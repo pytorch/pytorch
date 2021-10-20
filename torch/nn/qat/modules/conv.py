@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from torch.nn.intrinsic import ConvReLU2d, ConvReLU3d
+from torch.ao.nn.quantization.intrinsic import ConvReLU2d, ConvReLU3d
 
 
 class Conv2d(nn.Conv2d):

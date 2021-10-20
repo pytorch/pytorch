@@ -1,5 +1,5 @@
 import torch.nn as nn
-import torch.nn.intrinsic as nni
+import torch.ao.nn.quantization.intrinsic as nni
 
 from typing import Union, Callable, Tuple, Dict, Optional, Type
 

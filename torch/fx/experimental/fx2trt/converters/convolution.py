@@ -80,7 +80,7 @@ def quantized_conv2d(network, submod, args, kwargs, layer_name):
     return common_conv(network, submod, dimension=2, input_val=input_val, layer_name=layer_name, is_quantized=True)
 
 
-@tensorrt_converter(torch.nn.intrinsic.quantized.modules.ConvReLU2d)
+@tensorrt_converter(torch.ao.nn.quantization.intrinsic.quantized.modules.ConvReLU2d)
 def quantized_conv_relu2d(network, submod, args, kwargs, layer_name):
     input_val = args[0]
 

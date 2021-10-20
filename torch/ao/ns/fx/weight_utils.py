@@ -3,10 +3,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.quantized.dynamic as nnqd
 import torch.nn.quantized as nnq
-import torch.nn.intrinsic.qat as nniqat
+import torch.ao.nn.quantization.intrinsic.qat as nniqat
 import torch.nn.qat as nnqat
-import torch.nn.intrinsic as nni
-import torch.nn.intrinsic.quantized as nniq
+import torch.ao.nn.quantization.intrinsic as nni
+import torch.ao.nn.quantization.intrinsic.quantized as nniq
 toq = torch.ops.quantized
 from torch.fx import GraphModule
 from torch.fx.graph import Node

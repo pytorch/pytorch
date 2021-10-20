@@ -5,9 +5,9 @@ import torch.nn as nn
 import torch.nn.quantized as nnq
 import torch.nn.quantized._reference as nnqr
 import torch.nn.quantized.dynamic as nnqd
-import torch.nn.intrinsic as nni
-import torch.nn.intrinsic.quantized as nniq
-import torch.nn.intrinsic.quantized.dynamic as nniqd
+import torch.ao.nn.quantization.intrinsic as nni
+import torch.ao.nn.quantization.intrinsic.quantized as nniq
+import torch.ao.nn.quantization.intrinsic.quantized.dynamic as nniqd
 import torch.multiprocessing as mp
 
 # graph mode quantization based on fx
@@ -352,7 +352,7 @@ class TestFuseFx(QuantizationTestCase):
         }
         m = prepare_fx(model, qconfig_dict)
 
-        self.checkGraphModuleNodes(m, expected_node=ns.call_module(torch.nn.intrinsic.modules.fused.LinearReLU))
+        self.checkGraphModuleNodes(m, expected_node=ns.call_module(torch.ao.nn.quantization.intrinsic.modules.fused.LinearReLU))
 
     def test_fuse_custom_config_dict_validity(self):
         r"""

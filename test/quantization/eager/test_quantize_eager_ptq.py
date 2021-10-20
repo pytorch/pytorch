@@ -346,7 +346,7 @@ class TestPostTrainingStatic(QuantizationTestCase):
                 model = convert(model)
 
                 def checkQuantized(model):
-                    self.assertEqual(type(model.module.conv1), nn.intrinsic.quantized.ConvReLU2d)
+                    self.assertEqual(type(model.module.conv1), ao.nn.quantization.intrinsic.quantized.ConvReLU2d)
                     self.assertEqual(type(model.module.myop), nn.quantized.QFunctional)
                     self.assertEqual(type(model.module.avgpool), nn.AdaptiveAvgPool2d)
                     self.assertEqual(type(model.module.fc), nnq.Linear)

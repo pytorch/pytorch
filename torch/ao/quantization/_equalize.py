@@ -3,7 +3,7 @@ import copy
 from typing import Dict, Any
 
 _supported_types = {torch.nn.Conv2d, torch.nn.Linear}
-_supported_intrinsic_types = {torch.nn.intrinsic.ConvReLU2d, torch.nn.intrinsic.LinearReLU}
+_supported_intrinsic_types = {torch.ao.nn.quantization.intrinsic.ConvReLU2d, torch.ao.nn.quantization.intrinsic.LinearReLU}
 _all_supported_types = _supported_types.union(_supported_intrinsic_types)
 
 def set_module_weight(module, weight) -> None:

@@ -193,7 +193,7 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
                     self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
 
         model_list = [AnnotatedConvModel(qengine), AnnotatedConvBnReLUModel(qengine)]
-        module_swap_list = [nn.Conv2d, nn.intrinsic.modules.fused.ConvReLU2d]
+        module_swap_list = [nn.Conv2d, ao.nn.quantization.intrinsic.modules.fused.ConvReLU2d]
         for model in model_list:
             model.eval()
             if hasattr(model, "fuse_model"):

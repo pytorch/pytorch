@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
-import torch.nn.intrinsic as nni
-import torch.nn.intrinsic.quantized as nniq
+import torch.ao.nn.quantization.intrinsic as nni
+import torch.ao.nn.quantization.intrinsic.quantized as nniq
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 import torch.ao.quantization
@@ -60,7 +60,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
     @override_qengines
     def test_linear_api(self):
-        """test API functionality for nn.quantized.linear and nn.intrinsic.quantized.linear_relu"""
+        """test API functionality for nn.quantized.linear and ao.nn.quantization.intrinsic.quantized.linear_relu"""
         options = itertools.product(
             [1, 5],
             [16, 32],
@@ -360,7 +360,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             check_save_load=True)
 
         # Test from_float
-        fused_conv_module = torch.nn.intrinsic._FusedModule(conv_module)
+        fused_conv_module = torch.ao.nn.quantization.intrinsic._FusedModule(conv_module)
         fused_conv_module.qconfig = torch.ao.quantization.default_qconfig
         torch.ao.quantization.prepare(fused_conv_module, inplace=True)
         fused_conv_module(X.float())

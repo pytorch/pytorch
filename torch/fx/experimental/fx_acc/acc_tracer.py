@@ -212,7 +212,7 @@ class AccRewritingTracer(Tracer):
         ConditionalExceptionWrapper,
         torch.nn.quantized.Linear,
         torch.nn.quantized.Conv2d,
-        torch.nn.intrinsic.quantized.ConvReLU2d,
+        torch.ao.nn.quantization.intrinsic.quantized.ConvReLU2d,
     }
 
     def is_leaf_module(self, m: nn.Module, mod_qual_name: str) -> bool:

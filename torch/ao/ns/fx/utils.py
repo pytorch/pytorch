@@ -3,7 +3,7 @@ import operator
 
 import torch
 import torch.nn as nn
-import torch.nn.intrinsic.quantized as nniq
+import torch.ao.nn.quantization.intrinsic.quantized as nniq
 import torch.nn.quantized as nnq
 
 toq = torch.ops.quantized

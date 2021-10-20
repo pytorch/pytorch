@@ -1,6 +1,6 @@
 import torch
 import torch.nn.quantized.functional
-import torch.nn.intrinsic as nni
+import torch.ao.nn.quantization.intrinsic as nni
 
 class BatchNorm2d(torch.nn.BatchNorm2d):
     r"""This is the quantized version of :class:`~torch.nn.BatchNorm2d`.
