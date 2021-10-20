@@ -1626,7 +1626,7 @@ std::tuple<Tensor, Tensor, Tensor> linalg_lu_factor_ex(const Tensor& A, bool piv
   auto pivots = at::empty({0}, A.options().dtype(kInt));
   auto info = at::empty({0}, A.options().dtype(kInt));
   at::native::linalg_lu_factor_ex_out(A, pivot, check_errors, LU, pivots, info);
-  return {std::move(LU), std::move(pivots), std::move(info)};
+  return std::make_tuple(std::move(LU), std::move(pivots), std::move(info));
 }
 
 std::tuple<Tensor&, Tensor&> linalg_lu_factor_out(const Tensor& A, bool pivot, Tensor & LU, Tensor & pivots) {
@@ -1652,7 +1652,7 @@ std::tuple<Tensor, Tensor> linalg_lu_factor(const Tensor& A, bool pivot) {
     singleCheckErrors(info.item<int64_t>(), "torch.linalg.lu_factor");
   }
 
-  return {std::move(LU), std::move(pivots)};
+  return std::make_tuple(std::move(LU), std::move(pivots));
 }
 
 // TODO Deprecate this function in favour of linalg_lu_factor_ex
