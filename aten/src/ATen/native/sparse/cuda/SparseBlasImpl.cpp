@@ -163,7 +163,7 @@ void spmm(
       kHalf,
       kBFloat16,
       result.scalar_type(),
-      "addmm_out_sparse_csr_impl_cuda",
+      "spmm",
       [&] {
         auto beta_ = beta.to<scalar_t>();
         auto alpha_ = alpha.to<scalar_t>();
@@ -247,7 +247,7 @@ void spgemm(
       kHalf,
       kBFloat16,
       C.scalar_type(),
-      "addmm_out_sparse_csr_impl_cuda",
+      "spgemm",
       [&] {
         auto beta_ = beta.to<scalar_t>();
         auto alpha_ = alpha.to<scalar_t>();
@@ -330,7 +330,7 @@ void spgemm(
         TORCH_INTERNAL_ASSERT_DEBUG_ONLY(C_num_rows == m);
         TORCH_INTERNAL_ASSERT_DEBUG_ONLY(C_num_cols == n);
 
-        // Resize result using nnz information from cusolver
+        // Resize result using nnz information from cusparse
         col_indices_and_values_resize_(C, C_nnz);
 
         // Update matC with the new pointers

@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Owner(s): ["module: tests"]
+
 import torch
 import torch.utils.data
 import numpy as np
