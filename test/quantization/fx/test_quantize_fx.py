@@ -5207,7 +5207,7 @@ class TestQuantizeFxOpsNew(QuantizationTestCase):
 
         m = M().eval()
         m = prepare_fx(m, {"": default_qconfig})
-        m = _convert_fx_new(m, is_reference=True)
+        m = _convert_fx_do_not_use(m, is_reference=True)
         expected_occurrence = {
             ns.call_function(torch.quantize_per_tensor): 5,
             ns.call_method("dequantize"): 5,

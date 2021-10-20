@@ -50,7 +50,7 @@ def restore_state(
     patterns: Dict[Pattern, QuantizeHandler] = observed._patterns  # type: ignore[assignment]
     return patterns, node_name_to_scope, prepare_custom_config_dict
 
-def _convert_new_do_not_use(
+def _convert_do_not_use(
         model: GraphModule, is_reference: bool = False,
         convert_custom_config_dict: Dict[str, Any] = None,
         is_standalone_module: bool = False,

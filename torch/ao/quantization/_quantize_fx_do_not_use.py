@@ -5,7 +5,7 @@ from .quantize_fx import (
     check_is_valid_convert_custom_config_dict
 )
 from .fx.graph_module import QuantizedGraphModule
-from .fx._covnert_fx_do_not_use import _convert_do_not_use
+from .fx._convert_do_not_use import _convert_do_not_use
 
 def _convert_fx_do_not_use(
         graph_module: GraphModule, is_reference: bool = False,
