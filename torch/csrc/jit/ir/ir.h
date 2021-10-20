@@ -1583,7 +1583,7 @@ struct OperatorMap {
   }
 
   void insert(const OperatorSet& op_set, T val) {
-    for (auto& op : *op_set.get_ops()) {
+    for (auto& op : *op_set.getOps()) {
       insert(op, val);
     }
   }
