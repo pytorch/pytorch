@@ -1,3 +1,4 @@
+# Owner(s): ["module: nn"]
 
 import math
 import random
@@ -4574,11 +4575,11 @@ class TestNN(NNTestCase):
         def assert_is_orthogonal(X):
             n, k = X.size(-2), X.size(-1)
             if n < k:
-                X = X.transpose(-2, -1)
+                X = X.mT
                 n, k = k, n
             Id = torch.eye(k, dtype=X.dtype, device=X.device).expand(*(X.size()[:-2]), k, k)
             eps = 10 * n * torch.finfo(X.dtype).eps
-            torch.testing.assert_allclose(X.transpose(-2, -1).conj() @ X, Id, atol=eps, rtol=0.)
+            torch.testing.assert_allclose(X.mH @ X, Id, atol=eps, rtol=0.)
 
 
         def assert_weight_allclose_Q(weight, W):
@@ -4586,11 +4587,11 @@ class TestNN(NNTestCase):
             # (or of its transpose if the matrix is wide)
             wide_matrix = W.size(-2) < W.size(-1)
             if wide_matrix:
-                W = W.transpose(-2, -1)
+                W = W.mT
             Q, R = torch.linalg.qr(W)
             Q *= R.diagonal(dim1=-2, dim2=-1).sgn().unsqueeze(-2)
             if wide_matrix:
-                Q = Q.transpose(-2, -1)
+                Q = Q.mT
             torch.testing.assert_allclose(Q, weight, atol=1e-5, rtol=0.)
 
 
@@ -4644,10 +4645,10 @@ class TestNN(NNTestCase):
                 # Intializing with a given orthogonal matrix works
                 X = torch.randn_like(m.weight)
                 if wide_matrix:
-                    X = X.transpose(-2, -1)
+                    X = X.mT
                 w_new = torch.linalg.qr(X).Q
                 if wide_matrix:
-                    w_new = w_new.transpose(-2, -1)
+                    w_new = w_new.mT
                 if can_initialize:
                     m.weight = w_new
                     torch.testing.assert_allclose(w_new, m.weight, atol=1e-5, rtol=0.)
@@ -14584,6 +14585,31 @@ class TestNNDeviceType(NNTestCase):
 
         helper(2, 8, 4, 4, ks=2)
         helper(None, 3, 50, 50, ks=5)
+
+    @onlyCPU
+    def test_avg_pool2d_bfloat16(self, device):
+        def helper(n, c, h, w, kernel_size, stride, memory_format):
+            input = torch.randn(n, c, h, w, dtype=torch.float32, device=device).bfloat16()
+            input = input.to(memory_format=memory_format).requires_grad_()
+            pool = torch.nn.AvgPool2d(kernel_size, stride).to(device)
+
+            input2 = input.detach().clone().float().requires_grad_(True)
+
+            out = pool(input)
+            out.sum().backward()
+            out2 = pool(input2)
+            out2.sum().backward()
+
+            self.assertTrue(out.is_contiguous(memory_format=memory_format))
+            self.assertEqual(out.dtype, torch.bfloat16)
+            self.assertEqual(input.grad.dtype, torch.bfloat16)
+            self.assertEqual(out, out2.bfloat16())
+            self.assertEqual(input.grad, input2.grad.bfloat16())
+
+        helper(4, 30, 8, 8, 7, 1, torch.contiguous_format)
+        helper(4, 65, 8, 8, 7, 1, torch.channels_last)
+        helper(1, 19, 20, 10, 8, 2, torch.contiguous_format)
+        helper(1, 19, 20, 10, 8, 2, torch.channels_last)
 
     def test_upsamplingNearest2d(self, device):
         for memory_format in [torch.contiguous_format, torch.channels_last]:
