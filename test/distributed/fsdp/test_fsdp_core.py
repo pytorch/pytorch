@@ -11,18 +11,18 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_fsdp import (
-    FSDPTest,
-    NestedWrappedModule,
-    TransformerWithSharedParams,
-    NestedWrappedModuleWithDelay,
     DummyDDP,
+    FSDPTest,
     MixtureOfExperts,
+    NestedWrappedModule,
+    NestedWrappedModuleWithDelay,
+    TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    parametrize,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
-    parametrize,
 )
 
 
@@ -148,19 +148,13 @@ class TestHooks(FSDPTest):
         input = model.module.get_input(torch.device("cuda"))
         output = model(*input)
         # this is pre-bwd hook
-        assert (
-            len(output._backward_hooks) == 1
-        ), "single output should have one pre-backward hook"
+        self.assertEqual(len(output._backward_hooks), 1)
         loss = model.module.get_loss(input, output).cuda()
         loss.backward()
         # It doesn't get removed
-        assert (
-            len(output._backward_hooks) == 1
-        ), "output pre-backward hook should not be removed after backward call"
+        self.assertEqual(len(output._backward_hooks), 1)
         optim.step()
-        assert (
-            len(output._backward_hooks) == 1
-        ), "output pre-backward hook should not be removed after optimizer step"
+        self.assertEqual(len(output._backward_hooks), 1)
 
     @skip_if_lt_x_gpu(2)
     @parametrize("cuda_first", [False, True])
@@ -171,19 +165,11 @@ class TestHooks(FSDPTest):
         input = model.module.get_input(torch.device("cuda"))
         model._register_post_backward_hooks = mock.MagicMock(return_value=None)
         model._register_pre_backward_hooks = mock.MagicMock(return_value=None)
-        assert (
-            not model._register_post_backward_hooks.called
-        ), "_register_post_backward_hooks should have not been called before forward computation"
-        assert (
-            not model._register_pre_backward_hooks.called
-        ), "_register_pre_backward_hooks should have not been called before forward computation"
+        self.assertFalse(model._register_post_backward_hooks.called)
+        self.assertFalse(model._register_pre_backward_hooks.called)
         model(*input)
-        assert (
-            model._register_post_backward_hooks.called
-        ), "_register_post_backward_hooks should have been called after forward computation"
-        assert (
-            model._register_pre_backward_hooks.called
-        ), "_register_pre_backward_hooks should have been called after forward computation"
+        self.assertTrue(model._register_post_backward_hooks.called)
+        self.assertTrue(model._register_pre_backward_hooks.called)
 
 
 class TestNoGrad(FSDPTest):

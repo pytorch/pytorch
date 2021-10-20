@@ -8,14 +8,18 @@ from torch.distributed._fsdp.utils import (
     _apply_to_tensors,
 )
 from torch.testing._internal.common_utils import (
-    subtest, instantiate_parametrized_tests,
-    run_tests,
+    instantiate_parametrized_tests,
     parametrize,
+    run_tests,
+    subtest,
+    TestCase,
 )
 
 
-class TestUtils(unittest.TestCase):
-    @parametrize("devices", [["cpu"], ["cuda"], subtest(["cpu", "cuda"], name='cpu_cuda')])
+class TestUtils(TestCase):
+    @parametrize(
+        "devices", [["cpu"], ["cuda"], subtest(["cpu", "cuda"], name="cpu_cuda")]
+    )
     def test_apply_to_tensors(self, devices):
         if (
             "cuda" in devices
@@ -52,11 +56,9 @@ class TestUtils(unittest.TestCase):
             return t
 
         new_data = _apply_to_tensors(fn, data)
-        assert total == expected, f"{total} vs. {expected}"
+        self.assertEqual(total, expected)
         for i, v in enumerate(data):
-            assert type(new_data[i]) == type(
-                v
-            ), f"expected type {type(v)} got {type(new_data[i])}"
+            self.assertEqual(type(new_data[i]), type(v))
 
 
 instantiate_parametrized_tests(TestUtils)

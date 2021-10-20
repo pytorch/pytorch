@@ -1,7 +1,5 @@
 # Owner(s): ["oncall: distributed"]
 
-""" Test FSDP with some params frozen. """
-
 import sys
 from enum import Enum
 
@@ -17,10 +15,10 @@ from torch.testing._internal.common_fsdp import (
     get_full_params,
 )
 from torch.testing._internal.common_utils import (
-    run_tests,
     instantiate_parametrized_tests,
-    TEST_WITH_DEV_DBG_ASAN,
     parametrize,
+    run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
 )
 
 

@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: distributed"]
 
-""" Test FlattenParamsWrapper on CPU and GPU (FP32 & FP16 on GPU). """
 import unittest
 
 import torch
@@ -75,12 +74,8 @@ class TestFlattenParams(TestCase):
         flat_module = FlattenParamsWrapper(module, params_to_flatten)
         flat_num_params = sum(p.numel() for p in flat_module.parameters())
 
-        assert (
-            ref_num_params == flat_num_params
-        ), "num of params in flat_param is not matched with original params"
-        assert (
-            flat_num_params == flat_module.flat_param.numel()
-        ), "num of params in flat_param is not correct"
+        self.assertEqual(ref_num_params, flat_num_params)
+        self.assertEqual(flat_num_params, flat_module.flat_param.numel())
 
     def _test_output(self, module):
         ref_output = self._get_output(module)
@@ -100,62 +95,44 @@ class TestFlattenParams(TestCase):
         num_params_to_flatten = sum(p.numel() for p in params_to_flatten)
 
         module = FlattenParamsWrapper(module, param_list=params_to_flatten)
-        assert (
-            module.flat_param.numel() == num_params_to_flatten
-        ), "num of params in flat_param is not matched with original params"
-        assert (
-            sum(p.numel() for p in module.parameters()) == num_params
-        ), "num of params in flat_param is not matched with original params"
+        self.assertEqual(module.flat_param.numel(), num_params_to_flatten)
+        self.assertEqual(sum(p.numel() for p in module.parameters()), num_params)
 
         # flattened parameters are removed
-        assert (
-            len(list(module.encoder.layers[1].parameters())) == 0
-        ), "original params are not removed"
-        assert (
-            len(list(module.decoder.layers[0].parameters())) == 0
-        ), "original params are not removed"
+        self.assertEqual(len(list(module.encoder.layers[1].parameters())), 0)
+        self.assertEqual(len(list(module.decoder.layers[0].parameters())), 0)
 
         # non-flattened parameters remain
-        assert (
-            len(list(module.encoder.layers[0].parameters())) > 0
-        ), "original params are removed"
-        assert (
-            len(list(module.decoder.layers[1].parameters())) > 0
-        ), "original params are removed"
+        self.assertGreater(len(list(module.encoder.layers[0].parameters())), 0)
+        self.assertGreater(len(list(module.decoder.layers[1].parameters())), 0)
 
         # test that changing the module dtype works properly
         orig_dtype = params_to_flatten[0].dtype
         new_dtype = torch.float32 if orig_dtype == torch.float16 else torch.float16
-        assert (
-            module.flat_param.dtype == orig_dtype
-        ), "flat_param data type does not match original param data type"
-        assert all(
-            p.dtype == orig_dtype for p in module.encoder.layers[0].parameters()
-        ), "flat_param data type does not match original param data type"
+        self.assertEqual(module.flat_param.dtype, orig_dtype)
+        self.assertTrue(
+            all(p.dtype == orig_dtype for p in module.encoder.layers[0].parameters())
+        )
         module = module.to(dtype=new_dtype)
-        assert (
-            module.flat_param.dtype == new_dtype
-        ), "flat_param data type does not match original param data type"
-        assert all(
-            p.dtype == new_dtype for p in module.encoder.layers[0].parameters()
-        ), "flat_param data type does not match original param data type"
+        self.assertEqual(module.flat_param.dtype, new_dtype)
+        self.assertTrue(
+            all(p.dtype == new_dtype for p in module.encoder.layers[0].parameters())
+        )
 
     def test_flatten_nothing(self):
         module = self._get_transformer()
         module = FlattenParamsWrapper(module, param_list=[])
-        assert module.flat_param is None
+        self.assertIsNone(module.flat_param)
 
     def test_empty_module(self):
         module = self._get_empty_module()
         in_data = torch.rand(1)
         ref_out = module(in_data)
         module = FlattenParamsWrapper(module, param_list=[])
-        assert (
-            len(list(module.parameters())) == 0
-        ), "empty module should not have parameters"
-        assert module.flat_param is None, "empty param_list should not have flat_param"
+        self.assertEqual(len(list(module.parameters())), 0)
+        self.assertIsNone(module.flat_param)
         fpw_out = module(in_data)
-        torch.testing.assert_allclose(ref_out, fpw_out)
+        self.assertEqual(ref_out, fpw_out)
 
     def test_num_params(self):
         module = self._get_transformer()
@@ -184,7 +161,7 @@ class TestFlattenParams(TestCase):
         flat_module = FlattenParamsWrapper(module, params_to_flatten)
         flat_pnorm_after_step = self._get_pnorm_after_step(flat_module)
 
-        torch.testing.assert_allclose(ref_pnorm_after_step, flat_pnorm_after_step)
+        self.assertEqual(ref_pnorm_after_step, flat_pnorm_after_step)
 
 
 @unittest.skipIf(not torch.cuda.is_available(), "test requires a GPU")
