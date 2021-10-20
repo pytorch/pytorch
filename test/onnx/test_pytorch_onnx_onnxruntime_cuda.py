@@ -6,7 +6,7 @@ import torch
 
 from torch.cuda.amp import autocast
 
-from test_pytorch_common import disableScriptTest, skipIfUnsupportedMinOpsetVersion
+from test_pytorch_common import skipIfUnsupportedMinOpsetVersion, skipScriptTest
 from test_pytorch_common import skipIfNoCuda, skipIfNoBFloat16Cuda
 
 from test_pytorch_onnx_onnxruntime import TestONNXRuntime
@@ -29,7 +29,7 @@ class TestONNXRuntime_cuda(unittest.TestCase):
 
     @skipIfUnsupportedMinOpsetVersion(9)
     @skipIfNoCuda
-    @disableScriptTest()
+    @skipScriptTest()
     def test_layer_norm_fp16(self):
         class LayerNormModel(torch.nn.Module):
             def __init__(self):
@@ -46,7 +46,7 @@ class TestONNXRuntime_cuda(unittest.TestCase):
 
     @skipIfUnsupportedMinOpsetVersion(12)
     @skipIfNoCuda
-    @disableScriptTest()
+    @skipScriptTest()
     def test_softmaxCrossEntropy_fusion_fp16(self):
         class FusionModel(torch.nn.Module):
             def __init__(self):
@@ -68,7 +68,7 @@ class TestONNXRuntime_cuda(unittest.TestCase):
         self.run_test(FusionModel(), (input, target))
 
     @skipIfNoCuda
-    @disableScriptTest()
+    @skipScriptTest()
     def test_apex_o2(self):
         class LinearModel(torch.nn.Module):
             def __init__(self):

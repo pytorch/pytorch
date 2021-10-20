@@ -412,10 +412,16 @@ def _resolve_and_flatten_graph_inputs(model, args_params):
     resolved_args = []  # type: ignore[var-annotated]
     if isinstance(model, torch.jit.ScriptModule) or isinstance(model, torch.jit.ScriptFunction):
         for i, var in enumerate(args_params):
-            if var is not None:
-                resolved_args += [var]
-            else:
+            if var is None:
                 resolved_args += [sig.parameters[ordered_list_keys[i]].default]
+            elif isinstance(var, tuple):
+                for offset, sub_var in enumerate(var):
+                    if sub_var is None:
+                        resolved_args += [sig.parameters[ordered_list_keys[i]].default[offset]]
+                    else:
+                        resolved_args += [sub_var]
+            else:
+                resolved_args += [var]
     else:
         resolved_args = args_params
     resolved_args, _ = torch.jit._flatten(resolved_args)
@@ -552,6 +558,7 @@ def _model_to_graph(model, args, verbose=False,
         torch._C._jit_pass_onnx_assign_output_shape(graph, output_tensors, out_desc, _onnx_shape_inference)
 
     _set_input_and_output_names(graph, input_names, output_names)
+    params_dict = _get_named_param_dict(graph, params)
     # make sure that the param dict and the graph match each other
     flatten_args = _resolve_and_flatten_graph_inputs(model, args)
     assert len(params) + len(flatten_args) == sum(1 for _ in graph.inputs())

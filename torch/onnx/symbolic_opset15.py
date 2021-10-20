@@ -32,9 +32,7 @@ from torch.onnx.symbolic_helper import _is_none
 
 def __is_(g, self, other):
     if _is_none(other):
-        if self.type().kind() == "NoneType":
-            return g.op("Constant", value_t=torch.BoolTensor([1]))
-        elif self.type().kind() == "OptionalType":
+        if self.type().kind() == 'OptionalType' or self.type().kind() == 'NoneType':
             none = g.op("OptionalHasElement", self)
             return g.op("Not", none)
         else:
@@ -53,7 +51,7 @@ def prim_unchecked_cast(g, self):
     # if x is an optional Tensor, unchecked_cast will cast
     # x to Tensor, so the rest of the graph knows that x is a Tensor
     # this doesn't do anything in runtime and is a noop in ONNX
-    if self.type().kind() == "OptionalType":
+    if self.type().kind() == 'OptionalType' or self.type().kind() == 'NoneType':
         return g.op("OptionalGetElement", self)
     else:
         return self
