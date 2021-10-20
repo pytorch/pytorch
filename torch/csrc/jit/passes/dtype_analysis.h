@@ -1,9 +1,8 @@
 #pragma once
 
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/ir/ir.h>
-#include <memory> // for shared_ptr
-
-#include "c10/macros/Export.h" // for TORCH_API
+#include <memory>
 
 namespace torch {
 namespace jit {
