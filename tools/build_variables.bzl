@@ -254,6 +254,7 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/passes/shape_analysis.cpp",
     "torch/csrc/jit/passes/integer_value_refinement.cpp",
     "torch/csrc/jit/passes/symbolic_shape_analysis.cpp",
+    "torch/csrc/jit/passes/symbolic_shape_runtime_fusion.cpp",
     "torch/csrc/jit/passes/specialize_autogradzero.cpp",
     "torch/csrc/jit/passes/update_differentiable_graph_requires_grad.cpp",
     "torch/csrc/jit/passes/variadic_ops.cpp",
@@ -352,7 +353,10 @@ core_sources_full = core_sources_full_mobile + [
 ]
 
 lazy_tensor_core_sources = [
+    "torch/csrc/lazy/core/config.cpp",
     "torch/csrc/lazy/core/hash.cpp",
+    "torch/csrc/lazy/core/ir.cpp",
+    "torch/csrc/lazy/core/ir_metadata.cpp",
 ]
 
 libtorch_core_sources = sorted(
