@@ -1,6 +1,7 @@
 #include <ATen/native/cuda/TensorTopK.h>
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/WrapDimUtils.h>
 #include <ATen/native/cuda/Sort.h>
 
 namespace at {
