@@ -5,8 +5,10 @@
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dtype_analysis.h>
+#include <torch/csrc/jit/passes/utils/op_registry.h>
 #include <torch/library.h>
 #include <algorithm>
 #include <memory>
@@ -19,6 +21,10 @@ namespace {
 
 using Tensor = at::Tensor;
 using ScalarType = at::ScalarType;
+
+// ----------------------------------------------------------------------------------
+// Metatensor Inference for Dtype
+// ----------------------------------------------------------------------------------
 
 std::unique_ptr<Stack> MTensorArgumentCreator(Node* n) {
   auto stack = std::make_unique<std::vector<IValue>>();
@@ -135,13 +141,41 @@ bool tryApplyDtypeMetaTensor(Node* n) {
   return setDtype(n->output(), return_tensor->scalar_type());
 }
 
+// ----------------------------------------------------------------------------------
+// Custom Rules for Dtype
+// ----------------------------------------------------------------------------------
+using DtypePropRule = std::function<bool(Node*)>;
+// Function to propagate dtype information for a node
+// Returns true if the dtype information was changed
+
+bool setDtypeToFirstArg(Node* n) {
+  // Sets all tesnsor outputs to the dtype of the first input
+  auto first_arg = n->inputs().at(0);
+  auto tensor_type = first_arg->type()->cast<TensorType>();
+  TORCH_INTERNAL_ASSERT(tensor_type, "Expecting a tensor type");
+  auto scalar_type = tensor_type->scalarType();
+  if (!scalar_type.has_value()) {
+    return false;
+  }
+
+  bool changed = false;
+  for (auto output : n->outputs()) {
+    if (output->type()->cast<TensorType>()) {
+      changed |= setDtype(output, scalar_type.value());
+    }
+  }
+  return changed;
+}
+
 // DtypePropagationPass is an analysis pass that walks through a graph in
 // topological order and forward propagate Dtypes (ScalarTypes) from graph
 // inputs (expressed in input_descriptors) to all output tensor nodes in the
 // graph.
 struct DtypePropagationPass {
   DtypePropagationPass(std::shared_ptr<Graph> graph)
-      : graph_(std::move(graph)) {}
+      : graph_(std::move(graph)) {
+    buildDtypeRuleRegistry();
+  }
 
   // returns true if at least one node has its scalar type set on a tensor node
   bool run() {
@@ -249,6 +283,12 @@ struct DtypePropagationPass {
   bool processAtenOps(Node* n) {
     GRAPH_DEBUG("processAtenOps");
     GRAPH_DEBUG("case = ", n->kind(), " ", *n);
+    // Custom Rule Matching
+    if (auto prop_fn = dtype_prop_registry_->find(n->getOperator())) {
+      DtypePropRule rule = *prop_fn;
+      return rule(n);
+    }
+
     bool changed = tryApplyDtypeMetaTensor(n);
 
     switch (n->kind()) {
@@ -264,6 +304,16 @@ struct DtypePropagationPass {
     }
 
     return changed;
+  }
+
+  void buildDtypeRuleRegistry() {
+    // building a registry for all of the custom dtype rules
+    dtype_prop_registry_ = std::make_unique<OperatorMap<DtypePropRule>>();
+
+    dtype_prop_registry_->insert(
+        *nn_ops_first_input_preserving(), setDtypeToFirstArg);
+    dtype_prop_registry_->insert(
+        *ops_one_tensor_in_shape_transform(), setDtypeToFirstArg);
   }
   /*
   AliasDb* getOrCreateAliasDb() {
@@ -281,7 +331,7 @@ struct DtypePropagationPass {
   implementation
   "aten::mean(Tensor self, *, ScalarType? dtype) -> Tensor",
   */
-
+  std::unique_ptr<OperatorMap<DtypePropRule>> dtype_prop_registry_;
   std::shared_ptr<Graph> graph_;
   // std::unique_ptr<AliasDb> aliasDb_ = nullptr;
 };
