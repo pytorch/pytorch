@@ -53,6 +53,7 @@ class DistributedUtilTest(unittest.TestCase):
             server_addr=localhost,
             server_port=0,
             timeout=2,
+            world_size=world_size,
             wait_for_workers=False,
         )
 

@@ -92,6 +92,9 @@ def create_c10d_store(
 
 
 def _check_full_rank(store, world_size):
+    # do not perform check when an indeterminate world_size is specified
+    if world_size <= -1:
+        return
     idx = store.add(_MEMBER_CHECKIN, 1)
     if idx == world_size:
         store.set(_LAST_MEMBER_CHECKIN, "<val_ignored>")
