@@ -199,7 +199,7 @@ class MixtureOfExperts(NestedWrappedModule):
 
         self.num_expert_params = sum([p.numel() for p in expert.parameters()])
         for p in expert.parameters():
-            p.expert = True
+            p.expert = True  # type: ignore[attr-defined]
 
         # everything else is shared
         torch.manual_seed(0)
@@ -211,9 +211,9 @@ class MixtureOfExperts(NestedWrappedModule):
             expert_group = torch.distributed.new_group(
                 [group.rank()]
             )  # world size 1 means no shard
-            expert = FullyShardedDataParallel(expert, expert_group)
+            expert = FullyShardedDataParallel(expert, expert_group)  # type: ignore[assignment]
 
-            shared = FullyShardedDataParallel(shared, group)
+            shared = FullyShardedDataParallel(shared, group)  # type: ignore[assignment]
 
         self.module = nn.Sequential(
             nn.Linear(d_input, d_shared), shared, expert, nn.Linear(d_shared, d_input)
