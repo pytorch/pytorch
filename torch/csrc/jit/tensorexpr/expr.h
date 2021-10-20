@@ -259,11 +259,11 @@ class TORCH_API Buf : public ExprNode<Buf> {
 
   ExprPtr qzero() const {
     return qzero_;
-  };
+  }
 
   ExprPtr qscale() const {
     return qscale_;
-  };
+  }
 
   void set_qzero(ExprPtr qzero) {
     qzero_ = qzero;
