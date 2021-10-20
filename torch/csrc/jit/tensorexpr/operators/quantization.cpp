@@ -62,8 +62,8 @@ BufHandle makeQBufHandle(
 Tensor computeQuantizePerTensor(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
-    const c10::optional<ScalarType>& outputType,
-    at::Device device) {
+    const c10::optional<ScalarType>&,
+    at::Device) {
   std::vector<VarPtr> vars;
   std::vector<ExprHandle> indices;
   for (const auto& os : outputShape) {
@@ -106,7 +106,7 @@ Tensor computeQuantizePerTensorExternalCall(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const c10::optional<ScalarType>& outputType,
-    at::Device device) {
+    at::Device) {
   Dtype dtype = kFloat;
   if (outputType) {
     dtype = Dtype(*outputType);
@@ -128,7 +128,7 @@ Tensor computeDequantizeExternalCall(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const c10::optional<ScalarType>& outputType,
-    at::Device device) {
+    at::Device) {
   Dtype dtype = kFloat;
   if (outputType) {
     dtype = Dtype(*outputType);
@@ -149,7 +149,7 @@ Tensor computeQuantizedConv2dPrepack(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const c10::optional<ScalarType>& outputType,
-    at::Device device) {
+    at::Device) {
   Dtype dtype = kFloat;
   if (outputType) {
     dtype = Dtype(*outputType);
@@ -191,7 +191,7 @@ Tensor computeQuantizedConv2d(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const c10::optional<ScalarType>& outputType,
-    at::Device device) {
+    at::Device) {
   Dtype dtype = kFloat;
   if (outputType) {
     dtype = Dtype(*outputType);
@@ -219,7 +219,7 @@ Tensor computeQuantizedConv2dRelu(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const c10::optional<ScalarType>& outputType,
-    at::Device device) {
+    at::Device) {
   Dtype dtype = kFloat;
   if (outputType) {
     dtype = Dtype(*outputType);
@@ -247,7 +247,7 @@ Tensor computeQuantizedAdd(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const c10::optional<ScalarType>& outputType,
-    at::Device device) {
+    at::Device) {
   Dtype dtype = kFloat;
   if (outputType) {
     dtype = Dtype(*outputType);
@@ -278,7 +278,7 @@ Tensor computeDequantize(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const c10::optional<ScalarType>& outputType,
-    at::Device device) {
+    at::Device) {
   Dtype dtype = kFloat;
   if (outputType) {
     dtype = Dtype(*outputType);
@@ -286,9 +286,6 @@ Tensor computeDequantize(
   auto qx = c10::get<BufHandle>(inputs[0]);
   auto qscale = qx.node()->qscale();
   auto qzero = qx.node()->qzero();
-  auto qdtype = qx.node()->dtype();
-  const double qscale_f = immQScale(qx);
-  const int64_t qzero_f = immQZero(qx);
   TORCH_INTERNAL_ASSERT(
       qscale, buildErrorMessage("Missing quantized scale for dequantize"));
   TORCH_INTERNAL_ASSERT(
@@ -317,7 +314,7 @@ Tensor computeUpsampleNearest2d(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const c10::optional<ScalarType>& outputType,
-    at::Device device) {
+    at::Device) {
   Dtype dtype = kFloat;
   if (outputType) {
     dtype = Dtype(*outputType);
