@@ -8259,6 +8259,12 @@
     CPU: searchsorted_cpu
     CUDA: searchsorted_cuda
 
+# This is a DUMMY function to force the linking against torch_cuda_cu on Windows.
+# This op should NOT be used or exposed or edited or else Windows builds (with BUILD_SPLIT_CUDA) will break.
+- func: _torch_cuda_cu_linker_symbol_op(Tensor self) -> Tensor
+  dispatch:
+    CUDA: _torch_cuda_cu_linker_symbol_op_cuda
+
 - func: searchsorted.Tensor_out(Tensor sorted_sequence, Tensor self, *, bool out_int32=False, bool right=False, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: searchsorted_out_cpu
