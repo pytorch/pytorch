@@ -65,11 +65,7 @@ Tensor hardswish(const Tensor& input) {
   return output.contiguous(input.suggest_memory_format());
 }
 
-Tensor& hardswish_(Tensor& input) {
-  return hardswish_out(input, input);
-}
-
-Tensor& hardswish_out(Tensor& input, Tensor& result) {
+const Tensor& hardswish_out(const Tensor& input, const Tensor& result) {
   Tensor padded_input = mobile::allocate_padded_contiguous_if_needed(
       input, input.suggest_memory_format());
 
@@ -86,6 +82,10 @@ Tensor& hardswish_out(Tensor& input, Tensor& result) {
     result.copy_(output);
   }
   return result;
+}
+
+const Tensor& hardswish_(const Tensor& input) {
+  return hardswish_out(input, input);
 }
 } // namespace xnnpack
 } // namespace native

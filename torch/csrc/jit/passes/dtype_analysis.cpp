@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dtype_analysis.h>
 #include <torch/library.h>
+#include <algorithm>
 #include <memory>
 #include <stdexcept>
 
@@ -134,14 +135,6 @@ bool tryApplyDtypeMetaTensor(Node* n) {
   return setDtype(n->output(), return_tensor->scalar_type());
 }
 
-class TensorPropertyInferrer {
- public:
-  TensorPropertyInferrer();
-  bool virtual hasProperty(Value* v) = 0;
-  void virtual setDtype(Value* v, const IValue& ival) = 0;
-  void virtual setDtype(Value* dst, const Value* src) = 0;
-};
-
 // DtypePropagationPass is an analysis pass that walks through a graph in
 // topological order and forward propagate Dtypes (ScalarTypes) from graph
 // inputs (expressed in input_descriptors) to all output tensor nodes in the
@@ -190,18 +183,13 @@ struct DtypePropagationPass {
         n->blocks().empty(), "Do not handle this block structure");
 
     // process non-block nodes
-    bool has_tensor_output = false;
-    for (size_t i = 0; i < n->outputs().size(); i++) {
-      auto type = n->output(i)->type();
-      if (auto tt = type->castRaw<TensorType>()) {
-        // TODO: Check if the castRaw is actually what we want
-        // EG Bool might be castable but is not needed to be propagated.
-        has_tensor_output = true;
-        break;
-      }
-    }
-    // if output contains no tensor, nothing to propagate
+    bool has_tensor_output =
+        std::any_of(n->outputs().begin(), n->outputs().end(), [](Value* v) {
+          return (bool)v->type()->cast<TensorType>();
+        });
+
     if (!has_tensor_output) {
+      // if output contains no tensor, nothing to propagate
       return false;
     }
 
@@ -282,7 +270,7 @@ struct DtypePropagationPass {
 
     GRAPH_DEBUG("case = ", n->kind(), " ", *n);
     bool changed = tryApplyDtypeMetaTensor(n);
-    /*
+
     switch (n->kind()) {
       case aten::append:
         // auto elementType =
@@ -294,7 +282,6 @@ struct DtypePropagationPass {
         // }
         break;
     }
-    */
 
     return changed;
   }
