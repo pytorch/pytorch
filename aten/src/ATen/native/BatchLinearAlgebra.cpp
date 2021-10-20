@@ -1650,7 +1650,7 @@ std::tuple<Tensor, Tensor> linalg_lu_factor(const Tensor& A, bool pivot) {
     singleCheckErrors(info.item<int64_t>(), "torch.linalg.lu_factor");
   }
 
-  return {std::move(LU), std::move(pivots)};
+  return std::make_tuple(std::move(LU), std::move(pivots));
 }
 
 // TODO Deprecate this function in favour of linalg_lu_factor_ex
