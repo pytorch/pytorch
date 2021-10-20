@@ -15,7 +15,9 @@ from torch.ao.quantization.quantize_fx import (
     prepare_fx,
     convert_fx,
     prepare_qat_fx,
-    _convert_fx_new,
+)
+from torch.ao.quantization._quantize_fx_do_not_use import (
+    _convert_fx_do_not_use,
 )
 
 from torch.ao.quantization.fx.quantization_patterns import DefaultNodeQuantizeHandler
