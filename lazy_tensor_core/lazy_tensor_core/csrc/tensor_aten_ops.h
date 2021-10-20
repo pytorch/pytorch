@@ -63,9 +63,6 @@ LazyTensor add(
     const LazyTensor& input, const at::Scalar& other, const at::Scalar& alpha,
     c10::optional<at::ScalarType> logical_element_type = c10::nullopt);
 
-void addcdiv_(LazyTensor& input, const at::Scalar& value,
-              const LazyTensor& tensor1, const LazyTensor& tensor2);
-
 LazyTensor addmm(const LazyTensor& input, const LazyTensor& weight,
                  const LazyTensor& bias);
 
