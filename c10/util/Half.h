@@ -11,7 +11,9 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/C++17.h>
+#include <c10/util/TypeSafeSignMath.h>
 #include <c10/util/complex.h>
+#include <type_traits>
 
 #if defined(__cplusplus) && (__cplusplus >= 201103L)
 #include <cmath>
@@ -49,6 +51,10 @@
 #else
 #define C10_DEVICE_HOST_FUNCTION
 #endif
+
+// TODO
+#include <fstream>
+#include <typeinfo> // operator typeid
 
 namespace c10 {
 
@@ -453,12 +459,10 @@ overflows(From f) {
     // allow for negative numbers to wrap using two's complement arithmetic.
     // For example, with uint8, this allows for `a - b` to be treated as
     // `a + 255 * b`.
-    constexpr bool can_overflow =
-        std::numeric_limits<From>::digits > limit::digits;
-    return (can_overflow && f > limit::max()) ||
-        (f < 0 && -static_cast<uint64_t>(f) > limit::max());
+    return greater_than_max<To>(f) ||
+        (c10::is_negative(f) && -static_cast<uint64_t>(f) > limit::max());
   } else {
-    return f < limit::lowest() || f > limit::max();
+    return f < limit::lowest() || greater_than_max<To>(f);
   }
 }
 
