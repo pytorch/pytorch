@@ -7038,6 +7038,10 @@
   structured_delegate: atan2.out
   variants: method, function
 
+# arctan2, alias of atan2
+- func: arctan2(Tensor self, Tensor other) -> Tensor
+  variants: method, function
+
 - func: lerp.Scalar_out(Tensor self, Tensor end, Scalar weight, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   dispatch:

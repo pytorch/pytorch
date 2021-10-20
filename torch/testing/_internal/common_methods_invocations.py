@@ -6840,6 +6840,7 @@ op_db: List[OpInfo] = [
                                     active_if=IS_WINDOWS),
                    )),
     OpInfo('atan2',
+           aliases=('arctan2',),
            dtypes=all_types_and(torch.bool),
            dtypesIfCPU=all_types_and(torch.bool),
            dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),

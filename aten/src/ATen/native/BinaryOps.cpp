@@ -415,6 +415,10 @@ TORCH_IMPL_FUNC(atan2_out) (const Tensor& self, const Tensor& other, const Tenso
   atan2_stub(device_type(), *this);
 }
 
+Tensor arctan2(const Tensor& self, const Tensor& other) {
+  return at::atan2(self, other);
+}
+
 Tensor& add_relu_impl(
     Tensor& result, const Tensor& self, const Tensor& other, const Scalar& alpha) {
   auto iter = TensorIterator::binary_op(result, self, other);

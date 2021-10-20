@@ -563,6 +563,12 @@ atan2_(other) -> Tensor
 In-place version of :meth:`~Tensor.atan2`
 """)
 
+add_docstr_all('arctan2', r"""
+arctan2(other) -> Tensor
+
+See :func:`torch.arctan2`
+""")
+
 add_docstr_all('atanh', r"""
 atanh() -> Tensor
 

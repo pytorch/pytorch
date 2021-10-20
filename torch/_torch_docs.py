@@ -927,6 +927,12 @@ Example::
     tensor([ 0.9833,  0.0811, -1.9743, -1.4151])
 """.format(**common_args))
 
+add_docstr(torch.arctan2,
+           r"""
+arctan2(input, other, *, out=None) -> Tensor
+Alias for :func:`torch.atan2`.
+""")
+
 add_docstr(torch.atanh, r"""
 atanh(input, *, out=None) -> Tensor
 
