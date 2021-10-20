@@ -1,3 +1,4 @@
+#pragma once
 #include <c10/core/ScalarType.h>
 #include <cstdint>
 

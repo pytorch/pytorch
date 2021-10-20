@@ -1,3 +1,4 @@
+#pragma once
 #include <ATen/native/DispatchStub.h>
 
 namespace at {
