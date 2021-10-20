@@ -11,9 +11,9 @@
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/graph_iterator.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
+#include <torch/csrc/jit/testing/file_check.h>
 #include <torch/cuda.h>
 #include <unordered_map>
-#include <torch/csrc/jit/testing/file_check.h>
 
 namespace torch {
 namespace jit {
