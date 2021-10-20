@@ -44,6 +44,10 @@ install_ubuntu() {
     wget \
     vim
 
+  # Should resolve issues related to various apt package repository cert issues
+  # see: https://github.com/pytorch/pytorch/issues/65931
+  apt-get install -y libgnutls30
+
   # Cleanup package manager
   apt-get autoclean && apt-get clean
   rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
@@ -109,10 +113,7 @@ esac
 # Install Valgrind separately since the apt-get version is too old.
 mkdir valgrind_build && cd valgrind_build
 VALGRIND_VERSION=3.16.1
-if ! wget http://valgrind.org/downloads/valgrind-${VALGRIND_VERSION}.tar.bz2
-then
-  wget https://sourceware.org/ftp/valgrind/valgrind-${VALGRIND_VERSION}.tar.bz2
-fi
+wget https://ossci-linux.s3.amazonaws.com/valgrind-${VALGRIND_VERSION}.tar.bz2
 tar -xjf valgrind-${VALGRIND_VERSION}.tar.bz2
 cd valgrind-${VALGRIND_VERSION}
 ./configure --prefix=/usr/local

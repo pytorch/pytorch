@@ -69,11 +69,11 @@ __global__ void conv_depthwise2d_forward_kernel(
 
     acc_t value = biasEnabled ? static_cast<acc_t>(bias.data()[c]) : acc_t(0);
     const index_t offset0 = (n * inputChannels + inputChannel) * inputHeight * inputWidth;
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 #pragma unroll
 #endif
     for (int kH = 0; kH < KH_LIMIT; ++kH) {
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 #pragma unroll
 #endif
       for (int kW = 0; kW < KW_LIMIT; ++kW) {
@@ -125,17 +125,17 @@ __global__ void conv_depthwise2d_backward_kernel(
 
     acc_t value(0);
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 #pragma unroll
 #endif
     for (int multiplier = 0; multiplier < depthwiseMultiplier; ++multiplier) {
       int och = (c * depthwiseMultiplier) + multiplier;
       int weightOffset = och * kernelHeight * kernelWidth;
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 #pragma unroll
 #endif
       for (int kh = 0; kh < KH_LIMIT; ++kh) {
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 #pragma unroll
 #endif
         for (int kw = 0; kw < KW_LIMIT; ++kw) {

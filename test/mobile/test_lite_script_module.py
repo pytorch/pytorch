@@ -475,10 +475,10 @@ class TestLiteScriptQuantizedModule(QuantizationLiteTestCase):
         class M(torch.nn.Module):
             def __init__(self):
                 super(M, self).__init__()
-                self.quant = torch.quantization.QuantStub()
+                self.quant = torch.ao.quantization.QuantStub()
                 self.conv = torch.nn.Conv2d(1, 1, 1)
                 self.relu = torch.nn.ReLU()
-                self.dequant = torch.quantization.DeQuantStub()
+                self.dequant = torch.ao.quantization.DeQuantStub()
 
             def forward(self, x):
                 x = self.quant(x)
@@ -490,12 +490,12 @@ class TestLiteScriptQuantizedModule(QuantizationLiteTestCase):
         model_fp32 = M()
 
         model_fp32.eval()
-        model_fp32.qconfig = torch.quantization.get_default_qconfig('qnnpack')
-        model_fp32_fused = torch.quantization.fuse_modules(model_fp32, [['conv', 'relu']])
-        model_fp32_prepared = torch.quantization.prepare(model_fp32_fused)
+        model_fp32.qconfig = torch.ao.quantization.get_default_qconfig('qnnpack')
+        model_fp32_fused = torch.ao.quantization.fuse_modules(model_fp32, [['conv', 'relu']])
+        model_fp32_prepared = torch.ao.quantization.prepare(model_fp32_fused)
         input_fp32 = torch.randn(4, 1, 4, 4)
         model_fp32_prepared(input_fp32)
-        model_int8 = torch.quantization.convert(model_fp32_prepared)
+        model_int8 = torch.ao.quantization.convert(model_fp32_prepared)
 
         input = torch.randn(4, 1, 4, 4)
         self._compare_script_and_mobile(model=model_int8, input=input)

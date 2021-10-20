@@ -655,7 +655,7 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
       auto consumer_tvs = ir_utils::consumerTvsOf(cached_input);
       TORCH_INTERNAL_ASSERT(
           consumer_tvs.size(),
-          "Input was not succesfully filtered out for scheduling but wasn't used.");
+          "Input was not successfully filtered out for scheduling but wasn't used.");
 
       // Grab a consumer which will be used for computeAt structure of cached
       // input into a consumer
