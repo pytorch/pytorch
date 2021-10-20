@@ -137,7 +137,7 @@ def _handle_col_wise_sharding(input, world_size, weight, local_shard_t, bias, pg
     # distribute the outputs using all2all.
     dist.all_to_all_single(output, combined_results, output_split_sizes=output_split_sizes, group=pg)
 
-    # Check if we need to rearrange rows appropriately for output.
+    # Check if we need to rearrange columns appropriately for output.
     rearrange_columns = any([idx != placement.rank() for idx, placement in enumerate(weight._sharding_spec.placements)])
     if rearrange_columns:
         indices = []
