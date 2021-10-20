@@ -789,7 +789,7 @@ bool Value::mustNotBeNone() const {
   return node_->kind() != prim::AutogradAdd && type() != NoneType::get() &&
       !type()->cast<OptionalType>() &&
       !(type()->cast<UnionType>() &&
-        type()->expect<UnionType>()->canHoldType(NoneType::get()));
+        type()->expect<UnionType>()->canHoldType(*NoneType::get()));
 }
 
 std::string Value::debugNameBase() const {
@@ -1001,7 +1001,7 @@ bool Node::matches(const FunctionSchema& schema) const {
     // we will not succeed at matching T. However None <: Optional[T] so this
     // check can still succeed.
 
-    if (!actuals[i]->type()->isSubtypeOf(formal)) {
+    if (!actuals[i]->type()->isSubtypeOf(*formal)) {
       return false;
     }
   }
@@ -1641,7 +1641,7 @@ size_t Node::blocksFromGraphBlock() {
 }
 
 inline const SourceRange& fakeRange() {
-  static SourceRange range(std::make_shared<Source>(""), 0, 1);
+  static SourceRange range(std::make_shared<Source>(std::string("")), 0, 1);
   return range;
 }
 
@@ -1773,7 +1773,7 @@ Node* Graph::createList(
   auto n = create(prim::ListConstruct, values);
   for (const auto& v : values) {
     TORCH_CHECK(
-        v->type()->isSubtypeOf(contained_type),
+        v->type()->isSubtypeOf(*contained_type),
         "Expected a list element that subtypes '",
         contained_type->repr_str(),
         "' but got an element of type '",
@@ -1803,8 +1803,8 @@ Node* Graph::createDict(
   AT_ASSERT(keys.size() == values.size());
   auto n = create(prim::DictConstruct, 1);
   for (const auto i : c10::irange(keys.size())) {
-    AT_ASSERT(keys[i]->type()->isSubtypeOf(key_type));
-    AT_ASSERT(values[i]->type()->isSubtypeOf(value_type));
+    AT_ASSERT(keys[i]->type()->isSubtypeOf(*key_type));
+    AT_ASSERT(values[i]->type()->isSubtypeOf(*value_type));
 
     n->addInput(keys[i]);
     n->addInput(values[i]);
@@ -1814,9 +1814,8 @@ Node* Graph::createDict(
 }
 
 Node* Graph::createNumToTensor(Value* value) {
-  auto typ = value->type();
   Node* result = create(prim::NumToTensor, {value});
-  result->output()->setType(TensorType::fromNumberType(std::move(typ)));
+  result->output()->setType(TensorType::fromNumberType(*value->type()));
   return result;
 }
 

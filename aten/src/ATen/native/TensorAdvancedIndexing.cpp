@@ -255,7 +255,7 @@ AdvancedIndex::AdvancedIndex(const Tensor& src, TensorList indices_list)
   int64_t element_size_bytes = src.element_size();
   int64_t dims_before = 0, dims_after = 0, dims_indexed = 0;
   IntArrayRef replacement_shape;
-  for (size_t dim = 0; dim < indices_list.size(); dim++) {
+  for (const auto dim : c10::irange(indices_list.size())) {
     if (!indices_list[dim].defined()) {
       if (dims_indexed == 0) {
         dims_before++;
@@ -319,7 +319,7 @@ const Tensor& value){
         return std::make_tuple(false, Tensor());
       } else {
         mask = index;
-        for (int64_t j = 0; j < index.dim(); j++) {
+        for (const auto j : c10::irange(index.dim())) {
           int64_t srcIdx = num_ind + j;
           TORCH_CHECK_INDEX(index.size(j) == self.size(srcIdx), "The shape of the mask ", index.sizes(), " at index ", j,
   " does not match the shape of the indexed tensor ", self.sizes(), " at index ", srcIdx);
@@ -328,7 +328,8 @@ const Tensor& value){
       }
     }
   }
-  for (int64_t i = num_ind; i< self.ndimension(); i++){
+  for (const auto i : c10::irange(num_ind, self.ndimension())) {
+    (void)i; //Suppress unused variable warning
     mask = mask.unsqueeze(-1);
   }
   return std::make_tuple(true, mask);
@@ -729,7 +730,7 @@ Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const T
 
   if (self.dim() > 1) {
     // Equivalent to:
-    //   for (auto i = 0; i < numel; i++) {
+    //   for (const auto i : c10::irange(numel)) {
     //     auto selfSlice = self.select(dim, index_data[i]);
     //     auto sourceSlice = source.select(dim, i);
     //     selfSlice.add_(sourceSlice);
@@ -747,7 +748,7 @@ Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const T
 
     AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "index_add_cpu_", [&] () {
       auto index_data = index_contig.data_ptr<index_t>();
-      for (auto i = 0; i < numel; i++) {
+      for (const auto i : c10::irange(numel)) {
           auto self_i = index_data[i];
           TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_dim_size), "index out of range in self");
           auto self_data = static_cast<char*>(selfSlice.data_ptr()) + self_i * self_stride_bytes;
@@ -775,7 +776,7 @@ Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const T
       AT_DISPATCH_INDEX_TYPES(index_contig.scalar_type(), "index_add_cpu_",
         [&index_contig, &numel, &self, &self_ptr, &self_stride, &source_ptr, &source_stride, alpha_value] {
         auto index_data = index_contig.data_ptr<index_t>();
-        for (auto i = 0; i < numel; i++) {
+        for (const auto i : c10::irange(numel)) {
             auto self_i = index_data[i];
             TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self.numel()), "index out of range in self");
             scalar_t *self_ip = self_ptr + self_i * self_stride;
@@ -847,12 +848,12 @@ Tensor & index_select_out_cpu_dim1_(
 
       // Special-case single-float copy for efficiency
       if (self.scalar_type() == ScalarType::Float && block_size == 1) {
-        for (auto batch = 0; batch < outer_dims_product; ++batch) {
+        for (const auto batch : c10::irange(outer_dims_product)) {
           const float* src_floats =
               (const float*)(src_base + batch * src_batch_bytesize);
           float* dst_floats = (float*)(out + batch * gathered_batch_bytesize);
 
-          for (auto i = 0; i < N; ++i) {
+          for (const auto i : c10::irange(N)) {
             auto idx = idxs[i];
             if (idx < 0) {
               idx = idx + src_indexing_axis_dim;
@@ -863,8 +864,8 @@ Tensor & index_select_out_cpu_dim1_(
       } else {
         // outer_dims_product specifies how many times we repeat inner dimensions,
         // so we just iterate over it to cover all outer dimensions.
-        for (auto batch = 0; batch < outer_dims_product; ++batch) {
-          for (auto i = 0; i < N; ++i) {
+        for (const auto batch : c10::irange(outer_dims_product)) {
+          for (const auto i : c10::irange(N)) {
             auto idx = idxs[i];
             if (idx < 0) {
               idx = idx + src_indexing_axis_dim;
@@ -946,7 +947,7 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
         [&index_contig, &start, &end, &sub_iter, &self_dim_size, &selfSlice_data, &self_stride_bytes,
           &resultSlice_data, &result_stride_bytes] () {
         auto index_data = index_contig.data_ptr<index_t>();
-        for (int64_t i = start; i < end; i++) {
+        for (const auto i : c10::irange(start, end)) {
           auto self_i = index_data[i];
           TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_dim_size), "index out of range in self");
           auto self_data = static_cast<char*>(selfSlice_data) + self_i * self_stride_bytes;
@@ -975,7 +976,7 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
             [&index_contig, &slice_size_bytes, &self_dim_size, &selfSlice_data,
               &self_stride_bytes, &resultSlice_data, &result_stride_bytes, &start, &end] () {
             auto index_data = index_contig.data_ptr<index_t>();
-            for (int64_t i = start; i < end; i++) {
+            for (const auto i : c10::irange(start, end)) {
               auto self_i = index_data[i];
               TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_dim_size), "index out of range in self");
               auto self_data = static_cast<char*>(selfSlice_data) + self_i * self_stride_bytes;
@@ -1003,7 +1004,7 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
         AT_DISPATCH_INDEX_TYPES(index_contig.scalar_type(), "index_select_out_cpu_quant_",
           [&index_contig, &numel, &self_numel, &self_data_ptr, &self_stride, &result_data_ptr, &result_stride] {
           auto index_data = index_contig.data_ptr<index_t>();
-          for (auto i = 0; i < numel; i++) {
+          for (const auto i : c10::irange(numel)) {
             auto self_i = index_data[i];
             TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_numel), "index out of range in self");
             scalar_t *self_ip = self_data_ptr + self_i * self_stride;
@@ -1023,7 +1024,7 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
         AT_DISPATCH_INDEX_TYPES(index_contig.scalar_type(), "index_select_out_cpu_",
           [&index_contig, &numel, &self_numel, &self_data_ptr, &self_stride, &result_data_ptr, &result_stride] {
           auto index_data = index_contig.data_ptr<index_t>();
-          for (auto i = 0; i < numel; i++) {
+          for (const auto i : c10::irange(numel)) {
             auto self_i = index_data[i];
             TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_numel), "index out of range in self");
             scalar_t *self_ip = self_data_ptr + self_i * self_stride;
@@ -1523,7 +1524,7 @@ Tensor _gather_sparse_backward(const Tensor& self, int64_t dim, const Tensor& in
     int64_t n_above = grad.numel();
     int64_t n_below = 1;
     if (dim < 0) dim += self.ndimension();
-    for (int i=0; i<self.ndimension(); i++) {
+    for (const auto i : c10::irange(self.ndimension())) {
         n_above /= grad.size(i);
         if (i == dim) {
             sparse_ind[i] = index.reshape(-1);
@@ -1562,7 +1563,7 @@ int64_t count_nonzero_impl(TensorIteratorBase& iter, Range range) {
       }
       ptr += stride;
     }
-    for (int64_t k = 1; k < ilp_factor; ++k) {
+    for (const auto k : c10::irange(1, ilp_factor)) {
       nonzero[0] += nonzero[k];
     }
     num_nonzero += nonzero[0];
@@ -1597,7 +1598,7 @@ Tensor count_nonzero_cpu(const Tensor& self, IntArrayRef dims){
     });
   });
 
-  for (int64_t i = 1; i < num_threads; ++i) {
+  for (const auto i : c10::irange(1, num_threads)) {
     thread_count_nonzero[0] += thread_count_nonzero[i];
   }
   auto out = at::empty({}, self.options().dtype(kLong));
@@ -1642,7 +1643,7 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {
   });
 
   // Convert thread-local counts to cumulative sum
-  for (size_t i = 1; i < thread_count_nonzero.size(); ++i) {
+  for (const auto i : c10::irange(1, thread_count_nonzero.size())) {
     thread_count_nonzero[i] += thread_count_nonzero[i - 1];
   }
 
@@ -1691,13 +1692,14 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {
         const auto ndim = out_accessor.size(1);
         int64_t* out = out_ptr;
 
-        for (int64_t i = 0; i < n2; ++i) {
+        for (const auto i : c10::irange(n2)) {
           const char* ptr = data[0] + i * strides[1];
-          for (int64_t j = 0; j < n1; ++j) {
+          for (const auto j : c10::irange(n1)) {
+            (void)j; //Suppress unused variable warning
             const auto& val = *reinterpret_cast<const scalar_t*>(ptr);
             // If nonzero, write index
             if (val != scalar_t(0)) {
-              for (int64_t k = 0; k < ndim; ++k) {
+              for (const auto k : c10::irange(ndim)) {
                 *out = local_idx[k];
                 out += out_stride1;
               }
