@@ -10,7 +10,7 @@ import torch.nn.intrinsic.quantized.dynamic as nniqd
 import torch.nn.intrinsic.qat as nniqat
 import torch.nn.quantized as nnq
 import torch.nn.quantized._reference as nnqr
-import torch.nn.quantized.dynamic as nnqd
+import torch.ao.nn.quantization.quantized.dynamic as nnqd
 import torch.nn.qat as nnqat
 
 from typing import Optional, Union, Dict, Set, Callable, Any

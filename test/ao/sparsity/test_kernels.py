@@ -203,7 +203,7 @@ class TestQuantizedSparseLayers(TestCase):
                 tq.convert(dqmodel, mapping=tq.get_default_dynamic_quant_module_mappings(), inplace=True)
 
                 assert isinstance(sdqmodel.linear, ao_nn_sq.dynamic.Linear), "Convert failed"
-                assert isinstance(dqmodel.linear, nn.quantized.dynamic.Linear), "Mapping failed"
+                assert isinstance(dqmodel.linear, ao.nn.quantization.quantized.dynamic.Linear), "Mapping failed"
 
                 # Make sure numerics are right
                 Y_ref = dqmodel(X_fp32)
@@ -306,7 +306,7 @@ class TestQuantizedSparseLayers(TestCase):
                 tq.convert(dqmodel, mapping=tq.get_default_dynamic_quant_module_mappings(), inplace=True)
 
                 assert isinstance(sdqmodel.linear, ao_nn_sq.dynamic.Linear), "Convert failed"
-                assert isinstance(dqmodel.linear, nn.quantized.dynamic.Linear), "Mapping failed"
+                assert isinstance(dqmodel.linear, ao.nn.quantization.quantized.dynamic.Linear), "Mapping failed"
 
                 scripted_sdqmodel = torch.jit.script(sdqmodel)
                 scripted_sdqmodel.eval()
