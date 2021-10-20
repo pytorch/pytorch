@@ -305,18 +305,28 @@ RegisterOperators reg_guard({
                       tensor.device() != device ||
                       tensor.dtype() != expected_scalar_types[i]) ||
                   tensor.requires_grad()) {
+                std::cout << " DEVICE /DTYPE/ REQUIRES GRAD MISMATCH\n";
+                std::cout << tensor;
+                std::cout << "Expected device : " << device << "\n";
+                std::cout << "Expected dtype : " << expected_scalar_types[i]
+                          << "\n";
                 push(stack, false);
                 return;
               }
               // TODO: striding
               if (C10_UNLIKELY(
                       !tensor.is_contiguous(at::MemoryFormat::Contiguous))) {
+                std::cout << " CONTIGUITY MISMATCH \n\n";
+                std::cout << tensor;
                 push(stack, false);
                 return;
               }
               const auto& sizes = tensor.sizes();
               const auto num_dims = sizes.size();
               if (C10_UNLIKELY(num_dims != expected_dims[i])) {
+                std::cout << " Expected Dims Mismatch \n\n";
+                std::cout << tensor;
+                std::cout << " Expected num dims: " << expected_dims[i] << "\n";
                 push(stack, false);
                 return;
               }
@@ -326,6 +336,10 @@ RegisterOperators reg_guard({
                 const int64_t tensor_dim = sizes[dim_index];
                 if (dim_value >= 0) {
                   if (C10_UNLIKELY(dim_value != tensor_dim)) {
+                    std::cout << " Concrete value dim Mismatch \n\n";
+                    std::cout << tensor;
+                    std::cout << " Expected dim value: " << tensor_dim << "\n";
+                    std::cout << " Dim index: " << dim_index;
                     push(stack, false);
                     return;
                   }
@@ -338,6 +352,11 @@ RegisterOperators reg_guard({
                   // sym symbol already seen, check value
                   if (flattened_symbolic_dims[flattened_sym_index] >= 0) {
                     if (C10_UNLIKELY(flattened_sym_value != tensor_dim)) {
+                      std::cout << " symbolic value dim Mismatch \n\n";
+                      std::cout << tensor;
+                      std::cout << " Expected symbolic value : "
+                                << flattened_sym_value << "\n";
+                      std::cout << " Dim index: " << dim_index;
                       push(stack, false);
                       return;
                     }
