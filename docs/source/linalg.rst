@@ -61,6 +61,16 @@ Inverses
     inv
     pinv
 
+Matrix Functions
+----------------
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    matrix_exp
+    matrix_power
+
 Matrix Products
 ---------------
 
@@ -69,7 +79,6 @@ Matrix Products
     :nosignatures:
 
     matmul
-    matrix_power
     multi_dot
     householder_product
 

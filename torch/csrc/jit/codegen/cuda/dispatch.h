@@ -161,7 +161,7 @@ class TORCH_CUDA_CU_API OptInConstDispatch : public PolymorphicBase {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Bool.");
   }
   virtual void handle(const Double*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Double.");
+    TORCH_INTERNAL_ASSERT(false, "Handle not overridden for Double.");
   }
   virtual void handle(const Int*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Int.");
@@ -184,7 +184,7 @@ class TORCH_CUDA_CU_API OptInConstDispatch : public PolymorphicBase {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for BinaryOp.");
   }
   virtual void handle(const WelfordOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for WelfordOp.");
+    TORCH_INTERNAL_ASSERT(false, "Handle not overridden for WelfordOp.");
   }
   virtual void handle(const TernaryOp*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for TernaryOp.");
@@ -196,13 +196,13 @@ class TORCH_CUDA_CU_API OptInConstDispatch : public PolymorphicBase {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for BroadcastOp.");
   }
   virtual void handle(const TransposeOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for TransposeOp.");
+    TORCH_INTERNAL_ASSERT(false, "Handle not overridden for TransposeOp.");
   }
   virtual void handle(const ShiftOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for ShiftOp.");
+    TORCH_INTERNAL_ASSERT(false, "Handle not overridden for ShiftOp.");
   }
   virtual void handle(const GatherOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for GatherOp.");
+    TORCH_INTERNAL_ASSERT(false, "Handle not overridden for GatherOp.");
   }
 };
 
@@ -227,7 +227,7 @@ class TORCH_CUDA_CU_API OptInDispatch : public PolymorphicBase {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Bool.");
   }
   virtual void handle(Double*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Double.");
+    TORCH_INTERNAL_ASSERT(false, "Handle not overridden for Double.");
   }
   virtual void handle(Int*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Int.");
@@ -256,19 +256,19 @@ class TORCH_CUDA_CU_API OptInDispatch : public PolymorphicBase {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for ReductionOp.");
   }
   virtual void handle(WelfordOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for WelfordOp.");
+    TORCH_INTERNAL_ASSERT(false, "Handle not overridden for WelfordOp.");
   }
   virtual void handle(BroadcastOp*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for BroadcastOp.");
   }
   virtual void handle(TransposeOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for TransposeOp.");
+    TORCH_INTERNAL_ASSERT(false, "Handle not overridden for TransposeOp.");
   }
   virtual void handle(ShiftOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for ShiftOp.");
+    TORCH_INTERNAL_ASSERT(false, "Handle not overridden for ShiftOp.");
   }
   virtual void handle(GatherOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for GatherOp.");
+    TORCH_INTERNAL_ASSERT(false, "Handle not overridden for GatherOp.");
   }
 };
 
@@ -383,19 +383,19 @@ class TORCH_CUDA_CU_API OptInMutator : public PolymorphicBase {
     TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for ReductionOp.");
   }
   virtual Statement* mutate(WelfordOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for WelfordOp.");
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overridden for WelfordOp.");
   }
   virtual Statement* mutate(BroadcastOp*) {
     TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for BroadcastOp.");
   }
   virtual Statement* mutate(TransposeOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for TransposeOp.");
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overridden for TransposeOp.");
   }
   virtual Statement* mutate(ShiftOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for ShiftOp.");
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overridden for ShiftOp.");
   }
   virtual Statement* mutate(GatherOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for GatherOp.");
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overridden for GatherOp.");
   }
 };
 

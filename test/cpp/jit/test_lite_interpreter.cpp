@@ -482,12 +482,27 @@ TEST(LiteInterpreterTest, GetByteCodeVersion) {
   auto version_v4 = _get_model_bytecode_version(test_model_file_v4);
   AT_ASSERT(version_v4 == 4);
 }
+
 #endif // !defined(FB_XPLAT_BUILD)
+
+TEST(LiteInterpreterTest, GetContainTypes) {
+  Module m("m");
+  m.define(R"(
+    def forward(self):
+      return 3
+  )");
+
+  std::stringstream ss;
+  m._save_for_mobile(ss, {}, true);
+
+  auto contained_types = _get_mobile_model_contained_types(ss);
+  AT_ASSERT(contained_types.size() >= 0);
+}
 
 namespace {
 
 void compareModelOutput(
-    const std::vector<IValue>& actual_result_list,
+    c10::ArrayRef<IValue> actual_result_list,
     const std::vector<Tensor>& expect_result_list) {
   AT_ASSERT(actual_result_list.size() == expect_result_list.size());
   AT_ASSERT(actual_result_list[0].toTensor().equal(expect_result_list[0]));
@@ -510,7 +525,7 @@ void runAndCheckTorchScriptModel(
   Module m_mobile = load(input_model_stream);
 
   auto actual_result = m_mobile.forward(input_data);
-  std::vector<IValue> actual_result_list = actual_result.toTuple()->elements();
+  const auto& actual_result_list = actual_result.toTuple()->elements();
   compareModelOutput(actual_result_list, expect_result_list);
 }
 
@@ -527,7 +542,7 @@ void runAndCheckBytecodeModel(
   Module m_mobile = load(input_model_stream);
 
   auto actual_result = m_mobile.forward(input_data);
-  std::vector<IValue> actual_result_list = actual_result.toTuple()->elements();
+  const auto& actual_result_list = actual_result.toTuple()->elements();
 
   compareModelOutput(actual_result_list, expect_result_list);
 }
@@ -631,8 +646,9 @@ TEST(LiteInterpreterTest, isCompatibleSuccess) {
   std::unordered_map<std::string, OperatorInfo> model_ops;
   model_ops["aten::add.Scalar"] = OperatorInfo{2};
 
+  std::unordered_set<std::string> types = {"List", "int"};
   auto model_info = ModelCompatibilityInfo{
-      caffe2::serialize::kMaxSupportedBytecodeVersion, model_ops};
+      caffe2::serialize::kMaxSupportedBytecodeVersion, model_ops, types};
 
   AT_ASSERT(
       is_compatible(runtime_info, model_info).status ==
@@ -648,7 +664,9 @@ TEST(LiteInterpreterTest, isCompatibleFail) {
   std::unordered_map<std::string, OperatorInfo> runtime_ops;
   runtime_ops["aten::add.Int"] = OperatorInfo{2};
   auto runtime_info = RuntimeCompatibilityInfo{
-      caffe2::serialize::kMaxSupportedBytecodeVersion, runtime_ops};
+      caffe2::serialize::kMaxSupportedBytecodeVersion,
+      runtime_ops,
+      _get_mobile_supported_types()};
 
   auto result = is_compatible(runtime_info, model_info);
   AT_ASSERT(result.status = ModelCompatibilityStatus::ERROR);
@@ -659,12 +677,25 @@ TEST(LiteInterpreterTest, isCompatibleFail) {
   // test trivial failure due to bytecode
   runtime_ops["aten::add.Scalar"] = OperatorInfo{2};
   runtime_info = RuntimeCompatibilityInfo{
-      caffe2::serialize::kMaxSupportedBytecodeVersion, runtime_ops};
+      caffe2::serialize::kMaxSupportedBytecodeVersion,
+      runtime_ops,
+      _get_mobile_supported_types()};
   model_info.bytecode_version =
       caffe2::serialize::kMaxSupportedBytecodeVersion + 1;
 
   result = is_compatible(runtime_info, model_info);
   AT_ASSERT(result.status = ModelCompatibilityStatus::ERROR);
+
+  // test trivial failure due to type
+  runtime_info = RuntimeCompatibilityInfo::get();
+  std::unordered_set<std::string> types = {"List", "int", "NamedTuple"};
+
+  model_info = ModelCompatibilityInfo{
+      caffe2::serialize::kMaxSupportedBytecodeVersion, model_ops, types};
+
+  AT_ASSERT(
+      is_compatible(runtime_info, model_info).status ==
+      ModelCompatibilityStatus::ERROR);
 }
 
 TEST(LiteInterpreterTest, Eval) {
@@ -941,10 +972,13 @@ TEST(RunTimeTest, ParseBytecode) {
   std::string function_name("test_function");
   auto function = std::unique_ptr<mobile::Function>(
       new mobile::Function(c10::QualifiedName(function_name)));
-  std::vector<IValue> debug_handles_m_tuple;
+  c10::ivalue::TupleElements debug_handles_m_tuple;
   parseInstructions(
-      function_name, instructions, debug_handles_m_tuple, function.get());
-  parseTypes(types, function.get());
+      function_name,
+      std::move(*c10::ivalue::Tuple::create(instructions)).elements(),
+      debug_handles_m_tuple,
+      function.get());
+  parseTypes(c10::ivalue::Tuple::create(types)->elements(), function.get());
   const size_t rsize = 5;
   parseRegisterSize(rsize, function.get());
 
@@ -999,10 +1033,17 @@ TEST(RunTimeTest, ParseOperator) {
   std::string function_name("test_function");
   auto function = std::unique_ptr<mobile::Function>(
       new mobile::Function(c10::QualifiedName(function_name)));
-  std::vector<IValue> debug_handles_m_tuple;
+  c10::ivalue::TupleElements debug_handles_m_tuple;
   parseInstructions(
-      function_name, instructions, debug_handles_m_tuple, function.get());
-  parseOperators(operators, model_version, 1, function.get());
+      function_name,
+      std::move(*c10::ivalue::Tuple::create(instructions)).elements(),
+      debug_handles_m_tuple,
+      function.get());
+  parseOperators(
+      std::move(*c10::ivalue::Tuple::create(operators)).elements(),
+      model_version,
+      1,
+      function.get());
   const size_t rsize = 5;
   parseRegisterSize(rsize, function.get());
 
@@ -1143,24 +1184,22 @@ TEST(LiteInterpreterTest, DefaultArgsPinv) {
   //                  None)),)))))
 }
 
-TEST(LiteInterpreterTest, DefaultArgsPinvSpecifyDefault) {
+TEST(LiteInterpreterTest, DefaultArgsTensorinvSpecifyDefault) {
   // The second argument is specified, but the value is the same as the default
   // value. It's treated as "not specified" since the value can be fetched from
   // schema.
   Module m("m");
   m.define(R"(
     def forward(self, input):
-      return torch.linalg_pinv(input, 1e-15)
+      return torch.linalg_tensorinv(input, 2)
   )");
   torch::jit::MobileCode code(m.get_method("forward").graph(), "forward");
   auto arg_nums = code.op_to_num_specified_args();
   ASSERT_EQ(arg_nums.size(), 1);
-  ASSERT_EQ(arg_nums["aten::linalg_pinv"], 1);
+  ASSERT_EQ(arg_nums["aten::linalg_tensorinv"], 1);
   std::vector<torch::jit::IValue> inputs;
-  const int N = 28;
-  auto input = torch::range(1, N * N, 1);
-  input[0] = 1; // a more stable matrix
-  input = input.view({N, N});
+  const int N = 4;
+  auto input = torch::rand({N, N, N, N});
   inputs.push_back(input);
   testLiteModuleCompareResultTensors(m, inputs);
 }

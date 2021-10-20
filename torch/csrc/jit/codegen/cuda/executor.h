@@ -184,7 +184,7 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
   // launch kernels without re-inference parameters.
   std::unordered_map<size_t, ExecutorEntry> executor_entry_lookup_;
 
-  // Profiling support: knob to control wheter we actually execute the
+  // Profiling support: knob to control whether we actually execute the
   // kernel on the GPU or not
   bool execute_kernel_ = true;
 
