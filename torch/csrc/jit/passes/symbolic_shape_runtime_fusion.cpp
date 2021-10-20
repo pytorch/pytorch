@@ -297,7 +297,15 @@ RegisterOperators reg_guard({
             // each invocation or would that mess up with multithreaded
             // inference since we are writing to it?
             // TODO - smallvector here ?
-            std::vector<int64_t> flattened_symbolic_dims(num_symbolic_dims, -1);
+
+            // TODO - faster initialization
+            // std::vector<int64_t> flattened_symbolic_dims(num_symbolic_dims, -1);
+            // did not work on certain platforms
+            std::vector<int64_t> flattened_symbolic_dims;
+            flattened_symbolic_dims.reserve(num_symbolic_dims);
+            for (size_t i = 0; i < num_symbolic_dims; ++i) {
+              flattened_symbolic_dims.push_back(-1);
+            }
             size_t flattened_dim_offset = 0;
             for (const auto i : c10::irange(num_inputs)) {
               at::Tensor tensor = inputs[i].toTensor();
