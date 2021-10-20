@@ -2675,9 +2675,9 @@ def sample_inputs_searchsorted(op_info, device, dtype, requires_grad):
         side = 'right' if right else 'left'
         inputs.append(SampleInput(input_tensor, args=(boundary_tensor,), kwargs=dict(out_int32=out_int32, right=right)))
         inputs.append(SampleInput(input_tensor, args=(boundary_tensor,), kwargs=dict(out_int32=out_int32, side=side)))
-        inputs.append(SampleInput(unsorted_tensor, args=(boundary_tensor,), 
+        inputs.append(SampleInput(unsorted_tensor, args=(boundary_tensor,),
                                   kwargs=dict(out_int32=out_int32, right=right, sorter=sorter)))
-        inputs.append(SampleInput(unsorted_tensor, args=(boundary_tensor,), 
+        inputs.append(SampleInput(unsorted_tensor, args=(boundary_tensor,),
                                   kwargs=dict(out_int32=out_int32, side=side, sorter=sorter)))
     return inputs
 
