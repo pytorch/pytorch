@@ -35,7 +35,7 @@ __global__ void RowwiseReduceCUDAKernel(
   const int r = blockIdx.x;
   T val = init;
   for (int c = threadIdx.x; c < cols; c += blockDim.x) {
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
     val = reducer(val, __ldg(X + r * cols + c));
 #else
     val = reducer(val, X[r * cols + c]);
@@ -60,7 +60,7 @@ __global__ void ColwiseReduceCUDAKernel(
   const int c = blockIdx.x;
   T val = init;
   for (int r = threadIdx.x; r < rows; r += blockDim.x) {
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
     val = reducer(val, __ldg(X + r * cols + c));
 #else
     val = reducer(val, X[r * cols + c]);
@@ -88,7 +88,7 @@ __global__ void BothEndsReduceCUDAKernel(
   T val = init;
   for (int m = threadIdx.x; m < M; m += blockDim.x) {
     for (int k = threadIdx.y; k < K; k += blockDim.y) {
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
       val = reducer(val, __ldg(X + (m * N + n) * K + k));
 #else
       val = reducer(val, X[(m * N + n) * K + k]);
@@ -123,7 +123,7 @@ __global__ void ReduceTensorCUDAKernel(
       X_index += Y_index % Y_dims.data[d] * X_strides.data[d];
       Y_index /= Y_dims.data[d];
     }
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
     val = reducer(val, __ldg(X + X_index));
 #else
     val = reducer(val, X[X_index]);
@@ -252,7 +252,7 @@ RowwiseMomentsCUDAKernel(const int cols, const T* X, T* mean, T* var) {
   T v_val = 0;
   for (int c = threadIdx.x; c < cols; c += blockDim.x) {
     const int X_index = r * cols + c;
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
     m_val += __ldg(X + X_index);
     v_val += __ldg(X + X_index) * __ldg(X + X_index);
 #else
@@ -284,7 +284,7 @@ __global__ void ColwiseMomentsCUDAKernel(
   T v_val = 0;
   for (int r = threadIdx.x; r < rows; r += blockDim.x) {
     const int X_index = r * cols + c;
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
     m_val += __ldg(X + X_index);
     v_val += __ldg(X + X_index) * __ldg(X + X_index);
 #else
@@ -320,7 +320,7 @@ __global__ void BothEndsMomentsCUDAKernel(
   for (int m = threadIdx.x; m < M; m += blockDim.x) {
     for (int k = threadIdx.y; k < K; k += blockDim.y) {
       const int X_index = (m * N + n) * K + k;
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
       m_val += __ldg(X + X_index);
       v_val += __ldg(X + X_index) * __ldg(X + X_index);
 #else
@@ -360,7 +360,7 @@ __global__ void MomentsCUDAKernel(
       X_index += Y_index % Y_dims.data[d] * X_strides.data[d];
       Y_index /= Y_dims.data[d];
     }
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
     m_val += __ldg(X + X_index);
     v_val += __ldg(X + X_index) * __ldg(X + X_index);
 #else

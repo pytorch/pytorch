@@ -220,8 +220,9 @@ class TORCH_CUDA_CU_API CudaCodeGen : public CodeGen {
 
   ~CudaCodeGen() override;
 
-  void call_raw(const std::vector<void*>& args) override;
   void call(const std::vector<CallArg>& args) override;
+  void call_raw(const std::vector<void*>& args) override;
+  void call_with_numel(void** args, int64_t numel) override;
 
   template <typename... Ts>
   void operator()(const Ts&... ts) {
@@ -271,6 +272,7 @@ class TORCH_CUDA_CU_API CudaCodeGen : public CodeGen {
   std::unordered_set<std::string> taken_func_names;
   CUfunction function_;
   bool has_random_ = false;
+  int thread_block_size_ = -1;
 
   std::string GetUniqueFuncName(const std::string& func_prefix);
 };

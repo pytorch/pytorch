@@ -174,13 +174,26 @@ if HAS_PYDOT:
             result += "|" + "requires_grad" + "=" + str(tm.requires_grad) + r"\l"
             result += "|" + "stride" + "=" + str(tm.stride) + r"\l"
             if tm.is_quantized:
-                if tm.qscheme in {
+                assert tm.qparams is not None
+                assert "qscheme" in tm.qparams
+                qscheme = tm.qparams["qscheme"]
+                if qscheme in {
                         torch.per_tensor_affine,
                         torch.per_tensor_symmetric,
                 }:
-                    result += "|" + "q_scale" + "=" + str(tm.q_scale) + r"\l"
-                    result += "|" + "q_zero_point" + "=" + str(tm.q_zero_point) + r"\l"
-                result += "|" + "qscheme" + "=" + str(tm.qscheme) + r"\l"
+                    result += "|" + "q_scale" + "=" + str(tm.qparams["scale"]) + r"\l"
+                    result += "|" + "q_zero_point" + "=" + str(tm.qparams["zero_point"]) + r"\l"
+                elif qscheme in {
+                        torch.per_channel_affine,
+                        torch.per_channel_symmetric,
+                        torch.per_channel_affine_float_qparams,
+                }:
+                    result += "|" + "q_per_channel_scale" + "=" + str(tm.qparams["scale"]) + r"\l"
+                    result += "|" + "q_per_channel_zero_point" + "=" + str(tm.qparams["zero_point"]) + r"\l"
+                    result += "|" + "q_per_channel_axis" + "=" + str(tm.qparams["axis"]) + r"\l"
+                else:
+                    raise RuntimeError(f"Unsupported qscheme: {qscheme}")
+                result += "|" + "qscheme" + "=" + str(tm.qparams["qscheme"]) + r"\l"
             return result
 
         def _get_tensor_label(self, t: torch.Tensor) -> str:

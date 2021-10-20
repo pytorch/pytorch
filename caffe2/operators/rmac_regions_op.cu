@@ -3,11 +3,11 @@
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/rmac_regions_op.h"
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 #include <cfloat>
 #endif
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 namespace rocprim {
 #else
 namespace cub {

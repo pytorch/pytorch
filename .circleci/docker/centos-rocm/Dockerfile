@@ -11,6 +11,12 @@ ARG EC2
 ADD ./common/install_base.sh install_base.sh
 RUN bash ./install_base.sh && rm install_base.sh
 
+# Update CentOS git version
+RUN yum -y remove git
+RUN yum -y remove git-*
+RUN yum -y install https://packages.endpoint.com/rhel/7/os/x86_64/endpoint-repo-1.9-1.x86_64.rpm
+RUN yum install -y git
+
 # Install devtoolset
 ARG DEVTOOLSET_VERSION
 ADD ./common/install_devtoolset.sh install_devtoolset.sh

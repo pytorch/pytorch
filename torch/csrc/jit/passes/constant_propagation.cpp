@@ -59,7 +59,10 @@ c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
           n->inputs().size());
     } break;
     case prim::CreateObject: {
-      createObject(stack, n->output()->type()->expect<ClassType>(), /*use_weak_ref*/true);
+      createObject(
+          stack,
+          n->output()->type()->expect<ClassType>(),
+          /*use_weak_ref*/ true);
     } break;
     case prim::GetAttr: {
       auto attr = pop(stack).toObject()->getAttr(n->s(attr::name));
@@ -139,6 +142,7 @@ std::unordered_set<Symbol> skip_list = {
     prim::profile,
     prim::profile_ivalue,
     prim::unchecked_unwrap_optional, // TODO remove
+    aten::dequantize,
     // TODO (zach): we should consider skipping tensor factories in the cases
     // where the constant tensor would be large but cheap to create.
 };
