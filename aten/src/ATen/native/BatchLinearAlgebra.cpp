@@ -1560,7 +1560,7 @@ DEFINE_DISPATCH(lu_stub);
 
 // TODO: remove check_errors argument
 // https://github.com/pytorch/pytorch/issues/64014
-std::tuple<Tensor, Tensor, Tensor> _lu_with_info(const Tensor& self, bool compute_pivots, bool check_errors) {
+std::tuple<Tensor, Tensor, Tensor> _lu_with_info(const Tensor& self, bool compute_pivots) {
   TORCH_CHECK(self.dim() >= 2,
            "expected tensor with 2 or more dimensions, got size: ", self.sizes(),
            " instead");

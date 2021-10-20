@@ -492,7 +492,7 @@ class Tensor(torch._C._TensorBase):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.lu, (self,), self, pivot=pivot, get_infos=get_infos)
 
-        LU, pivots, infos = torch._lu_with_info(self, pivot=pivot, check_errors=(not get_infos))
+        LU, pivots, infos = torch._lu_with_info(self, pivot=pivot)
         if get_infos:
             return LU, pivots, infos
         else:

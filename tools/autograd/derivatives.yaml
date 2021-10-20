@@ -882,7 +882,7 @@
   self: zeros_like(self)
   other: zeros_like(other)
 
-- name: _lu_with_info(Tensor self, bool pivot=True, bool check_errors=True) -> (Tensor LU, Tensor pivots, Tensor info)
+- name: _lu_with_info(Tensor self, bool pivot=True) -> (Tensor LU, Tensor pivots, Tensor info)
   self: _lu_with_info_backward(grad, self, LU, pivots)
   LU: _lu_with_info_jvp(self_t, LU, pivots)
 

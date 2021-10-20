@@ -658,8 +658,8 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
 
   m.impl(TORCH_SELECTIVE_NAME("aten::_lu_with_info"),
          TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
-                                 std::tuple<Tensor, Tensor, Tensor> (const Tensor &, bool, bool),
-                                 std::tuple<Tensor, Tensor, Tensor> (const Tensor &, bool, bool),
+                                 std::tuple<Tensor, Tensor, Tensor> (const Tensor &, bool),
+                                 std::tuple<Tensor, Tensor, Tensor> (const Tensor &, bool),
                                  &ADD_NS(_lu_with_info)>::type::call)));
 
   m.impl(TORCH_SELECTIVE_NAME("aten::lu_unpack"),
