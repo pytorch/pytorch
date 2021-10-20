@@ -198,6 +198,7 @@ WINDOWS_BLOCKLIST = [
     "distributed/elastic/agent/server/test/api_test",
     "distributed/elastic/multiprocessing/api_test",
     "distributed/_sharded_tensor/test_sharded_tensor",
+    "distributed/_sharded_tensor/ops/test_embedding",
     "distributed/_sharded_tensor/ops/test_linear",
 ] + FSDP_TEST
 
@@ -207,6 +208,7 @@ ROCM_BLOCKLIST = [
     "distributed/rpc/test_tensorpipe_agent",
     "distributed/rpc/cuda/test_tensorpipe_agent",
     "distributed/_sharded_tensor/test_sharded_tensor",
+    "distributed/_sharded_tensor/ops/test_embedding",
     "distributed/_sharded_tensor/ops/test_linear",
     "test_determination",
     "test_multiprocessing",
@@ -342,6 +344,7 @@ DISTRIBUTED_TESTS = [
     "distributed/elastic/multiprocessing/api_test",
     "distributed/_sharding_spec/test_sharding_spec",
     "distributed/_sharded_tensor/test_sharded_tensor",
+    "distributed/_sharded_tensor/ops/test_embedding",
     "distributed/_sharded_tensor/ops/test_linear",
 ] + [test for test in TESTS if test.startswith("distributed/fsdp")]
 
