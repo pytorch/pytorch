@@ -364,3 +364,25 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         out1 = outs[0].type().symbolic_sizes()
         out2 = outs[1].type().symbolic_sizes()
         self.assertEqual(out1, out2)
+
+    def test_stitching_multi_output(self):
+        max_pool = torch.nn.MaxPool2d(kernel_size=3, stride=2, padding=1, dilation=1, ceil_mode=False, return_indices=True)
+        tensor = torch.rand(1, 3, 224, 224)
+        mod = torch.jit.trace(max_pool, (tensor,))
+        mod = torch.jit.freeze(mod.eval())
+        inp = list(mod.graph.inputs())[1]
+        inp.setType(inp.type().with_sizes([None, None, None, None]))
+        shape_compute_graph = torch._C._jit_pass_propagate_shapes_on_graph_and_build_compute(
+            mod.graph,
+            next(mod.graph.nodes()),
+            mod.graph.findNode("prim::TupleConstruct")
+        )
+        max_pool_node = mod.graph.findNode("aten::max_pool2d_with_indices")
+        outs = list(max_pool_node.outputs())
+        self.assertEqual(outs[0].type().symbolic_sizes(), outs[1].type().symbolic_sizes())
+        g = shape_compute_graph.partial_eval_shape_graph()
+        # to make into a jit function cant have multiple outputs
+        g.makeMultiOutputIntoTuple()
+        func = torch._C._create_function_from_graph("partial_eval_graph", g)
+        output_shape = func(tensor.size())
+        self.assertEqual(list(output_shape), list(mod(tensor)[0].size()))
