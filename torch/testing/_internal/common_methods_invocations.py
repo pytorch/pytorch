@@ -3427,6 +3427,7 @@ def sample_inputs_take(op_info, device, dtype, requires_grad):
         # Empty cases
         src_sizes = [(0,), (), (1,), (3, 2)]
         src_gen = (make_arg(size) for size in src_sizes)
+
         idx = make_idx((0,), high=1)
         for src in src_gen:
             yield SampleInput(input=src, args=(idx,))
@@ -4197,6 +4198,19 @@ def sample_inputs_lu(op_info, device, dtype, requires_grad=False, **kwargs):
 
     return list(generate_samples())
 
+def sample_inputs_linalg_lu_factor(op_info, device, dtype, requires_grad=False, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+    # not needed once OpInfo tests support Iterables
+    def generate_samples():
+        batch_shapes = ((), (3,), (3, 3))
+        # pivot=False only supported in CUDA
+        pivots = (True, False) if dtype == "cuda" else (True,)
+        deltas = (-2, -1, 0, +1, +2)
+        for batch_shape, pivot, delta in product(batch_shapes, pivots, deltas):
+            shape = batch_shape + (S + delta, S)
+            yield SampleInput(make_arg(shape), kwargs={"pivot": pivot})
+
+    return list(generate_samples())
 
 def sample_inputs_lu_solve(op_info, device, dtype, requires_grad=False, **kwargs):
     from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
@@ -7981,7 +7995,19 @@ op_db: List[OpInfo] = [
            check_batched_grad=False,
            check_batched_gradgrad=False,
            supports_forward_ad=True,
-           sample_inputs_func=sample_inputs_lu,
+           sample_inputs_func=sample_inputs_linalg_lu_factor,
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack]),
+    OpInfo('linalg.lu_factor_ex',
+           aten_name='linalg_lu_factor_ex',
+           op=torch.linalg.lu_factor_ex,
+           dtypes=floating_and_complex_types(),
+           supports_inplace_autograd=False,
+           # we use in-place operations which cannot be avoided.
+           # This causes vmap failures, hence we skip batched gradient checks
+           check_batched_grad=False,
+           check_batched_gradgrad=False,
+           supports_forward_ad=True,
+           sample_inputs_func=sample_inputs_linalg_lu_factor,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack]),
     OpInfo('lu',
            op=torch.lu,
