@@ -6742,7 +6742,13 @@ class TestNN(NNTestCase):
             padded = rnn_utils.pad_sequence(sequences)
             self.assertEqual(padded, expected.transpose(0, 1))
 
-    def test_pad_sequence(self):
+    def test_unpad_sequence(self):
+        def _compatibility_test(sequences, unpadded_sequences):
+            self.assertEqual(sequences[0], unpadded_sequences[0])
+            self.assertEqual(sequences[1], unpadded_sequences[1])
+            self.assertEqual(sequences[2], unpadded_sequences[2])
+            self.assertTrue(all([torch.allclose(a, b) for a, b in zip(sequences, unpadded_sequences)]))
+        
         # single dimensional
         a = torch.tensor([1, 2, 3])
         b = torch.tensor([4, 5])
@@ -6750,22 +6756,16 @@ class TestNN(NNTestCase):
         sequences = [a, b, c]
 
         # batch_first = true
-        padded = rnn_utils.pad_sequence(sequences, True)
+        padded_sequences = rnn_utils.pad_sequence(sequences, True)
         lengths = torch.as_tensor([v.size(0) for v in sequences])
-        unpadded = rnn_utils.unpad_sequence(sequences, lengths, True)
-        self.assertEqual(unpadded[0], a)
-        self.assertEqual(unpadded[1], b)
-        self.assertEqual(unpadded[2], c)
-        self.assertTrue(all([torch.allclose(a, b) for a, b in zip(sequences, unpadded)]))
+        unpadded_sequences = rnn_utils.unpad_sequence(padded_sequences, lengths, True)
+        _compatibility_test(sequences, unpadded_sequences)
 
         # batch_first = false
-        padded = rnn_utils.pad_sequence(sequences)
+        padded_sequences = rnn_utils.pad_sequence(sequences)
         lengths = torch.as_tensor([v.size(0) for v in sequences])
-        unpadded = rnn_utils.unpad_sequence(sequences, lengths)
-        self.assertEqual(unpadded[0], a)
-        self.assertEqual(unpadded[1], b)
-        self.assertEqual(unpadded[2], c)
-        self.assertTrue(all([torch.allclose(a, b) for a, b in zip(sequences, unpadded)]))
+        unpadded_sequences = rnn_utils.unpad_sequence(padded_sequences, lengths)
+        _compatibility_test(sequences, unpadded_sequences)
 
     def test_pack_sequence(self):
         def _compatibility_test(sequences, lengths, batch_first, enforce_sorted=False):
