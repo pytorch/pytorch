@@ -155,7 +155,8 @@ void Logger::set_construction_data_and_log(
     const std::string& module_name,
     const std::vector<int>& device_ids,
     int output_device,
-    bool broadcast_buffers) {
+    bool broadcast_buffers,
+    bool has_sync_bn) {
   // No lock is needed, as it will be called in DistributedDataParallel
   // constructor.
   ddp_logging_data_->strs_map["module_name"] = module_name;
@@ -182,6 +183,7 @@ void Logger::set_construction_data_and_log(
   ddp_logging_data_->strs_map["device_ids"] = c10::Join(", ", device_ids);
   ddp_logging_data_->ints_map["output_device"] = output_device;
   ddp_logging_data_->ints_map["broadcast_buffers"] = broadcast_buffers;
+  ddp_logging_data_->ints_map["has_sync_bn"] = has_sync_bn;
   ddp_logging_data_->ints_map["bucket_cap_bytes"] = reducer_->bucket_bytes_cap_;
   ddp_logging_data_->ints_map["find_unused_parameters"] =
       reducer_->find_unused_parameters_;
