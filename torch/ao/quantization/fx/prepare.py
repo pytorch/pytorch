@@ -205,7 +205,6 @@ def insert_observer(
     model: torch.nn.Module,
     modules: Dict[str, torch.nn.Module],
     graph: Graph,
-    input_or_output: str,
 ) -> Node:
     """
     Attaches `observer` to `model`, and creates a node which calls
@@ -218,7 +217,7 @@ def insert_observer(
     if is_equalization_observer(observer):
         prefix = node.name + '_equalization_process_'
     else:
-        prefix = input_or_output + '_activation_post_process_'
+        prefix = 'activation_post_process_'
     get_new_observer_name = get_new_attr_name_with_prefix(prefix)
     observer_name = get_new_observer_name(model)
     setattr(model, observer_name, observer)
@@ -330,7 +329,6 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
 
     is_standalone_module = qhandler is not None and \
         isinstance(qhandler, StandaloneModuleQuantizeHandler)
-    obs_type = "input"
     if not is_standalone_module:
         # regular flow for most nodes, except standalone modules
         is_weight = node_arg_is_weight(node, arg)
@@ -345,10 +343,6 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
         bias_needs_obs = \
             (is_bias and activation_dtype(qconfig) == torch.float16) and \
             weight_dtype(qconfig) == torch.float16
-        if weight_needs_obs:
-            obs_type = "w"
-        elif bias_needs_obs:
-            obs_type = "b"
         arg_dtype = node_name_to_target_dtype[arg.name]
         node_dtype = node_name_to_target_dtype[node.name]
         dtype_changes_and_second_dtype_not_float = (
@@ -418,7 +412,7 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
 
         if existing_obs_node is None:
             new_obs_node = insert_observer(
-                arg, node, new_obs_mod, model, modules, graph, obs_type)
+                arg, node, new_obs_mod, model, modules, graph)
             # set the type, so the next node can read it
             node_name_to_target_dtype[new_obs_node.name] = node_dtype
             # override this arg to be the observed arg
@@ -516,7 +510,7 @@ def maybe_insert_input_equalization_observers_for_node(
 
         new_eq_obs_mod = act_eq_process_ctr()
         new_eq_obs_node = insert_observer(
-            arg, node, new_eq_obs_mod, model, modules, graph, "input")
+            arg, node, new_eq_obs_mod, model, modules, graph)
 
         # set the type, so the next node can read it
         node_name_to_target_dtype[new_eq_obs_node.name] = node_name_to_target_dtype[arg.name]
@@ -575,7 +569,7 @@ def maybe_insert_output_observer_for_node(
                 qconfig,
                 matched_pattern)
         observer = act_post_process_ctr()
-        new_obs = insert_observer(node, node, observer, model, modules, graph, "output")
+        new_obs = insert_observer(node, node, observer, model, modules, graph)
         # set the type, so the next node can read it
         node_name_to_target_dtype[new_obs.name] = \
             node_name_to_target_dtype[node.name]
@@ -649,7 +643,7 @@ def maybe_insert_observers_before_graph_output(
                     'Quantizing the output node without a qconfig is not supported'
                 observer_mod = qconfig.activation()
                 observer_node = insert_observer(
-                    maybe_node, maybe_node, observer_mod, model, modules, graph, "input")
+                    maybe_node, maybe_node, observer_mod, model, modules, graph)
                 return observer_node
             else:
                 return maybe_node
