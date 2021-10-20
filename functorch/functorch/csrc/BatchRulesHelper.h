@@ -393,6 +393,16 @@ inline int64_t get_bdim_size2(
   TORCH_INTERNAL_ASSERT(false);
 }
 
+// [start, start + 1, ..., stop - 1]
+inline VmapDimVector range(int64_t start, int64_t stop) {
+  TORCH_INTERNAL_ASSERT(stop >= start);
+  VmapDimVector dims;
+  dims.reserve(stop - start);
+  for (int64_t i = start; i < stop; i++) {
+    dims.emplace_back(i);
+  }
+  return dims;
+}
 
 }}
 
