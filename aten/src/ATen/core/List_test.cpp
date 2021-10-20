@@ -1144,3 +1144,14 @@ TEST(ListTest, canAccessTensorByReference) {
       std::is_same<decltype(listRef[0]), const at::Tensor&>::value,
       "List<at::Tensor> access should be by const reference");
 }
+
+TEST(ListTest, toTypedList) {
+  List<std::string> stringList({"one", "two"});
+  auto genericList = impl::toList(std::move(stringList));
+  EXPECT_EQ(genericList.size(), 2);
+  stringList = c10::impl::toTypedList<std::string>(std::move(genericList));
+  EXPECT_EQ(stringList.size(), 2);
+
+  genericList = impl::toList(std::move(stringList));
+  EXPECT_THROW(c10::impl::toTypedList<int64_t>(std::move(genericList)), c10::Error);
+}

@@ -843,7 +843,7 @@ void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
         row->elements().at(0).toStringRef());
     const auto& ops_list = row->elements().at(1).toTuple()->elements();
     for (const auto& op : ops_list) {
-      auto op_item = op.toTuple()->elements();
+      const auto& op_item = op.toTuple()->elements();
       TORCH_CHECK(
           op_item.size() >= 2,
           "There should be either two parts (name and overload name), ",
