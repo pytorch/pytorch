@@ -190,7 +190,7 @@ TORCH_PRECOMPUTE_META_FUNC(index_add)
               source.dim());
   TORCH_CHECK(numel == (source.dim() == 0 ? 1 : source.size(dim)),
               "index_add_(): Number of indices (", numel, ") should be equal to source.size(dim): (",
-              source.size(dim), ")");
+              source.size(dim), "), for dim: ", dim);
   // All other dimensions other than indexing dim for `source` tensor should match `self`
   for (int dim_index = 0; dim_index < source.ndimension(); dim_index++) {
     if (dim_index == dim || source.size(dim_index) == 1) continue;
