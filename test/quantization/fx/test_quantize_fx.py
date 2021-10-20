@@ -5191,9 +5191,13 @@ class TestQuantizeFxOpsNew(QuantizationTestCase):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+                self.linear = torch.nn.Linear(5, 5)
                 self.relu = torch.nn.ReLU()
 
             def forward(self, x):
+                x = self.conv(x)
+                x = self.linear(x)
                 x = x + 3
                 x = self.relu(x)
                 x = x + 6
@@ -5203,8 +5207,10 @@ class TestQuantizeFxOpsNew(QuantizationTestCase):
         m = prepare_fx(m, {"": default_qconfig})
         m = _convert_fx_new(m, is_reference=True)
         expected_occurrence = {
-            ns.call_function(torch.quantize_per_tensor): 3,
-            ns.call_method("dequantize"): 3,
+            ns.call_function(torch.quantize_per_tensor): 5,
+            ns.call_method("dequantize"): 5,
+            ns.call_module(torch.nn.quantized._reference.Linear): 1,
+            ns.call_module(torch.nn.quantized._reference.Conv2d): 1,
         }
         self.checkGraphModuleNodes(
             m,

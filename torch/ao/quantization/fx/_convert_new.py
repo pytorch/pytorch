@@ -7,8 +7,14 @@ from torch.fx.graph import (
     Graph,
     Node,
 )
-from .quantization_types import Pattern
 from ..qconfig import QConfigAny
+from ..quantization_mappings import get_static_quant_module_class
+from ..utils import (
+    weight_is_statically_quantized,
+    get_qparam_dict,
+)
+
+from .quantization_types import Pattern
 from .match_utils import (
     find_matches,
 )
@@ -24,6 +30,7 @@ from .utils import (
     get_custom_module_class_keys,
     get_quantize_node_info,
     create_getattr_from_value,
+    _parent_name,
 )
 
 from torch.ao.quantization.quantize import (
@@ -160,8 +167,26 @@ def _convert_new(model: GraphModule, is_reference: bool = False,
                 # output_quantized_idxs override.
                 # TODO: remove dequantize node if any
                 raise Exception("output_quantized_idxs is not supported yet")
-        elif node.op == 'call_module' and is_activation_post_process(modules[node.target]):
-            replace_observer_with_quantize_dequantize_node(model.graph, node, modules)
+        elif node.op == "call_module":
+            if is_activation_post_process(modules[node.target]):
+                replace_observer_with_quantize_dequantize_node(model.graph, node, modules)
+            elif type(modules[node.target]) in [
+                    torch.nn.Linear,
+                    torch.nn.Conv1d,
+                    torch.nn.Conv2d,
+                    torch.nn.Conv3d]:
+                fmodule = modules[node.target]
+                qconfig = fmodule.qconfig
+                # TODO: rename weight_is_statically_quantized to weight_is_int8_quantized
+                if qconfig is not None and weight_is_statically_quantized(qconfig):
+                    weight_post_process = qconfig.weight()
+                    # run weight observer
+                    weight_post_process(fmodule.weight)  # type: ignore[operator]
+                    weight_qparams = get_qparam_dict(weight_post_process)
+                    ref_qmodule_cls = get_static_quant_module_class(type(fmodule), is_reference=True)
+                    ref_qmodule = ref_qmodule_cls.from_float(fmodule, weight_qparams)
+                    parent_name, name = _parent_name(node.target)
+                    setattr(modules[parent_name], name, ref_qmodule)
 
     # removes qconfig and activation_post_process modules
     if _remove_qconfig_flag:
