@@ -1,6 +1,7 @@
 #include <ATen/cudnn/Descriptors.h>
 
 #include <ATen/ATen.h>
+#include <c10/util/irange.h>
 
 #include <iostream>
 #include <sstream>
@@ -53,11 +54,11 @@ void TensorDescriptor::set(cudnnDataType_t datatype, IntArrayRef t_sizes, IntArr
 #undef STR
   int size[CUDNN_DIM_MAX];
   int stride[CUDNN_DIM_MAX];
-  for (size_t i = 0; i < dim; ++i) {
+  for (const auto i : c10::irange(dim)) {
     size[i] = static_cast<int>(t_sizes[i]);
     stride[i] = static_cast<int>(t_strides[i]);
   }
-  for (size_t i = dim; i < pad; ++i) {
+  for (const auto i : c10::irange(dim, pad)) {
     size[i] = 1;
     stride[i] = 1;
   }
@@ -135,10 +136,10 @@ void FilterDescriptor::set(const at::Tensor &t, const at::MemoryFormat memory_fo
     "cuDNN suggested memory_format: ", memory_format);
 
   int size[CUDNN_DIM_MAX];
-  for (int i = 0; i < dim; ++i) {
+  for (const auto i : c10::irange(dim)) {
     size[i] = (int) t.size(i);
   }
-  for (int i = dim; i < pad; ++i) {
+  for (const auto i : c10::irange(dim, pad)) {
     size[i] = (int) 1;
   }
   dim = std::max(dim, pad);
