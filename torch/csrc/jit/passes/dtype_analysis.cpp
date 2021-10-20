@@ -249,14 +249,6 @@ struct DtypePropagationPass {
   bool processAtenOps(Node* n) {
     GRAPH_DEBUG("processAtenOps");
     GRAPH_DEBUG("case = ", n->kind(), " ", *n);
-
-    // Custom Rule Matching
-    if (auto prop_fn = dtype_prop_registry_->find(n->getOperator())) {
-      DtypePropRule rule = *prop_fn;
-      return rule(n);
-    }
-
-    GRAPH_DEBUG("case = ", n->kind(), " ", *n);
     bool changed = tryApplyDtypeMetaTensor(n);
 
     switch (n->kind()) {
