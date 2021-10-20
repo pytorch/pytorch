@@ -26,12 +26,13 @@ class TORCH_API CodeGen {
       StmtPtr stmt,
       std::vector<BufferArg> buffer_args,
       at::Device device = at::kCPU,
-      std::string kernel_func_name = "func")
+      std::string kernel_func_name = "func",
+      const bool pre_alloc = false)
       : stmt_(stmt),
         buffer_args_(std::move(buffer_args)),
         device_(device),
         kernel_func_name_(std::move(kernel_func_name)) {
-    allocBuf();
+    allocBuf(pre_alloc);
   }
 
   virtual ~CodeGen() = default;
@@ -101,7 +102,12 @@ class TORCH_API CodeGen {
     return kernel_func_name_;
   }
 
-  void allocBuf();
+  void allocBuf(const bool pre_alloc);
+  void insertMemNodes(std::vector<std::pair<BufPtr, BufPtr>>& b2m, const bool pre_alloc);
+
+  std::vector<BufPtr> getIntermediateBufs() const{
+    return buffers_to_alloc_;
+  }
 
  protected:
   static void* argToPtr(const BufferArg& bufferArg, const CallArg& callArg);
@@ -111,6 +117,7 @@ class TORCH_API CodeGen {
   std::vector<BufferArg> buffer_args_;
   at::Device device_ = at::kCPU;
   std::string kernel_func_name_ = "func";
+  std::vector<BufPtr> buffers_to_alloc_;
 };
 
 class CodeGen::BufferArg {
@@ -191,7 +198,8 @@ class RegisterCodeGenList {
       StmtPtr stmt,
       const std::vector<CodeGen::BufferArg>&,
       at::Device device,
-      const std::string& kernel_func_name)>;
+      const std::string& kernel_func_name,
+      const bool pre_alloc)>;
 
   TORCH_API StmtFactoryMethod FindStmtFactoryMethod(const std::string& name);
   RegisterCodeGenList(const RegisterCodeGenList&) = delete;
@@ -219,10 +227,11 @@ class RegisterCodeGen {
         [](StmtPtr stmt,
            const std::vector<CodeGen::BufferArg>& params,
            at::Device device,
-           const std::string& kernel_func_name) {
+           const std::string& kernel_func_name,
+           const bool pre_alloc) {
           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           std::unique_ptr<CodeGen> method(
-              new CodeGenType(stmt, params, device, kernel_func_name));
+              new CodeGenType(stmt, params, device, kernel_func_name, pre_alloc));
           return method;
         });
   }
@@ -233,7 +242,8 @@ TORCH_API std::unique_ptr<CodeGen> CreateCodeGen(
     StmtPtr stmt,
     const std::vector<CodeGen::BufferArg>& params,
     at::Device device = at::kCPU,
-    const std::string& kernel_func_name = "func");
+    const std::string& kernel_func_name = "func",
+    const bool pre_alloc = false);
 
 class TORCH_API GenericIntrinsicsExpander : public IRMutator {
  protected:

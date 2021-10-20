@@ -40,10 +40,11 @@ std::unique_ptr<CodeGen> CreateCodeGen(
     StmtPtr stmt,
     const std::vector<CodeGen::BufferArg>& params,
     at::Device device,
-    const std::string& kernel_func_name) {
+    const std::string& kernel_func_name,
+    const bool pre_alloc) {
   RegisterCodeGenList::StmtFactoryMethod method =
       RegisterCodeGenList::GetInstance().FindStmtFactoryMethod(name);
-  return method(stmt, params, device, kernel_func_name);
+  return method(stmt, params, device, kernel_func_name, pre_alloc);
 }
 
 ExprPtr GenericIntrinsicsExpander::mutate(IntrinsicsPtr v) {
@@ -188,29 +189,36 @@ std::vector<std::pair<BufPtr, BufPtr>> linerScan(
   return b2m_ret;
 }
 
-StmtPtr insertMemNodes(
+void CodeGen::insertMemNodes(
     std::vector<std::pair<BufPtr, BufPtr>>& b2m,
-    StmtPtr stmt) {
-  BlockPtr b = to<Block>(stmt);
+    const bool pre_alloc) {
+  BlockPtr b = to<Block>(stmt_);
   if (!b) {
-    b = alloc<Block>(std::vector<StmtPtr>({stmt}));
+    b = alloc<Block>(std::vector<StmtPtr>({stmt_}));
   }
 
-  // Insert allocations and frees for temporary buffers at global scope.
   for (auto rit = b2m.rbegin(); rit != b2m.rend(); ++rit) {
     if (rit->first == rit->second) {
       BufPtr buf = rit->first;
-      b->prepend_stmt(alloc<Allocate>(buf));
-      b->append_stmt(alloc<Free>(buf));
+      if (pre_alloc) {
+        // Save buffers for buffer preallocation in TEK.
+        buffers_to_alloc_.emplace_back(buf);
+        // Add preallocated buffers to args.
+        buffer_args_.emplace_back(BufHandle(buf));
+      } else {
+        // Insert allocations and frees for temporary buffers at global scope.
+        b->prepend_stmt(alloc<Allocate>(buf));
+        b->append_stmt(alloc<Free>(buf));
+      }
     } else {
       b->prepend_stmt(alloc<BufMap>(rit->first, rit->second));
     }
   }
 
-  return b;
+  set_stmt(b);
 }
 
-void CodeGen::allocBuf() {
+void CodeGen::allocBuf(const bool pre_alloc) {
   // Identify intermediate buffers that are not allocated yet.
   auto bufs = NodeFinder<Buf>::find(stmt_);
   std::unordered_set<BufPtr> bufs_allocated;
@@ -243,8 +251,7 @@ void CodeGen::allocBuf() {
 
   // Insert memory allocation/mapping nodes.
   if (b2m.size() > 0) {
-    auto stmt_new = insertMemNodes(b2m, stmt_);
-    set_stmt(stmt_new);
+    insertMemNodes(b2m, pre_alloc);
   }
 
   GRAPH_DEBUG("\nMemomry Allocation:\n\n", *stmt(), "\n");

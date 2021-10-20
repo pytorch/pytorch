@@ -1031,8 +1031,9 @@ SimpleIREvaluator::SimpleIREvaluator(
     StmtPtr stmt,
     const std::vector<BufferArg>& buffer_args,
     at::Device device,
-    const std::string& kernel_func_name)
-    : CodeGen(stmt, buffer_args, device, kernel_func_name) {
+    const std::string& kernel_func_name,
+    const bool pre_alloc)
+    : CodeGen(stmt, buffer_args, device, kernel_func_name, pre_alloc) {
   impl_ = std::make_unique<SimpleIREvaluatorImpl>();
   expand_intrinsics();
 }

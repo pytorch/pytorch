@@ -26,6 +26,7 @@ class TORCH_API LLVMCodeGen : public CodeGen {
       const std::vector<BufferArg>& args,
       at::Device device = at::kCPU,
       const std::string& kernel_func_name = "func",
+      const bool pre_alloc = false,
       Dtype dtype = kInt,
       c10::optional<std::string> triple = c10::nullopt,
       c10::optional<std::string> cpu = c10::nullopt,
@@ -117,7 +118,7 @@ struct TORCH_API LLVMCodeGenBuilder {
 
   std::unique_ptr<LLVMCodeGen> build() {
     return std::make_unique<LLVMCodeGen>(
-        stmt_, args_, device_, kernelFuncName_, dtype_, triple_, cpu_, attrs_);
+        stmt_, args_, device_, kernelFuncName_, pre_alloc_, dtype_, triple_, cpu_, attrs_);
   }
 
  private:
@@ -126,6 +127,7 @@ struct TORCH_API LLVMCodeGenBuilder {
   at::Device device_ = at::kCPU;
   std::string kernelFuncName_ = "func";
   Dtype dtype_ = kInt;
+  const bool pre_alloc_ = false;
   c10::optional<std::string> triple_ = c10::nullopt;
   c10::optional<std::string> cpu_ = c10::nullopt;
   c10::optional<std::string> attrs_ = c10::nullopt;

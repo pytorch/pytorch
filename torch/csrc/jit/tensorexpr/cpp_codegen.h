@@ -69,7 +69,8 @@ class TORCH_API CppCodeGen : public CodeGen {
       StmtPtr stmt,
       const std::vector<BufferArg>& buffer_args,
       at::Device device = at::kCPU,
-      const std::string& kernel_func_name = "func");
+      const std::string& kernel_func_name = "func",
+      const bool pre_alloc = false);
 
   ~CppCodeGen() override;
 

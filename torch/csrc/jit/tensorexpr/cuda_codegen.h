@@ -214,8 +214,9 @@ class TORCH_CUDA_CU_API CudaCodeGen : public CodeGen {
       StmtPtr stmt,
       const std::vector<BufferArg>& buffer_args,
       at::Device device = at::Device(at::kCUDA, at::cuda::current_device()),
-      const std::string& kernel_func_name = "func")
-      : CodeGen(stmt, buffer_args, device, kernel_func_name) {
+      const std::string& kernel_func_name = "func",
+      const bool pre_alloc = false)
+      : CodeGen(stmt, buffer_args, device, kernel_func_name, pre_alloc) {
     Initialize();
   }
 

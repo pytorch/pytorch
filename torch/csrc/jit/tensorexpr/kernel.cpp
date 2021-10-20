@@ -918,13 +918,7 @@ StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
     }
   }
 
-  if (pre_alloc_) {
-    auto interm_bufs = l.getIntermediateBufs();
-    preAllocIntermediateBufs(interm_bufs);
-    l.prepareForCodegen(interm_bufs);
-  } else {
-    l.prepareForCodegen();
-  }
+  l.prepareForCodegen();
 
   GRAPH_DEBUG("after prepareForCodegen", *l.root_stmt());
   l.simplify();
@@ -1238,9 +1232,8 @@ void TensorExprKernel::bindConstant(const torch::jit::Value* v) {
 }
 
 void TensorExprKernel::preAllocIntermediateBufs(
-    std::unordered_set<BufPtr>& interm_bufs) {
-  std::vector<std::pair<BufPtr, void*>> allocated_bufs;
-  for (auto it = interm_bufs.begin(); it != interm_bufs.end();) {
+    std::vector<BufPtr>& interm_bufs) {
+  for (auto it = interm_bufs.begin(); it != interm_bufs.end();++it) {
     // Check if buf shape is static and compute its size if static.
     auto buf = *it;
     bool is_static = true;
@@ -1255,25 +1248,13 @@ void TensorExprKernel::preAllocIntermediateBufs(
     }
     // Only allocate memory for static bufs.
     if (!is_static) {
-      ++it;
       continue;
     }
     auto bp = (void*)malloc(size);
     if (!bp) {
-      ++it;
       continue;
     }
-    allocated_bufs.emplace_back(buf, bp);
-    it = interm_bufs.erase(it);
-  }
-  std::sort(
-      allocated_bufs.begin(),
-      allocated_bufs.end(),
-      [](const auto& a, const auto& b) {
-        return a.first->name_hint() > b.first->name_hint();
-      });
-  for (auto& a : allocated_bufs) {
-    constants_.push_back({a.first, a.second});
+    constants_.push_back({buf, bp});
   }
 }
 
@@ -1365,7 +1346,13 @@ void TensorExprKernel::compile() {
       stmt,
       bufferArgs_,
       device_,
-      SubgraphUtils::generateNameForGraph(graph_));
+      SubgraphUtils::generateNameForGraph(graph_),
+      pre_alloc_);
+
+  if(pre_alloc_) {
+    auto interm_bufs = codegen_->getIntermediateBufs();
+    preAllocIntermediateBufs(interm_bufs);
+  }
 }
 
 TensorExprKernel::TensorExprKernel(
