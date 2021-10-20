@@ -1,5 +1,9 @@
 import torch
 
+def validate_param(param, param_name):
+    if param is None:
+        raise ValueError(f"param: {param_name} shouldn't be None!")
+
 def uniform_(types, args=(), kwargs=None):
     r"""
     Fills the Tensor in sharded_tensor.local_shards with values drawn from the uniform
@@ -20,7 +24,3 @@ def uniform_(types, args=(), kwargs=None):
     for shard in sharded_tensor.local_shards():
         torch.nn.init.uniform_(shard.tensor, a=a, b=b)
     return sharded_tensor
-
-def validate_param(param, param_name):
-    if param is None:
-        raise ValueError(f"param: {param_name} shouldn't be None!")
