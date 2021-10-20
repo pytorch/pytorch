@@ -6829,16 +6829,21 @@ class TestNN(NNTestCase):
                                     batch_first)
 
     def test_unpack_sequence(self):
+        def _compatibility_test(sequences, unpacked_sequences):
+            self.assertEqual(sequences[0], unpacked_sequences[0])
+            self.assertEqual(sequences[1], unpacked_sequences[1])
+            self.assertEqual(sequences[2], unpacked_sequences[2])
+            self.assertTrue(all([torch.allclose(a, b) for a, b in zip(sequences, unpacked_sequences)]))
+        
+        # single dimensional
         a = torch.tensor([1, 2, 3])
         b = torch.tensor([4, 5])
         c = torch.tensor([6])
         sequences = [a, b, c]
+
         packed_sequences = rnn_utils.pack_sequence(sequences)
         unpacked_sequences = rnn_utils.unpack_sequence(packed_sequences)
-        self.assertEqual(unpacked_sequences[0], a)
-        self.assertEqual(unpacked_sequences[1], b)
-        self.assertEqual(unpacked_sequences[2], c)
-        self.assertTrue(all([torch.allclose(a, b) for a, b in zip(sequences, unpacked_sequences)]))
+        _compatibility_test(sequences, unpacked_sequences)
 
     def test_pack_padded_sequence(self):
         def generate_test_case(sorted_lengths, should_shuffle):
