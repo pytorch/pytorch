@@ -108,7 +108,7 @@ Tensor margin_ranking_loss(const Tensor& input1, const Tensor& input2, const Ten
 
 Tensor kl_div(const Tensor& input, const Tensor& target, int64_t reduction, bool log_target) {
   auto output = log_target ? at::exp(target) * (target - input)
-                           : at::native::xlogy(target, target) - target * input;
+                           : at::xlogy(target, target) - target * input;
   return apply_loss_reduction(output, reduction);
 }
 
