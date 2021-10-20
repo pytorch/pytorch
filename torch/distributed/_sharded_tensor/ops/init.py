@@ -9,18 +9,18 @@ def uniform_(types, args=(), kwargs=None):
         a: the lower bound of the uniform distribution
         b: the upper bound of the uniform distribution
     """
-    assert_not_none(kwargs, "kwargs")
-    sharded_tensor = kwargs['tensor']
-    assert_not_none(sharded_tensor, "sharded_tensor")
+    validate_param(kwargs, "kwargs")
+    validate_param = kwargs['tensor']
+    validate_param(sharded_tensor, "sharded_tensor")
     a = kwargs['a']
-    assert_not_none(a, "a")
+    validate_param(a, "a")
     b = kwargs['b']
-    assert_not_none(b, "b")
+    validate_param(b, "b")
 
     for shard in sharded_tensor.local_shards():
         torch.nn.init.uniform_(shard.tensor, a=a, b=b)
     return sharded_tensor
 
-def assert_not_none(param, param_name):
+def validate_param(param, param_name):
     if param is None:
         raise ValueError(f"param: {param_name} shouldn't be None!")
