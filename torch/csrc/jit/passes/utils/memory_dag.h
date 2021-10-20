@@ -86,7 +86,6 @@ class TORCH_API MemoryDAG {
 
   // Do `a` and `b` potentially share a memory location?
   bool mayAlias(const Element* a, const Element* b) const;
-  bool mayAlias(Element* a, Element* b) const;
 
   // Does `a` hold reference to any memory that is stored in `b`, or vice versa?
   bool mayContainAlias(const Element* a, const Element* b) const;
@@ -120,7 +119,6 @@ class TORCH_API MemoryDAG {
   Element* unsafeMakeFreshValue(const Value* v);
 
  private:
-  bool mayAliasImpl(const Element* a, const Element* b) const;
   bool mayContainAliasImpl(const Element* contained, const Element* container)
       const;
   const MemoryLocations& getAllContainedMemoryLocations(

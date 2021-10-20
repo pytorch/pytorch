@@ -43,15 +43,7 @@ Element* MemoryDAG::fromIndex(unsigned x) {
   return indexToElementMap_[x].get();
 }
 
-bool MemoryDAG::mayAlias(Element* a, Element* b) const {
-  return mayAliasImpl(a, b);
-}
-
 bool MemoryDAG::mayAlias(const Element* a, const Element* b) const {
-  return mayAliasImpl(a, b);
-}
-
-bool MemoryDAG::mayAliasImpl(const Element* a, const Element* b) const {
   const auto& aMemLoc = getMemoryLocations(a);
   const auto& bMemLoc = getMemoryLocations(b);
 
