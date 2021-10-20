@@ -289,7 +289,8 @@ static void UpdateScalarTypeForOutput(
     Node* n,
     const c10::ScalarType& scalar_type) {
   auto output_tensor_type = n->output()->type()->cast<TensorType>();
-  n->output()->setType(
+  if (output_tensor_type)
+    n->output()->setType(
       CreateProfiledTensorTypeWithScalarType(output_tensor_type, scalar_type));
 }
 

@@ -911,6 +911,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(NestedTupleModel(), input=(x, y))
 
     @skipScriptTest([7, 8, 9, 10, 11, 12, 13, 14])
+    @skipScriptTest([15])  # pending ORT implementation
     def test_optional_inputs_with_no_optionals(self):
         class NoOptionalModel(torch.nn.Module):
             def forward(self, input):
@@ -946,6 +947,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(MixedModel(), (x, {"y": y}))
 
     @skipScriptTest([7, 8, 9, 10, 11, 12, 13, 14])
+    @skipScriptTest([15])  # pending ORT implementation
     def test_optional_inputs_with_mixed_optionals_script(self):
         class MixedModel(torch.nn.Module):
             def forward(self, x, y: Optional[Tensor] = torch.ones(2, 3), z: Optional[Tensor] = torch.zeros(2, 3)):
@@ -982,6 +984,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(AllOptionalModel(), {"y": y, "z": None})
 
     @skipScriptTest([7, 8, 9, 10, 11, 12, 13, 14])
+    @skipScriptTest([15])  # pending ORT implementation
     def test_optional_inputs_with_all_optionals_script(self):
         class AllOptionalModel(torch.nn.Module):
             def forward(self, y: Optional[Tensor] = torch.ones(2, 3), z: Optional[Tensor] = torch.zeros(2, 3)):
@@ -990,7 +993,7 @@ class TestONNXRuntime(unittest.TestCase):
                 elif z is not None:
                     return z
                 else:
-                    return torch.tensor(-1)
+                    return torch.tensor(-1.)
 
         y = torch.randn(2, 3)
         # Without optional arguments dictionary
@@ -1047,6 +1050,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(AllOptionalModel(), {"y": None, "z": z}, input_names=["input_z"])
 
     @skipScriptTest([7, 8, 9, 10, 11, 12, 13, 14])
+    @skipScriptTest([15])  # pending ORT implementation
     def test_input_names_with_optional_args_script(self):
         class NoOptionalModel(torch.nn.Module):
             def forward(self, input):
@@ -1117,6 +1121,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(Model(), (x, None))
 
     @skipScriptTest([7, 8, 9, 10, 11, 12, 13, 14])
+    @skipScriptTest([15])  # pending ORT implementation
     def test_none_as_input_script(self):
         class Model(torch.nn.Module):
             def forward(self, x, y: Optional[Tensor] = torch.ones(2, 3)):
@@ -1142,6 +1147,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(Model(), (x, (None, y)))
 
     @skipScriptTest([7, 8, 9, 10, 11, 12, 13, 14])
+    @skipScriptTest([15])  # pending ORT implementation
     def test_none_as_tuple_input_scripting(self):
         class Model(torch.nn.Module):
             def forward(self, x, y: Tuple[Optional[Tensor], Optional[Tensor]] = (torch.zeros(2, 3), torch.zeros(2, 3))):
@@ -1171,6 +1177,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(Model(), (x, None, z))
 
     @skipScriptTest([7, 8, 9, 10, 11, 12, 13, 14])
+    @skipScriptTest([15])  # pending ORT implementation
     def test_none_as_named_input_scripting(self):
         class Model(torch.nn.Module):
             def forward(self, x, y: Optional[Tensor] = torch.ones(2, 3), z: Optional[Tensor] = torch.zeros(2, 3)):
@@ -3520,7 +3527,7 @@ class TestONNXRuntime(unittest.TestCase):
         k = torch.tensor(3)
         self.run_test(MyModuleDynamic(), [x, k])
 
-    @disableScriptTest()  # Python builtin apply of FunctionMeta object is currently not supported in Torchscript.
+    @skipScriptTest()  # Python builtin apply of FunctionMeta object is currently not supported in Torchscript.
     @skipIfUnsupportedMinOpsetVersion(11)  # Clip op min is an input since opset 11.
     def test_auto_grad(self):
         class MyClip(torch.autograd.Function):

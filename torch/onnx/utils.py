@@ -19,7 +19,7 @@ import inspect
 from torch._six import string_classes
 from torch.jit import _unique_state_dict
 from torch.onnx import ONNX_ARCHIVE_MODEL_PROTO_NAME, ExportTypes, OperatorExportTypes, TrainingMode, CheckerError
-from torch._C import ListType, OptionalType, _propagate_and_assign_input_shapes, _check_onnx_proto
+from torch._C import ListType, OptionalType, NoneType, _propagate_and_assign_input_shapes, _check_onnx_proto
 from typing import List, Tuple, Union
 
 
@@ -445,10 +445,16 @@ def _resolve_and_flatten_graph_inputs(model, args_params):
     resolved_args = []  # type: ignore[var-annotated]
     if isinstance(model, torch.jit.ScriptModule) or isinstance(model, torch.jit.ScriptFunction):
         for i, var in enumerate(args_params):
-            if var is not None:
-                resolved_args += [var]
-            else:
+            if var is None:
                 resolved_args += [sig.parameters[ordered_list_keys[i]].default]
+            elif isinstance(var, tuple):
+                for offset, sub_var in enumerate(var):
+                    if sub_var is None:
+                        resolved_args += [sig.parameters[ordered_list_keys[i]].default[offset]]
+                    else:
+                        resolved_args += [sub_var]
+            else:
+                resolved_args += [var]
     else:
         resolved_args = args_params
     resolved_args, _ = torch.jit._flatten(resolved_args)
@@ -574,6 +580,7 @@ def _model_to_graph(model, args, verbose=False,
         torch._C._jit_pass_onnx_assign_output_shape(graph, output_tensors, out_desc, _onnx_shape_inference)
 
     _set_input_and_output_names(graph, input_names, output_names)
+    params_dict = _get_named_param_dict(graph, params)
     # make sure that the param dict and the graph match each other
     flatten_args = _resolve_and_flatten_graph_inputs(model, args)
     assert len(params) + len(flatten_args) == sum(1 for _ in graph.inputs())
@@ -1197,7 +1204,8 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
                             if i == 0 and i < len(inputs):
                                 b_in.setType(inputs[i].type())
                             if i > 0 and (i + 1) < len(inputs):
-                                b_in.setType(inputs[i + 1].type())
+                                if not inputs[i + 1].type().isSubtypeOf(NoneType.get()):
+                                    b_in.setType(inputs[i + 1].type())
                         torch._C._jit_pass_onnx_block(b, new_block, operator_export_type, env,
                                                       is_sub_block)
                     new_op_outputs = torch._C._jit_pass_fixup_onnx_controlflow_node(new_node, opset_version)

@@ -264,7 +264,7 @@ class GraphEncoder {
       bool use_external_data_format = false,
       const std::string& onnx_file_path = std::string());
 
-  void EncodeTypeProto(onnx::TypeProto* type_proto, const TypePtr& node_type);
+  void EncodeTypeProto(onnx::TypeProto* type_proto, const TypePtr& node_type, std::string name);
 
   void EncodeLocalFunctionOpsetImport(
       onnx::FunctionProto* func_proto,
@@ -936,13 +936,15 @@ void GraphEncoder::AddAttribute(
       attr->set_type(onnx::AttributeProto_AttributeType_TYPE_PROTO);
       auto tp = attr->mutable_tp();
       const TypePtr& node_type = node->ty(name);
-      EncodeTypeProto(tp, node_type);
+      EncodeTypeProto(tp, node_type, node_proto->op_type() + "_" + name.toDisplayString());
     } break;
     case AttributeKind::tys: {
       attr->set_type(onnx::AttributeProto_AttributeType_TYPE_PROTOS);
+      size_t index = 0;
       for (auto& v : node->tys(name)) {
         auto tp = attr->add_type_protos();
-        EncodeTypeProto(tp, v);
+        EncodeTypeProto(tp, v, node_proto->op_type() + "_" + name.toDisplayString() + "_" + std::to_string(index));
+        index ++;
       }
     } break;
     case AttributeKind::g: {
@@ -1071,7 +1073,8 @@ void GraphEncoder::EncodeLocalFunction(
 
 void GraphEncoder::EncodeTypeProto(
     onnx::TypeProto* type_proto,
-    const TypePtr& node_type) {
+    const TypePtr& node_type,
+    std::string name) {
   if (node_type->kind() == TypeKind::TensorType) {
     onnx::TypeProto_Tensor* tensor_type_proto =
         type_proto->mutable_tensor_type();
@@ -1081,8 +1084,15 @@ void GraphEncoder::EncodeTypeProto(
       auto sizes = t->symbolic_sizes().sizes().value();
       for (const auto i : c10::irange(sizes.size())) {
         shape->add_dim();
-        AT_ASSERT(sizes[i].is_static());
-        shape->mutable_dim(i)->set_dim_value(sizes[i].static_size());
+        if (sizes[i].is_static())
+          shape->mutable_dim(i)->set_dim_value(sizes[i].static_size());
+        else {
+          if (symbol_dim_map_.find(sizes[i]) == symbol_dim_map_.end()) {
+            symbol_dim_map_[sizes[i]] =
+                "_dim_" + std::to_string(i);
+          }
+          shape->mutable_dim(i)->set_dim_param(symbol_dim_map_[sizes[i]]);
+        }
       }
     }
     if (t->scalarType()) {
@@ -1093,7 +1103,7 @@ void GraphEncoder::EncodeTypeProto(
     onnx::TypeProto_Sequence* seq_type = type_proto->mutable_sequence_type();
     ListTypePtr list_type = node_type->cast<ListType>();
     auto elem_type = list_type->getElementType();
-    EncodeTypeProto(seq_type->mutable_elem_type(), elem_type);
+    EncodeTypeProto(seq_type->mutable_elem_type(), elem_type, name);
   }
 }
 

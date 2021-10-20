@@ -1574,9 +1574,10 @@ void SpecialPostProcess(Node* n) {
       break;
     }
     case ::c10::onnx::Optional: {
-      TensorTypePtr t_type = n->output()->type()->cast<TensorType>();
-      if (nullptr != t_type) {
-        n->output()->setType(OptionalType::ofTensor());
+      if (TensorTypePtr t_type = n->output()->type()->cast<TensorType>()) {
+        n->output()->setType(OptionalType::create(t_type));
+      } else if (ListTypePtr l_type = n->output()->type()->cast<ListType>()) {
+        n->output()->setType(OptionalType::create(l_type));
       }
       break;
     }

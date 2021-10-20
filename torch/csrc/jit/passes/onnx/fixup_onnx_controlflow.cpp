@@ -189,9 +189,20 @@ std::vector<Value*> ConvertSequenceDependencies(Node* node, int opset_version) {
 // a value from outside the block. Inserting an Identity node inside
 // the block, linking with the value outside as workaround.
 void FixupONNXSubblockOutputs(Node* n) {
-  for (auto* child_block : n->blocks()) {
-    InsertIdentityForInputUsedAsOutput(child_block);
+  for (Block* block : n->blocks()) {
+    for (Value* output : block->outputs()) {
+      if (output->node()->owningBlock() != block) {
+        Node* id_node = block->owningGraph()->create(onnx::Identity);
+        id_node->insertBefore(block->return_node());
+        id_node->addInput(output);
+        id_node->output()->copyMetadata(output);
+        id_node->copyMetadata(n);
+        block->return_node()->replaceInputWith(output, id_node->output());
+      }
+    }
   }
+
+
 }
 
 } // anonymous namespace
@@ -278,8 +289,6 @@ void InferShapeTypeForUninitializedOutput(
       const_node->output()->setType(
           TensorType::create(*(output_type->scalarType()), at::kCPU, {}, {}));
     }
-    const_node->insertBefore(block->return_node());
-    uninitialized_output->replaceAllUsesWith(const_node->output());
   } else if (auto output_type = other_output->type()->cast<ListType>()) {
     TypePtr elem = output_type->getElementType();
     const_node = graph->create(::c10::onnx::SequenceEmpty, 1);
@@ -296,12 +305,10 @@ void InferShapeTypeForUninitializedOutput(
       const_node->output()->setType(other_output->type());
     } else {
       std::cerr
-          << "Warning: UninitializedOutput - Invalid number of elem Type of ListTensor found"
+          << "Warning: UninitializedOutput - Invalid elem Type of ListTensor found"
           << std::endl;
       const_node->output()->setType(other_output->type());
     }
-    const_node->insertBefore(block->return_node());
-    uninitialized_output->replaceAllUsesWith(const_node->output());
   } else if (auto output_type = other_output->type()->cast<NoneType>()) {
     const TypePtr& t = TensorType::createContiguous(
         at::kLong,
@@ -313,9 +320,10 @@ void InferShapeTypeForUninitializedOutput(
     const_node = graph->create(::c10::onnx::Optional, 1);
     const_node->ty_(Symbol::attr("type"), t);
     const_node->output()->setType(OptionalType::create(t));
-    const_node->insertBefore(block->return_node());
-    uninitialized_output->replaceAllUsesWith(const_node->output());
-
+  } else if (auto output_type = other_output->type()->cast<OptionalType>()) {
+    const_node = graph->create(::c10::onnx::Optional, 1);
+    const_node->ty_(Symbol::attr("type"), output_type);
+    const_node->output()->setType(OptionalType::create(output_type));
   } else {
     std::cerr << "Warning: Handling Uninitialized node of type "
               << other_output->type()->repr_str() << " not supported."
@@ -439,6 +447,7 @@ void ONNXMergeIfBlockOutputShapes(Node* node) {
 
   auto mergeTensorType =
       [&findCommonShape](TensorTypePtr a, TensorTypePtr b) -> TensorTypePtr {
+
     if (a && b) {
       const auto& a_shape = a->symbolic_sizes();
       const auto& b_shape = b->symbolic_sizes();
@@ -532,28 +541,24 @@ void ONNXMergeIfBlockOutputShapes(Node* node) {
     }
 
     if (then_none_type || else_none_type) {
-      if (then_none_type) {
-        auto opt_type = else_block->outputs().at(i)->type();
-
+      if (then_none_type ) {
+        auto opt_type = node->outputs().at(i)->type();
         auto const_node =
             then_block->owningGraph()->create(::c10::onnx::Optional, 1);
         const_node->ty_(Symbol::attr("type"), opt_type);
         const_node->output()->setType(OptionalType::create(opt_type));
         const_node->insertBefore(then_block->return_node());
         then_block->outputs().at(i)->replaceAllUsesWith(const_node->output());
+      }
 
-        node->outputs().at(i)->setType(OptionalType::create(opt_type));
-      } else if (else_none_type) {
-        auto opt_type = then_block->outputs().at(i)->type();
-
+      if (else_none_type) {
+        auto opt_type = node->outputs().at(i)->type();
         auto const_node =
             else_block->owningGraph()->create(::c10::onnx::Optional, 1);
         const_node->ty_(Symbol::attr("type"), opt_type);
         const_node->output()->setType(OptionalType::create(opt_type));
         const_node->insertBefore(else_block->return_node());
         else_block->outputs().at(i)->replaceAllUsesWith(const_node->output());
-
-        node->outputs().at(i)->setType(OptionalType::create(opt_type));
       }
     }
   }
