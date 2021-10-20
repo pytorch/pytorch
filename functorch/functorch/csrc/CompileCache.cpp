@@ -356,7 +356,7 @@ struct CompileResult : public CompileResultBase {
   /// Set vector of (arg, dim) pairs that indicate from which argument/dimension
   /// to extract the output size.
   void setShapeFrom(const std::vector<std::pair<int, int>>& indices) {
-    assert(indices.shape() <= MAX_DIMS);
+    assert(indices.size() <= MAX_DIMS);
     shapeFrom_ = indices;
   }
 
