@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: distributed"]
+
 import functools
 import sys
 
@@ -16,6 +18,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
 )
+
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -38,6 +41,8 @@ def _get_full_params(model, recurse=True):
     else:
         torch.cuda.synchronize()
         model._rebuild_full_params()
+        if model.module.flat_param is not None:
+            model.module._unflatten_params()
 
 
 class TransformerWithSharedParams(nn.Module):
