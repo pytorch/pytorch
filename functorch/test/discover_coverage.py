@@ -21,7 +21,7 @@ public_docs = [
 ]
 
 # torch.abs, Tensor.abs, Tensor.abs_ are all considered to be different
-def get_public_overridable_apis(pytorch_root='/raid/rzou/pt/whiteboard'):
+def get_public_overridable_apis(pytorch_root='/raid/rzou/pt/debug-cpu'):
     results = {}
     all_overridable_apis = set(torch.overrides.get_testing_overrides().keys())
     for module, module_name, src in public_docs:
@@ -151,7 +151,7 @@ def get_ops_covered_by_opinfos():
             ops[alias.op] = opinfo
     return ops
 
-def get_top_ops_not_covered_by_opinfo(torch_threshold=0, nn_fn_threshold=0):
+def get_top_ops(torch_threshold, nn_fn_threshold):
     denylist = set({
         'tensor', 'load', 'zeros', 'no_grad', 'save', 'from_numpy',
         'manual_seed', 'ones', 'randn', 'arange', 'rand',
@@ -165,9 +165,15 @@ def get_top_ops_not_covered_by_opinfo(torch_threshold=0, nn_fn_threshold=0):
         'equal', 'enable_grad', 'seed', 'is_storage', 'hamming_window',
         'is_floating_point', 'nn.functional.torch',
     })
+
     torch_ops = [op[0] for op in top_ops.top_torch[:torch_threshold]]
     nn_fn_ops = [op[0] for op in top_ops.top_nn_functional[:nn_fn_threshold]]
     ops = torch_ops + nn_fn_ops
+    ops = [op for op in ops if op not in denylist]
+    return ops
+
+def get_top_ops_not_covered_by_opinfo(torch_threshold=0, nn_fn_threshold=0):
+    ops = get_top_ops(torch_threshold, nn_fn_threshold)
 
     ops_with_opinfo = []
     for op in op_db:
@@ -203,29 +209,51 @@ tests = {
     'test_vmapvjp_has_batch_rule',
 }
 
-def get_statuses():
+def get_statuses(for_subset=None, invert=False):
     overridable_outplace_we_care_about = get_public_overridable_outplace_we_care_about()
+    if for_subset is not None:
+        overridable_outplace_we_care_about = {
+            k: v
+            for k, v in overridable_outplace_we_care_about.items()
+            # Removes "torch."
+            if k[6:] in for_subset
+        }
     op_to_opinfo = get_ops_covered_by_opinfos()
     result = {}
     x = get_covered_ops(overridable_outplace_we_care_about)
     for name, op in get_covered_ops(overridable_outplace_we_care_about).items():
         opinfo = op_to_opinfo[op]
-        success = copy.deepcopy(tests)
-        for decorator in opinfo.decorators:
-            if not hasattr(decorator, 'test_name'):
-                continue
-            if decorator.test_name in tests and decorator.test_name in success:
-                success.remove(decorator.test_name)
-        # NB: disregard aliases, they're too much trouble
-        for func in [opinfo.op]:
-            if opinfo.name not in result.keys():
-                result[name] = success
-            else:
-                result[name] = result[name].intersection(success)
+        if invert == False:
+            success = copy.deepcopy(tests)
+            for decorator in opinfo.decorators:
+                if not hasattr(decorator, 'test_name'):
+                    continue
+                if decorator.test_name in tests and decorator.test_name in success:
+                    success.remove(decorator.test_name)
+            # NB: disregard aliases, they're too much trouble
+            for func in [opinfo.op]:
+                if opinfo.name not in result.keys():
+                    result[name] = success
+                else:
+                    result[name] = result[name].intersection(success)
+        if invert == True:
+            failures = set({})
+            for decorator in opinfo.decorators:
+                if not hasattr(decorator, 'test_name'):
+                    continue
+                if decorator.test_name in tests:
+                    failures.add(decorator.test_name)
+
+            # NB: disregard aliases, they're too much trouble
+            for func in [opinfo.op]:
+                if opinfo.name not in result.keys():
+                    result[name] = failures
+                else:
+                    result[name] = result[name].union(failures)
     return result
 
-def transpose_statuses():
-    statuses = get_statuses()
+def transpose_statuses(for_subset=None, invert=False):
+    statuses = get_statuses(for_subset, invert=invert)
     result = {}
     for test in tests:
         result[test] = set({})
@@ -270,6 +298,25 @@ method_only_ops = get_method_only_ops_we_care_about()
 # for op in top_ops_not_covered_by_opinfo:
 #     print(op)
 
-top_ops_not_covered_by_opinfo = get_top_ops_not_covered_by_opinfo(200, 40)
-for op in top_ops_not_covered_by_opinfo:
-    print(op)
+# print("top ops not covered by opinfo: ")
+# top_ops_not_covered_by_opinfo = get_top_ops_not_covered_by_opinfo(200, 40)
+# for op in top_ops_not_covered_by_opinfo:
+#     print('- ' + op)
+
+# print("top ops not covered by opinfo: ")
+# top_ops_not_covered_by_opinfo = get_top_ops_not_covered_by_opinfo(200, 40)
+# for op in top_ops_not_covered_by_opinfo:
+#     print('- ' + op)
+
+def print_coverage_info(th=100, nn=25):
+    print('=' * 80)
+    print(f"top {th}, {nn} coverage")
+    statuses = transpose_statuses(get_top_ops(th, nn), invert=True)
+    top_ops_not_covered_by_opinfo = get_top_ops_not_covered_by_opinfo(th, nn)
+    print(f"total ops in set: {th + nn}")
+    print(f"tested by OpInfo: {th + nn - len(top_ops_not_covered_by_opinfo)}")
+    for test in tests:
+        print(f'{test} failing coverage {len(statuses[test])}')
+
+print_coverage_info(100, 25)
+print_coverage_info(200, 50)
