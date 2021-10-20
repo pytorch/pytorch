@@ -174,11 +174,17 @@ Tensor computeQuantizedConv2dPrepack(
       ResultBuf,
       "nnc_aten_quantized_conv2d_prepack",
       {qw, b},
+      // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
       {strides[0],
+       // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
        strides[1],
+       // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
        padding[0],
+       // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
        padding[1],
+       // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
        dilation[0],
+       // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
        dilation[1],
        groups,
        immQScale(qw),
