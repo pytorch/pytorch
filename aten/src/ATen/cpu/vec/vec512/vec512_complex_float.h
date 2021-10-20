@@ -4,6 +4,7 @@
 // See Note [Do not compile initializers with AVX]
 
 #include <c10/util/complex.h>
+#include <c10/util/irange.h>
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
 #if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
@@ -667,7 +668,7 @@ public:
   Vectorized<c10::complex<float>> map(c10::complex<float> (*const f)(const c10::complex<float> &)) const {
     __at_align__ c10::complex<float> tmp[size()];
     store(tmp);
-    for (int i = 0; i < size(); i++) {
+    for (const auto i : c10::irange(size())) {
       tmp[i] = f(tmp[i]);
     }
     return loadu(tmp);
@@ -858,7 +859,7 @@ public:
     __at_align__ c10::complex<float> y_tmp[size()];
     store(x_tmp);
     exp.store(y_tmp);
-    for (int i = 0; i < size(); i++) {
+    for (const auto i : c10::irange(size())) {
       x_tmp[i] = std::pow(x_tmp[i], y_tmp[i]);
     }
     return loadu(x_tmp);
