@@ -2666,19 +2666,35 @@ def sample_inputs_bucketize(op_info, device, dtype, requires_grad):
 def sample_inputs_searchsorted(op_info, device, dtype, requires_grad):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
-    sizes = ((M,), (M, M))
+    sizes = ((0,), (M,), (0, 0), (M, M), (0, 0, 0), (M, M, M))
     inputs = []
-    for size, out_int32, right in product(sizes, [False, True], [False, True]):
+    for size, split_last_dim, split_outermost_dim in product(sizes, [False, True], [False, True]):
+        if (split_last_dim or split_outermost_dim) and size[0] == 0:  # can't slice an empty tensor
+            continue
+
         unsorted_tensor = make_arg(size)
-        input_tensor, sorter = torch.sort(unsorted_tensor)
-        boundary_tensor = make_arg(size)
-        side = 'right' if right else 'left'
-        inputs.append(SampleInput(input_tensor, args=(boundary_tensor,), kwargs=dict(out_int32=out_int32, right=right)))
-        inputs.append(SampleInput(input_tensor, args=(boundary_tensor,), kwargs=dict(out_int32=out_int32, side=side)))
-        inputs.append(SampleInput(unsorted_tensor, args=(boundary_tensor,),
-                                  kwargs=dict(out_int32=out_int32, right=right, sorter=sorter)))
-        inputs.append(SampleInput(unsorted_tensor, args=(boundary_tensor,),
-                                  kwargs=dict(out_int32=out_int32, side=side, sorter=sorter)))
+        input_tensor = make_arg(size)
+
+        if split_last_dim:
+            last_dim = len(unsorted_tensor.shape) - 1
+            unsorted_tensor = unsorted_tensor.narrow(last_dim, 1, 4)
+        if split_outermost_dim:
+            if len(unsorted_tensor.shape) == 1:  # redundant with split_last_dim when there's only one dimension
+                continue
+            unsorted_tensor, input_tensor = unsorted_tensor.narrow(0, 1, 2), input_tensor.narrow(0, 1, 2)
+        boundary_tensor, sorter = torch.sort(unsorted_tensor)
+
+        inputs.extend(SampleInput(boundary_tensor, args=(input_tensor,), kwargs=dict(out_int32=out_int32, right=right)) 
+                      for out_int32, right in product([False, True], [False, True]))
+        inputs.extend(SampleInput(boundary_tensor, args=(input_tensor,), kwargs=dict(out_int32=out_int32, side=side))
+                      for out_int32, side in product([False, True], ["left", "right"]))   
+
+        inputs.extend(
+            SampleInput(unsorted_tensor, args=(input_tensor,), kwargs=dict(out_int32=out_int32, right=right, sorter=sorter)) 
+            for out_int32, right in product([False, True], [False, True]))
+        inputs.extend(
+            SampleInput(unsorted_tensor, args=(input_tensor,), kwargs=dict(out_int32=out_int32, side=side, sorter=sorter)) 
+            for out_int32, side in product([False, True], ["left", "right"]))
     return inputs
 
 def sample_inputs_gradient(op_info, device, dtype, requires_grad):
@@ -7032,13 +7048,24 @@ def reference_group_norm(inp: np.ndarray, num_groups: int, weight=None, bias=Non
 # stacked 1D cases
 def reference_searchsorted(sorted_sequence, boundary, out_int32=False, right=False, side='left', sorter=None):
     side = 'right' if (right or side == 'right') else 'left'
-    if len(sorted_sequence.shape) == 1:
+    if len(sorted_sequence.shape) == 1 :
         ret = np.searchsorted(sorted_sequence, boundary, side=side, sorter=sorter)
         return ret.astype(np.int32) if out_int32 else ret
+    elif sorted_sequence.shape[0] == 0:
+        if sorter is not None:
+            sorter = sorter.flatten()
+        ret = np.searchsorted(sorted_sequence.flatten(), boundary.flatten(), side=side, sorter=sorter)
+        ret = ret.astype(np.int32) if out_int32 else ret
+        return ret.reshape(boundary.shape)
     else:
         # numpy searchsorted only supports 1D inputs so we split up ND inputs
-        assert len(sorted_sequence.shape) == 2
-        splits = range(0, sorted_sequence.shape[0])
+        orig_shape = boundary.shape
+        num_splits = np.prod(sorted_sequence.shape[:-1])
+        splits = range(0, num_splits)
+        sorted_sequence, boundary = sorted_sequence.reshape(num_splits, -1), boundary.reshape(num_splits, -1)
+        if sorter is not None:
+            sorter = sorter.reshape(num_splits, -1)
+
         split_sequence = [sorted_sequence[i] for i in splits]
         split_boundary = [boundary[i] for i in splits]
         split_sorter = [sorter[i] if (sorter is not None) else None for i in splits]
@@ -7046,7 +7073,7 @@ def reference_searchsorted(sorted_sequence, boundary, out_int32=False, right=Fal
         split_ret = [np.searchsorted(s_seq, b, side=side, sorter=s_sort)
                      for (s_seq, b, s_sort) in zip(split_sequence, split_boundary, split_sorter)]
         split_ret = [i.astype(np.int32) for i in split_ret] if out_int32 else split_ret
-        return np.stack(split_ret)
+        return np.stack(split_ret).reshape(orig_shape)
 
 
 def gradcheck_wrapper_hermitian_input(op, input, *args, **kwargs):
@@ -11031,14 +11058,7 @@ op_db: List[OpInfo] = [
            skips=(
                # JIT tests don't work with Tensor keyword arguments
                # https://github.com/pytorch/pytorch/issues/58507
-               # RuntimeError:
-               # undefined value tensor:
-               #   File "<string>", line 3
-               #
-               # def the_method(i0, i1):
-               #     return torch.searchsorted(i0, i1, out_int32=False, right=False, sorter=tensor([0, 4, 7, 6, 2, 8, 3, 9, 1, 5], device='cuda:0'))
-               #                                                                            ~~~~~~ <--- HERE
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+               DecorateInfo(unittest.skip("Expected failure!"), 'TestJit', 'test_variant_consistency_jit'),
            )),
     OpInfo('cat',
            ref=lambda input_seq, dim=0, **kwargs: np.concatenate(input_seq, axis=dim, **kwargs),
