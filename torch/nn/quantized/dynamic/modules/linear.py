@@ -77,7 +77,7 @@ class Linear(nnq.Linear):
         r"""Create a dynamic quantized module from a float module or qparams_dict
 
         Args:
-            mod (Module): a float module, either produced by torch.quantization
+            mod (Module): a float module, either produced by torch.ao.quantization
                           utilities or provided by the user
         """
         float_modules = [torch.nn.Linear, torch.nn.modules.linear.NonDynamicallyQuantizableLinear,
@@ -95,7 +95,7 @@ class Linear(nnq.Linear):
             # We have the circular import issues if we import the qconfig in the beginning of this file:
             # https://github.com/pytorch/pytorch/pull/24231. The current workaround is to postpone the
             # import until we need it.
-            from torch.quantization.qconfig import default_dynamic_qconfig
+            from torch.ao.quantization.qconfig import default_dynamic_qconfig
             weight_observer = default_dynamic_qconfig.weight()
         dtype = weight_observer.dtype
         assert dtype in [torch.qint8, torch.float16], "The only supported dtypes for " \

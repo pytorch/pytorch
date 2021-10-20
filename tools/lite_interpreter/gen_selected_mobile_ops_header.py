@@ -12,7 +12,7 @@ if_condition_template_str = """if (kernel_tag_sv.compare("$kernel_tag_name") == 
 }"""
 if_condition_template = CodeTemplate(if_condition_template_str)
 
-selected_kernel_dtypes_h_template_str = """#pragma once
+selected_kernel_dtypes_h_template_str = """
 #include <c10/core/ScalarType.h>
 #include <c10/util/string_view.h>
 #include <c10/macros/Macros.h>

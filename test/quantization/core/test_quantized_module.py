@@ -4,9 +4,9 @@ import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
-import torch.quantization
+import torch.ao.quantization
 
-from torch.quantization import (
+from torch.ao.quantization import (
     get_default_static_quant_module_mappings,
     default_float_qparams_observer,
     PerChannelMinMaxObserver,
@@ -200,12 +200,12 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         for mut in modules_under_test:
             # Test from_float.
             float_linear = mut(in_features, out_features).float()
-            float_linear.qconfig = torch.quantization.default_qconfig
-            torch.quantization.prepare(float_linear, inplace=True)
+            float_linear.qconfig = torch.ao.quantization.default_qconfig
+            torch.ao.quantization.prepare(float_linear, inplace=True)
             float_linear(X.float())
             # Sequential allows swapping using "convert".
             quantized_float_linear = torch.nn.Sequential(float_linear)
-            quantized_float_linear = torch.quantization.convert(quantized_float_linear, inplace=True)
+            quantized_float_linear = torch.ao.quantization.convert(quantized_float_linear, inplace=True)
 
             # Smoke test to make sure the module actually runs
             quantized_float_linear(X_q)
@@ -361,13 +361,13 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
         # Test from_float
         fused_conv_module = torch.nn.intrinsic._FusedModule(conv_module)
-        fused_conv_module.qconfig = torch.quantization.default_qconfig
-        torch.quantization.prepare(fused_conv_module, inplace=True)
+        fused_conv_module.qconfig = torch.ao.quantization.default_qconfig
+        torch.ao.quantization.prepare(fused_conv_module, inplace=True)
         fused_conv_module(X.float())
         converted_qconv_module = fused_conv_module
         reference_mapping = get_default_static_quant_module_mappings()
         reference_mapping[type(conv_module)] = type(qconv_module)
-        torch.quantization.convert(converted_qconv_module, mapping=reference_mapping, inplace=True)
+        torch.ao.quantization.convert(converted_qconv_module, mapping=reference_mapping, inplace=True)
 
         # Smoke test to make sure the module actually runs
         if use_bias:
@@ -967,7 +967,7 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
             # Test from_float
             float_linear = mut(in_features, out_features).float()
             if use_default_observer:
-                float_linear.qconfig = torch.quantization.default_dynamic_qconfig
+                float_linear.qconfig = torch.ao.quantization.default_dynamic_qconfig
             prepare_dynamic(float_linear)
             float_linear(X.float())
             quantized_float_linear = nnqd.Linear.from_float(float_linear)

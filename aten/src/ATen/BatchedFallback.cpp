@@ -36,7 +36,7 @@ static bool areAnyArgumentsTensorList(const FunctionSchema& schema) {
   return std::any_of(
       schema.arguments().begin(),
       schema.arguments().end(),
-      [] (const Argument& arg) { return arg.type()->isSubtypeOf(ListType::ofTensors()); });
+      [] (const Argument& arg) { return arg.type()->isSubtypeOf(*ListType::ofTensors()); });
 }
 
 // Returns if an operator is in-place. An operator is inplace if:
@@ -50,20 +50,20 @@ static bool isInplaceOp(const c10::FunctionSchema& schema) {
     return false;
   }
   // Check that the first argument is being written to
-  const auto& first_arg_alias_info = schema.arguments().begin()->alias_info();
-  if (!first_arg_alias_info || !first_arg_alias_info.value().isWrite()) {
+  const AliasInfo* first_arg_alias_info = schema.arguments().begin()->alias_info();
+  if (!first_arg_alias_info || !first_arg_alias_info->isWrite()) {
     return false;
   }
   // Check that none of the other args are being aliased
   for (auto it = schema.arguments().begin() + 1; it != schema.arguments().end(); ++it) {
-    const auto& alias_info = it->alias_info();
+    const AliasInfo* alias_info = it->alias_info();
     if (alias_info) {
       return false;
     }
   }
   // Check that the first tensor is being returned (i.e., output has a (a!))
-  const auto& return_alias_info = schema.returns()[0].alias_info();
-  return return_alias_info && return_alias_info.value().isWrite();
+  const AliasInfo* return_alias_info = schema.returns()[0].alias_info();
+  return return_alias_info && return_alias_info->isWrite();
 }
 
 static void warnFallback(const c10::FunctionSchema& schema, bool is_inplace) {
