@@ -79,25 +79,25 @@ inline Tensor searchsorted_scalar_tensor(const Scalar& scalar, const c10::Device
 }
 
 inline void searchsorted_pre_check(
-    const Tensor& boundaries, 
-    const Tensor& input, 
-    const Tensor& output, 
-    const bool out_int32, 
-    const bool right, 
-    const c10::optional<c10::string_view> side_opt, 
+    const Tensor& boundaries,
+    const Tensor& input,
+    const Tensor& output,
+    const bool out_int32,
+    const bool right,
+    const c10::optional<c10::string_view> side_opt,
     const Tensor& sorter) {
   if (side_opt) {
-    const c10::string_view side = *side_opt; 
+    const c10::string_view side = *side_opt;
     TORCH_CHECK(side == "left" || side == "right", "torch.searchsorted(): side can only be 'left' or 'right' but got ", side);
 
     // we assume the user has not explicitly set (right=False, side="right")
-    TORCH_CHECK(!right || side == "right", "torch.searchsorted(): side and right can't be set to opposites, got side of ", side, 
+    TORCH_CHECK(!right || side == "right", "torch.searchsorted(): side and right can't be set to opposites, got side of ", side,
       " while right was True");
   }
 
   TORCH_CHECK(boundaries.device() == input.device(), "boundaries and input value tensors should have same device type, ",
     "but we got boundaries tensor device type ", boundaries.device(), " and input value tensor device type ", input.device());
- 
+
   if (sorter.defined()) {
     TORCH_CHECK(sorter.device() == boundaries.device(), "sorter and boundary tensors should have same device type, ",
     "but we got sorter tensor device type ", sorter.device(), " and input value tensor device type ", boundaries.device());
@@ -105,7 +105,7 @@ inline void searchsorted_pre_check(
     TORCH_CHECK(sorter.sizes() == boundaries.sizes(), "boundary and sorter must have the same size, but we got bouanry tensor ",
     boundaries.sizes(), "and we got sorter tensor ", sorter.sizes());
 
-    TORCH_CHECK(sorter.scalar_type() == ScalarType::Long, "sorter must be a tensor of long dtype but got dtype ", 
+    TORCH_CHECK(sorter.scalar_type() == ScalarType::Long, "sorter must be a tensor of long dtype but got dtype ",
     sorter.scalar_type());
   }
 

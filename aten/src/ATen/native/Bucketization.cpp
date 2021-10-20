@@ -34,7 +34,7 @@ constexpr int64_t SEARCHSORTED_GRAIN_SIZE = 200;
 // customized lower_bound func to ensure the low bound of 'nan', 'inf' etc. be the end of boundary
 // and we can properly handle a sorter argument
 // std::lower_bound can not be used here since its customized comparator need strict weak ordering
-// and the customized comparators require both arguments to have the same type, which wouldn't 
+// and the customized comparators require both arguments to have the same type, which wouldn't
 // happen when comparing val of input_t to an indexer value from sorter of int64
 template<typename input_t>
 int64_t cus_lower_bound(int64_t start, int64_t end, const input_t val, const input_t* bd, const int64_t* sort) {
@@ -55,7 +55,7 @@ int64_t cus_lower_bound(int64_t start, int64_t end, const input_t val, const inp
 }
 
 // customized upper_bound func to ensure we can properly handle a sorter argument
-// std::upper_bound can not be used here since its customized comparator requires both arguments to have the 
+// std::upper_bound can not be used here since its customized comparator requires both arguments to have the
 // same type, which wouldn't happen when comparing val of input_t to an indexer value from sorter of int64
 template<typename input_t>
 int64_t cus_upper_bound(int64_t start, int64_t end, const input_t val, const input_t* bd, const int64_t* sort) {
@@ -85,7 +85,7 @@ void searchsorted_cpu_contiguous(Tensor& result, const Tensor& input, const Tens
 
   const input_t *data_in = input.data_ptr<input_t>();
   const input_t *data_bd = boundaries.data_ptr<input_t>();
-  const int64_t *data_st = sorter.defined() ? sorter.data_ptr<int64_t>() : nullptr; 
+  const int64_t *data_st = sorter.defined() ? sorter.data_ptr<int64_t>() : nullptr;
   output_t *data_out = result.data_ptr<output_t>();
 
   bool is_1d_boundaries = boundaries.dim() == 1;
@@ -145,14 +145,14 @@ Tensor& searchsorted_out_cpu(
   const Tensor& sorter = *sorter_maybe_owned;
   searchsorted_pre_check(sorted_sequence, self, result, out_int32, right, side_opt, sorter);
   resize_output(result, self.sizes());
-  
+
   // we have two inputs to set right, pre_check checks that they aren't set to opposites
   bool is_right = side_opt ? *side_opt == "right" : right;
-  
+
   if (self.numel() == 0) {
     return result;
   }
-  
+
   // for non-contiguous result tensors, we write the output to a contiguous copy so we can later copy back, maintaing the original result tensor
   Tensor out = result;
   if (!result.is_contiguous()) {
@@ -160,7 +160,7 @@ Tensor& searchsorted_out_cpu(
   }
   if (sorted_sequence.is_contiguous() && self.is_contiguous() && sorted_sequence.dtype() == self.dtype() && sorter.is_contiguous()) {
     dispatch(out, self, sorted_sequence, out_int32, is_right, sorter);
-  } 
+  }
   else {
     Tensor trimmed_input;
     Tensor trimmed_boundaries;
@@ -183,7 +183,7 @@ Tensor searchsorted_cpu(
       const Tensor& sorted_sequence,
       const Tensor& self,
       bool out_int32,
-      bool right, 
+      bool right,
       const c10::optional<c10::string_view> side_opt,
       const c10::optional<Tensor>& sorter_opt) {
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;

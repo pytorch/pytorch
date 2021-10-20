@@ -135,7 +135,7 @@ Tensor& searchsorted_out_cuda(
   const Tensor& sorter = *sorter_maybe_owned;
   searchsorted_pre_check(sorted_sequence, self, result, out_int32, right, side_opt, sorter);
   resize_output(result, self.sizes());
-  
+
   // we have two inputs to set right, pre_check checks that they aren't set to opposites
   bool is_right = (side_opt && *side_opt == "right") || right;
   if (self.numel() == 0) {

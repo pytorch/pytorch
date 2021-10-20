@@ -2675,8 +2675,10 @@ def sample_inputs_searchsorted(op_info, device, dtype, requires_grad):
         side = 'right' if right else 'left'
         inputs.append(SampleInput(input_tensor, args=(boundary_tensor,), kwargs=dict(out_int32=out_int32, right=right)))
         inputs.append(SampleInput(input_tensor, args=(boundary_tensor,), kwargs=dict(out_int32=out_int32, side=side)))
-        inputs.append(SampleInput(unsorted_tensor, args=(boundary_tensor,), kwargs=dict(out_int32=out_int32, right=right, sorter=sorter)))
-        inputs.append(SampleInput(unsorted_tensor, args=(boundary_tensor,), kwargs=dict(out_int32=out_int32, side=side, sorter=sorter)))
+        inputs.append(SampleInput(unsorted_tensor, args=(boundary_tensor,), 
+                                  kwargs=dict(out_int32=out_int32, right=right, sorter=sorter)))
+        inputs.append(SampleInput(unsorted_tensor, args=(boundary_tensor,), 
+                                  kwargs=dict(out_int32=out_int32, side=side, sorter=sorter)))
     return inputs
 
 def sample_inputs_gradient(op_info, device, dtype, requires_grad):
@@ -7041,7 +7043,7 @@ def reference_searchsorted(sorted_sequence, boundary, out_int32=False, right=Fal
         split_boundary = [boundary[i] for i in splits]
         split_sorter = [sorter[i] if (sorter is not None) else None for i in splits]
 
-        split_ret = [np.searchsorted(s_seq, b, side=side, sorter=s_sort) 
+        split_ret = [np.searchsorted(s_seq, b, side=side, sorter=s_sort)
                      for (s_seq, b, s_sort) in zip(split_sequence, split_boundary, split_sorter)]
         split_ret = [i.astype(np.int32) for i in split_ret] if out_int32 else split_ret
         return np.stack(split_ret)
@@ -11029,10 +11031,10 @@ op_db: List[OpInfo] = [
            skips=(
                # JIT tests don't work with Tensor keyword arguments
                # https://github.com/pytorch/pytorch/issues/58507
-               # RuntimeError: 
+               # RuntimeError:
                # undefined value tensor:
                #   File "<string>", line 3
-               # 
+               #
                # def the_method(i0, i1):
                #     return torch.searchsorted(i0, i1, out_int32=False, right=False, sorter=tensor([0, 4, 7, 6, 2, 8, 3, 9, 1, 5], device='cuda:0'))
                #                                                                            ~~~~~~ <--- HERE
