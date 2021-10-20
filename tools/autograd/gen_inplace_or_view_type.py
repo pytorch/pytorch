@@ -1,3 +1,9 @@
+# Generates ADInplaceOrViewType.h/cpp
+#
+# NOTE: If any changes are being made to the ADInplaceOrView codegen please also check
+# if updates are needed in torch/csrc/autograd/autograd_not_implemented_fallback.cpp
+# The fallback is expected to mimick this codegen, so we should keep the two in sync.
+
 from tools.codegen.api import cpp
 from tools.codegen.api.autograd import (
     NativeFunctionWithDifferentiabilityInfo, gen_differentiable_outputs,
@@ -19,7 +25,6 @@ from .gen_trace_type import (
     MANUAL_AUTOGRAD, type_wrapper_name, tie_return_values, get_return_value
 )
 
-
 # See NOTE [ Autograd View Variables ] in variable.h for details.
 # If you update list VIEW_FUNCTIONS or RETURNS_VIEWS_OF_INPUT,
 # you **MUST** also update the public list of view ops accordingly in
@@ -28,7 +33,12 @@ from .gen_trace_type import (
 #
 # A map: function name => name of the argument that all outputs are view of
 
-VIEW_FUNCTIONS_WITH_METADATA_CHANGE = ['view_as_complex', 'view_as_real', '_conj', '_neg_view']
+VIEW_FUNCTIONS_WITH_METADATA_CHANGE = [
+    'view_as_complex',
+    'view_as_real',
+    '_conj',
+    '_neg_view'
+]
 
 VIEW_FUNCTIONS = {
     'numpy_T': 'self',
@@ -74,7 +84,7 @@ for key in VIEW_FUNCTIONS_WITH_METADATA_CHANGE:
 RETURNS_VIEWS_OF_INPUT = set(VIEW_FUNCTIONS.keys()).union({
     'chunk', 'detach', 'contiguous', 'reshape', 'reshape_as',
     'expand_as', 'view_as', 'real', 'imag', 'narrow', 'movedim',
-    'tensor_split', 'swapdims', 'swapaxes'
+    'tensor_split', 'swapdims', 'swapaxes', 'mT', 'mH', 'adjoint', 'matrix_H'
 })
 
 # These are the functions we consider views for the purposes of validating
