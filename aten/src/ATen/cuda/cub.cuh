@@ -29,7 +29,7 @@
   AT_CUDA_CHECK(cudaGetLastError());                                      \
 } while (false)
 
-#ifdef __HIP_PLATFORM_HCC__
+#ifdef USE_ROCM
 #define NO_ROCM(x)
 #else
 #define NO_ROCM(x) x
@@ -67,7 +67,7 @@ struct cuda_type<c10::BFloat16> {
   using type = __nv_bfloat16;
 };
 
-#elif !defined(__HIP_PLATFORM_HCC__)
+#elif !defined(USE_ROCM)
 
 // backport https://github.com/NVIDIA/cub/pull/306 for c10::BFloat16
 
@@ -103,7 +103,7 @@ inline int get_num_bits(uint64_t max_key) {
 }
 
 template<typename key_t>
-static inline void sort_keys(
+static inline void radix_sort_keys(
     const key_t *keys_in, key_t *keys_out,
     int64_t n, bool descending=false, int64_t begin_bit=0, int64_t end_bit=sizeof(key_t)*8
 ) {
@@ -126,7 +126,7 @@ static inline void sort_keys(
 }
 
 template<typename key_t, typename value_t>
-static inline void sort_pairs(
+static inline void radix_sort_pairs(
     const key_t *keys_in, key_t *keys_out,
     const value_t *values_in, value_t *values_out,
     int64_t n, bool descending=false, int64_t begin_bit=0, int64_t end_bit=sizeof(key_t)*8

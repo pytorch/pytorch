@@ -1,7 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/cuda/Atomic.cuh>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 
 #include <math.h>
 

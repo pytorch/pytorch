@@ -511,7 +511,7 @@ std::vector<at::Tensor> FusionKernelRuntime::runMultiKernelWithInput(
 
   TORCH_INTERNAL_ASSERT(
       inputs.size() == segmented_fusion_->inputs().size(),
-      "Inputs were not set up correctly, recieved ",
+      "Inputs were not set up correctly, received ",
       inputs.size(),
       " inputs but expecting ",
       segmented_fusion_->inputs().size());
