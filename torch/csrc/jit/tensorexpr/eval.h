@@ -49,10 +49,12 @@ class InterpValue {
   AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, VALUE_CTOR);
 #undef VALUE_CTOR
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   InterpValue(c10::quint8 v) : dtype_(kQUInt8) {
     QUInt8values.emplace_back(v.val_);
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   InterpValue(c10::qint8 v) : dtype_(kQInt8) {
     QInt8values.emplace_back(v.val_);
   }
@@ -62,7 +64,9 @@ class InterpValue {
       : dtype_(Dtype(k##Name, v.size())), Name##values(v) {}
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, VALUE_VEC_CTOR);
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   VALUE_VEC_CTOR(c10::quint8, QUInt8);
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   VALUE_VEC_CTOR(c10::qint8, QInt8);
 #undef VALUE_VEC_CTOR
 
@@ -235,7 +239,9 @@ class ExprEval {
   } break;
       // NOLINTNEXTLINE(modernize-use-emplace)
       AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TYPE_CASE);
+      // NOLINTNEXTLINE(modernize-use-emplace)
       TYPE_CASE(c10::quint8, QUInt8);
+      // NOLINTNEXTLINE(modernize-use-emplace)
       TYPE_CASE(c10::qint8, QInt8);
 #undef TYPE_CASE
       case ScalarType::Bool: {

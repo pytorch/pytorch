@@ -703,7 +703,9 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     value_ = InterpValue(val);                       \
   } break;
       AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
+      // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
       TYPE_CASE(c10::quint8, QUInt8);
+      // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
       TYPE_CASE(c10::qint8, QInt8);
 #undef TYPE_CASE
       default:
@@ -747,7 +749,9 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     }                                                           \
   } break;
       AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
+      // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
       TYPE_CASE(c10::quint8, QUInt8);
+      // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
       TYPE_CASE(c10::qint8, QInt8);
 #undef TYPE_CASE
       default:
