@@ -37,11 +37,10 @@ jobs:
       - name: Install PyTorch and setup environment
         run: |
           . activate reltest
-          conda install -y cudatoolkit=10.2
+          conda install -y cudatoolkit=10.2 numpy
           conda install -y -c pytorch pytorch=1.9.1 torchvision
-          # conda install -y -c pytorch-test pytorch=${{ github.event.inputs.pytorch_version }} \
-          #                                  cudatoolkit=10.2
-          # echo "RESULT_DIR=${HOME}/release-testing/${{ github.event.inputs.pytorch_version }}" >> $GITHUB_ENV
+          # conda install -y cudatoolkit=10.2
+          # conda install -y -c pytorch-test pytorch=1.10.0 torchvision
           python -c "import torch"
           echo "RESULT_DIR=${HOME}/release-testing/1.9.1" >> $GITHUB_ENV
           sudo nvidia-smi -ac ${GPU_FREQUENCY}
