@@ -1,11 +1,6 @@
-import torch
-from torch.testing._internal.jit_utils import JitTestCase, RUN_CUDA, _inline_everything
-from torch import nn
-from torch.testing import FileCheck
-from typing import Callable, List
-from torch._C import TensorType, BoolType, parse_ir, _propagate_shapes
+from torch.testing._internal.jit_utils import JitTestCase
+from torch._C import parse_ir
 
-import unittest
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -30,4 +25,3 @@ class TestAliasAnalysis(JitTestCase):
         self.assertTrue(alias_db.may_contain_alias(next(split_node.inputs()), split_node.output()))
         # because %x.1 enters wildcard set, it now aliases other members of wildcard set (graph inputs)
         self.assertTrue(alias_db.may_contain_alias(next(split_node.inputs()), next(graph.inputs())))
-
