@@ -38,7 +38,7 @@ jobs:
         run: |
           . activate reltest
           conda install -y cudatoolkit=10.2
-          conda install -y -c pytorch pytorch=1.9.1
+          conda install -y -c pytorch pytorch=1.9.1 torchvision
           # conda install -y -c pytorch-test pytorch=${{ github.event.inputs.pytorch_version }} \
           #                                  cudatoolkit=10.2
           # echo "RESULT_DIR=${HOME}/release-testing/${{ github.event.inputs.pytorch_version }}" >> $GITHUB_ENV
