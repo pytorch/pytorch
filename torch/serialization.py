@@ -386,6 +386,7 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
     import torch.nn as nn
     serialized_container_types = {}
     serialized_storages = {}
+    storage_types: Dict[int, type] = {}
 
     def persistent_id(obj: Any) -> Optional[Tuple]:
         # FIXME: the docs say that persistent_id should only return a string
@@ -422,6 +423,15 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
                 storage_type = normalize_storage_type(type(obj))
                 dtype = torch.uint8
                 storage_numel = cast(Storage, storage).nbytes()
+
+            if storage.data_ptr() in storage_types:
+                if storage_type != storage_types[storage.data_ptr()]:
+                    # TODO: This feature could be added in the future
+                    raise RuntimeError(
+                        'Cannot save multiple tensors or storages that '
+                        'view the same data as different types')
+            else:
+                storage_types[storage.data_ptr()] = storage_type
 
             view_metadata: Optional[Tuple[str, int, int]]
             storage = cast(Storage, storage)
@@ -506,6 +516,7 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
 def _save(obj, zip_file, pickle_module, pickle_protocol):
     serialized_storages = {}
     id_map: Dict[int, str] = {}
+    storage_types: Dict[int, type] = {}
 
     def persistent_id(obj):
         # FIXME: the docs say that persistent_id should only return a string
@@ -529,6 +540,16 @@ def _save(obj, zip_file, pickle_module, pickle_protocol):
                 storage_numel = storage.nbytes()
 
             storage = cast(Storage, storage)
+
+            if storage.data_ptr() in storage_types:
+                if storage_type != storage_types[storage.data_ptr()]:
+                    # TODO: This feature could be added in the future
+                    raise RuntimeError(
+                        'Cannot save multiple tensors or storages that '
+                        'view the same data as different types')
+            else:
+                storage_types[storage.data_ptr()] = storage_type
+
             storage_key = id_map.setdefault(storage._cdata, str(len(id_map)))
             location = location_tag(storage)
             serialized_storages[storage_key] = storage
