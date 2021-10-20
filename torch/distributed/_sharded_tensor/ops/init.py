@@ -14,7 +14,7 @@ def uniform_(types, args=(), kwargs=None):
         b: the upper bound of the uniform distribution
     """
     validate_param(kwargs, "kwargs")
-    validate_param = kwargs['tensor']
+    sharded_tensor = kwargs['tensor']
     validate_param(sharded_tensor, "sharded_tensor")
     a = kwargs['a']
     validate_param(a, "a")
