@@ -95,7 +95,7 @@ c10::Dict<std::string, std::string> deviceMapToC10Dict(
 DeviceMap c10DictToDeviceMap(
     const c10::Dict<std::string, std::string>& c10DeviceMap);
 
-std::vector<IValue> toIValues(const Message& message, MessageType type);
+c10::ivalue::TupleElements toIValues(const Message& message, MessageType type);
 
 c10::intrusive_ptr<Message> fromIValues(
     std::vector<IValue> ivalues,

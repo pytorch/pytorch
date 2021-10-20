@@ -55,6 +55,16 @@ void addmm_out_legacy(
   at::native::s_addmm_out_csr_sparse_dense_cuda_worker(nnz, m, n, k, result, beta, result, alpha, crow_indices, col_indices, values, mat2);
 }
 
+c10::MaybeOwned<Tensor> inline prepare_dense_vector_for_cusparse(
+    const Tensor& tensor) {
+  if (tensor.is_non_overlapping_and_dense()) {
+    return c10::MaybeOwned<Tensor>::borrowed(tensor);
+  } else {
+    return c10::MaybeOwned<Tensor>::owned(
+        tensor.clone(at::MemoryFormat::Contiguous));
+  }
+}
+
 } // anonymous namespace
 
 void addmm_out_sparse_csr(
@@ -114,7 +124,7 @@ void addmm_out_sparse_csr(
 #endif
 
   auto descB = at::cuda::sparse::CuSparseDnMatDescriptor(
-      transpose_B ? mat2_->transpose(-2, -1) : *mat2_);
+      transpose_B ? mat2_->mT() : *mat2_);
   auto descC = at::cuda::sparse::CuSparseDnMatDescriptor(*result_);
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
@@ -160,6 +170,99 @@ void addmm_out_sparse_csr(
             work_data.get()));
       });
 
+  if (!result.is_same(*result_)) {
+    result.copy_(*result_);
+  }
+#endif
+}
+
+/*
+  Computes a sparse matrix-dense vector product defined as
+  y <- alpha*op(A)*x + beta*y
+
+  Args:
+  * `mat` - Tensor storing sparse m x n matrix A.
+  * `vec` - Tensor storing dense vector x of size n.
+  * `result` - [in] Tensor storing dense vector y of size m.
+               [out] result of the operation.
+*/
+void addmv_out_sparse_csr(
+    const at::sparse_csr::SparseCsrTensor& mat,
+    const Tensor& vec,
+    const Scalar& beta,
+    const Scalar& alpha,
+    const Tensor& result) {
+#if !AT_USE_CUSPARSE_GENERIC_API()
+  TORCH_CHECK(
+      false,
+      "Calling addmv on a sparse GPU tensor requires compiling ",
+      "PyTorch with CUDA 10.2+ (CUDA 11+ on Windows). ",
+      "Please use PyTorch built with newer CUDA version.");
+#else
+  cusparseOperation_t opA = CUSPARSE_OPERATION_NON_TRANSPOSE;
+
+  c10::MaybeOwned<Tensor> result_ = prepare_dense_vector_for_cusparse(result);
+  c10::MaybeOwned<Tensor> vec_ = prepare_dense_vector_for_cusparse(vec);
+
+  // TODO: update this to support COO sparse layout
+  auto descA = at::cuda::sparse::CuSparseSpMatCsrDescriptor(mat);
+  auto descX = at::cuda::sparse::CuSparseDnVecDescriptor(*vec_);
+  auto descY = at::cuda::sparse::CuSparseDnVecDescriptor(*result_);
+
+  // cusparseSpMVAlg_t was updated in cuda 11.2.1 (cusparse 11.4.0)
+#if CUSPARSE_VERSION >= 11400
+  cusparseSpMVAlg_t alg = CUSPARSE_SPMV_ALG_DEFAULT;
+#else
+  cusparseSpMVAlg_t alg = CUSPARSE_MV_ALG_DEFAULT;
+#endif
+
+  // SpMV doesn't support uniform precision computation
+  // For float16/bfloat16 inputs compute_type must be CUDA_R_32F
+  // and type of alpha, beta must be float
+  auto dispatch_scalar_type = result.scalar_type();
+  if (dispatch_scalar_type == at::ScalarType::Half ||
+      dispatch_scalar_type == at::ScalarType::BFloat16) {
+    dispatch_scalar_type = at::ScalarType::Float;
+  }
+
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+      dispatch_scalar_type,
+      "addmv_out_sparse_csr_cuda_impl",
+      [&] {
+        auto beta_ = beta.to<scalar_t>();
+        auto alpha_ = alpha.to<scalar_t>();
+        cudaDataType compute_type = at::cuda::getCudaDataType<scalar_t>();
+        auto handle = at::cuda::getCurrentCUDASparseHandle();
+
+        size_t buffer_size;
+        TORCH_CUDASPARSE_CHECK(cusparseSpMV_bufferSize(
+            handle,
+            opA,
+            &alpha_,
+            descA.descriptor(),
+            descX.descriptor(),
+            &beta_,
+            descY.descriptor(),
+            compute_type,
+            alg,
+            &buffer_size // output
+            ));
+
+        auto& allocator = *c10::cuda::CUDACachingAllocator::get();
+        auto work_data = allocator.allocate(buffer_size);
+
+        TORCH_CUDASPARSE_CHECK(cusparseSpMV(
+            handle,
+            opA,
+            &alpha_,
+            descA.descriptor(),
+            descX.descriptor(),
+            &beta_,
+            descY.descriptor(),
+            compute_type,
+            alg,
+            work_data.get()));
+      });
   if (!result.is_same(*result_)) {
     result.copy_(*result_);
   }

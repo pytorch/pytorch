@@ -117,7 +117,7 @@ std::unique_ptr<ScriptRRefFetchRet> ScriptRRefFetchRet::fromMessage(
       values.size() == 1,
       "RRef of IValue should contain a single IValue, but got ",
       values.size());
-  return std::make_unique<ScriptRRefFetchRet>(std::move(values), DeviceMap());
+  return std::make_unique<ScriptRRefFetchRet>(std::move(values).vec(), DeviceMap());
 }
 
 c10::intrusive_ptr<Message> PythonRRefFetchRet::toMessageImpl() && {
@@ -129,7 +129,7 @@ c10::intrusive_ptr<Message> PythonRRefFetchRet::toMessageImpl() && {
 std::unique_ptr<PythonRRefFetchRet> PythonRRefFetchRet::fromMessage(
     const Message& message) {
   return std::make_unique<PythonRRefFetchRet>(
-      toIValues(message, MessageType::PYTHON_RREF_FETCH_RET), DeviceMap());
+      toIValues(message, MessageType::PYTHON_RREF_FETCH_RET).vec(), DeviceMap());
 }
 
 std::unique_ptr<RRefUserDelete> RRefUserDelete::fromMessage(

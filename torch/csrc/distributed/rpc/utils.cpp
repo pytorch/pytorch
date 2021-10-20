@@ -517,7 +517,7 @@ std::vector<at::IValue> readWrappedPayload(
       additionalPayloadSize,
       *rpc::RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
       tensorTable);
-  std::vector<at::IValue> tupleElements = tuple.toTuple()->elements();
+  std::vector<at::IValue> tupleElements = tuple.toTuple()->elements().vec();
   payload.resize(payload.size() - additionalPayloadSize);
   return tupleElements;
 }
@@ -597,7 +597,7 @@ DeviceMap c10DictToDeviceMap(
   return deviceMap;
 }
 
-std::vector<IValue> toIValues(const Message& message, MessageType type) {
+c10::ivalue::TupleElements toIValues(const Message& message, MessageType type) {
   TORCH_INTERNAL_ASSERT(
       type == message.type(),
       "Expecting message of type ",
