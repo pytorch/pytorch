@@ -94,7 +94,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'dot', 'vdot', 'cholesky', 'triangular_solve', 'mm', '_unsafe_view', 'mv', 'outer',
     'bmm', 'diagonal', 'alias', 'atan', 'log', 'log10', 'log1p', 'log2', 'reciprocal',
     'tan', 'pow', 'rsqrt', 'tanh', 'tanh_backward', 'asinh', 'acosh', 'atanh', 'take', 'fill_',
-    'exp', 'nonzero', 'mean', 'inverse', 'solve', 'linalg_cholesky', 'addcmul', 'addcdiv','linalg_solve_triangular', 
+    'exp', 'nonzero', 'mean', 'inverse', 'solve', 'linalg_cholesky', 'addcmul', 'addcdiv',
     'matrix_exp', 'linalg_matrix_exp', 'linalg_eigh', 'cholesky_solve', 'linalg_qr', '_svd_helper', '_fft_c2c', '_fft_r2c',
     'linalg_solve', 'sqrt', 'stack', 'gather', 'index_select', 'index_add_', 'linalg_inv', 'linalg_inv_ex',
     'l1_loss_backward', 'baddbmm', 'addbmm', 'addmm', 'addmv', 'addr', 'linalg_householder_product',
@@ -108,7 +108,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'index', 'masked_fill', 'cross', 'lu_unpack', 'renorm', '_conj_physical',
     'scatter', 'scatter_add', 'sigmoid', 'sigmoid_backward', 'trapezoid', 'cumulative_trapezoid',
     'conj_physical_', '_neg_view', '_reshape_alias', '_det_lu_based_helper', 'lu_solve', '_lu_with_info',
-    'linalg_pinv', 'linalg_lstsq',
+    'linalg_solve_triangular', 'linalg_pinv', 'linalg_lstsq',
 }
 
 GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {
