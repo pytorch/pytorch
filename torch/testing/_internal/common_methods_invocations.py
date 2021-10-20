@@ -4200,6 +4200,7 @@ def sample_inputs_lu(op_info, device, dtype, requires_grad=False, **kwargs):
 
 def sample_inputs_linalg_lu_factor(op_info, device, dtype, requires_grad=False, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
     # not needed once OpInfo tests support Iterables
     def generate_samples():
         batch_shapes = ((), (3,), (3, 3))
