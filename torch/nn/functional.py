@@ -3677,7 +3677,7 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
             output `size`. The computed output `size` will be used to infer new scales for
             the interpolation. Note that when `scale_factor` is floating-point, it may differ
             from the recomputed `scale_factor` due to rounding and precision issues.
-            If `recomputed_scale_factor` is ``False``, then `size` or `scale_factor` will
+            If `recompute_scale_factor` is ``False``, then `size` or `scale_factor` will
             be used directly for interpolation.
 
     .. note::
