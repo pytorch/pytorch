@@ -360,7 +360,6 @@ class TestOperators(TestCase):
         xfail('nanmean'),
         xfail('block_diag'),
         xfail('nn.functional.dropout'),
-        xfail('nn.functional.nll_loss'),
     }))
     def test_vmapvjp(self, device, dtype, op):
         # These are too annoying to put into the list above
@@ -539,7 +538,6 @@ class TestOperators(TestCase):
         xfail('vstack'),
         xfail('block_diag'),
         xfail('nn.functional.batch_norm'),
-        xfail('nn.functional.nll_loss'),
         xfail('cdist'),
         xfail('lu_solve'),
         xfail('lu_unpack'),
