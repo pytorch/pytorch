@@ -975,7 +975,7 @@ at::Tensor _convolution(
     } else {
       std::vector<Tensor> outputs(params.groups);
       input = input.contiguous();
-      for (int g = 0; g < params.groups; ++g) {
+      for (const auto g : c10::irange(params.groups)) {
         auto input_g = subtensor(input, 1, params.groups, g);
         auto weight_g = subtensor(weight, 0, params.groups, g);
         auto bias_g = subtensor(bias, 0, params.groups, g);
@@ -1212,7 +1212,7 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const c10::option
         }
       } else {
         std::vector<Tensor> gWt_list(groups);
-        for (int g = 0; g < groups; ++g) {
+        for (const auto g : c10::irange(groups)) {
           auto ggIt_g = subvariable(ggIt, 0, groups, g);
           auto gOt_g = subvariable(gOt, 0, groups, g);
           if (gOt_g.is_cuda()) {
@@ -1239,7 +1239,7 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const c10::option
       // the ConvForward kernels don't support asymmetric padding.
       auto gW_size = gW.sizes();
       auto w_size = weight.sizes();
-      for (size_t i = 2; i < gW_size.size(); ++i) {
+      for (const auto i : c10::irange(2, gW_size.size())) {
         if (gW_size[i] > w_size[i]) {
             gW = gW.narrow(i, 0, w_size[i]);
             gW_size = gW.sizes();
@@ -1268,7 +1268,7 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const c10::option
         // rather than narrowing the computed gI
         auto gI_size = gI.sizes();
         auto i_size = input.sizes();
-        for (size_t i = 2; i < gI_size.size(); ++i) {
+        for (const auto i : c10::irange(2, gI_size.size())) {
           if (gI_size[i] > i_size[i]) {
             gI = gI.narrow(i, 0, i_size[i]);
             gI_size = gI.sizes();
@@ -1289,7 +1289,7 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const c10::option
             gi_conv_params.output_padding[1] = input_shape[0] - expected_input_shape;
           }
         } else {
-          for(size_t i = 0; i < kernel_size.size(); ++i) {
+          for (const auto i : c10::irange(kernel_size.size())) {
             // Check if whole input has been used or not
             auto expected_input_shape = (kernel_size[i] - 1) * gi_conv_params.dilation[i]
               - 2 * gi_conv_params.padding[i]
