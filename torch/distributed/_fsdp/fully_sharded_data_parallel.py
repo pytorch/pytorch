@@ -353,13 +353,27 @@ class FullyShardedDataParallel(nn.Module):
         # as needed. The storage may contain padding elements so that it is
         # evenly divisible by world_size, although these padding elements will
         # be removed before the relevant computation.
-        if p._is_sharded:  # type: ignore[attr-defined]
+        if p._is_sharded and not hasattr(p, '_full_param_padded'):  # type: ignore[attr-defined]
+            # Only need to create attribute if this is the first forward pass.
+            # Note that this assumes compute_device and compute_dtype won't
+            # change throughout the training. If this assumption breaks in the
+            # future, we can cache the prev iterations compute_dtype, device etc
+            # and compare them.
             p._full_param_padded = torch.zeros(  # type: ignore[attr-defined]
                 p.numel() * self.world_size,
                 device=self.compute_device,
                 dtype=self.compute_dtype,
             )
             _free_storage(p._full_param_padded)  # type: ignore[attr-defined]
+        elif p._is_sharded:
+            # Should be appropriate size
+            expected_size = p.numel() * self.world_size
+            assert (
+                p._full_param_padded.shape[0] == expected_size
+            ), f"Expected p._full_param_sharded to have size {expected_size} but got {p._full_param_padded.shape[0]}"
+            # And should have storage freed in prev forward pass
+            _assert_storage_freed(p._full_param_sharded)
+
 
     def _set_is_root(self) -> None:
         """If ``True``, implies that no other :class:`FullyShardedDataParallel`
@@ -829,13 +843,19 @@ def _free_storage(data: torch.Tensor) -> None:
         ), "The tensor is not the sole occupant of the storage."
         data.storage().resize_(0)  # type: ignore[attr-defined]
 
+def _assert_storage_freed(data: torch.Tensor):
+    """
+    Ensures `data` tensor storage has been resized to be 0.
+    """
+    assert (
+        data.storage().size() == 0
+    ), "Then tensor storage should have been resized to be 0."
+
 
 @torch.no_grad()
 def _alloc_storage(data: torch.Tensor, size: torch.Size) -> None:
     """Allocate storage for a tensor."""
     if data.storage().size() == size.numel():  # no need to reallocate
         return
-    assert (
-        data.storage().size() == 0
-    ), "Then tensor storage should have been resized to be 0."
+    _assert_storage_freed(data)
     data.storage().resize_(size.numel())  # type: ignore[attr-defined]
