@@ -113,10 +113,6 @@ def export(model, args, f, export_params=True, verbose=False, training=None,
         else:
             operator_export_type = OperatorExportTypes.ONNX
 
-    if enable_onnx_checker is not None:
-        warnings.warn("'enable_onnx_checker' is deprecated and ignored. It will be removed in "
-                      "the next PyTorch release. To proceed despite ONNX checker failures, "
-                      "catch torch.onnx.CheckerError.")
     if _retain_param_name is not None:
         warnings.warn("'_retain_param_name' is deprecated and ignored. "
                       "It will be removed in the next PyTorch release.")
