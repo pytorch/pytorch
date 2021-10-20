@@ -11,18 +11,6 @@
 
 namespace at { namespace functorch {
 
-// [start, start + 1, ..., stop - 1]
-static VmapDimVector range(int64_t start, int64_t stop) {
-  TORCH_INTERNAL_ASSERT(stop >= start);
-  VmapDimVector dims;
-  dims.reserve(stop - start);
-  for (int64_t i = start; i < stop; i++) {
-    dims.emplace_back(i);
-  }
-  return dims;
-}
-
-
 bool is_allowed_dim_on_scalar_tensor(int64_t dim) {
   return dim == 0 || dim == -1;
 }
