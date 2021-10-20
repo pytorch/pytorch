@@ -3,6 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
+#include <c10/util/irange.h>
 
 #include <algorithm>
 #include <mutex>
@@ -98,7 +99,7 @@ void histogram_cpu_contiguous(Tensor& hist, const Tensor& bin_edges,
         // Allocates a buffer for the thread's local results
         std::vector<input_t> data_out_local(numel_be - 1, input_t(0));
 
-        for (int64_t i = start; i < end; ++i) {
+        for (const auto i : c10::irange(start, end)) {
             const input_t elt = accessor_in[i];
 
             // Skips elements which fall outside the specified bins
