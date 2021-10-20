@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/CPUApplyUtils.h>
 #include <ATen/Dispatch.h>
+#include <ATen/TensorMeta.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/ExpandUtils.h>
 
@@ -203,6 +204,33 @@ extern "C" void strsm_(char *side, char *uplo, char *trans, char *diag, int *n, 
 #endif
 
 namespace at {
+namespace meta {
+
+TORCH_META_FUNC(linalg_lu_factor_ex)(const Tensor& A, bool pivot, bool check_errors) {
+  TORCH_CHECK(A.dim() >= 2, "torch.lu_factor: Expected tensor with 2 or more dimensions. Got size: ", A.sizes(), " instead");
+
+  auto sizes = A.sizes().vec();
+  const auto m = sizes.cend()[-2];
+  const auto n = sizes.cend()[-1];
+
+  // make column major strides for BLAS
+  auto LU_strides = at::detail::defaultStrides(sizes);
+  LU_strides.end()[-2] = 1;
+  LU_strides.end()[-1] = m;
+  set_output(0, sizes, LU_strides, A.options(), {});
+
+  // sizes now has the size of pivots
+  sizes.pop_back();
+  sizes.back() = std::min(m, n);
+  set_output(1, sizes, {}, A.options().dtype(kInt), {});
+
+  // sizes now has the size of pivots
+  sizes.pop_back();
+  set_output(2, sizes, {}, A.options().dtype(kInt), {});
+}
+
+} // namespace meta
+
 namespace native {
 
 #if AT_BUILD_WITH_LAPACK()
@@ -1558,32 +1586,12 @@ Tensor cholesky_inverse(const Tensor &input, bool upper) {
 
 DEFINE_DISPATCH(lu_factor_stub);
 
-std::tuple<Tensor&, Tensor&, Tensor&> linalg_lu_factor_ex_out(const Tensor& A,
-                                                              bool pivot,
-                                                              bool check_errors,
-                                                              Tensor& LU,
-                                                              Tensor& pivots,
-                                                              Tensor& info) {
-  TORCH_CHECK(A.dim() >= 2,
-              "expected tensor with 2 or more dimensions, got size: ", A.sizes(), " instead");
-  auto req_size = A.sizes().vec();
-  // TODO reimplementation of resize_output with format F-contiguous
-  // We should make this a standalone function
-  if (resize_output_check(LU, req_size)) {
-    // Transpose size
-    std::iter_swap(req_size.end() - 1, req_size.end() - 2);
-    LU.resize_(req_size, MemoryFormat::Contiguous);
-    std::iter_swap(req_size.end() - 1, req_size.end() - 2);
-    LU.transpose_(-2, -1);  // make 'LU' have Fortran contiguous memory layLU
-  }
-  const auto m = req_size.cend()[-2];
-  const auto n = req_size.cend()[-1];
-  req_size.pop_back();
-  req_size.back() = std::min(m, n);
-  at::native::resize_output(pivots, req_size);
-  req_size.pop_back();
-  at::native::resize_output(info, req_size);
-
+TORCH_IMPL_FUNC(linalg_lu_factor_ex_out)(const Tensor& A,
+                                         bool pivot,
+                                         bool check_errors,
+                                         const Tensor& LU,
+                                         const Tensor& pivots,
+                                         const Tensor& info) {
   const auto LU_f_contig = LU.transpose(-2, -1).is_contiguous() ;
 
   if (LU_f_contig && !LU.is_same(A)) {
@@ -1617,22 +1625,12 @@ std::tuple<Tensor&, Tensor&, Tensor&> linalg_lu_factor_ex_out(const Tensor& A,
       singleCheckErrors(info.item<int64_t>(), "torch.linalg.lu_factor_ex");
     }
   }
-
-  return {LU, pivots, info};
 }
 
-std::tuple<Tensor, Tensor, Tensor> linalg_lu_factor_ex(const Tensor& A, bool pivot, bool check_errors) {
-  auto LU = at::empty({0}, A.options());
-  auto pivots = at::empty({0}, A.options().dtype(kInt));
-  auto info = at::empty({0}, A.options().dtype(kInt));
-  at::native::linalg_lu_factor_ex_out(A, pivot, check_errors, LU, pivots, info);
-  return {std::move(LU), std::move(pivots), std::move(info)};
-}
-
-std::tuple<Tensor&, Tensor&> linalg_lu_factor_out(const Tensor& A, bool pivot, Tensor & LU, Tensor & pivots) {
+std::tuple<Tensor&, Tensor&> linalg_lu_factor_out(const Tensor& A, bool pivot, Tensor& LU, Tensor& pivots) {
   auto info = at::empty({0}, A.options().dtype(kInt));
   // We pass check_errors as we want to use lu_factor rather than lu_factor_ex in the errors
-  at::native::linalg_lu_factor_ex_out(A, pivot, /*chech_errors=*/false, LU, pivots, info);
+  at::linalg_lu_factor_ex_out(LU, pivots, info, A, pivot, /*chech_errors=*/false);
   if (A.dim() > 2) {
     batchCheckErrors(info, "torch.linalg.lu_factor");
   } else {

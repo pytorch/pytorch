@@ -10371,13 +10371,13 @@
 
 - func: linalg_lu_factor_ex(Tensor A, *, bool pivot=True, bool check_errors=False) -> (Tensor LU, Tensor pivots, Tensor info)
   python_module: linalg
+  structured_delegate: linalg_lu_factor_ex.out
   variants: function
-  dispatch:
-    CPU, CUDA: linalg_lu_factor_ex
 
 - func: linalg_lu_factor_ex.out(Tensor A, *, bool pivot=True, bool check_errors=False, Tensor(a!) LU, Tensor(b!) pivots, Tensor(c!) info) -> (Tensor(a!) LU, Tensor(b!) pivots, Tensor(c!) info)
   python_module: linalg
   variants: function
+  structured: True
   dispatch:
     CPU, CUDA: linalg_lu_factor_ex_out
 
