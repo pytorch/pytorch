@@ -477,7 +477,19 @@ SourceRangeRecords getBackendSourceRanges(const Module& m) {
   return sr_records;
 }
 
+auto& mobileInterfaceCallExport() {
+  static std::atomic<bool> flag{false};
+  return flag;
+}
+
 } // namespace
+
+TORCH_API void enableMobileInterfaceCallExport() {
+  mobileInterfaceCallExport().store(true, std::memory_order_relaxed);
+}
+bool getMobileInterfaceCallExport() {
+  return mobileInterfaceCallExport().load(std::memory_order_relaxed);
+}
 
 BytecodeExportSet moduleMethodsTuple(
     const Module& module,
