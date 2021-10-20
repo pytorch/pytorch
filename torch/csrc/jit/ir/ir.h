@@ -1549,6 +1549,7 @@ TORCH_API std::vector<Value*> unpackOutputs(const std::vector<Value*>& outputs);
 
 struct OperatorSet {
   OperatorSet(std::initializer_list<const char*> sig_literals);
+  std::shared_ptr<std::vector<std::shared_ptr<Operator>>> get_ops() const;
 
  private:
   friend struct Node;
@@ -1579,6 +1580,12 @@ struct OperatorMap {
     erase(op);
     map[Symbol::fromQualString(op->schema().name())].emplace_back(
         std::make_pair(op, val));
+  }
+
+  void insert(const OperatorSet& op_set, T val) {
+    for (auto& op : *op_set.get_ops()) {
+      insert(op, val);
+    }
   }
 
   void insert(
