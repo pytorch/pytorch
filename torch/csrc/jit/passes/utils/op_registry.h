@@ -6,6 +6,7 @@
 
 namespace torch {
 namespace jit {
+// Moved from shape_analysis.cpp
 
 // Requirements:
 //   dims           : preserved from the first argument
