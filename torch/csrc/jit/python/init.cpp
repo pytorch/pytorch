@@ -534,6 +534,12 @@ void initJITBindings(PyObject* module) {
           [](Node& n) {
             return toIValue(n.output())->toObject()->is_weak_compilation_ref();
           })
+      // TODO: not sure why this isnt exposed on object itself
+      .def(
+          "_jit_temp_is_alias_of",
+          [](Tensor& t1, Tensor& t2) {
+            return t1.is_alias_of(t2);
+          })
       .def(
           "_jit_erase_non_input_shape_information",
           [](std::shared_ptr<Graph>& g) {

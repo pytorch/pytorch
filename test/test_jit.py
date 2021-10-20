@@ -16184,6 +16184,36 @@ def add_nn_functional_test(name, self_size, args, variant_name='', check_ad=(), 
                     # For tests we disabled AD subgraph inlining, make sure it's not falling back to autograd
                     if (doAutodiffCheck(test_name)):
                         self.assertAutodiffNode(script_fn.last_graph, should_autodiff_node, autodiff_nodes, fusible_nodes)
+                        if should_autodiff_node:
+                            # we should not be fusing any operators which return aliases as a single node
+                            # see create_autodiff_subgraphs
+                            f_arg_copy = deepcopy(f_args_variable)
+                            kwarg_copy = deepcopy(kwargs_variable)
+                            outputs = fn(*f_arg_copy, **kwarg_copy)
+
+                            def collect_tensors(tensor_set, object):
+                                if isinstance(object, torch.Tensor):
+                                    tensor_set.add(object)
+                                elif isinstance(object, dict):
+                                    for key, value in object.items():
+                                        collect_tensors(tensor_set, key)
+                                        collect_tensor(tensor_set, value)
+                                elif isinstance(object, (list, tuple)):
+                                    for item in object:
+                                        collect_tensors(tensor_set, item)
+                                else:
+                                    self.assertTrue(False, "unhandled object " + str(object))
+
+                            input_tensors = set()
+                            collect_tensors(input_tensors, f_arg_copy)
+                            collect_tensors(input_tensors, kwarg_copy)
+                            output_tensors = set()
+                            collect_tensors(output_tensors, outputs)
+
+                            for t1 in input_tensors:
+                                for t2 in output_tensors:
+                                    self.assertFalse(torch._C._jit_temp_is_alias_of(t1, t2))
+
 
             if test_name in EXCLUDE_PYTHON_PRINT:
                 with torch._jit_internal._disable_emit_hooks():

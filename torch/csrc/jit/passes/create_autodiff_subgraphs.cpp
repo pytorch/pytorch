@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
+#include <algorithm>
 
 namespace torch {
 namespace jit {
@@ -195,17 +196,12 @@ class SubgraphSlicer {
   }
 
   bool isViewOp(Node* n) {
-    switch (n->kind()) {
-      case aten::view:
-      case aten::view_as:
-      case aten::reshape:
-      case aten::reshape_as:
-      case aten::transpose:
-      case aten::expand:
-      case aten::expand_as:
-        return true;
+    // prim::profiles will always be removed, so we treat a prim::profile node as a view op
+    // if its profiled value is a view
+    if (n->kind() == prim::profile) {
+      return isViewOp(n->input()->node());
     }
-    return false;
+    return aliasDb_.mayContainAlias(n->outputs(), n->inputs());
   }
 
   bool shouldConsiderForMerge(Node* node) {
@@ -217,7 +213,7 @@ class SubgraphSlicer {
       return false;
     }
     // view ops as outputs of differentiable subgraphs can cause incorrect
-    // differentiation for now, do not include them in the subgraph
+    // differentiation, do not include them in the subgraph
     if (isViewOp(node)) {
       return false;
     }
@@ -226,7 +222,10 @@ class SubgraphSlicer {
 
   std::pair<graph_node_list::iterator, bool> scanNode(Node* consumer) {
     if (shouldConsiderForMerge(consumer)) {
-      if (consumer->kind() != prim::DifferentiableGraph) {
+      // we dont handle views as outputs of the differentiable subgraph, so don't start
+      // differentiable subgraph from it.
+      // TODO: more general merge & shrink aliasing alrogithm
+      if (consumer->kind() != prim::DifferentiableGraph && !isViewOp(consumer)) {
         consumer = SubgraphUtils::createSingletonSubgraphAndUpdateAliasing(
             consumer, prim::DifferentiableGraph, aliasDb_);
       }
@@ -249,6 +248,21 @@ class SubgraphSlicer {
     AT_ASSERT(consumer->kind() == prim::DifferentiableGraph);
     bool canMerge = shouldConsiderForMerge(producer) &&
         aliasDb_.moveBeforeTopologicallyValid(producer, consumer);
+
+    // we don't handle view ops as outputs of differentiable subgraphs,
+    // so, only include a view as a producer, and only if it doensn't
+    // have any uses outside of the consumer
+    // TODO: more general merge & shrink aliasing alrogithm
+    if (isViewOp(producer)) {
+      if (producer->outputs().size() != 1) {
+        return c10::nullopt;
+      }
+      if (std::any_of(producer->output()->uses().begin(), producer->output()->uses().end(), [&](const Use& use) {
+        return use.user != consumer;
+      })) {
+        return c10::nullopt;
+      }
+    }
 
     if (!canMerge) {
       return c10::nullopt;
