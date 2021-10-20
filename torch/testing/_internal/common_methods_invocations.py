@@ -2684,6 +2684,39 @@ def sample_inputs_max_pool2d(op_info, device, dtype, requires_grad, **kwargs):
 
     return list(generator())
 
+def sample_inputs_max_pool1d(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    kerneli = [(2,), 2]
+    stridei = [[2,]]
+    Ci = [2]
+    Hi = [3, 6]
+    Wi = [6]
+    ceil_modei = [True, False]
+    paddingi = [0, 1]
+    dilationi = [1, (2,)]
+    return_indicesi = [True, False]
+
+    products = product(kerneli, stridei, Ci, Hi, Wi, ceil_modei, paddingi, dilationi, return_indicesi)
+
+    def generator():
+        for kernel, stride, C, H, W, ceil_mode, padding, dilation, return_indices in products:
+            max_pool = torch.nn.MaxPool1d(kernel, stride, ceil_mode=ceil_mode, padding=padding,
+                                          dilation=dilation, return_indices=return_indices)
+            kwargs = {
+                "kernel_size": max_pool.kernel_size,
+                "stride": max_pool.stride,
+                "padding": max_pool.padding,
+                "dilation": max_pool.dilation,
+                "ceil_mode": max_pool.ceil_mode,
+                "return_indices": max_pool.return_indices,
+            }
+            sample_input = make_arg((C, H, W))
+
+            yield SampleInput(sample_input, kwargs=kwargs)
+
+    return list(generator())
+
 def sample_inputs_normalize(self, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, low=-1, high=1, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -7942,6 +7975,15 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_scripting=False,  # TODO: fix aliasing test
            sample_inputs_func=sample_inputs_max_pool2d),
+    OpInfo('nn.functional.max_pool1d',
+           aten_name='max_pool1d',
+           supports_autograd=True,
+           supports_out=False,
+           assert_jit_shape_analysis=True,
+           dtypesIfCPU=floating_types(),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           supports_scripting=False,  # TODO: fix aliasing test
+           sample_inputs_func=sample_inputs_max_pool1d),
     OpInfo('nn.functional.linear',
            aten_name='linear',
            supports_autograd=True,
