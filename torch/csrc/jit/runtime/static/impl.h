@@ -43,7 +43,7 @@ TORCH_API std::string dumpValueSet(
 // - output_aliases:
 //     values that are either outputs or contain aliases of outputs
 // - external_aliases:
-//     values that are inputs, constants, outputs, or their aliases.
+//     values that are inputs, constants, or their aliases.
 //     The output aliases that end up here are as a result of aliasDb failing to
 //     recognize them as outputs due to collection object (e.g., Tuple) aliasing
 //     inputs.
