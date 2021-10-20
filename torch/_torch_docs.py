@@ -11673,14 +11673,14 @@ Args:
 
 add_docstr(torch.searchsorted,
            r"""
-searchsorted(sorted_sequence, values, *, out_int32=False, side='left', out=None) -> Tensor
+searchsorted(sorted_sequence, values, *, out_int32=False, right=False, side='left', out=None, sorter=None) -> Tensor
 
 Find the indices from the *innermost* dimension of :attr:`sorted_sequence` such that, if the
-corresponding values in :attr:`values` were inserted before the indices, the order of the
-corresponding *innermost* dimension within :attr:`sorted_sequence` would be preserved.
-Return a new tensor with the same size as :attr:`values`. If :attr:`right` is False (default),
-then the left boundary of :attr:`sorted_sequence` is closed. More formally, the returned index
-satisfies the following rules:
+corresponding values in :attr:`values` were inserted before the indices, when sorted, the order 
+of the corresponding *innermost* dimension within :attr:`sorted_sequence` would be preserved.
+Return a new tensor with the same size as :attr:`values`. If :attr:`right` is False or side is 
+'left (default), then the left boundary of :attr:`sorted_sequence` is closed. More formally, 
+the returned index satisfies the following rules:
 
 .. list-table::
    :widths: 12 10 78
@@ -11711,20 +11711,21 @@ Args:
 Keyword args:
     out_int32 (bool, optional): indicate the output data type. torch.int32 if True, torch.int64 otherwise.
                                 Default value is False, i.e. default output data type is torch.int64.
-    side (str, optional): if 'left', return the first suitable location that is found. If 'right', return the
+    right (bool, optional): if False, return the first suitable location that is found. If True, return the
                             last such index. If no suitable index found, return 0 for non-numerical value
                             (eg. nan, inf) or the size of *innermost* dimension within :attr:`sorted_sequence`
-                            (one pass the last index of the *innermost* dimension). In other words, if 'left',
+                            (one pass the last index of the *innermost* dimension). In other words, if False,
                             gets the lower bound index for each value in :attr:`values` on the corresponding
-                            *innermost* dimension of the :attr:`sorted_sequence`. If 'right', gets the upper
-                            bound index instead. Default value is 'left'.
+                            *innermost* dimension of the :attr:`sorted_sequence`. If True, gets the upper
+                            bound index instead. Default value is False. :attr:`side` does the same and is 
+                            preferred. It will error if :attr:`side` is set to "left" while this is True.
+    side (str, optional): the same as :attr:`right` but preferred. "left" corresponds to False for :attr:`right`
+                            and "right" corresponds to True for :attr:`right`. It will error if this is set to
+                            "left" while :attr:`right` is True.
     out (Tensor, optional): the output tensor, must be the same size as :attr:`values` if provided.
-    out (LongTensor, optional): if provided, a tensor matching the shape of the unsorted :attr:`sorted_sequence` 
-                            containing a sequence of indices that sort it in the ascending order on the 
-                            innermost dimension
-
-.. note:: If your use case is always 1-D sorted sequence, :func:`torch.bucketize` is preferred,
-          because it has fewer dimension checks resulting in slightly better performance.
+    sorter (LongTensor, optional): if provided, a tensor matching the shape of the unsorted 
+                            :attr:`sorted_sequence` containing a sequence of indices that sort it in the 
+                            ascending order on the innermost dimension
 
 
 Example::

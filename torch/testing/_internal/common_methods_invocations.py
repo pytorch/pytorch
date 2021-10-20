@@ -7025,11 +7025,14 @@ def reference_group_norm(inp: np.ndarray, num_groups: int, weight=None, bias=Non
     return Y
 
 
+# using a custom reference function since numpy only has a string side arg (instead of right and side) and doesn't
+# have an out_int32 arg. Additionally, numpy doesn't support searchsorted with ND arrays, so this splits those into
+# stacked 1D cases
 def reference_searchsorted(sorted_sequence, boundary, out_int32=False, right=False, side='left', sorter=None):
     side = 'right' if (right or side == 'right') else 'left'
     if len(sorted_sequence.shape) == 1:
-       ret = np.searchsorted(sorted_sequence, boundary, side=side, sorter=sorter)
-       return ret.astype(np.int32) if out_int32 else ret
+        ret = np.searchsorted(sorted_sequence, boundary, side=side, sorter=sorter)
+        return ret.astype(np.int32) if out_int32 else ret
     else:
         # numpy searchsorted only supports 1D inputs so we split up ND inputs
         assert len(sorted_sequence.shape) == 2
@@ -7038,9 +7041,11 @@ def reference_searchsorted(sorted_sequence, boundary, out_int32=False, right=Fal
         split_boundary = [boundary[i] for i in splits]
         split_sorter = [sorter[i] if (sorter is not None) else None for i in splits]
 
-        split_ret = [np.searchsorted(s_seq, b, side=side, sorter=s_sort) for (s_seq, b, s_sort) in zip(split_sequence, split_boundary, split_sorter)]
+        split_ret = [np.searchsorted(s_seq, b, side=side, sorter=s_sort) 
+                     for (s_seq, b, s_sort) in zip(split_sequence, split_boundary, split_sorter)]
         split_ret = [i.astype(np.int32) for i in split_ret] if out_int32 else split_ret
         return np.stack(split_ret)
+
 
 def gradcheck_wrapper_hermitian_input(op, input, *args, **kwargs):
     """Gradcheck wrapper for functions that take Hermitian matrices as input.
@@ -11021,7 +11026,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_searchsorted,
            supports_autograd=False,
            ref=reference_searchsorted,
-           skips = (
+           skips=(
                # JIT tests don't work with Tensor keyword arguments
                # https://github.com/pytorch/pytorch/issues/58507
                # RuntimeError: 

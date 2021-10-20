@@ -4,13 +4,13 @@
 #include <ATen/native/Resize.h>
 #include <c10/util/irange.h>
 
-/* Implement a numpy like searchsorted and a bucketize function running on cpu
+/* Implement a numpy like searchsorted and a TF like bucketize function running on cpu
  *
  * - torch.searchsorted(sorted_sequence, values, right=False, side='left', out_int32=False, sorter=None)
  *   sorted_sequence - N*D or 1D (apply to all values) tensor containing sorted sequences in last dimension
  *   values          - N*D tensor or a Scalar (when sorted_sequence is 1D) containing the search values
- *   right           - (deprecated) corresponding to lower bound if False and upper bound if True
- *   side            - corresponding to lower bound if 'left' and upper bound if 'right'
+ *   right           - corresponding to lower bound if False and upper bound if True
+ *   side            - (preferred to right) corresponding to lower bound if 'left' and upper bound if 'right'
  *   out_int32       - the output tensor is int64_t type if False and int(32bit normally) type if True.
  *   sorter          - if provided, sorted_sequence may not be sorted and the sorted order is given by this tensor
  *
@@ -32,14 +32,17 @@ namespace {
 constexpr int64_t SEARCHSORTED_GRAIN_SIZE = 200;
 
 // customized lower_bound func to ensure the low bound of 'nan', 'inf' etc. be the end of boundary
-// and we can support a sorter argument
+// and we can properly handle a sorter argument
 // std::lower_bound can not be used here since its customized comparator need strict weak ordering
-// and the sorter requires comparing to `val` to be different than other comparisons
+// and the customized comparators require both arguments to have the same type, which wouldn't 
+// happen when comparing val of input_t to an indexer value from sorter of int64
 template<typename input_t>
-int64_t cus_lower_bound(int64_t start, int64_t end, input_t val, const input_t* bd, const int64_t* sort) {
-  int64_t orig_start = start;
+int64_t cus_lower_bound(int64_t start, int64_t end, const input_t val, const input_t* bd, const int64_t* sort) {
+  // sorter gives relative ordering for ND tensors, so we need to save and add the non-updated start as an offset
+  // i.e. the second row of a 3x3 tensors starts at element 3 but sorter's second row only contains 0, 1, or 2
+  const int64_t orig_start = start;
   while (start < end) {
-    int64_t mid = start + ((end - start) >> 1);
+    const int64_t mid = start + ((end - start) >> 1);
     const input_t mid_val = sort ? bd[sort[mid] + orig_start] : bd[mid];
     if (!(mid_val >= val)) {
       start = mid + 1;
@@ -51,13 +54,16 @@ int64_t cus_lower_bound(int64_t start, int64_t end, input_t val, const input_t* 
   return start;
 }
 
-// customized upper_bound func to ensure the sorter is usable 
-// std::upper_bound can not be used here since comparisons to `val` must be treated different from other comparisons
+// customized upper_bound func to ensure we can properly handle a sorter argument
+// std::upper_bound can not be used here since its customized comparator requires both arguments to have the 
+// same type, which wouldn't happen when comparing val of input_t to an indexer value from sorter of int64
 template<typename input_t>
-int64_t cus_upper_bound(int64_t start, int64_t end, input_t val, const input_t* bd, const int64_t* sort) {
-  int64_t orig_start = start;
+int64_t cus_upper_bound(int64_t start, int64_t end, const input_t val, const input_t* bd, const int64_t* sort) {
+  // sorter gives relative ordering for ND tensors, so we need to save and add the non-updated start as an offset
+  // i.e. the second row of a 3x3 tensors starts at element 3 but sorter's second row only contains 0, 1, or 2
+  const int64_t orig_start = start;
   while (start < end) {
-    int64_t mid = start + ((end - start) >> 1);
+    const int64_t mid = start + ((end - start) >> 1);
     const input_t mid_val = sort ? bd[sort[mid] + orig_start] : bd[mid];
     if (!(mid_val > val)) {
       start = mid + 1;
@@ -131,23 +137,23 @@ Tensor& searchsorted_out_cpu(
     const Tensor& self,
     bool out_int32,
     bool right,
-    c10::string_view side,
+    const c10::optional<c10::string_view> side_opt,
     const c10::optional<Tensor>& sorter_opt,
     Tensor& result) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> sorter_maybe_owned = at::borrow_from_optional_tensor(sorter_opt);
   const Tensor& sorter = *sorter_maybe_owned;
-  searchsorted_pre_check(sorted_sequence, self, result, out_int32, side, sorter);
+  searchsorted_pre_check(sorted_sequence, self, result, out_int32, right, side_opt, sorter);
   resize_output(result, self.sizes());
   
-  // we assume the user has *not* explicitly set antithetical params:
-  //   not (right=False, side='right') nor (right=True, side='left')
-  bool is_right = right || side == "right";
+  // we have two inputs to set right, pre_check checks that they aren't set to opposites
+  bool is_right = side_opt ? *side_opt == "right" : right;
   
   if (self.numel() == 0) {
     return result;
   }
   
+  // for non-contiguous result tensors, we write the output to a contiguous copy so we can later copy back, maintaing the original result tensor
   Tensor out = result;
   if (!result.is_contiguous()) {
     out = result.contiguous();
@@ -166,6 +172,7 @@ Tensor& searchsorted_out_cpu(
     dispatch(out, final_input, final_boundaries, out_int32, is_right, final_sorter);
   }
 
+  // if result is non-contiguous, we wrote the answer to a copied version, so we copy back to the original result tensor
   if (!result.is_contiguous()) {
     result.copy_(out);
   }
@@ -176,12 +183,13 @@ Tensor searchsorted_cpu(
       const Tensor& sorted_sequence,
       const Tensor& self,
       bool out_int32,
-      bool right, c10::string_view side,
-      const c10::optional<Tensor>& sorter) {
+      bool right, 
+      const c10::optional<c10::string_view> side_opt,
+      const c10::optional<Tensor>& sorter_opt) {
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
   c10::TensorOptions options = TensorOptions().device(self.options().device()).dtype(scalar_type);
   Tensor result = at::empty({0}, options, MemoryFormat::Contiguous);
-  at::native::searchsorted_out_cpu(sorted_sequence, self, out_int32, right, side, sorter, result);
+  at::native::searchsorted_out_cpu(sorted_sequence, self, out_int32, right, side_opt, sorter_opt, result);
   return result;
 }
 
@@ -190,15 +198,15 @@ Tensor searchsorted_cpu(
     const Scalar& self,
     bool out_int32,
     bool right,
-    c10::string_view side,
-    const c10::optional<Tensor>& sorter) {
+    const c10::optional<c10::string_view> side_opt,
+    const c10::optional<Tensor>& sorter_opt) {
   const Tensor& scalar_tensor = searchsorted_scalar_tensor(self, sorted_sequence.device());
-  return searchsorted_cpu(sorted_sequence, scalar_tensor, out_int32, right, side, sorter);
+  return searchsorted_cpu(sorted_sequence, scalar_tensor, out_int32, right, side_opt, sorter_opt);
 }
 
 Tensor& bucketize_out_cpu(const Tensor& self, const Tensor& boundaries, bool out_int32, bool right, Tensor& result) {
   TORCH_CHECK(boundaries.dim() == 1, "boundaries tensor must be 1 dimension, but got dim(", boundaries.dim(), ")");
-  at::native::searchsorted_out_cpu(boundaries, self, out_int32, right, "left", nullopt, result);
+  at::native::searchsorted_out_cpu(boundaries, self, out_int32, right, nullopt, nullopt, result);
   return result;
 }
 

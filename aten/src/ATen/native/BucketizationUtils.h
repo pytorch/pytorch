@@ -6,31 +6,38 @@
 namespace at {
 namespace native {
 
+// original values given by raw_*. If an original value is not contiguous, will make a contiguous copy to
+// the corresponding trimmed_* value. Additionally, if the dtypes of the boundary and input tensor do not
+// match, will change them to be a common super type so comparisons are done between the same types.
+// For any trimmed_* tensor, if its outgoing value matches what it was incoming (typically null), then the
+// corresponding raw_* version should be used since it was already contiguous of the right type.
 inline void searchsorted_maybe_trim_input_tensors(
-  Tensor& trimmed_input,
-  Tensor& trimmed_boundaries,
-  Tensor& trimmed_sorter,
-  const Tensor& raw_input,
-  const Tensor& raw_boundaries,
-  const Tensor& raw_sorter) {
-
+    Tensor& trimmed_input,
+    Tensor& trimmed_boundaries,
+    Tensor& trimmed_sorter,
+    const Tensor& raw_input,
+    const Tensor& raw_boundaries,
+    const Tensor& raw_sorter) {
   bool in_is_contiguous = raw_input.is_contiguous();
   bool bd_is_contiguous = raw_boundaries.is_contiguous();
   bool sort_is_contiguous = raw_sorter.is_contiguous();
 
   if (!in_is_contiguous) {
     TORCH_WARN_ONCE("input value tensor is non-contiguous, this will lower the performance due to extra data copy "
-      "when converting non-contiguous tensor to contiguous, please use contiguous input value tensor if possible");
+      "when converting non-contiguous tensor to contiguous, please use contiguous input value tensor if possible. "
+      "This message will only appear once per program.");
     trimmed_input = raw_input.contiguous();
   }
   if (!bd_is_contiguous) {
-    TORCH_WARN_ONCE("input value tensor is non-contiguous, this will lower the performance due to extra data copy "
-      "when converting non-contiguous tensor to contiguous, please use contiguous input value tensor if possible");
+    TORCH_WARN_ONCE("boundary tensor is non-contiguous, this will lower the performance due to extra data copy "
+      "when converting non-contiguous tensor to contiguous, please use contiguous input value tensor if possible. "
+      "This message will only appear once per program.");
     trimmed_boundaries = raw_boundaries.contiguous();
   }
   if (!sort_is_contiguous) {
-    TORCH_WARN_ONCE("input value tensor is non-contiguous, this will lower the performance due to extra data copy "
-      "when converting non-contiguous tensor to contiguous, please use contiguous input value tensor if possible");
+    TORCH_WARN_ONCE("sorter tensor is non-contiguous, this will lower the performance due to extra data copy "
+      "when converting non-contiguous tensor to contiguous, please use contiguous input value tensor if possible. "
+      "This message will only appear once per program.");
     trimmed_sorter = raw_sorter.contiguous();
   }
   if (raw_input.dtype() != raw_boundaries.dtype()) {
@@ -71,20 +78,34 @@ inline Tensor searchsorted_scalar_tensor(const Scalar& scalar, const c10::Device
   return tensor;
 }
 
-inline void searchsorted_pre_check(const Tensor& boundaries, const Tensor& input, const Tensor& output, bool out_int32, c10::string_view side, const Tensor& sorter) {
-  TORCH_CHECK(side == "left" || side == "right", "side can only be 'left' or 'right' but got ", side);
+inline void searchsorted_pre_check(
+    const Tensor& boundaries, 
+    const Tensor& input, 
+    const Tensor& output, 
+    const bool out_int32, 
+    const bool right, 
+    const c10::optional<c10::string_view> side_opt, 
+    const Tensor& sorter) {
+  if (side_opt) {
+    const c10::string_view side = *side_opt; 
+    TORCH_CHECK(side == "left" || side == "right", "torch.searchsorted(): side can only be 'left' or 'right' but got ", side);
+
+    // we assume the user has not explicitly set (right=False, side="right")
+    TORCH_CHECK(!right || side == "right", "torch.searchsorted(): side and right can't be set to opposites, got side of ", side, 
+      " while right was True");
+  }
 
   TORCH_CHECK(boundaries.device() == input.device(), "boundaries and input value tensors should have same device type, ",
     "but we got boundaries tensor device type ", boundaries.device(), " and input value tensor device type ", input.device());
  
   if (sorter.defined()) {
-    TORCH_CHECK(sorter.device() == input.device(), "sorter and input value tensors should have same device type, ",
-    "but we got sorter tensor device type ", sorter.device(), " and input value tensor device type ", input.device());
+    TORCH_CHECK(sorter.device() == boundaries.device(), "sorter and boundary tensors should have same device type, ",
+    "but we got sorter tensor device type ", sorter.device(), " and input value tensor device type ", boundaries.device());
 
-    TORCH_CHECK(sorter.sizes() == input.sizes(), "input and sorter must have the same size, but we got input value tensor ",
-    input.sizes(), "and we got sorter tensor ", sorter.sizes());
+    TORCH_CHECK(sorter.sizes() == boundaries.sizes(), "boundary and sorter must have the same size, but we got bouanry tensor ",
+    boundaries.sizes(), "and we got sorter tensor ", sorter.sizes());
 
-    TORCH_CHECK(sorter.scalar_type() == ScalarType::Long, "sorter must be a LongTensor but got that it holds ", 
+    TORCH_CHECK(sorter.scalar_type() == ScalarType::Long, "sorter must be a tensor of long dtype but got dtype ", 
     sorter.scalar_type());
   }
 

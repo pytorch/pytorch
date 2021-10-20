@@ -1373,11 +1373,17 @@ class TestReductions(TestCase):
         with self.assertRaisesRegex(RuntimeError, "side can only be 'left' or 'right'"):
             torch.searchsorted(values_1d, values_1d, side='bad')
 
-        # invalid sorter argument
-      #  with self.assertRaisesRegex(RuntimeError, "expected sorter "):
-      #      sequence = torch.rand_like(values_1d, dtype=torch.float)
-      #      _, sorted_idx = torch.sort(sequence)
-      #      torch.searchsorted(sequence, values_1d, sorter=sorted_idx)
+        # invalid sorter argument, wrong size
+        with self.assertRaisesRegex(RuntimeError, "boundary and sorter must have the same size"):
+            sequence = torch.rand_like(values_1d, dtype=torch.float)
+            _, sorted_idx = torch.sort(sequence)
+            torch.searchsorted(sequence, values_1d, sorter=sorted_idx[:-1])
+
+        # invalid sorter argument, is not dtype long
+        with self.assertRaisesRegex(RuntimeError, "sorter must be a tensor of long dtype"):
+            sequence = torch.rand_like(values_1d, dtype=torch.float)
+            _, sorted_idx = torch.sort(sequence)
+            torch.searchsorted(sequence, values_1d, sorter=sorted_idx.to(torch.float32))
 
         # scalar type bfloat16
         if self.device_type == 'cpu':
