@@ -7,6 +7,7 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._fsdp import FullyShardedDataParallel
+from torch.distributed._fsdp.fully_sharded_data_parallel import CPUOffload
 from torch.distributed._fsdp.fully_sharded_data_parallel import TrainingState_
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
@@ -31,6 +32,9 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
+def _get_model_device_set(model):
+    return {p.device for p in model.parameters()}
+
 # get full params of a model recursively
 def _get_full_params(model, recurse=True):
     if recurse:
@@ -40,6 +44,11 @@ def _get_full_params(model, recurse=True):
                 _get_full_params(module, recurse=False)
     else:
         torch.cuda.synchronize()
+        # TODO: ideally should not use private FSDP APIs
+        if model.cpu_offload.offload_params:
+            # Move params back to GPU
+            for p in model.parameters():
+                model._move_to_compute_device(p)
         model._rebuild_full_params()
         if model.module.flat_param is not None:
             model.module._unflatten_params()
@@ -56,25 +65,25 @@ class TransformerWithSharedParams(nn.Module):
         assert (
             d_vocab >= 12
         ), "dim of vocab should be larger than 12, as we use torch.arange(12) as input"
-        self.embed_tokens = nn.Embedding(d_vocab, d_model)
+        self.embed_tokens = nn.Embedding(d_vocab, d_model).cuda()
         self.transformer = nn.Transformer(
             d_model=d_model,
             num_encoder_layers=2,
             num_decoder_layers=2,
             dim_feedforward=8,
             dropout=0.1,
-        )
-        self.output_proj = nn.Linear(d_model, d_vocab)
+        ).cuda()
+        self.output_proj = nn.Linear(d_model, d_vocab).cuda()
 
         # share the embedding and output projection weights
         self.output_proj.weight = self.embed_tokens.weight
         self.register_buffer(
-            "vocab_bias", self.embed_tokens.weight.new_ones((d_model,))
+            "vocab_bias", self.embed_tokens.weight.new_ones((d_model,)).cuda()
         )
-        self.register_buffer("long_buffer", torch.zeros_like(self.vocab_bias, dtype=torch.long))  # type: ignore[arg-type]
+        self.register_buffer("long_buffer", torch.zeros_like(self.vocab_bias, dtype=torch.long).cuda())  # type: ignore[arg-type]
 
         self.bs = 2
-        self.bn = torch.nn.BatchNorm1d(self.bs) if add_bn else torch.nn.Identity()
+        self.bn = torch.nn.BatchNorm1d(self.bs).cuda() if add_bn else torch.nn.Identity().cuda()
 
     def get_input(self, device):
         torch.manual_seed(1 + self.rank)  # keep everything deterministic
@@ -101,36 +110,36 @@ class TransformerWithSharedParams(nn.Module):
 
 
 class NestedWrappedModule(nn.Module):
-    def __init__(self, group, wrap_fsdp, wrap_everything=False):
+    def __init__(self, group, wrap_fsdp, wrap_everything=False, *args, **kwargs):
         super().__init__()
         self.rank = group.rank()
         self.world_size = group.size()
 
         def _maybe_wrap(layer):
             if wrap_fsdp:
-                return FullyShardedDataParallel(layer, group)
+                return FullyShardedDataParallel(layer, group, *args, **kwargs)
             return layer
 
         torch.manual_seed(0)  # keep everything deterministic
 
         if wrap_everything:
             self.module = nn.Sequential(
-                _maybe_wrap(nn.Linear(8, 4)),
-                _maybe_wrap(nn.Linear(4, 16)),
-                _maybe_wrap(nn.Linear(16, 4)),
-                _maybe_wrap(nn.Linear(4, 8)),
+                _maybe_wrap(nn.Linear(8, 4).cuda()),
+                _maybe_wrap(nn.Linear(4, 16).cuda()),
+                _maybe_wrap(nn.Linear(16, 4).cuda()),
+                _maybe_wrap(nn.Linear(4, 8).cuda()),
             )
         else:
             self.module = nn.Sequential(
-                nn.Linear(8, 4),
+                nn.Linear(8, 4).cuda(),
                 _maybe_wrap(
                     nn.Sequential(
-                        _maybe_wrap(nn.Linear(4, 16)),
-                        nn.Linear(16, 16),
+                        _maybe_wrap(nn.Linear(4, 16).cuda()),
+                        nn.Linear(16, 16).cuda(),
                     )
                 ),
-                _maybe_wrap(nn.Linear(16, 4)),
-                nn.Linear(4, 8),
+                _maybe_wrap(nn.Linear(16, 4).cuda()),
+                nn.Linear(4, 8).cuda(),
             )
 
     def get_input(self, device):
@@ -200,7 +209,8 @@ class FSDPTest(MultiProcessTestCase):
         dist.destroy_process_group()
         sys.exit(0)
 
-    def _train_for_several_steps(self, model, num_steps, autocast, lr=0.01):
+    def _train_for_several_steps(self, model, num_steps, autocast, *args, lr=0.01, **kwargs):
+        cpu_offload = kwargs.get("cpu_offload", None)
         model_device = next(model.parameters()).device
         # use SGD with momentum instead of Adam, since Adam is scale invariant
         # and this makes it bad for tests
@@ -211,6 +221,17 @@ class FSDPTest(MultiProcessTestCase):
                 # Inputs always cuda regardless of cpu offloading, or model.device
                 input = model.module.get_input(torch.device("cuda"))
                 output = model(*input)
+                # After forward pass, if cpu_offload, model, except for root
+                # layer, should be on CPU.
+                if cpu_offload is not None and cpu_offload.offload_params:
+                    outer_module = model.module
+                    outer_module_params = set(outer_module.parameters(recurse=False))
+                    non_root_params = set(model.parameters()) - outer_module_params
+                    # Short-circuit if there are no root params.
+                    if non_root_params:
+                        devices = {p.device for p in non_root_params}
+                        self.assertEqual(devices, {torch.device("cpu")})
+
                 loss = model.module.get_loss(input, output).to(model_device)
             assert (
                 loss.dtype == torch.float32
@@ -223,12 +244,13 @@ class FSDPTest(MultiProcessTestCase):
         return loss.detach()
 
     def _test_identical_outputs(
-        self, model_init_fn, num_steps=2, use_cuda=True, lr=0.01
+        self, model_init_fn, num_steps=2, use_cuda=True, lr=0.01,
+        offload_params=False
     ):
         group = dist.distributed_c10d._get_default_group()
         rank = group.rank()
         # Establish reference behavior with PyTorch DDP (+ optionally autocast).
-        model = model_init_fn(group=group, wrap_fsdp=False).cuda()
+        model = model_init_fn(group=group, wrap_fsdp=False)
         model = nn.parallel.DistributedDataParallel(
             model, device_ids=[rank], output_device=rank
         )
@@ -238,25 +260,34 @@ class FSDPTest(MultiProcessTestCase):
         ref_full_params = list(model.parameters())
 
         # Confirm we get the same behavior using FullyShardedDataParallel.
-        model = model_init_fn(group=group, wrap_fsdp=True)
-        model = FullyShardedDataParallel(model)
-        if use_cuda:
-            model = model.cuda()
-        else:
-            assert next(model.parameters()).device == torch.device(
-                "cpu"
-            ), "module parameters should be placed on cpu if use_cuda is False."
+        cpu_offload_config = CPUOffload(offload_params=offload_params)
+        # model_init_fn might use nested FSDP, pass in FSDP args appropriately.
+        model = model_init_fn(group=group, wrap_fsdp=True, cpu_offload=cpu_offload_config)
+        # TODO: FSDP does not work in forward pass with CPU models currently
+        # so use_cuda otherwise assert parameters placed on CPU check is removed
+        # here.
+        model = FullyShardedDataParallel(model, cpu_offload=cpu_offload_config)
+        # Check params are correctly offloaded if specified after ctor. Check
+        # for offloading after forward is done in _train_for_several_steps.
+        if cpu_offload_config.offload_params:
+            self.assertEqual({torch.device("cpu")}, _get_model_device_set(model))
+
         shard_loss = self._train_for_several_steps(
-            model, num_steps, autocast=False, lr=lr
+            model, num_steps, autocast=False, lr=lr,
+            cpu_offload=cpu_offload_config
         )
+        if cpu_offload_config.offload_params:
+            # shard_loss is on CPU as the loss device in _train_for_several_steps
+            # is decided by the model parameter devices, so move it to GPU.
+            shard_loss = shard_loss.to(torch.cuda.current_device())
         _get_full_params(model)
         shard_full_params = list(model.parameters())
-
         torch.testing.assert_allclose(ref_loss, shard_loss)
         self.assertEqual(
             ref_full_params,
             shard_full_params,
-            exact_device=True,
+            # Dont enforce device if offloading params
+            exact_device=not cpu_offload_config.offload_params,
             msg="FullyShardedDataParallel didn't match PyTorch DDP",
         )
 
@@ -272,13 +303,26 @@ class TestParityWithDDP(FSDPTest):
         self._test_identical_outputs(NestedWrappedModule)
 
     @skip_if_lt_x_gpu(2)
+    def test_nested_wrapped_model_cpu_offload(self):
+        self._test_identical_outputs(NestedWrappedModule, offload_params=True)
+
+    @skip_if_lt_x_gpu(2)
     def test_nested_all_wrapped_model(self):
         model_fn = functools.partial(NestedWrappedModule, wrap_everything=True)
         self._test_identical_outputs(model_fn)
 
     @skip_if_lt_x_gpu(2)
+    def test_nested_all_wrapped_model_cpu_offload(self):
+        model_fn = functools.partial(NestedWrappedModule, wrap_everything=True)
+        self._test_identical_outputs(model_fn, offload_params=True)
+
+    @skip_if_lt_x_gpu(2)
     def test_transformer_parameterized(self):
         self._test_identical_outputs(TransformerWithSharedParams)
+
+    @skip_if_lt_x_gpu(2)
+    def test_transformer_parameterized_cpu_offload(self):
+        self._test_identical_outputs(TransformerWithSharedParams, offload_params=True)
 
 
 if __name__ == "__main__":

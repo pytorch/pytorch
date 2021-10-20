@@ -29,6 +29,13 @@ from .utils import (
 if TYPE_CHECKING:
     from collections import OrderedDict  # noqa: F401
 
+from dataclasses import dataclass
+
+@dataclass
+class CPUOffload:
+    offload_params: bool = False
+    # TODO: offload_grads, offload_state_dict
+
 
 class TrainingState_(Enum):
     """
@@ -78,16 +85,23 @@ class FullyShardedDataParallel(nn.Module):
             module to be wrapped with FSDP.
         process_group (Optional[ProcessGroup]):
             process group for sharding
+        cpu_offload (Optional [CPUOffload]):
+            CPU offloading config. Currently, only parameter CPU offload is
+            supported.
     """
 
     def __init__(
         self,
         module: nn.Module,
         process_group: Optional[ProcessGroup] = None,
+        cpu_offload: Optional[CPUOffload] = None
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
         self.process_group = process_group or _get_default_group()
+        self.cpu_offload = (
+            cpu_offload if cpu_offload is not None else CPUOffload()
+        )
         self.rank = self.process_group.rank()
         self.world_size = self.process_group.size()
         # device for computation, if module is on GPU, use module.device;
@@ -140,6 +154,12 @@ class FullyShardedDataParallel(nn.Module):
         # Flag to guard against preparing gradients multiple times per backward pass.
         self._pre_backward_hook_has_run = False
 
+        # If specified, offload parameter shard to CPU.
+        if self.cpu_offload.offload_params:
+            for p in self.params:
+                self._offload_to_cpu(p)
+
+
     @property
     def module(self) -> FlattenParamsWrapper:
         """make model.module accessible, just like DDP."""
@@ -153,6 +173,23 @@ class FullyShardedDataParallel(nn.Module):
         while world_size % factor == 0 and world_size / factor > factor:
             factor *= 2
         return float(factor)
+
+    def _offload_to_cpu(self, p):
+        # Offloads parameter to CPU from self.compute_device. If parameter is
+        # already on CPU this is a noop.
+        cpu_device = torch.device("cpu")
+        if p.data.device == cpu_device:
+            return
+        with torch.no_grad():
+            p.data = p.detach().to(cpu_device)
+
+    def _move_to_compute_device(self, p):
+        # Moves parameter from CPU to self.compute_device. A noop if this
+        # parameter is already on the device.
+        if p.data.device == self.compute_device:
+            return
+        with torch.no_grad():
+            p.data = p.detach().to(self.compute_device)
 
     def _cast_buffers(
         self, device: Optional[torch.device] = None, memo: Optional[Set] = None
@@ -309,7 +346,9 @@ class FullyShardedDataParallel(nn.Module):
             # Don't free the full params for the outer-most (root) instance,
             # In most cases, root instance contains params in the last layers
             # or has no params. In these cases, those params will be needed
-            # immediately after for the backward pass.
+            # immediately after for the backward pass. Note that this only
+            # applies currently when freeing parameters at end of layer's
+            # forward pass.
             self.reshard_after_forward = False
 
             # Due to the use of streams, we need to make sure the previous
@@ -431,6 +470,11 @@ class FullyShardedDataParallel(nn.Module):
         self._streams["all_gather"].wait_stream(torch.cuda.current_stream())
 
     def forward(self, *args: Any, **kwargs: Any) -> Any:
+        # Bring params to GPU if needed.
+        if self.cpu_offload.offload_params:
+            for p in self.params:
+                self._move_to_compute_device(p)
+
         self._lazy_init()
 
         # Start of a forward pass.
@@ -454,6 +498,15 @@ class FullyShardedDataParallel(nn.Module):
         # initialized with the correct dtype and (sharded) size, since optimizer
         # state is typically initialized lazily in ``optim.step()``.
         self._use_param_local_shard()
+
+        # Offload parameters back to CPU. Note that here we check
+        # reshard_after_forward because similar to how we don't want to free
+        # root parameters at end of forward, we don't want to offload them
+        # either since their backward pass will probably start relatively
+        # quicker.
+        if self.reshard_after_forward and self.cpu_offload.offload_params:
+            for p in self.params:
+                self._offload_to_cpu(p)
 
         # Register pre-backward hooks to all-gather the params for the backward
         # pass (if output's grad was needed). This won't register anything if
@@ -493,6 +546,14 @@ class FullyShardedDataParallel(nn.Module):
             # calls are completed.
             if self._is_root:
                 self._queue_wait_for_post_backward()
+
+            # Bring parameters back to the device so gradient computation can
+            # happen properly. This will bring back all params in the layer and
+            # run only once since we check self._pre_backward_hook_has_run
+            # above.
+            if self.cpu_offload.offload_params:
+                for p in self.params:
+                    self._move_to_compute_device(p)
 
             self._rebuild_full_params()
 
@@ -594,9 +655,21 @@ class FullyShardedDataParallel(nn.Module):
                 "FSDP only works with gradients that don't require gradients"
             )
 
+        # Note that we don't check self.reshard_after_forward here, which is
+        # False for root/outermost layer in FSDP. This is because we assume
+        # root layer will mostly have parameters at the end of the model, so
+        # in backwards it will be useful to free and keep only the shard because
+        # root parameters will only be used at end of forward.
         self._free_full_params([param])
         # Switch to local shard after backward.
         self._use_param_local_shard([param])
+
+        # TODO: we are not offloading params to CPU here if cpu offload for
+        # params is specified, since it does not make much sense if gradients
+        # are not also offloaded. If gradients are not offloaded then user
+        # will have to manually move grads/params to same device to run
+        # optimizer. it is better to do this in conjunction when grad offloading
+        # is ready.
 
         # Wait for all work in the current stream to finish, then start the
         # reductions in post_backward stream.
