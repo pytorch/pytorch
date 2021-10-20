@@ -1,16 +1,12 @@
-from typing import Any, Dict, Tuple, List, Callable, Optional, Union
-from collections import defaultdict
+from typing import Any, Dict, Tuple, List
 import torch
 from torch.fx import (
     GraphModule,
-    Proxy,
-    map_arg
 )
 from torch.fx.graph import (
     Graph,
     Node,
 )
-from torch.fx.node import Argument
 from .quantization_types import Pattern
 from ..qconfig import QConfigAny
 from .match_utils import (
@@ -18,7 +14,6 @@ from .match_utils import (
 )
 from .graph_module import (
     is_observed_module,
-    is_observed_standalone_module,
     QuantizedGraphModule,
 )
 from .quantization_patterns import (
@@ -26,10 +21,6 @@ from .quantization_patterns import (
 )
 from ._equalize import update_obs_for_equalization, convert_eq_obs
 from .utils import (
-    is_get_tensor_info_node,
-    node_return_type_is_int,
-    quantize_node,
-    get_new_attr_name_with_prefix,
     collect_producer_nodes,
     graph_module_from_producer_nodes,
     get_custom_module_class_keys,
@@ -42,10 +33,7 @@ from torch.ao.quantization.quantize import (
     _remove_qconfig,
     is_activation_post_process,
 )
-from ..utils import (
-    activation_is_statically_quantized,
-    activation_dtype,
-)
+
 
 def run_weight_observers(observed: GraphModule) -> None:
     r''' Extract the subgraph that produces the weight for dynamic quant
@@ -192,8 +180,7 @@ def _convert_new(model: GraphModule, is_reference: bool = False,
                 # output_quantized_idxs override.
                 # TODO: remove dequantize node if any
                 raise Exception("output_quantized_idxs is not supported yet")
-        elif node.op == 'call_module' and \
-             is_activation_post_process(modules[node.target]):
+        elif node.op == 'call_module' and is_activation_post_process(modules[node.target]):
             insert_quantize_dequantize_node(model.graph, node, modules)
 
     # removes qconfig and activation_post_process modules
