@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: distributed"]
+
 import torch
 import os
 import torch.cuda
