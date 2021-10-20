@@ -567,6 +567,10 @@ def convert_fx(
 
         * `_remove_qconfig`: Option to remove the qconfig attributes in the model after convert.
 
+        * `qconfig_dict`: qconfig_dict with the same keys as in prepare_fx API, but with the values
+          restricted to None. For each entry whose value is set to None, we skip quantizing that
+          entry in the model.
+
     Return:
         A quantized model (GraphModule)
 

@@ -5,6 +5,7 @@ from torch.ao.quantization.qconfig import add_module_to_qconfig_obs_ctr, QConfig
 from torch.ao.quantization.quantize import (
     is_activation_post_process,
 )
+import copy
 import re
 
 from torch.fx.graph import (
@@ -137,8 +138,7 @@ def generate_qconfig_map(
         modules: Dict[str, torch.nn.Module],
         input_graph: Graph,
         qconfig_dict: Any,
-        node_name_to_scope: Dict[str, Tuple[str, type]],
-        prepared_qconfig_map: Dict[str, QConfigAny] = None) -> Dict[str, QConfigAny]:
+        node_name_to_scope: Dict[str, Tuple[str, type]]) -> Dict[str, QConfigAny]:
     global_qconfig = qconfig_dict.get("", None)
     qconfig_map = dict()
 
@@ -154,9 +154,6 @@ def generate_qconfig_map(
     for node in input_graph.nodes:
         qconfig = None
         if node.op == "get_attr":
-            if prepared_qconfig_map:
-                prepared_qconfig = prepared_qconfig_map[node.name]
-                global_qconfig = qconfig_dict.get("", prepared_qconfig)
             module_name, _ = _parent_name(node.target)
             qconfig = maybe_adjust_qconfig_for_module_type_or_name(
                 qconfig_dict, type(modules[module_name]), module_name, global_qconfig)
@@ -165,9 +162,6 @@ def generate_qconfig_map(
             # precedence: module_name_qconfig
             # > function_qconfig > global_qconfig
             # module_name takes precedence over function qconfig
-            if prepared_qconfig_map:
-                prepared_qconfig = prepared_qconfig_map[node.name]
-                global_qconfig = qconfig_dict.get("", prepared_qconfig)
             function_qconfig = get_object_type_qconfig(
                 qconfig_dict, node.target, global_qconfig)
             module_path, module_type = node_name_to_scope[node.name]
@@ -183,9 +177,6 @@ def generate_qconfig_map(
             qconfig_with_device_check = add_module_to_qconfig_obs_ctr(qconfig, modules.get(node.target, None))
 
         elif node.op == "call_method":
-            if prepared_qconfig_map:
-                prepared_qconfig = prepared_qconfig_map[node.name]
-                global_qconfig = qconfig_dict.get("", prepared_qconfig)
             module_path, module_type = node_name_to_scope[node.name]
             # use the qconfig of the module that the node belongs to
             qconfig = maybe_adjust_qconfig_for_module_type_or_name(
@@ -198,9 +189,6 @@ def generate_qconfig_map(
             # if the node is an observer, just continue - don't add it to the qconfig_map
             if is_activation_post_process(modules[node.target]):
                 continue
-            if prepared_qconfig_map:
-                prepared_qconfig = prepared_qconfig_map[node.name]
-                global_qconfig = qconfig_dict.get("", prepared_qconfig)
             qconfig = maybe_adjust_qconfig_for_module_type_or_name(
                 qconfig_dict, type(modules[node.target]), node.target, global_qconfig)
 
@@ -311,3 +299,30 @@ def check_is_valid_fuse_custom_config_dict(fuse_custom_config_dict: Optional[Dic
     fuse_custom_config_dict_allowed_keys = {"additional_fuser_method_mapping",
                                             "preserved_attributes"}
     check_is_valid_config_dict(fuse_custom_config_dict, fuse_custom_config_dict_allowed_keys, "fuse_custom_config_dict")
+
+
+def convert_qconfig_dict_values(qconfig_dict: Dict[str, Dict[Any, Any]]) -> Dict[str, Dict[Any, Any]]:
+    r""" Convert the qconfig_dict passed in the convert_fx function to replace `None` with False
+
+    Args:
+      `qconfig_dict`: configuration dictionary for convert quantization step
+    """
+    modified_qconfig_dict = copy.deepcopy(qconfig_dict)
+    for k, v in qconfig_dict.items():
+        if k == "module_name_object_type_order":
+            qconfig_module_name_object_type_order = qconfig_dict[k]
+            for i in range(len(qconfig_module_name_object_type_order)):
+                (module_path, object_type, object_type_idx, config) = qconfig_module_name_object_type_order[i]
+                assert config is None,\
+                    'expected convert qconfig_dict to only have None values for various keys. \
+                    But found {} for key {}'.format(config, k)
+                modified_qconfig_dict[k][i] = (module_path, object_type, object_type_idx, False)
+        else:
+            for name, config in qconfig_dict[k].items():
+                assert config is None,\
+                    'expected convert qconfig_dict to only have None values for various keys. \
+                    But found {} for key {}'.format(config, k)
+                modified_qconfig_dict[k][name] = False
+
+    print(qconfig_dict, modified_qconfig_dict)
+    return modified_qconfig_dict

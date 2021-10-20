@@ -28,7 +28,7 @@ from .quantization_patterns import (
 from .qconfig_utils import (
     convert_dict_to_ordered_dict,
     generate_qconfig_map,
-    get_flattened_qconfig_dict,
+    convert_qconfig_dict_values,
 )
 from ._equalize import update_obs_for_equalization, convert_eq_obs
 from .utils import (
@@ -204,18 +204,27 @@ def convert(model: GraphModule, is_reference: bool = False,
     modules = dict(model.named_modules(remove_duplicate=False))
 
     modules_copy = copy.deepcopy(modules)
-    convert_qconfig_map = qconfig_map
     if qconfig_dict:
-        # TODO: check to make sure the qconfig_dict only has None values specified.
         convert_dict_to_ordered_dict(qconfig_dict)
-        convert_qconfig_map = generate_qconfig_map(model, modules_copy, model.graph, qconfig_dict, node_name_to_scope, qconfig_map)
+        convert_dict = convert_qconfig_dict_values(qconfig_dict)
+        convert_qconfig_map = generate_qconfig_map(model, modules_copy, model.graph, convert_dict, node_name_to_scope)
+
+        # compare the convert_qconfig_map to the map generated after prepare, and copy over every value, except the ones
+        # set to False, which are set to None in the convert map.
+        for k, v in qconfig_map.items():
+            assert k in convert_qconfig_map, 'Expected key {} in convert qconfig_map'.format(k)
+            if convert_qconfig_map[k] is False:
+                convert_qconfig_map[k] = None
+            else:
+                convert_qconfig_map[k] = qconfig_map[k]
+        qconfig_map = convert_qconfig_map
 
     custom_module_classes = get_custom_module_class_keys(
         convert_custom_config_dict,
         "observed_to_quantized_custom_module_class")
     matches = find_matches(
         model.graph, modules, patterns,
-        convert_qconfig_map,
+        qconfig_map,
         custom_module_classes=custom_module_classes)
 
     if model._equalization_qconfig_map is not None:
@@ -488,7 +497,7 @@ def convert(model: GraphModule, is_reference: bool = False,
                     assert len(out_quant_idxs) <= 1, "Currently standalone only support one output"
                     quantized = 0 in out_quant_idxs
 
-                qconfig = convert_qconfig_map[node.name]
+                qconfig = qconfig_map[node.name]
                 # Note: load_arg can be overwritten in the convert method when used to
                 # create Node in graph
                 result = obj.convert(

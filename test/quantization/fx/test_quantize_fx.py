@@ -3106,7 +3106,6 @@ class TestQuantizeFx(QuantizationTestCase):
                 self.w = torch.ones(5, 5)
                 self.b = torch.zeros(5)
 
-
             def forward(self, x):
                 return torch.nn.functional.linear(x, self.w, self.b)
 
@@ -3115,26 +3114,69 @@ class TestQuantizeFx(QuantizationTestCase):
             def __init__(self):
                 super().__init__()
                 self.mods1 = torch.nn.Sequential(
+                    Linear(),
                     Linear()
                 )
-                #self.mods2 = Linear()
                 self.mods3 = torch.nn.Linear(5, 5)
 
             def forward(self, x):
                 x = self.mods1(x)
                 x = torch.add(x, 4)
-                #x = self.mods2(x)
-                #y = torch.add(x, 2)
-                #z = torch.mul(x, 5)
-                x = self.mods3(x)
+                z = torch.mul(x, 5)
+                x = self.mods3(z)
                 return x
 
         model = M().eval()
 
-        prepared = prepare_fx(model, {"": default_qconfig})
-        convert_qconfig_dict = {"module_name": [("mods3", None)]}
+        for check in ["module_name", "object_type"]:
+            prepared = prepare_fx(model, {"": default_qconfig})
+            prepared(torch.rand(5, 5))
+            if check == "module_name":
+                convert_qconfig_dict = {"module_name": [("mods1.0", None)]}
 
-        converted = convert_fx(prepared, qconfig_dict=convert_qconfig_dict)
+                node_occurrence = {
+                    ns.call_function(torch.quantize_per_tensor): 1,
+                    ns.call_function(torch.nn.functional.linear): 1,
+                    ns.call_function(torch.ops.quantized.linear): 1,
+                    ns.call_function(torch.ops.quantized.add): 1,
+                    ns.call_function(torch.ops.quantized.mul): 1,
+                    ns.call_method("dequantize"): 1
+                }
+                order_check = [
+                    ns.call_function(torch.nn.functional.linear),
+                    ns.call_function(torch.quantize_per_tensor),
+                    ns.call_function(torch.ops.quantized.linear),
+                    ns.call_function(torch.ops.quantized.add),
+                    ns.call_function(torch.ops.quantized.mul),
+                    ns.call_module(nnq.Linear),
+                    ns.call_method("dequantize"),
+                ]
+            elif check == "object_type":
+                convert_qconfig_dict = {"object_type": [(torch.nn.Linear, None)]}
+
+                node_occurrence = {
+                    ns.call_function(torch.quantize_per_tensor): 1,
+                    ns.call_function(torch.ops.quantized.linear): 2,
+                    ns.call_function(torch.ops.quantized.add): 1,
+                    ns.call_function(torch.ops.quantized.mul): 1,
+                    ns.call_method("dequantize"): 1
+                }
+                order_check = [
+                    ns.call_function(torch.quantize_per_tensor),
+                    ns.call_function(torch.ops.quantized.linear),
+                    ns.call_function(torch.ops.quantized.linear),
+                    ns.call_function(torch.ops.quantized.add),
+                    ns.call_function(torch.ops.quantized.mul),
+                    ns.call_method("dequantize"),
+                    ns.call_module(nn.Linear),
+                ]
+
+            converted = convert_fx(prepared, qconfig_dict=convert_qconfig_dict)
+            converted(torch.rand(5, 5))
+            self.checkGraphModuleNodes(
+                converted,
+                expected_node_occurrence=node_occurrence,
+                expected_node_list=order_check)
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
