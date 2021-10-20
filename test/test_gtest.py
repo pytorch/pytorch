@@ -12,6 +12,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     IS_MACOS,
     IS_IN_CI,
+    skipIfRocm,
 )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -92,7 +93,6 @@ class GTest(TestCase):
     method to this class named the same as the test binary (or test_<name> if
     the binary's name doesn't start with 'test_')
     """
-
     def test_jit(self, binary: Path, test_name: str):
         setup_path = REPO_ROOT / "test" / "cpp" / "jit" / "tests_setup.py"
         # These tests fail on windows only (this wasn't caught before switching
@@ -155,10 +155,12 @@ def generate_test_case(existing_case, binary: Path, test_name: str):
         def test_case(self):
             existing_case(self, binary, test_name)
 
-    return test_case
+    return skipIfRocm(test_case)
 
 
+print("not main")
 if __name__ == "__main__":
+    print("main")
     if not TEST_BINARY_DIR.exists():
         print(
             f"{TEST_BINARY_DIR} does not exist, this test "
@@ -166,6 +168,9 @@ if __name__ == "__main__":
         )
         exit(1)
 
+    print(TEST_BINARY_DIR)
+    print(TEST_BINARY_DIR.glob("*"))
+    print(TEST_BINARY_DIR.glob("*test*"))
     for binary in TEST_BINARY_DIR.glob("*test*"):
         # If the test already has a properly formatted name, don't prepend a
         # redundant 'test_'
