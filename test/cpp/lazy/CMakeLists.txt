@@ -2,6 +2,7 @@ set(LAZY_TEST_ROOT ${TORCH_ROOT}/test/cpp/lazy)
 
 # Build the cpp gtest binary containing the cpp-only tests.
 set(LAZY_TEST_SRCS
+  ${LAZY_TEST_ROOT}/test_ir.cpp
   ${LAZY_TEST_ROOT}/test_misc.cpp
 )
 
