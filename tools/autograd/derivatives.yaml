@@ -916,7 +916,7 @@
   mask: non_differentiable
   result: auto_linear
 
-- name: matrix_exp(Tensor self) -> Tensor
+- name: linalg_matrix_exp(Tensor self) -> Tensor
   self: matrix_exp_backward(self, grad)
 
 - name: max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
