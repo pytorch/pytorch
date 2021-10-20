@@ -24,6 +24,7 @@ from torch.testing._internal.common_quantization import (
     QuantStubModel,
     ManualLinearQATModel,
     ManualConvLinearQATModel,
+    ManualEmbeddingBagLinear,
     TwoLayerLinearModel,
     test_only_eval_fn,
     test_only_train_fn,
@@ -102,6 +103,37 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
 
                 model = ManualConvLinearQATModel()
                 model = quantize_qat(model, test_only_train_fn, [self.img_data_2d_train])
+                checkQuantized(model)
+
+    def test_embedding_bag_linear(self):
+        for qengine in supported_qengines:
+            with override_quantized_engine(qengine):
+                model = ManualEmbeddingBagLinear().train()
+                model = prepare_qat(model)
+                self.checkObservers(model)
+
+                train_indices = [[torch.randint(0, 10, (12, 12)), torch.randn((12, 1))] for _ in range(2)]
+                eval_output = [[torch.randint(0, 10, (12, 1))]]
+
+                test_only_train_fn(model, train_indices)
+                # make sure not activation_post_process is inserted for EmbeddingBag
+                self.assertFalse(hasattr(model, "activation_post_process"))
+                model = convert(model)
+
+                def checkQuantized(model):
+                    # Make sure EmbeddingBag is now a quantized EmbeddingBag.
+                    self.assertTrue(type(model.emb), nn.quantized.EmbeddingBag)
+                    # Also test that Linear has been quantized.
+                    self.assertTrue(type(model.linear), nnq.Linear)
+
+                    test_only_eval_fn(model, eval_output)
+                    self.checkScriptable(model, eval_output)
+                    self.checkNoQconfig(model)
+
+                checkQuantized(model)
+
+                model = ManualEmbeddingBagLinear()
+                model = quantize_qat(model, test_only_train_fn, [train_indices])
                 checkQuantized(model)
 
     def test_train_save_load_eval(self):
