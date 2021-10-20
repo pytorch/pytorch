@@ -27,8 +27,8 @@
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
-#include <torch/csrc/jit/passes/restore_mutation.h>
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
+#include <torch/csrc/jit/passes/restore_mutation.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
