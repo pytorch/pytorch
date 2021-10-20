@@ -8557,7 +8557,7 @@ op_db: List[OpInfo] = [
            aten_name='avg_pool2d',
            supports_autograd=True,
            supports_out=False,
-           dtypesIfCPU=floating_types_and(torch.int64),
+           dtypesIfCPU=floating_types_and(torch.int64, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_avgpool2d),
     OpInfo('nn.functional.max_pool2d',
