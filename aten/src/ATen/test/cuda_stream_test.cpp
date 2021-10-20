@@ -4,6 +4,7 @@
 #include <ATen/cuda/CUDAEvent.h>
 #include <c10/core/Event.h>
 #include <c10/core/impl/InlineEvent.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/impl/CUDAGuardImpl.h>
 #include <c10/util/irange.h>
@@ -432,4 +433,28 @@ TEST(TestStream, ExternalMultiThreadTest) {
 
   cudaStreamDestroy(cuda_stream_a);
   cudaStreamDestroy(cuda_stream_b);
+}
+
+// Verifies that an external stream can be passed to the CUDA caching allocator
+// without lifetime issues.
+TEST(TestStream, ExternalRecordWithAllocator) {
+  if (!at::cuda::is_available())
+    return;
+  at::cuda::CUDAGuard device_guard(0);
+  at::cuda::CUDAStreamGuard guard(at::cuda::getDefaultCUDAStream(0));
+
+  c10::cuda::CUDACachingAllocator::init(1);
+
+  cudaStream_t cuda_stream;
+  cudaStreamCreateWithPriority(&cuda_stream, cudaStreamNonBlocking, -1);
+  at::cuda::CUDAStream myStream =
+      at::cuda::getStreamFromExternal(cuda_stream, 0);
+
+  at::DataPtr dataPtr = c10::cuda::CUDACachingAllocator::get()->allocate(1);
+  c10::cuda::CUDACachingAllocator::recordStream(dataPtr, myStream);
+
+  cudaStreamDestroy(cuda_stream);
+
+  // Trigger the allocator to free the block.
+  dataPtr.clear();
 }

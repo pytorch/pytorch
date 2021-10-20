@@ -93,7 +93,7 @@ namespace CUDACachingAllocator {
 
 namespace {
 
-using stream_set = std::unordered_set<cuda::CUDAStream>;
+using stream_to_event_map = std::unordered_map<c10::StreamId, cudaEvent_t>;
 
 constexpr size_t kMinBlockSize =
     512; // all sizes are rounded to at least 512 bytes
@@ -162,7 +162,7 @@ struct BlockPool {
 struct Block {
   int device; // gpu
   cudaStream_t stream; // allocation stream
-  stream_set stream_uses; // streams on which the block was used
+  stream_to_event_map events_for_stream_uses; // events for the streams on which the block was used
   size_t size; // block size in bytes
   BlockPool* pool; // owning memory pool
   void* ptr; // memory address
@@ -179,7 +179,7 @@ struct Block {
       void* ptr)
       : device(device),
         stream(stream),
-        stream_uses(),
+        events_for_stream_uses(),
         size(size),
         pool(pool),
         ptr(ptr),
@@ -192,7 +192,7 @@ struct Block {
   Block(int device, cudaStream_t stream, size_t size)
       : device(device),
         stream(stream),
-        stream_uses(),
+        events_for_stream_uses(),
         size(size),
         pool(nullptr),
         ptr(nullptr),
@@ -617,7 +617,7 @@ class DeviceCachingAllocator {
     if (block->size >= CachingAllocatorConfig::max_split_size())
       update_stat(stats.oversize_allocations, -1);
 
-    if (!block->stream_uses.empty()) {
+    if (!block->events_for_stream_uses.empty()) {
       if (C10_UNLIKELY(captures_underway)) {
         // It's forbidden to cudaEventQuery an event recorded during CUDA graph
         // capture. We conservatively defer recording end-of-life events until
@@ -663,7 +663,13 @@ class DeviceCachingAllocator {
       // special synchronization
       return;
     }
-    block->stream_uses.insert(stream);
+    auto iter = block->events_for_stream_uses.find(stream.id());
+    if (iter == block->events_for_stream_uses.end()) {
+      cuda::CUDAGuard device_guard(stream.device_index());
+      cudaEvent_t event = create_event_internal();
+      std::tie(iter, std::ignore) = block->events_for_stream_uses.emplace(stream.id(), event);
+    }
+    C10_CUDA_CHECK(cudaEventRecord(iter->second, stream.stream()));
   }
 
   /** set memory fraction to limit maximum allocated memory **/
@@ -772,7 +778,7 @@ class DeviceCachingAllocator {
         block_info.size = block->size;
         block_info.allocated = block->allocated;
         block_info.active = block->allocated || (block->event_count > 0) ||
-            !block->stream_uses.empty();
+            !block->events_for_stream_uses.empty();
 
         segment_info.total_size += block_info.size;
         if (block_info.allocated) {
@@ -890,7 +896,7 @@ class DeviceCachingAllocator {
   void free_block(Block* block) {
     TORCH_INTERNAL_ASSERT(
         !block->allocated && block->event_count == 0 &&
-        block->stream_uses.empty());
+        block->events_for_stream_uses.empty());
 
     size_t original_block_size = block->size;
 
@@ -934,7 +940,7 @@ class DeviceCachingAllocator {
    * or 0 on failure. */
   size_t try_merge_blocks(Block* dst, Block* src, BlockPool& pool) {
     if (!src || src->allocated || src->event_count > 0 ||
-        !src->stream_uses.empty()) {
+        !src->events_for_stream_uses.empty()) {
       return 0;
     }
 
@@ -1241,28 +1247,18 @@ class DeviceCachingAllocator {
   }
 
   void insert_events(Block* block) {
-    int prev_device;
-    C10_CUDA_CHECK(cudaGetDevice(&prev_device));
-
-    stream_set streams(std::move(block->stream_uses));
-    AT_ASSERT(block->stream_uses.empty());
-    for (auto& stream : streams) {
-      C10_CUDA_CHECK(cudaSetDevice(stream.device_index()));
-
-      cudaEvent_t event = create_event_internal();
-      C10_CUDA_CHECK(cudaEventRecord(event, stream.stream()));
-
+    stream_to_event_map events(std::move(block->events_for_stream_uses));
+    AT_ASSERT(block->events_for_stream_uses.empty());
+    for (auto& pair : events) {
       block->event_count++;
-      cuda_events.emplace_back(event, block);
+      cuda_events.emplace_back(pair.second, block);
     }
-
-    C10_CUDA_CHECK(cudaSetDevice(prev_device));
   }
 
   void insert_events_deferred_until_no_capture() {
     if (C10_UNLIKELY(needs_events_deferred_until_no_capture.size() > 0)) {
       for (auto* block : needs_events_deferred_until_no_capture) {
-        TORCH_INTERNAL_ASSERT(!block->stream_uses.empty());
+        TORCH_INTERNAL_ASSERT(!block->events_for_stream_uses.empty());
         insert_events(block);
       }
       needs_events_deferred_until_no_capture.clear();
