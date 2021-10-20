@@ -13,6 +13,7 @@ from torch.ao.quantization.fake_quantize import (
     FusedMovingAvgObsFakeQuantize,
     default_fused_per_channel_wt_fake_quant,
     default_embedding_fake_quant,
+    default_embedding_fake_quant_4bit,
 )
 
 from .observer import (
@@ -185,6 +186,9 @@ def get_default_qconfig(backend='fbgemm'):
 
 default_embedding_qat_qconfig = QConfig(activation=NoopObserver,
                                         weight=default_embedding_fake_quant)
+
+default_embedding_qat_qconfig_4bit = QConfig(activation=NoopObserver,
+                                             weight=default_embedding_fake_quant_4bit)
 
 def get_default_qat_qconfig(backend='fbgemm', version=1):
     """
