@@ -6756,9 +6756,9 @@ class TestNN(NNTestCase):
         sequences = [a, b, c]
 
         # batch_first = true
-        padded_sequences = rnn_utils.pad_sequence(sequences, True)
+        padded_sequences = rnn_utils.pad_sequence(sequences, batch_first=True)
         lengths = torch.as_tensor([v.size(0) for v in sequences])
-        unpadded_sequences = rnn_utils.unpad_sequence(padded_sequences, lengths, True)
+        unpadded_sequences = rnn_utils.unpad_sequence(padded_sequences, lengths, batch_first=True)
         _compatibility_test(sequences, unpadded_sequences)
 
         # batch_first = false
