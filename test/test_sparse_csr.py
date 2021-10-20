@@ -672,6 +672,8 @@ class TestSparseCSR(TestCase):
         not _check_cusparse_spgemm_available(),
         "cuSparse Generic API SpGEMM is not available"
     )
+    @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
+                        torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
     def test_addmm_sizes_all_sparse_csr(self, device, dtype):
         for m in [0, 1, 25]:
             for n in [0, 1, 10]:

@@ -190,7 +190,7 @@ struct TORCH_API OptionalType : public UnionType {
   TypePtr createWithContained(
       std::vector<TypePtr> contained_types) const override {
     AT_ASSERT(contained_types.size() == 1);
-    return create(contained_types[0]);
+    return create(std::move(contained_types[0]));
   }
 
   bool isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const override;
@@ -1626,23 +1626,23 @@ inline TypePtr TensorType::fromBoolType() {
   return TensorType::createContiguous(at::kBool, at::kCPU, {});
 }
 
-inline c10::optional<c10::ScalarType> tryScalarTypeFromJitType(const c10::TypePtr & type) {
-  if (type == FloatType::get()) {
+inline c10::optional<c10::ScalarType> tryScalarTypeFromJitType(const Type& type) {
+  if (&type == FloatType::get().get()) {
     return at::typeMetaToScalarType(c10::get_default_dtype());
-  } else if (type == IntType::get()) {
+  } else if (&type == IntType::get().get()) {
     return at::ScalarType::Long;
-  } else if (type == BoolType::get()) {
+  } else if (&type == BoolType::get().get()) {
     return at::ScalarType::Bool;
   }
   return c10::nullopt;
 }
 
-inline at::ScalarType scalarTypeFromJitType(const c10::TypePtr& type) {
+inline at::ScalarType scalarTypeFromJitType(const Type& type) {
   auto result = tryScalarTypeFromJitType(type);
   TORCH_CHECK(
       result,
       "Add new condition, expected Float, Complex, Int, or Bool but got",
-      type->str());
+      type.str());
   return *result;
 }
 
