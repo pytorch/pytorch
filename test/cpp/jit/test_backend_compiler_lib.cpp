@@ -123,8 +123,10 @@ class BackendWithCompiler : public PyTorchBackendInterface {
           auto h_ptr = float_data_ptr(h);
           auto y_ptr = float_data_ptr(y);
           if (instruction == "aten::add") {
+            TORCH_CHECK(x.sizes() == h.sizes());
             y_ptr[0] = x_ptr[0] + h_ptr[0];
           } else {
+            TORCH_CHECK(x.sizes() == h.sizes());
             y_ptr[0] = x_ptr[0] - h_ptr[0];
           }
           output_list.emplace_back(y);
