@@ -25,6 +25,7 @@ def linear(*, input, weight, bias):
     return nn.functional.linear(**locals())
 
 
+@register_acc_op_properties(AccOpProperty.quantized)
 @register_acc_op
 def quantized_linear(*, input, weight, bias, acc_out_ty=None):
     assert acc_out_ty is not None
@@ -462,6 +463,7 @@ def hardswish_mapper(node: torch.fx.Node, _: nn.Module) -> torch.fx.Node:
         new_node.meta = node.meta.copy()
         return new_node
 
+@register_acc_op_properties(AccOpProperty.quantized)
 @register_acc_op_mapping(
     op_and_target=("call_function", torch.ops.quantized.add),
     arg_replacement_tuples=[
@@ -487,6 +489,7 @@ def quantized_add(*, input, other, acc_out_ty=None):
     )
 
 
+@register_acc_op_properties(AccOpProperty.quantized)
 @register_acc_op_mapping(
     op_and_target=("call_function", torch.ops.quantized.mul),
     arg_replacement_tuples=[
@@ -511,6 +514,8 @@ def quantized_mul(*, input, other, acc_out_ty=None):
         qparams["zero_point"],
     )
 
+
+@register_acc_op_properties(AccOpProperty.quantized)
 @register_acc_op_mapping(
     op_and_target=("call_function", torch.quantize_per_tensor),
     arg_replacement_tuples=[
@@ -572,6 +577,18 @@ def quantize_per_channel(*, input, acc_out_ty=None):
 @register_acc_op
 def dequantize(*, input):
     return torch.dequantize(input)
+
+
+@register_acc_op
+def rescale_quantize_per_tensor(*, input, acc_out_ty=None):
+    d = dequantize(input=input)
+    return quantize_per_tensor(input=d, acc_out_ty=acc_out_ty)
+
+
+@register_acc_op
+def rescale_quantize_per_channel(*, input, acc_out_ty=None):
+    d = dequantize(input=input)
+    return quantize_per_channel(input=d, acc_out_ty=acc_out_ty)
 
 
 @register_acc_op_mapping(op_and_target=("call_function", operator.sub))
@@ -898,6 +915,7 @@ def conv2d(*, input, weight, bias, stride, padding, dilation, groups):
     return nn.functional.conv2d(**locals())
 
 
+@register_acc_op_properties(AccOpProperty.quantized)
 @register_acc_op
 def quantized_conv2d(
     *,
@@ -1081,6 +1099,7 @@ def tuple_construct(*, tensors):
     return tuple(tensors)
 
 
+@register_acc_op_properties(AccOpProperty.quantized)
 @register_acc_op_mapping(
     op_and_target=("call_function", torch.ops.quantized.batch_norm2d),
     arg_replacement_tuples=[
@@ -1397,6 +1416,7 @@ def custom_torch_add_mapper(node: torch.fx.Node, mod: nn.Module) -> torch.fx.Nod
         return new_node
 
 
+@register_acc_op_properties(AccOpProperty.quantized)
 @register_custom_acc_mapper_fn(
     op_and_target=("call_module", nn.quantized.Linear),
     arg_replacement_tuples=[
@@ -1454,6 +1474,7 @@ def packed_quantized_linear_mapper(
         return new_node
 
 
+@register_acc_op_properties(AccOpProperty.quantized)
 @register_custom_acc_mapper_fn(
     op_and_target=("call_module", nn.quantized.Conv2d),
     arg_replacement_tuples=[
@@ -1513,6 +1534,7 @@ def packed_quantized_conv2d_mapper(
         return new_node
 
 
+@register_acc_op_properties(AccOpProperty.quantized)
 @register_custom_acc_mapper_fn(
     op_and_target=("call_function", torch.ops.quantized.add_relu),
     arg_replacement_tuples=[
@@ -1547,6 +1569,7 @@ def add_relu_unfuse_mapper(
         return relu_node
 
 
+@register_acc_op_properties(AccOpProperty.quantized)
 @register_custom_acc_mapper_fn(
     op_and_target=("call_module", nn.intrinsic.quantized.ConvReLU2d),
     arg_replacement_tuples=[
@@ -1571,6 +1594,7 @@ def packed_quantized_convrelu2d_mapper(
         )
         relu_node.meta = node.meta
         return relu_node
+
 
 @register_acc_op_mapping(op_and_target=("call_function", torch.nn.functional.gelu))
 @register_acc_op_mapping(op_and_target=("call_method", "gelu"))
