@@ -156,11 +156,9 @@ def _handle_row_wise_sharding(input, world_size, weight, rank, local_shard, pg):
     rearrange_indices_1d = torch.argsort(indices_1d)
     input_sorted.contiguous()
 
-    # Compute expected size
+    # Decide which rank the input goes to by check the sharding range.
     split_size = get_split_size(weight.size(0), world_size)
     rearrange_rows = False
-
-    # Decide which rank the input goes to by check the sharding range.
     input_split_sizes: List[int] = [0] * world_size
     input_split_start_indices: List[int] = [0] * world_size
     # When we do the chunk split, we always ensure the first N - 1 chunks get max out
@@ -195,8 +193,8 @@ def _handle_row_wise_sharding(input, world_size, weight, rank, local_shard, pg):
         )
         rearrange_indices_1d_second_order = torch.argsort(torch.Tensor(indices_flatten))
 
-    # allgather the input split size to be sent from each rank to the current rank.
-    # We then get the output split size
+    # Get the input split size to be sent from each rank to the current rank.
+    # We can then infer the output split size.
     input_split_sizes_tensor = (
         torch.Tensor(input_split_sizes).type("torch.IntTensor").cuda(rank)
     )
@@ -210,12 +208,12 @@ def _handle_row_wise_sharding(input, world_size, weight, rank, local_shard, pg):
     )
     output_split_sizes = output_split_sizes_tensor.tolist()
 
-    # Input size for each rank will have different sizes.
+    # Input sent from each rank to the current rank may have different sizes.
     gathered_input = torch.empty(
         sum(output_split_sizes), dtype=torch.int64, device=input.device
     )
 
-    # Perform the modular operation of the input
+    # Perform the modular operation of the 1D tensor to be sent to each rank.
     input_sorted = torch.remainder(input_sorted, sharded_dim_size_max)
 
     # Perform alltoall
