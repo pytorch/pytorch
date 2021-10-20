@@ -483,6 +483,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
   case ScalarType::Name: {                                                 \
     std::vector<CppType> vec = castValues<SrcType, CppType>(dst_dtype, v); \
     std::vector<Type> qvec;                                                \
+    qvec.reserve(vec.size); \
     for (CppType u : vec) {                                                \
       qvec.emplace_back(u);                                                \
     }                                                                      \

@@ -111,7 +111,7 @@ void nnc_aten_quantized_conv2d(
     int64_t* buf_ranks,
     int64_t* buf_dims,
     int8_t* buf_dtypes,
-    int64_t args_num,
+    int64_t,
     int64_t* extra_args) {
   std::vector<at::Tensor> tensors =
       constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
@@ -139,7 +139,7 @@ void nnc_aten_quantized_conv2d_relu(
     int64_t* buf_ranks,
     int64_t* buf_dims,
     int8_t* buf_dtypes,
-    int64_t args_num,
+    int64_t,
     int64_t* extra_args) {
   std::vector<at::Tensor> tensors =
       constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
@@ -167,7 +167,7 @@ void nnc_aten_quantized_add(
     int64_t* buf_ranks,
     int64_t* buf_dims,
     int8_t* buf_dtypes,
-    int64_t args_num,
+    int64_t,
     int64_t* extra_args) {
   std::vector<at::Tensor> tensors =
       constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
@@ -272,7 +272,7 @@ void nnc_aten_upsample_nearest2d(
     int64_t* buf_ranks,
     int64_t* buf_dims,
     int8_t* buf_dtypes,
-    int64_t args_num,
+    int64_t,
     int64_t* extra_args) {
   std::vector<at::Tensor> tensors =
       constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
@@ -322,7 +322,7 @@ void nnc_aten_quantize_per_tensor(
     int64_t* buf_ranks,
     int64_t* buf_dims,
     int8_t* buf_dtypes,
-    int64_t args_num,
+    int64_t,
     int64_t* extra_args) {
   std::vector<at::Tensor> tensors =
       constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
@@ -340,7 +340,7 @@ void nnc_aten_dequantize(
     int64_t* buf_ranks,
     int64_t* buf_dims,
     int8_t* buf_dtypes,
-    int64_t args_num,
+    int64_t,
     int64_t* extra_args) {
   std::vector<at::Tensor> tensors =
       constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);

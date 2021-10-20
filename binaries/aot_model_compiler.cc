@@ -173,8 +173,9 @@ int main(int argc, char** argv) {
   auto graph = frozen_m.get_method(FLAGS_method_name).graph();
   auto input_shapes = parseInputShapes();
   std::vector<c10::optional<at::Tensor>> example_inputs;
+  example_inputs.reserve(input_shapes.size());
   for (const auto& input_shape : input_shapes) {
-    example_inputs.push_back(at::rand(input_shape));
+    example_inputs.emplace_back(at::rand(input_shape));
   }
 
   torch::jit::RemoveTensorMutation(graph);
