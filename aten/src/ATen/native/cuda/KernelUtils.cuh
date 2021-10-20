@@ -1,5 +1,4 @@
 #pragma once
-#include <ATen/ATen.h>
 #include <ATen/cuda/Atomic.cuh>
 
 namespace at {
