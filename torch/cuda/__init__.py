@@ -621,67 +621,77 @@ class _CudaBase(object):
 
     __new__ = _lazy_new
 
-from torch.storage import TypedStorage
+from torch.storage import TypedStorage, LegacyStorage
 
 class UntypedStorage(_CudaBase, torch._C.CudaByteStorageBase, _StorageBase):
-    pass
+    @classmethod
+    def from_buffer(cls, *args, **kwargs):
+        raise RuntimeError('from_buffer: Not available for CUDA storage')
 
-class ByteStorage(TypedStorage):
+    @classmethod
+    def _new_with_weak_ptr(cls, *args, **kwargs):
+        raise RuntimeError('_new_with_weak_ptr: Not available for CUDA storage')
+
+    @classmethod
+    def _new_shared_filename(cls, manager, obj, size, *, device=None, dtype=None):
+        raise RuntimeError('_new_shared_filename: Not available for CUDA storage')
+
+class ByteStorage(LegacyStorage):
     @classproperty
     def dtype(self):
         return torch.uint8
 
-class DoubleStorage(TypedStorage):
+class DoubleStorage(LegacyStorage):
     @classproperty
     def dtype(self):
         return torch.double
 
-class FloatStorage(TypedStorage):
+class FloatStorage(LegacyStorage):
     @classproperty
     def dtype(self):
         return torch.float
 
-class HalfStorage(TypedStorage):
+class HalfStorage(LegacyStorage):
     @classproperty
     def dtype(self):
         return torch.half
 
-class LongStorage(TypedStorage):
+class LongStorage(LegacyStorage):
     @classproperty
     def dtype(self):
         return torch.long
 
-class IntStorage(TypedStorage):
+class IntStorage(LegacyStorage):
     @classproperty
     def dtype(self):
         return torch.int
 
-class ShortStorage(TypedStorage):
+class ShortStorage(LegacyStorage):
     @classproperty
     def dtype(self):
         return torch.short
 
-class CharStorage(TypedStorage):
+class CharStorage(LegacyStorage):
     @classproperty
     def dtype(self):
         return torch.int8
 
-class BoolStorage(TypedStorage):
+class BoolStorage(LegacyStorage):
     @classproperty
     def dtype(self):
         return torch.bool
 
-class BFloat16Storage(TypedStorage):
+class BFloat16Storage(LegacyStorage):
     @classproperty
     def dtype(self):
         return torch.bfloat16
 
-class ComplexDoubleStorage(TypedStorage):
+class ComplexDoubleStorage(LegacyStorage):
     @classproperty
     def dtype(self):
         return torch.cdouble
 
-class ComplexFloatStorage(TypedStorage):
+class ComplexFloatStorage(LegacyStorage):
     @classproperty
     def dtype(self):
         return torch.cfloat

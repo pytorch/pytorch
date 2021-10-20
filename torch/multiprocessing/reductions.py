@@ -103,7 +103,7 @@ def rebuild_cuda_tensor(tensor_cls, tensor_size, tensor_stride, tensor_offset,
                         requires_grad, ref_counter_handle, ref_counter_offset, event_handle, event_sync_required):
     # If storage_handle is None, storage points to nullptr.
     if storage_handle is None or storage_size_bytes == 0:
-        storage = storage_cls(0)
+        storage = storage_cls(0, dtype=dtype, device=storage_device)
     else:
         storage = storage_from_cache(storage_cls, (storage_handle, storage_offset_bytes))
         if storage is None:
@@ -120,7 +120,7 @@ def rebuild_cuda_tensor(tensor_cls, tensor_size, tensor_stride, tensor_offset,
             shared_cache[(storage_handle, storage_offset_bytes)] = StorageWeakRef(storage)
         else:
             # We already ref counting this Storage, but producer needs new ref-counters to be released.
-            storage_cls._release_ipc_counter(ref_counter_handle, ref_counter_offset)
+            storage_cls._release_ipc_counter(ref_counter_handle, ref_counter_offset, device=storage_device)
 
     t = torch._utils._rebuild_tensor(
         torch.storage.TypedStorage(wrap_storage=storage._untyped(), dtype=dtype),
@@ -288,7 +288,7 @@ def storage_from_cache(cls, key):
     storage_ref = shared_cache.get(key)
     if storage_ref is None:
         return None
-    return cls._new_with_weak_ptr(storage_ref.cdata)
+    return torch.UntypedStorage._new_with_weak_ptr(storage_ref.cdata)
 
 
 def rebuild_storage_fd(cls, df, size):
@@ -305,10 +305,10 @@ def rebuild_storage_fd(cls, df, size):
 
 
 def rebuild_storage_filename(cls, manager, handle, size):
-    storage = storage_from_cache(cls, handle)
+    storage: torch.UntypedStorage = storage_from_cache(cls, handle)
     if storage is not None:
         return storage._shared_decref()
-    storage = cls._new_shared_filename(manager, handle, size)
+    storage = torch.UntypedStorage._new_shared_filename(manager, handle, size)
     shared_cache[handle] = StorageWeakRef(storage)
     return storage._shared_decref()
 

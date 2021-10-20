@@ -1867,6 +1867,7 @@ class AbstractTestCases:
             self.assertEqual(bools.size(), 8)
             self.assertEqual(bools.tolist(), [False, True, True, True, True, True, True, True])
             self.assertEqual(bools.type(), 'torch.BoolStorage')
+            self.assertTrue(isinstance(bools, torch.BoolStorage))
 
             f = bytearray(b'\x80\x02\x8a\nl\xfc\x9cF\xf9 j\xa8P\x19.\x80\x02M\xe9')
             bools = torch.BoolStorage.from_buffer(f, 'big')
@@ -1885,12 +1886,14 @@ class AbstractTestCases:
             self.assertEqual(storage.size(), 6)
             self.assertEqual(storage.tolist(), [-1, 0, 1, 2, 3, 4])
             self.assertEqual(storage.type(), 'torch.IntStorage')
+            self.assertTrue(isinstance(storage, torch.IntStorage))
             self.assertIs(storage.dtype, torch.int32)
 
             floatStorage = storage.float()
             self.assertEqual(floatStorage.size(), 6)
             self.assertEqual(floatStorage.tolist(), [-1, 0, 1, 2, 3, 4])
             self.assertEqual(floatStorage.type(), 'torch.FloatStorage')
+            self.assertTrue(isinstance(floatStorage, torch.FloatStorage))
             self.assertEqual(floatStorage.int().tolist(), [-1, 0, 1, 2, 3, 4])
             self.assertIs(floatStorage.dtype, torch.float32)
 
@@ -1898,6 +1901,7 @@ class AbstractTestCases:
             self.assertEqual(halfStorage.size(), 6)
             self.assertEqual(halfStorage.tolist(), [-1, 0, 1, 2, 3, 4])
             self.assertEqual(halfStorage.type(), 'torch.HalfStorage')
+            self.assertTrue(isinstance(halfStorage, torch.HalfStorage))
             self.assertEqual(halfStorage.int().tolist(), [-1, 0, 1, 2, 3, 4])
             self.assertIs(halfStorage.dtype, torch.float16)
 
@@ -1905,6 +1909,7 @@ class AbstractTestCases:
             self.assertEqual(bfloat16Storage.size(), 6)
             self.assertEqual(bfloat16Storage.tolist(), [-1, 0, 1, 2, 3, 4])
             self.assertEqual(bfloat16Storage.type(), 'torch.BFloat16Storage')
+            self.assertTrue(isinstance(bfloat16Storage, torch.BFloat16Storage))
             self.assertEqual(bfloat16Storage.int().tolist(), [-1, 0, 1, 2, 3, 4])
             self.assertIs(bfloat16Storage.dtype, torch.bfloat16)
 
@@ -1912,6 +1917,7 @@ class AbstractTestCases:
             self.assertEqual(longStorage.size(), 6)
             self.assertEqual(longStorage.tolist(), [-1, 0, 1, 2, 3, 4])
             self.assertEqual(longStorage.type(), 'torch.LongStorage')
+            self.assertTrue(isinstance(longStorage, torch.LongStorage))
             self.assertEqual(longStorage.int().tolist(), [-1, 0, 1, 2, 3, 4])
             self.assertIs(longStorage.dtype, torch.int64)
 
@@ -1919,6 +1925,7 @@ class AbstractTestCases:
             self.assertEqual(shortStorage.size(), 6)
             self.assertEqual(shortStorage.tolist(), [-1, 0, 1, 2, 3, 4])
             self.assertEqual(shortStorage.type(), 'torch.ShortStorage')
+            self.assertTrue(isinstance(shortStorage, torch.ShortStorage))
             self.assertEqual(shortStorage.int().tolist(), [-1, 0, 1, 2, 3, 4])
             self.assertIs(shortStorage.dtype, torch.int16)
 
@@ -1926,6 +1933,7 @@ class AbstractTestCases:
             self.assertEqual(doubleStorage.size(), 6)
             self.assertEqual(doubleStorage.tolist(), [-1.0, 0.0, 1.0, 2.0, 3.0, 4.0])
             self.assertEqual(doubleStorage.type(), 'torch.DoubleStorage')
+            self.assertTrue(isinstance(doubleStorage, torch.DoubleStorage))
             self.assertEqual(doubleStorage.int().tolist(), [-1, 0, 1, 2, 3, 4])
             self.assertIs(doubleStorage.dtype, torch.float64)
 
@@ -1933,6 +1941,7 @@ class AbstractTestCases:
             self.assertEqual(charStorage.size(), 6)
             self.assertEqual(charStorage.tolist(), [-1.0, 0.0, 1.0, 2.0, 3.0, 4.0])
             self.assertEqual(charStorage.type(), 'torch.CharStorage')
+            self.assertTrue(isinstance(charStorage, torch.CharStorage))
             self.assertEqual(charStorage.int().tolist(), [-1, 0, 1, 2, 3, 4])
             self.assertIs(charStorage.dtype, torch.int8)
 
@@ -1940,6 +1949,7 @@ class AbstractTestCases:
             self.assertEqual(byteStorage.size(), 6)
             self.assertEqual(byteStorage.tolist(), [255, 0, 1, 2, 3, 4])
             self.assertEqual(byteStorage.type(), 'torch.ByteStorage')
+            self.assertTrue(isinstance(byteStorage, torch.ByteStorage))
             self.assertEqual(byteStorage.int().tolist(), [255, 0, 1, 2, 3, 4])
             self.assertIs(byteStorage.dtype, torch.uint8)
 
@@ -1947,6 +1957,7 @@ class AbstractTestCases:
             self.assertEqual(boolStorage.size(), 6)
             self.assertEqual(boolStorage.tolist(), [True, False, True, True, True, True])
             self.assertEqual(boolStorage.type(), 'torch.BoolStorage')
+            self.assertTrue(isinstance(boolStorage, torch.BoolStorage))
             self.assertEqual(boolStorage.int().tolist(), [1, 0, 1, 1, 1, 1])
             self.assertIs(boolStorage.dtype, torch.bool)
 
@@ -1954,13 +1965,130 @@ class AbstractTestCases:
             self.assertEqual(complexfloat_storage.size(), 6)
             self.assertEqual(complexfloat_storage.tolist(), [-1, 0, 1 + 2j, 2.5j, 3.5, 4 - 2j])
             self.assertEqual(complexfloat_storage.type(), 'torch.ComplexFloatStorage')
+            self.assertTrue(isinstance(complexfloat_storage, torch.ComplexFloatStorage))
             self.assertIs(complexfloat_storage.dtype, torch.complex64)
 
             complexdouble_storage = complexfloat_storage.complex_double()
             self.assertEqual(complexdouble_storage.size(), 6)
             self.assertEqual(complexdouble_storage.tolist(), [-1, 0, 1 + 2j, 2.5j, 3.5, 4 - 2j])
             self.assertEqual(complexdouble_storage.type(), 'torch.ComplexDoubleStorage')
+            self.assertTrue(isinstance(complexdouble_storage, torch.ComplexDoubleStorage))
             self.assertIs(complexdouble_storage.dtype, torch.complex128)
+
+        def test_storage_error(self):
+            quantized_storages = [
+                torch.QInt32Storage,
+                torch.QInt8Storage,
+                torch.QUInt2x4Storage,
+                torch.QUInt4x2Storage,
+                torch.QUInt8Storage,
+            ]
+
+            with self.assertRaisesRegex(RuntimeError, r"Only child classes of LegacyStorage can be instantiated"):
+                torch.storage.LegacyStorage()
+
+            for storage_class in torch._storage_classes:
+                if storage_class in [torch.UntypedStorage, torch.cuda.UntypedStorage, torch.TypedStorage]:
+                    continue
+
+                device = 'cuda' if storage_class.__module__ == 'torch.cuda' else 'cpu'
+                dtype = storage_class.dtype
+
+                if device == 'cuda' and not torch.cuda.is_available():
+                    continue
+
+                # Legacy <type>Storage constructor errors
+                with self.assertRaisesRegex(RuntimeError, r"'device' cannot be specified"):
+                    storage_class(device='cpu')
+
+                with self.assertRaisesRegex(RuntimeError, r"'dtype' cannot be specified"):
+                    storage_class(dtype=torch.float)
+
+                with self.assertRaisesRegex(TypeError, r"got an unexpected keyword"):
+                    storage_class(sdlkjf=torch.float)
+
+                with self.assertRaisesRegex(RuntimeError, r"Too many positional arguments"):
+                    storage_class(0, 0)
+
+                with self.assertRaisesRegex(TypeError, r"invalid data type"):
+                    storage_class('string')
+
+                with self.assertRaisesRegex(TypeError, r"Argument type not recognized"):
+                    storage_class(torch.tensor([]))
+
+                s = storage_class()
+
+                with self.assertRaisesRegex(RuntimeError, r"No positional arguments"):
+                    storage_class(0, wrap_storage=s._untyped())
+
+                with self.assertRaisesRegex(TypeError, r"must be UntypedStorage"):
+                    storage_class(wrap_storage=s)
+
+                if torch.cuda.is_available():
+                    if storage_class in quantized_storages:
+                        with self.assertRaisesRegex(RuntimeError, r"Cannot create CUDA storage with quantized dtype"):
+                            s.cuda()
+
+                    else:
+
+                        if s.is_cuda:
+                            s_other_device = s.cpu()
+                        else:
+                            s_other_device = s.cuda()
+
+                        with self.assertRaisesRegex(RuntimeError, r"Device of 'wrap_storage' must be"):
+                            storage_class(wrap_storage=s_other_device._untyped())
+
+                # TypedStorage constructor errors
+                with self.assertRaisesRegex(RuntimeError, r"No positional arguments"):
+                    torch.TypedStorage(0, wrap_storage=s._untyped(), dtype=dtype)
+
+                with self.assertRaisesRegex(RuntimeError, r"Argument 'dtype' must be specified"):
+                    torch.TypedStorage(wrap_storage=s._untyped())
+
+                with self.assertRaisesRegex(TypeError, r"Argument 'dtype' must be torch.dtype"):
+                    torch.TypedStorage(wrap_storage=s._untyped(), dtype=0)
+
+                with self.assertRaisesRegex(RuntimeError, r"Argument 'device' should not be specified"):
+                    torch.TypedStorage(wrap_storage=s._untyped(), dtype=dtype, device=device)
+
+                with self.assertRaisesRegex(TypeError, r"Argument 'wrap_storage' must be UntypedStorage"):
+                    torch.TypedStorage(wrap_storage=s, dtype=dtype)
+
+                with self.assertRaisesRegex(RuntimeError, r"Storage device not recognized"):
+                    torch.TypedStorage(dtype=dtype, device='xla')
+
+                if torch.cuda.is_available():
+                    if storage_class in quantized_storages:
+                        with self.assertRaisesRegex(RuntimeError, r"Cannot create CUDA storage with quantized dtype"):
+                            torch.TypedStorage(dtype=dtype, device='cuda')
+
+                with self.assertRaisesRegex(TypeError, r"Argument type not recognized"):
+                    torch.TypedStorage(torch.tensor([]), dtype=dtype, device=device)
+
+                with self.assertRaisesRegex(RuntimeError, r"Too many positional arguments"):
+                    torch.TypedStorage(0, 0, dtype=dtype, device=device)
+
+        def test_storage_error_no_attribute(self):
+            storage_classes = [
+                torch.cuda.ByteStorage,
+                torch.cuda.FloatStorage,
+                torch.cuda.UntypedStorage,
+            ]
+            for storage_class in storage_classes:
+                with self.assertRaisesRegex(RuntimeError, r'Not available for CUDA storage'):
+                    storage_class.from_buffer()
+
+                if storage_class == torch.cuda.UntypedStorage:
+                    with self.assertRaisesRegex(RuntimeError, r'Not available for CUDA storage'):
+                        storage_class._new_with_weak_ptr()
+
+                else:
+                    with self.assertRaisesRegex(AttributeError, r'has no attribute'):
+                        storage_class._new_with_weak_ptr()
+
+                with self.assertRaisesRegex(RuntimeError, r'Not available for CUDA storage'):
+                    storage_class._new_shared_filename(0, 0, 0)
 
         def test_from_file(self):
             def assert_with_filename(filename):

@@ -178,11 +178,7 @@ class Tensor(torch._C._TensorBase):
         if self.dtype not in torch.storage._dtype_to_storage_type_map():
             raise RuntimeError(f'unsupported Storage type: {self.dtype}')
 
-        storage = self._storage()
-        storage_name = torch.storage._dtype_to_storage_type_map()[self.dtype]
-        storage_class = eval(type(storage).__module__ + '.' + storage_name)
-        storage = storage_class(wrap_storage=storage)
-        return storage
+        return torch.TypedStorage(wrap_storage=self._storage(), dtype=self.dtype)
 
     def _reduce_ex_internal(self, proto):
         check_serializing_named_tensor(self)
