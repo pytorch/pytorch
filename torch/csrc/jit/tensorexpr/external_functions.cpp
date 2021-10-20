@@ -119,10 +119,10 @@ void nnc_aten_quantized_conv2d(
   const c10::ScalarType x_qdtype = static_cast<c10::ScalarType>(extra_args[2]);
   at::Tensor qx = at::from_blob_quantized_per_tensor_affine(
       buf_data[1],
-      // NOLINTNEXTLINE
+      // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
       tensors[1].sizes(),
       [](void*) {},
-      // NOLINTNEXTLINE
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions)
       x_qscale,
       x_qzero,
       at::TensorOptions(toQIntType(x_qdtype)));
@@ -149,10 +149,10 @@ void nnc_aten_quantized_conv2d_relu(
   const c10::ScalarType x_qdtype = static_cast<c10::ScalarType>(extra_args[2]);
   at::Tensor qx = at::from_blob_quantized_per_tensor_affine(
       buf_data[1],
-      // NOLINTNEXTLINE
+      // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
       tensors[1].sizes(),
       [](void*) {},
-      // NOLINTNEXTLINE
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions)
       x_qscale,
       x_qzero,
       at::TensorOptions(toQIntType(x_qdtype)));
@@ -180,10 +180,10 @@ void nnc_aten_quantized_add(
   const c10::ScalarType a_qdtype = static_cast<c10::ScalarType>(extra_args[2]);
   at::Tensor qa = at::from_blob_quantized_per_tensor_affine(
       buf_data[1],
-      // NOLINTNEXTLINE
+      // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
       tensors[1].sizes(),
       [](void*) {},
-      // NOLINTNEXTLINE
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions)
       a_qscale,
       a_qzero,
       at::TensorOptions(toQIntType(a_qdtype)));
@@ -192,10 +192,10 @@ void nnc_aten_quantized_add(
   const c10::ScalarType b_qdtype = static_cast<c10::ScalarType>(extra_args[5]);
   at::Tensor qb = at::from_blob_quantized_per_tensor_affine(
       buf_data[2],
-      // NOLINTNEXTLINE
+      // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
       tensors[2].sizes(),
       [](void*) {},
-      // NOLINTNEXTLINE
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions)
       b_qscale,
       b_qzero,
       at::TensorOptions(toQIntType(b_qdtype)));
@@ -219,6 +219,7 @@ void nnc_aten_upsample_nearest2d(
     int64_t* extra_args) {
   std::vector<at::Tensor> tensors =
       constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+  // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
   at::Tensor x = tensors[0];
   const double x_qscale = ((double*)extra_args)[0];
   const int64_t x_qzero = extra_args[1];
@@ -227,10 +228,10 @@ void nnc_aten_upsample_nearest2d(
   if (is_quantized) {
     x = at::from_blob_quantized_per_tensor_affine(
         buf_data[1],
-        // NOLINTNEXTLINE
+        // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
         tensors[1].sizes(),
         [](void*) {},
-        // NOLINTNEXTLINE
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions)
         x_qscale,
         x_qzero,
         at::TensorOptions(toQIntType(static_cast<c10::ScalarType>(x_qdtype))));
@@ -271,7 +272,7 @@ void nnc_aten_quantize_per_tensor(
     int64_t* extra_args) {
   std::vector<at::Tensor> tensors =
       constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
-  // NOLINTNEXTLINE
+  // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
   at::Tensor x = tensors[1];
   const double qscale = ((double*)extra_args)[0];
   const int64_t qzero = extra_args[1];
@@ -295,8 +296,10 @@ void nnc_aten_dequantize(
   const int64_t qdtype = extra_args[2];
   at::Tensor qx = at::from_blob_quantized_per_tensor_affine(
       buf_data[1],
+      // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
       tensors[1].sizes(),
       [](void*) {},
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions)
       qscale,
       qzero,
       at::TensorOptions(toQIntType(static_cast<c10::ScalarType>(qdtype))));
