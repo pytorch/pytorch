@@ -182,13 +182,6 @@ def gen_lazy_nativefunc_definition(func: NativeFunction, backend_index: BackendI
     assert len(value_types) > 0, f"Only supporting tensor ops so far, none found in {sig}"
     first_tensor = value_types[0]
     bridge_str = f"""auto result = bridge::AtenFromLtcTensor(lazy_{first_tensor.name}.CreateFrom(node,
-        // TODO (@wconstab): experiment on dtype
-        // try always overriding output dtype to match the one ATen says our op should produce.
-        // this diverges from most of the handwritten methods, which often do not override and
-        // rely on other behavior in the lowering or copy process to make this correct.
-        // (1) evaluate design goal: to always pick the IR's dtype in one place (here)
-        // (2) rationalize this with Google's design, it may be a problem
-        // (3) evaluate perf impact: make sure we're not actually doing casts becuase of this override
         out_dtype.front()));"""
     if returns_length > 1:
         bridge_str = f"""std::vector<LazyTensor> lazy_tensors;
