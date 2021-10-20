@@ -3,6 +3,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/core/List.h>
+#include <c10/util/irange.h>
 
 namespace at { namespace native {
 
@@ -28,7 +29,7 @@ static C10_UNUSED std::vector<Tensor> expandTensors(const Tensor & self, const t
         }
         // The sizes of the ByteTensor mask or bool tensor must match the sizes of the
         // corresponding dimensions in self
-        for (int64_t j = 0; j < index.dim(); j++) {
+        for (const auto j : c10::irange(index.dim())) {
           int64_t srcIdx = result.size() + j;
           if (index.size(j) != self.size(srcIdx)) {
             invalid_mask(self, srcIdx, index, j);
@@ -36,7 +37,7 @@ static C10_UNUSED std::vector<Tensor> expandTensors(const Tensor & self, const t
         }
         // Replace with nonzeros
         auto nonzero = index.nonzero();
-        for (int64_t j = 0; j < index.dim(); j++) {
+        for (const auto j : c10::irange(index.dim())) {
           result.emplace_back(nonzero.select(1, j));
         }
       } else {
