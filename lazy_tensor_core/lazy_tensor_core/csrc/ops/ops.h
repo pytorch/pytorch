@@ -175,10 +175,6 @@ NodePtr ARange(const at::Scalar& start, const at::Scalar& end,
 
 NodePtr BroadcastTensors(OpList tensors);
 
-NodePtr Norm(const torch::lazy::Value& input, const c10::optional<at::Scalar>& p,
-             c10::optional<at::ScalarType> dtype,
-             lazy_tensors::Span<const lazy_tensors::int64> dims, bool keepdim);
-
 NodePtr Identity(lazy_tensors::int64 lines, lazy_tensors::int64 cols,
                  lazy_tensors::PrimitiveType element_type);
 

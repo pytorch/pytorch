@@ -6,7 +6,6 @@ namespace torch_lazy_tensors {
 namespace tensor_aten_ops {
 
 // TODO: Remove methods from here as we support codegen for more ops
-
 //////////////////////////////////////////////////////////////////////////////
 // ATEN operators follows here, listed in alphabetical order.
 //////////////////////////////////////////////////////////////////////////////
@@ -615,10 +614,6 @@ std::pair<LazyTensor, LazyTensor> nms(const LazyTensor& boxes,
 
 LazyTensor nonzero(const LazyTensor& input);
 
-LazyTensor norm(const LazyTensor& input, const c10::optional<at::Scalar>& p,
-                c10::optional<at::ScalarType> dtype, at::IntArrayRef dim,
-                bool keepdim);
-
 LazyTensor normal(double mean, const LazyTensor& std);
 
 LazyTensor normal(const LazyTensor& mean, double std);
@@ -743,18 +738,6 @@ LazyTensor sinh(const LazyTensor& input);
 LazyTensor slice(const LazyTensor& input, lazy_tensors::int64 dim,
                  lazy_tensors::int64 start, lazy_tensors::int64 end,
                  lazy_tensors::int64 step);
-
-// Computes a loss that uses a squared term if the absolute element-wise error
-// falls below 1 and an L1 term otherwise.
-LazyTensor smooth_l1_loss(const LazyTensor& input, const LazyTensor& target,
-                          lazy_tensors::int64 reduction, double beta);
-
-// Returns the gradient of the input of a smooth_l1_loss operation.
-LazyTensor smooth_l1_loss_backward(const LazyTensor& grad_output,
-                                   const LazyTensor& input,
-                                   const LazyTensor& target,
-                                   lazy_tensors::int64 reduction, double beta);
-
 LazyTensor softmax(const LazyTensor& input, lazy_tensors::int64 dim,
                    c10::optional<at::ScalarType> dtype);
 LazyTensor softmax_backward(const LazyTensor& grad_output,
@@ -803,12 +786,6 @@ LazyTensor sub(
 LazyTensor sub(
     const LazyTensor& input, const at::Scalar& other, const at::Scalar& alpha,
     c10::optional<at::ScalarType> logical_element_type = c10::nullopt);
-
-LazyTensor sum(const LazyTensor& input,
-               std::vector<lazy_tensors::int64> dimensions,
-               bool keep_reduced_dimensions,
-               c10::optional<at::ScalarType> dtype);
-
 std::tuple<LazyTensor, LazyTensor, LazyTensor> svd(const LazyTensor& input,
                                                    bool some, bool compute_uv);
 
@@ -835,9 +812,6 @@ std::tuple<LazyTensor, LazyTensor> topk(const LazyTensor& input,
                                         lazy_tensors::int64 k,
                                         lazy_tensors::int64 dim, bool largest,
                                         bool sorted);
-
-// Returns the sum of the elements of the diagonal of the input 2-D matrix.
-LazyTensor trace(const LazyTensor& input);
 
 // Swap given dimensions of the input.
 LazyTensor transpose(const LazyTensor& input, lazy_tensors::int64 dim0,

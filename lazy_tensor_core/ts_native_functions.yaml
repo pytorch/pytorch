@@ -21,9 +21,14 @@ full_codegen:
   - native_layer_norm_backward
   - rsqrt
   - sigmoid
+  - smooth_l1_loss
+  - smooth_l1_loss_backward
   - softplus
   - softplus_backward
+  - sum
+  - sum.dim_IntList
   - topk
+  - trace
   - add.Tensor
 supported:
   - as_strided
@@ -70,8 +75,6 @@ supported:
   - squeeze_
   - squeeze_.dim
   - stack
-  - sum
-  - sum.dim_IntList
   - t
   - t_
   - tanh

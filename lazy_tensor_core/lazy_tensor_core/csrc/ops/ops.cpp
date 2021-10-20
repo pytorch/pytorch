@@ -8,12 +8,12 @@
 #include "lazy_tensor_core/csrc/ops/constant.h"
 #include "lazy_tensor_core/csrc/ops/expand.h"
 #include "lazy_tensor_core/csrc/ops/permute.h"
-#include "lazy_tensor_core/csrc/ops/sum.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensor_core/csrc/torch_util.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/computation_client/util.h"
 #include "lazy_tensors/shape_util.h"
+#include "lazy_tensor_core/csrc/ts_backend/LazyLazyIr.h"
 #include "torch/csrc/lazy/core/ir_metadata.h"
 
 namespace torch_lazy_tensors {
@@ -265,44 +265,6 @@ NodePtr BroadcastTensors(OpList tensors) {
   std::dynamic_pointer_cast<TsNode>(node)->SetShapeDeferred(
       [&]() { return compiler::NodeLowering::Get()->Infer(node.get()); });
   return node;
-}
-
-NodePtr Norm(const torch::lazy::Value& input, const c10::optional<at::Scalar>& p,
-             c10::optional<at::ScalarType> dtype,
-             lazy_tensors::Span<const lazy_tensors::int64> dims, bool keepdim) {
-  ScopePusher ir_scope(at::aten::norm.toQualString());
-  auto dimensions = lazy_tensors::util::ToVector<lazy_tensors::int64>(dims);
-  if (dimensions.empty()) {
-    dimensions =
-        lazy_tensors::util::Iota<lazy_tensors::int64>(ir::GetShapeFromTsValue(input).rank());
-  }
-  if (!p.has_value() || p->toDouble() == 2.0) {
-    NodePtr square = input * input;
-    NodePtr result = torch::lazy::MakeNode<Sum>(square, dimensions, keepdim, dtype);
-    return Sqrt(result);
-  }
-  double norm_value = p->toDouble();
-  if (norm_value == 1.0) {
-    // Contrary to documentation, norm(p=1) has nothing to do with traces and
-    // standard mathematical definitions of nuclear norms:
-    //
-    //   >>> import torch
-    //   >>> x = torch.randn(4, 4)
-    //   >>> print(torch.norm(x, 1))
-    //   tensor(11.9437)
-    //   >>> print(torch.trace(x.abs()))
-    //   tensor(3.1235)
-    //   >>> print(x.abs().sum())
-    //   tensor(11.9437)
-    return torch::lazy::MakeNode<Sum>(Abs(input), dimensions, keepdim, dtype);
-  }
-  // Generic sum(x^p)^(1/p) norms.
-  NodePtr norm_exp = ScalarOp(norm_value, ir::GetShapeFromTsValue(input).element_type());
-  NodePtr norm_exp_inv =
-      ScalarOp(1.0 / norm_value, ir::GetShapeFromTsValue(input).element_type());
-  NodePtr exp = Pow(Abs(input), norm_exp);
-  NodePtr result = torch::lazy::MakeNode<Sum>(exp, dimensions, keepdim, dtype);
-  return Pow(result, norm_exp_inv);
 }
 
 NodePtr Identity(lazy_tensors::int64 lines, lazy_tensors::int64 cols,
