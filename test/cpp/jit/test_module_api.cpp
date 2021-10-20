@@ -13,7 +13,7 @@
 namespace torch {
 namespace jit {
 
-static const auto moduleInterfaceSrc = R"JIT(
+static constexpr c10::string_view moduleInterfaceSrc = R"JIT(
 class OneInterface(ModuleInterface):
     def one(self, x: Tensor, y: Tensor) -> Tensor:
         pass
@@ -27,7 +27,7 @@ def forward(self, x: Tensor) -> Tensor:
     return self.attr + x
 )JIT"};
 
-static const auto parentForward = R"JIT(
+static const std::string parentForward = R"JIT(
 def forward(self, x: Tensor) -> Tensor:
     return self.subMod1.one(x, x) + self.subMod2.one(x, x)
 )JIT";

@@ -5,6 +5,7 @@
 
 #include <ATen/native/im2col.h>
 #include <ATen/native/im2col_shape_check.h>
+#include <c10/util/irange.h>
 
 namespace at {
 namespace native {
@@ -91,7 +92,7 @@ static void im2col_out_cpu_template(
         Tensor input_n;
         Tensor output_n;
 
-        for (int64_t elt = 0; elt < batch_size; elt++) {
+        for (const auto elt : c10::irange(batch_size)) {
           input_n = input.select(0, elt);
           output_n = output.select(0, elt);
 
