@@ -211,6 +211,7 @@ enum pytorch_qnnp_status pytorch_qnnp_create_deconvolution2d_nhwc_q8(
 
   deconvolution->ukernel_type = pytorch_qnnp_ukernel_type_conv;
   deconvolution->format = pytorch_qnnp_format_quint8;
+  deconvolution->transpose = true;
 
   *deconvolution_out = deconvolution;
   return pytorch_qnnp_status_success;

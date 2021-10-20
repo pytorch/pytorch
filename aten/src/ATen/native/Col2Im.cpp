@@ -5,6 +5,7 @@
 
 #include <ATen/native/im2col.h>
 #include <ATen/native/im2col_shape_check.h>
+#include <c10/util/irange.h>
 
 // Note [im2col/col2im output padding]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -150,7 +151,7 @@ static void col2im_out_cpu_template(
                 stride_width +
             1;
 
-        for (int64_t elt = 0; elt < batch_size; elt++) {
+        for (const auto elt : c10::irange(batch_size)) {
           input_n = input.select(0, elt);
           output_n = output.select(0, elt);
 
