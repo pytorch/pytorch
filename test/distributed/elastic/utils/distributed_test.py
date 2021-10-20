@@ -44,9 +44,22 @@ class DistributedUtilTest(unittest.TestCase):
             )
 
     def test_create_store_multi(self):
-        world_size = 3
-        server_port = get_free_port()
+        # allow server to start first by specifying an indeterminate number of workers
+        world_size = -1
         localhost = socket.gethostname()
+
+        # start the server on the main process using an available port
+        store = create_c10d_store(
+            is_server=True,
+            server_addr=localhost,
+            server_port=0,
+            timeout=2,
+            wait_for_workers=False,
+        )
+
+        # worker processes will use the port that was assigned to the server
+        server_port = store.port
+
         worker0 = mp.Process(
             target=_create_c10d_store_mp,
             args=(False, localhost, server_port, world_size),
@@ -58,15 +71,6 @@ class DistributedUtilTest(unittest.TestCase):
 
         worker0.start()
         worker1.start()
-
-        # start the server on the main process
-        store = create_c10d_store(
-            is_server=True,
-            server_addr=localhost,
-            server_port=server_port,
-            world_size=world_size,
-            timeout=2,
-        )
 
         worker0.join()
         worker1.join()
