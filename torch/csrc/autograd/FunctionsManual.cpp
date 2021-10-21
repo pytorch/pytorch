@@ -3696,6 +3696,13 @@ bool any_variable_defined(const variable_list& variables) {
 // efficiently in such cases, however, as evaluating of each K_i will amount to calls
 // to ORGQR to be able to compute H_i_plus.
 
+// This function computes either the product between
+// (I - tau u v^H) and K (in-place or not) with `condition_with_I = true`, or between
+// (-tau u v^H) and K (out-of-place only) with `condition_with_I = false`.
+// Parameter `left` controls whether the matrix K is multiplied from the left or
+// from the right.
+// Additionally, when the computation is done in-place, we exploit that the first
+// `k` coordinates of `u_full/v_full` are zeros.
 Tensor apply_simple_transformation(
     int64_t m, int64_t k,
     const Tensor& u_full, const Tensor& v_full,
