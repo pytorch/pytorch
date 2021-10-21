@@ -5093,6 +5093,7 @@ class TestLinalg(TestCase):
 
         for (size_x, size_y), nctg_x, nctg_y in product(self.gen_sizes_matmul(3), (True, False), (True, False)):
             x = make_arg(size_x, noncontiguous=nctg_x)
+            y = make_arg(size_y, noncontiguous=nctg_y)
             self.check_single_matmul(x, y)
 
     def test_linear_algebra_scalar_raises(self, device) -> None:
