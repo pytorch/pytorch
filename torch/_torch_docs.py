@@ -8276,7 +8276,7 @@ Example::
     >>> torch.round(torch.tensor([-0.5, 0.5, 1.5, 2.5]))
     tensor([-0., 0., 2., 2.])
     
-    >>> # A positive decimal argument rounds to the to that decimal place
+    >>> # A positive decimals argument rounds to the to that decimal place
     >>> torch.round(torch.tensor([0.1234567]), decimals=3)
     tensor([0.1230])
     
