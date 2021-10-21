@@ -223,7 +223,7 @@ void FixupONNXLoopNodeInputs(Node* node) {
   cond->setType(BoolType::get());
 
   Value* i = sub_block->inputs().at(0);
-  i->setType(TensorType::fromNumberType(IntType::get()));
+  i->setType(TensorType::fromNumberType(*IntType::get()));
 
   // add cast to condition input inside the loop.
   Value* next_cond_val = sub_block->outputs().at(0);
