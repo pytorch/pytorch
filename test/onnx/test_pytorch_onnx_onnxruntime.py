@@ -6926,15 +6926,15 @@ class TestONNXRuntime(unittest.TestCase):
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_kldiv_loss(self):
 
-        x = torch.rand(5)
+        x = torch.rand(5).log()
         y = torch.rand(5)
         self._kldiv_loss(x, y)
 
-        x = torch.rand(2, 3, 5)
+        x = torch.rand(2, 3, 5).log()
         y = torch.rand(2, 3, 5)
         self._kldiv_loss(x, y)
 
-        x = torch.rand(2, 3, 5, 7)
+        x = torch.rand(2, 3, 5, 7).log()
         y = torch.rand(2, 3, 5, 7)
         self._kldiv_loss(x, y)
 

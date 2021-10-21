@@ -662,25 +662,26 @@ void l1_kernel(TensorIterator& iter) {
 }
 
 void smooth_l1_kernel(TensorIterator& iter, double beta) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "smooth_l1_cpu", [&]() {
-    using Vec = Vectorized<scalar_t>;
-    const scalar_t beta_val(beta);
-    const Vec beta_val_vec(beta_val);
-    const Vec point_five_vec(static_cast<scalar_t>(0.5));
-    cpu_kernel_vec(
-        iter,
-        [&beta_val](scalar_t a, scalar_t b) -> scalar_t {
-          auto z = std::abs(a - b);
-          return z < beta_val
-              ? static_cast<scalar_t>(0.5) * z * z / beta_val
-              : z - static_cast<scalar_t>(0.5) * beta_val;
-        },
-        [&beta_val_vec, &point_five_vec](Vec a, Vec b) {
-          auto z = (a - b).abs();
-          return Vec::blendv(
-              point_five_vec * z * z / beta_val_vec, z - point_five_vec * beta_val_vec, z >= beta_val_vec);
-        });
-  });
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+        kBFloat16, kHalf, iter.dtype(), "smooth_l1_cpu", [&]() {
+        using Vec = Vectorized<scalar_t>;
+        const scalar_t beta_val(beta);
+        const Vec beta_val_vec(beta_val);
+        const Vec point_five_vec(static_cast<scalar_t>(0.5));
+        cpu_kernel_vec(
+            iter,
+            [&beta_val](scalar_t a, scalar_t b) -> scalar_t {
+              auto z = std::abs(a - b);
+              return z < beta_val
+                  ? static_cast<scalar_t>(0.5) * z * z / beta_val
+                  : z - static_cast<scalar_t>(0.5) * beta_val;
+            },
+            [&beta_val_vec, &point_five_vec](Vec a, Vec b) {
+              auto z = (a - b).abs();
+              return Vec::blendv(
+                  point_five_vec * z * z / beta_val_vec, z - point_five_vec * beta_val_vec, z >= beta_val_vec);
+            });
+      });
 }
 
 void huber_kernel(TensorIterator& iter, double delta) {

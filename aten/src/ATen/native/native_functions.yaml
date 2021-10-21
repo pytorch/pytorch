@@ -1236,6 +1236,7 @@
     MkldnnCPU: copy_mkldnn_
     SparseCPU, SparseCUDA, SparseHIP, SparseXPU: copy_sparse_wrapper_
     CompositeExplicitAutograd: copy_
+    SparseCsrCPU, SparseCsrCUDA: copy_sparse_csr_
 
 - func: _copy_from(Tensor self, Tensor dst, bool non_blocking=False) -> Tensor
   dispatch: {}
@@ -1823,6 +1824,7 @@
     CPU, Meta: resize_
     CUDA: resize_cuda_
     QuantizedCPU: quantized_resize_cpu_
+    SparseCsrCPU, SparseCsrCUDA: resize_sparse_csr_
 
 - func: empty_quantized(int[] size, Tensor qtensor, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   category_override: factory
