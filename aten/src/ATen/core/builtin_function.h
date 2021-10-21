@@ -62,12 +62,14 @@ struct BuiltinOpFunction : public Function {
     return *this;
   }
 
-  void call(Stack& stack, size_t, c10::function_ref<void(const Code&)>) override {
+  bool call(Stack& stack, size_t, c10::function_ref<void(const Code&)>) override {
     run(stack);
+    return false;
   }
 
-  void call(Stack& stack, c10::function_ref<void(const mobile::Code&)>) override {
+  bool call(Stack& stack, c10::function_ref<void(const mobile::Code&)>) override {
     run(stack);
+    return false;
   }
 
   ~BuiltinOpFunction() override {}
