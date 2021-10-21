@@ -1202,7 +1202,7 @@ class TestOldViewOps(TestCase):
         # Resizing should happen
         check([5, 5], [5, 2], True)
         check([5, 5], [6, 1], True)
-        check([10, 10], [ 5, 1], True)
+        check([10, 10], [5, 1], True)
         check([10, 10], [10, 2], True)
 
 
