@@ -15,6 +15,7 @@ from torch.ao.quantization.quantize_fx import (
     prepare_fx,
     convert_fx,
     prepare_qat_fx,
+    _convert_fx_new,
 )
 
 from torch.ao.quantization.fx.quantization_patterns import DefaultNodeQuantizeHandler
@@ -5184,6 +5185,30 @@ class TestQuantizeFxOps(QuantizationTestCase):
         m = convert_fx(m)
         m(data)
         # make sure everything runs
+
+class TestQuantizeFxOpsNew(QuantizationTestCase):
+    def test_ops(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                x = x + 3
+                x = self.relu(x)
+                x = x + 6
+                return x
+
+        m = M().eval()
+        m = prepare_fx(m, {"": default_qconfig})
+        m = _convert_fx_new(m, is_reference=True)
+        expected_occurrence = {
+            ns.call_function(torch.quantize_per_tensor): 3,
+            ns.call_method("dequantize"): 3,
+        }
+        self.checkGraphModuleNodes(
+            m,
+            expected_node_occurrence=expected_occurrence)
 
 class TestQuantizeFxModels(QuantizationTestCase):
     @skipIfNoFBGEMM
