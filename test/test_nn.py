@@ -1,19 +1,19 @@
 # Owner(s): ["module: nn"]
 
+import io
+import itertools
 import math
+import pickle
 import random
 import string
 import unittest
-import io
 import unittest.mock as mock
-import itertools
 import warnings
-import pickle
-from copy import deepcopy
-from itertools import repeat, product
-from functools import reduce
-from operator import mul
 from collections import OrderedDict
+from copy import deepcopy
+from functools import reduce
+from itertools import product, repeat
+from operator import mul
 
 import torch
 
@@ -21,42 +21,100 @@ import torch
 # NN tests use double as the default dtype
 torch.set_default_dtype(torch.double)
 
-from torch._six import inf, nan
+from hypothesis import given
+
 import torch.backends.cudnn as cudnn
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.init as init
-import torch.nn.utils.rnn as rnn_utils
-from torch.nn.utils import clip_grad_norm_, clip_grad_value_
 import torch.nn.utils.parametrize as parametrize
 import torch.nn.utils.prune as prune
-from torch.nn.utils import parameters_to_vector, vector_to_parameters
-from torch.nn import Parameter
-from torch.nn.parameter import UninitializedParameter, UninitializedBuffer
-from torch.nn.parallel._functions import Broadcast
-from torch.testing._internal.common_dtype import integral_types, get_all_fp_dtypes, get_all_math_dtypes
-from torch.testing._internal.common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, \
-    skipIfRocmVersionLessThan, skipIfNotMiopenSuggestNHWC, TEST_NUMPY, TEST_SCIPY, TEST_WITH_ROCM, download_file, \
-    get_function_arglist, load_tests, repeat_test_for_types, ALL_TENSORTYPES, \
-    ALL_TENSORTYPES2, suppress_warnings, TemporaryFileName, TEST_WITH_UBSAN, IS_PPC
-from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
-from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
-    module_tests, criterion_tests, loss_reference_fns, \
-    ctcloss_reference, new_module_tests, single_batch_reference_fn
-from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
-    dtypesIfCUDA, precisionOverride, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, onlyCPU, \
-    skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, skipCUDAIfRocmVersionLessThan, skipCUDAIfNotMiopenSuggestNHWC, \
-    onlyOnCPUAndCUDA, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, skipMeta, get_all_device_types
-from torch.nn import MultiheadAttention
-
-from hypothesis import given
+import torch.nn.utils.rnn as rnn_utils
 import torch.testing._internal.hypothesis_utils as hu
-from torch.testing._internal.common_utils import _assertGradAndGradgradChecks, gradcheck, gradgradcheck, \
-    GRADCHECK_NONDET_TOL
-from torch.testing._internal.common_utils import dtype2prec_DONTUSE
-from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32, tf32_off, tf32_on
+from torch._six import inf, nan
+from torch.nn import MultiheadAttention, Parameter
+from torch.nn.parallel._functions import Broadcast
+from torch.nn.parameter import UninitializedBuffer, UninitializedParameter
+from torch.nn.utils import (
+    clip_grad_norm_,
+    clip_grad_value_,
+    parameters_to_vector,
+    vector_to_parameters,
+)
+from torch.testing._internal.common_cuda import (
+    TEST_CUDA,
+    TEST_CUDNN,
+    TEST_CUDNN_VERSION,
+    TEST_MULTIGPU,
+    tf32_is_not_fp32,
+    tf32_off,
+    tf32_on,
+    tf32_on_and_off,
+)
+from torch.testing._internal.common_device_type import (
+    deviceCountAtLeast,
+    dtypes,
+    dtypesIfCUDA,
+    get_all_device_types,
+    instantiate_device_type_tests,
+    largeTensorTest,
+    onlyCPU,
+    onlyCUDA,
+    onlyOnCPUAndCUDA,
+    precisionOverride,
+    skipCUDAIf,
+    skipCUDAIfCudnnVersionLessThan,
+    skipCUDAIfNoCudnn,
+    skipCUDAIfNotMiopenSuggestNHWC,
+    skipCUDAIfNotRocm,
+    skipCUDAIfRocm,
+    skipCUDAIfRocmVersionLessThan,
+    skipMeta,
+)
+from torch.testing._internal.common_dtype import (
+    get_all_fp_dtypes,
+    get_all_math_dtypes,
+    integral_types,
+)
+from torch.testing._internal.common_nn import (
+    CriterionTest,
+    NewModuleTest,
+    NNTestCase,
+    criterion_tests,
+    ctcloss_reference,
+    loss_reference_fns,
+    module_tests,
+    new_module_tests,
+    single_batch_reference_fn,
+)
+from torch.testing._internal.common_utils import (
+    ALL_TENSORTYPES,
+    ALL_TENSORTYPES2,
+    GRADCHECK_NONDET_TOL,
+    IS_PPC,
+    TEST_NUMPY,
+    TEST_SCIPY,
+    TEST_WITH_ROCM,
+    TEST_WITH_UBSAN,
+    TemporaryFileName,
+    TestCase,
+    _assertGradAndGradgradChecks,
+    download_file,
+    dtype2prec_DONTUSE,
+    freeze_rng_state,
+    get_function_arglist,
+    gradcheck,
+    gradgradcheck,
+    load_tests,
+    repeat_test_for_types,
+    run_tests,
+    skipIfNoLapack,
+    skipIfNotMiopenSuggestNHWC,
+    skipIfRocm,
+    skipIfRocmVersionLessThan,
+    suppress_warnings,
+)
 from torch.types import _TensorOrTensors
-
 
 AMPERE_OR_ROCM = TEST_WITH_ROCM or tf32_is_not_fp32()
 
@@ -65,8 +123,8 @@ AMPERE_OR_ROCM = TEST_WITH_ROCM or tf32_is_not_fp32()
 load_tests = load_tests
 
 if TEST_SCIPY:
-    from scipy import stats
     import scipy.ndimage
+    from scipy import stats
 
 if TEST_NUMPY:
     import numpy as np
@@ -419,6 +477,7 @@ class TestNN(NNTestCase):
 
     def test_conv_backcompat(self):
         from torch.serialization import SourceChangeWarning
+
         # This file was generated by running on PyTorch 1.0.1 on Python 2:
         #
         #     import torch
