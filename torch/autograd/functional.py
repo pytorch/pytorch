@@ -1,6 +1,6 @@
 import torch
 from typing import Tuple, List
-import torch.autograd.forward_ad as fwAD
+from . import forward_ad as fwAD
 from torch._vmap_internals import _vmap  # can we replace with use of is_grads_batched=True
 
 # Utility functions

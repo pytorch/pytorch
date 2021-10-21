@@ -797,6 +797,7 @@ def _test_batched_grad_forward_ad(func, inputs) -> bool:
             if torch.allclose(res, exp):
                 continue
             raise GradcheckError(_get_failed_batched_grad_test_msg(input_idx, input_idx, res, exp, is_forward_ad=True))
+    return True
 
 def _test_batched_grad(input, output, output_idx) -> bool:
     # NB: _test_batched_grad compares two autograd.grad invocations with a single
