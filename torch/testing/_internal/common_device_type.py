@@ -1064,6 +1064,9 @@ def expectedFailureCUDA(fn):
 def expectedFailureMeta(fn):
     return expectedFailure('meta')(fn)
 
+def expectedFailureXLA(fn):
+    return expectedFailure('xla')(fn)
+
 # This decorator checks that the decorated function produces a nondeterministic
 # alert for the expected device types
 class expectedAlertNondeterministic:

@@ -15,7 +15,7 @@ from torch.testing._internal.common_utils import \
     (IS_FBCODE, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, skipIfRocm, slowTest,
      parametrize, subtest, instantiate_parametrized_tests, dtype_name)
 from torch.testing._internal.common_device_type import \
-    (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
+    (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes, expectedFailureXLA,
      get_device_type_test_bases, instantiate_device_type_tests, onlyCUDA, onlyOnCPUAndCUDA,
      deviceCountAtLeast, ops, skipXLA)
 from torch.testing._internal.common_methods_invocations import op_db
@@ -605,6 +605,12 @@ if __name__ == '__main__':
 
     @skipXLA
     def test_skip_xla(self, device):
+        if self.device_type == 'xla':
+            # Should not reach here!
+            self.assertTrue(False)
+
+    @expectedFailureXLA
+    def test_expected_failure_xla(self, device):
         if self.device_type == 'xla':
             # Should not reach here!
             self.assertTrue(False)
