@@ -2039,6 +2039,24 @@ class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
                 results_len=4,
                 should_log_inputs=should_log_inputs)
 
+    @skipIfNoFBGEMM
+    def test_sparsenn_compare_activations_fp16(self):
+        sparse_nn = SparseNNModel(use_functional_dense_top=True).eval()
+        idx = torch.LongTensor([1, 2, 4, 5, 4, 3, 2, 9])
+        offsets = torch.LongTensor([0, 4])
+        x = torch.randn(2, 4)
+        sparse_nn(idx, offsets, x)
+        qconfig_dict = {
+            '': None,
+            'object_type': [
+                (F.linear, torch.quantization.float16_static_qconfig),
+            ],
+        }
+        self._test_match_activations(
+            sparse_nn, (idx, offsets, x),
+            results_len=5,
+            qconfig_dict=qconfig_dict)
+
     @skip_if_no_torchvision
     @skipIfNoFBGEMM
     @unittest.skip("TODO: broken by https://github.com/pytorch/pytorch/pull/61687, will enable later")

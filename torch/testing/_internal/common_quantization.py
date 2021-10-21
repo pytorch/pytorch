@@ -2,6 +2,8 @@ r"""Importing this file includes common utility methods and base clases for
 checking quantization api and properties of resulting modules.
 """
 
+import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -1979,7 +1981,6 @@ class EmbeddingWithStaticLinear(torch.nn.Module):
         return features
 
 class DenseTopMLP(nn.Module):
-
     def __init__(self, dense_dim, dense_out, embedding_dim, top_out_in, top_out_out) -> None:
         super(DenseTopMLP, self).__init__()
 
@@ -2002,6 +2003,35 @@ class DenseTopMLP(nn.Module):
         out = self.top_mlp(features)
         return out
 
+class DenseTopMLPFunctional(nn.Module):
+    def __init__(self, dense_dim, dense_out, embedding_dim, top_out_in, top_out_out) -> None:
+        super(DenseTopMLPFunctional, self).__init__()
+
+        self.dense_mlp_w = nn.Parameter(torch.randn(dense_out, dense_dim))
+        self.dense_mlp_b = nn.Parameter(torch.randn(dense_out))
+
+        self.top_mlp_1_w = nn.Parameter(torch.randn(top_out_in, dense_out + embedding_dim))
+        self.top_mlp_1_b = nn.Parameter(torch.randn(top_out_in))
+
+        self.top_mlp_2_w = nn.Parameter(torch.randn(top_out_out, top_out_in))
+        self.top_mlp_2_b = nn.Parameter(torch.randn(top_out_out))
+
+        torch.nn.init.kaiming_uniform_(self.dense_mlp_w, a=math.sqrt(5))
+        torch.nn.init.kaiming_uniform_(self.top_mlp_1_w, a=math.sqrt(5))
+        torch.nn.init.kaiming_uniform_(self.top_mlp_2_w, a=math.sqrt(5))
+
+    def forward(
+        self,
+        sparse_feature: torch.Tensor,
+        dense: torch.Tensor,
+    ) -> torch.Tensor:
+        dense_feature = F.linear(dense, self.dense_mlp_w, self.dense_mlp_b)
+        features = torch.cat([dense_feature] + [sparse_feature], dim=1)
+
+        out = F.linear(features, self.top_mlp_1_w, self.top_mlp_1_b)
+        out = F.linear(out, self.top_mlp_2_w, self.top_mlp_2_b)
+        return out
+
 # thin wrapper around embedding bag, because tracing inside nn.Embedding
 # bag is not supported at the moment and this is top level
 class EmbBagWrapper(nn.Module):
@@ -2021,13 +2051,18 @@ class SparseNNModel(nn.Module):
     _TOP_OUT_OUT = 2
     _TOP_MLP_DIM = 1
 
-    def __init__(self) -> None:
+    def __init__(self, use_functional_dense_top=False) -> None:
         super(SparseNNModel, self).__init__()
 
         self.model_sparse = EmbBagWrapper(self._NUM_EMBEDDINGS, self._EMBEDDING_DIM)
-        self.dense_top = DenseTopMLP(
-            self._DENSE_DIM, self._DENSE_OUTPUT, self._EMBEDDING_DIM, self._TOP_OUT_IN,
-            self._TOP_OUT_OUT)
+        if not use_functional_dense_top:
+            self.dense_top = DenseTopMLP(
+                self._DENSE_DIM, self._DENSE_OUTPUT, self._EMBEDDING_DIM, self._TOP_OUT_IN,
+                self._TOP_OUT_OUT)
+        else:
+            self.dense_top = DenseTopMLPFunctional(
+                self._DENSE_DIM, self._DENSE_OUTPUT, self._EMBEDDING_DIM, self._TOP_OUT_IN,
+                self._TOP_OUT_OUT)
 
     def forward(
         self,
