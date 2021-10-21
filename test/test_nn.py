@@ -6876,7 +6876,7 @@ class TestNN(NNTestCase):
         c = torch.tensor([6])
         sequences = [a, b, c]
 
-        packed_sequences = rnn_utils.pack_sequence(sequences)
+        packed_sequences = rnn_utils.pack_sequence(sequences, enforce_sorted=False)
         unpacked_sequences = rnn_utils.unpack_sequence(packed_sequences)
         _compatibility_test(sequences, unpacked_sequences)
 
@@ -6890,7 +6890,7 @@ class TestNN(NNTestCase):
                 sequences.append(torch.rand(seq_len, 5, *trailing_dims))
             random.shuffle(sequences)
             
-            packed_sequences = rnn_utils.pack_sequence(sequences)
+            packed_sequences = rnn_utils.pack_sequence(sequences, enforce_sorted=False)
             unpacked_sequences = rnn_utils.unpack_sequence(packed_sequences)
             _compatibility_test(sequences, unpacked_sequences)
 
