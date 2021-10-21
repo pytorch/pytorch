@@ -3836,7 +3836,7 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
 }
 
 Tensor householder_product_jvp(
-    const Tensor& dV,
+    const Tensor& dV_,
     const Tensor& dtau,
     const Tensor& prod,
     const Tensor& V_,
@@ -3849,6 +3849,7 @@ Tensor householder_product_jvp(
   // that the diagonal of input is filled with 1s.
   auto V = V_.tril(-1);
   V.diagonal(0, -2, -1).fill_(1.0);
+  auto dV = dV_.tril(-1);
 
   // compute sigma such that
   // H(sigma_i) == H(tau_i)^{-1}.
@@ -3861,7 +3862,51 @@ Tensor householder_product_jvp(
     V_first_k_cols * V_first_k_cols.conj()
   ).sum(-2);
   auto sigma = tau / (tau * V_first_k_cols_norm_squared - 1.0);
-  return dV;
+
+  auto apply_householder_reflector = [m](
+    int64_t k, const Tensor& v_full,
+    const Tensor& t, Tensor& K,
+    bool left = true) -> Tensor {
+    return apply_simple_transformation(
+      m, k, v_full, v_full, t, K, /*modify_K_in_place=*/true, /*condition_with_I=*/true, left
+    );
+  };
+
+  auto apply_simple_product = [m](
+    int64_t k,
+    const Tensor& u_full, const Tensor& v_full,
+    const Tensor& t, Tensor& K
+  ) -> Tensor {
+    return apply_simple_transformation(
+      m, k, u_full, v_full, t, K, /*modify_K_in_place=*/false, /*condition_with_I=*/false, /*left=*/true
+    );
+  };
+
+
+  auto H_plus = prod.detach().clone();
+  IntArrayRef batch_vector_shape(V.sizes().data(), V.dim() - 1);
+  auto H_minus = at::diag_embed(at::ones(batch_vector_shape, V.options()));
+
+  auto dprod = at::zeros_like(prod);
+  for (int64_t i = 0; i < k; ++i) {
+    auto v_i = V.narrow(-1, i, 1);
+    auto dv_i = dV.narrow(-1, i, 1);
+    auto tau_i = tau.narrow(-1, i, 1);
+    auto dtau_i = dtau.narrow(-1, i, 1);
+    auto sigma_i = sigma.narrow(-1, i, 1);
+
+    H_plus = apply_householder_reflector(i, v_i, sigma_i, H_plus, /*left=*/true);
+
+    dprod.add_(H_minus.matmul(
+      apply_simple_product(k, v_i, v_i, dtau_i, H_plus)
+      + apply_simple_product(k, dv_i, v_i, tau_i, H_plus)
+      + apply_simple_product(k, v_i, dv_i, tau_i, H_plus)
+    ));
+
+    H_minus = apply_householder_reflector(i, v_i, tau_i, H_minus, /*left=*/false);
+  }
+
+  return dprod;
 }
 
 std::tuple<Tensor, Tensor> polar_backward(
