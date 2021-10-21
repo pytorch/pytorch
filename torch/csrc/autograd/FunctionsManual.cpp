@@ -3868,7 +3868,8 @@ Tensor householder_product_jvp(
     const Tensor& t, Tensor& K,
     bool left = true) -> Tensor {
     return apply_simple_transformation(
-      m, k, v_full, v_full, t, K, /*modify_K_in_place=*/true, /*condition_with_I=*/true, left
+      // setting modify_K_in_place = true causes CUDA memory leaks in OpInfo tests of forward AD
+      m, k, v_full, v_full, t, K, /*modify_K_in_place=*/false, /*condition_with_I=*/true, left
     );
   };
 
