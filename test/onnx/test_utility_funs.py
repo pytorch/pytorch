@@ -647,7 +647,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                 self.celu2 = torch.nn.CELU(2.0)
                 self.dropout = N(0.5)
 
-            def forward(self, x: torch.Tensor, y: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
+            def forward(self, x, y, z):
                 res1 = self.celu1(x)
                 res2 = self.celu2(y)
                 for ln in self.lns:
@@ -658,9 +658,10 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         y = torch.randn(2, 3)
         z = torch.randn(2, 3)
 
-        """
-        Export specified modules, containing non-existed dropout.
-        """
+        # Export specified modules. Test against specifying modules that won't
+        # exist in the exported model.
+        # Model export in inference mode will remove dropout node,
+        # thus the dropout module no longer exist in graph.
         f = io.BytesIO()
         torch.onnx.export(M(3), (x, y, z), f, opset_version=self.opset_version,
                           export_modules_as_functions={torch.nn.CELU, torch.nn.Dropout, torch.nn.LayerNorm})
