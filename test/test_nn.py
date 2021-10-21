@@ -6777,11 +6777,6 @@ class TestNN(NNTestCase):
             _compatibility_test(sequences, unpadded_sequences)
 
     def test_pack_sequence(self):
-        def pad(tensor, length):
-            return torch.cat(
-                [tensor.data, tensor.data.new(
-                    length - tensor.size(0), *tensor.size()[1:]).zero_()])
-        
         def _compatibility_test(sequences, lengths, batch_first, enforce_sorted=False):
             padded = rnn_utils.pad_sequence(sequences, batch_first)
             packed = rnn_utils.pack_sequence(sequences, enforce_sorted)
@@ -6814,27 +6809,6 @@ class TestNN(NNTestCase):
         self.assertEqual(packed_enforce_sorted.data.data, expected)
         self.assertTrue(packed_enforce_sorted.sorted_indices is None)
         self.assertTrue(packed_enforce_sorted.unsorted_indices is None)
-
-        # more dimensions
-        maxlen = 9
-        for num_dim in (0, 1, 2, 3):
-            sequences = []
-            trailing_dims = [4] * num_dim
-            for i in range(1, maxlen + 1):
-                seq_len = i * i
-                sequences.append(torch.rand(seq_len, 5, *trailing_dims))
-            random.shuffle(sequences)
-            expected = []
-            for seq in sequences:
-                expected.append(pad(seq, maxlen * maxlen))
-            # batch first = true
-            expected = torch.stack(expected)
-            padded = rnn_utils.pad_sequence(sequences, True)
-            self.assertEqual(padded, expected)
-
-            # batch first = false
-            padded = rnn_utils.pad_sequence(sequences)
-            self.assertEqual(padded, expected.transpose(0, 1))
 
         with self.assertRaisesRegex(RuntimeError, 'must be sorted in decreasing order'):
             rnn_utils.pack_sequence([b, c, a], enforce_sorted=True)
