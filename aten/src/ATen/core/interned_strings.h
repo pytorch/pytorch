@@ -199,6 +199,7 @@ namespace c10 {
   _(aten, atan2)                     \
   _(aten, atan2_)                    \
   _(aten, arctan2)                   \
+  _(aten, arctan2_)                  \
   _(aten, atanh)                     \
   _(aten, atanh_)                    \
   _(aten, arctanh)                   \
