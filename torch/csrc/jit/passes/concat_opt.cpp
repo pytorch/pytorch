@@ -497,5 +497,93 @@ void ExpandConcatAndEliminateRedundancy(const std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP("After expanding Concat and eliminating redundancy", graph);
 }
 
+namespace {
+
+class TrivialConcatEliminator {
+ public:
+  explicit TrivialConcatEliminator(std::shared_ptr<Graph> graph)
+      : graph_(std::move(graph)), aliasDb_(graph_) {}
+
+  bool run() {
+    collectTrivialConcatNodes(graph_->block());
+    auto changed = eliminateTrivialNodes();
+    if (changed) {
+      // EliminateDeadCode to get rid of ListConstructs that we might not need
+      // anymore.
+      EliminateDeadCode(graph_);
+    }
+    return changed;
+  }
+
+ private:
+  // Stores a trivial concat node and the new output to use
+  using TrivialConcat = std::pair<Node*, Value*>;
+
+  bool isTrivialList(const Node* list_node) const {
+    return list_node->kind() == prim::ListConstruct &&
+        list_node->inputs().size() == 1;
+  }
+
+  void handleConcat(Node* node) {
+    auto* list = node->input(0);
+    auto* list_node = list->node();
+    if (isTrivialList(list_node) &&
+        aliasDb_.couldMoveBeforeTopologically(list_node, node)) {
+      auto* new_output = list_node->input(0);
+      trivial_nodes_.emplace_back(node, new_output);
+    }
+  }
+
+  void handleVarConcat(Node* node) {
+    // A node is trivial if it looks like prim::VarConcat(%tensor, %dim)
+    if (node->inputs().size() == 2) {
+      auto* new_output = node->input(0);
+      trivial_nodes_.emplace_back(node, new_output);
+    }
+  }
+
+  void collectTrivialConcatNodes(Block* block) {
+    for (auto* node : block->nodes()) {
+      for (auto* b : node->blocks()) {
+        collectTrivialConcatNodes(b);
+      }
+
+      if (node->kind() == prim::VarConcat) {
+        handleVarConcat(node);
+      } else if (node->kind() == aten::cat) {
+        handleConcat(node);
+      }
+    }
+  }
+
+  bool eliminateTrivialNodes() {
+    if (trivial_nodes_.empty()) {
+      return false;
+    }
+
+    for (const auto& to_eliminate : trivial_nodes_) {
+      auto* node_to_delete = to_eliminate.first;
+      auto* new_output = to_eliminate.second;
+
+      node_to_delete->output()->replaceAllUsesWith(new_output);
+      node_to_delete->destroy();
+    }
+
+    return true;
+  }
+
+  std::shared_ptr<Graph> graph_;
+  AliasDb aliasDb_;
+  std::vector<TrivialConcat> trivial_nodes_;
+};
+
+} // namespace
+
+bool EliminateTrivialConcat(const std::shared_ptr<Graph>& graph) {
+  bool changed = TrivialConcatEliminator(graph).run();
+  GRAPH_DUMP("After eliminating trivial concat", graph);
+  return changed;
+}
+
 } // namespace jit
 } // namespace torch

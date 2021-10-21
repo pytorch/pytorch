@@ -654,5 +654,93 @@ TEST(
       ->run(*graph);
 }
 
+TEST(ConcatOptTest, EliminateTrivialConcat) {
+  auto graph = std::make_shared<Graph>();
+  const std::string input =
+      R"IR(
+        graph(%0: Tensor):
+          %dim : int = prim::Constant[value=0]()
+          %input : Tensor[] = prim::ListConstruct(%0)
+          %concat : Tensor = aten::cat(%input, %dim)
+          return (%concat)
+      )IR";
+  parseIR(input, graph.get());
+  std::vector<at::Tensor> inputs = {at::rand({1})};
+  auto orig_outputs = runGraph(graph, inputs);
+
+  ASSERT_TRUE(EliminateTrivialConcat(graph));
+  graph->lint();
+  auto opt_outputs = runGraph(graph, inputs);
+  ASSERT_TRUE(exactlyEqual(orig_outputs, opt_outputs));
+
+  // After performing EliminateTrivialConcat:
+  //  graph(%0 : Tensor):
+  //    return (%0)
+  testing::FileCheck()
+      .check_count("prim::ListConstruct", 0, /*exactly*/ true)
+      ->check_count("aten::cat", 0, /*exactly*/ true)
+      ->run(*graph);
+}
+
+TEST(ConcatOptTest, EliminateTrivialConcatMutatedList) {
+  auto graph = std::make_shared<Graph>();
+  const std::string input =
+      R"IR(
+        graph(%0: Tensor):
+          %dim : int = prim::Constant[value=0]()
+          %input : Tensor[] = prim::ListConstruct(%0)
+          %modified_input : Tensor[] = aten::append(%input, %0)
+          %concat : Tensor = aten::cat(%input, %dim)
+          return (%concat)
+      )IR";
+  parseIR(input, graph.get());
+  // No changes; the list is appended to, so the aten::cat node
+  // is no longer considered trivial
+  ASSERT_FALSE(EliminateTrivialConcat(graph));
+}
+
+TEST(ConcatOptTest, EliminateTrivialVarConcat) {
+  auto graph = std::make_shared<Graph>();
+  const std::string input =
+      R"IR(
+        graph(%0: Tensor):
+          %dim : int = prim::Constant[value=0]()
+          %concat : Tensor = prim::VarConcat(%0, %dim)
+          return (%concat)
+      )IR";
+  parseIR(input, graph.get());
+  std::vector<at::Tensor> inputs = {at::rand({1})};
+  auto orig_outputs = runGraph(graph, inputs);
+
+  ASSERT_TRUE(EliminateTrivialConcat(graph));
+  graph->lint();
+  auto opt_outputs = runGraph(graph, inputs);
+  ASSERT_TRUE(exactlyEqual(orig_outputs, opt_outputs));
+
+  // After performing EliminateTrivialConcat:
+  //  graph(%0 : Tensor):
+  //    return (%0)
+  testing::FileCheck()
+      .check_count("prim::VarConcat", 0, /*exactly*/ true)
+      ->run(*graph);
+}
+
+TEST(ConcatOptTest, EliminateTrivialConcatNotApplied) {
+  auto graph = std::make_shared<Graph>();
+  const std::string input =
+      R"IR(
+        graph(%0: Tensor):
+          %dim : int = prim::Constant[value=0]()
+          %inputs : Tensor[] = prim::ListConstruct(%0, %0)
+          %concat.1 : Tensor = aten::cat(%inputs, %dim)
+          %concat.2 : Tensor = prim::VarConcat(%0, %0, %dim)
+          return (%concat.1, %concat.2)
+      )IR";
+  parseIR(input, graph.get());
+  std::vector<at::Tensor> inputs = {at::rand({1})};
+  // No changes, the concat nodes are not trivial.
+  ASSERT_FALSE(EliminateTrivialConcat(graph));
+}
+
 } // namespace jit
 } // namespace torch
