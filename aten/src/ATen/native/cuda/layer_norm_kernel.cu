@@ -25,7 +25,7 @@ constexpr int kColwiseReduceTileSize = 32;
 template <typename T, typename T_ACC>
 __global__ void RowwiseMomentsCUDAKernel(
     int64_t N,
-    T eps,
+    T_ACC eps,
     const T* X,
     T_ACC* mean,
     T_ACC* rstd) {
@@ -57,7 +57,7 @@ __global__ void RowwiseMomentsCUDAKernel(
     T_ACC m2;
     thrust::tie(m2, m1) = welford_op.project(val);
     mean[i] = m1;
-    rstd[i] = c10::cuda::compat::rsqrt(m2 + static_cast<T_ACC>(eps));
+    rstd[i] = c10::cuda::compat::rsqrt(m2 + eps);
   }
 }
 
@@ -262,14 +262,14 @@ __global__ void GammaBetaBackwardCUDAKernel(
   }
 }
 
-template <typename T>
+template <typename T, typename T_ACC>
 void LayerNormKernelImplInternal(
     const Tensor& X,
     const Tensor& gamma,
     const Tensor& beta,
     int64_t M,
     int64_t N,
-    T eps,
+    T_ACC eps,
     Tensor* Y,
     Tensor* mean,
     Tensor* rstd) {
@@ -280,7 +280,6 @@ void LayerNormKernelImplInternal(
   const T* gamma_data = gamma.defined() ? gamma.data_ptr<T>() : nullptr;
   const T* beta_data = beta.defined() ? beta.data_ptr<T>() : nullptr;
   T* Y_data = Y->data_ptr<T>();
-  using T_ACC = acc_type<T, true>;
   T_ACC* mean_data = mean->data_ptr<T_ACC>();
   T_ACC* rstd_data = rstd->data_ptr<T_ACC>();
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
@@ -309,8 +308,9 @@ void LayerNormKernelImpl(
       X.scalar_type(),
       "LayerNormKernelImpl",
       [&]() {
-        LayerNormKernelImplInternal<scalar_t>(
-            X, gamma, beta, M, N, static_cast<scalar_t>(eps), Y, mean, rstd);
+  	using acc_t = acc_type<scalar_t, true>;
+        LayerNormKernelImplInternal<scalar_t, acc_t>(
+            X, gamma, beta, M, N, static_cast<acc_t>(eps), Y, mean, rstd);
       });
 }
 
