@@ -3700,9 +3700,9 @@ bool any_variable_defined(const variable_list& variables) {
 auto apply_householder_reflector(
     int64_t m, int64_t k,
     const Tensor& v_full, const Tensor& t, Tensor& K,
-    bool modify_K_in_place,
+    bool modify_K_in_place = true,
     bool left = true) -> Tensor {
-  // v_full is a vector of dimension (..., m, 1), t is a scalar of dimension (..., 1)
+  // we assume v_full is a vector of dimension (..., m, 1), t is a scalar of dimension (..., 1)
 
   // TODO: matrix-vector products in the code below are dispatched to matrix-matrix products.
   // We either need to extend matmul to support batched matrix-vector products, or
