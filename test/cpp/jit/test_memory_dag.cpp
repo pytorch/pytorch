@@ -72,17 +72,27 @@ TEST(MemoryDAGTest, Basic) {
     auto dag = std::make_unique<MemoryDAG>(std::move(t));
     EXPECT_TRUE(dag->mayContainAlias(a, b));
     EXPECT_TRUE(dag->mayContainAlias(b, a));
+    EXPECT_FALSE(dag->mayTransitivelyContainOrPointTo(a, b));
+    EXPECT_TRUE(dag->mayTransitivelyContainOrPointTo(b, a));
 
     EXPECT_TRUE(dag->mayContainAlias(a, c));
     EXPECT_TRUE(dag->mayContainAlias(c, a));
+    EXPECT_FALSE(dag->mayTransitivelyContainOrPointTo(a, c));
+    EXPECT_TRUE(dag->mayTransitivelyContainOrPointTo(c, a));
 
     EXPECT_TRUE(dag->mayContainAlias(b, c));
     EXPECT_TRUE(dag->mayContainAlias(c, b));
+    EXPECT_FALSE(dag->mayTransitivelyContainOrPointTo(b, c));
+    EXPECT_FALSE(dag->mayTransitivelyContainOrPointTo(c, b));
 
     // containers contain an element in themselves
     EXPECT_TRUE(dag->mayContainAlias(b, b));
     EXPECT_TRUE(dag->mayContainAlias(c, c));
     EXPECT_TRUE(dag->mayContainAlias(a, a));
+
+    EXPECT_TRUE(dag->mayTransitivelyContainOrPointTo(b, b));
+    EXPECT_TRUE(dag->mayTransitivelyContainOrPointTo(c, c));
+    EXPECT_TRUE(dag->mayTransitivelyContainOrPointTo(a, a));
   }
   {
     // b(a)
@@ -102,11 +112,17 @@ TEST(MemoryDAGTest, Basic) {
     auto dag = std::make_unique<MemoryDAG>(std::move(t));
     EXPECT_TRUE(dag->mayContainAlias(b, d));
     EXPECT_TRUE(dag->mayContainAlias(d, b));
+    EXPECT_FALSE(dag->mayTransitivelyContainOrPointTo(b, d));
+    EXPECT_TRUE(dag->mayTransitivelyContainOrPointTo(d, b));
 
     EXPECT_TRUE(dag->mayContainAlias(c, d));
     EXPECT_TRUE(dag->mayContainAlias(d, c));
+    EXPECT_FALSE(dag->mayTransitivelyContainOrPointTo(c, d));
+    EXPECT_FALSE(dag->mayTransitivelyContainOrPointTo(d, c));
 
     EXPECT_TRUE(dag->mayContainAlias(a, d));
+    EXPECT_FALSE(dag->mayTransitivelyContainOrPointTo(a, d));
+    EXPECT_TRUE(dag->mayTransitivelyContainOrPointTo(d, a));
   }
   {
     // f(e)
@@ -130,6 +146,8 @@ TEST(MemoryDAGTest, Basic) {
     for (auto elem : {a, b, c, d}) {
       EXPECT_FALSE(dag->mayContainAlias(f, elem));
       EXPECT_FALSE(dag->mayContainAlias(e, elem));
+      EXPECT_FALSE(dag->mayTransitivelyContainOrPointTo(f, elem));
+      EXPECT_FALSE(dag->mayTransitivelyContainOrPointTo(e, elem));
     }
   }
 }

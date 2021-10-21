@@ -94,6 +94,17 @@ class TORCH_API MemoryDAG {
       const at::ArrayRef<Element*> a,
       const at::ArrayRef<Element*> b) const;
 
+  // Might there be any path from `a` to `b` in the contains-or-points-to graph?
+  // Compare to mayContainAlias, except the relationship is not symmetric.
+  bool mayTransitivelyContainOrPointTo(const Element* a, const Element* b)
+      const;
+  bool mayTransitivelyContainOrPointTo(
+      const Element* a,
+      const at::ArrayRef<Element*> b) const;
+  bool mayTransitivelyContainOrPointTo(
+      const at::ArrayRef<Element*> a,
+      const at::ArrayRef<Element*> b) const;
+
   // Converts from the compressed index representation
   const Element* fromIndex(unsigned x) const;
   Element* fromIndex(unsigned x);
