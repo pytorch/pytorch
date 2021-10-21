@@ -15,6 +15,7 @@ from torch.ao.quantization.quantize_fx import (
     prepare_fx,
     convert_fx,
     prepare_qat_fx,
+    _convert_fx_new,
 )
 
 from torch.ao.quantization.fx.quantization_patterns import DefaultNodeQuantizeHandler
@@ -5185,6 +5186,36 @@ class TestQuantizeFxOps(QuantizationTestCase):
         m(data)
         # make sure everything runs
 
+class TestQuantizeFxOpsNew(QuantizationTestCase):
+    def test_ops(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+                self.linear = torch.nn.Linear(5, 5)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.linear(x)
+                x = x + 3
+                x = self.relu(x)
+                x = x + 6
+                return x
+
+        m = M().eval()
+        m = prepare_fx(m, {"": default_qconfig})
+        m = _convert_fx_new(m, is_reference=True)
+        expected_occurrence = {
+            ns.call_function(torch.quantize_per_tensor): 5,
+            ns.call_method("dequantize"): 5,
+            ns.call_module(torch.nn.quantized._reference.Linear): 1,
+            ns.call_module(torch.nn.quantized._reference.Conv2d): 1,
+        }
+        self.checkGraphModuleNodes(
+            m,
+            expected_node_occurrence=expected_occurrence)
+
 class TestQuantizeFxModels(QuantizationTestCase):
     @skipIfNoFBGEMM
     @unittest.skipIf(not TEST_CUDA, "gpu is not available.")
@@ -5483,7 +5514,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
                 kwargs["transform_input"] = False
             eager_quantizable_model = None
             if name in quantized_model_list:
-                eager_quantizable_model = quantized_models.__dict__[name](pretrained=True, quantize=False, **kwargs).eval().float()
+                eager_quantizable_model = quantized_models.__dict__[name](pretrained=False, quantize=False, **kwargs).eval().float()
             # compare with eager mode quantized model when it is available
             pretrained = eager_quantizable_model is not None
             model = models.__dict__[name](pretrained=pretrained, **kwargs).eval().float()
@@ -5522,8 +5553,8 @@ class TestQuantizeFxModels(QuantizationTestCase):
     def test_resnet18_ddp(self):
         from torchvision import models
         from torchvision.models import quantization as quantized_models
-        eager_quantizable_model = quantized_models.__dict__[name](pretrained=True, quantize=False).eval().float()
-        model = models.__dict__[name](pretrained=True).eval().float()
+        eager_quantizable_model = quantized_models.__dict__[name](pretrained=False, quantize=False).eval().float()
+        model = models.__dict__[name](pretrained=False).eval().float()
         self._test_model_impl(
             'ddp', 'resnet18', model, eager_quantizable_model)
 
