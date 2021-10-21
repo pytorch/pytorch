@@ -62,10 +62,15 @@ void InterpreterState::leaveFrame() {
 
 void InterpreterState::saveExceptionDebugHandle() {
   const auto& frame = frames_.back();
-  if (frame.getPC() >= frame.getCode().debug_handles_.size()) {
-    return;
+  if (auto handle = frame.getDebugHandle()) {
+    exception_debug_handle_ = *handle;
   }
-  exception_debug_handle_ = frame.getCode().debug_handles_[frame.getPC()];
+}
+
+void InterpreterState::callFunction(torch::jit::Function& f, Stack& stack) {
+  bool newFrame =
+      f.call(stack, [&](const mobile::Code& code) { enterFrame(code); });
+  (frames_.rbegin() + (newFrame ? 1 : 0))->step();
 }
 
 bool InterpreterState::run(Stack& stack) {
@@ -74,11 +79,14 @@ bool InterpreterState::run(Stack& stack) {
       auto& frame = frames_.back();
       const auto& code = frame.getCode();
       const auto pc = frame.getPC();
-      auto inst = code.instructions_.at(pc);
+      auto inst = frame.getInstruction();
       // If no valid debug handle found then just log pc.
       // This is possible when we did not save debug handles
-      DebugHandle debug_handle =
-          pc >= code.debug_handles_.size() ? pc : code.debug_handles_.at(pc);
+
+      DebugHandle debug_handle = pc;
+      if (auto handle = frame.getDebugHandle()) {
+        debug_handle = *handle;
+      }
 
       // std::cout << "RUNNING " << pc << " "
       //           << code_->instructions_with_handles_[pc].instruction;
@@ -124,9 +132,7 @@ bool InterpreterState::run(Stack& stack) {
         } break;
         case CALL: {
           auto& function = *frame.getCode().functions_.at(inst.X);
-          frame.step();
-          function.call(
-              stack, [&](const mobile::Code& code) { enterFrame(code); });
+          callFunction(function, stack);
         } break;
         case INTERFACE_CALL: {
           torch::jit::Function& method =

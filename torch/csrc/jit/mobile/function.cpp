@@ -191,8 +191,9 @@ size_t Function::num_inputs() const {
   return schema_->arguments().size();
 }
 
-void Function::call(Stack&, c10::function_ref<void(const mobile::Code&)> f) {
+bool Function::call(Stack&, c10::function_ref<void(const mobile::Code&)> f) {
   f(*code_);
+  return true;
 }
 
 const std::shared_ptr<Code> Function::get_code() const {

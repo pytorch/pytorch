@@ -1933,11 +1933,11 @@ def linear(input: Tensor, weight: Tensor, bias: Optional[Tensor] = None) -> Tens
 
     Shape:
 
-        - Input: :math:`(N, *, in\_features)` N is the batch size, `*` means any number of
-          additional dimensions
-        - Weight: :math:`(out\_features, in\_features)`
-        - Bias: :math:`(out\_features)`
-        - Output: :math:`(N, *, out\_features)`
+        - Input: :math:`(*, in\_features)` where `*` means any number of
+          additional dimensions, including none
+        - Weight: :math:`(out\_features, in\_features)` or :math:`(in\_features)`
+        - Bias: :math:`(out\_features)` or :math:`()`
+        - Output: :math:`(*, out\_features)` or :math:`(*)`, based on the shape of the weight
     """
     if has_torch_function_variadic(input, weight, bias):
         return handle_torch_function(linear, (input, weight, bias), input, weight, bias=bias)
