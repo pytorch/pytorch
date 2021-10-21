@@ -5,7 +5,6 @@ from torch.ao.quantization.qconfig import add_module_to_qconfig_obs_ctr, QConfig
 from torch.ao.quantization.quantize import (
     is_activation_post_process,
 )
-import copy
 import re
 
 from torch.fx.graph import (
@@ -301,28 +300,29 @@ def check_is_valid_fuse_custom_config_dict(fuse_custom_config_dict: Optional[Dic
     check_is_valid_config_dict(fuse_custom_config_dict, fuse_custom_config_dict_allowed_keys, "fuse_custom_config_dict")
 
 
-def convert_qconfig_dict_values(qconfig_dict: Dict[str, Dict[Any, Any]]) -> Dict[str, Dict[Any, Any]]:
-    r""" Convert the qconfig_dict passed in the convert_fx function to replace `None` with False
+def compare_prepare_convert_qconfig_dict(prepare_qconfig_dict: Dict[str, Dict[Any, Any]],
+                                         convert_qconfig_dict: Dict[str, Dict[Any, Any]]) -> None:
+    r""" Compare the qconfig_dict passed in convert to the one from prepare and check the values
 
     Args:
-      `qconfig_dict`: configuration dictionary for convert quantization step
+      `prepare_qconfig_dict`: configuration dictionary for prepare quantization step
+      `convert_qconfig_dict`: configuration dictionary for convert quantization step
     """
-    modified_qconfig_dict = copy.deepcopy(qconfig_dict)
-    for k, v in qconfig_dict.items():
-        if k == "module_name_object_type_order":
-            qconfig_module_name_object_type_order = qconfig_dict[k]
-            for i in range(len(qconfig_module_name_object_type_order)):
-                (module_path, object_type, object_type_idx, config) = qconfig_module_name_object_type_order[i]
-                assert config is None,\
-                    'expected convert qconfig_dict to only have None values for various keys. \
-                    But found {} for key {}'.format(config, k)
-                modified_qconfig_dict[k][i] = (module_path, object_type, object_type_idx, False)
-        else:
-            for name, config in qconfig_dict[k].items():
-                assert config is None,\
-                    'expected convert qconfig_dict to only have None values for various keys. \
-                    But found {} for key {}'.format(config, k)
-                modified_qconfig_dict[k][name] = False
+    prepare_keys = prepare_qconfig_dict.keys()
+    convert_keys = convert_qconfig_dict.keys()
 
-    print(qconfig_dict, modified_qconfig_dict)
-    return modified_qconfig_dict
+    for k in prepare_keys:
+        if k == '':
+            assert k in convert_qconfig_dict, "Missing key {} from convert qconfig_dict when it was present in prepare".format(k)
+            assert convert_qconfig_dict[k] is None or prepare_qconfig_dict[k] == convert_qconfig_dict[k], "Expected \
+            convert qconfig_dict have the same qconfig as prepare qconfig_dict or None. \
+            Updated qconfig {} to {} for key {}".format(prepare_qconfig_dict[k], convert_qconfig_dict[k], k)
+        elif k in ['object_type', 'module_name', 'module_namr_regex']:
+            for name, qconfig in prepare_qconfig_dict[k].items():
+                assert name in convert_qconfig_dict[k], "Missing key {} {} from convert qconfig_dict \
+                when it was present in prepare".format(k, name)
+                assert convert_qconfig_dict[k][name] is None or prepare_qconfig_dict[k][name] == convert_qconfig_dict[k][name], \
+                    "Expected convert qconfig_dict have the same qconfig as prepare qconfig_dict or None. \
+                    Updated qconfig {} to {} for key {} {}".format(prepare_qconfig_dict[k], convert_qconfig_dict[k], k, name)
+        else:
+            assert "Unsupported key in convert_qconfig_dict {}".format(k)

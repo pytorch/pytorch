@@ -1091,6 +1091,7 @@ def save_state(
     patterns: Dict[Pattern, QuantizeHandler],
     prepare_custom_config_dict: Dict[str, Any],
     equalization_qconfig_map: Dict[str, Any],
+    qconfig_dict: Dict[str, Dict[Any, Any]],
 ) -> None:
     observed._patterns = patterns  # type: ignore[assignment]
     observed._qconfig_map = qconfig_map  # type: ignore[assignment]
@@ -1098,6 +1099,7 @@ def save_state(
         prepare_custom_config_dict  # type: ignore[assignment]
     observed._node_name_to_scope = node_name_to_scope  # type: ignore[assignment]
     observed._equalization_qconfig_map = equalization_qconfig_map  # type: ignore[assignment]
+    observed._qconfig_dict = qconfig_dict  # type: ignore[assignment]
 
 def prepare(
         model: GraphModule,
@@ -1153,6 +1155,7 @@ def prepare(
         quant_patterns, additional_quant_patterns)
 
     convert_dict_to_ordered_dict(qconfig_dict)
+    original_dict = qconfig_dict
     convert_dict_to_ordered_dict(equalization_qconfig_dict)
     flattened_qconfig_dict = get_flattened_qconfig_dict(qconfig_dict)
     # TODO: support regex as well
@@ -1209,7 +1212,7 @@ def prepare(
         input_quantized_idxs, output_quantized_idxs)
 
     save_state(model, qconfig_map, node_name_to_scope, patterns,
-               prepare_custom_config_dict, equalization_qconfig_map)
+               prepare_custom_config_dict, equalization_qconfig_map, original_dict)
     preserved_attributes = set(prepare_custom_config_dict.get("preserved_attributes", []))
     model = ObservedGraphModule(model, model.graph, preserved_attributes)
     if is_standalone_module:

@@ -3184,11 +3184,11 @@ class TestQuantizeFx(QuantizationTestCase):
 
         model = M().eval()
 
-        for check in ["module_name", "object_type"]:
+        for check in [ "object_type"]:
             prepared = prepare_fx(model, {"": default_qconfig})
             prepared(torch.rand(5, 5))
             if check == "module_name":
-                convert_qconfig_dict = {"module_name": [("mods1.0", None)]}
+                convert_qconfig_dict = {"": default_qconfig, "module_name": [("mods1.0", None)]}
 
                 node_occurrence = {
                     ns.call_function(torch.quantize_per_tensor): 1,
@@ -3208,7 +3208,7 @@ class TestQuantizeFx(QuantizationTestCase):
                     ns.call_method("dequantize"),
                 ]
             elif check == "object_type":
-                convert_qconfig_dict = {"object_type": [(torch.nn.Linear, None)]}
+                convert_qconfig_dict = {"": default_qconfig, "object_type": [(torch.nn.Linear, None)]}
 
                 node_occurrence = {
                     ns.call_function(torch.quantize_per_tensor): 1,

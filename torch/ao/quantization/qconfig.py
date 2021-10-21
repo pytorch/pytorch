@@ -275,7 +275,7 @@ def add_module_to_qconfig_obs_ctr(
         qconfig: configured so that obs constructors set to construct on the same device as module
     """
 
-    if module is None or qconfig is None or qconfig is False or qconfig._fields != ('activation', 'weight'):
+    if module is None or qconfig is None or qconfig._fields != ('activation', 'weight'):
         return qconfig
 
     def get_factory_kwargs_based_on_module_device():

@@ -576,7 +576,7 @@ def _convert_fx(
         convert_custom_config_dict,
         is_standalone_module,
         _remove_qconfig_flag=_remove_qconfig,
-        qconfig_dict=qconfig_dict,
+        convert_qconfig_dict=qconfig_dict,
     )
 
     preserved_attributes = convert_custom_config_dict.get("preserved_attributes", [])
@@ -640,9 +640,26 @@ def convert_fx(
 
         * `_remove_qconfig`: Option to remove the qconfig attributes in the model after convert.
 
-        * `qconfig_dict`: qconfig_dict with the same keys as in prepare_fx API, but with the values
-          restricted to None. For each entry whose value is set to None, we skip quantizing that
-          entry in the model.
+        * `qconfig_dict`: qconfig_dict with the either
+            a) same keys as what is passed to the qconfig_dict in prepare_fx API, with same values or `None`.
+            b) additional keys with values set to `None`
+            For each entry whose value is set to None, we skip quantizing that entry in the model.
+            Example:
+            qconfig_dict = {
+
+                # used for object_type, skip quantizing torch.nn.functional.add
+                "object_type": [
+                (torch.nn.functional.add, None),
+                (torch.nn.functional.linear, qconfig_from_prepare)
+                ...,
+                ],
+
+                # sed for module names, skip quantizing "foo.bar"
+                "module_name": [
+                ("foo.bar", None)
+                ...,
+                ],
+            }
 
     Return:
         A quantized model (GraphModule)

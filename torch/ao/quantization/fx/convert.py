@@ -13,7 +13,7 @@ from torch.fx.graph import (
 )
 from torch.fx.node import Argument
 from .quantization_types import Pattern
-from ..qconfig import QConfigAny
+from ..qconfig import QConfigAny, qconfig_equals
 from .match_utils import (
     find_matches,
 )
@@ -28,7 +28,7 @@ from .quantization_patterns import (
 from .qconfig_utils import (
     convert_dict_to_ordered_dict,
     generate_qconfig_map,
-    convert_qconfig_dict_values,
+    compare_prepare_convert_qconfig_dict,
 )
 from ._equalize import update_obs_for_equalization, convert_eq_obs
 from .utils import (
@@ -170,7 +170,7 @@ def convert(model: GraphModule, is_reference: bool = False,
             convert_custom_config_dict: Dict[str, Any] = None,
             is_standalone_module: bool = False,
             _remove_qconfig_flag: bool = True,
-            qconfig_dict: Dict[str, Any] = None) -> QuantizedGraphModule:
+            convert_qconfig_dict: Dict[str, Any] = None) -> QuantizedGraphModule:
     """ standalone_module means it a submodule that is not inlined in
     parent module, and will be quantized separately as one unit.
 
@@ -203,20 +203,22 @@ def convert(model: GraphModule, is_reference: bool = False,
     # the same activation_post_process module instance but different names
     modules = dict(model.named_modules(remove_duplicate=False))
 
-    modules_copy = copy.deepcopy(modules)
-    if qconfig_dict:
-        convert_dict_to_ordered_dict(qconfig_dict)
-        convert_dict = convert_qconfig_dict_values(qconfig_dict)
-        convert_qconfig_map = generate_qconfig_map(model, modules_copy, model.graph, convert_dict, node_name_to_scope)
+    # TODO refactor this code once we update the prepare logic to have additional information on
+    # which graph nodes have been observed and share that with convert to decide which observers to ignore.
+    if convert_qconfig_dict:
+        prepare_qconfig_dict: Dict[str, Dict[Any, Any]] = model._qconfig_dict
+        modules_copy = copy.deepcopy(modules)
+        convert_dict_to_ordered_dict(convert_qconfig_dict)
+        compare_prepare_convert_qconfig_dict(prepare_qconfig_dict, convert_qconfig_dict)
+        convert_qconfig_map = generate_qconfig_map(model, modules_copy, model.graph, convert_qconfig_dict, node_name_to_scope)
 
-        # compare the convert_qconfig_map to the map generated after prepare, and copy over every value, except the ones
-        # set to False, which are set to None in the convert map.
+        # check the convert_qconfig_map generated and ensure that all the values either match what was set in prepare qconfig_map
+        # or are set to None in the convert_qconfig_map.
         for k, v in qconfig_map.items():
             assert k in convert_qconfig_map, 'Expected key {} in convert qconfig_map'.format(k)
-            if convert_qconfig_map[k] is False:
-                convert_qconfig_map[k] = None
-            else:
-                convert_qconfig_map[k] = qconfig_map[k]
+            if convert_qconfig_map[k] is not None:
+                assert qconfig_equals(v, convert_qconfig_map[k]), 'Expected k {} to have the same value in prepare qconfig_dict \
+                and convert qconfig_dict, found {} updated to {}.'.format(k, v, convert_qconfig_map[k])
         qconfig_map = convert_qconfig_map
 
     custom_module_classes = get_custom_module_class_keys(
