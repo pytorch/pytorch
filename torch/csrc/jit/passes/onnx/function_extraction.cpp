@@ -23,7 +23,7 @@ struct FunctionExtractor {
       : graph_(graph),
         module_names_(module_names.begin(), module_names.end()),
         param_names_(param_names.begin(), param_names.end()) {}
-  std::pair<ValAttrNameMap, NodeAttrNameMap> run();
+  NodeAttrNameMap run();
 
  private:
   struct ScopeContext {
@@ -55,14 +55,12 @@ struct FunctionExtractor {
 
     ScopePtr scope_key_;
     scope_ctx_map scope_ctxs_;
-    std::unordered_map<Node*, std::unordered_set<Node*>> constant_map_;
     std::unordered_map<
         Node*,
         std::unordered_map<Symbol, std::unordered_set<Node*>>>
         attribute_map_;
 
     // Passed later to serialization.
-    ValAttrNameMap val_attr_to_name_;
     NodeAttrNameMap node_attr_to_name_;
   };
 
@@ -120,18 +118,18 @@ FunctionExtractor::FunctionContext::FunctionContext(
     scope_ctx_map& scope_ctxs)
     : scope_key_(std::move(key)) {
   GRAPH_UPDATE(
-      "Process function family for scope ",
+      "Process function context for scope ",
       scope_key_->name().toDisplayString());
   TORCH_INTERNAL_ASSERT(scopes.size() > 0);
   const auto& ref_ctx = scope_ctxs[scope_key_];
-  // NOTE: Family scopes must have same number and order of nodes.
+  // NOTE: Function scopes must have same number and order of nodes.
   GRAPH_DEBUG(
-      "Initialized family context for scope ",
+      "Initialized function context for scope ",
       scope_key_->name().toDisplayString());
 
   for (const auto& scope : scopes) {
     GRAPH_DEBUG(
-        "Process scope family with scope ", scope->name().toDisplayString());
+        "Process function context for scope ", scope->name().toDisplayString());
     TORCH_INTERNAL_ASSERT(scope_ctxs.find(scope) != scope_ctxs.end());
     scope_ctxs_[scope] = scope_ctxs[scope];
     if (scope_key_ == scope) {
@@ -148,39 +146,31 @@ FunctionExtractor::FunctionContext::FunctionContext(
       TORCH_INTERNAL_ASSERT(ns_a[i]->kind() == ns_b[i]->kind());
       auto n_a = ns_a[i];
       auto n_b = ns_b[i];
-      if (n_a->kind() == c10::onnx::Constant) {
-        const auto& t_a = n_a->t(attr::value);
-        const auto& t_b = n_b->t(attr::value);
-        if (!t_a.equal(t_b)) {
-          constant_map_[n_a].insert(n_b);
-        }
-      } else {
-        std::vector<c10::Symbol> diff_attrs;
-        std::vector<c10::Symbol> same_attrs;
-        auto n_a_attr_names = n_a->attributeNames();
-        auto n_b_attr_names = n_b->attributeNames();
-        std::sort(n_a_attr_names.begin(), n_a_attr_names.end());
-        std::sort(n_b_attr_names.begin(), n_b_attr_names.end());
-        std::set_difference(
-            n_a_attr_names.begin(),
-            n_a_attr_names.end(),
-            n_b_attr_names.begin(),
-            n_b_attr_names.end(),
-            std::inserter(diff_attrs, diff_attrs.begin()));
-        std::set_intersection(
-            n_a_attr_names.begin(),
-            n_a_attr_names.end(),
-            n_b_attr_names.begin(),
-            n_b_attr_names.end(),
-            std::inserter(same_attrs, same_attrs.begin()));
-        for (auto attr_name : diff_attrs) {
-          attribute_map_[n_a][attr_name].insert(n_b);
-        }
+      std::vector<c10::Symbol> diff_attrs;
+      std::vector<c10::Symbol> same_attrs;
+      auto n_a_attr_names = n_a->attributeNames();
+      auto n_b_attr_names = n_b->attributeNames();
+      std::sort(n_a_attr_names.begin(), n_a_attr_names.end());
+      std::sort(n_b_attr_names.begin(), n_b_attr_names.end());
+      std::set_difference(
+          n_a_attr_names.begin(),
+          n_a_attr_names.end(),
+          n_b_attr_names.begin(),
+          n_b_attr_names.end(),
+          std::inserter(diff_attrs, diff_attrs.begin()));
+      std::set_intersection(
+          n_a_attr_names.begin(),
+          n_a_attr_names.end(),
+          n_b_attr_names.begin(),
+          n_b_attr_names.end(),
+          std::inserter(same_attrs, same_attrs.begin()));
+      for (auto attr_name : diff_attrs) {
+        attribute_map_[n_a][attr_name].insert(n_b);
+      }
 
-        for (auto attr_name : same_attrs) {
-          if (!HasSameAttribute(n_a, n_b, attr_name)) {
-            attribute_map_[n_a][attr_name].insert(n_b);
-          }
+      for (auto attr_name : same_attrs) {
+        if (!HasSameAttribute(n_a, n_b, attr_name)) {
+          attribute_map_[n_a][attr_name].insert(n_b);
         }
       }
     }
@@ -188,20 +178,13 @@ FunctionExtractor::FunctionContext::FunctionContext(
   }
 
   GRAPH_DEBUG(
-      "Process scope family complete. ", scope_key_->name().toDisplayString());
+      "Process function context complete. ",
+      scope_key_->name().toDisplayString());
   DebugPrint();
 }
 
 void FunctionExtractor::FunctionContext::DebugPrint() const {
   GRAPH_DEBUG("Scope name: ", scope_key_->name().toDisplayString());
-
-  for (const auto& it : constant_map_) {
-    GRAPH_DEBUG("Constant value difference: ");
-    GRAPH_DEBUG(*it.first);
-    for (auto n : it.second) {
-      GRAPH_DEBUG(*n);
-    }
-  }
 
   for (const auto& it : attribute_map_) {
     for (const auto& attr_it : it.second) {
@@ -228,19 +211,6 @@ void FunctionExtractor::FunctionContext::SetAttrName(
   auto n_attr_it = node_attr_to_name_[n_in_def][attr.toUnqualString()] = name;
 }
 
-void FunctionExtractor::FunctionContext::SetAttrName(
-    Node* ref_const_n,
-    const std::string& name) {
-  TORCH_INTERNAL_ASSERT(ref_const_n->kind() == c10::onnx::Constant);
-  auto v_it =
-      scope_ctxs_[scope_key_]->env_to_subgraph_.find(ref_const_n->output());
-  TORCH_INTERNAL_ASSERT(
-      v_it != scope_ctxs_[scope_key_]->env_to_subgraph_.end(),
-      "node not found in env: ",
-      *ref_const_n);
-  val_attr_to_name_[v_it->second] = name;
-}
-
 c10::optional<std::string> FunctionExtractor::FunctionContext::FindAttrName(
     Node* ref_n,
     Symbol attr) {
@@ -256,21 +226,6 @@ c10::optional<std::string> FunctionExtractor::FunctionContext::FindAttrName(
   }
   auto name_it = n_attr_it->second.find(attr.toUnqualString());
   if (name_it == n_attr_it->second.end()) {
-    return c10::nullopt;
-  }
-  return name_it->second;
-}
-
-c10::optional<std::string> FunctionExtractor::FunctionContext::FindAttrName(
-    Node* ref_const_n) {
-  TORCH_INTERNAL_ASSERT(ref_const_n->kind() == c10::onnx::Constant);
-  auto v_it =
-      scope_ctxs_[scope_key_]->env_to_subgraph_.find(ref_const_n->output());
-  if (v_it == scope_ctxs_[scope_key_]->env_to_subgraph_.end()) {
-    return c10::nullopt;
-  }
-  auto name_it = val_attr_to_name_.find(v_it->second);
-  if (name_it == val_attr_to_name_.end()) {
     return c10::nullopt;
   }
   return name_it->second;
@@ -429,9 +384,7 @@ c10::optional<ScopePtr> FunctionExtractor::InferScope(Node* n) {
         IsValidScope);
 
     if (scopes.size() > 0) {
-      // find common ancestor.
       auto common_ancestor = FindCommonAncestor(scopes);
-
       if (common_ancestor.has_value() &&
           IsValidScope(common_ancestor.value())) {
         return common_ancestor.value();
@@ -452,7 +405,11 @@ std::shared_ptr<Graph> FunctionExtractor::ConstructFuncGraph(
   auto g = std::make_shared<Graph>();
   GRAPH_DEBUG("Constructing graph for ", scope->namesFromRoot());
 
-  // TODO: update input name of function to common name?
+  // TODO: Update input names of function to match those in Module source code
+  // signature.
+  // This requires mapping between function node inputs and Module inputs.
+  // Due to the lack of such mapping, currently debugName is used as input
+  // names.
   ctx.PopulateInputsOutputs(param_names_);
   for (auto* v : ctx.inputs_) {
     env[v] = g->addInput()->copyMetadata(v);
@@ -519,15 +476,6 @@ Node* FunctionExtractor::CreateFunctionDefNode(
     return attr_name;
   };
 
-  for (const auto& c_it : func_ctx.constant_map_) {
-    auto* c_n = c_it.first;
-    TORCH_INTERNAL_ASSERT(c_n->kind() == c10::onnx::Constant);
-    auto attr_name = std::string(c_n->kind().toUnqualString()) + '_' +
-        c_n->output()->debugNameBase();
-    auto final_attr_name = adjust_attr_name(attr_name);
-    final_attr_names.emplace_back(final_attr_name);
-    func_ctx.SetAttrName(c_n, final_attr_name);
-  }
   for (const auto& n_it : func_ctx.attribute_map_) {
     auto* n = n_it.first;
     for (const auto& attr_it : n_it.second) {
@@ -553,13 +501,14 @@ Node* FunctionExtractor::CreateFunctionNode(
     const std::string& func_name) {
   const auto& func_scope = func_ctx.scope_key_;
   const auto& func_scope_ctx = func_ctx.scope_ctxs_[func_scope];
-  const auto func_nk = Symbol::fromQualString(domain_name + "::" + func_name);
   GRAPH_DEBUG(
       "Create and insert local function for scope: ",
       func_scope->namesFromRoot());
   scope_ctx.PopulateInputsOutputs(param_names_);
   auto last_n = *scope_ctx.nlist_.rbegin();
-  auto func_n = graph->create(func_nk, scope_ctx.outputs_.size());
+  auto func_n = graph->create(
+      Symbol::fromQualString(domain_name + "::" + func_name),
+      scope_ctx.outputs_.size());
   func_n->copyMetadata(last_n);
   for (auto* v : scope_ctx.inputs_) {
     func_n->addInput(v);
@@ -569,22 +518,7 @@ Node* FunctionExtractor::CreateFunctionNode(
     scope_ctx.outputs_[i]->replaceAllUsesWith(func_n->output(i));
   }
 
-  // set constants and attributes of different values as function attributes.
-
-  for (const auto& it : func_ctx.constant_map_) {
-    TORCH_INTERNAL_ASSERT(it.first->kind() == c10::onnx::Constant);
-    TORCH_INTERNAL_ASSERT(it.first->outputs().size() == 1);
-    auto attr_name = func_ctx.FindAttrName(it.first).value();
-    auto val = it.first->t(attr::value);
-    for (auto* n : scope_ctx.nlist_) {
-      if (it.second.find(n) != it.second.end()) {
-        val = n->t(attr::value);
-        break;
-      }
-    }
-    func_n->t_(Symbol::attr(attr_name), val);
-  }
-
+  // set attributes of different values as function attributes.
   auto copy_attr =
       [](Node* a, Node* b, Symbol attr, const std::string& new_name) {
 #define COPY_ATTR(kind)                                \
@@ -635,7 +569,6 @@ Node* FunctionExtractor::CreateFunctionNode(
   }
 
   func_n->insertAfter(last_n);
-
   return func_n;
 }
 
@@ -663,11 +596,11 @@ void FunctionExtractor::ConvertScopeToFunction(
   auto construct_unique_module_name = [&](std::string module_name) {
     auto module_name_variant = module_variant_count_.find(module_name);
     if (module_name_variant != module_variant_count_.end()) {
+      module_variant_count_[module_name]++;
       module_name += ("." + std::to_string(module_name_variant->second));
     } else {
       module_variant_count_[module_name] = 0;
     }
-    module_variant_count_[module_name]++;
     return module_name;
   };
 
@@ -689,7 +622,7 @@ void FunctionExtractor::ConvertScopeToFunction(
         scope_ctx.nlist_.begin(), scope_ctx.nlist_.end());
 
     auto last_n = *scope_ctx.nlist_.rbegin();
-    // replace local function node in parent scopes.
+    // replace function body nodes in parent scopes with local function node.
     for (auto& it : scope_ctxs) {
       const auto& parent_scope = it.first;
       auto& parent_ctx = *it.second;
@@ -742,10 +675,13 @@ void FunctionExtractor::ConvertScopeToFunction(
 
 bool FunctionExtractor::ScopeContext::IsIdenticalFuncion(
     const ScopeContext& other_ctx) const {
-  // TODO: need to differentiate same function under different inputs.
-  //       when constants are passed inplace of inputs, this leads to different
-  //       input count and node count. Likewise, due to different uses, output
-  //       count can be different as well.
+  // Differentiate same function under different inputs.
+  // When constants are passed in place of inputs, it leads to different
+  // input count and node count. Likewise, due to different uses, output
+  // count can be different as well.
+  // For now export them as different functions.
+  // Covered by `test_local_function_overloads` in
+  // `test/onnx/test_utility_funs.py`.
   if (&other_ctx == this) {
     return true;
   }
@@ -1040,7 +976,7 @@ scope_list FunctionExtractor::SortScopesByMaxDepth(
   return sorted_scopes;
 }
 
-std::pair<ValAttrNameMap, NodeAttrNameMap> FunctionExtractor::run() {
+NodeAttrNameMap FunctionExtractor::run() {
   auto scope_ctxs = PartitionNodesByScope(graph_);
   DebugPrintScopeContexts(scope_ctxs);
   auto identical_scope_map = PartitionIdenticalScopes(scope_ctxs);
@@ -1057,12 +993,9 @@ std::pair<ValAttrNameMap, NodeAttrNameMap> FunctionExtractor::run() {
   DebugPrintGraphWithFunction(graph_);
 
   // Construct return mappings
-  ValAttrNameMap val_attr_to_name;
   NodeAttrNameMap node_attr_to_name;
 
   for (const auto& it : func_ctxs_) {
-    auto func_val_map = it.second->val_attr_to_name_;
-    val_attr_to_name.insert(func_val_map.begin(), func_val_map.end());
     auto func_ref_map = it.second->node_attr_to_name_;
     node_attr_to_name.insert(func_ref_map.begin(), func_ref_map.end());
   }
@@ -1077,12 +1010,24 @@ std::pair<ValAttrNameMap, NodeAttrNameMap> FunctionExtractor::run() {
   }
   func_ctxs_.clear();
 
-  return std::make_pair(val_attr_to_name, node_attr_to_name);
+  return node_attr_to_name;
 }
 
 } // namespace
 
-std::pair<ValAttrNameMap, NodeAttrNameMap> ONNXFunctionExtraction(
+// FunctionExtractor runs in the following steps. Updates are made inplace to
+// the graph argument.
+//    1. Partition nodes into groups based on their scope information.
+//    Each scope represents an individual nn.Module call. A ScopeContext object
+//    is created for each group.
+//    2. Compare and find groups with the same subgraph pattern from step 1.
+//    3. Scopes are nested. Starting from the deepest scope, extract the
+//    subgraph pattern, and define as local function node. Replace subgraph
+//    pattern with a single node of the new local function node type. A
+//    FunctionContext object is created for each function.
+//    4. Construct NodeAttrNameMap tracking mapping from attribute name of
+//    IR Node inside function subgraph, to function attribute name.
+NodeAttrNameMap ONNXFunctionExtraction(
     std::shared_ptr<Graph>& graph,
     const std::unordered_set<std::string>& module_names,
     const std::vector<std::string>& param_names) {

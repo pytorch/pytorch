@@ -186,7 +186,6 @@ class GraphEncoder {
       bool add_node_names,
       bool use_external_data_format,
       const std::string& onnx_file_path,
-      const ValAttrNameMap& val_attr_to_name = {},
       const NodeAttrNameMap& node_attr_to_name = {});
 
   onnx::ModelProto get_model_proto() {
@@ -309,7 +308,8 @@ class GraphEncoder {
   void AddAttribute(
       onnx::NodeProto* node_proto,
       const jit::Symbol name,
-      const std::string& ref_attr_name);
+      const std::string& ref_attr_name,
+      const AttributeKind attr_kind);
 
   void AddAttribute(
       onnx::NodeProto* node_proto,
@@ -334,7 +334,6 @@ class GraphEncoder {
   int64_t onnx_opset_version_;
   std::map<std::string, int> custom_opsets_;
   std::shared_ptr<Graph> graph_;
-  ValAttrNameMap val_attr_to_name_;
   NodeAttrNameMap node_attr_to_name_;
   // For large models, the parameters can be stored in separate binary files.
   // This parameter sets a threshold on the number of elements in the parameter
@@ -375,6 +374,38 @@ onnx::TensorProto_DataType ATenTypeToOnnxType(at::ScalarType at_type) {
   }
 }
 
+onnx::AttributeProto_AttributeType ATenAttributeKindToOnnxAttributeType(
+    AttributeKind at_kind,
+    const jit::Symbol name) {
+  switch (at_kind) {
+    case AttributeKind::f:
+      return onnx::AttributeProto_AttributeType_FLOAT;
+    case AttributeKind::fs:
+      return onnx::AttributeProto_AttributeType_FLOATS;
+    case AttributeKind::i:
+      return onnx::AttributeProto_AttributeType_INT;
+    case AttributeKind::is:
+      return onnx::AttributeProto_AttributeType_INTS;
+    case AttributeKind::s:
+      return onnx::AttributeProto_AttributeType_STRING;
+    case AttributeKind::ss:
+      return onnx::AttributeProto_AttributeType_STRINGS;
+    case AttributeKind::t:
+      return onnx::AttributeProto_AttributeType_TENSOR;
+    case AttributeKind::ts:
+      return onnx::AttributeProto_AttributeType_TENSORS;
+    case AttributeKind::g:
+      return onnx::AttributeProto_AttributeType_GRAPH;
+    case AttributeKind::gs:
+      return onnx::AttributeProto_AttributeType_GRAPHS;
+    default:
+      std::ostringstream err_msg;
+      err_msg << "attribute \"" << name.toDisplayString()
+              << "\" has unexpected kind: " << toString(at_kind);
+      throw std::runtime_error(err_msg.str());
+  }
+}
+
 GraphEncoder::GraphEncoder(
     const std::shared_ptr<Graph>& graph,
     int64_t onnx_opset_version,
@@ -390,7 +421,6 @@ GraphEncoder::GraphEncoder(
     bool add_node_names,
     bool use_external_data_format,
     const std::string& onnx_file_path,
-    const ValAttrNameMap& val_attr_to_name,
     const NodeAttrNameMap& node_attr_to_name)
     : num_blocks_(0),
       num_op_nodes_(0),
@@ -402,10 +432,9 @@ GraphEncoder::GraphEncoder(
       onnx_opset_version_(onnx_opset_version),
       custom_opsets_(custom_opsets),
       graph_(graph),
-      val_attr_to_name_(val_attr_to_name),
       node_attr_to_name_(node_attr_to_name) {
   model_proto_.set_producer_name("pytorch");
-  // we pin IR version to version 6 (12/11/2019) instead of using
+  // we pin IR version to version 8 instead of using
   // onnx::IR_VERSION. with this change, the test_operators.py will be more
   // stable. only bump it when it's necessary
   model_proto_.set_ir_version(onnx_torch::IR_VERSION);
@@ -725,12 +754,7 @@ void GraphEncoder::EncodeNode(
     if (input->node()->mustBeNone()) {
       node_proto->add_input("");
     } else {
-      auto attr_it = val_attr_to_name_.find(input);
-      if (attr_it != val_attr_to_name_.end()) {
-        node_proto->add_input(attr_it->second);
-      } else {
-        node_proto->add_input(input->debugName());
-      }
+      node_proto->add_input(input->debugName());
     }
   }
   for (auto output : node->outputs()) {
@@ -764,7 +788,8 @@ void GraphEncoder::EncodeNode(
     if (attrs_it != node_attr_to_name_.end()) {
       auto attr_it = attrs_it->second.find(attr_name.toUnqualString());
       if (attr_it != attrs_it->second.end()) {
-        AddAttribute(node_proto, attr_name, attr_it->second);
+        AddAttribute(
+            node_proto, attr_name, attr_it->second, node->kindOf(attr_name));
         continue;
       }
     }
@@ -824,11 +849,13 @@ void GraphEncoder::EncodeNode(
 void GraphEncoder::AddAttribute(
     onnx::NodeProto* node_proto,
     const jit::Symbol name,
-    const std::string& ref_attr_name) {
+    const std::string& ref_attr_name,
+    const AttributeKind attr_kind) {
   auto attr = node_proto->add_attribute();
   AT_ASSERT(name.is_attr());
   attr->set_name(name.toUnqualString());
   attr->set_ref_attr_name(ref_attr_name);
+  attr->set_type(ATenAttributeKindToOnnxAttributeType(attr_kind, name));
 }
 
 void GraphEncoder::AddAttribute(
@@ -858,37 +885,32 @@ void GraphEncoder::AddAttribute(
   auto attr = node_proto->add_attribute();
   AT_ASSERT(name.is_attr());
   attr->set_name(name.toUnqualString());
+  attr->set_type(
+      ATenAttributeKindToOnnxAttributeType(node->kindOf(name), name));
   switch (node->kindOf(name)) {
     case AttributeKind::f:
       attr->set_f(node->f(name));
-      attr->set_type(onnx::AttributeProto_AttributeType_FLOAT);
       break;
     case AttributeKind::fs:
-      attr->set_type(onnx::AttributeProto_AttributeType_FLOATS);
       for (auto& v : node->fs(name))
         // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         attr->add_floats(v);
       break;
     case AttributeKind::i:
-      attr->set_type(onnx::AttributeProto_AttributeType_INT);
       attr->set_i(node->i(name));
       break;
     case AttributeKind::is:
-      attr->set_type(onnx::AttributeProto_AttributeType_INTS);
       for (auto& v : node->is(name))
         attr->add_ints(v);
       break;
     case AttributeKind::s:
-      attr->set_type(onnx::AttributeProto_AttributeType_STRING);
       attr->set_s(node->s(name));
       break;
     case AttributeKind::ss:
-      attr->set_type(onnx::AttributeProto_AttributeType_STRINGS);
       for (auto& v : node->ss(name))
         attr->add_strings(v);
       break;
     case AttributeKind::t: {
-      attr->set_type(onnx::AttributeProto_AttributeType_TENSOR);
       auto t = attr->mutable_t();
       if (use_external_data_format && !t->has_name()) {
         t->set_name(
@@ -898,7 +920,6 @@ void GraphEncoder::AddAttribute(
           t, node->t(name), {}, use_external_data_format, onnx_file_path);
     } break;
     case AttributeKind::ts:
-      attr->set_type(onnx::AttributeProto_AttributeType_TENSORS);
       for (auto& v : node->ts(name)) {
         auto t = attr->add_tensors();
         if (use_external_data_format && !t->has_name()) {
@@ -909,7 +930,6 @@ void GraphEncoder::AddAttribute(
       }
       break;
     case AttributeKind::g: {
-      attr->set_type(onnx::AttributeProto_AttributeType_GRAPH);
       auto g = attr->mutable_g();
       EncodeGraph(
           g,
@@ -922,7 +942,6 @@ void GraphEncoder::AddAttribute(
           onnx_file_path);
     } break;
     case AttributeKind::gs:
-      attr->set_type(onnx::AttributeProto_AttributeType_GRAPHS);
       for (auto& v : node->gs(name)) {
         auto g = attr->add_graphs();
         EncodeGraph(
@@ -1166,7 +1185,6 @@ export_onnx(
     bool add_node_names,
     bool use_external_data_format,
     const std::string& onnx_file_path,
-    const ValAttrNameMap& val_attr_to_name,
     const NodeAttrNameMap& node_attr_to_name) {
   auto graph_encoder = GraphEncoder(
       graph,
@@ -1181,8 +1199,6 @@ export_onnx(
       add_node_names,
       use_external_data_format,
       onnx_file_path,
-      // module_names_to_function,
-      val_attr_to_name,
       node_attr_to_name);
   GRAPH_DEBUG("onnx proto:", prettyPrint(graph_encoder.get_model_proto()));
   return std::make_tuple(
