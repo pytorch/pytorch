@@ -876,7 +876,6 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
         activation_int8_quantized = activation_is_int8_quantized(qconfig)
         activation_statically_quantized = activation_is_statically_quantized(qconfig)
         weight_dtype = dtypes[1]
-        # TODO: reference_model option for linear module
         if self.linear_node.op == 'call_module':
 
             output_activation_post_process = \
@@ -885,7 +884,10 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
             # note that relu should already be fused into linear modul in the fusion step
             assert self.relu_node is None, 'linear module and relu fusion is not executed, ' \
                 'please make sure to run fusion before prepare'
-            if is_reference:
+            # we'll always produce reference pattern for torch.nn.Linear,
+            # will remove the else branch after we migrated all use cases
+            if is_reference or \
+               type(self.linear) in [torch.nn.Linear] and dtypes in [(torch.quint8, torch.qint8, None)]:
                 # produce dequant - float_op - quant pattern
                 dtype = torch.float
                 if activation_int8_quantized:
@@ -920,7 +922,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                 # we can have a map from module to reference module
                 # and allow user to register new ones
                 qlinear_cls = get_static_quant_module_class(
-                    type(float_linear), is_reference=is_reference)
+                    type(float_linear), is_reference=True)
                 ref_linear = qlinear_cls.from_float(float_linear, weight_qparams)
 
                 # if the parent is a fused linear (Sequential), we can replace the first
@@ -945,6 +947,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                         node_name_to_scope,
                         is_input=False)
                 return op_out
+            # non-reference option
             else:
                 # 1. attach output activation post process to linear module
                 if output_activation_post_process:

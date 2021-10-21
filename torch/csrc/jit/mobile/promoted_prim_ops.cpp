@@ -122,7 +122,7 @@ void toList(Stack& stack) {
   TORCH_CHECK(
       (out_ty == FloatType::get() && t.is_floating_point()) ||
           (out_ty == ComplexType::get() && t.is_complex()) ||
-          tryScalarTypeFromJitType(out_ty) == t.scalar_type(),
+          tryScalarTypeFromJitType(*out_ty) == t.scalar_type(),
       "Output annotation element type and runtime tensor element type must match for tolist()");
 
   // Check that the dimension of the Tensor matches that of the
