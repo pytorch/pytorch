@@ -1181,6 +1181,31 @@ class TestOldViewOps(TestCase):
         test_helper((10, 3, 32, 32), 10 * 3 * 32 * 32, torch.channels_last, device)
         test_helper((3, 10, 3, 32, 32), 3 * 10 * 3 * 32 * 32, torch.channels_last_3d, device)
 
+    def test_strides_resize_(self, device):
+        original = torch.ones(5, 5, device=device)
+
+        def check(shape, strides, should_resize):
+            tensor = original.clone()
+            tensor.resize_(shape, strides)
+            if should_resize:
+                self.assertEqual(tensor.stride, strides)
+                self.assertNotEqual(original.data_ptr(), tensor.data_ptr())
+            else:
+                self.assertEqual(original.stride, strides)
+                self.assertEqual(original.data_ptr(), tensor.data_ptr())
+
+        # No resizing happens
+        check([5, 5], [2, 1], False)
+        check([5, 5], [5, 1], False)
+        check([3, 2], [3, 3], False)
+        check([3, 2], [7, 4], False)
+        # Resizing should happen
+        check([5, 5], [5, 2], True)
+        check([5, 5], [6, 1], True)
+        check([10, 10], [ 5, 1], True)
+        check([10, 10], [10, 2], True)
+
+
     @onlyOnCPUAndCUDA
     @dtypes(torch.int64, torch.float, torch.complex128)
     def test_transpose_invalid(self, device, dtype):

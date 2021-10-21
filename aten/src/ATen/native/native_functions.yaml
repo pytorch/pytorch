@@ -1824,6 +1824,15 @@
     CUDA: resize_cuda_
     QuantizedCPU: quantized_resize_cpu_
 
+- func: resize_.strides(Tensor(a!) self, int[] size, int[] strides) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
+  variants: method
+  device_check: NoCheck
+  device_guard: False
+  dispatch:
+    CPU, Meta: resize_with_strides_
+    CUDA: resize_with_strides_cuda_
+
 - func: empty_quantized(int[] size, Tensor qtensor, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   category_override: factory
   variants: function

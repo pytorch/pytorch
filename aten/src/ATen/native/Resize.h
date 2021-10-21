@@ -1,13 +1,45 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <ATen/native/DispatchStub.h>
 #include <ATen/native/ResizeCommon.h>
 #include <ATen/TensorUtils.h>
 
 #include <c10/core/CPUAllocator.h>
+#include <cstddef>
 
 
 namespace at { namespace native {
+
+using ResizeImplFn = TensorImpl*(*)(TensorImpl*, IntArrayRef, c10::optional<IntArrayRef>, bool);
+using MaybeResizeFn = void(*)(TensorImpl*, uint64_t);
+// Template implementation for `resize_`.
+// Implementors should call this function with the core
+// resizing implementation as template parameter.
+template <ResizeImplFn Impl>
+void resize_template(
+    const Tensor& self,
+    IntArrayRef size,
+    c10::optional<IntArrayRef> strides,
+    c10::optional<MemoryFormat> optional_memory_format,
+    bool resize_storage) {
+  TORCH_INTERNAL_ASSERT(!(strides.has_value() && optional_memory_format.has_value()));
+  if (self.has_names()) {
+    resize_named_tensor_(self, size, optional_memory_format);
+    return;
+  }
+  auto* self_ = self.unsafeGetTensorImpl();
+  Impl(self_, size, strides, resize_storage);
+  if (optional_memory_format.has_value()) {
+    auto memory_format =
+        optional_memory_format.value();
+    TORCH_CHECK(
+        memory_format != MemoryFormat::Preserve,
+        "Unsupported memory format",
+        memory_format);
+    self_->empty_tensor_restride(memory_format);
+  }
+}
 
 // TODO: make all operations that resize given outputs use this function
 //   for consistency and maintainability.
@@ -21,7 +53,10 @@ namespace at { namespace native {
 //   needs resizing
 // NOTE: In the future the warning will become an error
 // Returns a bool saying whether or not the resize actually happened or not
-TORCH_API bool resize_output(const Tensor& output, IntArrayRef shape);
+TORCH_API bool resize_output(
+    const Tensor& output,
+    IntArrayRef shape,
+    c10::optional<IntArrayRef> strides = c10::nullopt);
 
 // Utility for resize_output
 //  Returns a bool saying resize should happen or not and
@@ -57,6 +92,86 @@ static inline void maybe_resize_storage_cpu(TensorImpl* self, uint64_t new_size)
   } else if (new_size_bytes > storage.nbytes()) {
     resize_bytes_cpu(storage.unsafeGetStorageImpl(), new_size_bytes);
   }
+}
+
+// Try to reuse the storage by ignoring the given strides, if
+// necessary. There are 3 cases:
+// 1. Using the requested size and strides fit inside the existing
+//    storage -> no allocation needed!
+// 2. It only fits in the existing storage if we don't use the
+//    requested strides -> no allocation needed!
+// 3. We have to allocate memory -> allocation needed!
+template <MaybeResizeFn MaybeResize>
+TensorImpl* resize_impl_tryreuse_(
+    TensorImpl* self,
+    IntArrayRef size,
+    c10::optional<IntArrayRef> stride,
+    bool resize_storage = true) {
+  const auto storage_nbytes = self->storage().nbytes();
+
+  // Defines how we are allocating/reusing memory.
+  // CONTIGUOUS has lower priority than STRIDED.
+  enum Strategy { CONTIGUOUS = 0, STRIDED, UNDEF };
+  // Keep track of which strategy we are going to use for reusing
+  // the storage (if that's possible).
+  Strategy selected = UNDEF;
+  // If we can't, we pick an allocation strategy.
+  Strategy alloc_strategy = UNDEF;
+
+  // Computation of contiguous storage size is necessary, here.
+  // Calling 'self->set_size_contiguous' already does it, but we
+  // still don't know at this point.
+  int64_t contiguous_storage_size = 1;
+  for (auto s : size) {
+    contiguous_storage_size *= s;
+  }
+
+  // Fill in the data necessary to decide: (i) whether we will need
+  // allocation or not; and (ii) what strategy we are going to use.
+  std::array<bool, 2> did_overflow {false, false};
+  std::array<bool, 2> may_reuse {false, false};
+  std::array<uint64_t, 2> byte_size {0, 0};
+  std::array<int64_t, 2> storage_size {0, 0};
+
+  storage_size[STRIDED] = storage_size_for(size, stride.value());
+  storage_size[CONTIGUOUS] = contiguous_storage_size;
+
+  for (int i = 0; i < Strategy::UNDEF; i++) {
+    byte_size[i] = (storage_size[i] + self->storage_offset()) * self->dtype().itemsize();
+    did_overflow[i] = overflows<size_t>(byte_size[i]);
+    may_reuse[i] = storage_nbytes >= static_cast<size_t>(byte_size[i]);
+    alloc_strategy = !did_overflow[i] ?
+        static_cast<Strategy>(i) : alloc_strategy;
+    selected = (!did_overflow[i] && may_reuse[i]) ?
+        static_cast<Strategy>(i) : selected;
+  }
+
+  if (selected == UNDEF) {
+    // If both `selected` and `alloc_strategy` are `UNDEF`, it means
+    // that we've overflowed on all strategies.
+    TORCH_CHECK(
+        alloc_strategy != UNDEF,
+        "Requested storage size (", storage_size[CONTIGUOUS],
+        ") cannot be represented as a size_t");
+    selected = alloc_strategy;
+  }
+
+  switch (selected) {
+    case Strategy::STRIDED:
+      self->set_sizes_and_strides(size, stride.value());
+      break;
+    case Strategy::CONTIGUOUS:
+      self->set_sizes_contiguous(storage_size[CONTIGUOUS]);
+      break;
+    default:
+      break;
+  }
+
+  if (resize_storage) {
+    MaybeResize(self, storage_size[selected]);
+  }
+
+  return self;
 }
 
 inline TensorImpl* resize_impl_cpu_(

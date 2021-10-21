@@ -35,18 +35,21 @@ static bool is_functorch_wrapped_tensor(const Tensor& tensor) {
   return !(key_set & kFunctorchWrappedTensors).empty();
 }
 
-bool resize_output(const Tensor& output, IntArrayRef shape) {
+bool resize_output(const Tensor& output, IntArrayRef shape, c10::optional<IntArrayRef> strides) {
   if (resize_output_check(output, shape)) {
-    // avoid a redispatch for cpu and cuda.
-    // TODO: when resize_cuda_ is re-written to be unified with resize_,
-    // we can provide the same benefit for cuda.
-    //
     // TODO(#61485): functorch wrapped tensors should not go through the
     // fast path. This is a hack, longer term solutions are in the issue
     if (output.is_cpu() && !is_functorch_wrapped_tensor(output)) {
-      at::native::resize_(output, shape);
+      at::native::resize_template<&resize_impl_tryreuse_<&maybe_resize_storage_cpu>>(
+          output, shape, strides, c10::nullopt, true);
     } else {
-      output.resize_(shape);
+      // We need to dispatch to different functions based on whether
+      // `strides` is given or not.
+      if (strides.has_value()) {
+        output.resize_(shape, strides.value());
+      } else {
+        output.resize_(shape);
+      }
     }
     return true;
   } else {
@@ -126,21 +129,16 @@ const Tensor& resize_(
     const Tensor& self,
     IntArrayRef size,
     c10::optional<MemoryFormat> optional_memory_format) {
-  if (self.has_names()) {
-    return resize_named_tensor_(self, size, optional_memory_format);
-  }
-  auto* self_ = self.unsafeGetTensorImpl();
-  // NOLINTNEXTLINE(bugprone-argument-comment)
-  resize_impl_cpu_(self_, size, /*strides=*/c10::nullopt);
-  if (optional_memory_format.has_value()) {
-    auto memory_format =
-        optional_memory_format.value();
-    TORCH_CHECK(
-        memory_format != MemoryFormat::Preserve,
-        "Unsupported memory format",
-        memory_format);
-    self_->empty_tensor_restride(memory_format);
-  }
+  resize_template<&resize_impl_cpu_>(self, size, c10::nullopt, optional_memory_format, true);
+  return self;
+}
+
+const Tensor& resize_with_strides_(
+    const Tensor& self,
+    IntArrayRef size,
+    IntArrayRef strides) {
+  resize_template<&resize_impl_tryreuse_<&maybe_resize_storage_cpu>>(
+      self, size, strides, c10::nullopt, true);
   return self;
 }
 
