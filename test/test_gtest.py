@@ -52,7 +52,7 @@ print(f"[remove] USING PATH {TEST_BINARY_DIR}")
 # as regular binaries.
 # TODO: Once all the C++ tests have been migrated to this wrapper, we can delete
 # this list
-ALLOWLISTED_TEST = {
+ALLOWLISTED_TESTS = {
     "test_jit",
 }
 
@@ -98,6 +98,10 @@ class GTest(TestCase):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         print("main")
+        if TEST_WITH_ROCM:
+            # C++ tests don't run on rocm
+            return
+
         if not TEST_BINARY_DIR.exists():
             raise RuntimeError(
                 f"{TEST_BINARY_DIR} does not exist, this test "
@@ -106,10 +110,10 @@ class GTest(TestCase):
 
         print(TEST_BINARY_DIR)
         print("globs")
-        print('list(TEST_BINARY_DIR.glob("*"))', list(TEST_BINARY_DIR.glob("*")))
-        print(
-            'list(TEST_BINARY_DIR.glob("*test*"))', list(TEST_BINARY_DIR.glob("*test*"))
-        )
+        # print('list(TEST_BINARY_DIR.glob("*"))', list(TEST_BINARY_DIR.glob("*")))
+        # print(
+        #     'list(TEST_BINARY_DIR.glob("*test*"))', list(TEST_BINARY_DIR.glob("*test*"))
+        # )
         self.binaries = {}
 
         for binary in TEST_BINARY_DIR.glob("*test*"):
@@ -127,7 +131,7 @@ class GTest(TestCase):
             else:
                 test_name = f"test_{binary.name}"
 
-            if test_name not in ALLOWLISTED_TEST:
+            if test_name not in ALLOWLISTED_TESTS:
                 continue
 
             self.binaries[test_name] = binary
@@ -146,8 +150,10 @@ class GTest(TestCase):
             #     GTest, test_name, maybe_existing_case,
             # )
 
+    @skipIfRocm
     def test_jit(self):
-        binary = self.binaries["test_jit"]
+        test_name = "test_jit"
+        binary = self.binaries[test_name]
         setup_path = REPO_ROOT / "test" / "cpp" / "jit" / "tests_setup.py"
         # These tests fail on windows only (this wasn't caught before switching
         # to the Python runner since test_jit.exe wasn't run during windows
@@ -241,7 +247,7 @@ if __name__ == "__main__":
     #     else:
     #         test_name = f"test_{binary.name}"
 
-    #     if test_name not in ALLOWLISTED_TEST:
+    #     if test_name not in ALLOWLISTED_TESTS:
     #         continue
 
     #     maybe_existing_case = generate_test_case(
