@@ -183,6 +183,10 @@ def gen(out: str, native_yaml_path: str, deprecated_yaml_path: str, template_pat
     create_python_bindings(
         fm, functions, is_py_special_function, 'torch.special', 'python_special_functions.cpp', method=False)
 
+    # Currently, we only use `functions` to generate `return_types` bindings.
+    # All methods which return namedtuple have function variant at this point.
+    # If any method only operator with namedtuple is added in the future,
+    # we will have to address that.
     create_python_return_type_bindings(
         fm, functions, lambda fn: True, 'torch.return_types', 'python_return_types.cpp', method=False)
 
