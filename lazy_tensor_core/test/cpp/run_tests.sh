@@ -54,7 +54,9 @@ cmake "$RUNDIR" \
   -DCMAKE_BUILD_TYPE=$BUILDTYPE \
   -DPYTHON_INCLUDE_DIR=$(python -c "from distutils.sysconfig import get_python_inc; print(get_python_inc())") \
   -DPYTHON_LIBRARY=$(python -c "import distutils.sysconfig as sysconfig; print(sysconfig.get_config_var('LIBDIR') + '/' + sysconfig.get_config_var('LDLIBRARY'))")
-make -j $VERB
+# Ninja needs a separate build invocation for googletest.
+cmake --build . --target googletest
+cmake --build . --target all
 
 if [ $BUILD_ONLY -eq 0 ]; then
   if [ "$LOGFILE" != "" ]; then
