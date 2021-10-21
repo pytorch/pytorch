@@ -6,6 +6,8 @@
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
+
+#include <c10/util/irange.h>
 #include <c10/util/math_compat.h>
 
 #include <algorithm>
@@ -39,7 +41,7 @@ static void avg_pool2d_out_frame(
     bool count_include_pad,
     c10::optional<int64_t> divisor_override) {
   at::parallel_for(0, nInputPlane, 0, [&](int64_t start, int64_t end) {
-    for (auto k = start; k < end; k++) {
+    for (const auto k : c10::irange(start, end)) {
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int64_t xx, yy;
       /* For all output pixels... */
@@ -224,7 +226,7 @@ Tensor q_avg_pool2d(
           divisor_override);
     } else {
       at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
-        for (auto b = start; b < end; b++) {
+        for (const auto b : c10::irange(start, end)) {
           qavg_pool2d_nhwc_stub(
               input.device().type(),
               input,
@@ -270,7 +272,7 @@ Tensor q_avg_pool2d(
           divisor_override);
     } else {
       at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
-        for (auto b = start; b < end; b++) {
+        for (const auto b : c10::irange(start, end)) {
           avg_pool2d_out_frame<scalar_t>(
               input,
               output,
