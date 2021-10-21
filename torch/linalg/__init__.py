@@ -1920,8 +1920,8 @@ the output has the same batch dimensions.
         :func:`torch.linalg.lu` computes the LU decomposition with partial pivoting of a possibly
         non-square matrix.
 
-        :func:`torch.linalg.solve` solves a system of linear equations. It can be seen as a composition
-        of this function and :func:`~lu_solve`.
+        :func:`torch.linalg.solve` solves a system of linear equations. It is a composition
+        of :func:`~lu_factor` and :func:`~lu_solve`.
 
 Args:
     A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
@@ -1970,7 +1970,7 @@ denoting the errors that may have happened during the computation of this functi
 """ + r"""
 
 .. seealso::
-        :func:`~lu_factor` is a SciPy compatible variant that always checks for errors.
+        :func:`~lu_factor` is a variant that always checks for errors.
 
 Args:
     A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.

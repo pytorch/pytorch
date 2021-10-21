@@ -4188,18 +4188,23 @@ def sample_inputs_cholesky_solve(op_info, device, dtype, requires_grad=False, **
 
 
 def sample_inputs_lu(op_info, device, dtype, requires_grad=False, **kwargs):
+    make_arg = partial(make_fullrank_matrices_with_distinct_singular_values,
+                       dtype=dtype, device=device, requires_grad=requires_grad)
+
     # not needed once OpInfo tests support Iterables
     def generate_samples():
         batch_shapes = ((), (3,), (3, 3))
         for batch_shape, get_infos, size_delta in product(batch_shapes, (True, False), (-2, -1, 0, +1, +2)):
             shape = batch_shape + (S + size_delta, S)
-            input = make_tensor(shape, device, dtype, requires_grad=requires_grad, low=None, high=None)
+            input = make_arg(*shape)
             yield SampleInput(input, args=(True, get_infos))
 
     return list(generate_samples())
 
 def sample_inputs_linalg_lu_factor(op_info, device, dtype, requires_grad=False, **kwargs):
-    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+    # When calling `lu_factor` we need to assure that the matrix is invertible
+    make_fn = make_tensor if "ex" in op_info.name else make_fullrank_matrices_with_distinct_singular_values
+    make_arg = partial(make_fn, dtype=dtype, device=device, requires_grad=requires_grad)
 
     # not needed once OpInfo tests support Iterables
     def generate_samples():
@@ -4209,12 +4214,16 @@ def sample_inputs_linalg_lu_factor(op_info, device, dtype, requires_grad=False, 
         deltas = (-2, -1, 0, +1, +2)
         for batch_shape, pivot, delta in product(batch_shapes, pivots, deltas):
             shape = batch_shape + (S + delta, S)
-            yield SampleInput(make_arg(shape), kwargs={"pivot": pivot})
+            # Insanely annoying that make_fullrank_blablabla accepts a *shape and not a tuple!
+            A = make_arg(shape) if "ex" in op_info.name else make_arg(*shape)
+            yield SampleInput(A, kwargs={"pivot": pivot})
 
     return list(generate_samples())
 
 def sample_inputs_lu_solve(op_info, device, dtype, requires_grad=False, **kwargs):
-    from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
+    make_fn = make_fullrank_matrices_with_distinct_singular_values
+    make_a = partial(make_fn, dtype=dtype, device=device)
+    make_b = partial(make_tensor, dtype=dtype, device=device)
 
     batches = [(), (0, ), (2, )]
     ns = [5, 3, 0]
@@ -4222,20 +4231,26 @@ def sample_inputs_lu_solve(op_info, device, dtype, requires_grad=False, **kwargs
 
     def generate_samples():
         for n, batch, rhs in product(ns, batches, nrhs):
-            a = random_fullrank_matrix_distinct_singular_value(n, *batch, dtype=dtype, device=device)
-            requires_grad_options = (False,) if not requires_grad else (True, False)
-            # we try all possible combinations of requires_grad for each input
-            for lu_requires_grad, b_requires_grad in product(requires_grad_options, requires_grad_options):
-                # when requires_grad == True, at least one input has to have requires_grad enabled
-                if requires_grad and not lu_requires_grad and not b_requires_grad:
-                    continue
-                # we run LU several times to guarantee that the produced SampleInputs are independent
-                # this is especially important when setting different requries_grad for same tensors!
+            with torch.no_grad():
+                shape_a = batch + (n, n)
+                a = make_a(*shape_a)
                 lu, pivs = a.lu()
-                lu.requires_grad = lu_requires_grad
-                b = torch.randn(*batch, n, rhs, dtype=dtype, device=device)
-                b.requires_grad = b_requires_grad
-                yield SampleInput(b, args=(lu, pivs))
+
+                shape_b = batch + (n, rhs)
+                b = make_b(shape_b)
+
+            grads = (False,) if not requires_grad else (True, False)
+            # we try all possible combinations of requires_grad for each input
+            for lu_grad, b_grad in product(grads, grads):
+                # when requires_grad == True, at least one input has to have requires_grad enabled
+                if requires_grad and not lu_grad and not b_grad:
+                    continue
+
+                lu_ = lu.detach().contiguous()
+                lu_.requires_grad_(lu_grad)
+                b_ = b.detach().clone()
+                b_.requires_grad_(b_grad)
+                yield SampleInput(b_, args=(lu_, pivs))
 
     return list(generate_samples())
 
@@ -5919,9 +5934,10 @@ def sample_inputs_softplus(op_info, device, dtype, requires_grad, **kwargs):
     ]
 
 def sample_inputs_tensorinv(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = make_fullrank_matrices_with_distinct_singular_values
+
     def make_input():
-        input = make_fullrank_matrices_with_distinct_singular_values(12, 12, device=device, dtype=dtype)
-        return input.requires_grad_(requires_grad)
+        return make_arg(12, 12, device=device, dtype=dtype, requires_grad=requires_grad)
 
     # lhs / rhs shape can have any number of dimensions as long as their product equals 12
     shapes = [
