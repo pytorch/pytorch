@@ -2688,7 +2688,7 @@ def sample_inputs_max_pool1d(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     kerneli = [(2,), 2]
-    stridei = [[2,]]
+    stridei = [[2, ]]
     Ci = [2]
     Hi = [3, 6]
     Wi = [6]
