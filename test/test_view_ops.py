@@ -1,3 +1,5 @@
+# Owner(s): ["module: tests"]
+
 import torch
 import numpy as np
 
@@ -364,6 +366,16 @@ class TestViewOps(TestCase):
             self.assertTrue(self.is_view_of(t, v_imag))
             self.assertEqual(v_imag, t_numpy_conj.imag)
             self.assertTrue(v_imag.is_neg())
+
+    @onlyOnCPUAndCUDA
+    def test_conj_view_with_shared_memory(self, device) -> None:
+        a = _make_tensor((4, 5,), torch.cfloat, device)
+        b = a.conj()
+        c = a.conj()
+
+        self.assertEqual(torch.add(a, b), a.add_(b))
+        self.assertEqual(torch.add(b, c), torch.add(b, c, out=a))
+        self.assertEqual(torch.add(b, c), b.add_(c))
 
     @onlyOnCPUAndCUDA
     @dtypes(*product(get_all_complex_dtypes(), get_all_dtypes()))
