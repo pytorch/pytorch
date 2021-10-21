@@ -158,10 +158,6 @@ NodePtr FracOp(const torch::lazy::Value& input);
 
 NodePtr Ger(const torch::lazy::Value& input, const torch::lazy::Value& other);
 
-NodePtr AddMatMulOp(const torch::lazy::Value& input, const torch::lazy::Value& weight, const torch::lazy::Value& bias);
-
-NodePtr MatMul(const torch::lazy::Value& lhs, const torch::lazy::Value& rhs);
-
 NodePtr AdaptiveAvgPool2dBackward(const torch::lazy::Value& grad_output, const torch::lazy::Value& input);
 
 NodePtr AdaptiveAvgPool3dBackward(const torch::lazy::Value& grad_output, const torch::lazy::Value& input);

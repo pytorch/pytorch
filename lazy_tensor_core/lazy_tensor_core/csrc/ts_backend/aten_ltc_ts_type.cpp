@@ -74,27 +74,6 @@ at::Tensor subtensor(const at::Tensor& tensor, int dim, int groups, int g) {
 
 }  // namespace
 
-at::Tensor LazyNativeFunctions::addmm(const at::Tensor& self,
-                                      const at::Tensor& mat1,
-                                      const at::Tensor& mat2,
-                                      const at::Scalar& beta,
-                                      const at::Scalar& alpha) {
-  LTC_FN_COUNTER("lazy::");
-  // lazy::dot doesn't support integer types.
-  if (beta.to<double>() != 1 || alpha.to<double>() != 1 ||
-      !at::native::is_floating_point(self) ||
-      !at::native::is_floating_point(mat1) ||
-      !at::native::is_floating_point(mat2)) {
-    return at::native::call_fallback_fn<&ltc_eager_fallback,
-                                        ATEN_OP(addmm)>::call(self, mat1, mat2,
-                                                              beta, alpha);
-  }
-  return bridge::AtenFromLtcTensor(
-      tensor_aten_ops::addmm(bridge::GetLtcTensor(mat1),
-                             /*weight=*/bridge::GetLtcTensor(mat2),
-                             /*bias=*/bridge::GetLtcTensor(self)));
-}
-
 at::Tensor LazyNativeFunctions::alias(const at::Tensor& self) {
   LTC_FN_COUNTER("lazy::");
   return self;
@@ -160,19 +139,6 @@ at::Tensor& LazyNativeFunctions::bernoulli_(
   LazyTensor self_tensor = bridge::GetLtcTensor(self);
   tensor_aten_ops::bernoulli_(self_tensor, p);
   return self;
-}
-
-at::Tensor LazyNativeFunctions::bmm(const at::Tensor& self,
-                                    const at::Tensor& mat2) {
-  LTC_FN_COUNTER("lazy::");
-  // lazy::dot doesn't support integer types.
-  if (!at::native::is_floating_point(self) ||
-      !at::native::is_floating_point(mat2)) {
-    return at::native::call_fallback_fn<&ltc_eager_fallback,
-                                        ATEN_OP(bmm)>::call(self, mat2);
-  }
-  return bridge::AtenFromLtcTensor(tensor_aten_ops::bmm(
-      bridge::GetLtcTensor(self), bridge::GetLtcTensor(mat2)));
 }
 
 at::Tensor LazyNativeFunctions::cat(at::TensorList tensors, int64_t dim) {
