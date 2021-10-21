@@ -175,11 +175,15 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   void callFunction(
       Function& f,
       Stack& stack,
-      size_t bailOut = GraphExecutor::getDefaultNumBailOuts()) {
-    f.call(stack, bailOut, [&](const Code& code) {
+      size_t bailOut = GraphExecutor::getDefaultNumBailOuts(),
+      bool next = true) {
+    bool newFrame = f.call(stack, bailOut, [&](const Code& code) {
       enterFrame(code, stack.size() - code.num_inputs());
       checkAndStartRecordFunction(frames.back(), stack);
     });
+    if (next) {
+      (frames.rbegin() + (newFrame ? 1 : 0))->pc++;
+    }
   }
 
   // relative to the end of the register list so that when we call
@@ -276,7 +280,6 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             push(stack, IValue());
             push(stack, IValue());
             push(stack, IValue());
-            ++frames.back().pc;
             callFunction(f, stack);
             continue;
           }
@@ -380,7 +383,6 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           case INST(CALL): {
             INST_GUARD;
             Function* fn = frame.function->function_table_[inst.X];
-            ++frames.back().pc;
             callFunction(*fn, stack);
             continue;
           }
@@ -404,7 +406,6 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                     ->type()
                     ->getMethod(
                         frame.function->constant_table_[inst.X].toStringRef());
-            ++frames.back().pc;
             callFunction(function, stack);
             continue;
           }
@@ -567,7 +568,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             stack.resize(base_pointer + num_inputs);
             leaveFrame();
 
-            callFunction(f, stack, remaining_bailout_depth);
+            callFunction(f, stack, remaining_bailout_depth, false);
             continue;
           }
           case INST(LIST_UNPACK): {
