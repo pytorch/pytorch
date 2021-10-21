@@ -6,7 +6,7 @@ namespace distributed {
 namespace c10d {
 namespace quantization {
 
-// NOTE: The kernels are copied from fbgemm_gpu, we should dedup them later
+// TODO: The kernels are copied from fbgemm_gpu, we should dedup them later
 
 void FloatToBFloat16Quantized_ref(
     const float* const input,
