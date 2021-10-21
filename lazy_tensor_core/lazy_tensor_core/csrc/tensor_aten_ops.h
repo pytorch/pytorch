@@ -540,31 +540,6 @@ LazyTensor mul(
 LazyTensor narrow(const LazyTensor& input, lazy_tensors::int64 dim,
                   lazy_tensors::int64 start, lazy_tensors::int64 length);
 
-// Like batch_norm, but returns additional save_mean and save_invstd used by
-// the backward pass.
-std::tuple<LazyTensor, LazyTensor, LazyTensor> native_batch_norm(
-    const LazyTensor& input, const LazyTensor& weight, const LazyTensor& bias,
-    LazyTensor& running_mean, LazyTensor& running_var, bool training,
-    double momentum, double eps);
-
-std::tuple<LazyTensor, LazyTensor, LazyTensor> ts_native_batch_norm(
-    const LazyTensor& input, const LazyTensor& weight, const LazyTensor& bias,
-    LazyTensor& running_mean, LazyTensor& running_var, bool training,
-    double momentum, double eps);
-
-// Returns the input, weight and bias gradients.
-std::tuple<LazyTensor, LazyTensor, LazyTensor> native_batch_norm_backward(
-    const LazyTensor& grad_out, const LazyTensor& input,
-    const LazyTensor& weight, const LazyTensor& save_mean,
-    const LazyTensor& save_invstd, bool training, double eps);
-
-std::tuple<LazyTensor, LazyTensor, LazyTensor> ts_native_batch_norm_backward(
-    const LazyTensor& grad_out, const LazyTensor& input,
-    const LazyTensor& weight, const LazyTensor& running_mean,
-    const LazyTensor& running_var, const LazyTensor& save_mean,
-    const LazyTensor& save_invstd, bool training, double eps,
-    lazy_tensors::Span<const bool> output_mask);
-
 LazyTensor ne(const LazyTensor& input, const at::Scalar& other);
 
 LazyTensor ne(const LazyTensor& input, const LazyTensor& other);

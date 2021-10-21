@@ -535,64 +535,6 @@ at::Tensor LazyNativeFunctions::mul(const at::Tensor& self,
                     });
 }
 
-std::tuple<at::Tensor, at::Tensor, at::Tensor>
-LazyNativeFunctions::native_batch_norm(
-    const at::Tensor& input, const c10::optional<at::Tensor>& weight,
-    const c10::optional<at::Tensor>& bias,
-    const c10::optional<at::Tensor>& running_mean,
-    const c10::optional<at::Tensor>& running_var, bool training,
-    double momentum, double eps) {
-  LTC_FN_COUNTER("lazy::");
-  LazyTensor input_tensor = bridge::GetLtcTensor(input);
-  const Device& device = input_tensor.GetDevice();
-  LazyTensor running_mean_tensor =
-      bridge::GetOrCreateLtcTensor(running_mean, device);
-  LazyTensor running_var_tensor =
-      bridge::GetOrCreateLtcTensor(running_var, device);
-  auto outputs = tensor_aten_ops::ts_native_batch_norm(
-      bridge::GetLtcTensor(input), bridge::GetOrCreateLtcTensor(weight, device),
-      bridge::GetOrCreateLtcTensor(bias, device), running_mean_tensor,
-      running_var_tensor, training, momentum, eps);
-  return std::make_tuple(bridge::AtenFromLtcTensor(std::get<0>(outputs)),
-                         bridge::AtenFromLtcTensor(std::get<1>(outputs)),
-                         bridge::AtenFromLtcTensor(std::get<2>(outputs)));
-}
-
-std::tuple<at::Tensor, at::Tensor, at::Tensor>
-LazyNativeFunctions::native_batch_norm_backward(
-    const at::Tensor& grad_out, const at::Tensor& input,
-    const c10::optional<at::Tensor>& weight,
-    const c10::optional<at::Tensor>& running_mean,
-    const c10::optional<at::Tensor>& running_var,
-    const c10::optional<at::Tensor>& save_mean,
-    const c10::optional<at::Tensor>& save_invstd, bool train, double eps,
-    std::array<bool, 3> output_mask) {
-  LTC_FN_COUNTER("lazy::");
-  LazyTensor grad_out_tensor = bridge::GetLtcTensor(grad_out);
-  const Device& device = grad_out_tensor.GetDevice();
-  LazyTensor null_tensor;
-  bool running_stats = running_mean && running_mean->defined();
-  LTC_CHECK_EQ(running_var && running_var->defined(), running_stats);
-  auto gradients = tensor_aten_ops::ts_native_batch_norm_backward(
-      bridge::GetLtcTensor(grad_out), bridge::GetLtcTensor(input),
-      bridge::GetOrCreateLtcTensor(weight, device),
-      running_stats ? bridge::GetOrCreateLtcTensor(running_mean, device)
-                    : null_tensor,
-      running_stats ? bridge::GetOrCreateLtcTensor(running_var, device)
-                    : null_tensor,
-      bridge::GetOrCreateLtcTensor(save_mean, device),
-      bridge::GetOrCreateLtcTensor(save_invstd, device), train, eps,
-      output_mask);
-  at::Tensor undefined;
-  return std::make_tuple(
-      output_mask[0] ? bridge::AtenFromLtcTensor(std::get<0>(gradients))
-                     : undefined,
-      output_mask[1] ? bridge::AtenFromLtcTensor(std::get<1>(gradients))
-                     : undefined,
-      output_mask[2] ? bridge::AtenFromLtcTensor(std::get<2>(gradients))
-                     : undefined);
-}
-
 at::Tensor LazyNativeFunctions::ne(const at::Tensor& self,
                                    const at::Scalar& other) {
   LTC_FN_COUNTER("lazy::");

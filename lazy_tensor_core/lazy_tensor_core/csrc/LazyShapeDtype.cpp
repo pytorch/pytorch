@@ -50,6 +50,74 @@ namespace torch_lazy_tensors{
 namespace ir {
 namespace ops {
 
+
+std::vector<std::vector<int64_t>> compute_shape_bitwise_and(const at::Tensor& self, const at::Scalar& other) {
+  return {self.sizes().vec()};
+}
+
+std::vector<c10::ScalarType> compute_dtype_bitwise_and(const at::Tensor& self, const at::Scalar& other) {
+  return {self.scalar_type()};
+}
+
+std::vector<std::vector<int64_t>> compute_shape_mean(const at::Tensor& self, c10::optional<at::ScalarType> dtype) {
+  return {{}};
+}
+
+std::vector<c10::ScalarType> compute_dtype_mean(const at::Tensor& self, c10::optional<at::ScalarType> dtype) {
+  if (dtype.has_value()) {
+    return {dtype.value()};
+  }
+  return {self.scalar_type()};
+}
+
+std::vector<std::vector<int64_t>> compute_shape_mv(const at::Tensor& self, const at::Tensor& vec) {
+  return {{self.size(0)}};
+}
+
+std::vector<c10::ScalarType> compute_dtype_mv(const at::Tensor& self, const at::Tensor& vec) {
+  return {self.scalar_type()};
+}
+
+std::vector<std::vector<int64_t>> compute_shape_native_batch_norm(const at::Tensor & input, const c10::optional<at::Tensor> & weight, const c10::optional<at::Tensor> & bias, const c10::optional<at::Tensor> & running_mean, const c10::optional<at::Tensor> & running_var, bool training, double momentum, double eps) {
+  if (running_mean.has_value() && running_var.has_value()) {
+    return {input.sizes().vec(), running_mean.value().sizes().vec(), running_var.value().sizes().vec()};
+  } else if (running_mean.has_value() || running_var.has_value()) {
+    LTC_ERROR() << "Unexpected case, running_mean or running_var but not both";
+  } else {
+    // input shape is assumed [N, C, H, W] and Batch Norm is defined as operating over C,
+    // so mean, var have shape of [C]
+    return {input.sizes().vec(), {input.sizes().vec()[1]}, {input.sizes().vec()[1]}};
+  }
+}
+
+std::vector<c10::ScalarType> compute_dtype_native_batch_norm(const at::Tensor & input, const c10::optional<at::Tensor> & weight, const c10::optional<at::Tensor> & bias, const c10::optional<at::Tensor> & running_mean, const c10::optional<at::Tensor> & running_var, bool training, double momentum, double eps) {
+  if (running_mean.has_value() && running_var.has_value()) {
+    return {input.scalar_type(), running_mean.value().scalar_type(), running_var.value().scalar_type()};
+  } else if (running_mean.has_value() || running_var.has_value()) {
+    LTC_ERROR() << "Unexpected case, running_mean or running_var but not both";
+  } else {
+    return {input.scalar_type(), input.scalar_type(), input.scalar_type()};
+  }
+}
+
+std::vector<std::vector<int64_t>> compute_shape_native_batch_norm_backward(const at::Tensor & grad_out, const at::Tensor & input, const c10::optional<at::Tensor> & weight, const c10::optional<at::Tensor> & running_mean, const c10::optional<at::Tensor> & running_var, const c10::optional<at::Tensor> & save_mean, const c10::optional<at::Tensor> & save_invstd, bool train, double eps, ::std::array<bool,3> output_mask) {
+  LTC_CHECK(weight.has_value()) << "Not sure what to do if weight is undefined";
+  return {input.sizes().vec(), weight.value().sizes().vec(), weight.value().sizes().vec()};
+}
+
+std::vector<c10::ScalarType> compute_dtype_native_batch_norm_backward(const at::Tensor & grad_out, const at::Tensor & input, const c10::optional<at::Tensor> & weight, const c10::optional<at::Tensor> & running_mean, const c10::optional<at::Tensor> & running_var, const c10::optional<at::Tensor> & save_mean, const c10::optional<at::Tensor> & save_invstd, bool train, double eps, ::std::array<bool,3> output_mask) {
+  // Autograd seems to always save a weight tensor even if it was nullopt in forward.
+  // but, it may be 'undefined' - so .defined() is the real source of truth here
+  if (weight.has_value() && weight.value().defined()){
+    // Following implementation in aten/src/ATen/native/Normalization.cpp : batch_norm_backward_cpu_template()
+    return {input.scalar_type(), weight.value().scalar_type(), input.scalar_type()};
+  }
+
+  // if weight has no value, I don't think gradient to weight matters; but we still have to provide a valid
+  // scalartype or lazy tensor won't be happy
+  return {input.scalar_type(), input.scalar_type(), input.scalar_type()};
+}
+
 std::vector<std::vector<int64_t>> compute_shape_native_layer_norm(const at::Tensor & input,
     at::IntArrayRef normalized_shape, const c10::optional<at::Tensor> & weight, const c10::optional<at::Tensor> & bias,
     double eps) {
@@ -95,60 +163,6 @@ std::vector<c10::ScalarType> compute_dtype_native_layer_norm_backward(const at::
   return dtypes;
 }
 
-std::vector<std::vector<int64_t>> compute_shape_mean(const at::Tensor& self, c10::optional<at::ScalarType> dtype) {
-  return {{}};
-}
-
-std::vector<c10::ScalarType> compute_dtype_mean(const at::Tensor& self, c10::optional<at::ScalarType> dtype) {
-  if (dtype.has_value()) {
-    return {dtype.value()};
-  }
-  return {self.scalar_type()};
-}
-
-std::vector<std::vector<int64_t>> compute_shape_mv(const at::Tensor& self, const at::Tensor& vec) {
-  return {{self.size(0)}};
-}
-
-std::vector<c10::ScalarType> compute_dtype_mv(const at::Tensor& self, const at::Tensor& vec) {
-  return {self.scalar_type()};
-}
-
-std::vector<std::vector<int64_t>> compute_shape_bitwise_and(const at::Tensor& self, const at::Scalar& other) {
-  return {self.sizes().vec()};
-}
-
-std::vector<c10::ScalarType> compute_dtype_bitwise_and(const at::Tensor& self, const at::Scalar& other) {
-  return {self.scalar_type()};
-}
-
-std::vector<std::vector<int64_t>> compute_shape_sum(
-    const at::Tensor& self, c10::optional<at::ScalarType> dtype) {
-  return {{}};
-}
-
-std::vector<c10::ScalarType> compute_dtype_sum(
-    const at::Tensor& self, c10::optional<at::ScalarType> dtype) {
-  if (dtype.has_value()) {
-    return {dtype.value()};
-  }
-  // It's undocumented, but torch::sum promotes all integral types to int64 by
-  // default
-  if (isIntegralType(self.scalar_type(), /*includeBool*/ true)) {
-    return {c10::ScalarType::Long};
-  }
-  return {self.scalar_type()};
-  ;
-}
-
-std::vector<std::vector<int64_t>> compute_shape_trace(const at::Tensor& self) {
-  return {{}};
-}
-
-std::vector<c10::ScalarType> compute_dtype_trace(const at::Tensor& self) {
-  return {self.scalar_type()};
-}
-
 std::vector<std::vector<int64_t>> compute_shape_smooth_l1_loss(
     const at::Tensor& self, const at::Tensor& target, int64_t reduction,
     double beta) {
@@ -183,6 +197,34 @@ std::vector<c10::ScalarType> compute_dtype_smooth_l1_loss_backward(
     const at::Tensor& target, int64_t reduction, double beta) {
   return {self.scalar_type(), target.scalar_type()};
 }
+
+std::vector<std::vector<int64_t>> compute_shape_sum(
+    const at::Tensor& self, c10::optional<at::ScalarType> dtype) {
+  return {{}};
+}
+
+std::vector<c10::ScalarType> compute_dtype_sum(
+    const at::Tensor& self, c10::optional<at::ScalarType> dtype) {
+  if (dtype.has_value()) {
+    return {dtype.value()};
+  }
+  // It's undocumented, but torch::sum promotes all integral types to int64 by
+  // default
+  if (isIntegralType(self.scalar_type(), /*includeBool*/ true)) {
+    return {c10::ScalarType::Long};
+  }
+  return {self.scalar_type()};
+  ;
+}
+
+std::vector<std::vector<int64_t>> compute_shape_trace(const at::Tensor& self) {
+  return {{}};
+}
+
+std::vector<c10::ScalarType> compute_dtype_trace(const at::Tensor& self) {
+  return {self.scalar_type()};
+}
+
 
 } // namespace ops
 } // namespace ir

@@ -19,6 +19,8 @@ full_codegen:
   - mean
   - mm
   - mv
+  - native_batch_norm
+  - native_batch_norm_backward
   - native_layer_norm
   - native_layer_norm_backward
   - rsqrt
@@ -55,8 +57,6 @@ supported:
   - leaky_relu_backward
   - mul.Tensor
   - mul.Scalar
-  - native_batch_norm
-  - native_batch_norm_backward
   - nll_loss_backward
   - nll_loss_forward
   - max_pool2d_with_indices

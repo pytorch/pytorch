@@ -34,8 +34,6 @@
 #include "lazy_tensor_core/csrc/ops/threshold.h"
 #include "lazy_tensor_core/csrc/ops/threshold_backward.h"
 #include "lazy_tensor_core/csrc/ops/ts_embedding_dense_backward.h"
-#include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_backward.h"
-#include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_forward.h"
 #include "lazy_tensor_core/csrc/ops/unselect.h"
 #include "lazy_tensor_core/csrc/ops/unsqueeze.h"
 #include "lazy_tensor_core/csrc/ops/update_slice.h"
@@ -119,12 +117,6 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
       case at::aten::nll_loss_backward: {
         const torch::lazy::Output& input = node->operand(1);
         return ir::GetShapeFromTsOutput(input);
-      }
-      case at::aten::native_batch_norm: {
-        return InferBatchNorm(node);
-      }
-      case at::aten::native_batch_norm_backward: {
-        return InferBatchNormBackward(node);
       }
       case at::aten::nll_loss_forward: {
         return InferNllLossForward(torch::lazy::NodeCast<ir::ops::NllLossForward>(
@@ -248,15 +240,6 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
           torch::lazy::NodeCast<ir::ops::ConvolutionOverrideable>(
               node, ir::OpKind(at::aten::convolution_overrideable)));
     }
-    if (node->op().op == at::aten::native_batch_norm) {
-      return LowerBatchNorm(torch::lazy::NodeCast<ir::ops::TSNativeBatchNormForward>(
-          node, ir::OpKind(at::aten::native_batch_norm)));
-    }
-    if (node->op().op == at::aten::native_batch_norm_backward) {
-      return LowerBatchNormBackward(
-          torch::lazy::NodeCast<ir::ops::TSNativeBatchNormBackward>(
-              node, ir::OpKind(at::aten::native_batch_norm_backward)));
-    }
     if (node->op().op == at::aten::constant_pad_nd) {
       return LowerConstantPad(torch::lazy::NodeCast<ir::ops::ConstantPadNd>(
           node, ir::OpKind(at::aten::constant_pad_nd)));
@@ -343,21 +326,6 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
         lazy_tensors::PrimitiveType::PRED,
         Helpers::GetPromotedShape(ir::GetShapeFromTsOutput(lhs).dimensions(),
                                   ir::GetShapeFromTsOutput(rhs).dimensions()));
-  }
-
-  static lazy_tensors::Shape InferBatchNorm(const torch::lazy::Node* node) {
-    const torch::lazy::Output& input = node->operand(0);
-    const torch::lazy::Output& running_mean = node->operand(3);
-    const torch::lazy::Output& running_var = node->operand(4);
-    return lazy_tensors::ShapeUtil::MakeTupleShape(
-        {ir::GetShapeFromTsOutput(input), ir::GetShapeFromTsOutput(running_mean), ir::GetShapeFromTsOutput(running_var)});
-  }
-
-  static lazy_tensors::Shape InferBatchNormBackward(const torch::lazy::Node* node) {
-    const torch::lazy::Output& input = node->operand(1);
-    const torch::lazy::Output& weight = node->operand(2);
-    return lazy_tensors::ShapeUtil::MakeTupleShape(
-        {ir::GetShapeFromTsOutput(input), ir::GetShapeFromTsOutput(weight), ir::GetShapeFromTsOutput(weight)});
   }
 
   static lazy_tensors::Shape InferNllLossForward(
@@ -562,38 +530,6 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
     torch::jit::Value* as_strided = as_strided_out.front();
     GenerateCopy(as_strided, loctx()->GetOutputOp(input_op));
     return {destination};
-  }
-
-  TSOpVector LowerBatchNorm(const ir::ops::TSNativeBatchNormForward* node) {
-    std::vector<torch::jit::NamedValue> arguments;
-    for (size_t i = 0; i < 5; ++i) {
-      arguments.emplace_back(loctx()->GetOutputOp(node->operand(i)));
-    }
-    arguments.emplace_back(node->training());
-    arguments.emplace_back(node->momentum());
-    arguments.emplace_back(node->eps());
-    return LowerBuiltin(node, arguments);
-  }
-
-  TSOpVector LowerBatchNormBackward(
-      const ir::ops::TSNativeBatchNormBackward* node) {
-    std::vector<torch::jit::NamedValue> arguments;
-    for (size_t i = 0; i < 3; ++i) {
-      arguments.emplace_back(loctx()->GetOutputOp(node->operand(i)));
-    }
-    const auto& operands = node->operands();
-    c10::optional<at::Tensor> null_arg;
-    if (operands.size() == 5) {
-      arguments.emplace_back(null_arg);
-      arguments.emplace_back(null_arg);
-    }
-    for (size_t i = 3; i < operands.size(); ++i) {
-      arguments.emplace_back(loctx()->GetOutputOp(node->operand(i)));
-    }
-    arguments.emplace_back(node->training());
-    arguments.emplace_back(node->eps());
-    arguments.emplace_back(node->output_mask());
-    return LowerBuiltin(node, arguments);
   }
 
   TSOpVector LowerCast(const ir::ops::Cast* node) {
