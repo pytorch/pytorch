@@ -8300,10 +8300,9 @@ op_db: List[OpInfo] = [
         gradcheck_fast_mode=False,
         skips=(
             DecorateInfo(
-                unittest.skip("Skipped!"),
+                unittest.expectedFailure,
                 "TestJit",
                 "test_variant_consistency_jit",
-                dtypes=(torch.float32, torch.complex64),
             ),
         ),
     ),
