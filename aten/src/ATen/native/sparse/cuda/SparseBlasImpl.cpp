@@ -205,6 +205,13 @@ void spgemm(
       "PyTorch with CUDA 11+. ",
       "Please use PyTorch built with newer CUDA version.");
 #else
+  // older versions of cusparse on Windows segfault for complex128 dtype
+#if defined(_WIN32) && defined(CUSPARSE_VERSION) && CUSPARSE_VERSION < 11400
+  TORCH_CHECK(
+      !(A.scalar_type() == ScalarType::ComplexDouble),
+      "Sparse multiplication with complex128 dtype inputs is not supported with current CUDA version. Please upgrade to CUDA Toolkit 11.2.1+");
+#endif
+
   IntArrayRef A_sizes = A.sizes();
   auto ndim = A.dim();
   auto m = A_sizes[ndim - 2];
