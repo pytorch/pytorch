@@ -8,9 +8,9 @@
 
 namespace at { namespace detail {
 
-template <typename T, int size>
+template <typename T, int size_>
 struct Array {
-  T data[size];
+  T data[size_];
 
   C10_HOST_DEVICE T operator[](int i) const {
     return data[i];
@@ -27,10 +27,10 @@ struct Array {
   Array(const Array&) = default;
   Array& operator=(const Array&) = default;
 #endif
-
+  static constexpr int size(){return size_;}
   // Fill the array with x.
   C10_HOST_DEVICE Array(T x) {
-    for (int i = 0; i < size; i++) {
+    for (int i = 0; i < size_; i++) {
       data[i] = x;
     }
   }

@@ -36,6 +36,7 @@
 #include <ATen/core/Array.h>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/cuda/jit_utils.h>
 #include <c10/macros/Macros.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/TypeCast.h>
@@ -141,12 +142,12 @@ static inline void launch_vectorized_kernel(int64_t N, const func_t& f, array_t 
     }
   ); // if_constexpr
 
-  
+
 }
 
-template<bool jitting, typename func_t, typename array_t, typename inp_calc_t, typename out_calc_t, typename loader_t, typename storer_t>
+template<bool jitting, typename result_type, typename common_type, typename func_t, typename array_t, typename inp_calc_t, typename out_calc_t, typename loader_t, typename storer_t>
 static inline void launch_unrolled_kernel(int64_t N, const func_t& f, array_t data,
-                                          inp_calc_t ic, out_calc_t oc, loader_t l, storer_t s)
+                                          inp_calc_t ic, out_calc_t oc, loader_t l, storer_t s, bool contiguous)
 {
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
   int64_t grid = (N + block_work_size - 1) / block_work_size;
@@ -156,8 +157,26 @@ static inline void launch_unrolled_kernel(int64_t N, const func_t& f, array_t da
     [&] (auto _) {  // then-case, jitting=true
       std::cout << "jitting is true!" << std::endl;
       std::cout << "launch_unrolled_kernel!" << std::endl;
-      // TODO: provide nvrtc scaffold
-      // TODO: provide inline caching with (static?) pointers
+      static at::cuda::jit::NvrtcFunction fn;
+      if (!fn.function){
+        std::cout << "generating code\n";
+        constexpr int nTensors = array_t::size();
+        constexpr bool dynamic_casting = std::is_same<decltype(l), memory::LoadWithoutCast>::value && std::is_same<decltype(l), memory::LoadWithoutCast>::value;
+        auto code = at::cuda::jit::generate_code(nTensors, contiguous, dynamic_casting);
+        fn = at::cuda::jit::jit_pwise_function(code, "kernel0"); // TODO proper name
+      }
+      //pack args
+      std::array<void*, 7> args = {
+        nullptr, //functor goes here
+        (void*)&N,
+        (void*)&data,
+        (void*)&ic,
+        (void*)&oc,
+        (void*)&l,
+        (void*)&s
+      };
+      at::cuda::jit::launch_jitted_pwise_function(fn, args, grid, num_threads);
+
     },
     [&] (auto _) {  // else-case, jitting=false
       unrolled_elementwise_kernel<func_t, array_t><<<grid, num_threads, 0, stream>>>(N, f, data, ic, oc, l, s);
@@ -191,7 +210,7 @@ void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f, const bool dynam
       auto output_offset_calculator = make_output_offset_calculator(iter);
       auto loader = memory::LoadWithoutCast();
       auto storer = memory::StoreWithoutCast();
-      launch_unrolled_kernel<jitting>(numel, f, data, input_offset_calculator, output_offset_calculator, loader, storer);
+      launch_unrolled_kernel<jitting, result_type, common_type>(numel, f, data, input_offset_calculator, output_offset_calculator, loader, storer, contiguous);
     }
   } else {
     at::detail::Array<ScalarType, arity> dtypes;
@@ -204,12 +223,12 @@ void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f, const bool dynam
       std::cout << "gpu_kernel_impl dynamic_casting and contiguous" << std::endl;
       auto input_offset_calculator = TrivialOffsetCalculator<arity>();
       auto output_offset_calculator = TrivialOffsetCalculator<1>();
-      launch_unrolled_kernel<jitting>(numel, f, data, input_offset_calculator, output_offset_calculator, loader, storer);
+      launch_unrolled_kernel<jitting, result_type, common_type>(numel, f, data, input_offset_calculator, output_offset_calculator, loader, storer, contiguous);
     } else {
       std::cout << "gpu_kernel_impl dynamic_casting and !contiguous" << std::endl;
       auto input_offset_calculator = make_input_offset_calculator<arity>(iter);
       auto output_offset_calculator = make_output_offset_calculator(iter);
-      launch_unrolled_kernel<jitting>(numel, f, data, input_offset_calculator, output_offset_calculator, loader, storer);
+      launch_unrolled_kernel<jitting, result_type, common_type>(numel, f, data, input_offset_calculator, output_offset_calculator, loader, storer, contiguous);
     }
   }
 }
