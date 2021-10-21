@@ -7,7 +7,6 @@
 #include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/cuda/SortingRadixSelect.cuh>
 #include <ATen/native/cuda/SortUtils.cuh>
-#include <THC/THCTensorMathReduce.cuh>  // for AddOp
 
 #include <c10/macros/Macros.h>
 
@@ -16,6 +15,14 @@ using namespace at::native;
 namespace at {
 namespace native {
 namespace {
+
+template <typename T>
+struct AddOp {
+  __device__ __forceinline__ T operator()(T const &lhs, T const &rhs) {
+    return (lhs + rhs);
+  }
+};
+
 template <typename T, typename IndexType, int Dim, bool Order>
 C10_LAUNCH_BOUNDS_1(1024)
 __global__ void gatherTopK(at::cuda::detail::TensorInfo<T, IndexType> input,
