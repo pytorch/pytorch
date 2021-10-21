@@ -2744,8 +2744,8 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda(const Tensor& self, bool som
   Args:
   * `b` -  [in] the right hand side matrix B
            [out] the solution matrix X
-  * `lu` - [in] the LU factorization of matrix A (see at::_lu_with_info)
-  * `pivots` - [in] the pivot indices (see at::_lu_with_info)
+  * `lu` - [in] the LU factorization of matrix A (see at::linalg_lu_factor)
+  * `pivots` - [in] the pivot indices (see at::linalg_lu_factor)
 
   For further details, please see the MAGMA documentation for magma_dgetrs_gpu.
 */
@@ -2798,8 +2798,8 @@ static void apply_lu_solve_looped_magma(const Tensor& b, const Tensor& lu, const
   Args:
   * `b` -  [in] the right hand side matrix B
            [out] the solution matrix X
-  * `lu` - [in] the LU factorization of matrix A (see at::_lu_with_info)
-  * `pivots` - [in] the pivot indices (see at::_lu_with_info)
+  * `lu` - [in] the LU factorization of matrix A (see at::linalg_lu_factor)
+  * `pivots` - [in] the pivot indices (see at::linalg_lu_factor)
 
   For further details, please see the MAGMA documentation for magma_dgetrs_batched.
 */
