@@ -6926,17 +6926,15 @@ workflows:
           context: org-member
           ios_arch: x86_64
           ios_platform: SIMULATOR
+          lite_interpreter: "0"
           name: pytorch_ios_12_5_1_nightly_x86_64_build
-          use_coreml: "1"
-          use_metal: "1"
       - binary_ios_build:
           build_environment: libtorch-ios-12.5.1-nightly-arm64-build
           context: org-member
           ios_arch: arm64
           ios_platform: OS
+          lite_interpreter: "0"
           name: pytorch_ios_12_5_1_nightly_arm64_build
-          use_coreml: "1"
-          use_metal: "1"
       - binary_ios_upload:
           build_environment: libtorch-ios-12.5.1-nightly-binary-build-upload
           context: org-member
