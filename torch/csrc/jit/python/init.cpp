@@ -24,6 +24,7 @@
 #include <torch/csrc/jit/passes/erase_number_types.h>
 #include <torch/csrc/jit/passes/fold_conv_bn.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
+#include <torch/csrc/jit/passes/frozen_concat_linear.h>
 #include <torch/csrc/jit/passes/frozen_conv_add_relu_fusion.h>
 #include <torch/csrc/jit/passes/frozen_conv_folding.h>
 #include <torch/csrc/jit/passes/frozen_graph_optimizations.h>
@@ -181,6 +182,21 @@ void initJITBindings(PyObject* module) {
             return shapeComputeGraphForSchema(n->schema());
           })
       .def("_jit_pass_propagate_shapes_on_graph", PropagateShapesOnGraph)
+      .def(
+          "_jit_pass_propagate_shapes_on_graph_and_build_compute",
+          [](std::shared_ptr<Graph>& graph) {
+            return PropagateShapesAndBuildLargeShapeComputeGraph(
+                graph, *graph->nodes().begin(), *graph->nodes().end());
+          })
+      .def(
+          "_jit_pass_propagate_shapes_on_graph_and_build_compute",
+          [](std::shared_ptr<Graph>& graph, Node* beg) {
+            return PropagateShapesAndBuildLargeShapeComputeGraph(
+                graph, beg, *graph->nodes().end());
+          })
+      .def(
+          "_jit_pass_propagate_shapes_on_graph_and_build_compute",
+          PropagateShapesAndBuildLargeShapeComputeGraph)
       .def("_jit_pass_onnx_function_substitution", ONNXFunctionCallSubstitution)
       .def("_jit_pass_integer_value_refinement", RefineIntegerValues)
       .def(
@@ -352,6 +368,7 @@ void initJITBindings(PyObject* module) {
           py::arg("preservedAttrs") = std::vector<std::string>(),
           py::arg("freezeInterfaces") = true,
           py::arg("preserveParameters") = false)
+      .def("_jit_pass_concat_frozen_linear", &FrozenConcatLinear)
       .def("_jit_pass_fold_frozen_conv_bn", &FoldFrozenConvBatchnorm)
       .def("_jit_pass_fold_frozen_conv_add_or_sub", &FoldFrozenConvAddOrSub)
       .def("_jit_pass_fold_frozen_conv_mul_or_div", &FoldFrozenConvMulOrDiv)
@@ -517,6 +534,7 @@ void initJITBindings(PyObject* module) {
             return LowerGraph(*graph, self._ivalue());
           })
       .def("_jit_pass_loop_unrolling", UnrollLoops)
+      .def("_jit_pass_constant_loop_unrolling", UnrollConstantLoops)
       .def(
           "_jit_pass_constant_propagation_immutable_types",
           [](std::shared_ptr<Graph>& g) {
