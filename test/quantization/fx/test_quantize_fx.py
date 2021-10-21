@@ -3184,7 +3184,7 @@ class TestQuantizeFx(QuantizationTestCase):
 
         model = M().eval()
 
-        for check in [ "object_type"]:
+        for check in ["module_name", "object_type"]:
             prepared = prepare_fx(model, {"": default_qconfig})
             prepared(torch.rand(5, 5))
             if check == "module_name":

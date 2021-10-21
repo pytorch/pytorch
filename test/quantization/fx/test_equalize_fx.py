@@ -523,21 +523,21 @@ class TestEqualizeFx(QuantizationTestCase):
             inp_counter = 0
             weight_counter = 0
             for node in convert_ref.graph.nodes:
-                if "w_activation_post" not in node.name and node.op == 'call_module' and \
-                   isinstance(modules[str(node.target)], MinMaxObserver):
-                    # Check min/max values of input activation layers
-                    exp_min_val, exp_max_val = exp_inp_act_vals[inp_counter]
-                    self.assertEqual(modules[str(node.target)].min_val, exp_min_val)
-                    self.assertEqual(modules[str(node.target)].max_val, exp_max_val)
-                    inp_counter += 1
+                users = list(node.users)
+                if node.op == 'call_module' and isinstance(modules[str(node.target)], MinMaxObserver):
+                    if len(users) == 1 and users[0].target == torch.nn.functional.linear and users[0].args[1] == node:
+                        # Check min/max values of weight activation layers
+                        exp_min_val, exp_max_val = exp_weight_act_vals[weight_counter]
+                        self.assertEqual(modules[str(node.target)].min_val, exp_min_val)
+                        self.assertEqual(modules[str(node.target)].max_val, exp_max_val)
+                        weight_counter += 1
+                    else:
+                        # Check min/max values of input activation layers
+                        exp_min_val, exp_max_val = exp_inp_act_vals[inp_counter]
+                        self.assertEqual(modules[str(node.target)].min_val, exp_min_val)
+                        self.assertEqual(modules[str(node.target)].max_val, exp_max_val)
+                        inp_counter += 1
 
-                elif node.op == 'call_module' and isinstance(modules[str(node.target)], MinMaxObserver):
-                    # Check min/max values of weight activation layers
-                    assert("w_activation_post" in node.name)
-                    exp_min_val, exp_max_val = exp_weight_act_vals[weight_counter]
-                    self.assertEqual(modules[str(node.target)].min_val, exp_min_val)
-                    self.assertEqual(modules[str(node.target)].max_val, exp_max_val)
-                    weight_counter += 1
 
     def check_orig_and_eq_graphs(self, orig_model, eq_model):
         """ Given a non-equalized model and an equalized model, check that the
