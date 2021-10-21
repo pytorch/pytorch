@@ -22,8 +22,8 @@ NodePtr AdaptiveAvgPool2d::Clone(OpList operands) const {
 
 std::string AdaptiveAvgPool2d::ToString() const {
   std::stringstream ss;
-  ss << TsNode::ToString() << ", output_size=("
-     << lazy_tensors::StrJoin(output_size_, ", ") << ")";
+  ss << TsNode::ToString() << ", output_size=(" << c10::Join(", ", output_size_)
+     << ")";
   return ss.str();
 }
 

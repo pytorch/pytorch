@@ -28,8 +28,7 @@ NodePtr Resize::Clone(OpList operands) const {
 
 std::string Resize::ToString() const {
   std::stringstream ss;
-  ss << TsNode::ToString() << ", size=(" << lazy_tensors::StrJoin(size_, ", ")
-     << ")";
+  ss << TsNode::ToString() << ", size=(" << c10::Join(", ", size_) << ")";
   return ss.str();
 }
 

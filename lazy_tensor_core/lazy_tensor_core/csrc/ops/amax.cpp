@@ -22,8 +22,7 @@ NodePtr Amax::Clone(OpList operands) const {
 
 std::string Amax::ToString() const {
   std::stringstream ss;
-  ss << TsNode::ToString()
-     << ", dimensions=" << lazy_tensors::StrJoin(dimensions_, ", ")
+  ss << TsNode::ToString() << ", dimensions=" << c10::Join(", ", dimensions_)
      << ", keepdim=" << keepdim_;
   return ss.str();
 }

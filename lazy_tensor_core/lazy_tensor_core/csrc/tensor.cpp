@@ -33,7 +33,6 @@
 #include "lazy_tensors/computation_client/thread_pool.h"
 #include "lazy_tensors/literal_util.h"
 #include "lazy_tensors/shape_util.h"
-#include "lazy_tensors/str_join.h"
 #include "torch/csrc/autograd/variable.h"
 
 namespace torch_lazy_tensors {

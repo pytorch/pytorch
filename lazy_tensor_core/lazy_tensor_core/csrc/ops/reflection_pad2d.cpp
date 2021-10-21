@@ -2,7 +2,6 @@
 
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
 #include "lazy_tensors/computation_client/util.h"
-#include "lazy_tensors/str_join.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -23,8 +22,7 @@ NodePtr ReflectionPad2d::Clone(OpList operands) const {
 
 std::string ReflectionPad2d::ToString() const {
   std::stringstream ss;
-  ss << TsNode::ToString() << ", padding=("
-     << lazy_tensors::StrJoin(padding_, ", ") << ")";
+  ss << TsNode::ToString() << ", padding=(" << c10::Join(", ", padding_) << ")";
   return ss.str();
 }
 

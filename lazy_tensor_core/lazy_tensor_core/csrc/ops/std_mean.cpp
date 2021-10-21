@@ -1,7 +1,6 @@
 #include "lazy_tensor_core/csrc/ops/std_mean.h"
 
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
-#include "lazy_tensors/str_join.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -28,8 +27,7 @@ NodePtr StdMean::Clone(OpList operands) const {
 
 std::string StdMean::ToString() const {
   std::stringstream ss;
-  ss << TsNode::ToString() << ", dimensions=("
-     << lazy_tensors::StrJoin(dimensions_, ", ")
+  ss << TsNode::ToString() << ", dimensions=(" << c10::Join(", ", dimensions_)
      << "), keep_reduced_dimensions=" << keep_reduced_dimensions_
      << ", correction=" << correction_;
   return ss.str();

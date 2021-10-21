@@ -45,7 +45,7 @@ class Shape {
 
   std::string ToString(bool print_layout = false) const {
     return lazy_tensors::StrCat(PrimitiveTypeName(element_type_), "[",
-                                lazy_tensors::StrJoin(dimensions_, ","), "]");
+                                c10::Join(",", dimensions_), "]");
   }
 
   int64 rank() const { return dimensions_.size(); }

@@ -4,7 +4,6 @@
 #include "lazy_tensor_core/csrc/data_ops.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/computation_client/util.h"
-#include "lazy_tensors/str_join.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -27,8 +26,8 @@ NodePtr Split::Clone(OpList operands) const {
 
 std::string Split::ToString() const {
   std::stringstream ss;
-  ss << TsNode::ToString() << ", split_sizes=("
-     << lazy_tensors::StrJoin(split_sizes_, ", ") << "), dim=" << dim_;
+  ss << TsNode::ToString() << ", split_sizes=(" << c10::Join(", ", split_sizes_)
+     << "), dim=" << dim_;
   return ss.str();
 }
 

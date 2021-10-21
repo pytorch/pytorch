@@ -2,7 +2,6 @@
 
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
 #include "lazy_tensors/computation_client/util.h"
-#include "lazy_tensors/str_join.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -25,7 +24,7 @@ NodePtr Expand::Clone(OpList operands) const {
 
 std::string Expand::ToString() const {
   std::stringstream ss;
-  ss << TsNode::ToString() << ", size=(" << lazy_tensors::StrJoin(size_, ", ")
+  ss << TsNode::ToString() << ", size=(" << c10::Join(", ", size_)
      << "), is_scalar_expand=" << is_scalar_expand_;
   return ss.str();
 }

@@ -13,27 +13,6 @@
 
 namespace lazy_tensors {
 
-// TODO(whc) replace all uses of this with c10::Join
-template <typename Range>
-std::string StrJoin(const Range& range, c10::string_view separator) {
-  auto b = std::begin(range);
-  auto e = std::end(range);
-  if (b == e) {
-    return "";
-  }
-  std::vector<std::string> str_tokens;
-  std::transform(b, e, std::back_inserter(str_tokens), [](auto val) {
-    std::ostringstream os;
-    os << val;
-    return os.str();
-  });
-  std::ostringstream joined;
-  std::copy(str_tokens.begin(), str_tokens.end() - 1,
-            std::ostream_iterator<std::string>(joined, separator.data()));
-  joined << str_tokens.back();
-  return joined.str();
-}
-
 // TODO - is is_scalar the right thing here?
 // I mainly wanted to make sure it wasn't ambiguous for vector<T>
 template <typename T, typename std::enable_if<

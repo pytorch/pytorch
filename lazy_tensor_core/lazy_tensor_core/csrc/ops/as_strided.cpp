@@ -28,8 +28,8 @@ AsStrided::AsStrided(const torch::lazy::Value& input, std::vector<lazy_tensors::
 
 std::string AsStrided::ToString() const {
   std::stringstream ss;
-  ss << TsNode::ToString() << ", size=(" << lazy_tensors::StrJoin(size_, ", ")
-     << "), stride=(" << lazy_tensors::StrJoin(stride_, ", ")
+  ss << TsNode::ToString() << ", size=(" << c10::Join(", ", size_)
+     << "), stride=(" << c10::Join(", ", stride_)
      << "), storage_offset=" << storage_offset_;
   return ss.str();
 }
