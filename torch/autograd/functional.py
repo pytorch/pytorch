@@ -769,10 +769,6 @@ def hessian(func, inputs, create_graph=False, strict=False, vectorize=False, for
         return out.squeeze()
 
     def jac_func(*inp):
-        # Why do we want to ensure the graph is always created in this case? when it is forward ad
-        # because someone might forget to pass inputs that are requires_grad=True?
-        # hmm, this is actually the inner one
-        # also, why does this inner one have to be a jacobian anyway, we
         if forward_ad:
             # Ensure the graph is created (and not detached)
             inp = tuple(t.requires_grad_(True) for t in inp)
