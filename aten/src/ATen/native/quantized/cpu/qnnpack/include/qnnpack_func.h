@@ -129,6 +129,7 @@ enum pytorch_qnnp_status qnnpackDeConv(
     const pytorch_qnnp_operator_t deconvolution,
     void* packed_weights,
     const size_t batch_size,
+    const size_t input_depth,
     const size_t input_height,
     const size_t input_width,
     const uint8_t input_zero_point,

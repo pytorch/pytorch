@@ -155,6 +155,18 @@ enum pytorch_qnnp_status pytorch_qnnp_setup_deconvolution2d_nhwc_q8(
     size_t output_stride,
     pthreadpool_t threadpool);
 
+enum pytorch_qnnp_status pytorch_qnnp_setup_deconvolution3d_ndhwc_q8(
+    pytorch_qnnp_operator_t deconvolution,
+    size_t batch_size,
+    size_t input_depth,
+    size_t input_height,
+    size_t input_width,
+    const uint8_t* input,
+    size_t input_stride,
+    uint8_t* output,
+    size_t output_stride,
+    pthreadpool_t threadpool);
+
 enum pytorch_qnnp_status pytorch_qnnp_create_fully_connected_nc_q8(
     size_t input_channels,
     size_t output_channels,

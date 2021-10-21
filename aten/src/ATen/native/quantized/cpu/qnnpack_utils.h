@@ -199,8 +199,9 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
     size_t zero_offset = 0;
 
     if (transpose_) {
-      convolution->adjustment_width = output_padding_[1];
-      convolution->adjustment_height = output_padding_[0];
+      convolution->adjustment_depth = kSpatialDim == 3 ? output_padding_[0] : 0;
+      convolution->adjustment_height = output_padding_[kSpatialDim - 2];
+      convolution->adjustment_width = output_padding_[kSpatialDim - 1];
       if (group_input_channels < 8) {
         zero_size += 8;
         zero_offset = 8;

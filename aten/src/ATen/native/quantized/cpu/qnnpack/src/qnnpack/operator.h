@@ -53,6 +53,7 @@ struct pytorch_qnnp_operator {
   uint32_t input_padding_right;
   uint32_t input_padding_bottom;
   uint32_t input_padding_left;
+  uint32_t adjustment_depth;
   uint32_t adjustment_height;
   uint32_t adjustment_width;
   uint32_t kernel_depth;

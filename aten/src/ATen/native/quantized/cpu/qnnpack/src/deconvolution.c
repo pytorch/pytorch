@@ -198,6 +198,15 @@ enum pytorch_qnnp_status pytorch_qnnp_create_deconvolution2d_nhwc_q8(
   deconvolution->group_input_channels = group_input_channels;
   deconvolution->group_output_channels = group_output_channels;
 
+  deconvolution->stride_depth = 1;
+  deconvolution->input_depth = 1;
+  deconvolution->output_depth = 1;
+  deconvolution->kernel_depth = 1;
+  deconvolution->dilation_depth = 1;
+  deconvolution->adjustment_depth = 0;
+  deconvolution->input_padding_front = 0;
+  deconvolution->input_padding_back = 0;
+
   deconvolution->kernel_zero_point = kernel_zero_points[0];
 
   deconvolution->conv_quantization_params =
@@ -231,6 +240,30 @@ enum pytorch_qnnp_status pytorch_qnnp_setup_deconvolution2d_nhwc_q8(
     uint8_t* output,
     size_t output_pixel_stride,
     pthreadpool_t threadpool) {
+  return pytorch_qnnp_setup_deconvolution3d_ndhwc_q8(
+      deconvolution,
+      batch_size,
+      1,
+      input_height,
+      input_width,
+      input,
+      input_pixel_stride,
+      output,
+      output_pixel_stride,
+      threadpool);
+}
+
+enum pytorch_qnnp_status pytorch_qnnp_setup_deconvolution3d_ndhwc_q8(
+    pytorch_qnnp_operator_t deconvolution,
+    size_t batch_size,
+    size_t input_depth,
+    size_t input_height,
+    size_t input_width,
+    const uint8_t* input,
+    size_t input_pixel_stride,
+    uint8_t* output,
+    size_t output_pixel_stride,
+    pthreadpool_t threadpool) {
   if (!pytorch_qnnp_params.initialized) {
     pytorch_qnnp_log_error(
         "pytorch_qnnp_setup_deconvolution2d_nhwc_q8 failed because QNNPACK is not properly initialized");
@@ -242,15 +275,17 @@ enum pytorch_qnnp_status pytorch_qnnp_setup_deconvolution2d_nhwc_q8(
     return pytorch_qnnp_status_success;
   }
 
-  if (input_width == 0 || input_height == 0) {
+  if (input_depth == 0 || input_width == 0 || input_height == 0) {
     pytorch_qnnp_log_error(
-        "failed to setup deconvolution with %zux%zu input: input dimensions must be non-zero",
-        input_width,
-        input_height);
+        "failed to setup deconvolution with %zux%zux%zu input: input dimensions must be non-zero",
+        input_depth,
+        input_height,
+        input_width);
     return pytorch_qnnp_status_invalid_parameter;
   }
 
   deconvolution->batch_size = batch_size;
+  deconvolution->input_depth = input_depth;
   deconvolution->input_height = input_height;
   deconvolution->input_width = input_width;
   deconvolution->input = input;
@@ -258,11 +293,19 @@ enum pytorch_qnnp_status pytorch_qnnp_setup_deconvolution2d_nhwc_q8(
   deconvolution->output = output;
   deconvolution->output_pixel_stride = output_pixel_stride;
 
+  const size_t kernel_depth = deconvolution->kernel_depth;
   const size_t kernel_height = deconvolution->kernel_height;
   const size_t kernel_width = deconvolution->kernel_width;
-  const size_t kernel_size = kernel_height * kernel_width;
-  const size_t stride_height = deconvolution->stride_height;
-  const size_t stride_width = deconvolution->stride_width;
+  const size_t kernel_size = kernel_depth * kernel_height * kernel_width;
+  const size_t output_depth = deconvolution->output_depth =
+      compute_output_dimension(
+          input_depth,
+          deconvolution->input_padding_front +
+              deconvolution->input_padding_back,
+          deconvolution->adjustment_depth,
+          kernel_depth,
+          deconvolution->dilation_depth,
+          deconvolution->stride_depth);
   const size_t output_height = deconvolution->output_height =
       compute_output_dimension(
           input_height,
@@ -271,7 +314,7 @@ enum pytorch_qnnp_status pytorch_qnnp_setup_deconvolution2d_nhwc_q8(
           deconvolution->adjustment_height,
           kernel_height,
           deconvolution->dilation_height,
-          stride_height);
+          deconvolution->stride_height);
   const size_t output_width = deconvolution->output_width =
       compute_output_dimension(
           input_width,
@@ -280,10 +323,10 @@ enum pytorch_qnnp_status pytorch_qnnp_setup_deconvolution2d_nhwc_q8(
           deconvolution->adjustment_width,
           kernel_width,
           deconvolution->dilation_width,
-          stride_width);
+          deconvolution->stride_width);
 
   const size_t groups = deconvolution->groups;
-  const size_t output_size = output_height * output_width;
+  const size_t output_size = output_depth * output_height * output_width;
   const size_t output_tile_size = pytorch_qnnp_params.q8conv.mr;
   const size_t tiled_output_size = round_up(output_size, output_tile_size);
   const size_t indirection_buffer_size =

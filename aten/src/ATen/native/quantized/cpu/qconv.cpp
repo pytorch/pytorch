@@ -745,6 +745,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
         convolution_op.get(),
         pack_w->getPackedWeights(),
         N,
+        D,
         H,
         W,
         act_ndhwc.q_zero_point(),

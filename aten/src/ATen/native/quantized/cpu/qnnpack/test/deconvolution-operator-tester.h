@@ -596,6 +596,7 @@ class DeconvolutionOperatorTester {
                   deconvolution,
                   packW->getPackedWeights(),
                   batchSize(),
+                  1 /* inputDepth */,
                   inputHeight(),
                   inputWidth(),
                   inputZeroPoint,

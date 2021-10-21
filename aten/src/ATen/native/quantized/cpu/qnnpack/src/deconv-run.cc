@@ -90,6 +90,7 @@ enum pytorch_qnnp_status qnnpackDeConv(
     const pytorch_qnnp_operator_t deconvolution,
     void* packed_weights,
     const size_t batch_size,
+    const size_t input_depth,
     const size_t input_height,
     const size_t input_width,
     const uint8_t input_zero_point,
@@ -107,6 +108,7 @@ enum pytorch_qnnp_status qnnpackDeConv(
     return pytorch_qnnp_status_success;
   }
   // Check all invalid parameters
+  const size_t kernel_depth = deconvolution->kernel_depth;
   const size_t kernel_width = deconvolution->kernel_width;
   const size_t kernel_height = deconvolution->kernel_height;
 
@@ -129,6 +131,14 @@ enum pytorch_qnnp_status qnnpackDeConv(
           output_max);
 
   // Setup the kernel
+  const size_t output_depth = compute_output_dimension(
+      input_depth,
+      deconvolution->input_padding_front + deconvolution->input_padding_back,
+      deconvolution->adjustment_depth,
+      kernel_depth,
+      deconvolution->dilation_depth,
+      deconvolution->stride_depth);
+  std::cout << output_depth << std::endl;
   const size_t output_width = compute_output_dimension(
       input_width,
       deconvolution->input_padding_left + deconvolution->input_padding_right,
@@ -143,8 +153,8 @@ enum pytorch_qnnp_status qnnpackDeConv(
       kernel_height,
       deconvolution->dilation_height,
       deconvolution->stride_height);
-  const size_t kernel_size = kernel_height * kernel_width;
-  const size_t output_size = output_height * output_width;
+  const size_t kernel_size = kernel_depth * kernel_height * kernel_width;
+  const size_t output_size = output_depth * output_height * output_width;
 
   const size_t input_pixel_stride =
       deconvolution->group_input_channels * deconvolution->groups;
@@ -153,12 +163,14 @@ enum pytorch_qnnp_status qnnpackDeConv(
 
   if (deconvolution->input != input ||
       deconvolution->batch_size != batch_size ||
+      deconvolution->input_depth != input_depth ||
       deconvolution->input_height != input_height ||
       deconvolution->input_width != input_width ||
       deconvolution->input_pixel_stride != input_pixel_stride) {
-    pytorch_qnnp_status status = pytorch_qnnp_setup_deconvolution2d_nhwc_q8(
+    pytorch_qnnp_status status = pytorch_qnnp_setup_deconvolution3d_ndhwc_q8(
         deconvolution,
         batch_size,
+        input_depth,
         input_height,
         input_width,
         input,
