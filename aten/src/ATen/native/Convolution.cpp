@@ -493,6 +493,12 @@ static void check_shape_forward(const at::Tensor& input,
     std::vector<int64_t> kernel_shape;
     bool kernel_size_correct = true;
 
+    TORCH_CHECK(input.size(1) == (weight_sizes[1] * groups),
+                "Given groups=", groups, ", weight of size ", weight_sizes,
+                ", expected input", input.sizes(), " to have ",
+                (weight_sizes[1] * groups), " channels, but got ", input.size(1),
+                " channels instead");
+
     TORCH_CHECK(!bias.defined() || (bias.ndimension() == 1 && bias.size(0) == weight_sizes[0]),
              "Given weight of size ", weight_sizes,
              ", expected bias to be 1-dimensional with ", weight_sizes[0], " elements",
@@ -807,11 +813,11 @@ at::Tensor _convolution(
                           params.output_padding, params.stride, params.dilation,
                           params.groups);
     }
+    if (input.size(1) == 0) {
+      o[input_channels_dim] = 0;
+    }
     if (input_is_mkldnn && weight.is_mkldnn()) {
       // mkldnn will error on the below 0-dim handling code
-      if (input.size(1) == 0) {
-        o[input_channels_dim] = 0;
-      }
       return empty_mkldnn(
           o,
           optTypeMetaToScalarType(input.options().dtype_opt()),
@@ -819,15 +825,12 @@ at::Tensor _convolution(
           input.options().device_opt(),
           input.options().pinned_memory_opt());
     }
-    if (input.size(1) == 0) {
-      // Set the channel dim of the output to 0 since the input also has channels=0.
-      o[input_channels_dim] = 0;
-      return input.view(o);
-    }
+
     auto weight_view = at::_unsafe_view(weight, -1);
-    auto out = input * weight_view[0];
-    if (bias.defined())
+    auto out = (input.size(1) == 0) ? (input.view(-1) * weight_view) : (input * weight_view[0]);
+    if (bias.defined()) {
       out.add_(bias[0]);
+    }
     return out.view(o);
   }
 
