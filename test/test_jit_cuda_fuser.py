@@ -2751,10 +2751,11 @@ class TestCudaFuser(JitTestCase):
         # If replay() updated RNG state correctly, graph_out should now equal eager_out
         self.assertEqual(graph_out, eager_out)
 
-    def _test_batch_norm_impl_index_helper(self, batch, c, hw, affine=True, track_running_stats=True, train=True):
+    def _test_batch_norm_impl_index_helper(self, batch, c, hw, affine=True,
+                                           track_running_stats=True, train=True,
+                                           dtype=torch.float32):
         # enabling inlining to avoid counter increment in BN forward
         torch._C._debug_set_autodiff_subgraph_inlining(True)
-        dtype = torch.float32
 
         class MyModule(torch.nn.Module):
             def __init__(self, num_features=10, affine=True, track_running_stats=True):
@@ -2826,8 +2827,12 @@ class TestCudaFuser(JitTestCase):
             .execution_plans.values())[0].graph
         self.assertGraphContainsExactly(bwd_graph, FUSION_GUARD, 1, consider_subgraphs=True)
 
-        self.assertTrue(self._compare("comparing output failed", jit_o, o, 1e-5))
-        self.assertTrue(self._compare("comparing input grad failed", x.grad, ref_x.grad, 1e-4))
+        e0 = 1e-5 if dtype is not torch.half else 1e-3
+        e1 = 1e-4 if dtype is not torch.half else 1e-3
+        e2 = 1e-3 if dtype is not torch.half else 1e-2
+
+        self.assertTrue(self._compare("comparing output failed", jit_o, o, e0))
+        self.assertTrue(self._compare("comparing input grad failed", x.grad, ref_x.grad, e1))
         # TODO: switch to welford and reduce this to 1e-5
         # The 1e-3 looks bad, but we don't have welford in codegen, so numeric
         # is very different between reference and codegen.
@@ -2835,20 +2840,35 @@ class TestCudaFuser(JitTestCase):
             self.assertTrue(self._compare("comparing weight grad failed",
                                           my_module.bn.weight.grad,
                                           ref_module.bn.weight.grad,
-                                          1e-3))
+                                          e2))
             self.assertTrue(self._compare("comparing bias grad failed",
                                           my_module.bn.bias.grad,
                                           ref_module.bn.bias.grad,
-                                          1e-4))
+                                          e1))
         if has_running_stats:
             self.assertTrue(self._compare("comparing running_mean failed",
                                           my_module.bn.running_mean,
                                           ref_module.bn.running_mean,
-                                          1e-5))
+                                          e0))
             self.assertTrue(self._compare("comparing running_var failed",
                                           my_module.bn.running_var,
                                           ref_module.bn.running_var,
-                                          1e-5))
+                                          e0))
+
+    @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_batch_norm_half(self):
+        with torch.backends.cudnn.flags(enabled=True):
+            setups = [
+                [True, True],
+                [False, False],
+                [True, False],
+                [False, True]]
+            for training_and_track, affine in itertools.product(setups, [True, False]):
+                training, track_running_stats = training_and_track
+                self._test_batch_norm_impl_index_helper(4, 8, 5, affine, track_running_stats, training, torch.half)
 
     @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")

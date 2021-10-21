@@ -262,20 +262,58 @@ ForwardNormResult batch_norm(
 
     // updating running mean and running var
     if (running_mean != nullptr && running_var != nullptr) {
+      // Note: kTraining is true here!
+      TORCH_INTERNAL_ASSERT(
+          kTraining,
+          "When running stats are provided, batch stats should only be computed during training");
+
       auto rev_momentum = sub(new Double(1.0), momentum);
       auto current_mean_hat = mul(welford_out.avg, momentum);
       auto mean_hat = mul(running_mean, rev_momentum);
       auto new_mean_hat = add(mean_hat, current_mean_hat);
-      fusion->addOutput(new_mean_hat);
-      fusion->aliasOutputToInput(new_mean_hat, running_mean);
 
       auto num_feature_decrement = sub(num_features, new Int(1));
       auto unbiased_var = div(welford_out.var_sum, num_feature_decrement);
       auto current_var_hat = mul(unbiased_var, momentum);
       auto var_hat = mul(running_var, rev_momentum);
       auto new_var_hat = add(var_hat, current_var_hat);
-      fusion->addOutput(new_var_hat);
-      fusion->aliasOutputToInput(new_var_hat, running_var);
+
+      // when inputs have been casted by parser. We want to alias the output to
+      // the pre-casted input, so we can still update running stats
+      auto cast_to_input_dtype = [fusion](
+                                     Val* casted_input, Val* aliased_output) {
+        auto unary_op = casted_input->definition();
+        TORCH_INTERNAL_ASSERT(
+            unary_op->isA<UnaryOp>() &&
+                unary_op->as<UnaryOp>()->getUnaryOpType() == UnaryOpType::Cast,
+            "check for cast op");
+        auto input_to_cast = unary_op->input(0);
+        TORCH_INTERNAL_ASSERT(
+            input_to_cast->isFusionInput(),
+            "IO_tensor batch_norm::running_stats can only updating input tensor to fusion");
+        auto rm_dtype = input_to_cast->getDataType();
+        TORCH_INTERNAL_ASSERT(
+            rm_dtype.has_value(),
+            "Input running stats must have dtype defined");
+        auto casted_output = castOp(*rm_dtype, aliased_output);
+
+        fusion->addOutput(casted_output);
+        fusion->aliasOutputToInput(casted_output, input_to_cast);
+      };
+
+      if (fusion->hasInput(running_mean)) {
+        fusion->addOutput(new_mean_hat);
+        fusion->aliasOutputToInput(new_mean_hat, running_mean);
+      } else {
+        cast_to_input_dtype(running_mean, new_mean_hat);
+      }
+
+      if (fusion->hasInput(running_var)) {
+        fusion->addOutput(new_var_hat);
+        fusion->aliasOutputToInput(new_var_hat, running_var);
+      } else {
+        cast_to_input_dtype(running_var, new_var_hat);
+      }
     }
 
     mean = welford_out.avg;

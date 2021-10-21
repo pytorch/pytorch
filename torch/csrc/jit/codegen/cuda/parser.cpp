@@ -1133,8 +1133,6 @@ class IrParser {
         REGISTER_PARSE_RULE(
             ptr_op,
             {
-              auto fusion = FusionGuard::getCurFusion();
-
               MemoryFormat format = MemoryFormat::Contiguous;
               Val* operand = nullptr;
               std::tie(format, operand) =
@@ -1165,9 +1163,6 @@ class IrParser {
                       static_cast<c10::TypePtr>(NoneType::get()))) {
                 running_mean =
                     value_map[node->input(3)->unique()]->as<TensorView>();
-                TORCH_INTERNAL_ASSERT(
-                    !kTraining || fusion->hasInput(running_mean),
-                    "IO_tensor `batch_norm::running_mean` can only be input tensor to fusion");
               }
 
               TensorView* running_var = nullptr;
@@ -1175,9 +1170,6 @@ class IrParser {
                       static_cast<c10::TypePtr>(NoneType::get()))) {
                 running_var =
                     value_map[node->input(4)->unique()]->as<TensorView>();
-                TORCH_INTERNAL_ASSERT(
-                    !kTraining || fusion->hasInput(running_var),
-                    "IO_tensor `batch_norm::running_var` can only be input tensor to fusion");
               }
 
               Val* momentum_ptr = nullptr;
