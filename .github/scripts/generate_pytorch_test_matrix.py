@@ -15,6 +15,9 @@ from typing import Dict
 from typing_extensions import TypedDict
 
 
+BUILD_ENVIRONMENT = os.getenv('BUILD_ENVIRONMENT')
+
+
 class Config(TypedDict):
     num_shards: int
     runner: str
@@ -31,14 +34,40 @@ def get_disabled_issues() -> str:
     issue_numbers = [x[4] for x in re.findall(regex, pr_body)]
     return ','.join(issue_numbers)
 
+# When the user specifies labels that are NOT ciflow/default, the expectation is
+# that the workflows should be triggered as if they are on trunk. For example, when
+# ciflow/all is specified, we should run the full test suite for Windows CUDA
+# and NOT only the smoke tests.
+def run_as_if_on_trunk() -> bool:
+    ON_PULL_REQUEST = os.getenv('GITHUB_HEAD_REF')
+    if not ON_PULL_REQUEST:
+        return True
+
+    from pathlib import Path
+    GITHUB_DIR = Path(__file__).resolve().parent.parent
+
+    with open(f'{GITHUB_DIR}/generated-ciflow-ruleset.json') as f:
+        labels_to_workflows = json.load(f)['label_rules']
+
+    pr_labels = json.loads(os.getenv('PR_LABELS', '[]'))
+    current_workflow_triggered_by_label = False
+    for label in pr_labels:
+        if label != 'ciflow/default' and label in labels_to_workflows:
+            workflows_triggered_by_label = labels_to_workflows[label]
+            if any([BUILD_ENVIRONMENT in workflow for workflow in workflows_triggered_by_label]):
+                current_workflow_triggered_by_label = True
+                break
+
+    return current_workflow_triggered_by_label
 
 def main() -> None:
     TEST_RUNNER_TYPE = os.getenv('TEST_RUNNER_TYPE')
     assert TEST_RUNNER_TYPE is not None
-    ON_PULL_REQUEST = os.getenv('GITHUB_HEAD_REF')
+    RUN_SMOKE_TESTS_ONLY_ON_PR = os.getenv('RUN_SMOKE_TESTS_ONLY_ON_PR')
+    RUN_SMOKE_TESTS = RUN_SMOKE_TESTS_ONLY_ON_PR == "true" and not run_as_if_on_trunk()
     NUM_TEST_SHARDS_ON_PULL_REQUEST = os.getenv('NUM_TEST_SHARDS_ON_PULL_REQUEST')
-    NUM_TEST_SHARDS = int(os.getenv('NUM_TEST_SHARDS', '1'))
-    if ON_PULL_REQUEST and NUM_TEST_SHARDS_ON_PULL_REQUEST:
+    NUM_TEST_SHARDS = int(os.getenv('NUM_TEST_SHARDS', '0'))
+    if not run_as_if_on_trunk() and NUM_TEST_SHARDS_ON_PULL_REQUEST:
         NUM_TEST_SHARDS = int(NUM_TEST_SHARDS_ON_PULL_REQUEST)
     MULTIGPU_RUNNER_TYPE = os.getenv('MULTIGPU_RUNNER_TYPE')
     NOGPU_RUNNER_TYPE = os.getenv('NOGPU_RUNNER_TYPE')
@@ -66,6 +95,8 @@ def main() -> None:
         configs['xla'] = {'num_shards': 1, 'runner': TEST_RUNNER_TYPE}
     if os.getenv('ENABLE_NOARCH_TEST'):
         configs['noarch'] = {'num_shards': 1, 'runner': TEST_RUNNER_TYPE}
+    if RUN_SMOKE_TESTS:
+        configs['smoke_tests'] = {'num_shards': 1, 'runner': TEST_RUNNER_TYPE}
     matrix = {
         'include': [
             {

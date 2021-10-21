@@ -42,11 +42,11 @@ class TestQuantizeFxTRT(QuantizationTestCase):
         conv2d_module_args = (3, 3, 3)
 
         m = Conv2d(*conv2d_module_args).eval()
-        qconfig = torch.quantization.QConfig(
-            activation=torch.quantization.observer.HistogramObserver.with_args(
+        qconfig = torch.ao.quantization.QConfig(
+            activation=torch.ao.quantization.observer.HistogramObserver.with_args(
                 qscheme=torch.per_tensor_symmetric, dtype=torch.qint8
             ),
-            weight=torch.quantization.default_weight_observer
+            weight=torch.ao.quantization.default_weight_observer
         )
         prepared = prepare_fx(m, {"": qconfig}, backend_config_dict=get_tensorrt_backend_config_dict())
         # calibration
@@ -74,11 +74,11 @@ class TestQuantizeFxTRT(QuantizationTestCase):
         linear_module_input = torch.rand(8, 5)
 
         m = LinearModule().eval()
-        qconfig = torch.quantization.QConfig(
-            activation=torch.quantization.observer.HistogramObserver.with_args(
+        qconfig = torch.ao.quantization.QConfig(
+            activation=torch.ao.quantization.observer.HistogramObserver.with_args(
                 qscheme=torch.per_tensor_symmetric, dtype=torch.qint8
             ),
-            weight=torch.quantization.default_weight_observer
+            weight=torch.ao.quantization.default_weight_observer
         )
         prepared = prepare_fx(m, {"": qconfig}, backend_config_dict=get_tensorrt_backend_config_dict())
         # calibration

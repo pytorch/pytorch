@@ -5,10 +5,10 @@
 
 namespace at { namespace native {
 
-using unfold2d_fn =
-    void (*)(
-    Tensor& finput,
-    Tensor& input,
+using unfold2d_fn = void (*)(
+    ScalarType dtype,
+    void *finput,
+    void *input,
     int64_t kH,
     int64_t kW,
     int64_t dH,

@@ -13,7 +13,7 @@ tensor as input. Correct code for this case is generated, however, nvrtc does
 not know how to handle int*_t integer types, so typedefs help it handle those
 cases*/
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 static auto type_declarations_template = CodeTemplate(R"(
 ${RuntimeHeader}
 ${HalfHeader}
@@ -212,7 +212,7 @@ void ${kernelName}(IndexType totalElements, ${formals} ${RandParam}) {
 // with __half2float(). All mathematical operations are done on float
 // values, and if needed the intermediate float representation is
 // converted to half with __float2half() when writing to a half tensor.
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 constexpr auto half_support_literal =
     R"(
 typedef __half half;
@@ -262,7 +262,7 @@ typedef __half half;
 )";
 #endif
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 constexpr auto bfloat16_support_literal =
     R"(
 #ifndef __align__
