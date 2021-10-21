@@ -811,13 +811,6 @@ class ShapePropagator {
         std::unique_lock<std::mutex> lock{shape_formulas_mutex};
         shape_formulas.emplace_back(std::move(operators), std::move(formula));
       }
-
-      register_formula_for(
-          std::shared_ptr<OperatorSet> operators,
-          formula_t formula) {
-        std::unique_lock<std::mutex> lock{shape_formulas_mutex};
-        shape_formulas.emplace_back(std::move(*operators), std::move(formula));
-      }
     };
 
     // Requirements:
@@ -1163,7 +1156,7 @@ class ShapePropagator {
         }};
 
     static const register_formula_for nn_ops_first_input_formula{
-        nn_ops_first_input_preserving(), [](Node* node) -> type_vec_t {
+        *nn_ops_first_input_preserving(), [](Node* node) -> type_vec_t {
           if (auto type = node->input(0)->type()->cast<TensorType>()) {
             return {type->dimensionedOnly()};
           }
