@@ -3842,6 +3842,7 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
   return std::make_tuple(input_grad, tau_grad);
 }
 
+// We refer to the derivations described above the method `apply_simple_transformation`
 Tensor householder_product_jvp(
     const Tensor& dV_,
     const Tensor& dtau,
@@ -3880,6 +3881,7 @@ Tensor householder_product_jvp(
     );
   };
 
+  // computes (-t u v^H) K
   auto apply_simple_product = [m](
     int64_t k,
     const Tensor& u_full, const Tensor& v_full,
