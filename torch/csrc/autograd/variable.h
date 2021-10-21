@@ -688,31 +688,32 @@ inline Variable make_variable(
     bool requires_grad = false,
     bool allow_tensor_metadata_change = true) {
   if (data.defined()) {
+    c10::intrusive_ptr<c10::TensorImpl, c10::UndefinedTensorImpl> data_impl;
     if (data.getIntrusivePtr().use_count() == 1 && data.getIntrusivePtr()->unique_version()) {
-      auto data_impl = data.unsafeReleaseIntrusivePtr();
+      data_impl = data.unsafeReleaseIntrusivePtr();
       data_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
-      // NOLINTNEXTLINE(bugprone-branch-clone)
-      if (requires_grad) {
-        data_impl->set_autograd_meta(std::make_unique<AutogradMeta>(data_impl.get(), requires_grad));
-      } else {
-        data_impl->set_autograd_meta(nullptr);
-      }
-      return Variable(std::move(data_impl));
     } else {
-      auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
+      data_impl = data.getIntrusivePtr()->shallow_copy_and_detach(
         /*version_counter=*/0,
         /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
-      // NOLINTNEXTLINE(bugprone-branch-clone)
-      if (requires_grad) {
-        data_impl_copy->set_autograd_meta(std::make_unique<AutogradMeta>(
-          data_impl_copy.get(), requires_grad));
-      } else {
-        data_impl_copy->set_autograd_meta(nullptr);
-      }
-      return Variable(data_impl_copy);
     }
+    data_impl->set_autograd_meta(
+      requires_grad ? std::make_unique<AutogradMeta>(data_impl.get(), requires_grad)
+                    : std::unique_ptr<AutogradMeta>());
+    return Variable(std::move(data_impl));
   }
   return Variable();
+}
+
+/// Creates a `Variable` by stealing from the given `Tensor`.
+/// The caller is responsible for ensuring that the Tensor can be stollen from.
+inline Variable make_variable_unique(at::Tensor data, bool requires_grad) {
+  auto data_impl = data.unsafeReleaseIntrusivePtr();
+  data_impl->set_allow_tensor_metadata_change(true);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!data_impl->autograd_meta());
+  if (requires_grad)
+    data_impl->set_autograd_meta(std::make_unique<AutogradMeta>(data_impl.get(), requires_grad));
+  return Variable(std::move(data_impl));
 }
 
 /// Creates a `Variable` from the given `Tensor`, copying its underlying `TensorImpl`.

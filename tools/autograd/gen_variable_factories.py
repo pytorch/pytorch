@@ -75,6 +75,6 @@ def process_function(f: NativeFunction) -> Optional[str]:
     return f"""\
 inline at::Tensor {name}({', '.join(formals)}) {{
   at::AutoDispatchBelowADInplaceOrView guard;
-  return autograd::make_variable(at::{name}({', '.join(exprs)}), /*requires_grad=*/{requires_grad});
+  return autograd::make_variable_unique(at::{name}({', '.join(exprs)}), /*requires_grad=*/{requires_grad});
 }}
 """

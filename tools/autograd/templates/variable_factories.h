@@ -38,7 +38,7 @@ namespace torch {
 /// - `unsigned long long int`
 /// - `long long int`
 inline at::Tensor tensor(detail::TensorDataContainer tensor_data_container, const at::TensorOptions& options = {}) {
-  return autograd::make_variable(
+  return autograd::make_variable_unique(
     // note: we remove the requires_grad setting from the TensorOptions because
     // it is ignored anyways (and we actually have an assertion that it isn't set
     // which would fail otherwise). We handle requires_grad explicitly here
@@ -69,7 +69,7 @@ inline at::Tensor from_blob(
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
     return at::from_blob(data, sizes, strides, deleter, options.requires_grad(c10::nullopt));
   })();
-  return autograd::make_variable(tensor, options.requires_grad());
+  return autograd::make_variable_unique(std::move(tensor), options.requires_grad());
 }
 
 /// Exposes the given `data` as a `Tensor` without taking ownership of the
@@ -87,7 +87,7 @@ inline at::Tensor from_blob(
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
     return at::from_blob(data, sizes, strides, options.requires_grad(c10::nullopt));
   })();
-  return autograd::make_variable(tensor, options.requires_grad());
+  return autograd::make_variable_unique(std::move(tensor), options.requires_grad());
 }
 
 /// Exposes the given `data` as a `Tensor` without taking ownership of the
@@ -106,7 +106,7 @@ inline at::Tensor from_blob(
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
     return at::from_blob(data, sizes, deleter, options.requires_grad(c10::nullopt));
   })();
-  return autograd::make_variable(tensor, options.requires_grad());
+  return autograd::make_variable_unique(std::move(tensor), options.requires_grad());
 }
 
 /// Exposes the given `data` as a `Tensor` without taking ownership of the
@@ -122,7 +122,7 @@ inline at::Tensor from_blob(
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
     return at::from_blob(data, sizes, options.requires_grad(c10::nullopt));
   })();
-  return autograd::make_variable(tensor, options.requires_grad());
+  return autograd::make_variable_unique(std::move(tensor), options.requires_grad());
 }
 
 ${function_definitions}
