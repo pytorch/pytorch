@@ -93,6 +93,7 @@ class GTest(TestCase):
     method to this class named the same as the test binary (or test_<name> if
     the binary's name doesn't start with 'test_')
     """
+
     def test_jit(self, binary: Path, test_name: str):
         setup_path = REPO_ROOT / "test" / "cpp" / "jit" / "tests_setup.py"
         # These tests fail on windows only (this wasn't caught before switching
@@ -169,8 +170,9 @@ if __name__ == "__main__":
         exit(1)
 
     print(TEST_BINARY_DIR)
-    print(TEST_BINARY_DIR.glob("*"))
-    print(TEST_BINARY_DIR.glob("*test*"))
+    print("globs")
+    print('list(TEST_BINARY_DIR.glob("*"))', list(TEST_BINARY_DIR.glob("*")))
+    print('list(TEST_BINARY_DIR.glob("*test*"))', list(TEST_BINARY_DIR.glob("*test*")))
     for binary in TEST_BINARY_DIR.glob("*test*"):
         # If the test already has a properly formatted name, don't prepend a
         # redundant 'test_'

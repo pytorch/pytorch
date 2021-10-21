@@ -67,6 +67,7 @@ try:
     from quantization.fx.test_quantize_fx import TestFuseFx  # noqa: F401
     from quantization.fx.test_quantize_fx import TestQuantizeFx  # noqa: F401
     from quantization.fx.test_quantize_fx import TestQuantizeFxOps  # noqa: F401
+    from quantization.fx.test_quantize_fx import TestQuantizeFxOpsNew  # noqa: F401
     from quantization.fx.test_quantize_fx import TestQuantizeFxModels  # noqa: F401
 except ImportError:
     # In FBCode we separate FX out into a separate target for the sake of dev
