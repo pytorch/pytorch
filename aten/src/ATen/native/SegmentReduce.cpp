@@ -3,6 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NumericUtils.h>
+#include <c10/util/irange.h>
 
 namespace at {
 namespace native {
@@ -41,8 +42,8 @@ void _segment_reduce_cpu_kernel1(
         auto* output_data = output.data_ptr<scalar_t>();
         const auto* values_data = data.data_ptr<scalar_t>();
         int64_t lengths_cum_sum = 0;
-        for (int64_t i = 0; i < segment_count; ++i) {
-          for (int64_t l = 0; l < stride_count; ++l) {
+        for (const auto i : c10::irange(segment_count)) {
+          for (const auto l : c10::irange(stride_count)) {
             // ===== step1: initialize starting value
             scalar_t initial_value;
             if (initial.has_value()) {
@@ -141,12 +142,12 @@ void _segment_reduce_cpu_backward_kernel1(
         const auto* values_data = data_contig.data_ptr<scalar_t>();
 
         int64_t lengths_cum_sum = 0;
-        for (int64_t i = 0; i < segment_count; ++i) {
+        for (const auto i : c10::irange(segment_count)) {
           if (lengths_data[i] == 0) {
             continue;
           }
 
-          for (int64_t l = 0; l < stride_count; ++l) {
+          for (const auto l : c10::irange(stride_count)) {
             int64_t output_index = (i * stride_count) + l;
 
             if (reduction == SegmentReductionType::MAX ||
