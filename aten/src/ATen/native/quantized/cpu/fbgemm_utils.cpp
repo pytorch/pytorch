@@ -11,6 +11,7 @@
 #include <c10/core/QScheme.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/accumulate.h>
+#include <c10/util/irange.h>
 #include <torch/custom_class.h>
 
 torch::class_<LinearPackedParamsBase> register_linear_params();
@@ -47,9 +48,9 @@ void CopyToChannelsLast3dTensor(
     const T* src,
     T* dst) {
   const int64_t inner_size = D * H * W;
-  for (int64_t i = 0; i < N; ++i) {
-    for (int64_t j = 0; j < inner_size; ++j) {
-      for (int64_t k = 0; k < C; ++k) {
+  for (const auto i : c10::irange(N)) {
+    for (const auto j : c10::irange(inner_size)) {
+      for (const auto k : c10::irange(C)) {
         dst[(i * inner_size + j) * C + k] = src[(i * C + k) * inner_size + j];
       }
     }
@@ -69,8 +70,8 @@ void CopyICFirst3dTensorToChannelsLast3dTensor(
   // IC OC/G THW -> G OC/G THW IC/G
   const int64_t inner_size = D * H * W;
   for (int64_t i = 0; i < G * OC_G; ++i) {
-    for (int64_t j = 0; j < inner_size; ++j) {
-      for (int64_t ic = 0; ic < IC_G; ++ic) {
+    for (const auto j : c10::irange(inner_size)) {
+      for (const auto ic : c10::irange(IC_G)) {
         // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         int g = i / OC_G;
         // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)

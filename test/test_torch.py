@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Owner(s): ["module: tests"]
+
 import torch
 import torch.utils.data
 import numpy as np
@@ -3888,7 +3890,7 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('avg_pool3d_backward_cuda', ['cuda'], test_warning=False)
+        @expectedAlertNondeterministic('avg_pool3d_backward_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -3900,7 +3902,7 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('adaptive_avg_pool2d_backward_cuda', ['cuda'], test_warning=False)
+        @expectedAlertNondeterministic('adaptive_avg_pool2d_backward_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -3912,7 +3914,7 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('adaptive_avg_pool3d_backward_cuda', ['cuda'], test_warning=False)
+        @expectedAlertNondeterministic('adaptive_avg_pool3d_backward_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -3924,7 +3926,7 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('max_pool3d_with_indices_backward_cuda', ['cuda'], test_warning=False)
+        @expectedAlertNondeterministic('max_pool3d_with_indices_backward_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -3936,7 +3938,7 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('adaptive_max_pool2d_backward_cuda', ['cuda'], test_warning=False)
+        @expectedAlertNondeterministic('adaptive_max_pool2d_backward_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -3948,7 +3950,7 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('fractional_max_pool2d_backward_cuda', ['cuda'], test_warning=False)
+        @expectedAlertNondeterministic('fractional_max_pool2d_backward_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -3960,7 +3962,7 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('fractional_max_pool3d_backward_cuda', ['cuda'], test_warning=False)
+        @expectedAlertNondeterministic('fractional_max_pool3d_backward_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -3975,7 +3977,7 @@ else:
             align_corners=False)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('upsample_linear1d_backward_out_cuda', ['cuda'], test_warning=False)
+        @expectedAlertNondeterministic('upsample_linear1d_backward_out_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -3990,7 +3992,7 @@ else:
             align_corners=False)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('upsample_bilinear2d_backward_out_cuda', ['cuda'], test_warning=False)
+        @expectedAlertNondeterministic('upsample_bilinear2d_backward_out_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -4005,7 +4007,7 @@ else:
             align_corners=False)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('upsample_bicubic2d_backward_out_cuda', ['cuda'], test_warning=False)
+        @expectedAlertNondeterministic('upsample_bicubic2d_backward_out_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -4020,7 +4022,7 @@ else:
             align_corners=False)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('upsample_trilinear3d_backward_out_cuda', ['cuda'], test_warning=False)
+        @expectedAlertNondeterministic('upsample_trilinear3d_backward_out_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -4032,7 +4034,7 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('reflection_pad1d_backward_out_cuda', ['cuda'], test_warning=False)
+        @expectedAlertNondeterministic('reflection_pad1d_backward_out_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -4044,7 +4046,7 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('reflection_pad2d_backward_cuda', ['cuda'], test_warning=False)
+        @expectedAlertNondeterministic('reflection_pad2d_backward_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -4056,7 +4058,7 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('reflection_pad3d_backward_out_cuda', ['cuda'], test_warning=False)
+        @expectedAlertNondeterministic('reflection_pad3d_backward_out_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -4068,7 +4070,7 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('replication_pad1d_backward_cuda', ['cuda'], test_warning=False)
+        @expectedAlertNondeterministic('replication_pad1d_backward_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -4080,7 +4082,7 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('replication_pad2d_backward_cuda', ['cuda'], test_warning=False)
+        @expectedAlertNondeterministic('replication_pad2d_backward_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -4092,7 +4094,7 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('replication_pad3d_backward_cuda', ['cuda'], test_warning=False)
+        @expectedAlertNondeterministic('replication_pad3d_backward_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -4118,10 +4120,9 @@ else:
         res = module(input, target, input_lengths, target_lengths)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('ctc_loss_backward_gpu', ['cuda'], test_warning=False)
+        @expectedAlertNondeterministic('ctc_loss_backward_gpu', ['cuda'])
         def backward_func(slf, device):
-            with warnings.catch_warnings(record=True) as w:
-                res.backward(grad)
+            res.backward(grad, retain_graph=True)
 
         backward_func(self, device)
 
@@ -4133,7 +4134,7 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('embedding_bag_backward_cuda_max', ['cuda'], test_warning=False)
+        @expectedAlertNondeterministic('embedding_bag_backward_cuda_max', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -4245,7 +4246,7 @@ else:
             res = op_call(a, dim, index)
             grad = torch.ones_like(res)
 
-            @expectedAlertNondeterministic('scatter_add_cuda_kernel', ['cuda'], test_warning=False)
+            @expectedAlertNondeterministic('scatter_add_cuda_kernel', ['cuda'])
             def backward_func(slf, device):
                 res.backward(grad)
 
@@ -4260,7 +4261,7 @@ else:
         res = torch.nn.functional.grid_sample(input, grid, align_corners=False)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('grid_sampler_2d_backward_cuda', ['cuda'], test_warning=False)
+        @expectedAlertNondeterministic('grid_sampler_2d_backward_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -4272,7 +4273,7 @@ else:
         res = torch.nn.functional.grid_sample(input, grid, align_corners=False)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('grid_sampler_3d_backward_cuda', ['cuda'], test_warning=False)
+        @expectedAlertNondeterministic('grid_sampler_3d_backward_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -4836,8 +4837,8 @@ else:
     @tf32_on_and_off(0.005)
     def test_cdist_non_contiguous(self, device):
         for cm in ['use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
-            x = torch.randn(5, 7, device=device).transpose(-1, -2)
-            y = torch.randn(5, 3, device=device).transpose(-1, -2)
+            x = torch.randn(5, 7, device=device).mT
+            y = torch.randn(5, 3, device=device).mT
             actual = torch.cdist(x, y, p=2, compute_mode=cm)
             expected = self._brute_cdist(x, y, p=2)
             self.assertFalse(x.is_contiguous())
@@ -4863,8 +4864,8 @@ else:
     @tf32_on_and_off()
     def test_cdist_non_contiguous_batch(self, device):
         for cm in ['use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
-            x = torch.randn(4, 3, 2, 5, 7, device=device).transpose(-1, -2)
-            y = torch.randn(4, 3, 2, 5, 3, device=device).transpose(-1, -2)
+            x = torch.randn(4, 3, 2, 5, 7, device=device).mT
+            y = torch.randn(4, 3, 2, 5, 3, device=device).mT
             actual = torch.cdist(x, y, p=2, compute_mode=cm)
             expected = self._brute_cdist(x, y, p=2)
             self.assertFalse(x.is_contiguous())
@@ -4872,14 +4873,14 @@ else:
             self.assertEqual(expected, actual)
 
             x = torch.randn(7, 2, 7, 5, device=device)
-            y = torch.randn(7, 2, 5, 3, device=device).transpose(-1, -2)
+            y = torch.randn(7, 2, 5, 3, device=device).mT
             actual = torch.cdist(x, y, p=2, compute_mode=cm)
             expected = self._brute_cdist(x, y, p=2)
             self.assertTrue(x.is_contiguous())
             self.assertFalse(y.is_contiguous())
             self.assertEqual(expected, actual)
 
-            x = torch.randn(4, 5, 7, device=device).transpose(-1, -2)
+            x = torch.randn(4, 5, 7, device=device).mT
             y = torch.randn(4, 3, 5, device=device)
             actual = torch.cdist(x, y, p=2, compute_mode=cm)
             expected = self._brute_cdist(x, y, p=2)
