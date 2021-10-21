@@ -9,6 +9,7 @@ import torch.distributed.algorithms.quantization.quantization as quant
 from torch.distributed.algorithms.quantization.quantization import DQuantType
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
+    init_multigpu_helper,
     requires_gloo,
     skip_if_rocm,
     skip_if_lt_x_gpu,
@@ -120,7 +121,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             device = torch.device(f"cuda:{self.rank}")
             group = list(range(0, self.world_size))
             group_id = dist.new_group(range(self.world_size))
-            rank_to_GPU = self._init_multigpu_helper()
+            rank_to_GPU = init_multigpu_helper(self.world_size, BACKEND)
             self._test_all_to_all(
                 group,
                 group_id,
@@ -140,7 +141,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             device = torch.device(f"cuda:{self.rank}")
             group = list(range(0, self.world_size))
             group_id = dist.new_group(range(self.world_size))
-            rank_to_GPU = self._init_multigpu_helper()
+            rank_to_GPU = init_multigpu_helper(self.world_size, BACKEND)
             self._test_all_to_all(
                 group,
                 group_id,
@@ -159,7 +160,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             device = torch.device(f"cuda:{self.rank}")
             group = list(range(0, self.world_size))
             group_id = dist.new_group(range(self.world_size))
-            rank_to_GPU = self._init_multigpu_helper()
+            rank_to_GPU = init_multigpu_helper(self.world_size, BACKEND)
             self._test_all_to_all_single(
                 group,
                 group_id,
@@ -179,7 +180,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             device = torch.device(f"cuda:{self.rank}")
             group = list(range(0, self.world_size))
             group_id = dist.new_group(range(self.world_size))
-            rank_to_GPU = self._init_multigpu_helper()
+            rank_to_GPU = init_multigpu_helper(self.world_size, BACKEND)
             self._test_all_to_all_single(
                 group,
                 group_id,
