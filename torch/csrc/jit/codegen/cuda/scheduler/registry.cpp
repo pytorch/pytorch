@@ -295,12 +295,31 @@ class SchedulerTopologyChecker {
       }
     }
 
+    // When checking post reduction vals, we need to make sure
+    //  we are really checking paths starting from all outputs
+    //  of multi-output reductions, i.e. welford. The reduction_tv
+    //  vector is assumed to only have one of them.
+    std::unordered_set<Val*> reduction_tv_set(
+        reduction_tvs.begin(), reduction_tvs.end());
+
+    for (auto red : reduction_tvs) {
+      if (red->definition()) {
+        if (auto wop = dynamic_cast<WelfordOp*>(red->definition())) {
+          for (auto wop_output : wop->outputs()) {
+            if (wop_output->isA<TensorView>()) {
+              reduction_tv_set.insert(wop_output);
+            }
+          }
+        }
+      }
+    }
+
     // If reductions are on fastest dim, don't fuse any operations (after
     // reductions) that requires an input that is not an input to the
     // reductions.
     if (fastest_dim_reduction) {
       auto post_reduction_vals = DependencyCheck::getAllValsBetween(
-          {reduction_tvs.begin(), reduction_tvs.end()},
+          reduction_tv_set,
           {fusion->outputs().begin(), fusion->outputs().end()});
 
       if (post_reduction_vals.empty()) {
