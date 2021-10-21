@@ -206,7 +206,7 @@ def convert(model: GraphModule, is_reference: bool = False,
     # TODO refactor this code once we update the prepare logic to have additional information on
     # which graph nodes have been observed and share that with convert to decide which observers to ignore.
     if convert_qconfig_dict:
-        prepare_qconfig_dict: Dict[str, Dict[Any, Any]] = model._qconfig_dict
+        prepare_qconfig_dict: Dict[str, Dict[Any, Any]] = model._qconfig_dict  # type: ignore[assignment]
         modules_copy = copy.deepcopy(modules)
         convert_dict_to_ordered_dict(convert_qconfig_dict)
         compare_prepare_convert_qconfig_dict(prepare_qconfig_dict, convert_qconfig_dict)
