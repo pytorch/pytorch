@@ -5938,6 +5938,7 @@ def sample_inputs_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
             if t.eq(ignore).all() and reduction == "mean":
                 t.fill_(0)
             yield make_input(s), t, dict(ignore_index=num_classes // 2, reduction=reduction)
+            yield make_input(s), t, dict(ignore_index=num_classes // 2, reduction=reduction, weight=make_weight())
             # Test ignoring all the targets
             # If "mean", nll returns NaN, so it's not differentiable at those points
             if reduction != "mean":
