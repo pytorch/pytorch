@@ -2720,16 +2720,16 @@ def sample_inputs_max_pool2d(op_info, device, dtype, requires_grad, **kwargs):
 def sample_inputs_max_pool3d(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    kerneli = [[4, 8, 6], 5]
+    kerneli = [[3, 5, 3], 5]
     stridei = [None, [2, 2, 4], 2]
     Ni = [1, 2, None]
-    Ci = [6]
-    Di = [8]
-    Hi = [20]
-    Wi = [16]
+    Ci = [4]
+    Di = [5]
+    Hi = [7]
+    Wi = [6]
     ceil_modei = [True, False]
-    paddingi = [(1, 2, 1), 0]
-    dilationi = [1, (1, 2, 3)]
+    paddingi = [(1, 2, 1), 1]
+    dilationi = [1, (1, 2, 1)]
     return_indicesi = [True, False]
 
     products = product(kerneli, stridei, Ni, Ci, Di, Hi, Wi, ceil_modei, paddingi, dilationi, return_indicesi)
