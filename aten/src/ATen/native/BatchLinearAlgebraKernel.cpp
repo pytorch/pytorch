@@ -853,7 +853,7 @@ void apply_lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& in
       "Calling torch.lu on a CPU tensor requires compiling ",
       "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
 #else
-  TORCH_CHECK(compute_pivots, "lu_factor without pivoting is not implemented on the CPU");
+  TORCH_CHECK(compute_pivots, "linalg.lu_factor: LU without pivoting is not implemented on the CPU");
 
   auto input_data = input.data_ptr<scalar_t>();
   auto pivots_data = pivots.data_ptr<int>();
@@ -889,8 +889,8 @@ void lu_factor_kernel(const Tensor& input, const Tensor& pivots, const Tensor& i
   Args:
   * `b` -  [in] the right hand side matrix B
            [out] the solution matrix X
-  * `lu` - [in] the LU factorization of matrix A (see at::_lu_with_info)
-  * `pivots` - [in] the pivot indices (see at::_lu_with_info)
+  * `lu` - [in] the LU factorization of matrix A (see at::linalg_lu_factor)
+  * `pivots` - [in] the pivot indices (see at::linalg_lu_factor)
 
   For further details, please see the LAPACK documentation for GETRS.
 */
