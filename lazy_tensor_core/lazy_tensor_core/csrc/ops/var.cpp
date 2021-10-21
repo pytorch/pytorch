@@ -6,7 +6,6 @@
 #include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensor_core/csrc/torch_util.h"
 #include "lazy_tensors/computation_client/util.h"
-#include "lazy_tensors/str_join.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -32,8 +31,7 @@ NodePtr Var::Clone(OpList operands) const {
 
 std::string Var::ToString() const {
   std::stringstream ss;
-  ss << TsNode::ToString() << ", dimensions=("
-     << lazy_tensors::StrJoin(dimensions_, ", ")
+  ss << TsNode::ToString() << ", dimensions=(" << c10::Join(", ", dimensions_)
      << "), correction=" << correction_
      << ", keep_reduced_dimensions=" << keep_reduced_dimensions_;
   return ss.str();

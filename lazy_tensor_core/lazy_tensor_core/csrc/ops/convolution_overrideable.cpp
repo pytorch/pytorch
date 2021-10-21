@@ -2,7 +2,6 @@
 
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
-#include "lazy_tensors/str_join.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -61,11 +60,11 @@ NodePtr ConvolutionOverrideable::Clone(OpList operands) const {
 
 std::string ConvolutionOverrideable::ToString() const {
   std::stringstream ss;
-  ss << TsNode::ToString() << ", stride=(" << lazy_tensors::StrJoin(stride_, ", ")
-     << "), padding=(" << lazy_tensors::StrJoin(padding_, ", ")
-     << "), dilation=(" << lazy_tensors::StrJoin(dilation_, ", ")
-     << "), transpose=" << transposed_ << ", output_padding=("
-     << lazy_tensors::StrJoin(output_padding_, ", ") << "), groups=" << groups_;
+  ss << TsNode::ToString() << ", stride=(" << c10::Join(", ", stride_)
+     << "), padding=(" << c10::Join(", ", padding_) << "), dilation=("
+     << c10::Join(", ", dilation_) << "), transpose=" << transposed_
+     << ", output_padding=(" << c10::Join(", ", output_padding_)
+     << "), groups=" << groups_;
   return ss.str();
 }
 

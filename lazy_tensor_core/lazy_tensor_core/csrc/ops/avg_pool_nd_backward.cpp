@@ -52,9 +52,8 @@ NodePtr AvgPoolNdBackward::Clone(OpList operands) const {
 std::string AvgPoolNdBackward::ToString() const {
   std::stringstream ss;
   ss << TsNode::ToString() << ", spatial_dim_count=" << spatial_dim_count_
-     << ", kernel_size=(" << lazy_tensors::StrJoin(kernel_size_, ", ")
-     << "), stride=(" << lazy_tensors::StrJoin(stride_, ", ") << "), padding=("
-     << lazy_tensors::StrJoin(padding_, ", ")
+     << ", kernel_size=(" << c10::Join(", ", kernel_size_) << "), stride=("
+     << c10::Join(", ", stride_) << "), padding=(" << c10::Join(", ", padding_)
      << "), count_include_pad=" << count_include_pad_;
   return ss.str();
 }

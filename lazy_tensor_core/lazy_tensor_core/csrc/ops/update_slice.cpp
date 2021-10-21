@@ -2,7 +2,6 @@
 
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
 #include "lazy_tensor_core/csrc/ops/ltc_ops.h"
-#include "lazy_tensors/str_join.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -25,7 +24,7 @@ NodePtr UpdateSlice::Clone(OpList operands) const {
 std::string UpdateSlice::ToString() const {
   std::stringstream ss;
   ss << TsNode::ToString() << ", base_indices=("
-     << lazy_tensors::StrJoin(base_indices_, ", ") << ")";
+     << c10::Join(", ", base_indices_) << ")";
   return ss.str();
 }
 

@@ -4,7 +4,6 @@
 #include "lazy_tensor_core/csrc/ops/ltc_ops.h"
 #include "lazy_tensors/computation_client/util.h"
 #include "lazy_tensors/shape_util.h"
-#include "lazy_tensors/str_join.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -48,7 +47,7 @@ std::string AllReduce::ToString() const {
      << ", scale=" << scale_ << ", groups=(";
   for (size_t i = 0; i < groups_.size(); ++i) {
     ss << (i == 0 ? "(" : ",(");
-    ss << lazy_tensors::StrJoin(groups_[i], ", ") << ")";
+    ss << c10::Join(", ", groups_[i]) << ")";
   }
   ss << ")";
   return ss.str();

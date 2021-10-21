@@ -3,7 +3,6 @@
 #include "lazy_tensor_core/csrc/data_ops.h"
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensors/shape_util.h"
-#include "lazy_tensors/str_join.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -34,8 +33,8 @@ View::View(const torch::lazy::Value& input, std::vector<lazy_tensors::int64> out
 
 std::string View::ToString() const {
   std::stringstream ss;
-  ss << TsNode::ToString() << ", output_size=("
-     << lazy_tensors::StrJoin(output_size_, ", ") << ")";
+  ss << TsNode::ToString() << ", output_size=(" << c10::Join(", ", output_size_)
+     << ")";
   return ss.str();
 }
 
