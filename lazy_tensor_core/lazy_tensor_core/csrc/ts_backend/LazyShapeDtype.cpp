@@ -11,8 +11,8 @@
  *
  */
 
+#include "torch/csrc/api/include/torch/enum.h"
 #include "lazy_tensor_core/csrc/ts_backend/LazyShapeDtype.h"
-
 namespace torch_lazy_tensors{
 namespace ir {
 namespace ops {
@@ -96,6 +96,55 @@ std::vector<std::vector<int64_t>> compute_shape_bitwise_and(const at::Tensor& se
 std::vector<c10::ScalarType> compute_dtype_bitwise_and(const at::Tensor& self, const at::Scalar& other) {
   return {self.scalar_type()};
 }
+
+std::vector<std::vector<int64_t>> compute_shape_sum(const at::Tensor & self, c10::optional<at::ScalarType> dtype) {
+  return {{}};
+}
+
+std::vector<c10::ScalarType> compute_dtype_sum(const at::Tensor & self, c10::optional<at::ScalarType> dtype) {
+  if (dtype.has_value()) {
+    return {dtype.value()};
+  }
+  // It's undocumented, but torch::sum promotes all integral types to int64 by default
+  if (isIntegralType(self.scalar_type(), /*includeBool*/ true)) {
+    return {c10::ScalarType::Long};
+  }
+  return {self.scalar_type()};;
+}
+
+std::vector<std::vector<int64_t>> compute_shape_trace(const at::Tensor & self) {
+  return {{}};
+}
+
+std::vector<c10::ScalarType> compute_dtype_trace(const at::Tensor & self) {
+  return {self.scalar_type()};
+}
+
+std::vector<std::vector<int64_t>> compute_shape_smooth_l1_loss(const at::Tensor & self, const at::Tensor & target, int64_t reduction, double beta) {
+  // Taken from definition of 'Output' shape here:
+  // https://pytorch.org/docs/stable/generated/torch.nn.SmoothL1Loss.html
+  switch(reduction){
+    case at::Reduction::None:
+      return {self.sizes().vec()};
+    default:
+      return {{}};
+  }
+}
+
+std::vector<c10::ScalarType> compute_dtype_smooth_l1_loss(const at::Tensor & self, const at::Tensor & target, int64_t reduction, double beta) {
+  return {self.scalar_type()};
+}
+
+std::vector<std::vector<int64_t>> compute_shape_smooth_l1_loss_backward(const at::Tensor & grad_output, const at::Tensor & self, const at::Tensor & target, int64_t reduction, double beta) {
+  // The `grad_output` tensor is really the input to this kernel, and while its shape may vary following the logic of the forward output,
+  // the outputs of this kernel should have fixed shapes matching the inputs to the forward kernel.
+  return {self.sizes().vec(), target.sizes().vec()};
+}
+
+std::vector<c10::ScalarType> compute_dtype_smooth_l1_loss_backward(const at::Tensor & grad_output, const at::Tensor & self, const at::Tensor & target, int64_t reduction, double beta) {
+  return {self.scalar_type(), target.scalar_type()};
+}
+
 
 } // namespace ops
 } // namespace ir

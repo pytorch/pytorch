@@ -102,7 +102,6 @@
 #include "lazy_tensor_core/csrc/ops/stack.h"
 #include "lazy_tensor_core/csrc/ops/std.h"
 #include "lazy_tensor_core/csrc/ops/std_mean.h"
-#include "lazy_tensor_core/csrc/ops/sum.h"
 #include "lazy_tensor_core/csrc/ops/svd.h"
 #include "lazy_tensor_core/csrc/ops/symeig.h"
 #include "lazy_tensor_core/csrc/ops/threshold.h"
@@ -1752,18 +1751,6 @@ LazyTensor nonzero(const LazyTensor& input) {
   return input.CreateFrom(torch::lazy::Value(node, 0), at::ScalarType::Long);
 }
 
-LazyTensor norm(const LazyTensor& input, const c10::optional<at::Scalar>& p,
-                c10::optional<at::ScalarType> dtype, at::IntArrayRef dim,
-                bool keepdim) {
-  auto canonical_dims = Helpers::GetCanonicalDimensionIndices(
-      Helpers::I64List(dim), input.shape().get().rank());
-  if (!dtype) {
-    dtype = input.dtype_optional();
-  }
-  return input.CreateFrom(
-      ir::ops::Norm(input.GetIrValue(), p, dtype, canonical_dims, keepdim));
-}
-
 LazyTensor normal(double mean, const LazyTensor& std) {
   return std.CreateFrom(torch::lazy::MakeNode<ir::ops::Normal>(
       LazyTensor::GetIrValueForScalar(mean, std.shape(), std.GetDevice()),
@@ -2092,20 +2079,6 @@ LazyTensor slice(const LazyTensor& input, lazy_tensors::int64 dim,
   return input.CreateViewTensor(std::move(view_info));
 }
 
-LazyTensor smooth_l1_loss(const LazyTensor& input, const LazyTensor& target,
-                          lazy_tensors::int64 reduction, double beta) {
-  return tensor_ops::SmoothL1Loss(input, target, GetReductionMode(reduction),
-                                  beta);
-}
-
-LazyTensor smooth_l1_loss_backward(const LazyTensor& grad_output,
-                                   const LazyTensor& input,
-                                   const LazyTensor& target,
-                                   lazy_tensors::int64 reduction, double beta) {
-  return tensor_ops::SmoothL1LossBackward(grad_output, input, target,
-                                          GetReductionMode(reduction), beta);
-}
-
 LazyTensor softshrink(const LazyTensor& input, const at::Scalar& lambda) {
   return input.CreateFrom(
       torch::lazy::MakeNode<ir::ops::Softshrink>(input.GetIrValue(), lambda));
@@ -2238,23 +2211,6 @@ LazyTensor sub(const LazyTensor& input, const at::Scalar& other,
                           logical_element_type);
 }
 
-LazyTensor sum(const LazyTensor& input,
-               std::vector<lazy_tensors::int64> dimensions,
-               bool keep_reduced_dimensions,
-               c10::optional<at::ScalarType> dtype) {
-  if (at::isIntegralType(input.dtype(), /*includeBool=*/true) && !dtype) {
-    dtype = at::ScalarType::Long;
-  } else if (!dtype) {
-    dtype = input.dtype_optional();
-  }
-  return input.CreateFrom(
-      torch::lazy::MakeNode<ir::ops::Sum>(input.GetIrValue(),
-                                 Helpers::GetCanonicalDimensionIndices(
-                                     dimensions, input.shape().get().rank()),
-                                 keep_reduced_dimensions, dtype),
-      dtype);
-}
-
 std::tuple<LazyTensor, LazyTensor, LazyTensor> svd(const LazyTensor& input,
                                                    bool some, bool compute_uv) {
   NodePtr node =
@@ -2333,17 +2289,6 @@ std::tuple<LazyTensor, LazyTensor> topk(const LazyTensor& input,
   return std::make_tuple(
       input.CreateFrom(torch::lazy::Value(node, 0)),
       input.CreateFrom(torch::lazy::Value(node, 1), at::ScalarType::Long));
-}
-
-LazyTensor trace(const LazyTensor& input) {
-  auto input_shape_ref = input.shape();
-  LTC_CHECK_EQ((*input_shape_ref).rank(), 2)
-      << "invalid argument for trace: expected a matrix";
-  NodePtr eye = ir::ops::Identity((*input_shape_ref).dimensions(0),
-                                      (*input_shape_ref).dimensions(1),
-                                      (*input_shape_ref).element_type());
-  return sum(input.CreateFrom(eye * input.GetIrValue()), {0, 1}, false,
-             input.dtype());
 }
 
 LazyTensor transpose(const LazyTensor& input, lazy_tensors::int64 dim0,

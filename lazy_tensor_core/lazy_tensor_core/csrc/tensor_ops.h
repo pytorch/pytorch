@@ -20,13 +20,6 @@ LazyTensor KlDivBackward(const LazyTensor& grad_output, const LazyTensor& input,
 LazyTensor MakeMatrixWithDiagonal(const LazyTensor& input,
                                   lazy_tensors::int64 diagonal);
 
-LazyTensor SmoothL1Loss(const LazyTensor& input, const LazyTensor& target,
-                        ReductionMode reduction, double beta);
-
-LazyTensor SmoothL1LossBackward(const LazyTensor& grad_output,
-                                const LazyTensor& input,
-                                const LazyTensor& target,
-                                ReductionMode reduction, double beta);
 
 LazyTensor Select(const LazyTensor& input, lazy_tensors::int64 dim,
                   lazy_tensors::int64 index);

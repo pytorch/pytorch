@@ -31,7 +31,6 @@
 #include "lazy_tensor_core/csrc/ops/select.h"
 #include "lazy_tensor_core/csrc/ops/squeeze.h"
 #include "lazy_tensor_core/csrc/ops/stack.h"
-#include "lazy_tensor_core/csrc/ops/sum.h"
 #include "lazy_tensor_core/csrc/ops/threshold.h"
 #include "lazy_tensor_core/csrc/ops/threshold_backward.h"
 #include "lazy_tensor_core/csrc/ops/ts_embedding_dense_backward.h"
@@ -166,10 +165,6 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
       case at::aten::stack: {
         return InferStack(
             torch::lazy::NodeCast<ir::ops::Stack>(node, ir::OpKind(at::aten::stack)));
-      }
-      case at::aten::sum: {
-        return InferSum(
-            torch::lazy::NodeCast<ir::ops::Sum>(node, ir::OpKind(at::aten::sum)));
       }
       case at::aten::constant_pad_nd: {
         auto constant_pad_nd = torch::lazy::NodeCast<ir::ops::ConstantPadNd>(
@@ -327,10 +322,6 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
     if (node->op().op == at::aten::stack) {
       return LowerStack(
           torch::lazy::NodeCast<ir::ops::Stack>(node, ir::OpKind(at::aten::stack)));
-    }
-    if (node->op().op == at::aten::sum) {
-      return LowerSum(
-          torch::lazy::NodeCast<ir::ops::Sum>(node, ir::OpKind(at::aten::sum)));
     }
     if (node->op().op == at::aten::threshold) {
       return LowerThreshold(
@@ -556,26 +547,6 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
     output_dimensions.insert(output_dimensions.begin() + stack->dim(),
                              inputs.size());
     return lazy_tensors::Shape(input_shape.element_type(), output_dimensions);
-  }
-
-  static lazy_tensors::Shape InferSum(const ir::ops::Sum* sum) {
-    const torch::lazy::Output& argument = sum->operand(0);
-    const lazy_tensors::Shape& argument_shape = ir::GetShapeFromTsOutput(argument);
-    const auto argument_dimensions = argument_shape.dimensions();
-    std::vector<lazy_tensors::int64> output_dimensions;
-    const auto& sum_dimensions = sum->dimensions();
-    for (lazy_tensors::int64 i = 0; i < argument_shape.rank(); ++i) {
-      auto it = std::find(sum_dimensions.begin(), sum_dimensions.end(), i);
-      if (it == sum_dimensions.end()) {
-        output_dimensions.push_back(argument_dimensions[i]);
-      } else if (sum->keep_reduced_dimensions()) {
-        output_dimensions.push_back(1);
-      }
-    }
-    lazy_tensors::PrimitiveType element_type =
-        sum->dtype() ? torch_lazy_tensors::TensorTypeToLtcType(*sum->dtype())
-                     : argument_shape.element_type();
-    return lazy_tensors::Shape(element_type, output_dimensions);
   }
 
   TSOpVector LowerBuiltin(
@@ -983,16 +954,6 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
             ->output());
     arguments.emplace_back(stack->dim());
     return LowerBuiltin(stack, arguments);
-  }
-
-  TSOpVector LowerSum(const ir::ops::Sum* sum) {
-    std::vector<torch::jit::NamedValue> arguments;
-    arguments.emplace_back(loctx()->GetOutputOp(sum->operand(0)));
-    arguments.emplace_back(sum->dimensions());
-    arguments.emplace_back(sum->keep_reduced_dimensions());
-    std::vector<torch::jit::NamedValue> kwarguments;
-    kwarguments.emplace_back("dtype", sum->dtype());
-    return LowerBuiltin(sum, arguments, kwarguments);
   }
 
   TSOpVector LowerThreshold(const ir::ops::Threshold* node) {
