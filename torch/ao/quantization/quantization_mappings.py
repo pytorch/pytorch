@@ -76,6 +76,7 @@ DEFAULT_STATIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nnqat.Linear: nnq.Linear,
     nnqat.Conv2d: nnq.Conv2d,
     nnqat.Conv3d: nnq.Conv3d,
+    nnqat.EmbeddingBag: nnq.EmbeddingBag,
 }
 
 # Default map for swapping float module to qat modules
@@ -83,6 +84,7 @@ DEFAULT_QAT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nn.Conv2d: nnqat.Conv2d,
     nn.Conv3d: nnqat.Conv3d,
     nn.Linear: nnqat.Linear,
+    nn.EmbeddingBag: nnqat.EmbeddingBag,
     nn.modules.linear.NonDynamicallyQuantizableLinear: nnqat.Linear,
     # Intrinsic modules:
     nni.ConvBn1d: nniqat.ConvBn1d,
@@ -106,6 +108,8 @@ DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nn.LSTMCell: nnqd.LSTMCell,
     nn.RNNCell: nnqd.RNNCell,
     nni.LinearReLU: nniqd.LinearReLU,
+    nn.EmbeddingBag: nnq.EmbeddingBag,
+    nn.Embedding: nnq.Embedding,
 }
 
 # Allowlist for propagating the qconfig
