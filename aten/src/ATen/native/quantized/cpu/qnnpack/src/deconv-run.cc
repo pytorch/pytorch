@@ -138,7 +138,6 @@ enum pytorch_qnnp_status qnnpackDeConv(
       kernel_depth,
       deconvolution->dilation_depth,
       deconvolution->stride_depth);
-  std::cout << output_depth << std::endl;
   const size_t output_width = compute_output_dimension(
       input_width,
       deconvolution->input_padding_left + deconvolution->input_padding_right,
