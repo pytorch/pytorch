@@ -90,11 +90,12 @@ struct TORCH_API GraphFunction : public Function {
     return *executor_;
   }
 
-  void call(
+  bool call(
       Stack& stack,
       size_t bailOut,
       c10::function_ref<void(const Code&)> f) override {
     f(get_executor().getPlanFor(stack, bailOut).code);
+    return true;
   }
 
  private:
