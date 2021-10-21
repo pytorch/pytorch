@@ -2,7 +2,53 @@ import torch
 from torch import Tensor
 import torch.nn as nn
 import torch.nn.functional as F
+from typing import Optional
 
+from torch.overrides import (
+    has_torch_function, has_torch_function_unary, has_torch_function_variadic,
+    handle_torch_function)
+
+def _no_grad_embedding_renorm_(weight: Tensor, input: Tensor, max_norm: float, norm_type: float) -> Tensor:
+    with torch.no_grad():
+        torch.embedding_renorm_(weight, input, max_norm, norm_type)
+
+def fused_fake_quant_embedding_fn(
+    input: Tensor,
+    weight: Tensor,
+    padding_idx: Optional[int] = None,
+    max_norm: Optional[float] = None,
+    norm_type: float = 2.0,
+    scale_grad_by_freq: bool = False,
+    sparse: bool = False,
+) -> Tensor:
+    if has_torch_function_variadic(input, weight):
+        return handle_torch_function(
+            embedding, (input, weight),
+            input, weight, padding_idx, max_norm, norm_type,
+            scale_grad_by_freq, sparse
+        )
+    if padding_idx is not None:
+        if padding_idx > 0:
+            assert padding_idx < weight.size(0), "Padding_idx must be within num_embeddings"
+        elif padding_idx < 0:
+            assert padding_idx >= -weight.size(0), "Padding_idx must be within num_embeddings"
+            padding_idx = weight.size(0) + padding_idx
+    else:
+        padding_idx = -1
+
+    if max_norm is not None:
+        # Note [embedding_renorm contiguous]
+        # `embedding_renorm_` will call .contiguous() on input anyways, so we
+        # call it here and take advantage of the improved locality in the
+        # `embedding` call below too.
+        input = input.contiguous()
+        # Note [embedding_renorm set_grad_enabled]
+        # XXX: equivalent to
+        # with torch.no_grad():
+        #   torch.embedding_renorm_
+        # remove once script supports set_grad_enabled
+        _no_grad_embedding_renorm_(weight, input, max_norm, norm_type)
+    return torch.ops.quantized.fused_fake_quant_embedding(weight, input, 0, 255, padding_idx, scale_grad_by_freq, sparse)
 
 class Embedding(nn.Embedding):
     r"""
@@ -37,8 +83,8 @@ class Embedding(nn.Embedding):
 
     def forward(self, input) -> Tensor:
         return F.embedding(input, self.weight_fake_quant(self.weight), self.padding_idx,
-                           self.max_norm, self.norm_type, self.scale_grad_by_freq,
-                           self.sparse)
+                                             self.max_norm, self.norm_type, self.scale_grad_by_freq,
+                                             self.sparse)
 
     @classmethod
     def from_float(cls, mod):
@@ -69,6 +115,20 @@ class Embedding(nn.Embedding):
         embedding_bag.weight = torch.nn.Parameter(self.weight.detach())
         embedding_bag.train(self.training)
         return embedding_bag
+
+class FusedFakeQuantEmbedding(Embedding):
+    def __init__(self, num_embeddings, embedding_dim, padding_idx=None,
+                 max_norm=None, norm_type=2.0, scale_grad_by_freq=False,
+                 sparse=False, _weight=None, device=None, dtype=None, qconfig=None) -> None:
+                 super().__init__(num_embeddings, embedding_dim, padding_idx, max_norm,
+                         norm_type, scale_grad_by_freq, sparse, _weight,
+                         device, dtype, qconfig)
+
+    def forward(self, input):
+        return fused_fake_quant_embedding_fn(input, self.weight, self.padding_idx,
+                                        self.max_norm, self.norm_type, self.scale_grad_by_freq,
+                                        self.sparse)
+
 class EmbeddingBag(nn.EmbeddingBag):
     r"""
     An embedding bag module attached with FakeQuantize modules for weight,

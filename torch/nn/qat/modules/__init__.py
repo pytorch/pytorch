@@ -1,7 +1,11 @@
 from .linear import Linear
 from .conv import Conv2d
 from .conv import Conv3d
-from .embedding_ops import EmbeddingBag, Embedding
+from .embedding_ops import (
+    EmbeddingBag,
+    Embedding,
+    FusedFakeQuantEmbedding,
+)
 
 __all__ = [
     "Linear",
@@ -9,4 +13,5 @@ __all__ = [
     "Conv3d",
     "Embedding",
     "EmbeddingBag",
+    "FusedFakeQuantEmbedding",
 ]

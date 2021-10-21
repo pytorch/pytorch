@@ -9,6 +9,7 @@
 #include <memory>
 #include <sstream>
 #include <vector>
+#include <iostream>
 
 
 namespace at { namespace native {
