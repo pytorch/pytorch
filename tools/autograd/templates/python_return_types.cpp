@@ -32,6 +32,9 @@ void initReturnTypes(PyObject* module) {
   }
 
   for (const auto& return_type_pair : return_types_map) {
+    // hold onto the TypeObject for the unlikely case of user
+    // deleting or overriding it.
+    Py_INCREF(return_type_pair.second);
     if (PyModule_AddObject(
             return_types_module,
             return_type_pair.first.c_str(),
@@ -40,8 +43,9 @@ void initReturnTypes(PyObject* module) {
     }
   }
 
-  // steals a reference to return_types
+  // steals a reference to return_types on success
   if (PyModule_AddObject(module, "_return_types", return_types_module) != 0) {
+    Py_DECREF(return_types_module);
     throw python_error();
   }
 }
