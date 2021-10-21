@@ -8243,11 +8243,11 @@ Rounds elements of :attr:`input` to the nearest integer.
 
 .. note::
     This function implements the "round half to even" to
-    break ties when a number is equidistant from two 
+    break ties when a number is equidistant from two
     integers (e.g. `round(2.5)` is 2).
-    
+
     When the :attr:\`decimals\` argument is specified the
-    algorithm used is similar to NumPy's `around`. This 
+    algorithm used is similar to NumPy's `around`. This
     algorithm is fast but inexact and it can easily
     overflow for low precision dtypes.
     Eg. `round(tensor([10000], dtype=torch.float16), decimals=3)` is `inf`.
@@ -8270,16 +8270,16 @@ Example::
 
     >>> torch.round(torch.tensor((4.7, -2.3, 9.1, -7.7)))
     tensor([ 5.,  -2.,  9., -8.])
-    
+
     >>> # Values equidistant from two integers are rounded towards the
     >>> #   the nearest even value (zero is treated as even)
     >>> torch.round(torch.tensor([-0.5, 0.5, 1.5, 2.5]))
     tensor([-0., 0., 2., 2.])
-    
+
     >>> # A positive decimals argument rounds to the to that decimal place
     >>> torch.round(torch.tensor([0.1234567]), decimals=3)
     tensor([0.1230])
-    
+
     >>> # A negative decimals argument rounds to the left of the decimal
     >>> torch.round(torch.tensor([1200.1234567]), decimals=-3)
     tensor([1000.])
