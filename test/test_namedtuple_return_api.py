@@ -146,7 +146,7 @@ class TestNamedTupleAPI(TestCase):
         '''))
 
     def test_import_return_types(self):
-        import torch.return_types
+        import torch.return_types  # noqa: F401
 
 
 if __name__ == '__main__':
