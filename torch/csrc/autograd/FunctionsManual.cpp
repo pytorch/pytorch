@@ -3885,7 +3885,7 @@ Tensor householder_product_jvp(
 
   auto H_plus = prod.detach().clone();
   IntArrayRef batch_vector_shape(V.sizes().data(), V.dim() - 1);
-  auto H_minus = at::diag_embed(at::ones(batch_vector_shape, V.options()));
+  auto H_minus = at::diag_embed(at::ones({1}, V.options()).expand(batch_vector_shape));
 
   auto dprod = at::zeros_like(prod);
   for (int64_t i = 0; i < k; ++i) {
