@@ -94,10 +94,14 @@ class TORCH_API Logger {
   // if graph was actually static and is a candidate for static graph
   // optimization.
   void log_if_graph_static(bool is_static) {
+    if (static_graph_logged_) {
+      return;
+    }
     ddp_logging_data_->ints_map["can_set_static_graph"] = is_static;
     // It is useful to report the iteration that training finished at.
     ddp_logging_data_->ints_map["iteration"] = reducer_->num_iterations_;
     at::LogPyTorchDDPUsage(*ddp_logging_data_);
+    static_graph_logged_ = true;
   }
 
 
@@ -108,6 +112,10 @@ class TORCH_API Logger {
   std::shared_ptr<c10d::Reducer> reducer_;
   // track the number of iterations when runtime stats are collected so far.
   long num_iterations_stats_recorded_ = 0;
+  // Whether it is logged that graph is static or not. Needed because reducer
+  // logs that the graph is not static when detected as such, and we want to
+  // avoid overhead associated with multiple logging.
+  bool static_graph_logged_{false};
 };
 
 } // namespace c10d
