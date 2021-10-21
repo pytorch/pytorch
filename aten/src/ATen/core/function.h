@@ -76,10 +76,12 @@ struct TORCH_API Function {
 
   virtual bool call(Stack&, size_t, c10::function_ref<void(const Code&)>) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(false);
+    return false;
   }
 
   virtual bool call(Stack&, c10::function_ref<void(const mobile::Code&)>) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(false);
+    return false;
   }
 
   virtual ~Function() {}
