@@ -392,9 +392,13 @@ enum class CallType {
 };
 
 struct PyTraceEvent {
+  PyTraceEvent(int64_t t0, int64_t t1, std::string name, PyTraceEvent* parent, CallType call_type)
+    : t0_(t0), t1_(t1), name_(name), parent_(parent), call_type_(call_type) {}
   int64_t t0_;
   int64_t t1_;
   std::string name_;
+
+  PyTraceEvent* parent_;
   CallType call_type_;
 };
 
