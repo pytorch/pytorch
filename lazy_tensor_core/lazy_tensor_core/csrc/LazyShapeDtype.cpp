@@ -9,6 +9,38 @@
  * yet structured kernels can still be used with lazy_tensor codegen, but require
  * manual intervention to implement compute_shape_{op} and compute_dtype_{op}.
  *
+ * READ THIS!
+ *
+ * 1. Beware: Tech Debt!
+ * ---------------------
+ * These functions are tech debt.  We want to delete them all and use structured
+ * kernels instead, but it's a lot faster to write these so we're decoupling the
+ * two efforts to move fast for adding support for codegenned Lazy Tensor ops.
+ *
+ * Codegenned Lazy Tensor ops with handwritten shape formulae are still better than
+ * fully handwritten Lazy Tensor ops (which also have handwritten shape formulae).
+ *
+ * 2. Structured Kernels For The Win
+ * ---------------------------------
+ * Long term, more and more ops should be supported as 'structured kernels'.  Consider
+ * doing your part and porting an op.  As ops get ported over, the codegen will automatically
+ * notice and stop generating declarations for these shape formulae, so we'll need to
+ * manually clean up the unused functions in this file, or somehow automate that.
+ *
+ * https://dev-discuss.pytorch.org/t/slides-from-structured-kernel-presentation/179
+ *
+ * 3. How to figure out the shape/dtype
+ * ------------------------------------
+ * Unfortunatley there isn't a one-stop-shop for learning the output shape formulae for all
+ * operators.  This is partly becuase some operators are not part of our 'public' API, including
+ * backward operators which users don't directly invoke.
+ *
+ * Check our opinfo registry:
+ *  https://github.com/pytorch/pytorch/blob/13b859983183ea9938deb5030ac9a0747841f0a8/torch/csrc/jit/runtime/symbolic_shape_registry.cpp
+ *
+ * Read the manual (for ops that are 1:1 with python frontend):
+ *  https://pytorch.org/docs/stable/generated/torch.trace.html
+ *
  */
 
 #include "torch/csrc/api/include/torch/enum.h"
