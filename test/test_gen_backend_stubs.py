@@ -1,3 +1,5 @@
+# Owner(s): ["module: codegen"]
+
 import os
 import tempfile
 
