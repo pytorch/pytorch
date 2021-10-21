@@ -16357,7 +16357,7 @@ class TestNNDeviceType(NNTestCase):
 
        output_fp16 = torch.layer_norm(input, normalized_shape, weight, bias, eps)
        output_fp32 = torch.layer_norm(input.float(), normalized_shape, weight.float(), bias.float(), eps).half()
-       torch.testing.assert_allclose(output_fp16, output_fp32, atol=0, rtol=0) 
+       torch.testing.assert_allclose(output_fp16, output_fp32, atol=0, rtol=0)
 
     def test_hardsigmoid_grad(self, device):
         inputs = (torch.randn(4, 16, 16, device=device) - 0.5) * 10
