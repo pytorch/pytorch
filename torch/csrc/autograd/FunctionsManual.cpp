@@ -3872,23 +3872,24 @@ Tensor householder_product_jvp(
   auto sigma = tau / (tau * V_first_k_cols_norm_squared - 1.0);
 
   auto apply_householder_reflector = [m](
-    int64_t k, const Tensor& v_full,
+    const Tensor& v_full,
     const Tensor& t, Tensor& K,
     bool left = true) -> Tensor {
     return apply_simple_transformation(
-      // setting modify_K_in_place = true causes CUDA memory leaks in OpInfo tests of forward AD
-      m, k, v_full, v_full, t, K, /*modify_K_in_place=*/false, /*condition_with_I=*/true, left
+      // setting `modify_K_in_place = true` causes CUDA memory leaks in OpInfo tests of forward AD
+      // for that reason we ignore `k` by passing zero
+      m, /*k=*/0, v_full, v_full, t, K, /*modify_K_in_place=*/false, /*condition_with_I=*/true, left
     );
   };
 
   // computes (-t u v^H) K
   auto apply_simple_product = [m](
-    int64_t k,
     const Tensor& u_full, const Tensor& v_full,
     const Tensor& t, Tensor& K
   ) -> Tensor {
     return apply_simple_transformation(
-      m, k, u_full, v_full, t, K, /*modify_K_in_place=*/false, /*condition_with_I=*/false, /*left=*/true
+      // since ``modify_K_in_place = false`, we can ignore `k` and pass arbitrary value
+      m, /*k=*/0, u_full, v_full, t, K, /*modify_K_in_place=*/false, /*condition_with_I=*/false, /*left=*/true
     );
   };
 
@@ -3905,15 +3906,15 @@ Tensor householder_product_jvp(
     auto dtau_i = dtau.narrow(-1, i, 1);
     auto sigma_i = sigma.narrow(-1, i, 1);
 
-    H_plus = apply_householder_reflector(i, v_i, sigma_i, H_plus, /*left=*/true);
+    H_plus = apply_householder_reflector(v_i, sigma_i, H_plus, /*left=*/true);
 
     dprod.add_(H_minus.matmul(
-      apply_simple_product(k, v_i, v_i, dtau_i, H_plus)
-      + apply_simple_product(k, dv_i, v_i, tau_i, H_plus)
-      + apply_simple_product(k, v_i, dv_i, tau_i, H_plus)
+      apply_simple_product(v_i, v_i, dtau_i, H_plus)
+      + apply_simple_product(dv_i, v_i, tau_i, H_plus)
+      + apply_simple_product(v_i, dv_i, tau_i, H_plus)
     ));
 
-    H_minus = apply_householder_reflector(i, v_i, tau_i, H_minus, /*left=*/false);
+    H_minus = apply_householder_reflector(v_i, tau_i, H_minus, /*left=*/false);
   }
 
   return dprod;
