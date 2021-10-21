@@ -2,29 +2,12 @@
 
 #include <vector>
 
-#include <ATen/core/ivalue.h>
-#include <ATen/core/operator_name.h>
+#include <torch/csrc/jit/mobile/code.h>
 #include <torch/csrc/jit/mobile/frame.h>
-#include <torch/csrc/jit/runtime/instruction.h>
 
 namespace torch {
 namespace jit {
 namespace mobile {
-using Stack = std::vector<c10::IValue>;
-using DebugHandle = int64_t;
-class Function;
-
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-struct Code {
-  std::vector<Instruction> instructions_;
-  std::vector<DebugHandle> debug_handles_;
-  std::vector<c10::OperatorName> op_names_;
-  std::vector<std::function<void(Stack&)>> operators_;
-  std::vector<c10::IValue> constants_;
-  std::vector<c10::TypePtr> types_;
-  std::vector<mobile::Function*> functions_;
-  size_t register_size_; // Aggregated output size.
-};
 
 struct InterpreterState {
   TORCH_API explicit InterpreterState(const Code& code);
@@ -34,6 +17,7 @@ struct InterpreterState {
   void enterFrame(const Code&);
   void leaveFrame();
   void saveExceptionDebugHandles();
+  void callFunction(torch::jit::Function& f, Stack& stack);
 
   c10::IValue& reg(size_t reg);
   std::vector<c10::IValue> registers_;

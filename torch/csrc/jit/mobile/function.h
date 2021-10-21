@@ -25,7 +25,7 @@ class TORCH_API Function : public torch::jit::Function {
   void ensure_defined() override {}
   size_t num_inputs() const override;
   const c10::QualifiedName& qualname() const override;
-  void call(Stack&, c10::function_ref<void(const mobile::Code&)>) override;
+  bool call(Stack&, c10::function_ref<void(const mobile::Code&)>) override;
 
   void append_instruction(OpCode op, int X, int N, int64_t dbg_handle);
   void append_instruction(OpCode op, int X, int N);

@@ -64,13 +64,19 @@ void InterpreterState::saveExceptionDebugHandles() {
   std::vector<DebugHandle> exception_debug_handles;
   for (auto frame = frames_.crbegin(); frame != frames_.crend(); frame++) {
     size_t pc = frame->getPC() - (frame != frames_.crbegin() ? 1 : 0);
-    if (pc >= frame->getCode().debug_handles_.size()) {
+    if (auto handle = frame->getDebugHandle(pc)) {
+      exception_debug_handles.push_back(*handle);
+    } else {
       exception_debug_handles.push_back(-1);
-      continue;
     }
-    exception_debug_handles.push_back(frame->getCode().debug_handles_[pc]);
   }
   exception_debug_handles_ = std::move(exception_debug_handles);
+}
+
+void InterpreterState::callFunction(torch::jit::Function& f, Stack& stack) {
+  bool newFrame =
+      f.call(stack, [&](const mobile::Code& code) { enterFrame(code); });
+  (frames_.rbegin() + (newFrame ? 1 : 0))->step();
 }
 
 bool InterpreterState::run(Stack& stack) {
@@ -79,11 +85,14 @@ bool InterpreterState::run(Stack& stack) {
       auto& frame = frames_.back();
       const auto& code = frame.getCode();
       const auto pc = frame.getPC();
-      auto inst = code.instructions_.at(pc);
+      auto inst = frame.getInstruction();
       // If no valid debug handle found then just log pc.
       // This is possible when we did not save debug handles
-      DebugHandle debug_handle =
-          pc >= code.debug_handles_.size() ? pc : code.debug_handles_.at(pc);
+
+      DebugHandle debug_handle = pc;
+      if (auto handle = frame.getDebugHandle()) {
+        debug_handle = *handle;
+      }
 
       // std::cout << "RUNNING " << pc << " "
       //           << code_->instructions_with_handles_[pc].instruction;
@@ -129,9 +138,7 @@ bool InterpreterState::run(Stack& stack) {
         } break;
         case CALL: {
           auto& function = *frame.getCode().functions_.at(inst.X);
-          frame.step();
-          function.call(
-              stack, [&](const mobile::Code& code) { enterFrame(code); });
+          callFunction(function, stack);
         } break;
         case INTERFACE_CALL: {
           torch::jit::Function& method =
@@ -141,9 +148,7 @@ bool InterpreterState::run(Stack& stack) {
                   ->getMethod(code.constants_[inst.X].toStringRef());
           RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS(
               method.name(), debug_handle, stack);
-          frame.step();
-          method.call(
-              stack, [&](const mobile::Code& code) { enterFrame(code); });
+          callFunction(method, stack);
         } break;
         case LOAD:
           stack.emplace_back(reg(inst.X));
