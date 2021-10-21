@@ -2687,7 +2687,7 @@ def sample_inputs_max_pool2d(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     kerneli = [[3, 2], 3]
-    stridei = [[2, 2]]
+    stridei = [None, [2, 2]]
     Ni = [1, 2, None]
     Ci = [2]
     Hi = [3, 6]
@@ -8010,7 +8010,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_scripting=False,  # TODO: fix aliasing test
            skips=(
-               # JIT Shape Analysis check fails for this op
+               # FIXME: JIT Shape Analysis check fails for this op (not implemented yet)
                # AssertionError: None != torch.Size([1, 2, 3])
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
            ),
@@ -8033,7 +8033,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_scripting=False,  # TODO: fix aliasing test
            skips=(
-               # JIT Shape Analysis check fails for this op
+               # FIXME: JIT Shape Analysis check fails for this op (not implemented yet)
                # AssertionError: None != torch.Size([1, 6, 3, 5, 4])
                DecorateInfo(unittest.skip('Skipped!'), 'TestJit', 'test_variant_consistency_jit'),
            ),
