@@ -16,7 +16,7 @@ from torch.testing._internal.common_utils import (
     torch_to_numpy_dtype_dict, slowTest,
     TEST_SCIPY, IS_MACOS, IS_PPC, IS_WINDOWS)
 from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests, deviceCountAtLeast, onlyNativeDeviceTypes,
+    expectedFailureMeta, instantiate_device_type_tests, deviceCountAtLeast, onlyNativeDeviceTypes,
     onlyCPU, largeTensorTest, precisionOverride, dtypes,
     onlyCUDA, skipCPUIf, dtypesIfCUDA, skipMeta, get_all_device_types)
 from torch.testing._internal.common_dtype import (
@@ -2751,6 +2751,7 @@ class TestTensorCreation(TestCase):
         self.assertEqual(t[-1].item(), 2)
         del t
 
+    @expectedFailureMeta  # RuntimeError: The tensor has a non-zero number of elements
     @onlyNativeDeviceTypes
     def test_tensor_ctor_device_inference(self, device):
         torch_device = torch.device(device)
