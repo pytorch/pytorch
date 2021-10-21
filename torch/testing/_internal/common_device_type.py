@@ -1250,4 +1250,4 @@ def skipMeta(fn):
     return skipMetaIf(True, "test doesn't work with meta tensors")(fn)
 
 def skipXLA(fn):
-    return skipCPUIf(True, "Marked as skipped for XLA")(fn)
+    return skipXLAIf(True, "Marked as skipped for XLA")(fn)
