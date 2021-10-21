@@ -64,8 +64,8 @@ Tensor & masked_scatter__cuda(Tensor& self, const Tensor& mask, const Tensor& so
     return self;
   }
 
-  auto maskPrefixSum = at::empty(mask.sizes(), mask.options().dtype(kLong));
-  launch_masked_scatter_kernel(self, mask, maskPrefixSum, source);
+  auto maskPrefixSum = at::empty(self.sizes(), mask.options().dtype(kLong));
+  launch_masked_scatter_kernel(self, *b_mask, maskPrefixSum, source);
 
   return self;
 }
