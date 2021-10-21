@@ -6772,10 +6772,9 @@ class TestNN(NNTestCase):
             random.shuffle(sequences)
             
             lengths = torch.as_tensor([v.size(0) for v in sequences])
-            for batch_first in [True, False]:
-                padded_sequences = rnn_utils.pad_sequence(sequences, batch_first=batch_first)
-                unpadded_sequences = rnn_utils.unpad_sequence(padded_sequences, lengths, batch_first=batch_first)
-                _compatibility_test(sequences, unpadded_sequences)
+            padded_sequences = rnn_utils.pad_sequence(sequences, batch_first=batch_first)
+            unpadded_sequences = rnn_utils.unpad_sequence(padded_sequences, lengths, batch_first=batch_first)
+            _compatibility_test(sequences, unpadded_sequences)
 
     def test_pack_sequence(self):
         def pad(tensor, length):
