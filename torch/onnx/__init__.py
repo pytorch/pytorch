@@ -35,10 +35,9 @@ def _export(*args, **kwargs):
 
 def export(model, args, f, export_params=True, verbose=False, training=TrainingMode.EVAL,
            input_names=None, output_names=None, operator_export_type=None,
-           opset_version=None, _retain_param_name=None, do_constant_folding=True,
-           example_outputs=None, dynamic_axes=None, keep_initializers_as_inputs=None,
-           custom_opsets=None, enable_onnx_checker=None, use_external_data_format=None,
-           export_modules_as_functions=False):
+           opset_version=None, do_constant_folding=True, example_outputs=None,
+           dynamic_axes=None, keep_initializers_as_inputs=None, custom_opsets=None,
+           use_external_data_format=None, export_modules_as_functions=False):
     r"""
     Exports a model into ONNX format. If ``model`` is not a
     :class:`torch.jit.ScriptModule` nor a :class:`torch.jit.ScriptFunction`, this runs
@@ -187,8 +186,6 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
         opset_version (int, default 9):
             Must be ``== _onnx_main_opset or in _onnx_stable_opsets``,
             defined in torch/onnx/symbolic_helper.py.
-        _retain_param_name (bool, default True): Deprecated and ignored. Will be removed in next PyTorch
-            release.
         do_constant_folding (bool, default False): Apply the constant-folding optimization.
             Constant-folding will replace some of the ops that have all constant inputs
             with pre-computed constant nodes.
@@ -293,8 +290,6 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             the opset version is set to 1. Only custom opset domain name and version should be
             indicated through this argument.
 
-        enable_onnx_checker (bool, default True): Deprecated and ignored. Will be removed in next
-            Pytorch release.
         use_external_data_format (bool, default False): Deprecated and ignored. Will be removed in
             next Pytorch release.
         export_modules_as_functions (bool or set of str, type or nn.Module, default False): Flag to enable
@@ -314,10 +309,9 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
     from torch.onnx import utils
     return utils.export(model, args, f, export_params, verbose, training,
                         input_names, output_names, operator_export_type, opset_version,
-                        _retain_param_name, do_constant_folding, example_outputs,
-                        dynamic_axes, keep_initializers_as_inputs, custom_opsets,
-                        enable_onnx_checker, use_external_data_format,
-                        export_modules_as_functions)
+                        do_constant_folding, example_outputs, dynamic_axes,
+                        keep_initializers_as_inputs, custom_opsets,
+                        use_external_data_format, export_modules_as_functions)
 
 
 def export_to_pretty_string(*args, **kwargs) -> str:
