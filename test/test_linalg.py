@@ -1708,7 +1708,7 @@ class TestLinalg(TestCase):
         # check invalid norm type
         a = torch.ones(3, 3, dtype=dtype, device=device)
         for p in ['wrong_norm', 5]:
-            with self.assertRaisesRegex(RuntimeError, f"linalg_cond got an invalid norm type: {p}"):
+            with self.assertRaisesRegex(RuntimeError, f"linalg.cond got an invalid norm type: {p}"):
                 torch.linalg.cond(a, p)
 
     # This test calls torch.linalg.norm and numpy.linalg.norm with illegal arguments
