@@ -187,17 +187,6 @@ void CheckDimensionSize(const LazyTensor& t, lazy_tensors::int64 dim,
       << " (while checking arguments for " << tag << ")";
 }
 
-void CheckBmmDimension(const std::string& tag, const LazyTensor& batch1,
-                       const LazyTensor& batch2) {
-  // Consistent with the checks in bmm_out_or_baddbmm_.
-  CheckRank(batch1, 3, tag, "batch1", 1);
-  CheckRank(batch2, 3, tag, "batch2", 2);
-  CheckDimensionSize(batch2, 0, /*batch_size=*/batch1.size(0), tag, "batch2",
-                     2);
-  CheckDimensionSize(batch2, 1, /*contraction_size=*/batch1.size(2), tag,
-                     "batch2", 2);
-}
-
 std::vector<lazy_tensors::int64> GetExpandDimensions(
     const lazy_tensors::Shape& shape,
     std::vector<lazy_tensors::int64> dimensions) {
@@ -437,12 +426,6 @@ LazyTensor acosh(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::Acosh(input.GetIrValue()));
 }
 
-LazyTensor addmm(const LazyTensor& input, const LazyTensor& weight,
-                 const LazyTensor& bias) {
-  return input.CreateFrom(ir::ops::AddMatMulOp(
-      input.GetIrValue(), weight.GetIrValue(), bias.GetIrValue()));
-}
-
 LazyTensor all(const LazyTensor& input,
                std::vector<lazy_tensors::int64> dimensions,
                bool keep_reduced_dimensions) {
@@ -603,19 +586,6 @@ LazyTensor avg_pool_nd_backward(const LazyTensor& out_backprop,
       count_include_pad));
 }
 
-LazyTensor baddbmm(const LazyTensor& input, const LazyTensor& batch1,
-                   const LazyTensor& batch2, const at::Scalar& beta,
-                   const at::Scalar& alpha) {
-  CheckBmmDimension(/*tag=*/"baddbmm", batch1, batch2);
-  torch::lazy::Value product_multiplier = LazyTensor::GetIrValueForScalar(
-      alpha, batch1.shape().get().element_type(), batch1.GetDevice());
-  torch::lazy::Value bias_multiplier = LazyTensor::GetIrValueForScalar(
-      beta, input.shape().get().element_type(), input.GetDevice());
-  return input.CreateFrom(ir::ops::BaddBmm(
-      batch1.GetIrValue(), batch2.GetIrValue(), input.GetIrValue(),
-      product_multiplier, bias_multiplier));
-}
-
 LazyTensor bernoulli(const LazyTensor& input, double probability) {
   auto input_shape = input.shape();
   return input.CreateFrom(torch::lazy::MakeNode<ir::ops::Bernoulli>(
@@ -702,11 +672,6 @@ void bitwise_xor_out(LazyTensor& out, const LazyTensor& input,
                      const LazyTensor& other) {
   CheckIsIntegralOrPred(input.shape(), "__xor__");
   out.SetIrValue(ir::ops::BitwiseXor(input.GetIrValue(), other.GetIrValue()));
-}
-
-LazyTensor bmm(const LazyTensor& batch1, const LazyTensor& batch2) {
-  CheckBmmDimension(/*tag=*/"bmm", batch1, batch2);
-  return matmul(batch1, batch2);
 }
 
 std::vector<LazyTensor> broadcast_tensors(
@@ -1412,11 +1377,6 @@ LazyTensor masked_select(const LazyTensor& input, const LazyTensor& mask) {
   NodePtr node = torch::lazy::MakeNode<ir::ops::MaskedSelect>(input.GetIrValue(),
                                                          mask.GetIrValue());
   return input.CreateFrom(torch::lazy::Value(node, 0));
-}
-
-LazyTensor matmul(const LazyTensor& input, const LazyTensor& other) {
-  return input.CreateFrom(
-      ir::ops::MatMul(input.GetIrValue(), other.GetIrValue()));
 }
 
 LazyTensor max(const LazyTensor& input, const LazyTensor& other,

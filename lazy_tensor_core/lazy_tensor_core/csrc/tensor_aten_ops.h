@@ -55,9 +55,6 @@ LazyTensor acos(const LazyTensor& input);
 
 LazyTensor acosh(const LazyTensor& input);
 
-LazyTensor addmm(const LazyTensor& input, const LazyTensor& weight,
-                 const LazyTensor& bias);
-
 LazyTensor all(const LazyTensor& input,
                std::vector<lazy_tensors::int64> dimensions,
                bool keep_reduced_dimensions);
@@ -124,10 +121,6 @@ LazyTensor avg_pool_nd_backward(const LazyTensor& out_backprop,
                                 std::vector<lazy_tensors::int64> padding,
                                 bool ceil_mode, bool count_include_pad);
 
-LazyTensor baddbmm(const LazyTensor& input, const LazyTensor& batch1,
-                   const LazyTensor& batch2, const at::Scalar& beta,
-                   const at::Scalar& alpha);
-
 LazyTensor bernoulli(const LazyTensor& input, double probability);
 LazyTensor bernoulli(const LazyTensor& input);
 void bernoulli_(LazyTensor& input, double probability);
@@ -164,11 +157,6 @@ void bitwise_xor_out(LazyTensor& out, const LazyTensor& input,
 
 void bitwise_xor_out(LazyTensor& out, const LazyTensor& input,
                      const LazyTensor& other);
-
-// Batch matrix multiplication. Both tensors must be 3D, the batch size must
-// match and the remaining two dimensions must be compatible for matrix
-// multiplication.
-LazyTensor bmm(const LazyTensor& batch1, const LazyTensor& batch2);
 
 // Broadcasts the given tensors according to broadcasting semantics.
 std::vector<LazyTensor> broadcast_tensors(
@@ -486,8 +474,6 @@ void masked_scatter_(LazyTensor& input, const LazyTensor& mask,
                      const LazyTensor& source);
 
 LazyTensor masked_select(const LazyTensor& input, const LazyTensor& mask);
-
-LazyTensor matmul(const LazyTensor& input, const LazyTensor& other);
 
 LazyTensor max(
     const LazyTensor& input, const LazyTensor& other,

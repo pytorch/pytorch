@@ -101,10 +101,6 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
         return InferIndexSelect(torch::lazy::NodeCast<ir::ops::IndexSelect>(
             node, ir::OpKind(at::aten::index_select)));
       }
-      case at::aten::matmul: {
-        // Only used from bmm currently.
-        return InferBmm(node);
-      }
       case at::aten::cat: {
         return InferCat(
             torch::lazy::NodeCast<ir::ops::Cat>(node, ir::OpKind(at::aten::cat)));
@@ -118,10 +114,6 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
         return InferConvolutionOverrideable(
             torch::lazy::NodeCast<ir::ops::ConvolutionOverrideable>(
                 node, ir::OpKind(at::aten::convolution_overrideable)));
-      }
-      case at::aten::addmm:
-      case at::aten::mm: {
-        return InferMm(node);
       }
       case at::aten::leaky_relu_backward:
       case at::aten::nll_loss_backward: {
@@ -236,14 +228,6 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
       }
       return LowerConstant(torch::lazy::NodeCast<ir::ops::Constant>(
           node, ir::OpKind(at::prim::Constant)));
-    }
-    if (node->op().op == at::aten::addmm) {
-      std::vector<torch::jit::NamedValue> arguments;
-      // The addmm operator in PyTorch takes bias first.
-      arguments.emplace_back(loctx()->GetOutputOp(node->operand(2)));
-      arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
-      arguments.emplace_back(loctx()->GetOutputOp(node->operand(1)));
-      return LowerBuiltin(node, arguments);
     }
     if (node->op().op == at::aten::bernoulli) {
       std::vector<torch::jit::NamedValue> arguments;
@@ -394,22 +378,6 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
         scalarShape, std::move(scalarShape)});
   }
 
-  static lazy_tensors::Shape InferBmm(const torch::lazy::Node* node) {
-    const torch::lazy::Output& tensor1 = node->operand(0);
-    const torch::lazy::Output& tensor2 = node->operand(1);
-    const lazy_tensors::Shape& tensor1_shape = ir::GetShapeFromTsOutput(tensor1);
-    const lazy_tensors::Shape& tensor2_shape = ir::GetShapeFromTsOutput(tensor2);
-    LTC_CHECK_EQ(tensor1_shape.rank(), 3);
-    LTC_CHECK_EQ(tensor2_shape.rank(), 3);
-    lazy_tensors::int64 b = tensor1_shape.dimensions(0);
-    lazy_tensors::int64 n = tensor1_shape.dimensions(1);
-    lazy_tensors::int64 m1 = tensor1_shape.dimensions(2);
-    LTC_CHECK_EQ(tensor2_shape.dimensions(0), b);
-    LTC_CHECK_EQ(tensor2_shape.dimensions(1), m1);
-    lazy_tensors::int64 p = tensor2_shape.dimensions(2);
-    return lazy_tensors::Shape(tensor1_shape.element_type(), {b, n, p});
-  }
-
   static lazy_tensors::Shape InferCat(const ir::ops::Cat* node) {
     const auto& operands = node->operands();
     LTC_CHECK(!operands.empty());
@@ -490,20 +458,6 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
     LTC_CHECK_LT(node->dim(), input_shape.rank());
     output_dimensions[node->dim()] = index_shape.dimensions(0);
     return lazy_tensors::Shape(input_shape.element_type(), output_dimensions);
-  }
-
-  static lazy_tensors::Shape InferMm(const torch::lazy::Node* node) {
-    const torch::lazy::Output& tensor1 = node->operand(0);
-    const torch::lazy::Output& tensor2 = node->operand(1);
-    const lazy_tensors::Shape& tensor1_shape = ir::GetShapeFromTsOutput(tensor1);
-    const lazy_tensors::Shape& tensor2_shape = ir::GetShapeFromTsOutput(tensor2);
-    LTC_CHECK_EQ(tensor1_shape.rank(), 2);
-    LTC_CHECK_EQ(tensor2_shape.rank(), 2);
-    lazy_tensors::int64 n = tensor1_shape.dimensions(0);
-    lazy_tensors::int64 m = tensor1_shape.dimensions(1);
-    LTC_CHECK_EQ(tensor2_shape.dimensions(0), m);
-    lazy_tensors::int64 p = tensor2_shape.dimensions(1);
-    return lazy_tensors::Shape(tensor1_shape.element_type(), {n, p});
   }
 
   static lazy_tensors::Shape InferRepeat(const ir::ops::Repeat* repeat) {

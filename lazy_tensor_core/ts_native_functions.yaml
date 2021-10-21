@@ -7,7 +7,10 @@ full_codegen:
   - _softmax_backward_data
   - addcdiv
   - addcmul
+  - addmm
   - bitwise_and.Tensor
+  - baddbmm
+  - bmm
   - cos
   - clamp
   - dropout
@@ -35,7 +38,6 @@ supported:
   - as_strided_
   - bernoulli
   - bernoulli_.float
-  - bmm
   - cat
   - constant_pad_nd
   - convolution_overrideable
@@ -86,7 +88,6 @@ supported:
   - unsqueeze_
   - sub.Tensor
   - sub.Scalar
-  - addmm
   - view
   - ne.Scalar
   - ne.Tensor

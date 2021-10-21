@@ -145,21 +145,6 @@ NodePtr Ger(const torch::lazy::Value& input, const torch::lazy::Value& other) {
   return node;
 }
 
-NodePtr AddMatMulOp(const torch::lazy::Value& input, const torch::lazy::Value& weight,
-                    const torch::lazy::Value& bias) {
-  NodePtr node = GenericOp(OpKind(at::aten::addmm), {input, weight, bias});
-  std::dynamic_pointer_cast<TsNode>(node)->SetShapeDeferred(
-      [&]() { return compiler::NodeLowering::Get()->Infer(node.get()); });
-  return node;
-}
-
-NodePtr MatMul(const torch::lazy::Value& lhs, const torch::lazy::Value& rhs) {
-  NodePtr node = GenericOp(OpKind(at::aten::matmul), {lhs, rhs});
-  std::dynamic_pointer_cast<TsNode>(node)->SetShapeDeferred(
-      [&]() { return compiler::NodeLowering::Get()->Infer(node.get()); });
-  return node;
-}
-
 NodePtr AdaptiveAvgPool3dBackward(const torch::lazy::Value& grad_output,
                                   const torch::lazy::Value& input) {
   NodePtr node = GenericOp(OpKind(at::aten::adaptive_avg_pool3d_backward),
@@ -362,16 +347,6 @@ NodePtr LogDet(const torch::lazy::Value& input) {
 
 NodePtr Inverse(const torch::lazy::Value& input) {
   return GenericOp(OpKind(at::aten::inverse), {input}, ir::GetShapeFromTsValue(input));
-}
-
-NodePtr BaddBmm(const torch::lazy::Value& lhs, const torch::lazy::Value& rhs, const torch::lazy::Value& bias,
-                const torch::lazy::Value& product_multiplier, const torch::lazy::Value& bias_multiplier) {
-  NodePtr node =
-      GenericOp(OpKind(at::aten::baddbmm),
-                {lhs, rhs, bias, product_multiplier, bias_multiplier});
-  std::dynamic_pointer_cast<TsNode>(node)->SetShapeDeferred(
-      [&]() { return compiler::NodeLowering::Get()->Infer(node.get()); });
-  return node;
 }
 
 NodePtr Lerp(const torch::lazy::Value& start, const torch::lazy::Value& end, const torch::lazy::Value& weight) {
