@@ -453,7 +453,7 @@ class TestFFT(TestCase):
             op(a, s=(10, 10, 10, 10))
 
     @skipCPUIfNoFFT
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)
     def test_hfftn(self, device, dtype):
         # input_ndim, dim
@@ -485,7 +485,7 @@ class TestFFT(TestCase):
             self.assertEqual(expect, actual)
 
     @skipCPUIfNoFFT
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)
     def test_ihfftn(self, device, dtype):
         # input_ndim, dim

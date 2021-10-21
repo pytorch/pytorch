@@ -3024,7 +3024,7 @@ class TestTorchDeviceType(TestCase):
         self.assertIsInstance(torch.inf, float)
         self.assertEqual(torch.inf, math.inf)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64,
             torch.bool, torch.float32, torch.complex64, torch.float64,
             torch.complex128)
@@ -3070,7 +3070,7 @@ class TestTorchDeviceType(TestCase):
                 bytes_to_scalar(v_s_byte[start:end], dtype, device),
                 v[dim0][dim1])
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64,
             torch.bool, torch.float32, torch.complex64, torch.float64,
             torch.complex128, torch.quint8, torch.qint8, torch.qint32,
@@ -3105,7 +3105,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(s, storage_type(l))
 
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(*get_all_dtypes())
     def test_tensor_from_storage(self, device, dtype):
         a = make_tensor((4, 5, 3), device, dtype, low=-9, high=9)
@@ -3122,7 +3122,7 @@ class TestTorchDeviceType(TestCase):
                 error_storage = a.to(error_dtype).storage()
                 torch.tensor(error_storage, device=device, dtype=dtype)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(*get_all_dtypes())
     def test_set_storage(self, device, dtype):
         a = make_tensor((4, 5, 3), device, dtype, low=-9, high=9)
