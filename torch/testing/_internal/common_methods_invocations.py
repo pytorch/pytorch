@@ -4890,16 +4890,25 @@ def sample_inputs_to_sparse(op_info, device, dtype, requires_grad, **kwargs):
 
 def sample_inputs_cross_entropy(op_info, device, dtype, requires_grad, **kwargs):
     batch_size, num_classes = shape = (2, 3)
+    reductions = ("mean", "sum", "none")
 
     input_shape_and_kwargs: List[Tuple[Tuple[int, ...], Dict[str, Any]]] = [
         (shape, dict()),
         ((*shape, 1), dict()),
         ((*shape, 1, 2), dict()),
         ((*shape, 1, 2, 3), dict()),
-        (shape, dict(weight=make_tensor((num_classes,), device=device, dtype=dtype))),
+        *[(shape, dict(reduction=reduction)) for reduction in reductions],
+        *[
+            (
+                shape,
+                dict(
+                    weight=make_tensor((num_classes,), device=device, dtype=dtype),
+                    reduction=reduction,
+                ),
+            )
+            for reduction in reductions
+        ],
         (shape, dict(ignore_index=1)),
-        (shape, dict(reduction="sum")),
-        (shape, dict(reduction="none")),
     ]
 
     sample_inputs = []
