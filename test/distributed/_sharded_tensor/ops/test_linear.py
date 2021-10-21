@@ -12,6 +12,7 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
+    run_tests,
 )
 from torch.testing._internal.distributed._sharded_tensor import (
     ShardedTensorTestBase,
@@ -85,3 +86,6 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
             # Test uneven split.
             self._run_sharded_linear(spec, [5, 19], [19, 11], 1)
             self._run_sharded_linear(spec, [5, 21], [21, 11], 1)
+
+if __name__ == '__main__':
+    run_tests()
