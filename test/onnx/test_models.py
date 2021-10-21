@@ -190,14 +190,14 @@ class TestModels(TestCase):
         qat_resnet50.qconfig = quantization.QConfig(
             activation=quantization.default_fake_quant, weight=quantization.default_fake_quant)
         quantization.prepare_qat(qat_resnet50, inplace=True)
-        qat_resnet50.apply(torch.quantization.enable_observer)
-        qat_resnet50.apply(torch.quantization.enable_fake_quant)
+        qat_resnet50.apply(torch.ao.quantization.enable_observer)
+        qat_resnet50.apply(torch.ao.quantization.enable_fake_quant)
 
         _ = qat_resnet50(x)
         for module in qat_resnet50.modules():
             if isinstance(module, quantization.FakeQuantize):
                 module.calculate_qparams()
-        qat_resnet50.apply(torch.quantization.disable_observer)
+        qat_resnet50.apply(torch.ao.quantization.disable_observer)
 
         self.exportTest(toC(qat_resnet50), toC(x))
 
@@ -211,14 +211,14 @@ class TestModels(TestCase):
             activation=quantization.default_fake_quant,
             weight=quantization.default_per_channel_weight_fake_quant)
         quantization.prepare_qat(qat_resnet50, inplace=True)
-        qat_resnet50.apply(torch.quantization.enable_observer)
-        qat_resnet50.apply(torch.quantization.enable_fake_quant)
+        qat_resnet50.apply(torch.ao.quantization.enable_observer)
+        qat_resnet50.apply(torch.ao.quantization.enable_fake_quant)
 
         _ = qat_resnet50(x)
         for module in qat_resnet50.modules():
             if isinstance(module, quantization.FakeQuantize):
                 module.calculate_qparams()
-        qat_resnet50.apply(torch.quantization.disable_observer)
+        qat_resnet50.apply(torch.ao.quantization.disable_observer)
 
         self.exportTest(toC(qat_resnet50), toC(x))
 

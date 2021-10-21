@@ -6,7 +6,7 @@ import pickle
 import time
 import warnings
 from datetime import timedelta
-from typing import Dict, Optional, Tuple, Union
+from typing import Callable, Dict, Optional, Tuple, Union
 
 import torch
 from torch._C._distributed_c10d import (
@@ -107,6 +107,7 @@ class Backend(object):
     NCCL = "nccl"
     MPI = "mpi"
     TCP = "tcp"
+    _plugins: Dict[str, Callable] = {}
 
     def __new__(cls, name: str):
         if not isinstance(name, string_classes):
@@ -142,7 +143,15 @@ class Backend(object):
         .. note:: This support of 3rd party backend is experimental and subject to change.
 
         """
-        setattr(Backend, name.upper(), func)
+        assert not hasattr(Backend, name.upper()), (
+            f"{name.upper()} c10d backend already exist"
+        )
+        assert name.upper() not in Backend._plugins, (
+            f"{name.upper()} c10d backend creator function already exist"
+        )
+
+        setattr(Backend, name.upper(), name.upper())
+        Backend._plugins[name.upper()] = func
 
 
 # `_backend`, `dist_backend`, and `reduce_op` are here to maintain backward
@@ -739,7 +748,10 @@ def _new_process_group_helper(
             _pg_map[pg] = (Backend.NCCL, store)
             _pg_names[pg] = group_name
         else:
-            pg = getattr(Backend, backend.upper())(
+            assert backend.upper() in Backend._plugins, (
+                f"unknown c10d backend type {backend.upper()}"
+            )
+            pg = Backend._plugins[backend.upper()](
                 prefix_store, rank, world_size, timeout
             )
             _pg_map[pg] = (backend, store)
@@ -1343,7 +1355,7 @@ def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
         work = group.allreduce_coalesced(tensors, opts)
 
     if async_op:
-        return work
+        return work.get_future()
     else:
         work.wait()
 
@@ -1519,8 +1531,11 @@ def _object_to_tensor(obj):
     f = io.BytesIO()
     _pickler(f).dump(obj)
     byte_storage = torch.ByteStorage.from_buffer(f.getvalue())  # type: ignore[attr-defined]
-    byte_tensor = torch.tensor(byte_storage, dtype=torch.uint8)
-    local_size = torch.tensor([byte_tensor.numel()], dtype=torch.long)
+    # Do not replace `torch.ByteTensor` or `torch.LongTensor` with torch.tensor and specifying dtype.
+    # Otherwise, it will casue 100X slowdown.
+    # See: https://github.com/pytorch/pytorch/issues/65696
+    byte_tensor = torch.ByteTensor(byte_storage)
+    local_size = torch.LongTensor([byte_tensor.numel()])
     return byte_tensor, local_size
 
 
@@ -2145,7 +2160,7 @@ def all_gather_coalesced(
         work = group.allgather_coalesced(output_tensor_lists, input_tensor_list)
 
     if async_op:
-        return work
+        return work.get_future()
     else:
         work.wait()
 

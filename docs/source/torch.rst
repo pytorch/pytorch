@@ -54,6 +54,7 @@ Creation Ops
 
     tensor
     sparse_coo_tensor
+    asarray
     as_tensor
     as_strided
     from_numpy
@@ -87,6 +88,7 @@ Indexing, Slicing, Joining, Mutating Ops
     :toctree: generated
     :nosignatures:
 
+    argwhere
     cat
     concat
     conj
@@ -397,6 +399,7 @@ Reduction Ops
     dist
     logsumexp
     mean
+    nanmean
     median
     nanmedian
     mode

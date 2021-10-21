@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/ScalarType.h>
+#include <c10/util/irange.h>
 #include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/TensorUtils.h>
@@ -44,7 +45,7 @@ static inline Tensor cloneBatchedColumnMajor(const Tensor& src) {
   // this will be efficient (no reordering of the data will occur)
   // because the first transpose will make the tensor contiguous,
   // and cloning a contiguous tensor is fast.
-  auto result = src.transpose(-2, -1).clone(at::MemoryFormat::Contiguous);
+  auto result = src.mT().clone(at::MemoryFormat::Contiguous);
   result.transpose_(-2, -1);
   return result;
 }
@@ -169,7 +170,8 @@ void batch_iterator_with_broadcasting(const Tensor& a, const Tensor& b, const fu
     auto* b_batch_idx_ptr = data[0];
     auto* a_batch_idx_ptr = data[1];
 
-    for (int64_t elem = 0; elem < nelems; ++elem) {
+    for (const auto elem : c10::irange(nelems)) {
+      (void)elem; //Suppress unused variable warning
       auto b_curr_linear_batch_idx = *reinterpret_cast<int64_t*>(b_batch_idx_ptr);
       auto a_curr_linear_batch_idx = *reinterpret_cast<int64_t*>(a_batch_idx_ptr);
 
@@ -332,7 +334,7 @@ static inline Tensor _move_to_end(const Tensor& self, IntArrayRef axes) {
   const int64_t ndim = self.ndimension();
   std::vector<int64_t> perm;
 
-  for (int64_t i = 0; i < ndim; i++) {
+  for (const auto i : c10::irange(ndim)) {
     auto it = std::find(a.begin(), a.end(), i);
     if (it == a.end()) {
        perm.push_back(i);
@@ -476,7 +478,7 @@ static inline std::vector<int64_t> create_dim_backshift_permutation(int64_t dim0
     "duplicate or invalid dimensions");
   std::vector<int64_t> permutation(ndim);
   int64_t cur_permuted_dim = 0;
-  for (int64_t dim_ind = 0; dim_ind < ndim; dim_ind++) {
+  for (const auto dim_ind : c10::irange(ndim)) {
     if ((dim_ind != dim0) && (dim_ind != dim1)) {
       permutation[cur_permuted_dim++] = dim_ind;
     }
@@ -493,7 +495,7 @@ static inline std::vector<int64_t> create_dim_backshift_permutation(int64_t dim0
 static inline std::vector<int64_t> create_reverse_permutation(std::vector<int64_t> permutation) {
   int64_t ndim = permutation.size();
   std::vector<int64_t> reverse_permutation(ndim);
-  for (int64_t dim_ind = 0; dim_ind < ndim; dim_ind++) {
+  for (const auto dim_ind : c10::irange(ndim)) {
     reverse_permutation[permutation[dim_ind]] = dim_ind;
   }
   return reverse_permutation;
@@ -560,6 +562,11 @@ static inline void checkLinalgCompatibleDtype(const std::string& fn_name, Scalar
       out_name, " with dtype ", out_type);
 }
 
+static inline void checkNotComplexTolerance(const Tensor& tol, const c10::string_view f_name, const c10::string_view tol_name) {
+  TORCH_CHECK(!at::isComplexType(tol.scalar_type()),
+              f_name, ": ", tol_name, " tensor of complex type is not supported. Got ", tol.scalar_type());
+}
+
 /*
   Two types of 'other' tensors are supported when solving
   a system of linear equations matmul(input, x) = other:
@@ -574,6 +581,26 @@ static inline bool linalg_solve_is_vector_rhs(const Tensor& input, const Tensor&
   auto expected_batched_rhs_shape = IntArrayRef(input.sizes().data(), input.dim() - 1); // input.shape[:-1]
   bool vector_case = other.dim() == 1 || (input.dim() - 1 == other.dim() && other.sizes().equals(expected_batched_rhs_shape));
   return vector_case;
+}
+
+static inline bool is_blas_compatible_column_major_order(const Tensor& input) {
+  IntArrayRef input_strides = input.strides();
+  IntArrayRef input_sizes = input.sizes();
+  auto ndim = input.dim();
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim == 2);
+  auto leading_dimension = input_strides[ndim - 1];
+  auto rows = input_sizes[ndim - 2];
+  return (input_strides[ndim - 2] == 1) && (leading_dimension >= std::max<int64_t>(1, rows));
+}
+
+static inline bool is_blas_compatible_row_major_order(const Tensor& input) {
+  IntArrayRef input_strides = input.strides();
+  IntArrayRef input_sizes = input.sizes();
+  auto ndim = input.dim();
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim == 2);
+  auto leading_dimension = input_strides[ndim - 2];
+  auto cols = input_sizes[ndim - 1];
+  return (input_strides[ndim - 1] == 1) && (leading_dimension >= std::max<int64_t>(1, cols));
 }
 
 }}  // namespace at::native

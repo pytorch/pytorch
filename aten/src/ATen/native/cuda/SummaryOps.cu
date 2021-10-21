@@ -1,9 +1,8 @@
 #include <ATen/ATen.h>
+#include <ATen/NumericUtils.h>
+#include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
-
-#include <THC/THCAtomics.cuh>
-#include <THC/THCNumerics.cuh>
 
 namespace at {
 namespace cuda {
@@ -353,12 +352,10 @@ Tensor _histc_cuda_template(
     maxvalue = maxvalue + 1;
   }
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
   TORCH_CHECK(
-      !(THCNumerics<input_t>::isinf(minvalue) ||
-        THCNumerics<input_t>::isinf(maxvalue) ||
-        THCNumerics<input_t>::isnan(minvalue) ||
-        THCNumerics<input_t>::isnan(maxvalue)),
+      !(at::_isinf(minvalue) || at::_isinf(maxvalue) ||
+        at::_isnan(minvalue) || at::_isnan(maxvalue)),
       "range of [",
       minvalue,
       ", ",

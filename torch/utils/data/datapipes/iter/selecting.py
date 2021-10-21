@@ -1,6 +1,8 @@
 import warnings
-from torch.utils.data import IterDataPipe, functional_datapipe, DataChunk
-from typing import Callable, TypeVar, Iterator, Optional, Tuple, Dict
+from typing import Callable, Dict, Iterator, Optional, Tuple, TypeVar
+
+from torch.utils.data import DataChunk, IterDataPipe, functional_datapipe
+from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper
 
 T_co = TypeVar('T_co', covariant=True)
 
@@ -91,12 +93,26 @@ class FilterIterDataPipe(IterDataPipe[T_co]):
 
     def _returnIfTrue(self, data):
         condition = self.filter_fn(data, *self.args, **self.kwargs)
+
+        if df_wrapper.is_column(condition):
+            # We are operatring on DataFrames filter here
+            result = []
+            for idx, mask in enumerate(df_wrapper.iterate(condition)):
+                if mask:
+                    result.append(df_wrapper.get_item(data, idx))
+            if len(result):
+                return df_wrapper.concat(result)
+            else:
+                return None
+
         if not isinstance(condition, bool):
-            raise ValueError("Boolean output is required for `filter_fn` of FilterIterDataPipe")
+            raise ValueError("Boolean output is required for `filter_fn` of FilterIterDataPipe, got", type(condition))
         if condition:
             return data
 
     def _isNonEmpty(self, data):
+        if df_wrapper.is_dataframe(data):
+            return True
         r = data is not None and \
             not (isinstance(data, list) and len(data) == 0 and self.drop_empty_batches)
         return r

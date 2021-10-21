@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <c10/util/irange.h>
 #include <test/cpp/tensorexpr/test_base.h>
 #include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -416,13 +417,13 @@ TEST_F(Kernel, DISABLED_Shape_Inference) {
     // Check sizes
     CHECK_EQ(o.sizes().size(), ref.sizes().size());
     size_t num_el = 1;
-    for (size_t idx = 0; idx < ref.sizes().size(); idx++) {
+    for (const auto idx : c10::irange(ref.sizes().size())) {
       CHECK_EQ(o.sizes()[idx], ref.sizes()[idx]);
       num_el *= ref.sizes()[idx];
     }
 
     // Check the contents
-    for (size_t i = 0; i < num_el; i++) {
+    for (const auto i : c10::irange(num_el)) {
       CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
     }
   }
@@ -469,13 +470,13 @@ TEST_F(Kernel, DISABLED_Shape_Inference) {
     // Check sizes
     CHECK_EQ(o.sizes().size(), ref.sizes().size());
     size_t num_el = 1;
-    for (size_t idx = 0; idx < ref.sizes().size(); idx++) {
+    for (const auto idx : c10::irange(ref.sizes().size())) {
       CHECK_EQ(o.sizes()[idx], ref.sizes()[idx]);
       num_el *= ref.sizes()[idx];
     }
 
     // Check the contents
-    for (size_t i = 0; i < num_el; i++) {
+    for (const auto i : c10::irange(num_el)) {
       CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
     }
   }
@@ -569,13 +570,13 @@ TEST_F(Kernel, CatInputTypesPromotion) {
     CHECK_EQ(o.sizes().size(), ref.sizes().size());
     CHECK_EQ(o.dtype(), ref.dtype());
     size_t num_el = 1;
-    for (size_t idx = 0; idx < ref.sizes().size(); idx++) {
+    for (const auto idx : c10::irange(ref.sizes().size())) {
       CHECK_EQ(o.sizes()[idx], ref.sizes()[idx]);
       num_el *= ref.sizes()[idx];
     }
 
     // Check the contents
-    for (size_t i = 0; i < num_el; i++) {
+    for (const auto i : c10::irange(num_el)) {
       CHECK_EQ(((double*)o.data_ptr())[i], ((double*)ref.data_ptr())[i]);
     }
   }
@@ -658,13 +659,13 @@ TEST_F(Kernel, CatWoConditionals) {
   CHECK_EQ(o.sizes().size(), ref.sizes().size());
   CHECK_EQ(o.dtype(), ref.dtype());
   size_t num_el = 1;
-  for (size_t idx = 0; idx < ref.sizes().size(); idx++) {
+  for (const auto idx : c10::irange(ref.sizes().size())) {
     CHECK_EQ(o.sizes()[idx], ref.sizes()[idx]);
     num_el *= ref.sizes()[idx];
   }
 
   // Check the contents
-  for (size_t i = 0; i < num_el; i++) {
+  for (const auto i : c10::irange(num_el)) {
     CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
   }
   getCatWoConditionals() = false;
@@ -723,13 +724,13 @@ TEST_F(Kernel, OptimizeConditionals) {
   CHECK_EQ(o.sizes().size(), ref.sizes().size());
   CHECK_EQ(o.dtype(), ref.dtype());
   size_t num_el = 1;
-  for (size_t idx = 0; idx < ref.sizes().size(); idx++) {
+  for (const auto idx : c10::irange(ref.sizes().size())) {
     CHECK_EQ(o.sizes()[idx], ref.sizes()[idx]);
     num_el *= ref.sizes()[idx];
   }
 
   // Check the contents
-  for (size_t i = 0; i < num_el; i++) {
+  for (const auto i : c10::irange(num_el)) {
     CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
   }
   getOptConditionals() = old_opt_conditionals;
@@ -872,9 +873,9 @@ TEST_F(Kernel, SumOneAxis) {
         // Check the IR we produced
         const std::string& verification_pattern =
             R"IR(
-# CHECK: for (int64_t v = 0ll; v <
+# CHECK: for (int64_t
 # CHECK-NEXT: sum
-# CHECK-NEXT: for (int64_t v_1 = 0ll; v_1 <
+# CHECK-NEXT: for (int64_t
 # CHECK-NEXT:   sum)IR";
         torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
@@ -904,7 +905,7 @@ TEST_F(Kernel, SumMultipleAxes) {
 
   // Only iterate over positive values of axes to keep the running time
   // reasonable, since the number of pairs is quadratic.
-  for (int dim1 = 0; dim1 < a.dim(); ++dim1) {
+  for (const auto dim1 : c10::irange(a.dim())) {
     for (int dim2 = dim1 + 1; dim2 < a.dim(); ++dim2) {
       for (bool keepdim : {false, true}) {
         TemplateEnv env;
@@ -933,10 +934,10 @@ TEST_F(Kernel, SumMultipleAxes) {
         // Check the IR we produced
         const std::string& verification_pattern =
             R"IR(
-# CHECK: int64_t v = 0
-# CHECK: int64_t v_1 = 0
-# CHECK: int64_t v_2 = 0
-# CHECK: int64_t v_3 = 0
+# CHECK: for (int64_t
+# CHECK: for (int64_t
+# CHECK: for (int64_t
+# CHECK: for (int64_t
 # CHECK: sum)IR";
         torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
@@ -977,7 +978,7 @@ TEST_F(Kernel, Softmax2D) {
         # CHECK-NEXT: aten_softmax)IR";
 
   for (auto log_softmax : {false, true}) {
-    for (int softmax_dim = 0; softmax_dim < a.dim(); ++softmax_dim) {
+    for (const auto softmax_dim : c10::irange(a.dim())) {
       auto softmax_dim_size = a.sizes()[softmax_dim];
       auto other_dim = (softmax_dim + 1) % a.dim();
       auto ref =
@@ -1046,10 +1047,10 @@ TEST_F(Kernel, Softmax3D) {
         # CHECK-NEXT: aten_softmax)IR";
 
   for (auto log_softmax : {false, true}) {
-    for (int softmax_dim = 0; softmax_dim < a.dim(); ++softmax_dim) {
+    for (const auto softmax_dim : c10::irange(a.dim())) {
       auto softmax_dim_size = a.sizes()[softmax_dim];
       std::vector<int> other_dims;
-      for (int i = 0; i < a.dim(); ++i) {
+      for (const auto i : c10::irange(a.dim())) {
         if (i != softmax_dim) {
           other_dims.push_back(i);
         }
@@ -1127,10 +1128,10 @@ TEST_F(Kernel, Softmax4D) {
         # CHECK-NEXT: aten_softmax)IR";
 
   for (auto log_softmax : {false, true}) {
-    for (int softmax_dim = 0; softmax_dim < a.dim(); ++softmax_dim) {
+    for (const auto softmax_dim : c10::irange(a.dim())) {
       auto softmax_dim_size = a.sizes()[softmax_dim];
       std::vector<int> other_dims;
-      for (int i = 0; i < a.dim(); ++i) {
+      for (const auto i : c10::irange(a.dim())) {
         if (i != softmax_dim) {
           other_dims.push_back(i);
         }
@@ -1180,6 +1181,84 @@ TEST_F(Kernel, Softmax4D) {
   }
 }
 
+TEST_F(Kernel, SignTest) {
+  const auto graph_template = R"IR(
+      graph(%0 : ${dtype}(${size}, strides=[1], device=cpu)):
+        %2 : ${dtype}(${size}, strides=[1]) = aten::sign(%0)
+        return (%2))IR";
+
+  auto run_test = [](const std::string& graph_string, const at::Tensor& input) {
+    auto graph = std::make_shared<Graph>();
+    parseIR(graph_string, &*graph);
+
+    TensorExprKernel k(graph);
+    StmtPtr s = k.getCodeGenStmt();
+
+    std::vector<at::Tensor> inputs = {input};
+    std::vector<IValue> stack = fmap<IValue>(inputs);
+    k.run(stack);
+    auto o = stack[0].toTensor();
+    auto ref = at::sign(input);
+    ASSERT_TRUE(at::allclose(o, ref));
+  };
+  auto common_options = at::TensorOptions()
+                            .layout(at::kStrided)
+                            .device(at::kCPU)
+                            .requires_grad(false);
+  int default_input_size = 100;
+  for (auto scalar_type : {ScalarType::Float, ScalarType::Double}) {
+    at::Tensor corner_case_inputs;
+    TemplateEnv env;
+    auto options = common_options;
+    switch (scalar_type) {
+      case ScalarType::Float: {
+        env.s("dtype", "Float");
+        options = options.dtype(at::kFloat);
+        std::vector<float> input_float = {
+            0.0f,
+            -0.0f,
+            std::numeric_limits<float>::infinity(),
+            -std::numeric_limits<float>::infinity(),
+            std::nanf("1"),
+            -std::nanf("1")};
+        corner_case_inputs = at::from_blob(
+            input_float.data(),
+            {static_cast<long>(input_float.size())},
+            options);
+        auto rand_input = at::rand({default_input_size}, options);
+        auto input = at::cat({rand_input, corner_case_inputs});
+        env.d("size", at::numel(input));
+        const auto graph_string = format(graph_template, env);
+        run_test(graph_string, input);
+        break;
+      }
+      case ScalarType::Double: {
+        env.s("dtype", "Double");
+        options = options.dtype(at::kDouble);
+        std::vector<double> input_double = {
+            0.0,
+            -0.0,
+            std::numeric_limits<double>::infinity(),
+            -std::numeric_limits<double>::infinity(),
+            std::nan("1"),
+            -std::nan("1")};
+        corner_case_inputs = at::from_blob(
+            input_double.data(),
+            {static_cast<long>(input_double.size())},
+            options);
+        auto rand_input = at::rand({default_input_size}, options);
+        auto input = at::cat({rand_input, corner_case_inputs});
+        env.d("size", at::numel(input));
+        const auto graph_string = format(graph_template, env);
+        run_test(graph_string, input);
+        break;
+      }
+      default:
+        throw unsupported_dtype();
+    }
+  }
+}
+
 TEST_F(Kernel, InlineProducerIntoReduction) {
   // Inline producer (mul) into reduction (sum).
   const auto graph_string = R"IR(
@@ -1201,8 +1280,8 @@ TEST_F(Kernel, InlineProducerIntoReduction) {
   // We should have only one loop in the end.
   const std::string& verification_pattern =
       R"IR(
-        # CHECK: for (int64_t v = 0ll; v < 5
-        # CHECK-NEXT: for (int64_t v_1 = 0ll; v_1 < 3
+        # CHECK: for (int64_t i_1 = 0ll; i_1 < 5
+        # CHECK-NEXT: for (int64_t j_1 = 0ll; j_1 < 3
         # CHECK-NEXT:   sum
         # CHECK-NOT: for)IR";
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
@@ -1240,11 +1319,11 @@ TEST_F(Kernel, InlineReductionIntoConsumer) {
   // We should have two loops in the end.
   const std::string& verification_pattern =
       R"IR(
-        # CHECK: for (int64_t v = 0ll; v < 5
-        # CHECK-NEXT: for (int64_t v_1 = 0ll; v_1 < 3
+        # CHECK: for (int64_t i_1 = 0ll; i_1 < 5
+        # CHECK-NEXT: for (int64_t j_1 = 0ll; j_1 < 3
         # CHECK-NEXT:   sum
-        # CHECK: for (int64_t v_2 = 0ll; v_2 < 5
-        # CHECK-NEXT: for (int64_t v_3 = 0ll; v_3 < 3
+        # CHECK: for (int64_t i_2 = 0ll; i_2 < 5
+        # CHECK-NEXT: for (int64_t j_2 = 0ll; j_2 < 3
         # CHECK-NEXT:   aten_mul
         # CHECK-NOT: for)IR";
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
