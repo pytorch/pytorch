@@ -4158,35 +4158,37 @@ def sample_inputs_linalg_solve_triangular(op_info, device, dtype, requires_grad=
     bs = (1, 2, 0)
     ns = (3, 0)
     ks = (1, 3, 0)
-    grad = (False,) if not requires_grad else (True, False)
 
     def gen_inputs():
-        for b, n, k, grad_A, grad_B in product(bs, ns, ks, grad, grad):
-            # If requires_grad, at least one input needs to require grad
-            if requires_grad and not grad_A and not grad_B:
-                continue
-
-            for left, upper, uni in product((True, False), repeat=3):
-                with torch.no_grad():
-                    if b == 1:
-                        A = make_arg((n, n)) if left else make_arg((k, k))
-                        B = make_arg((n, k))
-                    else:
-                        A = make_arg((b, n, n)) if left else make_arg((b, k, k))
-                        B = make_arg((b, n, k))
-                    if uni:
-                        # Not really necessary, but writing it for consistency
-                        A.diagonal(0, -2, -1).fill_(1.)
-                    else:
-                        d = A.diagonal(0, -2, -1)
-                        d[d.abs() < 1e-6] = 1.
-                    if upper:
-                        A.triu_()
-                    else:
-                        A.tril_()
-                A.requires_grad_(grad_A)
-                B.requires_grad_(grad_B)
-                yield SampleInput(A, args=(B,), kwargs={"upper": upper, "left": left, "unitriangular": uni})
+        for b, n, k left, upper, uni in product(bs, ns, ks, product((True, False), repeat=3)):
+            with torch.no_grad():
+                if b == 1:
+                    A = make_arg((n, n)) if left else make_arg((k, k))
+                    B = make_arg((n, k))
+                else:
+                    A = make_arg((b, n, n)) if left else make_arg((b, k, k))
+                    B = make_arg((b, n, k))
+                if uni:
+                    # Not really necessary, but writing it for consistency
+                    A.diagonal(0, -2, -1).fill_(1.)
+                else:
+                    d = A.diagonal(0, -2, -1)
+                    d[d.abs() < 1e-6] = 1.
+                if upper:
+                    A.triu_()
+                else:
+                    A.tril_()
+            kwargs = {"upper": upper, "left": left, "unitriangular": uni}
+            if requires_grad:
+                for grad_A, grad_B in product((True, False), repeat=2):
+                    # Either A or B needs to have a gradient
+                    if not grad_A and not grad_B
+                        continue
+                    A.requires_grad_(grad_A)
+                    B.requires_grad_(grad_B)
+                    yield SampleInput(A, args=(B,), kwargs=kwargs)
+            else:
+                yield SampleInput(A, args=(B,), kwargs=kwargs)
 
     return list(gen_inputs())
 
