@@ -16345,6 +16345,19 @@ class TestNNDeviceType(NNTestCase):
             with torch.backends.cudnn.flags(enabled=False):
                 self._test_batchnorm_grad(device)
 
+    @onlyCUDA
+    def test_layernorm_half_precision(self):
+       width = 128
+       input = torch.rand((1,5,width))*0.1
+       input = input.cuda().half()
+       normalized_shape = (width,)
+       weight = torch.ones(width).cuda().half()
+       bias = torch.zeros(width).cuda().half()
+       eps = 1e-5
+
+       output_fp16 = torch.layer_norm(input, normalized_shape, weight, bias, eps)
+       output_fp32 = torch.layer_norm(input.float(), normalized_shape, weight.float(), bias.float(), eps).half()
+       torch.testing.assert_allclose(output_fp16, output_fp32, atol=0, rtol=0) 
 
     def test_hardsigmoid_grad(self, device):
         inputs = (torch.randn(4, 16, 16, device=device) - 0.5) * 10
