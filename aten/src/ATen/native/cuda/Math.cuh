@@ -314,21 +314,20 @@ static inline C10_HOST_DEVICE scalar_t calc_i0(scalar_t _x) {
 
 template <typename scalar_t>
 static inline C10_HOST_DEVICE scalar_t calc_i0e(scalar_t _x) {
-  // Upcast input for numerical accuracy purposes
-  // Needed for accurate results if input is bfloat16 or float16
   static_assert(!std::is_same<scalar_t, Half>() && !std::is_same<scalar_t, BFloat16>(), "don't instantiate with low precision type");
-  if (_x <= scalar_t{8.0}) {
+  scalar_t x = ::abs(_x)
+  if (x <= scalar_t{8.0}) {
     auto coeff_pair = chebyshev_coefficients_i0e_A<scalar_t>();
     auto A = std::get<0>(coeff_pair);
     auto len = std::get<1>(coeff_pair);
-    scalar_t y = (_x / scalar_t{2.0}) - scalar_t{2.0};
+    scalar_t y = (x / scalar_t{2.0}) - scalar_t{2.0};
     return (chbevl(y, A, len));
   }
 
   auto coeff_pair = chebyshev_coefficients_i0e_B<scalar_t>();
   auto B = std::get<0>(coeff_pair);
   auto len = std::get<1>(coeff_pair);
-  return (chbevl(scalar_t{32.0} / _x - scalar_t{2.0}, B, len) / ::sqrt(_x));
+  return (chbevl(scalar_t{32.0} / x - scalar_t{2.0}, B, len) / ::sqrt(x));
 }
 
 template <typename scalar_t>
