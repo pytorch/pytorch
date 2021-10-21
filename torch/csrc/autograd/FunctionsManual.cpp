@@ -3711,7 +3711,7 @@ Tensor apply_simple_transformation(
   // We could enable mv for inputs which are not batched, but it is not done to eliminate
   // the code duplication.
 
-  // returns (I - t u v^H) K
+  // returns (I - t u v^H) K or -t u v^H K
   if (left) {
     if (modify_K_in_place) {
       auto v = u_full.narrow(-2, k, m - k);
@@ -3724,7 +3724,7 @@ Tensor apply_simple_transformation(
       return condition_with_I ? K - transformation : -transformation;
     }
   }
-  // returns K (I - t v v^H)
+  // returns K (I - t u v^H) or -K t u v^H
   else {
     if (modify_K_in_place) {
       auto v = u_full.narrow(-2, k, m - k);
