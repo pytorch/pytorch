@@ -14432,53 +14432,6 @@ class TestNNDeviceType(NNTestCase):
         empty_tensor = torch.empty((2, 0, 1), device=device, dtype=dtype)
         check(empty_tensor, (1, None, 0, 1, False, False), empty_tensor)
 
-    @onlyCPU
-    @dtypes(torch.float, torch.double)
-    def test_max_pool1d(self, device, dtype):
-        # FIXME For now compare against max_pool1d with indices
-        def check(x, *args, **kwargs):
-            model = torch.nn.MaxPool1d(*args, **kwargs)
-            ref_model = torch.nn.MaxPool1d(*args, **kwargs, return_indices=True)
-            self.assertEqual(model(x), ref_model(x)[0])
-
-        sizes = [random.sample(range(8, 128), 3) for _ in range(3)]
-        kernel_sizes = random.sample(range(1, 5), 3)
-        strides = random.sample(range(1, 5), 3)
-        dilations = random.sample(range(1, 5), 3)
-        ceil_modes = [True, False]
-
-        for size, kernel_size, stride, dilation, ceil_mode in \
-                itertools.product(sizes, kernel_sizes, strides, dilations, ceil_modes):
-            padding = random.sample(range(0, math.floor(kernel_size / 2) + 1), 1)
-            check(torch.randn(size, device=device, dtype=dtype),
-                  kernel_size, stride, padding, dilation, ceil_mode=ceil_mode)
-
-        # Non-contiguous test
-        tensor = torch.randn(5, 151, 33, device=device, dtype=dtype)[::2, ::3, ::2]
-        check(tensor, 3, 2, 1, 2, ceil_mode=True)
-        check(tensor.transpose(1, 2), 3, 2, 1, 2, ceil_mode=True)
-
-    @onlyCUDA
-    def test_max_pool2d(self, device):
-        def helper(n, c, h, w, ks):
-            x = torch.randn(n, c, h, w, device='cuda', dtype=torch.float, requires_grad=True)
-            ref_x = x.detach().clone().cpu().requires_grad_()
-
-            pool = torch.nn.MaxPool2d(kernel_size=ks)
-
-            y = pool(x)
-            ref_y = pool(ref_x)
-
-            y.sum().backward()
-            ref_y.sum().backward()
-
-            self.assertEqual(y, ref_y)
-            self.assertEqual(x.grad, ref_x.grad)
-
-        helper(2, 8, 4, 4, ks=2)
-        helper(1, 100000, 32, 32, ks=4)
-        helper(1, 100000, 1, 4, ks=(1, 4))  # test for max_pool1d
-
     @onlyOnCPUAndCUDA
     @dtypes(torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
@@ -14514,31 +14467,6 @@ class TestNNDeviceType(NNTestCase):
         helper(4, 8, 7, 7, 3, stride=1)
         helper(10, 512, 31, 31, 3, stride=2)
         helper(1, 129, 8, 8, 3, stride=2)
-
-    @onlyCUDA
-    def test_max_pool2d_indices(self, device):
-        def helper(n, c, h, w, ks):
-            if n is None:
-                x = torch.randn(c, h, w, device='cuda', dtype=torch.float, requires_grad=True)
-            else:
-                x = torch.randn(n, c, h, w, device='cuda', dtype=torch.float, requires_grad=True)
-
-            ref_x = x.detach().clone().cpu().requires_grad_()
-
-            pool = torch.nn.MaxPool2d(kernel_size=ks, return_indices=True)
-
-            y, idx = pool(x)
-            ref_y, ref_idx = pool(ref_x)
-
-            y.sum().backward()
-            ref_y.sum().backward()
-
-            self.assertEqual(y, ref_y)
-            self.assertEqual(idx, ref_idx)  # assertEqual implicitly compares shape for tensors
-            self.assertEqual(x.grad, ref_x.grad)
-
-        helper(2, 8, 4, 4, ks=2)
-        helper(None, 3, 50, 50, ks=5)
 
     def test_upsamplingNearest2d(self, device):
         for memory_format in [torch.contiguous_format, torch.channels_last]:
