@@ -1,31 +1,35 @@
 # Owner(s): ["oncall: distributed"]
 
 import sys
-import torch
 
+import torch
 from torch.distributed._sharded_tensor import (
     shard_parameter,
-)
-from torch.distributed._sharding_spec import (
-    ChunkShardingSpec,
 )
 from torch.testing._internal.common_distributed import (
     requires_nccl,
     skip_if_lt_x_gpu,
 )
+from torch.testing._internal.common_utils import (
+    TEST_WITH_DEV_DBG_ASAN,
+)
 from torch.testing._internal.distributed._sharded_tensor import (
     ShardedTensorTestBase,
     with_comms,
 )
-from torch.testing._internal.common_utils import (
-    TEST_WITH_DEV_DBG_ASAN,
+from torch.testing._internal.distributed._sharded_tensor._test_ops_common import (
+    generate_chunk_sharding_specs_for_test,
 )
 
 if TEST_WITH_DEV_DBG_ASAN:
-    print("Skip dev-asan as torch + multiprocessing spawn have known issues", file=sys.stderr)
+    print(
+        "Skip dev-asan as torch + multiprocessing spawn have known issues",
+        file=sys.stderr,
+    )
     sys.exit(0)
 
-class TestShardedTensorOps(ShardedTensorTestBase):
+
+class TestShardedTensorOpsLinear(ShardedTensorTestBase):
     def _run_sharded_linear(self, spec, input_size, linear_size, sharded_dim):
         # Use same seed.
         torch.manual_seed(0)
@@ -64,68 +68,20 @@ class TestShardedTensorOps(ShardedTensorTestBase):
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
     def test_sharded_linear_colwise(self):
-        spec = ChunkShardingSpec(
-            dim=0,
-            placements=[
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
-            ],
-        )
-
-        self._run_sharded_linear(spec, [5, 17], [17, 12], 0)
-        self._run_sharded_linear(spec, [5, 21], [21, 11], 0)
-        self._run_sharded_linear(spec, [5, 23], [23, 13], 0)
-        self._run_sharded_linear(spec, [5, 15], [15, 14], 0)
-
-        # Test different ordering.
-        spec = ChunkShardingSpec(
-            dim=0,
-            placements=[
-                "rank:1/cuda:1",
-                "rank:0/cuda:0",
-                "rank:3/cuda:3",
-                "rank:2/cuda:2",
-            ],
-        )
-
-        self._run_sharded_linear(spec, [5, 17], [17, 12], 0)
-        self._run_sharded_linear(spec, [5, 21], [21, 11], 0)
-        self._run_sharded_linear(spec, [5, 23], [23, 13], 0)
-        self._run_sharded_linear(spec, [5, 15], [15, 14], 0)
+        for spec in generate_chunk_sharding_specs_for_test(0):
+            self._run_sharded_linear(spec, [5, 17], [17, 12], 0)
+            self._run_sharded_linear(spec, [5, 21], [21, 11], 0)
+            self._run_sharded_linear(spec, [5, 23], [23, 13], 0)
+            self._run_sharded_linear(spec, [5, 15], [15, 14], 0)
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
     def test_sharded_linear_rowwise(self):
-        spec = ChunkShardingSpec(
-            dim=1,
-            placements=[
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
-            ],
-        )
+        for spec in generate_chunk_sharding_specs_for_test(1):
+            # Test even split.
+            self._run_sharded_linear(spec, [5, 16], [16, 11], 1)
 
-        # Test even split.
-        self._run_sharded_linear(spec, [5, 16], [16, 11], 1)
-
-        # Test uneven split.
-        self._run_sharded_linear(spec, [5, 19], [19, 11], 1)
-        self._run_sharded_linear(spec, [5, 21], [21, 11], 1)
-
-        # Test different ordering.
-        spec = ChunkShardingSpec(
-            dim=1,
-            placements=[
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
-            ],
-        )
-        self._run_sharded_linear(spec, [5, 16], [16, 11], 1)
-        self._run_sharded_linear(spec, [5, 19], [19, 11], 1)
-        self._run_sharded_linear(spec, [5, 21], [21, 11], 1)
+            # Test uneven split.
+            self._run_sharded_linear(spec, [5, 19], [19, 11], 1)
+            self._run_sharded_linear(spec, [5, 21], [21, 11], 1)
