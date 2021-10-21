@@ -6,7 +6,7 @@ import pickle
 import time
 import warnings
 from datetime import timedelta
-from typing import Dict, Optional, Tuple, Union
+from typing import Callable, Dict, Optional, Tuple, Union
 
 import torch
 from torch._C._distributed_c10d import (
@@ -107,7 +107,7 @@ class Backend(object):
     NCCL = "nccl"
     MPI = "mpi"
     TCP = "tcp"
-    _plugins = {}
+    _plugins: Dict[str, Callable] = {}
 
     def __new__(cls, name: str):
         if not isinstance(name, string_classes):
