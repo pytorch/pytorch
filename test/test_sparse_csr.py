@@ -12,7 +12,6 @@ from torch.testing._internal.common_device_type import \
      precisionOverride, skipMeta, skipCUDAIf)
 from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing._internal.common_dtype import floating_types, get_all_dtypes
-from test_linalg import _test_addmm_addmv
 from test_sparse import CUSPARSE_SPMM_COMPLEX128_SUPPORTED
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
@@ -30,6 +29,51 @@ def _check_cusparse_spgemm_available():
     version = _get_torch_cuda_version()
     min_supported_version = (11, 0)
     return version >= min_supported_version
+
+
+# This should be just an import from test_linalg instead of code duplication
+# but https://github.com/pytorch/pytorch/pull/63511#discussion_r733989701
+def _test_addmm_addmv(test_case, f, t, m, v, *, alpha=None, beta=None, transpose_out=False, layout=torch.strided, all_sparse=False):
+    """
+    Unified test for checking `f(t, m, v, alpha=alpha, beta=beta)` computation,
+    where f is `torch.addmv` or `torch.addmm`.
+    `transpose_out` controls whether the out argument is in column-major order.
+    `layout` controls whether `m` is converted to specified layout or not.
+    Custom behaviour is implemented only for torch.sparse_csr layout.
+    """
+    dtype = t.dtype
+    numpy_dtype = dtype
+    if dtype in {torch.bfloat16}:
+        numpy_dtype = torch.float
+    if dtype.is_complex:
+        alpha = 0.9 + 0.3j if alpha is None else alpha
+        beta = 0.5 + 0.6j if beta is None else beta
+    else:
+        alpha = 1.2 if alpha is None else alpha
+        beta = 0.8 if beta is None else beta
+
+    def convert_layout(mat):
+        if layout == torch.sparse_csr:
+            return mat.to_sparse_csr()
+        else:
+            assert mat.layout == layout
+            return mat
+
+    if all_sparse:
+        res1 = f(*map(convert_layout, (t, m, v)), alpha=alpha, beta=beta)
+        res1 = res1.to_dense()
+    else:
+        res1 = f(t, convert_layout(m), v, alpha=alpha, beta=beta)
+    res2 = torch.full_like(res1, float('nan'))
+    if transpose_out:
+        res2 = res2.t().clone(memory_format=torch.contiguous_format).t()
+    f(t, convert_layout(m), v, alpha=alpha, beta=beta, out=res2)
+    res3 = alpha * (m.to(numpy_dtype).cpu().numpy() @ v.to(numpy_dtype).cpu().numpy())
+    if beta != 0:
+        res3 += (beta * t).to(numpy_dtype).cpu().numpy()
+    res3 = torch.from_numpy(res3).to(dtype)
+    test_case.assertEqual(res1, res2)
+    test_case.assertEqual(res1, res3)
 
 
 class TestSparseCSRSampler(TestCase):
