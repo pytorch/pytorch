@@ -525,6 +525,7 @@ Other Operations
     tril_indices
     triu
     triu_indices
+    unravel_index
     vander
     view_as_real
     view_as_complex
