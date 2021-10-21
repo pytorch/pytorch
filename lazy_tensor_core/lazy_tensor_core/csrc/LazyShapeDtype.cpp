@@ -208,6 +208,14 @@ std::vector<c10::ScalarType> compute_dtype_trace(const at::Tensor& self) {
   return {self.scalar_type()};
 }
 
+std::vector<std::vector<int64_t>> compute_shape_sort(const at::Tensor & self, int64_t dim, bool descending) {
+  return {self.sizes().vec(), self.sizes().vec()};
+}
+
+std::vector<c10::ScalarType> compute_dtype_sort(const at::Tensor & self, int64_t dim, bool descending) {
+  return {self.scalar_type(), c10::ScalarType::Long};
+}
+
 std::vector<std::vector<int64_t>> compute_shape_smooth_l1_loss(
     const at::Tensor& self, const at::Tensor& target, int64_t reduction,
     double beta) {
@@ -234,13 +242,13 @@ std::vector<std::vector<int64_t>> compute_shape_smooth_l1_loss_backward(
   // shape may vary following the logic of the forward output, the output of
   // this kernel should have fixed shapes matching the inputs to the forward
   // kernel.
-  return {self.sizes().vec(), target.sizes().vec()};
+  return {self.sizes().vec()};
 }
 
 std::vector<c10::ScalarType> compute_dtype_smooth_l1_loss_backward(
     const at::Tensor& grad_output, const at::Tensor& self,
     const at::Tensor& target, int64_t reduction, double beta) {
-  return {self.scalar_type(), target.scalar_type()};
+  return {self.scalar_type()};
 }
 
 std::vector<std::vector<int64_t>> compute_shape_log_sigmoid_forward(const at::Tensor& self) {
