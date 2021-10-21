@@ -6772,10 +6772,15 @@ class TestAutogradFunctional(TestCase):
     def test_jacobian_create_graph_vectorize(self):
         self._test_jacobian_create_graph(vectorize=True)
 
-    def _check_jacobian_vectorize_correctness(self, f, inputs):
+    def _check_jacobian_vectorize_correctness(self, f, inputs, test_forward_ad=True):
         expected = autogradF.jacobian(f, inputs, vectorize=False)
-        result = autogradF.jacobian(f, inputs, vectorize=True)
-        self.assertEqual(result, expected)
+        result_backward_mode = autogradF.jacobian(f, inputs, vectorize=True)
+        self.assertEqual(result_backward_mode, expected)
+
+        if test_forward_ad:
+            result_forward_mode = autogradF.jacobian(f, inputs, forward_ad=True, vectorize=True)
+            print(result_forward_mode, expected)
+            self.assertEqual(result_forward_mode, expected)
 
     def test_jacobian_vectorize_correctness_simple(self):
         def f(x):
@@ -6847,12 +6852,17 @@ class TestAutogradFunctional(TestCase):
 
         x = torch.randn(3)
         y = torch.randn(3)
-        self._check_jacobian_vectorize_correctness(f, (x, y))
+        # The Jacobin computed using forward AD has the dtype of the output
+        # but the Jacobian computed with reverse AD has dtype of input
+        self._check_jacobian_vectorize_correctness(f, (x, y), test_forward_ad=False)
 
     def _check_hessian_vectorize_correctness(self, f, inputs):
         expected = autogradF.hessian(f, inputs, vectorize=False)
         result = autogradF.hessian(f, inputs, vectorize=True)
         self.assertEqual(result, expected)
+
+        result_forward_mode = autogradF.hessian(f, inputs, forward_ad=True, vectorize=True)
+        self.assertEqual(result_forward_mode, expected)
 
     def test_hessian_vectorize_correctness_simple(self):
         def f(x):
@@ -6881,7 +6891,7 @@ class TestAutogradFunctional(TestCase):
 
         # output unrelated to all inputs
         def f(x, y):
-            return torch.randn([])
+            return torch.ones([])
 
         x = torch.randn(2)
         y = torch.randn(3)
