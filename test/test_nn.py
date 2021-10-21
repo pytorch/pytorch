@@ -13627,6 +13627,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(inp1.grad, torch.zeros_like(inp1))
         self.assertEqual(inp2.grad, torch.zeros_like(inp2))
 
+    @expectedFailureMeta  # RuntimeError: cannot reshape tensor of 0 elements into shape [1, 0, -1]
     @onlyNativeDeviceTypes
     def test_TransformerEncoderLayer_empty(self, device):
         for batch_first, input_shape in [(True, (0, 10, 512)),
@@ -13635,6 +13636,7 @@ class TestNNDeviceType(NNTestCase):
             encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8, batch_first=batch_first).to(device)
             self._test_module_empty_input(encoder_layer, input, check_size=False)
 
+    @expectedFailureMeta  # RuntimeError: cannot reshape tensor of 0 elements into shape [1, 0, -1]
     @onlyNativeDeviceTypes
     def test_TransformerEncoder_empty(self, device):
         for batch_first, input_shape in [(True, (0, 10, 512)),
@@ -13644,6 +13646,7 @@ class TestNNDeviceType(NNTestCase):
             transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=6).to(device)
             self._test_module_empty_input(transformer_encoder, input, check_size=False)
 
+    @expectedFailureMeta  # RuntimeError: cannot reshape tensor of 0 elements into shape [1, 0, -1]
     @onlyNativeDeviceTypes
     def test_TransformerDecoderLayer_empty(self, device):
         for batch_first, memory_shape, tgt_shape in [(True, (0, 10, 512), (0, 20, 512)),
@@ -13653,6 +13656,7 @@ class TestNNDeviceType(NNTestCase):
             decoder_layer = nn.TransformerDecoderLayer(d_model=512, nhead=8, batch_first=batch_first).to(device)
             self._test_module_empty_inputs(decoder_layer, [tgt, memory])
 
+    @expectedFailureMeta  # RuntimeError: cannot reshape tensor of 0 elements into shape [1, 0, -1]
     @onlyNativeDeviceTypes
     def test_TransformerDecoder_empty(self, device):
         for batch_first, memory_shape, tgt_shape in [(True, (0, 10, 512), (0, 20, 512)),
@@ -13663,6 +13667,7 @@ class TestNNDeviceType(NNTestCase):
             transformer_decoder = nn.TransformerDecoder(decoder_layer, num_layers=6).to(device)
             self._test_module_empty_inputs(transformer_decoder, [tgt, memory])
 
+    @expectedFailureMeta  # RuntimeError: cannot reshape tensor of 0 elements into shape [1, 0, -1]
     @onlyNativeDeviceTypes
     def test_Transformer_empty(self, device):
         for batch_first, src_shape, tgt_shape in [(True, (10, 0, 512), (20, 0, 512))]:
