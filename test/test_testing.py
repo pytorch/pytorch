@@ -603,7 +603,6 @@ if __name__ == '__main__':
             self.assertTrue(set(dtypes) == set(dynamic_dtypes))
             self.assertTrue(set(dtypes) == set(dynamic_dispatch.dispatch_fn()))
 
-
 instantiate_device_type_tests(TestTesting, globals())
 
 
