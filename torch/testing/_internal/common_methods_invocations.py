@@ -6028,6 +6028,33 @@ def sample_inputs_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
 
     return list(gen_inputs())
 
+def sample_inputs_argwhere(op_info, device, dtype, requires_grad, **kwargs):
+    def generator():
+        yield SampleInput(torch.tensor([1, 0, 2, 0], dtype=dtype, device=device, requires_grad=requires_grad))
+
+        mask = torch.tensor([[0, 1, 0, 1, 0],
+                             [1, 1, 1, 1, 0],
+                             [0, 0, 0, 1, 0],
+                             [1, 0, 1, 1, 0],
+                             [1, 0, 0, 1, 0]], dtype=torch.bool, device=device)
+        t = make_tensor((S, S), dtype=dtype, device=device, requires_grad=requires_grad)
+        with torch.no_grad():
+            t[mask] = 0
+        yield SampleInput(t)
+
+        t = make_tensor((S, S), dtype=dtype, device=device, requires_grad=requires_grad, noncontiguous=True)
+        with torch.no_grad():
+            t[mask] = 0
+        yield SampleInput(t)
+
+        t = make_tensor((S, 0), dtype=dtype, device=device, requires_grad=requires_grad)
+        yield SampleInput(t)
+
+        yield SampleInput(torch.zeros((S,), dtype=dtype, device=device, requires_grad=requires_grad))
+        yield SampleInput(make_tensor((), dtype=dtype, device=device, requires_grad=requires_grad))
+
+    return list(generator())
+
 def sample_inputs_pairwise_distance(op_info, device, dtype, requires_grad, **kwargs):
     make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -10653,6 +10680,14 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_grid_sample,
         supports_gradgrad=False,
         gradcheck_nondet_tol=1e-15,
+    ),
+    OpInfo(
+        "argwhere",
+        ref=np.argwhere,
+        dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+        supports_out=False,
+        supports_autograd=False,
+        sample_inputs_func=sample_inputs_argwhere,
     ),
     ReductionOpInfo(
         'all',
