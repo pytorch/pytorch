@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: distributed"]
 
-import sys
 from enum import Enum
 
 import torch
@@ -120,8 +119,12 @@ class TestFreezingWeights(FSDPTest):
             optimizer.zero_grad()
             fake_loss.backward()
             if freezing_method == FreezingMethod.GradToNone:
-                for param in model.module.module.trunk.parameters():
-                    param.grad = None
+                if with_fsdp:
+                    for param in model.module.module.trunk.parameters():
+                        param.grad = None
+                else:
+                    for param in model.module.trunk.parameters():
+                        param.grad = None
             optimizer.step()
 
         if with_fsdp:
@@ -140,7 +143,7 @@ class TestFreezingWeights(FSDPTest):
     ):
         # DDP
         ddp_state = self._dist_train(
-            with_nested_trunk, freezing_method, freeze_after_wrap_fsdp, with_fsdp=True
+            with_nested_trunk, freezing_method, freeze_after_wrap_fsdp, with_fsdp=False
         )
 
         # FSDP
