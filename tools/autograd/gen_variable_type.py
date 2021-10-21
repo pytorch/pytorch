@@ -519,8 +519,6 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
 
     requires_derivative = (not undifferentiable) and (len(differentiable_inputs) > 0) and (len(differentiable_outputs) > 0)
 
-    requires_fw_derivatives = not undifferentiable and len(fw_derivatives) > 0
-
     if info is not None and info.has_derivatives and not requires_derivative:
         raise RuntimeError(f'ERROR: derivative ignored for {name} -- specified an autograd function without derivative')
 
@@ -978,10 +976,11 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
     if is_out_fn:
         body.append(emit_forbid_fw_derivatives(is_out_fn=True))
     else:
-        if requires_fw_derivatives:
+        if requires_derivative:
             body.extend(emit_fw_derivatives())
-        else:
-            body.append(emit_forbid_fw_derivatives())
+            if len(fw_derivatives) == 0:
+                # TODO handle the case when len > 0 and len < num_diff_outputs
+                body.append(emit_forbid_fw_derivatives())
 
     if requires_derivative:
         # Save only after the forward AD has been set up
