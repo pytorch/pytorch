@@ -27,7 +27,7 @@
  * notice and stop generating declarations for these shape formulae, so we'll need to
  * manually clean up the unused functions in this file, or somehow automate that.
  *
- * <Link about structured kernels>
+ * https://dev-discuss.pytorch.org/t/slides-from-structured-kernel-presentation/179
  *
  * 3. How to figure out the shape/dtype
  * ------------------------------------
