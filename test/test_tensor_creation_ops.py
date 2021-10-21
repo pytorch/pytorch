@@ -231,6 +231,7 @@ class TestTensorCreation(TestCase):
         self.assertEqual(expected, t.roll(1, 0))
 
     @slowTest
+    @skipMeta
     def test_triu_tril(self, device):
         def gen_mask(shape, diagonal, device, upper):
             mask = torch.zeros(*shape[-2:]).byte()
@@ -1210,6 +1211,7 @@ class TestTensorCreation(TestCase):
 
     # TODO: update to work on CUDA, too
     @onlyCPU
+    @skipMeta
     def test_trilu_indices(self, device):
         for test_args in tri_tests_args:
             _compare_trilu_indices(self, *test_args)

@@ -6100,12 +6100,14 @@
   dispatch:
     CPU: tril_cpu_
     CUDA: tril_cuda_
+    Meta: tril_meta_
 
 - func: triu_(Tensor(a!) self, int diagonal=0) -> Tensor(a!)
   variants: method
   dispatch:
     CPU: triu_cpu_
     CUDA: triu_cuda_
+    Meta: triu_meta_
 
 - func: digamma_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -6220,7 +6222,7 @@
 
 - func: triu.out(Tensor self, int diagonal=0, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: triu_cpu_out
+    CPU, Meta: triu_out
     CUDA: triu_cuda_out
 
 - func: triu(Tensor self, int diagonal=0) -> Tensor
@@ -6230,7 +6232,7 @@
 
 - func: tril.out(Tensor self, int diagonal=0, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: tril_cpu_out
+    CPU, Meta: tril_out
     CUDA: tril_cuda_out
 
 - func: tril(Tensor self, int diagonal=0) -> Tensor

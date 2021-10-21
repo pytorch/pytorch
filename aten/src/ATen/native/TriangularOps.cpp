@@ -107,9 +107,13 @@ Tensor& tril_cpu_(Tensor &self, int64_t k) {
   return self;
 }
 
-Tensor& tril_cpu_out(const Tensor& self, int64_t k, Tensor &result) {
+Tensor& tril_meta_(Tensor &self, int64_t k) {
+  return self;
+}
+
+Tensor& tril_out(const Tensor& self, int64_t k, Tensor &result) {
   at::native::resize_output(result, self.sizes());
-  if (self.numel() == 0) {
+  if (self.numel() == 0 || result.device() == kMeta) {
     return result;
   }
   Tensor self_c;
@@ -142,9 +146,13 @@ Tensor& triu_cpu_(Tensor &self, int64_t k) {
   return self;
 }
 
-Tensor& triu_cpu_out(const Tensor& self, int64_t k, Tensor &result) {
+Tensor& triu_meta_(Tensor &self, int64_t k) {
+  return self;
+}
+
+Tensor& triu_out(const Tensor& self, int64_t k, Tensor &result) {
   at::native::resize_output(result, self.sizes());
-  if (self.numel() == 0) {
+  if (self.numel() == 0 || result.device() == kMeta) {
     return result;
   }
   Tensor self_c;
