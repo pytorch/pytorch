@@ -83,9 +83,9 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
             # Test even split.
             self._run_sharded_linear(spec, [5, 16], [16, 11], 1)
 
-        # Test uneven split.
-        self._run_sharded_linear(spec, [5, 19], [19, 11], 1)
-        self._run_sharded_linear(spec, [5, 21], [21, 11], 1)
+            # Test uneven split.
+            self._run_sharded_linear(spec, [5, 19], [19, 11], 1)
+            self._run_sharded_linear(spec, [5, 21], [21, 11], 1)
 
 if __name__ == '__main__':
     run_tests()
