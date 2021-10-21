@@ -403,7 +403,7 @@ struct PyTraceEvent {
 };
 
 using TriggerFn = void (*)();
-using TraceEventsFn = std::vector<PyTraceEvent> (*)();
+using TraceEventsFn = std::vector<std::unique_ptr<PyTraceEvent>> (*)();
 
 void registerFunctions(
   TriggerFn start,

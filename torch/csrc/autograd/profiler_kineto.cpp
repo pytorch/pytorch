@@ -306,17 +306,17 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
     size_t py_index = 0;
     auto py_device = libkineto::processId();
     auto py_resource = libkineto::systemThreadId();
-    auto push_py_event = [&](const python_tracer::PyTraceEvent& e) {
+    auto push_py_event = [&](const std::unique_ptr<python_tracer::PyTraceEvent>& e) {
       libkineto::GenericTraceActivity op(
           cpu_trace->span,
           libkineto::ActivityType::USER_ANNOTATION,
-          e.name_
+          e->name_
         );
 
         op.device = py_device;
         op.resource = py_resource;
-        op.startTime = e.t0_;
-        op.endTime = e.t1_;
+        op.startTime = e->t0_;
+        op.endTime = e->t1_;
         cpu_trace->activities.push_back(op);
     };
 
@@ -325,7 +325,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
       auto& activity = activities[idx];
 
       auto end_time = kineto_event.start_us_ + kineto_event.duration_us_;
-      while (py_index < py_events.size() && py_events[py_index].t1_ <= end_time) {
+      while (py_index < py_events.size() && py_events[py_index]->t1_ <= end_time) {
         push_py_event(py_events[py_index]);
         py_index++;
       }

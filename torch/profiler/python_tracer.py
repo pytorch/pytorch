@@ -17,4 +17,4 @@ def _prefix_regex() -> str:
 
     path_prefixes = sorted({os.path.abspath(i) for i in raw_paths})
     assert all(isinstance(i, str) for i in path_prefixes)
-    return f"^({[re.escape(i + os.sep) for i in path_prefixes]})"
+    return f"^({'|'.join([re.escape(i + os.sep) for i in path_prefixes])})"
