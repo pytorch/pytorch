@@ -5942,41 +5942,6 @@ Example::
     tensor([ 0,  2,  0,  1])
 """.format(**single_dim_common))
 
-add_docstr(torch.argwhere,
-           r"""
-argwhere(input) -> Tensor
-
-Returns a tensor containing the indices of all non-zero elements of
-:attr:`input`.  Each row in the result contains the indices of a non-zero
-element in :attr:`input`. The result is sorted lexicographically, with
-the last index changing the fastest (C-style).
-
-If :attr:`input` has :math:`n` dimensions, then the resulting indices tensor
-:attr:`out` is of size :math:`(z \times n)`, where :math:`z` is the total number of
-non-zero elements in the :attr:`input` tensor.
-
-.. note::
-    This function is similar to NumPy's `argwhere`.
-
-    When :attr:`input` is on CUDA, this function causes host-device synchronization.
-
-Args:
-    {input}
-
-Example::
-
-    >>> t = torch.tensor([1, 0, 1])
-    >>> torch.argwhere(t)
-    tensor([[0],
-            [2]])
-    >>> t = torch.tensor([[1, 0, 1], [0, 1, 1]])
-    >>> torch.argwhere(t)
-    tensor([[0, 0],
-            [0, 2],
-            [1, 1],
-            [1, 2]])
-""")
-
 add_docstr(torch.mean, r"""
 mean(input, *, dtype=None) -> Tensor
 
