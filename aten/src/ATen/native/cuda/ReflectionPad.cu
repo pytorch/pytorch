@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
+#include <ATen/ceil_div.h>
 #include <ATen/cuda/Atomic.cuh>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/TensorUtils.h>
@@ -327,7 +328,7 @@ void reflection_pad2d_out_template(
         for (int64_t block_z = 0; block_z < size_z; block_z += 65535) {
           int64_t block_z_size = std::min(size_z - block_z, static_cast<int64_t>(65535));
 
-          dim3 grid_size(at::cuda::ATenCeilDiv(output_plane_size, static_cast<int64_t>(256)), block_y_size, block_z_size);
+          dim3 grid_size(at::ceil_div(output_plane_size, static_cast<int64_t>(256)), block_y_size, block_z_size);
 
           reflection_pad2d_out_kernel<<<
             grid_size, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -399,7 +400,7 @@ void reflection_pad2d_backward_out_template(
         for (int64_t block_z = 0; block_z < size_z; block_z += 65535) {
           int64_t block_z_size = std::min(size_z - block_z, static_cast<int64_t>(65535));
 
-          dim3 grid_size(at::cuda::ATenCeilDiv(output_plane_size, static_cast<int64_t>(256)), block_y_size, block_z_size);
+          dim3 grid_size(at::ceil_div(output_plane_size, static_cast<int64_t>(256)), block_y_size, block_z_size);
 
           reflection_pad2d_backward_out_kernel<<<
             grid_size, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -596,7 +597,7 @@ TORCH_IMPL_FUNC(reflection_pad3d_out_cuda) (
           for (int64_t block_z = 0; block_z < size_z; block_z += 65535) {
             int64_t block_z_size = std::min(size_z - block_z, static_cast<int64_t>(65535));
 
-            dim3 grid_size(at::cuda::ATenCeilDiv(output_plane_size, static_cast<int64_t>(256)), \
+            dim3 grid_size(at::ceil_div(output_plane_size, static_cast<int64_t>(256)), \
                            block_y_size, block_z_size);
 
             reflection_pad3d_out_kernel<<<
@@ -649,7 +650,7 @@ TORCH_IMPL_FUNC(reflection_pad3d_backward_out_cuda) (
           for (int64_t block_z = 0; block_z < size_z; block_z += 65535) {
             int64_t block_z_size = std::min(size_z - block_z, static_cast<int64_t>(65535));
 
-            dim3 grid_size(at::cuda::ATenCeilDiv(output_plane_size, static_cast<int64_t>(256)), \
+            dim3 grid_size(at::ceil_div(output_plane_size, static_cast<int64_t>(256)), \
                            block_y_size, block_z_size);
 
             reflection_pad3d_backward_out_kernel<<<

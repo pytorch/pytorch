@@ -55,45 +55,45 @@ class PandasWrapper:
 # When you build own implementation just override it with dataframe_wrapper.set_df_wrapper(new_wrapper_class)
 default_wrapper = PandasWrapper
 
-
 def get_df_wrapper():
     return default_wrapper
 
 
 def set_df_wrapper(wrapper):
+    global default_wrapper
     default_wrapper = wrapper
 
 
 def create_dataframe(data, columns=None):
     wrapper = get_df_wrapper()
-    wrapper.create_dataframe(data, columns)
+    return wrapper.create_dataframe(data, columns)
 
 
 def is_dataframe(data):
     wrapper = get_df_wrapper()
-    wrapper.is_dataframe(data)
+    return wrapper.is_dataframe(data)
 
 
 def is_column(data):
     wrapper = get_df_wrapper()
-    wrapper.is_column(data)
+    return wrapper.is_column(data)
 
 
 def concat(buffer):
     wrapper = get_df_wrapper()
-    wrapper.concat(buffer)
+    return wrapper.concat(buffer)
 
 
 def iterate(data):
     wrapper = get_df_wrapper()
-    wrapper.iterate(data)
+    return wrapper.iterate(data)
 
 
 def get_item(data, idx):
     wrapper = get_df_wrapper()
-    wrapper.get_item(data, idx)
+    return wrapper.get_item(data, idx)
 
 
 def get_len(df):
     wrapper = get_df_wrapper()
-    wrapper.get_len(df)
+    return wrapper.get_len(df)

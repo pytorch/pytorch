@@ -38,7 +38,8 @@ CC="clang" CXX="clang++" LDSHARED="clang --shared" \
   CFLAGS="-fsanitize=address -fsanitize=undefined -fno-sanitize-recover=all -shared-libasan -pthread" \
   CXX_FLAGS="-pthread" \
   USE_ASAN=1 USE_CUDA=0 USE_MKLDNN=0 \
-  python setup.py install
+  python setup.py bdist_wheel
+  python -mpip install dist/*.whl
 
 # Test building via the sdist source tarball
 python setup.py sdist

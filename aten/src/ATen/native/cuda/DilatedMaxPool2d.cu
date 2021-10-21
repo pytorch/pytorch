@@ -1,16 +1,16 @@
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
+#include <ATen/ceil_div.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/NumericUtils.h>
 #include <ATen/native/Pool.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/cuda/NumericLimits.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/KernelUtils.h>
-#include <THC/THCNumerics.cuh>
 #include <c10/macros/Macros.h>
 #include <ATen/native/cuda/LaunchUtils.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 
 namespace at {
 namespace native {
@@ -60,7 +60,7 @@ __global__ void max_pool_forward_nchw(const int nthreads, const scalar_t* bottom
     for (int h = hstart; h < hend; h += dilation_h) {
       for (int w = wstart; w < wend; w += dilation_w) {
         scalar_t val = btm_data[h * width + w];
-        if ((static_cast<accscalar_t>(val) > maxval) || THCNumerics<scalar_t>::isnan(val)) {
+        if ((static_cast<accscalar_t>(val) > maxval) || at::_isnan(val)) {
           maxidx = h * width + w;
           maxval = static_cast<accscalar_t>(val);
         }
@@ -134,7 +134,7 @@ __global__ void max_pool_forward_nhwc(const scalar_t* bottom_data, const int nba
           const scalar_t *ptr_input = bottom_data + ih * in_stride_h + iw * in_stride_w;
           for(int c = channel_offset; c < channels; c+= blockDim.x*kernel_stride_C) {
             scalar_t val = ptr_input[c*in_stride_c];
-            if ((static_cast<accscalar_t>(val) > out_cached[cached_index]) || THCNumerics<scalar_t>::isnan(val)) {
+            if ((static_cast<accscalar_t>(val) > out_cached[cached_index]) || at::_isnan(val)) {
               out_cached[cached_index] = static_cast<accscalar_t>(val);
               out_mask_cached[cached_index] = ih * width + iw;
             }
@@ -161,7 +161,7 @@ __global__ void max_pool_forward_nhwc(const scalar_t* bottom_data, const int nba
 static const int BLOCK_THREADS = 256;
 
 template <typename scalar_t, typename accscalar_t>
-#if defined (__HIP_PLATFORM_HCC__)
+#if defined (USE_ROCM)
 C10_LAUNCH_BOUNDS_2(BLOCK_THREADS, 4)
 #else
 C10_LAUNCH_BOUNDS_2(BLOCK_THREADS, 8)
@@ -361,18 +361,18 @@ const Tensor& indices) {
               maxThreadsDim[0], std::min<int>(lastPow2(nInputPlane), max_threads / block_y / block_z));
           const dim3 block(block_x, block_y, block_z);
 
-          int kernel_stride_C = cuda::ATenCeilDiv(
+          int kernel_stride_C = ceil_div(
               safe_downcast<int, int64_t>(nInputPlane), block_x * 4);
-          int kernel_size_C = cuda::ATenCeilDiv(
+          int kernel_size_C = ceil_div(
               safe_downcast<int, int64_t>(nInputPlane), block_x * kernel_stride_C);
 
           int grid_x = nbatch*kernel_stride_C;
           int grid_y = std::min<int>(
               at::cuda::getCurrentDeviceProperties()->maxGridSize[1],
-              cuda::ATenCeilDiv(safe_downcast<int, int64_t>(outputWidth), block_y*BLOCK_STRIDE));
+              ceil_div(safe_downcast<int, int64_t>(outputWidth), block_y*BLOCK_STRIDE));
           int grid_z = std::min<int>(
               at::cuda::getCurrentDeviceProperties()->maxGridSize[2],
-              cuda::ATenCeilDiv(safe_downcast<int, int64_t>(outputHeight), block_z*BLOCK_STRIDE));
+              ceil_div(safe_downcast<int, int64_t>(outputHeight), block_z*BLOCK_STRIDE));
           const dim3 grid(grid_x, grid_y, grid_z);
 
           size_t shmem_size = (kernel_size_C * block_x*block_y*block_z) * (sizeof(int) + sizeof(scalar_t));
@@ -394,7 +394,7 @@ const Tensor& indices) {
           const int num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock,
                                             BLOCK_THREADS);
           max_pool_forward_nchw<scalar_t, scalar_t>
-              <<<cuda::ATenCeilDiv(count, num_threads), num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+              <<<ceil_div(count, num_threads), num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
               count, input_data,
                   nbatch, nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,
                   kH, kW, dH, dW, padH, padW, dilationH, dilationW,
@@ -494,18 +494,18 @@ const Tensor& gradInput) {
               maxThreadsDim[0], std::min<int>(lastPow2(nInputPlane), max_threads / block_y / block_z));
           const dim3 block(block_x, block_y, block_z);
 
-          int kernel_stride_C = cuda::ATenCeilDiv(
+          int kernel_stride_C = ceil_div(
               safe_downcast<int, int64_t>(nInputPlane), block_x * 4);
-          int kernel_size_C = cuda::ATenCeilDiv(
+          int kernel_size_C = ceil_div(
               safe_downcast<int, int64_t>(nInputPlane), block_x * kernel_stride_C);
 
           int grid_x = nbatch*kernel_stride_C;
           int grid_y = std::min<int>(
               at::cuda::getCurrentDeviceProperties()->maxGridSize[1],
-              cuda::ATenCeilDiv(safe_downcast<int, int64_t>(inputWidth), block_y*BLOCK_STRIDE));
+              ceil_div(safe_downcast<int, int64_t>(inputWidth), block_y*BLOCK_STRIDE));
           int grid_z = std::min<int>(
               at::cuda::getCurrentDeviceProperties()->maxGridSize[2],
-              cuda::ATenCeilDiv(safe_downcast<int, int64_t>(inputHeight), block_z*BLOCK_STRIDE));
+              ceil_div(safe_downcast<int, int64_t>(inputHeight), block_z*BLOCK_STRIDE));
           const dim3 grid(grid_x, grid_y, grid_z);
 
           size_t shmem_size = (kernel_size_C * block_x*block_y*block_z) * sizeof(accscalar_t);
