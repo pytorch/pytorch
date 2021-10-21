@@ -574,6 +574,7 @@ def generate_tensor_like_override_tests(cls):
         # annotated_args. The problem is that, if one does so, one finds a number
         # of functions that have problematic signatures in native_functions.yaml.
         # Fixing these would be BC breaking, so hence this terrible hack
+        # https://github.com/pytorch/pytorch/issues/67008
         kwargs = {}
         if hasattr(func, "__name__") and "linalg_solve_triangular" in func.__name__:
             kwargs = {"upper": True}
