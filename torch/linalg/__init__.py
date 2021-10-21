@@ -1899,22 +1899,23 @@ Computes the solution of a triangular system of linear equations with a unique s
 
 Letting :math:`\mathbb{K}` be :math:`\mathbb{R}` or :math:`\mathbb{C}`,
 this function computes the solution :math:`X \in \mathbb{K}^{n \times k}` of the **linear system**
-associated to the upper triangular matrix :math:`A \in \mathbb{K}^{n \times n}` without zeros on the diagonal
+associated to the triangular matrix :math:`A \in \mathbb{K}^{n \times n}` without zeros on the diagonal
 (that is, it is `invertible`_) and the rectangular matrix , :math:`B \in \mathbb{K}^{n \times k}`,
 which is defined as
 
 .. math:: AX = B
 
-If :attr:`upper`\ `= False`, :math:`A` will be assumed to be lower triangular without zeros on the diagonal.
+The argument :attr:`upper` signals whether :math:`A` is upper or lower triangular.
 
-If :attr:`left`\ `= False`, the returned matrix :math:`X \in \mathbb{K}^{n \times k}` will solve the system
+If :attr:`left`\ `= False`, this function returns the matrix :math:`X \in \mathbb{K}^{n \times k}` that
+solves the system
 
 .. math::
 
     XA = B\mathrlap{\qquad A \in \mathbb{K}^{k \times k}, B \in \mathbb{K}^{n \times k}.}
 
 If :attr:`upper`\ `= True` (resp. `False`) just the upper (resp. lower) triangular half of :attr:`A`
-will be accessed. The other triangular half will be considered to be zero and will not be accessed.
+will be accessed. The elements below the main diagonal will be considered to be zero and will not be accessed.
 
 If :attr:`unitriangular`\ `= True`, the diagonal of :attr:`A` is assumed to be ones and will not be accessed.
 
