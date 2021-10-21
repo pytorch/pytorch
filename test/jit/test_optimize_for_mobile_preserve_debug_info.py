@@ -1,4 +1,4 @@
-# Owner(s): ["oncall: jit"]
+# Owner(s): ["oncall: mobile"]
 
 import torch
 import torch._C

@@ -1,4 +1,4 @@
-# Owner(s): ["oncall: jit"]
+# Owner(s): ["module: onnx"]
 
 import io
 import os
