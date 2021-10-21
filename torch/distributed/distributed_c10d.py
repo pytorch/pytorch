@@ -107,6 +107,7 @@ class Backend(object):
     NCCL = "nccl"
     MPI = "mpi"
     TCP = "tcp"
+    _plugins = {}
 
     def __new__(cls, name: str):
         if not isinstance(name, string_classes):
@@ -142,7 +143,15 @@ class Backend(object):
         .. note:: This support of 3rd party backend is experimental and subject to change.
 
         """
-        setattr(Backend, name.upper(), func)
+        assert not hasattr(Backend, name.upper()), (
+            f"{name.upper()} c10d backend already exist"
+        )
+        assert name.upper() not in Backend._plugins, (
+            f"{name.upper()} c10d backend creator function already exist"
+        )
+
+        setattr(Backend, name.upper(), name.upper())
+        Backend._plugins[name.upper()] = func
 
 
 # `_backend`, `dist_backend`, and `reduce_op` are here to maintain backward
@@ -739,7 +748,10 @@ def _new_process_group_helper(
             _pg_map[pg] = (Backend.NCCL, store)
             _pg_names[pg] = group_name
         else:
-            pg = getattr(Backend, backend.upper())(
+            assert backend.upper() in Backend._plugins, (
+                f"unknown c10d backend type {backend.upper()}"
+            )
+            pg = Backend._plugins[backend.upper()](
                 prefix_store, rank, world_size, timeout
             )
             _pg_map[pg] = (backend, store)
