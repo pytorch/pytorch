@@ -9077,6 +9077,13 @@ class TestNN(NNTestCase):
 
             self.assertEqual(output_sig.grad, output_logits.grad)
 
+    def test_bce_with_logits_has_correct_forward_grad(self):
+        output = torch.randn(3, 5, requires_grad=True)
+        target = torch.randn(3, 5)
+        for reduction in ('sum', 'mean', 'none'):
+            gradcheck(lambda self, target: nn.BCEWithLogitsLoss(reduction=reduction)(self, target),
+                      (output, target), check_forward_ad=True)
+
     def test_bce_with_logits_has_correct_grad_at_zero(self):
         output = torch.zeros(3, 1, requires_grad=True)
         target = torch.zeros(3, 1)

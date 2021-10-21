@@ -51,6 +51,17 @@ namespace at {
 // do some refactoring.
 
 // PyTorch allows operations to specify dim 0 and dim -1 on a scalar tensor.
+
+static VmapDimVector range(int64_t start, int64_t stop) {
+  TORCH_INTERNAL_ASSERT(stop >= start);
+  VmapDimVector dims;
+  dims.reserve(stop - start);
+  for (int64_t i = start; i < stop; i++) {
+    dims.emplace_back(i);
+  }
+  return dims;
+}
+
 static bool is_allowed_dim_on_scalar_tensor(int64_t dim) {
   return dim == 0 || dim == -1;
 }
@@ -69,6 +80,11 @@ Tensor sum_batching_rule(const Tensor& self, IntArrayRef dims, bool keepdim, opt
   auto dims_physical = self_physical.getPhysicalDims(dims);
   auto result = at::sum(self_physical.tensor(), dims_physical, keepdim, dtype);
   return self_physical.getPhysicalToLogicalMap().apply(result);
+}
+
+Tensor sum_decomp(
+    const Tensor& self, optional<ScalarType> dtype) {
+  return at::sum(self, range(0, self.dim()), false, dtype);
 }
 
 bool isPhysicalScalarTensor(const Tensor& logical_tensor) {
@@ -1072,6 +1088,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("_new_zeros_with_same_meta", _new_zeros_with_same_meta_batching_rule);
 
   m.impl("sum.dim_IntList", sum_batching_rule);
+  m.impl("sum", sum_decomp);
   m.impl("is_complex", native::is_complex);
 
   // inplace operations

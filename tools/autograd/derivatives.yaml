@@ -1054,6 +1054,7 @@
 
 - name: neg(Tensor self) -> Tensor
   self: grad.neg()
+  result: self_t.neg()
 
 - name: nextafter(Tensor self, Tensor other) -> Tensor
   self: not_implemented("nextafter")
@@ -1575,6 +1576,7 @@
 - name: binary_cross_entropy_with_logits(Tensor self, Tensor target, Tensor? weight=None, Tensor? pos_weight=None, int reduction=Mean) -> Tensor
   self: binary_cross_entropy_with_logits_backward(grad, self, target, weight, pos_weight, reduction)
   target: binary_cross_entropy_with_logits_target_backward(grad, self, target, weight, pos_weight, reduction)
+  result: binary_cross_entropy_with_logits_jvp(self_t, target_t, self_p, target_p, weight, pos_weight, reduction)
 
 - name: embedding(Tensor weight, Tensor indices, int padding_idx=-1, bool scale_grad_by_freq=False, bool sparse=False) -> Tensor
   indices: non_differentiable
