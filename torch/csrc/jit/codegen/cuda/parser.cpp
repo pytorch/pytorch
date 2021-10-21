@@ -513,7 +513,12 @@ class IrParser {
       ParseFuncPtr parse_fn,
       MergeQueryFuncPtr merge_query_fn = nullptr,
       OperatorTypeFuncPtr type_fn = nullptr) {
-    parser_symbol_set_.insert(c10::Symbol::fromQualString(op->schema().name()));
+    auto op_name = op->schema().name();
+    parser_symbol_set_.insert(c10::Symbol::fromQualString(op_name));
+    // We blindly attempt to profile the inplace version of supported op, this
+    // is to ensure that in-place removal in fusion partition would have the
+    // profile information for them readily available after the pass.
+    parser_symbol_set_.insert(c10::Symbol::fromQualString(op_name + '_'));
     jit_operator_registry_.emplace(
         std::piecewise_construct,
         std::forward_as_tuple(canonicalSchemaString(op->schema())),

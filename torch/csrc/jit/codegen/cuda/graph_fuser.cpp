@@ -1102,11 +1102,25 @@ void removeCudaFusionPathForGuardNode(Node* n) {
   auto uses = n->output()->uses();
   TORCH_INTERNAL_ASSERT(
       uses.size() == 1,
-      "CudaFusionGuard should only be used by a single prim::If");
+      "CudaFusionGuard should only be used once by prim::If or prim::ListConstruct");
   Node* if_node = uses[0].user;
-  TORCH_INTERNAL_ASSERT(
-      if_node->kind() == prim::If,
-      "CudaFusionGuard should only be used by prim::If");
+  if (if_node->kind() != prim::If) {
+    TORCH_INTERNAL_ASSERT(
+        if_node->kind() == prim::ListConstruct,
+        "CudaFusionGuard is not used by neither prim::If or prim::ListConstruct");
+    // break all inputs so producer prim::CudaFusionGuard can be removed later
+    if_node->removeAllInputs();
+    auto list_use = if_node->output()->uses();
+    TORCH_INTERNAL_ASSERT(
+        list_use.size() == 1 && list_use[0].user->kind() == aten::all,
+        "prim::ListConstruct should only be used once by aten::all");
+    auto all_use = list_use[0].user->output()->uses();
+    TORCH_INTERNAL_ASSERT(
+        all_use.size() == 1 && all_use[0].user->kind() == prim::If,
+        "aten::all should only be used once by prim::If");
+    if_node = all_use[0].user;
+  }
+
   auto fall_back_graph = if_node->blocks()[1];
   Node* fallback_node = nullptr;
   for (auto fb_n : fall_back_graph->nodes()) {
@@ -1377,6 +1391,7 @@ void guardFusionGroup(Node* fusion) {
     auto const_true = fusion->owningGraph()->insertConstant(IValue(true));
     const_true->node()->moveBefore(versioning_if);
 
+    std::vector<Value*> check_flags = {};
     for (const auto& original_offset : profiled_ivalue_indices) {
       size_t offset = original_offset - compensation;
 
@@ -1423,12 +1438,8 @@ void guardFusionGroup(Node* fusion) {
       }
       ivalue_check->setType(BoolType::get());
 
-      typecheck_result =
-          fusion->owningGraph()
-              ->create(aten::__and__, {ivalue_check, typecheck_result}, 1)
-              ->insertBefore(versioning_if)
-              ->output();
-      typecheck_result->setType(BoolType::get());
+      // aggregate flags;
+      check_flags.emplace_back(ivalue_check);
 
       // remove inputs to fusion;
       fusion->removeInput(offset);
@@ -1445,6 +1456,19 @@ void guardFusionGroup(Node* fusion) {
       }
       fusion_graph->eraseInput(offset);
       compensation++;
+    }
+
+    if (!check_flags.empty()) {
+      // attaching output from CudaFusionGuard to profile ivalue checks
+      check_flags.emplace_back(typecheck_result);
+      auto graph = fusion->owningGraph();
+      auto bool_list_node =
+          graph->insertNode(graph->createList(BoolType::get(), check_flags));
+      bool_list_node->moveBefore(versioning_if);
+      Value* bool_list = bool_list_node->output();
+      // new typecheck_result
+      typecheck_result = graph->insert(aten::all, {bool_list});
+      typecheck_result->node()->moveBefore(versioning_if);
     }
     // update graph in fusion node
     fusion->g_(attr::Subgraph, fusion_graph);
