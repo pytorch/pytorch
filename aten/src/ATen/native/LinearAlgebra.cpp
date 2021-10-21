@@ -24,6 +24,7 @@
 #include <functional>
 #include <limits>
 #include <numeric>
+#include <tuple>
 
 namespace at {
 namespace meta {
@@ -114,12 +115,10 @@ DEFINE_DISPATCH(linalg_vector_norm_stub);
 // Helper function for det methods.
 // For pivoted LU factorization A = P * L * U. Since we always have det(L) = 1,
 // det(P) = \pm 1, this method returns a 3-tuple:
-//   (det(P), diag(U), info),
-// where info helps us identify singular matrices.
+//   (det(P), diag(U)),
 static inline std::tuple<c10::ExclusivelyOwned<Tensor>, c10::ExclusivelyOwned<Tensor>> _lu_det_P_diag_U(const Tensor& self) {
-  Tensor pivs, lu, infos;
-  std::tie(lu, pivs, infos) = at::linalg_lu_factor_ex(self);
-  TORCH_CHECK(infos.ge(0).all().item<uint8_t>(), "Invalid argument passed to lu");
+  Tensor pivs, lu;
+  std::tie(lu, pivs, std::ignore) = at::linalg_lu_factor_ex(self);
   auto n = self.size(-1);
   auto num_exchanges = (at::arange(1, n + 1, pivs.options()) != pivs)
     .sum(-1, /*keepdim=*/false, /*dtype=*/at::kLong).fmod_(2);
@@ -133,9 +132,8 @@ static inline std::tuple<c10::ExclusivelyOwned<Tensor>, c10::ExclusivelyOwned<Te
 // Since det(P) = +- 1 (even or odd permutation), and diag(L) = I, we get that
 // det(A) = ([is P odd] * -2 + 1) * prod(diag(U))
 std::tuple<Tensor, Tensor, Tensor> _det_lu_based_helper(const Tensor& self) {
-  Tensor lu, pivs, infos;
-  std::tie(lu, pivs, infos) = at::linalg_lu_factor_ex(self);
-  TORCH_CHECK(infos.ge(0).all().item<uint8_t>(), "at::_det_lu_based_helper(): Invalid argument passed to LU");
+  Tensor lu, pivs;
+  std::tie(lu, pivs, std::ignore) = at::linalg_lu_factor_ex(self);
 
   // find det(P)
   auto n = self.size(-1);
