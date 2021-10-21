@@ -455,7 +455,7 @@ def emit_namedtuple_call(
             typename = f'NamedTuple{"" if not typedefs else len(typedefs)}'
             typenames[tn_key] = typename
             typedefs.append(f"""\
-static PyTypeObject {typename} = *get_namedtuple("{name}");""")
+static PyTypeObject* {typename} = get_namedtuple("{name}");""")
 
     return typedefs, typenames
 
@@ -980,7 +980,7 @@ Py_RETURN_NONE;
 """
         else:
             typename = namedtuple_typenames.get(gen_namedtuple_typename_key(f))
-            namedtuple_typeref = f'&{typename}, ' if typename is not None else ''
+            namedtuple_typeref = f'{typename}, ' if typename is not None else ''
             return f"""\
 {schema_comment}
 {inits}
