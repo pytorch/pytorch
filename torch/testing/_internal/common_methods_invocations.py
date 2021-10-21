@@ -2650,6 +2650,39 @@ def sample_inputs_adaptive_avg_pool2d(op_info, device, dtype, requires_grad, **k
 
     return list(generator())
 
+def sample_inputs_max_pool1d(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    kerneli = [(2,), 3]
+    stridei = [[2, ]]
+    Ni = [1, 2, None]
+    Ci = [2]
+    Wi = [6]
+    ceil_modei = [True, False]
+    paddingi = [0, 1]
+    dilationi = [1, (2,)]
+    return_indicesi = [True, False]
+
+    products = product(kerneli, stridei, Ni, Ci, Wi, ceil_modei, paddingi, dilationi, return_indicesi)
+
+    def generator():
+        for kernel, stride, N, C, W, ceil_mode, padding, dilation, return_indices in products:
+            max_pool = torch.nn.MaxPool1d(kernel, stride, ceil_mode=ceil_mode, padding=padding,
+                                          dilation=dilation, return_indices=return_indices)
+            kwargs = {
+                "kernel_size": max_pool.kernel_size,
+                "stride": max_pool.stride,
+                "padding": max_pool.padding,
+                "dilation": max_pool.dilation,
+                "ceil_mode": max_pool.ceil_mode,
+                "return_indices": max_pool.return_indices,
+            }
+            sample_input = make_arg((N, C, W)) if N is not None else make_arg((C, W))
+
+            yield SampleInput(sample_input, kwargs=kwargs)
+
+    return list(generator())
+
 def sample_inputs_max_pool2d(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -2684,24 +2717,26 @@ def sample_inputs_max_pool2d(op_info, device, dtype, requires_grad, **kwargs):
 
     return list(generator())
 
-def sample_inputs_max_pool1d(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs_max_pool3d(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    kerneli = [(2,), 3]
-    stridei = [[2, ]]
+    kerneli = [[4, 8, 6], 5]
+    stridei = [[2, 2, 4], 2]
     Ni = [1, 2, None]
-    Ci = [2]
-    Wi = [6]
+    Ci = [6]
+    Di = [8]
+    Hi = [20]
+    Wi = [16]
     ceil_modei = [True, False]
-    paddingi = [0, 1]
-    dilationi = [1, (2,)]
+    paddingi = [(1, 2, 1), 0]
+    dilationi = [1, (1, 2, 3)]
     return_indicesi = [True, False]
 
-    products = product(kerneli, stridei, Ni, Ci, Wi, ceil_modei, paddingi, dilationi, return_indicesi)
+    products = product(kerneli, stridei, Ni, Ci, Di, Hi, Wi, ceil_modei, paddingi, dilationi, return_indicesi)
 
     def generator():
-        for kernel, stride, N, C, W, ceil_mode, padding, dilation, return_indices in products:
-            max_pool = torch.nn.MaxPool1d(kernel, stride, ceil_mode=ceil_mode, padding=padding,
+        for kernel, stride, N, C, D, H, W, ceil_mode, padding, dilation, return_indices in products:
+            max_pool = torch.nn.MaxPool3d(kernel, stride, ceil_mode=ceil_mode, padding=padding,
                                           dilation=dilation, return_indices=return_indices)
             kwargs = {
                 "kernel_size": max_pool.kernel_size,
@@ -2711,7 +2746,7 @@ def sample_inputs_max_pool1d(op_info, device, dtype, requires_grad, **kwargs):
                 "ceil_mode": max_pool.ceil_mode,
                 "return_indices": max_pool.return_indices,
             }
-            sample_input = make_arg((N, C, W)) if N is not None else make_arg((C, W))
+            sample_input = make_arg((N, C, D, H, W)) if N is not None else (make_arg((D, C, H, W)))
 
             yield SampleInput(sample_input, kwargs=kwargs)
 
@@ -7989,6 +8024,20 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_scripting=False,  # TODO: fix aliasing test
            sample_inputs_func=sample_inputs_max_pool2d),
+    OpInfo('nn.functional.max_pool3d',
+           aten_name='max_pool3d',
+           supports_autograd=True,
+           supports_out=False,
+           assert_jit_shape_analysis=True,
+           dtypesIfCPU=floating_types(),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           supports_scripting=False,  # TODO: fix aliasing test
+           skips=(
+               # JIT Shape Analysis check fails for this op
+               # AssertionError: None != torch.Size([1, 6, 3, 5, 4])
+               DecorateInfo(unittest.skip('Skipped!'), 'TestJit', 'test_variant_consistency_jit'),
+           ),
+           sample_inputs_func=sample_inputs_max_pool3d),
     OpInfo('nn.functional.linear',
            aten_name='linear',
            supports_autograd=True,
