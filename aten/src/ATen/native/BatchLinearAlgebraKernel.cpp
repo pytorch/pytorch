@@ -63,7 +63,7 @@ void apply_reflect_conj_tri_single(scalar_t* self, int64_t n, int64_t stride, bo
   std::function<void(int64_t, int64_t)> loop = [](int64_t, int64_t){};
   if (upper) {
     loop = [&](int64_t start, int64_t end) {
-      for (int64_t i = start; i < end; i++) {
+      for (const auto i : c10::irange(start, end)) {
         for (int64_t j = i + 1; j < n; j++) {
           self[i * stride + j] = conj_impl(self[j * stride + i]);
         }
@@ -71,8 +71,8 @@ void apply_reflect_conj_tri_single(scalar_t* self, int64_t n, int64_t stride, bo
     };
   } else {
     loop = [&](int64_t start, int64_t end) {
-      for (int64_t i = start; i < end; i++) {
-        for (int64_t j = 0; j < i; j++) {
+      for (const auto i : c10::irange(start, end)) {
+        for (const auto j : c10::irange(i)) {
           self[i * stride + j] = conj_impl(self[j * stride + i]);
         }
       }
@@ -106,7 +106,7 @@ void apply_cholesky_inverse(Tensor& input, Tensor& infos, bool upper) {
   auto n = input.size(-2);
   auto lda = std::max<int64_t>(1, n);
 
-  for (int64_t i = 0; i < batch_size; i++) {
+  for (const auto i : c10::irange(batch_size)) {
     scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
     int* info_working_ptr = &infos_data[i];
     lapackCholeskyInverse<scalar_t>(uplo, n, input_working_ptr, lda, info_working_ptr);
@@ -273,7 +273,7 @@ void linalg_eig_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos,
   // the content of eigenvalues, eigenvectors and infos is overwritten by 'apply_linalg_eig'
 
   // apply_linalg_eig modifies in-place provided input matrix, therefore we need a copy
-  Tensor input_working_copy = at::empty(input.transpose(-2, -1).sizes(), input.options());
+  Tensor input_working_copy = at::empty(input.mT().sizes(), input.options());
   input_working_copy.transpose_(-2, -1);  // make input_working_copy to have Fortran contiguous memory layout
   input_working_copy.copy_(input);
 
@@ -501,7 +501,7 @@ inline void apply_orgqr(Tensor& self, const Tensor& tau) {
   lwork = std::max<int>(1, real_impl<scalar_t, value_t>(wkopt));
   Tensor work = at::empty({lwork}, self.options());
 
-  for (int64_t i = 0; i < batch_size; i++) {
+  for (const auto i : c10::irange(batch_size)) {
     scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
     scalar_t* tau_working_ptr = &tau_data[i * tau_stride];
 

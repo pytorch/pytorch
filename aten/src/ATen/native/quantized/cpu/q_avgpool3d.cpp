@@ -5,6 +5,8 @@
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
+
+#include <c10/util/irange.h>
 #include <c10/util/math_compat.h>
 
 #include <algorithm>
@@ -154,7 +156,7 @@ Tensor q_avg_pool3d(
         divisor_override);
   } else {
     at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
-      for (auto b = start; b < end; b++) {
+      for (const auto b : c10::irange(start, end)) {
         qavg_pool3d_nhwc_stub(
             input_nhwc.device().type(),
             input_nhwc,
