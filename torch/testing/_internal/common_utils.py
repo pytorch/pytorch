@@ -58,6 +58,8 @@ from torch import Tensor
 import torch.backends.cudnn
 import torch.backends.mkl
 from enum import Enum
+from statistics import mean
+import functools
 
 torch.backends.disable_global_flags()
 
@@ -803,15 +805,21 @@ def skipIfNotMiopenSuggestNHWC(fn):
 # Context manager for setting deterministic flag and automatically
 # resetting it to its original value
 class DeterministicGuard:
-    def __init__(self, deterministic):
+    def __init__(self, deterministic, *, warn_only=False):
         self.deterministic = deterministic
+        self.warn_only = warn_only
 
     def __enter__(self):
         self.deterministic_restore = torch.are_deterministic_algorithms_enabled()
-        torch.use_deterministic_algorithms(self.deterministic)
+        self.warn_only_restore = torch.is_deterministic_algorithms_warn_only_enabled()
+        torch.use_deterministic_algorithms(
+            self.deterministic,
+            warn_only=self.warn_only)
 
     def __exit__(self, exception_type, exception_value, traceback):
-        torch.use_deterministic_algorithms(self.deterministic_restore)
+        torch.use_deterministic_algorithms(
+            self.deterministic_restore,
+            warn_only=self.warn_only_restore)
 
 # Context manager for setting cuda sync debug mode and reset it
 # to original value
@@ -860,7 +868,9 @@ class CudaSyncGuard:
 def wrapDeterministicFlagAPITest(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        with DeterministicGuard(torch.are_deterministic_algorithms_enabled()):
+        with DeterministicGuard(
+                torch.are_deterministic_algorithms_enabled(),
+                warn_only=torch.is_deterministic_algorithms_warn_only_enabled()):
             class CuBLASConfigGuard:
                 cublas_var_name = 'CUBLAS_WORKSPACE_CONFIG'
 
@@ -1783,8 +1793,10 @@ class TestCase(expecttest.TestCase):
         assert (atol is None) == (rtol is None), "If one of atol or rtol is specified, then the other must be too"
         debug_msg: Optional[str] = None
 
+        if x is None or y is None:
+            self.assertTrue(x is None and y is None)
         # Tensor x Number and Number x Tensor comparisons
-        if isinstance(x, torch.Tensor) and isinstance(y, Number):
+        elif isinstance(x, torch.Tensor) and isinstance(y, Number):
             self.assertEqual(x.item(), y, atol=atol, rtol=rtol, msg=msg,
                              exact_dtype=exact_dtype, exact_device=exact_device)
         elif isinstance(y, torch.Tensor) and isinstance(x, Number):
@@ -2302,7 +2314,7 @@ def random_symmetric_matrix(l, *batches, **kwargs):
     dtype = kwargs.get('dtype', torch.double)
     device = kwargs.get('device', 'cpu')
     A = torch.randn(*(batches + (l, l)), dtype=dtype, device=device)
-    A = (A + A.transpose(-2, -1)).div_(2)
+    A = (A + A.mT).div_(2)
     return A
 
 # Creates a symmetric matrix or batch of symmetric matrices
@@ -2310,33 +2322,39 @@ def random_symmetric_matrix(l, *batches, **kwargs):
 def make_symmetric_matrices(*shape, device, dtype):
     assert shape[-1] == shape[-2]
     t = make_tensor(shape, device=device, dtype=dtype)
-    t = t + t.transpose(-2, -1).div_(2)
+    t = (t + t.mT).div_(2)
     return t
 
 def random_hermitian_matrix(l, *batches, **kwargs):
     dtype = kwargs.get('dtype', torch.double)
     device = kwargs.get('device', 'cpu')
     A = torch.randn(*(batches + (l, l)), dtype=dtype, device=device)
-    A = (A + A.transpose(-2, -1).conj()).div_(2)
+    A = (A + A.mH).div_(2)
     return A
 
 
 def random_symmetric_psd_matrix(l, *batches, **kwargs):
+    """
+    Returns a batch of random symmetric positive-semi-definite matrices.
+    The shape of the result is batch_dims + (matrix_size, matrix_size)
+    The following example creates a tensor of size 2 x 4 x 3 x 3
+    >>> matrices = random_symmetric_psd_matrix(3, 2, 4, dtype=dtype, device=device)
+    """
     dtype = kwargs.get('dtype', torch.double)
     device = kwargs.get('device', 'cpu')
     A = torch.randn(*(batches + (l, l)), dtype=dtype, device=device)
-    return torch.matmul(A, A.transpose(-2, -1))
+    return A @ A.mT
 
 
 def random_hermitian_psd_matrix(matrix_size, *batch_dims, dtype=torch.double, device='cpu'):
     """
-    Returns a batch of random Hermitian semi-positive-definite matrices.
+    Returns a batch of random Hermitian positive-semi-definite matrices.
     The shape of the result is batch_dims + (matrix_size, matrix_size)
     The following example creates a tensor of size 2 x 4 x 3 x 3
     >>> matrices = random_hermitian_psd_matrix(3, 2, 4, dtype=dtype, device=device)
     """
     A = torch.randn(*(batch_dims + (matrix_size, matrix_size)), dtype=dtype, device=device)
-    return torch.matmul(A, A.conj().transpose(-2, -1))
+    return A @ A.mH
 
 
 # TODO: remove this (prefer make_symmetric_pd_matrices below)
@@ -2345,7 +2363,7 @@ def random_symmetric_pd_matrix(matrix_size, *batch_dims, **kwargs):
     device = kwargs.get('device', 'cpu')
     A = torch.randn(*(batch_dims + (matrix_size, matrix_size)),
                     dtype=dtype, device=device)
-    return torch.matmul(A, A.transpose(-2, -1)) \
+    return torch.matmul(A, A.mT) \
         + torch.eye(matrix_size, dtype=dtype, device=device) * 1e-5
 
 
@@ -2354,9 +2372,8 @@ def random_symmetric_pd_matrix(matrix_size, *batch_dims, **kwargs):
 def make_symmetric_pd_matrices(*shape, device, dtype):
     assert shape[-1] == shape[-2]
     t = make_tensor(shape, device=device, dtype=dtype)
-    t = torch.matmul(t, t.transpose(-2, -1))
     i = torch.eye(shape[-1], device=device, dtype=dtype) * 1e-5
-    return t + i
+    return t @ t.mT + i
 
 def random_hermitian_pd_matrix(matrix_size, *batch_dims, dtype, device):
     """
@@ -2367,8 +2384,7 @@ def random_hermitian_pd_matrix(matrix_size, *batch_dims, dtype, device):
     """
     A = torch.randn(*(batch_dims + (matrix_size, matrix_size)),
                     dtype=dtype, device=device)
-    return torch.matmul(A, A.transpose(-2, -1).conj()) \
-        + torch.eye(matrix_size, dtype=dtype, device=device)
+    return A @ A.mH + torch.eye(matrix_size, dtype=dtype, device=device)
 
 
 # TODO: remove this (prefer make_fullrank_matrices_with_distinct_singular_values below)
@@ -2912,3 +2928,34 @@ def set_single_threaded_if_parallel_tbb(fn):
         finally:
             torch.set_num_threads(num_threads)
     return wrap_fn
+
+
+@functools.lru_cache()
+def get_cycles_per_ms() -> float:
+    """Measure and return approximate number of cycles per millisecond for torch.cuda._sleep
+    """
+
+    def measure() -> float:
+        start = torch.cuda.Event(enable_timing=True)
+        end = torch.cuda.Event(enable_timing=True)
+        start.record()
+        torch.cuda._sleep(1000000)
+        end.record()
+        end.synchronize()
+        cycles_per_ms = 1000000 / start.elapsed_time(end)
+        return cycles_per_ms
+
+    # Get 10 values and remove the 2 max and 2 min and return the avg.
+    # This is to avoid system disturbance that skew the results, e.g.
+    # the very first cuda call likely does a bunch of init, which takes
+    # much longer than subsequent calls.
+    #
+    # Tested on both Tesla V100, Quadro GP100, Titan RTX, RTX 3090 GPUs
+    # and seems to return stable values. Therefore, we enable caching
+    # using lru_cache decorator above.
+    num = 10
+    vals = []
+    for _ in range(num):
+        vals.append(measure())
+    vals = sorted(vals)
+    return mean(vals[2 : num - 2])

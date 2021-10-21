@@ -69,13 +69,13 @@ void validateBlock(
   throw std::runtime_error(                        \
       std::string("ONNX export failed: ") + name + \
       "\n\nGraph we tried to export:\n" + b->owningGraph()->toString());
+    // Special error messages for certain types of operators
     if (node->kind() == prim::PythonOp) {
       auto py_node = static_cast<PythonOp*>(node);
       FAIL_EXPORT(
           "Couldn't export Python operator " + py_node->name() +
           "\n\nDefined at:\n" + getNodeStackTraceString(node))
     } else {
-      // Special error messages for certain types of operators
       if (node->kind() == aten::expand) {
         if (operator_export_type ==
             onnx_torch::OperatorExportTypes::ONNX_ATEN_FALLBACK) {
@@ -530,9 +530,7 @@ void EncoderBase::EncodeBlock(
       p_n->set_domain(domain);
     }
     if (operator_export_type_ == onnx_torch::OperatorExportTypes::ONNX) {
-      AT_ASSERT(
-          !node->kind().is_aten() && !node->kind().is_prim() &&
-          !node->kind().is_attr());
+      AT_ASSERT(!node->kind().is_aten() && !node->kind().is_attr());
     }
     p_n->set_op_type(node->kind().toUnqualString());
     if (add_node_names) {
