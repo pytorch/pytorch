@@ -145,6 +145,9 @@ class TestNamedTupleAPI(TestCase):
         test_namedtuple_return_api.py. Do you forget to add test for that operator?
         '''))
 
+    def test_import_return_types(self):
+        import torch.return_types
+
 
 if __name__ == '__main__':
     run_tests()
