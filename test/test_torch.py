@@ -8029,7 +8029,6 @@ else:
     @expectedFailureXLA
     def test_expected_failure_xla(self, device):
         if self.device_type == 'xla':
-            # Should not reach here!
             self.assertTrue(False)
 
 
