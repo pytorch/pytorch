@@ -406,7 +406,7 @@ def unpad_sequence(padded_sequences, lengths, batch_first=False):
         mask = idx < length
         unpacked_seq = seq[mask]
         unpadded_sequences.append(unpacked_seq)
-    
+
     return unpadded_sequences
 
 
