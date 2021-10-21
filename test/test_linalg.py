@@ -12,7 +12,7 @@ from math import inf, nan, isnan
 import random
 from random import randrange
 from itertools import product
-from functools import reduce
+from functools import reduce, partial
 
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_SCIPY, IS_MACOS, IS_WINDOWS, slowTest,
@@ -5535,25 +5535,23 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
-    def test_linalg_lu_factor(self, device, dtype):
+    def test_linalg_lu_factor_and_lu(self, device, dtype):
+        # Tests lu, linalg.lu_factor and linalg.lu_factor_ex
         from torch.testing._internal.common_utils import random_matrix
 
-        def run_test(A, pivot, singular):
+        def run_test(A, pivot, singular, fn):
             k = min(A.shape[-2:])
             batch = A.shape[:-2]
-            if singular:
-                if pivot:
-                    # We discard the errors, as the factorization always succeeds
-                    LU, pivots, _ = torch.linalg.lu_factor_ex(A, pivot=pivot)
-                else:
-                    # It may or may not throw as the LU decomposition without pivoting
-                    # may still succeed for sinuglar matrices
-                    try:
-                        LU, pivots = torch.linalg.lu_factor(A, pivot=pivot)
-                    except RuntimeError:
-                        return
+            check_errors = fn == torch.linalg.lu_factor
+            if singular and check_errors:
+                # It may or may not throw as the LU decomposition without pivoting
+                # may still succeed for sinuglar matrices
+                try:
+                    LU, pivots = fn(A, pivot=pivot)
+                except RuntimeError:
+                    return
             else:
-                LU, pivots = torch.linalg.lu_factor(A, pivot=pivot)
+                LU, pivots = fn(A, pivot=pivot)[:2]
 
             self.assertEqual(LU.size(), A.shape)
             self.assertEqual(pivots.size(), batch + (k,))
@@ -5569,19 +5567,20 @@ class TestLinalg(TestCase):
         batches = ((0,), (2,), (3,), (1, 0), (3, 5))
         # Non pivoting just implemented for CUDA
         pivots = (True, False) if device == "cuda" else (True,)
-        for ms, batch, pivot, singular in itertools.product(sizes, batches, pivots, (True, False)):
+        fns = (partial(torch.lu, get_infos=True), torch.linalg.lu_factor, torch.linalg.lu_factor_ex)
+        for ms, batch, pivot, singular, fn in itertools.product(sizes, batches, pivots, (True, False), fns):
             m, n = ms
             A = random_matrix(m, n, *batch, singular=singular, dtype=dtype, device=device)
             # Just do one of them on singular matrices
             if A.numel() == 0 and not singular:
                 continue
-            run_test(A, pivot, singular)
+            run_test(A, pivot, singular, fn)
 
             # Reproducer of a magma bug,
             # see https://bitbucket.org/icl/magma/issues/13/getrf_batched-kernel-produces-nans-on
             if dtype == torch.double and singular:
                 A = torch.ones(batch + ms, dtype=dtype, device=device)
-                run_test(A, pivot, singular)
+                run_test(A, pivot, singular, fn)
 
         # Info should be positive for rank deficient matrices
         A = torch.ones(5, 3, 3, device=device)
@@ -5592,87 +5591,8 @@ class TestLinalg(TestCase):
             with self.assertRaisesRegex(RuntimeError, 'LU without pivoting is not implemented on the CPU'):
                 torch.lu(torch.empty(1, 2, 2), pivot=False)
 
-    @precisionOverride({torch.complex64: 5e-6})
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(torch.double, torch.cfloat, torch.cdouble)
-    def test_lu(self, device, dtype):
-        from torch.testing._internal.common_utils import random_matrix
-
-        def run_test(device, pivot):
-            def run_subtest(matrix_size, batches, device, pivot, singular=False, a=None):
-                if isinstance(matrix_size, int):
-                    rows = columns = matrix_size
-                else:
-                    rows, columns = matrix_size
-                if a is None:
-                    a = random_matrix(rows, columns, *batches, **dict(singular=singular, dtype=dtype, device=device))
-                a_LU_info, pivots_info, info_ = a.lu(pivot=pivot, get_infos=True)
-                self.assertEqual(a_LU_info.size(), torch.Size(batches + (rows, columns)))
-                self.assertEqual(pivots_info.size(), torch.Size(batches + (min(rows, columns),)))
-                self.assertEqual(info_.size(), torch.Size(batches))
-                # If a randomly generated input matrix is singular,
-                # then info_ contains indices i such that U[i, i] ==
-                # 0. This however conveys that the factorization was
-                # successful albeit with a singular input. Therefore,
-                # we require info.min() >= 0
-                self.assertGreaterEqual(info_.min(), 0)
-                a_LU, pivots = a.lu(pivot=pivot)
-                self.assertEqual(a_LU, a_LU_info)
-                self.assertEqual(pivots_info, pivots)
-
-
-                P, L, U = torch.lu_unpack(a_LU, pivots)
-                P_ = P.cpu().numpy()
-                L_ = L.cpu().numpy()
-                U_ = U.cpu().numpy()
-
-                self.assertEqual(np.matmul(P_, np.matmul(L_, U_)), a)
-
-                if self.device_type == 'cuda':
-                    # lu without pivoting is implemented only for cuda device
-                    a_LU_info_nopiv, nopiv, info_nopiv = a.lu(pivot=False, get_infos=True)
-                    P_nopiv, L_nopiv, U_nopiv = torch.lu_unpack(a_LU_info_nopiv, nopiv)
-                    P_nopiv_ = P_nopiv.cpu().numpy()
-                    L_nopiv_ = L_nopiv.cpu().numpy()
-                    U_nopiv_ = U_nopiv.cpu().numpy()
-
-                    self.assertEqual(np.matmul(P_nopiv_, np.matmul(L_nopiv_, U_nopiv_)), a)
-
-                    k = min(rows, columns)
-                    self.assertEqual(nopiv, torch.arange(1, 1 + k, device=device, dtype=torch.int32).expand(a.shape[:-2] + (k, )))
-                    if not singular:
-                        # It is not guaranteed that LU factorization
-                        # without pivoting is able to determine if a
-                        # matrix is singular while LU factorization
-                        # with pivoting is. Therefore, we require the
-                        # equality of info-s only for non-singular
-                        # matrices.
-                        # NOTE: infor_ is reshaped because info_nopiv might have
-                        # squashed batch dimensions for complex types on CUDA,
-                        # see the TODOs above.
-                        self.assertEqual(info_.reshape(info_nopiv.shape), info_nopiv)
-
-            for ms, batch in itertools.product([3, 5, 7, (4, 2), (3, 4)], [(), (2,), (3,), (3, 5)]):
-                run_subtest(ms, batch, device, pivot)
-                run_subtest(ms, batch, device, pivot, singular=True)
-
-                # Reproducer of a magma bug, see https://bitbucket.org/icl/magma/issues/13/getrf_batched-kernel-produces-nans-on
-                a = torch.ones(batch + (ms if isinstance(ms, tuple) else (ms, ms)), dtype=torch.double, device=device)
-                run_subtest(ms, batch, device, pivot, singular=True, a=a)
-
-            # Info should be positive for rank deficient matrices
-            a = torch.ones(5, 3, 3, device=device)
-            self.assertGreater(a.lu(pivot=pivot, get_infos=True)[2][0], 0)
-
-        run_test(device, True)
-
-        if self.device_type == 'cpu':
-            # Error checking, no pivoting variant on CPU
             with self.assertRaisesRegex(RuntimeError, 'LU without pivoting is not implemented on the CPU'):
-                torch.lu(torch.empty(1, 2, 2), pivot=False)
-        else:
-            run_test(device, False)
+                torch.linalg.lu_factor(torch.empty(1, 2, 2), pivot=False)
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
