@@ -141,18 +141,7 @@ def generate_required_docker_images(items):
 def gen_build_workflows_tree():
     build_workflows_functions = [
         # For rocm images, which don't have a circleci job equivalent
-        cimodel.data.simple.docker_definitions.get_workflow_jobs,
-        pytorch_build_definitions.get_workflow_jobs,
-        cimodel.data.simple.macos_definitions.get_workflow_jobs,
-        cimodel.data.simple.android_definitions.get_workflow_jobs,
-        cimodel.data.simple.ios_definitions.get_workflow_jobs,
-        cimodel.data.simple.mobile_definitions.get_workflow_jobs,
-        cimodel.data.simple.binary_smoketest.get_workflow_jobs,
         cimodel.data.simple.nightly_ios.get_workflow_jobs,
-        cimodel.data.simple.nightly_android.get_workflow_jobs,
-        cimodel.data.simple.anaconda_prune_defintions.get_workflow_jobs,
-        binary_build_definitions.get_post_upload_jobs,
-        binary_build_definitions.get_binary_smoke_test_jobs,
     ]
     build_jobs = [f() for f in build_workflows_functions]
     build_jobs.extend(

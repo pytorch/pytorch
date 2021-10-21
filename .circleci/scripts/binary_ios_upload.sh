@@ -27,14 +27,11 @@ lipo -i ${ZIP_DIR}/install/lib/*.a
 cp ${PROJ_ROOT}/ios/LibTorch-Lite.h ${ZIP_DIR}/src/
 cp ${PROJ_ROOT}/LICENSE ${ZIP_DIR}/
 # zip the library
-export DATE="$(date -u +%Y%m%d)"
-export IOS_NIGHTLY_BUILD_VERSION="1.11.0.${DATE}"
-# libtorch_lite_ios_nightly_1.11.0.20210810.zip
-ZIPFILE="libtorch_lite_ios_nightly_${IOS_NIGHTLY_BUILD_VERSION}.zip"
+ZIPFILE="libtorch_ios_1.10.0.zip"
 cd ${ZIP_DIR}
 #for testing
 touch version.txt
-echo "${IOS_NIGHTLY_BUILD_VERSION}" > version.txt
+echo "1.10.0" > version.txt
 zip -r ${ZIPFILE} install src version.txt LICENSE
 # upload to aws
 # Install conda then 'conda install' awscli
@@ -50,15 +47,4 @@ export AWS_SECRET_ACCESS_KEY=${AWS_S3_ACCESS_SECRET_FOR_PYTORCH_BINARY_UPLOAD}
 set +x
 # echo "AWS KEY: ${AWS_ACCESS_KEY_ID}"
 # echo "AWS SECRET: ${AWS_SECRET_ACCESS_KEY}"
-aws s3 cp ${ZIPFILE} s3://ossci-ios-build/ --acl public-read
-
-# create a new LibTorch-Lite-Nightly.podspec from the template
-echo "cp ${PROJ_ROOT}/ios/LibTorch-Lite-Nightly.podspec.template ${PROJ_ROOT}/ios/LibTorch-Lite-Nightly.podspec"
-cp ${PROJ_ROOT}/ios/LibTorch-Lite-Nightly.podspec.template ${PROJ_ROOT}/ios/LibTorch-Lite-Nightly.podspec
-
-# update pod version
-sed -i '' -e "s/IOS_NIGHTLY_BUILD_VERSION/${IOS_NIGHTLY_BUILD_VERSION}/g" ${PROJ_ROOT}/ios/LibTorch-Lite-Nightly.podspec
-cat ${PROJ_ROOT}/ios/LibTorch-Lite-Nightly.podspec
-
-# push the new LibTorch-Lite-Nightly.podspec to CocoaPods
-pod trunk push --verbose --allow-warnings --use-libraries --skip-import-validation ${PROJ_ROOT}/ios/LibTorch-Lite-Nightly.podspec
+aws s3 cp ${ZIPFILE} s3://ossci-ios/ --acl public-read
