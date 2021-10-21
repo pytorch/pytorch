@@ -113,13 +113,13 @@ DEFINE_DISPATCH(addr_stub);
 DEFINE_DISPATCH(linalg_vector_norm_stub);
 
 // As P is a permutation matrix
-// det(P) = 1 if it's an odd permutation and det(P) = -1 if it's an even permutation
+// det(P) = 1 if it's an even permutation and det(P) = -1 if it's an odd permutation
 static inline Tensor _lu_det_P(const Tensor& lu, const Tensor& pivs) {
   const auto n = lu.size(-1);
   auto det_P = (at::arange(1, n + 1, pivs.options()) != pivs)
     .sum(-1, /*keepdim=*/false, /*dtype=*/at::kLong)
     .fmod_(2)
-    // take the value from {0, 1} to {1, 1}
+    // take 0 to 1 and 1 to -1
     .mul_(-2)
     .add_(1);
   return det_P;
