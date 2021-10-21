@@ -5589,7 +5589,7 @@ class TestLinalg(TestCase):
 
         if self.device_type == 'cpu':
             # Error checking, no pivoting variant on CPU
-            with self.assertRaisesRegex(RuntimeError, 'lu_factor without pivoting is not implemented on the CPU'):
+            with self.assertRaisesRegex(RuntimeError, 'LU without pivoting is not implemented on the CPU'):
                 torch.lu(torch.empty(1, 2, 2), pivot=False)
 
     @precisionOverride({torch.complex64: 5e-6})
@@ -5669,7 +5669,7 @@ class TestLinalg(TestCase):
 
         if self.device_type == 'cpu':
             # Error checking, no pivoting variant on CPU
-            with self.assertRaisesRegex(RuntimeError, 'lu without pivoting is not implemented on the CPU'):
+            with self.assertRaisesRegex(RuntimeError, 'LU without pivoting is not implemented on the CPU'):
                 torch.lu(torch.empty(1, 2, 2), pivot=False)
         else:
             run_test(device, False)

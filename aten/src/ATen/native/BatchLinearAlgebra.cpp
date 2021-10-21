@@ -1653,8 +1653,8 @@ std::tuple<Tensor, Tensor> linalg_lu_factor(const Tensor& A, bool pivot) {
 }
 
 // TODO Deprecate this function in favour of linalg_lu_factor_ex
-std::tuple<Tensor, Tensor, Tensor> _lu_with_info(const Tensor& self, bool pivot) {
-  return at::linalg_lu_factor_ex(self, pivot, /*check_errors=*/false);
+std::tuple<Tensor, Tensor, Tensor> _lu_with_info(const Tensor& self, bool compute_pivots, bool check_errors) {
+  return at::linalg_lu_factor_ex(self, compute_pivots, check_errors);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangular_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
