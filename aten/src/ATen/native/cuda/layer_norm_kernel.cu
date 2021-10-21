@@ -308,7 +308,7 @@ void LayerNormKernelImpl(
       X.scalar_type(),
       "LayerNormKernelImpl",
       [&]() {
-  	using acc_t = acc_type<scalar_t, true>;
+        using acc_t = acc_type<scalar_t, true>;
         LayerNormKernelImplInternal<scalar_t, acc_t>(
             X, gamma, beta, M, N, static_cast<acc_t>(eps), Y, mean, rstd);
       });
