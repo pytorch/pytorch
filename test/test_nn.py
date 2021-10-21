@@ -6748,7 +6748,7 @@ class TestNN(NNTestCase):
             self.assertEqual(sequences[1], unpadded_sequences[1])
             self.assertEqual(sequences[2], unpadded_sequences[2])
             self.assertTrue(all([torch.allclose(a, b) for a, b in zip(sequences, unpadded_sequences)]))
-        
+
         # single dimensional
         a = torch.tensor([1, 2, 3])
         b = torch.tensor([4, 5])
@@ -6770,7 +6770,7 @@ class TestNN(NNTestCase):
                 seq_len = i * i
                 sequences.append(torch.rand(seq_len, 5, *trailing_dims))
             random.shuffle(sequences)
-            
+
             lengths = torch.as_tensor([v.size(0) for v in sequences])
             padded_sequences = rnn_utils.pad_sequence(sequences, batch_first=batch_first)
             unpadded_sequences = rnn_utils.unpad_sequence(padded_sequences, lengths, batch_first=batch_first)
@@ -6843,7 +6843,7 @@ class TestNN(NNTestCase):
             self.assertEqual(sequences[1], unpacked_sequences[1])
             self.assertEqual(sequences[2], unpacked_sequences[2])
             self.assertTrue(all([torch.allclose(a, b) for a, b in zip(sequences, unpacked_sequences)]))
-        
+
         # single dimensional
         a = torch.tensor([1, 2, 3])
         b = torch.tensor([4, 5])
@@ -6863,7 +6863,7 @@ class TestNN(NNTestCase):
                 seq_len = i * i
                 sequences.append(torch.rand(seq_len, 5, *trailing_dims))
             random.shuffle(sequences)
-            
+
             packed_sequences = rnn_utils.pack_sequence(sequences, enforce_sorted=False)
             unpacked_sequences = rnn_utils.unpack_sequence(packed_sequences)
             _compatibility_test(sequences, unpacked_sequences)
