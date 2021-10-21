@@ -13,6 +13,7 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_IN_CI,
     skipIfRocm,
+    TEST_WITH_ROCM,
 )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -94,7 +95,59 @@ class GTest(TestCase):
     the binary's name doesn't start with 'test_')
     """
 
-    def test_jit(self, binary: Path, test_name: str):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        print("main")
+        if not TEST_BINARY_DIR.exists():
+            raise RuntimeError(
+                f"{TEST_BINARY_DIR} does not exist, this test "
+                "must run from a PyTorch checkout"
+            )
+
+        print(TEST_BINARY_DIR)
+        print("globs")
+        print('list(TEST_BINARY_DIR.glob("*"))', list(TEST_BINARY_DIR.glob("*")))
+        print(
+            'list(TEST_BINARY_DIR.glob("*test*"))', list(TEST_BINARY_DIR.glob("*test*"))
+        )
+        self.binaries = {}
+
+        for binary in TEST_BINARY_DIR.glob("*test*"):
+            # If the test already has a properly formatted name, don't prepend a
+            # redundant 'test_'
+            if IS_WINDOWS and binary.suffix != ".exe":
+                continue
+
+            if binary.name.startswith("test_"):
+                if IS_WINDOWS:
+                    # Get rid of the ".exe"
+                    test_name = binary.stem
+                else:
+                    test_name = binary.name
+            else:
+                test_name = f"test_{binary.name}"
+
+            if test_name not in ALLOWLISTED_TEST:
+                continue
+
+            self.binaries[test_name] = binary
+
+            if getattr(self, test_name, None) is None:
+                # Add the test case if it's not hardcoded
+                def test_case(self):
+                    run_binary(binary, test_name)
+
+                setattr(self, test_name, test_case)
+
+            # maybe_existing_case = generate_test_case(
+            #     getattr(GTest, test_name, None), binary, test_name
+            # )
+            # setattr(
+            #     GTest, test_name, maybe_existing_case,
+            # )
+
+    def test_jit(self):
+        binary = self.binaries["test_jit"]
         setup_path = REPO_ROOT / "test" / "cpp" / "jit" / "tests_setup.py"
         # These tests fail on windows only (this wasn't caught before switching
         # to the Python runner since test_jit.exe wasn't run during windows
@@ -145,58 +198,58 @@ class GTest(TestCase):
         run_cmd([sys.executable, str(setup_path), "shutdown"])
 
 
-def generate_test_case(existing_case, binary: Path, test_name: str):
-    if existing_case is None:
+# def generate_test_case(existing_case, binary: Path, test_name: str):
+#     if existing_case is None:
 
-        def test_case(self):
-            run_binary(binary, test_name)
+#         def test_case(self):
+#             run_binary(binary, test_name)
 
-    else:
+#     else:
 
-        def test_case(self):
-            existing_case(self, binary, test_name)
+#         def test_case(self):
+#             existing_case(self, binary, test_name)
 
-    return skipIfRocm(test_case)
+#     return skipIfRocm(test_case)
 
 
 print("not main")
 if __name__ == "__main__":
-    print("main")
-    if not TEST_BINARY_DIR.exists():
-        print(
-            f"{TEST_BINARY_DIR} does not exist, this test "
-            "must run from a PyTorch checkout"
-        )
-        exit(1)
+    # print("main")
+    # if not TEST_BINARY_DIR.exists():
+    #     print(
+    #         f"{TEST_BINARY_DIR} does not exist, this test "
+    #         "must run from a PyTorch checkout"
+    #     )
+    #     exit(1)
 
-    print(TEST_BINARY_DIR)
-    print("globs")
-    print('list(TEST_BINARY_DIR.glob("*"))', list(TEST_BINARY_DIR.glob("*")))
-    print('list(TEST_BINARY_DIR.glob("*test*"))', list(TEST_BINARY_DIR.glob("*test*")))
-    for binary in TEST_BINARY_DIR.glob("*test*"):
-        # If the test already has a properly formatted name, don't prepend a
-        # redundant 'test_'
-        if IS_WINDOWS and binary.suffix != ".exe":
-            continue
+    # print(TEST_BINARY_DIR)
+    # print("globs")
+    # print('list(TEST_BINARY_DIR.glob("*"))', list(TEST_BINARY_DIR.glob("*")))
+    # print('list(TEST_BINARY_DIR.glob("*test*"))', list(TEST_BINARY_DIR.glob("*test*")))
+    # for binary in TEST_BINARY_DIR.glob("*test*"):
+    #     # If the test already has a properly formatted name, don't prepend a
+    #     # redundant 'test_'
+    #     if IS_WINDOWS and binary.suffix != ".exe":
+    #         continue
 
-        if binary.name.startswith("test_"):
-            if IS_WINDOWS:
-                # Get rid of the ".exe"
-                test_name = binary.stem
-            else:
-                test_name = binary.name
-        else:
-            test_name = f"test_{binary.name}"
+    #     if binary.name.startswith("test_"):
+    #         if IS_WINDOWS:
+    #             # Get rid of the ".exe"
+    #             test_name = binary.stem
+    #         else:
+    #             test_name = binary.name
+    #     else:
+    #         test_name = f"test_{binary.name}"
 
-        if test_name not in ALLOWLISTED_TEST:
-            continue
+    #     if test_name not in ALLOWLISTED_TEST:
+    #         continue
 
-        maybe_existing_case = generate_test_case(
-            getattr(GTest, test_name, None), binary, test_name
-        )
-        setattr(
-            GTest, test_name, maybe_existing_case,
-        )
+    #     maybe_existing_case = generate_test_case(
+    #         getattr(GTest, test_name, None), binary, test_name
+    #     )
+    #     setattr(
+    #         GTest, test_name, maybe_existing_case,
+    #     )
 
     # Don't 'save_xml' since gtest does that for us and we don't want to
     # duplicate it for these test cases
