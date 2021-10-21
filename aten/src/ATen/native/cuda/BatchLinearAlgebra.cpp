@@ -1930,6 +1930,8 @@ static void apply_lu_factor(const Tensor& input, const Tensor& pivots, const Ten
   // MAGMA does not work with batch_size == 0.
   // CuSolver does not work when the matrices have no elements
   if (input.numel() == 0) {
+    // zero out the infos as it will have one element if the input is a matrix
+    infos.zero_();
     return;
   }
 #ifdef USE_CUSOLVER
