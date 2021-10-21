@@ -151,17 +151,9 @@ TORCH_LIBRARY_IMPL(quantized, CPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::linear_relu_dynamic_mkldnn"), TORCH_FN(QLinearDynamicInt8Mkldnn<true>::run));
 }
 
-TORCH_LIBRARY_IMPL(_quantized, CPU, m) {
-  m.impl(TORCH_SELECTIVE_NAME("_quantized::linear_dynamic_mkldnn"), TORCH_FN(QLinearDynamicInt8Mkldnn<false>::run));
-}
-
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::linear_dynamic_mkldnn"), TORCH_FN(QLinearDynamicInt8Mkldnn<false>::run));
   m.impl(TORCH_SELECTIVE_NAME("quantized::linear_relu_dynamic_mkldnn"), TORCH_FN(QLinearDynamicInt8Mkldnn<true>::run));
-}
-
-TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
-  m.impl(TORCH_SELECTIVE_NAME("_quantized::linear_dynamic_mkldnn"), TORCH_FN(QLinearDynamicInt8Mkldnn<false>::run));
 }
 
 } // namespace

@@ -120,10 +120,6 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::linear_relu_mkldnn"), TORCH_FN(QLinearInt8Mkldnn<true>::run));
 }
 
-TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
-  m.impl(TORCH_SELECTIVE_NAME("_quantized::linear_mkldnn"), TORCH_FN(QLinearInt8Mkldnn<false>::run));
-}
-
 } // namespace
 } // namespace native
 } // namespace at

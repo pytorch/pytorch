@@ -303,16 +303,6 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose3d_prepack_mkldnn"), TORCH_FN(QConvPackWeightInt8Mkldnn<3>::run_deconv));
 }
 
-TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
-  // Conv
-  m.impl(TORCH_SELECTIVE_NAME("_quantized::conv2d_prepack_mkldnn"), TORCH_FN(QConvPackWeightInt8Mkldnn<2>::run_conv));
-  m.impl(TORCH_SELECTIVE_NAME("_quantized::conv3d_prepack_mkldnn"), TORCH_FN(QConvPackWeightInt8Mkldnn<3>::run_conv));
-  // ConvTranspose
-  m.impl(TORCH_SELECTIVE_NAME("_quantized::conv_transpose1d_prepack_mkldnn"), TORCH_FN(QConv1dPackWeightInt8Mkldnn::run_deconv));
-  m.impl(TORCH_SELECTIVE_NAME("_quantized::conv_transpose2d_prepack_mkldnn"), TORCH_FN(QConvPackWeightInt8Mkldnn<2>::run_deconv));
-  m.impl(TORCH_SELECTIVE_NAME("_quantized::conv_transpose3d_prepack_mkldnn"), TORCH_FN(QConvPackWeightInt8Mkldnn<3>::run_deconv));
-}
-
 } // namespace
 } // namespace native
 } // namespace at

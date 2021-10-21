@@ -391,15 +391,6 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose3d_mkldnn"),  QConvInt8Mkldnn<3, false>::run);
 }
 
-TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
-  m.impl(TORCH_SELECTIVE_NAME("_quantized::conv2d_mkldnn"),      QConvInt8Mkldnn<2, false>::run);
-  m.impl(TORCH_SELECTIVE_NAME("_quantized::conv2d_relu_mkldnn"), QConvInt8Mkldnn<2, true>::run);
-
-  // transpose
-  m.impl(TORCH_SELECTIVE_NAME("_quantized::conv_transpose1d_mkldnn"),  QConv1dInt8Mkldnn<false>::run);
-  m.impl(TORCH_SELECTIVE_NAME("_quantized::conv_transpose2d_mkldnn"),  QConvInt8Mkldnn<2, false>::run);
-}
-
 } // namespace
 } // namespace native
 } // namespace at

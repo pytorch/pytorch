@@ -109,10 +109,6 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::linear_prepack_mkldnn"), TORCH_FN(QLinearPackWeightInt8Mkldnn::run));
 }
 
-TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
-  m.impl(TORCH_SELECTIVE_NAME("_quantized::linear_prepack_mkldnn"), TORCH_FN(QLinearPackWeightInt8Mkldnn::run));
-}
-
 } // namespace
 } // namespace native
 } // namespace at
