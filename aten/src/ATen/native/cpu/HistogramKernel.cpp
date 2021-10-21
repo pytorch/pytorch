@@ -3,6 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
+#include <c10/util/irange.h>
 
 #include <algorithm>
 #include <mutex>
@@ -121,7 +122,7 @@ void histogramdd_cpu_contiguous(Tensor& hist, const TensorList& bin_edges,
         Tensor hist_local = at::zeros(hist.sizes(), hist.dtype());
 
         std::vector<at::indexing::TensorIndex> indices(D, 0);
-        for (int64_t i = start; i < end; ++i) {
+        for (const auto i : c10::irange(start, end)) {
             bool skip_elt = false;
 
             for (int64_t dim = 0; dim < D; dim++) {
