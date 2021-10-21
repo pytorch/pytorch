@@ -67,6 +67,7 @@ try:
     from quantization.fx.test_quantize_fx import TestFuseFx  # noqa: F401
     from quantization.fx.test_quantize_fx import TestQuantizeFx  # noqa: F401
     from quantization.fx.test_quantize_fx import TestQuantizeFxOps  # noqa: F401
+    from quantization.fx.test_quantize_fx import TestQuantizeFxOpsNew  # noqa: F401
     from quantization.fx.test_quantize_fx import TestQuantizeFxModels  # noqa: F401
 except ImportError:
     # In FBCode we separate FX out into a separate target for the sake of dev
@@ -88,7 +89,10 @@ except ImportError:
     pass
 
 # Backward Compatibility. Tests serialization and BC for quantized modules.
-from quantization.bc.test_backward_compatibility import TestSerialization  # noqa: F401
+try:
+    from quantization.bc.test_backward_compatibility import TestSerialization  # noqa: F401
+except ImportError:
+    pass
 
 # JIT Graph Mode Quantization
 from quantization.jit.test_quantize_jit import TestQuantizeJit  # noqa: F401

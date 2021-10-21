@@ -1,6 +1,8 @@
 #include <ATen/ATen.h>
+#include <ATen/ceil_div.h>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
+#include <ATen/cuda/ScanUtils.cuh>
 #include <ATen/native/Resize.h>
 #include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/cuda/SortingRadixSelect.cuh>
@@ -13,6 +15,14 @@ using namespace at::native;
 namespace at {
 namespace native {
 namespace {
+
+template <typename T>
+struct AddOp {
+  __device__ __forceinline__ T operator()(T const &lhs, T const &rhs) {
+    return (lhs + rhs);
+  }
+};
+
 template <typename T, typename IndexType, int Dim, bool Order>
 C10_LAUNCH_BOUNDS_1(1024)
 __global__ void gatherTopK(at::cuda::detail::TensorInfo<T, IndexType> input,
@@ -30,7 +40,7 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<T, IndexType> input,
                            IndexType indicesWithinSliceStride) {
   // Indices are limited to integer fp precision, so counts can fit in
   // int32, regardless of IndexType
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
   __shared__ int smem[64];
 #else
   __shared__ int smem[32]; // one per each warp, up to warp limit
@@ -74,7 +84,7 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<T, IndexType> input,
   // All threads need to participate in the loop and the prefix sum,
   // but not necessarily in the load; hence loop bounds being rounded
   // up to a multiple of the block dim.
-  IndexType numIterations = THCRoundUp(inputSliceSize, (IndexType) blockDim.x);
+  IndexType numIterations = round_up(inputSliceSize, (IndexType) blockDim.x);
   IndexType writeIndexStart = 0;
 
   for (IndexType i = threadIdx.x; i < numIterations; i += blockDim.x) {
@@ -91,7 +101,8 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<T, IndexType> input,
 
     int index;
     int carry;
-    exclusiveBinaryPrefixScan<int, true>(smem, hasTopK, &index, &carry, AddOp<int>());
+    at::cuda::exclusiveBinaryPrefixScan<int, true>(
+        smem, hasTopK, &index, &carry, AddOp<int>());
 
     if (hasTopK) {
       int writeIndex = writeIndexStart + index;
@@ -124,7 +135,8 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<T, IndexType> input,
 
     int index;
     int carry;
-    exclusiveBinaryPrefixScan<int, true>(smem, hasTopK, &index, &carry, AddOp<int>());
+    at::cuda::exclusiveBinaryPrefixScan<int, true>(
+        smem, hasTopK, &index, &carry, AddOp<int>());
 
     if (hasTopK && index < topKRemaining) {
       int writeIndex = writeIndexStart + index;
@@ -254,7 +266,7 @@ TORCH_IMPL_FUNC(topk_out_cuda)
     dim3 grid;                                                            \
     TORCH_INTERNAL_ASSERT(getGridFromTiles(inputSlices, grid), "Too many slices to sort"); \
                                                                           \
-    dim3 block(std::min(at::cuda::ATenCeilDiv(sliceSize, (int64_t) C10_WARP_SIZE)*(int64_t) C10_WARP_SIZE, (int64_t) 1024)); \
+    dim3 block(std::min(at::ceil_div(sliceSize, (int64_t) C10_WARP_SIZE)*(int64_t) C10_WARP_SIZE, (int64_t) 1024)); \
                                                                           \
     /* This is used as a template parameter to calculate indices. */      \
     /* We only specialize it if all collapsed dim sizes are the */        \
