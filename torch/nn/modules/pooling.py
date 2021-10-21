@@ -224,7 +224,7 @@ class MaxPool3d(_MaxPoolNd):
         >>> m = nn.MaxPool3d(3, stride=2)
         >>> # pool of non-square window
         >>> m = nn.MaxPool3d((3, 2, 2), stride=(2, 1, 2))
-        >>> input = torch.randn(20, 16, 50,44, 31)
+        >>> input = torch.randn(20, 16, 50, 44, 31)
         >>> output = m(input)
 
     .. _link:
