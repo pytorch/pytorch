@@ -420,7 +420,7 @@ Tensor arctan2(const Tensor& self, const Tensor& other) {
 }
 
 Tensor& arctan2_(Tensor& self, const Tensor& other) {
-  return at::atan2_(self, other);
+  return self.atan2_(other);
 }
 
 Tensor& arctan2_out(const Tensor& self, const Tensor& other, Tensor& result) {
