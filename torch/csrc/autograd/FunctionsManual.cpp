@@ -4104,6 +4104,27 @@ Tensor cat_jvp(at::TensorList tensors, int64_t dim) {
   return out_fw_grad;
 }
 
+Tensor stack_jvp(at::TensorList tensors, int64_t dim) {
+  // Basically copy of cat_jvp above
+  // TOD0: consolidate with the logic of cat_jvp
+  Tensor out_fw_grad;
+
+  auto any_defined = false;
+  for (const auto& t: tensors) {
+    any_defined |= isFwGradDefined(t);
+  }
+
+  if (any_defined) {
+    std::vector<Tensor> fw_grads;
+
+    for (auto& t: tensors) {
+      fw_grads.push_back(isFwGradDefined(t)? t._fw_grad(/*level*/ 0): at::zeros_like(t));
+    }
+    out_fw_grad = at::stack(fw_grads, dim);
+  }
+  return out_fw_grad;
+}
+
 Tensor cumprod_jvp(Tensor self_t, Tensor self_p, Tensor result, int dim) {
   // Generic formula when no 0. is involved
   Tensor gradient = (self_t / self_p).cumsum(dim) * result;

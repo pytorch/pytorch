@@ -1,11 +1,24 @@
 import torch
 from typing import Tuple, List
+import torch.autograd.forward_ad as fwAD
+from torch._vmap_internals import _vmap  # can we replace with use of is_grads_batched=True
 
 # Utility functions
 
-def _as_tuple(inp, arg_name, fn_name):
+def _as_tuple_nocheck(x):
+    if isinstance(x, tuple):
+        return x
+    elif isinstance(x, list):
+        return tuple(x)
+    else:
+        return x,
+
+def _as_tuple(inp, arg_name=None, fn_name=None):
     # Ensures that inp is a tuple of Tensors
     # Returns whether or not the original inp was a tuple and the tupled version of the input
+    if arg_name is None and fn_name is None:
+        return _as_tuple_nocheck(inp)
+
     is_inp_tuple = True
     if not isinstance(inp, tuple):
         inp = (inp,)
@@ -408,7 +421,66 @@ def _construct_standard_basis_for(tensors: Tuple[torch.Tensor, ...], tensor_nume
     return chunks
 
 
-def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False):
+def _jacfwd(func, inputs, strict=False, vectorize=False):
+    if strict:
+        raise RuntimeError('torch.autograd.functional.jacobian: `strict=True` '
+                           'and `forward_ad=True` are not supported together (yet). '
+                           'Please either set `strict=False` or '
+                           '`forward_ad=False`.')
+    is_inputs_tuple, inputs = _as_tuple(inputs, "inputs", "jacobian")
+    outputs = func(*inputs)
+    is_outputs_tuple, outputs = _as_tuple(outputs,
+                                          "outputs of the user-provided function",
+                                          "jacobian")
+    if vectorize:
+        # See NOTE: [Computing jacobian with vmap and grad for multiple outputs]
+        if strict:
+            raise RuntimeError('torch.autograd.functional.jacobian: `strict=True` '
+                               'and `vectorized=True` are not supported together. '
+                               'Please either set `strict=False` or '
+                               '`vectorize=False`.')
+        input_numels = tuple(input.numel() for input in inputs)
+
+        # Step 1: Prepare tangents
+        tangents = _construct_standard_basis_for(inputs, input_numels)
+
+        # Step 2: Compute vmap over computation with dual tensors
+        def jvp(tangents):
+            with fwAD.dual_level():
+                dual_inputs = tuple(
+                    fwAD.make_dual(input, tangent.view_as(input)) for input, tangent in zip(inputs, tangents))
+                dual_outputs = _as_tuple(func(*dual_inputs))
+                jv = []
+                for dual_out in dual_outputs:
+                    primal, tangent = fwAD.unpack_dual(dual_out)
+                    if tangent is not None:
+                        jv.append(tangent)
+                    else:
+                        jv.append(torch.zeros_like(primal))
+                return tuple(jv)
+
+        outputs_before_split = _vmap(jvp)(tangents)
+
+        # Step 3: for each of the output tangents, split along dim 0
+        jacobian_input_output = []
+        for jac, output_i in zip(outputs_before_split, outputs):
+            jacobian_output_i_output = []
+            for jac, input_j in zip(jac.split(input_numels, dim=0), inputs):
+                # We need to transpose the Jacobian because in forward AD, the
+                # batch dimension represents that of the inputs
+                jacobian_input_i_output_j = jac.permute(*range(1, jac.ndim), 0) \
+                    .reshape(tuple([*output_i.shape, *input_j.shape]))
+
+                jacobian_output_i_output.append(jacobian_input_i_output_j)
+            jacobian_input_output.append(jacobian_output_i_output)
+
+        # Omit [Step 4] because everything is already transposed w/ forward AD
+        return _tuple_postprocess(jacobian_input_output, (is_outputs_tuple, is_inputs_tuple))
+    else:
+        raise NotImplementedError("Only vectorized path is implemented")
+
+
+def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False, forward_ad=False):
     r"""Function that computes the Jacobian of a given function.
 
     Args:
@@ -472,6 +544,13 @@ def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False):
          tensor([[3., 0.],
                  [0., 3.]]))
     """
+    if forward_ad:
+        if create_graph:
+            raise RuntimeError('torch.autograd.functional.jacobian: `create_graph=True` '
+                               'and `forward_ad=True` are not supported together (yet). '
+                               'Please either set `strict=False` or '
+                               '`forward_ad=False`.')
+        return _jacfwd(func, inputs, strict, vectorize)
 
     with torch.enable_grad():
         is_inputs_tuple, inputs = _as_tuple(inputs, "inputs", "jacobian")
@@ -598,7 +677,7 @@ def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False):
 
         return _tuple_postprocess(jacobian, (is_outputs_tuple, is_inputs_tuple))
 
-def hessian(func, inputs, create_graph=False, strict=False, vectorize=False):
+def hessian(func, inputs, create_graph=False, strict=False, vectorize=False, forward_ad=False):
     r"""Function that computes the Hessian of a given scalar function.
 
     Args:
@@ -690,11 +769,18 @@ def hessian(func, inputs, create_graph=False, strict=False, vectorize=False):
         return out.squeeze()
 
     def jac_func(*inp):
+        # Why do we want to ensure the graph is always created in this case? when it is forward ad
+        # because someone might forget to pass inputs that are requires_grad=True?
+        # hmm, this is actually the inner one
+        # also, why does this inner one have to be a jacobian anyway, we
+        if forward_ad:
+            # Ensure the graph is created (and not detached)
+            inp = tuple(t.requires_grad_(True) for t in inp)
         jac = jacobian(ensure_single_output_function, inp, create_graph=True)
         _check_requires_grad(jac, "jacobian", strict=strict)
         return jac
 
-    res = jacobian(jac_func, inputs, create_graph=create_graph, strict=strict, vectorize=vectorize)
+    res = jacobian(jac_func, inputs, create_graph=create_graph, strict=strict, vectorize=vectorize, forward_ad=forward_ad)
     return _tuple_postprocess(res, (is_inputs_tuple, is_inputs_tuple))
 
 
