@@ -6755,21 +6755,34 @@ class TestNN(NNTestCase):
         c = torch.tensor([6])
         sequences = [a, b, c]
 
-        # batch_first = true
-        batch_first = True
-        padded_sequences = rnn_utils.pad_sequence(sequences, batch_first=batch_first)
         lengths = torch.as_tensor([v.size(0) for v in sequences])
-        unpadded_sequences = rnn_utils.unpad_sequence(padded_sequences, lengths, batch_first=batch_first)
-        _compatibility_test(sequences, unpadded_sequences)
+        for batch_first in [True, False]:
+            padded_sequences = rnn_utils.pad_sequence(sequences, batch_first=batch_first)
+            unpadded_sequences = rnn_utils.unpad_sequence(padded_sequences, lengths, batch_first=batch_first)
+            _compatibility_test(sequences, unpadded_sequences)
 
-        # batch_first = false
-        batch_first = False
-        padded_sequences = rnn_utils.pad_sequence(sequences, batch_first=batch_first)
-        lengths = torch.as_tensor([v.size(0) for v in sequences])
-        unpadded_sequences = rnn_utils.unpad_sequence(padded_sequences, lengths, batch_first=batch_first)
-        _compatibility_test(sequences, unpadded_sequences)
+        # more dimensions
+        maxlen = 9
+        for num_dim in (0, 1, 2, 3):
+            sequences = []
+            trailing_dims = [4] * num_dim
+            for i in range(1, maxlen + 1):
+                seq_len = i * i
+                sequences.append(torch.rand(seq_len, 5, *trailing_dims))
+            random.shuffle(sequences)
+            
+            lengths = torch.as_tensor([v.size(0) for v in sequences])
+            for batch_first in [True, False]:
+                padded_sequences = rnn_utils.pad_sequence(sequences, batch_first=batch_first)
+                unpadded_sequences = rnn_utils.unpad_sequence(padded_sequences, lengths, batch_first=batch_first)
+                _compatibility_test(sequences, unpadded_sequences)
 
     def test_pack_sequence(self):
+        def pad(tensor, length):
+            return torch.cat(
+                [tensor.data, tensor.data.new(
+                    length - tensor.size(0), *tensor.size()[1:]).zero_()])
+        
         def _compatibility_test(sequences, lengths, batch_first, enforce_sorted=False):
             padded = rnn_utils.pad_sequence(sequences, batch_first)
             packed = rnn_utils.pack_sequence(sequences, enforce_sorted)
@@ -6802,6 +6815,27 @@ class TestNN(NNTestCase):
         self.assertEqual(packed_enforce_sorted.data.data, expected)
         self.assertTrue(packed_enforce_sorted.sorted_indices is None)
         self.assertTrue(packed_enforce_sorted.unsorted_indices is None)
+
+        # more dimensions
+        maxlen = 9
+        for num_dim in (0, 1, 2, 3):
+            sequences = []
+            trailing_dims = [4] * num_dim
+            for i in range(1, maxlen + 1):
+                seq_len = i * i
+                sequences.append(torch.rand(seq_len, 5, *trailing_dims))
+            random.shuffle(sequences)
+            expected = []
+            for seq in sequences:
+                expected.append(pad(seq, maxlen * maxlen))
+            # batch first = true
+            expected = torch.stack(expected)
+            padded = rnn_utils.pad_sequence(sequences, True)
+            self.assertEqual(padded, expected)
+
+            # batch first = false
+            padded = rnn_utils.pad_sequence(sequences)
+            self.assertEqual(padded, expected.transpose(0, 1))
 
         with self.assertRaisesRegex(RuntimeError, 'must be sorted in decreasing order'):
             rnn_utils.pack_sequence([b, c, a], enforce_sorted=True)
@@ -6846,6 +6880,20 @@ class TestNN(NNTestCase):
         packed_sequences = rnn_utils.pack_sequence(sequences)
         unpacked_sequences = rnn_utils.unpack_sequence(packed_sequences)
         _compatibility_test(sequences, unpacked_sequences)
+
+        # more dimensions
+        maxlen = 9
+        for num_dim in (0, 1, 2, 3):
+            sequences = []
+            trailing_dims = [4] * num_dim
+            for i in range(1, maxlen + 1):
+                seq_len = i * i
+                sequences.append(torch.rand(seq_len, 5, *trailing_dims))
+            random.shuffle(sequences)
+            
+            packed_sequences = rnn_utils.pack_sequence(sequences)
+            unpacked_sequences = rnn_utils.unpack_sequence(packed_sequences)
+            _compatibility_test(sequences, unpacked_sequences)
 
     def test_pack_padded_sequence(self):
         def generate_test_case(sorted_lengths, should_shuffle):
