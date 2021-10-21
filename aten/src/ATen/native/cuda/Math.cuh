@@ -309,7 +309,7 @@ static inline C10_HOST_DEVICE scalar_t calc_i0(scalar_t _x) {
   auto coeff_pair = chebyshev_coefficients_i0e_B<scalar_t>();
   auto B = std::get<0>(coeff_pair);
   auto len = std::get<1>(coeff_pair);
-  return static_cast<scalar_t>(::exp(x) * chbevl(scalar_t{32.0} / x - scalar_t{2.0}, B, len) / ::sqrt(x));
+  return (::exp(x) * chbevl(scalar_t{32.0} / x - scalar_t{2.0}, B, len) / ::sqrt(x));
 }
 
 template <typename scalar_t>
@@ -322,13 +322,13 @@ static inline C10_HOST_DEVICE scalar_t calc_i0e(scalar_t _x) {
     auto A = std::get<0>(coeff_pair);
     auto len = std::get<1>(coeff_pair);
     scalar_t y = (_x / scalar_t{2.0}) - scalar_t{2.0};
-    return static_cast<scalar_t>(chbevl(y, A, len));
+    return (chbevl(y, A, len));
   }
 
   auto coeff_pair = chebyshev_coefficients_i0e_B<scalar_t>();
   auto B = std::get<0>(coeff_pair);
   auto len = std::get<1>(coeff_pair);
-  return static_cast<scalar_t>(chbevl(scalar_t{32.0} / _x - scalar_t{2.0}, B, len) / ::sqrt(_x));
+  return (chbevl(scalar_t{32.0} / _x - scalar_t{2.0}, B, len) / ::sqrt(_x));
 }
 
 template <typename scalar_t>
