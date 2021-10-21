@@ -392,8 +392,8 @@ def kaiming_uniform_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu'):
         >>> nn.init.kaiming_uniform_(w, mode='fan_in', nonlinearity='relu')
     """
     if has_torch_function_variadic(tensor, a, mode, nonlinearity):
-        return handle_torch_function(kaiming_uniform_,
-            (tensor, a, mode, nonlinearity),
+        return handle_torch_function(
+            kaiming_uniform_, (tensor, a, mode, nonlinearity),
             tensor=tensor, a=a, mode=mode, nonlinear=nonlinearity)
 
     if 0 in tensor.shape:
