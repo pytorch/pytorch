@@ -1,18 +1,17 @@
 #pragma once
 
 #include <ATen/core/ATenGeneral.h>
-#include <ATen/Tensor.h>
-#include <ATen/Utils.h>
-#include <ATen/core/ATenGeneral.h>
 #include <ATen/core/Generator.h>
 #include <ATen/CPUGeneratorImpl.h>
 #include <ATen/core/LegacyTypeDispatch.h>
+#include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/detail/HIPHooksInterface.h>
 #include <ATen/detail/ORTHooksInterface.h>
 #include <c10/util/Exception.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/core/QEngine.h>
+#include <c10/util/irange.h>
 
 #include <memory>
 #include <mutex>
@@ -150,7 +149,8 @@ class TORCH_API Context {
   //    }
 
   bool deterministicAlgorithms() const;
-  void setDeterministicAlgorithms(bool);
+  bool deterministicAlgorithmsWarnOnly() const;
+  void setDeterministicAlgorithms(bool, bool);
 
   // Note [Writing Nondeterministic Operations]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -235,6 +235,7 @@ class TORCH_API Context {
   bool enabled_cudnn = true;
   bool deterministic_cudnn = false;
   bool _deterministic_algorithms = false;
+  bool _deterministic_algorithms_warn_only = false;
   bool benchmark_cudnn = false;
   bool allow_tf32_cudnn = true;
   bool allow_tf32_cublas = true;
@@ -351,7 +352,7 @@ static inline void manual_seed(uint64_t seed) {
   // available. In that case, we must not seed CUDA; it will fail!
   const auto num_gpus = detail::getCUDAHooks().getNumGPUs();
   if (hasCUDA() && num_gpus > 0) {
-    for (int i = 0; i < num_gpus; i++) {
+    for (const auto i : c10::irange(num_gpus)) {
       auto cuda_gen = globalContext().defaultGenerator(
         Device(at::kCUDA, static_cast<c10::DeviceIndex>(i))
       );

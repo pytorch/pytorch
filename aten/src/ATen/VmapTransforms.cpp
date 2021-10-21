@@ -94,7 +94,7 @@ VmapDimVector VmapPhysicalView::getPhysicalStrides(IntArrayRef logical_strides) 
 static BatchDims computeFrontBatchDimsFromLevels(std::bitset<kVmapNumLevels> levels_bitset) {
   BatchDims bdims;
   int64_t dim = 0;
-  for (int64_t level = 0; level < kVmapNumLevels; level++) {
+  for (const auto level : c10::irange(kVmapNumLevels)) {
     if (!levels_bitset[level]) {
       continue;
     }
@@ -219,7 +219,7 @@ MultiBatchVmapTransform::logicalToPhysical(TensorList logical_tensors) {
   VmapDimVector batch_sizes(num_batch_dims, 1);
   for (const auto& physical_tensor : physical_tensors) {
     auto physical_sizes = physical_tensor.sizes();
-    for (int64_t dim = 0; dim < num_batch_dims; dim++) {
+    for (const auto dim : c10::irange(num_batch_dims)) {
       if (physical_sizes[dim] != 1) {
         batch_sizes[dim] = physical_sizes[dim];
       }
