@@ -7,6 +7,7 @@ import torch.fx
 
 class AccOpProperty(Flag):
     pointwise = auto()
+    quantized = auto()
 
 acc_op_properties: DefaultDict[Callable, Set[AccOpProperty]] = defaultdict(set)
 acc_ops_with_property: DefaultDict[AccOpProperty, Set[Callable]] = defaultdict(set)
