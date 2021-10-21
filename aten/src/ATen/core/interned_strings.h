@@ -266,6 +266,8 @@ namespace c10 {
   _(aten, ne_)                       \
   _(aten, not_equal)                 \
   _(aten, not_equal_)                \
+  _(aten, nonzero)                   \
+  _(aten, argwhere)                  \
   _(aten, _ger)                      \
   _(aten, ger)                       \
   _(aten, outer)                     \
