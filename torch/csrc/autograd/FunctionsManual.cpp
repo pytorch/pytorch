@@ -3696,13 +3696,14 @@ bool any_variable_defined(const variable_list& variables) {
 // efficiently in such cases, however, as evaluating of each K_i will amount to calls
 // to ORGQR to be able to compute H_i_plus.
 
-// TODO: replace this function with calls to LARFB
-auto apply_householder_reflector(
+Tensor apply_simple_transformation(
     int64_t m, int64_t k,
-    const Tensor& v_full, const Tensor& t, Tensor& K,
+    const Tensor& u_full, const Tensor& v_full,
+    const Tensor& t, Tensor& K,
     bool modify_K_in_place = true,
-    bool left = true) -> Tensor {
-  // we assume v_full is a vector of dimension (..., m, 1), t is a scalar of dimension (..., 1)
+    bool condition_with_I = true,
+    bool left = true) {
+  // we assume u_full is a vector of dimension (..., m, 1), t is a scalar of dimension (..., 1)
 
   // TODO: matrix-vector products in the code below are dispatched to matrix-matrix products.
   // We either need to extend matmul to support batched matrix-vector products, or
@@ -3710,28 +3711,30 @@ auto apply_householder_reflector(
   // We could enable mv for inputs which are not batched, but it is not done to eliminate
   // the code duplication.
 
-  // returns (I - t v v^H) K
+  // returns (I - t u v^H) K
   if (left) {
     if (modify_K_in_place) {
-      auto v = v_full.narrow(-2, k, m - k);
-      auto u = v.mH().matmul(K.narrow(-2, k, m - k));
+      auto v = u_full.narrow(-2, k, m - k);
+      auto u = v_full.narrow(-2, k, m - k).mH().matmul(K.narrow(-2, k, m - k));
       K.narrow(-2, k, m - k).sub_((t.unsqueeze(-1) * v) * u);
       return K;
     }
     else {
-      return K - (t.unsqueeze(-1) * v_full) * v_full.mH().matmul(K);
+      auto transformation = (t.unsqueeze(-1) * u_full) * v_full.mH().matmul(K);
+      return condition_with_I ? K - transformation : -transformation;
     }
   }
   // returns K (I - t v v^H)
   else {
     if (modify_K_in_place) {
-      auto v = v_full.narrow(-2, k, m - k);
-      auto u = K.narrow(-1, k, m - k).matmul(t.unsqueeze(-1) * v);
+      auto v = u_full.narrow(-2, k, m - k);
+      auto u = K.narrow(-1, k, m - k).matmul(t.unsqueeze(-1) * v_full.narrow(-2, k, m - k));
       K.narrow(-1, k, m - k).sub_(u * v.mH());
       return K;
     }
     else {
-      return K - K.matmul(t.unsqueeze(-1) * v_full) * v_full.mH();
+      auto transformation = K.matmul(t.unsqueeze(-1) * u_full) * v_full.mH();
+      return condition_with_I ? K - transformation : -transformation;
     }
   }
 };
@@ -3786,10 +3789,19 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
     return std::make_tuple(v_grad, tau_grad.squeeze(-1));
   };
 
+  auto apply_householder_reflector = [m, modify_K_in_place](
+    int64_t k, const Tensor& v_full,
+    const Tensor& t, Tensor& K,
+    bool left = true) -> Tensor {
+    return apply_simple_transformation(
+      m, k, v_full, v_full, t, K, modify_K_in_place, /*condition_with_I=*/true, left
+    );
+  };
+
   // K <- H_0^{-1} @ K
   K = apply_householder_reflector(
-    m, 0, input.narrow(-1, 0, 1), sigma.narrow(-1, 0, 1),
-    K, modify_K_in_place, /*left=*/true
+    0, input.narrow(-1, 0, 1), sigma.narrow(-1, 0, 1),
+    K, /*left=*/true
   );
   for (int64_t i = 0; i < k; ++i) {
     // NOTE: narrow will unsqueeze(-1)
@@ -3806,12 +3818,12 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
       auto v_i_next = input.narrow(-1, i + 1, 1);
       auto s_i_next = sigma.narrow(-1, i + 1, 1);
       K = apply_householder_reflector(
-        m, i + 1, v_i_next, s_i_next,
-        K, modify_K_in_place, /*left=*/true
+        i + 1, v_i_next, s_i_next,
+        K, /*left=*/true
       );
       K = apply_householder_reflector(
-        m, i, v_i, t_i,
-        K, modify_K_in_place, /*left=*/false
+        i, v_i, t_i,
+        K, /*left=*/false
       );
     }
   }
@@ -3821,6 +3833,35 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
   input_grad.tril_(-1);
 
   return std::make_tuple(input_grad, tau_grad);
+}
+
+Tensor householder_product_jvp(
+    const Tensor& dV,
+    const Tensor& dtau,
+    const Tensor& prod,
+    const Tensor& V_,
+    const Tensor& tau
+) {
+  auto m = V_.size(-2);
+  auto k = tau.size(-1);
+
+  // forward operates only over the lower triangular part with the assumption
+  // that the diagonal of input is filled with 1s.
+  auto V = V_.tril(-1);
+  V.diagonal(0, -2, -1).fill_(1.0);
+
+  // compute sigma such that
+  // H(sigma_i) == H(tau_i)^{-1}.
+  // If the input to householder_product comes from GEQRF,
+  // we will never encounter ||v_i||^2 tau_i == 1, so H(tau_i) will always be invertible.
+  // This follows from the documentation https://www.netlib.org/lapack/lug/node128.html,
+  // and tau always satisfying the condition |tau|^2 ||v||^2 == 2 * Re(tau).
+  auto V_first_k_cols = V.narrow(-1, 0, k);
+  auto V_first_k_cols_norm_squared = (
+    V_first_k_cols * V_first_k_cols.conj()
+  ).sum(-2);
+  auto sigma = tau / (tau * V_first_k_cols_norm_squared - 1.0);
+  return dV;
 }
 
 std::tuple<Tensor, Tensor> polar_backward(
