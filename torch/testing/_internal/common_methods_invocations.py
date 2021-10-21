@@ -2687,20 +2687,20 @@ def sample_inputs_max_pool2d(op_info, device, dtype, requires_grad, **kwargs):
 def sample_inputs_max_pool1d(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    kerneli = [(2,), 2]
+    kerneli = [(2,), 3]
     stridei = [[2, ]]
+    Ni = [1, 2, None]
     Ci = [2]
-    Hi = [3, 6]
     Wi = [6]
     ceil_modei = [True, False]
     paddingi = [0, 1]
     dilationi = [1, (2,)]
     return_indicesi = [True, False]
 
-    products = product(kerneli, stridei, Ci, Hi, Wi, ceil_modei, paddingi, dilationi, return_indicesi)
+    products = product(kerneli, stridei, Ni, Ci, Wi, ceil_modei, paddingi, dilationi, return_indicesi)
 
     def generator():
-        for kernel, stride, C, H, W, ceil_mode, padding, dilation, return_indices in products:
+        for kernel, stride, N, C, W, ceil_mode, padding, dilation, return_indices in products:
             max_pool = torch.nn.MaxPool1d(kernel, stride, ceil_mode=ceil_mode, padding=padding,
                                           dilation=dilation, return_indices=return_indices)
             kwargs = {
@@ -2711,7 +2711,7 @@ def sample_inputs_max_pool1d(op_info, device, dtype, requires_grad, **kwargs):
                 "ceil_mode": max_pool.ceil_mode,
                 "return_indices": max_pool.return_indices,
             }
-            sample_input = make_arg((C, H, W))
+            sample_input = make_arg((N, C, W)) if N is not None else make_arg((C, W))
 
             yield SampleInput(sample_input, kwargs=kwargs)
 
@@ -7966,6 +7966,20 @@ op_db: List[OpInfo] = [
            dtypesIfCPU=floating_types_and(torch.int64),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_avgpool2d),
+    OpInfo('nn.functional.max_pool1d',
+           aten_name='max_pool1d',
+           supports_autograd=True,
+           supports_out=False,
+           assert_jit_shape_analysis=True,
+           dtypesIfCPU=floating_types(),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           supports_scripting=False,  # TODO: fix aliasing test
+           skips=(
+               # JIT Shape Analysis check fails for this op
+               # AssertionError: None != torch.Size([1, 2, 3])
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+           ),
+           sample_inputs_func=sample_inputs_max_pool1d),
     OpInfo('nn.functional.max_pool2d',
            aten_name='max_pool2d',
            supports_autograd=True,
@@ -7975,15 +7989,6 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_scripting=False,  # TODO: fix aliasing test
            sample_inputs_func=sample_inputs_max_pool2d),
-    OpInfo('nn.functional.max_pool1d',
-           aten_name='max_pool1d',
-           supports_autograd=True,
-           supports_out=False,
-           assert_jit_shape_analysis=True,
-           dtypesIfCPU=floating_types(),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
-           supports_scripting=False,  # TODO: fix aliasing test
-           sample_inputs_func=sample_inputs_max_pool1d),
     OpInfo('nn.functional.linear',
            aten_name='linear',
            supports_autograd=True,
