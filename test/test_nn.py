@@ -16348,11 +16348,10 @@ class TestNNDeviceType(NNTestCase):
     @onlyCUDA
     def test_layernorm_half_precision(self):
        width = 128
-       input = torch.rand((1,5,width))*0.1
-       input = input.cuda().half()
+       input = torch.rand((1,5,width, device="cuda", dtype=torch.half))*0.1
        normalized_shape = (width,)
-       weight = torch.ones(width).cuda().half()
-       bias = torch.zeros(width).cuda().half()
+       weight = torch.ones(width, device="cuda", dtype=torch.half)
+       bias = torch.zeros(width, device="cuda", dtype=torch.half)
        eps = 1e-5
 
        output_fp16 = torch.layer_norm(input, normalized_shape, weight, bias, eps)
