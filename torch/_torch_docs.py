@@ -8236,23 +8236,26 @@ row_stack(tensors, *, out=None) -> Tensor
 Alias of :func:`torch.vstack`.
 """)
 
-add_docstr(torch.round,
-           r"""
+add_docstr(torch.round, r"""
 round(input, *, decimals=0, out=None) -> Tensor
 
-Returns a new tensor with each of the elements of :attr:`input` rounded
-to the closest integer.
+Rounds elements of :attr:`input` to the nearest integer.
 
 .. note::
-    This function rounds to even in halfway cases
-    Eg. round(2.5) will be 2.
+    This function implements the "round half to even" to
+    break ties when a number is equidistant from two 
+    integers (e.g. `round(2.5)` is 2).
+    
+    When the :attr:\`decimals\` argument is specified the
+    algorithm used is similar to NumPy's `around`. This 
+    algorithm is fast but inexact and it can easily
+    overflow for low precision dtypes.
+    Eg. `round(tensor([10000], dtype=torch.float16), decimals=3)` is `inf`.
 
-    The algorithm with decimals is modeled after the algorithm
-    of NumPy's `around`. This algorithm is fast but inexact and
-    it can easily overflow for low precision dtypes.
-    Eg. round(tensor([10000], dtype=torch.float16), decimals=3) -> `inf`
-
-    See also :func:`torch.ceil`, :func:`torch.floor`, :func:`torch.trunc`.
+.. seealso::
+    :func:`torch.ceil`, which rounds up.
+    :func:`torch.floor`, which rounds down.
+    :func:`torch.trunc`, which rounds towards zero.
 
 Args:
     {input}
@@ -8265,16 +8268,19 @@ Keyword args:
 
 Example::
 
-    >>> a = torch.randn(4)
-    >>> a
-    tensor([ 0.9920,  0.6077,  0.9734, -1.0362])
-    >>> torch.round(a)
-    tensor([ 1.,  1.,  1., -1.])
-    >>> # Halfway values
+    >>> torch.round(torch.tensor((4.7, -2.3, 9.1, -7.7)))
+    tensor([ 5.,  -2.,  9., -8.])
+    
+    >>> # Values equidistant from two integers are rounded towards the
+    >>> #   the nearest even value (zero is treated as even)
     >>> torch.round(torch.tensor([-0.5, 0.5, 1.5, 2.5]))
     tensor([-0., 0., 2., 2.])
+    
+    >>> # A positive decimal argument rounds to the to that decimal place
     >>> torch.round(torch.tensor([0.1234567]), decimals=3)
     tensor([0.1230])
+    
+    >>> # A negative decimals argument rounds to the left of the decimal
     >>> torch.round(torch.tensor([1200.1234567]), decimals=-3)
     tensor([1000.])
 """.format(**common_args))
