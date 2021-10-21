@@ -217,8 +217,9 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
 
   if (expandedValue.numel() < num_indices * nElemBefore * sliceSize) {
     auto expanded_size = infer_size_dimvector(expandedValue.sizes(), linearIndex.sizes());
-    expandedValue = expandedValue.expand(expanded_size).contiguous();
+    expandedValue = expandedValue.expand(expanded_size);
   }
+  expandedValue = expandedValue.contiguous();
 
   if (num_indices > 0 && sliceSize > 0) {
       const bool permuted = !src.is_contiguous();
