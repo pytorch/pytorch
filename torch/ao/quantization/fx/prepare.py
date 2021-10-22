@@ -244,6 +244,7 @@ def get_target_activation_dtype_for_node(
     qhandler: Optional[QuantizeHandler],
     modules: Dict[str, torch.nn.Module],
     cache_for_no_tensor_check: Dict[Node, bool],
+    node_name_to_target_dtype: Dict[str, Any],
 ) -> Optional[torch.dtype]:
     """
     Returns the expected dtype of the input and output of this node after
@@ -278,6 +279,11 @@ def get_target_activation_dtype_for_node(
 
         # get qconfig to determine the eventual dtype of this node
         if qconfig is not None:
+            if qhandler is not None and qhandler.is_general_tensor_shape_op():
+                first_arg = node.args[0]
+                if type(first_arg) is Node:
+                    first_arg_dtype = node_name_to_target_dtype[first_arg.name]  # type: ignore[union-attr]
+                    return first_arg_dtype
             if qhandler is not None and qhandler.input_output_observed() and qhandler.is_output_quantized(qconfig):
                 act_dtype, weight_dtype, act_compute_dtype = \
                     get_qconfig_dtypes(qconfig)
@@ -915,7 +921,7 @@ def insert_observers_for_model(
         node_name_to_target_dtype[node.name] = get_target_activation_dtype_for_node(
             node, qconfig, inputs_seen_counter, outputs_seen_counter,
             input_quantized_idxs, output_quantized_idxs, qhandler,
-            modules, cache_for_no_tensor_check)
+            modules, cache_for_no_tensor_check, node_name_to_target_dtype)
 
     # Second, for nodes with known input dtypes, propagate them throughout the
     # graph. For example, if there is a call such as
