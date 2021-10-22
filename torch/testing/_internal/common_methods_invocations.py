@@ -2571,6 +2571,27 @@ def sample_inputs_histogram(op_info, device, dtype, requires_grad):
 
     return sample_inputs
 
+def sample_inputs_histogramdd(op_info, device, dtype, requires_grad):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    sizes = ((S, S), (S, S, S), (S, 1, S), (S, 0, S))
+    bin_ct_patterns = ((1, 1, 1, 1, 1), (2, 3, 2, 3, 2), (3, 2, 3, 2, 3))
+
+    sample_inputs = []
+    for size, bin_ct_pattern, weighted, density in product(sizes, bin_ct_patterns, [False, True], [False, True]):
+        input_tensor = make_arg(size)
+        bin_ct = bin_ct_pattern[:size[-1]]
+        weight_tensor = make_arg(size[:-1]) if weighted else None
+
+        sample_inputs.append(SampleInput(input_tensor, args=(bin_ct,),
+                                         kwargs=dict(weight=weight_tensor, density=density)))
+
+        bins_tensor = [make_arg(ct + 1) for ct in bin_ct]
+        sample_inputs.append(SampleInput(input_tensor, args=(bins_tensor,),
+                                         kwargs=dict(weight=weight_tensor, density=density)))
+
+    return sample_inputs
+
 def sample_inputs_bincount(op_info, device, dtype, requires_grad):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
@@ -6028,33 +6049,6 @@ def sample_inputs_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
 
     return list(gen_inputs())
 
-def sample_inputs_argwhere(op_info, device, dtype, requires_grad, **kwargs):
-    def generator():
-        yield SampleInput(torch.tensor([1, 0, 2, 0], dtype=dtype, device=device, requires_grad=requires_grad))
-
-        mask = torch.tensor([[0, 1, 0, 1, 0],
-                             [1, 1, 1, 1, 0],
-                             [0, 0, 0, 1, 0],
-                             [1, 0, 1, 1, 0],
-                             [1, 0, 0, 1, 0]], dtype=torch.bool, device=device)
-        t = make_tensor((S, S), dtype=dtype, device=device, requires_grad=requires_grad)
-        with torch.no_grad():
-            t[mask] = 0
-        yield SampleInput(t)
-
-        t = make_tensor((S, S), dtype=dtype, device=device, requires_grad=requires_grad, noncontiguous=True)
-        with torch.no_grad():
-            t[mask] = 0
-        yield SampleInput(t)
-
-        t = make_tensor((S, 0), dtype=dtype, device=device, requires_grad=requires_grad)
-        yield SampleInput(t)
-
-        yield SampleInput(torch.zeros((S,), dtype=dtype, device=device, requires_grad=requires_grad))
-        yield SampleInput(make_tensor((), dtype=dtype, device=device, requires_grad=requires_grad))
-
-    return list(generator())
-
 def sample_inputs_pairwise_distance(op_info, device, dtype, requires_grad, **kwargs):
     make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -8078,6 +8072,10 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            aliases=('linalg.matrix_exp',),
            sample_inputs_func=sample_inputs_matrix_exp,
+           # Needs to construct a 2nx2n matrix by copy_ ing into it
+           check_batched_grad=False,
+           check_batched_gradgrad=False,
+           supports_forward_ad=True,
            supports_out=False,
            ),
     OpInfo('matmul',
@@ -10030,6 +10028,16 @@ op_db: List[OpInfo] = [
                #                                          ~~~~~~ <--- HERE
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
            )),
+    OpInfo('histogramdd',
+           dtypes=_dispatch_dtypes(),  # histogramdd is only implemented on CPU
+           dtypesIfCPU=floating_types(),
+           sample_inputs_func=sample_inputs_histogramdd,
+           supports_autograd=False,
+           skips=(
+               # JIT tests don't work with Tensor keyword arguments
+               # https://github.com/pytorch/pytorch/issues/58507
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+           )),
     OpInfo('bincount',
            dtypes=integral_types_and(),
            sample_inputs_func=sample_inputs_bincount,
@@ -10680,14 +10688,6 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_grid_sample,
         supports_gradgrad=False,
         gradcheck_nondet_tol=1e-15,
-    ),
-    OpInfo(
-        "argwhere",
-        ref=np.argwhere,
-        dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
-        supports_out=False,
-        supports_autograd=False,
-        sample_inputs_func=sample_inputs_argwhere,
     ),
     ReductionOpInfo(
         'all',

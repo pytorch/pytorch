@@ -1747,10 +1747,6 @@ std::vector<Tensor> nonzero_numpy(const Tensor& self) {
   return self.nonzero().unbind(1);
 }
 
-Tensor argwhere(const Tensor& self) {
-  return self.nonzero();
-}
-
 Tensor & masked_scatter__cpu(Tensor& self, const Tensor & mask, const Tensor & source) {
   at::assert_no_internal_overlap(self);
   TORCH_CHECK(
