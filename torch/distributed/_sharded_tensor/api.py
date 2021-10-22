@@ -20,14 +20,15 @@ from torch.distributed._sharding_spec import (
     ShardingSpec,
 )
 from torch.distributed._sharding_spec._internals import (
+    _parse_and_validate_remote_device,
     check_tensor,
-    check_tensor_size_and_flatten,
+    flatten_tensor_size,
     get_split_size,
     get_chunked_dim_size,
     validate_non_overlapping_shards_metadata,
 )
 from torch.types import Number
-from .ops import sharded_linear
+from .ops import sharded_embedding, sharded_linear, uniform_
 
 # Tracking for sharded tensor objects.
 _sharded_tensor_lock = threading.Lock()
@@ -270,7 +271,7 @@ class ShardedTensor(object):
         if tensor_init_params.tensor_properties.memory_format != torch.contiguous_format:
             raise ValueError('Only torch.contiguous_format memory_format is currently supported')
 
-        dims = check_tensor_size_and_flatten(size)
+        dims = flatten_tensor_size(size)
 
         self._sharding_spec = sharding_spec
 
@@ -434,16 +435,19 @@ class ShardedTensor(object):
         process_group=None,
         init_rrefs=False,
     ):
-        # prepare initialization
-        sharded_tensor = cls.__new__(cls)
-        sharded_tensor._prepare_init(process_group=process_group, init_rrefs=init_rrefs)
-        current_rank = dist.get_rank(sharded_tensor._process_group)
-        world_size = dist.get_world_size(sharded_tensor._process_group)
+        # STEP 1: Validate the Shardmetadatas locally and across ranks
+        process_group = (
+            process_group
+            if process_group is not None
+            else distributed_c10d._get_default_group()
+        )
+        current_rank = dist.get_rank(process_group)
+        world_size = dist.get_world_size(process_group)
 
         local_shard_metadatas: List[ShardMetadata] = []
         local_sharded_tensor_metadata: Optional[ShardedTensorMetadata] = None
         local_shards_device = torch.device("cpu")
-        global_size = torch.Size(check_tensor_size_and_flatten(global_size))
+        global_size = torch.Size(flatten_tensor_size(global_size))
 
         if len(local_shards) > 0:
             first_shard_dtype = local_shards[0].tensor.dtype
@@ -451,12 +455,12 @@ class ShardedTensor(object):
             first_shard_requires_grad = local_shards[0].tensor.requires_grad
             first_shard_is_pinned = local_shards[0].tensor.is_pinned()
 
-            # 1. Validate local tensors and associated metadatas
+            # 1). Validate local tensors and associated metadatas
             for local_shard in local_shards:
                 local_shard_tensor = local_shard.tensor
                 local_shard_meta = local_shard.metadata
                 local_shard_metadatas.append(local_shard_meta)
-                rank, local_device = sharded_tensor._parse_and_validate_remote_device(local_shard_meta.placement)
+                rank, local_device = _parse_and_validate_remote_device(process_group, local_shard_meta.placement)
                 local_shards_device = local_device
 
                 if local_shard_tensor.layout != torch.strided or local_shard_tensor.layout != first_shard_layout:
@@ -494,7 +498,7 @@ class ShardedTensor(object):
                 pin_memory=first_shard_is_pinned
             )
 
-            # 2. Build a "local" ShardedTensorMetadata with all local shards on this rank, then
+            # 2). Build a "local" ShardedTensorMetadata with all local shards on this rank, then
             #    do all_gather to collect local_sharded_tensor_metadata from all ranks
             local_sharded_tensor_metadata = ShardedTensorMetadata(
                 shards_metadata=local_shard_metadatas,
@@ -511,16 +515,16 @@ class ShardedTensor(object):
                 dist.all_gather_object(
                     gathered_metadatas,
                     local_sharded_tensor_metadata,
-                    group=sharded_tensor._process_group
+                    group=process_group
                 )
         else:
             dist.all_gather_object(
                 gathered_metadatas,
                 local_sharded_tensor_metadata,
-                group=sharded_tensor._process_group
+                group=process_group
             )
 
-        # 3. Build a global sharded tensor metadata by gathering local ShardedTensorMetadata
+        # 3). Build a global sharded tensor metadata by gathering local ShardedTensorMetadata
         global_sharded_tensor_metadata = None
         global_metadata_rank = 0
 
@@ -559,19 +563,25 @@ class ShardedTensor(object):
             # pass all validations, extend shards metadata
             global_sharded_tensor_metadata.shards_metadata.extend(rank_metadata.shards_metadata)
 
-        if global_sharded_tensor_metadata is None:
+        if global_sharded_tensor_metadata is not None:
+            # check if shards_metadata have overlap shards
+            validate_non_overlapping_shards_metadata(global_sharded_tensor_metadata.shards_metadata)
+
+            # check if the shards_metadata is compatible with global size of the sharded tensor.
+            check_tensor(global_sharded_tensor_metadata.shards_metadata, global_sharded_tensor_metadata.size)
+        else:
             raise ValueError("ShardedTensor have no local shards on all ranks!")
 
-        # check if shards_metadata have overlap shards
-        validate_non_overlapping_shards_metadata(global_sharded_tensor_metadata.shards_metadata)
+        # STEP 2: Validation done, create the actual ShardedTensor and populate fields
+        # prepare initialization
+        sharded_tensor = cls.__new__(cls)
+        sharded_tensor._prepare_init(process_group=process_group, init_rrefs=init_rrefs)
 
-        # check if the shards_metadata is compatible with global size of the sharded tensor.
-        check_tensor(global_sharded_tensor_metadata.shards_metadata, global_sharded_tensor_metadata.size)
-
-        # done validation, add to metadata and local_shards
+        # add to metadata and local_shards
         sharded_tensor._metadata = global_sharded_tensor_metadata
         sharded_tensor._local_shards = local_shards
         # make a EnumerableShardingSpec for sharded tensors that initialized from this API.
+        # TODO: make sharding spec a ChunkShardingSpec by inferring from the metadata list.
         sharded_tensor._sharding_spec = EnumerableShardingSpec(global_sharded_tensor_metadata.shards_metadata)
 
         # run post initialization, i.e. map registration, rpc initialization
@@ -598,7 +608,7 @@ class ShardedTensor(object):
 
         shards_metadata = []
         for idx, remote_device in enumerate(remote_devices):
-            rank, local_device = self._parse_and_validate_remote_device(remote_device)
+            rank, local_device = _parse_and_validate_remote_device(self._process_group, remote_device)
 
             # Adjust the sharding dim for this rank.
             sharded_dim_size = get_chunked_dim_size(dim_size, split_size, idx)
@@ -635,7 +645,7 @@ class ShardedTensor(object):
 
         shards_metadata = []
         for shard_metadata in self._sharding_spec.shards:  # type: ignore[attr-defined]
-            rank, local_device = self._parse_and_validate_remote_device(shard_metadata.placement)
+            rank, local_device = self._parse_and_validate_remote_device(self._process_group, shard_metadata.placement)
             shards_metadata.append(shard_metadata)
 
             if current_rank == rank:
@@ -649,30 +659,6 @@ class ShardedTensor(object):
         self._metadata = ShardedTensorMetadata(
             shards_metadata, dims, tensor_init_params.tensor_properties, )
 
-    def _parse_and_validate_remote_device(self, remote_device: torch.distributed._remote_device):
-
-        worker_name = remote_device.worker_name()
-        rank = remote_device.rank()
-        device = remote_device.device()
-
-        # Validate rank, skip validation if rank is not part of process group.
-        if not distributed_c10d._rank_not_in_group(self._process_group):
-            if rank is not None and (rank < 0 or rank >= dist.get_world_size(self._process_group)):
-                raise ValueError(f'Invalid rank: {rank}')
-
-        if worker_name is not None:
-            if not rpc._is_current_rpc_agent_set():
-                raise RuntimeError(f'RPC framework needs to be initialized for using worker names: {worker_name}')
-
-            workers = rpc._get_current_rpc_agent().get_worker_infos()
-            for worker in workers:
-                if worker.name == worker_name:
-                    return worker.id, device
-
-            raise ValueError(f'Invalid worker name: {worker_name}')
-
-        return rank, device
-
     def sharding_spec(self) -> ShardingSpec:
         """
         Returns the ShardingSpec for the tensor.
@@ -682,7 +668,10 @@ class ShardedTensor(object):
     def __torch_function__(self, func, types, args=(), kwargs=None):
         if func == torch.nn.functional.linear:
             return sharded_linear(types, args, kwargs, self._process_group)
-
+        if func == torch.nn.functional.embedding:
+            return sharded_embedding(types, args, kwargs, self._process_group)
+        elif func == torch.nn.init.uniform_:
+            return uniform_(types, args, kwargs)
         raise RuntimeError(
             f"torch function '{func.__name__}', with args: {args} and "
             f"kwargs: {kwargs} not supported for ShardedTensor!")
