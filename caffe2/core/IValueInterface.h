@@ -5,7 +5,7 @@
 
 
 namespace c10 {
-class IValue;
+struct IValue;
 }
 
 namespace caffe2 {
