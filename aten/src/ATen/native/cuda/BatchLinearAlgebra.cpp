@@ -13,13 +13,21 @@
 #include <ATen/native/cuda/BatchLinearAlgebraLib.h>
 #include <ATen/native/cpu/zmath.h>
 
-#include <THC/THC.h> // for USE_MAGMA
-
-#ifdef USE_MAGMA
+#if AT_MAGMA_ENABLED()
 #include <magma_types.h>
 #include <magma_v2.h>
+#include <ATen/cuda/detail/CUDAHooks.h>
 
 const bool use_magma_ = true;
+
+namespace {
+struct MagmaInitializer {
+  MagmaInitializer() {
+    ::at::cuda::detail::set_magma_init_fn([]{ magma_init(); });
+  };
+} initializer;
+}  // namespace (anonymous)
+
 #else
 const bool use_magma_ = false;
 
@@ -28,7 +36,7 @@ const bool use_magma_ = false;
 namespace at {
 namespace native {
 
-#ifdef USE_MAGMA
+#if AT_MAGMA_ENABLED()
 template<class scalar_t>
 void magmaSolve(
     magma_int_t n, magma_int_t nrhs, scalar_t* dA, magma_int_t ldda,
@@ -1233,7 +1241,7 @@ magma_trans_t to_magma(TransposeType trans) {
   TORCH_INTERNAL_ASSERT(false, "Invalid transpose type");
 }
 } // anonymous namespace
-#endif // USE_MAGMA
+#endif // AT_MAGMA_ENABLED()
 
 #define ALLOCATE_ARRAY(name, type, size) \
   auto storage_##name = pin_memory<type>(size); \
@@ -1243,7 +1251,7 @@ magma_trans_t to_magma(TransposeType trans) {
 
 template <typename scalar_t>
 static void apply_solve(Tensor& b, Tensor& A, Tensor& infos_out) {
-#ifndef USE_MAGMA
+#if !AT_MAGMA_ENABLED()
 AT_ERROR("solve: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
 #else
@@ -1338,7 +1346,7 @@ For more information see MAGMA's documentation for GETRI and GETRF routines.
 */
 template <typename scalar_t>
 static void apply_batched_inverse(Tensor& self, Tensor& self_inv, Tensor& infos_lu, Tensor& infos_getri) {
-#ifndef USE_MAGMA
+#if !AT_MAGMA_ENABLED()
 AT_ERROR("inverse: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
 #else
@@ -1412,7 +1420,7 @@ AT_ERROR("inverse: MAGMA library not found in "
 
 template <typename scalar_t>
 static void apply_single_inverse(Tensor& self, Tensor& info_lu, Tensor& info_getri) {
-#ifndef USE_MAGMA
+#if !AT_MAGMA_ENABLED()
 AT_ERROR("inverse: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
 #else
@@ -1510,7 +1518,7 @@ Tensor& _linalg_inv_out_helper_cuda(Tensor &result, Tensor& infos_lu, Tensor& in
 
 template <typename scalar_t>
 static void apply_cholesky_solve(Tensor& b, Tensor& A, bool upper, int64_t& info) {
-#ifndef USE_MAGMA
+#if !AT_MAGMA_ENABLED()
 AT_ERROR("cholesky_solve: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
 #else
@@ -1606,7 +1614,7 @@ Tensor _cholesky_solve_helper_cuda(const Tensor& self, const Tensor& A, bool upp
 
 template <typename scalar_t>
 static void apply_cholesky(const Tensor& self, bool upper, const Tensor& info) {
-#ifndef USE_MAGMA
+#if !AT_MAGMA_ENABLED()
   TORCH_CHECK(
       false,
       "Calling torch.linalg.cholesky on a CUDA tensor requires compiling ",
@@ -1673,11 +1681,11 @@ void cholesky_helper_magma(const Tensor& input, bool upper, const Tensor& info) 
     // reads off bounds it will still be valid user memory.
     result = at::empty(input.numel() + 1, input.options());
     result.resize_as_(input).transpose_(-2, -1);
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.transpose(-2, -1).is_contiguous());
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.mT().is_contiguous());
 
     // batched MAGMA doesn't support upper=true
     // we transpose and conjugate the input as a workaround
-    result.copy_(upper ? input.conj().transpose(-2, -1) : input);
+    result.copy_(upper ? input.mH() : input);
   }
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
@@ -1689,7 +1697,7 @@ void cholesky_helper_magma(const Tensor& input, bool upper, const Tensor& info) 
     // if upper=true we need to tranpose and conjugate the result tensor
     // because the cholesky decomposition is stored in the lower triangular part
     if (upper) {
-      input.copy_(result.conj().transpose(-2, -1));
+      input.copy_(result.mH());
     } else {
       input.copy_(result);
     }
@@ -1721,7 +1729,7 @@ For more information see MAGMA's documentation for POTRS routine.
 */
 template <typename scalar_t>
 static void apply_cholesky_inverse(Tensor& input, Tensor& infos, bool upper) {
-#ifndef USE_MAGMA
+#if !AT_MAGMA_ENABLED()
   TORCH_CHECK(false, "cholesky_inverse: MAGMA library not found in compilation. Please rebuild with MAGMA.");
 #else
   // magmaCholeskyInverse (magma_dpotri_gpu) is slow because internally
@@ -1800,11 +1808,11 @@ REGISTER_CUDA_DISPATCH(cholesky_inverse_stub, &cholesky_inverse_kernel_impl);
 */
 template <typename scalar_t>
 static void apply_lu_looped_magma(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
-#ifndef USE_MAGMA
+#if !AT_MAGMA_ENABLED()
   TORCH_CHECK(
       false,
       "Calling torch.lu on a CUDA tensor requires compiling ",
-      "PyTorch with MAGMA. lease rebuild with MAGMA.");
+      "PyTorch with MAGMA. Please rebuild with MAGMA.");
 #else
   // magmaLu and magmaLuNoPiv require infos and pivots tensor to be on CPU
   // the data is later copied back to the appropriate output tensor
@@ -1861,11 +1869,11 @@ static void apply_lu_looped_magma(const Tensor& input, const Tensor& pivots, con
 */
 template <typename scalar_t>
 static void apply_lu_batched_magma(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
-#ifndef USE_MAGMA
+#if !AT_MAGMA_ENABLED()
   TORCH_CHECK(
       false,
       "Calling torch.lu on a CUDA tensor requires compiling ",
-      "PyTorch with MAGMA. lease rebuild with MAGMA.");
+      "PyTorch with MAGMA. Please rebuild with MAGMA.");
 #else
   auto input_data = input.data_ptr<scalar_t>();
   auto infos_data = infos.data_ptr<magma_int_t>();
@@ -1958,7 +1966,7 @@ REGISTER_CUDA_DISPATCH(lu_stub, &apply_lu);
 
 template <typename scalar_t>
 static void apply_triangular_solve_batched_magma(Tensor& A, Tensor& b, bool left, bool upper, TransposeType transpose, bool unitriangular) {
-#ifndef USE_MAGMA
+#if !AT_MAGMA_ENABLED()
 AT_ERROR("triangular_solve: MAGMA library not found in "
          "compilation. Please rebuild with MAGMA.");
 #else
@@ -2033,7 +2041,7 @@ void triangular_solve_kernel(Tensor& A, Tensor& B, bool left, bool upper, Transp
   if (batchCount(A) <= 8 && A.size(-1) >= 64) {
     triangular_solve_cublas(A, B, left, upper, transpose, unitriangular);
   } else {
-#ifndef USE_MAGMA
+#if !AT_MAGMA_ENABLED()
     triangular_solve_batched_cublas(A, B, left, upper, transpose, unitriangular);
 #else
     // cuBLAS batched is faster than MAGMA batched up until 512x512, after that MAGMA is faster
@@ -2042,7 +2050,7 @@ void triangular_solve_kernel(Tensor& A, Tensor& B, bool left, bool upper, Transp
     } else {
       triangular_solve_batched_magma(A, B, left, upper, transpose, unitriangular);
     }
-#endif // USE_MAGMA
+#endif // AT_MAGMA_ENABLED()
   }
 }
 
@@ -2082,7 +2090,7 @@ REGISTER_CUDA_DISPATCH(ormqr_stub, &ormqr_kernel);
 
 template <typename scalar_t>
 static void apply_geqrf(const Tensor& input, const Tensor& tau) {
-#ifndef USE_MAGMA
+#if !AT_MAGMA_ENABLED()
   TORCH_CHECK(
     false,
     "Calling torch.geqrf on a CUDA tensor requires compiling ",
@@ -2160,7 +2168,7 @@ REGISTER_CUDA_DISPATCH(geqrf_stub, &geqrf_kernel);
 template <typename scalar_t>
 static void apply_qr(Tensor& Q, Tensor& R, int64_t q_size_minus_2, int64_t r_size_minus_1, int64_t n_columns,
                      bool compute_q) {
-#ifndef USE_MAGMA
+#if !AT_MAGMA_ENABLED()
 AT_ERROR("qr: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
 #else
@@ -2277,7 +2285,7 @@ std::tuple<Tensor, Tensor> _linalg_qr_helper_cuda(const Tensor& input, c10::stri
 
 template <typename scalar_t>
 static void apply_magma_eigh(const Tensor& values, const Tensor& vectors, const Tensor& infos, bool upper, bool compute_eigenvectors) {
-#ifndef USE_MAGMA
+#if !AT_MAGMA_ENABLED()
   TORCH_CHECK(
     false,
     "Calling torch.linalg.eigh/eigvalsh on a CUDA tensor requires compiling ",
@@ -2442,7 +2450,7 @@ REGISTER_CUDA_DISPATCH(linalg_eigh_stub, &linalg_eigh_kernel);
 template <typename scalar_t>
 static void apply_eig(const Tensor& self, bool eigenvectors, Tensor& out_eigvals, Tensor& out_eigvecs,
                       int64_t *info_ptr) {
-#ifndef USE_MAGMA
+#if !AT_MAGMA_ENABLED()
 TORCH_CHECK(false, "Calling torch.eig on a CUDA tensor requires compiling PyTorch with MAGMA. "
                    "Either transfer the tensor to the CPU before calling torch.eig or recompile with MAGMA.");
 #else
@@ -2532,7 +2540,7 @@ For more information see MAGMA's documentation for GEEV routine.
 */
 template <typename scalar_t>
 void apply_linalg_eig(Tensor& values, Tensor& vectors, Tensor& input, Tensor& infos, bool compute_eigenvectors) {
-#ifndef USE_MAGMA
+#if !AT_MAGMA_ENABLED()
 TORCH_CHECK(false, "Calling torch.linalg.eig on a CUDA tensor requires compiling PyTorch with MAGMA. "
                    "Either transfer the tensor to the CPU before calling torch.linalg.eig or recompile with MAGMA.");
 #else
@@ -2613,7 +2621,7 @@ REGISTER_CUDA_DISPATCH(linalg_eig_stub, &linalg_eig_kernel);
 template<typename scalar_t>
 static void apply_svd(Tensor& self, Tensor& U, Tensor& S, Tensor& VT,
                       char jobchar, std::vector<int64_t>& infos) {
-#ifndef USE_MAGMA
+#if !AT_MAGMA_ENABLED()
 AT_ERROR("svd: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
 #else
@@ -2747,11 +2755,11 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda(const Tensor& self, bool som
 */
 template <typename scalar_t>
 static void apply_lu_solve_looped_magma(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType transpose) {
-#ifndef USE_MAGMA
+#if !AT_MAGMA_ENABLED()
   TORCH_CHECK(
       false,
       "Calling torch.lu_solve on a CUDA tensor requires compiling ",
-      "PyTorch with MAGMA. lease rebuild with MAGMA.");
+      "PyTorch with MAGMA. Please rebuild with MAGMA.");
 #else
   auto trans = to_magma(transpose);
   auto b_data = b.data_ptr<scalar_t>();
@@ -2801,11 +2809,11 @@ static void apply_lu_solve_looped_magma(const Tensor& b, const Tensor& lu, const
 */
 template <typename scalar_t>
 static void apply_lu_solve_batched_magma(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType transpose) {
-#ifndef USE_MAGMA
+#if !AT_MAGMA_ENABLED()
   TORCH_CHECK(
       false,
       "Calling torch.lu_solve on a CUDA tensor requires compiling ",
-      "PyTorch with MAGMA. lease rebuild with MAGMA.");
+      "PyTorch with MAGMA. Please rebuild with MAGMA.");
 #else
   auto trans = to_magma(transpose);
   auto b_data = b.data_ptr<scalar_t>();
@@ -2911,7 +2919,7 @@ REGISTER_CUDA_DISPATCH(lu_solve_stub, &lu_solve_dispatch);
 
 template <typename scalar_t>
 static void apply_gels(const Tensor& a, Tensor& b, Tensor& infos) {
-#ifndef USE_MAGMA
+#if !AT_MAGMA_ENABLED()
   TORCH_CHECK(false, "torch.linalg.lstsq: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
 #else
@@ -2980,7 +2988,7 @@ void linalg_lstsq_gels(const Tensor& A, const Tensor& B, const Tensor& /*infos*/
     auto A_expand_batch = expand_batch_portion;
     A_expand_batch.insert(A_expand_batch.end(), {A.size(-2), A.size(-1)});
     Tensor A_expanded = A.expand({A_expand_batch});
-    bool is_fortran_contiguous = A_expanded.transpose(-2, -1).is_contiguous();
+    bool is_fortran_contiguous = A_expanded.mT().is_contiguous();
     Tensor A_broadcasted = is_fortran_contiguous ? A_expanded : cloneBatchedColumnMajor(A_expanded);
     auto tau_expand_batch = expand_batch_portion;
     tau_expand_batch.push_back(tau.size(-1));
@@ -2998,7 +3006,7 @@ void linalg_lstsq_gels(const Tensor& A, const Tensor& B, const Tensor& /*infos*/
         /*transpose=*/TransposeType::NoTranspose,
         /*unitriangular=*/false);
   } else { // underdetermined case
-    Tensor Ah = cloneBatchedColumnMajor(A.conj().transpose(-2, -1));
+    Tensor Ah = cloneBatchedColumnMajor(A.mH());
 
     // Step 1: compute QR factorization of conjugate transpose of A using geqrf
     geqrf_kernel(Ah, tau);
@@ -3008,7 +3016,7 @@ void linalg_lstsq_gels(const Tensor& A, const Tensor& B, const Tensor& /*infos*/
     auto A_expand_batch = expand_batch_portion;
     A_expand_batch.insert(A_expand_batch.end(), {Ah.size(-2), Ah.size(-1)});
     Tensor Ah_expanded = Ah.expand({A_expand_batch});
-    bool is_fortran_contiguous = Ah_expanded.transpose(-2, -1).is_contiguous();
+    bool is_fortran_contiguous = Ah_expanded.mT().is_contiguous();
     Tensor Ah_broadcasted = is_fortran_contiguous ? Ah_expanded : cloneBatchedColumnMajor(Ah_expanded);
 
     // Step 2: R^H Z = B
@@ -3063,7 +3071,7 @@ void lstsq_kernel(const Tensor& a, Tensor& b, Tensor& /*rank*/, Tensor& /*singul
         "Please rebuild with cuSOLVER.");
 #endif
   } else { // m >= n
-#ifndef USE_MAGMA
+#if !AT_MAGMA_ENABLED()
     // MAGMA is not available we can either use cuBLAS or cuSOLVER here
     // the batched vs looped dispatch is implemented based on the following performance results
     // https://github.com/pytorch/pytorch/pull/54725#issuecomment-832234456
@@ -3083,7 +3091,7 @@ void lstsq_kernel(const Tensor& a, Tensor& b, Tensor& /*rank*/, Tensor& /*singul
     // if both MAGMA and cuSOLVER are available this would call cuSOLVER
     // MAGMA is called if cuSOLVER is not available
     gels_looped(a, b, infos);
-#endif // USE_MAGMA
+#endif // AT_MAGMA_ENABLED()
   }
 }
 
@@ -3106,7 +3114,7 @@ std::tuple<Tensor, Tensor> legacy_lstsq_cuda(const Tensor &B, const Tensor &A) {
       "X = torch.linalg.lstsq(A, B).solution"
     );
 
-#ifndef USE_MAGMA
+#if !AT_MAGMA_ENABLED()
   TORCH_CHECK(false, "solve: MAGMA library not found in "
               "compilation. Please rebuild with MAGMA.");
 #else
@@ -3145,7 +3153,7 @@ std::tuple<Tensor, Tensor> legacy_lstsq_cuda(const Tensor &B, const Tensor &A) {
 
   TORCH_CHECK(info == 0, "MAGMA gels : Argument %d : illegal value", -info);
   return std::tuple<Tensor, Tensor>(B_working, A_working);
-#endif  // USE_MAGMA
+#endif  // AT_MAGMA_ENABLED()
 }
 
 std::tuple<Tensor&, Tensor&> legacy_lstsq_out_cuda(
