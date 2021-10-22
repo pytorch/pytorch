@@ -7,7 +7,6 @@ from torch.fx.node import Target, Node, Argument
 from torch.nn.intrinsic import _FusedModule
 from .fx import Fuser  # noqa: F401
 from .fx import prepare, convert  # noqa: F401
-from .fx import get_fbgemm_backend_config_dict  # noqa: F401
 from .fx import get_tensorrt_backend_config_dict  # noqa: F401
 from .fx.graph_module import ObservedGraphModule, QuantizedGraphModule
 from .fx.qconfig_utils import (

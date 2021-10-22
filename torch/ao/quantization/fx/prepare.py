@@ -43,6 +43,7 @@ from .graph_module import (
 
 from .pattern_utils import (
     MatchResult,
+    get_default_quant_patterns,
 )
 
 from .match_utils import (
@@ -82,9 +83,6 @@ from ..utils import (
     activation_dtype,
     weight_dtype,
 )
-
-from .backend_config_dict import get_fbgemm_backend_config_dict
-from .backend_config_dict import validate_backend_config_dict
 
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
@@ -1150,10 +1148,6 @@ def prepare(
         prepare_custom_config_dict = {}
     if equalization_qconfig_dict is None:
         equalization_qconfig_dict = {}
-    if backend_config_dict is None:
-        backend_config_dict = get_fbgemm_backend_config_dict()
-
-    validate_backend_config_dict(backend_config_dict)
 
     additional_quant_patterns = \
         prepare_custom_config_dict.get("additional_quant_pattern", {})
@@ -1167,7 +1161,7 @@ def prepare(
     #   ((<function relu at 0x7f766a7360d0>, <built-in function add>):
     #     <class 'torch.ao.quantization.fx.quantize.Add'>),
     # }
-    quant_patterns = backend_config_dict["quant_patterns"]
+    quant_patterns = get_default_quant_patterns()
     patterns: Dict[Pattern, QuantizeHandler] = get_combined_dict(
         quant_patterns, additional_quant_patterns)
 
