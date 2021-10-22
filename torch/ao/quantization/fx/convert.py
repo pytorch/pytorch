@@ -29,6 +29,8 @@ from .qconfig_utils import (
     convert_dict_to_ordered_dict,
     generate_qconfig_map,
     compare_prepare_convert_qconfig_dict,
+    update_qconfig_for_fusion,
+    update_qconfig_for_qat,
 )
 from ._equalize import update_obs_for_equalization, convert_eq_obs
 from .utils import (
@@ -52,6 +54,9 @@ from ..utils import (
 )
 
 from .lower_to_fbgemm import lower_to_fbgemm
+from ..quantization_mappings import (
+    DEFAULT_QAT_MODULE_MAPPINGS,
+)
 
 # weight prepacking ops
 WEIGHT_PREPACK_OPS = {
@@ -140,7 +145,7 @@ def fold_weight(
 def remove_quant_dequant_pairs(quantized: QuantizedGraphModule) -> QuantizedGraphModule:
     quantized_root = quantized
     for node in quantized.graph.nodes:
-        if node.op == "call_function" and node.target == torch.quantize_per_tensor:
+        if node.op == "call_function" and node.target in [torch.quantize_per_tensor, torch.quantize_per_channel]:
             users = list(node.users)
             user = users[0] if users else None
             if len(users) == 1 and user.op == "call_method" and user.target == "dequantize":
@@ -209,9 +214,14 @@ def convert(model: GraphModule, is_reference: bool = False,
         prepare_qconfig_dict: Dict[str, Dict[Any, Any]] = model._qconfig_dict  # type: ignore[assignment]
         modules_copy = copy.deepcopy(modules)
         convert_dict_to_ordered_dict(convert_qconfig_dict)
-        compare_prepare_convert_qconfig_dict(prepare_qconfig_dict, convert_qconfig_dict)
-        convert_qconfig_map = generate_qconfig_map(model, modules_copy, model.graph, convert_qconfig_dict, node_name_to_scope)
+        if model._is_training:
+            additional_qat_module_mapping = prepare_custom_config_dict.get(
+                "additional_qat_module_mapping", {})
+            convert_qconfig_dict = update_qconfig_for_qat(convert_qconfig_dict, additional_qat_module_mapping)
+        convert_qconfig_dict = update_qconfig_for_fusion(model, convert_qconfig_dict)
 
+        compare_prepare_convert_qconfig_dict(prepare_qconfig_dict, convert_qconfig_dict)  # type: ignore
+        convert_qconfig_map = generate_qconfig_map(model, modules_copy, model.graph, convert_qconfig_dict, node_name_to_scope)
         # check the convert_qconfig_map generated and ensure that all the values either match what was set in prepare qconfig_map
         # or are set to None in the convert_qconfig_map.
         for k, v in qconfig_map.items():
@@ -488,6 +498,12 @@ def convert(model: GraphModule, is_reference: bool = False,
                 result = quantized_graph.node_copy(
                     node, load_non_quantized)
                 quantized = False
+                # If there are QAT swapped modules in the graph that we don't want to quantize, rever them back to FP32 ones.
+                if node.op == 'call_module' and type(modules[node.target]) in DEFAULT_QAT_MODULE_MAPPINGS.values():
+                    float_mod = modules[node.target].to_float()
+                    setattr(model, node.name, float_mod)
+                    with model.graph.inserting_before(node):
+                        new_float_node = model.graph.create_node('call_module', node.name, node.args, node.kwargs)
             else:
                 assert obj is not None
                 # We will get whether the output is quantized or not before

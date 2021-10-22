@@ -3183,39 +3183,56 @@ class TestQuantizeFx(QuantizationTestCase):
                 x = self.mods3(z)
                 return x
 
-        model = M().eval()
+        model = M().train()
 
         for check in ["module_name", "object_type"]:
-            prepared = prepare_fx(model, {"": default_qconfig})
+            qconfig_dict = {"": None,
+                            "object_type": [
+                                (nn.functional.linear, get_default_qat_qconfig("fbgemm")),
+                                (torch.add, get_default_qat_qconfig("fbgemm")),
+                                (nn.Linear, get_default_qat_qconfig("fbgemm")),
+                            ],
+                            }
+            prepared = prepare_qat_fx(model,qconfig_dict)
             prepared(torch.rand(5, 5))
             if check == "module_name":
-                convert_qconfig_dict = {"": default_qconfig, "module_name": [("mods1.0", None)]}
+                convert_qconfig_dict = {"": None,
+                                        "object_type": [
+                                            (nn.functional.linear, get_default_qat_qconfig("fbgemm")),
+                                            (torch.add, get_default_qat_qconfig("fbgemm")),
+                                            (nn.Linear, get_default_qat_qconfig("fbgemm")),
+                                        ],
+                                        "module_name": [("mods1.0", None)]}
 
                 node_occurrence = {
-                    ns.call_function(torch.quantize_per_tensor): 1,
+                    ns.call_function(torch.quantize_per_tensor): 2,
                     ns.call_function(torch.nn.functional.linear): 1,
                     ns.call_function(torch.ops.quantized.linear): 1,
                     ns.call_function(torch.ops.quantized.add): 1,
-                    ns.call_function(torch.ops.quantized.mul): 1,
-                    ns.call_method("dequantize"): 1
+                    ns.call_method("dequantize"): 2
                 }
                 order_check = [
                     ns.call_function(torch.nn.functional.linear),
                     ns.call_function(torch.quantize_per_tensor),
                     ns.call_function(torch.ops.quantized.linear),
                     ns.call_function(torch.ops.quantized.add),
-                    ns.call_function(torch.ops.quantized.mul),
+                    ns.call_method("dequantize"),
+                    ns.call_function(torch.quantize_per_tensor),
                     ns.call_module(nnq.Linear),
                     ns.call_method("dequantize"),
                 ]
             elif check == "object_type":
-                convert_qconfig_dict = {"": default_qconfig, "object_type": [(torch.nn.Linear, None)]}
+                convert_qconfig_dict = {"": None,
+                                        "object_type": [
+                                            (nn.functional.linear, get_default_qat_qconfig("fbgemm")),
+                                            (torch.add, get_default_qat_qconfig("fbgemm")),
+                                            (nn.Linear, None),
+                                        ],}
 
                 node_occurrence = {
                     ns.call_function(torch.quantize_per_tensor): 1,
                     ns.call_function(torch.ops.quantized.linear): 2,
                     ns.call_function(torch.ops.quantized.add): 1,
-                    ns.call_function(torch.ops.quantized.mul): 1,
                     ns.call_method("dequantize"): 1
                 }
                 order_check = [
@@ -3223,7 +3240,6 @@ class TestQuantizeFx(QuantizationTestCase):
                     ns.call_function(torch.ops.quantized.linear),
                     ns.call_function(torch.ops.quantized.linear),
                     ns.call_function(torch.ops.quantized.add),
-                    ns.call_function(torch.ops.quantized.mul),
                     ns.call_method("dequantize"),
                     ns.call_module(nn.Linear),
                 ]
