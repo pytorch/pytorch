@@ -132,7 +132,7 @@ class TORCH_API TensorExprKernel {
     kBlockCodeGen,
   };
 
-  void compile(const std::string& kernel_func_name = "func");
+  void compile();
   void genInputDebugNames();
   void runKernel(Stack& stack);
 
@@ -232,6 +232,7 @@ class TORCH_API TensorExprKernel {
 
   std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings_;
   bool pre_alloc_{false};
+  const std::string& kernel_func_name_;
 };
 
 TORCH_API int& getTECudaPointwiseLoopLevels();
