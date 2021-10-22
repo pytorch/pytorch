@@ -19,8 +19,8 @@ from typing import List, Optional
 #   (which are implemented manually in the at::functionalization::impl namespace).
 
 # The lambdas generated for each view op in the functionalization pass are of the form
-# [captures](input_args) -> return_type {
-#     return name(call_args);
+# [capture_arguments](outer_arguments) -> returns_type {
+#     return name(inner_arguments);
 # }
 
 # Define some specific lambda input arguments.
@@ -49,7 +49,7 @@ def name(f: NativeFunction, *, functional_op: NativeFunction, is_reverse: bool, 
     if is_reverse:
         # in the reverse case, we codegen both the call-sites (which need the full namespace) and the declarations (which don't)
         if include_namespace:
-            return f'at::functionalization::impl::{name}_inverse'
+            return f'at::functionalization::FunctionalInverses::{name}_inverse'
         else:
             return f'{name}_inverse'
     # in the forward case, we just diretly call into the at::_ops API (so we always need the namespace)

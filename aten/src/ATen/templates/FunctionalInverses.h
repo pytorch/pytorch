@@ -6,8 +6,11 @@
 
 namespace at {
 namespace functionalization {
-namespace impl {
+
+struct FunctionalInverses {
 
 ${view_inverse_declarations}
 
-}}}
+};
+}
+}

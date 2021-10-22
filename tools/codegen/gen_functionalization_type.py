@@ -11,7 +11,8 @@ from tools.codegen.model import (
 from typing import List, Optional, Union, Tuple
 from tools.codegen.utils import mapMaybe
 
-from tools.autograd.gen_inplace_or_view_type import modifies_arguments
+def modifies_arguments(f: NativeFunction) -> bool:
+    return f.func.kind() in [SchemaKind.inplace, SchemaKind.out]
 
 # This function constructs the return statement for the kernels that contain mutations
 # It mostly just needs to special case multi-output returns to wrap the result in a tuple

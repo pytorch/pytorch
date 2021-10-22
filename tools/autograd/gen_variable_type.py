@@ -795,10 +795,10 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                 elif noref_cpp_type == BaseCType(tensorListT):
                     raise AssertionError(f"Please add use_count checks for {noref_cpp_type}")
 
-        # if stmts_before_call and stmts_after_call:
-            # call = RUN_ONLY_IN_DEBUG_MODE.substitute(statements=stmts_before_call) + \
-                # call + \
-                # RUN_ONLY_IN_DEBUG_MODE.substitute(statements=stmts_after_call)
+        if stmts_before_call and stmts_after_call:
+            call = RUN_ONLY_IN_DEBUG_MODE.substitute(statements=stmts_before_call) + \
+                call + \
+                RUN_ONLY_IN_DEBUG_MODE.substitute(statements=stmts_after_call)
         return call
 
     def emit_call(f: NativeFunction, unpacked_bindings: List[Binding]) -> str:
