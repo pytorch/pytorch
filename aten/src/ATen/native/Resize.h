@@ -146,8 +146,8 @@ TensorImpl* resize_impl_tryreuse_(
   }
 
   auto c = check_allocatable(storage_size[CONTIGUOUS]);
-  selected = (!c.did_overflow && c.may_reuse) ? STRIDED : selected;
-  fallback = !c.did_overflow ? STRIDED : fallback;
+  selected = (!c.did_overflow && c.may_reuse) ? CONTIGUOUS : selected;
+  fallback = !c.did_overflow ? CONTIGUOUS : fallback;
 
   if (selected == UNDEF) {
     // If both `selected` and `alloc_strategy` are `UNDEF`, it means
