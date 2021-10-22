@@ -3,17 +3,14 @@ name: Build Test
 on:
   pull_request:
     types: [opened, synchronize, reopened, unassigned]
-  # workflow_call:
-  #   secrets:
-  #       token:
-  #         required: true
+  workflow_call:
+    secrets:
+      token:
+        required: true
 
 jobs:
   workflow-test:
     runs-on: linux.2xlarge 
     steps:
       - run: echo "🎉 The job was automatically triggered by a ${{ github.event_name }} event."
-  call-workflow-build-linux-wheels:
-    uses: pytorch/pytorch/.github/workflows/build_linux_wheels.yml@lan/test_builder
-    secrets:
-      token: ${{ secrets.GITHUB_TOKEN }}
+      
