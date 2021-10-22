@@ -35,6 +35,7 @@ on:
 env:
   BUILD_ENVIRONMENT: !{{ build_environment }}
   BUILD_WHEEL: 1
+  MAX_JOBS: 8
   CUDA_VERSION: "!{{ cuda_version }}"
   IN_CI: 1
   IS_GHA: 1

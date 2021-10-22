@@ -122,6 +122,10 @@ class TORCH_API TensorExprKernel {
     return bufferArgs_;
   }
 
+  const std::string& getKernelName() const {
+    return codegen_->kernel_func_name();
+  }
+
  private:
   enum BackendType {
     kUninitialized,
