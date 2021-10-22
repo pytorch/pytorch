@@ -1692,11 +1692,11 @@ PyMethodDef* python_functions() {
 }
 
 namespace quantization {
-TORCH_LIBRARY(q, m) {
+TORCH_LIBRARY(quantization, m) {
     m.def("_Bfloat16QuantizedToFloat(Tensor input) -> Tensor");
     m.def("_FloatToBfloat16Quantized(Tensor input) -> Tensor");
 }
-    TORCH_LIBRARY_IMPL(q, CPU, m) {
+    TORCH_LIBRARY_IMPL(quantization, CPU, m) {
         m.impl("_Bfloat16QuantizedToFloat", _bfloat16_to_float_cpu);
         m.impl("_FloatToBfloat16Quantized", _float_to_bfloat16_cpu);
     }
@@ -1704,7 +1704,7 @@ TORCH_LIBRARY(q, m) {
 #ifdef USE_C10D_NCCL
     #define DISPATCH_TO_CUDA(name, function) \
         m.impl(name, torch::dispatch(c10::DispatchKey::CUDA, TORCH_FN(function)))
-    TORCH_LIBRARY_IMPL(q, CUDA, m) {
+    TORCH_LIBRARY_IMPL(quantization, CUDA, m) {
         DISPATCH_TO_CUDA("_Bfloat16QuantizedToFloat", _bfloat16_to_float_cuda);
         DISPATCH_TO_CUDA("_FloatToBfloat16Quantized", _float_to_bfloat16_cuda);
     }
