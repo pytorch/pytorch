@@ -1624,6 +1624,7 @@ new_module_tests = [
         input_size=(4, 5, 5),
         cudnn=True,
         check_eval=True,
+        check_half=True,
         desc='1d_elementwise_affine',
     ),
     dict(
@@ -1633,6 +1634,7 @@ new_module_tests = [
         input_size=(4, 5, 5),
         cudnn=True,
         check_eval=True,
+        check_half=True,
         desc='1d_no_elementwise_affine',
     ),
     dict(
@@ -1642,6 +1644,7 @@ new_module_tests = [
         input_size=(4, 2, 2, 5),
         cudnn=True,
         check_eval=True,
+        check_half=True,
         desc='3d_elementwise_affine',
     ),
     dict(
@@ -1651,6 +1654,7 @@ new_module_tests = [
         input_size=(4, 2, 2, 5),
         cudnn=True,
         check_eval=True,
+        check_half=True,
         desc='3d_no_elementwise_affine',
     ),
     dict(
@@ -1661,6 +1665,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         gradcheck_fast_mode=True,
+        check_half=True,
         desc='3d_no_affine_large_feature',
     ),
     dict(
@@ -1670,6 +1675,7 @@ new_module_tests = [
         input_size=(0, 5),
         cudnn=True,
         check_eval=True,
+        check_half=True,
         desc='1d_empty_elementwise_affine',
     ),
     dict(
