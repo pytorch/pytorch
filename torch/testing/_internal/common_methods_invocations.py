@@ -8345,13 +8345,25 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_cross_entropy,
         supports_out=False,
         gradcheck_fast_mode=False,
+        decorators=(
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=1e-5, rtol=1e-3)}),
+                "TestJit",
+                "test_variant_consistency_jit",
+                device_type="cpu",
+            ),
+        ),
         skips=(
+            # AssertionError: False is not true : Scalars failed to compare as equal! 0 != 1536
+            # test_ops.TestJitCUDA.test_variant_consistency_jit_nn_functional_cross_entropy_cuda_float32 leaked
+            # 1536 bytes CUDA memory on device 0
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestJit",
                 "test_variant_consistency_jit",
+                device_type="cuda",
             ),
-        ),
+        )
     ),
     OpInfo('nn.functional.normalize',
            dtypesIfCPU=floating_and_complex_types_and(torch.bfloat16),
