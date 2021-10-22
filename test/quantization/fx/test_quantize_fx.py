@@ -5270,7 +5270,7 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
         prepared = prepare_fx(m, {"": self.qconfig}, backend_config_dict=self.backend_config_dict)
         # calibration
         prepared(conv2d_input)
-        quantized = convert_fx(prepared, is_reference=True)
+        quantized = _convert_fx_do_not_use(prepared, is_reference=True)
         node_occurrence = {
             ns.call_function(torch.quantize_per_tensor): 2,
             ns.call_method("dequantize"): 2
@@ -5296,7 +5296,7 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
         prepared = prepare_fx(m, {"": self.qconfig}, backend_config_dict=self.backend_config_dict)
         # calibration
         prepared(linear_module_input)
-        quantized = convert_fx(prepared, is_reference=True)
+        quantized = _convert_fx_do_not_use(prepared, is_reference=True)
         node_occurrence = {
             ns.call_function(torch.quantize_per_tensor): 2,
             ns.call_method("dequantize"): 2,
