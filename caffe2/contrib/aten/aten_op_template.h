@@ -2,6 +2,7 @@
 #include <unordered_map>
 #include <string>
 #include <ATen/Functions.h>
+#include <ATen/core/List.h>
 #include <c10/macros/Macros.h>
 #include <caffe2/core/context.h>
 #include <caffe2/core/operator.h>
@@ -21,7 +22,7 @@ using at::Half; // for AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, ...)
 namespace internal {
 TORCH_API at::Tensor index_with_uint8_handling(
     const at::Tensor& self,
-    const torch::List<c10::optional<at::Tensor>>& indices);
+    const c10::List<c10::optional<at::Tensor>>& indices);
 }
 
 template <class Context>

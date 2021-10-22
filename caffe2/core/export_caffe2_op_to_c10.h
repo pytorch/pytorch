@@ -8,6 +8,7 @@
 #include <ATen/core/grad_mode.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
+#include <caffe2/core/tensor.h>
 #include <c10/core/CompileTimeFunctionPointer.h>
 #include <torch/library.h>
 #include <vector>
@@ -20,16 +21,22 @@ constexpr const char* PREALLOCATED_OUTPUT_ARGNAME =
 
 using _CallCaffe2OpFunc = c10::List<at::Tensor>(
     const c10::FunctionSchema& schema,
-    std::vector<c10::IValue>&& inputs,
-    c10::List<at::Tensor>&& outputs);
+    const std::vector<c10::IValue> &inputs,
+    c10::List<at::Tensor> &&outputs);
 
 template <class Caffe2Operator>
 inline c10::List<at::Tensor> _call_caffe2_op(
     const c10::FunctionSchema& schema,
-    std::vector<c10::IValue>&& inputs,
-    c10::List<at::Tensor>&& outputs) {
-  Caffe2Operator op(schema, std::move(inputs), std::move(outputs), -1);
+    const std::vector<c10::IValue> &inputs,
+    c10::List<at::Tensor> &&outputs) {
+  c10::SmallVector<caffe2::Tensor, 6> outputs_caffe2(outputs.size());
+  for (auto i : c10::irange(outputs.size())) {
+    outputs_caffe2[i] = caffe2::Tensor(outputs.get(i));
+  }
+
+  Caffe2Operator op(schema, inputs, outputs_caffe2, -1);
   op.Run(-1);
+
   auto op_outputs = std::move(op).move_output_tensors();
   TORCH_INTERNAL_ASSERT(outputs.size() == op_outputs.size());
   for (auto i : c10::irange(op_outputs.size())) {

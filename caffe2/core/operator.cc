@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include "caffe2/core/operator.h"
 
 #include <algorithm>
@@ -15,8 +16,12 @@
 #include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/string_utils.h"
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
-#include <ATen/core/List.h>
+
+#undef TORCH_ASSERT_NO_OPERATORS
+
+#if defined(EXPOSE_C2_OPS) ||                               \
+  !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+#include <ATen/core/function_schema.h>
 #endif
 
 #include "caffe2/core/export_c10_op_to_caffe2.h"
@@ -86,51 +91,18 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
 
 #if defined(EXPOSE_C2_OPS) || \
     !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
-namespace {
-int C10_UNUSED // Suppress unused function warning on mobile.
-compute_input_size_(const std::vector<c10::IValue>& inputs) {
-  if (inputs.empty()) {
-    return 0;
-  }
-  if (inputs[0].isTensorList()) {
-    // if the first input is a tensor list, we get input tensors by indexing
-    // into that list. currently, this means that only tensors from that list
-    // are accessible as inputs. any hypothetical input tensors that come after
-    // the list are not accessible.
-    return inputs[0].toTensorVector().size();
-  }
-  // it's not a tensor list. Count the number of tensor inputs and return them.
-  size_t num_tensor_inputs = 0;
-  bool found_nontensor = false;
-  for (const auto& input : inputs) {
-    if (input.isTensor()) {
-      AT_ASSERTM(
-          !found_nontensor,
-          "All tensor arguments must come before non-tensor arguments");
-      ++num_tensor_inputs;
-    } else {
-      found_nontensor = true;
-    }
-  }
-  return num_tensor_inputs;
-}
-} // namespace
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 OperatorBase::OperatorBase(
     const c10::FunctionSchema& fn_schema,
-    std::vector<c10::IValue> inputs,
-    const c10::List<at::Tensor> &outputs)
+    c10::ArrayRef<c10::IValue> inputs,
+    c10::ArrayRef<caffe2::Tensor> outputs)
     // NOLINTNEXTLINE(performance-move-const-arg)
-    : fn_schema_(make_unique<c10::FunctionSchema>(std::move(fn_schema))),
-      newstyle_inputs_(std::move(inputs)),
-      input_size_(compute_input_size_(newstyle_inputs_)) {
+    : fn_schema_(new c10::FunctionSchema(std::move(fn_schema))),
+      newstyle_inputs_(inputs),
+      output_tensors_(outputs.vec()),
+      input_size_(newstyle_inputs_.compute_input_size()) {
   input_tensors_.resize(input_size_);
-
-  output_tensors_.reserve(outputs_.size());
-  for (auto i : c10::irange(outputs.size())) {
-    output_tensors_.emplace_back(outputs.extract(i));
-  }
 }
 #endif
 

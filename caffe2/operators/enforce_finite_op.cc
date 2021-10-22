@@ -1,6 +1,29 @@
 #include "caffe2/operators/enforce_finite_op.h"
+#include <ATen/core/Tensor.h>
 
 namespace caffe2 {
+namespace detail {
+void LogBlobFiniteness(Workspace *ws) {
+  // This uses the aten interfaces to compute the sum and finiteness of the
+  // tensors which are not present by default on xplat and mobile builds.
+#if defined(EXPOSE_C2_OPS) ||                               \
+  !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+  for (const std::string& blob_name : ws->Blobs()) {
+    try {
+      const auto& blob = ws->GetBlob(blob_name);
+      if (blob != nullptr && blob->IsType<Tensor>()) {
+        Tensor* c2Tensor = blob->GetMutable<Tensor>();
+        const at::Tensor& tensor = static_cast<at::Tensor>(*c2Tensor);
+        bool blob_finite = tensor.sum().isfinite().cpu().data_ptr<bool>()[0];
+        LOG(INFO) << "blob " << blob_name << " isfinite=" << (blob_finite ? "true" : "false");
+      }
+    } catch (const std::exception& ex) {
+      LOG(ERROR) << "failed to check finiteness for " << blob_name << ": " << ex.what();
+    }
+  }
+#endif
+}
+}
 
 template <>
 template <typename T>

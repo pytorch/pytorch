@@ -33,9 +33,7 @@
 
 #if defined(EXPOSE_C2_OPS) || \
     !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
-#include <ATen/core/TensorBody.h>
-#include <ATen/core/function_schema.h>
-#include <ATen/core/ivalue.h>
+#include "caffe2/core/IValueInterface.h"
 #endif
 
 C10_DECLARE_bool(caffe2_operator_throw_if_fp_exceptions);
@@ -68,8 +66,8 @@ class TORCH_API OperatorBase : public Observable<OperatorBase> {
     !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   explicit OperatorBase(
       const c10::FunctionSchema& schema,
-      std::vector<c10::IValue> inputs,
-      const c10::List<at::Tensor> &outputs);
+      c10::ArrayRef<c10::IValue> inputs,
+      c10::ArrayRef<caffe2::Tensor> outputs);
 #endif
 
   virtual ~OperatorBase() noexcept;
@@ -119,8 +117,7 @@ class TORCH_API OperatorBase : public Observable<OperatorBase> {
     !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
     auto index = argumentIndexWithName(name);
     CAFFE_ENFORCE(index.has_value(), "Couldn't get index for argument!", name);
-    const auto& value = newstyle_inputs_[index.value()];
-    return value.template to<T>();
+    return newstyle_inputs_.template to<T>(index.value());
 #else
     CAFFE_THROW("Non-legacy operators are not legal in xplat/caffe2");
 #endif
@@ -132,13 +129,6 @@ class TORCH_API OperatorBase : public Observable<OperatorBase> {
     return ArgumentHelper::HasSingleArgumentOfType<OperatorDef, T>(
         *operator_def_, name);
   }
-#if defined(EXPOSE_C2_OPS) || \
-    !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
-  template <typename T>
-  inline vector<T> GetVectorFromIValueList(const c10::IValue& value) const {
-    return value.template to<List<T>>().vec();
-  }
-#endif
 
   template <typename T>
   inline vector<T> GetRepeatedArgument(
@@ -189,29 +179,22 @@ class TORCH_API OperatorBase : public Observable<OperatorBase> {
 #if defined(EXPOSE_C2_OPS) || \
     !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
     DCHECK_LT(0U, newstyle_inputs_.size());
-    IValue ival;
-    if (newstyle_inputs_[0].isTensorList()) {
+    caffe2::Tensor tensor;
+    if (newstyle_inputs_.isTensorList(0)) {
       // if the first input is a tensor list, we get input tensors by indexing
       // into that list. currently, this means that only tensors from that list
       // are accessible as inputs. any hypothetical input tensors that come
       // after the list are not accessible.
-      auto tensorList = newstyle_inputs_[0].toTensorVector();
+      auto tensorList = newstyle_inputs_.toTensorVector(0);
       DCHECK_LT((size_t)idx, tensorList.size());
-      ival = tensorList[idx];
+      tensor = tensorList[idx];
     } else {
       // if the first input is not a tensor list, we get input tensors by
       // indexing into the inputs.
       DCHECK_LT((size_t)idx, newstyle_inputs_.size());
-      ival = newstyle_inputs_[idx];
+      tensor = newstyle_inputs_.toTensor(idx);
     }
-    CAFFE_ENFORCE(
-        ival.isTensor(),
-        "Input(int, DeviceType) is only available for IValues that store Tensors");
-    auto t = ival.toTensor();
-    if (!t.is_contiguous()) {
-      t = t.contiguous();
-    }
-    Tensor tensor = caffe2::Tensor(std::move(t));
+    tensor = caffe2::detail::contiguous(std::move(tensor));
     CAFFE_ENFORCE_EQ(tensor.GetDeviceType(), type);
     input_tensors_[idx] = std::move(tensor);
     return input_tensors_[idx];
@@ -604,7 +587,7 @@ class TORCH_API OperatorBase : public Observable<OperatorBase> {
 #if defined(EXPOSE_C2_OPS) || \
     !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   std::unique_ptr<const c10::FunctionSchema> fn_schema_;
-  vector<c10::IValue> newstyle_inputs_;
+  caffe2::detail::IValueInterface newstyle_inputs_;
 #endif
   // HACK
   // We preserve the fact that Output() returns Tensor*
@@ -665,59 +648,6 @@ inline NetDef OperatorBase::GetSingleArgument<NetDef>(
   return NetDef();
 }
 
-#if defined(EXPOSE_C2_OPS) || \
-    !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
-template <>
-inline vector<int> OperatorBase::GetVectorFromIValueList<int>(
-    const c10::IValue& value) const {
-  auto vs = value.toIntVector();
-  vector<int> out;
-  out.reserve(vs.size());
-  for (int64_t v : vs) {
-    out.emplace_back(v);
-  }
-  return out;
-}
-
-template <>
-inline vector<float> OperatorBase::GetVectorFromIValueList<float>(
-    const c10::IValue& value) const {
-  const auto& vs = value.toDoubleVector();
-  vector<float> out;
-  out.reserve(vs.size());
-  for (double v : vs) {
-    out.emplace_back(v);
-  }
-  return out;
-}
-
-template <>
-inline vector<string> OperatorBase::GetVectorFromIValueList<string>(
-    const c10::IValue& value) const {
-  auto vs = value.template to<c10::List<string>>();
-  vector<string> out;
-  out.reserve(vs.size());
-  for (string v : vs) {
-    out.emplace_back(v);
-  }
-  return out;
-}
-
-// We need this specialisation because IValue based lists don't support
-// int16_t. We need to load it as List<int64_t> and transform to int16_t.
-template <>
-inline vector<int16_t> OperatorBase::GetVectorFromIValueList<int16_t>(
-    const c10::IValue& value) const {
-  auto list = value.template to<c10::List<int64_t>>();
-  std::vector<int16_t> result;
-  result.reserve(list.size());
-  for (int64_t elem : list) {
-    result.push_back(static_cast<int16_t>(elem));
-  }
-  return result;
-}
-#endif
-
 // OP_SINGLE_ARG provides a shorter initialization choice for initialization of
 // member variables for the class constructors.
 #define OP_SINGLE_ARG(type, name, variable, default) \
@@ -751,8 +681,7 @@ inline vector<T> OperatorBase::GetRepeatedArgument(
     !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   auto index = argumentIndexWithName(name);
   CAFFE_ENFORCE(index.has_value(), "Couldn't get index for argument!", name);
-  const auto& value = newstyle_inputs_[index.value()];
-  return GetVectorFromIValueList<T>(value);
+  return newstyle_inputs_.template toVec<T>(index.value());
 #else
   CAFFE_THROW("Non-legacy operators are not legal in xplat/caffe2");
 #endif
@@ -773,8 +702,7 @@ inline vector<int16_t> OperatorBase::GetRepeatedArgument<int16_t>(
     !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   auto index = argumentIndexWithName(name);
   CAFFE_ENFORCE(index.has_value(), "Couldn't get index for argument!", name);
-  const auto& value = newstyle_inputs_[index.value()];
-  auto vec = GetVectorFromIValueList<int64_t>(value);
+  auto vec = newstyle_inputs_.template toVec<int64_t>(index.value());
   std::vector<int16_t> result;
   result.reserve(vec.size());
   for (int64_t elem : vec) {
@@ -802,8 +730,8 @@ class Operator : public OperatorBase {
     !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   explicit Operator(
       const c10::FunctionSchema& fn_schema,
-      std::vector<c10::IValue> inputs,
-      const c10::List<at::Tensor> &outputs,
+      c10::ArrayRef<c10::IValue> inputs,
+      c10::ArrayRef<caffe2::Tensor> outputs,
       StreamId stream = 0)
       : OperatorBase(fn_schema, std::move(inputs), outputs) {
     // In the constructor, we switch to the device so that the child class
