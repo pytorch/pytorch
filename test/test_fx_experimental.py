@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: fx"]
+
 import math
 import numbers
 import operator
@@ -1473,6 +1475,7 @@ class TestNormalizeOperators(JitTestCase):
             "mT",  # Implemented with a lambda
             "mH",  # Implemented with a lambda
             "gradient",
+            "histogramdd",
             "igamma",
             "igammac",
             "index_put",
@@ -1521,6 +1524,9 @@ class TestNormalizeOperators(JitTestCase):
 
         # Unsupported input types
         if op.name in op_skip:
+            return
+
+        if op.name.startswith('_masked.'):
             return
 
         # These ops currently don't trace in FX for various reasons (i.e. they take a list of tensors)
