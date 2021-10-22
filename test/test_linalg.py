@@ -2296,6 +2296,23 @@ class TestLinalg(TestCase):
                 torch.linalg.eig(a, out=(out_w, out_v))
 
     @skipCPUIfNoLapack
+    @onlyCPU
+    @dtypes(*floating_and_complex_types())
+    def test_eig_with_nan(self, dtype):
+        a = torch.randn((3, 3), dtype=dtype)
+        l, v = torch.linalg.eig(a)
+
+
+        a = torch.tensor([[3, 2, float('nan')], [4, 5, float('nan')], [1, 2, 3]], dtype=dtype)
+        with torch.linalg.nancheck(False):
+            with self.assertRaisesRegex(RuntimeError, "eig failed with SIGINT."):
+                torch.linalg.eig(a)
+
+        with torch.linalg.nancheck(True):
+            values, vectors = torch.linalg.eig(a)
+            self.assertEqual(values.shape, torch.Tensor([3]))
+
+    @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
     # NumPy computes only in float64 and complex128 precisions
     # for float32 or complex64 results might be very different from float64 or complex128
