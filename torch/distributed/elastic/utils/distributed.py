@@ -64,7 +64,9 @@ def create_c10d_store(
                 timeout=datetime.timedelta(seconds=timeout),
                 wait_for_workers=wait_for_workers,
             )
-            _check_full_rank(store, world_size)
+            # skips full rank check when we don't have to wait for all workers
+            if wait_for_workers:
+                _check_full_rank(store, world_size)
             log.info("Successfully created c10d store")
             return store
         except RuntimeError as e:
@@ -92,9 +94,6 @@ def create_c10d_store(
 
 
 def _check_full_rank(store, world_size):
-    # do not perform check when an indeterminate world_size is specified
-    if world_size <= -1:
-        return
     idx = store.add(_MEMBER_CHECKIN, 1)
     if idx == world_size:
         store.set(_LAST_MEMBER_CHECKIN, "<val_ignored>")

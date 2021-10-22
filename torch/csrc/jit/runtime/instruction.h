@@ -72,6 +72,7 @@ struct Instruction {
   Instruction(OpCode op, int32_t X, uint16_t N)
       : op(op), unused(0), N(N), X(X) {}
 };
+std::ostream& operator<<(std::ostream& out, Instruction inst);
 
 bool isOpSupportedInMobile(OpCode op);
 
