@@ -171,8 +171,6 @@ class QuantizeHandler(ABC):
         """
         return True
 
-
-    @abstractmethod
     def convert(self,
                 node: Node,
                 qconfig: QConfigAny,

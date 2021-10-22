@@ -5312,6 +5312,34 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
         # make sure it runs
         trt_mod(linear_module_input.cuda())
 
+    def test_unsupported_qconfig(self):
+        """ Check that we won't quantize the model if the qconfig is not supported
+        """
+        class LinearModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 10)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        linear_module_input = torch.rand(8, 5)
+
+        m = LinearModule().eval()
+        trt_unsupported_qconfig = default_qconfig
+        prepared = prepare_fx(m, {"": trt_unsupported_qconfig}, backend_config_dict=self.backend_config_dict)
+        # calibration
+        prepared(linear_module_input)
+        quantized = _convert_fx_do_not_use(prepared, is_reference=True)
+        node_occurrence = {
+            ns.call_function(torch.quantize_per_tensor): 0,
+            ns.call_method("dequantize"): 0,
+            ns.call_module(torch.nn.Linear): 1,
+            ns.call_module(torch.nn.quantized._reference.Linear): 0,
+        }
+        # check model is not quantized
+        self.checkGraphModuleNodes(quantized, expected_node_occurrence=node_occurrence)
+
 class TestQuantizeFxModels(QuantizationTestCase):
     @skipIfNoFBGEMM
     @unittest.skipIf(not TEST_CUDA, "gpu is not available.")

@@ -38,17 +38,7 @@ from torch.ao.quantization.quantize import (
     is_activation_post_process,
 )
 
-
-def restore_state(
-        observed: GraphModule
-) -> Tuple[Dict[Pattern, QuantizeHandler], Dict[str, Tuple[str, type]], Dict[str, Any]]:
-    assert is_observed_module(observed), \
-        'incoming model must be produced by prepare_fx'
-    prepare_custom_config_dict: Dict[str, Any] = \
-        observed._prepare_custom_config_dict  # type: ignore[assignment]
-    node_name_to_scope: Dict[str, Tuple[str, type]] = observed._node_name_to_scope  # type: ignore[assignment]
-    patterns: Dict[Pattern, QuantizeHandler] = observed._patterns  # type: ignore[assignment]
-    return patterns, node_name_to_scope, prepare_custom_config_dict
+from .convert import restore_state
 
 def _convert_do_not_use(
         model: GraphModule, is_reference: bool = False,
@@ -65,7 +55,7 @@ def _convert_do_not_use(
     """
     if convert_custom_config_dict is None:
         convert_custom_config_dict = {}
-    patterns, node_name_to_scope, prepare_custom_config_dict = restore_state(model)
+    patterns, node_name_to_scope, prepare_custom_config_dict, observed_node_names = restore_state(model)
     qconfig_map: Dict[str, QConfigAny] = model._qconfig_map  # type: ignore[assignment]
 
     assert is_reference, "convert2 only supports reference option"
@@ -178,8 +168,11 @@ def _convert_do_not_use(
                     torch.nn.Conv3d]:
                 fmodule = modules[node.target]
                 qconfig = fmodule.qconfig
+
+                is_observed = node.name in observed_node_names
+                is_weight_quantized = weight_is_statically_quantized(qconfig)
                 # TODO: rename weight_is_statically_quantized to weight_is_int8_quantized
-                if qconfig is not None and weight_is_statically_quantized(qconfig):
+                if qconfig is not None and is_observed and is_weight_quantized:
                     weight_post_process = qconfig.weight()
                     # run weight observer
                     weight_post_process(fmodule.weight)  # type: ignore[operator]
