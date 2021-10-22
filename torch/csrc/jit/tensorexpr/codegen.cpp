@@ -203,7 +203,7 @@ StmtPtr insertMemNodes(
       b->prepend_stmt(alloc<Allocate>(buf));
       b->append_stmt(alloc<Free>(buf));
     } else {
-      b->prepend_stmt(alloc<BufMap>(rit->first, rit->second));
+      b->prepend_stmt(alloc<PlacementAllocate>(rit->first, rit->second));
     }
   }
 
