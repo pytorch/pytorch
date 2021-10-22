@@ -23,6 +23,10 @@ struct Code {
   std::vector<std::function<void(Stack&)>> operators_;
   std::vector<c10::IValue> constants_;
   std::vector<c10::TypePtr> types_;
+  // TODO After we actually export CALL instructions we can remove this.
+  // We may need a two-stage importing scheme, where we firstly construct all
+  // function objects, and then append referenced function pointers. This could
+  // be done in parseMethods().
   std::vector<mobile::Function*> functions_;
   size_t register_size_; // Aggregated output size.
 };
