@@ -17,15 +17,14 @@ std::vector<lazy_tensors::int64> ComputeShapeStrides(
     const lazy_tensors::Shape& shape);
 
 std::vector<lazy_tensors::int64> ComputeArrayStrides(
-    lazy_tensors::Span<const lazy_tensors::int64> sizes);
+    c10::ArrayRef<lazy_tensors::int64> sizes);
 
 // Converts a literal to an at::Tensor of the given element type.
 at::Tensor MakeTensorFromLiteral(const lazy_tensors::Literal& literal,
                                  at::ScalarType dest_element_type);
 
 std::vector<at::Tensor> DataHandlesToTensors(
-    lazy_tensors::Span<const lazy_tensors::ComputationClient::DataPtr>
-        data_handles,
+    c10::ArrayRef<lazy_tensors::ComputationClient::DataPtr> data_handles,
     at::ScalarType dest_element_type);
 
 bool TensorCompare(const at::Tensor& t1, const at::Tensor& t2);

@@ -10,9 +10,8 @@ ShapeBuilder& ShapeBuilder::Add(const lazy_tensors::Shape& shape,
   return *this;
 }
 
-ShapeBuilder& ShapeBuilder::Add(
-    const lazy_tensors::Shape& shape,
-    lazy_tensors::Span<const lazy_tensors::int64> dimensions) {
+ShapeBuilder& ShapeBuilder::Add(const lazy_tensors::Shape& shape,
+                                c10::ArrayRef<lazy_tensors::int64> dimensions) {
   dims_.reserve(dimensions.size());
   for (auto dim : dimensions) {
     dims_.push_back({&shape, dim});

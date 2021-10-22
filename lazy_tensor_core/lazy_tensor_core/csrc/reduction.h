@@ -1,6 +1,5 @@
 #pragma once
 
-#include "lazy_tensors/span.h"
 
 namespace torch_lazy_tensors {
 

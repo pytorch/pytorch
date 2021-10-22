@@ -37,12 +37,12 @@ class TSComputationClient : public ComputationClient {
   DataPtr CreateDataPlaceholder(std::string device, Shape shape) override;
 
   std::vector<DataPtr> TransferToServer(
-      lazy_tensors::Span<const TensorSource> tensors) override {
+      c10::ArrayRef<TensorSource> tensors) override {
     LTC_LOG(FATAL) << "Not implemented yet.";
   }
 
   std::vector<Literal> TransferFromServer(
-      lazy_tensors::Span<const DataPtr> handles) override {
+      c10::ArrayRef<DataPtr> handles) override {
     LTC_LOG(FATAL) << "Not implemented yet.";
   }
 
@@ -50,34 +50,33 @@ class TSComputationClient : public ComputationClient {
       std::vector<CompileInstance> instances) override;
 
   std::vector<DataPtr> ExecuteComputation(
-      const Computation& computation,
-      lazy_tensors::Span<const DataPtr> arguments, const std::string& device,
+      const Computation& computation, c10::ArrayRef<DataPtr> arguments,
+      const std::string& device,
       const ExecuteComputationOptions& options) override;
 
   std::vector<std::vector<DataPtr>> ExecuteReplicated(
       const Computation& computation,
       const std::vector<std::vector<DataPtr>>& arguments,
-      lazy_tensors::Span<const std::string> devices,
+      c10::ArrayRef<std::string> devices,
       const ExecuteReplicatedOptions& options) override {
     LTC_LOG(FATAL) << "Not implemented yet.";
   }
 
   std::vector<std::vector<DataPtr>> ExecuteParallel(
-      lazy_tensors::Span<const Computation* const> computations,
+      c10::ArrayRef<Computation*> computations,
       const std::vector<std::vector<DataPtr>>& arguments,
-      lazy_tensors::Span<const std::string> devices,
+      c10::ArrayRef<std::string> devices,
       const ExecuteParallelOptions& options) override {
     LTC_LOG(FATAL) << "Not implemented yet.";
   }
 
-  std::vector<DataPtr> ExecuteChained(
-      lazy_tensors::Span<const ExecuteChainedOp> ops,
-      const std::string& device) override {
+  std::vector<DataPtr> ExecuteChained(c10::ArrayRef<ExecuteChainedOp> ops,
+                                      const std::string& device) override {
     LTC_LOG(FATAL) << "Not implemented yet.";
   }
 
   std::vector<std::vector<DataPtr>> DeconstructTuple(
-      lazy_tensors::Span<const DataPtr> tuples) override {
+      c10::ArrayRef<DataPtr> tuples) override {
     LTC_LOG(FATAL) << "Not implemented yet.";
   }
 

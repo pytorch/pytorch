@@ -14,10 +14,9 @@ namespace ir {
 LoweringContext::LoweringContext(const std::string& name, Device device)
     : device_(std::move(device)) {}
 
-LoweringContext::LoweringContext(
-    const std::string& name, Device device,
-    lazy_tensors::Span<const torch::lazy::Node* const> post_order,
-    Util::EmissionMap emit_status)
+LoweringContext::LoweringContext(const std::string& name, Device device,
+                                 c10::ArrayRef<torch::lazy::Node*> post_order,
+                                 Util::EmissionMap emit_status)
     : device_(std::move(device)), emit_status_(std::move(emit_status)) {}
 
 const std::vector<lazy_tensors::ComputationClient::DataPtr>&

@@ -29,7 +29,7 @@ std::string Permute::ToString() const {
 
 lazy_tensors::Shape Permute::MakePermuteShape(
     const lazy_tensors::Shape& source_shape,
-    lazy_tensors::Span<const lazy_tensors::int64> permutation) {
+    c10::ArrayRef<lazy_tensors::int64> permutation) {
   return Helpers::GetDynamicReshape(
       source_shape, Helpers::Permute(permutation, source_shape.dimensions()));
 }

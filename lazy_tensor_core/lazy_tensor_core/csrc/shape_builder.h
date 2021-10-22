@@ -3,7 +3,6 @@
 #include <vector>
 
 #include "lazy_tensors/shape.h"
-#include "lazy_tensors/span.h"
 #include "lazy_tensors/types.h"
 
 namespace torch_lazy_tensors {
@@ -15,7 +14,7 @@ class ShapeBuilder {
   ShapeBuilder& Add(const lazy_tensors::Shape& shape, lazy_tensors::int64 dim);
 
   ShapeBuilder& Add(const lazy_tensors::Shape& shape,
-                    lazy_tensors::Span<const lazy_tensors::int64> dimensions);
+                    c10::ArrayRef<lazy_tensors::int64> dimensions);
 
   ShapeBuilder& Add(lazy_tensors::int64 size);
 

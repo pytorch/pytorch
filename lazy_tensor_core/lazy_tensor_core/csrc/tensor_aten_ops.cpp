@@ -215,7 +215,7 @@ ReductionMode GetReductionMode(lazy_tensors::int64 reduction) {
 // resized if its size is 1. If it's empty, it's replaced with the provided
 // default first.
 std::vector<lazy_tensors::int64> CheckIntList(
-    lazy_tensors::Span<const lazy_tensors::int64> list, size_t length,
+    c10::ArrayRef<lazy_tensors::int64> list, size_t length,
     const std::string& name, std::vector<lazy_tensors::int64> def = {}) {
   std::vector<lazy_tensors::int64> result;
   if (list.empty()) {
@@ -673,8 +673,7 @@ void bitwise_xor_out(LazyTensor& out, const LazyTensor& input,
   out.SetIrValue(ir::ops::BitwiseXor(input.GetIrValue(), other.GetIrValue()));
 }
 
-std::vector<LazyTensor> broadcast_tensors(
-    lazy_tensors::Span<const LazyTensor> tensors) {
+std::vector<LazyTensor> broadcast_tensors(c10::ArrayRef<LazyTensor> tensors) {
   LTC_CHECK(!tensors.empty()) << "broadcast_tensors cannot take an empty list";
   std::vector<torch::lazy::Value> tensor_ir_values;
   for (const auto& tensor : tensors) {
@@ -684,8 +683,7 @@ std::vector<LazyTensor> broadcast_tensors(
   return tensors.front().MakeOutputTensors(node);
 }
 
-LazyTensor cat(lazy_tensors::Span<const LazyTensor> tensors,
-               lazy_tensors::int64 dim) {
+LazyTensor cat(c10::ArrayRef<LazyTensor> tensors, lazy_tensors::int64 dim) {
   // Shape checks for cat:
   // - If not empty, every tensor shape must be the same.
   // - Empty tensor passes but is simply ignore in implementation,
@@ -732,7 +730,7 @@ LazyTensor clone(const LazyTensor& input) {
 }
 
 LazyTensor constant_pad_nd(const LazyTensor& input,
-                           lazy_tensors::Span<const lazy_tensors::int64> pad,
+                           c10::ArrayRef<lazy_tensors::int64> pad,
                            const at::Scalar& value) {
   std::vector<lazy_tensors::int64> complete_pad(pad.begin(), pad.end());
   complete_pad.resize(2 * input.shape().get().rank());
@@ -935,7 +933,7 @@ void fill_(LazyTensor& input, const at::Scalar& value) {
 }
 
 LazyTensor flip(const LazyTensor& input,
-                lazy_tensors::Span<const lazy_tensors::int64> dims) {
+                c10::ArrayRef<lazy_tensors::int64> dims) {
   auto dimensions =
       Helpers::GetCanonicalDimensionIndices(dims, input.shape().get().rank());
   std::set<lazy_tensors::int64> unique_dims(dimensions.begin(),
@@ -959,7 +957,7 @@ LazyTensor fmod(const LazyTensor& input, const at::Scalar& other,
                           logical_element_type);
 }
 
-LazyTensor full(lazy_tensors::Span<const lazy_tensors::int64> size,
+LazyTensor full(c10::ArrayRef<lazy_tensors::int64> size,
                 const at::Scalar& fill_value, const Device& device,
                 at::ScalarType scalar_type) {
   CheckShapeDimensions(size);
@@ -1013,8 +1011,7 @@ LazyTensor gt(const LazyTensor& input, const LazyTensor& other) {
   return DispatchComparisonOp(at::aten::gt, input, other);
 }
 
-LazyTensor index(const LazyTensor& input,
-                 lazy_tensors::Span<const LazyTensor> indices,
+LazyTensor index(const LazyTensor& input, c10::ArrayRef<LazyTensor> indices,
                  lazy_tensors::int64 start_dim) {
   return IndexByTensors(input, indices, start_dim);
 }
@@ -1075,19 +1072,19 @@ void index_fill_(LazyTensor& input, lazy_tensors::int64 dim,
   input.SetIrValue(IndexFill(input, canonical_dim, index, value));
 }
 
-LazyTensor index_put(
-    const LazyTensor& input, lazy_tensors::Span<const LazyTensor> indices,
-    lazy_tensors::int64 start_dim, const LazyTensor& values, bool accumulate,
-    lazy_tensors::Span<const lazy_tensors::int64> result_permutation) {
+LazyTensor index_put(const LazyTensor& input, c10::ArrayRef<LazyTensor> indices,
+                     lazy_tensors::int64 start_dim, const LazyTensor& values,
+                     bool accumulate,
+                     c10::ArrayRef<lazy_tensors::int64> result_permutation) {
   return input.CreateFrom(IndexPutByTensors(input, indices, start_dim, values,
                                             accumulate, result_permutation));
 }
 
-void index_put_(
-    LazyTensor& input, const LazyTensor& canonical_base,
-    lazy_tensors::Span<const LazyTensor> indices, lazy_tensors::int64 start_dim,
-    const LazyTensor& values, bool accumulate,
-    lazy_tensors::Span<const lazy_tensors::int64> result_permutation) {
+void index_put_(LazyTensor& input, const LazyTensor& canonical_base,
+                c10::ArrayRef<LazyTensor> indices,
+                lazy_tensors::int64 start_dim, const LazyTensor& values,
+                bool accumulate,
+                c10::ArrayRef<lazy_tensors::int64> result_permutation) {
   input.SetIrValue(IndexPutByTensors(canonical_base, indices, start_dim, values,
                                      accumulate, result_permutation));
 }
@@ -1515,7 +1512,7 @@ std::tuple<LazyTensor, LazyTensor, LazyTensor> ts_native_batch_norm_backward(
     const LazyTensor& weight, const LazyTensor& running_mean,
     const LazyTensor& running_var, const LazyTensor& save_mean,
     const LazyTensor& save_invstd, bool training, double eps,
-    lazy_tensors::Span<const bool> output_mask) {
+    c10::ArrayRef<bool> output_mask) {
   lazy_tensors::Shape features_shape = BatchNormFeaturesShape(input);
   torch::lazy::Value weight_value =
       GetIrValueOrDefault(weight, 1, features_shape, input.GetDevice());
@@ -1647,7 +1644,7 @@ LazyTensor not_supported(std::string description, lazy_tensors::Shape shape,
 }
 
 LazyTensor permute(const LazyTensor& input,
-                   lazy_tensors::Span<const lazy_tensors::int64> dims) {
+                   c10::ArrayRef<lazy_tensors::int64> dims) {
   auto input_shape = input.shape();
   ViewInfo view_info(
       ViewInfo::Type::kPermute, input_shape,
@@ -2018,8 +2015,7 @@ void squeeze_(LazyTensor& input, lazy_tensors::int64 dim) {
       Helpers::GetCanonicalDimensionIndex(dim, input.shape().get().rank())));
 }
 
-LazyTensor stack(lazy_tensors::Span<const LazyTensor> tensors,
-                 lazy_tensors::int64 dim) {
+LazyTensor stack(c10::ArrayRef<LazyTensor> tensors, lazy_tensors::int64 dim) {
   LTC_CHECK_GT(tensors.size(), 0);
   std::vector<torch::lazy::Value> values;
   for (auto& tensor : tensors) {
@@ -2270,7 +2266,7 @@ LazyTensor upsample_nearest2d_backward(
 }
 
 LazyTensor view(const LazyTensor& input,
-                lazy_tensors::Span<const lazy_tensors::int64> output_size) {
+                c10::ArrayRef<lazy_tensors::int64> output_size) {
   auto input_shape = input.shape();
   std::vector<lazy_tensors::int64> complete_dimensions =
       GetCompleteShape(output_size, input_shape.get().dimensions());

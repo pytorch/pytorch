@@ -7,7 +7,6 @@
 #include "lazy_tensors/computation_client/cache.h"
 #include "lazy_tensors/computation_client/computation_client.h"
 #include "lazy_tensors/computation_client/util.h"
-#include "lazy_tensors/span.h"
 #include "lazy_tensors/types.h"
 #include "torch/csrc/lazy/core/ir.h"
 
@@ -25,16 +24,16 @@ class OpByOpExecutor {
   static OpByOpExecutor* Get();
 
   std::vector<lazy_tensors::ComputationClient::ExecuteChainedOp> BuildOps(
-      lazy_tensors::Span<const torch::lazy::Value> roots, const std::string& device,
-      lazy_tensors::Span<const std::string> devices);
+      c10::ArrayRef<torch::lazy::Value> roots, const std::string& device,
+      c10::ArrayRef<std::string> devices);
 
   std::vector<lazy_tensors::ComputationClient::DataPtr> Execute(
-      lazy_tensors::Span<const torch::lazy::Value> roots, const std::string& device,
-      lazy_tensors::Span<const std::string> devices);
+      c10::ArrayRef<torch::lazy::Value> roots, const std::string& device,
+      c10::ArrayRef<std::string> devices);
 
-  AsyncTask ExecuteAsync(lazy_tensors::Span<const torch::lazy::Value> roots,
+  AsyncTask ExecuteAsync(c10::ArrayRef<torch::lazy::Value> roots,
                          const std::string& device,
-                         lazy_tensors::Span<const std::string> devices);
+                         c10::ArrayRef<std::string> devices);
 
  private:
   using CompileCache =

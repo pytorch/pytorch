@@ -9,7 +9,6 @@
 #include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/layout.h"
 #include "lazy_tensors/primitive_util.h"
-#include "lazy_tensors/span.h"
 #include "lazy_tensors/str_cat.h"
 #include "lazy_tensors/str_join.h"
 #include "lazy_tensors/types.h"
@@ -20,14 +19,14 @@ class Shape {
  public:
   Shape() : element_type_(PrimitiveType::INVALID) {}
 
-  Shape(at::ScalarType element_type, lazy_tensors::Span<const int64> dimensions);
+  Shape(at::ScalarType element_type, c10::ArrayRef<int64> dimensions);
 
-  Shape(PrimitiveType element_type, lazy_tensors::Span<const int64> dimensions)
+  Shape(PrimitiveType element_type, c10::ArrayRef<int64> dimensions)
       : element_type_(element_type),
         dimensions_(dimensions.begin(), dimensions.end()),
         dynamic_dimensions_(dimensions.size(), false) {}
 
-  Shape(lazy_tensors::Span<const Shape> element_shapes)
+  Shape(c10::ArrayRef<Shape> element_shapes)
       : element_type_(PrimitiveType::TUPLE),
         element_shapes_(element_shapes.begin(), element_shapes.end()) {}
 
@@ -62,7 +61,7 @@ class Shape {
     dynamic_dimensions_[dimension] = is_dynamic;
   }
 
-  lazy_tensors::Span<const bool> dynamic_dimensions() const {
+  c10::ArrayRef<bool> dynamic_dimensions() const {
     LTC_LOG(FATAL) << "Not implemented yet.";
   }
 
@@ -88,11 +87,11 @@ class Shape {
     dimensions_[index] = value;
   }
 
-  lazy_tensors::Span<const int64> dimensions() const {
+  c10::ArrayRef<int64> dimensions() const {
     if (dynamic_mode_.load()) {
       throw std::runtime_error("Exact shape not known");
     }
-    return MakeSpan(dimensions_);
+    return dimensions_;
   }
 
   int tuple_shapes_size() const { return element_shapes_.size(); }

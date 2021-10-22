@@ -3,7 +3,6 @@
 #include <unordered_map>
 #include <vector>
 
-#include "lazy_tensors/span.h"
 #include "torch/csrc/lazy/core/ir.h"
 
 namespace torch_lazy_tensors {
@@ -26,22 +25,20 @@ class Util {
   // this API. The returned post-order can be empty if the node has already been
   // emitted inside the emission map. An error is generated if a loop is
   // detected.
-  static std::vector<const torch::lazy::Node*> ComputePostOrder(
+  static std::vector<torch::lazy::Node*> ComputePostOrder(
       const torch::lazy::Node* node, EmissionMap* emap);
 
-  static std::vector<const torch::lazy::Node*> ComputePostOrder(
-      lazy_tensors::Span<const torch::lazy::Node* const> nodes,
-      EmissionMap* emap);
+  static std::vector<torch::lazy::Node*> ComputePostOrder(
+      c10::ArrayRef<torch::lazy::Node*> nodes, EmissionMap* emap);
 
   // Same as above, but computes the post order on the set of nodes specified as
   // argument.
-  static std::vector<const torch::lazy::Node*> ComputePostOrder(
-      lazy_tensors::Span<const torch::lazy::Node* const> nodes);
+  static std::vector<torch::lazy::Node*> ComputePostOrder(
+      c10::ArrayRef<torch::lazy::Node*> nodes);
 
   // Retrieves the number of nodes within the graph whose sink are passed in the
   // nodes argument.
-  static size_t GetGraphSize(
-      lazy_tensors::Span<const torch::lazy::Node* const> nodes);
+  static size_t GetGraphSize(c10::ArrayRef<torch::lazy::Node*> nodes);
 };
 
 }  // namespace ir

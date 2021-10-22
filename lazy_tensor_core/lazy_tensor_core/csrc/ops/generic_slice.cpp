@@ -7,12 +7,11 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-GenericSlice::GenericSlice(
-    const torch::lazy::Value& input,
-    lazy_tensors::Span<const lazy_tensors::int64> base_indices,
-    lazy_tensors::Span<const lazy_tensors::int64> sizes)
+GenericSlice::GenericSlice(const torch::lazy::Value& input,
+                           c10::ArrayRef<lazy_tensors::int64> base_indices,
+                           c10::ArrayRef<lazy_tensors::int64> sizes)
     : TsNode(ltc_generic_slice, {input},
-           /*num_outputs=*/1, torch::lazy::MHash(base_indices, sizes)),
+             /*num_outputs=*/1, torch::lazy::MHash(base_indices, sizes)),
       base_indices_(base_indices.begin(), base_indices.end()),
       sizes_(sizes.begin(), sizes.end()) {
   SetShapeDeferred(

@@ -374,8 +374,7 @@ torch::lazy::Value LazyTensor::GetIrValueForScalar(const at::Scalar& value,
 
 torch::lazy::Value LazyTensor::GetIrValueForScalar(
     const at::Scalar& value, lazy_tensors::PrimitiveType type,
-    lazy_tensors::Span<const lazy_tensors::int64> dimensions,
-    const Device& device) {
+    c10::ArrayRef<lazy_tensors::int64> dimensions, const Device& device) {
   torch::lazy::Value ir_value = GetIrValueForScalar(value, type, device);
   if (!dimensions.empty()) {
     ir_value = torch::lazy::MakeNode<ir::ops::Expand>(

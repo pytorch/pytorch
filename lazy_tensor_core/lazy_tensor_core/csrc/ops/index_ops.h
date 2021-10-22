@@ -55,13 +55,13 @@ torch::lazy::Value EnsureRank1(const torch::lazy::Value& index);
 // Implements indexing by tensors of long according to the top-level
 // description.
 LazyTensor IndexByTensors(const LazyTensor& base,
-                          lazy_tensors::Span<const LazyTensor> indices,
+                          c10::ArrayRef<LazyTensor> indices,
                           lazy_tensors::int64 start_dim);
 
 torch::lazy::Value IndexPutByTensors(
-    const LazyTensor& base, lazy_tensors::Span<const LazyTensor> indices,
+    const LazyTensor& base, c10::ArrayRef<LazyTensor> indices,
     lazy_tensors::int64 start_dim, const LazyTensor& updates, bool accumulate,
-    lazy_tensors::Span<const lazy_tensors::int64> result_permutation);
+    c10::ArrayRef<lazy_tensors::int64> result_permutation);
 
 NodePtr IndexFill(const LazyTensor& base, lazy_tensors::int64 dim,
                       const LazyTensor& index, const at::Scalar& value);

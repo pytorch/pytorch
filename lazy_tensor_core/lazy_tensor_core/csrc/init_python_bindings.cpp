@@ -69,9 +69,9 @@ void PrepareToExit() {
 
 std::string GetTensorsDump(
     const std::vector<at::Tensor>& tensors,
-    const std::function<std::string(lazy_tensors::Span<const torch::lazy::Node* const>)>&
+    const std::function<std::string(c10::ArrayRef<torch::lazy::Node*>)>&
         coverter) {
-  std::vector<const torch::lazy::Node*> nodes;
+  std::vector<torch::lazy::Node*> nodes;
   std::vector<torch::lazy::Value> values;
   for (auto& tensor : tensors) {
     LazyTensor xtensor = bridge::GetLtcTensor(tensor);
@@ -275,7 +275,7 @@ std::string GetLiveTensorsReport(size_t nodes_threshold,
   for (auto& tensor : tensors) {
     torch::lazy::Value ir_value = tensor.CurrentIrValue();
     if (ir_value) {
-      std::vector<const torch::lazy::Node*> roots({ir_value.node.get()});
+      std::vector<torch::lazy::Node*> roots({ir_value.node.get()});
       auto post_order = ir::Util::ComputePostOrder(roots);
       if (post_order.size() > nodes_threshold) {
         ss << "Tensor: id=" << tensor.GetUniqueId()
@@ -412,14 +412,14 @@ void InitLtcModuleBindings(py::module m) {
   });
   m.def("_get_ltc_tensors_dot",
         [](const std::vector<at::Tensor>& tensors) -> std::string {
-          auto coverter = [](lazy_tensors::Span<const torch::lazy::Node* const> nodes) {
+          auto coverter = [](c10::ArrayRef<torch::lazy::Node*> nodes) {
             return ir::DumpUtil::ToDot(nodes);
           };
           return GetTensorsDump(tensors, coverter);
         });
   m.def("_get_ltc_tensors_text",
         [](const std::vector<at::Tensor>& tensors) -> std::string {
-          auto coverter = [](lazy_tensors::Span<const torch::lazy::Node* const> nodes) {
+          auto coverter = [](c10::ArrayRef<torch::lazy::Node*> nodes) {
             return ir::DumpUtil::ToText(nodes);
           };
           return GetTensorsDump(tensors, coverter);

@@ -5,21 +5,22 @@
 namespace torch_lazy_tensors {
 namespace ir {
 
-std::vector<const torch::lazy::Node*> Util::ComputePostOrder(const torch::lazy::Node* node,
-                                                EmissionMap* emap) {
-  std::vector<const torch::lazy::Node*> post_order;
-  std::vector<const torch::lazy::Node*> queue;
-  queue.push_back(node);
+std::vector<torch::lazy::Node*> Util::ComputePostOrder(
+    const torch::lazy::Node* node, EmissionMap* emap) {
+  std::vector<torch::lazy::Node*> post_order;
+  std::vector<torch::lazy::Node*> queue;
+  // std::vector<const T> to c10::ArrayRef<T> conversion is not supported,
+  // so we need to drop const in the return vector and use const_cast here.
+  queue.push_back(const_cast<torch::lazy::Node*>(node));
   while (!queue.empty()) {
     node = queue.back();
     auto it = emap->find(node);
     if (it == emap->end()) {
       (*emap)[node] = kEmitting;
-
       for (auto& output : node->operands()) {
         auto oit = emap->find(output.node);
         if (oit == emap->end()) {
-          queue.push_back(output.node);
+          queue.push_back(const_cast<torch::lazy::Node*>(output.node));
         } else if (oit->second == kEmitting) {
           LTC_ERROR() << "Graph loop found at " << *output.node;
         }
@@ -31,7 +32,7 @@ std::vector<const torch::lazy::Node*> Util::ComputePostOrder(const torch::lazy::
             << "Graph loop found at " << *output.node;
       }
       (*emap)[node] = kEmitted;
-      post_order.push_back(node);
+      post_order.push_back(const_cast<torch::lazy::Node*>(node));
       queue.pop_back();
     } else {
       LTC_CHECK_EQ(it->second, kEmitted);
@@ -41,9 +42,9 @@ std::vector<const torch::lazy::Node*> Util::ComputePostOrder(const torch::lazy::
   return post_order;
 }
 
-std::vector<const torch::lazy::Node*> Util::ComputePostOrder(
-    lazy_tensors::Span<const torch::lazy::Node* const> nodes, EmissionMap* emap) {
-  std::vector<const torch::lazy::Node*> post_order;
+std::vector<torch::lazy::Node*> Util::ComputePostOrder(
+    c10::ArrayRef<torch::lazy::Node*> nodes, EmissionMap* emap) {
+  std::vector<torch::lazy::Node*> post_order;
   for (auto node : nodes) {
     auto node_post_order = ComputePostOrder(node, emap);
     post_order.insert(post_order.end(), node_post_order.begin(),
@@ -52,15 +53,14 @@ std::vector<const torch::lazy::Node*> Util::ComputePostOrder(
   return post_order;
 }
 
-std::vector<const torch::lazy::Node*> Util::ComputePostOrder(
-    lazy_tensors::Span<const torch::lazy::Node* const> nodes) {
+std::vector<torch::lazy::Node*> Util::ComputePostOrder(
+    c10::ArrayRef<torch::lazy::Node*> nodes) {
   EmissionMap emap;
   return ComputePostOrder(nodes, &emap);
 }
 
-size_t Util::GetGraphSize(lazy_tensors::Span<const torch::lazy::Node* const> nodes) {
-  std::vector<const torch::lazy::Node*> post_order = ComputePostOrder(nodes);
-  return post_order.size();
+size_t Util::GetGraphSize(c10::ArrayRef<torch::lazy::Node*> nodes) {
+  return ComputePostOrder(nodes).size();
 }
 
 }  // namespace ir

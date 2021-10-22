@@ -19,7 +19,7 @@ class BackendImplInterface {
 
   virtual std::unique_ptr<ir::LoweringContext> CreateLoweringContext(
       const std::string& name, Device device,
-      lazy_tensors::Span<const torch::lazy::Node* const> post_order,
+      c10::ArrayRef<torch::lazy::Node*> post_order,
       ir::Util::EmissionMap emit_status) const = 0;
 
   virtual std::unique_ptr<ir::LoweringContext> CreateLoweringContext(
@@ -31,8 +31,7 @@ class BackendImplInterface {
       const = 0;
 
   virtual std::vector<std::string> GetCompilationDevices(
-      const std::string& device,
-      lazy_tensors::Span<const std::string> devices) const = 0;
+      const std::string& device, c10::ArrayRef<std::string> devices) const = 0;
 
   virtual at::Tensor MakeTensorFromComputationData(
       const lazy_tensors::ComputationClient::DataPtr data,

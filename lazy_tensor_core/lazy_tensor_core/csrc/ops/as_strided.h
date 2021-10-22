@@ -25,15 +25,14 @@ class AsStrided : public TsNode {
 
   lazy_tensors::int64 storage_offset() const { return storage_offset_; }
 
-  static bool StrideIsSupported(
-      const lazy_tensors::Shape& input_shape,
-      lazy_tensors::Span<const lazy_tensors::int64> size,
-      lazy_tensors::Span<const lazy_tensors::int64> stride,
-      lazy_tensors::int64 storage_offset);
+  static bool StrideIsSupported(const lazy_tensors::Shape& input_shape,
+                                c10::ArrayRef<lazy_tensors::int64> size,
+                                c10::ArrayRef<lazy_tensors::int64> stride,
+                                lazy_tensors::int64 storage_offset);
 
   static std::vector<lazy_tensors::int64> GetArrayStridePermutation(
-      lazy_tensors::Span<const lazy_tensors::int64> stride,
-      lazy_tensors::Span<const lazy_tensors::int64> size);
+      c10::ArrayRef<lazy_tensors::int64> stride,
+      c10::ArrayRef<lazy_tensors::int64> size);
 
  private:
   std::vector<lazy_tensors::int64> size_;

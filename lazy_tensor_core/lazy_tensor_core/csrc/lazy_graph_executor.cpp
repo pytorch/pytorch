@@ -405,19 +405,18 @@ std::vector<LazyTensor> LazyGraphExecutor::GetLiveTensors(
   return DeviceContextArena::Get()->GetLiveTensors(device);
 }
 
-void LazyGraphExecutor::SyncLiveTensorsGraph(
-    const Device* device, lazy_tensors::Span<const std::string> devices,
-    bool wait) {
+void LazyGraphExecutor::SyncLiveTensorsGraph(const Device* device,
+                                             c10::ArrayRef<std::string> devices,
+                                             bool wait) {
   auto tensors = GetLiveTensors(device);
   LTC_VLOG(4) << tensors.size() << " live tensors: devices=("
               << c10::Join(", ", devices) << ")";
   SyncTensorsGraph(&tensors, devices, wait, /*sync_ltc_data=*/true);
 }
 
-void LazyGraphExecutor::SyncTensorsGraph(
-    std::vector<LazyTensor>* tensors,
-    lazy_tensors::Span<const std::string> devices, bool wait,
-    bool sync_ltc_data) {
+void LazyGraphExecutor::SyncTensorsGraph(std::vector<LazyTensor>* tensors,
+                                         c10::ArrayRef<std::string> devices,
+                                         bool wait, bool sync_ltc_data) {
   LTC_VLOG(4) << "Trying to sync the value of " << tensors->size()
               << " tensor(s)";
   static const bool op_by_op =
@@ -444,8 +443,7 @@ void LazyGraphExecutor::MarkStep(const Device& device) {
   g_tls_data.Reset();
 }
 
-void LazyGraphExecutor::WaitDeviceOps(
-    lazy_tensors::Span<const std::string> devices) {
+void LazyGraphExecutor::WaitDeviceOps(c10::ArrayRef<std::string> devices) {
   std::set<Device> wait_devices;
   if (!devices.empty()) {
     for (auto& device_str : devices) {
@@ -586,8 +584,7 @@ LazyGraphExecutor::SyncTensorCollection LazyGraphExecutor::CollectSyncTensors(
 }
 
 std::vector<torch::lazy::Value> LazyGraphExecutor::CollectRoots(
-    const std::vector<LazyTensor>& tensors,
-    lazy_tensors::Span<const size_t> indices) {
+    const std::vector<LazyTensor>& tensors, c10::ArrayRef<size_t> indices) {
   std::vector<torch::lazy::Value> roots;
   roots.reserve(indices.size());
   for (auto index : indices) {
@@ -599,7 +596,7 @@ std::vector<torch::lazy::Value> LazyGraphExecutor::CollectRoots(
 std::vector<lazy_tensors::ComputationClient::DataPtr>
 LazyGraphExecutor::FetchTensorData(std::vector<LazyTensor>* tensors,
                                    const SyncTensorsConfig& config,
-                                   lazy_tensors::Span<const size_t> indices) {
+                                   c10::ArrayRef<size_t> indices) {
   std::vector<lazy_tensors::ComputationClient::DataPtr> tensors_data;
   tensors_data.reserve(indices.size());
   for (auto index : indices) {
@@ -629,9 +626,8 @@ LazyGraphExecutor::FetchTensorData(std::vector<LazyTensor>* tensors,
 }
 
 LazyGraphExecutor::PostOrderData LazyGraphExecutor::RunPostOrder(
-    const std::vector<LazyTensor>& tensors,
-    lazy_tensors::Span<const size_t> indices) {
-  std::vector<const torch::lazy::Node*> roots;
+    const std::vector<LazyTensor>& tensors, c10::ArrayRef<size_t> indices) {
+  std::vector<torch::lazy::Node*> roots;
   roots.reserve(indices.size());
   for (auto index : indices) {
     torch::lazy::Value ir_value = tensors.at(index).CurrentIrValue();
@@ -676,8 +672,7 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::TryRunCachedSync(
 }
 
 LazyGraphExecutor::CompilationResult LazyGraphExecutor::Compile(
-    const std::vector<LazyTensor>& tensors,
-    lazy_tensors::Span<const std::string> devices,
+    const std::vector<LazyTensor>& tensors, c10::ArrayRef<std::string> devices,
     const SyncTensorCollection& coll, PostOrderData* po_data) {
   static const bool enable_aliasing =
       lazy_tensors::sys_util::GetEnvBool("ENABLE_PARAM_ALIASING", false);
@@ -768,8 +763,7 @@ LazyGraphExecutor::LookupCachedCompile(const std::vector<LazyTensor>& tensors,
 }
 
 void LazyGraphExecutor::BuildInputOutputAliases(
-    const std::vector<LazyTensor>& tensors,
-    lazy_tensors::Span<const size_t> indices,
+    const std::vector<LazyTensor>& tensors, c10::ArrayRef<size_t> indices,
     ir::LoweringContext* lowering_ctx) {
   std::unordered_map<lazy_tensors::int64, size_t> output_tensor_id_map;
   for (size_t i = 0; i < indices.size(); ++i) {
@@ -806,15 +800,14 @@ void LazyGraphExecutor::BuildInputOutputAliases(
 }
 
 LazyGraphExecutor::OpByOpAsync LazyGraphExecutor::SyncTensorsGraphOpByOp(
-    std::vector<LazyTensor>* tensors,
-    lazy_tensors::Span<const std::string> devices,
+    std::vector<LazyTensor>* tensors, c10::ArrayRef<std::string> devices,
     const SyncTensorsConfig& config) {
   struct Async {
     explicit Async(
         SyncTensorCollection coll,
         std::vector<lazy_tensors::ComputationClient::DataPtr> tensors_data,
         std::vector<torch::lazy::Value> roots,
-        lazy_tensors::Span<const std::string> devices)
+        c10::ArrayRef<std::string> devices)
         : coll(std::move(coll)),
           tensors_data(std::move(tensors_data)),
           roots(std::move(roots)),
@@ -866,10 +859,9 @@ LazyGraphExecutor::OpByOpAsync LazyGraphExecutor::SyncTensorsGraphOpByOp(
 }
 
 std::shared_ptr<LazyGraphExecutor::Async>
-LazyGraphExecutor::SyncTensorsGraphInternal(
-    std::vector<LazyTensor>* tensors,
-    lazy_tensors::Span<const std::string> devices,
-    const SyncTensorsConfig& config) {
+LazyGraphExecutor::SyncTensorsGraphInternal(std::vector<LazyTensor>* tensors,
+                                            c10::ArrayRef<std::string> devices,
+                                            const SyncTensorsConfig& config) {
   SyncTensorCollection coll = CollectSyncTensors(*tensors, config);
   if (coll.indices.empty()) {
     return nullptr;
@@ -998,21 +990,17 @@ std::vector<at::Tensor> LazyGraphExecutor::GetTensorsFused(
   }
   std::vector<lazy_tensors::ComputationClient::DataPtr> tensors_data =
       GatherTensorsData(
-          *tensors,
-          async != nullptr ? async->indices
-                           : lazy_tensors::Span<const size_t>(),
+          *tensors, async != nullptr ? async->indices : c10::ArrayRef<size_t>(),
           async != nullptr
               ? async->tensors_data
-              : lazy_tensors::Span<
-                    const lazy_tensors::ComputationClient::DataPtr>());
+              : c10::ArrayRef<lazy_tensors::ComputationClient::DataPtr>());
   return FetchTensors(tensors, tensors_data,
                       async != nullptr ? &async->indices : nullptr);
 }
 
 std::vector<at::Tensor> LazyGraphExecutor::FetchTensors(
     std::vector<LazyTensor>* tensors,
-    lazy_tensors::Span<const lazy_tensors::ComputationClient::DataPtr>
-        tensors_data,
+    c10::ArrayRef<lazy_tensors::ComputationClient::DataPtr> tensors_data,
     const std::vector<size_t>* indices) {
   std::vector<at::Tensor> results;
   size_t literals_index = 0;
@@ -1042,10 +1030,8 @@ std::vector<at::Tensor> LazyGraphExecutor::FetchTensors(
 
 std::vector<lazy_tensors::ComputationClient::DataPtr>
 LazyGraphExecutor::GatherTensorsData(
-    const std::vector<LazyTensor>& tensors,
-    lazy_tensors::Span<const size_t> indices,
-    lazy_tensors::Span<const lazy_tensors::ComputationClient::DataPtr>
-        tensors_data) {
+    const std::vector<LazyTensor>& tensors, c10::ArrayRef<size_t> indices,
+    c10::ArrayRef<lazy_tensors::ComputationClient::DataPtr> tensors_data) {
   std::vector<lazy_tensors::ComputationClient::DataPtr> result_tensors_data;
   std::unordered_map<lazy_tensors::int64, size_t> uid_index_map;
   size_t indices_index = 0;

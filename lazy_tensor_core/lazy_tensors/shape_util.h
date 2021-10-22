@@ -4,7 +4,6 @@
 
 #include "lazy_tensors/primitive_types.h"
 #include "lazy_tensors/shape.h"
-#include "lazy_tensors/span.h"
 #include "lazy_tensors/util.h"
 #include "torch/csrc/jit/tensorexpr/types.h"
 #include "torch/csrc/lazy/core/hash.h"
@@ -101,20 +100,21 @@ class ShapeUtil {
     }
   }
 
-  static Shape MakeTupleShape(lazy_tensors::Span<const Shape> shapes) {
+  static Shape MakeTupleShape(c10::ArrayRef<Shape> shapes) {
     return Shape(shapes);
   }
 
   static Shape MakeShape(PrimitiveType element_type,
-                         lazy_tensors::Span<const int64> dimensions) {
+                         c10::ArrayRef<int64> dimensions) {
     return MakeShapeWithDescendingLayout(element_type, dimensions);
   }
 
-  static Shape MakeShapeWithLayout(
-      PrimitiveType element_type, lazy_tensors::Span<const int64> dimensions,
-      lazy_tensors::Span<const int64> minor_to_major,
-      lazy_tensors::Span<const Tile> tiles = {}, int64 element_size_in_bits = 0,
-      int64 memory_space = 0) {
+  static Shape MakeShapeWithLayout(PrimitiveType element_type,
+                                   c10::ArrayRef<int64> dimensions,
+                                   c10::ArrayRef<int64> minor_to_major,
+                                   c10::ArrayRef<Tile> tiles = {},
+                                   int64 element_size_in_bits = 0,
+                                   int64 memory_space = 0) {
     LTC_CHECK(tiles.empty());
     LTC_CHECK_EQ(element_size_in_bits, 0);
     LTC_CHECK_EQ(memory_space, 0);
@@ -130,8 +130,8 @@ class ShapeUtil {
     return shape;
   }
 
-  static Shape MakeShapeWithDescendingLayout(
-      PrimitiveType element_type, lazy_tensors::Span<const int64> dimensions) {
+  static Shape MakeShapeWithDescendingLayout(PrimitiveType element_type,
+                                             c10::ArrayRef<int64> dimensions) {
     std::vector<int64> layout(dimensions.size());
     std::iota(layout.rbegin(), layout.rend(), static_cast<int64>(0));
     return MakeShapeWithLayout(element_type, dimensions, layout);

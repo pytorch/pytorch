@@ -22,14 +22,14 @@ namespace lazy {
 // Adapters that provide torch::lazy Hash functions for xla types
 
 template <typename T>
-torch::lazy::hash_t Hash(lazy_tensors::Span<const T> values) {
+torch::lazy::hash_t Hash(c10::ArrayRef<T> values) {
   return torch::lazy::ContainerHash(values);
 }
 
 // When specializing Hash(T) also specialize MHash(T, ...) since
 // torch::lazy::MHash template won't be aware of the Hash(T) here
 template <typename T, typename... Targs>
-hash_t MHash(lazy_tensors::Span<const T> value, Targs... Fargs) {
+hash_t MHash(c10::ArrayRef<T> value, Targs... Fargs) {
   return HashCombine(Hash(value), MHash(Fargs...));
 }
 
@@ -191,8 +191,8 @@ std::vector<T> ToVector(const S& input) {
 
 template <typename T>
 std::vector<T> GetValuesVector(
-    lazy_tensors::Span<const T> values,
-    lazy_tensors::Span<const c10::optional<T>* const> opt_values) {
+    const std::vector<T>& values,
+    const std::vector<const c10::optional<T>*>& opt_values) {
   std::vector<T> result(values.begin(), values.end());
   for (auto opt : opt_values) {
     if (*opt) {

@@ -159,11 +159,9 @@ void bitwise_xor_out(LazyTensor& out, const LazyTensor& input,
                      const LazyTensor& other);
 
 // Broadcasts the given tensors according to broadcasting semantics.
-std::vector<LazyTensor> broadcast_tensors(
-    lazy_tensors::Span<const LazyTensor> tensors);
+std::vector<LazyTensor> broadcast_tensors(c10::ArrayRef<LazyTensor> tensors);
 
-LazyTensor cat(lazy_tensors::Span<const LazyTensor> tensors,
-               lazy_tensors::int64 dim);
+LazyTensor cat(c10::ArrayRef<LazyTensor> tensors, lazy_tensors::int64 dim);
 
 LazyTensor ceil(const LazyTensor& input);
 
@@ -182,7 +180,7 @@ LazyTensor clone(const LazyTensor& input);
 // Pad with the given value and size specified by the given list of low and
 // high paddings.
 LazyTensor constant_pad_nd(const LazyTensor& input,
-                           lazy_tensors::Span<const lazy_tensors::int64> pad,
+                           c10::ArrayRef<lazy_tensors::int64> pad,
                            const at::Scalar& value);
 
 LazyTensor convolution_overrideable(
@@ -239,7 +237,7 @@ LazyTensor diagonal(const LazyTensor& input, lazy_tensors::int64 offset,
 // A generalized contraction between tensors of arbitrary dimension defined by
 // the given equation and applied to the input tensors.
 LazyTensor einsum(const std::string& equation,
-                  lazy_tensors::Span<const LazyTensor> tensors);
+                  c10::ArrayRef<LazyTensor> tensors);
 
 LazyTensor elu(const LazyTensor& input, const at::Scalar& alpha,
                const at::Scalar& scale, const at::Scalar& input_scale);
@@ -280,7 +278,7 @@ void fill_(LazyTensor& input, const at::Scalar& value);
 
 // Flips (reverses) the values in the dimensions of the input tensor.
 LazyTensor flip(const LazyTensor& input,
-                lazy_tensors::Span<const lazy_tensors::int64> dims);
+                c10::ArrayRef<lazy_tensors::int64> dims);
 
 LazyTensor fmod(
     const LazyTensor& input, const LazyTensor& other,
@@ -289,7 +287,7 @@ LazyTensor fmod(
     const LazyTensor& input, const at::Scalar& other,
     c10::optional<at::ScalarType> logical_element_type = c10::nullopt);
 
-LazyTensor full(lazy_tensors::Span<const lazy_tensors::int64> size,
+LazyTensor full(c10::ArrayRef<lazy_tensors::int64> size,
                 const at::Scalar& fill_value, const Device& device,
                 at::ScalarType scalar_type);
 LazyTensor full_like(const LazyTensor& input, const at::Scalar& fill_value,
@@ -317,8 +315,7 @@ LazyTensor gt(const LazyTensor& input, const LazyTensor& other);
 // For input of shape d1 x d2 x ... x dn and p indices of shape i1 x i2 x ...
 // x ik, the output shape is d1 x ... x d(start_dim) x i1 x ... x ik x
 // d(start_dim+p+1) x ... x dn.
-LazyTensor index(const LazyTensor& input,
-                 lazy_tensors::Span<const LazyTensor> indices,
+LazyTensor index(const LazyTensor& input, c10::ArrayRef<LazyTensor> indices,
                  lazy_tensors::int64 start_dim);
 
 LazyTensor index_add(const LazyTensor& input, lazy_tensors::int64 dim,
@@ -351,16 +348,16 @@ void index_fill_(LazyTensor& input, lazy_tensors::int64 dim,
 
 // Puts values into the input tensor using the given indices (a tuple of
 // tensors) and returns the result.
-LazyTensor index_put(
-    const LazyTensor& input, lazy_tensors::Span<const LazyTensor> indices,
-    lazy_tensors::int64 start_dim, const LazyTensor& values, bool accumulate,
-    lazy_tensors::Span<const lazy_tensors::int64> result_permutation);
+LazyTensor index_put(const LazyTensor& input, c10::ArrayRef<LazyTensor> indices,
+                     lazy_tensors::int64 start_dim, const LazyTensor& values,
+                     bool accumulate,
+                     c10::ArrayRef<lazy_tensors::int64> result_permutation);
 
-void index_put_(
-    LazyTensor& input, const LazyTensor& canonical_base,
-    lazy_tensors::Span<const LazyTensor> indices, lazy_tensors::int64 start_dim,
-    const LazyTensor& values, bool accumulate,
-    lazy_tensors::Span<const lazy_tensors::int64> result_permutation);
+void index_put_(LazyTensor& input, const LazyTensor& canonical_base,
+                c10::ArrayRef<LazyTensor> indices,
+                lazy_tensors::int64 start_dim, const LazyTensor& values,
+                bool accumulate,
+                c10::ArrayRef<lazy_tensors::int64> result_permutation);
 
 LazyTensor index_select(const LazyTensor& input, lazy_tensors::int64 dim,
                         const LazyTensor& index);
@@ -537,7 +534,7 @@ std::tuple<LazyTensor, LazyTensor, LazyTensor> ts_native_batch_norm_backward(
     const LazyTensor& weight, const LazyTensor& running_mean,
     const LazyTensor& running_var, const LazyTensor& save_mean,
     const LazyTensor& save_invstd, bool training, double eps,
-    lazy_tensors::Span<const bool> output_mask);
+    c10::ArrayRef<bool> output_mask);
 
 LazyTensor ne(const LazyTensor& input, const at::Scalar& other);
 
@@ -587,7 +584,7 @@ LazyTensor not_supported(std::string description, lazy_tensors::Shape shape,
 
 // Permute the dimensions of this tensor according to the given permutation.
 LazyTensor permute(const LazyTensor& input,
-                   lazy_tensors::Span<const lazy_tensors::int64> dims);
+                   c10::ArrayRef<lazy_tensors::int64> dims);
 
 LazyTensor pow(const LazyTensor& input, const at::Scalar& exponent);
 LazyTensor pow(const LazyTensor& input, const LazyTensor& exponent);
@@ -729,8 +726,7 @@ LazyTensor squeeze(const LazyTensor& input, lazy_tensors::int64 dim);
 void squeeze_(LazyTensor& input);
 void squeeze_(LazyTensor& input, lazy_tensors::int64 dim);
 
-LazyTensor stack(lazy_tensors::Span<const LazyTensor> tensors,
-                 lazy_tensors::int64 dim);
+LazyTensor stack(c10::ArrayRef<LazyTensor> tensors, lazy_tensors::int64 dim);
 
 LazyTensor std(const LazyTensor& input,
                std::vector<lazy_tensors::int64> dimensions,
@@ -843,7 +839,7 @@ std::tuple<LazyTensor, LazyTensor> var_mean(
 
 // Like reshape, but it returns a view into the original tensor.
 LazyTensor view(const LazyTensor& input,
-                lazy_tensors::Span<const lazy_tensors::int64> output_size);
+                c10::ArrayRef<lazy_tensors::int64> output_size);
 
 void zero_(LazyTensor& input);
 

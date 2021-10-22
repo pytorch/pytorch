@@ -4,7 +4,6 @@
 #include <c10/util/Optional.h>
 
 #include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
-#include "lazy_tensors/span.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
