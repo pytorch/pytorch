@@ -10,9 +10,9 @@
 #include <vector>
 
 namespace c10 {
-class IValue;
+struct FunctionSchema;
+struct IValue;
 class OperatorHandle;
-class FunctionSchema;
 using Stack = std::vector<IValue>;
 }
 

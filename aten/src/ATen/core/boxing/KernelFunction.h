@@ -73,7 +73,7 @@ TORCH_API void ambiguous_autogradother_kernel(OperatorKernel*, const OperatorHan
 namespace kernel_function {
 
 template<class Return, class... Args>
-Return call(const KernelFunction &func, const OperatorHandle& opHandle, DispatchKeySet dispatchKeySet, Args... args);
+C10_ALWAYS_INLINE Return call(const KernelFunction &func, const OperatorHandle& opHandle, DispatchKeySet dispatchKeySet, Args... args);
 
 template<bool AllowLegacyTypes=false, class KernelFunctor>
 inline KernelFunction makeFromUnboxedFunctor(std::unique_ptr<OperatorKernel> kernelFunctor);
