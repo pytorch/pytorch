@@ -117,14 +117,17 @@ class GTest(TestCase):
             print("all", list(path.glob("*")))
             print("tests", list(path.glob("*test*")))
 
-        try_dir(TEST_BINARY_DIR)
-        try_dir(TEST_BINARY_DIR / "win_tmp")
-        try_dir(TEST_BINARY_DIR / "win_tmp" / "torch" / "build" / "bin")
-        try_dir(TEST_BINARY_DIR / "win_tmp" / "build" / "bin")
-        try_dir(REPO_ROOT / "build" / "bin")
-        try_dir(REPO_ROOT / "build" / "win_tmp")
-        try_dir(REPO_ROOT / "build" / "win_tmp" / "torch" / "build" / "bin")
-        try_dir(REPO_ROOT / "build" / "win_tmp" / "build" / "bin")
+        # try_dir(TEST_BINARY_DIR)
+        # try_dir(TEST_BINARY_DIR / "win_tmp")
+        # try_dir(TEST_BINARY_DIR / "win_tmp" / "torch" / "build" / "bin")
+        # try_dir(TEST_BINARY_DIR / "win_tmp" / "build" / "bin")
+        # try_dir(REPO_ROOT / "build" / "bin")
+        # try_dir(REPO_ROOT / "build" / "win_tmp")
+        # try_dir(REPO_ROOT / "build" / "win_tmp" / "torch" / "build" / "bin")
+        # try_dir(REPO_ROOT / "build" / "win_tmp" / "build" / "bin")
+        print("ALL FILES GLOB")
+        print(list(REPO_ROOT.glob("**/*")))
+
         self.binaries = {}
 
         for binary in TEST_BINARY_DIR.glob("*test*"):
