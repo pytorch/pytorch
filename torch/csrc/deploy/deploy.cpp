@@ -57,7 +57,10 @@ static bool writeDeployInterpreter(FILE* dst) {
   return customLoader;
 }
 
-InterpreterManager::InterpreterManager(size_t nInterp) : resources_(nInterp) {
+InterpreterManager::InterpreterManager(
+    size_t nInterp,
+    const c10::optional<std::string>& pythonPath)
+    : resources_(nInterp) {
   TORCH_DEPLOY_TRY
   for (const auto i : c10::irange(nInterp)) {
     instances_.emplace_back(this);
@@ -75,13 +78,17 @@ InterpreterManager::InterpreterManager(size_t nInterp) : resources_(nInterp) {
             return at::nullopt;
           }
         });
+
+    if (pythonPath) {
+      I.global("sys", "path").attr("append")({pythonPath.value()});
+    }
   }
 
   // Pre-registered modules.
   // Since torch::deploy::Obj.toIValue cannot infer empty list, we hack it to
   // return None for empty list.
   // TODO(jwtan): Make the discovery of these modules easier.
-  reigsterModuleSource(
+  registerModuleSource(
       "GetArgumentNamesModule",
       "from inspect import signature\n"
       "from typing import Callable, Optional\n"
@@ -160,6 +167,11 @@ ReplicatedObj InterpreterSession::createMovable(Obj obj) {
   TORCH_CHECK(
       manager_,
       "Can only create a movable object when the session was created from an interpreter that is part of a InterpreterManager");
+
+  TORCH_CHECK(
+      impl_->isOwner(obj),
+      "Cannot create movable from an object that lives in different session");
+
   auto pickled = impl_->pickle(self, obj);
   return ReplicatedObj(std::make_shared<ReplicatedObjImpl>(
       manager_->nextObjectId_++, std::move(pickled), manager_));
