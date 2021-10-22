@@ -299,6 +299,23 @@ static inline int64_t nearest_neighbor_compute_source_index(
   return src_index;
 }
 
+static inline int64_t nearest_idx(
+    int64_t output_index,
+    int64_t input_size,
+    int64_t output_size,
+    c10::optional<double> scales) {
+  if (output_size == input_size) {
+    // scale_factor = 1, simply copy
+    return output_index;
+  } else if (output_size == 2 * input_size) {
+    // scale_factor = 2, shift input index
+    return output_index >> 1;
+  } else {
+    float scale = compute_scales_value<float>(scales, input_size, output_size);
+    return nearest_neighbor_compute_source_index(scale, output_index, input_size);
+  }
+}
+
 template <typename scalar_t>
 static scalar_t upsample_get_value_bounded(
     scalar_t* data,
