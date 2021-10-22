@@ -3193,7 +3193,7 @@ class TestQuantizeFx(QuantizationTestCase):
                                 (nn.Linear, get_default_qat_qconfig("fbgemm")),
                             ],
                             }
-            prepared = prepare_qat_fx(model,qconfig_dict)
+            prepared = prepare_qat_fx(model, qconfig_dict)
             prepared(torch.rand(5, 5))
             if check == "module_name":
                 convert_qconfig_dict = {"": None,
@@ -3227,7 +3227,7 @@ class TestQuantizeFx(QuantizationTestCase):
                                             (nn.functional.linear, get_default_qat_qconfig("fbgemm")),
                                             (torch.add, get_default_qat_qconfig("fbgemm")),
                                             (nn.Linear, None),
-                                        ],}
+                                        ]}
 
                 node_occurrence = {
                     ns.call_function(torch.quantize_per_tensor): 1,
