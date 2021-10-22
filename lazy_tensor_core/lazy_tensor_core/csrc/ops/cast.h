@@ -11,7 +11,6 @@ namespace ops {
 
 class Cast : public TsNode {
  public:
-  Cast(const torch::lazy::Value& input, lazy_tensors::PrimitiveType type);
   Cast(const torch::lazy::Value& input, at::ScalarType dtype,
        c10::optional<at::ScalarType> stype = c10::nullopt);
 
@@ -19,15 +18,12 @@ class Cast : public TsNode {
 
   NodePtr Clone(OpList operands) const override;
 
-  lazy_tensors::PrimitiveType type() const { return type_; }
-
-  const c10::optional<at::ScalarType>& dtype() const { return dtype_; };
+  const at::ScalarType dtype() const { return dtype_; };
 
   const c10::optional<at::ScalarType>& stype() const { return stype_; };
 
  private:
-  lazy_tensors::PrimitiveType type_;
-  c10::optional<at::ScalarType> dtype_;
+  at::ScalarType dtype_;
   c10::optional<at::ScalarType> stype_;
 };
 

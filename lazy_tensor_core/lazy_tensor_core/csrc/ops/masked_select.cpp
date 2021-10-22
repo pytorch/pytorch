@@ -13,10 +13,10 @@ lazy_tensors::Shape NodeOutputShape(const torch::lazy::Value& input) {
   const lazy_tensors::Shape& input_shape = ir::GetShapeFromTsValue(input);
   lazy_tensors::int64 input_elements =
       lazy_tensors::ShapeUtil::ElementsIn(input_shape);
-  lazy_tensors::PrimitiveType size_type =
+  c10::ScalarType size_type =
       GetShapeDimensionType(/*device=*/nullptr);
   lazy_tensors::Shape result_shape = lazy_tensors::ShapeUtil::MakeShape(
-      input_shape.element_type(), {input_elements});
+      input_shape.at_element_type(), {input_elements});
   result_shape.set_dynamic_dimension(0, true);
   return lazy_tensors::ShapeUtil::MakeTupleShape(
       {result_shape, lazy_tensors::ShapeUtil::MakeShape(size_type, {})});

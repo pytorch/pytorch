@@ -75,7 +75,7 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
       auto generic_slice = torch::lazy::NodeCast<ir::ops::GenericSlice>(
           node, *ir::ops::ltc_generic_slice);
       const torch::lazy::Output& argument = node->operand(0);
-      return lazy_tensors::Shape(ir::GetShapeFromTsOutput(argument).element_type(),
+      return lazy_tensors::Shape(ir::GetShapeFromTsOutput(argument).at_element_type(),
                                  generic_slice->sizes());
     }
     if (node->op() == *ir::ops::ltc_update_slice) {
@@ -87,7 +87,7 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
         auto expand =
             torch::lazy::NodeCast<ir::ops::Expand>(node, ir::OpKind(at::aten::expand));
         const torch::lazy::Output& argument = node->operand(0);
-        return lazy_tensors::Shape(ir::GetShapeFromTsOutput(argument).element_type(),
+        return lazy_tensors::Shape(ir::GetShapeFromTsOutput(argument).at_element_type(),
                                    expand->size());
       }
       case at::aten::index_select: {
@@ -161,7 +161,7 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
         for (auto rit = pad.rbegin(); rit != pad.rend(); rit += 2, ++i) {
           padded_dimensions[i] += (*rit + *(rit + 1));
         }
-        return lazy_tensors::Shape(argument_shape.element_type(),
+        return lazy_tensors::Shape(argument_shape.at_element_type(),
                                    padded_dimensions);
       }
       case at::aten::eq:
@@ -320,7 +320,7 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
     const torch::lazy::Output& lhs = node->operand(0);
     const torch::lazy::Output& rhs = node->operand(1);
     return lazy_tensors::Shape(
-        lazy_tensors::PrimitiveType::PRED,
+        c10::ScalarType::Bool,
         Helpers::GetPromotedShape(ir::GetShapeFromTsOutput(lhs).dimensions(),
                                   ir::GetShapeFromTsOutput(rhs).dimensions()));
   }
@@ -345,12 +345,12 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
     static constexpr size_t kDimension2D = 2;
 
     auto inputShape = ir::GetShapeFromTsOutput(node->operand(0));
-    auto scalarShape = lazy_tensors::Shape(inputShape.element_type(), {});
+    auto scalarShape = lazy_tensors::Shape(inputShape.at_element_type(), {});
     if (node->reduction() == ReductionMode::kNone &&
         inputShape.dimensions_size() == kDimension2D) {
       auto batchSize = inputShape.dimensions(0);
       return lazy_tensors::ShapeUtil::MakeTupleShape(
-          {lazy_tensors::Shape(inputShape.element_type(), {batchSize})
+          {lazy_tensors::Shape(inputShape.at_element_type(), {batchSize})
               , std::move(scalarShape)});
     }
 
@@ -391,11 +391,11 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
 
     if (!conv->transposed()) {
       return lazy_tensors::Shape(
-          input_shape.element_type(),
+          input_shape.at_element_type(),
           at::native::conv_output_size(input_size, weight_size, padding, stride,
                                        dilation));
     } else {
-      return lazy_tensors::Shape(input_shape.element_type(),
+      return lazy_tensors::Shape(input_shape.at_element_type(),
                                  at::native::conv_input_size(
                                      input_size, weight_size, padding,
                                      output_padding, stride, dilation, groups));
@@ -415,7 +415,7 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
     LTC_CHECK_GE(node->dim(), 0);
     LTC_CHECK_LT(node->dim(), input_shape.rank());
     output_dimensions[node->dim()] = index_shape.dimensions(0);
-    return lazy_tensors::Shape(input_shape.element_type(), output_dimensions);
+    return lazy_tensors::Shape(input_shape.at_element_type(), output_dimensions);
   }
 
   static lazy_tensors::Shape InferRepeat(const ir::ops::Repeat* repeat) {
@@ -433,7 +433,7 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
     for (const auto idx : c10::irange(repeats.size())) {
       target_size[idx] = padded_size[idx] * repeats[idx];
     }
-    return lazy_tensors::Shape(input_shape.element_type(), target_size);
+    return lazy_tensors::Shape(input_shape.at_element_type(), target_size);
   }
 
   static lazy_tensors::Shape InferSqueeze(const ir::ops::Squeeze* squeeze) {
@@ -441,7 +441,7 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
     const lazy_tensors::Shape& argument_shape = ir::GetShapeFromTsOutput(argument);
     const auto output_sizes =
         BuildSqueezedDimensions(argument_shape.dimensions(), squeeze->dim());
-    return lazy_tensors::Shape(argument_shape.element_type(), output_sizes);
+    return lazy_tensors::Shape(argument_shape.at_element_type(), output_sizes);
   }
 
   static lazy_tensors::Shape InferStack(const ir::ops::Stack* stack) {
@@ -458,7 +458,7 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
     LTC_CHECK_LE(stack->dim(), output_dimensions.size());
     output_dimensions.insert(output_dimensions.begin() + stack->dim(),
                              inputs.size());
-    return lazy_tensors::Shape(input_shape.element_type(), output_dimensions);
+    return lazy_tensors::Shape(input_shape.at_element_type(), output_dimensions);
   }
 
   TSOpVector LowerBuiltin(
@@ -800,7 +800,7 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
         at::TensorOptions()
             .device(lazy_tensors::compiler::TSComputationClient::
                         HardwareDeviceType())
-            .dtype(lazy_tensors::PrimitiveToScalarType(shape.element_type()));
+            .dtype(shape.at_element_type());
     return {
         loctx()->graph()->insertConstant(at::scalar_tensor(value, options))};
   }

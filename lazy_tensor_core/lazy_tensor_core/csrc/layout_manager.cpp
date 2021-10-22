@@ -118,7 +118,7 @@ double PaddingFactor(lazy_tensors::int64 size, int padding) {
 
 lazy_tensors::Shape MakeShapeWithSortedLayout(
     c10::ArrayRef<lazy_tensors::int64> dimensions,
-    lazy_tensors::PrimitiveType type) {
+    c10::ScalarType type) {
   // Place bigger dimensions on most minor layout locations.
   std::vector<lazy_tensors::int64> layout =
       lazy_tensors::util::Iota<lazy_tensors::int64>(dimensions.size(),
@@ -141,26 +141,8 @@ lazy_tensors::Shape* SetDynamicDimensions(
   return shape;
 }
 
-lazy_tensors::Shape MakeTpuShape(c10::ArrayRef<lazy_tensors::int64> dimensions,
-                                 c10::ArrayRef<bool> dynamic_dimensions,
-                                 lazy_tensors::PrimitiveType type) {
-  static double max_padding_factor =
-      lazy_tensors::sys_util::GetEnvDouble("LTC_MAX_PADDING_FACTOR", 1.25);
-  lazy_tensors::Shape shape;
-  if (PaddingFactor(dimensions[dimensions.size() - 1], 128) *
-          PaddingFactor(dimensions[dimensions.size() - 2], 8) <
-      max_padding_factor) {
-    shape = lazy_tensors::ShapeUtil::MakeShapeWithDescendingLayout(type,
-                                                                   dimensions);
-  } else {
-    shape = MakeShapeWithSortedLayout(dimensions, type);
-  }
-  SetDynamicDimensions(&shape, dynamic_dimensions);
-  return shape;
-}
-
 lazy_tensors::Shape MakeShapeWithLayout(
-    lazy_tensors::PrimitiveType type,
+    c10::ScalarType type,
     c10::ArrayRef<lazy_tensors::int64> dimensions,
     c10::ArrayRef<bool> dynamic_dimensions,
     c10::ArrayRef<lazy_tensors::int64> layout) {
@@ -174,7 +156,7 @@ lazy_tensors::Shape MakeShapeWithLayout(
 
 lazy_tensors::Shape MakeTorchTensorLayout(
     c10::ArrayRef<lazy_tensors::int64> dimensions,
-    c10::ArrayRef<bool> dynamic_dimensions, lazy_tensors::PrimitiveType type) {
+    c10::ArrayRef<bool> dynamic_dimensions, c10::ScalarType type) {
   lazy_tensors::Shape shape =
       lazy_tensors::ShapeUtil::MakeShapeWithDescendingLayout(type, dimensions);
   SetDynamicDimensions(&shape, dynamic_dimensions);
@@ -183,16 +165,14 @@ lazy_tensors::Shape MakeTorchTensorLayout(
 
 lazy_tensors::Shape MakeArrayShapeFromDimensions(
     c10::ArrayRef<lazy_tensors::int64> dimensions,
-    c10::ArrayRef<bool> dynamic_dimensions, lazy_tensors::PrimitiveType type,
+    c10::ArrayRef<bool> dynamic_dimensions, c10::ScalarType type,
     DeviceType device_type) {
   auto layout_ptr = LayoutManager::Get()->GetLayout(dimensions);
   if (layout_ptr != nullptr) {
     return MakeShapeWithLayout(type, dimensions, dynamic_dimensions,
                                *layout_ptr);
   }
-  if (dimensions.size() > 1 && device_type == DeviceType::TPU) {
-    return MakeTpuShape(dimensions, dynamic_dimensions, type);
-  }
+
   return MakeTorchTensorLayout(dimensions, dynamic_dimensions, type);
 }
 

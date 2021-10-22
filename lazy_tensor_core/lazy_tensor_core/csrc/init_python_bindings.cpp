@@ -169,8 +169,10 @@ std::shared_ptr<torch::lazy::Value> AllReduceInPlace(
     const std::shared_ptr<torch::lazy::Value>& token, double scale,
     const std::vector<std::vector<lazy_tensors::int64>>& replica_groups) {
   std::vector<LazyTensor> xtensors = GetLtcTensors(tensors, /*want_all=*/true);
-  return std::make_shared<torch::lazy::Value>(lazy_tensor_distributed::all_reduce(
-      &xtensors, *token, GetReduceType(reduce_type), scale, replica_groups));
+  return std::make_shared<torch::lazy::Value>(
+      lazy_tensor_distributed::all_reduce(&xtensors, *token,
+                                          GetReduceType(reduce_type), scale,
+                                          replica_groups));
 }
 
 std::pair<at::Tensor, std::shared_ptr<torch::lazy::Value>> AllReduce(
@@ -328,7 +330,7 @@ std::shared_ptr<torch::lazy::Value> CreateToken(const std::string& device_str) {
   // backend compiler passes might remove it, vanishing its sequencing effects.
   Device device = GetDeviceOrCurrent(device_str);
   torch::lazy::Value ir_value = LazyGraphExecutor::Get()->GetDeviceDataIrValue(
-      0.0, lazy_tensors::PrimitiveType::F32, device);
+      0.0, c10::ScalarType::Float, device);
   return std::make_shared<torch::lazy::Value>(std::move(ir_value));
 }
 
@@ -494,23 +496,25 @@ void InitLtcModuleBindings(py::module m) {
     return replication_devices != nullptr ? replication_devices->size() : 0;
   });
 
-  py::class_<torch::lazy::Value, std::shared_ptr<torch::lazy::Value>>(m, "IrValue");
+  py::class_<torch::lazy::Value, std::shared_ptr<torch::lazy::Value>>(
+      m, "IrValue");
   m.def("_ltc_create_token",
         [](const std::string& device) { return CreateToken(device); });
-  m.def("_ltc_all_reduce_inplace", [](const std::string& reduce_type,
-                                      const std::vector<at::Tensor>& tensors,
-                                      const std::shared_ptr<torch::lazy::Value>& token,
-                                      double scale, const py::list& groups) {
-    std::vector<std::vector<lazy_tensors::int64>> replica_groups =
-        CreateReduceGroups(groups);
-    std::shared_ptr<torch::lazy::Value> new_token;
-    {
-      NoGilSection nogil;
-      new_token =
-          AllReduceInPlace(reduce_type, tensors, token, scale, replica_groups);
-    }
-    return new_token;
-  });
+  m.def(
+      "_ltc_all_reduce_inplace",
+      [](const std::string& reduce_type, const std::vector<at::Tensor>& tensors,
+         const std::shared_ptr<torch::lazy::Value>& token, double scale,
+         const py::list& groups) {
+        std::vector<std::vector<lazy_tensors::int64>> replica_groups =
+            CreateReduceGroups(groups);
+        std::shared_ptr<torch::lazy::Value> new_token;
+        {
+          NoGilSection nogil;
+          new_token = AllReduceInPlace(reduce_type, tensors, token, scale,
+                                       replica_groups);
+        }
+        return new_token;
+      });
   m.def("_ltc_all_reduce",
         [](const std::string& reduce_type, const at::Tensor& input,
            const std::shared_ptr<torch::lazy::Value>& token, double scale,
@@ -531,7 +535,8 @@ void InitLtcModuleBindings(py::module m) {
           return result_tuple;
         });
   m.def("_ltc_all_to_all",
-        [](const at::Tensor& input, const std::shared_ptr<torch::lazy::Value>& token,
+        [](const at::Tensor& input,
+           const std::shared_ptr<torch::lazy::Value>& token,
            lazy_tensors::int64 split_dimension,
            lazy_tensors::int64 concat_dimension,
            lazy_tensors::int64 split_count, const py::list& groups) {
@@ -552,7 +557,8 @@ void InitLtcModuleBindings(py::module m) {
           return result_tuple;
         });
   m.def("_ltc_collective_permute",
-        [](const at::Tensor& input, const std::shared_ptr<torch::lazy::Value>& token,
+        [](const at::Tensor& input,
+           const std::shared_ptr<torch::lazy::Value>& token,
            const py::list& pairs) {
           std::vector<std::pair<lazy_tensors::int64, lazy_tensors::int64>>
               source_target_pairs = CreateSourceTargetPairs(pairs);
@@ -573,43 +579,49 @@ void InitLtcModuleBindings(py::module m) {
     return SetCurrentThreadDevice(device);
   });
   m.def("_ltc_get_default_device", []() { return GetCurrentThreadDevice(); });
-  m.def("_ltc_set_rng_seed",
-        [](lazy_tensors::uint64 seed, const std::string& device) {
-          SetRngSeed(seed, device);
-        },
-        py::arg("seed") = 101, py::arg("device") = "");
-  m.def("_ltc_get_rng_seed",
-        [](const std::string& device) { return GetRngSeed(device); },
-        py::arg("device") = "");
-  m.def("_ltc_sync_multi",
-        [](const std::vector<at::Tensor>& tensors,
-           const std::vector<std::string>& devices, bool wait,
-           bool sync_ltc_data) {
-          NoGilSection nogil;
-          SyncTensors(tensors, devices, wait, sync_ltc_data);
-        },
-        py::arg("tensors"), py::arg("devices"), py::arg("wait") = true,
-        py::arg("sync_ltc_data") = true);
-  m.def("_ltc_sync_live_tensors",
-        [](const std::string& device, const std::vector<std::string>& devices,
-           bool wait) {
-          NoGilSection nogil;
-          SyncLiveTensors(device, devices, wait);
-        },
-        py::arg("device") = "", py::arg("devices"), py::arg("wait") = true);
-  m.def("_ltc_step_marker",
-        [](const std::string& device, const std::vector<std::string>& devices,
-           bool wait) {
-          NoGilSection nogil;
-          StepMarker(device, devices, wait);
-        },
-        py::arg("device") = "", py::arg("devices"), py::arg("wait") = true);
-  m.def("_ltc_wait_device_ops",
-        [](const std::vector<std::string>& devices) {
-          NoGilSection nogil;
-          LazyGraphExecutor::Get()->WaitDeviceOps(devices);
-        },
-        py::arg("devices"));
+  m.def(
+      "_ltc_set_rng_seed",
+      [](lazy_tensors::uint64 seed, const std::string& device) {
+        SetRngSeed(seed, device);
+      },
+      py::arg("seed") = 101, py::arg("device") = "");
+  m.def(
+      "_ltc_get_rng_seed",
+      [](const std::string& device) { return GetRngSeed(device); },
+      py::arg("device") = "");
+  m.def(
+      "_ltc_sync_multi",
+      [](const std::vector<at::Tensor>& tensors,
+         const std::vector<std::string>& devices, bool wait,
+         bool sync_ltc_data) {
+        NoGilSection nogil;
+        SyncTensors(tensors, devices, wait, sync_ltc_data);
+      },
+      py::arg("tensors"), py::arg("devices"), py::arg("wait") = true,
+      py::arg("sync_ltc_data") = true);
+  m.def(
+      "_ltc_sync_live_tensors",
+      [](const std::string& device, const std::vector<std::string>& devices,
+         bool wait) {
+        NoGilSection nogil;
+        SyncLiveTensors(device, devices, wait);
+      },
+      py::arg("device") = "", py::arg("devices"), py::arg("wait") = true);
+  m.def(
+      "_ltc_step_marker",
+      [](const std::string& device, const std::vector<std::string>& devices,
+         bool wait) {
+        NoGilSection nogil;
+        StepMarker(device, devices, wait);
+      },
+      py::arg("device") = "", py::arg("devices"), py::arg("wait") = true);
+  m.def(
+      "_ltc_wait_device_ops",
+      [](const std::vector<std::string>& devices) {
+        NoGilSection nogil;
+        LazyGraphExecutor::Get()->WaitDeviceOps(devices);
+      },
+      py::arg("devices"));
   m.def("_ltc_counter_names",
         []() { return lazy_tensors::metrics::GetCounterNames(); });
   m.def("_ltc_counter_value", [](const std::string& name) -> py::object {
@@ -624,11 +636,12 @@ void InitLtcModuleBindings(py::module m) {
   });
   m.def("_ltc_metrics_report",
         []() { return lazy_tensors::metrics_reader::CreateMetricReport(); });
-  m.def("_ltc_tensors_report",
-        [](size_t nodes_threshold, const std::string& device) {
-          return GetLiveTensorsReport(nodes_threshold, device);
-        },
-        py::arg("nodes_threshold") = 100, py::arg("device") = "");
+  m.def(
+      "_ltc_tensors_report",
+      [](size_t nodes_threshold, const std::string& device) {
+        return GetLiveTensorsReport(nodes_threshold, device);
+      },
+      py::arg("nodes_threshold") = 100, py::arg("device") = "");
   m.def("_ltc_memory_info", [](const std::string& device) -> py::object {
     return GetMemoryInfo(device);
   });

@@ -7,7 +7,6 @@
 #include "lazy_tensors/computation_client/ltc_logging.h"
 #include "lazy_tensors/computation_client/sys_util.h"
 #include "lazy_tensors/computation_client/util.h"
-#include "lazy_tensors/primitive_util.h"
 #include "lazy_tensors/shape_util.h"
 
 namespace torch_lazy_tensors {
@@ -138,7 +137,7 @@ c10::optional<Helpers::DynamicReshapeInfo> Helpers::GetDynamicReshapeInfo(
   }
   DynamicReshapeInfo info;
   info.output_shape = lazy_tensors::ShapeUtil::MakeShape(
-      input_shape.element_type(), output_sizes);
+      input_shape.at_element_type(), output_sizes);
   if (info.output_shape.rank() > 0) {
     lazy_tensors::int64 size_at_dyndim = 1;
     for (lazy_tensors::int64 i = 0; i <= input_dynamic_dimension; ++i) {
@@ -173,7 +172,7 @@ lazy_tensors::Shape Helpers::GetDynamicReshape(
   if (info) {
     return info->output_shape;
   }
-  return lazy_tensors::ShapeUtil::MakeShape(input_shape.element_type(),
+  return lazy_tensors::ShapeUtil::MakeShape(input_shape.at_element_type(),
                                             output_sizes);
 }
 
@@ -185,58 +184,6 @@ std::vector<lazy_tensors::int64> Helpers::MakeTransposePermutation(
   auto permute_dims = lazy_tensors::util::Iota<lazy_tensors::int64>(rank);
   std::swap(permute_dims[canonical_dim0], permute_dims[canonical_dim1]);
   return permute_dims;
-}
-
-lazy_tensors::PrimitiveType Helpers::PromoteType(
-    lazy_tensors::PrimitiveType type1, lazy_tensors::PrimitiveType type2) {
-  if (type1 == type2) {
-    return type1;
-  }
-  lazy_tensors::int64 size1 =
-      lazy_tensors::ShapeUtil::ByteSizeOfPrimitiveType(type1);
-  lazy_tensors::int64 size2 =
-      lazy_tensors::ShapeUtil::ByteSizeOfPrimitiveType(type2);
-  if (lazy_tensors::primitive_util::IsComplexType(type1)) {
-    return (!lazy_tensors::primitive_util::IsComplexType(type2) ||
-            size1 >= size2)
-               ? type1
-               : type2;
-  }
-  if (lazy_tensors::primitive_util::IsComplexType(type2)) {
-    return type2;
-  }
-  if (lazy_tensors::primitive_util::IsFloatingPointType(type1)) {
-    return (!lazy_tensors::primitive_util::IsFloatingPointType(type2) ||
-            size1 >= size2)
-               ? type1
-               : type2;
-  }
-  if (lazy_tensors::primitive_util::IsFloatingPointType(type2) ||
-      size2 > size1) {
-    return type2;
-  }
-  if (lazy_tensors::primitive_util::IsIntegralType(type1) &&
-      lazy_tensors::primitive_util::IsIntegralType(type2)) {
-    if (size1 > size2) {
-      return type1;
-    }
-    if (size2 > size1) {
-      return type2;
-    }
-    // At this point, they are not the same type, they are both integers, and
-    // they have the same size. One of them must be unsigned and the other
-    // signed, convert to unsigned.
-    return lazy_tensors::primitive_util::UnsignedIntegralTypeForBitWidth(
-        lazy_tensors::primitive_util::BitWidth(type1));
-  }
-  if (type1 == lazy_tensors::PrimitiveType::PRED) {
-    return type2;
-  }
-  if (type2 == lazy_tensors::PrimitiveType::PRED) {
-    return type1;
-  }
-  // If nothing matches the above logic, first operand wins.
-  return type1;
 }
 
 std::vector<lazy_tensors::int64> Helpers::GetPromotedShape(
@@ -278,14 +225,14 @@ std::vector<lazy_tensors::int64> Helpers::GetPromotedShape(
 lazy_tensors::Shape Helpers::GetPromotedShape(
     const lazy_tensors::Shape& shape1, const lazy_tensors::Shape& shape2) {
   return lazy_tensors::ShapeUtil::MakeShape(
-      shape1.element_type(),
+      shape1.at_element_type(),
       GetPromotedShape(shape1.dimensions(), shape2.dimensions()));
 }
 
 lazy_tensors::Shape Helpers::GetPromotedBinaryOpShape(
     const lazy_tensors::Shape& shape1, const lazy_tensors::Shape& shape2) {
   return lazy_tensors::ShapeUtil::MakeShape(
-      PromoteType(shape1.element_type(), shape2.element_type()),
+      promoteTypes(shape1.at_element_type(), shape2.at_element_type()),
       GetPromotedShape(shape1.dimensions(), shape2.dimensions()));
 }
 

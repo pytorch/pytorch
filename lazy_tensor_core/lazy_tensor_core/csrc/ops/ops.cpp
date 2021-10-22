@@ -170,75 +170,6 @@ NodePtr Where(const torch::lazy::Value& condition, const torch::lazy::Value& inp
                    ir::GetShapeFromTsValue(input));
 }
 
-NodePtr ARange(const at::Scalar& start, const at::Scalar& end,
-               const at::Scalar& step, at::ScalarType scalar_type) {
-  lazy_tensors::PrimitiveType type = MakeLtcPrimitiveType(scalar_type,
-                                                          /*device=*/nullptr);
-  LTC_CHECK_NE(step.toDouble(), 0.0);
-  LTC_CHECK(!std::isnan(start.toDouble()) && !std::isnan(end.toDouble()))
-      << "unsupported range: " << start.toDouble() << " -> " << end.toDouble();
-  LTC_CHECK((start.toDouble() <= end.toDouble() && step.toDouble() > 0.0) ||
-            (start.toDouble() >= end.toDouble() && step.toDouble() < 0.0));
-  lazy_tensors::Literal values;
-  switch (type) {
-    case lazy_tensors::PrimitiveType::BF16:
-      values = Helpers::Range<lazy_tensors::bfloat16>(
-          static_cast<lazy_tensors::bfloat16>(start.toFloat()),
-          static_cast<lazy_tensors::bfloat16>(end.toFloat()),
-          static_cast<lazy_tensors::bfloat16>(step.toFloat()));
-      break;
-    case lazy_tensors::PrimitiveType::F16:
-      values = Helpers::Range<lazy_tensors::half>(
-          static_cast<lazy_tensors::half>(start.toHalf()),
-          static_cast<lazy_tensors::half>(end.toHalf()),
-          static_cast<lazy_tensors::half>(step.toHalf()));
-      break;
-    case lazy_tensors::PrimitiveType::F32:
-      values =
-          Helpers::Range<float>(start.toFloat(), end.toFloat(), step.toFloat());
-      break;
-    case lazy_tensors::PrimitiveType::F64:
-      values = Helpers::Range<double>(start.toDouble(), end.toDouble(),
-                                      step.toDouble());
-      break;
-    case lazy_tensors::PrimitiveType::U8:
-      values = Helpers::Range<lazy_tensors::uint8>(start.toByte(), end.toByte(),
-                                                   step.toByte());
-      break;
-    case lazy_tensors::PrimitiveType::S8:
-      values = Helpers::Range<lazy_tensors::int8>(start.toChar(), end.toChar(),
-                                                  step.toChar());
-      break;
-    case lazy_tensors::PrimitiveType::S16:
-      values = Helpers::Range<lazy_tensors::int16>(
-          start.toShort(), end.toShort(), step.toShort());
-      break;
-    case lazy_tensors::PrimitiveType::U16:
-      values = Helpers::Range<lazy_tensors::uint16>(start.toInt(), end.toInt(),
-                                                    step.toInt());
-      break;
-    case lazy_tensors::PrimitiveType::S32:
-      values = Helpers::Range<lazy_tensors::int32>(start.toInt(), end.toInt(),
-                                                   step.toInt());
-      break;
-    case lazy_tensors::PrimitiveType::U32:
-      values = Helpers::Range<lazy_tensors::uint32>(
-          start.toLong(), end.toLong(), step.toLong());
-      break;
-    case lazy_tensors::PrimitiveType::S64:
-      values = Helpers::Range<lazy_tensors::int64>(start.toLong(), end.toLong(),
-                                                   step.toLong());
-      break;
-    case lazy_tensors::PrimitiveType::U64:
-      values = Helpers::Range<lazy_tensors::uint64>(
-          start.toLong(), end.toLong(), step.toLong());
-      break;
-    default:
-      LTC_ERROR() << "Type not supported: " << type;
-  }
-  return torch::lazy::MakeNode<Constant>(std::move(values));
-}
-
 NodePtr BroadcastTensors(OpList tensors) {
   NodePtr node = GenericOp(OpKind(at::aten::broadcast_tensors), tensors,
                            /*num_outputs=*/tensors.size());
@@ -248,7 +179,7 @@ NodePtr BroadcastTensors(OpList tensors) {
 }
 
 NodePtr Identity(lazy_tensors::int64 lines, lazy_tensors::int64 cols,
-                 lazy_tensors::PrimitiveType element_type) {
+                 c10::ScalarType element_type) {
   return GenericOp(
       OpKind(at::aten::eye),
       lazy_tensors::ShapeUtil::MakeShape(element_type, {lines, cols}),
@@ -313,19 +244,19 @@ NodePtr MaxUnary(const torch::lazy::Value& input) {
   LTC_CHECK_GT(lazy_tensors::ShapeUtil::ElementsIn(ir::GetShapeFromTsValue(input)), 0);
   return GenericOp(
       OpKind(at::aten::max), {input},
-      lazy_tensors::ShapeUtil::MakeShape(ir::GetShapeFromTsValue(input).element_type(), {}));
+      lazy_tensors::ShapeUtil::MakeShape(ir::GetShapeFromTsValue(input).at_element_type(), {}));
 }
 
 NodePtr MinUnary(const torch::lazy::Value& input) {
   LTC_CHECK_GT(lazy_tensors::ShapeUtil::ElementsIn(ir::GetShapeFromTsValue(input)), 0);
   return GenericOp(
       OpKind(at::aten::min), {input},
-      lazy_tensors::ShapeUtil::MakeShape(ir::GetShapeFromTsValue(input).element_type(), {}));
+      lazy_tensors::ShapeUtil::MakeShape(ir::GetShapeFromTsValue(input).at_element_type(), {}));
 }
 
 NodePtr Take(const torch::lazy::Value& input, const torch::lazy::Value& index) {
   lazy_tensors::Shape result_shape = ir::GetShapeFromTsValue(index);
-  result_shape.set_element_type(ir::GetShapeFromTsValue(input).element_type());
+  result_shape.set_element_type(ir::GetShapeFromTsValue(input).at_element_type());
   return GenericOp(OpKind(at::aten::take), {input, index},
                    std::move(result_shape));
 }

@@ -19,7 +19,7 @@ lazy_tensors::Shape NodeOutputShape(
   }
   const auto complete_output_sizes =
       GetCompleteShape(output_sizes, input_shape.dimensions());
-  return lazy_tensors::ShapeUtil::MakeShape(input_shape.element_type(),
+  return lazy_tensors::ShapeUtil::MakeShape(input_shape.at_element_type(),
                                             complete_output_sizes);
 }
 

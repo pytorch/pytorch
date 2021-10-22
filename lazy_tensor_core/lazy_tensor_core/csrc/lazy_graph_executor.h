@@ -79,15 +79,15 @@ class LazyGraphExecutor {
   std::string DumpBackendComputation(const std::vector<LazyTensor>& tensors);
 
   torch::lazy::Value GetDeviceDataIrValue(const at::Scalar& value,
-                                          lazy_tensors::PrimitiveType type,
+                                          c10::ScalarType type,
                                           const Device& device);
   torch::lazy::Value GetIrValueForScalar(const at::Scalar& value,
-                                         lazy_tensors::PrimitiveType type,
+                                         c10::ScalarType type,
                                          const Device& device);
   torch::lazy::Value GetIrValueForScalar(const at::Scalar& value,
                                          const Device& device);
   torch::lazy::Value GetIrValueForScalar(
-      const at::Scalar& value, lazy_tensors::PrimitiveType type,
+      const at::Scalar& value, c10::ScalarType type,
       c10::ArrayRef<lazy_tensors::int64> dimensions, const Device& device);
   torch::lazy::Value GetIrValueForScalar(const at::Scalar& value,
                                          const lazy_tensors::Shape& shape,

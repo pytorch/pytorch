@@ -9,7 +9,6 @@
 #include "lazy_tensors/shape.h"
 #include "lazy_tensors/shape_util.h"
 #include "lazy_tensors/span.h"
-#include "lazy_tensors/primitive_util.h"
 
 namespace lazy_tensors {
 
@@ -120,8 +119,7 @@ inline void Literal::PopulateR1(lazy_tensors::Span<const NativeT> values) {
   LTC_CHECK(shape().IsArray());
   LTC_CHECK_EQ(shape().rank(), 1);
   LTC_CHECK_EQ(ShapeUtil::ElementsIn(shape()), values.size());
-  LTC_CHECK_EQ(shape().element_type(),
-               primitive_util::NativeToPrimitiveType<NativeT>());
+  LTC_CHECK_EQ(shape().at_element_type(), c10::CppTypeToScalarType<NativeT>::value);
   auto data_span = data<NativeT>();
   std::copy(values.begin(), values.end(), data_span.begin());
 }
