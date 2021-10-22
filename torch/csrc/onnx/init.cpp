@@ -37,7 +37,6 @@ void initONNXBindings(PyObject* module) {
       .value("PRESERVE", TrainingMode::PRESERVE)
       .value("TRAINING", TrainingMode::TRAINING);
 
-  onnx.attr("IR_VERSION") = IR_VERSION;
   onnx.attr("PRODUCER_VERSION") = py::str(TORCH_VERSION);
 
 #ifdef PYTORCH_ONNX_CAFFE2_BUNDLE

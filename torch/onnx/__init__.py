@@ -7,10 +7,6 @@ PYTORCH_ONNX_CAFFE2_BUNDLE = _C._onnx.PYTORCH_ONNX_CAFFE2_BUNDLE
 
 ONNX_ARCHIVE_MODEL_PROTO_NAME = "__MODEL_PROTO"
 
-# TODO: Update these variables when there
-# is a new ir_version and producer_version
-# and use these values in the exporter
-ir_version = _C._onnx.IR_VERSION
 producer_name = "pytorch"
 producer_version = _C._onnx.PRODUCER_VERSION
 constant_folding_opset_versions = [9, 10, 11, 12, 13, 14]

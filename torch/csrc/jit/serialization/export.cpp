@@ -54,6 +54,27 @@ namespace {
 namespace onnx_torch = ::torch::onnx;
 namespace onnx = ::ONNX_NAMESPACE;
 
+const static int kInvalidOpsetVersion = -1;
+// Based on OP_SET_ID_VERSION_MAP in
+// https://github.com/onnx/onnx/blob/master/onnx/helper.py.
+constexpr static std::array<int64_t, 16> kOpsetVersionToIRVersion = {
+    kInvalidOpsetVersion,
+    3,
+    kInvalidOpsetVersion,
+    kInvalidOpsetVersion,
+    kInvalidOpsetVersion,
+    3,
+    3,
+    3,
+    3,
+    4,
+    5,
+    6,
+    7,
+    7,
+    7,
+    8};
+
 std::string getNodeStackTraceString(const Node* n) {
   return n->sourceRange().str();
 }
@@ -435,10 +456,13 @@ GraphEncoder::GraphEncoder(
       graph_(graph),
       node_attr_to_name_(node_attr_to_name) {
   model_proto_.set_producer_name("pytorch");
-  // we pin IR version to version 8 instead of using
-  // onnx::IR_VERSION. with this change, the test_operators.py will be more
-  // stable. only bump it when it's necessary
-  model_proto_.set_ir_version(onnx_torch::IR_VERSION);
+  TORCH_CHECK(
+      onnx_opset_version > 0 &&
+          onnx_opset_version < kOpsetVersionToIRVersion.size() &&
+          kOpsetVersionToIRVersion[onnx_opset_version] != kInvalidOpsetVersion,
+      "Unsupported onnx_opset_version.");
+
+  model_proto_.set_ir_version(kOpsetVersionToIRVersion[onnx_opset_version]);
   model_proto_.set_producer_version(TORCH_VERSION);
 
   validateGraph(graph, operator_export_type);
