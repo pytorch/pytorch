@@ -25,7 +25,7 @@ def _apply_docstring_templates(func):
     """Decorator that applies docstring templates to function docstring
     and returns the function instance.
     """
-
+    return func
     docstring_templates = dict(
         reduction_signature='''\
 {function_name}(input, dim, *, keepdim=False, dtype=None, mask=None) -> Tensor''',
