@@ -647,7 +647,7 @@ TEST(LiteInterpreterTest, isCompatibleSuccess) {
   std::unordered_map<std::string, OperatorInfo> model_ops;
   model_ops["aten::add.Scalar"] = OperatorInfo{2};
 
-  std::unordered_set<std::string> types = {"List", "int"};
+  std::unordered_set<std::string> types = {"List", "int", "NamedTuple"};
   auto model_info = ModelCompatibilityInfo{
       caffe2::serialize::kMaxSupportedBytecodeVersion, model_ops, types};
 
@@ -689,7 +689,7 @@ TEST(LiteInterpreterTest, isCompatibleFail) {
 
   // test trivial failure due to type
   runtime_info = RuntimeCompatibilityInfo::get();
-  std::unordered_set<std::string> types = {"List", "int", "NamedTuple"};
+  std::unordered_set<std::string> types = {"List", "int", "Sequence"};
 
   model_info = ModelCompatibilityInfo{
       caffe2::serialize::kMaxSupportedBytecodeVersion, model_ops, types};
