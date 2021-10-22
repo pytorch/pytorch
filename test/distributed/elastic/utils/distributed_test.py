@@ -19,8 +19,8 @@ from torch.distributed.elastic.utils.distributed import (
 from torch.testing._internal.common_utils import IS_MACOS, IS_WINDOWS, run_tests
 
 
-def _create_c10d_store_mp(is_server, server_addr, port, world_size):
-    store = create_c10d_store(is_server, server_addr, port, world_size, timeout=2)
+def _create_c10d_store_mp(is_server, server_addr, port, world_size, wait_for_workers):
+    store = create_c10d_store(is_server, server_addr, port, world_size, wait_for_workers=wait_for_workers, timeout=2)
     if store is None:
         raise AssertionError()
 
@@ -45,6 +45,7 @@ class DistributedUtilTest(unittest.TestCase):
     def test_create_store_multi(self):
         # allow server to start first by specifying an indeterminate number of workers
         world_size = -1
+        wait_for_workers = False
         localhost = socket.gethostname()
 
         # start the server on the main process using an available port
@@ -54,7 +55,7 @@ class DistributedUtilTest(unittest.TestCase):
             server_port=0,
             timeout=2,
             world_size=world_size,
-            wait_for_workers=False,
+            wait_for_workers=wait_for_workers,
         )
 
         # worker processes will use the port that was assigned to the server
@@ -62,11 +63,11 @@ class DistributedUtilTest(unittest.TestCase):
 
         worker0 = mp.Process(
             target=_create_c10d_store_mp,
-            args=(False, localhost, server_port, world_size),
+            args=(False, localhost, server_port, world_size, wait_for_workers),
         )
         worker1 = mp.Process(
             target=_create_c10d_store_mp,
-            args=(False, localhost, server_port, world_size),
+            args=(False, localhost, server_port, world_size, wait_for_workers),
         )
 
         worker0.start()
