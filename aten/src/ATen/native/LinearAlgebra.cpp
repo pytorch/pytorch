@@ -2219,12 +2219,8 @@ Tensor mexp(const Tensor& a, bool compute_highest_degree_approx = false) {
   }
 }
 
-// Based on:
-//
-// Mathias, Roy.
-// A Chain Rule for Matrix Functions and Applications.
-// SIAM J. Matrix Anal. Appl. 17 (1996): 610-620.
-//
+// TODO This should be deprecated in favor of linalg_matrix_exp_differential
+//      in FunctionsManual.cpp
 template <typename func_t>
 Tensor backward_analytic_function_of_a_matrix(
     const Tensor& self, const Tensor& grad,
@@ -2245,8 +2241,7 @@ Tensor backward_analytic_function_of_a_matrix(
     .narrow(-2, 0, n).narrow(-1, n, n);
   return grad_input;
 }
-
-};
+} // end anon namespace
 
 // Computes the matrix exponential for a given batch of squared matrices.
 // The implementaion is based on:
@@ -2278,6 +2273,8 @@ Tensor matrix_exp(const Tensor& a) {
   return at::linalg_matrix_exp(a);
 }
 
+// TODO This should be deprecated in favor of linalg_matrix_exp_differential
+//      in FunctionsManual.cpp
 Tensor matrix_exp_backward(const Tensor& self, const Tensor& grad) {
   NoTF32Guard disable_tf32;
   return backward_analytic_function_of_a_matrix(

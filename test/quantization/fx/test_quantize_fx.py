@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: quantization"]
+
 import os
 import torch
 import torch.nn.functional as F
@@ -15,7 +17,9 @@ from torch.ao.quantization.quantize_fx import (
     prepare_fx,
     convert_fx,
     prepare_qat_fx,
-    _convert_fx_new,
+)
+from torch.ao.quantization._quantize_fx_do_not_use import (
+    _convert_fx_do_not_use,
 )
 
 from torch.ao.quantization.fx.quantization_patterns import DefaultNodeQuantizeHandler
@@ -5205,7 +5209,7 @@ class TestQuantizeFxOpsNew(QuantizationTestCase):
 
         m = M().eval()
         m = prepare_fx(m, {"": default_qconfig})
-        m = _convert_fx_new(m, is_reference=True)
+        m = _convert_fx_do_not_use(m, is_reference=True)
         expected_occurrence = {
             ns.call_function(torch.quantize_per_tensor): 5,
             ns.call_method("dequantize"): 5,
