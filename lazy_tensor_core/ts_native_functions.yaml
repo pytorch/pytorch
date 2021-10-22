@@ -5,11 +5,12 @@ full_codegen:
   - _log_softmax_backward_data
   - _softmax
   - _softmax_backward_data
+  - add.Tensor
   - addcdiv
   - addcmul
   - addmm
-  - bitwise_and.Tensor
   - baddbmm
+  - bitwise_and.Tensor
   - bmm
   - cos
   - clamp
@@ -41,7 +42,7 @@ full_codegen:
   - topk
   - trace
   - trunc
-  - add.Tensor
+  - zero_
 supported:
   - as_strided
   - as_strided_
@@ -107,7 +108,6 @@ supported:
   - index_select
   - alias
   - tanh_backward
-  - zero_
 autograd:
   - max_pool2d
   - max_pool3d

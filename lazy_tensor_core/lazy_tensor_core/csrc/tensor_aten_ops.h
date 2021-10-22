@@ -831,8 +831,6 @@ std::tuple<LazyTensor, LazyTensor> var_mean(
 LazyTensor view(const LazyTensor& input,
                 c10::ArrayRef<lazy_tensors::int64> output_size);
 
-void zero_(LazyTensor& input);
-
 LazyTensor where(const LazyTensor& condition, const LazyTensor& input,
                  const LazyTensor& other);
 
