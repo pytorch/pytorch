@@ -62,8 +62,6 @@ ALLOW_LIST = [
     ("aten::grid_sampler_2d_backward", datetime.date(2021, 10, 21)),
     ("prim::TensorExprDynamicGuard", datetime.date(2021, 11, 20)),
     ("caffe2::", datetime.date(2021, 10, 23)),
-    ("q::_FloatToBfloat16Quantized", datetime.date(2021, 12, 21)),
-    ("q::_Bfloat16QuantizedToFloat", datetime.date(2021, 12, 21)),
 ]
 
 ALLOW_LIST_COMPILED = [
