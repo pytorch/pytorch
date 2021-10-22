@@ -27,7 +27,7 @@ namespace jit {
 namespace {
 struct SchemaParser {
   SchemaParser(const std::string& str)
-      : L(std::make_shared<Source>(str)),
+      : L(std::make_shared<SourceView>(c10::string_view(str))),
         type_parser(L, /*parse_complete_tensor_types*/ false) {}
 
   either<OperatorName, FunctionSchema> parseDeclaration() {
@@ -334,7 +334,7 @@ C10_EXPORT FunctionSchema parseSchema(const std::string& schema) {
   TORCH_CHECK(
       parsed.is_right(),
       "Tried to parse a function schema but only the operator name was given");
-  return parsed.right();
+  return std::move(parsed.right());
 }
 
 C10_EXPORT OperatorName parseName(const std::string& name) {
@@ -342,7 +342,7 @@ C10_EXPORT OperatorName parseName(const std::string& name) {
   TORCH_CHECK(
       parsed.is_left(),
       "Tried to parse an operator name but function schema was given");
-  return parsed.left();
+  return std::move(parsed.left());
 }
 
 } // namespace jit
