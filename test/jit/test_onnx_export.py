@@ -11,7 +11,7 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.common_utils import suppress_warnings
 from torch.testing._internal.jit_utils import JitTestCase
-from torch.onnx import OperatorExportTypes
+from torch.onnx import OperatorExportTypes, utils
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -354,3 +354,23 @@ class TestONNXExport(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, r"DictConstruct.+is not supported."):
             torch.onnx.export_to_pretty_string(
                 torch.jit.script(mod), (x_in,), f)
+
+    def test_source_range_propagation(self):
+        class ExpandingModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                # Will be expanded during ONNX export
+                self.ln = torch.nn.LayerNorm([1])
+
+            def forward(self, input):
+                return self.ln(input)
+
+        mod = ExpandingModule()
+
+        graph, _, _ = utils._model_to_graph(
+            mod, (torch.zeros(1),),
+            operator_export_type=OperatorExportTypes.ONNX)
+
+        # Ensure that every node in the graph has a valid source range
+        for node in graph.nodes():
+            self.assertTrue(node.sourceRange())

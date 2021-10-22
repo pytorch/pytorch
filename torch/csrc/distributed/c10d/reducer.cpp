@@ -1383,8 +1383,6 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
   auto& replica = bucket.replicas[replica_index];
   for (const auto intra_bucket_index : c10::irange(replica.variables.size())) {
     auto& variable = replica.variables[intra_bucket_index];
-    const auto offset = replica.offsets[intra_bucket_index];
-    const auto length = replica.lengths[intra_bucket_index];
 
     bool global_unused = false;
     // See Note [Skip allreducing local_used_map_dev]
@@ -1425,6 +1423,9 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
     }
 
     if (!gradient_as_bucket_view_) {
+      RECORD_FUNCTION(
+          "torch.distributed.ddp.reducer::copy_bucket_to_grad",
+          std::vector<c10::IValue>({variable}));
       copy_bucket_to_grad(variable, replica, intra_bucket_index, global_unused);
     } else {
       const auto& bucket_view_out =
@@ -1634,6 +1635,7 @@ void Reducer::sync_bucket_indices(
     std::vector<size_t> bucket;
     bucket.reserve(bucket_size);
     for (const auto j : c10::irange(bucket_size)) {
+      (void)j;
       bucket.push_back(indices_accessor[indices_accessor_Index++]);
     }
     bucket_indices.emplace_back(std::move(bucket));

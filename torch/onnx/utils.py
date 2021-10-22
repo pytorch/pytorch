@@ -17,7 +17,7 @@ import numbers
 import warnings
 from torch._six import string_classes
 from torch.jit import _unique_state_dict
-from torch.onnx import ONNX_ARCHIVE_MODEL_PROTO_NAME, ExportTypes, OperatorExportTypes, TrainingMode
+from torch.onnx import ONNX_ARCHIVE_MODEL_PROTO_NAME, ExportTypes, OperatorExportTypes, TrainingMode, CheckerError
 from torch._C import ListType, OptionalType, _propagate_and_assign_input_shapes, _check_onnx_proto
 from typing import List, Tuple, Union
 
@@ -25,9 +25,6 @@ from typing import List, Tuple, Union
 # the flag to tell the user whether it's in the middle of ONNX export or not
 __IN_ONNX_EXPORT = False
 
-
-class ONNXCheckerError(Exception):
-    pass
 
 def is_in_onnx_export():
     global __IN_ONNX_EXPORT
@@ -73,6 +70,36 @@ def select_model_mode_for_export(model, mode):
         if not isinstance(model, torch.jit.ScriptFunction):
             model.train(is_originally_training)
 
+@contextlib.contextmanager
+def disable_apex_o2_state_dict_hook(model):
+    # Apex O2 hook state_dict to return fp16 weights as fp32.
+    # Exporter cannot identify them as same tensors.
+    # Since this hook is only used by optimizer, it is safe to
+    # remove this hook while exporting.
+    if not isinstance(model, torch.jit.ScriptFunction):
+        tmp_map = {}  # type: ignore[var-annotated]
+        for module in model.modules():
+            for k, v in module._state_dict_hooks.items():
+                if type(v).__name__ == 'O2StateDictHook':
+                    if module not in tmp_map:
+                        tmp_map[module] = {}
+                    tmp_map[module][k] = v
+            if module in tmp_map:
+                for k in tmp_map[module].keys():
+                    module._state_dict_hooks.pop(k)
+    try:
+        yield
+    finally:
+        if not isinstance(model, torch.jit.ScriptFunction):
+            for module, m_map in tmp_map.items():
+                for k, v in m_map.items():
+                    module._state_dict_hooks[k] = v
+
+@contextlib.contextmanager
+def exporter_context(model, mode):
+    with select_model_mode_for_export(model, mode) as mode_ctx, \
+            disable_apex_o2_state_dict_hook(model) as apex_ctx:
+        yield (mode_ctx, apex_ctx)
 
 def export(model, args, f, export_params=True, verbose=False, training=None,
            input_names=None, output_names=None, operator_export_type=None,
@@ -89,7 +116,7 @@ def export(model, args, f, export_params=True, verbose=False, training=None,
     if enable_onnx_checker is not None:
         warnings.warn("'enable_onnx_checker' is deprecated and ignored. It will be removed in "
                       "the next PyTorch release. To proceed despite ONNX checker failures, "
-                      "catch torch.onnx.ONNXCheckerError.")
+                      "catch torch.onnx.CheckerError.")
     if _retain_param_name is not None:
         warnings.warn("'_retain_param_name' is deprecated and ignored. "
                       "It will be removed in the next PyTorch release.")
@@ -596,7 +623,7 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
     _set_operator_export_type(operator_export_type)
     from torch.onnx.symbolic_helper import _set_onnx_shape_inference
     _set_onnx_shape_inference(onnx_shape_inference)
-    with select_model_mode_for_export(model, training):
+    with exporter_context(model, training):
         val_keep_init_as_ip = _decide_keep_init_as_input(keep_initializers_as_inputs,
                                                          operator_export_type,
                                                          opset_version)
@@ -652,7 +679,7 @@ def _find_missing_ops_onnx_export(model, args, f, verbose=False, training=Traini
     # operator_export_type is set ro ONNX_FALLTHROUGH by default so that if an op is not supported
     # in ONNX, fall through will occur and export the operator as is, as a custom ONNX op.
     operator_export_type = OperatorExportTypes.ONNX_FALLTHROUGH
-    with select_model_mode_for_export(model, training):
+    with exporter_context(model, training):
         args = _decide_input_format(model, args)
         graph, params_dict, torch_out = _model_to_graph(model, args, verbose, input_names,
                                                         output_names, operator_export_type)
@@ -701,7 +728,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
         # (to preserve whatever the original training mode was.)
         _set_opset_version(opset_version)
         _set_operator_export_type(operator_export_type)
-        with select_model_mode_for_export(model, training):
+        with exporter_context(model, training):
             val_keep_init_as_ip = _decide_keep_init_as_input(keep_initializers_as_inputs,
                                                              operator_export_type,
                                                              opset_version)
@@ -779,7 +806,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
                 try:
                     _check_onnx_proto(proto)
                 except RuntimeError as e:
-                    raise ONNXCheckerError(e)
+                    raise CheckerError(e)
     finally:
         assert __IN_ONNX_EXPORT
         __IN_ONNX_EXPORT = False
@@ -794,9 +821,24 @@ def _set_input_and_output_names(graph, input_names, output_names):
             raise RuntimeError(
                 "number of %s names provided (%d) exceeded number of %ss (%d)"
                 % (descriptor, len(name_list), descriptor, len(node_list)))
-        for name, node in zip(name_list, node_list):
+
+        # Mark if the output node DebugName is set before.
+        output_node_set = set()
+        for i, (name, node) in enumerate(zip(name_list, node_list)):
+            # Duplicated output node, insert onnx::Identity to avoid setting the same DebugName after setDebugName().
+            if descriptor == "output":
+                if node in output_node_set:
+                    identity_node = graph.create("onnx::Identity")
+                    identity_node.insertAfter(node.node())
+                    identity_node.addInput(node)
+                    identity_node.output().setType(node.type())
+                    graph.return_node().replaceInput(i, identity_node.output())
+                    node = identity_node.output()
+                output_node_set.add(node)
+
             if node.debugName() != name:
                 node.setDebugName(name)
+
     set_names(list(graph.inputs()), input_names, "input")
     set_names(list(graph.outputs()), output_names, "output")
 
@@ -1127,14 +1169,15 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
                         torch._C._jit_pass_onnx_node_shape_type_inference(new_node, _params_dict, opset_version)
                     return new_op_outputs
             else:
-                symbolic_name = "prim_" + op_name
-                domain = ""
-                symbolic_fn = _find_symbolic_in_registry(domain, symbolic_name, opset_version,
+                symbolic_fn = _find_symbolic_in_registry("prim", op_name, opset_version,
                                                          operator_export_type)
                 if symbolic_fn is None:
                     return None
                 attrs = {k: n[k] for k in n.attributeNames()}
-                if op_name == 'PythonOp':
+                # TODO: https://msdata.visualstudio.com/Vienna/_workitems/edit/1408006
+                # PythonOp symbolic need access thde node to resolve the name conflict,
+                # this is inconsistent with regular op symbolic.
+                if op_name == "PythonOp":
                     inputs = (n, *inputs)
                 return symbolic_fn(g, *inputs, **attrs)
 
@@ -1235,8 +1278,9 @@ def get_ns_op_name_from_custom_op(symbolic_name):
                            alphanumerical characters"
                            .format(symbolic_name))
     ns, op_name = symbolic_name.split("::")
-    unaccepted_domain_names = ["onnx", "aten", "prim"]
-    if ns in unaccepted_domain_names:
+    # TODO: Allow users to register custom symbolic in aten domain.
+    # https://msdata.visualstudio.com/Vienna/_workitems/edit/1407799
+    if ns in ("onnx", "aten"):
         raise RuntimeError("Failed to register operator {}. The domain {} is already a used domain."
                            .format(symbolic_name, ns))
     return ns, op_name

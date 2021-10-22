@@ -21,11 +21,12 @@ std::ostream& operator<<(std::ostream& output, const Logger& logger) {
   auto& ddp_logging_data = (*logger.ddp_logging_data_);
 
   std::string loggerInfo = fmt::format(
-      "[Rank {} / {}] Training {} unused_parameter_size={} \n "
+      "[Rank {} / {}] [iteration {}] Training {} unused_parameter_size={} \n "
       "Avg forward compute time: {} \n Avg backward compute time: {} \n"
       "Avg backward comm. time: {} \n Avg backward comm/comp overlap time: {}",
       ddp_logging_data.ints_map["rank"],
       ddp_logging_data.ints_map["world_size"],
+      ddp_logging_data.ints_map["iteration"],
       ddp_logging_data.strs_map["module_name"],
       ddp_logging_data.ints_map["unused_parameter_size"],
       ddp_logging_data.ints_map["avg_forward_compute_time"],
@@ -154,7 +155,8 @@ void Logger::set_construction_data_and_log(
     const std::string& module_name,
     const std::vector<int>& device_ids,
     int output_device,
-    bool broadcast_buffers) {
+    bool broadcast_buffers,
+    bool has_sync_bn) {
   // No lock is needed, as it will be called in DistributedDataParallel
   // constructor.
   ddp_logging_data_->strs_map["module_name"] = module_name;
@@ -181,6 +183,7 @@ void Logger::set_construction_data_and_log(
   ddp_logging_data_->strs_map["device_ids"] = c10::Join(", ", device_ids);
   ddp_logging_data_->ints_map["output_device"] = output_device;
   ddp_logging_data_->ints_map["broadcast_buffers"] = broadcast_buffers;
+  ddp_logging_data_->ints_map["has_sync_bn"] = has_sync_bn;
   ddp_logging_data_->ints_map["bucket_cap_bytes"] = reducer_->bucket_bytes_cap_;
   ddp_logging_data_->ints_map["find_unused_parameters"] =
       reducer_->find_unused_parameters_;

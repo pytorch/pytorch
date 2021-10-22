@@ -27,7 +27,6 @@ _(aten, _amp_update_scale_) \
 _(aten, _arange) \
 _(aten, _argmax) \
 _(aten, _argmin) \
-_(aten, _baddbmm_mkl) \
 _(aten, _cast_Byte) \
 _(aten, _cast_Char) \
 _(aten, _cast_Double) \
@@ -548,7 +547,6 @@ _(aten, nll_loss2d_backward) \
 _(aten, nll_loss2d_forward) \
 _(aten, nll_loss_backward) \
 _(aten, nll_loss_forward) \
-_(aten, nonzero) \
 _(aten, nonzero_numpy) \
 _(aten, norm) \
 _(aten, norm_except_dim) \

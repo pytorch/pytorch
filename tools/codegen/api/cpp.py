@@ -5,7 +5,7 @@ from tools.codegen.model import (Argument, Arguments, BaseTy, BaseType,
 from tools.codegen.api.types import (ArgName, BaseCType, Binding, ConstRefCType, NamedCType, CType,
                                      MutRefCType, ArrayCType, ListCType, VectorCType, ArrayRefCType,
                                      OptionalCType, TupleCType, SpecialArgName, boolT, scalarT,
-                                     tensorListT, dimnameListT, tensorT, voidT,
+                                     tensorListT, dimnameListT, tensorT, voidT, longT,
                                      BaseTypeToCppMapping, intArrayRefT, tensorOptionsT)
 from tools.codegen import local
 from tools.codegen.utils import assert_never
@@ -62,7 +62,10 @@ def valuetype_type(t: Type, *, binds: ArgName) -> Optional[NamedCType]:
         raise AssertionError(f"unrecognized type {repr(t)}")
 
 # Translation of types occuring in JIT arguments to a C++ argument type.
-def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> NamedCType:
+# If remove_non_owning_ref_types is set, we'll guarantee that the outputed CType is not a non-owning reference type.
+# For example, we'll return std::vector<int> instead of IntArrayRef.
+# See Note [translation from C++ reference to value types]
+def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName, remove_non_owning_ref_types: bool = False) -> NamedCType:
     # If it's a value type, do the value type translation
     r = valuetype_type(t, binds=binds)
     if r is not None:
@@ -91,7 +94,10 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> NamedCType:
     elif isinstance(t, ListType):
         # TODO: remove these special cases, ArrayRef fallthrough works fine
         if str(t.elem) == 'int':
-            return NamedCType(binds, BaseCType(intArrayRefT))
+            if remove_non_owning_ref_types:
+                return NamedCType(binds, VectorCType(BaseCType(longT)))
+            else:
+                return NamedCType(binds, BaseCType(intArrayRefT))
         elif str(t.elem) == 'Tensor':
             return NamedCType(binds, BaseCType(tensorListT))
         elif str(t.elem) == 'Scalar':
@@ -306,10 +312,3 @@ def arguments(
             has_tensor_options=arguments.tensor_options is not None,
             cpp_no_default_args=cpp_no_default_args)
     ]
-
-# Translate a JIT argument into its C++ type,
-# but replaces any instances of reference C++ types with corresponding value types.
-# See Note [translation from C++ reference to value types]
-def argument_to_value_type(a: Argument) -> NamedCType:
-    output_ctype = argument_type(a, binds=a.name)
-    return NamedCType(output_ctype.name, output_ctype.type.ref_to_value_type())
