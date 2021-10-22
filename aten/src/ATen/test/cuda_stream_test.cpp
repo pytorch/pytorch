@@ -362,7 +362,7 @@ TEST(TestStream, ExternalGuardTest) {
   at::cuda::CUDAStream myFirstStream =
       at::cuda::getStreamFromExternal(a_cuda_stream, 0);
   at::cuda::CUDAStream mySecondStream =
-      at::cuda::getStreamFromExternal(another_cuda_stream, 1);
+      at::cuda::getStreamFromExternal(another_cuda_stream, 0);
 
   at::cuda::CUDAStream originalStream = at::cuda::getCurrentCUDAStream();
   {
