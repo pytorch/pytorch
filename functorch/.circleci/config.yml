@@ -5,15 +5,6 @@ commands:
     description: "checkout merge branch"
     steps:
       - checkout
-  #     - run:
-  #         name: Checkout merge branch
-  #         command: |
-  #           set -ex
-  #           BRANCH=$(git rev-parse --abbrev-ref HEAD)
-  #           if [[ "$BRANCH" != "master" ]]; then
-  #             git fetch --force origin ${CIRCLE_BRANCH}/merge:merged/${CIRCLE_BRANCH}
-  #             git checkout "merged/$CIRCLE_BRANCH"
-  #           fi
 
 binary_common: &binary_common
   parameters:
@@ -84,7 +75,7 @@ jobs:
           name: Post process
           command: .circleci/unittest/linux/scripts/post_process.sh
       - store_test_results:
-          path: test-results
+          path: test-reports
 
   unittest_linux_gpu:
     <<: *binary_common
@@ -122,7 +113,7 @@ jobs:
           name: Post process
           command: .circleci/unittest/linux/scripts/post_process.sh
       - store_test_results:
-          path: test-results
+          path: test-reports
 
 workflows:
   unittest:
