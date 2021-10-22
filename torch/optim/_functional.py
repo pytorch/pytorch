@@ -36,6 +36,10 @@ def adagrad(params: List[Tensor],
         clr = lr / (1 + (step - 1) * lr_decay)
 
         if grad.is_sparse:
+            print('in sparse block')
+            if torch.is_complex(grad):
+                print('in complex block')
+                raise RuntimeError('Complex gradients are not supported in Adagrad with sparse parameters')
             grad = grad.coalesce()  # the update is non-linear so indices must be unique
             grad_indices = grad._indices()
             grad_values = grad._values()

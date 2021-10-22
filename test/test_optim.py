@@ -1,3 +1,5 @@
+# Owner(s): ["module: optimizer"]
+
 import warnings
 import math
 import unittest
@@ -243,28 +245,28 @@ class TestOptim(TestCase):
             scheduler_constructors
         )
 
-    def _test_complex_optimizer(self, optimizer_constructor, sparse=False):
-        complex_param = torch.randn(5, 5, dtype=torch.complex64, requires_grad=True)
-        real_param = torch.view_as_real(complex_param).detach().clone().requires_grad_()
+    def _test_complex_optimizer(self, optimizer_constructor, sparse=False, expect_error=False):
+        real_param = torch.randn(10, 2, requires_grad=True)
+        complex_param = torch.view_as_complex(real_param).detach().clone().requires_grad_()
+
         complex_opt = optimizer_constructor(complex_param)
         real_opt = optimizer_constructor(real_param)
 
         for i in range(3):
             if sparse:
-                i = [[0, 3], [1, 1], [2, 2], [4, 0]]
-                v = torch.randn(4, dtype=torch.complex64)
-                complex_param.grad = torch.sparse_coo_tensor(list(zip(*i)), v, complex_param.shape)
+                b = torch.randn(10, 2).relu()
+                real_grad = b.to_sparse()
+                c_grad = torch.view_as_complex(b).to_sparse()
 
-                i = [[0, 3, 0], [0, 3, 1], [1, 1, 0], [1, 1, 1], [2, 2, 0], [2, 2, 1], [4, 0, 0], [4, 0, 1]]
-                v = [v[0].real, v[0].imag, v[1].real, v[1].imag, v[2].real, v[2].imag, v[3].real, v[3].imag]
-                real_param.grad = torch.sparse_coo_tensor(list(zip(*i)), v, real_param.shape)
+                complex_param.grad = c_grad
+                real_param.grad = real_grad
+
             else:
                 complex_param.grad = torch.randn_like(complex_param)
                 real_param.grad = torch.view_as_real(complex_param.grad)
 
             complex_opt.step()
             real_opt.step()
-
             self.assertEqual(torch.view_as_real(complex_param), real_param)
 
     def _build_params_dict(self, weight, bias, **kwargs):
@@ -652,10 +654,11 @@ class TestOptim(TestCase):
                     [param], lr=1e-1, initial_accumulator_value=0.1, weight_decay=1
                 )
             )
-            self._test_complex_optimizer(
-                lambda param: optimizer([param], lr=1e-1),
-                sparse=True
-            )
+            with self.assertRaisesRegex(RuntimeError, "Complex gradients are not supported in Adagrad with sparse parameters"):
+                self._test_complex_optimizer(
+                    lambda param: optimizer([param], lr=1e-1),
+                    sparse=True,
+                )
 
     def test_adamax(self):
         for optimizer in [optim.Adamax, optim_mt.Adamax]:

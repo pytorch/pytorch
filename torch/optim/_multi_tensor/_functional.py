@@ -38,6 +38,9 @@ def adagrad(
     minus_clr = [-lr / (1 + (step - 1) * lr_decay) for step in state_steps]
 
     if has_sparse_grad:
+        for x in grads:
+            if torch.is_complex(x):
+                raise RuntimeError('Complex gradients are not supported in Adagrad with sparse parameters')
         # sparse is not supported by multi_tensor. Fall back to optim.adagrad
         # implementation for sparse gradients
         for i, (param, grad, state_sum, step) in enumerate(
