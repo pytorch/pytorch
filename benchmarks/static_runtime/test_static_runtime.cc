@@ -1245,13 +1245,15 @@ TEST(StaticRuntime, IndividualOps_Index) {
   testStaticRuntime(index_without_none_script, args_a, args_b);
 
   // Index with None
-  // When indexing with none, the shape of `a` becomes [2, 1, 2],
+  // When indexing with none, the shape of `f` becomes [2, 1, 2],
   // so the mask must be reshaped appropriately.
-  auto idx_a_reshape = torch::tensor({{{0, 1}}, {{0, 0}}}, at::kBool);
-  std::vector<IValue> args_a_with_none{a, idx_a_reshape};
+  auto f = at::rand({2, 1, 2});
+  auto idx_f_reshape = torch::tensor({{{0, 1}}, {{0, 0}}}, at::kBool);
+  std::vector<IValue> args_f_with_none{f, idx_f_reshape};
+  args_f_with_none.emplace_back();
 
-  testStaticRuntime(index_with_none_script, args_a_with_none);
-  testStaticRuntime(index_with_none_script, args_a_with_none, args_b);
+  testStaticRuntime(index_with_none_script, args_f_with_none);
+  testStaticRuntime(index_with_none_script, args_f_with_none, {IValue(b), IValue(idx_b), IValue()});
 
   // Index with multiple tensors
   auto c = at::randn({2, 2});

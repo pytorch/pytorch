@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: distributed"]
+
 import math
 import io
 import itertools
