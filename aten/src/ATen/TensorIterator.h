@@ -724,6 +724,7 @@ public:
   }
 
   // Bypass output dtype/device computation and fix the dtype/device as specified here.
+  TensorIteratorConfig& declare_static_dtype_and_device(ScalarType dtype, Device device);
   TensorIteratorConfig& declare_static_dtype(ScalarType dtype);
   TensorIteratorConfig& declare_static_device(Device device);
   TensorIteratorConfig& declare_static_shape(IntArrayRef shape);

@@ -757,8 +757,7 @@ void upsample_generic_Nd_kernel_impl(
 
   TensorIteratorConfig config;
   config.check_all_same_dtype(false)
-    .declare_static_dtype(input.scalar_type())
-    .declare_static_device(input.device())
+    .declare_static_dtype_and_device(input.scalar_type(), input.device())
     .add_output(output)
     .add_input(restrided_input);
 

@@ -126,6 +126,13 @@ TensorIteratorConfig& TensorIteratorConfig::add_borrowed_input(const TensorBase&
   return *this;
 }
 
+TensorIteratorConfig& TensorIteratorConfig::declare_static_dtype_and_device(ScalarType dtype, Device device) {
+  TORCH_CHECK(!check_all_same_dtype_, "check_all_same_dtype(false) must be called before declare_static_dtype(...)");
+  static_dtype_ = dtype;
+  static_device_ = device;
+  return *this;
+}
+
 TensorIteratorConfig& TensorIteratorConfig::declare_static_dtype(ScalarType dtype) {
   TORCH_CHECK(!check_all_same_dtype_, "check_all_same_dtype(false) must be called before declare_static_dtype(...)");
   static_dtype_ = dtype;
