@@ -47,7 +47,7 @@ void RemoveInplaceOps(Block* block) {
       // create a replacement out of place op
       auto newNode = graph->create(inPlaceToOutOfPlace.at(node->kind()));
       newNode->insertBefore(node);
-      newNode->setScope(node->scope());
+      newNode->copyMetadata(node);
       // copy inputs
       for (auto input : node->inputs()) {
         newNode->addInput(input);
