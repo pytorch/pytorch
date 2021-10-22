@@ -386,7 +386,7 @@ class TestJit(JitTestCase):
                     return x
 
                 pkl_fn = pickle.dumps(fn, protocol=0)
-                
+
     def test_restore_device(self):
         class M(torch.jit.ScriptModule):
             def __init__(self, cpu_device_str):
