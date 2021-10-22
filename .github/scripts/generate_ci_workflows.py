@@ -293,10 +293,10 @@ LINUX_WORKFLOWS = [
             labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU},
         ),
     ),
-    # Build PyTorch with BUILD_CAFFE2=OFF
+    # Build PyTorch with BUILD_CAFFE2=ON
     CIWorkflow(
         arch="linux",
-        build_environment="puretorch-linux-xenial-py3.6-gcc5.4",
+        build_environment="caffe2-linux-xenial-py3.6-gcc5.4",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc5.4",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
         exclude_test=True,
