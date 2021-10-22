@@ -356,8 +356,8 @@ ForwardNormResult batch_norm(
 }
 
 BackwardNormResult batch_norm_backward(
-    TensorView* x,
-    TensorView* dy,
+    TensorView* input,
+    TensorView* grad_output,
     TensorView* weight,
     TensorView* running_mean,
     TensorView* running_var,
@@ -367,8 +367,8 @@ BackwardNormResult batch_norm_backward(
     Val* eps,
     const std::vector<bool>& output_mask,
     bool channels_last) {
-  TORCH_INTERNAL_ASSERT(x != nullptr, "Input is invalid.");
-  TORCH_INTERNAL_ASSERT(dy != nullptr, "Grad Output is invalid.");
+  TORCH_INTERNAL_ASSERT(input != nullptr, "Input is invalid.");
+  TORCH_INTERNAL_ASSERT(grad_output != nullptr, "Grad Output is invalid.");
   TORCH_INTERNAL_ASSERT(
       eps != nullptr && eps->getDataType().has_value() &&
           eps->getDataType().value() == DataType::Double,
@@ -379,90 +379,83 @@ BackwardNormResult batch_norm_backward(
   // N = reduction = B * H * W * D
   // weight = bias = (C) tensor
   const size_t kNumberOfDims =
-      TensorDomain::noReductions(x->getRootDomain()).size();
-  // channels last format means C dimension is at axis kNumberOfDims-1 at x / dy
+      TensorDomain::noReductions(input->getMaybeRFactorDomain()).size();
+  // channels last format means C dimension is at axis kNumberOfDims-1 at x /
+  // grad_out
   size_t c_axis = channels_last ? kNumberOfDims - 1 : 1;
 
   std::vector<int> reduction_axes;
   std::vector<bool> broadcast_mask(kNumberOfDims, false);
-  Val* num_features = new Double(1);
+  Val* num_features = nullptr;
   for (const auto axis : c10::irange(kNumberOfDims)) {
     if (axis != c_axis) {
       reduction_axes.push_back(axis);
       broadcast_mask[axis] = true;
-      num_features = mul(num_features, x->domain()->domain()[axis]->extent());
+      if (num_features == nullptr) {
+        num_features =
+            castOp(DataType::Double, input->domain()->domain()[axis]->extent());
+      } else {
+        num_features =
+            mul(num_features, input->domain()->domain()[axis]->extent());
+      }
     }
   }
 
-  Val* bcast_weight = nullptr;
-  if (weight != nullptr) {
-    bcast_weight = broadcast(weight, broadcast_mask);
-  } else {
-    bcast_weight = new Double(1);
-  }
-
-  TensorView* dx = nullptr;
-  TensorView* dw = nullptr;
-  TensorView* db = nullptr;
+  auto mean = save_mean;
+  auto invstd = save_invstd;
   if (kTraining) {
     TORCH_INTERNAL_ASSERT(
         save_mean != nullptr && save_invstd != nullptr,
         "When training=True, save_mean and save_invstd are required.");
-
-    auto bcast_rstd = broadcast(save_invstd, broadcast_mask);
-    auto bcast_mean = broadcast(save_mean, broadcast_mask);
-    auto x_hat = mul(sub(x, bcast_mean), bcast_rstd);
-    auto grad_x_hat = mul(dy, bcast_weight);
-
-    auto a = mul(num_features, grad_x_hat);
-
-    auto b = sum(grad_x_hat, reduction_axes);
-    auto bcast_b = broadcast(b, broadcast_mask);
-
-    auto c1 = mul(grad_x_hat, x_hat);
-    auto c2 = sum(c1, reduction_axes);
-    auto bcast_c2 = broadcast(c2, broadcast_mask);
-    auto c3 = mul(x_hat, bcast_c2);
-
-    auto inner = sub(sub(a, bcast_b), c3);
-
-    auto reciprocal_size = unaryOp(UnaryOpType::Reciprocal, num_features);
-
-    if (output_mask[0]) {
-      dx = mul(mul(reciprocal_size, bcast_rstd), inner);
-    }
-
-    if (output_mask[1]) {
-      dw = sum(mul(dy, x_hat), reduction_axes);
-    }
   } else {
-    // TODO: this is not a legit assumption? Can't we run with
-    // track_running_stats == false && training == false
-    // which should just run through the case above.
-    TORCH_INTERNAL_ASSERT(
-        running_mean != nullptr && running_var != nullptr,
-        "When training=False, running_mean and running_invstd are required.");
-
-    auto bcast_var = broadcast(running_var, broadcast_mask);
-    auto var_eps = add(bcast_var, eps);
-    auto bcast_rstd = unaryOp(UnaryOpType::Rsqrt, var_eps);
-    auto bcast_mean = broadcast(running_mean, broadcast_mask);
-
-    if (output_mask[0]) {
-      dx = mul(mul(dy, bcast_rstd), bcast_weight);
-    }
-
-    if (output_mask[1]) {
-      auto x_hat = mul(sub(x, bcast_mean), bcast_rstd);
-      dw = sum(mul(dy, x_hat), reduction_axes);
-    }
+    mean = running_mean;
+    invstd = rsqrt(add(running_var, eps));
   }
 
+  mean = broadcast(mean, broadcast_mask);
+
+  TensorView* weight_val = nullptr;
+  if (weight == nullptr) {
+    weight_val = TensorViewBuilder()
+                     .ndims(kNumberOfDims)
+                     .dtype(input->getDataType().value())
+                     .shape(std::vector<int64_t>(kNumberOfDims, 1))
+                     .build();
+    new UnaryOp(
+        UnaryOpType::Set, weight_val->as<Val>(), (new Double(1.0))->as<Val>());
+  } else {
+    weight_val = broadcast(weight, broadcast_mask);
+  }
+
+  auto norm = reciprocal(num_features);
+
+  auto grad_output_sum = sum(grad_output, reduction_axes);
+  auto dot_p = sum(mul(grad_output, sub(input, mean)), reduction_axes);
+
+  auto grad_mean = broadcast(mul(grad_output_sum, norm), broadcast_mask);
+  auto proj_scale =
+      broadcast(mul(mul(dot_p, norm), mul(invstd, invstd)), broadcast_mask);
+  auto grad_scale = mul(broadcast(invstd, broadcast_mask), weight_val);
+
+  TensorView* grad_input = nullptr;
+  if (kTraining) {
+    auto proj = mul(sub(input, mean), proj_scale);
+    grad_input = mul(sub(sub(grad_output, proj), grad_mean), grad_scale);
+  } else {
+    grad_input = mul(grad_output, grad_scale);
+  }
+
+  TensorView* grad_weight = nullptr;
+  if (output_mask[1]) {
+    grad_weight = mul(dot_p, invstd);
+  }
+
+  TensorView* grad_bias = nullptr;
   if (output_mask[2]) {
-    db = sum(dy, reduction_axes);
+    grad_bias = grad_output_sum;
   }
 
-  return {dx, dw, db};
+  return {grad_input, grad_weight, grad_bias};
 }
 
 ForwardNormResult instance_norm(
