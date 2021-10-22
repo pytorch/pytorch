@@ -60,8 +60,8 @@ static inline void slow_conv2d_shape_check(
   TORCH_CHECK(ndim == 4, "Expected 4D input tensor, but got: ", input.sizes());
   for (int64_t dim = 2; dim < ndim; ++dim) {
     TORCH_CHECK(input.size(dim) != 0,
-                "Expected input tensor with optional zero batch and channel dimensions, but got dimension ",
-                dim, " of size 0.");
+                "Expected non-zero size for input dimension ", dim,
+                ", but got input shape: ", input.sizes(), ". Only the batch and channel dimensions support size 0.");
   }
 
   const int64_t input_height = input.size(dim_height);
