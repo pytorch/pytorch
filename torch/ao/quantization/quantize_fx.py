@@ -7,7 +7,6 @@ from torch.fx.node import Target, Node, Argument
 from torch.nn.intrinsic import _FusedModule
 from .fx import Fuser  # noqa: F401
 from .fx import prepare, convert  # noqa: F401
-from .fx._convert_new import _convert_new  # noqa: F401
 from .fx import get_fbgemm_backend_config_dict  # noqa: F401
 from .fx import get_tensorrt_backend_config_dict  # noqa: F401
 from .fx.graph_module import ObservedGraphModule, QuantizedGraphModule
@@ -675,23 +674,3 @@ def _convert_standalone_module_fx(
         convert_custom_config_dict,
         is_standalone_module=True,
     )
-
-def _convert_fx_new(
-        graph_module: GraphModule, is_reference: bool = False,
-        convert_custom_config_dict: Dict[str, Any] = None,
-        _remove_qconfig: bool = True) -> QuantizedGraphModule:
-    assert is_reference
-    if convert_custom_config_dict is None:
-        convert_custom_config_dict = {}
-
-    _check_is_graph_module(graph_module)
-    check_is_valid_convert_custom_config_dict(convert_custom_config_dict)
-
-    quantized = _convert_new(
-        graph_module, is_reference, convert_custom_config_dict,
-        False, _remove_qconfig_flag=_remove_qconfig)
-
-    preserved_attributes = convert_custom_config_dict.get("preserved_attributes", [])
-    for attr_name in preserved_attributes:
-        setattr(quantized, attr_name, getattr(graph_module, attr_name))
-    return quantized
