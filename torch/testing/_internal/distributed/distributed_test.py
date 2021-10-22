@@ -3599,6 +3599,7 @@ class DistributedTest:
         ):
             model.train()
             output = model(input_var)
+            self.assertTrue(torch.isfinite(output).all().item())
             l = loss(output, target) * scale_factor
             l.backward()
             if memory_format is not None:
@@ -3608,6 +3609,10 @@ class DistributedTest:
             self.assertEqual(len(param_gpu), len(param_DDP))
             for p_gpu, p_DDP in zip(param_gpu, param_DDP):
                 self.assertEqual(p_gpu, p_DDP)
+                if p_gpu.requires_grad and p_DDP.requires_grad:
+                    self.assertTrue(p_gpu.grad is not None)
+                    self.assertTrue(p_DDP.grad is not None)
+                    self.assertEqual(p_gpu.grad, p_DDP.grad)
 
         def _test_DDP_niter(
             self,
@@ -3646,15 +3651,16 @@ class DistributedTest:
                 )
 
                 # Update weights and run a second iteration to shake out errors
+                self._assert_equal_param(
+                    list(model_base.parameters()), list(model_DDP.module.parameters())
+                )
                 if zero_grad:
                     self._model_step_with_zero_grad(model_base)
                     self._model_step_with_zero_grad(model_DDP)
                 else:
                     self._model_step(model_base)
                     self._model_step(model_DDP)
-                self._assert_equal_param(
-                    list(model_base.parameters()), list(model_DDP.module.parameters())
-                )
+
 
                 # Shuffle the input so that DDP input is different
                 input = input[torch.randperm(batch_size)]
@@ -4609,6 +4615,9 @@ class DistributedTest:
             input_cpu = torch.randn(global_bs, 2)
             target = torch.randn(global_bs, 4)
             loss = nn.MSELoss()
+
+            print("input: ", input_cpu.shape)
+            print("target: ", target.shape)
 
             # check two model parameters over 5 iterations
             self._test_DDP_niter(

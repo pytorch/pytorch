@@ -594,7 +594,6 @@ std::tuple<Tensor, Tensor> batch_norm_gather_stats_with_counts_cuda(
   const Tensor& running_mean = *running_mean_maybe_owned;
   const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
 
-
   auto scalar_type = running_mean.defined() ? running_mean.scalar_type() : self.scalar_type();
   return AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, scalar_type, "batch_norm_update_stats_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
@@ -653,6 +652,7 @@ Tensor batch_norm_backward_elemt_cuda(const Tensor& self, const Tensor& input, c
       batch_norm_use_channels_last_kernels(input))  {
     return batch_norm_backward_elemt_channels_last_cuda_template(self, input, mean, invstd, weight, sum_dy, sum_dy_xmu, count);
   }
+  std::cout << "BACKWARD ELEMENT CALLER\n";
 
   return AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "batch_norm_backward_elemt", [&] {
     auto mean_st = mean.dtype();
@@ -662,12 +662,16 @@ Tensor batch_norm_backward_elemt_cuda(const Tensor& self, const Tensor& input, c
     bool is_bfloat16_float = std::is_same<scalar_t, at::BFloat16>::value && mean_st == at::kFloat;
     using accscalar_t = at::acc_type<scalar_t, true>;
     if (cuda::detail::canUse32BitIndexMath(self)) {
+      std::cout << "BACKWARD ELEMENT CALLER 32 bit indexing\n";
+
       if (is_half_float || is_bfloat16_float) {
         return batch_norm_backward_elemt_cuda_template<scalar_t, accscalar_t, int32_t>(self, input, mean, invstd, weight, sum_dy, sum_dy_xmu, count);
       } else {
         return batch_norm_backward_elemt_cuda_template<scalar_t, scalar_t, int32_t>(self, input, mean, invstd, weight, sum_dy, sum_dy_xmu, count);
       }
     } else {
+      std::cout << "BACKWARD ELEMENT CALLER 64 bit indexing\n";
+
       if (is_half_float || is_bfloat16_float) {
         return batch_norm_backward_elemt_cuda_template<scalar_t, accscalar_t, int64_t>(self, input, mean, invstd, weight, sum_dy, sum_dy_xmu, count);
       } else {

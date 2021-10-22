@@ -9,6 +9,8 @@
 #include <ATen/native/cuda/LaunchUtils.h>
 #include <c10/macros/Macros.h>
 
+#include <iostream>
+
 namespace at { namespace native {
 
 // The maximum number of threads in a block
@@ -474,6 +476,7 @@ __global__ void batch_norm_reduce_statistics_kernel(
     index_t n = 0;
     for (int j = 0; j < world_size; j++) {
       scalar_t count = counts[j];
+      if (n + count == 0) { continue; }
       accscalar_t m = vec_mean[j][i];
       accscalar_t v = accscalar_t(1.0) / (vec_invstd[j][i]);
       v = (v * v - epsilon) * count;
@@ -689,12 +692,15 @@ void batch_norm_stats_cuda_template(
 
   using accscalar_t = at::acc_type<scalar_t, true>;
   int64_t n_input = input_.size(1);
+  resize_output(out_mean, {n_input});
+  resize_output(out_invstd, {n_input});
+
+  if (input_.size(0) == 0) { return; }
+
   Tensor dummy_mean_;
   Tensor dummy_var_;
   auto input_reshaped = input_.reshape({input_.size(0), input_.size(1), -1}); // internally we merge the feature dimensions
 
-  resize_output(out_mean, {n_input});
-  resize_output(out_invstd, {n_input});
   auto input = get_packed_accessor<
       scalar_t, 3, RestrictPtrTraits, index_t>(input_reshaped, "input");
   TORCH_INTERNAL_ASSERT(out_invstd.dim() == 1 && out_invstd.is_contiguous() &&
@@ -719,7 +725,7 @@ void batch_norm_stats_cuda_template(
 template<typename input_scalar_t, typename stat_scalar_t, typename index_t>
 void batch_norm_elemt_cuda_template(const Tensor& output_, const Tensor& input_, const Tensor& weight_,
                                     const Tensor& bias_, const Tensor& mean_, const Tensor& invstd_) {
-
+  if (input_.size(0) == 0) { return; } // empty batch size.
   using stat_accscalar_t = at::acc_type<stat_scalar_t, true>;
   int64_t n_input = input_.size(1);
   auto input_reshaped = input_.reshape({input_.size(0), input_.size(1), -1}); // internally we merge the feature dimensions
@@ -774,6 +780,10 @@ std::tuple<Tensor, Tensor> batch_norm_gather_stats_cuda_template(const Tensor& m
   save_mean_ = at::empty({features}, input_options);
   save_invstd_ = at::empty({features}, input_options);
 
+  if (mean_.size(0) == 0) {  // empty batch
+    return std::make_tuple(save_mean_, save_invstd_);
+  }
+
   auto mean = packed_accessor_or_dummy<
       accscalar_t, 2, RestrictPtrTraits, index_t>(mean_, "mean");
   auto invstd = packed_accessor_or_dummy<
@@ -804,15 +814,12 @@ template<typename input_scalar_t, typename stat_scalar_t, typename index_t>
 std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_backward_reduce_cuda_template(const Tensor& grad_out_, const Tensor& input_,
                                                                                     const Tensor& mean_, const Tensor& invstd_, const Tensor& weight_,
                                                                                     const bool input_g, const bool weight_g, const bool bias_g) {
-
   using stat_accscalar_t = at::acc_type<stat_scalar_t, true>;
   int64_t n_input = input_.size(1);
   Tensor sum_dy_;
   Tensor sum_dy_xmu_;
   Tensor grad_weight_;
   Tensor grad_bias_;
-  auto input_reshaped = input_.reshape({input_.size(0), input_.size(1), -1}); // internally we merge the feature dimensions
-  auto grad_output_reshaped = grad_out_.reshape(input_reshaped.sizes());
 
   if (input_g) {
     sum_dy_ = at::empty_like(mean_, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
@@ -824,6 +831,13 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_backward_reduce_cuda_templ
   if (bias_g) {
     grad_bias_ = at::empty({n_input}, weight_.options());
   }
+
+  if (input_.size(0) == 0) { // empty batch size.
+    return std::make_tuple(sum_dy_, sum_dy_xmu_, grad_weight_, grad_bias_);
+  }
+
+  auto input_reshaped = input_.reshape({input_.size(0), input_.size(1), -1}); // internally we merge the feature dimensions
+  auto grad_output_reshaped = grad_out_.reshape(input_reshaped.sizes());
 
   auto input = get_packed_accessor<
       input_scalar_t, 3, DefaultPtrTraits, index_t>(input_reshaped, "input");
@@ -863,6 +877,7 @@ template<typename input_scalar_t, typename stat_scalar_t, typename index_t>
 Tensor batch_norm_backward_elemt_cuda_template(const Tensor& grad_out_, const Tensor& input_,
                                                const Tensor& mean_, const Tensor& invstd_,
                                                const Tensor& weight_, const Tensor& sum_dy_, const Tensor& sum_dy_xmu_) {
+  if (input_.size(0) == 0) { return at::empty_like(input_); } // empty batch
 
   using stat_accscalar_t = at::acc_type<stat_scalar_t, true>;
   int64_t n_input = input_.size(1);
@@ -914,6 +929,7 @@ template<typename input_scalar_t, typename stat_scalar_t, typename index_t>
 Tensor batch_norm_backward_elemt_cuda_template(const Tensor& grad_out_, const Tensor& input_,
                                                const Tensor& mean_, const Tensor& invstd_,
                                                const Tensor& weight_, const Tensor& sum_dy_, const Tensor& sum_dy_xmu_, const Tensor& count) {
+  if (input_.size(0) == 0) { return at::empty_like(input_); } // empty batch
 
   using stat_accscalar_t = at::acc_type<stat_scalar_t, true>;
   int64_t n_input = input_.size(1);
@@ -1645,11 +1661,11 @@ at::Tensor batch_norm_backward_elemt_channels_last_cuda_template(
     const at::Tensor& sum_dy,
     const at::Tensor& sum_dy_xmu,
     const at::Tensor& count) {
-  const auto stride = input.sizes()[1];
-  const auto reduction_size = input.numel() / stride;
-
   // Input is guarunteed to be channels-last compatible
   at::Tensor grad_input = at::empty_like(input);
+
+  const auto stride = input.sizes()[1];
+  const auto reduction_size = input.numel() / stride;
 
   dim3 block;
   dim3 grid;
@@ -1712,12 +1728,12 @@ at::Tensor batch_norm_backward_elemt_channels_last_cuda_template(
     const at::Tensor& weight,
     const at::Tensor& sum_dy,
     const at::Tensor& sum_dy_xmu) {
+  // Input is guarunteed to be channels-last compatible
+  at::Tensor grad_input = at::empty_like(input);
+
   const auto stride = input.sizes()[1];
   const auto reduction_size = input.numel() / stride;
   auto norm_fct = 1.0 / reduction_size;
-
-  // Input is guarunteed to be channels-last compatible
-  at::Tensor grad_input = at::empty_like(input);
 
   dim3 block;
   dim3 grid;
