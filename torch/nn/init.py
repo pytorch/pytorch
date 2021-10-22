@@ -135,8 +135,8 @@ def uniform_(tensor: Tensor, a: float = 0., b: float = 1.) -> Tensor:
         >>> w = torch.empty(3, 5)
         >>> nn.init.uniform_(w)
     """
-    if has_torch_function_variadic(tensor, a, b):
-        return handle_torch_function(uniform_, (tensor, a, b), tensor=tensor, a=a, b=b)
+    if has_torch_function_variadic(tensor):
+        return handle_torch_function(uniform_, (), tensor=tensor, a=a, b=b)
     return _no_grad_uniform_(tensor, a, b)
 
 
@@ -153,8 +153,8 @@ def normal_(tensor: Tensor, mean: float = 0., std: float = 1.) -> Tensor:
         >>> w = torch.empty(3, 5)
         >>> nn.init.normal_(w)
     """
-    if has_torch_function_variadic(tensor, mean, std):
-        return handle_torch_function(normal_, (tensor, mean, std), tensor=tensor, mean=mean, std=std)
+    if has_torch_function_variadic(tensor):
+        return handle_torch_function(normal_, (), tensor=tensor, mean=mean, std=std)
     return _no_grad_normal_(tensor, mean, std)
 
 def trunc_normal_(tensor: Tensor, mean: float = 0., std: float = 1., a: float = -2., b: float = 2.) -> Tensor:
@@ -391,10 +391,8 @@ def kaiming_uniform_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu'):
         >>> w = torch.empty(3, 5)
         >>> nn.init.kaiming_uniform_(w, mode='fan_in', nonlinearity='relu')
     """
-    if has_torch_function_variadic(tensor, a, mode, nonlinearity):
-        return handle_torch_function(
-            kaiming_uniform_, (tensor, a, mode, nonlinearity),
-            tensor=tensor, a=a, mode=mode, nonlinear=nonlinearity)
+    if has_torch_function_variadic(tensor):
+        return handle_torch_function(kaiming_uniform_, (), tensor=tensor, a=a, mode=mode, nonlinear=nonlinearity)
 
     if 0 in tensor.shape:
         warnings.warn("Initializing zero-element tensors is a no-op")
