@@ -61,7 +61,7 @@ set_module(ScriptFunction, "torch.jit")
 def _reduce(cls):
     raise pickle.PickleError("ScriptFunction cannot be pickled")
 
-ScriptFunction.__reduce__ = _reduce  # type: ignore[no-redef]
+ScriptFunction.__reduce__ = _reduce  # type: ignore[assignment]
 
 
 if _enabled:
