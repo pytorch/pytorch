@@ -27,69 +27,35 @@ using namespace qnnpack::testing;
 class ConvolutionOperatorTester {
  public:
   inline ConvolutionOperatorTester& padding(uint32_t padding) {
-    this->paddingTop_ = padding;
-    this->paddingRight_ = padding;
-    this->paddingBottom_ = padding;
-    this->paddingLeft_ = padding;
+    this->paddingHeight_ = padding;
+    this->paddingWidth_ = padding;
     return *this;
   }
 
   inline ConvolutionOperatorTester& padding(
       uint32_t paddingHeight,
       uint32_t paddingWidth) {
-    this->paddingTop_ = paddingHeight;
-    this->paddingRight_ = paddingWidth;
-    this->paddingBottom_ = paddingHeight;
-    this->paddingLeft_ = paddingWidth;
+    this->paddingHeight_ = paddingHeight;
+    this->paddingWidth_ = paddingWidth;
     return *this;
   }
 
   inline ConvolutionOperatorTester& paddingHeight(uint32_t paddingHeight) {
-    this->paddingTop_ = paddingHeight;
-    this->paddingBottom_ = paddingHeight;
+    this->paddingHeight_ = paddingHeight;
     return *this;
   }
 
   inline ConvolutionOperatorTester& paddingWidth(uint32_t paddingWidth) {
-    this->paddingRight_ = paddingWidth;
-    this->paddingLeft_ = paddingWidth;
+    this->paddingWidth_ = paddingWidth;
     return *this;
   }
 
-  inline ConvolutionOperatorTester& paddingTop(uint32_t paddingTop) {
-    this->paddingTop_ = paddingTop;
-    return *this;
+  inline uint32_t paddingWidth() const {
+    return this->paddingWidth_;
   }
 
-  inline uint32_t paddingTop() const {
-    return this->paddingTop_;
-  }
-
-  inline ConvolutionOperatorTester& paddingRight(uint32_t paddingRight) {
-    this->paddingRight_ = paddingRight;
-    return *this;
-  }
-
-  inline uint32_t paddingRight() const {
-    return this->paddingRight_;
-  }
-
-  inline ConvolutionOperatorTester& paddingBottom(uint32_t paddingBottom) {
-    this->paddingBottom_ = paddingBottom;
-    return *this;
-  }
-
-  inline uint32_t paddingBottom() const {
-    return this->paddingBottom_;
-  }
-
-  inline ConvolutionOperatorTester& paddingLeft(uint32_t paddingLeft) {
-    this->paddingLeft_ = paddingLeft;
-    return *this;
-  }
-
-  inline uint32_t paddingLeft() const {
-    return this->paddingLeft_;
+  inline uint32_t paddingHeight() const {
+    return this->paddingHeight_;
   }
 
   inline ConvolutionOperatorTester& inputSize(
@@ -325,8 +291,7 @@ class ConvolutionOperatorTester {
   }
 
   inline size_t outputHeight() const {
-    const size_t paddedInputHeight =
-        paddingTop() + inputHeight() + paddingBottom();
+    const size_t paddedInputHeight = inputHeight() + paddingHeight() * 2;
     if (paddedInputHeight <= dilatedKernelHeight()) {
       return 1;
     } else {
@@ -336,8 +301,7 @@ class ConvolutionOperatorTester {
   }
 
   inline size_t outputWidth() const {
-    const size_t paddedInputWidth =
-        paddingLeft() + inputWidth() + paddingRight();
+    const size_t paddedInputWidth = inputWidth() + paddingWidth() * 2;
     if (paddedInputWidth <= dilatedKernelWidth()) {
       return 1;
     } else {
@@ -437,11 +401,11 @@ class ConvolutionOperatorTester {
           for (size_t ox = 0; ox < outputWidth(); ox++) {
             for (size_t ky = 0; ky < kernelHeight(); ky++) {
               const size_t iy = oy * subsamplingHeight() +
-                  ky * dilationHeight() - paddingTop();
+                  ky * dilationHeight() - paddingHeight();
               if (iy < inputHeight()) {
                 for (size_t kx = 0; kx < kernelWidth(); kx++) {
                   const size_t ix = ox * subsamplingWidth() +
-                      kx * dilationWidth() - paddingLeft();
+                      kx * dilationWidth() - paddingWidth();
                   if (ix < inputWidth()) {
                     for (size_t g = 0; g < groups(); g++) {
                       for (size_t oc = 0; oc < groupOutputChannels(); oc++) {
@@ -515,10 +479,8 @@ class ConvolutionOperatorTester {
       ASSERT_EQ(
           pytorch_qnnp_status_success,
           pytorch_qnnp_create_convolution2d_nhwc_q8(
-              paddingTop(),
-              paddingRight(),
-              paddingBottom(),
-              paddingLeft(),
+              paddingHeight(),
+              paddingWidth(),
               kernelHeight(),
               kernelWidth(),
               subsamplingHeight(),
@@ -641,10 +603,8 @@ class ConvolutionOperatorTester {
   }
 
  private:
-  uint32_t paddingTop_{0};
-  uint32_t paddingRight_{0};
-  uint32_t paddingBottom_{0};
-  uint32_t paddingLeft_{0};
+  uint32_t paddingHeight_{0};
+  uint32_t paddingWidth_{0};
   size_t inputHeight_{1};
   size_t inputWidth_{1};
   uint32_t groups_{1};

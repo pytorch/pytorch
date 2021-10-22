@@ -40,9 +40,9 @@ void pytorch_qnnp_indirection_init_conv3d(
   const size_t dilation_depth = op->dilation_depth;
   const size_t dilation_height = op->dilation_height;
   const size_t dilation_width = op->dilation_width;
-  const size_t input_padding_front = op->input_padding_front;
-  const size_t input_padding_top = op->input_padding_top;
-  const size_t input_padding_left = op->input_padding_left;
+  const size_t input_padding_depth = op->input_padding_depth;
+  const size_t input_padding_height = op->input_padding_height;
+  const size_t input_padding_width = op->input_padding_width;
 
   const size_t output_size = output_depth * output_height * output_width;
   const size_t kernel_size = kernel_depth * kernel_height * kernel_width;
@@ -70,16 +70,16 @@ void pytorch_qnnp_indirection_init_conv3d(
 
           for (size_t kernel_z = 0; kernel_z < kernel_depth; kernel_z++) {
             const size_t input_z = output_z * stride_depth +
-                kernel_z * dilation_depth - input_padding_front;
+                kernel_z * dilation_depth - input_padding_depth;
             if (input_z < input_depth) {
               for (size_t kernel_y = 0; kernel_y < kernel_height; kernel_y++) {
                 const size_t input_y = output_y * stride_height +
-                    kernel_y * dilation_height - input_padding_top;
+                    kernel_y * dilation_height - input_padding_height;
                 if (input_y < input_height) {
                   for (size_t kernel_x = 0; kernel_x < kernel_width;
                        kernel_x++) {
                     const size_t input_x = output_x * stride_width +
-                        kernel_x * dilation_width - input_padding_left;
+                        kernel_x * dilation_width - input_padding_width;
                     const size_t index = (group * batch_size + image) *
                             tiled_output_size * kernel_size +
                         output_tile_start * kernel_size +
@@ -154,19 +154,19 @@ void pytorch_qnnp_indirection_init_dwconv2d(
   const size_t stride_width = op->stride_width;
   const size_t dilation_height = op->dilation_height;
   const size_t dilation_width = op->dilation_width;
-  const size_t input_padding_top = op->input_padding_top;
-  const size_t input_padding_left = op->input_padding_left;
+  const size_t input_padding_height = op->input_padding_height;
+  const size_t input_padding_width = op->input_padding_width;
 
   for (size_t image = batch_start; image < batch_size; image++) {
     for (size_t output_y = 0; output_y < output_height; output_y++) {
       for (size_t kernel_y = 0; kernel_y < kernel_height; kernel_y++) {
         const size_t input_y = output_y * stride_height +
-            kernel_y * dilation_height - input_padding_top;
+            kernel_y * dilation_height - input_padding_height;
         if (input_y < input_height) {
           for (size_t output_x = 0; output_x < output_width; output_x++) {
             for (size_t kernel_x = 0; kernel_x < kernel_width; kernel_x++) {
               const size_t input_x = output_x * stride_width +
-                  kernel_x * dilation_width - input_padding_left;
+                  kernel_x * dilation_width - input_padding_width;
               const size_t index =
                   (image * output_height + output_y) * step_height +
                   output_x * step_width * kernel_height +
@@ -217,8 +217,8 @@ void pytorch_qnnp_indirection_init_deconv2d(
   const size_t stride_width = op->stride_width;
   const size_t dilation_height = op->dilation_height;
   const size_t dilation_width = op->dilation_width;
-  const size_t input_padding_top = op->input_padding_top;
-  const size_t input_padding_left = op->input_padding_left;
+  const size_t input_padding_height = op->input_padding_height;
+  const size_t input_padding_width = op->input_padding_width;
 
   const size_t output_size = output_height * output_width;
   const size_t kernel_size = kernel_height * kernel_width;
@@ -237,11 +237,11 @@ void pytorch_qnnp_indirection_init_deconv2d(
           const size_t output_x = output_index % output_width;
           for (size_t kernel_y = 0; kernel_y < kernel_height; kernel_y++) {
             const size_t y =
-                output_y + input_padding_top - kernel_y * dilation_height;
+                output_y + input_padding_height - kernel_y * dilation_height;
             const size_t input_y = y / stride_height;
             for (size_t kernel_x = 0; kernel_x < kernel_width; kernel_x++) {
               const size_t x =
-                  output_x + input_padding_left - kernel_x * dilation_width;
+                  output_x + input_padding_width - kernel_x * dilation_width;
               const size_t input_x = x / stride_width;
               const size_t index = (group * batch_size + image) *
                       tiled_output_size * kernel_size +
@@ -284,21 +284,21 @@ void pytorch_qnnp_indirection_init_maxpool2d(
   const size_t stride_width = op->stride_width;
   const size_t dilation_height = op->dilation_height;
   const size_t dilation_width = op->dilation_width;
-  const size_t input_padding_top = op->input_padding_top;
-  const size_t input_padding_left = op->input_padding_left;
+  const size_t input_padding_height = op->input_padding_height;
+  const size_t input_padding_width = op->input_padding_width;
 
   for (size_t image = batch_start; image < batch_size; image++) {
     for (size_t output_y = 0; output_y < output_height; output_y++) {
       for (size_t pooling_y = 0; pooling_y < pooling_height; pooling_y++) {
         const size_t input_y =
             doz(output_y * stride_height + pooling_y * dilation_height,
-                input_padding_top);
+                input_padding_height);
         const size_t clamped_input_y = min(input_y, input_height - 1);
         for (size_t output_x = 0; output_x < output_width; output_x++) {
           for (size_t pooling_x = 0; pooling_x < pooling_width; pooling_x++) {
             const size_t input_x =
                 doz(output_x * stride_width + pooling_x * dilation_width,
-                    input_padding_left);
+                    input_padding_width);
             const size_t clamped_input_x = min(input_x, input_width - 1);
             const size_t index =
                 (image * output_height + output_y) * step_height +
