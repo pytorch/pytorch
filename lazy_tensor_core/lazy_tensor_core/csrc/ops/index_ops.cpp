@@ -129,9 +129,9 @@ CanonicalIndexInfo TransposeToFront(at::Tensor base, at::TensorList indices) {
 
 // Wraps index tensors once into the [0, dim_size) interval, where dim_size is
 // the size of the current indexed dimension.
-std::vector<LazyTensor> WrapIndicesOnce(
-    const LazyTensor& base, lazy_tensors::Span<const LazyTensor> indices,
-    int start_dim) {
+std::vector<LazyTensor> WrapIndicesOnce(const LazyTensor& base,
+                                        c10::ArrayRef<LazyTensor> indices,
+                                        int start_dim) {
   std::vector<LazyTensor> canonical_indices;
   auto base_shape_ref = base.shape();
   LTC_CHECK_LE(indices.size(), base_shape_ref.get().rank());
@@ -213,7 +213,7 @@ torch::lazy::Value EnsureRank1(const torch::lazy::Value& index) {
 }
 
 LazyTensor IndexByTensors(const LazyTensor& base,
-                          lazy_tensors::Span<const LazyTensor> indices,
+                          c10::ArrayRef<LazyTensor> indices,
                           lazy_tensors::int64 start_dim) {
   if (indices.empty()) {
     return base;
@@ -232,9 +232,9 @@ LazyTensor IndexByTensors(const LazyTensor& base,
 }
 
 torch::lazy::Value IndexPutByTensors(
-    const LazyTensor& base, lazy_tensors::Span<const LazyTensor> indices,
+    const LazyTensor& base, c10::ArrayRef<LazyTensor> indices,
     lazy_tensors::int64 start_dim, const LazyTensor& values, bool accumulate,
-    lazy_tensors::Span<const lazy_tensors::int64> result_permutation) {
+    c10::ArrayRef<lazy_tensors::int64> result_permutation) {
   if (indices.empty()) {
     return base.GetIrValue();
   }

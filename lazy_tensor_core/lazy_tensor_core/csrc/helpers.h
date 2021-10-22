@@ -12,7 +12,6 @@
 #include "lazy_tensors/core/lib/bfloat16/bfloat16.h"
 #include "lazy_tensors/literal_util.h"
 #include "lazy_tensors/permutation_util.h"
-#include "lazy_tensors/span.h"
 #include "lazy_tensors/types.h"
 
 namespace torch_lazy_tensors {
@@ -93,11 +92,11 @@ class Helpers {
 
   static c10::optional<DynamicReshapeInfo> GetDynamicReshapeInfo(
       const lazy_tensors::Shape& input_shape,
-      lazy_tensors::Span<const lazy_tensors::int64> output_sizes);
+      c10::ArrayRef<lazy_tensors::int64> output_sizes);
 
   static lazy_tensors::Shape GetDynamicReshape(
       const lazy_tensors::Shape& input_shape,
-      lazy_tensors::Span<const lazy_tensors::int64> output_sizes);
+      c10::ArrayRef<lazy_tensors::int64> output_sizes);
 
   // Converts an iterable container to a vector of int64's.
   template <typename S>
@@ -112,8 +111,8 @@ class Helpers {
 
   // Creates a set of dimension by dropping the drop_dims ones.
   static std::vector<lazy_tensors::int64> DropDimensions(
-      lazy_tensors::Span<const lazy_tensors::int64> sizes,
-      lazy_tensors::Span<const lazy_tensors::int64> drop_dims);
+      c10::ArrayRef<lazy_tensors::int64> sizes,
+      c10::ArrayRef<lazy_tensors::int64> drop_dims);
 
   // Get the canonical dimension index in the [0, rank) interval. Negative
   // indices are interpreted as follows: -1 is rank-1, -2 is rank-2 etc.
@@ -122,14 +121,13 @@ class Helpers {
 
   // Same as above, for multiple dimensions.
   static std::vector<lazy_tensors::int64> GetCanonicalDimensionIndices(
-      lazy_tensors::Span<const lazy_tensors::int64> dimensions,
-      lazy_tensors::int64 rank);
+      c10::ArrayRef<lazy_tensors::int64> dimensions, lazy_tensors::int64 rank);
 
   // Returns the canonical position in the dim dimension, handling negative
   // values for the position.
   static lazy_tensors::int64 GetCanonicalPosition(
-      lazy_tensors::Span<const lazy_tensors::int64> dimensions,
-      lazy_tensors::int64 dim, lazy_tensors::int64 pos);
+      c10::ArrayRef<lazy_tensors::int64> dimensions, lazy_tensors::int64 dim,
+      lazy_tensors::int64 pos);
 
   // Retrieves the dynamic dimension of an input shape, or returns -1 if none.
   static lazy_tensors::int64 GetDynamicDimension(
@@ -143,8 +141,7 @@ class Helpers {
   // size as the input.
   template <typename Container>
   static std::vector<typename Container::value_type> Permute(
-      lazy_tensors::Span<const lazy_tensors::int64> permutation,
-      const Container& input) {
+      c10::ArrayRef<lazy_tensors::int64> permutation, const Container& input) {
     using T = typename Container::value_type;
     LTC_CHECK(input.size() == permutation.size() &&
               lazy_tensors::IsPermutation(permutation))
@@ -173,8 +170,8 @@ class Helpers {
   //   shape2       =       [6, 5, 2]
   //   result_shape = [9, 7, 6, 5, 2]
   static std::vector<lazy_tensors::int64> GetPromotedShape(
-      lazy_tensors::Span<const lazy_tensors::int64> shape1_dims,
-      lazy_tensors::Span<const lazy_tensors::int64> shape2_dims);
+      c10::ArrayRef<lazy_tensors::int64> shape1_dims,
+      c10::ArrayRef<lazy_tensors::int64> shape2_dims);
 
   static lazy_tensors::Shape GetPromotedShape(
       const lazy_tensors::Shape& shape1, const lazy_tensors::Shape& shape2);

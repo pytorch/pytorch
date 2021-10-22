@@ -11,7 +11,6 @@
 #include "lazy_tensors/computation_client/computation_client.h"
 #include "lazy_tensors/core/platform/macros.h"
 #include "lazy_tensors/shape_util.h"
-#include "lazy_tensors/span.h"
 #include "lazy_tensors/types.h"
 #include "torch/csrc/lazy/core/ir.h"
 
@@ -23,14 +22,14 @@ class LoweringContext {
  public:
   LoweringContext(const std::string& name, Device device);
   LoweringContext(const std::string& name, Device device,
-                  lazy_tensors::Span<const torch::lazy::Node* const> post_order,
+                  c10::ArrayRef<torch::lazy::Node*> post_order,
                   Util::EmissionMap emit_status);
 
   virtual ~LoweringContext() = default;
 
   static std::unique_ptr<LoweringContext> Create(
       const std::string& name, Device device,
-      lazy_tensors::Span<const torch::lazy::Node* const> post_order,
+      c10::ArrayRef<torch::lazy::Node*> post_order,
       Util::EmissionMap emit_status);
 
   static std::unique_ptr<LoweringContext> Create(const std::string& name,

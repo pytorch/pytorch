@@ -1,11 +1,9 @@
 #pragma once
 
-#include "lazy_tensors/span.h"
 
 namespace lazy_tensors {
 
-inline lazy_tensors::Span<const int64> AsInt64Slice(
-    lazy_tensors::Span<const int64> slice) {
+inline c10::ArrayRef<int64> AsInt64Slice(c10::ArrayRef<int64> slice) {
   return slice;
 }
 

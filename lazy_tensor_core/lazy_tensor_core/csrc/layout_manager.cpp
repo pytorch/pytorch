@@ -26,7 +26,7 @@ class LayoutManager {
   }
 
   const std::vector<lazy_tensors::int64>* GetLayout(
-      lazy_tensors::Span<const lazy_tensors::int64> dimensions) const {
+      c10::ArrayRef<lazy_tensors::int64> dimensions) const {
     auto it = layouts_.find(dimensions);
     return it != layouts_.end() ? &it->second->layout : nullptr;
   }
@@ -39,14 +39,14 @@ class LayoutManager {
 
   struct DimensionsHasher {
     size_t operator()(
-        const lazy_tensors::Span<const lazy_tensors::int64>& dimensions) const {
+        const c10::ArrayRef<lazy_tensors::int64>& dimensions) const {
       return torch::lazy::HashReduce(
           torch::lazy::MHash(dimensions));
     }
   };
 
   using LayoutMap =
-      std::unordered_map<lazy_tensors::Span<const lazy_tensors::int64>,
+      std::unordered_map<c10::ArrayRef<lazy_tensors::int64>,
                          std::shared_ptr<LayoutEntry>, DimensionsHasher>;
 
   LayoutManager() {
@@ -117,7 +117,7 @@ double PaddingFactor(lazy_tensors::int64 size, int padding) {
 }
 
 lazy_tensors::Shape MakeShapeWithSortedLayout(
-    lazy_tensors::Span<const lazy_tensors::int64> dimensions,
+    c10::ArrayRef<lazy_tensors::int64> dimensions,
     lazy_tensors::PrimitiveType type) {
   // Place bigger dimensions on most minor layout locations.
   std::vector<lazy_tensors::int64> layout =
@@ -131,8 +131,7 @@ lazy_tensors::Shape MakeShapeWithSortedLayout(
 }
 
 lazy_tensors::Shape* SetDynamicDimensions(
-    lazy_tensors::Shape* shape,
-    lazy_tensors::Span<const bool> dynamic_dimensions) {
+    lazy_tensors::Shape* shape, c10::ArrayRef<bool> dynamic_dimensions) {
   if (!dynamic_dimensions.empty()) {
     LTC_CHECK_EQ(dynamic_dimensions.size(), shape->rank());
     for (size_t i = 0; i < dynamic_dimensions.size(); ++i) {
@@ -142,10 +141,9 @@ lazy_tensors::Shape* SetDynamicDimensions(
   return shape;
 }
 
-lazy_tensors::Shape MakeTpuShape(
-    lazy_tensors::Span<const lazy_tensors::int64> dimensions,
-    lazy_tensors::Span<const bool> dynamic_dimensions,
-    lazy_tensors::PrimitiveType type) {
+lazy_tensors::Shape MakeTpuShape(c10::ArrayRef<lazy_tensors::int64> dimensions,
+                                 c10::ArrayRef<bool> dynamic_dimensions,
+                                 lazy_tensors::PrimitiveType type) {
   static double max_padding_factor =
       lazy_tensors::sys_util::GetEnvDouble("LTC_MAX_PADDING_FACTOR", 1.25);
   lazy_tensors::Shape shape;
@@ -163,9 +161,9 @@ lazy_tensors::Shape MakeTpuShape(
 
 lazy_tensors::Shape MakeShapeWithLayout(
     lazy_tensors::PrimitiveType type,
-    lazy_tensors::Span<const lazy_tensors::int64> dimensions,
-    lazy_tensors::Span<const bool> dynamic_dimensions,
-    lazy_tensors::Span<const lazy_tensors::int64> layout) {
+    c10::ArrayRef<lazy_tensors::int64> dimensions,
+    c10::ArrayRef<bool> dynamic_dimensions,
+    c10::ArrayRef<lazy_tensors::int64> layout) {
   lazy_tensors::Shape shape =
       lazy_tensors::ShapeUtil::MakeShapeWithLayout(type, dimensions, layout);
   SetDynamicDimensions(&shape, dynamic_dimensions);
@@ -175,9 +173,8 @@ lazy_tensors::Shape MakeShapeWithLayout(
 }  // namespace
 
 lazy_tensors::Shape MakeTorchTensorLayout(
-    lazy_tensors::Span<const lazy_tensors::int64> dimensions,
-    lazy_tensors::Span<const bool> dynamic_dimensions,
-    lazy_tensors::PrimitiveType type) {
+    c10::ArrayRef<lazy_tensors::int64> dimensions,
+    c10::ArrayRef<bool> dynamic_dimensions, lazy_tensors::PrimitiveType type) {
   lazy_tensors::Shape shape =
       lazy_tensors::ShapeUtil::MakeShapeWithDescendingLayout(type, dimensions);
   SetDynamicDimensions(&shape, dynamic_dimensions);
@@ -185,9 +182,9 @@ lazy_tensors::Shape MakeTorchTensorLayout(
 }
 
 lazy_tensors::Shape MakeArrayShapeFromDimensions(
-    lazy_tensors::Span<const lazy_tensors::int64> dimensions,
-    lazy_tensors::Span<const bool> dynamic_dimensions,
-    lazy_tensors::PrimitiveType type, DeviceType device_type) {
+    c10::ArrayRef<lazy_tensors::int64> dimensions,
+    c10::ArrayRef<bool> dynamic_dimensions, lazy_tensors::PrimitiveType type,
+    DeviceType device_type) {
   auto layout_ptr = LayoutManager::Get()->GetLayout(dimensions);
   if (layout_ptr != nullptr) {
     return MakeShapeWithLayout(type, dimensions, dynamic_dimensions,

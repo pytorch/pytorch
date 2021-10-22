@@ -14,7 +14,6 @@
 #include "lazy_tensors/computation_client/metrics.h"
 #include "lazy_tensors/computation_client/types.h"
 #include "lazy_tensors/literal_util.h"
-#include "lazy_tensors/span.h"
 #include "lazy_tensors/status.h"
 #include "lazy_tensors/types.h"
 
@@ -124,12 +123,12 @@ class ComputationClient {
 
   // Transfers local tensor values to the TPU servers and fetches the handles.
   virtual std::vector<DataPtr> TransferToServer(
-      lazy_tensors::Span<const TensorSource> tensors) = 0;
+      c10::ArrayRef<TensorSource> tensors) = 0;
 
   // Reads the tensor literal values stored at TPU server sites, behind the
   // supplied handles.
   virtual std::vector<Literal> TransferFromServer(
-      lazy_tensors::Span<const DataPtr> handles) = 0;
+      c10::ArrayRef<DataPtr> handles) = 0;
 
   // Compiles a set of computations.
   virtual std::vector<ComputationPtr> Compile(
@@ -140,9 +139,8 @@ class ComputationClient {
   // If options.explode_tuple is true, the output tuple will be decomposed into
   // its single elements.
   virtual std::vector<DataPtr> ExecuteComputation(
-      const Computation& computation,
-      lazy_tensors::Span<const DataPtr> arguments, const std::string& device,
-      const ExecuteComputationOptions& options) = 0;
+      const Computation& computation, c10::ArrayRef<DataPtr> arguments,
+      const std::string& device, const ExecuteComputationOptions& options) = 0;
 
   // Executes the computation in replicated mode.
   // The size of the arguments vector is the number of replicas to execute,
@@ -158,7 +156,7 @@ class ComputationClient {
   virtual std::vector<std::vector<DataPtr>> ExecuteReplicated(
       const Computation& computation,
       const std::vector<std::vector<DataPtr>>& arguments,
-      lazy_tensors::Span<const std::string> devices,
+      c10::ArrayRef<std::string> devices,
       const ExecuteReplicatedOptions& options) = 0;
 
   // Executes the computations in parallel. Each computation must target a
@@ -169,9 +167,9 @@ class ComputationClient {
   // being the return value of computations[i]. If options.explode_tuple is
   // true, the output tuples will be decomposed into their single elements.
   virtual std::vector<std::vector<DataPtr>> ExecuteParallel(
-      lazy_tensors::Span<const Computation* const> computations,
+      c10::ArrayRef<Computation*> computations,
       const std::vector<std::vector<DataPtr>>& arguments,
-      lazy_tensors::Span<const std::string> devices,
+      c10::ArrayRef<std::string> devices,
       const ExecuteParallelOptions& options) = 0;
 
   // Executes a serie of operations, whose results are input of other
@@ -181,11 +179,10 @@ class ComputationClient {
   // every ExecuteChainedOp marked with is_result=true, in the order they appear
   // within the ops post-order.
   virtual std::vector<DataPtr> ExecuteChained(
-      lazy_tensors::Span<const ExecuteChainedOp> ops,
-      const std::string& device) = 0;
+      c10::ArrayRef<ExecuteChainedOp> ops, const std::string& device) = 0;
 
   virtual std::vector<std::vector<DataPtr>> DeconstructTuple(
-      lazy_tensors::Span<const DataPtr> tuples) = 0;
+      c10::ArrayRef<DataPtr> tuples) = 0;
 
   // Returns a unique string which identifies the resource domain of a given
   // device. Within a resource domain, handles to device memory or compiled
@@ -218,7 +215,7 @@ class ComputationClient {
   // device will be returned. Otherwise a vector with the devices content will
   // be returned.
   std::vector<std::string> GetCompilationDevices(
-      const std::string& device, lazy_tensors::Span<const std::string> devices);
+      const std::string& device, c10::ArrayRef<std::string> devices);
 
   // Retrieves the ordinal number out of a device string. This is the number
   // after the last ':' character of the device string.

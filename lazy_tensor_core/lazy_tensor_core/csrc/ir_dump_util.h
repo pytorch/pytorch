@@ -3,7 +3,6 @@
 #include <string>
 
 #include "lazy_tensor_core/csrc/device.h"
-#include "lazy_tensors/span.h"
 #include "torch/csrc/lazy/core/ir.h"
 
 namespace torch_lazy_tensors {
@@ -11,20 +10,20 @@ namespace ir {
 
 class DumpUtil {
  public:
-  static std::string ToDot(lazy_tensors::Span<const torch::lazy::Node* const> nodes);
+  static std::string ToDot(c10::ArrayRef<torch::lazy::Node *> nodes);
 
   static std::string PostOrderToDot(
-      lazy_tensors::Span<const torch::lazy::Node* const> post_order,
-      lazy_tensors::Span<const torch::lazy::Node* const> roots);
+      c10::ArrayRef<torch::lazy::Node *> post_order,
+      c10::ArrayRef<torch::lazy::Node *> roots);
 
-  static std::string ToText(lazy_tensors::Span<const torch::lazy::Node* const> nodes);
+  static std::string ToText(c10::ArrayRef<torch::lazy::Node *> nodes);
 
   static std::string PostOrderToText(
-      lazy_tensors::Span<const torch::lazy::Node* const> post_order,
-      lazy_tensors::Span<const torch::lazy::Node* const> roots);
+      c10::ArrayRef<torch::lazy::Node *> post_order,
+      c10::ArrayRef<torch::lazy::Node *> roots);
 
-  static std::string ToBackend(lazy_tensors::Span<const torch::lazy::Value> values,
-                               const Device& device);
+  static std::string ToBackend(c10::ArrayRef<torch::lazy::Value> values,
+                               const Device &device);
 };
 
 }  // namespace ir

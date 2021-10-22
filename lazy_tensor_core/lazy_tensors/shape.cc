@@ -2,10 +2,12 @@
 #include "lazy_tensor_core/csrc/tensor_util.h"
 namespace lazy_tensors {
 
-Shape::Shape(at::ScalarType element_type,
-             lazy_tensors::Span<const int64> dimensions)
+Shape::Shape(at::ScalarType element_type, c10::ArrayRef<int64> dimensions)
     : element_type_(torch_lazy_tensors::MakeLtcPrimitiveType(
-          element_type, /*device=*/nullptr)),    // TODO(whc) used what was available now, but want to move to using aten dtype not device-specific dtype
+          element_type,
+          /*device=*/nullptr)),  // TODO(whc) used what was available now, but
+                                 // want to move to using aten dtype not
+                                 // device-specific dtype
       dimensions_(dimensions.begin(), dimensions.end()),
       dynamic_dimensions_(dimensions.size(), false) {}
 

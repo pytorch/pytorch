@@ -8,7 +8,6 @@
 
 #include "lazy_tensor_core/csrc/device.h"
 #include "lazy_tensor_core/csrc/tensor.h"
-#include "lazy_tensors/span.h"
 
 namespace torch_lazy_tensors {
 namespace bridge {
@@ -25,8 +24,7 @@ LazyTensor GetLtcTensor(const at::Tensor& tensor);
 void ReplaceLtcTensor(const at::Tensor& tensor, LazyTensor new_ltc_tensor);
 
 // Same as above, applied to a list of tensors.
-std::vector<LazyTensor> GetLtcTensors(
-    lazy_tensors::Span<const at::Tensor> tensors);
+std::vector<LazyTensor> GetLtcTensors(c10::ArrayRef<at::Tensor> tensors);
 
 // If tensor is a lazy tensor type, returns the LazyTensor embedded within it,
 // otherwise creates a new lazy tensor type with tensor as data.
@@ -45,14 +43,13 @@ std::vector<at::Tensor> LtcCreateTensorList(const at::TensorList& tensors);
 std::vector<c10::optional<at::Tensor>> LtcCreateOptTensorList(
     const std::vector<c10::optional<at::Tensor>>& tensors);
 
-void LtcUpdateTensors(lazy_tensors::Span<const at::Tensor> dest_ltc_tensors,
-                      lazy_tensors::Span<const at::Tensor> source_cpu_tensors,
-                      lazy_tensors::Span<const size_t> indices);
+void LtcUpdateTensors(c10::ArrayRef<at::Tensor> dest_ltc_tensors,
+                      c10::ArrayRef<at::Tensor> source_cpu_tensors,
+                      c10::ArrayRef<size_t> indices);
 
-void LtcUpdateTensorsMeta(
-    lazy_tensors::Span<const at::Tensor> dest_ltc_tensors,
-    lazy_tensors::Span<const at::Tensor> source_cpu_tensors,
-    lazy_tensors::Span<const size_t> indices);
+void LtcUpdateTensorsMeta(c10::ArrayRef<at::Tensor> dest_ltc_tensors,
+                          c10::ArrayRef<at::Tensor> source_cpu_tensors,
+                          c10::ArrayRef<size_t> indices);
 
 // Tries to extract the device out of the lazy tensor. Returns nullopt if the
 // input is not a lazy tensor.
@@ -99,7 +96,7 @@ at::Tensor LtcToAtenTensor(LazyTensor ltc_tensor,
 at::Tensor AtenFromLtcTensor(LazyTensor ltc_tensor);
 
 std::vector<at::Tensor> AtenFromLtcTensors(
-    lazy_tensors::Span<const LazyTensor> ltc_tensors);
+    c10::ArrayRef<LazyTensor> ltc_tensors);
 
 // Creates a lazy tensor holding the data in tensor, on the given device.
 at::Tensor CreateLtcTensor(at::Tensor tensor,

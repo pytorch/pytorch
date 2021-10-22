@@ -16,8 +16,8 @@
 namespace torch_lazy_tensors {
 
 std::vector<lazy_tensors::int64> GetCompleteShape(
-    lazy_tensors::Span<const lazy_tensors::int64> output_sizes,
-    lazy_tensors::Span<const lazy_tensors::int64> input_sizes) {
+    c10::ArrayRef<lazy_tensors::int64> output_sizes,
+    c10::ArrayRef<lazy_tensors::int64> input_sizes) {
   c10::optional<size_t> incomplete_dim;
   lazy_tensors::int64 incomplete_element_count = 1;
   for (size_t dim = 0; dim < output_sizes.size(); ++dim) {
@@ -56,7 +56,7 @@ std::vector<lazy_tensors::int64> GetCompleteShape(
 }
 
 std::vector<lazy_tensors::int64> BuildSqueezedDimensions(
-    lazy_tensors::Span<const lazy_tensors::int64> dimensions,
+    c10::ArrayRef<lazy_tensors::int64> dimensions,
     lazy_tensors::int64 squeeze_dim) {
   std::vector<lazy_tensors::int64> output_dimensions;
   for (lazy_tensors::int64 i = 0; i < dimensions.size(); ++i) {
@@ -69,8 +69,7 @@ std::vector<lazy_tensors::int64> BuildSqueezedDimensions(
 }
 
 std::vector<lazy_tensors::int64> BuildUnsqueezeDimensions(
-    lazy_tensors::Span<const lazy_tensors::int64> dimensions,
-    lazy_tensors::int64 dim) {
+    c10::ArrayRef<lazy_tensors::int64> dimensions, lazy_tensors::int64 dim) {
   LTC_CHECK_LE(dim, dimensions.size());
   auto unsqueeze_dimensions =
       lazy_tensors::util::ToVector<lazy_tensors::int64>(dimensions);
@@ -78,9 +77,8 @@ std::vector<lazy_tensors::int64> BuildUnsqueezeDimensions(
   return unsqueeze_dimensions;
 }
 
-size_t ComputeSplitCount(
-    lazy_tensors::int64 dim_size,
-    lazy_tensors::Span<const lazy_tensors::int64> split_sizes) {
+size_t ComputeSplitCount(lazy_tensors::int64 dim_size,
+                         c10::ArrayRef<lazy_tensors::int64> split_sizes) {
   size_t count = 0;
   for (auto size : split_sizes) {
     if (size > dim_size) {

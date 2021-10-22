@@ -11,7 +11,6 @@
 #include "lazy_tensor_core/csrc/debug_util.h"
 #include "lazy_tensor_core/csrc/device.h"
 #include "lazy_tensor_core/csrc/tensor.h"
-#include "lazy_tensors/span.h"
 #include "torch/csrc/lazy/core/ir.h"
 
 #define XLA_CPP_TEST_ENABLED(name)                          \
@@ -59,10 +58,10 @@ static inline void AllEqual(at::Tensor tensor, at::Tensor xla_tensor) {
   EXPECT_TRUE(EqualValues(tensor, xla_tensor));
 }
 
-void ForEachDevice(lazy_tensors::Span<const DeviceType> device_types,
+void ForEachDevice(c10::ArrayRef<DeviceType> device_types,
                    const std::function<void(const Device&)>& devfn);
 
-void ForEachDevice(lazy_tensors::Span<const DeviceType> device_types,
+void ForEachDevice(c10::ArrayRef<DeviceType> device_types,
                    const std::function<void(const torch::Device&)>& devfn);
 
 void ForEachDevice(const std::function<void(const Device&)>& devfn);
@@ -70,7 +69,7 @@ void ForEachDevice(const std::function<void(const Device&)>& devfn);
 void ForEachDevice(const std::function<void(const torch::Device&)>& devfn);
 
 void WithAllDevices(
-    lazy_tensors::Span<const DeviceType> device_types,
+    c10::ArrayRef<DeviceType> device_types,
     const std::function<void(const std::vector<Device>&,
                              const std::vector<Device>&)>& devfn);
 

@@ -38,19 +38,18 @@ NodePtr AsStrided::Clone(OpList operands) const {
   return torch::lazy::MakeNode<AsStrided>(operands.at(0), size_, stride_, storage_offset_);
 }
 
-bool AsStrided::StrideIsSupported(
-    const lazy_tensors::Shape& input_shape,
-    lazy_tensors::Span<const lazy_tensors::int64> size,
-    lazy_tensors::Span<const lazy_tensors::int64> stride,
-    lazy_tensors::int64 storage_offset) {
+bool AsStrided::StrideIsSupported(const lazy_tensors::Shape& input_shape,
+                                  c10::ArrayRef<lazy_tensors::int64> size,
+                                  c10::ArrayRef<lazy_tensors::int64> stride,
+                                  lazy_tensors::int64 storage_offset) {
   std::vector<lazy_tensors::int64> sorted_stride(stride.begin(), stride.end());
   std::sort(sorted_stride.begin(), sorted_stride.end());
   return stride.empty() || sorted_stride.front() == 1;
 }
 
 std::vector<lazy_tensors::int64> AsStrided::GetArrayStridePermutation(
-    lazy_tensors::Span<const lazy_tensors::int64> stride,
-    lazy_tensors::Span<const lazy_tensors::int64> size) {
+    c10::ArrayRef<lazy_tensors::int64> stride,
+    c10::ArrayRef<lazy_tensors::int64> size) {
   std::vector<lazy_tensors::int64> permutation =
       lazy_tensors::util::Iota<lazy_tensors::int64>(stride.size());
   std::sort(permutation.begin(), permutation.end(),

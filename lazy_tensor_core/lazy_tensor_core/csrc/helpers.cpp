@@ -13,8 +13,8 @@
 namespace torch_lazy_tensors {
 
 std::vector<lazy_tensors::int64> Helpers::DropDimensions(
-    lazy_tensors::Span<const lazy_tensors::int64> sizes,
-    lazy_tensors::Span<const lazy_tensors::int64> drop_dims) {
+    c10::ArrayRef<lazy_tensors::int64> sizes,
+    c10::ArrayRef<lazy_tensors::int64> drop_dims) {
   std::vector<lazy_tensors::int64> new_dims;
   size_t drop_index = 0;
   for (size_t i = 0; i < sizes.size(); ++i) {
@@ -42,8 +42,7 @@ lazy_tensors::int64 Helpers::GetCanonicalDimensionIndex(
 }
 
 std::vector<lazy_tensors::int64> Helpers::GetCanonicalDimensionIndices(
-    lazy_tensors::Span<const lazy_tensors::int64> dimensions,
-    lazy_tensors::int64 rank) {
+    c10::ArrayRef<lazy_tensors::int64> dimensions, lazy_tensors::int64 rank) {
   std::vector<lazy_tensors::int64> canonical_dim_indices;
   for (lazy_tensors::int64 dim : dimensions) {
     canonical_dim_indices.push_back(GetCanonicalDimensionIndex(dim, rank));
@@ -52,8 +51,8 @@ std::vector<lazy_tensors::int64> Helpers::GetCanonicalDimensionIndices(
 }
 
 lazy_tensors::int64 Helpers::GetCanonicalPosition(
-    lazy_tensors::Span<const lazy_tensors::int64> dimensions,
-    lazy_tensors::int64 dim, lazy_tensors::int64 pos) {
+    c10::ArrayRef<lazy_tensors::int64> dimensions, lazy_tensors::int64 dim,
+    lazy_tensors::int64 pos) {
   dim = GetCanonicalDimensionIndex(dim, dimensions.size());
   if (pos < 0) {
     pos = GetCanonicalDimensionIndex(pos, dimensions[dim]);
@@ -131,7 +130,7 @@ Helpers::MinMax Helpers::MinMaxValues(lazy_tensors::PrimitiveType type) {
 
 c10::optional<Helpers::DynamicReshapeInfo> Helpers::GetDynamicReshapeInfo(
     const lazy_tensors::Shape& input_shape,
-    lazy_tensors::Span<const lazy_tensors::int64> output_sizes) {
+    c10::ArrayRef<lazy_tensors::int64> output_sizes) {
   lazy_tensors::int64 input_dynamic_dimension =
       GetDynamicDimension(input_shape);
   if (input_dynamic_dimension < 0) {
@@ -169,7 +168,7 @@ c10::optional<Helpers::DynamicReshapeInfo> Helpers::GetDynamicReshapeInfo(
 
 lazy_tensors::Shape Helpers::GetDynamicReshape(
     const lazy_tensors::Shape& input_shape,
-    lazy_tensors::Span<const lazy_tensors::int64> output_sizes) {
+    c10::ArrayRef<lazy_tensors::int64> output_sizes) {
   auto info = GetDynamicReshapeInfo(input_shape, output_sizes);
   if (info) {
     return info->output_shape;
@@ -241,8 +240,8 @@ lazy_tensors::PrimitiveType Helpers::PromoteType(
 }
 
 std::vector<lazy_tensors::int64> Helpers::GetPromotedShape(
-    lazy_tensors::Span<const lazy_tensors::int64> shape1_dims,
-    lazy_tensors::Span<const lazy_tensors::int64> shape2_dims) {
+    c10::ArrayRef<lazy_tensors::int64> shape1_dims,
+    c10::ArrayRef<lazy_tensors::int64> shape2_dims) {
   std::vector<lazy_tensors::int64> dimensions;
   // If the rank of a shape is bigger than then other, fill up the first
   // dimensions with the ones of the bigger.

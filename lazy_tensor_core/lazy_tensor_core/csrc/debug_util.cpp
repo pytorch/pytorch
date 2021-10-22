@@ -51,10 +51,10 @@ DebugUtil::GraphFormat DebugUtil::GetDefaultGraphFormat() {
   return format;
 }
 
-std::string DebugUtil::GetTensorsGraphInfo(
-    lazy_tensors::Span<const LazyTensor> tensors,
-    const std::vector<size_t>* indices, GraphFormat format) {
-  std::vector<const torch::lazy::Node*> root_nodes;
+std::string DebugUtil::GetTensorsGraphInfo(c10::ArrayRef<LazyTensor> tensors,
+                                           const std::vector<size_t>* indices,
+                                           GraphFormat format) {
+  std::vector<torch::lazy::Node*> root_nodes;
   std::vector<torch::lazy::Value> root_values;
   std::vector<torch::lazy::hash_t> root_hashes;
   lazy_tensors::util::Unique<Device> unique_device;
@@ -111,9 +111,10 @@ std::string DebugUtil::GetTensorsGraphInfo(
   return ss.str();
 }
 
-void DebugUtil::SaveTensorsGraphInfo(
-    const char* name, lazy_tensors::Span<const LazyTensor> tensors,
-    const std::vector<size_t>* indices, GraphFormat format) {
+void DebugUtil::SaveTensorsGraphInfo(const char* name,
+                                     c10::ArrayRef<LazyTensor> tensors,
+                                     const std::vector<size_t>* indices,
+                                     GraphFormat format) {
   static const std::string save_file =
       lazy_tensors::sys_util::GetEnvOrdinalPath("LTC_SAVE_TENSORS_FILE", "");
   if (!save_file.empty()) {

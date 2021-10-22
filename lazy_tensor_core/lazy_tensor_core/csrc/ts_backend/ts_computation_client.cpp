@@ -39,7 +39,7 @@ std::vector<ComputationClient::ComputationPtr> TSComputationClient::Compile(
 }
 
 std::vector<ComputationClient::DataPtr> TSComputationClient::ExecuteComputation(
-    const Computation& computation, lazy_tensors::Span<const DataPtr> arguments,
+    const Computation& computation, c10::ArrayRef<DataPtr> arguments,
     const std::string& device, const ExecuteComputationOptions& options) {
   torch::jit::GraphExecutor& graph_executor =
       static_cast<

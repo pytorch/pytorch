@@ -1,7 +1,6 @@
 #pragma once
 
 #include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
-#include "lazy_tensors/span.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -19,7 +18,7 @@ class Permute : public TsNode {
 
   static lazy_tensors::Shape MakePermuteShape(
       const lazy_tensors::Shape& source_shape,
-      lazy_tensors::Span<const lazy_tensors::int64> permutation);
+      c10::ArrayRef<lazy_tensors::int64> permutation);
 
  private:
   // The permutation of dimensions.

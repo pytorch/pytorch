@@ -9,8 +9,8 @@ namespace ir {
 namespace ops {
 namespace {
 
-lazy_tensors::Shape NodeOutputShape(
-    const torch::lazy::Value& input, lazy_tensors::Span<const lazy_tensors::int64> size) {
+lazy_tensors::Shape NodeOutputShape(const torch::lazy::Value& input,
+                                    c10::ArrayRef<lazy_tensors::int64> size) {
   return lazy_tensors::ShapeUtil::MakeShape(ir::GetShapeFromTsValue(input).element_type(), size);
 }
 

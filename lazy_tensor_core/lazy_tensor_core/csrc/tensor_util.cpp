@@ -351,8 +351,7 @@ std::vector<lazy_tensors::int64> GetIterationDimensions(
 }
 
 struct CopyPartition {
-  explicit CopyPartition(
-      lazy_tensors::Span<const lazy_tensors::int64> dimensions)
+  explicit CopyPartition(c10::ArrayRef<lazy_tensors::int64> dimensions)
       : base(dimensions.size()), limit(dimensions.begin(), dimensions.end()) {}
 
   std::vector<lazy_tensors::int64> base;
@@ -360,7 +359,7 @@ struct CopyPartition {
 };
 
 std::vector<CopyPartition> CreateCopyPartitions(
-    lazy_tensors::Span<const lazy_tensors::int64> dimensions,
+    c10::ArrayRef<lazy_tensors::int64> dimensions,
     lazy_tensors::int64 strided_copy_dimension) {
   // The minimum number of elements copy that can be assigned to a thread.
   static const lazy_tensors::int64 kMinThreadElements = 100000;
@@ -399,12 +398,12 @@ std::vector<CopyPartition> CreateCopyPartitions(
 }
 
 template <typename SType, typename DType>
-void SlicedCopy(lazy_tensors::Span<const lazy_tensors::int64> dimensions,
+void SlicedCopy(c10::ArrayRef<lazy_tensors::int64> dimensions,
                 const SType* src_data,
-                lazy_tensors::Span<const lazy_tensors::int64> src_strides,
+                c10::ArrayRef<lazy_tensors::int64> src_strides,
                 DType* dest_data,
-                lazy_tensors::Span<const lazy_tensors::int64> dest_strides,
-                lazy_tensors::Span<const lazy_tensors::int64> iter_dims,
+                c10::ArrayRef<lazy_tensors::int64> dest_strides,
+                c10::ArrayRef<lazy_tensors::int64> iter_dims,
                 const CopyPartition& part) {
   std::vector<lazy_tensors::int64> indices(part.base);
   lazy_tensors::int64 inner_src_stride = src_strides[iter_dims.front()];
@@ -583,7 +582,7 @@ at::Tensor LiteralToTensor(const lazy_tensors::Literal& literal,
   lazy_tensors::int64 total_elements =
       lazy_tensors::ShapeUtil::ElementsIn(torch_shape);
 
-  const auto literal_data = literal.data<SType>();
+  auto literal_data = literal.data<SType>();
   at::Tensor tensor = at::empty(dimensions, at::TensorOptions(atype));
   CopyTensors<SType, DType>(literal_data.data(), literal.shape(),
                             tensor.data_ptr<DType>(),
@@ -698,7 +697,7 @@ std::vector<lazy_tensors::int64> ComputeShapeStrides(
 }
 
 std::vector<lazy_tensors::int64> ComputeArrayStrides(
-    lazy_tensors::Span<const lazy_tensors::int64> sizes) {
+    c10::ArrayRef<lazy_tensors::int64> sizes) {
   std::vector<lazy_tensors::int64> strides(sizes.size(), 1);
   for (lazy_tensors::int64 i = sizes.size(); i > 1; --i) {
     strides[i - 2] = strides[i - 1] * sizes[i - 1];
@@ -810,8 +809,7 @@ lazy_tensors::Literal GetTensorLiteral(const at::Tensor& tensor,
 }
 
 std::vector<at::Tensor> DataHandlesToTensors(
-    lazy_tensors::Span<const lazy_tensors::ComputationClient::DataPtr>
-        data_handles,
+    c10::ArrayRef<lazy_tensors::ComputationClient::DataPtr> data_handles,
     at::ScalarType dest_element_type) {
   std::vector<at::Tensor> tensors;
   for (const auto& handle : data_handles) {

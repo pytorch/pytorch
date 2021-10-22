@@ -81,8 +81,7 @@ void ReplaceLtcTensor(const at::Tensor& tensor, LazyTensor new_ltc_tensor) {
   impl->set_tensor(std::move(new_ltc_tensor));
 }
 
-std::vector<LazyTensor> GetLtcTensors(
-    lazy_tensors::Span<const at::Tensor> tensors) {
+std::vector<LazyTensor> GetLtcTensors(c10::ArrayRef<at::Tensor> tensors) {
   std::vector<LazyTensor> ltc_tensors;
   ltc_tensors.reserve(tensors.size());
   for (const auto& tensor : tensors) {
@@ -166,9 +165,9 @@ std::vector<c10::optional<at::Tensor>> LtcCreateOptTensorList(
   return opt_aten_ltc_tensors;
 }
 
-void LtcUpdateTensors(lazy_tensors::Span<const at::Tensor> dest_ltc_tensors,
-                      lazy_tensors::Span<const at::Tensor> source_cpu_tensors,
-                      lazy_tensors::Span<const size_t> indices) {
+void LtcUpdateTensors(c10::ArrayRef<at::Tensor> dest_ltc_tensors,
+                      c10::ArrayRef<at::Tensor> source_cpu_tensors,
+                      c10::ArrayRef<size_t> indices) {
   for (auto index : indices) {
     at::Tensor dest = dest_ltc_tensors.at(index);
     at::Tensor source = source_cpu_tensors.at(index);
@@ -187,10 +186,9 @@ void LtcUpdateTensors(lazy_tensors::Span<const at::Tensor> dest_ltc_tensors,
   }
 }
 
-void LtcUpdateTensorsMeta(
-    lazy_tensors::Span<const at::Tensor> dest_ltc_tensors,
-    lazy_tensors::Span<const at::Tensor> source_cpu_tensors,
-    lazy_tensors::Span<const size_t> indices) {
+void LtcUpdateTensorsMeta(c10::ArrayRef<at::Tensor> dest_ltc_tensors,
+                          c10::ArrayRef<at::Tensor> source_cpu_tensors,
+                          c10::ArrayRef<size_t> indices) {
   for (auto index : indices) {
     at::Tensor dest = dest_ltc_tensors.at(index);
     at::Tensor source = source_cpu_tensors.at(index);
@@ -310,7 +308,7 @@ at::Tensor AtenFromLtcTensor(LazyTensor ltc_tensor) {
 }
 
 std::vector<at::Tensor> AtenFromLtcTensors(
-    lazy_tensors::Span<const LazyTensor> ltc_tensors) {
+    c10::ArrayRef<LazyTensor> ltc_tensors) {
   std::vector<at::Tensor> tensors;
   tensors.reserve(ltc_tensors.size());
   for (auto& tensor : ltc_tensors) {

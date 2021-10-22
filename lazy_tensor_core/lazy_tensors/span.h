@@ -205,7 +205,7 @@ constexpr Span<T> MakeSpan(T (&array)[N]) noexcept {
 //
 // Examples:
 //
-//   void ProcessInts(lazy_tensors::Span<const int> some_ints);
+//   void ProcessInts(c10::ArrayRef<int> some_ints);
 //
 //   // Call with a pointer and size.
 //   int array[3] = { 0, 0, 0 };

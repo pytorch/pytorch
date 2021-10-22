@@ -176,8 +176,7 @@ class LazyTensor {
                                        const Device& device);
   static torch::lazy::Value GetIrValueForScalar(
       const at::Scalar& value, lazy_tensors::PrimitiveType type,
-      lazy_tensors::Span<const lazy_tensors::int64> dimensions,
-      const Device& device);
+      c10::ArrayRef<lazy_tensors::int64> dimensions, const Device& device);
   static torch::lazy::Value GetIrValueForScalar(const at::Scalar& value,
                                        const lazy_tensors::Shape& shape,
                                        const Device& device);
