@@ -834,13 +834,6 @@ at::Tensor LazyNativeFunctions::view(const at::Tensor& self,
       lazy_tensor_aten_ops::view(self_tensor, Helpers::I64List(size)));
 }
 
-at::Tensor& LazyNativeFunctions::zero_(at::Tensor& self) {
-  LTC_FN_COUNTER("lazy::");
-  auto selfTensor = bridge::GetLtcTensor(self);
-  lazy_tensor_aten_ops::zero_(selfTensor);
-  return self;
-}
-
 void InitializeAtenBindings() {}
 
 }  // namespace torch_lazy_tensors

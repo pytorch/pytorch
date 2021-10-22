@@ -161,6 +161,14 @@ std::vector<c10::ScalarType> compute_dtype_sum(
   ;
 }
 
+std::vector<std::vector<int64_t>> compute_shape_zero_(at::Tensor& self) {
+  return {self.sizes().vec()};
+}
+
+std::vector<c10::ScalarType> compute_dtype_zero_(at::Tensor& self) {
+  return {self.scalar_type()};
+}
+
 std::vector<std::vector<int64_t>> compute_shape_trace(const at::Tensor& self) {
   return {{}};
 }

@@ -1,6 +1,6 @@
 from typing import List, Union
 from dataclasses import dataclass
-from tools.codegen.context import method_with_native_function
+from tools.codegen.context import method_with_native_function, with_native_function_and_index
 from tools.codegen.model import (BackendIndex, NativeFunction,
                                  NativeFunctionsGroup)
 from tools.codegen.api.types import (BaseCType, OptionalCType, NamedCType,
@@ -183,10 +183,15 @@ def gen_lazy_nativefunc_definition(func: NativeFunction, backend_index: BackendI
         lazy_tensors.push_back(lazy_{first_tensor.name}.CreateFrom(torch::lazy::Value(node, i), out_dtype[i]));
     }}
     auto result = bridge::TupleAtenFromLtcTensors<{returns_length}>(lazy_tensors);"""
+    # TODO(alanwaketan): What if the operator has both the tuple output and inplace variant.
+    if schema.name.name.inplace:
+        bridge_str = f"""lazy_{first_tensor.name}.SetInPlaceIrValue(node);
+    auto& result = {first_tensor.name};"""
+
 
     return [f"""\
 // TODO(alanwaketan): Quite a lot inefficient copy-by-value there. Let's optimize it.
-{sig.decl(name=f"{class_method_name}::{schema.aten_name}")} {{
+{sig_decl(func, backend_index).format(f"{class_method_name}::{schema.aten_name}")} {{
     LTC_FN_COUNTER("lazy::");
     {get_device_str}
     {lazy_tensor_decls_str}
@@ -197,7 +202,11 @@ def gen_lazy_nativefunc_definition(func: NativeFunction, backend_index: BackendI
 }};\n
 """]
 
+@with_native_function_and_index
+def sig_decl(func: NativeFunction, backend_index: BackendIndex) -> str:
+    return kernel_signature(func, backend_index).decl("{}")
 
+@with_native_function_and_index
 def gen_lazy_shape_dtype_decl(f: NativeFunction, backend_index: BackendIndex) -> List[str]:
     sig = kernel_signature(f, backend_index)
 
