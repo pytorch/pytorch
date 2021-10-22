@@ -807,6 +807,7 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
         qconfig_dict=None,
         skip_scripting=False,
         prepare_fn=prepare_fx,
+        is_reference=False,
     ):
         if qconfig_dict is None:
             qconfig_dict = {'': torch.ao.quantization.default_qconfig}
@@ -817,7 +818,7 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
         mp = prepare_fn(copy.deepcopy(m), qconfig_dict)
         mp(*data)
         mp_copy = copy.deepcopy(mp)
-        mq = convert_fx(mp_copy)
+        mq = convert_fx(mp_copy, is_reference=is_reference)
 
         m_ns, mp_ns2 = add_loggers(
             'a', m, 'b', copy.deepcopy(mp), OutputLogger,
@@ -2055,7 +2056,8 @@ class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
         self._test_match_activations(
             sparse_nn, (idx, offsets, x),
             results_len=5,
-            qconfig_dict=qconfig_dict)
+            qconfig_dict=qconfig_dict,
+            is_reference=True)
 
     @skip_if_no_torchvision
     @skipIfNoFBGEMM
