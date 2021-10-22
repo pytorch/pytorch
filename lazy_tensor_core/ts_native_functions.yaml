@@ -13,7 +13,6 @@ full_codegen:
   - bmm
   - cos
   - clamp
-  - dropout
   - gelu
   - gelu_backward
   - log2
