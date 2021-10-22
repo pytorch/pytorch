@@ -1231,16 +1231,15 @@ def main() -> None:
         'registration_declarations': [compute_registration_declarations(f, backend_indices) for f in native_functions],
     })
 
-    # We need to easily map from [inplace_op_name] -> [functional_op_name] for the functionalization pass.
+    # We need to easily map from [inplace_op_name] -> [functional_op] for the functionalization pass,
+    # so here I generate a mapping from every operator name to its corresponding functional NativeFunction (if it exist).
     pre_grouped_d: Dict[FunctionSchema, Dict[SchemaKind, NativeFunction]] = pre_group_native_functions(native_functions)
-
     to_functional_op: Dict[OperatorName, Optional[NativeFunction]] = {
         k: v for d in [
             {f.func.name: pre_grouped_d[func][SchemaKind.functional]
                 if SchemaKind.functional in pre_grouped_d[func].keys() else None
                 for f in pre_grouped_d[func].values()}
             for func in pre_grouped_d.keys()]
-        # k: v for d in [foo(func) for func in pre_grouped_d.keys()]
         for k, v in d.items()
     }
 

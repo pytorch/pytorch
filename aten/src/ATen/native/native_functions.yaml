@@ -2737,6 +2737,7 @@
 - func: matrix_exp(Tensor self) -> Tensor
   variants: function, method
 
+# This function should be deprecated in favor of differential_analytic_matrix_function in FunctionsManual.cpp
 - func: matrix_exp_backward(Tensor self, Tensor grad) -> Tensor
 
 # DEPRECATED: Use torch.aminmax instead
@@ -6690,9 +6691,6 @@
 - func: nonzero_numpy(Tensor self) -> Tensor[]
   variants: method, function
 
-- func: argwhere(Tensor self) -> Tensor
-  variants: method, function
-
 - func: gather.out(Tensor self, int dim, Tensor index, *, bool sparse_grad=False, Tensor(a!) out) -> Tensor(a!)
   structured: True
   dispatch:
@@ -7128,6 +7126,18 @@
   variants: method, function
   dispatch:
     CPU: histogram_cpu
+
+- func: _histogramdd_bin_edges(Tensor self, int[] bins, *, float[]? range=None, Tensor? weight=None, bool density=False) -> Tensor[]
+  dispatch:
+    CPU: histogramdd_bin_edges_cpu
+
+- func: _histogramdd_from_bin_cts(Tensor self, int[] bins, *, float[]? range=None, Tensor? weight=None, bool density=False) -> Tensor
+  dispatch:
+    CPU: histogramdd_cpu
+
+- func: _histogramdd_from_bin_tensors(Tensor self, Tensor[] bins, *, Tensor? weight=None, bool density=False) -> Tensor
+  dispatch:
+    CPU: histogramdd_cpu
 
 - func: fmod.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator

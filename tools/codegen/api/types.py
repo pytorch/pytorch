@@ -533,7 +533,7 @@ class ViewInverseSignature:
     def decl(self) -> str:
         return_type = functionalization.returns_type(self.f.func)
         decls = [a.decl() for a in functionalization.inner_arguments(self.f.func, is_reverse=True)]
-        return f"{return_type.cpp_type()} {self.name()}({', '.join(decls)});"
+        return f"static {return_type.cpp_type()} {self.name()}({', '.join(decls)});"
 
     @staticmethod
     def from_func(f: NativeFunction) -> 'ViewInverseSignature':

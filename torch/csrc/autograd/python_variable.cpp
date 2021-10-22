@@ -369,9 +369,9 @@ static PyObject* THPVariable_make_wrapper_subclass(PyObject*, PyObject* args, Py
   // NB: pin_memory doesn't actually do anything
   // TODO: strides variant?
   static PythonArgParser parser({
-    "_make_wrapper_subclass(PyObject* cls, IntArrayRef size, *, IntArrayRef? strides=None, MemoryFormat? memory_format=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
+    "_make_wrapper_subclass(PyObject* cls, IntArrayRef size, *, IntArrayRef? strides=None, int64_t? storage_offset=None, MemoryFormat? memory_format=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
   });
-  ParsedArgs<9> parsed_args{};
+  ParsedArgs<10> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
   PyObject* cls = r.pyobject(0);
 
@@ -385,13 +385,13 @@ static PyObject* THPVariable_make_wrapper_subclass(PyObject*, PyObject* args, Py
     ((PyTypeObject*)cls)->tp_name, " must define __torch_dispatch__");
 
   const auto options = TensorOptions()
-    .dtype(r.scalartype(4))
-    .device(r.device(6))
-    .layout(r.layoutOptional(5))
+    .dtype(r.scalartype(5))
+    .device(r.device(7))
+    .layout(r.layoutOptional(6))
     // NB: long standing issue, requires_grad is not respected here; you
     // have to set it post facto, see https://github.com/pytorch/pytorch/issues/26428
     // .requires_grad(r.toBool(7))
-    .pinned_memory(r.toBool(7));
+    .pinned_memory(r.toBool(8));
 
   // don't bother releasing GIL here, as we are not allocating any nontrivial
   // data
@@ -400,11 +400,12 @@ static PyObject* THPVariable_make_wrapper_subclass(PyObject*, PyObject* args, Py
   auto data = at::for_blob(nullptr, r.intlist(1))
         // TODO: make strides argument optional. I vaguely remember optional<IntArrayRef> being problematic, need to test.
         .strides(r.intlistOptional(2))
+        .storage_offset(r.toInt64Optional(3))
         .context(nullptr, [](void *ctx) {})
         .target_device(options.device())  // TODO: this shouldn't be necessary if it came from options
         .options(options)
         .make_tensor();
-  data.set_requires_grad(r.toBool(8));
+  data.set_requires_grad(r.toBool(9));
 
   return THPVariable_NewWithVar(
       (PyTypeObject*)cls,

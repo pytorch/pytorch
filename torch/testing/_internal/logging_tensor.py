@@ -9,7 +9,7 @@ import itertools
 # TODO: move this into library proper
 @contextlib.contextmanager
 def no_dispatch() -> Iterator[None]:
-    guard = torch._C._DisableTorchDispatch()
+    guard = torch._C._DisableTorchDispatch()  # type: ignore
     try:
         yield
     finally:
@@ -33,9 +33,10 @@ class LoggingTensor(torch.Tensor):
         # The wrapping tensor (LoggingTensor) shouldn't hold any
         # memory for the class in question, but it should still
         # advertise the same device as before
-        r = torch.Tensor._make_wrapper_subclass(
-            cls, elem.size(), elem.stride(),
-            # TODO: clone strides and storage aliasing
+        r = torch.Tensor._make_wrapper_subclass(  # type: ignore
+            cls, elem.size(),
+            strides=elem.stride(), storage_offset=elem.storage_offset(),
+            # TODO: clone storage aliasing
             dtype=elem.dtype, layout=elem.layout,
             device=elem.device, requires_grad=elem.requires_grad
         )
@@ -75,9 +76,9 @@ class LoggingTensorHandler(logging.Handler):
     # autograd
     def _shortid(self, o: object) -> int:
         if not hasattr(o, '_shortid'):
-            o._shortid = self.next_shortid
+            o._shortid = self.next_shortid  # type: ignore
             self.next_shortid += 1
-        return o._shortid
+        return o._shortid  # type: ignore
 
     def _fmt(self, a: object) -> str:
         return f'${self._shortid(a)}' if isinstance(a, LoggingTensor) else repr(a)
@@ -97,7 +98,7 @@ def log_input(name: str, var: object):
 @contextlib.contextmanager
 def capture_logs() -> Iterator[List[str]]:
     logger = logging.getLogger("LoggingTensor")
-    log_list = []
+    log_list: List[str] = []
     handler = LoggingTensorHandler(log_list)
     logger.addHandler(handler)
     logger.setLevel(logging.INFO)
