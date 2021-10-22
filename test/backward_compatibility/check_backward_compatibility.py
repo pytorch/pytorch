@@ -60,6 +60,10 @@ ALLOW_LIST = [
     ("aten::_fused_moving_avg_obs_fq_helper", datetime.date(2021, 10, 21)),
     ("aten::_baddbmm_mkl_", datetime.date(2021, 10, 31)),
     ("aten::grid_sampler_2d_backward", datetime.date(2021, 10, 21)),
+    ("prim::TensorExprDynamicGuard", datetime.date(2021, 11, 20)),
+    ("caffe2::", datetime.date(2021, 10, 23)),
+    ("q::_FloatToBfloat16Quantized", datetime.date(2021, 12, 21)),
+    ("q::_Bfloat16QuantizedToFloat", datetime.date(2021, 12, 21)),
 ]
 
 ALLOW_LIST_COMPILED = [
@@ -85,7 +89,7 @@ def allow_listed(schema):
 dont_parse_list = [
     ("_TorchScriptTesting.*", datetime.date(2099, 9, 17)),
     ("test_backend", datetime.date(2099, 9, 17)),
-    ("dist_c10d", datetime.date(2021, 1, 30)),
+    ("dist_c10d", datetime.date(2099, 9, 17)),
 ]
 
 
