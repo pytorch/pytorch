@@ -127,7 +127,7 @@ OperatorBase::OperatorBase(
       input_size_(compute_input_size_(newstyle_inputs_)) {
   input_tensors_.resize(input_size_);
 
-  output_tensors_.reserve(outputs.size());
+  output_tensors_.reserve(outputs_.size());
   for (auto i : c10::irange(outputs.size())) {
     output_tensors_.emplace_back(outputs.extract(i));
   }
