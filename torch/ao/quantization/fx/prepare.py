@@ -153,6 +153,9 @@ def is_output_dtype_supported_by_backend(
     node_name_to_target_dtype: Dict[str, Any],
     pattern_config: Dict[str, torch.dtype],
 ):
+    """ Check if the configured qconfig for the output
+    is supported by the backend or not
+    """
     output_dtype = pattern_config.get("output_dtype", None)
     return output_dtype is None or output_dtype == node_name_to_target_dtype[node.name]
 
@@ -161,8 +164,9 @@ def is_pattern_dtype_config_supported_by_backend(
     pattern: Optional[Pattern],
     matched_nodes: List[Node],
     node_name_to_target_dtype: Dict[str, Any],
-    backend_config_dict: Optional[Dict[str, Any]]):
-    """ Check is the dtype configuration of a pattern can be supported by
+    backend_config_dict: Optional[Dict[str, Any]]
+):
+    """ Check is the dtype configuration of a pattern is supported by
     the backend or not
     """
     if backend_config_dict is None or pattern is None:
@@ -1308,6 +1312,9 @@ def prepare(
     run_prepare_fx_on_standalone_modules(
         model, modules, matches, prepare_custom_config_dict)
 
+    # record names for the set of observed node, so that in convert step
+    # we know whether we need to convert a floating point module to reference
+    # quantized module or not
     observed_node_names: Set[str] = set()
 
     result_node = insert_observers_for_model(

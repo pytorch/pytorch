@@ -1,4 +1,4 @@
-from typing import Any, Dict, Tuple, List
+from typing import Any, Dict, List
 import torch
 from torch.fx import (
     GraphModule,
@@ -14,16 +14,11 @@ from ..utils import (
     get_qparam_dict,
 )
 
-from .quantization_types import Pattern
 from .match_utils import (
     find_matches,
 )
 from .graph_module import (
-    is_observed_module,
     QuantizedGraphModule,
-)
-from .quantization_patterns import (
-    QuantizeHandler,
 )
 from ._equalize import update_obs_for_equalization, convert_eq_obs
 from .utils import (
@@ -45,7 +40,18 @@ def _convert_do_not_use(
         convert_custom_config_dict: Dict[str, Any] = None,
         is_standalone_module: bool = False,
         _remove_qconfig_flag: bool = True) -> QuantizedGraphModule:
-    """ standalone_module means it a submodule that is not inlined in
+    """
+    We will convert an observed model (a module with observer calls) to a reference
+    quantized model, the rule is simple:
+    1. for each observer module call in the graph, we'll convert it to calls to
+       quantize and dequantize functions based on the observer instance
+    2. for weighted operations like linear/conv, we need to convert them to reference
+       quantized module, this requires us to know whether the dtype configured for the
+       weight is supported in the backend, this is done in prepare step and the result
+       is stored in observed_node_names, we can decide whether we need to swap the
+       module based on this set
+
+    standalone_module means it a submodule that is not inlined in
     parent module, and will be quantized separately as one unit.
 
     Returns a quantized standalone module, whether input/output is quantized is
