@@ -928,7 +928,6 @@ class Type:
 
     @staticmethod
     def _parse(t: str) -> 'Type':
-        print(t)
         m = re.match(r'^(.+)\?$', t)
         if m is not None:
             return OptionalType(Type.parse(m.group(1)))
