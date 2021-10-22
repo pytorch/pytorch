@@ -784,6 +784,7 @@ filegroup(
         "caffe2/core/init_intrinsics_check.cc",
         "caffe2/core/init_omp.cc",
         "caffe2/core/int8_serialization.cc",
+        "caffe2/core/IValueInterface.cc",
         "caffe2/core/memonger.cc",
         "caffe2/core/module.cc",
         "caffe2/core/net.cc",

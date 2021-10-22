@@ -174,5 +174,6 @@ INSTANTIATE_TO_VEC(int16_t);
 INSTANTIATE_TO_VEC(float);
 INSTANTIATE_TO_VEC(double);
 INSTANTIATE_TO_VEC(bool);
+INSTANTIATE_TO_VEC(std::string);
 
 }}  // namespace caffe2::detail
