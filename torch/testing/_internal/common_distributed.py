@@ -383,7 +383,7 @@ def init_multigpu_helper(world_size: int, backend: str):
         # Without this setting NCCL might throw unhandled error.
         os.environ["NCCL_MAX_NRINGS"] = "1"
 
-    # If rank is lesser than or equal to number of available GPU's
+    # If rank is less than or equal to number of available GPU's
     # then each rank can be mapped to corresponding GPU.
     nGPUs_per_process = 1
     if world_size > nGPUs:
