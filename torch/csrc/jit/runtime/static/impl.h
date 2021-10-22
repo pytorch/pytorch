@@ -3,6 +3,7 @@
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
 #include <c10/core/CPUAllocator.h>
+#include <c10/util/ArrayRef.h>
 #include <c10/util/variant.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -174,7 +175,7 @@ class TORCH_API StaticModule {
   // This interface only works if StaticModule was initialized
   // with a TorchScript module, otherwise use the above interface
   c10::IValue operator()(
-      const std::vector<c10::IValue>& args,
+      c10::ArrayRef<c10::IValue> args,
       const std::unordered_map<std::string, c10::IValue>& kwargs);
 
   const Graph& graph() const {
@@ -275,15 +276,15 @@ class TORCH_API StaticRuntime {
   // This interface only works if StaticModule was initialized
   // with a TorchScript module, otherwise use the above interface
   c10::IValue operator()(
-      const std::vector<c10::IValue>& args,
+      c10::ArrayRef<c10::IValue> args,
       const std::unordered_map<std::string, c10::IValue>& kwargs);
 
   void display_nodes(
-      const std::vector<c10::IValue>& args,
+      c10::ArrayRef<c10::IValue> args,
       const std::unordered_map<std::string, c10::IValue>& kwargs);
 
   void benchmark(
-      const std::vector<c10::IValue>& args,
+      c10::ArrayRef<c10::IValue> args,
       const std::unordered_map<std::string, c10::IValue>& kwargs,
       const int warmup_runs,
       const int main_runs,
@@ -291,7 +292,7 @@ class TORCH_API StaticRuntime {
       bool generate_ai_pep_output = false);
 
   float benchmark_model(
-      const std::vector<c10::IValue>& args,
+      c10::ArrayRef<c10::IValue> args,
       const std::unordered_map<std::string, c10::IValue>& kwargs,
       const int warmup_runs,
       const int main_runs);
@@ -314,7 +315,7 @@ class TORCH_API StaticRuntime {
   };
 
   IndividualMetrics benchmark_individual_ops(
-      const std::vector<c10::IValue>& args,
+      c10::ArrayRef<c10::IValue> args,
       const std::unordered_map<std::string, c10::IValue>& kwargs,
       const int warmup_runs,
       const int main_runs);
@@ -364,7 +365,7 @@ class TORCH_API StaticRuntime {
  private:
   // helper method for copying input args/kwargs into inputs_
   void set_inputs(
-      const std::vector<c10::IValue>& args,
+      c10::ArrayRef<c10::IValue> args,
       const std::unordered_map<std::string, c10::IValue>& kwargs);
 
   // clean up owning refs of input IValues
@@ -415,6 +416,7 @@ class TORCH_API ProcessedNode {
     }
     node_ = rhs.node_;
     fn_ = rhs.fn_;
+
     if (!inputs_ || inputs_size_ != rhs.inputs_size_) {
       inputs_ = std::make_unique<const IValue*[]>(rhs.inputs_size_);
       inputs_size_ = rhs.inputs_size_;
@@ -472,11 +474,11 @@ class TORCH_API ProcessedNode {
   std::vector<IValue> clone_inputs() const;
 
   bool has_out_variant() const {
-    return fn_.index() == 0;
+    return fn_.kind == FunctionKind::kOutVariant;
   }
 
   bool has_native() const {
-    return fn_.index() == 1;
+    return fn_.kind == FunctionKind::kNativeFunction;
   }
 
   bool verify_no_memory_overlap() const;
@@ -486,12 +488,17 @@ class TORCH_API ProcessedNode {
   }
 
  private:
-  void run_impl();
-
   Node* node_;
-  using OutVariant = std::function<void(ProcessedNode*)>;
-  using NativeFunction = std::function<void(ProcessedNode*)>;
-  c10::variant<OutVariant, NativeFunction, Operation> fn_;
+  enum class FunctionKind {
+    kOutVariant,
+    kNativeFunction,
+    kInterpreterFallback,
+  };
+  struct Function {
+    std::function<void(ProcessedNode*)> f;
+    FunctionKind kind = FunctionKind::kOutVariant;
+  };
+  Function fn_;
   std::unique_ptr<const IValue*[]> inputs_; // unowned
   std::unique_ptr<IValue[]> outputs_;
   size_t inputs_size_;
