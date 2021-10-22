@@ -1862,7 +1862,7 @@ def full(g, sizes, value, dtype, layout, device, pin_memory=False):
         if isinstance(sizes_, list) and len(sizes_) == 0:
             sizes = g.op("Constant", value_t=torch.tensor([]).to(torch.int64))
         return g.op("ConstantOfShape", sizes,
-                    value_t=torch.tensor([const_value], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
+                    value_t=const_value.view(1).to(sym_help.scalar_type_to_pytorch_type[dtype]))
 
 
 def full_like(g, input, fill_value, dtype=None, layout=None, device=None, pin_memory=False, memory_format=None):
@@ -1876,7 +1876,7 @@ def full_like(g, input, fill_value, dtype=None, layout=None, device=None, pin_me
     else:
         shape = g.op("Shape", input)
         return g.op("ConstantOfShape", shape,
-                    value_t=torch.tensor([fill_value], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
+                    value_t=torch.tensor([fill_value]).to(sym_help.scalar_type_to_pytorch_type[dtype]))
 
 
 def new_full(g, self, size, fill_value, dtype, layout, device, pin_memory=False):
