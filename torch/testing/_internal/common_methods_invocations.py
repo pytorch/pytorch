@@ -1153,7 +1153,7 @@ def sample_inputs_linalg_det_singular(op_info, device, dtype, requires_grad):
             b = make_arg(size[:-2] + (rank, n)) / 10
 
             x = a @ b
-            lu, pivs = x.lu()
+            lu, pivs, _ = torch.linalg.lu_factor_ex(x)
             p, l, u = torch.lu_unpack(lu, pivs)
             u_diag_abs = u.diagonal(0, -2, -1).abs()
             u_diag_abs_largest = u_diag_abs.max(dim=-1, keepdim=True).values
@@ -2568,6 +2568,44 @@ def sample_inputs_histogram(op_info, device, dtype, requires_grad):
         bins_tensor = make_arg((bin_ct + 1,))
         sample_inputs.append(SampleInput(input_tensor, args=(bins_tensor,),
                                          kwargs=dict(weight=weight_tensor, density=density)))
+
+    return sample_inputs
+
+def sample_inputs_histogramdd(op_info, device, dtype, requires_grad):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    sizes = ((S, S), (S, S, S), (S, 1, S), (S, 0, S))
+    bin_ct_patterns = ((1, 1, 1, 1, 1), (2, 3, 2, 3, 2), (3, 2, 3, 2, 3))
+
+    sample_inputs = []
+    for size, bin_ct_pattern, weighted, density in product(sizes, bin_ct_patterns, [False, True], [False, True]):
+        input_tensor = make_arg(size)
+        bin_ct = bin_ct_pattern[:size[-1]]
+        weight_tensor = make_arg(size[:-1]) if weighted else None
+
+        sample_inputs.append(SampleInput(input_tensor, args=(bin_ct,),
+                                         kwargs=dict(weight=weight_tensor, density=density)))
+
+        bins_tensor = [make_arg(ct + 1) for ct in bin_ct]
+        sample_inputs.append(SampleInput(input_tensor, args=(bins_tensor,),
+                                         kwargs=dict(weight=weight_tensor, density=density)))
+
+    return sample_inputs
+
+def sample_inputs_bincount(op_info, device, dtype, requires_grad):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    sample_inputs = []
+
+    for size, weighted in product((S, M), [False, True]):
+        input_tensor = torch.randint(0, size, (size,), dtype=dtype, device=device)
+        weight_tensor = make_arg((size,)) if weighted else None
+
+        max_val = int(input_tensor.max().item())
+
+        for minlength in [0, max_val // 2, max_val, 2 * max_val]:
+            sample_inputs.append(SampleInput(input_tensor,
+                                             kwargs=dict(weights=weight_tensor, minlength=minlength)))
 
     return sample_inputs
 
@@ -4235,6 +4273,7 @@ def sample_inputs_lu_solve(op_info, device, dtype, requires_grad=False, **kwargs
                 shape_a = batch + (n, n)
                 a = make_a(*shape_a)
                 lu, pivs = a.lu()
+                lu = lu.contiguous()
 
                 shape_b = batch + (n, rhs)
                 b = make_b(shape_b)
@@ -4246,7 +4285,7 @@ def sample_inputs_lu_solve(op_info, device, dtype, requires_grad=False, **kwargs
                 if requires_grad and not lu_grad and not b_grad:
                     continue
 
-                lu_ = lu.detach().contiguous()
+                lu_ = lu.detach().clone()
                 lu_.requires_grad_(lu_grad)
                 b_ = b.detach().clone()
                 b_.requires_grad_(b_grad)
@@ -8089,6 +8128,10 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            aliases=('linalg.matrix_exp',),
            sample_inputs_func=sample_inputs_matrix_exp,
+           # Needs to construct a 2nx2n matrix by copy_ ing into it
+           check_batched_grad=False,
+           check_batched_gradgrad=False,
+           supports_forward_ad=True,
            supports_out=False,
            ),
     OpInfo('matmul',
@@ -10039,6 +10082,26 @@ op_db: List[OpInfo] = [
                # def the_method(i0):
                #     return torch.histogram(i0, 1, weight=tensor(-0.5735, dtype=torch.float32), density=False)
                #                                          ~~~~~~ <--- HERE
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+           )),
+    OpInfo('histogramdd',
+           dtypes=_dispatch_dtypes(),  # histogramdd is only implemented on CPU
+           dtypesIfCPU=floating_types(),
+           sample_inputs_func=sample_inputs_histogramdd,
+           supports_autograd=False,
+           skips=(
+               # JIT tests don't work with Tensor keyword arguments
+               # https://github.com/pytorch/pytorch/issues/58507
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+           )),
+    OpInfo('bincount',
+           dtypes=integral_types_and(),
+           sample_inputs_func=sample_inputs_bincount,
+           supports_out=False,
+           supports_autograd=False,
+           skips=(
+               # JIT tests don't work with Tensor keyword arguments
+               # https://github.com/pytorch/pytorch/issues/58507
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
            )),
     OpInfo('bucketize',
