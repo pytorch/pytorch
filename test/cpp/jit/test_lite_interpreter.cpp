@@ -646,7 +646,7 @@ TEST(LiteInterpreterTest, isCompatibleSuccess) {
   std::unordered_map<std::string, OperatorInfo> model_ops;
   model_ops["aten::add.Scalar"] = OperatorInfo{2};
 
-  std::unordered_set<std::string> types = {"List", "int"};
+  std::unordered_set<std::string> types = {"List", "int", "NamedTuple"};
   auto model_info = ModelCompatibilityInfo{
       caffe2::serialize::kMaxSupportedBytecodeVersion, model_ops, types};
 
@@ -688,7 +688,7 @@ TEST(LiteInterpreterTest, isCompatibleFail) {
 
   // test trivial failure due to type
   runtime_info = RuntimeCompatibilityInfo::get();
-  std::unordered_set<std::string> types = {"List", "int", "NamedTuple"};
+  std::unordered_set<std::string> types = {"List", "int", "Sequence"};
 
   model_info = ModelCompatibilityInfo{
       caffe2::serialize::kMaxSupportedBytecodeVersion, model_ops, types};
@@ -1184,24 +1184,22 @@ TEST(LiteInterpreterTest, DefaultArgsPinv) {
   //                  None)),)))))
 }
 
-TEST(LiteInterpreterTest, DefaultArgsPinvSpecifyDefault) {
+TEST(LiteInterpreterTest, DefaultArgsTensorinvSpecifyDefault) {
   // The second argument is specified, but the value is the same as the default
   // value. It's treated as "not specified" since the value can be fetched from
   // schema.
   Module m("m");
   m.define(R"(
     def forward(self, input):
-      return torch.linalg_pinv(input, 1e-15)
+      return torch.linalg_tensorinv(input, 2)
   )");
   torch::jit::MobileCode code(m.get_method("forward").graph(), "forward");
   auto arg_nums = code.op_to_num_specified_args();
   ASSERT_EQ(arg_nums.size(), 1);
-  ASSERT_EQ(arg_nums["aten::linalg_pinv"], 1);
+  ASSERT_EQ(arg_nums["aten::linalg_tensorinv"], 1);
   std::vector<torch::jit::IValue> inputs;
-  const int N = 28;
-  auto input = torch::range(1, N * N, 1);
-  input[0] = 1; // a more stable matrix
-  input = input.view({N, N});
+  const int N = 4;
+  auto input = torch::rand({N, N, N, N});
   inputs.push_back(input);
   testLiteModuleCompareResultTensors(m, inputs);
 }
