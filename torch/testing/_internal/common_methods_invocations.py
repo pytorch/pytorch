@@ -10675,6 +10675,8 @@ op_db: List[OpInfo] = [
             # Does not work with lambda
             # Raises : JIT Test does not execute any logic
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            # Reference: https://github.com/pytorch/pytorch/issues/67084
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view', device_type='cuda'),
         ),
         supports_out=False,
     ),
