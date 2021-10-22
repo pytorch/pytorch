@@ -379,13 +379,13 @@ class TestJit(JitTestCase):
         self.assertTrue(any(['archive/constants.pkl' == f.filename for f in files]))
 
     def test_script_fn_pkl(self):
-            with self.assertRaisesRegex(pickle.PickleError, "ScriptFunction cannot be pickled"):
+        with self.assertRaisesRegex(pickle.PickleError, "ScriptFunction cannot be pickled"):
 
-                @torch.jit.script
-                def fn(x: torch.Tensor) -> torch.Tensor:
-                    return x
+            @torch.jit.script
+            def fn(x: torch.Tensor) -> torch.Tensor:
+                return x
 
-                pkl_fn = pickle.dumps(fn, protocol=0)
+            pkl_fn = pickle.dumps(fn, protocol=0)
 
     def test_restore_device(self):
         class M(torch.jit.ScriptModule):
