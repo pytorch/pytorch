@@ -35,7 +35,9 @@ from tools.codegen.context import (method_with_native_function,
                                    with_native_function)
 import tools.codegen.dest as dest
 from tools.codegen.gen_functionalization_type import (
-    Functionalize, gen_functionalization_view_inverse_declaration
+    gen_functionalization_definition,
+    gen_functionalization_registration,
+    gen_functionalization_view_inverse_declaration
 )
 
 T = TypeVar('T')
@@ -927,14 +929,17 @@ def get_custom_build_selector(
 
     return selector
 
-def get_grouped_native_functions(
-        native_functions: Sequence[NativeFunction]) -> Sequence[Union[NativeFunction, NativeFunctionsGroup]]:
+def pre_group_native_functions(
+        native_functions: Sequence[NativeFunction]) -> Dict[FunctionSchema, Dict[SchemaKind, NativeFunction]]:
     pre_grouped_native_functions: Dict[FunctionSchema, Dict[SchemaKind, NativeFunction]] = defaultdict(dict)
     for f in native_functions:
         d = pre_grouped_native_functions[f.func.signature()]
         assert f.func.kind() not in d
         d[f.func.kind()] = f
+    return pre_grouped_native_functions
 
+def get_grouped_native_functions(
+        native_functions: Sequence[NativeFunction]) -> Sequence[Union[NativeFunction, NativeFunctionsGroup]]:
     def flatten_pre_group(d: Dict[SchemaKind, NativeFunction]) -> Sequence[Union[NativeFunction, NativeFunctionsGroup]]:
         r = NativeFunctionsGroup.from_dict(d)
         if r is None:
@@ -943,6 +948,7 @@ def get_grouped_native_functions(
             return [r]
 
     # TODO: how come ValuesView isn't a Sequence lol
+    pre_grouped_native_functions = pre_group_native_functions(native_functions)
     return list(concatMap(flatten_pre_group, list(pre_grouped_native_functions.values())))
 
 def main() -> None:
@@ -1225,18 +1231,36 @@ def main() -> None:
         'registration_declarations': [compute_registration_declarations(f, backend_indices) for f in native_functions],
     })
 
+    # We need to easily map from [inplace_op_name] -> [functional_op_name] for the functionalization pass.
+    pre_grouped_d: Dict[FunctionSchema, Dict[SchemaKind, NativeFunction]] = pre_group_native_functions(native_functions)
+
+    to_functional_op: Dict[OperatorName, Optional[NativeFunction]] = {
+        k: v for d in [
+            {f.func.name: pre_grouped_d[func][SchemaKind.functional]
+                if SchemaKind.functional in pre_grouped_d[func].keys() else None
+                for f in pre_grouped_d[func].values()}
+            for func in pre_grouped_d.keys()]
+        # k: v for d in [foo(func) for func in pre_grouped_d.keys()]
+        for k, v in d.items()
+    }
+
     cpu_fm.write_sharded(
         'RegisterFunctionalization.cpp',
         grouped_native_functions,
         key_fn=key_func_grouped,
         env_callable=lambda g: {
-            'func_definitions': Functionalize(Target.DEFINITION)(g),
-            'func_registrations': Functionalize(Target.REGISTRATION, backend_indices[DispatchKey.CompositeImplicitAutograd])(g)},
+            'func_definitions': list(mapMaybe(lambda f: gen_functionalization_definition(
+                f, to_functional_op[f.func.name]),
+                [g] if isinstance(g, NativeFunction) else g.functions())),
+            'func_registrations': list(mapMaybe(lambda f: gen_functionalization_registration(
+                f, backend_indices[DispatchKey.CompositeImplicitAutograd]),
+                [g] if isinstance(g, NativeFunction) else g.functions()))
+        },
         num_shards=4,
         sharded_keys={'func_definitions', 'func_registrations'}
     )
     cpu_fm.write('FunctionalInverses.h', lambda: {
-        'view_inverse_declarations': list(concatMap(gen_functionalization_view_inverse_declaration, native_functions))
+        'view_inverse_declarations': list(mapMaybe(gen_functionalization_view_inverse_declaration, native_functions))
     })
 
     if options.output_dependencies:

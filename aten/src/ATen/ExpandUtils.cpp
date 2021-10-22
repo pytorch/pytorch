@@ -197,7 +197,7 @@ std::vector<int64_t> infer_dense_strides(IntArrayRef tensor_sizes, IntArrayRef t
   // compute output strides which preserves the input tensor's memory layout
   std::vector<int64_t> out_strides(ndim);
   int64_t curr_stride = 1;
-  for (size_t i = 0; i < ndim; ++i) {
+  for (const auto i : c10::irange(ndim)) {
     int64_t idx = perm[i];
     out_strides[idx] = curr_stride;
     // Note: for size 0, we simply treated it as 1, it really doesn't matter here

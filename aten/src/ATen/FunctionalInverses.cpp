@@ -115,7 +115,7 @@ Tensor _reshape_alias_inverse(const Tensor& base, const Tensor& mutated_view, at
     return mutated_view.reshape(base.sizes());
 }
 
-Tensor select_inverse(const Tensor& base, const Tensor& mutated_view, int64_t dim, int64_t index) {
+Tensor select_int_inverse(const Tensor& base, const Tensor& mutated_view, int64_t dim, int64_t index) {
     return base.select_scatter(mutated_view, dim, index);
 }
 Tensor detach_inverse(const Tensor& base, const Tensor& mutated_view) {
@@ -123,11 +123,11 @@ Tensor detach_inverse(const Tensor& base, const Tensor& mutated_view) {
     return mutated_view;
 }
 
-Tensor slice_inverse(const Tensor& base, const Tensor& mutated_view, int64_t dim, c10::optional<int64_t> start, c10::optional<int64_t> end, int64_t step) {
+Tensor slice_Tensor_inverse(const Tensor& base, const Tensor& mutated_view, int64_t dim, c10::optional<int64_t> start, c10::optional<int64_t> end, int64_t step) {
     return base.slice_scatter(mutated_view, dim, start, end, step);
 }
 
-Tensor split_inverse(const Tensor& base, const Tensor& mutated_view, int64_t mutated_view_idx, int64_t split_size, int64_t dim) {
+Tensor split_Tensor_inverse(const Tensor& base, const Tensor& mutated_view, int64_t mutated_view_idx, int64_t split_size, int64_t dim) {
     // It would be nice if this logic could be re-used from autograd's split_backward(), but I don't think it can.
     // For functionalization, we have only have one of the tensors from the TensorList outputed by split(), and we want to layer i
     // on top of the base tensor.
@@ -156,7 +156,7 @@ Tensor squeeze_inverse(const Tensor& base, const Tensor& mutated_view) {
     return unsqueeze_to(mutated_view, base.sizes());
 }
 
-Tensor squeeze_inverse(const Tensor& base, const Tensor& mutated_view, int64_t dim) {
+Tensor squeeze_dim_inverse(const Tensor& base, const Tensor& mutated_view, int64_t dim) {
     return unsqueeze_to(mutated_view, dim, base.sizes());
 }
 
@@ -164,7 +164,7 @@ Tensor t_inverse(const Tensor& base, const Tensor& mutated_view) {
     return mutated_view.t();
 }
 
-Tensor transpose_inverse(const Tensor& base, const Tensor& mutated_view, int64_t dim0, int64_t dim1) {
+Tensor transpose_int_inverse(const Tensor& base, const Tensor& mutated_view, int64_t dim0, int64_t dim1) {
     return mutated_view.transpose(dim0, dim1);
 }
 
@@ -202,7 +202,7 @@ Tensor col_indices_inverse(const at::Tensor& base, const at::Tensor& mutated_vie
     return Tensor();
 }
 
-Tensor unbind_inverse(const Tensor& base, const Tensor& mutated_view, int64_t mutated_view_idx, int64_t dim) {
+Tensor unbind_int_inverse(const Tensor& base, const Tensor& mutated_view, int64_t mutated_view_idx, int64_t dim) {
     dim = at::maybe_wrap_dim(dim, base.sizes().size());
     return base.select_scatter(mutated_view, dim, mutated_view_idx);
 }
@@ -211,7 +211,7 @@ Tensor view_inverse(const Tensor& base, const Tensor& mutated_view, at::IntArray
     return mutated_view.view(base.sizes());
 }
 
-Tensor view_inverse(const Tensor& base, const Tensor& mutated_view, at::ScalarType dtype) {
+Tensor view_dtype_inverse(const Tensor& base, const Tensor& mutated_view, at::ScalarType dtype) {
     return mutated_view.view(base.scalar_type());
 }
 

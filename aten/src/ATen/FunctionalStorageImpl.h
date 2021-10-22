@@ -23,11 +23,18 @@ namespace functionalization {
 // The forward_fn lambda describes how to replay view1 on a tensor.
 //
 // The reverse_fn lambda describes how, given a tensor that is already a view, how to get the corresponding base tensor.
-// E.g. if:
-// b = a.view1(...)
-// output = view1_inverse(a, b, ...)
+// E.g. Below is an example of a program that has alias operations removed, and the role that the inverse lambda play:
 //
-// Then b and output should be equal.
+// normal program with views and mutations:
+// original_view1 = original_input1.view_op(args...)
+// original_view1.add_(1) (perform a mutation on the view, which should also modify original_input)
+
+// version of the program with no aliasing, that instead uses view_inverse functions
+// original_view2 = original_input2.view_copy_op(args...)
+// original_view2.add_(1) (perform a mutation on the original_view2. At this point, original_input2 is NOT modified)
+// x = view_op_inverse(original_input2, original_view2, args...)
+//
+// original_view1 and x should be equal
 // See Note [Functionalization Pass: View Inverses].
 struct ViewMeta {
   ViewMeta(
@@ -70,13 +77,13 @@ struct ViewMeta {
 class Alias {
   public:
     struct Update {
-        const at::Tensor new_val;
-        std::vector<ViewMeta> view_metas;
+        const at::Tensor& new_val;
+        std::vector<ViewMeta>& view_metas;
     };
     explicit Alias(const at::Tensor& base);
     const at::Tensor& base() const;
     size_t generation() const { return generation_; }
-    void add_update(const at::Tensor& updated_val, std::vector<ViewMeta> metas);
+    void add_update(const at::Tensor& updated_val, std::vector<ViewMeta>& metas);
     void apply_updates();
   private:
     // NB: base_ should always point to a tensor BELOW the current functionalization layer.

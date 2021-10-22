@@ -1,113 +1,10 @@
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.logging_tensor import LoggingTensor, log_input, capture_logs, no_dispatch
 from torch.utils._pytree import tree_map
 from torch.utils._python_dispatch import enable_python_mode
 
-from typing import Iterator, List
 import logging
-import contextlib
-import itertools
-
-# TODO: move this into library proper
-@contextlib.contextmanager
-def no_dispatch() -> Iterator[None]:
-    guard = torch._C._DisableTorchDispatch()
-    try:
-        yield
-    finally:
-        del guard
-
-
-# How the chain of calls works for LoggingTensor:
-# 1. Call torch.sin
-# 2. Attempt __torch_function__. In LoggingTensor torch function is disabled so we bypass it entirely
-# 3. Enter dispatcher, wind your way through Autograd
-# 4. Hit Python dispatch key, call __torch_dispatch__
-
-# TODO: TensorBase should work
-class LoggingTensor(torch.Tensor):
-    elem: torch.Tensor
-
-    __slots__ = ['elem']
-
-    @staticmethod
-    def __new__(cls, elem, *args, **kwargs):
-        # The wrapping tensor (LoggingTensor) shouldn't hold any
-        # memory for the class in question, but it should still
-        # advertise the same device as before
-        r = torch.Tensor._make_wrapper_subclass(
-            cls, elem.size(), elem.stride(),
-            # TODO: clone strides and storage aliasing
-            dtype=elem.dtype, layout=elem.layout,
-            device=elem.device, requires_grad=elem.requires_grad
-        )
-        # ...the real tensor is held as an element on the tensor.
-        r.elem = elem
-        return r
-
-    def __repr__(self):
-        return f"LoggingTensor({self.elem})"
-
-    @classmethod
-    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-        def unwrap(e):
-            return e.elem if isinstance(e, LoggingTensor) else e
-
-        def wrap(e):
-            return LoggingTensor(e) if isinstance(e, torch.Tensor) else e
-
-        # no_dispatch is only needed if you use enable_python_mode.
-        # It prevents infinite recursion.
-        with no_dispatch():
-            rs = tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)))
-        logging.getLogger("LoggingTensor").info(f"{func.__module__}.{func.__name__}", args, kwargs, rs)
-        return rs
-
-# https://stackoverflow.com/questions/36408496/python-logging-handler-to-append-to-list
-class LoggingTensorHandler(logging.Handler):
-    log_list: List[str]
-    next_shortid: int
-
-    def __init__(self, log_list: List[str]) -> None:
-        logging.Handler.__init__(self)
-        self.log_list = log_list
-        self.next_shortid = 0
-
-    # WARNING: not deterministic over multiple threads, this matters for
-    # autograd
-    def _shortid(self, o: object) -> int:
-        if not hasattr(o, '_shortid'):
-            o._shortid = self.next_shortid
-            self.next_shortid += 1
-        return o._shortid
-
-    def _fmt(self, a: object) -> str:
-        return f'${self._shortid(a)}' if isinstance(a, LoggingTensor) else repr(a)
-
-    def emit(self, record):
-        fmt_args = ", ".join(itertools.chain(
-            (self._fmt(a) for a in record.args[0]),
-            (f"{k}={self._fmt(v)}" for k, v in record.args[1].items())
-        ))
-        fmt_rets = ", ".join(self._fmt(a) for a in record.args[2]) \
-            if isinstance(record.args[2], (list, tuple)) else self._fmt(record.args[2])
-        self.log_list.append(f'{fmt_rets} = {record.msg}({fmt_args})')
-
-def log_input(name: str, var: object):
-    logging.getLogger("LoggingTensor").info("input", (name,), {}, (var,))
-
-@contextlib.contextmanager
-def capture_logs() -> Iterator[List[str]]:
-    logger = logging.getLogger("LoggingTensor")
-    log_list = []
-    handler = LoggingTensorHandler(log_list)
-    logger.addHandler(handler)
-    logger.setLevel(logging.INFO)
-    logger.propagate = False
-    try:
-        yield log_list
-    finally:
-        logger.removeHandler(handler)
 
 class TestPythonDispatch(TestCase):
     def test_basic(self) -> None:
@@ -384,6 +281,21 @@ $6 = torch._ops.aten.add_($1, $5)''')
 
         self.assertEqual(type(MyTensor(2).new_ones(3)), MyTensor)
 
+    def test_like(self) -> None:
+        class MyTensor(torch.Tensor):
+            __torch_function__ = torch._C._disabled_torch_function_impl
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                return MyTensor(3)
+
+        for f in ["empty", "ones", "rand", "randn", "zeros"]:
+            f_name = f + "_like"
+            self.assertEqual(type(getattr(torch, f_name)(MyTensor(2))), MyTensor)
+
+        self.assertEqual(type(torch.full_like(MyTensor(2), 1.)), MyTensor)
+        self.assertEqual(type(torch.randint_like(MyTensor(2), high=3)), MyTensor)
+
     def test_enable_python_mode_error(self) -> None:
         with self.assertRaisesRegex(ValueError, "__torch_dispatch__"):
             with enable_python_mode(torch.Tensor):
@@ -460,6 +372,15 @@ $6 = torch._ops.aten.add_($1, $5)''')
                 with enable_python_mode(LoggingTensor):
                     pass
 
+    def test_tolist_numpy_with_python_mode(self) -> None:
+        x = LoggingTensor(torch.tensor([2.0, 3.0]))
+        with self.assertRaisesRegex(RuntimeError, "is not supported for tensor subclasses."):
+            x.tolist()
+        with self.assertRaisesRegex(RuntimeError, "is not supported for tensor subclasses."):
+            x.numpy()
+        with self.assertRaises(AssertionError):
+            self.assertEqual(x, None)
+
     def test_enable_python_mode_subclass_autograd_device_check(self) -> None:
         class NonWrapperSublass(torch.Tensor):
             elem: torch.Tensor
@@ -496,188 +417,6 @@ $6 = torch._ops.aten.add_($1, $5)''')
         z.sum().backward(torch.tensor(1))
         self.assertEqual(x.grad, y)
         self.assertEqual(y.grad, x)
-
-
-class FunctionalTensor(torch.Tensor):
-
-    elem: torch.Tensor
-
-    __slots__ = ['elem', 'elem_']
-
-    @staticmethod
-    def __new__(cls, elem, *args, **kwargs):
-        # r = torch.Tensor._make_wrapper_subclass(cls, elem)
-        r = torch.Tensor._make_wrapper_subclass(
-            cls, elem.size(), elem.stride(),
-            dtype=elem.dtype, layout=elem.layout,
-            device='meta', requires_grad=elem.requires_grad
-        )
-        if elem._is_functional_tensor():
-            r.elem_ = elem
-            r.elem = r.elem_
-        else:
-            r.elem_ = elem
-            r.elem = r.elem_._to_functional_tensor()
-        return r
-
-    def __repr__(self):
-        assert self.elem._is_functional_tensor()
-        self.elem._sync()
-        return f"FunctionalTensor({self.elem._from_functional_tensor()})"
-
-    @classmethod
-    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-        def unwrap(e):
-            if not isinstance(e, torch.Tensor):
-                return e
-            if isinstance(e, FunctionalTensor):
-                return e.elem
-            # This can happen if I do FunctionalTensor(torch.ones(2)) + torch.ones(2)
-            assert not e._is_functional_tensor()
-            return e._to_functional_tensor()
-
-        def wrap(e):
-            if not isinstance(e, torch.Tensor):
-                return e
-            assert not isinstance(e, FunctionalTensor)
-            assert e._is_functional_tensor()
-            return FunctionalTensor(e)
-
-        unwrapped_args = tree_map(unwrap, args)
-        if func.__name__ == 'add_':
-            unwrapped_res = unwrapped_args[0].add_(*unwrapped_args[1:], **kwargs)
-        else:
-            unwrapped_res = func(*unwrapped_args, **kwargs)
-        res = tree_map(wrap, unwrapped_res)
-        return res
-
-class TestFunctionalization(TestCase):
-
-    def test_functionalization(self):
-        def f5(x, *, logging: bool):
-            # test: everything
-            with capture_logs() as logs:
-                tmp = torch.ones(2, 2)
-                y = x.view(8)
-                z0 = y.reshape(2, 4)
-                z1 = z0.transpose(1, 0)
-                z1.unsqueeze_(0)
-                z1.squeeze_()
-                z2, z3 = z1.split(2)
-                z2.add_(tmp)
-            if logging:
-                self.assertExpectedInline('\n'.join(logs), """\
-$1 = torch._ops.aten.view($0, [8])
-$2 = torch._ops.aten._reshape_alias($1, [2, 4], [4, 1])
-$3 = torch._ops.aten.transpose($2, 1, 0)
-$4 = torch._ops.aten.view($0, [8])
-$5 = torch._ops.aten._reshape_alias($4, [2, 4], [4, 1])
-$6 = torch._ops.aten.transpose($5, 1, 0)
-$7 = torch._ops.aten.unsqueeze($6, 0)
-$8 = torch._ops.aten.view($0, [8])
-$9 = torch._ops.aten._reshape_alias($8, [2, 4], [4, 1])
-$10 = torch._ops.aten.transpose($9, 1, 0)
-$11 = torch._ops.aten.unsqueeze($10, 0)
-$12 = torch._ops.aten.squeeze($11)
-$13, $14 = torch._ops.aten.split($12, 2)
-$15 = torch._ops.aten.add($13, tensor([[1., 1.],
-        [1., 1.]]))""")
-            else:
-                return z2
-
-        def f4(x, *, logging: bool):
-            # test: view + inplace op (transpose_)
-            with capture_logs() as logs:
-                tmp = torch.ones(4)
-                x.transpose_(1, 0)
-                y = x[0]
-                y.add_(tmp)
-            if logging:
-                self.assertExpectedInline('\n'.join(logs), """\
-$1 = torch._ops.aten.transpose($0, 1, 0)
-$2 = torch._ops.aten.select($1, 0, 0)
-$3 = torch._ops.aten.add($2, tensor([1., 1., 1., 1.]))""")
-            else:
-                return y
-
-        def f3(x, *, logging: bool):
-            # test: view ops that return multiple tensors (split)
-            with capture_logs() as logs:
-                tmp = torch.ones(2)
-                y1, y2 = x.split(2)
-                y3 = y2.diagonal()
-                y3.add_(tmp)
-            if logging:
-                self.assertExpectedInline('\n'.join(logs), """\
-$1, $2 = torch._ops.aten.split($0, 2)
-$3 = torch._ops.aten.diagonal($2)
-$4 = torch._ops.aten.add($3, tensor([1., 1.]))""")
-            else:
-                return y3
-
-        def f2(x, *, logging: bool):
-            # test: view ops that take a subset of the original tensor (select/diagonal)
-            with capture_logs() as logs:
-                tmp = torch.ones(2)
-                y = x.permute(1, 0)
-                z1 = y[0]
-                z2 = z1.reshape(2, 2)
-                z3 = z2.diagonal()
-                z3.add_(tmp)
-            if logging:
-                self.assertExpectedInline('\n'.join(logs), """\
-$1 = torch._ops.aten.permute($0, [1, 0])
-$2 = torch._ops.aten.select($1, 0, 0)
-$3 = torch._ops.aten._reshape_alias($2, [2, 2], [4, 2])
-$4 = torch._ops.aten.diagonal($3)
-$5 = torch._ops.aten.add($4, tensor([1., 1.]))""")
-            else:
-                return z3
-
-        def f1(x, *, logging: bool):
-            # simple test: 1 view op, 1 inplace op
-            with capture_logs() as logs:
-                tmp = torch.ones(4, 2)
-                y = x.view(4, 2)
-                y.add_(tmp)
-                z = x + tmp
-            if logging:
-                self.assertExpectedInline('\n'.join(logs), """\
-$1 = torch._ops.aten.view($0, [4, 2])
-$2 = torch._ops.aten.add($1, tensor([[1., 1.],
-        [1., 1.],
-        [1., 1.],
-        [1., 1.]]))
-$3 = torch._ops.aten.view($2, [4, 2])
-$4 = torch._ops.aten.add($3, tensor([[1., 1.],
-        [1., 1.],
-        [1., 1.],
-        [1., 1.]]))""")
-            else:
-                return y
-
-        def assert_functionalization(func, inpt):
-            input_clone = inpt.clone()
-            input_functional = FunctionalTensor(input_clone)
-
-            # Runs expecttests for LoggingTensor output.
-            func(FunctionalTensor(LoggingTensor(inpt.clone())), logging=True)
-
-            # Compare outputs (and mutated inputs), with and without functionalization.
-            out_ref = func(inpt, logging=False)
-            out_functional = func(input_functional, logging=False)
-
-            # We need to sync the input tensors first, in case there are any queued mutations left.
-            input_functional.elem._sync()
-            out_functional.elem._sync()
-            self.assertEqual(out_ref, out_functional.elem._from_functional_tensor())
-            self.assertEqual(inpt, input_functional.elem._from_functional_tensor())  # input mutations should still occur
-
-        assert_functionalization(f1, torch.ones(4, 2))
-        assert_functionalization(f2, torch.ones(4, 2))
-        assert_functionalization(f3, torch.ones(4, 2))
-        assert_functionalization(f4, torch.ones(4, 2))
-        assert_functionalization(f5, torch.ones(4, 2))
 
 if __name__ == '__main__':
     run_tests()

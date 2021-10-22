@@ -22,9 +22,8 @@ const at::Tensor& Alias::base() const {
   return base_;
 }
 
-// metas is taken by value on purpose - we want to copy the vector.
-void Alias::add_update(const at::Tensor& updated_val, std::vector<ViewMeta> metas) {
-  updates_.push_back({updated_val, std::move(metas)});
+void Alias::add_update(const at::Tensor& updated_val, std::vector<ViewMeta>& metas) {
+  updates_.push_back({updated_val, metas});
   generation_++;
 }
 
