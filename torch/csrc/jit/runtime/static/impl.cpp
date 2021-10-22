@@ -1391,40 +1391,45 @@ ProcessedNode::ProcessedNode(
   outputs_ = std::make_unique<IValue[]>(outputs_size_);
 
   if (enable_out_variant) {
-    if ((fn_ = getOutOfPlaceOperation(node))) {
-      function_kind_ = FunctionKind::kOutVariant;
+    std::function<void(ProcessedNode*)> f = getOutOfPlaceOperation(node);
+    if (f) {
+      fn_ = {f, FunctionKind::kOutVariant};
       VLOG(1) << "Switch to out variant for node: " << PrintNode(node);
       return;
     }
   }
-  if ((fn_ = getNativeOperation(node))) {
-    function_kind_ = FunctionKind::kNativeFunction;
-    VLOG(1) << "Switch to native impl for node: " << PrintNode(node);
-    return;
+  {
+    std::function<void(ProcessedNode*)> f = getNativeOperation(node);
+    if (f) {
+      fn_ = {f, FunctionKind::kNativeFunction};
+      VLOG(1) << "Switch to native impl for node: " << PrintNode(node);
+      return;
+    }
   }
   {
     const Operator& op = node->getOperator();
-    fn_ = [node_op = op.getOperation(node)](ProcessedNode* pnode) mutable {
-      std::vector<IValue> stack;
-      Node* node = pnode->node_;
-      const size_t size = node->inputs().size();
-      stack.reserve(size + (hasVarArgs(node) ? 1 : 0));
-      for (const auto i : c10::irange(size)) {
-        stack.emplace_back(pnode->Input(i));
-      }
-      // Need to store the number of inputs in stack for variadic ops.
-      if (hasVarArgs(node)) {
-        stack.emplace_back(static_cast<int>(size));
-      }
+    std::function<void(ProcessedNode*)> f =
+        [node_op = op.getOperation(node)](ProcessedNode* pnode) mutable {
+          std::vector<IValue> stack;
+          Node* node = pnode->node_;
+          const size_t size = node->inputs().size();
+          stack.reserve(size + (hasVarArgs(node) ? 1 : 0));
+          for (const auto i : c10::irange(size)) {
+            stack.emplace_back(pnode->Input(i));
+          }
+          // Need to store the number of inputs in stack for variadic ops.
+          if (hasVarArgs(node)) {
+            stack.emplace_back(static_cast<int>(size));
+          }
 
-      node_op(stack);
+          node_op(stack);
 
-      DCHECK_EQ(stack.size(), node->outputs().size());
-      for (const auto i : c10::irange(node->outputs().size())) {
-        pnode->Output(i) = std::move(stack[i]);
-      }
-    };
-    function_kind_ = FunctionKind::kInterpreterFallback;
+          DCHECK_EQ(stack.size(), node->outputs().size());
+          for (const auto i : c10::irange(node->outputs().size())) {
+            pnode->Output(i) = std::move(stack[i]);
+          }
+        };
+    fn_ = {f, FunctionKind::kInterpreterFallback};
     VLOG(1) << "Fallback interpreter for node: " << PrintNode(node);
   }
 }
@@ -1452,12 +1457,12 @@ void ProcessedNode::run() {
         guard.before(get_op_name());
       }
     }
-    fn_(this);
+    fn_.f(this);
   } else {
-    fn_(this);
+    fn_.f(this);
   }
 #else
-  fn_(this);
+  fn_.f(this);
 #endif
 }
 

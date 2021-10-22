@@ -398,7 +398,6 @@ class TORCH_API ProcessedNode {
 
   ProcessedNode(const ProcessedNode& rhs)
       : node_(rhs.node_),
-        function_kind_(rhs.function_kind_),
         fn_(rhs.fn_),
         inputs_(std::make_unique<const IValue*[]>(rhs.inputs_size_)),
         outputs_(std::make_unique<IValue[]>(rhs.outputs_size_)),
@@ -416,7 +415,6 @@ class TORCH_API ProcessedNode {
       return *this;
     }
     node_ = rhs.node_;
-    function_kind_ = rhs.function_kind_;
     fn_ = rhs.fn_;
 
     if (!inputs_ || inputs_size_ != rhs.inputs_size_) {
@@ -476,11 +474,11 @@ class TORCH_API ProcessedNode {
   std::vector<IValue> clone_inputs() const;
 
   bool has_out_variant() const {
-    return function_kind_ == FunctionKind::kOutVariant;
+    return fn_.kind == FunctionKind::kOutVariant;
   }
 
   bool has_native() const {
-    return function_kind_ == FunctionKind::kNativeFunction;
+    return fn_.kind == FunctionKind::kNativeFunction;
   }
 
   bool verify_no_memory_overlap() const;
@@ -496,8 +494,11 @@ class TORCH_API ProcessedNode {
     kNativeFunction,
     kInterpreterFallback,
   };
-  FunctionKind function_kind_;
-  std::function<void(ProcessedNode*)> fn_;
+  struct Function {
+    std::function<void(ProcessedNode*)> f;
+    FunctionKind kind = FunctionKind::kOutVariant;
+  };
+  Function fn_;
   std::unique_ptr<const IValue*[]> inputs_; // unowned
   std::unique_ptr<IValue[]> outputs_;
   size_t inputs_size_;
