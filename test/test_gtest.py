@@ -108,16 +108,23 @@ class GTest(TestCase):
                 "must run from a PyTorch checkout"
             )
 
-        print("CWD", os. getcwd())
+        print("CWD", os.getcwd())
         print(TEST_BINARY_DIR)
-        print("globs")
-        print('list(TEST_BINARY_DIR.glob("*"))', list(TEST_BINARY_DIR.glob("*")))
-        print(
-            'list(TEST_BINARY_DIR.glob("*test*"))', list(TEST_BINARY_DIR.glob("*test*"))
-        )
-        other_bin_dir = REPO_ROOT / "build" / "bin"
-        print(other_bin_dir, other_bin_dir.exists())
-        print(other_bin_dir.glob("*"))
+
+        def try_dir(path):
+            print("Looking at", path)
+            print("\texists:", path.exists())
+            print("all", list(path.glob("*")))
+            print("tests", list(path.glob("*test*")))
+
+        try_dir(TEST_BINARY_DIR)
+        try_dir(TEST_BINARY_DIR / "win_tmp")
+        try_dir(TEST_BINARY_DIR / "win_tmp" / "torch" / "build" / "bin")
+        try_dir(TEST_BINARY_DIR / "win_tmp" / "build" / "bin")
+        try_dir(REPO_ROOT / "build" / "bin")
+        try_dir(REPO_ROOT / "build" / "win_tmp")
+        try_dir(REPO_ROOT / "build" / "win_tmp" / "torch" / "build" / "bin")
+        try_dir(REPO_ROOT / "build" / "win_tmp" / "build" / "bin")
         self.binaries = {}
 
         for binary in TEST_BINARY_DIR.glob("*test*"):
