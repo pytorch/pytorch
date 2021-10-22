@@ -7,6 +7,7 @@
 #include <c10/util/Optional.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
+#include <torch/csrc/api/include/torch/version.h>
 #include <torch/csrc/autograd/symbolic.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
@@ -438,8 +439,7 @@ GraphEncoder::GraphEncoder(
   // onnx::IR_VERSION. with this change, the test_operators.py will be more
   // stable. only bump it when it's necessary
   model_proto_.set_ir_version(onnx_torch::IR_VERSION);
-  // TODO: set the producer version using appropriate function call
-  model_proto_.set_producer_version(onnx_torch::PRODUCER_VERSION);
+  model_proto_.set_producer_version(TORCH_VERSION);
 
   validateGraph(graph, operator_export_type);
 
