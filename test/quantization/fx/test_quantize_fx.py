@@ -3158,23 +3158,30 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertEqual(out_ref, out)
 
     def test_general_tensor_shape_op_on_input(self):
-
-        class M(torch.nn.Module):
-            def __init__(self):
+        class Linear_BN(torch.nn.Sequential):
+            def __init__(self, a, b, bn_weight_init=1, resolution=-100000):
                 super().__init__()
-                self.add_module("c", torch.nn.Linear(1, 1, bias=False))
+                self.add_module("c", torch.nn.Linear(a, b, bias=False))
+                bn = torch.nn.BatchNorm1d(b)
+                torch.nn.init.constant_(bn.weight, bn_weight_init)
+                torch.nn.init.constant_(bn.bias, 0)
+                self.add_module("bn", bn)
 
             def forward(self, x):
-                output_shape = x.shape[:-1] + (self.c.out_features,)
+                l, bn = self._modules.values()
+                output_shape = x.shape[:-1] + (l.out_features,)
+                x = x.flatten(0, 1)
+                x = l(x)
+                x = bn(x)
                 x = x.reshape(output_shape)
                 return x
 
-        m = M().eval()
+        m = Linear_BN(1, 1).eval()
         qconfig_dict = {'': torch.quantization.default_qconfig}
         mp = prepare_fx(m, qconfig_dict)
-        print(mp)
         mp(torch.randn(1, 1, 1, 1))
-
+        mq = convert_fx(mp)
+        mq(torch.randn(1, 1, 1, 1))
 
 
 @skipIfNoFBGEMM

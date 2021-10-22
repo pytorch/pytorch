@@ -371,16 +371,26 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
             # without an observer in convert
             # TODO(future PR): change this so a placeholder is inserted for
             # future dequants, to make the logic easier to understand
-            (node_dtype != torch.float) and
+            (node_dtype != torch.float)
+        )
+        is_reshape = (
+            (node.op == 'call_function' and node.target is torch.reshape) or
+            (node.op == 'call_method' and node.target == 'reshape')
+        )
+        activation_needs_obs = (
+            is_activation and
+            dtype_changes_and_second_dtype_not_float and
             # if arg is a bool tensor or not a tensor, do not insert observer
             (arg_dtype not in (torch.bool, None)) and
+            # for reshape, do not insert observer for second arg
+            not (is_reshape and arg is node.args[1]) and
             (is_activation and activation_is_statically_quantized(qconfig))
         )
 
         needs_obs = (
             weight_needs_obs or
             bias_needs_obs or
-            dtype_changes_and_second_dtype_not_float
+            activation_needs_obs
         )
 
     else:
