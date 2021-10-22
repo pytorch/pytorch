@@ -338,9 +338,9 @@ class GraphEncoder {
   NodeAttrNameMap node_attr_to_name_;
   // For large models, the parameters can be stored in separate binary files.
   // This parameter sets a threshold on the number of elements in the parameter
-  // tensor, beyond which the parameter is stored in a separate file (if API
-  // argument use_external_data_format is set to True). This threshold is in
-  // place so as not to create too many external files.
+  // tensor, beyond which the parameter is stored in a separate file (if
+  // use_external_data_format_ is True). This threshold is in place
+  // so as not to create too many external files.
   const size_t ParamSizeThresholdForExternalStorage = 1024;
 };
 
@@ -1211,11 +1211,6 @@ export_onnx(
 
 std::string serialize_model_proto_to_string(
     const std::shared_ptr<::ONNX_NAMESPACE::ModelProto>& model_proto) {
-  const size_t proto_size = model_proto->ByteSizeLong();
-  TORCH_CHECK(
-      proto_size <= INT_MAX,
-      "Exporting model exceed maximum protobuf size of 2GB. "
-      "Please call torch.onnx.export without setting use_external_data_format parameter.");
   return model_proto->SerializeAsString();
 }
 
