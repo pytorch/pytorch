@@ -54,6 +54,7 @@ class CudaAnalysis : public IRVisitor {
 
   void visit(AllocatePtr v) override;
   void visit(FreePtr v) override;
+  void visit(PlacementAllocatePtr v) override;
   void visit(ForPtr v) override;
 
   std::unordered_set<BufPtr> store_targets_;
