@@ -783,7 +783,9 @@ else:
 def _unique_impl(input: Tensor, sorted: bool = True,
                  return_inverse: bool = False, return_counts: bool = False,
                  dim: Optional[int] = None) -> _unique_impl_out:
-    r"""Returns the unique elements of the input tensor.
+    r"""unique(input, sorted=True, return_inverse=False, return_counts=False, dim=None) -> Tuple[Tensor, Tensor, Tensor]
+    
+    Returns the unique elements of the input tensor.
 
     .. note:: This function is different from :func:`torch.unique_consecutive` in the sense that
         this function also eliminates non-consecutive duplicate values.
