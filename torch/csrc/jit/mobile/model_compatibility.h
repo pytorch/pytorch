@@ -49,5 +49,47 @@ TORCH_API std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
 TORCH_API std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
     std::shared_ptr<caffe2::serialize::ReadAdapterInterface> rai);
 
+// The family of methods below to get contained types from a model
+// Throws if not passed in a well formed model
+TORCH_API std::unordered_set<std::string> _get_mobile_model_contained_types(
+    std::istream& in);
+
+TORCH_API std::unordered_set<std::string> _get_mobile_model_contained_types(
+    const std::string& filename);
+
+TORCH_API std::unordered_set<std::string> _get_mobile_model_contained_types(
+    std::shared_ptr<caffe2::serialize::ReadAdapterInterface> rai);
+
+std::unordered_set<std::string> _get_mobile_model_contained_types(
+    const std::vector<c10::IValue>& bytecode_ivalues);
+
+// The family of methods below return the compatibility information of a model
+struct ModelCompatibilityInfo {
+  uint64_t bytecode_version;
+  std::unordered_map<std::string, OperatorInfo> operator_info;
+  std::unordered_set<std::string> type_table;
+
+  // Factory Methods
+  static TORCH_API ModelCompatibilityInfo get(std::istream& in);
+  static TORCH_API ModelCompatibilityInfo get(const std::string& filename);
+  static TORCH_API ModelCompatibilityInfo
+  get(std::shared_ptr<caffe2::serialize::ReadAdapterInterface> rai);
+};
+
+enum ModelCompatibilityStatus {
+  OK = 1,
+  ERROR = 2,
+};
+
+struct ModelCompatCheckResult {
+  ModelCompatibilityStatus status;
+  std::vector<std::string> errors;
+};
+// Takes in information about a runtime and a model and returns if the two are
+// compatible
+TORCH_API ModelCompatCheckResult is_compatible(
+    RuntimeCompatibilityInfo runtime_info,
+    ModelCompatibilityInfo model_info);
+
 } // namespace jit
 } // namespace torch

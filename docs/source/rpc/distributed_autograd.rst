@@ -65,7 +65,7 @@ an RPC.
   input tensors. The output gradients of this function are sent to the source
   node to the appropriate ``send`` function during the backward pass.
 - Each ``send-recv`` pair is assigned a globally unique ``autograd_message_id``
-  to uniquely identify the pair. This is useful to lookup the corresponding
+  to uniquely identify the pair. This is useful to look up the corresponding
   function on a remote node during the backward pass.
 - For :ref:`rref`, whenever we call :meth:`torch.distributed.rpc.RRef.to_here`
   we attach an appropriate ``send-recv`` pair for the tensors involved.
@@ -98,7 +98,7 @@ This context serves the following purpose:
 2. During the forward pass we store the ``send`` and ``recv`` functions for
    each autograd pass in this context. This ensures we hold references to the
    appropriate nodes in the autograd graph to keep it alive. In addition to
-   this, it is easy to lookup the appropriate ``send`` and ``recv`` functions
+   this, it is easy to look up the appropriate ``send`` and ``recv`` functions
    during the backward pass.
 3. In general we also use this context to store some metadata for each
    distributed autograd pass.

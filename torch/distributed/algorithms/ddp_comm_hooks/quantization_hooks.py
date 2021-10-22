@@ -65,7 +65,7 @@ def quantization_pertensor_hook(
     rank = process_group.rank() if process_group is not None else dist.get_rank()
     world_size = group_to_use.size()
 
-    tensor = bucket.get_tensor()
+    tensor = bucket.buffer()
 
     myObserver = torch.quantization.MinMaxObserver().cuda(tensor.device)
     myObserver(tensor)
@@ -144,7 +144,7 @@ def quantization_perchannel_hook(
     rank = process_group.rank() if process_group is not None else dist.get_rank()
     world_size = group_to_use.size()
 
-    tensor = bucket.get_tensor()
+    tensor = bucket.buffer()
 
     tensor_in_channels = (
         nn.functional.pad(

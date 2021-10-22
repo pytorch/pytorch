@@ -97,19 +97,12 @@ Tensor& mean_out_quantized_cpu(
   }
 #endif
   auto self_dequantized = self.dequantize();
-  auto result_dequantized =
-      at::native::mean_cpu_gpu(self_dequantized, dim, keepdim, opt_dtype);
+  auto result_dequantized = at::mean(self_dequantized, dim, keepdim, opt_dtype);
   result = at::quantize_per_tensor(
       result_dequantized,
       self.q_scale(),
       self.q_zero_point(),
       opt_dtype.value_or(self.scalar_type()));
-  return result;
-}
-
-Tensor mean_quantized_cpu(const Tensor& self, optional<ScalarType> dtype) {
-  Tensor result;
-  mean_out_quantized_cpu(self, IntArrayRef{}, false, dtype, result);
   return result;
 }
 

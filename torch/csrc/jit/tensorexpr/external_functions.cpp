@@ -5,6 +5,7 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/native/xnnpack/OpContext.h>
 #include <c10/util/irange.h>
+#include <torch/csrc/jit/tensorexpr/exceptions.h>
 #include <torch/csrc/jit/tensorexpr/external_functions_registry.h>
 
 namespace torch {
@@ -24,8 +25,8 @@ std::vector<at::Tensor> constructTensors(
   for (const auto i : c10::irange(bufs_num)) {
     buf_data_vec.push_back(buf_data[i]);
     buf_dims_vec.emplace_back();
-    // NOLINTNEXTLINE(clang-diagnostic-unused-variable,clang-analyzer-deadcode.DeadStores)
     for (const auto dim : c10::irange(buf_ranks[i])) {
+      (void)dim;
       buf_dims_vec[i].push_back(buf_dims[buf_dims_idx++]);
     }
     buf_dtypes_vec.push_back(static_cast<c10::ScalarType>(buf_dtypes[i]));
@@ -208,7 +209,7 @@ void nnc_prepacked_linear_clamp_run(
       constructTensors(bufs_num - 1, buf_data, buf_ranks, buf_dims, buf_dtypes);
 
   const at::Tensor& x = tensors[1];
-  const auto context = reinterpret_cast<LinearOpContext*>(buf_data[2]);
+  auto context = reinterpret_cast<LinearOpContext*>(buf_data[2]);
   at::Tensor output = context->run(x);
   memcpy(
       buf_data[0], output.data_ptr(), output.element_size() * output.numel());
@@ -228,7 +229,7 @@ void nnc_prepacked_conv2d_clamp_run(
       constructTensors(bufs_num - 1, buf_data, buf_ranks, buf_dims, buf_dtypes);
 
   const at::Tensor& x = tensors[1];
-  const auto context = reinterpret_cast<Conv2dOpContext*>(buf_data[2]);
+  auto context = reinterpret_cast<Conv2dOpContext*>(buf_data[2]);
   at::Tensor output = context->run(x);
   memcpy(
       buf_data[0], output.data_ptr(), output.element_size() * output.numel());

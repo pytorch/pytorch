@@ -239,7 +239,8 @@ def kl_div(input: Tensor, target: Tensor, size_average: Optional[bool] = ..., re
 
 
 def cross_entropy(input: Tensor, target: Tensor, weight: Optional[Tensor] = ..., size_average: Optional[bool] = ...,
-                  ignore_index: int = ..., reduce: Optional[bool] = ..., reduction: str = ...) -> Tensor: ...
+                  ignore_index: int = ..., reduce: Optional[bool] = ..., reduction: str = ...,
+                  label_smoothing: float = ...) -> Tensor: ...
 
 
 def binary_cross_entropy(input: Tensor, target: Tensor, weight: Optional[Tensor] = ...,
@@ -304,7 +305,7 @@ def upsample(input: Any, size: Optional[Any] = ..., scale_factor: Optional[Any] 
 
 
 def interpolate(input: Any, size: Optional[Any] = ..., scale_factor: Optional[Any] = ..., mode: str = ...,
-                align_corners: Optional[Any] = ...): ...
+                align_corners: Optional[Any] = ..., recompute_scale_factor: Optional[Any] = ...): ...
 
 
 def upsample_nearest(input: Any, size: Optional[Any] = ..., scale_factor: Optional[Any] = ...): ...

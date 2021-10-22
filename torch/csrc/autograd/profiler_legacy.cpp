@@ -277,6 +277,8 @@ void ProfilerThreadLocalState::popRange(const at::RecordFunction& fn, const bool
 void ProfilerThreadLocalState::reportMemoryUsage(
     void* /* unused */,
     int64_t alloc_size,
+    int64_t /* total_allocated, unused for legacy */,
+    int64_t /* total_reserved, unused for legacy */,
     c10::Device device) {
   if (config_.profile_memory && config_.state != ProfilerState::Disabled) {
     uint64_t thread_id = at::RecordFunction::currentThreadId();
@@ -300,17 +302,17 @@ std::string getNvtxStr(
     const std::vector<std::vector<int64_t>>& shapes) {
   if (sequence_nr >= -1 || shapes.size() > 0) {
     std::stringstream s;
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
     s << name.str();
 #endif
     if (sequence_nr >= 0) {
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
       s << ", seq = " << sequence_nr;
 #else
       s << name.str() << ", seq = " << sequence_nr;
 #endif
     } else if (sequence_nr == -1) {
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
       s << name.str();
 #endif
     }

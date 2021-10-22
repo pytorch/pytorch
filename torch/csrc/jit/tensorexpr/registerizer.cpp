@@ -7,9 +7,7 @@ namespace registerizer {
 
 // AccessInfo
 
-void AccessInfo::addStore(
-    const Store* store,
-    const std::shared_ptr<Scope>& scope) {
+void AccessInfo::addStore(StorePtr store, const std::shared_ptr<Scope>& scope) {
   block_ =
       block_ ? Block::getSharedParent(block_, scope->block()) : scope->block();
 
@@ -19,7 +17,8 @@ void AccessInfo::addStore(
   first_usage_ = first_usage_ ? block_->getEnclosedRoot(first_usage_) : store;
   last_usage_ = store;
 
-  store_cost_ = IRSimplifier::simplify(new Add(store_cost_, new IntImm(1)));
+  store_cost_ =
+      IRSimplifier::simplify(alloc<Add>(store_cost_, immLike(store_cost_, 1)));
   stores_.push_back(store);
 
   conditionId_ = scope->conditionId();
@@ -27,15 +26,16 @@ void AccessInfo::addStore(
 }
 
 void AccessInfo::addLoad(
-    const Load* load,
+    LoadPtr load,
     const std::shared_ptr<Scope>& scope,
-    const Stmt* usage) {
+    StmtPtr usage) {
   block_ =
       block_ ? Block::getSharedParent(block_, scope->block()) : scope->block();
   first_usage_ = first_usage_ ? block_->getEnclosedRoot(first_usage_) : usage;
   last_usage_ = usage;
 
-  load_cost_ = IRSimplifier::simplify(new Add(load_cost_, new IntImm(1)));
+  load_cost_ =
+      IRSimplifier::simplify(alloc<Add>(load_cost_, immLike(load_cost_, 1)));
   loads_.push_back(load);
 
   conditionId_ = scope->conditionId();
@@ -43,20 +43,27 @@ void AccessInfo::addLoad(
 }
 
 void AccessInfo::merge(const std::shared_ptr<AccessInfo>& other) {
-  TORCH_INTERNAL_ASSERT(hash_ == other->hash());
-  TORCH_INTERNAL_ASSERT(indices_.size() == other->indices().size());
+  TORCH_INTERNAL_ASSERT(
+      hash_ == other->hash(),
+      buildErrorMessage(
+          "Expected hashes to match in registerizer in the fuser."));
+  TORCH_INTERNAL_ASSERT(
+      indices_.size() == other->indices().size(),
+      buildErrorMessage(
+          "Expected ranks to match in registerizer in the fuser."));
 
   last_usage_ = other->last_usage();
-  for (auto* s : other->stores()) {
+  for (auto s : other->stores()) {
     stores_.push_back(s);
   }
-  for (auto* l : other->loads()) {
+  for (auto l : other->loads()) {
     loads_.push_back(l);
   }
 
   store_cost_ =
-      IRSimplifier::simplify(new Add(store_cost_, other->store_cost()));
-  load_cost_ = IRSimplifier::simplify(new Add(load_cost_, other->load_cost()));
+      IRSimplifier::simplify(alloc<Add>(store_cost_, other->store_cost()));
+  load_cost_ =
+      IRSimplifier::simplify(alloc<Add>(load_cost_, other->load_cost()));
 
   block_ = Block::getSharedParent(block_, other->block());
   // update first and last usage to be in the parent Block.
@@ -67,15 +74,18 @@ void AccessInfo::merge(const std::shared_ptr<AccessInfo>& other) {
 
 bool AccessInfo::overlaps(const std::shared_ptr<AccessInfo>& other) {
   // All accesses to a buf must have the same dimensionality.
-  TORCH_INTERNAL_ASSERT(indices_.size() == other->indices().size());
+  TORCH_INTERNAL_ASSERT(
+      indices_.size() == other->indices().size(),
+      buildErrorMessage(
+          "Expected ranks to match in registerizer in the fuser."));
 
-  const auto& other_indices = other->indices();
+  auto& other_indices = other->indices();
 
   // They don't overlap if there is a guaranteed difference in any
   // dimension.
   bool overlap = true;
   for (size_t i = 0; i < indices_.size(); ++i) {
-    const Expr* diff = new Sub(indices_[i], other_indices[i]);
+    ExprPtr diff = alloc<Sub>(indices_[i], other_indices[i]);
     diff = IRSimplifier::simplify(diff);
 
     if (diff->isConstant() && !immediateEquals(diff, 0)) {
@@ -87,9 +97,9 @@ bool AccessInfo::overlaps(const std::shared_ptr<AccessInfo>& other) {
   return overlap;
 }
 
-bool AccessInfo::dependsOnVar(const Var* v) {
+bool AccessInfo::dependsOnVar(VarPtr v) {
   VarFinder vf;
-  for (auto* i : indices_) {
+  for (auto i : indices_) {
     i->accept(&vf);
   }
 
@@ -107,10 +117,10 @@ std::shared_ptr<AccessInfo> AccessInfo::cloneWithHiddenInfo(
   newInfo->firstUsageOverlapped_ = orig->firstUsageOverlapped_;
   newInfo->store_cost_ = orig->store_cost_;
   newInfo->load_cost_ = orig->load_cost_;
-  for (auto* s : orig->stores_) {
+  for (auto s : orig->stores_) {
     newInfo->stores_.push_back(s);
   }
-  for (auto* s : orig->loads_) {
+  for (auto s : orig->loads_) {
     newInfo->loads_.push_back(s);
   }
 
@@ -121,7 +131,7 @@ std::shared_ptr<AccessInfo> AccessInfo::cloneWithHiddenInfo(
 
 void AccessInfo::print() const {
   std::cout << "Access: " << *buf_ << "{";
-  for (auto* i : indices_) {
+  for (auto i : indices_) {
     std::cout << *i << " ";
   }
   std::cout << "} stores: " << stores_.size() << " (" << *store_cost_ << ") -";
@@ -139,7 +149,7 @@ void Scope::closeAccess(const std::shared_ptr<AccessInfo>& info) {
   closedAccesses_.push_back(info);
 }
 
-AccessHashMap& Scope::getAccessMapByBuf(const Buf* b) {
+AccessHashMap& Scope::getAccessMapByBuf(BufPtr b) {
   auto it = openAccesses_.find(b);
   if (it == openAccesses_.end()) {
     // create and return
@@ -179,7 +189,7 @@ void RegisterizerAnalysis::closeAccessIntoScope(
   scope->closeAccess(info);
 }
 
-void RegisterizerAnalysis::visit(const For* v) {
+void RegisterizerAnalysis::visit(ForPtr v) {
   if (v->loop_options().is_gpu_block_index() ||
       v->loop_options().is_gpu_thread_index()) {
     throw malformed_input(
@@ -195,8 +205,8 @@ void RegisterizerAnalysis::visit(const For* v) {
   v->body()->accept(this);
   stmtStack_.pop_front();
 
-  const Expr* loopExtent =
-      IRSimplifier::simplify(new Sub(v->stop(), v->start()));
+  ExprPtr loopExtent =
+      IRSimplifier::simplify(alloc<Sub>(v->stop(), v->start()));
 
   // now we need to see which accesses we can hoist out of the for loop, their
   // costs should be multiplied by the loop extent.
@@ -227,7 +237,7 @@ void RegisterizerAnalysis::visit(const For* v) {
       bool closed = false;
       // If this access depends on a locally scoped variable, it cannot be
       // hosted out of the loop.
-      for (auto* v : currentScope_->localVars()) {
+      for (auto v : currentScope_->localVars()) {
         if (candidate->dependsOnVar(v)) {
           closeAccessIntoScope(candidate, currentScope_);
           closed = true;
@@ -263,10 +273,10 @@ void RegisterizerAnalysis::visit(const For* v) {
   mergeCurrentScopeIntoParent();
 };
 
-void RegisterizerAnalysis::visit(const Cond* v) {
-  const Expr* condition = v->condition();
-  Block* true_stmt = v->true_stmt();
-  Block* false_stmt = v->false_stmt();
+void RegisterizerAnalysis::visit(CondPtr v) {
+  ExprPtr condition = v->condition();
+  BlockPtr true_stmt = v->true_stmt();
+  BlockPtr false_stmt = v->false_stmt();
 
   stmtStack_.push_front(v);
 
@@ -303,10 +313,10 @@ void RegisterizerAnalysis::visit(const Cond* v) {
 // IfThenElses are just like Conds except they are not Stmts, which means no
 // registerization can occur internally. However, the first reference to an
 // access can occur within one if its visible outside the condition.
-void RegisterizerAnalysis::visit(const IfThenElse* v) {
-  const Expr* condition = v->condition();
-  const Expr* true_value = v->true_value();
-  const Expr* false_value = v->false_value();
+void RegisterizerAnalysis::visit(IfThenElsePtr v) {
+  ExprPtr condition = v->condition();
+  ExprPtr true_value = v->true_value();
+  ExprPtr false_value = v->false_value();
 
   // condition is in enclosing scope.
   condition->accept(this);
@@ -338,7 +348,7 @@ void RegisterizerAnalysis::visit(const IfThenElse* v) {
   }
 }
 
-void RegisterizerAnalysis::visit(const Let* v) {
+void RegisterizerAnalysis::visit(LetPtr v) {
   currentScope_->addLocalVar(v->var());
 
   stmtStack_.push_front(v);
@@ -346,7 +356,7 @@ void RegisterizerAnalysis::visit(const Let* v) {
   stmtStack_.pop_front();
 }
 
-void RegisterizerAnalysis::visit(const Block* v) {
+void RegisterizerAnalysis::visit(BlockPtr v) {
   auto prev_scope = currentScope_;
   if (currentScope_->block() != v) {
     currentScope_ = std::make_shared<Scope>(v, prev_scope);
@@ -354,7 +364,7 @@ void RegisterizerAnalysis::visit(const Block* v) {
 
   stmtStack_.push_front(v);
 
-  for (auto* s : *v) {
+  for (auto s : *v) {
     s->accept(this);
     if (currentScope_->block() != v) {
       // merge the inner block's accesses into this Block's accesses.
@@ -374,7 +384,7 @@ void RegisterizerAnalysis::visit(const Block* v) {
   }
 }
 
-void RegisterizerAnalysis::visit(const Store* v) {
+void RegisterizerAnalysis::visit(StorePtr v) {
   stmtStack_.push_front(v);
   v->value()->accept(this);
   stmtStack_.pop_front();
@@ -386,7 +396,7 @@ void RegisterizerAnalysis::visit(const Store* v) {
 
   // hash the Store:
   SimplifierHashType accessHash = hasher_.hash(v->buf());
-  for (auto* i : v->indices()) {
+  for (auto i : v->indices()) {
     accessHash = hasher_.hash_combine(accessHash, i);
   }
 
@@ -428,14 +438,14 @@ void RegisterizerAnalysis::visit(const Store* v) {
   }
 }
 
-void RegisterizerAnalysis::visit(const Load* v) {
+void RegisterizerAnalysis::visit(LoadPtr v) {
   if (v->indices().empty()) {
     // already a scalar.
     return;
   }
   // hash the Load:
   SimplifierHashType accessHash = hasher_.hash(v->buf());
-  for (auto* i : v->indices()) {
+  for (auto i : v->indices()) {
     accessHash = hasher_.hash_combine(accessHash, i);
   }
 
@@ -563,7 +573,7 @@ void RegisterizerAnalysis::mergeCurrentScopeIntoParent() {
   // copy across current open accesses, merging as necessary.
   // for each Buf with an open access:
   for (auto& pair : currentScope_->openAccesses()) {
-    const Buf* buf = pair.first;
+    BufPtr buf = pair.first;
     if (pair.second.empty()) {
       continue;
     }
@@ -607,7 +617,7 @@ void RegisterizerAnalysis::mergeCurrentScopeIntoParent() {
 
       // If this access depends on a locally scoped variable, it cannot be
       // lifted out of the loop.
-      for (auto* v : currentScope_->localVars()) {
+      for (auto v : currentScope_->localVars()) {
         if (candidate->dependsOnVar(v)) {
           closeAccessIntoScope(candidate, parent);
           handled = true;
@@ -640,7 +650,7 @@ std::vector<std::shared_ptr<AccessInfo>> RegisterizerAnalysis::getCandidates() {
 
 // RegisterizerReplacer
 
-const Expr* RegisterizerReplacer::mutate(const Load* v) {
+ExprPtr RegisterizerReplacer::mutate(LoadPtr v) {
   auto it = loadToAccess_.find(v);
   if (it == loadToAccess_.end()) {
     // This access cannot be registerized.
@@ -652,7 +662,7 @@ const Expr* RegisterizerReplacer::mutate(const Load* v) {
   return info->replacement().var;
 }
 
-Stmt* RegisterizerReplacer::mutate(const Store* v) {
+StmtPtr RegisterizerReplacer::mutate(StorePtr v) {
   if (eliminatedIntializers_.count(v) != 0) {
     // This store is the intializer for a scalar var that is already inserted.
     return nullptr;
@@ -666,22 +676,25 @@ Stmt* RegisterizerReplacer::mutate(const Store* v) {
 
   auto& info = it->second;
 
-  const Expr* new_val = v->value()->accept_mutator(this);
+  ExprPtr new_val = v->value()->accept_mutator(this);
 
-  return new Store(info->replacement().var_wrapper, {}, new_val);
+  v->set_value(new_val);
+  v->set_buf(info->replacement().var_wrapper);
+  v->set_indices({});
+  return v;
 }
 
-Stmt* RegisterizerReplacer::mutate(const Block* v) {
+StmtPtr RegisterizerReplacer::mutate(BlockPtr v) {
   auto& scope = parentToAccesses_[v];
 
-  std::vector<Stmt*> stmts;
-  for (Stmt* stmt : v->stmts()) {
+  std::vector<StmtPtr> stmts;
+  for (StmtPtr stmt : v->stmts()) {
     {
       // Insert the initializer for any Scalars scoped to this block.
       auto it = scope.initializerPoints_.find(stmt);
       if (it != scope.initializerPoints_.end()) {
         for (auto& info : it->second) {
-          Stmt* initializer =
+          StmtPtr initializer =
               info->replacement().initializer->accept_mutator(this);
           stmts.push_back(initializer);
         }
@@ -689,7 +702,7 @@ Stmt* RegisterizerReplacer::mutate(const Block* v) {
       }
     }
 
-    Stmt* stmt_new = stmt->accept_mutator(this);
+    StmtPtr stmt_new = stmt->accept_mutator(this);
     if (stmt_new) {
       if (stmt_new->get_parent()) {
         stmt_new = Stmt::clone(stmt_new);
@@ -702,8 +715,8 @@ Stmt* RegisterizerReplacer::mutate(const Block* v) {
       auto it = scope.finalizePoints_.find(stmt);
       if (it != scope.finalizePoints_.end()) {
         for (auto& info : it->second) {
-          Store* finalizer =
-              new Store(info->buf(), info->indices(), info->replacement().var);
+          StorePtr finalizer = alloc<Store>(
+              info->buf(), info->indices(), info->replacement().var);
           stmts.push_back(finalizer);
         }
         scope.finalizePoints_.erase(it);
@@ -711,14 +724,14 @@ Stmt* RegisterizerReplacer::mutate(const Block* v) {
     }
   }
 
-  return new Block(stmts);
+  return alloc<Block>(stmts);
 }
 
 void RegisterizerReplacer::buildReplacements() {
   // Traverse the list of replacements, creating vars and updating our local
   // maps.
   for (auto& info : infoSet_) {
-    Var* v = new Var(
+    VarPtr v = alloc<Var>(
         info->buf()->name_hint() + "_" +
             c10::to_string(getBufferAccessCount(info->buf())),
         info->buf()->dtype());
@@ -726,12 +739,13 @@ void RegisterizerReplacer::buildReplacements() {
     info->replacement().var = v;
 
     // we need to wrap the Var in a Buf so we can Load or Store it.
-    info->replacement().var_wrapper = new Buf(v, {}, info->buf()->dtype());
+    info->replacement().var_wrapper =
+        alloc<Buf>(v, std::vector<ExprPtr>({}), info->buf()->dtype());
 
     bool first = true;
-    for (auto* s : info->stores()) {
+    for (auto s : info->stores()) {
       if (first && info->first_usage() == s && !info->firstUsageOverlapped()) {
-        info->replacement().initializer = new Let(v, s->value());
+        info->replacement().initializer = alloc<Let>(v, s->value());
         eliminatedIntializers_.insert(s);
       } else {
         storeToAccess_[s] = info;
@@ -740,7 +754,7 @@ void RegisterizerReplacer::buildReplacements() {
       first = false;
     }
 
-    for (auto* s : info->loads()) {
+    for (auto s : info->loads()) {
       loadToAccess_[s] = info;
     }
 
@@ -755,8 +769,8 @@ void RegisterizerReplacer::buildReplacements() {
 
     // create a default initializer by reading the access.
     if (info->replacement().initializer == nullptr) {
-      info->replacement().initializer = new Let(
-          v, new Load(info->buf()->dtype(), info->buf(), info->indices()));
+      info->replacement().initializer = alloc<Let>(
+          v, alloc<Load>(info->buf()->dtype(), info->buf(), info->indices()));
     }
   }
 }
@@ -764,13 +778,13 @@ void RegisterizerReplacer::buildReplacements() {
 } // namespace registerizer
 
 // Apply scalar replacement to all accesses in s.
-Stmt* registerize(Stmt* s) {
+StmtPtr registerize(StmtPtr s) {
   s = IRSimplifier::simplify(s);
 
   // The outermost node must be a Block so we have somewhere to put outer scope
   // scalars.
-  if (!dynamic_cast<Block*>(s)) {
-    s = new Block({s});
+  if (!to<Block>(s)) {
+    s = alloc<Block>(std::vector<StmtPtr>({s}));
   }
   registerizer::RegisterizerAnalysis analysis;
   s->accept(&analysis);

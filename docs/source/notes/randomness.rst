@@ -150,6 +150,6 @@ Use :meth:`worker_init_fn` and `generator` to preserve reproducibility::
         train_dataset,
         batch_size=batch_size,
         num_workers=num_workers,
-        worker_init_fn=seed_worker
+        worker_init_fn=seed_worker,
         generator=g,
     )

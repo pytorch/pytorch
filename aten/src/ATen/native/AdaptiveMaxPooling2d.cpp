@@ -1,23 +1,25 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/AdaptivePooling.h>
+#include <c10/util/irange.h>
 
 
 namespace at {
 namespace meta {
 TORCH_META_FUNC(adaptive_max_pool2d) (const Tensor& input, IntArrayRef output_size) {
-  for (int64_t i = 0; i < input.ndimension(); i++) {
+  int ndim = input.ndimension();
+  TORCH_CHECK(ndim == 3 || ndim == 4,
+              "adaptive_max_pool2d(): Expected 3D or 4D tensor, but got: ",
+              input.sizes());
+  for (const auto i : c10::irange(1, ndim)) {
     TORCH_CHECK(input.size(i) > 0,
-        "adaptive_max_pool2d: expected input to have non-empty spatial dimensions, "
+        "adaptive_max_pool2d(): Expected input to have non-zero size for non-batch dimensions, "
         "but input has sizes ", input.sizes(), " with dimension ", i,
         " being empty");
   }
 
-  TORCH_CHECK((input.ndimension() == 3 || input.ndimension() == 4),
-      "non-empty 3D or 4D (batch mode) tensor expected for input");
-
   TORCH_CHECK(output_size.size() == 2,
-      "adaptive_max_pool2d: internal error: output_size.size() must be 2");
+      "adaptive_max_pool2d(): internal error: output_size.size() must be 2");
 
   int dimH = 1;
   int64_t sizeB = 1;
@@ -48,15 +50,14 @@ TORCH_META_FUNC(adaptive_max_pool2d) (const Tensor& input, IntArrayRef output_si
 TORCH_META_FUNC(adaptive_max_pool2d_backward)
 (const Tensor& grad_output, const Tensor& input, const Tensor& indices) {
   int64_t ndim = grad_output.ndimension();
-  for (int64_t i = 0; i < ndim; i++) {
+  TORCH_CHECK(ndim == 3 || ndim == 4,
+    "adaptive_max_pooling2d_backward(): Expected 3D or 4D grad_output, but got: ", grad_output.sizes());
+  for (const auto i : c10::irange(1, ndim)) {
     TORCH_CHECK(grad_output.size(i) > 0,
-      "adaptive_max_pooling2d_backward(): expected grad_output to have non-empty spatial dimensions, "
+      "adaptive_max_pooling2d_backward(): Expected grad_output to have non-zero size for non-batch dimensions, "
       "but grad_output has sizes ", grad_output.sizes(), " with dimension ", i,
       " being empty");
   }
-
-  TORCH_CHECK((ndim == 3 || ndim == 4),
-    "non-empty 3D or 4D (batch mode) tensor expected for grad_output");
 
   TORCH_CHECK(input.dtype() == grad_output.dtype(),
     "expected dtype ", input.dtype(), " for `grad_output` but got dtype ", grad_output.dtype());

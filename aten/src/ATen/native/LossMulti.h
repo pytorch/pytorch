@@ -6,7 +6,7 @@
 
 namespace at { namespace native {
 namespace {
-  static void multilabel_margin_loss_shape_check(
+  static C10_UNUSED void multilabel_margin_loss_shape_check(
     int64_t& nframe,
     int64_t& dim,
     const int64_t& ndims,
@@ -41,7 +41,7 @@ namespace {
     }
   }
 
-  static void multi_margin_loss_shape_check(
+  static C10_UNUSED void multi_margin_loss_shape_check(
     int64_t& nframe,
     int64_t& dim,
     const int64_t& ndims,

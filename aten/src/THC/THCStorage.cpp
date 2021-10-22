@@ -4,6 +4,7 @@
 #include <TH/THHalf.h>
 
 #include <new>
+#include <c10/cuda/CUDACachingAllocator.h>
 
 #include <THC/generic/THCStorage.cpp>
 #include <THC/THCGenerateAllTypes.h>
@@ -18,41 +19,17 @@
 #include <THC/THCGenerateBFloat16Type.h>
 
 #include <c10/util/intrusive_ptr.h>
+#include <ATen/native/cuda/Resize.h>
 
 void THCStorage_resizeBytes(
     THCState* state,
     THCStorage* self,
-    ptrdiff_t size_bytes) {
-  THArgCheck(size_bytes >= 0, 2, "invalid size");
-  THAssert(self->allocator() != nullptr);
-  int device;
-  THCudaCheck(cudaGetDevice(&device));
-
-  if (!self->resizable())
-    THError("Trying to resize storage that is not resizable");
-
-  if (size_bytes == 0) {
-    self->set_data_ptr_noswap(at::DataPtr(nullptr, at::Device(at::DeviceType::CUDA, device)));
-    self->set_nbytes(0);
-  } else {
-    at::DataPtr data = self->allocator()->allocate(size_bytes);
-
-    if (self->data_ptr()) {
-      // Enable p2p access when the memcpy is across devices
-      THCState_getPeerToPeerAccess(state, device, THCStorage_getDevice(state, self));
-
-      THCudaCheck(cudaMemcpyAsync(
-          data.get(),
-          self->data(),
-          THMin(self->nbytes(), size_bytes),
-          cudaMemcpyDeviceToDevice,
-          c10::cuda::getCurrentCUDAStream()));
-    }
-
-    // Destructively overwrite data_ptr
-    self->set_data_ptr_noswap(std::move(data));
-    self->set_nbytes(size_bytes);
-  }
+    ptrdiff_t size_bytes_i) {
+  TORCH_CHECK(!c10::overflows<size_t>(size_bytes_i),
+              "Requested storage size (", size_bytes_i,
+              ") cannot be represented as a size_t");
+  const auto size_bytes = static_cast<size_t>(size_bytes_i);
+  at::native::resize_bytes_cuda(self, size_bytes);
 }
 
 int THCStorage_getDevice(THCState* state, const THCStorage* storage) {

@@ -220,11 +220,22 @@ TORCH_API bool aliasAnalysisHasSpecialCaseFor(c10::Symbol sym);
 // string.
 template <typename Func>
 c10::optional<Operator> OperatorGenerator(
-    torch::detail::SelectiveStr<true> schema_str,
+    const char* schema_str,
     Func&& op,
     AliasAnalysisKind alias_analysis) {
   return c10::optional<Operator>(Operator(
       std::string(schema_str), std::forward<Func>(op), alias_analysis));
+}
+
+template <typename Func>
+c10::optional<Operator> OperatorGenerator(
+    torch::detail::SelectiveStr<true> schema_str,
+    Func&& op,
+    AliasAnalysisKind alias_analysis) {
+  return OperatorGenerator(
+      static_cast<const char*>(schema_str),
+      std::forward<Func>(op),
+      alias_analysis);
 }
 
 template <typename Func>

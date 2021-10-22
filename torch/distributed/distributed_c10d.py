@@ -1,36 +1,40 @@
 import contextlib
 import io
 import logging
+import os
 import pickle
 import time
 import warnings
 from datetime import timedelta
-from typing import Dict, Optional, Tuple, Union
+from typing import Callable, Dict, Optional, Tuple, Union
 
 import torch
 from torch._C._distributed_c10d import (
-    AllreduceOptions,
     AllreduceCoalescedOptions,
+    AllreduceOptions,
     AllToAllOptions,
     BarrierOptions,
     BroadcastOptions,
     GatherOptions,
     PrefixStore,
     ProcessGroup,
-    ReduceOptions,
     ReduceOp,
+    ReduceOptions,
     ReduceScatterOptions,
     ScatterOptions,
     Store,
+    _DistributedDebugLevel,
+    _get_debug_mode,
 )
-from torch._C._distributed_c10d import _get_debug_mode, _DistributedDebugLevel
 from torch._six import string_classes
+
+from .constants import default_pg_timeout
+from .rendezvous import register_rendezvous_handler, rendezvous  # noqa: F401
+
 
 # This module is wildcard imported from torch.distributed.
 # TODO: specify __all__
 
-from .constants import default_pg_timeout
-from .rendezvous import rendezvous, register_rendezvous_handler  # noqa: F401
 
 _MPI_AVAILABLE = True
 _NCCL_AVAILABLE = True
@@ -103,6 +107,7 @@ class Backend(object):
     NCCL = "nccl"
     MPI = "mpi"
     TCP = "tcp"
+    _plugins: Dict[str, Callable] = {}
 
     def __new__(cls, name: str):
         if not isinstance(name, string_classes):
@@ -138,7 +143,15 @@ class Backend(object):
         .. note:: This support of 3rd party backend is experimental and subject to change.
 
         """
-        setattr(Backend, name.upper(), func)
+        assert not hasattr(Backend, name.upper()), (
+            f"{name.upper()} c10d backend already exist"
+        )
+        assert name.upper() not in Backend._plugins, (
+            f"{name.upper()} c10d backend creator function already exist"
+        )
+
+        setattr(Backend, name.upper(), name.upper())
+        Backend._plugins[name.upper()] = func
 
 
 # `_backend`, `dist_backend`, and `reduce_op` are here to maintain backward
@@ -244,7 +257,9 @@ def _store_based_barrier(rank, store, timeout):
                 )
             )
 
-    logger.info(f"Rank {rank}: Completed store-based barrier for key:{store_key} with {world_size} nodes.")
+    logger.info(
+        f"Rank {rank}: Completed store-based barrier for key:{store_key} with {world_size} nodes."
+    )
 
 
 def _rank_not_in_group(group: ProcessGroup):
@@ -382,6 +397,18 @@ def is_initialized():
     Checking if the default process group has been initialized
     """
     return GroupMember.WORLD is not None
+
+
+def is_torchelastic_launched():
+    """
+    Checks whether this process was launched with ``torch.distributed.elastic``
+    (aka torchelastic). The existence of ``TORCHELASTIC_RUN_ID`` environment
+    variable is used as a proxy to determine whether the current process
+    was launched with torchelastic. This is a reasonable proxy since
+    ``TORCHELASTIC_RUN_ID`` maps to the rendezvous id which is always a
+    non-null value indicating the job id for peer discovery purposes..
+    """
+    return os.getenv("TORCHELASTIC_RUN_ID") is not None
 
 
 def _get_default_group():
@@ -721,7 +748,10 @@ def _new_process_group_helper(
             _pg_map[pg] = (Backend.NCCL, store)
             _pg_names[pg] = group_name
         else:
-            pg = getattr(Backend, backend.upper())(
+            assert backend.upper() in Backend._plugins, (
+                f"unknown c10d backend type {backend.upper()}"
+            )
+            pg = Backend._plugins[backend.upper()](
                 prefix_store, rank, world_size, timeout
             )
             _pg_map[pg] = (backend, store)
@@ -782,7 +812,8 @@ def destroy_process_group(group=None):
 
 def get_rank(group=None):
     """
-    Returns the rank of current process group
+    Returns the rank of the current process in the provided ``group`` or the
+    default group if none was provided.
 
     Rank is a unique identifier assigned to each process within a distributed
     process group. They are always consecutive integers ranging from 0 to
@@ -1324,7 +1355,7 @@ def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
         work = group.allreduce_coalesced(tensors, opts)
 
     if async_op:
-        return work
+        return work.get_future()
     else:
         work.wait()
 
@@ -1500,8 +1531,11 @@ def _object_to_tensor(obj):
     f = io.BytesIO()
     _pickler(f).dump(obj)
     byte_storage = torch.ByteStorage.from_buffer(f.getvalue())  # type: ignore[attr-defined]
-    byte_tensor = torch.tensor(byte_storage, dtype=torch.uint8)
-    local_size = torch.tensor([byte_tensor.numel()], dtype=torch.long)
+    # Do not replace `torch.ByteTensor` or `torch.LongTensor` with torch.tensor and specifying dtype.
+    # Otherwise, it will casue 100X slowdown.
+    # See: https://github.com/pytorch/pytorch/issues/65696
+    byte_tensor = torch.ByteTensor(byte_storage)
+    local_size = torch.LongTensor([byte_tensor.numel()])
     return byte_tensor, local_size
 
 
@@ -1778,8 +1812,8 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
     is_nccl_backend = group_backend == Backend.NCCL
     current_device = None
     if device is not None:
-        if is_nccl_backend and device.type != 'cuda':
-            raise ValueError('device type must be cuda for nccl backend')
+        if is_nccl_backend and device.type != "cuda":
+            raise ValueError("device type must be cuda for nccl backend")
         current_device = device
     else:
         current_device = torch.device("cpu")
@@ -2126,7 +2160,7 @@ def all_gather_coalesced(
         work = group.allgather_coalesced(output_tensor_lists, input_tensor_list)
 
     if async_op:
-        return work
+        return work.get_future()
     else:
         work.wait()
 
@@ -2229,7 +2263,9 @@ def scatter(tensor, scatter_list=None, src=0, group=None, async_op=False):
 
     if _rank_not_in_group(group):
         return
-    scatter_list = [t if not t.is_complex() else torch.view_as_real(t) for t in scatter_list]
+    scatter_list = [
+        t if not t.is_complex() else torch.view_as_real(t) for t in scatter_list
+    ]
     tensor = tensor if not tensor.is_complex() else torch.view_as_real(tensor)
 
     my_rank = get_rank()
@@ -3026,9 +3062,7 @@ def new_subgroups(
         if rank in ranks_in_subgroup:
             cur_subgroup = subgroup
             logger.info(
-                "Rank {} is assigned to subgroup {}".format(
-                    rank, ranks_in_subgroup
-                )
+                "Rank {} is assigned to subgroup {}".format(rank, ranks_in_subgroup)
             )
 
     return cur_subgroup, subgroups
@@ -3139,8 +3173,6 @@ def new_subgroups_by_enumeration(
             rank_to_ranks_dict[rank] = ranks
             if my_rank == rank:
                 cur_subgroup = subgroup
-                logging.info(
-                    "Rank {} is assigned to subgroup {}".format(rank, ranks)
-                )
+                logging.info("Rank {} is assigned to subgroup {}".format(rank, ranks))
 
     return cur_subgroup, subgroups

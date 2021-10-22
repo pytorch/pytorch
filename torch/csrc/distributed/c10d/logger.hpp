@@ -12,7 +12,8 @@ class TORCH_API Logger {
       const std::string& module_name,
       const std::vector<int>& device_ids,
       int output_device,
-      bool broadcast_buffers);
+      bool broadcast_buffers,
+      bool has_sync_bn);
 
   void set_static_graph();
 
@@ -37,6 +38,10 @@ class TORCH_API Logger {
   void set_parameter_stats();
   // Get size of each bucket (Bytes).
   std::vector<int> get_bucket_sizes();
+  // Get bucket size limits specified during DDP construction.
+  std::vector<int> get_bucket_size_limits();
+  // Get variable indices for each bucket.
+  std::vector<std::vector<size_t>> get_per_bucket_variable_indices();
   // Set comm. hook, if used
   void set_comm_hook(const std::string& hook);
   // Set running with uneven input detection (model.join() context manager)
@@ -53,6 +58,13 @@ class TORCH_API Logger {
       Timer& timer,
       Timer::Event start_event,
       Timer::Event end_event);
+
+  // Set the absolute time of the event that has been recorded in reducer.
+  void set_event_time(
+    int64_t& event_time,
+    Timer& timer,
+    Timer::Event event
+  );
   // Set stats that can be collected only during
   // training loop. It is called at the beginning of forward call
   // to record the run time stats of sampled iterations that previouly ran.
@@ -72,6 +84,9 @@ class TORCH_API Logger {
     ddp_logging_data_->ints_map["has_error"] = 1;
     auto err = c10::str(ddp_error, args...);
     ddp_logging_data_->strs_map["error"] = err;
+    // Report the iteration we are erroring at so user knows how many examples
+    // successfully processed before this error was hit.
+    ddp_logging_data_->ints_map["iteration"] = reducer_->num_iterations_;
     at::LogPyTorchDDPUsage(*ddp_logging_data_);
   }
 
@@ -80,6 +95,8 @@ class TORCH_API Logger {
   // optimization.
   void log_if_graph_static(bool is_static) {
     ddp_logging_data_->ints_map["can_set_static_graph"] = is_static;
+    // It is useful to report the iteration that training finished at.
+    ddp_logging_data_->ints_map["iteration"] = reducer_->num_iterations_;
     at::LogPyTorchDDPUsage(*ddp_logging_data_);
   }
 

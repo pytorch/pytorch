@@ -325,6 +325,17 @@ Tensor run(
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   xnn_status setup_status;
 
+  /*
+   * Input Pointer Caching:
+   * Previously, we cached the input/output pointers and dimension parameters
+   * so that if the same pointers and parameters are used, this setup could be
+   * skipped.
+   * However, XNNPack has integrated offsets with its indirection buffer, so the
+   * buffer does not need to be recalculated even if activation tensor pointer
+   * changes as long as tensor dimensions are the same. Thus, the aforementioned
+   * manual caching is not needed here.
+   */
+
   if (context.transposed_) {
     setup_status = xnn_setup_deconvolution2d_nhwc_f32(
       context.op.get(),                                      // operator
@@ -412,6 +423,21 @@ Tensor conv2d_clamp_run(
     const Tensor& input,
     const c10::intrusive_ptr<xnnpack::Conv2dOpContext>& op_context) {
   return op_context->run(input);
+}
+
+// Op is registered to have Any argument as we plan to reuse it for prepacked conv2d of other backends
+std::tuple<IntArrayRef, c10::optional<IntArrayRef>, IntArrayRef, IntArrayRef, IntArrayRef, int64_t>
+unpack_prepacked_sizes_conv2d(const IValue& ivalue) {
+  auto op_context = ivalue.toCustomClass<xnnpack::Conv2dOpContext>();
+  const auto tuple = op_context->unpack();
+  const auto& bias = std::get<1>(tuple);
+  return std::make_tuple(
+      std::get<0>(tuple).sizes(),
+      (bias && bias->defined()) ? c10::optional<IntArrayRef>(bias->sizes()) : c10::nullopt,
+      std::get<2>(tuple),
+      std::get<3>(tuple),
+      std::get<4>(tuple),
+      std::get<5>(tuple));
 }
 
 Tensor conv2d_transpose_clamp_run(

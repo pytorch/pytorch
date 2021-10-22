@@ -15,7 +15,7 @@ import tempfile
 import time
 import unittest
 from itertools import product
-from typing import Dict, List, Union, Callable
+from typing import Callable, Dict, List, Union
 from unittest import mock
 from unittest.mock import patch
 
@@ -24,24 +24,25 @@ import torch.multiprocessing as mp
 from torch.distributed.elastic.multiprocessing import ProcessFailure, start_processes
 from torch.distributed.elastic.multiprocessing.api import (
     MultiprocessContext,
-    SignalException,
     RunProcsResult,
+    SignalException,
     Std,
     _validate_full_rank,
-    to_map,
     _wrap,
+    to_map,
 )
 from torch.distributed.elastic.multiprocessing.errors.error_handler import _write_error
 from torch.testing._internal.common_utils import (
+    IS_IN_CI,
+    IS_MACOS,
+    IS_WINDOWS,
     NO_MULTIPROCESSING_SPAWN,
     TEST_WITH_ASAN,
+    TEST_WITH_DEV_DBG_ASAN,
     TEST_WITH_TSAN,
-    IS_IN_CI,
-    IS_WINDOWS,
-    IS_MACOS,
+    run_tests,
     sandcastle_skip_if,
 )
-from torch.testing._internal.common_utils import run_tests
 
 
 class RunProcResultsTest(unittest.TestCase):
@@ -222,15 +223,12 @@ def start_processes_zombie_test(
 
 
 # tests incompatible with tsan or asan
-if not (TEST_WITH_ASAN or TEST_WITH_TSAN or IS_WINDOWS or IS_MACOS):
+if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
+
     class StartProcessesTest(unittest.TestCase):
         def setUp(self):
             self.test_dir = tempfile.mkdtemp(prefix=f"{self.__class__.__name__}_")
-
-            if NO_MULTIPROCESSING_SPAWN:  # python 2.7 doesn't have spawn
-                self._start_methods = ["fork"]
-            else:
-                self._start_methods = ["fork", "spawn"]
+            self._start_methods = ["spawn"]
 
         def tearDown(self):
             shutil.rmtree(self.test_dir)
@@ -254,12 +252,15 @@ if not (TEST_WITH_ASAN or TEST_WITH_TSAN or IS_WINDOWS or IS_MACOS):
 
         def test_to_map(self):
             local_world_size = 2
-            self.assertEqual({0: Std.OUT, 1: Std.OUT}, to_map(Std.OUT, local_world_size))
+            self.assertEqual(
+                {0: Std.OUT, 1: Std.OUT}, to_map(Std.OUT, local_world_size)
+            )
             self.assertEqual(
                 {0: Std.NONE, 1: Std.OUT}, to_map({1: Std.OUT}, local_world_size)
             )
             self.assertEqual(
-                {0: Std.ERR, 1: Std.OUT}, to_map({0: Std.ERR, 1: Std.OUT}, local_world_size)
+                {0: Std.ERR, 1: Std.OUT},
+                to_map({0: Std.ERR, 1: Std.OUT}, local_world_size),
             )
 
         def test_invalid_log_dir(self):
@@ -316,7 +317,7 @@ if not (TEST_WITH_ASAN or TEST_WITH_TSAN or IS_WINDOWS or IS_MACOS):
                 args={0: (1,)},
                 envs={0: {}},
                 log_dir=self.log_dir(),
-                start_method="fork",
+                start_method="spawn",
             )
 
             self.assertIsNone(pc.wait(timeout=0.1, period=0.01))
@@ -331,7 +332,7 @@ if not (TEST_WITH_ASAN or TEST_WITH_TSAN or IS_WINDOWS or IS_MACOS):
                 args={0: (1,)},
                 envs={0: {}},
                 log_dir=self.log_dir(),
-                start_method="fork",
+                start_method="spawn",
             )
 
             pids = pc.pids()
@@ -385,9 +386,7 @@ if not (TEST_WITH_ASAN or TEST_WITH_TSAN or IS_WINDOWS or IS_MACOS):
                     results = pc.wait(period=0.1)
                     self.assertEqual({0: None, 1: None}, results.return_values)
 
-        @sandcastle_skip_if(
-            TEST_WITH_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan or asan"
-        )
+        @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "tests incompatible with asan")
         def test_function_large_ret_val(self):
             # python multiprocessing.queue module uses pipes and actually PipedQueues
             # This means that if a single object is greater than a pipe size
@@ -442,7 +441,9 @@ if not (TEST_WITH_ASAN or TEST_WITH_TSAN or IS_WINDOWS or IS_MACOS):
                     self.assertEqual(1, failure.exitcode)
                     self.assertEqual("<N/A>", failure.signal_name())
                     self.assertEqual(pc.pids()[0], failure.pid)
-                    self.assertEqual(os.path.join(log_dir, "0", "error.json"), error_file)
+                    self.assertEqual(
+                        os.path.join(log_dir, "0", "error.json"), error_file
+                    )
                     self.assertEqual(
                         int(error_file_data["message"]["extraInfo"]["timestamp"]),
                         int(failure.timestamp),
@@ -544,17 +545,22 @@ if not (TEST_WITH_ASAN or TEST_WITH_TSAN or IS_WINDOWS or IS_MACOS):
                 run_result = mp_context._poll()
                 self.assertEqual(1, len(run_result.failures))
                 failure = run_result.failures[0]
-                self.assertEqual("Signal 1 (SIGHUP) received by PID 123", failure.message)
+                self.assertEqual(
+                    "Signal 1 (SIGHUP) received by PID 123", failure.message
+                )
 
 
 # tests incompatible with tsan or asan, the redirect functionality does not work on macos or windows
-if not (TEST_WITH_ASAN or TEST_WITH_TSAN or IS_WINDOWS or IS_MACOS):
+if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
+
     class StartProcessesListTest(StartProcessesTest):
         ########################################
         # start_processes as binary tests
         ########################################
         def test_function(self):
-            for start_method, redirs in product(self._start_methods, redirects_oss_test()):
+            for start_method, redirs in product(
+                self._start_methods, redirects_oss_test()
+            ):
                 with self.subTest(start_method=start_method, redirs=redirs):
                     pc = start_processes(
                         name="echo",
@@ -629,7 +635,7 @@ if not (TEST_WITH_ASAN or TEST_WITH_TSAN or IS_WINDOWS or IS_MACOS):
                 args={0: ("hello",), 1: ("world",)},
                 envs={0: {"RANK": "0"}, 1: {"RANK": "1"}},
                 log_dir=self.log_dir(),
-                start_method="fork",
+                start_method="spawn",
                 redirects={0: Std.ERR, 1: Std.NONE},
                 tee={0: Std.OUT, 1: Std.ERR},
             )
@@ -646,7 +652,8 @@ if not (TEST_WITH_ASAN or TEST_WITH_TSAN or IS_WINDOWS or IS_MACOS):
 
 
 # tests incompatible with tsan or asan, the redirect functionality does not work on macos or windows
-if not (TEST_WITH_ASAN or TEST_WITH_TSAN or IS_WINDOWS or IS_MACOS or IS_IN_CI):
+if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS or IS_IN_CI):
+
     class StartProcessesNotCITest(StartProcessesTest):
         def test_wrap_bad(self):
             none = ""
@@ -696,7 +703,11 @@ if not (TEST_WITH_ASAN or TEST_WITH_TSAN or IS_WINDOWS or IS_MACOS or IS_IN_CI):
 
             failure = results.failures[0]
             self.assertNotEqual(signal.SIGSEGV, failure.exitcode)
-            self.assertEqual("SIGSEGV", failure.signal_name())
+            if TEST_WITH_ASAN or TEST_WITH_TSAN:
+                # ASAN/TSAN exit code is 1.
+                self.assertEqual("<N/A>", failure.signal_name())
+            else:
+                self.assertEqual("SIGSEGV", failure.signal_name())
             self.assertEqual("<NONE>", failure.error_file_data["message"])
 
         def test_function_redirect_and_tee(self):
@@ -709,7 +720,7 @@ if not (TEST_WITH_ASAN or TEST_WITH_TSAN or IS_WINDOWS or IS_MACOS or IS_IN_CI):
                         args={0: ("hello",), 1: ("world",)},
                         envs={0: {"RANK": "0"}, 1: {"RANK": "1"}},
                         log_dir=log_dir,
-                        start_method="fork",
+                        start_method="spawn",
                         redirects={0: Std.ERR, 1: Std.NONE},
                         tee={0: Std.OUT, 1: Std.ERR},
                     )
@@ -795,7 +806,8 @@ if not (TEST_WITH_ASAN or TEST_WITH_TSAN or IS_WINDOWS or IS_MACOS or IS_IN_CI):
                     self.assertEqual(pc.pids()[0], failure.pid)
                     self.assertEqual("<N/A>", error_file)
                     self.assertEqual(
-                        f"Process failed with exitcode {FAIL}", failure.message
+                        "To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html",
+                        failure.message,
                     )
                     self.assertLessEqual(failure.timestamp, int(time.time()))
 

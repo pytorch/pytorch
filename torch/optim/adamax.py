@@ -4,9 +4,31 @@ from .optimizer import Optimizer
 
 
 class Adamax(Optimizer):
-    """Implements Adamax algorithm (a variant of Adam based on infinity norm).
+    r"""Implements Adamax algorithm (a variant of Adam based on infinity norm).
 
-    It has been proposed in `Adam: A Method for Stochastic Optimization`__.
+    .. math::
+       \begin{aligned}
+            &\rule{110mm}{0.4pt}                                                                 \\
+            &\textbf{input}      : \gamma \text{ (lr)}, \beta_1, \beta_2
+                \text{ (betas)},\theta_0 \text{ (params)},f(\theta) \text{ (objective)},
+                \: \lambda \text{ (weight decay)},                                                \\
+            &\hspace{13mm}    \epsilon \text{ (epsilon)}                                          \\
+            &\textbf{initialize} :  m_0 \leftarrow 0 \text{ ( first moment)},
+                u_0 \leftarrow 0 \text{ ( infinity norm)}                                 \\[-1.ex]
+            &\rule{110mm}{0.4pt}                                                                 \\
+            &\textbf{for} \: t=1 \: \textbf{to} \: \ldots \: \textbf{do}                         \\
+            &\hspace{5mm}g_t           \leftarrow   \nabla_{\theta} f_t (\theta_{t-1})           \\
+            &\hspace{5mm}if \: \lambda \neq 0                                                    \\
+            &\hspace{10mm} g_t \leftarrow g_t + \lambda  \theta_{t-1}                            \\
+            &\hspace{5mm}m_t      \leftarrow   \beta_1 m_{t-1} + (1 - \beta_1) g_t               \\
+            &\hspace{5mm}u_t      \leftarrow   \mathrm{max}(\beta_2 u_{t-1}, |g_{t}|+\epsilon)   \\
+            &\hspace{5mm}\theta_t \leftarrow \theta_{t-1} - \frac{\gamma m_t}{(1-\beta^t_1) u_t} \\
+            &\rule{110mm}{0.4pt}                                                          \\[-1.ex]
+            &\bf{return} \:  \theta_t                                                     \\[-1.ex]
+            &\rule{110mm}{0.4pt}                                                          \\[-1.ex]
+       \end{aligned}
+
+    For further details regarding the algorithm we refer to `Adam: A Method for Stochastic Optimization`_.
 
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
@@ -18,7 +40,8 @@ class Adamax(Optimizer):
             numerical stability (default: 1e-8)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
 
-    __ https://arxiv.org/abs/1412.6980
+    .. _Adam\: A Method for Stochastic Optimization:
+        https://arxiv.org/abs/1412.6980
     """
 
     def __init__(self, params, lr=2e-3, betas=(0.9, 0.999), eps=1e-8,

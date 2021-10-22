@@ -8,11 +8,16 @@ from .helper_functions import get_dyn_range, mark_as_int8_layer
 @tensorrt_converter(torch.mul)
 @tensorrt_converter(operator.mul)
 def mul(network, target, args, kwargs, layer_name):
-    assert len(args) == 2
-    if not all(isinstance(arg, trt.tensorrt.ITensor) for arg in args):
+    # operator.mul
+    if len(kwargs) == 0:
+        lhs_val, rhs_val = args
+    else:
+        # torch.mul
+        lhs_val, rhs_val = kwargs["input"], kwargs["other"]
+
+    if not all(isinstance(arg, trt.tensorrt.ITensor) for arg in [lhs_val, rhs_val]):
         raise RuntimeError('mul() received an input that is not part of the TensorRT region!')
 
-    lhs_val, rhs_val = args
     layer = network.add_elementwise(lhs_val, rhs_val, trt.ElementWiseOperation.PROD)
     layer.name = layer_name
 

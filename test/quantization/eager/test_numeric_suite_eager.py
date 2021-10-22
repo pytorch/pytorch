@@ -1,7 +1,9 @@
+# Owner(s): ["oncall: quantization"]
+
 import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
-from torch.quantization import (
+from torch.ao.quantization import (
     DeQuantStub,
     QuantStub,
     convert,
@@ -10,7 +12,7 @@ from torch.quantization import (
     quantize,
     quantize_dynamic,
 )
-from torch.quantization._numeric_suite import (
+from torch.ao.ns._numeric_suite import (
     OutputLogger,
     Shadow,
     ShadowLogger,
@@ -277,7 +279,7 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
         qengine = torch.backends.quantized.engine
 
         model = ModelWithFunctionals().eval()
-        model.qconfig = torch.quantization.get_default_qconfig("fbgemm")
+        model.qconfig = torch.ao.quantization.get_default_qconfig("fbgemm")
         q_model = prepare(model, inplace=False)
         q_model(self.img_data_2d[0][0])
         q_model = convert(q_model)
@@ -411,7 +413,7 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
         qengine = torch.backends.quantized.engine
 
         model = ModelWithFunctionals().eval()
-        model.qconfig = torch.quantization.get_default_qconfig("fbgemm")
+        model.qconfig = torch.ao.quantization.get_default_qconfig("fbgemm")
         q_model = prepare(model, inplace=False)
         q_model(self.img_data_2d[0][0])
         q_model = convert(q_model)

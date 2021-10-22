@@ -1,18 +1,17 @@
 #include <ATen/ATen.h>
+#include <ATen/CUDAFunctions.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAUtils.h>
+#include <ATen/cuda/ThrustAllocator.h>
 #include <ATen/native/sparse/SparseTensorMath.h>
 #include <ATen/native/sparse/ParamUtils.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
-#include <ATen/native/sparse/cuda/SparseCUDABlas.cuh>
-
-#include <THC/THCThrustAllocator.cuh>
+#include <ATen/native/sparse/cuda/SparseCUDABlas.h>
 
 #include <thrust/binary_search.h>
 #include <thrust/device_ptr.h>
@@ -25,7 +24,6 @@
 #include <bitset>
 
 #include <c10/cuda/CUDAMathCompat.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/native/cuda/Loops.cuh>
@@ -53,7 +51,7 @@ namespace {
 
 // Number of threads in a block given an input size up to MAX_BLOCK_SIZE
 static int getNumThreads(int nElem) {
-#if defined(__HIP_PLATFORM_HCC__)
+#if defined(USE_ROCM)
   int threadSizes[5] = {16, 32, 64, 128, 256};
 #else
   int threadSizes[5] = {32, 64, 128, 256, 512};
@@ -216,7 +214,7 @@ Tensor get_offsets(
     implementation of get_offsets function that this implementation is based on.
   */
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+  at::cuda::ThrustAllocator allocator;
   auto policy = thrust::cuda::par(allocator).on(stream);
 
   auto ndim = indices.size(0);
@@ -275,7 +273,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> compute_pool_max(
     implementation that this implementation is based on.
   */
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+  at::cuda::ThrustAllocator allocator;
   auto policy = thrust::cuda::par(allocator).on(stream);
 
   auto nnz = indices.size(1);
@@ -380,18 +378,17 @@ void cuda_sparse_coo_softmax(
 
   if (dim >= sparse_dim) {
     if (LogSoftMax) {
-      auto new_values = log_softmax_cuda(values, dim - sparse_dim + 1, false);
+      auto new_values =
+          at::cuda::_log_softmax(values, dim - sparse_dim + 1, false);
       out_values.set_(new_values);
     } else {
-      auto new_values = softmax_cuda(values, dim - sparse_dim + 1, false);
+      auto new_values = at::cuda::_softmax(values, dim - sparse_dim + 1, false);
       out_values.set_(new_values);
     }
     return;
   }
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
-  auto policy = thrust::cuda::par(allocator).on(stream);
 
   auto nnz = values.size(0);
   auto sizes = input.sizes();
@@ -434,7 +431,8 @@ void cuda_sparse_coo_softmax_backward(
     Tensor& grad_input,
     const Tensor& grad,
     const Tensor& output,
-    const int64_t dim) {
+    const int64_t dim,
+    ScalarType input_dtype) {
   /*
     See ATen/native/sparse/Softmax.cpp:cpu_sparse_coo_softmax_backward for
     the CPU implementation of the sparse softmax backward algorithm that this
@@ -460,18 +458,18 @@ void cuda_sparse_coo_softmax_backward(
   auto grad_offsets = get_offsets(grad_indices, sizes, -1);
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+  at::cuda::ThrustAllocator allocator;
   auto policy = thrust::cuda::par(allocator).on(stream);
 
   /* when dim >= sparse_dim the dense backward is used */
   if (dim >= sparse_dim) {
     if (at::native::cuda_equal(out_offsets, grad_offsets) == true) {
-      Tensor unused = at::native::empty_like(grad_values);
       if (LogSoftMax) {
-        auto r = log_softmax_backward_cuda(grad_values, out_values, dim - sparse_dim + 1, unused);
+        auto r = at::cuda::_log_softmax_backward_data(
+            grad_values, out_values, dim - sparse_dim + 1, input_dtype);
         values.set_(r);
       } else {
-        auto r = softmax_backward_cuda(grad_values, out_values, dim - sparse_dim + 1, unused);
+        auto r = at::cuda::_softmax_backward_data(grad_values, out_values, dim - sparse_dim + 1, input_dtype);
         values.set_(r);
       }
     } else {
@@ -482,7 +480,6 @@ void cuda_sparse_coo_softmax_backward(
       auto out_offsets_accessor = host_out_offsets.data_ptr<int64_t>();
       auto grad_offsets_accessor = host_grad_offsets.data_ptr<int64_t>();
       for (int64_t i = 0; i < out_nnz; i++) {
-        Tensor unused = at::native::empty_like(grad_values);
         auto low = thrust::lower_bound(
             grad_offsets_accessor,
             grad_offsets_accessor + grad_offsets.size(0),
@@ -494,12 +491,12 @@ void cuda_sparse_coo_softmax_backward(
         */
         if (j < grad_nnz && out_offsets_accessor[i] == grad_offsets_accessor[j]) {
           if (LogSoftMax) {
-            auto r = log_softmax_backward_cuda(
-                grad_values[j], out_values[i], dim - sparse_dim, unused);
+            auto r = at::cuda::_log_softmax_backward_data(
+                grad_values[j], out_values[i], dim - sparse_dim, input_dtype);
             values[i].copy_(r);
           } else {
-            auto r = softmax_backward_cuda(
-                grad_values[j], out_values[i], dim - sparse_dim, unused);
+            auto r = at::cuda::_softmax_backward_data(
+                grad_values[j], out_values[i], dim - sparse_dim, input_dtype);
             values[i].copy_(r);
           }
         }
@@ -611,7 +608,7 @@ Tensor softmax_backward_sparse_cuda(
   }
   AT_DISPATCH_FLOATING_TYPES(grad.scalar_type(), "softmax_backward", [&] {
     cuda_sparse_coo_softmax_backward<scalar_t, false>(
-        grad_input, grad, output, dim_);
+        grad_input, grad, output, dim_, input_.scalar_type());
   });
   return grad_input;
 }
@@ -631,7 +628,7 @@ Tensor log_softmax_backward_sparse_cuda(
 
   AT_DISPATCH_FLOATING_TYPES(grad.scalar_type(), "log_softmax_backward", [&] {
     cuda_sparse_coo_softmax_backward<scalar_t, true>(
-        grad_input, grad, output, dim_);
+        grad_input, grad, output, dim_, input_.scalar_type());
   });
   return grad_input;
 }

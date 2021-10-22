@@ -8,10 +8,9 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/native/cuda/block_reduce.cuh>
-#include <THC/THCDeviceUtils.cuh>
 
 #include <c10/cuda/CUDAMathCompat.h>
 
@@ -23,14 +22,13 @@ namespace {
 constexpr int kCUDANumThreads = 256;
 constexpr int kColwiseReduceTileSize = 32;
 
-template <typename T>
+template <typename T, typename T_ACC>
 __global__ void RowwiseMomentsCUDAKernel(
     int64_t N,
-    T eps,
+    T_ACC eps,
     const T* X,
-    T* mean,
-    T* rstd) {
-  using T_ACC = acc_type<T, true>;
+    T_ACC* mean,
+    T_ACC* rstd) {
   using WelfordType = WelfordData<T_ACC, int64_t, T_ACC>;
   using WelfordOp =
       WelfordOps<T_ACC, T_ACC, int64_t, T_ACC, thrust::pair<T_ACC, T_ACC>>;
@@ -59,20 +57,19 @@ __global__ void RowwiseMomentsCUDAKernel(
     T_ACC m2;
     thrust::tie(m2, m1) = welford_op.project(val);
     mean[i] = m1;
-    rstd[i] = c10::cuda::compat::rsqrt(m2 + static_cast<T_ACC>(eps));
+    rstd[i] = c10::cuda::compat::rsqrt(m2 + eps);
   }
 }
 
-template <typename T>
+template <typename T, typename T_ACC>
 __global__ void LayerNormForwardCUDAKernel(
     int64_t N,
     const T* X,
-    const T* mean,
-    const T* rstd,
+    const T_ACC* mean,
+    const T_ACC* rstd,
     const T* gamma,
     const T* beta,
     T* Y) {
-  using T_ACC = acc_type<T, true>;
   const int64_t i = blockIdx.x;
   for (int64_t j = threadIdx.x; j < N; j += blockDim.x) {
     const int64_t index = i * N + j;
@@ -116,17 +113,16 @@ __global__ void ComputeInternalGradientsCUDAKernel(
   }
 }
 
-template <typename T>
+template <typename T, typename T_ACC>
 __global__ void ComputeGradientFusedParamsCUDAKernel(
     int64_t M,
     int64_t N,
-    const T* mean,
-    const T* rstd,
+    const T_ACC* mean,
+    const T_ACC* rstd,
     const acc_type<T, true>* ds,
     const acc_type<T, true>* db,
     acc_type<T, true>* c1,
     acc_type<T, true>* c2) {
-  using T_ACC = acc_type<T, true>;
   const int64_t index = blockIdx.x * blockDim.x + threadIdx.x;
   if (index < M) {
     const T_ACC s = T_ACC(1) / static_cast<T_ACC>(N);
@@ -140,17 +136,16 @@ __global__ void ComputeGradientFusedParamsCUDAKernel(
   }
 }
 
-template <typename T>
-__global__ void LayerNormBackwardCUDAKenrel(
+template <typename T, typename T_ACC>
+__global__ void LayerNormBackwardCUDAKernel(
     int64_t N,
     const T* dY,
     const T* X,
     const T* gamma,
-    const T* a,
+    const T_ACC* a,
     const acc_type<T, true>* b,
     const acc_type<T, true>* c,
     T* dX) {
-  using T_ACC = acc_type<T, true>;
   const int64_t i = blockIdx.x;
   for (int64_t j = threadIdx.x; j < N; j += blockDim.x) {
     const int64_t index = i * N + j;
@@ -162,17 +157,16 @@ __global__ void LayerNormBackwardCUDAKenrel(
   }
 }
 
-template <typename T>
+template <typename T, typename T_ACC>
 __global__ void GammaBetaBackwardSimpleCUDAKernel(
     int64_t M,
     int64_t N,
     const T* dY,
     const T* X,
-    const T* mean,
-    const T* rstd,
+    const T_ACC* mean,
+    const T_ACC* rstd,
     T* dg,
     T* db) {
-  using T_ACC = acc_type<T, true>;
   const int64_t j = blockIdx.x * blockDim.x + threadIdx.x;
   if (j < N) {
     T_ACC sum1 = 0;
@@ -194,17 +188,16 @@ __global__ void GammaBetaBackwardSimpleCUDAKernel(
   }
 }
 
-template <typename T>
+template <typename T, typename T_ACC>
 __global__ void GammaBetaBackwardCUDAKernel(
     int64_t M,
     int64_t N,
     const T* dY,
     const T* X,
-    const T* mean,
-    const T* rstd,
+    const T_ACC* mean,
+    const T_ACC* rstd,
     T* dg,
     T* db) {
-  using T_ACC = acc_type<T, true>;
   __shared__ T_ACC g_shared[kColwiseReduceTileSize][kColwiseReduceTileSize + 1];
   __shared__ T_ACC b_shared[kColwiseReduceTileSize][kColwiseReduceTileSize + 1];
   const int64_t j = blockIdx.x * blockDim.x + threadIdx.x;
@@ -269,14 +262,14 @@ __global__ void GammaBetaBackwardCUDAKernel(
   }
 }
 
-template <typename T>
+template <typename T, typename T_ACC>
 void LayerNormKernelImplInternal(
     const Tensor& X,
     const Tensor& gamma,
     const Tensor& beta,
     int64_t M,
     int64_t N,
-    T eps,
+    T_ACC eps,
     Tensor* Y,
     Tensor* mean,
     Tensor* rstd) {
@@ -287,14 +280,14 @@ void LayerNormKernelImplInternal(
   const T* gamma_data = gamma.defined() ? gamma.data_ptr<T>() : nullptr;
   const T* beta_data = beta.defined() ? beta.data_ptr<T>() : nullptr;
   T* Y_data = Y->data_ptr<T>();
-  T* mean_data = mean->data_ptr<T>();
-  T* rstd_data = rstd->data_ptr<T>();
+  T_ACC* mean_data = mean->data_ptr<T_ACC>();
+  T_ACC* rstd_data = rstd->data_ptr<T_ACC>();
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
-  RowwiseMomentsCUDAKernel<T>
+  RowwiseMomentsCUDAKernel<T, T_ACC>
       <<<M, cuda_utils::kCUDABlockReduceNumThreads, 0, cuda_stream>>>(
           N, eps, X_data, mean_data, rstd_data);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
-  LayerNormForwardCUDAKernel<T><<<M, kCUDANumThreads, 0, cuda_stream>>>(
+  LayerNormForwardCUDAKernel<T, T_ACC><<<M, kCUDANumThreads, 0, cuda_stream>>>(
       N, X_data, mean_data, rstd_data, gamma_data, beta_data, Y_data);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
@@ -315,8 +308,9 @@ void LayerNormKernelImpl(
       X.scalar_type(),
       "LayerNormKernelImpl",
       [&]() {
-        LayerNormKernelImplInternal<scalar_t>(
-            X, gamma, beta, M, N, static_cast<scalar_t>(eps), Y, mean, rstd);
+        using acc_t = acc_type<scalar_t, true>;
+        LayerNormKernelImplInternal<scalar_t, acc_t>(
+            X, gamma, beta, M, N, static_cast<acc_t>(eps), Y, mean, rstd);
       });
 }
 
@@ -340,8 +334,8 @@ void LayerNormBackwardKernelImplInternal(
   DCHECK(!gamma.defined() || gamma.numel() == N);
   const T* dY_data = dY.template data_ptr<T>();
   const T* X_data = X.template data_ptr<T>();
-  const T* mean_data = mean.template data_ptr<T>();
-  const T* rstd_data = rstd.template data_ptr<T>();
+  const T_ACC* mean_data = mean.template data_ptr<T_ACC>();
+  const T_ACC* rstd_data = rstd.template data_ptr<T_ACC>();
   const T* gamma_data =
       gamma.defined() ? gamma.template data_ptr<T>() : nullptr;
   T* dX_data = dX->defined() ? dX->template data_ptr<T>() : nullptr;
@@ -364,7 +358,7 @@ void LayerNormBackwardKernelImplInternal(
             N, dY_data, X_data, gamma_data, ds_data, db_data);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
     const int64_t B = (M + kCUDANumThreads - 1) / kCUDANumThreads;
-    ComputeGradientFusedParamsCUDAKernel<T>
+    ComputeGradientFusedParamsCUDAKernel<T, T_ACC>
         <<<B, kCUDANumThreads, 0, cuda_stream>>>(
             M,
             N,
@@ -375,7 +369,7 @@ void LayerNormBackwardKernelImplInternal(
             scale_data,
             bias_data);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
-    LayerNormBackwardCUDAKenrel<T><<<M, kCUDANumThreads, 0, cuda_stream>>>(
+    LayerNormBackwardCUDAKernel<T><<<M, kCUDANumThreads, 0, cuda_stream>>>(
         N,
         dY_data,
         X_data,
@@ -393,7 +387,7 @@ void LayerNormBackwardKernelImplInternal(
     if (M < 512) {
       // For small batch size, do colwise reduce directly.
       const int64_t B = (N + kCUDANumThreads - 1) / kCUDANumThreads;
-      GammaBetaBackwardSimpleCUDAKernel<T>
+      GammaBetaBackwardSimpleCUDAKernel<T, T_ACC>
           <<<B, kCUDANumThreads, 0, cuda_stream>>>(
               M,
               N,
@@ -409,7 +403,7 @@ void LayerNormBackwardKernelImplInternal(
           (N + kColwiseReduceTileSize - 1) / kColwiseReduceTileSize;
       constexpr int kThreadX = kColwiseReduceTileSize;
       constexpr int kThreadY = kColwiseReduceTileSize / 2;
-      GammaBetaBackwardCUDAKernel<T>
+      GammaBetaBackwardCUDAKernel<T, T_ACC>
           <<<B, dim3(kThreadX, kThreadY), 0, cuda_stream>>>(
               M,
               N,
@@ -442,7 +436,7 @@ void LayerNormBackwardKernelImpl(
       "LayerNormBackwardKernelImpl",
       [&]() {
         LayerNormBackwardKernelImplInternal<scalar_t>(
-            dY, X, mean, rstd, gamma, M, N, dX, dgamma, dbeta);
+            dY.contiguous(), X, mean, rstd, gamma, M, N, dX, dgamma, dbeta);
       });
 }
 
@@ -476,8 +470,9 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_cuda(
       c10::nullopt /* device */,
       c10::nullopt /* pin_memory */,
       LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  Tensor mean = at::empty({M}, X->options());
-  Tensor rstd = at::empty({M}, X->options());
+  auto acc_type = at::toAccumulateType(input.scalar_type(), /*is_cuda=*/true);
+  Tensor mean = at::empty({M}, X->options().dtype(acc_type));
+  Tensor rstd = at::empty({M}, X->options().dtype(acc_type));
   if (M > 0) {
     LayerNormKernelImpl(*X, *gamma, *beta, M, N, eps, &Y, &mean, &rstd);
 

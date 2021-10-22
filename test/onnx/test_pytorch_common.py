@@ -60,6 +60,16 @@ def skipIfUnsupportedMaxOpsetVersion(min_opset_version):
         return wrapper
     return skip_dec
 
+# skips tests for all opset versions.
+def skipForAllOpsetVersions():
+    def skip_dec(func):
+        def wrapper(self):
+            if self.opset_version:
+                raise unittest.SkipTest("Skip verify test for unsupported opset_version")
+            return func(self)
+        return wrapper
+    return skip_dec
+
 # Enables tests for scripting, instead of only tracing the model.
 def enableScriptTest():
     def script_dec(func):

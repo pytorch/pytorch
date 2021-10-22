@@ -6,6 +6,8 @@
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/irange.h>
+#include <iostream>
 
 namespace at {
 namespace vec {
@@ -97,7 +99,7 @@ public:
     // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
     // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
     // instructions while a loop would be compiled to one instruction.
-    for (auto i = 0; i < size(); ++i) {
+    for (const auto i : c10::irange(size())) {
       tmp_values[i] = 0;
     }
     std::memcpy(tmp_values, ptr, count * sizeof(int64_t));
@@ -220,7 +222,7 @@ public:
     // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
     // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
     // instructions while a loop would be compiled to one instruction.
-    for (auto i = 0; i < size(); ++i) {
+    for (const auto i : c10::irange(size())) {
       tmp_values[i] = 0;
     }
     std::memcpy(tmp_values, ptr, count * sizeof(int32_t));
@@ -236,12 +238,6 @@ public:
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp_values), values);
       std::memcpy(ptr, tmp_values, count * sizeof(int32_t));
     }
-  }
-  void dump() const {
-      for (size_t i = 0; i < size(); ++i) {
-          std::cout << (int)((value_type*)&values)[i] << " ";
-      }
-      std::cout << std::endl;
   }
   const int32_t& operator[](int idx) const  = delete;
   int32_t& operator[](int idx)  = delete;
@@ -440,7 +436,7 @@ public:
     // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
     // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
     // instructions while a loop would be compiled to one instruction.
-    for (auto i = 0; i < size(); ++i) {
+    for (const auto i : c10::irange(size())) {
       tmp_values[i] = 0;
     }
     std::memcpy(tmp_values, ptr, count * sizeof(int16_t));
@@ -689,7 +685,7 @@ public:
     // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
     // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
     // instructions while a loop would be compiled to one instruction.
-    for (size_t i = 0; i < size(); ++i) {
+    for (const auto i : c10::irange(size())) {
       tmp_values[i] = 0;
     }
     std::memcpy(tmp_values, ptr, count * sizeof(int8_t));

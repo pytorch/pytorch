@@ -2,6 +2,7 @@
 #include <ATen/core/jit_type.h>
 #if AT_PARALLEL_OPENMP
 #include <ATen/Parallel.h>
+#include <ATen/ParallelFuture.h>
 
 #include <atomic>
 
@@ -49,7 +50,7 @@ void set_num_threads(int nthreads) {
   omp_set_num_threads(nthreads);
 #endif
 #ifdef TH_BLAS_MKL
-  mkl_set_num_threads(nthreads);
+  mkl_set_num_threads_local(nthreads);
 
   // because PyTorch uses OpenMP outside of MKL invocations
   // as well, we want this flag to be false, so that

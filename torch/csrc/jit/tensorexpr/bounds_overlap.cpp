@@ -14,8 +14,8 @@ OverlapKind boundOverlap(Bound a, Bound b) {
     return ContainedOrEqual;
   }
 
-  const Expr* lowDiff = IRSimplifier::simplify(new Sub(a.start, b.end));
-  const Expr* highDiff = IRSimplifier::simplify(new Sub(b.start, a.end));
+  ExprPtr lowDiff = IRSimplifier::simplify(alloc<Sub>(a.start, b.end));
+  ExprPtr highDiff = IRSimplifier::simplify(alloc<Sub>(b.start, a.end));
 
   if (lowDiff->isConstant() && highDiff->isConstant()) {
     int low = immediateAs<int>(lowDiff);
@@ -26,8 +26,8 @@ OverlapKind boundOverlap(Bound a, Bound b) {
     }
   }
 
-  const Expr* diff_start = IRSimplifier::simplify(new Sub(b.start, a.start));
-  const Expr* diff_end = IRSimplifier::simplify(new Sub(b.end, a.end));
+  ExprPtr diff_start = IRSimplifier::simplify(alloc<Sub>(b.start, a.start));
+  ExprPtr diff_end = IRSimplifier::simplify(alloc<Sub>(b.end, a.end));
 
   // If one side fully encloses the other, they're adjacent.
   if (diff_start->isConstant() && diff_end->isConstant()) {
@@ -68,8 +68,8 @@ Bound flattenBounds(const IndexBounds& a) {
   Bound ret = a[0];
 
   for (size_t i = 1; i < a.size(); ++i) {
-    ret.start = new Mul(ret.start, a[i].start);
-    ret.end = new Mul(ret.end, a[i].end);
+    ret.start = alloc<Mul>(ret.start, a[i].start);
+    ret.end = alloc<Mul>(ret.end, a[i].end);
   }
 
   ret.start = IRSimplifier::simplify(ret.start);
@@ -122,25 +122,25 @@ std::vector<Bound> subtractBound(Bound a, Bound b, OverlapKind overlap) {
     return {a};
   }
 
-  const Expr* lowDiff = IRSimplifier::simplify(new Sub(b.start, a.start));
-  const Expr* highDiff = IRSimplifier::simplify(new Sub(b.end, a.end));
+  ExprPtr lowDiff = IRSimplifier::simplify(alloc<Sub>(b.start, a.start));
+  ExprPtr highDiff = IRSimplifier::simplify(alloc<Sub>(b.end, a.end));
 
   // If the diff has only a single var, we can try to guess sign.
   if (!lowDiff->isConstant()) {
     auto vars = VarFinder::find(lowDiff);
     if (vars.size() == 1) {
-      lowDiff = IRSimplifier::simplify(new Sub(
-          Substitute(b.start, {{*vars.begin(), new IntImm(1)}}),
-          Substitute(a.start, {{*vars.begin(), new IntImm(1)}})));
+      lowDiff = IRSimplifier::simplify(alloc<Sub>(
+          SubstituteInClone(b.start, {{*vars.begin(), immLike(b.start, 1)}}),
+          SubstituteInClone(a.start, {{*vars.begin(), immLike(a.start, 1)}})));
     }
   }
 
   if (!highDiff->isConstant()) {
     auto vars = VarFinder::find(highDiff);
     if (vars.size() == 1) {
-      highDiff = IRSimplifier::simplify(new Sub(
-          Substitute(b.end, {{*vars.begin(), new IntImm(1)}}),
-          Substitute(a.end, {{*vars.begin(), new IntImm(1)}})));
+      highDiff = IRSimplifier::simplify(alloc<Sub>(
+          SubstituteInClone(b.end, {{*vars.begin(), immLike(b.end, 1)}}),
+          SubstituteInClone(a.end, {{*vars.begin(), immLike(a.end, 1)}})));
     }
   }
 
@@ -157,12 +157,13 @@ std::vector<Bound> subtractBound(Bound a, Bound b, OverlapKind overlap) {
 
   if (hasHead) {
     res.emplace_back(
-        a.start, IRSimplifier::simplify(new Sub(b.start, new IntImm(1))));
+        a.start,
+        IRSimplifier::simplify(alloc<Sub>(b.start, immLike(b.start, 1))));
   }
 
   if (hasTail) {
-    const Expr* tailStart =
-        IRSimplifier::simplify(new Add(b.end, new IntImm(1)));
+    ExprPtr tailStart =
+        IRSimplifier::simplify(alloc<Add>(b.end, immLike(b.end, 1)));
     res.emplace_back(tailStart, a.end);
   }
 
@@ -193,7 +194,7 @@ std::vector<IndexBounds> subtractIndicesBounds(
     return {};
   }
   // All accesses to a buf must have the same dimensionality.
-  TORCH_INTERNAL_ASSERT(A.size() == B.size());
+  TORCH_INTERNAL_ASSERT(A.size() == B.size(), buildErrorMessage());
 
   // Each dimension can be sliced into multiple bound segments.
   std::vector<IndexBounds> boundSlices;
@@ -207,7 +208,8 @@ std::vector<IndexBounds> subtractIndicesBounds(
     for (auto slice : slices) {
       IndexBounds newRegion;
       newRegion.reserve(A.size());
-      TORCH_INTERNAL_ASSERT(remainingOuterBounds.size() == i);
+      TORCH_INTERNAL_ASSERT(
+          remainingOuterBounds.size() == i, buildErrorMessage());
 
       for (size_t j = 0; j < i; ++j) {
         newRegion.push_back(remainingOuterBounds[j]);
@@ -223,7 +225,7 @@ std::vector<IndexBounds> subtractIndicesBounds(
         remaining = A[i];
       } else {
         auto remainingSlices = subtractBound(remaining, slice);
-        TORCH_INTERNAL_ASSERT(remainingSlices.size() == 1);
+        TORCH_INTERNAL_ASSERT(remainingSlices.size() == 1, buildErrorMessage());
         remaining = remainingSlices[0];
       }
     }

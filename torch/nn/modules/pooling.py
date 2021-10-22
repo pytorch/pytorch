@@ -84,7 +84,7 @@ class MaxPool1d(_MaxPoolNd):
     padding: _size_1_t
     dilation: _size_1_t
 
-    def forward(self, input: Tensor) -> Tensor:
+    def forward(self, input: Tensor):
         return F.max_pool1d(input, self.kernel_size, self.stride,
                             self.padding, self.dilation, self.ceil_mode,
                             self.return_indices)
@@ -158,7 +158,7 @@ class MaxPool2d(_MaxPoolNd):
     padding: _size_2_t
     dilation: _size_2_t
 
-    def forward(self, input: Tensor) -> Tensor:
+    def forward(self, input: Tensor):
         return F.max_pool2d(input, self.kernel_size, self.stride,
                             self.padding, self.dilation, self.ceil_mode,
                             self.return_indices)
@@ -236,7 +236,7 @@ class MaxPool3d(_MaxPoolNd):
     padding: _size_3_t
     dilation: _size_3_t
 
-    def forward(self, input: Tensor) -> Tensor:
+    def forward(self, input: Tensor):
         return F.max_pool3d(input, self.kernel_size, self.stride,
                             self.padding, self.dilation, self.ceil_mode,
                             self.return_indices)
@@ -570,7 +570,8 @@ class AvgPool2d(_AvgPoolNd):
         padding: implicit zero padding to be added on both sides
         ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
         count_include_pad: when True, will include the zero-padding in the averaging calculation
-        divisor_override: if specified, it will be used as divisor, otherwise :attr:`kernel_size` will be used
+        divisor_override: if specified, it will be used as divisor, otherwise size of the pooling region will be used.
+
 
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})` or :math:`(C, H_{in}, W_{in})`.
@@ -727,6 +728,12 @@ class FractionalMaxPool2d(Module):
         return_indices: if ``True``, will return the indices along with the outputs.
                         Useful to pass to :meth:`nn.MaxUnpool2d`. Default: ``False``
 
+    Shape:
+        - Input: :math:`(N, C, H_{in}, W_{in})` or :math:`(C, H_{in}, W_{in})`.
+        - Output: :math:`(N, C, H_{out}, W_{out})` or :math:`(C, H_{out}, W_{out})`, where
+          :math:`(H_{out}, W_{out})=\text{output\_size}` or
+          :math:`(H_{out}, W_{out})=\text{output\_ratio} \times (H_{in}, W_{in})`.
+
     Examples:
         >>> # pool of square window of size=3, and target output size 13x12
         >>> m = nn.FractionalMaxPool2d(3, output_size=(13, 12))
@@ -765,7 +772,7 @@ class FractionalMaxPool2d(Module):
                 raise ValueError("output_ratio must be between 0 and 1 (got {})"
                                  .format(output_ratio))
 
-    def forward(self, input: Tensor) -> Tensor:
+    def forward(self, input: Tensor):
         return F.fractional_max_pool2d(
             input, self.kernel_size, self.output_size, self.output_ratio,
             self.return_indices,
@@ -828,7 +835,7 @@ class FractionalMaxPool3d(Module):
                 raise ValueError("output_ratio must be between 0 and 1 (got {})"
                                  .format(output_ratio))
 
-    def forward(self, input: Tensor) -> Tensor:
+    def forward(self, input: Tensor):
         return F.fractional_max_pool3d(
             input, self.kernel_size, self.output_size, self.output_ratio,
             self.return_indices,
@@ -875,8 +882,8 @@ class LPPool1d(_LPPoolNd):
         ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
 
     Shape:
-        - Input: :math:`(N, C, L_{in})`
-        - Output: :math:`(N, C, L_{out})`, where
+        - Input: :math:`(N, C, L_{in})` or :math:`(C, L_{in})`.
+        - Output: :math:`(N, C, L_{out})` or :math:`(C, L_{out})`, where
 
           .. math::
               L_{out} = \left\lfloor\frac{L_{in} - \text{kernel\_size}}{\text{stride}} + 1\right\rfloor
@@ -1035,7 +1042,7 @@ class AdaptiveMaxPool2d(_AdaptiveMaxPoolNd):
 
     output_size: _size_2_opt_t
 
-    def forward(self, input: Tensor) -> Tensor:
+    def forward(self, input: Tensor):
         return F.adaptive_max_pool2d(input, self.output_size, self.return_indices)
 
 
@@ -1078,7 +1085,7 @@ class AdaptiveMaxPool3d(_AdaptiveMaxPoolNd):
 
     output_size: _size_3_opt_t
 
-    def forward(self, input: Tensor) -> Tensor:
+    def forward(self, input: Tensor):
         return F.adaptive_max_pool3d(input, self.output_size, self.return_indices)
 
 

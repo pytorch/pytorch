@@ -48,3 +48,13 @@ stages:
           _PYTHON_VERSION: $(PYTHON_VERSION_WIN_2)
           _CUDA_BUILD_VERSION: $(CUDA_BUILD_VERSION_WIN_2)
           _RUN_TESTS: $(RUN_TESTS_WIN)
+
+- stage: 'NotifyWebapp'
+  displayName: 'Notify Webapp that pipeline is finished'
+  dependsOn: NightlyCustomTests
+  condition: succeededOrFailed()
+  jobs:
+  - template: job_templates/notify-webapp-template.yml
+    parameters:
+      name: ubuntu_1804_CPU
+      pool: $(BUILD_POOL_LIN_1)

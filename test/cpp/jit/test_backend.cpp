@@ -25,7 +25,7 @@ TEST(BackendTest, ToBackend) {
   std::vector<IValue> inputs;
   inputs.emplace_back(2.0 * torch::ones({}));
   inputs.emplace_back(1.0 * torch::ones({}));
-  auto ref = m.forward(inputs).toTuple()->elements();
+  auto ref = m.forward(inputs).toTuple()->elements().vec();
 
   c10::Dict<IValue, IValue> compile_spec(StringType::get(), AnyType::get());
   c10::Dict<IValue, IValue> fake_dict(StringType::get(), AnyType::get());
@@ -75,7 +75,7 @@ TEST(BackendTest, ToBackend) {
         return (_10, _12)
 
    */
-  auto res = lm.forward(inputs).toTuple()->elements();
+  auto res = lm.forward(inputs).toTuple()->elements().vec();
   AT_ASSERT(res[0].toTensor().equal(ref[0].toTensor()));
   AT_ASSERT(res[1].toTensor().equal(ref[1].toTensor()));
 }
@@ -96,7 +96,7 @@ TEST(BackendTest, ToBackendNotAvailable) {
   std::vector<IValue> inputs;
   inputs.emplace_back(2.0 * torch::ones({}));
   inputs.emplace_back(1.0 * torch::ones({}));
-  auto ref = m.forward(inputs).toTuple()->elements();
+  auto ref = m.forward(inputs).toTuple()->elements().vec();
 
   c10::Dict<IValue, IValue> compile_spec(StringType::get(), AnyType::get());
   c10::Dict<IValue, IValue> fake_dict(StringType::get(), AnyType::get());
@@ -338,16 +338,16 @@ TEST(BackendTestDebugInfo, TestCompiler) {
   lm._save_for_mobile(ss, ExtraFilesMap(), true);
   auto mlm = _load_for_mobile(ss);
   std::string error_pattern = R"(
-  Module hierarchy:top(m).aten::add
+  Module hierarchy:top(m)::<unknown>.aten::add
 Traceback of TorchScript (most recent call last):
-  File "<string>", line 5, in FunctionName_UNKNOWN
+  File "<string>", line 5, in <unknown>
                 typed_inputs: List[Any] = [x, h, ]
                 if self.__backend.is_available() :
                   _0, = self.__backend.execute(self.__handles["forward"], typed_inputs)
                         ~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
                   assert isinstance(_0, Tensor)
                   return _0
-  File "<string>", line 3, in FunctionName_UNKNOWN
+  File "<string>", line 3, in <unknown>
 
     def forward(self, x, h):
         return x + h
@@ -392,16 +392,16 @@ TEST(BackendTestDebugInfo, TestExceptionStackForCompilerWithModuleHierarchy) {
   lm._save_for_mobile(ss, ExtraFilesMap(), true);
   auto mlm = _load_for_mobile(ss);
   std::string error_pattern = R"(
-  Module hierarchy:top(C).A0(A).aten::add
+  Module hierarchy:top(C)::<unknown>.A0(A)::forward.aten::add
 Traceback of TorchScript (most recent call last):
-  File "<string>", line 5, in FunctionName_UNKNOWN
+  File "<string>", line 5, in <unknown>
                 typed_inputs: List[Any] = [x, y, ]
                 if self.__backend.is_available() :
                   _0, = self.__backend.execute(self.__handles["forward"], typed_inputs)
                         ~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
                   assert isinstance(_0, Tensor)
                   return _0
-  File "<string>", line 3, in FunctionName_UNKNOWN
+  File "<string>", line 3, in <unknown>
 
     def forward(self, x, y):
       return self.A0.forward(x, y) + self.B0.forward(x)
@@ -485,16 +485,16 @@ TEST(
    *
    */
   std::string error_pattern = R"(
-  Module hierarchy:top(C).B0(B).A0(A).aten::add
+  Module hierarchy:top(C)::<unknown>.B0(B)::forward.A0(A)::forward.aten::add
 Traceback of TorchScript (most recent call last):
-  File "<string>", line 5, in FunctionName_UNKNOWN
+  File "<string>", line 5, in <unknown>
                 typed_inputs: List[Any] = [x, y, ]
                 if self.__backend.is_available() :
                   _0, = self.__backend.execute(self.__handles["forward"], typed_inputs)
                         ~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
                   assert isinstance(_0, Tensor)
                   return _0
-  File "<string>", line 3, in FunctionName_UNKNOWN
+  File "<string>", line 3, in <unknown>
 
     def forward(self, x, y):
       return self.B0.forward(x, y) + 3
@@ -572,9 +572,9 @@ TEST(BackendTestDebugInfo, TestExceptionStackForCompilerWithLoweredSubModule) {
   c._save_for_mobile(ss, ExtraFilesMap(), true);
   auto c_loaded = _load_for_mobile(ss);
   std::string error_pattern = R"(
-  Module hierarchy:top(C).A0(A).aten::add
+  Module hierarchy:top(C)::<unknown>.A0(A)::forward.aten::add
 Traceback of TorchScript (most recent call last):
-  File "<string>", line 3, in FunctionName_UNKNOWN
+  File "<string>", line 3, in <unknown>
 
     def forward(self, x, y):
       return self.A0.forward(x, y) + self.B0.forward(x)
@@ -587,7 +587,7 @@ Traceback of TorchScript (most recent call last):
                         ~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
                   assert isinstance(_0, Tensor)
                   return _0
-  File "<string>", line 3, in FunctionName_UNKNOWN
+  File "<string>", line 3, in <unknown>
 
     def forward(self, x, y):
       return x + y
@@ -693,9 +693,9 @@ TEST(
    *
    *  */
   std::string error_pattern = R"(
-  Module hierarchy:top(C).A0(A).AA0(AA).aten::add
+  Module hierarchy:top(C)::<unknown>.A0(A)::forward.AA0(AA)::forward.aten::add
 Traceback of TorchScript (most recent call last):
-  File "<string>", line 3, in FunctionName_UNKNOWN
+  File "<string>", line 3, in <unknown>
 
     def forward(self, x, y):
       return self.A0.forward(x, y) + self.B0.forward(x)
@@ -708,7 +708,7 @@ Traceback of TorchScript (most recent call last):
                         ~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
                   assert isinstance(_0, Tensor)
                   return _0
-  File "<string>", line 3, in FunctionName_UNKNOWN
+  File "<string>", line 3, in <unknown>
 
     def forward(self, x, y):
       return self.AA0.forward(x, y) + 3

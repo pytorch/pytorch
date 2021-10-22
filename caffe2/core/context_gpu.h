@@ -313,7 +313,7 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
     auto status = cudaStreamQuery(stream);
     if (status == cudaErrorNotReady) {
       // ignore and clear the error if not ready
-      cudaGetLastError();
+      (void)cudaGetLastError();
     }
     return status == cudaSuccess;
   }

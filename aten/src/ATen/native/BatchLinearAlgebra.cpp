@@ -55,12 +55,6 @@ extern "C" void cpotri_(char *uplo, int *n, std::complex<float> *a, int *lda, in
 extern "C" void dpotri_(char *uplo, int *n, double *a, int *lda, int *info);
 extern "C" void spotri_(char *uplo, int *n, float *a, int *lda, int *info);
 
-// trtrs
-extern "C" void ztrtrs_(char *uplo, char *trans, char *diag, int *n, int *nrhs, std::complex<double> *a, int *lda, std::complex<double> *b, int *ldb, int *info);
-extern "C" void ctrtrs_(char *uplo, char *trans, char *diag, int *n, int *nrhs, std::complex<float> *a, int *lda, std::complex<float> *b, int *ldb, int *info);
-extern "C" void dtrtrs_(char *uplo, char *trans, char *diag, int *n, int *nrhs, double *a, int *lda, double *b, int *ldb, int *info);
-extern "C" void strtrs_(char *uplo, char *trans, char *diag, int *n, int *nrhs, float *a, int *lda, float *b, int *ldb, int *info);
-
 // geqrf
 extern "C" void zgeqrf_(int *m, int *n, std::complex<double> *a, int *lda, std::complex<double> *tau, std::complex<double> *work, int *lwork, int *info);
 extern "C" void cgeqrf_(int *m, int *n, std::complex<float> *a, int *lda, std::complex<float> *tau, std::complex<float> *work, int *lwork, int *info);
@@ -200,6 +194,14 @@ extern "C" void sgelss_(int *m, int *n, int *nrhs,
     float *work, int *lwork, int *info);
 #endif
 
+#if AT_BUILD_WITH_BLAS()
+// trsm
+extern "C" void ztrsm_(char *side, char *uplo, char *trans, char *diag, int *n, int *nrhs, std::complex<double> *alpha, std::complex<double> *a, int *lda, std::complex<double> *b, int *ldb);
+extern "C" void ctrsm_(char *side, char *uplo, char *trans, char *diag, int *n, int *nrhs, std::complex<float> *alpha, std::complex<float> *a, int *lda, std::complex<float> *b, int *ldb);
+extern "C" void dtrsm_(char *side, char *uplo, char *trans, char *diag, int *n, int *nrhs, double *alpha, double *a, int *lda, double *b, int *ldb);
+extern "C" void strsm_(char *side, char *uplo, char *trans, char *diag, int *n, int *nrhs, float *alpha, float *a, int *lda, float *b, int *ldb);
+#endif
+
 namespace at {
 namespace native {
 
@@ -316,22 +318,6 @@ template<> void lapackCholeskyInverse<double>(char uplo, int n, double *a, int l
 
 template<> void lapackCholeskyInverse<float>(char uplo, int n, float *a, int lda, int *info) {
   spotri_(&uplo, &n, a, &lda, info);
-}
-
-template<> void lapackTriangularSolve<c10::complex<double>>(char uplo, char trans, char diag, int n, int nrhs, c10::complex<double> *a, int lda, c10::complex<double> *b, int ldb, int *info) {
-  ztrtrs_(&uplo, &trans, &diag, &n, &nrhs, reinterpret_cast<std::complex<double>*>(a), &lda, reinterpret_cast<std::complex<double>*>(b), &ldb, info);
-}
-
-template<> void lapackTriangularSolve<c10::complex<float>>(char uplo, char trans, char diag, int n, int nrhs, c10::complex<float> *a, int lda, c10::complex<float> *b, int ldb, int *info) {
-  ctrtrs_(&uplo, &trans, &diag, &n, &nrhs, reinterpret_cast<std::complex<float>*>(a), &lda, reinterpret_cast<std::complex<float>*>(b), &ldb, info);
-}
-
-template<> void lapackTriangularSolve<double>(char uplo, char trans, char diag, int n, int nrhs, double *a, int lda, double *b, int ldb, int *info) {
-  dtrtrs_(&uplo, &trans, &diag, &n, &nrhs, a, &lda, b, &ldb, info);
-}
-
-template<> void lapackTriangularSolve<float>(char uplo, char trans, char diag, int n, int nrhs, float *a, int lda, float *b, int ldb, int *info) {
-  strtrs_(&uplo, &trans, &diag, &n, &nrhs, a, &lda, b, &ldb, info);
 }
 
 template<> void lapackGeqrf<c10::complex<double>>(int m, int n, c10::complex<double> *a, int lda, c10::complex<double> *tau, c10::complex<double> *work, int lwork, int *info) {
@@ -687,6 +673,28 @@ template<> void lapackGelss<float>(
 }
 #endif
 
+#if AT_BUILD_WITH_BLAS()
+template<> void blasTriangularSolve<c10::complex<double>>(char side, char uplo, char trans, char diag, int n, int nrhs, c10::complex<double> *a, int lda, c10::complex<double> *b, int ldb) {
+  std::complex<double> one{1., 0.};
+  ztrsm_(&side, &uplo, &trans, &diag, &n, &nrhs, &one, reinterpret_cast<std::complex<double>*>(a), &lda, reinterpret_cast<std::complex<double>*>(b), &ldb);
+}
+
+template<> void blasTriangularSolve<c10::complex<float>>(char side, char uplo, char trans, char diag, int n, int nrhs, c10::complex<float> *a, int lda, c10::complex<float> *b, int ldb) {
+  std::complex<float> one{1.f, 0.f};
+  ctrsm_(&side, &uplo, &trans, &diag, &n, &nrhs, &one, reinterpret_cast<std::complex<float>*>(a), &lda, reinterpret_cast<std::complex<float>*>(b), &ldb);
+}
+
+template<> void blasTriangularSolve<double>(char side, char uplo, char trans, char diag, int n, int nrhs, double *a, int lda, double *b, int ldb) {
+  auto one = 1.;
+  dtrsm_(&side, &uplo, &trans, &diag, &n, &nrhs, &one, a, &lda, b, &ldb);
+}
+
+template<> void blasTriangularSolve<float>(char side, char uplo, char trans, char diag, int n, int nrhs, float *a, int lda, float *b, int ldb) {
+  auto one = 1.f;
+  strsm_(&side, &uplo, &trans, &diag, &n, &nrhs, &one, a, &lda, b, &ldb);
+}
+#endif
+
 // Below of the definitions of the functions operating on a batch that are going to be dispatched
 // in the main helper functions for the linear algebra operations
 
@@ -816,7 +824,7 @@ static Tensor& linalg_solve_out_info(Tensor& result, Tensor& infos, const Tensor
   if (vector_case) {
     is_batched_column_major = result.is_contiguous();
   } else if (!vector_case && result.dim() >= 2) {
-    is_batched_column_major = result.transpose(-2, -1).is_contiguous();
+    is_batched_column_major = result.mT().is_contiguous();
   }
 
   // if 'other' is a batch of 2D tensors, then 'input' can be non-batched and will be broadcasted
@@ -858,7 +866,7 @@ static Tensor& linalg_solve_out_info(Tensor& result, Tensor& infos, const Tensor
     if (vector_case) {
       result.resize_(squeezed_result_shape);
     } else {
-      at::native::resize_as_(result, other_broadcasted.transpose(-2, -1), MemoryFormat::Contiguous);
+      at::native::resize_as_(result, other_broadcasted.mT(), MemoryFormat::Contiguous);
       result.transpose_(-2, -1);
     }
   }
@@ -873,7 +881,7 @@ static Tensor& linalg_solve_out_info(Tensor& result, Tensor& infos, const Tensor
   if (vector_case) {
     TORCH_INTERNAL_ASSERT(result.is_contiguous());
   } else {
-    TORCH_INTERNAL_ASSERT(result.transpose(-2, -1).is_contiguous());
+    TORCH_INTERNAL_ASSERT(result.mT().is_contiguous());
   }
 
   // for 1-dimensional 'other', we need to unsqueeze the result before passing to "apply_solve"
@@ -1048,7 +1056,7 @@ static Tensor& linalg_inv_out_info(Tensor& result, Tensor& infos_lu, Tensor& inf
   bool result_equal_expected_shape = result.sizes().equals(input.sizes());
   bool is_batched_column_major = false;
   if (result.dim() >= 2) {
-    is_batched_column_major = result.transpose(-2, -1).is_contiguous();
+    is_batched_column_major = result.mT().is_contiguous();
   }
 
   // if result is not empty and not in batched column major format
@@ -1085,7 +1093,7 @@ static Tensor& linalg_inv_out_info(Tensor& result, Tensor& infos_lu, Tensor& inf
 
   // if result has no elements we can modify it
   if (result.numel() == 0) {
-    at::native::resize_as_(result, input.transpose(-2, -1), MemoryFormat::Contiguous);
+    at::native::resize_as_(result, input.mT(), MemoryFormat::Contiguous);
     result.transpose_(-2, -1);
   }
 
@@ -1094,7 +1102,7 @@ static Tensor& linalg_inv_out_info(Tensor& result, Tensor& infos_lu, Tensor& inf
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.device() == input.device());
 
   // result tensor must be in batched column major order (Fortran contiguous)
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.transpose(-2, -1).is_contiguous());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.mT().is_contiguous());
 
   // if info has no elements we can modify it
   if (infos_lu.numel() == 0) {
@@ -1207,6 +1215,7 @@ static void apply_cholesky_solve(Tensor& b, Tensor& A, bool upper, std::vector<i
   auto b_mat_stride = matrixStride(b);
   auto batch_size = batchCount(A);
   auto n = A.size(-2);
+  auto ldab = std::max<int64_t>(1, n);
   auto nrhs = b.size(-1);
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -1214,7 +1223,7 @@ static void apply_cholesky_solve(Tensor& b, Tensor& A, bool upper, std::vector<i
   for (const auto i : c10::irange(batch_size)) {
     scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
     scalar_t* b_working_ptr = &b_data[i * b_mat_stride];
-    lapackCholeskySolve<scalar_t>(uplo, n, nrhs, A_working_ptr, n, b_working_ptr, n, &info);
+    lapackCholeskySolve<scalar_t>(uplo, n, nrhs, A_working_ptr, ldab, b_working_ptr, ldab, &info);
     infos[i] = info;
     if (info != 0) {
       return;
@@ -1272,7 +1281,7 @@ Tensor cholesky(const Tensor &self, bool upper) {
     "and\n"
     "U = torch.cholesky(A, upper=True)\n",
     "should be replaced with\n",
-    "U = torch.linalg.cholesky(A).transpose(-2, -1).conj().\n"
+    "U = torch.linalg.cholesky(A).mH().\n"
     "This transform will produce equivalent results for all valid (symmetric positive definite) inputs."
   );
   if (self.numel() == 0) {
@@ -1311,7 +1320,7 @@ Tensor& cholesky_out(const Tensor &self, bool upper, Tensor &result) {
     "and\n"
     "U = torch.cholesky(A, upper=True)\n",
     "should be replaced with\n",
-    "U = torch.linalg.cholesky(A).transpose(-2, -1).conj().\n"
+    "U = torch.linalg.cholesky(A).mH().\n"
     "This transform will produce equivalent results for all valid (symmetric positive definite) inputs."
   );
   checkSameDevice("cholesky", result, self);
@@ -1322,7 +1331,7 @@ Tensor& cholesky_out(const Tensor &self, bool upper, Tensor &result) {
   return result;
 }
 
-void linalg_cholesky_out_info(const Tensor& input, const Tensor& result, const Tensor& info) {
+void linalg_cholesky_out_info(const Tensor& input, const Tensor& result, const Tensor& info, bool upper) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.dim() >= 2);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.size(-1) == input.size(-2));
 
@@ -1334,12 +1343,12 @@ void linalg_cholesky_out_info(const Tensor& input, const Tensor& result, const T
 
   // if result has no elements we can modify it
   if (result.numel() == 0) {
-    at::native::resize_as_(result, input.transpose(-2, -1), MemoryFormat::Contiguous);
+    at::native::resize_as_(result, input.mT(), MemoryFormat::Contiguous);
     result.transpose_(-2, -1);
   }
 
   // result tensor must be in batched column major order (Fortran contiguous)
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.transpose(-2, -1).is_contiguous());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.mT().is_contiguous());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.sizes().equals(input.sizes()));
 
   // cholesky_stub (apply_cholesky) performs calculations in-place and result must be a copy of input
@@ -1356,12 +1365,16 @@ void linalg_cholesky_out_info(const Tensor& input, const Tensor& result, const T
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info.sizes().equals(expected_info_shape));
   info.fill_(0);
 
-  cholesky_stub(result.device().type(), result, info, /*upper=*/false);
+  cholesky_stub(result.device().type(), result, info, upper);
 
-  result.tril_();
+  if (upper) {
+    result.triu_();
+  } else {
+    result.tril_();
+  }
 }
 
-std::tuple<Tensor&, Tensor&> linalg_cholesky_ex_out(const Tensor& input, bool check_errors, Tensor& L, Tensor& info) {
+std::tuple<Tensor&, Tensor&> linalg_cholesky_ex_out(const Tensor& input, bool upper, bool check_errors, Tensor& L, Tensor& info) {
   squareCheckInputs(input);
   checkSameDevice("torch.linalg.cholesky_ex", L, input, "L");
   checkLinalgCompatibleDtype("torch.linalg.cholesky_ex", L, input, "L");
@@ -1380,7 +1393,7 @@ std::tuple<Tensor&, Tensor&> linalg_cholesky_ex_out(const Tensor& input, bool ch
   bool L_equal_expected_shape = L.sizes().equals(input.sizes());
   bool is_L_batched_column_major = false;
   if (L.dim() >= 2) {
-    is_L_batched_column_major = L.transpose(-2, -1).is_contiguous();
+    is_L_batched_column_major = L.mT().is_contiguous();
   }
 
   // if L is not empty and not in batched column major format
@@ -1397,14 +1410,14 @@ std::tuple<Tensor&, Tensor&> linalg_cholesky_ex_out(const Tensor& input, bool ch
   if (copy_needed) {
     Tensor L_tmp = at::empty({0}, input.options());
     Tensor info_tmp = at::empty({0}, input.options().dtype(kInt));
-    linalg_cholesky_out_info(input, L_tmp, info_tmp);
+    linalg_cholesky_out_info(input, L_tmp, info_tmp, upper);
     at::native::resize_output(L, L_tmp.sizes());
     L.copy_(L_tmp);
     at::native::resize_output(info, info_tmp.sizes());
     info.copy_(info_tmp);
   } else {
     // use "out" tensors' memory directly
-    linalg_cholesky_out_info(input, L, info);
+    linalg_cholesky_out_info(input, L, info, upper);
   }
 
   if (check_errors) {
@@ -1418,16 +1431,16 @@ std::tuple<Tensor&, Tensor&> linalg_cholesky_ex_out(const Tensor& input, bool ch
   return std::tuple<Tensor&, Tensor&>(L, info);
 }
 
-std::tuple<Tensor, Tensor> linalg_cholesky_ex(const Tensor& input, bool check_errors) {
+std::tuple<Tensor, Tensor> linalg_cholesky_ex(const Tensor& input, bool upper, bool check_errors) {
   Tensor L = at::empty({0}, input.options());
   Tensor info = at::empty({0}, input.options().dtype(kInt));
-  std::tie(L, info) = at::native::linalg_cholesky_ex_out(input, check_errors, L, info);
+  std::tie(L, info) = at::native::linalg_cholesky_ex_out(input, upper, check_errors, L, info);
   return std::make_tuple(L, info);
 }
 
-Tensor linalg_cholesky(const Tensor &self) {
+Tensor linalg_cholesky(const Tensor &self, bool upper) {
   Tensor result, info;
-  std::tie(result, info) = at::linalg_cholesky_ex(self, /*check_errors=*/false);
+  std::tie(result, info) = at::linalg_cholesky_ex(self, upper, /*check_errors=*/false);
 
   // we pass check_errors=false above and do the check here
   // so that the name of the function is correct in the error message
@@ -1440,14 +1453,14 @@ Tensor linalg_cholesky(const Tensor &self) {
   return result;
 }
 
-Tensor& linalg_cholesky_out(const Tensor &self, Tensor &result) {
+Tensor& linalg_cholesky_out(const Tensor &self, bool upper, Tensor &result) {
   // linalg_cholesky_ex_outf includes these checks, but we do it here
   // so that the name of the function is correct in the error message
   checkSameDevice("torch.linalg.cholesky", result, self);
   checkLinalgCompatibleDtype("torch.linalg.cholesky", result, self);
 
   Tensor info = at::empty({0}, self.options().dtype(kInt));
-  std::tie(result, info) = at::linalg_cholesky_ex_outf(self, /*check_errors=*/false, result, info);
+  std::tie(result, info) = at::linalg_cholesky_ex_outf(self, upper, /*check_errors=*/false, result, info);
 
   // we pass check_errors=false above and do the check here
   // so that the name of the function is correct in the error message
@@ -1477,12 +1490,12 @@ Tensor& cholesky_inverse_out_info(Tensor& result, Tensor& infos, const Tensor& i
 
   // if result has no elements we can modify it
   if (result.numel() == 0) {
-    at::native::resize_as_(result, input.transpose(-2, -1), MemoryFormat::Contiguous);
+    at::native::resize_as_(result, input.mT(), MemoryFormat::Contiguous);
     result.transpose_(-2, -1);
   }
 
   // result tensor must be in batched column major order (Fortran contiguous)
-  TORCH_INTERNAL_ASSERT(result.transpose(-2, -1).is_contiguous());
+  TORCH_INTERNAL_ASSERT(result.mT().is_contiguous());
   TORCH_INTERNAL_ASSERT(result.sizes().equals(input.sizes()));
 
   // cholesky_inverse_stub (apply_cholesky_inverse) performs calculations in-place and result must be a copy of input
@@ -1508,7 +1521,7 @@ Tensor& cholesky_inverse_out(const Tensor &input, bool upper, Tensor &result) {
   bool result_equal_expected_shape = result.sizes().equals(input.sizes());
   bool is_batched_column_major = false;
   if (result.dim() >= 2) {
-    is_batched_column_major = result.transpose(-2, -1).is_contiguous();
+    is_batched_column_major = result.mT().is_contiguous();
   }
 
   // if result is not empty and not in batched column major format
@@ -1545,6 +1558,8 @@ Tensor cholesky_inverse(const Tensor &input, bool upper) {
 
 DEFINE_DISPATCH(lu_stub);
 
+// TODO: remove check_errors argument
+// https://github.com/pytorch/pytorch/issues/64014
 std::tuple<Tensor, Tensor, Tensor> _lu_with_info(const Tensor& self, bool compute_pivots, bool check_errors) {
   TORCH_CHECK(self.dim() >= 2,
            "expected tensor with 2 or more dimensions, got size: ", self.sizes(),
@@ -1562,14 +1577,6 @@ std::tuple<Tensor, Tensor, Tensor> _lu_with_info(const Tensor& self, bool comput
   // 'lu' tensor is modified in-place and must be a copy of 'self'
   Tensor lu = cloneBatchedColumnMajor(self);
   lu_stub(self.device().type(), lu, pivots_tensor, infos_tensor, compute_pivots);
-
-  if (check_errors) {
-    if (self.dim() > 2) {
-      batchCheckErrors(infos_tensor, "lu", /*allow_singular=*/true);
-    } else {
-      singleCheckErrors(infos_tensor.item<int64_t>(), "lu", /*allow_singular=*/true);
-    }
-  }
   return std::make_tuple(lu, pivots_tensor, infos_tensor);
 }
 
@@ -1583,7 +1590,7 @@ The result of the computation is saved in-place in 'result' tensor,
 'clone_input' will be a copy of 'input',
 'infos' is used to store information for possible checks for error,
 'upper' controls the portion of input matrix to consider in computations,
-'transpose' if true then 'input.transpose(-2, -1)' @ 'result' = 'other' is solved,
+'transpose' if true then 'input.mT()' @ 'result' = 'other' is solved,
 'unitriangular' if true then the diagonal elements of 'input' are assumed to be 1
 and the actual diagonal values are not used.
 */
@@ -1615,19 +1622,19 @@ static std::tuple<Tensor&, Tensor&> triangular_solve_out_info(
 
   // if 'result' has no elements we can modify it
   if (result.numel() == 0) {
-    result.resize_(other.transpose(-2, -1).sizes(), MemoryFormat::Contiguous);
+    result.resize_(other.mT().sizes(), MemoryFormat::Contiguous);
     result.transpose_(-2, -1);  // make 'result' to have Fortran contiguous memory layout
   }
 
   // if 'clone_input' has no elements we can modify it
   if (clone_input.numel() == 0) {
-    clone_input.resize_(input.transpose(-2, -1).sizes(), MemoryFormat::Contiguous);
+    clone_input.resize_(input.mT().sizes(), MemoryFormat::Contiguous);
     clone_input.transpose_(-2, -1);  // make 'clone_input' to have Fortran contiguous memory layout
   }
 
   // 'result' and 'clone_input' must be in batched column major order (Fortran contiguous)
-  TORCH_INTERNAL_ASSERT(result.transpose(-2, -1).is_contiguous());
-  TORCH_INTERNAL_ASSERT(clone_input.transpose(-2, -1).is_contiguous());
+  TORCH_INTERNAL_ASSERT(result.mT().is_contiguous());
+  TORCH_INTERNAL_ASSERT(clone_input.mT().is_contiguous());
 
   // triangular_solve_stub performs calculations in-place
   // 'result' must be a copy of 'other'
@@ -1637,7 +1644,7 @@ static std::tuple<Tensor&, Tensor&> triangular_solve_out_info(
   result.copy_(other);
   clone_input.copy_(input);
 
-  triangular_solve_stub(input.device().type(), clone_input, result, infos, upper, transpose, /*conjugate_transpose=*/false, unitriangular);
+  triangular_solve_stub(input.device().type(), clone_input, result, /*left=*/true, upper, transpose ? TransposeType::Transpose : TransposeType::NoTranspose, unitriangular);
 
   return std::tuple<Tensor&, Tensor&>(result, clone_input);
 }
@@ -1697,7 +1704,7 @@ static void geqrf_out_helper(const Tensor& input, const Tensor& QR, const Tensor
 
   // if 'QR' has no elements we can modify it
   if (QR.numel() == 0) {
-    QR.resize_as_(input.transpose(-2, -1), MemoryFormat::Contiguous);
+    QR.resize_as_(input.mT(), MemoryFormat::Contiguous);
     QR.transpose_(-2, -1); // make Fortran-contiguous
   }
 
@@ -1708,7 +1715,7 @@ static void geqrf_out_helper(const Tensor& input, const Tensor& QR, const Tensor
   }
 
   // QR tensor must be in batched column major order (Fortran contiguous)
-  TORCH_INTERNAL_ASSERT(QR.transpose(-2, -1).is_contiguous());
+  TORCH_INTERNAL_ASSERT(QR.mT().is_contiguous());
   TORCH_INTERNAL_ASSERT(QR.sizes().equals(input.sizes()));
 
   // tau tensor must be contiguous
@@ -1738,7 +1745,7 @@ std::tuple<Tensor&, Tensor&> geqrf_out(const Tensor& input, Tensor& QR, Tensor& 
 
   bool is_batched_column_major = false;
   if (QR.dim() >= 2) {
-    is_batched_column_major = QR.transpose(-2, -1).is_contiguous();
+    is_batched_column_major = QR.mT().is_contiguous();
   }
 
   // if 'QR' is not empty and not in batched column major format
@@ -1810,7 +1817,7 @@ void linalg_qr_out_helper(const Tensor& input, const Tensor& Q, const Tensor& R,
     TORCH_INTERNAL_ASSERT(Q.sizes().equals(expected_Q_shape));
 
     // Q tensor must be in batched column major order (Fortran contiguous)
-    TORCH_INTERNAL_ASSERT(Q.transpose(-2, -1).is_contiguous());
+    TORCH_INTERNAL_ASSERT(Q.mT().is_contiguous());
   }
 
   // R must have the expected shape: (reduced_mode || !compute_q) ? (..., min(m,n), n) : (..., m, n)
@@ -1819,7 +1826,7 @@ void linalg_qr_out_helper(const Tensor& input, const Tensor& Q, const Tensor& R,
   TORCH_INTERNAL_ASSERT(R.sizes().equals(expected_R_shape));
 
   // R tensor must be in batched column major order (Fortran contiguous)
-  TORCH_INTERNAL_ASSERT(R.transpose(-2, -1).is_contiguous());
+  TORCH_INTERNAL_ASSERT(R.mT().is_contiguous());
 
   auto tau_shape = input.sizes().vec();
   tau_shape.pop_back();
@@ -1837,7 +1844,7 @@ void linalg_qr_out_helper(const Tensor& input, const Tensor& Q, const Tensor& R,
       QR = reduced_mode ? Q : R;
     } else {
       // if m > n and compute_q==false we need to allocate an additional temporary tensor
-      QR = at::empty(input.transpose(-2, -1).sizes(), input.options());
+      QR = at::empty(input.mT().sizes(), input.options());
       QR.transpose_(-2, -1);
     }
   }
@@ -1973,12 +1980,12 @@ Tensor& householder_product_out_helper(const Tensor& input, const Tensor& tau, T
 
   // if result has no elements we can modify it
   if (result.numel() == 0) {
-    at::native::resize_as_(result, input.transpose(-2, -1), MemoryFormat::Contiguous);
+    at::native::resize_as_(result, input.mT(), MemoryFormat::Contiguous);
     result.transpose_(-2, -1);
   }
 
   // result tensor must be in batched column major order (Fortran contiguous)
-  TORCH_INTERNAL_ASSERT(result.transpose(-2, -1).is_contiguous());
+  TORCH_INTERNAL_ASSERT(result.mT().is_contiguous());
   TORCH_INTERNAL_ASSERT(result.sizes().equals(input.sizes()));
 
   // tau tensor must be contiguous
@@ -2047,7 +2054,7 @@ Tensor& linalg_householder_product_out(const Tensor& input, const Tensor& tau, T
   bool result_equal_expected_shape = result.sizes().equals(input.sizes());
   bool is_batched_column_major = false;
   if (result.dim() >= 2) {
-    is_batched_column_major = result.transpose(-2, -1).is_contiguous();
+    is_batched_column_major = result.mT().is_contiguous();
   }
 
   // if result is not empty and not in batched column major format
@@ -2104,12 +2111,12 @@ void ormqr_out_helper(const Tensor& input, const Tensor& tau, const Tensor& othe
 
   // if 'result' has no elements we can modify it
   if (result.numel() == 0) {
-    at::native::resize_as_(result, other.transpose(-2, -1), MemoryFormat::Contiguous);
+    at::native::resize_as_(result, other.mT(), MemoryFormat::Contiguous);
     result.transpose_(-2, -1);
   }
 
   // 'result' tensor must be in batched column major order (Fortran contiguous)
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.transpose(-2, -1).is_contiguous());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.mT().is_contiguous());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.sizes().equals(other.sizes()));
 
   // 'tau' tensor must be contiguous
@@ -2121,8 +2128,8 @@ void ormqr_out_helper(const Tensor& input, const Tensor& tau, const Tensor& othe
 
   // 'input' tensor must be Fortran contiguous
   Tensor input_ = input;
-  if (!input.transpose(-2, -1).is_contiguous()) {
-    input_ = at::empty(input.transpose(-2, -1).sizes(), input.options(), MemoryFormat::Contiguous);
+  if (!input.mT().is_contiguous()) {
+    input_ = at::empty(input.mT().sizes(), input.options(), MemoryFormat::Contiguous);
     input_.transpose_(-2, -1);
     input_.copy_(input);
   }
@@ -2200,7 +2207,7 @@ Tensor& ormqr_out(const Tensor& input, const Tensor& tau, const Tensor& other, b
   bool result_equal_expected_shape = result.sizes().equals(other.sizes());
   bool is_batched_column_major = false;
   if (result.dim() >= 2) {
-    is_batched_column_major = result.transpose(-2, -1).is_contiguous();
+    is_batched_column_major = result.mT().is_contiguous();
   }
 
   // if result is not empty and not in batched column major format
@@ -2287,7 +2294,7 @@ void linalg_eigh_out_info(
   }
 
   // 'vectors' must be in batched column major order (Fortran contiguous)
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(vectors.transpose(-2, -1).is_contiguous());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(vectors.mT().is_contiguous());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(vectors.sizes().equals(input.sizes()));
 
   // 'values' must be contiguous
@@ -2575,9 +2582,9 @@ static Tensor& linalg_eig_make_complex_eigenvectors(Tensor& complex_vectors, con
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(complex_values.is_complex());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(real_vectors.is_floating_point());
 
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(complex_vectors.transpose(-2, -1).is_contiguous());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(complex_vectors.mT().is_contiguous());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(complex_values.is_contiguous());
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(real_vectors.transpose(-2, -1).is_contiguous());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(real_vectors.mT().is_contiguous());
 
   AT_DISPATCH_FLOATING_TYPES(real_vectors.scalar_type(), "linalg_eig_make_complex_vector", [&]{
     linalg_eig_make_complex_eigenvectors_impl<scalar_t>(complex_vectors, complex_values, real_vectors);
@@ -2626,7 +2633,7 @@ std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Tensor& va
 
   // 'vectors' must be in batched column major order (Fortran contiguous)
   if (compute_eigenvectors) {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(vectors.transpose(-2, -1).is_contiguous());
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(vectors.mT().is_contiguous());
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(vectors.sizes().equals(input.sizes()));
   }
 
@@ -2716,7 +2723,7 @@ std::tuple<Tensor&, Tensor&> linalg_eig_out(const Tensor& input, Tensor& values,
   // if result is not empty and not in batched column major format we have to allocate a temporary tensor
   bool is_batched_column_major = false;
   if (vectors.dim() >= 2) {
-    is_batched_column_major = vectors.transpose(-2, -1).is_contiguous();
+    is_batched_column_major = vectors.mT().is_contiguous();
   }
 
   bool values_expected_type = (values.scalar_type() == toComplexType(input.scalar_type()));
@@ -3032,7 +3039,7 @@ std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& self, bool some, bool compu
   //     "U, S, V = torch.svd(A, some=some, compute_uv=True) (default)\n",
   //     "should be replaced with\n",
   //     "U, S, Vh = torch.linalg.svd(A, full_matrices=not some)\n",
-  //     "V = Vh.transpose(-2, -1).conj()\n",
+  //     "V = Vh.mH()\n",
   //     "and\n",
   //     "_, S, _ = torch.svd(A, some=some, compute_uv=False)\n",
   //     "should be replaced with\n",
@@ -3085,7 +3092,7 @@ std::tuple<Tensor, Tensor, Tensor> linalg_svd(const Tensor& self, bool full_matr
     Tensor U, S, V;
     std::tie(U, S, V) = at::_svd_helper(self, some, /*compute_uv=*/true);
 
-    Tensor Vh = V.conj().transpose(-2, -1);
+    Tensor Vh = V.mH();
     return std::make_tuple(U, S, Vh);
 
 }
@@ -3246,7 +3253,7 @@ static void linalg_lstsq_out_info(
   if (vector_case) {
     TORCH_INTERNAL_ASSERT(solution.is_contiguous());
   } else {
-    TORCH_INTERNAL_ASSERT(solution.transpose(-2, -1).is_contiguous());
+    TORCH_INTERNAL_ASSERT(solution.mT().is_contiguous());
   }
 
   // for 1-dimensional 'other', we need to unsqueeze the 'solution' before passing to "apply_solve"
@@ -3450,7 +3457,7 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> linalg_lstsq_out(
   if (vector_case) {
     is_solution_batched_column_major = solution.is_contiguous();
   } else if (!vector_case && solution.dim() >= 2) {
-    is_solution_batched_column_major = solution.transpose(-2, -1).is_contiguous();
+    is_solution_batched_column_major = solution.mT().is_contiguous();
   }
 
   // 'residuals' is not checked here because at::sum_out(residuals, ...) does that
@@ -3547,17 +3554,7 @@ DEFINE_DISPATCH(lu_solve_stub);
 DEFINE_DISPATCH(lu_solve_trans_stub);
 
 // Supports arbitrary batch dimensions for self and LU_data (implicitly LU_pivots also)
-Tensor _lu_solve_trans(const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivots, const c10::string_view trans_str) {
-  auto trans = std::toupper(trans_str[0]);
-  switch (trans) {
-    case 'N':
-    case 'T':
-    case 'C':
-      break;
-    default:
-      TORCH_CHECK(false,
-                  "lu_solve: wrong `trans` parameter, it must be one of 'N', 'T' or 'C'");
-  }
+Tensor _lu_solve_trans(const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivots, TransposeType trans) {
   TORCH_CHECK(self.dim() >= 2,
               "b should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
   TORCH_CHECK(LU_data.dim() >= 2,
@@ -3591,7 +3588,7 @@ Tensor _lu_solve_trans(const Tensor& self, const Tensor& LU_data, const Tensor& 
   Tensor result = cloneBatchedColumnMajor(self_broadcasted);
 
   // if LU_data is Fortran-contiguous no need to make a copy
-  bool is_LU_data_batched_column_major = LU_data_broadcasted.transpose(-2, -1).is_contiguous();
+  bool is_LU_data_batched_column_major = LU_data_broadcasted.mT().is_contiguous();
   Tensor LU_data_working_copy = is_LU_data_batched_column_major ? LU_data_broadcasted : cloneBatchedColumnMajor(LU_data_broadcasted);
   Tensor LU_pivots_working_copy = LU_pivots_broadcasted.is_contiguous() ? LU_pivots_broadcasted : LU_pivots_broadcasted.contiguous();
 
@@ -3600,7 +3597,7 @@ Tensor _lu_solve_trans(const Tensor& self, const Tensor& LU_data, const Tensor& 
 }
 
 Tensor lu_solve(const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivots) {
-  return at::native::_lu_solve_trans(self, LU_data, LU_pivots, "N");
+  return at::native::_lu_solve_trans(self, LU_data, LU_pivots, TransposeType::NoTranspose);
 }
 
 Tensor& lu_solve_out(const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivots, Tensor& result) {
@@ -3742,7 +3739,7 @@ Tensor _det_lu_based_helper_backward_helper(
   auto d_diag = det_grad * det.conj();
   auto d = at::diag_embed(d_diag.unsqueeze(-1).expand(det_expanded_sizes));
   // make sure that d is Fortran-contiguous. The transposition is sufficient as d is a diagonal square matrix
-  d = d.transpose(-2, -1);
+  d = d.mT();
 
   if (self.device().type() == at::kCPU) {
     // we want to condition the diagonal of the lu Tensor, but it is not allowed
@@ -3750,7 +3747,7 @@ Tensor _det_lu_based_helper_backward_helper(
     auto lu_clone = lu.clone();
     condition_diagonal(lu_clone);
 
-    auto trans = self.is_complex() ? 'C' : 'T';
+    auto trans = self.is_complex() ? TransposeType::ConjTranspose : TransposeType::Transpose;
 
     // d is modified in-place and will contain the result
     lu_solve_trans_stub(self.device().type(), d, lu_clone, pivs, trans);
@@ -3768,8 +3765,6 @@ Tensor _det_lu_based_helper_backward_helper(
       u.conj_physical_();
     }
 
-    auto infos = at::zeros({std::max<int64_t>(1, batchCount(self))}, self.options().dtype(kInt));
-
     // triangular_solve_stub performs operations in-place.
     // Tensor d will contain the result
     condition_diagonal(u);
@@ -3782,19 +3777,19 @@ Tensor _det_lu_based_helper_backward_helper(
     // Since u is conjugated in-place in the code above, it is sufficient
     // to just run triangular_solve with upper=false.
     triangular_solve_stub(
-      self.device().type(), u, d, infos,
+      self.device().type(), u, d,
+      /*left=*/true,
       /*upper=*/false,
-      /*transpose=*/false,
-      /*conjugate_transpose=*/false,
+      /*transpose=*/TransposeType::NoTranspose,
       /*unitriangular=*/false);
 
     // After this operation d will contain a row-wise permuted grad wrt to self
     // The same notes as for the system involving u apply here.
     triangular_solve_stub(
-      self.device().type(), l, d, infos,
+      self.device().type(), l, d,
+      /*left=*/true,
       /*upper=*/true,
-      /*transpose=*/false,
-      /*conjugate_transpose=*/false,
+      /*transpose=*/TransposeType::NoTranspose,
       /*unitriangular=*/true);
 
     // multiply by p to restore the row order
