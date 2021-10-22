@@ -874,6 +874,10 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     internal_buffers_.insert(std::make_pair(b, std::move(buffer)));
   }
 
+  void visit(PlacementAllocatePtr v) override {
+    buffer_mapping_[v->src_buf()] = buffer_mapping_[v->dest_buf()];
+  }
+
   void visit(FreePtr v) override {
     BufPtr b = v->buf();
     int count = internal_buffers_.erase(b);

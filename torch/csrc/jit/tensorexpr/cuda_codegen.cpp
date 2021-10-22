@@ -105,6 +105,10 @@ void CudaAnalysis::visit(AllocatePtr v) {
   throw std::runtime_error("Global alloc not supported yet");
 }
 
+void CudaAnalysis::visit(PlacementAllocatePtr v) {
+  throw std::runtime_error("Memory reuse not supported yet");
+}
+
 void CudaAnalysis::visit(ForPtr v) {
   // Recurse first.
   v->body()->accept(this);
