@@ -198,11 +198,9 @@ ${index_type} strides_[25][NARGS];
 
 ${functor}
 
-// NOTE: assumes the op is binary (i.e. has three arguments out, a, and b)
 // TODO: setup grid-stride loop
 extern "C" __global__
 void ${name}_kernel(
-    ${name}<${scalar_type}> functor,
     const int numel,
     Array<char*, ${nInputs}+1> data, //[${nInputs}+1],
     OffsetCalculator<${nInputs}> input_calculator,
@@ -237,7 +235,7 @@ for (int j = 0; j < thread_work_size; j++){
 
 #pragma unroll
 for (int j = 0; j < thread_work_size; j++) {
-    out[j] = functor(${args});
+    out[j] = ${name}<${scalar_type}>(${args});
 }
 
 thread_idx = threadIdx.x;
@@ -256,39 +254,4 @@ for (int j = 0; j < thread_work_size; j++){
     thread_idx += num_threads;
 }
 
-// NOTE: only the first thread operates on the first element for now
-//if (blockIdx.x == 0 && threadIdx.x == 0)
-{
-    // ${scalar_type} a_value;
-    // int a_offset = a.index_to_offset(0);
-
-    // ${scalar_type} b_value;
-    // int b_offset = b.index_to_offset(0);
-
-    // int out_offset = out.index_to_offset(0);
-
-    // // TODO: refactor the loading, see c10::fetch_and_cast
-    // if (a.scalar_type_ == 0) {
-    //   a_value = static_cast<${scalar_type}>(*(reinterpret_cast<float*>(a.data_ + a_offset)));
-    // } else if (a.scalar_type_ == 1) {
-    //   a_value = static_cast<${scalar_type}>(*(reinterpret_cast<double*>(a.data_ + a_offset)));
-    // }
-
-    // if (b.scalar_type_ == 0) {
-    //   b_value = static_cast<${scalar_type}>(*(reinterpret_cast<float*>(b.data_ + b_offset)));
-    // } else if (b.scalar_type_ == 1) {
-    //   b_value = static_cast<${scalar_type}>(*(reinterpret_cast<double*>(b.data_ + b_offset)));
-    // }
-
-    // ${scalar_type} out_value = functor(a_value, b_value);
-
-    // // TODO: refactor the storing, see c10::cast_and_store
-    // if (out.scalar_type_ == 0) {
-    //   *(reinterpret_cast<float*>(out.data_ + out_offset)) = static_cast<float>(out_value);
-    // } else if (out.scalar_type_ == 1) {
-    //   *(reinterpret_cast<double*>(out.data_ + out_offset)) = static_cast<double>(out_value);
-    // }
-
-    // printf("%f\n", out_value);
-    }
 }

@@ -14,13 +14,13 @@ struct NvrtcFunction {
   CUmodule module = CUmodule();
   CUfunction function = nullptr;
 };
-std::string generate_code(int nTensors, bool contiguous, bool dynamic_casting);
+std::string generate_code(int nTensors, std::string func, std::string name, bool contiguous, bool dynamic_casting);
 NvrtcFunction jit_pwise_function(
     const std::string& code,
     const std::string& kernel_name);
 void launch_jitted_pwise_function(
     NvrtcFunction function,
-    std::array<void*, 7>& args,
+    std::array<void*, 6>& args,
     const int nBlocks,
     const int kBlockSize);
 } // namespace jit

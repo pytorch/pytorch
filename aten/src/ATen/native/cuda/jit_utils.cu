@@ -29,13 +29,15 @@ torch::jit::CodeTemplate load_code_template(const std::string& path) {
 }
 
 
-std::string generate_code(int nTensors, bool contiguous, bool dynamic_casting){
+std::string generate_code(int nTensors, std::string func, std::string name, bool contiguous, bool dynamic_casting){
     torch::jit::TemplateEnv env;
     env.s("index_type", "unsigned int");
     const int nInputs = nTensors - 1;
     env.s("nInputs", std::to_string(nInputs));
     std::string common_dtype_string = "float"; // FIXME, it shouldn't be hardcoded and it shouldn't be template parameter
-    //ignore functor for now
+    env.s("scalar_type", common_dtype_string);
+    env.s("functor", func);
+    env.s("name", name);
     std::stringstream declare_load_arrays;
     for (int i=0; i < nInputs; i++){
 //TODO these arrays are potentially of the different types, use function traits to determine the types
@@ -170,7 +172,7 @@ NvrtcFunction jit_pwise_function(
 // TODO: may need/want to initialize CUDA context here (refactor into nvrtc call)
 void launch_jitted_pwise_function(
     NvrtcFunction function,
-    std::array<void*, 7>& args,
+    std::array<void*, 6>& args,
     const int nBlocks,
     const int kBlockSize) {
 

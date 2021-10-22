@@ -145,6 +145,11 @@ static inline void launch_vectorized_kernel(int64_t N, const func_t& f, array_t 
 
 }
 
+template<typename func_t>
+static inline std::string generate_code_wrapper(int64_t nTensors, func_t& f, std::string& name, bool contiguous, bool dynamic_casting ){
+  return at::cuda::jit::generate_code(nTensors, f, name, contiguous, dynamic_casting);
+}
+
 template<bool jitting, typename result_type, typename common_type, typename func_t, typename array_t, typename inp_calc_t, typename out_calc_t, typename loader_t, typename storer_t>
 static inline void launch_unrolled_kernel(int64_t N, const func_t& f, array_t data,
                                           inp_calc_t ic, out_calc_t oc, loader_t l, storer_t s, bool contiguous)
@@ -162,12 +167,14 @@ static inline void launch_unrolled_kernel(int64_t N, const func_t& f, array_t da
         std::cout << "generating code\n";
         constexpr int nTensors = array_t::size();
         constexpr bool dynamic_casting = std::is_same<decltype(l), memory::LoadWithoutCast>::value && std::is_same<decltype(l), memory::LoadWithoutCast>::value;
-        auto code = at::cuda::jit::generate_code(nTensors, contiguous, dynamic_casting);
-        fn = at::cuda::jit::jit_pwise_function(code, "kernel0"); // TODO proper name
+        std::string name = "i0";
+        auto code = generate_code_wrapper(nTensors, f, name, contiguous, dynamic_casting);
+        std::cout << code;
+        //auto code = at::cuda::jit::generate_code(nTensors, f, name, contiguous, dynamic_casting);
+        fn = at::cuda::jit::jit_pwise_function(code, name); // TODO proper name
       }
       //pack args
-      std::array<void*, 7> args = {
-        nullptr, //functor goes here
+      std::array<void*, 6> args = {
         (void*)&N,
         (void*)&data,
         (void*)&ic,
