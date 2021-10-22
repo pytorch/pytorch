@@ -204,12 +204,12 @@ std::pair<IValue, IValue> getFunctionTuple(
           name_type_pairs.emplace_back(
               c10::ivalue::Tuple::create({it->name(), it->type()->repr_str()}));
 
-          // For Tensor type, in Python, if it's inferred type, str() return
-          // "Tensor" and repr_str() return "Tensor (inferred)" if it's not
-          // inferred type, str() return "Tensor[]" and repr_str() return
-          // "Tensor". In cpp, repr_str() will always return "Tensor" regardless
-          // inferred type. When exporing custom type in bytecode, "Tensor" is
-          // the preferred way to deserialize Tensor type
+          // When it->type() is Tensor type, in Python, if it's inferred type,
+          // str() return "Tensor" and repr_str() return "Tensor (inferred)". If
+          // it's not inferred type, str() return "Tensor[]" and repr_str()
+          // return "Tensor". In cpp, repr_str() will always return "Tensor"
+          // regardless inferred type. When exporing custom type in bytecode,
+          // "Tensor" is the preferred way to deserialize Tensor type
           type_str = it->is_inferred_type() ? it->type()->str()
                                             : it->type()->repr_str();
           named_tuple_str.append("[" + it->name() + ", " + type_str + "]");
