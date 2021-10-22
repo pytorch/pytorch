@@ -398,7 +398,6 @@ static PyObject* THPVariable_make_wrapper_subclass(PyObject*, PyObject* args, Py
   // TODO: for_blob produces non-resizable tensors, we might want this to be
   // resizable (have to define a custom allocator in that case)
   auto data = at::for_blob(nullptr, r.intlist(1))
-        // TODO: make strides argument optional. I vaguely remember optional<IntArrayRef> being problematic, need to test.
         .strides(r.intlistOptional(2))
         .storage_offset(r.toInt64Optional(3))
         .context(nullptr, [](void *ctx) {})
