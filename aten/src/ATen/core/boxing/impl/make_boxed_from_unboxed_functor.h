@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/core/boxing/OperatorKernel.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/stack.h>
 #include <c10/util/intrusive_ptr.h>
@@ -62,27 +63,6 @@ class OperatorHandle;
  * and are expected to be called by explicitly specifying the template parameters in a way that matches
  * the expected operator signature at each call site.
  */
-
-/**
- * Inherit from OperatorKernel to implement a c10 kernel.
- *
- * Example:
- * > namespace {
- * >   class my_kernel_cpu final : public c10::OperatorKernel {
- * >   public:
- * >     Tensor operator()(Tensor a, Tensor b) {...}
- * >   };
- * > }
- *
- * The kernel class is allowed to have members but these are equivalent
- * to global variables. The kernel implementation is responsible for
- * preventing race conditions on them.
- *
- * See below for how to register this kernel with PyTorch.
- */
-struct TORCH_API OperatorKernel : public c10::intrusive_ptr_target {
-  virtual ~OperatorKernel() = default;
-};
 
 namespace impl {
   // supported_primitive_arg_types defines which primitive types we allow in

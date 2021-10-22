@@ -9,6 +9,7 @@
 #include <c10/core/DispatchKeySet.h>
 #include <c10/core/CompileTimeFunctionPointer.h>
 #include <ATen/core/boxing/KernelFunction.h>
+#include <ATen/core/boxing/KernelFunction_fromUnboxed.h>
 #include <ATen/core/dispatch/CppSignature.h>
 #include <ATen/core/dispatch/RegistrationHandleRAII.h>
 #include <ATen/core/op_registration/infer_schema.h>
@@ -164,7 +165,8 @@ public:
 
       return std::move(*this).kernel(
         std::move(dispatch_key),
-        KernelFunction::makeFromUnboxedFunctor<false, KernelFunctor>(std::make_unique<KernelFunctor>(std::forward<ConstructorParameters>(constructorParameters)...)),
+        c10::kernel_function::makeFromUnboxedFunctor<false, KernelFunctor>(
+            std::make_unique<KernelFunctor>(std::forward<ConstructorParameters>(constructorParameters)...)),
         impl::CppSignature::make<KernelFunctor>(),
         detail::inferFunctionSchemaFromFunctor<KernelFunctor>()
       );
@@ -216,7 +218,8 @@ public:
 
       return std::move(*this).kernel(
         c10::nullopt,
-        KernelFunction::makeFromUnboxedFunctor<false, KernelFunctor>(std::make_unique<KernelFunctor>(std::forward<ConstructorParameters>(constructorParameters)...)),
+        c10::kernel_function::makeFromUnboxedFunctor<false, KernelFunctor>(
+            std::make_unique<KernelFunctor>(std::forward<ConstructorParameters>(constructorParameters)...)),
         impl::CppSignature::make<KernelFunctor>(),
         detail::inferFunctionSchemaFromFunctor<KernelFunctor>()
       );
@@ -244,7 +247,7 @@ public:
 
       return std::move(*this).kernel(
         std::move(dispatch_key),
-        KernelFunction::makeFromUnboxedFunction(TORCH_FN(kernel_func)),
+        c10::kernel_function::makeFromUnboxedFunction(TORCH_FN(kernel_func)),
         impl::CppSignature::make<FuncType>(),
         // TODO Do schema inference without relying on WrapFunctionIntoFunctor
         detail::inferFunctionSchemaFromFunctor<typename impl::WrapFunctionIntoFunctor<CompileTimeFunctionPointer<FuncType, kernel_func>>::type>()
@@ -273,7 +276,7 @@ public:
 
       return std::move(*this).kernel(
         c10::nullopt,
-        KernelFunction::makeFromUnboxedFunction(TORCH_FN(kernel_func)),
+        c10::kernel_function::makeFromUnboxedFunction(TORCH_FN(kernel_func)),
         impl::CppSignature::make<FuncType>(),
         // TODO Do schema inference without relying on WrapFunctionIntoFunctor
         detail::inferFunctionSchemaFromFunctor<typename impl::WrapFunctionIntoFunctor<CompileTimeFunctionPointer<FuncType, kernel_func>>::type>()
@@ -288,7 +291,7 @@ public:
 
       return std::move(*this).kernel(
         std::move(dispatch_key),
-        KernelFunction::makeFromUnboxedRuntimeFunction(kernel_func),
+        c10::kernel_function::makeFromUnboxedRuntimeFunction(kernel_func),
         impl::CppSignature::make<FuncType>(),
         // TODO Do schema inference without relying on WrapFunctionIntoFunctor
         detail::inferFunctionSchemaFromFunctor<impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<FuncType>>>()
@@ -303,7 +306,7 @@ public:
 
       return std::move(*this).kernel(
         c10::nullopt,
-        KernelFunction::makeFromUnboxedRuntimeFunction(kernel_func),
+        c10::kernel_function::makeFromUnboxedRuntimeFunction(kernel_func),
         impl::CppSignature::make<FuncType>(),
         // TODO Do schema inference without relying on WrapFunctionIntoFunctor
         detail::inferFunctionSchemaFromFunctor<impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<FuncType>>>()
@@ -344,7 +347,7 @@ public:
 
       return std::move(*this).kernel(
         std::move(dispatch_key),
-        KernelFunction::makeFromUnboxedLambda(std::forward<Lambda>(functor)),
+        c10::kernel_function::makeFromUnboxedLambda(std::forward<Lambda>(functor)),
         impl::CppSignature::make<Lambda>(),
         // TODO Do schema inference without relying on WrapFunctionIntoRuntimeFunctor
         detail::inferFunctionSchemaFromFunctor<impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<Lambda>>>()
@@ -385,7 +388,7 @@ public:
 
       return std::move(*this).kernel(
         c10::nullopt,
-        KernelFunction::makeFromUnboxedLambda(std::forward<Lambda>(lambda)),
+        c10::kernel_function::makeFromUnboxedLambda(std::forward<Lambda>(lambda)),
         impl::CppSignature::make<Lambda>(),
         // TODO Do schema inference without relying on WrapFunctionIntoRuntimeFunctor
         detail::inferFunctionSchemaFromFunctor<impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<Lambda>>>()
@@ -523,7 +526,7 @@ public:
      constexpr bool AllowLegacyTypes = true;
      return std::move(*this).op(std::move(options).schema(schemaOrName).kernel(
        c10::nullopt,
-       KernelFunction::makeFromUnboxedRuntimeFunction<AllowLegacyTypes>(func),
+       c10::kernel_function::makeFromUnboxedRuntimeFunction<AllowLegacyTypes>(func),
        impl::CppSignature::make<FuncType>(),
        // TODO Do schema inference without relying on WrapFunctionIntoRuntimeFunctor
        detail::inferFunctionSchemaFromFunctor<impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<FuncType>>>()
@@ -554,7 +557,7 @@ public:
       constexpr bool AllowLegacyTypes = true;
       return std::move(*this).op(std::move(options).schema(schemaOrName).kernel(
         c10::nullopt,
-        KernelFunction::makeFromUnboxedLambda<AllowLegacyTypes>(std::forward<Lambda>(lambda)),
+        c10::kernel_function::makeFromUnboxedLambda<AllowLegacyTypes>(std::forward<Lambda>(lambda)),
         impl::CppSignature::make<Lambda>(),
         // TODO Do schema inference without relying on WrapFunctionIntoRuntimeFunctor
         detail::inferFunctionSchemaFromFunctor<impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<Lambda>>>()
@@ -571,7 +574,7 @@ public:
       constexpr bool AllowLegacyTypes = true;
       return std::move(*this).op(std::move(options).schema(schemaOrName).kernel(
         c10::nullopt,
-        KernelFunction::makeFromUnboxedLambda<AllowLegacyTypes>(std::forward<Lambda>(lambda)),
+        c10::kernel_function::makeFromUnboxedLambda<AllowLegacyTypes>(std::forward<Lambda>(lambda)),
         impl::CppSignature::make<Lambda>(),
         // TODO Do schema inference without relying on WrapFunctionIntoRuntimeFunctor
         detail::inferFunctionSchemaFromFunctor<impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<Lambda>>>()

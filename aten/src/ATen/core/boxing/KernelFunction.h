@@ -1,15 +1,18 @@
 #pragma once
 
-#include <ATen/core/stack.h>
+#include <ATen/core/boxing/OperatorKernel.h>
+#include <c10/core/DispatchKeySet.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/TypeList.h>
 
 namespace c10 {
 
-using Stack = torch::jit::Stack; // TODO Instead of this, move torch::jit::Stack to the c10 namespace.
+class IValue;
+using Stack = std::vector<IValue>;
 
 class OperatorHandle;
 struct OperatorKernel;
+class KernelFunction;
 
 // This kernel implements the behavior of falling through to the next available
 // registered dispatch key.  The implementation of this function is FAST; it is
@@ -66,6 +69,19 @@ TORCH_API void ambiguous_autogradother_kernel(OperatorKernel*, const OperatorHan
 // give a good error message in cases when boxing is not supported).  When
 // boxing is universally supported this can be removed.
 [[noreturn]] TORCH_API void named_not_supported_kernel(OperatorKernel*, const OperatorHandle&, DispatchKeySet, Stack*);
+
+namespace kernel_function {
+
+template<class Return, class... Args>
+Return call(const KernelFunction &func, const OperatorHandle& opHandle, DispatchKeySet dispatchKeySet, Args... args);
+
+template<bool AllowLegacyTypes=false, class KernelFunctor>
+inline KernelFunction makeFromUnboxedFunctor(std::unique_ptr<OperatorKernel> kernelFunctor);
+
+template<class FuncPtr, bool AllowLegacyTypes=false>
+KernelFunction makeFromUnboxedFunction(FuncPtr);
+
+}
 
 /**
  * KernelFunction is similar to std::function but stores a kernel function.
@@ -153,7 +169,7 @@ public:
    * > Tensor result = func.call<Tensor, Tensor, bool>(tensor1, true);
    */
   template<class Return, class... Args>
-  Return call(const OperatorHandle& opHandle, DispatchKeySet dispatchKeySet, Args... args) const;
+  friend Return kernel_function::call(const KernelFunction &func, const OperatorHandle& opHandle, DispatchKeySet dispatchKeySet, Args... args);
 
   /**
    * Create a KernelFunction from a boxed function.
@@ -184,8 +200,8 @@ public:
    * > };
    * > KernelFunction func = KernelFunction::makeFromUnboxedFunctor<MyFunctor>(std::make_unique<MyFunctor>());
    */
-  template<bool AllowLegacyTypes = false, class KernelFunctor>
-  static KernelFunction makeFromUnboxedFunctor(std::unique_ptr<OperatorKernel> kernelFunctor);
+  template<bool AllowLegacyTypes, class KernelFunctor>
+  friend KernelFunction kernel_function::makeFromUnboxedFunctor(std::unique_ptr<OperatorKernel> kernelFunctor);
 
   /**
    * Create a KernelFunction from a boxed functor.
@@ -213,22 +229,9 @@ public:
    * > Tensor unboxed_func(Tensor a, Tensor b) {...}
    * > KernelFunction func = KernelFunction::makeFromUnboxedFunction<decltype(unboxed_func), &unboxed_func>();
    */
-  template<class FuncPtr, bool AllowLegacyTypes = false>
-  static KernelFunction makeFromUnboxedFunction(FuncPtr);
+  template<class FuncPtr, bool AllowLegacyTypes>
+  friend KernelFunction kernel_function::makeFromUnboxedFunction(FuncPtr);
 
-  /**
-   * Create a KernelFunction from an unboxed function.
-   * KernelFunction::makeFromUnboxedFunction is usually a better choice than
-   * this if you know the function pointer at compile time, see doc comment
-   * there for an explanation.
-   *
-   * Example:
-   *
-   * > Tensor unboxed_func(Tensor a, Tensor b) {...}
-   * > KernelFunction func = KernelFunction::makeFromUnboxedRuntimeFunction(&unboxed_func);
-   */
-  template<bool AllowLegacyTypes = false, class FuncType>
-  static KernelFunction makeFromUnboxedRuntimeFunction(FuncType* func);
 
   static KernelFunction makeFallthrough();
   static KernelFunction makeAmbiguousAutogradOther();
@@ -239,19 +242,6 @@ public:
 
   template<BoxedKernelFunction_withDispatchKeys* func>
   static void make_boxed_function(OperatorKernel*, const OperatorHandle& opHandle, DispatchKeySet, Stack* stack);
-
-  /**
-   * Create a KernelFunction from an unboxed lambda.
-   *
-   * Example:
-   *
-   * > KernelFunction func = KernelFunction::makeFromUnboxedLambda(
-   * >      [] (Tensor a, bool b) -> Tensor {...});
-   */
-  template<bool AllowLegacyTypes = false, class Lambda>
-  static std::enable_if_t<guts::is_stateless_lambda<std::decay_t<Lambda>>::value, KernelFunction> makeFromUnboxedLambda(Lambda&& lambda);
-  template<bool AllowLegacyTypes = false, class Lambda>
-  static std::enable_if_t<!guts::is_stateless_lambda<std::decay_t<Lambda>>::value, KernelFunction> makeFromUnboxedLambda(Lambda&& lambda);
 
   std::string dumpState() const;
   // For testing internal invariants only

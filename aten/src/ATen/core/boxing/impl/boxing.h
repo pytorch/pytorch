@@ -4,6 +4,7 @@
 // i.e. how to make a vector<IValue> from a set of concrete arguments.
 
 #include <ATen/core/ivalue.h>
+#include <ATen/core/stack.h>
 #include <c10/core/TensorOptions.h>
 
 #include <ATen/core/boxing/KernelFunction.h>
