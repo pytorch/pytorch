@@ -248,74 +248,85 @@ class ModifiesVarChecker : public IRVisitor {
   bool found_{false};
 };
 
-// Stmt PC
-class StmtPC {
+// This indicates the path from root to a stmt A in AST. Specifically, it
+// consists of a vector of integers: each integer represents the number of stmts
+// before A's ancestor or A in the block. For example, "1:1:0" points to stmt
+// "d[i] += e[i, j];" in the following code.
+//
+// c = a/b;
+// for i
+//  d[i] = 0;
+//  for j
+//    d[i] += e[i, j];
+class StmtCounter {
  public:
   void append(int32_t id) {
-    PC.emplace_back(id);
+    counter_.emplace_back(id);
   }
   void pop() {
-    PC.pop_back();
+    counter_.pop_back();
   }
 
-  const std::vector<int32_t> getPC() {
-    return PC;
+  const std::vector<int32_t> getCounter() {
+    return counter_;
   }
 
-  bool operator==(StmtPC& pc) {
-    auto compare = pc.getPC();
-    if (PC.size() != compare.size()) {
+  bool operator==(StmtCounter& counter) {
+    auto compare = counter.getCounter();
+    if (counter_.size() != compare.size()) {
       return false;
     }
     int size = compare.size();
     for (int i = 0; i < size; i++) {
-      if (PC.at(i) != compare.at(i)) {
+      if (counter_.at(i) != compare.at(i)) {
         return false;
       }
     }
     return true;
   }
 
-  bool operator<(StmtPC& pc) {
-    auto compare = pc.getPC();
-    int size = PC.size() < compare.size() ? PC.size() : compare.size();
+  bool operator<(StmtCounter& counter) {
+    auto compare = counter.getCounter();
+    int size =
+        counter_.size() < compare.size() ? counter_.size() : compare.size();
     for (int i = 0; i < size; i++) {
-      if (PC.at(i) > compare.at(i)) {
+      if (counter_.at(i) > compare.at(i)) {
         return false;
       }
     }
-    return !(*this == pc);
+    return !(*this == counter);
   }
 
-  bool operator>(StmtPC& pc) {
-    auto compare = pc.getPC();
-    int size = PC.size() < compare.size() ? PC.size() : compare.size();
+  bool operator>(StmtCounter& counter) {
+    auto compare = counter.getCounter();
+    int size =
+        counter_.size() < compare.size() ? counter_.size() : compare.size();
     for (int i = 0; i < size; i++) {
-      if (PC.at(i) < compare.at(i)) {
+      if (counter_.at(i) < compare.at(i)) {
         return false;
       }
     }
-    return !(*this == pc);
+    return !(*this == counter);
   }
 
-  std::string getPCString() {
-    std::string pcstr = "";
-    for (int i = 0; i < PC.size(); i++) {
-      pcstr += std::to_string(PC.at(i));
-      pcstr += ":";
+  std::string getCounterString() {
+    std::string cstr = "";
+    for (int i = 0; i < counter_.size(); i++) {
+      cstr += std::to_string(counter_.at(i));
+      cstr += ":";
     }
-    return pcstr;
+    return cstr;
   }
 
  private:
-  std::vector<int32_t> PC;
+  std::vector<int32_t> counter_;
 };
 
 // Visit Stmts and Record their PCs
 class StmtRecorder : public IRVisitor {
  public:
-  StmtPC getStmtPC() {
-    return pc_;
+  StmtCounter getStmtCounter() {
+    return counter_;
   }
 
  private:
@@ -329,10 +340,10 @@ class StmtRecorder : public IRVisitor {
 
     int count = 0;
     for (StmtPtr s : *v) {
-      count++;
-      pc_.append(count);
+      counter_.append(count);
       s->accept(this);
-      pc_.pop();
+      counter_.pop();
+      count++;
     }
   }
 
@@ -351,23 +362,23 @@ class StmtRecorder : public IRVisitor {
     flatten_ = false;
   }
 
-  StmtPC pc_;
+  StmtCounter counter_;
   bool flatten_ = false;
 };
 
 enum AccMode { READ, WRITE, REDUCE };
 
 // Traverses the IR to identify all reads/writes to a buf, and their PCs
-using BufAccessInfo = std::tuple<StmtPtr, AccMode, StmtPC>;
+using BufAccessInfo = std::tuple<StmtPtr, AccMode, StmtCounter>;
 class BufAccesses : public StmtRecorder {
  public:
   BufAccesses(BufPtr b) : buf_(b) {}
 
-  std::vector<std::tuple<StmtPtr, AccMode, StmtPC>> accesses() {
+  std::vector<std::tuple<StmtPtr, AccMode, StmtCounter>> accesses() {
     return accesses_;
   }
 
-  static std::vector<std::tuple<StmtPtr, AccMode, StmtPC>> find(
+  static std::vector<std::tuple<StmtPtr, AccMode, StmtCounter>> find(
       StmtPtr s,
       BufPtr b) {
     BufAccesses finder(b);
@@ -412,17 +423,17 @@ class BufAccesses : public StmtRecorder {
 
   void insertAccesses(StmtPtr s) {
     if (readsBuffer(s) && writesBuffer(s)) {
-      auto acc = std::make_tuple(s, AccMode::REDUCE, getStmtPC());
+      auto acc = std::make_tuple(s, AccMode::REDUCE, getStmtCounter());
       accesses_.push_back(acc);
       return;
     }
     if (readsBuffer(s)) {
-      auto acc = std::make_tuple(s, AccMode::READ, getStmtPC());
+      auto acc = std::make_tuple(s, AccMode::READ, getStmtCounter());
       accesses_.push_back(acc);
       return;
     }
     if (writesBuffer(s)) {
-      auto acc = std::make_tuple(s, AccMode::WRITE, getStmtPC());
+      auto acc = std::make_tuple(s, AccMode::WRITE, getStmtCounter());
       accesses_.push_back(acc);
     }
   }
