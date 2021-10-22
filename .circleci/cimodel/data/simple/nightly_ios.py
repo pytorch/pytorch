@@ -1,6 +1,4 @@
 import cimodel.data.simple.ios_definitions as ios_definitions
-import cimodel.lib.miniutils as miniutils
-
 
 class IOSNightlyJob:
     def __init__(self,
