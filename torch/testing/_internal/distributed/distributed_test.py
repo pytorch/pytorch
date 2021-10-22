@@ -8268,6 +8268,32 @@ class DistributedTest:
             BACKEND != "nccl" and BACKEND != "gloo",
             "Only Nccl & Gloo backend support DistributedDataParallel",
         )
+        def test_sync_bn_logged(self):
+            model = BN_NET
+            rank = self.rank
+            # single gpu training setup
+            model_gpu = model.cuda(rank)
+            no_sync_bn = torch.nn.parallel.DistributedDataParallel(
+                copy.deepcopy(model_gpu),
+                device_ids=[self.rank],
+            )
+            ddp_logging_data = no_sync_bn._get_ddp_logging_data()
+            sync_bn_logged = ddp_logging_data.get("has_sync_bn", True)
+            self.assertFalse(sync_bn_logged)
+            model_DDP = nn.SyncBatchNorm.convert_sync_batchnorm(model_gpu)
+            model_DDP = torch.nn.parallel.DistributedDataParallel(
+                model_DDP,
+                device_ids=[self.rank],
+            )
+            ddp_logging_data = model_DDP._get_ddp_logging_data()
+            sync_bn_logged = ddp_logging_data.get("has_sync_bn", False)
+            self.assertTrue(sync_bn_logged)
+
+        @skip_if_lt_x_gpu(2)
+        @sandcastle_skip_if(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only Nccl & Gloo backend support DistributedDataParallel",
+        )
         def test_stateless_api_with_ddp(self):
             class MockModule(torch.nn.Module):
                 def __init__(self):
