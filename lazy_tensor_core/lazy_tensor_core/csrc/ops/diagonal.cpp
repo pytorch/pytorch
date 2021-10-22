@@ -50,7 +50,7 @@ lazy_tensors::Shape Diagonal::MakeDiagonalShape(
         std::min(shape.dimensions(dim1) + offset, shape.dimensions(dim2)), 0);
   }
   dimensions.push_back(dsize);
-  return lazy_tensors::ShapeUtil::MakeShape(shape.element_type(), dimensions);
+  return lazy_tensors::ShapeUtil::MakeShape(shape.at_element_type(), dimensions);
 }
 
 }  // namespace ops

@@ -84,7 +84,7 @@ lazy_tensors::PrimitiveType MakeLtcPrimitiveType(at::ScalarType scalar_type,
 
 bool RequiresRawTypeCasting(at::ScalarType scalar_type, const Device* device);
 
-lazy_tensors::PrimitiveType GetShapeDimensionType(const Device* device);
+c10::ScalarType GetShapeDimensionType(const Device* device);
 
 template<typename... TupleType>
 std::vector<std::vector<int64_t>> CreateComputationShapeFromMetaTensors(const std::tuple<TupleType...>& tensors) {

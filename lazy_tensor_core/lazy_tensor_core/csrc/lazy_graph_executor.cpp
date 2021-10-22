@@ -270,10 +270,10 @@ class DeviceContextArena {
     devctx->running_seed = kSeedAdd + kSeedMul * devctx->running_seed;
     // Compose new seeds from the root seed, to avoid creating too many
     // computation parameters which might overflow the device capacity.
-    torch::lazy::Value k = ir::ops::ScalarOp(MakeIntScalar(kSeedMul),
-                                    MakeLtcPrimitiveType(kSeedType, &device));
-    torch::lazy::Value b = ir::ops::ScalarOp(MakeIntScalar(kSeedAdd),
-                                    MakeLtcPrimitiveType(kSeedType, &device));
+    torch::lazy::Value k =
+        ir::ops::ScalarOp(MakeIntScalar(kSeedMul), kSeedType);
+    torch::lazy::Value b =
+        ir::ops::ScalarOp(MakeIntScalar(kSeedAdd), kSeedType);
     devctx->seed_ir_value = b + k * devctx->seed_ir_value;
     return devctx->seed_ir_value;
   }
@@ -332,8 +332,8 @@ class DeviceContextArena {
   }
 
   torch::lazy::Value IrValueFromScalar(const at::Scalar& value,
-                              at::ScalarType scalar_type,
-                              const Device& device) {
+                                       at::ScalarType scalar_type,
+                                       const Device& device) {
     at::Tensor tensor =
         at::scalar_tensor(value, at::TensorOptions(scalar_type));
     lazy_tensors::ComputationClient::DataPtr device_data =
@@ -489,17 +489,17 @@ std::string LazyGraphExecutor::DumpBackendComputation(
 }
 
 torch::lazy::Value LazyGraphExecutor::GetDeviceDataIrValue(
-    const at::Scalar& value, lazy_tensors::PrimitiveType type,
+    const at::Scalar& value, c10::ScalarType type,
     const Device& device) {
   lazy_tensors::ComputationClient::DataPtr data =
-      GetDeviceData(value, TensorTypeFromLtcType(type), device);
+      GetDeviceData(value, type, device);
   data->SetInfo(std::make_shared<DeviceDataInfo>(
       /*tensor_id=*/-1, /*read_only=*/true));
   return torch::lazy::MakeNode<ir::ops::DeviceData>(std::move(data));
 }
 
 torch::lazy::Value LazyGraphExecutor::GetIrValueForScalar(
-    const at::Scalar& value, lazy_tensors::PrimitiveType type,
+    const at::Scalar& value, c10::ScalarType type,
     const Device& device) {
   if (IsSpecialScalar(value)) {
     return ir::ops::ScalarOp(std::move(value), type);
@@ -510,11 +510,11 @@ torch::lazy::Value LazyGraphExecutor::GetIrValueForScalar(
 torch::lazy::Value LazyGraphExecutor::GetIrValueForScalar(
     const at::Scalar& value, const Device& device) {
   return GetIrValueForScalar(
-      value, MakeLtcPrimitiveType(GetScalarType(value), &device), device);
+      value, GetScalarType(value), device);
 }
 
 torch::lazy::Value LazyGraphExecutor::GetIrValueForScalar(
-    const at::Scalar& value, lazy_tensors::PrimitiveType type,
+    const at::Scalar& value, c10::ScalarType type,
     c10::ArrayRef<lazy_tensors::int64> dimensions, const Device& device) {
   torch::lazy::Value ir_value = GetIrValueForScalar(value, type, device);
   if (!dimensions.empty()) {
@@ -528,17 +528,17 @@ torch::lazy::Value LazyGraphExecutor::GetIrValueForScalar(
 torch::lazy::Value LazyGraphExecutor::GetIrValueForScalar(
     const at::Scalar& value, const lazy_tensors::Shape& shape,
     const Device& device) {
-  return GetIrValueForScalar(value, shape.element_type(), shape.dimensions(),
+  return GetIrValueForScalar(value, shape.at_element_type(), shape.dimensions(),
                              device);
 }
 
 torch::lazy::Value LazyGraphExecutor::GetIrValueForScalar(
     const at::Scalar& value, const lazy_tensors::Shape& shape,
     c10::optional<at::ScalarType> logical_element_type, const Device& device) {
-  lazy_tensors::PrimitiveType type =
+  c10::ScalarType type =
       logical_element_type
-          ? MakeLtcPrimitiveType(*logical_element_type, &device)
-          : shape.element_type();
+          ? *logical_element_type
+          : shape.at_element_type();
   return GetIrValueForScalar(value, type, shape.dimensions(), device);
 }
 
@@ -1037,7 +1037,8 @@ std::vector<at::Tensor> LazyGraphExecutor::GetTensorsOpByOp(
     DebugUtil::SaveTensorsGraphInfo("GetTensorsOpByOp", *tensors,
                                     &coll.indices);
 
-    std::vector<torch::lazy::Value> roots = CollectRoots(*tensors, coll.indices);
+    std::vector<torch::lazy::Value> roots =
+        CollectRoots(*tensors, coll.indices);
     async_tensors_data =
         OpByOpExecutor::Get()->Execute(roots, coll.device.ToString(), {});
   }

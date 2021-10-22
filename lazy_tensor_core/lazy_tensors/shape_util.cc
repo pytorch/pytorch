@@ -14,7 +14,7 @@ torch::lazy::hash_t SingleShapeHash(const lazy_tensors::Shape& shape, torch::laz
   for (auto dim : shape.dimensions()) {
     seed = HashCombine(seed, (uint64_t)dim);
   }
-  return HashCombine(seed, static_cast<int>(shape.element_type()));
+  return HashCombine(seed, static_cast<int>(shape.at_element_type()));
 }
 
 // The hash is deterministic to enable easier debugging between separate runs.
@@ -83,7 +83,7 @@ void ShapeUtil::ForEachSubshape(const Shape& shape,
   using lazy_tensors::hash;
   using lazy_tensors::Hash64Combine;
 
-  size_t hash_value = hash<PrimitiveType>()(shape.element_type());
+  size_t hash_value = hash<c10::ScalarType>()(shape.at_element_type());
 
   if (shape.tuple_shapes().empty()) {
     for (int i = 0; i < shape.dimensions_size(); ++i) {

@@ -91,40 +91,6 @@ bool Use32BitLong() {
   return use_32bit_long;
 }
 
-lazy_tensors::PrimitiveType LtcTypeFromTensorType(at::ScalarType scalar_type,
-                                                  const Device& device) {
-  switch (scalar_type) {
-    case at::ScalarType::Double:
-      return device.hw_type != DeviceType::TPU
-                 ? lazy_tensors::PrimitiveType::F64
-                 : lazy_tensors::PrimitiveType::F32;
-    case at::ScalarType::Float:
-      return lazy_tensors::PrimitiveType::F32;
-    case at::ScalarType::BFloat16:
-      return lazy_tensors::PrimitiveType::BF16;
-    case at::ScalarType::Half:
-      return lazy_tensors::PrimitiveType::F16;
-    case at::ScalarType::Bool:
-      return lazy_tensors::PrimitiveType::PRED;
-    case at::ScalarType::Byte:
-      return lazy_tensors::PrimitiveType::U8;
-    case at::ScalarType::Char:
-      return lazy_tensors::PrimitiveType::S8;
-    case at::ScalarType::Short:
-      return lazy_tensors::PrimitiveType::S16;
-    case at::ScalarType::Int:
-      return lazy_tensors::PrimitiveType::S32;
-    case at::ScalarType::Long:
-      return lazy_tensors::PrimitiveType::S64;
-    case at::ScalarType::ComplexFloat:
-      return lazy_tensors::PrimitiveType::C64;
-    case at::ScalarType::ComplexDouble:
-      return lazy_tensors::PrimitiveType::C128;
-    default:
-      LTC_ERROR() << "Type not supported: " << scalar_type;
-  }
-}
-
 template <typename S>
 struct Caster {
   template <typename D>
@@ -475,7 +441,7 @@ void TensorToBuffer(const at::Tensor& tensor,
   at::Tensor contiguous_tensor = tensor.contiguous();
   lazy_tensors::Shape src_shape = MakeTorchTensorLayout(
       Helpers::I64List(contiguous_tensor.sizes()), /*dynamic_dimensions=*/{},
-      LtcTypeFromTensorType(contiguous_tensor.type().scalarType(), device));
+      contiguous_tensor.type().scalarType());
   CopyTensors<SType, DType>(contiguous_tensor.data_ptr<SType>(), src_shape,
                             dest_buffer, dest_buffer_size, dest_shape);
 }
@@ -485,64 +451,67 @@ void TensorToBufferSType(const at::Tensor& tensor,
                          const lazy_tensors::Shape& dest_shape,
                          void* dest_buffer, size_t dest_buffer_size,
                          const Device& device) {
-  switch (dest_shape.element_type()) {
-    case lazy_tensors::PrimitiveType::BF16:
+  switch (dest_shape.at_element_type()) {
+    case c10::ScalarType::BFloat16:
       TensorToBuffer<SType, lazy_tensors::bfloat16>(
           tensor, dest_shape, dest_buffer, dest_buffer_size, device);
       break;
-    case lazy_tensors::PrimitiveType::F16:
+    case c10::ScalarType::Half:
       TensorToBuffer<SType, lazy_tensors::half>(tensor, dest_shape, dest_buffer,
                                                 dest_buffer_size, device);
       break;
-    case lazy_tensors::PrimitiveType::F32:
+    case c10::ScalarType::Float:
       TensorToBuffer<SType, float>(tensor, dest_shape, dest_buffer,
                                    dest_buffer_size, device);
       break;
-    case lazy_tensors::PrimitiveType::F64:
+    case c10::ScalarType::Double:
       TensorToBuffer<SType, double>(tensor, dest_shape, dest_buffer,
                                     dest_buffer_size, device);
       break;
-    case lazy_tensors::PrimitiveType::PRED:
+    case c10::ScalarType::Bool:
       TensorToBuffer<SType, bool>(tensor, dest_shape, dest_buffer,
                                   dest_buffer_size, device);
       break;
-    case lazy_tensors::PrimitiveType::U8:
+    case c10::ScalarType::Byte:
       TensorToBuffer<SType, lazy_tensors::uint8>(
           tensor, dest_shape, dest_buffer, dest_buffer_size, device);
       break;
-    case lazy_tensors::PrimitiveType::S8:
+    case c10::ScalarType::Char:
       TensorToBuffer<SType, lazy_tensors::int8>(tensor, dest_shape, dest_buffer,
                                                 dest_buffer_size, device);
       break;
-    case lazy_tensors::PrimitiveType::S16:
+    case c10::ScalarType::Short: 
       TensorToBuffer<SType, lazy_tensors::int16>(
           tensor, dest_shape, dest_buffer, dest_buffer_size, device);
       break;
-    case lazy_tensors::PrimitiveType::U16:
-      TensorToBuffer<SType, lazy_tensors::uint16>(
-          tensor, dest_shape, dest_buffer, dest_buffer_size, device);
-      break;
-    case lazy_tensors::PrimitiveType::S32:
+    // c10 doesn't have a uint16 type
+    // case lazy_tensors::PrimitiveType::U16:
+    //   TensorToBuffer<SType, lazy_tensors::uint16>(
+    //       tensor, dest_shape, dest_buffer, dest_buffer_size, device);
+    //   break;
+    case c10::ScalarType::Int:
       TensorToBuffer<SType, lazy_tensors::int32>(
           tensor, dest_shape, dest_buffer, dest_buffer_size, device);
       break;
-    case lazy_tensors::PrimitiveType::U32:
-      TensorToBuffer<SType, lazy_tensors::uint32>(
-          tensor, dest_shape, dest_buffer, dest_buffer_size, device);
-      break;
-    case lazy_tensors::PrimitiveType::S64:
+    // c10 doesn't have a uint32 type
+    // case lazy_tensors::PrimitiveType::U32:
+    //   TensorToBuffer<SType, lazy_tensors::uint32>(
+    //       tensor, dest_shape, dest_buffer, dest_buffer_size, device);
+    //   break;
+    case c10::ScalarType::Long:
       TensorToBuffer<SType, lazy_tensors::int64>(
           tensor, dest_shape, dest_buffer, dest_buffer_size, device);
       break;
-    case lazy_tensors::PrimitiveType::U64:
-      TensorToBuffer<SType, lazy_tensors::uint64>(
-          tensor, dest_shape, dest_buffer, dest_buffer_size, device);
-      break;
-    case lazy_tensors::PrimitiveType::C64:
+    // c10 doesn't have a uint64 type
+    // case lazy_tensors::PrimitiveType::U64:
+    //   TensorToBuffer<SType, lazy_tensors::uint64>(
+    //       tensor, dest_shape, dest_buffer, dest_buffer_size, device);
+    //   break;
+    case c10::ScalarType::ComplexFloat:
       TensorToBuffer<SType, lazy_tensors::complex64>(
           tensor, dest_shape, dest_buffer, dest_buffer_size, device);
       break;
-    case lazy_tensors::PrimitiveType::C128:
+    case c10::ScalarType::ComplexDouble:
       TensorToBuffer<SType, lazy_tensors::complex128>(
           tensor, dest_shape, dest_buffer, dest_buffer_size, device);
       break;
@@ -578,7 +547,7 @@ at::Tensor LiteralToTensor(const lazy_tensors::Literal& literal,
       lazy_tensors::util::ToVector<int64_t>(literal.shape().dimensions());
   lazy_tensors::Shape torch_shape = MakeTorchTensorLayout(
       literal.shape().dimensions(), /*dynamic_dimensions=*/{},
-      literal.shape().element_type());
+      literal.shape().at_element_type());
   lazy_tensors::int64 total_elements =
       lazy_tensors::ShapeUtil::ElementsIn(torch_shape);
 
@@ -707,47 +676,47 @@ std::vector<lazy_tensors::int64> ComputeArrayStrides(
 
 at::Tensor MakeTensorFromLiteral(const lazy_tensors::Literal& literal,
                                  at::ScalarType dest_element_type) {
-  switch (literal.shape().element_type()) {
-    case lazy_tensors::PrimitiveType::PRED:
+  switch (literal.shape().at_element_type()) {
+    case c10::ScalarType::Bool:
       return LiteralToTensorHelper<bool>(literal, dest_element_type);
-    case lazy_tensors::PrimitiveType::BF16:
+    case c10::ScalarType::BFloat16:
       return LiteralToTensorHelper<lazy_tensors::bfloat16>(literal,
                                                            dest_element_type);
-    case lazy_tensors::PrimitiveType::F16:
+    case c10::ScalarType::Half:
       return LiteralToTensorHelper<lazy_tensors::half>(literal,
                                                        dest_element_type);
-    case lazy_tensors::PrimitiveType::F32:
+    case c10::ScalarType::Float:
       return LiteralToTensorHelper<float>(literal, dest_element_type);
-    case lazy_tensors::PrimitiveType::F64:
+    case c10::ScalarType::Double:
       return LiteralToTensorHelper<double>(literal, dest_element_type);
-    case lazy_tensors::PrimitiveType::U8:
+    case c10::ScalarType::Byte:
       return LiteralToTensorHelper<lazy_tensors::uint8>(literal,
                                                         dest_element_type);
-    case lazy_tensors::PrimitiveType::S8:
+    case c10::ScalarType::Char:
       return LiteralToTensorHelper<lazy_tensors::int8>(literal,
                                                        dest_element_type);
-    case lazy_tensors::PrimitiveType::S16:
+    case c10::ScalarType::Short:
       return LiteralToTensorHelper<lazy_tensors::int16>(literal,
                                                         dest_element_type);
-    case lazy_tensors::PrimitiveType::U16:
-      return LiteralToTensorHelper<lazy_tensors::uint16>(literal,
-                                                         dest_element_type);
-    case lazy_tensors::PrimitiveType::S32:
+    // case lazy_tensors::PrimitiveType::U16:
+    //   return LiteralToTensorHelper<lazy_tensors::uint16>(literal,
+    //                                                      dest_element_type);
+    case c10::ScalarType::Int:
       return LiteralToTensorHelper<lazy_tensors::int32>(literal,
                                                         dest_element_type);
-    case lazy_tensors::PrimitiveType::U32:
-      return LiteralToTensorHelper<lazy_tensors::uint32>(literal,
-                                                         dest_element_type);
-    case lazy_tensors::PrimitiveType::S64:
+    // case lazy_tensors::PrimitiveType::U32:
+    //   return LiteralToTensorHelper<lazy_tensors::uint32>(literal,
+    //                                                      dest_element_type);
+    case c10::ScalarType::Long:
       return LiteralToTensorHelper<lazy_tensors::int64>(literal,
                                                         dest_element_type);
-    case lazy_tensors::PrimitiveType::U64:
-      return LiteralToTensorHelper<lazy_tensors::uint64>(literal,
-                                                         dest_element_type);
-    case lazy_tensors::PrimitiveType::C64:
+    // case lazy_tensors::PrimitiveType::U64:
+    //   return LiteralToTensorHelper<lazy_tensors::uint64>(literal,
+    //                                                      dest_element_type);
+    case c10::ScalarType::ComplexFloat:
       return LiteralToTensorHelper<lazy_tensors::complex64>(literal,
                                                             dest_element_type);
-    case lazy_tensors::PrimitiveType::C128:
+    case c10::ScalarType::ComplexDouble:
       return LiteralToTensorHelper<lazy_tensors::complex128>(literal,
                                                              dest_element_type);
     default:
@@ -798,8 +767,7 @@ lazy_tensors::Literal GetTensorLiteral(const at::Tensor& tensor,
   if (shape == nullptr) {
     auto dimensions = Helpers::I64List(tensor.sizes());
     computed_shape = MakeTorchTensorLayout(
-        dimensions, /*dynamic_dimensions=*/{},
-        LtcTypeFromTensorType(tensor.type().scalarType(), ltc_device));
+        dimensions, /*dynamic_dimensions=*/{}, tensor.type().scalarType());
     shape = &computed_shape;
   }
   lazy_tensors::Literal literal(*shape);
@@ -840,16 +808,15 @@ torch::lazy::hash_t TensorHash(const at::Tensor& tensor) {
     case at::ScalarType::Double:
       return torch::lazy::DataHash(ctensor.data_ptr<double>(), size);
     case at::ScalarType::BFloat16:
-      return torch::lazy::DataHash(ctensor.data_ptr<at::BFloat16>(),
-                                          size);
+      return torch::lazy::DataHash(ctensor.data_ptr<at::BFloat16>(), size);
     case at::ScalarType::Half:
       return torch::lazy::DataHash(ctensor.data_ptr<at::Half>(), size);
     case at::ScalarType::ComplexFloat:
-      return torch::lazy::DataHash(
-          ctensor.data_ptr<c10::complex<float>>(), size);
+      return torch::lazy::DataHash(ctensor.data_ptr<c10::complex<float>>(),
+                                   size);
     case at::ScalarType::ComplexDouble:
-      return torch::lazy::DataHash(
-          ctensor.data_ptr<c10::complex<double>>(), size);
+      return torch::lazy::DataHash(ctensor.data_ptr<c10::complex<double>>(),
+                                   size);
     default:
       LTC_ERROR() << "Unsupported scalar type: " << ctensor.scalar_type();
   }
@@ -878,7 +845,7 @@ lazy_tensors::Shape MakeShapeWithDeviceLayout(const lazy_tensors::Shape& shape,
         if (subshape->IsArray()) {
           *subshape = MakeArrayShapeFromDimensions(
               subshape->dimensions(), subshape->dynamic_dimensions(),
-              subshape->element_type(), device_type);
+              subshape->at_element_type(), device_type);
         }
       });
   return device_shape;
@@ -887,11 +854,10 @@ lazy_tensors::Shape MakeShapeWithDeviceLayout(const lazy_tensors::Shape& shape,
 lazy_tensors::Shape CreateComputationShapeFromTensor(const at::Tensor& tensor,
                                                      const Device* device) {
   Device ltc_device = GetDeviceOrCurrent(device);
-  return MakeArrayShapeFromDimensions(
-      Helpers::I64List(tensor.sizes()),
-      /*dynamic_dimensions=*/{},
-      MakeLtcPrimitiveType(tensor.type().scalarType(), &ltc_device),
-      ltc_device.hw_type);
+  return MakeArrayShapeFromDimensions(Helpers::I64List(tensor.sizes()),
+                                      /*dynamic_dimensions=*/{},
+                                      tensor.type().scalarType(),
+                                      ltc_device.hw_type);
 }
 
 at::ScalarType TensorTypeFromLtcType(lazy_tensors::PrimitiveType ltc_type) {
@@ -1052,11 +1018,10 @@ bool RequiresRawTypeCasting(at::ScalarType scalar_type, const Device* device) {
   }
 }
 
-lazy_tensors::PrimitiveType GetShapeDimensionType(const Device* device) {
+c10::ScalarType GetShapeDimensionType(const Device* device) {
   Device ltc_device = GetDeviceOrCurrent(device);
-  return ltc_device.hw_type == DeviceType::CPU
-             ? lazy_tensors::PrimitiveType::S64
-             : lazy_tensors::PrimitiveType::S32;
+  return ltc_device.hw_type == DeviceType::CPU ? c10::ScalarType::Long
+                                               : c10::ScalarType::Int;
 }
 
 bool IsSpecialScalar(const at::Scalar& value) {

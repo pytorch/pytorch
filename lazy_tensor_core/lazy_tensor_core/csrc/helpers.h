@@ -158,9 +158,6 @@ class Helpers {
       lazy_tensors::int64 dim0, lazy_tensors::int64 dim1,
       lazy_tensors::int64 rank);
 
-  static lazy_tensors::PrimitiveType PromoteType(
-      lazy_tensors::PrimitiveType type1, lazy_tensors::PrimitiveType type2);
-
   // Calculates the protomoted shape to which the input shapes should be
   // broadcasted for an elementwise operation. The size of the common dimensions
   // (2,3,4 for shape1, and 0,1,2 for shape2) must either match, or either one
@@ -179,11 +176,6 @@ class Helpers {
   static lazy_tensors::Shape GetPromotedBinaryOpShape(
       const lazy_tensors::Shape& shape1, const lazy_tensors::Shape& shape2);
 
-  template <typename T>
-  static lazy_tensors::Literal Range(T start, T end, T step) {
-    return lazy_tensors::LiteralUtil::CreateR1<T>(
-        lazy_tensors::util::Range<T>(start, end, step));
-  }
 };
 
 }  // namespace torch_lazy_tensors

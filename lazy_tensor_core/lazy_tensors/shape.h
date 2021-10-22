@@ -8,7 +8,6 @@
 #include "lazy_tensors/computation_client/client_data.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/layout.h"
-#include "lazy_tensors/primitive_util.h"
 #include "lazy_tensors/str_cat.h"
 #include "lazy_tensors/str_join.h"
 #include "lazy_tensors/types.h"
@@ -17,41 +16,34 @@ namespace lazy_tensors {
 
 class Shape {
  public:
-  Shape() : element_type_(PrimitiveType::INVALID) {}
+  Shape() : at_element_type_(c10::ScalarType::Undefined) {}
 
   Shape(at::ScalarType element_type, c10::ArrayRef<int64> dimensions);
 
-  Shape(PrimitiveType element_type, c10::ArrayRef<int64> dimensions)
-      : element_type_(element_type),
-        dimensions_(dimensions.begin(), dimensions.end()),
-        dynamic_dimensions_(dimensions.size(), false) {}
 
   Shape(c10::ArrayRef<Shape> element_shapes)
-      : element_type_(PrimitiveType::TUPLE),
-        element_shapes_(element_shapes.begin(), element_shapes.end()) {}
+      : at_element_type_(c10::ScalarType::Undefined),
+        element_shapes_(element_shapes.begin(), element_shapes.end()),
+        is_tuple_(true) {
+          LTC_CHECK(element_shapes.size() > 0);
+          // TODO(whc) it's not really clear what the definition of element shape 
+          // should be for a tuple shape.  However, for tuple shapes, we appear
+          // to be accessing the element_type field in some places.  Fix this.
+          at_element_type_ = element_shapes[0].at_element_type();
+        }
 
-  Shape(const client::ShapeData& shape_data)
-      : element_type_(shape_data.element_type()),
-        dimensions_(shape_data.dimensions()),
-        dynamic_dimensions_(shape_data.dimensions().size(), false) {
-    for (const client::ShapeData& element_shape : shape_data.element_shapes()) {
-      element_shapes_.push_back(Shape(element_shape));
-    }
-    for (const int64_t dim_index : shape_data.minor_to_major()) {
-      layout_.add_minor_to_major(dim_index);
-    }
-  }
+  Shape(const client::ShapeData& shape_data);
 
   std::string ToString(bool print_layout = false) const {
-    return lazy_tensors::StrCat(PrimitiveTypeName(element_type_), "[",
+    return lazy_tensors::StrCat(toString(at_element_type_), "[",
                                 c10::Join(",", dimensions_), "]");
   }
 
   int64 rank() const { return dimensions_.size(); }
 
-  bool IsArray() const { return primitive_util::IsArrayType(element_type()); }
+  bool IsArray() const { return false; }
 
-  bool IsTuple() const { return element_type_ == PrimitiveType::TUPLE; }
+  bool IsTuple() const { return is_tuple_; }
 
   bool is_dynamic_dimension(int dimension) const {
     return dynamic_dimensions_.at(dimension);
@@ -69,8 +61,8 @@ class Shape {
   // by 1.
   void DeleteDimension(int64 dim_to_delete);
 
-  PrimitiveType element_type() const { return element_type_; }
-  void set_element_type(PrimitiveType value) { element_type_ = value; }
+  c10::ScalarType at_element_type() const { return at_element_type_; }
+  void set_element_type(at::ScalarType value);
 
   // Methods for accessing the dimensions array.
   int dimensions_size() const { return dimensions_.size(); }
@@ -108,7 +100,7 @@ class Shape {
   Layout* mutable_layout() { return &layout_; }
 
   bool operator==(const Shape& other) const {
-    return element_type_ == other.element_type_ &&
+    return at_element_type_ == other.at_element_type_ &&
            dimensions_ == other.dimensions_;
   }
 
@@ -117,7 +109,8 @@ class Shape {
   static void SetDynamicMode();
 
  private:
-  PrimitiveType element_type_;
+  bool is_tuple_ = false;
+  c10::ScalarType at_element_type_;
   std::vector<int64> dimensions_;
   std::vector<bool> dynamic_dimensions_;
   std::vector<Shape> element_shapes_;
@@ -155,18 +148,7 @@ inline std::ostream& operator<<(std::ostream& out, const Shape& shape) {
   return out << shape.ToString();
 }
 
-inline client::ShapeData ToShapeData(const Shape& shape) {
-  std::vector<client::ShapeData> element_shapes;
-  for (const Shape& element_shape : shape.tuple_shapes()) {
-    element_shapes.push_back(ToShapeData(element_shape));
-  }
-  auto shape_dimensions = shape.dimensions();
-  std::vector<int64_t> dimensions(shape_dimensions.begin(),
-                                  shape_dimensions.end());
-  auto minor_to_major = shape.layout().minor_to_major();
-  return client::ShapeData(
-      shape.element_type(), dimensions, element_shapes,
-      std::vector<int64_t>(minor_to_major.begin(), minor_to_major.end()));
-}
+// TODO(whc) took away inline temporarily, figured we'd delete this anyway
+client::ShapeData ToShapeData(const Shape& shape);
 
 }  // namespace lazy_tensors

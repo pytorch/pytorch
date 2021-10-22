@@ -9,7 +9,7 @@ namespace torch_lazy_tensors {
 
 class ShapeBuilder {
  public:
-  explicit ShapeBuilder(lazy_tensors::PrimitiveType type) : type_(type) {}
+  explicit ShapeBuilder(c10::ScalarType type) : type_(type) {}
 
   ShapeBuilder& Add(const lazy_tensors::Shape& shape, lazy_tensors::int64 dim);
 
@@ -26,7 +26,7 @@ class ShapeBuilder {
     lazy_tensors::int64 dim_or_size = -1;
   };
 
-  lazy_tensors::PrimitiveType type_;
+  c10::ScalarType type_;
   std::vector<ShapeDim> dims_;
 };
 
