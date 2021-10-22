@@ -6,7 +6,6 @@ on:
   # TODO: Add an on_release trigger to build on tags
   workflow_dispatch:
   repository_dispatch:
-    types: [build]
 
 jobs:
   generate-build-matrix:
