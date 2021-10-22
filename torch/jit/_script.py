@@ -56,7 +56,7 @@ function and does not have any attributes or Parameters.
 """
 set_module(ScriptFunction, "torch.jit")
 
-# Throws an error if a jit function is tried to be pickled.
+# Throws an error if a jit function is pickled.
 # Helps to avoid Python crashes for Python versions 3.9.5 + when protocol 0 or 1 is given as an argument.
 def _reduce(cls):
     raise pickle.PickleError("ScriptFunction cannot be pickled")
