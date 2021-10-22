@@ -1,13 +1,16 @@
 # Owner(s): ["oncall: distributed"]
 
 import random
+import sys
 import unittest
 
 import torch
+from torch import distributed as dist
 from torch.distributed._fsdp.utils import (
     _apply_to_tensors,
 )
 from torch.testing._internal.common_utils import (
+    TEST_WITH_DEV_DBG_ASAN,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -16,15 +19,25 @@ from torch.testing._internal.common_utils import (
 )
 
 
+if not dist.is_available():
+    print("Distributed not available, skipping tests", file=sys.stderr)
+    sys.exit(0)
+
+if TEST_WITH_DEV_DBG_ASAN:
+    print(
+        "Skip dev-asan as torch + multiprocessing spawn have known issues",
+        file=sys.stderr,
+    )
+    sys.exit(0)
+
+
 class TestUtils(TestCase):
     @parametrize(
         "devices", [["cpu"], ["cuda"], subtest(["cpu", "cuda"], name="cpu_cuda")]
     )
     def test_apply_to_tensors(self, devices):
-        if (
-            "cuda" in devices
-            and not torch.cuda.is_available()
-            or torch.cuda.device_count() < 1
+        if "cuda" in devices and (
+            not torch.cuda.is_available() or torch.cuda.device_count() < 1
         ):
             raise unittest.SkipTest("Skipped due to lack of GPU")
 

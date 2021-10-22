@@ -1,10 +1,12 @@
 # Owner(s): ["oncall: distributed"]
 
+import sys
 from enum import Enum
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch import distributed as dist
 from torch.distributed._fsdp import FullyShardedDataParallel as FSDP
 from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -13,10 +15,23 @@ from torch.testing._internal.common_fsdp import (
     get_full_params,
 )
 from torch.testing._internal.common_utils import (
+    TEST_WITH_DEV_DBG_ASAN,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
 )
+
+
+if not dist.is_available():
+    print("Distributed not available, skipping tests", file=sys.stderr)
+    sys.exit(0)
+
+if TEST_WITH_DEV_DBG_ASAN:
+    print(
+        "Skip dev-asan as torch + multiprocessing spawn have known issues",
+        file=sys.stderr,
+    )
+    sys.exit(0)
 
 
 class Model(nn.Module):
