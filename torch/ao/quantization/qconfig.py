@@ -13,6 +13,7 @@ from torch.ao.quantization.fake_quantize import (
     FusedMovingAvgObsFakeQuantize,
     default_fused_per_channel_wt_fake_quant,
     default_embedding_fake_quant,
+    default_embedding_fake_quant_4bit,
 )
 
 from .observer import (
@@ -42,10 +43,12 @@ class QConfig(namedtuple('QConfig', ['activation', 'weight'])):
 
 
     Observer classes have usually reasonable default arguments, but they can be overwritten with `with_args`
-    method (that behaves like functools.partial):
+    method (that behaves like functools.partial)::
 
-      my_qconfig = QConfig(activation=MinMaxObserver.with_args(dtype=torch.qint8),
-      weight=default_observer.with_args(dtype=torch.qint8))
+      my_qconfig = QConfig(
+          activation=MinMaxObserver.with_args(dtype=torch.qint8),
+          weight=default_observer.with_args(dtype=torch.qint8))
+
     """
     def __new__(cls, activation, weight):
         # catch common mistakes
@@ -57,12 +60,21 @@ class QConfig(namedtuple('QConfig', ['activation', 'weight'])):
 
 default_qconfig = QConfig(activation=default_observer,
                           weight=default_weight_observer)
+"""
+Default qconfig configuration.
+"""
 
 default_debug_qconfig = QConfig(weight=default_weight_observer,
                                 activation=default_debug_observer)
+"""
+Default qconfig configuration for debugging.
+"""
 
 default_per_channel_qconfig = QConfig(activation=default_observer,
                                       weight=default_per_channel_weight_observer)
+"""
+Default qconfig configuration for per channel weight quantization.
+"""
 
 class QConfigDynamic(namedtuple('QConfigDynamic', ['activation', 'weight'])):
     """
@@ -76,9 +88,10 @@ class QConfigDynamic(namedtuple('QConfigDynamic', ['activation', 'weight'])):
     Quantization function will instantiate observers multiple times for each of the layers.
 
     Observer classes have usually reasonable default arguments, but they can be overwritten with `with_args`
-    method (that behaves like functools.partial):
+    method (that behaves like functools.partial)::
 
       my_qconfig = QConfigDynamic(weight=default_observer.with_args(dtype=torch.qint8))
+
     """
     def __new__(cls, activation=torch.nn.Identity, weight=torch.nn.Identity):
         # catch common mistakes
@@ -89,18 +102,36 @@ class QConfigDynamic(namedtuple('QConfigDynamic', ['activation', 'weight'])):
 
 default_dynamic_qconfig = QConfigDynamic(activation=default_dynamic_quant_observer,
                                          weight=default_weight_observer)
+"""
+Default dynamic qconfig.
+"""
+
 float16_dynamic_qconfig = QConfigDynamic(activation=PlaceholderObserver.with_args(dtype=torch.float32),
                                          weight=PlaceholderObserver.with_args(dtype=torch.float16))
+"""
+Dynamic qconfig with weights quantized to `torch.float16`.
+"""
+
 float16_static_qconfig = QConfigDynamic(activation=PlaceholderObserver.with_args(dtype=torch.float16),
                                         weight=PlaceholderObserver.with_args(dtype=torch.float16))
+"""
+Dynamic qconfig with both activations and weights quantized to `torch.float16`.
+"""
+
 per_channel_dynamic_qconfig = QConfigDynamic(activation=default_dynamic_quant_observer,
                                              weight=default_per_channel_weight_observer)
+"""
+Dynamic qconfig with weights quantized per channel.
+"""
 
 # TODO: this is weight only quant, change this to QConfigWeightOnly
 # or remove the QConfigDynamic later
 float_qparams_weight_only_qconfig = QConfigDynamic(
     activation=default_placeholder_observer,
     weight=default_float_qparams_observer)
+"""
+Dynamic qconfig with weights quantized with a floating point zero_point.
+"""
 
 float_qparams_weight_only_qconfig_4bit = QConfigDynamic(
     activation=default_placeholder_observer,
@@ -108,17 +139,41 @@ float_qparams_weight_only_qconfig_4bit = QConfigDynamic(
 
 default_qat_qconfig = QConfig(activation=default_fake_quant,
                               weight=default_weight_fake_quant)
+"""
+Default qconfig for QAT.
+"""
 
 default_weight_only_qconfig = QConfig(activation=torch.nn.Identity,
                                       weight=default_weight_fake_quant)
+"""
+Default qconfig for quantizing weights only.
+"""
+
 default_activation_only_qconfig = QConfig(activation=default_fake_quant,
                                           weight=torch.nn.Identity)
+"""
+Default qconfig for quantizing activations only.
+"""
 
 # QAT config that uses a fused observer + fake quant modules for optimized training performance.
 # to modify the activation/weight observers, the default entries in fake_quantize.py can be modified.
 default_qat_qconfig_v2 = QConfig(activation=default_fused_act_fake_quant, weight=default_fused_wt_fake_quant)
+"""
+Fused version of `default_qat_config`, has performance benefits.
+"""
 
 def get_default_qconfig(backend='fbgemm'):
+    """
+    Returns the default PTQ qconfig for the specified backend.
+
+    Args:
+      * `backend`: a string representing the target backend. Currently supports `fbgemm`
+        and `qnnpack`.
+
+    Return:
+        qconfig
+    """
+
     if backend == 'fbgemm':
         qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=True),
                           weight=default_per_channel_weight_observer)
@@ -132,7 +187,21 @@ def get_default_qconfig(backend='fbgemm'):
 default_embedding_qat_qconfig = QConfig(activation=NoopObserver,
                                         weight=default_embedding_fake_quant)
 
+default_embedding_qat_qconfig_4bit = QConfig(activation=NoopObserver,
+                                             weight=default_embedding_fake_quant_4bit)
+
 def get_default_qat_qconfig(backend='fbgemm', version=1):
+    """
+    Returns the default QAT qconfig for the specified backend.
+
+    Args:
+      * `backend`: a string representing the target backend. Currently supports `fbgemm`
+        and `qnnpack`.
+      * `version`: version, for backwards compatibility. Can be `None` or `1`.
+
+    Return:
+        qconfig
+    """
     # Histogram observer is too slow for quantization aware training
     if version is None:
         if backend == 'fbgemm':
@@ -169,6 +238,9 @@ def get_default_qat_qconfig(backend='fbgemm', version=1):
 
 def assert_valid_qconfig(qconfig: Optional[Union[QConfig, QConfigDynamic]],
                          mod: torch.nn.Module) -> None:
+    """
+    Verifies that this `qconfig` is valid.
+    """
     if qconfig is None:
         return
     is_conv_transpose_mod = (
@@ -234,6 +306,9 @@ def add_module_to_qconfig_obs_ctr(
 
 
 def qconfig_equals(q1: QConfigAny, q2: QConfigAny):
+    """
+    Returns `True` if `q1` equals `q2`, and `False` otherwise.
+    """
     # functools.partial has no __eq__ operator defined so '==' defaults to 'is'
     def partial_equals(p1, p2):
         same = p1.func == p2.func
