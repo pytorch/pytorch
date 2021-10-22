@@ -99,7 +99,7 @@ class TestShardedTensorNNInit(ShardedTensorTestBase):
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
     def test_init_sharded_tensor_with_kaiming_uniform(self):
-        """ Test torch.nn.init.kaiming_uniform_(ShardedTensor, a, mode, nonlinearit) """
+        """ Test torch.nn.init.kaiming_uniform_(ShardedTensor, a, mode, nonlinearity) """
 
         spec = ChunkShardingSpec(
             dim=0,
@@ -124,10 +124,10 @@ class TestShardedTensorNNInit(ShardedTensorTestBase):
         # Clone local tensor to ensure torch.nn.init starts from the same input
         local_tensor_clone = torch.clone(sharded_tensor.local_shards()[0].tensor)
         torch.manual_seed(seed)
-        torch.nn.init.kaiming_normal_(sharded_tensor, a=a, mode=mode, nonlinearity=nonlinearity)
+        torch.nn.init.kaiming_uniform_(sharded_tensor, a=a, mode=mode, nonlinearity=nonlinearity)
 
         torch.manual_seed(seed)
-        torch.nn.init.kaiming_normal_(local_tensor_clone, a=a, mode=mode, nonlinearity=nonlinearity)
+        torch.nn.init.kaiming_uniform_(local_tensor_clone, a=a, mode=mode, nonlinearity=nonlinearity)
         self.assertEqual(local_tensor_clone, sharded_tensor.local_shards()[0].tensor)
 
 if __name__ == '__main__':
