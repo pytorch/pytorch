@@ -368,7 +368,6 @@ libtorch_core_sources = sorted(
 
 # These files are the only ones that are supported on Windows.
 libtorch_distributed_base_sources = [
-    "torch/csrc/distributed/c10d/frontend.cpp",
     "torch/csrc/distributed/c10d/comm.cpp",
     "torch/csrc/distributed/c10d/default_comm_hooks.cpp",
     "torch/csrc/distributed/c10d/FileStore.cpp",
@@ -380,7 +379,6 @@ libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/ProcessGroupGloo.cpp",
     "torch/csrc/distributed/c10d/ProcessGroupMPI.cpp",
     "torch/csrc/distributed/c10d/ProcessGroupWrapper.cpp",
-    "torch/csrc/distributed/c10d/quantization/quantization.cpp",
     "torch/csrc/distributed/c10d/reducer.cpp",
     "torch/csrc/distributed/c10d/sequence_num.cpp",
     "torch/csrc/distributed/c10d/Store.cpp",
@@ -614,7 +612,6 @@ libtorch_cuda_distributed_base_sources = [
 
 # These files are only supported on Linux (and others) but not on Windows.
 libtorch_cuda_distributed_extra_sources = [
-    "torch/csrc/distributed/c10d/frontend_cuda.cpp",
     "torch/csrc/distributed/c10d/NCCLUtils.cpp",
     "torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp",
     "torch/csrc/distributed/rpc/tensorpipe_cuda.cpp",
@@ -749,7 +746,6 @@ libtorch_python_core_sources = [
     "torch/csrc/jit/passes/onnx/fixup_onnx_controlflow.cpp",
     "torch/csrc/jit/passes/onnx/list_model_parameters.cpp",
     "torch/csrc/jit/passes/onnx/function_substitution.cpp",
-    "torch/csrc/jit/passes/onnx/fold_if_node.cpp",
     "torch/csrc/jit/passes/onnx/helper.cpp",
     "torch/csrc/jit/passes/onnx/peephole.cpp",
     "torch/csrc/jit/passes/onnx/preprocess_for_onnx.cpp",
@@ -758,6 +754,7 @@ libtorch_python_core_sources = [
     "torch/csrc/jit/passes/onnx/unpack_quantized_weights.cpp",
     "torch/csrc/jit/passes/onnx/remove_inplace_ops_for_onnx.cpp",
     "torch/csrc/jit/passes/onnx/shape_type_inference.cpp",
+    "torch/csrc/jit/passes/onnx/function_extraction.cpp",
     "torch/csrc/jit/python/pybind_utils.cpp",
     "torch/csrc/jit/passes/onnx/pattern_conversion/common.cpp",
     "torch/csrc/jit/passes/onnx/pattern_conversion/pattern_encapsulation.cpp",
@@ -805,6 +802,7 @@ libtorch_python_core_sources = [
 libtorch_python_distributed_core_sources = [
     "torch/csrc/distributed/c10d/init.cpp",
     "torch/csrc/distributed/c10d/python_comm_hook.cpp",
+    "torch/csrc/distributed/c10d/quantization/quantization.cpp",
 ]
 
 libtorch_python_distributed_sources = libtorch_python_distributed_core_sources + [
@@ -939,6 +937,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/nnapi/nnapi_bind.cpp",
     "aten/src/ATen/nnapi/nnapi_wrapper.cpp",
     "aten/src/ATen/nnapi/nnapi_model_loader.cpp",
+    "aten/src/ATen/native/prim_native_functions.cpp",
 ]
 
 aten_cpu_source_codegen_list = [
