@@ -95,8 +95,7 @@ void OptimizeGraph(
         graph,
         c10::Symbol::fromQualString("fb::sigrid_transforms_torch_bind"),
         c10::Symbol::fromQualString(
-            "fb::variadic_sigrid_transforms_torch_bind"),
-        1 /* list_idx */);
+            "fb::variadic_sigrid_transforms_torch_bind"));
     FuseSignLog1P(graph);
 
     // TODO: we can avoid this guard by moving operations
