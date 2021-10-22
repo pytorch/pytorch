@@ -10,7 +10,7 @@ from tools.codegen.model import (DispatchKey,
 from tools.codegen.selective_build.selector import SelectiveBuilder
 from tools.codegen.utils import concatMap, YamlLoader
 import tools.codegen.dest as dest
-from .gen_backend_stubs import (parse_backend_yaml, error_on_missing_kernels,
+from .gen_backend_stubs import (parse_backend_yaml, error_on_missing_or_invalid_kernels,
                                 gen_dispatchkey_nativefunc_headers,
                                 gen_dispatcher_registrations)
 
@@ -145,8 +145,8 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
         class_name = backend_indices[backend_dispatch_key].native_function_class_name()
 
         if impl_path is not None:
-            error_on_missing_kernels(native_functions, backend_indices, backend_key,
-                                     autograd_key, impl_path, full_codegen)
+            error_on_missing_or_invalid_kernels(native_functions, backend_indices, backend_key,
+                                                autograd_key, impl_path, full_codegen)
 
         assert class_name is not None
 

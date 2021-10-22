@@ -123,7 +123,7 @@ autograd key. They cannot be mix and matched. If this is something you need, fee
     return ParsedExternalYaml(backend_key, autograd_key, cpp_namespace, backend_indices)
 
 
-def error_on_missing_kernels(
+def error_on_missing_or_invalid_kernels(
         native_functions: Sequence[NativeFunction],
         backend_indices: Dict[DispatchKey, BackendIndex],
         backend_key: DispatchKey,
@@ -170,6 +170,23 @@ but expected {expected_overload_count} kernel(s). The expected function schemas 
 
 """
     assert missing_kernels_err_msg == "", missing_kernels_err_msg
+
+    # Additionally, provide a nice error if a user tries to register a composite op with no derivative formula to a backend key.
+    # Otherwise, autograd will silently stop working for their op.
+    for f in native_functions:
+        if backend_indices[backend_key].has_kernel(f) and f.has_composite_implicit_autograd_kernel:
+            # At this point, we know that the vendor provided a kernel for an op that also has a CompositeImplicitAutograd kernel.
+            # What we really want to error on, though, is if that op doesn't have a derivative formula registered in-tree.
+            # We can guess that based on whether or not the op has ANY in-tree non-composite kernels.
+            # Technically this has a small chance of false negatives, but it's easier than re-parsing derivatives.yaml here.
+            has_non_composite_in_tree_backend = any(idx.has_kernel(f) for idx in backend_indices.values() if not idx.external)
+            assert not has_non_composite_in_tree_backend, \
+                f"\nFound an entry for '{f.func.name}' in the yaml. " \
+                "This operator is composite, which means that by default it will decompose into base operators. " \
+                "If decomposing is fine, then you can simply remove the entry from the yaml file. " \
+                "If you wish to provide an explicit kernel directly for this composite op, you can do so by:\n " \
+                "(a) moving the operator name under the 'autograd' entry in the yaml file\n " \
+                "(b) writing a custom Autograd Function for the operator"
 
 
 def main() -> None:
