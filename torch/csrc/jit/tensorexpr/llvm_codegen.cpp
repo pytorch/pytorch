@@ -272,7 +272,7 @@ class LLVMCodeGenImpl : public IRVisitor {
   void visit(IntrinsicsPtr v) override;
   void visit(AllocatePtr v) override;
   void visit(FreePtr v) override;
-  void visit(BufMapPtr v) override;
+  void visit(PlacementAllocatePtr v) override;
   void visit(LetPtr v) override;
   void visit(CondPtr v) override;
   void visit(ExternalCallPtr v) override;
@@ -1984,7 +1984,7 @@ void LLVMCodeGenImpl::visit(AllocatePtr v) {
   varToVal_[v->buffer_var()] = malloc;
 }
 
-void LLVMCodeGenImpl::visit(BufMapPtr v) {
+void LLVMCodeGenImpl::visit(PlacementAllocatePtr v) {
   llvm::Value* ptr = varToVal_.at(v->dest_buf()->base_handle());
   varToVal_[v->src_buf()->base_handle()] = ptr;
 }

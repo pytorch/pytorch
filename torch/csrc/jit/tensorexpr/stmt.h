@@ -388,12 +388,16 @@ class TORCH_API Allocate : public StmtNode<Allocate> {
   // TODO: add memory types.
 };
 
-class TORCH_API BufMap : public StmtNode<BufMap> {
+// PlacementAllocate is a variation of the Allocate operator in NNC IR. It does
+// not allocate memory but reuse the memory of another(dest) buffer for the src
+// buffer.
+class TORCH_API PlacementAllocate : public StmtNode<PlacementAllocate> {
  public:
-  static BufMapPtr make(
+  static PlacementAllocatePtr make(
       const BufHandle& src_buf_handle,
       const BufHandle& dest_buf_handle) {
-    return alloc<BufMap>(src_buf_handle.node(), dest_buf_handle.node());
+    return alloc<PlacementAllocate>(
+        src_buf_handle.node(), dest_buf_handle.node());
   }
 
   BufPtr src_buf() const {
@@ -412,7 +416,7 @@ class TORCH_API BufMap : public StmtNode<BufMap> {
     dest_buf_ = buf;
   }
 
-  explicit BufMap(BufPtr src_buf, BufPtr dest_buf)
+  explicit PlacementAllocate(BufPtr src_buf, BufPtr dest_buf)
       : src_buf_(src_buf), dest_buf_(dest_buf) {}
 
  private:
