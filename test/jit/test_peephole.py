@@ -540,6 +540,41 @@ class TestPeephole(JitTestCase):
         FileCheck().check_not("aten::add")
         self.assertEqual(foo(3), (3, 3))
 
+    def test_noop_peephole(self):
+        # test unsuccessful
+        def foo1(x):
+            return x + 0
+
+        def foo2():
+            x = torch.zeros([2, 2])
+            x.sub_(3)
+            return x + 0
+
+        def foo3():
+            x = torch.zeros([2, 2])
+            return x, x + 0
+
+        funcs = foo1, foo2, foo3
+        inps = (torch.ones([2]),), (), ()
+        for func, inp in zip(funcs, inps):
+            foo_s = torch.jit.script(func)
+            self.run_pass("peephole", foo_s.graph)
+            FileCheck().check_count("aten::add", 1, exactly=True).run(foo_s.graph)
+            self.assertEqual(func(*inp), foo_s(*inp))
+
+        # successful
+        def func(x):
+            return (x + 0) / 1 - 5
+
+        func_s = torch.jit.script(func)
+        self.run_pass("peephole", func_s.graph)
+        # bail on modified value first
+        FileCheck().check_not("aten::add").check("aten::div").run(func_s.graph)
+        # second run it should succeed
+        self.run_pass("peephole", func_s.graph)
+        FileCheck().check_not("aten::add").check_not("aten::div").run(func_s.graph)
+        self.assertEqual(func(torch.ones([2, 2])), func_s(torch.ones([2, 2])))
+
     def test_refine_integer_values(self):
         @torch.jit.script
         def foo(x: int):
