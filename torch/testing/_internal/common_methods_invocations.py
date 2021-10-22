@@ -2571,6 +2571,27 @@ def sample_inputs_histogram(op_info, device, dtype, requires_grad):
 
     return sample_inputs
 
+def sample_inputs_histogramdd(op_info, device, dtype, requires_grad):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    sizes = ((S, S), (S, S, S), (S, 1, S), (S, 0, S))
+    bin_ct_patterns = ((1, 1, 1, 1, 1), (2, 3, 2, 3, 2), (3, 2, 3, 2, 3))
+
+    sample_inputs = []
+    for size, bin_ct_pattern, weighted, density in product(sizes, bin_ct_patterns, [False, True], [False, True]):
+        input_tensor = make_arg(size)
+        bin_ct = bin_ct_pattern[:size[-1]]
+        weight_tensor = make_arg(size[:-1]) if weighted else None
+
+        sample_inputs.append(SampleInput(input_tensor, args=(bin_ct,),
+                                         kwargs=dict(weight=weight_tensor, density=density)))
+
+        bins_tensor = [make_arg(ct + 1) for ct in bin_ct]
+        sample_inputs.append(SampleInput(input_tensor, args=(bins_tensor,),
+                                         kwargs=dict(weight=weight_tensor, density=density)))
+
+    return sample_inputs
+
 def sample_inputs_bincount(op_info, device, dtype, requires_grad):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
@@ -10001,6 +10022,16 @@ op_db: List[OpInfo] = [
                # def the_method(i0):
                #     return torch.histogram(i0, 1, weight=tensor(-0.5735, dtype=torch.float32), density=False)
                #                                          ~~~~~~ <--- HERE
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+           )),
+    OpInfo('histogramdd',
+           dtypes=_dispatch_dtypes(),  # histogramdd is only implemented on CPU
+           dtypesIfCPU=floating_types(),
+           sample_inputs_func=sample_inputs_histogramdd,
+           supports_autograd=False,
+           skips=(
+               # JIT tests don't work with Tensor keyword arguments
+               # https://github.com/pytorch/pytorch/issues/58507
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
            )),
     OpInfo('bincount',
