@@ -279,7 +279,9 @@ vTensor::Image allocate_image(
       // Usage
       {
         VK_IMAGE_USAGE_SAMPLED_BIT |
-            VK_IMAGE_USAGE_STORAGE_BIT,
+            VK_IMAGE_USAGE_STORAGE_BIT |
+            VK_IMAGE_USAGE_TRANSFER_SRC_BIT | // for vkCmdCopyImage
+            VK_IMAGE_USAGE_TRANSFER_DST_BIT,  // for vkCmdCopyImage
         {
           VMA_MEMORY_USAGE_GPU_ONLY,
           0u,

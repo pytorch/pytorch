@@ -166,6 +166,12 @@ Tensor slice_backward_wrapper(
     int64_t step);
 Tensor linalg_eig_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
                            const Tensor& L, const Tensor& V);
+Tensor linalg_lstsq_jvp(
+  const Tensor& A,
+  const Tensor& B,
+  const Tensor& dA,
+  const Tensor& dB
+);
 Tensor eigh_jvp_eigenvectors(const Tensor& input_tangent, const Tensor& eigenvalues, const Tensor& eigenvectors);
 Tensor eigh_jvp_eigenvalues(const Tensor& input_tangent, const Tensor& eigenvalues, const Tensor& eigenvectors);
 Tensor eigh_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
@@ -260,7 +266,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
     IntArrayRef normalized_shape,
     std::array<bool,3> output_mask);
 
-std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, const Tensor& input, const Tensor& tau);
+std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, const Tensor& result, const Tensor& input, const Tensor& tau);
 std::tuple<Tensor, Tensor> polar_backward(
     const Tensor& grad,
     const Tensor& result);
@@ -297,6 +303,15 @@ Tensor _det_lu_based_helper_backward(
   const Tensor& self,
   const Tensor& lu,
   const Tensor& pivs
+);
+
+std::tuple<Tensor, Tensor> linalg_lstsq_backward(
+  const Tensor& grad,
+  const Tensor& A,
+  const Tensor& B,
+  const c10::optional<double> rcond,
+  const c10::optional<c10::string_view> driver,
+  const std::array<bool, 2>& grad_input_mask
 );
 
 Tensor lu_backward_base(
