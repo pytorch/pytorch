@@ -15514,9 +15514,9 @@ TEST(NVFuserTest, FusionLargeWelfordNormalization_CUDA) {
 
   auto tvs1 = Welford(tv0, {1});
   auto sum_of_tv0 = sum(tv0, {1});
-  auto sum_plus_avg = add(tvs1.avg, sum_of_tv0);
 
-  fusion->addOutput(sum_plus_avg);
+  fusion->addOutput(tvs1.var_sum);
+  fusion->addOutput(sum_of_tv0);
 
   FusionExecutorCache executor_cache(std::move(fusion_ptr));
 
@@ -15526,8 +15526,9 @@ TEST(NVFuserTest, FusionLargeWelfordNormalization_CUDA) {
     at::Tensor t0 = at::randn({128, inner_size}, options);
     auto outputs = executor_cache.runFusionWithInputs({t0});
 
-    auto t1 = t0.mean({1}) + t0.sum({1});
-    testValidate(fusion, outputs, {t0}, {t1}, __LINE__, __FILE__);
+    auto t1 = t0.var({1}, false) * inner_size;
+    auto t2 = t0.sum({1});
+    testValidate(fusion, outputs, {t0}, {t1, t2}, __LINE__, __FILE__);
 
     return executor_cache.getMostRecentKernelRuntime();
   };
