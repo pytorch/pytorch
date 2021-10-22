@@ -342,7 +342,6 @@ def amin(input: Tensor,
         raise ValueError(f'masked amin expects strided tensor (got {input.layout} tensor)')
 
 
-@_apply_docstring_templates
 def mean(input: Tensor,
          dim: DimOrDims = None,
          *,
@@ -363,9 +362,7 @@ elements, have ``nan`` values.
 
 {reduction_args}
 
-{reduction_example}
-
-    """
+{reduction_example}"""
     if dtype is None:
         dtype = input.dtype
     if input.layout == torch.strided:
