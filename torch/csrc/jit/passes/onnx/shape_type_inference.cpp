@@ -941,30 +941,30 @@ c10::SymbolicShape ComputeShapeForSlice(
 }
 
 void ProcessSliceNode(Node* n, int opset_version) {
-  if (ConstantValueMap::HasShape(n->input(0)->debugName())) {
+  auto valid = true;
+  // For opset version <= 9, starts, ends, axes, steps are attributes,
+  // so their values are always valid.
+  if (opset_version >= 10) {
+    valid = ConstantValueMap::HasValue(n->input(1)->debugName()) &&
+        ConstantValueMap::HasValue(n->input(2)->debugName());
+    for (const auto input_idx : c10::irange(3, 5)) {
+      if (n->inputs().size() > input_idx) {
+        valid = valid &&
+            ConstantValueMap::HasValue(n->input(input_idx)->debugName());
+      }
+    }
+  }
+  if (!ConstantValueMap::HasShape(n->input(0)->debugName()) || !valid) {
+    if (ConstantValueMap::HasRank(n->input(0)->debugName())) {
+      auto rank = ConstantValueMap::GetRank(n->input(0)->debugName()).value();
+      UpdateRank(n->output(), rank);
+    }
+    return;
+  } else {
     auto shape_size_0 =
         ConstantValueMap::GetShape(n->input(0)->debugName()).value();
     if (shape_size_0.rank().has_value()) {
       auto input0_shape_value = shape_size_0.sizes().value();
-      auto valid = true;
-      if (opset_version >= 10) {
-        valid = ConstantValueMap::HasValue(n->input(1)->debugName()) &&
-            ConstantValueMap::HasValue(n->input(2)->debugName());
-        for (const auto input_idx : c10::irange(3, 5)) {
-          if (n->inputs().size() > input_idx) {
-            valid = valid &&
-                ConstantValueMap::HasValue(n->input(input_idx)->debugName());
-          }
-        }
-      }
-      if (!valid) {
-        if (ConstantValueMap::HasRank(n->input(0)->debugName())) {
-          auto rank =
-              ConstantValueMap::GetRank(n->input(0)->debugName()).value();
-          UpdateRank(n->output(), rank);
-        }
-        return;
-      }
 
       std::vector<int64_t> start_vector;
       std::vector<int64_t> end_vector;
