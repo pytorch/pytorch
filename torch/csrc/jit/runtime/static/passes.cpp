@@ -648,7 +648,9 @@ void FuseListUnpackV2(std::shared_ptr<torch::jit::Graph>& graph) {
       // This captures a case of `y = fb::equally_split(x, 1, _)` where y
       // becomes just an alias of x.
       // If this case is found, replace y with x to avoid executing this op.
-      node->output(0)->replaceAllUsesWith(node->input(0));
+      list_unpack_node->output()->replaceAllUsesWith(node->input(0));
+      list_unpack_node->destroy();
+      to_remove.push_back(node);
       continue;
     }
 
