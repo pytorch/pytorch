@@ -762,6 +762,48 @@ class TestIndexing(TestCase):
         self.assertEqual(a[-1, -1], 14)
         self.assertEqual(a[0, -1], 1)
 
+    @onlyCUDA
+    def test_index_put_accumulate_expanded_values(self, device):
+        # checks the issue with cuda: https://github.com/pytorch/pytorch/issues/39227
+        # and verifies consistency with CPU result
+        t = torch.zeros((5, 2))
+        t_dev = t.to(device)
+        indices = [
+            torch.tensor([0, 1, 2, 3]),
+            torch.tensor([1, ]),
+        ]
+        indices_dev = [i.to(device) for i in indices]
+        values0d = torch.tensor(1.0)
+        values1d = torch.tensor([1.0, ])
+
+        out_cuda = t_dev.index_put_(indices_dev, values0d.to(device), accumulate=True)
+        out_cpu = t.index_put_(indices, values0d, accumulate=True)
+        self.assertEqual(out_cuda.cpu(), out_cpu)
+
+        out_cuda = t_dev.index_put_(indices_dev, values1d.to(device), accumulate=True)
+        out_cpu = t.index_put_(indices, values1d, accumulate=True)
+        self.assertEqual(out_cuda.cpu(), out_cpu)
+
+        t = torch.zeros(4, 3, 2)
+        t_dev = t.to(device)
+
+        indices = [
+            torch.tensor([0, ]),
+            torch.arange(3)[:, None],
+            torch.arange(2)[None, :],
+        ]
+        indices_dev = [i.to(device) for i in indices]
+        values1d = torch.tensor([-1.0, -2.0])
+        values2d = torch.tensor([[-1.0, -2.0], ])
+
+        out_cuda = t_dev.index_put_(indices_dev, values1d.to(device), accumulate=True)
+        out_cpu = t.index_put_(indices, values1d, accumulate=True)
+        self.assertEqual(out_cuda.cpu(), out_cpu)
+
+        out_cuda = t_dev.index_put_(indices_dev, values2d.to(device), accumulate=True)
+        out_cpu = t.index_put_(indices, values2d, accumulate=True)
+        self.assertEqual(out_cuda.cpu(), out_cpu)
+
     @onlyOnCPUAndCUDA
     def test_index_put_accumulate_duplicate_indices(self, device):
         for i in range(1, 512):
