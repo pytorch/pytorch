@@ -1,0 +1,42 @@
+[[linter]]
+name = 'FLAKE8'
+patterns = ['**/*.py']
+args = [
+    'python3',
+    'tools/linter/flake8_linter.py',
+    '--binary=flake8',
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
+name = 'MYPY'
+patterns = ['**/*.py']
+args = [
+    'python3',
+    'tools/linter/mypy_linter.py',
+    '--binary=mypy',
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
+name = 'CLANGFORMAT'
+patterns = ['**/*.cpp', '**/*.h']
+args = [
+    'python3',
+    'tools/linter/clangformat_linter.py',
+    '--binary=clang-format',
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
+name = 'CLANGTIDY'
+patterns = ['**/*.cpp']
+args = [
+    'python3',
+    'tools/linter/clangtidy_linter.py',
+    '--',
+    '@{{PATHSFILE}}'
+]
