@@ -190,8 +190,6 @@ class TORCH_CUDA_CU_API BestEffortReplay {
   }
 
  public:
-  // Highly duplicated from the constructor above.
-  // TODO: Remove other constructor
   BestEffortReplay(
       const std::vector<IterDomain*>& replay_domain,
       const std::vector<IterDomain*>& target_domain,

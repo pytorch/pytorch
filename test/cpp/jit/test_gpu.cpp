@@ -5276,9 +5276,9 @@ TEST(NVFuserTest, FusionAdvancedIndexing4_CUDA) {
   FusionGuard fg(&fusion);
 
   // Set up your input tensor views
-  TensorView* tv0 = makeConcreteTensor({10, 20});
+  TensorView* tv0 = makeConcreteTensor({4, 8});
   fusion.addInput(tv0);
-  TensorView* tv1 = makeConcreteTensor({10, 10, 20});
+  TensorView* tv1 = makeConcreteTensor({4, 4, 8});
   fusion.addInput(tv1);
 
   TensorView* tv2 = add(tv0, new Double(1));
@@ -5287,8 +5287,8 @@ TEST(NVFuserTest, FusionAdvancedIndexing4_CUDA) {
   fusion.addOutput(tv4);
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-  at::Tensor t0 = at::randn({10, 20}, options);
-  at::Tensor t1 = at::randn({10, 10, 20}, options);
+  at::Tensor t0 = at::randn({4, 8}, options);
+  at::Tensor t1 = at::randn({4, 4, 8}, options);
 
   auto t2 = t0.add(1.0);
   auto aten_output = t2.add(t1);
@@ -5850,6 +5850,54 @@ TEST(NVFuserTest, FusionAdvancedLowering5_CUDA) {
 
   std::vector<IValue> aten_inputs = {t0, t1};
   std::vector<at::Tensor> aten_outputs = {t3};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  auto cg_outputs = fe.runFusion(aten_inputs);
+
+  testValidate(
+      &fusion, cg_outputs, aten_inputs, aten_outputs, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionAdvancedLowering6_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  TensorView* tv0 = makeConcreteTensor({5, 4, 3});
+  fusion.addInput(tv0);
+  auto tv1 = makeConcreteTensor({4});
+  fusion.addInput(tv1);
+  auto tv2 = unaryOp(UnaryOpType::Set, tv0);
+  auto tv3 = unaryOp(UnaryOpType::Set, tv1);
+
+  auto tv4 = sum(tv2, {0, 2});
+  auto tv5 = add(tv4, tv3);
+  fusion.addOutput(tv5);
+
+  auto tv6 = broadcast(tv3, {true, false, true});
+  auto tv7 = add(tv2, tv6);
+  fusion.addOutput(tv7);
+
+  tv2->computeAt(tv4, -1, ComputeAtMode::BestEffort);
+  tv3->computeAt(tv7, -1, ComputeAtMode::BestEffort);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(1);
+  at::Tensor t0 = at::randn({5, 4, 3}, options);
+  at::Tensor t1 = at::randn({4}, options);
+
+  auto t2 = t0;
+  auto t3 = t1;
+
+  std::vector<int64_t> reduction_axes{0, 2};
+  auto t4 = t2.sum(reduction_axes);
+  auto t5 = add(t4, t3);
+  auto t6 = t3.unsqueeze(0).unsqueeze(-1);
+  auto t7 = t2.add(t6);
+
+  std::vector<IValue> aten_inputs = {t0, t1};
+  std::vector<at::Tensor> aten_outputs = {t5, t7};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion);
