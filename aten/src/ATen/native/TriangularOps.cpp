@@ -2,13 +2,25 @@
 #include <ATen/CPUApplyUtils.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/native/Resize.h>
-
 #include <ATen/Parallel.h>
+#include <ATen/TensorMeta.h>
+#include <ATen/native/Resize.h>
 #include <ATen/native/TriangularOpsUtils.h>
 #include <c10/util/irange.h>
 
 namespace at {
+namespace meta {
+
+TORCH_META_FUNC(tril)(const Tensor& self, int64_t k) {
+  set_output(self.sizes(), self.options());
+}
+
+TORCH_META_FUNC(triu)(const Tensor& self, int64_t k) {
+  set_output(self.sizes(), self.options());
+}
+
+}  // namespace meta
+
 namespace native {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triu/tril ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -52,7 +64,7 @@ static void apply_triu_tril_single(
 }
 
 template <typename scalar_t, bool upper>
-void apply_triu_tril(Tensor& result, const Tensor& self, bool inplace, int64_t k) {
+void apply_triu_tril(const Tensor& result, const Tensor& self, bool inplace, int64_t k) {
   auto n = self.size(-2);
   auto m = self.size(-1);
   auto self_data = self.data_ptr<scalar_t>();
@@ -85,82 +97,26 @@ void apply_triu_tril(Tensor& result, const Tensor& self, bool inplace, int64_t k
   });
 }
 
-Tensor tril(const Tensor& self, int64_t k) {
-  Tensor result = at::empty({0}, self.options());
-  at::tril_out(result, self, k);
-  return result;
-}
-
-Tensor& tril_cpu_(Tensor &self, int64_t k) {
+TORCH_IMPL_FUNC(tril_cpu)(const Tensor& self, int64_t k, const Tensor &result) {
   if (self.numel() == 0) {
-    return self;
-  }
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  bool inplace;
-  Tensor self_c;
-  std::tie(inplace, self_c) = checkTrilTriuBatchContiguous(self, true);
-  Tensor result = inplace ? self : at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::BFloat16, at::ScalarType::Half, at::ScalarType::Bool, self.scalar_type(), "tril", [&]{
-    apply_triu_tril<scalar_t, false>(result, self_c, inplace, k);
-  });
-  if (!inplace) self.copy_(result);
-  return self;
-}
-
-Tensor& tril_meta_(Tensor &self, int64_t k) {
-  return self;
-}
-
-Tensor& tril_out(const Tensor& self, int64_t k, Tensor &result) {
-  at::native::resize_output(result, self.sizes());
-  if (self.numel() == 0 || result.device() == kMeta) {
-    return result;
+    return;
   }
   Tensor self_c;
   std::tie(std::ignore, self_c) = checkTrilTriuBatchContiguous(self, false);
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::BFloat16, at::ScalarType::Half, at::ScalarType::Bool, self.scalar_type(), "tril", [&]{
     apply_triu_tril<scalar_t, false>(result, self_c, false, k);
   });
-  return result;
 }
 
-Tensor triu(const Tensor& self, int64_t k) {
-  Tensor result = at::empty({0}, self.options());
-  at::triu_out(result, self, k);
-  return result;
-}
-
-Tensor& triu_cpu_(Tensor &self, int64_t k) {
+TORCH_IMPL_FUNC(triu_cpu)(const Tensor& self, int64_t k, const Tensor &result) {
   if (self.numel() == 0) {
-    return self;
-  }
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  bool inplace;
-  Tensor self_c;
-  std::tie(inplace, self_c) = checkTrilTriuBatchContiguous(self, true);
-  Tensor result = inplace ? self : at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::BFloat16, at::ScalarType::Half, at::ScalarType::Bool, self.scalar_type(), "triu", [&]{
-    apply_triu_tril<scalar_t, true>(result, self_c, inplace, k);
-  });
-  if (!inplace) self.copy_(result);
-  return self;
-}
-
-Tensor& triu_meta_(Tensor &self, int64_t k) {
-  return self;
-}
-
-Tensor& triu_out(const Tensor& self, int64_t k, Tensor &result) {
-  at::native::resize_output(result, self.sizes());
-  if (self.numel() == 0 || result.device() == kMeta) {
-    return result;
+    return;
   }
   Tensor self_c;
   std::tie(std::ignore, self_c) = checkTrilTriuBatchContiguous(self, false);
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::BFloat16, at::ScalarType::Half, at::ScalarType::Bool, self.scalar_type(), "triu", [&]{
     apply_triu_tril<scalar_t, true>(result, self_c, false, k);
   });
-  return result;
 }
 
 Tensor trace_backward(const Tensor& grad, IntArrayRef sizes) {
@@ -173,7 +129,6 @@ Tensor trace_backward(const Tensor& grad, IntArrayRef sizes) {
   grad_input.index_fill_(0, indices, grad);
   return grad_input.view(sizes);
 }
-
 
 }  // namespace native
 }  // namespace at
