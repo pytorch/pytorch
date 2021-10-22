@@ -40,3 +40,20 @@ args = [
     '--',
     '@{{PATHSFILE}}'
 ]
+
+[[linter]]
+name = 'TYPEIGNORE'
+patterns = ['**/*.py']
+args = [
+    'python3',
+    'tools/linter/grep_linter.py',
+    '--pattern=# type:\s*ignore(?!\[)',
+    '--linter_name=TYPEIGNORE',
+    '--error_name=unqualified type: ignore',
+    """--error_description=\
+        The above lines have unqualified `type: ignore`; \
+        please convert them to `type: ignore[xxxx]`
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]

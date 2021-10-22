@@ -10,7 +10,7 @@ import sys
 import time
 from enum import Enum
 from typing import Any, List, NamedTuple, Optional, Pattern
-from install.clang_tidy import INSTALLATION_PATH, OUTPUT_DIR, PLATFORM_TO_HASH, PLATFORM_TO_URL, download  # type: ignore
+from install.clang_tidy import INSTALLATION_PATH, OUTPUT_DIR, PLATFORM_TO_HASH, PLATFORM_TO_URL, download  # type: ignore[import]
 
 
 IS_WINDOWS: bool = os.name == "nt"

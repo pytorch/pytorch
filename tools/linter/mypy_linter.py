@@ -100,7 +100,7 @@ def check_file(
                 path=filename,
                 line=None,
                 char=None,
-                code="FLAKE8",
+                code="MYPY",
                 severity=LintSeverity.ERROR,
                 name="command-failed",
                 original=None,
@@ -145,7 +145,7 @@ def main() -> None:
         "--retries",
         default=3,
         type=int,
-        help="times to retry timed out flake8",
+        help="times to retry timed out mypy",
     )
     parser.add_argument(
         "--verbose",
