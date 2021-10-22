@@ -30,7 +30,12 @@ inline c10::List<at::Tensor> _call_caffe2_op(
     c10::List<at::Tensor>&& outputs) {
   Caffe2Operator op(schema, std::move(inputs), std::move(outputs), -1);
   op.Run(-1);
-  return std::move(op).move_newstyle_outputs();
+  auto op_outputs = std::move(op).move_output_tensors();
+  TORCH_INTERNAL_ASSERT(outputs.size() == op_outputs.size());
+  for (auto i : c10::irange(op_outputs.size())) {
+    outputs[i] = at::Tensor(std::move(op_outputs[i]));
+  }
+  return std::move(outputs);
 }
 
 // This function is inline in the hope that compilers optimizing for speed will
