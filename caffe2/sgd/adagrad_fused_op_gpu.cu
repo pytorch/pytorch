@@ -1,4 +1,4 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_NO_OPERATORS
 #include <c10/core/GeneratorImpl.h>
 #include <algorithm>
 
