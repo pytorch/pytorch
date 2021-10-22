@@ -380,13 +380,11 @@ class TestJit(JitTestCase):
 
     def test_script_fn_pkl(self):
         with self.assertRaisesRegex(pickle.PickleError, "ScriptFunction cannot be pickled"):
-            
             @torch.jit.script
             def fn(x: torch.Tensor) -> torch.Tensor:
                 return x
-
             pkl_fn = pickle.dumps(fn, protocol=0)
-           
+
     def test_restore_device(self):
         class M(torch.jit.ScriptModule):
             def __init__(self, cpu_device_str):
