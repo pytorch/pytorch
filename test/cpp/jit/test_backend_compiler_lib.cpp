@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/backends/backend.h>
 #include <torch/csrc/jit/backends/backend_exception.h>
+#include <torch/csrc/jit/mobile/profiler_edge.h>
 
 namespace torch {
 namespace jit {
@@ -87,13 +88,17 @@ class BackendWithCompiler : public PyTorchBackendInterface {
     at::Tensor x = val0.toTensor();
     c10::IValue val1 = inputs[1];
     at::Tensor h = val1.toTensor();
+    std::vector<std::tuple<int64_t, int64_t, std::string>> op_runtimes_us;
+    op_runtimes_us.reserve(handle.toList().size());
 
     c10::List<at::Tensor> output_list;
+    auto start_us = autograd::profiler::getTime() / 1000;
     for (const auto& token : handle.toList()) {
       IValue val = token;
       auto instruction = val.toTuple()->elements()[0].toStringRef();
       auto debug_handle = val.toTuple()->elements()[1].toInt();
       double const_val = 1.0;
+      auto start_time_us = autograd::profiler::getTime() / 1000;
       try {
         if (instruction.rfind("prim::Constant", 0) == 0) {
           TORCH_CHECK(
@@ -119,6 +124,18 @@ class BackendWithCompiler : public PyTorchBackendInterface {
       } catch (c10::Error& e) {
         TORCH_DELEGATED_BACKEND_THROW(false, e.what(), debug_handle);
       }
+      auto end_time_us = autograd::profiler::getTime() / 1000;
+      auto duration = end_time_us - start_time_us;
+      op_runtimes_us.emplace_back(duration, debug_handle, instruction);
+    }
+    for (const auto& tup : op_runtimes_us) {
+      RECORD_BACKEND_EVENT_TO_EDGE_PROFILER(
+          start_us,
+          start_us + std::get<0>(tup),
+          std::get<1>(tup),
+          std::get<2>(tup),
+          "test_backend");
+      start_us = start_us + std::get<0>(tup);
     }
     return c10::impl::toList(output_list);
   }
