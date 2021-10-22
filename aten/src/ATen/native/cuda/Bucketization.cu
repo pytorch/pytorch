@@ -125,13 +125,17 @@ Tensor& searchsorted_out_cuda(const Tensor& sorted_sequence, const Tensor& self,
   return result;
 }
 
-// We need this function to force the linking against torch_cuda_cu on Windows.
 Tensor searchsorted_cuda(const Tensor& sorted_sequence, const Tensor& self, bool out_int32, bool right) {
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
   c10::TensorOptions options = TensorOptions().device(self.options().device()).dtype(scalar_type);
   Tensor result = at::empty({0}, options, MemoryFormat::Contiguous);
   at::native::searchsorted_out_cuda(sorted_sequence, self, out_int32, right, result);
   return result;
+}
+
+// See [Note about _torch_cuda_cu_linker_symbol_op and torch_cuda_cu] in native_functions.yaml
+Tensor _torch_cuda_cu_linker_symbol_op_cuda(const Tensor& self) {
+  return self;
 }
 
 Tensor searchsorted_cuda(const Tensor& sorted_sequence, const Scalar& self, bool out_int32, bool right) {
