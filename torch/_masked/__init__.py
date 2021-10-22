@@ -25,7 +25,6 @@ def _apply_docstring_templates(func):
     """Decorator that applies docstring templates to function docstring
     and returns the function instance.
     """
-    return func
     docstring_templates = dict(
         reduction_signature='''\
 {function_name}(input, dim, *, keepdim=False, dtype=None, mask=None) -> Tensor''',
@@ -342,6 +341,7 @@ def amin(input: Tensor,
         raise ValueError(f'masked amin expects strided tensor (got {input.layout} tensor)')
 
 
+@_apply_docstring_templates
 def mean(input: Tensor,
          dim: DimOrDims = None,
          *,
