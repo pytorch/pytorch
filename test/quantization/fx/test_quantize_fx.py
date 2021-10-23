@@ -3143,16 +3143,15 @@ class TestQuantizeFx(QuantizationTestCase):
         name_list = []
         for name, mod in prepared.named_modules():
             if isinstance(mod, torch.ao.quantization.observer.MinMaxObserver):
-                assert "mods" in name
                 name_list.append(name)
-        expected_name_list = ['mods1_0_input_activation_post_process_0',
-                              'mods1_0_w_activation_post_process_0',
-                              'mods1_0_output_activation_post_process_0',
-                              'mods1_1_w_activation_post_process_0',
-                              'mods1_1_output_activation_post_process_0',
-                              'mods2_w_activation_post_process_0',
-                              'mods2_output_activation_post_process_0',
-                              'mods3_output_activation_post_process_0']
+        expected_name_list = ['activation_post_process_0',
+                              'activation_post_process_1',
+                              'activation_post_process_2',
+                              'activation_post_process_3',
+                              'activation_post_process_4',
+                              'activation_post_process_6',
+                              'activation_post_process_7',
+                              'activation_post_process_10']
         assert name_list == expected_name_list
 
     def test_linear_lowering(self):
