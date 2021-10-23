@@ -130,6 +130,8 @@ class QuantizeHandler(ABC):
         """
         # TODO(future PR): potentially clean up and deduplicate these
         # mappings.
+        print("all node:", self.all_node_args_are_tensors)
+        print("input output:", self.input_output_observed())
         return self.all_node_args_are_tensors and self.input_output_observed()
 
     def should_mark_output_quantized_from_input_quantized_status(
@@ -1732,13 +1734,6 @@ class ConvReLUQuantizeHandlerNew(QuantizeHandler):
         elif node.op == "call_function":
             self.conv = node.target  # type: ignore[assignment]
 
-    def should_insert_observer_for_output(
-        self,
-        qconfig: Any,
-        model_is_training: bool,
-    ) -> bool:
-        return False
-
     def is_output_quantized(self, qconfig):
         return False
 
@@ -1885,13 +1880,6 @@ class LinearReLUQuantizeHandlerNew(QuantizeHandler):
         self.linear_node = node
         if node.op == 'call_module':
             self.linear = modules[str(self.linear_node.target)]
-
-    def should_insert_observer_for_output(
-        self,
-        qconfig: Any,
-        model_is_training: bool,
-    ) -> bool:
-        return False
 
     def is_output_quantized(self, qconfig):
         return False
