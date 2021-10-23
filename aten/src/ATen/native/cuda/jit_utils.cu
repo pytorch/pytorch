@@ -28,55 +28,65 @@ torch::jit::CodeTemplate load_code_template(const std::string& path) {
 
 }
 
+std::string generate_code(
+    int nTensors,
+    std::string& func,
+    std::string& name,
+    std::string& common_type,
+    std::string& result_type,
+    bool contiguous,
+    bool dynamic_casting) {
+  torch::jit::TemplateEnv env;
+  env.s("index_type", "unsigned int");
+  const int nInputs = nTensors - 1;
+  env.s("nInputs", std::to_string(nInputs));
+  env.s("scalar_type", common_type);
+  env.s("functor", func);
+  env.s("name", name);
+  std::stringstream declare_load_arrays;
+  for (int i = 0; i < nInputs; i++) {
+    // TODO these arrays are potentially of the different types, use function
+    // traits to determine the types
+    declare_load_arrays << common_type << " arg" << std::to_string(i)
+                        << "[" << std::to_string(thread_work_size) << "];\n";
+  }
+  env.s("declare_load_arrays", declare_load_arrays.str());
+  std::stringstream declare_store_arrays;
+  declare_store_arrays << common_type << " out"
+                       << "[" << std::to_string(thread_work_size) << "];\n";
+  env.s("declare_store_arrays", declare_store_arrays.str());
+  if (!dynamic_casting) {
+    env.s("loader", "LoadWithoutCast");
+    env.s("storer", "StoreWithoutCast");
+  } else {
+    env.s(
+        "loader", std::string("LoadWithCast<" + std::to_string(nInputs) + ">"));
+    env.s("storer", "StoreWithCast");
+  }
+  std::stringstream load_inputs;
+  const int nOutputs = 1; // FIXME
+  for (int i = 0; i < nInputs; i++) {
+    auto i_string = std::to_string(i);
+    load_inputs << "arg" << i_string << "[j] = l.load<" << common_type
+                << ">(data[" << std::to_string(i + nOutputs)
+                << "], input_offsets[" << i_string << "], " << i_string
+                << ");\n";
+  }
+  env.s("load_inputs", load_inputs.str());
+  std::stringstream store_outputs;
+  store_outputs << "s.store<" << result_type
+                << ">(out[j], data[0], output_offsets[0]);\n";
+  env.s("store_outputs", store_outputs.str());
+  std::stringstream functor_args;
+  for (int i = 0; i < nInputs - 1; i++) {
+    functor_args << "arg" << std::to_string(i) << "[j], ";
+  }
+  functor_args << "arg" << std::to_string(nInputs - 1) << "[j]";
+  env.s("args", functor_args.str());
 
-std::string generate_code(int nTensors, std::string& func, std::string& name, bool contiguous, bool dynamic_casting){
-    torch::jit::TemplateEnv env;
-    env.s("index_type", "unsigned int");
-    const int nInputs = nTensors - 1;
-    env.s("nInputs", std::to_string(nInputs));
-    std::string common_dtype_string = "float"; // FIXME, it shouldn't be hardcoded and it shouldn't be template parameter
-    env.s("scalar_type", common_dtype_string);
-    env.s("functor", func);
-    env.s("name", name);
-    std::stringstream declare_load_arrays;
-    for (int i=0; i < nInputs; i++){
-//TODO these arrays are potentially of the different types, use function traits to determine the types
-      declare_load_arrays << common_dtype_string << " arg" << std::to_string(i) << "[" << std::to_string(thread_work_size) << "];\n";
-    }
-    env.s("declare_load_arrays", declare_load_arrays.str());
-    std::stringstream declare_store_arrays;
-    declare_store_arrays << common_dtype_string << " out" << "[" << std::to_string(thread_work_size) << "];\n";
-    env.s("declare_store_arrays", declare_store_arrays.str());
-    if (!dynamic_casting) {
-      env.s("loader", "LoadWithoutCast");
-      env.s("storer", "StoreWithoutCast");
-    } else {
-      env.s("loader", std::string("LoadWithCast<"+std::to_string(nInputs) + ">"));
-      env.s("storer", "StoreWithCast");
-    }
-    std::stringstream load_inputs;
-    const int nOutputs = 1; //FIXME
-    for (int i = 0; i < nInputs; i++) {
-      auto i_string = std::to_string(i);
-      load_inputs << "arg" << i_string << "[j] = l.load<" << common_dtype_string
-                  << ">(data[" << std::to_string(i + nOutputs)
-                  << "], input_offsets[" << i_string << "], " << i_string
-                  << ");\n";
-    }
-    env.s("load_inputs", load_inputs.str());
-    std::stringstream store_outputs;
-    store_outputs << "s.store<" << common_dtype_string
-                    << ">(out[j], data[0], output_offsets[0]);\n";
-    env.s("store_outputs", store_outputs.str());
-    std::stringstream functor_args;
-    for (int i=0; i < nInputs - 1; i++){
-        functor_args << "arg" << std::to_string(i) << "[j], ";
-    }
-    functor_args << "arg" << std::to_string(nInputs-1) << "[j]";
-    env.s("args", functor_args.str());
-
-    static auto cuda_template = load_code_template("/home/ngimel/local/pytorch/aten/src/ATen/native/cuda/jit_code_template.cuh");
-    return cuda_template.format(env);
+  static auto cuda_template = load_code_template(
+      "/home/ngimel/local/pytorch/aten/src/ATen/native/cuda/jit_code_template.cuh");
+  return cuda_template.format(env);
 }
 
 NvrtcFunction jit_pwise_function(
