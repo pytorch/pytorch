@@ -83,11 +83,11 @@ void CodeGen::call_with_numel(void** args, int64_t numel) {
       false, "This codegen backend does not implement call_with_numel");
 }
 
-size_t bufSize(BufPtr buf) {
+c10::optional<size_t> bufSize(BufPtr buf) {
   size_t size = elementSize(buf->dtype().scalar_type()) * buf->dtype().lanes();
   for (auto& d : buf->dims()) {
     if (!d->isConstant()) {
-      return 0;
+      return c10::nullopt;
     }
     size = size * (*intValue(d));
   }
@@ -97,7 +97,7 @@ size_t bufSize(BufPtr buf) {
 using BufRangeInfo =
     std::unordered_map<BufPtr, std::pair<BufAccessInfo, BufAccessInfo>>;
 
-std::vector<std::pair<BufPtr, BufPtr>> linerScan(
+std::vector<std::pair<BufPtr, BufPtr>> linearScan(
     std::unordered_set<BufPtr>& bufs,
     BufRangeInfo& buf_ranges) {
   // Sort buffers by the time they appear.
@@ -156,7 +156,7 @@ std::vector<std::pair<BufPtr, BufPtr>> linerScan(
     // If the buf has dynamic shapes, we'll skip it (i.e., allocate memory for
     // it, and there are no future reuses on its memory).
     // TODO: reuse memory for bufs with dynamic shapes
-    if (bufSize(buf) == 0) {
+    if (!bufSize(buf)) {
       b2m_ret.emplace_back(std::make_pair(buf, buf));
       continue;
     }
@@ -210,7 +210,12 @@ StmtPtr insertMemNodes(
   return b;
 }
 
-void CodeGen::allocBuf() {
+// We allocate intermediate buffers by inserting Allocate/Free or
+// PlacementAllocate stmts. Allocate/Free stmts will allocate memory at runtime,
+// and PlacementAllocate stmt reuses the memory of one buffer for another
+// buffer. In current implementation, we use linear scan for memory reuses.
+// TODO: try more memory reuse algorithms and compare their memory efficiency.
+void CodeGen::allocIntermediateBufs() {
   // Identify intermediate buffers that are not allocated yet.
   auto bufs = NodeFinder<Buf>::find(stmt_);
   std::unordered_set<BufPtr> bufs_allocated;
@@ -239,7 +244,7 @@ void CodeGen::allocBuf() {
 
   // For each intermediate buffer, we reuse the memory of an old buffer which
   // dies, or allocate memory if reusing buffer is impossible.
-  auto b2m = linerScan(interm_bufs, interm_buf_ranges);
+  auto b2m = linearScan(interm_bufs, interm_buf_ranges);
 
   // Insert memory allocation/mapping nodes.
   if (b2m.size() > 0) {
@@ -247,7 +252,7 @@ void CodeGen::allocBuf() {
     set_stmt(stmt_new);
   }
 
-  GRAPH_DEBUG("\nMemomry Allocation:\n\n", *stmt(), "\n");
+  GRAPH_DEBUG("\nMemory Allocation:\n\n", *stmt(), "\n");
 }
 
 } // namespace tensorexpr
