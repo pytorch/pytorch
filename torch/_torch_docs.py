@@ -3619,6 +3619,8 @@ It currently accepts :attr:`ndarray` with dtypes of ``numpy.float64``,
 ``numpy.int64``, ``numpy.int32``, ``numpy.int16``, ``numpy.int8``, ``numpy.uint8``,
 and ``numpy.bool``.
 
+
+
 Example::
 
     >>> a = numpy.array([1, 2, 3])
