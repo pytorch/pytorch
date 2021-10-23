@@ -233,7 +233,6 @@ Tensor class reference
     Tensor.argmax
     Tensor.argmin
     Tensor.argsort
-    Tensor.argwhere
     Tensor.asin
     Tensor.asin_
     Tensor.arcsin
