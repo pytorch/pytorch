@@ -1172,17 +1172,19 @@ void TensorExprKernel::compile() {
       stmt,
       bufferArgs_,
       device_,
-      SubgraphUtils::generateNameForGraph(graph_));
+      kernel_func_name_);
 }
 
 TensorExprKernel::TensorExprKernel(
     const std::shared_ptr<Graph>& subgraph,
     std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings,
-    bool pre_alloc /*= false*/)
+    bool pre_alloc /*= false*/,
+    const std::string& kernel_func_name)
     : graph_(subgraph),
       code_(subgraph, ""),
       custom_lowerings_(std::move(custom_lowerings)),
-      pre_alloc_(pre_alloc) {
+      pre_alloc_(pre_alloc),
+      kernel_func_name_(kernel_func_name) {
   allow_fallback_ = fallbackAllowed();
   if (!allow_fallback_) {
     compile();
