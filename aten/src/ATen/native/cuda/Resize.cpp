@@ -40,6 +40,20 @@ void resize_bytes_cuda(StorageImpl* storage, size_t size_bytes) {
   storage->set_nbytes(size_bytes);
 }
 
+TensorImpl* resize_impl_cuda_(
+    TensorImpl* self,
+    IntArrayRef size,
+    c10::optional<IntArrayRef> stride,
+    bool device_guard) {
+  cuda::OptionalCUDAGuard guard;
+  if (device_guard) {
+    guard.set_index(self->storage().device().index());
+  }
+  resize_impl_template_<&maybe_resize_storage_cuda, &select_storage_size_default>(
+      self, size, stride);
+  return self;
+}
+
 const Tensor& resize_cuda_(
     const Tensor& self,
     IntArrayRef size,
@@ -52,6 +66,7 @@ const Tensor& resize_with_strides_cuda_(
     const Tensor& self,
     IntArrayRef size,
     IntArrayRef strides) {
+  cuda::OptionalCUDAGuard guard(self.storage().device().index());
   resize_template<&resize_impl_tryreuse_<&maybe_resize_storage_cuda>>(
       self, size, strides, c10::nullopt, true);
   return self;
