@@ -560,6 +560,7 @@ def _convert_fx(
     convert_custom_config_dict: Optional[Dict[str, Any]] = None,
     is_standalone_module: bool = False,
     _remove_qconfig: bool = True,
+    qconfig_dict: Dict[str, Any] = None,
 ) -> QuantizedGraphModule:
     """ `is_standalone_module`: see docs in :func:`~torch.ao.quantization.prepare_standalone_module_fx`
     """
@@ -575,6 +576,7 @@ def _convert_fx(
         convert_custom_config_dict,
         is_standalone_module,
         _remove_qconfig_flag=_remove_qconfig,
+        convert_qconfig_dict=qconfig_dict,
     )
 
     preserved_attributes = convert_custom_config_dict.get("preserved_attributes", [])
@@ -588,6 +590,7 @@ def convert_fx(
     is_reference: bool = False,
     convert_custom_config_dict: Optional[Dict[str, Any]] = None,
     _remove_qconfig: bool = True,
+    qconfig_dict: Dict[str, Any] = None,
 ) -> QuantizedGraphModule:
     r""" Convert a calibrated or trained model to a quantized model
 
@@ -637,6 +640,27 @@ def convert_fx(
 
         * `_remove_qconfig`: Option to remove the qconfig attributes in the model after convert.
 
+        * `qconfig_dict`: qconfig_dict with the either
+            a) same keys as what is passed to the qconfig_dict in prepare_fx API, with same values or `None`.
+            b) additional keys with values set to `None`
+            For each entry whose value is set to None, we skip quantizing that entry in the model.
+            Example:
+            qconfig_dict = {
+
+                # used for object_type, skip quantizing torch.nn.functional.add
+                "object_type": [
+                (torch.nn.functional.add, None),
+                (torch.nn.functional.linear, qconfig_from_prepare)
+                ...,
+                ],
+
+                # sed for module names, skip quantizing "foo.bar"
+                "module_name": [
+                ("foo.bar", None)
+                ...,
+                ],
+            }
+
     Return:
         A quantized model (GraphModule)
 
@@ -652,6 +676,7 @@ def convert_fx(
         is_reference,
         convert_custom_config_dict,
         _remove_qconfig=_remove_qconfig,
+        qconfig_dict=qconfig_dict,
     )
 
 
