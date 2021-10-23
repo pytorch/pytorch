@@ -12,7 +12,6 @@ from torch.ao.quantization import (
 )
 from torch.ao.quantization.quantize_fx import (
     prepare_fx,
-    convert_fx,
     get_tensorrt_backend_config_dict,
 )
 from torch.ao.quantization._quantize_fx_do_not_use import (
