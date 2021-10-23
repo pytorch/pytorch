@@ -220,7 +220,7 @@ def convert(model: GraphModule, is_reference: bool = False,
             convert_qconfig_dict = update_qconfig_for_qat(convert_qconfig_dict, additional_qat_module_mapping)
         convert_qconfig_dict = update_qconfig_for_fusion(model, convert_qconfig_dict)
 
-        compare_prepare_convert_qconfig_dict(prepare_qconfig_dict, convert_qconfig_dict)  # type: ignore
+        compare_prepare_convert_qconfig_dict(prepare_qconfig_dict, convert_qconfig_dict)  # type: ignore[arg-type]
         convert_qconfig_map = generate_qconfig_map(model, modules_copy, model.graph, convert_qconfig_dict, node_name_to_scope)
         # check the convert_qconfig_map generated and ensure that all the values either match what was set in prepare qconfig_map
         # or are set to None in the convert_qconfig_map.
