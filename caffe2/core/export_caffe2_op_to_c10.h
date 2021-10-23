@@ -5,7 +5,7 @@
 #if defined(EXPOSE_C2_OPS) || \
     !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
 #include <caffe2/core/tensor.h>
-#include <ATen/core/boxing/KernelFunction.h>
+#include <ATen/core/boxing/BoxedKernel.h>
 #include <c10/core/Stream.h>
 #include <vector>
 
@@ -57,15 +57,15 @@ void boxed_caffe2_operator(const OperatorHandle& opHandle, c10::Stack* stack) {
 }
 
 struct TORCH_API InitCPUDefinition {
-  InitCPUDefinition(const char *name, c10::KernelFunction func);
+  InitCPUDefinition(const char *name, c10::BoxedKernel kernel);
 };
 
 struct TORCH_API InitCUDADefinition {
-  InitCUDADefinition(const char *name, c10::KernelFunction func);
+  InitCUDADefinition(const char *name, c10::BoxedKernel kernel);
 };
 
 struct TORCH_API InitHIPDefinition {
-  InitHIPDefinition(const char *name, c10::KernelFunction func);
+  InitHIPDefinition(const char *name, c10::BoxedKernel kernel);
 };
 
 struct TORCH_API InitSchema {
@@ -130,8 +130,8 @@ struct TORCH_API InitSchema {
     OperatorName, OperatorClass)                                        \
   static const caffe2::detail::InitCPUDefinition                        \
   C10_CONCATENATE(InitCPULibrary_IMPL_static_init_, C10_UID)(           \
-      C10_STRINGIZE(OperatorName),                                      \
-      c10::KernelFunction::makeFromBoxedFunction<                       \
+      "_caffe2::" #OperatorName,                                        \
+      c10::BoxedKernel::makeFromFunction<                               \
       &::caffe2::detail::boxed_caffe2_operator<OperatorClass>>());
 
 #define C10_EXPORT_CAFFE2_OP_TO_C10_CPU(                                     \
@@ -142,8 +142,8 @@ struct TORCH_API InitSchema {
 #define C10_EXPORT_CAFFE2_OP_TO_C10_CUDA(OperatorName, OperatorClass)   \
   static const caffe2::detail::InitCUDADefinition                       \
   C10_CONCATENATE(InitCUDALibrary_IMPL_static_init_, C10_UID)(          \
-      C10_STRINGIZE(OperatorName),                                      \
-      c10::KernelFunction::makeFromBoxedFunction<                       \
+      "_caffe2::" #OperatorName,                                        \
+      c10::BoxedKernel::makeFromFunction<                               \
       &::caffe2::detail::boxed_caffe2_operator<OperatorClass>>());
 
 
@@ -153,8 +153,8 @@ struct TORCH_API InitSchema {
 #define C10_EXPORT_CAFFE2_OP_TO_C10_HIP(OperatorName, OperatorClass)    \
   static const caffe2::detail::InitHIPDefinition                        \
   C10_CONCATENATE(InitHIPLibrary_IMPL_static_init_, C10_UID)(           \
-      C10_STRINGIZE(OperatorName),                                      \
-      c10::KernelFunction::makeFromBoxedFunction<                       \
+      "_caffe2::" #OperatorName,                                        \
+      c10::BoxedKernel::makeFromFunction<                               \
       &::caffe2::detail::boxed_caffe2_operator<OperatorClass>>());      \
 
 

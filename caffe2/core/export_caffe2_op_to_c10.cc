@@ -120,30 +120,30 @@ static FunctionSchema make_function_schema_for_c10(const char* schema_str) {
 #endif
 }
 
-InitCPUDefinition::InitCPUDefinition(const char *name, KernelFunction func) {
+InitCPUDefinition::InitCPUDefinition(const char *name, c10::BoxedKernel kernel) {
   static torch::Library cpu_lib(
       torch::Library::IMPL, "_caffe2", c10::DispatchKey::CPU,
       __FILE__, __LINE__);
   if (c10::impl::dispatch_key_allowlist_check(c10::DispatchKey::CPU)) {
-    cpu_lib.def(name, torch::CppFunction::makeFromKernelFunction(func));
+    cpu_lib.impl(name, torch::CppFunction::makeFromBoxedKernel(std::move(kernel)));
   }
 }
 
-InitCUDADefinition::InitCUDADefinition(const char *name, KernelFunction func) {
+InitCUDADefinition::InitCUDADefinition(const char *name, c10::BoxedKernel kernel) {
   static torch::Library cuda_lib(
       torch::Library::IMPL, "_caffe2", c10::DispatchKey::CUDA,
       __FILE__, __LINE__);
   if (c10::impl::dispatch_key_allowlist_check(c10::DispatchKey::CUDA)) {
-    cuda_lib.def(name, torch::CppFunction::makeFromKernelFunction(func));
+    cuda_lib.impl(name, torch::CppFunction::makeFromBoxedKernel(std::move(kernel)));
   }
 }
 
-InitHIPDefinition::InitHIPDefinition(const char *name, KernelFunction func) {
+InitHIPDefinition::InitHIPDefinition(const char *name, c10::BoxedKernel kernel) {
   static torch::Library hip_lib(
       torch::Library::IMPL, "_caffe2", c10::DispatchKey::HIP,
       __FILE__, __LINE__);
   if (c10::impl::dispatch_key_allowlist_check(c10::DispatchKey::HIP)) {
-    hip_lib.def(name, torch::CppFunction::makeFromKernelFunction(func));
+    hip_lib.impl(name, torch::CppFunction::makeFromBoxedKernel(std::move(kernel)));
   }
 }
 

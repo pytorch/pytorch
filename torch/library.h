@@ -67,7 +67,6 @@
 
 // Just for inferFunctionSchemaFromFunctor
 #include <ATen/core/op_registration/op_registration.h>
-#include <ATen/core/boxing/KernelFunction_fromUnboxed.h>
 
 namespace torch {
 
@@ -106,7 +105,7 @@ public:
   /// This overload accepts function pointers, e.g., `CppFunction(&add_impl)`
   template <typename Func>
   explicit CppFunction(Func* f, std::enable_if_t<c10::guts::is_function_type<Func>::value, std::nullptr_t> = nullptr)
-    : func_(c10::kernel_function::makeFromUnboxedRuntimeFunction(f))
+    : func_(c10::KernelFunction::makeFromUnboxedRuntimeFunction(f))
     , cpp_signature_(c10::impl::CppSignature::make<Func>())
     , schema_(c10::detail::inferFunctionSchemaFromFunctor<std::decay_t<Func>>())
     , debug_()
@@ -115,7 +114,7 @@ public:
   /// This overload accepts compile time function pointers, e.g., `CppFunction(TORCH_FN(add_impl))`
   template <typename FuncPtr>
   explicit CppFunction(FuncPtr f, std::enable_if_t<c10::is_compile_time_function_pointer<FuncPtr>::value, std::nullptr_t> = nullptr)
-    : func_(c10::kernel_function::makeFromUnboxedFunction(f))
+    : func_(c10::KernelFunction::makeFromUnboxedFunction(f))
     , cpp_signature_(c10::impl::CppSignature::make<typename FuncPtr::FuncType>())
     , schema_(c10::detail::inferFunctionSchemaFromFunctor<typename FuncPtr::FuncType>())
     , debug_()
@@ -124,7 +123,7 @@ public:
   /// This overload accepts lambdas, e.g., `CppFunction([](const Tensor& self) { ... })`
   template <typename Lambda>
   explicit CppFunction(Lambda&& f, std::enable_if_t<c10::guts::is_functor<std::decay_t<Lambda>>::value, std::nullptr_t> = nullptr)
-    : func_(c10::kernel_function::makeFromUnboxedLambda(std::forward<Lambda>(f)))
+    : func_(c10::KernelFunction::makeFromUnboxedLambda(std::forward<Lambda>(f)))
     , cpp_signature_(c10::impl::CppSignature::make<Lambda>())
     , schema_(c10::detail::inferFunctionSchemaFromFunctor<std::decay_t<Lambda>>())
     , debug_()
@@ -134,7 +133,7 @@ public:
   /// This overload accepts function pointers, e.g., `CppFunction(&add_impl, NoInferSchemaTag())`
   template <typename Func>
   explicit CppFunction(Func* f, NoInferSchemaTag, std::enable_if_t<c10::guts::is_function_type<Func>::value, std::nullptr_t> = nullptr)
-    : func_(c10::kernel_function::makeFromUnboxedRuntimeFunction(f))
+    : func_(c10::KernelFunction::makeFromUnboxedRuntimeFunction(f))
     , cpp_signature_(c10::impl::CppSignature::make<Func>())
     // TODO: Don't go through WrapRuntimeKernelFunctor
     , schema_(nullptr)
@@ -144,7 +143,7 @@ public:
   /// This overload accepts compile time function pointers, e.g., `CppFunction(TORCH_FN(add_impl), NoInferSchemaTag())`
   template <typename FuncPtr>
   explicit CppFunction(FuncPtr f, NoInferSchemaTag, std::enable_if_t<c10::is_compile_time_function_pointer<FuncPtr>::value, std::nullptr_t> = nullptr)
-    : func_(c10::kernel_function::makeFromUnboxedFunction(f))
+    : func_(c10::KernelFunction::makeFromUnboxedFunction(f))
     , cpp_signature_(c10::impl::CppSignature::make<typename FuncPtr::FuncType>())
     // TODO: Don't go through WrapRuntimeKernelFunctor
     , schema_(nullptr)
@@ -154,7 +153,7 @@ public:
   /// This overload accepts lambdas, e.g., `CppFunction([](const Tensor& self) { ... }. NoInferSchemaTag())`
   template <typename Lambda>
   explicit CppFunction(Lambda&& f, NoInferSchemaTag, std::enable_if_t<c10::guts::is_functor<std::decay_t<Lambda>>::value, std::nullptr_t> = nullptr)
-    : func_(c10::kernel_function::makeFromUnboxedLambda(std::forward<Lambda>(f)))
+    : func_(c10::KernelFunction::makeFromUnboxedLambda(std::forward<Lambda>(f)))
     , cpp_signature_(c10::impl::CppSignature::make<Lambda>())
     // TODO: Don't go through WrapRuntimeKernelFunctor
     , schema_(nullptr)
@@ -248,13 +247,11 @@ public:
     return CppFunction(f);
   }
 
-  /// Create a function from a run time kernel function object.
-  static CppFunction makeFromKernelFunction(c10::KernelFunction f) {
+  static CppFunction makeFromBoxedKernel(c10::BoxedKernel kernel) {
     return CppFunction(
-        /* func */std::move(f),
+        c10::KernelFunction::makeFromBoxedKernel(std::move(kernel)),
         /* cpp_signature */ c10::nullopt, // not known for boxed functions
-        /* schema */ nullptr
-      );
+        /* schema */ nullptr);
   }
 
   CppFunction&& debug(std::string d) && {

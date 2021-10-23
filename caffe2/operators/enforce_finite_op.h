@@ -9,7 +9,7 @@
 namespace caffe2 {
 
 namespace detail {
-void LogBlobFiniteness(Workspace *ws);
+TORCH_API void LogBlobFiniteness(Workspace *ws);
 }
 
 template <class Context>
