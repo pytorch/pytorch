@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import os
 import sys
 from unittest import mock
 
@@ -277,7 +278,11 @@ class FSDPTest(MultiProcessTestCase):
 
         # Specify gloo backend to make 'init_process_group()' succeed,
         # Actual tests will be skipped if there is no enough GPUs.
-        backend = "nccl" if torch.cuda.is_available() else "gloo"
+
+        backend = os.environ.get("BACKEND", None)
+        if backend is None:
+            backend = "nccl" if torch.cuda.is_available() else "gloo"
+
         try:
             dist.init_process_group(
                 init_method=self.init_method,
