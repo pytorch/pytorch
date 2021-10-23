@@ -141,6 +141,35 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
             shape_ranges,
             no_convert=no_convert)
 
+    def test_sigmoid_linear(self):
+        class SigmoidLinear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 10)
+                self.sigmoid = torch.nn.Sigmoid()
+
+            def forward(self, x):
+                x = self.sigmoid(x)
+                x = self.linear(x)
+                return x
+
+        linear_input = torch.rand(8, 5)
+
+        shape_ranges = [
+            ((1, 5),
+             (5, 5),
+             (10, 5))
+        ]
+        no_convert = {
+            ns.call_function(torch.quantize_per_tensor): 2,
+            ns.call_method("dequantize"): 2,
+        }
+        self._test_module(
+            SigmoidLinear(),
+            [linear_input],
+            shape_ranges,
+            no_convert=no_convert)
+
     def test_unsupported_qconfig(self):
         """ Check that we won't quantize the model if the qconfig is not supported
         """
