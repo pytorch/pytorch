@@ -375,7 +375,7 @@ def compare_prepare_convert_qconfig_dict(prepare_qconfig_dict: Dict[str, Dict[An
         if k == '':
             assert k in convert_qconfig_dict, "Missing key {} from convert qconfig_dict when it was present in prepare".format(k)
             assert (convert_qconfig_dict[k] is None
-                   or qconfig_equals(prepare_qconfig_dict[k], convert_qconfig_dict[k])), (  # type: ignore
+                   or qconfig_equals(prepare_qconfig_dict[k], convert_qconfig_dict[k])), (  # type: ignore[arg-type]
                 "Expected convert qconfig_dict have the same qconfig as prepare qconfig_dict or None."
                 "Updated qconfig {} to {} for key {}".format(prepare_qconfig_dict[k], convert_qconfig_dict[k], k))
         elif k in ['object_type', 'module_name', 'module_namr_regex']:
