@@ -34,6 +34,9 @@ if IS_WINDOWS:
     paths = [
         r"C:\Jenkins\Miniconda3\Library\bin",
         r"C:\actions-runner\_work\pytorch\pytorch\build\bin",
+        r"C:\actions-runner\_work\pytorch\pytorch\build\win_tmp\build\bin",
+        r"C:\actions-runner\_work\pytorch\pytorch\build\win_tmp\build\lib",
+        r"C:\actions-runner\_work\pytorch\pytorch\build\lib",
         r"C:\Jenkins\Miniconda3",
         r"C:\actions-runner\bin",
     ]
@@ -62,7 +65,7 @@ def run_cmd(cmd: List[str]) -> Any:
     print(f"[gtest runner] {' '.join(cmd)}")
     proc = subprocess.run(cmd, env=env)
     if proc.returncode != 0:
-        raise RuntimeError(f"Command '{cmd}' failed")
+        raise RuntimeError(f"Command '{cmd}' failed with exit code: {proc.returncode}")
     return proc
 
 
