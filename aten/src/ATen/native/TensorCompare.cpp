@@ -411,12 +411,12 @@ Tensor _s_where(const Tensor& condition, const Tensor& self, const Tensor& other
   Tensor ret = at::empty(self.sizes(), self.options().dtype(result_type));
 
   auto iter = at::TensorIteratorConfig()
-                  .check_all_same_dtype(false)
-                  .add_output(ret)
-                  .add_input(condition)
-                  .add_input(self)
-                  .add_input(other)
-                  .build();
+    .check_all_same_dtype(false)
+    .add_output(ret)
+    .add_input(condition)
+    .add_input(self)
+    .add_input(other)
+    .build();
   where_kernel(iter.device_type(), iter, condition.scalar_type());
   return ret;
 }
