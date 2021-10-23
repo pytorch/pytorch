@@ -10,7 +10,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, suppress_warnings)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, onlyCPU, dtypes, onlyOnCPUAndCUDA)
+    (instantiate_device_type_tests, onlyCPU, dtypes, onlyOnCPUAndCUDA, skipMeta)
 from torch.testing._internal.common_dtype import (
     get_all_dtypes, get_all_int_dtypes, get_all_fp_dtypes, get_all_complex_dtypes
 )
@@ -1181,30 +1181,47 @@ class TestOldViewOps(TestCase):
         test_helper((10, 3, 32, 32), 10 * 3 * 32 * 32, torch.channels_last, device)
         test_helper((3, 10, 3, 32, 32), 3 * 10 * 3 * 32 * 32, torch.channels_last_3d, device)
 
+    @skipMeta
     def test_strides_resize_(self, device):
-        original = torch.ones(5, 5, device=device)
+        original_size = [5, 5]
+        original = torch.ones(*original_size, device=device)
 
-        def check(shape, strides, should_resize):
+        def check(shape, stride, should_reallocate, should_ignore_strides=False):
             tensor = original.clone()
-            tensor.resize_(shape, strides)
-            if should_resize:
-                self.assertEqual(tensor.stride, strides)
-                self.assertNotEqual(original.data_ptr(), tensor.data_ptr())
+            old_dataptr = tensor.data_ptr()
+            tensor.resize_(shape, stride)
+            # Shape has to be the requested one no matter what
+            self.assertEqual(tensor.shape, shape)
+            # There's a possibility that the strides will be ignored
+            # (if they make the Tensor too big to fit in the given memory)
+            if should_ignore_strides:
+                self.assertTrue(tensor.is_contiguous())
             else:
-                self.assertEqual(original.stride, strides)
-                self.assertEqual(original.data_ptr(), tensor.data_ptr())
+                self.assertEqual(stride, tensor.stride())
+            # Check whether the pointers have changed or not.
+            if should_reallocate:
+                self.assertNotEqual(old_dataptr, tensor.data_ptr())
+            else:
+                self.assertEqual(old_dataptr, tensor.data_ptr())
 
-        # No resizing happens
-        check([5, 5], [2, 1], False)
-        check([5, 5], [5, 1], False)
-        check([3, 2], [3, 3], False)
-        check([3, 2], [7, 4], False)
-        # Resizing should happen
-        check([5, 5], [5, 2], True)
-        check([5, 5], [6, 1], True)
-        check([10, 10], [5, 1], True)
-        check([10, 10], [10, 2], True)
-
+        # No need to reallocate, strided
+        flags = {"should_reallocate": False, "should_ignore_strides": False}
+        check([5, 5], [2, 1], **flags)
+        check([5, 5], [4, 1], **flags)
+        check([5, 5], [3, 2], **flags)
+        check([5, 5], [1, 4], **flags)
+        flags = {"should_reallocate": False, "should_ignore_strides": True}
+        # No need to reallocate, contiguous
+        check([5, 5], [6, 1], **flags)
+        check([5, 5], [6, 10], **flags)
+        check([3, 5], [8, 8], **flags)
+        check([4, 4], [20, 1], **flags)
+        # Needs to reallocate, strided
+        flags = {"should_reallocate": True, "should_ignore_strides": False}
+        check([10, 10], [10, 2], **flags)
+        check([10, 10], [1, 20], **flags)
+        check([10, 10], [20, 2], **flags)
+        check([10, 10], [5, 2], **flags)
 
     @onlyOnCPUAndCUDA
     @dtypes(torch.int64, torch.float, torch.complex128)

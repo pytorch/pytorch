@@ -30,33 +30,10 @@ static inline void maybe_resize_storage_cuda(TensorImpl* self, uint64_t new_size
   }
 }
 
-inline TensorImpl* resize_impl_cuda_(
+TensorImpl* resize_impl_cuda_(
     TensorImpl* self,
     IntArrayRef size,
     c10::optional<IntArrayRef> stride,
-    bool device_guard = true) {
-  if (self->sizes() == size && (!stride || self->strides() == stride)) {
-    return self;
-  }
-
-  // NB: We don't need to hold the device guard when calling from TH
-  cuda::OptionalCUDAGuard guard;
-  if (device_guard) {
-    guard.set_index(self->storage().device().index());
-  }
-
-  int64_t storage_size = 1;
-  if (stride) {
-    self->set_sizes_and_strides(size, *stride);
-    // NB: storage size can be different from numel.
-    storage_size = storage_size_for(size, *stride);
-  } else {
-    self->set_sizes_contiguous(size);
-    storage_size = self->numel();
-  }
-  maybe_resize_storage_cuda(self, storage_size);
-
-  return self;
-}
+    bool device_guard = true);
 
 }}
