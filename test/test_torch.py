@@ -7884,9 +7884,9 @@ else:
 
         for ndims in range(0, 4):
             shape = self._rand_shape(ndims, min_size=5, max_size=10)
+            condition = make_tensor(shape, dtype=torch.bool, device=device)
+            x = make_tensor(shape, dtype=dtype, device=device)
             for scalar in (True, 1, 3.14, 3.14 + 2j):
-                condition = make_tensor(shape, dtype=torch.bool, device=device)
-                x = make_tensor(shape, dtype=dtype, device=device)
                 _test_where_scalar_tensor(condition, x, scalar)
 
     # As the test fails with Runtime Error not raised on XLA
@@ -7899,20 +7899,14 @@ else:
         # as they are the output values which are compared.
         x1_vals = [True, 3, 7.0, 1 + 0.5j]
         x2_vals = [False, 4, 8.0, 2 + 0.5j]
-        default_dtype = torch.get_default_dtype()
-        for test_default_dtype in (torch.float, torch.double):
-            torch.set_default_dtype(test_default_dtype)
-            for x1 in x1_vals:
-                for x2 in x2_vals:
-                    condition = torch.empty(height, width, dtype=torch.bool, device=device).bernoulli_()
-                    common_dtype = torch.result_type(x1, x2)
-                    # NumPy aggressively promotes to double, hence cast to output to correct dtype
-                    expected = torch.from_numpy(np.where(condition.cpu().numpy(), x1, x2)).to(common_dtype)
-                    result = torch.where(condition, x1, x2)
-                    self.assertEqual(expected, result)
-
-        # Reset the original dtype
-        torch.set_default_dtype(default_dtype)
+        for x1 in x1_vals:
+            for x2 in x2_vals:
+                condition = torch.empty(height, width, dtype=torch.bool, device=device).bernoulli_()
+                common_dtype = torch.result_type(x1, x2)
+                # NumPy aggressively promotes to double, hence cast to output to correct dtype
+                expected = torch.from_numpy(np.where(condition.cpu().numpy(), x1, x2)).to(common_dtype)
+                result = torch.where(condition, x1, x2)
+                self.assertEqual(expected, result)
 
     def test_hook_remove(self, device):
         # Reference: https://github.com/pytorch/pytorch/issues/58354
