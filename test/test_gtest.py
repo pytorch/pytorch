@@ -43,7 +43,8 @@ if IS_IN_CI:
     if IS_MACOS:
         TEST_BINARY_DIR = Path(torch.__file__).resolve().parent / "bin"
     elif IS_WINDOWS:
-        TEST_BINARY_DIR = REPO_ROOT / "build"
+        TEST_BINARY_DIR = REPO_ROOT / "build" / "win_tmp" / " build" / "torch" / "bin"
+        # TEST_BINARY_DIR = REPO_ROOT / "build"
 BUILD_ENVIRONMENT = os.getenv("BUILD_ENVIRONMENT", "")
 
 print(f"[remove] USING PATH {TEST_BINARY_DIR}")
@@ -117,7 +118,7 @@ class GTest(TestCase):
             print("all", list(path.glob("*")))
             print("tests", list(path.glob("*test*")))
 
-        # try_dir(TEST_BINARY_DIR)
+        try_dir(TEST_BINARY_DIR)
         # try_dir(TEST_BINARY_DIR / "win_tmp")
         # try_dir(TEST_BINARY_DIR / "win_tmp" / "torch" / "build" / "bin")
         # try_dir(TEST_BINARY_DIR / "win_tmp" / "build" / "bin")
@@ -125,8 +126,8 @@ class GTest(TestCase):
         # try_dir(REPO_ROOT / "build" / "win_tmp")
         # try_dir(REPO_ROOT / "build" / "win_tmp" / "torch" / "build" / "bin")
         # try_dir(REPO_ROOT / "build" / "win_tmp" / "build" / "bin")
-        print("ALL FILES GLOB")
-        print(list(REPO_ROOT.glob("**/*")))
+        # print("ALL FILES GLOB")
+        # print(list(REPO_ROOT.glob("**/*")))
 
         self.binaries = {}
 
