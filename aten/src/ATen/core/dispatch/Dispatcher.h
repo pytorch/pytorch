@@ -2,7 +2,6 @@
 
 #include <ATen/SequenceNumber.h>
 #include <ATen/core/boxing/KernelFunction.h>
-#include <ATen/core/boxing/KernelFunction_call.h>
 #include <ATen/core/boxing/impl/boxing.h>
 #include <ATen/core/dispatch/OperatorEntry.h>
 #include <ATen/core/dispatch/CppSignature.h>
@@ -440,8 +439,7 @@ struct CaptureKernelCall {
       const DispatchKeySet& dispatchKeySet,
       Args&&... args)
       // Calls the kernel and capture the result in output_.
-      : output_{c10::kernel_function::call<ReturnType, Args...>(
-            kernel,
+      : output_{kernel.template call<ReturnType, Args...>(
             op,
             dispatchKeySet,
             std::forward<Args>(args)...)} {}
@@ -478,8 +476,8 @@ struct CaptureKernelCall<void> {
       const DispatchKeySet& dispatchKeySet,
       Args&&... args) {
     // Calling the kernel and no need to capture void.
-    c10::kernel_function::call<void, Args...>(
-        kernel, op, dispatchKeySet, std::forward<Args>(args)...);
+    kernel.template call<void, Args...>(
+        op, dispatchKeySet, std::forward<Args>(args)...);
   }
   Stack getOutputs() {
     return Stack();
@@ -519,8 +517,7 @@ inline Return Dispatcher::callWithDispatchKeySlowPath(const TypedOperatorHandle<
     }
   }
   // keeping the guard alive while executing the kernel
-  return c10::kernel_function::call<Return, Args...>(
-      kernel, op, dispatchKeySet, std::forward<Args>(args)...);
+  return kernel.template call<Return, Args...>(op, dispatchKeySet, std::forward<Args>(args)...);
 }
 
 // See [Note: Argument forwarding in the dispatcher] for why Args doesn't use &&
@@ -543,8 +540,7 @@ C10_DISPATCHER_INLINE_UNLESS_MOBILE Return Dispatcher::call(const TypedOperatorH
     return callWithDispatchKeySlowPath<Return, Args...>(op, pre_sampled, dispatchKeySet, kernel, std::forward<Args>(args)...);
   }
 #endif  // PYTORCH_DISABLE_PER_OP_PROFILING
-  return c10::kernel_function::call<Return, Args...>(
-      kernel, op, dispatchKeySet, std::forward<Args>(args)...);
+  return kernel.template call<Return, Args...>(op, dispatchKeySet, std::forward<Args>(args)...);
 }
 
 // See [Note: Argument forwarding in the dispatcher] for why Args doesn't use &&
@@ -553,8 +549,7 @@ inline Return Dispatcher::redispatch(const TypedOperatorHandle<Return (Args...)>
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   // do not use RecordFunction on redispatch
   const KernelFunction& kernel = op.operatorDef_->op.lookup(currentDispatchKeySet.highestPriorityTypeId());
-  return c10::kernel_function::call<Return, Args...>(
-      kernel, op, currentDispatchKeySet, std::forward<Args>(args)...);
+  return kernel.template call<Return, Args...>(op, currentDispatchKeySet, std::forward<Args>(args)...);
 }
 
 inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const {

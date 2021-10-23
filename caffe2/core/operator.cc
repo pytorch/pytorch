@@ -98,7 +98,7 @@ OperatorBase::OperatorBase(
     c10::ArrayRef<c10::IValue> inputs,
     c10::ArrayRef<caffe2::Tensor> outputs)
     // NOLINTNEXTLINE(performance-move-const-arg)
-    : fn_schema_(new c10::FunctionSchema(std::move(fn_schema))),
+    : fn_schema_(make_unique<c10::FunctionSchema>(std::move(fn_schema))),
       newstyle_inputs_(inputs),
       output_tensors_(outputs.vec()),
       input_size_(newstyle_inputs_.compute_input_size()) {
