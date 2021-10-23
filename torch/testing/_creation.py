@@ -105,6 +105,7 @@ def make_tensor(
     _integral_types = [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]
     _floating_types = [torch.float16, torch.bfloat16, torch.float32, torch.float64]
     _complex_types = [torch.cfloat, torch.cdouble]
+    assert not requires_grad or dtype in _floating_types or dtype in _complex_types
 
     if dtype is torch.bool:
         result = torch.randint(0, 2, shape, device=device, dtype=dtype)
