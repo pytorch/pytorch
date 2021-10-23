@@ -2,6 +2,7 @@
   "__comment": "@generated DO NOT EDIT MANUALLY, Generation script: .github/scripts/generate_ci_workflows.py",
   "label_rules": {
     "ciflow/all": [
+      "caffe2-linux-xenial-py3.6-gcc5.4",
       "libtorch-linux-xenial-cuda10.2-py3.6-gcc7",
       "libtorch-linux-xenial-cuda11.3-py3.6-gcc7",
       "linux-bionic-cuda10.2-py3.9-gcc7",
@@ -22,7 +23,6 @@
       "periodic-linux-xenial-cuda10.2-py3-gcc7-slow-gradcheck",
       "periodic-linux-xenial-cuda11.1-py3.6-gcc7",
       "periodic-win-vs2019-cuda11.1-py3",
-      "puretorch-linux-xenial-py3.6-gcc5.4",
       "win-vs2019-cpu-py3",
       "win-vs2019-cuda11.3-py3"
     ],
@@ -30,6 +30,7 @@
       "linux-xenial-py3.6-gcc7-bazel-test"
     ],
     "ciflow/cpu": [
+      "caffe2-linux-xenial-py3.6-gcc5.4",
       "linux-bionic-py3.6-clang9",
       "linux-vulkan-bionic-py3.6-clang9",
       "linux-xenial-py3.6-clang7-asan",
@@ -37,7 +38,6 @@
       "linux-xenial-py3.6-gcc5.4",
       "linux-xenial-py3.6-gcc7-bazel-test",
       "parallelnative-linux-xenial-py3.6-gcc5.4",
-      "puretorch-linux-xenial-py3.6-gcc5.4",
       "win-vs2019-cpu-py3"
     ],
     "ciflow/cuda": [
@@ -72,6 +72,7 @@
       "periodic-libtorch-linux-xenial-cuda11.1-py3.6-gcc7"
     ],
     "ciflow/linux": [
+      "caffe2-linux-xenial-py3.6-gcc5.4",
       "libtorch-linux-xenial-cuda10.2-py3.6-gcc7",
       "libtorch-linux-xenial-cuda11.3-py3.6-gcc7",
       "linux-bionic-cuda10.2-py3.9-gcc7",
@@ -90,8 +91,7 @@
       "parallelnative-linux-xenial-py3.6-gcc5.4",
       "periodic-libtorch-linux-xenial-cuda11.1-py3.6-gcc7",
       "periodic-linux-xenial-cuda10.2-py3-gcc7-slow-gradcheck",
-      "periodic-linux-xenial-cuda11.1-py3.6-gcc7",
-      "puretorch-linux-xenial-py3.6-gcc5.4"
+      "periodic-linux-xenial-cuda11.1-py3.6-gcc7"
     ],
     "ciflow/mobile": [
       "linux-xenial-py3-clang5-mobile-build",
