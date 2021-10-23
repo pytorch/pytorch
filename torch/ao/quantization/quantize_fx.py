@@ -653,7 +653,7 @@ def convert_fx(
                 ...,
                 ],
 
-                # sed for module names, skip quantizing "foo.bar"
+                # used for module names, skip quantizing "foo.bar"
                 "module_name": [
                 ("foo.bar", None)
                 ...,
