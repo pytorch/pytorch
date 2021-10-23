@@ -90,6 +90,10 @@ std::string getNncKernelId() {
       ":" + version_token;
 }
 
+std::string getNncKernelFuncName(const std::string& method_name) {
+  return "nnc_" + FLAGS_model_name + "_" + FLAGS_model_version + "_" + method_name;
+}
+
 void writeOutputLlvmAssembly(const std::string& asm_code) {
   std::string output_llvm_file_name = FLAGS_output_llvm;
   if (output_llvm_file_name.empty()) {
@@ -108,18 +112,13 @@ c10::IValue preprocess(
     const c10::Dict<c10::IValue, c10::IValue>& method_compile_spec,
     const torch::jit::BackendDebugHandleGenerator& generate_debug_handles) {
 
-  std::string output_llvm_file_name = FLAGS_output_llvm;
-  if (output_llvm_file_name.empty()) {
-    output_llvm_file_name =
-        FLAGS_model.substr(0, FLAGS_model.find('.')) + ".compiled.ll";
-  }
-
   auto method = mod.get_method(FLAGS_method_name);
   auto graph = method.function().graph()->copy();
   auto sizes = getInputSizes(method_compile_spec);
+  auto kernel_func_name = getNncKernelFuncName(FLAGS_method_name);
 
-  std::string llvm_asm_code;
-  auto compiled = torch::jit::mobile::nnc::aotCompile(FLAGS_method_name, graph, sizes);
+  auto compiled = torch::jit::mobile::nnc::aotCompile(
+      FLAGS_method_name, graph, sizes, kernel_func_name);
   writeOutputLlvmAssembly(compiled.second);
 
   auto func = std::move(compiled.first);
@@ -141,8 +140,8 @@ int main(int argc, char** argv) {
       " --model=<model file>"
       " --model_name=<model name>"
       " --model_version=<model version>"
-      " --input_dims='1,3,224,224'"
-      " [--method_name=<mehhod name>]"
+      " --input_dims=<input dimensions like '1,3,224,224;2,2'>"
+      " [--method_name=<method name>]"
       " [--output_llvm=<llvm assembly output file path>]"
       " [--output_model=<output model file path>]");
 
@@ -153,6 +152,9 @@ int main(int argc, char** argv) {
   }
 
   CAFFE_ENFORCE(!FLAGS_model.empty(), c10::UsageMessage());
+  CAFFE_ENFORCE(!FLAGS_model_name.empty(), c10::UsageMessage());
+  CAFFE_ENFORCE(!FLAGS_model_version.empty(), c10::UsageMessage());
+  CAFFE_ENFORCE(!FLAGS_input_dims.empty(), c10::UsageMessage());
 
   std::string output_model_name = FLAGS_output_model;
   if (output_model_name.empty()) {
