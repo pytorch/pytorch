@@ -8072,6 +8072,10 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            aliases=('linalg.matrix_exp',),
            sample_inputs_func=sample_inputs_matrix_exp,
+           # Needs to construct a 2nx2n matrix by copy_ ing into it
+           check_batched_grad=False,
+           check_batched_gradgrad=False,
+           supports_forward_ad=True,
            supports_out=False,
            ),
     OpInfo('matmul',
@@ -11065,24 +11069,6 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
             # RuntimeError: Unknown builtin op: aten::iinfo
-            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-        ),
-        sample_inputs_func=sample_inputs_masked_reduction,
-        gradcheck_wrapper=gradcheck_wrapper_masked_operation
-    ),
-    ReductionOpInfo(
-        '_masked.mean',
-        ref=reference_reduction_numpy(np.mean) if np.lib.NumpyVersion(np.__version__) >= '1.20.0' else None,
-        method_variant=None,
-        nan_policy='propagate',
-        supports_out=False,
-        promotes_int_to_float=True,
-        dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
-        skips=(
-            # FIXME: sum reduces all dimensions when dim=[]
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
-            # RuntimeError: undefined value tensor
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
         ),
         sample_inputs_func=sample_inputs_masked_reduction,
