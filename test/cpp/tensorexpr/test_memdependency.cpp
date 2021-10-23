@@ -3021,10 +3021,11 @@ TEST(MemDependency, MemDependencyCheckerComputeGEMM) {
   }
 
   loop.prepareForCodegen();
+  SimpleIREvaluator cg(loop.root_stmt(), {AP, BP, CT});
 
   // now check lowered dependency graph.
   {
-    StmtPtr stmt = IRSimplifier::simplify(loop.root_stmt());
+    StmtPtr stmt = IRSimplifier::simplify(cg.stmt());
     stmt->accept(&analyzer_lowered);
 
     // Lowering will change the dimensionality of all bounds due to index

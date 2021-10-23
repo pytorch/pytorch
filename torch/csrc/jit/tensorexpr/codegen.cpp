@@ -1,3 +1,5 @@
+#include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/codegen.h>
 
 #include <sstream>
@@ -80,6 +82,50 @@ void CodeGen::call_with_numel(void** args, int64_t numel) {
   TORCH_INTERNAL_ASSERT(
       false, "This codegen backend does not implement call_with_numel");
 }
+
+StmtPtr insertMemNodes(std::unordered_set<BufPtr>& interm_bufs, StmtPtr stmt) {
+  BlockPtr b = to<Block>(stmt);
+  if (!b) {
+    b = alloc<Block>(std::vector<StmtPtr>({stmt}));
+  }
+
+  // Insert allocations and frees for temporary buffers at global scope.
+  for (auto buf : interm_bufs) {
+    b->prepend_stmt(alloc<Allocate>(buf));
+    b->append_stmt(alloc<Free>(buf));
+  }
+
+  return b;
+}
+
+void CodeGen::allocIntermediateBufs() {
+  // Identify intermediate buffers that are not allocated yet.
+  auto bufs = NodeFinder<Buf>::find(stmt_);
+  std::unordered_set<BufPtr> bufs_allocated;
+  for (auto b : buffer_args_) {
+    bufs_allocated.insert(b.buf());
+  }
+  auto allocs = NodeFinder<Allocate>::find(stmt_);
+  for (auto a : allocs) {
+    bufs_allocated.insert(a->buf());
+  }
+
+  std::unordered_set<BufPtr> interm_bufs;
+  for (auto buf : bufs) {
+    if (!bufs_allocated.count(buf) && !interm_bufs.count(buf)) {
+      interm_bufs.insert(buf);
+    }
+  }
+
+  // Insert allocation/free nodes.
+  if (interm_bufs.size() > 0) {
+    auto stmt_new = insertMemNodes(interm_bufs, stmt_);
+    set_stmt(stmt_new);
+  }
+
+  GRAPH_DEBUG("\nMemory Allocation:\n\n", *stmt(), "\n");
+}
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
