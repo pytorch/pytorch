@@ -1,15 +1,26 @@
 import torch
 from collections import OrderedDict, defaultdict
 from typing import Union, Callable, Any, Dict, Tuple, Set, Optional
-from torch.ao.quantization.qconfig import add_module_to_qconfig_obs_ctr, QConfigAny
-
+from torch.ao.quantization.qconfig import add_module_to_qconfig_obs_ctr, QConfigAny, qconfig_equals
+from torch.ao.quantization.quantize import (
+    is_activation_post_process,
+)
 import re
-
+from torch.fx import (
+    GraphModule,
+)
 from torch.fx.graph import (
     Graph,
 )
 
 from .utils import _parent_name
+from ..utils import (
+    get_combined_dict,
+)
+from ..fuser_method_mappings import DEFAULT_OP_LIST_TO_FUSER_METHOD
+from ..quantization_mappings import (
+    get_default_qat_module_mappings,
+)
 
 
 def get_flattened_qconfig_dict(qconfig_dict):
@@ -130,6 +141,58 @@ def maybe_adjust_qconfig_for_module_type_or_name(qconfig_dict, module_type, modu
     return module_name_qconfig
 
 
+def update_qconfig_for_qat(
+    qconfig_dict: Any,
+    additional_qat_module_mapping: Dict[Callable, Callable]
+) -> Any:
+    """
+    Update the qconfig_dict to account for module swaps during QAT.
+    During QAT we perform a module swap on the nn.Module types to the corresponding nn.qat.modules types.
+    """
+    all_qat_mappings = get_combined_dict(
+        get_default_qat_module_mappings(), additional_qat_module_mapping)
+    object_type_dict = qconfig_dict.get("object_type", None)
+    new_object_type_dict = object_type_dict.copy()
+    for k, v in new_object_type_dict.items():
+        if k in all_qat_mappings:
+            object_type_dict[all_qat_mappings[k]] = v
+    return qconfig_dict
+
+def update_qconfig_for_fusion(
+    model: GraphModule,
+    qconfig_dict: Any,
+) -> Any:
+    """
+    Update the qconfig_dict to account for fused modules such as LinearReLU.
+    """
+    object_type_dict = qconfig_dict.get("object_type", None)
+    if object_type_dict is None:
+        return qconfig_dict
+
+    modules = dict(model.named_modules())
+
+    for node in model.graph.nodes:
+        if node.op == 'call_module' and node.target in modules:
+            module_type = type(modules[str(node.target)])
+            if module_type not in list(DEFAULT_OP_LIST_TO_FUSER_METHOD.values()):
+                continue
+
+            for ops, fuser in DEFAULT_OP_LIST_TO_FUSER_METHOD.items():
+                if module_type == fuser:
+                    fused_qconfig = object_type_dict.get(ops[0], None)
+
+                    # Raise an error if the modules in the fused module have
+                    # different qconfigs specified in the qconfig_dict
+                    for op in ops:
+                        if not qconfig_equals(object_type_dict.get(op, None), fused_qconfig):
+                            raise LookupError("During fusion, we need to specify the same " +
+                                              f"qconfigs for both modules in {module_type}.")
+
+                    if fused_qconfig is not None:
+                        object_type_dict[module_type] = fused_qconfig
+
+    return qconfig_dict
+
 def generate_qconfig_map(
         root: torch.nn.Module,
         modules: Dict[str, torch.nn.Module],
@@ -147,7 +210,6 @@ def generate_qconfig_map(
     # 1 F.conv2d invocations so far.
     submodule_to_object_type_to_cur_idx: Dict[str, Dict[Callable, int]] = \
         defaultdict(lambda: defaultdict(int))
-
     for node in input_graph.nodes:
         qconfig = None
         if node.op == "get_attr":
@@ -183,6 +245,9 @@ def generate_qconfig_map(
             qconfig_with_device_check = add_module_to_qconfig_obs_ctr(qconfig, modules.get(node.target, None))
 
         elif node.op == 'call_module':
+            # if the node is an observer, just continue - don't add it to the qconfig_map
+            if is_activation_post_process(modules[node.target]):
+                continue
             qconfig = maybe_adjust_qconfig_for_module_type_or_name(
                 qconfig_dict, type(modules[node.target]), node.target, global_qconfig)
 
@@ -293,3 +358,33 @@ def check_is_valid_fuse_custom_config_dict(fuse_custom_config_dict: Optional[Dic
     fuse_custom_config_dict_allowed_keys = {"additional_fuser_method_mapping",
                                             "preserved_attributes"}
     check_is_valid_config_dict(fuse_custom_config_dict, fuse_custom_config_dict_allowed_keys, "fuse_custom_config_dict")
+
+
+def compare_prepare_convert_qconfig_dict(prepare_qconfig_dict: Dict[str, Dict[Any, Any]],
+                                         convert_qconfig_dict: Dict[str, Dict[Any, Any]]) -> None:
+    r""" Compare the qconfig_dict passed in convert to the one from prepare and check the values
+
+    Args:
+      `prepare_qconfig_dict`: configuration dictionary for prepare quantization step
+      `convert_qconfig_dict`: configuration dictionary for convert quantization step
+    """
+    prepare_keys = prepare_qconfig_dict.keys()
+    convert_keys = convert_qconfig_dict.keys()
+
+    for k in prepare_keys:
+        if k == '':
+            assert k in convert_qconfig_dict, "Missing key {} from convert qconfig_dict when it was present in prepare".format(k)
+            assert (convert_qconfig_dict[k] is None
+                   or qconfig_equals(prepare_qconfig_dict[k], convert_qconfig_dict[k])), (  # type: ignore
+                "Expected convert qconfig_dict have the same qconfig as prepare qconfig_dict or None."
+                "Updated qconfig {} to {} for key {}".format(prepare_qconfig_dict[k], convert_qconfig_dict[k], k))
+        elif k in ['object_type', 'module_name', 'module_namr_regex']:
+            for name, qconfig in prepare_qconfig_dict[k].items():
+                assert name in convert_qconfig_dict[k], "Missing key {} {} from convert qconfig_dict \
+                when it was present in prepare".format(k, name)
+                assert convert_qconfig_dict[k][name] is None \
+                    or qconfig_equals(prepare_qconfig_dict[k][name], convert_qconfig_dict[k][name]), \
+                    "Expected convert qconfig_dict have the same qconfig as prepare qconfig_dict or None. \
+                    Updated qconfig {} to {} for key {} {}".format(prepare_qconfig_dict[k], convert_qconfig_dict[k], k, name)
+        else:
+            assert "Unsupported key in convert_qconfig_dict {}".format(k)
