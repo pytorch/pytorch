@@ -181,15 +181,21 @@ class BinaryOpRelu(torch.nn.Module):
 def _user_func_with_complex_return_type(x):
     return list(torch.split(x, 1, 1))
 
-def lower_to_trt(model, sample_input, shape_ranges):
+def lower_to_trt(model, inputs, shape_ranges):
     """ Lower a quantized model to TensorRT
     """
-    model = acc_tracer.trace(model, [sample_input])  # type: ignore[attr-defined]
+    assert len(inputs) == 1, "lower_to_trt only works for one input currently"
+    model = acc_tracer.trace(model, inputs)  # type: ignore[attr-defined]
+    # TODO: test multiple inputs setting and enable multiple inputs
+    input_specs = [
+        InputTensorSpec(
+            torch.Size([-1, *inputs[0].shape[1:]]), torch.float,
+            shape_ranges=shape_ranges, has_batch_dim=True)
+    ]
+
     interp = TRTInterpreter(
         model,
-        [InputTensorSpec(
-            torch.Size([-1, *sample_input.shape[1:]]), torch.float,
-            shape_ranges=shape_ranges, has_batch_dim=True)],
+        input_specs,
         explicit_batch_dimension=True, explicit_precision=True)
     engine, input_names, output_names = interp.run(fp16_mode=False, int8_mode=True)
     trt_mod = TRTModule(engine, input_names, output_names)
@@ -5275,7 +5281,7 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
           no_prepare: node occurrence after prepare
           no_convert: node occurrence after convert
         """
-        m = M().eval()
+        m = m.eval()
         prepared = prepare_fx(m, {"": self.qconfig}, backend_config_dict=self.backend_config_dict)
         self.checkGraphModuleNodes(prepared, expected_node_occurrence=no_prepare)
         # calibration
@@ -5291,7 +5297,7 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
 
     def test_conv(self):
         class Conv2dModule(torch.nn.Module):
-            def __init__(self, *args):
+            def __init__(self):
                 super().__init__()
                 self.conv = torch.nn.Conv2d(3, 3, 3)
 
@@ -5325,7 +5331,7 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
         shape_ranges = [
             ((1, 5),
              (5, 5),
-             (10, 8))
+             (10, 5))
         ]
         no_convert = {
             ns.call_function(torch.quantize_per_tensor): 2,
