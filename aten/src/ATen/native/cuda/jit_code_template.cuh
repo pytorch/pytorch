@@ -223,13 +223,13 @@ for (int j = 0; j < thread_work_size; j++){
     int linear_idx = thread_idx + block_work_size * idx;
     auto input_offsets = input_calculator.get(linear_idx);
     // printf(
-    //     "thread %d data %p %p %p offset %d %d\n",
+    //     "thread %d data %p %p offset %d\n",
     //     threadIdx.x,
-    //     data[0], data[1], data[2],
-    //     input_offsets[0], input_offsets[1]);
+    //     data[0], data[1],
+    //     input_offsets[0]);
     ${load_inputs}
-    //printf(
-    //    "thread %d a %f b %f offsets %d %d\n", threadIdx.x, arg0[j], arg1[j], input_offsets[0], input_offsets[1]);
+    // printf(
+    //    "thread %d a %f offsets %d\n", threadIdx.x, arg0[j], input_offsets[0]);
     thread_idx += num_threads;
 }
 

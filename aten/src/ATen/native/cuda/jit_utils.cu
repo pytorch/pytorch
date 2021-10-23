@@ -29,7 +29,7 @@ torch::jit::CodeTemplate load_code_template(const std::string& path) {
 }
 
 
-std::string generate_code(int nTensors, std::string func, std::string name, bool contiguous, bool dynamic_casting){
+std::string generate_code(int nTensors, std::string& func, std::string& name, bool contiguous, bool dynamic_casting){
     torch::jit::TemplateEnv env;
     env.s("index_type", "unsigned int");
     const int nInputs = nTensors - 1;
@@ -93,7 +93,7 @@ NvrtcFunction jit_pwise_function(
   int major = 0, minor = 0;
   bool compile_to_sass = false;
   torch::jit::fuser::cuda::codegenOutputQuery(prop, major, minor, compile_to_sass);
-
+  std::cout << "create program\n";
   // Creates the NVRTC program
   nvrtcProgram program;
   const auto& nvrtc = at::globalContext().getNVRTC();
@@ -125,7 +125,7 @@ NvrtcFunction jit_pwise_function(
   // Avoid excessive register usage from assertion
   args.push_back("-DNDEBUG");
 #endif
-
+  std::cout << "compile program\n";
   // compiles and validates result
   const auto compilation_result =
       nvrtc.nvrtcCompileProgram(program, args.size(), args.data());
@@ -158,10 +158,10 @@ NvrtcFunction jit_pwise_function(
     AT_CUDA_NVRTC_CHECK(getFunc(program, ptx.data()));
 
     NvrtcFunction compiled_kernel_;
-
     AT_CUDA_DRIVER_CHECK(nvrtc.cuModuleLoadData(&(compiled_kernel_.module), ptx.data()));
+    std::string name = kernel_name + "_kernel";
     AT_CUDA_DRIVER_CHECK(
-        nvrtc.cuModuleGetFunction(&(compiled_kernel_.function), compiled_kernel_.module, kernel_name.c_str()));
+        nvrtc.cuModuleGetFunction(&(compiled_kernel_.function), compiled_kernel_.module, name.c_str()));
 
     //TODO use guards to avoid leaking
     AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcDestroyProgram(&program));
@@ -177,7 +177,6 @@ void launch_jitted_pwise_function(
     const int kBlockSize) {
 
   const auto& nvrtc = at::globalContext().getNVRTC();
-
   // Launches kernel on current stream
   auto stream = at::cuda::getCurrentCUDAStream();
   AT_CUDA_DRIVER_CHECK(nvrtc.cuLaunchKernel(

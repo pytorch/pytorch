@@ -146,7 +146,7 @@ static inline void launch_vectorized_kernel(int64_t N, const func_t& f, array_t 
 }
 
 template<typename func_t>
-static inline std::string generate_code_wrapper(int64_t nTensors, func_t& f, std::string& name, bool contiguous, bool dynamic_casting ){
+static inline std::string generate_code_wrapper(int64_t nTensors, func_t f, std::string& name, bool contiguous, bool dynamic_casting ){
   return at::cuda::jit::generate_code(nTensors, f, name, contiguous, dynamic_casting);
 }
 
@@ -166,7 +166,7 @@ static inline void launch_unrolled_kernel(int64_t N, const func_t& f, array_t da
       if (!fn.function){
         std::cout << "generating code\n";
         constexpr int nTensors = array_t::size();
-        constexpr bool dynamic_casting = std::is_same<decltype(l), memory::LoadWithoutCast>::value && std::is_same<decltype(l), memory::LoadWithoutCast>::value;
+        constexpr bool dynamic_casting = !std::is_same<decltype(l), memory::LoadWithoutCast>() || !std::is_same<decltype(l), memory::LoadWithoutCast>();
         std::string name = "i0";
         auto code = generate_code_wrapper(nTensors, f, name, contiguous, dynamic_casting);
         std::cout << code;
