@@ -1050,7 +1050,7 @@ def insert_observers_for_model(
                 if node.op != 'output':
                     # add matched nodes to the observed node name set
                     for n in matched_nodes:
-                        observed_node_names.add(n)
+                        observed_node_names.add(n.name)
 
                     # This is currently only used for equalization.
                     # Checks if the current node is in a branch in which the two
