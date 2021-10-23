@@ -65,32 +65,6 @@ LazyTensor Cross(const LazyTensor& input, const LazyTensor& other,
   return tensor_aten_ops::stack({s1, s2, s3}, canonical_dim);
 }
 
-LazyTensor KlDivBackward(const LazyTensor& grad_output, const LazyTensor& input,
-                         const LazyTensor& target, ReductionMode reduction,
-                         bool log_target) {
-  auto input_shape_ref = input.shape();
-  LazyTensor expanded_grad_output = tensor_aten_ops::expand(
-      grad_output, lazy_tensors::util::ToVector<lazy_tensors::int64>(
-                       input_shape_ref.get().dimensions()));
-  LazyTensor grad_input;
-  if (!log_target) {
-    grad_input = tensor_aten_ops::where(
-        tensor_aten_ops::gt(target, 0),
-        tensor_aten_ops::neg(
-            tensor_aten_ops::mul(target, expanded_grad_output)),
-        tensor_aten_ops::full_like(input, 0, input.GetDevice(), c10::nullopt));
-  } else {
-    grad_input = tensor_aten_ops::neg(tensor_aten_ops::mul(
-        tensor_aten_ops::exp(target), expanded_grad_output));
-  }
-  if (reduction == ReductionMode::kMean) {
-    LazyTensor dims_size = lazy_tensor_distributed::get_dimensions_size(
-        input, Helpers::GetAllDimensions(input_shape_ref));
-    grad_input = tensor_aten_ops::div(grad_input, dims_size);
-  }
-  return grad_input;
-}
-
 LazyTensor MakeMatrixWithDiagonal(const LazyTensor& input,
                                   lazy_tensors::int64 diagonal) {
   lazy_tensors::int64 size = input.shape().get().dimensions(0);
@@ -111,59 +85,6 @@ LazyTensor Select(const LazyTensor& input, lazy_tensors::int64 dim,
   LazyTensor result = tensor_aten_ops::narrow(input, dim, index, 1);
   auto new_dims = Helpers::DropDimensions(shape.get().dimensions(), {dim});
   return tensor_aten_ops::view(result, new_dims);
-}
-
-LazyTensor EmbeddingDenseBackward(const LazyTensor& grad_output,
-                                  const LazyTensor& indices,
-                                  lazy_tensors::int64 num_weights,
-                                  lazy_tensors::int64 padding_idx,
-                                  bool scale_grad_by_freq) {
-  LTC_CHECK_EQ(indices.dtype(), at::ScalarType::Long)
-      << "Embedding indices are expected to be of scalar type Long";
-  auto indices_shape_ref = indices.shape();
-  // The weight must be of rank 2, which means the rank of grad_output is one
-  // more than the indices.
-  LTC_CHECK_EQ(grad_output.shape().get().rank(),
-               indices_shape_ref.get().rank() + 1);
-  lazy_tensors::int64 numel =
-      lazy_tensors::ShapeUtil::ElementsIn(indices_shape_ref.get());
-  LazyTensor grad =
-      tensor_aten_ops::view(grad_output, {numel, grad_output.size(-1)});
-  LazyTensor grad_weight =
-      tensor_aten_ops::full({num_weights, grad_output.size(-1)}, 0,
-                            grad_output.GetDevice(), grad_output.dtype());
-  LazyTensor indices_rank1 = tensor_aten_ops::view(indices, {numel});
-  if (scale_grad_by_freq) {
-    // Compute the histogram of index values.
-    LazyTensor counts = tensor_aten_ops::full(
-        {num_weights}, 0, indices.GetDevice(), indices.dtype());
-    LazyTensor ones =
-        tensor_aten_ops::full({numel}, 1, indices.GetDevice(), indices.dtype());
-    tensor_aten_ops::index_put_(
-        counts, counts, {indices_rank1}, /*start_dim=*/0,
-        /*values=*/ones,
-        /*accumulate=*/true, /*result_permutation=*/{0});
-    LazyTensor grad_weights_scale =
-        tensor_aten_ops::index(counts, {indices_rank1}, 0);
-    // Scale the value of the gradient by the histogram.
-    grad = tensor_aten_ops::div(
-        grad, tensor_aten_ops::unsqueeze(grad_weights_scale, 1));
-  }
-  // Don't accumulate gradients for indices which are equal with the given
-  // padding_idx.
-  LazyTensor skip_padding = tensor_aten_ops::unsqueeze(
-      tensor_aten_ops::ne(indices_rank1, static_cast<double>(padding_idx)), 1);
-  skip_padding = tensor_aten_ops::expand(
-      skip_padding, lazy_tensors::util::ToVector<lazy_tensors::int64>(
-                        grad.shape().get().dimensions()));
-  LazyTensor zero_grad =
-      tensor_aten_ops::full_like(grad, 0, grad.GetDevice(), grad.dtype());
-  return tensor_aten_ops::index_put(
-      grad_weight, {indices_rank1},
-      /*start_dim=*/0,
-      /*values=*/tensor_aten_ops::where(skip_padding, grad, zero_grad),
-      /*accumulate=*/true,
-      /*result_permutation=*/{0, 1});
 }
 
 }  // namespace tensor_ops

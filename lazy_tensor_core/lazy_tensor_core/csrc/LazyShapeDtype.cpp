@@ -50,6 +50,26 @@ namespace torch_lazy_tensors{
 namespace ir {
 namespace ops {
 
+std::vector<std::vector<int64_t>> compute_shape_embedding_dense_backward(const at::Tensor& grad_output, const at::Tensor& indices, int64_t num_weights, int64_t padding_idx, bool scale_grad_by_freq) {
+  // Based on aten/src/ATen/native/Embedding.cpp::embedding_dense_backward_cpu.
+  return {{num_weights, grad_output.size(-1)}};
+}
+
+std::vector<c10::ScalarType> compute_dtype_embedding_dense_backward(const at::Tensor& grad_output, const at::Tensor& indices, int64_t num_weights, int64_t padding_idx, bool scale_grad_by_freq) {
+  // Based on aten/src/ATen/native/Embedding.cpp::embedding_dense_backward_cpu.
+  return {grad_output.scalar_type()};
+}
+
+std::vector<std::vector<int64_t>> compute_shape_kl_div_backward(const at::Tensor& grad_output, const at::Tensor& self, const at::Tensor& target, int64_t reduction, bool log_target) {
+  // Based on definition of aten/src/ATen/native/Loss.cpp::kl_div_backward_cpu.
+  return {self.sizes().vec()};
+}
+
+std::vector<c10::ScalarType> compute_dtype_kl_div_backward(const at::Tensor& grad_output, const at::Tensor& self, const at::Tensor& target, int64_t reduction, bool log_target) {
+  // Based on definition of aten/src/ATen/native/Loss.cpp::kl_div_backward_cpu.
+  return {self.scalar_type()};
+}
+
 std::vector<std::vector<int64_t>> compute_shape_native_layer_norm(const at::Tensor & input,
     at::IntArrayRef normalized_shape, const c10::optional<at::Tensor> & weight, const c10::optional<at::Tensor> & bias,
     double eps) {

@@ -13,8 +13,12 @@ full_codegen:
   - bmm
   - cos
   - clamp
+  - div.Tensor
+  - div.Tensor_mode
+  - embedding_dense_backward
   - gelu
   - gelu_backward
+  - kl_div_backward
   - log2
   - mean
   - mm
@@ -43,10 +47,6 @@ supported:
   - convolution_backward_overrideable
   - _copy_from
   - _copy_from_and_resize
-  - div.Tensor
-  - div.Tensor_mode
-  - div.Scalar
-  - embedding_dense_backward
   - empty.memory_format
   - empty_strided
   - expand

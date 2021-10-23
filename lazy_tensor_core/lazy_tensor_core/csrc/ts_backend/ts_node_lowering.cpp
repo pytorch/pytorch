@@ -33,7 +33,6 @@
 #include "lazy_tensor_core/csrc/ops/stack.h"
 #include "lazy_tensor_core/csrc/ops/threshold.h"
 #include "lazy_tensor_core/csrc/ops/threshold_backward.h"
-#include "lazy_tensor_core/csrc/ops/ts_embedding_dense_backward.h"
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_backward.h"
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_forward.h"
 #include "lazy_tensor_core/csrc/ops/unselect.h"
@@ -91,11 +90,6 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
         const torch::lazy::Output& argument = node->operand(0);
         return lazy_tensors::Shape(ir::GetShapeFromTsOutput(argument).element_type(),
                                    expand->size());
-      }
-      case at::aten::embedding_dense_backward: {
-        return InferEmbeddingDenseBackward(
-            torch::lazy::NodeCast<ir::ops::TSEmbeddingDenseBackward>(
-                node, ir::OpKind(at::aten::embedding_dense_backward)));
       }
       case at::aten::index_select: {
         return InferIndexSelect(torch::lazy::NodeCast<ir::ops::IndexSelect>(
@@ -260,11 +254,6 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
     if (node->op().op == at::aten::constant_pad_nd) {
       return LowerConstantPad(torch::lazy::NodeCast<ir::ops::ConstantPadNd>(
           node, ir::OpKind(at::aten::constant_pad_nd)));
-    }
-    if (node->op().op == at::aten::embedding_dense_backward) {
-      return LowerEmbeddingDenseBackward(
-          torch::lazy::NodeCast<ir::ops::TSEmbeddingDenseBackward>(
-              node, ir::OpKind(at::aten::embedding_dense_backward)));
     }
     if (node->op().op == at::aten::expand) {
       return LowerExpand(
@@ -432,16 +421,6 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
                                      input_size, weight_size, padding,
                                      output_padding, stride, dilation, groups));
     }
-  }
-
-  static lazy_tensors::Shape InferEmbeddingDenseBackward(
-      const ir::ops::TSEmbeddingDenseBackward* node) {
-    const torch::lazy::Output& grad_output = node->operand(0);
-    const lazy_tensors::Shape& grad_output_shape = ir::GetShapeFromTsOutput(grad_output);
-    return lazy_tensors::Shape(
-        grad_output_shape.element_type(),
-        {node->num_weights(),
-         grad_output_shape.dimensions(grad_output_shape.rank() - 1)});
   }
 
   static lazy_tensors::Shape InferIndexSelect(
@@ -716,17 +695,6 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
     arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
     arguments.emplace_back(node->pad());
     arguments.emplace_back(node->value());
-    return LowerBuiltin(node, arguments);
-  }
-
-  TSOpVector LowerEmbeddingDenseBackward(
-      const ir::ops::TSEmbeddingDenseBackward* node) {
-    std::vector<torch::jit::NamedValue> arguments;
-    arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
-    arguments.emplace_back(loctx()->GetOutputOp(node->operand(1)));
-    arguments.emplace_back(node->num_weights());
-    arguments.emplace_back(node->padding_idx());
-    arguments.emplace_back(node->scale_grad_by_freq());
     return LowerBuiltin(node, arguments);
   }
 

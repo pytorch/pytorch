@@ -9589,7 +9589,8 @@ TEST_F(AtenLtcTsTensorTest, TestKlDivBackward) {
   torch::Tensor target = torch::rand(
       {4, 3}, torch::TensorOptions(torch::kFloat).requires_grad(true));
   for (torch::Reduction::Reduction reduction :
-       {torch::Reduction::Mean, torch::Reduction::Sum}) {
+       {torch::Reduction::Mean, torch::Reduction::Sum,
+        torch::Reduction::None}) {
     auto testfn =
         [&](const std::vector<torch::Tensor>& inputs) -> torch::Tensor {
       return torch::kl_div(/*self=*/inputs[0], /*target=*/inputs[1], reduction);
