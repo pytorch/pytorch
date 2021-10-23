@@ -118,7 +118,15 @@ struct TORCH_API LLVMCodeGenBuilder {
 
   std::unique_ptr<LLVMCodeGen> build() {
     return std::make_unique<LLVMCodeGen>(
-        stmt_, args_, device_, kernelFuncName_, pre_alloc_, dtype_, triple_, cpu_, attrs_);
+        stmt_,
+        args_,
+        device_,
+        kernelFuncName_,
+        pre_alloc_,
+        dtype_,
+        triple_,
+        cpu_,
+        attrs_);
   }
 
  private:

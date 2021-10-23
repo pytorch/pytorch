@@ -339,9 +339,9 @@ LLVMCodeGen::LLVMCodeGen(
     c10::optional<std::string> triple,
     c10::optional<std::string> cpu,
     c10::optional<std::string> attrs)
-    : CodeGen(stmt, args, device, kernel_func_name, pre_alloc){
-      impl_ = std::make_unique<
-            LLVMCodeGenImpl>(this->stmt(), this->buffer_args(), device, dtype, triple, cpu, attrs);
+    : CodeGen(stmt, args, device, kernel_func_name, pre_alloc) {
+  impl_ = std::make_unique<LLVMCodeGenImpl>(
+      this->stmt(), this->buffer_args(), device, dtype, triple, cpu, attrs);
   callee_ = std::make_unique<LLVMCodeGenCallee>(
       impl_->releaseJIT(), (void*)impl_->getKernelAddress());
 }

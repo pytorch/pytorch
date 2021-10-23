@@ -32,7 +32,7 @@ class TORCH_API CodeGen {
         buffer_args_(std::move(buffer_args)),
         device_(device),
         kernel_func_name_(std::move(kernel_func_name)) {
-    allocBuf(pre_alloc);
+    allocIntermediateBufs(pre_alloc);
   }
 
   virtual ~CodeGen() = default;
@@ -102,10 +102,12 @@ class TORCH_API CodeGen {
     return kernel_func_name_;
   }
 
-  void allocBuf(const bool pre_alloc);
-  void insertMemNodes(std::vector<std::pair<BufPtr, BufPtr>>& b2m, const bool pre_alloc);
+  void allocIntermediateBufs(const bool pre_alloc);
+  void insertMemNodes(
+      std::vector<std::pair<BufPtr, BufPtr>>& b2m,
+      const bool pre_alloc);
 
-  std::vector<BufPtr> getIntermediateBufs() const{
+  std::vector<BufPtr> getIntermediateBufs() const {
     return buffers_to_alloc_;
   }
 
@@ -230,8 +232,8 @@ class RegisterCodeGen {
            const std::string& kernel_func_name,
            const bool pre_alloc) {
           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          std::unique_ptr<CodeGen> method(
-              new CodeGenType(stmt, params, device, kernel_func_name, pre_alloc));
+          std::unique_ptr<CodeGen> method(new CodeGenType(
+              stmt, params, device, kernel_func_name, pre_alloc));
           return method;
         });
   }

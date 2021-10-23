@@ -1040,7 +1040,7 @@ void TensorExprKernel::bindConstant(const torch::jit::Value* v) {
 
 void TensorExprKernel::preAllocIntermediateBufs(
     std::vector<BufPtr>& interm_bufs) {
-  for (auto it = interm_bufs.begin(); it != interm_bufs.end();++it) {
+  for (auto it = interm_bufs.begin(); it != interm_bufs.end(); ++it) {
     // Check if buf shape is static and compute its size if static.
     auto buf = *it;
     bool is_static = true;
@@ -1156,7 +1156,7 @@ void TensorExprKernel::compile() {
       SubgraphUtils::generateNameForGraph(graph_),
       pre_alloc_);
 
-  if(pre_alloc_) {
+  if (pre_alloc_) {
     auto interm_bufs = codegen_->getIntermediateBufs();
     preAllocIntermediateBufs(interm_bufs);
   }
