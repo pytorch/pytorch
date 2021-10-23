@@ -16,11 +16,13 @@ from ..quantize import (
 from ..observer import (
     ObserverBase,
 )
-from ..qconfig import QConfigAny, qconfig_equals
+from ..qconfig import QConfigAny
 from .qconfig_utils import (
     convert_dict_to_ordered_dict,
     generate_qconfig_map,
     get_flattened_qconfig_dict,
+    update_qconfig_for_fusion,
+    update_qconfig_for_qat,
 )
 
 from .quantization_patterns import (
@@ -60,8 +62,6 @@ from .utils import (
     WEIGHT_INDEX_DICT,
     BIAS_INDEX_DICT,
 )
-
-from ..fuser_method_mappings import DEFAULT_OP_LIST_TO_FUSER_METHOD
 
 from ..quantization_mappings import (
     get_default_qat_module_mappings,
@@ -145,58 +145,6 @@ def qat_swap_modules(
     all_mappings = get_combined_dict(
         get_default_qat_module_mappings(), additional_qat_module_mapping)
     convert(root, mapping=all_mappings, inplace=True, remove_qconfig=False)
-
-def update_qconfig_for_qat(
-    qconfig_dict: Any,
-    additional_qat_module_mapping: Dict[Callable, Callable]
-) -> Any:
-    """
-    Update the qconfig_dict to account for module swaps during QAT.
-    During QAT we perform a module swap on the nn.Module types to the corresponding nn.qat.modules types.
-    """
-    all_qat_mappings = get_combined_dict(
-        get_default_qat_module_mappings(), additional_qat_module_mapping)
-    object_type_dict = qconfig_dict.get("object_type", None)
-    new_object_type_dict = object_type_dict.copy()
-    for k, v in new_object_type_dict.items():
-        if k in all_qat_mappings:
-            object_type_dict[all_qat_mappings[k]] = v
-    return qconfig_dict
-
-def update_qconfig_for_fusion(
-    model: GraphModule,
-    qconfig_dict: Any,
-) -> Any:
-    """
-    Update the qconfig_dict to account for fused modules such as LinearReLU.
-    """
-    object_type_dict = qconfig_dict.get("object_type", None)
-    if object_type_dict is None:
-        return qconfig_dict
-
-    modules = dict(model.named_modules())
-
-    for node in model.graph.nodes:
-        if node.op == 'call_module':
-            module_type = type(modules[str(node.target)])
-            if module_type not in list(DEFAULT_OP_LIST_TO_FUSER_METHOD.values()):
-                continue
-
-            for ops, fuser in DEFAULT_OP_LIST_TO_FUSER_METHOD.items():
-                if module_type == fuser:
-                    fused_qconfig = object_type_dict.get(ops[0], None)
-
-                    # Raise an error if the modules in the fused module have
-                    # different qconfigs specified in the qconfig_dict
-                    for op in ops:
-                        if not qconfig_equals(object_type_dict.get(op, None), fused_qconfig):
-                            raise LookupError("During fusion, we need to specify the same " +
-                                              f"qconfigs for both modules in {module_type}.")
-
-                    if fused_qconfig is not None:
-                        object_type_dict[module_type] = fused_qconfig
-
-    return qconfig_dict
 
 def insert_observer(
     node: Node,
@@ -1091,6 +1039,8 @@ def save_state(
     patterns: Dict[Pattern, QuantizeHandler],
     prepare_custom_config_dict: Dict[str, Any],
     equalization_qconfig_map: Dict[str, Any],
+    qconfig_dict: Dict[str, Dict[Any, Any]],
+    is_training: bool,
 ) -> None:
     observed._patterns = patterns  # type: ignore[assignment]
     observed._qconfig_map = qconfig_map  # type: ignore[assignment]
@@ -1098,6 +1048,8 @@ def save_state(
         prepare_custom_config_dict  # type: ignore[assignment]
     observed._node_name_to_scope = node_name_to_scope  # type: ignore[assignment]
     observed._equalization_qconfig_map = equalization_qconfig_map  # type: ignore[assignment]
+    observed._qconfig_dict = qconfig_dict  # type: ignore[assignment]
+    observed._is_training = is_training  # type: ignore[assignment]
 
 def prepare(
         model: GraphModule,
@@ -1209,7 +1161,7 @@ def prepare(
         input_quantized_idxs, output_quantized_idxs)
 
     save_state(model, qconfig_map, node_name_to_scope, patterns,
-               prepare_custom_config_dict, equalization_qconfig_map)
+               prepare_custom_config_dict, equalization_qconfig_map, qconfig_dict, model.training)
     preserved_attributes = set(prepare_custom_config_dict.get("preserved_attributes", []))
     model = ObservedGraphModule(model, model.graph, preserved_attributes)
     if is_standalone_module:
