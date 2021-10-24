@@ -313,7 +313,7 @@ Tensor linalg_pinv(
     Tensor U, S, V;
     // TODO: replace input.svd with linalg_svd when torch/xla can work with at::linalg_svd
     std::tie(U, S, V) = input.svd();
-    return at::matmul(V * S.reciprocal().unsqueeze(-2), U.conj().transpose(-2, -1));
+    return at::matmul(V * S.reciprocal().unsqueeze(-2), U.mH());
   }
 
   // If not Hermitian use singular value decomposition, else use eigenvalue decomposition
@@ -326,7 +326,7 @@ Tensor linalg_pinv(
     Tensor tol = at::max(atol.unsqueeze(-1), rtol.unsqueeze(-1) * max_val);
     Tensor S_pseudoinv = at::where(S > tol, S.reciprocal(), at::zeros({}, S.options())).to(input.dtype());
     // computes V @ diag(S_pseudoinv) @ U.conj().T
-    return at::matmul(V * S_pseudoinv.unsqueeze(-2), U.conj().transpose(-2, -1));
+    return at::matmul(V * S_pseudoinv.unsqueeze(-2), U.mH());
   } else {
     Tensor S, U;
     std::tie(S, U) = at::linalg_eigh(input);
@@ -337,7 +337,7 @@ Tensor linalg_pinv(
     Tensor tol = at::max(atol.unsqueeze(-1), rtol.unsqueeze(-1) * max_val);
     Tensor S_pseudoinv = at::where(S_abs > tol, S.reciprocal(), at::zeros({}, S.options())).to(input.dtype());
     // computes U @ diag(S_pseudoinv) @ U.conj().T
-    return at::matmul(U * S_pseudoinv.unsqueeze(-2), U.conj().transpose(-2, -1));
+    return at::matmul(U * S_pseudoinv.unsqueeze(-2), U.mH());
   }
 }
 
@@ -1264,7 +1264,7 @@ static void addbmm_impl_(
   }
 
   auto adjusted_beta(beta);
-  for (int64_t batch = 0; batch < num_batches; ++batch) {
+  for (const auto batch : c10::irange(num_batches)) {
     result.addmm_(batch1[batch], batch2[batch], adjusted_beta, alpha);
     adjusted_beta = 1; // accumulate output once
   }
@@ -1321,23 +1321,23 @@ inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, const T
 
   int64_t grain_size = std::min(internal::GRAIN_SIZE / (is * js * ks), (int64_t)1);
   parallel_for(0, bs, grain_size, [&](int64_t b_begin, int64_t b_end) {
-      for (int64_t b = b_begin; b < b_end; b++) {
+      for (const auto b : c10::irange(b_begin, b_end)) {
         auto r1 = r0[b];
         auto s1 = s0[b];
         auto m1 = m0[b];
-        for (int64_t i = 0; i < is; i++) {
+        for (const auto i : c10::irange(is)) {
           auto r2 = r1[i];
           auto s2 = s1[i];
-          for (int64_t j = 0; j < js; j++) {
+          for (const auto j : c10::irange(js)) {
             scalar_t &r = r2[j];
             if (is_bmm) {
               r = 0;
-              for (int64_t k = 0; k < ks; k++) {
+              for (const auto k : c10::irange(ks)) {
                 r += s2[k] * m1[k][j];
               }
             } else {
               r *= beta;
-              for (int64_t k = 0; k < ks; k++) {
+              for (const auto k : c10::irange(ks)) {
                 r += alpha * s2[k] * m1[k][j];
               }
             }
@@ -2100,10 +2100,11 @@ void compute_T18_scale_square(
   auto mexp_scaled = at::native::compute_T18<scalar_t>(a_scaled);
   auto s_cpu = (s.device().type() == at::kCPU)
     ? s : s.to(at::kCPU);
-  for (int64_t i = 0; i < mexp_scaled.size(0); ++i) {
+  for (const auto i : c10::irange(mexp_scaled.size(0))) {
     auto s_val = s_cpu.select(0, i).template item<int64_t>();
     auto mexp = mexp_scaled.select(0, i);
-    for (int64_t p = 0; p < s_val; ++p) {
+    for (const auto p : c10::irange(s_val)) {
+      (void)p; //Suppress unused variable warning
       mexp = at::matmul(mexp, mexp);
     }
     mexp_out.select(0, i).copy_(mexp);
@@ -2218,18 +2219,14 @@ Tensor mexp(const Tensor& a, bool compute_highest_degree_approx = false) {
   }
 }
 
-// Based on:
-//
-// Mathias, Roy.
-// A Chain Rule for Matrix Functions and Applications.
-// SIAM J. Matrix Anal. Appl. 17 (1996): 610-620.
-//
+// TODO This should be deprecated in favor of linalg_matrix_exp_differential
+//      in FunctionsManual.cpp
 template <typename func_t>
 Tensor backward_analytic_function_of_a_matrix(
     const Tensor& self, const Tensor& grad,
     const func_t& function_of_a_matrix
   ) {
-  auto self_transposed = self.transpose(-2, -1).conj();
+  auto self_transposed = self.mH();
   auto self_transposed_sizes = self_transposed.sizes().vec();
   self_transposed_sizes[self.dim() - 2] <<= 1;
   self_transposed_sizes[self.dim() - 1] <<= 1;
@@ -2244,8 +2241,7 @@ Tensor backward_analytic_function_of_a_matrix(
     .narrow(-2, 0, n).narrow(-1, n, n);
   return grad_input;
 }
-
-};
+} // end anon namespace
 
 // Computes the matrix exponential for a given batch of squared matrices.
 // The implementaion is based on:
@@ -2254,25 +2250,31 @@ Tensor backward_analytic_function_of_a_matrix(
 // Computing the Matrix Exponential with an Optimized Taylor Polynomial Approximation.
 // Mathematics 2019, 7, 1174.
 //
-Tensor matrix_exp(const Tensor& a) {
-  TORCH_CHECK(a.dim() >= 2
-          && (at::isFloatingType(a.scalar_type())
-           || at::isComplexType(a.scalar_type())),
-              "matrix_exp(", a.scalar_type(), "{", a.sizes(), "}): expected a tensor "
-              "of floating or complex types with dim at least 2");
-  TORCH_CHECK(a.size(-1) == a.size(-2),
-              "matrix_exp(", a.scalar_type(), "{", a.sizes(), "}): expected a tensor "
-              "of squared matrices");
+Tensor linalg_matrix_exp(const Tensor& a) {
+  squareCheckInputs(a);
+  TORCH_CHECK((at::isFloatingType(a.scalar_type()) || at::isComplexType(a.scalar_type())),
+              "Expected a floating point or complex tensor as input. Got: ", a.scalar_type());
 
   NoTF32Guard disable_tf32;
 
-  if (a.size(-1) == 1) {
+  // Trivial cases
+  const auto n = a.size(-1);
+  if (n == 0) {
+    return a.clone();
+  } else if (n == 1) {
     return a.exp();
+  } else {
+    return at::native::mexp(a);
   }
-
-  return mexp(a);
 }
 
+// Alias
+Tensor matrix_exp(const Tensor& a) {
+  return at::linalg_matrix_exp(a);
+}
+
+// TODO This should be deprecated in favor of linalg_matrix_exp_differential
+//      in FunctionsManual.cpp
 Tensor matrix_exp_backward(const Tensor& self, const Tensor& grad) {
   NoTF32Guard disable_tf32;
   return backward_analytic_function_of_a_matrix(
@@ -2371,7 +2373,7 @@ Tensor& nuclear_norm_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tens
 // (e.g. [0, 1, 2, ..., ndim-1])
 static std::vector<int64_t> make_dim_list(int64_t ndim) {
   std::vector<int64_t> dim_list(ndim);
-  for (int64_t ind = 0; ind < ndim; ind++) {
+  for (const auto ind : c10::irange(ndim)) {
     dim_list[ind] = ind;
   }
   return dim_list;
@@ -2924,7 +2926,7 @@ struct KronImpl final {
       a_reshape = c10::SmallVector<int64_t, 10>(2 * maxdim);
       b_reshape = c10::SmallVector<int64_t, 10>(2 * maxdim);
       result_reshape = c10::SmallVector<int64_t, 10>(maxdim);
-      for (int64_t i = 0; i < maxdim; i++) {
+      for (const auto i : c10::irange(maxdim)) {
         a_reshape[2 * i] = (i >= pad_self ? self.sizes()[i - pad_self] : 1);
         a_reshape[2 * i + 1] = 1;
         b_reshape[2 * i] = 1;
@@ -2939,7 +2941,7 @@ struct KronImpl final {
       TORCH_INTERNAL_ASSERT(result.defined(), "Cannot call kron_out with an undefined result tensor as the out argument. Please allocate a Tensor before calling kron_out with it.");
 
       c10::SmallVector<int64_t, 10> mul_shape(2 * maxdim);
-      for (int64_t i = 0; i < maxdim; i++) {
+      for (const auto i : c10::irange(maxdim)) {
         mul_shape[2 * i] = a_reshape[2 * i];
         mul_shape[2 * i + 1] = b_reshape[2 * i + 1];
       }

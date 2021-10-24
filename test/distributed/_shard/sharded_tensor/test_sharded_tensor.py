@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: distributed"]
+
 import io
 import itertools
 import math
@@ -1035,15 +1037,15 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         self.assertEqual(torch.Size([10, 20]), st.size())
 
         # Test with row size
-        sharded_tensor = _sharded_tensor.empty(spec, (10, 20), init_rrefs=True)
+        st = sharded_tensor.empty(spec, (10, 20), init_rrefs=True)
         self.assertEqual(sharded_tensor.size(0), 10)
 
         # Test with col size
-        sharded_tensor = _sharded_tensor.empty(spec, (10, 20), init_rrefs=True)
+        st = sharded_tensor.empty(spec, (10, 20), init_rrefs=True)
         self.assertEqual(sharded_tensor.size(1), 20)
 
         # Test with invalid input
-        sharded_tensor = _sharded_tensor.empty(spec, (10, 20), init_rrefs=True)
+        st = sharded_tensor.empty(spec, (10, 20), init_rrefs=True)
         with self.assertRaisesRegex(ValueError, 'must be within the range of tensor dimensions \\[0, 2\\)'):
             sharded_tensor.size(-1)
         with self.assertRaisesRegex(ValueError, 'must be within the range of tensor dimensions \\[0, 2\\)'):
