@@ -96,4 +96,4 @@ inline BoxedKernel::InternalBoxedKernelFunction* BoxedKernel::getFnPtr() const {
   return boxed_kernel_func_;
 }
 
-}
+}  // namespace c10
