@@ -648,15 +648,15 @@ def convert_fx(
 
                 # used for object_type, skip quantizing torch.nn.functional.add
                 "object_type": [
-                (torch.nn.functional.add, None),
-                (torch.nn.functional.linear, qconfig_from_prepare)
-                ...,
+                    (torch.nn.functional.add, None),
+                    (torch.nn.functional.linear, qconfig_from_prepare)
+                    ...,
                 ],
 
                 # sed for module names, skip quantizing "foo.bar"
                 "module_name": [
-                ("foo.bar", None)
-                ...,
+                    ("foo.bar", None)
+                    ...,
                 ],
             }
 
