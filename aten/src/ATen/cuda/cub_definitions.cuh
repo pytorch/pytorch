@@ -1,6 +1,6 @@
 #pragma once
 
-#if !define(USE_ROCM)
+#if !defined(USE_ROCM)
 #include <cuda.h>  // for CUDA_VERSION
 #endif
 
