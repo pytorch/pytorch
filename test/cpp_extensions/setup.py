@@ -39,6 +39,12 @@ if torch.cuda.is_available() and (CUDA_HOME is not None or ROCM_HOME is not None
                             'nvcc': ['-O2']})
     ext_modules.append(extension)
 
+    cublas_extension = CUDAExtension(
+        name='torch_test_cpp_extension.cublas_extension',
+        sources=['cublas_extension.cpp']
+    )
+    ext_modules.append(cublas_extension)
+
 if torch.cuda.is_available() and (CUDA_HOME is not None or ROCM_HOME is not None):
     extension = CUDAExtension(
         'torch_test_cpp_extension.torch_library', [
