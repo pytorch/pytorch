@@ -365,14 +365,14 @@ class FullyShardedDataParallel(nn.Module):
                 dtype=self.compute_dtype,
             )
             _free_storage(p._full_param_padded)  # type: ignore[attr-defined]
-        elif p._is_sharded:
+        elif p._is_sharded:  # type: ignore[attr-defined]
             # Should be appropriate size
             expected_size = p.numel() * self.world_size
             assert (
-                p._full_param_padded.shape[0] == expected_size
-            ), f"Expected p._full_param_sharded to have size {expected_size} but got {p._full_param_padded.shape[0]}"
+                p._full_param_padded.shape[0] == expected_size  # type: ignore[attr-defined]
+            ), f"Expected p._full_param_sharded to have size {expected_size} but got {p._full_param_padded.shape[0]}"  # type: ignore[attr-defined]
             # And should have storage freed in prev forward pass
-            _assert_storage_freed(p._full_param_sharded)
+            _assert_storage_freed(p._full_param_sharded)  # type: ignore[attr-defined]
 
 
     def _set_is_root(self) -> None:
