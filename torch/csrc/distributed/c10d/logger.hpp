@@ -105,9 +105,6 @@ class TORCH_API Logger {
   std::shared_ptr<c10d::Reducer> reducer_;
   // track the number of iterations when runtime stats are collected so far.
   long num_iterations_stats_recorded_ = 0;
-  // Whether it is logged that graph is static or not. Needed because reducer
-  // logs that the graph is not static when detected as such, and we want to
-  // avoid overhead associated with multiple logging.
 };
 
 } // namespace c10d
