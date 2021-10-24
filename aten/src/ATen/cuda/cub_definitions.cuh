@@ -1,6 +1,6 @@
 #pragma once
 
-#if !defined(USE_ROCM)
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
 #include <cuda.h>
 #include <cub/version.cuh>
 #else
