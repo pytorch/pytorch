@@ -239,6 +239,9 @@ class FullyShardedDataParallel(nn.Module):
         # Shard using torch.chunk to match all-gather/reduce-scatter.
         chunks = list(torch.flatten(tensor).chunk(self.world_size))
         if len(chunks) < (self.rank + 1):
+            # If there are not enough chunks to shard across ranks, create an
+            # empty chunk that will just be padded with zeros to be the
+            # appropriate size.
             chunk = chunks[0].new_empty(0)
         else:
             chunk = chunks[self.rank]
@@ -249,6 +252,9 @@ class FullyShardedDataParallel(nn.Module):
         ), "Chunk's size should be equal or smaller than \
             the first chunk's size."
 
+        # We always need to clone here, because regardless of padding the
+        # original parameter, of which this chunk is a view of, is deallocated
+        # after _get_shard.
         shard = chunk.clone()
         if num_to_pad > 0:
             shard = F.pad(shard, [0, num_to_pad])
@@ -266,12 +272,16 @@ class FullyShardedDataParallel(nn.Module):
         return self.module.__getitem__(key)  # type: ignore[operator]
 
     def _reset_lazy_init(self) -> None:
-        """Reset instance so :func:`_lazy_init` will run on the next forward."""
+        """
+        Reset instance so :func:`_lazy_init` will run on the next forward.
+        Currently this is only called in __init__
+        """
         self._is_root: Optional[bool] = None
         self._streams: Dict[str, torch.cuda.Stream] = {}
         for p in self.params:
             if hasattr(p, "_local_shard"):
-                # reset attributes that are added in _init_param_attributes
+                # reset attributes that are added in _init_param_attributes, as
+                # part of _lazy_init
                 del p._local_shard  # type: ignore[attr-defined]
 
     def _lazy_init(self) -> None:
@@ -287,6 +297,7 @@ class FullyShardedDataParallel(nn.Module):
         # happen in __init__, but _is_root can only be determined after the
         # entire model hierarchy is setup, thus we run it lazily.
         if self._is_root is None:
+            # _is_root means that we are in the outermost module's forward.
             self._set_is_root()
             self._setup_streams()
 
@@ -312,14 +323,18 @@ class FullyShardedDataParallel(nn.Module):
         are set by :func:`_shard_parameters`:
             ``_is_sharded``: ``True`` if the Parameter is sharded or ``False``
                 if the Parameter is intentionally not sharded (in which case we
-                will all-reduce grads for this param).
+                will all-reduce grads for this param). Currently the only way
+                `_is_sharded = False` is if world_size = 1.
             ``_orig_size``: the size of the original Parameter (before sharding)
         A few attributes are set here:
-            ``_local_shard``: a single shard of the parameters.
+            ``_local_shard``: a single shard of the parameter. This is needed to
+                recover the shard after rebuilding full parameter in forward
+                and backward.
             ``_full_param_padded``: the full weight (padded to be evenly
                 divisible by ``world_size``), used for computation in the
-                forward and backward pass. This will be resized in place and
-                only materialized (via all-gather) as needed.
+                forward and backward pass. It is initialized with the
+                appropriate size and then has its storage freed. This will be
+                resized in place and only materialized (via all-gather) as needed.
         Another attribute is set by :func:`_register_post_backward_hooks`:
             ``_shard_bwd_hook``: it holds the parameter's AccumulateGrad object
                 and the registered post hook handle.
