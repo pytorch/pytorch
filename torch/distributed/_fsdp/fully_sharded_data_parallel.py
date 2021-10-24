@@ -237,7 +237,7 @@ class FullyShardedDataParallel(nn.Module):
     def _get_shard(self, tensor: torch.Tensor) -> Tuple[torch.Tensor, int]:
         """Return the local shard of a full tensor."""
         # Shard using torch.chunk to match all-gather/reduce-scatter.
-        chunks = list(torch.flatten(tensor).chunk(self.world_size))
+        chunks = torch.flatten(tensor).chunk(self.world_size)
         if len(chunks) < (self.rank + 1):
             # If there are not enough chunks to shard across ranks, create an
             # empty chunk that will just be padded with zeros to be the
