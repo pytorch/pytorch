@@ -643,8 +643,7 @@ def convert_fx(
             a) same keys as what is passed to the qconfig_dict in prepare_fx API, with same values or `None`.
             b) additional keys with values set to `None`
 
-            For each entry whose value is set to None, we skip quantizing that entry in the model.
-          Example::
+          For each entry whose value is set to None, we skip quantizing that entry in the model::
 
             qconfig_dict = {
               # used for object_type, skip quantizing torch.nn.functional.add
