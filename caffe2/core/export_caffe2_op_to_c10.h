@@ -113,12 +113,7 @@ struct TORCH_API InitSchema {
  * - If your operator has a variable number of input tensors, make the first (!)
  *   input an input of type TensorList. There must be no other tensor inputs.
  */
-#define C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(OperatorName)   \
-  namespace caffe2 {                                        \
-  namespace _c10_ops {                                      \
-  TORCH_API const char* schema_##OperatorName();            \
-  }                                                         \
-  }
+#define C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(OperatorName)
 
 #define C10_EXPORT_CAFFE2_OP_TO_C10_SCHEMA_ONLY(OperatorName, OperatorSchema) \
   /* Register the op schema with the c10 dispatcher */                        \

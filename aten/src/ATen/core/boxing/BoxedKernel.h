@@ -3,7 +3,6 @@
 #include <ATen/core/boxing/OperatorKernel.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/util/intrusive_ptr.h>
-#include <c10/util/TypeList.h>
 
 namespace c10 {
 
@@ -113,22 +112,7 @@ public:
   bool isFallthrough() const;
 
   /**
-   * Call the function in a boxed way.
-   * If the kernel function was created with an unboxed function,
-   * this will call an unboxing wrapper which then calls into that
-   * unboxed function.
-   *
-   * Example:
-   *
-   * > void boxed_func(OperatorKernel*, Stack* stack) {...}
-   * > KernelFunction func = KernelFunction::makeFromBoxedFunction(&boxed_func);
-   * > Tensor result = func.callBoxed(stack);
-   *
-   * Or, with an unboxed implementation:
-   *
-   * > KernelFunction func = KernelFunction::makeFromUnboxedLambda(
-   * >      [] (Tensor a, bool b) -> Tensor {...});
-   * > Tensor result = func.callBoxed(stack);
+   * Call the function with boxed arguments.
    */
   void callBoxed(const OperatorHandle& opHandle, DispatchKeySet dispatchKeySet, Stack* stack) const;
 
@@ -138,7 +122,7 @@ public:
    * Example:
    *
    * > void boxed_func(OperatorKernel*, Stack* stack) {...}
-   * > KernelFunction func = KernelFunction::makeFromBoxedFunction<&boxed_func>();
+   * > BoxedFunction func = BoxedKernel::makeFromFunction<&boxed_func>();
    */
   template<BoxedKernelFunction* func>
   static BoxedKernel makeFromFunction();
@@ -159,7 +143,7 @@ public:
    * >   public:
    * >     void operator()(const OperatorHandle&, DispatchKeySet, Stack*) {...}
    * > };
-   * > KernelFunction func = KernelFunction::makeFromBoxedFunctor(std::make_unique<MyFunctor>());
+   * > BoxedKernel func = BoxedKernel::makeFromFunctor(std::make_unique<MyFunctor>());
    */
   template<class KernelFunctor>
   static BoxedKernel makeFromFunctor(std::unique_ptr<KernelFunctor> kernelFunctor);
@@ -168,9 +152,6 @@ public:
   static BoxedKernel makeFallthrough();
   static BoxedKernel makeAmbiguousAutogradOther();
   static BoxedKernel makeNamedNotSupported();
-
-  // For testing internal invariants only
-  bool _equalsBoxed(const BoxedKernel&) const;
 
 private:
 
@@ -191,6 +172,6 @@ private:
   InternalBoxedKernelFunction* boxed_kernel_func_;
 };
 
-}
+}  // namespace c10
 
 #include <ATen/core/boxing/BoxedKernel_impl.h>
