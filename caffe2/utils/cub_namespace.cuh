@@ -1,12 +1,5 @@
 #pragma once
 
-#if !defined(USE_ROCM)
-#include <cuda.h>
-#include <cub/version.cuh>
-#else
-#define CUB_VERSION 0
-#endif
-
 // cub sort support for CUB_WRAPPED_NAMESPACE is added to cub 1.13.1 in:
 // https://github.com/NVIDIA/cub/pull/326
 // CUB_WRAPPED_NAMESPACE is defined globally in cmake/Dependencies.cmake
