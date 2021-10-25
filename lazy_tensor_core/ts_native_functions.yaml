@@ -17,6 +17,7 @@ full_codegen:
   - gelu_backward
   - log2
   - mean
+  - mean.dim
   - mm
   - mv
   - native_layer_norm
