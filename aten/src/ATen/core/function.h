@@ -49,7 +49,10 @@ struct TORCH_API Function {
 
   virtual c10::intrusive_ptr<c10::ivalue::Future> runAsync(
       Stack& stack,
-      TaskLauncher taskLauncher = at::launch) = 0;
+      TaskLauncher taskLauncher = at::launch) {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(false);
+    return {};
+  }
 
   at::IValue operator()(
     Stack stack,
