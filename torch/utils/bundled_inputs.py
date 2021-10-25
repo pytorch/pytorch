@@ -250,7 +250,15 @@ def augment_many_model_functions_with_bundled_inputs(
     get_bundled_inputs_functions_and_info_template = ""
 
     for function, input_list in inputs.items():
-        function_name = function.__name__
+        if hasattr(function, "__name__"):
+            function_name = function.__name__
+        else:
+            if hasattr(function, "name"):
+                function_name = function.name  # type: ignore[attr-defined]
+            else:
+                raise Exception(
+                    'At least one of your functions has no attribute name please ensure all have one. m.foo.name = "foo"')
+
 
         if input_list is not None and not isinstance(input_list, Sequence):
             raise TypeError("Error inputs for function {0} is not a Sequence".format(function_name))

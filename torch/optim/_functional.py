@@ -46,9 +46,19 @@ def adagrad(params: List[Tensor],
             std_values = std._values().sqrt_().add_(eps)
             param.add_(_make_sparse(grad, grad_indices, grad_values / std_values), alpha=-clr)
         else:
+            is_complex = torch.is_complex(param)
+            if is_complex:
+                grad = torch.view_as_real(grad)
+                state_sum = torch.view_as_real(state_sum)
+                param = torch.view_as_real(param)
             state_sum.addcmul_(grad, grad, value=1)
             std = state_sum.sqrt().add_(eps)
             param.addcdiv_(grad, std, value=-clr)
+            if is_complex:
+                param = torch.view_as_complex(param)
+                state_sum = torch.view_as_complex(state_sum)
+
+
 
 
 def adam(params: List[Tensor],

@@ -167,7 +167,7 @@ AttributeError::AttributeError(const char* format, ...) {
   va_end(fmt_args);
 }
 
-void PyWarningHandler::process(
+void PyWarningHandler::InternalHandler::process(
     const c10::SourceLocation& source_location,
     const std::string& msg,
     const bool verbatim) {
@@ -177,15 +177,16 @@ void PyWarningHandler::process(
 PyWarningHandler::PyWarningHandler() noexcept(true):
       prev_handler_(c10::Warning::get_warning_handler()),
       in_exception_(false) {
-  c10::Warning::set_warning_handler(this);
+  c10::Warning::set_warning_handler(&internal_handler_);
 }
 
 /// See NOTE [ Conversion Cpp Python Warning ] for noexcept justification
 /// NOLINTNEXTLINE(bugprone-exception-escape)
 PyWarningHandler::~PyWarningHandler() noexcept(false) {
   c10::Warning::set_warning_handler(prev_handler_);
+  auto &warning_buffer = internal_handler_.warning_buffer_;
 
-  if (warning_buffer_.size() > 0) {
+  if (warning_buffer.size() > 0) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     PyObject *type, *value, *traceback;
     pybind11::gil_scoped_acquire gil;
@@ -195,7 +196,7 @@ PyWarningHandler::~PyWarningHandler() noexcept(false) {
       // error has been set yet
       PyErr_Fetch(&type, &value, &traceback);
     }
-    for (const auto& warning : warning_buffer_) {
+    for (const auto& warning : warning_buffer) {
       auto source_location = warning.source_location_;
       const auto& msg = processErrorMsg(warning.msg_);
       if (source_location.file == nullptr) {
@@ -230,7 +231,7 @@ PyWarningHandler::~PyWarningHandler() noexcept(false) {
         }
       }
     }
-    warning_buffer_.clear();
+    warning_buffer.clear();
     if ((result < 0) && (!in_exception_)) {
       /// A warning raised an error, we need to force the parent
       /// function to return an error code.
