@@ -730,6 +730,7 @@ from torch import futures as futures
 from torch import nn as nn
 import torch.nn.intrinsic
 import torch.nn.quantizable
+import torch.ao.nn.quantization.quantized
 import torch.nn.quantized
 # AO depends on nn, as well as quantized stuff -- so should be after those.
 from torch import ao as ao
