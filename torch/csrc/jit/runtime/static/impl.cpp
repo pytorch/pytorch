@@ -1029,20 +1029,28 @@ c10::IValue StaticRuntime::operator()(
     std::vector<c10::IValue> outputs;
     outputs.reserve(static_module_.num_outputs());
     for (const auto i : c10::irange(static_module_.num_outputs())) {
-      // The exact output tensor should never be managed.
-      DCHECK(!isManagedOutputTensor(*outputs_[i]));
-      // use move here. Otherwise, clean up outputs_[i] explicitly
-      outputs.emplace_back(std::move(*outputs_[i]));
+      // REVIEW: is this actually safe or does trying to manage an
+      // output tensor indicate deeper problems? what was supposed to
+      // stop it?
+
+      if (C10_UNLIKELY(isManagedOutputTensor(*outputs_[i]))) {
+        outputs.emplace_back(*outputs_[i]);
+      } else {
+        outputs.emplace_back(std::move(*outputs_[i]));
+      }
     }
     return c10::ivalue::Tuple::create(std::move(outputs));
   }
 #ifndef NDEBUG
   check_for_memory_leak(false);
 #endif
-  // The exact output tensor should never be managed.
-  DCHECK(!isManagedOutputTensor(*outputs_[0]));
-  // use move here. Otherwise, clean up outputs_[0] explicitly
-  return std::move(*outputs_[0]);
+  // REVIEW: same safety question as above
+  if (C10_UNLIKELY(isManagedOutputTensor(*outputs_[0]))) {
+    return *outputs_[0];
+  } else {
+    // use move here. Otherwise, clean up outputs_[0] explicitly
+    return std::move(*outputs_[0]);
+  }
 }
 
 template c10::IValue StaticRuntime::operator()<const std::vector<c10::IValue>&>(
@@ -1402,7 +1410,12 @@ void StaticRuntime::check_for_memory_leak(bool output_returned) {
     for (const auto i : c10::irange(pnode.outputs().size())) {
       const IValue* ival = &pnode.Output(i);
       const Value* val = pnode.node()->output(i);
-      if (planner_ && planner_->isManagedOutputTensorValue(val)) {
+      // subtlety: isManagedOutputTensorValue may give a false
+      // negative here if an output is an alias of this value, so
+      // check the actual tensor!
+      if (planner_ &&
+          (planner_->isManagedOutputTensor(*ival) ||
+           planner_->isManagedOutputTensorValue(val))) {
         // `ival` contains a managed output tensor that the runtime doesn't
         // reclaim at the end of an iteration, but the client does so
         // by explicitly calling `StaticRuntime::deallocateOutputTensors`.
