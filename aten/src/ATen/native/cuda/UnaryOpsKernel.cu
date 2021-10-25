@@ -154,12 +154,6 @@ void nan_to_num_kernel_cuda(
 }
 
 void frexp_kernel_cuda(TensorIteratorBase& iter) {
-#if defined(USE_ROCM)
-  // Reference: https://rocmdocs.amd.com/en/latest/ROCm_API_References/HIP-MATH.html
-  //            https://github.com/ROCm-Developer-Tools/HIP/issues/2169
-  // ROCm does not support frexp function yet
-  TORCH_CHECK(false, "torch.frexp() is not implemented on ROCm platform.");
-#else
   AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::Half,
     // The iter.dtype() here is the dtype of mantissa output.
     // It's a floating point type and must be the same as the input's dtype.
@@ -171,7 +165,6 @@ void frexp_kernel_cuda(TensorIteratorBase& iter) {
         return {mantissa, exponent};
       });
   });
-#endif
 }
 
 REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel_cuda);
