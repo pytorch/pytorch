@@ -70,6 +70,28 @@ std::vector<c10::ScalarType> compute_dtype_kl_div_backward(const at::Tensor& gra
   return {self.scalar_type()};
 }
 
+std::vector<std::vector<int64_t>> compute_shape_cat(at::TensorList tensors, int64_t dim) {
+  // TODO(whc) support cat in codegen and move this to compute_*_cat functions
+  std::vector<int64_t> out_shape(tensors[0].sizes().begin(), tensors[0].sizes().end());
+
+  int64_t rank = tensors[0].sizes().size();
+  int64_t canonical_dim = dim % rank;
+  if (canonical_dim < 0) {
+      canonical_dim += rank;
+  }
+  size_t extended_dim_shape = 0;
+  for (auto& tensor: tensors) {
+    extended_dim_shape += tensor.sizes()[canonical_dim];
+  }
+  out_shape[canonical_dim] = extended_dim_shape;
+  return {out_shape};
+}
+
+std::vector<c10::ScalarType> compute_dtype_cat(at::TensorList tensors, int64_t dim) {
+  // cat requires same dtype of all inputs
+  return {tensors[0].scalar_type()};
+}
+
 std::vector<std::vector<int64_t>> compute_shape_native_layer_norm(const at::Tensor & input,
     at::IntArrayRef normalized_shape, const c10::optional<at::Tensor> & weight, const c10::optional<at::Tensor> & bias,
     double eps) {
