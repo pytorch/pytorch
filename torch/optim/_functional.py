@@ -209,8 +209,6 @@ def adadelta(params: List[Tensor],
         acc_delta.mul_(rho).addcmul_(delta, delta, value=1 - rho)
         if torch.is_complex(param):
             delta = torch.view_as_complex(delta)
-            square_avg = torch.view_as_complex(square_avg)
-            acc_delta = torch.view_as_complex(acc_delta)
         param.add_(delta, alpha=-lr)
 
 def rmsprop(params: List[Tensor],
