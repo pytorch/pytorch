@@ -18,6 +18,7 @@
       "linux-xenial-py3.6-clang7-asan",
       "linux-xenial-py3.6-clang7-onnx",
       "linux-xenial-py3.6-gcc5.4",
+      "linux-xenial-py3.6-gcc7",
       "parallelnative-linux-xenial-py3.6-gcc5.4",
       "periodic-libtorch-linux-xenial-cuda11.1-py3.6-gcc7",
       "periodic-linux-xenial-cuda10.2-py3-gcc7-slow-gradcheck",
@@ -37,6 +38,7 @@
       "linux-xenial-py3.6-clang7-asan",
       "linux-xenial-py3.6-clang7-onnx",
       "linux-xenial-py3.6-gcc5.4",
+      "linux-xenial-py3.6-gcc7",
       "parallelnative-linux-xenial-py3.6-gcc5.4",
       "win-vs2019-cpu-py3"
     ],
@@ -63,6 +65,7 @@
       "linux-xenial-py3.6-clang7-asan",
       "linux-xenial-py3.6-clang7-onnx",
       "linux-xenial-py3.6-gcc5.4",
+      "linux-xenial-py3.6-gcc7",
       "win-vs2019-cpu-py3",
       "win-vs2019-cuda11.3-py3"
     ],
@@ -88,6 +91,7 @@
       "linux-xenial-py3.6-clang7-asan",
       "linux-xenial-py3.6-clang7-onnx",
       "linux-xenial-py3.6-gcc5.4",
+      "linux-xenial-py3.6-gcc7",
       "parallelnative-linux-xenial-py3.6-gcc5.4",
       "periodic-libtorch-linux-xenial-cuda11.1-py3.6-gcc7",
       "periodic-linux-xenial-cuda10.2-py3-gcc7-slow-gradcheck",
