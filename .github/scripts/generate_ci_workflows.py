@@ -2,7 +2,7 @@
 
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Dict, Set, List
+from typing import Dict, Set, List, Iterable
 
 import jinja2
 import json
@@ -223,7 +223,7 @@ class CIWorkflow:
 @dataclass
 class DockerWorkflow:
     build_environment: str
-    docker_images: Set[str]
+    docker_images: List[str]
 
     # Optional fields
     ciflow_config: CIFlowConfig = field(default_factory=CIFlowConfig)
@@ -542,17 +542,17 @@ BAZEL_WORKFLOWS = [
 DOCKER_WORKFLOWS = [
     DockerWorkflow(
         build_environment="docker-builds",
-        docker_images={
+        docker_images=sorted({
             workflow.docker_image_base
             for workflow in [*LINUX_WORKFLOWS, *BAZEL_WORKFLOWS]
             if workflow.docker_image_base
-        },
+        }),
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_DOCKER, LABEL_CIFLOW_SCHEDULED},
         ),
         # Run weekly to ensure they can build
         is_scheduled="1 * */7 * *",
-    )
+    ),
 ]
 
 def main() -> None:
@@ -577,6 +577,9 @@ def main() -> None:
 
     ciflow_ruleset = CIFlowRuleset()
     for template, workflows in template_and_workflows:
+        # added Iterable check to appease the mypy gods
+        if not isinstance(workflows, Iterable):
+            raise Exception(f"How is workflows not iterable? {workflows}")
         for workflow in workflows:
             workflow.generate_workflow_file(workflow_template=template)
             ciflow_ruleset.add_label_rule(workflow.ciflow_config.labels, workflow.build_environment)
