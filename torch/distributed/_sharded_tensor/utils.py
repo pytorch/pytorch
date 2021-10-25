@@ -81,7 +81,7 @@ def _validate_output_tensor_for_gather(
             "on non-destination ranks."
         )
 
-def _flatten_tensor_size(size) -> List[int]:
+def _flatten_tensor_size(*size) -> List[int]:
     """
     Checks if tensor size is valid, then flatten/return the list of ints.
 
@@ -176,13 +176,13 @@ def build_metadata_from_local_shards(
 
     local_sharded_tensor_metadata = ShardedTensorMetadata(
         shards_metadata=local_shard_metadatas,
-        size=global_size,
+        size=torch.Size(global_size),
         tensor_properties=local_tensor_properties)
 
     return (local_sharded_tensor_metadata, local_shards_device)
 
 
-def build_global_metadata(gathered_metadatas: List[ShardedTensorMetadata]):
+def build_global_metadata(gathered_metadatas: List[Optional[ShardedTensorMetadata]]):
     global_sharded_tensor_metadata = None
     global_metadata_rank = 0
 
