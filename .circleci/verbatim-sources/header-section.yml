@@ -20,6 +20,9 @@ parameters:
   run_slow_gradcheck_build:
     type: boolean
     default: false
+  builder_circle_sha1:
+    type: string
+    default: ""
 
 executors:
   windows-with-nvidia-gpu:

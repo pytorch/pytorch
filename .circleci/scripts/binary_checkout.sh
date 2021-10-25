@@ -63,6 +63,11 @@ popd
 # Clone the Builder master repo
 retry git clone -q https://github.com/pytorch/builder.git "$BUILDER_ROOT"
 pushd "$BUILDER_ROOT"
+if [[ -n "${BUILDER_CIRCLE_SHA1:-}" ]]; then
+  # Check out a specific commit (typically the latest) from pytorch/builder
+  git reset --hard "${BUILDER_CIRCLE_SHA1}"
+  git checkout -q -B main
+fi
 echo "Using builder from "
 git --no-pager log --max-count 1
 popd
