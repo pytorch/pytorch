@@ -733,7 +733,7 @@ def max_pool2d_with_indices(
     # and https://github.com/pytorch/pytorch/issues/62545 for context
     if ceil_mode != return_indices:
         warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
-                      "to match the args list in nn.MaxPool2d in a future release.")
+                      " to match the args list in nn.MaxPool2d in a future release.")
 
     if has_torch_function_unary(input):
         return handle_torch_function(

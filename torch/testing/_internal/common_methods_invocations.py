@@ -2972,6 +2972,7 @@ def sample_inputs_max_pool2d(op_info, device, dtype, requires_grad, **kwargs):
             sample_input = make_arg((N, C, H, W)) if N is not None else (make_arg((C, H, W)))
 
             yield SampleInput(sample_input, kwargs=kwargs)
+
     return list(generator())
 
 def sample_inputs_max_pool3d(op_info, device, dtype, requires_grad, **kwargs):
@@ -8687,6 +8688,33 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_max_pool2d),
     OpInfo('nn.functional.max_pool3d',
            aten_name='max_pool3d',
+           supports_autograd=True,
+           supports_out=False,
+           assert_jit_shape_analysis=False,  # TODO: add shape analysis
+           dtypesIfCPU=floating_types(),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           supports_scripting=False,  # TODO: fix aliasing test
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           sample_inputs_func=sample_inputs_max_pool3d),
+    OpInfo('nn.functional.max_pool1d_with_indices',
+           aten_name='max_pool1d_with_indices',
+           supports_autograd=True,
+           supports_out=False,
+           assert_jit_shape_analysis=False,  # TODO: add shape analysis
+           dtypesIfCPU=floating_types(),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           supports_scripting=False,  # TODO: fix aliasing test
+           sample_inputs_func=sample_inputs_max_pool1d),
+    OpInfo('nn.functional.max_pool2d_with_indices',
+           aten_name='max_pool2d_with_indices',
+           supports_autograd=True,
+           supports_out=False,
+           assert_jit_shape_analysis=True,
+           dtypesIfCPU=floating_types(),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           sample_inputs_func=sample_inputs_max_pool2d),
+    OpInfo('nn.functional.max_pool3d_with_indices',
+           aten_name='max_pool3d_with_indices',
            supports_autograd=True,
            supports_out=False,
            assert_jit_shape_analysis=False,  # TODO: add shape analysis
