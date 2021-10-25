@@ -1,6 +1,6 @@
 #pragma once
 
-#include <map>
+#include <unordered_map>
 
 #include <ATen/core/function_schema.h>
 #include <ATen/core/ivalue.h>
@@ -21,15 +21,13 @@ struct ExportedFunction {
 };
 
 class TORCH_API BytecodeExportSet {
-  struct Comparator {
-    bool operator()(const c10::QualifiedName& a, const c10::QualifiedName& b)
-        const {
-      return a.qualifiedName() < b.qualifiedName();
-    }
-  };
-
  public:
-  BytecodeExportSet() : items_(Comparator{}) {}
+  BytecodeExportSet() = default;
+  BytecodeExportSet(const BytecodeExportSet&) = delete;
+  BytecodeExportSet& operator=(const BytecodeExportSet&) = delete;
+  BytecodeExportSet(BytecodeExportSet&&) = default;
+  BytecodeExportSet& operator=(BytecodeExportSet&&) = default;
+
   void add(const c10::QualifiedName& qn, ExportedFunction);
   void update(const c10::QualifiedName& qn, bool toplevel);
   bool contains(const c10::QualifiedName& qn) const;
@@ -49,7 +47,7 @@ class TORCH_API BytecodeExportSet {
   }
 
  private:
-  std::map<c10::QualifiedName, ExportedFunction, Comparator> items_;
+  std::unordered_map<c10::QualifiedName, ExportedFunction> items_;
 };
 
 } // namespace jit
