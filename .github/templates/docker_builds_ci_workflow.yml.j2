@@ -1,0 +1,51 @@
+{% import 'common.yml.j2' as common %}
+
+{%- block name -%}
+# Template is at:    .github/templates/docker_builds_ci_workflow.yml.j2
+# Generation script: .github/scripts/generate_ci_workflows.py
+{%- endblock %}
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
+    paths:
+      - '.circleci/docker/**'
+      - '.github/workflows/generated-docker-builds.yml'
+{%- if is_scheduled %}
+  schedule:
+    - cron: !{{ is_scheduled }}
+{%- endif %}
+
+jobs:
+!{{ common.ciflow_should_run_job(ciflow_config) }}
+{% block build +%}
+  build:
+    runs-on: linux.2xlarge
+    needs: [!{{ ciflow_config.root_job_name }}]
+    strategy:
+      matrix:
+        docker_image_base:
+          {%- for docker_image in docker_images %}
+            - '!{{ docker_image }}'
+          {%- endfor %}
+    env:
+      DOCKER_IMAGE_BASE: '${{ matrix.docker_image_base }}'
+    steps:
+      !{{ common.setup_ec2_linux() }}
+      !{{ common.checkout_pytorch("recursive") }}
+      !{{ common.calculate_docker_image() }}
+      - name: Pull Docker image
+        run: |
+          !{{ common.pull_docker("${DOCKER_IMAGE}") }}
+      !{{ common.parse_ref() }}
+      !{{ common.teardown_ec2_linux() }}
+      - name: Hold runner for 2 hours or until ssh sessions have drained
+        # Always hold for active ssh sessions
+        if: always()
+        run: .github/scripts/wait_for_ssh_to_drain.sh
+      - name: Clean up docker images
+        if: always()
+        run: |
+          # Prune all of the docker images
+          docker system prune -af
+{%- endblock %}
