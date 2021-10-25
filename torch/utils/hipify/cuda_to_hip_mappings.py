@@ -7760,6 +7760,8 @@ CUDA_SPARSE_MAP = collections.OrderedDict(
     [
         ("cusparseStatus_t", ("hipsparseStatus_t", CONV_MATH_FUNC, API_SPARSE)),
         ("cusparseHandle_t", ("hipsparseHandle_t", CONV_MATH_FUNC, API_SPARSE)),
+        ("cuComplex", ("hipComplex", CONV_TYPE, API_SPARSE)),
+        ("cuDoubleComplex", ("hipDoubleComplex", CONV_TYPE, API_SPARSE)),
         (
             "CUSPARSE_POINTER_MODE_HOST",
             ("HIPSPARSE_POINTER_MODE_HOST", CONV_NUMERIC_LITERAL, API_SPARSE),
