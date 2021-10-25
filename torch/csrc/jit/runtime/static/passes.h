@@ -14,6 +14,10 @@ TORCH_API void ReplaceWithCopy(
     std::shared_ptr<torch::jit::Graph>& graph,
     bool outputs_are_immutable = true);
 
+void ReplaceWithMaybeCopy(
+    std::shared_ptr<torch::jit::Graph>& graph,
+    bool outputs_are_immutable = true);
+
 TORCH_API void EnableStaticRuntimeLayerNorm(
     std::shared_ptr<torch::jit::Graph>& graph);
 

@@ -103,6 +103,7 @@ void OptimizeGraph(
     // to exposed folders.
 #ifdef FBCODE_CAFFE2
     ReplaceWithCopy(graph);
+    ReplaceWithMaybeCopy(graph);
     FuseListUnpack(graph);
     FuseListUnpackV2(graph);
     EnableStaticRuntimeLayerNorm(graph);

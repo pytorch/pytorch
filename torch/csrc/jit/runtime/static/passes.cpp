@@ -329,6 +329,15 @@ TORCH_LIBRARY_FRAGMENT(static_runtime, m) {
       "static_runtime::flatten_copy.using_ints(Tensor self, int start_dim=0, int end_dim=-1) -> Tensor",
       c10::AliasAnalysisKind::PURE_FUNCTION));
   m.def(torch::schema(
+      "static_runtime::to_maybe_copy_out.prim_dtype(Tensor self, int? dtype=None, bool non_blocking=False, bool copy=False) -> (Tensor, bool)",
+      c10::AliasAnalysisKind::PURE_FUNCTION));
+  m.def(torch::schema(
+      "static_runtime::to_maybe_copy_out.dtype(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> (Tensor, bool)",
+      c10::AliasAnalysisKind::PURE_FUNCTION));
+  m.def(torch::schema(
+      "static_runtime::to_maybe_copy_out.other(Tensor self, Tensor other, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> (Tensor, bool)",
+      c10::AliasAnalysisKind::PURE_FUNCTION));
+  m.def(torch::schema(
       "static_runtime::to_copy.prim_dtype(Tensor self, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor",
       c10::AliasAnalysisKind::PURE_FUNCTION));
   m.def(torch::schema(
@@ -350,6 +359,9 @@ TORCH_LIBRARY_FRAGMENT(static_runtime, m) {
   m.def(torch::schema(
       "static_runtime::fused_equally_split(Tensor input, int num_split, int dim) -> ...",
       c10::AliasAnalysisKind::PURE_FUNCTION));
+  m.def(torch::schema(
+      "static_runtime::select_tensor(Tensor(a) a, Tensor(b) b, bool use_b) -> Tensor(a|b)",
+      c10::AliasAnalysisKind::FROM_SCHEMA));
 }
 
 void FuseSignLog1P(std::shared_ptr<torch::jit::Graph>& graph) {
@@ -425,6 +437,138 @@ void UseVariadicTupleUnpack(const std::shared_ptr<Graph>& graph) {
   }
 }
 
+// Out variants of ops cannot participate in memory planning if they
+// have outputs that alias inputs. For ops that either return their
+// input directly or copy it (most notably aten::to), we adopt the
+// following strategy instead of directly making them out variants so
+// that they can participate in memory planning anyway. Let `a` denote
+// the input Tensor to the op.
+//
+// 1) Pass `a` (and the other operator inputs) to a special
+// `static_runtime::$OP_maybe_copy_out` variant of the op. This op
+// returns a normal output Tensor (call it `b_out` as well as a
+// `did_copy` flag indicating whether the output should be used. If
+// `did_copy` is false, the value of `b_out` is unspecified. Note that
+// this operator is an ordinary out variant that is perfectly amenable
+// to memory planning.
+//
+// 2) Pass `a`, `b_out`, and `did_copy` to a special
+// `static_runtime::select_tensor` op, which returns `b_out` if
+// `did_copy` is true and `a` otherwise. Note that this operator does
+// not need to participate in memory planning because its output
+// always aliases its input.
+//
+// Here is an illustration:
+//
+//                        |
+// |----------------------+ a
+// |                      v
+// |    +------------------------------------+
+// |    |                                    |
+// |    | static_runtime::$OP_maybe_copy_out |
+// |    |                                    |
+// |    +------------------+--------+--------+
+// |                       |        |
+// +--------------+        | b_out  | did_copy
+//                | a      |        |
+//                v        v        v
+//      +------------------------------------+
+//      |                                    |
+//      |    static_runtime::select_tensor   |
+//      |                                    |
+//      +------------------+-----------------+
+//                         |
+//                         |
+//                         | either a or b_out
+//                         |
+//                         v
+
+void ReplaceWithMaybeCopy(
+    std::shared_ptr<torch::jit::Graph>& graph,
+    bool outputs_are_immutable) {
+  AliasDb db(graph);
+
+  // for ops that have overloads, match the schema
+  static const std::array<std::pair<c10::FunctionSchema, c10::Symbol>, 3> supported_schema =
+      {{{torch::schema(
+             "aten::to.prim_dtype(Tensor(a) self, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)"),
+         c10::Symbol::fromQualString("static_runtime::to_maybe_copy_out")},
+        {torch::schema(
+             "aten::to.dtype(Tensor(a) self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor(a)"),
+         c10::Symbol::fromQualString("static_runtime::to_maybe_copy_out")},
+        {torch::schema(
+             "aten::to.other(Tensor(a) self, Tensor other, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor(a)"),
+         c10::Symbol::fromQualString("static_runtime::to_maybe_copy_out")}}};
+
+  auto match_schema = [](const Node* node, c10::Symbol& out_matched_symbol) {
+    for (auto& schema : supported_schema) {
+      if (node->matches(schema.first)) {
+        out_matched_symbol = schema.second;
+        return true;
+      }
+    }
+    return false;
+  };
+
+  bool has_inplace_ops = HasInplaceOp(graph, db);
+
+  // old node, new node, select_tensor node
+  std::vector<std::tuple<Node*, Node*, Node*>> replacement;
+  for (auto* n : graph->nodes()) {
+    c10::Symbol new_symbol;
+    if (!match_schema(n, new_symbol)) {
+      continue;
+    }
+    DCHECK(n->outputs().size() == 1);
+
+    // Duplicate in-place ops guard from ReplaceWithCopy below.
+    auto* in = n->input(0);
+    if (has_inplace_ops && in->uses().size() > 1) {
+      continue;
+    }
+
+    auto* out = n->output();
+    if (!outputs_are_immutable && db.mayContainAlias({out}, graph->outputs())) {
+      continue;
+    }
+
+    // Add the did_copy flag to outputs.
+    auto* new_node = graph->create(new_symbol, n->outputs().size() + 1);
+    new_node->insertBefore(n);
+    for (auto* input : n->inputs()) {
+      new_node->addInput(input);
+    }
+    new_node->outputs().at(1)->setType(c10::BoolType::get());
+
+    static const auto select_tensor_symbol =
+        c10::Symbol::fromQualString("static_runtime::select_tensor");
+    auto* select_tensor_node = graph->create(select_tensor_symbol, 1);
+    select_tensor_node->insertBefore(n);
+    DCHECK_EQ(new_node->outputs().size(), 2);
+    select_tensor_node->addInput(in);
+    for (auto* output : new_node->outputs()) {
+      select_tensor_node->addInput(output);
+    }
+    replacement.emplace_back(n, new_node, select_tensor_node);
+  }
+
+  for (const auto& tup : replacement) {
+    auto* const old_node = std::get<0>(tup);
+    auto* const new_node = std::get<1>(tup);
+    auto* const select_tensor_node = std::get<2>(tup);
+
+    new_node->outputs()[0]->copyMetadata(old_node->output());
+    select_tensor_node->output()->copyMetadata(old_node->output());
+    old_node->replaceAllUsesWith(select_tensor_node);
+    old_node->destroy();
+  }
+#ifndef NDEBUG
+  graph->lint();
+  AliasDb db2(graph);
+  torch::jit::Lint(&db2);
+#endif
+}
+
 void ReplaceWithCopy(
     std::shared_ptr<torch::jit::Graph>& graph,
     bool outputs_are_immutable) {
@@ -442,36 +586,13 @@ void ReplaceWithCopy(
       {c10::Symbol::fromQualString("aten::flatten"),
        c10::Symbol::fromQualString("static_runtime::flatten_copy")}};
 
-  // for ops that have overloads, match the schema
-  const std::vector<std::pair<c10::FunctionSchema, c10::Symbol>> supported_schema = {
-      {torch::schema(
-           "aten::to.prim_dtype(Tensor(a) self, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)"),
-       c10::Symbol::fromQualString("static_runtime::to_copy")},
-      {torch::schema(
-           "aten::to.dtype(Tensor(a) self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor(a)"),
-       c10::Symbol::fromQualString("static_runtime::to_copy")},
-      {torch::schema(
-           "aten::to.other(Tensor(a) self, Tensor other, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor(a)"),
-       c10::Symbol::fromQualString("static_runtime::to_copy")}};
-
-  auto match_schema = [&supported_schema](
-                          const Node* node, c10::Symbol& out_matched_symbol) {
-    for (auto& schema : supported_schema) {
-      if (node->matches(schema.first)) {
-        out_matched_symbol = schema.second;
-        return true;
-      }
-    }
-    return false;
-  };
-
   bool has_inplace_ops = HasInplaceOp(graph, db);
   std::vector<std::pair<Node*, Node*>> replacement;
   for (auto* n : graph->nodes()) {
     c10::Symbol new_symbol;
     if (supported.count(n->kind()) && opIsRegistered(supported.at(n->kind()))) {
       new_symbol = supported.at(n->kind());
-    } else if (!match_schema(n, new_symbol)) {
+    } else {
       continue;
     }
     DCHECK(n->outputs().size() == 1);

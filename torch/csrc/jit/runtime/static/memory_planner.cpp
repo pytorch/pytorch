@@ -197,6 +197,11 @@ void MemoryPlanner::allocateManagedTensors() {
     void* src = static_cast<void*>(start + offset);
 
     for (auto* tensor : tensors) {
+      // NOTE: we have to do this check because of select_tensor,
+      // which may leave its output undefined.
+      if (!tensor->defined()) {
+        continue;
+      }
       tensor->storage().set_data_ptr_noswap(
           at::DataPtr(src, src, nullptr, tensor->device()));
       tensor->storage().set_nbytes(tensor_size);
@@ -251,6 +256,11 @@ void MemoryPlanner::deallocate() {
     const auto& tensors = ms.second;
     size_t max = ms.first;
     for (auto& tensor : tensors) {
+      // NOTE: we have to do this check because of to_maybe_copy_out,
+      // which may leave its output undefined.
+      if (!tensor->defined()) {
+        continue;
+      }
       size_t current_size =
           compute_aligned_tensor_size(tensor->storage().nbytes());
       tensor->storage().unsafeGetStorageImpl()->reset();

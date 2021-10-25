@@ -22,6 +22,7 @@ void createFusionGroups(Block* block, AliasDb* aliasDb, size_t min_size);
 void fuseStaticSubgraphs(std::shared_ptr<Graph> graph, size_t min_size) {
   Inline(*graph);
   ReplaceWithCopy(graph);
+  ReplaceWithMaybeCopy(graph);
   ConstantPropagation(graph);
   Canonicalize(graph);
   ConstantPropagation(graph);

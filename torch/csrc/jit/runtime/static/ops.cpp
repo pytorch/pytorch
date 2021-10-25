@@ -11,6 +11,7 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/SharedReduceOps.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
+#include <ATen/native/TensorConversions.h>
 #include <ATen/native/layer_norm.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/qembeddingbag.h>
@@ -1001,6 +1002,89 @@ REGISTER_OPERATOR_FUNCTOR(aten::pow, aten_pow, [](Node* n) -> SROperator {
   LogAndDumpSchema(n);
   return nullptr;
 });
+
+namespace {
+bool check_to_will_alias(ProcessedNode* p_node) {
+  const auto& self = p_node->Input(0).toTensor();
+  c10::optional<at::ScalarType> dtype;
+  c10::Layout layout = self.layout();
+  c10::Device device = self.device();
+  if (p_node->Input(1).isTensor()) {
+    const auto& other = p_node->Input(1).toTensor();
+    dtype = other.scalar_type();
+    layout = other.layout();
+    device = other.device();
+  } else {
+    dtype = p_node->Input(1).toOptional<at::ScalarType>();
+  }
+  const auto copy = p_node->Input(3).toBool();
+  c10::optional<c10::MemoryFormat> memory_format = c10::nullopt;
+  if (p_node->inputs().size() == 5) {
+    memory_format = p_node->Input(4).toOptional<c10::MemoryFormat>();
+  }
+
+  return !copy &&
+      at::native::to_will_alias(
+          self, dtype, layout, device, copy, memory_format);
+}
+
+void to_copy_functor(ProcessedNode* p_node) {
+  const auto& self = p_node->Input(0).toTensor();
+  // ignore input 3 (copy)
+  auto non_blocking = p_node->Input(2).toBool(); // non_blocking
+  // handle memory format
+  bool copy_strides = false;
+  c10::optional<c10::MemoryFormat> memory_format = c10::nullopt;
+  if (p_node->inputs().size() == 5) {
+    memory_format = p_node->Input(4).toOptional<c10::MemoryFormat>();
+  }
+  memory_format = memory_format.value_or(c10::MemoryFormat::Preserve);
+
+  if (p_node->Output(0).isNone()) {
+    // handle dtype, layout, and device
+    c10::optional<at::ScalarType> dtype;
+    c10::Layout layout = self.layout();
+    c10::Device device = self.device();
+    if (p_node->Input(1).isTensor()) {
+      const auto& other = p_node->Input(1).toTensor();
+      dtype = other.scalar_type();
+      layout = other.layout();
+      device = other.device();
+    } else {
+      dtype = p_node->Input(1).toOptional<at::ScalarType>();
+    }
+
+    if (memory_format == c10::MemoryFormat::Preserve) {
+      if (self.is_non_overlapping_and_dense()) {
+        memory_format = c10::nullopt;
+        copy_strides = true;
+      } else {
+        memory_format = self.suggest_memory_format();
+      }
+    }
+
+    // See Note [Explicit nullopt MemoryFormat argument]
+    // Can't use size {0} if memory_format is ChannelLast
+    p_node->Output(0) = at::detail::empty_cpu(
+        self.sizes(),
+        dtype,
+        layout,
+        self.device(),
+        c10::nullopt,
+        memory_format);
+  }
+
+  copy_strides = copy_strides ||
+      (memory_format == c10::MemoryFormat::Preserve &&
+       self.is_non_overlapping_and_dense());
+
+  auto& out_t = p_node->Output(0).toTensor();
+  fastResizeToZero(out_t);
+  at::native::to_copy_out(
+      out_t, self, non_blocking, copy_strides, memory_format);
+}
+} // namespace
+
 // out variant takes precedence over native
 // NB: This impl doesn't work for cpu->cuda copy/cast or vice versa.
 REGISTER_OPERATOR_FUNCTOR(
@@ -1010,60 +1094,64 @@ REGISTER_OPERATOR_FUNCTOR(
       // support 4- or 5-arg for adindexer/adfinder models
       // Keep TORCH_CHECK here because there is no alternative for fallback
       TORCH_CHECK(n->inputs().size() == 4 || n->inputs().size() == 5);
+      return to_copy_functor;
+    });
+
+REGISTER_OPERATOR_FUNCTOR(
+    static_runtime::to_maybe_copy_out,
+    aten_to_maybe_copy,
+    [](Node* n) -> SROperator {
+      // support 4- or 5-arg for adindexer/adfinder models
+      // Keep TORCH_CHECK here because there is no alternative for fallback
+      TORCH_CHECK(n->inputs().size() == 4 || n->inputs().size() == 5);
       return [](ProcessedNode* p_node) {
-        const auto& self = p_node->Input(0).toTensor();
-        // ignore input 3 (copy)
-        auto non_blocking = p_node->Input(2).toBool(); // non_blocking
-        // handle memory format
-        bool copy_strides = false;
-        c10::optional<c10::MemoryFormat> memory_format = c10::nullopt;
-        if (p_node->inputs().size() == 5) {
-          memory_format = p_node->Input(4).toOptional<c10::MemoryFormat>();
-        }
-        memory_format = memory_format.value_or(c10::MemoryFormat::Preserve);
-
-        if (p_node->Output(0).isNone()) {
-          // handle dtype, layout, and device
-          c10::optional<at::ScalarType> dtype;
-          c10::Layout layout = self.layout();
-          c10::Device device = self.device();
-          if (p_node->Input(1).isTensor()) {
-            const auto& other = p_node->Input(1).toTensor();
-            dtype = other.scalar_type();
-            layout = other.layout();
-            device = other.device();
-          } else {
-            dtype = p_node->Input(1).toOptional<at::ScalarType>();
+        if (check_to_will_alias(p_node)) {
+          if (p_node->Output(0).isNone()) {
+            p_node->Output(0) = at::Tensor();
           }
-
-          if (memory_format == c10::MemoryFormat::Preserve) {
-            if (self.is_non_overlapping_and_dense()) {
-              memory_format = c10::nullopt;
-              copy_strides = true;
-            } else {
-              memory_format = self.suggest_memory_format();
-            }
+          DCHECK(p_node->Output(0).isTensor());
+          p_node->Output(1) = false;
+        } else {
+          // need to keep Output(0) in a reasonable state!
+          if (p_node->Output(0).isTensor() &&
+              !p_node->Output(0).toTensor().defined()) {
+            p_node->Output(0) = IValue();
           }
-
-          // See Note [Explicit nullopt MemoryFormat argument]
-          // Can't use size {0} if memory_format is ChannelLast
-          p_node->Output(0) = at::detail::empty_cpu(
-              self.sizes(),
-              dtype,
-              layout,
-              self.device(),
-              c10::nullopt,
-              memory_format);
+          p_node->Output(1) = true;
+          to_copy_functor(p_node);
         }
+      };
+    });
 
-        copy_strides = copy_strides ||
-            (memory_format == c10::MemoryFormat::Preserve &&
-             self.is_non_overlapping_and_dense());
-
-        auto& out_t = p_node->Output(0).toTensor();
-        fastResizeToZero(out_t);
-        at::native::to_copy_out(
-            out_t, self, non_blocking, copy_strides, memory_format);
+REGISTER_OPERATOR_FUNCTOR(
+    static_runtime::select_tensor,
+    aten_select_tensor,
+    [](Node* n) -> SROperator {
+      TORCH_CHECK(n->inputs().size() == 3);
+      return [](ProcessedNode* p_node) {
+        const auto did_copy = p_node->Input(2).toBool();
+        DCHECK(p_node->Input(0).isTensor());
+        DCHECK(p_node->Input(1).isTensor() || p_node->Input(1).isNone());
+        // Check to avoid an unnecessary refcount bump. IValue in
+        // general doesn't do this check because it would probably
+        // result in code bloat and not hit often, but here we are
+        // likely to very often be assigning the same tensor.
+        if (did_copy) {
+          if (!p_node->Input(1).isNone() &&
+              (p_node->Output(0).isTensor() &&
+               p_node->Input(1).toTensor().is_same(
+                   p_node->Output(0).toTensor()))) {
+            return;
+          }
+          p_node->Output(0) = p_node->Input(1);
+        } else {
+          if (p_node->Output(0).isTensor() &&
+              p_node->Input(0).toTensor().is_same(
+                  p_node->Output(0).toTensor())) {
+            return;
+          }
+          p_node->Output(0) = p_node->Input(0);
+        }
       };
     });
 
@@ -1902,7 +1990,6 @@ REGISTER_OPERATOR_FUNCTOR(
     });
 
 namespace {
-
 void check_cat_no_zero_dim(const std::vector<at::Tensor>& tensors) {
   for (const auto i : c10::irange(tensors.size())) {
     auto& t = tensors[i];
@@ -1941,7 +2028,6 @@ REGISTER_OPERATOR_FUNCTOR(
     });
 
 namespace {
-
 // This template and its specialization help us avoid compiler warnings
 // about taking the absolute value of an unsigned type in signed_log1p
 template <class T>
