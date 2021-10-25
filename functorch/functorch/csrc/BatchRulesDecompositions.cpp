@@ -25,6 +25,12 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   OP_DECOMPOSE(arcsinh);
   OP_DECOMPOSE(arctan);
   OP_DECOMPOSE(arctanh);
+  OP_DECOMPOSE(atleast_1d);
+  OP_DECOMPOSE2(atleast_1d, Sequence);
+  OP_DECOMPOSE(atleast_2d);
+  OP_DECOMPOSE2(atleast_2d, Sequence);
+  OP_DECOMPOSE(atleast_3d);
+  OP_DECOMPOSE2(atleast_3d, Sequence);
   OP_DECOMPOSE(broadcast_tensors);
   OP_DECOMPOSE(broadcast_to);
   OP_DECOMPOSE(clip);
