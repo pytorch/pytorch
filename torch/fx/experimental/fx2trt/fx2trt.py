@@ -205,6 +205,16 @@ class TRTModule(torch.nn.Module):
         if not self.context.profiler:
             self.context.profiler = trt.Profiler()
 
+    def disable_profiling(self):
+        """
+        Disable TensorRT profiling.
+        """
+        self._check_initialized()
+
+        torch.cuda.synchronize()
+        del self.context
+        self.context = self.engine.create_execution_context()
+
 
 CONVERTERS = {}
 
