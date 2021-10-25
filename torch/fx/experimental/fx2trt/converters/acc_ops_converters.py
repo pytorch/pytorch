@@ -2,6 +2,7 @@ import math
 import operator
 from typing import Any, Tuple, Sequence, Union, List, Optional
 
+
 import numpy as np
 import tensorrt as trt
 import torch
@@ -12,6 +13,7 @@ from torch.fx.experimental.fx2trt.fx2trt import (
     torch_dtype_from_trt,
     get_dynamic_dims,
 )
+from torch.fx.immutable_collections import immutable_list
 
 ShapeType = Union[Sequence[int], trt.Dims]
 
@@ -672,10 +674,12 @@ def acc_ops_layer_norm(network, target, args, kwargs, name):
         network, scale_layer, beta_tensor.get_output(0), trt.ElementWiseOperation.SUM, name
     )
 
+
 @tensorrt_converter(acc_ops.softmax)
 def acc_ops_softmax(network, target, args, kwargs, name):
     input_val = kwargs["input"]
     dim = kwargs["dim"]
+    input_ranks = len(input_val.shape) + (1 if network.has_implicit_batch_dimension else 0)
 
     if not isinstance(input_val, trt.tensorrt.ITensor):
         raise RuntimeError(
@@ -692,20 +696,18 @@ def acc_ops_softmax(network, target, args, kwargs, name):
         return ret
 
     if dim is None:
-        dim = get_softmax_dim(
-            len(input_val.shape)
-            if not network.has_implicit_batch_dimension
-            else len(input_val.shape) + 1
-        )
+        dim = get_softmax_dim(input_ranks)
 
+    dim = dim % input_ranks
     if network.has_implicit_batch_dimension:
         assert dim != 0, "Can't apply softmax on batch dimension when it's implicit."
-        dim = (dim % (len(input_val.shape) + 1)) - 1
+        dim -= 1
 
     layer = network.add_softmax(input_val)
     layer.axes = 1 << dim
     layer.name = name
     return layer.get_output(0)
+
 
 @tensorrt_converter(acc_ops.tile)
 def acc_ops_tile(network, target, args, kwargs, name):
@@ -1145,6 +1147,10 @@ def acc_ops_unsqueeze(network, target, args, kwargs, name):
                            "of the TensorRT region!")
 
     dim = kwargs["dim"]
+    input_shape = input_val.shape
+    input_shape_size = len(input_val.shape) + 1 if network.has_implicit_batch_dimension else len(input_val.shape)
+    if dim < 0:
+        dim = dim % (input_shape_size + 1)
     if network.has_implicit_batch_dimension:
         assert dim != 0
         dim -= 1
@@ -1762,8 +1768,9 @@ def acc_ops_dequantize(network, target, args, kwargs, name):
         q_scale = qparams["scale"]
         q_zero_point = qparams["zero_point"]
         q_axis = qparams["axis"]
-        scale_shape = q_scale.shape
-        if not torch.equal(q_zero_point, torch.zeros(q_zero_point.shape, dtype=q_zero_point.dtype)):
+        assert isinstance(q_scale, immutable_list), "expected q_scale to be immutable_list got {}".format(type(q_scale))
+        scale_shape = (len(q_scale),)
+        if any(x != 0 for x in q_zero_point):
             raise RuntimeError(f"Only support zero_point == 0, get {q_zero_point}")
     else:
         raise RuntimeError("Unsupported qscheme in dequantize: {qscheme}")

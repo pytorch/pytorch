@@ -79,5 +79,8 @@ cc_library(
         "-std=c++11",
     ],
     visibility = ["//visibility:public"],
-    deps = [":gloo_headers"] + if_cuda([":gloo_cuda"]),
+    deps = [":gloo_headers"] + if_cuda(
+        [":gloo_cuda"],
+        [],
+    ),
 )

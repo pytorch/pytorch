@@ -54,8 +54,8 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
   export BUILD_SPLIT_CUDA=ON
 fi
 
-if [[ ${BUILD_ENVIRONMENT} == *"pure_torch"* || ${BUILD_ENVIRONMENT} == *"puretorch"* ]]; then
-  export BUILD_CAFFE2=OFF
+if [[ ${BUILD_ENVIRONMENT} == *"caffe2"* || ${BUILD_ENVIRONMENT} == *"onnx"* ]]; then
+  export BUILD_CAFFE2=ON
 fi
 
 if [[ ${BUILD_ENVIRONMENT} == *"paralleltbb"* ]]; then

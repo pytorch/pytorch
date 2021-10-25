@@ -374,9 +374,6 @@ filegroup(
             "aten/src/ATen/native/sparse/cuda/*.cpp",
             "aten/src/THC/*.cpp",
         ],
-        exclude = [
-            "aten/src/THC/THCStorage.cpp",  # included in aten/src/THC/THCGeneral.cpp
-        ],
     ),
 )
 

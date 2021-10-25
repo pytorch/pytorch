@@ -86,9 +86,6 @@ This describes the quantization related functions of the `torch` namespace.
 
 torch.Tensor (quantization related methods)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
->>>>>>> 76f04ad385 (Quantization docs: rewrite API reference to be more automated)
->>>>>>> 37fe4f87ce (Quantization docs: rewrite API reference to be more automated)
->>>>>>> af26f377de (Quantization docs: rewrite API reference to be more automated)
 
 Quantized Tensors support a limited subset of data manipulation methods of the
 regular full-precision tensor.
