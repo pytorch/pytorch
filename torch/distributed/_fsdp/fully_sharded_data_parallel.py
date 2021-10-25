@@ -371,7 +371,7 @@ class FullyShardedDataParallel(nn.Module):
             assert (
                 p._full_param_padded.shape[0] == expected_size  # type: ignore[attr-defined]
             ), (
-                f"Expected p._full_param_sharded to have size {expected_size} "
+                f"Expected p._full_param_sharded to have size {expected_size} "  # type: ignore[attr-defined]
                 f"but got {p._full_param_padded.shape[0]}"  # type: ignore[attr-defined]
             )
             # And should have storage freed in prev forward pass
