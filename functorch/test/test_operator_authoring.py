@@ -5,7 +5,7 @@ import numpy as np
 
 import torch
 from torch import fx
-from functorch import pointwise_operator
+from functorch.compile import pointwise_operator
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.jit_utils import JitTestCase
 import unittest
