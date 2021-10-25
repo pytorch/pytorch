@@ -110,6 +110,8 @@ struct C10_API FunctionalStorageImpl : public c10::StorageImpl {
   const Tensor& base();
   size_t generation() const;
 
+  ~FunctionalStorageImpl() override = default;
+
  private:
   at::functionalization::Alias alias_;
 };
