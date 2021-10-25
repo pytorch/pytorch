@@ -279,9 +279,11 @@ class TORCH_API StaticRuntime {
   // This interface only works if StaticModule was initialized
   // with a TorchScript module, otherwise use the above interface
   // IValueList should be a std::vector<IValue> (lvalue or rvalue)
-  template <class IValueList>
   c10::IValue operator()(
-      IValueList&& args,
+      const std::vector<c10::IValue>& args,
+      const std::unordered_map<std::string, c10::IValue>& kwargs);
+  c10::IValue operator()(
+      std::vector<c10::IValue>&& args,
       const std::unordered_map<std::string, c10::IValue>& kwargs);
 
   void display_nodes(
@@ -368,6 +370,11 @@ class TORCH_API StaticRuntime {
   bool isManagedOutputTensor(const IValue& ivalue);
 
  private:
+  template <typename IValueList>
+  c10::IValue run_impl(
+      IValueList&& args,
+      const std::unordered_map<std::string, c10::IValue>& kwargs);
+
   // helper method for copying input args/kwargs into inputs_
   void set_inputs(
       const std::vector<c10::IValue>& args,
