@@ -1315,6 +1315,21 @@ TEST_F(AtenLtcTsTensorTest, TestMeanInDimsKeepCast) {
   }
 }
 
+TEST_F(AtenLtcTsTensorTest, TestMeanInDimOut) {
+  torch::Tensor a = torch::rand({4, 4, 4}, torch::TensorOptions(torch::kFloat));
+  int rank = a.dim();
+  for (int dim = -rank; dim < rank; ++dim) {
+    torch::Tensor b = torch::empty({4, 4}, torch::TensorOptions(torch::kFloat));
+    torch::mean_out(b, a, {dim});
+    ForEachDevice([&](const torch::Device& device) {
+      torch::Tensor xla_a = CopyToDevice(a, device);
+      torch::Tensor xla_b = torch::empty({4, 4}, xla_a.options());
+      torch::mean_out(xla_b, xla_a, {dim});
+      AllClose(b, xla_b);
+    });
+  }
+}
+
 TEST_F(AtenLtcTsTensorTest, TestStd) {
   torch::Tensor a = torch::rand({4, 3, 4}, torch::TensorOptions(torch::kFloat));
   for (auto unbiased : {true, false}) {

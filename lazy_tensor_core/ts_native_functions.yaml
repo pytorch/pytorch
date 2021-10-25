@@ -21,6 +21,7 @@ full_codegen:
   - kl_div_backward
   - log2
   - mean
+  - mean.dim
   - mm
   - mv
   - native_layer_norm
