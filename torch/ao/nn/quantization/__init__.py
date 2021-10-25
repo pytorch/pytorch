@@ -1,1 +1,3 @@
-# dummy line to allow it to be checked in
+from torch.ao.nn.quantization import (
+    quantized,
+)
