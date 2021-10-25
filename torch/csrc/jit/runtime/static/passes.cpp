@@ -535,8 +535,7 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
   for (auto it = nodes.begin(); it != nodes.end(); ++it) {
     Node* node = *it;
     const std::string node_qual_string = node->kind().toQualString();
-    if (node_qual_string == "fb::sigrid_transforms" ||
-        node_qual_string == "fb::sigrid_transforms_torch_bind" ||
+    if (node_qual_string == "fb::sigrid_transforms_torch_bind" ||
         node_qual_string == "fb::gather_ranges_to_dense" ||
         node_qual_string == "fb::gather_ranges_to_dense_v2" ||
         node_qual_string == "fb::variadic_sigrid_transforms_torch_bind") {
@@ -591,7 +590,9 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
 void FuseListUnpackV2(std::shared_ptr<torch::jit::Graph>& graph) {
   const FastMap<c10::Symbol, c10::Symbol> unfused_to_fused = {
       {c10::Symbol::fromQualString("fb::equally_split"),
-       c10::Symbol::fromQualString("static_runtime::fused_equally_split")}};
+       c10::Symbol::fromQualString("static_runtime::fused_equally_split")},
+      {c10::Symbol::fromQualString("fb::sigrid_transforms"),
+       c10::Symbol::fromQualString("static_runtime::fused_sigrid_transforms")}};
 
   AliasDb alias_db(
       graph, /*isFrozen=*/false, /*enablePreciseTupleContainerAnalysis=*/true);
