@@ -376,6 +376,24 @@ LivenessMap GetLivenessMap(
     insert_all_pairs_in_liveness_map(outputs);
   };
 
+
+  // Hacky fixup for aliases: if a value is live, everything it points to or contains is live.
+  for (auto* v : values_in_creation_order) {
+    for (auto* v2: values_in_creation_order) {
+      if (mayTransitivelyContainOrPointTo(db, v, v2)) {
+        // Add v2 to liveness map for v and also for everything in liveness_map[v].
+        auto it = liveness_map.find(v);
+        if (it != liveness_map.end()) {
+          it->second.insert(v2);
+          for (auto *live_with_v : it->second) {
+            liveness_map[live_with_v].insert(v2);
+          }
+        }
+      }
+    }
+  }
+  GRAPH_DEBUG("LivenessMap: ", dumpLivenessMap(liveness_map));
+
   return liveness_map;
 };
 
