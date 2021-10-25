@@ -4,6 +4,7 @@
 
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/Exceptions.h>
+#include <c10/util/irange.h>
 
 #define CUDABLAS_POSINT_CHECK(FD, X)         \
   TORCH_CHECK(                               \
@@ -295,7 +296,7 @@ void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half)) {
       c, CUDA_R_16F, ldc, stridec,
       num_batches, CUDA_R_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
   } else {
-    for (int64_t i = 0; i < num_batches; ++i) {
+    for (const auto i : c10::irange(num_batches)) {
       at::cuda::blas::gemm<at::Half>(
         transa, transb,
         m, n, k,
