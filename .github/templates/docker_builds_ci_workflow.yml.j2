@@ -3,11 +3,12 @@
 {%- block name -%}
 # Template is at:    .github/templates/docker_builds_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
+name: !{{ build_environment }}
 {%- endblock %}
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
+    types: [opened, synchronize, reopened]
     paths:
       - '.circleci/docker/**'
       - '.github/workflows/generated-docker-builds.yml'
@@ -18,11 +19,9 @@ on:
 !{{ common.concurrency(build_environment) }}
 
 jobs:
-!{{ common.ciflow_should_run_job(ciflow_config) }}
 {% block build +%}
   build:
     runs-on: linux.2xlarge
-    needs: [!{{ ciflow_config.root_job_name }}]
     strategy:
       matrix:
         docker_image_base:
