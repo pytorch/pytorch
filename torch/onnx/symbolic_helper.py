@@ -926,6 +926,10 @@ class ScalarType(enum.IntEnum):
     COMPLEX64 = enum.auto()
     COMPLEX128 = enum.auto()
     BOOL = enum.auto()
+    QINT8 = enum.auto()
+    QUINT8 = enum.auto()
+    QINT32 = enum.auto()
+    BFLOAT16 = enum.auto()
 
 
 # This indicates each scalar type's corresponding
