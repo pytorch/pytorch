@@ -39,6 +39,9 @@ env:
   AWS_DEFAULT_REGION: us-east-1
   CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
   CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+{%- if build_with_debug %}
+  DEBUG: 1
+{%- endif %}
 !{{ common.concurrency(build_environment) }}
 
 jobs:

@@ -52,6 +52,9 @@ env:
   AWS_DEFAULT_REGION: us-east-1
   CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
   CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+{%- if build_with_debug %}
+  DEBUG: 1
+{%- endif %}
 {%- if cuda_version != "cpu" %}
   TORCH_CUDA_ARCH_LIST: "7.0"
 {%- endif %}

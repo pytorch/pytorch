@@ -145,6 +145,7 @@ class CIWorkflow:
     enable_doc_jobs: bool = False
     exclude_test: bool = False
     build_generates_artifacts: bool = True
+    build_with_debug: bool = False
     is_scheduled: str = ''
     num_test_shards: int = 1
     only_run_smoke_tests_on_pull_request: bool = False
@@ -247,11 +248,12 @@ WINDOWS_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="windows",
-        build_environment="periodic-win-vs2019-cuda11.1-py3",
+        build_environment="periodic-win-vs2019-cuda11.1-py3-debug",
         cuda_version="11.1",
         test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
         num_test_shards=2,
         is_scheduled="45 0,4,8,12,16,20 * * *",
+        build_with_debug=True,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_SCHEDULED, LABEL_CIFLOW_WIN, LABEL_CIFLOW_CUDA}
         ),
@@ -430,10 +432,11 @@ LINUX_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="linux",
-        build_environment="periodic-linux-xenial-cuda11.1-py3.6-gcc7",
+        build_environment="periodic-linux-xenial-cuda11.1-py3.6-gcc7-debug",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
         num_test_shards=2,
+        build_with_debug=True,
         is_scheduled="45 0,4,8,12,16,20 * * *",
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_SCHEDULED, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA}
