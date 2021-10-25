@@ -20,8 +20,8 @@ from .api import (
     ShardedTensorMetadata,
     TensorInitParams,
     TensorProperties,
-    load_with_process_group,
 )
+from .utils import load_with_process_group
 import torch.distributed as dist
 from torch.distributed import distributed_c10d
 
