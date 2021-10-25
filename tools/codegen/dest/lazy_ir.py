@@ -166,10 +166,10 @@ def gen_lazy_nativefunc_definition(func: NativeFunction, backend_index: BackendI
         meta_str = f"""auto out_meta = at::meta::{schema.aten_name}({', '.join(str(t.name) for t in all_types)});
     {meta_out}"""
     else:
-        meta_args = ", ".join([f"{t.name}" for t in all_types])
+        sig = ComputeShapeSignature(func)
         meta_str = f"""
-    auto out_shape = torch_lazy_tensors::ir::ops::compute_shape_{schema.base_name}({meta_args});
-    auto out_dtype = torch_lazy_tensors::ir::ops::compute_dtype_{schema.base_name}({meta_args});"""
+    auto out_shape = {sig.shape_call};
+    auto out_dtype = {sig.dtype_call};"""
 
     node_str = f"""auto node = torch::lazy::MakeNode<ir::ops::{schema.node_name}>({node_ctor_input_str}, out_dtype, out_shape);"""
 
@@ -183,8 +183,9 @@ def gen_lazy_nativefunc_definition(func: NativeFunction, backend_index: BackendI
         lazy_tensors.push_back(lazy_{first_tensor.name}.CreateFrom(torch::lazy::Value(node, i), out_dtype[i]));
     }}
     auto result = bridge::TupleAtenFromLtcTensors<{returns_length}>(lazy_tensors);"""
-    # TODO(alanwaketan): What if the operator has both the tuple output and inplace variant.
     if schema.name.name.inplace:
+        assert returns_length == 1, "We assumed there was no such case where an op is an in-place variant " \
+                                    "and has tuple outputs."
         bridge_str = f"""lazy_{first_tensor.name}.SetInPlaceIrValue(node);
     auto& result = {first_tensor.name};"""
 
@@ -206,6 +207,39 @@ def gen_lazy_nativefunc_definition(func: NativeFunction, backend_index: BackendI
 def sig_decl(func: NativeFunction, backend_index: BackendIndex) -> str:
     return kernel_signature(func, backend_index).decl("{}")
 
+class ComputeShapeSignature:
+    """
+    Here we use the base name as the suffix of the signature to avoid generating for in-place variants.
+    """
+    @method_with_native_function
+    def __init__(self, f: NativeFunction):
+        self.__schema = LazyIrSchema(f.func)
+        self.__dispatch_args = ', '.join([a.decl() for a in dispatcher.arguments(f.func)])
+        self.__call_args = ", ".join([f"{t.name}" for t in self.__schema.filtered_types()])
+
+    def __decl_suffix(self) -> str:
+        return f"{self.__schema.base_name}({self.__dispatch_args})"
+
+    def __call_suffix(self) -> str:
+        return f"{self.__schema.base_name}({self.__call_args})"
+
+    @property
+    def shape_decl(self) -> str:
+        return f"std::vector<std::vector<int64_t>> compute_shape_{self.__decl_suffix()}"
+
+    @property
+    def dtype_decl(self) -> str:
+        return f"std::vector<c10::ScalarType> compute_dtype_{self.__decl_suffix()}"
+
+    @property
+    def shape_call(self) -> str:
+        return f"torch_lazy_tensors::ir::ops::compute_shape_{self.__call_suffix()}"
+
+    @property
+    def dtype_call(self) -> str:
+        return f"torch_lazy_tensors::ir::ops::compute_dtype_{self.__call_suffix()}"
+
+
 @with_native_function_and_index
 def gen_lazy_shape_dtype_decl(f: NativeFunction, backend_index: BackendIndex) -> List[str]:
     sig = kernel_signature(f, backend_index)
@@ -219,9 +253,7 @@ def gen_lazy_shape_dtype_decl(f: NativeFunction, backend_index: BackendIndex) ->
     # Only generate shape/dtype fn for non-structured kernels,
     # since we just use the meta function for structured kernels
     if not f.structured and f.structured_delegate is None:
-        dispatch_args = ', '.join([a.decl() for a in dispatcher.arguments(f.func)])
-        # Here we use the base name to avoid generating for in-place variants.
-        return ["\n".join([f"std::vector<std::vector<int64_t>> compute_shape_{schema.base_name}({dispatch_args});",
-                           f"std::vector<c10::ScalarType> compute_dtype_{schema.base_name}({dispatch_args});"])]
+        sig = ComputeShapeSignature(f)
+        return ["\n".join([f"{sig.shape_decl};", f"{sig.dtype_decl};"])]
     else:
         return []
