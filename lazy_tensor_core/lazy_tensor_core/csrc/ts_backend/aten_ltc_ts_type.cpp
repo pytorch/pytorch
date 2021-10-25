@@ -1,3 +1,4 @@
+#include "ATen/MetaFunctions.h"
 #include <ATen/Operators.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/CPUFallback.h>
@@ -7,6 +8,7 @@
 #include "lazy_tensor_core/csrc/function_call_tracker.h"
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/ops/as_strided.h"
+#include "lazy_tensor_core/csrc/ops/cat.h"
 #include "lazy_tensor_core/csrc/tensor_aten_ops.h"
 #include "lazy_tensor_core/csrc/tensor_impl.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
@@ -18,6 +20,16 @@
 #include "lazy_tensors/computation_client/debug_macros.h"
 
 namespace torch_lazy_tensors {
+namespace ir{
+namespace ops{
+// TODO(whc) forward declare these since they aren't defined in the autogenned header;
+// this will be solved when moving cat() to codegen
+std::vector<std::vector<int64_t>> compute_shape_cat(at::TensorList tensors, int64_t dim);
+std::vector<c10::ScalarType> compute_dtype_cat(at::TensorList tensors, int64_t dim);
+}
+}
+
+
 namespace {
 
 void CheckSubOperandTypes(at::ScalarType type1, at::ScalarType type2) {
@@ -144,8 +156,18 @@ at::Tensor& LazyNativeFunctions::bernoulli_(
 
 at::Tensor LazyNativeFunctions::cat(at::TensorList tensors, int64_t dim) {
   LTC_FN_COUNTER("lazy::");
-  return bridge::AtenFromLtcTensor(
-      lazy_tensor_aten_ops::cat(bridge::GetLtcTensors(tensors), dim));
+  auto lazy_tensors = bridge::GetLtcTensors(tensors);
+  std::vector<torch::lazy::Value> values;
+  values.reserve(lazy_tensors.size());
+  for (auto& tensor: lazy_tensors){
+    values.emplace_back(tensor.GetIrValue());
+  }
+
+  auto out_shapes = torch_lazy_tensors::ir::ops::compute_shape_cat(tensors, dim);
+  auto out_dtypes = torch_lazy_tensors::ir::ops::compute_dtype_cat(tensors, dim);
+  auto node = torch::lazy::MakeNode<ir::ops::Cat>(values, dim, out_dtypes, out_shapes);
+  auto result = bridge::AtenFromLtcTensor(lazy_tensors[0].CreateFrom(torch::lazy::Value(node, 0), out_dtypes[0]));
+  return result;
 }
 
 at::Tensor LazyNativeFunctions::constant_pad_nd(const at::Tensor& self,

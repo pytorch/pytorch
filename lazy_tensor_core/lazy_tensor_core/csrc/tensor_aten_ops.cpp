@@ -683,38 +683,6 @@ std::vector<LazyTensor> broadcast_tensors(c10::ArrayRef<LazyTensor> tensors) {
   return tensors.front().MakeOutputTensors(node);
 }
 
-LazyTensor cat(c10::ArrayRef<LazyTensor> tensors, lazy_tensors::int64 dim) {
-  // Shape checks for cat:
-  // - If not empty, every tensor shape must be the same.
-  // - Empty tensor passes but is simply ignore in implementation,
-  //   e.g. ([2, 3, 5], [])
-  // - If empty dimension, other dimensions must be the same.
-  //   e.g. ([4, 0, 32, 32], [4, 2, 32, 32], dim=1) passes.
-  //   ([4, 0, 32, 32], [4, 2, 31, 32], dim=1) throws.
-  LTC_CHECK_GT(tensors.size(), 0);
-  std::vector<torch::lazy::Value> values;
-  std::vector<lazy_tensors::Shape> shapes;
-  for (size_t i = 0; i < tensors.size(); ++i) {
-    lazy_tensors::Shape tensor_shape = tensors[i].shape();
-    if (tensor_shape.rank() == 1 && tensor_shape.dimensions()[0] == 0) {
-      continue;
-    }
-    dim = Helpers::GetCanonicalDimensionIndex(dim, tensor_shape.rank());
-    tensor_shape.DeleteDimension(dim);
-    if (!shapes.empty()) {
-      LTC_CHECK(
-          lazy_tensors::ShapeUtil::Compatible(shapes.back(), tensor_shape))
-          << shapes.back() << " vs. " << tensor_shape;
-    }
-    shapes.push_back(tensor_shape);
-    values.push_back(tensors[i].GetIrValue());
-  }
-  if (values.empty()) {
-    return tensors[0];
-  }
-  return tensors[0].CreateFrom(torch::lazy::MakeNode<ir::ops::Cat>(values, dim));
-}
-
 LazyTensor ceil(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::Ceil(input.GetIrValue()));
 }

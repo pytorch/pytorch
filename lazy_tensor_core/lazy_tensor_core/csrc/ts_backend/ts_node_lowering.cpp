@@ -11,7 +11,6 @@
 #include "lazy_tensor_core/csrc/ops/as_strided.h"
 #include "lazy_tensor_core/csrc/ops/as_strided_view_update.h"
 #include "lazy_tensor_core/csrc/ops/cast.h"
-#include "lazy_tensor_core/csrc/ops/cat.h"
 #include "lazy_tensor_core/csrc/ops/constant.h"
 #include "lazy_tensor_core/csrc/ops/constant_pad_nd.h"
 #include "lazy_tensor_core/csrc/ops/convolution_backward_overrideable.h"
@@ -94,10 +93,6 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
       case at::aten::index_select: {
         return InferIndexSelect(torch::lazy::NodeCast<ir::ops::IndexSelect>(
             node, ir::OpKind(at::aten::index_select)));
-      }
-      case at::aten::cat: {
-        return InferCat(
-            torch::lazy::NodeCast<ir::ops::Cat>(node, ir::OpKind(at::aten::cat)));
       }
       case at::aten::convolution_backward_overrideable: {
         return InferConvolutionBackwardOverrideable(
@@ -227,10 +222,6 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
       std::vector<torch::jit::NamedValue> arguments;
       arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
       return LowerBuiltin(node, arguments);
-    }
-    if (node->op().op == at::aten::cat) {
-      return LowerCat(
-          torch::lazy::NodeCast<ir::ops::Cat>(node, ir::OpKind(at::aten::cat)));
     }
     if (node->op().op == at::aten::convolution_backward_overrideable) {
       return LowerConvolutionBackwardOverrideable(
@@ -365,18 +356,6 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
 
     return lazy_tensors::ShapeUtil::MakeTupleShape({
         scalarShape, std::move(scalarShape)});
-  }
-
-  static lazy_tensors::Shape InferCat(const ir::ops::Cat* node) {
-    const auto& operands = node->operands();
-    LTC_CHECK(!operands.empty());
-    lazy_tensors::Shape output_shape = ir::GetShapeFromTsOutput(operands[0]);
-    size_t cat_dimension_size = 0;
-    for (const torch::lazy::Output& operand : operands) {
-      cat_dimension_size += ir::GetShapeFromTsOutput(operand).dimensions(node->dim());
-    }
-    output_shape.set_dimensions(node->dim(), cat_dimension_size);
-    return output_shape;
   }
 
   static lazy_tensors::Shape InferConvolutionBackwardOverrideable(
@@ -580,23 +559,6 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
     arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
     arguments.emplace_back(node->dtype());
     return LowerBuiltin(at::aten::to, arguments);
-  }
-
-  TSOpVector LowerCat(const ir::ops::Cat* cat) {
-    std::vector<torch::jit::NamedValue> arguments;
-    std::vector<torch::jit::Value*> tensor_list;
-    const auto& operands = cat->operands();
-    LTC_CHECK(!operands.empty());
-    for (const torch::lazy::Output& operand : operands) {
-      tensor_list.emplace_back(loctx()->GetOutputOp(operand));
-    }
-    auto graph = function_->graph();
-    arguments.emplace_back(
-        graph
-            ->insertNode(graph->createList(tensor_list[0]->type(), tensor_list))
-            ->output());
-    arguments.emplace_back(cat->dim());
-    return LowerBuiltin(cat, arguments);
   }
 
   TSOpVector LowerConvolutionBackwardOverrideable(
