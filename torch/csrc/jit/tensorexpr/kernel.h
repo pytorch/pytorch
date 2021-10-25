@@ -103,10 +103,10 @@ class TORCH_API TensorExprKernel {
           {},
       bool pre_alloc = false)
       : TensorExprKernel(
-        subgraph,
-        SubgraphUtils::generateNameForGraph(subgraph),
-        custom_lowerings,
-        pre_alloc) {}
+            subgraph,
+            SubgraphUtils::generateNameForGraph(subgraph),
+            custom_lowerings,
+            pre_alloc) {}
 
   void run(Stack& stack);
   void runFast(
