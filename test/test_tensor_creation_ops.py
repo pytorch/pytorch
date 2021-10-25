@@ -18,7 +18,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, deviceCountAtLeast, onlyOnCPUAndCUDA,
     onlyCPU, largeTensorTest, precisionOverride, dtypes,
-    onlyCUDA, skipCPUIf, dtypesIfCUDA, dtypesIfCPU, skipMeta, get_all_device_types)
+    onlyCUDA, skipCPUIf, dtypesIfCUDA, dtypesIfCPU, get_all_device_types)
 from torch.testing._internal.common_dtype import (
     get_all_dtypes, get_all_math_dtypes, get_all_int_dtypes, get_all_fp_dtypes, get_all_complex_dtypes
 )
@@ -1525,7 +1525,6 @@ class TestTensorCreation(TestCase):
         self.assertTrue(grid_b.equal(grid_b2))
         self.assertTrue(grid_c.equal(grid_c2))
 
-    @skipMeta
     def test_meshgrid_vs_numpy(self, device):
         # Shapes to the random tensors. Each line is a test case, and
         # each list within that line is the shape of a single
@@ -2587,8 +2586,6 @@ class TestTensorCreation(TestCase):
                                    torch.tensor(1, dtype=torch.int16)).dtype)
         torch.set_default_dtype(saved_dtype)
 
-    # cannot call storage() on meta tensor
-    @skipMeta
     def test_empty_strided(self, device):
         for shape in [(2, 3, 4), (0, 2, 0)]:
             # some of these cases are pretty strange, just verifying that if as_strided
@@ -3864,10 +3861,6 @@ class TestAsArray(TestCase):
         check(device=device, dtype=dtype)
         check(device=device, dtype=dtype, copy=False)
 
-    # Skipping 'meta' devices, since there's no point in comparing their
-    # data pointer (which is basically the point here), since they all
-    # return 0.
-    @skipMeta
     @dtypes(*get_all_dtypes())
     def test_alias_from_tensor(self, device, dtype):
         self._test_alias_with_cvt(identity, device, dtype)
@@ -3877,8 +3870,6 @@ class TestAsArray(TestCase):
     def test_alias_from_numpy(self, device, dtype):
         self._test_alias_with_cvt(to_numpy, device, dtype)
 
-    # Skipping 'meta', since 'to_dlpack' does not work for them.
-    @skipMeta
     @dtypes(*get_all_dtypes(include_bool=False))
     def test_alias_from_dlpack(self, device, dtype):
         self._test_alias_with_cvt(to_dlpack, device, dtype)
@@ -3916,7 +3907,6 @@ class TestAsArray(TestCase):
                     check(same_dtype=False, dtype=other)
                     check(same_dtype=False, dtype=other, copy=True)
 
-    @skipMeta
     @dtypes(*get_all_dtypes())
     def test_copy_tensor(self, device, dtype):
         self._test_copy_with_cvt(identity, device, dtype)
@@ -3926,7 +3916,6 @@ class TestAsArray(TestCase):
     def test_copy_from_numpy(self, device, dtype):
         self._test_copy_with_cvt(to_numpy, device, dtype)
 
-    @skipMeta
     @dtypes(*get_all_dtypes(include_bool=False))
     def test_copy_from_dlpack(self, device, dtype):
         self._test_copy_with_cvt(to_dlpack, device, dtype)

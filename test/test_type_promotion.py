@@ -9,7 +9,7 @@ import torch
 from torch.testing._internal.common_utils import (TestCase, run_tests, load_tests,
                                                   TEST_NUMPY, torch_to_numpy_dtype_dict)
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests, onlyOnCPUAndCUDA,
-                                                        dtypes, dtypesIfCUDA, onlyCPU, expectedFailureMeta)
+                                                        dtypes, dtypesIfCUDA, onlyCPU)
 from torch.testing._internal.common_dtype import (
     get_all_dtypes, get_all_math_dtypes, get_all_int_dtypes, get_all_fp_dtypes
 )
@@ -561,7 +561,6 @@ class TestTypePromotion(TestCase):
         for dtype in get_all_dtypes():
             self.assertEqual(torch.promote_types(dtype, dtype), dtype)
 
-    @expectedFailureMeta
     @float_double_default_dtype
     def test_indexing_fail(self, device):
         # https://github.com/pytorch/pytorch/issues/28010

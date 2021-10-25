@@ -40,7 +40,7 @@ from torch.testing._internal.common_methods_invocations import mask_not_all_zero
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests, skipCUDAIfRocm,
                                                         onlyCPU, onlyCUDA, onlyOnCPUAndCUDA, dtypes, dtypesIfCUDA,
                                                         deviceCountAtLeast, skipCUDAIfCudnnVersionLessThan,
-                                                        skipCUDAIf, skipMeta)
+                                                        skipCUDAIf)
 from torch.testing._internal.common_dtype import get_all_dtypes
 
 import pickle
@@ -7875,7 +7875,6 @@ class TestAutogradDeviceType(TestCase):
             nnz = 0 if empty_nnz else 5
             _test(sparse_size + dense_size, len(sparse_size), nnz, device)
 
-    @skipMeta
     @dtypes(torch.double, torch.cdouble)
     def test_sparse_backward(self, device, dtype):
         class FixedGradientFunction(Function):
@@ -8328,7 +8327,6 @@ class TestAutogradDeviceType(TestCase):
                     param.grad = None
                 inp.grad = None
 
-    @skipMeta  # LSTM cell reuses output which was resized
     def test_LSTM_grad_and_gradgrad(self, device):
         hsize = 4
         inp = torch.rand(1, 3, hsize, device=device, dtype=torch.float64, requires_grad=True)
@@ -8336,7 +8334,6 @@ class TestAutogradDeviceType(TestCase):
             mod = torch.nn.LSTM(hsize, hsize, bias=bias).to(device).to(torch.float64)
             self._test_rnn_mod(mod, inp)
 
-    @skipMeta  # GRU cell reuses output which was resized
     def test_GRU_grad_and_gradgrad(self, device):
         hsize = 4
         inp = torch.rand(1, 3, hsize, device=device, dtype=torch.float64, requires_grad=True)

@@ -22,7 +22,7 @@ from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes,
      onlyCPU, skipCUDAIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, onlyOnCPUAndCUDA, dtypesIfCUDA,
-     onlyCUDA, skipCUDAVersionIn, skipMeta, skipCUDAIfNoCusolver)
+     onlyCUDA, skipCUDAVersionIn, skipCUDAIfNoCusolver)
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
     all_types, floating_types, floating_and_complex_types, get_all_dtypes, get_all_int_dtypes, get_all_complex_dtypes,
@@ -1530,7 +1530,6 @@ class TestLinalg(TestCase):
 
     # This test compares torch.linalg.norm, torch.linalg.matrix_norm and numpy.linalg.norm to
     # ensure that their matrix norm results match.
-    @skipMeta  # https://github.com/pytorch/pytorch/issues/54082
     @skipCUDAIfNoMagma
     @dtypes(torch.float, torch.double)
     @precisionOverride({torch.float32: 2e-5})
@@ -1595,7 +1594,6 @@ class TestLinalg(TestCase):
                                       ("aten::norm", "aten::linalg_vector_norm")):
             profile_and_check(f, x, kwargs, fn_name)
 
-    @skipMeta  # https://github.com/pytorch/pytorch/issues/53739
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
@@ -1650,7 +1648,6 @@ class TestLinalg(TestCase):
                 actual = torch.linalg.cond(input, p)
                 self.assertEqual(actual, expected)
 
-    @skipMeta  # https://github.com/pytorch/pytorch/issues/53739
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
@@ -1820,7 +1817,6 @@ class TestLinalg(TestCase):
                 result_n = np.linalg.norm(x_n, ord=ord)
                 self.assertEqual(result, result_n, msg=msg)
 
-    @skipMeta  # https://github.com/pytorch/pytorch/issues/54082
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double)
@@ -3929,7 +3925,6 @@ class TestLinalg(TestCase):
         run_test_skipped_elements((12, 3, 2), ind=1)
         run_test_skipped_elements((18, 3, 3, 1), ind=1)
 
-    @skipMeta  # See https://github.com/pytorch/pytorch/issues/53739
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
@@ -3940,7 +3935,6 @@ class TestLinalg(TestCase):
             a_inv = torch.linalg.tensorinv(a, ind=ind)
             self.assertEqual(a_inv.shape, a.shape[ind:] + a.shape[:ind])
 
-    @skipMeta  # See https://github.com/pytorch/pytorch/issues/53739
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)

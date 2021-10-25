@@ -8,7 +8,7 @@ import unittest
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM, TEST_WITH_SLOW
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, dtypes, onlyCUDA, skipCUDAIfRocm, skipMeta, ops)
+    (instantiate_device_type_tests, dtypes, onlyCUDA, skipCUDAIfRocm, ops)
 from torch.testing._internal.common_methods_invocations import \
     (foreach_unary_op_db, foreach_binary_op_db, foreach_pointwise_op_db, foreach_minmax_op_db)
 from torch.testing._internal.common_dtype import (
@@ -169,7 +169,6 @@ class TestForeach(TestCase):
     # are expected to return the same outputs, however, the outputs look unstable for torch.bfloat16 and torch.half.
     # log: https://ci.pytorch.org/jenkins/job/pytorch-builds/job/pytorch-linux-bionic-rocm4.2-py3.6-test1/2741/console
     @skipCUDAIfRocm
-    @skipMeta
     @ops(foreach_binary_op_db)
     def test_binary_op_tensorlists_fastpath(self, device, dtype, op):
         for N in N_values:
@@ -191,7 +190,6 @@ class TestForeach(TestCase):
         self._binary_test(dtype, inplace_op, inplace_ref, inputs, is_fastpath, is_inplace=True)
 
     @skipCUDAIfRocm
-    @skipMeta
     @ops(foreach_binary_op_db)
     def test_binary_op_scalar_fastpath(self, device, dtype, op):
         for N, scalar in itertools.product(N_values, Scalars):
@@ -230,7 +228,6 @@ class TestForeach(TestCase):
     # separating mixed scalarlist tests. By setting the first element of scalarlist to bool,
     # they are expected to throw bool sub error even in inplace test.
     @skipCUDAIfRocm
-    @skipMeta
     @ops(foreach_binary_op_db)
     def test_binary_op_scalarlist_fastpath(self, device, dtype, op):
         for N in N_values:
@@ -298,7 +295,6 @@ class TestForeach(TestCase):
         self._pointwise_test(
             dtype, inplace_op, inplace_ref, inputs, is_fastpath and disable_fastpath, is_inplace=True, values=values)
 
-    @skipMeta
     @ops(foreach_pointwise_op_db)
     def test_pointwise_op_fastpath(self, device, dtype, op):
         disable_fastpath = dtype in get_all_int_dtypes() + [torch.bool]
@@ -364,7 +360,6 @@ class TestForeach(TestCase):
         self._regular_unary_test(dtype, op, ref, inputs, is_fastpath)
         self._inplace_unary_test(dtype, inplace_op, inplace_ref, inputs, is_fastpath)
 
-    @skipMeta
     @ops(foreach_unary_op_db)
     def test_unary_fastpath(self, device, dtype, op):
         for N in N_values:
@@ -446,7 +441,6 @@ class TestForeach(TestCase):
     # note(mkozuki): this test case fails with Meta at least in my local environment.
     # The message was
     # `AssertionError: NotImplementedError("Could not run 'aten::_foreach_add.Scalar' with arguments from the 'Meta' backend.`
-    @skipMeta
     @dtypes(torch.float)
     @ops(foreach_binary_op_db)
     def test_binary_op_scalar_with_different_tensor_dtypes(self, device, dtype, op):
@@ -523,7 +517,6 @@ class TestForeach(TestCase):
                 with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
                     foreach_op_([tensor1], [tensor2])
 
-    @skipMeta
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not found")
     @dtypes(*get_all_dtypes())
     @ops(foreach_binary_op_db)

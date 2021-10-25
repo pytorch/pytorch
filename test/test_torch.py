@@ -44,7 +44,6 @@ from torch.testing._internal.common_device_type import (
     skipCUDAVersionIn,
     onlyCUDA, onlyCPU,
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
-    skipMeta,
     PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyOnCPUAndCUDA,
     expectedAlertNondeterministic, get_all_device_types)
 from typing import Dict, List, Tuple
@@ -7238,7 +7237,6 @@ else:
             for x in xs:
                 _test_helper(x, op, unary=True)
 
-    @skipMeta
     @onlyOnCPUAndCUDA
     @dtypes(*get_all_dtypes(include_bool=False))
     def test_dlpack_capsule_conversion(self, device, dtype):
@@ -7247,7 +7245,6 @@ else:
         z = from_dlpack(to_dlpack(x))
         self.assertEqual(z, x)
 
-    @skipMeta
     @onlyOnCPUAndCUDA
     @dtypes(*get_all_dtypes(include_bool=False))
     def test_dlpack_protocol_conversion(self, device, dtype):
@@ -7255,7 +7252,6 @@ else:
         z = from_dlpack(x)
         self.assertEqual(z, x)
 
-    @skipMeta
     @onlyOnCPUAndCUDA
     def test_dlpack_shared_storage(self, device):
         x = make_tensor((5,), device, torch.float64)
@@ -7263,7 +7259,6 @@ else:
         z[0] = z[0] + 20.0
         self.assertEqual(z, x)
 
-    @skipMeta
     @onlyCUDA
     @dtypes(*get_all_dtypes(include_bool=False))
     def test_dlpack_conversion_with_streams(self, device, dtype):
@@ -7282,7 +7277,6 @@ else:
         stream.synchronize()
         self.assertEqual(z, x)
 
-    @skipMeta
     @onlyCUDA
     @dtypes(*get_all_dtypes(include_bool=False))
     def test_dlpack_conversion_with_diff_streams(self, device, dtype):
@@ -7300,7 +7294,6 @@ else:
         stream_b.synchronize()
         self.assertEqual(z, x)
 
-    @skipMeta
     @onlyOnCPUAndCUDA
     @dtypes(*get_all_dtypes(include_bool=False))
     def test_dlpack_tensor_invalid_stream(self, device, dtype):
@@ -7308,7 +7301,6 @@ else:
             x = make_tensor((5,), device, dtype)
             x.__dlpack__(stream=object())
 
-    @skipMeta
     def test_dlpack_error_on_bool_tensor(self):
         x = torch.tensor([True], dtype=torch.bool)
         with self.assertRaises(RuntimeError):
@@ -7316,20 +7308,17 @@ else:
 
     # TODO: increase tests once NumPy supports the `__dlpack__` protocol
 
-    @skipMeta
     def test_dlpack_export_requires_grad(self):
         x = torch.zeros(10, dtype=torch.float32, requires_grad=True)
         with self.assertRaisesRegex(RuntimeError, r"require gradient"):
             x.__dlpack__()
 
-    @skipMeta
     def test_dlpack_export_is_conj(self):
         x = torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j])
         y = torch.conj(x)
         with self.assertRaisesRegex(RuntimeError, r"conjugate bit"):
             y.__dlpack__()
 
-    @skipMeta
     def test_dlpack_export_non_strided(self):
         x = torch.sparse_coo_tensor([[0]], [1], size=(1,))
         y = torch.conj(x)

@@ -38,7 +38,7 @@ except ImportError:
 #   compatible test classes and optionally doing the following:
 #
 #     - instantiating a version of the test class for each available device type
-#         (often the CPU, CUDA, and META device types)
+#         (often the CPU, and CUDA device types)
 #     - further instantiating a version of each test that's always specialized
 #         on the test class's device type, and optionally specialized further
 #         on datatypes or operators
@@ -421,15 +421,6 @@ class CPUTestBase(DeviceTypeTestBase):
     def _should_stop_test_suite(self):
         return False
 
-# The meta device represents tensors that don't have any storage; they have
-# all metadata (size, dtype, strides) but they don't actually do any compute
-class MetaTestBase(DeviceTypeTestBase):
-    device_type = 'meta'
-    _ignore_not_implemented_error = True
-
-    def _should_stop_test_suite(self):
-        return False
-
 class CUDATestBase(DeviceTypeTestBase):
     device_type = 'cuda'
     _do_cuda_memory_leak_check = True
@@ -483,11 +474,8 @@ def get_device_type_test_bases():
                 test_bases.append(CUDATestBase)
         else:
             test_bases.append(CPUTestBase)
-            test_bases.append(MetaTestBase)
     else:
         test_bases.append(CPUTestBase)
-        if not TEST_SKIP_NOARCH:
-            test_bases.append(MetaTestBase)
         if torch.cuda.is_available():
             test_bases.append(CUDATestBase)
 
@@ -785,12 +773,6 @@ class skipCUDAIf(skipIf):
 
     def __init__(self, dep, reason):
         super().__init__(dep, reason, device_type='cuda')
-
-# Skips a test on Meta if the condition is true.
-class skipMetaIf(skipIf):
-
-    def __init__(self, dep, reason):
-        super().__init__(dep, reason, device_type='meta')
 
 def _has_sufficient_memory(device, size):
     if torch.device(device).type == 'cuda':
@@ -1227,6 +1209,3 @@ def skipCUDAIfNoCusparseGeneric(fn):
 
 def skipCUDAIfNoCudnn(fn):
     return skipCUDAIfCudnnVersionLessThan(0)(fn)
-
-def skipMeta(fn):
-    return skipMetaIf(True, "test doesn't work with meta tensors")(fn)

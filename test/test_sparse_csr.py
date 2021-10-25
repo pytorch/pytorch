@@ -11,7 +11,7 @@ from torch.testing._internal.common_utils import \
     (IS_MACOS, IS_WINDOWS, TestCase, run_tests, load_tests, coalescedonoff)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoCusparseGeneric,
-     precisionOverride, skipMeta)
+     precisionOverride)
 from torch.testing._internal.common_dtype import floating_types, get_all_dtypes
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
@@ -106,7 +106,6 @@ class TestSparseCSR(TestCase):
             self.assertEqual(torch.tensor([0, 1, 0, 1], dtype=torch.int64, device=device), sparse.col_indices())
             self.assertEqual(torch.tensor([1, 2, 3, 4], dtype=dtype, device=device), sparse.values())
 
-    @skipMeta
     @dtypes(*get_all_dtypes())
     def test_empty(self, device, dtype):
         ns = [5, 2, 0]
@@ -127,7 +126,6 @@ class TestSparseCSR(TestCase):
             self.assertEqual(result.col_indices().dtype, torch.int64)
             self.assertEqual(result.values().dtype, dtype)
 
-    @skipMeta
     @dtypes(*get_all_dtypes())
     def test_empty_errors(self, device, dtype):
         with self.assertRaisesRegex(RuntimeError, "torch.empty: Only 2D sparse CSR tensors are supported."):
@@ -136,7 +134,6 @@ class TestSparseCSR(TestCase):
         with self.assertRaisesRegex(RuntimeError, "torch.empty: Only 2D sparse CSR tensors are supported."):
             torch.empty((2, 3, 4), dtype=dtype, device=device, layout=torch.sparse_csr)
 
-    @skipMeta
     @dtypes(*get_all_dtypes())
     def test_copy(self, device, dtype):
 
@@ -155,7 +152,6 @@ class TestSparseCSR(TestCase):
             run_test(shape, 0, index_dtype)
             run_test(shape, shape[0] * shape[1], index_dtype)
 
-    @skipMeta
     @dtypes(*get_all_dtypes())
     def test_copy_errors(self, device, dtype):
         for index_dtype in [torch.int32, torch.int64]:
@@ -174,7 +170,6 @@ class TestSparseCSR(TestCase):
             with self.assertRaisesRegex(RuntimeError, "only tensors with the same number of specified elements are supported."):
                 a.copy_(b)
 
-    @skipMeta
     @dtypes(*get_all_dtypes())
     def test_resize(self, device, dtype):
         for index_dtype in [torch.int32, torch.int64]:
@@ -196,7 +191,6 @@ class TestSparseCSR(TestCase):
             # resize to smaller shape trims specified elements
             self.assertEqual(a._nnz(), 5)
 
-    @skipMeta
     @dtypes(*get_all_dtypes())
     def test_resize_errors(self, device, dtype):
         for index_dtype in [torch.int32, torch.int64]:

@@ -46,7 +46,7 @@ from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, Criteri
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, precisionOverride, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, onlyCPU, \
     skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, skipCUDAIfRocmVersionLessThan, skipCUDAIfNotMiopenSuggestNHWC, \
-    onlyOnCPUAndCUDA, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, skipMeta, get_all_device_types
+    onlyOnCPUAndCUDA, deviceCountAtLeast, largeTensorTest, get_all_device_types
 from torch.nn import MultiheadAttention
 
 from hypothesis import given
@@ -17741,7 +17741,6 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             F.elu_(x)
 
-    @expectedFailureMeta  # https://github.com/pytorch/pytorch/issues/54897
     def test_hardswish_inplace_overlap(self, device):
         x = torch.randn((1, 6), device=device).expand((6, 6))
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
@@ -17883,7 +17882,6 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(len(w), 1)
             self.assertTrue("Complex modules are a new feature" in str(w[-1].message))
 
-    @skipMeta
     @dtypes(torch.float32, torch.float64)
     def test_module_to_empty(self, device, dtype):
         class MyModule(nn.Module):
@@ -17911,7 +17909,6 @@ class TestNNDeviceType(NNTestCase):
         m.to_empty(device='meta')
         m(input)
 
-    @skipMeta
     def test_skip_init(self, device):
         torch.manual_seed(1)
         m_initialized = torch.nn.Linear(5, 1)

@@ -431,7 +431,7 @@ def generate_tests(test_cls, constructor_arg_db):
 
 
 class TestModuleInit(TestCase):
-    _ignore_not_implemented_error = False
+    ...
 
 
 generate_tests(TestModuleInit, build_constructor_arg_db())

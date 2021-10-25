@@ -1192,13 +1192,6 @@ class CudaMemoryLeakCheck():
                     warnings.warn('{} leaked {} bytes ROCm memory on device {}'.format(
                         self.name, after - before, i), RuntimeWarning)
 
-@contextmanager
-def skip_exception_type(exc_type):
-    try:
-        yield
-    except exc_type as e:
-        raise unittest.SkipTest(f"not implemented: {e}") from e
-
 #  "min_satisfying_examples" setting has been deprecated in hypythesis
 #  3.56.0 and removed in hypothesis 4.x
 try:
@@ -1293,20 +1286,6 @@ def get_comparison_dtype(a, b):
 
     return compare_dtype
 
-# This implements a variant of assertRaises/assertRaisesRegex where we first test
-# if the exception is NotImplementedError, and if so just skip the test instead
-# of failing it.
-#
-# This is implemented by inheriting from the (private) implementation of
-# assertRaises from unittest.case, and slightly tweaking it for this new
-# behavior.  The year is 2021: this private class hierarchy hasn't changed since
-# 2010, seems low risk to inherit from.
-class AssertRaisesContextIgnoreNotImplementedError(unittest.case._AssertRaisesContext):
-    def __exit__(self, exc_type, exc_value, tb):
-        if exc_type is not None and issubclass(exc_type, NotImplementedError):
-            self.test_case.skipTest(f"not_implemented: {exc_value}")  # type: ignore[attr-defined]
-        return super().__exit__(exc_type, exc_value, tb)
-
 
 @contextmanager
 def set_warn_always_context(new_val: bool):
@@ -1359,10 +1338,6 @@ class TestCase(expecttest.TestCase):
     _do_cuda_memory_leak_check = False
     _do_cuda_non_default_stream = False
 
-    # When True, if a test case raises a NotImplementedError, instead of failing
-    # the test, skip it instead.
-    _ignore_not_implemented_error = False
-
     def __init__(self, method_name='runTest'):
         super().__init__(method_name)
 
@@ -1379,9 +1354,6 @@ class TestCase(expecttest.TestCase):
             self._do_cuda_non_default_stream &= getattr(test_method, '_do_cuda_non_default_stream', True)
             if self._do_cuda_non_default_stream and not IS_WINDOWS:
                 self.wrap_with_cuda_policy(method_name, self.enforceNonDefaultStream)
-
-            if self._ignore_not_implemented_error:
-                self.wrap_with_policy(method_name, lambda: skip_exception_type(NotImplementedError))
 
     def assertLeaksNoCudaTensors(self, name=None):
         name = self.id() if name is None else name
@@ -1401,10 +1373,6 @@ class TestCase(expecttest.TestCase):
         fullname = self.id().lower()  # class_name.method_name
         if TEST_CUDA and ('gpu' in fullname or 'cuda' in fullname):
             setattr(self, method_name, self.wrap_method_with_policy(test_method, policy))
-
-    def wrap_with_policy(self, method_name, policy):
-        test_method = getattr(self, method_name)
-        setattr(self, method_name, self.wrap_method_with_policy(test_method, policy))
 
     # A policy is a zero-argument function that returns a context manager.
     # We don't take the context manager directly as it may be necessary to
@@ -2000,30 +1968,6 @@ class TestCase(expecttest.TestCase):
             if id(obj) == id(elem):
                 return
         raise AssertionError("object not found in iterable")
-
-    # Reimplemented to provide special behavior when
-    # _ignore_not_implemented_error is True
-    def assertRaises(self, expected_exception, *args, **kwargs):
-        if self._ignore_not_implemented_error:
-            context: Optional[AssertRaisesContextIgnoreNotImplementedError] = \
-                AssertRaisesContextIgnoreNotImplementedError(expected_exception, self)  # type: ignore[call-arg]
-            try:
-                return context.handle('assertRaises', args, kwargs)  # type: ignore[union-attr]
-            finally:
-                # see https://bugs.python.org/issue23890
-                context = None
-        else:
-            return super().assertRaises(expected_exception, *args, **kwargs)
-
-    # Reimplemented to provide special behavior when
-    # _ignore_not_implemented_error is True
-    def assertRaisesRegex(self, expected_exception, expected_regex, *args, **kwargs):
-        if self._ignore_not_implemented_error:
-            context = AssertRaisesContextIgnoreNotImplementedError(  # type: ignore[call-arg]
-                expected_exception, self, expected_regex)
-            return context.handle('assertRaisesRegex', args, kwargs)  # type: ignore[attr-defined]
-        else:
-            return super().assertRaisesRegex(expected_exception, expected_regex, *args, **kwargs)
 
     # TODO: Support context manager interface
     # NB: The kwargs forwarding to callable robs the 'subname' parameter.
