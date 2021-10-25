@@ -1,7 +1,7 @@
 #pragma once
 #include <ATen/ExpandUtils.h>
-#include <ATen/native/TensorIterator.h>
 #include <ATen/native/CanUse32BitIndexMath.h>
+#include <ATen/native/TensorIterator.h>
 #include <ATen/core/List.h>
 #include <c10/util/irange.h>
 
