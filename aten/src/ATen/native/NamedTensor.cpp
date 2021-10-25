@@ -221,7 +221,7 @@ Tensor align_to(const Tensor& tensor, DimnameList order, int64_t ellipsis_idx) {
   };
 
   // Fill in the non-ellipsis dimensions
-  for (const auto order_idx : c10::irange(0U, order.size())) {
+  for (const auto order_idx : c10::irange(static_cast<int64_t>(order.size()))) {
     auto out_idx = order_idx;
     if (order_idx >= ellipsis_idx) {
       out_idx = order_idx + num_ellipsis_names;
