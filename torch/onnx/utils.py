@@ -106,7 +106,8 @@ def export(model, args, f, export_params=True, verbose=False, training=None,
            opset_version=None, _retain_param_name=None, do_constant_folding=True,
            example_outputs=None, strip_doc_string=None, dynamic_axes=None,
            keep_initializers_as_inputs=None, custom_opsets=None,
-           enable_onnx_checker=None, use_external_data_format=None):
+           enable_onnx_checker=None, use_external_data_format=None,
+           export_modules_as_functions=False):
     if operator_export_type is None:
         if torch.onnx.PYTORCH_ONNX_CAFFE2_BUNDLE:
             operator_export_type = OperatorExportTypes.ONNX_ATEN_FALLBACK
@@ -135,7 +136,8 @@ def export(model, args, f, export_params=True, verbose=False, training=None,
             operator_export_type=operator_export_type, opset_version=opset_version,
             do_constant_folding=do_constant_folding, example_outputs=example_outputs,
             dynamic_axes=dynamic_axes, keep_initializers_as_inputs=keep_initializers_as_inputs,
-            custom_opsets=custom_opsets, use_external_data_format=use_external_data_format)
+            custom_opsets=custom_opsets, use_external_data_format=use_external_data_format,
+            export_modules_as_functions=export_modules_as_functions)
 
 
 def _is_constant_tensor_list(node):
@@ -158,12 +160,14 @@ def _split_tensor_list_constants(g, block):
             for val in node.output().toIValue():
                 input = g.insertConstant(val)
                 input.node().moveBefore(node)
+                input.node().copyMetadata(node)
                 inputs.append(input)
 
             lc = (g.create("prim::ListConstruct", inputs)
                   .insertBefore(node)
                   .output()
                   .setType(ListType.ofTensors()))
+            lc.node().copyMetadata(node)
             node.output().replaceAllUsesWith(lc)
 
 
@@ -240,7 +244,9 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
         input_names = [] if input_names is None else input_names
         dynamic_axes = {} if dynamic_axes is None else dynamic_axes
         torch._C._jit_pass_onnx_set_dynamic_input_shape(graph, dynamic_axes, input_names)
+    torch._C._jit_pass_onnx_lint(graph)
     graph = torch._C._jit_pass_onnx(graph, operator_export_type)
+    torch._C._jit_pass_onnx_lint(graph)
     torch._C._jit_pass_lint(graph)
 
     torch._C._jit_pass_onnx_scalar_type_analysis(graph, True, _export_onnx_opset_version)
@@ -462,6 +468,7 @@ def _create_jit_graph(model, args):
         return graph, params, torch_out, None
     else:
         graph, torch_out = _trace_and_get_graph_from_model(model, args)
+        torch._C._jit_pass_onnx_lint(graph)
         state_dict = _unique_state_dict(model)
         params = list(state_dict.values())
         graph_inputs = list(graph.inputs())
@@ -640,55 +647,62 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
                                         operator_export_type, google_printer,
                                         val_keep_init_as_ip, custom_opsets, val_add_node_names)
 
-def _find_missing_ops_onnx_export(model, args, f, verbose=False, training=TrainingMode.EVAL,
-                                  input_names=None, output_names=None, opset_version=None, dynamic_axes=None):
+def unconvertible_ops(model, args, training=TrainingMode.EVAL, opset_version=None):
     r"""
-    This diagnostic tool runs your model with operator_export_type set to
+    Converts the model with operator_export_type set to
     OperatorExportTypes.ONNX_FALLTHROUGH once in order to get a list of
-    all the ops that are not supported/implemented by the current exporter
+    all the ops that are not supported/implemented by the exporter.
 
-    operator_export_type is set to OperatorExportTypes.ONNX_FALLTHROUGH by default
-        OperatorExportTypes.ONNX_FALLTHROUGH: If an op is not supported
-        in ONNX, fall through and export the operator as is, as a custom
-        ONNX op. Using this mode, the op can be exported and implemented by
-        the user for their runtime backend.
-        Example graph::
+    Args:
+        model: Same as corresponding arg to torch.onnx.export.
+        args: Same as corresponding arg to torch.onnx.export.
+        training: Same as corresponding arg to torch.onnx.export.
+        opset_version: Same as corresponding arg to torch.onnx.export.
 
-            graph(%0 : Float(2, 3, 4, strides=[12, 4, 1], requires_grad=0, device=cpu)):
-                %6 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
-                %4 : None = prim::Constant()
-                %5 : Float(2, 3, 4, strides=[12, 4, 1], requires_grad=0, device=cpu) = aten::cumsum(%0, %6, %4) # main.py:6:0
-                return (%5)
-
-        is exported as::
-
-            graph(%0 : Float(2, 3, 4, strides=[12, 4, 1], requires_grad=0, device=cpu)):
-                %6 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
-                %4 : None = prim::Constant()
-                %5 : Float(2, 3, 4, strides=[12, 4, 1], requires_grad=0, device=cpu) = aten::cumsum(%0, %6, %4) # main.py:6:0
-                return (%5)
-
-        In the above example, aten::cumsum in not implemented in opset 9, hence exporter falls
-        through and provides a list of unsupported ops, the result being:
-            Unsupported ops : [aten:cumsum]
+    Returns:
+        Tuple[torch._C.Graph, List[str]], where the list includes the names
+          of the unconvertible ops.
     """
     from torch.onnx.symbolic_helper import _default_onnx_opset_version, _set_opset_version
-    if opset_version is None:
-        opset_version = _default_onnx_opset_version
+    opset_version = opset_version or _default_onnx_opset_version
     _set_opset_version(opset_version)
-    # operator_export_type is set ro ONNX_FALLTHROUGH by default so that if an op is not supported
+    # operator_export_type is set to ONNX_FALLTHROUGH by default so that if an op is not supported
     # in ONNX, fall through will occur and export the operator as is, as a custom ONNX op.
     operator_export_type = OperatorExportTypes.ONNX_FALLTHROUGH
     with exporter_context(model, training):
         args = _decide_input_format(model, args)
-        graph, params_dict, torch_out = _model_to_graph(model, args, verbose, input_names,
-                                                        output_names, operator_export_type)
-    # The output "unsupported_ops" will contain the names of all the ops that are not supported in ONNX
+        graph, params_dict, torch_out = _model_to_graph(
+            model, args,
+            # So that if an op connot be converted to ONNX, it will be kept
+            # as-is rather than cause a failure.
+            operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH)
     unsupported_ops = list()
+    supported_namespaces = ("onnx", "prim")
     for node in graph.nodes():
-        if node.kind().split(":")[0] not in ["onnx", "prim"]:
+        if node.kind().split(":")[0] not in supported_namespaces:
             unsupported_ops.append(node.kind())
     return graph, unsupported_ops
+
+def _setup_trace_module_map(model, export_modules_as_functions):
+    def __setup_trace_module_map():
+        trace_module_map = {_m : torch.typename(_m) for _m in model.modules()}
+        torch.jit._trace._trace_module_map = trace_module_map
+        return trace_module_map
+
+    if isinstance(export_modules_as_functions, bool) and export_modules_as_functions:
+        trace_module_map = __setup_trace_module_map()
+        export_modules_as_functions = {v for k, v in trace_module_map.items()}
+    elif isinstance(export_modules_as_functions, set) and len(export_modules_as_functions) > 0:
+        trace_module_map = __setup_trace_module_map()
+        module_typenames = {torch.typename(v) if isinstance(v, (torch.nn.Module, type)) else v
+                            for v in export_modules_as_functions}
+        export_modules_as_functions = module_typenames
+    else:
+        export_modules_as_functions = None
+    return export_modules_as_functions
+
+def _reset_trace_module_map():
+    torch.jit._trace._trace_module_map = None
 
 def _export(model, args, f, export_params=True, verbose=False, training=None,
             input_names=None, output_names=None, operator_export_type=None,
@@ -696,7 +710,10 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             opset_version=None, do_constant_folding=True,
             dynamic_axes=None, keep_initializers_as_inputs=None,
             fixed_batch_size=False, custom_opsets=None, add_node_names=True,
-            use_external_data_format=None, onnx_shape_inference=True):
+            use_external_data_format=None, onnx_shape_inference=True,
+            export_modules_as_functions=False):
+
+    export_modules_as_functions = _setup_trace_module_map(model, export_modules_as_functions)
 
     if isinstance(model, torch.nn.DataParallel):
         raise ValueError("torch.nn.DataParallel is not supported by ONNX "
@@ -755,16 +772,25 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             if custom_opsets is None:
                 custom_opsets = {}
 
+            torch._C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
+            val_attr_to_name = {}  # type: ignore[var-annotated]
+            node_attr_to_name = {}  # type: ignore[var-annotated]
+            if export_modules_as_functions is not None:
+                # NOTE: cannot call DCE after this pass. DCE will remove function definition nodes.
+                val_attr_to_name, node_attr_to_name = torch._C._jit_pass_onnx_function_extraction(
+                    graph, export_modules_as_functions, list(params_dict.keys()))
             if export_params:
                 proto, export_map, val_use_external_data_format = graph._export_onnx(
                     params_dict, opset_version, dynamic_axes, defer_weight_export,
                     operator_export_type, not verbose, val_keep_init_as_ip, custom_opsets,
-                    val_add_node_names, val_use_external_data_format, model_file_location)
+                    val_add_node_names, val_use_external_data_format, model_file_location,
+                    val_attr_to_name, node_attr_to_name)
             else:
                 proto, export_map, val_use_external_data_format = graph._export_onnx(
                     {}, opset_version, dynamic_axes, False, operator_export_type,
                     not verbose, val_keep_init_as_ip, custom_opsets, val_add_node_names,
-                    val_use_external_data_format, model_file_location)
+                    val_use_external_data_format, model_file_location,
+                    val_attr_to_name, node_attr_to_name)
 
             if export_type == ExportTypes.PROTOBUF_FILE:
                 assert(len(export_map) == 0)
@@ -810,6 +836,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
     finally:
         assert __IN_ONNX_EXPORT
         __IN_ONNX_EXPORT = False
+        _reset_trace_module_map()
     return torch_out
 
 
