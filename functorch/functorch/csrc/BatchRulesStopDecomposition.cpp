@@ -72,6 +72,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   OP_DECOMPOSE(mH);
   OP_DECOMPOSE2(min, other );
   OP_DECOMPOSE2(moveaxis, intlist);
+  OP_DECOMPOSE2(movedim, int);
   OP_DECOMPOSE(msort);
   OP_DECOMPOSE(mT);
   OP_DECOMPOSE2(multiply, Tensor );
