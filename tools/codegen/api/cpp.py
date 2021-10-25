@@ -344,10 +344,9 @@ TYPE_CONVERSION = {
             "optional": "({}).toOptional<bool>(),",
             "list": "({}).toBoolList()->elements(),",
         },
-        BaseTy.layout: {
+        BaseTy.Layout: {
             "default": "({}).toLayout(),",
-            "optional": "({}).toOptional<bool>(),",
-            "list": "({}).toBoolList()->elements(),",
+            "optional": "({}).toOptional<at::Layout>(),",
         },
         BaseTy.Device: {
             "default": "({}).toDevice(),",
