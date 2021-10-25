@@ -150,7 +150,7 @@ class TRTModule(torch.nn.Module):
 
                     idx = self.input_binding_indices_in_order[i]
                     bindings[idx] = contiguous_inputs[i].data_ptr()
-
+                    # print(contiguous_inputs[i].shape)
                     if not self.engine.has_implicit_batch_dimension:
                         self.context.set_binding_shape(
                             idx, tuple(contiguous_inputs[i].shape)
