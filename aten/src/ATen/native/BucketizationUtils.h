@@ -126,10 +126,12 @@ inline void searchsorted_pre_check(
     input.sizes());
 
   ScalarType output_dtype = output.scalar_type();
-  TORCH_CHECK((output_dtype == ScalarType::Long && !out_int32) || (output_dtype == ScalarType::Int && out_int32),
-    "torch.searchsorted(): output tensor's dtype is wrong, it can only be Int(int32) or Long(int64) depending on ",
-    "whether out_int32 flag is True, but we got output tensor's dtype ", output_dtype, " and out_int32 flag is ", 
-    (out_int32 ? "True" : "False"));
+  TORCH_CHECK(
+      (output_dtype == ScalarType::Long && !out_int32) ||
+          (output_dtype == ScalarType::Int && out_int32),
+      "torch.searchsorted(): output tensor's dtype is wrong, it can only be Int(int32) or Long(int64) depending on ",
+      "whether out_int32 flag is True, but we got output tensor's dtype ", output_dtype,
+      " and out_int32 flag is ", (out_int32 ? "True" : "False"));
 
   if (out_int32) {
     TORCH_CHECK(boundaries.sizes().back() < INT_MAX,

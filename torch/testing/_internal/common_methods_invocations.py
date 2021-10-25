@@ -2668,33 +2668,19 @@ def sample_inputs_searchsorted(op_info, device, dtype, requires_grad):
 
     sizes = ((0,), (M,), (0, 0), (M, M), (0, 0, 0), (M, M, M))
     inputs = []
-    for size, split_last_dim, split_outermost_dim in product(sizes, [False, True], [False, True]):
-        if (split_last_dim or split_outermost_dim) and size[0] == 0:  # can't slice an empty tensor
-            continue
-
-        unsorted_tensor = make_arg(size)
-        input_tensor = make_arg(size)
-
-        if split_last_dim:
-            last_dim = len(unsorted_tensor.shape) - 1
-            unsorted_tensor = unsorted_tensor.narrow(last_dim, 1, 4)
-        if split_outermost_dim:
-            if len(unsorted_tensor.shape) == 1:  # redundant with split_last_dim when there's only one dimension
-                continue
-            unsorted_tensor, input_tensor = unsorted_tensor.narrow(0, 1, 2), input_tensor.narrow(0, 1, 2)
+    for size, noncontiguous, out_int32, right in product(sizes, [False, True], [False, True], [False, True]):
+        unsorted_tensor = make_arg(size, noncontiguous=noncontiguous)
+        input_tensor = make_arg(size, noncontiguous=noncontiguous)
         boundary_tensor, sorter = torch.sort(unsorted_tensor)
+        side = "right" if right else "left"
 
-        inputs.extend(SampleInput(boundary_tensor, args=(input_tensor,), kwargs=dict(out_int32=out_int32, right=right)) 
-                      for out_int32, right in product([False, True], [False, True]))
-        inputs.extend(SampleInput(boundary_tensor, args=(input_tensor,), kwargs=dict(out_int32=out_int32, side=side))
-                      for out_int32, side in product([False, True], ["left", "right"]))   
+        inputs.append(SampleInput(boundary_tensor, args=(input_tensor,), kwargs=dict(out_int32=out_int32, right=right)))
+        inputs.append(SampleInput(boundary_tensor, args=(input_tensor,), kwargs=dict(out_int32=out_int32, side=side)))
 
-        inputs.extend(
-            SampleInput(unsorted_tensor, args=(input_tensor,), kwargs=dict(out_int32=out_int32, right=right, sorter=sorter)) 
-            for out_int32, right in product([False, True], [False, True]))
-        inputs.extend(
-            SampleInput(unsorted_tensor, args=(input_tensor,), kwargs=dict(out_int32=out_int32, side=side, sorter=sorter)) 
-            for out_int32, side in product([False, True], ["left", "right"]))
+        inputs.append(
+            SampleInput(unsorted_tensor, args=(input_tensor,), kwargs=dict(out_int32=out_int32, right=right, sorter=sorter)))
+        inputs.append(
+            SampleInput(unsorted_tensor, args=(input_tensor,), kwargs=dict(out_int32=out_int32, side=side, sorter=sorter)))
     return inputs
 
 def sample_inputs_gradient(op_info, device, dtype, requires_grad):
@@ -11050,7 +11036,7 @@ op_db: List[OpInfo] = [
            )),
     OpInfo('searchsorted',
            dtypes=all_types(),
-           dtypesIfCPU=all_types_and(torch.bfloat16),
+           dtypesIfCPU=all_types_and(torch.bfloat16, torch.float16),
            dtypesIfCUDA=all_types(),
            sample_inputs_func=sample_inputs_searchsorted,
            supports_autograd=False,
