@@ -1,4 +1,5 @@
 import torch
+from torch import Tensor
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -19,10 +20,10 @@ class EmbeddingBag(nn.EmbeddingBag):
     """
     _FLOAT_MODULE = nn.EmbeddingBag
 
-    def __init__(self, num_embeddings, embedding_dim, max_norm=None, norm_type=2.0,
-                 scale_grad_by_freq=False, mode='mean', sparse=False, _weight=None,
-                 include_last_offset=False, padding_idx=None, qconfig=None, device=None,
-                 dtype=None) -> None:
+    def __init__(self, num_embeddings, embedding_dim, max_norm=None,
+                 norm_type=2.0, scale_grad_by_freq=False, mode='mean',
+                 sparse=False, _weight=None, include_last_offset=False,
+                 padding_idx=None, qconfig=None, device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
         super().__init__(num_embeddings, embedding_dim, max_norm, norm_type,
                          scale_grad_by_freq, mode, sparse, _weight,
@@ -34,14 +35,18 @@ class EmbeddingBag(nn.EmbeddingBag):
         self.qconfig = qconfig
         self.weight_fake_quant = qconfig.weight(factory_kwargs=factory_kwargs)
 
-    def forward(self, input):
-        return F.embedding_bag(input, self.weight_fake_quant(self.weight))
+    def forward(self, input, offsets=None, per_sample_weights=None) -> Tensor:
+        return F.embedding_bag(input, self.weight_fake_quant(self.weight), offsets,
+                               self.max_norm, self.norm_type,
+                               self.scale_grad_by_freq, self.mode, self.sparse,
+                               per_sample_weights, self.include_last_offset,
+                               self.padding_idx)
 
     @classmethod
     def from_float(cls, mod):
         r"""Create a qat module from a float module
 
-            Args: `mod` a float module, either produced by torch.quantization utilities
+            Args: `mod` a float module, either produced by torch.ao.quantization utilities
             or directly from user
         """
         assert type(mod) == cls._FLOAT_MODULE, ' qat.' + cls.__name__ + '.from_float only works for ' + \
