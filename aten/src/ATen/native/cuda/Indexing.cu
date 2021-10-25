@@ -209,12 +209,17 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
   if (indices.size() > (size_t)self.dim()) {
     TORCH_CHECK_INDEX(false, "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
   }
-  auto value_ = value.contiguous();
-  Tensor linearIndex, expandedValue, src;
+  Tensor linearIndex, src, expandedValue = value;
   int64_t nElemBefore, strideBefore, sliceSize;
   std::vector<int64_t> inversePerm;
   std::tie(linearIndex, src, nElemBefore, strideBefore, sliceSize, inversePerm) = makeLinearIndex(self, indices, !unsafe);
   int64_t num_indices = linearIndex.numel();
+
+  if (expandedValue.numel() < num_indices * nElemBefore * sliceSize) {
+    auto expanded_size = infer_size_dimvector(expandedValue.sizes(), linearIndex.sizes());
+    expandedValue = expandedValue.expand(expanded_size);
+  }
+  expandedValue = expandedValue.contiguous();
 
   if (num_indices > 0 && sliceSize > 0) {
       const bool permuted = !src.is_contiguous();
@@ -246,7 +251,10 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
         num_indices, false, 0, nbits);
       }
 
-      TORCH_INTERNAL_ASSERT(linearIndex.numel()*sliceSize*nElemBefore == value.numel(), "number of flattened indices did not match number of elements in the value tensor", linearIndex.numel()*sliceSize*nElemBefore, value.numel());
+      TORCH_INTERNAL_ASSERT(
+          linearIndex.numel()*sliceSize*nElemBefore == expandedValue.numel(),
+          "number of flattened indices did not match number of elements in the value tensor: ",
+          linearIndex.numel()*sliceSize*nElemBefore, " vs ", expandedValue.numel());
       const int UNROLL = 4;
       const int indices_per_block = 4;
       dim3 grid(ceil_div(num_indices, (int64_t) indices_per_block),
@@ -255,11 +263,11 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
       dim3 block(C10_WARP_SIZE, indices_per_block);
 
       AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
-      value_.scalar_type(), "indexing_backward", [&] {
+      expandedValue.scalar_type(), "indexing_backward", [&] {
         indexing_backward_kernel<scalar_t, UNROLL><<<grid, block, 0, stream>>>(
           sorted_indices.data_ptr<int64_t>(),
           orig_indices.data_ptr<int64_t>(),
-          value_.data_ptr<scalar_t>(),
+          expandedValue.data_ptr<scalar_t>(),
           src_.data_ptr<scalar_t>(),
           num_indices,
           sliceSize,
