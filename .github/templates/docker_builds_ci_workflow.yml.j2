@@ -19,17 +19,19 @@ on:
 !{{ common.concurrency(build_environment) }}
 
 jobs:
-{% block build +%}
-  build:
+{% block docker_build +%}
+  docker-build:
     runs-on: linux.2xlarge
     strategy:
       matrix:
-        docker_image_base:
+        include:
           {%- for docker_image in docker_images %}
-            - '!{{ docker_image }}'
+            - docker_image_base: '!{{ docker_image }}'
+              docker_image_short_name: '!{{ docker_image.split('/')[-1] }}'
           {%- endfor %}
     env:
       DOCKER_IMAGE_BASE: '${{ matrix.docker_image_base }}'
+    name: docker-build (${{ matrix.docker_image_short_name }})
     steps:
       !{{ common.setup_ec2_linux() }}
       !{{ common.checkout_pytorch("recursive") }}
