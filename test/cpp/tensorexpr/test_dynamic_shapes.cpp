@@ -18,6 +18,7 @@ using namespace torch::indexing;
 using namespace torch::jit::tensorexpr;
 
 TEST(DynamicShapes, SimpleGraph) {
+#ifdef TORCH_ENABLE_LLVM
   std::shared_ptr<Graph> graph = std::make_shared<Graph>();
   const auto graph_string = R"IR(
       graph(%x : Tensor,
@@ -79,9 +80,11 @@ TEST(DynamicShapes, SimpleGraph) {
     auto o = stack[0].toTensor();
     ASSERT_TRUE(at::allclose(o, ref));
   }
+#endif
 }
 
 TEST(DynamicShapes, GraphWith2InputsSameDims) {
+#ifdef TORCH_ENABLE_LLVM
   // The two inputs in this graph must have the same dims.
   std::shared_ptr<Graph> graph = std::make_shared<Graph>();
   const auto graph_string = R"IR(
@@ -153,9 +156,11 @@ TEST(DynamicShapes, GraphWith2InputsSameDims) {
     auto o = stack[0].toTensor();
     ASSERT_TRUE(at::allclose(o, ref));
   }
+#endif
 }
 
 TEST(DynamicShapes, GraphWith2InputsAndBroadcast) {
+#ifdef TORCH_ENABLE_LLVM
   // The second input to the graph has a dim of size 1 which should be
   // broadcasted in the at::mul op.
   std::shared_ptr<Graph> graph = std::make_shared<Graph>();
@@ -231,9 +236,11 @@ TEST(DynamicShapes, GraphWith2InputsAndBroadcast) {
     auto o = stack[0].toTensor();
     ASSERT_TRUE(at::allclose(o, ref));
   }
+#endif
 }
 
 TEST(DynamicShapes, GraphWithCatAndBroadcast) {
+#ifdef TORCH_ENABLE_LLVM
   std::shared_ptr<Graph> graph = std::make_shared<Graph>();
   const auto graph_string = R"IR(
       graph(%x : Float(10, 5, requires_grad=0, device=cpu),
@@ -329,6 +336,7 @@ TEST(DynamicShapes, GraphWithCatAndBroadcast) {
 
   auto o = stack[0].toTensor();
   ASSERT_TRUE(at::allclose(o, ref));
+#endif
 }
 
 } // namespace jit

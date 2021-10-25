@@ -763,7 +763,7 @@ void initTensorExprBindings(PyObject* module) {
           }),
           py::arg("g"),
           py::arg("custom_lowerings_str"),
-          py::arg("symbolic_shape_inputs"),
+          py::arg("symbolic_shape_inputs") = std::vector<int64_t>(),
           py::arg("pre_alloc") = false)
       .def(
           "run",
