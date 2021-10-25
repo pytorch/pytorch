@@ -12,7 +12,7 @@ import os
 import torch
 from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
     skipCUDANonDefaultStreamIf, TEST_WITH_ASAN, TEST_WITH_UBSAN, TEST_WITH_TSAN, \
-    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, DeterministicGuard, TEST_SKIP_NOARCH, \
+    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, DeterministicGuard, \
     _TestParametrizer, dtype_name, TEST_WITH_MIOPEN_SUGGEST_NHWC
 from torch.testing._internal.common_cuda import _get_torch_cuda_version, TEST_CUSPARSE_GENERIC
 from torch.testing._internal.common_dtype import get_all_dtypes
