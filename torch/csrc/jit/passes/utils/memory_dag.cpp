@@ -43,7 +43,15 @@ Element* MemoryDAG::fromIndex(unsigned x) {
   return indexToElementMap_[x].get();
 }
 
+bool MemoryDAG::mayAlias(Element* a, Element* b) const {
+  return mayAliasImpl(a, b);
+}
+
 bool MemoryDAG::mayAlias(const Element* a, const Element* b) const {
+  return mayAliasImpl(a, b);
+}
+
+bool MemoryDAG::mayAliasImpl(const Element* a, const Element* b) const {
   const auto& aMemLoc = getMemoryLocations(a);
   const auto& bMemLoc = getMemoryLocations(b);
 
@@ -51,8 +59,11 @@ bool MemoryDAG::mayAlias(const Element* a, const Element* b) const {
 }
 
 bool MemoryDAG::mayContainAlias(const Element* a, const Element* b) const {
-  return getAllContainedMemoryLocations(a).intersects(
-      getAllContainedMemoryLocations(b));
+  return mayContainAliasImpl(a, b);
+}
+
+bool MemoryDAG::mayContainAlias(Element* a, Element* b) const {
+  return mayContainAliasImpl(a, b);
 }
 
 const MemoryLocations& MemoryDAG::getAllContainedMemoryLocations(
@@ -99,6 +110,11 @@ void MemoryDAG::collectAllContainedMemoryLocationsImpl(
   }
 }
 
+bool MemoryDAG::mayContainAliasImpl(const Element* a, const Element* b) const {
+  return getAllContainedMemoryLocations(a).intersects(
+      getAllContainedMemoryLocations(b));
+}
+
 bool MemoryDAG::mayContainAlias(
     const at::ArrayRef<Element*> a,
     const at::ArrayRef<Element*> b) const {
@@ -117,29 +133,6 @@ bool MemoryDAG::mayContainAlias(
   }
 
   return all_a_mlocs.intersects(all_b_mlocs);
-}
-
-bool MemoryDAG::mayTransitivelyContainOrPointTo(
-    const Element* a,
-    const Element* b) const {
-  return getAllContainedMemoryLocations(a).test(b->index);
-}
-
-bool MemoryDAG::mayTransitivelyContainOrPointTo(
-    const Element* a,
-    at::ArrayRef<Element*> b) const {
-  const auto& all_a_mlocs = getAllContainedMemoryLocations(a);
-  return std::any_of(b.begin(), b.end(), [&all_a_mlocs](Element* b_elt) {
-    return all_a_mlocs.test(b_elt->index);
-  });
-}
-
-bool MemoryDAG::mayTransitivelyContainOrPointTo(
-    at::ArrayRef<Element*> a,
-    at::ArrayRef<Element*> b) const {
-  return std::any_of(a.begin(), a.end(), [this, b](Element* a_elt) {
-    return this->mayTransitivelyContainOrPointTo(a_elt, b);
-  });
 }
 
 void MemoryDAGBuilder::makePointerTo(Element* from, Element* to) {

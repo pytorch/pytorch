@@ -20,6 +20,7 @@
 #include <torch/csrc/jit/runtime/static/ops.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
+#include <iterator>
 #include <sstream>
 #include <stdexcept>
 
@@ -95,8 +96,7 @@ void OptimizeGraph(
         graph,
         c10::Symbol::fromQualString("fb::sigrid_transforms_torch_bind"),
         c10::Symbol::fromQualString(
-            "fb::variadic_sigrid_transforms_torch_bind"),
-        1 /* list_idx */);
+            "fb::variadic_sigrid_transforms_torch_bind"));
     FuseSignLog1P(graph);
 
     // TODO: we can avoid this guard by moving operations
@@ -104,6 +104,7 @@ void OptimizeGraph(
 #ifdef FBCODE_CAFFE2
     ReplaceWithCopy(graph);
     FuseListUnpack(graph);
+    FuseListUnpackV2(graph);
     EnableStaticRuntimeLayerNorm(graph);
 #endif
   }
@@ -135,7 +136,7 @@ c10::FunctionSchema RemoveSelfFromSchema(const c10::FunctionSchema& s) {
 std::vector<Value*> valueVecFromFastSet(const FastSet<const Value*>& s) {
   std::vector<Value*> result;
   result.reserve(s.size());
-  for (auto* v: s) {
+  for (auto* v : s) {
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
     result.emplace_back(const_cast<Value*>(v));
   }
@@ -766,9 +767,15 @@ std::vector<at::Tensor> StaticModule::operator()(
 }
 
 c10::IValue StaticModule::operator()(
-    c10::ArrayRef<c10::IValue> args,
+    const std::vector<c10::IValue>& args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
   return runtime()(args, kwargs);
+}
+
+c10::IValue StaticModule::operator()(
+    std::vector<c10::IValue>&& args,
+    const std::unordered_map<std::string, c10::IValue>& kwargs) {
+  return runtime()(std::move(args), kwargs);
 }
 
 StaticRuntime::StaticRuntime(const StaticModule& sm) : static_module_(sm) {
@@ -847,7 +854,7 @@ std::vector<at::Tensor> StaticRuntime::operator()(
 }
 
 void StaticRuntime::set_inputs(
-    c10::ArrayRef<c10::IValue> args,
+    const std::vector<IValue>& args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
   if (!kwargs.empty()) {
     // This is not ideal
@@ -883,8 +890,49 @@ void StaticRuntime::set_inputs(
   }
 }
 
+void StaticRuntime::set_inputs(
+    std::vector<IValue>&& args,
+    const std::unordered_map<std::string, c10::IValue>& kwargs) {
+  if (!kwargs.empty()) {
+    // This is not ideal
+    TORCH_CHECK(
+        static_module_.schema(),
+        "Schema is not available. Consider creating the Static Runtime "
+        "with StaticModule(const torch::jit::Module& m) instead.");
+    std::vector<c10::IValue> stack;
+    stack.reserve(inputs_.size());
+    if (static_module_.first_input_is_self()) {
+      stack.emplace_back(static_module_.module()._ivalue());
+    }
+    stack.insert(
+        stack.end(),
+        std::make_move_iterator(args.begin()),
+        std::make_move_iterator(args.end()));
+
+    static_module_.schema()->checkAndNormalizeInputs(stack, kwargs);
+    DCHECK_EQ(inputs_.size(), stack.size());
+    for (const auto i : c10::irange(stack.size())) {
+      Input(i) = std::move(stack[i]);
+    }
+  } else {
+    if (static_module_.first_input_is_self()) {
+      Input(0) = static_module_.module()._ivalue();
+      DCHECK_EQ(inputs_.size(), args.size() + 1);
+      for (const auto i : c10::irange(args.size())) {
+        Input(i + 1) = std::move(args[i]);
+      }
+    } else {
+      DCHECK_EQ(inputs_.size(), args.size());
+      for (const auto i : c10::irange(args.size())) {
+        Input(i) = std::move(args[i]);
+      }
+    }
+  }
+}
+
+template <typename IValueList>
 c10::IValue StaticRuntime::operator()(
-    c10::ArrayRef<c10::IValue> args,
+    IValueList&& args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
   // We assume inference workloads, so we do not need
   // autograd. Enabling this is a significant win on dispatcher
@@ -899,7 +947,7 @@ c10::IValue StaticRuntime::operator()(
     planner_->allocate();
   }
 
-  set_inputs(args, kwargs);
+  set_inputs(std::forward<IValueList>(args), kwargs);
 
   // NB: before optimizing the order of execution, ensure that the
   // memory optimization pass (LivenessMap) is
@@ -947,6 +995,14 @@ c10::IValue StaticRuntime::operator()(
   return std::move(*outputs_[0]);
 }
 
+template c10::IValue StaticRuntime::operator()<const std::vector<c10::IValue>&>(
+    const std::vector<c10::IValue>& args,
+    const std::unordered_map<std::string, c10::IValue>& kwargs);
+
+template c10::IValue StaticRuntime::operator()<std::vector<c10::IValue>&&>(
+    std::vector<c10::IValue>&& args,
+    const std::unordered_map<std::string, c10::IValue>& kwargs);
+
 namespace {
 
 std::string generate_latency_json(const std::string& label, double millis) {
@@ -965,7 +1021,7 @@ std::string generate_latency_json(const std::string& label, double millis) {
 } // namespace
 
 void StaticRuntime::benchmark(
-    c10::ArrayRef<c10::IValue> args,
+    const std::vector<c10::IValue>& args,
     const std::unordered_map<std::string, c10::IValue>& kwargs,
     const int warmup_runs,
     const int main_runs,
@@ -1058,7 +1114,7 @@ void StaticRuntime::benchmark(
 }
 
 float StaticRuntime::benchmark_model(
-    c10::ArrayRef<c10::IValue> args,
+    const std::vector<c10::IValue>& args,
     const std::unordered_map<std::string, c10::IValue>& kwargs,
     const int warmup_runs,
     const int main_runs) {
@@ -1129,7 +1185,7 @@ void display_pnode_info(const ProcessedNode& pnode) {
 }
 
 void StaticRuntime::display_nodes(
-    c10::ArrayRef<c10::IValue> args,
+    const std::vector<c10::IValue>& args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
   c10::InferenceMode mode;
   if (planner_) {
@@ -1161,7 +1217,7 @@ void StaticRuntime::display_nodes(
 }
 
 StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
-    c10::ArrayRef<c10::IValue> args,
+    const std::vector<c10::IValue>& args,
     const std::unordered_map<std::string, c10::IValue>& kwargs,
     const int warmup_runs,
     const int main_runs) {
@@ -1388,40 +1444,45 @@ ProcessedNode::ProcessedNode(
   outputs_ = std::make_unique<IValue[]>(outputs_size_);
 
   if (enable_out_variant) {
-    if ((fn_ = getOutOfPlaceOperation(node))) {
-      function_kind_ = FunctionKind::kOutVariant;
+    std::function<void(ProcessedNode*)> f = getOutOfPlaceOperation(node);
+    if (f) {
+      fn_ = {f, FunctionKind::kOutVariant};
       VLOG(1) << "Switch to out variant for node: " << PrintNode(node);
       return;
     }
   }
-  if ((fn_ = getNativeOperation(node))) {
-    function_kind_ = FunctionKind::kNativeFunction;
-    VLOG(1) << "Switch to native impl for node: " << PrintNode(node);
-    return;
+  {
+    std::function<void(ProcessedNode*)> f = getNativeOperation(node);
+    if (f) {
+      fn_ = {f, FunctionKind::kNativeFunction};
+      VLOG(1) << "Switch to native impl for node: " << PrintNode(node);
+      return;
+    }
   }
   {
     const Operator& op = node->getOperator();
-    fn_ = [node_op = op.getOperation(node)](ProcessedNode* pnode) mutable {
-      std::vector<IValue> stack;
-      Node* node = pnode->node_;
-      const size_t size = node->inputs().size();
-      stack.reserve(size + (hasVarArgs(node) ? 1 : 0));
-      for (const auto i : c10::irange(size)) {
-        stack.emplace_back(pnode->Input(i));
-      }
-      // Need to store the number of inputs in stack for variadic ops.
-      if (hasVarArgs(node)) {
-        stack.emplace_back(static_cast<int>(size));
-      }
+    std::function<void(ProcessedNode*)> f =
+        [node_op = op.getOperation(node)](ProcessedNode* pnode) mutable {
+          std::vector<IValue> stack;
+          Node* node = pnode->node_;
+          const size_t size = node->inputs().size();
+          stack.reserve(size + (hasVarArgs(node) ? 1 : 0));
+          for (const auto i : c10::irange(size)) {
+            stack.emplace_back(pnode->Input(i));
+          }
+          // Need to store the number of inputs in stack for variadic ops.
+          if (hasVarArgs(node)) {
+            stack.emplace_back(static_cast<int>(size));
+          }
 
-      node_op(stack);
+          node_op(stack);
 
-      DCHECK_EQ(stack.size(), node->outputs().size());
-      for (const auto i : c10::irange(node->outputs().size())) {
-        pnode->Output(i) = std::move(stack[i]);
-      }
-    };
-    function_kind_ = FunctionKind::kInterpreterFallback;
+          DCHECK_EQ(stack.size(), node->outputs().size());
+          for (const auto i : c10::irange(node->outputs().size())) {
+            pnode->Output(i) = std::move(stack[i]);
+          }
+        };
+    fn_ = {f, FunctionKind::kInterpreterFallback};
     VLOG(1) << "Fallback interpreter for node: " << PrintNode(node);
   }
 }
@@ -1449,12 +1510,12 @@ void ProcessedNode::run() {
         guard.before(get_op_name());
       }
     }
-    fn_(this);
+    fn_.f(this);
   } else {
-    fn_(this);
+    fn_.f(this);
   }
 #else
-  fn_(this);
+  fn_.f(this);
 #endif
 }
 

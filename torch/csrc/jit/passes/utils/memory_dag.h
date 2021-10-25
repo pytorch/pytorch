@@ -86,22 +86,13 @@ class TORCH_API MemoryDAG {
 
   // Do `a` and `b` potentially share a memory location?
   bool mayAlias(const Element* a, const Element* b) const;
+  bool mayAlias(Element* a, Element* b) const;
 
   // Does `a` hold reference to any memory that is stored in `b`, or vice versa?
   bool mayContainAlias(const Element* a, const Element* b) const;
+  bool mayContainAlias(Element* a, Element* b) const;
 
   bool mayContainAlias(
-      const at::ArrayRef<Element*> a,
-      const at::ArrayRef<Element*> b) const;
-
-  // Might there be any path from `a` to `b` in the contains-or-points-to graph?
-  // Compare to mayContainAlias, except the relationship is not symmetric.
-  bool mayTransitivelyContainOrPointTo(const Element* a, const Element* b)
-      const;
-  bool mayTransitivelyContainOrPointTo(
-      const Element* a,
-      const at::ArrayRef<Element*> b) const;
-  bool mayTransitivelyContainOrPointTo(
       const at::ArrayRef<Element*> a,
       const at::ArrayRef<Element*> b) const;
 
@@ -129,6 +120,9 @@ class TORCH_API MemoryDAG {
   Element* unsafeMakeFreshValue(const Value* v);
 
  private:
+  bool mayAliasImpl(const Element* a, const Element* b) const;
+  bool mayContainAliasImpl(const Element* contained, const Element* container)
+      const;
   const MemoryLocations& getAllContainedMemoryLocations(
       const Element* elem) const;
   void collectAllContainedMemoryLocationsImpl(
