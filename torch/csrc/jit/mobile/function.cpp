@@ -175,13 +175,6 @@ void Function::run(Stack& stack) {
   interp_state.run(stack);
 }
 
-c10::intrusive_ptr<c10::ivalue::Future> Function::runAsync(
-    Stack& stack,
-    TaskLauncher taskLauncher) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(false);
-  return {};
-}
-
 at::IValue Function::operator()(Stack& stack) {
   run(stack);
   return stack.front();

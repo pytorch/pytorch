@@ -18,9 +18,6 @@ class TORCH_API Function : public torch::jit::Function {
  public:
   explicit Function(c10::QualifiedName name);
   void run(Stack& stack) override;
-  c10::intrusive_ptr<c10::ivalue::Future> runAsync(
-      Stack& stack,
-      TaskLauncher taskLauncher = at::launch) override;
   at::IValue operator()(Stack& stack);
   void ensure_defined() override {}
   size_t num_inputs() const override;
