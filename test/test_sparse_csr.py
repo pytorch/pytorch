@@ -877,7 +877,7 @@ class TestSparseCSR(TestCase):
         not _check_cusparse_triangular_solve_available(),
         "cuSparse Generic API SpSV is not available"
     )
-    @dtypes(*floating_and_complex_types())
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
     def test_sparse_triangular_solve(self, device, dtype):
