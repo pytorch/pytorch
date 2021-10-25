@@ -634,6 +634,8 @@ TEST(StaticRuntime, IndividualOps_to) {
     }
     testStaticRuntime(to_script_other, args2);
     testStaticRuntime(to_script_alias, {a});
+    testStaticRuntime(to_script_memory_planning_fail, {a, a});
+    testStaticRuntime(to_script_fails_managed_output_check, {a, a});
 
     // dynamic shapes
     testStaticRuntime(to_script_dtype, args0, {a2, b, c, d, e});

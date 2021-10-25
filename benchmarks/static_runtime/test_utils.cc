@@ -222,7 +222,14 @@ void testStaticRuntime(
       }
       runtime.check_for_memory_leak();
       // first run
+      VLOG(2) << "enable_out_variant: " << enable_out_variant;
+      VLOG(2) << "manage_output_tensors: " << manage_output_tensors;
+      VLOG(2) << "args: " << args;
+      VLOG(2) << "args2: " << args;
+      VLOG(2) << "expect: " << expect;
+      VLOG(2) << "actual: " << expect;
       compareResults(expect, actual, use_allclose, use_equalnan);
+      VLOG(2) << "first run comparison done";
       if (manage_output_tensors) {
         actual = IValue();
         runtime.deallocateOutputTensors();
@@ -233,7 +240,9 @@ void testStaticRuntime(
         expect = test_context->getExpected(args2);
         actual = runtime(args2, {});
         runtime.check_for_memory_leak();
+        VLOG(2) << "comparing with args2";
         compareResults(expect, actual, use_allclose, use_equalnan);
+        VLOG(2) << "second run comparison done";
         if (manage_output_tensors) {
           actual = IValue();
           runtime.deallocateOutputTensors();
@@ -244,7 +253,9 @@ void testStaticRuntime(
         actual = runtime(args, {});
         runtime.check_for_memory_leak();
         // third run
+        VLOG(2) << "comparing third run";
         compareResults(expect, actual, use_allclose, use_equalnan);
+        VLOG(2) << "third run comparison done";
         if (manage_output_tensors) {
           actual = IValue();
           runtime.deallocateOutputTensors();
@@ -255,7 +266,9 @@ void testStaticRuntime(
         // and allocate managed tensors.
         actual = runtime(args, {});
         runtime.check_for_memory_leak();
+        VLOG(2) << "comparing second run with same args";
         compareResults(expect, actual, use_allclose, use_equalnan);
+        VLOG(2) << "second run comparison done";
         if (manage_output_tensors) {
           actual = IValue();
           runtime.deallocateOutputTensors();

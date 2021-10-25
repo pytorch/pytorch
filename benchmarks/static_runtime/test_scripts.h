@@ -303,6 +303,20 @@ const auto to_script_alias = R"JIT(
       return (c)
 )JIT";
 
+const auto to_script_fails_managed_output_check = R"JIT(
+  def forward(self, a, b):
+    d = a.half() * b.half()
+    e = d.float()
+    return e
+)JIT";
+
+const auto to_script_memory_planning_fail = R"JIT(
+  def forward(self, a, b):
+    d = a.half() * b.half()
+    e = d.float().relu()
+    return e
+)JIT";
+
 const auto detach_script_0 = R"JIT(
   def forward(self, input: Tensor):
       a = input.detach()
