@@ -170,10 +170,6 @@ class TORCH_API StaticModule {
   using DefInfo = std::pair<int, int>;
 
  public:
-  std::vector<at::Tensor> operator()(const std::vector<at::Tensor>& inps);
-
-  // This interface only works if StaticModule was initialized
-  // with a TorchScript module, otherwise use the above interface
   c10::IValue operator()(
       const std::vector<c10::IValue>& args,
       const std::unordered_map<std::string, c10::IValue>& kwargs);
@@ -274,11 +270,6 @@ class TORCH_API StaticRuntime {
 
   C10_DISABLE_COPY_AND_ASSIGN(StaticRuntime);
 
-  std::vector<at::Tensor> operator()(const std::vector<at::Tensor>& inps);
-
-  // This interface only works if StaticModule was initialized
-  // with a TorchScript module, otherwise use the above interface
-  // IValueList should be a std::vector<IValue> (lvalue or rvalue)
   c10::IValue operator()(
       const std::vector<c10::IValue>& args,
       const std::unordered_map<std::string, c10::IValue>& kwargs);
