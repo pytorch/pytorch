@@ -917,7 +917,8 @@
   result: auto_linear
 
 - name: linalg_matrix_exp(Tensor self) -> Tensor
-  self: matrix_exp_backward(self, grad)
+  self: linalg_matrix_exp_differential(self, grad, /*adjoint*/ true)
+  result: linalg_matrix_exp_differential(self_p, self_t, /*adjoint*/ false)
 
 - name: max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), keepdim)
