@@ -353,7 +353,7 @@ class FullyShardedDataParallel(nn.Module):
         # as needed. The storage may contain padding elements so that it is
         # evenly divisible by world_size, although these padding elements will
         # be removed before the relevant computation.
-        if p._is_sharded and not hasattr(p, '_full_param_padded'):  # type: ignore[attr-defined]
+        if p._is_sharded and not hasattr(p, "_full_param_padded"):  # type: ignore[attr-defined]
             # Only need to create attribute if this is the first forward pass.
             # Note that this assumes compute_device and compute_dtype won't
             # change throughout the training. If this assumption breaks in the
@@ -365,15 +365,17 @@ class FullyShardedDataParallel(nn.Module):
                 dtype=self.compute_dtype,
             )
             _free_storage(p._full_param_padded)  # type: ignore[attr-defined]
-        elif p._is_sharded:
+        elif p._is_sharded:  # type: ignore[attr-defined]
             # Should be appropriate size
             expected_size = p.numel() * self.world_size
             assert (
-                p._full_param_padded.shape[0] == expected_size
-            ), f"Expected p._full_param_sharded to have size {expected_size} but got {p._full_param_padded.shape[0]}"
+                p._full_param_padded.shape[0] == expected_size  # type: ignore[attr-defined]
+            ), (
+                f"Expected p._full_param_sharded to have size {expected_size} "
+                f"but got {p._full_param_padded.shape[0]}"  # type: ignore[attr-defined]
+            )
             # And should have storage freed in prev forward pass
-            _assert_storage_freed(p._full_param_sharded)
-
+            _assert_storage_freed(p._full_param_sharded)  # type: ignore[attr-defined]
 
     def _set_is_root(self) -> None:
         """If ``True``, implies that no other :class:`FullyShardedDataParallel`
@@ -842,6 +844,7 @@ def _free_storage(data: torch.Tensor) -> None:
             data.storage_offset() == 0
         ), "The tensor is not the sole occupant of the storage."
         data.storage().resize_(0)  # type: ignore[attr-defined]
+
 
 def _assert_storage_freed(data: torch.Tensor):
     """
