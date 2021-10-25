@@ -11410,6 +11410,13 @@ op_db: List[OpInfo] = [
                 "TestJit",
                 "test_variant_consistency_jit",
             ),
+            # This test cannot handle a callable passed to `distance_function`. If we would use
+            # `distance_function=None`, the test would pass fine.
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestNormalizeOperators",
+                "test_normalize_operator_exhaustive",
+            ),
         ),
     )
 ]
