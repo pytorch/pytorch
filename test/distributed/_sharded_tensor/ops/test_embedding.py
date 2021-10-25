@@ -10,6 +10,7 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
+    run_tests,
 )
 from torch.testing._internal.distributed._sharded_tensor import (
     ShardedTensorTestBase,
@@ -45,7 +46,7 @@ class TestShardedEmbedding(ShardedTensorTestBase):
 
         # Run sharded computation
         torch.manual_seed(self.rank)  # inputs different on each rank
-        inp = torch.randint(num_embeddings, tuple(input_size)).cuda(self.rank)
+        inp = torch.randint(0, num_embeddings, tuple(input_size)).cuda(self.rank)
         sharded_output = sharded_embedding(inp)
 
         # Run local computation
@@ -85,3 +86,6 @@ class TestShardedEmbedding(ShardedTensorTestBase):
             self._run_sharded_embedding(spec, [8, 6, 5, 4], 19, 11)
             self._run_sharded_embedding(spec, [6, 7, 6], 21, 11)
             self._run_sharded_embedding(spec, [4], 21, 11)
+
+if __name__ == '__main__':
+    run_tests()

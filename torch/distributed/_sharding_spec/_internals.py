@@ -149,4 +149,4 @@ def get_chunked_dim_size(dim_size, split_size, idx):
     Returns:
         An int indicating the dim size of the chunk.
     """
-    return min(dim_size, split_size * (idx + 1)) - split_size * idx
+    return max(min(dim_size, split_size * (idx + 1)) - split_size * idx, 0)
