@@ -249,7 +249,7 @@ void gels_batched_cublas(const Tensor& a, Tensor& b, Tensor& infos) {
 inline static Tensor column_major_identity_matrix_like(const Tensor& self) {
   auto size = self.sizes();
   auto size_slice = IntArrayRef(size.data(), size.size()-1);
-  return at::ones(size_slice, self.options()).diag_embed().transpose(-2, -1);
+  return at::ones(size_slice, self.options()).diag_embed().mT();
 }
 
 template <typename scalar_t>

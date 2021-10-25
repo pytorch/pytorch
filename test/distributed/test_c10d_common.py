@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: distributed"]
+
 import copy
 import os
 import sys
@@ -757,6 +759,17 @@ class PythonProcessGroupTest(MultiProcessTestCase):
     def test_get_backend_name(self):
         dpg = DummyProcessGroup(0, 1)
         self.assertEqual("Dummy", dpg.name())
+
+    def test_backend_class_attr(self):
+        dist.Backend.register_backend(
+            "dummy",
+            PythonProcessGroupTest.create_dummy
+        )
+        self.assertEqual(dist.Backend.DUMMY, "DUMMY")
+        self.assertEqual(
+            dist.Backend._plugins["DUMMY"],
+            PythonProcessGroupTest.create_dummy
+        )
 
     @staticmethod
     def create_dummy(store, rank, size, timeout):
