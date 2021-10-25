@@ -101,11 +101,14 @@ const std::string shape_compute_functions =
             out[infer_dim] = numel // newsize
           return out
 
-        def view(self: List[int], sizes: List[int]):
+        def numel(sizes: List[int]):
           numel = 1
-          for elem in self:
+          for elem in sizes:
             numel *= elem
-          return infer_size_impl(sizes, numel)
+          return numel
+
+        def view(self: List[int], sizes: List[int]):
+          return infer_size_impl(sizes, numel(self))
 
         def view_one_unused(self: List[int], sizes: List[int], *, implicit: bool=False):
           return view(self, sizes)
@@ -193,6 +196,26 @@ const std::string shape_compute_functions =
         def max_pool2d_with_indices(input: List[int], kernel_size: List[int], stride: List[int], padding: List[int], dilation: List[int], ceil_mode: bool):
           out = max_pool2d(input, kernel_size, stride, padding, dilation, ceil_mode)
           return (out, out)
+
+        def upsample_nearest2d(input: List[int], output_size: Optional[List[int]], scale_factors: Optional[List[float]]):
+          out: List[int] = []
+          out.append(input[0])
+          out.append(input[1])
+          if output_size is not None:
+            assert scale_factors is None, "Must specify exactly one of output_size and scale_factors"
+            assert len(output_size) == 2
+            out.append(output_size[0])
+            out.append(output_size[1])
+            return out
+
+          if scale_factors is not None:
+            assert output_size is None, "Must specify exactly one of output_size and scale_factors"
+            assert len(scale_factors) == 2
+            out.append(int(input[2] * scale_factors[0]))
+            out.append(int(input[3] * scale_factors[1]))
+            return out
+          assert 0, "Either output_size or scale_factors must be presented"
+
     )"
     R"(
 
@@ -288,6 +311,53 @@ const std::string shape_compute_functions =
           out = _copy(self)
           out[dim] = (len + step - 1) // step
           return out
+
+        def check_cat_no_zero_dim(tensors: List[List[int]]):
+          for tensor in tensors:
+            assert(len(tensor) > 0)
+
+        def legacy_cat_wrap_dim(dim: int, tensor_sizes: List[List[int]]):
+          out_dim : Optional[int] = None
+          for size in tensor_sizes:
+            if len(size) != 0 and size != [0] and out_dim is not None:
+              out_dim = maybe_wrap_dim(dim, len(size))
+          if out_dim is None:
+            out_dim = dim
+          return out_dim
+
+        def should_skip(tensor: List[int]):
+          return numel(tensor) == 0 and len(tensor) == 1
+
+        def check_cat_shape_except_dim(first: List[int], second: List[int], dimension: int, index: int):
+          first_dims = len(first)
+          second_dims = len(second)
+          assert first_dims == second_dims, "Tensors must have same number of dimensions"
+          for dim in range(0, first_dims):
+            if dim != dimension:
+              assert first[dim] == second[dim], "Sizes of tensors must match except in dimension"
+
+        def cat(tensors: List[List[int]], dim: int):
+          check_cat_no_zero_dim(tensors)
+          dim = legacy_cat_wrap_dim(dim, tensors)
+          assert len(tensors) > 0
+          not_skipped_tensor: Optional[List[int]] = None
+          for tensor in tensors:
+            if not should_skip(tensor):
+              not_skipped_tensor = tensor
+          if not_skipped_tensor is None:
+            return [0]
+
+          cat_dim_size = 0
+
+          for i in range(len(tensors)):
+            tensor = tensors[i]
+            if not should_skip(tensor):
+              check_cat_shape_except_dim(not_skipped_tensor, tensor, dim, i)
+              cat_dim_size = cat_dim_size + tensor[dim]
+
+          result_size = _copy(not_skipped_tensor)
+          result_size[dim] = cat_dim_size
+          return result_size
 
         def select(self: List[int], dim: int, index: int):
           ndim = len(self)
@@ -511,7 +581,11 @@ const std::string shape_compute_functions =
             for elem in input:
               out.append(elem)
             return out
-          slice_numel = multiply_integers(input[start_dim:end_dim - start_dim + 1])
+          slice_numel = 1
+          for i in range(start_dim, end_dim - start_dim + 1):
+            slice_numel *= input[i]
+          # TODO: use slicing when slice optimization has landed
+          # slice_numel = multiply_integers(input[start_dim:end_dim - start_dim + 1])
           shape: List[int] = []
           for i in range(start_dim):
             shape.append(input[i])
@@ -519,6 +593,12 @@ const std::string shape_compute_functions =
           for i in range(end_dim + 1, len(input)):
             shape.append(input[i])
           return shape
+
+        def quantized_prepacked_conv2d(input: List[int], conv2dOpContext: Any):
+          assert isinstance(conv2dOpContext, __torch__.torch.classes.quantized.Conv2dPackedParamsBase)
+          (weight, bias, stride, padding, dilation, groups) = unchecked_cast(Tuple[List[int], Optional[List[int]], List[int], List[int], List[int], int], ops.quantized.conv2d_unpack_sizes(conv2dOpContext))
+          return conv2d(input, weight, bias, stride, padding, dilation, groups)
+
     )"
 #ifdef USE_XNNPACK
     R"(
@@ -556,6 +636,10 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::mul.Scalar(Tensor self, Scalar other) -> Tensor", "unary"},
       {"aten::div.Tensor(Tensor self, Tensor other) -> Tensor", "broadcast"},
       {"aten::div.Scalar(Tensor self, Scalar other) -> Tensor", "unary"},
+      {"aten::sub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor", "broadcast"},
+      {"aten::sub_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)", "broadcast"},
+      {"aten::sub.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor", "unary"},
+      {"aten::sub_.Scalar(Tensor(a!) self, Scalar other, Scalar alpha=1) -> Tensor(a!)", "unary"},
       {"aten::contiguous(Tensor(a) self, *, MemoryFormat memory_format=contiguous_format) -> Tensor(a)", "unary"},
       {"aten::gt.Tensor(Tensor self, Tensor other) -> Tensor", "broadcast"},
       {"aten::rsub.Tensor(Tensor self, Scalar other, Scalar alpha=1) -> Tensor", "unary"},
@@ -605,6 +689,7 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor", "batch_norm"},
       {"aten::conv3d(Tensor input, Tensor weight, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] dilation=1, int groups=1) -> Tensor", "conv3d"},
       {"aten::flatten.using_ints(Tensor(a) self, int start_dim=0, int end_dim=-1) -> Tensor(a)", "flatten"},
+      {"aten::cat(Tensor[] tensors, int dim=0) -> Tensor", "cat"},
       {"aten::relu(Tensor self) -> Tensor", "unary"},
       {"aten::permute(Tensor(a) self, int[] dims) -> Tensor(a)", "permute"},
       {"aten::view(Tensor(a) self, int[] size) -> Tensor(a)", "view"},
@@ -612,8 +697,13 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)", "expand_one_unused"},
       {"aten::mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", "mean_dim"},
       {"aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor", "addmm"},
+      {"aten::upsample_nearest2d.vec(Tensor input, int[]? output_size, float[]? scale_factors) -> (Tensor)", "upsample_nearest2d"},
       {"aten::quantize_per_tensor(Tensor self, float scale, int zero_point, ScalarType dtype) -> Tensor", "unary"},
+      {"aten::quantize_per_tensor.tensor_qparams(Tensor self, Tensor scale, Tensor zero_point, ScalarType dtype) -> Tensor", "unary"},
       {"aten::dequantize(Tensor self) -> Tensor", "unary"},
+      {"quantized::conv2d.new(Tensor qx, __torch__.torch.classes.quantized.Conv2dPackedParamsBase packed_weight, float output_scale, int output_zero_point) -> Tensor", "quantized_prepacked_conv2d"},
+      {"quantized::conv2d_relu.new(Tensor qx, __torch__.torch.classes.quantized.Conv2dPackedParamsBase packed_weight, float output_scale, int output_zero_point) -> Tensor", "quantized_prepacked_conv2d"},
+      {"quantized::add(Tensor qa, Tensor qb, float scale, int zero_point) -> Tensor qc", "broadcast"},
 #ifdef USE_XNNPACK
       {"prepacked::conv2d_clamp_run(Tensor X, __torch__.torch.classes.xnnpack.Conv2dOpContext W_prepack) -> Tensor Y", "prepacked_conv2d_clamp_run"},
       {"prepacked::linear_clamp_run(Tensor X, __torch__.torch.classes.xnnpack.LinearOpContext W_prepack) -> Tensor Y", "prepacked_linear_clamp_run"},
