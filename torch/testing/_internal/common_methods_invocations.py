@@ -8280,8 +8280,6 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_broadcast_python_scalar'),
         ),
     ),
-    # `softmax` supports different dtypes based on whether `dtype` argument,
-    # is passed or not. Hence two OpInfo entries, one with dtype and other without.
     BinaryUfuncInfo('logical_and',
                 ref=np.logical_and,
                 dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -8297,6 +8295,8 @@ op_db: List[OpInfo] = [
                 dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                 sample_inputs_func=sample_inputs_logical_binaryops,
                 supports_autograd=False),
+    # `softmax` supports different dtypes based on whether `dtype` argument,
+    # is passed or not. Hence two OpInfo entries, one with dtype and other without.
     OpInfo('softmax',
            aliases=('special.softmax', 'nn.functional.softmax',),
            aten_name='softmax',
