@@ -90,7 +90,7 @@ class TORCH_API TensorExprKernel {
   };
 
  public:
- explicit TensorExprKernel(
+  explicit TensorExprKernel(
       const std::shared_ptr<Graph>& subgraph,
       const std::string& kernel_func_name,
       std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings =
