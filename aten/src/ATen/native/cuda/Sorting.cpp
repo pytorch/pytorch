@@ -83,6 +83,9 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
   std::vector<int64_t> out_shape = self.sizes().vec();
   zero_numel_check_dims(self, dim, "median()");
   if (self.dim() > 0) {
+    assert(dim >= 0);
+    assert(dim < out_shape.size());
+
     if (keepdim) {
       out_shape[dim] = 1;
     } else {
