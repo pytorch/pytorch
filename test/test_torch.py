@@ -7905,20 +7905,33 @@ else:
 
     # As the test fails with Runtime Error not raised on XLA
     @onlyOnCPUAndCUDA
-    def test_where_scalar_scalar(self, device):
-        # Scalar-Scalar Version
-        height = 5
-        width = 5
+    def test_where_scalar_handcrafted_values(self, device):
+        # Tests ScalarxScalar as well as the ScalarxTensor
+        # version of `where` against NumPy version with
+        # handcrafted values.
+        condition_shape = (5, 5)
+        dtypes = (
+            torch.bool, torch.uint8, torch.int8, torch.int16, torch.int64,
+            torch.float16, torch.float32, torch.float64,
+            torch.complex64, torch.complex128,
+        )
+        shapes = ((), (5,), (1, 5),)
+
+        tensors = (torch.ones(shape, dtype=dtype, device=device) * 17 for shape, dtype in product(shapes, dtypes))
+
         # Use different values for `x` and `y`
         # as they are the output values which are compared.
-        x1_vals = [True, 3, 7.0, 1 + 0.5j]
-        x2_vals = [False, 4, 8.0, 2 + 0.5j]
+        x1_vals = (True, 3, 7.0, 1 + 0.5j)
+        x2_vals = itertools.chain((False, 4, 8.0, 2 + 0.5j), tensors)
         for x1 in x1_vals:
             for x2 in x2_vals:
-                condition = torch.empty(height, width, dtype=torch.bool, device=device).bernoulli_()
+                condition = torch.empty(*condition_shape, dtype=torch.bool, device=device).bernoulli_()
                 common_dtype = torch.result_type(x1, x2)
                 # NumPy aggressively promotes to double, hence cast to output to correct dtype
-                expected = torch.from_numpy(np.where(condition.cpu().numpy(), x1, x2)).to(common_dtype)
+                if isinstance(x2, torch.Tensor):
+                    expected = torch.from_numpy(np.where(condition.cpu().numpy(), x1, x2.cpu().numpy())).to(common_dtype)
+                else:
+                    expected = torch.from_numpy(np.where(condition.cpu().numpy(), x1, x2)).to(common_dtype)
                 result = torch.where(condition, x1, x2)
                 self.assertEqual(expected, result)
 
