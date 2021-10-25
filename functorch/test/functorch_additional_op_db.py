@@ -215,3 +215,27 @@ for reduction in ['mean', 'sum', 'none']:
                supports_out=True))
 
 
+
+def sample_inputs_atleast_nd(self, device, dtype, requires_grad):
+    inps = []
+    for i in range(5):
+        inps.append(make_tensor(list(range(i)), device=device, dtype=dtype,
+                      requires_grad=requires_grad, low=-1, high=1))
+
+    sample_inputs = []
+    for inp in inps:
+        sample_inputs.append(SampleInput(inp))
+
+    sample_inputs.append(SampleInput(inps))
+    return sample_inputs
+
+for i in range(1, 4):
+    additional_op_db.append(
+        OpInfo(f'atleast_{i}d',
+                aten_name="atleast_{i}d",
+                supports_autograd=True,
+                sample_inputs_func=sample_inputs_atleast_nd,
+                dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+                supports_out=False))
+
+
