@@ -2571,6 +2571,44 @@ def sample_inputs_histogram(op_info, device, dtype, requires_grad):
 
     return sample_inputs
 
+def sample_inputs_histogramdd(op_info, device, dtype, requires_grad):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    sizes = ((S, S), (S, S, S), (S, 1, S), (S, 0, S))
+    bin_ct_patterns = ((1, 1, 1, 1, 1), (2, 3, 2, 3, 2), (3, 2, 3, 2, 3))
+
+    sample_inputs = []
+    for size, bin_ct_pattern, weighted, density in product(sizes, bin_ct_patterns, [False, True], [False, True]):
+        input_tensor = make_arg(size)
+        bin_ct = bin_ct_pattern[:size[-1]]
+        weight_tensor = make_arg(size[:-1]) if weighted else None
+
+        sample_inputs.append(SampleInput(input_tensor, args=(bin_ct,),
+                                         kwargs=dict(weight=weight_tensor, density=density)))
+
+        bins_tensor = [make_arg(ct + 1) for ct in bin_ct]
+        sample_inputs.append(SampleInput(input_tensor, args=(bins_tensor,),
+                                         kwargs=dict(weight=weight_tensor, density=density)))
+
+    return sample_inputs
+
+def sample_inputs_bincount(op_info, device, dtype, requires_grad):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    sample_inputs = []
+
+    for size, weighted in product((S, M), [False, True]):
+        input_tensor = torch.randint(0, size, (size,), dtype=dtype, device=device)
+        weight_tensor = make_arg((size,)) if weighted else None
+
+        max_val = int(input_tensor.max().item())
+
+        for minlength in [0, max_val // 2, max_val, 2 * max_val]:
+            sample_inputs.append(SampleInput(input_tensor,
+                                             kwargs=dict(weights=weight_tensor, minlength=minlength)))
+
+    return sample_inputs
+
 def sample_inputs_bucketize(op_info, device, dtype, requires_grad):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
@@ -5875,83 +5913,6 @@ def sample_inputs_dropout(op_info, device, dtype, requires_grad, **kwargs):
         SampleInput(input, kwargs=dict(training=False)),
     ]
 
-
-def sample_inputs_embedding(op_info, device, dtype, requires_grad, **kwargs):
-    def make_input(shape):
-        return make_tensor(shape, device=device, dtype=dtype, requires_grad=requires_grad)
-
-    def make_long_input(shape, *, low, high, noncontiguous=False):
-        return make_tensor(shape, device=device, dtype=torch.long, low=low, high=high,
-                           noncontiguous=noncontiguous, requires_grad=requires_grad)
-
-    def generator():
-        # 0-D index tensor
-        idx = make_long_input((), low=0, high=M)
-        yield SampleInput(make_input((M, S)), args=(idx,),)
-
-        # 1-D index tensor
-        idx = make_long_input((S,), low=0, high=M)
-        yield SampleInput(make_input((M, S)), args=(idx,),)
-
-        idx = make_long_input((S,), low=0, high=M, noncontiguous=True)
-        yield SampleInput(make_input((M, S)), args=(idx,),)
-
-        # 2-D index tensor
-        idx = make_long_input((S, S), low=0, high=M)
-        yield SampleInput(make_input((M, S)), args=(idx,),)
-
-        idx = make_long_input((S, S), low=0, high=M, noncontiguous=True)
-        yield SampleInput(make_input((M, S)), args=(idx,),)
-
-        if not requires_grad:
-            # Following inputs return different gradient from the numerical gradient.
-            # This is expected and relevant tests are present in `test_nn.py`.
-
-            # The gradient vector at `padding_idx` is not updated.
-            idx = make_long_input((2, 2), low=0, high=S)
-            idx[0, 0] = 2
-            idx[1, 1] = 2
-            yield SampleInput(make_input((S, S)), args=(idx,), kwargs={'padding_idx': 2},)
-
-            idx = make_long_input((2, 2), low=0, high=S)
-            idx[0, 0] = 4
-            idx[1, 1] = 4
-            yield SampleInput(make_input((S, S)), args=(idx,), kwargs={'padding_idx': -1},)
-
-            # Due to inplace renorming of weight, the numerical gradient doesn't match the
-            # analytical gradient.
-            idx = make_long_input((2, 2), low=0, high=S)
-            weights = make_input((S, S)) * 2
-            yield SampleInput(weights, args=(idx,), kwargs={'max_norm': 1.},)
-
-            idx = make_long_input((2, 2), low=0, high=S)
-            weights = make_input((S, S)) * 2
-            yield SampleInput(weights, args=(idx,), kwargs={'max_norm': 1., 'norm_type': 1.0},)
-
-            # Scale the gradient based on the inverse frequency of a particular index.
-            idx = make_long_input((2, 2), low=0, high=S)
-            idx[0, 0] = 1
-            idx[0, 1] = 1
-            weights = make_input((S, S))
-            yield SampleInput(weights, args=(idx,), kwargs={'scale_grad_by_freq': True},)
-
-            # gradcheck not implemented for sparse tensors.
-            idx = make_long_input((2, 2), low=0, high=S)
-            weights = make_input((S, S))
-            yield SampleInput(weights, args=(idx,), kwargs={'sparse': True})
-
-            idx = make_long_input((3, 3), low=0, high=S)
-            idx[0, 0] = 1  # freq more than 1
-            idx[0, 1] = 1  # freq more than 1
-            idx[1, 0] = 0  # padding_idx
-            weights = make_input((S, S)) * 2
-            yield SampleInput(weights, args=(idx,),
-                              kwargs={'sparse': True, 'scale_grad_by_freq': True,
-                                      'padding_idx': 0, 'max_norm': 1.})
-
-    return list(generator())
-
-
 def sample_inputs_one_hot(op_info, device, dtype, requires_grad, **kwargs):
     def make_input(shape, *, low, high):
         return make_tensor(shape, device=device, dtype=dtype, low=low, high=high, requires_grad=requires_grad)
@@ -8111,6 +8072,10 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            aliases=('linalg.matrix_exp',),
            sample_inputs_func=sample_inputs_matrix_exp,
+           # Needs to construct a 2nx2n matrix by copy_ ing into it
+           check_batched_grad=False,
+           check_batched_gradgrad=False,
+           supports_forward_ad=True,
            supports_out=False,
            ),
     OpInfo('matmul',
@@ -8688,11 +8653,6 @@ op_db: List[OpInfo] = [
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
-           skips=(
-               # RuntimeError: deepEquals(input.iValue, deepCopiedInput) INTERNAL ASSERT FAILED at
-               # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":142, please report a bug to PyTorch
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-           ),
            sample_inputs_func=sample_inputs_batch_norm),
     # This variant tests batch_norm with cuDNN disabled only on CUDA devices
     OpInfo('nn.functional.batch_norm',
@@ -8701,11 +8661,6 @@ op_db: List[OpInfo] = [
            dtypesIfCPU=empty_types(),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
-           skips=(
-               # RuntimeError: deepEquals(input.iValue, deepCopiedInput) INTERNAL ASSERT FAILED at
-               # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":142, please report a bug to PyTorch
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-           ),
            decorators=[onlyCUDA, disablecuDNN],
            sample_inputs_func=sample_inputs_batch_norm),
     # We have to add 2 OpInfo entry for `igamma` and `igammac`.First is the
@@ -10073,9 +10028,29 @@ op_db: List[OpInfo] = [
                #                                          ~~~~~~ <--- HERE
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
            )),
+    OpInfo('histogramdd',
+           dtypes=_dispatch_dtypes(),  # histogramdd is only implemented on CPU
+           dtypesIfCPU=floating_types(),
+           sample_inputs_func=sample_inputs_histogramdd,
+           supports_autograd=False,
+           skips=(
+               # JIT tests don't work with Tensor keyword arguments
+               # https://github.com/pytorch/pytorch/issues/58507
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+           )),
+    OpInfo('bincount',
+           dtypes=integral_types_and(),
+           sample_inputs_func=sample_inputs_bincount,
+           supports_out=False,
+           supports_autograd=False,
+           skips=(
+               # JIT tests don't work with Tensor keyword arguments
+               # https://github.com/pytorch/pytorch/issues/58507
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+           )),
     OpInfo('bucketize',
-           dtypes=all_types_and(torch.bfloat16),
-           dtypesIfCUDA=all_types(),
+           dtypes=all_types_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=all_types_and(torch.float16),
            sample_inputs_func=sample_inputs_bucketize,
            supports_autograd=False,
            skips=(
@@ -10674,21 +10649,6 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_one_hot,
     ),
     OpInfo(
-        "nn.functional.embedding",
-        # We use lambda to reshuffle the positional arguments.
-        # This is because currently only the `input` field of SampleInput
-        # is tested in gradient tests.
-        op=lambda weight, idx, **kwargs: torch.nn.functional.embedding(idx, weight, **kwargs),
-        dtypes=floating_types_and(torch.bfloat16, torch.float16),
-        sample_inputs_func=sample_inputs_embedding,
-        skips=(
-            # Does not work with lambda
-            # Raises : JIT Test does not execute any logic
-            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-        ),
-        supports_out=False,
-    ),
-    OpInfo(
         "nn.functional.softplus",
         ref=reference_softplus,
         sample_inputs_func=sample_inputs_softplus,
@@ -11055,6 +11015,30 @@ op_db: List[OpInfo] = [
                          'TestReductions', 'test_reference_masked'),
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-03)}),
                          'TestReductions', 'test_ref_small_input'),
+        ],
+        sample_inputs_func=sample_inputs_masked_reduction
+    ),
+    ReductionOpInfo(
+        '_masked.prod',
+        ref=reference_reduction_numpy(np.prod),
+        method_variant=None,
+        identity=1,
+        nan_policy='propagate',
+        supports_out=False,
+        promotes_int_to_int64=True,
+        # FIXME: "prod_cpu" not implemented for 'BFloat16'
+        # FIXME: "prod_cpu" not implemented for 'Half'
+        dtypesIfCPU=all_types_and_complex_and(torch.bool),
+        dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+        skips=(
+            # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
+            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+        ),
+        decorators=[
+            DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-03, rtol=1e-02)}),
+                         'TestReductions', 'test_reference_masked'),
+            DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-03, rtol=1e-03)}),
+                         'TestReductions', 'test_ref_duplicate_values'),
         ],
         sample_inputs_func=sample_inputs_masked_reduction
     ),
