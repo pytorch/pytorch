@@ -1291,6 +1291,101 @@ class TestFreezing(JitTestCase):
         FileCheck().check('prim::GetAttr[name="a"]').run(fm.forward.graph)
         FileCheck().check('prim::GetAttr[name="b"]').run(fm.modify_a.graph)
 
+    def test_freeze_module_with_user_preserved_attribute_on_submodule(self):
+        class SubModule(nn.Module):
+            def __init__(self):
+                super(SubModule, self).__init__()
+                self.a = 1
+                self.b = 2
+
+            def forward(self):
+                return self.a + self.b
+
+        class Module(nn.Module):
+            def __init__(self):
+                super(Module, self).__init__()
+                self.sub1 = SubModule()
+                self.sub2 = SubModule()
+
+            def forward(self):
+                return self.sub1() + self.sub2()
+
+        m = torch.jit.script(Module())
+        m.eval()
+        m = torch.jit.freeze(m, preserved_attrs=['sub1.a', 'sub2.a'])
+        fm = m._c
+
+        self.assertTrue(fm.hasattr('sub1'))
+        self.assertTrue(fm.sub1.hasattr('a'))
+        self.assertFalse(fm.sub1.hasattr('b'))
+        self.assertTrue(fm.hasattr('sub2'))
+        self.assertTrue(fm.sub2.hasattr('a'))
+        self.assertFalse(fm.sub2.hasattr('b'))
+        self.assertEqual(m(), 6)
+        m.sub1.a += 1
+        self.assertEqual(m(), 7)
+
+    def test_freeze_module_with_user_preserved_attribute_on_unused_submodule(self):
+        class SubModule(nn.Module):
+            def __init__(self):
+                super(SubModule, self).__init__()
+                self.a = 1
+                self.b = 2
+
+            def forward(self):
+                return self.a + self.b
+
+            @torch.jit.export
+            def method_a(self):
+                return 42
+
+        class Module(nn.Module):
+            def __init__(self):
+                super(Module, self).__init__()
+                self.sub = SubModule()
+
+            def forward(self):
+                return 1
+
+        m = torch.jit.script(Module())
+        m.eval()
+        fm = torch.jit.freeze(m, preserved_attrs=['sub.a', 'sub.method_a'])._c
+
+        self.assertTrue(fm.hasattr('sub'))
+        self.assertTrue(fm.sub.hasattr('a'))
+        self.assertFalse(fm.sub.hasattr('b'))
+        self.assertTrue(fm.sub._has_method('method_a'))
+
+    def test_freeze_module_with_user_preserved_method_on_submodule(self):
+        class SubModule(nn.Module):
+            def __init__(self):
+                super(SubModule, self).__init__()
+
+            def forward(self, x):
+                return self.method_a(x) + self.method_b(x)
+
+            def method_a(self, x):
+                return x * x
+
+            def method_b(self, x):
+                return x + x
+
+        class Module(nn.Module):
+            def __init__(self):
+                super(Module, self).__init__()
+                self.sub = SubModule()
+
+            def forward(self, x):
+                return self.sub(x)
+
+        m = torch.jit.script(Module())
+        m.eval()
+        fm = torch.jit.freeze(m, preserved_attrs=['sub.method_a'])._c
+
+        self.assertTrue(fm.hasattr('sub'))
+        self.assertTrue(fm.sub._has_method('method_a'))
+        self.assertFalse(fm.sub._has_method('method_b'))
+
     @skipIfNoFBGEMM
     def test_module_with_shared_type_instances(self):
         class Child(nn.Module):
