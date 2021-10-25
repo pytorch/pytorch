@@ -6,6 +6,7 @@
 #include <vector>
 
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/runtime/static/impl.h>
 
 namespace c10 {
 struct IValue;
@@ -29,6 +30,8 @@ void testStaticRuntime(
     const bool use_equalnan = false);
 
 std::shared_ptr<Graph> getGraphFromIR(const std::string& ir);
+
+bool hasProcessedNodeWithName(torch::jit::StaticModule& smodule, const char *name);
 
 } // namespace test
 } // namespace jit
