@@ -2951,6 +2951,7 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         x = torch.randn(3, 4, 5, device=device, requires_grad=True)
         self._batched_grad_test(lambda x: x.diagonal(0, -1, -2), (x,))
 
+
     @allowVmapFallbackUsage
     def test_unrelated_output(self, device):
         B0 = 3
