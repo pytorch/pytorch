@@ -24,7 +24,7 @@ if [[ "$BUILD_ENVIRONMENT" == *-mobile-code-analysis* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile-code-analysis.sh" "$@"
 fi
 
-# Always build periodic jobs with debug
+# Always build periodic jobs with debug symbols
 if [[ "$BUILD_ENVIRONMENT" == periodic-* ]]; then
   export DEBUG=1
 fi
