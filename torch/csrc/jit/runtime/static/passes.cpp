@@ -347,6 +347,9 @@ TORCH_LIBRARY_FRAGMENT(static_runtime, m) {
   m.def(torch::schema(
       "static_runtime::VarTupleUnpack(...) -> ...",
       c10::AliasAnalysisKind::CONSERVATIVE));
+  m.def(torch::schema(
+      "static_runtime::fused_equally_split(Tensor input, int num_split, int dim) -> ...",
+      c10::AliasAnalysisKind::PURE_FUNCTION));
 }
 
 void FuseSignLog1P(std::shared_ptr<torch::jit::Graph>& graph) {
@@ -529,13 +532,11 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
   const std::vector<Value*> graph_outputs(
       graph->outputs().begin(), graph->outputs().end());
   auto nodes = graph->nodes();
-  std::vector<Node*> equally_splits_to_remove;
   for (auto it = nodes.begin(); it != nodes.end(); ++it) {
     Node* node = *it;
     const std::string node_qual_string = node->kind().toQualString();
     if (node_qual_string == "fb::sigrid_transforms" ||
         node_qual_string == "fb::sigrid_transforms_torch_bind" ||
-        node_qual_string == "fb::equally_split" ||
         node_qual_string == "fb::gather_ranges_to_dense" ||
         node_qual_string == "fb::gather_ranges_to_dense_v2" ||
         node_qual_string == "fb::variadic_sigrid_transforms_torch_bind") {
@@ -577,20 +578,7 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
       it_next.destroyCurrent(); // remove list_unpack
 
       node->eraseOutput(0);
-
-      if (node_qual_string == "fb::equally_split" &&
-          node->outputs().size() == 1) {
-        // This captures a case of `y = fb::equally_split(x, 1, _)` where y
-        // becomes just an alias of x.
-        // If this case is found, replace y with x to avoid executing this op.
-        equally_splits_to_remove.push_back(node);
-      }
     }
-  }
-
-  for (Node* node : equally_splits_to_remove) {
-    node->output(0)->replaceAllUsesWith(node->input(0));
-    node->destroy();
   }
 
 #ifndef NDEBUG
@@ -601,7 +589,9 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
 }
 
 void FuseListUnpackV2(std::shared_ptr<torch::jit::Graph>& graph) {
-  const FastMap<c10::Symbol, c10::Symbol> unfused_to_fused = {};
+  const FastMap<c10::Symbol, c10::Symbol> unfused_to_fused = {
+      {c10::Symbol::fromQualString("fb::equally_split"),
+       c10::Symbol::fromQualString("static_runtime::fused_equally_split")}};
 
   AliasDb alias_db(
       graph, /*isFrozen=*/false, /*enablePreciseTupleContainerAnalysis=*/true);
