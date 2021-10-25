@@ -87,7 +87,8 @@ std::unique_ptr<Function> compileMethod(
 std::pair<std::unique_ptr<Function>, const std::string> aotCompile(
     const std::string& method_name,
     std::shared_ptr<Graph>& g,
-    const std::vector<std::vector<int64_t>>& sizes) {
+    const std::vector<std::vector<int64_t>>& sizes,
+    const std::string& kernel_func_name) {
   GRAPH_DEBUG("Input sizes ", sizes);
   GRAPH_DEBUG("Method name ", method_name);
 
@@ -111,7 +112,9 @@ std::pair<std::unique_ptr<Function>, const std::string> aotCompile(
   GRAPH_DUMP("graph after shape propagation ", g);
 
   std::shared_ptr<tensorexpr::TensorExprKernel> kernel =
-      std::make_shared<tensorexpr::TensorExprKernel>(g);
+      std::make_shared<tensorexpr::TensorExprKernel>(
+          TensorExprKernel(g, kernel_func_name));
+
   const std::string compiled_assembly = kernel->getCodeText();
 
   auto func = compileMethod(kernel, method_name, sizes);
