@@ -3748,10 +3748,11 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
         if isinstance(size, (list, tuple)):
             if len(size) != dim:
                 raise ValueError(
-                    "Input and output must have the same number of spatial dimensions, but given "
-                    f"output size: {size} vs input spatial dimensions: {list(input.shape[2:])}. "
-                    "Please, provide input tensor in (B, C, d1, d2, ...,dN) format and "
-                    "output size as (o1, o2, ...,oN)."
+                    "Input and output must have the same number of spatial dimensions, but got "
+                    f"input with with spatial dimensions of {list(input.shape[2:])} and output size of {size}. "
+                    "Please provide input tensor in (N, C, d1, d2, ...,dK) format and "
+                    "output size in (o1, o2, ...,oK) format."
+
                 )
             output_size = size
         else:
@@ -3762,10 +3763,11 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
         if isinstance(scale_factor, (list, tuple)):
             if len(scale_factor) != dim:
                 raise ValueError(
-                    "The number input spatial dimensions must match the number of scale factors, but given "
-                    f"scale_factor: {scale_factor} vs input spatial dimensions: {list(input.shape[2:])}. "
-                    "Please, provide input tensor in (B, C, d1, d2, ...,dN) format and "
-                    "scale_factor as (s1, s2, ...,sN)"
+                    "Input and scale_factor must have the same number of spatial dimensions, but "
+                    f"got input with spatial dimensions of {list(input.shape[2:])} and "
+                    f"scale_factor of shape {scale_factor}. "
+                    "Please provide input tensor in (N, C, d1, d2, ...,dK) format and "
+                    "scale_factor in (s1, s2, ...,sK) format."
                 )
             scale_factors = scale_factor
         else:
