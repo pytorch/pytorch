@@ -441,7 +441,7 @@ class KLDivLoss(_Loss):
     Shape:
         - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
         - Target: :math:`(*)`, same shape as the input.
-        - Output: scalar by default. If :attr:``reduction`` is ``'none'``, then :math:`(*)`,
+        - Output: scalar by default. If :attr:`reduction` is ``'none'``, then :math:`(*)`,
           same shape as the input.
 
     """
@@ -1436,9 +1436,9 @@ class TripletMarginLoss(_Loss):
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
 
     Shape:
-        - Input: :math:`(N, D)` where :math:`D` is the vector dimension.
-        - Output: A Tensor of shape :math:`(N)` if :attr:`reduction` is ``'none'``, or a scalar
-          otherwise.
+        - Input: :math:`(N, D)` or :math`(D)` where :math:`D` is the vector dimension.
+        - Output: A Tensor of shape :math:`(N)` if :attr:`reduction` is ``'none'`` and
+                  input shape is :math`(N, D)`; a scalar otherwise.
 
     Examples::
 

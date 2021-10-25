@@ -1,6 +1,7 @@
 import sys
 import os
 import contextlib
+import http
 import io
 import re
 import shutil
@@ -656,6 +657,7 @@ class TestHub(TestCase):
                          SUM_OF_HUB_EXAMPLE)
 
     @retry(URLError, tries=3)
+    @retry(http.client.RemoteDisconnected, tries=3)
     def test_load_state_dict_from_url(self):
         loaded_state = hub.load_state_dict_from_url(TORCHHUB_EXAMPLE_RELEASE_URL)
         self.assertEqual(sum_of_state_dict(loaded_state),
@@ -687,6 +689,24 @@ class TestHub(TestCase):
         with tempfile.TemporaryDirectory('hub_dir') as dirname:
             torch.hub.set_dir(dirname)
             self.assertEqual(torch.hub.get_dir(), dirname)
+
+    @retry(URLError, tries=3)
+    def test_hub_parse_repo_info(self):
+        # If the branch is specified we just parse the input and return
+        self.assertEqual(
+            torch.hub._parse_repo_info('a/b:c'),
+            ('a', 'b', 'c')
+        )
+        # For torchvision, the default branch is main
+        self.assertEqual(
+            torch.hub._parse_repo_info('pytorch/vision'),
+            ('pytorch', 'vision', 'main')
+        )
+        # For the torchhub_example repo, the default branch is still master
+        self.assertEqual(
+            torch.hub._parse_repo_info('ailzhang/torchhub_example'),
+            ('ailzhang', 'torchhub_example', 'master')
+        )
 
     @retry(URLError, tries=3)
     def test_load_state_dict_from_url_with_name(self):

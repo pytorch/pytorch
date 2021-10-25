@@ -1,4 +1,3 @@
-import copy
 import warnings
 from torch.utils.data import IterDataPipe, _utils, functional_datapipe, DataChunk
 from typing import Callable, Dict, Iterator, Optional, Sized, Tuple, TypeVar
@@ -99,8 +98,6 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
             data = list(data)
         else:
             t_flag = False
-            # Deepcopy data to prevent the original data modified. E.g. list, dict
-            data = copy.deepcopy(data)
 
         if self.output_col is None:
             if isinstance(self.input_col, (list, tuple)):

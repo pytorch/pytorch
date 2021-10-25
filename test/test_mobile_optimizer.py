@@ -286,10 +286,10 @@ class TestOptimizer(TestCase):
         class Parent(nn.Module):
             def __init__(self):
                 super(Parent, self).__init__()
-                self.quant = torch.quantization.QuantStub()
+                self.quant = torch.ao.quantization.QuantStub()
                 self.conv1 = nn.Conv2d(1, 1, 1)
                 self.child = Child()
-                self.dequant = torch.quantization.DeQuantStub()
+                self.dequant = torch.ao.quantization.DeQuantStub()
 
             def forward(self, x):
                 x = self.quant(x)
@@ -300,10 +300,10 @@ class TestOptimizer(TestCase):
 
         with override_quantized_engine('qnnpack'):
             model = Parent()
-            model.qconfig = torch.quantization.get_default_qconfig('qnnpack')
-            torch.quantization.prepare(model, inplace=True)
+            model.qconfig = torch.ao.quantization.get_default_qconfig('qnnpack')
+            torch.ao.quantization.prepare(model, inplace=True)
             model(torch.randn(4, 1, 4, 4))
-            torch.quantization.convert(model, inplace=True)
+            torch.ao.quantization.convert(model, inplace=True)
             model = torch.jit.script(model)
             # this line should not have ASAN failures
             model_optim = optimize_for_mobile(model)
@@ -424,11 +424,11 @@ class TestOptimizer(TestCase):
         class Standalone(nn.Module):
             def __init__(self):
                 super(Standalone, self).__init__()
-                self.quant = torch.quantization.QuantStub()
+                self.quant = torch.ao.quantization.QuantStub()
                 self.conv1 = nn.Conv2d(1, 1, 1)
                 self.conv2 = nn.Conv2d(1, 1, 1)
                 self.relu = nn.ReLU()
-                self.dequant = torch.quantization.DeQuantStub()
+                self.dequant = torch.ao.quantization.DeQuantStub()
 
             def forward(self, x):
                 x = self.quant(x)
@@ -439,7 +439,7 @@ class TestOptimizer(TestCase):
                 return x
 
             def fuse_model(self):
-                torch.quantization.fuse_modules(self, [['conv2', 'relu']], inplace=True)
+                torch.ao.quantization.fuse_modules(self, [['conv2', 'relu']], inplace=True)
                 pass
 
         class Child(nn.Module):
@@ -454,11 +454,11 @@ class TestOptimizer(TestCase):
         class Parent(nn.Module):
             def __init__(self):
                 super(Parent, self).__init__()
-                self.quant = torch.quantization.QuantStub()
+                self.quant = torch.ao.quantization.QuantStub()
                 self.conv1 = nn.Conv2d(1, 1, 1)
                 self.child = Child()
                 # TODO: test nn.Sequential after #42039 is fixed
-                self.dequant = torch.quantization.DeQuantStub()
+                self.dequant = torch.ao.quantization.DeQuantStub()
 
             def forward(self, x):
                 x = self.quant(x)
@@ -472,11 +472,11 @@ class TestOptimizer(TestCase):
 
         with override_quantized_engine('qnnpack'):
             def _quant_script_and_optimize(model):
-                model.qconfig = torch.quantization.get_default_qconfig('qnnpack')
+                model.qconfig = torch.ao.quantization.get_default_qconfig('qnnpack')
                 model.fuse_model()
-                torch.quantization.prepare(model, inplace=True)
+                torch.ao.quantization.prepare(model, inplace=True)
                 model(torch.randn(4, 1, 4, 4))
-                torch.quantization.convert(model, inplace=True)
+                torch.ao.quantization.convert(model, inplace=True)
                 model = torch.jit.script(model)
                 model_optim = optimize_for_mobile(model)
                 return model, model_optim
