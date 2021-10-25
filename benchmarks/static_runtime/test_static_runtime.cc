@@ -883,7 +883,7 @@ TEST(StaticRuntime, KWargsAPI_2) {
              {"wide", wide}});
 
         // run static runtime
-        c10::IValue output_ivalue = smod({}, kwargs);
+        c10::IValue output_ivalue = smod(std::vector<IValue>{}, kwargs);
         smod.runtime().check_for_memory_leak();
 
         at::Tensor output_2 = getTensor(output_ivalue);
