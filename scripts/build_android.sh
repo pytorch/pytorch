@@ -155,6 +155,10 @@ if [ -n "${USE_VULKAN}" ]; then
   CMAKE_ARGS+=("-DUSE_VULKAN=ON")
 fi
 
+if [ -n "${USE_NNAPI}" ]; then
+  CMAKE_ARGS+=("-DUSE_NNAPI=${USE_NNAPI}")
+fi
+
 # Use-specified CMake arguments go last to allow overridding defaults
 CMAKE_ARGS+=($@)
 
