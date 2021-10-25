@@ -78,7 +78,7 @@ void _not(Stack& stack) {
 void boolTensor(Stack& stack) {
   at::Tensor a;
   pop(stack, a);
-  push(stack, a.is_nonzero());
+  push(stack, at::native::is_nonzero(a));
 }
 
 void toList(Stack& stack) {
@@ -122,7 +122,7 @@ void toList(Stack& stack) {
   TORCH_CHECK(
       (out_ty == FloatType::get() && t.is_floating_point()) ||
           (out_ty == ComplexType::get() && t.is_complex()) ||
-          tryScalarTypeFromJitType(out_ty) == t.scalar_type(),
+          tryScalarTypeFromJitType(*out_ty) == t.scalar_type(),
       "Output annotation element type and runtime tensor element type must match for tolist()");
 
   // Check that the dimension of the Tensor matches that of the
