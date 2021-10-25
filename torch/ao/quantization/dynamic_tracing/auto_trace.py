@@ -517,7 +517,7 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                             f"record_module {type(self)} " +
                             # f"out {type(output)} " +
                             f"dtype {output.dtype if isinstance(output, torch.Tensor) else None} " +
-                            f"end")
+                            "end")
                         logger.debug(f"ending fqn {fqn}\n")
                     return output
                 finally:
