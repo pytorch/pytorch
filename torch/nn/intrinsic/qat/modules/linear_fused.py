@@ -2,7 +2,6 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.intrinsic as nni
-import torch.nn.qat as nnqat
 import torch.nn.functional as F
 from torch.nn import init
 from torch.nn.parameter import Parameter
@@ -88,17 +87,15 @@ class LinearBn1d(nn.modules.linear.Linear, nni._FusedModule):
         self.bn.training = False
         return self
 
-    def _forward(self, input):
+    def forward(self, input):
         assert self.bn.running_var is not None
-        linear = F.linear(input, self.weight, self.bias)
+        weight = self.weight_fake_quant(self.weight)
+        linear = F.linear(input, weight, self.bias)
         output = self.bn(linear)
         return output
 
     def extra_repr(self):
         return super(LinearBn1d, self).extra_repr()
-
-    def forward(self, input):
-        return self._forward(input)
 
     def train(self, mode=True):
         """
@@ -127,7 +124,7 @@ class LinearBn1d(nn.modules.linear.Linear, nni._FusedModule):
         assert mod.qconfig, 'Input float module must have a valid config'
         qconfig = mod.qconfig
         linear, bn = mod[0], mod[1]
-        qat_linearbn = cls(linear.in_features, linear.out_features, linear.bias,
+        qat_linearbn = cls(linear.in_features, linear.out_features, linear.bias is not None,
                            bn.eps, bn.momentum,
                            False, qconfig)
         qat_linearbn.weight = linear.weight

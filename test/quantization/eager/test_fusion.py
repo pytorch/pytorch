@@ -334,13 +334,32 @@ class TestFusion(QuantizationTestCase):
         inp1 = torch.randn(8, 20)
         inp2 = torch.randn(8, 20)
 
-        #Get some interesting values into the running mean and variance.
+        # Get some interesting values into the running mean and variance.
         model(inp1)
         golden = model(inp2)
 
         model = fuse_modules(model, [["fc", "bn"]])
         self.assertEqual(type(model.bn), nn.Identity)
         self.assertEqual(golden, model(inp2))
+
+    def test_fusion_linear_bn_qat(self):
+        model = ModelForLinearBNFusion().train()
+        inp1 = torch.randn(8, 20)
+        inp2 = torch.randn(8, 20)
+
+        # Get some interesting values into the running mean and variance.
+        model(inp1)
+        golden = model(inp2)
+
+        model = fuse_modules(model, [["fc", "bn"]])
+
+        model.qconfig = torch.quantization.get_default_qat_qconfig()
+        model_prepared = torch.quantization.prepare_qat(model)
+
+        self.assertEqual(nni.LinearBn1d, type(model.fc))
+        self.assertEqual(nn.Identity, type(model.bn))
+        self.assertEqual(nniqat.LinearBn1d, type(model_prepared.fc))
+        self.assertEqual(nn.Identity, type(model_prepared.bn))
 
     def test_forward_hooks_preserved(self):
         r"""Test case that checks whether forward pre hooks of the first module and

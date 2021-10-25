@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import torch.backends.mkldnn
 from torch.nn import Conv2d, BatchNorm2d, ReLU, init
+import torch.nn.functional as F
 from torch.nn.intrinsic.qat import ConvBn2d, ConvBnReLU2d
 from torch.nn.modules.utils import _pair
 import torch.nn.quantized as nnq
@@ -40,6 +41,7 @@ from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 from functools import reduce
+from copy import deepcopy
 
 class TestQuantizationAwareTraining(QuantizationTestCase):
     def test_manual(self):
@@ -818,6 +820,37 @@ class TestConvBNQATModule(TestCase):
             qat_op_optim.step()
             qat_ref_op_optim.step()
 
+class ReferenceLinearBatchNorm1d(nn.Module):
+    def __init__(self, linear, bn, qconfig):
+        super().__init__()
+        self.linear_weight = nn.Parameter(linear.weight.clone().detach())
+        self.linear_bias = nn.Parameter(linear.bias.clone().detach())
+        self.bn = deepcopy(bn)
+        self.weight_fq = qconfig.weight()
+        self.output_fq = qconfig.activation()
+
+    def forward(self, x):
+        weight_fq = self.weight_fq(self.linear_weight)
+        x = F.linear(x, weight_fq, self.linear_bias)
+        x = self.bn(x)
+        x = self.output_fq(x)
+        return x
+
+class TestLinearBNQATModule(TestCase):
+    @given(batch_size=st.integers(2, 4),
+           in_features=st.sampled_from([2, 3, 4]),
+           out_features=st.sampled_from([2, 3]))
+    def test_linear_bn_numerics(self, batch_size, in_features, out_features):
+        m = nn.Sequential(nn.Linear(in_features, out_features), nn.BatchNorm1d(out_features)).train()
+        m.qconfig = torch.quantization.get_default_qat_qconfig()
+        m_ref = ReferenceLinearBatchNorm1d(m[0], m[1], m.qconfig)
+        m_ref.apply(torch.ao.quantization.disable_fake_quant)
+
+        data = torch.randn(batch_size, out_features, in_features)
+        result_actual = m(data)
+        result_ref = m_ref(data)
+
+        self.assertEqual(result_ref, result_actual)
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
