@@ -479,7 +479,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("expand", expand_batch_rule);
   VMAP_SUPPORT("unfold", unfold_batch_rule);
   VMAP_SUPPORT("movedim.intlist", movedim_batch_rule);
-  m.impl("movedim.int", static_cast<Tensor(*)(const Tensor&,int64_t,int64_t)>(native::movedim)); // composite wrt autograd
-} 
+}
 
 }}
