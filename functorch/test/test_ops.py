@@ -341,6 +341,7 @@ class TestOperators(TestCase):
         xfail('lu_unpack'),
         xfail('masked_fill'),
         xfail('masked_scatter'),
+        xfail('matrix_exp'),
         xfail('max', 'reduction_no_dim', device_type='cpu'),
         xfail('median', device_type='cpu'),
         xfail('min', 'reduction_no_dim', device_type='cpu'),
