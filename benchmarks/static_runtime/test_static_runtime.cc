@@ -883,7 +883,7 @@ TEST(StaticRuntime, KWargsAPI_2) {
              {"wide", wide}});
 
         // run static runtime
-        c10::IValue output_ivalue = smod({}, kwargs);
+        c10::IValue output_ivalue = smod(std::vector<IValue>{}, kwargs);
         smod.runtime().check_for_memory_leak();
 
         at::Tensor output_2 = getTensor(output_ivalue);
@@ -1136,8 +1136,9 @@ TEST(
   Node* sigmoid_node = getNodeWithKind(smodule, "aten::sigmoid");
   const at::IValue a = torch::randn({2, 3});
   at::IValue b = torch::randn({3, 1});
-  std::vector<const IValue*> ivalue_inputs{&a};
-  ProcessedNode pnode(sigmoid_node, std::move(ivalue_inputs), true);
+  std::unique_ptr<const IValue*[]> ivalue_inputs = std::make_unique<const IValue*[]>(1);
+  ivalue_inputs[0] = &a;
+  ProcessedNode pnode(sigmoid_node, std::move(ivalue_inputs), 1, true);
 
   pnode.Output(0) = b;
   EXPECT_TRUE(pnode.verify_no_memory_overlap());
@@ -1156,8 +1157,9 @@ TEST(
   Node* sigmoid_node = getNodeWithKind(smodule, "aten::sigmoid");
   const at::IValue a = torch::randn({2, 3});
   at::IValue b = torch::randn({3, 1});
-  std::vector<const IValue*> ivalue_inputs{&a};
-  ProcessedNode pnode(sigmoid_node, std::move(ivalue_inputs), true);
+  std::unique_ptr<const IValue*[]> ivalue_inputs = std::make_unique<const IValue*[]>(1);
+  ivalue_inputs[0] = &a;
+  ProcessedNode pnode(sigmoid_node, std::move(ivalue_inputs), 1, true);
 
   pnode.Output(0) = b;
   EXPECT_TRUE(pnode.verify_no_memory_overlap());
@@ -1179,16 +1181,18 @@ TEST(ProcessedNode, VerifyNoMemoryOverlapWithOverlappingOutputs) {
   {
     auto a = at::randn({2, 3});
     IValue ivalue(a);
-    std::vector<const IValue*> inputs{&ivalue};
-    ProcessedNode list_unpack_pnode(list_unpack_node, std::move(inputs), /*enable_out_variant=*/true);
+    std::unique_ptr<const IValue*[]> inputs = std::make_unique<const IValue*[]>(1);
+    inputs[0] = &ivalue;
+    ProcessedNode list_unpack_pnode(list_unpack_node, std::move(inputs), 1, /*enable_out_variant=*/true);
     ASSERT_EQ(list_unpack_pnode.outputs().size(), 2);
     EXPECT_TRUE(list_unpack_pnode.verify_no_memory_overlap());
   }
   {
     auto a = at::randn({2, 3});
     IValue ivalue(a);
-    std::vector<const IValue*> inputs{&ivalue};
-    ProcessedNode list_unpack_pnode(list_unpack_node, std::move(inputs), /*enable_out_variant=*/true);
+    std::unique_ptr<const IValue*[]> inputs = std::make_unique<const IValue*[]>(1);
+    inputs[0] = &ivalue;
+    ProcessedNode list_unpack_pnode(list_unpack_node, std::move(inputs), 1, /*enable_out_variant=*/true);
     auto b = at::randn({2, 3});
     list_unpack_pnode.Output(0) = b;
     list_unpack_pnode.Output(1) = b;
@@ -1241,13 +1245,15 @@ TEST(StaticRuntime, IndividualOps_Index) {
   testStaticRuntime(index_without_none_script, args_a, args_b);
 
   // Index with None
-  // When indexing with none, the shape of `a` becomes [2, 1, 2],
+  // When indexing with none, the shape of `f` becomes [2, 1, 2],
   // so the mask must be reshaped appropriately.
-  auto idx_a_reshape = torch::tensor({{{0, 1}}, {{0, 0}}}, at::kBool);
-  std::vector<IValue> args_a_with_none{a, idx_a_reshape};
+  auto f = at::rand({2, 1, 2});
+  auto idx_f_reshape = torch::tensor({{{0, 1}}, {{0, 0}}}, at::kBool);
+  std::vector<IValue> args_f_with_none{f, idx_f_reshape};
+  args_f_with_none.emplace_back();
 
-  testStaticRuntime(index_with_none_script, args_a_with_none);
-  testStaticRuntime(index_with_none_script, args_a_with_none, args_b);
+  testStaticRuntime(index_with_none_script, args_f_with_none);
+  testStaticRuntime(index_with_none_script, args_f_with_none, {IValue(b), IValue(idx_b), IValue()});
 
   // Index with multiple tensors
   auto c = at::randn({2, 2});
