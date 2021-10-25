@@ -238,14 +238,12 @@ Overriding the forward mode AD formula has a very similar API with some differen
 You can implement the :meth:`~Function.jvp` function.
 
 It will be given as many :class:`Tensor` arguments as there were inputs, with each
-of them representing gradient w.r.t. that input. You should *only* modify these inplace
-if the corresponding input to the :meth:`~Function.forward` function is also modified
-inplace. It should return as many tensors as there were outputs, with each of them
-containing the gradient w.r.t. its corresponding output.
+of them representing gradient w.r.t. that input. It should return as many tensors as there
+were outputs, with each of them containing the gradient w.r.t. its corresponding output.
+The :meth:`~Function.jvp` will be called just after the :meth:`~Function.forward`
+method, before the :meth:`~Function.apply` returns.
 
-:meth:`~Function.jvp` has a few subtle differences with the :meth:`~Function.backward` function:
-- It is guaranteed to only be called once, just after the :meth:`~Function.forward`
-  method, before the :meth:`~Function.apply` returns.
+:meth:`~Function.jvp` has a few subtle differences with the :meth:`~Function.backward` function
 - You can use the `ctx` to pass any data from the :meth:`~Function.forward` to the
   :meth:`~Function.jvp` function. If that state will not be needed for the :meth:`~Function.backward`,
   you can explicitly free it by doing `del ctx.foo` at the end of the :meth:`~Function.jvp` function.
@@ -257,8 +255,8 @@ containing the gradient w.r.t. its corresponding output.
   a view of the given `k`th input gradient.
 - Because the user cannot specify which gradient needs to be computed, the :meth:`~Function.jvp` function should
   always compute gradients for all the outputs.
-- The forward mode gradient do respect the flag set by :meth:`~torch.autograd.function.FunctionCtx.set_materialize_grads`
-  and you can get `None` input gradient when this is disabled.
+- The forward mode gradients do respect the flag set by :meth:`~torch.autograd.function.FunctionCtx.set_materialize_grads`
+  and you can get `None` input gradients when this is disabled.
 
 
 Extending :mod:`torch.nn`
