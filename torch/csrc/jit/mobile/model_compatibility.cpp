@@ -58,10 +58,7 @@ c10::IValue readArchive(
 }
 
 std::vector<IValue> get_bytecode_ivalues(PyTorchStreamReader& reader) {
-  std::vector<IValue> bytecode_values;
-  bytecode_values =
-      std::move(*readArchive("bytecode", reader).toTuple()).elements();
-  return bytecode_values;
+  return std::move(*readArchive("bytecode", reader).toTuple()).elements().vec();
 }
 
 /********************** Bytecode **********************/
@@ -229,27 +226,23 @@ std::unordered_set<std::string> _get_mobile_model_contained_types(
   // the hash to record which types are parsed.
   std::unordered_set<std::string> parsed_type_names_records;
   for (const auto i : c10::irange(1, bytecode_ivalues.size())) {
-    auto method_tuple = bytecode_ivalues.at(i).toTuple()->elements();
+    const auto& method_tuple = bytecode_ivalues.at(i).toTuple()->elements();
     auto type_table_tuple =
         method_tuple.at(1).toTuple()->elements()[BYTECODE_INDEX_TYPE];
-    auto type_table =
+    const auto& type_table =
         type_table_tuple.toTuple()->elements()[1].toTuple()->elements();
+
     // type_table is a list of IValue, and each IValue is a string,
     // for example: "Dict[int, Tuple[Tensor, Tensor, Tensor]]"
+    std::vector<std::string> type_name_list;
     for (const auto& type_definition : type_table) {
       std::unordered_set<std::string> type_tokens;
       std::string type_name = type_definition.toString()->string();
-
-      // parse the type only if it's new, and insert it in the record
-      if (parsed_type_names_records.find(type_name) ==
-          parsed_type_names_records.end()) {
-        parsed_type_names_records.insert(type_name);
-        at::TypeParser parser(type_name);
-        parser.parse();
-        type_tokens = parser.getContainedTypes();
-        contained_types.insert(type_tokens.begin(), type_tokens.end());
-      }
+      type_name_list.emplace_back(type_name);
     }
+    at::TypeParser parser(type_name_list);
+    parser.parseList();
+    contained_types = parser.getContainedTypes();
   }
 
   return contained_types;
