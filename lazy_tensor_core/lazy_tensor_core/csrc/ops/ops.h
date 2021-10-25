@@ -148,13 +148,7 @@ NodePtr Clamp(const torch::lazy::Value& input, const torch::lazy::Value& min, co
 
 NodePtr Ceil(const torch::lazy::Value& input);
 
-NodePtr Floor(const torch::lazy::Value& input);
-
 NodePtr Round(const torch::lazy::Value& input);
-
-NodePtr Trunc(const torch::lazy::Value& input);
-
-NodePtr FracOp(const torch::lazy::Value& input);
 
 NodePtr Ger(const torch::lazy::Value& input, const torch::lazy::Value& other);
 
