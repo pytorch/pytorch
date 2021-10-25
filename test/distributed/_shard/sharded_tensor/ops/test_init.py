@@ -1,35 +1,39 @@
 import sys
-import torch
 
-from torch.distributed import _sharded_tensor
-from torch.distributed._sharding_spec import (
+import torch
+from torch.distributed._shard import (
+    sharded_tensor,
     ChunkShardingSpec,
 )
 from torch.testing._internal.common_distributed import (
     requires_nccl,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.distributed._sharded_tensor import (
-    ShardedTensorTestBase,
-    with_comms,
-)
 from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
     run_tests,
 )
+from torch.testing._internal.distributed._sharded_tensor import (
+    ShardedTensorTestBase,
+    with_comms,
+)
 
 if TEST_WITH_DEV_DBG_ASAN:
-    print("Skip dev-asan as torch + multiprocessing spawn have known issues", file=sys.stderr)
+    print(
+        "Skip dev-asan as torch + multiprocessing spawn have known issues",
+        file=sys.stderr,
+    )
     sys.exit(0)
 
+
 class TestShardedTensorNNInit(ShardedTensorTestBase):
-    """ Testing torch.nn.init functions for ShardedTensor """
+    """Testing torch.nn.init functions for ShardedTensor"""
 
     @with_comms
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
     def test_init_sharded_tensor_with_uniform(self):
-        """ Test torch.nn.init.uniform_(ShardedTensor, a, b) """
+        """Test torch.nn.init.uniform_(ShardedTensor, a, b)"""
 
         spec = ChunkShardingSpec(
             dim=0,
@@ -48,18 +52,18 @@ class TestShardedTensorNNInit(ShardedTensorTestBase):
         seed = 1234
         dtype = torch.double
 
-        sharded_tensor = _sharded_tensor.empty(spec, h, w, dtype=dtype)
-        self.assertEqual(1, len(sharded_tensor.local_shards()))
+        st = sharded_tensor.empty(spec, h, w, dtype=dtype)
+        self.assertEqual(1, len(st.local_shards()))
 
         # Clone local tensor to ensure torch.nn.init starts from the same input
-        local_tensor_clone = torch.clone(sharded_tensor.local_shards()[0].tensor)
+        local_tensor_clone = torch.clone(st.local_shards()[0].tensor)
         torch.manual_seed(seed)
-        torch.nn.init.uniform_(sharded_tensor, a=a, b=b)
+        torch.nn.init.uniform_(st, a=a, b=b)
 
         torch.manual_seed(seed)
         torch.nn.init.uniform_(local_tensor_clone, a=a, b=b)
-        self.assertEqual(local_tensor_clone, sharded_tensor.local_shards()[0].tensor)
+        self.assertEqual(local_tensor_clone, st.local_shards()[0].tensor)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_tests()

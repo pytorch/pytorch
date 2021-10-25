@@ -2,11 +2,10 @@ from typing import List, cast
 
 import torch
 import torch.distributed as dist
-from torch.distributed._sharded_tensor.ops._common import (
+from torch.distributed._shard.sharded_tensor.ops._common import (
     _handle_col_wise_sharding_common,
 )
-from torch.distributed._sharding_spec import ChunkShardingSpec
-from torch.distributed._sharding_spec._internals import (
+from torch.distributed._shard.sharding_spec._internals import (
     get_split_size,
     get_chunked_dim_size,
 )
@@ -87,7 +86,8 @@ def sharded_embedding(types, args, kwargs, pg):
        are done for the (17 x 6 x 4) matrix and finally we transponse the
        dim 0 and dim 2 again.
     """
-    from torch.distributed._sharded_tensor import ShardedTensor
+    from torch.distributed._shard import ShardedTensor
+    from torch.distributed._shard import ChunkShardingSpec
 
     input = args[0]
     weight = args[1]

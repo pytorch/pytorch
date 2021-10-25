@@ -43,7 +43,7 @@ def empty(
         Needs to be called on all ranks in an SPMD fashion.
 
     Args:
-        sharding_spec (:class:`torch.distributed._sharding_spec.ShardingSpec`): The specification
+        sharding_spec (:class:`torch.distributed._shard.sharding_spec.ShardingSpec`): The specification
             describing how to shard the Tensor.
         size (int...): a sequence of integers defining the shape of the output
             tensor. Can be a variable number of arguments or a collection like a list or tuple.
@@ -105,7 +105,7 @@ def ones(
         Needs to be called on all ranks in an SPMD fashion.
 
     Args:
-        sharding_spec (:class:`torch.distributed._sharding_spec.ShardingSpec`): The specification
+        sharding_spec (:class:`torch.distributed._shard.sharding_spec.ShardingSpec`): The specification
             describing how to shard the Tensor.
         size (int...): a sequence of integers defining the shape of the output
             tensor. Can be a variable number of arguments or a collection like a list or tuple.
@@ -164,7 +164,7 @@ def rand(
         interval :math:`[0, 1)`. Needs to be called on all ranks in an SPMD fashion.
 
     Args:
-        sharding_spec (:class:`torch.distributed._sharding_spec.ShardingSpec`): The specification
+        sharding_spec (:class:`torch.distributed._shard.sharding_spec.ShardingSpec`): The specification
             describing how to shard the Tensor.
         size (int...): a sequence of integers defining the shape of the output
             tensor. Can be a variable number of arguments or a collection like a list or tuple.
@@ -224,7 +224,7 @@ def zeros(
         Needs to be called on all ranks in an SPMD fashion.
 
     Args:
-        sharding_spec (:class:`torch.distributed._sharding_spec.ShardingSpec`): The specification
+        sharding_spec (:class:`torch.distributed._shard.sharding_spec.ShardingSpec`): The specification
             describing how to shard the Tensor.
         size (int...): a sequence of integers defining the shape of the output
             tensor. Can be a variable number of arguments or a collection like a list or tuple.
@@ -286,7 +286,7 @@ def full(
         inferred type from fill_value. Needs to be called on all ranks in an SPMD fashion.
 
     Args:
-        sharding_spec (:class:`torch.distributed._sharding_spec.ShardingSpec`): The specification
+        sharding_spec (:class:`torch.distributed._shard.sharding_spec.ShardingSpec`): The specification
             describing how to shard the Tensor.
         size (int...):  a list, tuple, or `torch.Size` of integers defining the shape of the
             output tensor.
@@ -343,9 +343,9 @@ def init_from_local_shards(
     Needs to be called on all ranks in an SPMD fashion.
 
     Args:
-        local_shards (List[:class `torch.distributed._sharded_tensor.Shard`]): A list
+        local_shards (List[:class `torch.distributed._shard.sharded_tensor.Shard`]): A list
             of shards that represent the local shards on this rank.
-        sharded_tensor_metadata (:class:`torch.distributed._sharded_tensor.ShardedTensorMetadata`)
+        sharded_tensor_metadata (:class:`torch.distributed._shard.sharded_tensor.ShardedTensorMetadata`)
             The ShardedTensorMetadata that created manually, represents the global metadata
             of the ShardedTensor, must comply with `local_shards` defined in each rank.
             Note that `sharded_tensor_metadata` must be valid and should also contain
@@ -433,12 +433,12 @@ def shard_parameter(
     across the rest of the ranks.
 
     This method replaces ``module.param_name`` with a
-    :class:`torch.distributed._sharded_tensor.ShardedTensor`
+    :class:`torch.distributed._shard.sharded_tensor.ShardedTensor`
 
     Args:
         module (:class:`torch.nn.Module`): Module whose parameter needs to be sharded.
         param_name (str): Name of the parameter of ``module`` that needs to be sharded.
-        sharding_spec (:class:`torch.distributed._sharding_spec.ShardingSpec`): The specification
+        sharding_spec (:class:`torch.distributed._shard.sharding_spec.ShardingSpec`): The specification
             describing how to shard the Tensor.
 
     Keyword args:
@@ -450,7 +450,7 @@ def shard_parameter(
             the default process group will be used.
 
     .. warning::
-        Only :class:`torch.distributed._sharding_spec.ShardingSpec` is
+        Only :class:`torch.distributed._shard.sharding_spec.ShardingSpec` is
         currently supported as the ``sharding_spec``.
     """
     # Perform some validation first.

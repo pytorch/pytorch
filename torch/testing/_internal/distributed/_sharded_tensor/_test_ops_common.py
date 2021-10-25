@@ -1,4 +1,4 @@
-from torch.distributed._sharding_spec import (
+from torch.distributed._shard import (
     ChunkShardingSpec,
 )
 

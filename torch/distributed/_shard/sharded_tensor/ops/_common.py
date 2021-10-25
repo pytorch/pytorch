@@ -1,6 +1,6 @@
 import torch
 import torch.distributed as dist
-from torch.distributed._sharding_spec._internals import (
+from torch.distributed._shard.sharding_spec._internals import (
     get_split_size,
     get_chunked_dim_size,
 )
