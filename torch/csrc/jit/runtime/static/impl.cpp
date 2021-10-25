@@ -150,6 +150,39 @@ bool mayContainAlias(AliasDb& db, const Value* a, const Value* b) {
 
 bool mayContainAlias(
     AliasDb& db,
+    const Value* a,
+    const FastSet<const Value*> b) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  return db.mayContainAlias(const_cast<Value*>(a), valueVecFromFastSet(b));
+}
+
+bool mayTransitivelyContainOrPointTo(
+    AliasDb& db,
+    const Value* a,
+    const Value* b) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  return db.mayTransitivelyContainOrPointTo(
+      const_cast<Value*>(a), const_cast<Value*>(b));
+}
+
+bool mayTransitivelyContainOrPointTo(
+    AliasDb& db,
+    const Value* a,
+    const FastSet<const Value*>& b) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  auto bs = valueVecFromFastSet(b);
+  return db.mayTransitivelyContainOrPointTo(const_cast<Value*>(a), bs);
+}
+
+bool mayTransitivelyContainOrPointTo(
+    AliasDb& db,
+    const FastSet<const Value*> a,
+    const Value* b) {
+  return db.mayTransitivelyContainOrPointTo(
+      valueVecFromFastSet(a), {const_cast<Value*>(b)});
+}
+bool mayContainAlias(
+    AliasDb& db,
     const FastSet<const Value*>& a,
     const FastSet<const Value*>& b) {
   return db.mayContainAlias(valueVecFromFastSet(a), valueVecFromFastSet(b));
@@ -566,9 +599,8 @@ void ValueGroup::init(
     AliasDb& db) {
   external_aliases_.clear();
   output_aliases_.clear();
-  // Build `input_or_constant_aliases` as we look through nodes forwardly from
-  // the graph's inputs and add aliases of the inputs being created by the
-  // nodes.
+  // external_aliases_ should contain all nodes that may transitively
+  // contain or point to any inputs or constants.
   external_aliases_.insert(graph->inputs().begin(), graph->inputs().end());
   for (const auto* node : graph->nodes()) {
     if (node->kind() == prim::Constant) {
@@ -583,7 +615,7 @@ void ValueGroup::init(
       continue;
     }
     for (const auto* v : node->outputs()) {
-      if (mayContainAlias(db, {v}, external_aliases_)) {
+      if (mayTransitivelyContainOrPointTo(db, v, external_aliases_)) {
         external_aliases_.insert(v);
       }
     }
@@ -591,6 +623,11 @@ void ValueGroup::init(
 
   // Build `output_aliases` as we look through nodes reversely so that we can
   // start from the output values, and follow the flows backwardly from there.
+
+  // output_aliases_ should contain all nodes that any output may
+  // transitively contain or point to.
+  // TODO: add more direct way to just get the transitive closure for the
+  // outputs?
   output_aliases_.insert(graph->outputs().begin(), graph->outputs().end());
   for (const auto* node : graph->nodes().reverse()) {
     if (node->kind() == prim::Constant) {
@@ -598,14 +635,7 @@ void ValueGroup::init(
       continue;
     }
     for (const auto* v : node->outputs()) {
-      // Add values that can aliase input/constant values. Note some output
-      // aliases may end up in this category via collection objects (e.g.,
-      // Tuple).
-      if (mayContainAlias(db, {v}, external_aliases_)) {
-        external_aliases_.insert(v);
-        continue;
-      }
-      if (mayContainAlias(db, {v}, output_aliases_)) {
+      if (mayTransitivelyContainOrPointTo(db, output_aliases_, v)) {
         output_aliases_.insert(v);
       }
     }
