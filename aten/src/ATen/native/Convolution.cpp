@@ -432,6 +432,42 @@ bool check_cudnn_depthwise_workload(const at::Tensor& input, int stride) {
   }
   return false;
 }
+
+// simplified version for cudnn 8.2 and above
+bool check_cudnn_depthwise_workload_with_filter(const at::Tensor& input, int stride, const at::Tensor& weight) {
+  // 1D conv
+  if(input.size(2) == 1 && stride == 1){
+    return true;
+  }
+
+  // 2d conv
+  // only square filters
+  if (weight.size(2) != weight.size(3)) return false;
+  int filter = weight.size(3);
+  // only 1/3/5 filter
+  if (filter != 1 && filter != 3 && filter != 5) return false;
+  // we don't enforce square input but only check width to reduce heuristic space
+  if (input.size(3) < 7) return false; // min width 7
+  int w = input.size(3);
+  // only 1/2 stride, use cudnn for all stride 1
+  if (stride == 1) return true;
+  if (stride != 2) return false;
+
+  int ch = input.size(1);
+  int bs = input.size(0);
+  // special case since bs1 show good perf in lots of cases
+  if (bs == 1) {
+    if (filter == 1 && w <= 28) return true;
+    if (filter == 3 || filter == 5) return true;
+  } else {
+    if (filter == 1 && bs <= 16 && ch >= 128 && w <= 7) return true;
+    if (filter == 3 || filter == 5) {
+      if ((ch >= 512) || (ch >= 256 && w >= 28)) return true;
+    }
+  }
+  return false;
+}
+
 // Use cudnn for FP16 depthwise convolutions
 auto ConvParams::use_cudnn_depthwise(
         const at::Tensor& input, const at::Tensor& weight) const -> bool {
@@ -440,6 +476,20 @@ auto ConvParams::use_cudnn_depthwise(
   }
   if (detail::getCUDAHooks().supportsDepthwiseConvolutionWithCuDNN()) {
     long cudnn_version = detail::getCUDAHooks().versionCuDNN();
+    if (cudnn_version >= 8200) {
+      bool kernel_cond =  (use_cudnn(input, weight) &&
+                           input.scalar_type() == kHalf && // only for FP16
+                           weight.scalar_type() == kHalf &&
+                           is_depthwise(input, weight) &&
+                           input.ndimension() == 4 &&   // TODO: 5-D contiguous depthwise is not supported yet, need benchmarks
+                           !is_dilated() && // no dilation supported
+                           (stride[0] == stride[1] || input.size(2) == 1) && // square or 1d
+                           input.size(1) >= 32); // min 32 channels supported)
+      if (kernel_cond) {
+        return check_cudnn_depthwise_workload_with_filter(input, stride[1], weight);
+      }
+    }
+    // keep (7600 <= cudnn < 8200) code unchanged
     bool kernel_cond =  (cudnn_version >= 7600 &&
                          use_cudnn(input, weight) &&
                          input.scalar_type() == kHalf && // only for FP16
