@@ -92,12 +92,12 @@ void searchsorted_cuda_contiguous(Tensor& result, const Tensor& input, const Ten
 
 void dispatch(Tensor& result, const Tensor& input, const Tensor& boundaries, bool out_int32, bool right) {
   if (!out_int32) {
-    AT_DISPATCH_ALL_TYPES(input.scalar_type(), "searchsorted_out_cuda", [&] {
+    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, input.scalar_type(), "searchsorted_out_cuda", [&] {
       searchsorted_cuda_contiguous<scalar_t, int64_t>(result, input, boundaries, right);
     });
   }
   else {
-    AT_DISPATCH_ALL_TYPES(input.scalar_type(), "searchsorted_out_cuda", [&] {
+    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, input.scalar_type(), "searchsorted_out_cuda", [&] {
       searchsorted_cuda_contiguous<scalar_t, int>(result, input, boundaries, right);
     });
   }
