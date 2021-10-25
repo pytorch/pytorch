@@ -22,55 +22,55 @@ cc_library(
 
 cc_library(
     name = "cuda",
-    srcs = glob(["targets/x86_64-linux/lib/libcudart.so*"]),
+    srcs = ["targets/x86_64-linux/lib/libcudart.so"],
     visibility = ["//visibility:public"],
     deps = [":cuda_headers"],
 )
 
 cc_library(
     name = "cufft",
-    srcs = glob(["targets/x86_64-linux/lib/libcufft.so*"]),
+    srcs = ["targets/x86_64-linux/lib/libcufft.so"],
     visibility = ["//visibility:public"],
 )
 
 cc_library(
     name = "cublas",
-    srcs = glob([
-        "targets/x86_64-linux/lib/libcublasLt.so*",
-        "targets/x86_64-linux/lib/libcublas.so*",
-    ]),
+    srcs = [
+        "targets/x86_64-linux/lib/libcublasLt.so",
+        "targets/x86_64-linux/lib/libcublas.so",
+    ],
     visibility = ["//visibility:public"],
 )
 
 cc_library(
     name = "curand",
-    srcs = glob(["targets/x86_64-linux/lib/libcurand.so*"]),
+    srcs = ["targets/x86_64-linux/lib/libcurand.so"],
     visibility = ["//visibility:public"],
 )
 
 cc_library(
     name = "cusolver",
-    srcs = glob(["targets/x86_64-linux/lib/libcusolver.so*"]),
+    srcs = ["targets/x86_64-linux/lib/libcusolver.so"],
     visibility = ["//visibility:public"],
 )
 
 cc_library(
     name = "cusparse",
-    srcs = glob(["targets/x86_64-linux/lib/libcusparse.so*"]),
+    srcs = ["targets/x86_64-linux/lib/libcusparse.so"],
     visibility = ["//visibility:public"],
 )
 
 cc_library(
     name = "nvrtc",
-    srcs = glob([
-        "targets/x86_64-linux/lib/libnvrtc.so*",
-        "targets/x86_64-linux/lib/libnvrtc-builtins.so*",
-    ]),
+    srcs = [
+        "targets/x86_64-linux/lib/libnvrtc.so",
+        "targets/x86_64-linux/lib/libnvrtc-builtins.so",
+    ],
     visibility = ["//visibility:public"],
 )
 
 cc_library(
     name = "nvToolsExt",
-    srcs = glob([ "lib64/libnvToolsExt.so*"]),
+    srcs = [ "lib64/libnvToolsExt.so"],
     visibility = ["//visibility:public"],
 )
