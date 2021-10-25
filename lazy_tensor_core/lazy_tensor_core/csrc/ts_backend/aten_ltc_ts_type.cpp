@@ -674,19 +674,6 @@ at::Tensor& LazyNativeFunctions::random_(at::Tensor& self,
   return self;
 }
 
-at::Tensor LazyNativeFunctions::relu(const at::Tensor& self) {
-  LTC_FN_COUNTER("lazy::");
-  return bridge::AtenFromLtcTensor(
-      lazy_tensor_aten_ops::relu(bridge::GetLtcTensor(self)));
-}
-
-at::Tensor& LazyNativeFunctions::relu_(at::Tensor& self) {
-  LTC_FN_COUNTER("lazy::");
-  LazyTensor self_tensor = bridge::GetLtcTensor(self);
-  lazy_tensor_aten_ops::relu_(self_tensor);
-  return self;
-}
-
 at::Tensor LazyNativeFunctions::repeat(const at::Tensor& self,
                                        at::IntArrayRef repeats) {
   LTC_FN_COUNTER("lazy::");

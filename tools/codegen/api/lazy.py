@@ -133,6 +133,10 @@ class LazyIrSchema:
     def aten_name(self) -> str:
         return f"{self.name.name}"
 
+    @property
+    def base_name(self) -> str:
+        return f"{self.name.name.base}"
+
     def filtered_types(self, positional: bool = True, keyword: bool = True,
                        values: bool = True, scalars: bool = True) -> List[NamedCType]:
         types: List[NamedCType] = []

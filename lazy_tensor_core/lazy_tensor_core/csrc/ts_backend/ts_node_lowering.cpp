@@ -122,8 +122,6 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
       // activation and unary op do not change shape
       case at::aten::leaky_relu:
       case at::aten::pow:
-      case at::aten::relu:
-      case at::aten::relu_:
       case at::aten::sqrt: {
         const torch::lazy::Output& argument = node->operand(0);
         return ir::GetShapeFromTsOutput(argument);

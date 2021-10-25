@@ -7,7 +7,7 @@ ${lazy_ir_inc}
 
 ${external_backend_headers}
 
-namespace torch_lazy_tensors{
+namespace torch_lazy_tensors {
 namespace ir {
 
 static lazy_tensors::Shape convertShape(

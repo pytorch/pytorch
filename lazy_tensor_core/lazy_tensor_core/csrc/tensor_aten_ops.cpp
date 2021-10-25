@@ -1668,14 +1668,6 @@ LazyTensor reflection_pad2d_backward(const LazyTensor& grad_output,
           grad_output.GetIrValue(), input.GetIrValue(), std::move(padding)));
 }
 
-LazyTensor relu(const LazyTensor& input) {
-  return input.CreateFrom(ir::ops::ReluOp(input.GetIrValue()));
-}
-
-void relu_(LazyTensor& input) {
-  input.SetInPlaceIrValue(ir::ops::ReluOp(input.GetIrValue()));
-}
-
 LazyTensor remainder(const LazyTensor& input, const LazyTensor& other) {
   return input.CreateFrom(
       ir::ops::Remainder(input.GetIrValue(), other.GetIrValue()));

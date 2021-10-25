@@ -85,8 +85,6 @@ NodePtr SignOp(const torch::lazy::Value& input);
 
 NodePtr Abs(const torch::lazy::Value& input);
 
-NodePtr ReluOp(const torch::lazy::Value& input);
-
 NodePtr Min(const torch::lazy::Value& input, const torch::lazy::Value& other);
 
 NodePtr Max(const torch::lazy::Value& input, const torch::lazy::Value& other);
