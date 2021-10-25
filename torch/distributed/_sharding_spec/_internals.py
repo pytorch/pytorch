@@ -1,9 +1,8 @@
-import collections.abc
 from dataclasses import dataclass
 from typing import List, Union
-from torch.distributed.remote_device import _remote_device
 
 import torch
+from torch.distributed.remote_device import _remote_device
 
 @dataclass
 class ShardMetadata(object):
@@ -151,19 +150,3 @@ def get_chunked_dim_size(dim_size, split_size, idx):
         An int indicating the dim size of the chunk.
     """
     return min(dim_size, split_size * (idx + 1)) - split_size * idx
-
-def flatten_tensor_size(size) -> List[int]:
-    """
-    Checks if tensor size is valid, then flatten/return the list of ints.
-
-    """
-    if len(size) == 1 and isinstance(size[0], collections.abc.Sequence):
-        dims = list(*size)
-    else:
-        dims = list(size)
-
-    for dim in dims:
-        if not isinstance(dim, int):
-            raise TypeError(f'size has to be a sequence of ints, found: {dims}')
-
-    return dims
