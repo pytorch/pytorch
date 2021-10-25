@@ -319,17 +319,24 @@ void FuseInferenceOpsForSparseNN(std::shared_ptr<torch::jit::Graph>& graph) {
 }
 
 TORCH_LIBRARY_FRAGMENT(static_runtime, m) {
-  m.def("static_runtime::permute_copy(Tensor self, int[] dims) -> Tensor");
-  m.def(
-      "static_runtime::reshape_copy(Tensor(a) self, int[] shape) -> Tensor(a)");
-  m.def(
-      "static_runtime::flatten_copy.using_ints(Tensor(a) self, int start_dim=0, int end_dim=-1) -> Tensor(a)");
-  m.def(
-      "static_runtime::to_copy.prim_dtype(Tensor self, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor");
-  m.def(
-      "static_runtime::to_copy.dtype(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor");
-  m.def(
-      "static_runtime::to_copy.other(Tensor self, Tensor other, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor");
+  m.def(torch::schema(
+      "static_runtime::permute_copy(Tensor self, int[] dims) -> Tensor",
+      c10::AliasAnalysisKind::PURE_FUNCTION));
+  m.def(torch::schema(
+      "static_runtime::reshape_copy(Tensor self, int[] shape) -> Tensor",
+      c10::AliasAnalysisKind::PURE_FUNCTION));
+  m.def(torch::schema(
+      "static_runtime::flatten_copy.using_ints(Tensor self, int start_dim=0, int end_dim=-1) -> Tensor",
+      c10::AliasAnalysisKind::PURE_FUNCTION));
+  m.def(torch::schema(
+      "static_runtime::to_copy.prim_dtype(Tensor self, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor",
+      c10::AliasAnalysisKind::PURE_FUNCTION));
+  m.def(torch::schema(
+      "static_runtime::to_copy.dtype(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor",
+      c10::AliasAnalysisKind::PURE_FUNCTION));
+  m.def(torch::schema(
+      "static_runtime::to_copy.other(Tensor self, Tensor other, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor",
+      c10::AliasAnalysisKind::PURE_FUNCTION));
   m.def(torch::schema(
       "static_runtime::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> (Tensor, Tensor, Tensor)",
       c10::AliasAnalysisKind::PURE_FUNCTION));
@@ -340,6 +347,9 @@ TORCH_LIBRARY_FRAGMENT(static_runtime, m) {
   m.def(torch::schema(
       "static_runtime::VarTupleUnpack(...) -> ...",
       c10::AliasAnalysisKind::CONSERVATIVE));
+  m.def(torch::schema(
+      "static_runtime::fused_equally_split(Tensor input, int num_split, int dim) -> ...",
+      c10::AliasAnalysisKind::PURE_FUNCTION));
 }
 
 void FuseSignLog1P(std::shared_ptr<torch::jit::Graph>& graph) {
@@ -522,14 +532,13 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
   const std::vector<Value*> graph_outputs(
       graph->outputs().begin(), graph->outputs().end());
   auto nodes = graph->nodes();
-  std::vector<Node*> equally_splits_to_remove;
   for (auto it = nodes.begin(); it != nodes.end(); ++it) {
     Node* node = *it;
     const std::string node_qual_string = node->kind().toQualString();
     if (node_qual_string == "fb::sigrid_transforms" ||
         node_qual_string == "fb::sigrid_transforms_torch_bind" ||
-        node_qual_string == "fb::equally_split" ||
         node_qual_string == "fb::gather_ranges_to_dense" ||
+        node_qual_string == "fb::gather_ranges_to_dense_v2" ||
         node_qual_string == "fb::variadic_sigrid_transforms_torch_bind") {
       const Value* value_out = node->outputs()[0];
       if (value_out->uses().size() > 1) {
@@ -569,20 +578,7 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
       it_next.destroyCurrent(); // remove list_unpack
 
       node->eraseOutput(0);
-
-      if (node_qual_string == "fb::equally_split" &&
-          node->outputs().size() == 1) {
-        // This captures a case of `y = fb::equally_split(x, 1, _)` where y
-        // becomes just an alias of x.
-        // If this case is found, replace y with x to avoid executing this op.
-        equally_splits_to_remove.push_back(node);
-      }
     }
-  }
-
-  for (Node* node : equally_splits_to_remove) {
-    node->output(0)->replaceAllUsesWith(node->input(0));
-    node->destroy();
   }
 
 #ifndef NDEBUG
@@ -591,6 +587,90 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
   torch::jit::Lint(&db2);
 #endif
 }
+
+void FuseListUnpackV2(std::shared_ptr<torch::jit::Graph>& graph) {
+  const FastMap<c10::Symbol, c10::Symbol> unfused_to_fused = {
+      {c10::Symbol::fromQualString("fb::equally_split"),
+       c10::Symbol::fromQualString("static_runtime::fused_equally_split")}};
+
+  AliasDb alias_db(
+      graph, /*isFrozen=*/false, /*enablePreciseTupleContainerAnalysis=*/true);
+  const std::vector<Value*> graph_outputs(
+      graph->outputs().begin(), graph->outputs().end());
+  auto nodes = graph->nodes();
+  std::vector<Node*> to_remove;
+  for (auto* node : nodes) {
+    auto unfused_to_fused_it = unfused_to_fused.find(node->kind());
+    if (unfused_to_fused_it == unfused_to_fused.end()) {
+      continue;
+    }
+
+    const Value* value_out = node->outputs()[0];
+    if (value_out->uses().size() > 1) {
+      continue;
+    }
+
+    Node* list_unpack_node = value_out->uses()[0].user;
+    if (list_unpack_node->kind() != prim::ListUnpack) {
+      continue;
+    }
+
+    auto list_unpack_outputs = list_unpack_node->outputs();
+    if (list_unpack_outputs.empty()) {
+      continue;
+    }
+
+    const bool is_equally_split =
+        node->kind() == c10::Symbol::fromQualString("fb::equally_split");
+    if (!is_equally_split) {
+      // If any output of the ListUnpack node is unmanaged, disable fusion
+      // since the fused op assumes all outputs are either managed or not.
+      // "fb::equally_split" is excluded here since it does doublecheck
+      // individual outputs without having this assumption.
+      const std::vector<Value*> list_unpack_outputs_vec(
+          list_unpack_outputs.begin(), list_unpack_outputs.end());
+      if (alias_db.mayContainAlias(list_unpack_outputs_vec, graph_outputs)) {
+        continue;
+      }
+    }
+
+    if (is_equally_split && list_unpack_outputs.size() == 1) {
+      // This captures a case of `y = fb::equally_split(x, 1, _)` where y
+      // becomes just an alias of x.
+      // If this case is found, replace y with x to avoid executing this op.
+      list_unpack_node->output()->replaceAllUsesWith(node->input(0));
+      list_unpack_node->destroy();
+      to_remove.push_back(node);
+      continue;
+    }
+
+    const auto& new_sym = unfused_to_fused_it->second;
+    auto* new_node = graph->create(new_sym, 0);
+
+    for (Value* in : node->inputs()) {
+      new_node->addInput(in);
+    }
+
+    for (Value* out : list_unpack_outputs) {
+      Value* new_out = new_node->addOutput();
+      new_out->copyMetadata(out);
+      out->replaceAllUsesWith(new_out);
+    }
+
+    new_node->insertAfter(node);
+    list_unpack_node->destroy();
+    to_remove.push_back(node);
+  }
+  for (Node* node : to_remove) {
+    node->destroy();
+  }
+
+#ifndef NDEBUG
+  graph->lint();
+  AliasDb db2(graph);
+  torch::jit::Lint(&db2);
+#endif
+} // namespace jit
 
 void EnableStaticRuntimeLayerNorm(std::shared_ptr<torch::jit::Graph>& graph) {
   const c10::Symbol static_runtime_layer_norm_symbol =
