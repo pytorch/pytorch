@@ -244,15 +244,15 @@ The :meth:`~Function.jvp` will be called just after the :meth:`~Function.forward
 method, before the :meth:`~Function.apply` returns.
 
 :meth:`~Function.jvp` has a few subtle differences with the :meth:`~Function.backward` function
-- You can use the `ctx` to pass any data from the :meth:`~Function.forward` to the
-  :meth:`~Function.jvp` function. If that state will not be needed for the :meth:`~Function.backward`,
-  you can explicitly free it by doing `del ctx.foo` at the end of the :meth:`~Function.jvp` function.
+- You can use the `ctx` to pass any data from the :meth:`~Function.forward` to the :meth:`~Function.jvp`
+  function. If that state will not be needed for the :meth:`~Function.backward`,
+  you can explicitly free it by doing ``del ctx.foo`` at the end of the :meth:`~Function.jvp` function.
 - The implementation of :meth:`~Function.jvp` must be backward differentiable or explicitly check that
-  none of the given forward mode gradient has `requires_grad` set.
+  none of the given forward mode gradient has ``requires_grad`` set.
 - The :meth:`~Function.jvp` function must match the view/inplace behavior of :meth:`~Function.forward`.
-  For example, if the `i`th input is modified inplace, then the `i`th gradient must be updated inplace.
-  Similarly, if the `j`th output is a view of the `k`th input. Then the returned `j`th output gradient must be
-  a view of the given `k`th input gradient.
+  For example, if the ``i``th input is modified inplace, then the ``i``th gradient must be updated inplace.
+  Similarly, if the ``j``th output is a view of the ``k``th input. Then the returned ``j``th output gradient must be
+  a view of the given ``k``th input gradient.
 - Because the user cannot specify which gradient needs to be computed, the :meth:`~Function.jvp` function should
   always compute gradients for all the outputs.
 - The forward mode gradients do respect the flag set by :meth:`~torch.autograd.function.FunctionCtx.set_materialize_grads`
