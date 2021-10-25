@@ -1198,6 +1198,23 @@ def sample_inputs_linalg_matrix_power(op_info, device, dtype, requires_grad):
 
     return inputs
 
+def sample_inputs_logical_binaryops(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    cases = (
+        ((1,), (3,)),
+        ((0,), (0,)),
+        ((1, 2), (3, 1)),
+        ((), (1, 2)),
+        ((), ()),
+    )
+
+    def generator():
+        for input_, other in cases:
+            yield SampleInput(make_arg(input_), args=(make_arg(other),))
+
+    return list(generator())
+
 def sample_inputs_hsplit(op_info, device, dtype, requires_grad):
     return (SampleInput(make_tensor((6,), device, dtype,
                                     low=None, high=None,
@@ -8265,6 +8282,21 @@ op_db: List[OpInfo] = [
     ),
     # `softmax` supports different dtypes based on whether `dtype` argument,
     # is passed or not. Hence two OpInfo entries, one with dtype and other without.
+    BinaryUfuncInfo('logical_and',
+                ref=np.logical_and,
+                dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                sample_inputs_func=sample_inputs_logical_binaryops,
+                supports_autograd=False),
+    BinaryUfuncInfo('logical_or',
+                ref=np.logical_or,
+                dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                sample_inputs_func=sample_inputs_logical_binaryops,
+                supports_autograd=False),
+    BinaryUfuncInfo('logical_xor',
+                ref=np.logical_xor,
+                dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                sample_inputs_func=sample_inputs_logical_binaryops,
+                supports_autograd=False),
     OpInfo('softmax',
            aliases=('special.softmax', 'nn.functional.softmax',),
            aten_name='softmax',
