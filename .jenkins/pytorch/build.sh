@@ -24,6 +24,11 @@ if [[ "$BUILD_ENVIRONMENT" == *-mobile-code-analysis* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile-code-analysis.sh" "$@"
 fi
 
+# Always build periodic jobs with debug
+if [[ "$BUILD_ENVIRONMENT" == periodic-* ]]; then
+  export DEBUG=1
+fi
+
 if [[ "$BUILD_ENVIRONMENT" == *linux-xenial-cuda11.3* ]]; then
   # Enabling DEPLOY build (embedded torch python interpreter, experimental)
   # only on one config for now, can expand later
