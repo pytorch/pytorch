@@ -694,6 +694,32 @@ TEST(WriteTrackingTest, HasWriters) {
   EXPECT_TRUE(aliasDb.isMutable(add));
 }
 
+// These are macros rather than functions so that test failures will
+// blame to the calling line.
+#define EXPECT_MAY_TRANSITIVELY_CONTAIN_OR_POINT_TO_ASYMMETRIC(aliasDb, a, b) \
+  do {                                                                        \
+    EXPECT_TRUE((aliasDb).mayContainAlias((a), (b)));                         \
+    EXPECT_TRUE((aliasDb).mayContainAlias((b), (a)));                   \
+    EXPECT_TRUE((aliasDb).mayTransitivelyContainOrPointTo((a), (b)));         \
+    EXPECT_FALSE((aliasDb).mayTransitivelyContainOrPointTo((b), (a)));        \
+  } while (0)
+
+#define EXPECT_MAY_CONTAIN_ALIAS(aliasDb, a, b)                       \
+  do {                                                                \
+    EXPECT_TRUE((aliasDb).mayContainAlias((a), (b)));                 \
+    EXPECT_TRUE((aliasDb).mayContainAlias((b), (a)));                 \
+    EXPECT_TRUE((aliasDb).mayTransitivelyContainOrPointTo((a), (b))); \
+    EXPECT_TRUE((aliasDb).mayTransitivelyContainOrPointTo((b), (a))); \
+  } while (0)
+
+#define EXPECT_DOES_NOT_CONTAIN_OR_ALIAS(aliasDb, a, b)                \
+  do {                                                                 \
+    EXPECT_FALSE((aliasDb).mayContainAlias((a), (b)));                 \
+    EXPECT_FALSE((aliasDb).mayContainAlias((b), (a)));                 \
+    EXPECT_FALSE((aliasDb).mayTransitivelyContainOrPointTo((a), (b))); \
+    EXPECT_FALSE((aliasDb).mayTransitivelyContainOrPointTo((b), (a))); \
+  } while (0)
+
 TEST(ContainerAliasingTest, MayContainAlias) {
   auto graph = std::make_shared<Graph>();
   std::unordered_map<std::string, Value*> vmap;
@@ -718,15 +744,17 @@ TEST(ContainerAliasingTest, MayContainAlias) {
 
   EXPECT_TRUE(graph->outputs().size() == 3);
   for (auto out : graph->outputs()) {
-    EXPECT_TRUE(aliasDb.mayContainAlias(ten_output, out));
-    EXPECT_FALSE(aliasDb.mayContainAlias(local_var, out));
+    EXPECT_MAY_CONTAIN_ALIAS(aliasDb, ten_output, out);
+    EXPECT_DOES_NOT_CONTAIN_OR_ALIAS(aliasDb, local_var, out);
   }
 
-  EXPECT_TRUE(aliasDb.mayContainAlias(ten_output, graph->inputs()));
-  EXPECT_FALSE(aliasDb.mayContainAlias(local_var, graph->inputs()));
+  EXPECT_MAY_CONTAIN_ALIAS(aliasDb, ten_output, graph->inputs());
 
-  EXPECT_TRUE(aliasDb.mayContainAlias({ten_output}, graph->outputs()));
-  EXPECT_FALSE(aliasDb.mayContainAlias(str_output, graph->outputs()));
+  EXPECT_DOES_NOT_CONTAIN_OR_ALIAS(aliasDb, local_var, graph->inputs());
+
+  EXPECT_MAY_CONTAIN_ALIAS(aliasDb, c10::ArrayRef<Value*>({ten_output}), graph->outputs());
+
+  EXPECT_DOES_NOT_CONTAIN_OR_ALIAS(aliasDb, str_output, graph->outputs());
 }
 
 TEST(ContainerAliasingTest, MayContainAlias_cast) {
@@ -754,14 +782,16 @@ TEST(ContainerAliasingTest, MayContainAlias_cast) {
 
   EXPECT_TRUE(graph->outputs().size() == 1);
   for (auto out : graph->outputs()) {
-    EXPECT_TRUE(aliasDb.mayContainAlias(c, out));
+    EXPECT_MAY_CONTAIN_ALIAS(aliasDb, c, out);
   }
 
-  EXPECT_TRUE(aliasDb.mayContainAlias(a, b));
-  EXPECT_FALSE(aliasDb.mayContainAlias(b, graph->inputs()));
+  EXPECT_MAY_TRANSITIVELY_CONTAIN_OR_POINT_TO_ASYMMETRIC(aliasDb, b, a);
 
-  EXPECT_TRUE(aliasDb.mayContainAlias({c}, graph->outputs()));
-  EXPECT_FALSE(aliasDb.mayContainAlias(b, graph->outputs()));
+  EXPECT_DOES_NOT_CONTAIN_OR_ALIAS(aliasDb, b, graph->inputs());
+
+  EXPECT_MAY_CONTAIN_ALIAS(aliasDb, (c10::ArrayRef<Value*>{c}), graph->outputs());
+
+  EXPECT_DOES_NOT_CONTAIN_OR_ALIAS(aliasDb, b, graph->outputs());
 }
 
 TEST(ContainerAliasingTest, PrimitveValuesDontAliasContainers) {
@@ -786,7 +816,7 @@ TEST(ContainerAliasingTest, PrimitveValuesDontAliasContainers) {
   EXPECT_TRUE(graph->outputs().size() == 3);
   // primitive values don't need to alias container
   for (auto out : graph->outputs()) {
-    EXPECT_FALSE(aliasDb.mayContainAlias(int_node->output(), out));
+    EXPECT_DOES_NOT_CONTAIN_OR_ALIAS(aliasDb, int_node->output(), out);
   }
 }
 
@@ -810,9 +840,9 @@ TEST(ContainerAliasingTest, UnionAliasing) {
   EXPECT_TRUE(aliasDb.mayAlias(b, c));
   EXPECT_TRUE(aliasDb.mayAlias(c, c));
   EXPECT_FALSE(aliasDb.mayAlias(a, b));
-  EXPECT_TRUE(aliasDb.mayContainAlias(a, b));
-  EXPECT_TRUE(aliasDb.mayContainAlias(a, c));
-  EXPECT_TRUE(aliasDb.mayContainAlias(b, c));
+  EXPECT_MAY_CONTAIN_ALIAS(aliasDb, a, b);
+  EXPECT_MAY_CONTAIN_ALIAS(aliasDb, c, a);
+  EXPECT_MAY_CONTAIN_ALIAS(aliasDb, c, b);
 }
 
 TEST(ContainerAliasingTest, InputsCanAliasOutputs) {
@@ -831,9 +861,9 @@ TEST(ContainerAliasingTest, InputsCanAliasOutputs) {
   AliasDb aliasDb(graph);
 
   for (auto input : graph->inputs()) {
-    EXPECT_TRUE(aliasDb.mayContainAlias(input, tuple_node->output()));
+    EXPECT_MAY_CONTAIN_ALIAS(aliasDb, input, tuple_node->output());
   }
-  EXPECT_TRUE(aliasDb.mayContainAlias(graph->inputs(), graph->outputs()));
+  EXPECT_MAY_CONTAIN_ALIAS(aliasDb, graph->inputs(), graph->outputs());
 }
 
 // Test tuple that doesn't come from construct
@@ -864,7 +894,7 @@ graph(%x : int,
       continue;
     }
 
-    EXPECT_TRUE(aliasDb.mayContainAlias(input, graph->outputs().at(0)));
+    EXPECT_MAY_CONTAIN_ALIAS(aliasDb, input, graph->outputs().at(0));
   }
 }
 
@@ -888,11 +918,10 @@ graph():
   auto list_1 = g_output->node()->inputs().at(1);
 
   // TODO FIX assume conservatively for now
-  EXPECT_TRUE(aliasDb.mayContainAlias(list_1, list_2));
-  EXPECT_TRUE(aliasDb.mayContainAlias(list_2, list_1));
+  EXPECT_MAY_CONTAIN_ALIAS(aliasDb, list_1, list_2);
 
-  EXPECT_TRUE(aliasDb.mayContainAlias(list_1, g_output));
-  EXPECT_TRUE(aliasDb.mayContainAlias(list_2, g_output));
+  EXPECT_MAY_CONTAIN_ALIAS(aliasDb, list_1, g_output);
+  EXPECT_MAY_CONTAIN_ALIAS(aliasDb, list_2, g_output);
 }
 
 // simple example
@@ -914,14 +943,14 @@ graph():
   auto second_ten = *node_iter++;
   auto tup_node = *node_iter;
 
-  EXPECT_TRUE(aliasDb.mayContainAlias(first_ten->output(), tup_node->output()));
+  EXPECT_MAY_CONTAIN_ALIAS(aliasDb, first_ten->output(), tup_node->output());
   EXPECT_TRUE(
       !aliasDb.mayContainAlias(second_ten->output(), tup_node->output()));
 
   std::vector<Value*> first_st = {first_ten->output()};
   std::vector<Value*> second_st = {second_ten->output()};
   std::vector<Value*> tup_st = {tup_node->output()};
-  EXPECT_TRUE(aliasDb.mayContainAlias(first_st, tup_st));
+  EXPECT_MAY_CONTAIN_ALIAS(aliasDb, first_st, tup_st);
   EXPECT_FALSE(aliasDb.mayContainAlias(first_st, second_st));
   EXPECT_FALSE(aliasDb.mayContainAlias(second_st, tup_st));
 }
@@ -949,7 +978,7 @@ TEST(ContainerAliasingTest, Lists) {
 
   auto d = vmap["d"];
 
-  EXPECT_TRUE(aliasDb.mayContainAlias(d, c));
+  EXPECT_MAY_CONTAIN_ALIAS(aliasDb, d, c);
   EXPECT_TRUE(aliasDb.mayContainAlias(c, d));
 }
 
@@ -1177,16 +1206,16 @@ TEST(WildcardsTest, TypeIsolation) {
   EXPECT_FALSE(aliasDb.hasWriters(int_list));
   EXPECT_TRUE(aliasDb.hasWriters(opt_ten_list));
   EXPECT_TRUE(aliasDb.hasWriters(ten_list));
-  EXPECT_FALSE(aliasDb.mayContainAlias(int_list, opt_ten_list));
-  EXPECT_TRUE(aliasDb.mayContainAlias(ten_list, opt_ten_list));
+  EXPECT_DOES_NOT_CONTAIN_OR_ALIAS(aliasDb, int_list, opt_ten_list);
+  EXPECT_MAY_CONTAIN_ALIAS(aliasDb, ten_list, opt_ten_list);
   EXPECT_TRUE(aliasDb.mayAlias(ten_list, opt_ten_list));
 
   auto list_of_tensor_lists = vmap["ten_ten_list"];
-  EXPECT_TRUE(aliasDb.mayContainAlias(ten_list, list_of_tensor_lists));
-  EXPECT_TRUE(aliasDb.mayContainAlias(ten_list, vmap["ten"]));
+  EXPECT_MAY_CONTAIN_ALIAS(aliasDb, ten_list, list_of_tensor_lists);
+  EXPECT_MAY_CONTAIN_ALIAS(aliasDb, ten_list, vmap["ten"]);
 
-  EXPECT_TRUE(
-      !aliasDb.mayContainAlias(vmap["int_int_list"], list_of_tensor_lists));
+  EXPECT_DOES_NOT_CONTAIN_OR_ALIAS(
+      aliasDb, vmap["int_int_list"], list_of_tensor_lists);
 }
 
 // test invariant container aliasing
@@ -1210,7 +1239,7 @@ TEST(WildcardsTest, InvariantContainerAliasing) {
     auto ten_list = vmap["ten_list"];
     EXPECT_FALSE(aliasDb.hasWriters(ten_opt_list));
     EXPECT_TRUE(aliasDb.hasWriters(ten_list));
-    EXPECT_TRUE(aliasDb.mayContainAlias(ten_list, ten_opt_list));
+    EXPECT_MAY_CONTAIN_ALIAS(aliasDb, ten_list, ten_opt_list);
     EXPECT_FALSE(aliasDb.mayAlias(ten_list, ten_opt_list));
   }
   {
@@ -1239,8 +1268,8 @@ TEST(WildcardsTest, InvariantContainerAliasing) {
         vmap);
     AliasDb aliasDb(graph);
     EXPECT_TRUE(aliasDb.mayAlias(vmap["float_3D_list"], vmap["float_2D_list"]));
-    EXPECT_TRUE(aliasDb.mayContainAlias(vmap["float_3D_list"], vmap["ten"]));
-    EXPECT_TRUE(aliasDb.mayContainAlias(vmap["float_2D_list"], vmap["ten"]));
+    EXPECT_MAY_CONTAIN_ALIAS(aliasDb, vmap["float_3D_list"], vmap["ten"]);
+    EXPECT_MAY_CONTAIN_ALIAS(aliasDb, vmap["float_2D_list"], vmap["ten"]);
   }
 }
 
@@ -1477,8 +1506,8 @@ TEST(
       graph, /*isFrozen=*/false, /*enablePreciseTupleContainerAnalysis=*/true);
 
   EXPECT_TRUE(!aliasDb.mayAlias(vmap["x"], vmap["y"]));
-  EXPECT_TRUE(aliasDb.mayContainAlias(vmap["z"], vmap["x"]));
-  EXPECT_TRUE(aliasDb.mayContainAlias(vmap["z"], vmap["y"]));
+  EXPECT_MAY_TRANSITIVELY_CONTAIN_OR_POINT_TO_ASYMMETRIC(aliasDb, vmap["z"], vmap["x"]);
+  EXPECT_MAY_TRANSITIVELY_CONTAIN_OR_POINT_TO_ASYMMETRIC(aliasDb, vmap["z"], vmap["y"]);
 }
 
 TEST(
@@ -1497,8 +1526,8 @@ TEST(
   // enablePreciseTupleContainerAnalysis = false.
   AliasDb aliasDb(graph);
 
-  EXPECT_TRUE(aliasDb.mayContainAlias(vmap["z"], vmap["x"]));
-  EXPECT_TRUE(aliasDb.mayContainAlias(vmap["z"], vmap["y"]));
+  EXPECT_MAY_CONTAIN_ALIAS(aliasDb, vmap["z"], vmap["x"]);
+  EXPECT_MAY_CONTAIN_ALIAS(aliasDb, vmap["z"], vmap["y"]);
   EXPECT_TRUE(aliasDb.mayAlias(vmap["x"], vmap["y"]));
 }
 
@@ -1524,12 +1553,12 @@ TEST(AliasRegistrationTest, WildcardAliasForTupleConstructWithUses) {
   EXPECT_TRUE(aliasDb.mayAlias(vmap["x"], vmap["y"]));
   EXPECT_TRUE(aliasDb.mayAlias(vmap["x"], vmap["z"]));
   EXPECT_TRUE(aliasDb.mayAlias(vmap["y"], vmap["z"]));
-  EXPECT_TRUE(aliasDb.mayContainAlias(vmap["a"], vmap["x"]));
-  EXPECT_TRUE(aliasDb.mayContainAlias(vmap["a"], vmap["y"]));
-  EXPECT_TRUE(aliasDb.mayContainAlias(vmap["a"], vmap["z"]));
-  EXPECT_TRUE(aliasDb.mayContainAlias(vmap["b"], vmap["x"]));
-  EXPECT_TRUE(aliasDb.mayContainAlias(vmap["b"], vmap["y"]));
-  EXPECT_TRUE(aliasDb.mayContainAlias(vmap["b"], vmap["z"]));
+  EXPECT_MAY_CONTAIN_ALIAS(aliasDb, vmap["a"], vmap["x"]);
+  EXPECT_MAY_CONTAIN_ALIAS(aliasDb, vmap["a"], vmap["y"]);
+  EXPECT_MAY_CONTAIN_ALIAS(aliasDb, vmap["a"], vmap["z"]);
+  EXPECT_MAY_CONTAIN_ALIAS(aliasDb, vmap["b"], vmap["x"]);
+  EXPECT_MAY_CONTAIN_ALIAS(aliasDb, vmap["b"], vmap["y"]);
+  EXPECT_MAY_CONTAIN_ALIAS(aliasDb, vmap["b"], vmap["z"]);
 }
 
 TEST(AliasRegistrationTest, PureWithAnnotationsShouldError2) {

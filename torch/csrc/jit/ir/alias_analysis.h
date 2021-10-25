@@ -73,6 +73,21 @@ class AliasDb {
       const at::ArrayRef<Value*> a,
       const at::ArrayRef<Value*> b) const;
 
+  // Might there be any path from `a` to `b` in the contains-or-points-to graph?
+  // Compare to mayContainAlias, except the relationship is not symmetric.
+  TORCH_API bool mayTransitivelyContainOrPointTo(Value* a, Value* b) const;
+
+  // Might there be any path from `a` to any element in `b` in the
+  // contains-or-points-to graph? Compare to mayContainAlias, except the
+  // relationship is not symmetric.
+  TORCH_API bool mayTransitivelyContainOrPointTo(
+      Value* a,
+      const at::ArrayRef<Value*> b) const;
+
+  TORCH_API bool mayTransitivelyContainOrPointTo(
+      const at::ArrayRef<Value*> a,
+      const at::ArrayRef<Value*> b) const;
+
   // Do `a` and `b` potentially share a memory location?
   TORCH_API bool mayAlias(const Value* a, const Value* b) const;
   // Do any values in group `a` potentially share a memory location with any
@@ -268,6 +283,7 @@ class AliasDb {
       Element* container_elem,
       const AliasTypeSet& mut_types);
 
+  bool mayTransitivelyContainOrPointToImpl(Element* a, Element* b) const;
   std::vector<Element*> getElements(at::ArrayRef<Value*> vs) const;
   bool mayAliasWildcard(const Value* v) const;
   bool mayAliasWildcard(const at::ArrayRef<Value*> vs) const;

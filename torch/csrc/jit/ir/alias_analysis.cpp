@@ -1309,6 +1309,71 @@ bool AliasDb::mayContainAlias(Value* a, Value* b) const {
   return memoryDAG_->mayContainAlias(elementMap_.at(a), elementMap_.at(b));
 }
 
+bool AliasDb::mayTransitivelyContainOrPointToImpl(
+    Element* a_elt,
+    Element* b_elt) const {
+  if (memoryDAG_->mayTransitivelyContainOrPointTo(a_elt, b_elt)) {
+    return true;
+  }
+
+  // MemoryDAG only creates inbound edges for wildcards, but not
+  // outbound edges, so we need to check if there exists a wildcard
+  // that both a_elt and b_elt may transitively contain or point to.
+  return std::any_of(
+      wildcardIndex_.begin(),
+      wildcardIndex_.end(),
+      [memoryDAG = memoryDAG_.get(), a_elt, b_elt](const auto& pair) {
+        return memoryDAG->mayTransitivelyContainOrPointTo(a_elt, pair.second) &&
+            memoryDAG->mayTransitivelyContainOrPointTo(b_elt, pair.second);
+      });
+}
+
+bool AliasDb::mayTransitivelyContainOrPointTo(Value* a, Value* b) const {
+  if (!isMutableTypeInternal(a) || !isMutableTypeInternal(b)) {
+    return false;
+  }
+  auto* const a_elt = elementMap_.at(a);
+  auto* const b_elt = elementMap_.at(b);
+  return mayTransitivelyContainOrPointToImpl(a_elt, b_elt);
+}
+
+bool AliasDb::mayTransitivelyContainOrPointTo(
+    Value* a,
+    const at::ArrayRef<Value*> b) const {
+  if (!isMutableTypeInternal(a)) {
+    return false;
+  }
+  auto b_elems = getElements(b);
+  if (b_elems.empty()) {
+    return false;
+  }
+  auto* a_elt = elementMap_.at(a);
+  for (auto* b_elt : b_elems) {
+    if (mayTransitivelyContainOrPointToImpl(a_elt, b_elt)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool AliasDb::mayTransitivelyContainOrPointTo(
+    const at::ArrayRef<Value*> a,
+    const at::ArrayRef<Value*> b) const {
+  auto a_elems = getElements(a);
+  if (a_elems.empty()) {
+    return false;
+  }
+  auto b_elems = getElements(b);
+  for (auto* a_elem : a_elems) {
+    for (auto* b_elem : b_elems) {
+      if (mayTransitivelyContainOrPointToImpl(a_elem, b_elem)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 std::vector<Element*> AliasDb::getElements(at::ArrayRef<Value*> vs) const {
   std::vector<Element*> elements;
   for (const auto& val : vs) {
@@ -1323,9 +1388,8 @@ bool AliasDb::mayContainAlias(
     const at::ArrayRef<Value*> a,
     const at::ArrayRef<Value*> b) const {
   auto a_elems = getElements(a);
-  return a_elems.size() == 0
-      ? false
-      : memoryDAG_->mayContainAlias(a_elems, getElements(b));
+  return a_elems.empty() ? false
+                         : memoryDAG_->mayContainAlias(a_elems, getElements(b));
 }
 
 // Make each value in the `from` list point to its partner in the `to` list
