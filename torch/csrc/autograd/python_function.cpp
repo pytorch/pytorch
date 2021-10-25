@@ -621,6 +621,20 @@ PyObject* process_outputs(PyObject *op_obj, const std::shared_ptr<PyNode>& cdata
     }
   }
 
+  auto module_name = PyDict_GetItemString(((PyTypeObject*)op_obj)->tp_dict, "__module__");
+  if (!module_name) {
+    return NULL;
+  }
+  Py_ssize_t size;
+  const char *ptr = PyUnicode_AsUTF8AndSize(module_name, &size);
+  if (!ptr) {
+      return NULL;
+  }
+  auto modname = std::string(ptr);
+  if (node) {
+    node->s_(jit::attr::module, modname);
+  }
+
   bool is_inplace = static_cast<bool>(grad_fn->dirty_tensors);
   _wrap_outputs(cdata, grad_fn, unpacked.input_vars, raw_output, outputs, is_executable);
   _trace_post_record(node, op_obj, unpacked.input_vars, outputs, is_inplace, unpack_output);
