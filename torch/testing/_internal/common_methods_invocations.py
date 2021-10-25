@@ -8630,15 +8630,10 @@ op_db: List[OpInfo] = [
            aten_name='max_pool1d',
            supports_autograd=True,
            supports_out=False,
-           assert_jit_shape_analysis=True,
+           assert_jit_shape_analysis=False,  # TODO: add shape analysis
            dtypesIfCPU=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_scripting=False,  # TODO: fix aliasing test
-           skips=(
-               # FIXME: JIT Shape Analysis check fails for this op (not implemented yet)
-               # AssertionError: None != torch.Size([1, 2, 3])
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-           ),
            sample_inputs_func=sample_inputs_max_pool1d),
     OpInfo('nn.functional.max_pool2d',
            aten_name='max_pool2d',
@@ -8652,15 +8647,10 @@ op_db: List[OpInfo] = [
            aten_name='max_pool3d',
            supports_autograd=True,
            supports_out=False,
-           assert_jit_shape_analysis=True,
+           assert_jit_shape_analysis=False,  # TODO: add shape analysis
            dtypesIfCPU=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_scripting=False,  # TODO: fix aliasing test
-           skips=(
-               # FIXME: JIT Shape Analysis check fails for this op (not implemented yet)
-               # AssertionError: None != torch.Size([1, 6, 3, 5, 4])
-               DecorateInfo(unittest.skip('Skipped!'), 'TestJit', 'test_variant_consistency_jit'),
-           ),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=sample_inputs_max_pool3d),
     OpInfo('nn.functional.linear',
