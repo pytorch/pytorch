@@ -49,6 +49,7 @@
 #endif
 
 #if !defined(USE_ROCM) && !CUB_SUPPORTS_NV_BFLOAT16()
+
 namespace at_cuda_detail {
 // backport https://github.com/NVIDIA/cub/pull/306 for c10::BFloat16
 
