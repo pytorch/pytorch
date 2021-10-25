@@ -231,7 +231,7 @@ class DockerWorkflow:
     is_scheduled: str = ''
 
     def generate_workflow_file(self, workflow_template: jinja2.Template) -> None:
-        output_file_path = GITHUB_DIR / f"workflows/generated-docker-builds.yml"
+        output_file_path = GITHUB_DIR / "workflows/generated-docker-builds.yml"
         with open(output_file_path, "w") as output_file:
             GENERATED = "generated"  # Note that please keep the variable GENERATED otherwise phabricator will hide the whole file
             output_file.writelines([f"# @{GENERATED} DO NOT EDIT MANUALLY\n"])
@@ -547,9 +547,6 @@ DOCKER_WORKFLOWS = [
             for workflow in [*LINUX_WORKFLOWS, *BAZEL_WORKFLOWS]
             if workflow.docker_image_base
         }),
-        ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_DOCKER, LABEL_CIFLOW_SCHEDULED},
-        ),
         # Run weekly to ensure they can build
         is_scheduled="1 * */7 * *",
     ),

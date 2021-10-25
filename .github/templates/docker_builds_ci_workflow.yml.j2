@@ -15,6 +15,7 @@ on:
   schedule:
     - cron: !{{ is_scheduled }}
 {%- endif %}
+!{{ common.concurrency(build_environment) }}
 
 jobs:
 !{{ common.ciflow_should_run_job(ciflow_config) }}
