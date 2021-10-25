@@ -159,7 +159,7 @@ TEST(StaticRuntime, Sigmoid) {
 
 TEST(StaticRuntime, Clone) {
   auto a = at::randn({2, 3});
-  auto b = at::empty_strided({3, 2}, {1, 3});
+  auto b = at::randn({3, 2}).as_strided({3, 2}, {1, 3});
   auto c = at::randn({1, 2, 3, 4});
   auto d = at::randn({1, 0, 3, 4});
   std::vector<IValue> args_0{b, c10::MemoryFormat::Contiguous};
@@ -755,9 +755,9 @@ TEST(StaticRuntime, LongModel) {
   at::Tensor output_1 = mod.forward(input_ivalues).toTensor();
 
   // run static runtime
-  std::vector<at::Tensor> input_tensors({a, b, c});
+  std::vector<c10::IValue> input_tensors({a, b, c});
   torch::jit::StaticModule smod(mod);
-  at::Tensor output_2 = smod(input_tensors)[0];
+  at::Tensor output_2 = smod(input_tensors, {}).toTensor();
   smod.runtime().check_for_memory_leak();
   EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
 }
@@ -773,9 +773,9 @@ TEST(StaticRuntime, TrivialModel) {
   at::Tensor output_1 = mod.forward(input_ivalues).toTensor();
 
   // run static runtime
-  std::vector<at::Tensor> input_tensors({a, b, c});
+  std::vector<c10::IValue> input_tensors({a, b, c});
   torch::jit::StaticModule smod(mod);
-  at::Tensor output_2 = smod(input_tensors)[0];
+  at::Tensor output_2 = smod(input_tensors, {}).toTensor();
   smod.runtime().check_for_memory_leak();
   EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
 }
@@ -789,9 +789,9 @@ TEST(StaticRuntime, LeakyReLU) {
   at::Tensor output_1 = mod.forward(input_ivalues).toTensor();
 
   // run static runtime
-  std::vector<at::Tensor> input_tensors({inputs});
+  std::vector<c10::IValue> input_tensors({inputs});
   torch::jit::StaticModule smod(mod);
-  at::Tensor output_2 = smod(input_tensors)[0];
+  at::Tensor output_2 = smod(input_tensors, {}).toTensor();
   smod.runtime().check_for_memory_leak();
   EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
 }
@@ -813,8 +813,10 @@ TEST(StaticRuntime, DeepWide) {
       auto output_1 = getTensor(mod.forward(inputs));
 
       // run static runtime
-      std::vector<at::Tensor> input_tensors({ad_emb_packed, user_emb, wide});
-      at::Tensor output_2 = smod(input_tensors)[0];
+      std::vector<c10::IValue> input_tensors({ad_emb_packed, user_emb, wide});
+      auto outputs = smod(input_tensors, {}).toTuple()->elements();
+      ASSERT_TRUE(outputs.size() > 0);
+      at::Tensor output_2 = outputs[0].toTensor();
       smod.runtime().check_for_memory_leak();
       EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
     }
@@ -883,7 +885,7 @@ TEST(StaticRuntime, KWargsAPI_2) {
              {"wide", wide}});
 
         // run static runtime
-        c10::IValue output_ivalue = smod({}, kwargs);
+        c10::IValue output_ivalue = smod(std::vector<IValue>{}, kwargs);
         smod.runtime().check_for_memory_leak();
 
         at::Tensor output_2 = getTensor(output_ivalue);
@@ -947,9 +949,11 @@ TEST(StaticRuntime, CleanUpMemory) {
               auto output_1 = getTensor(mod.forward(inputs));
 
               // run static runtime
-              std::vector<at::Tensor> input_tensors(
+              std::vector<c10::IValue> input_tensors(
                   {ad_emb_packed, user_emb, wide});
-              at::Tensor output_2 = runtime(input_tensors)[0];
+              auto outputs = runtime(input_tensors, {}).toTuple()->elements();
+              ASSERT_TRUE(outputs.size() > 0);
+              auto output_2 = outputs[0].toTensor();
               runtime.check_for_memory_leak();
               EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
               if (manage_output_tensors) {
@@ -1053,9 +1057,9 @@ TEST(StaticRuntime, ManageOutputTensorsWithDeallocateOutputTensors) {
       torch::randn({batch_size, 1, embedding_size});
     auto user_emb = torch::randn({batch_size, 1, embedding_size});
     auto wide = torch::randn({batch_size, num_features});
-    std::vector<at::Tensor> input_tensors(
+    std::vector<c10::IValue> input_tensors(
         {ad_emb_packed, user_emb, wide});
-    runtime(input_tensors)[0];
+    runtime(input_tensors, {});
     runtime.check_for_memory_leak();
     runtime.deallocateOutputTensors();
     runtime.checkOutputTensorMemoryLeaks();
@@ -1079,21 +1083,21 @@ TEST(StaticRuntime, ManageOutputTensorsWithoutDeallocateOutputTensors) {
     torch::randn({batch_size, 1, embedding_size});
   auto user_emb = torch::randn({batch_size, 1, embedding_size});
   auto wide = torch::randn({batch_size, num_features});
-  std::vector<at::Tensor> input_tensors(
+  std::vector<c10::IValue> input_tensors(
       {ad_emb_packed, user_emb, wide});
   // Profile run.
-  runtime(input_tensors)[0];
+  runtime(input_tensors, {});
   runtime.deallocateOutputTensors();
   // Run again to allocate output Tensors without deallocating them.
-  runtime(input_tensors)[0];
+  runtime(input_tensors, {});
   // Memory leak checking fails.
   EXPECT_THROW(runtime.checkOutputTensorMemoryLeaks(), std::exception);
   // Calling the runtime without deallocation fails too.
-  EXPECT_THROW(runtime(input_tensors)[0], std::exception);
+  EXPECT_THROW(runtime(input_tensors, {}), std::exception);
   // After deallocation, everything works fine.
   runtime.deallocateOutputTensors();
   runtime.checkOutputTensorMemoryLeaks();
-  runtime(input_tensors)[0];
+  runtime(input_tensors, {});
 }
 
 TEST(StaticRuntime, FusionPass) {
@@ -1136,8 +1140,9 @@ TEST(
   Node* sigmoid_node = getNodeWithKind(smodule, "aten::sigmoid");
   const at::IValue a = torch::randn({2, 3});
   at::IValue b = torch::randn({3, 1});
-  std::vector<const IValue*> ivalue_inputs{&a};
-  ProcessedNode pnode(sigmoid_node, std::move(ivalue_inputs), true);
+  std::unique_ptr<const IValue*[]> ivalue_inputs = std::make_unique<const IValue*[]>(1);
+  ivalue_inputs[0] = &a;
+  ProcessedNode pnode(sigmoid_node, std::move(ivalue_inputs), 1, true);
 
   pnode.Output(0) = b;
   EXPECT_TRUE(pnode.verify_no_memory_overlap());
@@ -1156,8 +1161,9 @@ TEST(
   Node* sigmoid_node = getNodeWithKind(smodule, "aten::sigmoid");
   const at::IValue a = torch::randn({2, 3});
   at::IValue b = torch::randn({3, 1});
-  std::vector<const IValue*> ivalue_inputs{&a};
-  ProcessedNode pnode(sigmoid_node, std::move(ivalue_inputs), true);
+  std::unique_ptr<const IValue*[]> ivalue_inputs = std::make_unique<const IValue*[]>(1);
+  ivalue_inputs[0] = &a;
+  ProcessedNode pnode(sigmoid_node, std::move(ivalue_inputs), 1, true);
 
   pnode.Output(0) = b;
   EXPECT_TRUE(pnode.verify_no_memory_overlap());
@@ -1179,16 +1185,18 @@ TEST(ProcessedNode, VerifyNoMemoryOverlapWithOverlappingOutputs) {
   {
     auto a = at::randn({2, 3});
     IValue ivalue(a);
-    std::vector<const IValue*> inputs{&ivalue};
-    ProcessedNode list_unpack_pnode(list_unpack_node, std::move(inputs), /*enable_out_variant=*/true);
+    std::unique_ptr<const IValue*[]> inputs = std::make_unique<const IValue*[]>(1);
+    inputs[0] = &ivalue;
+    ProcessedNode list_unpack_pnode(list_unpack_node, std::move(inputs), 1, /*enable_out_variant=*/true);
     ASSERT_EQ(list_unpack_pnode.outputs().size(), 2);
     EXPECT_TRUE(list_unpack_pnode.verify_no_memory_overlap());
   }
   {
     auto a = at::randn({2, 3});
     IValue ivalue(a);
-    std::vector<const IValue*> inputs{&ivalue};
-    ProcessedNode list_unpack_pnode(list_unpack_node, std::move(inputs), /*enable_out_variant=*/true);
+    std::unique_ptr<const IValue*[]> inputs = std::make_unique<const IValue*[]>(1);
+    inputs[0] = &ivalue;
+    ProcessedNode list_unpack_pnode(list_unpack_node, std::move(inputs), 1, /*enable_out_variant=*/true);
     auto b = at::randn({2, 3});
     list_unpack_pnode.Output(0) = b;
     list_unpack_pnode.Output(1) = b;
@@ -1241,13 +1249,15 @@ TEST(StaticRuntime, IndividualOps_Index) {
   testStaticRuntime(index_without_none_script, args_a, args_b);
 
   // Index with None
-  // When indexing with none, the shape of `a` becomes [2, 1, 2],
+  // When indexing with none, the shape of `f` becomes [2, 1, 2],
   // so the mask must be reshaped appropriately.
-  auto idx_a_reshape = torch::tensor({{{0, 1}}, {{0, 0}}}, at::kBool);
-  std::vector<IValue> args_a_with_none{a, idx_a_reshape};
+  auto f = at::rand({2, 1, 2});
+  auto idx_f_reshape = torch::tensor({{{0, 1}}, {{0, 0}}}, at::kBool);
+  std::vector<IValue> args_f_with_none{f, idx_f_reshape};
+  args_f_with_none.emplace_back();
 
-  testStaticRuntime(index_with_none_script, args_a_with_none);
-  testStaticRuntime(index_with_none_script, args_a_with_none, args_b);
+  testStaticRuntime(index_with_none_script, args_f_with_none);
+  testStaticRuntime(index_with_none_script, args_f_with_none, {IValue(b), IValue(idx_b), IValue()});
 
   // Index with multiple tensors
   auto c = at::randn({2, 2});
