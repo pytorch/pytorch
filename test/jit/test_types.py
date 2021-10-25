@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: jit"]
+
 from collections import namedtuple
 from typing import Dict, List, Optional, Tuple
 
