@@ -117,10 +117,21 @@ static inline void maybe_resize_storage_cpu(TensorImpl* self, uint64_t new_size)
   }
 }
 
-uint64_t select_storage_size_default(
+inline uint64_t select_storage_size_default(
     TensorImpl* self,
     IntArrayRef size,
-    c10::optional<IntArrayRef> stride);
+    c10::optional<IntArrayRef> stride) {
+  int64_t storage_size = 1;
+  if (stride) {
+    self->set_sizes_and_strides(size, *stride);
+    // NB: storage size can be different from numel.
+    storage_size = storage_size_for(size, *stride);
+  } else {
+    self->set_sizes_contiguous(size);
+    storage_size = self->numel();
+  }
+  return storage_size;
+}
 
 TensorImpl* resize_impl_cpu_(
     TensorImpl* self,
@@ -135,10 +146,79 @@ TensorImpl* resize_impl_cpu_(
 // 2. It only fits in the existing storage if we don't use the
 //    requested strides -> no allocation needed!
 // 3. We have to allocate memory -> allocation needed!
-uint64_t select_storage_size_tryreuse(
+inline uint64_t select_storage_size_tryreuse(
     TensorImpl* self,
     IntArrayRef size,
-    c10::optional<IntArrayRef> stride);
+    c10::optional<IntArrayRef> stride) {
+  const size_t storage_nbytes = self->storage().nbytes();
+
+  // Defines how we are allocating/reusing memory.
+  // CONTIGUOUS has lower priority than STRIDED.
+  enum Strategy { CONTIGUOUS = 0, STRIDED, UNDEF };
+  // Checks that will be used to decide what strategy we will use
+  struct Checks {
+    bool may_reuse;
+    bool did_overflow;
+  };
+
+  auto check_allocatable = [&](const uint64_t storage_size) -> Checks {
+    auto byte_size = (storage_size + self->storage_offset()) * self->dtype().itemsize();
+    auto bytes = static_cast<size_t>(byte_size);
+    return Checks{bytes <= storage_nbytes, overflows<size_t>(byte_size)};
+  };
+
+  // Keep track of which strategy we are going to use for reusing
+  // the storage (if that's possible).
+  Strategy selected = UNDEF;
+  // If we can't, we pick an allocation strategy.
+  Strategy fallback = UNDEF;
+
+  std::array<uint64_t, 2> storage_size{0, 0};
+
+  // Computation of contiguous storage size is necessary, here.
+  // Calling 'self->set_size_contiguous' already does it, but we
+  // still don't know at this point.
+  storage_size[CONTIGUOUS] = 1;
+  for (auto s : size) {
+    storage_size[CONTIGUOUS] *= s;
+  }
+
+  auto c = check_allocatable(storage_size[CONTIGUOUS]);
+  selected = (!c.did_overflow && c.may_reuse) ? CONTIGUOUS : selected;
+  fallback = !c.did_overflow ? CONTIGUOUS : fallback;
+
+  // Use STRIDED strategy only if we have strides.
+  if (stride.has_value()) {
+    storage_size[STRIDED] = storage_size_for(size, stride.value());
+    auto c = check_allocatable(storage_size[STRIDED]);
+    selected = (!c.did_overflow && c.may_reuse) ? STRIDED : selected;
+    fallback = !c.did_overflow ? STRIDED : fallback;
+  }
+
+  if (selected == UNDEF) {
+    // If both `selected` and `alloc_strategy` are `UNDEF`, it means
+    // that we've overflowed on all strategies.
+    TORCH_CHECK(
+        fallback != UNDEF,
+        "Requested storage size (",
+        storage_size[CONTIGUOUS],
+        ") cannot be represented as a size_t");
+    selected = fallback;
+  }
+
+  switch (selected) {
+    case Strategy::STRIDED:
+      self->set_sizes_and_strides(size, stride.value());
+      break;
+    case Strategy::CONTIGUOUS:
+      self->set_sizes_contiguous(size);
+      break;
+    default:
+      break;
+  }
+
+  return storage_size[selected];
+}
 
 template <MaybeResizeFn MaybeFn>
 TensorImpl* resize_impl_tryreuse_(
