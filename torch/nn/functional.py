@@ -4965,6 +4965,25 @@ def multi_head_attention_forward(
             static_v=static_v,
         )
 
+    # Shape check.
+    if query.dim() == 3:
+        key_padding_cond = key_padding_mask is None or key_padding_mask.dim() == 2
+        attn_mask_cond = attn_mask is None or attn_mask.dim() in (2, 3)
+        assert key.dim() == 3 and value.dim() == 3 and key_padding_cond and attn_mask_cond
+    elif query.dim() == 2:
+        key_padding_cond = key_padding_mask is None or key_padding_mask.dim() == 1
+        attn_mask_cond = attn_mask is None or attn_mask.dim() in (2, 3)
+        assert key.dim() == 2 and value.dim() == 2 and key_padding_cond and attn_mask_cond
+        query = query.unsqueeze(1)
+        key = key.unsqueeze(1)
+        value = value.unsqueeze(1)
+        if key_padding_mask is not None:
+            key_padding_mask = key_padding_mask.unsqueeze(0)
+        if attn_mask is not None and attn_mask.dim() == 3:
+            assert attn_mask.shape == (num_heads, query.shape[0], key.shape[0])
+    else:
+        assert False, "Shapes should be...."
+
     # set up shape vars
     tgt_len, bsz, embed_dim = query.shape
     src_len, _, _ = key.shape

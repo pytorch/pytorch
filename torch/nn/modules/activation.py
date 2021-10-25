@@ -985,7 +985,7 @@ class MultiheadAttention(Module):
           size, :math:`L` is the target sequence length, and :math:`S` is the source sequence length. Only returned
           when ``need_weights=True``.
         """
-        if self.batch_first:
+        if self.batch_first and query.dim() == 3:
             query, key, value = [x.transpose(1, 0) for x in (query, key, value)]
 
         if not self._qkv_same_embed_dim:
@@ -1008,7 +1008,7 @@ class MultiheadAttention(Module):
                 training=self.training,
                 key_padding_mask=key_padding_mask, need_weights=need_weights,
                 attn_mask=attn_mask)
-        if self.batch_first:
+        if self.batch_first and query.dim() == 3:
             return attn_output.transpose(1, 0), attn_output_weights
         else:
             return attn_output, attn_output_weights
