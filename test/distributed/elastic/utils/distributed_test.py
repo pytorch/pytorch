@@ -43,8 +43,7 @@ class DistributedUtilTest(unittest.TestCase):
             )
 
     def test_create_store_multi(self):
-        # allow server to start first by specifying an indeterminate number of workers
-        world_size = -1
+        world_size = 3
         wait_for_workers = False
         localhost = socket.gethostname()
 
