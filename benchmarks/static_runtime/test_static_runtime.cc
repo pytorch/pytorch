@@ -755,9 +755,9 @@ TEST(StaticRuntime, LongModel) {
   at::Tensor output_1 = mod.forward(input_ivalues).toTensor();
 
   // run static runtime
-  std::vector<at::Tensor> input_tensors({a, b, c});
+  std::vector<c10::IValue> input_tensors({a, b, c});
   torch::jit::StaticModule smod(mod);
-  at::Tensor output_2 = smod(input_tensors)[0];
+  at::Tensor output_2 = smod(input_tensors, {}).toTensor();
   smod.runtime().check_for_memory_leak();
   EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
 }
@@ -773,9 +773,9 @@ TEST(StaticRuntime, TrivialModel) {
   at::Tensor output_1 = mod.forward(input_ivalues).toTensor();
 
   // run static runtime
-  std::vector<at::Tensor> input_tensors({a, b, c});
+  std::vector<c10::IValue> input_tensors({a, b, c});
   torch::jit::StaticModule smod(mod);
-  at::Tensor output_2 = smod(input_tensors)[0];
+  at::Tensor output_2 = smod(input_tensors, {}).toTensor();
   smod.runtime().check_for_memory_leak();
   EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
 }
@@ -789,9 +789,9 @@ TEST(StaticRuntime, LeakyReLU) {
   at::Tensor output_1 = mod.forward(input_ivalues).toTensor();
 
   // run static runtime
-  std::vector<at::Tensor> input_tensors({inputs});
+  std::vector<c10::IValue> input_tensors({inputs});
   torch::jit::StaticModule smod(mod);
-  at::Tensor output_2 = smod(input_tensors)[0];
+  at::Tensor output_2 = smod(input_tensors, {}).toTensor();
   smod.runtime().check_for_memory_leak();
   EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
 }
@@ -813,8 +813,10 @@ TEST(StaticRuntime, DeepWide) {
       auto output_1 = getTensor(mod.forward(inputs));
 
       // run static runtime
-      std::vector<at::Tensor> input_tensors({ad_emb_packed, user_emb, wide});
-      at::Tensor output_2 = smod(input_tensors)[0];
+      std::vector<c10::IValue> input_tensors({ad_emb_packed, user_emb, wide});
+      auto outputs = smod(input_tensors, {}).toTuple()->elements();
+      ASSERT_TRUE(outputs.size() > 0);
+      at::Tensor output_2 = outputs[0].toTensor();
       smod.runtime().check_for_memory_leak();
       EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
     }
@@ -947,9 +949,11 @@ TEST(StaticRuntime, CleanUpMemory) {
               auto output_1 = getTensor(mod.forward(inputs));
 
               // run static runtime
-              std::vector<at::Tensor> input_tensors(
+              std::vector<c10::IValue> input_tensors(
                   {ad_emb_packed, user_emb, wide});
-              at::Tensor output_2 = runtime(input_tensors)[0];
+              auto outputs = runtime(input_tensors, {}).toTuple()->elements();
+              ASSERT_TRUE(outputs.size() > 0);
+              auto output_2 = outputs[0].toTensor();
               runtime.check_for_memory_leak();
               EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
               if (manage_output_tensors) {
@@ -1053,9 +1057,9 @@ TEST(StaticRuntime, ManageOutputTensorsWithDeallocateOutputTensors) {
       torch::randn({batch_size, 1, embedding_size});
     auto user_emb = torch::randn({batch_size, 1, embedding_size});
     auto wide = torch::randn({batch_size, num_features});
-    std::vector<at::Tensor> input_tensors(
+    std::vector<c10::IValue> input_tensors(
         {ad_emb_packed, user_emb, wide});
-    runtime(input_tensors)[0];
+    runtime(input_tensors, {});
     runtime.check_for_memory_leak();
     runtime.deallocateOutputTensors();
     runtime.checkOutputTensorMemoryLeaks();
@@ -1079,21 +1083,21 @@ TEST(StaticRuntime, ManageOutputTensorsWithoutDeallocateOutputTensors) {
     torch::randn({batch_size, 1, embedding_size});
   auto user_emb = torch::randn({batch_size, 1, embedding_size});
   auto wide = torch::randn({batch_size, num_features});
-  std::vector<at::Tensor> input_tensors(
+  std::vector<c10::IValue> input_tensors(
       {ad_emb_packed, user_emb, wide});
   // Profile run.
-  runtime(input_tensors)[0];
+  runtime(input_tensors, {});
   runtime.deallocateOutputTensors();
   // Run again to allocate output Tensors without deallocating them.
-  runtime(input_tensors)[0];
+  runtime(input_tensors, {});
   // Memory leak checking fails.
   EXPECT_THROW(runtime.checkOutputTensorMemoryLeaks(), std::exception);
   // Calling the runtime without deallocation fails too.
-  EXPECT_THROW(runtime(input_tensors)[0], std::exception);
+  EXPECT_THROW(runtime(input_tensors, {}), std::exception);
   // After deallocation, everything works fine.
   runtime.deallocateOutputTensors();
   runtime.checkOutputTensorMemoryLeaks();
-  runtime(input_tensors)[0];
+  runtime(input_tensors, {});
 }
 
 TEST(StaticRuntime, FusionPass) {
