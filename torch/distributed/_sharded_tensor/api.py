@@ -30,6 +30,7 @@ from .metadata import TensorProperties, ShardedTensorMetadata
 from .ops import sharded_embedding, sharded_linear, uniform_
 from .shard import Shard
 from .utils import (
+    _CURRENT_PROCESS_GROUP,
     _parse_and_validate_remote_device,
     _validate_output_tensor_for_gather
 )
@@ -612,7 +613,6 @@ class ShardedTensor(object):
         self._local_shards, self._metadata, pg_state, self._sharding_spec, self._init_rrefs = state
 
         # Setup process group
-        global _CURRENT_PROCESS_GROUP
         if _CURRENT_PROCESS_GROUP is None:
             self._process_group = distributed_c10d._get_default_group()
         else:
