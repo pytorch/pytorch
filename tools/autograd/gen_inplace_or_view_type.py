@@ -33,7 +33,12 @@ from .gen_trace_type import (
 #
 # A map: function name => name of the argument that all outputs are view of
 
-VIEW_FUNCTIONS_WITH_METADATA_CHANGE = ['view_as_complex', 'view_as_real', '_conj', '_neg_view']
+VIEW_FUNCTIONS_WITH_METADATA_CHANGE = [
+    'view_as_complex',
+    'view_as_real',
+    '_conj',
+    '_neg_view'
+]
 
 VIEW_FUNCTIONS = {
     'numpy_T': 'self',
@@ -79,7 +84,7 @@ for key in VIEW_FUNCTIONS_WITH_METADATA_CHANGE:
 RETURNS_VIEWS_OF_INPUT = set(VIEW_FUNCTIONS.keys()).union({
     'chunk', 'detach', 'contiguous', 'reshape', 'reshape_as',
     'expand_as', 'view_as', 'real', 'imag', 'narrow', 'movedim',
-    'tensor_split', 'swapdims', 'swapaxes'
+    'tensor_split', 'swapdims', 'swapaxes', 'mT', 'mH', 'adjoint', 'matrix_H'
 })
 
 # These are the functions we consider views for the purposes of validating

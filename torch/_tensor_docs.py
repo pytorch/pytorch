@@ -4831,10 +4831,47 @@ Alias for :meth:`~Tensor.dim()`
 
 add_docstr_all('T',
                r"""
-Is this Tensor with its dimensions reversed.
+Returns a view of this tensor with its dimensions reversed.
 
 If ``n`` is the number of dimensions in ``x``,
 ``x.T`` is equivalent to ``x.permute(n-1, n-2, ..., 0)``.
+
+.. warning::
+    The use of :func:`Tensor.T` on tensors of dimension other than 2 to reverse their shape
+    is deprecated and it will throw an error in a future release. Consider :attr:`~.Tensor.mT`
+    to transpose batches of matrices or `x.permute(*torch.arange(x.ndim - 1, -1, -1))` to reverse
+    the dimensions of a tensor.
+""")
+
+add_docstr_all('H',
+               r"""
+Returns a view of a matrix (2-D tensor) conjugated and transposed.
+
+``x.H`` is equivalent to ``x.transpose(0, 1).conj()`` for complex matrices and
+``x.transpose(0, 1)`` for real matrices.
+
+.. seealso::
+
+        :attr:`~.Tensor.mH`: An attribute that also works on batches of matrices.
+""")
+
+add_docstr_all('mT',
+               r"""
+Returns a view of this tensor with the last two dimensions transposed.
+
+``x.mT`` is equivalent to ``x.transpose(-2, -1)``.
+""")
+
+add_docstr_all('mH',
+               r"""
+Accessing this property is equivalent to calling :func:`adjoint`.
+""")
+
+add_docstr_all('adjoint',
+               r"""
+adjoint() -> Tensor
+
+Alias for :func:`adjoint`
 """)
 
 add_docstr_all('real',

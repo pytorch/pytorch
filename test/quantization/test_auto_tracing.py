@@ -1,7 +1,6 @@
 import collections
 import copy
 import math
-from typing import List
 import unittest
 
 import torch
@@ -22,7 +21,7 @@ from torch.quantization.quantize_fx import (
     convert_fx,
 )
 
-import torch.quantization._quantize_dynamic_tracing as _quantize_dynamic_tracing
+import torch.ao.quantization._quantize_dynamic_tracing as _quantize_dynamic_tracing
 
 def _allclose(a, b):
     if isinstance(a, tuple):
@@ -54,9 +53,9 @@ class AutoTracingTestCase(QuantizationTestCase):
         mp = _quantize_dynamic_tracing.prepare(
             m, example_args, fuse_modules=fuse_modules)
         out_p = mp(*example_args)
-        print(mp)
+        # print(mp)
         mq = _quantize_dynamic_tracing.convert(mp)
-        print(mq)
+        # print(mq)
         # verify it runs
         out_q = mq(*example_args)
         # print(out_q)
@@ -125,7 +124,6 @@ class TestAutoTracing(AutoTracingTestCase):
         m = M().eval()
         m.qconfig = torch.quantization.default_qconfig
         mp = _quantize_dynamic_tracing.prepare(m, (torch.randn(1, 1, 1, 1),))
-        print(mp)
         self.assertTrue(isinstance(mp.conv, nni.ConvReLU2d))
         self.assertTrue(isinstance(mp.child[0], nni.ConvReLU2d))
 
@@ -689,12 +687,9 @@ class TestAutoTracing(AutoTracingTestCase):
 
         model_fp32 = M().eval()
         example_inputs = {'y': torch.randn(1), 'x': torch.randn(1)}
-        print('example_inputs', example_inputs)
-        import collections
         ExampleInputsTupleCtr = collections.namedtuple('ExampleInputs', example_inputs)
         example_inputs_tuple = ExampleInputsTupleCtr(**example_inputs)
         ms = torch.jit.trace(model_fp32, example_inputs_tuple)
-        print(ms.graph)
 
         return
         qconfig = torch.quantization.default_qconfig
@@ -760,7 +755,6 @@ class TestAutoTracing(AutoTracingTestCase):
         m = SequentialAppendList(torch.nn.Conv2d(1, 1, 1)).eval()
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 1, 1),))
-        print(m)
 
     def test_unsupported_ops(self):
         class M(torch.nn.Module):

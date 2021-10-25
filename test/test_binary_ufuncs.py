@@ -1,3 +1,5 @@
+# Owner(s): ["module: tests"]
+
 import torch
 import numpy as np
 
@@ -218,22 +220,28 @@ class TestBinaryUfuncs(TestCase):
         for idx in iter_indices(x):
             self.assertEqual(x[idx] >= y[idx], ge[idx] == 1)
 
+    @onlyCUDA
+    def test_comparison_ops_device_computation(self, device):
+        operands = (
+            torch.tensor(0),
+            torch.tensor(2, device='cuda'),
+            torch.tensor([0, 2], device='cuda')
+        )
+        # Checks that comparison operators compute the correct
+        # output device, given a combination of devices
+        # TODO: test all comparison ops after porting them to structured kernel
+        # logical_and, logical_or, and logical_xor
+        for op in [torch.lt, torch.le, torch.gt, torch.ge, torch.eq, torch.ne]:
+            for lhs in operands:
+                for rhs in operands:
+                    self.assertEqual(op(lhs, rhs), op(lhs.cpu(), rhs.cpu()))
+
     # TODO: update to work on CUDA, too
     @onlyCPU
     def test_comparison_ops_must_take_bool_output(self, device):
         for op in [torch.lt, torch.le, torch.gt, torch.ge, torch.eq, torch.ne,
                    torch.logical_and, torch.logical_or, torch.logical_xor]:
             self.assertEqual(op(torch.tensor([True]), torch.tensor([False])).dtype, torch.bool)
-
-    # TODO: update to work on CUDA, too
-    @onlyCPU
-    def test_inplace_comparison_ops_require_inputs_have_same_dtype(self, device):
-        for op in ['lt_', 'le_', 'gt_', 'ge_', 'eq_', 'ne_', 'logical_xor_', 'logical_and_', 'logical_or_']:
-            with self.assertRaisesRegex(RuntimeError, 'Expected object of scalar type'):
-                x = torch.tensor([1], dtype=torch.int)
-                y = torch.tensor([2], dtype=torch.long)
-                in_place_method = getattr(x, op)
-                in_place_method(y)
 
     # TODO: update to work on CUDA, too
     @onlyCPU
@@ -2259,13 +2267,6 @@ class TestBinaryUfuncs(TestCase):
         getattr(torch, op)(a, b, out=c)
         self.assertEqual(expected_res.bool(), c)
 
-        # in-place
-        # TODO: remove when different dtypes as operands are supported
-        if dtypes[0] != dtypes[1]:
-            with self.assertRaises(RuntimeError):
-                getattr(a, op + '_')(b)
-            return
-
         getattr(a, op + '_')(b)
         self.assertEqual(expected_res, a)
 
@@ -2352,9 +2353,14 @@ class TestBinaryUfuncs(TestCase):
             our_func = torch.logaddexp
 
         def _test_helper(a, b):
-            ref = ref_func(a.cpu().numpy(), b.cpu().numpy())
-            v = our_func(a, b)
-            self.assertEqual(ref, v)
+            if dtype == torch.bfloat16:
+                ref = ref_func(a.cpu().float().numpy(), b.cpu().float().numpy())
+                v = our_func(a, b)
+                self.assertEqual(ref, v.float(), atol=0.01, rtol=0.01)
+            else:
+                ref = ref_func(a.cpu().numpy(), b.cpu().numpy())
+                v = our_func(a, b)
+                self.assertEqual(ref, v)
 
         # simple test
         a = torch.randn(64, 2, dtype=dtype, device=device) - 0.5
@@ -2372,11 +2378,11 @@ class TestBinaryUfuncs(TestCase):
         b = torch.tensor([float('inf'), float('-inf'), float('-inf'), float("nan")], dtype=dtype, device=device)
         _test_helper(a, b)
 
-    @dtypes(torch.float32, torch.float64)
+    @dtypes(torch.float32, torch.float64, torch.bfloat16)
     def test_logaddexp(self, device, dtype):
         self._test_logaddexp(device, dtype, base2=False)
 
-    @dtypes(torch.float32, torch.float64)
+    @dtypes(torch.float32, torch.float64, torch.bfloat16)
     def test_logaddexp2(self, device, dtype):
         self._test_logaddexp(device, dtype, base2=True)
 
