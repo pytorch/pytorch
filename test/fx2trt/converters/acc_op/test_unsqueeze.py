@@ -5,21 +5,42 @@ import torch.fx
 import torch.fx.experimental.fx_acc.acc_ops as acc_ops
 import torch.nn as nn
 from caffe2.torch.fb.fx2trt.tests.test_utils import AccTestCase, InputTensorSpec
+from parameterized import parameterized
 
 
 class TestUnsqueeze(AccTestCase):
-    def test_unsqueeze(self):
+    @parameterized.expand(
+        [
+            ("negative_dim", -2),
+            ("positive_dim", 2),
+        ]
+    )
+    def test_unsqueeze(self, _, dim):
         class Unsqueeze(nn.Module):
+            def __init__(self, dim):
+                super().__init__()
+                self.dim = dim
+
             def forward(self, x):
-                return torch.unsqueeze(x, 1)
+                return torch.unsqueeze(x, self.dim)
 
         inputs = [torch.randn(1, 2, 3)]
-        self.run_test(Unsqueeze(), inputs, expected_ops={acc_ops.unsqueeze})
+        self.run_test(Unsqueeze(dim), inputs, expected_ops={acc_ops.unsqueeze})
 
-    def test_unsqueeze_with_dynamic_shape(self):
+    @parameterized.expand(
+        [
+            ("negative_dim_dynamic", -4),
+            ("positive_dim_dynamic", 1),
+        ]
+    )
+    def test_unsqueeze_with_dynamic_shape(self, _, dim):
         class Unsqueeze(nn.Module):
+            def __init__(self, dim):
+                super().__init__()
+                self.dim = dim
+
             def forward(self, x):
-                return torch.unsqueeze(x, 1)
+                return torch.unsqueeze(x, self.dim)
 
         input_specs = [
             InputTensorSpec(
@@ -29,5 +50,5 @@ class TestUnsqueeze(AccTestCase):
             ),
         ]
         self.run_test_with_dynamic_shape(
-            Unsqueeze(), input_specs, expected_ops={acc_ops.unsqueeze}
+            Unsqueeze(dim), input_specs, expected_ops={acc_ops.unsqueeze}
         )
