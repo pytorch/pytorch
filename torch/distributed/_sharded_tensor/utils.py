@@ -5,6 +5,9 @@ import torch
 from torch.distributed import distributed_c10d
 from torch.distributed import rpc
 
+# Tracks the current process group in the load context manager.
+_CURRENT_PROCESS_GROUP = None
+
 @contextmanager
 def load_with_process_group(process_group):
     """
@@ -21,7 +24,7 @@ def load_with_process_group(process_group):
     finally:
         _CURRENT_PROCESS_GROUP = None
 
-def _parse_and_validate_remote_device(pg: distributed_c10d.ProcessGroup, remote_device: torch.distributed._remote_device):
+def _parse_and_validate_remote_device(pg, remote_device):
 
     worker_name = remote_device.worker_name()
     rank = remote_device.rank()

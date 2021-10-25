@@ -39,10 +39,6 @@ _sharded_tensor_lock = threading.Lock()
 _sharded_tensor_current_id = 0
 _sharded_tensor_map: Dict[int, 'ShardedTensor'] = {}
 
-# Tracks the current process group in the load context manager.
-_CURRENT_PROCESS_GROUP = None
-
-
 def _register_remote_shards(sharded_tensor_id: int, rrefs: List[rpc.RRef[Shard]], rpc_rank: int):
     with _sharded_tensor_lock:
         if sharded_tensor_id not in _sharded_tensor_map:
