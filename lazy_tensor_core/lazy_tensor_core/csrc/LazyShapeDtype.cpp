@@ -46,7 +46,8 @@
 #include "lazy_tensor_core/csrc/ts_backend/LazyShapeDtype.h"
 
 #include "torch/csrc/api/include/torch/enum.h"
-namespace torch_lazy_tensors{
+
+namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
@@ -134,6 +135,14 @@ std::vector<c10::ScalarType> compute_dtype_mv(const at::Tensor& self, const at::
   return {self.scalar_type()};
 }
 
+std::vector<std::vector<int64_t>> compute_shape_relu(const at::Tensor& self) {
+  return {self.sizes().vec()};
+}
+
+std::vector<c10::ScalarType> compute_dtype_relu(const at::Tensor& self) {
+  return {self.scalar_type()};
+}
+
 std::vector<std::vector<int64_t>> compute_shape_bitwise_and(const at::Tensor& self, const at::Scalar& other) {
   return {self.sizes().vec()};
 }
@@ -161,11 +170,11 @@ std::vector<c10::ScalarType> compute_dtype_sum(
   ;
 }
 
-std::vector<std::vector<int64_t>> compute_shape_zero_(at::Tensor& self) {
+std::vector<std::vector<int64_t>> compute_shape_zero(at::Tensor& self) {
   return {self.sizes().vec()};
 }
 
-std::vector<c10::ScalarType> compute_dtype_zero_(at::Tensor& self) {
+std::vector<c10::ScalarType> compute_dtype_zero(at::Tensor& self) {
   return {self.scalar_type()};
 }
 
@@ -200,7 +209,7 @@ std::vector<std::vector<int64_t>> compute_shape_smooth_l1_loss_backward(
     const at::Tensor& grad_output, const at::Tensor& self,
     const at::Tensor& target, int64_t reduction, double beta) {
   // The `grad_output` tensor is really the input to this kernel, and while its
-  // shape may vary following the logic of the forward output, the outputs of
+  // shape may vary following the logic of the forward output, the output of
   // this kernel should have fixed shapes matching the inputs to the forward
   // kernel.
   return {self.sizes().vec(), target.sizes().vec()};

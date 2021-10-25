@@ -604,9 +604,6 @@ LazyTensor reflection_pad2d_backward(const LazyTensor& grad_output,
                                      const LazyTensor& input,
                                      std::vector<lazy_tensors::int64> padding);
 
-LazyTensor relu(const LazyTensor& input);
-void relu_(LazyTensor& input);
-
 LazyTensor remainder(const LazyTensor& input, const LazyTensor& other);
 LazyTensor remainder(const LazyTensor& input, const at::Scalar& other);
 

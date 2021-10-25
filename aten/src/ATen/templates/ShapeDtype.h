@@ -5,7 +5,7 @@ ${lazy_ir_sysinc}
 
 ${lazy_ir_inc}
 
-namespace torch_lazy_tensors{
+namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 

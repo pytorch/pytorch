@@ -79,13 +79,6 @@ NodePtr Abs(const torch::lazy::Value& input) {
   return GenericOp(OpKind(at::aten::abs), {input}, ir::GetShapeFromTsValue(input));
 }
 
-NodePtr ReluOp(const torch::lazy::Value& input) {
-  NodePtr node = GenericOp(OpKind(at::aten::relu), {input});
-  std::dynamic_pointer_cast<TsNode>(node)->SetShapeDeferred(
-      [&]() { return compiler::NodeLowering::Get()->Infer(node.get()); });
-  return node;
-}
-
 NodePtr HardSigmoid(const torch::lazy::Value& input) {
   return GenericOp(OpKind(at::aten::hardsigmoid), {input}, ir::GetShapeFromTsValue(input));
 }

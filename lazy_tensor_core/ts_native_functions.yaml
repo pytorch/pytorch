@@ -31,6 +31,8 @@ full_codegen:
   - native_layer_norm_backward
   - nll_loss_backward
   - nll_loss_forward
+  - relu
+  - relu_
   - rsqrt
   - sigmoid
   - smooth_l1_loss
@@ -70,8 +72,6 @@ supported:
   - max_pool3d_with_indices_backward
   - permute
   - random_
-  - relu
-  - relu_
   - repeat
   - select.int
   - slice.Tensor

@@ -81,6 +81,10 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
     parsed_yaml = parse_native_yaml(native_yaml_path)
     native_functions, backend_indices = parsed_yaml.native_functions, parsed_yaml.backend_indices
     grouped_native_functions = get_grouped_native_functions(native_functions)
+    def sort_native_function(f: Union[NativeFunctionsGroup, NativeFunction]) -> str:
+        func = f.functional.func if isinstance(f, NativeFunctionsGroup) else f.func
+        return str(func.name.name)
+    grouped_native_functions.sort(key=sort_native_function)
     parsed_backend_yaml = parse_backend_yaml(source_yaml, grouped_native_functions, backend_indices)
     backend_key = parsed_backend_yaml.backend_key
     autograd_key = parsed_backend_yaml.autograd_key
@@ -89,10 +93,21 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
     full_codegen = parse_full_codegen_ops(source_yaml, grouped_native_functions)
 
     def concat_map_codegen(func: Callable[[NativeFunction], Sequence[str]],
-                           xs: Iterable[Union[NativeFunctionsGroup, NativeFunction]]) -> Iterator[str]:
+                           xs: Iterable[Union[NativeFunctionsGroup, NativeFunction]],
+                           *, codegenInplaceVariant: bool = False) -> Iterator[str]:
+        """
+        We code-gen for the functional variant, which is all we need for IR classes/lowerings/shape inferences, but we
+        only code-gen additional entries for the inplace variant for the native functions.
+        Note: If xs is not sorted, there maybe an edge case when generating IR classes. Considering relu and relu_, if
+        we encounter relu_ before relu. we will then generate an IR class with op = at::aten::relu_ for both relu and
+        relu_ which will cause problems for relu.
+        """
+        generated = set()
         for x in xs:
             f = x.functional if isinstance(x, NativeFunctionsGroup) else x
-            if f.func.name in full_codegen:
+            if f.func.name in full_codegen and \
+                (codegenInplaceVariant or not f.func.name.name.inplace or f.func.name.name.base not in generated):
+                generated.add(f.func.name.name.base)
                 for r in func(f):
                     yield r
 
@@ -140,7 +155,8 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
                     backend_indices[backend_dispatch_key],
                     class_method_name=f'{backend_dispatch_key}NativeFunctions',
                     node_base=node_base),
-                grouped_native_functions
+                grouped_native_functions,
+                codegenInplaceVariant=True
             )),
         })
 

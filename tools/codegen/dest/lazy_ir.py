@@ -81,7 +81,7 @@ class {schema.node_name} : public {self.node_base} {{
  public:
   {schema.node_name}({node_ctor_args}, const std::vector<at::ScalarType>& out_dtypes,
       const std::vector<std::vector<int64_t>>& out_shapes)
-      : {self.node_base}(torch::lazy::OpKind(at::aten::{func.name.name}),
+      : {self.node_base}(torch::lazy::OpKind(at::aten::{schema.aten_name}),
               {{{base_ctor_value_args}}},
               convertShape(out_dtypes, out_shapes),
               /* num_outputs */ {len(func.returns)},
@@ -168,8 +168,8 @@ def gen_lazy_nativefunc_definition(func: NativeFunction, backend_index: BackendI
     else:
         meta_args = ", ".join([f"{t.name}" for t in all_types])
         meta_str = f"""
-    auto out_shape = torch_lazy_tensors::ir::ops::compute_shape_{schema.aten_name}({meta_args});
-    auto out_dtype = torch_lazy_tensors::ir::ops::compute_dtype_{schema.aten_name}({meta_args});"""
+    auto out_shape = torch_lazy_tensors::ir::ops::compute_shape_{schema.base_name}({meta_args});
+    auto out_dtype = torch_lazy_tensors::ir::ops::compute_dtype_{schema.base_name}({meta_args});"""
 
     node_str = f"""auto node = torch::lazy::MakeNode<ir::ops::{schema.node_name}>({node_ctor_input_str}, out_dtype, out_shape);"""
 
@@ -220,7 +220,8 @@ def gen_lazy_shape_dtype_decl(f: NativeFunction, backend_index: BackendIndex) ->
     # since we just use the meta function for structured kernels
     if not f.structured and f.structured_delegate is None:
         dispatch_args = ', '.join([a.decl() for a in dispatcher.arguments(f.func)])
-        return ["\n".join([f"std::vector<std::vector<int64_t>> compute_shape_{schema.aten_name}({dispatch_args});",
-                           f"std::vector<c10::ScalarType> compute_dtype_{schema.aten_name}({dispatch_args});"])]
+        # Here we use the base name to avoid generating for in-place variants.
+        return ["\n".join([f"std::vector<std::vector<int64_t>> compute_shape_{schema.base_name}({dispatch_args});",
+                           f"std::vector<c10::ScalarType> compute_dtype_{schema.base_name}({dispatch_args});"])]
     else:
         return []
