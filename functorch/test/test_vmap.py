@@ -183,7 +183,7 @@ class TestVmapAPI(TestCase):
         tensor = torch.randn(2)
         # The fallback doesn't support TensorList
         with self.assertRaisesRegex(RuntimeError, 'Batching rule not implemented'):
-            vmap(lambda t: torch.atleast_1d([t]))(tensor)
+            vmap(lambda t: torch.vstack([t]))(tensor)
 
         # Don't support non-tensor returns. This is a limitation of vmap;
         # functions that don't return tensors must be special cased
