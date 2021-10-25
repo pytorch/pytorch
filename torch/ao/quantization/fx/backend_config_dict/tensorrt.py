@@ -6,6 +6,7 @@ def get_tensorrt_backend_config_dict():
     NOTE: Current api will change in the future, it's just to unblock experimentation for
     new backends, please don't use it right now.
     """
+    # dtype configs
     weighted_op_qint8_dtype_config = {
         # optional, input activation dtype
         "input_dtype": torch.qint8,
@@ -16,6 +17,14 @@ def get_tensorrt_backend_config_dict():
         # optional, output activation dtype
         "output_dtype": torch.qint8
     }
+    non_weighted_op_qint8_dtype_config = {
+        # optional, input activation dtype
+        "input_dtype": torch.qint8,
+        # optional, output activation dtype
+        "output_dtype": torch.qint8,
+    }
+
+    # operator (module/functional/torch ops) configs
     linear_module_config = {
         # Please see README under this folder for pattern format
         "pattern": torch.nn.Linear,
@@ -31,11 +40,19 @@ def get_tensorrt_backend_config_dict():
             weighted_op_qint8_dtype_config,
         ]
     }
+    cat_config = {
+        "pattern": torch.cat,
+        "observation_type": ObservationType.OUTPUT_SHARE_OBSERVER_WITH_INPUT,
+        "dtype_configs": [
+            non_weighted_op_qint8_dtype_config,
+        ]
+    }
     return {
         # optional
         "name": "tensorrt",
         "configs": [
             linear_module_config,
             conv_module_config,
+            cat_config,
         ]
     }

@@ -168,5 +168,25 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
         # check model is not quantized
         self.checkGraphModuleNodes(quantized, expected_node_occurrence=node_occurrence)
 
+    def test_cat(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return torch.cat([x, x], 1)
+
+        m = M().eval()
+        prepared = prepare_fx(
+            m, {"": self.qconfig}, backend_config_dict=self.backend_config_dict)
+        self.assertTrue(len(dict(prepared.named_children())) == 1)
+        quantized = _convert_fx_do_not_use(prepared, is_reference=True)
+        node_occurrence = {
+            ns.call_function(torch.quantize_per_tensor): 2,
+            ns.call_function(torch.cat): 1,
+            ns.call_method("dequantize"): 2,
+        }
+        self.checkGraphModuleNodes(quantized, expected_node_occurrence=node_occurrence)
+
 if __name__ == "__main__":
     run_tests()
