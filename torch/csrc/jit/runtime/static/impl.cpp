@@ -933,7 +933,7 @@ void StaticRuntime::set_inputs(
 }
 
 template <typename IValueList>
-c10::IValue StaticRuntime::operator()(
+c10::IValue StaticRuntime::run_impl(
     IValueList&& args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
   // We assume inference workloads, so we do not need
@@ -997,13 +997,17 @@ c10::IValue StaticRuntime::operator()(
   return std::move(*outputs_[0]);
 }
 
-template c10::IValue StaticRuntime::operator()<const std::vector<c10::IValue>&>(
+c10::IValue StaticRuntime::operator()(
     const std::vector<c10::IValue>& args,
-    const std::unordered_map<std::string, c10::IValue>& kwargs);
+    const std::unordered_map<std::string, c10::IValue>& kwargs) {
+  return run_impl(args, kwargs);
+}
 
-template c10::IValue StaticRuntime::operator()<std::vector<c10::IValue>&&>(
+c10::IValue StaticRuntime::operator()(
     std::vector<c10::IValue>&& args,
-    const std::unordered_map<std::string, c10::IValue>& kwargs);
+    const std::unordered_map<std::string, c10::IValue>& kwargs) {
+  return run_impl(std::move(args), kwargs);
+}
 
 namespace {
 
