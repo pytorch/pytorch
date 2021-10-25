@@ -8661,6 +8661,7 @@ op_db: List[OpInfo] = [
                # AssertionError: None != torch.Size([1, 6, 3, 5, 4])
                DecorateInfo(unittest.skip('Skipped!'), 'TestJit', 'test_variant_consistency_jit'),
            ),
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=sample_inputs_max_pool3d),
     OpInfo('nn.functional.linear',
            aten_name='linear',
