@@ -4,7 +4,7 @@ This is not intended to be imported directly; please use the exposed
 functionalities in `torch.jit`.
 """
 
-from typing import Optional, List
+from typing import List, Optional
 
 import torch
 from torch.jit._script import RecursiveScriptModule, ScriptModule
@@ -26,12 +26,10 @@ def freeze(mod, preserved_attrs: Optional[List[str]] = None, optimize_numerics: 
 
     Args:
         mod (:class:`ScriptModule`): a module to be frozen
-
         preserved_attrs (Optional[List[str]]): a list of attributes to preserve in addition to the forward method.
-        Attributes modified in preserved methods will also be preserved.
-
+            Attributes modified in preserved methods will also be preserved.
         optimize_numerics (bool): If ``True``, a set of optimization passes will be run that does not strictly
-        preserve numerics. Full details of optimization can be found at `torch.jit.run_frozen_optimizations`.
+            preserve numerics. Full details of optimization can be found at `torch.jit.run_frozen_optimizations`.
 
     Returns:
         Frozen :class:`ScriptModule`.
