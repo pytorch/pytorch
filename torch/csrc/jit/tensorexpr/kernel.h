@@ -93,6 +93,7 @@ class TORCH_API TensorExprKernel {
       const std::shared_ptr<Graph>& subgraph,
       std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings =
           {},
+      std::vector<int64_t> symbolic_shape_inputs = {},
       bool pre_alloc = false);
 
   void run(Stack& stack);
@@ -172,6 +173,7 @@ class TORCH_API TensorExprKernel {
   BackendType inferBackendTypeFromDevice(at::Device device);
 
   Tensor bindInput(const torch::jit::Value* input);
+  BlockPtr bindAllInputs();
 
   Tensor convertOutputToCorrectStrides(torch::jit::Value* v);
 
@@ -195,6 +197,12 @@ class TORCH_API TensorExprKernel {
   // size and manage these buffers in the way we manage JIT constant tensors:
   // push the buf args into the stack so NNC IR can access them at runtime.
   void preAllocIntermediateBufs(std::unordered_set<BufPtr>& interm_bufs);
+
+  VarHandle getVarForShape(const c10::ShapeSymbol& ss);
+  std::vector<ExprHandle>& getStridesForValue(const Value* v);
+  BufHandle bindSymbolicShapeInput(const Value* input, const std::string& name);
+  std::vector<ExprHandle> sizesFromSymbolicShape(
+      const c10::SymbolicShape& shape);
 
  private:
   struct UnpackedTensorOptions {
@@ -229,6 +237,17 @@ class TORCH_API TensorExprKernel {
   bool hasBroadcast_{false};
   std::unordered_map<const torch::jit::Value*, std::vector<ExprHandle>>
       known_sizes_;
+
+  std::vector<std::vector<ExprHandle>> tensorOutputSymbolicSizes_;
+  // A map from ShapeSymbol.value() to the corresponding Var.
+  std::unordered_map<int64_t, VarHandle> shapeSymbolToVar_;
+  std::unordered_map<const Value*, std::vector<ExprHandle>> inputToStrides_;
+  std::unordered_map<ExprPtr, size_t> shapeSymbolInputPos_;
+  // List of values corresponding to the ShapeSymbols that are inputs to
+  // kernel being compiled. The order of these values correspond to the order
+  // of the symbolic inputs at the end of the list of inputs to the kernel.
+  std::vector<int64_t> symbolic_shape_inputs_;
+  bool has_symbolic_shapes_{false};
 
   std::vector<at::Tensor> unpacked_constant_tensors_;
   std::vector<ConstantDescr> constants_;
