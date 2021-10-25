@@ -499,7 +499,7 @@ def hardsigmoid(input: Tensor, inplace: bool = False) -> Tensor:
     if not input.is_quantized:
         raise ValueError("Input to 'quantized.hardsigmoid' must be quantized!")
     if inplace:
-        return torch._C._nn.hardsigmoid_(input)
+        return torch._C._nn.hardsigmoid_(input)  # type: ignore[attr-defined]
     return torch._C._nn.hardsigmoid(input)
 
 def clamp(input: Tensor, min_: float, max_: float) -> Tensor:
