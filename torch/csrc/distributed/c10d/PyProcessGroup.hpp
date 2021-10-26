@@ -63,7 +63,7 @@ class PyProcessGroup : public ProcessGroup {
     PYBIND11_OVERRIDE(
         c10::intrusive_ptr<ProcessGroup::Work>, /* Return type */
         ProcessGroup, /* Parent class */
-        broadcast, /* Name of function in C++ */
+        barrier, /* Name of function in C++ */
         opts);
   }
 
