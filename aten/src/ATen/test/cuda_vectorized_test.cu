@@ -81,7 +81,7 @@ __global__ void vectorized_copy(scalar_t *dst, scalar_t *src) {
   int idx = blockIdx.x;
   using vectorized = policies::vectorized<vec_size, array_t>;
   auto policy = vectorized(data);
-  scalar_t buf[thread_work_size];
+  scalar_t buf[thread_work_size()];
   auto accessor = [&](int index) -> scalar_t & { return buf[index]; };
   policy.load_single_arg(accessor, src + 256 * blockIdx.x);
   policy.store(buf, idx);
