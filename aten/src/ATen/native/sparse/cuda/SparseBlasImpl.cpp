@@ -511,18 +511,17 @@ void triangular_solve_out_sparse_csr(
   auto descA = at::cuda::sparse::CuSparseSpMatCsrDescriptor(A);
   descA.set_mat_fill_mode(upper);
   descA.set_mat_diag_type(unitriangular);
-  cusparseOperation_t opA = transpose ? CUSPARSE_OPERATION_TRANSPOSE : CUSPARSE_OPERATION_NON_TRANSPOSE;
+  cusparseOperation_t opA = transpose ? CUSPARSE_OPERATION_TRANSPOSE
+                                      : CUSPARSE_OPERATION_NON_TRANSPOSE;
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
-      X.scalar_type(),
-      "triangular_solve_out_sparse_csr_cuda_impl",
-      [&] {
-        scalar_t alpha = 1;
-        cudaDataType compute_type = at::cuda::getCudaDataType<scalar_t>();
-        auto handle = at::cuda::getCurrentCUDASparseHandle();
-        size_t buffer_size;
+  if (B.size(-1) == 1) {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+        X.scalar_type(), "triangular_solve_out_sparse_csr_cuda_impl", [&] {
+          scalar_t alpha = 1;
+          cudaDataType compute_type = at::cuda::getCudaDataType<scalar_t>();
+          auto handle = at::cuda::getCurrentCUDASparseHandle();
+          size_t buffer_size;
 
-        if (B.size(-1) == 1) {
           auto desc_spsv = at::cuda::sparse::CuSparseSpSVDescriptor();
           auto descB = at::cuda::sparse::CuSparseDnVecDescriptor(*B_);
           auto descX = at::cuda::sparse::CuSparseDnVecDescriptor(*X_);
@@ -552,8 +551,7 @@ void triangular_solve_out_sparse_csr(
               compute_type,
               CUSPARSE_SPSV_ALG_DEFAULT,
               desc_spsv.descriptor(),
-              work_data.get()
-          ));
+              work_data.get()));
 
           TORCH_CUDASPARSE_CHECK(cusparseSpSV_solve(
               handle,
@@ -564,16 +562,23 @@ void triangular_solve_out_sparse_csr(
               descX.descriptor(),
               compute_type,
               CUSPARSE_SPSV_ALG_DEFAULT,
-              desc_spsv.descriptor()
-          ));
-        } else {
+              desc_spsv.descriptor()));
+        });
+  } else {
 #if !AT_USE_CUSPARSE_GENERIC_SPSM()
-          TORCH_CHECK(
-              false,
-              "Calling triangular solve on a sparse GPU tensor requires compiling ",
-              "PyTorch with CUDA 11.3.1. ",
-              "Please use PyTorch built with newer CUDA version.");
+    TORCH_CHECK(
+        false,
+        "Calling triangular solve on a sparse GPU tensor requires compiling ",
+        "PyTorch with CUDA 11.3.1. ",
+        "Please use PyTorch built with newer CUDA version.");
 #else
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+        X.scalar_type(), "triangular_solve_out_sparse_csr_cuda_impl", [&] {
+          scalar_t alpha = 1;
+          cudaDataType compute_type = at::cuda::getCudaDataType<scalar_t>();
+          auto handle = at::cuda::getCurrentCUDASparseHandle();
+          size_t buffer_size;
+
           cusparseOperation_t opB = CUSPARSE_OPERATION_NON_TRANSPOSE;
           auto desc_spsm = at::cuda::sparse::CuSparseSpSMDescriptor();
           auto descB = at::cuda::sparse::CuSparseDnMatDescriptor(*B_);
@@ -606,8 +611,7 @@ void triangular_solve_out_sparse_csr(
               compute_type,
               CUSPARSE_SPSM_ALG_DEFAULT,
               desc_spsm.descriptor(),
-              work_data.get()
-          ));
+              work_data.get()));
 
           TORCH_CUDASPARSE_CHECK(cusparseSpSM_solve(
               handle,
@@ -619,11 +623,10 @@ void triangular_solve_out_sparse_csr(
               descX.descriptor(),
               compute_type,
               CUSPARSE_SPSM_ALG_DEFAULT,
-              desc_spsm.descriptor()
-          ));
+              desc_spsm.descriptor()));
+        });
 #endif // !AT_USE_CUSPARSE_GENERIC_SPSM()
-        }
-      });
+  }
   if (!X.is_same(*X_)) {
     X.copy_(*X_);
   }
