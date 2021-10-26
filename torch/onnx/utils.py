@@ -106,18 +106,13 @@ def export(model, args, f, export_params=True, verbose=False, training=None,
            opset_version=None, _retain_param_name=None, do_constant_folding=True,
            example_outputs=None, strip_doc_string=None, dynamic_axes=None,
            keep_initializers_as_inputs=None, custom_opsets=None,
-           enable_onnx_checker=None, use_external_data_format=None,
-           export_modules_as_functions=False):
+           use_external_data_format=None, export_modules_as_functions=False):
     if operator_export_type is None:
         if torch.onnx.PYTORCH_ONNX_CAFFE2_BUNDLE:
             operator_export_type = OperatorExportTypes.ONNX_ATEN_FALLBACK
         else:
             operator_export_type = OperatorExportTypes.ONNX
 
-    if enable_onnx_checker is not None:
-        warnings.warn("'enable_onnx_checker' is deprecated and ignored. It will be removed in "
-                      "the next PyTorch release. To proceed despite ONNX checker failures, "
-                      "catch torch.onnx.CheckerError.")
     if _retain_param_name is not None:
         warnings.warn("'_retain_param_name' is deprecated and ignored. "
                       "It will be removed in the next PyTorch release.")
