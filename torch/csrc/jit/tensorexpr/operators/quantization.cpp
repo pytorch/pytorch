@@ -1,3 +1,4 @@
+#include <c10/core/ScalarType.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/operators/misc.h>
 #include <torch/csrc/jit/tensorexpr/operators/quantization.h>
@@ -77,11 +78,11 @@ Tensor computeQuantizePerTensor(
 
   const auto dtype = [](auto qdtype) {
     if (static_cast<int64_t>(ScalarType::QInt8) == qdtype) {
-      return Dtype(ScalarType::Char);
+      return Dtype(ScalarType::QInt8);
     } else if (static_cast<int64_t>(ScalarType::QUInt8) == qdtype) {
-      return Dtype(ScalarType::Byte);
+      return Dtype(ScalarType::QUInt8);
     }
-    throw malformed_input("Unsupported quantized dtype");
+    throw malformed_input("Expected quantized dtype");
   }(c10::get<int64_t>(inputs[3]));
   const BufHandle& x = c10::get<BufHandle>(inputs[0]);
 
@@ -115,11 +116,11 @@ Tensor computeQuantizePerTensorExternalCall(
 
   const auto dtype = [](auto qdtype) {
     if (static_cast<int64_t>(ScalarType::QInt8) == qdtype) {
-      return Dtype(ScalarType::Char);
+      return Dtype(ScalarType::QInt8);
     } else if (static_cast<int64_t>(ScalarType::QUInt8) == qdtype) {
-      return Dtype(ScalarType::Byte);
+      return Dtype(ScalarType::QUInt8);
     }
-    throw malformed_input("Unsupported quantized dtype");
+    throw malformed_input("Expected quantized dtype");
   }(qdtype);
   auto ResultBuf =
       makeQBufHandle("quantize_per_tensor", outputShape, dtype, qscale, qzero);
