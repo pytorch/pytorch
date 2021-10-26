@@ -4985,12 +4985,12 @@ class TestLinalg(TestCase):
         b = torch.randn(2, 1, dtype=dtype, device=device)
         out = torch.empty_like(b).to(torch.int)
         clone_a = torch.empty_like(a)
-        with self.assertRaisesRegex(RuntimeError, "but got result with dtype Int"):
+        with self.assertRaisesRegex(RuntimeError, "Expected out tensor to have dtype"):
             torch.triangular_solve(b, a, out=(out, clone_a))
 
         out = torch.empty_like(b)
         clone_a = clone_a.to(torch.int)
-        with self.assertRaisesRegex(RuntimeError, "but got clone_A with dtype Int"):
+        with self.assertRaisesRegex(RuntimeError, "Expected out tensor to have dtype"):
             torch.triangular_solve(b, a, out=(out, clone_a))
 
         # device should match
