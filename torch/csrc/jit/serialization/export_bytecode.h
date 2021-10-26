@@ -13,8 +13,16 @@ namespace torch {
 namespace jit {
 
 struct ExportedFunction {
-  ExportedFunction(const Function& f, std::unique_ptr<Graph> g, bool t)
-      : function(f), optimizedGraph(std::move(g)), toplevel(t) {}
+  ExportedFunction(
+      Module m,
+      const Function& f,
+      std::unique_ptr<Graph> g,
+      bool t)
+      : mod(std::move(m)),
+        function(f),
+        optimizedGraph(std::move(g)),
+        toplevel(t) {}
+  Module mod;
   const Function& function;
   std::unique_ptr<Graph> optimizedGraph;
   bool toplevel;
