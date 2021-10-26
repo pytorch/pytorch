@@ -537,6 +537,39 @@ void initJITBindings(PyObject* module) {
             }
             return TraceGraph(graph, stack);
           })
+      .def(
+          "_jit_trace_module",
+          [](Module& model, const py::tuple& inputs) {
+            auto graph = model.get_method("forward").graph();
+            Stack stack;
+            push(stack, model._ivalue());
+            stack.reserve(inputs.size() + 1); // captures?
+            for (auto& obj : inputs) {
+              stack.push_back(toTypeInferredIValue(obj));
+            }
+            auto g_inputs = graph->inputs();
+            for (const auto i : c10::irange(inputs.size())) {
+              if (stack[i].isTensor()) {
+                g_inputs[i]->setType(stack[i].type());
+              }
+            }
+            GRAPH_DEBUG("Tracing Graph");
+            auto traced = TraceGraph(graph, stack);
+            GRAPH_DUMP("Traced Graph", traced);
+            for (int64_t i = graph->block()->outputs().size() - 1; i >= 0; i--) {
+              graph->block()->eraseOutput(i);
+            }
+            for (auto it = graph->block()->nodes().rbegin();
+             it != graph->block()->nodes().rend();
+             it++) {
+              it.destroyCurrent();
+            }
+            for (int64_t i = graph->block()->inputs().size() - 1; i >= 0; i--) {
+              graph->block()->eraseInput(i);
+            }
+            graph->block()->cloneFrom(traced->block(), nullptr);
+            GRAPH_DUMP("Copied Graph", graph);
+          })
       .def("_jit_pass_remove_expands", RemoveExpands)
       .def("_jit_pass_erase_number_types", EraseNumberTypes)
       .def("_jit_pass_inline_fork_wait", InlineForkWait)
