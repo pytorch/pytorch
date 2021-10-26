@@ -5140,18 +5140,20 @@ else:
             np_t = to_np(t)
 
             # test when prepend and append's size along dim is 1
-            actual = torch.diff(t, dim=dim, prepend=prepend, append=append)
-            expected = torch.from_numpy(np.diff(np_t, axis=dim, prepend=to_np(prepend), append=to_np(append)))
-            self.assertEqual(actual, expected.to(t.dtype))
+            for n in range(1, t.size(dim) + 2):
+                actual = torch.diff(t, dim=dim, n=n, prepend=prepend, append=append)
+                expected = torch.from_numpy(np.diff(np_t, axis=dim, n=n, prepend=to_np(prepend), append=to_np(append)))
+                self.assertEqual(actual, expected.to(t.dtype))                          
 
             # test when prepend and append's size along dim != 1
-            actual = torch.diff(t, dim=dim, prepend=t, append=t)
-            expected = torch.from_numpy(np.diff(np_t, axis=dim, prepend=np_t, append=np_t))
-            self.assertEqual(actual, expected.to(t.dtype))
+            for n in range(1, t.size(dim) * 3):
+                actual = torch.diff(t, dim=dim, n=n, prepend=t, append=t)
+                expected = torch.from_numpy(np.diff(np_t, axis=dim, n=n, prepend=np_t, append=np_t))
+                self.assertEqual(actual, expected.to(t.dtype))
 
     # All tensors appear contiguous on XLA
     @onlyOnCPUAndCUDA
-    @dtypes(*get_all_dtypes())
+    @dtypes(*get_all_dtypes(include_bfloat16=False))
     def test_diff_noncontig(self, device, dtype):
         shapes = (
             (1,),
@@ -5172,8 +5174,8 @@ else:
 
     # RngNormal not implemented for type f16 for XLA
     @dtypes(*get_all_dtypes(include_half=False))
-    @dtypesIfCPU(*get_all_dtypes())
-    @dtypesIfCUDA(*get_all_dtypes())
+    @dtypesIfCPU(*get_all_dtypes(include_bfloat16=False))
+    @dtypesIfCUDA(*get_all_dtypes(include_bfloat16=False))
     def test_diff(self, device, dtype):
         shapes = (
             (1,),
@@ -5199,8 +5201,12 @@ else:
             t.diff(dim=0, prepend=invalid_prepend)
 
         with self.assertRaisesRegex(
-                RuntimeError, 'diff only supports n = 1 currently'):
-            torch.diff(t, n=2)
+                RuntimeError, 'diff expects dim to be a valid dimension but got'):
+            t.diff(dim=3)
+
+        with self.assertRaisesRegex(
+                RuntimeError, 'diff expects n to be at least 1 and < size along dim after prepend and append'):
+            t.diff(n=4)
 
         with self.assertRaisesRegex(
                 RuntimeError, 'diff expects input to be at least one-dimensional'):
