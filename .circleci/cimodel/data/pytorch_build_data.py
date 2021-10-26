@@ -10,7 +10,6 @@ CONFIG_TREE_DATA = [
                 ]),
             ]),
             # TODO: bring back libtorch test
-            ("7", [X("3.6")]),
         ]),
         ("cuda", [
             ("10.2", [
