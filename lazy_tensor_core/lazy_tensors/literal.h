@@ -92,8 +92,8 @@ inline void Literal::Set<uint64_t>(
 }
 
 template <>
-inline void Literal::Set<lazy_tensors::bfloat16>(
-    lazy_tensors::Span<const int64_t> multi_index, lazy_tensors::bfloat16 value) {
+inline void Literal::Set<c10::BFloat16>(
+    lazy_tensors::Span<const int64_t> multi_index, c10::BFloat16 value) {
   LTC_LOG(FATAL) << "Not implemented yet.";
 }
 

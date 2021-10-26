@@ -1,6 +1,7 @@
 #pragma once
 #include <c10/core/Scalar.h>
 #include <c10/util/Half.h>
+#include <c10/util/BFloat16.h>
 #include <c10/util/Optional.h>
 
 #include <complex>
@@ -10,7 +11,6 @@
 
 #include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/computation_client/util.h"
-#include "lazy_tensors/core/lib/bfloat16/bfloat16.h"
 #include "lazy_tensors/literal_util.h"
 #include "lazy_tensors/permutation_util.h"
 
@@ -38,8 +38,8 @@ class Helpers {
       case lazy_tensors::PrimitiveType::F32:
         return lazy_tensors::LiteralUtil::CreateR0<float>(scalar_value);
       case lazy_tensors::PrimitiveType::BF16:
-        return lazy_tensors::LiteralUtil::CreateR0<lazy_tensors::bfloat16>(
-            static_cast<lazy_tensors::bfloat16>(
+        return lazy_tensors::LiteralUtil::CreateR0<c10::BFloat16>(
+            static_cast<c10::BFloat16>(
                 static_cast<float>(scalar_value)));
       case lazy_tensors::PrimitiveType::F16:
         return lazy_tensors::LiteralUtil::CreateR0<c10::Half>(

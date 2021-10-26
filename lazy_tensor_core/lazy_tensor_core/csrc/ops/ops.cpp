@@ -182,10 +182,10 @@ NodePtr ARange(const at::Scalar& start, const at::Scalar& end,
   lazy_tensors::Literal values;
   switch (type) {
     case lazy_tensors::PrimitiveType::BF16:
-      values = Helpers::Range<lazy_tensors::bfloat16>(
-          static_cast<lazy_tensors::bfloat16>(start.toFloat()),
-          static_cast<lazy_tensors::bfloat16>(end.toFloat()),
-          static_cast<lazy_tensors::bfloat16>(step.toFloat()));
+      values = Helpers::Range<c10::BFloat16>(
+          static_cast<c10::BFloat16>(start.toFloat()),
+          static_cast<c10::BFloat16>(end.toFloat()),
+          static_cast<c10::BFloat16>(step.toFloat()));
       break;
     case lazy_tensors::PrimitiveType::F16:
       values = Helpers::Range<c10::Half>(

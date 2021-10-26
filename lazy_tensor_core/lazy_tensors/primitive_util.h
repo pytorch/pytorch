@@ -2,6 +2,7 @@
 
 #include <string>
 #include <c10/util/Half.h>
+#include <c10/util/BFloat16.h>
 #include "lazy_tensors/primitive_types.h"
 
 namespace lazy_tensors {
@@ -87,7 +88,7 @@ inline PrimitiveType NativeToPrimitiveType<c10::Half>() {
 }
 
 template <>
-inline PrimitiveType NativeToPrimitiveType<bfloat16>() {
+inline PrimitiveType NativeToPrimitiveType<c10::BFloat16>() {
   return PrimitiveType::BF16;
 }
 

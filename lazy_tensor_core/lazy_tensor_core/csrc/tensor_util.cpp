@@ -9,6 +9,7 @@
 #include <thread>
 
 #include <c10/util/Half.h>
+#include <c10/util/BFloat16.h>
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/layout_manager.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_computation_client.h"
@@ -18,7 +19,6 @@
 #include "lazy_tensors/computation_client/sys_util.h"
 #include "lazy_tensors/computation_client/thread_pool.h"
 #include "lazy_tensors/computation_client/util.h"
-#include "lazy_tensors/core/lib/bfloat16/bfloat16.h"
 #include "lazy_tensors/literal_util.h"
 #include "lazy_tensors/shape_util.h"
 
@@ -142,9 +142,9 @@ struct Caster<at::BFloat16> {
   }
 };
 template <>
-struct Caster<lazy_tensors::bfloat16> {
+struct Caster<c10::BFloat16> {
   template <typename D>
-  D cast(const lazy_tensors::bfloat16& value) const {
+  D cast(const c10::BFloat16& value) const {
     return static_cast<D>(static_cast<float>(value));
   }
 };
@@ -246,7 +246,7 @@ int64_t GetFlatTensorOffset(
   return base;
 }
 
-// The lazy_tensors::bfloat16 does not have implicit cast operations, so using
+// The c10::BFloat16 does not have implicit cast operations, so using
 // std::copy() for it, is not going to work.
 struct CopyDirect {};
 struct CopyCasted {};
@@ -256,11 +256,7 @@ struct NeedCast {
   static constexpr bool value = false;
 };
 template <>
-struct NeedCast<lazy_tensors::bfloat16> {
-  static constexpr bool value = true;
-};
-template <>
-struct NeedCast<at::BFloat16> {
+struct NeedCast<c10::BFloat16> {
   static constexpr bool value = true;
 };
 template <>
@@ -311,19 +307,6 @@ void CopyData(D* dest, const S* source, int64_t n,
   // Use strided copy with step 1 since it has the static_cast<> required to
   // convert from/to bfloat16.
   StridedCopy(dest, 1, source, 1, n);
-}
-
-template <>
-void CopyData<at::BFloat16, lazy_tensors::bfloat16>(
-    at::BFloat16* dest, const lazy_tensors::bfloat16* source,
-    int64_t n, const CopyCasted&) {
-  CheckedMemcpy<at::BFloat16, lazy_tensors::bfloat16>(dest, source, n);
-}
-template <>
-void CopyData<lazy_tensors::bfloat16, at::BFloat16>(
-    lazy_tensors::bfloat16* dest, const at::BFloat16* source,
-    int64_t n, const CopyCasted&) {
-  CheckedMemcpy<lazy_tensors::bfloat16, at::BFloat16>(dest, source, n);
 }
 
 std::vector<int64_t> GetIterationDimensions(
@@ -489,7 +472,7 @@ void TensorToBufferSType(const at::Tensor& tensor,
                          const Device& device) {
   switch (dest_shape.element_type()) {
     case lazy_tensors::PrimitiveType::BF16:
-      TensorToBuffer<SType, lazy_tensors::bfloat16>(
+      TensorToBuffer<SType, c10::BFloat16>(
           tensor, dest_shape, dest_buffer, dest_buffer_size, device);
       break;
     case lazy_tensors::PrimitiveType::F16:
@@ -713,7 +696,7 @@ at::Tensor MakeTensorFromLiteral(const lazy_tensors::Literal& literal,
     case lazy_tensors::PrimitiveType::PRED:
       return LiteralToTensorHelper<bool>(literal, dest_element_type);
     case lazy_tensors::PrimitiveType::BF16:
-      return LiteralToTensorHelper<lazy_tensors::bfloat16>(literal,
+      return LiteralToTensorHelper<c10::BFloat16>(literal,
                                                            dest_element_type);
     case lazy_tensors::PrimitiveType::F16:
       return LiteralToTensorHelper<c10::Half>(literal,
