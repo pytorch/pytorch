@@ -11,7 +11,7 @@
 #include <torch/custom_class.h>
 #include <torch/library.h>
 
-torch::class_<LinearPackedParamsBase> register_linear_params();
+int register_linear_params();
 
 namespace at { namespace native {
 
@@ -1984,6 +1984,10 @@ namespace {
 
 static auto ensure_linear_params_registered = register_linear_params();
 
+// This custom class depends on quantized.LinearPackedParamsBase
+// No rnn models are on mobile yet, so its hard to test, but
+// when this is made selective we may have to update the selective
+// build tracer to manually enforce this dependency.
 static auto cell_params_base_registry =
     torch::class_<CellParamsBase>("rnn", "CellParamsBase")
         .def_pickle(

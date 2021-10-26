@@ -8,10 +8,11 @@
 
 namespace ao {
 namespace sparse {
-torch::class_<LinearPackedParamsBase> register_linear_params() {
+
+int register_linear_params() {
   static auto register_linear_params =
-      torch::class_<LinearPackedParamsBase>(
-          "sparse", "LinearPackedParamsBase")
+      torch::selective_class::class_<LinearPackedParamsBase>(
+          "sparse", TORCH_SELECTIVE_CLASS("LinearPackedParamsBase"))
           .def_pickle(
               [](const c10::intrusive_ptr<LinearPackedParamsBase>& params)
                   -> LinearPackedSerializationType { // __getstate__
@@ -65,7 +66,7 @@ torch::class_<LinearPackedParamsBase> register_linear_params() {
 #endif // USE_FBGEMM
                 TORCH_CHECK(false, "Unknown qengine");
               });
-  return register_linear_params;
+  return 0;
 }
 
 namespace {

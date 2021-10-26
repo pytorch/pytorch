@@ -5,7 +5,7 @@
 #include <c10/util/irange.h>
 #include <torch/library.h>
 
-torch::class_<EmbeddingPackedParamsBase> register_embedding_params();
+int register_embedding_params();
 
 at::Tensor PackedEmbeddingBagWeight::unpack() {
   auto packed_weight = packed_w;

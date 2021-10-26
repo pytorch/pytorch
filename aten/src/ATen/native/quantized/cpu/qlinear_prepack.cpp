@@ -14,7 +14,7 @@
 #include <algorithm>
 #include <vector>
 
-torch::class_<LinearPackedParamsBase> register_linear_params();
+int register_linear_params();
 
 #ifdef USE_FBGEMM
 namespace {

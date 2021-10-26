@@ -14,8 +14,8 @@
 #include <c10/util/irange.h>
 #include <torch/custom_class.h>
 
-torch::class_<LinearPackedParamsBase> register_linear_params();
-torch::class_<EmbeddingPackedParamsBase> register_embedding_params();
+int register_linear_params();
+int register_embedding_params();
 
 #ifdef USE_FBGEMM
 
@@ -358,15 +358,27 @@ Tensor ConvertConvWeightsToChannelLastTensor<3>(
 } // namespace native
 } // namespace at
 
-
 #endif // USE_FBGEMM
 
-    template <int kSpatialDim = 2>
-    TORCH_API torch::class_<ConvPackedParamsBase<kSpatialDim>>
-    register_conv_params() {
+namespace {
+  constexpr const char* _hack_int_to_class_name(int x) {
+    switch(x) {
+      case 2:
+        return "Conv2dPackedParamsBase";
+      case 3:
+        return "Conv3dPackedParamsBase";
+      default:
+        assert(false);
+        return "NotAValidDimension";
+    }
+  }
+}
+
+template <int kSpatialDim = 2>
+int register_conv_params() {
   static auto register_conv_params =
-    torch::class_<ConvPackedParamsBase<kSpatialDim>>(
-        "quantized", "Conv" + c10::to_string(kSpatialDim) + "dPackedParamsBase")
+    torch::selective_class::class_<ConvPackedParamsBase<kSpatialDim>>(
+        "quantized", TORCH_SELECTIVE_CLASS(_hack_int_to_class_name(kSpatialDim)))
     .def_pickle(
         [](const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& params)
         -> ConvParamsSerializationType { // __getstate__
@@ -398,15 +410,10 @@ Tensor ConvertConvWeightsToChannelLastTensor<3>(
     .def("dilation", &ConvPackedParamsBase<kSpatialDim>::dilation)
     .def("groups", &ConvPackedParamsBase<kSpatialDim>::groups)
     .def("transpose", &ConvPackedParamsBase<kSpatialDim>::transpose);
-  return register_conv_params;
+  return 0;
 }
 
-template
-TORCH_API torch::class_<ConvPackedParamsBase<2>> register_conv_params<2>();
-template
-TORCH_API torch::class_<ConvPackedParamsBase<3>> register_conv_params<3>();
-
-torch::class_<LinearPackedParamsBase> register_linear_params() {
+int register_linear_params() {
   using SerializationType = std::tuple<at::Tensor, c10::optional<at::Tensor>>;
   static auto register_linear_params =
       torch::class_<LinearPackedParamsBase>(
@@ -464,11 +471,14 @@ torch::class_<LinearPackedParamsBase> register_linear_params() {
                    return bias;
                  })
               .def("unpack", &LinearPackedParamsBase::unpack);
-  return register_linear_params;
+  // its convenient to call this function from a global scope in this file to ensure
+  // registration occurs. However, we dont need to keep the reference to this class
+  // after registration so returning a dummy value is fine.
+  return 0;
 }
 
 
-torch::class_<EmbeddingPackedParamsBase> register_embedding_params() {
+int register_embedding_params() {
   // Type for __getstate__/__setstate__ serialization
   //
   // Element 0 is the version of the PackedParam structure
@@ -483,8 +493,8 @@ torch::class_<EmbeddingPackedParamsBase> register_embedding_params() {
     std::vector<int64_t>>;
 
   static auto register_embedding_params =
-    torch::class_<EmbeddingPackedParamsBase>(
-      "quantized", "EmbeddingPackedParamsBase")
+    torch::selective_class::class_<EmbeddingPackedParamsBase>(
+      "quantized", TORCH_SELECTIVE_CLASS("EmbeddingPackedParamsBase"))
       .def_pickle(
           [](const c10::intrusive_ptr<EmbeddingPackedParamsBase>& params)
               -> EmbeddingParamsSerializationType { // __getstate__ call
@@ -520,14 +530,14 @@ torch::class_<EmbeddingPackedParamsBase> register_embedding_params() {
       .def("bit_rate", &EmbeddingPackedParamsBase::bit_rate)
       .def("version", &EmbeddingPackedParamsBase::version);
 
-  return register_embedding_params;
+  return 0;
 }
 
 namespace {
 
+static auto linear_params = register_linear_params();
 static auto conv2d_params = register_conv_params<2>();
 static auto conv3d_params = register_conv_params<3>();
-static auto linear_params = register_linear_params();
 static auto embedding_params = register_embedding_params();
 
 } // namespace
