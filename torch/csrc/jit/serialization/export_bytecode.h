@@ -14,14 +14,11 @@ namespace jit {
 
 struct ExportedFunction {
   ExportedFunction(
-      Module m,
+      const Module& m,
       const Function& f,
       std::unique_ptr<Graph> g,
       bool t)
-      : mod(std::move(m)),
-        function(f),
-        optimizedGraph(std::move(g)),
-        toplevel(t) {}
+      : mod(m), function(f), optimizedGraph(std::move(g)), toplevel(t) {}
   Module mod;
   const Function& function;
   std::unique_ptr<Graph> optimizedGraph;
