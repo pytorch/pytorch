@@ -1,7 +1,7 @@
 #include "lazy_tensor_core/csrc/tensor_util.h"
 
 #include <algorithm>
-#include <complex>
+#include <c10/util/complex.h>
 #include <cstring>
 #include <functional>
 #include <list>
@@ -157,15 +157,15 @@ struct Caster<c10::complex<float>> {
 };
 
 template <>
-std::complex<float> Caster<c10::complex<float>>::cast<std::complex<float>>(
+c10::complex<float> Caster<c10::complex<float>>::cast<c10::complex<float>>(
     const c10::complex<float>& value) const {
-  return std::complex<float>(value.real(), value.imag());
+  return c10::complex<float>(value.real(), value.imag());
 }
 
 template <>
-std::complex<double> Caster<c10::complex<float>>::cast<std::complex<double>>(
+c10::complex<double> Caster<c10::complex<float>>::cast<c10::complex<double>>(
     const c10::complex<float>& value) const {
-  return std::complex<double>(value.real(), value.imag());
+  return c10::complex<double>(value.real(), value.imag());
 }
 
 template <>
@@ -177,43 +177,16 @@ struct Caster<c10::complex<double>> {
 };
 
 template <>
-std::complex<float> Caster<c10::complex<double>>::cast<std::complex<float>>(
+c10::complex<float> Caster<c10::complex<double>>::cast<c10::complex<float>>(
     const c10::complex<double>& value) const {
-  return std::complex<float>(value.real(), value.imag());
-}
-
-template <>
-std::complex<double> Caster<c10::complex<double>>::cast<std::complex<double>>(
-    const c10::complex<double>& value) const {
-  return std::complex<double>(value.real(), value.imag());
-}
-
-template <>
-struct Caster<std::complex<float>> {
-  template <typename D>
-  D cast(const std::complex<float>& value) const {
-    return static_cast<D>(value.real());
-  }
-};
-
-template <>
-c10::complex<float> Caster<std::complex<float>>::cast<c10::complex<float>>(
-    const std::complex<float>& value) const {
   return c10::complex<float>(value.real(), value.imag());
 }
-template <>
-c10::complex<double> Caster<std::complex<float>>::cast<c10::complex<double>>(
-    const std::complex<float>& value) const {
-  return c10::complex<double>(value.real(), value.imag());
-}
 
 template <>
-struct Caster<std::complex<double>> {
-  template <typename D>
-  D cast(const std::complex<double>& value) const {
-    return static_cast<D>(value.real());
-  }
-};
+c10::complex<double> Caster<c10::complex<double>>::cast<c10::complex<double>>(
+    const c10::complex<double>& value) const {
+  return c10::complex<double>(value.real(), value.imag());
+}
 
 // Copies n bytes from source to dest, with different stride values for source
 // and destination.
@@ -262,14 +235,6 @@ struct NeedCast<c10::complex<float>> {
 };
 template <>
 struct NeedCast<c10::complex<double>> {
-  static constexpr bool value = true;
-};
-template <>
-struct NeedCast<std::complex<float>> {
-  static constexpr bool value = true;
-};
-template <>
-struct NeedCast<std::complex<double>> {
   static constexpr bool value = true;
 };
 
@@ -517,11 +482,11 @@ void TensorToBufferSType(const at::Tensor& tensor,
           tensor, dest_shape, dest_buffer, dest_buffer_size, device);
       break;
     case lazy_tensors::PrimitiveType::C64:
-      TensorToBuffer<SType, std::complex<float>>(
+      TensorToBuffer<SType, c10::complex<float>>(
           tensor, dest_shape, dest_buffer, dest_buffer_size, device);
       break;
     case lazy_tensors::PrimitiveType::C128:
-      TensorToBuffer<SType, std::complex<double>>(
+      TensorToBuffer<SType, c10::complex<double>>(
           tensor, dest_shape, dest_buffer, dest_buffer_size, device);
       break;
     default:
@@ -723,10 +688,10 @@ at::Tensor MakeTensorFromLiteral(const lazy_tensors::Literal& literal,
       return LiteralToTensorHelper<uint64_t>(literal,
                                                          dest_element_type);
     case lazy_tensors::PrimitiveType::C64:
-      return LiteralToTensorHelper<std::complex<float>>(literal,
+      return LiteralToTensorHelper<c10::complex<float>>(literal,
                                                             dest_element_type);
     case lazy_tensors::PrimitiveType::C128:
-      return LiteralToTensorHelper<std::complex<double>>(literal,
+      return LiteralToTensorHelper<c10::complex<double>>(literal,
                                                              dest_element_type);
     default:
       LTC_ERROR() << "Unsupported literal type: " << literal.shape();
