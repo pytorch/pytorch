@@ -141,6 +141,10 @@ void Function::append_type(const at::TypePtr& type) {
   code_->types_.push_back(type);
 }
 
+void Function::append_function(mobile::Function& function) {
+  code_->functions_.push_back(&function);
+}
+
 void Function::set_register_size(size_t size) {
   code_->register_size_ = size;
 }
