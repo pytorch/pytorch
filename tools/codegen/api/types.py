@@ -547,7 +547,9 @@ class FunctionalizationLambda:
     # The NativeFunction this signature is derived from
     f: NativeFunction
 
-    # The NativeFunction this signature is derived from
+    # The corresponding out-of-place variant of the above NativeFunction
+    # This only really matters for inplace-view ops.
+    # e.g. transpose_() -> transpose().
     functional_op: NativeFunction
 
     # are we generating the forward lambda or the reverse lambda?

@@ -25,7 +25,7 @@ void FunctionalTensorWrapper::set_constructor_metadata() {
   key_set_ = c10::DispatchKeySet(c10::DispatchKey::Functionalize) | value_.key_set();
 }
 
-FunctionalTensorWrapper::FunctionalTensorWrapper(Tensor value)
+FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& value)
   : c10::TensorImpl(
       c10::Storage(c10::make_intrusive<functionalization::FunctionalStorageImpl>(value)),
       c10::DispatchKeySet(DispatchKey::Functionalize) | value.key_set(),
@@ -55,7 +55,8 @@ FunctionalTensorWrapper::FunctionalTensorWrapper(Tensor value)
 // This behavior was taken from pytorch/xla, which the alias-removal logic was inspired from.
 // One benefit of the laziness is that we save work in the cases where a user has multiple views and mutates one of them,
 // but never uses the other views later in the program (in which case we'll never update the alias).
-// It also has downsides though: repeatedly applying mutations to the same view withing syncing will slowly leak memory.
+// It also has downsides though: repeatedly applying mutations to the same view without syncing
+// will silently use up more and more memory as more mutations are queued up.
 //
 // Corresponding diagram:
 //
@@ -99,7 +100,7 @@ FunctionalTensorWrapper::FunctionalTensorWrapper(Tensor value)
 // - view_value: The output tensor that we need to wrap.
 // - base: The "base" of the view that `view_value` was generated from.
 // See Note [Functionalization: Alias Removal Part 2] for more details on the mutation replay logic.
-FunctionalTensorWrapper::FunctionalTensorWrapper(Tensor view_value, const FunctionalTensorWrapper* base, functionalization::ViewMeta meta)
+FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& view_value, const FunctionalTensorWrapper* base, functionalization::ViewMeta meta)
   : c10::TensorImpl(
       c10::DispatchKeySet(DispatchKey::Functionalize),
       view_value.dtype(),
@@ -123,6 +124,10 @@ functionalization::FunctionalStorageImpl* FunctionalTensorWrapper::functional_st
 void FunctionalTensorWrapper::commit_update() {
   auto storage_impl = functional_storage_impl();
   storage_impl->add_update(value_, view_metas_);
+  // Invariant: commit_update() is called during an inplace operation.
+  // Tensor inputs to the operation are synced before runnig the op,
+  // so the current tensor must be up-to-date with its alias at this point.
+  generation_ = storage_impl->generation();
 }
 
 bool FunctionalTensorWrapper::is_aliased() const {
@@ -254,26 +259,26 @@ c10::optional<Tensor> from_functional_tensor(const c10::optional<Tensor>& t) {
   }
   return c10::nullopt;
 }
-c10::List<Tensor> from_functional_tensor(const c10::List<Tensor> t_list) {
+c10::List<Tensor> from_functional_tensor(const c10::List<Tensor>& t_list) {
   c10::List<Tensor> outputs;
   outputs.reserve(t_list.size());
   for (const auto i : c10::irange(t_list.size())) {
-    outputs[i] = from_functional_tensor(t_list[i]);
+    outputs.push_back(from_functional_tensor(t_list[i]));
   }
   return outputs;
 }
-c10::List<c10::optional<Tensor>> from_functional_tensor(const c10::List<c10::optional<Tensor>> t_list) {
+c10::List<c10::optional<Tensor>> from_functional_tensor(const c10::List<c10::optional<Tensor>>& t_list) {
   c10::List<c10::optional<Tensor>> outputs;
   outputs.reserve(t_list.size());
   for (const auto i : c10::irange(t_list.size())) {
-    outputs[i] = from_functional_tensor(t_list[i]);
+    outputs.push_back(from_functional_tensor(t_list[i]));
   }
   return outputs;
 }
 TensorList from_functional_tensor(const TensorList& t_list) {
   std::vector<Tensor> outputs(t_list.size());
   for (const auto i : c10::irange(t_list.size())) {
-    outputs[i] = from_functional_tensor(t_list[i]);
+    outputs.push_back(from_functional_tensor(t_list[i]));
   }
   return outputs;
 }
@@ -354,15 +359,15 @@ void mutate_view_meta(const at::Tensor& self, functionalization::ViewMeta meta) 
 // In order to properly compute stride information, the functionalization pass
 // calls each {view} reference implementations with meta tensors.
 // The output meta tensor's stride info serves as a reference for what the correct strides should be.
-void set_strides(const Tensor& out, const Tensor& reference_out) {
+void set_sizes_strides_offset(const Tensor& out, const Tensor& reference_out) {
   out.unsafeGetTensorImpl()->set_sizes_and_strides(reference_out.sizes(), reference_out.strides());
   out.unsafeGetTensorImpl()->set_storage_offset(reference_out.storage_offset());
 }
 
-void set_strides(const std::vector<Tensor>& outs, const std::vector<Tensor>& reference_outs) {
+void set_sizes_strides_offset(const std::vector<Tensor>& outs, const std::vector<Tensor>& reference_outs) {
   TORCH_INTERNAL_ASSERT(outs.size() == reference_outs.size());
   for (const auto i : c10::irange(reference_outs.size())) {
-    set_strides(outs[i], reference_outs[i]);
+    set_sizes_strides_offset(outs[i], reference_outs[i]);
   }
 }
 

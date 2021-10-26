@@ -22,7 +22,7 @@ const at::Tensor& Alias::base() const {
   return base_;
 }
 
-void Alias::add_update(const at::Tensor& updated_val, std::vector<ViewMeta>& metas) {
+void Alias::add_update(const at::Tensor& updated_val, const std::vector<ViewMeta>& metas) {
   updates_.push_back({updated_val, metas});
   generation_++;
 }
@@ -97,7 +97,7 @@ FunctionalStorageImpl::FunctionalStorageImpl(const Tensor& value)
     alias_(Alias(value))
   {}
 
-void FunctionalStorageImpl::add_update(const Tensor& updated_val, std::vector<ViewMeta>& view_metas) {
+void FunctionalStorageImpl::add_update(const Tensor& updated_val, const std::vector<ViewMeta>& view_metas) {
   alias_.add_update(updated_val, view_metas);
 }
 

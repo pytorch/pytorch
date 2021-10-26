@@ -142,7 +142,7 @@ def emit_view_functionalization_body(
         reference_tensor_output = at::_ops::{api_name}::call({', '.join(meta_call_args)});
       }}
       // See  Note [Propagating strides in the functionalization pass]
-      at::functionalization::impl::set_strides(self, reference_tensor_output);
+      at::functionalization::impl::set_sizes_strides_offset(self, reference_tensor_output);
       return self;
 """
 
@@ -169,7 +169,7 @@ def emit_view_functionalization_body(
       );
       auto out = at::functionalization::impl::create_functional_tensor_with_view_meta(tmp_output, self, view_meta);
       // See  Note [Propagating strides in the functionalization pass]
-      at::functionalization::impl::set_strides(out, reference_tensor_output);
+      at::functionalization::impl::set_sizes_strides_offset(out, reference_tensor_output);
       return out;
 """
 

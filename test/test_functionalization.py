@@ -7,11 +7,46 @@ def maybe_log_functional_input(name, handle, is_logging):
         assert torch._is_functional_tensor(handle)
         log_input(name, torch._from_functional_tensor(handle))
 
+def fooo():
+    print("ENABLE")
+    torch._enable_functionalization()
+
+def barr():
+    print("DISABLE")
+    torch._disable_functionalization()
+
+
 class TestFunctionalization(TestCase):
 
-    def test_functionalization(self):
+    def assert_functionalization(self, func, inpt):
+        input_clone = inpt.clone()
 
-        def f1(x, *, logging: bool):
+        input_clone2 = inpt.clone()
+        input_clone_logging = LoggingTensor(inpt.clone())
+
+        input_functional = torch._to_functional_tensor(input_clone2)
+        input_functional_logging = torch._to_functional_tensor(input_clone_logging)
+
+        # Runs expecttests for LoggingTensor output.
+        torch._enable_functionalization()
+        func(input_functional_logging, logging=True)
+        torch._disable_functionalization()
+
+        # Compare outputs (and mutated inputs), with and without functionalization.
+        out_ref = func(inpt, logging=False)
+
+        torch._enable_functionalization()
+        out_functional = func(input_functional, logging=False)
+        torch._disable_functionalization()
+
+        # We need to sync the input tensors first, in case there are any queued mutations left.
+        torch._sync(input_functional)
+        torch._sync(out_functional)
+        self.assertEqual(out_ref, torch._from_functional_tensor(out_functional))
+        self.assertEqual(inpt, torch._from_functional_tensor(input_functional))  # input mutations should still occur
+
+    def test_simple(self):
+        def f(x, *, logging: bool):
             # simple test: 1 view op, 1 inplace op
             with capture_logs() as logs:
                 maybe_log_functional_input("x", x, logging)
@@ -31,8 +66,35 @@ $3 = torch._ops.aten.view($2, [4, 2])
 $4 = torch._ops.aten.mul($3, $3)""")
             else:
                 return y
+        x = torch.ones(4, 2)
+        self.assert_functionalization(f, x)
 
-        def f2(x, *, logging: bool):
+    def test_aliases_maintained_after_pass(self):
+        def f(x):
+            tmp = torch.ones(4, 2)
+            y = x.view(4, 2)
+            z = x.view(4, 2)
+            y.add_(tmp)
+            return y, z
+
+        input_functional = torch._to_functional_tensor(torch.ones(4, 2))
+        torch._enable_functionalization()
+        y, z = f(input_functional)
+        torch._sync(y)
+        torch._sync(z)
+        torch._disable_functionalization()
+
+        # y and z are aliases inside of the function, and that aliasing relationship should be maintained.
+        _y = torch._from_functional_tensor(y)
+        _z = torch._from_functional_tensor(z)
+        # We don't currently have a good way of testing aliasing relationships in python so...
+        _y_frozen = _y.clone()
+        self.assertTrue(torch.allclose(_y_frozen, _y))
+        _z.add_(1)
+        self.assertFalse(torch.allclose(_y_frozen, _y))
+
+    def test_diagonal(self):
+        def f(x, *, logging: bool):
             # test: view ops that take a subset of the original tensor (select/diagonal)
             with capture_logs() as logs:
                 maybe_log_functional_input("x", x, logging)
@@ -49,8 +111,10 @@ $3 = torch._ops.aten.diagonal_scatter($0, $2)
 $4 = torch._ops.aten.mul($3, $3)""")
             else:
                 return z
+        self.assert_functionalization(f, torch.ones(2, 2))
 
-        def f3(x, *, logging: bool):
+    def test_split(self):
+        def f(x, *, logging: bool):
             # test: view ops that return multiple tensors (split)
             with capture_logs() as logs:
                 maybe_log_functional_input("x", x, logging)
@@ -71,8 +135,10 @@ $8 = torch._ops.aten.slice_scatter($0, $7, 0, 2, 4)
 $9 = torch._ops.aten.mul($8, $8)""")
             else:
                 return y3
+        self.assert_functionalization(f, torch.ones(4, 2))
 
-        def f4(x, *, logging: bool):
+    def test_view_inplace(self):
+        def f(x, *, logging: bool):
             # test: view + inplace op (transpose_)
             with capture_logs() as logs:
                 maybe_log_functional_input("x", x, logging)
@@ -88,8 +154,10 @@ $2 = torch._ops.aten.select($1, 0, 0)
 $3 = torch._ops.aten.add($2, tensor([1., 1., 1., 1.]))""")
             else:
                 return y
+        self.assert_functionalization(f, torch.ones(4, 2))
 
-        def f5(x, *, logging: bool):
+    def test_everything(self):
+        def f(x, *, logging: bool):
             # test: everything
             with capture_logs() as logs:
                 maybe_log_functional_input("x", x, logging)
@@ -121,64 +189,27 @@ $13, $14 = torch._ops.aten.split($12, 2)
 $15 = torch._ops.aten.add($13, tensor([[1., 1.],
         [1., 1.]]))
 $16 = torch._ops.aten.select($2, 0, 0)
-$17 = torch._ops.aten.view($0, [8])
-$18 = torch._ops.aten._reshape_alias($17, [2, 4], [4, 1])
-$19 = torch._ops.aten.transpose($18, 1, 0)
-$20 = torch._ops.aten.unsqueeze($19, 0)
-$21 = torch._ops.aten.squeeze($20)
-$22 = torch._ops.aten.slice_scatter($21, $15, 0, 0, 2)
-$23 = torch._ops.aten.unsqueeze($22, 0)
-$24 = torch._ops.aten.squeeze($23, 0)
-$25 = torch._ops.aten.transpose($24, 1, 0)
-$26 = torch._ops.aten._reshape_alias($25, [8], [1])
-$27 = torch._ops.aten.view($26, [4, 2])
-$28 = torch._ops.aten.view($27, [8])
-$29 = torch._ops.aten._reshape_alias($28, [2, 4], [4, 1])
-$30 = torch._ops.aten.transpose($29, 1, 0)
-$31 = torch._ops.aten.unsqueeze($30, 0)
-$32 = torch._ops.aten.squeeze($31)
-$33, $34 = torch._ops.aten.split($32, 2)
-$35 = torch._ops.aten.clone($33, memory_format=0)
-$36 = torch._ops.aten._unsafe_view($35, [4])
-$37 = torch._ops.aten.view($27, [8])
-$38 = torch._ops.aten._reshape_alias($37, [2, 4], [4, 1])
-$39 = torch._ops.aten.select($38, 0, 0)
-$40 = torch._ops.aten.add($39, $36)""")
+$17 = torch._ops.aten.clone($15, memory_format=0)
+$18 = torch._ops.aten._unsafe_view($17, [4])
+$19 = torch._ops.aten.view($0, [8])
+$20 = torch._ops.aten._reshape_alias($19, [2, 4], [4, 1])
+$21 = torch._ops.aten.transpose($20, 1, 0)
+$22 = torch._ops.aten.unsqueeze($21, 0)
+$23 = torch._ops.aten.squeeze($22)
+$24 = torch._ops.aten.slice_scatter($23, $15, 0, 0, 2)
+$25 = torch._ops.aten.unsqueeze($24, 0)
+$26 = torch._ops.aten.squeeze($25, 0)
+$27 = torch._ops.aten.transpose($26, 1, 0)
+$28 = torch._ops.aten._reshape_alias($27, [8], [1])
+$29 = torch._ops.aten.view($28, [4, 2])
+$30 = torch._ops.aten.view($29, [8])
+$31 = torch._ops.aten._reshape_alias($30, [2, 4], [4, 1])
+$32 = torch._ops.aten.select($31, 0, 0)
+$33 = torch._ops.aten.add($32, $18)""")
             else:
                 return z2
 
-        def assert_functionalization(func, inpt):
-            input_clone = inpt.clone()
-
-            input_clone2 = inpt.clone()
-            input_clone_logging = LoggingTensor(inpt.clone())
-
-            input_functional = torch._to_functional_tensor(input_clone2)
-            input_functional_logging = torch._to_functional_tensor(input_clone_logging)
-
-            # Runs expecttests for LoggingTensor output.
-            torch._enable_functionalization()
-            func(input_functional_logging, logging=True)
-            torch._disable_functionalization()
-
-            # Compare outputs (and mutated inputs), with and without functionalization.
-            out_ref = func(inpt, logging=False)
-
-            torch._enable_functionalization()
-            out_functional = func(input_functional, logging=False)
-            torch._disable_functionalization()
-
-            # We need to sync the input tensors first, in case there are any queued mutations left.
-            torch._sync(input_functional)
-            torch._sync(out_functional)
-            self.assertEqual(out_ref, torch._from_functional_tensor(out_functional))
-            self.assertEqual(inpt, torch._from_functional_tensor(input_functional))  # input mutations should still occur
-
-        assert_functionalization(f1, torch.ones(4, 2))
-        assert_functionalization(f2, torch.ones(2, 2))
-        assert_functionalization(f3, torch.ones(4, 2))
-        assert_functionalization(f4, torch.ones(4, 2))
-        assert_functionalization(f5, torch.ones(4, 2))
+        self.assert_functionalization(f, torch.ones(4, 2))
 
 if __name__ == '__main__':
     run_tests()
