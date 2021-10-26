@@ -11037,7 +11037,7 @@ op_db: List[OpInfo] = [
     OpInfo('searchsorted',
            dtypes=all_types(),
            dtypesIfCPU=all_types_and(torch.bfloat16, torch.float16),
-           dtypesIfCUDA=all_types(),
+           dtypesIfCUDA=all_types_and(torch.float16),
            sample_inputs_func=sample_inputs_searchsorted,
            supports_autograd=False,
            ref=reference_searchsorted,
