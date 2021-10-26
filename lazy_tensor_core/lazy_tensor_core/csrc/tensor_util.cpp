@@ -8,6 +8,7 @@
 #include <numeric>
 #include <thread>
 
+#include <c10/util/Half.h>
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/layout_manager.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_computation_client.h"
@@ -148,9 +149,9 @@ struct Caster<lazy_tensors::bfloat16> {
   }
 };
 template <>
-struct Caster<lazy_tensors::half> {
+struct Caster<c10::Half> {
   template <typename D>
-  D cast(const lazy_tensors::half& value) const {
+  D cast(const c10::Half& value) const {
     return static_cast<D>(static_cast<float>(value));
   }
 };
@@ -263,7 +264,7 @@ struct NeedCast<at::BFloat16> {
   static constexpr bool value = true;
 };
 template <>
-struct NeedCast<lazy_tensors::half> {
+struct NeedCast<c10::Half> {
   static constexpr bool value = true;
 };
 template <>
@@ -492,7 +493,7 @@ void TensorToBufferSType(const at::Tensor& tensor,
           tensor, dest_shape, dest_buffer, dest_buffer_size, device);
       break;
     case lazy_tensors::PrimitiveType::F16:
-      TensorToBuffer<SType, lazy_tensors::half>(tensor, dest_shape, dest_buffer,
+      TensorToBuffer<SType, c10::Half>(tensor, dest_shape, dest_buffer,
                                                 dest_buffer_size, device);
       break;
     case lazy_tensors::PrimitiveType::F32:
@@ -715,7 +716,7 @@ at::Tensor MakeTensorFromLiteral(const lazy_tensors::Literal& literal,
       return LiteralToTensorHelper<lazy_tensors::bfloat16>(literal,
                                                            dest_element_type);
     case lazy_tensors::PrimitiveType::F16:
-      return LiteralToTensorHelper<lazy_tensors::half>(literal,
+      return LiteralToTensorHelper<c10::Half>(literal,
                                                        dest_element_type);
     case lazy_tensors::PrimitiveType::F32:
       return LiteralToTensorHelper<float>(literal, dest_element_type);

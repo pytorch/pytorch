@@ -3,6 +3,7 @@
 #include <ATen/TensorIndexing.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/native/TensorFactories.h>
+#include <c10/util/Half.h>
 
 #include <complex>
 #include <string>
@@ -97,8 +98,8 @@ inline void Literal::Set<lazy_tensors::bfloat16>(
 }
 
 template <>
-inline void Literal::Set<lazy_tensors::half>(
-    lazy_tensors::Span<const int64> multi_index, lazy_tensors::half value) {
+inline void Literal::Set<c10::Half>(
+    lazy_tensors::Span<const int64> multi_index, c10::Half value) {
   LTC_LOG(FATAL) << "Not implemented yet.";
 }
 

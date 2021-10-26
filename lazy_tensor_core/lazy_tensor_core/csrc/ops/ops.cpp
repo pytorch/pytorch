@@ -1,7 +1,7 @@
 #include "lazy_tensor_core/csrc/ops/ops.h"
 
+#include <c10/util/Half.h>
 #include <cmath>
-
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/ops/arithmetic_ir_ops.h"
@@ -188,10 +188,10 @@ NodePtr ARange(const at::Scalar& start, const at::Scalar& end,
           static_cast<lazy_tensors::bfloat16>(step.toFloat()));
       break;
     case lazy_tensors::PrimitiveType::F16:
-      values = Helpers::Range<lazy_tensors::half>(
-          static_cast<lazy_tensors::half>(start.toHalf()),
-          static_cast<lazy_tensors::half>(end.toHalf()),
-          static_cast<lazy_tensors::half>(step.toHalf()));
+      values = Helpers::Range<c10::Half>(
+          static_cast<c10::Half>(start.toHalf()),
+          static_cast<c10::Half>(end.toHalf()),
+          static_cast<c10::Half>(step.toHalf()));
       break;
     case lazy_tensors::PrimitiveType::F32:
       values =

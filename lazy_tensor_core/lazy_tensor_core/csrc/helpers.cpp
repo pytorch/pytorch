@@ -1,7 +1,7 @@
 #include "lazy_tensor_core/csrc/helpers.h"
 
+#include <c10/util/Half.h>
 #include <limits>
-
 #include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/computation_client/ltc_logging.h"
@@ -112,8 +112,8 @@ Helpers::MinMax Helpers::MinMaxValues(lazy_tensors::PrimitiveType type) {
                   std::numeric_limits<uint64_t>::max())};
     case lazy_tensors::PrimitiveType::F16:
       return {
-          static_cast<float>(std::numeric_limits<lazy_tensors::half>::lowest()),
-          static_cast<float>(std::numeric_limits<lazy_tensors::half>::max())};
+          static_cast<float>(std::numeric_limits<c10::Half>::lowest()),
+          static_cast<float>(std::numeric_limits<c10::Half>::max())};
     case lazy_tensors::PrimitiveType::BF16:
     case lazy_tensors::PrimitiveType::F32:
       return {std::numeric_limits<float>::lowest(),

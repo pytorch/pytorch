@@ -1,6 +1,6 @@
 #pragma once
-
 #include <c10/core/Scalar.h>
+#include <c10/util/Half.h>
 #include <c10/util/Optional.h>
 
 #include <complex>
@@ -43,8 +43,8 @@ class Helpers {
             static_cast<lazy_tensors::bfloat16>(
                 static_cast<float>(scalar_value)));
       case lazy_tensors::PrimitiveType::F16:
-        return lazy_tensors::LiteralUtil::CreateR0<lazy_tensors::half>(
-            static_cast<lazy_tensors::half>(static_cast<float>(scalar_value)));
+        return lazy_tensors::LiteralUtil::CreateR0<c10::Half>(
+            static_cast<c10::Half>(static_cast<float>(scalar_value)));
       case lazy_tensors::PrimitiveType::S64:
         return lazy_tensors::LiteralUtil::CreateR0<int64_t>(
             scalar_value);
