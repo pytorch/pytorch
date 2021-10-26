@@ -696,11 +696,7 @@ def acc_ops_softmax(network, target, args, kwargs, name):
         return ret
 
     if dim is None:
-        dim = get_softmax_dim(
-            len(input_val.shape)
-            if not network.has_implicit_batch_dimension
-            else len(input_val.shape) + 1
-        )
+        dim = get_softmax_dim(input_ranks)
 
     dim = dim % input_ranks
     if network.has_implicit_batch_dimension:
@@ -1151,6 +1147,10 @@ def acc_ops_unsqueeze(network, target, args, kwargs, name):
                            "of the TensorRT region!")
 
     dim = kwargs["dim"]
+    input_shape = input_val.shape
+    input_shape_size = len(input_val.shape) + 1 if network.has_implicit_batch_dimension else len(input_val.shape)
+    if dim < 0:
+        dim = dim % (input_shape_size + 1)
     if network.has_implicit_batch_dimension:
         assert dim != 0
         dim -= 1

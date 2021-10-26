@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: distributed"]
+
 import contextlib
 import io
 from copy import deepcopy
