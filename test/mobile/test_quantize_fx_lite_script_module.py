@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: mobile"]
+
 import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
