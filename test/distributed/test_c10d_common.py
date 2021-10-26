@@ -12,13 +12,13 @@ from itertools import product
 from sys import platform
 
 import torch
-import torch.distributed as c10d
+import torch.distributed as dist
 
-if not c10d.is_available():
-    print("c10d not available, skipping tests", file=sys.stderr)
+if not dist.is_available():
+    print("distributed package not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
-import torch.distributed as dist
+import torch.distributed.distributed_c10d as c10d
 import torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook as powerSGD
 import torch.nn.functional as F
 import torch.testing._internal.common_utils as common
@@ -69,19 +69,19 @@ def gpus_for_rank(world_size):
 class AbstractTimeoutTest(object):
     def _test_store_timeout(self, backend, init_method, c2p):
         try:
-            c10d.distributed_c10d.init_process_group(
+            dist.init_process_group(
                 backend=backend,
                 init_method=init_method,
                 world_size=1,
                 rank=0,
                 timeout=timedelta(seconds=1),
             )
-            default_store = c10d.distributed_c10d._get_default_store()
+            default_store = c10d._get_default_store()
             tik = time.time()
             with self.assertRaisesRegex(RuntimeError, "Timeout"):
                 default_store.get("nonexistent key")
             tok = time.time()
-            c10d.destroy_process_group()
+            dist.destroy_process_group()
             c2p.append(float(tok - tik))
         except RuntimeError as e:
             # catch "Address already in use" error and report it to the main
@@ -562,7 +562,7 @@ class AbstractCommTest(object):
             self._verify_sequence_number_across_pg(
                 pg=process_group, verify_pg=verify_pg
             )
-            if not c10d.distributed_c10d._rank_not_in_group(process_group)
+            if not c10d._rank_not_in_group(process_group)
             else -1
         )
 
@@ -570,7 +570,7 @@ class AbstractCommTest(object):
         for i in range(10):
             t = torch.ones(1, device=torch.cuda.current_device())
             dist.all_reduce(t, group=process_group)
-            if not c10d.distributed_c10d._rank_not_in_group(process_group):
+            if not c10d._rank_not_in_group(process_group):
                 seq_num = self._verify_sequence_number_across_pg(
                     pg=process_group,
                     verify_pg=verify_pg,
@@ -582,7 +582,7 @@ class AbstractCommTest(object):
             if dist.get_rank(process_group) not in [0, 2]:
                 dist.all_reduce(t, group=process_group, async_op=True)
             # Now ranks 0 and 2 should be lagging by 1.
-            if not c10d.distributed_c10d._rank_not_in_group(process_group):
+            if not c10d._rank_not_in_group(process_group):
                 seq_num = process_group._get_sequence_number_for_group()
                 rank = dist.get_rank(process_group)
                 obj_list = [None for _ in range(dist.get_world_size(verify_pg))]
@@ -600,7 +600,7 @@ class AbstractCommTest(object):
 
     def _test_sequence_num_incremented_default_group(self, backend_name):
         torch.cuda.set_device(self.rank)
-        store = c10d.FileStore(self.file_name, self.world_size)
+        store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
             backend_name,
             world_size=self.world_size,
@@ -608,13 +608,13 @@ class AbstractCommTest(object):
             store=store,
         )
         self._test_sequence_num_incremented(
-            c10d.distributed_c10d._get_default_group(),
+            c10d._get_default_group(),
             ranks=list(i for i in range(dist.get_world_size())),
         )
 
     def _test_sequence_num_incremented_subgroup(self, backend_name):
         torch.cuda.set_device(self.rank)
-        store = c10d.FileStore(self.file_name, self.world_size)
+        store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
             backend_name,
             world_size=self.world_size,
@@ -626,7 +626,7 @@ class AbstractCommTest(object):
         self._test_sequence_num_incremented(subgroup, subgroup_ranks)
 
     def _test_sequence_num_set_default_pg(self, backend):
-        store = c10d.FileStore(self.file_name, self.world_size)
+        store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
             backend,
             world_size=self.world_size,
@@ -634,14 +634,14 @@ class AbstractCommTest(object):
             store=store,
         )
 
-        default_pg = c10d.distributed_c10d._get_default_group()
+        default_pg = c10d._get_default_group()
         seq_num = default_pg._get_sequence_number_for_group()
         obj_list = [None for _ in range(dist.get_world_size())]
         dist.all_gather_object(obj_list, seq_num)
         self.assertEqual(len(set(obj_list)), 1)
 
     def _test_sequence_num_set_new_group(self, backend):
-        store = c10d.FileStore(self.file_name, self.world_size)
+        store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
             backend,
             world_size=self.world_size,
@@ -651,7 +651,7 @@ class AbstractCommTest(object):
 
         subgroup = dist.new_group([0, 1])
 
-        if not c10d.distributed_c10d._rank_not_in_group(subgroup):
+        if not c10d._rank_not_in_group(subgroup):
             subgroup_seq = subgroup._get_sequence_number_for_group()
             obj_list = [None for _ in range(dist.get_world_size(subgroup))]
             dist.all_gather_object(obj_list, subgroup_seq, group=subgroup)
