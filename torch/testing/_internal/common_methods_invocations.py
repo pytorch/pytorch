@@ -9770,7 +9770,7 @@ op_db: List[OpInfo] = [
     OpInfo('index_copy',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_inplace_autograd=False,
-           supports_out=False,
+           supports_out=True,
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_index_copy,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
