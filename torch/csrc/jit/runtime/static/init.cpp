@@ -48,10 +48,6 @@ void initStaticModuleBindings(PyObject* module) {
   static_module
       .def(
           "__call__",
-          py::overload_cast<const std::vector<at::Tensor>&>(
-              &StaticModule::operator()))
-      .def(
-          "__call__",
           [](StaticModule& self,
              const std::vector<at::Tensor>& args,
              const std::unordered_map<std::string, at::Tensor>& kwargs) {
