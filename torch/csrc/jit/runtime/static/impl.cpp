@@ -94,9 +94,8 @@ void OptimizeGraph(
   if (opts.enable_out_variant) {
     UseVariadicOp(
         graph,
-        c10::Symbol::fromQualString("fb::sigrid_transforms_torch_bind"),
-        c10::Symbol::fromQualString(
-            "fb::variadic_sigrid_transforms_torch_bind"));
+        fromQualString("fb::sigrid_transforms_torch_bind"),
+        fromQualString("fb::variadic_sigrid_transforms_torch_bind"));
     FuseSignLog1P(graph);
 
     // TODO: we can avoid this guard by moving operations
@@ -1494,6 +1493,9 @@ void ProcessedNode::run() {
 #else
   fn_.f(this);
 #endif
+#ifndef NDEBUG
+  verify_no_memory_overlap();
+#endif
 }
 
 static bool checkNoMemoryOverlap(const at::Tensor& a, const at::Tensor& b) {
@@ -1520,26 +1522,34 @@ bool ProcessedNode::verify_no_memory_overlap() const {
       }
       const auto& out1_t = outputs_[j].toTensor();
       if (!checkNoMemoryOverlap(out0_t, out1_t)) {
+        LOG(INFO) << "Node output " << i << " overlaps with output " << j
+                  << ", " << PrintNode(node_);
         return false;
       }
     }
   }
 
   auto schema = node()->maybeSchema();
-  if (!schema || schema->is_mutable()) {
+  // skip memory overlap check for mutable ops with only one output
+  if (!schema || (schema->is_mutable() && outputs_size_ == 1)) {
     return true;
   }
-  for (const IValue* in : inputs()) {
+  for (const auto i : c10::irange(inputs_size_)) {
+    const IValue* in = &Input(i);
     if (!in->isTensor()) {
       continue;
     }
     const auto& in_t = in->toTensor();
-    for (const IValue& out : outputs()) {
+    for (const auto j : c10::irange(outputs_size_)) {
+      const IValue& out = Output(j);
       if (!out.isTensor()) {
         continue;
       }
       const auto& out_t = out.toTensor();
       if (!checkNoMemoryOverlap(in_t, out_t)) {
+        LOG(INFO) << "Node input " << i << " overlaps with output " << j << ", "
+                  << PrintNode(node_);
+        LOG(INFO) << *schema;
         return false;
       }
     }
