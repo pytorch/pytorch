@@ -76,6 +76,8 @@ void embedding_dense_backward_cuda_scan<int>(Tensor &sorted_indices, Tensor &cou
 template
 void embedding_dense_backward_cuda_scan<int64_t>(Tensor &sorted_indices, Tensor &count);
 
+#endif
+
 template<typename index_t>
 int64_t embedding_backward_cuda_kernel_unique_by_key(const Tensor &sorted_indices, Tensor &segment_offsets) {
   auto stream = at::cuda::getCurrentCUDAStream();
