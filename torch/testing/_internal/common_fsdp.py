@@ -24,8 +24,11 @@ from enum import Enum
 
 
 class FSDPInitMode(Enum):
+    # Move model to CUDA before wrap
     CUDA_BEFORE = 1
+    # Move model to CUDA after wrap
     CUDA_AFTER = 2
+    # Don't move movel to CUDA at all.
     CUDA_NEVER = 3
 
 # get full params of a model recursively
