@@ -307,11 +307,11 @@ class ShardedTensor(object):
 
         local_sharded_tensor_metadata: Optional[ShardedTensorMetadata] = None
         local_shards_device = torch.device("cpu")
-        global_size = _flatten_tensor_size(global_size)
+        global_tensor_size = _flatten_tensor_size(global_size)
 
         if len(local_shards) > 0:
             local_sharded_tensor_metadata, local_shards_device = \
-                build_metadata_from_local_shards(local_shards, global_size, current_rank, process_group)
+                build_metadata_from_local_shards(local_shards, global_tensor_size, current_rank, process_group)
 
         # STEP 2. Validate metadata across ranks, and build a global sharded tensor
         # metadata by gathering local ShardedTensorMetadata

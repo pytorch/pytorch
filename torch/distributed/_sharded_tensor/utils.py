@@ -114,7 +114,7 @@ def _raise_if_mismatch(expected, actual, prop_name, ranks, is_local=True):
 
 def build_metadata_from_local_shards(
     local_shards: List[Shard],
-    global_size: Sequence[int],
+    global_size: List[int],
     current_rank: int,
     pg: distributed_c10d.ProcessGroup
 ) -> Tuple[ShardedTensorMetadata, torch.device]:
