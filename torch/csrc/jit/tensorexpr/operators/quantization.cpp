@@ -107,6 +107,7 @@ Tensor computeQuantizePerTensor(
 Tensor computeQuantizePerTensorExternalCall(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    // NOLINTNEXTLINE
     const c10::optional<ScalarType>& outputType,
     at::Device) {
   const BufHandle& x = c10::get<BufHandle>(inputs[0]);
@@ -201,7 +202,9 @@ Tensor computeQuantizedConv2dPrepack(
 Tensor computeQuantizedConv2d(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    // NOLINTNEXTLINE
     const c10::optional<ScalarType>& outputType,
+    // NOLINTNEXTLINE
     at::Device device) {
   const BufHandle& qx = c10::get<BufHandle>(inputs[0]);
   const BufHandle& prepacked = c10::get<BufHandle>(inputs[1]);
@@ -230,7 +233,9 @@ Tensor computeQuantizedConv2d(
 Tensor computeQuantizedConv2dRelu(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    // NOLINTNEXTLINE
     const c10::optional<ScalarType>& outputType,
+    // NOLINTNEXTLINE
     at::Device device) {
   const BufHandle& qx = c10::get<BufHandle>(inputs[0]);
   const BufHandle& prepacked = c10::get<BufHandle>(inputs[1]);
@@ -259,7 +264,9 @@ Tensor computeQuantizedConv2dRelu(
 Tensor computeQuantizedAdd(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    // NOLINTNEXTLINE
     const c10::optional<ScalarType>& outputType,
+    // NOLINTNEXTLINE
     at::Device device) {
   const BufHandle& qa = c10::get<BufHandle>(inputs[0]);
   const BufHandle& qb = c10::get<BufHandle>(inputs[1]);
