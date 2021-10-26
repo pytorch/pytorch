@@ -744,10 +744,10 @@
   result: auto_linear
 
 - name: inverse(Tensor self) -> Tensor
-  self: -at::matmul(result.conj().transpose(-2, -1), at::matmul(grad, result.conj().transpose(-2, -1)))
+  self: -at::matmul(result.mH(), at::matmul(grad, result.mH()))
 
 - name: linalg_inv_ex(Tensor self, *, bool check_errors=False) -> (Tensor inverse, Tensor info)
-  self: -at::matmul(inverse.conj().transpose(-2, -1), at::matmul(grad, inverse.conj().transpose(-2, -1)))
+  self: -at::matmul(inverse.mH(), at::matmul(grad, inverse.mH()))
   inverse: -at::matmul(at::matmul(inverse, self_t), inverse)
 
 - name: linalg_pinv.atol_rtol_tensor(Tensor self, *, Tensor? atol=None, Tensor? rtol=None, bool hermitian=False) -> Tensor
@@ -871,8 +871,8 @@
   A: not_implemented("lstsq")
 
 - name: linalg_lstsq(Tensor self, Tensor b, float? rcond=None, *, str? driver=None) -> (Tensor solution, Tensor residuals, Tensor rank, Tensor singular_values)
-  self: not_implemented("linalg_lstsq")
-  b: not_implemented("linalg_lstsq")
+  self, b: linalg_lstsq_backward(grad, self, b, rcond, driver, grad_input_mask)
+  solution: linalg_lstsq_jvp(self_p, b_p, self_t, b_t)
   output_differentiability: [True, False, False, False]
 
 - name: lt_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
@@ -916,8 +916,9 @@
   mask: non_differentiable
   result: auto_linear
 
-- name: matrix_exp(Tensor self) -> Tensor
-  self: matrix_exp_backward(self, grad)
+- name: linalg_matrix_exp(Tensor self) -> Tensor
+  self: linalg_matrix_exp_differential(self, grad, /*adjoint*/ true)
+  result: linalg_matrix_exp_differential(self_p, self_t, /*adjoint*/ false)
 
 - name: max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), keepdim)
@@ -1087,7 +1088,7 @@
 
 - name: _cdist_forward(Tensor x1, Tensor x2, float p, int? compute_mode) -> Tensor
   x1: _cdist_backward(grad.contiguous(), x1, x2, p, result)
-  x2: _cdist_backward(grad.transpose(-1, -2).contiguous(), x2, x1, p, result.transpose(-1, -2).contiguous())
+  x2: _cdist_backward(grad.mT().contiguous(), x2, x1, p, result.mT().contiguous())
 
 - name: _cdist_backward(Tensor grad, Tensor x1, Tensor x2, float p, Tensor cdist) -> Tensor
   grad: not_implemented("_cdist_backward")
@@ -1110,6 +1111,7 @@
 
 - name: linalg_householder_product(Tensor input, Tensor tau) -> Tensor
   input, tau: householder_product_backward(grad, result, input, tau)
+  result: householder_product_jvp(input_t, tau_t, result, input_p, tau_p)
 
 - name: ormqr(Tensor self, Tensor input2, Tensor input3, bool left=True, bool transpose=False) -> Tensor
   self: not_implemented("ormqr")
