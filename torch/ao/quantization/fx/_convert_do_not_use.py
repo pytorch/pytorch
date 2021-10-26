@@ -35,6 +35,26 @@ from torch.ao.quantization.quantize import (
 
 from .convert import restore_state
 
+FUSED_MODULE_CLASSES = (
+    torch.nn.intrinsic.LinearReLU,
+    torch.nn.intrinsic.ConvReLU1d,
+    torch.nn.intrinsic.ConvReLU2d,
+    torch.nn.intrinsic.ConvReLU3d,
+)
+
+QAT_MODULE_CLASSES = (
+    torch.nn.qat.Linear,
+    torch.nn.qat.Conv2d,
+    torch.nn.qat.Conv3d,
+    torch.nn.intrinsic.qat.LinearReLU,
+    torch.nn.intrinsic.qat.ConvBn2d,
+    torch.nn.intrinsic.qat.ConvBnReLU2d,
+    torch.nn.intrinsic.qat.ConvReLU2d,
+    torch.nn.intrinsic.qat.ConvBn3d,
+    torch.nn.intrinsic.qat.ConvBnReLU3d,
+    torch.nn.intrinsic.qat.ConvReLU3d
+)
+
 def _convert_do_not_use(
         model: GraphModule, is_reference: bool = False,
         convert_custom_config_dict: Dict[str, Any] = None,
@@ -64,7 +84,7 @@ def _convert_do_not_use(
     patterns, node_name_to_scope, prepare_custom_config_dict, observed_node_names = restore_state(model)
     qconfig_map: Dict[str, QConfigAny] = model._qconfig_map  # type: ignore[assignment]
 
-    assert is_reference, "convert2 only supports reference option"
+    assert is_reference, "_convert_do_not_use only supports reference option"
 
     # mapping from fully qualified module name to module instance
     # for example,
@@ -167,24 +187,57 @@ def _convert_do_not_use(
         elif node.op == "call_module":
             if is_activation_post_process(modules[node.target]):
                 replace_observer_with_quantize_dequantize_node(model.graph, node, modules)
-            elif type(modules[node.target]) in [
+            elif type(modules[node.target]) in set([
                     torch.nn.Linear,
                     torch.nn.Conv1d,
                     torch.nn.Conv2d,
-                    torch.nn.Conv3d]:
-                fmodule = modules[node.target]
-                qconfig = fmodule.qconfig
+                    torch.nn.Conv3d]).union(QAT_MODULE_CLASSES).union(FUSED_MODULE_CLASSES):
+                # TODO: refactor this part to a function
+                original_module = modules[node.target]
+                qconfig = original_module.qconfig
 
                 is_observed = node.name in observed_node_names
                 is_weight_quantized = weight_is_statically_quantized(qconfig)
                 # TODO: rename weight_is_statically_quantized to weight_is_int8_quantized
-                if qconfig is not None and is_observed and is_weight_quantized:
+                if qconfig is None or not is_observed or not is_weight_quantized:
+                    continue
+
+                float_module = original_module
+                fused_module = None
+                if isinstance(
+                        original_module,
+                        QAT_MODULE_CLASSES):
+                    # case 1. converting qat module to
+                    # a float module, we need to attch
+                    # weight fake_quant to the module,
+                    # weight fake_quant is assumed to be run during
+                    # QAT so we don't need to run it again here
+                    float_module = original_module.to_float()  # type: ignore[operator]
+                    # change qat conv to conv
+                    parent_name, name = _parent_name(node.target)
+                    setattr(modules[parent_name], name, float_module)
+                    if isinstance(float_module, torch.nn.intrinsic._FusedModule):
+                        fused_module = float_module
+                        float_module = fused_module[0]
+                    weight_post_process = original_module.weight_fake_quant
+                else:
+                    # case 2. converting a float module/fused float module
+                    # to float module, we need to attach
+                    # weight observer to the conv module and run it
+                    # with conv weight
+                    if isinstance(original_module, torch.nn.intrinsic._FusedModule):
+                        fused_module = original_module
+                        float_module = fused_module[0]  # type: ignore[index]
+                    assert qconfig is not None
                     weight_post_process = qconfig.weight()
                     # run weight observer
-                    weight_post_process(fmodule.weight)  # type: ignore[operator]
-                    weight_qparams = get_qparam_dict(weight_post_process)
-                    ref_qmodule_cls = get_static_quant_module_class(type(fmodule), is_reference=True)
-                    ref_qmodule = ref_qmodule_cls.from_float(fmodule, weight_qparams)
+                    weight_post_process(float_module.weight)  # type: ignore[operator]
+                weight_qparams = get_qparam_dict(weight_post_process)
+                ref_qmodule_cls = get_static_quant_module_class(type(float_module), is_reference=True)
+                ref_qmodule = ref_qmodule_cls.from_float(float_module, weight_qparams)
+                if fused_module is not None:
+                    fused_module[0] = ref_qmodule
+                else:
                     parent_name, name = _parent_name(node.target)
                     setattr(modules[parent_name], name, ref_qmodule)
 

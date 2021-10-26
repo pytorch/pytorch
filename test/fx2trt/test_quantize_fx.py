@@ -20,10 +20,13 @@ from torch.ao.quantization._quantize_fx_do_not_use import (
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
 )
+import torch.nn.functional as F
+
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.common_quantization import NodeSpec as ns
 import unittest
+import itertools
 
 def lower_to_trt(model, inputs, shape_ranges):
     """ Lower a quantized model to TensorRT
@@ -92,36 +95,60 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
         trt_mod(*inputs_cuda)
 
 
-    def test_conv(self):
-        class Conv2dModule(torch.nn.Module):
-            def __init__(self):
+    def test_conv_relu_module(self):
+        conv_module = {1 : torch.nn.Conv1d, 2 : torch.nn.Conv2d, 3 : torch.nn.Conv3d}
+
+        conv1d_input = torch.rand(1, 3, 10)
+        conv2d_input = torch.rand(1, 3, 10, 10)
+        conv3d_input = torch.rand(1, 3, 10, 10, 10)
+        conv_input = {1: conv1d_input, 2: conv2d_input, 3: conv3d_input}
+
+        class ConvNdModule(torch.nn.Module):
+            def __init__(self, dim, has_relu=False, f_relu=False):
                 super().__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3)
+                self.conv = conv_module[dim](3, 3, 3).float()
+                if has_relu:
+                    if f_relu:
+                        self.relu = F.relu
+                    else:
+                        self.relu = torch.nn.ReLU()
+                else:
+                    self.relu = torch.nn.Identity()
 
             def forward(self, x):
-                return self.conv(x)
+                return self.relu(self.conv(x))
 
-        conv2d_input = torch.rand(1, 3, 224, 224)
-        no_convert = {
-            ns.call_function(torch.quantize_per_tensor): 2,
-            ns.call_method("dequantize"): 2
-        }
-        self._test_module(
-            Conv2dModule(),
-            [conv2d_input],
-            [((1, 3, 224, 224),
-              (5, 3, 224, 224),
-              (10, 3, 224, 224))],
-            no_convert=no_convert)
+        # just testing conv2d since conv1d and conv3d are not supported in fx2trt
+        for dim, has_relu, f_relu in itertools.product([2], [True, False], [True, False]):
+            # when has_relu=False, we have torch.nn.Identity, which would introduce
+            # extra quant-dequat pair
+            no_convert = {
+                ns.call_function(torch.quantize_per_tensor): 2 + int(not has_relu),
+                ns.call_method("dequantize"): 2 + int(not has_relu),
+            }
+            self._test_module(
+                ConvNdModule(dim, has_relu, f_relu),
+                [conv_input[dim]],
+                [((1, *conv_input[dim].shape[1:]),
+                  (5, *conv_input[dim].shape[1:]),
+                  (10, *conv_input[dim].shape[1:]))],
+                no_convert=no_convert)
 
-    def test_linear(self):
+    def test_linear_relu_module(self):
         class LinearModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, has_relu=False, f_relu=False):
                 super().__init__()
-                self.linear = torch.nn.Linear(5, 10)
+                self.linear = torch.nn.Linear(5, 10).float()
+                if has_relu:
+                    if f_relu:
+                        self.relu = F.relu
+                    else:
+                        self.relu = torch.nn.ReLU()
+                else:
+                    self.relu = torch.nn.Identity()
 
             def forward(self, x):
-                return self.linear(x)
+                return self.relu(self.linear(x))
 
         linear_input = torch.rand(8, 5)
 
@@ -130,15 +157,18 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
              (5, 5),
              (10, 5))
         ]
-        no_convert = {
-            ns.call_function(torch.quantize_per_tensor): 2,
-            ns.call_method("dequantize"): 2,
-        }
-        self._test_module(
-            LinearModule(),
-            [linear_input],
-            shape_ranges,
-            no_convert=no_convert)
+        for has_relu, f_relu in itertools.product([True, False], [True, False]):
+            # when has_relu=False, we have torch.nn.Identity, which would introduce
+            # extra quant-dequat pair
+            no_convert = {
+                ns.call_function(torch.quantize_per_tensor): 2 + int(not has_relu),
+                ns.call_method("dequantize"): 2 + int(not has_relu),
+            }
+            self._test_module(
+                LinearModule(has_relu, f_relu),
+                [linear_input],
+                shape_ranges,
+                no_convert=no_convert)
 
     def test_unsupported_qconfig(self):
         """ Check that we won't quantize the model if the qconfig is not supported
