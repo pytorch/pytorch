@@ -1,6 +1,6 @@
 import collections
 import enum
-from typing import Callable, Tuple, Any, List, Optional
+from typing import Callable, Tuple, Any, List, Optional, Dict
 
 import torch
 import torch.nn.functional as F
@@ -497,3 +497,38 @@ def iterate_and_apply(
             return func(args, cur_flattened_tensor_info)
         else:
             return args
+
+def get_prev_seen_op(
+    idx_to_seen_op: Dict[str, SeenOp],
+    cur_seen_op: SeenOp,
+) -> Optional[SeenOp]:
+    """
+    Input: cur_seen_op, all seen ops
+    Output: the SeenOp which created the input to the current SeenOp
+    """
+    input_tensor_id = cur_seen_op.input_tensor_infos[0].id
+    for idx, seen_op in idx_to_seen_op.items():
+        for output_tensor_info in seen_op.output_tensor_infos:
+            if output_tensor_info is not None:
+                if input_tensor_id == output_tensor_info.id:
+                    return seen_op
+    return None
+
+def get_next_seen_ops(
+    idx_to_seen_op: Dict[str, SeenOp],
+    cur_seen_op: SeenOp,
+) -> List[SeenOp]:
+    """
+    Input: cur_seen_op
+    Output: list of all seen_ops which use the output of the cur_seen_op,
+    """
+    if len(cur_seen_op.output_tensor_infos) != 1:
+        return []
+    output_tensor_id = cur_seen_op.output_tensor_infos[0].id
+    results = []
+    for idx, seen_op in idx_to_seen_op.items():
+        for input_tensor_info in seen_op.input_tensor_infos:
+            if input_tensor_info is not None:
+                if output_tensor_id == input_tensor_info.id:
+                    results.append(seen_op)
+    return results

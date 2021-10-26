@@ -1,29 +1,10 @@
-from typing import List, Dict
+from typing import List
 
 import torch
 
 from .utils import (
-    SeenOp,
+    get_next_seen_ops,
 )
-
-def _get_next_seen_ops(
-    idx_to_seen_op: Dict[str, SeenOp],
-    cur_seen_op: SeenOp,
-) -> List[SeenOp]:
-    """
-    Input: cur_seen_op
-    Output: list of all seen_ops which use the output of the cur_seen_op,
-    """
-    if len(cur_seen_op.output_tensor_infos) != 1:
-        return []
-    output_tensor_id = cur_seen_op.output_tensor_infos[0].id
-    results = []
-    for idx, seen_op in idx_to_seen_op.items():
-        for input_tensor_info in seen_op.input_tensor_infos:
-            if input_tensor_info is not None:
-                if output_tensor_id == input_tensor_info.id:
-                    results.append(seen_op)
-    return results
 
 def get_module_fusion_fqns(
     module: torch.nn.Module,
@@ -61,7 +42,7 @@ def get_module_fusion_fqns(
                 for mod_type in fusion_pattern:
                     if cur_seen_op is not None and mod_type == cur_seen_op.type:
                         cur_fqns.append(cur_seen_op.fqn)
-                        next_seen_ops = _get_next_seen_ops(
+                        next_seen_ops = get_next_seen_ops(
                             qstate.idx_to_seen_ops, cur_seen_op)
                         if len(next_seen_ops) == 1:
                             cur_seen_op = next_seen_ops[0]

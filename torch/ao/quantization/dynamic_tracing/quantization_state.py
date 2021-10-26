@@ -28,6 +28,7 @@ from .utils import (
     iterate_and_apply,
     get_op_packing_only_uses_module_attributes,
     get_packable_tensor_kwarg_names,
+    get_prev_seen_op,
 )
 
 # TODO(future PR): maybe better name
@@ -449,9 +450,8 @@ class AutoQuantizationState(torch.nn.Module):
                     # into having a soft link.
                     # TODO: make this handle more cases
                     # TODO: handle module -> add_scalar -> add_scalar
-                    # TODO: this needs to look up by tensor_id, not idx,
-                    # current code may be wrong for some subgraphs
-                    prev_op = self.idx_to_seen_ops[str(self.idx - 1)]
+                    prev_op = get_prev_seen_op(
+                        self.idx_to_seen_ops, seen_op)
                     # TODO: the following line needs to only check fqn
                     # for modules, not for functions
                     fqn_last_part = prev_op.fqn.split('.')[-1]
