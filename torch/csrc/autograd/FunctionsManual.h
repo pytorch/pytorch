@@ -268,6 +268,13 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
     std::array<bool,3> output_mask);
 
 std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, const Tensor& result, const Tensor& input, const Tensor& tau);
+Tensor householder_product_jvp(
+    const Tensor& dV,
+    const Tensor& dtau,
+    const Tensor& prod,
+    const Tensor& V,
+    const Tensor& tau
+);
 std::tuple<Tensor, Tensor> polar_backward(
     const Tensor& grad,
     const Tensor& result);
