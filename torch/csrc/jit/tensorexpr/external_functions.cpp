@@ -531,7 +531,7 @@ const static RegisterNNCExternalFunction nnc_dequantize(
     "nnc_aten_dequantize",
     nnc_aten_dequantize);
 const static RegisterNNCExternalFunction nnc_quantized_conv2d_prepack(
-    "nnc_quantized_conv2d_prepack",
+    "nnc_aten_quantized_conv2d_prepack",
     nnc_aten_quantized_conv2d_prepack);
 const static RegisterNNCExternalFunction nnc_upsample_nearest2d(
     "nnc_aten_upsample_nearest2d",

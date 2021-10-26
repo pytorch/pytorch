@@ -39,6 +39,7 @@ std::vector<mobile::nnc::InputSpec> toInputSpecs(
   for (const auto& sizes : inputSizes) {
     mobile::nnc::InputSpec spec;
     spec.sizes_ = sizes;
+    // TODO: get and set input dtype
     spec.dtype_ = c10::ScalarType::Float;
     specs.emplace_back(std::move(spec));
   }
@@ -54,13 +55,22 @@ std::unique_ptr<Function> compileMethod(
   func->set_input_specs(toInputSpecs(sizes));
 
   std::vector<at::Tensor> parameters;
+  auto params = c10::impl::GenericList(c10::AnyType::get());
+
   auto const_descriptors = kernel->getConstantDescriptors();
   for (const auto& cd : const_descriptors) {
     auto sizes = getConstSizes(cd.buf);
-    at::Tensor const_tensor = at::from_blob(cd.ptr, sizes).clone();
-    parameters.push_back(const_tensor);
+    // at::Tensor const_tensor = at::from_blob(cd.ptr, sizes).clone();
+    // parameters.push_back(const_tensor);
+    if (cd.ptr) {
+      at::Tensor const_tensor = at::from_blob(cd.ptr, sizes).clone();
+      params.push_back(const_tensor);
+    } else {
+      params.emplace_back(toIValue(cd.node->output()));
+    }
   }
-  func->set_parameters(c10::impl::toList(c10::List<at::Tensor>(parameters)));
+  // func->set_parameters(c10::impl::toList(c10::List<at::Tensor>(parameters)));
+  func->set_parameters(params);
 
   MemoryPlan plan;
   plan.buffer_sizes_ = {}; // temp_sizes_;
@@ -75,8 +85,7 @@ std::unique_ptr<Function> compileMethod(
     OutputSpec output;
     output.sizes_ = getConstSizes(ba.buf());
     // TODO: assert the output is a buffer and not a scalar
-    // TODO: use actual dtype
-    output.dtype_ = c10::ScalarType::Float;
+    output.dtype_ = ba.buf()->dtype().scalar_type();
     out_spec.push_back(output);
   }
   func->set_output_specs(out_spec);

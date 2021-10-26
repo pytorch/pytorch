@@ -1519,7 +1519,7 @@ RegisterNNCLoweringsFunction quantized_add(
     computeQuantizedAdd);
 
 RegisterNNCLoweringsFunction quantized_conv2d_prepack(
-		{"_quantized::conv2d_prepack(Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> (__torch__.torch.classes.quantized.Conv2dPackedParamsBase)"},
+    {"quantized::conv2d_prepack(Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> (__torch__.torch.classes.quantized.Conv2dPackedParamsBase)"},
     computeQuantizedConv2dPrepack);
 
 RegisterNNCLoweringsFunction aten_upsample_nearest2d(
