@@ -4,7 +4,6 @@ import contextlib
 import enum
 import logging
 import os
-import socket
 import threading
 from typing import NamedTuple
 
