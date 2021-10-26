@@ -25,7 +25,7 @@ from torch.distributed._sharding_spec._internals import (
 )
 from torch.types import Number
 from .metadata import TensorProperties, ShardedTensorMetadata
-from .ops import sharded_embedding, sharded_linear, uniform_
+from .ops import kaiming_uniform_, normal_, sharded_embedding, sharded_linear, uniform_
 from .shard import Shard
 from .utils import (
     _CURRENT_PROCESS_GROUP,
@@ -346,6 +346,7 @@ class ShardedTensor(object):
         sharded_tensor._local_shards = local_shards
         # make a EnumerableShardingSpec for sharded tensors that initialized from this API.
         # TODO: make sharding spec a ChunkShardingSpec by inferring from the metadata list.
+        #       see issue https://github.com/pytorch/pytorch/issues/67244
         sharded_tensor._sharding_spec = EnumerableShardingSpec(global_sharded_tensor_metadata.shards_metadata)
 
         # run post initialization, i.e. map registration, rpc initialization
@@ -434,8 +435,12 @@ class ShardedTensor(object):
             return sharded_linear(types, args, kwargs, self._process_group)
         if func == torch.nn.functional.embedding:
             return sharded_embedding(types, args, kwargs, self._process_group)
+        elif func == torch.nn.init.normal_:
+            return normal_(types, args, kwargs)
         elif func == torch.nn.init.uniform_:
             return uniform_(types, args, kwargs)
+        elif func == torch.nn.init.kaiming_uniform_:
+            return kaiming_uniform_(types, args, kwargs)
         raise RuntimeError(
             f"torch function '{func.__name__}', with args: {args} and "
             f"kwargs: {kwargs} not supported for ShardedTensor!")
