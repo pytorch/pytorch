@@ -167,7 +167,7 @@ bool Function::run(Stack& stack) const {
     schema->checkAndNormalizeInputs(
         stack, std::unordered_map<std::string, IValue>{} /*kwargs*/);
   }
-  InterpreterState interp_state(code_);
+  InterpreterState interp_state(*code_);
   return interp_state.run(stack);
 }
 
@@ -181,8 +181,7 @@ const std::shared_ptr<Code> Function::get_code() const {
 }
 
 int64_t Function::getExceptionDebugHandle() const {
-  size_t pc = getInterpretersExceptionPC();
-  return (pc < code_->debug_handles_.size()) ? code_->debug_handles_[pc] : -1;
+  return getInterpretersExceptionDebugHandle();
 }
 
 } // namespace mobile
