@@ -1193,6 +1193,44 @@ void initJITBindings(PyObject* module) {
           })
       .def("has_storage", &DeserializationStorageContext::hasStorage);
 
+  m.def("get_schema", [](const std::string& op_name, const std::string& overload_name) {
+    auto symbol = Symbol::fromQualString(op_name);
+    auto operations = getAllOperatorsFor(symbol);
+    for (auto op: operations) {
+      if (op->schema().overload_name() == overload_name) {
+        return op->schema();
+      }
+    }
+    throw std::runtime_error("Found no matching schema");
+  });
+
+  m.def(
+      "get_operation_overload",
+      [](const std::string& op_name, const std::string& overload_name) {
+        try {
+          auto symbol = Symbol::fromQualString(op_name);
+          auto operations = getAllOperatorsFor(symbol);
+          for (auto op: operations) {
+            if (op->schema().overload_name() == overload_name) {
+              std::ostringstream docstring;
+              docstring << "Automatically bound operator '" << op_name
+                        << "' with schema:\n";
+              docstring << "  " << op->schema() << "\n";
+              auto func = py::cpp_function(
+              [op, symbol](py::args args, py::kwargs kwargs) {
+                return invokeOperatorFromPython({op}, args, kwargs);
+              },
+              py::name(symbol.toUnqualString()),
+              py::doc(docstring.str().c_str()));
+              return func;
+            }
+          }
+          throw std::runtime_error("Found no matching schema");
+        } catch (const c10::Error& error) {
+          throw std::runtime_error(error.what_without_backtrace());
+        }
+      });
+
   m.def(
       "_jit_get_operation",
       [](const std::string& op_name) {

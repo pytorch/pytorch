@@ -25,6 +25,92 @@ def dl_open_guard():
     if _SET_GLOBAL_FLAGS:
         sys.setdlopenflags(old_flags)
 
+class OpOverload:
+    def __init__(self, op, schema):
+        self.op = op
+        self.schema = schema
+    
+    def __call__(self, *args, **kwargs):
+        return self.op(*args, **kwargs or {})
+    
+    def __getattr__(self, key):
+        return getattr(self.op, key)
+    
+    # `my_namespace::my_op`
+    def qualified_name(self):
+        return self.schema.name
+
+    def overload_name(self):
+        return self.schema.overload_name
+
+    # vector of Arguments -- each Argument's name, and type can currently be accessed
+    # it might be useful to make the mutability of the arg accessible (using the alias_info stored in the C++ struct) 
+    def returns(self):
+        return self.schema.returns
+
+    def arguments(self):
+        return self.schema.arguments
+
+# >>> torch.ops.aten.add.default
+# aten::add(Scalar a, Scalar b) -> (Scalar)
+# <torch._ops.OpOverload object at 0x7f54a7dccf40>
+# >>> torch.ops.aten.addmv
+# <torch._ops.DisambiguateOpOverloads object at 0x7f54a7e60c40>
+# >>> torch.ops.aten.addmv.default
+# aten::addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> (Tensor)
+# <torch._ops.OpOverload object at 0x7f54a7dccb50>
+
+# this might be a bit slower than the version before.
+class OpOverloadBundle():
+    def __init__(self, namespace_name, op_name):
+        # Get the op `my_namespace::my_op` if available. This will also check
+        # for overloads and raise an exception if there are more than one.
+        qualified_op_name = '{}::{}'.format(namespace_name, op_name)
+        op = torch._C._jit_get_operation(qualified_op_name)
+
+        # let the script frontend know that op is identical to the builtin op
+        # with qualified_op_name
+        torch.jit._builtins._register_builtin(op, qualified_op_name)
+        setattr(self, op_name, op)
+        op.__module__ = self.__module__ + "." + namespace_name
+
+        self.op = op
+        self.namespace_name = namespace_name
+        self.op_name = op_name
+
+    def __getattr__(self, key):
+        # It is not a valid op_name when __file__ is passed in
+        if key == '__file__':
+            return 'torch.ops'
+
+        # return the overload packet
+        # make sure to disallow this keyword in native functions
+        # can access all overloads except -> overload_name=empty string, schema-> aten::add(Scalar a, Scalar b) -> (Scalar)
+        if key == 'default':
+            key = ""
+        qualified_op_name = '{}::{}'.format(self.namespace_name, self.op_name)
+        op = torch._C.get_operation_overload(qualified_op_name, key)
+        schema = torch.get_schema(qualified_op_name, key)
+        print(schema)
+        return OpOverload(op, schema)
+
+    
+    def __call__(self, *args, **kwargs):
+        # to ensure torch.ops.foo.bar() is still callable from JIT
+        # "" key handling from above
+        # save a fn_ptr and just call that here. in its current version, it will be pretty slow
+        if kwargs is None:
+            kwargs = {}
+        return self.op(*args, **kwargs)
+
+#resolution of torch.fn is different from torch.ops. ... fn
+# First one is parsing the python objects and then matching the schema -> calls into the unboxed version of the method
+
+# second one is done by JIT. Creates a stack of all the overloads and then tries to match the correct one at runtime
+# always calls into boxed
+
+# autograd codegen mostly creates variabletype, tracertype, inplace or view type and python bindings
+# aten codegen generates tensor methods for the the tensor class
 
 # _OpNamespace is a subclass of ModuleType because the torch script
 # allows attribute lookups on modules only. Since we want torch.ops.foo.bar()
@@ -54,19 +140,29 @@ class _OpNamespace(types.ModuleType):
         self.name = name
 
     def __getattr__(self, op_name):
-        # It is not a valid op_name when __file__ is passed in
-        if op_name == '__file__':
-            return 'torch.ops'
-        # Get the op `my_namespace::my_op` if available. This will also check
-        # for overloads and raise an exception if there are more than one.
-        qualified_op_name = '{}::{}'.format(self.name, op_name)
-        op = torch._C._jit_get_operation(qualified_op_name)
-        # let the script frontend know that op is identical to the builtin op
-        # with qualified_op_name
-        torch.jit._builtins._register_builtin(op, qualified_op_name)
-        setattr(self, op_name, op)
-        op.__module__ = self.__module__ + "." + self.name
-        return op
+        return OpOverloadBundle(self.name, op_name)
+
+'''
+FYI:
+torch.ops.aten.add -> attribute query invokes getattr (fn pointer)
+indexing on attribute lookup (torch.ops.aten.add['Tensor']) then the attribute should return a dict
+torch.ops.aten.add.Tensor -> attribute of an attribute
+torch.ops.aten.add.Scalar -> shouldn't be exposed in Python (since it can never be called from python) (can be used from __torch_dispatch__)
+
+First way:
+torch.ops.aten.add -> Returns a DisambiguateOpOverloads class object which can be called (overload __call__) -- same behavior as before
+torch.ops.aten.add.overload_name -> Returns an OpOverload class object which contains the overload name, op name and fn_ptr to the overload.
+add.default -> out-of-place (make the attribute name (here default) a reserved keyword to avoid conflict in future)
+
+Second way:
+torch.ops.aten.add -> Returns a DisambiguateOpOverloads (same as above)
+torch.ops.aten.add[overload_name] -> Returns an OpOverload class object (same as above)
+torch.ops.aten.add[""] -> Returns an OpOverload with overload_name set to an empty string and call method calling the out-of-place fn
+                         as in case without empty sstring indexing ...
+
+Third way:
+Allow both attribute lookup and indexing
+'''
 
 class _Ops(types.ModuleType):
     __file__ = '_ops.py'
