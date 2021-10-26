@@ -84,7 +84,6 @@ def _validate_output_tensor_for_gather(
 def _flatten_tensor_size(size) -> List[int]:
     """
     Checks if tensor size is valid, then flatten/return the list of ints.
-
     """
     if len(size) == 1 and isinstance(size[0], collections.abc.Sequence):
         dims = list(*size)

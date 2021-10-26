@@ -13,9 +13,9 @@ class Shard(object):
     the associated metadata for that shard.
 
     Args:
-        tensor(torch.Tensor): local tensor for the shard.
+        tensor(torch.Tensor): Local tensor for the shard.
         metadata(:class `torch.distributed._sharded_tensor.ShardMetadata`):
-            metadata for this shard, including offsets, lengths and device placement.
+            The metadata for the shard, including offsets, lengths and device placement.
     """
     __slots__ = ['tensor', 'metadata']
     tensor: torch.Tensor
@@ -39,13 +39,13 @@ class Shard(object):
     @classmethod
     def from_tensor_and_offsets(cls, tensor: torch.Tensor, shard_offsets: List[int], rank: int):
         """
-        Class method to create Shard from local tensor, shard_offsets, and rank
+        Creates a Shard of a ShardedTensor from a local torch.Tensor, shard_offsets and rank.
 
         Args:
-            tensor(torch.Tensor): local tensor for the shard.
-            shard_offsets(List[int]): list of integers specify the offset
-                of this shard on each dimension.
-            rank(int): specify the rank for this shard.
+            tensor(torch.Tensor): Local tensor for the shard.
+            shard_offsets(List[int]): List of integers specify the offset
+                of the shard on each dimension.
+            rank(int): Specify the rank for the shard.
         """
         shard_lengths = list(tensor.size())
         placement = _remote_device(f"rank:{rank}/{str(tensor.device)}")
