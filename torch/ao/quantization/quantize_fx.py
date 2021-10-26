@@ -7,8 +7,6 @@ from torch.fx.node import Target, Node, Argument
 from torch.nn.intrinsic import _FusedModule
 from .fx import Fuser  # noqa: F401
 from .fx import prepare, convert  # noqa: F401
-from .fx._convert_new import _convert_new  # noqa: F401
-from .fx import get_fbgemm_backend_config_dict  # noqa: F401
 from .fx import get_tensorrt_backend_config_dict  # noqa: F401
 from .fx.graph_module import ObservedGraphModule, QuantizedGraphModule
 from .fx.qconfig_utils import (
@@ -561,6 +559,7 @@ def _convert_fx(
     convert_custom_config_dict: Optional[Dict[str, Any]] = None,
     is_standalone_module: bool = False,
     _remove_qconfig: bool = True,
+    qconfig_dict: Dict[str, Any] = None,
 ) -> QuantizedGraphModule:
     """ `is_standalone_module`: see docs in :func:`~torch.ao.quantization.prepare_standalone_module_fx`
     """
@@ -576,6 +575,7 @@ def _convert_fx(
         convert_custom_config_dict,
         is_standalone_module,
         _remove_qconfig_flag=_remove_qconfig,
+        convert_qconfig_dict=qconfig_dict,
     )
 
     preserved_attributes = convert_custom_config_dict.get("preserved_attributes", [])
@@ -589,6 +589,7 @@ def convert_fx(
     is_reference: bool = False,
     convert_custom_config_dict: Optional[Dict[str, Any]] = None,
     _remove_qconfig: bool = True,
+    qconfig_dict: Dict[str, Any] = None,
 ) -> QuantizedGraphModule:
     r""" Convert a calibrated or trained model to a quantized model
 
@@ -638,6 +639,28 @@ def convert_fx(
 
         * `_remove_qconfig`: Option to remove the qconfig attributes in the model after convert.
 
+        * `qconfig_dict`: qconfig_dict with either same keys as what is passed to
+          the qconfig_dict in `prepare_fx` API, with same values or `None`, or
+          additional keys with values set to `None`
+
+          For each entry whose value is set to None, we skip quantizing that entry in the model::
+
+            qconfig_dict = {
+              # used for object_type, skip quantizing torch.nn.functional.add
+              "object_type": [
+                (torch.nn.functional.add, None),
+                (torch.nn.functional.linear, qconfig_from_prepare)
+                ...,
+              ],
+
+              # sed for module names, skip quantizing "foo.bar"
+              "module_name": [
+                ("foo.bar", None)
+                ...,
+              ],
+            }
+
+
     Return:
         A quantized model (GraphModule)
 
@@ -653,6 +676,7 @@ def convert_fx(
         is_reference,
         convert_custom_config_dict,
         _remove_qconfig=_remove_qconfig,
+        qconfig_dict=qconfig_dict,
     )
 
 
@@ -675,23 +699,3 @@ def _convert_standalone_module_fx(
         convert_custom_config_dict,
         is_standalone_module=True,
     )
-
-def _convert_fx_new(
-        graph_module: GraphModule, is_reference: bool = False,
-        convert_custom_config_dict: Dict[str, Any] = None,
-        _remove_qconfig: bool = True) -> QuantizedGraphModule:
-    assert is_reference
-    if convert_custom_config_dict is None:
-        convert_custom_config_dict = {}
-
-    _check_is_graph_module(graph_module)
-    check_is_valid_convert_custom_config_dict(convert_custom_config_dict)
-
-    quantized = _convert_new(
-        graph_module, is_reference, convert_custom_config_dict,
-        False, _remove_qconfig_flag=_remove_qconfig)
-
-    preserved_attributes = convert_custom_config_dict.get("preserved_attributes", [])
-    for attr_name in preserved_attributes:
-        setattr(quantized, attr_name, getattr(graph_module, attr_name))
-    return quantized
