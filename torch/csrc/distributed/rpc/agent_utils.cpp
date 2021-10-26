@@ -59,9 +59,8 @@ std::tuple<std::string, std::string, std::string> getNextKeyIds() {
 
 // Synchronize process with all other agent processes strictly using store
 // Block until all ``RpcAgent``s reach this method.
-// Returns true if there are 0 active calls amongst all rpc agents
-// Returns false otherwise
-bool syncCallCount(
+// Returns total number of active calls of all RPC agents in the group
+int syncCallCount(
     ::c10d::PrefixStore store,
     const int worldSize,
     int activeCalls) {
@@ -71,6 +70,9 @@ bool syncCallCount(
   // Add to keys which will record the number of processes and active calls
   int totalCallCount = store.add(activeCallCountKey, activeCalls);
   int totalProcessCount = store.add(processCountKey, 1);
+
+  VLOG(1) << processCountKey << " " << totalCallCount << " "
+          << totalProcessCount;
 
   // The last worker will need to set the ready key
   if (totalProcessCount == worldSize) {
@@ -84,7 +86,7 @@ bool syncCallCount(
   auto activeCallCountData = store.get(activeCallCountKey);
   totalCallCount = std::stoi(
       std::string(activeCallCountData.begin(), activeCallCountData.end()));
-  return totalCallCount == 0;
+  return totalCallCount;
 }
 
 } // namespace rpc

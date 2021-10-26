@@ -12,7 +12,8 @@ class TORCH_API Logger {
       const std::string& module_name,
       const std::vector<int>& device_ids,
       int output_device,
-      bool broadcast_buffers);
+      bool broadcast_buffers,
+      bool has_sync_bn);
 
   void set_static_graph();
 

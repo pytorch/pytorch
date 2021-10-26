@@ -18,7 +18,7 @@ std::unordered_map<std::string, worker_id_t> collectNames(
 
 // This performs a synchronization of all call counts by using store.
 // All RPC peers wait for others to join to exit at the same time.
-bool syncCallCount(
+int syncCallCount(
     ::c10d::PrefixStore store,
     const int worldSize,
     int activeCalls = 0);

@@ -1047,16 +1047,17 @@ void TensorPipeAgent::join(bool shutdown) {
       VLOG(1) << "RPC agent for " << workerInfo_.name_
               << " exited the barrier and found " << clientActiveCalls_
               << " active client calls";
-      bool canFinishShutdown =
+      int totalClientActiveCalls =
           syncCallCount(shutdownStore_, worldSize_, clientActiveCalls_);
       VLOG(1) << "RPC agent for " << workerInfo_.name_
-              << " completed the allreduce and got a total of "
-              << clientActiveCalls_
+              << " completed sync call counts and got a total of "
+              << totalClientActiveCalls
               << " active client calls across all workers";
-      if (shutdown) {
-        shuttingDown_ = true;
-      }
-      if (canFinishShutdown) {
+      if (totalClientActiveCalls == 0) {
+        if (shutdown) {
+          shuttingDown_ = true;
+          syncCallCount(shutdownStore_, worldSize_);
+        }
         break;
       }
     }
