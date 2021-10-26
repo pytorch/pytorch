@@ -7,7 +7,7 @@
 namespace at {
 namespace native {
 
-template<typename scalar_t, typename opmath_t = typename get_opmath_t<scalar_t>::opmath_t>
+template<typename scalar_t, typename opmath_t = typename at::opmath_type<scalar_t>>
 __device__ __forceinline__ opmath_t reduce_block_into_lanes(
     opmath_t *x,
     scalar_t val,
@@ -64,7 +64,7 @@ struct LpNormFunctor {
       T* output_per_tensor,
       const int max_chunks_per_tensor
   ) {
-    using opmath_t = typename get_opmath_t<T>::opmath_t;
+    using opmath_t = typename at::opmath_type<T>;
     int tensor_loc = tl.block_to_tensor[blockIdx.x];
     int chunk_idx = tl.block_to_chunk[blockIdx.x];
     int n = tl.numel_for_tensor[tensor_loc];
@@ -121,7 +121,7 @@ __global__ void lpnorm_cleanup(
     T* output_per_tensor,
     T* ret_per_tensor,
     int max_chunks_per_tensor) {
-  using opmath_t = typename get_opmath_t<T>::opmath_t;
+  using opmath_t = typename at::opmath_type<T>;
   __shared__ opmath_t vals[512];
 
   T* output_this_tensor = output_per_tensor + blockIdx.x*max_chunks_per_tensor;
@@ -175,7 +175,7 @@ std::vector<Tensor> foreach_tensor_norm_cuda(TensorList tensors, const Scalar& o
   if (p == static_cast<double>(1)) {
     AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf, kBFloat16, tensor_lists[0][0].scalar_type(), "foreach_tensor_norm_cuda", [&]() {
-        using opmath_t = typename get_opmath_t<scalar_t>::opmath_t;
+        using opmath_t = typename at::opmath_type<scalar_t>;
         multi_tensor_apply<1>(
           tensor_lists,
           LpNormFunctor<scalar_t, 1>(),
@@ -191,7 +191,7 @@ std::vector<Tensor> foreach_tensor_norm_cuda(TensorList tensors, const Scalar& o
   } else if (p == static_cast<double>(2)) {
     AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf, kBFloat16, tensor_lists[0][0].scalar_type(), "foreach_tensor_norm_cuda", [&]() {
-        using opmath_t = typename get_opmath_t<scalar_t>::opmath_t;
+        using opmath_t = typename at::opmath_type<scalar_t>;
         multi_tensor_apply<1>(
           tensor_lists,
           LpNormFunctor<scalar_t, 2>(),
