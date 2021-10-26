@@ -383,6 +383,8 @@ class TORCH_API StaticRuntime {
     }
   }
 
+  void create_memory_planner();
+
   // Memory planning is only enabled if sm->opts().cleanup_activations is true.
   // Otherwise, the memory used by activations is cached inside the static
   // runtime.
