@@ -78,7 +78,7 @@ void _not(Stack& stack) {
 void boolTensor(Stack& stack) {
   at::Tensor a;
   pop(stack, a);
-  push(stack, a.is_nonzero());
+  push(stack, at::native::is_nonzero(a));
 }
 
 void toList(Stack& stack) {

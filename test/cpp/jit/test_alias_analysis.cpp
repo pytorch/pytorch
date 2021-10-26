@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/runtime/graph_iterator.h>
 #include <torch/csrc/utils/memory.h>
 
 namespace torch {
@@ -480,6 +481,135 @@ TEST(AliasAnalysisTest, SafeToChangeAliasingRelationship) {
   EXPECT_TRUE(aliasDb.safeToChangeAliasingRelationship(vmap["c"], vmap["d"]));
   EXPECT_TRUE(aliasDb.safeToChangeAliasingRelationship(vmap["d"], vmap["c"]));
 }
+
+class BatchAndInstanceNormFixture
+    : public ::testing::TestWithParam<std::tuple<std::string, NodeKind, bool>> {
+};
+
+TEST_P(BatchAndInstanceNormFixture, BatchAndInstanceNorm) {
+  auto param = GetParam();
+  auto fnName = std::get<0>(param);
+  auto nodeKind = std::get<1>(param);
+  auto isTraining = std::get<2>(param);
+  std::string isTrainingStr = std::to_string((int)isTraining);
+
+  auto graph = std::make_shared<Graph>();
+
+  parseIR(
+      R"IR(
+  graph(%input : Tensor, %running_mean : Tensor, %running_var : Tensor):
+      %none : NoneType = prim::Constant()
+      %training : bool = prim::Constant[value=)IR" +
+          isTrainingStr + R"IR(]()
+      %momentum : float = prim::Constant[value=1.0]()
+      %eps : float = prim::Constant[value=1.0e-9]()
+      %cudnn_enabled : bool = prim::Constant[value=0]()
+      %res : Tensor = )IR" +
+          fnName +
+          R"IR((%input, %none, %none, %running_mean, %running_var, %training, %momentum, %eps, %cudnn_enabled)
+      return (%res)
+    )IR",
+      &*graph);
+
+  graph->lint();
+  DepthFirstGraphNodeIterator it(graph);
+
+  Node* n = nullptr;
+  while ((n = it.next()) != nullptr) {
+    if (n->kind() == nodeKind) {
+      break;
+    }
+  }
+  EXPECT_TRUE(n != nullptr);
+
+  AliasDb aliasDb(graph);
+  EXPECT_TRUE(aliasDb.hasWriters(n) == isTraining);
+}
+
+TEST_P(BatchAndInstanceNormFixture, BatchAndInstanceNormTrainingUnknown) {
+  auto param = GetParam();
+  auto fnName = std::get<0>(param);
+  auto nodeKind = std::get<1>(param);
+
+  auto graph = std::make_shared<Graph>();
+
+  parseIR(
+      R"IR(
+  graph(%input : Tensor, %running_mean : Tensor, %running_var : Tensor, %training : bool):
+      %none : NoneType = prim::Constant()
+      %momentum : float = prim::Constant[value=1.0]()
+      %eps : float = prim::Constant[value=1.0e-9]()
+      %cudnn_enabled : bool = prim::Constant[value=0]()
+      %res : Tensor = )IR" +
+          fnName +
+          R"IR((%input, %none, %none, %running_mean, %running_var, %training, %momentum, %eps, %cudnn_enabled)
+      return (%res)
+    )IR",
+      &*graph);
+
+  graph->lint();
+  DepthFirstGraphNodeIterator it(graph);
+
+  Node* n = nullptr;
+  while ((n = it.next()) != nullptr) {
+    if (n->kind() == nodeKind) {
+      break;
+    }
+  }
+  EXPECT_TRUE(n != nullptr);
+
+  AliasDb aliasDb(graph);
+  EXPECT_TRUE(aliasDb.hasWriters(n));
+}
+
+TEST_P(BatchAndInstanceNormFixture, BatchNormTrainingWithNoMeanOrVar) {
+  auto param = GetParam();
+  auto fnName = std::get<0>(param);
+  auto nodeKind = std::get<1>(param);
+  auto isTraining = std::get<2>(param);
+  std::string isTrainingStr = std::to_string((int)isTraining);
+
+  auto graph = std::make_shared<Graph>();
+
+  parseIR(
+      R"IR(
+  graph(%input : Tensor):
+      %none : NoneType = prim::Constant()
+      %training : bool = prim::Constant[value=)IR" +
+          isTrainingStr + R"IR(]()
+      %momentum : float = prim::Constant[value=1.0]()
+      %eps : float = prim::Constant[value=1.0e-9]()
+      %cudnn_enabled : bool = prim::Constant[value=0]()
+      %res : Tensor = )IR" +
+          fnName +
+          R"IR((%input, %none, %none, %none, %none, %training, %momentum, %eps, %cudnn_enabled)
+      return (%res)
+    )IR",
+      &*graph);
+
+  graph->lint();
+  DepthFirstGraphNodeIterator it(graph);
+
+  Node* n = nullptr;
+  while ((n = it.next()) != nullptr) {
+    if (n->kind() == nodeKind) {
+      break;
+    }
+  }
+  EXPECT_TRUE(n != nullptr);
+
+  AliasDb aliasDb(graph);
+  EXPECT_FALSE(aliasDb.hasWriters(n));
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    AliasAnalysisTest,
+    BatchAndInstanceNormFixture,
+    ::testing::Values(
+        std::make_tuple("aten::batch_norm", aten::batch_norm, false),
+        std::make_tuple("aten::instance_norm", aten::instance_norm, false),
+        std::make_tuple("aten::batch_norm", aten::batch_norm, true),
+        std::make_tuple("aten::instance_norm", aten::instance_norm, true)));
 
 TEST(WriteTrackingTest, Basic) {
   RegisterOperators reg({Operator(
