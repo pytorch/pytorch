@@ -7,7 +7,6 @@
 #include <vector>
 
 #include "lazy_tensors/int128.h"
-#include "lazy_tensors/types.h"
 
 namespace lazy_tensors {
 

@@ -7,7 +7,6 @@
 #include <vector>
 
 #include "lazy_tensors/computation_client/metrics.h"
-#include "lazy_tensors/types.h"
 
 namespace torch_lazy_tensors {
 namespace cpp_test {

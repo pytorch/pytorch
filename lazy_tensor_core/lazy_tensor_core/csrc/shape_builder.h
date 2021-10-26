@@ -3,7 +3,6 @@
 #include <vector>
 
 #include "lazy_tensors/shape.h"
-#include "lazy_tensors/types.h"
 
 namespace torch_lazy_tensors {
 

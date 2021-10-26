@@ -2,7 +2,6 @@
 
 #include <functional>
 
-#include "lazy_tensors/types.h"
 
 namespace lazy_tensors {
 

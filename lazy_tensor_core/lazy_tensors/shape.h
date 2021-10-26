@@ -11,7 +11,6 @@
 #include "lazy_tensors/primitive_util.h"
 #include "lazy_tensors/str_cat.h"
 #include "lazy_tensors/str_join.h"
-#include "lazy_tensors/types.h"
 
 namespace lazy_tensors {
 

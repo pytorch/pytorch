@@ -3,7 +3,6 @@
 
 #include <string>
 
-#include "lazy_tensors/types.h"
 
 namespace lazy_tensors {
 namespace sys_util {

@@ -13,7 +13,6 @@
 #include "lazy_tensors/core/lib/bfloat16/bfloat16.h"
 #include "lazy_tensors/literal_util.h"
 #include "lazy_tensors/permutation_util.h"
-#include "lazy_tensors/types.h"
 
 namespace torch_lazy_tensors {
 

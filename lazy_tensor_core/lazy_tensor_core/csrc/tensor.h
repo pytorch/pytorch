@@ -16,7 +16,6 @@
 #include "lazy_tensors/computation_client/multi_wait.h"
 #include "lazy_tensors/computation_client/util.h"
 #include "lazy_tensors/status.h"
-#include "lazy_tensors/types.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/lazy/core/ir.h"
 

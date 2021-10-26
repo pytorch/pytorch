@@ -8,7 +8,6 @@
 #include "lazy_tensors/literal.h"
 #include "lazy_tensors/shape.h"
 #include "lazy_tensors/span.h"
-#include "lazy_tensors/types.h"
 #include "torch/csrc/autograd/variable.h"
 
 namespace torch_lazy_tensors {

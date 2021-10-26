@@ -10,7 +10,6 @@
 
 #include "lazy_tensors/computation_client/sys_util.h"
 #include "lazy_tensors/str_cat.h"
-#include "lazy_tensors/types.h"
 
 namespace lazy_tensors {
 namespace metrics {

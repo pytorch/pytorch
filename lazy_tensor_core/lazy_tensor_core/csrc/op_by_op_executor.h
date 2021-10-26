@@ -7,7 +7,6 @@
 #include "lazy_tensors/computation_client/cache.h"
 #include "lazy_tensors/computation_client/computation_client.h"
 #include "lazy_tensors/computation_client/util.h"
-#include "lazy_tensors/types.h"
 #include "torch/csrc/lazy/core/ir.h"
 
 namespace torch_lazy_tensors {

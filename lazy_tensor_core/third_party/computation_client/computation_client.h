@@ -15,7 +15,6 @@
 #include "lazy_tensors/computation_client/types.h"
 #include "lazy_tensors/literal_util.h"
 #include "lazy_tensors/status.h"
-#include "lazy_tensors/types.h"
 
 namespace lazy_tensors {
 
