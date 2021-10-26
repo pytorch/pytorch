@@ -181,12 +181,14 @@ std::vector<Tensor> foreach_tensor_norm_cuda(TensorList tensors, const Scalar& o
           LpNormFunctor<scalar_t, 1>(),
           output_per_tensor.data_ptr<scalar_t>(),
           max_chunks_per_tensor);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
         const at::cuda::OptionalCUDAGuard device_guard(device_of(output_per_tensor));
         auto stream = at::cuda::getCurrentCUDAStream();
         lpnorm_cleanup<scalar_t, 1><<<ntensors, 512, 0, stream>>>(
           output_per_tensor.data_ptr<scalar_t>(),
           ret_per_tensor.data_ptr<scalar_t>(),
           max_chunks_per_tensor);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
   } else if (p == static_cast<double>(2)) {
     AT_DISPATCH_FLOATING_TYPES_AND2(
@@ -197,17 +199,18 @@ std::vector<Tensor> foreach_tensor_norm_cuda(TensorList tensors, const Scalar& o
           LpNormFunctor<scalar_t, 2>(),
           output_per_tensor.data_ptr<scalar_t>(),
           max_chunks_per_tensor);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
         const at::cuda::OptionalCUDAGuard device_guard(device_of(output_per_tensor));
         auto stream = at::cuda::getCurrentCUDAStream();
         lpnorm_cleanup<scalar_t, 2><<<ntensors, 512, 0, stream>>>(
           output_per_tensor.data_ptr<scalar_t>(),
           ret_per_tensor.data_ptr<scalar_t>(),
           max_chunks_per_tensor);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
   } else {
     AT_ERROR("foreach_tensor_norm_cuda fast path got unexpected ord value: ", p);
   }
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   std::vector<Tensor> result;
   result.reserve(ntensors);
