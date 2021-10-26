@@ -6,7 +6,6 @@
 #include <memory>
 #include <mutex>
 
-#include "lazy_tensors/types.h"
 
 namespace lazy_tensors {
 namespace util {

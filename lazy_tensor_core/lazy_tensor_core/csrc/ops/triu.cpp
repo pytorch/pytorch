@@ -5,7 +5,7 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-Triu::Triu(const torch::lazy::Value& input, lazy_tensors::int64 diagonal)
+Triu::Triu(const torch::lazy::Value& input, int64_t diagonal)
     : TsNode(torch::lazy::OpKind(at::aten::triu), {input}, ir::GetShapeFromTsValue(input),
            /*num_outputs=*/1, torch::lazy::MHash(diagonal)),
       diagonal_(diagonal) {}

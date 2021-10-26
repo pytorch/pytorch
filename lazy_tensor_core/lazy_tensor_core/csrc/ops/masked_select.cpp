@@ -11,7 +11,7 @@ namespace {
 
 lazy_tensors::Shape NodeOutputShape(const torch::lazy::Value& input) {
   const lazy_tensors::Shape& input_shape = ir::GetShapeFromTsValue(input);
-  lazy_tensors::int64 input_elements =
+  int64_t input_elements =
       lazy_tensors::ShapeUtil::ElementsIn(input_shape);
   c10::ScalarType size_type =
       GetShapeDimensionType(/*device=*/nullptr);

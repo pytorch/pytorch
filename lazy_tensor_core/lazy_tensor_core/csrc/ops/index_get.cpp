@@ -8,7 +8,7 @@ namespace ir {
 namespace ops {
 
 IndexGet::IndexGet(const torch::lazy::Value& base, const torch::lazy::Value& indices,
-                   lazy_tensors::int64 start_dim)
+                   int64_t start_dim)
     : TsNode(OpKind(at::aten::index), {base, indices},
            /*num_outputs=*/1, torch::lazy::MHash(start_dim)),
       start_dim_(start_dim) {

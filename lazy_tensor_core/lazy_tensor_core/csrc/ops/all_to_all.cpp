@@ -9,10 +9,10 @@ namespace ir {
 namespace ops {
 
 AllToAll::AllToAll(const torch::lazy::Value& input, const torch::lazy::Value& token,
-                   lazy_tensors::int64 split_dimension,
-                   lazy_tensors::int64 concat_dimension,
-                   lazy_tensors::int64 split_count,
-                   std::vector<std::vector<lazy_tensors::int64>> groups)
+                   int64_t split_dimension,
+                   int64_t concat_dimension,
+                   int64_t split_count,
+                   std::vector<std::vector<int64_t>> groups)
     : TsNode(ltc_all_to_all, {input, token},
            /*num_outputs=*/2,
            torch::lazy::MHash(split_dimension, concat_dimension,

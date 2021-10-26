@@ -11,7 +11,7 @@ class AllReduce : public TsNode {
  public:
   AllReduce(AllReduceType reduce_type, OpList operands,
             const torch::lazy::Value& token, double scale,
-            std::vector<std::vector<lazy_tensors::int64>> groups);
+            std::vector<std::vector<int64_t>> groups);
 
   std::string ToString() const override;
 
@@ -21,14 +21,14 @@ class AllReduce : public TsNode {
 
   double scale() const { return scale_; }
 
-  const std::vector<std::vector<lazy_tensors::int64>>& groups() const {
+  const std::vector<std::vector<int64_t>>& groups() const {
     return groups_;
   }
 
  private:
   AllReduceType reduce_type_;
   double scale_;
-  std::vector<std::vector<lazy_tensors::int64>> groups_;
+  std::vector<std::vector<int64_t>> groups_;
 };
 
 }  // namespace ops

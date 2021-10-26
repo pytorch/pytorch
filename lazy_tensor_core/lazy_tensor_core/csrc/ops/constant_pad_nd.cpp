@@ -10,7 +10,7 @@ namespace ir {
 namespace ops {
 
 ConstantPadNd::ConstantPadNd(const torch::lazy::Value& input,
-                             std::vector<lazy_tensors::int64> pad,
+                             std::vector<int64_t> pad,
                              const at::Scalar& value)
     : TsNode(torch::lazy::OpKind(at::aten::constant_pad_nd), {input},
            /*num_outputs=*/1,

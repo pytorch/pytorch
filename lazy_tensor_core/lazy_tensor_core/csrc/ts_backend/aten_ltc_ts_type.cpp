@@ -401,7 +401,7 @@ at::Tensor LazyNativeFunctions::expand(const at::Tensor& self,
   LTC_FN_COUNTER("lazy::");
   return bridge::AtenFromLtcTensor(lazy_tensor_aten_ops::expand(
       bridge::GetLtcTensor(self),
-      lazy_tensors::util::ToVector<lazy_tensors::int64>(size)));
+      lazy_tensors::util::ToVector<int64_t>(size)));
 }
 
 at::Tensor& LazyNativeFunctions::fill_(at::Tensor & self, const at::Scalar & value) {

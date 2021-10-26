@@ -10,7 +10,6 @@
 #include "lazy_tensors/layout.h"
 #include "lazy_tensors/str_cat.h"
 #include "lazy_tensors/str_join.h"
-#include "lazy_tensors/types.h"
 
 namespace lazy_tensors {
 
@@ -18,7 +17,7 @@ class Shape {
  public:
   Shape() : at_element_type_(c10::ScalarType::Undefined) {}
 
-  Shape(at::ScalarType element_type, c10::ArrayRef<int64> dimensions);
+  Shape(at::ScalarType element_type, c10::ArrayRef<int64_t> dimensions);
 
 
   Shape(c10::ArrayRef<Shape> element_shapes)
@@ -39,7 +38,7 @@ class Shape {
                                 c10::Join(",", dimensions_), "]");
   }
 
-  int64 rank() const { return dimensions_.size(); }
+  int64_t rank() const { return dimensions_.size(); }
 
   bool IsArray() const { return false; }
 
@@ -59,14 +58,14 @@ class Shape {
 
   // Removes the dimension at index dim_to_delete entirely, reducing the rank
   // by 1.
-  void DeleteDimension(int64 dim_to_delete);
+  void DeleteDimension(int64_t dim_to_delete);
 
   c10::ScalarType at_element_type() const { return at_element_type_; }
   void set_element_type(at::ScalarType value);
 
   // Methods for accessing the dimensions array.
   int dimensions_size() const { return dimensions_.size(); }
-  int64 dimensions(int index) const {
+  int64_t dimensions(int index) const {
     if (dynamic_mode_.load()) {
       throw std::runtime_error("Exact shape not known");
     }
@@ -74,12 +73,12 @@ class Shape {
     return dimensions_[index];
   }
 
-  void set_dimensions(int index, int64 value) {
+  void set_dimensions(int index, int64_t value) {
     LTC_CHECK_LT(index, dimensions_.size());
     dimensions_[index] = value;
   }
 
-  c10::ArrayRef<int64> dimensions() const {
+  c10::ArrayRef<int64_t> dimensions() const {
     if (dynamic_mode_.load()) {
       throw std::runtime_error("Exact shape not known");
     }
@@ -111,7 +110,7 @@ class Shape {
  private:
   bool is_tuple_ = false;
   c10::ScalarType at_element_type_;
-  std::vector<int64> dimensions_;
+  std::vector<int64_t> dimensions_;
   std::vector<bool> dynamic_dimensions_;
   std::vector<Shape> element_shapes_;
   Layout layout_;

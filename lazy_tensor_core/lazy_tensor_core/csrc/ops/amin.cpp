@@ -6,7 +6,7 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-Amin::Amin(const torch::lazy::Value& input, std::vector<lazy_tensors::int64> dimensions,
+Amin::Amin(const torch::lazy::Value& input, std::vector<int64_t> dimensions,
            bool keepdim)
     : TsNode(torch::lazy::OpKind(at::aten::amin), {input},
            /*num_outputs=*/1, torch::lazy::MHash(dimensions, keepdim)),

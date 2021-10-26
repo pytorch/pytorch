@@ -8,22 +8,22 @@ namespace ops {
 
 class KthValue : public TsNode {
  public:
-  KthValue(const torch::lazy::Value& input, lazy_tensors::int64 k, lazy_tensors::int64 dim,
+  KthValue(const torch::lazy::Value& input, int64_t k, int64_t dim,
            bool keepdim);
 
   std::string ToString() const override;
 
   NodePtr Clone(OpList operands) const override;
 
-  lazy_tensors::int64 k() const { return k_; };
+  int64_t k() const { return k_; };
 
-  lazy_tensors::int64 dim() const { return dim_; };
+  int64_t dim() const { return dim_; };
 
   bool keepdim() const { return keepdim_; }
 
  private:
-  lazy_tensors::int64 k_;
-  lazy_tensors::int64 dim_;
+  int64_t k_;
+  int64_t dim_;
   bool keepdim_;
 };
 

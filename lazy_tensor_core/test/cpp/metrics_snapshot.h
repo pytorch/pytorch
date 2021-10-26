@@ -7,7 +7,6 @@
 #include <vector>
 
 #include "lazy_tensors/computation_client/metrics.h"
-#include "lazy_tensors/types.h"
 
 namespace torch_lazy_tensors {
 namespace cpp_test {
@@ -16,8 +15,8 @@ class MetricsSnapshot {
  public:
   struct ChangedCounter {
     std::string name;
-    lazy_tensors::int64 before = 0;
-    lazy_tensors::int64 after = 0;
+    int64_t before = 0;
+    int64_t after = 0;
   };
 
   MetricsSnapshot();
@@ -43,7 +42,7 @@ class MetricsSnapshot {
                                    std::stringstream* ss);
 
   std::unordered_map<std::string, MetricSamples> metrics_map_;
-  std::unordered_map<std::string, lazy_tensors::int64> counters_map_;
+  std::unordered_map<std::string, int64_t> counters_map_;
 };
 
 }  // namespace cpp_test

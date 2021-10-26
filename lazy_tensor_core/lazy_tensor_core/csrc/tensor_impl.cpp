@@ -148,7 +148,7 @@ void LTCTensorImpl::SetupSizeProperties() {
       numel_ *= dim;
     }
     sizes_and_strides_.set_sizes(updated_sizes);
-    std::vector<lazy_tensors::int64> updated_strides;
+    std::vector<int64_t> updated_strides;
     if (is_interop_view_ && tensor_.CurrentTensorData()) {
       at::IntArrayRef strides = tensor_.CurrentTensorData()->strides();
       updated_strides.assign(strides.begin(), strides.end());

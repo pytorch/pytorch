@@ -8,18 +8,18 @@ namespace ops {
 
 class ArgMax : public TsNode {
  public:
-  ArgMax(const torch::lazy::Value& input, lazy_tensors::int64 dim, bool keepdim);
+  ArgMax(const torch::lazy::Value& input, int64_t dim, bool keepdim);
 
   std::string ToString() const override;
 
   NodePtr Clone(OpList operands) const override;
 
-  lazy_tensors::int64 dim() const { return dim_; };
+  int64_t dim() const { return dim_; };
 
   bool keepdim() const { return keepdim_; }
 
  private:
-  lazy_tensors::int64 dim_;
+  int64_t dim_;
   bool keepdim_;
 };
 

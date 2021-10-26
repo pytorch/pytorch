@@ -7,8 +7,8 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-KthValue::KthValue(const torch::lazy::Value& input, lazy_tensors::int64 k,
-                   lazy_tensors::int64 dim, bool keepdim)
+KthValue::KthValue(const torch::lazy::Value& input, int64_t k,
+                   int64_t dim, bool keepdim)
     : TsNode(torch::lazy::OpKind(at::aten::kthvalue), {input},
            /*num_outputs=*/2, torch::lazy::MHash(k, dim, keepdim)),
       k_(k),

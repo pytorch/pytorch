@@ -7,8 +7,8 @@ namespace ir {
 namespace ops {
 
 StdMean::StdMean(const torch::lazy::Value& input,
-                 std::vector<lazy_tensors::int64> dimensions,
-                 lazy_tensors::int64 correction, bool keep_reduced_dimensions)
+                 std::vector<int64_t> dimensions,
+                 int64_t correction, bool keep_reduced_dimensions)
     : TsNode(torch::lazy::OpKind(at::aten::std_mean), {input},
            /*num_outputs=*/2,
            torch::lazy::MHash(dimensions, correction,

@@ -8,16 +8,16 @@ namespace ops {
 
 class Resize : public TsNode {
  public:
-  Resize(const torch::lazy::Value& input, std::vector<lazy_tensors::int64> size);
+  Resize(const torch::lazy::Value& input, std::vector<int64_t> size);
 
   NodePtr Clone(OpList operands) const override;
 
   std::string ToString() const override;
 
-  const std::vector<lazy_tensors::int64>& size() const { return size_; }
+  const std::vector<int64_t>& size() const { return size_; }
 
  private:
-  std::vector<lazy_tensors::int64> size_;
+  std::vector<int64_t> size_;
 };
 
 }  // namespace ops

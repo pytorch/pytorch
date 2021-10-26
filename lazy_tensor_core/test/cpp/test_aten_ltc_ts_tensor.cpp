@@ -3752,7 +3752,7 @@ TEST_F(AtenLtcTsTensorTest, TestRandperm) {
   torch::Tensor shuffle = torch::randperm(
       n, torch::TensorOptions(torch::kLong).device(torch::kLazy));
   torch::Tensor shuffle_cpu = CopyToDevice(shuffle, torch::kCPU);
-  std::vector<lazy_tensors::int64> shuffle_data(
+  std::vector<int64_t> shuffle_data(
       shuffle_cpu.data_ptr<int64_t>(), shuffle_cpu.data_ptr<int64_t>() + n);
   EXPECT_TRUE(shuffle_data.size() == n &&
               lazy_tensors::IsPermutation(shuffle_data));
@@ -6026,8 +6026,8 @@ TEST_F(AtenLtcTsTensorTest, TestUnsafeView) {
 TEST_F(AtenLtcTsTensorTest, TestNarrow) {
   torch::Tensor a =
       torch::rand({8, 10, 4, 4}, torch::TensorOptions(torch::kFloat));
-  for (lazy_tensors::int64 dim : {1, -3}) {
-    for (lazy_tensors::int64 start : {2, -8}) {
+  for (int64_t dim : {1, -3}) {
+    for (int64_t start : {2, -8}) {
       torch::Tensor b = a.narrow(dim, start, 6);
       ForEachDevice([&](const torch::Device& device) {
         torch::Tensor xla_a = CopyToDevice(a, device);
@@ -6039,8 +6039,8 @@ TEST_F(AtenLtcTsTensorTest, TestNarrow) {
 }
 
 TEST_F(AtenLtcTsTensorTest, TestNarrowUpdate) {
-  for (lazy_tensors::int64 dim : {1, -2}) {
-    for (lazy_tensors::int64 start : {2, -6}) {
+  for (int64_t dim : {1, -2}) {
+    for (int64_t start : {2, -6}) {
       torch::Tensor a =
           torch::rand({3, 8, 3}, torch::TensorOptions(torch::kFloat));
       torch::Tensor a_copy = a.clone();
@@ -6060,8 +6060,8 @@ TEST_F(AtenLtcTsTensorTest, TestNarrowUpdate) {
 }
 
 TEST_F(AtenLtcTsTensorTest, TestNarrowUpdateBaseCheck) {
-  for (lazy_tensors::int64 dim : {0, -2}) {
-    for (lazy_tensors::int64 start : {2, -6}) {
+  for (int64_t dim : {0, -2}) {
+    for (int64_t start : {2, -6}) {
       torch::Tensor a =
           torch::zeros({8, 3}, torch::TensorOptions(torch::kFloat));
       torch::Tensor a_copy = a.clone();
@@ -6081,9 +6081,9 @@ TEST_F(AtenLtcTsTensorTest, TestNarrowUpdateBaseCheck) {
 }
 
 TEST_F(AtenLtcTsTensorTest, TestNarrowUpdateTwoSlices) {
-  for (lazy_tensors::int64 dim : {0, -2}) {
-    for (lazy_tensors::int64 start0 : {2, -6}) {
-      for (lazy_tensors::int64 start1 : {6, -2}) {
+  for (int64_t dim : {0, -2}) {
+    for (int64_t start0 : {2, -6}) {
+      for (int64_t start1 : {6, -2}) {
         torch::Tensor a =
             torch::zeros({8, 3}, torch::TensorOptions(torch::kFloat));
         torch::Tensor a_copy = a.clone();
@@ -6112,8 +6112,8 @@ TEST_F(AtenLtcTsTensorTest, TestNarrowUpdateTwoSlices) {
 }
 
 TEST_F(AtenLtcTsTensorTest, TestNarrowUpdateView) {
-  for (lazy_tensors::int64 dim : {0, -3}) {
-    for (lazy_tensors::int64 start : {2, -6}) {
+  for (int64_t dim : {0, -3}) {
+    for (int64_t start : {2, -6}) {
       torch::Tensor a =
           torch::rand({8, 2, 3}, torch::TensorOptions(torch::kFloat));
       torch::Tensor a_copy = a.clone();
@@ -6135,9 +6135,9 @@ TEST_F(AtenLtcTsTensorTest, TestNarrowUpdateView) {
 }
 
 TEST_F(AtenLtcTsTensorTest, TestNarrowInNarrowUpdate) {
-  for (lazy_tensors::int64 dim : {1, -2}) {
-    for (lazy_tensors::int64 start0 : {1, -7}) {
-      for (lazy_tensors::int64 start1 : {1, -5}) {
+  for (int64_t dim : {1, -2}) {
+    for (int64_t start0 : {1, -7}) {
+      for (int64_t start1 : {1, -5}) {
         torch::Tensor a =
             torch::rand({3, 8, 3}, torch::TensorOptions(torch::kFloat));
         torch::Tensor a_copy = a.clone();
@@ -6160,8 +6160,8 @@ TEST_F(AtenLtcTsTensorTest, TestNarrowInNarrowUpdate) {
 }
 
 TEST_F(AtenLtcTsTensorTest, TestNarrowCopy) {
-  for (lazy_tensors::int64 dim : {1, -3}) {
-    for (lazy_tensors::int64 start : {2, -8}) {
+  for (int64_t dim : {1, -3}) {
+    for (int64_t start : {2, -8}) {
       ForEachDevice([&](const torch::Device& device) {
         torch::Tensor input =
             torch::rand({8, 10, 4, 4}, torch::TensorOptions(torch::kFloat));

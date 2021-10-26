@@ -11,7 +11,6 @@
 #include "lazy_tensors/computation_client/computation_client.h"
 #include "lazy_tensors/core/platform/macros.h"
 #include "lazy_tensors/shape_util.h"
-#include "lazy_tensors/types.h"
 #include "torch/csrc/lazy/core/ir.h"
 
 namespace torch_lazy_tensors {
@@ -71,7 +70,7 @@ class LoweringContext {
   // this information, but it can be used to implement efficient in-place
   // operations in a semantically functional model.
   virtual void SetUpAlias(const lazy_tensors::ShapeIndex& output_index,
-                          lazy_tensors::int64 param_number,
+                          int64_t param_number,
                           const lazy_tensors::ShapeIndex& param_index);
 
   size_t GetEmittedNodeCount() const { return emit_status_.size(); }

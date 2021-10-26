@@ -131,16 +131,16 @@ NodePtr SiLU(const torch::lazy::Value& input);
 NodePtr SigmoidBackward(const torch::lazy::Value& grad_output, const torch::lazy::Value& output);
 
 NodePtr LogSoftmaxBackwardOp(const torch::lazy::Value& grad_output, const torch::lazy::Value& output,
-                             lazy_tensors::int64 dim);
+                             int64_t dim);
 
 NodePtr TSLogSoftmaxBackwardOp(const torch::lazy::Value& grad_output, const torch::lazy::Value& output,
-                               lazy_tensors::int64 dim, const torch::lazy::Value& self);
+                               int64_t dim, const torch::lazy::Value& self);
 
 NodePtr SoftmaxBackwardOp(const torch::lazy::Value& grad_output, const torch::lazy::Value& output,
-                          lazy_tensors::int64 dim);
+                          int64_t dim);
 
 NodePtr TSSoftmaxBackwardOp(const torch::lazy::Value& grad_output, const torch::lazy::Value& output,
-                            lazy_tensors::int64 dim, const torch::lazy::Value& self);
+                            int64_t dim, const torch::lazy::Value& self);
 
 NodePtr Clamp(const torch::lazy::Value& input, const torch::lazy::Value& min, const torch::lazy::Value& max);
 
@@ -160,7 +160,7 @@ NodePtr Where(const torch::lazy::Value& condition, const torch::lazy::Value& inp
 
 NodePtr BroadcastTensors(OpList tensors);
 
-NodePtr Identity(lazy_tensors::int64 lines, lazy_tensors::int64 cols,
+NodePtr Identity(int64_t lines, int64_t cols,
                  c10::ScalarType element_type);
 
 NodePtr Elu(const torch::lazy::Value& input, const at::Scalar& alpha,

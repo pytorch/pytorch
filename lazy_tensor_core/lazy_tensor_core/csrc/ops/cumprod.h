@@ -11,19 +11,19 @@ namespace ops {
 
 class CumProd : public TsNode {
  public:
-  CumProd(const torch::lazy::Value& input, lazy_tensors::int64 dim,
+  CumProd(const torch::lazy::Value& input, int64_t dim,
           c10::optional<at::ScalarType> dtype);
 
   std::string ToString() const override;
 
   NodePtr Clone(OpList operands) const override;
 
-  lazy_tensors::int64 dim() const { return dim_; }
+  int64_t dim() const { return dim_; }
 
   const c10::optional<at::ScalarType>& dtype() const { return dtype_; }
 
  private:
-  lazy_tensors::int64 dim_;
+  int64_t dim_;
   c10::optional<at::ScalarType> dtype_;
 };
 

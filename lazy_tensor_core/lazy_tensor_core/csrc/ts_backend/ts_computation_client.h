@@ -19,7 +19,7 @@ class TSComputationClient : public ComputationClient {
           : Data(std::move(device), std::move(shape)) {}
 
       OpaqueHandle GetOpaqueHandle() override {
-        return reinterpret_cast<int64>(this);
+        return reinterpret_cast<int64_t>(this);
       }
 
       void Assign(const Data& data) override {

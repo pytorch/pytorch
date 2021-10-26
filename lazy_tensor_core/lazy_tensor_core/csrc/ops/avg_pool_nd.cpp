@@ -8,7 +8,7 @@ namespace ir {
 namespace ops {
 namespace {
 
-c10::Symbol AvgPoolNdSymbol(lazy_tensors::int64 spatial_dim_count) {
+c10::Symbol AvgPoolNdSymbol(int64_t spatial_dim_count) {
   switch (spatial_dim_count) {
     case 1:
       return at::aten::avg_pool1d;
@@ -24,10 +24,10 @@ c10::Symbol AvgPoolNdSymbol(lazy_tensors::int64 spatial_dim_count) {
 
 }  // namespace
 
-AvgPoolNd::AvgPoolNd(const torch::lazy::Value& input, lazy_tensors::int64 spatial_dim_count,
-                     std::vector<lazy_tensors::int64> kernel_size,
-                     std::vector<lazy_tensors::int64> stride,
-                     std::vector<lazy_tensors::int64> padding, bool ceil_mode,
+AvgPoolNd::AvgPoolNd(const torch::lazy::Value& input, int64_t spatial_dim_count,
+                     std::vector<int64_t> kernel_size,
+                     std::vector<int64_t> stride,
+                     std::vector<int64_t> padding, bool ceil_mode,
                      bool count_include_pad)
     : TsNode(torch::lazy::OpKind(AvgPoolNdSymbol(spatial_dim_count)), {input},
            /*num_outputs=*/1,

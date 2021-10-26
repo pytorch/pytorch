@@ -45,7 +45,7 @@ class LazyTensor {
     c10::optional<at::ScalarType> logical_element_type;
     c10::optional<at::Tensor> tensor_data;
     const Device device;
-    const lazy_tensors::int64 unique_id = 0;
+    const int64_t unique_id = 0;
     size_t generation = 1;
   };
 
@@ -80,7 +80,7 @@ class LazyTensor {
 
   LazyTensor alias() const { return LazyTensor(data_ptr()); }
 
-  lazy_tensors::int64 size(lazy_tensors::int64 dim) const;
+  int64_t size(int64_t dim) const;
 
   at::Tensor ToTensor(bool detached);
 
@@ -105,7 +105,7 @@ class LazyTensor {
   lazy_tensors::Shape shape_with_layout() const;
 
   const Device& GetDevice() const;
-  lazy_tensors::int64 GetUniqueId() const;
+  int64_t GetUniqueId() const;
 
   // Retrieves an opaque ID of the alias object upon which the tensor's view is
   // rooted, or 0 if this tensor is not a view.
@@ -194,7 +194,7 @@ class LazyTensor {
                                 const Device& device) const;
 
 
-  static lazy_tensors::int64 GetNextTensorId();
+  static int64_t GetNextTensorId();
 
   std::shared_ptr<Data> data_;
 };

@@ -82,7 +82,7 @@ LazyTensor::Data* LazyTensor::data() const {
   return data_.get();
 }
 
-lazy_tensors::int64 LazyTensor::size(lazy_tensors::int64 dim) const {
+int64_t LazyTensor::size(int64_t dim) const {
   auto tensor_shape = shape();
   int rank = tensor_shape.get().rank();
   int dim_index = Helpers::GetCanonicalDimensionIndex(dim, rank);
@@ -126,7 +126,7 @@ lazy_tensors::Shape LazyTensor::shape_with_layout() const {
 
 const Device& LazyTensor::GetDevice() const { return data()->device; }
 
-lazy_tensors::int64 LazyTensor::GetUniqueId() const {
+int64_t LazyTensor::GetUniqueId() const {
   return data()->unique_id;
 }
 
@@ -309,9 +309,9 @@ std::shared_ptr<View> LazyTensor::UpdateView(
     std::shared_ptr<View> view, torch::lazy::Value ir_value) const {
   if (ir::GetShapeFromTsValue(ir_value).dimensions() !=
       view->shape().dimensions()) {
-    LTC_CHECK_EQ(lazy_tensors::util::Multiply<lazy_tensors::int64>(
+    LTC_CHECK_EQ(lazy_tensors::util::Multiply<int64_t>(
                      ir::GetShapeFromTsValue(ir_value).dimensions()),
-                 lazy_tensors::util::Multiply<lazy_tensors::int64>(
+                 lazy_tensors::util::Multiply<int64_t>(
                      view->shape().dimensions()));
 
     ViewInfo view_info(ViewInfo::Type::kReshape,
@@ -518,9 +518,9 @@ void LazyTensor::ApplyPendingGraph() {
   }
 }
 
-lazy_tensors::int64 LazyTensor::GetNextTensorId() {
-  static std::atomic<lazy_tensors::int64>* id_generator =
-      new std::atomic<lazy_tensors::int64>(1);
+int64_t LazyTensor::GetNextTensorId() {
+  static std::atomic<int64_t>* id_generator =
+      new std::atomic<int64_t>(1);
   return id_generator->fetch_add(1);
 }
 

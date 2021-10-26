@@ -3,6 +3,7 @@
 #include <c10/util/string_view.h>
 
 #include <string>
+#include <vector>
 
 namespace lazy_tensors {
 

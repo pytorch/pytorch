@@ -36,9 +36,9 @@ struct CanonicalIndexInfo {
   // The permutation to be applied to the result. This is needed for indexed
   // updates, since a permutation is applied to the base to bring non-null
   // indices to front. This is the inverse of that permutation.
-  std::vector<lazy_tensors::int64> result_permutation;
+  std::vector<int64_t> result_permutation;
   // The dimension number at which indexing starts.
-  lazy_tensors::int64 start_dim = 0;
+  int64_t start_dim = 0;
 };
 
 // Transform the given base and indices to a form supported by the LazyTensor
@@ -56,23 +56,23 @@ torch::lazy::Value EnsureRank1(const torch::lazy::Value& index);
 // description.
 LazyTensor IndexByTensors(const LazyTensor& base,
                           c10::ArrayRef<LazyTensor> indices,
-                          lazy_tensors::int64 start_dim);
+                          int64_t start_dim);
 
 torch::lazy::Value IndexPutByTensors(
     const LazyTensor& base, c10::ArrayRef<LazyTensor> indices,
-    lazy_tensors::int64 start_dim, const LazyTensor& updates, bool accumulate,
-    c10::ArrayRef<lazy_tensors::int64> result_permutation);
+    int64_t start_dim, const LazyTensor& updates, bool accumulate,
+    c10::ArrayRef<int64_t> result_permutation);
 
-NodePtr IndexFill(const LazyTensor& base, lazy_tensors::int64 dim,
+NodePtr IndexFill(const LazyTensor& base, int64_t dim,
                       const LazyTensor& index, const at::Scalar& value);
 
-NodePtr IndexFill(const LazyTensor& base, lazy_tensors::int64 dim,
+NodePtr IndexFill(const LazyTensor& base, int64_t dim,
                       const LazyTensor& index, const LazyTensor& value);
 
-torch::lazy::Value IndexAdd(const LazyTensor& base, lazy_tensors::int64 dim,
+torch::lazy::Value IndexAdd(const LazyTensor& base, int64_t dim,
                    const LazyTensor& index, const LazyTensor& source);
 
-torch::lazy::Value IndexCopy(const LazyTensor& base, lazy_tensors::int64 dim,
+torch::lazy::Value IndexCopy(const LazyTensor& base, int64_t dim,
                     const LazyTensor& index, const LazyTensor& source);
 
 }  // namespace torch_lazy_tensors

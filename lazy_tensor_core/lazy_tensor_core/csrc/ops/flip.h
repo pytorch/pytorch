@@ -8,17 +8,17 @@ namespace ops {
 
 class Flip : public TsNode {
  public:
-  Flip(const torch::lazy::Value& input, std::vector<lazy_tensors::int64> dims);
+  Flip(const torch::lazy::Value& input, std::vector<int64_t> dims);
 
   NodePtr Clone(OpList operands) const override;
 
   std::string ToString() const override;
 
-  const std::vector<lazy_tensors::int64>& dims() const { return dims_; }
+  const std::vector<int64_t>& dims() const { return dims_; }
 
  private:
   // The dimensions which are flipped.
-  std::vector<lazy_tensors::int64> dims_;
+  std::vector<int64_t> dims_;
 };
 
 }  // namespace ops

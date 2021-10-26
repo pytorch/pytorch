@@ -8,9 +8,9 @@ namespace ir {
 namespace ops {
 
 DiagonalViewUpdate::DiagonalViewUpdate(const torch::lazy::Value& target, const torch::lazy::Value& input,
-                                       lazy_tensors::int64 offset,
-                                       lazy_tensors::int64 dim1,
-                                       lazy_tensors::int64 dim2)
+                                       int64_t offset,
+                                       int64_t dim1,
+                                       int64_t dim2)
     : TsNode(ltc_diagonal_view_update, {target, input}, ir::GetShapeFromTsValue(target),
            /*num_outputs=*/1, torch::lazy::MHash(offset, dim1, dim2)),
       offset_(offset),

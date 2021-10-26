@@ -5,7 +5,7 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-Flip::Flip(const torch::lazy::Value& input, std::vector<lazy_tensors::int64> dims)
+Flip::Flip(const torch::lazy::Value& input, std::vector<int64_t> dims)
     : TsNode(torch::lazy::OpKind(at::aten::flip), {input}, ir::GetShapeFromTsValue(input),
            /*num_outputs=*/1, torch::lazy::MHash(dims)),
       dims_(std::move(dims)) {}

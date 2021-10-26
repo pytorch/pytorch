@@ -11,18 +11,18 @@ namespace ops {
 class UpsampleNearest : public TsNode {
  public:
   UpsampleNearest(const torch::lazy::Value& input,
-                  std::vector<lazy_tensors::int64> output_size);
+                  std::vector<int64_t> output_size);
 
   NodePtr Clone(OpList operands) const override;
 
   std::string ToString() const override;
 
-  const std::vector<lazy_tensors::int64>& output_size() const {
+  const std::vector<int64_t>& output_size() const {
     return output_size_;
   }
 
  private:
-  std::vector<lazy_tensors::int64> output_size_;
+  std::vector<int64_t> output_size_;
 };
 
 }  // namespace ops

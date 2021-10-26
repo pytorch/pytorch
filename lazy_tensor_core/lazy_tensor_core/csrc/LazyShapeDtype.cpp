@@ -183,7 +183,7 @@ std::vector<c10::ScalarType> compute_dtype_sum(
   if (dtype.has_value()) {
     return {dtype.value()};
   }
-  // It's undocumented, but torch::sum promotes all integral types to int64 by
+  // It's undocumented, but torch::sum promotes all integral types to int64_t by
   // default
   if (isIntegralType(self.scalar_type(), /*includeBool*/ true)) {
     return {c10::ScalarType::Long};

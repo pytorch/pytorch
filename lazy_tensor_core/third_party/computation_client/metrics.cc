@@ -47,7 +47,7 @@ void EmitMetricInfo(const std::string& name, MetricData* data,
     for (auto& sample : samples) {
       total += sample.value;
     }
-    int64 delta_time =
+    int64_t delta_time =
         samples.back().timestamp_ns - samples.front().timestamp_ns;
     if (delta_time > 0) {
       double value_sec = 1e6 * (total / (delta_time / 1000.0));
@@ -157,7 +157,7 @@ CounterData* MetricsArena::GetCounter(const std::string& name) {
 MetricData::MetricData(MetricReprFn repr_fn, size_t max_samples)
     : repr_fn_(std::move(repr_fn)), samples_(max_samples) {}
 
-void MetricData::AddSample(int64 timestamp_ns, double value) {
+void MetricData::AddSample(int64_t timestamp_ns, double value) {
   std::lock_guard<std::mutex> lock(lock_);
   size_t position = count_ % samples_.size();
   ++count_;
@@ -206,7 +206,7 @@ Metric::Metric(std::string name, MetricReprFn repr_fn, size_t max_samples)
 
 double Metric::Accumulator() const { return GetData()->Accumulator(); }
 
-void Metric::AddSample(int64 timestamp_ns, double value) {
+void Metric::AddSample(int64_t timestamp_ns, double value) {
   GetData()->AddSample(timestamp_ns, value);
 }
 

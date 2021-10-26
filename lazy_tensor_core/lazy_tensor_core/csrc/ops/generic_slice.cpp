@@ -8,8 +8,8 @@ namespace ir {
 namespace ops {
 
 GenericSlice::GenericSlice(const torch::lazy::Value& input,
-                           c10::ArrayRef<lazy_tensors::int64> base_indices,
-                           c10::ArrayRef<lazy_tensors::int64> sizes)
+                           c10::ArrayRef<int64_t> base_indices,
+                           c10::ArrayRef<int64_t> sizes)
     : TsNode(ltc_generic_slice, {input},
              /*num_outputs=*/1, torch::lazy::MHash(base_indices, sizes)),
       base_indices_(base_indices.begin(), base_indices.end()),

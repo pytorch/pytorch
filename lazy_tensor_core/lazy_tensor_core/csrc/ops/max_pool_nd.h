@@ -8,34 +8,34 @@ namespace ops {
 
 class MaxPoolNd : public TsNode {
  public:
-  MaxPoolNd(const torch::lazy::Value& input, lazy_tensors::int64 spatial_dim_count,
-            std::vector<lazy_tensors::int64> kernel_size,
-            std::vector<lazy_tensors::int64> stride,
-            std::vector<lazy_tensors::int64> padding, bool ceil_mode);
+  MaxPoolNd(const torch::lazy::Value& input, int64_t spatial_dim_count,
+            std::vector<int64_t> kernel_size,
+            std::vector<int64_t> stride,
+            std::vector<int64_t> padding, bool ceil_mode);
 
   NodePtr Clone(OpList operands) const override;
 
   std::string ToString() const override;
 
-  lazy_tensors::int64 spatial_dim_count() const { return spatial_dim_count_; }
+  int64_t spatial_dim_count() const { return spatial_dim_count_; }
 
-  const std::vector<lazy_tensors::int64>& kernel_size() const {
+  const std::vector<int64_t>& kernel_size() const {
     return kernel_size_;
   }
 
-  const std::vector<lazy_tensors::int64>& stride() const { return stride_; }
+  const std::vector<int64_t>& stride() const { return stride_; }
 
-  const std::vector<lazy_tensors::int64>& padding() const { return padding_; }
+  const std::vector<int64_t>& padding() const { return padding_; }
 
   bool ceil_mode() const { return ceil_mode_; }
 
  private:
-  lazy_tensors::int64 spatial_dim_count_;
+  int64_t spatial_dim_count_;
   // The parameters of the pooling. Only support the same kernel size, stride
   // and padding in both dimensions for now.
-  std::vector<lazy_tensors::int64> kernel_size_;
-  std::vector<lazy_tensors::int64> stride_;
-  std::vector<lazy_tensors::int64> padding_;
+  std::vector<int64_t> kernel_size_;
+  std::vector<int64_t> stride_;
+  std::vector<int64_t> padding_;
   bool ceil_mode_;
 };
 

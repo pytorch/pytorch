@@ -18,7 +18,7 @@ std::string GetEnvOrdinalPath(const char* name, const std::string& defval,
                               const char* ordinal_env) {
   std::string path = GetEnvString(name, defval);
   if (!path.empty()) {
-    int64 ordinal = GetEnvInt(ordinal_env, -1);
+    int64_t ordinal = GetEnvInt(ordinal_env, -1);
     if (ordinal >= 0) {
       path = lazy_tensors::StrCat(path, ".", ordinal);
     }
@@ -26,7 +26,7 @@ std::string GetEnvOrdinalPath(const char* name, const std::string& defval,
   return path;
 }
 
-int64 GetEnvInt(const char* name, int64 defval) {
+int64_t GetEnvInt(const char* name, int64_t defval) {
   const char* env = std::getenv(name);
   return env != nullptr ? std::atol(env) : defval;
 }
@@ -50,7 +50,7 @@ bool GetEnvBool(const char* name, bool defval) {
   return std::atoi(env) != 0;
 }
 
-int64 NowNs() {
+int64_t NowNs() {
   auto now = std::chrono::high_resolution_clock::now();
   return std::chrono::duration_cast<std::chrono::nanoseconds>(
              now.time_since_epoch())

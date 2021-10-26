@@ -1,7 +1,7 @@
 #include "lazy_tensor_core/csrc/ops/ops.h"
 
+#include <c10/util/Half.h>
 #include <cmath>
-
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/ops/arithmetic_ir_ops.h"
@@ -171,7 +171,7 @@ NodePtr BroadcastTensors(OpList tensors) {
   return node;
 }
 
-NodePtr Identity(lazy_tensors::int64 lines, lazy_tensors::int64 cols,
+NodePtr Identity(int64_t lines, int64_t cols,
                  c10::ScalarType element_type) {
   return GenericOp(
       OpKind(at::aten::eye),

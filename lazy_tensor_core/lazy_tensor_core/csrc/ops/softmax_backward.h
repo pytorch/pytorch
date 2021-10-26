@@ -9,17 +9,17 @@ namespace ops {
 class SoftmaxBackward : public TsNode {
  public:
   SoftmaxBackward(const torch::lazy::Value& grad_output, const torch::lazy::Value& output,
-                  lazy_tensors::int64 dim);
+                  int64_t dim);
 
   NodePtr Clone(OpList operands) const override;
 
   std::string ToString() const override;
 
-  lazy_tensors::int64 dim() const { return dim_; }
+  int64_t dim() const { return dim_; }
 
  private:
   // The dimension along which the result is computed.
-  lazy_tensors::int64 dim_;
+  int64_t dim_;
 };
 
 }  // namespace ops

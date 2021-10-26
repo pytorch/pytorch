@@ -8,7 +8,7 @@ namespace ir {
 namespace ops {
 
 Stack::Stack(OpList values,
-             lazy_tensors::int64 dim)
+             int64_t dim)
     : TsNode(torch::lazy::OpKind(at::aten::stack), values,
            /*num_outputs=*/1, torch::lazy::MHash(dim)),
       dim_(dim) {

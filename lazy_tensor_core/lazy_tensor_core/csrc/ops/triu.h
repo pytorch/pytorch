@@ -10,16 +10,16 @@ namespace ops {
 // matrices input.
 class Triu : public TsNode {
  public:
-  Triu(const torch::lazy::Value& input, lazy_tensors::int64 diagonal);
+  Triu(const torch::lazy::Value& input, int64_t diagonal);
 
   NodePtr Clone(OpList operands) const override;
 
   std::string ToString() const override;
 
-  lazy_tensors::int64 diagonal() const { return diagonal_; }
+  int64_t diagonal() const { return diagonal_; }
 
  private:
-  lazy_tensors::int64 diagonal_;
+  int64_t diagonal_;
 };
 
 }  // namespace ops

@@ -8,7 +8,7 @@ namespace ir {
 namespace ops {
 
 AdaptiveAvgPool2d::AdaptiveAvgPool2d(
-    const torch::lazy::Value& input, std::vector<lazy_tensors::int64> output_size)
+    const torch::lazy::Value& input, std::vector<int64_t> output_size)
     : TsNode(torch::lazy::OpKind(at::aten::adaptive_avg_pool2d), {input},
            /*num_outputs=*/1, torch::lazy::MHash(output_size)),
       output_size_(std::move(output_size)) {

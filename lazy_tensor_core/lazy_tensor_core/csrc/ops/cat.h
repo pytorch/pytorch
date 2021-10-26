@@ -13,7 +13,7 @@ class Cat : public TsNode {
 
   std::string ToString() const override;
 
-  lazy_tensors::int64 dim() const { return dim_; };
+  int64_t dim() const { return dim_; };
 
   TSOpVector Lower(TSNodeLoweringInterface& tsLoweringInterface,
                    std::shared_ptr<torch::jit::GraphFunction> function,

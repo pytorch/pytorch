@@ -9,7 +9,7 @@ namespace ops {
 
 UpdateSlice::UpdateSlice(const torch::lazy::Value& input,
                          const torch::lazy::Value& source,
-                         c10::ArrayRef<lazy_tensors::int64> base_indices)
+                         c10::ArrayRef<int64_t> base_indices)
     : TsNode(ltc_update_slice, {input, source},
              /*num_outputs=*/1, torch::lazy::MHash(base_indices)),
       base_indices_(base_indices.begin(), base_indices.end()) {

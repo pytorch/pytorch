@@ -22,7 +22,7 @@ std::vector<torch::lazy::Value> GetOperandList(OpList operands,
 AllReduce::AllReduce(AllReduceType reduce_type,
                      OpList operands,
                      const torch::lazy::Value& token, double scale,
-                     std::vector<std::vector<lazy_tensors::int64>> groups)
+                     std::vector<std::vector<int64_t>> groups)
     : TsNode(ltc_cross_replica_sum, GetOperandList(operands, token),
            /*num_outputs=*/operands.size() + 1,
            torch::lazy::MHash(

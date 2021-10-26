@@ -9,7 +9,7 @@ namespace ir {
 namespace ops {
 
 UpsampleBilinear::UpsampleBilinear(const torch::lazy::Value& input,
-                                   std::vector<lazy_tensors::int64> output_size,
+                                   std::vector<int64_t> output_size,
                                    bool align_corners)
     : TsNode(torch::lazy::OpKind(at::aten::upsample_bilinear2d), {input},
            /*num_outputs=*/1,

@@ -9,7 +9,7 @@ namespace ir {
 namespace ops {
 
 UpsampleNearest::UpsampleNearest(const torch::lazy::Value& input,
-                                 std::vector<lazy_tensors::int64> output_size)
+                                 std::vector<int64_t> output_size)
     : TsNode(torch::lazy::OpKind(at::aten::upsample_nearest2d), {input},
            /*num_outputs=*/1, torch::lazy::MHash(output_size)),
       output_size_(std::move(output_size)) {

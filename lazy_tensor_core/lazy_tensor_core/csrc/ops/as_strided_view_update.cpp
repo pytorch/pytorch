@@ -12,8 +12,8 @@ namespace ops {
 
 AsStridedViewUpdate::AsStridedViewUpdate(
     const torch::lazy::Value& target, const torch::lazy::Value& input,
-    std::vector<lazy_tensors::int64> size,
-    std::vector<lazy_tensors::int64> stride, lazy_tensors::int64 storage_offset)
+    std::vector<int64_t> size,
+    std::vector<int64_t> stride, int64_t storage_offset)
     : TsNode(ltc_as_strided_view_update, {target, input},
            [&]() {
              return lazy_tensors::ShapeUtil::MakeShape(

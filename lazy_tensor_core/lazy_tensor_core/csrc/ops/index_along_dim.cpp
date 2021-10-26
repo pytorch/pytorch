@@ -9,7 +9,7 @@ namespace ops {
 
 IndexAlongDim::IndexAlongDim(OpKind op, const torch::lazy::Value& buffer,
                              const torch::lazy::Value& index, const torch::lazy::Value& value,
-                             lazy_tensors::int64 dim)
+                             int64_t dim)
     : TsNode(op, {buffer, index, value},
            /*num_outputs=*/1, torch::lazy::MHash(dim)),
       dim_(dim) {

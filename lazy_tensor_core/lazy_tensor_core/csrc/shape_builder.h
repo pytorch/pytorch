@@ -3,7 +3,6 @@
 #include <vector>
 
 #include "lazy_tensors/shape.h"
-#include "lazy_tensors/types.h"
 
 namespace torch_lazy_tensors {
 
@@ -11,19 +10,19 @@ class ShapeBuilder {
  public:
   explicit ShapeBuilder(c10::ScalarType type) : type_(type) {}
 
-  ShapeBuilder& Add(const lazy_tensors::Shape& shape, lazy_tensors::int64 dim);
+  ShapeBuilder& Add(const lazy_tensors::Shape& shape, int64_t dim);
 
   ShapeBuilder& Add(const lazy_tensors::Shape& shape,
-                    c10::ArrayRef<lazy_tensors::int64> dimensions);
+                    c10::ArrayRef<int64_t> dimensions);
 
-  ShapeBuilder& Add(lazy_tensors::int64 size);
+  ShapeBuilder& Add(int64_t size);
 
   lazy_tensors::Shape Build() const;
 
  private:
   struct ShapeDim {
     const lazy_tensors::Shape* shape = nullptr;
-    lazy_tensors::int64 dim_or_size = -1;
+    int64_t dim_or_size = -1;
   };
 
   c10::ScalarType type_;

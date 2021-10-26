@@ -11,19 +11,19 @@ namespace ops {
 
 class Softmax : public TsNode {
  public:
-  Softmax(const torch::lazy::Value& input, lazy_tensors::int64 dim,
+  Softmax(const torch::lazy::Value& input, int64_t dim,
           c10::optional<at::ScalarType> dtype);
 
   NodePtr Clone(OpList operands) const override;
 
   std::string ToString() const override;
 
-  lazy_tensors::int64 dim() const { return dim_; }
+  int64_t dim() const { return dim_; }
 
   const c10::optional<at::ScalarType>& dtype() const { return dtype_; }
 
  private:
-  lazy_tensors::int64 dim_;
+  int64_t dim_;
   c10::optional<at::ScalarType> dtype_;
 };
 

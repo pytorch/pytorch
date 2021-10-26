@@ -146,7 +146,7 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
         const auto argument_dimensions = argument_shape.dimensions();
         const auto& pad = constant_pad_nd->pad();
         LTC_CHECK_EQ(argument_dimensions.size() * 2, pad.size());
-        std::vector<lazy_tensors::int64> padded_dimensions(
+        std::vector<int64_t> padded_dimensions(
             argument_dimensions.begin(), argument_dimensions.end());
         size_t i = 0;
         for (auto rit = pad.rbegin(); rit != pad.rend(); rit += 2, ++i) {
@@ -374,7 +374,7 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
     LTC_CHECK_EQ(index_shape.rank(), 1);
     const lazy_tensors::Shape& input_shape = ir::GetShapeFromTsOutput(input);
     const auto input_dimensions = input_shape.dimensions();
-    std::vector<lazy_tensors::int64> output_dimensions(input_dimensions.begin(),
+    std::vector<int64_t> output_dimensions(input_dimensions.begin(),
                                                        input_dimensions.end());
     LTC_CHECK_GE(node->dim(), 0);
     LTC_CHECK_LT(node->dim(), input_shape.rank());
@@ -388,12 +388,12 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
     const auto& repeats = repeat->repeats();
     LTC_CHECK_GE(repeats.size(), input_shape.rank());
 
-    lazy_tensors::int64 num_new_dimensions =
+    int64_t num_new_dimensions =
         repeats.size() - input_shape.rank();
-    std::vector<lazy_tensors::int64> padded_size(num_new_dimensions, 1);
+    std::vector<int64_t> padded_size(num_new_dimensions, 1);
     padded_size.insert(padded_size.end(), input_shape.dimensions().begin(),
                        input_shape.dimensions().end());
-    std::vector<lazy_tensors::int64> target_size(repeats.size());
+    std::vector<int64_t> target_size(repeats.size());
     for (const auto idx : c10::irange(repeats.size())) {
       target_size[idx] = padded_size[idx] * repeats[idx];
     }
@@ -416,7 +416,7 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
       LTC_CHECK_EQ(ir::GetShapeFromTsOutput(input), input_shape);
     }
     const auto input_dimensions = input_shape.dimensions();
-    std::vector<lazy_tensors::int64> output_dimensions(input_dimensions.begin(),
+    std::vector<int64_t> output_dimensions(input_dimensions.begin(),
                                                        input_dimensions.end());
     LTC_CHECK_GE(stack->dim(), 0);
     LTC_CHECK_LE(stack->dim(), output_dimensions.size());
@@ -474,7 +474,7 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
     const auto input_dimensions = input_shape.dimensions();
     std::vector<torch::jit::NamedValue> dest_arguments;
     dest_arguments.emplace_back(destination);
-    dest_arguments.emplace_back(std::vector<lazy_tensors::int64>(
+    dest_arguments.emplace_back(std::vector<int64_t>(
         input_dimensions.begin(), input_dimensions.end()));
     dest_arguments.emplace_back(node->stride());
     dest_arguments.emplace_back(node->storage_offset());
@@ -649,7 +649,7 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
     LTC_CHECK_EQ(sizes.size(), base_indices.size());
     LTC_CHECK_EQ(input_shape.rank(), base_indices.size());
     for (size_t dim = 0; dim < base_indices.size(); ++dim) {
-      lazy_tensors::int64 start = base_indices[dim];
+      int64_t start = base_indices[dim];
       base = GenerateSlice(/*base=*/base, /*dim=*/dim, /*start=*/start,
                            /*end=*/start + sizes[dim], /*step=*/1);
     }
@@ -707,7 +707,7 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
   }
 
   TSOpVector LowerSelect(const ir::ops::Select* node) {
-    lazy_tensors::int64 step =
+    int64_t step =
         ir::ops::Select::GetStride(node->start(), node->end(), node->stride());
     torch::jit::Value* base = loctx()->GetOutputOp(node->operand(0));
     return {GenerateSlice(/*base=*/base, /*dim=*/node->dim(),
@@ -763,7 +763,7 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
   TSOpVector LowerUnselect(const ir::ops::Unselect* node) {
     torch::jit::Value* dest =
         GenerateClone(loctx()->GetOutputOp(node->operand(0)));
-    lazy_tensors::int64 step =
+    int64_t step =
         ir::ops::Select::GetStride(node->start(), node->end(), node->stride());
     torch::jit::Value* selected = GenerateSlice(
         /*base=*/dest, /*dim=*/node->dim(), /*start=*/node->start(),
@@ -781,7 +781,7 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
     LTC_CHECK_EQ(source_shape.rank(), base_indices.size());
     torch::jit::Value* base = dest;
     for (size_t dim = 0; dim < base_indices.size(); ++dim) {
-      lazy_tensors::int64 start = base_indices[dim];
+      int64_t start = base_indices[dim];
       base = GenerateSlice(/*base=*/base, /*dim=*/dim, /*start=*/start,
                            /*end=*/start + source_shape.dimensions(dim),
                            /*step=*/1);
@@ -820,10 +820,10 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
   }
 
   torch::jit::Value* GenerateSlice(torch::jit::Value* base,
-                                   lazy_tensors::int64 dim,
-                                   lazy_tensors::int64 start,
-                                   lazy_tensors::int64 end,
-                                   lazy_tensors::int64 step) {
+                                   int64_t dim,
+                                   int64_t start,
+                                   int64_t end,
+                                   int64_t step) {
     std::vector<torch::jit::NamedValue> arguments;
     arguments.emplace_back(base);
     arguments.emplace_back(dim);
