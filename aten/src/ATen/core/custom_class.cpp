@@ -29,6 +29,14 @@ at::ClassTypePtr getCustomClass(const std::string& name) {
   return customClasses().count(name) ? customClasses()[name] : nullptr;
 }
 
+const std::unordered_set<std::string> getAllCustomClassesNames() {
+  std::unordered_set<std::string> ret;
+  for (const auto& kv: customClasses()) {
+    ret.insert(kv.first);
+  }
+  return ret;
+}
+
 bool isCustomClass(const c10::IValue& v) {
   return v.isObject() && v.toObject()->type()->name() &&
       getCustomClass(v.toObject()->type()->name()->qualifiedName());
