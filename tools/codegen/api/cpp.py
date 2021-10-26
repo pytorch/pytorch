@@ -41,10 +41,13 @@ def name(func: FunctionSchema, *, faithful_name_for_out_overloads: bool = False)
 # Translation of "value types" in JIT schema to C++ API type.  Value
 # types look the same no matter if they are argument types or return
 # types.  Returns None if the type in question is not a value type.
-def valuetype_type(t: Type, *, binds: ArgName) -> Optional[NamedCType]:
+def valuetype_type(t: Type, *, binds: ArgName, remove_non_owning_ref_types: bool = False) -> Optional[NamedCType]:
     if isinstance(t, BaseType):
         if t.name == BaseTy.Tensor or t.name == BaseTy.Scalar:
             return None
+        if remove_non_owning_ref_types:
+            if t.name == BaseTy.str:
+                raise AssertionError("string ref->value conversion: not implemented yet")
         # All other BaseType currently map directly to BaseCppTypes.
         return NamedCType(binds, BaseCType(BaseTypeToCppMapping[t.name]))
     elif isinstance(t, OptionalType):
@@ -67,7 +70,7 @@ def valuetype_type(t: Type, *, binds: ArgName) -> Optional[NamedCType]:
 # See Note [translation from C++ reference to value types]
 def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName, remove_non_owning_ref_types: bool = False) -> NamedCType:
     # If it's a value type, do the value type translation
-    r = valuetype_type(t, binds=binds)
+    r = valuetype_type(t, binds=binds, remove_non_owning_ref_types=remove_non_owning_ref_types)
     if r is not None:
         return r
 

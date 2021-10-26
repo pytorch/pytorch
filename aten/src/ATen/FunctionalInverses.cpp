@@ -47,13 +47,20 @@ Tensor unsqueeze_to(const Tensor & self, int64_t dim, IntArrayRef sizes) {
 // These aren't really true inverses in the mathematically sense: each view inverse describes how to undo
 // the original view (although it takes in different arguments).
 //
-// In general, view inverses respect the following property:
+// E.g. Below is an example of a program that has alias operations removed, and the role that view inverses play:
 //
-// b = view1(a, args...)
-// a_copy = view1_inverse(a, b, args...)
-// a and a_copy should be equal.
+// normal program with views and mutations:
+// view1 = input1.view_op(args...)
+// view1.add_(1) (perform a mutation on the view, which should also modify input)
+
+// version of the program with no aliasing, that instead uses view_inverse functions:
+// view_copy1 = input1.view_copy_op(args...)
+// view_copy1.add_(1) (perform a mutation on view_copy1. At this point, input1 is NOT modified)
+// x = view_op_inverse(input1, view_copy1, args...)
 //
-// Note that a is also passed as an argument to view1_inverse in the above example.
+// at this point, input1 and x should be equal
+//
+// Note that input1 is also passed as an argument to view_op_inverse in the above example.
 // This isn't actually required for most view operators: it's only required for view ops
 // where you can't figure out what the size of the base tensor is given just the view tensor and arguments.
 // Examples are slice/select/scatter/squeeze/as_strided.

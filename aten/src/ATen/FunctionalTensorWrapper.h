@@ -39,11 +39,10 @@ namespace at {
 // See Note [Functionalization: Mutation Removal] for details on mutation removal.
 
 struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
-  // Note that value is not taken by reference: internally, the wrapper will change the value tensor that it points to over time.
-  explicit FunctionalTensorWrapper(Tensor value);
+  explicit FunctionalTensorWrapper(const Tensor& value);
   // Additional constructor to create a FunctionalTensorWrapper directly from an underlying tensor that was created from a view.
   // For example, the code b = a.view1() will generate a constructor call to FunctionalTensorWrapper(b, a, view1_meta)
-  explicit FunctionalTensorWrapper(Tensor view_value, const FunctionalTensorWrapper* base, functionalization::ViewMeta meta);
+  explicit FunctionalTensorWrapper(const Tensor& view_value, const FunctionalTensorWrapper* base, functionalization::ViewMeta meta);
 
   // Get the underlying, actual tensor, that doesn't know anything about functionalization.
   const Tensor& value() const { return value_; };
@@ -102,6 +101,7 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   void set_constructor_metadata();
   functionalization::FunctionalStorageImpl* functional_storage_impl() const;
 
+  // Note that value is not taken by reference: internally, the wrapper will change the value tensor that it points to over time.
   Tensor value_;
   int64_t level_;
 
@@ -131,8 +131,8 @@ TORCH_API TensorList to_functional_tensor(const TensorList& t_list);
 
 TORCH_API Tensor from_functional_tensor(const Tensor& tensor);
 TORCH_API c10::optional<Tensor> from_functional_tensor(const c10::optional<Tensor>& t);
-TORCH_API c10::List<Tensor> from_functional_tensor(const c10::List<Tensor> t_list);
-TORCH_API c10::List<c10::optional<Tensor>> from_functional_tensor(const c10::List<c10::optional<Tensor>> t_list);
+TORCH_API c10::List<Tensor> from_functional_tensor(const c10::List<Tensor>& t_list);
+TORCH_API c10::List<c10::optional<Tensor>> from_functional_tensor(const c10::List<c10::optional<Tensor>>& t_list);
 TORCH_API TensorList from_functional_tensor(const TensorList& tensors);
 
 TORCH_API void sync(const at::Tensor& t);
@@ -147,8 +147,8 @@ std::vector<Tensor> create_functional_tensor_with_view_meta(const std::vector<Te
 
 void mutate_view_meta(const Tensor& self, functionalization::ViewMeta meta);
 
-void set_strides(const Tensor& out, const Tensor& meta_out);
-void set_strides(const std::vector<Tensor>& outs, const std::vector<Tensor>& meta_outs);
+void set_sizes_strides_offset(const Tensor& out, const Tensor& meta_out);
+void set_sizes_strides_offset(const std::vector<Tensor>& outs, const std::vector<Tensor>& meta_outs);
 
 } // namespace impl
 } // namespace functionalization

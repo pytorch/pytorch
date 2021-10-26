@@ -66,7 +66,6 @@ def capture_arguments(func: FunctionSchema, *, is_reverse: bool) -> List[Binding
     non_self_args = args[1:]
     non_self_value_bindings = [dispatcher.argument(a, remove_non_owning_ref_types=True) for a in non_self_args]
     return non_self_value_bindings
-    # TODO: remove skip_self() from everywhere
 
 
 def returns_type(func: FunctionSchema) -> CType:
