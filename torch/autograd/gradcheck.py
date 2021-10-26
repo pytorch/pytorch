@@ -760,10 +760,6 @@ def _test_batched_grad_forward_ad(func, inputs) -> bool:
     assert isinstance(inputs, tuple)
 
     for input_idx, current_input in enumerate(inputs):
-        def is_differentiable_dtype(input):
-            dtype = input.dtype
-            return dtype in (torch.float, torch.double, torch.cfloat, torch.cdouble)
-
         def jvp(tangent: torch.Tensor):
             with fwAD.dual_level():
                 dual = fwAD.make_dual(current_input, tangent)
@@ -779,7 +775,7 @@ def _test_batched_grad_forward_ad(func, inputs) -> bool:
                     else:
                         ret.append(torch.zeros([], dtype=primal_out.dtype, device=primal_out.device).expand(primal_out.shape))
                 return tuple(ret)
-        if not is_tensor_like(current_input) or not is_differentiable_dtype(current_input):
+        if not _is_float_or_complex_tensor(current_input):
             continue
 
         tangents = [torch.randn_like(current_input) for _ in range(2)]
