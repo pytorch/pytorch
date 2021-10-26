@@ -8,6 +8,29 @@
 
 namespace torch {
 
+namespace detail {
+/**
+ * In the Facebook internal build (using BUCK), this macro is enabled by
+ * passing in -c pt.enable_record_kernel_dtype=1 when building the tracer
+ * binary.
+ */
+#if defined ENABLE_RECORD_KERNEL_FUNCTION_DTYPE
+TORCH_API void record_custom_class(std::string name);
+
+/**
+ * Record an instance of a custom class being loaded
+ * grab portion of string after final '.' from qualified name
+ * as this seemingly aligns with how users name their custom classes
+ * example: __torch__.torch.classes.xnnpack.Conv2dOpContext
+ */
+#define RECORD_CUSTOM_CLASS(NAME) \
+  auto name = std::string(NAME);  \
+  detail::record_custom_class(name.substr(name.find_last_of(".") + 1));
+#else
+#define RECORD_CUSTOM_CLASS(NAME)
+#endif
+} // namespace detail
+
 /// This struct is used to represent default values for arguments
 /// when registering methods for custom classes.
 ///     static auto register_foo = torch::class_<Foo>("myclasses", "Foo")
