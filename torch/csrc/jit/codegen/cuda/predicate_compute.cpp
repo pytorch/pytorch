@@ -79,7 +79,7 @@ ParallelizedDomainPredicate::getPredicateMap(
   const auto gpu_lower = GpuLower::current();
   kir::IrBuilder ir_builder(gpu_lower->kernel());
 
-  auto output_tvs = ir_utils::filterByType<kir::TensorView>(expr->outputs());
+  auto output_tvs = ir_utils::getTvs(expr->outputs());
 
   if (output_tvs.empty()) {
     return {};

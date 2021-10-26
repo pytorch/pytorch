@@ -87,6 +87,19 @@ Expr* asExpr(Statement*);
 // TODO(kir): Remove in favor of ->as<TensorView>()
 TensorView* asTV(Val*);
 
+//! Get kir::TensorView potentially via kir::TensorIndex. Returns nullptr if
+//! cast fails.
+kir::TensorView* getTv(kir::Val*);
+
+//! Get only kir::TensorView potentially via kir::TensorIndex.
+std::vector<kir::TensorView*> getTvs(const std::vector<kir::Val*>& vals);
+
+//! Get kir::TensorView potentially via kir::TensorIndex. Error if cast fails.
+kir::TensorView* asTv(kir::Val*);
+
+//! Get kir::TensorView potentially via kir::TensorIndex. Error if cast fails.
+std::vector<kir::TensorView*> asTvs(const std::vector<kir::Val*>& vals);
+
 bool hasBlockSync(const Expr* expr, const ThreadPredicateMap& pred_map);
 bool hasBlockSync(const kir::Expr* expr, const ThreadPredicateMap& pred_map);
 

@@ -127,6 +127,41 @@ bool isTVOp(const kir::Expr* expr) {
   return outputs.size() >= 1 && outputs[0]->isA<kir::TensorView>();
 }
 
+kir::TensorView* getTv(kir::Val* val) {
+  if (auto tv = dynamic_cast<kir::TensorView*>(val)) {
+    return tv;
+  } else if (auto ti = dynamic_cast<kir::TensorIndex*>(val)) {
+    return ti->view();
+  }
+  return nullptr;
+}
+
+std::vector<kir::TensorView*> getTvs(const std::vector<kir::Val*>& vals) {
+  std::vector<kir::TensorView*> tvs;
+  for (auto val : vals) {
+    auto tv = ir_utils::getTv(val);
+    if (tv) {
+      tvs.emplace_back(tv);
+    }
+  }
+  return tvs;
+}
+
+kir::TensorView* asTv(kir::Val* val) {
+  auto tv = getTv(val);
+  TORCH_INTERNAL_ASSERT(tv != nullptr, "Neigher TensorView nor TensorIndex");
+  return tv;
+}
+
+std::vector<kir::TensorView*> asTvs(const std::vector<kir::Val*> vals) {
+  std::vector<kir::TensorView*> tvs;
+  for (auto val : vals) {
+    auto tv = ir_utils::asTv(val);
+    tvs.emplace_back(tv);
+  }
+  return tvs;
+}
+
 // TODO: why do we assume there's a single TV output?
 TensorView* getTVOutput(const Expr* expr) {
   for (auto out : expr->outputs()) {
@@ -139,10 +174,8 @@ TensorView* getTVOutput(const Expr* expr) {
 
 kir::TensorView* getTVOutput(const kir::Expr* expr) {
   for (auto out : expr->outputs()) {
-    if (auto tv = dynamic_cast<kir::TensorView*>(out)) {
+    if (auto tv = getTv(out)) {
       return tv;
-    } else if (auto ti = dynamic_cast<kir::TensorIndex*>(out)) {
-      return ti->view();
     }
   }
   return nullptr;
