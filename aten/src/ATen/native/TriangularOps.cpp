@@ -101,22 +101,54 @@ TORCH_IMPL_FUNC(tril_cpu)(const Tensor& self, int64_t k, const Tensor &result) {
   if (self.numel() == 0) {
     return;
   }
+
+  bool inplace_op = self.is_same(result);
+
+  bool inplace_update = false;
   Tensor self_c;
-  std::tie(std::ignore, self_c) = checkTrilTriuBatchContiguous(self, false);
+  std::tie(inplace_update, self_c) = checkTrilTriuBatchContiguous(self, inplace_op);
+
+  Tensor result_c;
+  if (inplace_op && !inplace_update) {
+    result_c = at::empty_like(result, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  } else {
+    result_c = result;
+  }
+
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::BFloat16, at::ScalarType::Half, at::ScalarType::Bool, self.scalar_type(), "tril", [&]{
-    apply_triu_tril<scalar_t, false>(result, self_c, false, k);
+    apply_triu_tril<scalar_t, false>(result_c, self_c, inplace_op && inplace_update, k);
   });
+
+  if (inplace_op && !inplace_update) {
+    result.copy_(result_c);
+  }
 }
 
 TORCH_IMPL_FUNC(triu_cpu)(const Tensor& self, int64_t k, const Tensor &result) {
   if (self.numel() == 0) {
     return;
   }
+
+  bool inplace_op = self.is_same(result);
+
+  bool inplace_update = false;
   Tensor self_c;
-  std::tie(std::ignore, self_c) = checkTrilTriuBatchContiguous(self, false);
+  std::tie(inplace_update, self_c) = checkTrilTriuBatchContiguous(self, inplace_op);
+
+  Tensor result_c;
+  if (inplace_op && !inplace_update) {
+    result_c = at::empty_like(result, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  } else {
+    result_c = result;
+  }
+
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::BFloat16, at::ScalarType::Half, at::ScalarType::Bool, self.scalar_type(), "triu", [&]{
-    apply_triu_tril<scalar_t, true>(result, self_c, false, k);
+    apply_triu_tril<scalar_t, true>(result_c, self_c, inplace_op && inplace_update, k);
   });
+
+  if (inplace_op && !inplace_update) {
+    result.copy_(result_c);
+  }
 }
 
 Tensor trace_backward(const Tensor& grad, IntArrayRef sizes) {
