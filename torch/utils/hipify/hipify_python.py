@@ -678,7 +678,7 @@ class Trie():
 CAFFE2_TRIE = Trie()
 CAFFE2_MAP = {}
 PYTORCH_TRIE = Trie()
-PYTORCH_MAP = {}
+PYTORCH_MAP: Dict[str, object] = {}
 PYTORCH_SPARSE_MAP = {}
 for mapping in CUDA_TO_HIP_MAPPINGS:
     assert isinstance(mapping, Mapping)
