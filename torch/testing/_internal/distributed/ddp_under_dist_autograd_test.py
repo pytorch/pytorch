@@ -4,6 +4,7 @@ import contextlib
 import enum
 import logging
 import os
+import socket
 import threading
 from typing import NamedTuple
 
@@ -561,15 +562,14 @@ class DdpComparisonTest(CommonDdpComparisonTest):
                         msg=f"The grads for param {param} are different under local "
                         f"and dist autograd: {param.grad} \n---\n {grads_dict[param]} for iteration {i}",
                     )
-        dist.destroy_process_group()
 
     @requires_gloo()
-    @dist_init(clean_shutdown=False)
+    @dist_init
     def test_ddp_comparison(self):
         self._run_test_ddp_comparision()
 
     @requires_gloo()
-    @dist_init(clean_shutdown=False)
+    @dist_init
     def test_ddp_comparison_uneven_inputs(self):
         # test with simulating uneven inputs in DDP
         self._run_test_ddp_comparision(simulate_uneven_inputs=True)
