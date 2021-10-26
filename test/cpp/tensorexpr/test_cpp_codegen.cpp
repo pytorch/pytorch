@@ -2,6 +2,7 @@
 
 #include "test/cpp/tensorexpr/test_base.h"
 
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/tensorexpr/cpp_codegen.h>
 #include <torch/csrc/jit/tensorexpr/fwd_decls.h>
 #include <torch/csrc/jit/tensorexpr/stmt.h>
@@ -207,7 +208,7 @@ TEST(CppPrinter, Cond) {
 TEST(CppPrinter, Intrinsics) {
   const std::unordered_set<IntrinsicsOp, std::hash<int>> unsupported_ops{
       kRand, kSigmoid};
-  for (int i = 0; i < kMaxIntrinsicsOp; i++) {
+  for (const auto i : c10::irange(static_cast<uint32_t>(kMaxIntrinsicsOp))) {
     IntrinsicsOp op = static_cast<IntrinsicsOp>(i);
     if (unsupported_ops.count(op)) {
       continue;
