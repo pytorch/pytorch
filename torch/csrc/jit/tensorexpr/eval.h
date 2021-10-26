@@ -50,12 +50,12 @@ class InterpValue {
 #undef VALUE_CTOR
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  InterpValue(c10::quint8 v) : dtype_(kQUInt8) {
+  explicit InterpValue(c10::quint8 v) : dtype_(kQUInt8) {
     QUInt8values.emplace_back(v.val_);
   }
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  InterpValue(c10::qint8 v) : dtype_(kQInt8) {
+  explicit InterpValue(c10::qint8 v) : dtype_(kQInt8) {
     QInt8values.emplace_back(v.val_);
   }
 
@@ -65,9 +65,9 @@ class InterpValue {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, VALUE_VEC_CTOR);
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  VALUE_VEC_CTOR(c10::quint8, QUInt8);
+  VALUE_VEC_CTOR(c10::quint8, QUInt8)
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  VALUE_VEC_CTOR(c10::qint8, QInt8);
+  VALUE_VEC_CTOR(c10::qint8, QInt8)
 #undef VALUE_VEC_CTOR
 
   template <typename T>
