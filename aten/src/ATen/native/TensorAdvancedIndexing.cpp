@@ -177,10 +177,16 @@ TORCH_PRECOMPUTE_META_FUNC(index_copy)
 (const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source) {
   dim = maybe_wrap_dim(dim, self.dim());
 
+  const Tensor& result = maybe_get_output(0);
+  bool check_result = result.defined();
+  set_output(self.sizes(), self.options());
+  if (check_result) {
+    at::assert_no_internal_overlap(result);
+    at::assert_no_overlap(result, index);
+    at::assert_no_overlap(result, source);
+  }
+
   TORCH_CHECK_INDEX(index.dim() < 2, "index_copy_(): Index should have dimension 1 or 0 (got ", index.dim(), ")");
-  at::assert_no_internal_overlap(self);
-  at::assert_no_overlap(self, index);
-  at::assert_no_overlap(self, source);
 
   int64_t numIndices = index.numel();
   if (source.dim() == 0 && numIndices != 1) {
@@ -711,11 +717,6 @@ Tensor & _index_copy_impl_(Tensor & self, int64_t dim, const Tensor & index, con
 
   return self;
 }
-
-/* Tensor index_copy(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) { */
-/*   return self.clone(at::MemoryFormat::Preserve).index_copy_(dim, index, source); */
-/* } */
-
 
 Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source, const Scalar &alpha) {
   dim = maybe_wrap_dim(dim, self.dim());
