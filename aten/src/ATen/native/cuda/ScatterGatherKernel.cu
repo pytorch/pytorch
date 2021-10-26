@@ -65,17 +65,27 @@ __global__ void _scatter_gather_elementwise_kernel(int N, func_t f) {
   }
 }
 
-template <int nt, int vt, typename func_t>
+template <typename func_t>
 static void _launch_scatter_gather_kernel(int64_t N, const func_t& f) {
   TORCH_INTERNAL_ASSERT(N >= 0 && N <= std::numeric_limits<int32_t>::max());
   if (N == 0) {
     return;
   }
 
+  const int nt = at::cuda::warp_size() * 2;
+  constexpr  int vt = 4;
   const dim3 block(nt);
-  const dim3 grid((N + block.x * vt - 1) / (block.x * vt));
+  const dim3 grid((N + nt * vt - 1) / (nt * vt));
   const auto stream = at::cuda::getCurrentCUDAStream();
-  _scatter_gather_elementwise_kernel<nt, vt, func_t><<<grid, block, 0, stream>>>(N, f);
+
+  if (nt == 64) {
+    _scatter_gather_elementwise_kernel<64, vt, func_t>
+        <<<grid, block, 0, stream>>>(N, f);
+  } else if (nt == 128) {
+    _scatter_gather_elementwise_kernel<128, vt, func_t>
+        <<<grid, block, 0, stream>>>(N, f);
+  }
+
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
@@ -120,7 +130,7 @@ struct _cuda_scatter_gather_internal_kernel {
 
     };
 
-    _launch_scatter_gather_kernel<num_threads, thread_work_size>(iter.numel(), loop);
+    _launch_scatter_gather_kernel(iter.numel(), loop);
   }
 }; // struct _cuda_scatter_fill_internal_kernel
 
@@ -284,7 +294,7 @@ struct _cuda_scatter_fill_internal_kernel {
 
     };
 
-    _launch_scatter_gather_kernel<num_threads, thread_work_size>(iter.numel(), loop);
+    _launch_scatter_gather_kernel(iter.numel(), loop);
   }
 }; // struct _cuda_scatter_fill_internal_kernel
 

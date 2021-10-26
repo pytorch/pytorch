@@ -266,7 +266,8 @@ TORCH_IMPL_FUNC(topk_out_cuda)
     dim3 grid;                                                            \
     TORCH_INTERNAL_ASSERT(getGridFromTiles(inputSlices, grid), "Too many slices to sort"); \
                                                                           \
-    dim3 block(std::min(at::ceil_div(sliceSize, (int64_t) C10_WARP_SIZE)*(int64_t) C10_WARP_SIZE, (int64_t) 1024)); \
+    int warp_size = at::cuda::warp_size();                                \
+    dim3 block(std::min(at::cuda::ATenCeilDiv(sliceSize, (int64_t) warp_size)*(int64_t) warp_size, (int64_t) 1024)); \
                                                                           \
     /* This is used as a template parameter to calculate indices. */      \
     /* We only specialize it if all collapsed dim sizes are the */        \

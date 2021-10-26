@@ -7,6 +7,7 @@ import contextlib
 import ctypes
 import gc
 import io
+import os
 import pickle
 import queue
 import sys
@@ -17,6 +18,7 @@ import unittest
 import torch
 import torch.cuda
 import torch.cuda.comm as comm
+from torch import multiprocessing as mp
 from torch.nn.parallel import scatter_gather
 from torch.utils.checkpoint import checkpoint_sequential
 from torch._six import inf, nan
@@ -1487,42 +1489,38 @@ class TestCuda(TestCase):
         samples = probs.multinomial(1000000, replacement=True)
         self.assertGreater(probs[samples].min().item(), 0)
 
-    def _spawn_test_multinomial_invalid_probs_cuda(self, probs):
-        import subprocess
+    @staticmethod
+    def mute():
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stderr.fileno())
+
+    def _spawn_method(self, method, arg):
+        ctx = mp.get_context("spawn")
+        with ctx.Pool(1, initializer=self.mute) as pool:
+            errors = pool.map(method, [arg])
+            for e in errors:
+                if 'device-side assert triggered' not in str(e):
+                    self.fail(e)
+
+    @staticmethod
+    def _test_multinomial_invalid_probs_cuda(probs):
         try:
-            p = subprocess.Popen([sys.executable, '-c', f"""\
-import sys
-import torch
-from torch._six import inf, nan
-try:
-    with torch.random.fork_rng(devices=[0]):
-        torch.multinomial(torch.tensor({probs}).to('cuda'), 2, replacement=True)
-        torch.cuda.synchronize()
-    sys.exit(-1) # Should not be reached
-except RuntimeError as e:
-    sys.exit(-2)
-"""], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
-            out, err = p.communicate(timeout=10)
-            p.wait(timeout=10)
-        except subprocess.TimeoutExpired as e:
-            p.kill()
-            out, err = p.communicate()
-        expected_messages = [
-            'device-side assert triggered',  # CUDA
-            'Assertion',  # CUDA
-            'HSA_STATUS_ERROR_EXCEPTION',  # ROCm
-            'Device-side assertion'  # ROCm
-        ]
-        self.assertTrue(any([msg in out or msg in err for msg in expected_messages]))
+            with torch.random.fork_rng(devices=[0]):
+                torch.multinomial(probs.to('cuda'), 2, replacement=True)
+                torch.cuda.synchronize()
+            return False  # Should not be reached
+        except RuntimeError as e:
+            return e
 
     @slowTest
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
+    @skipIfRocm
     def test_multinomial_invalid_probs_cuda(self):
-        self._spawn_test_multinomial_invalid_probs_cuda([1., -1., 1.])
-        self._spawn_test_multinomial_invalid_probs_cuda([1., inf, 1.])
-        self._spawn_test_multinomial_invalid_probs_cuda([1., -inf, 1.])
-        self._spawn_test_multinomial_invalid_probs_cuda([1., 1., nan])
+        test_method = TestCuda._test_multinomial_invalid_probs_cuda
+        self._spawn_method(test_method, torch.tensor([1., -1., 1.]))
+        self._spawn_method(test_method, torch.tensor([1., inf, 1.]))
+        self._spawn_method(test_method, torch.tensor([1., -inf, 1.]))
+        self._spawn_method(test_method, torch.tensor([1., 1., nan]))
 
     @slowTest
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
@@ -1962,6 +1960,8 @@ t1.start()
 t2.start()
 """])
 
+    # ROCm doesn't support device side asserts
+    @skipIfRocm
     def test_fixed_cuda_assert_async(self):
         with self.assertRaisesRegex(RuntimeError, "Boolean value of Tensor with no values is ambiguous"):
             torch._assert_async(torch.tensor([], device="cuda"))

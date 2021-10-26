@@ -292,6 +292,9 @@ static void launch_kernel(int64_t N, const func_t& f, array_t data) {
   if (N == 0) {
     return;
   }
+  const int num_threads = at::cuda::warp_size() * 2;
+  const int thread_work_size = 4;
+  const int block_work_size = thread_work_size * num_threads;
   int64_t grid = (N + block_work_size - 1) / block_work_size;
   auto stream = at::cuda::getCurrentCUDAStream();
   elementwise_kernel<func_t, array_t><<<grid, num_threads, 0, stream>>>(N, f, data);

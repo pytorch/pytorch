@@ -32,19 +32,26 @@ __global__ void _unfold_backward_elementwise_kernel(int total_n_elems, func_t f)
   }
 }
 
-template <int n_threads, int n_elems_per_thread, typename func_t>
+template <typename func_t>
 static void _launch_unfold_backward_kernel(int total_n_elems, func_t f) {
   TORCH_INTERNAL_ASSERT(
     total_n_elems >= 0 && total_n_elems <= std::numeric_limits<int32_t>::max()
   );
 
+  const int n_threads = at::cuda::warp_size() * 2;
+  constexpr int n_elems_per_thread = 4;
   dim3 block(n_threads);
-  constexpr int total_work_block = n_threads * n_elems_per_thread;
+  const int total_work_block = n_threads * n_elems_per_thread;
   dim3 grid((total_n_elems + total_work_block - 1) / total_work_block);
 
   auto stream = at::cuda::getCurrentCUDAStream();
-  _unfold_backward_elementwise_kernel<n_threads, n_elems_per_thread, func_t>
-    <<<grid, block, 0, stream>>>(total_n_elems, f);
+  if (n_threads == 64) {
+    _unfold_backward_elementwise_kernel<64, n_elems_per_thread, func_t>
+        <<<grid, block, 0, stream>>>(total_n_elems, f);
+  } else if (n_threads == 128) {
+    _unfold_backward_elementwise_kernel<128, n_elems_per_thread, func_t>
+        <<<grid, block, 0, stream>>>(total_n_elems, f);
+  }
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
@@ -103,7 +110,7 @@ void _unfold_backward_internal_kernel(
       grad_out_data[grad_out_idx_dim * grad_out_dim_stride] = *grad_in_data;
     };
 
-    _launch_unfold_backward_kernel<num_threads, thread_work_size>(iter.numel(), loop);
+    _launch_unfold_backward_kernel(iter.numel(), loop);
   }
   else {
     auto offset_calc = make_offset_calculator<3>(iter);
@@ -138,7 +145,7 @@ void _unfold_backward_internal_kernel(
 
     };
 
-    _launch_unfold_backward_kernel<num_threads, thread_work_size>(iter.numel(), loop);
+    _launch_unfold_backward_kernel(iter.numel(), loop);
   }
 }
 
