@@ -2726,8 +2726,8 @@ def sample_inputs_index_add(op_info, device, dtype, requires_grad, **kwargs):
     # non-contiguous source
     s_nonctg = s.transpose(0, 1)
 
-    idx = make_arg((S,), dtype=torch.int64, low=0, high=S)
-    idx_nonctg = make_arg((S,), dtype=torch.int64, low=0, high=S, noncontiguous=True)
+    idx = make_arg((S,), dtype=torch.int64, low=0, high=S, requires_grad=False)
+    idx_nonctg = make_arg((S,), dtype=torch.int64, low=0, high=S, noncontiguous=True, requires_grad=False)
     samples = [SampleInput(tensor, args=(1, idx, source))
                for tensor, idx, source in product([t, t_nonctg], [idx, idx_nonctg], [s, s_nonctg])]
     samples.extend(SampleInput(tensor, args=(1, idx, source), kwargs=dict(alpha=a))
@@ -2736,7 +2736,7 @@ def sample_inputs_index_add(op_info, device, dtype, requires_grad, **kwargs):
     # Add scalar cases
     scalar_sizes = [(), (1,)]
     ts = (make_arg(size) for size in scalar_sizes)
-    idxs = (make_arg(size, dtype=torch.int64, low=0, high=1) for size in scalar_sizes)
+    idxs = (make_arg(size, dtype=torch.int64, low=0, high=1, requires_grad=False) for size in scalar_sizes)
     ss = (make_arg(size) for size in scalar_sizes)
 
     samples.extend(SampleInput(t, args=(0, idx, s)) for t, idx, s in product(ts, idxs, ss))
@@ -3355,10 +3355,9 @@ def sample_inputs_dist(op_info, device, dtype, requires_grad):
 # Missing to test the nondeterminism of the operation
 # https://github.com/pytorch/pytorch/issues/53352
 def sample_inputs_index_copy(op_info, device, dtype, requires_grad, **kwargs):
-    def make_arg(shape, low=None, high=None, dtype=dtype):
+    def make_arg(shape, low=None, high=None, dtype=dtype, requires_grad=requires_grad):
         return make_tensor(shape, device=device, dtype=dtype,
-                           low=low, high=high,
-                           requires_grad=requires_grad)
+                           low=low, high=high, requires_grad=requires_grad)
 
     t = make_arg((S, S))
     s = make_arg((S, S))
@@ -3379,7 +3378,7 @@ def sample_inputs_index_copy(op_info, device, dtype, requires_grad, **kwargs):
     # Add scalar cases
     scalar_sizes = [(), (1,)]
     ts = (make_arg(size) for size in scalar_sizes)
-    idxs = (make_arg(size, dtype=torch.int64, low=0, high=1) for size in scalar_sizes)
+    idxs = (make_arg(size, dtype=torch.int64, low=0, high=1, requires_grad=False) for size in scalar_sizes)
     ss = (make_arg(size) for size in scalar_sizes)
 
     samples.extend(SampleInput(t, args=(0, idx, s)) for t, idx, s in product(ts, idxs, ss))
@@ -4356,7 +4355,7 @@ def sample_inputs_cov(op_info, device, dtype, requires_grad, **kwargs):
     for t in _generate_correlation_inputs(device, dtype, requires_grad):
         inputs.append(SampleInput(t))
         num_observations = t.numel() if t.ndimension() < 2 else t.size(1)
-        fweights = make_tensor((num_observations,), device, torch.int, low=1, high=10, requires_grad=requires_grad)
+        fweights = make_tensor((num_observations,), device, torch.int, low=1, high=10)
         aweights = make_tensor((num_observations,), device, torch.float, low=0, high=1, requires_grad=requires_grad)
         for correction, fw, aw in product(range(num_observations), [None, fweights], [None, aweights]):
             inputs.append(SampleInput(t, kwargs={'correction': correction, 'fweights': fw, 'aweights': aw}))
@@ -5928,7 +5927,7 @@ def sample_inputs_embedding(op_info, device, dtype, requires_grad, **kwargs):
 
     def make_long_input(shape, *, low, high, noncontiguous=False):
         return make_tensor(shape, device=device, dtype=torch.long, low=low, high=high,
-                           noncontiguous=noncontiguous, requires_grad=requires_grad)
+                           noncontiguous=noncontiguous)
 
     def generator():
         # 0-D index tensor
