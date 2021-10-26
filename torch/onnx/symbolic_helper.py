@@ -318,19 +318,12 @@ def _is_fp(value):
     if value:
         if isinstance(value, torch.Tensor):
             type = value.dtype
-            fp_set = (torch.float16, torch.float32, torch.float64, torch.bfloat16)
-            return type in fp_set
+            return type in (torch.float16, torch.float32, torch.float64, torch.bfloat16)
         else:
             type = value.type().scalarType()
             if type is None:
                 warnings.warn("Type cannot be inferred, which might cause exported graph to produce incorrect results.")
-            return (type == "Float") or (type == "Double") or (type == "Half") or (type == "BFloat16")
-    return False
-
-def _dtype_is_fp(type_value):
-    if type_value:
-        fp_set = (torch.float16, torch.float32, torch.float64, torch.bfloat16)
-        return type_value in fp_set
+            return type in ("Float", "Double", "Half", "BFloat16")
     return False
 
 def _generate_wrapped_number(g, scalar):
@@ -895,7 +888,7 @@ cast_pytorch_to_onnx = {
     "Bool": torch.onnx.TensorProtoDataType.BOOL,
     "ComplexFloat": torch.onnx.TensorProtoDataType.COMPLEX64,
     "ComplexDouble": torch.onnx.TensorProtoDataType.COMPLEX128,
-    "BFloat16": torch.onnx.TensorProtoDataType.BFLOAT16,
+    "BFloat16": torch.onnx.TensorProtoDataType.FLOAT16,
     "Undefined": torch.onnx.TensorProtoDataType.UNDEFINED,
 }
 
@@ -911,7 +904,10 @@ scalar_name_to_pytorch = {
     "bool": "Bool",
     "complex64": "ComplexFloat",
     "complex128": "ComplexDouble",
-    "bfloat16": "BFloat16"
+    "qint8": "QInt8",
+    "quint8": "QUInt8",
+    "qint32": "QInt32",
+    "bfloat16": "BFloat16",
 }
 
 
@@ -937,8 +933,8 @@ class ScalarType(enum.IntEnum):
 
 
 # This indicates each scalar type's corresponding
-# torch type. 12-14 are quantized types, no need to join for now. Related source:
-# https://github.com/pytorch/pytorch/blob/onnx_ms_1/c10/core/ScalarType.h
+# torch type. Related source:
+# https://github.com/pytorch/pytorch/blob/344defc9733a45fee8d0c4d3f5530f631e823196/c10/core/ScalarType.h
 scalar_type_to_pytorch_type = [
     torch.uint8,        # 0
     torch.int8,         # 1
@@ -952,6 +948,9 @@ scalar_type_to_pytorch_type = [
     torch.complex64,    # 9
     torch.complex128,   # 10
     torch.bool,         # 11
+    torch.qint8,        # 12
+    torch.quint8,       # 13
+    torch.qint32,       # 14
     torch.bfloat16,     # 15
 ]
 
@@ -960,19 +959,22 @@ def _cast_func_template(to_i, g, input, non_blocking):
 
 
 scalar_type_to_onnx = [
-    cast_pytorch_to_onnx["Byte"],
-    cast_pytorch_to_onnx["Char"],
-    cast_pytorch_to_onnx["Short"],
-    cast_pytorch_to_onnx["Int"],
-    cast_pytorch_to_onnx["Long"],
-    cast_pytorch_to_onnx["Half"],
-    cast_pytorch_to_onnx["Float"],
-    cast_pytorch_to_onnx["Double"],
-    cast_pytorch_to_onnx["Undefined"],
-    cast_pytorch_to_onnx["ComplexFloat"],
-    cast_pytorch_to_onnx["ComplexDouble"],
-    cast_pytorch_to_onnx["Bool"],
-    cast_pytorch_to_onnx["BFloat16"],
+    cast_pytorch_to_onnx["Byte"],            # 0
+    cast_pytorch_to_onnx["Char"],            # 1
+    cast_pytorch_to_onnx["Short"],           # 2
+    cast_pytorch_to_onnx["Int"],             # 3
+    cast_pytorch_to_onnx["Long"],            # 4
+    cast_pytorch_to_onnx["Half"],            # 5
+    cast_pytorch_to_onnx["Float"],           # 6
+    cast_pytorch_to_onnx["Double"],          # 7
+    cast_pytorch_to_onnx["Undefined"],       # 8
+    cast_pytorch_to_onnx["ComplexFloat"],    # 9
+    cast_pytorch_to_onnx["ComplexDouble"],   # 10
+    cast_pytorch_to_onnx["Bool"],            # 11
+    cast_pytorch_to_onnx["Char"],            # 12
+    cast_pytorch_to_onnx["Byte"],            # 13
+    cast_pytorch_to_onnx["Int"],             # 14
+    cast_pytorch_to_onnx["BFloat16"],        # 15
 ]
 
 # Global set to store the list of quantized operators in the network.
