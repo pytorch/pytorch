@@ -8287,7 +8287,7 @@ op_db: List[OpInfo] = [
                     supports_autograd=False,
                     # FIXME: logical_and does not accept scalar inputs
                     skips=(
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_broadcast_python_scalar'),
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_broadcast_python_scalar'),
                     )),
     BinaryUfuncInfo('logical_or',
                     ref=np.logical_or,
@@ -8296,7 +8296,7 @@ op_db: List[OpInfo] = [
                     supports_autograd=False,
                     # FIXME: logical_or does not accept scalar inputs
                     skips=(
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_broadcast_python_scalar'),
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_broadcast_python_scalar'),
                     )),
     BinaryUfuncInfo('logical_xor',
                     ref=np.logical_xor,
@@ -8305,7 +8305,7 @@ op_db: List[OpInfo] = [
                     supports_autograd=False,
                     # FIXME: logical_xor does not accept scalar inputs
                     skips=(
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_broadcast_python_scalar'),
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_broadcast_python_scalar'),
                     )),
     # `softmax` supports different dtypes based on whether `dtype` argument,
     # is passed or not. Hence two OpInfo entries, one with dtype and other without.
