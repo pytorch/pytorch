@@ -194,7 +194,6 @@ if(BUILD_SPLIT_CUDA)
       "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/TensorModeKernel.cpp"
       "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/TensorShapeCUDA.cpp"
       "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/TensorTopK.cpp"
-      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cudnn/GridSampler.cpp"
       "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/sparse/cuda/SparseBlas.cpp"
       "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/sparse/cuda/SparseBlasImpl.cpp"
       "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/sparse/cuda/SparseBlasLegacy.cpp"
