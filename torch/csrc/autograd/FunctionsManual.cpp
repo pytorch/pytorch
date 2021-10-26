@@ -3729,6 +3729,57 @@ bool any_variable_defined(const variable_list& variables) {
 // the householder_product is still differentiable! We will not be able to compute K_i
 // efficiently in such cases, however, as evaluating of each K_i will amount to calls
 // to ORGQR to be able to compute H_i_plus.
+
+// This function computes either the product between
+// (I - tau u v^H) and K (in-place or not) with `condition_with_I = true`, or between
+// (-tau u v^H) and K (out-of-place only) with `condition_with_I = false`.
+// Parameter `left` controls whether the matrix K is multiplied from the left or
+// from the right.
+// Additionally, when the computation is done in-place, we exploit that the first
+// `k` coordinates of `u_full/v_full` are zeros.
+Tensor apply_simple_transformation(
+    int64_t m, int64_t k,
+    const Tensor& u_full, const Tensor& v_full,
+    const Tensor& t, Tensor& K,
+    bool modify_K_in_place = true,
+    bool condition_with_I = true,
+    bool left = true) {
+  // we assume u_full is a vector of dimension (..., m, 1), t is a scalar of dimension (..., 1)
+
+  // TODO: matrix-vector products in the code below are dispatched to matrix-matrix products.
+  // We either need to extend matmul to support batched matrix-vector products, or
+  // implement a batched variant of mv.
+  // We could enable mv for inputs which are not batched, but it is not done to eliminate
+  // the code duplication.
+
+  // returns (I - t u v^H) K or -t u v^H K
+  if (left) {
+    if (modify_K_in_place) {
+      auto v = u_full.narrow(-2, k, m - k);
+      auto u = v_full.narrow(-2, k, m - k).mH().matmul(K.narrow(-2, k, m - k));
+      K.narrow(-2, k, m - k).sub_((t.unsqueeze(-1) * v) * u);
+      return K;
+    }
+    else {
+      auto transformation = (t.unsqueeze(-1) * u_full) * v_full.mH().matmul(K);
+      return condition_with_I ? K - transformation : -transformation;
+    }
+  }
+  // returns K (I - t u v^H) or -K t u v^H
+  else {
+    if (modify_K_in_place) {
+      auto v = u_full.narrow(-2, k, m - k);
+      auto u = K.narrow(-1, k, m - k).matmul(t.unsqueeze(-1) * v_full.narrow(-2, k, m - k));
+      K.narrow(-1, k, m - k).sub_(u * v.mH());
+      return K;
+    }
+    else {
+      auto transformation = K.matmul(t.unsqueeze(-1) * u_full) * v_full.mH();
+      return condition_with_I ? K - transformation : -transformation;
+    }
+  }
+};
+
 std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, const Tensor& result, const Tensor& input_, const Tensor& tau) {
   if (!grad.defined() || !input_.numel() || !tau.numel()) {
     return std::tuple<Tensor, Tensor>(Tensor(), Tensor());
@@ -3767,43 +3818,6 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
   // if only first-order derivative is expected, we can modify K in-place for better performance
   bool modify_K_in_place = !at::GradMode::is_enabled();
 
-  // TODO: replace this function with calls to LARFB
-  auto apply_householder_reflector = [m, modify_K_in_place](
-      int64_t k, const Tensor& v_full, const Tensor& t, Tensor& K, bool left = true) -> Tensor {
-    // v_full is a vector of dimension (..., m, 1), t is a scalar of dimension (..., 1)
-
-    // TODO: matrix-vector products in the code below are dispatched to matrix-matrix products.
-    // We either need to extend matmul to support batched matrix-vector products, or
-    // implement a batched variant of mv.
-    // We could enable mv for inputs which are not batched, but it is not done to eliminate
-    // the code duplication.
-
-    // returns (I - t v v^H) K
-    if (left) {
-      if (modify_K_in_place) {
-        auto v = v_full.narrow(-2, k, m - k);
-        auto u = v.mH().matmul(K.narrow(-2, k, m - k));
-        K.narrow(-2, k, m - k).sub_((t.unsqueeze(-1) * v) * u);
-        return K;
-      }
-      else {
-        return K - (t.unsqueeze(-1) * v_full) * v_full.mH().matmul(K);
-      }
-    }
-    // returns K (I - t v v^H)
-    else {
-      if (modify_K_in_place) {
-        auto v = v_full.narrow(-2, k, m - k);
-        auto u = K.narrow(-1, k, m - k).matmul(t.unsqueeze(-1) * v);
-        K.narrow(-1, k, m - k).sub_(u * v.mH());
-        return K;
-      }
-      else {
-        return K - K.matmul(t.unsqueeze(-1) * v_full) * v_full.mH();
-      }
-    }
-  };
-
   // This method exploites that at k-th iteration vector v_k has only elements v_k[k:] which are non-zero.
   auto update_grad = [&m](int64_t k, const Tensor& v_full, const Tensor& t, const Tensor& K) -> std::tuple<Tensor, Tensor> {
     // v_full is a vector of dimension (..., m, 1), t is a scalar of dimension (..., 1)
@@ -3814,6 +3828,15 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
     auto v_grad = (-t_unsqueezed * vHK).conj().squeeze(-2) - (t_unsqueezed * Kv).squeeze(-1);
     auto tau_grad = -(vHK.narrow(-1, k, m - k).matmul(v)).conj();
     return std::make_tuple(v_grad, tau_grad.squeeze(-1));
+  };
+
+  auto apply_householder_reflector = [m, modify_K_in_place](
+    int64_t k, const Tensor& v_full,
+    const Tensor& t, Tensor& K,
+    bool left = true) -> Tensor {
+    return apply_simple_transformation(
+      m, k, v_full, v_full, t, K, modify_K_in_place, /*condition_with_I=*/true, left
+    );
   };
 
   // K <- H_0^{-1} @ K
@@ -3851,6 +3874,84 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
   input_grad.tril_(-1);
 
   return std::make_tuple(input_grad, tau_grad);
+}
+
+// We refer to the derivations described above the method `apply_simple_transformation`
+Tensor householder_product_jvp(
+    const Tensor& dV_,
+    const Tensor& dtau,
+    const Tensor& prod,
+    const Tensor& V_,
+    const Tensor& tau
+) {
+  auto m = V_.size(-2);
+  auto k = tau.size(-1);
+
+  // forward operates only over the lower triangular part with the assumption
+  // that the diagonal of input is filled with 1s.
+  auto V = V_.tril(-1);
+  V.diagonal(0, -2, -1).fill_(1.0);
+  auto dV = dV_.tril(-1);
+
+  // compute sigma such that
+  // H(sigma_i) == H(tau_i)^{-1}.
+  // If the input to householder_product comes from GEQRF,
+  // we will never encounter ||v_i||^2 tau_i == 1, so H(tau_i) will always be invertible.
+  // This follows from the documentation https://www.netlib.org/lapack/lug/node128.html,
+  // and tau always satisfying the condition |tau|^2 ||v||^2 == 2 * Re(tau).
+  auto V_first_k_cols = V.narrow(-1, 0, k);
+  auto V_first_k_cols_norm_squared = (
+    V_first_k_cols * V_first_k_cols.conj()
+  ).sum(-2);
+  auto sigma = tau / (tau * V_first_k_cols_norm_squared - 1.0);
+
+  auto apply_householder_reflector = [m](
+    const Tensor& v_full,
+    const Tensor& t, Tensor& K,
+    bool left = true) -> Tensor {
+    return apply_simple_transformation(
+      // setting `modify_K_in_place = true` causes CUDA memory leaks in OpInfo tests of forward AD
+      // for that reason we ignore `k` by passing zero
+      m, /*k=*/0, v_full, v_full, t, K, /*modify_K_in_place=*/false, /*condition_with_I=*/true, left
+    );
+  };
+
+  // computes (-t u v^H) K
+  auto apply_simple_product = [m](
+    const Tensor& u_full, const Tensor& v_full,
+    const Tensor& t, Tensor& K
+  ) -> Tensor {
+    return apply_simple_transformation(
+      // since ``modify_K_in_place = false`, we can ignore `k` and pass arbitrary value
+      m, /*k=*/0, u_full, v_full, t, K, /*modify_K_in_place=*/false, /*condition_with_I=*/false, /*left=*/true
+    );
+  };
+
+
+  auto H_plus = prod.detach().clone();
+  IntArrayRef batch_vector_shape(V.sizes().data(), V.dim() - 1);
+  auto H_minus = at::diag_embed(at::ones({1}, V.options()).expand(batch_vector_shape));
+
+  auto dprod = at::zeros_like(prod);
+  for (int64_t i = 0; i < k; ++i) {
+    auto v_i = V.narrow(-1, i, 1);
+    auto dv_i = dV.narrow(-1, i, 1);
+    auto tau_i = tau.narrow(-1, i, 1);
+    auto dtau_i = dtau.narrow(-1, i, 1);
+    auto sigma_i = sigma.narrow(-1, i, 1);
+
+    H_plus = apply_householder_reflector(v_i, sigma_i, H_plus, /*left=*/true);
+
+    dprod.add_(H_minus.matmul(
+      apply_simple_product(v_i, v_i, dtau_i, H_plus)
+      + apply_simple_product(dv_i, v_i, tau_i, H_plus)
+      + apply_simple_product(v_i, dv_i, tau_i, H_plus)
+    ));
+
+    H_minus = apply_householder_reflector(v_i, tau_i, H_minus, /*left=*/false);
+  }
+
+  return dprod;
 }
 
 std::tuple<Tensor, Tensor> polar_backward(
