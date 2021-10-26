@@ -5143,7 +5143,7 @@ else:
             for n in range(1, t.size(dim) + 2):
                 actual = torch.diff(t, dim=dim, n=n, prepend=prepend, append=append)
                 expected = torch.from_numpy(np.diff(np_t, axis=dim, n=n, prepend=to_np(prepend), append=to_np(append)))
-                self.assertEqual(actual, expected.to(t.dtype))                          
+                self.assertEqual(actual, expected.to(t.dtype))
 
             # test when prepend and append's size along dim != 1
             for n in range(1, t.size(dim) * 3):

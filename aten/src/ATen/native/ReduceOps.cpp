@@ -758,7 +758,7 @@ static inline void diff_check(const Tensor& self, int64_t n, int64_t dim, const 
   TORCH_CHECK(
       self.dim() >= dim,
       "diff expects dim to be a valid dimension but got dim=", dim, " while tensor has ", self.dim(), "dims");
-  
+
   auto prepend_size = (prepend == c10::nullopt) ? 0 : prepend->size(dim);
   auto append_size = (append == c10::nullopt) ? 0 : append->size(dim);
   auto size_along_dim = self.size(dim) + prepend_size + append_size;
