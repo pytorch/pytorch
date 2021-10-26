@@ -3188,6 +3188,7 @@ class TestOperatorSignatures(JitTestCase):
                            'expand_as',
                            'fill_',
                            'hstack',
+                           'histogramdd',
                            'igamma',
                            'igammac',
                            'linalg.multi_dot',
@@ -3259,7 +3260,7 @@ class TestOperatorSignatures(JitTestCase):
                     raise RuntimeError(f'Did not match any schemas for op {op.name}!')
 
         except Exception as e:
-            assert op.name in known_no_schema or "nn.functional" in op.name or "_masked." in op.name
+            assert op.name in known_no_schema or "nn.functional" in op.name or "_masked." in op.name, op.name
 
 
 class TestFXAPIBackwardCompatibility(JitTestCase):
