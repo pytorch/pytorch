@@ -8,11 +8,11 @@ namespace lazy_tensors {
 namespace {
 
 // 0xff is in case char is signed.
-inline uint64 ByteAs64(char c) { return static_cast<uint64>(c) & 0xff; }
+inline uint64_t ByteAs64(char c) { return static_cast<uint64_t>(c) & 0xff; }
 
-uint64 DecodeFixed64(const char* ptr) {
+uint64_t DecodeFixed64(const char* ptr) {
   // Load the raw bytes
-  uint64 result;
+  uint64_t result;
   memcpy(&result, ptr, sizeof(result));  // gcc optimizes this to a plain load
   return result;
 }
@@ -22,14 +22,14 @@ uint64 DecodeFixed64(const char* ptr) {
 // Same as:
 // https://github.com/tensorflow/tensorflow/blob/master/tensorflow/core/platform/hash.cc
 
-uint64 Hash64(const char* data, size_t n, uint64 seed) {
-  const uint64 m = 0xc6a4a7935bd1e995;
+uint64_t Hash64(const char* data, size_t n, uint64_t seed) {
+  const uint64_t m = 0xc6a4a7935bd1e995;
   const int r = 47;
 
-  uint64 h = seed ^ (n * m);
+  uint64_t h = seed ^ (n * m);
 
   while (n >= 8) {
-    uint64 k = DecodeFixed64(data);
+    uint64_t k = DecodeFixed64(data);
     data += 8;
     n -= 8;
 

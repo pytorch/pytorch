@@ -36,7 +36,7 @@ torch::lazy::hash_t Hash(const lazy_tensors::Shape& shape) {
 
 namespace lazy_tensors {
 
-/* static */ int64 ShapeUtil::TupleElementCount(const Shape& shape) {
+/* static */ int64_t ShapeUtil::TupleElementCount(const Shape& shape) {
   LTC_CHECK(shape.IsTuple()) << shape;
   return shape.tuple_shapes_size();
 }
@@ -50,7 +50,7 @@ Status ForEachSubshapeHelper(const Shape& shape,
                              ShapeIndex* index) {
   TF_RETURN_IF_ERROR(func(shape, *index));
   if (shape.IsTuple()) {
-    for (int64 i = 0; i < ShapeUtil::TupleElementCount(shape); ++i) {
+    for (int64_t i = 0; i < ShapeUtil::TupleElementCount(shape); ++i) {
       // Track the sub-shape position, which can be used by the visitor
       // function.
       index->push_back(i);
@@ -88,7 +88,7 @@ void ShapeUtil::ForEachSubshape(const Shape& shape,
   if (shape.tuple_shapes().empty()) {
     for (int i = 0; i < shape.dimensions_size(); ++i) {
       hash_value =
-          Hash64Combine(hash_value, hash<int64>()(shape.dimensions(i)));
+          Hash64Combine(hash_value, hash<int64_t>()(shape.dimensions(i)));
       hash_value = Hash64Combine(hash_value,
                                  hash<bool>()(shape.is_dynamic_dimension(i)));
     }

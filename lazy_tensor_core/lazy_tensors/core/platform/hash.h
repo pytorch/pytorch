@@ -1,7 +1,7 @@
 #pragma once
 
 #include <functional>
-
+#include <stdint.h>
 
 namespace lazy_tensors {
 

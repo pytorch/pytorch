@@ -7,8 +7,8 @@ namespace lazy_tensors {
 size_t LayoutUtil::Hash(const Layout& layout) {
   size_t hash_value = std::hash<size_t>()(0);
 
-  for (int64 minor_to_major : layout.minor_to_major()) {
-    hash_value = Hash64Combine(hash_value, hash<int64>()(minor_to_major));
+  for (int64_t minor_to_major : layout.minor_to_major()) {
+    hash_value = Hash64Combine(hash_value, hash<int64_t>()(minor_to_major));
   }
 
   return hash_value;

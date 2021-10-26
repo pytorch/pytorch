@@ -3,6 +3,7 @@
 #include <vector>
 
 #include "lazy_tensors/str_join.h"
+#include "lazy_tensors/computation_client/debug_macros.h"
 
 namespace lazy_tensors {
 

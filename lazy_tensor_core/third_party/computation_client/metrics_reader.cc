@@ -44,7 +44,7 @@ std::string CreateXrtMetricReport() {
       ss << "  StdDev: " << minfo.repr_fn(percentile.stddev * minfo.scale)
          << std::endl;
 
-      uint64 delta_time = percentile.end_nstime - percentile.start_nstime;
+      uint64_t delta_time = percentile.end_nstime - percentile.start_nstime;
       if (delta_time > 0) {
         double count_sec = 1e6 * (static_cast<double>(percentile.num_samples) /
                                   (delta_time / 1000.0));

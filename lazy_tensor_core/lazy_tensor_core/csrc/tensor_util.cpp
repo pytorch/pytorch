@@ -142,13 +142,6 @@ struct Caster<at::BFloat16> {
   }
 };
 template <>
-struct Caster<c10::BFloat16> {
-  template <typename D>
-  D cast(const c10::BFloat16& value) const {
-    return static_cast<D>(static_cast<float>(value));
-  }
-};
-template <>
 struct Caster<c10::Half> {
   template <typename D>
   D cast(const c10::Half& value) const {
