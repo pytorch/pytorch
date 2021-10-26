@@ -66,6 +66,12 @@ void fuseFrozenConvAddReluImpl(std::shared_ptr<Graph>& graph) {
 
   auto filter = [](const Match& match,
                    const std::unordered_map<std::string, Value*>& vmap) {
+#if CUDNN_VERSION < 8000
+    // cuDNN Conv-Bias-Relu fusion may raise CUDNN_STATUS_NOT_SUPPORTED error in 7.6.5 or lower.
+    // See https://github.com/pytorch/pytorch/pull/65594#issuecomment-948989177
+    return false;
+#endif
+
     auto weight = toIValue(match.values_map.at(vmap.at("weight")));
     if (!weight.has_value() || !weight.value().isTensor()) {
       return false;
@@ -73,11 +79,6 @@ void fuseFrozenConvAddReluImpl(std::shared_ptr<Graph>& graph) {
     const at::Tensor& weight_t = weight.value().toTensor();
     if (!weight_t.device().is_cuda() ||
         !weight_t.is_contiguous()
-#if CUDNN_VERSION < 8000
-        // Enabling the fusion for half-precision causes perf regression on
-        // earlier cuDNN
-        || weight_t.dtype() == at::kHalf
-#endif
     ) {
       return false;
     }
