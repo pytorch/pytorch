@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: quantization"]
+
 import torch
 import torch.nn as nn
 from torch.testing._internal.common_quantization import QuantizationTestCase

@@ -36,6 +36,9 @@ class CompilationUnit {
   std::vector<std::unique_ptr<Function>>& methods() {
     return methods_;
   }
+  const std::vector<std::unique_ptr<Function>>& methods() const {
+    return methods_;
+  }
   Function* find_function(const c10::QualifiedName& qn);
 
  private:
@@ -121,6 +124,10 @@ class TORCH_API Module {
 
   bool hasDebugHandles() const {
     return has_debug_handles_;
+  }
+
+  const CompilationUnit& compilation_unit() const {
+    return *cu_.get();
   }
 
  private:
