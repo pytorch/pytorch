@@ -7877,7 +7877,9 @@ else:
         )
         shapes = ((), (5,), (1, 5),)
 
-        tensors = (torch.ones(shape, dtype=dtype, device=device) * 17 for shape, dtype in product(shapes, dtypes))
+        with torch.no_grad():
+            tensors = (torch.empty(shape, dtype=dtype, device=device).fill_(17)
+                       for shape, dtype in product(shapes, dtypes))
 
         # Use different values for `x` and `y`
         # as they are the output values which are compared.
