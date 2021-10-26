@@ -27,7 +27,7 @@ from torch.distributed._sharding_spec._internals import (
 )
 from torch.types import Number
 from .metadata import TensorProperties, ShardedTensorMetadata
-from .ops import sharded_embedding, sharded_linear, uniform_
+from .ops import kaiming_uniform_, normal_, sharded_embedding, sharded_linear, uniform_
 from .shard import Shard
 from .utils import (
     _CURRENT_PROCESS_GROUP,
@@ -489,8 +489,12 @@ class ShardedTensor(object):
             return sharded_linear(types, args, kwargs, self._process_group)
         if func == torch.nn.functional.embedding:
             return sharded_embedding(types, args, kwargs, self._process_group)
+        elif func == torch.nn.init.normal_:
+            return normal_(types, args, kwargs)
         elif func == torch.nn.init.uniform_:
             return uniform_(types, args, kwargs)
+        elif func == torch.nn.init.kaiming_uniform_:
+            return kaiming_uniform_(types, args, kwargs)
         raise RuntimeError(
             f"torch function '{func.__name__}', with args: {args} and "
             f"kwargs: {kwargs} not supported for ShardedTensor!")
