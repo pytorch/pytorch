@@ -188,8 +188,7 @@ ConvParamsSerializationTypeV3 parse_conv_serialized_state(c10::IValue v) {
   }
 }
 
-// changing this as deserialize_conv is implemented only for version 3
-#define QCONV_SERIALIZATION_VERSION 3
+#define QCONV_SERIALIZATION_VERSION 2
 
 #if QCONV_SERIALIZATION_VERSION == 2
 using ConvParamsSerializationType = ConvParamsSerializationTypeV2;

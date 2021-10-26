@@ -123,7 +123,7 @@ void nnc_aten_quantized_conv2d(
       // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
       tensors[1].sizes(),
       [](void*) {},
-      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions)
+      // NOLINTNEXTLINE
       x_qscale,
       x_qzero,
       at::TensorOptions(toQIntType(x_qdtype)));
@@ -153,7 +153,7 @@ void nnc_aten_quantized_conv2d_relu(
       // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
       tensors[1].sizes(),
       [](void*) {},
-      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions)
+      // NOLINTNEXTLINE
       x_qscale,
       x_qzero,
       at::TensorOptions(toQIntType(x_qdtype)));
@@ -184,7 +184,7 @@ void nnc_aten_quantized_add(
       // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
       tensors[1].sizes(),
       [](void*) {},
-      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions)
+      // NOLINTNEXTLINE
       a_qscale,
       a_qzero,
       at::TensorOptions(toQIntType(a_qdtype)));
@@ -196,7 +196,7 @@ void nnc_aten_quantized_add(
       // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
       tensors[2].sizes(),
       [](void*) {},
-      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions)
+      // NOLINTNEXTLINE
       b_qscale,
       b_qzero,
       at::TensorOptions(toQIntType(b_qdtype)));
@@ -296,7 +296,7 @@ void nnc_aten_upsample_nearest2d(
         // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
         tensors[1].sizes(),
         [](void*) {},
-        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions)
+        // NOLINTNEXTLINE
         x_qscale,
         x_qzero,
         at::TensorOptions(toQIntType(static_cast<c10::ScalarType>(x_qdtype))));
@@ -364,7 +364,7 @@ void nnc_aten_dequantize(
       // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
       tensors[1].sizes(),
       [](void*) {},
-      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions)
+      // NOLINTNEXTLINE
       qscale,
       qzero,
       at::TensorOptions(toQIntType(static_cast<c10::ScalarType>(qdtype))));
