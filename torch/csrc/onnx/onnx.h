@@ -20,6 +20,5 @@ enum class TrainingMode {
 // test_operators.py will be more stable. Only bump it when
 // necessary.
 constexpr size_t IR_VERSION = 8;
-constexpr const char* PRODUCER_VERSION = "1.11";
 } // namespace onnx
 } // namespace torch
