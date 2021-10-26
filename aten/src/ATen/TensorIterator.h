@@ -122,13 +122,14 @@ struct TORCH_API OperandInfo {
   /// but during type promotion target_dtype value can become different from tensor's dtype
   /// also, during type promotion target_dtype and device can be set for an undefined tensor so that tensor can be properly
   /// constructed later.
-  Device device = kCPU;
+  c10::optional<Device> device = c10::nullopt;
   ScalarType target_dtype = ScalarType::Undefined;
   // Caches dtype of the tensor, because scalar_type is an expensive operation
   // If dtype of the tensor is changed (e.g. as a result of type promotion or in allocate_outputs), this
   //value should be changed too.
   ScalarType current_dtype = ScalarType::Undefined;
 
+  bool is_device_defined() const { return device.has_value(); }
   bool is_type_defined() const { return target_dtype != ScalarType::Undefined; }
   TensorOptions options() const {
     return TensorOptions(target_dtype).device(device);
@@ -256,7 +257,7 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
     return common_dtype_;
   }
   ScalarType input_dtype(int arg=0) const { return operands_[num_outputs_ + arg].current_dtype; }
-  Device device(int arg=0) const { return operands_[arg].device; }
+  Device device(int arg=0) const { return operands_[arg].device.value(); }
   DeviceType device_type(int arg=0) const { return device(arg).type(); }
   int64_t element_size(int arg) const { return elementSize(dtype(arg)); }
   bool is_scalar(int arg) const;
@@ -725,6 +726,8 @@ public:
 
   // Bypass output dtype/device computation and fix the dtype/device as specified here.
   TensorIteratorConfig& declare_static_dtype_and_device(ScalarType dtype, Device device);
+  TensorIteratorConfig& declare_static_dtype(ScalarType dtype);
+  TensorIteratorConfig& declare_static_device(Device device);
   TensorIteratorConfig& declare_static_shape(IntArrayRef shape);
   TensorIteratorConfig& declare_static_shape(IntArrayRef shape, IntArrayRef squash_dims);
 
@@ -742,7 +745,8 @@ private:
   int num_inputs_ = 0;
 
   c10::optional<DimVector> static_shape_ = c10::nullopt;
-  c10::optional<std::pair<ScalarType, Device>> static_dtype_and_device_ = c10::nullopt;
+  c10::optional<ScalarType> static_dtype_ = c10::nullopt;
+  c10::optional<Device> static_device_ = c10::nullopt;
   bool check_mem_overlap_ = true;
   bool allow_cpu_scalars_ = false;
   bool is_reduction_ = false;
