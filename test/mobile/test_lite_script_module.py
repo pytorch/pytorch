@@ -1,8 +1,7 @@
 import torch
 import torch.utils.bundled_inputs
 import io
-from typing import Dict, List, NamedTuple
-from collections import namedtuple
+from typing import Dict, List
 import inspect
 
 from torch.jit.mobile import _load_for_lite_interpreter, _export_operator_list
@@ -220,36 +219,6 @@ class TestLiteScriptModule(TestCase):
         with self.assertRaisesRegex(RuntimeError,
                                     r"Workaround: instead of using arbitrary class type \(class Foo\(\)\), "
                                     r"define a pytorch class \(class Foo\(torch\.nn\.Module\)\)\.$"):
-            script_module._save_to_buffer_for_lite_interpreter()
-
-    def test_unsupported_return_typing_namedtuple(self):
-        myNamedTuple = NamedTuple('myNamedTuple', [('a', torch.Tensor)])
-
-        class MyTestModule(torch.nn.Module):
-            def forward(self):
-                return myNamedTuple(torch.randn(1))
-
-        script_module = torch.jit.script(MyTestModule())
-        with self.assertRaisesRegex(RuntimeError,
-                                    r"A named tuple type is not supported in mobile module. "
-                                    r"Workaround: instead of using a named tuple type\'s fields, "
-                                    r"use a dictionary type\'s key-value pair itmes or "
-                                    r"a pytorch class \(class Foo\(torch\.nn\.Module\)\)\'s attributes."):
-            script_module._save_to_buffer_for_lite_interpreter()
-
-    def test_unsupported_return_collections_namedtuple(self):
-        myNamedTuple = namedtuple('myNamedTuple', [('a')])
-
-        class MyTestModule(torch.nn.Module):
-            def forward(self):
-                return myNamedTuple(torch.randn(1))
-
-        script_module = torch.jit.script(MyTestModule())
-        with self.assertRaisesRegex(RuntimeError,
-                                    r"A named tuple type is not supported in mobile module. "
-                                    r"Workaround: instead of using a named tuple type\'s fields, "
-                                    r"use a dictionary type\'s key-value pair itmes or "
-                                    r"a pytorch class \(class Foo\(torch\.nn\.Module\)\)\'s attributes."):
             script_module._save_to_buffer_for_lite_interpreter()
 
     def test_unsupported_return_list_with_module_class(self):
