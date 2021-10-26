@@ -777,7 +777,7 @@ class PythonProcessGroupTest(MultiProcessTestCase):
 
     def _store_barrier(self, name):
         store = c10d._get_default_store()
-        key=f"TEST:PythonProcessGroupTest:{name}"
+        key = f"TEST:PythonProcessGroupTest:{name}"
         if self.rank == 0:
             worker_count = 0
             # By default, TCPServer lives on rank 0. So rank 0 needs to make
