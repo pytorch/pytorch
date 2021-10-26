@@ -380,7 +380,7 @@ class FullyShardedDataParallel(nn.Module):
             # If CPU offloading, p._local_shard should have been placed on CPU
             # during its first lazy construction.
             if self.cpu_offload.offload_params:
-                assert p._local_shard.device == torch.device("cpu"), "Expected p._local_shard to be on CPU."
+                assert p._local_shard.device == torch.device("cpu"), "Expected p._local_shard to be on CPU."  # type: ignore[attr-defined]
             return
 
         # A single shard of the parameters. Also makes p._local_shard to be on
@@ -392,8 +392,8 @@ class FullyShardedDataParallel(nn.Module):
         # If CPU offloading, pin the memory to enable faster CPU -> GPU device
         # transfer.
         if self.cpu_offload.offload_params:
-            assert p._local_shard.device == torch.device("cpu")
-            p._local_shard.pin_memory()
+            assert p._local_shard.device == torch.device("cpu")  # type: ignore[attr-defined]
+            p._local_shard.pin_memory()  # type: ignore[attr-defined]
 
         # We also maintain a full-sized parameter of type self.compute_dtype.
         # We resize the storage to size 0 at init (here) and only materialize
@@ -855,7 +855,7 @@ class FullyShardedDataParallel(nn.Module):
         for p in params:
             if self.cpu_offload.offload_params:
                 # Ensure local_shard resides in CPU if we are offloading params.
-                assert p._local_shard.device == torch.device("cpu"), "Expected p._local_shard to be on CPU"
+                assert p._local_shard.device == torch.device("cpu"), "Expected p._local_shard to be on CPU"  # type: ignore[attr-defined]
             p.data = p._local_shard  # type: ignore[attr-defined]
 
     def _assert_state(self, state: Union[TrainingState_, List[TrainingState_]]) -> None:
