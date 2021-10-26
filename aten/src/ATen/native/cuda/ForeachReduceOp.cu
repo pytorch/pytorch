@@ -2,6 +2,7 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/cuda/DeviceUtils.cuh>
 #include <ATen/native/ForeachUtils.h>
+#include <ATen/native/cuda/block_reduce.cuh>
 #include <ATen/native/cuda/ForeachFunctors.cuh>
 #include <ATen/native/cuda/MultiTensorApply.cuh>
 
@@ -109,7 +110,8 @@ struct LpNormFunctor {
     for (int i = 0; i < kILP; i++) {
       val += vals[i];
     }
-    auto final = reduce_block_into_lanes(s_vals, val);
+    // auto final = reduce_block_into_lanes(s_vals, val);
+    auto final = at::native::cuda_utils::BlockReduceSum(val, s_vals);
 
     if (threadIdx.x == 0) {
       output_per_tensor[(tl.start_tensor_this_launch + tensor_loc) * max_chunks_per_tensor + chunk_idx] = final;
@@ -130,7 +132,8 @@ __global__ void lpnorm_cleanup(
   for (int i = threadIdx.x; i < max_chunks_per_tensor; i += blockDim.x) {
     val += output_this_tensor[i];
   }
-  opmath_t final = reduce_block_into_lanes(vals, val);
+  // opmath_t final = reduce_block_into_lanes(vals, val);
+  opmath_t final = at::native::cuda_utils::BlockReduceSum<opmath_t>(val, vals);
   if(threadIdx.x == 0) {
     ret_per_tensor[blockIdx.x] = NormType == 1 ? final : ::sqrt(final);
   }
