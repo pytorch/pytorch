@@ -6,7 +6,7 @@
 namespace torch {
 namespace jit {
 
-TEST(OpReplacementTest, ReplaceDiv) {
+TEST(OpReplacementTest, ReplaceDivInSimpleFunction) {
     const auto graph_string = R"IR(
         graph(%0 : Tensor,
               %1 : Tensor):
@@ -16,8 +16,37 @@ TEST(OpReplacementTest, ReplaceDiv) {
     auto g = std::make_shared<Graph>();
     torch::jit::parseIR(graph_string, g.get());
     ReplaceOpsWithUpgraders(g);
-    // TODO prints correct graph but will need to add some better way of testing this
+    testing::FileCheck()
+      .check("prim::If")
+      ->check_count("aten::div(%2, %1)", 1, /*exactly=*/true)
+      ->check_count("aten::div(%2, %1, %4)", 1, /*exactly=*/true)
+      ->run(*g);
+}
+
+TEST(OpReplacementTest, ReplaceDivInNestedFunction) {
+    const auto graph_string = R"IR(
+        graph(%0 : Tensor,
+              %1 : Tensor,
+              %8 : bool):
+            %9 : bool = prim::Constant[value=1]()
+            %7 : bool = prim::If(%8)
+                block0():
+                    -> (%9)
+                block1():
+                    %2 : Tensor = aten::add(%0, %1)
+                    %3 : Tensor  = aten::div(%2, %1)
+                    %10 : bool = aten::is_floating_point(%3)
+                    -> (%10)
+            return (%7))IR";
+    auto g = std::make_shared<Graph>();
+    torch::jit::parseIR(graph_string, g.get());
+    ReplaceOpsWithUpgraders(g);
     g->print(std::cout);
+    testing::FileCheck()
+      .check("prim::If")
+      ->check_count("aten::div(%2, %1)", 1, /*exactly=*/true)
+      ->check_count("aten::div(%2, %1, %4)", 1, /*exactly=*/true)
+      ->run(*g);
 }
 
 } // namespace jit

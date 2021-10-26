@@ -1371,5 +1371,152 @@ TEST(LiteInterpreterTest, OperatorCacheDifferentiatesDefaultArgs) {
   testLiteModuleCompareResultTensors(m, inputs, "forward3");
 }
 
+TEST(RunTimeTest, UpgraderBytecode) {
+  // auto div_tensor = R"SCRIPT(
+  // def div_0_3(self: Tensor, other: Tensor) -> Tensor:
+  //   if (self.is_floating_point() or other.is_floating_point()):
+  //     return self.true_divide(other)
+  //   return self.divide(other, rounding_mode='trunc')
+  // )SCRIPT";
+
+  // 1. Prepare for the bytecode. In reality it can be from a customized
+  // deserializer.
+  std::vector<IValue> instructions{
+      to_tuple({"STOREN", 1, 2}), to_tuple({"LOAD", 1, 0}),
+      to_tuple({"OP", 0, 0}),     to_tuple({"JF", 3, 0}),
+      to_tuple({"LOADC", 1, 0}),  to_tuple({"JMP", 3, 0}),
+      to_tuple({"LOAD", 2, 0}),   to_tuple({"OP", 0, 0}),
+      to_tuple({"STORE", 3, 0}),  to_tuple({"MOVE", 3, 0}),
+      to_tuple({"JF", 5, 0}),     to_tuple({"LOAD", 1, 0}),
+      to_tuple({"LOAD", 2, 0}),   to_tuple({"OP", 1, 0}),
+      to_tuple({"JMP", 5, 0}),    to_tuple({"LOAD", 1, 0}),
+      to_tuple({"LOAD", 2, 0}),   to_tuple({"LOADC", 0, 0}),
+      to_tuple({"OP", 2, 0}),     to_tuple({"STORE", 4, 0}),
+      to_tuple({"DROPR", 2, 0}),  to_tuple({"DROPR", 1, 0}),
+      to_tuple({"MOVE", 4, 0}),   to_tuple({"RET", 0, 0}),
+  };
+  std::vector<IValue> operators{
+      to_tuple({"aten::is_floating_point", "", 1}),
+      to_tuple({"aten::div", "Tensor", 2}),
+      to_tuple({"aten::div", "Tensor_mode", 3}),
+  };
+  std::vector<IValue> constants{
+      to_tuple({"trunc", true}),
+  };
+  int64_t model_version = caffe2::serialize::kProducedBytecodeVersion;
+  // 2. Parse the function
+  std::string function_name("test_function");
+  auto function = std::unique_ptr<mobile::Function>(
+      new mobile::Function(c10::QualifiedName(function_name)));
+  c10::ivalue::TupleElements debug_handles_m_tuple;
+  parseInstructions(
+      function_name,
+      std::move(*c10::ivalue::Tuple::create(instructions)).elements(),
+      debug_handles_m_tuple,
+      function.get());
+  parseOperators(
+      std::move(*c10::ivalue::Tuple::create(operators)).elements(),
+      model_version,
+      1,
+      function.get());
+  const size_t rsize = 4;
+  parseRegisterSize(rsize, function.get());
+  parseConstants(
+      std::move(*c10::ivalue::Tuple::create(constants)).elements(),
+      function.get());
+
+  // 3. Prepare for inputs and run the function
+  std::vector<IValue> inputs{at::tensor(2), at::tensor(2)};
+  function->run(inputs);
+  auto output = inputs[0];
+  ASSERT_EQ(output, at::tensor(1));
+}
+
+TEST(RunTimeTest, RuntimeCall) {
+  //     def call(x):
+  //         return x + x
+  //
+  //     def forward(a):
+  //         x = a + call(a)
+  //         y = a + call(x)
+  //         return y
+
+  std::vector<IValue> instructionsCall{
+      to_tuple({"STORE", 1, 0}),
+      to_tuple({"LOAD", 1, 0}),
+      to_tuple({"MOVE", 1, 0}),
+      to_tuple({"LOADC", 0, 0}),
+      to_tuple({"OP", 0, 0}),
+      to_tuple({"RET", 0, 0}),
+  };
+  std::vector<IValue> instructionsFoo{
+      to_tuple({"STORE", 1, 0}),
+      to_tuple({"LOAD", 1, 0}),
+      to_tuple({"LOAD", 1, 0}),
+      to_tuple({"MOVE", 1, 0}),
+      to_tuple({"CALL", 0, 0}),
+      to_tuple({"LOADC", 0, 0}),
+      to_tuple({"OP", 0, 0}),
+      to_tuple({"CALL", 0, 0}),
+      to_tuple({"LOADC", 0, 0}),
+      to_tuple({"OP", 0, 0}),
+      to_tuple({"RET", 0, 0}),
+  };
+  std::vector<IValue> operatorsFoo{
+      to_tuple({"aten::add", "Tensor", 3}),
+  };
+  std::vector<IValue> constantsFoo{
+      1,
+  };
+  std::vector<IValue> operatorsCall{
+      to_tuple({"aten::add", "Tensor", 3}),
+  };
+  std::vector<IValue> constantsCall{
+      1,
+  };
+  int64_t model_version = caffe2::serialize::kProducedBytecodeVersion;
+
+  auto foo = std::make_unique<mobile::Function>(c10::QualifiedName("foo"));
+  c10::ivalue::TupleElements debug_handles_m_tuple;
+  parseInstructions(
+      "foo",
+      std::move(*c10::ivalue::Tuple::create(instructionsFoo)).elements(),
+      debug_handles_m_tuple,
+      foo.get());
+  parseOperators(
+      std::move(*c10::ivalue::Tuple::create(operatorsFoo)).elements(),
+      model_version,
+      1,
+      foo.get());
+  parseConstants(
+      std::move(*c10::ivalue::Tuple::create(constantsFoo)).elements(),
+      foo.get());
+  const size_t rsize = 5;
+  parseRegisterSize(rsize, foo.get());
+
+  auto call = std::make_unique<mobile::Function>(c10::QualifiedName("call"));
+  parseInstructions(
+      "call",
+      std::move(*c10::ivalue::Tuple::create(instructionsCall)).elements(),
+      debug_handles_m_tuple,
+      call.get());
+  parseOperators(
+      std::move(*c10::ivalue::Tuple::create(operatorsCall)).elements(),
+      model_version,
+      1,
+      call.get());
+  parseConstants(
+      std::move(*c10::ivalue::Tuple::create(constantsCall)).elements(),
+      call.get());
+  parseRegisterSize(rsize, call.get());
+
+  foo->append_function(*call);
+
+  std::vector<IValue> inputs{at::tensor(1)};
+  foo->run(inputs);
+  auto output = inputs[0];
+  ASSERT_EQ(output, at::tensor(7));
+}
+
 } // namespace jit
 } // namespace torch

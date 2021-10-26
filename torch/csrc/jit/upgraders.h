@@ -9,7 +9,9 @@ namespace jit {
 using UpgraderDB = std::vector<std::pair<int, std::string>>;
 
 static std::unordered_map<std::string, UpgraderDB> operator_version_map({
-    {"aten::div.Tensor", {{4, "div_Tensor_0_3"}}}
+    {"aten::div.Tensor", {{4, "div_Tensor_0_3"}}},
+    {"aten::div.Scalar", {{4, "div_Scalar_0_3"}}},
+    {"aten::div.out", {{4, "div_out_0_3"}}},
 });
 
 static std::unordered_map<std::string, std::string> upgraders_graph({
@@ -39,18 +41,18 @@ static std::unordered_map<std::string, std::string> upgraders_graph({
                             %4 : bool = aten::is_floating_point(%self.1)
                             %9 : bool = prim::If(%4)
                                 block0():
-                                -> (%6)
+                                    -> (%6)
                                 block1():
-                                %8 : bool = prim::isinstance[types=[float]](%other.1)
-                                -> (%8)
+                                    %8 : bool = prim::isinstance[types=[float]](%other.1)
+                                    -> (%8)
                             %44 : Tensor = prim::If(%9) # torch/jit/operator_upgraders.py:21:4
                                 block0():
-                                %45 : Tensor = aten::div(%self.1, %other.1) # torch/jit/operator_upgraders.py:22:15
-                                -> (%45)
+                                    %45 : Tensor = aten::div(%self.1, %other.1) # torch/jit/operator_upgraders.py:22:15
+                                    -> (%45)
                                 block1():
-                                %other.9 : Union[complex, int] = prim::unchecked_cast(%other.1)
-                                %46 : Tensor = aten::div(%self.1, %other.9, %41) # torch/jit/operator_upgraders.py:23:11
-                                -> (%46)
+                                    %other.9 : Union[complex, int] = prim::unchecked_cast(%other.1)
+                                    %46 : Tensor = aten::div(%self.1, %other.9, %41) # torch/jit/operator_upgraders.py:23:11
+                                    -> (%46)
                             return (%44))IR"},
     {"div_out_0_3", R"IR(graph(%self.1 : Tensor,
                             %other.1 : Tensor,
@@ -60,23 +62,23 @@ static std::unordered_map<std::string, std::string> upgraders_graph({
                         %5 : bool = aten::is_floating_point(%self.1) # torch/jit/operator_upgraders.py:31:8
                         %12 : bool = prim::If(%5) # torch/jit/operator_upgraders.py:31:8
                             block0():
-                            -> (%7)
+                                -> (%7)
                             block1():
                             %10 : bool = aten::is_floating_point(%other.1) # torch/jit/operator_upgraders.py:31:36
-                            -> (%10)
+                                -> (%10)
                         %18 : bool = prim::If(%12) # torch/jit/operator_upgraders.py:31:8
                             block0():
-                            -> (%7)
+                                -> (%7)
                             block1():
-                            %16 : bool = aten::is_floating_point(%out.1) # torch/jit/operator_upgraders.py:31:65
-                            -> (%16)
+                                %16 : bool = aten::is_floating_point(%out.1) # torch/jit/operator_upgraders.py:31:65
+                                -> (%16)
                         %44 : Tensor = prim::If(%18) # torch/jit/operator_upgraders.py:31:4
                             block0():
-                            %45 : Tensor = aten::div(%self.1, %other.1, %out.1) # torch/jit/operator_upgraders.py:32:15
-                            -> (%45)
+                                %45 : Tensor = aten::div(%self.1, %other.1, %out.1) # torch/jit/operator_upgraders.py:32:15
+                                -> (%45)
                             block1():
-                            %46 : Tensor = aten::div(%self.1, %other.1, %41, %out.1) # torch/jit/operator_upgraders.py:33:11
-                            -> (%46)
+                                %46 : Tensor = aten::div(%self.1, %other.1, %41, %out.1) # torch/jit/operator_upgraders.py:33:11
+                                -> (%46)
                         return (%44))IR"}
 });
 
