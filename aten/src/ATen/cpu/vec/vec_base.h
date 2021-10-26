@@ -735,6 +735,13 @@ inline Vectorized<T> operator^(const Vectorized<T>& a, const Vectorized<T>& b) {
 
 #else
 
+template <typename T>
+auto load(char const* data) -> T {
+  T ret;
+  std::memcpy(&ret, data, sizeof(ret));
+  return ret;
+}
+
 template<class T, typename Op>
 static inline Vectorized<T> bitwise_binary_op(const Vectorized<T> &a, const Vectorized<T> &b, Op op) {
   static constexpr uint32_t element_no = VECTOR_WIDTH / sizeof(intmax_t);
@@ -743,16 +750,18 @@ static inline Vectorized<T> bitwise_binary_op(const Vectorized<T> &a, const Vect
   static_assert(sizeof(buffer) == sizeof(Vectorized<T>), "sizeof(buffer) must match sizeof(Vectorized<T>)");
   // We should be using memcpy in order to respect the strict aliasing rule
   // see: https://github.com/pytorch/pytorch/issues/66119
-  // Calculate the stride to apply memcpy on `sizeof(intmax_t) / sizeof(T)` elements,
-  // e.g. for int16 inputs and intmax_t with a width of 64 bit, 4 elements will be type punned.
-  static constexpr uint32_t stride = sizeof(intmax_t) / sizeof(T);
-  for (uint32_t i = 0U; i < element_no; ++ i) {
-    intmax_t a_val;
-    intmax_t b_val;
-    std::memcpy(&a_val, &a[i*stride], sizeof(intmax_t));
-    std::memcpy(&b_val, &b[i*stride], sizeof(intmax_t));
-    buffer[i] = op(a_val, b_val);
+  // Using char* is defined in the C11 standard 6.5 Expression paragraph 7
+  // (http://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf)
+  const auto* a_data = reinterpret_cast<const char*>((const T*) a);
+  const auto* b_data = reinterpret_cast<const char*>((const T*) b);
+  // load each intmax_t chunk and process; increase pointers by sizeof(intmax_t)
+  for (auto& out : buffer) {
+    out = op(load<intmax_t>(a_data), load<intmax_t>(b_data));
+    a_data += sizeof(intmax_t);
+    b_data += sizeof(intmax_t);
   }
+  assert(a_data == reinterpret_cast<const char*>((const T*) a) + sizeof(a));
+  assert(b_data == reinterpret_cast<const char*>((const T*) b) + sizeof(b));
   return Vectorized<T>::loadu(buffer);
 }
 
