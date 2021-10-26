@@ -1,6 +1,6 @@
 import collections.abc
 from contextlib import contextmanager
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Sequence
 
 import torch
 from torch.distributed import distributed_c10d
@@ -114,7 +114,7 @@ def _raise_if_mismatch(expected, actual, prop_name, ranks, is_local=True):
 
 def build_metadata_from_local_shards(
     local_shards: List[Shard],
-    global_size: List[int],
+    global_size: Sequence[int],
     current_rank: int,
     pg: distributed_c10d.ProcessGroup
 ) -> Tuple[ShardedTensorMetadata, torch.device]:
@@ -175,7 +175,7 @@ def build_metadata_from_local_shards(
     return (local_sharded_tensor_metadata, local_shards_device)
 
 
-def build_global_metadata(gathered_metadatas: List[Optional[ShardedTensorMetadata]]):
+def build_global_metadata(gathered_metadatas: Sequence[Optional[ShardedTensorMetadata]]):
     global_sharded_tensor_metadata = None
     global_metadata_rank = 0
 
