@@ -699,7 +699,7 @@ TEST(WriteTrackingTest, HasWriters) {
 #define EXPECT_MAY_TRANSITIVELY_CONTAIN_OR_POINT_TO_ASYMMETRIC(aliasDb, a, b) \
   do {                                                                        \
     EXPECT_TRUE((aliasDb).mayContainAlias((a), (b)));                         \
-    EXPECT_TRUE((aliasDb).mayContainAlias((b), (a)));                   \
+    EXPECT_TRUE((aliasDb).mayContainAlias((b), (a)));                         \
     EXPECT_TRUE((aliasDb).mayTransitivelyContainOrPointTo((a), (b)));         \
     EXPECT_FALSE((aliasDb).mayTransitivelyContainOrPointTo((b), (a)));        \
   } while (0)
@@ -752,7 +752,8 @@ TEST(ContainerAliasingTest, MayContainAlias) {
 
   EXPECT_DOES_NOT_CONTAIN_OR_ALIAS(aliasDb, local_var, graph->inputs());
 
-  EXPECT_MAY_CONTAIN_ALIAS(aliasDb, c10::ArrayRef<Value*>({ten_output}), graph->outputs());
+  EXPECT_MAY_CONTAIN_ALIAS(
+      aliasDb, c10::ArrayRef<Value*>({ten_output}), graph->outputs());
 
   EXPECT_DOES_NOT_CONTAIN_OR_ALIAS(aliasDb, str_output, graph->outputs());
 }
@@ -789,7 +790,8 @@ TEST(ContainerAliasingTest, MayContainAlias_cast) {
 
   EXPECT_DOES_NOT_CONTAIN_OR_ALIAS(aliasDb, b, graph->inputs());
 
-  EXPECT_MAY_CONTAIN_ALIAS(aliasDb, (c10::ArrayRef<Value*>{c}), graph->outputs());
+  EXPECT_MAY_CONTAIN_ALIAS(
+      aliasDb, (c10::ArrayRef<Value*>{c}), graph->outputs());
 
   EXPECT_DOES_NOT_CONTAIN_OR_ALIAS(aliasDb, b, graph->outputs());
 }
@@ -1506,8 +1508,10 @@ TEST(
       graph, /*isFrozen=*/false, /*enablePreciseTupleContainerAnalysis=*/true);
 
   EXPECT_TRUE(!aliasDb.mayAlias(vmap["x"], vmap["y"]));
-  EXPECT_MAY_TRANSITIVELY_CONTAIN_OR_POINT_TO_ASYMMETRIC(aliasDb, vmap["z"], vmap["x"]);
-  EXPECT_MAY_TRANSITIVELY_CONTAIN_OR_POINT_TO_ASYMMETRIC(aliasDb, vmap["z"], vmap["y"]);
+  EXPECT_MAY_TRANSITIVELY_CONTAIN_OR_POINT_TO_ASYMMETRIC(
+      aliasDb, vmap["z"], vmap["x"]);
+  EXPECT_MAY_TRANSITIVELY_CONTAIN_OR_POINT_TO_ASYMMETRIC(
+      aliasDb, vmap["z"], vmap["y"]);
 }
 
 TEST(
