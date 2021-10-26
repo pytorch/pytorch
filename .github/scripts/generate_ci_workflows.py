@@ -24,7 +24,7 @@ WINDOWS_RUNNERS = {
 }
 
 LINUX_CPU_TEST_RUNNER = "linux.2xlarge"
-LINUX_CUDA_TEST_RUNNER = "linux.8xlarge.nvidia.gpu"
+LINUX_CUDA_TEST_RUNNER = "linux.4xlarge.nvidia.gpu"
 LINUX_RUNNERS = {
     LINUX_CPU_TEST_RUNNER,
     LINUX_CUDA_TEST_RUNNER,
