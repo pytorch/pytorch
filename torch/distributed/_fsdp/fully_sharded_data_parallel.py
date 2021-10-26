@@ -125,10 +125,6 @@ class FullyShardedDataParallel(nn.Module):
 
         self.numel_padded_per_param: List[int] = []
         self.cpu_offload = cpu_offload or CPUOffload()
-        if self.cpu_offload.offload_params:
-            print(" -- FSDP Initailzed with CPU offloading")
-        else:
-            print(" --- FSDP NOT using CPU")
 
         # Only handle params which are not already sharded. This enables
         # sharding individual layers of a Module, with an outer wrapper to

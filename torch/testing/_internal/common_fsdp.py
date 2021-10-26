@@ -379,7 +379,6 @@ class FSDPTest(MultiProcessTestCase):
                     # Params should always be on CPU, even if
                     # p._is_sharded=False
                     self.assertEqual(p.device, torch.device("cpu"))
-            print(" -- STEPPING ---")
             optim.step()
         if isinstance(model, FullyShardedDataParallel):
             model._assert_state(TrainingState_.IDLE)
@@ -456,15 +455,12 @@ class FSDPTest(MultiProcessTestCase):
                 device_set,
                 f"Got device set {device_set}"
             )
-        print("passed sanity check")
         get_full_params(model)
         shard_full_params = list(model.parameters())
 
         if cpu_offload.offload_params:
             shard_loss = shard_loss.cuda()
         torch.testing.assert_allclose(ref_loss, shard_loss)
-        print(f"devices {[p.device for p in model.parameters()]}, type {type(model)}")
-        print(" -- checking equality of params --")
         self.assertEqual(
             ref_full_params,
             shard_full_params,
