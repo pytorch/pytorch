@@ -1,3 +1,5 @@
+# Owner(s): ["module: autograd"]
+
 import gc
 import io
 import math
@@ -2784,7 +2786,7 @@ class TestAutograd(TestCase):
         # TODO: review if this can be ported to OpInfos or moved to test_linalg.py
         def run_symeig_test(k, sizes, largest=True):
             A = torch.rand(*sizes).double()
-            A = A.matmul(A.transpose(-1, -2)) / 10
+            A = (A @ A.mT) / 10
             A.requires_grad_(True)
 
             gradcheck(lambda A: func(k, A, largest), A, check_batched_grad=False)
@@ -2800,7 +2802,7 @@ class TestAutograd(TestCase):
             A = A.detach().requires_grad_(True)
             D, U = func(k, A, largest)
             (D.sum() + U.sum()).backward()
-            self.assertEqual(A.grad, A.grad.transpose(-1, -2))
+            self.assertEqual(A.grad, A.grad.mT)
 
         # the tests below take about 1-2 minutes to finish,
         # but we want to be extra sure that the backward is correct.
@@ -7759,6 +7761,13 @@ class TestAutogradForwardMode(TestCase):
             with self.assertRaisesRegex(RuntimeError, "out= function"):
                 torch.add(foo, bar, out=bar)
 
+    def test_non_differentiable(self):
+        with fwAD.dual_level():
+            foo = fwAD.make_dual(torch.rand(2), torch.rand(2))
+            bar = torch.rand(2)
+
+            # No differentiable outputs, shouldn't error
+            eq = foo == bar
 
 # Generic device type autograd tests.
 class TestAutogradDeviceType(TestCase):

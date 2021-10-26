@@ -8,8 +8,10 @@
 
 namespace at { namespace cuda { namespace detail {
 
-// Callback to initialize THC Magma, which is implemented in torch_cuda_cu
-TORCH_CUDA_CPP_API extern std::function<void()> THCMagma_init;
+// Set the callback to initialize Magma, which is set by
+// torch_cuda_cu. This indirection is required so magma_init is called
+// in the same library where Magma will be used.
+TORCH_CUDA_CPP_API void set_magma_init_fn(void (*magma_init_fn)());
 
 TORCH_CUDA_CPP_API bool hasPrimaryContext(int64_t device_index);
 TORCH_CUDA_CPP_API c10::optional<int64_t> getDeviceIndexWithPrimaryContext();

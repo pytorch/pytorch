@@ -113,21 +113,20 @@ static inline C10_HOST_DEVICE scalar_t calc_gcd(scalar_t a_in, scalar_t b_in) {
 template <typename scalar_t>
 static inline C10_HOST_DEVICE scalar_t
 chbevl(scalar_t _x, const scalar_t array[], size_t len) {
-  using accscalar_t = at::acc_type<scalar_t, true>;
+  static_assert(!std::is_same<scalar_t, Half>() && !std::is_same<scalar_t, BFloat16>(), "don't instantiate with low precision type");
 
-  accscalar_t x = static_cast<accscalar_t>(_x);
-  accscalar_t b0, b1, b2;
+  scalar_t b0, b1, b2;
 
-  b0 = static_cast<accscalar_t>(array[0]);
+  b0 = array[0];
   b1 = 0;
 
   for (size_t i = 1; i < len; ++i)  {
     b2 = b1;
     b1 = b0;
-    b0 = x * b1 - b2 + static_cast<accscalar_t>(array[i]);
+    b0 = _x * b1 - b2 + array[i];
   }
 
-  return static_cast<scalar_t>(0.5 * (b0 - b2));
+  return (0.5 * (b0 - b2));
 }
 
 /*
@@ -294,46 +293,41 @@ C10_HOST_DEVICE inline
 
 template <typename scalar_t>
 static inline C10_HOST_DEVICE scalar_t calc_i0(scalar_t _x) {
-  using accscalar_t = at::acc_type<scalar_t, true>;
-
+  static_assert(!std::is_same<scalar_t, Half>() && !std::is_same<scalar_t, BFloat16>(), "don't instantiate with low precision type");
   // Upcast input for numerical accuracy purposes
   // Needed for accurate results if input is bfloat16 or float16
-  accscalar_t x = ::abs(static_cast<accscalar_t>(_x));
+  scalar_t x = ::abs(_x);
 
-  if (x <= accscalar_t{8.0}) {
-    auto coeff_pair = chebyshev_coefficients_i0e_A<accscalar_t>();
+  if (x <= scalar_t{8.0}) {
+    auto coeff_pair = chebyshev_coefficients_i0e_A<scalar_t>();
     auto A = std::get<0>(coeff_pair);
     auto len = std::get<1>(coeff_pair);
-    accscalar_t y = (x / accscalar_t{2.0}) - accscalar_t{2.0};
-    return static_cast<scalar_t>(::exp(x) * chbevl(y, A, len));
+    scalar_t y = (x / scalar_t{2.0}) - scalar_t{2.0};
+    return (::exp(x) * chbevl(y, A, len));
   }
 
-  auto coeff_pair = chebyshev_coefficients_i0e_B<accscalar_t>();
+  auto coeff_pair = chebyshev_coefficients_i0e_B<scalar_t>();
   auto B = std::get<0>(coeff_pair);
   auto len = std::get<1>(coeff_pair);
-  return static_cast<scalar_t>(::exp(x) * chbevl(accscalar_t{32.0} / x - accscalar_t{2.0}, B, len) / ::sqrt(x));
+  return (::exp(x) * chbevl(scalar_t{32.0} / x - scalar_t{2.0}, B, len) / ::sqrt(x));
 }
 
 template <typename scalar_t>
 static inline C10_HOST_DEVICE scalar_t calc_i0e(scalar_t _x) {
-  using accscalar_t = at::acc_type<scalar_t, true>;
-
-  // Upcast input for numerical accuracy purposes
-  // Needed for accurate results if input is bfloat16 or float16
-  accscalar_t x = ::abs(static_cast<accscalar_t>(_x));
-
-  if (x <= accscalar_t{8.0}) {
-    auto coeff_pair = chebyshev_coefficients_i0e_A<accscalar_t>();
+  static_assert(!std::is_same<scalar_t, Half>() && !std::is_same<scalar_t, BFloat16>(), "don't instantiate with low precision type");
+  scalar_t x = ::abs(_x);
+  if (x <= scalar_t{8.0}) {
+    auto coeff_pair = chebyshev_coefficients_i0e_A<scalar_t>();
     auto A = std::get<0>(coeff_pair);
     auto len = std::get<1>(coeff_pair);
-    accscalar_t y = (x / accscalar_t{2.0}) - accscalar_t{2.0};
-    return static_cast<scalar_t>(chbevl(y, A, len));
+    scalar_t y = (x / scalar_t{2.0}) - scalar_t{2.0};
+    return (chbevl(y, A, len));
   }
 
-  auto coeff_pair = chebyshev_coefficients_i0e_B<accscalar_t>();
+  auto coeff_pair = chebyshev_coefficients_i0e_B<scalar_t>();
   auto B = std::get<0>(coeff_pair);
   auto len = std::get<1>(coeff_pair);
-  return static_cast<scalar_t>(chbevl(accscalar_t{32.0} / x - accscalar_t{2.0}, B, len) / ::sqrt(x));
+  return (chbevl(scalar_t{32.0} / x - scalar_t{2.0}, B, len) / ::sqrt(x));
 }
 
 template <typename scalar_t>
