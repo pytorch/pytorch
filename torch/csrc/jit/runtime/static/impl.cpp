@@ -20,6 +20,7 @@
 #include <torch/csrc/jit/runtime/static/ops.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
+#include <iterator>
 #include <sstream>
 #include <stdexcept>
 
@@ -95,8 +96,7 @@ void OptimizeGraph(
         graph,
         c10::Symbol::fromQualString("fb::sigrid_transforms_torch_bind"),
         c10::Symbol::fromQualString(
-            "fb::variadic_sigrid_transforms_torch_bind"),
-        1 /* list_idx */);
+            "fb::variadic_sigrid_transforms_torch_bind"));
     FuseSignLog1P(graph);
 
     // TODO: we can avoid this guard by moving operations
@@ -104,6 +104,7 @@ void OptimizeGraph(
 #ifdef FBCODE_CAFFE2
     ReplaceWithCopy(graph);
     FuseListUnpack(graph);
+    FuseListUnpackV2(graph);
     EnableStaticRuntimeLayerNorm(graph);
 #endif
   }
@@ -159,6 +160,20 @@ bool mayContainAlias(
 //  Map each value to all values that are alive at the same time.
 using LivenessMap = FastMap<const Value*, FastSet<const Value*>>;
 
+std::string dumpLivenessMap(const LivenessMap& liveness_map) {
+  std::ostringstream oss;
+  oss << "{";
+  for (const auto& p : liveness_map) {
+    oss << "{%" << p.first->debugName() << ": {";
+    for (const auto* val : p.second) {
+      oss << "%" << val->debugName() << ", ";
+    }
+    oss << "}},\n";
+  }
+  oss << "}";
+  return oss.str();
+}
+
 //  The algorithm does a traversal of the execution graph
 //  while keeping track of the live values.
 LivenessMap GetLivenessMap(
@@ -202,20 +217,19 @@ LivenessMap GetLivenessMap(
     v_live_set.reserve(live_values_use_chain.size());
     for (const auto& live_v : live_values_use_chain) {
       v_live_set.insert(live_v.first);
-      liveness_map.at(live_v.first).insert(v);
+      liveness_map[live_v.first].insert(v);
     }
 
     // only add values to the live set if they
     // have deps, otherwise they die immediately
     if (v->uses().size()) {
       live_values_use_chain[v] = FastSet<const Node*>(v->uses().size());
-    }
-
-    // record the relationship between v (Value) and its uses (Node)
-    for (const auto& u : v->uses()) {
-      const auto* node = u.user;
-      live_values_use_chain.at(v).insert(node);
-      live_nodes_def_chain[node].insert(v);
+      // record the relationship between v (Value) and its uses (Node)
+      for (const auto& u : v->uses()) {
+        const auto* node = u.user;
+        live_values_use_chain[v].insert(node);
+        live_nodes_def_chain[node].insert(v);
+      }
     }
 
     // FIXME(penguin): the following alias refinement seems to assume
@@ -238,24 +252,19 @@ LivenessMap GetLivenessMap(
     // for all the values in the alias set,
     // we set them "alive"
     for (auto* aliased_v : refined_aliases) {
+      GRAPH_DEBUG("aliased_v: %", aliased_v->debugName());
       add_live_value_fn(aliased_v);
-      for (const auto& u : aliased_v->uses()) {
-        const auto* node = u.user;
-        // track deps of the aliased values is if they
-        // are our own
-        live_values_use_chain.at(v).insert(node);
-        live_nodes_def_chain[node].insert(v);
-      }
     }
   };
 
-  auto traverse_node_fn = [&](const Node* node,
-                              std::vector<const Value*>& dead) {
-    if (live_nodes_def_chain.count(node)) {
-      for (const auto* v : live_nodes_def_chain.at(node)) {
-        live_values_use_chain.at(v).erase(node);
-        if (!live_values_use_chain.at(v).size()) {
-          dead.emplace_back(v);
+  auto remove_dead_values = [&](const Node* node) {
+    auto find = live_nodes_def_chain.find(node);
+    if (find != live_nodes_def_chain.end()) {
+      for (const auto* v : find->second) {
+        live_values_use_chain[v].erase(node);
+        if (!live_values_use_chain[v].size()) {
+          // v is now dead
+          live_values_use_chain.erase(v);
         }
       }
     }
@@ -268,16 +277,33 @@ LivenessMap GetLivenessMap(
       }
     }
 
-    std::vector<const Value*> dead;
-    traverse_node_fn(node, dead);
-    for (const auto* dead_value : dead) {
-      live_values_use_chain.erase(dead_value);
-    }
+    remove_dead_values(node);
   }
+  GRAPH_DEBUG("LivenessMap: ", dumpLivenessMap(liveness_map));
 
   for (const auto& v : live_values_use_chain) {
-    TORCH_CHECK(value_group.isAlwaysAlive(v.first));
+    TORCH_CHECK(
+        value_group.isAlwaysAlive(v.first),
+        v.first->debugName(),
+        "is not in the value_group.isAlwaysAlive group");
   }
+
+  auto insert_all_pairs_in_liveness_map =
+      [&](at::ArrayRef<const Value*> values) {
+        for (size_t i = 0; !values.empty() && i < values.size() - 1; ++i) {
+          auto value_it = liveness_map.find(values[i]);
+          if (value_it == liveness_map.end()) {
+            continue;
+          }
+          for (size_t j = i + 1; j < values.size(); ++j) {
+            auto value2_it = liveness_map.find(values[j]);
+            if (value2_it != liveness_map.end()) {
+              value_it->second.insert(values[j]);
+              value2_it->second.insert(values[i]);
+            }
+          }
+        }
+      };
 
   for (const auto* node : graph->nodes()) {
     auto inputs = node->inputs();
@@ -296,22 +322,7 @@ LivenessMap GetLivenessMap(
         output_it->second.insert(input);
       }
     }
-    auto insert_all_pairs_in_liveness_map =
-        [&](at::ArrayRef<const Value*> values) {
-          for (size_t i = 0; !values.empty() && i < values.size() - 1; ++i) {
-            auto value_it = liveness_map.find(values[i]);
-            if (value_it == liveness_map.end()) {
-              continue;
-            }
-            for (size_t j = i + 1; j < values.size(); ++j) {
-              auto value2_it = liveness_map.find(values[j]);
-              if (value2_it != liveness_map.end()) {
-                value_it->second.insert(values[j]);
-                value2_it->second.insert(values[i]);
-              }
-            }
-          }
-        };
+
     // All inputs should be alive at the same time.
     insert_all_pairs_in_liveness_map(inputs);
 
@@ -723,7 +734,7 @@ StaticModule::StaticModule(
   AliasDb alias_db(
       graph_, /*isFrozen=*/false, /*enablePreciseTupleContainerAnalysis=*/true);
   value_group_.init(graph_, alias_db);
-  GRAPH_DEBUG("ValueGroup", value_group_.toString());
+  GRAPH_DEBUG(value_group_.toString());
 
   if (opts_.optimize_memory) {
     auto lm = GetLivenessMap(graph_, value_group_, alias_db);
@@ -752,15 +763,16 @@ StaticRuntime& StaticModule::runtime() {
   return *cached_runtime_;
 }
 
-std::vector<at::Tensor> StaticModule::operator()(
-    const std::vector<at::Tensor>& inps) {
-  return runtime()(inps);
-}
-
 c10::IValue StaticModule::operator()(
     const std::vector<c10::IValue>& args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
   return runtime()(args, kwargs);
+}
+
+c10::IValue StaticModule::operator()(
+    std::vector<c10::IValue>&& args,
+    const std::unordered_map<std::string, c10::IValue>& kwargs) {
+  return runtime()(std::move(args), kwargs);
 }
 
 StaticRuntime::StaticRuntime(const StaticModule& sm) : static_module_(sm) {
@@ -814,32 +826,8 @@ StaticRuntime::StaticRuntime(const StaticModule& sm) : static_module_(sm) {
 
 StaticRuntime::~StaticRuntime() = default;
 
-std::vector<at::Tensor> StaticRuntime::operator()(
-    const std::vector<at::Tensor>& inps) {
-  std::vector<c10::IValue> stack;
-  stack.resize(inps.size());
-  for (const auto i : c10::irange(inps.size())) {
-    stack[i] = inps[i];
-  }
-
-  c10::IValue v =
-      (*this)(stack, std::unordered_map<std::string, c10::IValue>());
-
-  std::vector<at::Tensor> out;
-
-  if (v.isTuple()) {
-    auto t = v.toTuple();
-    for (const auto& el : t->elements()) {
-      out.emplace_back(el.toTensor());
-    }
-  } else {
-    out.emplace_back(v.toTensor());
-  }
-  return out;
-}
-
 void StaticRuntime::set_inputs(
-    const std::vector<c10::IValue>& args,
+    const std::vector<IValue>& args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
   if (!kwargs.empty()) {
     // This is not ideal
@@ -875,8 +863,49 @@ void StaticRuntime::set_inputs(
   }
 }
 
-c10::IValue StaticRuntime::operator()(
-    const std::vector<c10::IValue>& args,
+void StaticRuntime::set_inputs(
+    std::vector<IValue>&& args,
+    const std::unordered_map<std::string, c10::IValue>& kwargs) {
+  if (!kwargs.empty()) {
+    // This is not ideal
+    TORCH_CHECK(
+        static_module_.schema(),
+        "Schema is not available. Consider creating the Static Runtime "
+        "with StaticModule(const torch::jit::Module& m) instead.");
+    std::vector<c10::IValue> stack;
+    stack.reserve(inputs_.size());
+    if (static_module_.first_input_is_self()) {
+      stack.emplace_back(static_module_.module()._ivalue());
+    }
+    stack.insert(
+        stack.end(),
+        std::make_move_iterator(args.begin()),
+        std::make_move_iterator(args.end()));
+
+    static_module_.schema()->checkAndNormalizeInputs(stack, kwargs);
+    DCHECK_EQ(inputs_.size(), stack.size());
+    for (const auto i : c10::irange(stack.size())) {
+      Input(i) = std::move(stack[i]);
+    }
+  } else {
+    if (static_module_.first_input_is_self()) {
+      Input(0) = static_module_.module()._ivalue();
+      DCHECK_EQ(inputs_.size(), args.size() + 1);
+      for (const auto i : c10::irange(args.size())) {
+        Input(i + 1) = std::move(args[i]);
+      }
+    } else {
+      DCHECK_EQ(inputs_.size(), args.size());
+      for (const auto i : c10::irange(args.size())) {
+        Input(i) = std::move(args[i]);
+      }
+    }
+  }
+}
+
+template <typename IValueList>
+c10::IValue StaticRuntime::run_impl(
+    IValueList&& args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
   // We assume inference workloads, so we do not need
   // autograd. Enabling this is a significant win on dispatcher
@@ -891,7 +920,7 @@ c10::IValue StaticRuntime::operator()(
     planner_->allocate();
   }
 
-  set_inputs(args, kwargs);
+  set_inputs(std::forward<IValueList>(args), kwargs);
 
   // NB: before optimizing the order of execution, ensure that the
   // memory optimization pass (LivenessMap) is
@@ -937,6 +966,18 @@ c10::IValue StaticRuntime::operator()(
   DCHECK(!isManagedOutputTensor(*outputs_[0]));
   // use move here. Otherwise, clean up outputs_[0] explicitly
   return std::move(*outputs_[0]);
+}
+
+c10::IValue StaticRuntime::operator()(
+    const std::vector<c10::IValue>& args,
+    const std::unordered_map<std::string, c10::IValue>& kwargs) {
+  return run_impl(args, kwargs);
+}
+
+c10::IValue StaticRuntime::operator()(
+    std::vector<c10::IValue>&& args,
+    const std::unordered_map<std::string, c10::IValue>& kwargs) {
+  return run_impl(std::move(args), kwargs);
 }
 
 namespace {
@@ -1380,20 +1421,45 @@ ProcessedNode::ProcessedNode(
   outputs_ = std::make_unique<IValue[]>(outputs_size_);
 
   if (enable_out_variant) {
-    if (OutVariant fn = getOutOfPlaceOperation(node)) {
-      fn_.emplace<0>(std::move(fn));
+    std::function<void(ProcessedNode*)> f = getOutOfPlaceOperation(node);
+    if (f) {
+      fn_ = {f, FunctionKind::kOutVariant};
       VLOG(1) << "Switch to out variant for node: " << PrintNode(node);
       return;
     }
   }
-  if (NativeFunction fn = getNativeOperation(node)) {
-    fn_.emplace<1>(std::move(fn));
-    VLOG(1) << "Switch to native impl for node: " << PrintNode(node);
-    return;
+  {
+    std::function<void(ProcessedNode*)> f = getNativeOperation(node);
+    if (f) {
+      fn_ = {f, FunctionKind::kNativeFunction};
+      VLOG(1) << "Switch to native impl for node: " << PrintNode(node);
+      return;
+    }
   }
   {
     const Operator& op = node->getOperator();
-    fn_.emplace<2>(op.getOperation(node));
+    std::function<void(ProcessedNode*)> f =
+        [node_op = op.getOperation(node)](ProcessedNode* pnode) mutable {
+          std::vector<IValue> stack;
+          Node* node = pnode->node_;
+          const size_t size = node->inputs().size();
+          stack.reserve(size + (hasVarArgs(node) ? 1 : 0));
+          for (const auto i : c10::irange(size)) {
+            stack.emplace_back(pnode->Input(i));
+          }
+          // Need to store the number of inputs in stack for variadic ops.
+          if (hasVarArgs(node)) {
+            stack.emplace_back(static_cast<int>(size));
+          }
+
+          node_op(stack);
+
+          DCHECK_EQ(stack.size(), node->outputs().size());
+          for (const auto i : c10::irange(node->outputs().size())) {
+            pnode->Output(i) = std::move(stack[i]);
+          }
+        };
+    fn_ = {f, FunctionKind::kInterpreterFallback};
     VLOG(1) << "Fallback interpreter for node: " << PrintNode(node);
   }
 }
@@ -1409,34 +1475,6 @@ std::vector<IValue> ProcessedNode::clone_inputs() const {
   return result;
 }
 
-void ProcessedNode::run_impl() {
-  DCHECK(verify_no_memory_overlap());
-  if (fn_.index() == 0) {
-    c10::get<0>(fn_)(this);
-  } else if (fn_.index() == 1) {
-    c10::get<1>(fn_)(this);
-  } else {
-    std::vector<IValue> stack;
-    const size_t size = node_->inputs().size();
-    stack.reserve(size + 1);
-    for (const auto i : c10::irange(size)) {
-      stack.emplace_back(Input(i));
-    }
-    // Need to store the number of inputs in stack for variadic ops.
-    if (hasVarArgs(node_)) {
-      stack.emplace_back(static_cast<int>(size));
-    }
-
-    DCHECK(fn_.index() == 2);
-    c10::get<2>(fn_)(stack);
-
-    DCHECK_EQ(stack.size(), node_->outputs().size());
-    for (const auto i : c10::irange(node_->outputs().size())) {
-      Output(i) = std::move(stack[i]);
-    }
-  }
-}
-
 void ProcessedNode::run() {
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   bool pre_sampled = false;
@@ -1449,12 +1487,12 @@ void ProcessedNode::run() {
         guard.before(get_op_name());
       }
     }
-    run_impl();
+    fn_.f(this);
   } else {
-    run_impl();
+    fn_.f(this);
   }
 #else
-  run_impl();
+  fn_.f(this);
 #endif
 }
 
