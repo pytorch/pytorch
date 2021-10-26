@@ -67,8 +67,9 @@ void fuseFrozenConvAddReluImpl(std::shared_ptr<Graph>& graph) {
   auto filter = [](const Match& match,
                    const std::unordered_map<std::string, Value*>& vmap) {
 #if CUDNN_VERSION < 8000
-    // cuDNN Conv-Bias-Relu fusion may raise CUDNN_STATUS_NOT_SUPPORTED error in 7.6.5 or lower.
-    // See https://github.com/pytorch/pytorch/pull/65594#issuecomment-948989177
+    // cuDNN Conv-Bias-Relu fusion may raise CUDNN_STATUS_NOT_SUPPORTED error
+    // in 7.6.5 or lower. See
+    // https://github.com/pytorch/pytorch/pull/65594#issuecomment-948989177
     return false;
 #endif
 
