@@ -67,7 +67,7 @@ const char *cusparseGetErrorString(cusparseStatus_t status);
 #ifdef CUDART_VERSION
 
 namespace at { namespace cuda { namespace solver {
-const char* cusolverGetErrorMessage(cusolverStatus_t status);
+C10_EXPORT const char* cusolverGetErrorMessage(cusolverStatus_t status);
 }}} // namespace at::cuda::solver
 
 #define TORCH_CUSOLVER_CHECK(EXPR)                                \

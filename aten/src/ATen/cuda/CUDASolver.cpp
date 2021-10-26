@@ -10,7 +10,7 @@ namespace at {
 namespace cuda {
 namespace solver {
 
-const char* cusolverGetErrorMessage(cusolverStatus_t status) {
+C10_EXPORT const char* cusolverGetErrorMessage(cusolverStatus_t status) {
   switch (status) {
     case CUSOLVER_STATUS_SUCCESS:                     return "CUSOLVER_STATUS_SUCCES";
     case CUSOLVER_STATUS_NOT_INITIALIZED:             return "CUSOLVER_STATUS_NOT_INITIALIZED";
