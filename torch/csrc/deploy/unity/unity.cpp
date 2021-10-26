@@ -1,19 +1,36 @@
-#include "unity.h"
+#include <dirent.h>
 #include <dlfcn.h>
 #include <fmt/format.h>
 #include <sys/stat.h>
+#include <torch/csrc/deploy/unity/unity.h>
 #include <filesystem>
 
 namespace torch {
 namespace deploy {
-Unity::Unity(int nInterp, const std::string& pythonAppDir)
-    : pythonAppDir_(pythonAppDir),
+Unity::Unity(int nInterp, std::string pythonAppDir)
+    : pythonAppDir_(std::move(pythonAppDir)),
       pythonAppRoot_(pythonAppDir_ + "/python_app_root") {
   setupPythonApp();
   preloadSharedLibraries();
   interpreterManager_ =
       std::make_unique<InterpreterManager>(nInterp, pythonAppRoot_);
   mainModule_ = lookupMainModule();
+}
+
+/*
+ * I can not use std::filesystem since that's added in C++17 and clang-tidy
+ * seems using a older version of C++ and can not find it.
+ *
+ * Create a small utility to check the existence of a directory instead.
+ */
+bool _dirExists(const std::string& dirPath) {
+  DIR* dir = opendir(dirPath.c_str());
+  if (dir) {
+    closedir(dir);
+    return true;
+  } else {
+    return false;
+  }
 }
 
 extern "C" char _binary_python_app_start[];
@@ -35,7 +52,7 @@ void Unity::setupPythonApp() {
    * dynamic library not found issue.
    */
   TORCH_CHECK(
-      std::filesystem::exists(pythonAppRoot_),
+      _dirExists(pythonAppRoot_),
       fmt::format(
           "The python app root {} must exist before running the binary. Otherwise there will be issues to find dynamic libraries. Please create the directory and rerun",
           pythonAppRoot_));
@@ -66,7 +83,7 @@ void Unity::preloadSharedLibraries() {
   // 1. CustomLoader can not find the correct order to loader them
   // 2. CustomLoader use RTLD_LOCAL so the symbol defined in one lib can not be
   // used by another
-  const char* preloadList[] = {
+  std::array<const char*, 3> preloadList = {
       "libmkl_core.so", "libmkl_intel_thread.so", nullptr};
   for (int i = 0; preloadList[i]; ++i) {
     TORCH_CHECK(

@@ -10,7 +10,7 @@ class Unity {
  public:
   explicit Unity(
       int nInterp,
-      const std::string& pythonAppDir = DEFAULT_PYTHON_APP_DIR);
+      std::string pythonAppDir = DEFAULT_PYTHON_APP_DIR);
 
   const std::string& getPythonAppRoot() const {
     return pythonAppRoot_;
