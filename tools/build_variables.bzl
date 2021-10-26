@@ -147,6 +147,7 @@ core_trainer_sources = [
     "torch/csrc/autograd/record_function_ops.cpp",
     "torch/csrc/autograd/saved_variable.cpp",
     "torch/csrc/autograd/variable.cpp",
+    "torch/csrc/autograd/utils/warnings.cpp",
     "torch/csrc/jit/frontend/name_mangler.cpp",
     "torch/csrc/jit/ir/type_hashing.cpp",
     "torch/csrc/jit/serialization/pickler.cpp",
@@ -284,6 +285,7 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/runtime/script_profile.cpp",
     "torch/csrc/jit/runtime/symbolic_script.cpp",
     "torch/csrc/jit/runtime/symbolic_shape_registry.cpp",
+    "torch/csrc/jit/runtime/jit_trace.cpp",
     "torch/csrc/jit/serialization/callstack_debug_info_serialization.cpp",
     "torch/csrc/jit/serialization/import.cpp",
     "torch/csrc/jit/serialization/import_export_helpers.cpp",
@@ -351,7 +353,10 @@ core_sources_full = core_sources_full_mobile + [
 ]
 
 lazy_tensor_core_sources = [
+    "torch/csrc/lazy/core/config.cpp",
     "torch/csrc/lazy/core/hash.cpp",
+    "torch/csrc/lazy/core/ir.cpp",
+    "torch/csrc/lazy/core/ir_metadata.cpp",
 ]
 
 libtorch_core_sources = sorted(
@@ -447,6 +452,7 @@ libtorch_core_jit_sources = sorted(jit_sources_full)
 torch_mobile_tracer_sources = [
     "torch/csrc/jit/mobile/model_tracer/tracer.cpp",
     "torch/csrc/jit/mobile/model_tracer/TensorUtils.cpp",
+    "torch/csrc/jit/mobile/model_tracer/TracerRunner.cpp",
     "torch/csrc/jit/mobile/model_tracer/MobileModelRunner.cpp",
     "torch/csrc/jit/mobile/model_tracer/OperatorCallTracer.cpp",
     "torch/csrc/jit/mobile/model_tracer/KernelDTypeTracer.cpp",
@@ -743,7 +749,6 @@ libtorch_python_core_sources = [
     "torch/csrc/jit/passes/onnx/fixup_onnx_controlflow.cpp",
     "torch/csrc/jit/passes/onnx/list_model_parameters.cpp",
     "torch/csrc/jit/passes/onnx/function_substitution.cpp",
-    "torch/csrc/jit/passes/onnx/fold_if_node.cpp",
     "torch/csrc/jit/passes/onnx/helper.cpp",
     "torch/csrc/jit/passes/onnx/peephole.cpp",
     "torch/csrc/jit/passes/onnx/preprocess_for_onnx.cpp",
@@ -752,6 +757,7 @@ libtorch_python_core_sources = [
     "torch/csrc/jit/passes/onnx/unpack_quantized_weights.cpp",
     "torch/csrc/jit/passes/onnx/remove_inplace_ops_for_onnx.cpp",
     "torch/csrc/jit/passes/onnx/shape_type_inference.cpp",
+    "torch/csrc/jit/passes/onnx/function_extraction.cpp",
     "torch/csrc/jit/python/pybind_utils.cpp",
     "torch/csrc/jit/passes/onnx/pattern_conversion/common.cpp",
     "torch/csrc/jit/passes/onnx/pattern_conversion/pattern_encapsulation.cpp",
@@ -933,6 +939,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/nnapi/nnapi_bind.cpp",
     "aten/src/ATen/nnapi/nnapi_wrapper.cpp",
     "aten/src/ATen/nnapi/nnapi_model_loader.cpp",
+    "aten/src/ATen/native/prim_native_functions.cpp",
 ]
 
 aten_cpu_source_codegen_list = [
@@ -959,6 +966,7 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/CrossKernel.cpp",
     "aten/src/ATen/native/cpu/DepthwiseConvKernel.cpp",
     "aten/src/ATen/native/cpu/DistanceOpsKernel.cpp",
+    "aten/src/ATen/native/cpu/DistributionKernels.cpp",
     "aten/src/ATen/native/cpu/FillKernel.cpp",
     "aten/src/ATen/native/cpu/FunctionOfAMatrixUtilsKernel.cpp",
     "aten/src/ATen/native/cpu/GridSamplerKernel.cpp",
