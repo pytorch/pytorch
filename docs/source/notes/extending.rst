@@ -243,7 +243,8 @@ were outputs, with each of them containing the gradient w.r.t. its corresponding
 The :meth:`~Function.jvp` will be called just after the :meth:`~Function.forward`
 method, before the :meth:`~Function.apply` returns.
 
-:meth:`~Function.jvp` has a few subtle differences with the :meth:`~Function.backward` function
+:meth:`~Function.jvp` has a few subtle differences with the :meth:`~Function.backward` function:
+
 - You can use the `ctx` to pass any data from the :meth:`~Function.forward` to the :meth:`~Function.jvp` function.
   If that state will not be needed for the :meth:`~Function.backward`,
   you can explicitly free it by doing ``del ctx.foo`` at the end of the :meth:`~Function.jvp` function.
