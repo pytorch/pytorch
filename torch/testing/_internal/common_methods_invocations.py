@@ -5927,7 +5927,7 @@ def sample_inputs_embedding(op_info, device, dtype, requires_grad, **kwargs):
 
     def make_long_input(shape, *, low, high, noncontiguous=False):
         return make_tensor(shape, device=device, dtype=torch.long, low=low, high=high,
-                           noncontiguous=noncontiguous, requires_grad=requires_grad)
+                           noncontiguous=noncontiguous)
 
     def generator():
         # 0-D index tensor
