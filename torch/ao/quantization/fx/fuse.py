@@ -28,7 +28,7 @@ from .quantization_types import Pattern
 class Fuser:
     def fuse(
         self, model: GraphModule, fuse_custom_config_dict: Optional[Dict[str, Any]] = None
-    ) -> GraphModule: 
+    ) -> GraphModule:
         if fuse_custom_config_dict is None:
             fuse_custom_config_dict = {}
 
