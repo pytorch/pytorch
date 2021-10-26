@@ -146,7 +146,6 @@ at::Tensor PackedConvWeightsMkldnn<kSpatialDim>::apply_impl(
     const at::Tensor& act,
     double output_scale,
     int64_t output_zero_point) {
-  std::cout << "quantized::conv_mkldnn (qengine = " << (int)at::globalContext().qEngine() << ")" << std::endl;
   std::string func_name = "quantized::conv";
   if (transpose()) {
     func_name += "_transpose";

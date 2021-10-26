@@ -1103,46 +1103,110 @@ class TestMkldnn(TestCase):
         model = torchvision.models.resnet.resnext50_32x4d(pretrained=False)
         self._test_imagenet_model(model)
 
-    def test_lower_functional_conv2d(self):
+    def test_conv_int8(self):
+        from torch.backends.mkldnn.quantization import functional as mqF
+        import torch.nn.quantized.functional as qF
+        mkldnn_op_list = [mqF.conv1d_mkldnn, mqF.conv2d_mkldnn, mqF.conv3d_mkldnn]
+        fbgemm_op_list = [qF.conv1d, qF.conv2d, qF.conv3d]
+        dims = (1, 2, 3)
+        input_shapes = ((224,), (224, 224), (55, 55, 55))
+        options = itertools.product([True, False], [1, 2], [1, 4])
+        for i in range(3):
+            for bias, dilation, groups in options:
+                N = torch.randint(3, 10, (1,)).item()
+                M = torch.randint(1, 3, (1,)).item() * groups
+                IC = torch.randint(1, 3, (1,)).item() * groups
+                OC = torch.randint(1, 3, (1,)).item()
+                K = torch.randint(1, 3, (1,)).item()
+                x_scale = torch.randn((1,)).item() + 1.1
+                w_scale = torch.randn((1,)).item() + 1.1
+                y_scale = torch.randn((1,)).item() + 1.1
+                x_zero_point = torch.randint(1, 3, (1,)).item()
+                y_zero_point = torch.randint(1, 3, (1,)).item()
+                bias = 2 * torch.randn(OC, dtype=torch.float)
+                x_shape = (N, IC) + input_shapes[i]
+                x = 2 * torch.randn(x_shape, dtype=torch.float32) + 2
+                w_shape = (OC, IC) + (K,) * (i + 1)
+                w = torch.randn(w_shape, dtype=torch.float32) + 1
+                qx = torch.quantize_per_tensor(x, scale=x_scale, zero_point=x_zero_point, dtype=torch.quint8)
+                qw = torch.quantize_per_tensor(w, scale=w_scale, zero_point=0, dtype=torch.qint8)
+                qy_mkldnn = mkldnn_op_list[i](qx, qw, bias, scale=y_scale, zero_point=y_zero_point)
+                qy_fbgemm = fbgemm_op_list[i](qx, qw, bias, scale=y_scale, zero_point=y_zero_point)
+                self.assertEqual(qy_mkldnn, qy_fbgemm)
+
+    def test_linear_int8(self):
+        from torch.backends.mkldnn.quantization import functional as mqF
+        import torch.nn.quantized.functional as qF
+        for i in range(3):
+            batch_size = torch.randint(3, 10, (1,)).item()
+            in_features = torch.randint(3, 10, (1,)).item()
+            out_features = torch.randint(3, 100, (1,)).item()
+            x_scale = torch.randn((1,)).item() + 1.1
+            w_scale = torch.randn((1,)).item() + 1.1
+            y_scale = torch.randn((1,)).item() + 1.1
+            x_zero_point = torch.randint(1, 3, (1,)).item()
+            y_zero_point = torch.randint(1, 3, (1,)).item()
+            bias = 2 * torch.randn(out_features, dtype=torch.float)
+            x = torch.randn(batch_size, in_features, dtype=torch.float32) * 2 + 2
+            w = torch.randn(out_features, in_features, dtype=torch.float32) + 1
+            qx = torch.quantize_per_tensor(x, scale=x_scale, zero_point=x_zero_point, dtype=torch.quint8)
+            qw = torch.quantize_per_tensor(w, scale=w_scale, zero_point=0, dtype=torch.qint8)
+            qy_mkldnn = mqF.linear_mkldnn(qx, qw, bias, scale=y_scale, zero_point=y_zero_point)
+            qy_fbgemm = qF.linear(qx, qw, bias, scale=y_scale, zero_point=y_zero_point)
+            self.assertEqual(qy_mkldnn, qy_fbgemm)
+
+    def test_lower_functional_conv(self):
         from torch.quantization.quantize_fx import prepare_fx, convert_fx
         from torch.backends.mkldnn.quantization.lowering import lower_to_mkldnn_backend
 
-        class M(torch.nn.Module):
-            def forward(self, x, w, b):
-                y = F.conv2d(x, w, b)
-                return y
+        op_list = [F.conv1d, F.conv2d, F.conv3d]
+        prepack_func_name_list = ['conv1d_prepack_mkldnn',
+                                  'conv2d_prepack_mkldnn',
+                                  'conv3d_prepack_mkldnn']
+        conv_func_name_list = ['conv1d_mkldnn',
+                               'conv2d_mkldnn',
+                               'conv3d_mkldnn']
+        conv_relu_func_name_list = ['conv1d_relu_mkldnn',
+                                    'conv2d_relu_mkldnn',
+                                    'conv3d_relu_mkldnn']
+        fp32_func_name_list = ['conv1d', 'conv2d', 'conv3d']
+        for i in range(3):
+            class M(torch.nn.Module):
+                def forward(self, x, w, b):
+                    y = op_list[i](x, w, b)
+                    return y
 
-        class M_ReLU(torch.nn.Module):
-            def forward(self, x, w, b):
-                y = F.conv2d(x, w, b)
-                y = F.relu(y)
-                return y
+            class M_ReLU(torch.nn.Module):
+                def forward(self, x, w, b):
+                    y = op_list[i](x, w, b)
+                    y = F.relu(y)
+                    return y
 
-        valid = True
-        # conv2d
-        m = M().eval()
-        qconfig_dict = {"": torch.quantization.default_qconfig}
-        m = prepare_fx(m, qconfig_dict)
-        m = convert_fx(m, is_reference=True)
-        m = lower_to_mkldnn_backend(m)
-        nodes = list(n.name for n in m.graph.nodes)
-        if ('conv2d_prepack_mkldnn' not in nodes) or\
-           ('conv2d_mkldnn' not in nodes) or\
-           ('conv2d' in nodes):
-            valid = False
+            valid = True
+            # conv
+            m = M().eval()
+            qconfig_dict = {"": torch.quantization.default_qconfig}
+            m = prepare_fx(m, qconfig_dict)
+            m = convert_fx(m, is_reference=True)
+            m = lower_to_mkldnn_backend(m)
+            nodes = list(n.name for n in m.graph.nodes)
+            if (prepack_func_name_list[i] not in nodes) or\
+               (conv_func_name_list[i] not in nodes) or\
+               (fp32_func_name_list[i] in nodes):
+                valid = False
 
-        # conv2d_relu
-        m = M_ReLU().eval()
-        qconfig_dict = {"": torch.quantization.default_qconfig}
-        m = prepare_fx(m, qconfig_dict)
-        m = convert_fx(m, is_reference=True)
-        m = lower_to_mkldnn_backend(m)
-        nodes = list(n.name for n in m.graph.nodes)
-        if ('conv2d_prepack_mkldnn' not in nodes) or\
-           ('conv2d_relu_mkldnn' not in nodes) or\
-           ('conv2d' in nodes):
-            valid = False
-        self.assertEqual(valid, True)
+            # conv_relu
+            m = M_ReLU().eval()
+            qconfig_dict = {"": torch.quantization.default_qconfig}
+            m = prepare_fx(m, qconfig_dict)
+            m = convert_fx(m, is_reference=True)
+            m = lower_to_mkldnn_backend(m)
+            nodes = list(n.name for n in m.graph.nodes)
+            if (prepack_func_name_list[i] not in nodes) or\
+               (conv_relu_func_name_list[i] not in nodes) or\
+               (fp32_func_name_list[i] in nodes):
+                valid = False
+            self.assertEqual(valid, True)
 
     def test_lower_functional_linear(self):
         from torch.quantization.quantize_fx import prepare_fx, convert_fx
