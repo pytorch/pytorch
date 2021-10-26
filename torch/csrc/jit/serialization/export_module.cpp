@@ -110,18 +110,7 @@ std::pair<IValue, IValue> getFunctionTuple(
       auto node = code->instructions_source()[i];
       for (const auto& input : node->inputs()) {
         const auto& input_type = input->type();
-        if (input_type->kind() == TypeKind::TupleType) {
-          if (const auto& name_typed_input =
-                  input_type->cast<at::NamedType>()) {
-            TORCH_CHECK(
-                !name_typed_input->name(),
-                "A named tuple type is not supported in mobile module. ",
-                "Workaround: instead of using a named tuple type's fields, ",
-                "use a dictionary type's key-value pair itmes or ",
-                "a pytorch class (class Foo(torch.nn.Module))'s attributes.'");
-          }
-        } else if (
-            input_type->kind() == TypeKind::ListType ||
+        if (input_type->kind() == TypeKind::ListType ||
             input_type->kind() == TypeKind::DictType) {
           for (const TypePtr& element_type : input_type->containedTypes()) {
             TORCH_CHECK(
@@ -190,9 +179,65 @@ std::pair<IValue, IValue> getFunctionTuple(
   types.reserve(code->type_table().size());
   static const std::string torch_prefix("__torch__");
   static const std::string class_prefix("__torch__.torch.classes");
+  std::shared_ptr<torch::jit::CompilationUnit> cu =
+      module._ivalue()->compilation_unit();
+
   for (const TypePtr& t : code->type_table()) {
-    auto type_str = t->annotation_str();
-    if (type_str.find(torch_prefix) == 0) {
+    std::string type_str = t->annotation_str();
+    if (t->kind() == TypeKind::TupleType) {
+      TORCH_CHECK(
+          cu->get_named_tuple(t->str()),
+          "Can't find definition for the qualified name: ",
+          t->str(),
+          "(TypeKind::TupleType)  in compilation unit.",
+          "Please report a bug to PyTorch.");
+      auto named_tuple_type = cu->get_named_tuple(t->str());
+      if (named_tuple_type != nullptr) {
+        std::string named_tuple_str = t->str();
+        named_tuple_str.append("[NamedTuple, [");
+        std::vector<IValue> name_type_pairs;
+
+        // Get the field name and field type for the NamedTuple
+        for (auto it = named_tuple_type->schema()->arguments().begin();
+             it != named_tuple_type->schema()->arguments().end();
+             it++) {
+          name_type_pairs.emplace_back(
+              c10::ivalue::Tuple::create({it->name(), it->type()->repr_str()}));
+
+          // When it->type() is Tensor type, in Python, if it's inferred type,
+          // str() return "Tensor" and repr_str() return "Tensor (inferred)". If
+          // it's not inferred type, str() return "Tensor[]" and repr_str()
+          // return "Tensor". In cpp, repr_str() will always return "Tensor"
+          // regardless inferred type. When exporing custom type in bytecode,
+          // "Tensor" is the preferred way to deserialize Tensor type
+          type_str = it->is_inferred_type() ? it->type()->str()
+                                            : it->type()->repr_str();
+          named_tuple_str.append("[" + it->name() + ", " + type_str + "]");
+          if (it != named_tuple_type->schema()->arguments().end() - 1) {
+            named_tuple_str.append(",");
+          }
+        }
+        named_tuple_str.append("]]");
+        // Create a named_tuple type with following structure
+        // "qualified_named[
+        //   NamedTuple, [
+        //       [filed_name_1, field_type_1],
+        //       [filed_name_2, field_type_2]
+        //   ]
+        // ]"
+        //  Example NamedTuple type:
+        //  "__torch__.base_models.sparse_nn.pytorch_preproc_types.PreprocOutputType[
+        //     NamedTuple, [
+        //         [float_features, Tensor],
+        //         [id_list_features, List[Tensor]],
+        //         [label,  Tensor],
+        //         [weight, Tensor],
+        //         ]
+        //     ]"
+        types.emplace_back(named_tuple_str);
+        continue;
+      }
+    } else if (type_str.find(torch_prefix) == 0) {
       TORCH_CHECK(
           type_str.find(class_prefix) == 0,
           "__torch__ types other than torchbind (__torch__.torch.classes)"
