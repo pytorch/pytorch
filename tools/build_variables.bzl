@@ -357,6 +357,7 @@ lazy_tensor_core_sources = [
     "torch/csrc/lazy/core/hash.cpp",
     "torch/csrc/lazy/core/ir.cpp",
     "torch/csrc/lazy/core/ir_metadata.cpp",
+    "torch/csrc/lazy/core/ir_util.cpp",
 ]
 
 libtorch_core_sources = sorted(
