@@ -250,12 +250,11 @@ WINDOWS_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="windows",
-        build_environment="periodic-win-vs2019-cuda11.1-py3-debug",
+        build_environment="periodic-win-vs2019-cuda11.1-py3",
         cuda_version="11.1",
         test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
         num_test_shards=2,
         is_scheduled="45 0,4,8,12,16,20 * * *",
-        build_with_debug=True,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_SCHEDULED, LABEL_CIFLOW_WIN, LABEL_CIFLOW_CUDA}
         ),

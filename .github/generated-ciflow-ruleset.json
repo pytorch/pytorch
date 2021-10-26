@@ -22,7 +22,7 @@
       "periodic-libtorch-linux-xenial-cuda11.1-py3.6-gcc7",
       "periodic-linux-xenial-cuda10.2-py3-gcc7-slow-gradcheck",
       "periodic-linux-xenial-cuda11.1-py3.6-gcc7-debug",
-      "periodic-win-vs2019-cuda11.1-py3-debug",
+      "periodic-win-vs2019-cuda11.1-py3",
       "win-vs2019-cpu-py3",
       "win-vs2019-cuda11.3-py3"
     ],
@@ -49,7 +49,7 @@
       "periodic-libtorch-linux-xenial-cuda11.1-py3.6-gcc7",
       "periodic-linux-xenial-cuda10.2-py3-gcc7-slow-gradcheck",
       "periodic-linux-xenial-cuda11.1-py3.6-gcc7-debug",
-      "periodic-win-vs2019-cuda11.1-py3-debug",
+      "periodic-win-vs2019-cuda11.1-py3",
       "win-vs2019-cuda11.3-py3"
     ],
     "ciflow/default": [
@@ -112,7 +112,7 @@
       "periodic-libtorch-linux-xenial-cuda11.1-py3.6-gcc7",
       "periodic-linux-xenial-cuda10.2-py3-gcc7-slow-gradcheck",
       "periodic-linux-xenial-cuda11.1-py3.6-gcc7-debug",
-      "periodic-win-vs2019-cuda11.1-py3-debug"
+      "periodic-win-vs2019-cuda11.1-py3"
     ],
     "ciflow/slow": [
       "linux-bionic-cuda10.2-py3.9-gcc7",
@@ -126,7 +126,7 @@
       "linux-vulkan-bionic-py3.6-clang9"
     ],
     "ciflow/win": [
-      "periodic-win-vs2019-cuda11.1-py3-debug",
+      "periodic-win-vs2019-cuda11.1-py3",
       "win-vs2019-cpu-py3",
       "win-vs2019-cuda11.3-py3"
     ],
