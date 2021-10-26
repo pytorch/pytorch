@@ -123,7 +123,7 @@ def is_input_arg_dtype_supported_by_backend(
     node: Node,
     node_name_to_target_dtype: Dict[str, Any],
     pattern_config: Dict[str, torch.dtype],
-):
+) -> bool:
     """ Check if the configured qconfig for the argument
     is supported by the backend or not
     """
@@ -152,7 +152,7 @@ def is_output_dtype_supported_by_backend(
     node: Node,
     node_name_to_target_dtype: Dict[str, Any],
     pattern_config: Dict[str, torch.dtype],
-):
+) -> bool:
     """ Check if the configured qconfig for the output
     is supported by the backend or not
     """
@@ -165,7 +165,7 @@ def is_pattern_dtype_config_supported_by_backend(
     matched_nodes: List[Node],
     node_name_to_target_dtype: Dict[str, Any],
     backend_config_dict: Optional[Dict[str, Any]]
-):
+) -> bool:
     """ Check is the dtype configuration of a pattern is supported by
     the backend or not
     """
