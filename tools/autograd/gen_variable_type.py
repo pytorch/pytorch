@@ -979,8 +979,14 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         if requires_derivative:
             body.extend(emit_fw_derivatives())
             if len(fw_derivatives) == 0:
-                # TODO handle the case when len > 0 and len < num_diff_outputs
                 body.append(emit_forbid_fw_derivatives())
+            else:
+                assert len(fw_derivatives) == len(differentiable_outputs), (
+                    "Expected the number of forward derivatives implemented to match the "
+                    "number of differentiable outputs. NB: This only applies when at least "
+                    "one forward derivative is implemented. Not implementing any forward "
+                    "derivatives is also okay, and we would require inputs to the op to "
+                    "not have associated tangents in that case.")
 
     if requires_derivative:
         # Save only after the forward AD has been set up

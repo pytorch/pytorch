@@ -4341,14 +4341,23 @@ class TestAutograd(TestCase):
         gradcheck(fn2, (x, x.clone()), check_forward_ad=True, check_backward_ad=False, check_batched_grad=True,
                   check_undefined_grad=False)
 
-        # TODO: We want a test that produces an error for forward-AD + batched grad
-        # only, i.e., detect the current vmap level, but we don't have bindings for that
-        # checking whether randomized ops are allowed doesn't quite work yet either
-        # def fn3(a: torch.Tensor):
-        #     pass
-        # msg = "gradcheck failed while testing batched gradient computation with forward ad"
-        # with self.assertRaisesRegex(RuntimeError, msg):
-        #     gradcheck(fn3, (x,), check_forward_ad=True, check_batched_grad=True)
+        class Fn(Function):
+            @staticmethod
+            def forward(ctx, foo):
+                return foo * 2
+
+            @staticmethod
+            def vjp(ctx, gO):
+                return gO * 2
+
+            @staticmethod
+            def jvp(ctx, gI):
+                torch.randn_like(gI)
+                return gI * 2
+
+        msg = "vmap: We do not yet support calling random operations inside of vmap"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            gradcheck(Fn.apply, (x,), check_forward_ad=True, check_batched_grad=True, check_batched_forward_grad=True)
 
     def test_version_counter(self):
         x = torch.randn(1, 2)
@@ -7825,6 +7834,13 @@ class TestAutogradForwardMode(TestCase):
             with self.assertRaisesRegex(RuntimeError, "out= function"):
                 torch.add(foo, bar, out=bar)
 
+    def test_non_differentiable(self):
+        with fwAD.dual_level():
+            foo = fwAD.make_dual(torch.rand(2), torch.rand(2))
+            bar = torch.rand(2)
+
+            # No differentiable outputs, shouldn't error
+            eq = foo == bar
 
 # Generic device type autograd tests.
 class TestAutogradDeviceType(TestCase):
