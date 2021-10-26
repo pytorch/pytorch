@@ -45,6 +45,12 @@ if torch.cuda.is_available() and (CUDA_HOME is not None or ROCM_HOME is not None
     )
     ext_modules.append(cublas_extension)
 
+    cusolver_extension = CUDAExtension(
+        name='torch_test_cpp_extension.cusolver_extension',
+        sources=['cusolver_extension.cpp']
+    )
+    ext_modules.append(cusolver_extension)
+
 if torch.cuda.is_available() and (CUDA_HOME is not None or ROCM_HOME is not None):
     extension = CUDAExtension(
         'torch_test_cpp_extension.torch_library', [

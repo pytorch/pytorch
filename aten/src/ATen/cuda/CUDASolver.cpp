@@ -2,6 +2,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/cuda/CUDASolver.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/macros/Export.h>
 
 #ifdef CUDART_VERSION
 
