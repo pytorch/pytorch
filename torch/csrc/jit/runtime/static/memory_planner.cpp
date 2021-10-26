@@ -6,12 +6,11 @@
 namespace torch {
 namespace jit {
 
-static void assign_storage_to_managed_tensors(
+void MemoryPlanner::assign_storage_to_managed_tensors(
     StaticRuntime* runtime,
     const FastSet<const Value*>& managed_tensor_values,
     const FastMap<const Value*, std::vector<const Value*>>&
-        value_to_same_storage_values,
-    std::vector<std::pair<size_t, std::vector<at::Tensor*>>>& managed_tensors) {
+        value_to_same_storage_values) {
   // map Value to index to managed_storage, where multiple values can
   // map to the same index (i.e., sharing the same storage)
   FastMap<const Value*, size_t> value_to_storage_idx;
@@ -27,16 +26,14 @@ static void assign_storage_to_managed_tensors(
         auto f = value_to_storage_idx.find(val);
         if (f != value_to_storage_idx.end()) {
           auto storage_idx = f->second;
-          managed_tensors[storage_idx].second.emplace_back(tensor);
+          managed_tensors_[storage_idx].tensors.emplace_back(tensor);
         } else {
-          auto p =
-              std::make_pair<size_t, std::vector<at::Tensor*>>(0, {tensor});
-          managed_tensors.emplace_back(std::move(p));
+          managed_tensors_.emplace_back(ManagedTensorSet{0, {tensor}});
           // first of a group, update the value_to_storage_idx map with the
           // index
           auto f = value_to_same_storage_values.find(val);
           if (f != value_to_same_storage_values.end()) {
-            auto storage_idx = managed_tensors.size() - 1;
+            auto storage_idx = managed_tensors_.size() - 1;
             const auto& same_storage_values = f->second;
             for (const auto* v : same_storage_values) {
               value_to_storage_idx[v] = storage_idx;
@@ -147,11 +144,8 @@ MemoryPlanner::MemoryPlanner(
       unmanaged_ivalues.end());
 
   if (enable_out_variant) {
-    ::torch::jit::assign_storage_to_managed_tensors(
-        runtime,
-        managed_tensor_values,
-        value_to_same_storage_values,
-        managed_tensors_);
+    assign_storage_to_managed_tensors(
+        runtime, managed_tensor_values, value_to_same_storage_values);
   }
 
   if (enable_out_variant && manage_output_tensors) {
@@ -161,7 +155,7 @@ MemoryPlanner::MemoryPlanner(
 
   num_managed_tensors_ = 0;
   for (const auto& ms : managed_tensors_) {
-    num_managed_tensors_ += ms.second.size();
+    num_managed_tensors_ += ms.tensors.size();
   }
 }
 
@@ -188,23 +182,21 @@ void MemoryPlanner::allocateManagedTensors() {
 
   reused_tensors_ = 0;
   for (const auto& ms : managed_tensors_) {
-    auto tensor_size = ms.first;
-    if (tensor_size == 0) {
+    if (ms.tensor_size == 0) {
       continue;
     }
-    const auto& tensors = ms.second;
-    DCHECK_LE(offset + tensor_size, managed_bytes_);
+    DCHECK_LE(offset + ms.tensor_size, managed_bytes_);
     void* src = static_cast<void*>(start + offset);
 
-    for (auto* tensor : tensors) {
+    for (auto* tensor : ms.tensors) {
       tensor->storage().set_data_ptr_noswap(
           at::DataPtr(src, src, nullptr, tensor->device()));
-      tensor->storage().set_nbytes(tensor_size);
+      tensor->storage().set_nbytes(ms.tensor_size);
       reused_tensors_++;
     }
     reused_tensors_--;
 
-    offset += tensor_size;
+    offset += ms.tensor_size;
   }
   DCHECK_EQ(offset, managed_bytes_);
 }
@@ -248,9 +240,8 @@ void MemoryPlanner::deallocate() {
   // free memory used by outputs of ops in out variants
   // but keep the TensorImpl and StorageImpl around
   for (auto& ms : managed_tensors_) {
-    const auto& tensors = ms.second;
-    size_t max = ms.first;
-    for (auto& tensor : tensors) {
+    size_t max = ms.tensor_size;
+    for (auto& tensor : ms.tensors) {
       size_t current_size =
           compute_aligned_tensor_size(tensor->storage().nbytes());
       tensor->storage().unsafeGetStorageImpl()->reset();
@@ -261,7 +252,7 @@ void MemoryPlanner::deallocate() {
     // run (following C2 tradition), exploiting the fact that tensor storage
     // size does not have to match that of real tensor size. The following logic
     // records the tensor storage size for the next run.
-    ms.first = max;
+    ms.tensor_size = max;
     managed_bytes_ += max;
   }
 

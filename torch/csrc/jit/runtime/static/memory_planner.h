@@ -102,10 +102,15 @@ class MemoryPlanner {
   // ivalues created in one run but not managed by MemoryPlanner
   std::vector<IValue*> unmanaged_ivalues_;
 
-  // each pair contains the size (in bytes) of data to be allocated
-  // and a vector of Tensors that should be backed by that same data.
-  // Thus, if memonger is disabled, all vectors are of size 1.
-  std::vector<std::pair<size_t, std::vector<at::Tensor*>>> managed_tensors_;
+  struct ManagedTensorSet {
+    // Size (in bytes) of data to be allocated.
+    size_t tensor_size;
+    // Tensors that should be backed by that same data. If memonger is
+    // disabled, all vectors are of size 1.
+    std::vector<at::Tensor*> tensors;
+  };
+
+  std::vector<ManagedTensorSet> managed_tensors_;
   at::DataPtr buffer_; // allocated each time we call Run()
   size_t num_managed_tensors_{0};
   size_t managed_bytes_{0};
@@ -123,6 +128,12 @@ class MemoryPlanner {
 
   static size_t compute_aligned_tensor_size(size_t nbytes);
   static at::DataPtr allocate_buffer(size_t size);
+
+  void assign_storage_to_managed_tensors(
+      StaticRuntime* runtime,
+      const FastSet<const Value*>& managed_tensor_values,
+      const FastMap<const Value*, std::vector<const Value*>>&
+          value_to_same_storage_values);
 };
 
 } // namespace jit
