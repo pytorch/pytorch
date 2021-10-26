@@ -12,6 +12,7 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_fsdp import (
     DummyDDP,
+    FSDPInitMode,
     FSDPTest,
     MixtureOfExperts,
     NestedWrappedModule,
@@ -24,6 +25,8 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
 )
+
+from torch.distributed._fsdp.fully_sharded_data_parallel import CPUOffload
 
 
 if not dist.is_available():
@@ -46,26 +49,103 @@ class TestParityWithDDP(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     def test_nested_wrapped_model(self):
-        self._test_identical_outputs(NestedWrappedModule)
+        # TODO: FSDPInitMode.CUDA_NEVER doesn't work without CPU offloading.
+        for fsdp_init_mode in [FSDPInitMode.CUDA_AFTER, FSDPInitMode.CUDA_BEFORE]:
+            with self.subTest(fsdp_init_mode=fsdp_init_mode):
+                self._test_identical_outputs(NestedWrappedModule, fsdp_init_mode=fsdp_init_mode)
+
+    @skip_if_lt_x_gpu(2)
+    def test_cpu_offload_nested_wrapped_model(self):
+        # Note that FSDPInitMode.CUDA_NEVER works currently only with CPU
+        # offload as we explicitly bring the param back to CUDA device. In
+        # general, it will not work since we try to all_gather p.data which is
+        # on CPU but NCCL only supports GPU.
+        for fsdp_init_mode in [
+            FSDPInitMode.CUDA_NEVER,
+            FSDPInitMode.CUDA_AFTER,
+            FSDPInitMode.CUDA_BEFORE,
+        ]:
+            with self.subTest(fsdp_init_mode=fsdp_init_mode):
+                cpu_offload = CPUOffload(offload_params=True)
+                self._test_identical_outputs(
+                    NestedWrappedModule,
+                    fsdp_init_mode=fsdp_init_mode,
+                    cpu_offload=cpu_offload
+                )
 
     @skip_if_lt_x_gpu(2)
     def test_nested_all_wrapped_model(self):
-        model_fn = functools.partial(NestedWrappedModule, wrap_everything=True)
-        self._test_identical_outputs(model_fn)
+        # TODO: FSDPInitMode.CUDA_NEVER doesn't work without CPU offloading, for
+        # NCCL backend.
+        for fsdp_init_mode in [FSDPInitMode.CUDA_AFTER, FSDPInitMode.CUDA_BEFORE]:
+            with self.subTest(fsdp_init_mode=fsdp_init_mode):
+                model_fn = functools.partial(NestedWrappedModule, wrap_everything=True)
+                self._test_identical_outputs(model_fn, fsdp_init_mode=fsdp_init_mode)
+
+    @skip_if_lt_x_gpu(2)
+    def test_cpu_offload_nested_all_wrapped_model(self):
+        for fsdp_init_mode in [FSDPInitMode.CUDA_AFTER, FSDPInitMode.CUDA_BEFORE, FSDPInitMode.CUDA_NEVER]:
+            with self.subTest(fsdp_init_mode=fsdp_init_mode):
+                cpu_offload = CPUOffload(offload_params=True)
+                model_fn = functools.partial(NestedWrappedModule, wrap_everything=True)
+                self._test_identical_outputs(
+                    model_fn,
+                    fsdp_init_mode=fsdp_init_mode,
+                    cpu_offload=cpu_offload
+                )
 
     @skip_if_lt_x_gpu(2)
     def test_transformer_parameterized(self):
-        self._test_identical_outputs(TransformerWithSharedParams)
+        # TODO: FSDPInitMode.CUDA_NEVER doesn't work without CPU offloading.
+        for fsdp_init_mode in [FSDPInitMode.CUDA_AFTER, FSDPInitMode.CUDA_BEFORE]:
+            with self.subTest(fsdp_init_mode=fsdp_init_mode):
+                self._test_identical_outputs(TransformerWithSharedParams, fsdp_init_mode=fsdp_init_mode)
+
+    @skip_if_lt_x_gpu(2)
+    def test_cpu_offload_transformer_parameterized(self):
+        # TODO: FSDPInitMode.CUDA_NEVER doesn't work without CPU offloading.
+        for fsdp_init_mode in [FSDPInitMode.CUDA_AFTER]:
+            with self.subTest(fsdp_init_mode=fsdp_init_mode):
+                cpu_offload = CPUOffload(offload_params=True)
+                self._test_identical_outputs(
+                    TransformerWithSharedParams,
+                    fsdp_init_mode=fsdp_init_mode,
+                    cpu_offload=cpu_offload
+                )
 
     @skip_if_lt_x_gpu(2)
     def test_delayed_optim_step(self):
         # We use a model with a long CUDA delay right before the optimizer step.
         # This tests our streams logic, and that we don't start the allgather
         # until after the optimization step completes.
-        model_fn = functools.partial(
-            NestedWrappedModuleWithDelay, delay_after_loss_ms=250
-        )
-        self._test_identical_outputs(model_fn)
+        # TODO: FSDPInitMode.CUDA_NEVER doesn't work without CPU offloading.
+        for fsdp_init_mode in [FSDPInitMode.CUDA_AFTER, FSDPInitMode.CUDA_BEFORE]:
+            with self.subTest(fsdp_init_mode=fsdp_init_mode):
+                model_fn = functools.partial(
+                    NestedWrappedModuleWithDelay, delay_after_loss_ms=250
+                )
+                self._test_identical_outputs(model_fn, fsdp_init_mode=fsdp_init_mode)
+
+    @skip_if_lt_x_gpu(2)
+    def test_cpu_offload_delayed_optim_step(self):
+        # We use a model with a long CUDA delay right before the optimizer step.
+        # This tests our streams logic, and that we don't start the allgather
+        # until after the optimization step completes.
+        for fsdp_init_mode in [
+            FSDPInitMode.CUDA_AFTER,
+            FSDPInitMode.CUDA_BEFORE,
+            FSDPInitMode.CUDA_NEVER
+        ]:
+            with self.subTest(fsdp_init_mode=fsdp_init_mode):
+                cpu_offload = CPUOffload(offload_params=True)
+                model_fn = functools.partial(
+                    NestedWrappedModuleWithDelay, delay_after_loss_ms=250, cpu_offload=cpu_offload
+                )
+                self._test_identical_outputs(
+                    model_fn,
+                    fsdp_init_mode=fsdp_init_mode,
+                    cpu_offload=cpu_offload
+                )
 
     @skip_if_lt_x_gpu(2)
     def test_delayed_reduce_scatter(self):
@@ -73,30 +153,90 @@ class TestParityWithDDP(FSDPTest):
         # the post_backward_stream takes much longer than the backward pass.
         # This tests that we properly block at the end of the backward pass for
         # the reductions to finish.
-        model_fn = functools.partial(
-            NestedWrappedModuleWithDelay, delay_before_reduction_ms=250
-        )
-        self._test_identical_outputs(model_fn)
+        for fsdp_init_mode in [FSDPInitMode.CUDA_AFTER, FSDPInitMode.CUDA_BEFORE]:
+            with self.subTest(fsdp_init_mode=fsdp_init_mode):
+                model_fn = functools.partial(
+                    NestedWrappedModuleWithDelay, delay_before_reduction_ms=250
+                )
+                self._test_identical_outputs(model_fn, fsdp_init_mode=fsdp_init_mode)
+
+    @skip_if_lt_x_gpu(2)
+    def test_cpu_offload_delayed_reduce_scatter(self):
+        # We insert a delay in the torch.distributed._reduce_scatter_base op, so that
+        # the post_backward_stream takes much longer than the backward pass.
+        # This tests that we properly block at the end of the backward pass for
+        # the reductions to finish.
+        for fsdp_init_mode in [FSDPInitMode.CUDA_AFTER, FSDPInitMode.CUDA_BEFORE, FSDPInitMode.CUDA_NEVER]:
+            with self.subTest(fsdp_init_mode=fsdp_init_mode):
+                cpu_offload = CPUOffload(offload_params=True)
+                model_fn = functools.partial(
+                    NestedWrappedModuleWithDelay, delay_before_reduction_ms=250,
+                    cpu_offload=cpu_offload,
+                )
+                self._test_identical_outputs(model_fn, fsdp_init_mode=fsdp_init_mode, cpu_offload=cpu_offload)
 
     def _dummy_ddp_fn(self, model):
         return DummyDDP(model)
 
     @skip_if_lt_x_gpu(2)
     def test_mixture_of_experts(self):
-        self._test_identical_outputs(
-            MixtureOfExperts,
-            # MixtureOfExperts implements custom reduce logic, so the reference
-            # behavior should use that logic instead of PyTorch DDP.
-            ref_ddp_fn=self._dummy_ddp_fn,
-        )
+        # TODO: FSDPInitMode.CUDA_NEVER doesn't work without CPU offloading.
+        for fsdp_init_mode in [FSDPInitMode.CUDA_AFTER, FSDPInitMode.CUDA_BEFORE]:
+            with self.subTest(fsdp_init_mode=fsdp_init_mode):
+                self._test_identical_outputs(
+                    MixtureOfExperts,
+                    # MixtureOfExperts implements custom reduce logic, so the reference
+                    # behavior should use that logic instead of PyTorch DDP.
+                    ref_ddp_fn=self._dummy_ddp_fn,
+                    fsdp_init_mode=fsdp_init_mode
+                )
+
+    @skip_if_lt_x_gpu(2)
+    def test_cpu_offload_mixture_of_experts(self):
+        # TODO: FSDPInitMode.CUDA_NEVER doesn't work without CPU offloading.
+        for fsdp_init_mode in [
+            FSDPInitMode.CUDA_AFTER,
+            FSDPInitMode.CUDA_BEFORE,
+            FSDPInitMode.CUDA_NEVER
+        ]:
+            with self.subTest(fsdp_init_mode=fsdp_init_mode):
+                cpu_offload = CPUOffload(offload_params=True)
+                self._test_identical_outputs(
+                    MixtureOfExperts,
+                    # MixtureOfExperts implements custom reduce logic, so the reference
+                    # behavior should use that logic instead of PyTorch DDP.
+                    ref_ddp_fn=self._dummy_ddp_fn,
+                    fsdp_init_mode=fsdp_init_mode,
+                    cpu_offload=cpu_offload,
+                )
 
     @skip_if_lt_x_gpu(2)
     def test_mixture_of_experts_with_delay_before_free(self):
-        model_fn = functools.partial(MixtureOfExperts, delay_before_free_ms=250)
-        self._test_identical_outputs(
-            model_fn,
-            ref_ddp_fn=self._dummy_ddp_fn,
-        )
+        for fsdp_init_mode in [FSDPInitMode.CUDA_AFTER, FSDPInitMode.CUDA_BEFORE]:
+            with self.subTest(fsdp_init_mode=fsdp_init_mode):
+                model_fn = functools.partial(MixtureOfExperts, delay_before_free_ms=250)
+                self._test_identical_outputs(
+                    model_fn,
+                    ref_ddp_fn=self._dummy_ddp_fn,
+                    fsdp_init_mode=fsdp_init_mode,
+                )
+
+    @skip_if_lt_x_gpu(2)
+    def test_cpu_offload_mixture_of_experts_with_delay_before_free(self):
+        for fsdp_init_mode in [
+            FSDPInitMode.CUDA_AFTER,
+            FSDPInitMode.CUDA_BEFORE,
+            FSDPInitMode.CUDA_NEVER
+        ]:
+            with self.subTest(fsdp_init_mode=fsdp_init_mode):
+                cpu_offload = CPUOffload(offload_params=True)
+                model_fn = functools.partial(MixtureOfExperts, delay_before_free_ms=250)
+                self._test_identical_outputs(
+                    model_fn,
+                    ref_ddp_fn=self._dummy_ddp_fn,
+                    fsdp_init_mode=fsdp_init_mode,
+                    cpu_offload=cpu_offload,
+                )
 
 
 class TestParamInit(FSDPTest):
