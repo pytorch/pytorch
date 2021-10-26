@@ -21,46 +21,46 @@ namespace lazy_tensors {
 class ShapeIndex {
  public:
   ShapeIndex() = default;
-  ShapeIndex(std::initializer_list<int64> init) : indices_(init) {}
+  ShapeIndex(std::initializer_list<int64_t> init) : indices_(init) {}
 
   bool empty() const { return indices_.empty(); }
   size_t size() const { return indices_.size(); }
-  void push_back(int64 value) { indices_.push_back(value); }
+  void push_back(int64_t value) { indices_.push_back(value); }
   void pop_back() { indices_.pop_back(); }
 
-  const int64& operator[](size_t i) const { return indices_[i]; }
-  int64& operator[](size_t i) { return indices_[i]; }
+  const int64_t& operator[](size_t i) const { return indices_[i]; }
+  int64_t& operator[](size_t i) { return indices_[i]; }
 
  private:
-  std::vector<int64> indices_;
+  std::vector<int64_t> indices_;
 };
 
 class ShapeUtil {
  public:
-  static int64 ElementsIn(const Shape& shape) {
+  static int64_t ElementsIn(const Shape& shape) {
     return util::Multiply<int64_t>(shape.dimensions());
   }
 
-  static int64 ByteSizeOfPrimitiveType(PrimitiveType primitive_type) {
+  static int64_t ByteSizeOfPrimitiveType(PrimitiveType primitive_type) {
     switch (primitive_type) {
       case PrimitiveType::PRED:
-        return sizeof(int8);
+        return sizeof(int8_t);
       case PrimitiveType::S8:
-        return sizeof(int8);
+        return sizeof(int8_t);
       case PrimitiveType::S16:
-        return sizeof(int16);
+        return sizeof(int16_t);
       case PrimitiveType::S32:
-        return sizeof(int32);
+        return sizeof(int32_t);
       case PrimitiveType::S64:
-        return sizeof(int64);
+        return sizeof(int64_t);
       case PrimitiveType::U8:
-        return sizeof(uint8);
+        return sizeof(uint8_t);
       case PrimitiveType::U16:
-        return sizeof(uint16);
+        return sizeof(uint16_t);
       case PrimitiveType::U32:
-        return sizeof(uint32);
+        return sizeof(uint32_t);
       case PrimitiveType::U64:
-        return sizeof(uint64);
+        return sizeof(uint64_t);
       case PrimitiveType::BF16:
         return sizeof(float) / 2;
       case PrimitiveType::F16:
@@ -106,16 +106,16 @@ class ShapeUtil {
   }
 
   static Shape MakeShape(PrimitiveType element_type,
-                         c10::ArrayRef<int64> dimensions) {
+                         c10::ArrayRef<int64_t> dimensions) {
     return MakeShapeWithDescendingLayout(element_type, dimensions);
   }
 
   static Shape MakeShapeWithLayout(PrimitiveType element_type,
-                                   c10::ArrayRef<int64> dimensions,
-                                   c10::ArrayRef<int64> minor_to_major,
+                                   c10::ArrayRef<int64_t> dimensions,
+                                   c10::ArrayRef<int64_t> minor_to_major,
                                    c10::ArrayRef<Tile> tiles = {},
-                                   int64 element_size_in_bits = 0,
-                                   int64 memory_space = 0) {
+                                   int64_t element_size_in_bits = 0,
+                                   int64_t memory_space = 0) {
     LTC_CHECK(tiles.empty());
     LTC_CHECK_EQ(element_size_in_bits, 0);
     LTC_CHECK_EQ(memory_space, 0);
@@ -123,7 +123,7 @@ class ShapeUtil {
     LTC_CHECK(element_type != PrimitiveType::INVALID &&
               element_type != PrimitiveType::TUPLE);
     Layout layout;
-    for (int64 dimension_number : minor_to_major) {
+    for (int64_t dimension_number : minor_to_major) {
       layout.add_minor_to_major(dimension_number);
     }
     Shape shape(element_type, dimensions);
@@ -132,17 +132,17 @@ class ShapeUtil {
   }
 
   static Shape MakeShapeWithDescendingLayout(PrimitiveType element_type,
-                                             c10::ArrayRef<int64> dimensions) {
-    std::vector<int64> layout(dimensions.size());
-    std::iota(layout.rbegin(), layout.rend(), static_cast<int64>(0));
+                                             c10::ArrayRef<int64_t> dimensions) {
+    std::vector<int64_t> layout(dimensions.size());
+    std::iota(layout.rbegin(), layout.rend(), static_cast<int64_t>(0));
     return MakeShapeWithLayout(element_type, dimensions, layout);
   }
 
   // Returns the number of elements in the given tuple shape.
   // Precondition: IsTuple(shape)
-  static int64 TupleElementCount(const Shape& shape);
+  static int64_t TupleElementCount(const Shape& shape);
 
-  static const Shape& GetTupleElementShape(const Shape& shape, int64 index) {
+  static const Shape& GetTupleElementShape(const Shape& shape, int64_t index) {
     LTC_LOG(FATAL) << "Not implemented yet.";
   }
 
@@ -160,7 +160,7 @@ class ShapeUtil {
       return;
     }
     for (size_t i = 0; i < shape->tuple_shapes_size(); ++i) {
-      func(shape, {static_cast<int64>(i)});
+      func(shape, {static_cast<int64_t>(i)});
     }
   }
 

@@ -6,15 +6,15 @@
 
 namespace lazy_tensors {
 
-std::vector<int64> InversePermutation(c10::ArrayRef<int64> input_permutation);
+std::vector<int64_t> InversePermutation(c10::ArrayRef<int64_t> input_permutation);
 
-bool IsPermutation(c10::ArrayRef<int64> permutation);
+bool IsPermutation(c10::ArrayRef<int64_t> permutation);
 
-bool IsIdentityPermutation(c10::ArrayRef<int64> permutation);
+bool IsIdentityPermutation(c10::ArrayRef<int64_t> permutation);
 
 template <typename Container>
 inline std::vector<typename Container::value_type> PermuteInverse(
-    const Container& input, c10::ArrayRef<int64> permutation) {
+    const Container& input, c10::ArrayRef<int64_t> permutation) {
   using T = typename Container::value_type;
   c10::ArrayRef<T> data(input);
   CHECK(IsPermutation(permutation));

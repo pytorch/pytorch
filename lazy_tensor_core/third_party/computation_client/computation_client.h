@@ -108,8 +108,8 @@ class ComputationClient {
   };
 
   struct MemoryInfo {
-    int64 kb_free = 0;
-    int64 kb_total = 0;
+    int64_t kb_free = 0;
+    int64_t kb_total = 0;
   };
 
   static std::unique_ptr<ComputationClient> Create();
@@ -218,7 +218,7 @@ class ComputationClient {
 
   // Retrieves the ordinal number out of a device string. This is the number
   // after the last ':' character of the device string.
-  static int64 GetDeviceOrdinal(const std::string& device);
+  static int64_t GetDeviceOrdinal(const std::string& device);
 
   // Returns the ComputationClient singleton.
   static ComputationClient* Get();

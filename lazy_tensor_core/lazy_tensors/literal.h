@@ -45,7 +45,7 @@ class Literal {
   void* untyped_data(const ShapeIndex& shape_index = {}) {
     LTC_LOG(FATAL) << "Not implemented yet.";
   }
-  int64 size_bytes(const ShapeIndex& shape_index = {}) const {
+  int64_t size_bytes(const ShapeIndex& shape_index = {}) const {
     return value_.numel() * value_.element_size();
   }
 
@@ -58,7 +58,7 @@ class Literal {
   Literal Clone() const { LTC_LOG(FATAL) << "Not implemented yet."; }
 
   template <typename NativeT>
-  void Set(lazy_tensors::Span<const int64> multi_index, NativeT value) {
+  void Set(lazy_tensors::Span<const int64_t> multi_index, NativeT value) {
     if (multi_index.empty()) {
       value_.fill_(value);
       return;
@@ -81,38 +81,38 @@ class Literal {
 
 template <>
 inline void Literal::Set<uint32_t>(
-    lazy_tensors::Span<const int64> multi_index, uint32_t value) {
+    lazy_tensors::Span<const int64_t> multi_index, uint32_t value) {
   Set<int64_t>(multi_index, static_cast<int64_t>(value));
 }
 
 template <>
 inline void Literal::Set<uint64_t>(
-    lazy_tensors::Span<const int64> multi_index, uint64_t value) {
+    lazy_tensors::Span<const int64_t> multi_index, uint64_t value) {
   LTC_LOG(FATAL) << "Not implemented yet.";
 }
 
 template <>
 inline void Literal::Set<lazy_tensors::bfloat16>(
-    lazy_tensors::Span<const int64> multi_index, lazy_tensors::bfloat16 value) {
+    lazy_tensors::Span<const int64_t> multi_index, lazy_tensors::bfloat16 value) {
   LTC_LOG(FATAL) << "Not implemented yet.";
 }
 
 template <>
 inline void Literal::Set<c10::Half>(
-    lazy_tensors::Span<const int64> multi_index, c10::Half value) {
+    lazy_tensors::Span<const int64_t> multi_index, c10::Half value) {
   LTC_LOG(FATAL) << "Not implemented yet.";
 }
 
 template <>
 inline void Literal::Set<std::complex<float>>(
-    lazy_tensors::Span<const int64> multi_index,
+    lazy_tensors::Span<const int64_t> multi_index,
     std::complex<float> value) {
   LTC_LOG(FATAL) << "Not implemented yet.";
 }
 
 template <>
 inline void Literal::Set<std::complex<double>>(
-    lazy_tensors::Span<const int64> multi_index,
+    lazy_tensors::Span<const int64_t> multi_index,
     std::complex<double> value) {
   LTC_LOG(FATAL) << "Not implemented yet.";
 }

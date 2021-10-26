@@ -1,7 +1,7 @@
 #pragma once
 
 #include <string>
-
+#include <c10/util/Half.h>
 #include "lazy_tensors/primitive_types.h"
 
 namespace lazy_tensors {
@@ -30,43 +30,43 @@ inline PrimitiveType NativeToPrimitiveType<bool>() {
 
 // Unsigned integer
 template <>
-inline PrimitiveType NativeToPrimitiveType<uint8>() {
+inline PrimitiveType NativeToPrimitiveType<uint8_t>() {
   return PrimitiveType::U8;
 }
 
 template <>
-inline PrimitiveType NativeToPrimitiveType<uint16>() {
+inline PrimitiveType NativeToPrimitiveType<uint16_t>() {
   return PrimitiveType::U16;
 }
 
 template <>
-inline PrimitiveType NativeToPrimitiveType<uint32>() {
+inline PrimitiveType NativeToPrimitiveType<uint32_t>() {
   return PrimitiveType::U32;
 }
 
 template <>
-inline PrimitiveType NativeToPrimitiveType<uint64>() {
+inline PrimitiveType NativeToPrimitiveType<uint64_t>() {
   return PrimitiveType::U64;
 }
 
 // Signed integer
 template <>
-inline PrimitiveType NativeToPrimitiveType<int8>() {
+inline PrimitiveType NativeToPrimitiveType<int8_t>() {
   return PrimitiveType::S8;
 }
 
 template <>
-inline PrimitiveType NativeToPrimitiveType<int16>() {
+inline PrimitiveType NativeToPrimitiveType<int16_t>() {
   return PrimitiveType::S16;
 }
 
 template <>
-inline PrimitiveType NativeToPrimitiveType<int32>() {
+inline PrimitiveType NativeToPrimitiveType<int32_t>() {
   return PrimitiveType::S32;
 }
 
 template <>
-inline PrimitiveType NativeToPrimitiveType<int64>() {
+inline PrimitiveType NativeToPrimitiveType<int64_t>() {
   return PrimitiveType::S64;
 }
 
@@ -82,7 +82,7 @@ inline PrimitiveType NativeToPrimitiveType<double>() {
 }
 
 template <>
-inline PrimitiveType NativeToPrimitiveType<half>() {
+inline PrimitiveType NativeToPrimitiveType<c10::Half>() {
   return PrimitiveType::F16;
 }
 
@@ -93,12 +93,12 @@ inline PrimitiveType NativeToPrimitiveType<bfloat16>() {
 
 // Complex
 template <>
-inline PrimitiveType NativeToPrimitiveType<complex64>() {
+inline PrimitiveType NativeToPrimitiveType<std::complex<float>>() {
   return PrimitiveType::C64;
 }
 
 template <>
-inline PrimitiveType NativeToPrimitiveType<complex128>() {
+inline PrimitiveType NativeToPrimitiveType<std::complex<double>>() {
   return PrimitiveType::C128;
 }
 
@@ -132,7 +132,7 @@ inline int BitWidth(PrimitiveType type) {
   LTC_LOG(FATAL) << "Not implemented yet.";
 }
 
-inline PrimitiveType UnsignedIntegralTypeForBitWidth(int64 src_bitwidth) {
+inline PrimitiveType UnsignedIntegralTypeForBitWidth(int64_t src_bitwidth) {
   LTC_LOG(FATAL) << "Not implemented yet.";
 }
 

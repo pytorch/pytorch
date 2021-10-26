@@ -5,13 +5,13 @@
 
 namespace lazy_tensors {
 
-extern uint64 Hash64(const char* data, size_t n, uint64 seed);
+extern uint64_t Hash64(const char* data, size_t n, uint64_t seed);
 
-inline uint64 Hash64(const char* data, size_t n) {
+inline uint64_t Hash64(const char* data, size_t n) {
   return Hash64(data, n, 0xDECAFCAFFE);
 }
 
-inline uint64 Hash64Combine(uint64 a, uint64 b) {
+inline uint64_t Hash64Combine(uint64_t a, uint64_t b) {
   return a ^ (b + 0x9e3779b97f4a7800ULL + (a << 10) + (a >> 4));
 }
 
