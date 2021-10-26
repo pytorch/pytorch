@@ -7,7 +7,7 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-TopK::TopK(const torch::lazy::Value& input, lazy_tensors::int64 k, lazy_tensors::int64 dim,
+TopK::TopK(const torch::lazy::Value& input, int64_t k, int64_t dim,
            bool largest, bool sorted)
     : TsNode(torch::lazy::OpKind(at::aten::topk), {input},
            /*num_outputs=*/2,

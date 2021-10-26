@@ -202,35 +202,35 @@ NodePtr ARange(const at::Scalar& start, const at::Scalar& end,
                                       step.toDouble());
       break;
     case lazy_tensors::PrimitiveType::U8:
-      values = Helpers::Range<lazy_tensors::uint8>(start.toByte(), end.toByte(),
+      values = Helpers::Range<uint8_t>(start.toByte(), end.toByte(),
                                                    step.toByte());
       break;
     case lazy_tensors::PrimitiveType::S8:
-      values = Helpers::Range<lazy_tensors::int8>(start.toChar(), end.toChar(),
+      values = Helpers::Range<int8_t>(start.toChar(), end.toChar(),
                                                   step.toChar());
       break;
     case lazy_tensors::PrimitiveType::S16:
-      values = Helpers::Range<lazy_tensors::int16>(
+      values = Helpers::Range<int16_t>(
           start.toShort(), end.toShort(), step.toShort());
       break;
     case lazy_tensors::PrimitiveType::U16:
-      values = Helpers::Range<lazy_tensors::uint16>(start.toInt(), end.toInt(),
+      values = Helpers::Range<uint16_t>(start.toInt(), end.toInt(),
                                                     step.toInt());
       break;
     case lazy_tensors::PrimitiveType::S32:
-      values = Helpers::Range<lazy_tensors::int32>(start.toInt(), end.toInt(),
+      values = Helpers::Range<int32_t>(start.toInt(), end.toInt(),
                                                    step.toInt());
       break;
     case lazy_tensors::PrimitiveType::U32:
-      values = Helpers::Range<lazy_tensors::uint32>(
+      values = Helpers::Range<uint32_t>(
           start.toLong(), end.toLong(), step.toLong());
       break;
     case lazy_tensors::PrimitiveType::S64:
-      values = Helpers::Range<lazy_tensors::int64>(start.toLong(), end.toLong(),
+      values = Helpers::Range<int64_t>(start.toLong(), end.toLong(),
                                                    step.toLong());
       break;
     case lazy_tensors::PrimitiveType::U64:
-      values = Helpers::Range<lazy_tensors::uint64>(
+      values = Helpers::Range<uint64_t>(
           start.toLong(), end.toLong(), step.toLong());
       break;
     default:
@@ -247,7 +247,7 @@ NodePtr BroadcastTensors(OpList tensors) {
   return node;
 }
 
-NodePtr Identity(lazy_tensors::int64 lines, lazy_tensors::int64 cols,
+NodePtr Identity(int64_t lines, int64_t cols,
                  lazy_tensors::PrimitiveType element_type) {
   return GenericOp(
       OpKind(at::aten::eye),

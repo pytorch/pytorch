@@ -17,10 +17,10 @@ struct SelectInfo {
            stride == ref.stride;
   }
 
-  lazy_tensors::int64 dim = 0;
-  lazy_tensors::int64 start = 0;
-  lazy_tensors::int64 end = 0;
-  lazy_tensors::int64 stride = 0;
+  int64_t dim = 0;
+  int64_t start = 0;
+  int64_t end = 0;
+  int64_t stride = 0;
 };
 
 struct AsStridedInfo {
@@ -28,8 +28,8 @@ struct AsStridedInfo {
     return offset == ref.offset && stride == ref.stride;
   }
 
-  std::vector<lazy_tensors::int64> stride;
-  lazy_tensors::int64 offset = 0;
+  std::vector<int64_t> stride;
+  int64_t offset = 0;
 };
 
 struct DiagonalInfo {
@@ -37,9 +37,9 @@ struct DiagonalInfo {
     return offset == ref.offset && dim1 == ref.dim1 && dim2 == ref.dim2;
   }
 
-  lazy_tensors::int64 offset = 0;
-  lazy_tensors::int64 dim1 = 0;
-  lazy_tensors::int64 dim2 = 1;
+  int64_t offset = 0;
+  int64_t dim1 = 0;
+  int64_t dim2 = 1;
 };
 
 struct ViewInfo {
@@ -59,7 +59,7 @@ struct ViewInfo {
   ViewInfo(Type view_type, lazy_tensors::Shape shape,
            lazy_tensors::Shape source_shape);
   ViewInfo(Type view_type, lazy_tensors::Shape source_shape,
-           std::vector<lazy_tensors::int64> permutation);
+           std::vector<int64_t> permutation);
   ViewInfo(Type view_type, const lazy_tensors::Shape& source_shape,
            SelectInfo select);
   ViewInfo(Type view_type, lazy_tensors::Shape shape,
@@ -80,11 +80,11 @@ struct ViewInfo {
   lazy_tensors::Shape shape;
   // In case of narrowing, the starting indices from where the narrow slice is
   // cut.
-  std::vector<lazy_tensors::int64> indices;
+  std::vector<int64_t> indices;
   // The shape of the source of this view.
   lazy_tensors::Shape source_shape;
   // The permutation to be used. If empty, this is not a permute operation.
-  std::vector<lazy_tensors::int64> permutation;
+  std::vector<int64_t> permutation;
   // Information used for sliced views.
   c10::optional<SelectInfo> select;
   // Information used for as_strided views.

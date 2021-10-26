@@ -11,14 +11,14 @@ namespace torch_lazy_tensors {
 namespace tensor_ops {
 
 LazyTensor Cross(const LazyTensor& input, const LazyTensor& other,
-                 c10::optional<lazy_tensors::int64> dim);
+                 c10::optional<int64_t> dim);
 
 LazyTensor MakeMatrixWithDiagonal(const LazyTensor& input,
-                                  lazy_tensors::int64 diagonal);
+                                  int64_t diagonal);
 
 
-LazyTensor Select(const LazyTensor& input, lazy_tensors::int64 dim,
-                  lazy_tensors::int64 index);
+LazyTensor Select(const LazyTensor& input, int64_t dim,
+                  int64_t index);
 
 }  // namespace tensor_ops
 }  // namespace torch_lazy_tensors

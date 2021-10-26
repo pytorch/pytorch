@@ -7,9 +7,9 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-Select::Select(const torch::lazy::Value& input, lazy_tensors::int64 dim,
-               lazy_tensors::int64 start, lazy_tensors::int64 end,
-               lazy_tensors::int64 stride)
+Select::Select(const torch::lazy::Value& input, int64_t dim,
+               int64_t start, int64_t end,
+               int64_t stride)
     : TsNode(ltc_select, {input},
            [&]() {
              return MakeSelectShape(ir::GetShapeFromTsValue(input), dim, start, end, stride);
@@ -33,20 +33,20 @@ std::string Select::ToString() const {
 }
 
 lazy_tensors::Shape Select::MakeSelectShape(const lazy_tensors::Shape& shape,
-                                            lazy_tensors::int64 dim,
-                                            lazy_tensors::int64 start,
-                                            lazy_tensors::int64 end,
-                                            lazy_tensors::int64 stride) {
-  lazy_tensors::int64 effective_stride = GetStride(start, end, stride);
+                                            int64_t dim,
+                                            int64_t start,
+                                            int64_t end,
+                                            int64_t stride) {
+  int64_t effective_stride = GetStride(start, end, stride);
   lazy_tensors::Shape select_shape(shape);
   select_shape.set_dimensions(
       dim, (end - start + effective_stride - 1) / effective_stride);
   return select_shape;
 }
 
-lazy_tensors::int64 Select::GetStride(lazy_tensors::int64 start,
-                                      lazy_tensors::int64 end,
-                                      lazy_tensors::int64 stride) {
+int64_t Select::GetStride(int64_t start,
+                                      int64_t end,
+                                      int64_t stride) {
   if (stride == 0) {
     LTC_CHECK_EQ(start, end);
     stride = 1;

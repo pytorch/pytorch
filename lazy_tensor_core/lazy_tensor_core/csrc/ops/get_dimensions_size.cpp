@@ -11,7 +11,7 @@ namespace ir {
 namespace ops {
 
 GetDimensionsSize::GetDimensionsSize(
-    const torch::lazy::Value& input, std::vector<lazy_tensors::int64> dimensions)
+    const torch::lazy::Value& input, std::vector<int64_t> dimensions)
     : TsNode(ltc_get_dimensions_size, {input},
            lazy_tensors::ShapeUtil::MakeShape(
                GetShapeDimensionType(/*device=*/nullptr), {}),

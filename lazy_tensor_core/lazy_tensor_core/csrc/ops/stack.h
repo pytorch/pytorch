@@ -8,16 +8,16 @@ namespace ops {
 
 class Stack : public TsNode {
  public:
-  Stack(OpList values, lazy_tensors::int64 dim);
+  Stack(OpList values, int64_t dim);
 
   std::string ToString() const override;
 
   NodePtr Clone(OpList operands) const override;
 
-  lazy_tensors::int64 dim() const { return dim_; };
+  int64_t dim() const { return dim_; };
 
  private:
-  lazy_tensors::int64 dim_;
+  int64_t dim_;
 };
 
 }  // namespace ops

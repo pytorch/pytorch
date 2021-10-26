@@ -35,7 +35,7 @@ void LoweringContext::AddParameter(const torch::lazy::Output& output, size_t ind
 }
 
 void LoweringContext::SetUpAlias(const lazy_tensors::ShapeIndex& output_index,
-                                 lazy_tensors::int64 param_number,
+                                 int64_t param_number,
                                  const lazy_tensors::ShapeIndex& param_index) {}
 
 }  // namespace ir

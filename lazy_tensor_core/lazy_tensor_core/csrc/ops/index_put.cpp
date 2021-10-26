@@ -6,7 +6,7 @@ namespace ir {
 namespace ops {
 
 IndexPut::IndexPut(const torch::lazy::Value& base, const torch::lazy::Value& indices,
-                   lazy_tensors::int64 start_dim, const torch::lazy::Value& values,
+                   int64_t start_dim, const torch::lazy::Value& values,
                    bool accumulate)
     : TsNode(OpKind(at::aten::index_put), {base, indices, values}, ir::GetShapeFromTsValue(base),
            /*num_outputs=*/1, torch::lazy::MHash(start_dim, accumulate)),

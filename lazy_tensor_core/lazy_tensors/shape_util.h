@@ -37,7 +37,7 @@ class ShapeIndex {
 class ShapeUtil {
  public:
   static int64 ElementsIn(const Shape& shape) {
-    return util::Multiply<lazy_tensors::int64>(shape.dimensions());
+    return util::Multiply<int64_t>(shape.dimensions());
   }
 
   static int64 ByteSizeOfPrimitiveType(PrimitiveType primitive_type) {

@@ -10,7 +10,7 @@ namespace ops {
 
 CollectivePermute::CollectivePermute(
     const torch::lazy::Value& input, const torch::lazy::Value& token,
-    std::vector<std::pair<lazy_tensors::int64, lazy_tensors::int64>>
+    std::vector<std::pair<int64_t, int64_t>>
         source_target_pairs)
     : TsNode(ltc_collective_permute, {input, token},
            /*num_outputs=*/2, torch::lazy::MHash(source_target_pairs)),

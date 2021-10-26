@@ -212,9 +212,9 @@ class DataCacheArena {
 class DeviceContextArena {
   struct DeviceContext {
     std::mutex lock;
-    std::map<lazy_tensors::int64, std::weak_ptr<LazyTensor::Data>> tensors_data;
-    lazy_tensors::uint64 seed = 101;
-    lazy_tensors::uint64 running_seed = 101;
+    std::map<int64_t, std::weak_ptr<LazyTensor::Data>> tensors_data;
+    uint64_t seed = 101;
+    uint64_t running_seed = 101;
     torch::lazy::Value seed_ir_value;
   };
 
@@ -255,8 +255,8 @@ class DeviceContextArena {
 
   torch::lazy::Value GetRngSeed(const Device& device) {
     static const at::ScalarType kSeedType = at::ScalarType::Long;
-    static const lazy_tensors::uint64 kSeedMul = 214013;
-    static const lazy_tensors::uint64 kSeedAdd = 2531011;
+    static const uint64_t kSeedMul = 214013;
+    static const uint64_t kSeedAdd = 2531011;
     DeviceContext* devctx = GetDeviceContext(device);
     std::lock_guard<std::mutex> lock(devctx->lock);
     if (!devctx->seed_ir_value) {
@@ -276,13 +276,13 @@ class DeviceContextArena {
     return devctx->seed_ir_value;
   }
 
-  lazy_tensors::uint64 GetRunningSeed(const Device& device) {
+  uint64_t GetRunningSeed(const Device& device) {
     DeviceContext* devctx = GetDeviceContext(device);
     std::lock_guard<std::mutex> lock(devctx->lock);
     return devctx->running_seed;
   }
 
-  void SetRngSeed(const Device& device, lazy_tensors::uint64 seed) {
+  void SetRngSeed(const Device& device, uint64_t seed) {
     DeviceContext* devctx = GetDeviceContext(device);
     std::lock_guard<std::mutex> lock(devctx->lock);
     devctx->seed = seed;
@@ -377,12 +377,12 @@ torch::lazy::Value LazyGraphExecutor::GetRngSeed(const Device& device) {
   return DeviceContextArena::Get()->GetRngSeed(device);
 }
 
-lazy_tensors::uint64 LazyGraphExecutor::GetRunningSeed(const Device& device) {
+uint64_t LazyGraphExecutor::GetRunningSeed(const Device& device) {
   return DeviceContextArena::Get()->GetRunningSeed(device);
 }
 
 void LazyGraphExecutor::SetRngSeed(const Device& device,
-                                   lazy_tensors::uint64 seed) {
+                                   uint64_t seed) {
   DeviceContextArena::Get()->SetRngSeed(device, seed);
 }
 
@@ -524,7 +524,7 @@ LazyGraphExecutor::SyncTensorCollection LazyGraphExecutor::CollectSyncTensors(
   std::vector<at::Tensor> at_tensors;
   std::vector<std::string> devices;
   std::vector<size_t> at_tensor_index;
-  std::unordered_set<lazy_tensors::int64> tensor_ids;
+  std::unordered_set<int64_t> tensor_ids;
   // The force_ltc_data controls aliasing compilation, so effectively the same
   // graph with on/off force_ltc_data should not match, hash wise.
   coll.hash = torch::lazy::MHash(config.force_ltc_data);
@@ -765,10 +765,10 @@ LazyGraphExecutor::LookupCachedCompile(const std::vector<LazyTensor>& tensors,
 void LazyGraphExecutor::BuildInputOutputAliases(
     const std::vector<LazyTensor>& tensors, c10::ArrayRef<size_t> indices,
     ir::LoweringContext* lowering_ctx) {
-  std::unordered_map<lazy_tensors::int64, size_t> output_tensor_id_map;
+  std::unordered_map<int64_t, size_t> output_tensor_id_map;
   for (size_t i = 0; i < indices.size(); ++i) {
     size_t tensor_index = indices[i];
-    lazy_tensors::int64 tensor_id = tensors[tensor_index].GetUniqueId();
+    int64_t tensor_id = tensors[tensor_index].GetUniqueId();
     output_tensor_id_map[tensor_id] = i;
   }
   const std::vector<lazy_tensors::ComputationClient::DataPtr>& parameters_data =
@@ -786,7 +786,7 @@ void LazyGraphExecutor::BuildInputOutputAliases(
         if (lazy_tensors::Shape(parameters_data[i]->shape()) == root_shape &&
             alias_map[output_index] < 0) {
           lowering_ctx->SetUpAlias(
-              {static_cast<lazy_tensors::int64>(output_index)}, i, {});
+              {static_cast<int64_t>(output_index)}, i, {});
           alias_map[output_index] = i;
 
           LTC_VLOG(6) << "Aliased paramter " << i << " with output "
@@ -1033,10 +1033,10 @@ LazyGraphExecutor::GatherTensorsData(
     const std::vector<LazyTensor>& tensors, c10::ArrayRef<size_t> indices,
     c10::ArrayRef<lazy_tensors::ComputationClient::DataPtr> tensors_data) {
   std::vector<lazy_tensors::ComputationClient::DataPtr> result_tensors_data;
-  std::unordered_map<lazy_tensors::int64, size_t> uid_index_map;
+  std::unordered_map<int64_t, size_t> uid_index_map;
   size_t indices_index = 0;
   for (size_t i = 0; i < tensors.size(); ++i) {
-    lazy_tensors::int64 tensor_id = tensors[i].GetUniqueId();
+    int64_t tensor_id = tensors[i].GetUniqueId();
     auto it = uid_index_map.find(tensor_id);
     if (it != uid_index_map.end()) {
       // Current tensor is a duplicate of a previously processed tensor that had

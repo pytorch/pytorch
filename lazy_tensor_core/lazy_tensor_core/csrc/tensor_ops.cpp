@@ -18,8 +18,8 @@ using torch::lazy::ScopePusher;
 // Returns the sub-tensor at the given index in the given dimension. Its rank
 // is one less than the input, in other words the singleton dimension is
 // squeezed out.
-LazyTensor IndexAcrossDims(const LazyTensor& input, lazy_tensors::int64 dim,
-                           lazy_tensors::int64 index) {
+LazyTensor IndexAcrossDims(const LazyTensor& input, int64_t dim,
+                           int64_t index) {
   return tensor_aten_ops::squeeze(
       tensor_aten_ops::slice(input, dim, index, index + 1, 1), dim);
 }
@@ -27,8 +27,8 @@ LazyTensor IndexAcrossDims(const LazyTensor& input, lazy_tensors::int64 dim,
 }  // namespace
 
 LazyTensor Cross(const LazyTensor& input, const LazyTensor& other,
-                 c10::optional<lazy_tensors::int64> dim) {
-  lazy_tensors::int64 canonical_dim;
+                 c10::optional<int64_t> dim) {
+  int64_t canonical_dim;
   if (dim) {
     canonical_dim =
         Helpers::GetCanonicalDimensionIndex(*dim, input.shape().get().rank());
@@ -66,20 +66,20 @@ LazyTensor Cross(const LazyTensor& input, const LazyTensor& other,
 }
 
 LazyTensor MakeMatrixWithDiagonal(const LazyTensor& input,
-                                  lazy_tensors::int64 diagonal) {
-  lazy_tensors::int64 size = input.shape().get().dimensions(0);
+                                  int64_t diagonal) {
+  int64_t size = input.shape().get().dimensions(0);
   LazyTensor identity =
       tensor_aten_ops::eye(size, size, input.GetDevice(), input.dtype());
   auto padding =
       diagonal >= 0
-          ? std::vector<lazy_tensors::int64>{diagonal, 0, 0, diagonal}
-          : std::vector<lazy_tensors::int64>{0, -diagonal, -diagonal, 0};
+          ? std::vector<int64_t>{diagonal, 0, 0, diagonal}
+          : std::vector<int64_t>{0, -diagonal, -diagonal, 0};
   return tensor_aten_ops::constant_pad_nd(tensor_aten_ops::mul(identity, input),
                                           padding, 0);
 }
 
-LazyTensor Select(const LazyTensor& input, lazy_tensors::int64 dim,
-                  lazy_tensors::int64 index) {
+LazyTensor Select(const LazyTensor& input, int64_t dim,
+                  int64_t index) {
   auto shape = input.shape();
   dim = Helpers::GetCanonicalDimensionIndex(dim, shape.get().rank());
   LazyTensor result = tensor_aten_ops::narrow(input, dim, index, 1);

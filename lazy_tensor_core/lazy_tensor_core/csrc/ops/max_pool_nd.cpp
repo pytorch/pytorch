@@ -8,7 +8,7 @@ namespace ir {
 namespace ops {
 namespace {
 
-c10::Symbol MaxPoolNdSymbol(lazy_tensors::int64 spatial_dim_count) {
+c10::Symbol MaxPoolNdSymbol(int64_t spatial_dim_count) {
   switch (spatial_dim_count) {
     case 1:
       return at::aten::max_pool1d;
@@ -24,10 +24,10 @@ c10::Symbol MaxPoolNdSymbol(lazy_tensors::int64 spatial_dim_count) {
 
 }  // namespace
 
-MaxPoolNd::MaxPoolNd(const torch::lazy::Value& input, lazy_tensors::int64 spatial_dim_count,
-                     std::vector<lazy_tensors::int64> kernel_size,
-                     std::vector<lazy_tensors::int64> stride,
-                     std::vector<lazy_tensors::int64> padding, bool ceil_mode)
+MaxPoolNd::MaxPoolNd(const torch::lazy::Value& input, int64_t spatial_dim_count,
+                     std::vector<int64_t> kernel_size,
+                     std::vector<int64_t> stride,
+                     std::vector<int64_t> padding, bool ceil_mode)
     : TsNode(torch::lazy::OpKind(MaxPoolNdSymbol(spatial_dim_count)), {input},
            /*num_outputs=*/2,
            torch::lazy::MHash(spatial_dim_count, kernel_size, stride,

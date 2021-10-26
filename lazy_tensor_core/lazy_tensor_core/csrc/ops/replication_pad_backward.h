@@ -11,16 +11,16 @@ namespace ops {
 class ReplicationPadBackward : public TsNode {
  public:
   ReplicationPadBackward(const torch::lazy::Value& gard_output, const torch::lazy::Value& input,
-                         std::vector<lazy_tensors::int64> padding);
+                         std::vector<int64_t> padding);
 
   NodePtr Clone(OpList operands) const override;
 
   std::string ToString() const override;
 
-  const std::vector<lazy_tensors::int64>& padding() const { return padding_; }
+  const std::vector<int64_t>& padding() const { return padding_; }
 
  private:
-  std::vector<lazy_tensors::int64> padding_;
+  std::vector<int64_t> padding_;
 };
 
 }  // namespace ops

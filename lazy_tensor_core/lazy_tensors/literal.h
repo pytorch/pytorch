@@ -78,14 +78,14 @@ class Literal {
 };
 
 template <>
-inline void Literal::Set<lazy_tensors::uint32>(
-    lazy_tensors::Span<const int64> multi_index, lazy_tensors::uint32 value) {
+inline void Literal::Set<uint32_t>(
+    lazy_tensors::Span<const int64> multi_index, uint32_t value) {
   Set<int64_t>(multi_index, static_cast<int64_t>(value));
 }
 
 template <>
-inline void Literal::Set<lazy_tensors::uint64>(
-    lazy_tensors::Span<const int64> multi_index, lazy_tensors::uint64 value) {
+inline void Literal::Set<uint64_t>(
+    lazy_tensors::Span<const int64> multi_index, uint64_t value) {
   LTC_LOG(FATAL) << "Not implemented yet.";
 }
 

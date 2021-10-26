@@ -10,13 +10,13 @@ namespace ops {
 namespace {
 
 lazy_tensors::Shape NodeOutputShape(const torch::lazy::Value& input,
-                                    c10::ArrayRef<lazy_tensors::int64> size) {
+                                    c10::ArrayRef<int64_t> size) {
   return lazy_tensors::ShapeUtil::MakeShape(ir::GetShapeFromTsValue(input).element_type(), size);
 }
 
 }  // namespace
 
-Resize::Resize(const torch::lazy::Value& input, std::vector<lazy_tensors::int64> size)
+Resize::Resize(const torch::lazy::Value& input, std::vector<int64_t> size)
     : TsNode(torch::lazy::OpKind(at::aten::resize), {input},
            [&]() { return NodeOutputShape(input, size); },
            /*num_outputs=*/1, torch::lazy::MHash(size)),

@@ -8,7 +8,7 @@ namespace ir {
 namespace ops {
 
 ReflectionPad2d::ReflectionPad2d(const torch::lazy::Value& input,
-                                 std::vector<lazy_tensors::int64> padding)
+                                 std::vector<int64_t> padding)
     : TsNode(OpKind(at::aten::reflection_pad2d), {input},
            /*num_outputs=*/1, torch::lazy::MHash(padding)),
       padding_(std::move(padding)) {

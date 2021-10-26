@@ -71,7 +71,7 @@ class LoweringContext {
   // this information, but it can be used to implement efficient in-place
   // operations in a semantically functional model.
   virtual void SetUpAlias(const lazy_tensors::ShapeIndex& output_index,
-                          lazy_tensors::int64 param_number,
+                          int64_t param_number,
                           const lazy_tensors::ShapeIndex& param_index);
 
   size_t GetEmittedNodeCount() const { return emit_status_.size(); }

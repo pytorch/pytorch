@@ -64,12 +64,12 @@ class CounterData {
  public:
   CounterData() : value_(0) {}
 
-  void AddValue(lazy_tensors::int64 value) { value_ += value; }
+  void AddValue(int64_t value) { value_ += value; }
 
-  lazy_tensors::int64 Value() const { return value_; }
+  int64_t Value() const { return value_; }
 
  private:
-  std::atomic<lazy_tensors::int64> value_;
+  std::atomic<int64_t> value_;
 };
 
 class MetricsArena {
@@ -157,9 +157,9 @@ class Counter {
  public:
   explicit Counter(std::string name);
 
-  void AddValue(lazy_tensors::int64 value) { GetData()->AddValue(value); }
+  void AddValue(int64_t value) { GetData()->AddValue(value); }
 
-  lazy_tensors::int64 Value() const { return GetData()->Value(); }
+  int64_t Value() const { return GetData()->Value(); }
 
  private:
   CounterData* GetData() const;

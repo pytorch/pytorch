@@ -8,7 +8,7 @@ namespace ir {
 namespace ops {
 namespace {
 
-c10::Symbol MaxUnpoolNdBackwardSymbol(lazy_tensors::int64 spatial_dim_count) {
+c10::Symbol MaxUnpoolNdBackwardSymbol(int64_t spatial_dim_count) {
   switch (spatial_dim_count) {
     case 2:
       return at::aten::max_unpool2d_backward;
@@ -24,7 +24,7 @@ c10::Symbol MaxUnpoolNdBackwardSymbol(lazy_tensors::int64 spatial_dim_count) {
 
 MaxUnpoolNdBackward::MaxUnpoolNdBackward(
     const torch::lazy::Value& grad_output, const torch::lazy::Value& input, const torch::lazy::Value& indices,
-    std::vector<lazy_tensors::int64> output_size)
+    std::vector<int64_t> output_size)
     : TsNode(torch::lazy::OpKind(MaxUnpoolNdBackwardSymbol(output_size.size())),
            {grad_output, input, indices},
            /*num_outputs=*/1, torch::lazy::MHash(output_size)),

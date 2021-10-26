@@ -10,7 +10,7 @@ namespace ir {
 namespace ops {
 
 Nms::Nms(const torch::lazy::Value& boxes, const torch::lazy::Value& scores, const torch::lazy::Value& score_threshold,
-         const torch::lazy::Value& iou_threshold, lazy_tensors::int64 output_size)
+         const torch::lazy::Value& iou_threshold, int64_t output_size)
     : TsNode(ltc_nms, {boxes, scores, score_threshold, iou_threshold},
            /*num_outputs=*/2, torch::lazy::MHash(output_size)),
       output_size_(output_size) {

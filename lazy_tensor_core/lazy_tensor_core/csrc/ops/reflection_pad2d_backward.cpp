@@ -9,7 +9,7 @@ namespace ops {
 
 ReflectionPad2dBackward::ReflectionPad2dBackward(
     const torch::lazy::Value& grad_output, const torch::lazy::Value& input,
-    std::vector<lazy_tensors::int64> padding)
+    std::vector<int64_t> padding)
     : TsNode(OpKind(at::aten::reflection_pad2d_backward), {grad_output, input},
            /*num_outputs=*/1, torch::lazy::MHash(padding)),
       padding_(std::move(padding)) {

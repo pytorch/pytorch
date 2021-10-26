@@ -9,7 +9,7 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-CumProd::CumProd(const torch::lazy::Value& input, lazy_tensors::int64 dim,
+CumProd::CumProd(const torch::lazy::Value& input, int64_t dim,
                  c10::optional<at::ScalarType> dtype)
     : TsNode(torch::lazy::OpKind(at::aten::cumprod), {input},
            /*num_outputs=*/1,

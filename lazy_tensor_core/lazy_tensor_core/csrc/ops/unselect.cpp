@@ -10,8 +10,8 @@ namespace ir {
 namespace ops {
 
 Unselect::Unselect(const torch::lazy::Value& target, const torch::lazy::Value& source,
-                   lazy_tensors::int64 dim, lazy_tensors::int64 start,
-                   lazy_tensors::int64 end, lazy_tensors::int64 stride)
+                   int64_t dim, int64_t start,
+                   int64_t end, int64_t stride)
     : TsNode(ltc_unselect, {target, source}, ir::GetShapeFromTsValue(target),
            /*num_outputs=*/1,
            torch::lazy::MHash(dim, start, end, stride)),

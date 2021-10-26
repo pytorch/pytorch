@@ -9,10 +9,10 @@ namespace ops {
 
 ConvolutionBackwardOverrideable::ConvolutionBackwardOverrideable(
     const torch::lazy::Value& grad_output, const torch::lazy::Value& input, const torch::lazy::Value& weight,
-    std::vector<lazy_tensors::int64> stride,
-    std::vector<lazy_tensors::int64> padding,
-    std::vector<lazy_tensors::int64> dilation, bool transposed,
-    std::vector<lazy_tensors::int64> output_padding, lazy_tensors::int64 groups)
+    std::vector<int64_t> stride,
+    std::vector<int64_t> padding,
+    std::vector<int64_t> dilation, bool transposed,
+    std::vector<int64_t> output_padding, int64_t groups)
     : TsNode(torch::lazy::OpKind(at::aten::convolution_backward_overrideable),
            {grad_output, input, weight},
            /*num_outputs=*/3,
@@ -30,10 +30,10 @@ ConvolutionBackwardOverrideable::ConvolutionBackwardOverrideable(
 
 ConvolutionBackwardOverrideable::ConvolutionBackwardOverrideable(
     const torch::lazy::Value& grad_output, const torch::lazy::Value& input, const torch::lazy::Value& weight,
-    std::vector<lazy_tensors::int64> stride,
-    std::vector<lazy_tensors::int64> padding,
-    std::vector<lazy_tensors::int64> dilation, bool transposed,
-    std::vector<lazy_tensors::int64> output_padding, lazy_tensors::int64 groups,
+    std::vector<int64_t> stride,
+    std::vector<int64_t> padding,
+    std::vector<int64_t> dilation, bool transposed,
+    std::vector<int64_t> output_padding, int64_t groups,
     std::array<bool, 3> output_mask)
     : ConvolutionBackwardOverrideable(grad_output, input, weight, stride,
                                       padding, dilation, transposed,

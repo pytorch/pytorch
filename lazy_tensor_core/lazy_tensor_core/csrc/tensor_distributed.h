@@ -10,29 +10,29 @@ namespace lazy_tensor_distributed {
 //////////////////////////////////////////////////////////////////////////////
 std::pair<LazyTensor, torch::lazy::Value> all_reduce(
     const LazyTensor& input, const torch::lazy::Value& token, AllReduceType reduce_type,
-    double scale, std::vector<std::vector<lazy_tensors::int64>> groups);
+    double scale, std::vector<std::vector<int64_t>> groups);
 
 torch::lazy::Value all_reduce_(LazyTensor& input, const torch::lazy::Value& token,
                       AllReduceType reduce_type, double scale,
-                      std::vector<std::vector<lazy_tensors::int64>> groups);
+                      std::vector<std::vector<int64_t>> groups);
 
 torch::lazy::Value all_reduce(std::vector<LazyTensor>* inputs, const torch::lazy::Value& token,
                      AllReduceType reduce_type, double scale,
-                     std::vector<std::vector<lazy_tensors::int64>> groups);
+                     std::vector<std::vector<int64_t>> groups);
 
 std::pair<LazyTensor, torch::lazy::Value> all_to_all(
     const LazyTensor& input, const torch::lazy::Value& token,
-    lazy_tensors::int64 split_dimension, lazy_tensors::int64 concat_dimension,
-    lazy_tensors::int64 split_count,
-    std::vector<std::vector<lazy_tensors::int64>> groups);
+    int64_t split_dimension, int64_t concat_dimension,
+    int64_t split_count,
+    std::vector<std::vector<int64_t>> groups);
 
 std::pair<LazyTensor, torch::lazy::Value> collective_permute(
     const LazyTensor& input, const torch::lazy::Value& token,
-    std::vector<std::pair<lazy_tensors::int64, lazy_tensors::int64>>
+    std::vector<std::pair<int64_t, int64_t>>
         source_target_pairs);
 
 LazyTensor get_dimensions_size(const LazyTensor& input,
-                               std::vector<lazy_tensors::int64> dimensions);
+                               std::vector<int64_t> dimensions);
 
 }  // namespace lazy_tensor_distributed
 }  // namespace torch_lazy_tensors

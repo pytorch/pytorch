@@ -11,18 +11,18 @@ namespace ops {
 class GetDimensionsSize : public TsNode {
  public:
   GetDimensionsSize(const torch::lazy::Value& input,
-                    std::vector<lazy_tensors::int64> dimensions);
+                    std::vector<int64_t> dimensions);
 
   NodePtr Clone(OpList operands) const override;
 
   std::string ToString() const override;
 
-  const std::vector<lazy_tensors::int64>& dimensions() const {
+  const std::vector<int64_t>& dimensions() const {
     return dimensions_;
   }
 
  private:
-  std::vector<lazy_tensors::int64> dimensions_;
+  std::vector<int64_t> dimensions_;
 };
 
 }  // namespace ops

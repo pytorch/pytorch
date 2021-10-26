@@ -7,7 +7,7 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-ArgMax::ArgMax(const torch::lazy::Value& input, lazy_tensors::int64 dim, bool keepdim)
+ArgMax::ArgMax(const torch::lazy::Value& input, int64_t dim, bool keepdim)
     : TsNode(torch::lazy::OpKind(at::aten::argmax), {input},
            /*num_outputs=*/1, torch::lazy::MHash(dim, keepdim)),
       dim_(dim),

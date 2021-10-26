@@ -7,7 +7,7 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-ArgMin::ArgMin(const torch::lazy::Value& input, lazy_tensors::int64 dim, bool keepdim)
+ArgMin::ArgMin(const torch::lazy::Value& input, int64_t dim, bool keepdim)
     : TsNode(torch::lazy::OpKind(at::aten::argmin), {input},
            /*num_outputs=*/1, torch::lazy::MHash(dim, keepdim)),
       dim_(dim),

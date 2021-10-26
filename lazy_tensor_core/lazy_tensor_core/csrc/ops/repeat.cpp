@@ -7,7 +7,7 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-Repeat::Repeat(const torch::lazy::Value& input, std::vector<lazy_tensors::int64> repeats)
+Repeat::Repeat(const torch::lazy::Value& input, std::vector<int64_t> repeats)
     : TsNode(torch::lazy::OpKind(at::aten::repeat), {input},
            /*num_outputs=*/1, torch::lazy::MHash(repeats)),
       repeats_(std::move(repeats)) {

@@ -7,7 +7,7 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-Cat::Cat(OpList values, lazy_tensors::int64 dim)
+Cat::Cat(OpList values, int64_t dim)
     : TsNode(torch::lazy::OpKind(at::aten::cat), values,
            /*num_outputs=*/1, torch::lazy::MHash(dim)),
       dim_(dim) {

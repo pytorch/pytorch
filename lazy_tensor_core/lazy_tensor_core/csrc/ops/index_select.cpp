@@ -7,7 +7,7 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-IndexSelect::IndexSelect(const torch::lazy::Value& input, lazy_tensors::int64 dim,
+IndexSelect::IndexSelect(const torch::lazy::Value& input, int64_t dim,
                          const torch::lazy::Value& index)
     : TsNode(torch::lazy::OpKind(at::aten::index_select), {input, index},
            /*num_outputs=*/1, torch::lazy::MHash(dim)),

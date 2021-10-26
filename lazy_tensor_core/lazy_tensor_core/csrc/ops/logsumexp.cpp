@@ -10,7 +10,7 @@ namespace ir {
 namespace ops {
 
 Logsumexp::Logsumexp(const torch::lazy::Value& input,
-                     std::vector<lazy_tensors::int64> dimensions,
+                     std::vector<int64_t> dimensions,
                      bool keep_reduced_dimensions)
     : TsNode(torch::lazy::OpKind(at::aten::logsumexp), {input},
            /*num_outputs=*/1,

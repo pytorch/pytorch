@@ -7,7 +7,7 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-Expand::Expand(const torch::lazy::Value& input, std::vector<lazy_tensors::int64> size,
+Expand::Expand(const torch::lazy::Value& input, std::vector<int64_t> size,
                bool is_scalar_expand)
     : TsNode(torch::lazy::OpKind(at::aten::expand), {input},
            /*num_outputs=*/1,

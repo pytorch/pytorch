@@ -7,10 +7,10 @@ namespace torch_lazy_tensors {
 class LazyGraphExecutor {
  public:
   struct DeviceDataInfo : public lazy_tensors::client::Data::Info {
-    DeviceDataInfo(lazy_tensors::int64 tensor_id, bool read_only)
+    DeviceDataInfo(int64_t tensor_id, bool read_only)
         : tensor_id(tensor_id), read_only(read_only) {}
 
-    lazy_tensors::int64 tensor_id = 0;
+    int64_t tensor_id = 0;
     bool read_only = false;
   };
 
@@ -21,8 +21,8 @@ class LazyGraphExecutor {
 
   // Seed for random generator
   torch::lazy::Value GetRngSeed(const Device& device);
-  lazy_tensors::uint64 GetRunningSeed(const Device& device);
-  void SetRngSeed(const Device& device, lazy_tensors::uint64 seed);
+  uint64_t GetRunningSeed(const Device& device);
+  void SetRngSeed(const Device& device, uint64_t seed);
 
   void DeviceBarrier(const Device& device);
 
