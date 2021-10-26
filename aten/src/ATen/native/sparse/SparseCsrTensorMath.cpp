@@ -219,8 +219,8 @@ Tensor& addmm_out_sparse_csr_cpu(
       TORCH_CHECK(false, "Calling addmm on sparse CPU tensors requires compiling PyTorch with MKL. Please use PyTorch built with MKL.");
     }
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.layout() == kStrided);
-    AT_DISPATCH_FLOATING_TYPES(values.scalar_type(), "addmm_sparse_dense", [&] {
-        addmm_out_sparse_csr_native_cpu<scalar_t>(mat1, mat2, result, self_, alpha, beta);
+    AT_DISPATCH_FLOATING_TYPES(result.scalar_type(), "addmm_sparse_dense", [&] {
+        addmm_out_sparse_csr_native_cpu<scalar_t>(mat1, mat2, result, alpha, beta);
     });
 #else
   sparse::impl::mkl::addmm_out_sparse_csr(mat1, mat2, beta, alpha, result);
