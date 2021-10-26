@@ -38,7 +38,7 @@ c10::MaybeOwned<Tensor> prepare_dense_matrix_for_mkl(
 
   Args:
   * `tensor` - 2D strided Tensor.
-  * `row_major` - coltrol the memory layout.
+  * `row_major` - controls the memory layout.
 */
 c10::MaybeOwned<Tensor> prepare_dense_matrix_for_mkl(
     const Tensor& tensor,
