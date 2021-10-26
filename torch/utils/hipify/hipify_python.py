@@ -600,11 +600,6 @@ def is_pytorch_file(filepath):
     return False
 
 
-def is_cusparse_file(filepath):
-    if is_pytorch_file(filepath):
-        return "sparse" in filepath.lower()
-    return False
-
 def is_caffe2_gpu_file(filepath):
     if filepath.startswith("c10/cuda"):
         return True
@@ -678,8 +673,7 @@ class Trie():
 CAFFE2_TRIE = Trie()
 CAFFE2_MAP = {}
 PYTORCH_TRIE = Trie()
-PYTORCH_MAP: Dict[str, object] = {}
-PYTORCH_SPARSE_MAP = {}
+PYTORCH_MAP = {}
 for mapping in CUDA_TO_HIP_MAPPINGS:
     assert isinstance(mapping, Mapping)
     for src, value in mapping.items():
@@ -687,12 +681,7 @@ for mapping in CUDA_TO_HIP_MAPPINGS:
         meta_data = value[1:]
         if constants.API_CAFFE2 not in meta_data:
             PYTORCH_TRIE.add(src)
-            # if src is already in PYTORCH_MAP and dst belongs to API_SPARSE
-            # do not overwrite PYTORCH_MAP, store dst separately
-            if constants.API_SPARSE in meta_data and PYTORCH_MAP.get(src, False):
-                PYTORCH_SPARSE_MAP[src] = dst
-            else:
-                PYTORCH_MAP[src] = dst
+            PYTORCH_MAP[src] = dst
         if constants.API_PYTORCH not in meta_data:
             CAFFE2_TRIE.add(src)
             CAFFE2_MAP[src] = dst
@@ -743,11 +732,7 @@ def preprocessor(
     if is_pytorch_extension:
         output_source = RE_PYTORCH_PREPROCESSOR.sub(pt_repl, output_source)
     else:
-        if is_cusparse_file(filepath):
-            def pt_sparse_repl(m):
-                return PYTORCH_SPARSE_MAP.get(m.group(0), pt_repl(m))
-            output_source = RE_PYTORCH_PREPROCESSOR.sub(pt_sparse_repl, output_source)
-        elif is_pytorch_file(filepath):
+        if is_pytorch_file(filepath):
             output_source = RE_PYTORCH_PREPROCESSOR.sub(pt_repl, output_source)
         else:
             def c2_repl(m):
