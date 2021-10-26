@@ -287,10 +287,12 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
       indices.data_ptr<index_t>(), sorted_indices.data_ptr<index_t>(),
       range.data_ptr<index_t>(), orig_indices.data_ptr<index_t>(),
       num_indices, false/*, 0, nbits*/);
+  });
 
-    if (scale_grad_by_freq) {
-      count = at::empty_like(indices, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  if (scale_grad_by_freq) {
+    count = at::empty_like(indices, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 #if CUB_SUPPORTS_SCAN_BY_KEY()
+    AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_dense_backward_cuda", [&] () {
       cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
       // Compute an increasing sequence per unique item in sortedIndices:
@@ -315,11 +317,13 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
         at_cuda_detail::cub::Max(),
         num_indices
       );
+    });
 #else
+    AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_dense_backward_cuda", [&] () {
       embedding_dense_backward_cuda_scan<index_t>(sorted_indices, count);
+    });
 #endif
-    }
-  });
+  }
 
   return embedding_backward_cuda_kernel(grad, orig_indices,
       sorted_indices, count, num_weights, padding_idx);
