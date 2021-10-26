@@ -576,39 +576,6 @@ at::Tensor LazyNativeFunctions::ne(const at::Tensor& self,
       bridge::GetLtcTensor(self), bridge::GetLtcTensor(other)));
 }
 
-at::Tensor LazyNativeFunctions::nll_loss_backward(const at::Tensor& grad_output,
-    const at::Tensor& self, const at::Tensor& target,
-    const c10::optional<at::Tensor>& weight, int64_t reduction,
-    int64_t ignore_index, const at::Tensor& total_weight)
-{
-  LTC_FN_COUNTER("lazy::");
-
-  auto selfTensor = bridge::GetLtcTensor(self);
-  return bridge::AtenFromLtcTensor(lazy_tensor_aten_ops::nll_loss_backward(
-      bridge::GetLtcTensor(grad_output), selfTensor,
-      bridge::GetLtcTensor(target),
-      bridge::GetOrCreateLtcTensor(weight, selfTensor.GetDevice()), reduction,
-      ignore_index, bridge::GetLtcTensor(total_weight)));
-}
-
-std::tuple<at::Tensor,at::Tensor>
-LazyNativeFunctions::nll_loss_forward(const at::Tensor& self,
-    const at::Tensor& target, const c10::optional<at::Tensor>& weight,
-    int64_t reduction, int64_t ignore_index)
-{
-  LTC_FN_COUNTER("lazy::");
-
-  auto selfTensor = bridge::GetLtcTensor(self);
-  auto lazyOutputs = lazy_tensor_aten_ops::nll_loss_forward(
-      selfTensor, bridge::GetLtcTensor(target),
-      bridge::GetOrCreateLtcTensor(weight, selfTensor.GetDevice()), reduction,
-      ignore_index);
-
-  return std::make_tuple(
-      bridge::AtenFromLtcTensor(std::get<0>(lazyOutputs)),
-      bridge::AtenFromLtcTensor(std::get<1>(lazyOutputs)));
-}
-
 // We need to explicitly override max pooling operators and just call the
 // fallback for them because we've customized the autograd function for them
 // (backward needs saved indices from forward).

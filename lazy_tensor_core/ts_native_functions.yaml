@@ -28,6 +28,8 @@ full_codegen:
   - mv
   - native_layer_norm
   - native_layer_norm_backward
+  - nll_loss_backward
+  - nll_loss_forward
   - rsqrt
   - sigmoid
   - smooth_l1_loss
@@ -61,8 +63,6 @@ supported:
   - mul.Scalar
   - native_batch_norm
   - native_batch_norm_backward
-  - nll_loss_backward
-  - nll_loss_forward
   - max_pool2d_with_indices
   - max_pool2d_with_indices_backward
   - max_pool3d_with_indices
