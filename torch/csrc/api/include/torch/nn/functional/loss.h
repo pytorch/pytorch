@@ -472,7 +472,9 @@ inline Tensor multilabel_soft_margin_loss(
     loss = loss * weight;
   }
 
-  loss = loss.sum(1) / input.size(1); // only return N loss values
+  auto class_dim = input.dim() - 1;
+  auto C = input.size(class_dim);
+  loss = loss.sum(class_dim) / C; // only return N loss values
 
   Tensor ret;
 
@@ -738,8 +740,8 @@ inline Tensor margin_ranking_loss(const Tensor& input1,
                                   double margin,
                                   MarginRankingLossFuncOptions::reduction_t reduction) {
   TORCH_CHECK(
-    input1.dim() != 0 && input2.dim() != 0 && target.dim() != 0,
-    "margin_ranking_loss does not support scalars, got sizes: "
+    input1.dim() == input2.dim() && input1.dim() == target.dim(),
+    "margin_ranking_loss : All input tensors should have same dimension but got sizes: "
     "input1: ", input1.sizes(), ", input2: ", input2.sizes(),
     ", target: ", target.sizes());
   return torch::margin_ranking_loss(input1, input2, target, margin,

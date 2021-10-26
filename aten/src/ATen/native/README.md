@@ -250,6 +250,13 @@ There is also another situation in which we use annotations, namely views.
   - `transpose(Tensor(a) self, int dim0, int dim1) -> Tensor(a)`
     An alias to the memory represented by `self` may be also returned, however it is not mutated.
 
+When a Tensor views are contained in a Tensor list, we need to represent that the output list
+contains Tensors that alias the input.
+  - `func: chunk(Tensor(a -> *) self, int chunks, int dim=0) -> Tensor[]`
+We assume lists contain memory which aliases the heap, so in order to correctly set up the aliasing
+relationship between the output and input, we annotate that the input Tensor enters the heap `(a -> *)`.
+For more details,
+
 We have some asserts to check whether a developer uses these annotations correctly and throw asserts
 if she doesn't. For example, any out function must use the `(a!)` annotation as described above.
  If this causes a lot of confusion please add @cpuhrsch to your PR.
