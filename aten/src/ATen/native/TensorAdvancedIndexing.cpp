@@ -173,6 +173,53 @@ TORCH_META_FUNC(scatter_add)
   scatter_meta_impl(*this, self, dim, index, src, "add");
 }
 
+TORCH_PRECOMPUTE_META_FUNC(index_copy)
+(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source) {
+  dim = maybe_wrap_dim(dim, self.dim());
+
+  TORCH_CHECK_INDEX(index.dim() < 2, "index_copy_(): Index should have dimension 1 or 0 (got ", index.dim(), ")");
+  at::assert_no_internal_overlap(self);
+  at::assert_no_overlap(self, index);
+  at::assert_no_overlap(self, source);
+
+  int64_t numIndices = index.numel();
+  if (source.dim() == 0 && numIndices != 1) {
+    TORCH_CHECK_INDEX(false, "index_copy_(): When source is scalar, index should have one element (got ", numIndices, ")");
+  } else if ((source.dim() != self.dim()) && (source.dim() != 0 && self.dim() != 0)) {
+    TORCH_CHECK_INDEX(false, "index_copy_(): When source and destination are not scalars, their dimensionality must match. Source dimensionality (",
+                   source.dim(), "), destination dimensionality (", self.dim(), ")");
+  }
+
+  TORCH_CHECK(index.scalar_type() == ScalarType::Long, "index_copy_(): Expected a long tensor for index, but got ", index.scalar_type());
+  TORCH_CHECK(self.scalar_type() == source.scalar_type(), "index_copy_(): self and source expected to have the same dtype, but got (self) ", self.scalar_type(), " and (source) ", source.scalar_type());
+  TORCH_CHECK(self.device() == source.device() && self.device() == index.device(),
+      "index_copy_(): self, index and source expected to be in the same device, but got (self) ",
+      self.device(), ", (index) ", index.device(), ", and (source) ", source.device());
+
+  // Check that source and destination slices have the same size
+  auto selfSlicedSizes = self.sizes().vec();
+  if (selfSlicedSizes.size() > 0) {
+    selfSlicedSizes.erase(selfSlicedSizes.begin() + dim);
+  }
+  auto sourceSlicedSizes = source.sizes().vec();
+  if (sourceSlicedSizes.size() > 0) {
+    sourceSlicedSizes.erase(sourceSlicedSizes.begin() + dim);
+  }
+  if (selfSlicedSizes.size() != sourceSlicedSizes.size() ||
+      !std::equal(selfSlicedSizes.begin(), selfSlicedSizes.end(),
+                  sourceSlicedSizes.begin())) {
+    std::stringstream ss;
+    ss << "index_copy_(): Source/destination tensor must have same slice shapes. ";
+    ss << "Destination slice shape: " << selfSlicedSizes << " at dimension " << dim;
+    ss << " and source slice shape: " << sourceSlicedSizes << " at dimension 0.";
+    TORCH_CHECK(false, ss.str());
+  }
+  TORCH_CHECK_INDEX(source.dim() == 0 || numIndices == source.size(dim),
+          "index_copy_(): Number of indices (", numIndices, ") should be equal to source.size(dim) (", source.size(dim), ")");
+
+  return TORCH_PRECOMPUTE_STRUCT(index_copy)().set_dim(dim);
+}
+
 } // namespace meta
 
 namespace native {
@@ -589,62 +636,24 @@ Tensor & index_put_(Tensor & self, const torch::List<c10::optional<Tensor>>& ind
   return at::_index_put_impl_(self, indices, value, accumulate, /*unsafe=*/false);
 }
 
-Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  dim = maybe_wrap_dim(dim, self.dim());
+TORCH_IMPL_FUNC(index_copy_out)
+(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Tensor& result) {
+    if (!result.is_same(self)) result.copy_(self);
 
-  TORCH_CHECK_INDEX(index.dim() < 2, "index_copy_(): Index should have dimension 1 or 0 (got ", index.dim(), ")");
-  at::assert_no_internal_overlap(self);
-  at::assert_no_overlap(self, index);
-  at::assert_no_overlap(self, source);
-
-  int64_t numIndices = index.numel();
-  if (source.dim() == 0 && numIndices != 1) {
-    TORCH_CHECK_INDEX(false, "index_copy_(): When source is scalar, index should have one element (got ", numIndices, ")");
-  } else if ((source.dim() != self.dim()) && (source.dim() != 0 && self.dim() != 0)) {
-    TORCH_CHECK_INDEX(false, "index_copy_(): When source and destination are not scalars, their dimensionality must match. Source dimensionality (",
-                   source.dim(), "), destination dimensionality (", self.dim(), ")");
-  }
-
-  TORCH_CHECK(index.scalar_type() == ScalarType::Long, "index_copy_(): Expected a long tensor for index, but got ", index.scalar_type())
-  TORCH_CHECK(self.scalar_type() == source.scalar_type(), "index_copy_(): self and source expected to have the same dtype, but got (self) ", self.scalar_type(), " and (source) ", source.scalar_type());
-  TORCH_CHECK(self.device() == source.device() && self.device() == index.device(),
-      "index_copy_(): self, index and source expected to be in the same device, but got (self) ",
-      self.device(), ", (index) ", index.device(), ", and (source) ", source.device());
-
-  // Check that source and destination slices have the same size
-  auto selfSlicedSizes = self.sizes().vec();
-  if (selfSlicedSizes.size() > 0) {
-    selfSlicedSizes.erase(selfSlicedSizes.begin() + dim);
-  }
-  auto sourceSlicedSizes = source.sizes().vec();
-  if (sourceSlicedSizes.size() > 0) {
-    sourceSlicedSizes.erase(sourceSlicedSizes.begin() + dim);
-  }
-  if (selfSlicedSizes.size() != sourceSlicedSizes.size() ||
-      !std::equal(selfSlicedSizes.begin(), selfSlicedSizes.end(),
-                  sourceSlicedSizes.begin())) {
-    std::stringstream ss;
-    ss << "index_copy_(): Source/destination tensor must have same slice shapes. ";
-    ss << "Destination slice shape: " << selfSlicedSizes << " at dimension " << dim;
-    ss << " and source slice shape: " << sourceSlicedSizes << " at dimension 0.";
-    TORCH_CHECK(false, ss.str());
-  }
-  TORCH_CHECK_INDEX(source.dim() == 0 || numIndices == source.size(dim),
-          "index_copy_(): Number of indices (", numIndices, ") should be equal to source.size(dim) (", source.size(dim), ")");
-
-  // See Note [Enabling Deterministic Operations]
-  if (self.device().type() == DeviceType::CUDA && globalContext().deterministicAlgorithms()){
-    torch::List<c10::optional<Tensor>> indices;
-    indices.reserve(dim + 1);
-    for (const auto i: c10::irange(dim)) {
-      (void)i;
-      indices.emplace_back();
+    // See Note [Enabling Deterministic Operations]
+    if (result.device().type() == DeviceType::CUDA && globalContext().deterministicAlgorithms()){
+        torch::List<c10::optional<Tensor>> indices;
+        indices.reserve(dim + 1);
+        for (const auto i: c10::irange(dim)) {
+          (void)i;
+          indices.emplace_back();
+        }
+        indices.emplace_back(index);
+        result.index_put_(indices, source, false);
+        return;
     }
-    indices.emplace_back(index);
-    return self.index_put_(indices, source, false);
-  }
 
-  return at::_index_copy_(self, dim, index, source);
+    at::_index_copy_(const_cast<Tensor&>(result), dim, index, source);
 }
 
 Tensor & _index_copy_impl_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
@@ -703,9 +712,9 @@ Tensor & _index_copy_impl_(Tensor & self, int64_t dim, const Tensor & index, con
   return self;
 }
 
-Tensor index_copy(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  return self.clone(at::MemoryFormat::Preserve).index_copy_(dim, index, source);
-}
+/* Tensor index_copy(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) { */
+/*   return self.clone(at::MemoryFormat::Preserve).index_copy_(dim, index, source); */
+/* } */
 
 
 Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source, const Scalar &alpha) {
