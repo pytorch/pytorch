@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
+#include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
 
@@ -15,42 +17,41 @@ StaticModule makeStaticModuleFromScript(const std::string& script) {
 
 } // namespace
 
-/**
- * Test that StaticModule correctly initializes the set of always alive values
- * containing: 1) Inputs/Outputs 2) Constants 3) Aliases of (1) and (2)
- */
-TEST(StaticModule, ExternalValues) {
-  const std::string src = R"JIT(
-        def forward(self, a, b):
-            a_alias = a.view(a.size())
-            inputs_list = [a, b]
-            return a_alias + b + 1, inputs_list
-    )JIT";
-  auto sm = makeStaticModuleFromScript(src);
+// Test that StaticModule::value_group groups values of the graph into
+// 1) Inputs/Constants and their aliases 2) Outputs and their aliases.
+TEST(StaticModule, ValueGroup) {
+  const std::string src = R"IR(
+    graph(%input0 : Tensor, %input1 : Tensor):
+      # Constants.
+      %0 : int = prim::Constant[value=1]()
+      # Internal values.
+      %1 : Tensor = aten::add(%input0, %input1, %0)
+      # This includes aliases of output.
+      %2 : Tensor = aten::add(%input0, %1, %0)
+      # This includes output.
+      %3 : (Tensor) = prim::TupleConstruct(%2)
+      return (%3)
+    )IR";
+  auto input_graph = std::make_shared<torch::jit::Graph>();
+  torch::jit::parseIR(src, input_graph.get());
+  torch::jit::StaticModule sm(input_graph);
+  const Graph& graph = sm.graph();
+  std::vector<const Node*> nodes(graph.nodes().begin(), graph.nodes().end());
+  const auto& value_group = sm.value_group();
 
-  const auto& external_values = sm.external_values();
-  const auto& graph = sm.graph();
-
-  auto value_is_always_alive = [&external_values](const Value* v) {
-    return external_values.find(v) != external_values.end();
-  };
-
-  for (const Value* v : graph.inputs()) {
-    EXPECT_TRUE(value_is_always_alive(v));
+  std::vector<const Value*> expected_input_aliases{graph.inputs()[0], graph.inputs()[1], nodes[0]->output()};
+  for (auto* value : expected_input_aliases) {
+    EXPECT_TRUE(value_group.isExternalAlias(value));
   }
-  for (const Value* v : graph.outputs()) {
-    EXPECT_TRUE(value_is_always_alive(v));
-  }
 
-  for (const Node* n : graph.nodes()) {
-    if (n->kind() == prim::Constant ||
-        // In the graph above, a view on an input is created.
-        n->kind() == aten::view ||
-        // We also create a list of the inputs.
-        n->kind() == prim::ListConstruct) {
-      EXPECT_TRUE(value_is_always_alive(n->output()));
-    }
+  std::vector<const Value*> expected_output_aliases{graph.outputs()[0], nodes[2]->output()};
+  for (auto* value : expected_output_aliases) {
+    EXPECT_TRUE(value_group.isOutputAlias(value));
   }
+  EXPECT_FALSE(value_group.isAlwaysAlive(nodes[1]->output()));
+  EXPECT_TRUE(value_group.isAlwaysAlive(graph.inputs()[0]));
+  EXPECT_TRUE(value_group.isAlwaysAlive(graph.inputs()[1]));
+  EXPECT_TRUE(value_group.isAlwaysAlive(graph.outputs()[0]));
 }
 
 TEST(StaticModule, IsOptimizableContainerType_NonOptimizableInputs) {
@@ -111,4 +112,23 @@ TEST(StaticModule, IsOptimizableContainerType_CanUseOutVariant) {
       EXPECT_FALSE(sm.is_optimizable_container_type(n));
     }
   }
+}
+
+// Test operator() with rvalue inputs
+TEST(StaticModule, RValueInputs) {
+  const std::string src = R"JIT(
+    def forward(self, x):
+        y = torch.relu(x)
+        return y.clone()
+  )JIT";
+  auto sm = makeStaticModuleFromScript(src);
+
+  std::vector<IValue> input{at::randn({1})};
+
+  auto expected = sm(input, {});
+  auto actual = sm(std::move(input), {});
+
+  EXPECT_TRUE(expected.isTensor());
+  EXPECT_TRUE(actual.isTensor());
+  EXPECT_TRUE(expected.toTensor().equal(actual.toTensor()));
 }

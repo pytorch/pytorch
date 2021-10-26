@@ -95,6 +95,23 @@ graph():
 interp = TRTInterpreter(split_mod._run_on_acc_0, InputTensorSpec.from_tensors(inputs))
 engine, input_names, output_names = interp.run()
 trt_mod = TRTModule(engine, input_names, output_names)
+split_mod._run_on_acc_0 = trt_mod
 
 cuda_inputs = [input.cuda() for input in inputs]
+split_mod.cuda()
+lowered_model_output = split_mod(*cuda_inputs)
+
+# Make sure the results match
+model.cuda()
+regular_model_output = model(*cuda_inputs)
+torch.testing.assert_close(lowered_model_output, regular_model_output.to(torch.float16), atol=3e-3, rtol=1e-2)
+
+# We can utilize the trt profiler to print out the time spend on each layer.
+trt_mod.enable_profiling()
 trt_mod(*cuda_inputs)
+'''
+Reformatting CopyNode for Input Tensor 0 to LayerType.FULLY_CONNECTED_acc_ops.linear_linear_1: 0.027392ms
+LayerType.FULLY_CONNECTED_acc_ops.linear_linear_1: 0.023072ms
+PWN(ActivationType.RELU_acc_ops.relu_relu_1): 0.008928ms
+'''
+trt_mod.disable_profiling()
