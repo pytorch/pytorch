@@ -12,6 +12,7 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/op_replacement.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
@@ -81,6 +82,7 @@ void OptimizeGraph(
     const StaticModuleOptions& opts) {
   GRAPH_DUMP("Before optimizations: ", graph);
   Inline(*graph);
+  ReplaceOpsWithUpgraders(graph);
   ConstantPropagation(graph);
   Canonicalize(graph);
   ConstantPropagation(graph);
