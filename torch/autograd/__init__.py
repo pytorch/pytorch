@@ -313,3 +313,8 @@ from torch._C._autograd import (_ProfilerResult, _KinetoEvent,
                                 _prepare_profiler, _enable_profiler, _disable_profiler)
 
 from . import profiler
+
+def register_py_tensor_class_for_device(device, cls):
+    if not isinstance(cls, type):
+        raise RuntimeError("cls isn't a typeinfo object")
+    torch._C._autograd._register_py_class_for_device(device, cls)
