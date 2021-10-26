@@ -2571,6 +2571,44 @@ def sample_inputs_histogram(op_info, device, dtype, requires_grad):
 
     return sample_inputs
 
+def sample_inputs_histogramdd(op_info, device, dtype, requires_grad):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    sizes = ((S, S), (S, S, S), (S, 1, S), (S, 0, S))
+    bin_ct_patterns = ((1, 1, 1, 1, 1), (2, 3, 2, 3, 2), (3, 2, 3, 2, 3))
+
+    sample_inputs = []
+    for size, bin_ct_pattern, weighted, density in product(sizes, bin_ct_patterns, [False, True], [False, True]):
+        input_tensor = make_arg(size)
+        bin_ct = bin_ct_pattern[:size[-1]]
+        weight_tensor = make_arg(size[:-1]) if weighted else None
+
+        sample_inputs.append(SampleInput(input_tensor, args=(bin_ct,),
+                                         kwargs=dict(weight=weight_tensor, density=density)))
+
+        bins_tensor = [make_arg(ct + 1) for ct in bin_ct]
+        sample_inputs.append(SampleInput(input_tensor, args=(bins_tensor,),
+                                         kwargs=dict(weight=weight_tensor, density=density)))
+
+    return sample_inputs
+
+def sample_inputs_bincount(op_info, device, dtype, requires_grad):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    sample_inputs = []
+
+    for size, weighted in product((S, M), [False, True]):
+        input_tensor = torch.randint(0, size, (size,), dtype=dtype, device=device)
+        weight_tensor = make_arg((size,)) if weighted else None
+
+        max_val = int(input_tensor.max().item())
+
+        for minlength in [0, max_val // 2, max_val, 2 * max_val]:
+            sample_inputs.append(SampleInput(input_tensor,
+                                             kwargs=dict(weights=weight_tensor, minlength=minlength)))
+
+    return sample_inputs
+
 def sample_inputs_bucketize(op_info, device, dtype, requires_grad):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
@@ -3990,6 +4028,14 @@ def sample_inputs_householder_product(op_info, device, dtype, requires_grad, **k
 
         SampleInput(make_tensor((S, S), device, dtype, low=-2, high=2, requires_grad=requires_grad),
                     args=(make_tensor((0,), device, dtype, low=None, high=None, requires_grad=requires_grad),)),
+
+        # m = n = S, k = S - 2
+        SampleInput(make_tensor((S, S), device, dtype, low=-2, high=2, requires_grad=requires_grad),
+                    args=(make_tensor((S - 2,), device, dtype, low=None, high=None, requires_grad=requires_grad),)),
+
+        # m = S, n = S -1, k = S - 2
+        SampleInput(make_tensor((S, S - 1), device, dtype, low=-2, high=2, requires_grad=requires_grad),
+                    args=(make_tensor((S - 2,), device, dtype, low=None, high=None, requires_grad=requires_grad),)),
     )
 
     return samples
@@ -4160,7 +4206,7 @@ def sample_inputs_linalg_solve_triangular(op_info, device, dtype, requires_grad=
     ks = (1, 3, 0)
 
     def gen_inputs():
-        for b, n, k left, upper, uni in product(bs, ns, ks, product((True, False), repeat=3)):
+        for b, n, k, (left, upper, uni) in product(bs, ns, ks, product((True, False), repeat=3)):
             with torch.no_grad():
                 if b == 1:
                     A = make_arg((n, n)) if left else make_arg((k, k))
@@ -4182,7 +4228,7 @@ def sample_inputs_linalg_solve_triangular(op_info, device, dtype, requires_grad=
             if requires_grad:
                 for grad_A, grad_B in product((True, False), repeat=2):
                     # Either A or B needs to have a gradient
-                    if not grad_A and not grad_B
+                    if not grad_A and not grad_B:
                         continue
                     A.requires_grad_(grad_A)
                     B.requires_grad_(grad_B)
@@ -4348,7 +4394,7 @@ def sample_inputs_cov(op_info, device, dtype, requires_grad, **kwargs):
     for t in _generate_correlation_inputs(device, dtype, requires_grad):
         inputs.append(SampleInput(t))
         num_observations = t.numel() if t.ndimension() < 2 else t.size(1)
-        fweights = make_tensor((num_observations,), device, torch.int, low=0, high=10, requires_grad=requires_grad)
+        fweights = make_tensor((num_observations,), device, torch.int, low=1, high=10, requires_grad=requires_grad)
         aweights = make_tensor((num_observations,), device, torch.float, low=0, high=1, requires_grad=requires_grad)
         for correction, fw, aw in product(range(num_observations), [None, fweights], [None, aweights]):
             inputs.append(SampleInput(t, kwargs={'correction': correction, 'fweights': fw, 'aweights': aw}))
@@ -7890,6 +7936,7 @@ op_db: List[OpInfo] = [
            # TODO: backward uses in-place operations that vmap doesn't like
            check_batched_grad=False,
            check_batched_gradgrad=False,
+           supports_forward_ad=True,
            sample_inputs_func=sample_inputs_householder_product,
            decorators=[skipCUDAIfNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack]),
     OpInfo('linalg.lstsq',
@@ -8148,6 +8195,10 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            aliases=('linalg.matrix_exp',),
            sample_inputs_func=sample_inputs_matrix_exp,
+           # Needs to construct a 2nx2n matrix by copy_ ing into it
+           check_batched_grad=False,
+           check_batched_gradgrad=False,
+           supports_forward_ad=True,
            supports_out=False,
            ),
     OpInfo('matmul',
@@ -8725,11 +8776,6 @@ op_db: List[OpInfo] = [
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
-           skips=(
-               # RuntimeError: deepEquals(input.iValue, deepCopiedInput) INTERNAL ASSERT FAILED at
-               # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":142, please report a bug to PyTorch
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-           ),
            sample_inputs_func=sample_inputs_batch_norm),
     # This variant tests batch_norm with cuDNN disabled only on CUDA devices
     OpInfo('nn.functional.batch_norm',
@@ -8738,11 +8784,6 @@ op_db: List[OpInfo] = [
            dtypesIfCPU=empty_types(),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
-           skips=(
-               # RuntimeError: deepEquals(input.iValue, deepCopiedInput) INTERNAL ASSERT FAILED at
-               # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":142, please report a bug to PyTorch
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-           ),
            decorators=[onlyCUDA, disablecuDNN],
            sample_inputs_func=sample_inputs_batch_norm),
     # We have to add 2 OpInfo entry for `igamma` and `igammac`.First is the
@@ -10119,9 +10160,29 @@ op_db: List[OpInfo] = [
                #                                          ~~~~~~ <--- HERE
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
            )),
+    OpInfo('histogramdd',
+           dtypes=_dispatch_dtypes(),  # histogramdd is only implemented on CPU
+           dtypesIfCPU=floating_types(),
+           sample_inputs_func=sample_inputs_histogramdd,
+           supports_autograd=False,
+           skips=(
+               # JIT tests don't work with Tensor keyword arguments
+               # https://github.com/pytorch/pytorch/issues/58507
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+           )),
+    OpInfo('bincount',
+           dtypes=integral_types_and(),
+           sample_inputs_func=sample_inputs_bincount,
+           supports_out=False,
+           supports_autograd=False,
+           skips=(
+               # JIT tests don't work with Tensor keyword arguments
+               # https://github.com/pytorch/pytorch/issues/58507
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+           )),
     OpInfo('bucketize',
-           dtypes=all_types_and(torch.bfloat16),
-           dtypesIfCUDA=all_types(),
+           dtypes=all_types_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=all_types_and(torch.float16),
            sample_inputs_func=sample_inputs_bucketize,
            supports_autograd=False,
            skips=(
@@ -10731,6 +10792,8 @@ op_db: List[OpInfo] = [
             # Does not work with lambda
             # Raises : JIT Test does not execute any logic
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            # Reference: https://github.com/pytorch/pytorch/issues/67084
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view', device_type='cuda'),
         ),
         supports_out=False,
     ),
@@ -11101,6 +11164,30 @@ op_db: List[OpInfo] = [
                          'TestReductions', 'test_reference_masked'),
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-03)}),
                          'TestReductions', 'test_ref_small_input'),
+        ],
+        sample_inputs_func=sample_inputs_masked_reduction
+    ),
+    ReductionOpInfo(
+        '_masked.prod',
+        ref=reference_reduction_numpy(np.prod),
+        method_variant=None,
+        identity=1,
+        nan_policy='propagate',
+        supports_out=False,
+        promotes_int_to_int64=True,
+        # FIXME: "prod_cpu" not implemented for 'BFloat16'
+        # FIXME: "prod_cpu" not implemented for 'Half'
+        dtypesIfCPU=all_types_and_complex_and(torch.bool),
+        dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+        skips=(
+            # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
+            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+        ),
+        decorators=[
+            DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-03, rtol=1e-02)}),
+                         'TestReductions', 'test_reference_masked'),
+            DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-03, rtol=1e-03)}),
+                         'TestReductions', 'test_ref_duplicate_values'),
         ],
         sample_inputs_func=sample_inputs_masked_reduction
     ),
