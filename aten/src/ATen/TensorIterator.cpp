@@ -36,8 +36,8 @@ inline void get_base_ptrs(char** ptrs, ArrayRef<OperandInfo> operands) {
 }
 
 inline void get_strides(int64_t* strides, ArrayRef<OperandInfo> operands, int64_t ndim) {
-  for (int64_t dim = 0; dim < ndim; ++dim) {
-    for (size_t arg = 0; arg < operands.size(); ++arg) {
+  for (const auto dim : c10::irange(ndim)) {
+    for (const auto arg : c10::irange(operands.size())) {
       *strides++ = operands[arg].stride_bytes[dim];
     }
   }
@@ -128,7 +128,19 @@ TensorIteratorConfig& TensorIteratorConfig::add_borrowed_input(const TensorBase&
 
 TensorIteratorConfig& TensorIteratorConfig::declare_static_dtype_and_device(ScalarType dtype, Device device) {
   TORCH_CHECK(!check_all_same_dtype_, "check_all_same_dtype(false) must be called before declare_static_dtype(...)");
-  static_dtype_and_device_ = c10::make_optional(std::make_pair(dtype, device));
+  static_dtype_ = dtype;
+  static_device_ = device;
+  return *this;
+}
+
+TensorIteratorConfig& TensorIteratorConfig::declare_static_dtype(ScalarType dtype) {
+  TORCH_CHECK(!check_all_same_dtype_, "check_all_same_dtype(false) must be called before declare_static_dtype(...)");
+  static_dtype_ = dtype;
+  return *this;
+}
+
+TensorIteratorConfig& TensorIteratorConfig::declare_static_device(Device device) {
+  static_device_ = device;
   return *this;
 }
 
@@ -214,7 +226,7 @@ void TensorIteratorBase::reorder_dimensions() {
   // returns 1 if the dim0 should come after dim1, -1 if dim0 should come
   // before dim1, and 0 if the comparison is ambiguous.
   auto should_swap = [&](size_t dim0, size_t dim1) {
-    for (int arg = 0; arg < ntensors(); arg++) {
+    for (const auto arg : c10::irange(ntensors())) {
       // ignore undefined or incorrectly sized tensors
       if (operands_[arg].stride_bytes.empty() || operands_[arg].will_resize) {
         continue;
@@ -251,7 +263,7 @@ void TensorIteratorBase::reorder_dimensions() {
   };
 
   // insertion sort with support for ambiguous comparisons
-  for (int i = 1; i < ndim(); i++) {
+  for (const auto i : c10::irange(1, ndim())) {
     int dim1 = i;
     for (int dim0 = i - 1; dim0 >= 0; dim0--) {
       int comparison = should_swap(perm_[dim0], perm_[dim1]);
@@ -327,12 +339,20 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
     //   the device it should be allocated on.
     if (!op.is_type_defined()) {
       TORCH_INTERNAL_ASSERT(op.is_output, "Found type undefined input tensor!");
-      if (config.static_dtype_and_device_.has_value()) {
-        op.target_dtype = config.static_dtype_and_device_->first;
-        op.device = config.static_dtype_and_device_->second;
+
+      if (config.static_dtype_.has_value()) {
+        op.target_dtype = config.static_dtype_.value();
+      } else {
+        has_undefined_outputs = true;
+      }
+
+      if (config.static_device_.has_value()) {
+        op.device = config.static_device_.value();
       } else {
         TORCH_INTERNAL_ASSERT(config.check_all_same_device_);
-        has_undefined_outputs = true;
+      }
+
+      if (has_undefined_outputs || !op.device.has_value()) {
         continue;
       }
     }
@@ -418,12 +438,21 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
   //   - checks that all tensors are on the same device, if requested
   //   - checks that the common dtype can safely cast to each output, if requested
   //   - creates temporaries for CPU operations, if needed and requested
+  common_device_ = common_device;
   int max_cpu_scalars_on_non_cpu = config.allow_cpu_scalars_ ? 1 : 0;
   int current_cpu_scalars_on_non_cpu = 0;
   for (auto& op : operands_) {
-    if (!op.is_type_defined()) {
+    bool is_type_defined = op.is_type_defined();
+    bool is_device_defined = op.is_device_defined();
+
+    if (!is_type_defined) {
       op.target_dtype = common_dtype_;
+    }
+    if (!is_device_defined) {
       op.device = common_device;
+    }
+
+    if (!is_type_defined && !is_device_defined) {
       continue;
     }
 
@@ -441,10 +470,10 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
         TORCH_CHECK(current_cpu_scalars_on_non_cpu < max_cpu_scalars_on_non_cpu,
                     "Trying to pass too many CPU scalars to non-CPU kernel!");
         ++current_cpu_scalars_on_non_cpu;
-      } else if (op.device != common_device) {
+      } else if (op.device.value() != common_device) {
         TORCH_CHECK(false,
                     "Expected all tensors to be on the same device, but "
-                    "found at least two devices, ", common_device, " and ", op.device, "!");
+                    "found at least two devices, ", common_device, " and ", op.device.value(), "!");
       }
     }
 
@@ -490,14 +519,13 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
         op.target_dtype = common_dtype_;
       }
     }
-    common_device_ = common_device;
   }
 }
 
 StrideVector TensorIteratorBase::compatible_stride(int element_size) const {
   auto stride = StrideVector();
   int64_t next_stride = element_size;
-  for (int dim = 0; dim < ndim(); dim++) {
+  for (const auto dim : c10::irange(ndim())) {
     stride.push_back(next_stride);
     next_stride *= shape_[dim];
   }
@@ -510,14 +538,14 @@ DimVector TensorIteratorBase::invert_perm(IntArrayRef input) const {
   TORCH_INTERNAL_ASSERT(!has_coalesced_dimensions_);
   TORCH_INTERNAL_ASSERT(input.size()==perm_.size());
   auto res = DimVector(input.size()); //no initialization needed, every value in res should be written to.
-  for (int dim = 0; dim < ndim(); dim++) {
+  for (const auto dim : c10::irange(ndim())) {
     res[perm_[dim]] = input[dim];
   }
   return res;
 }
 
 void TensorIteratorBase::allocate_or_resize_outputs() {
-  for (int i = 0; i < num_outputs_; i++) {
+  for (const auto i : c10::irange(num_outputs_)) {
     auto& op = operands_[i];
     if (!op.tensor_base().defined() || op.will_resize) {
       TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
@@ -525,8 +553,8 @@ void TensorIteratorBase::allocate_or_resize_outputs() {
       op.stride_bytes = compatible_stride(element_size);
       // check if permutation is just an inverted order
       bool inverted = true;
-      for (int i = 0; i < ndim(); i++) {
-        if (perm_[i] != ndim() - i - 1) {
+      for (const auto j : c10::irange(ndim())) {
+        if (perm_[j] != ndim() - j - 1) {
           inverted = false;
           break;
         }
@@ -539,7 +567,7 @@ void TensorIteratorBase::allocate_or_resize_outputs() {
         set_output(i, tensor_shape, {}, original_options(op), names_);
       } else {
         auto tensor_stride = invert_perm(op.stride_bytes);
-        for (int dim = 0; dim < ndim(); dim++) {
+        for (const auto dim : c10::irange(ndim())) {
           tensor_stride[dim] /= element_size;
         }
         set_output(i, tensor_shape, tensor_stride, original_options(op), names_);
@@ -593,7 +621,7 @@ void TensorIteratorBase::coalesce_dimensions() {
     if (shape0 == 1 || shape1 == 1) {
       return true;
     }
-    for (int i = 0; i < ntensors(); i++) {
+    for (const auto i : c10::irange(ntensors())) {
       auto& stride = operands_[i].stride_bytes;
       if (shape0 * stride[dim0] != stride[dim1]) {
         return false;
@@ -604,14 +632,14 @@ void TensorIteratorBase::coalesce_dimensions() {
 
   // replace each operands stride at dim0 with its stride at dim1
   auto replace_stride = [&](int dim0, int dim1) {
-    for (int i = 0; i < ntensors(); i++) {
+    for (const auto i : c10::irange(ntensors())) {
       auto& stride = operands_[i].stride_bytes;
       stride[dim0] = stride[dim1];
     }
   };
 
   int prev_dim = 0;
-  for (int dim = 1; dim < ndim(); dim++) {
+  for (const auto dim : c10::irange(1, ndim())) {
     if (can_coalesce(prev_dim, dim)) {
       if (shape_[prev_dim] == 1) {
         replace_stride(prev_dim, dim);
@@ -627,7 +655,7 @@ void TensorIteratorBase::coalesce_dimensions() {
   }
 
   shape_.resize(prev_dim + 1);
-  for (int i = 0; i < ntensors(); i++) {
+  for (const auto i : c10::irange(ntensors())) {
     operands_[i].stride_bytes.resize(ndim());
   }
   has_coalesced_dimensions_ = true;
@@ -670,7 +698,7 @@ void TensorIteratorBase::permute_dimensions(IntArrayRef perm) {
 
   auto reorder = [perm](IntArrayRef data) {
     auto res = DimVector(data.size(), 0);
-    for (size_t i = 0; i < perm.size(); i++) {
+    for (const auto i : c10::irange(perm.size())) {
       res[i] = data[perm[i]];
     }
     return res;
@@ -687,7 +715,7 @@ void TensorIteratorBase::permute_dimensions(IntArrayRef perm) {
 
 int64_t TensorIteratorBase::num_output_elements() const {
   int64_t elem = 1;
-  for (int dim = 0; dim < ndim(); dim++) {
+  for (const auto dim : c10::irange(ndim())) {
     if (operands_[0].stride_bytes[dim] != 0 || shape_[dim] == 0)  {
       elem *= shape_[dim];
     }
@@ -697,7 +725,7 @@ int64_t TensorIteratorBase::num_output_elements() const {
 
 int TensorIteratorBase::num_reduce_dims() const {
   int count = 0;
-  for (int dim = 0; dim < ndim(); dim++) {
+  for (const auto dim : c10::irange(ndim())) {
     if (operands_[0].stride_bytes[dim] == 0) {
       count++;
     }
@@ -760,7 +788,7 @@ bool TensorIteratorBase::is_contiguous() const {
 
 bool TensorIteratorBase::is_scalar(int arg) const {
   const auto& stride = operands_[arg].stride_bytes;
-  for (int i = 0; i < ndim(); i++) {
+  for (const auto i : c10::irange(ndim())) {
     if (stride[i] != 0 && shape_[i] != 1) {
       return false;
     }
@@ -815,7 +843,7 @@ void TensorIteratorBase::narrow(int dim, int64_t start, int64_t size) {
 
 void TensorIteratorBase::select_all_keeping_dim(int start_dim, IntArrayRef indices) {
   TORCH_INTERNAL_ASSERT(start_dim <= ndim());
-  for (int i = start_dim; i < ndim(); ++i) {
+  for (const auto i : c10::irange(start_dim, ndim())) {
     for (auto& op : operands_) {
       op.data = ((char*)op.data) + op.stride_bytes[i] * indices[i - start_dim];
     }
@@ -864,7 +892,7 @@ void TensorIteratorBase::build_comparison_op(
   // want the output to be bool. Otherwise (e.g. 'torch.eq(a, b, out=c)') we
   // don't coerce the output.
   if (!out.defined()) {
-    config.declare_static_dtype_and_device(kBool, a.device());
+    config.declare_static_dtype(kBool);
   }
 
   // Note [special-case bool outputs]
@@ -943,7 +971,8 @@ void TensorIteratorBase::build_unary_force_boolean_op(const TensorBase& out, con
   build(TensorIteratorConfig()
       .set_check_mem_overlap(true)
       .check_all_same_dtype(false)
-      .declare_static_dtype_and_device(at::kBool, a.device())
+      .declare_static_dtype(at::kBool)
+      .declare_static_device(a.device())
       .add_owned_output(out)
       .add_owned_input(a));
 }
@@ -1063,13 +1092,13 @@ void TensorIteratorBase::populate_operands(TensorIteratorConfig& config) {
 
 void TensorIteratorBase::mark_outputs() {
   // TODO: merge this into populate_operands
-  for (int i = 0; i < num_outputs_; i++) {
+  for (const auto i : c10::irange(num_outputs_)) {
     operands_[i].is_output = true;
     const auto& output = tensor(i);
     if (!output.defined()) continue;
 
     // check if output is also an input
-    for (int arg = num_outputs_; arg < ntensors(); arg++) {
+    for (const auto arg : c10::irange(num_outputs_, ntensors())) {
       const auto& input = tensor(arg);
       if (output.is_same(input)) {
         operands_[i].is_read_write = true;
@@ -1086,7 +1115,7 @@ void TensorIteratorBase::mark_resize_outputs(const TensorIteratorConfig& config)
   if (config.static_shape_.has_value()) {
     return;
   }
-  for (int i = 0; i < num_outputs_; i++) {
+  for (const auto i : c10::irange(num_outputs_)) {
     const auto& output = tensor(i);
     if (output.defined() && !output.sizes().equals(shape_)) {
       if (config.resize_outputs_ && !operands_[i].is_read_write) {
@@ -1104,11 +1133,11 @@ void TensorIteratorBase::compute_mem_overlaps(const TensorIteratorConfig& config
   if (!config.check_mem_overlap_) {
     return;
   }
-  for (int i = 0; i < num_outputs_; i++) {
+  for (const auto i : c10::irange(num_outputs_)) {
     const auto& output = tensor_base(i);
     if (!output.defined()) continue;
     assert_no_internal_overlap(output);
-    for (int j = num_outputs_; j < ntensors(); j++) {
+    for (const auto j : c10::irange(num_outputs_, ntensors())) {
       const auto& input = tensor_base(j);
       if (!input.is_same(output)) {
         assert_no_partial_overlap(output, input);
@@ -1164,7 +1193,7 @@ void TensorIteratorBase::compute_strides(const TensorIteratorConfig& config) {
           op.stride_bytes.resize(ndim(), 0);
       else
           op.stride_bytes.resize(ndim());
-      for (size_t i = 0; i < original_shape.size(); i++) {
+      for (const auto i : c10::irange(original_shape.size())) {
         // see NOTE: [Computing output strides]
         if (original_shape[i] == 1 && shape_[offset + i] !=1) {
           op.stride_bytes[offset + i] = 0;
@@ -1183,7 +1212,7 @@ bool TensorIteratorBase::can_use_32bit_indexing() const {
   }
   for (auto& op : operands_) {
     int64_t max_offset = 1;
-    for (int dim = 0; dim < ndim(); dim++) {
+    for (const auto dim : c10::irange(ndim())) {
       max_offset += (shape_[dim] - 1) * op.stride_bytes[dim];
     }
     if (max_offset > max_value) {
@@ -1245,7 +1274,7 @@ bool TensorIteratorBase::fast_set_up(const TensorIteratorConfig& config) {
   switch (setup_type) {
     case FastSetupType::CONTIGUOUS:
       {
-        for (int i = 0; i < num_outputs_; i++){
+        for (const auto i : c10::irange(num_outputs_)) {
           auto& op = operands_[i];
           if (!op.tensor_base().defined()) {
             TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
@@ -1256,7 +1285,7 @@ bool TensorIteratorBase::fast_set_up(const TensorIteratorConfig& config) {
       }
     case FastSetupType::CHANNELS_LAST:
       {
-        for (int i = 0; i < num_outputs_; i++){
+        for (const auto i : c10::irange(num_outputs_)) {
           auto& op = operands_[i];
           if (!op.tensor_base().defined()) {
             TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
@@ -1273,7 +1302,7 @@ bool TensorIteratorBase::fast_set_up(const TensorIteratorConfig& config) {
           if (tensor(i_defined).defined()) break;
         }
         TORCH_CHECK(i_defined >= 0, "Can not find a defined tensor when fast allocating memory to outputs");
-        for (int i = 0; i < num_outputs_; i++){
+        for (const auto i : c10::irange(num_outputs_)) {
           auto& op = operands_[i];
           if (!op.tensor_base().defined()) {
             TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
