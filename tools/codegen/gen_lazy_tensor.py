@@ -83,10 +83,14 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
     grouped_native_functions = get_grouped_native_functions(native_functions)
 
     def sort_native_function(f: Union[NativeFunctionsGroup, NativeFunction]) -> str:
+        """
+        We sort the native function because of the note in concat_map_codegen.
+        TODO(alanwaketan): Remove this sorting hack once all ops are grouped properly.
+        """
         func = f.functional.func if isinstance(f, NativeFunctionsGroup) else f.func
         return str(func.name.name)
 
-    grouped_native_functions.sort(key=sort_native_function)
+    grouped_native_functions = sorted(grouped_native_functions, key=sort_native_function)
     parsed_backend_yaml = parse_backend_yaml(source_yaml, grouped_native_functions, backend_indices)
     backend_key = parsed_backend_yaml.backend_key
     autograd_key = parsed_backend_yaml.autograd_key
@@ -100,13 +104,19 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
         """
         We code-gen for the functional variant, which is all we need for IR classes/lowerings/shape inferences, but we
         only code-gen additional entries for the inplace variant for the native functions.
-        Note: If xs is not sorted, there maybe an edge case when generating IR classes. Considering relu and relu_, if
+        Note: If xs is not sorted, there may be an edge case when generating IR classes. Considering relu and relu_, if
         we encounter relu_ before relu. we will then generate an IR class with op = at::aten::relu_ for both relu and
         relu_ which will cause problems for relu.
+        TODO(alanwaketan): Once all ops are grouped properly, we should no longer need this hack.
         """
         generated = set()
         for x in xs:
             f = x.functional if isinstance(x, NativeFunctionsGroup) else x
+            # For the 'or'd terms:
+            # 1. codegenInplaceVariant means we can generate the in-place variant corresponding items.
+            # 2. not f.func.name.name.inplace means the op is not a in-place variant, so we can generate the item.
+            # 3. f.func.name.name.base not in generated means even for in-place ops we still need to generate the item
+            # as if they were the functional variants for one time.
             if f.func.name in full_codegen and \
                (codegenInplaceVariant or not f.func.name.name.inplace or f.func.name.name.base not in generated):
                 generated.add(f.func.name.name.base)
@@ -152,11 +162,8 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
             'backend_namespace': 'torch_lazy_tensors',  # this is wrong
             'native_function_definitions':
             list(concat_map_codegen(
-                lambda f: dest.gen_lazy_nativefunc_definition(
-                    f,
-                    backend_indices[backend_dispatch_key],
-                    class_method_name=f'{backend_dispatch_key}NativeFunctions',
-                    node_base=node_base),
+                dest.GenLazyNativeFuncDefinition(f'{backend_dispatch_key}NativeFunctions',
+                                                 backend_indices[backend_dispatch_key]),
                 grouped_native_functions,
                 codegenInplaceVariant=True
             )),
