@@ -1962,6 +1962,18 @@ class TestTEFuser(JitTestCase):
             for fn in [bn, bn_no_weight, bn_no_bias, bn_neither]:
                 test(fn, (i, x))
 
+    def test_profiler(self):
+        @torch.jit.script
+        def test(x, y, z):
+            return x * y + z
+
+        args = [torch.randn(4) for _ in range(3)]
+        with torch.autograd.profiler.profile() as prof:
+            for _ in range(3):
+                test(*args)
+        self.assertIn("fused_mul_add", prof.table())
+
+
 works_list = [
     '__radd__',
     '__rdiv__',
