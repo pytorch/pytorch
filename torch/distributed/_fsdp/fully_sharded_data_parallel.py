@@ -35,7 +35,7 @@ if TYPE_CHECKING:
 @dataclass
 class CPUOffload:
     offload_params: bool = False
-    # TODO: Gradient offloading, state dict offloading, activation offloading
+    # TODO: state dict offloading, activation offloading
     # https://github.com/pytorch/pytorch/issues/67224
 
 
@@ -88,9 +88,12 @@ class FullyShardedDataParallel(nn.Module):
         process_group (Optional[ProcessGroup]):
             process group for sharding
         cpu_offload (Optional [CPUOffload]):
-            CPU offloading config. Currently, only parameter CPU offload is
-            supported. It can be enabled via passing in
-            cpu_offload=CPUOffload(offload_params=True)
+            CPU offloading config. Currently, only parameter and grad CPU
+            offload is supported. It can be enabled via passing in
+            cpu_offload=CPUOffload(offload_params=True). Note that this
+            currently implicitly enables gradient offloading to CPU in order for
+            params and grads to be on same device to work with optimizer. This
+            API is subject to change.
     """
 
     def __init__(
@@ -122,6 +125,10 @@ class FullyShardedDataParallel(nn.Module):
 
         self.numel_padded_per_param: List[int] = []
         self.cpu_offload = cpu_offload or CPUOffload()
+        if self.cpu_offload.offload_params:
+            print(" -- FSDP Initailzed with CPU offloading")
+        else:
+            print(" --- FSDP NOT using CPU")
 
         # Only handle params which are not already sharded. This enables
         # sharding individual layers of a Module, with an outer wrapper to
@@ -664,6 +671,16 @@ class FullyShardedDataParallel(nn.Module):
                 ), "Currently the only way for _is_sharded to be False is \
                     world_size == 1"
 
+            # Regardless of sharding or not, offload the grad to CPU if we are
+            # offloading params. This is so param and grad reside on same device
+            # which is needed for the optimizer step.
+            if self.cpu_offload.offload_params:
+                self._offload_to_cpu(param.grad)
+                assert (
+                    param.device == torch.device("cpu") and
+                    param.grad.device == torch.device("cpu")
+                ), f"Unexpected param/grad devices: {param.device}, {param.grad.device}"
+
             # After _post_backward_hook returns, orig_grad_data will eventually
             # go out of scope, at which point it could otherwise be freed for
             # further reuse by the main stream while the div/reduce_scatter/copy
@@ -762,8 +779,9 @@ class FullyShardedDataParallel(nn.Module):
                 if self.cpu_offload.offload_params:
                     # Move params to GPU if needed. Note that we don't use
                     # self._full_param_padded.device here because the attr is
-                    # not set always. However when it is set, the device is
-                    # always self.compute_device.
+                    # not set always, i.e. when world_size=1 and
+                    # p._is_sharded = False. However when it is set, the
+                    # device is always self.compute_device.
                     p.data = p.data.to(self.compute_device, non_blocking=True)
                 # e.g., when world_size == 1
                 if not p._is_sharded:  # type: ignore[attr-defined]
@@ -777,7 +795,6 @@ class FullyShardedDataParallel(nn.Module):
                     continue
                 else:
                     # If full param has not been rebuilt or has been freed, call all gather
-                    # Move params in CPU to CUDA for the all-gather.
                     p_data = p.data  # type: ignore[attr-defined]
                     p_full_size = p._full_param_padded.size()  # type: ignore[attr-defined]
                     assert (
@@ -812,7 +829,8 @@ class FullyShardedDataParallel(nn.Module):
 
     @torch.no_grad()
     def _free_full_params(self, params: Optional[List[Parameter]] = None) -> None:
-        """Free up storage for full parameters.
+        """
+        Free up storage for full parameters.
         """
         if params is None:
             params = self.params
@@ -838,7 +856,6 @@ class FullyShardedDataParallel(nn.Module):
            parameters back to CPU if we are CPU offloading."""
         if params is None:
             params = self.params
-
         for p in params:
             if self.cpu_offload.offload_params:
                 # Ensure local_shard resides in CPU if we are offloading params.

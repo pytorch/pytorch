@@ -1,6 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
-from contextlib import nullcontext
+from contextlib import suppress
 import sys
 from unittest import mock
 
@@ -28,10 +28,12 @@ class FSDPInitMode(Enum):
     CUDA_BEFORE = 1
     # Move model to CUDA after wrap
     CUDA_AFTER = 2
-    # Don't move movel to CUDA at all.
+    # Don't move model to CUDA at all.
     CUDA_NEVER = 3
 
-# get full params of a model recursively
+# get full params of a model recursively. Note that if CPU offloading, it will
+# also automatically move the parameters to GPU, due to _rebuild_full_params
+# call.
 def get_full_params(model, recurse=True):
     if recurse:
         # get all params for any nested FSDP instances.
@@ -59,10 +61,8 @@ class TransformerWithSharedParams(nn.Module):
         assert (
             d_vocab >= 12
         ), "dim of vocab should be larger than 12, as we use torch.arange(12) as input"
-        move_to_cuda = fsdp_init_mode == FSDPInitMode.CUDA_BEFORE
 
         self.embed_tokens = nn.Embedding(d_vocab, d_model)
-        self.embed_tokens = _maybe_cuda(self.embed_tokens, move_to_cuda)
         self.transformer = nn.Transformer(
             d_model=d_model,
             num_encoder_layers=2,
@@ -70,9 +70,7 @@ class TransformerWithSharedParams(nn.Module):
             dim_feedforward=8,
             dropout=0.1,
         )
-        self.transformer = _maybe_cuda(self.transformer, move_to_cuda)
         self.output_proj = nn.Linear(d_model, d_vocab)
-        self.output_proj = _maybe_cuda(self.output_proj, move_to_cuda)
 
         # share the embedding and output projection weights
         self.output_proj.weight = self.embed_tokens.weight
@@ -83,7 +81,8 @@ class TransformerWithSharedParams(nn.Module):
 
         self.bs = 2
         self.bn = torch.nn.BatchNorm1d(self.bs) if add_bn else torch.nn.Identity()
-        self.bn = _maybe_cuda(self.bn, move_to_cuda)
+        move_to_cuda = fsdp_init_mode == FSDPInitMode.CUDA_BEFORE
+        self = _maybe_cuda(self, move_to_cuda)
 
     def get_input(self, device):
         torch.manual_seed(1 + self.rank)  # keep everything deterministic
@@ -364,8 +363,9 @@ class FSDPTest(MultiProcessTestCase):
                 # Post-forward, if CPU offloading model param should be on CPU.
                 if cpu_offload_params and isinstance(model, FullyShardedDataParallel):
                     for p in model.parameters():
-                        if p._is_sharded:
-                            self.assertEqual(p.device, torch.device("cpu"))
+                        # Params should always be on CPU, even if
+                        # p._is_sharded=False
+                        self.assertEqual(p.device, torch.device("cpu"))
 
                 loss = model.module.get_loss(input, output).to(model_device)
             assert (
@@ -376,15 +376,11 @@ class FSDPTest(MultiProcessTestCase):
             # Post-backward, if CPU offloading model params should be on CPU.
             if cpu_offload_params and isinstance(model, FullyShardedDataParallel):
                 for p in model.parameters():
-                    if p._is_sharded:
-                        self.assertEqual(p.device, torch.device("cpu"))
-            # TODO: gradient offloading is not supported yet. As a result the
-            # optimizer requires user to manually move params or grads so that
-            # their device is the same, but this movement seems to create a
-            # an issue where the resulting params after optimization are
-            # slightly off for both FSDP and DDP. Needs more investigation.
-            if not cpu_offload_params:
-                optim.step()
+                    # Params should always be on CPU, even if
+                    # p._is_sharded=False
+                    self.assertEqual(p.device, torch.device("cpu"))
+            print(" -- STEPPING ---")
+            optim.step()
         if isinstance(model, FullyShardedDataParallel):
             model._assert_state(TrainingState_.IDLE)
         return loss.detach()
@@ -432,13 +428,13 @@ class FSDPTest(MultiProcessTestCase):
         # offload params.
         if fsdp_init_mode != FSDPInitMode.CUDA_AFTER and cpu_offload.offload_params:
             for p in model.parameters():
-                if p._is_sharded:  # see note in fsdp
-                    self.assertEqual(p.device, torch.device("cpu"), f"Mismatch, cpu offload is {cpu_offload}")
+                # Should be on CPU regardless of if param is sharded.
+                self.assertEqual(p.device, torch.device("cpu"), f"Mismatch, cpu offload is {cpu_offload}")
 
         only_check_err = fsdp_init_mode == FSDPInitMode.CUDA_AFTER and cpu_offload.offload_params
         ctx = (
             self.assertRaisesRegex(AssertionError, "Expected param to be on CPU")
-            if only_check_err else nullcontext()
+            if only_check_err else suppress()
         )
         with ctx:
             shard_loss = self._train_for_several_steps(
@@ -451,12 +447,24 @@ class FSDPTest(MultiProcessTestCase):
         # so skip the rest of this logic.
         if only_check_err:
             return
+        # If CPU offload, next call will change model params to GPU. Sanity
+        # check that params are on CPU before.
+        if cpu_offload.offload_params:
+            device_set = {p.device for p in model.parameters()}
+            self.assertEqual(
+                {torch.device("cpu")},
+                device_set,
+                f"Got device set {device_set}"
+            )
+        print("passed sanity check")
         get_full_params(model)
         shard_full_params = list(model.parameters())
 
         if cpu_offload.offload_params:
             shard_loss = shard_loss.cuda()
         torch.testing.assert_allclose(ref_loss, shard_loss)
+        print(f"devices {[p.device for p in model.parameters()]}, type {type(model)}")
+        print(" -- checking equality of params --")
         self.assertEqual(
             ref_full_params,
             shard_full_params,
