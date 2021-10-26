@@ -170,12 +170,11 @@ class TORCH_API StaticModule {
   using DefInfo = std::pair<int, int>;
 
  public:
-  std::vector<at::Tensor> operator()(const std::vector<at::Tensor>& inps);
-
-  // This interface only works if StaticModule was initialized
-  // with a TorchScript module, otherwise use the above interface
   c10::IValue operator()(
-      c10::ArrayRef<c10::IValue> args,
+      const std::vector<c10::IValue>& args,
+      const std::unordered_map<std::string, c10::IValue>& kwargs);
+  c10::IValue operator()(
+      std::vector<c10::IValue>&& args,
       const std::unordered_map<std::string, c10::IValue>& kwargs);
 
   const Graph& graph() const {
@@ -271,20 +270,19 @@ class TORCH_API StaticRuntime {
 
   C10_DISABLE_COPY_AND_ASSIGN(StaticRuntime);
 
-  std::vector<at::Tensor> operator()(const std::vector<at::Tensor>& inps);
-
-  // This interface only works if StaticModule was initialized
-  // with a TorchScript module, otherwise use the above interface
   c10::IValue operator()(
-      c10::ArrayRef<c10::IValue> args,
+      const std::vector<c10::IValue>& args,
+      const std::unordered_map<std::string, c10::IValue>& kwargs);
+  c10::IValue operator()(
+      std::vector<c10::IValue>&& args,
       const std::unordered_map<std::string, c10::IValue>& kwargs);
 
   void display_nodes(
-      c10::ArrayRef<c10::IValue> args,
+      const std::vector<c10::IValue>& args,
       const std::unordered_map<std::string, c10::IValue>& kwargs);
 
   void benchmark(
-      c10::ArrayRef<c10::IValue> args,
+      const std::vector<c10::IValue>& args,
       const std::unordered_map<std::string, c10::IValue>& kwargs,
       const int warmup_runs,
       const int main_runs,
@@ -292,7 +290,7 @@ class TORCH_API StaticRuntime {
       bool generate_ai_pep_output = false);
 
   float benchmark_model(
-      c10::ArrayRef<c10::IValue> args,
+      const std::vector<c10::IValue>& args,
       const std::unordered_map<std::string, c10::IValue>& kwargs,
       const int warmup_runs,
       const int main_runs);
@@ -315,7 +313,7 @@ class TORCH_API StaticRuntime {
   };
 
   IndividualMetrics benchmark_individual_ops(
-      c10::ArrayRef<c10::IValue> args,
+      const std::vector<c10::IValue>& args,
       const std::unordered_map<std::string, c10::IValue>& kwargs,
       const int warmup_runs,
       const int main_runs);
@@ -363,9 +361,17 @@ class TORCH_API StaticRuntime {
   bool isManagedOutputTensor(const IValue& ivalue);
 
  private:
+  template <typename IValueList>
+  c10::IValue run_impl(
+      IValueList&& args,
+      const std::unordered_map<std::string, c10::IValue>& kwargs);
+
   // helper method for copying input args/kwargs into inputs_
   void set_inputs(
-      c10::ArrayRef<c10::IValue> args,
+      const std::vector<c10::IValue>& args,
+      const std::unordered_map<std::string, c10::IValue>& kwargs);
+  void set_inputs(
+      std::vector<c10::IValue>&& args,
       const std::unordered_map<std::string, c10::IValue>& kwargs);
 
   // clean up owning refs of input IValues
@@ -455,6 +461,11 @@ class TORCH_API ProcessedNode {
 
   // Output is readwrite
   IValue& Output(size_t i) {
+    DCHECK(i < outputs_size_);
+    return outputs_[i];
+  }
+
+  const IValue& Output(size_t i) const {
     DCHECK(i < outputs_size_);
     return outputs_[i];
   }
