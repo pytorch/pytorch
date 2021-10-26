@@ -1,5 +1,3 @@
-# Owner(s): ["module: mkldnn"]
-
 import copy
 import itertools
 import functools
@@ -25,6 +23,7 @@ from torch.testing._internal.common_utils import TestCase, \
 gradcheck = functools.partial(gradcheck, check_batched_grad=False)
 gradgradcheck = functools.partial(gradgradcheck, check_batched_grad=False)
 
+HAS_FBGEMM = 'fbgemm' in torch.backends.quantized.supported_engines
 
 # For OneDNN bf16 path, OneDNN requires the cpu has intel avx512 with avx512bw,
 # avx512vl, and avx512dq at least. So we will skip the test case if one processor
@@ -1105,6 +1104,7 @@ class TestMkldnn(TestCase):
         model = torchvision.models.resnet.resnext50_32x4d(pretrained=False)
         self._test_imagenet_model(model)
 
+    @unittest.skipIf(not HAS_FBGEMM, "FBGEMM quantization backend is not available")
     def test_conv_int8(self):
         from torch.backends.mkldnn.quantization import functional as mqF
         import torch.nn.quantized.functional as qF
@@ -1136,6 +1136,7 @@ class TestMkldnn(TestCase):
                 qy_fbgemm = fbgemm_op_list[i](qx, qw, bias, scale=y_scale, zero_point=y_zero_point)
                 self.assertEqual(qy_mkldnn, qy_fbgemm)
 
+    @unittest.skipIf(not HAS_FBGEMM, "FBGEMM quantization backend is not available")
     def test_linear_int8(self):
         from torch.backends.mkldnn.quantization import functional as mqF
         import torch.nn.quantized.functional as qF
