@@ -4,6 +4,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/native/TensorFactories.h>
 
+#include <complex>
 #include <string>
 
 #include "lazy_tensors/shape.h"
@@ -102,16 +103,16 @@ inline void Literal::Set<lazy_tensors::half>(
 }
 
 template <>
-inline void Literal::Set<lazy_tensors::complex64>(
+inline void Literal::Set<std::complex<float>>(
     lazy_tensors::Span<const int64> multi_index,
-    lazy_tensors::complex64 value) {
+    std::complex<float> value) {
   LTC_LOG(FATAL) << "Not implemented yet.";
 }
 
 template <>
-inline void Literal::Set<lazy_tensors::complex128>(
+inline void Literal::Set<std::complex<double>>(
     lazy_tensors::Span<const int64> multi_index,
-    lazy_tensors::complex128 value) {
+    std::complex<double> value) {
   LTC_LOG(FATAL) << "Not implemented yet.";
 }
 

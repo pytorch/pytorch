@@ -1,4 +1,5 @@
 #pragma once
+#include <complex>
 
 #include <c10/util/Optional.h>
 
@@ -69,9 +70,9 @@ class ShapeUtil {
       case PrimitiveType::F64:
         return sizeof(double);
       case PrimitiveType::C64:
-        return sizeof(complex64);
+        return sizeof(std::complex<float>);
       case PrimitiveType::C128:
-        return sizeof(complex128);
+        return sizeof(std::complex<double>);
       default:
         LTC_LOG(FATAL) << "Unhandled primitive type " << primitive_type;
     }

@@ -3,6 +3,7 @@
 #include <c10/core/Scalar.h>
 #include <c10/util/Optional.h>
 
+#include <complex>
 #include <functional>
 #include <tuple>
 #include <vector>
@@ -71,10 +72,10 @@ class Helpers {
       case lazy_tensors::PrimitiveType::PRED:
         return lazy_tensors::LiteralUtil::CreateR0<bool>(scalar_value);
       case lazy_tensors::PrimitiveType::C64:
-        return lazy_tensors::LiteralUtil::CreateR0<lazy_tensors::complex64>(
+        return lazy_tensors::LiteralUtil::CreateR0<std::complex<float>>(
             scalar_value);
       case lazy_tensors::PrimitiveType::C128:
-        return lazy_tensors::LiteralUtil::CreateR0<lazy_tensors::complex128>(
+        return lazy_tensors::LiteralUtil::CreateR0<std::complex<double>>(
             scalar_value);
       default:
         return lazy_tensors::LiteralUtil::CreateR0<T>(scalar_value);

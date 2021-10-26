@@ -1,6 +1,7 @@
 #include "lazy_tensor_core/csrc/tensor_util.h"
 
 #include <algorithm>
+#include <complex>
 #include <cstring>
 #include <functional>
 #include <list>
@@ -539,11 +540,11 @@ void TensorToBufferSType(const at::Tensor& tensor,
           tensor, dest_shape, dest_buffer, dest_buffer_size, device);
       break;
     case lazy_tensors::PrimitiveType::C64:
-      TensorToBuffer<SType, lazy_tensors::complex64>(
+      TensorToBuffer<SType, std::complex<float>>(
           tensor, dest_shape, dest_buffer, dest_buffer_size, device);
       break;
     case lazy_tensors::PrimitiveType::C128:
-      TensorToBuffer<SType, lazy_tensors::complex128>(
+      TensorToBuffer<SType, std::complex<double>>(
           tensor, dest_shape, dest_buffer, dest_buffer_size, device);
       break;
     default:
@@ -745,10 +746,10 @@ at::Tensor MakeTensorFromLiteral(const lazy_tensors::Literal& literal,
       return LiteralToTensorHelper<uint64_t>(literal,
                                                          dest_element_type);
     case lazy_tensors::PrimitiveType::C64:
-      return LiteralToTensorHelper<lazy_tensors::complex64>(literal,
+      return LiteralToTensorHelper<std::complex<float>>(literal,
                                                             dest_element_type);
     case lazy_tensors::PrimitiveType::C128:
-      return LiteralToTensorHelper<lazy_tensors::complex128>(literal,
+      return LiteralToTensorHelper<std::complex<double>>(literal,
                                                              dest_element_type);
     default:
       LTC_ERROR() << "Unsupported literal type: " << literal.shape();
