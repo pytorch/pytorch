@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
+#include <ATen/cuda/DeviceUtils.cuh>
 #include <ATen/native/ForeachUtils.h>
 #include <ATen/native/cuda/ForeachFunctors.cuh>
 #include <ATen/native/cuda/MultiTensorApply.cuh>
@@ -40,7 +41,7 @@ __device__ __forceinline__ opmath_t reduce_block_into_lanes(
 
 #pragma unroll
     for (int i = 16; i >= lanes; i >>= 1) {
-      final = final + __shfl_down_sync(0xffffffff, final, i);
+      final = final + WARP_SHFL_DOWN(final, i);
     }
   }
 
