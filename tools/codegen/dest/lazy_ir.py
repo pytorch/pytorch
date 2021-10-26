@@ -139,73 +139,74 @@ def lazy_tensor_decls(value_types: List[NamedCType]) -> str:
             raise AssertionError("TODO not sure if there are other valid types to handle here")
     return "\n    ".join(lazy_tensor_decls)
 
+@dataclass(frozen=True)
+class GenLazyNativeFuncDefinition:
+    class_method_name: str
+    backend_index: BackendIndex
 
-def gen_lazy_nativefunc_definition(func: NativeFunction, backend_index: BackendIndex,
-                                   class_method_name: str, node_base: str) -> List[str]:
-    sig = kernel_signature(func, backend_index)
+    @method_with_native_function
+    def __call__(self, func: NativeFunction) -> List[str]:
+        sig = kernel_signature(func, self.backend_index)
 
-    # Lazy IR stuff
-    schema = LazyIrSchema(func.func)
-    all_types = schema.filtered_types()
-    value_types = schema.filtered_types(values=True, scalars=False)
-    scalar_types = schema.filtered_types(values=False, scalars=True)
-    returns_length = len(schema.returns)
+        # Lazy IR stuff
+        schema = LazyIrSchema(func.func)
+        all_types = schema.filtered_types()
+        value_types = schema.filtered_types(values=True, scalars=False)
+        scalar_types = schema.filtered_types(values=False, scalars=True)
+        returns_length = len(schema.returns)
 
-    get_device_str = f"""auto device = bridge::GetLtcDevice({", ".join([f"{t.name}" for t in value_types])});"""
-    lazy_tensor_decls_str = lazy_tensor_decls(value_types)
-    node_ctor_input_str = node_ctor_inputs(schema)
+        get_device_str = f"""auto device = bridge::GetLtcDevice({", ".join([f"{t.name}" for t in value_types])});"""
+        lazy_tensor_decls_str = lazy_tensor_decls(value_types)
+        node_ctor_input_str = node_ctor_inputs(schema)
 
-    # call the meta kernel if it exists, to compute output shape/dtype for our IR
-    if func.structured or func.structured_delegate is not None:
-        meta_out = """std::vector<std::vector<int64_t>> out_shape{out_meta.sizes().vec()};
-    std::vector<c10::ScalarType> out_dtype{out_meta.scalar_type()};"""
+        # call the meta kernel if it exists, to compute output shape/dtype for our IR
+        if func.structured or func.structured_delegate is not None:
+            meta_out = """std::vector<std::vector<int64_t>> out_shape{out_meta.sizes().vec()};
+        std::vector<c10::ScalarType> out_dtype{out_meta.scalar_type()};"""
+            if returns_length > 1:
+                meta_out = """auto out_shape = CreateComputationShapeFromMetaTensors(out_meta);
+        auto out_dtype = CreateDTypeFromMetaTensors(out_meta);"""
+
+            meta_str = f"""auto out_meta = at::meta::{schema.aten_name}({', '.join(str(t.name) for t in all_types)});
+        {meta_out}"""
+        else:
+            shape_sig = ComputeShapeSignature(func)
+            meta_str = f"""
+        auto out_shape = {shape_sig.shape_call};
+        auto out_dtype = {shape_sig.dtype_call};"""
+
+        node_str = f"""auto node = torch::lazy::MakeNode<ir::ops::{schema.node_name}>({node_ctor_input_str},
+                                                                                      out_dtype, out_shape);"""
+
+        assert len(value_types) > 0, f"Only supporting tensor ops so far, none found in {sig}"
+        first_tensor = value_types[0]
+        bridge_str = f"""auto result = bridge::AtenFromLtcTensor(lazy_{first_tensor.name}.CreateFrom(node,
+            out_dtype.front()));"""
         if returns_length > 1:
-            meta_out = """auto out_shape = CreateComputationShapeFromMetaTensors(out_meta);
-    auto out_dtype = CreateDTypeFromMetaTensors(out_meta);"""
-
-        meta_str = f"""auto out_meta = at::meta::{schema.aten_name}({', '.join(str(t.name) for t in all_types)});
-    {meta_out}"""
-    else:
-        sig = ComputeShapeSignature(func)
-        meta_str = f"""
-    auto out_shape = {sig.shape_call};
-    auto out_dtype = {sig.dtype_call};"""
-
-    node_str = f"""auto node = torch::lazy::MakeNode<ir::ops::{schema.node_name}>({node_ctor_input_str}, out_dtype, out_shape);"""
-
-    assert len(value_types) > 0, f"Only supporting tensor ops so far, none found in {sig}"
-    first_tensor = value_types[0]
-    bridge_str = f"""auto result = bridge::AtenFromLtcTensor(lazy_{first_tensor.name}.CreateFrom(node,
-        out_dtype.front()));"""
-    if returns_length > 1:
-        bridge_str = f"""std::vector<LazyTensor> lazy_tensors;
-    for (int i = 0; i < {returns_length}; i++) {{
-        lazy_tensors.push_back(lazy_{first_tensor.name}.CreateFrom(torch::lazy::Value(node, i), out_dtype[i]));
-    }}
-    auto result = bridge::TupleAtenFromLtcTensors<{returns_length}>(lazy_tensors);"""
-    if schema.name.name.inplace:
-        assert returns_length == 1, "We assumed there was no such case where an op is an in-place variant " \
-                                    "and has tuple outputs."
-        bridge_str = f"""lazy_{first_tensor.name}.SetInPlaceIrValue(node);
-    auto& result = {first_tensor.name};"""
+            bridge_str = f"""std::vector<LazyTensor> lazy_tensors;
+        for (int i = 0; i < {returns_length}; i++) {{
+            lazy_tensors.push_back(lazy_{first_tensor.name}.CreateFrom(torch::lazy::Value(node, i), out_dtype[i]));
+        }}
+        auto result = bridge::TupleAtenFromLtcTensors<{returns_length}>(lazy_tensors);"""
+        if schema.name.name.inplace:
+            assert returns_length == 1, "We assumed there was no such case where an op is an in-place variant " \
+                                        "and has tuple outputs."
+            bridge_str = f"""lazy_{first_tensor.name}.SetInPlaceIrValue(node);
+        auto& result = {first_tensor.name};"""
 
 
-    return [f"""\
-// TODO(alanwaketan): Quite a lot inefficient copy-by-value there. Let's optimize it.
-{sig_decl(func, backend_index).format(f"{class_method_name}::{schema.aten_name}")} {{
-    LTC_FN_COUNTER("lazy::");
-    {get_device_str}
-    {lazy_tensor_decls_str}
-    {meta_str}
-    {node_str}
-    {bridge_str}
-    return result;
-}};\n
-"""]
-
-@with_native_function_and_index
-def sig_decl(func: NativeFunction, backend_index: BackendIndex) -> str:
-    return kernel_signature(func, backend_index).decl("{}")
+        return [f"""\
+    // TODO(alanwaketan): Quite a lot inefficient copy-by-value there. Let's optimize it.
+    {sig.decl(name=f"{self.class_method_name}::{schema.aten_name}")} {{
+        LTC_FN_COUNTER("lazy::");
+        {get_device_str}
+        {lazy_tensor_decls_str}
+        {meta_str}
+        {node_str}
+        {bridge_str}
+        return result;
+    }};\n
+    """]
 
 class ComputeShapeSignature:
     """
@@ -253,7 +254,7 @@ def gen_lazy_shape_dtype_decl(f: NativeFunction, backend_index: BackendIndex) ->
     # Only generate shape/dtype fn for non-structured kernels,
     # since we just use the meta function for structured kernels
     if not f.structured and f.structured_delegate is None:
-        sig = ComputeShapeSignature(f)
-        return ["\n".join([f"{sig.shape_decl};", f"{sig.dtype_decl};"])]
+        shape_sig = ComputeShapeSignature(f)
+        return ["\n".join([f"{shape_sig.shape_decl};", f"{shape_sig.dtype_decl};"])]
     else:
         return []
