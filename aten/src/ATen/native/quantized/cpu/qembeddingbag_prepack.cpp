@@ -9,7 +9,7 @@
 
 #include <c10/util/irange.h>
 
-torch::class_<EmbeddingPackedParamsBase> register_embedding_params();
+int register_embedding_params();
 
 /*
  * Prepack function for embedding_bag weights.
