@@ -763,11 +763,6 @@ StaticRuntime& StaticModule::runtime() {
   return *cached_runtime_;
 }
 
-std::vector<at::Tensor> StaticModule::operator()(
-    const std::vector<at::Tensor>& inps) {
-  return runtime()(inps);
-}
-
 c10::IValue StaticModule::operator()(
     const std::vector<c10::IValue>& args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
@@ -830,30 +825,6 @@ StaticRuntime::StaticRuntime(const StaticModule& sm) : static_module_(sm) {
 }
 
 StaticRuntime::~StaticRuntime() = default;
-
-std::vector<at::Tensor> StaticRuntime::operator()(
-    const std::vector<at::Tensor>& inps) {
-  std::vector<c10::IValue> stack;
-  stack.resize(inps.size());
-  for (const auto i : c10::irange(inps.size())) {
-    stack[i] = inps[i];
-  }
-
-  c10::IValue v =
-      (*this)(stack, std::unordered_map<std::string, c10::IValue>());
-
-  std::vector<at::Tensor> out;
-
-  if (v.isTuple()) {
-    auto t = v.toTuple();
-    for (const auto& el : t->elements()) {
-      out.emplace_back(el.toTensor());
-    }
-  } else {
-    out.emplace_back(v.toTensor());
-  }
-  return out;
-}
 
 void StaticRuntime::set_inputs(
     const std::vector<IValue>& args,
@@ -933,7 +904,7 @@ void StaticRuntime::set_inputs(
 }
 
 template <typename IValueList>
-c10::IValue StaticRuntime::operator()(
+c10::IValue StaticRuntime::run_impl(
     IValueList&& args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
   // We assume inference workloads, so we do not need
@@ -997,13 +968,17 @@ c10::IValue StaticRuntime::operator()(
   return std::move(*outputs_[0]);
 }
 
-template c10::IValue StaticRuntime::operator()<const std::vector<c10::IValue>&>(
+c10::IValue StaticRuntime::operator()(
     const std::vector<c10::IValue>& args,
-    const std::unordered_map<std::string, c10::IValue>& kwargs);
+    const std::unordered_map<std::string, c10::IValue>& kwargs) {
+  return run_impl(args, kwargs);
+}
 
-template c10::IValue StaticRuntime::operator()<std::vector<c10::IValue>&&>(
+c10::IValue StaticRuntime::operator()(
     std::vector<c10::IValue>&& args,
-    const std::unordered_map<std::string, c10::IValue>& kwargs);
+    const std::unordered_map<std::string, c10::IValue>& kwargs) {
+  return run_impl(std::move(args), kwargs);
+}
 
 namespace {
 
