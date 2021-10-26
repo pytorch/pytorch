@@ -56,7 +56,7 @@ void call_setup_methods() {
   at::Tensor t2 = t1.fill_(3);
   at::narrow(t2, 1, 0, 1);
   at::eq(t1, t2);
-  const volatile bool nz = at::zeros({1}).is_nonzero();
+  const volatile bool nz = at::native::is_nonzero(at::zeros({1}));
   (void)nz;
 
   // Create a byte tensor and copy it
