@@ -508,18 +508,32 @@ struct id_lt {
       return true;
     }
 
-    // Non constant dimensions should be outside constant ones
-    if (!id0->extent()->isConstScalar() && !id0->isThread() &&
-        !id1->extent()->isConstScalar() && !id1->isThread()) {
-      // Prefer pushing reductions right
-      if (id0->isReduction() && !id1->isReduction()) {
-        return false;
-      } else {
-        return true;
-      }
-    } else if (!id0->extent()->isConstScalar() && !id0->isThread()) {
+    // Potentially counter-intuitively, parallelized reductions can always go
+    // inside non reduction dims
+    if ((id0->isReduction() && id0->isThread()) && !id1->isReduction()) {
+      return false;
+    } else if (!id0->isReduction() && (id1->isReduction() && id1->isThread())) {
       return true;
-    } else if (!id1->extent()->isConstScalar() && !id1->isThread()) {
+    }
+
+    // Grids and blocks before others
+    if (id0->isBlockDim() && !id1->isBlockDim()) {
+      return true;
+    } else if (!id0->isBlockDim() && id1->isBlockDim()) {
+      return false;
+    }
+    if (id0->isThreadDim() && !id1->isThreadDim()) {
+      return true;
+    } else if (!id0->isThreadDim() && id1->isThreadDim()) {
+      return false;
+    }
+
+    bool id0_non_const = !id0->extent()->isConstScalar();
+    bool id1_non_const = !id1->extent()->isConstScalar();
+    // Non constant dimensions should be outside constant ones.
+    if (id0_non_const && !id1_non_const) {
+      return true;
+    } else if (!id0_non_const && id1_non_const) {
       return false;
     }
 
@@ -528,19 +542,6 @@ struct id_lt {
       return false;
     } else if (!id0->isReduction() && id1->isReduction()) {
       return true;
-    }
-
-    // If iteration domains, block and thread before others, if reductions push
-    // to the right to get out of the inliners way.
-    if (id0->isBlockDim()) {
-      return true;
-    } else if (id1->isBlockDim()) {
-      return false;
-    }
-    if (id0->isThreadDim()) {
-      return true;
-    } else if (id1->isThreadDim()) {
-      return false;
     }
 
     // Unroll and vectorizations should be pushed right (not inside broadcast or
@@ -575,8 +576,7 @@ struct id_lt {
             id1->getIterType() != IterType::Gather,
         "Gather not supported in this function.");
 
-    TORCH_INTERNAL_ASSERT(
-        false, "Error sorting out iteration domains: ", id0, " and ", id1);
+    return true;
   }
 };
 } // namespace
