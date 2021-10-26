@@ -306,6 +306,7 @@ class ShardedTensor(object):
         world_size = dist.get_world_size(process_group)
 
         local_sharded_tensor_metadata: Optional[ShardedTensorMetadata] = None
+        local_shards_device = torch.device("cpu")
         global_size = _flatten_tensor_size(global_size)
 
         if len(local_shards) > 0:

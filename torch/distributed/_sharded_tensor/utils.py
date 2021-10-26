@@ -81,7 +81,7 @@ def _validate_output_tensor_for_gather(
             "on non-destination ranks."
         )
 
-def _flatten_tensor_size(*size) -> List[int]:
+def _flatten_tensor_size(size) -> List[int]:
     """
     Checks if tensor size is valid, then flatten/return the list of ints.
 
@@ -193,33 +193,33 @@ def build_global_metadata(gathered_metadatas: List[Optional[ShardedTensorMetadat
         if global_sharded_tensor_metadata is None:
             global_sharded_tensor_metadata = rank_metadata
             global_metadata_rank = rank
+        else:
+            _raise_if_mismatch(global_sharded_tensor_metadata.size,
+                               rank_metadata.size,
+                               "global_size",
+                               [global_metadata_rank, rank],
+                               is_local=False)
 
-        _raise_if_mismatch(global_sharded_tensor_metadata.size,
-                           rank_metadata.size,
-                           "global_size",
-                           [global_metadata_rank, rank],
-                           is_local=False)
+            # don't need to check layout and memory format as we already checked in local shards validation stage
+            _raise_if_mismatch(global_sharded_tensor_metadata.tensor_properties.dtype,
+                               rank_metadata.tensor_properties.dtype,
+                               "dtype",
+                               [global_metadata_rank, rank],
+                               is_local=False)
 
-        # don't need to check layout and memory format as we already checked in local shards validation stage
-        _raise_if_mismatch(global_sharded_tensor_metadata.tensor_properties.dtype,
-                           rank_metadata.tensor_properties.dtype,
-                           "dtype",
-                           [global_metadata_rank, rank],
-                           is_local=False)
+            _raise_if_mismatch(global_sharded_tensor_metadata.tensor_properties.requires_grad,
+                               rank_metadata.tensor_properties.requires_grad,
+                               "requires_grad",
+                               [global_metadata_rank, rank],
+                               is_local=False)
 
-        _raise_if_mismatch(global_sharded_tensor_metadata.tensor_properties.requires_grad,
-                           rank_metadata.tensor_properties.requires_grad,
-                           "requires_grad",
-                           [global_metadata_rank, rank],
-                           is_local=False)
-
-        _raise_if_mismatch(global_sharded_tensor_metadata.tensor_properties.pin_memory,
-                           rank_metadata.tensor_properties.pin_memory,
-                           "pin_memory",
-                           [global_metadata_rank, rank],
-                           is_local=False)
-        # pass all validations, extend shards metadata
-        global_sharded_tensor_metadata.shards_metadata.extend(rank_metadata.shards_metadata)
+            _raise_if_mismatch(global_sharded_tensor_metadata.tensor_properties.pin_memory,
+                               rank_metadata.tensor_properties.pin_memory,
+                               "pin_memory",
+                               [global_metadata_rank, rank],
+                               is_local=False)
+            # pass all validations, extend shards metadata
+            global_sharded_tensor_metadata.shards_metadata.extend(rank_metadata.shards_metadata)
 
     if global_sharded_tensor_metadata is not None:
         # check if shards_metadata have overlap shards
