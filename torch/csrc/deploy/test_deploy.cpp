@@ -445,3 +445,18 @@ TEST(TorchpyTest, TestNumpy) {
   EXPECT_EQ(8, mat38.attr("shape").attr("__getitem__")({1}).toIValue().toInt());
 }
 #endif
+
+#if HAS_PYYAML
+TEST(TorchpyTest, TestPyYAML) {
+  const std::string kDocument = "a: 1\n";
+
+  torch::deploy::InterpreterManager m(2);
+  auto I = m.acquireOne();
+
+  auto load = I.global("yaml", "load")({kDocument});
+  EXPECT_EQ(1, load.attr("__getitem__")({"a"}).toIValue().toInt());
+
+  auto dump = I.global("yaml", "dump")({load});
+  EXPECT_EQ(kDocument, dump.toIValue().toString()->string());
+}
+#endif
