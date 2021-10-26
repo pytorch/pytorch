@@ -188,11 +188,11 @@ __global__ void distribution_binary_elementwise_kernel(
   using input_t_1 = typename function_traits<func_t>::template arg<1>::type;
   using input_t_2 = typename function_traits<func_t>::template arg<2>::type;
 
-  input_t_1 inputs_1[thread_work_size];
-  input_t_2 inputs_2[thread_work_size];
+  input_t_1 inputs_1[thread_work_size()];
+  input_t_2 inputs_2[thread_work_size()];
 
-  int base_index = BLOCK_WORK_SIZE * blockIdx.x;
-  int remaining = std::min<int>(numel - base_index, BLOCK_WORK_SIZE);
+  int base_index = block_work_size() * blockIdx.x;
+  int remaining = std::min<int>(numel - base_index, block_work_size());
 
   curandStatePhilox4_32_10_t state;
   curand_init(std::get<0>(seeds),
@@ -203,7 +203,7 @@ __global__ void distribution_binary_elementwise_kernel(
   // load data into registers
   int thread_idx = threadIdx.x;
   #pragma unroll
-  for (int i = 0; i < thread_work_size; i++) {
+  for (int i = 0; i < thread_work_size(); i++) {
     if (thread_idx >= remaining) {
       break;
     }
@@ -212,20 +212,20 @@ __global__ void distribution_binary_elementwise_kernel(
     inputs_1[i] = input_data_1[offsets[0]];
     inputs_2[i] = input_data_2[offsets[1]];
 
-    thread_idx += num_threads;
+    thread_idx += num_threads();
   }
 
   // compute and store
   thread_idx = threadIdx.x;
   #pragma unroll
-  for (int i = 0; i < thread_work_size; i++) {
+  for (int i = 0; i < thread_work_size(); i++) {
     if (thread_idx >= remaining) {
       break;
     }
     int input_idx = thread_idx + base_index;
     auto offsets = out_calc.get(input_idx);
     output_data[offsets[0]] = f(state, inputs_1[i], inputs_2[i]);
-    thread_idx += num_threads;
+    thread_idx += num_threads();
   }
 }
 
@@ -254,16 +254,16 @@ void distribution_binary_kernel(TensorIterator &iter, PhiloxCudaState philox_arg
   const input_t_1 *input_data_1 = static_cast<const input_t_1 *>(iter.data_ptr(1));
   const input_t_2 *input_data_2 = static_cast<const input_t_2 *>(iter.data_ptr(2));
 
-  int64_t grid = (numel + block_work_size - 1) / block_work_size;
+  int64_t grid = (numel + block_work_size() - 1) / block_work_size();
   auto stream = at::cuda::getCurrentCUDAStream();
 
   if (iter.is_contiguous()) {
-    distribution_binary_elementwise_kernel<<<grid,num_threads, 0, stream>>>(
+    distribution_binary_elementwise_kernel<<<grid,num_threads(), 0, stream>>>(
         numel, f, philox_args, output_data, input_data_1, input_data_2,
         TrivialOffsetCalculator<2>(), TrivialOffsetCalculator<1>());
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
-    distribution_binary_elementwise_kernel<<<grid, num_threads, 0, stream>>>(
+    distribution_binary_elementwise_kernel<<<grid, num_threads(), 0, stream>>>(
         numel, f, philox_args, output_data, input_data_1, input_data_2,
         make_input_offset_calculator<2>(iter), make_output_offset_calculator(iter));
     C10_CUDA_KERNEL_LAUNCH_CHECK();

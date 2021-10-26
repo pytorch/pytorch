@@ -36,7 +36,7 @@ void launch_cross_kernel(const TensorIteratorBase& iter, int64_t ostride,
   const auto N = iter.numel();
   auto offset_calculator = make_element_offset_calculator<3>(iter);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(N > 0 && N <= std::numeric_limits<int32_t>::max());
-  int64_t grid = (N + NUM_THREADS - 1) / NUM_THREADS;
+  int64_t grid = (N + num_threads() - 1) / num_threads();
   auto stream = at::cuda::getCurrentCUDAStream();
 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kHalf, iter.common_dtype(), "cross_cuda", [&] {
@@ -45,11 +45,11 @@ void launch_cross_kernel(const TensorIteratorBase& iter, int64_t ostride,
     auto x2 = static_cast<const scalar_t*>(iter.data_ptr(2));
     constexpr int64_t int_max = std::numeric_limits<int>::max();
     if (ostride * 2 > int_max || x1stride * 2 > int_max || x2stride * 2 > int_max) {
-      cross_kernel<<<grid, num_threads, 0, stream>>>(
+      cross_kernel<<<grid, num_threads(), 0, stream>>>(
           N, out, x1, x2, offset_calculator, ostride, x1stride, x2stride);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
-      cross_kernel<<<grid, num_threads, 0, stream>>>(
+      cross_kernel<<<grid, num_threads(), 0, stream>>>(
           N, out, x1, x2, offset_calculator,
           static_cast<int>(ostride),
           static_cast<int>(x1stride),
