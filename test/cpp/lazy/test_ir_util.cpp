@@ -37,7 +37,7 @@ class TestNode : public Node {
 };
 
 //   a
-//  / \
+// // \
 // b   c
 //  \ /
 //   d
@@ -62,7 +62,7 @@ TEST(IrUtilTest, BasicTest) {
 }
 
 //   a
-//  / \
+// // \
 // b---c
 TEST(IrUtilTest, TestCircle) {
   NodePtr a = MakeNode<TestNode>();
