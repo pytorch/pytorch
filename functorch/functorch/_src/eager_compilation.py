@@ -171,6 +171,13 @@ def draw_joint_graph(graph, joint_inputs, file_name="full_graph.png"):
     draw_graph(graph, file_name)
     return default_partition(graph, joint_inputs)
 
+def normalize_as_list(x):
+    if isinstance(x, tuple):
+        return list(x)
+    elif isinstance(x, list):
+        return x
+    return [x]
+
 def create_compiled_function(flat_fn, fw_compiler, bw_compiler, partition_fn):
     joint_forward_backward = create_joint_forward_backward(flat_fn)
 
@@ -196,16 +203,11 @@ def create_compiled_function(flat_fn, fw_compiler, bw_compiler, partition_fn):
                 # print(fw_module.code, bw_module.code)
 
                 compiled_fw = fw_compiler(fw_module, flat_args)
-                fw_outs = compiled_fw(*flat_args)
-
-                if not isinstance(fw_outs, list):
-                    fw_outs = [fw_outs]
+                fw_outs = normalize_as_list(compiled_fw(*flat_args))
 
                 bw_args = fw_outs[num_outs:] + fw_outs[0:num_outs]
                 compiled_bw = bw_compiler(bw_module, bw_args)
-            fw_outs = compiled_fw(*flat_args)
-            if not isinstance(fw_outs, list):
-                fw_outs = [fw_outs]
+            fw_outs = normalize_as_list(compiled_fw(*flat_args))
             ctx.save_for_backward(*fw_outs[num_outs:])
             if num_outs == 1:
                 return fw_outs[0]
@@ -215,9 +217,7 @@ def create_compiled_function(flat_fn, fw_compiler, bw_compiler, partition_fn):
         def backward(ctx, *flat_args):
             # hmm... this doesn't feel right. todo
             contiguous_args = [t.contiguous() for t in flat_args]
-            out = compiled_bw(*ctx.saved_tensors, *contiguous_args)
-            if not isinstance(out, list):
-                out = [out]
+            out = normalize_as_list(compiled_bw(*ctx.saved_tensors, *contiguous_args))
             out_iter = iter(out)
             grad_out = [next(out_iter) if p else None for p in ctx.needs_input_grad]
             return tuple(grad_out)
