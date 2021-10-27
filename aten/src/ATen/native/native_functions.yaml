@@ -111,6 +111,9 @@
 # when self is batched. Note that this is possible because a batching rule does
 # not need to redispatch to the same function.
 - func: _new_zeros_with_same_meta(Tensor self, Tensor other) -> Tensor
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: _new_zeros_with_same_meta
 
 - func: _new_zeros_with_meta(Tensor self, int[] size, int[] stride, int storage_offset, int storage_numel) -> Tensor
 
