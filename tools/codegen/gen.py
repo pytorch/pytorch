@@ -1249,10 +1249,10 @@ def main() -> None:
         key_fn=key_func_grouped,
         env_callable=lambda g: {
             'func_definitions': list(mapMaybe(lambda f: gen_functionalization_definition(
-                f, to_functional_op[f.func.name]),
+                selector, f, to_functional_op[f.func.name]),
                 [g] if isinstance(g, NativeFunction) else g.functions())),
             'func_registrations': list(mapMaybe(lambda f: gen_functionalization_registration(
-                f, backend_indices[DispatchKey.CompositeImplicitAutograd]),
+                selector, f, backend_indices[DispatchKey.CompositeImplicitAutograd]),
                 [g] if isinstance(g, NativeFunction) else g.functions()))
         },
         num_shards=4,
