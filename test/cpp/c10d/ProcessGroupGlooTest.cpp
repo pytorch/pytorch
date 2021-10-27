@@ -242,7 +242,7 @@ void checkProfiledEvents(
       auto match = !strcmp(evt.name(), expected_profile_str);
       if (verify_shapes && match) {
         auto shapesVec = evt.shapes();
-        for (int i = 0; i < expected_count; i++) {
+        for (const auto i : c10::irange(expected_count)) {
           // Assumptions: no two expected shapes are the same
           if (shapesVec[0] == expected_shapes[i]) {
             matched_shapes[i] = true;

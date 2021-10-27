@@ -111,7 +111,7 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
       case UnionType::Kind: {
         auto t = w.static_type->expect<UnionType>();
         if (t->containedTypes().size() == 2 &&
-            t->canHoldType(NoneType::get())) {
+            t->canHoldType(*NoneType::get())) {
           if (!w.value.isNone()) {
             auto inner = t->containedTypes()[0] != NoneType::get()
                 ? t->containedTypes()[0]

@@ -17,6 +17,16 @@ namespace jit {
 
 namespace {
 
+std::vector<std::string> splitName(const std::string& name) {
+  std::vector<std::string> result;
+  std::string sub_name;
+  std::istringstream name_stream(name);
+  while (std::getline(name_stream, sub_name, '.')) {
+    result.push_back(std::move(sub_name));
+  }
+  return result;
+}
+
 class AttributePropagator {
  public:
   AttributePropagator(
@@ -27,27 +37,27 @@ class AttributePropagator {
       : module_(module),
         freezeInterfaces_(freezeInterfaces),
         preserveParameters_(preserveParameters) {
-    // Currently only top level attributes and functions can  be preserved
-    // explicitly.
     auto checkName = [this](std::string& name) {
-      if (module_.hasattr(name)) {
-        auto attr = module_.attr(name);
+      const auto resolved_name = resolveName(name);
 
-        // Freezing client wants to presever this submodule. When cleaning
-        // the frozen module, make sure it will be preserved entirely.
-        if (attr.isModule()) {
-          preservedSubModule_.insert(attr.toModule()._ivalue());
+      if (resolved_name) {
+        const auto& parent_module = resolved_name->first;
+        const auto& attr_name = resolved_name->second;
+        if (parent_module.hasattr(attr_name)) {
+          auto value = parent_module.attr(attr_name);
+          // Freezing client wants to presever this submodule. When cleaning
+          // the frozen module, make sure it will be preserved entirely.
+          if (value.isModule()) {
+            preservedSubModule_.insert(value.toModule()._ivalue());
+          }
+          insertMutableAttr(attr_name, value, parent_module._ivalue());
+        } else {
+          auto fn = parent_module.get_method(attr_name);
+          preservedMethods_.insert(&fn.function());
         }
-        insertMutableAttr(name, attr, module_._ivalue());
         return true;
       }
 
-      for (auto& fn : module_.type()->methods()) {
-        if (fn->name() == name) {
-          preservedMethods_.insert(fn);
-          return true;
-        }
-      }
       return false;
     };
 
@@ -119,6 +129,57 @@ class AttributePropagator {
   }
 
  private:
+  using ResolvedName = std::pair<Module, std::string>;
+
+  // Try to resolve qualified names (submodule1.submodule2.foo). If
+  // the qualified name exists in the root module, return the unqualified
+  // attribute/function name and the parent module. Else, return nullopt.
+  // Examples:
+  // submodule1.submodule2.foo -> {submodule2, "foo"}
+  // submodule1.non_existent_module.foo -> nullopt
+  c10::optional<ResolvedName> resolveName(const std::string& name) {
+    auto sub_names = splitName(name);
+    if (sub_names.empty()) {
+      return c10::nullopt;
+    }
+    auto& attr_name = sub_names.back();
+    auto cur_module = module_;
+    std::vector<ResolvedName> attr_infos;
+    attr_infos.reserve(sub_names.size() - 1);
+
+    for (size_t i = 0; i < sub_names.size() - 1; ++i) {
+      bool found = false;
+      const auto& sub_name = sub_names[i];
+      for (const auto& child_module : cur_module.named_children()) {
+        if (child_module.name == sub_name) {
+          attr_infos.emplace_back(cur_module._ivalue(), child_module.name);
+          cur_module = child_module.value;
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        return c10::nullopt;
+      }
+    }
+
+    if (cur_module.hasattr(attr_name) || cur_module.find_method(attr_name)) {
+      // We don't want to mark these modules as mutable yet; that could
+      // interfere with the inlining procedure. Instead, we'll record
+      // the fact that the user wants to preserve them. They will be
+      // processed during clean-up preparation (recordReferenceAttrs)
+      for (auto& attr_info : attr_infos) {
+        const auto& parent_module = attr_info.first;
+        auto& sub_name = attr_info.second;
+        userPreservedAttrs_[parent_module._ivalue()].insert(
+            std::move(sub_name));
+      }
+      return std::make_pair(std::move(cur_module), std::move(attr_name));
+    }
+
+    return c10::nullopt;
+  }
+
   // findConstantAttr function locates the sub Module where attributes are
   // defined. The algorithm chases getAttr chains to locate the submodules.
   // For example:
@@ -638,6 +699,16 @@ class AttributePropagator {
         }
       }
     }
+    // We have to process the attributes that the user wants to preserve
+    // separately since it's possible that the user-preserved module is
+    // never referenced in the graph.
+    for (const auto& attr_info : userPreservedAttrs_) {
+      const auto& parent_module = attr_info.first;
+      for (const auto& attr_name : attr_info.second) {
+        const auto value = parent_module->getAttr(attr_name);
+        insertMutableAttr(attr_name, value, parent_module);
+      }
+    }
   }
 
   // This function recursively iterates over submodules to identify
@@ -710,7 +781,7 @@ class AttributePropagator {
         }
       }
       for (auto& fn : type->methods()) {
-        if (preservedMethods_.count(fn) && *type == *module_.type()) {
+        if (preservedMethods_.count(fn)) {
           continue;
         }
         funcsToRemove.push_back(fn);
@@ -773,6 +844,11 @@ class AttributePropagator {
       c10::intrusive_ptr<at::ivalue::Object>,
       c10::intrusive_ptr<at::ivalue::Object>>
       object_memo_;
+
+  // Contains names of attributes that the user wants to preserve with
+  // their owning modules.
+  std::unordered_map<ModulePtr, std::unordered_set<std::string>>
+      userPreservedAttrs_;
 
 }; // class AttributePropagator
 
