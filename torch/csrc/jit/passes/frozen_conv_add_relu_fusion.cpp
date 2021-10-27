@@ -10,11 +10,13 @@
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #ifdef USE_CUDA
 #include <ATen/cuda/CUDAConfig.h>
-#endif
 
 #if AT_CUDNN_ENABLED()
 #include <ATen/cudnn/cudnn-wrapper.h>
 #endif
+
+#endif
+
 
 namespace torch {
 namespace jit {
