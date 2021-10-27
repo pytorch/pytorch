@@ -5173,7 +5173,7 @@ else:
             self._test_diff_numpy(non_contig)
 
     # RngNormal not implemented for type f16 for XLA
-    @dtypes(*get_all_dtypes(include_half=False))
+    @dtypes(*get_all_dtypes(include_half=False, include_bfloat16=False))
     @dtypesIfCPU(*get_all_dtypes(include_bfloat16=False))
     @dtypesIfCUDA(*get_all_dtypes(include_bfloat16=False))
     def test_diff(self, device, dtype):
@@ -5199,10 +5199,6 @@ else:
                 RuntimeError, 'diff expects the shape of tensor to prepend or append to match that of input'):
             invalid_prepend = torch.tensor([[0, 1]], device=device, dtype=dtype)
             t.diff(dim=0, prepend=invalid_prepend)
-
-        with self.assertRaisesRegex(
-                RuntimeError, 'diff expects dim to be in range of'):
-            t.diff(dim=2)
 
         with self.assertRaisesRegex(
                 RuntimeError, 'diff expects n to be at least 1 and < size along dim after prepend and append'):

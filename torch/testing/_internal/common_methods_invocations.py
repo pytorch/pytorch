@@ -174,7 +174,7 @@ class SampleInput(object):
                 return {k: to_numpy(v) for k, v in x.items()}
             elif isinstance(x, torch.dtype):
                 return torch_to_numpy_dtype_dict[x]
-            elif isinstance(x, (numbers.Number, bool, str)):
+            elif isinstance(x, (numbers.Number, bool, str, type(None))):
                 return x
 
             raise ValueError("Unknown type {0}!".format(type(x)))
@@ -2526,7 +2526,7 @@ def sample_inputs_aminmax(op_info, device, dtype, requires_grad, **kwargs):
 
 def sample_inputs_diff(op_info, device, dtype, requires_grad, **kwargs):
     test_cases = (
-        # ((1,), 0, None, None),
+        # ((1,), 0, None, None), removing as torch.diff([x], n=1) shouldn't work
         ((S,), 0, None, None),
         ((S, 1), 0, None, None),
         ((S, 1), 1, None, None),
@@ -2537,13 +2537,14 @@ def sample_inputs_diff(op_info, device, dtype, requires_grad, **kwargs):
         ((S, S, S), 1, None, None),
         ((S, S, S), 2, None, None),
         ((S, S, S), 1, (S, 1, S), (S, 1, S)),
-        ((S, S, S), 2, (S, 1, S), (S, 1, S)),)
+        ((S, S, S), 2, (S, S, 1), (S, S, 1)),
+        ((S, S, S), 2, (S, S, S), (S, S, S)),)
 
     sample_inputs = []
     for size, dim, size_prepend, size_append in test_cases:
-        prepend_size = 0 if (size_prepend is None) else size_prepend(dim)
-        append_size = 0 if (size_append is None) else size_append(dim)
-        dim_size = size(dim) + size_prepend(dim) + size_append(dim) 
+        prepend_size = 0 if (size_prepend is None) else size_prepend[dim]
+        append_size = 0 if (size_append is None) else size_append[dim]
+        dim_size = size[dim] + prepend_size + append_size
         for n in range(1, dim_size):
             args = (make_tensor(size, device, dtype,
                                 low=None, high=None,
@@ -7323,8 +7324,12 @@ op_db: List[OpInfo] = [
                    safe_casts_outputs=True),
     OpInfo('diff',
            op=torch.diff,
-           ref=np.diff,
-           dtypes=all_types_and_complex_and(torch.bool, torch.float16),
+           # np.diff has np._NoValue as default values for prepend and append, compare_with_reference breaks if prepend/append
+           # are set as None when converting to numpy
+           ref=lambda input, n=1, axis=-1, prepend=np._NoValue, append=np._NoValue: np.diff(input, n, axis,
+                                                                                            np._NoValue if prepend is None else prepend,
+                                                                                            np._NoValue if append is None else append),
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_diff),
     BinaryUfuncInfo('div',
