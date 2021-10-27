@@ -6,7 +6,9 @@
 
 #include <c10/core/ScalarType.h>
 
+#if defined(USE_ROCM)
 #include <type_traits>
+#endif
 
 namespace at {
 namespace cuda {
