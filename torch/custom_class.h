@@ -435,8 +435,7 @@ namespace selective_class {
 
   template <class CurClass>
   inline class_<CurClass> class_(const std::string& namespaceName, detail::SelectiveStr<true> className) {
-    auto class_name = std::string(className.operator const char *());
-    return torch::class_<CurClass>(namespaceName, class_name);
+    return torch::class_<CurClass>(std::move(namespaceName), std::string(className.operator const char *()));
   }
 
   template <class CurClass>
