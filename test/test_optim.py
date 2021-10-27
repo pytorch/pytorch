@@ -247,8 +247,8 @@ class TestOptim(TestCase):
 
     def _test_complex_optimizer(self, optimizer_constructor):
         complex_param = torch.randn(5, 5, dtype=torch.complex64, requires_grad=True)
+        real_param = torch.view_as_real(complex_param).detach().clone().requires_grad_()
         complex_opt = optimizer_constructor(complex_param)
-        real_param = torch.view_as_real(complex_param).detach().requires_grad_()
         real_opt = optimizer_constructor(real_param)
 
         for i in range(3):
@@ -638,11 +638,6 @@ class TestOptim(TestCase):
             self._test_complex_optimizer(
                 lambda param: optimizer(
                     [param], lr=1e-1, initial_accumulator_value=0.1
-                )
-            )
-            self._test_complex_optimizer(
-                lambda param: optimizer(
-                    [param], lr=1e-1, initial_accumulator_value=0.1, weight_decay=1
                 )
             )
 

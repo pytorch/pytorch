@@ -12,7 +12,6 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
-#include <torch/csrc/jit/passes/op_replacement.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
@@ -82,7 +81,6 @@ void OptimizeGraph(
     const StaticModuleOptions& opts) {
   GRAPH_DUMP("Before optimizations: ", graph);
   Inline(*graph);
-  ReplaceOpsWithUpgraders(graph);
   ConstantPropagation(graph);
   Canonicalize(graph);
   ConstantPropagation(graph);
@@ -96,9 +94,8 @@ void OptimizeGraph(
   if (opts.enable_out_variant) {
     UseVariadicOp(
         graph,
-        c10::Symbol::fromQualString("fb::sigrid_transforms_torch_bind"),
-        c10::Symbol::fromQualString(
-            "fb::variadic_sigrid_transforms_torch_bind"));
+        fromQualString("fb::sigrid_transforms_torch_bind"),
+        fromQualString("fb::variadic_sigrid_transforms_torch_bind"));
     FuseSignLog1P(graph);
 
     // TODO: we can avoid this guard by moving operations
@@ -765,11 +762,6 @@ StaticRuntime& StaticModule::runtime() {
   return *cached_runtime_;
 }
 
-std::vector<at::Tensor> StaticModule::operator()(
-    const std::vector<at::Tensor>& inps) {
-  return runtime()(inps);
-}
-
 c10::IValue StaticModule::operator()(
     const std::vector<c10::IValue>& args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
@@ -832,30 +824,6 @@ StaticRuntime::StaticRuntime(const StaticModule& sm) : static_module_(sm) {
 }
 
 StaticRuntime::~StaticRuntime() = default;
-
-std::vector<at::Tensor> StaticRuntime::operator()(
-    const std::vector<at::Tensor>& inps) {
-  std::vector<c10::IValue> stack;
-  stack.resize(inps.size());
-  for (const auto i : c10::irange(inps.size())) {
-    stack[i] = inps[i];
-  }
-
-  c10::IValue v =
-      (*this)(stack, std::unordered_map<std::string, c10::IValue>());
-
-  std::vector<at::Tensor> out;
-
-  if (v.isTuple()) {
-    auto t = v.toTuple();
-    for (const auto& el : t->elements()) {
-      out.emplace_back(el.toTensor());
-    }
-  } else {
-    out.emplace_back(v.toTensor());
-  }
-  return out;
-}
 
 void StaticRuntime::set_inputs(
     const std::vector<IValue>& args,
@@ -935,7 +903,7 @@ void StaticRuntime::set_inputs(
 }
 
 template <typename IValueList>
-c10::IValue StaticRuntime::operator()(
+c10::IValue StaticRuntime::run_impl(
     IValueList&& args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
   // We assume inference workloads, so we do not need
@@ -999,13 +967,17 @@ c10::IValue StaticRuntime::operator()(
   return std::move(*outputs_[0]);
 }
 
-template c10::IValue StaticRuntime::operator()<const std::vector<c10::IValue>&>(
+c10::IValue StaticRuntime::operator()(
     const std::vector<c10::IValue>& args,
-    const std::unordered_map<std::string, c10::IValue>& kwargs);
+    const std::unordered_map<std::string, c10::IValue>& kwargs) {
+  return run_impl(args, kwargs);
+}
 
-template c10::IValue StaticRuntime::operator()<std::vector<c10::IValue>&&>(
+c10::IValue StaticRuntime::operator()(
     std::vector<c10::IValue>&& args,
-    const std::unordered_map<std::string, c10::IValue>& kwargs);
+    const std::unordered_map<std::string, c10::IValue>& kwargs) {
+  return run_impl(std::move(args), kwargs);
+}
 
 namespace {
 
@@ -1521,6 +1493,9 @@ void ProcessedNode::run() {
 #else
   fn_.f(this);
 #endif
+#ifndef NDEBUG
+  verify_no_memory_overlap();
+#endif
 }
 
 static bool checkNoMemoryOverlap(const at::Tensor& a, const at::Tensor& b) {
@@ -1547,26 +1522,34 @@ bool ProcessedNode::verify_no_memory_overlap() const {
       }
       const auto& out1_t = outputs_[j].toTensor();
       if (!checkNoMemoryOverlap(out0_t, out1_t)) {
+        LOG(INFO) << "Node output " << i << " overlaps with output " << j
+                  << ", " << PrintNode(node_);
         return false;
       }
     }
   }
 
   auto schema = node()->maybeSchema();
-  if (!schema || schema->is_mutable()) {
+  // skip memory overlap check for mutable ops with only one output
+  if (!schema || (schema->is_mutable() && outputs_size_ == 1)) {
     return true;
   }
-  for (const IValue* in : inputs()) {
+  for (const auto i : c10::irange(inputs_size_)) {
+    const IValue* in = &Input(i);
     if (!in->isTensor()) {
       continue;
     }
     const auto& in_t = in->toTensor();
-    for (const IValue& out : outputs()) {
+    for (const auto j : c10::irange(outputs_size_)) {
+      const IValue& out = Output(j);
       if (!out.isTensor()) {
         continue;
       }
       const auto& out_t = out.toTensor();
       if (!checkNoMemoryOverlap(in_t, out_t)) {
+        LOG(INFO) << "Node input " << i << " overlaps with output " << j << ", "
+                  << PrintNode(node_);
+        LOG(INFO) << *schema;
         return false;
       }
     }

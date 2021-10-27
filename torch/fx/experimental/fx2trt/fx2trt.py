@@ -205,6 +205,16 @@ class TRTModule(torch.nn.Module):
         if not self.context.profiler:
             self.context.profiler = trt.Profiler()
 
+    def disable_profiling(self):
+        """
+        Disable TensorRT profiling.
+        """
+        self._check_initialized()
+
+        torch.cuda.synchronize()
+        del self.context
+        self.context = self.engine.create_execution_context()
+
 
 CONVERTERS = {}
 
@@ -404,6 +414,7 @@ class TRTInterpreter(torch.fx.Interpreter):
         int8_mode=False,
         force_fp32_output=False,
         strict_type_constraints=False,
+        algorithm_selector=None,
     ) -> TRTInterpreterResult:
         # For float outputs, we set their dtype to fp16 only if fp16_mode=True and
         # force_fp32_output=False.
@@ -433,6 +444,10 @@ class TRTInterpreter(torch.fx.Interpreter):
         if self.optimization_profiles:
             for optimization_profile in self.optimization_profiles:
                 builder_config.add_optimization_profile(optimization_profile)
+
+        if algorithm_selector:
+            builder_config.set_flag(trt.BuilderFlag.DISABLE_TIMING_CACHE)
+            builder_config.algorithm_selector = algorithm_selector
 
         engine = self.builder.build_engine(self.network, builder_config)
         assert engine

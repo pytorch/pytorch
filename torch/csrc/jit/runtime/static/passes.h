@@ -30,5 +30,11 @@ TORCH_API void FuseSignLog1P(std::shared_ptr<Graph>& graph);
 
 TORCH_API void UseVariadicTupleUnpack(const std::shared_ptr<Graph>& graph);
 
+// c10::Symbol::fromQualString is a bit long to type everywhere, and
+// we can't use a `using` statement since it's a static class function.
+inline c10::Symbol fromQualString(const std::string& qual_string) {
+  return c10::Symbol::fromQualString(qual_string);
+}
+
 } // namespace jit
 } // namespace torch

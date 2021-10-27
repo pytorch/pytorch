@@ -3032,7 +3032,8 @@
   structured_delegate: mm.out
   variants: function, method
   dispatch:
-    SparseCPU, SparseCUDA, SparseCsrCPU, SparseCsrCUDA: _sparse_mm
+    SparseCPU, SparseCUDA: _sparse_mm
+    SparseCsrCPU, SparseCsrCUDA: _sparse_csr_mm
 
 - func: mm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
   structured: True

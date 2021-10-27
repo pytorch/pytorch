@@ -1663,6 +1663,86 @@ TEST(VulkanAPITest, sub_broadcast1_) {
   ASSERT_TRUE(check);
 }
 
+TEST(VulkanAPITest, transposed_conv2d) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  constexpr int64_t groups = 1;
+  constexpr std::array<int64_t, 2u> stride{1, 2};
+  constexpr std::array<int64_t, 2u> padding{1, 0};
+  constexpr std::array<int64_t, 2u> output_padding{0, 0};
+  //TODO: Support conv_transpose2d with dilation != 1
+  constexpr std::array<int64_t, 2u> dilation{1, 1};
+
+  constexpr struct {
+    uint32_t batches;
+    uint32_t channels;
+    uint32_t height;
+    uint32_t width;
+
+    std::array<int64_t, 4u> size() const {
+      return {
+        batches,
+        channels,
+        height,
+        width,
+      };
+    }
+  } input {1, 55, 7, 19};
+
+  constexpr struct {
+    uint32_t input_channels;
+    uint32_t output_channels;
+    uint32_t height;
+    uint32_t width;
+
+    std::array<int64_t, 4u> size() const {
+      return {
+        input_channels,
+        output_channels,
+        height,
+        width,
+      };
+    }
+  } weights {input.channels, 47, 2, 3};
+
+  const auto input_cpu = at::randn(input.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto weights_cpu = at::randn(weights.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_cpu = at::zeros({weights.output_channels}, at::device(at::kCPU).dtype(at::kFloat));
+
+  // Act
+  const auto output_cpu = at::conv_transpose2d(
+      input_cpu,
+      weights_cpu,
+      bias_cpu,
+      stride,
+      padding,
+      output_padding,
+      groups,
+      dilation);
+
+  const auto output_vk = at::conv_transpose2d(
+      input_cpu.vulkan(),
+      weights_cpu,
+      bias_cpu,
+      stride,
+      padding,
+      output_padding,
+      groups,
+      dilation).cpu();
+
+  // Assert
+  const bool check = almostEqual(output_cpu, output_vk);
+  if (!check) {
+    showRtol(output_cpu, output_vk);
+  }
+
+  ASSERT_TRUE(check);
+}
+
 TEST(VulkanAPITest, upsample_nearest2d) {
   if (!at::is_vulkan_available()) {
     return;

@@ -5,7 +5,7 @@
 namespace torch {
 namespace jit {
 
-TORCH_API void ReplaceOpsWithUpgraders(const std::shared_ptr<Graph>& graph);
+TORCH_API void ReplaceOpsWithUpgraders(std::shared_ptr<Graph> graph);
 
 } // namespace jit
 } // namespace torch

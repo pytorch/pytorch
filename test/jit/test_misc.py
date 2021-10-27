@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: jit"]
+
 from typing import Any, Dict, List, Optional, Tuple
 
 from torch.testing._internal.jit_utils import JitTestCase, make_global
