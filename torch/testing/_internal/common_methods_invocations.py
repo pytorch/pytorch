@@ -6139,12 +6139,16 @@ def _generate_sample_inputs_loss():
     for s, r in product(shapes, reductions):
         yield s, r
 
-def sample_inputs_huber_loss(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs_nn_loss(op_info, device, dtype, requires_grad, float_kwargs=None, **kwargs):
     _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     def gen_shape_kwargs():
         for s, r in _generate_sample_inputs_loss():
-            yield _make_tensor(s), _make_tensor(s), dict(reduction=r, delta=random.uniform(0.01, 9))
+            d = dict(reduction=r)
+            if float_kwargs:
+                for kw in float_kwargs:
+                    d[kw] = random.uniform(0.01, 9)
+            yield _make_tensor(s), _make_tensor(s), d.update(reduction=r)
 
     def gen_inputs():
         for input, target, kwargs in gen_shape_kwargs():
@@ -11254,7 +11258,7 @@ op_db: List[OpInfo] = [
         ref=_NOTHING,
         dtypes=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
-        sample_inputs_func=sample_inputs_huber_loss,
+        sample_inputs_func=partial(sample_inputs_nn_loss, float_kwargs=('delta',)),
         skips=(
             # JIT does not support variadic tensors.
             # RuntimeError: input->type()->kind() == TypeKind::OptionalType
