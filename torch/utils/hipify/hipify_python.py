@@ -750,7 +750,7 @@ def preprocessor(
         return PYTORCH_MAP[m.group(0)]
 
     def pt_sparse_repl(m):
-        # checks SPARSE map first, and if a miss occurs, falls back to pytorch mappings.
+        # checks SPARSE map first, and if a miss occurs, falls back to pytorch mappings
         return PYTORCH_SPARSE_MAP.get(m.group(0), pt_repl(m))
 
     if is_pytorch_extension:
