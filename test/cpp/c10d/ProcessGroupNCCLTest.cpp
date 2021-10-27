@@ -663,6 +663,16 @@ TEST_F(ProcessGroupNCCLTest, testReduceScatter) {
   }
 }
 
+TEST_F(ProcessGroupNCCLTest, DISABLED_testSequenceNumInit) {
+  if (skipTest()) {
+    return;
+  }
+  {
+    TemporaryFile file;
+    testSequenceNumInit(file.path, rank_, size_);
+  }
+}
+
 TEST_F(ProcessGroupNCCLTest, testProcessGroupNCCLHealthCheckFailTimeout) {
     if (skipTest()) {
         return;
