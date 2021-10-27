@@ -1,0 +1,30 @@
+{% extends "!layout.html" %}
+<link rel="canonical" href="{{ theme_canonical_url }}{{ pagename }}.html" />
+
+{% block extrahead %}
+{% if release == "master" %}
+<!--
+  Search engines should not index the master version of documentation.
+  Stable documentation are built without release == 'master'.
+-->
+<meta name="robots" content="noindex">
+{% endif %}
+{% endblock %}
+
+{% block menu %}
+{{ super() }}
+{% endblock %}
+
+{% block sidebartitle %}
+    {% include "searchbox.html" %}
+{% endblock %}
+
+
+{% block footer %}
+{{ super() }}
+<script script type="text/javascript">
+  var collapsedSections = ['Notes', 'Language Bindings', 'Libraries', 'Community'];
+</script>
+
+<img height="1" width="1" style="border-style:none;" alt="" src="https://www.googleadservices.com/pagead/conversion/795629140/?label=txkmCPmdtosBENSssfsC&amp;guid=ON&amp;script=0"/>
+{% endblock %}
