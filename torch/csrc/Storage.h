@@ -61,22 +61,28 @@
 #define THPStorageType TH_CONCAT_3(THP,Real,StorageType)
 #define THPStorageBaseStr TH_CONCAT_STRING_2(Real,StorageBase)
 
-#include <torch/csrc/generic/Storage.h>
-#include <TH/THGenerateAllTypes.h>
+bool THPByteStorage_init(PyObject *module);
+void THPByteStorage_postInit(PyObject *module);
 
 #include <torch/csrc/generic/Storage.h>
-#include <TH/THGenerateComplexTypes.h>
+#include <TH/THGenerateByteType.h>
 
-#include <torch/csrc/generic/Storage.h>
-#include <TH/THGenerateHalfType.h>
+// #include <torch/csrc/generic/Storage.h>
+// #include <TH/THGenerateAllTypes.h>
 
-#include <torch/csrc/generic/Storage.h>
-#include <TH/THGenerateBoolType.h>
+// #include <torch/csrc/generic/Storage.h>
+// #include <TH/THGenerateComplexTypes.h>
 
-#include <torch/csrc/generic/Storage.h>
-#include <TH/THGenerateBFloat16Type.h>
+// #include <torch/csrc/generic/Storage.h>
+// #include <TH/THGenerateHalfType.h>
 
-#include <torch/csrc/generic/Storage.h>
-#include <TH/THGenerateQTypes.h>
+// #include <torch/csrc/generic/Storage.h>
+// #include <TH/THGenerateBoolType.h>
+
+// #include <torch/csrc/generic/Storage.h>
+// #include <TH/THGenerateBFloat16Type.h>
+
+// #include <torch/csrc/generic/Storage.h>
+// #include <TH/THGenerateQTypes.h>
 
 #endif
