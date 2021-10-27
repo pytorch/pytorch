@@ -419,6 +419,17 @@ c10::IValue make_custom_class(CtorArgs&&... args) {
   return c10::IValue(std::move(userClassInstance));
 }
 
+template <class CurClass>
+inline class_<CurClass> selective_class_(const std::string& namespace_name, detail::SelectiveStr<true> className) {
+  auto class_name = std::string(className.operator const char *());
+  return torch::class_<CurClass>(namespace_name, class_name);
+}
+
+template <class CurClass>
+inline detail::ClassNotSelected selective_class_(const std::string&, detail::SelectiveStr<false>) {
+  return detail::ClassNotSelected();
+}
+
 // jit namespace for backward-compatibility
 // We previously defined everything in torch::jit but moved it out to
 // better reflect that these features are not limited only to TorchScript
