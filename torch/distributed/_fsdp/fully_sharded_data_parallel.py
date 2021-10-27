@@ -190,7 +190,7 @@ class FullyShardedDataParallel(nn.Module):
         if p.device == cpu_device:
             return
         with torch.no_grad():
-            p.data = p.to(cpu_device)
+            p.data = p.to(cpu_device, non_blocking=non_blocking)
 
     def _cast_buffers(
         self, device: Optional[torch.device] = None, memo: Optional[Set] = None
