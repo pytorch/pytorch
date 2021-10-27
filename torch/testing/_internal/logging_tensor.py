@@ -9,7 +9,7 @@ import itertools
 # TODO: move this into library proper
 @contextlib.contextmanager
 def no_dispatch() -> Iterator[None]:
-    guard = torch._C._DisableTorchDispatch()  # type: ignore
+    guard = torch._C._DisableTorchDispatch()  # type: ignore[attr-defined]
     try:
         yield
     finally:
@@ -33,7 +33,7 @@ class LoggingTensor(torch.Tensor):
         # The wrapping tensor (LoggingTensor) shouldn't hold any
         # memory for the class in question, but it should still
         # advertise the same device as before
-        r = torch.Tensor._make_wrapper_subclass(  # type: ignore
+        r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
             cls, elem.size(),
             strides=elem.stride(), storage_offset=elem.storage_offset(),
             # TODO: clone storage aliasing
@@ -76,9 +76,9 @@ class LoggingTensorHandler(logging.Handler):
     # autograd
     def _shortid(self, o: object) -> int:
         if not hasattr(o, '_shortid'):
-            o._shortid = self.next_shortid  # type: ignore
+            o._shortid = self.next_shortid  # type: ignore[attr-defined]
             self.next_shortid += 1
-        return o._shortid  # type: ignore
+        return o._shortid  # type: ignore[attr-defined]
 
     def _fmt(self, a: object) -> str:
         return f'${self._shortid(a)}' if isinstance(a, LoggingTensor) else repr(a)
