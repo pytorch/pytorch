@@ -5345,7 +5345,7 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
             ),
             weight=torch.ao.quantization.default_weight_observer
         )
-        self.backend_config_dict = get_tensorrt_backend_config_dict()
+        self.trt_backend_config_dict = get_tensorrt_backend_config_dict()
 
     def test_conv(self):
         class Conv2d(torch.nn.Module):
@@ -5360,7 +5360,7 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
         conv2d_module_args = (3, 3, 3)
 
         m = Conv2d(*conv2d_module_args).eval()
-        prepared = prepare_fx(m, {"": self.qconfig}, backend_config_dict=self.backend_config_dict)
+        prepared = prepare_fx(m, {"": self.qconfig}, backend_config_dict=self.trt_backend_config_dict)
         # calibration
         prepared(conv2d_input)
         quantized = _convert_fx_do_not_use(prepared, is_reference=True)
@@ -5386,7 +5386,7 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
         linear_module_input = torch.rand(8, 5)
 
         m = LinearModule().eval()
-        prepared = prepare_fx(m, {"": self.qconfig}, backend_config_dict=self.backend_config_dict)
+        prepared = prepare_fx(m, {"": self.qconfig}, backend_config_dict=self.trt_backend_config_dict)
         # calibration
         prepared(linear_module_input)
         quantized = _convert_fx_do_not_use(prepared, is_reference=True)
@@ -5420,7 +5420,7 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
 
         m = LinearModule().eval()
         trt_unsupported_qconfig = default_qconfig
-        prepared = prepare_fx(m, {"": trt_unsupported_qconfig}, backend_config_dict=self.backend_config_dict)
+        prepared = prepare_fx(m, {"": trt_unsupported_qconfig}, backend_config_dict=self.trt_backend_config_dict)
         # calibration
         prepared(linear_module_input)
         quantized = _convert_fx_do_not_use(prepared, is_reference=True)
