@@ -1,4 +1,5 @@
 #include <ATen/Functions.h>
+#include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/dispatch/ObservedOperators.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
@@ -9,6 +10,8 @@
 #include <torch/csrc/jit/mobile/model_tracer/TensorUtils.h>
 #include <torch/csrc/jit/mobile/model_tracer/TracerRunner.h>
 #include <torch/csrc/jit/mobile/parse_operators.h>
+#include <torch/csrc/jit/mobile/runtime_compatibility.h>
+#include <torch/csrc/jit/runtime/operator.h>
 #include <torch/script.h>
 
 namespace torch {
@@ -92,6 +95,84 @@ void consume_tensor(const at::Tensor& t) {
   c.copy_(t.cpu());
 }
 
+std::unordered_map<std::string, c10::FunctionSchema>
+_get_runtime_ops_and_schema() {
+  std::unordered_map<std::string, c10::FunctionSchema> result;
+
+  // Grab the jit operators
+  auto nonDispatcherOperators = torch::jit::getAllOperators();
+  for (const auto& full_op : nonDispatcherOperators) {
+    auto op = full_op->schema();
+    auto op_name = op.name();
+    if (!op.overload_name().empty()) {
+      op_name += ("." + op.overload_name());
+    }
+    result.emplace(op_name, op);
+  }
+
+  // Grab the dispatcher operators
+  auto dispatcherOperators = c10::Dispatcher::singleton().getAllOpNames();
+  for (auto& op : dispatcherOperators) {
+    // grab schema
+    const auto op_handle = c10::Dispatcher::singleton().findOp(op);
+    if (op_handle->hasSchema()) {
+      auto op_name = op.name;
+      if (!op.overload_name.empty()) {
+        op_name += ("." + op.overload_name);
+      }
+      result.emplace(op_name, op_handle->schema());
+    }
+  }
+
+  return result;
+}
+
+/**
+ * For the vast majority of usecases the instrumentation in getCustomClass will
+ * catch any custom classes referenced by a model. There are however, niche
+ * situations that avoid the getCustomClass instrumentation due to some nuances
+ * of mobile model deserialization. To get around that we can search through all
+ * the used ops, and inspect their schemas to search for any referenced classes.
+ * Example schema: prepacked::linear_clamp_prepack(Tensor W, Tensor? B=None,
+ *   Scalar? output_min=None, Scalar? output_max=None) ->
+ *   __torch__.torch.classes.xnnpack.LinearOpContext"
+ */
+void recordCustomClassesFromOpSchemas(
+    std::set<std::string>& root_ops,
+    std::set<std::string>& traced_ops,
+    std::set<std::string>& loaded_classes) {
+  std::set<std::string> ops;
+  ops.insert(root_ops.begin(), root_ops.end());
+  ops.insert(traced_ops.begin(), traced_ops.end());
+  auto ops_and_schemas = _get_runtime_ops_and_schema();
+
+  auto record_if_class = [&](std::string type_name) {
+    // All custom class types start with __torch__ not sure if this is by
+    // chance or guaranteed
+    if (type_name.find("__torch__") != std::string::npos) {
+      // The name of a customClassType here is its fully qualified name, but
+      // in registration only the class name is used so only record that
+      loaded_classes.insert(type_name.substr(type_name.find_last_of('.') + 1));
+    }
+  };
+
+  for (auto& op_name : ops) {
+    // This check is only necessary because of GPU models.
+    // Certain models can only run on a specific backend say metal.
+    // Those ops will be present in the models root ops, but likely
+    // not the tracer on linux
+    if (ops_and_schemas.find(op_name) != ops_and_schemas.end()) {
+      auto& schema = ops_and_schemas.at(op_name);
+      for (auto& arg : schema.arguments()) {
+        record_if_class(arg.type()->annotation_str());
+      }
+      for (auto& ret : schema.returns()) {
+        record_if_class(ret.type()->annotation_str());
+      }
+    }
+  }
+}
+
 void run_model(
     const std::string& input_module_path,
     std::set<std::string>& root_ops,
@@ -101,7 +182,6 @@ void run_model(
   // This is needed so that we can load any TorchBind objects (custom classes)
   // that this model refers to so that any operators being called from those
   // TorchBind objects can be traced by the model tracer.
-  //
   torch::jit::mobile::MobileModelRunner module_runner(input_module_path, 0);
   root_ops = module_runner.get_root_operators();
   std::cout << "Got " << root_ops.size() << " Root Operators." << std::endl;
@@ -178,10 +258,12 @@ TracerResult trace_run(const std::string& input_module_path) {
 
   torch::jit::mobile::OperatorCallTracer op_tracer;
   torch::jit::mobile::KernelDTypeTracer kdtype_tracer;
+  torch::jit::mobile::CustomClassTracer custom_class_tracer;
 
   call_setup_methods();
 
-  std::set<std::string> root_ops, traced_operators, enabled_backends;
+  std::set<std::string> root_ops, traced_operators, enabled_backends,
+      loaded_classes;
   torch::jit::mobile::KernelDTypeTracer::kernel_tags_type called_kernel_tags;
 
   using torch::jit::MobileModuleLoadOptions;
@@ -192,13 +274,21 @@ TracerResult trace_run(const std::string& input_module_path) {
   run_model(input_module_path, root_ops, enabled_backends, called_kernel_tags);
 
   traced_operators = op_tracer.getCalledOperators();
+  recordCustomClassesFromOpSchemas(root_ops, traced_operators, loaded_classes);
   called_kernel_tags.insert(
       kdtype_tracer.getCalledKernelTags().begin(),
       kdtype_tracer.getCalledKernelTags().end());
   traced_operators.insert(
       always_included_traced_ops.begin(), always_included_traced_ops.end());
+  loaded_classes.insert(
+      custom_class_tracer.getLoadedClasses().begin(),
+      custom_class_tracer.getLoadedClasses().end());
   TracerResult tracer_result = {
-      root_ops, traced_operators, called_kernel_tags, enabled_backends};
+      root_ops,
+      traced_operators,
+      called_kernel_tags,
+      loaded_classes,
+      enabled_backends};
 
   return tracer_result;
 }
