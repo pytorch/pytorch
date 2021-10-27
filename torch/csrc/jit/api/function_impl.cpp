@@ -7,6 +7,11 @@
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/peephole.h>
 
+#ifndef C10_MOBILE
+#include <ATen/autocast_mode.h>
+#include <torch/csrc/jit/passes/autocast.h>
+#endif
+
 namespace torch {
 namespace jit {
 namespace {
@@ -94,14 +99,47 @@ const c10::FunctionSchema& GraphFunction::getSchema() const {
   return *schema_;
 }
 
+GraphFunction::SpecializationKey GraphFunction::currentSpecialization() const {
+#ifdef C10_MOBILE
+  // disabling autodiff pass for mobile build since autocast APIs don't exist
+  return SpecializationKey::AutocastOff;
+#else
+  bool cpu_enabled = at::autocast::is_cpu_enabled();
+  bool gpu_enabled = at::autocast::is_enabled();
+  if (cpu_enabled && gpu_enabled) {
+    return SpecializationKey::CpuGpuAutocastOn;
+  } else if (!cpu_enabled && !gpu_enabled) {
+    return SpecializationKey::AutocastOff;
+  } else {
+    return gpu_enabled ? SpecializationKey::GpuAutocastOn
+                       : SpecializationKey::CpuAutocastOn;
+  }
+#endif
+}
+
 void preoptimizeGraph(std::shared_ptr<Graph>& graph) {
   Inline(*graph);
+
   // Peephole Optimize cleans up many "is None" checks and creates constant prop
   // opportunities
   PeepholeOptimize(graph, true);
-  // // AliasDb construction can be slow, so run it just on immutable types
-  // // to clean up constant Ifs & other easy wins
+
+  // AliasDb construction can be slow, so run it just on immutable types
+  // to clean up constant Ifs & other easy wins
   ConstantPropagationImmutableTypes(graph);
+
+#ifndef C10_MOBILE
+  // Inject casts for automatic mixed precision
+  //
+  // TODO: Ideally, this pass could run earlier, before inlining
+  //  or any other optimizations. That setup is preferable because:
+  //  1. The AMP pass would be self-contained and function independently
+  //     of the any optimizations
+  //  2. AMP transformations would benefit from followup passes's cleanup
+  //
+  Autocast(graph);
+#endif
+
   ConstantPooling(graph);
 }
 
