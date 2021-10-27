@@ -1849,6 +1849,23 @@ def sample_inputs_bmm(self, device, dtype, requires_grad, **kwargs):
         ),
     )
 
+def sample_inputs_attn(self, device, dtype, requires_grad, **kwargs):
+    sample_inputs = []
+    if (requires_grad):
+        for q_grad, k_grad, v_grad in product([False, True], [False, True], [False, True],):
+            if(not q_grad and not k_grad and not v_grad):
+                continue
+            q = make_tensor((S, S), device, dtype, requires_grad=q_grad)
+            k = make_tensor((S, S), device, dtype, requires_grad=k_grad)
+            v = make_tensor((S, S), device, dtype, requires_grad=v_grad)
+            sample_inputs.append(SampleInput(q, args=(k, v)))
+    else:
+        q = make_tensor((S, S), device, dtype, requires_grad=requires_grad)
+        k = make_tensor((S, S), device, dtype, requires_grad=requires_grad)
+        v = make_tensor((S, S), device, dtype, requires_grad=requires_grad)
+        sample_inputs.append(SampleInput(q, args=(k, v)))
+    return sample_inputs
+
 def sample_inputs_dot_vdot(self, device, dtype, requires_grad, **kwargs):
     sample_inputs = []
     sample_inputs.append(SampleInput(
@@ -7336,6 +7353,13 @@ op_db: List[OpInfo] = [
                    toleranceOverride({torch.complex64: tol(atol=1e-05, rtol=1.2e-03)}),
                    'TestMathBits', 'test_conj_view', device_type='cuda')],
            sample_inputs_func=sample_inputs_baddbmm),
+    OpInfo('attn',
+           dtypes=floating_types_and(torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+           sample_inputs_func=sample_inputs_attn,
+           supports_out=False,
+           assert_autodiffed=False,
+           ),
     OpInfo('dot',
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),

@@ -22,6 +22,7 @@ all_operators_with_namedtuple_return = {
     '_fused_moving_avg_obs_fq_helper',
     '_det_lu_based_helper',
     '_lu_with_info',
+    'attn'
 }
 
 
@@ -104,6 +105,8 @@ class TestNamedTupleAPI(TestCase):
             op(operators=['aminmax'], input=(), names=('min', 'max'), hasout=True),
             op(operators=['_lu_with_info'],
                input=(), names=('LU', 'pivots', 'info'), hasout=False),
+            op(operators=['attn'], input=(torch.randn([5, 5]), torch.randn([5, 5])),
+               names=('o', 'a'), hasout=False),
         ]
 
         def get_func(f):

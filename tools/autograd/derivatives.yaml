@@ -280,6 +280,11 @@
   self: grad * (self.pow(2) - 1).rsqrt().conj()
   result: auto_element_wise
 
+- name: attn(Tensor q, Tensor k, Tensor v) -> (Tensor o, Tensor a)
+  q: attn_backward_q(grads[0], grads[1], a, q, k, v)
+  k: attn_backward_k(grads[0], grads[1], a, q, k, v)
+  v: attn_backward_v(grads[0], a, v)
+
 - name: acosh_(Tensor(a!) self) -> Tensor(a!)
   self: not_implemented("inplace version of acosh")
 

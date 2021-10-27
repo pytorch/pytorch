@@ -543,6 +543,16 @@
 # (so that it can be traced directly).
 - func: _dim_arange(Tensor like, int dim) -> Tensor
 
+- func: attn(Tensor q, Tensor k, Tensor v) -> (Tensor o, Tensor a)
+  dispatch:
+    CompositeExplicitAutograd: attn
+
+- func: attn_backward_q(Tensor grad_o, Tensor grad_a, Tensor a, Tensor q, Tensor k, Tensor v) -> Tensor grad_q
+
+- func: attn_backward_k(Tensor grad_o, Tensor grad_a, Tensor a, Tensor q, Tensor k, Tensor v) -> Tensor grad_k
+
+- func: attn_backward_v(Tensor grad_o, Tensor a, Tensor v) -> Tensor grad_v
+
 - func: argmax(Tensor self, int? dim=None, bool keepdim=False) -> Tensor
   structured_delegate: argmax.out
   device_check: NoCheck   # TensorIterator
