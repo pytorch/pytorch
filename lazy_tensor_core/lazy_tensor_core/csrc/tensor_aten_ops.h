@@ -574,8 +574,6 @@ void put_(LazyTensor& input, const LazyTensor& index, const LazyTensor& source,
 
 std::tuple<LazyTensor, LazyTensor> qr(const LazyTensor& input, bool some);
 
-void random_(LazyTensor& input);
-
 LazyTensor randperm(int64_t n, const Device& device,
                     at::ScalarType scalar_type);
 

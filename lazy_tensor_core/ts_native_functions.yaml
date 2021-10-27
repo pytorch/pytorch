@@ -78,6 +78,8 @@ supported:
   - max_pool3d_with_indices_backward
   - permute
   - random_
+  - random_.from
+  - random_.to
   - repeat
   - select.int
   - slice.Tensor

@@ -8,9 +8,14 @@ namespace ops {
 
 class Random : public TsNode {
  public:
-  Random(const torch::lazy::Value& input);
+  Random(const torch::lazy::Value& input, const c10::optional<int64_t>& from, const c10::optional<int64_t>& to);
 
-  NodePtr Clone(OpList operands) const override;
+  std::string ToString() const override;
+  TSOpVector Lower(TSNodeLoweringInterface& tsLoweringInterface, std::shared_ptr<torch::jit::GraphFunction> function,
+      ts_backend::TSLoweringContext* loctx) const override;
+
+  c10::optional<int64_t> from;
+  c10::optional<int64_t> to;
 };
 
 }  // namespace ops

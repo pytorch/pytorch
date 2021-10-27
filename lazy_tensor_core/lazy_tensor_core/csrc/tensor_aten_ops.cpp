@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <functional>
 
+#include "c10/util/Optional.h"
 #include "lazy_tensor_core/csrc/aten_ltc_bridge.h"
 #include "lazy_tensor_core/csrc/data_ops.h"
 #include "lazy_tensor_core/csrc/helpers.h"
@@ -81,7 +82,6 @@
 #include "lazy_tensor_core/csrc/ops/prod.h"
 #include "lazy_tensor_core/csrc/ops/put.h"
 #include "lazy_tensor_core/csrc/ops/qr.h"
-#include "lazy_tensor_core/csrc/ops/random.h"
 #include "lazy_tensor_core/csrc/ops/reflection_pad2d.h"
 #include "lazy_tensor_core/csrc/ops/reflection_pad2d_backward.h"
 #include "lazy_tensor_core/csrc/ops/repeat.h"
@@ -1601,11 +1601,6 @@ std::tuple<LazyTensor, LazyTensor> qr(const LazyTensor& input, bool some) {
   NodePtr node = torch::lazy::MakeNode<ir::ops::QR>(input.GetIrValue(), some);
   return std::make_tuple(input.CreateFrom(torch::lazy::Value(node, 0)),
                          input.CreateFrom(torch::lazy::Value(node, 1)));
-}
-
-void random_(LazyTensor& input) {
-  input.SetInPlaceIrValue(
-      torch::lazy::MakeNode<ir::ops::Random>(input.GetIrValue()));
 }
 
 LazyTensor reciprocal(const LazyTensor& input) {

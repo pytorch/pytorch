@@ -1700,7 +1700,7 @@ TEST_F(AtenLtcTsTensorTest, TestUniformInPlace) {
 TEST_F(AtenLtcTsTensorTest, TestRandomInPlace) {
   for (auto dtype : {torch::kFloat, torch::kDouble, torch::kByte, torch::kChar,
                      torch::kShort, torch::kInt, torch::kLong}) {
-    const double eps = 0.15;
+    const double eps = 0.2;
     torch::Tensor a = torch::zeros({10, 10, 10}, torch::TensorOptions(dtype));
     ForEachDevice([&](const torch::Device& device) {
       torch::Tensor xla_a = CopyToDevice(a, device);
@@ -1719,7 +1719,7 @@ TEST_F(AtenLtcTsTensorTest, TestRandomInPlace) {
 TEST_F(AtenLtcTsTensorTest, TestRandomInPlaceDefaultFrom) {
   for (auto dtype : {torch::kFloat, torch::kDouble, torch::kByte, torch::kChar,
                      torch::kShort, torch::kInt, torch::kLong}) {
-    const double eps = 0.15;
+    const double eps = 0.2;
     torch::Tensor a = torch::zeros({10, 10, 10}, torch::TensorOptions(dtype));
     ForEachDevice([&](const torch::Device& device) {
       torch::Tensor xla_a = CopyToDevice(a, device);
