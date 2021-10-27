@@ -27,7 +27,6 @@ _(aten, _amp_update_scale_) \
 _(aten, _arange) \
 _(aten, _argmax) \
 _(aten, _argmin) \
-_(aten, _baddbmm_mkl) \
 _(aten, _cast_Byte) \
 _(aten, _cast_Char) \
 _(aten, _cast_Double) \
@@ -380,6 +379,7 @@ _(aten, heaviside) \
 _(aten, hinge_embedding_loss) \
 _(aten, histc) \
 _(aten, histogram) \
+_(aten, histogramdd) \
 _(aten, hspmm) \
 _(aten, hsplit) \
 _(aten, hstack) \
@@ -651,7 +651,6 @@ _(aten, smooth_l1_loss_forward) \
 _(aten, soft_margin_loss) \
 _(aten, soft_margin_loss_backward) \
 _(aten, soft_margin_loss_forward) \
-_(aten, softmax) \
 _(aten, _softmax) \
 _(aten, _softmax_backward_data) \
 _(aten, softplus) \

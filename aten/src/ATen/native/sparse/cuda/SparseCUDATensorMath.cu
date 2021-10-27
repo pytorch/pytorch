@@ -9,12 +9,11 @@
 #include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
 #include <ATen/native/sparse/cuda/SparseCUDABlas.h>
 #include <ATen/cuda/CUDAUtils.h>
+#include <ATen/cuda/ThrustAllocator.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/ExpandUtils.h>
 #include <c10/cuda/CUDACachingAllocator.h>
-
-#include <THC/THCThrustAllocator.cuh>
 
 #include <thrust/device_ptr.h>
 #include <thrust/sequence.h>
@@ -186,7 +185,7 @@ SparseTensor& hspmm_out_sparse_cuda(
   get_sparse_impl(r_)->resize_and_clear_(1, 1, {m, n});
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+  at::cuda::ThrustAllocator allocator;
   auto policy = thrust::cuda::par(allocator).on(stream);
 
   SparseTensor sparse = sparse_.coalesce();
@@ -341,7 +340,7 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseT
     values = values.reshape({nnz, view_columns});
     r_view.index_add_(0, indices1D, values, value);
   }
-  THCudaCheck(cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
 
   r_.copy_(r);
   return r_;
@@ -518,7 +517,7 @@ SparseTensor& mul_out_sparse_cuda(const SparseTensor& t_, const SparseTensor& sr
 // see NOTE [ sparse.sum() backward ]
 // --------------------------------------------------------------------
 template <typename scalar_t>
-#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(cuda::getApplyBlockSize(), cuda::getApplyBlocksPerSM())
 #endif
 __global__ void _sparse_sum_backward_cuda_kernel(
@@ -625,7 +624,7 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_
       int curDevice = -1;
       cudaGetDevice(&curDevice);
       cudaStream_t stream = at::cuda::getCurrentCUDAStream(curDevice);
-      auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+      at::cuda::ThrustAllocator allocator;
       auto policy = thrust::cuda::par(allocator).on(stream);
       typedef thrust::device_ptr<int64_t> thrust_ptr;
 
@@ -684,7 +683,7 @@ Tensor bmm_sparse_cuda(const SparseTensor& self, const Tensor& mat2) {
   return bmm_out_sparse_cuda(self, mat2, result);
 }
 
-#if !(defined(__HIP_PLATFORM_HCC__) || (defined(_MSC_VER) && CUSPARSE_VERSION < 11000))
+#if !(defined(USE_ROCM) || (defined(_MSC_VER) && CUSPARSE_VERSION < 11000))
 __global__ void search_end_matrix_indices_cuda_kernel(
   int64_t* mat_el_end_indices,
   int64_t num_matrices,
@@ -765,7 +764,7 @@ cudaDataType getTensorCudaDataType(Tensor self) {
 #endif
 
 Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor& result) {
-#if defined __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
   TORCH_CHECK(false, "bmm sparse-dense is not supported on HIP");
 #elif defined(_MSC_VER) && (CUSPARSE_VERSION < 11000)
   TORCH_CHECK(false, "bmm sparse-dense CUDA is not supported on Windows with cuda before 11.0");

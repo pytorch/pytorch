@@ -27,8 +27,10 @@
 #include <torch/csrc/utils/tensor_new.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <ATen/NamedTensorUtils.h>
+#include <c10/core/DeviceType.h>
 #include <c10/util/DeadlockDetection.h>
 #include <c10/util/irange.h>
+
 
 #include <torch/library.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
@@ -44,6 +46,8 @@
 #include <memory>
 #include <utility>
 #include <vector>
+
+
 
 using namespace at;
 using namespace torch;
@@ -154,6 +158,24 @@ static bool check_has_torch_dispatch(PyObject *obj) {
   );
 }
 
+// NOLINTNEXTLINE
+static PyObject* device_to_py_class_ [static_cast<size_t>(c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)];
+
+void registerPythonTensorClass(const std::string& device, PyObject* python_tensor_class) {
+  c10::Device dev(device);
+
+  TORCH_CHECK(dev.type() == kXLA, "Only the python class for XLA can be overriden");
+  if (device_to_py_class_[static_cast<size_t>(dev.type())] != nullptr) {
+    TORCH_WARN("Overriding a previously registered python class for ", dev.str());
+  }
+
+  device_to_py_class_[static_cast<size_t>(dev.type())] = python_tensor_class;
+}
+
+static PyObject* getPythonTensorClass(c10::Device d) {
+  return device_to_py_class_[static_cast<size_t>(d.type())];
+}
+
 // TODO: Make this take Variable by const reference
 PyObject * THPVariable_Wrap(at::TensorBase var)
 {
@@ -199,6 +221,17 @@ PyObject * THPVariable_Wrap(at::TensorBase var)
       status = c10::impl::PyInterpreterStatus::MAYBE_UNINITIALIZED;
     }
   }
+
+  if (C10_LIKELY(var.device().type() != c10::kXLA)) {
+    return THPVariable_NewWithVar(
+      (PyTypeObject*)THPVariableClass, std::move(var), status);
+  }
+
+  if (auto clazz = getPythonTensorClass(var.device())) {
+      return THPVariable_NewWithVar(
+        (PyTypeObject*)clazz, std::move(var), status);
+  }
+
   return THPVariable_NewWithVar(
       (PyTypeObject*)THPVariableClass, std::move(var), status);
 }
@@ -430,6 +463,39 @@ PyObject *THPVariable_get_T(THPVariable *self, void *unused)
   }
   const auto& var = THPVariable_Unpack(self);
   return THPVariable_Wrap(var.numpy_T());
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject *THPVariable_get_H(THPVariable *self, void *unused)
+{
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject *)self)) {
+    return handle_torch_function_getter(self, "H");
+  }
+  const auto& var = THPVariable_Unpack(self);
+  return THPVariable_Wrap(var.matrix_H());
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject *THPVariable_get_mT(THPVariable *self, void *unused)
+{
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject *)self)) {
+    return handle_torch_function_getter(self, "mT");
+  }
+  const auto& var = THPVariable_Unpack(self);
+  return THPVariable_Wrap(var.mT());
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject *THPVariable_get_mH(THPVariable *self, void *unused)
+{
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject *)self)) {
+    return handle_torch_function_getter(self, "mH");
+  }
+  const auto& var = THPVariable_Unpack(self);
+  return THPVariable_Wrap(var.mH());
   END_HANDLE_TH_ERRORS
 }
 
@@ -1015,6 +1081,9 @@ int THPVariable_set_imag(THPVariable* self, THPVariable *imag, void *unused)
 static struct PyGetSetDef THPVariable_properties[] = {
   {"_python_dispatch", (getter)THPVariable_get_python_dispatch, nullptr, nullptr, nullptr},
   {"T", (getter)THPVariable_get_T, nullptr, nullptr, nullptr},
+  {"H", (getter)THPVariable_get_H, nullptr, nullptr, nullptr},
+  {"mT", (getter)THPVariable_get_mT, nullptr, nullptr, nullptr},
+  {"mH", (getter)THPVariable_get_mH, nullptr, nullptr, nullptr},
   {"_cdata", (getter)THPVariable_get_cdata, nullptr, nullptr, nullptr},
   {"_version", (getter)THPVariable_get_version, nullptr, nullptr, nullptr},
   {"grad_fn", (getter)THPVariable_get_grad_fn, nullptr, nullptr, nullptr},
@@ -1670,7 +1739,7 @@ void concrete_dispatch_fn(
   }
 
   // Find overloaded tensors
-  for (int64_t idx = 0; idx < arguments.size(); idx++) {
+  for (const auto idx : c10::irange(arguments.size())) {
     const auto& ivalue = arguments[idx];
     if (ivalue.isTensor()) {
       const auto& tensor = ivalue.toTensor();
@@ -1692,12 +1761,12 @@ void concrete_dispatch_fn(
   }
 
   // Populate positional arguments
-  for (int64_t idx = 0; idx < positional_default_start; idx++) {
+  for (const auto idx : c10::irange(positional_default_start)) {
     PyTuple_SET_ITEM(args.ptr(), idx, torch::jit::toPyObject(std::move(arguments[idx])).release().ptr());
   }
 
   // Populate keyword arguments
-  for (int64_t idx = kwarg_only_start; idx < arguments.size(); idx++) {
+  for (const auto idx : c10::irange(kwarg_only_start, arguments.size())) {
     // But don't populate default keyword arguments
     if (is_default(idx)) continue;
     const auto& arg = schema.arguments()[idx];
