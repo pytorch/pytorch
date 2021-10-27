@@ -17,7 +17,7 @@ Tensor& max_unpooling2d_forward_out_cpu(
       "elements in indices should be type int64");
   TORCH_CHECK(
       output_size.size() == 2,
-      "There should be exactly two elements (height, width) in output_size, but found ", output_size.size(), " elements.");
+      "There should be exactly two elements (height, width) in output_size, but got ", output_size.size(), " elements.");
   TORCH_CHECK(
       (self_.ndimension() == 3 || self_.ndimension() == 4),
       "Input to max_unpooling2d should be a 3d or 4d Tensor, but got tensor with dimension: ", self_.ndimension());
@@ -77,20 +77,19 @@ static void max_unpooling3d_shape_check(
       "elements in indices should be type int64");
   TORCH_CHECK(
       (input.ndimension() == 4 || input.ndimension() == 5),
-      "Input to max_unpooling3d should be a 4d or 5d Tensor",
-      input.sizes());
+      "Input to max_unpooling3d should be a 4d or 5d Tensor, but got a tensor with dim ", input.ndimension());
   TORCH_CHECK(
       output_size.size() == 3,
-      "There should be exactly three elements (depth, height, width) in output_size");
+      "There should be exactly three elements (depth, height, width) in output_size, but got ", output_size.size(), " elements.");
   TORCH_CHECK(
       stride.size() == 3,
-      "There should be exactly three elements (depth, height, width) in stride");
+      "There should be exactly three elements (depth, height, width) in stride, but got: ", stride.size(), " elements.");
   TORCH_CHECK(
       padding.size() == 3,
-      "There should be exactly three elements (depth, height, width) in padding");
+      "There should be exactly three elements (depth, height, width) in padding, but got: ", padding.size(), " elements.");
   TORCH_CHECK(
       input.sizes() == indices.sizes(),
-      "Shape of indices should match shape of input");
+      "Shape of indices (", indices.sizes(), ") should match shape of input (", input.sizes(), ")");
 
   for (int64_t i = 1; i < input.ndimension(); ++i) {
     TORCH_CHECK(input.size(i) > 0, fn_name,
