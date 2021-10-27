@@ -18,6 +18,8 @@ struct THPVariable {
   PyObject* backward_hooks = nullptr;
 };
 
+TORCH_API void registerPythonTensorClass(const std::string& device, PyObject* python_tensor_class);
+
 THP_API PyObject *THPVariableClass;
 THP_API PyObject *ParameterClass;
 

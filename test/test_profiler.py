@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: profiler"]
+
 import collections
 import gc
 import io
