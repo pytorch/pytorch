@@ -460,7 +460,8 @@ GraphEncoder::GraphEncoder(
       onnx_opset_version > 0 &&
           onnx_opset_version < kOpsetVersionToIRVersion.size() &&
           kOpsetVersionToIRVersion[onnx_opset_version] != kInvalidOpsetVersion,
-      "Unsupported onnx_opset_version.");
+      "Unsupported onnx_opset_version: ",
+      onnx_opset_version);
 
   model_proto_.set_ir_version(kOpsetVersionToIRVersion[onnx_opset_version]);
   model_proto_.set_producer_version(TORCH_VERSION);
