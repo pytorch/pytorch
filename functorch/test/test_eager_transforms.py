@@ -21,6 +21,8 @@ import functorch
 from functorch import (
     grad, vjp, vmap, jacrev, grad_and_value,
     make_functional, make_functional_with_buffers,
+)
+from functorch._src.make_functional import (
     functional_init, functional_init_with_buffers,
 )
 
