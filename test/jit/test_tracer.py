@@ -2535,3 +2535,214 @@ class TestMixTracingScripting(JitTestCase):
         top = TopModule()
         top_example_input = torch.ones(1)
         torch.jit.trace(top, top_example_input)
+
+
+    class StarTestSumStarred(torch.nn.Module):
+        def __init__(self):
+            super(TestMixTracingScripting.StarTestSumStarred, self).__init__()
+
+        def forward(self, *inputs):
+            output = inputs[0]
+            for i in range(1, len(inputs)):
+                output += inputs[i]
+            return output
+
+    class StarTestReturnThree(torch.nn.Module):
+        def __init__(self):
+            super(TestMixTracingScripting.StarTestReturnThree, self).__init__()
+
+        def forward(self, rep):
+            return rep, rep, rep
+
+
+    def test_script_star_expr(self):
+
+        class M2(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M2, self).__init__()
+                self.m = torch.jit.trace(TestMixTracingScripting.StarTestSumStarred(),
+                                         (torch.ones(4, 3), torch.ones(4, 3), torch.ones(4, 3)))
+                self.g = torch.jit.trace(TestMixTracingScripting.StarTestReturnThree(), torch.ones(4, 3))
+
+            @torch.jit.script_method
+            def forward(self, rep):
+                tup = self.g(rep)
+                return self.m(*tup)
+
+        m = M2()
+        self.assertEqual(m(torch.zeros(4, 3)), 3 * torch.zeros(4, 3))
+
+    def test_script_star_expr_string(self):
+        class M2(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M2, self).__init__()
+                self.m = torch.jit.trace(TestMixTracingScripting.StarTestSumStarred(),
+                                         (torch.ones(4, 3), torch.ones(4, 3), torch.ones(4, 3)))
+                self.g = torch.jit.trace(TestMixTracingScripting.StarTestReturnThree(), torch.ones(4, 3))
+
+                self.define('''
+            def forward(self, rep):
+                tup = self.g(rep)
+                return self.m(*tup)
+                ''')
+
+        m = M2()
+        self.assertEqual(m(torch.zeros(4, 3)), 3 * torch.zeros(4, 3))
+
+    class StarTestSumAndReturnThree(torch.nn.Module):
+        def __init__(self):
+            super(TestMixTracingScripting.StarTestSumAndReturnThree, self).__init__()
+
+        def forward(self, *inputs):
+            output = inputs[0]
+            for i in range(1, len(inputs)):
+                output += inputs[i]
+            return output, output, output
+
+    def test_script_star_assign(self):
+        class M2(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M2, self).__init__()
+                self.g = torch.jit.trace(TestMixTracingScripting.StarTestSumAndReturnThree(), torch.ones(4, 3))
+                self.define('''
+            def forward(self, rep):
+                head, *tail = self.g(rep)
+                return head
+                ''')
+
+        m = M2()
+        self.assertEqual(m(torch.zeros(4, 3)), 3 * torch.zeros(4, 3))
+
+    def test_script_module_star_assign2(self):
+        class M2(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M2, self).__init__()
+                self.g = torch.jit.trace(
+                    TestMixTracingScripting.StarTestSumAndReturnThree(),
+                    (torch.ones(4, 3), torch.ones(4, 3), torch.ones(4, 3)),
+                    _force_outplace=True)
+                self.define('''
+            def forward(self, rep):
+                *head, tail = self.g(rep, rep, rep)
+                return tail
+                ''')
+
+        m = M2()
+        self.assertEqual(m(torch.ones(4, 3)), 3 * torch.ones(4, 3))
+
+    def test_script_module_star_assign2_inplace(self):
+        class M2(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M2, self).__init__()
+                self.g = torch.jit.trace(
+                    TestMixTracingScripting.StarTestSumAndReturnThree(),
+                    (torch.ones(4, 3), torch.ones(4, 3), torch.ones(4, 3)),
+                    _force_outplace=False)
+                self.define('''
+            def forward(self, rep):
+                *head, tail = self.g(rep, rep, rep)
+                return tail
+                ''')
+
+        m = M2()
+        # since forward() makes three aliases to the input `rep` before passing
+        # it to StarTestSumAndReturnThree(), in-place behavior will be different
+        # than the above out of place.
+        self.assertEqual(m(torch.ones(4, 3)), 4 * torch.ones(4, 3))
+
+    def test_script_module_star_assign_fail_pythonop(self):
+
+        with self.assertRaisesRegex(RuntimeError, "cannot be used as a tuple"):
+            class M2(torch.jit.ScriptModule):
+                def __init__(self):
+                    super(M2, self).__init__()
+
+                    @torch.jit.ignore
+                    def myfunc():
+                        return torch.zeros(1, 2, 3), torch.zeros(1, 2, 3)
+
+                    self.define('''
+                def forward(self, rep):
+                    a, *b = myfunc()
+                    return a
+                    ''')
+
+            m = M2()
+            m(torch.zeros(4, 3))
+
+    def test_script_module_star_assign_fail_builtin(self):
+        with self.assertRaisesRegex(RuntimeError, "cannot be used as a tuple"):
+            class M2(torch.jit.ScriptModule):
+                def __init__(self):
+                    super(M2, self).__init__()
+
+                    self.define('''
+                def forward(self, rep):
+                    a, *b = torch.neg(rep)
+                    return a
+                    ''')
+
+            m = M2()
+            m(torch.zeros(4, 3))
+
+    @unittest.skip("error in first class mode")
+    def test_call_traced_mod_from_tracing_fn(self):
+        class TracedModule(torch.nn.Module):
+            def __init__(self):
+                super(TracedModule, self).__init__()
+                self.param = torch.nn.Parameter(torch.rand(4, 3), requires_grad=False)
+
+            def forward(self, x):
+                return torch.mm(x, self.param)
+
+        tm = torch.jit.trace(TracedModule(), torch.rand(3, 4))
+
+        with self.assertRaisesRegex(RuntimeError, "must be registered as submodules"):
+            @_trace(torch.rand(3, 4))
+            def traced_fn(x):
+                return tm(x) + 1.0
+
+    def test_call_python_fn_from_traced_module(self):
+        def python_fn(x):
+            return torch.neg(x)
+
+        class TracedModule(torch.nn.Module):
+            def __init__(self):
+                super(TracedModule, self).__init__()
+                self.param = torch.nn.Parameter(torch.rand(4, 3))
+
+            def forward(self, x):
+                return torch.mm(python_fn(x), self.param)
+
+        tm = torch.jit.trace(TracedModule(), torch.rand(3, 4))
+
+        # Note: parameter self.param from the traced module should appear as
+        # an input to the graph and the neg op from the Python function should
+        # be properly inlined
+        self.assertTrue(len(list(tm.graph.inputs())) == 2)
+        FileCheck().check("aten::neg").check("aten::mm").run(str(tm.graph))
+
+    def test_call_python_mod_from_traced_module(self):
+        class PythonModule(torch.nn.Module):
+            def __init__(self):
+                super(PythonModule, self).__init__()
+                self.param = torch.nn.Parameter(torch.rand(5, 7))
+
+            def forward(self, x):
+                return torch.mm(x, self.param)
+
+        class TracedModule(torch.nn.Module):
+            def __init__(self):
+                super(TracedModule, self).__init__()
+                self.param = torch.nn.Parameter(torch.rand(4, 5))
+                self.mod = PythonModule()
+
+            def forward(self, x):
+                return self.mod(torch.mm(x, self.param)) + 1.0
+
+        tm = torch.jit.trace(TracedModule(), torch.rand(3, 4))
+
+        FileCheck().check_not("value=<Tensor>").check("aten::mm")\
+            .check("prim::CallMethod[name=\"forward\"]").check("aten::add") \
+            .run(str(tm.graph))
+        FileCheck().check("aten::mm").run(str(tm.mod.graph))
