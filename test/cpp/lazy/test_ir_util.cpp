@@ -36,12 +36,13 @@ class TestNode : public Node {
   std::vector<Output> operands_as_outputs_;
 };
 
-//  a
-// |  \
-// b   c
-//  \ /
-//   d
-// Post-order: d c b a
+/*  a
+ * / \
+ *b   c
+ * \ /
+ *  d
+ * Post-order: d c b a
+ */
 TEST(IrUtilTest, BasicTest) {
   NodePtr a = MakeNode<TestNode>();
   NodePtr b = MakeNode<TestNode>();
@@ -61,9 +62,11 @@ TEST(IrUtilTest, BasicTest) {
   EXPECT_EQ(postorder.at(3), a.get());
 }
 
-//  a
-// |  \
-// b---c
+/*  a
+ * / \
+ *b---c
+ * Post-order: not valid
+ */
 TEST(IrUtilTest, TestCircle) {
   NodePtr a = MakeNode<TestNode>();
   NodePtr b = MakeNode<TestNode>();
