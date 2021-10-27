@@ -122,20 +122,20 @@ def is_input_arg_dtype_supported_by_backend(
     arg: Argument,
     node: Node,
     node_name_to_target_dtype: Dict[str, Any],
-    pattern_config: Dict[str, torch.dtype],
+    dtype_config: Dict[str, torch.dtype],
 ) -> bool:
     """ Check if the configured qconfig for the argument
     is supported by the backend or not
     """
     if isinstance(arg, (list, tuple)):
-        return all(map(lambda a: is_input_arg_dtype_supported_by_backend(a, node, node_name_to_target_dtype, pattern_config), arg))
+        return all(map(lambda a: is_input_arg_dtype_supported_by_backend(a, node, node_name_to_target_dtype, dtype_config), arg))
     if not isinstance(arg, Node):
         return True
     # TODO: support check for standalone module
     is_weight = node_arg_is_weight(node, arg)
     is_bias = node_arg_is_bias(node, arg)
     is_activation = not (is_weight or is_bias)
-    input_activation_dtype = pattern_config.get("input_activation_dtype", None)
+    input_activation_dtype = dtype_config.get("input_activation_dtype", None)
     if is_activation:
         return input_activation_dtype is None or node_name_to_target_dtype[arg.name] == input_activation_dtype
     elif is_weight:
@@ -151,18 +151,18 @@ def is_input_arg_dtype_supported_by_backend(
 def is_output_dtype_supported_by_backend(
     node: Node,
     node_name_to_target_dtype: Dict[str, Any],
-    pattern_config: Dict[str, torch.dtype],
+    dtype_config: Dict[str, torch.dtype],
 ) -> bool:
     """ Check if the configured qconfig for the output
     is supported by the backend or not
     """
-    output_dtype = pattern_config.get("output_dtype", None)
+    output_dtype = dtype_config.get("output_dtype", None)
     return output_dtype is None or output_dtype == node_name_to_target_dtype[node.name]
 
 
 def is_pattern_dtype_config_supported_by_backend(
     pattern: Optional[Pattern],
-    matched_nodes: List[Node],
+    matched_nodes: Optional[List[Node]],
     node_name_to_target_dtype: Dict[str, Any],
     backend_config_dict: Optional[Dict[str, Any]]
 ) -> bool:
@@ -171,8 +171,9 @@ def is_pattern_dtype_config_supported_by_backend(
     """
     if backend_config_dict is None or pattern is None:
         return True
+    assert matched_nodes is not None and len(matched_nodes) >= 1
     pattern_to_dtype_configs = get_pattern_to_dtype_configs(backend_config_dict)
-    dtype_configs = pattern_to_dtype_configs.get(pattern, [])
+    dtype_configs: List[Dict[str, torch.dtype]] = pattern_to_dtype_configs.get(pattern, [])
 
     input_node = matched_nodes[0]
     output_node = matched_nodes[-1]
@@ -183,7 +184,7 @@ def is_pattern_dtype_config_supported_by_backend(
             supported = supported and \
                 is_input_arg_dtype_supported_by_backend(
                     arg, input_node, node_name_to_target_dtype, dtype_config)
-        for k, arg in input_node.kwargs:
+        for k, arg in input_node.kwargs.items():
             supported = supported and \
                 is_input_arg_dtype_supported_by_backend(
                     arg, input_node, node_name_to_target_dtype, dtype_config)
@@ -977,6 +978,7 @@ def insert_observers_for_model(
             if not skip_inserting_observers and is_supported_by_backend:
                 modules = dict(model.named_modules(remove_duplicate=False))
                 if node.op != 'output':
+                    assert matched_nodes is not None
                     # add matched nodes to the observed node name set
                     for n in matched_nodes:
                         observed_node_names.add(n.name)
