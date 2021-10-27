@@ -814,7 +814,7 @@ TEST(StaticRuntime, DeepWide) {
 
       // run static runtime
       std::vector<c10::IValue> input_tensors({ad_emb_packed, user_emb, wide});
-      auto outputs = smod(input_tensors, {}).toTuple()->elements();
+      auto outputs = smod(input_tensors, {}).toTupleRef().elements();
       ASSERT_TRUE(outputs.size() > 0);
       at::Tensor output_2 = outputs[0].toTensor();
       smod.runtime().check_for_memory_leak();
@@ -951,7 +951,7 @@ TEST(StaticRuntime, CleanUpMemory) {
               // run static runtime
               std::vector<c10::IValue> input_tensors(
                   {ad_emb_packed, user_emb, wide});
-              auto outputs = runtime(input_tensors, {}).toTuple()->elements();
+              auto outputs = runtime(input_tensors, {}).toTupleRef().elements();
               ASSERT_TRUE(outputs.size() > 0);
               auto output_2 = outputs[0].toTensor();
               runtime.check_for_memory_leak();
