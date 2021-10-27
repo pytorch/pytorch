@@ -244,7 +244,7 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
     auto grad_weight = at::zeros({num_weights, grad_.size(-1)}, grad_.options());
     int64_t stride = grad_weight.stride(0);
     int warp_size = at::cuda::warp_size();
-    dim3 grid(THCCeilDiv(stride, (int64_t)warp_size));
+    dim3 grid(ceil_div(stride, (int64_t)warp_size));
     dim3 block(warp_size, BLOCKDIMY);
 
     AT_DISPATCH_FLOATING_TYPES_AND2(
@@ -322,7 +322,8 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
     TORCH_INTERNAL_ASSERT(
         num_threads % warp_size == 0 && num_threads <= max_threads,
         "BlockReduceSum requires all warps be active");
-    dim3 grid = num_unique_indices.item<int64_t>();
+    int64_t *num_unique_indices_ptr = num_unique_indices.data_ptr<int64_t>();
+    dim3 grid = unique_indices.numel();
     dim3 block = num_threads;
     int dim = self.stride(0);
 
