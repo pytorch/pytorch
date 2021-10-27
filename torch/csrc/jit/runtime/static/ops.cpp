@@ -330,6 +330,40 @@ Tensor& c2_argmin_out(
   }
   return output;
 }
+
+void where_out(
+    const at::Tensor& cond,
+    const at::Tensor& x,
+    const at::Tensor& y,
+    at::Tensor& out) {
+  TORCH_CHECK(x.scalar_type() == y.scalar_type());
+  TORCH_CHECK(out.scalar_type() == x.scalar_type());
+  TORCH_CHECK(cond.scalar_type() == at::ScalarType::Bool);
+  TORCH_CHECK(x.sizes() == y.sizes());
+
+  at::native::resize_(out, x.sizes(), c10::nullopt);
+  TORCH_CHECK(out.is_contiguous());
+
+  const auto num_elems = x.numel();
+  AT_DISPATCH_ALL_TYPES(x.scalar_type(), "where_out_x", [&] {
+    const auto cond_contig = cond.expect_contiguous();
+    const auto x_contig = x.expect_contiguous();
+    const auto y_contig = y.expect_contiguous();
+
+    const auto* data_cond = cond_contig->data_ptr<bool>();
+    const auto* data_x = x_contig->data_ptr<scalar_t>();
+    const auto* data_y = y_contig->data_ptr<scalar_t>();
+    auto* data_out = out.data_ptr<scalar_t>();
+    for (const auto i : c10::irange(num_elems)) {
+      if (data_cond[i]) {
+        data_out[i] = data_x[i];
+      } else {
+        data_out[i] = data_y[i];
+      }
+    }
+  });
+}
+
 } // namespace native
 } // namespace at
 
@@ -667,7 +701,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::relu, aten_relu, [](Node* n) -> SROperator {
       p_node->Output(0) = create_empty_from(in0_t);
     }
     auto& out_t = p_node->Output(0).toTensor();
-    if (!te->supports(in0_t)) {
+    if (!te->checkInput<float>(in0_t)) {
       fastResizeToZero(out_t);
       at::cpu::threshold_out(out_t, in0_t, 0, 0);
     } else {
@@ -690,7 +724,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::tanh, aten_tanh, [](Node* n) -> SROperator {
       p_node->Output(0) = create_empty_from(in0_t);
     }
     auto& out_t = p_node->Output(0).toTensor();
-    if (!te->supports(in0_t)) {
+    if (!te->checkInput<float>(in0_t)) {
       fastResizeToZero(out_t);
       at::cpu::tanh_out(out_t, in0_t);
     } else {
@@ -716,7 +750,7 @@ REGISTER_OPERATOR_FUNCTOR(
           p_node->Output(0) = create_empty_from(in0_t);
         }
         auto& out_t = p_node->Output(0).toTensor();
-        if (!te->supports(in0_t)) {
+        if (!te->checkInput<float>(in0_t)) {
           fastResizeToZero(out_t);
           at::cpu::sigmoid_out(out_t, in0_t);
         } else {
@@ -748,7 +782,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::logit, aten_logit, [](Node* n) -> SROperator {
       p_node->Output(0) = create_empty_from(in0_t);
     }
     auto& out_t = p_node->Output(0).toTensor();
-    if (!te || !te->supports(in0_t)) {
+    if (!te || !te->checkInput<float>(in0_t)) {
       const auto& in0_t = p_node->Input(0).toTensor();
       const auto in1_d = p_node->Input(1).toOptional<double>();
       fastResizeToZero(out_t);
@@ -1973,7 +2007,7 @@ REGISTER_OPERATOR_FUNCTOR(
           p_node->Output(0) = create_empty_from(input);
         }
         auto& out = p_node->Output(0).toTensor();
-        if (!te || !te->supports(input)) {
+        if (!te || !te->checkInput<float>(input)) {
           fastResizeToZero(out);
           signed_log1p_out(out, input);
           return;
@@ -2021,5 +2055,41 @@ REGISTER_OPERATOR_FUNCTOR(
       LogAndDumpSchema(n);
       return nullptr;
     });
+
+REGISTER_OPERATOR_FUNCTOR(aten::where, aten_where, [](Node* n) -> SROperator {
+  if (n->matches(torch::schema(
+          "aten::where.self(Tensor condition, Tensor self, Tensor other) -> Tensor"))) {
+    auto te = createWhere();
+    return [te = std::move(te)](ProcessedNode* p_node) {
+      const auto& cond = p_node->Input(0).toTensor();
+      const auto& self = p_node->Input(1).toTensor();
+      const auto& other = p_node->Input(2).toTensor();
+
+      if (p_node->Output(0).isNone()) {
+        p_node->Output(0) = create_empty_from(self);
+      }
+      auto& out = p_node->Output(0).toTensor();
+
+      if (!te || !te->checkInput<bool>(cond) ||
+          !te->checkInput<int64_t>(self) || !te->checkInput<int64_t>(other)) {
+        fastResizeToZero(out);
+        at::native::where_out(cond, self, other, out);
+      } else {
+        at::native::resize_(out, self.sizes(), c10::nullopt);
+        auto num_elems = self.numel();
+        te->call(
+            {out.data_ptr(),
+             cond.data_ptr(),
+             self.data_ptr(),
+             other.data_ptr(),
+             &num_elems});
+      }
+    };
+  }
+
+  LogAndDumpSchema(n);
+  return nullptr;
+});
+
 } // namespace jit
 } // namespace torch
