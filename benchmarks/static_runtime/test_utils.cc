@@ -277,6 +277,18 @@ void testStaticRuntime(
   compareTensorLists(args_tensors, args_copy, use_allclose, use_equalnan);
 }
 
+bool hasProcessedNodeWithName(
+    torch::jit::StaticModule& smodule,
+    const char* name) {
+  for (torch::jit::ProcessedNode& pnode : smodule.runtime().nodes()) {
+    auto op_name = pnode.node()->kind().toQualString();
+    if (strcmp(op_name, name) == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
 } // namespace test
 } // namespace jit
 } // namespace torch

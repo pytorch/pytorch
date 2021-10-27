@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/frontend/parser.h>
 #include <torch/csrc/jit/frontend/resolver.h>
 #include <torch/csrc/jit/frontend/script_type_parser.h>
+#include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/custom_class.h>
@@ -18,7 +19,8 @@
 namespace torch {
 namespace jit {
 
-using SourceLoader = std::function<std::shared_ptr<Source>(const std::string&)>;
+using SourceLoader =
+    std::function<std::shared_ptr<SourceView>(const std::string&)>;
 
 struct SourceImporterImpl : public Resolver,
                             std::enable_shared_from_this<SourceImporterImpl> {
