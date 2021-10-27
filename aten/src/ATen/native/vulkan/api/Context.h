@@ -56,6 +56,10 @@ class Context final {
 
   void flush();
 
+  // Use this function only for debugging and testing when you want to make sure
+  // all GPU operations get finished before calling flush(). Otherwise, it may crash.
+  void wait(const at::Tensor& src);
+
  private:
   VkDevice device();
   VkQueue queue();
