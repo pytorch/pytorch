@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 
 #include <onnx/onnx_pb.h>
@@ -192,6 +193,61 @@ Node* transformToONNXConcatNode(
   }
 
   return concat_node;
+}
+
+void ONNXLintGraph(
+    const Block* b,
+    std::vector<NodeKind>& n_miss_sourceRange,
+    std::vector<NodeKind>& n_miss_scope) {
+  for (const auto* n : b->nodes()) {
+    for (const auto* sub_b : n->blocks()) {
+      ONNXLintGraph(sub_b, n_miss_sourceRange, n_miss_scope);
+    }
+
+    if (nullptr == n->sourceRange().source()) {
+      GRAPH_DEBUG("Node does not set sourceRange:", *n);
+      n_miss_sourceRange.emplace_back(n->kind());
+    }
+    if (n->scopeName() == "") {
+      GRAPH_DEBUG("Node does not set scope:", *n);
+      n_miss_scope.emplace_back(n->kind());
+    }
+  }
+}
+
+void ONNXLintGraph(const std::shared_ptr<Graph>& graph) {
+  // 1. Print nodes that does not have scope/source range covered.
+  std::vector<NodeKind> n_miss_sourceRange, n_miss_scope;
+  ONNXLintGraph(graph->block(), n_miss_sourceRange, n_miss_scope);
+  auto count_const = [](const std::vector<NodeKind>& vec) -> size_t {
+    size_t count = 0;
+    for (auto k : vec) {
+      switch (k) {
+        case prim::Constant:
+        case prim::ListConstruct:
+        case onnx::Constant:
+          count++;
+          break;
+      }
+    }
+    return count;
+  };
+  auto const_count_src = count_const(n_miss_sourceRange);
+  auto const_count_scope = count_const(n_miss_scope);
+  GRAPH_UPDATE("Missing sourceRange.")
+  GRAPH_UPDATE(
+      "Total ",
+      n_miss_sourceRange.size(),
+      " nodes. Including ",
+      const_count_src,
+      " constants.");
+  GRAPH_UPDATE("Missing scope.")
+  GRAPH_UPDATE(
+      "Total ",
+      n_miss_scope.size(),
+      " nodes. Including ",
+      const_count_scope,
+      " constants.");
 }
 
 } // namespace jit
