@@ -2983,8 +2983,7 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         self.assertEqual(result, torch.zeros(B0, *x.shape, device=device))
 
 class TestVmapOperatorsOpInfo(TestCase):
-    @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
-    @skipOps('TestVmapOperatorsOpInfo', 'test_vmap_exhaustive', {
+    vmap_fail = {
         # These are ops that we can't generate fallbacks for
         xfail('dsplit'),
         xfail('fill_'),
@@ -3003,6 +3002,8 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('block_diag'),
         xfail('nn.functional.dropout'),
         xfail('view_as_complex'),
+        xfail('H'),
+        xfail('mH'),
 
         # entries in here don't work and need to be fixed.
         # Each one of these is a bug
@@ -3018,7 +3019,23 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.batch_norm'),
         xfail('lu_unpack'),
         xfail('nn.functional.pad', 'constant'),
-    })
+        xfail('double'),
+        xfail('bfloat16'),
+        xfail('bool'),
+        xfail('byte'),
+        xfail('char'),
+        xfail('empty_like'),
+        xfail('float'),
+        xfail('half'),
+        xfail('histogramdd'),
+        xfail('int'),
+        xfail('long'),
+        xfail('nn.functional.embedding'),
+        xfail('randn_like'),
+        xfail('short'),
+    }
+    @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @skipOps('TestVmapOperatorsOpInfo', 'test_vmap_exhaustive', vmap_fail)
     def test_vmap_exhaustive(self, device, dtype, op):
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
         for sample_input in sample_inputs_itr:
@@ -3030,6 +3047,7 @@ class TestVmapOperatorsOpInfo(TestCase):
                 for a_op in op.aliases:
                     for loop_out, batched_out in get_fallback_and_vmap_exhaustive(a_op, arg_values, kwarg_values):
                         self.assertEqual(loop_out, batched_out, atol=1e-4, rtol=1e-4)
+            # todo(chilli): Garbage hack I added to deal with indexing not working
             except Exception as e:
                 # Checking if we're throwing an error because of dynamic shapes.
                 if "dynamic" in e.args[0]:
@@ -3037,7 +3055,7 @@ class TestVmapOperatorsOpInfo(TestCase):
                 raise e
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
-    @skipOps('TestVmapOperatorsOpInfo', 'test_op_has_batch_rule', {
+    @skipOps('TestVmapOperatorsOpInfo', 'test_op_has_batch_rule', vmap_fail.union({
         xfail('addr'),
         xfail('cdist'),
         xfail('complex'),
@@ -3119,18 +3137,40 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('resize_'),
         xfail('view_as_complex'),
         xfail('matrix_exp'),
-    })
+        xfail('_masked.amax'),
+        xfail('_masked.amin'),
+        xfail('_masked.sum'),
+        xfail('bucketize'),
+        xfail('cholesky_solve'),
+        xfail('fft.fft2'),
+        xfail('fft.hfft2'),
+        xfail('fft.hfftn'),
+        xfail('fft.ifft2'),
+        xfail('fft.ihfft2'),
+        xfail('fft.ihfftn'),
+        xfail('fft.irfft2'),
+        xfail('fft.rfft2'),
+        xfail('isinf'),
+        xfail('isreal'),
+        xfail('nn.functional.adaptive_avg_pool1d'),
+        xfail('nn.functional.adaptive_avg_pool3d'),
+        xfail('nn.functional.avg_pool1d'),
+        xfail('nn.functional.avg_pool3d'),
+        xfail('nn.functional.pairwise_distance'),
+        xfail('nn.functional.pixel_shuffle'),
+        xfail('nn.functional.pixel_unshuffle'),
+    }))
     def test_op_has_batch_rule(self, device, dtype, op):
         def test():
             sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
             for sample_input in sample_inputs_itr:
                 arg_values = [sample_input.input] + list(sample_input.args)
                 kwarg_values = sample_input.kwargs
-                for _ in get_fallback_and_vmap_exhaustive(op.op, arg_values, kwarg_values, compute_loop_out=False):
-                    pass
+                for loop_out, batched_out in get_fallback_and_vmap_exhaustive(op.op, arg_values, kwarg_values):
+                    self.assertEqual(loop_out, batched_out, atol=1e-4, rtol=1e-4)
                 for a_op in op.aliases:
-                    for _ in get_fallback_and_vmap_exhaustive(a_op, arg_values, kwarg_values, compute_loop_out=False):
-                        pass
+                    for loop_out, batched_out in get_fallback_and_vmap_exhaustive(a_op, arg_values, kwarg_values):
+                        self.assertEqual(loop_out, batched_out, atol=1e-4, rtol=1e-4)
         check_vmap_fallback(self, test, op)
 
     def test_isnan(self, device):
