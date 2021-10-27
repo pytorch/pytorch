@@ -23,11 +23,6 @@ class LinearBn1d(nn.modules.linear.Linear, nni._FusedModule):
         weight_fake_quant: fake quant module for weight
 
     """
-    _FLOAT_BN_MODULE = nn.BatchNorm1d
-    _FLOAT_RELU_MODULE = None
-    _FLOAT_MODULE = nni.LinearBn1d
-    _FLOAT_LINEAR_MODULE = nn.Linear
-
     def __init__(self,
                  # Linear args
                  in_features, out_features, bias=True,
@@ -90,9 +85,9 @@ class LinearBn1d(nn.modules.linear.Linear, nni._FusedModule):
     def forward(self, input):
         assert self.bn.running_var is not None
         weight = self.weight_fake_quant(self.weight)
-        linear = F.linear(input, weight, self.bias)
-        output = self.bn(linear)
-        return output
+        x = F.linear(input, weight, self.bias)
+        x = self.bn(x)
+        return x
 
     def extra_repr(self):
         return super(LinearBn1d, self).extra_repr()
@@ -116,10 +111,8 @@ class LinearBn1d(nn.modules.linear.Linear, nni._FusedModule):
             Args: `mod' a float module, either produced by torch.ao.quantization
             utilities or directly from user
         """
-        # The ignore is because _FLOAT_MODULE is a TypeVar here where the bound
-        # has no __name__ (code is fine though)
-        assert type(mod) == cls._FLOAT_MODULE, 'qat.' + cls.__name__ + \
-            '.from_float only works for ' + cls._FLOAT_MODULE.__name
+        assert type(mod) == nni.LinearBn1d, 'qat.' + cls.__name__ + \
+            '.from_float only works for ' + nni.LinearBn1d.__name__
         assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
         assert mod.qconfig, 'Input float module must have a valid config'
         qconfig = mod.qconfig
@@ -138,32 +131,27 @@ class LinearBn1d(nn.modules.linear.Linear, nni._FusedModule):
 
     def to_float(self):
         modules = []
-        cls = type(self)
-        lienar = cls._FLOAT_LINEAR_MODULE(
+        linear = nn.Linear(
             self.in_features,
             self.out_features,
-            self.bias)
+            self.bias is not None)
         linear.weight = Parameter(self.weight.detach())
         if self.bias is not None:
-            lienar.bias = Parameter(self.bias.detach())
+            linear.bias = Parameter(self.bias.detach())
         modules.append(linear)
 
-        if cls._FLOAT_BN_MODULE:
-            bn = cls._FLOAT_BN_MODULE(
-                self.bn.num_features,
-                self.bn.eps,
-                self.bn.momentum,
-                self.bn.affine,
-                self.bn.track_running_stats)
-            bn.weight = Paramter(self.bn.weight.detach())
-            if self.bn.affine:
-                bn.bias = Parameter(self.bn.bias.detach())
-            modueles.append(bn)
+        bn = nn.BatchNorm1d(
+            self.bn.num_features,
+            self.bn.eps,
+            self.bn.momentum,
+            self.bn.affine,
+            self.bn.track_running_stats)
+        bn.weight = Parameter(self.bn.weight.detach())
+        if self.bn.affine:
+            bn.bias = Parameter(self.bn.bias.detach())
+        modules.append(bn)
 
-        if cls._FLOAT_RELU_MODULE:
-            relu = cls._FLOAT_RELU_MODULE()
-            modules.append(relu)
-
-        result = cls._FLOAT_MODULE(*modules)
+        result = nni.LinearBn1d(*modules)
         result.train(self.training)
+        result.qconfig = self.qconfig
         return result

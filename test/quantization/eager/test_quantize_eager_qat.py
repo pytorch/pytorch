@@ -1,4 +1,5 @@
 import math
+import itertools
 import torch
 import torch.nn as nn
 import torch.backends.mkldnn
@@ -8,6 +9,7 @@ from torch.nn.intrinsic.qat import ConvBn2d, ConvBnReLU2d
 from torch.nn.modules.utils import _pair
 import torch.nn.quantized as nnq
 from torch.ao.quantization import (
+    fuse_modules,
     prepare,
     convert,
     prepare_qat,
@@ -837,20 +839,48 @@ class ReferenceLinearBatchNorm1d(nn.Module):
         return x
 
 class TestLinearBNQATModule(TestCase):
-    @given(batch_size=st.integers(2, 4),
-           in_features=st.sampled_from([2, 3, 4]),
-           out_features=st.sampled_from([2, 3]))
-    def test_linear_bn_numerics(self, batch_size, in_features, out_features):
-        m = nn.Sequential(nn.Linear(in_features, out_features), nn.BatchNorm1d(out_features)).train()
-        m.qconfig = torch.quantization.get_default_qat_qconfig()
-        m_ref = ReferenceLinearBatchNorm1d(m[0], m[1], m.qconfig)
-        m_ref.apply(torch.ao.quantization.disable_fake_quant)
+    def test_linear_bn_numerics(self):
+        test_cases = itertools.product(
+            [2, 4],    # batch_size
+            [2, 3, 4], # in_features
+            [2, 3]     # out_features
+        )
 
-        data = torch.randn(batch_size, out_features, in_features)
-        result_actual = m(data)
-        result_ref = m_ref(data)
+        for test_case in test_cases:
+            batch_size, in_features, out_features = test_case
 
-        self.assertEqual(result_ref, result_actual)
+            m = nn.Sequential(nn.Linear(in_features, out_features), nn.BatchNorm1d(out_features)).train()
+            m.qconfig = torch.quantization.get_default_qat_qconfig()
+            m_ref = ReferenceLinearBatchNorm1d(m[0], m[1], m.qconfig)
+            m_ref.apply(torch.ao.quantization.disable_fake_quant)
+
+            data = torch.randn(batch_size, out_features, in_features)
+            result_actual = m(data)
+            result_ref = m_ref(data)
+
+            self.assertEqual(result_ref, result_actual)
+
+    def test_fused_linear_bn_numerics(self):
+        test_cases = itertools.product(
+            [2, 4],    # batch_size
+            [2, 3, 4], # in_features
+            [2, 3]     # out_features
+        )
+
+        for test_case in test_cases:
+            batch_size, in_features, out_features = test_case
+
+            m = nn.Sequential(nn.Linear(in_features, out_features), nn.BatchNorm1d(out_features)).train()
+            m.qconfig = torch.quantization.get_default_qat_qconfig()
+            m_ref = ReferenceLinearBatchNorm1d(m[0], m[1], m.qconfig)
+            m_fused = fuse_modules(m, [['0', '1']])
+            m_fused = torch.quantization.prepare_qat(m_fused)
+
+            data = torch.randn(batch_size, out_features, in_features)
+            result_actual = m_fused(data)
+            result_ref = m_ref(data)
+
+            self.assertEqual(result_ref, result_actual)
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
