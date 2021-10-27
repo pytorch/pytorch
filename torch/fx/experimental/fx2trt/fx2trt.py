@@ -8,7 +8,10 @@ from torch.fx.node import _get_qualified_name
 from torch.fx.passes.shape_prop import TensorMetadata
 
 
-TRTInterpreterResult = Tuple[Any, Sequence[str], Sequence[str]]
+class TRTInterpreterResult(NamedTuple):
+    engine: Any
+    input_names: Sequence[str]
+    output_names: Sequence[str]
 
 
 # Borrowed from torch2trt
@@ -453,7 +456,7 @@ class TRTInterpreter(torch.fx.Interpreter):
 
         engine = self.builder.build_engine(self.network, builder_config)
         assert engine
-        return engine, self._input_names, self._output_names
+        return TRTInterpreterResult(engine, self._input_names, self._output_names)
 
     def run_node(self, n):
         self._cur_node_name = str(n)
