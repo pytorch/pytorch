@@ -7,6 +7,7 @@ name: !{{ build_environment }}
 {%- endblock %}
 
 on:
+  workflow_dispatch:
   pull_request:
     types: [opened, synchronize, reopened]
     paths:
@@ -35,7 +36,7 @@ jobs:
     steps:
       !{{ common.setup_ec2_linux() }}
       !{{ common.checkout_pytorch("recursive") }}
-      !{{ common.calculate_docker_image() }}
+      !{{ common.calculate_docker_image(true) }}
       - name: Pull Docker image
         run: |
           !{{ common.pull_docker("${DOCKER_IMAGE}") }}
