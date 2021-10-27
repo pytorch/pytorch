@@ -6133,28 +6133,11 @@ def sample_inputs_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
 
     return list(gen_inputs())
 
-def _generate_sample_inputs_loss():
+def _generate_sample_shape_reduction():
     shapes = ((S,), (S, S), (S, S, S), (S, S, S, S))
     reductions = ('none', 'mean', 'sum')
     for s, r in product(shapes, reductions):
         yield s, r
-
-def sample_inputs_nn_loss(op_info, device, dtype, requires_grad, float_kwargs=None, **kwargs):
-    _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-
-    def gen_shape_kwargs():
-        for s, r in _generate_sample_inputs_loss():
-            d = dict(reduction=r)
-            if float_kwargs:
-                for kw in float_kwargs:
-                    d[kw] = random.uniform(0.01, 9)
-            yield _make_tensor(s), _make_tensor(s), d.update(reduction=r)
-
-    def gen_inputs():
-        for input, target, kwargs in gen_shape_kwargs():
-            yield SampleInput(input, args=(target, ), kwargs=kwargs)
-
-    return list(gen_inputs())
 
 def sample_inputs_gaussian_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
     _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -6167,7 +6150,7 @@ def sample_inputs_gaussian_nll_loss(op_info, device, dtype, requires_grad, **kwa
         yield shape[:-1]
 
     def gen_shape_kwargs():
-        for s, r in _generate_sample_inputs_loss():
+        for s, r in _generate_sample_shape_reduction():
             for t_s, v_s in product(gen_shape(s), gen_shape(s)):
                 yield _make_tensor(s), _make_tensor(t_s), make_var(v_s), dict(reduction=r)
                 yield _make_tensor(s), _make_tensor(t_s), make_var(v_s), dict(full=True, reduction=r)
@@ -6178,19 +6161,25 @@ def sample_inputs_gaussian_nll_loss(op_info, device, dtype, requires_grad, **kwa
 
     return list(gen_inputs())
 
-def sample_inputs_poisson_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
+def _generate_sample_inputs_nn_loss(op_info, device, dtype, requires_grad, **kwargs):
     _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    def gen_shape_kwargs():
-        for s, r in _generate_sample_inputs_loss():
-            yield _make_tensor(s), _make_tensor(s), dict(reduction=r)
-            yield _make_tensor(s), _make_tensor(s), dict(log_input=False, reduction=r)
-            yield _make_tensor(s), _make_tensor(s), dict(full=True, reduction=r)
-            yield _make_tensor(s), _make_tensor(s), dict(log_input=False, full=True, reduction=r)
+    for s, r in _generate_sample_shape_reduction():
+        yield _make_tensor(s), _make_tensor(s), dict(reduction=r)
 
+def sample_inputs_hinge_embedding_loss(op_info, device, dtype, requires_grad, **kwargs):
     def gen_inputs():
-        for input, target, kwargs in gen_shape_kwargs():
-            yield SampleInput(input, args=(target, ), kwargs=kwargs)
+        for input, target, d in _generate_sample_inputs_nn_loss(op_info, device, dtype, requires_grad, **kwargs):
+            d['margin'] = random.uniform(-9, 9)
+            yield SampleInput(input, args=(target, ), kwargs=d)
+
+    return list(gen_inputs())
+
+def sample_inputs_huber_loss(op_info, device, dtype, requires_grad, **kwargs):
+    def gen_inputs():
+        for input, target, d in _generate_sample_inputs_nn_loss(op_info, device, dtype, requires_grad, **kwargs):
+            d['delta'] = random.uniform(0.01, 9)
+            yield SampleInput(input, args=(target, ), kwargs=d)
 
     return list(gen_inputs())
 
@@ -11254,20 +11243,6 @@ op_db: List[OpInfo] = [
         ),
     ),
     OpInfo(
-        "nn.functional.huber_loss",
-        ref=_NOTHING,
-        dtypes=floating_types_and(torch.float16, torch.bfloat16),
-        supports_out=False,
-        sample_inputs_func=partial(sample_inputs_nn_loss, float_kwargs=('delta',)),
-        skips=(
-            # JIT does not support variadic tensors.
-            # RuntimeError: input->type()->kind() == TypeKind::OptionalType
-            # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":270,
-            # please report a bug to PyTorch.
-            DecorateInfo(unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit", dtypes=(torch.float32,),),
-        ),
-    ),
-    OpInfo(
         "nn.functional.gaussian_nll_loss",
         ref=_NOTHING,
         dtypesIfCPU=all_types_and(torch.bfloat16),
@@ -11284,35 +11259,25 @@ op_db: List[OpInfo] = [
         ),
     ),
     OpInfo(
-        "nn.functional.poisson_nll_loss",
+        "nn.functional.hinge_embedding_loss",
         ref=_NOTHING,
-        dtypesIfCPU=all_types_and(torch.bfloat16),
-        dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
+        dtypesIfCPU=floating_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
-        supports_forward_ad=True,
-        sample_inputs_func=sample_inputs_poisson_nll_loss,
+        sample_inputs_func=sample_inputs_hinge_embedding_loss,
+    ),
+    OpInfo(
+        "nn.functional.huber_loss",
+        ref=_NOTHING,
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        supports_out=False,
+        sample_inputs_func=sample_inputs_huber_loss,
         skips=(
-            # torch.autograd.gradcheck.GradcheckError: Jacobian mismatch for output 0 with respect to input 0,
-            # numerical:tensor(nan)
-            # analytical:tensor(0.2667)
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestGradients",
-                "test_fn_grad",
-                dtypes=(torch.float64,),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestGradients",
-                "test_fn_gradgrad",
-                dtypes=(torch.float64,),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestGradients",
-                "test_forward_mode_AD",
-                dtypes=(torch.float64,),
-            ),
+            # JIT does not support variadic tensors.
+            # RuntimeError: input->type()->kind() == TypeKind::OptionalType
+            # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":270,
+            # please report a bug to PyTorch.
+            DecorateInfo(unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit", dtypes=(torch.float32,),),
         ),
     ),
     OpInfo(
