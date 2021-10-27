@@ -131,7 +131,7 @@ SparseTensor _coalesce_sparse_cuda(const SparseTensor& self) {
     values = values.contiguous();
     int64_t stride = c10::multiply_integers(values.sizes().slice(1));
     int warp_size = at::cuda::warp_size();
-    dim3 grid(THCCeilDiv(newNnz, (int64_t) SZ), THCCeilDiv(stride, (int64_t) warp_size*SZ));
+    dim3 grid(ceil_div(newNnz, (int64_t) SZ), ceil_div(stride, (int64_t) warp_size*SZ));
     dim3 block(warp_size, SZ);
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
       at::ScalarType::Half, at::ScalarType::BFloat16, values.scalar_type(), "coalesce_sparse_cuda", [&] {
