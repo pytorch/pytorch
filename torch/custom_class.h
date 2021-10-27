@@ -434,8 +434,9 @@ using ::torch::class_;
 namespace selective_class {
 
   template <class CurClass>
-  inline class_<CurClass> class_(const std::string& namespaceName, detail::SelectiveStr<true> className) {
-    return torch::class_<CurClass>(std::move(namespaceName), std::string(className.operator const char *()));
+  inline detail::ClassNotSelected class_(const std::string& namespaceName, detail::SelectiveStr<true> className) {
+    // return torch::class_<CurClass>(std::move(namespaceName), std::string(className.operator const char *()));
+    return detail::ClassNotSelected();
   }
 
   template <class CurClass>
