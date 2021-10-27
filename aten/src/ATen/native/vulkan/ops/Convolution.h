@@ -111,6 +111,21 @@ c10::intrusive_ptr<Conv2dOpContext> conv2d_clamp_prepack(
     const c10::optional<Scalar>& output_min,
     const c10::optional<Scalar>& output_max);
 
+Tensor conv2d_transpose_clamp_run(
+    const Tensor& input,
+    const c10::intrusive_ptr<Conv2dOpContext>& context);
+
+c10::intrusive_ptr<Conv2dOpContext> conv2d_transpose_clamp_prepack(
+    Tensor&& weight,
+    c10::optional<Tensor>&& bias,
+    std::vector<int64_t>&& stride,
+    std::vector<int64_t>&& padding,
+    std::vector<int64_t>&& output_padding,
+    std::vector<int64_t>&& dilation,
+    const int64_t groups,
+    const c10::optional<Scalar>& output_min,
+    const c10::optional<Scalar>& output_max);
+
 } // namespace ops
 } // namespace vulkan
 } // namespace native
