@@ -1,5 +1,3 @@
-# Owner(s): ["module: onnx"]
-
 import numpy as np
 import unittest
 import torch.onnx
