@@ -46,7 +46,7 @@ Tensor& addmm_out_sparse_csr_dense_cuda(
   // Also structured kernels do not support sparse output
   IntArrayRef self__sizes;
   c10::MaybeOwned<Tensor> self_;
-  if (&result != &self) {
+  if (&result != &self && self.layout() == kStrided) {
     self_ = expand_size(self, {mat1_sizes[0], mat2_sizes[1]}, "addmm");
     self__sizes = self_->sizes();
   } else {
@@ -60,10 +60,12 @@ Tensor& addmm_out_sparse_csr_dense_cuda(
   }
 
   if (&result != &self) {
-    at::native::resize_output(result, self__sizes);
-    if (beta.toComplexDouble() != 0.0) {
-      at::native::copy_(result, *self_);
+    if (result.layout() == kStrided) {
+      at::native::resize_output(result, self__sizes);
+    } else {
+      at::native::resize_as_sparse_csr_(result, *self_);
     }
+    result.copy_(*self_);
   }
 
   IntArrayRef result_sizes = result.sizes();
@@ -71,21 +73,24 @@ Tensor& addmm_out_sparse_csr_dense_cuda(
     return result;
   }
 
-  if (mat1._nnz() == 0) {
-    // By definition, when beta==0, values in self should be ignored. nans and
-    // infs should not propagate
+  if (mat1._nnz() == 0 && mat2.layout() == kStrided) {
+    // According to docs, when beta==0 values in self should be ignored
+    // nans and infs should not propagate
     if (beta.toComplexDouble() == 0.) {
-      return result.zero_();
+      result.zero_();
+    } else {
+      result.mul_(beta);
     }
-    return at::mul_out(
-        result,
-        self,
-        at::native::scalar_tensor(
-            beta,
-            self.scalar_type(),
-            c10::nullopt /* layout */,
-            at::kCPU,
-            c10::nullopt /* pin_memory */));
+    return result;
+  }
+
+  if (mat2.is_sparse_csr() && (mat1._nnz() == 0 || mat2._nnz() == 0)) {
+    if (beta.toComplexDouble() == 0.) {
+      result.values().zero_();
+    } else {
+      result.values().mul_(beta);
+    }
+    return result;
   }
 
   sparse::impl::cuda::addmm_out_sparse_csr(mat1, mat2, beta, alpha, result);

@@ -203,8 +203,8 @@ C10_UNUSED void PrecomputeMultiplierShiftForSigridHash(
   )IR";
   std::string split_pattern = R"IR(
     graph(%a, %b, %c, %d):
-        %y0 : Tensor = fb::sigrid_hash_compute_multipler_shift(%c)
-        %y2 : Tensor = fb::sigrid_hash_precompute(%a, %b, %c, %y0, %d)
+        %mul : int , %shift : int = fb::sigrid_hash_compute_multipler_shift(%c)
+        %y2 : Tensor = fb::sigrid_hash_precompute(%a, %b, %c, %mul, %shift, %d)
         return (%y2)
   )IR";
   SubgraphRewriter fuse;
@@ -216,13 +216,13 @@ C10_UNUSED
 void ClipRangesGatherSigridHash(std::shared_ptr<torch::jit::Graph>& graph) {
   // TODO:: check restrictions for inputs; outputs not used elsewhere
   std::string pattern = R"IR(
-    graph(%a, %b, %c, %d, %e, %f, %g, %h):
+    graph(%a, %b, %c, %d, %e, %f, %mul, %shift, %i):
         %y0 : Tensor, %y1 : Tensor = fb::clip_ranges_gather_lengths_to_offsets(%a, %b, %c, %d)
-        %y2 : Tensor = fb::sigrid_hash_precompute(%y0, %e, %f, %g, %h)
+        %y2 : Tensor = fb::sigrid_hash_precompute(%y0, %e, %f, %mul, %shift, %i)
         return (%y2, %y1))IR";
   std::string fused_pattern = R"IR(
-    graph(%a, %b, %c, %d, %e, %f, %g, %h):
-        %off : Tensor, %out : Tensor = fb::clip_ranges_gather_sigrid_hash_precompute_offsets(%b, %a, %c, %e, %f, %g, %h, %d)
+    graph(%a, %b, %c, %d, %e, %f, %mul, %shift, %i):
+        %off : Tensor, %out : Tensor = fb::clip_ranges_gather_sigrid_hash_precompute_offsets(%b, %a, %c, %e, %f, %mul, %shift, %i, %d)
         return (%out, %off))IR";
   SubgraphRewriter fuse;
   fuse.RegisterRewritePattern(pattern, fused_pattern);
@@ -232,14 +232,14 @@ void ClipRangesGatherSigridHash(std::shared_ptr<torch::jit::Graph>& graph) {
 C10_UNUSED void ClipRangesGatherRangesSigridHash(
     std::shared_ptr<torch::jit::Graph>& graph) {
   std::string pattern = R"IR(
-    graph(%a, %b, %c, %d, %e, %f, %g):
+    graph(%a, %b, %c, %d, %e, %mul, %shift, %h):
         %y0 : Tensor = fb::clip_ranges(%b, %c)
         %y1 : Tensor, %y2 : Tensor = fb::gather_ranges(%a, %y0)
-        %y3 : Tensor = fb::sigrid_hash_precompute(%y1, %d, %e, %f, %g)
+        %y3 : Tensor = fb::sigrid_hash_precompute(%y1, %d, %e, %mul, %shift, %h)
         return (%y3, %y2))IR";
   std::string fused_pattern = R"IR(
-    graph(%a, %b, %c, %d, %e, %f, %g):
-        %off : Tensor, %out : Tensor = fb::clip_ranges_gather_sigrid_hash_precompute_v3(%b, %a, %c, %d, %e, %f, %g)
+    graph(%a, %b, %c, %d, %e, %mul, %shift, %h):
+        %off : Tensor, %out : Tensor = fb::clip_ranges_gather_sigrid_hash_precompute_v3(%b, %a, %c, %d, %e, %mul, %shift, %h)
         return (%out, %off))IR";
 
   SubgraphRewriter fuse;
@@ -251,14 +251,14 @@ C10_UNUSED void ClipRangesGatherRangesX2SigridHashPrecompute(
     std::shared_ptr<torch::jit::Graph>& graph) {
   // Placeholder is a dummy op used to capture the first subgraph
   std::string pattern = R"IR(
-    graph(%ranges, %values, %max_length, %salt, %max_value, %mul_shift, %hash_into_int32):
+    graph(%ranges, %values, %max_length, %salt, %max_value, %mul, %shift, %hash_into_int32):
         %clipped : Tensor = fb::clip_ranges(%ranges, %max_length)
         %output : Tensor, %unused : Tensor = fb::gather_ranges(%values, %clipped)
-        %sigrid_hash_out : Tensor = fb::sigrid_hash_precompute(%output, %salt, %max_value, %mul_shift, %hash_into_int32)
+        %sigrid_hash_out : Tensor = fb::sigrid_hash_precompute(%output, %salt, %max_value, %mul, %shift, %hash_into_int32)
         return (%sigrid_hash_out, %clipped))IR";
   std::string fused_pattern = R"IR(
-    graph(%ranges, %values, %max_length, %salt, %max_value, %mul_shift, %hash_into_int32):
-        %sigrid_hash_out : Tensor, %clipped : Tensor = fb::placeholder(%ranges, %values, %max_length, %salt, %max_value, %mul_shift, %hash_into_int32)
+    graph(%ranges, %values, %max_length, %salt, %max_value, %mul, %shift, %hash_into_int32):
+        %sigrid_hash_out : Tensor, %clipped : Tensor = fb::placeholder(%ranges, %values, %max_length, %salt, %max_value, %mul, %shift, %hash_into_int32)
         return (%sigrid_hash_out, %clipped))IR";
 
   // the second gather_ranges can be eliminated because the `lengths` is
@@ -266,14 +266,14 @@ C10_UNUSED void ClipRangesGatherRangesX2SigridHashPrecompute(
   // clip_ranges_gather_sigrid_hash_v3 (caveat, the fused ops makes some
   // simplifying assumptions about the ranges input)
   std::string pattern2 = R"IR(
-    graph(%gather2_values, %ranges, %values, %max_length, %salt, %max_value, %mul_shift, %hash_into_int32):
-        %sigrid_hash_out : Tensor, %clipped : Tensor = fb::placeholder(%ranges, %values, %max_length, %salt, %max_value, %mul_shift, %hash_into_int32)
+    graph(%gather2_values, %ranges, %values, %max_length, %salt, %max_value, %mul, %shift, %hash_into_int32):
+        %sigrid_hash_out : Tensor, %clipped : Tensor = fb::placeholder(%ranges, %values, %max_length, %salt, %max_value, %mul, %shift, %hash_into_int32)
         %unused : Tensor, %lengths : Tensor = fb::gather_ranges(%gather2_values, %clipped)
         return (%lengths, %sigrid_hash_out))IR";
 
   std::string fused_pattern2 = R"IR(
-    graph(%gather2_values, %ranges, %values, %max_length, %salt, %max_value, %mul_shift, %hash_into_int32):
-        %lengths : Tensor, %sigrid_hash_out : Tensor = fb::clip_ranges_gather_sigrid_hash_precompute_v3(%ranges, %values, %max_length, %salt, %max_value, %mul_shift, %hash_into_int32)
+    graph(%gather2_values, %ranges, %values, %max_length, %salt, %max_value, %mul, %shift, %hash_into_int32):
+        %lengths : Tensor, %sigrid_hash_out : Tensor = fb::clip_ranges_gather_sigrid_hash_precompute_v3(%ranges, %values, %max_length, %salt, %max_value, %mul, %shift, %hash_into_int32)
         return (%lengths, %sigrid_hash_out))IR";
 
   SubgraphRewriter fuse;
@@ -412,7 +412,7 @@ void FuseTupleUnpackBlock(const TupleUnpackBlock& nodes) {
   TORCH_CHECK(nodes.size() > 0);
   auto graph = nodes[0]->owningGraph();
   auto var_unpack = graph->create(
-      c10::Symbol::fromQualString("static_runtime::VarTupleUnpack"),
+      fromQualString("static_runtime::VarTupleUnpack"),
       /* num_outputs */ 0);
   var_unpack->insertAfter(nodes[nodes.size() - 1]);
   for (Node* node : nodes) {
@@ -492,13 +492,13 @@ void ReplaceWithMaybeCopy(
   static const std::array<std::pair<c10::FunctionSchema, c10::Symbol>, 3> supported_schema =
       {{{torch::schema(
              "aten::to.prim_dtype(Tensor(a) self, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)"),
-         c10::Symbol::fromQualString("static_runtime::to_maybe_copy_out")},
+         fromQualString("static_runtime::to_maybe_copy_out")},
         {torch::schema(
              "aten::to.dtype(Tensor(a) self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor(a)"),
-         c10::Symbol::fromQualString("static_runtime::to_maybe_copy_out")},
+         fromQualString("static_runtime::to_maybe_copy_out")},
         {torch::schema(
              "aten::to.other(Tensor(a) self, Tensor other, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor(a)"),
-         c10::Symbol::fromQualString("static_runtime::to_maybe_copy_out")}}};
+         fromQualString("static_runtime::to_maybe_copy_out")}}};
 
   auto match_schema = [](const Node* node, c10::Symbol& out_matched_symbol) {
     for (auto& schema : supported_schema) {
@@ -541,7 +541,7 @@ void ReplaceWithMaybeCopy(
     new_node->outputs().at(1)->setType(c10::BoolType::get());
 
     static const auto select_tensor_symbol =
-        c10::Symbol::fromQualString("static_runtime::select_tensor");
+        fromQualString("static_runtime::select_tensor");
     auto* select_tensor_node = graph->create(select_tensor_symbol, 1);
     select_tensor_node->insertBefore(n);
     DCHECK_EQ(new_node->outputs().size(), 2);
@@ -576,15 +576,14 @@ void ReplaceWithCopy(
 
   const std::map<c10::Symbol, c10::Symbol> supported = {
 #ifdef FBCODE_CAFFE2
-      {c10::Symbol::fromQualString("aten::permute"),
-       c10::Symbol::fromQualString("static_runtime::permute_copy")},
+      {fromQualString("aten::permute"),
+       fromQualString("static_runtime::permute_copy")},
 #endif
-      {c10::Symbol::fromQualString("aten::narrow"),
-       c10::Symbol::fromQualString("aten::narrow_copy")},
-      {c10::Symbol::fromQualString("aten::reshape"),
-       c10::Symbol::fromQualString("static_runtime::reshape_copy")},
-      {c10::Symbol::fromQualString("aten::flatten"),
-       c10::Symbol::fromQualString("static_runtime::flatten_copy")}};
+      {fromQualString("aten::narrow"), fromQualString("aten::narrow_copy")},
+      {fromQualString("aten::reshape"),
+       fromQualString("static_runtime::reshape_copy")},
+      {fromQualString("aten::flatten"),
+       fromQualString("static_runtime::flatten_copy")}};
 
   bool has_inplace_ops = HasInplaceOp(graph, db);
   std::vector<std::pair<Node*, Node*>> replacement;
@@ -656,8 +655,7 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
   for (auto it = nodes.begin(); it != nodes.end(); ++it) {
     Node* node = *it;
     const std::string node_qual_string = node->kind().toQualString();
-    if (node_qual_string == "fb::sigrid_transforms" ||
-        node_qual_string == "fb::sigrid_transforms_torch_bind" ||
+    if (node_qual_string == "fb::sigrid_transforms_torch_bind" ||
         node_qual_string == "fb::gather_ranges_to_dense" ||
         node_qual_string == "fb::gather_ranges_to_dense_v2" ||
         node_qual_string == "fb::variadic_sigrid_transforms_torch_bind") {
@@ -711,8 +709,10 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
 
 void FuseListUnpackV2(std::shared_ptr<torch::jit::Graph>& graph) {
   const FastMap<c10::Symbol, c10::Symbol> unfused_to_fused = {
-      {c10::Symbol::fromQualString("fb::equally_split"),
-       c10::Symbol::fromQualString("static_runtime::fused_equally_split")}};
+      {fromQualString("fb::equally_split"),
+       fromQualString("static_runtime::fused_equally_split")},
+      {fromQualString("fb::sigrid_transforms"),
+       fromQualString("static_runtime::fused_sigrid_transforms")}};
 
   AliasDb alias_db(
       graph, /*isFrozen=*/false, /*enablePreciseTupleContainerAnalysis=*/true);
@@ -742,7 +742,7 @@ void FuseListUnpackV2(std::shared_ptr<torch::jit::Graph>& graph) {
     }
 
     const bool is_equally_split =
-        node->kind() == c10::Symbol::fromQualString("fb::equally_split");
+        node->kind() == fromQualString("fb::equally_split");
     if (!is_equally_split) {
       // If any output of the ListUnpack node is unmanaged, disable fusion
       // since the fused op assumes all outputs are either managed or not.
@@ -795,7 +795,7 @@ void FuseListUnpackV2(std::shared_ptr<torch::jit::Graph>& graph) {
 
 void EnableStaticRuntimeLayerNorm(std::shared_ptr<torch::jit::Graph>& graph) {
   const c10::Symbol static_runtime_layer_norm_symbol =
-      c10::Symbol::fromQualString("static_runtime::layer_norm");
+      fromQualString("static_runtime::layer_norm");
   auto nodes = graph->nodes();
   std::vector<std::pair<Node*, Node*>> replacement;
   for (auto it = nodes.begin(); it != nodes.end(); ++it) {
@@ -872,7 +872,7 @@ void RemoveImmutableInputDictLookups(
     key->moveBefore(marker);
   }
   const c10::Symbol static_runtime_dict_unpack_symbol =
-      c10::Symbol::fromQualString("static_runtime::dict_unpack");
+      fromQualString("static_runtime::dict_unpack");
   for (auto& it : dict_to_getitems) {
     Value* dict = it.first;
     std::vector<Node*>& getitems = it.second;

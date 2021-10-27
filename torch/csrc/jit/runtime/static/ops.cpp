@@ -1004,74 +1004,109 @@ REGISTER_OPERATOR_FUNCTOR(aten::pow, aten_pow, [](Node* n) -> SROperator {
 });
 
 namespace {
-bool check_to_will_alias(ProcessedNode* p_node) {
-  const auto& self = p_node->Input(0).toTensor();
+
+struct ToArgs {
   c10::optional<at::ScalarType> dtype;
-  c10::Layout layout = self.layout();
-  c10::Device device = self.device();
+  c10::Layout layout;
+  c10::Device device{c10::DeviceType::CPU};
+  c10::optional<c10::MemoryFormat> memory_format;
+};
+
+ToArgs extract_to_args(ProcessedNode* p_node) {
+  const auto& self = p_node->Input(0).toTensor();
+  ToArgs result;
   if (p_node->Input(1).isTensor()) {
     const auto& other = p_node->Input(1).toTensor();
-    dtype = other.scalar_type();
-    layout = other.layout();
-    device = other.device();
+    result.dtype = other.scalar_type();
+    result.layout = other.layout();
+    result.device = other.device();
   } else {
-    dtype = p_node->Input(1).toOptional<at::ScalarType>();
+    result.dtype = p_node->Input(1).toOptional<at::ScalarType>();
+    result.layout = self.layout();
+    result.device = self.device();
   }
-  const auto copy = p_node->Input(3).toBool();
-  c10::optional<c10::MemoryFormat> memory_format = c10::nullopt;
   if (p_node->inputs().size() == 5) {
-    memory_format = p_node->Input(4).toOptional<c10::MemoryFormat>();
+    result.memory_format = p_node->Input(4).toOptional<c10::MemoryFormat>();
   }
 
-  return !copy &&
-      at::native::to_will_alias(
-          self, dtype, layout, device, copy, memory_format);
+  return result;
 }
 
-void to_copy_functor(ProcessedNode* p_node) {
+bool check_to_will_alias(
+    ProcessedNode* p_node,
+    const at::Tensor& self,
+    const ToArgs& to_args) {
+  const auto copy = p_node->Input(3).toBool();
+  return !copy &&
+      at::native::to_will_alias(
+          self,
+          to_args.dtype,
+          to_args.layout,
+          to_args.device,
+          copy,
+          to_args.memory_format);
+}
+
+// Force inlining so we don't have to branch on whether args is null
+// at runtime.
+C10_ALWAYS_INLINE void to_copy_functor_impl(
+    ProcessedNode* p_node,
+    const ToArgs* args) {
   const auto& self = p_node->Input(0).toTensor();
   // ignore input 3 (copy)
   auto non_blocking = p_node->Input(2).toBool(); // non_blocking
   // handle memory format
   bool copy_strides = false;
-  c10::optional<c10::MemoryFormat> memory_format = c10::nullopt;
-  if (p_node->inputs().size() == 5) {
-    memory_format = p_node->Input(4).toOptional<c10::MemoryFormat>();
+
+  c10::optional<c10::MemoryFormat> memory_format;
+  c10::optional<ToArgs> my_args;
+  if (args) {
+    memory_format = args->memory_format.value_or(c10::MemoryFormat::Preserve);
+  } else {
+    my_args = extract_to_args(p_node);
+    args = &my_args.value();
+    memory_format = args->memory_format.value_or(c10::MemoryFormat::Preserve);
   }
-  memory_format = memory_format.value_or(c10::MemoryFormat::Preserve);
-
-  if (p_node->Output(0).isNone()) {
-    // handle dtype, layout, and device
-    c10::optional<at::ScalarType> dtype;
-    c10::Layout layout = self.layout();
-    c10::Device device = self.device();
-    if (p_node->Input(1).isTensor()) {
-      const auto& other = p_node->Input(1).toTensor();
-      dtype = other.scalar_type();
-      layout = other.layout();
-      device = other.device();
+  if (memory_format == c10::MemoryFormat::Preserve) {
+    if (self.is_non_overlapping_and_dense()) {
+      memory_format = c10::nullopt;
+      copy_strides = true;
     } else {
-      dtype = p_node->Input(1).toOptional<at::ScalarType>();
+      memory_format = self.suggest_memory_format();
     }
+  }
 
-    if (memory_format == c10::MemoryFormat::Preserve) {
-      if (self.is_non_overlapping_and_dense()) {
-        memory_format = c10::nullopt;
-        copy_strides = true;
-      } else {
-        memory_format = self.suggest_memory_format();
-      }
+  bool need_to_allocate_output = true;
+  if (p_node->Output(0).isTensor()) {
+    const auto& existing_output = p_node->Output(0).toTensor();
+    if (existing_output.dtype() != args->dtype ||
+        existing_output.layout() != args->layout ||
+        existing_output.device() != self.device() ||
+        !existing_output.is_contiguous(
+            memory_format.value_or(c10::MemoryFormat::Contiguous))) {
+      need_to_allocate_output = true;
+    } else {
+      need_to_allocate_output = false;
     }
+  }
 
-    // See Note [Explicit nullopt MemoryFormat argument]
-    // Can't use size {0} if memory_format is ChannelLast
+  // See Note [Explicit nullopt MemoryFormat argument]
+  // Can't use size {0} if memory_format is ChannelLast
+  if (need_to_allocate_output) {
     p_node->Output(0) = at::detail::empty_cpu(
         self.sizes(),
-        dtype,
-        layout,
+        args->dtype,
+        args->layout,
         self.device(),
         c10::nullopt,
         memory_format);
+  } else {
+    if (p_node->inputs().size() == 5) {
+      memory_format = p_node->Input(4).toOptional<c10::MemoryFormat>().value_or(
+          c10::MemoryFormat::Preserve);
+    } else {
+      memory_format = c10::MemoryFormat::Preserve;
+    }
   }
 
   copy_strides = copy_strides ||
@@ -1083,6 +1118,11 @@ void to_copy_functor(ProcessedNode* p_node) {
   at::native::to_copy_out(
       out_t, self, non_blocking, copy_strides, memory_format);
 }
+
+void to_copy_functor(ProcessedNode* p_node) {
+  to_copy_functor_impl(p_node, nullptr);
+}
+
 } // namespace
 
 // out variant takes precedence over native
@@ -1105,9 +1145,15 @@ REGISTER_OPERATOR_FUNCTOR(
       // Keep TORCH_CHECK here because there is no alternative for fallback
       TORCH_CHECK(n->inputs().size() == 4 || n->inputs().size() == 5);
       return [](ProcessedNode* p_node) {
-        if (check_to_will_alias(p_node)) {
+        ToArgs args = extract_to_args(p_node);
+        const auto& self = p_node->Input(0).toTensor();
+        if (check_to_will_alias(p_node, self, args)) {
           if (p_node->Output(0).isNone()) {
-            p_node->Output(0) = at::Tensor();
+            // We will never use this (unless check_to_will_alias
+            // returns false in a future iteration), but creating a
+            // defined tensor lets us avoid a check for undefined in
+            // MemoryPlanner::allocateManagedTensors().
+            p_node->Output(0) = create_empty_from(self);
           }
           DCHECK(p_node->Output(0).isTensor());
           p_node->Output(1) = false;
@@ -1118,7 +1164,14 @@ REGISTER_OPERATOR_FUNCTOR(
             p_node->Output(0) = IValue();
           }
           p_node->Output(1) = true;
-          to_copy_functor(p_node);
+          // XXX: need to fuse this here, with the following goals:
+          // 1) don't repeat checks from check_to_will_alias
+          // 2) reset dtype and layout of output if we are transitioning back
+          // and forth between alias & not alias modes (add a test for that!) 3)
+          // allow ourselves to remove the check for undefined in
+          // MemoryPlanner::deallocate by producing some kind of reasonable
+          // output tensor in the other branch
+          to_copy_functor_impl(p_node, &args);
         }
       };
     });
@@ -1131,16 +1184,15 @@ REGISTER_OPERATOR_FUNCTOR(
       return [](ProcessedNode* p_node) {
         const auto did_copy = p_node->Input(2).toBool();
         DCHECK(p_node->Input(0).isTensor());
-        DCHECK(p_node->Input(1).isTensor() || p_node->Input(1).isNone());
+        DCHECK(p_node->Input(1).isTensor());
         // Check to avoid an unnecessary refcount bump. IValue in
         // general doesn't do this check because it would probably
         // result in code bloat and not hit often, but here we are
         // likely to very often be assigning the same tensor.
         if (did_copy) {
-          if (!p_node->Input(1).isNone() &&
-              (p_node->Output(0).isTensor() &&
-               p_node->Input(1).toTensor().is_same(
-                   p_node->Output(0).toTensor()))) {
+          if (p_node->Output(0).isTensor() &&
+              p_node->Input(1).toTensor().is_same(
+                  p_node->Output(0).toTensor())) {
             return;
           }
           p_node->Output(0) = p_node->Input(1);
