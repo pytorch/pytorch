@@ -20,7 +20,7 @@ c10::IValue preprocess(
   c10::Dict<IValue, IValue> compiled(StringType::get(), StringType::get());
 
   for (const auto& method : mod.get_methods()) {
-    auto graph = method.function().graph()->copy();
+    auto graph = toGraphFunction(method.function()).graph()->copy();
     // Must inline the graph for debug info map.
     Inline(*graph);
     // This is here because to test module hierarchy we will have

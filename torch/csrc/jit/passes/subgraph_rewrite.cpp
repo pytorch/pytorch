@@ -61,7 +61,7 @@ void SubgraphRewriter::RegisterRewritePattern(
 Module SubgraphRewriter::runOnModule(const Module& module) {
   nodes_to_delete_.clear();
   for (const auto& m : module.get_methods()) {
-    auto g = m.function().graph();
+    auto g = toGraphFunction(m.function()).graph();
     runOnGraph(g);
   }
   return module;
