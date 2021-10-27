@@ -94,9 +94,8 @@ void OptimizeGraph(
   if (opts.enable_out_variant) {
     UseVariadicOp(
         graph,
-        c10::Symbol::fromQualString("fb::sigrid_transforms_torch_bind"),
-        c10::Symbol::fromQualString(
-            "fb::variadic_sigrid_transforms_torch_bind"));
+        fromQualString("fb::sigrid_transforms_torch_bind"),
+        fromQualString("fb::variadic_sigrid_transforms_torch_bind"));
     FuseSignLog1P(graph);
 
     // TODO: we can avoid this guard by moving operations
@@ -133,6 +132,16 @@ c10::FunctionSchema RemoveSelfFromSchema(const c10::FunctionSchema& s) {
   return s.cloneWithArguments(args);
 }
 
+std::vector<Value*> valueVecFromFastSet(const FastSet<const Value*>& s) {
+  std::vector<Value*> result;
+  result.reserve(s.size());
+  for (auto* v : s) {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+    result.emplace_back(const_cast<Value*>(v));
+  }
+  return result;
+}
+
 bool mayContainAlias(AliasDb& db, const Value* a, const Value* b) {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   return db.mayContainAlias(const_cast<Value*>(a), const_cast<Value*>(b));
@@ -142,19 +151,7 @@ bool mayContainAlias(
     AliasDb& db,
     const FastSet<const Value*>& a,
     const FastSet<const Value*>& b) {
-  std::vector<Value*> as;
-  std::vector<Value*> bs;
-  as.reserve(a.size());
-  for (auto* v : a) {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-    as.emplace_back(const_cast<Value*>(v));
-  }
-  bs.reserve(b.size());
-  for (auto* v : b) {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-    bs.emplace_back(const_cast<Value*>(v));
-  }
-  return db.mayContainAlias(as, bs);
+  return db.mayContainAlias(valueVecFromFastSet(a), valueVecFromFastSet(b));
 }
 
 //  Map each value to all values that are alive at the same time.
