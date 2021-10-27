@@ -62,7 +62,10 @@ popd
 
 # Clone the Builder master repo
 retry git clone -q https://github.com/pytorch/builder.git "$BUILDER_ROOT"
+BUILDER_BRANCH="reverse_trigger_binary"
 pushd "$BUILDER_ROOT"
+#git fetch --force origin "pull/${BUILDER_PR_NUMBER}/head:remotes/origin/pull/${BUILDER_PR_NUMBER}"
+git checkout "${BUILDER_BRANCH}"
 echo "Using builder from "
 git --no-pager log --max-count 1
 popd
