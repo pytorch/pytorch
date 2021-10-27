@@ -5201,8 +5201,8 @@ else:
             t.diff(dim=0, prepend=invalid_prepend)
 
         with self.assertRaisesRegex(
-                RuntimeError, 'diff expects dim to be a valid dimension but got'):
-            t.diff(dim=3)
+                RuntimeError, 'diff expects dim to be in range of'):
+            t.diff(dim=2)
 
         with self.assertRaisesRegex(
                 RuntimeError, 'diff expects n to be at least 1 and < size along dim after prepend and append'):

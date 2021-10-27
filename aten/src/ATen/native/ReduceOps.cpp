@@ -752,15 +752,15 @@ static inline void diff_check_compatible_shape(const Tensor& self, const c10::op
 static inline void diff_check(const Tensor& self, int64_t n, int64_t dim, const c10::optional<Tensor>&prepend, const c10::optional<Tensor>& append) {
   // Helper for diff that checks whether its parameters are valid
   TORCH_CHECK(
-      self.dim() >= 1,
+      self.dim()>= 1,
       "diff expects input to be at least one-dimensional");
 
   TORCH_CHECK(
-      self.dim() >= dim,
-      "diff expects dim to be a valid dimension but got dim=", dim, " while tensor has ", self.dim(), "dims");
+      self.dim() > dim && -self.dim() <= dim,
+      "diff expects dim to be in range of [", -self.dim(), ", ", self.dim()-1, "] but got dim=", dim);
 
-  auto prepend_size = (prepend == c10::nullopt) ? 0 : prepend->size(dim);
-  auto append_size = (append == c10::nullopt) ? 0 : append->size(dim);
+  auto prepend_size = (prepend.has_value() ? prepend.value().size(dim) : 0;
+  auto append_size = (append.has_value()) ? append.value().size(dim) : 0;
   auto size_along_dim = self.size(dim) + prepend_size + append_size;
   TORCH_CHECK(
        n >= 1 && n < size_along_dim,
@@ -774,6 +774,7 @@ static inline Tensor diff_helper(const Tensor& self, int64_t n, int64_t dim) {
   auto out_len = self.size(dim) - 1;
   auto result = self;
   bool is_kBool = self.dtype() == at::kBool;
+  n = n > self.size(dim) ? self.size(dim) : n;
 
   for (const auto i : c10::irange(n)) {
     if (is_kBool){
