@@ -69,13 +69,21 @@ namespace at { namespace cuda { namespace solver {
 const char* cusolverGetErrorMessage(cusolverStatus_t status);
 }}} // namespace at::cuda::solver
 
-#define TORCH_CUSOLVER_CHECK(EXPR)                                \
-  do {                                                            \
-    cusolverStatus_t __err = EXPR;                                \
-    TORCH_CHECK(__err == CUSOLVER_STATUS_SUCCESS,                 \
-                "cusolver error: ",                               \
-                at::cuda::solver::cusolverGetErrorMessage(__err), \
-                ", when calling `" #EXPR "`");                    \
+#define TORCH_CUSOLVER_CHECK(EXPR)                                              \
+  do {                                                                          \
+    cusolverStatus_t __err = EXPR;                                              \
+    if (__err == CUSOLVER_STATUS_EXECUTION_FAILED) {                            \
+      TORCH_CHECK(__err == CUSOLVER_STATUS_SUCCESS,                             \
+                  "cusolver error: ",                                           \
+                  at::cuda::solver::cusolverGetErrorMessage(__err),             \
+                  ", when calling `" #EXPR "`",                                 \
+                  ". This error may appear if the input matrix contains NaN."); \
+    } else {                                                                    \
+      TORCH_CHECK(__err == CUSOLVER_STATUS_SUCCESS,                             \
+                  "cusolver error: ",                                           \
+                  at::cuda::solver::cusolverGetErrorMessage(__err),             \
+                  ", when calling `" #EXPR "`");                                \
+    }                                                                           \
   } while (0)
 
 #else
