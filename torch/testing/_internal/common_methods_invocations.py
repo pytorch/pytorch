@@ -11226,10 +11226,14 @@ op_db: List[OpInfo] = [
         dtypesIfCPU=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
+        supports_forward_ad=True,
         sample_inputs_func=sample_inputs_gaussian_nll_loss,
         skips=(
+            # JIT does not support variadic tensors.
+            # RuntimeError: input->type()->kind() == TypeKind::OptionalType
+            # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":270,
+            # please report a bug to PyTorch.
             DecorateInfo(unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit", dtypes=(torch.float32,),),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD', dtypes=(torch.float64,),),
         ),
     ),
     OpInfo(
