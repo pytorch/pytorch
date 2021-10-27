@@ -689,6 +689,9 @@ public:
   template <class CurClass>
   inline torch::class_<CurClass> class_(const std::string& className);
 
+  // These overloads enable the use of selective build on classes registered within
+  // a library. The API is the same as before with 1 minor change. Instead of
+  // m.class_<foo>("foo") you instead do m.class_<foo>(TORCH_SELECTIVE_CLASS("foo"))
   template <class CurClass>
   inline torch::class_<CurClass> class_(detail::SelectiveStr<true> className);
 
