@@ -837,7 +837,7 @@ class TestIndexing(TestCase):
         t_dev = t.to(device)
         indices = torch.tensor([1, 0])
         indices_dev = indices.to(device)
-        value0d = torch.tensor([1.0, 2.0])
+        value0d = torch.tensor(10.0)
         value1d = torch.tensor([1.0, 2.0])
 
         out_cuda = func(t_dev, indices_dev, value0d.cuda())
