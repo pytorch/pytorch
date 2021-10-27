@@ -1,4 +1,4 @@
-name: Build Test
+name: Repository Dispatch
 
 on:
   pull_request:
