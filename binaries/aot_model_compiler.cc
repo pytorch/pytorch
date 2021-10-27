@@ -73,8 +73,8 @@ c10::Dict<c10::IValue, c10::IValue> createCompileSpec() {
 }
 
 std::vector<std::vector<int64_t>> getInputSizes (
-    const c10::Dict<c10::IValue, c10::IValue>& method_compile_spec) {
-  auto input_shapes = method_compile_spec.at(FLAGS_method_name).toGenericDict().at("sizes").toList();
+    const c10::Dict<c10::IValue, c10::IValue>& compile_spec) {
+  auto input_shapes = compile_spec.at(FLAGS_method_name).toGenericDict().at("sizes").toList();
   std::vector<std::vector<int64_t>> inputSizes;
   for (const auto& input_shape : input_shapes) {
     auto sizes = ((c10::IValue) input_shape).toIntVector();
@@ -105,7 +105,7 @@ void writeOutputLlvmAssembly(const std::string& asm_code) {
 
 c10::IValue preprocess(
     const torch::jit::Module& mod,
-    const c10::Dict<c10::IValue, c10::IValue>& method_compile_spec,
+    const c10::Dict<c10::IValue, c10::IValue>& compile_spec,
     const torch::jit::BackendDebugHandleGenerator& generate_debug_handles) {
 
   std::string output_llvm_file_name = FLAGS_output_llvm;
@@ -116,7 +116,7 @@ c10::IValue preprocess(
 
   auto method = mod.get_method(FLAGS_method_name);
   auto graph = method.function().graph()->copy();
-  auto sizes = getInputSizes(method_compile_spec);
+  auto sizes = getInputSizes(compile_spec);
 
   std::string llvm_asm_code;
   auto compiled = torch::jit::mobile::nnc::aotCompile(FLAGS_method_name, graph, sizes);

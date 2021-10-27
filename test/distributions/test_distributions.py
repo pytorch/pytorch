@@ -1,3 +1,5 @@
+# Owner(s): ["module: distributions"]
+
 """
 Note [Randomized statistical tests]
 -----------------------------------
