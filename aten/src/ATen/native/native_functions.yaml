@@ -1240,6 +1240,8 @@
     QuantizedCUDA, QuantizedXPU: copy_quantized_cuda_xpu_
     CompositeExplicitAutograd: copy_
     SparseCsrCPU, SparseCsrCUDA: copy_sparse_csr_
+    Vulkan: copy_vulkan_
+    Metal: copy_metal_
 
 - func: _copy_from(Tensor self, Tensor dst, bool non_blocking=False) -> Tensor
   dispatch: {}

@@ -103,6 +103,18 @@ bool is_supported_device(Device device) {
 namespace at {
 namespace native {
 
+Tensor& copy_metal_(Tensor& self, const Tensor& src, bool non_blocking) {
+  return at::metal::metal_copy_(self, src);
+}
+
+Tensor& copy_vulkan_(Tensor& self, const Tensor& src, bool non_blocking) {
+  #ifdef USE_VULKAN_API
+    return vulkan::ops::copy_(self, src);
+  #else
+    return at::vulkan::vulkan_copy_(self, src);
+  #endif
+}
+
 Tensor& copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   // TODO: this should be handled during dispatch, but that's missing...
   TORCH_CHECK(self.defined(), "self is undefined");
@@ -181,17 +193,17 @@ Tensor& copy_(Tensor & self, const Tensor & src, bool non_blocking) {
     return self;
   }
 
-  if (self.device().type() == at::kVulkan || src.device().type() == at::kVulkan) {
-  #ifdef USE_VULKAN_API
-    return vulkan::ops::copy_(self, src);
-  #else
-    return at::vulkan::vulkan_copy_(self, src);
-  #endif
-  }
+  // if (self.device().type() == at::kVulkan || src.device().type() == at::kVulkan) {
+  // #ifdef USE_VULKAN_API
+  //   return vulkan::ops::copy_(self, src);
+  // #else
+  //   return at::vulkan::vulkan_copy_(self, src);
+  // #endif
+  // }
 
-  if (self.device().type() == at::kMetal || src.device().type() == at::kMetal) {
-    return at::metal::metal_copy_(self, src);
-  }
+  // if (self.device().type() == at::kMetal || src.device().type() == at::kMetal) {
+  //   return at::metal::metal_copy_(self, src);
+  // }
 
   auto iter = TensorIteratorConfig()
     .add_output(self)
