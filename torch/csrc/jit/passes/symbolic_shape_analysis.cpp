@@ -826,7 +826,8 @@ struct SymbolicShapeGraphAnalyzer {
           new_list_output;
 
       TORCH_INTERNAL_ASSERT(
-          new_list_output->node()->kind() == prim::ListConstruct);
+          new_list_output->node()->kind() == prim::ListConstruct ||
+          new_list_output->node()->kind() == prim::Constant);
       TORCH_INTERNAL_ASSERT(!new_list_output->node()->hasUses());
 
       auto symbolic_sizes =

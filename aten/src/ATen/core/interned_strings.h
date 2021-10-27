@@ -463,6 +463,7 @@ namespace c10 {
   _(attr, df_output_vjps)            \
   _(attr, axes)                      \
   _(attr, axis)                      \
+  _(attr, symbolic_shape_inputs)     \
   _(attr, broadcast)                 \
   _(attr, direction)                 \
   _(attr, ends)                      \
