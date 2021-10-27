@@ -566,6 +566,18 @@ class TestOptim(TestCase):
             with self.assertRaisesRegex(ValueError, "Invalid rho value: 1.1"):
                 optimizer(None, lr=1e-2, rho=1.1)
 
+    def test_adadelta_complex(self):
+        for optimizer in [optim.Adadelta]:
+            self._test_complex_optimizer(
+                lambda weight: optimizer([weight])
+            )
+            self._test_complex_optimizer(
+                lambda weight: optimizer([weight], rho=0.95)
+            )
+            self._test_complex_optimizer(
+                lambda weight: optimizer([weight], rho=0.95, weight_decay=1)
+            )
+
     def test_nadam(self):
         for optimizer in [optim.NAdam, optim_mt.NAdam]:
             self._test_basic_cases(
