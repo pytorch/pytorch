@@ -626,7 +626,8 @@ TEST(StaticRuntime, IndividualOps_to) {
     std::vector<IValue> args2{a, other, c, d, e};
     std::vector<IValue> args3{a, c10::nullopt, c, d};
 
-    testStaticRuntime(to_script_dtype, args0);
+    std::vector<IValue> args0WithInt{a, ScalarType::Int, c, d, e};
+    testStaticRuntime(to_script_dtype, args0, args0WithInt);
     testStaticRuntime(to_script_dtype_strided, args0);
     testStaticRuntime(to_script_prim_dtype, args1);
     if (!d) {
