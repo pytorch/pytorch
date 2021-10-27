@@ -39,6 +39,8 @@ void apply_triu_tril_single(
     int64_t self_row_stride,
     int64_t self_col_stride,
     bool upper) {
+  constexpr int64_t zero = 0;
+
   if (upper) {
     parallel_for(0, n, 0, [&](int64_t start, int64_t end) {
       for (int64_t i : c10::irange(start, end)) {
@@ -46,7 +48,7 @@ void apply_triu_tril_single(
           result[i * res_row_stride + j * res_col_stride] = 0;
         }
         if (!inplace) {  // copy the rest of the self if not inplace
-          for (int64_t j = std::max(0l, i + k); j < m; j++) {
+          for (int64_t j = std::max(zero, i + k); j < m; j++) {
             result[i * res_row_stride + j * res_col_stride] = self[i * self_row_stride + j * self_col_stride];
           }
         }
@@ -55,11 +57,11 @@ void apply_triu_tril_single(
   } else {
     parallel_for(0, n, 0, [&](int64_t start, int64_t end) {
       for (int64_t i : c10::irange(start, end)) {
-        for (int64_t j = std::max(0l, i + k + 1); j < m; j++) {
+        for (int64_t j = std::max(zero, i + k + 1); j < m; j++) {
           result[i * res_row_stride + j * res_col_stride] = 0;
         }
         if (!inplace) {  // copy the rest of the self if not inplace
-          for (int64_t j = 0; j < std::min(m, i + k + 1); j++) {
+          for (int64_t j = zero; j < std::min(m, i + k + 1); j++) {
             result[i * res_row_stride + j * res_col_stride] = self[i * self_row_stride + j * self_col_stride];
           }
         }
