@@ -14,6 +14,7 @@
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/callstack_debug_info_serialization.h>
+#include <torch/csrc/jit/serialization/export_bytecode.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
@@ -29,13 +30,12 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/qualified_name.h>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 namespace torch {
 namespace jit {
-
-char const* toString(OpCode op);
 
 IValue to_tuple(std::vector<IValue> ivalues) {
   return c10::ivalue::Tuple::create(std::move(ivalues));
@@ -60,16 +60,14 @@ ExportModuleExtraFilesHook& GetExtraFilesHook() {
 std::pair<IValue, IValue> getFunctionTuple(
     const Module& module,
     const Function& func,
+    std::unique_ptr<Graph> optimizedGraph,
     BackendDebugInfoRecorder& debug_info_recorder,
-    const std::basic_string<char>& qn,
+    const std::string& qn,
     TypeNameUniquer& type_name_uniquer_) {
-  auto graph = func.graph()->copy();
-
-  Inline(*graph);
-
+  TORCH_INTERNAL_ASSERT(optimizedGraph);
   std::shared_ptr<MobileCode> code;
   code = std::make_shared<MobileCode>(
-      graph, func.name(), BytecodeEmitMode::is_default_value_for_unspecified_arg_enabled() /* emit_default_input_instructions */, BytecodeEmitMode::is_default_args_before_out_args_enabled() /* enable_defaults_args_with_out_args */);
+      std::move(optimizedGraph), func.name(), BytecodeEmitMode::is_default_value_for_unspecified_arg_enabled() /* emit_default_input_instructions */, BytecodeEmitMode::is_default_args_before_out_args_enabled() /* enable_defaults_args_with_out_args */);
   auto instructions_copy = code->instructions();
 
   // operator names
@@ -327,43 +325,128 @@ std::pair<IValue, IValue> getFunctionTuple(
   return std::make_pair(bytecode_vals, debug_info_vals);
 }
 
+void pushFunctionToIValues(
+    BytecodeExportSet exportSet,
+    std::vector<c10::IValue>& elements,
+    std::vector<c10::IValue>& debugInfoElements,
+    BackendDebugInfoRecorder& recorder,
+    TypeNameUniquer& uniquer) {
+  exportSet.visit(
+      [&](const c10::QualifiedName& qn, ExportedFunction& exported) {
+        auto tuple = getFunctionTuple(
+            exported.mod,
+            exported.function,
+            std::move(exported.optimizedGraph),
+            recorder,
+            qn.qualifiedName(),
+            uniquer);
+        elements.push_back(std::move(tuple.first));
+        debugInfoElements.push_back(std::move(tuple.second));
+      });
+}
+
+void pushFunctionToIValues(
+    BytecodeExportSet exportSet,
+    std::vector<c10::IValue>& elements,
+    BackendDebugInfoRecorder& recorder,
+    TypeNameUniquer& uniquer) {
+  std::vector<c10::IValue> debugInfoElements;
+  pushFunctionToIValues(
+      std::move(exportSet), elements, debugInfoElements, recorder, uniquer);
+}
+
+std::unordered_set<const FunctionSchema*> getInterfaceCalls(Graph& graph) {
+  std::unordered_set<const FunctionSchema*> ret;
+  auto nodes = findAllNodes(graph, c10::prim::CallMethod, true);
+  for (Node* node : nodes) {
+    if (auto iface = node->input(0)->type()->castRaw<InterfaceType>()) {
+      ret.insert(iface->getMethod(node->s(attr::name)));
+    }
+  }
+  return ret;
+}
+
+struct ModuleMethod {
+  ModuleMethod(const Module& m, const Function& f, c10::QualifiedName n)
+      : module(m), function(f), exportName(std::move(n)) {}
+  Module module;
+  const Function& function;
+  c10::QualifiedName exportName;
+};
+
+std::vector<ModuleMethod> getModuleInterfaceExports(
+    const Module& module,
+    const std::unordered_set<const FunctionSchema*>& schemas) {
+  if (schemas.size() == 0) {
+    return {};
+  }
+  std::unordered_set<std::string> names;
+  for (auto schema : schemas) {
+    names.insert(schema->name());
+  }
+  std::vector<ModuleMethod> ret;
+  for (const auto& submodule : module.modules()) {
+    for (const auto& method : submodule.get_methods()) {
+      if (names.find(method.function().qualname().name()) != names.end()) {
+        ret.emplace_back(
+            submodule, method.function(), method.function().qualname());
+      }
+    }
+  }
+  return ret;
+}
+
+void exportFunction(
+    BytecodeExportSet& exportSet,
+    const ModuleMethod& method,
+    bool toplevel = false) {
+  const auto& func = method.function;
+  const auto& qn = method.exportName;
+  if (exportSet.contains(qn)) {
+    if (toplevel) {
+      exportSet.update(qn, toplevel);
+    }
+    return;
+  }
+  auto graph = func.graph()->copyUnique();
+  Inline(*graph);
+  auto interfaceCalls = getInterfaceCalls(*graph);
+  exportSet.add(
+      qn, ExportedFunction{method.module, func, std::move(graph), toplevel});
+
+  if (!getMobileInterfaceCallExport()) {
+    return;
+  }
+
+  auto interfaces = getModuleInterfaceExports(method.module, interfaceCalls);
+  for (const auto& interface : interfaces) {
+    exportFunction(exportSet, interface);
+  }
+}
+
 void setstateTuple(
+    BytecodeExportSet& exportSet,
     const Module& module,
     const IValue& ivalue,
-    std::vector<c10::IValue>& elements,
-    std::unordered_set<std::string>& qn_cache,
-    std::vector<c10::IValue>& debug_info_elements,
-    BackendDebugInfoRecorder& debug_info_recorder,
-    TypeNameUniquer& type_name_uniquer_) {
+    TypeNameUniquer& type_name_uniquer_,
+    bool toplevel = false) {
   if (!ivalue.isObject())
     return;
   auto obj = ivalue.toObject();
   auto type = obj->type();
   if (checkHasValidSetGetState(type)) {
     Function& setstate = type->getMethod("__setstate__");
-    const auto qn =
-        type_name_uniquer_.getUniqueName(obj->type()).qualifiedName() + "." +
-        setstate.name();
-    if (qn_cache.find(qn) != qn_cache.end()) {
+    auto qn = type_name_uniquer_.getUniqueName(obj->type()).qualifiedName() +
+        "." + setstate.name();
+    if (exportSet.contains(qn)) {
       return;
     }
     if (setstate.isGraphFunction()) {
-      auto func_tuple = getFunctionTuple(
-          module, setstate, debug_info_recorder, qn, type_name_uniquer_);
-      elements.push_back(func_tuple.first);
-      qn_cache.emplace(qn);
-      debug_info_elements.push_back(func_tuple.second);
+      exportFunction(exportSet, ModuleMethod{module, setstate, qn}, toplevel);
     }
   } else {
     for (size_t i = 0, n = type->numAttributes(); i < n; ++i) {
-      setstateTuple(
-          module,
-          obj->getSlot(i),
-          elements,
-          qn_cache,
-          debug_info_elements,
-          debug_info_recorder,
-          type_name_uniquer_);
+      setstateTuple(exportSet, module, obj->getSlot(i), type_name_uniquer_);
     }
   }
 }
@@ -441,38 +524,37 @@ SourceRangeRecords getBackendSourceRanges(const Module& m) {
   return sr_records;
 }
 
+auto& mobileInterfaceCallExport() {
+  static std::atomic<bool> flag{false};
+  return flag;
+}
+
 } // namespace
 
-void moduleMethodsTuple(
+TORCH_API void enableMobileInterfaceCallExport() {
+  mobileInterfaceCallExport().store(true, std::memory_order_relaxed);
+}
+bool getMobileInterfaceCallExport() {
+  return mobileInterfaceCallExport().load(std::memory_order_relaxed);
+}
+
+BytecodeExportSet moduleMethodsTuple(
     const Module& module,
-    std::vector<c10::IValue>& elements, // note: appended to in-place
-    std::vector<c10::IValue>& debug_info_elements,
-    BackendDebugInfoRecorder& debug_info_recorder,
     TypeNameUniquer& type_name_uniquer_) {
+  BytecodeExportSet exportSet;
   auto methods = module.get_methods();
-  std::unordered_set<std::string> qn_cache;
   // top level methods
   for (const auto& method : methods) {
-    const auto qn = method.function().qualname().qualifiedName();
-    if (qn_cache.find(qn) != qn_cache.end()) {
-      continue;
-    }
-    auto func_tuple = getFunctionTuple(
-        module, method.function(), debug_info_recorder, qn, type_name_uniquer_);
-    elements.push_back(func_tuple.first);
-    qn_cache.emplace(qn);
-    debug_info_elements.push_back(func_tuple.second);
+    exportFunction(
+        exportSet,
+        ModuleMethod{module, method.function(), method.function().qualname()},
+        /* toplevel */ true);
   }
 
   // __setstate__ of all components
-  setstateTuple(
-      module,
-      module._ivalue(),
-      elements,
-      qn_cache,
-      debug_info_elements,
-      debug_info_recorder,
-      type_name_uniquer_);
+  setstateTuple(exportSet, module, module._ivalue(), type_name_uniquer_, true);
+
+  return exportSet;
 }
 
 void SetExportModuleExtraFilesHook(ExportModuleExtraFilesHook hook) {
@@ -687,12 +769,14 @@ void ScriptModuleSerializer::writeByteCode(
   // Always save debug handles
   debug_info_elements.emplace_back(static_cast<int64_t>(version_to_write));
 
-  moduleMethodsTuple(
-      module,
+  BytecodeExportSet exportSet = moduleMethodsTuple(module, type_name_uniquer_);
+  pushFunctionToIValues(
+      std::move(exportSet),
       elements,
       debug_info_elements,
       debug_info_recorder,
       type_name_uniquer_);
+
   auto telements = to_tuple(std::move(elements));
   writeArchive(
       telements,
@@ -874,10 +958,10 @@ void ExportModule(
 namespace {
 void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
   std::vector<c10::IValue> elements;
-  std::vector<c10::IValue> debug_info_elements;
   BackendDebugInfoRecorder dummy;
   TypeNameUniquer dummy_uniquer = TypeNameUniquer();
-  moduleMethodsTuple(m, elements, debug_info_elements, dummy, dummy_uniquer);
+  BytecodeExportSet exportSet = moduleMethodsTuple(m, dummy_uniquer);
+  pushFunctionToIValues(std::move(exportSet), elements, dummy, dummy_uniquer);
   for (const auto& element : elements) {
     auto table = element.toTuple()->elements()[1];
     auto row =
