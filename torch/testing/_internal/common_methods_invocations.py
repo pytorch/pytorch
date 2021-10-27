@@ -5927,7 +5927,7 @@ def sample_inputs_embedding_bag(op_info, device, dtype, requires_grad, **kwargs)
 
     def make_long_input(shape, *, low, high, noncontiguous=False):
         return make_tensor(shape, device=device, dtype=torch.long, low=low, high=high,
-                           noncontiguous=noncontiguous, requires_grad=requires_grad)
+                           noncontiguous=noncontiguous)
 
     def make_per_sample_weight(flag, idx):
         # a tensor of float / double weights, or None
