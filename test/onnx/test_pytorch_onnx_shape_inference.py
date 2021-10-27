@@ -1,7 +1,9 @@
 import unittest
 import torch
 import numpy as np
-
+from torch.onnx.symbolic_helper import (_set_onnx_shape_inference,
+                                        _onnx_main_opset,
+                                        _set_opset_version)
 
 def expect_tensor(scalar_type, shape=None):
     def verify(actual_type):
@@ -13,8 +15,11 @@ def expect_tensor(scalar_type, shape=None):
     return verify
 
 class TestONNXShapeInference(unittest.TestCase):
-    from torch.onnx.symbolic_helper import _onnx_main_opset
-    opset_version = _onnx_main_opset
+    def __init__(self, *args, **kwargs):
+        unittest.TestCase.__init__(self, *args, **kwargs)
+        self.opset_version = _onnx_main_opset
+        _set_onnx_shape_inference(True)
+        _set_opset_version(self.opset_version)
 
     def run_test(self, g, n, type_assertion_funcs):
         if not isinstance(type_assertion_funcs, list):
@@ -86,6 +91,18 @@ class TestONNXShapeInference(unittest.TestCase):
         constant_2 = self.insert_tensor_constant(g, torch.tensor([-1, 0, 0]))
         shape = g.op("Reshape", constant, constant_2)
         self.run_test(g, shape.node(), expect_tensor("Float", shape=(8, 16, 5)))
+
+    def test_slice(self):
+        g = self.create_empty_graph()
+        input = g.addInput()
+        input.setType(input.type().with_sizes([None, None]))
+        start_input = g.addInput()
+        start_input.setType(start_input.type().with_sizes([None]))
+        end = self.insert_tensor_constant(g, torch.tensor([3]))
+        axis = self.insert_tensor_constant(g, torch.tensor([0]))
+        step = self.insert_tensor_constant(g, torch.tensor([1]))
+        slice = g.op("Slice", input, start_input, end, axis, step)
+        self.run_test(g, slice.node(), expect_tensor(None, shape=(None, None)))
 
 if __name__ == '__main__':
     unittest.main()

@@ -638,8 +638,8 @@ const auto index_without_none_script = R"JIT(
 )JIT";
 
 const auto index_with_none_script = R"JIT(
-  def forward(self, a: Tensor, idx: Tensor):
-      return a[idx, None].clone()
+  def forward(self, a: Tensor, idx: Tensor, none: Optional[Tensor]):
+      return a[idx, none].clone()
 )JIT";
 
 const auto index_with_two_tensors_script = R"JIT(
