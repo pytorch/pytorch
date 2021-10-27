@@ -17,7 +17,6 @@
 
 #endif
 
-
 namespace torch {
 namespace jit {
 
