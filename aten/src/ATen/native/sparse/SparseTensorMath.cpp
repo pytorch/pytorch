@@ -1207,8 +1207,10 @@ Tensor _sparse_sum(const SparseTensor& input, IntArrayRef dims_to_sum, c10::opti
   }
   else {
     new_values = values.clone(at::MemoryFormat::Contiguous);
-    if (!dtype.has_value() && isIntegralType(input.scalar_type(), /*includeBool=*/false)) {
-        new_values = new_values.to(ScalarType::Long);
+    if (!dtype.has_value() && isIntegralType(input.scalar_type(), /*includeBool=*/false) && input.scalar_type() != ScalarType::Long) {
+        new_values = values.to(ScalarType::Long, at::MemoryFormat::Contiguous);
+    } else {
+        new_values = values.clone(at::MemoryFormat::Contiguous);
     }
   }
 
