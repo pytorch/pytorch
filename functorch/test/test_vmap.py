@@ -36,8 +36,9 @@ from common_utils import (
 import types
 
 import functorch
-from functorch import vmap, functional_init_with_buffers
+from functorch import vmap
 from functorch._C import reshape_dim_into, reshape_dim_outof
+from functorch._src.make_functional import functional_init_with_buffers
 
 FALLBACK_REGEX = 'There is a performance drop'
 
