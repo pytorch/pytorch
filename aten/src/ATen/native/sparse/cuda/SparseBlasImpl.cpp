@@ -475,7 +475,7 @@ void triangular_solve_out_sparse_csr(
   TORCH_CHECK(
       false,
       "Calling triangular solve on a sparse GPU tensor requires compiling ",
-      "PyTorch with CUDA 11.3. ",
+      "PyTorch with at least CUDA 11.3. ",
       "Please use PyTorch built with newer CUDA version.");
 #else
   if (B.numel() == 0 || X.numel() == 0 || A._nnz() == 0) {
@@ -547,7 +547,7 @@ void triangular_solve_out_sparse_csr(
     TORCH_CHECK(
         false,
         "Calling triangular solve on a sparse GPU tensor requires compiling ",
-        "PyTorch with CUDA 11.3.1. ",
+        "PyTorch with at least CUDA 11.3.1. ",
         "Please use PyTorch built with newer CUDA version.");
 #else
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
