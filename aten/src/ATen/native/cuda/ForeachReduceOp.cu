@@ -9,54 +9,6 @@
 namespace at {
 namespace native {
 
-template<typename scalar_t, typename opmath_t = typename at::opmath_type<scalar_t>>
-__device__ __forceinline__ opmath_t reduce_block_into_lanes(
-    opmath_t *x,
-    scalar_t val,
-    int lanes=1,
-    bool share_result=false // lanes is intended to be <= 32.
-) {
-  int tid = threadIdx.x + threadIdx.y*blockDim.x;
-  int blockSize = blockDim.x*blockDim.y; // blockSize is intended to be a multiple of 32.
-
-  if (blockSize >= 64) {
-    x[tid] = val;
-    __syncthreads();
-  }
-
-#pragma unroll
-  for (int i = (blockSize >> 1); i >= 64; i >>= 1) {
-    if (tid < i) {
-      x[tid] = x[tid] + x[tid+i];
-    }
-    __syncthreads();
-  }
-
-  opmath_t final;
-  if (tid < 32) {
-    if (blockSize >= 64) {
-      final = x[tid] + x[tid+32];
-    } else {
-      final = val;
-    }
-
-#pragma unroll
-    for (int i = 16; i >= lanes; i >>= 1) {
-      final = final + WARP_SHFL_DOWN(final, i);
-    }
-  }
-
-  if (share_result) {
-    if(tid < lanes) {
-      x[tid] = static_cast<scalar_t>(final); // EpilogueOp
-    }
-    // Make sure the smem result is visible to all warps.
-    __syncthreads();
-  }
-
-  return final;
-}
-
 template<typename T, int NormType, int depth=1, int r_args_depth=1, int res_arg_index=0>
 struct LpNormFunctor {
   static_assert(NormType == 1 || NormType == 2, "foreach_norm supports only L1 and L2 norm");
@@ -110,7 +62,6 @@ struct LpNormFunctor {
     for (int i = 0; i < kILP; i++) {
       val += vals[i];
     }
-    // auto final = reduce_block_into_lanes(s_vals, val);
     auto final = at::native::cuda_utils::BlockReduceSum(val, s_vals);
 
     if (threadIdx.x == 0) {
@@ -132,7 +83,6 @@ __global__ void lpnorm_cleanup(
   for (int i = threadIdx.x; i < max_chunks_per_tensor; i += blockDim.x) {
     val += output_this_tensor[i];
   }
-  // opmath_t final = reduce_block_into_lanes(vals, val);
   opmath_t final = at::native::cuda_utils::BlockReduceSum<opmath_t>(val, vals);
   if(threadIdx.x == 0) {
     ret_per_tensor[blockIdx.x] = NormType == 1 ? final : ::sqrt(final);
