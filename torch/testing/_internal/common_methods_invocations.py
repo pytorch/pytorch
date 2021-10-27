@@ -2928,7 +2928,8 @@ def sample_inputs_max_unpool1d(op_info, device, dtype, requires_grad, **kwargs):
             input_tensor = make_arg((N, C, W))
 
             max_unpool1d = torch.nn.MaxUnpool1d(kernel_size, stride, padding)
-            max_pool1d = torch.nn.MaxPool1d(kernel_size, stride, ceil_mode=ceil_mode, padding=padding, dilation=dilation, return_indices=True)
+            max_pool1d = torch.nn.MaxPool1d(kernel_size, stride, ceil_mode=ceil_mode, padding=padding,
+                                            dilation=dilation, return_indices=True)
 
             kwargs = {
                 "kernel_size": max_unpool1d.kernel_size,
@@ -2964,7 +2965,8 @@ def sample_inputs_max_unpool2d(op_info, device, dtype, requires_grad, **kwargs):
             input_tensor = make_arg((N, C, H, W))
 
             max_unpool2d = torch.nn.MaxUnpool2d(kernel_size, stride, padding)
-            max_pool2d = torch.nn.MaxPool2d(kernel_size, stride, ceil_mode=ceil_mode, padding=padding, dilation=dilation, return_indices=True)
+            max_pool2d = torch.nn.MaxPool2d(kernel_size, stride, ceil_mode=ceil_mode, padding=padding,
+                                            dilation=dilation, return_indices=True)
 
             kwargs = {
                 "kernel_size": max_unpool2d.kernel_size,
