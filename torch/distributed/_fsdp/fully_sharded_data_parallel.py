@@ -177,7 +177,13 @@ class FullyShardedDataParallel(nn.Module):
             factor *= 2
         return float(factor)
 
-    def _offload_to_cpu(self, p):
+    def _offload_to_cpu(self, p, non_blocking=False):
+        """
+        Offloads parameter to CPU from self.compute_device. If the parameter is
+        already on CPU then this is a noop. Note that if non_blocking=True, user
+        is responsible for ensuring appropriate stream and device
+        synchronization.
+        """
         # Offloads parameter to CPU from self.compute_device. If parameter is
         # already on CPU this is a noop.
         cpu_device = torch.device("cpu")
@@ -673,7 +679,10 @@ class FullyShardedDataParallel(nn.Module):
             # offloading params. This is so param and grad reside on same device
             # which is needed for the optimizer step.
             if self.cpu_offload.offload_params:
-                self._offload_to_cpu(param.grad)
+                # Note that similar to FairScale, we specify non_blocking=True
+                # and ensure the appropriate synchronization is done by waiting
+                # streams in _wait_for_post_backward.
+                self._offload_to_cpu(param.grad, non_blocking=True)
                 assert (
                     param.device == torch.device("cpu") and
                     param.grad.device == torch.device("cpu")
