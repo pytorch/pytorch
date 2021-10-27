@@ -1,4 +1,5 @@
 #include <ATen/native/RNN.h>
+#include "torch/library.h"
 
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
@@ -1989,7 +1990,7 @@ static auto ensure_linear_params_registered = register_linear_params();
 // when this is made selective we may have to update the selective
 // build tracer to manually enforce this dependency.
 static auto cell_params_base_registry =
-    torch::class_<CellParamsBase>("rnn", "CellParamsBase")
+    torch::selective_class::class_<CellParamsBase>("rnn", TORCH_SELECTIVE_CLASS("CellParamsBase"))
         .def_pickle(
             [](const c10::intrusive_ptr<CellParamsBase>& self)
                 -> CellParamsSerializationType { return self->__getstate__(); },

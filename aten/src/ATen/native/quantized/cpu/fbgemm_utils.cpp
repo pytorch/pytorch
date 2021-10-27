@@ -1,3 +1,4 @@
+#include "torch/library.h"
 #include <ATen/ATen.h>
 #include <ATen/native/quantized/cpu/conv_packed_params.h>
 #include <ATen/native/quantized/cpu/conv_serialization.h>
@@ -416,8 +417,8 @@ int register_conv_params() {
 int register_linear_params() {
   using SerializationType = std::tuple<at::Tensor, c10::optional<at::Tensor>>;
   static auto register_linear_params =
-      torch::class_<LinearPackedParamsBase>(
-          "quantized", "LinearPackedParamsBase")
+      torch::selective_class::class_<LinearPackedParamsBase>(
+          "quantized", TORCH_SELECTIVE_CLASS("LinearPackedParamsBase"))
           .def_pickle(
               [](const c10::intrusive_ptr<LinearPackedParamsBase>& params)
                   -> SerializationType { // __getstate__

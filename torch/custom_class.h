@@ -434,14 +434,13 @@ using ::torch::class_;
 namespace selective_class {
 
   template <class CurClass>
-  inline class_<CurClass> class_(const std::string& namespaceName, detail::SelectiveStr<true> className, std::string doc_string = "") {
+  inline class_<CurClass> class_(const std::string& namespaceName, detail::SelectiveStr<true> className) {
     auto class_name = std::string(className.operator const char *());
-    return torch::class_<CurClass>(namespaceName, class_name, std::move(doc_string));
+    return torch::class_<CurClass>(namespaceName, class_name);
   }
 
   template <class CurClass>
-  inline detail::ClassNotSelected class_(const std::string&, detail::SelectiveStr<false>, std::string doc_string = "") {
-    (void)doc_string; // unused parameter
+  inline detail::ClassNotSelected class_(const std::string&, detail::SelectiveStr<false>) {
     return detail::ClassNotSelected();
   }
 }
