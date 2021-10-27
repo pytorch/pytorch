@@ -94,9 +94,8 @@ void OptimizeGraph(
   if (opts.enable_out_variant) {
     UseVariadicOp(
         graph,
-        c10::Symbol::fromQualString("fb::sigrid_transforms_torch_bind"),
-        c10::Symbol::fromQualString(
-            "fb::variadic_sigrid_transforms_torch_bind"));
+        fromQualString("fb::sigrid_transforms_torch_bind"),
+        fromQualString("fb::variadic_sigrid_transforms_torch_bind"));
     FuseSignLog1P(graph);
 
     // TODO: we can avoid this guard by moving operations
@@ -148,39 +147,6 @@ bool mayContainAlias(AliasDb& db, const Value* a, const Value* b) {
   return db.mayContainAlias(const_cast<Value*>(a), const_cast<Value*>(b));
 }
 
-bool mayContainAlias(
-    AliasDb& db,
-    const Value* a,
-    const FastSet<const Value*> b) {
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  return db.mayContainAlias(const_cast<Value*>(a), valueVecFromFastSet(b));
-}
-
-bool mayTransitivelyContainOrPointTo(
-    AliasDb& db,
-    const Value* a,
-    const Value* b) {
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  return db.mayTransitivelyContainOrPointTo(
-      const_cast<Value*>(a), const_cast<Value*>(b));
-}
-
-bool mayTransitivelyContainOrPointTo(
-    AliasDb& db,
-    const Value* a,
-    const FastSet<const Value*>& b) {
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  auto bs = valueVecFromFastSet(b);
-  return db.mayTransitivelyContainOrPointTo(const_cast<Value*>(a), bs);
-}
-
-bool mayTransitivelyContainOrPointTo(
-    AliasDb& db,
-    const FastSet<const Value*> a,
-    const Value* b) {
-  return db.mayTransitivelyContainOrPointTo(
-      valueVecFromFastSet(a), {const_cast<Value*>(b)});
-}
 bool mayContainAlias(
     AliasDb& db,
     const FastSet<const Value*>& a,
@@ -376,16 +342,17 @@ LivenessMap GetLivenessMap(
     insert_all_pairs_in_liveness_map(outputs);
   };
 
-
-  // Hacky fixup for aliases: if a value is live, everything it points to or contains is live.
+  // Hacky fixup for aliases: if a value is live, everything it may
+  // alias is live.
   for (auto* v : values_in_creation_order) {
-    for (auto* v2: values_in_creation_order) {
-      if (mayTransitivelyContainOrPointTo(db, v, v2)) {
-        // Add v2 to liveness map for v and also for everything in liveness_map[v].
+    for (auto* v2 : values_in_creation_order) {
+      if (mayContainAlias(db, v, v2)) {
+        // Add v2 to liveness map for v and also for everything in
+        // liveness_map[v].
         auto it = liveness_map.find(v);
         if (it != liveness_map.end()) {
           it->second.insert(v2);
-          for (auto *live_with_v : it->second) {
+          for (auto* live_with_v : it->second) {
             liveness_map[live_with_v].insert(v2);
           }
         }
@@ -636,8 +603,9 @@ void ValueGroup::init(
     AliasDb& db) {
   external_aliases_.clear();
   output_aliases_.clear();
-  // external_aliases_ should contain all nodes that may transitively
-  // contain or point to any inputs or constants.
+  // Build `input_or_constant_aliases` as we look through nodes forwardly from
+  // the graph's inputs and add aliases of the inputs being created by the
+  // nodes.
   external_aliases_.insert(graph->inputs().begin(), graph->inputs().end());
   for (const auto* node : graph->nodes()) {
     if (node->kind() == prim::Constant) {
@@ -652,7 +620,7 @@ void ValueGroup::init(
       continue;
     }
     for (const auto* v : node->outputs()) {
-      if (mayTransitivelyContainOrPointTo(db, v, external_aliases_)) {
+      if (mayContainAlias(db, {v}, external_aliases_)) {
         external_aliases_.insert(v);
       }
     }
@@ -660,11 +628,6 @@ void ValueGroup::init(
 
   // Build `output_aliases` as we look through nodes reversely so that we can
   // start from the output values, and follow the flows backwardly from there.
-
-  // output_aliases_ should contain all nodes that any output may
-  // transitively contain or point to.
-  // TODO: add more direct way to just get the transitive closure for the
-  // outputs?
   output_aliases_.insert(graph->outputs().begin(), graph->outputs().end());
   for (const auto* node : graph->nodes().reverse()) {
     if (node->kind() == prim::Constant) {
@@ -672,7 +635,14 @@ void ValueGroup::init(
       continue;
     }
     for (const auto* v : node->outputs()) {
-      if (mayTransitivelyContainOrPointTo(db, output_aliases_, v)) {
+      // Add values that can aliase input/constant values. Note some output
+      // aliases may end up in this category via collection objects (e.g.,
+      // Tuple).
+      if (mayContainAlias(db, {v}, external_aliases_)) {
+        external_aliases_.insert(v);
+        continue;
+      }
+      if (mayContainAlias(db, {v}, output_aliases_)) {
         output_aliases_.insert(v);
       }
     }
@@ -829,11 +799,6 @@ StaticRuntime& StaticModule::runtime() {
   return *cached_runtime_;
 }
 
-std::vector<at::Tensor> StaticModule::operator()(
-    const std::vector<at::Tensor>& inps) {
-  return runtime()(inps);
-}
-
 c10::IValue StaticModule::operator()(
     const std::vector<c10::IValue>& args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
@@ -896,30 +861,6 @@ StaticRuntime::StaticRuntime(const StaticModule& sm) : static_module_(sm) {
 }
 
 StaticRuntime::~StaticRuntime() = default;
-
-std::vector<at::Tensor> StaticRuntime::operator()(
-    const std::vector<at::Tensor>& inps) {
-  std::vector<c10::IValue> stack;
-  stack.resize(inps.size());
-  for (const auto i : c10::irange(inps.size())) {
-    stack[i] = inps[i];
-  }
-
-  c10::IValue v =
-      (*this)(stack, std::unordered_map<std::string, c10::IValue>());
-
-  std::vector<at::Tensor> out;
-
-  if (v.isTuple()) {
-    auto t = v.toTuple();
-    for (const auto& el : t->elements()) {
-      out.emplace_back(el.toTensor());
-    }
-  } else {
-    out.emplace_back(v.toTensor());
-  }
-  return out;
-}
 
 void StaticRuntime::set_inputs(
     const std::vector<IValue>& args,
@@ -999,7 +940,7 @@ void StaticRuntime::set_inputs(
 }
 
 template <typename IValueList>
-c10::IValue StaticRuntime::operator()(
+c10::IValue StaticRuntime::run_impl(
     IValueList&& args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
   // We assume inference workloads, so we do not need
@@ -1071,13 +1012,17 @@ c10::IValue StaticRuntime::operator()(
   }
 }
 
-template c10::IValue StaticRuntime::operator()<const std::vector<c10::IValue>&>(
+c10::IValue StaticRuntime::operator()(
     const std::vector<c10::IValue>& args,
-    const std::unordered_map<std::string, c10::IValue>& kwargs);
+    const std::unordered_map<std::string, c10::IValue>& kwargs) {
+  return run_impl(args, kwargs);
+}
 
-template c10::IValue StaticRuntime::operator()<std::vector<c10::IValue>&&>(
+c10::IValue StaticRuntime::operator()(
     std::vector<c10::IValue>&& args,
-    const std::unordered_map<std::string, c10::IValue>& kwargs);
+    const std::unordered_map<std::string, c10::IValue>& kwargs) {
+  return run_impl(std::move(args), kwargs);
+}
 
 namespace {
 
@@ -1598,6 +1543,9 @@ void ProcessedNode::run() {
 #else
   fn_.f(this);
 #endif
+#ifndef NDEBUG
+  verify_no_memory_overlap();
+#endif
 }
 
 static bool checkNoMemoryOverlap(const at::Tensor& a, const at::Tensor& b) {
@@ -1624,26 +1572,34 @@ bool ProcessedNode::verify_no_memory_overlap() const {
       }
       const auto& out1_t = outputs_[j].toTensor();
       if (!checkNoMemoryOverlap(out0_t, out1_t)) {
+        LOG(INFO) << "Node output " << i << " overlaps with output " << j
+                  << ", " << PrintNode(node_);
         return false;
       }
     }
   }
 
   auto schema = node()->maybeSchema();
-  if (!schema || schema->is_mutable()) {
+  // skip memory overlap check for mutable ops with only one output
+  if (!schema || (schema->is_mutable() && outputs_size_ == 1)) {
     return true;
   }
-  for (const IValue* in : inputs()) {
+  for (const auto i : c10::irange(inputs_size_)) {
+    const IValue* in = &Input(i);
     if (!in->isTensor()) {
       continue;
     }
     const auto& in_t = in->toTensor();
-    for (const IValue& out : outputs()) {
+    for (const auto j : c10::irange(outputs_size_)) {
+      const IValue& out = Output(j);
       if (!out.isTensor()) {
         continue;
       }
       const auto& out_t = out.toTensor();
       if (!checkNoMemoryOverlap(in_t, out_t)) {
+        LOG(INFO) << "Node input " << i << " overlaps with output " << j << ", "
+                  << PrintNode(node_);
+        LOG(INFO) << *schema;
         return false;
       }
     }
