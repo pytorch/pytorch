@@ -2706,6 +2706,19 @@ TEST(ComputeFlopsTest, Basic) {
   flops = computeFlops(std::string("aten::addmm"), extra_args);
   ASSERT_EQ(flops, 43200);
 
+  // Test aten::bmm
+  extra_args.clear();
+  mat1_sizes = {7, 5, 6};
+  mat2_sizes = {7, 6, 3};
+  extra_args["mat1_size"] = at::IValue(at::IntArrayRef(mat1_sizes));
+  extra_args["mat2_size"] = at::IValue(at::IntArrayRef(mat2_sizes));
+  flops = computeFlops(std::string("aten::bmm"), extra_args);
+  ASSERT_EQ(flops, 1260);
+
+  // Test aten::baddbmm
+  flops = computeFlops(std::string("aten::baddbmm"), extra_args);
+  ASSERT_EQ(flops, 1260);
+
   // Test mm out of range
   extra_args.clear();
   flops = computeFlops(std::string("aten::mm"), extra_args);
