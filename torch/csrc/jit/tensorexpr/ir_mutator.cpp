@@ -200,6 +200,22 @@ ExprPtr IRMutator::mutate(BufPtr v) {
     v->set_dims(dims_new);
   }
 
+  ExprPtr qscale = v->qscale();
+  if (qscale) {
+    ExprPtr qscale_new = qscale->accept_mutator(this);
+    if (qscale != qscale_new) {
+      v->set_qscale(qscale_new);
+    }
+  }
+
+  ExprPtr qzero = v->qzero();
+  if (qzero) {
+    ExprPtr qzero_new = qzero->accept_mutator(this);
+    if (qzero != qzero_new) {
+      v->set_qzero(qzero_new);
+    }
+  }
+
   return v;
 }
 
