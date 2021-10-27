@@ -11,12 +11,66 @@ from torch.testing._internal.common_utils import \
     (IS_MACOS, IS_WINDOWS, TestCase, run_tests, load_tests, coalescedonoff)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoCusparseGeneric,
-     precisionOverride, skipMeta)
+     precisionOverride, skipMeta, skipCUDAIf)
+from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing._internal.common_dtype import floating_types, get_all_dtypes
+from test_sparse import CUSPARSE_SPMM_COMPLEX128_SUPPORTED
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
+
+
+def _check_cusparse_spgemm_available():
+    # cusparseSpGEMM was added in 11.0
+    version = _get_torch_cuda_version()
+    min_supported_version = (11, 0)
+    return version >= min_supported_version
+
+
+# This should be just an import from test_linalg instead of code duplication
+# but https://github.com/pytorch/pytorch/pull/63511#discussion_r733989701
+def _test_addmm_addmv(test_case, f, t, m, v, *, alpha=None, beta=None, transpose_out=False, layout=torch.strided, all_sparse=False):
+    """
+    Unified test for checking `f(t, m, v, alpha=alpha, beta=beta)` computation,
+    where f is `torch.addmv` or `torch.addmm`.
+    `transpose_out` controls whether the out argument is in column-major order.
+    `layout` controls whether `m` is converted to specified layout or not.
+    Custom behaviour is implemented only for torch.sparse_csr layout.
+    """
+    dtype = t.dtype
+    numpy_dtype = dtype
+    if dtype in {torch.bfloat16}:
+        numpy_dtype = torch.float
+    if dtype.is_complex:
+        alpha = 0.9 + 0.3j if alpha is None else alpha
+        beta = 0.5 + 0.6j if beta is None else beta
+    else:
+        alpha = 1.2 if alpha is None else alpha
+        beta = 0.8 if beta is None else beta
+
+    def convert_layout(mat):
+        if layout == torch.sparse_csr:
+            return mat.to_sparse_csr()
+        else:
+            assert mat.layout == layout
+            return mat
+
+    if all_sparse:
+        res1 = f(*map(convert_layout, (t, m, v)), alpha=alpha, beta=beta)
+        res1 = res1.to_dense()
+    else:
+        res1 = f(t, convert_layout(m), v, alpha=alpha, beta=beta)
+    res2 = torch.full_like(res1, float('nan'))
+    if transpose_out:
+        res2 = res2.t().clone(memory_format=torch.contiguous_format).t()
+    f(t, convert_layout(m), v, alpha=alpha, beta=beta, out=res2)
+    res3 = alpha * (m.to(numpy_dtype).cpu().numpy() @ v.to(numpy_dtype).cpu().numpy())
+    if beta != 0:
+        res3 += (beta * t).to(numpy_dtype).cpu().numpy()
+    res3 = torch.from_numpy(res3).to(dtype)
+    test_case.assertEqual(res1, res2)
+    test_case.assertEqual(res1, res3)
 
 
 class TestSparseCSRSampler(TestCase):
@@ -616,6 +670,72 @@ class TestSparseCSR(TestCase):
             test_shape(7, 8, 9, 20, True, index_dtype, (1, 0))
             test_shape(7, 8, 9, 20, False, index_dtype, (1, 1))
             test_shape(7, 8, 9, 20, True, index_dtype, (1, 1))
+
+    @onlyCUDA
+    @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
+                        torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
+    @dtypesIfCUDA(torch.complex64,
+                  *((torch.complex128,) if CUSPARSE_SPMM_COMPLEX128_SUPPORTED else ()),
+                  *torch.testing.get_all_fp_dtypes(include_bfloat16=SM80OrLater,
+                                                   include_half=SM53OrLater))
+    @skipCUDAIf(
+        not _check_cusparse_spgemm_available(),
+        "cuSparse Generic API SpGEMM is not available"
+    )
+    def test_addmm_all_sparse_csr(self, device, dtype):
+        M = torch.randn(10, 25, device=device).to(dtype)
+        m1 = torch.randn(10, 50, device=device).to(dtype)
+        m2 = torch.randn(50, 25, device=device).to(dtype)
+        _test_addmm_addmv(self, torch.addmm, M, m1, m2, layout=torch.sparse_csr, all_sparse=True)
+
+        # Test 0-strided
+        M = torch.randn(10, 1, device=device).to(dtype).expand(10, 25)
+        m1 = torch.randn(10, 1, device=device).to(dtype).expand(10, 50)
+        m2 = torch.randn(50, 25, device=device).to(dtype)
+        _test_addmm_addmv(self, torch.addmm, M, m1, m2, layout=torch.sparse_csr, all_sparse=True)
+
+        # Test beta=0, M=nan
+        M = torch.full((10, 25), float('nan'), device=device).to(dtype)
+        m1 = torch.randn(10, 50, device=device).to(dtype)
+        m2 = torch.randn(50, 25, device=device).to(dtype)
+        _test_addmm_addmv(self, torch.addmm, M, m1, m2, beta=0, layout=torch.sparse_csr, all_sparse=True)
+
+        # Test transpose
+        for t1, t2, t3, t4 in itertools.product([True, False], repeat=4):
+            def maybe_transpose(cond, m):
+                if not cond:
+                    return m
+                return m.t().clone(memory_format=torch.contiguous_format).t()
+
+            M = maybe_transpose(t1, torch.randn(10, 25, device=device).to(dtype))
+            m1 = maybe_transpose(t2, torch.randn(10, 50, device=device).to(dtype))
+            m2 = maybe_transpose(t3, torch.randn(50, 25, device=device).to(dtype))
+            _test_addmm_addmv(self, torch.addmm, M, m1, m2, transpose_out=t4, layout=torch.sparse_csr, all_sparse=True)
+
+    @onlyCUDA
+    @dtypesIfCUDA(*torch.testing.get_all_complex_dtypes(),
+                  *torch.testing.get_all_fp_dtypes(include_bfloat16=SM80OrLater,
+                                                   include_half=SM53OrLater))
+    @skipCUDAIf(
+        not _check_cusparse_spgemm_available(),
+        "cuSparse Generic API SpGEMM is not available"
+    )
+    @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
+                        torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
+    def test_addmm_sizes_all_sparse_csr(self, device, dtype):
+        for m in [0, 1, 25]:
+            for n in [0, 1, 10]:
+                for k in [0, 1, 8]:
+                    M = torch.randn(n, m, device=device).to(dtype)
+                    m1 = torch.randn(n, k, device=device).to(dtype)
+                    m2 = torch.randn(k, m, device=device).to(dtype)
+                    _test_addmm_addmv(self, torch.addmm, M, m1, m2, layout=torch.sparse_csr, all_sparse=True)
+
+                    M = torch.randn(n, m, device=device).to(dtype).to_sparse_csr()
+                    m1 = torch.randn(n, k + 1, device=device).to(dtype).to_sparse_csr()
+                    m2 = torch.randn(k, m, device=device).to(dtype).to_sparse_csr()
+                    self.assertRaisesRegex(RuntimeError, f"{n}x{k + 1}.*{k}x{m}", lambda: torch.addmm(M, m1, m2))
+                    self.assertRaisesRegex(RuntimeError, f"{n}x{k + 1}.*{k}x{m}", lambda: torch.mm(m1, m2))
 
     @onlyCUDA
     @dtypes(torch.float)

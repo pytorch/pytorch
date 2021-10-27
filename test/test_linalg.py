@@ -1661,14 +1661,14 @@ class TestLinalg(TestCase):
         # cond expects the input to be at least 2-dimensional
         a = torch.ones(3, dtype=dtype, device=device)
         for p in norm_types:
-            with self.assertRaisesRegex(RuntimeError, r'supports matrices or batches of matrices'):
+            with self.assertRaisesRegex(RuntimeError, r'at least 2 dimensions'):
                 torch.linalg.cond(a, p)
 
         # for some norm types cond expects the input to be square
         a = torch.ones(3, 2, dtype=dtype, device=device)
         norm_types = [1, -1, inf, -inf, 'fro', 'nuc']
         for p in norm_types:
-            with self.assertRaisesRegex(RuntimeError, r'supports square matrices or batches of square matrices'):
+            with self.assertRaisesRegex(RuntimeError, r'must be batches of square matrices'):
                 torch.linalg.cond(a, p)
 
         # if non-empty out tensor with wrong shape is passed a warning is given
@@ -1714,7 +1714,7 @@ class TestLinalg(TestCase):
         # check invalid norm type
         a = torch.ones(3, 3, dtype=dtype, device=device)
         for p in ['wrong_norm', 5]:
-            with self.assertRaisesRegex(RuntimeError, f"linalg_cond got an invalid norm type: {p}"):
+            with self.assertRaisesRegex(RuntimeError, f"linalg.cond got an invalid norm type: {p}"):
                 torch.linalg.cond(a, p)
 
     # This test calls torch.linalg.norm and numpy.linalg.norm with illegal arguments
@@ -2909,13 +2909,19 @@ class TestLinalg(TestCase):
                     svd(a, out=(out_u, out_s, out_v))
 
             # if input contains NaN then an error is triggered for svd
+            error_msg = 'The algorithm failed to converge' \
+                        if (self.device_type == 'cpu' or TEST_WITH_ROCM) \
+                        else 'CUSOLVER_STATUS_EXECUTION_FAILED'
             a = torch.full((3, 3), float('nan'), dtype=dtype, device=device)
             a[0] = float('nan')
-            with self.assertRaisesRegex(RuntimeError, "The algorithm failed to converge"):
+            with self.assertRaisesRegex(RuntimeError, error_msg):
                 svd(a)
+            error_msg = r'\(Batch element 1\): The algorithm failed to converge' \
+                        if (self.device_type == 'cpu' or TEST_WITH_ROCM) \
+                        else 'CUSOLVER_STATUS_EXECUTION_FAILED'
             a = torch.randn(3, 33, 33, dtype=dtype, device=device)
             a[1, 0, 0] = float('nan')
-            with self.assertRaisesRegex(RuntimeError, r"\(Batch element 1\): The algorithm failed to converge"):
+            with self.assertRaisesRegex(RuntimeError, error_msg):
                 svd(a)
 
     @skipCUDAIfNoMagmaAndNoCusolver
