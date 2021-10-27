@@ -423,7 +423,7 @@ void TensorToBufferSType(const at::Tensor& tensor,
       TensorToBuffer<SType, int8_t>(tensor, dest_shape, dest_buffer,
                                                 dest_buffer_size, device);
       break;
-    case c10::ScalarType::Short: 
+    case c10::ScalarType::Short:
       TensorToBuffer<SType, int16_t>(
           tensor, dest_shape, dest_buffer, dest_buffer_size, device);
       break;

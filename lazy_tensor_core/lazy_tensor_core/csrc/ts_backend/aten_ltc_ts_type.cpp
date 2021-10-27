@@ -9,6 +9,7 @@
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/ops/as_strided.h"
 #include "lazy_tensor_core/csrc/ops/cat.h"
+#include "lazy_tensor_core/csrc/ops/random.h"
 #include "lazy_tensor_core/csrc/tensor_aten_ops.h"
 #include "lazy_tensor_core/csrc/tensor_impl.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
@@ -660,6 +661,33 @@ at::Tensor LazyNativeFunctions::permute(const at::Tensor& self,
       lazy_tensor_aten_ops::permute(self_tensor, Helpers::I64List(dims)));
 }
 
+at::Tensor& LazyNativeFunctions::random_(at::Tensor& self, int64_t from, c10::optional<int64_t> to,
+    c10::optional<at::Generator> generator) {
+  LTC_FN_COUNTER("lazy::");
+
+  if (generator && generator->defined()) {
+    return at::native::call_fallback_fn<&ltc_eager_fallback,
+        ATEN_OP2(random_, from)>::call(self, from, to, generator);
+  }
+
+  auto selfTensor = bridge::GetLtcTensor(self);
+  selfTensor.SetInPlaceIrValue(torch::lazy::MakeNode<ir::ops::Random>(selfTensor.GetIrValue(), from, to));
+  return self;
+}
+
+at::Tensor& LazyNativeFunctions::random_(at::Tensor& self, int64_t to, c10::optional<at::Generator> generator) {
+  LTC_FN_COUNTER("lazy::");
+
+  if (generator && generator->defined()) {
+    return at::native::call_fallback_fn<&ltc_eager_fallback,
+        ATEN_OP2(random_, to)>::call(self, to, generator);
+  }
+
+  auto selfTensor = bridge::GetLtcTensor(self);
+  selfTensor.SetInPlaceIrValue(torch::lazy::MakeNode<ir::ops::Random>(selfTensor.GetIrValue(), c10::nullopt, to));
+  return self;
+}
+
 at::Tensor& LazyNativeFunctions::random_(at::Tensor& self,
     c10::optional<at::Generator> generator) {
   LTC_FN_COUNTER("lazy::");
@@ -670,7 +698,8 @@ at::Tensor& LazyNativeFunctions::random_(at::Tensor& self,
   }
 
   auto selfTensor = bridge::GetLtcTensor(self);
-  lazy_tensor_aten_ops::random_(selfTensor);
+  selfTensor.SetInPlaceIrValue(torch::lazy::MakeNode<ir::ops::Random>(
+      selfTensor.GetIrValue(), c10::nullopt, c10::nullopt));
   return self;
 }
 

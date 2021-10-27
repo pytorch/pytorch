@@ -25,7 +25,7 @@ class Shape {
         element_shapes_(element_shapes.begin(), element_shapes.end()),
         is_tuple_(true) {
           LTC_CHECK(element_shapes.size() > 0);
-          // TODO(whc) it's not really clear what the definition of element shape 
+          // TODO(whc) it's not really clear what the definition of element shape
           // should be for a tuple shape.  However, for tuple shapes, we appear
           // to be accessing the element_type field in some places.  Fix this.
           at_element_type_ = element_shapes[0].at_element_type();
