@@ -1,0 +1,14 @@
+name: Receive Repository Dispatch
+
+on:
+  repository_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        ref: ${{ github.event.client_payload.branch || 'master' }}
+    - name: Print message
+      run: echo "Successfully triggered CI of pytorch/pytorch"
