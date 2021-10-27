@@ -11313,7 +11313,7 @@ op_db: List[OpInfo] = [
                 dtypes=(torch.float32, torch.complex64),
             ),
         ),
-    ),
+    )
 ]
 
 # Common operator groupings
