@@ -185,12 +185,12 @@ acosh(input, *, out=None) -> Tensor
 
 Returns a new tensor with the inverse hyperbolic cosine of the elements of :attr:`input`.
 
+.. math::
+    \text{out}_{i} = \cosh^{-1}(\text{input}_{i})
+
 Note:
     The domain of the inverse hyperbolic cosine is `[1, inf)` and values outside this range
     will be mapped to ``NaN``, except for `+ INF` for which the output is mapped to `+ INF`.
-
-.. math::
-    \text{out}_{i} = \cosh^{-1}(\text{input}_{i})
 """ + r"""
 Args:
     {input}
@@ -5735,48 +5735,10 @@ Alias for :func:`torch.linalg.matrix_power`
 """)
 
 add_docstr(torch.matrix_exp, r"""
-matrix_exp(input) -> Tensor
+matrix_exp(A) -> Tensor
 
-Computes the matrix exponential of a square matrix or of each square matrix in a batch.
-For a matrix :attr:`input`, the matrix exponential is defined as
-
-.. math::
-    \mathrm{e}^\text{input} = \sum_{k=0}^\infty \text{input}^k / k!
-
-""" + r"""
-The implementation is based on:
-
-Bader, P.; Blanes, S.; Casas, F.
-Computing the Matrix Exponential with an Optimized Taylor Polynomial Approximation.
-Mathematics 2019, 7, 1174.
-
-Args:
-    {input}
-
-Example::
-
-    >>> a = torch.randn(2, 2, 2)
-    >>> a[0, :, :] = torch.eye(2, 2)
-    >>> a[1, :, :] = 2 * torch.eye(2, 2)
-    >>> a
-    tensor([[[1., 0.],
-             [0., 1.]],
-
-            [[2., 0.],
-             [0., 2.]]])
-    >>> torch.matrix_exp(a)
-    tensor([[[2.7183, 0.0000],
-             [0.0000, 2.7183]],
-
-             [[7.3891, 0.0000],
-              [0.0000, 7.3891]]])
-
-    >>> import math
-    >>> x = torch.tensor([[0, math.pi/3], [-math.pi/3, 0]])
-    >>> x.matrix_exp() # should be [[cos(pi/3), sin(pi/3)], [-sin(pi/3), cos(pi/3)]]
-    tensor([[ 0.5000,  0.8660],
-            [-0.8660,  0.5000]])
-""".format(**common_args))
+Alias for :func:`torch.linalg.matrix_exp`.
+""")
 
 add_docstr(torch.max,
            r"""
