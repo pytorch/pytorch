@@ -130,12 +130,17 @@ class TORCH_API Module {
     return *cu_.get();
   }
 
+  void setOperatorVersion(uint64_t operator_version) {
+    operator_version_ = operator_version;
+  }
+
  private:
   c10::intrusive_ptr<c10::ivalue::Object> object_;
   std::unordered_map<std::string, std::string> metadata_;
   std::shared_ptr<CompilationUnit> cu_;
   MobileDebugTable debug_table_;
   bool has_debug_handles_;
+  bool operator_version_;
 };
 } // namespace mobile
 } // namespace jit

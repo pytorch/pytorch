@@ -36,7 +36,6 @@ namespace torch {
 namespace jit {
 
 char const* toString(OpCode op);
-
 IValue to_tuple(std::vector<IValue> ivalues) {
   return c10::ivalue::Tuple::create(std::move(ivalues));
 }

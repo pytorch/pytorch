@@ -1,17 +1,40 @@
 #include <torch/csrc/jit/mobile/interpreter.h>
+// #include "ATen/core/ivalue_inl.h"
+// #include "jit/serialization/import_export_constants.h"
 
 #include <ATen/core/function.h>
+
+#include <ATen/core/ivalue.h>
+#include <torch/csrc/jit/mobile/parse_bytecode.h>
+#include <torch/csrc/jit/mobile/type_parser.h>
+#include <torch/csrc/jit/runtime/instruction.h>
+#include <torch/csrc/jit/serialization/import_export_constants.h>
+#include <torch/csrc/jit/serialization/import_export_functions.h>
+#include <torch/custom_class_detail.h>
+#include <cstdint>
+
 #include <ATen/core/jit_type.h>
 #include <ATen/core/operator_name.h>
-#include <torch/csrc/jit/mobile/function.h>
-#include <torch/csrc/jit/runtime/jit_exception.h>
-#include <torch/csrc/jit/runtime/vararg_functions.h>
-
 #include <ATen/record_function.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/backends/backend_exception.h>
+#include <torch/csrc/jit/mobile/function.h>
+#include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/observer.h>
+#include <torch/csrc/jit/mobile/parse_bytecode.h>
+#include <torch/csrc/jit/mobile/parse_operators.h>
+// #include <torch/csrc/jit/mobile/upgrader.h>
+#include <torch/csrc/jit/runtime/instruction.h>
+#include <torch/csrc/jit/runtime/jit_exception.h>
+#include <torch/csrc/jit/runtime/vararg_functions.h>
+#include <iostream>
+
+namespace c10 {
+namespace ivalue {
+struct TupleElements;
+}
+} // namespace c10
 
 namespace torch {
 namespace jit {
@@ -82,15 +105,18 @@ bool InterpreterState::run(Stack& stack) {
         debug_handle = *handle;
       }
 
-      // std::cout << "RUNNING " << pc << " "
-      //           << code_->instructions_with_handles_[pc].instruction;
-      // if (inst.op == OP) {
-      //   std::cout << ", " << code_->op_names_[inst.X].name;
-      //   if (!code_->op_names_[inst.X].overload_name.empty()) {
-      //     std::cout << "." << code_->op_names_[inst.X].overload_name;
-      //   }
-      // }
-      // std::cout << std::endl;
+      std::cout << "RUNNING " << pc << " " << code.instructions_.at(pc);
+      if (inst.op == OP) {
+        std::cout << ", " << code.op_names_[inst.X].name;
+        if (!code.op_names_[inst.X].overload_name.empty()) {
+          std::cout << "." << code.op_names_[inst.X].overload_name;
+        }
+      }
+      std::cout << " stack content of " << stack.size() << " len :";
+      for (const auto& it : stack) {
+        it.dump();
+      }
+      std::cout << std::endl;
 
       // TODO(iliacher): remove the workaround after RecordFunction is in
       // Dispatcher
@@ -125,7 +151,8 @@ bool InterpreterState::run(Stack& stack) {
           frame.step();
         } break;
         case CALL: {
-          auto& function = frame.getCode().functions_.at(inst.X);
+          std::shared_ptr<mobile::Function> function =
+              frame.getCode().functions_.at(inst.X);
           frame.step();
           enterFrame(*function->get_code());
         } break;
@@ -166,10 +193,12 @@ bool InterpreterState::run(Stack& stack) {
           reg(inst.X) = IValue();
           frame.step();
           break;
-        case LOADC:
-          stack.emplace_back(code.constants_[inst.X]);
+        case LOADC: {
+          c10::IValue iv = (code.constants_[inst.X]);
+          stack.emplace_back(iv);
+          // stack.emplace_back(code.constants_[inst.X]);
           frame.step();
-          break;
+        } break;
         case GET_ATTR: {
           auto userObj = pop(stack).toObject();
           auto value = userObj->getSlot(inst.X);

@@ -1,9 +1,14 @@
+#include <ATen/core/ivalue.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/mobile/function.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
+#include <torch/csrc/jit/mobile/parse_bytecode.h>
+#include <torch/csrc/jit/mobile/parse_operators.h>
 #include <torch/csrc/jit/mobile/prim_ops_registery.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/serialization/import_export_constants.h>
+#include "jit/mobile/upgrader.h"
 
 namespace torch {
 namespace jit {
@@ -42,8 +47,8 @@ bool Function::append_operator(
     const std::string& name,
     const std::string& overload_name,
     const c10::optional<int>& num_specified_args,
-    int64_t model_version) { /* TODO: T90339189 deprecate all v3 when v3 models
-                                are removed */
+    int64_t model_version) { /* TODO: T90339189 deprecate all v3 when v3
+                                models are removed */
   // Keep the original opname in code_
   code_->op_names_.emplace_back(name, overload_name);
   const auto& opname = code_->op_names_.back();
@@ -83,8 +88,8 @@ bool Function::append_operator(
       // Since byte-code versions 0x4L, convolution has an additional
       // default-value argument (allow_tf32=True, see
       // https://github.com/pytorch/pytorch/pull/40737). This wrapper handles
-      // backward compatibility with models of byte-code version <= 0x3L, where
-      // this bool argument does not yet exist.
+      // backward compatibility with models of byte-code version <= 0x3L,
+      // where this bool argument does not yet exist.
       fn = [fn](Stack& stack) {
         stack.push_back(true);
         fn(stack);
@@ -97,9 +102,9 @@ bool Function::append_operator(
         fn = [fn, num_specified_args, args](Stack& stack) {
           std::vector<IValue> out_args;
           // The following logic pops and temporarily stores all out arguments
-          // from the stack (which can be 0 or more, and always appended to the
-          // schema), in order to push the necessary default values. Finally,
-          // the out arguments are pushed back into the stack.
+          // from the stack (which can be 0 or more, and always appended to
+          // the schema), in order to push the necessary default values.
+          // Finally, the out arguments are pushed back into the stack.
           for (size_t i = args.size() - 1; i > 0 && args.at(i).is_out(); i--) {
             out_args.push_back(stack.back());
             stack.pop_back();
@@ -141,12 +146,17 @@ void Function::append_type(const at::TypePtr& type) {
   code_->types_.push_back(type);
 }
 
-void Function::append_function(mobile::Function& function) {
-  code_->functions_.push_back(&function);
+void Function::append_function(
+    const std::shared_ptr<mobile::Function>& function) {
+  code_->functions_.push_back(function);
 }
 
 void Function::set_register_size(size_t size) {
   code_->register_size_ = size;
+}
+
+void Function::set_operator_version(uint64_t operator_version) {
+  code_->operator_version_ = operator_version;
 }
 
 int64_t Function::get_debug_handle(size_t pc) const {
@@ -186,6 +196,77 @@ const std::shared_ptr<Code> Function::get_code() const {
 
 int64_t Function::getExceptionDebugHandle() const {
   return getInterpretersExceptionDebugHandle();
+}
+
+// std::shared_ptr<Function> Function::create(std::string qualified_name) {
+//   return std::shared_ptr<Function>(
+//       new mobile::Function(c10::QualifiedName(qualified_name)));
+// }
+
+std::shared_ptr<Function> Function::get(
+    std::string qualified_name,
+    IValue bytecode) {
+  std::shared_ptr<Function> foo(
+      new mobile::Function(c10::QualifiedName(qualified_name)));
+  std::vector<IValue> bytecode_list = bytecode.toTuple()->elements().vec();
+  c10::ivalue::TupleElements debug_handles_m_tuple;
+  int64_t model_version = 0x7L;
+  std::cout << "parse instruction: " << std::endl;
+  for (auto const& item :
+       bytecode_list[BYTECODE_INDEX_INSTRUCTION].toTuple()->elements().vec()) {
+    item.dump();
+  }
+  parseInstructions(
+      qualified_name,
+      std::move(
+          c10::ivalue::TupleElements(bytecode_list[BYTECODE_INDEX_INSTRUCTION]
+                                         .toTuple()
+                                         ->elements()
+                                         .vec())),
+      debug_handles_m_tuple,
+      foo.get());
+  std::cout << "parse operator: " << std::endl;
+  for (auto const& item :
+       bytecode_list[BYTECODE_INDEX_OPERATOR].toTuple()->elements().vec()) {
+    item.dump();
+  }
+  parseOperators(
+      std::move(c10::ivalue::TupleElements(
+          bytecode_list[BYTECODE_INDEX_OPERATOR].toTuple()->elements().vec())),
+      model_version,
+      1,
+      foo.get());
+  std::cout << "parse constant: " << std::endl;
+  for (auto const& item :
+       bytecode_list[BYTECODE_INDEX_CONSTANT].toTuple()->elements().vec()) {
+    item.dump();
+  }
+  parseConstants(
+      std::move(c10::ivalue::TupleElements(
+          bytecode_list[BYTECODE_INDEX_CONSTANT].toTuple()->elements().vec())),
+      foo.get());
+  const size_t rsize = 5;
+  std::cout << "parse type: " << std::endl;
+  for (auto const& item :
+       bytecode_list[BYTECODE_INDEX_INSTRUCTION].toTuple()->elements().vec()) {
+    item.dump();
+  }
+  parseTypes(
+      std::move(c10::ivalue::TupleElements(
+          bytecode_list[BYTECODE_INDEX_TYPE].toTuple()->elements().vec())),
+      foo.get());
+  size_t register_size = bytecode_list[BYTECODE_INDEX_REGISTER_SIZE]
+                             .toTuple()
+                             ->elements()
+                             .vec()[0]
+                             .toInt();
+
+  std::cout << "parse register_size: " << register_size << std::endl;
+  parseRegisterSize(register_size, foo.get());
+  return foo;
+  // static auto value =
+  //     Function::create({}, {}, SymbolicShape(), VaryingShape<Stride>{}, {});
+  // return value;
 }
 
 } // namespace mobile

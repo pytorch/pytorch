@@ -16,16 +16,16 @@ std::ostream& operator<<(std::ostream& out, OpCode op) {
   return out;
 }
 
-char const* toString(OpCode op) {
-  switch (op) {
-#define OP_STRING(x, _) \
-  case x:               \
-    return #x;
-    FORALL_OPCODES(OP_STRING)
-#undef OP_STRING
-  }
-  return nullptr;
-}
+// char const* toString(OpCode op) {
+//   switch (op) {
+// #define OP_STRING(x, _) \
+//   case x:               \
+//     return #x;
+//     FORALL_OPCODES(OP_STRING)
+// #undef OP_STRING
+//   }
+//   return nullptr;
+// }
 
 const char* OpInfo(OpCode op) {
   switch (op) {

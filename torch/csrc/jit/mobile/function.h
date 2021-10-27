@@ -2,6 +2,8 @@
 
 #include <ATen/core/function_schema.h>
 #include <ATen/core/ivalue.h>
+#include <torch/csrc/jit/mobile/code.h>
+#include <torch/csrc/jit/mobile/upgrader.h>
 #include <vector>
 
 namespace torch {
@@ -29,9 +31,10 @@ class Function {
                                 are removed */
   void append_constant(const c10::IValue& constant);
   void append_type(const c10::TypePtr& type);
-  TORCH_API void append_function(mobile::Function& func);
+  TORCH_API void append_function(const std::shared_ptr<mobile::Function>& func);
 
   void set_register_size(size_t size);
+  void set_operator_version(uint64_t operator_version);
 
   int64_t get_debug_handle(size_t pc) const;
   const std::shared_ptr<Code> get_code() const;
@@ -43,6 +46,11 @@ class Function {
   // is halted due to exception.
   // If no corresponding debug handle is found then -1 is returned.
   int64_t getExceptionDebugHandle() const;
+  static TORCH_API std::shared_ptr<Function> get(
+      std::string qualified_name,
+      c10::IValue bytecode);
+  static std::shared_ptr<Function> create(std::string qualified_name);
+  // void init_upgrader();
 
  private:
   c10::QualifiedName name_;

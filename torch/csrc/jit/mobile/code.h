@@ -4,6 +4,7 @@
 
 #include <ATen/core/ivalue.h>
 #include <ATen/core/operator_name.h>
+#include <torch/csrc/jit/mobile/function.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 
 namespace torch {
@@ -23,12 +24,9 @@ struct Code {
   std::vector<std::function<void(Stack&)>> operators_;
   std::vector<c10::IValue> constants_;
   std::vector<c10::TypePtr> types_;
-  // TODO After we actually export CALL instructions we can remove this.
-  // We may need a two-stage importing scheme, where we firstly construct all
-  // function objects, and then append referenced function pointers. This could
-  // be done in parseMethods().
-  std::vector<mobile::Function*> functions_;
+  std::vector<std::shared_ptr<mobile::Function>> functions_;
   size_t register_size_; // Aggregated output size.
+  uint64_t operator_version_; // Aggregated output size.
 };
 
 } // namespace mobile

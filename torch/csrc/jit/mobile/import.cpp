@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/parse_bytecode.h>
 #include <torch/csrc/jit/mobile/parse_operators.h>
+#include "jit/mobile/function.h"
 
 #include <ATen/core/ivalue.h>
 #include <c10/util/ScopeExit.h>
@@ -187,6 +188,7 @@ class BytecodeDeserializer final {
 
  private:
   TypePtr resolveTypeName(const c10::QualifiedName& qn);
+  void init_upgrader(mobile::Function* function);
   void parseMethods(
       c10::ivalue::TupleElements&& vals,
       c10::optional<c10::ivalue::TupleElements>&& debug_handles,
@@ -204,6 +206,7 @@ class BytecodeDeserializer final {
   std::unique_ptr<PyTorchStreamReader> reader_{};
   c10::optional<at::Device> device_;
   uint64_t module_load_options_;
+  uint64_t operator_version_;
 };
 
 BytecodeDeserializer::BytecodeDeserializer(
@@ -273,6 +276,17 @@ void BytecodeDeserializer::parseFunctionSchema(
         false /*is_varargs*/,
         false /*is_varret*/);
     function->setSchema(std::move(schema));
+  }
+}
+
+void BytecodeDeserializer::init_upgrader(mobile::Function* function) {
+  std::cout << "init upgrader, upgraders len: " << mobile::upgraders.size()
+            << std::endl;
+  for (auto const& [upgrader_name, upgrader_bytecode] : mobile::upgraders) {
+    std::cout << "upgrader_name: " << upgrader_name << std::endl;
+    std::shared_ptr<mobile::Function> func =
+        mobile::Function::get(upgrader_name, upgrader_bytecode);
+    function->append_function(func);
   }
 }
 
@@ -354,23 +368,34 @@ void BytecodeDeserializer::parseMethods(
           std::move(*std::move((*debug_handles)[i]).toTuple()).elements();
     }
 
-    parseInstructions(
-        function_name,
-        std::move(ins_list),
-        debug_handles_m_tuple,
-        function.get());
+    init_upgrader(function.get());
 
     parseOperators(
         std::move(ops_list),
         model_version,
         module_load_options_,
         function.get());
+    bool use_upgrader =
+        (operator_version_ < caffe2::serialize::kProducedFileFormatVersion);
+    parseInstructions(
+        function_name,
+        std::move(ins_list),
+        debug_handles_m_tuple,
+        function.get(),
+        use_upgrader);
 
     parseConstants(consts_list, function.get());
 
     parseTypes(types_list, function.get());
 
     function->set_register_size(register_size);
+    function->set_operator_version(operator_version_);
+
+    std::cout << "check function inside function:" << std::endl;
+    auto inside_func = function->get_code()->functions_;
+    for (const auto& fun : inside_func) {
+      std::cout << "fun name: " << fun->name() << std::endl;
+    }
 
     parseFunctionSchema(
         function_name, schemaTable, model_version, function.get());
@@ -426,8 +451,10 @@ mobile::Module BytecodeDeserializer::deserialize(
             .elements();
     has_debug_handles = true;
   }
+  operator_version_ = reader_->version();
   parseMethods(std::move(bvals), std::move(debug_handles), *mcu);
   auto m = mobile::Module(readArchive("data", mcu).toObject(), mcu);
+  // m.setOperatorVersion(reader_->version());
   m.setHasDebugHandles(has_debug_handles);
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
   MobileDebugTable debug_table = MobileDebugTable(reader_, compilation_unit_);

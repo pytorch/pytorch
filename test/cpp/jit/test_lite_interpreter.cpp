@@ -15,11 +15,11 @@
 #include <torch/csrc/jit/mobile/parse_bytecode.h>
 #include <torch/csrc/jit/mobile/parse_operators.h>
 #include <torch/csrc/jit/mobile/runtime_compatibility.h>
+#include <torch/csrc/jit/mobile/upgrader.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/custom_class.h>
 #include <torch/torch.h>
-
 #include <unordered_set>
 
 // Tests go in torch::jit
@@ -456,6 +456,10 @@ TEST(LiteInterpreterTest, BuiltinFunction) {
   auto str = res.toStringRef();
   std::string expected = "Hello! Your tensor has 12 elements!";
   AT_ASSERT(str == expected);
+}
+
+TEST(LiteInterpreterTest, TestUpgrader) {
+  auto o = torch::jit::mobile::operator_versions;
 }
 
 #if !defined FB_XPLAT_BUILD
@@ -1372,6 +1376,96 @@ TEST(LiteInterpreterTest, OperatorCacheDifferentiatesDefaultArgs) {
   testLiteModuleCompareResultTensors(m, inputs, "forward3");
 }
 
+TEST(LiteInterpreterTest, Upgrader) {
+  // std::vector<IValue> operators{
+  //     to_tuple({"aten::add", "Tensor", 3}),
+  // };
+  // Module m = load(
+  //     "/data/users/chenlai/fbsource/fbcode/caffe2/test/jit/fixtures/test_versioned_div_tensor_v3.pt");
+  mobile::Module m_module =
+      _load_for_mobile("/data/users/chenlai/data/prod_models/old_op.ptl");
+  std::vector<IValue> inputs = {
+      IValue(torch::ones({1})), IValue(torch::ones({1}))};
+  m_module.forward(inputs);
+
+  TORCH_CHECK(false);
+}
+
+TEST(LiteInterpreterTest, JitUpgrader) {
+  // std::vector<IValue> operators{
+  //     to_tuple({"aten::add", "Tensor", 3}),
+  // };
+  // Module m = load(
+  //     "/data/users/chenlai/fbsource/fbcode/caffe2/test/jit/fixtures/test_versioned_div_tensor_v3.pt");
+  Module m = load("/data/users/chenlai/data/prod_models/old_op.ptl");
+  std::vector<IValue> inputs = {
+      IValue(torch::ones({1})), IValue(torch::ones({1}))};
+  m.forward(inputs);
+
+  TORCH_CHECK(false);
+}
+
+TEST(RunTimeTest, UpgraderBytecode) {
+  // auto div_tensor = R"SCRIPT(
+  // def div_0_3(self: Tensor, other: Tensor) -> Tensor:
+  //   if (self.is_floating_point() or other.is_floating_point()):
+  //     return self.true_divide(other)
+  //   return self.divide(other, rounding_mode='trunc')
+  // )SCRIPT";
+
+  // 1. Prepare for the bytecode. In reality it can be from a customized
+  // deserializer.
+  std::vector<IValue> instructions{
+      to_tuple({"STOREN", 1, 2}), to_tuple({"LOAD", 1, 0}),
+      to_tuple({"OP", 0, 0}),     to_tuple({"JF", 3, 0}),
+      to_tuple({"LOADC", 1, 0}),  to_tuple({"JMP", 3, 0}),
+      to_tuple({"LOAD", 2, 0}),   to_tuple({"OP", 0, 0}),
+      to_tuple({"STORE", 3, 0}),  to_tuple({"MOVE", 3, 0}),
+      to_tuple({"JF", 5, 0}),     to_tuple({"LOAD", 1, 0}),
+      to_tuple({"LOAD", 2, 0}),   to_tuple({"OP", 1, 0}),
+      to_tuple({"JMP", 5, 0}),    to_tuple({"LOAD", 1, 0}),
+      to_tuple({"LOAD", 2, 0}),   to_tuple({"LOADC", 0, 0}),
+      to_tuple({"OP", 2, 0}),     to_tuple({"STORE", 4, 0}),
+      to_tuple({"DROPR", 2, 0}),  to_tuple({"DROPR", 1, 0}),
+      to_tuple({"MOVE", 4, 0}),   to_tuple({"RET", 0, 0}),
+  };
+  std::vector<IValue> operators{
+      to_tuple({"aten::is_floating_point", "", 1}),
+      to_tuple({"aten::div", "Tensor", 2}),
+      to_tuple({"aten::div", "Tensor_mode", 3}),
+  };
+  std::vector<IValue> constants{
+      to_tuple({"trunc", true}),
+  };
+  int64_t model_version = caffe2::serialize::kProducedBytecodeVersion;
+  // 2. Parse the function
+  std::string function_name("test_function");
+  auto function = std::unique_ptr<mobile::Function>(
+      new mobile::Function(c10::QualifiedName(function_name)));
+  c10::ivalue::TupleElements debug_handles_m_tuple;
+  parseInstructions(
+      function_name,
+      std::move(*c10::ivalue::Tuple::create(instructions)).elements(),
+      debug_handles_m_tuple,
+      function.get());
+  parseOperators(
+      std::move(*c10::ivalue::Tuple::create(operators)).elements(),
+      model_version,
+      1,
+      function.get());
+  const size_t rsize = 4;
+  parseRegisterSize(rsize, function.get());
+  parseConstants(
+      std::move(*c10::ivalue::Tuple::create(constants)).elements(),
+      function.get());
+
+  // 3. Prepare for inputs and run the function
+  std::vector<IValue> inputs{at::tensor(2), at::tensor(2)};
+  function->run(inputs);
+  auto output = inputs[0];
+  ASSERT_EQ(output, at::tensor(1));
+}
+
 TEST(RunTimeTest, RuntimeCall) {
   //     def call(x):
   //         return x + x
@@ -1434,7 +1528,7 @@ TEST(RunTimeTest, RuntimeCall) {
   const size_t rsize = 5;
   parseRegisterSize(rsize, foo.get());
 
-  auto call = std::make_unique<mobile::Function>(c10::QualifiedName("call"));
+  auto call = std::make_shared<mobile::Function>(c10::QualifiedName("call"));
   parseInstructions(
       "call",
       std::move(*c10::ivalue::Tuple::create(instructionsCall)).elements(),
@@ -1450,7 +1544,8 @@ TEST(RunTimeTest, RuntimeCall) {
       call.get());
   parseRegisterSize(rsize, call.get());
 
-  foo->append_function(*call);
+  // foo->append_function(*call);
+  foo->append_function(call);
 
   std::vector<IValue> inputs{at::tensor(1)};
   foo->run(inputs);

@@ -5,6 +5,8 @@
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <torch/custom_class_detail.h>
+#include <iostream>
+#include "jit/mobile/upgrader.h"
 
 namespace torch {
 namespace jit {
@@ -70,7 +72,8 @@ void parseInstructions(
     const std::string& function_name,
     c10::ivalue::TupleElements&& ins_list,
     c10::ivalue::TupleElements& debug_handles_m_tuple,
-    mobile::Function* function) {
+    mobile::Function* function,
+    bool use_upgrader) {
   c10::List<int64_t> debug_handles_list;
   if (!debug_handles_m_tuple.empty()) {
     const std::string& debug_info_function_name =
@@ -108,6 +111,29 @@ void parseInstructions(
     OpCode op_code = opCodeCache.parse(*ins_item[0].toString());
     int X = ins_item[1].toInt();
     int N = ins_item[2].toInt();
+
+    if (use_upgrader && op_code == OpCode::OP) {
+      std::string op_name = function->get_code()->op_names_[X].name;
+
+      std::string operator_name = function->get_code()->op_names_[X].name +
+          (function->get_code()->op_names_[X].overload_name.empty()
+               ? ""
+               : "_" + function->get_code()->op_names_[X].overload_name);
+      std::cout << "parsing OP" << operator_name << std::endl;
+      auto it = operator_versions.find(operator_name);
+      if (it != operator_versions.end()) {
+        auto upgrader = it->second;
+        std::cout << "upgrader name is " << upgrader.upgrader_name
+                  << " index: " << upgrader.index << std::endl;
+        auto func_name = function->get_code()->functions_[upgrader.index]->qualname().qualifiedName();
+        std::cout << "func name: " << func_name << std::endl;
+        op_code = OpCode::CALL;
+        X = upgrader.index;
+      }
+
+      // int new_X =
+    }
+
     if (!debug_handles_list.empty()) {
       int64_t debug_handle = debug_handles_list[j];
       function->append_instruction(op_code, X, N, debug_handle);

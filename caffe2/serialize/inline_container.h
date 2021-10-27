@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <iostream>
 #include <istream>
 #include <mutex>
 #include <ostream>
@@ -107,6 +108,7 @@ class TORCH_API PyTorchStreamReader final {
 
   ~PyTorchStreamReader();
   uint64_t version() const {
+    std::cout << "version: " << version_ << std::endl;
     return version_;
   }
 

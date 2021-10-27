@@ -9,7 +9,8 @@ TORCH_API void parseInstructions(
     const std::string& function_name,
     c10::ivalue::TupleElements&& ins_list,
     c10::ivalue::TupleElements& debug_handles_m_tuple,
-    mobile::Function* function);
+    mobile::Function* function,
+    bool use_upgrader = false);
 TORCH_API void parseConstants(
     const c10::ivalue::TupleElements& consts_list,
     mobile::Function* function);

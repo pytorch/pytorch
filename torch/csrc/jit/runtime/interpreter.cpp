@@ -52,6 +52,17 @@ C10_DEFINE_bool(
 namespace torch {
 namespace jit {
 
+char const* toString(OpCode op) {
+  switch (op) {
+#define OP_STRING(x, _) \
+  case x:               \
+    return #x;
+    FORALL_OPCODES(OP_STRING)
+#undef OP_STRING
+  }
+  return nullptr;
+}
+
 using CodeImpl = interpreter::CodeImpl;
 
 // Before we translate to intepreter instructions, we do
@@ -275,6 +286,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
       while (true) {
         Frame& frame = frames.back();
         Instruction inst = INST_FETCH(0);
+        std::cout << "inst: " << toString(inst.op) << std::endl;
+        std::cout << "RUNNING " << frame.pc;
         switch (inst.op) {
           case INST(ENTER): {
             INST_GUARD;
