@@ -109,6 +109,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'scatter', 'scatter_add', 'sigmoid', 'sigmoid_backward', 'trapezoid', 'cumulative_trapezoid',
     'conj_physical_', '_neg_view', '_reshape_alias', '_det_lu_based_helper', 'lu_solve', '_lu_with_info',
     'linalg_pinv', 'linalg_lstsq', 'native_pixel_shuffle', 'native_pixel_unshuffle',
+    'native_pixel_shuffle_backward', 'native_pixel_unshuffle_backward',
 }
 
 GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {
