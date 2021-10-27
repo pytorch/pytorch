@@ -174,6 +174,9 @@ class GenLazyNativeFuncDefinition:
             meta_str = f"""
         auto out_shape = {shape_sig.shape_call};
         auto out_dtype = {shape_sig.dtype_call};"""
+        meta_str += f"""
+        TORCH_INTERNAL_ASSERT(out_shape.size() == {returns_length});
+        TORCH_INTERNAL_ASSERT(out_dtype.size() == {returns_length});"""
 
         node_str = f"""auto node = torch::lazy::MakeNode<ir::ops::{schema.node_name}>({node_ctor_input_str},
                                                                                       out_dtype, out_shape);"""
