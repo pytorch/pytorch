@@ -36,6 +36,12 @@ def _set_nested_attr(obj: nn.Module, names: List[str], value: Tensor) -> None:
     else:
         _set_nested_attr(getattr(obj, names[0]), names[1:], value)
 
+def _get_nested_attr(obj: nn.Module, names: List[str]) -> None:
+    if len(names) == 1:
+        return getattr(obj, names[0])
+    else:
+        _get_nested_attr(getattr(obj, names[0]), names[1:])
+
 def extract_weights(mod: nn.Module) -> Tuple[Tuple[Tensor, ...], List[str]]:
     """
     This function removes all the Parameters from the model and
@@ -68,6 +74,14 @@ def load_weights(mod: nn.Module, names: List[str], params: Tuple[Tensor, ...], a
             p = nn.Parameter(p)
         _del_nested_attr(mod, name.split("."))
         _set_nested_attr(mod, name.split("."), p)
+
+def _swap_state(mod: nn.Module, split_names: List[str], elems):
+    result = []
+    for split_name, elem in zip(split_names, elems):
+        result.append(_get_nested_attr(mod, split_name))
+        _del_nested_attr(mod, split_name)
+        _set_nested_attr(mod, split_name, elem)
+    return result
 
 def extract_buffers(mod: nn.Module) -> Tuple[Tuple[Tensor, ...], List[str]]:
     orig_params = tuple(mod.buffers())
@@ -181,6 +195,8 @@ def make_functional_with_buffers_deprecated_v1(model: nn.Module):
 
     return weights, buffers, fun, weight_descriptors, buf_descriptors
 
+def make_split_names(lst):
+    return [name.split('.') for name in lst]
 
 class FunctionalModuleWithBuffers(nn.Module):
     def __init__(self, stateless_model, param_names, buffer_names):
@@ -188,6 +204,7 @@ class FunctionalModuleWithBuffers(nn.Module):
         self.stateless_model = stateless_model
         self.param_names = param_names
         self.buffer_names = buffer_names
+        self.split_names = make_split_names(param_names + buffer_names)
 
     @staticmethod
     def _create_from(model):
@@ -201,22 +218,24 @@ class FunctionalModuleWithBuffers(nn.Module):
             buffers,
         )
 
-    def with_state(self, params, buffers):
-        stateful_model = copy.deepcopy(self.stateless_model)
-        load_weights(stateful_model, self.param_names, params)
-        load_buffers(stateful_model, self.buffer_names, buffers)
-        return stateful_model
-
     def forward(self, params, buffers, *args, **kwargs):
-        stateful_model = self.with_state(params, buffers)
-        return stateful_model(*args, **kwargs)
-
+        # Temporarily load the state back onto self.stateless_model
+        old_state = _swap_state(
+            self.stateless_model,
+            self.split_names,
+            list(params) + list(buffers))
+        try:
+            return self.stateless_model(*args, **kwargs)
+        finally:
+            # Remove the loaded state on self.stateless_model
+            _swap_state(self.stateless_model, self.split_names, old_state)
 
 class FunctionalModule(nn.Module):
     def __init__(self, stateless_model, param_names):
         super(FunctionalModule, self).__init__()
         self.stateless_model = stateless_model
         self.param_names = param_names
+        self.split_names = make_split_names(param_names)
 
     @staticmethod
     def _create_from(model):
@@ -225,15 +244,14 @@ class FunctionalModule(nn.Module):
         params, param_names = extract_weights(model_copy)
         return FunctionalModule(model_copy, param_names), params
 
-    def with_state(self, params):
-        stateful_model = copy.deepcopy(self.stateless_model)
-        load_weights(stateful_model, self.param_names, params)
-        return stateful_model
-
     def forward(self, params, *args, **kwargs):
-        stateful_model = self.with_state(params)
-        return stateful_model(*args, **kwargs)
-
+        # Temporarily load the state back onto self.stateless_model
+        old_state = _swap_state(self.stateless_model, self.split_names, params)
+        try:
+            return self.stateless_model(*args, **kwargs)
+        finally:
+            # Remove the loaded state on self.stateless_model
+            _swap_state(self.stateless_model, self.split_names, old_state)
 
 def make_functional(model: nn.Module):
     """make_functional(model) -> func, weights
