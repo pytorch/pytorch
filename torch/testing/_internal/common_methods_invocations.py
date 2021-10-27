@@ -4028,6 +4028,14 @@ def sample_inputs_householder_product(op_info, device, dtype, requires_grad, **k
 
         SampleInput(make_tensor((S, S), device, dtype, low=-2, high=2, requires_grad=requires_grad),
                     args=(make_tensor((0,), device, dtype, low=None, high=None, requires_grad=requires_grad),)),
+
+        # m = n = S, k = S - 2
+        SampleInput(make_tensor((S, S), device, dtype, low=-2, high=2, requires_grad=requires_grad),
+                    args=(make_tensor((S - 2,), device, dtype, low=None, high=None, requires_grad=requires_grad),)),
+
+        # m = S, n = S -1, k = S - 2
+        SampleInput(make_tensor((S, S - 1), device, dtype, low=-2, high=2, requires_grad=requires_grad),
+                    args=(make_tensor((S - 2,), device, dtype, low=None, high=None, requires_grad=requires_grad),)),
     )
 
     return samples
@@ -4348,7 +4356,7 @@ def sample_inputs_cov(op_info, device, dtype, requires_grad, **kwargs):
     for t in _generate_correlation_inputs(device, dtype, requires_grad):
         inputs.append(SampleInput(t))
         num_observations = t.numel() if t.ndimension() < 2 else t.size(1)
-        fweights = make_tensor((num_observations,), device, torch.int, low=0, high=10, requires_grad=requires_grad)
+        fweights = make_tensor((num_observations,), device, torch.int, low=1, high=10, requires_grad=requires_grad)
         aweights = make_tensor((num_observations,), device, torch.float, low=0, high=1, requires_grad=requires_grad)
         for correction, fw, aw in product(range(num_observations), [None, fweights], [None, aweights]):
             inputs.append(SampleInput(t, kwargs={'correction': correction, 'fweights': fw, 'aweights': aw}))
@@ -5809,15 +5817,15 @@ def sample_inputs_select_scatter(op_info, device, dtype, requires_grad, **kwargs
 def sample_inputs_slice_scatter(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
-    cases = (((L, L, L), (L,), (0, 0, L, 1)),
-             ((L, L, L), (L,), (0, L // 2, L, 1)),
-             ((L, L, L), (L,), (0, L // 2, L, 2)),
-             ((L, L, L), (L,), (1, 0, L, 1)),
-             ((L, L, L), (L,), (1, L // 2, L, 1)),
-             ((L, L, L), (L,), (1, L // 2, L, 2)),
-             ((L, L, L), (L,), (2, 0, L, 1)),
-             ((L, L, L), (L // 2,), (2, L // 2, L, 1)),
-             ((L, L, L), (L // 4,), (2, L // 2, L, 2)),
+    cases = (((L, L, L), (L, L, L,), (0, 0, L, 1)),
+             ((L, L, L), (L // 2, L, L,), (0, L // 2, L, 1)),
+             ((L, L, L), (L // 4, L, L,), (0, L // 2, L, 2)),
+             ((L, L, L), (L, L, L,), (1, 0, L, 1)),
+             ((L, L, L), (L, L // 2, L,), (1, L // 2, L, 1)),
+             ((L, L, L), (L, L // 4, L,), (1, L // 2, L, 2)),
+             ((L, L, L), (L, L, L,), (2, 0, L, 1)),
+             ((L, L, L), (L, L, L // 2,), (2, L // 2, L, 1)),
+             ((L, L, L), (L, L, L // 4,), (2, L // 2, L, 2)),
              )
 
     def generator():
@@ -7966,6 +7974,7 @@ op_db: List[OpInfo] = [
            # TODO: backward uses in-place operations that vmap doesn't like
            check_batched_grad=False,
            check_batched_gradgrad=False,
+           supports_forward_ad=True,
            sample_inputs_func=sample_inputs_householder_product,
            decorators=[skipCUDAIfNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack]),
     OpInfo('linalg.lstsq',
