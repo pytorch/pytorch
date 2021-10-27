@@ -2943,6 +2943,42 @@ def sample_inputs_max_unpool1d(op_info, device, dtype, requires_grad, **kwargs):
 
     return list(generator())
 
+def sample_inputs_max_unpool2d(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    kerneli = [(2, 3), 3]
+    stridei = [(1, 1)]
+    Ni = [1, 2]
+    Ci = [2]
+    Hi = [3]
+    Wi = [6]
+    ceil_modei = [True, False]
+    paddingi = [1]
+    dilationi = [1]
+    output_sizei = [True, False]
+
+    products = product(kerneli, stridei, Ni, Ci, Hi, Wi, ceil_modei, paddingi, dilationi, output_sizei)
+
+    def generator():
+        for kernel_size, stride, N, C, H, W, ceil_mode, padding, dilation, output_size in products:
+            input_tensor = make_arg((N, C, H, W))
+
+            max_unpool2d = torch.nn.MaxUnpool2d(kernel_size, stride, padding)
+            max_pool2d = torch.nn.MaxPool2d(kernel_size, stride, ceil_mode=ceil_mode, padding=padding, dilation=dilation, return_indices=True)
+
+            kwargs = {
+                "kernel_size": max_unpool2d.kernel_size,
+                "stride": max_unpool2d.stride,
+                "padding": max_unpool2d.padding,
+            }
+
+            output_pool, indices = max_pool2d(input_tensor)
+            if output_size:
+                kwargs.update({'output_size': input_tensor.size()})
+            yield SampleInput(output_pool, args=(indices,), kwargs=kwargs)
+
+    return list(generator())
+
 def sample_inputs_max_pool2d(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -8648,6 +8684,19 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_gradgrad', dtypes=(torch.float64,)),
            ),
            sample_inputs_func=sample_inputs_max_unpool1d),
+    OpInfo('nn.functional.max_unpool2d',
+           aten_name='max_unpool2d',
+           supports_autograd=True,
+           supports_out=False,
+           assert_jit_shape_analysis=False,
+           dtypesIfCPU=floating_types(),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           skips=(
+               # TODO: Reference issue here
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad', dtypes=(torch.float64,)),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_gradgrad', dtypes=(torch.float64,)),
+           ),
+           sample_inputs_func=sample_inputs_max_unpool2d),
     OpInfo('nn.functional.max_pool2d',
            aten_name='max_pool2d',
            supports_autograd=True,
