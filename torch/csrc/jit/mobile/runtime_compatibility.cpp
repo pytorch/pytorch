@@ -18,6 +18,10 @@ uint64_t _get_runtime_bytecode_version() {
   return caffe2::serialize::kMaxSupportedBytecodeVersion;
 }
 
+uint64_t _get_runtime_operators_version() {
+  return caffe2::serialize::kProducedFileFormatVersion;
+}
+
 /*
  * Returns all registered PyTorch ops and their versioning
  */
