@@ -6133,7 +6133,7 @@ def sample_inputs_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
 
     return list(gen_inputs())
 
-def _generate_sample_inputs_loss():
+def _generate_sample_shape_reduction():
     shapes = ((S,), (S, S), (S, S, S), (S, S, S, S))
     reductions = ('none', 'mean', 'sum')
     for s, r in product(shapes, reductions):
@@ -6150,7 +6150,7 @@ def sample_inputs_gaussian_nll_loss(op_info, device, dtype, requires_grad, **kwa
         yield shape[:-1]
 
     def gen_shape_kwargs():
-        for s, r in _generate_sample_inputs_loss():
+        for s, r in _generate_sample_shape_reduction():
             for t_s, v_s in product(gen_shape(s), gen_shape(s)):
                 yield _make_tensor(s), _make_tensor(t_s), make_var(v_s), dict(reduction=r)
                 yield _make_tensor(s), _make_tensor(t_s), make_var(v_s), dict(full=True, reduction=r)
