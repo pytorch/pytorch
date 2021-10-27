@@ -8,6 +8,7 @@ from tools.codegen.model import (
     Argument, NativeFunction, SchemaKind, BackendIndex,
     Tag, FunctionSchema, SelfArgument, TensorOptionsArguments
 )
+from tools.codegen.selective_build.selector import SelectiveBuilder
 from typing import List, Optional, Union, Tuple
 from tools.codegen.utils import mapMaybe
 
@@ -248,9 +249,17 @@ def emit_declaration_for_noncomposite_views(f: NativeFunction) -> str:
 # These files provide the kernels that run the functionalization pass, which can be opted into
 # per backend (e.g. XLA or Vulkan), or as a composable transform (functionalize() in functorch).
 
-def gen_functionalization_registration(f: NativeFunction, composite_implicit_autograd_index: BackendIndex) -> Optional[str]:
+def gen_functionalization_registration(
+    selector: SelectiveBuilder,
+    f: NativeFunction,
+    composite_implicit_autograd_index: BackendIndex
+) -> Optional[str]:
     @with_native_function
     def emit_registration_helper(f: NativeFunction) -> Optional[str]:
+        # Note: for now, this logic is meant to avoid registering functionalization kernels for mobile.
+        # At some point, Vulkan we'll want to use functionalization and we'll need to change this.
+        if not selector.include_all_operators:
+            return None
         if not f.is_view_op and not modifies_arguments(f):
             return None
         if f.is_view_op and f.has_composite_implicit_autograd_kernel:
@@ -271,9 +280,15 @@ def gen_functionalization_registration(f: NativeFunction, composite_implicit_aut
 
     return emit_registration_helper(f)
 
-def gen_functionalization_definition(f: NativeFunction, functional_op: Optional[NativeFunction]) -> Optional[str]:
+def gen_functionalization_definition(
+    selector: SelectiveBuilder,
+    f: NativeFunction,
+    functional_op: Optional[NativeFunction]
+) -> Optional[str]:
     @with_native_function
     def emit_definition_helper(f: NativeFunction) -> Optional[str]:
+        if not selector.include_all_operators:
+            return None
         if not f.is_view_op and not modifies_arguments(f):
             return None
         if f.is_view_op and f.has_composite_implicit_autograd_kernel:
