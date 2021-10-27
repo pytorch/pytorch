@@ -1022,31 +1022,45 @@ REGISTER_OPERATOR_FUNCTOR(
         }
         memory_format = memory_format.value_or(c10::MemoryFormat::Preserve);
 
-        if (p_node->Output(0).isNone()) {
-          // handle dtype, layout, and device
-          c10::optional<at::ScalarType> dtype;
-          c10::Layout layout = self.layout();
-          c10::Device device = self.device();
-          if (p_node->Input(1).isTensor()) {
-            const auto& other = p_node->Input(1).toTensor();
-            dtype = other.scalar_type();
-            layout = other.layout();
-            device = other.device();
+        // handle dtype, layout, and device
+        c10::optional<at::ScalarType> dtype;
+        c10::Layout layout = self.layout();
+        c10::Device device = self.device();
+        if (p_node->Input(1).isTensor()) {
+          const auto& other = p_node->Input(1).toTensor();
+          dtype = other.scalar_type();
+          layout = other.layout();
+          device = other.device();
+        } else {
+          dtype = p_node->Input(1).toOptional<at::ScalarType>();
+        }
+
+        if (memory_format == c10::MemoryFormat::Preserve) {
+          if (self.is_non_overlapping_and_dense()) {
+            memory_format = c10::nullopt;
+            copy_strides = true;
           } else {
-            dtype = p_node->Input(1).toOptional<at::ScalarType>();
+            memory_format = self.suggest_memory_format();
           }
+        }
 
-          if (memory_format == c10::MemoryFormat::Preserve) {
-            if (self.is_non_overlapping_and_dense()) {
-              memory_format = c10::nullopt;
-              copy_strides = true;
-            } else {
-              memory_format = self.suggest_memory_format();
-            }
+        bool need_to_allocate_output = true;
+        if (p_node->Output(0).isTensor()) {
+          const auto& existing_output = p_node->Output(0).toTensor();
+          if (existing_output.dtype() != dtype ||
+              existing_output.layout() != layout ||
+              existing_output.device() != self.device() ||
+              !existing_output.is_contiguous(
+                  memory_format.value_or(c10::MemoryFormat::Contiguous))) {
+            need_to_allocate_output = true;
+          } else {
+            need_to_allocate_output = false;
           }
+        }
 
-          // See Note [Explicit nullopt MemoryFormat argument]
-          // Can't use size {0} if memory_format is ChannelLast
+        // See Note [Explicit nullopt MemoryFormat argument]
+        // Can't use size {0} if memory_format is ChannelLast
+        if (need_to_allocate_output) {
           p_node->Output(0) = at::detail::empty_cpu(
               self.sizes(),
               dtype,
