@@ -103,7 +103,6 @@ class TestShardedEmbeddingBag(ShardedTensorTestBase):
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
     def test_sharded_embedding_bag_colwise(self):
-        return
         for spec in generate_chunk_sharding_specs_for_test(1):
             self._test_sharded_embedding_bag_with_test_cases(spec)
 
