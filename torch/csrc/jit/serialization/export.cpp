@@ -17,6 +17,7 @@
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
 #include <torch/csrc/jit/serialization/onnx.h>
 #include <torch/csrc/onnx/onnx.h>
+#include <atomic>
 
 #include <onnx/checker.h>
 #include <onnx/onnx_pb.h>
