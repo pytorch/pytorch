@@ -88,6 +88,7 @@ const std::unordered_map<Symbol, Symbol>& getOperatorAliasMap() {
       {aten::clip_, aten::clamp_},
       {aten::det, aten::linalg_det},
       {aten::matrix_power, aten::linalg_matrix_power},
+      {aten::matrix_exp, aten::linalg_matrix_exp},
       {aten::ger, aten::outer},
       {aten::arccos, aten::acos},
       {aten::arccos_, aten::acos_},

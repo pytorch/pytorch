@@ -287,7 +287,7 @@ struct TORCH_API TupleElements {
   : inlineSize_(0), elementsVector_(std::move(elements)) {}
 
   explicit TupleElements(c10::ArrayRef<IValue> elements)
-  : inlineSize_(elements.size() <= 3? elements.size() : 0) {
+  : inlineSize_(elements.size() <= 3 ? elements.size() : 0) {
     switch (inlineSize_) {
       case 3:
         new (&elementsInline_[2]) IValue(elements[2]);
@@ -332,7 +332,7 @@ struct TORCH_API TupleElements {
 
   // It would be nice to make this noncopyable to prevent people from
   // writing code like `auto output =
-  // forward(...).toTuple()->elements()` (which does refcount bumps on
+  // forward(...).toTupleRef().elements()` (which does refcount bumps on
   // each element, unlike the more efficient but verbose
   // ```
   // auto outputIntrusivePtr = forward(...).toTuple();
@@ -630,10 +630,25 @@ struct TORCH_API Tuple : c10::intrusive_ptr_target {
     return c10::make_intrusive<Tuple>(std::move(e1), std::move(e2), std::move(e3));
   }
 
+ private:
+  // Workaround inability to use `>` operator in template argument list.
+  template <typename... Args>
+  static constexpr bool hasMoreThanThreeArgs() {
+    return sizeof...(Args) > 3;
+  }
+
+ public:
   template <typename... Args>
   static c10::intrusive_ptr<Tuple> create(Args&&... elements_) {
-    return create(
-        {IValue(std::forward<Args>(elements_))...});
+    switch (sizeof...(Args)) {
+      case 1:
+      case 2:
+      case 3:
+        return create(IValue(std::forward<Args>(elements_))...);
+      default:
+        return create(
+            std::vector<IValue>{IValue(std::forward<Args>(elements_))...});
+    }
   }
 
   // Again, it would be nice to make this noncopyable, but there's a
@@ -1136,7 +1151,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     }
     std::ostringstream oss;
     oss << devices[0];
-    for (size_t idx = 1; idx < devices.size(); idx++) {
+    for (const auto idx : c10::irange(1, devices.size())) {
       if (idx == devices.size() - 1) {
         oss << " and ";
       } else {
@@ -1153,7 +1168,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       return c10::kCPU;
     }
     c10::DeviceType deviceType = devices[0].type();
-    for (size_t idx = 1; idx < devices.size(); idx++) {
+    for (const auto idx : c10::irange(1, devices.size())) {
       TORCH_CHECK_VALUE(
           devices[idx].type() == deviceType,
           "Expected all devices to be of the same type, but got a mismatch between ",
@@ -1173,7 +1188,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       [](const c10::Device& a, const c10::Device& b) { return a.index() < b.index(); });
     // Deduplicate by compacting.
     size_t targetIdx = 0;
-    for (size_t sourceIdx = 0; sourceIdx < devices.size(); sourceIdx++) {
+    for (const auto sourceIdx : c10::irange(devices.size())) {
       TORCH_CHECK_VALUE(
           devices[sourceIdx].has_index(),
           "Expected devices to have indices, got ", devices[sourceIdx]);
