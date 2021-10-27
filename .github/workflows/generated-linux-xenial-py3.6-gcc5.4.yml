@@ -11,6 +11,7 @@ on:
       - master
       - release/*
   workflow_dispatch:
+  repository_dispatch:
 
 env:
   BUILD_ENVIRONMENT: linux-xenial-py3.6-gcc5.4
