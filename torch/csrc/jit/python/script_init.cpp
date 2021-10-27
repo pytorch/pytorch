@@ -1931,6 +1931,10 @@ void initJitScriptBindings(PyObject* module) {
 
   m.def("_get_graph_executor_optimize", &torch::jit::getGraphExecutorOptimize);
 
+  m.def(
+      "_enable_mobile_interface_call_export",
+      &torch::jit::enableMobileInterfaceCallExport);
+
   m.def("_create_module_with_type", [](const ClassTypePtr& type) {
      return Module(get_python_cu(), type);
    }).def("_create_object_with_type", [](const ClassTypePtr& type) {
