@@ -67,22 +67,4 @@ void THPByteStorage_postInit(PyObject *module);
 #include <torch/csrc/generic/Storage.h>
 #include <TH/THGenerateByteType.h>
 
-// #include <torch/csrc/generic/Storage.h>
-// #include <TH/THGenerateAllTypes.h>
-
-// #include <torch/csrc/generic/Storage.h>
-// #include <TH/THGenerateComplexTypes.h>
-
-// #include <torch/csrc/generic/Storage.h>
-// #include <TH/THGenerateHalfType.h>
-
-// #include <torch/csrc/generic/Storage.h>
-// #include <TH/THGenerateBoolType.h>
-
-// #include <torch/csrc/generic/Storage.h>
-// #include <TH/THGenerateBFloat16Type.h>
-
-// #include <torch/csrc/generic/Storage.h>
-// #include <TH/THGenerateQTypes.h>
-
 #endif

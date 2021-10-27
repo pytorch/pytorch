@@ -53,16 +53,4 @@ void THCPByteStorage_postInit(PyObject *module);
 #define THC_GENERIC_FILE "torch/csrc/generic/Storage.h"
 #include <THC/THCGenerateByteType.h>
 
-// #define THC_GENERIC_FILE "torch/csrc/generic/Storage.h"
-// #include <THC/THCGenerateAllTypes.h>
-
-// #define THC_GENERIC_FILE "torch/csrc/generic/Storage.h"
-// #include <THC/THCGenerateComplexTypes.h>
-
-// #define THC_GENERIC_FILE "torch/csrc/generic/Storage.h"
-// #include <THC/THCGenerateBoolType.h>
-
-// #define THC_GENERIC_FILE "torch/csrc/generic/Storage.h"
-// #include <THC/THCGenerateBFloat16Type.h>
-
 #endif
