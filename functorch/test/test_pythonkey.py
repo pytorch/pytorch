@@ -197,6 +197,8 @@ class TestPythonKeyOperatorsOpInfo(TestCase):
     xfail('nn.functional.dropout'),
     xfail('linalg.eigvals'),
     xfail('nn.functional.pad', 'circular'),
+    xfail('empty_like'), # randomness
+    xfail('randn_like'), # randomness
     })
     def test_make_fx_exhaustive(self, device, dtype, op):
 
