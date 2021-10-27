@@ -29,8 +29,8 @@ void BatchNormImplBase<D, Derived>::pretty_print(std::ostream& stream) const {
   } else {
       stream << "None";
   }
- 
-  stream << ", "
+
+   stream << ", "
          << "affine=" << this->options.affine() << ", "
          << "track_running_stats=" << this->options.track_running_stats() << ")";
 }
