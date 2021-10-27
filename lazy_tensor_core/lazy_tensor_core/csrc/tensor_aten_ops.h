@@ -542,10 +542,6 @@ LazyTensor ne(const LazyTensor& input, const LazyTensor& other);
 
 LazyTensor neg(const LazyTensor& input);
 
-std::tuple<LazyTensor, LazyTensor> nll_loss_forward(
-    const LazyTensor& input, const LazyTensor& target, const LazyTensor& weight,
-    lazy_tensors::int64 reduction, int ignore_index);
-
 LazyTensor nll_loss2d(const LazyTensor& input, const LazyTensor& target,
                       const LazyTensor& weight, lazy_tensors::int64 reduction,
                       int ignore_index);
@@ -556,12 +552,6 @@ LazyTensor nll_loss2d_backward(const LazyTensor& grad_output,
                                const LazyTensor& weight,
                                lazy_tensors::int64 reduction, int ignore_index,
                                const LazyTensor& total_weight);
-
-LazyTensor nll_loss_backward(const LazyTensor& grad_output,
-                             const LazyTensor& input, const LazyTensor& target,
-                             const LazyTensor& weight,
-                             lazy_tensors::int64 reduction, int ignore_index,
-                             const LazyTensor& total_weight);
 
 std::pair<LazyTensor, LazyTensor> nms(const LazyTensor& boxes,
                                       const LazyTensor& scores,

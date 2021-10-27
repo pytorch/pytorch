@@ -72,8 +72,6 @@
 #include "lazy_tensor_core/csrc/ops/native_batch_norm_forward.h"
 #include "lazy_tensor_core/csrc/ops/nll_loss2d.h"
 #include "lazy_tensor_core/csrc/ops/nll_loss2d_backward.h"
-#include "lazy_tensor_core/csrc/ops/nll_loss_backward.h"
-#include "lazy_tensor_core/csrc/ops/nll_loss_forward.h"
 #include "lazy_tensor_core/csrc/ops/nms.h"
 #include "lazy_tensor_core/csrc/ops/nonzero.h"
 #include "lazy_tensor_core/csrc/ops/normal.h"
@@ -1549,16 +1547,6 @@ LazyTensor neg(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::Neg(input.GetIrValue()));
 }
 
-std::tuple<LazyTensor, LazyTensor> nll_loss_forward(
-    const LazyTensor& input, const LazyTensor& target, const LazyTensor& weight,
-    lazy_tensors::int64 reduction, int ignore_index) {
-  auto node = torch::lazy::MakeNode<ir::ops::NllLossForward>(
-      input.GetIrValue(), target.GetIrValue(), GetOptionalIrValue(weight),
-      GetReductionMode(reduction), ignore_index);
-  return std::make_tuple(input.CreateFrom(torch::lazy::Value(node, 0)),
-                         input.CreateFrom(torch::lazy::Value(node, 1)));
-}
-
 LazyTensor nll_loss2d(const LazyTensor& input, const LazyTensor& target,
                       const LazyTensor& weight, lazy_tensors::int64 reduction,
                       int ignore_index) {
@@ -1574,17 +1562,6 @@ LazyTensor nll_loss2d_backward(const LazyTensor& grad_output,
                                lazy_tensors::int64 reduction, int ignore_index,
                                const LazyTensor& total_weight) {
   return input.CreateFrom(torch::lazy::MakeNode<ir::ops::NllLoss2dBackward>(
-      grad_output.GetIrValue(), input.GetIrValue(), target.GetIrValue(),
-      GetOptionalIrValue(weight), GetOptionalIrValue(total_weight),
-      GetReductionMode(reduction), ignore_index));
-}
-
-LazyTensor nll_loss_backward(const LazyTensor& grad_output,
-                             const LazyTensor& input, const LazyTensor& target,
-                             const LazyTensor& weight,
-                             lazy_tensors::int64 reduction, int ignore_index,
-                             const LazyTensor& total_weight) {
-  return input.CreateFrom(torch::lazy::MakeNode<ir::ops::NllLossBackward>(
       grad_output.GetIrValue(), input.GetIrValue(), target.GetIrValue(),
       GetOptionalIrValue(weight), GetOptionalIrValue(total_weight),
       GetReductionMode(reduction), ignore_index));
