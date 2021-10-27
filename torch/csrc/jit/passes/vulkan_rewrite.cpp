@@ -108,8 +108,7 @@ void insertPrePackedConv2dOp(std::shared_ptr<Graph>& graph) {
 
   SubgraphRewriter transpose_rewriter;
   transpose_rewriter.RegisterRewritePattern(
-      conv_2d_transpose_pattern,
-      prepacked_ops_conv2d_transpose_pattern);
+      conv_2d_transpose_pattern, prepacked_ops_conv2d_transpose_pattern);
   transpose_rewriter.runOnGraph(graph);
 }
 
@@ -227,7 +226,8 @@ void vulkanFoldPrePackingOps(script::Module& m) {
         (n->kind() ==
          Symbol::fromQualString("vulkan_prepack::linear_prepack")) ||
         (n->kind() ==
-            Symbol::fromQualString("vulkan_prepack::conv2d_transpose_clamp_prepack")));
+         Symbol::fromQualString(
+             "vulkan_prepack::conv2d_transpose_clamp_prepack")));
   };
   PrePackingOpsFolder(m, filter_fn, "prepack_folding");
 }
