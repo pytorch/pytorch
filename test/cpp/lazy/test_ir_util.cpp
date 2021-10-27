@@ -36,8 +36,8 @@ class TestNode : public Node {
   std::vector<Output> operands_as_outputs_;
 };
 
-//   a
-// // \
+//  a
+// |  \
 // b   c
 //  \ /
 //   d
@@ -61,8 +61,8 @@ TEST(IrUtilTest, BasicTest) {
   EXPECT_EQ(postorder.at(3), a.get());
 }
 
-//   a
-// // \
+//  a
+// |  \
 // b---c
 TEST(IrUtilTest, TestCircle) {
   NodePtr a = MakeNode<TestNode>();
