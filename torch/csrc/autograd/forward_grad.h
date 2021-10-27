@@ -161,8 +161,15 @@ struct TORCH_API ForwardGrad : std::enable_shared_from_this<ForwardGrad> {
           ForwardADLevel::get_by_idx(level)->erase(shared_from_this());
       }
 
-      std::lock_guard<std::mutex> lock(mutex_);
+      std::unique_lock<std::mutex> lock(mutex_);
+      const auto& it = content_.find(level);
+      TORCH_INTERNAL_ASSERT(it != content_.end(), "Resetting a non-existent level.");
+      // Keep the Tensor alive until we have released the lock
+      // This is needed as we can be in a case where this function is called by
+      // ForwardADLevel destructor
+      auto t = (*it).second;
       content_.erase(level);
+      lock.unlock();
   }
 
   const at::Tensor& value(uint64_t level) const;
