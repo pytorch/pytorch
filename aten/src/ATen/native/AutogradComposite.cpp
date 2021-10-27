@@ -28,10 +28,10 @@ Tensor _new_zeros_with_meta(
     IntArrayRef sizes,
     IntArrayRef strides,
     int64_t storage_offset,
-    int64_t storage_nueml) {
+    int64_t storage_numel) {
   // We need to create a storage of the same size to be able to have the same
   // viewing behavior in all cases
-  auto new_tensor = at::zeros({storage_nueml}, self.options());
+  auto new_tensor = at::zeros({storage_numel}, self.options());
   return new_tensor.as_strided(sizes, strides, storage_offset);
 }
 
@@ -42,11 +42,8 @@ Tensor _new_zeros_with_same_meta(
   auto strides = other.strides();
   auto storage_offset = other.storage_offset();
   // Explicit type to appease window build
-  int64_t storage_nueml = other.storage().nbytes() / other.itemsize();
-  // We need to create a storage of the same size to be able to have the same
-  // viewing behavior in all cases
-  auto new_tensor = at::zeros({storage_nueml}, self.options());
-  return new_tensor.as_strided(sizes, strides, storage_offset);
+  int64_t storage_numel = other.storage().nbytes() / other.itemsize();
+  return at::_new_zeros_with_meta(self, sizes, strides, storage_offset, storage_numel);
 }
 
 } // namespace native
