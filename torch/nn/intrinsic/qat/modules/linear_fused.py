@@ -63,7 +63,6 @@ class LinearBn1d(nn.modules.linear.Linear, nni._FusedModule):
         self.bn.reset_running_stats()
         init.uniform_(self.bn.weight)
         init.zeros_(self.bn.bias)
-        # note: below is actully for conv, not BN
         if self.bias is not None:
             fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)
             bound = 1 / math.sqrt(fan_in)
@@ -88,9 +87,6 @@ class LinearBn1d(nn.modules.linear.Linear, nni._FusedModule):
         x = F.linear(input, weight, self.bias)
         x = self.bn(x)
         return x
-
-    def extra_repr(self):
-        return super(LinearBn1d, self).extra_repr()
 
     def train(self, mode=True):
         """
@@ -128,30 +124,3 @@ class LinearBn1d(nn.modules.linear.Linear, nni._FusedModule):
         qat_linearbn.bn.running_var = bn.running_var
         qat_linearbn.bn.num_batches_tracked = bn.num_batches_tracked
         return qat_linearbn
-
-    def to_float(self):
-        modules = []
-        linear = nn.Linear(
-            self.in_features,
-            self.out_features,
-            self.bias is not None)
-        linear.weight = Parameter(self.weight.detach())
-        if self.bias is not None:
-            linear.bias = Parameter(self.bias.detach())
-        modules.append(linear)
-
-        bn = nn.BatchNorm1d(
-            self.bn.num_features,
-            self.bn.eps,
-            self.bn.momentum,
-            self.bn.affine,
-            self.bn.track_running_stats)
-        bn.weight = Parameter(self.bn.weight.detach())
-        if self.bn.affine:
-            bn.bias = Parameter(self.bn.bias.detach())
-        modules.append(bn)
-
-        result = nni.LinearBn1d(*modules)
-        result.train(self.training)
-        result.qconfig = self.qconfig
-        return result

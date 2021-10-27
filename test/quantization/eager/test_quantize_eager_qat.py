@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: quantization"]
+
 import math
 import itertools
 import torch
@@ -27,6 +29,7 @@ from torch.testing._internal.common_quantization import (
     QuantStubModel,
     ManualLinearQATModel,
     ManualConvLinearQATModel,
+    ManualEmbeddingBagLinear,
     TwoLayerLinearModel,
     test_only_eval_fn,
     test_only_train_fn,
@@ -106,6 +109,37 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
 
                 model = ManualConvLinearQATModel()
                 model = quantize_qat(model, test_only_train_fn, [self.img_data_2d_train])
+                checkQuantized(model)
+
+    def test_embedding_bag_linear(self):
+        for qengine in supported_qengines:
+            with override_quantized_engine(qengine):
+                model = ManualEmbeddingBagLinear().train()
+                model = prepare_qat(model)
+                self.checkObservers(model)
+
+                train_indices = [[torch.randint(0, 10, (12, 12)), torch.randn((12, 1))] for _ in range(2)]
+                eval_output = [[torch.randint(0, 10, (12, 1))]]
+
+                test_only_train_fn(model, train_indices)
+                # make sure not activation_post_process is inserted for EmbeddingBag
+                self.assertFalse(hasattr(model, "activation_post_process"))
+                model = convert(model)
+
+                def checkQuantized(model):
+                    # Make sure EmbeddingBag is now a quantized EmbeddingBag.
+                    self.assertTrue(type(model.emb), nn.quantized.EmbeddingBag)
+                    # Also test that Linear has been quantized.
+                    self.assertTrue(type(model.linear), nnq.Linear)
+
+                    test_only_eval_fn(model, eval_output)
+                    self.checkScriptable(model, eval_output)
+                    self.checkNoQconfig(model)
+
+                checkQuantized(model)
+
+                model = ManualEmbeddingBagLinear()
+                model = quantize_qat(model, test_only_train_fn, [train_indices])
                 checkQuantized(model)
 
     def test_train_save_load_eval(self):
@@ -841,34 +875,15 @@ class ReferenceLinearBatchNorm1d(nn.Module):
 class TestLinearBNQATModule(TestCase):
     def test_linear_bn_numerics(self):
         test_cases = itertools.product(
-            [2, 4],    # batch_size
-            [2, 3, 4], # in_features
-            [2, 3]     # out_features
+            [2, 4],     # batch_size
+            [2, 3, 4],  # in_features
+            [2, 3]      # out_features
         )
 
         for test_case in test_cases:
             batch_size, in_features, out_features = test_case
-
-            m = nn.Sequential(nn.Linear(in_features, out_features), nn.BatchNorm1d(out_features)).train()
-            m.qconfig = torch.quantization.get_default_qat_qconfig()
-            m_ref = ReferenceLinearBatchNorm1d(m[0], m[1], m.qconfig)
-            m_ref.apply(torch.ao.quantization.disable_fake_quant)
 
             data = torch.randn(batch_size, out_features, in_features)
-            result_actual = m(data)
-            result_ref = m_ref(data)
-
-            self.assertEqual(result_ref, result_actual)
-
-    def test_fused_linear_bn_numerics(self):
-        test_cases = itertools.product(
-            [2, 4],    # batch_size
-            [2, 3, 4], # in_features
-            [2, 3]     # out_features
-        )
-
-        for test_case in test_cases:
-            batch_size, in_features, out_features = test_case
 
             m = nn.Sequential(nn.Linear(in_features, out_features), nn.BatchNorm1d(out_features)).train()
             m.qconfig = torch.quantization.get_default_qat_qconfig()
@@ -876,11 +891,15 @@ class TestLinearBNQATModule(TestCase):
             m_fused = fuse_modules(m, [['0', '1']])
             m_fused = torch.quantization.prepare_qat(m_fused)
 
-            data = torch.randn(batch_size, out_features, in_features)
-            result_actual = m_fused(data)
+            result_fused = m_fused(data)
             result_ref = m_ref(data)
+            self.assertEqual(result_ref, result_fused)
 
-            self.assertEqual(result_ref, result_actual)
+            m_ref.apply(torch.ao.quantization.disable_fake_quant)
+
+            result_unfused = m(data)
+            result_ref = m_ref(data)
+            self.assertEqual(result_ref, result_unfused)
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
