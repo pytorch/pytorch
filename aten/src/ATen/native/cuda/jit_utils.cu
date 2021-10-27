@@ -28,12 +28,23 @@ torch::jit::CodeTemplate load_code_template(const std::string& path) {
 
 }
 
+std::string silly_generate_code() {
+    torch::jit::TemplateEnv env;
+    env.s("name", "i0");
+    env.s("scalar_t", "float");
+    env.s("nTensorArgs", "2");
+    env.s("nInputTensors", "1");
+    static auto cuda_template = load_code_template(
+      "/private/home/mruberry/git/pytorch/aten/src/ATen/native/cuda/silly_code_template.cuh");
+    return cuda_template.format(env);
+}
+
 std::string generate_code(
     int nTensors,
-    std::string& func,
-    std::string& name,
-    std::string& common_type,
-    std::string& result_type,
+    const std::string& func,
+    const std::string& name,
+    const std::string& common_type,
+    const std::string& result_type,
     bool contiguous,
     bool dynamic_casting) {
   torch::jit::TemplateEnv env;
@@ -85,7 +96,7 @@ std::string generate_code(
   env.s("args", functor_args.str());
 
   static auto cuda_template = load_code_template(
-      "/home/ngimel/local/pytorch/aten/src/ATen/native/cuda/jit_code_template.cuh");
+      "/private/home/mruberry/git/pytorch/aten/src/ATen/native/cuda/jit_code_template.cuh");
   return cuda_template.format(env);
 }
 
@@ -140,6 +151,7 @@ NvrtcFunction jit_pwise_function(
   const auto compilation_result =
       nvrtc.nvrtcCompileProgram(program, args.size(), args.data());
   if (compilation_result != NVRTC_SUCCESS) {
+    std::cout << "Compilation failed!" << std::endl;
     size_t logsize;
     AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcGetProgramLogSize(program, &logsize));
     std::vector<char> log(logsize);
@@ -185,6 +197,32 @@ void launch_jitted_pwise_function(
     std::array<void*, 6>& args,
     const int nBlocks,
     const int kBlockSize) {
+
+  const auto& nvrtc = at::globalContext().getNVRTC();
+  // Launches kernel on current stream
+  auto stream = at::cuda::getCurrentCUDAStream();
+  AT_CUDA_DRIVER_CHECK(nvrtc.cuLaunchKernel(
+    function.function,
+    nBlocks,
+    1,
+    1,
+    kBlockSize,
+    1,
+    1,
+    0,
+    stream,
+    args.data(),
+    nullptr));
+}
+
+// TODO: may need/want to initialize CUDA context here (refactor into nvrtc call)
+void launch_silly_jitted_pwise_function(
+    NvrtcFunction function,
+    std::array<void*, 4>& args,
+    const int nBlocks,
+    const int kBlockSize) {
+
+  std::cout << "launching silly jitted pwise function" << std::endl;
 
   const auto& nvrtc = at::globalContext().getNVRTC();
   // Launches kernel on current stream

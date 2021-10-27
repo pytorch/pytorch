@@ -91,11 +91,25 @@ namespace at { namespace native {
 
 /* Note [Jiterator]
 TensorIterator TODOs:
- - connect with jit
- - implement caching
+ - fix Trivial Offsetcalculator cases
+ - review caching
  - review dynamic casting reimplementation
  -   (in particular an output dtype distinct from the common dtype like abs)
  - review jitted_can_vectorize_up_to and verify matches non-jitted version
+ - add INFINITY and NAN macros for Zeta
+ - WORKING: 
+     - noncontiguous
+     - noncontiguous with out
+     - noncontiguous with out (different dtype)
+     - contiguous
+     - contiguous with out
+     - contiguous with out (different dtypes)
+ - UNTESTED:
+     - binary inputs different dtypes from each other
+     - binary inputs different dtypes from out
+     - binary all three tensors different dtypes
+     - inplace and method variations
+
 
 Jit TODOs:
 
@@ -109,7 +123,7 @@ Project TODOs:
 // Only handles elementwise unary and binary kernels with a 
 //   common dtype and a single output.
 // NOTE: this assumes the op's iterator has a common_dtype.
-template <typename return_type, typename common_type, int arity>
+template <char const *name, typename return_type, typename compute_type, int arity>
 void jitted_gpu_kernel(TensorIteratorBase& iter, const std::string& f) {
   // TODO: this preamble is common to both jitted_gpu_kernel and gpu_kernel
   //   Maybe it could be refactored?
@@ -125,8 +139,9 @@ void jitted_gpu_kernel(TensorIteratorBase& iter, const std::string& f) {
 
   if (!iter.can_use_32bit_indexing()) {
     for (auto& sub_iter : iter.with_32bit_indexing()) {
-      jitted_gpu_kernel<return_type, common_type, arity>(sub_iter, f);
+      jitted_gpu_kernel<name, return_type, compute_type, arity>(sub_iter, f);
     }
+
     return;
   }
 
@@ -138,6 +153,7 @@ void jitted_gpu_kernel(TensorIteratorBase& iter, const std::string& f) {
   //   casting is needed.
   // TODO: this needs additional review
   bool needs_dynamic_casting = false;
+  
   // Checks output
   const ScalarType return_scalar_type = c10::CppTypeToScalarType<return_type>::value;
   if (iter.dtype(0) != return_scalar_type) {
@@ -146,20 +162,26 @@ void jitted_gpu_kernel(TensorIteratorBase& iter, const std::string& f) {
     std::cout << "return_scalar_type is " << return_scalar_type << std::endl;
     needs_dynamic_casting = true;
   }
+  
   // Checks input(s)
-  const auto common_dtype = iter.common_dtype();
+  const ScalarType compute_scalar_type = c10::CppTypeToScalarType<compute_type>::value;
   for (auto i = decltype(arity){1}; i < (arity + 1); ++i) {
-    if (iter.dtype(i) != common_dtype) {
-      std::cout << "iter.dtype(i) != common_dtype (i=" << i << ")" << std::endl;
+    if (iter.dtype(i) != compute_scalar_type) {
+      std::cout << "iter.dtype(i) != compute_scalar_type (i=" << i << ")" << std::endl;
       std::cout << "iter.dtype(i) is " << iter.dtype(i) << std::endl;
-      std::cout << "common_dtype is " << common_dtype << std::endl;
+      std::cout << "compute_scalar_type is " << compute_scalar_type << std::endl;
       needs_dynamic_casting = true;
       break;
     }
   }
 
-  gpu_kernel_impl</*jitting=*/ true, return_type, common_type, arity>(iter, f, needs_dynamic_casting);
+  jitted_gpu_kernel_impl</*name*/ name, 
+                  /*return_type=*/ return_type, 
+                  /*compute_type=*/ compute_type, 
+                  arity>(iter, f, needs_dynamic_casting);
 }
+
+const char NO_NAME[] = "";
 
 template <typename func_t>
 void gpu_kernel(TensorIteratorBase& iter, const func_t& f) {
@@ -186,7 +208,7 @@ void gpu_kernel(TensorIteratorBase& iter, const func_t& f) {
   constexpr int arity = traits::arity;
   const bool dynamic_casting = needs_dynamic_casting<func_t>::check(iter);
 
-  gpu_kernel_impl</*jitting=*/ false, /*return_type=*/ void, /*common_type=*/ void, arity>(iter, f, dynamic_casting);
+  gpu_kernel_impl<arity>(iter, f, dynamic_casting);
 }
 
 template<typename arg1_t, typename arg2_t, typename return_t, typename func_t>

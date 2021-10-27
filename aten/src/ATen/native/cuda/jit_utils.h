@@ -14,12 +14,23 @@ struct NvrtcFunction {
   CUmodule module = CUmodule();
   CUfunction function = nullptr;
 };
+
+// Silly functions
+std::string silly_generate_code();
+
+void launch_silly_jitted_pwise_function(
+    NvrtcFunction function,
+    std::array<void*, 4>& args,
+    const int nBlocks,
+    const int kBlockSize);
+
+// Serious functions
 std::string generate_code(
     int nTensors,
-    std::string& func,
-    std::string& name,
-    std::string& common_type,
-    std::string& result_type,
+    const std::string& func,
+    const std::string& name,
+    const std::string& common_type,
+    const std::string& result_type,
     bool contiguous,
     bool dynamic_casting);
 NvrtcFunction jit_pwise_function(

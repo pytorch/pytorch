@@ -163,6 +163,20 @@ unsigned int m1;  // Magic number: m' above.
 unsigned int shift;  // Shift amounts.
 };
 
+template <int NARGS, typename index_t = uint32_t>
+struct TrivialOffsetCalculator {
+  // The offset for each argument. Wrapper around fixed-size array.
+  // The offsets are in # of elements, not in bytes.
+  Array<${index_type}, NARGS> get(index_t linear_idx) const {
+    offset_type offsets;
+    #pragma unroll
+    for (int arg = 0; arg < NARGS; arg++) {
+      offsets[arg] = linear_idx;
+    }
+    return offsets;
+  }
+};
+
 template<int NARGS>
 struct OffsetCalculator {
 OffsetCalculator() = default;
@@ -218,8 +232,9 @@ auto thread_idx = threadIdx.x;
 #pragma unroll
 for (int j = 0; j < thread_work_size; j++){
     if (thread_idx >= remaining) {
-    break;
+        break;
     }
+
     int linear_idx = thread_idx + block_work_size * idx;
     auto input_offsets = input_calculator.get(linear_idx);
     // printf(
@@ -242,7 +257,7 @@ thread_idx = threadIdx.x;
 #pragma unroll
 for (int j = 0; j < thread_work_size; j++){
     if (thread_idx >= remaining) {
-    break;
+        break;
     }
     //TODO maybe think about unifying offset calculators and reuse
     //offsets computed in the load loop
