@@ -408,6 +408,13 @@ namespace detail {
 
 namespace detail {
 
+  // dummy class for non selected custom torchbind classes
+  class ClassNotSelected {
+    public:
+      ClassNotSelected& def_pickle(...){ return *this;}
+      ClassNotSelected& def(...){ return *this;}
+  };
+
   // A SelectiveStr is like a const char*, except that it also comes
   // with a type brand that says whether or not the name is enabled or
   // not.  If the string is disabled, then (at compile time) we DON'T generate
@@ -417,12 +424,13 @@ namespace detail {
   template <bool enabled>
   class SelectiveStr {
   public:
-    constexpr SelectiveStr(const char* name) : name_(name) {}
+    constexpr explicit SelectiveStr(const char* name) : name_(name) {}
     constexpr operator const char*() { return name_; }
   private:
     const char* name_;
   };
 
+#define TORCH_SELECTIVE_CLASS(n) torch::detail::SelectiveStr<c10::impl::custom_class_allowlist_check(n)>(n)
 #define TORCH_SELECTIVE_NAME(n) torch::detail::SelectiveStr<c10::impl::op_allowlist_check(n)>(n)
 #define TORCH_SELECTIVE_SCHEMA(n) torch::detail::SelectiveStr<c10::impl::schema_allowlist_check(n)>(n)
 
@@ -680,6 +688,12 @@ public:
 
   template <class CurClass>
   inline torch::class_<CurClass> class_(const std::string& className);
+
+  template <class CurClass>
+  inline torch::class_<CurClass> class_(detail::SelectiveStr<true> className);
+
+  template <class CurClass>
+  inline detail::ClassNotSelected class_(detail::SelectiveStr<false> className);
 
 private:
   Kind kind_;
