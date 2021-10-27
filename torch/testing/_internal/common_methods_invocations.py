@@ -6139,6 +6139,19 @@ def _generate_sample_inputs_loss():
     for s, r in product(shapes, reductions):
         yield s, r
 
+def sample_inputs_huber_loss(op_info, device, dtype, requires_grad, **kwargs):
+    _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    def gen_shape_kwargs():
+        for s, r in _generate_sample_inputs_loss():
+            yield _make_tensor(s), _make_tensor(s), dict(reduction=r, delta=random.uniform(0.01, 9))
+
+    def gen_inputs():
+        for input, target, kwargs in gen_shape_kwargs():
+            yield SampleInput(input, args=(target, ), kwargs=kwargs)
+
+    return list(gen_inputs())
+
 def sample_inputs_gaussian_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
     _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     make_var = partial(make_tensor, low=0, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -11233,6 +11246,20 @@ op_db: List[OpInfo] = [
             # def the_method(i0, i1):
             #     return torch.nn.functional.nll_loss(i0, i1, weight=tensor([8.4784, 1.7658, 4.3228], dtype=torch.float32))
             #                                                        ~~~~~~ <--- HERE
+            DecorateInfo(unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit", dtypes=(torch.float32,),),
+        ),
+    ),
+    OpInfo(
+        "nn.functional.huber_loss",
+        ref=_NOTHING,
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        supports_out=False,
+        sample_inputs_func=sample_inputs_huber_loss,
+        skips=(
+            # JIT does not support variadic tensors.
+            # RuntimeError: input->type()->kind() == TypeKind::OptionalType
+            # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":270,
+            # please report a bug to PyTorch.
             DecorateInfo(unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit", dtypes=(torch.float32,),),
         ),
     ),
