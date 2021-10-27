@@ -9,3 +9,7 @@ t.py
 .vscode/
 ccache.sh
 *.ipynb
+docs/build
+docs/src
+docs/source/generated
+.DS_Store
