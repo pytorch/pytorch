@@ -1373,6 +1373,7 @@ struct Graph {
   friend TORCH_API std::ostream& operator<<(std::ostream& out, const Graph& g);
 
   TORCH_API std::shared_ptr<Graph> copy();
+  TORCH_API std::unique_ptr<Graph> copyUnique();
   TORCH_API void remapTypes(const std::function<TypePtr(TypePtr)>& type_map);
 
  private:
@@ -1380,6 +1381,7 @@ struct Graph {
   TORCH_API void freeNode(Node* n);
   TORCH_API void freeValue(Value* v);
   TORCH_API void freeBlock(Block* b);
+  void cloneFrom(Graph& src);
 };
 
 /** \brief An utility class for setting temporary insertion points.
