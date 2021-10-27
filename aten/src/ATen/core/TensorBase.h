@@ -20,6 +20,7 @@
 
 namespace c10 {
 struct TensorOptions;
+class Scalar;
 }
 
 namespace torch { namespace autograd {
@@ -137,6 +138,9 @@ class TORCH_API TensorBase {
   // will only lead to trouble and dangling references.
   c10::MaybeOwned<TensorBase> expect_contiguous(
       MemoryFormat memory_format=MemoryFormat::Contiguous) && = delete;
+
+  const TensorBase& fill_(const c10::Scalar& scalar) const;
+  const TensorBase& zero_() const;
 
   bool is_complex() const {
     return at::isComplexType(this->scalar_type());
@@ -366,6 +370,11 @@ class TORCH_API TensorBase {
   /// Returns if a `Tensor` has XLA backend.
   bool is_xla() const {
     return impl_->is_xla();
+  }
+
+  /// Returns if a `Tensor` has HPU backend.
+  bool is_hpu() const {
+    return impl_->is_hpu();
   }
 
   /// Returns if a `Tensor` has Lazy backend.

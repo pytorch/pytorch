@@ -1,3 +1,5 @@
+# Owner(s): ["NNC"]
+
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -1222,7 +1224,6 @@ class TestTensorExprFuser(BaseTestClass):
     def test_softmax_cuda(self):
         self._test_softmax('cuda')
 
-    @unittest.skip("float16 is not supported yet.")
     def test_half_gelu(self):
         devices = ["cuda"] if torch.cuda.is_available() else []
 

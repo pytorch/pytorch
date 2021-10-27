@@ -1,4 +1,5 @@
 #include <ATen/core/op_registration/infer_schema.h>
+#include <c10/util/irange.h>
 #include <sstream>
 
 namespace c10 {
@@ -6,12 +7,23 @@ namespace c10 {
 namespace detail {
 namespace infer_schema {
 namespace {
+
+std::string fastToString(size_t x) {
+  if (C10_LIKELY(x < 10)) {
+    std::string result;
+    result.push_back('_');
+    result.push_back('0' + x);
+    return result;
+  }
+  return "_" + c10::guts::to_string(x);
+}
+
 std::vector<Argument> createArgumentVector(c10::ArrayRef<ArgumentDef> args) {
   std::vector<Argument> result;
   result.reserve(args.size());
-  for (size_t i = 0; i < args.size(); ++i) {
+  for (const auto i : c10::irange(args.size())) {
     // Arguments are named "_<index>"
-    result.emplace_back("_" + c10::guts::to_string(i), (*args[i].getTypeFn)());
+    result.emplace_back(fastToString(i), (*args[i].getTypeFn)());
   }
   return result;
 }
@@ -38,7 +50,7 @@ C10_EXPORT c10::optional<std::string> findSchemaDifferences(const FunctionSchema
              " vs " + guts::to_string(rhs.returns().size());
   }
 
-  for (size_t i = 0; i < lhs.arguments().size(); ++i) {
+  for (const auto i : c10::irange(lhs.arguments().size())) {
     const TypePtr& leftType = lhs.arguments()[i].type();
     const TypePtr& rightType = rhs.arguments()[i].type();
     // Type::operator== is virtual. Comparing pointers first is
@@ -50,7 +62,7 @@ C10_EXPORT c10::optional<std::string> findSchemaDifferences(const FunctionSchema
     }
   }
 
-  for (size_t i = 0; i < lhs.returns().size(); ++i) {
+  for (const auto i : c10::irange(lhs.returns().size())) {
     const TypePtr& leftType = lhs.returns()[i].type();
     const TypePtr& rightType = rhs.returns()[i].type();
     // See above about comparing pointers first.

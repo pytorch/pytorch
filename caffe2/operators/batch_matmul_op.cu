@@ -12,7 +12,7 @@ bool BatchMatMulOp<CUDAContext, DefaultEngine>::RunOnDevice() {
 REGISTER_CUDA_OPERATOR(BatchMatMul, BatchMatMulOp<CUDAContext>);
 
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 
 template <>
 bool BatchMatMulOp<CUDAContext, TensorCoreEngine>::RunOnDevice() {

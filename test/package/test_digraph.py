@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: package/deploy"]
+
 from torch.package._digraph import DiGraph
 from torch.testing._internal.common_utils import run_tests
 
@@ -92,6 +94,37 @@ class TestDiGraph(PackageTestCase):
     def test_contains_non_hashable(self):
         g = DiGraph()
         self.assertFalse([1, 2, 3] in g)
+
+    def test_forward_closure(self):
+        g = DiGraph()
+        g.add_edge("1", "2")
+        g.add_edge("2", "3")
+        g.add_edge("5", "4")
+        g.add_edge("4", "3")
+        self.assertTrue(g.forward_transitive_closure("1") == set(["1", "2", "3"]))
+        self.assertTrue(g.forward_transitive_closure("4") == set(["4", "3"]))
+
+    def test_all_paths(self):
+        g = DiGraph()
+        g.add_edge("1", "2")
+        g.add_edge("1", "7")
+        g.add_edge("7", "8")
+        g.add_edge("8", "3")
+        g.add_edge("2", "3")
+        g.add_edge("5", "4")
+        g.add_edge("4", "3")
+
+        result = g.all_paths("1", "3")
+        # to get rid of indeterminism
+        actual = set([i.strip("\n") for i in result.split(";")[2:-1]])
+        expected = {
+            '"2" -> "3"',
+            '"1" -> "7"',
+            '"7" -> "8"',
+            '"1" -> "2"',
+            '"8" -> "3"',
+        }
+        self.assertEqual(actual, expected)
 
 
 if __name__ == "__main__":

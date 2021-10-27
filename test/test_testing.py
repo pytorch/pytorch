@@ -1,3 +1,5 @@
+# Owner(s): ["module: tests"]
+
 import collections
 import doctest
 import functools
@@ -437,6 +439,8 @@ class TestTesting(TestCase):
     @dtypes(torch.bool, torch.long, torch.float, torch.cfloat)
     def test_make_tensor(self, device, dtype):
         def check(size, low, high, requires_grad, noncontiguous):
+            if dtype not in [torch.float, torch.cfloat]:
+                requires_grad = False
             t = make_tensor(size, device, dtype, low=low, high=high,
                             requires_grad=requires_grad, noncontiguous=noncontiguous)
 
@@ -450,10 +454,7 @@ class TestTesting(TestCase):
             if t.numel() > 0 and dtype in [torch.long, torch.float]:
                 self.assertTrue(t.le(high).logical_and(t.ge(low)).all().item())
 
-            if dtype in [torch.float, torch.cfloat]:
-                self.assertEqual(t.requires_grad, requires_grad)
-            else:
-                self.assertFalse(t.requires_grad)
+            self.assertEqual(t.requires_grad, requires_grad)
 
             if t.numel() > 1:
                 self.assertEqual(t.is_contiguous(), not noncontiguous)
@@ -771,6 +772,15 @@ class TestAssertClose(TestCase):
             for fn in assert_close_with_inputs(actual, expected):
                 with self.assertRaisesRegex(AssertionError, "layout"):
                     fn()
+
+    def test_mismatching_layout_no_check(self):
+        strided = torch.randn((2, 2))
+        sparse_coo = strided.to_sparse()
+        sparse_csr = strided.to_sparse_csr()
+
+        for actual, expected in itertools.combinations((strided, sparse_coo, sparse_csr), 2):
+            for fn in assert_close_with_inputs(actual, expected):
+                fn(check_layout=False)
 
     def test_mismatching_dtype(self):
         actual = torch.empty((), dtype=torch.float)
