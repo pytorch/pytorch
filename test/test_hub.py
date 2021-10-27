@@ -1,3 +1,5 @@
+# Owner(s): ["module: hub"]
+
 import unittest
 from urllib.error import URLError
 import os
