@@ -263,7 +263,7 @@ class ModuleCloneHelper {
       }
       return type_ptr;
     };
-    auto graph = method.graph()->copy();
+    auto graph = toGraphFunction(method).graph()->copy();
     remapTypes(graph.get(), source, target, module_qconfig_map, type_remap_fn);
     // remap self
     graph->inputs()[0]->setType(target.type());
