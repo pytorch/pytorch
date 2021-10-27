@@ -12,6 +12,10 @@
 #include <ATen/cuda/CUDAConfig.h>
 #endif
 
+#if AT_CUDNN_ENABLED()
+#include <ATen/cudnn/cudnn-wrapper.h>
+#endif
+
 namespace torch {
 namespace jit {
 
@@ -66,13 +70,6 @@ void fuseFrozenConvAddReluImpl(std::shared_ptr<Graph>& graph) {
 
   auto filter = [](const Match& match,
                    const std::unordered_map<std::string, Value*>& vmap) {
-#if CUDNN_VERSION < 8000
-    // cuDNN Conv-Bias-Relu fusion may raise CUDNN_STATUS_NOT_SUPPORTED error
-    // in 7.6.5 or lower. See
-    // https://github.com/pytorch/pytorch/pull/65594#issuecomment-948989177
-    return false;
-#endif
-
     auto weight = toIValue(match.values_map.at(vmap.at("weight")));
     if (!weight.has_value() || !weight.value().isTensor()) {
       return false;
@@ -83,6 +80,13 @@ void fuseFrozenConvAddReluImpl(std::shared_ptr<Graph>& graph) {
     ) {
       return false;
     }
+
+#if CUDNN_VERSION < 8000
+    // cuDNN Conv-Bias-Relu fusion may raise CUDNN_STATUS_NOT_SUPPORTED error
+    // in 7.6.5 or lower. See
+    // https://github.com/pytorch/pytorch/pull/65594#issuecomment-948989177
+    return false;
+#endif
 
     // bias is optional
     if (vmap.find("bias") != vmap.end()) {

@@ -2116,6 +2116,11 @@ class TestFrozenOptimizations(JitTestCase):
 
     @unittest.skipIf(not TEST_CUDNN, "requires CUDNN")
     def test_freeze_conv_relu_fusion(self):
+        if torch.backends.cudnn.version() < 8000:
+            # cuDNN Conv-Bias-Relu fusion may raise CUDNN_STATUS_NOT_SUPPORTED error in 7.6.5 or lower.
+            # See https://github.com/pytorch/pytorch/pull/65594#issuecomment-948989177
+            return
+
         conv_bias = [True, False]
         conv_ops = [nn.Conv2d, nn.Conv3d]
         add_z = [True, False]
