@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: package/deploy"]
+
 import textwrap
 import types
 
