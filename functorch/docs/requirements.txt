@@ -1,0 +1,6 @@
+sphinx==3.5.4
+docutils==0.16
+-e git+https://github.com/pytorch/pytorch_sphinx_theme.git#egg=pytorch_sphinx_theme
+-e git://github.com/readthedocs/sphinx_rtd_theme.git#egg=sphinx_rtd_theme
+sphinxcontrib.katex
+sphinx_copybutton
