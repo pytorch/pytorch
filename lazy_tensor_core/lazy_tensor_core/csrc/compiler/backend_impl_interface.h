@@ -59,7 +59,7 @@ class BackendRegistrar {
 
 inline const BackendImplInterface* getBackendRegistrar() {
   auto p = backend_impl_registry.load();
-  LTC_CHECK(p) << "Lazy tensor backend not registered.";
+  CHECK(p) << "Lazy tensor backend not registered.";
   return p;
 }
 

@@ -10,8 +10,7 @@ namespace ops {
 Expand::Expand(const torch::lazy::Value& input, std::vector<int64_t> size,
                bool is_scalar_expand)
     : TsNode(torch::lazy::OpKind(at::aten::expand), {input},
-           /*num_outputs=*/1,
-           torch::lazy::MHash(size, is_scalar_expand)),
+             /*num_outputs=*/1, torch::lazy::MHash(size, is_scalar_expand)),
       size_(std::move(size)),
       is_scalar_expand_(is_scalar_expand) {
   SetShapeDeferred(

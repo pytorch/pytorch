@@ -1,7 +1,9 @@
 #include "lazy_tensor_core/csrc/ops/ops.h"
 
 #include <c10/util/Half.h>
+
 #include <cmath>
+
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/ops/arithmetic_ir_ops.h"
@@ -11,7 +13,6 @@
 #include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensor_core/csrc/torch_util.h"
 #include "lazy_tensor_core/csrc/ts_backend/LazyLazyIr.h"
-#include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/computation_client/util.h"
 #include "lazy_tensors/shape_util.h"
 #include "torch/csrc/lazy/core/ir_metadata.h"
@@ -148,8 +149,7 @@ NodePtr BroadcastTensors(OpList tensors) {
   return node;
 }
 
-NodePtr Identity(int64_t lines, int64_t cols,
-                 c10::ScalarType element_type) {
+NodePtr Identity(int64_t lines, int64_t cols, c10::ScalarType element_type) {
   return GenericOp(
       OpKind(at::aten::eye),
       lazy_tensors::ShapeUtil::MakeShape(element_type, {lines, cols}),
@@ -184,14 +184,16 @@ NodePtr Remainder(const torch::lazy::Value& input, const torch::lazy::Value& div
 }
 
 NodePtr MaxUnary(const torch::lazy::Value& input) {
-  LTC_CHECK_GT(lazy_tensors::ShapeUtil::ElementsIn(ir::GetShapeFromTsValue(input)), 0);
+  CHECK_GT(lazy_tensors::ShapeUtil::ElementsIn(ir::GetShapeFromTsValue(input)),
+           0);
   return GenericOp(
       OpKind(at::aten::max), {input},
       lazy_tensors::ShapeUtil::MakeShape(ir::GetShapeFromTsValue(input).at_element_type(), {}));
 }
 
 NodePtr MinUnary(const torch::lazy::Value& input) {
-  LTC_CHECK_GT(lazy_tensors::ShapeUtil::ElementsIn(ir::GetShapeFromTsValue(input)), 0);
+  CHECK_GT(lazy_tensors::ShapeUtil::ElementsIn(ir::GetShapeFromTsValue(input)),
+           0);
   return GenericOp(
       OpKind(at::aten::min), {input},
       lazy_tensors::ShapeUtil::MakeShape(ir::GetShapeFromTsValue(input).at_element_type(), {}));
@@ -206,7 +208,7 @@ NodePtr Take(const torch::lazy::Value& input, const torch::lazy::Value& index) {
 
 NodePtr LogDet(const torch::lazy::Value& input) {
   const lazy_tensors::Shape& input_shape = ir::GetShapeFromTsValue(input);
-  LTC_CHECK_GE(input_shape.rank(), 2) << input_shape;
+  CHECK_GE(input_shape.rank(), 2) << input_shape;
   // The input tensor is ...,N,N
   lazy_tensors::Shape logdet_shape(input_shape);
   logdet_shape.DeleteDimension(input_shape.rank() - 1);

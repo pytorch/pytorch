@@ -9,7 +9,6 @@
 #include "lazy_tensor_core/csrc/ir_dump_util.h"
 #include "lazy_tensor_core/csrc/ir_util.h"
 #include "lazy_tensor_core/csrc/python_util.h"
-#include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/computation_client/sys_util.h"
 #include "lazy_tensors/computation_client/unique.h"
 #include "lazy_tensors/str_split.h"
@@ -28,7 +27,7 @@ DebugUtil::GraphFormat DefaultGraphFormat() {
   } else if (fmt_str == "dot") {
     return DebugUtil::GraphFormat::kDot;
   }
-  LTC_ERROR() << "Invalid save graph format: " << fmt_str;
+  LOG(ERROR) << "Invalid save graph format: " << fmt_str;
 }
 
 std::unordered_set<std::string>* LoadExperiments() {
@@ -105,7 +104,7 @@ std::string DebugUtil::GetTensorsGraphInfo(c10::ArrayRef<LazyTensor> tensors,
     graph_str = ir::DumpUtil::ToBackend(
         root_values, unique_device ? *unique_device : GetCurrentDevice());
   } else {
-    LTC_ERROR() << "Invalid graph format: " << format;
+    LOG(ERROR) << "Invalid graph format: " << format;
   }
   ss << "\n## BEGIN_GRAPH\n" << graph_str << "\n## END_GRAPH\n\n";
   return ss.str();

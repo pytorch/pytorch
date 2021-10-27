@@ -7,10 +7,9 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-Stack::Stack(OpList values,
-             int64_t dim)
+Stack::Stack(OpList values, int64_t dim)
     : TsNode(torch::lazy::OpKind(at::aten::stack), values,
-           /*num_outputs=*/1, torch::lazy::MHash(dim)),
+             /*num_outputs=*/1, torch::lazy::MHash(dim)),
       dim_(dim) {
   SetShapeDeferred(
       [&]() { return compiler::NodeLowering::Get()->Infer(this); });

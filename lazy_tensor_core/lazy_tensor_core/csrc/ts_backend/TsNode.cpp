@@ -101,7 +101,7 @@ const lazy_tensors::Shape& TsNode::shape(size_t output_index) const {
   if (shape_.IsTuple()) {
     return shape_.tuple_shapes(output_index);
   }
-  LTC_CHECK_EQ(output_index, 0);
+  CHECK_EQ(output_index, 0);
   return shape_;
 }
 
@@ -154,7 +154,7 @@ torch::lazy::hash_t TsNode::GetOpHash(OpKind op,
 }
 
 void TsNode::AddOperand(NodePtr node, size_t index) {
-  LTC_CHECK_LT(index, node->num_outputs());
+  CHECK_LT(index, node->num_outputs());
   operands_.push_back(std::move(node));
   operands_as_outputs_.push_back(Output(operands_.back().get(), index));
 }

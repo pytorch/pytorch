@@ -10,17 +10,18 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-AsStridedViewUpdate::AsStridedViewUpdate(
-    const torch::lazy::Value& target, const torch::lazy::Value& input,
-    std::vector<int64_t> size,
-    std::vector<int64_t> stride, int64_t storage_offset)
-    : TsNode(ltc_as_strided_view_update, {target, input},
-           [&]() {
-             return lazy_tensors::ShapeUtil::MakeShape(
-                 ir::GetShapeFromTsValue(target).at_element_type(), size);
-           },
-           /*num_outputs=*/1,
-           torch::lazy::MHash(size, stride, storage_offset)),
+AsStridedViewUpdate::AsStridedViewUpdate(const torch::lazy::Value& target,
+                                         const torch::lazy::Value& input,
+                                         std::vector<int64_t> size,
+                                         std::vector<int64_t> stride,
+                                         int64_t storage_offset)
+    : TsNode(
+          ltc_as_strided_view_update, {target, input},
+          [&]() {
+            return lazy_tensors::ShapeUtil::MakeShape(
+                ir::GetShapeFromTsValue(target).at_element_type(), size);
+          },
+          /*num_outputs=*/1, torch::lazy::MHash(size, stride, storage_offset)),
       size_(std::move(size)),
       stride_(std::move(stride)),
       storage_offset_(storage_offset) {}

@@ -8,15 +8,14 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-AllToAll::AllToAll(const torch::lazy::Value& input, const torch::lazy::Value& token,
-                   int64_t split_dimension,
-                   int64_t concat_dimension,
-                   int64_t split_count,
+AllToAll::AllToAll(const torch::lazy::Value& input,
+                   const torch::lazy::Value& token, int64_t split_dimension,
+                   int64_t concat_dimension, int64_t split_count,
                    std::vector<std::vector<int64_t>> groups)
     : TsNode(ltc_all_to_all, {input, token},
-           /*num_outputs=*/2,
-           torch::lazy::MHash(split_dimension, concat_dimension,
-                                     split_count, groups)),
+             /*num_outputs=*/2,
+             torch::lazy::MHash(split_dimension, concat_dimension, split_count,
+                                groups)),
       split_dimension_(split_dimension),
       concat_dimension_(concat_dimension),
       split_count_(split_count),

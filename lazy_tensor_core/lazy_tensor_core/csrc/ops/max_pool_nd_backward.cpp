@@ -1,7 +1,6 @@
 #include "lazy_tensor_core/csrc/ops/max_pool_nd_backward.h"
 
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
-#include "lazy_tensors/computation_client/debug_macros.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -15,8 +14,8 @@ c10::Symbol MaxPoolNdBackwardSymbol(int64_t spatial_dim_count) {
     case 3:
       return at::aten::max_pool3d_with_indices_backward;
     default:
-      LTC_ERROR() << "Invalid number of spatial dimensions: "
-                  << spatial_dim_count;
+      LOG(ERROR) << "Invalid number of spatial dimensions: "
+                 << spatial_dim_count;
   }
 }
 
@@ -24,15 +23,13 @@ c10::Symbol MaxPoolNdBackwardSymbol(int64_t spatial_dim_count) {
 
 MaxPoolNdBackward::MaxPoolNdBackward(
     const torch::lazy::Value& grad_output, const torch::lazy::Value& input,
-    int64_t spatial_dim_count,
-    std::vector<int64_t> kernel_size,
-    std::vector<int64_t> stride,
-    std::vector<int64_t> padding, bool ceil_mode)
+    int64_t spatial_dim_count, std::vector<int64_t> kernel_size,
+    std::vector<int64_t> stride, std::vector<int64_t> padding, bool ceil_mode)
     : TsNode(torch::lazy::OpKind(MaxPoolNdBackwardSymbol(spatial_dim_count)),
-           {grad_output, input},
-           /*num_outputs=*/1,
-           torch::lazy::MHash(spatial_dim_count, kernel_size, stride,
-                                     padding, ceil_mode)),
+             {grad_output, input},
+             /*num_outputs=*/1,
+             torch::lazy::MHash(spatial_dim_count, kernel_size, stride, padding,
+                                ceil_mode)),
       spatial_dim_count_(spatial_dim_count),
       kernel_size_(std::move(kernel_size)),
       stride_(std::move(stride)),

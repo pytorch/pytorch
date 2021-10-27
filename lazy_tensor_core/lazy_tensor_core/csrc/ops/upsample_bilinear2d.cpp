@@ -12,8 +12,7 @@ UpsampleBilinear::UpsampleBilinear(const torch::lazy::Value& input,
                                    std::vector<int64_t> output_size,
                                    bool align_corners)
     : TsNode(torch::lazy::OpKind(at::aten::upsample_bilinear2d), {input},
-           /*num_outputs=*/1,
-           torch::lazy::MHash(output_size, align_corners)),
+             /*num_outputs=*/1, torch::lazy::MHash(output_size, align_corners)),
       output_size_(std::move(output_size)),
       align_corners_(align_corners) {
   SetShapeDeferred(

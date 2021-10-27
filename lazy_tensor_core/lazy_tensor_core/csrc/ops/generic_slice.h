@@ -16,9 +16,7 @@ class GenericSlice : public TsNode {
 
   std::string ToString() const override;
 
-  const std::vector<int64_t>& base_indices() const {
-    return base_indices_;
-  }
+  const std::vector<int64_t>& base_indices() const { return base_indices_; }
 
   const std::vector<int64_t>& sizes() const { return sizes_; }
 

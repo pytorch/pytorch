@@ -5,7 +5,6 @@
 
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
 #include "lazy_tensor_core/csrc/python_util.h"
-#include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/computation_client/sys_util.h"
 
 namespace torch_lazy_tensors {
@@ -25,13 +24,13 @@ LoweringContext::GetParametersData() const {
 }
 
 void LoweringContext::LowerNodeToResult(const torch::lazy::Node* node) {
-  LTC_LOG(FATAL) << "Not implemented.";
+  LOG(FATAL) << "Not implemented.";
 }
 
 void LoweringContext::AddParameter(const torch::lazy::Output& output, size_t index,
                                    const lazy_tensors::Shape& shape,
                                    const std::string& name) {
-  LTC_LOG(FATAL) << "Not implemented.";
+  LOG(FATAL) << "Not implemented.";
 }
 
 void LoweringContext::SetUpAlias(const lazy_tensors::ShapeIndex& output_index,

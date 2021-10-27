@@ -10,7 +10,8 @@ namespace ops {
 
 class ReplicationPadBackward : public TsNode {
  public:
-  ReplicationPadBackward(const torch::lazy::Value& gard_output, const torch::lazy::Value& input,
+  ReplicationPadBackward(const torch::lazy::Value& gard_output,
+                         const torch::lazy::Value& input,
                          std::vector<int64_t> padding);
 
   NodePtr Clone(OpList operands) const override;

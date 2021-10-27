@@ -1,13 +1,11 @@
 #pragma once
 
-#include <string>
+#include <c10/util/Logging.h>
 
-#include "lazy_tensors/computation_client/ltc_logging.h"
+#include <string>
 
 namespace lazy_tensors {
 
-inline std::string CurrentStackTrace() {
-  LTC_LOG(FATAL) << "Not implemented yet.";
-}
+inline std::string CurrentStackTrace() { LOG(FATAL) << "Not implemented yet."; }
 
 }  // namespace lazy_tensors

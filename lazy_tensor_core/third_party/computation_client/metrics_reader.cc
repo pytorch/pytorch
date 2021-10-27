@@ -3,7 +3,6 @@
 #include <sstream>
 
 #include "lazy_tensors/computation_client/computation_client.h"
-#include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/computation_client/metrics.h"
 #include "lazy_tensors/computation_client/util.h"
 

@@ -7,7 +7,6 @@
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/reduction.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
-#include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/computation_client/sys_util.h"
 #include "lazy_tensors/computation_client/util.h"
 #include "lazy_tensors/shape_util.h"
@@ -15,15 +14,14 @@
 
 namespace torch_lazy_tensors {
 
-std::vector<int64_t> GetCompleteShape(
-    c10::ArrayRef<int64_t> output_sizes,
-    c10::ArrayRef<int64_t> input_sizes) {
+std::vector<int64_t> GetCompleteShape(c10::ArrayRef<int64_t> output_sizes,
+                                      c10::ArrayRef<int64_t> input_sizes) {
   c10::optional<size_t> incomplete_dim;
   int64_t incomplete_element_count = 1;
   for (size_t dim = 0; dim < output_sizes.size(); ++dim) {
     int64_t dim_size = output_sizes[dim];
     if (dim_size < 0) {
-      LTC_CHECK(!incomplete_dim)
+      CHECK(!incomplete_dim)
           << "More than one incomplete dimension found: " << *incomplete_dim
           << " and " << dim;
       incomplete_dim = dim;
@@ -34,18 +32,17 @@ std::vector<int64_t> GetCompleteShape(
   int64_t total_element_count =
       lazy_tensors::util::Multiply<int64_t>(input_sizes);
   if (!incomplete_dim) {
-    LTC_CHECK_EQ(
-        total_element_count,
-        lazy_tensors::util::Multiply<int64_t>(output_sizes))
+    CHECK_EQ(total_element_count,
+             lazy_tensors::util::Multiply<int64_t>(output_sizes))
         << "(" << c10::Join(", ", output_sizes) << ") vs. ("
         << c10::Join(", ", input_sizes) << ")";
     return lazy_tensors::util::ToVector<int64_t>(output_sizes);
   }
-  LTC_CHECK_GT(incomplete_element_count, 0)
+  CHECK_GT(incomplete_element_count, 0)
       << "Cannot reshape tensor of 0 elements into shape "
       << "(" << c10::Join(", ", output_sizes)
       << ") because the unspecified dimension size -1 can be any value";
-  LTC_CHECK_EQ(total_element_count % incomplete_element_count, 0)
+  CHECK_EQ(total_element_count % incomplete_element_count, 0)
       << "(" << c10::Join(", ", output_sizes) << ") vs. ("
       << c10::Join(", ", input_sizes) << ")";
   std::vector<int64_t> complete_output_sizes =
@@ -55,9 +52,8 @@ std::vector<int64_t> GetCompleteShape(
   return complete_output_sizes;
 }
 
-std::vector<int64_t> BuildSqueezedDimensions(
-    c10::ArrayRef<int64_t> dimensions,
-    int64_t squeeze_dim) {
+std::vector<int64_t> BuildSqueezedDimensions(c10::ArrayRef<int64_t> dimensions,
+                                             int64_t squeeze_dim) {
   std::vector<int64_t> output_dimensions;
   for (int64_t i = 0; i < dimensions.size(); ++i) {
     int64_t dim = dimensions[i];
@@ -68,17 +64,15 @@ std::vector<int64_t> BuildSqueezedDimensions(
   return output_dimensions;
 }
 
-std::vector<int64_t> BuildUnsqueezeDimensions(
-    c10::ArrayRef<int64_t> dimensions, int64_t dim) {
-  LTC_CHECK_LE(dim, dimensions.size());
-  auto unsqueeze_dimensions =
-      lazy_tensors::util::ToVector<int64_t>(dimensions);
+std::vector<int64_t> BuildUnsqueezeDimensions(c10::ArrayRef<int64_t> dimensions,
+                                              int64_t dim) {
+  CHECK_LE(dim, dimensions.size());
+  auto unsqueeze_dimensions = lazy_tensors::util::ToVector<int64_t>(dimensions);
   unsqueeze_dimensions.insert(unsqueeze_dimensions.begin() + dim, 1);
   return unsqueeze_dimensions;
 }
 
-size_t ComputeSplitCount(int64_t dim_size,
-                         c10::ArrayRef<int64_t> split_sizes) {
+size_t ComputeSplitCount(int64_t dim_size, c10::ArrayRef<int64_t> split_sizes) {
   size_t count = 0;
   for (auto size : split_sizes) {
     if (size > dim_size) {

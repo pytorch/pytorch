@@ -1,6 +1,6 @@
 #include "lazy_tensor_core/csrc/ir_util.h"
 
-#include "lazy_tensors/computation_client/debug_macros.h"
+#include <c10/util/Logging.h>
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -22,20 +22,20 @@ std::vector<torch::lazy::Node*> Util::ComputePostOrder(
         if (oit == emap->end()) {
           queue.push_back(const_cast<torch::lazy::Node*>(output.node));
         } else if (oit->second == kEmitting) {
-          LTC_ERROR() << "Graph loop found at " << *output.node;
+          LOG(ERROR) << "Graph loop found at " << *output.node;
         }
       }
     } else if (it->second == kEmitting) {
       for (auto& output : node->operands()) {
         auto oit = emap->find(output.node);
-        LTC_CHECK(oit != emap->end() && oit->second == kEmitted)
+        CHECK(oit != emap->end() && oit->second == kEmitted)
             << "Graph loop found at " << *output.node;
       }
       (*emap)[node] = kEmitted;
       post_order.push_back(const_cast<torch::lazy::Node*>(node));
       queue.pop_back();
     } else {
-      LTC_CHECK_EQ(it->second, kEmitted);
+      CHECK_EQ(it->second, kEmitted);
       queue.pop_back();
     }
   }

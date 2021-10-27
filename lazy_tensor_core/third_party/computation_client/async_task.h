@@ -1,6 +1,7 @@
 #ifndef COMPUTATION_CLIENT_ASYNC_TASK_H_
 #define COMPUTATION_CLIENT_ASYNC_TASK_H_
 
+#include <c10/util/Logging.h>
 #include <c10/util/Optional.h>
 
 #include <condition_variable>
@@ -9,7 +10,6 @@
 #include <memory>
 #include <mutex>
 
-#include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/computation_client/thread_pool.h"
 
 namespace lazy_tensors {
@@ -35,7 +35,7 @@ class AsyncTask {
 
   AsyncTask& Wait() {
     std::unique_lock<std::mutex> lock(data_->mutex);
-    LTC_CHECK(data_->scheduled);
+    CHECK(data_->scheduled);
     data_->cv.wait(lock, [this] { return data_->completed; });
     if (data_->exptr != nullptr) {
       std::rethrow_exception(data_->exptr);
@@ -65,7 +65,7 @@ class AsyncTask {
 
     {
       std::lock_guard<std::mutex> lock(data_->mutex);
-      LTC_CHECK(!data_->scheduled);
+      CHECK(!data_->scheduled);
       data_->scheduled = true;
     }
     lazy_tensors::env::ScheduleIoClosure(std::move(completer));

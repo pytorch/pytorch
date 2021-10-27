@@ -5,10 +5,12 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-Scatter::Scatter(const torch::lazy::Value& input, const torch::lazy::Value& index, const torch::lazy::Value& src,
+Scatter::Scatter(const torch::lazy::Value& input,
+                 const torch::lazy::Value& index, const torch::lazy::Value& src,
                  int64_t dim)
-    : TsNode(torch::lazy::OpKind(at::aten::scatter), {input, index, src}, ir::GetShapeFromTsValue(input),
-           /*num_outputs=*/1, torch::lazy::MHash(dim)),
+    : TsNode(torch::lazy::OpKind(at::aten::scatter), {input, index, src},
+             ir::GetShapeFromTsValue(input),
+             /*num_outputs=*/1, torch::lazy::MHash(dim)),
       dim_(dim) {}
 
 NodePtr Scatter::Clone(OpList operands) const {

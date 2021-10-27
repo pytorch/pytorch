@@ -2,7 +2,6 @@
 
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
 #include "lazy_tensor_core/csrc/helpers.h"
-#include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/computation_client/util.h"
 
 namespace torch_lazy_tensors {
@@ -11,7 +10,7 @@ namespace ops {
 
 Permute::Permute(const torch::lazy::Value& input, std::vector<int64_t> dims)
     : TsNode(torch::lazy::OpKind(at::aten::permute), {input},
-           /*num_outputs=*/1, torch::lazy::MHash(dims)),
+             /*num_outputs=*/1, torch::lazy::MHash(dims)),
       dims_(std::move(dims)) {
   SetShapeDeferred(
       [&]() { return compiler::NodeLowering::Get()->Infer(this); });

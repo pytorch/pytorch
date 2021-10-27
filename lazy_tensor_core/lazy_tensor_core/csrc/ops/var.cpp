@@ -13,10 +13,10 @@ namespace ops {
 
 Var::Var(const torch::lazy::Value& input, std::vector<int64_t> dimensions,
          int64_t correction, bool keep_reduced_dimensions)
-    : TsNode(torch::lazy::OpKind(at::aten::var), {input},
-           /*num_outputs=*/1,
-           torch::lazy::MHash(dimensions, correction,
-                                     keep_reduced_dimensions)),
+    : TsNode(
+          torch::lazy::OpKind(at::aten::var), {input},
+          /*num_outputs=*/1,
+          torch::lazy::MHash(dimensions, correction, keep_reduced_dimensions)),
       dimensions_(std::move(dimensions)),
       correction_(correction),
       keep_reduced_dimensions_(keep_reduced_dimensions) {

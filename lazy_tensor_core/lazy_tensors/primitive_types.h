@@ -5,7 +5,6 @@
 #include <string>
 
 #include "lazy_tensors/computation_client/client_data.h"
-#include "lazy_tensors/computation_client/ltc_logging.h"
 
 namespace lazy_tensors {
 

@@ -10,7 +10,7 @@ namespace ir {
 static lazy_tensors::Shape convertShape(
     const std::vector<at::ScalarType>& dtypes,
     const std::vector<std::vector<int64_t>>& shapes) {
-  LTC_CHECK_EQ(dtypes.size(), shapes.size());
+  CHECK_EQ(dtypes.size(), shapes.size());
   if (dtypes.size() == 1) {
     return lazy_tensors::Shape(dtypes[0], shapes[0]);
   }
@@ -35,8 +35,7 @@ Cat::Cat(std::vector<torch::lazy::Value> values, int64_t dim,
              /*num_outputs=*/1, torch::lazy::MHash(dim)),
       dim_(dim),
       at_dtypes_(out_dtypes),
-      at_shapes_(out_shapes) {
-}
+      at_shapes_(out_shapes) {}
 
 std::string Cat::ToString() const {
   std::stringstream ss;

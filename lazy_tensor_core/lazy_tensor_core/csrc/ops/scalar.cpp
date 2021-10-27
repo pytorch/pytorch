@@ -3,7 +3,6 @@
 #include <functional>
 #include <sstream>
 
-#include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/shape_util.h"
 
 namespace torch_lazy_tensors {

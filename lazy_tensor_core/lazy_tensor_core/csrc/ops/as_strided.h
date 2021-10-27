@@ -11,8 +11,7 @@ namespace ops {
 class AsStrided : public TsNode {
  public:
   AsStrided(const torch::lazy::Value& input, std::vector<int64_t> size,
-            std::vector<int64_t> stride,
-            int64_t storage_offset);
+            std::vector<int64_t> stride, int64_t storage_offset);
 
   std::string ToString() const override;
 
@@ -30,8 +29,7 @@ class AsStrided : public TsNode {
                                 int64_t storage_offset);
 
   static std::vector<int64_t> GetArrayStridePermutation(
-      c10::ArrayRef<int64_t> stride,
-      c10::ArrayRef<int64_t> size);
+      c10::ArrayRef<int64_t> stride, c10::ArrayRef<int64_t> size);
 
  private:
   std::vector<int64_t> size_;

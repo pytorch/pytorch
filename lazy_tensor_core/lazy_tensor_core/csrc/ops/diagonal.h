@@ -8,8 +8,8 @@ namespace ops {
 
 class Diagonal : public TsNode {
  public:
-  Diagonal(const torch::lazy::Value& input, int64_t offset,
-           int64_t dim1, int64_t dim2);
+  Diagonal(const torch::lazy::Value& input, int64_t offset, int64_t dim1,
+           int64_t dim2);
 
   NodePtr Clone(OpList operands) const override;
 
@@ -22,8 +22,7 @@ class Diagonal : public TsNode {
   int64_t dim2() const { return dim2_; }
 
   static lazy_tensors::Shape MakeDiagonalShape(const lazy_tensors::Shape& shape,
-                                               int64_t offset,
-                                               int64_t dim1,
+                                               int64_t offset, int64_t dim1,
                                                int64_t dim2);
 
  private:

@@ -85,7 +85,7 @@ c10::optional<AttrTag> ParseAttrTag(const std::string& node_string,
 NodeIdMap GenerateIdMap(c10::ArrayRef<torch::lazy::Node*> post_order) {
   NodeIdMap id_map;
   for (auto node : post_order) {
-    LTC_CHECK(id_map.emplace(node, id_map.size()).second) << node->ToString();
+    CHECK(id_map.emplace(node, id_map.size()).second) << node->ToString();
   }
   return id_map;
 }
@@ -113,7 +113,7 @@ std::vector<AttrTag> GetNodeTags(const torch::lazy::Node* node) {
   std::string node_string = node->ToString();
   std::string op_string = node->op().ToString();
   std::string::size_type pos = node_string.find(op_string);
-  LTC_CHECK_NE(pos, std::string::npos) << node_string << " : " << op_string;
+  CHECK_NE(pos, std::string::npos) << node_string << " : " << op_string;
   pos += op_string.size();
   std::vector<AttrTag> tags;
   for (;;) {

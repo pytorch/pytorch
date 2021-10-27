@@ -16,7 +16,6 @@
 #include "lazy_tensor_core/csrc/ops/unselect.h"
 #include "lazy_tensor_core/csrc/ops/update_slice.h"
 #include "lazy_tensor_core/csrc/ops/view.h"
-#include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/computation_client/util.h"
 #include "lazy_tensors/permutation_util.h"
 #include "lazy_tensors/shape_util.h"
@@ -40,25 +39,24 @@ torch::lazy::Value ApplyViewInfo(torch::lazy::Value ir_value, const ViewInfo& vi
       return torch::lazy::MakeNode<ir::ops::Permute>(ir_value, view_info.permutation);
     case ViewInfo::Type::kReshape:
       return torch::lazy::MakeNode<ir::ops::View>(
-          ir_value, lazy_tensors::util::ToVector<int64_t>(
-                        view_info.shape.dimensions()));
+          ir_value,
+          lazy_tensors::util::ToVector<int64_t>(view_info.shape.dimensions()));
     case ViewInfo::Type::kResize:
       return torch::lazy::MakeNode<ir::ops::Resize>(
-          ir_value, lazy_tensors::util::ToVector<int64_t>(
-                        view_info.shape.dimensions()));
+          ir_value,
+          lazy_tensors::util::ToVector<int64_t>(view_info.shape.dimensions()));
     case ViewInfo::Type::kAsStrided:
       return torch::lazy::MakeNode<ir::ops::AsStrided>(
           ir_value,
-          lazy_tensors::util::ToVector<int64_t>(
-              view_info.shape.dimensions()),
+          lazy_tensors::util::ToVector<int64_t>(view_info.shape.dimensions()),
           view_info.as_strided->stride, view_info.as_strided->offset);
     case ViewInfo::Type::kDiagonal:
       return torch::lazy::MakeNode<ir::ops::Diagonal>(
           ir_value, view_info.diagonal->offset, view_info.diagonal->dim1,
           view_info.diagonal->dim2);
     default:
-      LTC_ERROR() << "Invalid view type: "
-                  << lazy_tensors::util::GetEnumValue(view_info.view_type);
+      LOG(ERROR) << "Invalid view type: "
+                 << lazy_tensors::util::GetEnumValue(view_info.view_type);
   }
 }
 
@@ -115,8 +113,8 @@ torch::lazy::Value ApplyUpdate(torch::lazy::Value ir_value,
             view_info.diagonal->dim1, view_info.diagonal->dim2);
         break;
       default:
-        LTC_ERROR() << "Invalid view type: "
-                    << lazy_tensors::util::GetEnumValue(view_info.view_type);
+        LOG(ERROR) << "Invalid view type: "
+                   << lazy_tensors::util::GetEnumValue(view_info.view_type);
     }
   }
   return result;
@@ -137,7 +135,7 @@ ViewInfo::ViewInfo(Type view_type, lazy_tensors::Shape source_shape,
       shape(ir::ops::Permute::MakePermuteShape(source_shape, permutation)),
       source_shape(std::move(source_shape)),
       permutation(std::move(permutation)) {
-  LTC_CHECK(view_type == Type::kPermute);
+  CHECK(view_type == Type::kPermute);
 }
 
 ViewInfo::ViewInfo(Type view_type, const lazy_tensors::Shape& source_shape,
@@ -147,7 +145,7 @@ ViewInfo::ViewInfo(Type view_type, const lazy_tensors::Shape& source_shape,
           source_shape, select.dim, select.start, select.end, select.stride)),
       source_shape(source_shape),
       select(std::move(select)) {
-  LTC_CHECK(view_type == Type::kSelect);
+  CHECK(view_type == Type::kSelect);
 }
 
 ViewInfo::ViewInfo(Type view_type, lazy_tensors::Shape shape,
@@ -156,7 +154,7 @@ ViewInfo::ViewInfo(Type view_type, lazy_tensors::Shape shape,
       shape(std::move(shape)),
       source_shape(std::move(source_shape)),
       as_strided(std::move(as_strided)) {
-  LTC_CHECK(view_type == Type::kAsStrided);
+  CHECK(view_type == Type::kAsStrided);
 }
 
 ViewInfo::ViewInfo(Type view_type, const lazy_tensors::Shape& source_shape,
@@ -166,7 +164,7 @@ ViewInfo::ViewInfo(Type view_type, const lazy_tensors::Shape& source_shape,
                                                  diagonal.dim1, diagonal.dim2)),
       source_shape(source_shape),
       diagonal(std::move(diagonal)) {
-  LTC_CHECK(view_type == Type::kDiagonal);
+  CHECK(view_type == Type::kDiagonal);
 }
 
 void Alias::Update(torch::lazy::Value ir_value, std::vector<ViewInfo> view_infos) {

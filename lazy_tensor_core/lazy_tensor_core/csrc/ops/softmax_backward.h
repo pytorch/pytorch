@@ -8,8 +8,8 @@ namespace ops {
 
 class SoftmaxBackward : public TsNode {
  public:
-  SoftmaxBackward(const torch::lazy::Value& grad_output, const torch::lazy::Value& output,
-                  int64_t dim);
+  SoftmaxBackward(const torch::lazy::Value& grad_output,
+                  const torch::lazy::Value& output, int64_t dim);
 
   NodePtr Clone(OpList operands) const override;
 

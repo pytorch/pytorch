@@ -4,8 +4,7 @@
 
 namespace torch_lazy_tensors {
 
-ShapeBuilder& ShapeBuilder::Add(const lazy_tensors::Shape& shape,
-                                int64_t dim) {
+ShapeBuilder& ShapeBuilder::Add(const lazy_tensors::Shape& shape, int64_t dim) {
   dims_.push_back({&shape, dim});
   return *this;
 }

@@ -1,7 +1,6 @@
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_forward.h"
 
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
-#include "lazy_tensors/computation_client/debug_macros.h"
 
 namespace torch_lazy_tensors {
 namespace ir {

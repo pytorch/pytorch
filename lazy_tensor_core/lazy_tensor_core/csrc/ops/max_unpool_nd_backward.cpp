@@ -1,7 +1,6 @@
 #include "lazy_tensor_core/csrc/ops/max_unpool_nd_backward.h"
 
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
-#include "lazy_tensors/computation_client/debug_macros.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -15,19 +14,20 @@ c10::Symbol MaxUnpoolNdBackwardSymbol(int64_t spatial_dim_count) {
     case 3:
       return at::aten::max_unpool3d_backward;
     default:
-      LTC_ERROR() << "Invalid number of spatial dimensions: "
-                  << spatial_dim_count;
+      LOG(ERROR) << "Invalid number of spatial dimensions: "
+                 << spatial_dim_count;
   }
 }
 
 }  // namespace
 
-MaxUnpoolNdBackward::MaxUnpoolNdBackward(
-    const torch::lazy::Value& grad_output, const torch::lazy::Value& input, const torch::lazy::Value& indices,
-    std::vector<int64_t> output_size)
+MaxUnpoolNdBackward::MaxUnpoolNdBackward(const torch::lazy::Value& grad_output,
+                                         const torch::lazy::Value& input,
+                                         const torch::lazy::Value& indices,
+                                         std::vector<int64_t> output_size)
     : TsNode(torch::lazy::OpKind(MaxUnpoolNdBackwardSymbol(output_size.size())),
-           {grad_output, input, indices},
-           /*num_outputs=*/1, torch::lazy::MHash(output_size)),
+             {grad_output, input, indices},
+             /*num_outputs=*/1, torch::lazy::MHash(output_size)),
       output_size_(std::move(output_size)) {
   SetShapeDeferred(
       [&]() { return compiler::NodeLowering::Get()->Infer(this); });

@@ -21,7 +21,7 @@ namespace torch_lazy_tensors {
 LazyTensor::Data::~Data() { LazyGraphExecutor::Get()->UnregisterTensor(this); }
 
 LazyTensor LazyTensor::Create(const at::Tensor& tensor, const Device& device) {
-  LTC_CHECK_NE(tensor.device().type(), at::kLazy);
+  CHECK_NE(tensor.device().type(), at::kLazy);
   LazyTensor xtensor(tensor, device);
   LazyGraphExecutor::Get()->RegisterTensor(xtensor.data_ptr());
   return xtensor;
@@ -78,7 +78,7 @@ LazyTensor::LazyTensor(std::shared_ptr<View> view, const Device& device,
 LazyTensor::LazyTensor(std::shared_ptr<Data> data) : data_(std::move(data)) {}
 
 LazyTensor::Data* LazyTensor::data() const {
-  LTC_CHECK(data_ != nullptr) << "Trying to access a null cursor";
+  CHECK(data_ != nullptr) << "Trying to access a null cursor";
   return data_.get();
 }
 
@@ -110,7 +110,7 @@ lazy_tensors::util::MaybeRef<lazy_tensors::Shape> LazyTensor::shape() const {
     // TODO(whc) remove shape from LazyTensor API too!
     return ir::GetShapeFromTsValue(data()->ir_value);
   }
-  LTC_CHECK(data()->tensor_data);
+  CHECK(data()->tensor_data);
   const Device& device = GetDevice();
   return lazy_tensors::ShapeUtil::MakeShape(
       data()->tensor_data->type().scalarType(),
@@ -126,9 +126,7 @@ lazy_tensors::Shape LazyTensor::shape_with_layout() const {
 
 const Device& LazyTensor::GetDevice() const { return data()->device; }
 
-int64_t LazyTensor::GetUniqueId() const {
-  return data()->unique_id;
-}
+int64_t LazyTensor::GetUniqueId() const { return data()->unique_id; }
 
 std::ptrdiff_t LazyTensor::GetViewAliasId() const {
   return data()->view != nullptr
@@ -149,7 +147,7 @@ lazy_tensors::ComputationClient::DataPtr LazyTensor::GetDataHandle() {
   if (up_to_date) {
     lazy_tensors::ComputationClient::DataPtr handle = CurrentDataHandle();
     if (handle != nullptr) {
-      LTC_CHECK(handle->HasValue())
+      CHECK(handle->HasValue())
           << "Trying to access data while an async operation is in flight: "
           << lazy_tensors::Shape(handle->shape());
       return handle;
@@ -165,7 +163,7 @@ lazy_tensors::ComputationClient::DataPtr LazyTensor::GetDataHandle() {
   if (data()->ir_value) {
     ApplyPendingGraph();
   } else {
-    LTC_CHECK(data()->tensor_data);
+    CHECK(data()->tensor_data);
     data()->handle = TensorToDataHandle(*data()->tensor_data, GetDevice());
   }
   return data()->handle;
@@ -254,7 +252,7 @@ torch::lazy::Value LazyTensor::GetIrValue() const {
     return data()->ir_value;
   }
   c10::optional<at::Tensor> tensor_data = CurrentTensorData();
-  LTC_CHECK(tensor_data);
+  CHECK(tensor_data);
   AssignIrValue(GetIrValueForTensor(*tensor_data, GetDevice()));
   return data()->ir_value;
 }
@@ -309,10 +307,9 @@ std::shared_ptr<View> LazyTensor::UpdateView(
     std::shared_ptr<View> view, torch::lazy::Value ir_value) const {
   if (ir::GetShapeFromTsValue(ir_value).dimensions() !=
       view->shape().dimensions()) {
-    LTC_CHECK_EQ(lazy_tensors::util::Multiply<int64_t>(
-                     ir::GetShapeFromTsValue(ir_value).dimensions()),
-                 lazy_tensors::util::Multiply<int64_t>(
-                     view->shape().dimensions()));
+    CHECK_EQ(lazy_tensors::util::Multiply<int64_t>(
+                 ir::GetShapeFromTsValue(ir_value).dimensions()),
+             lazy_tensors::util::Multiply<int64_t>(view->shape().dimensions()));
 
     ViewInfo view_info(ViewInfo::Type::kReshape,
                        ir::GetShapeFromTsValue(ir_value), view->shape());
@@ -519,8 +516,7 @@ void LazyTensor::ApplyPendingGraph() {
 }
 
 int64_t LazyTensor::GetNextTensorId() {
-  static std::atomic<int64_t>* id_generator =
-      new std::atomic<int64_t>(1);
+  static std::atomic<int64_t>* id_generator = new std::atomic<int64_t>(1);
   return id_generator->fetch_add(1);
 }
 

@@ -9,10 +9,10 @@ namespace ops {
 
 Std::Std(const torch::lazy::Value& input, std::vector<int64_t> dimensions,
          bool keep_reduced_dimensions, int64_t correction)
-    : TsNode(torch::lazy::OpKind(at::aten::std), {input},
-           /*num_outputs=*/1,
-           torch::lazy::MHash(dimensions, keep_reduced_dimensions,
-                                     correction)),
+    : TsNode(
+          torch::lazy::OpKind(at::aten::std), {input},
+          /*num_outputs=*/1,
+          torch::lazy::MHash(dimensions, keep_reduced_dimensions, correction)),
       dimensions_(std::move(dimensions)),
       keep_reduced_dimensions_(keep_reduced_dimensions),
       correction_(correction) {

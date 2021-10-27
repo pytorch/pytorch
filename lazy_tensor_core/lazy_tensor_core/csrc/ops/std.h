@@ -17,9 +17,7 @@ class Std : public TsNode {
 
   NodePtr Clone(OpList operands) const override;
 
-  const std::vector<int64_t>& dimensions() const {
-    return dimensions_;
-  }
+  const std::vector<int64_t>& dimensions() const { return dimensions_; }
 
   bool keep_reduced_dimensions() const { return keep_reduced_dimensions_; }
 

@@ -10,9 +10,9 @@ namespace ops {
 
 class AsStridedViewUpdate : public TsNode {
  public:
-  AsStridedViewUpdate(const torch::lazy::Value& target, const torch::lazy::Value& input,
-                      std::vector<int64_t> size,
-                      std::vector<int64_t> stride,
+  AsStridedViewUpdate(const torch::lazy::Value& target,
+                      const torch::lazy::Value& input,
+                      std::vector<int64_t> size, std::vector<int64_t> stride,
                       int64_t storage_offset);
 
   std::string ToString() const override;

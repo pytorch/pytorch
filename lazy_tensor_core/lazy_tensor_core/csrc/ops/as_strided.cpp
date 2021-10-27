@@ -13,15 +13,14 @@ namespace ir {
 namespace ops {
 
 AsStrided::AsStrided(const torch::lazy::Value& input, std::vector<int64_t> size,
-                     std::vector<int64_t> stride,
-                     int64_t storage_offset)
-    : TsNode(torch::lazy::OpKind(at::aten::as_strided), {input},
-           [&]() {
-             return lazy_tensors::ShapeUtil::MakeShape(
-                 ir::GetShapeFromTsValue(input).at_element_type(), size);
-           },
-           /*num_outputs=*/1,
-           torch::lazy::MHash(size, stride, storage_offset)),
+                     std::vector<int64_t> stride, int64_t storage_offset)
+    : TsNode(
+          torch::lazy::OpKind(at::aten::as_strided), {input},
+          [&]() {
+            return lazy_tensors::ShapeUtil::MakeShape(
+                ir::GetShapeFromTsValue(input).at_element_type(), size);
+          },
+          /*num_outputs=*/1, torch::lazy::MHash(size, stride, storage_offset)),
       size_(std::move(size)),
       stride_(std::move(stride)),
       storage_offset_(storage_offset) {}
@@ -48,14 +47,11 @@ bool AsStrided::StrideIsSupported(const lazy_tensors::Shape& input_shape,
 }
 
 std::vector<int64_t> AsStrided::GetArrayStridePermutation(
-    c10::ArrayRef<int64_t> stride,
-    c10::ArrayRef<int64_t> size) {
+    c10::ArrayRef<int64_t> stride, c10::ArrayRef<int64_t> size) {
   std::vector<int64_t> permutation =
       lazy_tensors::util::Iota<int64_t>(stride.size());
   std::sort(permutation.begin(), permutation.end(),
-            [&](int64_t a, int64_t b) {
-              return stride[a] > stride[b];
-            });
+            [&](int64_t a, int64_t b) { return stride[a] > stride[b]; });
   return permutation;
 }
 

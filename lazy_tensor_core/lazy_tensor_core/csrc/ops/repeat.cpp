@@ -1,7 +1,6 @@
 #include "lazy_tensor_core/csrc/ops/repeat.h"
 
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
-#include "lazy_tensors/computation_client/debug_macros.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -9,7 +8,7 @@ namespace ops {
 
 Repeat::Repeat(const torch::lazy::Value& input, std::vector<int64_t> repeats)
     : TsNode(torch::lazy::OpKind(at::aten::repeat), {input},
-           /*num_outputs=*/1, torch::lazy::MHash(repeats)),
+             /*num_outputs=*/1, torch::lazy::MHash(repeats)),
       repeats_(std::move(repeats)) {
   SetShapeDeferred(
       [&]() { return compiler::NodeLowering::Get()->Infer(this); });

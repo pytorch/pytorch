@@ -1,20 +1,19 @@
 #include "lazy_tensor_core/csrc/tensor_util.h"
 
-#include <algorithm>
+#include <c10/util/BFloat16.h>
+#include <c10/util/Half.h>
 #include <c10/util/complex.h>
+
+#include <algorithm>
 #include <cstring>
 #include <functional>
 #include <list>
 #include <numeric>
 #include <thread>
 
-#include <c10/util/Half.h>
-#include <c10/util/BFloat16.h>
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/layout_manager.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_computation_client.h"
-#include "lazy_tensors/computation_client/debug_macros.h"
-#include "lazy_tensors/computation_client/ltc_logging.h"
 #include "lazy_tensors/computation_client/multi_wait.h"
 #include "lazy_tensors/computation_client/sys_util.h"
 #include "lazy_tensors/computation_client/thread_pool.h"
@@ -28,7 +27,7 @@ namespace {
 bool ShouldUseBF16() {
   bool use_bf16 = lazy_tensors::sys_util::GetEnvBool("LTC_USE_BF16", false);
   if (use_bf16) {
-    LTC_LOG(INFO) << "Using BF16 data type for floating point values";
+    LOG(INFO) << "Using BF16 data type for floating point values";
   }
   return use_bf16;
 }
@@ -36,7 +35,7 @@ bool ShouldUseBF16() {
 bool ShouldUseF16() {
   bool use_fp16 = lazy_tensors::sys_util::GetEnvBool("LTC_USE_FP16", false);
   if (use_fp16) {
-    LTC_LOG(INFO) << "Using F16 data type for floating point values";
+    LOG(INFO) << "Using F16 data type for floating point values";
   }
   return use_fp16;
 }
@@ -45,7 +44,7 @@ bool ShouldDowncastToBF16() {
   bool downcast_bf16 =
       lazy_tensors::sys_util::GetEnvBool("LTC_DOWNCAST_BF16", false);
   if (downcast_bf16) {
-    LTC_LOG(INFO) << "Downcasting floating point values, F64->F32, F32->BF16";
+    LOG(INFO) << "Downcasting floating point values, F64->F32, F32->BF16";
   }
   return downcast_bf16;
 }
@@ -54,7 +53,7 @@ bool ShouldDowncastToF16() {
   bool downcast_fp16 =
       lazy_tensors::sys_util::GetEnvBool("LTC_DOWNCAST_FP16", false);
   if (downcast_fp16) {
-    LTC_LOG(INFO) << "Downcasting floating point values, F64->F32, F32->FP16";
+    LOG(INFO) << "Downcasting floating point values, F64->F32, F32->FP16";
   }
   return downcast_fp16;
 }
@@ -63,7 +62,7 @@ bool ShouldUse32BitLong() {
   bool use_32bit_long =
       lazy_tensors::sys_util::GetEnvBool("LTC_USE_32BIT_LONG", false);
   if (use_32bit_long) {
-    LTC_LOG(INFO) << "Using 32bit integers for kLong values";
+    LOG(INFO) << "Using 32bit integers for kLong values";
   }
   return use_32bit_long;
 }
@@ -169,8 +168,8 @@ void StridedCopy(D* dest, int64_t dest_stride, const S* source,
 // Computes the offset of the value at a given index, assuming a contiguous/flat
 // tensor data representation.
 template <typename S>
-int64_t GetFlatTensorOffset(
-    const S& strides, const std::vector<int64_t>& indices) {
+int64_t GetFlatTensorOffset(const S& strides,
+                            const std::vector<int64_t>& indices) {
   int64_t base = 0;
   for (size_t i = 0; i < indices.size(); ++i) {
     base += indices[i] * strides[i];
@@ -220,21 +219,18 @@ void CheckedMemcpy(D* dest, const S* source, int64_t n) {
 }
 
 template <typename D, typename S>
-void CopyData(D* dest, const S* source, int64_t n,
-              const CopyDirect&) {
+void CopyData(D* dest, const S* source, int64_t n, const CopyDirect&) {
   std::copy(source, source + n, dest);
 }
 
 template <typename D, typename S>
-void CopyData(D* dest, const S* source, int64_t n,
-              const CopyCasted&) {
+void CopyData(D* dest, const S* source, int64_t n, const CopyCasted&) {
   // Use strided copy with step 1 since it has the static_cast<> required to
   // convert from/to bfloat16.
   StridedCopy(dest, 1, source, 1, n);
 }
 
-std::vector<int64_t> GetIterationDimensions(
-    const lazy_tensors::Shape& shape) {
+std::vector<int64_t> GetIterationDimensions(const lazy_tensors::Shape& shape) {
   // We want to favor the most minor dimension as core iteration dimension, as
   // this walks one of the two tensors buffers in a cache friendly fashion.
   // Though, if the most minor dimension is too small, we will end up doing more
@@ -243,11 +239,9 @@ std::vector<int64_t> GetIterationDimensions(
   // is more than kMinorDimScale times the most minor one.
   static const int64_t kMinorDimScale = 8;
   std::vector<int64_t> iter_dims =
-      lazy_tensors::util::ToVector<int64_t>(
-          shape.layout().minor_to_major());
+      lazy_tensors::util::ToVector<int64_t>(shape.layout().minor_to_major());
   size_t index = 0;
-  int64_t scaled_dim_size =
-      kMinorDimScale * shape.dimensions(iter_dims[index]);
+  int64_t scaled_dim_size = kMinorDimScale * shape.dimensions(iter_dims[index]);
   for (size_t i = 1; i < iter_dims.size(); ++i) {
     int64_t dim = iter_dims[i];
     if (shape.dimensions(dim) > scaled_dim_size) {
@@ -268,8 +262,7 @@ struct CopyPartition {
 };
 
 std::vector<CopyPartition> CreateCopyPartitions(
-    c10::ArrayRef<int64_t> dimensions,
-    int64_t strided_copy_dimension) {
+    c10::ArrayRef<int64_t> dimensions, int64_t strided_copy_dimension) {
   // The minimum number of elements copy that can be assigned to a thread.
   static const int64_t kMinThreadElements = 100000;
   // Use at most 50% of the available cores.
@@ -284,19 +277,16 @@ std::vector<CopyPartition> CreateCopyPartitions(
     }
   }
 
-  int64_t num_elements =
-      lazy_tensors::util::Multiply<int64_t>(dimensions);
-  int64_t max_dim_unit_elements =
-      num_elements / dimensions[max_dim];
+  int64_t num_elements = lazy_tensors::util::Multiply<int64_t>(dimensions);
+  int64_t max_dim_unit_elements = num_elements / dimensions[max_dim];
   int64_t max_dim_size = dimensions[max_dim];
-  int64_t part_size = std::max<int64_t>(
-      std::max<int64_t>(max_dim_size / max_parts, 1),
-      kMinThreadElements / max_dim_unit_elements);
+  int64_t part_size =
+      std::max<int64_t>(std::max<int64_t>(max_dim_size / max_parts, 1),
+                        kMinThreadElements / max_dim_unit_elements);
   std::vector<CopyPartition> parts;
   int64_t csize = 0;
   while (csize < max_dim_size) {
-    int64_t n =
-        std::min<int64_t>(part_size, max_dim_size - csize);
+    int64_t n = std::min<int64_t>(part_size, max_dim_size - csize);
     CopyPartition p(dimensions);
     p.base[max_dim] = csize;
     p.limit[max_dim] = csize + n;
@@ -307,13 +297,10 @@ std::vector<CopyPartition> CreateCopyPartitions(
 }
 
 template <typename SType, typename DType>
-void SlicedCopy(c10::ArrayRef<int64_t> dimensions,
-                const SType* src_data,
-                c10::ArrayRef<int64_t> src_strides,
-                DType* dest_data,
+void SlicedCopy(c10::ArrayRef<int64_t> dimensions, const SType* src_data,
+                c10::ArrayRef<int64_t> src_strides, DType* dest_data,
                 c10::ArrayRef<int64_t> dest_strides,
-                c10::ArrayRef<int64_t> iter_dims,
-                const CopyPartition& part) {
+                c10::ArrayRef<int64_t> iter_dims, const CopyPartition& part) {
   std::vector<int64_t> indices(part.base);
   int64_t inner_src_stride = src_strides[iter_dims.front()];
   int64_t inner_dest_stride = dest_strides[iter_dims.front()];
@@ -338,12 +325,11 @@ template <typename SType, typename DType>
 void CopyTensors(const void* src_buffer, const lazy_tensors::Shape& src_shape,
                  void* dest_buffer, size_t dest_buffer_size,
                  const lazy_tensors::Shape& dest_shape) {
-  LTC_CHECK(lazy_tensors::ShapeUtil::SameDimensions(src_shape, dest_shape))
+  CHECK(lazy_tensors::ShapeUtil::SameDimensions(src_shape, dest_shape))
       << src_shape << " vs. " << dest_shape;
 
-  int64_t total_elements =
-      lazy_tensors::ShapeUtil::ElementsIn(src_shape);
-  LTC_CHECK_EQ(dest_buffer_size, total_elements * sizeof(DType));
+  int64_t total_elements = lazy_tensors::ShapeUtil::ElementsIn(src_shape);
+  CHECK_EQ(dest_buffer_size, total_elements * sizeof(DType));
 
   const SType* src_data = reinterpret_cast<const SType*>(src_buffer);
   DType* dest_data = reinterpret_cast<DType*>(dest_buffer);
@@ -356,12 +342,9 @@ void CopyTensors(const void* src_buffer, const lazy_tensors::Shape& src_shape,
     // We issue a multi-threaded copy by slicing the bigger dimension and
     // assigning its copy to different threads. This code is only valid for
     // ranks >= 2, but the layout check above covers the case.
-    std::vector<int64_t> src_strides =
-        ComputeShapeStrides(src_shape);
-    std::vector<int64_t> dest_strides =
-        ComputeShapeStrides(dest_shape);
-    std::vector<int64_t> iter_dims =
-        GetIterationDimensions(dest_shape);
+    std::vector<int64_t> src_strides = ComputeShapeStrides(src_shape);
+    std::vector<int64_t> dest_strides = ComputeShapeStrides(dest_shape);
+    std::vector<int64_t> iter_dims = GetIterationDimensions(dest_shape);
     std::vector<CopyPartition> parts =
         CreateCopyPartitions(dest_shape.dimensions(), iter_dims.front());
     auto mwait = std::make_shared<lazy_tensors::util::MultiWait>(parts.size());
@@ -396,12 +379,12 @@ void TensorToBufferSType(const at::Tensor& tensor,
                          const Device& device) {
   switch (dest_shape.at_element_type()) {
     case c10::ScalarType::BFloat16:
-      TensorToBuffer<SType, c10::BFloat16>(
-          tensor, dest_shape, dest_buffer, dest_buffer_size, device);
+      TensorToBuffer<SType, c10::BFloat16>(tensor, dest_shape, dest_buffer,
+                                           dest_buffer_size, device);
       break;
     case c10::ScalarType::Half:
       TensorToBuffer<SType, c10::Half>(tensor, dest_shape, dest_buffer,
-                                                dest_buffer_size, device);
+                                       dest_buffer_size, device);
       break;
     case c10::ScalarType::Float:
       TensorToBuffer<SType, float>(tensor, dest_shape, dest_buffer,
@@ -416,12 +399,12 @@ void TensorToBufferSType(const at::Tensor& tensor,
                                   dest_buffer_size, device);
       break;
     case c10::ScalarType::Byte:
-      TensorToBuffer<SType, uint8_t>(
-          tensor, dest_shape, dest_buffer, dest_buffer_size, device);
+      TensorToBuffer<SType, uint8_t>(tensor, dest_shape, dest_buffer,
+                                     dest_buffer_size, device);
       break;
     case c10::ScalarType::Char:
       TensorToBuffer<SType, int8_t>(tensor, dest_shape, dest_buffer,
-                                                dest_buffer_size, device);
+                                    dest_buffer_size, device);
       break;
     case c10::ScalarType::Short:
       TensorToBuffer<SType, int16_t>(
@@ -433,8 +416,8 @@ void TensorToBufferSType(const at::Tensor& tensor,
     //       tensor, dest_shape, dest_buffer, dest_buffer_size, device);
     //   break;
     case c10::ScalarType::Int:
-      TensorToBuffer<SType, int32_t>(
-          tensor, dest_shape, dest_buffer, dest_buffer_size, device);
+      TensorToBuffer<SType, int32_t>(tensor, dest_shape, dest_buffer,
+                                     dest_buffer_size, device);
       break;
     // c10 doesn't have a uint32 type
     // case lazy_tensors::PrimitiveType::U32:
@@ -442,8 +425,8 @@ void TensorToBufferSType(const at::Tensor& tensor,
     //       tensor, dest_shape, dest_buffer, dest_buffer_size, device);
     //   break;
     case c10::ScalarType::Long:
-      TensorToBuffer<SType, int64_t>(
-          tensor, dest_shape, dest_buffer, dest_buffer_size, device);
+      TensorToBuffer<SType, int64_t>(tensor, dest_shape, dest_buffer,
+                                     dest_buffer_size, device);
       break;
     // c10 doesn't have a uint64 type
     // case lazy_tensors::PrimitiveType::U64:
@@ -459,7 +442,7 @@ void TensorToBufferSType(const at::Tensor& tensor,
           tensor, dest_shape, dest_buffer, dest_buffer_size, device);
       break;
     default:
-      LTC_ERROR() << "Destination shape type not supported: " << dest_shape;
+      LOG(ERROR) << "Destination shape type not supported: " << dest_shape;
   }
 }
 
@@ -479,7 +462,7 @@ lazy_tensors::ComputationClient::DataPtr TensorToDataHandle(
 
   auto handles = std::vector<lazy_tensors::ComputationClient::DataPtr>{
       MakeComputationDataFromTensor(tensor, shape, device.ToString())};
-  LTC_CHECK_EQ(handles.size(), 1);
+  CHECK_EQ(handles.size(), 1);
   return std::move(handles.front());
 }
 
@@ -491,8 +474,7 @@ at::Tensor LiteralToTensor(const lazy_tensors::Literal& literal,
   lazy_tensors::Shape torch_shape = MakeTorchTensorLayout(
       literal.shape().dimensions(), /*dynamic_dimensions=*/{},
       literal.shape().at_element_type());
-  int64_t total_elements =
-      lazy_tensors::ShapeUtil::ElementsIn(torch_shape);
+  int64_t total_elements = lazy_tensors::ShapeUtil::ElementsIn(torch_shape);
 
   auto literal_data = literal.data<SType>();
   at::Tensor tensor = at::empty(dimensions, at::TensorOptions(atype));
@@ -533,7 +515,7 @@ at::Tensor LiteralToTensorHelper(const lazy_tensors::Literal& literal,
       return LiteralToTensor<SType, c10::complex<double>>(literal,
                                                           dest_element_type);
     default:
-      LTC_ERROR() << "Unsupported scalar type: " << dest_element_type;
+      LOG(ERROR) << "Unsupported scalar type: " << dest_element_type;
   }
 }
 
@@ -593,12 +575,11 @@ void PopulateTensorBuffer(const at::Tensor& tensor,
                                                 dest_buffer_size, device);
       break;
     default:
-      LTC_ERROR() << "Tensor type not supported: " << tensor.type();
+      LOG(ERROR) << "Tensor type not supported: " << tensor.type();
   }
 }
 
-std::vector<int64_t> ComputeShapeStrides(
-    const lazy_tensors::Shape& shape) {
+std::vector<int64_t> ComputeShapeStrides(const lazy_tensors::Shape& shape) {
   std::vector<int64_t> strides(shape.rank());
   int64_t stride = 1;
   for (auto dim : shape.layout().minor_to_major()) {
@@ -608,8 +589,7 @@ std::vector<int64_t> ComputeShapeStrides(
   return strides;
 }
 
-std::vector<int64_t> ComputeArrayStrides(
-    c10::ArrayRef<int64_t> sizes) {
+std::vector<int64_t> ComputeArrayStrides(c10::ArrayRef<int64_t> sizes) {
   std::vector<int64_t> strides(sizes.size(), 1);
   for (int64_t i = sizes.size(); i > 1; --i) {
     strides[i - 2] = strides[i - 1] * sizes[i - 1];
@@ -625,44 +605,38 @@ at::Tensor MakeTensorFromLiteral(const lazy_tensors::Literal& literal,
     case c10::ScalarType::BFloat16:
       return LiteralToTensorHelper<c10::BFloat16>(literal, dest_element_type);
     case c10::ScalarType::Half:
-      return LiteralToTensorHelper<c10::Half>(literal,
-                                                       dest_element_type);
+      return LiteralToTensorHelper<c10::Half>(literal, dest_element_type);
     case c10::ScalarType::Float:
       return LiteralToTensorHelper<float>(literal, dest_element_type);
     case c10::ScalarType::Double:
       return LiteralToTensorHelper<double>(literal, dest_element_type);
     case c10::ScalarType::Byte:
-      return LiteralToTensorHelper<uint8_t>(literal,
-                                                        dest_element_type);
+      return LiteralToTensorHelper<uint8_t>(literal, dest_element_type);
     case c10::ScalarType::Char:
-      return LiteralToTensorHelper<int8_t>(literal,
-                                                       dest_element_type);
+      return LiteralToTensorHelper<int8_t>(literal, dest_element_type);
     case c10::ScalarType::Short:
-      return LiteralToTensorHelper<int16_t>(literal,
-                                                        dest_element_type);
+      return LiteralToTensorHelper<int16_t>(literal, dest_element_type);
     // case lazy_tensors::PrimitiveType::U16:
     //   return LiteralToTensorHelper<lazy_tensors::uint16>(literal,
     //                                                      dest_element_type);
     case c10::ScalarType::Int:
-      return LiteralToTensorHelper<int32_t>(literal,
-                                                        dest_element_type);
+      return LiteralToTensorHelper<int32_t>(literal, dest_element_type);
     // case lazy_tensors::PrimitiveType::U32:
     //   return LiteralToTensorHelper<lazy_tensors::uint32>(literal,
     //                                                      dest_element_type);
     case c10::ScalarType::Long:
-      return LiteralToTensorHelper<int64_t>(literal,
-                                                        dest_element_type);
+      return LiteralToTensorHelper<int64_t>(literal, dest_element_type);
     // case lazy_tensors::PrimitiveType::U64:
     //   return LiteralToTensorHelper<lazy_tensors::uint64>(literal,
     //                                                      dest_element_type);
     case c10::ScalarType::ComplexFloat:
       return LiteralToTensorHelper<c10::complex<float>>(literal,
-                                                            dest_element_type);
+                                                        dest_element_type);
     case c10::ScalarType::ComplexDouble:
       return LiteralToTensorHelper<c10::complex<double>>(literal,
-                                                             dest_element_type);
+                                                         dest_element_type);
     default:
-      LTC_ERROR() << "Unsupported literal type: " << literal.shape();
+      LOG(ERROR) << "Unsupported literal type: " << literal.shape();
   }
 }
 
@@ -688,7 +662,7 @@ lazy_tensors::ComputationClient::DataPtr TensorToDataHandle(
 std::vector<lazy_tensors::ComputationClient::DataPtr> CreateTensorsData(
     const std::vector<at::Tensor>& tensors,
     const std::vector<std::string>& devices) {
-  LTC_CHECK_EQ(tensors.size(), devices.size());
+  CHECK_EQ(tensors.size(), devices.size());
   std::vector<lazy_tensors::ComputationClient::DataPtr> result;
   result.reserve(tensors.size());
   for (size_t i = 0; i < tensors.size(); ++i) {
@@ -760,7 +734,7 @@ torch::lazy::hash_t TensorHash(const at::Tensor& tensor) {
       return torch::lazy::DataHash(ctensor.data_ptr<c10::complex<double>>(),
                                    size);
     default:
-      LTC_ERROR() << "Unsupported scalar type: " << ctensor.scalar_type();
+      LOG(ERROR) << "Unsupported scalar type: " << ctensor.scalar_type();
   }
 }
 
@@ -769,7 +743,7 @@ std::vector<lazy_tensors::Shape> GetComponentShapes(
   std::vector<lazy_tensors::Shape> component_shapes;
   if (shape.IsTuple()) {
     for (const lazy_tensors::Shape& component_shape : shape.tuple_shapes()) {
-      LTC_CHECK(!component_shape.IsTuple()) << shape;
+      CHECK(!component_shape.IsTuple()) << shape;
       component_shapes.push_back(component_shape);
     }
   } else {
@@ -835,7 +809,7 @@ at::ScalarType TensorTypeFromLtcType(lazy_tensors::PrimitiveType ltc_type) {
     case lazy_tensors::PrimitiveType::C128:
       return at::ScalarType::ComplexDouble;
     default:
-      LTC_ERROR() << "Type not supported: " << ltc_type;
+      LOG(ERROR) << "Type not supported: " << ltc_type;
   }
 }
 
@@ -866,7 +840,7 @@ lazy_tensors::PrimitiveType TensorTypeToLtcType(at::ScalarType scalar_type) {
     case at::ScalarType::ComplexDouble:
       return lazy_tensors::PrimitiveType::C128;
     default:
-      LTC_ERROR() << "Type not supported: " << scalar_type;
+      LOG(ERROR) << "Type not supported: " << scalar_type;
   }
 }
 
@@ -944,7 +918,7 @@ lazy_tensors::PrimitiveType MakeLtcPrimitiveType(at::ScalarType scalar_type,
     case at::ScalarType::ComplexDouble:
       return GetDevicePrimitiveType(lazy_tensors::PrimitiveType::C128, device);
     default:
-      LTC_ERROR() << "Type not supported: " << scalar_type;
+      LOG(ERROR) << "Type not supported: " << scalar_type;
   }
 }
 

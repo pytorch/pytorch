@@ -1,11 +1,12 @@
 #include "lazy_tensors/computation_client/thread_pool.h"
 
+#include <c10/util/Logging.h>
+
 #include <condition_variable>
 #include <deque>
 #include <exception>
 #include <mutex>
 
-#include "lazy_tensors/computation_client/ltc_logging.h"
 #include "lazy_tensors/computation_client/metrics.h"
 
 namespace lazy_tensors {
@@ -63,8 +64,8 @@ class ThreadPool {
         closure();
       } catch (const std::exception& ex) {
         LTC_COUNTER("ThreadPoolException", 1);
-        LTC_LOG(ERROR) << "Exception from running thread pool closure: "
-                       << ex.what();
+        LOG(ERROR) << "Exception from running thread pool closure: "
+                   << ex.what();
       }
     }
   }
