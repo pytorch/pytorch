@@ -26,14 +26,15 @@ template <
     typename accscalar_t,
     typename IndexType,
     int ADims,
-    int VEC>
+    int VEC,
+    typename mask_t>
 #if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(256, 4)
 #endif
 __global__ void
 fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<scalar_t, IndexType> a,
                          at::cuda::detail::TensorInfo<scalar_t, IndexType> b,
-                         at::cuda::detail::TensorInfo<bool, IndexType> c,
+                         at::cuda::detail::TensorInfo<mask_t, IndexType> c,
                          IndexType totalElements, accscalar_t p,
                          accscalar_t scale,
                          PhiloxCudaState philox_args) {
@@ -41,7 +42,7 @@ fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<scalar_t, IndexType> a,
   static_assert(VEC <= 4, "Value of VEC must be in [2, 4]");
 
   using LoadT = memory::aligned_vector<scalar_t, VEC>;
-  using MaskLoadT = memory::aligned_vector<bool, VEC>;
+  using MaskLoadT = memory::aligned_vector<mask_t, VEC>;
 
   auto seeds = at::cuda::philox::unpack(philox_args);
   IndexType idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -92,13 +93,13 @@ fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<scalar_t, IndexType> a,
     *value = *reinterpret_cast<LoadT*>(&a.data[linearIndex]);
 
     scalar_t r[VEC];
-    bool mask[VEC];
+    mask_t mask[VEC];
 
     // Perform the actual computation
     #pragma unroll
     for (int ii = 0; ii < VEC; ii++) {
       r[ii] = src[ii]*(&rand.x)[ii]*scale;
-      mask[ii] = (bool)(&rand.x)[ii];
+      mask[ii] = (mask_t)(&rand.x)[ii];
     }
     // Vectorized writes for both mask & result
     *(reinterpret_cast<LoadT*>(&b.data[linearIndex])) = *reinterpret_cast<LoadT*>(&r[0]);
@@ -113,14 +114,15 @@ template <
     typename accscalar_t,
     typename IndexType,
     int ADims,
-    int BDims = ADims>
+    int BDims = ADims,
+    typename mask_t>
 #if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(256, 4)
 #endif
 __global__ void
 fused_dropout_kernel(cuda::detail::TensorInfo<scalar_t, IndexType> a,
                      cuda::detail::TensorInfo<scalar_t, IndexType> b,
-                     cuda::detail::TensorInfo<bool, IndexType> c,
+                     cuda::detail::TensorInfo<mask_t, IndexType> c,
                      IndexType totalElements, accscalar_t p,
                      accscalar_t scale,
                      PhiloxCudaState philox_args) {
@@ -160,14 +162,14 @@ fused_dropout_kernel(cuda::detail::TensorInfo<scalar_t, IndexType> a,
                const IndexType bOffset =
                    cuda::detail::IndexToOffset<scalar_t, IndexType, BDims>::get(li, b);
                b.data[bOffset] = src[ii]*(&rand.x)[ii]*scale;
-               c.data[bOffset] = (bool)(&rand.x)[ii];
+               c.data[bOffset] = (mask_t)(&rand.x)[ii];
            }
        }
        __syncthreads();
   }
 }
 
-template<typename scalar_t, typename accscalar_t>
+template<typename mask_t, typename scalar_t, typename accscalar_t>
 void masked_scale_kernel(at::Tensor& ret, const at::Tensor& src, const at::Tensor& mask, accscalar_t scale){
    auto iter = at::TensorIteratorConfig()
      .check_all_same_dtype(false)
@@ -178,7 +180,7 @@ void masked_scale_kernel(at::Tensor& ret, const at::Tensor& src, const at::Tenso
 
    at::native::gpu_kernel(
        iter,
-       [=]GPU_LAMBDA(const scalar_t src_val, const bool mask_val) -> scalar_t {
+       [=]GPU_LAMBDA(const scalar_t src_val, const mask_t mask_val) -> scalar_t {
           return (float)mask_val * src_val * scale;
        });
 }
@@ -202,7 +204,7 @@ int get_vector_size(at::Tensor self, at::Tensor ret, at::Tensor mask) {
   return can_vectorize ? vec_size : 1;
 }
 
-template <typename index_type>
+template <typename index_type, typename mask_t>
 inline void launcher(
     const Tensor& self,
     Tensor& ret,
@@ -227,7 +229,7 @@ inline void launcher(
         auto ret_info =
             cuda::detail::getTensorInfo<scalar_t, index_type>(ret);
         auto mask_info =
-            cuda::detail::getTensorInfo<bool, index_type>(mask);
+            cuda::detail::getTensorInfo<mask_t, index_type>(mask);
         self_info.collapseDims();
         ret_info.collapseDims();
         mask_info.collapseDims(); // ret and mask are collapsed to 1d
@@ -324,10 +326,10 @@ inline void launcher(
 
 } //anonymous namespace
 
+template <typename mask_t>
 std::tuple<Tensor,Tensor>
-native_dropout_cuda(const Tensor& self, double p, double scale, bool train){
-  auto gen = get_generator_or_default<CUDAGeneratorImpl>(c10::nullopt, cuda::detail::getDefaultCUDAGenerator());
-  Tensor mask = at::empty_like(self, self.options().dtype(kBool));
+dropout_cuda(CUDAGeneratorImpl* gen, const Tensor& self, double p, double scale, bool train){
+  Tensor mask = at::empty_like(self, self.options().dtype(c10::CppTypeToScalarType<mask_t>::value));
   const int64_t nelem = self.numel();
   // empty tensors should not get here, but just in case, avoid FPE
   // non-training shot-cut
@@ -348,24 +350,49 @@ native_dropout_cuda(const Tensor& self, double p, double scale, bool train){
     rng_engine_inputs = gen->philox_cuda_state(counter_offset);
   }
   if (cuda::detail::canUse32BitIndexMath(self)){
-    launcher<unsigned int>(
+    launcher<unsigned int, mask_t>(
         self, ret, mask, p, scale, nelem, rng_engine_inputs, grid, dim_block);
   } else {
-    launcher<uint64_t>(
+    launcher<uint64_t, mask_t>(
         self, ret, mask, p, scale, nelem, rng_engine_inputs, grid, dim_block);
   }
   return std::tuple<Tensor,Tensor>(ret, mask);
 }
 
-Tensor native_dropout_backward_cuda(const Tensor& grad, const Tensor& mask, double scale){
+std::tuple<Tensor,Tensor>
+native_dropout_cuda(const Tensor& self, double p, double scale, bool train){
+  auto gen = get_generator_or_default<CUDAGeneratorImpl>(c10::nullopt, cuda::detail::getDefaultCUDAGenerator());
+  return dropout_cuda<bool>(gen, self, p, scale, train);
+}
+
+// TODO: _fused_dropout_cuda is to be removed, see PR #63937
+std::tuple<Tensor,Tensor>
+fused_dropout_cuda(const Tensor& self, double p, c10::optional<Generator> gen_){
+  auto gen = get_generator_or_default<CUDAGeneratorImpl>(gen_, cuda::detail::getDefaultCUDAGenerator());
+  return dropout_cuda<uint8_t>(gen, self, p, 1.0 / p, true);
+}
+
+template <typename mask_t>
+Tensor dropout_backward_cuda(const Tensor& grad, const Tensor& mask, double scale){
    Tensor ret = at::empty_like(grad, grad.suggest_memory_format());
-   TORCH_CHECK(mask.scalar_type() == at::ScalarType::Bool, "Mask should be Bool Scalar Type", mask.scalar_type());
    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, ret.scalar_type(), "masked_scale", [&] {
       using accscalar_t = acc_type<scalar_t, true>;
-      masked_scale_kernel<scalar_t>(ret, grad, mask, (accscalar_t)scale);
+      masked_scale_kernel<mask_t, scalar_t>(ret, grad, mask, (accscalar_t)scale);
   });
   return ret;
 }
 
+Tensor native_dropout_backward_cuda(const Tensor& grad, const Tensor& mask, double scale){
+   TORCH_CHECK(mask.scalar_type() == at::ScalarType::Bool, "Mask should be Bool Scalar Type", mask.scalar_type());
+  return dropout_backward_cuda<bool>(grad, mask, scale);
+}
+
+// TODO: masked_scale_cuda is to be removed, see PR #63937
+Tensor masked_scale_cuda(const Tensor& self, const Tensor& mask, double scale){
+  TORCH_CHECK(mask.scalar_type() == at::ScalarType::Byte, "mask should be torch.uint8 dtype");
+  return dropout_backward_cuda<uint8_t>(self, mask, scale);
+}
+
 }
 }
+
