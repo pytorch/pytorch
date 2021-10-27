@@ -1,8 +1,8 @@
 # https://developercommunity.visualstudio.com/t/install-specific-version-of-vs-component/1142479
 # Where to find the links: https://docs.microsoft.com/en-us/visualstudio/releases/2019/history#release-dates-and-build-numbers
 
-# BuildTools from S3
-$VS_DOWNLOAD_LINK = "https://s3.amazonaws.com/ossci-windows/vs${env:VS_VERSION}_BuildTools.exe"
+# 16.11.5 buildTools
+$VS_DOWNLOAD_LINK = "https://download.visualstudio.microsoft.com/download/pr/5a50b8ac-2c22-47f1-ba60-70d4257a78fa/4e0f5197da02b62b9fa48f05b55f2e206265785a6f0bab7235ef88fbdbe49e5e/vs_BuildTools.exe"
 $COLLECT_DOWNLOAD_LINK = "https://aka.ms/vscollect.exe"
 $VS_INSTALL_ARGS = @("--nocache","--quiet","--wait", "--add Microsoft.VisualStudio.Workload.VCTools",
                                                      "--add Microsoft.Component.MSBuild",
