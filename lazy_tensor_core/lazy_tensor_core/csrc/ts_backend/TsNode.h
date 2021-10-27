@@ -79,7 +79,7 @@ class TsNode : public torch::lazy::Node {
   // removed from all the legacy ops, so I'm moving it from Node to TsNode
   // for now, and we'll delete it later once we've moved more ops to codegen
   virtual NodePtr Clone(OpList operands) const {
-    LTC_ERROR() << "Cloning not implemented for TsNode";
+    LOG(ERROR) << "Cloning not implemented for TsNode";
   }
 
   // Lower is a backend-specific method since it returns a backend specific

@@ -9,9 +9,9 @@
 #include "lazy_tensor_core/csrc/ops/device_data.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
-#include "lazy_tensors/computation_client/util.h"
 #include "lazy_tensors/computation_client/metrics.h"
 #include "lazy_tensors/computation_client/sys_util.h"
+#include "lazy_tensors/computation_client/util.h"
 #include "lazy_tensors/str_cat.h"
 #include "torch/csrc/lazy/core/hash.h"
 
@@ -91,7 +91,7 @@ OpByOpExecutor::BuildOps(c10::ArrayRef<torch::lazy::Value> roots,
   std::vector<torch::lazy::Node*> post_order =
       ir::Util::ComputePostOrder(root_nodes);
   LTC_VALUE_METRIC("OpByOpGraphSize", post_order.size());
-  LTC_VLOG(5) << "TensorsGraphSize=" << post_order.size();
+  VLOG(5) << "TensorsGraphSize=" << post_order.size();
 
   std::unordered_map<const torch::lazy::Node*, size_t> node_to_index;
   node_to_index.reserve(post_order.size());
@@ -181,12 +181,12 @@ OpByOpExecutor::BuildOps(c10::ArrayRef<torch::lazy::Value> roots,
   // If we missed the cache for certain ops, compile them now and fixup the
   // chained ops vector.
   if (!compile_instances.empty()) {
-    LTC_VLOG(3) << "Compiling " << compile_instances.size()
-                << " computations on device " << device;
+    VLOG(3) << "Compiling " << compile_instances.size()
+            << " computations on device " << device;
     auto computation_ptrs = lazy_tensors::ComputationClient::Get()->Compile(
         std::move(compile_instances));
-    LTC_VLOG(3) << "Compiling " << computation_ptrs.size()
-                << " computations on device " << device << " done!";
+    VLOG(3) << "Compiling " << computation_ptrs.size()
+            << " computations on device " << device << " done!";
     for (size_t i = 0; i < computation_ptrs.size(); ++i) {
       compile_cache_.Add(cache_keys[i], computation_ptrs[i]);
       for (auto index : compile_indices[cache_keys[i]]) {

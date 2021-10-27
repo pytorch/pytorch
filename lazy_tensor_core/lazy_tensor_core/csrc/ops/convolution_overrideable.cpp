@@ -1,23 +1,21 @@
 #include "lazy_tensor_core/csrc/ops/convolution_overrideable.h"
 
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
-#include "lazy_tensors/computation_client/debug_macros.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
 ConvolutionOverrideable::ConvolutionOverrideable(
-    const torch::lazy::Value& input, const torch::lazy::Value& weight, const torch::lazy::Value& bias,
-    std::vector<int64_t> stride,
-    std::vector<int64_t> padding,
-    std::vector<int64_t> dilation, bool transposed,
-    std::vector<int64_t> output_padding, int64_t groups)
+    const torch::lazy::Value& input, const torch::lazy::Value& weight,
+    const torch::lazy::Value& bias, std::vector<int64_t> stride,
+    std::vector<int64_t> padding, std::vector<int64_t> dilation,
+    bool transposed, std::vector<int64_t> output_padding, int64_t groups)
     : TsNode(torch::lazy::OpKind(at::aten::convolution_overrideable),
-           {input, weight, bias},
-           /*num_outputs=*/1,
-           torch::lazy::MHash(stride, padding, dilation, transposed,
-                                     output_padding, groups)),
+             {input, weight, bias},
+             /*num_outputs=*/1,
+             torch::lazy::MHash(stride, padding, dilation, transposed,
+                                output_padding, groups)),
       stride_(std::move(stride)),
       padding_(std::move(padding)),
       dilation_(std::move(dilation)),
@@ -30,14 +28,14 @@ ConvolutionOverrideable::ConvolutionOverrideable(
 
 ConvolutionOverrideable::ConvolutionOverrideable(
     const torch::lazy::Value& input, const torch::lazy::Value& weight,
-    std::vector<int64_t> stride,
-    std::vector<int64_t> padding,
+    std::vector<int64_t> stride, std::vector<int64_t> padding,
     std::vector<int64_t> dilation, bool transposed,
     std::vector<int64_t> output_padding, int64_t groups)
-    : TsNode(torch::lazy::OpKind(at::aten::convolution_overrideable), {input, weight},
-           /*num_outputs=*/1,
-           torch::lazy::MHash(stride, padding, dilation, transposed,
-                                     output_padding, groups)),
+    : TsNode(torch::lazy::OpKind(at::aten::convolution_overrideable),
+             {input, weight},
+             /*num_outputs=*/1,
+             torch::lazy::MHash(stride, padding, dilation, transposed,
+                                output_padding, groups)),
       stride_(std::move(stride)),
       padding_(std::move(padding)),
       dilation_(std::move(dilation)),

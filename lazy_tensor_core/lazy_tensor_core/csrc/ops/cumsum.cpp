@@ -12,8 +12,8 @@ namespace ops {
 CumSum::CumSum(const torch::lazy::Value& input, int64_t dim,
                c10::optional<at::ScalarType> dtype)
     : TsNode(torch::lazy::OpKind(at::aten::cumsum), {input},
-           /*num_outputs=*/1,
-           torch::lazy::MHash(dim, OptionalOr<int>(dtype, -1))),
+             /*num_outputs=*/1,
+             torch::lazy::MHash(dim, OptionalOr<int>(dtype, -1))),
       dim_(dim),
       dtype_(dtype) {
   SetShapeDeferred(

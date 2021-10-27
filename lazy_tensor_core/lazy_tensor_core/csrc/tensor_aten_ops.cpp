@@ -123,7 +123,6 @@
 #include "lazy_tensor_core/csrc/tensor.h"
 #include "lazy_tensor_core/csrc/tensor_ops.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
-#include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/computation_client/metrics.h"
 #include "lazy_tensors/computation_client/util.h"
 #include "lazy_tensors/literal_util.h"
@@ -149,9 +148,7 @@ torch::lazy::Value MaybeExpand(const torch::lazy::Value& input,
     return input;
   }
   return torch::lazy::MakeNode<ir::ops::Expand>(
-      input,
-      lazy_tensors::util::ToVector<int64_t>(
-          target_shape.dimensions()),
+      input, lazy_tensors::util::ToVector<int64_t>(target_shape.dimensions()),
       /*is_scalar_expand=*/false);
 }
 
@@ -159,7 +156,7 @@ void CheckRank(const LazyTensor& t, int64_t expected_rank,
                const std::string& tag, const std::string& arg_name,
                int arg_number) {
   int64_t actual_rank = t.shape().get().rank();
-  LTC_CHECK_EQ(actual_rank, expected_rank)
+  CHECK_EQ(actual_rank, expected_rank)
       << "Expected " << expected_rank << "-dimensional tensor, but got "
       << actual_rank << "-dimensional tensor for "
       << "argument #" << arg_number << " '" << arg_name << "'"
@@ -168,27 +165,25 @@ void CheckRank(const LazyTensor& t, int64_t expected_rank,
 
 template <typename T>
 void CheckShapeDimensions(const T& size) {
-  LTC_CHECK(std::all_of(size.begin(), size.end(), [](int64_t dim) {
+  CHECK(std::all_of(size.begin(), size.end(), [](int64_t dim) {
     return dim >= 0;
   })) << "Dimensions cannot be negative numbers";
 }
 
-void CheckDimensionSize(const LazyTensor& t, int64_t dim,
-                        int64_t expected_size,
+void CheckDimensionSize(const LazyTensor& t, int64_t dim, int64_t expected_size,
                         const std::string& tag, const std::string& arg_name,
                         int arg_number) {
   int64_t dim_size = t.size(dim);
-  LTC_CHECK_EQ(t.size(dim), expected_size)
+  CHECK_EQ(t.size(dim), expected_size)
       << "Expected tensor to have size " << expected_size << " at dimension "
       << dim << ", but got size " << dim_size << " for "
       << "argument #" << arg_number << " '" << arg_name << "'"
       << " (while checking arguments for " << tag << ")";
 }
 
-std::vector<int64_t> GetExpandDimensions(
-    const lazy_tensors::Shape& shape,
-    std::vector<int64_t> dimensions) {
-  LTC_CHECK_GE(dimensions.size(), shape.rank()) << shape;
+std::vector<int64_t> GetExpandDimensions(const lazy_tensors::Shape& shape,
+                                         std::vector<int64_t> dimensions) {
+  CHECK_GE(dimensions.size(), shape.rank()) << shape;
   int64_t base = dimensions.size() - shape.rank();
   for (size_t i = 0; i < shape.rank(); ++i) {
     if (dimensions[base + i] == -1) {
@@ -207,15 +202,15 @@ ReductionMode GetReductionMode(int64_t reduction) {
     case at::Reduction::Sum:
       return ReductionMode::kSum;
   }
-  LTC_ERROR() << "Unknown reduction mode: " << reduction;
+  LOG(ERROR) << "Unknown reduction mode: " << reduction;
 }
 
 // Resizes and / or checks whether a list is of the given size. The list is only
 // resized if its size is 1. If it's empty, it's replaced with the provided
 // default first.
-std::vector<int64_t> CheckIntList(
-    c10::ArrayRef<int64_t> list, size_t length,
-    const std::string& name, std::vector<int64_t> def = {}) {
+std::vector<int64_t> CheckIntList(c10::ArrayRef<int64_t> list, size_t length,
+                                  const std::string& name,
+                                  std::vector<int64_t> def = {}) {
   std::vector<int64_t> result;
   if (list.empty()) {
     result = std::move(def);
@@ -226,7 +221,7 @@ std::vector<int64_t> CheckIntList(
     result.resize(length, result[0]);
     return result;
   }
-  LTC_CHECK_EQ(result.size(), length)
+  CHECK_EQ(result.size(), length)
       << "Invalid length for the '" << name << "' attribute";
   return result;
 }
@@ -269,17 +264,16 @@ c10::optional<torch::lazy::Value> GetOptionalIrValue(const LazyTensor& tensor) {
 
 void CheckIsIntegralOrPred(const lazy_tensors::Shape& shape,
                            const std::string& op_name) {
-  LTC_CHECK(isIntegralType(shape.at_element_type(), /*includeBool*/ true))
+  CHECK(isIntegralType(shape.at_element_type(), /*includeBool*/ true))
       << "Operator " << op_name
       << " is only supported for integer or boolean type tensors, got: "
       << shape;
 }
 
-ViewInfo CreateAsStridedViewInfo(
-    const lazy_tensors::Shape& input_shape,
-    std::vector<int64_t> size,
-    std::vector<int64_t> stride,
-    c10::optional<int64_t> storage_offset) {
+ViewInfo CreateAsStridedViewInfo(const lazy_tensors::Shape& input_shape,
+                                 std::vector<int64_t> size,
+                                 std::vector<int64_t> stride,
+                                 c10::optional<int64_t> storage_offset) {
   lazy_tensors::Shape result_shape =
       Helpers::GetDynamicReshape(input_shape, size);
   AsStridedInfo as_strided_info;
@@ -421,8 +415,7 @@ LazyTensor acosh(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::Acosh(input.GetIrValue()));
 }
 
-LazyTensor all(const LazyTensor& input,
-               std::vector<int64_t> dimensions,
+LazyTensor all(const LazyTensor& input, std::vector<int64_t> dimensions,
                bool keep_reduced_dimensions) {
   at::ScalarType result_type = input.dtype() == at::ScalarType::Byte
                                    ? at::ScalarType::Byte
@@ -435,8 +428,7 @@ LazyTensor all(const LazyTensor& input,
                           result_type);
 }
 
-LazyTensor amax(const LazyTensor& input,
-                std::vector<int64_t> dimensions,
+LazyTensor amax(const LazyTensor& input, std::vector<int64_t> dimensions,
                 bool keep_reduced_dimensions) {
   return input.CreateFrom(torch::lazy::MakeNode<ir::ops::Amax>(
       input.GetIrValue(),
@@ -445,8 +437,7 @@ LazyTensor amax(const LazyTensor& input,
       keep_reduced_dimensions));
 }
 
-LazyTensor amin(const LazyTensor& input,
-                std::vector<int64_t> dimensions,
+LazyTensor amin(const LazyTensor& input, std::vector<int64_t> dimensions,
                 bool keep_reduced_dimensions) {
   return input.CreateFrom(torch::lazy::MakeNode<ir::ops::Amin>(
       input.GetIrValue(),
@@ -455,8 +446,7 @@ LazyTensor amin(const LazyTensor& input,
       keep_reduced_dimensions));
 }
 
-LazyTensor any(const LazyTensor& input,
-               std::vector<int64_t> dimensions,
+LazyTensor any(const LazyTensor& input, std::vector<int64_t> dimensions,
                bool keep_reduced_dimensions) {
   at::ScalarType result_type = input.dtype() == at::ScalarType::Byte
                                    ? at::ScalarType::Byte
@@ -469,8 +459,7 @@ LazyTensor any(const LazyTensor& input,
                           result_type);
 }
 
-LazyTensor argmax(const LazyTensor& input, int64_t dim,
-                  bool keepdim) {
+LazyTensor argmax(const LazyTensor& input, int64_t dim, bool keepdim) {
   int64_t canonical_dim =
       Helpers::GetCanonicalDimensionIndex(dim, input.shape().get().rank());
   return input.CreateFrom(torch::lazy::MakeNode<ir::ops::ArgMax>(
@@ -484,8 +473,7 @@ LazyTensor argmax(const LazyTensor& input) {
       at::ScalarType::Long);
 }
 
-LazyTensor argmin(const LazyTensor& input, int64_t dim,
-                  bool keepdim) {
+LazyTensor argmin(const LazyTensor& input, int64_t dim, bool keepdim) {
   int64_t canonical_dim =
       Helpers::GetCanonicalDimensionIndex(dim, input.shape().get().rank());
   return input.CreateFrom(torch::lazy::MakeNode<ir::ops::ArgMin>(
@@ -499,8 +487,7 @@ LazyTensor argmin(const LazyTensor& input) {
       at::ScalarType::Long);
 }
 
-LazyTensor as_strided(const LazyTensor& input,
-                      std::vector<int64_t> size,
+LazyTensor as_strided(const LazyTensor& input, std::vector<int64_t> size,
                       std::vector<int64_t> stride,
                       c10::optional<int64_t> storage_offset) {
   auto input_shape = input.shape();
@@ -545,8 +532,7 @@ LazyTensor atan2(const LazyTensor& input, const LazyTensor& other,
       logical_element_type);
 }
 
-LazyTensor avg_pool_nd(const LazyTensor& input,
-                       int64_t spatial_dim_count,
+LazyTensor avg_pool_nd(const LazyTensor& input, int64_t spatial_dim_count,
                        std::vector<int64_t> kernel_size,
                        std::vector<int64_t> stride,
                        std::vector<int64_t> padding, bool ceil_mode,
@@ -564,8 +550,8 @@ LazyTensor avg_pool_nd_backward(const LazyTensor& out_backprop,
                                 int64_t spatial_dim_count,
                                 std::vector<int64_t> kernel_size,
                                 std::vector<int64_t> stride,
-                                std::vector<int64_t> padding,
-                                bool ceil_mode, bool count_include_pad) {
+                                std::vector<int64_t> padding, bool ceil_mode,
+                                bool count_include_pad) {
   kernel_size = CheckIntList(kernel_size, spatial_dim_count, "kernel_size");
   stride = CheckIntList(stride, spatial_dim_count, "stride", kernel_size);
   padding = CheckIntList(padding, spatial_dim_count, "padding");
@@ -610,8 +596,7 @@ void bernoulli_(LazyTensor& input, const LazyTensor& probability) {
 
 LazyTensor binary_cross_entropy(const LazyTensor& input,
                                 const LazyTensor& target,
-                                const LazyTensor& weight,
-                                int64_t reduction) {
+                                const LazyTensor& weight, int64_t reduction) {
   return input.CreateFrom(torch::lazy::MakeNode<ir::ops::BinaryCrossEntropy>(
       input.GetIrValue(), target.GetIrValue(), GetOptionalIrValue(weight),
       GetReductionMode(reduction)));
@@ -666,7 +651,7 @@ void bitwise_xor_out(LazyTensor& out, const LazyTensor& input,
 }
 
 std::vector<LazyTensor> broadcast_tensors(c10::ArrayRef<LazyTensor> tensors) {
-  LTC_CHECK(!tensors.empty()) << "broadcast_tensors cannot take an empty list";
+  CHECK(!tensors.empty()) << "broadcast_tensors cannot take an empty list";
   std::vector<torch::lazy::Value> tensor_ir_values;
   for (const auto& tensor : tensors) {
     tensor_ir_values.push_back(tensor.GetIrValue());
@@ -689,8 +674,7 @@ LazyTensor clone(const LazyTensor& input) {
   return input.CreateFrom(input.GetIrValue());
 }
 
-LazyTensor constant_pad_nd(const LazyTensor& input,
-                           c10::ArrayRef<int64_t> pad,
+LazyTensor constant_pad_nd(const LazyTensor& input, c10::ArrayRef<int64_t> pad,
                            const at::Scalar& value) {
   std::vector<int64_t> complete_pad(pad.begin(), pad.end());
   complete_pad.resize(2 * input.shape().get().rank());
@@ -700,11 +684,9 @@ LazyTensor constant_pad_nd(const LazyTensor& input,
 
 LazyTensor convolution_overrideable(
     const LazyTensor& input, const LazyTensor& weight, const LazyTensor& bias,
-    std::vector<int64_t> stride,
-    std::vector<int64_t> padding,
+    std::vector<int64_t> stride, std::vector<int64_t> padding,
     std::vector<int64_t> dilation, bool transposed,
-    std::vector<int64_t> output_padding,
-    int64_t groups) {
+    std::vector<int64_t> output_padding, int64_t groups) {
   NodePtr ir_value = torch::lazy::MakeNode<ir::ops::ConvolutionOverrideable>(
       input.GetIrValue(), weight.GetIrValue(), bias.GetIrValue(),
       std::move(stride), std::move(padding), std::move(dilation), transposed,
@@ -714,11 +696,9 @@ LazyTensor convolution_overrideable(
 
 LazyTensor convolution_overrideable(
     const LazyTensor& input, const LazyTensor& weight,
-    std::vector<int64_t> stride,
-    std::vector<int64_t> padding,
+    std::vector<int64_t> stride, std::vector<int64_t> padding,
     std::vector<int64_t> dilation, bool transposed,
-    std::vector<int64_t> output_padding,
-    int64_t groups) {
+    std::vector<int64_t> output_padding, int64_t groups) {
   NodePtr ir_value = torch::lazy::MakeNode<ir::ops::ConvolutionOverrideable>(
       input.GetIrValue(), weight.GetIrValue(), std::move(stride),
       std::move(padding), std::move(dilation), transposed,
@@ -730,9 +710,8 @@ std::tuple<LazyTensor, LazyTensor, LazyTensor>
 convolution_backward_overrideable(
     const LazyTensor& out_backprop, const LazyTensor& input,
     const LazyTensor& weight, std::vector<int64_t> stride,
-    std::vector<int64_t> padding,
-    std::vector<int64_t> dilation, bool transposed,
-    std::vector<int64_t> output_padding, int64_t groups,
+    std::vector<int64_t> padding, std::vector<int64_t> dilation,
+    bool transposed, std::vector<int64_t> output_padding, int64_t groups,
     std::array<bool, 3> output_mask) {
   NodePtr node =
       torch::lazy::MakeNode<ir::ops::ConvolutionBackwardOverrideable>(
@@ -782,7 +761,7 @@ LazyTensor cumsum(const LazyTensor& input, int64_t dim,
 
 LazyTensor diag(const LazyTensor& input, int64_t offset) {
   int64_t rank = input.shape().get().rank();
-  LTC_CHECK(rank == 1 || rank == 2)
+  CHECK(rank == 1 || rank == 2)
       << "Invalid argument for diag: matrix or a vector expected";
   if (rank == 1) {
     return tensor_ops::MakeMatrixWithDiagonal(input, offset);
@@ -790,8 +769,8 @@ LazyTensor diag(const LazyTensor& input, int64_t offset) {
   return diagonal(input, offset, /*dim1=*/-2, /*dim2=*/-1);
 }
 
-LazyTensor diagonal(const LazyTensor& input, int64_t offset,
-                    int64_t dim1, int64_t dim2) {
+LazyTensor diagonal(const LazyTensor& input, int64_t offset, int64_t dim1,
+                    int64_t dim2) {
   auto input_shape = input.shape();
   int64_t canonical_dim1 =
       Helpers::GetCanonicalDimensionIndex(dim1, input.shape().get().rank());
@@ -848,14 +827,13 @@ void exponential_(LazyTensor& input, double lambd) {
       input_shape.get()));
 }
 
-LazyTensor eye(int64_t lines, int64_t cols,
-               const Device& device, at::ScalarType element_type) {
+LazyTensor eye(int64_t lines, int64_t cols, const Device& device,
+               at::ScalarType element_type) {
   return LazyTensor::Create(ir::ops::Identity(lines, cols, element_type),
                             device, element_type);
 }
 
-void eye_out(LazyTensor& out, int64_t lines,
-             int64_t cols) {
+void eye_out(LazyTensor& out, int64_t lines, int64_t cols) {
   out.SetIrValue(ir::ops::Identity(lines, cols >= 0 ? cols : lines,
                                    out.shape().get().at_element_type()));
 }
@@ -866,13 +844,11 @@ void fill_(LazyTensor& input, const at::Scalar& value) {
   input.SetInPlaceIrValue(std::move(constant));
 }
 
-LazyTensor flip(const LazyTensor& input,
-                c10::ArrayRef<int64_t> dims) {
+LazyTensor flip(const LazyTensor& input, c10::ArrayRef<int64_t> dims) {
   auto dimensions =
       Helpers::GetCanonicalDimensionIndices(dims, input.shape().get().rank());
-  std::set<int64_t> unique_dims(dimensions.begin(),
-                                            dimensions.end());
-  LTC_CHECK_EQ(unique_dims.size(), dimensions.size());
+  std::set<int64_t> unique_dims(dimensions.begin(), dimensions.end());
+  CHECK_EQ(unique_dims.size(), dimensions.size());
   return input.CreateFrom(
       torch::lazy::MakeNode<ir::ops::Flip>(input.GetIrValue(), dimensions));
 }
@@ -891,9 +867,8 @@ LazyTensor fmod(const LazyTensor& input, const at::Scalar& other,
                           logical_element_type);
 }
 
-LazyTensor full(c10::ArrayRef<int64_t> size,
-                const at::Scalar& fill_value, const Device& device,
-                at::ScalarType scalar_type) {
+LazyTensor full(c10::ArrayRef<int64_t> size, const at::Scalar& fill_value,
+                const Device& device, at::ScalarType scalar_type) {
   CheckShapeDimensions(size);
   lazy_tensors::Shape shape = MakeArrayShapeFromDimensions(
       size, /*dynamic_dimensions=*/{}, scalar_type, device.hw_type);
@@ -956,8 +931,8 @@ LazyTensor index_add(const LazyTensor& input, int64_t dim,
   return input.CreateFrom(IndexAdd(input, canonical_dim, index, source));
 }
 
-void index_add_(LazyTensor& input, int64_t dim,
-                const LazyTensor& index, const LazyTensor& source) {
+void index_add_(LazyTensor& input, int64_t dim, const LazyTensor& index,
+                const LazyTensor& source) {
   int64_t canonical_dim =
       Helpers::GetCanonicalDimensionIndex(dim, input.shape().get().rank());
   input.SetIrValue(IndexAdd(input, canonical_dim, index, source));
@@ -970,8 +945,8 @@ LazyTensor index_copy(const LazyTensor& input, int64_t dim,
   return input.CreateFrom(IndexCopy(input, canonical_dim, index, source));
 }
 
-void index_copy_(LazyTensor& input, int64_t dim,
-                 const LazyTensor& index, const LazyTensor& source) {
+void index_copy_(LazyTensor& input, int64_t dim, const LazyTensor& index,
+                 const LazyTensor& source) {
   int64_t canonical_dim =
       Helpers::GetCanonicalDimensionIndex(dim, input.shape().get().rank());
   input.SetIrValue(IndexCopy(input, canonical_dim, index, source));
@@ -991,15 +966,15 @@ LazyTensor index_fill(const LazyTensor& input, int64_t dim,
   return input.CreateFrom(IndexFill(input, canonical_dim, index, value));
 }
 
-void index_fill_(LazyTensor& input, int64_t dim,
-                 const LazyTensor& index, const LazyTensor& value) {
+void index_fill_(LazyTensor& input, int64_t dim, const LazyTensor& index,
+                 const LazyTensor& value) {
   int64_t canonical_dim =
       Helpers::GetCanonicalDimensionIndex(dim, input.shape().get().rank());
   input.SetIrValue(IndexFill(input, canonical_dim, index, value));
 }
 
-void index_fill_(LazyTensor& input, int64_t dim,
-                 const LazyTensor& index, const at::Scalar& value) {
+void index_fill_(LazyTensor& input, int64_t dim, const LazyTensor& index,
+                 const at::Scalar& value) {
   int64_t canonical_dim =
       Helpers::GetCanonicalDimensionIndex(dim, input.shape().get().rank());
   input.SetIrValue(IndexFill(input, canonical_dim, index, value));
@@ -1014,9 +989,8 @@ LazyTensor index_put(const LazyTensor& input, c10::ArrayRef<LazyTensor> indices,
 }
 
 void index_put_(LazyTensor& input, const LazyTensor& canonical_base,
-                c10::ArrayRef<LazyTensor> indices,
-                int64_t start_dim, const LazyTensor& values,
-                bool accumulate,
+                c10::ArrayRef<LazyTensor> indices, int64_t start_dim,
+                const LazyTensor& values, bool accumulate,
                 c10::ArrayRef<int64_t> result_permutation) {
   input.SetIrValue(IndexPutByTensors(canonical_base, indices, start_dim, values,
                                      accumulate, result_permutation));
@@ -1040,10 +1014,8 @@ LazyTensor isnan(const LazyTensor& input) {
                           at::ScalarType::Bool);
 }
 
-std::tuple<LazyTensor, LazyTensor> kthvalue(const LazyTensor& input,
-                                            int64_t k,
-                                            int64_t dim,
-                                            bool keepdim) {
+std::tuple<LazyTensor, LazyTensor> kthvalue(const LazyTensor& input, int64_t k,
+                                            int64_t dim, bool keepdim) {
   NodePtr node = torch::lazy::MakeNode<ir::ops::KthValue>(
       input.GetIrValue(), k,
       Helpers::GetCanonicalDimensionIndex(dim, input.shape().get().rank()),
@@ -1156,8 +1128,7 @@ LazyTensor logdet(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::LogDet(input.GetIrValue()));
 }
 
-LazyTensor logsumexp(const LazyTensor& input,
-                     std::vector<int64_t> dimensions,
+LazyTensor logsumexp(const LazyTensor& input, std::vector<int64_t> dimensions,
                      bool keep_reduced_dimensions) {
   return input.CreateFrom(torch::lazy::MakeNode<ir::ops::Logsumexp>(
       input.GetIrValue(),
@@ -1206,8 +1177,8 @@ LazyTensor max(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::MaxUnary(input.GetIrValue()), input.dtype());
 }
 
-std::tuple<LazyTensor, LazyTensor> max(const LazyTensor& input,
-                                       int64_t dim, bool keepdim) {
+std::tuple<LazyTensor, LazyTensor> max(const LazyTensor& input, int64_t dim,
+                                       bool keepdim) {
   int64_t canonical_dim =
       Helpers::GetCanonicalDimensionIndex(dim, input.shape().get().rank());
   NodePtr node = torch::lazy::MakeNode<ir::ops::MaxInDim>(
@@ -1227,11 +1198,12 @@ void max_out(LazyTensor& max, LazyTensor& max_values, const LazyTensor& input,
   max_values.SetIrValue(torch::lazy::Value(node, 1));
 }
 
-std::tuple<LazyTensor, LazyTensor> max_pool_nd(
-    const LazyTensor& input, int64_t spatial_dim_count,
-    std::vector<int64_t> kernel_size,
-    std::vector<int64_t> stride,
-    std::vector<int64_t> padding, bool ceil_mode) {
+std::tuple<LazyTensor, LazyTensor> max_pool_nd(const LazyTensor& input,
+                                               int64_t spatial_dim_count,
+                                               std::vector<int64_t> kernel_size,
+                                               std::vector<int64_t> stride,
+                                               std::vector<int64_t> padding,
+                                               bool ceil_mode) {
   kernel_size = CheckIntList(kernel_size, spatial_dim_count, "kernel_size");
   stride = CheckIntList(stride, spatial_dim_count, "stride", kernel_size);
   padding = CheckIntList(padding, spatial_dim_count, "padding");
@@ -1248,8 +1220,7 @@ LazyTensor max_pool_nd_backward(const LazyTensor& out_backprop,
                                 int64_t spatial_dim_count,
                                 std::vector<int64_t> kernel_size,
                                 std::vector<int64_t> stride,
-                                std::vector<int64_t> padding,
-                                bool ceil_mode) {
+                                std::vector<int64_t> padding, bool ceil_mode) {
   kernel_size = CheckIntList(kernel_size, spatial_dim_count, "kernel_size");
   stride = CheckIntList(stride, spatial_dim_count, "stride", kernel_size);
   padding = CheckIntList(padding, spatial_dim_count, "padding");
@@ -1286,8 +1257,8 @@ LazyTensor min(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::MinUnary(input.GetIrValue()), input.dtype());
 }
 
-std::tuple<LazyTensor, LazyTensor> min(const LazyTensor& input,
-                                       int64_t dim, bool keepdim) {
+std::tuple<LazyTensor, LazyTensor> min(const LazyTensor& input, int64_t dim,
+                                       bool keepdim) {
   int64_t canonical_dim =
       Helpers::GetCanonicalDimensionIndex(dim, input.shape().get().rank());
   NodePtr node = torch::lazy::MakeNode<ir::ops::MinInDim>(
@@ -1334,8 +1305,8 @@ LazyTensor mul(const LazyTensor& input, const at::Scalar& other,
   return input.CreateFrom(input.GetIrValue() * constant, logical_element_type);
 }
 
-LazyTensor narrow(const LazyTensor& input, int64_t dim,
-                  int64_t start, int64_t length) {
+LazyTensor narrow(const LazyTensor& input, int64_t dim, int64_t start,
+                  int64_t length) {
   auto input_shape = input.shape();
   dim = Helpers::GetCanonicalDimensionIndex(dim, input_shape.get().rank());
   lazy_tensors::Shape narrow_shape = input_shape;
@@ -1440,7 +1411,7 @@ std::tuple<LazyTensor, LazyTensor, LazyTensor> ts_native_batch_norm_backward(
   torch::lazy::Value weight_value =
       GetIrValueOrDefault(weight, 1, features_shape, input.GetDevice());
   NodePtr node;
-  LTC_CHECK_EQ(running_mean.is_null(), running_var.is_null());
+  CHECK_EQ(running_mean.is_null(), running_var.is_null());
   if (running_mean.is_null()) {
     node = torch::lazy::MakeNode<ir::ops::TSNativeBatchNormBackward>(
         grad_out.GetIrValue(), input.GetIrValue(), weight_value,
@@ -1483,8 +1454,8 @@ LazyTensor nll_loss2d(const LazyTensor& input, const LazyTensor& target,
 LazyTensor nll_loss2d_backward(const LazyTensor& grad_output,
                                const LazyTensor& input,
                                const LazyTensor& target,
-                               const LazyTensor& weight,
-                               int64_t reduction, int ignore_index,
+                               const LazyTensor& weight, int64_t reduction,
+                               int ignore_index,
                                const LazyTensor& total_weight) {
   return input.CreateFrom(torch::lazy::MakeNode<ir::ops::NllLoss2dBackward>(
       grad_output.GetIrValue(), input.GetIrValue(), target.GetIrValue(),
@@ -1549,8 +1520,7 @@ LazyTensor not_supported(std::string description, lazy_tensors::Shape shape,
                             device);
 }
 
-LazyTensor permute(const LazyTensor& input,
-                   c10::ArrayRef<int64_t> dims) {
+LazyTensor permute(const LazyTensor& input, c10::ArrayRef<int64_t> dims) {
   auto input_shape = input.shape();
   ViewInfo view_info(
       ViewInfo::Type::kPermute, input_shape,
@@ -1576,8 +1546,7 @@ LazyTensor pow(const at::Scalar& input, const LazyTensor& exponent) {
   return exponent.CreateFrom(ir::ops::Pow(input_node, exponent.GetIrValue()));
 }
 
-LazyTensor prod(const LazyTensor& input,
-                std::vector<int64_t> dimensions,
+LazyTensor prod(const LazyTensor& input, std::vector<int64_t> dimensions,
                 bool keep_reduced_dimensions,
                 c10::optional<at::ScalarType> dtype) {
   if (!dtype) {
@@ -1632,8 +1601,7 @@ LazyTensor remainder(const LazyTensor& input, const at::Scalar& other) {
   return input.CreateFrom(ir::ops::Remainder(input.GetIrValue(), constant));
 }
 
-LazyTensor repeat(const LazyTensor& input,
-                  std::vector<int64_t> repeats) {
+LazyTensor repeat(const LazyTensor& input, std::vector<int64_t> repeats) {
   return input.CreateFrom(torch::lazy::MakeNode<ir::ops::Repeat>(
       input.GetIrValue(), std::move(repeats)));
 }
@@ -1644,9 +1612,9 @@ LazyTensor replication_pad1d(const LazyTensor& input,
       input.GetIrValue(), std::move(padding)));
 }
 
-LazyTensor replication_pad1d_backward(
-    const LazyTensor& grad_output, const LazyTensor& input,
-    std::vector<int64_t> padding) {
+LazyTensor replication_pad1d_backward(const LazyTensor& grad_output,
+                                      const LazyTensor& input,
+                                      std::vector<int64_t> padding) {
   return input.CreateFrom(
       torch::lazy::MakeNode<ir::ops::ReplicationPadBackward>(
           grad_output.GetIrValue(), input.GetIrValue(), std::move(padding)));
@@ -1658,9 +1626,9 @@ LazyTensor replication_pad2d(const LazyTensor& input,
       input.GetIrValue(), std::move(padding)));
 }
 
-LazyTensor replication_pad2d_backward(
-    const LazyTensor& grad_output, const LazyTensor& input,
-    std::vector<int64_t> padding) {
+LazyTensor replication_pad2d_backward(const LazyTensor& grad_output,
+                                      const LazyTensor& input,
+                                      std::vector<int64_t> padding) {
   return input.CreateFrom(
       torch::lazy::MakeNode<ir::ops::ReplicationPadBackward>(
           grad_output.GetIrValue(), input.GetIrValue(), std::move(padding)));
@@ -1748,17 +1716,15 @@ void copy_(LazyTensor& input, LazyTensor& src) {
   }
 }
 
-void scatter_out(LazyTensor& out, const LazyTensor& input,
-                 int64_t dim, const LazyTensor& index,
-                 const LazyTensor& src) {
+void scatter_out(LazyTensor& out, const LazyTensor& input, int64_t dim,
+                 const LazyTensor& index, const LazyTensor& src) {
   out.SetIrValue(torch::lazy::MakeNode<ir::ops::Scatter>(
       input.GetIrValue(), index.GetIrValue(), src.GetIrValue(),
       Helpers::GetCanonicalDimensionIndex(dim, input.shape().get().rank())));
 }
 
-void scatter_out(LazyTensor& out, const LazyTensor& input,
-                 int64_t dim, const LazyTensor& index,
-                 const at::Scalar& value) {
+void scatter_out(LazyTensor& out, const LazyTensor& input, int64_t dim,
+                 const LazyTensor& index, const at::Scalar& value) {
   torch::lazy::Value constant = LazyGraphExecutor::Get()->GetIrValueForScalar(
       value, input.shape(), input.GetDevice());
   out.SetIrValue(torch::lazy::MakeNode<ir::ops::Scatter>(
@@ -1766,24 +1732,22 @@ void scatter_out(LazyTensor& out, const LazyTensor& input,
       Helpers::GetCanonicalDimensionIndex(dim, input.shape().get().rank())));
 }
 
-void scatter_add_(LazyTensor& input, int64_t dim,
-                  const LazyTensor& index, const LazyTensor& src) {
+void scatter_add_(LazyTensor& input, int64_t dim, const LazyTensor& index,
+                  const LazyTensor& src) {
   input.SetIrValue(torch::lazy::MakeNode<ir::ops::ScatterAdd>(
       input.GetIrValue(), index.GetIrValue(), src.GetIrValue(),
       Helpers::GetCanonicalDimensionIndex(dim, input.shape().get().rank())));
 }
 
-void scatter_add_out(LazyTensor& out, const LazyTensor& input,
-                     int64_t dim, const LazyTensor& index,
-                     const LazyTensor& src) {
+void scatter_add_out(LazyTensor& out, const LazyTensor& input, int64_t dim,
+                     const LazyTensor& index, const LazyTensor& src) {
   out.SetIrValue(torch::lazy::MakeNode<ir::ops::ScatterAdd>(
       input.GetIrValue(), index.GetIrValue(), src.GetIrValue(),
       Helpers::GetCanonicalDimensionIndex(dim, input.shape().get().rank())));
 }
 
-void scatter_add_out(LazyTensor& out, const LazyTensor& input,
-                     int64_t dim, const LazyTensor& index,
-                     const at::Scalar& value) {
+void scatter_add_out(LazyTensor& out, const LazyTensor& input, int64_t dim,
+                     const LazyTensor& index, const at::Scalar& value) {
   torch::lazy::Value constant = LazyGraphExecutor::Get()->GetIrValueForScalar(
       value, input.shape(), input.GetDevice());
   out.SetIrValue(torch::lazy::MakeNode<ir::ops::ScatterAdd>(
@@ -1791,8 +1755,7 @@ void scatter_add_out(LazyTensor& out, const LazyTensor& input,
       Helpers::GetCanonicalDimensionIndex(dim, input.shape().get().rank())));
 }
 
-LazyTensor select(const LazyTensor& input, int64_t dim,
-                  int64_t index) {
+LazyTensor select(const LazyTensor& input, int64_t dim, int64_t index) {
   return tensor_ops::Select(input, dim, index);
 }
 
@@ -1818,9 +1781,8 @@ LazyTensor sinh(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::Sinh(input.GetIrValue()));
 }
 
-LazyTensor slice(const LazyTensor& input, int64_t dim,
-                 int64_t start, int64_t end,
-                 int64_t step) {
+LazyTensor slice(const LazyTensor& input, int64_t dim, int64_t start,
+                 int64_t end, int64_t step) {
   auto input_shape = input.shape();
   dim = Helpers::GetCanonicalDimensionIndex(dim, input_shape.get().rank());
   start =
@@ -1850,8 +1812,7 @@ LazyTensor softshrink_backward(const LazyTensor& grad_out,
       input.GetIrValue(), lambda));
 }
 
-std::vector<LazyTensor> split(const LazyTensor& input,
-                              int64_t split_size,
+std::vector<LazyTensor> split(const LazyTensor& input, int64_t split_size,
                               int64_t dim) {
   auto input_shape = input.shape();
   int split_dim =
@@ -1873,9 +1834,9 @@ std::vector<LazyTensor> split(const LazyTensor& input,
   return input.MakeOutputTensors(node);
 }
 
-std::vector<LazyTensor> split_with_sizes(
-    const LazyTensor& input, std::vector<int64_t> split_size,
-    int64_t dim) {
+std::vector<LazyTensor> split_with_sizes(const LazyTensor& input,
+                                         std::vector<int64_t> split_size,
+                                         int64_t dim) {
   auto input_shape = input.shape();
   int split_dim =
       Helpers::GetCanonicalDimensionIndex(dim, input_shape.get().rank());
@@ -1916,7 +1877,7 @@ void squeeze_(LazyTensor& input, int64_t dim) {
 }
 
 LazyTensor stack(c10::ArrayRef<LazyTensor> tensors, int64_t dim) {
-  LTC_CHECK_GT(tensors.size(), 0);
+  CHECK_GT(tensors.size(), 0);
   std::vector<torch::lazy::Value> values;
   for (auto& tensor : tensors) {
     values.push_back(tensor.GetIrValue());
@@ -1927,8 +1888,7 @@ LazyTensor stack(c10::ArrayRef<LazyTensor> tensors, int64_t dim) {
       torch::lazy::MakeNode<ir::ops::Stack>(values, canonical_dim));
 }
 
-LazyTensor std(const LazyTensor& input,
-               std::vector<int64_t> dimensions,
+LazyTensor std(const LazyTensor& input, std::vector<int64_t> dimensions,
                bool keep_reduced_dimensions, int64_t correction) {
   return input.CreateFrom(torch::lazy::MakeNode<ir::ops::Std>(
       input.GetIrValue(),
@@ -1937,9 +1897,10 @@ LazyTensor std(const LazyTensor& input,
       keep_reduced_dimensions, correction));
 }
 
-std::tuple<LazyTensor, LazyTensor> std_mean(
-    const LazyTensor& input, std::vector<int64_t> dimensions,
-    int64_t correction, bool keep_reduced_dimensions) {
+std::tuple<LazyTensor, LazyTensor> std_mean(const LazyTensor& input,
+                                            std::vector<int64_t> dimensions,
+                                            int64_t correction,
+                                            bool keep_reduced_dimensions) {
   NodePtr node = torch::lazy::MakeNode<ir::ops::StdMean>(
       input.GetIrValue(),
       Helpers::GetCanonicalDimensionIndices(dimensions,
@@ -2039,8 +2000,7 @@ LazyTensor to(LazyTensor& input, c10::optional<Device> device,
   return new_tensor;
 }
 
-std::tuple<LazyTensor, LazyTensor> topk(const LazyTensor& input,
-                                        int64_t k,
+std::tuple<LazyTensor, LazyTensor> topk(const LazyTensor& input, int64_t k,
                                         int64_t dim, bool largest,
                                         bool sorted) {
   NodePtr node = torch::lazy::MakeNode<ir::ops::TopK>(
@@ -2052,8 +2012,7 @@ std::tuple<LazyTensor, LazyTensor> topk(const LazyTensor& input,
       input.CreateFrom(torch::lazy::Value(node, 1), at::ScalarType::Long));
 }
 
-LazyTensor transpose(const LazyTensor& input, int64_t dim0,
-                     int64_t dim1) {
+LazyTensor transpose(const LazyTensor& input, int64_t dim0, int64_t dim1) {
   auto input_shape = input.shape();
   auto permute_dims = Helpers::MakeTransposePermutation(
       /*dim0=*/dim0, /*dim1=*/dim1, /*rank=*/input_shape.get().rank());
@@ -2061,8 +2020,7 @@ LazyTensor transpose(const LazyTensor& input, int64_t dim0,
   return input.CreateViewTensor(std::move(view_info));
 }
 
-void transpose_(LazyTensor& input, int64_t dim0,
-                int64_t dim1) {
+void transpose_(LazyTensor& input, int64_t dim0, int64_t dim1) {
   auto input_shape = input.shape();
   auto permute_dims = Helpers::MakeTransposePermutation(
       /*dim0=*/dim0, /*dim1=*/dim1, /*rank=*/input_shape.get().rank());
@@ -2103,8 +2061,7 @@ void triu_(LazyTensor& input, int64_t diagonal) {
       torch::lazy::MakeNode<ir::ops::Triu>(input.GetIrValue(), diagonal));
 }
 
-std::vector<LazyTensor> unbind(const LazyTensor& input,
-                               int64_t dim) {
+std::vector<LazyTensor> unbind(const LazyTensor& input, int64_t dim) {
   dim = Helpers::GetCanonicalDimensionIndex(dim, input.shape().get().rank());
   int64_t dim_size = input.size(dim);
   std::vector<LazyTensor> slices;
@@ -2116,7 +2073,7 @@ std::vector<LazyTensor> unbind(const LazyTensor& input,
 }
 
 void uniform_(LazyTensor& input, double from, double to) {
-  LTC_CHECK_LE(from, to);
+  CHECK_LE(from, to);
   auto input_shape = input.shape();
   input.SetInPlaceIrValue(torch::lazy::MakeNode<ir::ops::Uniform>(
       LazyGraphExecutor::Get()->GetIrValueForScalar(
@@ -2149,9 +2106,10 @@ LazyTensor upsample_bilinear2d(const LazyTensor& input,
       input.GetIrValue(), std::move(output_size), align_corners));
 }
 
-LazyTensor upsample_bilinear2d_backward(
-    const LazyTensor& grad_output, std::vector<int64_t> output_size,
-    std::vector<int64_t> input_size, bool align_corners) {
+LazyTensor upsample_bilinear2d_backward(const LazyTensor& grad_output,
+                                        std::vector<int64_t> output_size,
+                                        std::vector<int64_t> input_size,
+                                        bool align_corners) {
   return grad_output.CreateFrom(
       torch::lazy::MakeNode<ir::ops::UpsampleBilinearBackward>(
           grad_output.GetIrValue(), std::move(output_size),
@@ -2164,17 +2122,16 @@ LazyTensor upsample_nearest2d(const LazyTensor& input,
       input.GetIrValue(), std::move(output_size)));
 }
 
-LazyTensor upsample_nearest2d_backward(
-    const LazyTensor& grad_output, std::vector<int64_t> output_size,
-    std::vector<int64_t> input_size) {
+LazyTensor upsample_nearest2d_backward(const LazyTensor& grad_output,
+                                       std::vector<int64_t> output_size,
+                                       std::vector<int64_t> input_size) {
   return grad_output.CreateFrom(
       torch::lazy::MakeNode<ir::ops::UpsampleNearestBackward>(
           grad_output.GetIrValue(), std::move(output_size),
           std::move(input_size)));
 }
 
-LazyTensor view(const LazyTensor& input,
-                c10::ArrayRef<int64_t> output_size) {
+LazyTensor view(const LazyTensor& input, c10::ArrayRef<int64_t> output_size) {
   auto input_shape = input.shape();
   std::vector<int64_t> complete_dimensions =
       GetCompleteShape(output_size, input_shape.get().dimensions());
@@ -2184,8 +2141,7 @@ LazyTensor view(const LazyTensor& input,
   return input.CreateViewTensor(std::move(view_info));
 }
 
-LazyTensor var(const LazyTensor& input,
-               std::vector<int64_t> dimensions,
+LazyTensor var(const LazyTensor& input, std::vector<int64_t> dimensions,
                int64_t correction, bool keep_reduced_dimensions) {
   return input.CreateFrom(torch::lazy::MakeNode<ir::ops::Var>(
       input.GetIrValue(),
@@ -2194,9 +2150,10 @@ LazyTensor var(const LazyTensor& input,
       correction, keep_reduced_dimensions));
 }
 
-std::tuple<LazyTensor, LazyTensor> var_mean(
-    const LazyTensor& input, std::vector<int64_t> dimensions,
-    int64_t correction, bool keep_reduced_dimensions) {
+std::tuple<LazyTensor, LazyTensor> var_mean(const LazyTensor& input,
+                                            std::vector<int64_t> dimensions,
+                                            int64_t correction,
+                                            bool keep_reduced_dimensions) {
   NodePtr node = torch::lazy::MakeNode<ir::ops::VarMean>(
       input.GetIrValue(),
       Helpers::GetCanonicalDimensionIndices(dimensions,

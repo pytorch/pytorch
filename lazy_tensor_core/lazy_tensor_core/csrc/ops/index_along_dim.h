@@ -8,7 +8,8 @@ namespace ops {
 
 class IndexAlongDim : public TsNode {
  public:
-  IndexAlongDim(OpKind op, const torch::lazy::Value& buffer, const torch::lazy::Value& index,
+  IndexAlongDim(OpKind op, const torch::lazy::Value& buffer,
+                const torch::lazy::Value& index,
                 const torch::lazy::Value& value, int64_t dim);
 
   std::string ToString() const override;

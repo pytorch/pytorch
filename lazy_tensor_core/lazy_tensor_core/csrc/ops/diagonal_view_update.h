@@ -8,9 +8,9 @@ namespace ops {
 
 class DiagonalViewUpdate : public TsNode {
  public:
-  DiagonalViewUpdate(const torch::lazy::Value& target, const torch::lazy::Value& input,
-                     int64_t offset, int64_t dim1,
-                     int64_t dim2);
+  DiagonalViewUpdate(const torch::lazy::Value& target,
+                     const torch::lazy::Value& input, int64_t offset,
+                     int64_t dim1, int64_t dim2);
 
   NodePtr Clone(OpList operands) const override;
 

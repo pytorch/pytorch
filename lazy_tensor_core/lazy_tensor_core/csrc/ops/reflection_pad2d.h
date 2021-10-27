@@ -10,7 +10,8 @@ namespace ops {
 
 class ReflectionPad2d : public TsNode {
  public:
-  ReflectionPad2d(const torch::lazy::Value& input, std::vector<int64_t> padding);
+  ReflectionPad2d(const torch::lazy::Value& input,
+                  std::vector<int64_t> padding);
 
   NodePtr Clone(OpList operands) const override;
 

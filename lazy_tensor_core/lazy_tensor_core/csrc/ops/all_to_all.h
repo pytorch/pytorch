@@ -10,10 +10,8 @@ namespace ops {
 class AllToAll : public TsNode {
  public:
   AllToAll(const torch::lazy::Value& input, const torch::lazy::Value& token,
-           int64_t split_dimension,
-           int64_t concat_dimension,
-           int64_t split_count,
-           std::vector<std::vector<int64_t>> groups);
+           int64_t split_dimension, int64_t concat_dimension,
+           int64_t split_count, std::vector<std::vector<int64_t>> groups);
 
   std::string ToString() const override;
 
@@ -25,9 +23,7 @@ class AllToAll : public TsNode {
 
   int64_t split_count() const { return split_count_; }
 
-  const std::vector<std::vector<int64_t>>& groups() const {
-    return groups_;
-  }
+  const std::vector<std::vector<int64_t>>& groups() const { return groups_; }
 
  private:
   int64_t split_dimension_;

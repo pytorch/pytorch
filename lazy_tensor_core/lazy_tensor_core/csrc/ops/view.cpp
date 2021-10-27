@@ -9,9 +9,8 @@ namespace ir {
 namespace ops {
 namespace {
 
-lazy_tensors::Shape NodeOutputShape(
-    const torch::lazy::Value& input,
-    c10::ArrayRef<int64_t> output_sizes) {
+lazy_tensors::Shape NodeOutputShape(const torch::lazy::Value& input,
+                                    c10::ArrayRef<int64_t> output_sizes) {
   const lazy_tensors::Shape& input_shape = ir::GetShapeFromTsValue(input);
   auto info = Helpers::GetDynamicReshapeInfo(input_shape, output_sizes);
   if (info) {
@@ -27,8 +26,8 @@ lazy_tensors::Shape NodeOutputShape(
 
 View::View(const torch::lazy::Value& input, std::vector<int64_t> output_size)
     : TsNode(torch::lazy::OpKind(at::aten::view), {input},
-           NodeOutputShape(input, output_size),
-           /*num_outputs=*/1, torch::lazy::MHash(output_size)),
+             NodeOutputShape(input, output_size),
+             /*num_outputs=*/1, torch::lazy::MHash(output_size)),
       output_size_(std::move(output_size)) {}
 
 std::string View::ToString() const {

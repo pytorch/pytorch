@@ -1,6 +1,5 @@
 #include "lazy_tensor_core/csrc/ops/resize.h"
 
-#include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/computation_client/util.h"
 #include "lazy_tensors/shape_util.h"
 
@@ -17,9 +16,10 @@ lazy_tensors::Shape NodeOutputShape(const torch::lazy::Value& input,
 }  // namespace
 
 Resize::Resize(const torch::lazy::Value& input, std::vector<int64_t> size)
-    : TsNode(torch::lazy::OpKind(at::aten::resize), {input},
-           [&]() { return NodeOutputShape(input, size); },
-           /*num_outputs=*/1, torch::lazy::MHash(size)),
+    : TsNode(
+          torch::lazy::OpKind(at::aten::resize), {input},
+          [&]() { return NodeOutputShape(input, size); },
+          /*num_outputs=*/1, torch::lazy::MHash(size)),
       size_(std::move(size)) {}
 
 NodePtr Resize::Clone(OpList operands) const {

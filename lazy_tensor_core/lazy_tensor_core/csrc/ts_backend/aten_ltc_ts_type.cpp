@@ -18,7 +18,6 @@
 #include "lazy_tensor_core/csrc/ts_backend/aten_autograd_ops_ts.h"
 #include "lazy_tensor_core/csrc/ts_backend/aten_eager_fallback.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_computation_client.h"
-#include "lazy_tensors/computation_client/debug_macros.h"
 
 namespace torch_lazy_tensors {
 namespace ir{
@@ -34,10 +33,10 @@ std::vector<c10::ScalarType> compute_dtype_cat(at::TensorList tensors, int64_t d
 namespace {
 
 void CheckSubOperandTypes(at::ScalarType type1, at::ScalarType type2) {
-  LTC_CHECK(type1 != at::kBool || type2 != at::kBool)
+  CHECK(type1 != at::kBool || type2 != at::kBool)
       << "Subtraction, the `-` operator, with two bool tensors is not "
          "supported. Use the `^` or `logical_xor()` operator instead.";
-  LTC_CHECK(type1 != at::kBool && type2 != at::kBool)
+  CHECK(type1 != at::kBool && type2 != at::kBool)
       << "Subtraction, the `-` operator, with a bool tensor is not "
          "supported. If you are trying to invert a mask, use the `~` or "
          "`logical_not()` operator instead.";
@@ -221,12 +220,11 @@ LazyNativeFunctions::convolution_backward_overrideable(
   }
   LTC_FN_TRACK(3);
   LTC_COUNTER("aten::convolution_backward_overrideable", 1);
-  LTC_VLOG(3) << "LTC-TS convolution_backward_overrideable :"
-              << " grad_output=" << grad_output.toString()
-              << " input=" << input.toString()
-              << " weight=" << weight.toString();
+  VLOG(3) << "LTC-TS convolution_backward_overrideable :"
+          << " grad_output=" << grad_output.toString()
+          << " input=" << input.toString() << " weight=" << weight.toString();
   const auto kernel_size = weight.sizes().slice(2);
-  LTC_CHECK(kernel_size.size() == 2 || kernel_size.size() == 3);
+  CHECK(kernel_size.size() == 2 || kernel_size.size() == 3);
   const at::DeviceType device_type =
       lazy_tensors::compiler::TSComputationClient::HardwareDeviceType();
   if (transposed) {
@@ -309,7 +307,7 @@ at::Tensor LazyNativeFunctions::_copy_from(const at::Tensor& self,
   if (!self_tensor) {
     static bool sync_update =
         lazy_tensors::sys_util::GetEnvBool("XLA_TENSOR_UPDATE_SYNC", true);
-    LTC_CHECK(dst_tensor);
+    CHECK(dst_tensor);
     dst_tensor->UpdateFromTensor(self, /*sync=*/sync_update);
   } else if (!dst_tensor) {
     at::Tensor tensor = self_tensor->ToTensor(/*detached=*/true);
@@ -319,7 +317,7 @@ at::Tensor LazyNativeFunctions::_copy_from(const at::Tensor& self,
   } else {
     if (!dst_tensor->CurrentIrValue()) {
       auto dst_tensor_data = dst_tensor->CurrentTensorData();
-      LTC_CHECK(dst_tensor_data);
+      CHECK(dst_tensor_data);
       auto src_tensor_data = self_tensor->CurrentTensorData();
       if (src_tensor_data) {
         dst_tensor_data->copy_(*src_tensor_data);
@@ -340,7 +338,7 @@ at::Tensor LazyNativeFunctions::_copy_from_and_resize(const at::Tensor& self,
   auto dst_tensor = bridge::TryGetLtcTensor(dst);
   auto self_tensor = bridge::TryGetLtcTensor(self);
   if (!self_tensor) {
-    LTC_CHECK(dst_tensor);
+    CHECK(dst_tensor);
     dst_tensor->UpdateFromTensorOut(self);
   } else if (!dst_tensor) {
     at::Tensor tensor = self_tensor->ToTensor(/*detached=*/true);
@@ -401,8 +399,7 @@ at::Tensor LazyNativeFunctions::expand(const at::Tensor& self,
                                        at::IntArrayRef size, bool implicit) {
   LTC_FN_COUNTER("lazy::");
   return bridge::AtenFromLtcTensor(lazy_tensor_aten_ops::expand(
-      bridge::GetLtcTensor(self),
-      lazy_tensors::util::ToVector<int64_t>(size)));
+      bridge::GetLtcTensor(self), lazy_tensors::util::ToVector<int64_t>(size)));
 }
 
 at::Tensor& LazyNativeFunctions::fill_(at::Tensor & self, const at::Scalar & value) {
@@ -564,7 +561,7 @@ LazyNativeFunctions::native_batch_norm_backward(
   const Device& device = grad_out_tensor.GetDevice();
   LazyTensor null_tensor;
   bool running_stats = running_mean && running_mean->defined();
-  LTC_CHECK_EQ(running_var && running_var->defined(), running_stats);
+  CHECK_EQ(running_var && running_var->defined(), running_stats);
   auto gradients = lazy_tensor_aten_ops::ts_native_batch_norm_backward(
       bridge::GetLtcTensor(grad_out), bridge::GetLtcTensor(input),
       bridge::GetOrCreateLtcTensor(weight, device),

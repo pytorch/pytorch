@@ -3767,8 +3767,8 @@ TEST_F(AtenLtcTsTensorTest, TestRandperm) {
   torch::Tensor shuffle = torch::randperm(
       n, torch::TensorOptions(torch::kLong).device(torch::kLazy));
   torch::Tensor shuffle_cpu = CopyToDevice(shuffle, torch::kCPU);
-  std::vector<int64_t> shuffle_data(
-      shuffle_cpu.data_ptr<int64_t>(), shuffle_cpu.data_ptr<int64_t>() + n);
+  std::vector<int64_t> shuffle_data(shuffle_cpu.data_ptr<int64_t>(),
+                                    shuffle_cpu.data_ptr<int64_t>() + n);
   EXPECT_TRUE(shuffle_data.size() == n &&
               lazy_tensors::IsPermutation(shuffle_data));
 }

@@ -18,9 +18,7 @@ class Split : public TsNode {
 
   std::string ToString() const override;
 
-  const std::vector<int64_t>& split_sizes() const {
-    return split_sizes_;
-  }
+  const std::vector<int64_t>& split_sizes() const { return split_sizes_; }
 
   int64_t dim() const { return dim_; }
 

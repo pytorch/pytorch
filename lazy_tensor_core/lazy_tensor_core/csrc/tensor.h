@@ -193,7 +193,6 @@ class LazyTensor {
   torch::lazy::Value GetIrValueForTensor(const at::Tensor& tensor,
                                 const Device& device) const;
 
-
   static int64_t GetNextTensorId();
 
   std::shared_ptr<Data> data_;

@@ -12,11 +12,9 @@
 
 namespace torch_lazy_tensors {
 
-std::vector<int64_t> ComputeShapeStrides(
-    const lazy_tensors::Shape& shape);
+std::vector<int64_t> ComputeShapeStrides(const lazy_tensors::Shape& shape);
 
-std::vector<int64_t> ComputeArrayStrides(
-    c10::ArrayRef<int64_t> sizes);
+std::vector<int64_t> ComputeArrayStrides(c10::ArrayRef<int64_t> sizes);
 
 // Converts a literal to an at::Tensor of the given element type.
 at::Tensor MakeTensorFromLiteral(const lazy_tensors::Literal& literal,

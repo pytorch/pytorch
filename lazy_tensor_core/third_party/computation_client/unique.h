@@ -6,7 +6,6 @@
 #include <functional>
 #include <set>
 
-#include "lazy_tensors/computation_client/debug_macros.h"
 
 namespace lazy_tensors {
 namespace util {
@@ -18,8 +17,7 @@ class Unique {
  public:
   std::pair<bool, const T&> set(const T& value) {
     if (value_) {
-      LTC_CHECK(C()(*value_, value))
-          << "'" << *value_ << "' vs '" << value << "'";
+      CHECK(C()(*value_, value)) << "'" << *value_ << "' vs '" << value << "'";
       return std::pair<bool, const T&>(false, *value_);
     }
     value_ = value;

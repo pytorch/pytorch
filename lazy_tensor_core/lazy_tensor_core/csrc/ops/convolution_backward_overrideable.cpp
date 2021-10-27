@@ -1,23 +1,21 @@
 #include "lazy_tensor_core/csrc/ops/convolution_backward_overrideable.h"
 
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
-#include "lazy_tensors/computation_client/debug_macros.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
 ConvolutionBackwardOverrideable::ConvolutionBackwardOverrideable(
-    const torch::lazy::Value& grad_output, const torch::lazy::Value& input, const torch::lazy::Value& weight,
-    std::vector<int64_t> stride,
-    std::vector<int64_t> padding,
-    std::vector<int64_t> dilation, bool transposed,
-    std::vector<int64_t> output_padding, int64_t groups)
+    const torch::lazy::Value& grad_output, const torch::lazy::Value& input,
+    const torch::lazy::Value& weight, std::vector<int64_t> stride,
+    std::vector<int64_t> padding, std::vector<int64_t> dilation,
+    bool transposed, std::vector<int64_t> output_padding, int64_t groups)
     : TsNode(torch::lazy::OpKind(at::aten::convolution_backward_overrideable),
-           {grad_output, input, weight},
-           /*num_outputs=*/3,
-           torch::lazy::MHash(stride, padding, dilation, transposed,
-                                     output_padding, groups)),
+             {grad_output, input, weight},
+             /*num_outputs=*/3,
+             torch::lazy::MHash(stride, padding, dilation, transposed,
+                                output_padding, groups)),
       stride_(std::move(stride)),
       padding_(std::move(padding)),
       dilation_(std::move(dilation)),
@@ -29,11 +27,10 @@ ConvolutionBackwardOverrideable::ConvolutionBackwardOverrideable(
 }
 
 ConvolutionBackwardOverrideable::ConvolutionBackwardOverrideable(
-    const torch::lazy::Value& grad_output, const torch::lazy::Value& input, const torch::lazy::Value& weight,
-    std::vector<int64_t> stride,
-    std::vector<int64_t> padding,
-    std::vector<int64_t> dilation, bool transposed,
-    std::vector<int64_t> output_padding, int64_t groups,
+    const torch::lazy::Value& grad_output, const torch::lazy::Value& input,
+    const torch::lazy::Value& weight, std::vector<int64_t> stride,
+    std::vector<int64_t> padding, std::vector<int64_t> dilation,
+    bool transposed, std::vector<int64_t> output_padding, int64_t groups,
     std::array<bool, 3> output_mask)
     : ConvolutionBackwardOverrideable(grad_output, input, weight, stride,
                                       padding, dilation, transposed,

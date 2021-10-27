@@ -1,21 +1,20 @@
 #include "lazy_tensor_core/csrc/ops/select.h"
 
 #include "lazy_tensor_core/csrc/ops/ltc_ops.h"
-#include "lazy_tensors/computation_client/debug_macros.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-Select::Select(const torch::lazy::Value& input, int64_t dim,
-               int64_t start, int64_t end,
-               int64_t stride)
-    : TsNode(ltc_select, {input},
-           [&]() {
-             return MakeSelectShape(ir::GetShapeFromTsValue(input), dim, start, end, stride);
-           },
-           /*num_outputs=*/1,
-           torch::lazy::MHash(dim, start, end, stride)),
+Select::Select(const torch::lazy::Value& input, int64_t dim, int64_t start,
+               int64_t end, int64_t stride)
+    : TsNode(
+          ltc_select, {input},
+          [&]() {
+            return MakeSelectShape(ir::GetShapeFromTsValue(input), dim, start,
+                                   end, stride);
+          },
+          /*num_outputs=*/1, torch::lazy::MHash(dim, start, end, stride)),
       dim_(dim),
       start_(start),
       end_(end),
@@ -33,10 +32,8 @@ std::string Select::ToString() const {
 }
 
 lazy_tensors::Shape Select::MakeSelectShape(const lazy_tensors::Shape& shape,
-                                            int64_t dim,
-                                            int64_t start,
-                                            int64_t end,
-                                            int64_t stride) {
+                                            int64_t dim, int64_t start,
+                                            int64_t end, int64_t stride) {
   int64_t effective_stride = GetStride(start, end, stride);
   lazy_tensors::Shape select_shape(shape);
   select_shape.set_dimensions(
@@ -44,11 +41,9 @@ lazy_tensors::Shape Select::MakeSelectShape(const lazy_tensors::Shape& shape,
   return select_shape;
 }
 
-int64_t Select::GetStride(int64_t start,
-                                      int64_t end,
-                                      int64_t stride) {
+int64_t Select::GetStride(int64_t start, int64_t end, int64_t stride) {
   if (stride == 0) {
-    LTC_CHECK_EQ(start, end);
+    CHECK_EQ(start, end);
     stride = 1;
   }
   return stride;

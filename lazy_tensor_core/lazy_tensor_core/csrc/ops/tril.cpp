@@ -6,8 +6,9 @@ namespace ir {
 namespace ops {
 
 Tril::Tril(const torch::lazy::Value& input, int64_t diagonal)
-    : TsNode(torch::lazy::OpKind(at::aten::tril), {input}, ir::GetShapeFromTsValue(input),
-           /*num_outputs=*/1, torch::lazy::MHash(diagonal)),
+    : TsNode(torch::lazy::OpKind(at::aten::tril), {input},
+             ir::GetShapeFromTsValue(input),
+             /*num_outputs=*/1, torch::lazy::MHash(diagonal)),
       diagonal_(diagonal) {}
 
 NodePtr Tril::Clone(OpList operands) const {

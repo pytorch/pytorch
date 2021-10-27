@@ -8,12 +8,11 @@ namespace ops {
 
 class AvgPoolNdBackward : public TsNode {
  public:
-  AvgPoolNdBackward(const torch::lazy::Value& grad_output, const torch::lazy::Value& input,
-                    int64_t spatial_dim_count,
+  AvgPoolNdBackward(const torch::lazy::Value& grad_output,
+                    const torch::lazy::Value& input, int64_t spatial_dim_count,
                     std::vector<int64_t> kernel_size,
-                    std::vector<int64_t> stride,
-                    std::vector<int64_t> padding, bool ceil_mode,
-                    bool count_include_pad);
+                    std::vector<int64_t> stride, std::vector<int64_t> padding,
+                    bool ceil_mode, bool count_include_pad);
 
   NodePtr Clone(OpList operands) const override;
 
@@ -21,9 +20,7 @@ class AvgPoolNdBackward : public TsNode {
 
   int64_t spatial_dim_count() const { return spatial_dim_count_; }
 
-  const std::vector<int64_t>& kernel_size() const {
-    return kernel_size_;
-  }
+  const std::vector<int64_t>& kernel_size() const { return kernel_size_; }
 
   const std::vector<int64_t>& stride() const { return stride_; }
 

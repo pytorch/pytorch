@@ -36,7 +36,7 @@ def ts_lowering_body(f: Union[NativeFunctionsGroup, NativeFunction]) -> str:
     {emplace_arguments_str}
     {emplace_kwarguments}
     TSOpVector {schema.aten_name}_out = tsLoweringInterface.LowerBuiltin(op().op, arguments, kwarguments);
-    LTC_CHECK_EQ({schema.aten_name}_out.size(), {len(func.returns)});
+    CHECK_EQ({schema.aten_name}_out.size(), {len(func.returns)});
 
     // TODO: need to call GenerateClone sometimes? Or else return LowerBuiltIn() directly
     return {schema.aten_name}_out;

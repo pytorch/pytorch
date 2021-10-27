@@ -9,7 +9,6 @@
 #include "lazy_tensor_core/csrc/tensor_impl.h"
 #include "lazy_tensor_core/csrc/torch_util.h"
 #include "lazy_tensors/computation_client/computation_client.h"
-#include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/str_cat.h"
 
 namespace torch_lazy_tensors {
@@ -22,7 +21,7 @@ class AtenLtcDeviceMapper {
 
   size_t GetDeviceOrdinal(const Device& device) const {
     auto it = devices_ordinals_.find(device);
-    LTC_CHECK(it != devices_ordinals_.end()) << device;
+    CHECK(it != devices_ordinals_.end()) << device;
     return it->second;
   }
 
@@ -68,16 +67,15 @@ bool IsLtcTensor(const at::Tensor& tensor) {
 
 LazyTensor GetLtcTensor(const at::Tensor& tensor) {
   auto xtensor = TryGetLtcTensor(tensor);
-  LTC_CHECK(xtensor) << "Input tensor is not a lazy tensor: "
-                     << tensor.toString();
+  CHECK(xtensor) << "Input tensor is not a lazy tensor: " << tensor.toString();
   return *xtensor;
 }
 
 void ReplaceLtcTensor(const at::Tensor& tensor, LazyTensor new_ltc_tensor) {
   LTCTensorImpl* impl =
       dynamic_cast<LTCTensorImpl*>(tensor.unsafeGetTensorImpl());
-  LTC_CHECK(impl != nullptr)
-      << "Input tensor is not a lazy tensor: " << tensor.toString();
+  CHECK(impl != nullptr) << "Input tensor is not a lazy tensor: "
+                         << tensor.toString();
   impl->set_tensor(std::move(new_ltc_tensor));
 }
 
@@ -193,9 +191,9 @@ void LtcUpdateTensorsMeta(c10::ArrayRef<at::Tensor> dest_ltc_tensors,
     at::Tensor dest = dest_ltc_tensors.at(index);
     at::Tensor source = source_cpu_tensors.at(index);
     LTCTensorImpl* dest_impl = GetLtcTensorImpl(dest);
-    LTC_CHECK(dest_impl);
+    CHECK(dest_impl);
     auto ltc_source = TryGetLtcTensor(source);
-    LTC_CHECK(!ltc_source);
+    CHECK(!ltc_source);
     LazyTensor& ltc_dest = dest_impl->tensor();
     ltc_dest.SetTensor(source);
   }
@@ -248,7 +246,7 @@ c10::optional<Device> GetLtcDevice(const c10::optional<c10::Device>& device) {
 }
 
 Device AtenDeviceToLtcDevice(const c10::Device& device) {
-  LTC_CHECK_EQ(device.type(), at::kLazy) << device;
+  CHECK_EQ(device.type(), at::kLazy) << device;
   int ordinal = device.has_index() ? device.index() : -1;
   if (ordinal < 0) {
     c10::Device current_device = GetCurrentAtenDevice();
@@ -292,7 +290,7 @@ c10::Device GetCurrentAtenDevice() {
 at::Tensor LtcToAtenTensor(LazyTensor ltc_tensor,
                            const at::TensorOptions& tensor_options) {
   if (tensor_options.has_device()) {
-    LTC_CHECK_NE(tensor_options.device().type(), at::kLazy);
+    CHECK_NE(tensor_options.device().type(), at::kLazy);
   }
   at::Tensor tensor = ltc_tensor.ToTensor(/*detached=*/false);
   // We need to copy the tensor since it is cached within the LazyTensor, and

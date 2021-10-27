@@ -1,7 +1,6 @@
 #include "lazy_tensor_core/csrc/ops/binary_cross_entropy_backward.h"
 
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
-#include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/computation_client/util.h"
 
 namespace torch_lazy_tensors {

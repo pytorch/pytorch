@@ -1,6 +1,5 @@
 #include "lazy_tensor_core/csrc/torch_util.h"
 
-#include "lazy_tensors/computation_client/debug_macros.h"
 
 namespace torch_lazy_tensors {
 
@@ -24,7 +23,7 @@ at::ScalarType GetScalarType(const at::Scalar& scalar) {
   } else if (scalar.isComplex()) {
     return at::kComplexDouble;
   }
-  LTC_ERROR() << "Unknown type for scalar";
+  LOG(ERROR) << "Unknown type for scalar";
 }
 
 at::Tensor UnwrapNumber(const at::Tensor& tensor, at::ScalarType dtype) {

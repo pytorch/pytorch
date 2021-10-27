@@ -1,6 +1,5 @@
 #pragma once
 
-#include "lazy_tensors/computation_client/debug_macros.h"
 
 namespace lazy_tensors {
 
@@ -91,7 +90,7 @@ class Span {
 
   constexpr T& operator[](size_t i) const
       noexcept {  // MSVC 2015 accepts this as constexpr, but not ptr_[i]
-    LTC_CHECK_LT(i, size());
+    CHECK_LT(i, size());
     return *(data() + i);
   }
 
@@ -103,12 +102,12 @@ class Span {
   }
 
   constexpr T& front() const noexcept {
-    LTC_CHECK_GT(size(), 0);
+    CHECK_GT(size(), 0);
     return *data();
   }
 
   constexpr T& back() const noexcept {
-    LTC_CHECK_GT(size(), 0);
+    CHECK_GT(size(), 0);
     return *(data() + size() - 1);
   }
 
@@ -183,7 +182,7 @@ constexpr Span<T> MakeSpan(T* ptr, size_t size) noexcept {
 
 template <int&... ExplicitArgumentBarrier, typename T>
 Span<T> MakeSpan(T* begin, T* end) noexcept {
-  LTC_CHECK_LE(begin, end);
+  CHECK_LE(begin, end);
   return Span<T>(begin, end - begin);
 }
 
@@ -229,7 +228,7 @@ constexpr Span<const T> MakeConstSpan(T* ptr, size_t size) noexcept {
 
 template <int&... ExplicitArgumentBarrier, typename T>
 Span<const T> MakeConstSpan(T* begin, T* end) noexcept {
-  LTC_CHECK_LE(begin, end);
+  CHECK_LE(begin, end);
   return Span<const T>(begin, end - begin);
 }
 

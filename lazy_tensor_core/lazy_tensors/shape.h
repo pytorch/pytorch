@@ -6,7 +6,6 @@
 
 #include "lazy_tensor_core/csrc/device.h"
 #include "lazy_tensors/computation_client/client_data.h"
-#include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/layout.h"
 #include "lazy_tensors/str_cat.h"
 #include "lazy_tensors/str_join.h"
@@ -19,16 +18,15 @@ class Shape {
 
   Shape(at::ScalarType element_type, c10::ArrayRef<int64_t> dimensions);
 
-
   Shape(c10::ArrayRef<Shape> element_shapes)
       : at_element_type_(c10::ScalarType::Undefined),
         element_shapes_(element_shapes.begin(), element_shapes.end()),
         is_tuple_(true) {
-          LTC_CHECK(element_shapes.size() > 0);
-          // TODO(whc) it's not really clear what the definition of element shape
-          // should be for a tuple shape.  However, for tuple shapes, we appear
-          // to be accessing the element_type field in some places.  Fix this.
-          at_element_type_ = element_shapes[0].at_element_type();
+    CHECK(element_shapes.size() > 0);
+    // TODO(whc) it's not really clear what the definition of element shape
+    // should be for a tuple shape.  However, for tuple shapes, we appear
+    // to be accessing the element_type field in some places.  Fix this.
+    at_element_type_ = element_shapes[0].at_element_type();
         }
 
   Shape(const client::ShapeData& shape_data);
@@ -53,7 +51,7 @@ class Shape {
   }
 
   c10::ArrayRef<bool> dynamic_dimensions() const {
-    LTC_LOG(FATAL) << "Not implemented yet.";
+    LOG(FATAL) << "Not implemented yet.";
   }
 
   // Removes the dimension at index dim_to_delete entirely, reducing the rank
@@ -69,12 +67,12 @@ class Shape {
     if (dynamic_mode_.load()) {
       throw std::runtime_error("Exact shape not known");
     }
-    LTC_CHECK_LT(index, dimensions_.size());
+    CHECK_LT(index, dimensions_.size());
     return dimensions_[index];
   }
 
   void set_dimensions(int index, int64_t value) {
-    LTC_CHECK_LT(index, dimensions_.size());
+    CHECK_LT(index, dimensions_.size());
     dimensions_[index] = value;
   }
 
@@ -88,8 +86,8 @@ class Shape {
   int tuple_shapes_size() const { return element_shapes_.size(); }
 
   const Shape& tuple_shapes(int index) const {
-    LTC_CHECK_GE(index, 0);
-    LTC_CHECK_LT(index, element_shapes_.size());
+    CHECK_GE(index, 0);
+    CHECK_LT(index, element_shapes_.size());
     return element_shapes_[index];
   }
   const std::vector<Shape>& tuple_shapes() const { return element_shapes_; }
@@ -124,7 +122,7 @@ class ProgramShape {
       : parameters_(std::move(parameters)),
         parameter_names_(std::move(parameter_names)),
         result_(std::move(result)) {
-    LTC_CHECK_EQ(parameters_.size(), parameter_names_.size());
+    CHECK_EQ(parameters_.size(), parameter_names_.size());
   }
 
   int parameters_size() const { return parameters_.size(); }

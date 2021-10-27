@@ -1,7 +1,6 @@
 #include "lazy_tensor_core/csrc/ops/avg_pool_nd_backward.h"
 
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
-#include "lazy_tensors/computation_client/debug_macros.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -15,24 +14,25 @@ c10::Symbol AvgNdBackwardSymbol(int64_t spatial_dim_count) {
     case 3:
       return at::aten::avg_pool3d_backward;
     default:
-      LTC_ERROR() << "Invalid number of spatial dimensions: "
-                  << spatial_dim_count;
+      LOG(ERROR) << "Invalid number of spatial dimensions: "
+                 << spatial_dim_count;
   }
 }
 
 }  // namespace
 
-AvgPoolNdBackward::AvgPoolNdBackward(
-    const torch::lazy::Value& grad_output, const torch::lazy::Value& input,
-    int64_t spatial_dim_count,
-    std::vector<int64_t> kernel_size,
-    std::vector<int64_t> stride,
-    std::vector<int64_t> padding, bool ceil_mode,
-    bool count_include_pad)
-    : TsNode(OpKind(AvgNdBackwardSymbol(spatial_dim_count)), {grad_output, input},
-           /*num_outputs=*/1,
-           torch::lazy::MHash(spatial_dim_count, kernel_size, stride,
-                                     padding, ceil_mode, count_include_pad)),
+AvgPoolNdBackward::AvgPoolNdBackward(const torch::lazy::Value& grad_output,
+                                     const torch::lazy::Value& input,
+                                     int64_t spatial_dim_count,
+                                     std::vector<int64_t> kernel_size,
+                                     std::vector<int64_t> stride,
+                                     std::vector<int64_t> padding,
+                                     bool ceil_mode, bool count_include_pad)
+    : TsNode(OpKind(AvgNdBackwardSymbol(spatial_dim_count)),
+             {grad_output, input},
+             /*num_outputs=*/1,
+             torch::lazy::MHash(spatial_dim_count, kernel_size, stride, padding,
+                                ceil_mode, count_include_pad)),
       spatial_dim_count_(spatial_dim_count),
       kernel_size_(std::move(kernel_size)),
       stride_(std::move(stride)),

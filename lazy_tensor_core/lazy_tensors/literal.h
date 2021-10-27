@@ -25,14 +25,14 @@ class Literal {
   template <typename NativeT>
   lazy_tensors::Span<const NativeT> data(
       const ShapeIndex& shape_index = {}) const {
-    LTC_CHECK(shape_index.empty()) << "Sub-literals not supported yet";
+    CHECK(shape_index.empty()) << "Sub-literals not supported yet";
     return MakeConstSpan(static_cast<const NativeT*>(value_.data_ptr()),
                          value_.numel());
   }
 
   template <typename NativeT>
   lazy_tensors::Span<NativeT> data(const ShapeIndex& shape_index = {}) {
-    LTC_CHECK(shape_index.empty()) << "Sub-literals not supported yet";
+    CHECK(shape_index.empty()) << "Sub-literals not supported yet";
     return lazy_tensors::Span<NativeT>(static_cast<NativeT*>(value_.data_ptr()),
                                        value_.numel());
   }
@@ -42,19 +42,19 @@ class Literal {
   }
 
   void* untyped_data(const ShapeIndex& shape_index = {}) {
-    LTC_LOG(FATAL) << "Not implemented yet.";
+    LOG(FATAL) << "Not implemented yet.";
   }
   int64_t size_bytes(const ShapeIndex& shape_index = {}) const {
     return value_.numel() * value_.element_size();
   }
 
   std::string ToStringWithoutShape() const {
-    LTC_LOG(FATAL) << "Not implemented yet.";
+    LOG(FATAL) << "Not implemented yet.";
   }
 
   size_t Hash() const;
 
-  Literal Clone() const { LTC_LOG(FATAL) << "Not implemented yet."; }
+  Literal Clone() const { LOG(FATAL) << "Not implemented yet."; }
 
   template <typename NativeT>
   void Set(lazy_tensors::Span<const int64_t> multi_index, NativeT value) {
@@ -87,41 +87,39 @@ inline void Literal::Set<uint32_t>(
 template <>
 inline void Literal::Set<uint64_t>(
     lazy_tensors::Span<const int64_t> multi_index, uint64_t value) {
-  LTC_LOG(FATAL) << "Not implemented yet.";
+  LOG(FATAL) << "Not implemented yet.";
 }
 
 template <>
 inline void Literal::Set<c10::BFloat16>(
     lazy_tensors::Span<const int64_t> multi_index, c10::BFloat16 value) {
-  LTC_LOG(FATAL) << "Not implemented yet.";
+  LOG(FATAL) << "Not implemented yet.";
 }
 
 template <>
 inline void Literal::Set<c10::Half>(
     lazy_tensors::Span<const int64_t> multi_index, c10::Half value) {
-  LTC_LOG(FATAL) << "Not implemented yet.";
+  LOG(FATAL) << "Not implemented yet.";
 }
 
 template <>
 inline void Literal::Set<std::complex<float>>(
-    lazy_tensors::Span<const int64_t> multi_index,
-    std::complex<float> value) {
-  LTC_LOG(FATAL) << "Not implemented yet.";
+    lazy_tensors::Span<const int64_t> multi_index, std::complex<float> value) {
+  LOG(FATAL) << "Not implemented yet.";
 }
 
 template <>
 inline void Literal::Set<std::complex<double>>(
-    lazy_tensors::Span<const int64_t> multi_index,
-    std::complex<double> value) {
-  LTC_LOG(FATAL) << "Not implemented yet.";
+    lazy_tensors::Span<const int64_t> multi_index, std::complex<double> value) {
+  LOG(FATAL) << "Not implemented yet.";
 }
 
 template <typename NativeT>
 inline void Literal::PopulateR1(lazy_tensors::Span<const NativeT> values) {
-  LTC_CHECK(shape().IsArray());
-  LTC_CHECK_EQ(shape().rank(), 1);
-  LTC_CHECK_EQ(ShapeUtil::ElementsIn(shape()), values.size());
-  LTC_CHECK_EQ(shape().at_element_type(), c10::CppTypeToScalarType<NativeT>::value);
+  CHECK(shape().IsArray());
+  CHECK_EQ(shape().rank(), 1);
+  CHECK_EQ(ShapeUtil::ElementsIn(shape()), values.size());
+  CHECK_EQ(shape().at_element_type(), c10::CppTypeToScalarType<NativeT>::value);
   auto data_span = data<NativeT>();
   std::copy(values.begin(), values.end(), data_span.begin());
 }

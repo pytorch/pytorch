@@ -9,8 +9,7 @@ namespace ops {
 class MaxPoolNd : public TsNode {
  public:
   MaxPoolNd(const torch::lazy::Value& input, int64_t spatial_dim_count,
-            std::vector<int64_t> kernel_size,
-            std::vector<int64_t> stride,
+            std::vector<int64_t> kernel_size, std::vector<int64_t> stride,
             std::vector<int64_t> padding, bool ceil_mode);
 
   NodePtr Clone(OpList operands) const override;
@@ -19,9 +18,7 @@ class MaxPoolNd : public TsNode {
 
   int64_t spatial_dim_count() const { return spatial_dim_count_; }
 
-  const std::vector<int64_t>& kernel_size() const {
-    return kernel_size_;
-  }
+  const std::vector<int64_t>& kernel_size() const { return kernel_size_; }
 
   const std::vector<int64_t>& stride() const { return stride_; }
 

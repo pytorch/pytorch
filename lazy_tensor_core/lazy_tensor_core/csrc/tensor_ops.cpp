@@ -5,7 +5,6 @@
 #include "lazy_tensor_core/csrc/tensor_aten_ops.h"
 #include "lazy_tensor_core/csrc/tensor_distributed.h"
 #include "lazy_tensor_core/csrc/ts_backend/LazyLazyIr.h"
-#include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/computation_client/util.h"
 #include "torch/csrc/lazy/core/ir.h"
 #include "torch/csrc/lazy/core/ir_metadata.h"
@@ -36,14 +35,14 @@ LazyTensor Cross(const LazyTensor& input, const LazyTensor& other,
     auto input_shape_ref = input.shape();
     auto dim_3_it = std::find((*input_shape_ref).dimensions().begin(),
                               (*input_shape_ref).dimensions().end(), 3);
-    LTC_CHECK(dim_3_it != (*input_shape_ref).dimensions().end())
+    CHECK(dim_3_it != (*input_shape_ref).dimensions().end())
         << "No dimension of size 3 in input: " << (*input_shape_ref).ToString();
     canonical_dim = dim_3_it - (*input_shape_ref).dimensions().begin();
   }
-  LTC_CHECK_EQ(input.size(canonical_dim), 3)
+  CHECK_EQ(input.size(canonical_dim), 3)
       << "Invalid cross argument: dimension " << canonical_dim
       << " does not have size 3";
-  LTC_CHECK_LT(canonical_dim, input.shape().get().rank())
+  CHECK_LT(canonical_dim, input.shape().get().rank())
       << "Invalid cross argument: dimension " << canonical_dim
       << " out of range";
   // Extract the slices for each axis.
@@ -68,21 +67,18 @@ LazyTensor Cross(const LazyTensor& input, const LazyTensor& other,
   return lazy_tensor_aten_ops::stack({s1, s2, s3}, canonical_dim);
 }
 
-LazyTensor MakeMatrixWithDiagonal(const LazyTensor& input,
-                                  int64_t diagonal) {
+LazyTensor MakeMatrixWithDiagonal(const LazyTensor& input, int64_t diagonal) {
   int64_t size = input.shape().get().dimensions(0);
   LazyTensor identity =
       lazy_tensor_aten_ops::eye(size, size, input.GetDevice(), input.dtype());
-  auto padding =
-      diagonal >= 0
-          ? std::vector<int64_t>{diagonal, 0, 0, diagonal}
-          : std::vector<int64_t>{0, -diagonal, -diagonal, 0};
+  auto padding = diagonal >= 0
+                     ? std::vector<int64_t>{diagonal, 0, 0, diagonal}
+                     : std::vector<int64_t>{0, -diagonal, -diagonal, 0};
   return lazy_tensor_aten_ops::constant_pad_nd(
       lazy_tensor_aten_ops::mul(identity, input), padding, 0);
 }
 
-LazyTensor Select(const LazyTensor& input, int64_t dim,
-                  int64_t index) {
+LazyTensor Select(const LazyTensor& input, int64_t dim, int64_t index) {
   auto shape = input.shape();
   dim = Helpers::GetCanonicalDimensionIndex(dim, shape.get().rank());
   LazyTensor result = lazy_tensor_aten_ops::narrow(input, dim, index, 1);

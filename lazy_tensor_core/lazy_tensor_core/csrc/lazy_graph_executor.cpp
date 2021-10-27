@@ -1,5 +1,7 @@
 #include "lazy_tensor_core/csrc/lazy_graph_executor.h"
 
+#include <c10/util/Logging.h>
+
 #include "lazy_tensor_core/csrc/debug_util.h"
 #include "lazy_tensor_core/csrc/ir_dump_util.h"
 #include "lazy_tensor_core/csrc/op_by_op_executor.h"
@@ -11,6 +13,7 @@
 #include "lazy_tensor_core/csrc/ops/scalar.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensor_core/csrc/torch_util.h"
+#include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/computation_client/unique.h"
 #include "torch/csrc/lazy/core/ir_metadata.h"
 
@@ -383,8 +386,7 @@ uint64_t LazyGraphExecutor::GetRunningSeed(const Device& device) {
   return DeviceContextArena::Get()->GetRunningSeed(device);
 }
 
-void LazyGraphExecutor::SetRngSeed(const Device& device,
-                                   uint64_t seed) {
+void LazyGraphExecutor::SetRngSeed(const Device& device, uint64_t seed) {
   DeviceContextArena::Get()->SetRngSeed(device, seed);
 }
 
@@ -411,16 +413,15 @@ void LazyGraphExecutor::SyncLiveTensorsGraph(const Device* device,
                                              c10::ArrayRef<std::string> devices,
                                              bool wait) {
   auto tensors = GetLiveTensors(device);
-  LTC_VLOG(4) << tensors.size() << " live tensors: devices=("
-              << c10::Join(", ", devices) << ")";
+  VLOG(4) << tensors.size() << " live tensors: devices=("
+          << c10::Join(", ", devices) << ")";
   SyncTensorsGraph(&tensors, devices, wait, /*sync_ltc_data=*/true);
 }
 
 void LazyGraphExecutor::SyncTensorsGraph(std::vector<LazyTensor>* tensors,
                                          c10::ArrayRef<std::string> devices,
                                          bool wait, bool sync_ltc_data) {
-  LTC_VLOG(4) << "Trying to sync the value of " << tensors->size()
-              << " tensor(s)";
+  VLOG(4) << "Trying to sync the value of " << tensors->size() << " tensor(s)";
   static const bool op_by_op =
       lazy_tensors::sys_util::GetEnvBool("SYNC_TENSORS_OPBYOP", false);
   SyncTensorsConfig config;
@@ -465,8 +466,7 @@ void LazyGraphExecutor::WaitDeviceOps(c10::ArrayRef<std::string> devices) {
 
 std::vector<at::Tensor> LazyGraphExecutor::GetTensors(
     std::vector<LazyTensor>* tensors) {
-  LTC_VLOG(4) << "Trying to get the value of " << tensors->size()
-              << " tensor(s)";
+  VLOG(4) << "Trying to get the value of " << tensors->size() << " tensor(s)";
   static const bool op_by_op =
       lazy_tensors::sys_util::GetEnvBool("GET_TENSORS_OPBYOP", false);
   return op_by_op ? GetTensorsOpByOp(tensors) : GetTensorsFused(tensors);
@@ -601,15 +601,13 @@ LazyGraphExecutor::SyncTensorCollection LazyGraphExecutor::CollectSyncTensors(
   coll.config = config;
   coll.device = *unique_device;
   coll.indices.reserve(tensors.size());
-  LTC_VLOG(4) << "Waiting on device barrier for device " << coll.device
-              << " ...";
+  VLOG(4) << "Waiting on device barrier for device " << coll.device << " ...";
   {
     LTC_TIMED("DeviceLockWait");
     coll.unlocker =
         DeviceLockerArena::Get()->LockDevices(unique_device.AsSet());
   }
-  LTC_VLOG(4) << "Waiting on device barrier for device " << coll.device
-              << " done!";
+  VLOG(4) << "Waiting on device barrier for device " << coll.device << " done!";
   for (size_t i = 0; i < tensors.size(); ++i) {
     if (tensor_ids.insert(tensors[i].GetUniqueId()).second &&
         tensors[i].CurrentDataHandle() == nullptr) {
@@ -624,7 +622,7 @@ LazyGraphExecutor::SyncTensorCollection LazyGraphExecutor::CollectSyncTensors(
         // The tensor only has at::Tensor data. We need to queue it for a
         // device upload.
         c10::optional<at::Tensor> tensor_data = tensors[i].CurrentTensorData();
-        LTC_CHECK(tensor_data);
+        CHECK(tensor_data);
         at_tensors.push_back(*tensor_data);
         devices.push_back(tensors[i].GetDevice().ToString());
         at_tensor_index.push_back(i);
@@ -648,8 +646,8 @@ LazyGraphExecutor::SyncTensorCollection LazyGraphExecutor::CollectSyncTensors(
       tensors[at_tensor_index[i]].data()->handle = std::move(handles[i]);
     }
   }
-  LTC_VLOG(4) << "Tensors graph hash " << torch::lazy::HashToString(coll.hash)
-              << " on device " << coll.device;
+  VLOG(4) << "Tensors graph hash " << torch::lazy::HashToString(coll.hash)
+          << " on device " << coll.device;
   return coll;
 }
 
@@ -734,7 +732,7 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::TryRunCachedSync(
     return nullptr;
   }
   LTC_VALUE_METRIC("TensorsGraphSize", po_data->post_order.size());
-  LTC_VLOG(5) << "TensorsGraphSize=" << po_data->post_order.size();
+  VLOG(5) << "TensorsGraphSize=" << po_data->post_order.size();
 
   return ScheduleSyncTensorsGraph(
       tensors, coll, std::move(po_data->parameters_data),
@@ -794,17 +792,14 @@ LazyGraphExecutor::CompilationResult LazyGraphExecutor::Compile(
            coll.device.ToString(), devices),
        &shape});
 
-  LTC_VLOG(3) << "Compiling IR graph hash "
-              << torch::lazy::HashToString(coll.hash) << " on device "
-              << coll.device << " ...";
+  VLOG(3) << "Compiling IR graph hash " << torch::lazy::HashToString(coll.hash)
+          << " on device " << coll.device << " ...";
   std::vector<std::shared_ptr<lazy_tensors::ComputationClient::Computation>>
       computations =
           lazy_tensors::ComputationClient::Get()->Compile(std::move(instances));
-  LTC_VLOG(3) << "Compiling IR graph hash "
-              << torch::lazy::HashToString(coll.hash) << " on device "
-              << coll.device << " done!";
-  LTC_CHECK_EQ(program_shape.parameters_size(),
-               po_data->parameters_data.size());
+  VLOG(3) << "Compiling IR graph hash " << torch::lazy::HashToString(coll.hash)
+          << " on device " << coll.device << " done!";
+  CHECK_EQ(program_shape.parameters_size(), po_data->parameters_data.size());
 
   return {/*device=*/coll.device,
           /*emitted_nodes=*/lowering_ctx->GetEmittedNodeCount(),
@@ -855,13 +850,11 @@ void LazyGraphExecutor::BuildInputOutputAliases(
             lowering_ctx->GetResultShape(output_index);
         if (lazy_tensors::Shape(parameters_data[i]->shape()) == root_shape &&
             alias_map[output_index] < 0) {
-          lowering_ctx->SetUpAlias(
-              {static_cast<int64_t>(output_index)}, i, {});
+          lowering_ctx->SetUpAlias({static_cast<int64_t>(output_index)}, i, {});
           alias_map[output_index] = i;
 
-          LTC_VLOG(6) << "Aliased paramter " << i << " with output "
-                      << output_index << ": "
-                      << lazy_tensors::Shape(parameters_data[i]->shape());
+          VLOG(6) << "Aliased paramter " << i << " with output " << output_index
+                  << ": " << lazy_tensors::Shape(parameters_data[i]->shape());
         }
       }
     }
@@ -900,15 +893,15 @@ LazyGraphExecutor::OpByOpAsync LazyGraphExecutor::SyncTensorsGraphOpByOp(
 
   auto syncfn = [async]() -> int {
     try {
-      LTC_VLOG(3) << "Executing (OpByOp) IR graph hash "
-                  << torch::lazy::HashToString(async->coll.hash)
-                  << " on device " << async->coll.device << " ...";
+      VLOG(3) << "Executing (OpByOp) IR graph hash "
+              << torch::lazy::HashToString(async->coll.hash) << " on device "
+              << async->coll.device << " ...";
       std::vector<lazy_tensors::ComputationClient::DataPtr> results =
           OpByOpExecutor::Get()->Execute(
               async->roots, async->coll.device.ToString(), async->devices);
-      LTC_VLOG(3) << "Executing (OpByOp) IR graph hash "
-                  << torch::lazy::HashToString(async->coll.hash)
-                  << " on device " << async->coll.device << " done!";
+      VLOG(3) << "Executing (OpByOp) IR graph hash "
+              << torch::lazy::HashToString(async->coll.hash) << " on device "
+              << async->coll.device << " done!";
 
       for (size_t i = 0; i < results.size(); ++i) {
         if (async->tensors_data[i] != nullptr) {
@@ -942,8 +935,8 @@ LazyGraphExecutor::SyncTensorsGraphInternal(std::vector<LazyTensor>* tensors,
   PostOrderData po_data = RunPostOrder(*tensors, coll.indices);
   coll.hash = torch::lazy::HashCombine(
       coll.hash, torch::lazy::Hash(po_data.parameter_sequence));
-  LTC_VLOG(4) << "Parameter sequence graph hash "
-              << torch::lazy::HashToString(coll.hash);
+  VLOG(4) << "Parameter sequence graph hash "
+          << torch::lazy::HashToString(coll.hash);
   std::shared_ptr<Async> async = TryRunCachedSync(tensors, &coll, &po_data);
   if (async != nullptr) {
     return async;
@@ -952,7 +945,7 @@ LazyGraphExecutor::SyncTensorsGraphInternal(std::vector<LazyTensor>* tensors,
   CompilationResult compile_result = Compile(*tensors, devices, coll, &po_data);
 
   LTC_VALUE_METRIC("TensorsGraphSize", compile_result.emitted_nodes);
-  LTC_VLOG(5) << "TensorsGraphSize=" << compile_result.emitted_nodes;
+  VLOG(5) << "TensorsGraphSize=" << compile_result.emitted_nodes;
 
   auto cached_computation = std::make_shared<CachedComputation>(
       std::move(compile_result.computation));
@@ -976,15 +969,13 @@ LazyGraphExecutor::ScheduleSyncTensorsGraph(
   auto syncfn = [async, hash = coll->hash]() {
     lazy_tensors::ComputationClient::ExecuteComputationOptions options;
     try {
-      LTC_VLOG(3) << "Executing IR graph hash "
-                  << torch::lazy::HashToString(hash) << " on device "
-                  << async->device << " ...";
+      VLOG(3) << "Executing IR graph hash " << torch::lazy::HashToString(hash)
+              << " on device " << async->device << " ...";
       auto results = lazy_tensors::ComputationClient::Get()->ExecuteComputation(
           *async->cached_computation->computation, async->parameters_data,
           async->device, options);
-      LTC_VLOG(3) << "Executing IR graph hash "
-                  << torch::lazy::HashToString(hash) << " on device "
-                  << async->device << " done!";
+      VLOG(3) << "Executing IR graph hash " << torch::lazy::HashToString(hash)
+              << " on device " << async->device << " done!";
 
       for (size_t i = 0; i < results.size(); ++i) {
         if (async->tensors_data[i] != nullptr) {
@@ -1089,7 +1080,7 @@ std::vector<at::Tensor> LazyGraphExecutor::FetchTensors(
       if (tensor_data) {
         results.push_back(*tensor_data);
       } else {
-        LTC_CHECK_LT(literals_index, tensors_data.size());
+        CHECK_LT(literals_index, tensors_data.size());
         results.push_back(lazy_tensors::MakeTensorFromComputationData(
             tensors_data[literals_index], (*tensors)[i].dtype()));
         ++literals_index;
@@ -1123,7 +1114,7 @@ LazyGraphExecutor::GatherTensorsData(
     } else if (!tensors[i].CurrentTensorData()) {
       lazy_tensors::ComputationClient::DataPtr handle =
           tensors[i].CurrentDataHandle();
-      LTC_CHECK(handle != nullptr);
+      CHECK(handle != nullptr);
       result_tensors_data.push_back(std::move(handle));
     }
   }

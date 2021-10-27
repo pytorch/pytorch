@@ -55,24 +55,24 @@ torch::lazy::Value EnsureRank1(const torch::lazy::Value& index);
 // Implements indexing by tensors of long according to the top-level
 // description.
 LazyTensor IndexByTensors(const LazyTensor& base,
-                          c10::ArrayRef<LazyTensor> indices,
-                          int64_t start_dim);
+                          c10::ArrayRef<LazyTensor> indices, int64_t start_dim);
 
-torch::lazy::Value IndexPutByTensors(
-    const LazyTensor& base, c10::ArrayRef<LazyTensor> indices,
-    int64_t start_dim, const LazyTensor& updates, bool accumulate,
-    c10::ArrayRef<int64_t> result_permutation);
+torch::lazy::Value IndexPutByTensors(const LazyTensor& base,
+                                     c10::ArrayRef<LazyTensor> indices,
+                                     int64_t start_dim,
+                                     const LazyTensor& updates, bool accumulate,
+                                     c10::ArrayRef<int64_t> result_permutation);
 
-NodePtr IndexFill(const LazyTensor& base, int64_t dim,
-                      const LazyTensor& index, const at::Scalar& value);
+NodePtr IndexFill(const LazyTensor& base, int64_t dim, const LazyTensor& index,
+                  const at::Scalar& value);
 
-NodePtr IndexFill(const LazyTensor& base, int64_t dim,
-                      const LazyTensor& index, const LazyTensor& value);
+NodePtr IndexFill(const LazyTensor& base, int64_t dim, const LazyTensor& index,
+                  const LazyTensor& value);
 
 torch::lazy::Value IndexAdd(const LazyTensor& base, int64_t dim,
-                   const LazyTensor& index, const LazyTensor& source);
+                            const LazyTensor& index, const LazyTensor& source);
 
 torch::lazy::Value IndexCopy(const LazyTensor& base, int64_t dim,
-                    const LazyTensor& index, const LazyTensor& source);
+                             const LazyTensor& index, const LazyTensor& source);
 
 }  // namespace torch_lazy_tensors

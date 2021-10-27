@@ -24,7 +24,7 @@ class Cat : public TsNode {
     kwarguments.reserve(0);
 
     std::vector<torch::jit::Value*> tensor_list;
-    LTC_CHECK(!operands().empty());
+    CHECK(!operands().empty());
     for (const torch::lazy::Output& operand : operands()) {
       tensor_list.emplace_back(loctx->GetOutputOp(operand));
     }
@@ -35,7 +35,7 @@ class Cat : public TsNode {
             ->output());
     arguments.emplace_back(dim());
     TSOpVector cat_out = tsLoweringInterface.LowerBuiltin(op().op, arguments, kwarguments);
-    LTC_CHECK_EQ(cat_out.size(), 1);
+    CHECK_EQ(cat_out.size(), 1);
 
     return cat_out;
 

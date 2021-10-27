@@ -5,8 +5,6 @@
 #include "lazy_tensor_core/csrc/function_call_tracker.h"
 #include "lazy_tensor_core/csrc/ts_backend/EagerFallback.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_computation_client.h"
-#include "lazy_tensors/computation_client/debug_macros.h"
-#include "lazy_tensors/computation_client/ltc_logging.h"
 #include "lazy_tensors/computation_client/metrics.h"
 
 namespace torch_lazy_tensors {
@@ -36,7 +34,7 @@ void ltc_eager_fallback(const c10::OperatorHandle& op,
   for (int64_t idx = 0; idx < arguments.size(); ++idx) {
     const auto& ivalue = arguments[idx];
     if (ivalue.isTensor()) {
-      LTC_VLOG(3) << ivalue.toTensor().toString();
+      VLOG(3) << ivalue.toTensor().toString();
     }
   }
 

@@ -17,9 +17,7 @@ class UpsampleNearest : public TsNode {
 
   std::string ToString() const override;
 
-  const std::vector<int64_t>& output_size() const {
-    return output_size_;
-  }
+  const std::vector<int64_t>& output_size() const { return output_size_; }
 
  private:
   std::vector<int64_t> output_size_;

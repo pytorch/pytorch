@@ -9,7 +9,6 @@
 #include "lazy_tensor_core/csrc/layout_manager.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensors/computation_client/computation_client.h"
-#include "lazy_tensors/computation_client/debug_macros.h"
 
 namespace torch_lazy_tensors {
 namespace {
@@ -126,7 +125,7 @@ bool LTCTensorImpl::is_contiguous(at::MemoryFormat memory_format) const {
     return tensor_.CurrentTensorData()->is_contiguous();
   }
   // Only check that the storage is already contiguous.
-  LTC_CHECK(is_contiguous_) << "Non-contiguous storage for lazy tensor";
+  CHECK(is_contiguous_) << "Non-contiguous storage for lazy tensor";
   return true;
 }
 
@@ -171,7 +170,7 @@ void LTCTensorImpl::AtenInitialize() {
 }
 
 const at::Storage& LTCTensorImpl::storage() const {
-  LTC_ERROR() << "Lazy tensors do not have storage";
+  LOG(ERROR) << "Lazy tensors do not have storage";
 }
 
 bool LTCTensorImpl::has_storage() const { return false; }

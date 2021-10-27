@@ -23,6 +23,7 @@
 #include "lazy_tensor_core/csrc/ts_backend/backend_impl.h"
 #include "lazy_tensor_core/csrc/version.h"
 #include "lazy_tensors/computation_client/computation_client.h"
+#include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/computation_client/metrics.h"
 #include "lazy_tensors/computation_client/metrics_analysis.h"
 #include "lazy_tensors/computation_client/metrics_reader.h"
@@ -136,11 +137,10 @@ AllReduceType GetReduceType(const std::string& reduce_type) {
   } else if (reduce_type == "max") {
     return AllReduceType::kMax;
   }
-  LTC_ERROR() << "Unknown AllReduce type: " << reduce_type;
+  LOG(ERROR) << "Unknown AllReduce type: " << reduce_type;
 }
 
-std::vector<std::vector<int64_t>> CreateReduceGroups(
-    const py::list& groups) {
+std::vector<std::vector<int64_t>> CreateReduceGroups(const py::list& groups) {
   std::vector<std::vector<int64_t>> replica_groups;
   for (auto& group : groups) {
     replica_groups.emplace_back();
@@ -151,15 +151,14 @@ std::vector<std::vector<int64_t>> CreateReduceGroups(
   return replica_groups;
 }
 
-std::vector<std::pair<int64_t, int64_t>>
-CreateSourceTargetPairs(const py::list& pairs) {
-  std::vector<std::pair<int64_t, int64_t>>
-      source_target_pairs;
+std::vector<std::pair<int64_t, int64_t>> CreateSourceTargetPairs(
+    const py::list& pairs) {
+  std::vector<std::pair<int64_t, int64_t>> source_target_pairs;
   for (auto& pair : pairs) {
     const auto& pylist_pair = pair.cast<py::list>();
-    LTC_CHECK_EQ(len(pylist_pair), 2);
-    source_target_pairs.push_back({pylist_pair[0].cast<int64_t>(),
-                                   pylist_pair[1].cast<int64_t>()});
+    CHECK_EQ(len(pylist_pair), 2);
+    source_target_pairs.push_back(
+        {pylist_pair[0].cast<int64_t>(), pylist_pair[1].cast<int64_t>()});
   }
   return source_target_pairs;
 }
@@ -191,8 +190,7 @@ std::pair<at::Tensor, std::shared_ptr<torch::lazy::Value>> AllReduce(
 
 std::pair<at::Tensor, std::shared_ptr<torch::lazy::Value>> AllToAll(
     const at::Tensor& input, const std::shared_ptr<torch::lazy::Value>& token,
-    int64_t split_dimension, int64_t concat_dimension,
-    int64_t split_count,
+    int64_t split_dimension, int64_t concat_dimension, int64_t split_count,
     const std::vector<std::vector<int64_t>>& replica_groups) {
   LazyTensor result;
   torch::lazy::Value new_token;
@@ -206,8 +204,7 @@ std::pair<at::Tensor, std::shared_ptr<torch::lazy::Value>> AllToAll(
 
 std::pair<at::Tensor, std::shared_ptr<torch::lazy::Value>> CollectivePermute(
     const at::Tensor& input, const std::shared_ptr<torch::lazy::Value>& token,
-    const std::vector<std::pair<int64_t, int64_t>>&
-        source_target_pairs) {
+    const std::vector<std::pair<int64_t, int64_t>>& source_target_pairs) {
   LazyTensor result;
   torch::lazy::Value new_token;
   std::tie(result, new_token) = lazy_tensor_distributed::collective_permute(
@@ -368,8 +365,7 @@ py::object GetRevisions() {
 
 py::object LtcNms(const at::Tensor& boxes, const at::Tensor& scores,
                   const at::Tensor& score_threshold,
-                  const at::Tensor& iou_threshold,
-                  int64_t output_size) {
+                  const at::Tensor& iou_threshold, int64_t output_size) {
   at::Tensor selected_indices;
   at::Tensor num_valid;
   {
@@ -408,8 +404,7 @@ void InitLtcModuleBindings(py::module m) {
   m.def("_get_git_revs", []() { return GetRevisions(); });
   m.def("_ltc_nms", [](const at::Tensor& boxes, const at::Tensor& scores,
                        const at::Tensor& score_threshold,
-                       const at::Tensor& iou_threshold,
-                       int64_t output_size) {
+                       const at::Tensor& iou_threshold, int64_t output_size) {
     return LtcNms(boxes, scores, score_threshold, iou_threshold, output_size);
   });
   m.def("_get_ltc_tensors_dot",
@@ -537,8 +532,7 @@ void InitLtcModuleBindings(py::module m) {
   m.def("_ltc_all_to_all",
         [](const at::Tensor& input,
            const std::shared_ptr<torch::lazy::Value>& token,
-           int64_t split_dimension,
-           int64_t concat_dimension,
+           int64_t split_dimension, int64_t concat_dimension,
            int64_t split_count, const py::list& groups) {
           std::vector<std::vector<int64_t>> replica_groups =
               CreateReduceGroups(groups);
@@ -560,8 +554,8 @@ void InitLtcModuleBindings(py::module m) {
         [](const at::Tensor& input,
            const std::shared_ptr<torch::lazy::Value>& token,
            const py::list& pairs) {
-          std::vector<std::pair<int64_t, int64_t>>
-              source_target_pairs = CreateSourceTargetPairs(pairs);
+          std::vector<std::pair<int64_t, int64_t>> source_target_pairs =
+              CreateSourceTargetPairs(pairs);
           at::Tensor result;
           std::shared_ptr<torch::lazy::Value> new_token;
           {

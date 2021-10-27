@@ -2,12 +2,12 @@
 
 #include <algorithm>
 #include <numeric>
-#include "lazy_tensors/computation_client/debug_macros.h"
 
 namespace lazy_tensors {
 
-std::vector<int64_t> InversePermutation(c10::ArrayRef<int64_t> input_permutation) {
-  DCHECK(IsPermutation(input_permutation));
+std::vector<int64_t> InversePermutation(
+    c10::ArrayRef<int64_t> input_permutation) {
+  CHECK(IsPermutation(input_permutation));
   std::vector<int64_t> output_permutation(input_permutation.size(), -1);
   for (size_t i = 0; i < input_permutation.size(); ++i) {
     output_permutation.at(input_permutation.at(i)) = i;

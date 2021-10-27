@@ -3,18 +3,15 @@
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/ops/scalar.h"
-#include "lazy_tensors/computation_client/debug_macros.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
 ConstantPadNd::ConstantPadNd(const torch::lazy::Value& input,
-                             std::vector<int64_t> pad,
-                             const at::Scalar& value)
+                             std::vector<int64_t> pad, const at::Scalar& value)
     : TsNode(torch::lazy::OpKind(at::aten::constant_pad_nd), {input},
-           /*num_outputs=*/1,
-           torch::lazy::MHash(pad, ScalarHash(value))),
+             /*num_outputs=*/1, torch::lazy::MHash(pad, ScalarHash(value))),
       pad_(std::move(pad)),
       value_(value) {
   SetShapeDeferred(

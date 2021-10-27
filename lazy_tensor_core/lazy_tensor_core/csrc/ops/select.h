@@ -24,14 +24,10 @@ class Select : public TsNode {
   int64_t stride() const { return stride_; }
 
   static lazy_tensors::Shape MakeSelectShape(const lazy_tensors::Shape& shape,
-                                             int64_t dim,
-                                             int64_t start,
-                                             int64_t end,
-                                             int64_t stride);
+                                             int64_t dim, int64_t start,
+                                             int64_t end, int64_t stride);
 
-  static int64_t GetStride(int64_t start,
-                                       int64_t end,
-                                       int64_t stride);
+  static int64_t GetStride(int64_t start, int64_t end, int64_t stride);
 
  private:
   int64_t dim_;

@@ -1,7 +1,10 @@
 #include "lazy_tensor_core/csrc/ts_backend/ts_computation_client.h"
 
+#include <c10/util/Logging.h>
+
 #include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_lowering_context.h"
+#include "lazy_tensors/computation_client/debug_macros.h"
 
 namespace lazy_tensors {
 namespace {
@@ -50,10 +53,9 @@ std::vector<ComputationClient::DataPtr> TSComputationClient::ExecuteComputation(
   for (auto argument : arguments) {
     const auto ts_data =
         std::static_pointer_cast<TSComputationClient::TSData>(argument);
-    LTC_CHECK(
-        lazy_tensors::compiler::TSComputationClient::HardwareDeviceType() !=
-            at::kCUDA ||
-        ts_data->data().device().type() == at::kCUDA);
+    CHECK(lazy_tensors::compiler::TSComputationClient::HardwareDeviceType() !=
+              at::kCUDA ||
+          ts_data->data().device().type() == at::kCUDA);
     stack.emplace_back(ts_data->data());
   }
   graph_executor.run(stack);
@@ -85,7 +87,9 @@ std::string TSComputationClient::GetDefaultDevice() const {
     case at::kCUDA: {
       return "GPU:0";
     }
-    default: { LTC_LOG(FATAL) << "Invalid device type"; }
+    default: {
+      LOG(FATAL) << "Invalid device type";
+    }
   }
 }
 
@@ -99,7 +103,7 @@ std::vector<std::string> TSComputationClient::GetAllDevices() const {
 
 void TSComputationClient::SetReplicationDevices(
     std::shared_ptr<std::vector<std::string>> devices) {
-  LTC_CHECK_EQ(devices->size(), size_t(1)) << "Replication not supported yet";
+  CHECK_EQ(devices->size(), size_t(1)) << "Replication not supported yet";
 }
 
 std::shared_ptr<std::vector<std::string>>

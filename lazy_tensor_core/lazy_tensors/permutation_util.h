@@ -1,13 +1,15 @@
 #pragma once
 
+#include <c10/util/Logging.h>
+
 #include <vector>
 
 #include "lazy_tensors/str_join.h"
-#include "lazy_tensors/computation_client/debug_macros.h"
 
 namespace lazy_tensors {
 
-std::vector<int64_t> InversePermutation(c10::ArrayRef<int64_t> input_permutation);
+std::vector<int64_t> InversePermutation(
+    c10::ArrayRef<int64_t> input_permutation);
 
 bool IsPermutation(c10::ArrayRef<int64_t> permutation);
 

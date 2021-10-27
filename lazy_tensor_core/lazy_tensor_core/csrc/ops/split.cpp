@@ -2,7 +2,6 @@
 
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
 #include "lazy_tensor_core/csrc/data_ops.h"
-#include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/computation_client/util.h"
 
 namespace torch_lazy_tensors {
@@ -12,8 +11,9 @@ namespace ops {
 Split::Split(const torch::lazy::Value& input, std::vector<int64_t> split_sizes,
              int64_t dim)
     : TsNode(torch::lazy::OpKind(at::aten::split), {input},
-           ComputeSplitCount(ir::GetShapeFromTsValue(input).dimensions(dim), split_sizes),
-           torch::lazy::MHash(split_sizes, dim)),
+             ComputeSplitCount(ir::GetShapeFromTsValue(input).dimensions(dim),
+                               split_sizes),
+             torch::lazy::MHash(split_sizes, dim)),
       split_sizes_(std::move(split_sizes)),
       dim_(dim) {
   SetShapeDeferred(

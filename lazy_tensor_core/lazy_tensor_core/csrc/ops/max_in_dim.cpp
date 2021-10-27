@@ -9,7 +9,7 @@ namespace ops {
 
 MaxInDim::MaxInDim(const torch::lazy::Value& input, int64_t dim, bool keepdim)
     : TsNode(torch::lazy::OpKind(at::aten::max), {input},
-           /*num_outputs=*/2, torch::lazy::MHash(dim, keepdim)),
+             /*num_outputs=*/2, torch::lazy::MHash(dim, keepdim)),
       dim_(dim),
       keepdim_(keepdim) {
   SetShapeDeferred(

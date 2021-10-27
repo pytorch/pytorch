@@ -7,12 +7,12 @@ namespace ir {
 namespace ops {
 
 VarMean::VarMean(const torch::lazy::Value& input,
-                 std::vector<int64_t> dimensions,
-                 int64_t correction, bool keep_reduced_dimensions)
-    : TsNode(torch::lazy::OpKind(at::aten::var_mean), {input},
-           /*num_outputs=*/2,
-           torch::lazy::MHash(dimensions, correction,
-                                     keep_reduced_dimensions)),
+                 std::vector<int64_t> dimensions, int64_t correction,
+                 bool keep_reduced_dimensions)
+    : TsNode(
+          torch::lazy::OpKind(at::aten::var_mean), {input},
+          /*num_outputs=*/2,
+          torch::lazy::MHash(dimensions, correction, keep_reduced_dimensions)),
       dimensions_(std::move(dimensions)),
       correction_(correction),
       keep_reduced_dimensions_(keep_reduced_dimensions) {

@@ -1,7 +1,6 @@
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_backward.h"
 
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
-#include "lazy_tensors/computation_client/debug_macros.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -47,7 +46,7 @@ NodePtr TSNativeBatchNormBackward::Clone(OpList operands) const {
         operands.at(0), operands.at(1), operands.at(2), operands.at(3),
         operands.at(4), training_, eps_, output_mask_);
   }
-  LTC_CHECK_EQ(operands.size(), 7);
+  CHECK_EQ(operands.size(), 7);
   return torch::lazy::MakeNode<TSNativeBatchNormBackward>(
       operands.at(0), operands.at(1), operands.at(2), operands.at(3),
       operands.at(4), operands.at(5), operands.at(6), training_, eps_,

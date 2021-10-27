@@ -2,7 +2,6 @@
 
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
 #include "lazy_tensor_core/csrc/ops/ltc_ops.h"
-#include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/computation_client/util.h"
 
 namespace torch_lazy_tensors {
@@ -12,7 +11,7 @@ namespace ops {
 ReplicationPad::ReplicationPad(const torch::lazy::Value& input,
                                std::vector<int64_t> padding)
     : TsNode(ltc_replication_pad, {input},
-           /*num_outputs=*/1, torch::lazy::MHash(padding)),
+             /*num_outputs=*/1, torch::lazy::MHash(padding)),
       padding_(std::move(padding)) {
   SetShapeDeferred(
       [&]() { return compiler::NodeLowering::Get()->Infer(this); });

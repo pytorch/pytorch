@@ -10,10 +10,9 @@ namespace ops {
 
 CollectivePermute::CollectivePermute(
     const torch::lazy::Value& input, const torch::lazy::Value& token,
-    std::vector<std::pair<int64_t, int64_t>>
-        source_target_pairs)
+    std::vector<std::pair<int64_t, int64_t>> source_target_pairs)
     : TsNode(ltc_collective_permute, {input, token},
-           /*num_outputs=*/2, torch::lazy::MHash(source_target_pairs)),
+             /*num_outputs=*/2, torch::lazy::MHash(source_target_pairs)),
       source_target_pairs_(std::move(source_target_pairs)) {
   SetShapeDeferred(
       [&]() { return compiler::NodeLowering::Get()->Infer(this); });

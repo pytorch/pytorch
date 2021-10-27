@@ -37,7 +37,7 @@ torch::lazy::hash_t Hash(const lazy_tensors::Shape& shape) {
 namespace lazy_tensors {
 
 /* static */ int64_t ShapeUtil::TupleElementCount(const Shape& shape) {
-  LTC_CHECK(shape.IsTuple()) << shape;
+  CHECK(shape.IsTuple()) << shape;
   return shape.tuple_shapes_size();
 }
 

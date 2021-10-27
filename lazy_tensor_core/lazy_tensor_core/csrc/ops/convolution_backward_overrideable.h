@@ -10,20 +10,17 @@ namespace ops {
 class ConvolutionBackwardOverrideable : public TsNode {
  public:
   ConvolutionBackwardOverrideable(
-      const torch::lazy::Value& grad_output, const torch::lazy::Value& input, const torch::lazy::Value& weight,
-      std::vector<int64_t> stride,
-      std::vector<int64_t> padding,
-      std::vector<int64_t> dilation, bool transposed,
-      std::vector<int64_t> output_padding,
-      int64_t groups);
+      const torch::lazy::Value& grad_output, const torch::lazy::Value& input,
+      const torch::lazy::Value& weight, std::vector<int64_t> stride,
+      std::vector<int64_t> padding, std::vector<int64_t> dilation,
+      bool transposed, std::vector<int64_t> output_padding, int64_t groups);
 
   ConvolutionBackwardOverrideable(
-      const torch::lazy::Value& grad_output, const torch::lazy::Value& input, const torch::lazy::Value& weight,
-      std::vector<int64_t> stride,
-      std::vector<int64_t> padding,
-      std::vector<int64_t> dilation, bool transposed,
-      std::vector<int64_t> output_padding,
-      int64_t groups, std::array<bool, 3> output_mask);
+      const torch::lazy::Value& grad_output, const torch::lazy::Value& input,
+      const torch::lazy::Value& weight, std::vector<int64_t> stride,
+      std::vector<int64_t> padding, std::vector<int64_t> dilation,
+      bool transposed, std::vector<int64_t> output_padding, int64_t groups,
+      std::array<bool, 3> output_mask);
 
   NodePtr Clone(OpList operands) const override;
 
@@ -37,9 +34,7 @@ class ConvolutionBackwardOverrideable : public TsNode {
 
   bool transposed() const { return transposed_; }
 
-  const std::vector<int64_t>& output_padding() const {
-    return output_padding_;
-  }
+  const std::vector<int64_t>& output_padding() const { return output_padding_; }
 
   int64_t groups() const { return groups_; }
 

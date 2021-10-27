@@ -1,7 +1,7 @@
 #pragma once
-#include <complex>
-
 #include <c10/util/Optional.h>
+
+#include <complex>
 
 #include "lazy_tensors/primitive_types.h"
 #include "lazy_tensors/shape.h"
@@ -74,7 +74,7 @@ class ShapeUtil {
       case PrimitiveType::C128:
         return sizeof(std::complex<double>);
       default:
-        LTC_LOG(FATAL) << "Unhandled primitive type " << primitive_type;
+        LOG(FATAL) << "Unhandled primitive type " << primitive_type;
     }
   }
 
@@ -116,12 +116,12 @@ class ShapeUtil {
                                    c10::ArrayRef<Tile> tiles = {},
                                    int64_t element_size_in_bits = 0,
                                    int64_t memory_space = 0) {
-    LTC_CHECK(tiles.empty());
-    LTC_CHECK_EQ(element_size_in_bits, 0);
-    LTC_CHECK_EQ(memory_space, 0);
-    LTC_CHECK_EQ(dimensions.size(), minor_to_major.size());
+    CHECK(tiles.empty());
+    CHECK_EQ(element_size_in_bits, 0);
+    CHECK_EQ(memory_space, 0);
+    CHECK_EQ(dimensions.size(), minor_to_major.size());
     // ScalarType doesn't include invalid or tuple, so we can assume this
-    // LTC_CHECK(element_type != PrimitiveType::INVALID &&
+    // CHECK(element_type != PrimitiveType::INVALID &&
     //           element_type != PrimitiveType::TUPLE);
     Layout layout;
     for (int64_t dimension_number : minor_to_major) {
@@ -132,8 +132,8 @@ class ShapeUtil {
     return shape;
   }
 
-  static Shape MakeShapeWithDescendingLayout(c10::ScalarType element_type,
-                                             c10::ArrayRef<int64_t> dimensions) {
+  static Shape MakeShapeWithDescendingLayout(
+      c10::ScalarType element_type, c10::ArrayRef<int64_t> dimensions) {
     std::vector<int64_t> layout(dimensions.size());
     std::iota(layout.rbegin(), layout.rend(), static_cast<int64_t>(0));
     return MakeShapeWithLayout(element_type, dimensions, layout);
@@ -144,7 +144,7 @@ class ShapeUtil {
   static int64_t TupleElementCount(const Shape& shape);
 
   static const Shape& GetTupleElementShape(const Shape& shape, int64_t index) {
-    LTC_LOG(FATAL) << "Not implemented yet.";
+    LOG(FATAL) << "Not implemented yet.";
   }
 
   // Calls the given visitor function for each subshape of the given shape.
@@ -218,7 +218,7 @@ inline at::ScalarType PrimitiveToScalarType(
       return at::ScalarType::Bool;
     }
     default: {
-      LTC_LOG(FATAL) << "Not implemented yet.";
+      LOG(FATAL) << "Not implemented yet.";
     }
   }
 }

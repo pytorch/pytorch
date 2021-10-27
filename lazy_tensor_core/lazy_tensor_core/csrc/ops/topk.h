@@ -8,8 +8,8 @@ namespace ops {
 
 class TopK : public TsNode {
  public:
-  TopK(const torch::lazy::Value& input, int64_t k, int64_t dim,
-       bool largest, bool sorted);
+  TopK(const torch::lazy::Value& input, int64_t k, int64_t dim, bool largest,
+       bool sorted);
 
   std::string ToString() const override;
 

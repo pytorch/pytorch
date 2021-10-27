@@ -13,7 +13,7 @@ namespace ir {
 static lazy_tensors::Shape convertShape(
     const std::vector<at::ScalarType>& dtypes,
     const std::vector<std::vector<int64_t>>& shapes) {
-  LTC_CHECK_EQ(dtypes.size(), shapes.size());
+  CHECK_EQ(dtypes.size(), shapes.size());
   if (dtypes.size() == 1) {
     return lazy_tensors::Shape(dtypes[0], shapes[0]);
   }

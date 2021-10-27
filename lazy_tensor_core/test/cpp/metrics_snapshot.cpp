@@ -2,7 +2,6 @@
 
 #include <regex>
 
-#include "lazy_tensors/computation_client/ltc_logging.h"
 #include "lazy_tensors/computation_client/util.h"
 
 namespace torch_lazy_tensors {

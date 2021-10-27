@@ -38,7 +38,7 @@ class Analyzer {
 };
 
 inline std::string CreatePerformanceReport() {
-  LTC_LOG(FATAL) << "Not implemented.";
+  LOG(FATAL) << "Not implemented.";
 }
 
 }  // namespace metrics

@@ -21,9 +21,7 @@ class AllReduce : public TsNode {
 
   double scale() const { return scale_; }
 
-  const std::vector<std::vector<int64_t>>& groups() const {
-    return groups_;
-  }
+  const std::vector<std::vector<int64_t>>& groups() const { return groups_; }
 
  private:
   AllReduceType reduce_type_;

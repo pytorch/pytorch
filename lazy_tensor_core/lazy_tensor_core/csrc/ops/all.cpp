@@ -12,8 +12,8 @@ namespace ops {
 All::All(const torch::lazy::Value& input, std::vector<int64_t> dimensions,
          bool keep_reduced_dimensions)
     : TsNode(torch::lazy::OpKind(at::aten::all), {input},
-           /*num_outputs=*/1,
-           torch::lazy::MHash(dimensions, keep_reduced_dimensions)),
+             /*num_outputs=*/1,
+             torch::lazy::MHash(dimensions, keep_reduced_dimensions)),
       dimensions_(std::move(dimensions)),
       keep_reduced_dimensions_(keep_reduced_dimensions) {
   SetShapeDeferred(

@@ -7,9 +7,10 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-Gather::Gather(const torch::lazy::Value& input, int64_t dim, const torch::lazy::Value& index)
+Gather::Gather(const torch::lazy::Value& input, int64_t dim,
+               const torch::lazy::Value& index)
     : TsNode(torch::lazy::OpKind(at::aten::gather), {input, index},
-           /*num_outputs=*/1, torch::lazy::MHash(dim)),
+             /*num_outputs=*/1, torch::lazy::MHash(dim)),
       dim_(dim) {
   SetShapeDeferred(
       [&]() { return compiler::NodeLowering::Get()->Infer(this); });

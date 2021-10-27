@@ -17,9 +17,7 @@ class GetDimensionsSize : public TsNode {
 
   std::string ToString() const override;
 
-  const std::vector<int64_t>& dimensions() const {
-    return dimensions_;
-  }
+  const std::vector<int64_t>& dimensions() const { return dimensions_; }
 
  private:
   std::vector<int64_t> dimensions_;

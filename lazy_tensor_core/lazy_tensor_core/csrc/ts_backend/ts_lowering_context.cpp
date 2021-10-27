@@ -21,12 +21,12 @@ TSLoweringContext::TSLoweringContext(
   lowering_ = NodeLowering::Create(this);
   for (auto node : post_order) {
     bool ok = lowering_->Lower(node);
-    LTC_CHECK(ok) << "Failed to lower: " << *node;
+    CHECK(ok) << "Failed to lower: " << *node;
   }
 }
 
 lazy_tensors::Shape TSLoweringContext::GetResultShape(size_t index) const {
-  LTC_LOG(FATAL) << "Not implemented yet.";
+  LOG(FATAL) << "Not implemented yet.";
 }
 
 size_t TSLoweringContext::AddResult(const torch::lazy::Output& output) {
@@ -48,12 +48,12 @@ torch::jit::Value* TSLoweringContext::GetOutputOp(const torch::lazy::Output& out
     auto post_order = ir::Util::ComputePostOrder(output.node, &emit_status_);
     for (auto node : post_order) {
       bool ok = lowering_->Lower(node);
-      LTC_CHECK(ok) << "Failed to lower: " << *node;
+      CHECK(ok) << "Failed to lower: " << *node;
     }
     // At this point the outpout better be present, otherwise there is an issue
     // with the lowering code.
     it = emitted_outputs_.find(output);
-    LTC_CHECK(it != emitted_outputs_.end())
+    CHECK(it != emitted_outputs_.end())
         << "No TS operation emitted for output: " << output;
   }
   return it->second;

@@ -38,12 +38,12 @@ class TSComputationClient : public ComputationClient {
 
   std::vector<DataPtr> TransferToServer(
       c10::ArrayRef<TensorSource> tensors) override {
-    LTC_LOG(FATAL) << "Not implemented yet.";
+    LOG(FATAL) << "Not implemented yet.";
   }
 
   std::vector<Literal> TransferFromServer(
       c10::ArrayRef<DataPtr> handles) override {
-    LTC_LOG(FATAL) << "Not implemented yet.";
+    LOG(FATAL) << "Not implemented yet.";
   }
 
   std::vector<ComputationPtr> Compile(
@@ -59,7 +59,7 @@ class TSComputationClient : public ComputationClient {
       const std::vector<std::vector<DataPtr>>& arguments,
       c10::ArrayRef<std::string> devices,
       const ExecuteReplicatedOptions& options) override {
-    LTC_LOG(FATAL) << "Not implemented yet.";
+    LOG(FATAL) << "Not implemented yet.";
   }
 
   std::vector<std::vector<DataPtr>> ExecuteParallel(
@@ -67,17 +67,17 @@ class TSComputationClient : public ComputationClient {
       const std::vector<std::vector<DataPtr>>& arguments,
       c10::ArrayRef<std::string> devices,
       const ExecuteParallelOptions& options) override {
-    LTC_LOG(FATAL) << "Not implemented yet.";
+    LOG(FATAL) << "Not implemented yet.";
   }
 
   std::vector<DataPtr> ExecuteChained(c10::ArrayRef<ExecuteChainedOp> ops,
                                       const std::string& device) override {
-    LTC_LOG(FATAL) << "Not implemented yet.";
+    LOG(FATAL) << "Not implemented yet.";
   }
 
   std::vector<std::vector<DataPtr>> DeconstructTuple(
       c10::ArrayRef<DataPtr> tuples) override {
-    LTC_LOG(FATAL) << "Not implemented yet.";
+    LOG(FATAL) << "Not implemented yet.";
   }
 
   std::string GetResourceDomain(const std::string& device) const override;
@@ -96,13 +96,13 @@ class TSComputationClient : public ComputationClient {
   std::shared_ptr<std::vector<std::string>> GetReplicationDevices() override;
 
   void SetRngSeed(size_t seed) override {
-    LTC_LOG(FATAL) << "Not implemented yet.";
+    LOG(FATAL) << "Not implemented yet.";
   }
 
   std::map<std::string, Metric> GetMetrics() const override { return {}; }
 
   MemoryInfo GetMemoryInfo(const std::string& device) override {
-    LTC_LOG(FATAL) << "Not implemented yet.";
+    LOG(FATAL) << "Not implemented yet.";
   }
 
   void PrepareToExit() override;

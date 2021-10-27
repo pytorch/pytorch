@@ -15,9 +15,7 @@ class Amin : public TsNode {
 
   NodePtr Clone(OpList operands) const override;
 
-  const std::vector<int64_t>& dimensions() const {
-    return dimensions_;
-  };
+  const std::vector<int64_t>& dimensions() const { return dimensions_; };
 
   bool keepdim() const { return keepdim_; }
 
