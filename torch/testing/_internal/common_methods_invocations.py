@@ -8695,6 +8695,7 @@ op_db: List[OpInfo] = [
                # TODO: Reference issue here
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad', dtypes=(torch.float64,)),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_gradgrad', dtypes=(torch.float64,)),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
            ),
            sample_inputs_func=sample_inputs_max_unpool2d),
     OpInfo('nn.functional.max_pool2d',
