@@ -16,7 +16,7 @@ from typing_extensions import TypedDict
 
 
 BUILD_ENVIRONMENT = os.getenv('BUILD_ENVIRONMENT')
-
+assert BUILD_ENVIRONMENT is not None
 
 class Config(TypedDict):
     num_shards: int
@@ -87,7 +87,7 @@ def main() -> None:
     if os.getenv('ENABLE_DISTRIBUTED_TEST'):
         configs['distributed'] = {
             'num_shards': 1,
-            'runner': DISTRIBUTED_GPU_RUNNER_TYPE if "cuda" in BUILD_ENVIRONMENT else TEST_RUNNER_TYPE
+            'runner': DISTRIBUTED_GPU_RUNNER_TYPE if "cuda" in str(BUILD_ENVIRONMENT) else TEST_RUNNER_TYPE
         }
     if os.getenv('ENABLE_SLOW_TEST'):
         configs['slow'] = {'num_shards': 1, 'runner': TEST_RUNNER_TYPE}
