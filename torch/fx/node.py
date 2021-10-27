@@ -5,6 +5,7 @@ from .immutable_collections import immutable_dict, immutable_list
 import torch
 import builtins
 import types
+import warnings
 from torch.fx.operator_schemas import normalize_function, normalize_module, ArgsKwargsPair
 
 if TYPE_CHECKING:
@@ -233,6 +234,9 @@ class Node:
             x (Node): The node to put before this node. Must be a member of the same graph.
         """
         assert self.graph == x.graph, "Attempting to move a Node into a different Graph"
+        if self == x:
+            warnings.warn("Trying to prepend a node to itself. This behavior has no effect on the graph.")
+            return
         x._remove_from_list()
         p = self._prev
         p._next, x._prev = x, p

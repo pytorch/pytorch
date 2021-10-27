@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/core/ivalue.h>
+#include <torch/csrc/jit/mobile/model_tracer/CustomClassTracer.h>
 #include <torch/csrc/jit/mobile/model_tracer/KernelDTypeTracer.h>
 
 namespace torch {
@@ -17,6 +18,7 @@ struct TracerResult {
   std::set<std::string> root_ops;
   std::set<std::string> traced_operators;
   KernelDTypeTracer::kernel_tags_type called_kernel_tags;
+  CustomClassTracer::custom_classes_type loaded_classes;
   std::set<std::string> enabled_backends;
 };
 

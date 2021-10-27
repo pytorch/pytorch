@@ -18,7 +18,7 @@ struct NoneValue : SugaredValue {
 
 std::shared_ptr<SugaredValue> PrintValue::call(
     const SourceRange& loc,
-    Function& m,
+    GraphFunction& m,
     at::ArrayRef<NamedValue> args,
     at::ArrayRef<NamedValue> kwargs,
     size_t n_binders) {
@@ -49,7 +49,7 @@ builtin_cast_method_to_scalar_type() {
 
 std::shared_ptr<SugaredValue> BuiltinFunction::call(
     const SourceRange& loc,
-    Function& m,
+    GraphFunction& m,
     at::ArrayRef<NamedValue> args,
     at::ArrayRef<NamedValue> kwargs,
     size_t n_binders) {
@@ -69,7 +69,7 @@ struct EnumClassHash {
 
 bool SimpleValue::hasAttr(
     const SourceRange& loc,
-    Function& m,
+    GraphFunction& m,
     const std::string& field) {
   auto class_type = value_->type()->cast<ClassType>();
   if (!class_type) {
@@ -85,7 +85,7 @@ bool SimpleValue::hasAttr(
 // callable value that will resolve to foo(x, y, z) when called.
 std::shared_ptr<SugaredValue> SimpleValue::attr(
     const SourceRange& loc,
-    Function& m,
+    GraphFunction& m,
     const std::string& field) {
   // Allow method-style casts on Tensor types. e.g. x.int()
   if (value_->type()->isSubtypeOf(*TensorType::get())) {
@@ -239,7 +239,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
 
 std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(
     const SourceRange& loc,
-    Function& m,
+    GraphFunction& m,
     const c10::optional<size_t>& size_hint) {
   static const auto make_simple_value =
       [](Value* v) -> std::shared_ptr<SugaredValue> {
@@ -283,7 +283,7 @@ static bool isRecursive(const TypePtr& classType, const TypePtr& attrType) {
 
 void SimpleValue::setAttr(
     const SourceRange& loc,
-    Function& m,
+    GraphFunction& m,
     const std::string& field,
     Value* newValue) {
   const auto classType = value_->type()->cast<ClassType>();
@@ -361,7 +361,7 @@ void SimpleValue::setAttr(
 
 std::shared_ptr<SugaredValue> SimpleValue::call(
     const SourceRange& loc,
-    Function& m,
+    GraphFunction& m,
     at::ArrayRef<NamedValue> args,
     at::ArrayRef<NamedValue> kwargs,
     size_t n_binders) {
@@ -399,7 +399,7 @@ std::shared_ptr<SugaredValue> SimpleValue::call(
   return SugaredValue::call(loc, m, args, kwargs, n_binders);
 }
 
-Value* SimpleValue::len(const SourceRange& loc, Function& m) {
+Value* SimpleValue::len(const SourceRange& loc, GraphFunction& m) {
   // List, Tuple, Tensor, fill in missing information desugaring
   Value* val = getValue();
   TypePtr val_type = val->type();
@@ -415,7 +415,7 @@ Value* SimpleValue::len(const SourceRange& loc, Function& m) {
 
 SugaredValuePtr SimpleValue::getitem(
     const SourceRange& loc,
-    Function& m,
+    GraphFunction& m,
     Value* idx,
     TypePtr type_hint) {
   Value* val = getValue();
@@ -452,7 +452,7 @@ SugaredValuePtr SimpleValue::getitem(
   }
 }
 
-SugaredValuePtr SimpleValue::iter(const SourceRange& loc, Function& m) {
+SugaredValuePtr SimpleValue::iter(const SourceRange& loc, GraphFunction& m) {
   auto value = getValue();
   auto type = value->type();
   // built-in iterable types
@@ -480,7 +480,7 @@ SugaredValuePtr SimpleValue::iter(const SourceRange& loc, Function& m) {
 
 RangeValue::RangeValue(
     const SourceRange& loc,
-    Function& m,
+    GraphFunction& m,
     std::vector<Value*> inputs,
     c10::optional<int64_t> static_len) {
   for (const auto i : c10::irange(inputs.size())) {
@@ -518,11 +518,11 @@ RangeValue::RangeValue(
   static_len_ = static_len;
 }
 
-SugaredValuePtr RangeValue::iter(const SourceRange& loc, Function& m) {
+SugaredValuePtr RangeValue::iter(const SourceRange& loc, GraphFunction& m) {
   return shared_from_this();
 };
 
-Value* RangeValue::len(const SourceRange& loc, Function& m) {
+Value* RangeValue::len(const SourceRange& loc, GraphFunction& m) {
   if (static_len_) {
     return insertConstant(*m.graph(), *static_len_, loc);
   }
@@ -536,7 +536,7 @@ Value* RangeValue::len(const SourceRange& loc, Function& m) {
 
 SugaredValuePtr RangeValue::getitem(
     const SourceRange& loc,
-    Function& m,
+    GraphFunction& m,
     Value* idx,
     TypePtr type_hint) {
   if (has_only_end_) {
@@ -568,7 +568,7 @@ std::vector<SugaredValuePtr> IterableTree::get_base_iterables() {
   return base_iters;
 }
 
-Value* IterableTree::len(const SourceRange& loc, Function& m) {
+Value* IterableTree::len(const SourceRange& loc, GraphFunction& m) {
   // if it's a iterable tree, we get the base iterables that consists of
   // SimpleValue or RangeValue, and then calculate the minimum length of all the
   // base iterables to be max_trip_count_val
@@ -587,7 +587,7 @@ Value* IterableTree::len(const SourceRange& loc, Function& m) {
 
 SugaredValuePtr IterableTree::getitem(
     const SourceRange& loc,
-    Function& m,
+    GraphFunction& m,
     Value* idx,
     TypePtr type_hint) {
   std::vector<SugaredValuePtr> child_items;
@@ -599,7 +599,7 @@ SugaredValuePtr IterableTree::getitem(
 
 void IterableTree::addChild(
     const SourceRange& range,
-    Function& m,
+    GraphFunction& m,
     const SugaredValuePtr& iter_value) {
   c10::optional<int64_t> child_len = iter_value->staticLen();
   if (children_.size() == 0) {
@@ -622,7 +622,7 @@ void IterableTree::addChild(
 
 std::shared_ptr<SugaredValue> MagicMethod::call(
     const SourceRange& loc,
-    Function& m,
+    GraphFunction& m,
     at::ArrayRef<NamedValue> args,
     at::ArrayRef<NamedValue> kwargs,
     size_t n_binders) {
@@ -640,7 +640,7 @@ std::shared_ptr<SugaredValue> MagicMethod::call(
 
 std::shared_ptr<SugaredValue> ClassValue::call(
     const SourceRange& loc,
-    Function& m,
+    GraphFunction& m,
     // note: names for args will be 'argument 0', 'argument 1', etc..
     at::ArrayRef<NamedValue> args,
     at::ArrayRef<NamedValue> kwargs,
@@ -663,7 +663,7 @@ std::shared_ptr<SugaredValue> ClassValue::call(
 
 std::shared_ptr<SugaredValue> ClassValue::attr(
     const SourceRange& loc,
-    Function& m,
+    GraphFunction& m,
     const std::string& field) {
   // Allow import_source.cpp to resolve calls to a submodule's
   // hooks. Edge case because normally you wouldn't allow a module to
@@ -681,7 +681,7 @@ std::shared_ptr<SugaredValue> ClassValue::attr(
 
 std::shared_ptr<SugaredValue> NamedTupleConstructor::call(
     const SourceRange& loc,
-    Function& m,
+    GraphFunction& m,
     at::ArrayRef<NamedValue> args,
     at::ArrayRef<NamedValue> kwargs,
     size_t n_binders) {
@@ -728,7 +728,7 @@ std::shared_ptr<BuiltinFunction> BuiltinFunction::tryCreate(
 
 std::shared_ptr<SugaredValue> SugaredEnumClass::attr(
     const SourceRange& loc,
-    Function& m,
+    GraphFunction& m,
     const std::string& field) {
   const auto& names_values = enum_type_->enumNamesValues();
   auto it = std::find_if(
@@ -745,7 +745,9 @@ std::shared_ptr<SugaredValue> SugaredEnumClass::attr(
       m.graph()->insertConstant(IValue(enum_holder), loc));
 }
 
-SugaredValuePtr SugaredEnumClass::iter(const SourceRange& loc, Function& m) {
+SugaredValuePtr SugaredEnumClass::iter(
+    const SourceRange& loc,
+    GraphFunction& m) {
   const auto& names_values = enum_type_->enumNamesValues();
   auto enum_value_ivalues = c10::impl::GenericList(enum_type_);
   enum_value_ivalues.reserve(names_values.size());

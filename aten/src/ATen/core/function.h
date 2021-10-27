@@ -56,8 +56,6 @@ struct TORCH_API Function {
   // if this isn't yet defined, run its method_creator function
   virtual void ensure_defined() = 0;
 
-  virtual std::shared_ptr<Graph> graph() const = 0;
-
   virtual std::shared_ptr<Graph> optimized_graph() const = 0;
 
   virtual void clear_execution_info() = 0;
