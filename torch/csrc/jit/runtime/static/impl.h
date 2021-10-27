@@ -465,6 +465,11 @@ class TORCH_API ProcessedNode {
     return outputs_[i];
   }
 
+  const IValue& Output(size_t i) const {
+    DCHECK(i < outputs_size_);
+    return outputs_[i];
+  }
+
   void set_input(size_t index, const IValue* ival) {
     inputs_[index] = ival;
   }
