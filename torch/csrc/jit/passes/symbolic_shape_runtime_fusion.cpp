@@ -380,6 +380,7 @@ RegisterOperators reg_guard({
                       return;
                     }
                   } else {
+                    std::cout << " WRITING " << tensor_dim << " TO INDEX " << flattened_sym_index;
                     // not seen, write value
                     flattened_symbolic_dims[flattened_sym_index] = tensor_dim;
                   }
