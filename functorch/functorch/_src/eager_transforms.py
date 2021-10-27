@@ -30,7 +30,7 @@ def _create_differentiable(inps, level=None):
     def create_differentiable(x):
         if isinstance(x, torch.Tensor):
             return x.requires_grad_()
-        raise ValueError(f'Thing passed to transform API must be Tensor,'
+        raise ValueError(f'Thing passed to transform API must be Tensor, '
                          f'got {type(x)}')
     return tree_map(create_differentiable, inps)
 
@@ -296,12 +296,12 @@ def grad_and_value(f, argnums=0, has_aux=False):
                     output, aux = output
 
                 if not isinstance(output, torch.Tensor):
-                    raise RuntimeError('grad_and_value(f)(*args): Expected f(*args)'
+                    raise RuntimeError('grad_and_value(f)(*args): Expected f(*args) '
                                        f'to return a Tensor, got {type(output)}')
                 if output.dim() != 0:
-                    raise RuntimeError('grad_and_value(f)(*args): Expected f(*args)'
+                    raise RuntimeError('grad_and_value(f)(*args): Expected f(*args) '
                                        'to return a scalar Tensor, got tensor with '
-                                       f'{output.dim()} dims. Maybe you wanted to'
+                                       f'{output.dim()} dims. Maybe you wanted to '
                                        'use the vjp or jacrev APIs instead?')
 
                 flat_diff_args, spec = tree_flatten(diff_args)
