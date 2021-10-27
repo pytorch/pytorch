@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Owner(s): ["module: linear algebra"]
+
 import torch
 import numpy as np
 
@@ -1659,14 +1661,14 @@ class TestLinalg(TestCase):
         # cond expects the input to be at least 2-dimensional
         a = torch.ones(3, dtype=dtype, device=device)
         for p in norm_types:
-            with self.assertRaisesRegex(RuntimeError, r'supports matrices or batches of matrices'):
+            with self.assertRaisesRegex(RuntimeError, r'at least 2 dimensions'):
                 torch.linalg.cond(a, p)
 
         # for some norm types cond expects the input to be square
         a = torch.ones(3, 2, dtype=dtype, device=device)
         norm_types = [1, -1, inf, -inf, 'fro', 'nuc']
         for p in norm_types:
-            with self.assertRaisesRegex(RuntimeError, r'supports square matrices or batches of square matrices'):
+            with self.assertRaisesRegex(RuntimeError, r'must be batches of square matrices'):
                 torch.linalg.cond(a, p)
 
         # if non-empty out tensor with wrong shape is passed a warning is given
@@ -1712,7 +1714,7 @@ class TestLinalg(TestCase):
         # check invalid norm type
         a = torch.ones(3, 3, dtype=dtype, device=device)
         for p in ['wrong_norm', 5]:
-            with self.assertRaisesRegex(RuntimeError, f"linalg_cond got an invalid norm type: {p}"):
+            with self.assertRaisesRegex(RuntimeError, f"linalg.cond got an invalid norm type: {p}"):
                 torch.linalg.cond(a, p)
 
     # This test calls torch.linalg.norm and numpy.linalg.norm with illegal arguments
@@ -2907,13 +2909,19 @@ class TestLinalg(TestCase):
                     svd(a, out=(out_u, out_s, out_v))
 
             # if input contains NaN then an error is triggered for svd
+            error_msg = 'The algorithm failed to converge' \
+                        if (self.device_type == 'cpu' or TEST_WITH_ROCM) \
+                        else 'CUSOLVER_STATUS_EXECUTION_FAILED'
             a = torch.full((3, 3), float('nan'), dtype=dtype, device=device)
             a[0] = float('nan')
-            with self.assertRaisesRegex(RuntimeError, "The algorithm failed to converge"):
+            with self.assertRaisesRegex(RuntimeError, error_msg):
                 svd(a)
+            error_msg = r'\(Batch element 1\): The algorithm failed to converge' \
+                        if (self.device_type == 'cpu' or TEST_WITH_ROCM) \
+                        else 'CUSOLVER_STATUS_EXECUTION_FAILED'
             a = torch.randn(3, 33, 33, dtype=dtype, device=device)
             a[1, 0, 0] = float('nan')
-            with self.assertRaisesRegex(RuntimeError, r"\(Batch element 1\): The algorithm failed to converge"):
+            with self.assertRaisesRegex(RuntimeError, error_msg):
                 svd(a)
 
     @skipCUDAIfNoMagmaAndNoCusolver
@@ -4983,12 +4991,12 @@ class TestLinalg(TestCase):
         b = torch.randn(2, 1, dtype=dtype, device=device)
         out = torch.empty_like(b).to(torch.int)
         clone_a = torch.empty_like(a)
-        with self.assertRaisesRegex(RuntimeError, "but got result with dtype Int"):
+        with self.assertRaisesRegex(RuntimeError, "Expected out tensor to have dtype"):
             torch.triangular_solve(b, a, out=(out, clone_a))
 
         out = torch.empty_like(b)
         clone_a = clone_a.to(torch.int)
-        with self.assertRaisesRegex(RuntimeError, "but got clone_A with dtype Int"):
+        with self.assertRaisesRegex(RuntimeError, "Expected out tensor to have dtype"):
             torch.triangular_solve(b, a, out=(out, clone_a))
 
         # device should match
@@ -6635,7 +6643,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.complex64)
-    def test_matrix_exp_utils(self, device, dtype):
+    def test_linalg_matrix_exp_utils(self, device, dtype):
         # test linear combination
         def run_test(coeff_shape, data_shape):
             coeffs = torch.rand(*coeff_shape, device=device, dtype=torch.float)
@@ -6671,30 +6679,31 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
-    def test_matrix_exp_boundary_cases(self, device, dtype):
+    def test_linalg_matrix_exp_boundary_cases(self, device, dtype):
+        expm = torch.linalg.matrix_exp
 
-        with self.assertRaisesRegex(RuntimeError, "expected a tensor of floating or complex types"):
-            torch.randn(3, 3).type(torch.int).matrix_exp()
+        with self.assertRaisesRegex(RuntimeError, "Expected a floating point or complex tensor"):
+            expm(torch.randn(3, 3).type(torch.int))
 
-        with self.assertRaisesRegex(RuntimeError, "with dim at least 2"):
-            torch.randn(3).matrix_exp()
+        with self.assertRaisesRegex(RuntimeError, "must have at least 2 dimensions"):
+            expm(torch.randn(3))
 
-        with self.assertRaisesRegex(RuntimeError, "expected a tensor of squared matrices"):
-            torch.randn(3, 2, 1).matrix_exp()
+        with self.assertRaisesRegex(RuntimeError, "must be batches of square matrices"):
+            expm(torch.randn(3, 2, 1))
 
         # check 1x1 matrices
         x = torch.randn(3, 3, 1, 1)
-        mexp = x.matrix_exp()
-        self.assertEqual(mexp, x.exp())
+        self.assertEqual(expm(x), x.exp())
 
     @slowTest
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
-    def test_matrix_exp_analytic(self, device, dtype):
+    def test_linalg_matrix_exp_analytic(self, device, dtype):
+        expm = torch.linalg.matrix_exp
         # check zero matrix
         x = torch.zeros(20, 20, dtype=dtype, device=device)
-        self.assertTrue((x.matrix_exp() == torch.eye(20, 20, dtype=dtype, device=device)).all().item())
+        self.assertTrue((expm(x) == torch.eye(20, 20, dtype=dtype, device=device)).all().item())
 
         def normalize_to_1_operator_norm(sample, desired_norm):
             sample_norm, _ = sample.abs().sum(-2).max(-1)
@@ -6743,7 +6752,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             x_norm, _ = x.abs().sum(-2).max(-1)
 
             # test simple analytic whatever norm generated
-            mexp = x.matrix_exp()
+            mexp = expm(x)
             mexp_analytic = np.matmul(
                 q_,
                 np.matmul(
@@ -6763,7 +6772,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             for sample_norm in sample_norms:
                 x_normalized = normalize_to_1_operator_norm(x, sample_norm)
 
-                mexp = x_normalized.matrix_exp()
+                mexp = expm(x_normalized)
                 mexp_analytic = np.matmul(
                     q_,
                     np.matmul(
@@ -6800,7 +6809,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double)
-    def test_matrix_exp_batch(self, device, dtype):
+    def test_linalg_matrix_exp_batch(self, device, dtype):
 
         def run_test(*n):
             tensors_batch = torch.zeros(n, dtype=dtype, device=device)
@@ -6814,8 +6823,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             for i in range(num_matrices):
                 tensors_batch[i, ...] = tensors_list[i]
 
-            tensors_exp_map = (x.matrix_exp() for x in tensors_list)
-            tensors_exp_batch = tensors_batch.matrix_exp()
+            tensors_exp_map = (torch.linalg.matrix_exp(x) for x in tensors_list)
+            tensors_exp_batch = torch.linalg.matrix_exp(tensors_batch)
 
             for i, tensor_exp in enumerate(tensors_exp_map):
                 self.assertEqual(tensors_exp_batch[i, ...], tensor_exp)
@@ -6835,7 +6844,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
-    def test_matrix_exp_compare_with_taylor(self, device, dtype):
+    def test_linalg_matrix_exp_compare_with_taylor(self, device, dtype):
 
         def normalize_to_1_operator_norm(sample, desired_norm):
             sample_norm, _ = sample.abs().sum(-2).max(-1)
@@ -6908,7 +6917,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 x = gen_good_cond_number_matrices(*n)
                 x = normalize_to_1_operator_norm(x, sample_norm)
 
-                mexp = x.matrix_exp()
+                mexp = torch.linalg.matrix_exp(x)
                 mexp_taylor = scale_square(x, deg)
 
                 self.assertEqual(mexp, mexp_taylor, atol=1e-2, rtol=0.0)

@@ -7,7 +7,7 @@ from torchvision.models.googlenet import googlenet
 from torchvision.models.mnasnet import mnasnet1_0
 from torchvision.models.mobilenet import mobilenet_v2
 from torchvision.models import shufflenet_v2_x1_0
-from torchvision.models.segmentation.segmentation import fcn_resnet101, deeplabv3_resnet101
+from torchvision.models.segmentation import fcn_resnet101, deeplabv3_resnet101
 from torchvision.models.video import r3d_18, mc3_18, r2plus1d_18
 
 from model_defs.mnist import MNIST
