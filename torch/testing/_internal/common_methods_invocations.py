@@ -5753,13 +5753,11 @@ def sample_inputs_atleast1d2d3d(op_info, device, dtype, requires_grad, **kwargs)
     shapes = ((S, S, S, S), (S, S, S), (S, S), (S, ), (),)
     make_tensor_partial = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
     for shape in shapes:
-        input_list.append(make_tensor_partial(shape))
-    
+        input_list.append(make_tensor_partial(shape))    
     samples = [
         SampleInput(input_list, ),
         SampleInput(torch.tensor(0, dtype=dtype, device=device, requires_grad=requires_grad),),
     ]
-    
     return samples
 
 def sample_inputs_select(op_info, device, dtype, requires_grad, **kwargs):
