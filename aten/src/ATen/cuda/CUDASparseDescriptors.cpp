@@ -93,7 +93,8 @@ CuSparseDnMatDescriptor::CuSparseDnMatDescriptor(const Tensor& input) {
 
 CuSparseDnVecDescriptor::CuSparseDnVecDescriptor(const Tensor& input) {
   // cuSPARSE doesn't support batched vectors
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.dim() == 1);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      input.dim() == 1 || (input.dim() == 2 && input.size(-1) == 1));
 
   // cuSPARSE doesn't support non-contiguous vectors
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.is_contiguous());
