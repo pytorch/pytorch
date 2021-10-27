@@ -441,4 +441,6 @@ inline class_<CurClass> Library::class_(const std::string& className) {
   return torch::class_<CurClass>(*ns_, className);
 }
 
-}
+const std::unordered_set<std::string> getAllCustomClassesNames();
+
+} // namespace torch
