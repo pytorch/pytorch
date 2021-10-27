@@ -22,10 +22,8 @@ runner_types:
     os: linux
     max_available: 500
     disk_size: 150
-  # TODO: Remove linux.8xlarge.nvidia.gpu after November 03, 2021
-  #       Ensure no queued jobs depend on this node type before removing
   linux.8xlarge.nvidia.gpu:
-    instance_type: g3.4xlarge
+    instance_type: g3.8xlarge
     os: linux
     max_available: 125
     disk_size: 150
