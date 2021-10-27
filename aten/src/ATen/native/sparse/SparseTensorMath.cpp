@@ -1207,6 +1207,9 @@ Tensor _sparse_sum(const SparseTensor& input, IntArrayRef dims_to_sum, c10::opti
   }
   else {
     new_values = values.clone(at::MemoryFormat::Contiguous);
+    if (!dtype.has_value() && isIntegralType(input.scalar_type(), /*includeBool=*/false)) {
+        new_values = new_values.to(ScalarType::Long);
+    }
   }
 
   if (sum_all_sparse_dim) {
@@ -1237,11 +1240,8 @@ Tensor _sparse_sum(const SparseTensor& input, IntArrayRef dims_to_sum, c10::opti
     for (auto d : dims_to_keep_v) new_sizes.emplace_back(sizes[d]);
     if (sum_all_sparse_dim) new_sizes.emplace(new_sizes.begin(), 1);
 
-    if (!dtype.has_value() && isIntegralType(input.scalar_type(), /*includeBool=*/false)) {
-      new_values = new_values.to(ScalarType::Long);
-    }
     // use coalesce() to do sum reduction
-    SparseTensor new_sparse = at::_sparse_coo_tensor_with_dims_and_tensors(new_sparse_dim, new_dense_dim, new_sizes, new_indices, new_values, input.options().dtype(new_values.dtype()));
+    SparseTensor new_sparse = at::_sparse_coo_tensor_with_dims_and_tensors(new_sparse_dim, new_dense_dim, new_sizes, new_indices, new_values, new_values.options().layout(kSparse));
     new_sparse = new_sparse.coalesce();
     return new_sparse;
   }
