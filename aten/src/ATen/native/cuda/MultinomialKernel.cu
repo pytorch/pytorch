@@ -75,7 +75,7 @@ void renormRows(Tensor& t) {
 
   int warp_size = at::cuda::warp_size();
   dim3 grid(rows < numSM * 4 ? rows : numSM * 4);
-  dim3 block(std::min(maxThreads, warp_size * div_up(cols, warp_size)));
+  dim3 block(std::min(maxThreads, warp_size * ceil_div(cols,  (int64_t)warp_size)));
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(t.scalar_type(), "renormRows_cuda", [&] {
     renormRowsL1<scalar_t>
