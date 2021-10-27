@@ -365,7 +365,9 @@ RegisterOperators reg_guard({
                 } else {
                   // flattened sym indices start at -1,
                   // so -1 -> index 0, -2 -> index 1
+                  std::cout << " dim value: " << dim_value << "\n";
                   const auto flattened_sym_index = (-dim_value) - 1;
+                  std::cout << " flattened sym index << " << flattened_sym_index << " \n";
                   const auto flattened_sym_value =
                       flattened_symbolic_dims[flattened_sym_index];
                   // sym symbol already seen, check value
@@ -380,7 +382,7 @@ RegisterOperators reg_guard({
                       return;
                     }
                   } else {
-                    std::cout << " WRITING " << tensor_dim << " TO INDEX " << flattened_sym_index;
+                    std::cout << " WRITING " << tensor_dim << " TO INDEX " << flattened_sym_index << "\n";
                     // not seen, write value
                     flattened_symbolic_dims[flattened_sym_index] = tensor_dim;
                   }
