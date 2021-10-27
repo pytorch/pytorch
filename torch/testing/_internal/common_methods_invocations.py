@@ -2857,6 +2857,21 @@ def sample_inputs_max_min_binary(op_info, device, dtype, requires_grad, **kwargs
                   for input_tensor, other_tensor in args_for_binary_op)
     return inputs
 
+def sample_inputs_logical(op_info, device, dtype, requires_grad, **kwargs):
+    inputs = []
+    args_for_binary_op = (
+        ((S, ), (S, ),),
+        ((), (),),
+    )
+    inputs = list((SampleInput(make_tensor(input_tensor, device, dtype,
+                                           low=None, high=None,
+                                           requires_grad=requires_grad),
+                               args=(make_tensor(other_tensor, device, dtype,
+                                                 low=None, high=None,
+                                                 requires_grad=requires_grad),),))
+                  for input_tensor, other_tensor in args_for_binary_op)
+    return inputs
+
 def sample_inputs_adaptive_avg_pool2d(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -8081,6 +8096,24 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager',
                                     dtypes=all_types_and_complex_and(torch.half, torch.bfloat16)),
                    )),
+    BinaryUfuncInfo('logical_and',
+                   ref=np.logical_and,
+                   sample_inputs_func=sample_inputs_logical,
+                   dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                   safe_casts_outputs=True,
+                   supports_autograd=False,),
+    BinaryUfuncInfo('logical_or',
+                   ref=np.logical_or,
+                   sample_inputs_func=sample_inputs_logical,
+                   dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                   safe_casts_outputs=True,
+                   supports_autograd=False,),
+    BinaryUfuncInfo('logical_xor',
+                   ref=np.logical_xor,
+                   sample_inputs_func=sample_inputs_logical,
+                   dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                   safe_casts_outputs=True,
+                   supports_autograd=False,),
     OpInfo('lt',
            aliases=('less',),
            dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16),
