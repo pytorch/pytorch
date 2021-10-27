@@ -87,7 +87,7 @@ def allow_listed(schema):
 dont_parse_list = [
     ("_TorchScriptTesting.*", datetime.date(2099, 9, 17)),
     ("test_backend", datetime.date(2099, 9, 17)),
-    ("dist_c10d", datetime.date(2021, 1, 30)),
+    ("dist_c10d", datetime.date(2099, 9, 17)),
 ]
 
 
