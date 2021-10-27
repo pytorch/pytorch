@@ -659,6 +659,7 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::TupleConstruct:
     case prim::DictConstruct:
     case prim::ListConstruct:
+    case aten::split:
       return analyzeContainerConstruct(node);
     case prim::TupleUnpack:
     case prim::TupleIndex:
@@ -1161,7 +1162,7 @@ void AliasDb::analyzeContainerConstruct(Node* node) {
   TORCH_INTERNAL_ASSERT(
       node->kind() == prim::ListConstruct ||
       node->kind() == prim::DictConstruct ||
-      node->kind() == prim::TupleConstruct);
+      node->kind() == prim::TupleConstruct || node->kind() == aten::split);
 
   // tuples which contain immutable types are immutable
   if (!isMutableTypeInternal(node->output())) {
