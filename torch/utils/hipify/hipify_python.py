@@ -679,7 +679,16 @@ CAFFE2_TRIE = Trie()
 CAFFE2_MAP = {}
 PYTORCH_TRIE = Trie()
 PYTORCH_MAP: Dict[str, object] = {}
+
+# In PyTorch, we map cuBLAS->rocBLAS and cuSPARSE->hipSPARSE. Note the prefix, roc versus hip.
+# The 'hip' APIs offer a more direct CUDA-friendly mapping, but calling rocBLAS directly has better performance.
+# Unfortunately, the roc* types and hip* types differ, i.e., rocblas_float_complex versus hipComplex.
+# In the case of SPARSE, we must use the hip types for complex instead of the roc types,
+# but the pytorch mappings assume roc. Therefore, we create a new SPARSE mapping that has a higher priority.
+# Its mappings will trigger first, and only when a miss occurs will the lower-priority pytorch mapping take place.
+# When a file contains "sparse" in the filename, a mapping marked with API_SPARSE is preferred over other choices.
 PYTORCH_SPARSE_MAP = {}
+
 for mapping in CUDA_TO_HIP_MAPPINGS:
     assert isinstance(mapping, Mapping)
     for src, value in mapping.items():
@@ -689,7 +698,7 @@ for mapping in CUDA_TO_HIP_MAPPINGS:
             PYTORCH_TRIE.add(src)
             # if src is already in PYTORCH_MAP and dst belongs to API_SPARSE
             # do not overwrite PYTORCH_MAP, store dst separately
-            if constants.API_SPARSE in meta_data and PYTORCH_MAP.get(src, False):
+            if constants.API_SPARSE in meta_data and PYTORCH_MAP.get(src, ""):
                 PYTORCH_SPARSE_MAP[src] = dst
             else:
                 PYTORCH_MAP[src] = dst
@@ -740,12 +749,14 @@ def preprocessor(
     def pt_repl(m):
         return PYTORCH_MAP[m.group(0)]
 
+    def pt_sparse_repl(m):
+        # checks SPARSE map first, and if a miss occurs, falls back to pytorch mappings.
+        return PYTORCH_SPARSE_MAP.get(m.group(0), pt_repl(m))
+
     if is_pytorch_extension:
         output_source = RE_PYTORCH_PREPROCESSOR.sub(pt_repl, output_source)
     else:
         if is_cusparse_file(filepath):
-            def pt_sparse_repl(m):
-                return PYTORCH_SPARSE_MAP.get(m.group(0), pt_repl(m))
             output_source = RE_PYTORCH_PREPROCESSOR.sub(pt_sparse_repl, output_source)
         elif is_pytorch_file(filepath):
             output_source = RE_PYTORCH_PREPROCESSOR.sub(pt_repl, output_source)
