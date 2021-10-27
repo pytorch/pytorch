@@ -201,6 +201,20 @@ class TestCommon(TestCase):
         for sample_input in sample_inputs:
             self.compare_with_reference(op, op.ref, sample_input)
 
+    # @ops((op for op in op_db if op.error_and_warning_inputs_func is not None), dtypes=OpDTypes.none)
+    @onlyOnCPUAndCUDA
+    @ops([op for op in op_db if op.error_and_warning_inputs_func is not None], dtypes=OpDTypes.none)
+    def test_errors_and_warnings(self, device, op):
+        negative_inputs = op.error_and_warning_inputs(device)
+        for ni in negative_inputs:
+            si = ni.sample_input
+            if ni.is_warning:
+                with self.assertWarnsOnceRegex(ni.error_type, ni.error_regex):
+                    op(si.input, *si.args, **si.kwargs)
+            else:  # it's an error
+                with self.assertRaisesRegex(ni.error_type, ni.error_regex):
+                    op(si.input, *si.args, **si.kwargs)
+
     # Validates ops implement the correct out= behavior
     # See https://github.com/pytorch/pytorch/wiki/Developer-FAQ#how-does-out-work-in-pytorch
     #   for a description of the correct behavior

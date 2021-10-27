@@ -183,6 +183,21 @@ class SampleInput(object):
         return (sample_np_input, np_args, np_kwargs)
 
 
+class ErrorOrWarningInput(object):
+    """
+    A SampleInput that will cause the operation to error or throw a warning. Optionally 
+    validates the error/warning's type and contents.
+    """
+
+    __slots__ = ['sample_input', 'is_warning', 'error_type', 'error_regex']
+
+    def __init__(self, sample_input, *, is_warning=False, error_type=None, error_regex=None):
+        self.sample_input = sample_input
+        self.is_warning = is_warning
+        self.error_type = error_type
+        self.error_regex = error_regex
+
+
 class AliasInfo(object):
     """Class holds alias information. For example, torch.abs ->
     torch.absolute, torch.Tensor.absolute, torch.Tensor.absolute_
@@ -462,16 +477,19 @@ class OpInfo(object):
                                             # if None, then the OpInfo specifies no method variant
 
                  # the following metadata are test directives for skipping or
-                 # modifying tests and a pointer to the op's sample inputs function
-                 # this function lets the OpInfo generate valid inputs
+                 #   modifying tests
                  skips=tuple(),  # information about which tests to skip
                  decorators=tuple(),  # decorators to apply to generated tests
+                 
+                 # the following are pointers to functions to generate certain classes
+                 #   of inputs
                  sample_inputs_func=None,  # function to generate sample inputs
+                 error_and_warning_inputs_func=None,  # function to generate inputs that will throw errors or warnings
 
                  # the following metadata relates to dtype support and is tested for correctness in test_ops.py
                  dtypes=floating_types(),  # dtypes this function is expected to work with
                  # the following dtypesIf... options override the dtypes value
-                 # on their respective device types
+                 #   on their respective device types
                  dtypesIfCPU=None,  # dtypes this function is expected to work with on CPU
                  dtypesIfCUDA=None,  # dtypes this function is expected to work with on CUDA
                  dtypesIfROCM=None,  # dtypes this function is expected to work with on ROCM
@@ -596,7 +614,9 @@ class OpInfo(object):
         self.safe_casts_outputs = safe_casts_outputs
 
         self.decorators = (*decorators, *skips)
+
         self.sample_inputs_func = sample_inputs_func
+        self.error_and_warning_inputs_func = error_and_warning_inputs_func
 
         self.assert_autodiffed = assert_autodiffed
         self.autodiff_fusible_nodes = autodiff_fusible_nodes if autodiff_fusible_nodes else []
@@ -739,6 +759,12 @@ class OpInfo(object):
             samples = tuple(samples_list)
 
         return samples
+
+    def error_and_warning_inputs(self, device, **kwargs):
+        """
+        Returns an iterable of ErrorOrWarningInputs.
+        """
+        return self.error_and_warning_inputs_func(self, device, **kwargs)
 
     def get_decorators(self, test_class, test_name, device, dtype):
         '''Returns the decorators targeting the given test.'''
@@ -4875,6 +4901,13 @@ def sample_inputs_prod(op_info, device, dtype, requires_grad):
 
     return list(sample_generator())
 
+def errors_and_warnings_neg(op_info, device, **kwargs):
+    si = SampleInput(torch.tensor((False, True), device=device))
+    msg = ("Negation, the `\\-` operator, on a bool tensor is not supported."
+               " If you are trying to invert a mask, use the `\\~` or"
+               " `logical_not\\(\\)` operator instead.")
+    return (ErrorOrWarningInput(si, error_type=RuntimeError, error_regex=msg),)
+
 def sample_inputs_nextafter(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
@@ -5909,6 +5942,14 @@ def sample_inputs_kthvalue(op_info, device, dtype, requires_grad, **kwargs):
     ]
 
     return [SampleInput(tensor, args=args) for tensor, args in test_cases]
+
+def errors_and_warnings_kthvalue(op_info, device, **kwargs):
+    # tests overlapping output fails
+    t = make_tensor(10, dtype=torch.float32, device=device)
+    indices = torch.empty((), device=device, dtype=torch.long)
+    si = SampleInput(t, args=(5,), kwargs={'out': (t, indices)})
+    return (ErrorOrWarningInput(si, error_type=RuntimeError, error_regex="unsupported operation"),)
+
 
 def sample_inputs_dropout(op_info, device, dtype, requires_grad, **kwargs):
     input = make_tensor((S,), device=device, dtype=dtype, requires_grad=requires_grad)
@@ -7780,7 +7821,8 @@ op_db: List[OpInfo] = [
            dtypesIfCPU=all_types_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.float16),
            supports_forward_ad=True,
-           sample_inputs_func=sample_inputs_kthvalue),
+           sample_inputs_func=sample_inputs_kthvalue,
+           error_and_warning_inputs_func=errors_and_warnings_kthvalue),
     OpInfo('le',
            aliases=('less_equal',),
            dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16),
@@ -8903,6 +8945,7 @@ op_db: List[OpInfo] = [
                    aliases=('negative', ),
                    ref=np.negative,
                    dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
+                   error_and_warning_inputs_func=errors_and_warnings_neg,
                    assert_autodiffed=True,),
     OpInfo('dist',
            op=torch.dist,
