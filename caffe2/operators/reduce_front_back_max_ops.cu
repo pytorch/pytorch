@@ -1,8 +1,9 @@
 #include <cub/block/block_reduce.cuh>
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/reduce_front_back_max_ops.h"
+#include "caffe2/utils/cub_namespace.cuh"
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 #include <cfloat>
 #endif
 

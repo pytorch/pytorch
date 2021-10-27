@@ -64,6 +64,7 @@ BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
       // We use conditional variable as a barrier to make sure each thread
       // performs required warmeup iterations before we start measuring
       for (const auto j : c10::irange(config.num_warmup_iters)) {
+        (void)j;
         runOnce(std::move(thread_inputs[thread_id][input_iters[thread_id]]));
         ++input_iters[thread_id];
       }
