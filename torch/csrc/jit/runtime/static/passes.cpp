@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
+#include <torch/csrc/jit/passes/variadic_ops.h>
 #include <torch/csrc/jit/runtime/graph_iterator.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
 
@@ -771,6 +772,21 @@ void RemoveImmutableInputDictLookups(
   }
   graph->setInsertPoint(graph->block());
   marker->destroy();
+}
+
+void UseVariadicGroupedAccessor(const std::shared_ptr<Graph>& graph) {
+  // Migration to v2 is still in progress. For now, SR will support
+  // both versions of this op.
+  UseVariadicOp(
+      graph,
+      c10::Symbol::fromQualString("grouped_accessor::grouped_accessor_op"),
+      c10::Symbol::fromQualString(
+          "static_runtime::variadic_grouped_accessor_op"));
+  UseVariadicOp(
+      graph,
+      c10::Symbol::fromQualString("grouped_accessor::grouped_accessor_op_v2"),
+      c10::Symbol::fromQualString(
+          "static_runtime::variadic_grouped_accessor_op_v2"));
 }
 
 } // namespace jit
