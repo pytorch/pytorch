@@ -304,9 +304,7 @@ class TestOperators(TestCase):
             for loop_out, batched_out in \
                     get_fallback_and_vmap_exhaustive(vjp_of_vjp, args_and_cotangents, {}):
                 self.assertEqual(loop_out, batched_out, atol=1e-4, rtol=1e-4)
-
-    @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
-    @skipOps('TestOperators', 'test_vmapvjp', vjp_fail.union({
+    vmapvjp_fail = vjp_fail.union({
         # All of the following are bugs and need to be fixed
         xfail('clamp', ''),
         xfail('diag_embed'),
@@ -360,7 +358,16 @@ class TestOperators(TestCase):
         xfail('nanmean'),
         xfail('block_diag'),
         xfail('nn.functional.dropout'),
-    }))
+        xfail('double'),
+        xfail('fft.fft2'),
+        xfail('fft.ifft2'),
+        xfail('fft.ihfft2'),
+        xfail('fft.ihfftn'),
+        xfail('fft.rfft2'),
+        xfail('_masked.prod'), # calls aten::item
+    })
+    @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @skipOps('TestOperators', 'test_vmapvjp', vmapvjp_fail)
     def test_vmapvjp(self, device, dtype, op):
         # These are too annoying to put into the list above
         if op.name in {'nn.functional.linear', 'nn.functional.conv2d'}:
@@ -382,7 +389,7 @@ class TestOperators(TestCase):
                 self.assertEqual(loop_out, batched_out, atol=1e-4, rtol=1e-4)
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
-    @skipOps('TestOperators', 'test_vmapvjp_has_batch_rule', {
+    @skipOps('TestOperators', 'test_vmapvjp_has_batch_rule', vmapvjp_fail.union({
         xfail('nn.functional.pad', 'constant'),
         xfail('view_as_complex'),
         xfail('__getitem__'),
@@ -493,7 +500,22 @@ class TestOperators(TestCase):
         xfail('block_diag'),
         xfail('nn.functional.dropout'),
         xfail('nn.functional.batch_norm'),
-    })
+        xfail('_masked.amax'),
+        xfail('_masked.amin'),
+        xfail('_masked.sum'),
+        xfail('_masked.prod'),
+        xfail('cholesky_solve'),
+        xfail('double'),
+        xfail('fft.fft2'),
+        xfail('fft.ifft2'),
+        xfail('fft.ihfft2'),
+        xfail('fft.ihfftn'),
+        xfail('fft.rfft2'),
+        xfail('nn.functional.adaptive_avg_pool1d'),
+        xfail('nn.functional.adaptive_avg_pool3d'),
+        xfail('nn.functional.avg_pool3d'),
+        xfail('nn.functional.embedding'),
+    }))
     def test_vmapvjp_has_batch_rule(self, device, dtype, op):
         # These are too annoying to put into the list above
         if op.name in {'nn.functional.linear', 'nn.functional.conv2d'}:
@@ -522,6 +544,8 @@ class TestOperators(TestCase):
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vjpvmap', vjp_fail.union({
+        # fallback path doesn't work
+        xfail('H'),
         # All of the following are bugs and need to be fixed
         xfail('__getitem__'),
         xfail('clamp', ''),
@@ -543,6 +567,7 @@ class TestOperators(TestCase):
         xfail('lu_unpack'),
         xfail('matrix_exp'),
         xfail('view_as_complex'),
+        xfail('double'),
     }))
     def test_vjpvmap(self, device, dtype, op):
         # NB: there is no vjpvmap_has_batch_rule test because that is almost
