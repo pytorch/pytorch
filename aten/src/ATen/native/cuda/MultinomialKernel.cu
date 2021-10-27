@@ -336,7 +336,7 @@ void multinomial_with_replacement_kernel_impl(
     int maxShared = props->sharedMemPerBlock;
 
     int warp_size = at::cuda::warp_size();
-    int requiredWarps = at::cuda::ATenCeilDiv(numCategories, warp_size);
+    int requiredWarps = at::ceil_div(numCategories, warp_size);
     int requiredThreads = std::min(maxThreads, requiredWarps * warp_size);
     int requiredShared = requiredThreads * sizeof(accscalar_t);
 
