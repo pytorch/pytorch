@@ -3143,16 +3143,15 @@ class TestQuantizeFx(QuantizationTestCase):
         name_list = []
         for name, mod in prepared.named_modules():
             if isinstance(mod, torch.ao.quantization.observer.MinMaxObserver):
-                assert "mods" in name
                 name_list.append(name)
-        expected_name_list = ['mods1_0_input_activation_post_process_0',
-                              'mods1_0_w_activation_post_process_0',
-                              'mods1_0_output_activation_post_process_0',
-                              'mods1_1_w_activation_post_process_0',
-                              'mods1_1_output_activation_post_process_0',
-                              'mods2_w_activation_post_process_0',
-                              'mods2_output_activation_post_process_0',
-                              'mods3_output_activation_post_process_0']
+        expected_name_list = ['activation_post_process_0',
+                              'activation_post_process_1',
+                              'activation_post_process_2',
+                              'activation_post_process_3',
+                              'activation_post_process_4',
+                              'activation_post_process_6',
+                              'activation_post_process_7',
+                              'activation_post_process_10']
         assert name_list == expected_name_list
 
     def test_linear_lowering(self):
@@ -3183,6 +3182,100 @@ class TestQuantizeFx(QuantizationTestCase):
         # checking result match
         self.assertEqual(out_ref, out)
 
+    def test_convert_qconfig_dict(self):
+        class Linear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.ones(5, 5)
+                self.b = torch.zeros(5)
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.w, self.b)
+
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mods1 = torch.nn.Sequential(
+                    Linear(),
+                    Linear()
+                )
+                self.mods3 = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                x = self.mods1(x)
+                x = torch.add(x, 4)
+                z = torch.mul(x, 5)
+                x = self.mods3(z)
+                return x
+
+        model = M().train()
+
+        for check in ["module_name", "object_type"]:
+            qconfig_dict = {"": None,
+                            "object_type": [
+                                (nn.functional.linear, get_default_qat_qconfig("fbgemm")),
+                                (torch.add, get_default_qat_qconfig("fbgemm")),
+                                (nn.Linear, get_default_qat_qconfig("fbgemm")),
+                            ],
+                            }
+            prepared = prepare_qat_fx(model, qconfig_dict)
+            prepared(torch.rand(5, 5))
+            if check == "module_name":
+                convert_qconfig_dict = {"": None,
+                                        "object_type": [
+                                            (nn.functional.linear, get_default_qat_qconfig("fbgemm")),
+                                            (torch.add, get_default_qat_qconfig("fbgemm")),
+                                            (nn.Linear, get_default_qat_qconfig("fbgemm")),
+                                        ],
+                                        "module_name": [("mods1.0", None)]}
+
+                node_occurrence = {
+                    ns.call_function(torch.quantize_per_tensor): 2,
+                    ns.call_function(torch.nn.functional.linear): 1,
+                    ns.call_function(torch.ops.quantized.linear): 1,
+                    ns.call_function(torch.ops.quantized.add): 1,
+                    ns.call_method("dequantize"): 2
+                }
+                order_check = [
+                    ns.call_function(torch.nn.functional.linear),
+                    ns.call_function(torch.quantize_per_tensor),
+                    ns.call_function(torch.ops.quantized.linear),
+                    ns.call_function(torch.ops.quantized.add),
+                    ns.call_method("dequantize"),
+                    ns.call_function(torch.quantize_per_tensor),
+                    ns.call_module(nnq.Linear),
+                    ns.call_method("dequantize"),
+                ]
+            elif check == "object_type":
+                convert_qconfig_dict = {"": None,
+                                        "object_type": [
+                                            (nn.functional.linear, get_default_qat_qconfig("fbgemm")),
+                                            (torch.add, get_default_qat_qconfig("fbgemm")),
+                                            (nn.Linear, None),
+                                        ]}
+
+                node_occurrence = {
+                    ns.call_function(torch.quantize_per_tensor): 1,
+                    ns.call_function(torch.ops.quantized.linear): 2,
+                    ns.call_function(torch.ops.quantized.add): 1,
+                    ns.call_method("dequantize"): 1
+                }
+                order_check = [
+                    ns.call_function(torch.quantize_per_tensor),
+                    ns.call_function(torch.ops.quantized.linear),
+                    ns.call_function(torch.ops.quantized.linear),
+                    ns.call_function(torch.ops.quantized.add),
+                    ns.call_method("dequantize"),
+                    ns.call_module(nn.Linear),
+                ]
+
+            converted = convert_fx(prepared, qconfig_dict=convert_qconfig_dict)
+            converted(torch.rand(5, 5))
+            self.checkGraphModuleNodes(
+                converted,
+                expected_node_occurrence=node_occurrence,
+                expected_node_list=order_check)
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
@@ -5212,6 +5305,42 @@ class TestQuantizeFxOps(QuantizationTestCase):
         m(data)
         # make sure everything runs
 
+    def test_ref_pattern_multi_use(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 5)
+                self.linear1 = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                y = self.linear(x)
+                z = self.linear1(x)
+                a = torch.mul(z, 5)
+                b = torch.add(z, 5)
+                return (y, a, b)
+
+        m = M().eval()
+        qconfig_dict = {
+            "": None,
+            "object_type": [
+                (torch.nn.Linear, get_default_qconfig("fbgemm")),
+                (torch.nn.ReLU, get_default_qconfig("fbgemm")),
+            ],
+        }
+        m = prepare_fx(m, qconfig_dict)
+        m = convert_fx(m)
+        expected_occurrence = {
+            ns.call_function(torch.quantize_per_tensor): 1,
+            ns.call_module(nnq.Linear): 2,
+            ns.call_method("dequantize"): 2,
+            ns.call_function(torch.add): 1,
+            ns.call_function(torch.mul): 1,
+        }
+        self.checkGraphModuleNodes(
+            m,
+            expected_node_occurrence=expected_occurrence)
+
+
 class TestQuantizeFxOpsNew(QuantizationTestCase):
     def test_ops(self):
         class M(torch.nn.Module):
@@ -5252,7 +5381,7 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
             ),
             weight=torch.ao.quantization.default_weight_observer
         )
-        self.backend_config_dict = get_tensorrt_backend_config_dict()
+        self.trt_backend_config_dict = get_tensorrt_backend_config_dict()
 
     def test_conv(self):
         class Conv2d(torch.nn.Module):
@@ -5267,7 +5396,7 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
         conv2d_module_args = (3, 3, 3)
 
         m = Conv2d(*conv2d_module_args).eval()
-        prepared = prepare_fx(m, {"": self.qconfig}, backend_config_dict=self.backend_config_dict)
+        prepared = prepare_fx(m, {"": self.qconfig}, backend_config_dict=self.trt_backend_config_dict)
         # calibration
         prepared(conv2d_input)
         quantized = _convert_fx_do_not_use(prepared, is_reference=True)
@@ -5293,7 +5422,7 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
         linear_module_input = torch.rand(8, 5)
 
         m = LinearModule().eval()
-        prepared = prepare_fx(m, {"": self.qconfig}, backend_config_dict=self.backend_config_dict)
+        prepared = prepare_fx(m, {"": self.qconfig}, backend_config_dict=self.trt_backend_config_dict)
         # calibration
         prepared(linear_module_input)
         quantized = _convert_fx_do_not_use(prepared, is_reference=True)
@@ -5311,6 +5440,34 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
               (10, *linear_module_input.shape[1:]))])
         # make sure it runs
         trt_mod(linear_module_input.cuda())
+
+    def test_unsupported_qconfig(self):
+        """ Check that we won't quantize the model if the qconfig is not supported
+        """
+        class LinearModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 10)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        linear_module_input = torch.rand(8, 5)
+
+        m = LinearModule().eval()
+        trt_unsupported_qconfig = default_qconfig
+        prepared = prepare_fx(m, {"": trt_unsupported_qconfig}, backend_config_dict=self.trt_backend_config_dict)
+        # calibration
+        prepared(linear_module_input)
+        quantized = _convert_fx_do_not_use(prepared, is_reference=True)
+        node_occurrence = {
+            ns.call_function(torch.quantize_per_tensor): 0,
+            ns.call_method("dequantize"): 0,
+            ns.call_module(torch.nn.Linear): 1,
+            ns.call_module(torch.nn.quantized._reference.Linear): 0,
+        }
+        # check model is not quantized
+        self.checkGraphModuleNodes(quantized, expected_node_occurrence=node_occurrence)
 
 class TestQuantizeFxModels(QuantizationTestCase):
     @skipIfNoFBGEMM

@@ -120,17 +120,13 @@ compute_input_size_(const std::vector<c10::IValue>& inputs) {
 OperatorBase::OperatorBase(
     const c10::FunctionSchema& fn_schema,
     std::vector<c10::IValue> inputs,
-    const c10::List<at::Tensor> &outputs)
+    std::vector<caffe2::Tensor> outputs)
     // NOLINTNEXTLINE(performance-move-const-arg)
     : fn_schema_(make_unique<c10::FunctionSchema>(std::move(fn_schema))),
       newstyle_inputs_(std::move(inputs)),
+      output_tensors_(std::move(outputs)),
       input_size_(compute_input_size_(newstyle_inputs_)) {
   input_tensors_.resize(input_size_);
-
-  output_tensors_.reserve(outputs.size());
-  for (auto i : c10::irange(outputs.size())) {
-    output_tensors_.emplace_back(outputs.extract(i));
-  }
 }
 #endif
 
