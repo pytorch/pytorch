@@ -19,7 +19,6 @@
 #include "lazy_tensor_core/csrc/ops/expand.h"
 #include "lazy_tensor_core/csrc/ops/flip.h"
 #include "lazy_tensor_core/csrc/ops/index_ops.h"
-#include "lazy_tensor_core/csrc/ops/index_select.h"
 #include "lazy_tensor_core/csrc/ops/nms.h"
 #include "lazy_tensor_core/csrc/ops/ops.h"
 #include "lazy_tensor_core/csrc/ops/permute.h"
@@ -235,15 +234,6 @@ void fill_(LazyTensor& input, const at::Scalar& value) {
   torch::lazy::Value constant = LazyGraphExecutor::Get()->GetIrValueForScalar(
       value, input.shape(), input.GetDevice());
   input.SetInPlaceIrValue(std::move(constant));
-}
-
-LazyTensor index_select(const LazyTensor& input, int64_t dim,
-                        const LazyTensor& index) {
-  torch::lazy::Value index_value = EnsureRank1(index.GetIrValue());
-  return input.CreateFrom(torch::lazy::MakeNode<ir::ops::IndexSelect>(
-      input.GetIrValue(),
-      Helpers::GetCanonicalDimensionIndex(dim, input.shape().get().rank()),
-      index_value));
 }
 
 LazyTensor lt(const LazyTensor& input, const at::Scalar& other) {

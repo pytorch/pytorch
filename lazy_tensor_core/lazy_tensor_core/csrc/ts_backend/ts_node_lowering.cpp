@@ -18,7 +18,6 @@
 #include "lazy_tensor_core/csrc/ops/device_data.h"
 #include "lazy_tensor_core/csrc/ops/expand.h"
 #include "lazy_tensor_core/csrc/ops/generic_slice.h"
-#include "lazy_tensor_core/csrc/ops/index_select.h"
 #include "lazy_tensor_core/csrc/ops/ltc_ops.h"
 #include "lazy_tensor_core/csrc/ops/permute.h"
 #include "lazy_tensor_core/csrc/ops/repeat.h"
@@ -83,10 +82,6 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
         const torch::lazy::Output& argument = node->operand(0);
         return lazy_tensors::Shape(ir::GetShapeFromTsOutput(argument).at_element_type(),
                                    expand->size());
-      }
-      case at::aten::index_select: {
-        return InferIndexSelect(torch::lazy::NodeCast<ir::ops::IndexSelect>(
-            node, ir::OpKind(at::aten::index_select)));
       }
       case at::aten::convolution_backward_overrideable: {
         return InferConvolutionBackwardOverrideable(
@@ -231,10 +226,6 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
       return LowerExpand(
           torch::lazy::NodeCast<ir::ops::Expand>(node, ir::OpKind(at::aten::expand)));
     }
-    if (node->op().op == at::aten::index_select) {
-      return LowerIndexSelect(torch::lazy::NodeCast<ir::ops::IndexSelect>(
-          node, ir::OpKind(at::aten::index_select)));
-    }
     if (node->op().op == at::aten::permute) {
       return LowerPermute(
           torch::lazy::NodeCast<ir::ops::Permute>(node, ir::OpKind(at::aten::permute)));
@@ -338,22 +329,6 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
                                      input_size, weight_size, padding,
                                      output_padding, stride, dilation, groups));
     }
-  }
-
-  static lazy_tensors::Shape InferIndexSelect(
-      const ir::ops::IndexSelect* node) {
-    const torch::lazy::Output& input = node->operand(0);
-    const torch::lazy::Output& index = node->operand(1);
-    const lazy_tensors::Shape& index_shape = ir::GetShapeFromTsOutput(index);
-    CHECK_EQ(index_shape.rank(), 1);
-    const lazy_tensors::Shape& input_shape = ir::GetShapeFromTsOutput(input);
-    const auto input_dimensions = input_shape.dimensions();
-    std::vector<int64_t> output_dimensions(input_dimensions.begin(),
-                                           input_dimensions.end());
-    CHECK_GE(node->dim(), 0);
-    CHECK_LT(node->dim(), input_shape.rank());
-    output_dimensions[node->dim()] = index_shape.dimensions(0);
-    return lazy_tensors::Shape(input_shape.at_element_type(), output_dimensions);
   }
 
   static lazy_tensors::Shape InferRepeat(const ir::ops::Repeat* repeat) {
@@ -626,14 +601,6 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
                            /*end=*/start + sizes[dim], /*step=*/1);
     }
     return {base};
-  }
-
-  TSOpVector LowerIndexSelect(const ir::ops::IndexSelect* node) {
-    std::vector<torch::jit::NamedValue> arguments;
-    arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
-    arguments.emplace_back(node->dim());
-    arguments.emplace_back(loctx()->GetOutputOp(node->operand(1)));
-    return LowerBuiltin(node, arguments);
   }
 
   TSOpVector LowerPermute(const ir::ops::Permute* node) {

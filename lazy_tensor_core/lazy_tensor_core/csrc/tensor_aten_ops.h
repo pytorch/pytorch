@@ -55,9 +55,6 @@ LazyTensor expand(const LazyTensor& input,
 // Fills the input with the given value.
 void fill_(LazyTensor& input, const at::Scalar& value);
 
-LazyTensor index_select(const LazyTensor& input, int64_t dim,
-                        const LazyTensor& index);
-
 LazyTensor lt(const LazyTensor& input, const at::Scalar& other);
 
 LazyTensor mul(

@@ -61,6 +61,26 @@ std::vector<c10::ScalarType> compute_dtype_embedding_dense_backward(const at::Te
   return {grad_output.scalar_type()};
 }
 
+std::vector<std::vector<int64_t>> compute_shape_index_select(const at::Tensor & self, int64_t dim,
+    const at::Tensor & index) {
+  // Based on definition of https://pytorch.org/docs/stable/generated/torch.index_select.html.
+  // Promote Rank 0 index tensor to a 1 * 1 tensor.
+  auto index_dim = index.dim() > 0 ? index.dim() : 1;
+  auto index_size = index.dim() > 0 ? index.size(0) : 1;
+  TORCH_CHECK(index_dim == 1);
+  TORCH_CHECK(dim >= 0 && dim < self.dim());
+
+  auto self_sizes = self.sizes();
+  std::vector<int64_t> output_sizes(self_sizes.begin(), self_sizes.end());
+  output_sizes[dim] = index_size;
+
+  return {output_sizes};
+}
+
+std::vector<c10::ScalarType> compute_dtype_index_select(const at::Tensor& self, int64_t dim, const at::Tensor& index) {
+  return {self.scalar_type()};
+}
+
 std::vector<std::vector<int64_t>> compute_shape_kl_div_backward(const at::Tensor& grad_output, const at::Tensor& self, const at::Tensor& target, int64_t reduction, bool log_target) {
   // Based on definition of aten/src/ATen/native/Loss.cpp::kl_div_backward_cpu.
   return {self.sizes().vec()};
