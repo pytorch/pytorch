@@ -177,20 +177,16 @@ class FullyShardedDataParallel(nn.Module):
             factor *= 2
         return float(factor)
 
-    def _offload_to_cpu(self, p, non_blocking=False):
+    def _offload_to_cpu(self, p):
         """
         Offloads parameter to CPU from self.compute_device. If the parameter is
-        already on CPU then this is a noop. Note that if non_blocking=True, user
-        is responsible for ensuring appropriate stream and device
-        synchronization.
+        already on CPU then this is a noop.
         """
-        # Offloads parameter to CPU from self.compute_device. If parameter is
-        # already on CPU this is a noop.
         cpu_device = torch.device("cpu")
         if p.device == cpu_device:
             return
         with torch.no_grad():
-            p.data = p.to(cpu_device, non_blocking=non_blocking)
+            p.data = p.to(cpu_device)
 
     def _cast_buffers(
         self, device: Optional[torch.device] = None, memo: Optional[Set] = None
@@ -402,6 +398,14 @@ class FullyShardedDataParallel(nn.Module):
         if self.cpu_offload.offload_params:
             assert p._local_shard.device == torch.device("cpu")  # type: ignore[attr-defined]
             p._local_shard.pin_memory()  # type: ignore[attr-defined]
+            # When offloading parameters, also move the grad shard to CPU during
+            # backward pass. In this case, it's important to pre-allocate the
+            # CPU grad shard in pinned memory so that we can do a non-blocking
+            # transfer.
+            p._cpu_grad = torch.zeros_like(
+                p.data,
+                device=torch.device("cpu")
+            ).pin_memory()
 
         # We also maintain a full-sized parameter of type self.compute_dtype.
         # We resize the storage to size 0 at init (here) and only materialize
@@ -682,11 +686,13 @@ class FullyShardedDataParallel(nn.Module):
                 # Note that similar to FairScale, we specify non_blocking=True
                 # and ensure the appropriate synchronization is done by waiting
                 # streams in _wait_for_post_backward.
-                self._offload_to_cpu(param.grad, non_blocking=True)
-                assert (
-                    param.device == torch.device("cpu") and
-                    param.grad.device == torch.device("cpu")
-                ), f"Unexpected param/grad devices: {param.device}, {param.grad.device}"
+                param._cpu_grad.copy_(param.grad.data, non_blocking=True)
+                # Don't let this memory get reused until after the transfer.
+                param.grad.data.record_stream(torch.cuda.current_stream())
+                # Point param.grad.data to CPU grad to offload it. Note that
+                # the transfer is async so it is not necessarily done until we
+                # explicitly synchronize in backward.
+                param.grad.data = param._cpu_grad
 
             # After _post_backward_hook returns, orig_grad_data will eventually
             # go out of scope, at which point it could otherwise be freed for
@@ -722,6 +728,11 @@ class FullyShardedDataParallel(nn.Module):
             self._assert_state(TrainingState_.BACKWARD_PRE)
 
         torch.cuda.current_stream().wait_stream(self._streams["post_backward"])
+        if self.cpu_offload.offload_params:
+            # Similar to FairScale, we need to wait for the non-blocking GPU ->
+            # CPU grad transfers to finish.
+            torch.cuda.current_stream().synchronize()
+
         # A backward pass is done, clean up below.
 
         def _remove_shard_bwd_hook(fsdp_module: FullyShardedDataParallel) -> None:
