@@ -6177,9 +6177,18 @@ def sample_inputs_gaussian_nll_loss(op_info, device, dtype, requires_grad, **kwa
         for s, r in _generate_sample_shape_reduction():
             for t_s, v_s in product(gen_shape(s), gen_shape(s)):
                 yield _make_tensor(s), _make_tensor(t_s), make_var(v_s), dict(reduction=r)
-                yield _make_tensor(s), _make_tensor(t_s), make_var(v_s), dict(full=True, reduction=r)
-                yield _make_tensor(s), _make_tensor(t_s), make_var(v_s), dict(eps=random.uniform(1e-6, 1e-3), reduction=r)
-                yield _make_tensor(s), _make_tensor(t_s), make_var(v_s), dict(full=True, eps=random.uniform(1e-6, 1e-3), reduction=r)
+                yield (
+                    _make_tensor(s), _make_tensor(t_s), make_var(v_s),
+                    dict(full=True, reduction=r)
+                )
+                yield (
+                    _make_tensor(s), _make_tensor(t_s), make_var(v_s),
+                    dict(eps=random.uniform(1e-6, 1e-3), reduction=r)
+                )
+                yield (
+                    _make_tensor(s), _make_tensor(t_s), make_var(v_s),
+                    dict(full=True, eps=random.uniform(1e-6, 1e-3), reduction=r)
+                )
 
     def gen_inputs():
         for input, target, var, kwargs in gen_shape_kwargs():
@@ -6204,7 +6213,7 @@ def sample_inputs_hinge_embedding_loss(op_info, device, dtype, requires_grad, **
 def sample_inputs_huber_loss(op_info, device, dtype, requires_grad, **kwargs):
     def gen_inputs():
         for input, target, d in _generate_sample_inputs_nn_loss(op_info, device, dtype, requires_grad, **kwargs):
-            d['delta'] = random.uniform(0.01, 9)
+            d['delta'] = random.uniform(1e-3, 9)
             yield SampleInput(input, args=(target, ), kwargs=d)
 
     return list(gen_inputs())
@@ -6216,8 +6225,16 @@ def sample_inputs_poisson_nll_loss(op_info, device, dtype, requires_grad, **kwar
         for s, r in _generate_sample_shape_reduction():
             for li in (True, False):
                 for f in (True, False):
-                    yield _make_tensor(s), _make_tensor(s), dict(log_input=li, full=f, reduction=r)
-                    yield _make_tensor(s), _make_tensor(s), dict(log_input=li, full=f, eps=random.uniform(1e-8, 1e-3), reduction=r)
+                    yield (
+                        _make_tensor(s), _make_tensor(s),
+                        dict(log_input=li, full=f, reduction=r)
+                    )
+                    yield (
+                        _make_tensor(s), _make_tensor(s),
+                        dict(log_input=li, full=f,
+                             eps=random.uniform(1e-8, 1e-3),
+                             reduction=r)
+                    )
 
     def gen_inputs():
         for input, target, kwargs in gen_shape_kwargs():
