@@ -10667,7 +10667,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
                # nonzero is not raising a warning when the out is resized
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out'),
-          )),
+           )),
     # `torch.norm` has multiple code paths depending on the value of `p`.
     # These paths have different dtype support. Also JIT supports,
     # most variants but not all of them. So we split the OpInfo entries,
