@@ -58,19 +58,6 @@ int64_t Helpers::GetCanonicalPosition(c10::ArrayRef<int64_t> dimensions,
   return pos;
 }
 
-int64_t Helpers::GetDynamicDimension(const lazy_tensors::Shape& shape) {
-  int64_t dynamic_dimension = -1;
-  for (int64_t i = 0; i < shape.rank(); ++i) {
-    if (shape.is_dynamic_dimension(i)) {
-      CHECK(dynamic_dimension < 0)
-          << "Only one dynamic dimension is supported: " << i << " and "
-          << dynamic_dimension << " in " << shape;
-      dynamic_dimension = i;
-    }
-  }
-  return dynamic_dimension;
-}
-
 Helpers::MinMax Helpers::MinMaxValues(lazy_tensors::PrimitiveType type) {
   switch (type) {
     case lazy_tensors::PrimitiveType::S8:
@@ -112,54 +99,6 @@ Helpers::MinMax Helpers::MinMaxValues(lazy_tensors::PrimitiveType type) {
     default:
       LOG(ERROR) << "Unsupported type " << type;
   }
-}
-
-c10::optional<Helpers::DynamicReshapeInfo> Helpers::GetDynamicReshapeInfo(
-    const lazy_tensors::Shape& input_shape,
-    c10::ArrayRef<int64_t> output_sizes) {
-  int64_t input_dynamic_dimension = GetDynamicDimension(input_shape);
-  if (input_dynamic_dimension < 0) {
-    return c10::nullopt;
-  }
-  DynamicReshapeInfo info;
-  info.output_shape = lazy_tensors::ShapeUtil::MakeShape(
-      input_shape.at_element_type(), output_sizes);
-  if (info.output_shape.rank() > 0) {
-    int64_t size_at_dyndim = 1;
-    for (int64_t i = 0; i <= input_dynamic_dimension; ++i) {
-      size_at_dyndim *= input_shape.dimensions(i);
-    }
-    int64_t dynamic_dimension = -1;
-    int64_t out_size = 1;
-    for (int64_t i = 0; i < output_sizes.size(); ++i) {
-      CHECK_LE(out_size,
-               size_at_dyndim / input_shape.dimensions(input_dynamic_dimension))
-          << "Unable to map dynamic dimension of shape " << input_shape
-          << " to output sizes (" << c10::Join(", ", output_sizes) << ")";
-      out_size *= output_sizes[i];
-      if (out_size >= size_at_dyndim) {
-        dynamic_dimension = i;
-        break;
-      }
-    }
-    CHECK(dynamic_dimension >= 0)
-        << "Unable to map dynamic dimension of shape " << input_shape
-        << " to output sizes (" << c10::Join(", ", output_sizes) << ")";
-    info.dynamic_dimension = dynamic_dimension;
-    info.output_shape.set_dynamic_dimension(info.dynamic_dimension, true);
-  }
-  return std::move(info);
-}
-
-lazy_tensors::Shape Helpers::GetDynamicReshape(
-    const lazy_tensors::Shape& input_shape,
-    c10::ArrayRef<int64_t> output_sizes) {
-  auto info = GetDynamicReshapeInfo(input_shape, output_sizes);
-  if (info) {
-    return info->output_shape;
-  }
-  return lazy_tensors::ShapeUtil::MakeShape(input_shape.at_element_type(),
-                                            output_sizes);
 }
 
 std::vector<int64_t> Helpers::MakeTransposePermutation(int64_t dim0,

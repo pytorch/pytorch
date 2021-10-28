@@ -80,14 +80,6 @@ class Helpers {
     return lazy_tensors::util::Iota<int64_t>(shape.rank());
   }
 
-  static c10::optional<DynamicReshapeInfo> GetDynamicReshapeInfo(
-      const lazy_tensors::Shape& input_shape,
-      c10::ArrayRef<int64_t> output_sizes);
-
-  static lazy_tensors::Shape GetDynamicReshape(
-      const lazy_tensors::Shape& input_shape,
-      c10::ArrayRef<int64_t> output_sizes);
-
   // Converts an iterable container to a vector of int64's.
   template <typename S>
   static std::vector<int64_t> I64List(const S& input) {
@@ -115,8 +107,6 @@ class Helpers {
   static int64_t GetCanonicalPosition(c10::ArrayRef<int64_t> dimensions,
                                       int64_t dim, int64_t pos);
 
-  // Retrieves the dynamic dimension of an input shape, or returns -1 if none.
-  static int64_t GetDynamicDimension(const lazy_tensors::Shape& shape);
 
   // Retrieves type's minimum and maximum values.
   static MinMax MinMaxValues(lazy_tensors::PrimitiveType type);
