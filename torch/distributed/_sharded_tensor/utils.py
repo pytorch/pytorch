@@ -151,12 +151,6 @@ def build_metadata_from_local_shards(
                 f'Found current rank in the process group: {current_rank}, '
                 f"local ShardMetadata placement's rank: {rank}"
             )
-        if local_shard_tensor.device != local_device:
-            raise ValueError(
-                f"Local shard tensor device does not match with local Shard's placement! "
-                f"Found local shard tensor device: {local_shard_tensor.device}, "
-                f"local shard metadata placement device: {local_device}"
-            )
 
         _raise_if_mismatch(local_shard_meta.shard_lengths, list(local_shard_tensor.size()), "size", current_rank)
         _raise_if_mismatch(local_shard_tensor.is_pinned(), first_shard_is_pinned, "pin_memory", current_rank)
