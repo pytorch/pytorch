@@ -14,7 +14,6 @@ from contextlib import closing
 
 from torch.distributed.elastic.utils.distributed import (
     create_c10d_store,
-    get_free_port,
     get_socket_with_port,
 )
 from torch.testing._internal.common_utils import (
@@ -25,8 +24,8 @@ from torch.testing._internal.common_utils import (
 )
 
 
-def _create_c10d_store_mp(is_server, server_addr, port, world_size):
-    store = create_c10d_store(is_server, server_addr, port, world_size, timeout=2)
+def _create_c10d_store_mp(is_server, server_addr, port, world_size, wait_for_workers):
+    store = create_c10d_store(is_server, server_addr, port, world_size, wait_for_workers=wait_for_workers, timeout=2)
     if store is None:
         raise AssertionError()
 
@@ -52,28 +51,33 @@ class DistributedUtilTest(unittest.TestCase):
     @unittest.skipIf(TEST_WITH_TSAN, "test incompatible with tsan")
     def test_create_store_multi(self):
         world_size = 3
-        server_port = get_free_port()
+        wait_for_workers = False
         localhost = socket.gethostname()
+
+        # start the server on the main process using an available port
+        store = create_c10d_store(
+            is_server=True,
+            server_addr=localhost,
+            server_port=0,
+            timeout=2,
+            world_size=world_size,
+            wait_for_workers=wait_for_workers,
+        )
+
+        # worker processes will use the port that was assigned to the server
+        server_port = store.port
+
         worker0 = mp.Process(
             target=_create_c10d_store_mp,
-            args=(False, localhost, server_port, world_size),
+            args=(False, localhost, server_port, world_size, wait_for_workers),
         )
         worker1 = mp.Process(
             target=_create_c10d_store_mp,
-            args=(False, localhost, server_port, world_size),
+            args=(False, localhost, server_port, world_size, wait_for_workers),
         )
 
         worker0.start()
         worker1.start()
-
-        # start the server on the main process
-        store = create_c10d_store(
-            is_server=True,
-            server_addr=localhost,
-            server_port=server_port,
-            world_size=world_size,
-            timeout=2,
-        )
 
         worker0.join()
         worker1.join()
