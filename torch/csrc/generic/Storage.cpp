@@ -348,5 +348,38 @@ void THPStorage_(initCopyMethods)()
 // NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <torch/csrc/generic/StorageSharing.cpp>
 
+bool THPStorage_(init)(PyObject *module)
+{
+  static std::vector<PyMethodDef> methods;
+  THPUtils_addPyMethodDefs(methods, THPStorage_(methods));
+  THPUtils_addPyMethodDefs(methods, THPStorage_(sharingMethods));
+
+  THPStorageType.tp_methods = methods.data();
+  THPStorageType.tp_members = THPStorage_(members);
+  THPStorageType.tp_getset = THPStorage_(properties);
+  if (PyType_Ready(&THPStorageType) < 0)
+    return false;
+  Py_INCREF(&THPStorageType);
+  PyModule_AddObject(module, THPStorageBaseStr, (PyObject *)&THPStorageType);
+  THPStorage_(initCopyMethods)();
+  return true;
+}
+
+void THPStorage_(postInit)(PyObject *module)
+{
+  THPStorageClass = PyObject_GetAttrString(module, "UntypedStorage");
+  if (!THPStorageClass) throw python_error();
+
+  at::Backend backend = at::Backend::CPU;
+#ifdef THC_GENERIC_FILE
+  backend = at::Backend::CUDA;
+#endif
+
+#ifdef THQUANTIZED
+  backend = at::Backend::QuantizedCPU;
+#endif
+
+  torch::registerStoragePyTypeObject((PyTypeObject*)THPStorageClass, backend, TH_CONCAT_2(at::k, Real));
+}
 
 #endif

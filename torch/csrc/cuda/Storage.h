@@ -47,9 +47,6 @@
 
 #include <torch/csrc/cuda/override_macros.h>
 
-bool THCPByteStorage_init(PyObject *module);
-void THCPByteStorage_postInit(PyObject *module);
-
 #define THC_GENERIC_FILE "torch/csrc/generic/Storage.h"
 #include <THC/THCGenerateByteType.h>
 
