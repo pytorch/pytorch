@@ -431,6 +431,10 @@ onnx::AttributeProto_AttributeType ATenAttributeKindToOnnxAttributeType(
       return onnx::AttributeProto_AttributeType_TENSOR;
     case AttributeKind::ts:
       return onnx::AttributeProto_AttributeType_TENSORS;
+    case AttributeKind::ty:
+      return onnx::AttributeProto_AttributeType_TYPE_PROTO;
+    case AttributeKind::tys:
+      return onnx::AttributeProto_AttributeType_TYPE_PROTOS;
     case AttributeKind::g:
       return onnx::AttributeProto_AttributeType_GRAPH;
     case AttributeKind::gs:

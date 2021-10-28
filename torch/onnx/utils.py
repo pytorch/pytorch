@@ -360,7 +360,6 @@ def _decide_input_format(model, args):
         warnings.warn("Skipping _decide_input_format\n {}".format(e.args[0]))
         return args
 
-
 def _trace(func, args, operator_export_type, return_outs=False):
     # Special case for common case of passing a single Tensor
     if isinstance(args, torch.Tensor):
