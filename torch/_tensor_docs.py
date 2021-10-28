@@ -1768,14 +1768,14 @@ See :func:`torch.histogram`
 
 add_docstr_all('index_add_',
                r"""
-index_add_(dim, index, tensor, *, alpha=1) -> Tensor
+index_add_(dim, index, source, *, alpha=1) -> Tensor
 
-Accumulate the elements of :attr:`alpha` times :attr:`tensor` into the :attr:`self`
+Accumulate the elements of :attr:`alpha` times ``source`` into the :attr:`self`
 tensor by adding to the indices in the order given in :attr:`index`. For example,
 if ``dim == 0``, ``index[i] == j``, and ``alpha=-1``, then the ``i``\ th row of
-:attr:`tensor` is subtracted from the ``j``\ th row of :attr:`self`.
+``source`` is subtracted from the ``j``\ th row of :attr:`self`.
 
-The :attr:`dim`\ th dimension of :attr:`tensor` must have the same size as the
+The :attr:`dim`\ th dimension of ``source`` must have the same size as the
 length of :attr:`index` (which must be a vector), and all other dimensions must
 match :attr:`self`, or an error will be raised.
 
@@ -1784,11 +1784,12 @@ Note:
 
 Args:
     dim (int): dimension along which to index
-    index (IntTensor or LongTensor): indices of :attr:`tensor` to select from
-    tensor (Tensor): the tensor containing values to add
+    index (Tensor): indices of ``source`` to select from,
+            should have dtype either `torch.int64` or `torch.int32`
+    source (Tensor): the tensor containing values to add
 
 Keyword args:
-    alpha (Number): the scalar multiplier for :attr:`tensor`
+    alpha (Number): the scalar multiplier for ``source``
 
 Example::
 
@@ -4643,7 +4644,7 @@ See :func:`torch.pinverse`
 
 add_docstr_all('index_add',
                r"""
-index_add(dim, index, tensor2) -> Tensor
+index_add(dim, index, source) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.index_add_`.
 """)
@@ -4830,10 +4831,47 @@ Alias for :meth:`~Tensor.dim()`
 
 add_docstr_all('T',
                r"""
-Is this Tensor with its dimensions reversed.
+Returns a view of this tensor with its dimensions reversed.
 
 If ``n`` is the number of dimensions in ``x``,
 ``x.T`` is equivalent to ``x.permute(n-1, n-2, ..., 0)``.
+
+.. warning::
+    The use of :func:`Tensor.T` on tensors of dimension other than 2 to reverse their shape
+    is deprecated and it will throw an error in a future release. Consider :attr:`~.Tensor.mT`
+    to transpose batches of matrices or `x.permute(*torch.arange(x.ndim - 1, -1, -1))` to reverse
+    the dimensions of a tensor.
+""")
+
+add_docstr_all('H',
+               r"""
+Returns a view of a matrix (2-D tensor) conjugated and transposed.
+
+``x.H`` is equivalent to ``x.transpose(0, 1).conj()`` for complex matrices and
+``x.transpose(0, 1)`` for real matrices.
+
+.. seealso::
+
+        :attr:`~.Tensor.mH`: An attribute that also works on batches of matrices.
+""")
+
+add_docstr_all('mT',
+               r"""
+Returns a view of this tensor with the last two dimensions transposed.
+
+``x.mT`` is equivalent to ``x.transpose(-2, -1)``.
+""")
+
+add_docstr_all('mH',
+               r"""
+Accessing this property is equivalent to calling :func:`adjoint`.
+""")
+
+add_docstr_all('adjoint',
+               r"""
+adjoint() -> Tensor
+
+Alias for :func:`adjoint`
 """)
 
 add_docstr_all('real',

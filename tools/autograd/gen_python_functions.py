@@ -86,7 +86,7 @@ _SKIP_PYTHON_BINDINGS = [
     'item', '_local_scalar_dense', 'to',
     '_to_copy',
     'copy_sparse_to_sparse_', 'copy_',
-    'numpy_T',  # this needs to be an attribute in Python, not a function
+    'numpy_T', 'matrix_H', 'mT', 'mH',  # these need to be an attributes in Python, not functions
     'nonzero(_(out|numpy))?',
     'set_data',
     '.*_overrideable',  # overrideable functions for backend extension

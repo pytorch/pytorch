@@ -1,9 +1,11 @@
 #include <ATen/MemoryOverlap.h>
+#include <ATen/core/TensorBase.h>
 #include <c10/core/Layout.h>
+#include <c10/util/irange.h>
 
 namespace at {
 
-MemOverlap has_internal_overlap(const Tensor& tensor) {
+MemOverlap has_internal_overlap(const TensorBase& tensor) {
   return has_internal_overlap(tensor.unsafeGetTensorImpl());
 }
 
@@ -16,7 +18,7 @@ MemOverlap has_internal_overlap(TensorImpl* t) {
 
   auto strides = t->strides();
   auto sizes = t->sizes();
-  for (size_t i = 0; i < strides.size(); ++i) {
+  for (const auto i : c10::irange(strides.size())) {
     if (strides[i] == 0 && sizes[i] > 1) {
       return MemOverlap::YES;
     }
@@ -25,7 +27,7 @@ MemOverlap has_internal_overlap(TensorImpl* t) {
   return MemOverlap::TOO_HARD;
 }
 
-void assert_no_internal_overlap(const Tensor& t) {
+void assert_no_internal_overlap(const TensorBase& t) {
   assert_no_internal_overlap(t.unsafeGetTensorImpl());
 }
 
@@ -36,7 +38,7 @@ void assert_no_internal_overlap(TensorImpl* t) {
     "performing the operation.");
 }
 
-MemOverlapStatus get_overlap_status(const Tensor& a, const Tensor& b) {
+MemOverlapStatus get_overlap_status(const TensorBase& a, const TensorBase& b) {
   return get_overlap_status(a.unsafeGetTensorImpl(), b.unsafeGetTensorImpl());
 }
 
@@ -71,7 +73,7 @@ MemOverlapStatus get_overlap_status(TensorImpl* a, TensorImpl* b) {
   return MemOverlapStatus::NO;
 }
 
-void assert_no_partial_overlap(const Tensor& a, const Tensor& b) {
+void assert_no_partial_overlap(const TensorBase& a, const TensorBase& b) {
   assert_no_partial_overlap(a.unsafeGetTensorImpl(), b.unsafeGetTensorImpl());
 }
 
@@ -82,7 +84,7 @@ void assert_no_partial_overlap(TensorImpl* a, TensorImpl* b) {
     "Please clone() the tensor before performing the operation.");
 }
 
-void assert_no_overlap(const Tensor& a, const Tensor& b) {
+void assert_no_overlap(const TensorBase& a, const TensorBase& b) {
   assert_no_overlap(a.unsafeGetTensorImpl(), b.unsafeGetTensorImpl());
 }
 

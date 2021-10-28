@@ -1024,7 +1024,7 @@ REGISTER_OPERATOR_FUNCTOR(
 
         if (p_node->Output(0).isNone()) {
           // handle dtype, layout, and device
-          at::ScalarType dtype;
+          c10::optional<at::ScalarType> dtype;
           c10::Layout layout = self.layout();
           c10::Device device = self.device();
           if (p_node->Input(1).isTensor()) {
@@ -1033,7 +1033,7 @@ REGISTER_OPERATOR_FUNCTOR(
             layout = other.layout();
             device = other.device();
           } else {
-            dtype = p_node->Input(1).toScalarType();
+            dtype = p_node->Input(1).toOptional<at::ScalarType>();
           }
 
           if (memory_format == c10::MemoryFormat::Preserve) {
@@ -1759,31 +1759,6 @@ REGISTER_OPERATOR_FUNCTOR(aten::linear, aten_linear, [](Node* n) -> SROperator {
       auto& out_t = p_node->Output(0).toTensor();
       fastResizeToZero(out_t);
       at::native::linear_out(out_t, in0_t, in1_t, in2_t);
-    }
-  };
-});
-
-REGISTER_OPERATOR_FUNCTOR(aten::fmod, aten_fmod, [](Node* n) -> SROperator {
-  if (!n->matches(torch::schema(
-          "aten::fmod.Scalar(Tensor self, Scalar other) -> Tensor")) &&
-      !n->matches(torch::schema(
-          "aten::fmod.Tensor(Tensor self, Tensor other) -> Tensor"))) {
-    LogAndDumpSchema(n);
-    return nullptr;
-  }
-  return [](ProcessedNode* p_node) {
-    const auto& in0_t = p_node->Input(0).toTensor();
-    const auto& in1_t = p_node->Input(1).isTensor()
-        ? p_node->Input(1).toTensor()
-        : at::native::wrapped_scalar_tensor(p_node->Input(1).toScalar());
-
-    if (p_node->Output(0).isNone()) {
-      p_node->Output(0) = at::cpu::fmod(in0_t, in1_t);
-    } else {
-      auto& out_t = p_node->Output(0).toTensor();
-      fastResizeToZero(out_t);
-
-      at::cpu::fmod_out(out_t, in0_t, in1_t);
     }
   };
 });

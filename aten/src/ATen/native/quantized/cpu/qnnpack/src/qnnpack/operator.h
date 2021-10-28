@@ -47,16 +47,21 @@ typedef struct {
 
 struct pytorch_qnnp_operator {
   size_t batch_size;
+  uint32_t input_padding_front;
+  uint32_t input_padding_back;
   uint32_t input_padding_top;
   uint32_t input_padding_right;
   uint32_t input_padding_bottom;
   uint32_t input_padding_left;
   uint32_t adjustment_height;
   uint32_t adjustment_width;
+  uint32_t kernel_depth;
   uint32_t kernel_height;
   uint32_t kernel_width;
+  uint32_t stride_depth;
   uint32_t stride_height;
   uint32_t stride_width;
+  uint32_t dilation_depth;
   uint32_t dilation_height;
   uint32_t dilation_width;
   uint32_t groups;
@@ -66,6 +71,7 @@ struct pytorch_qnnp_operator {
   size_t group_output_channels;
   size_t channels;
 
+  size_t input_depth;
   size_t input_height;
   size_t input_width;
   size_t input_pixel_stride;
@@ -76,6 +82,7 @@ struct pytorch_qnnp_operator {
   size_t input2_pixel_stride;
   const void* input2;
 
+  size_t output_depth;
   size_t output_height;
   size_t output_width;
   size_t output_pixel_stride;

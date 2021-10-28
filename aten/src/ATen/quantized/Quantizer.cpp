@@ -144,7 +144,8 @@ inline Tensor new_qtensor(
 
 Tensor PerTensorAffineQuantizer::quantize(const Tensor& rtensor) {
   TORCH_CHECK(
-      rtensor.scalar_type() == kFloat, "quantize only works on Float Tensor.");
+      rtensor.scalar_type() == kFloat,
+      "Quantize only works on Float Tensor, got ", rtensor.scalar_type());
   // Here we need a std::intrusive_ptr<Quantizer>.. but actually "this" is the
   // quantizer that can be reused, so I'm using intrusive_from_this here
   Tensor qtensor = new_qtensor(
@@ -201,7 +202,8 @@ Tensor PerChannelAffineQuantizer::dequantize(const Tensor& qtensor) {
 
 Tensor PerChannelAffineFloatQParamsQuantizer::quantize(const Tensor& rtensor) {
  TORCH_CHECK(
-      rtensor.scalar_type() == kFloat, "quantize only works on Float Tensor.");
+      rtensor.scalar_type() == kFloat,
+      "Quantize only works on Float Tensor, got ", rtensor.scalar_type());
  Tensor qtensor = new_qtensor(
       rtensor.sizes(),
       rtensor.options().dtype(scalar_type_),

@@ -13,6 +13,7 @@ on:
 env:
   BUILD_ENVIRONMENT: periodic-win-vs2019-cuda11.1-py3
   BUILD_WHEEL: 1
+  MAX_JOBS: 8
   CUDA_VERSION: "11.1"
   IN_CI: 1
   IS_GHA: 1
@@ -46,6 +47,7 @@ jobs:
       LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
     if: ${{ (github.repository == 'pytorch/pytorch') && (
             (github.event_name == 'push') ||
+            (github.event_name == 'schedule') ||
             (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cuda') || contains(github.event.pull_request.labels.*.name, 'ciflow/scheduled') || contains(github.event.pull_request.labels.*.name, 'ciflow/win')) ||
             (false))
          }}

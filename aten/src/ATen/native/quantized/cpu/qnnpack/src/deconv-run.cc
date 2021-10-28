@@ -1,4 +1,3 @@
-#include <conv_utils.h>
 #include <pytorch_qnnpack.h>
 #include <qnnpack_func.h>
 #include <qnnpack/indirection.h>
@@ -10,6 +9,21 @@
 #include <memory>
 
 namespace qnnpack {
+namespace {
+static size_t compute_output_dimension(
+    size_t input_dimension,
+    size_t input_padding_dimension,
+    size_t adjustment_dimension,
+    size_t kernel_dimension,
+    size_t dilation_dimension,
+    size_t stride_dimension) {
+  const size_t effective_kernel_dimension =
+      (kernel_dimension - 1) * dilation_dimension + 1;
+  return stride_dimension * (input_dimension - 1) + adjustment_dimension +
+      effective_kernel_dimension - input_padding_dimension;
+}
+} // namespace
+
 struct q8conv_context {
   size_t bs;
   size_t ks;
@@ -115,19 +129,20 @@ enum pytorch_qnnp_status qnnpackDeConv(
           output_max);
 
   // Setup the kernel
-  const std::array<size_t, 2> output_dims = conv_param_t::compute_output_dims(
-      {input_width, input_height},
-      {deconvolution->input_padding_top,
-       deconvolution->input_padding_left,
-       deconvolution->input_padding_bottom,
-       deconvolution->input_padding_right},
-      {deconvolution->adjustment_width, deconvolution->adjustment_height},
-      {kernel_width, kernel_height},
-      {deconvolution->dilation_width, deconvolution->dilation_height},
-      {deconvolution->stride_width, deconvolution->stride_height},
-      deconvolution->transpose);
-  const size_t output_width = output_dims[0];
-  const size_t output_height = output_dims[1];
+  const size_t output_width = compute_output_dimension(
+      input_width,
+      deconvolution->input_padding_left + deconvolution->input_padding_right,
+      deconvolution->adjustment_width,
+      kernel_width,
+      deconvolution->dilation_width,
+      deconvolution->stride_width);
+  const size_t output_height = compute_output_dimension(
+      input_height,
+      deconvolution->input_padding_top + deconvolution->input_padding_bottom,
+      deconvolution->adjustment_height,
+      kernel_height,
+      deconvolution->dilation_height,
+      deconvolution->stride_height);
   const size_t kernel_size = kernel_height * kernel_width;
   const size_t output_size = output_height * output_width;
 

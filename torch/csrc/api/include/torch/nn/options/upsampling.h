@@ -37,7 +37,7 @@ struct TORCH_API UpsampleOptions {
 
   /// if "True", the corner pixels of the input and output tensors are
   /// aligned, and thus preserving the values at those pixels. This only has
-  /// effect when :attr:`mode` is "linear", "bilinear", or
+  /// effect when :attr:`mode` is "linear", "bilinear", "bicubic", or
   /// "trilinear". Default: "False"
   TORCH_ARG(c10::optional<bool>, align_corners) = c10::nullopt;
 };

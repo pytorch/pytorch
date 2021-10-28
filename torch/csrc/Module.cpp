@@ -48,9 +48,12 @@
 #include <torch/csrc/utils/tensor_layouts.h>
 #include <torch/csrc/utils/tensor_memoryformats.h>
 #include <torch/csrc/utils/tensor_qschemes.h>
+#include <torch/csrc/utils/tensor_new.h>
 #include <torch/csrc/utils/tensor_numpy.h>
 #include <torch/csrc/utils/python_dispatch.h>
 #include <torch/csrc/utils/crash_handler.h>
+#include <torch/csrc/utils/python_arg_parser.h>
+#include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/jit/python/init.h>
 #include <torch/csrc/jit/python/python_ir.h>
@@ -372,28 +375,8 @@ PyObject *THPModule_fromDLPack(PyObject *_unused, PyObject *data)
 {
   using namespace torch::autograd;
   HANDLE_TH_ERRORS
-  DLManagedTensor * dlMTensor = (DLManagedTensor *)PyCapsule_GetPointer(data, "dltensor");
-  THPUtils_assert(dlMTensor, "from_dlpack received an invalid capsule. "
-    "Note that DLTensor capsules can be consumed only once, "
-    "so you might have already constructed a tensor from it once.")
-  // atensor steals the ownership of the underlying storage. It also passes a
-  // destructor function that will be called when the underlying storage goes
-  // out of scope. When the destructor is called, the dlMTensor is destructed too.
-  auto atensor = at::fromDLPack(dlMTensor);
-
-  // Make sure this capsule will never be used again.
-  PyCapsule_SetName(data, "used_dltensor");
-
-  // It is possible that the call to at::fromDLPack is the very first
-  // call to create a Tensor in PyTorch. If so, then _lazy_init has
-  // not been called, and the attempt to call createPyObject will fail
-  // because cuda ATen types have not been registered in Python yet.
-  // so if we have a cuda tensor, then we need to make sure
-  // we have called _lazy_init here
-  if(atensor.is_cuda()) {
-    py::module::import("torch.cuda").attr("init")();
-  }
-  return THPVariable_Wrap(std::move(atensor));
+  auto tensor = torch::utils::tensor_fromDLPack(data);
+  return THPVariable_Wrap(tensor);
   END_HANDLE_TH_ERRORS
 }
 
@@ -455,12 +438,16 @@ PyObject *THPModule_deterministicCuDNN(PyObject *_unused, PyObject *noargs)
   else Py_RETURN_FALSE;
 }
 
-PyObject *THPModule_setDeterministicAlgorithms(PyObject *_unused, PyObject *arg)
+PyObject *THPModule_setDeterministicAlgorithms(PyObject *_unused, PyObject *args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
-  THPUtils_assert(PyBool_Check(arg), "use_deterministic_algorithms expects a "
-          "bool, but got %s", THPUtils_typename(arg));
-  at::globalContext().setDeterministicAlgorithms(arg == Py_True);
+  static torch::PythonArgParser parser({
+    "_set_deterministic_algorithms(bool mode, *, bool warn_only=False)"});
+  torch::ParsedArgs<2> parsed_args{};
+  auto r = parser.parse(args, kwargs, parsed_args);
+  bool mode = r.toBool(0);
+  bool warn_only = r.toBool(1);
+  at::globalContext().setDeterministicAlgorithms(mode, warn_only);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -468,6 +455,14 @@ PyObject *THPModule_setDeterministicAlgorithms(PyObject *_unused, PyObject *arg)
 PyObject *THPModule_deterministicAlgorithms(PyObject *_unused, PyObject *noargs)
 {
   if (at::globalContext().deterministicAlgorithms()) {
+        Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
+}
+
+PyObject *THPModule_deterministicAlgorithmsWarnOnly(PyObject *_unused, PyObject *noargs)
+{
+  if (at::globalContext().deterministicAlgorithmsWarnOnly()) {
         Py_RETURN_TRUE;
   }
   Py_RETURN_FALSE;
@@ -675,7 +670,8 @@ static PyMethodDef TorchMethods[] = {
   {"_get_cudnn_deterministic", THPModule_deterministicCuDNN, METH_NOARGS,     nullptr},
   {"_set_cudnn_deterministic", THPModule_setDeterministicCuDNN, METH_O,  nullptr},
   {"_get_deterministic_algorithms", THPModule_deterministicAlgorithms, METH_NOARGS,     nullptr},
-  {"_set_deterministic_algorithms", THPModule_setDeterministicAlgorithms, METH_O,  nullptr},
+  {"_get_deterministic_algorithms_warn_only", THPModule_deterministicAlgorithmsWarnOnly, METH_NOARGS,     nullptr},
+  {"_set_deterministic_algorithms", castPyCFunctionWithKeywords(THPModule_setDeterministicAlgorithms), METH_VARARGS | METH_KEYWORDS,  nullptr},
   {"_get_warnAlways", THPModule_warnAlways, METH_NOARGS,     nullptr},
   {"_set_warnAlways", THPModule_setWarnAlways, METH_O,  nullptr},
   {"_get_cublas_allow_tf32", THPModule_allowTF32CuBLAS, METH_NOARGS,     nullptr},

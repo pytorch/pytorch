@@ -95,7 +95,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'bmm', 'diagonal', 'alias', 'atan', 'log', 'log10', 'log1p', 'log2', 'reciprocal',
     'tan', 'pow', 'rsqrt', 'tanh', 'tanh_backward', 'asinh', 'acosh', 'atanh', 'take', 'fill_',
     'exp', 'nonzero', 'mean', 'inverse', 'solve', 'linalg_cholesky', 'addcmul', 'addcdiv',
-    'matrix_exp', 'linalg_eigh', 'cholesky_solve', 'linalg_qr', '_svd_helper', '_fft_c2c', '_fft_r2c',
+    'matrix_exp', 'linalg_matrix_exp', 'linalg_eigh', 'cholesky_solve', 'linalg_qr', '_svd_helper', '_fft_c2c', '_fft_r2c',
     'linalg_solve', 'sqrt', 'stack', 'gather', 'index_select', 'index_add_', 'linalg_inv', 'linalg_inv_ex',
     'l1_loss_backward', 'baddbmm', 'addbmm', 'addmm', 'addmv', 'addr', 'linalg_householder_product',
     'constant_pad_nd', 'reflection_pad1d', 'reflection_pad2d', 'reflection_pad3d', 'linalg_cholesky_ex', 'linalg_eig',
@@ -108,6 +108,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'index', 'masked_fill', 'cross', 'lu_unpack', 'renorm', '_conj_physical',
     'scatter', 'scatter_add', 'sigmoid', 'sigmoid_backward', 'trapezoid', 'cumulative_trapezoid',
     'conj_physical_', '_neg_view', '_reshape_alias', '_det_lu_based_helper', 'lu_solve', '_lu_with_info',
+    'linalg_pinv', 'linalg_lstsq',
 }
 
 GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {
@@ -516,8 +517,6 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
     undifferentiable = (base_name in DONT_REQUIRE_DERIVATIVE) or (name in DONT_REQUIRE_DERIVATIVE)
 
     requires_derivative = (not undifferentiable) and (len(differentiable_inputs) > 0) and (len(differentiable_outputs) > 0)
-
-    requires_fw_derivatives = not undifferentiable and len(fw_derivatives) > 0
 
     if info is not None and info.has_derivatives and not requires_derivative:
         raise RuntimeError(f'ERROR: derivative ignored for {name} -- specified an autograd function without derivative')
@@ -976,10 +975,17 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
     if is_out_fn:
         body.append(emit_forbid_fw_derivatives(is_out_fn=True))
     else:
-        if requires_fw_derivatives:
+        if requires_derivative:
             body.extend(emit_fw_derivatives())
-        else:
-            body.append(emit_forbid_fw_derivatives())
+            if len(fw_derivatives) == 0:
+                body.append(emit_forbid_fw_derivatives())
+            else:
+                assert len(fw_derivatives) == len(differentiable_outputs), (
+                    "Expected the number of forward derivatives implemented to match the "
+                    "number of differentiable outputs. NB: This only applies when at least "
+                    "one forward derivative is implemented. Not implementing any forward "
+                    "derivatives is also okay, and we would require inputs to the op to "
+                    "not have associated tangents in that case.")
 
     if requires_derivative:
         # Save only after the forward AD has been set up

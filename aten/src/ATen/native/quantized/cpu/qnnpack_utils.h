@@ -118,7 +118,8 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
         w_zero_points(std::move(w_zps)) {
     const bool any_padding = std::any_of(
         padding_.begin(), padding_.end(), [](const auto& e) { return e != 0; });
-    const size_t kernel_size = kernel_[0] * kernel_[1];
+    const size_t kernel_size =
+        std::accumulate(kernel_.begin(), kernel_.end(), 1, std::multiplies<>());
 
     const size_t group_input_channels = transpose
         ? this->orig_weight.size(0) / groups
@@ -132,12 +133,14 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
       ukernel_type = pytorch_qnnp_ukernel_type_conv;
     } else {
       ukernel_type = pytorch_qnnp_ukernel_type_none;
-      if ((kernel_size == 9 || kernel_size == 25) &&
+      if (kSpatialDim == 2 && (kernel_size == 9 || kernel_size == 25) &&
           group_input_channels == 1 && group_output_channels == 1 &&
           groups > 1) {
         ukernel_type = pytorch_qnnp_ukernel_type_dwconv;
       } else if (
-          kernel_size == 1 && stride_[0] == 1 && stride_[1] == 1 &&
+          kernel_size == 1 &&
+          std::all_of(
+              stride_.begin(), stride_.end(), [](const auto& e) { return e == 1; }) &&
           !any_padding) {
         ukernel_type = group_input_channels >= SIZE_MAX
             ? pytorch_qnnp_ukernel_type_xzp_gemm
@@ -171,16 +174,21 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
     convolution->groups = groups;
     convolution->group_input_channels = group_input_channels;
     convolution->group_output_channels = group_output_channels;
-    convolution->kernel_height = kernel_[0];
-    convolution->kernel_width = kernel_[1];
-    convolution->stride_height = stride_[0];
-    convolution->stride_width = stride_[1];
-    convolution->dilation_height = dilation_[0];
-    convolution->dilation_width = dilation_[1];
-    convolution->input_padding_top = padding_[0];
-    convolution->input_padding_left = padding_[1];
-    convolution->input_padding_bottom = padding_[0];
-    convolution->input_padding_right = padding_[1];
+    convolution->kernel_depth = kSpatialDim == 3 ? kernel_[0] : 1;
+    convolution->kernel_height = kernel_[kSpatialDim - 2];
+    convolution->kernel_width = kernel_[kSpatialDim - 1];
+    convolution->stride_depth = kSpatialDim == 3 ? stride_[0] : 1;
+    convolution->stride_height = stride_[kSpatialDim - 2];
+    convolution->stride_width = stride_[kSpatialDim - 1];
+    convolution->dilation_depth = kSpatialDim == 3 ? dilation_[0] : 1;
+    convolution->dilation_height = dilation_[kSpatialDim - 2];
+    convolution->dilation_width = dilation_[kSpatialDim - 1];
+    convolution->input_padding_top = padding_[kSpatialDim - 2];
+    convolution->input_padding_left = padding_[kSpatialDim - 1];
+    convolution->input_padding_bottom = padding_[kSpatialDim - 2];
+    convolution->input_padding_right = padding_[kSpatialDim - 1];
+    convolution->input_padding_front = kSpatialDim == 3 ? padding_[0] : 0;
+    convolution->input_padding_back = kSpatialDim == 3 ? padding_[0] : 0;
     convolution->per_channel = is_per_channel;
     convolution->transpose = transpose_;
 

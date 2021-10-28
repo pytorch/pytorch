@@ -1,9 +1,10 @@
+# Owner(s): ["oncall: quantization"]
+
 from builtins import round
 
 import copy
 import itertools
 import numpy as np
-import sys
 import unittest
 import operator
 import random
@@ -21,7 +22,7 @@ import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 
 from torch.testing._internal.common_utils import TestCase
-from torch.testing._internal.common_utils import IS_PPC, TEST_WITH_UBSAN, IS_MACOS
+from torch.testing._internal.common_utils import IS_PPC, TEST_WITH_UBSAN, IS_MACOS, BUILD_WITH_CAFFE2
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM, skipIfNoQNNPACK
 from torch.testing._internal.common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
     override_quantized_engine, supported_qengines, override_qengines, _snr
@@ -977,6 +978,27 @@ class TestQuantizedOps(TestCase):
         qC_hat = mul(qA, qB, scale=scale_C, zero_point=zero_point_C)
         np.testing.assert_equal(qC, qC_hat.int_repr(),
                                 "Quantized multiplication failed.")
+
+    """Tests that quantized add works with broadcasting"""
+    def test_qadd_broadcast(self):
+        A = torch.randn(1, 1, 4, 4)
+        B = torch.randn(2, 1, 4, 4)
+        qA = torch.quantize_per_tensor(A, 0.02, 0, torch.quint8)
+        qB = torch.quantize_per_tensor(B, 0.04, 2, torch.quint8)
+
+        output_scale = 0.01
+        output_zp = 1
+
+        # ground truth
+        C = qA.dequantize() + qB.dequantize()
+        qC = torch.quantize_per_tensor(C, output_scale, output_zp, torch.quint8)
+
+        # quantized
+        qC_hat_1 = torch.ops.quantized.add(qA, qB, output_scale, output_zp)
+        qC_hat_2 = torch.ops.quantized.add(qB, qA, output_scale, output_zp)
+
+        self.assertTrue(torch.allclose(qC.dequantize(), qC_hat_1.dequantize()))
+        self.assertTrue(torch.allclose(qC.dequantize(), qC_hat_2.dequantize()))
 
     """Tests channel shuffle operation on quantized tensors."""
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
@@ -3206,7 +3228,8 @@ class TestQuantizedLinear(unittest.TestCase):
                 W_q.q_zero_point(), W_q_origin.q_zero_point())
 
 
-@unittest.skipIf(sys.platform == "darwin", "Known test failure on Mac.")
+@unittest.skipIf(IS_MACOS, "Known test failure on Mac.")
+@unittest.skipIf(not BUILD_WITH_CAFFE2, "Test needs Caffe2")
 class TestQuantizedEmbeddingOps(TestCase):
     def _test_embedding_bag_unpack_fn(self, pack_fn, unpack_fn, num_embeddings, embedding_dim, bit_rate, optimized_qparams,
                                       num_batches, data_type=np.float32):
@@ -4388,7 +4411,7 @@ class TestQuantizedConv(TestCase):
            use_bias=st.booleans(),
            use_relu=st.booleans(),
            use_channelwise=st.booleans(),
-           qengine=st.sampled_from(("fbgemm",)))
+           qengine=st.sampled_from(("qnnpack", "fbgemm")))
     def test_qconv3d(
         self,
         batch_size,

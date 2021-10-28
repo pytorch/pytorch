@@ -1,3 +1,5 @@
+# Owner(s): ["module: optimizer"]
+
 import warnings
 import math
 import unittest
@@ -243,12 +245,11 @@ class TestOptim(TestCase):
             scheduler_constructors
         )
 
-    def _test_complex_optimizer(self, optimizer):
-        lr = 0.001
+    def _test_complex_optimizer(self, optimizer_constructor):
         complex_param = torch.randn(5, 5, dtype=torch.complex64, requires_grad=True)
-        complex_opt = optimizer([complex_param], lr=lr)
-        real_param = torch.view_as_real(complex_param).detach().requires_grad_()
-        real_opt = optimizer([real_param], lr=lr)
+        real_param = torch.view_as_real(complex_param).detach().clone().requires_grad_()
+        complex_opt = optimizer_constructor(complex_param)
+        real_opt = optimizer_constructor(real_param)
 
         for i in range(3):
             complex_param.grad = torch.randn_like(complex_param)
@@ -336,7 +337,21 @@ class TestOptim(TestCase):
 
     def test_sgd_complex(self):
         for optimizer in [optim.SGD, optim_mt.SGD]:
-            self._test_complex_optimizer(optimizer)
+            self._test_complex_optimizer(
+                lambda param: optimizer([param], lr=0.001)
+            )
+            self._test_complex_optimizer(
+                lambda param: optimizer([param], lr=0.001, momentum=1)
+            )
+            self._test_complex_optimizer(
+                lambda param: optimizer([param], lr=0.001, momentum=1, weight_decay=1)
+            )
+            self._test_complex_optimizer(
+                lambda param: optimizer([param], lr=0.001, nesterov=True, momentum=1, weight_decay=1)
+            )
+            self._test_complex_optimizer(
+                lambda param: optimizer([param], lr=0.001, momentum=1, dampening=0.5, weight_decay=1)
+            )
 
     def test_multi_tensor_optimizers(self):
         if not torch.cuda.is_available():
@@ -551,6 +566,18 @@ class TestOptim(TestCase):
             with self.assertRaisesRegex(ValueError, "Invalid rho value: 1.1"):
                 optimizer(None, lr=1e-2, rho=1.1)
 
+    def test_adadelta_complex(self):
+        for optimizer in [optim.Adadelta]:
+            self._test_complex_optimizer(
+                lambda weight: optimizer([weight])
+            )
+            self._test_complex_optimizer(
+                lambda weight: optimizer([weight], rho=0.95)
+            )
+            self._test_complex_optimizer(
+                lambda weight: optimizer([weight], rho=0.95, weight_decay=1)
+            )
+
     def test_nadam(self):
         for optimizer in [optim.NAdam, optim_mt.NAdam]:
             self._test_basic_cases(
@@ -613,6 +640,17 @@ class TestOptim(TestCase):
                 lambda params: optimizer(params, lr=0.1),
                 [lambda opt: StepLR(opt, gamma=1 - 1e-5, step_size=500),
                  lambda opt: ReduceLROnPlateau(opt, threshold=1e-4)]
+            )
+
+    def test_adagrad_complex(self):
+        for optimizer in [optim.Adagrad, optim_mt.Adagrad]:
+            self._test_complex_optimizer(
+                lambda param: optimizer([param], lr=1e-1)
+            )
+            self._test_complex_optimizer(
+                lambda param: optimizer(
+                    [param], lr=1e-1, initial_accumulator_value=0.1
+                )
             )
 
     def test_adamax(self):

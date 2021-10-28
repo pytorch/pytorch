@@ -282,6 +282,9 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
     unsorted_function_hints.update({
         'set_flush_denormal': ['def set_flush_denormal(mode: _bool) -> _bool: ...'],
         'get_default_dtype': ['def get_default_dtype() -> _dtype: ...'],
+        'asarray': ['def asarray(obj: Any, *, dtype: Optional[_dtype]=None, '
+                    'device: Union[_device, str, None]=None, copy: Optional[_bool]=None, '
+                    'requires_grad: _bool=False) -> Tensor: ...'],
         'from_numpy': ['def from_numpy(ndarray) -> Tensor: ...'],
         'frombuffer': ['def frombuffer(buffer: Any, *, dtype: _dtype, count: int=-1, '
                        'offset: int=0, device: Union[_device, str, None]=None, '
