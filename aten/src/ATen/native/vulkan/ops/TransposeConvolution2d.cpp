@@ -452,7 +452,7 @@ Tensor TransposeConv2dOpContext::run(const Tensor& input_arg) const {
         v_input.sizes(),
         unpacked_.filter,
         packed_.padding,
-        packed_.output_padding
+        packed_.output_padding,
         packed_.stride,
         packed_.dilation),
     input.options(),
