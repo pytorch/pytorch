@@ -16,19 +16,19 @@ if [[ "${DESIRED_CUDA}" == "cu111" || "${DESIRED_CUDA}" == "cu113" ]]; then
 fi
 
 # Parse the parameters
-if [[ "$PACKAGE_TYPE" == 'conda' ]]; then
+if [[ "${PACKAGE_TYPE}" == 'conda' ]]; then
   build_script='conda/build_pytorch.sh'
-elif [[ "$DESIRED_CUDA" == cpu ]]; then
+elif [[ "${DESIRED_CUDA}" == cpu ]]; then
   build_script='manywheel/build_cpu.sh'
-elif [[ "$DESIRED_CUDA" == *"rocm"* ]]; then
+elif [[ "${DESIRED_CUDA}" == *"rocm"* ]]; then
   build_script='manywheel/build_rocm.sh'
 else
   build_script='manywheel/build.sh'
 fi
 
-if [[ "$CIRCLE_BRANCH" == "master" ]] || [[ "$CIRCLE_BRANCH" == release/* ]]; then
+if [[ "${CIRCLE_BRANCH}" == "master" ]] || [[ "${CIRCLE_BRANCH}" == release/* ]]; then
   export BUILD_DEBUG_INFO=1
 fi
 
 # Build the package
-SKIP_ALL_TESTS=1 "/builder/$build_script"
+SKIP_ALL_TESTS=1 "/builder/${build_script}"
