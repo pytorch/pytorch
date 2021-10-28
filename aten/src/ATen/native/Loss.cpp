@@ -28,14 +28,18 @@ TORCH_META_FUNC(smooth_l1_loss)
 (const Tensor& input, const Tensor& target, const int64_t reduction, double beta) {
   TORCH_CHECK(beta >= 0, "smooth_l1_loss does not support negative values for beta.")
   build_borrowing_binary_op(maybe_get_output(), input, target);
-
   if (reduction == Reduction::None) {
-    MetaBase::set_output(input.sizes(), input.options());
     return;
   }
 
-  auto real_output = at::meta::mean(maybe_get_output(), 0);
-  at::native::resize_(maybe_get_output(), real_output.sizes());
+  Tensor reduction_output;
+  if (reduction == Reduction::Mean) {
+    reduction_output = at::meta::mean(maybe_get_output(), 0);
+  }
+  if (reduction == Reduction::Sum) {
+    reduction_output = at::meta::sum(maybe_get_output(), 0);
+  }
+  at::native::resize_(maybe_get_output(), reduction_output.sizes());
 }
 
 } // namespace meta
@@ -65,8 +69,8 @@ TORCH_IMPL_FUNC(smooth_l1_loss_out)
       at::sum_out(const_cast<Tensor&>(result), iter.output(), 0);
     }
   } else {
-    auto iter = TensorIterator::borrowing_binary_op(result, input, target);
-    smooth_l1_stub(iter.device_type(), iter, beta);
+    TensorIterator iter = *this;
+    smooth_l1_stub(device_type(), iter, beta);
   }
 }
 
