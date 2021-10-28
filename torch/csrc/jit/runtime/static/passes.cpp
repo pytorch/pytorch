@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
+#include <torch/csrc/jit/passes/variadic_ops.h>
 #include <torch/csrc/jit/runtime/graph_iterator.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
 
@@ -591,7 +592,12 @@ void FuseListUnpackV2(std::shared_ptr<torch::jit::Graph>& graph) {
       {fromQualString("fb::equally_split"),
        fromQualString("static_runtime::fused_equally_split")},
       {fromQualString("fb::sigrid_transforms"),
-       fromQualString("static_runtime::fused_sigrid_transforms")}};
+       fromQualString("static_runtime::fused_sigrid_transforms")},
+      {fromQualString("static_runtime::variadic_grouped_accessor_op"),
+       fromQualString("static_runtime::fused_variadic_grouped_accessor_op")},
+      {fromQualString("static_runtime::variadic_grouped_accessor_op_v2"),
+       fromQualString(
+           "static_runtime::fused_variadic_grouped_accessor_op_v2")}};
 
   AliasDb alias_db(
       graph, /*isFrozen=*/false, /*enablePreciseTupleContainerAnalysis=*/true);
@@ -771,6 +777,19 @@ void RemoveImmutableInputDictLookups(
   }
   graph->setInsertPoint(graph->block());
   marker->destroy();
+}
+
+void UseVariadicGroupedAccessor(const std::shared_ptr<Graph>& graph) {
+  // Migration to v2 is still in progress. For now, SR will support
+  // both versions of this op.
+  UseVariadicOp(
+      graph,
+      fromQualString("grouped_accessor::grouped_accessor_op"),
+      fromQualString("static_runtime::variadic_grouped_accessor_op"));
+  UseVariadicOp(
+      graph,
+      fromQualString("grouped_accessor::grouped_accessor_op_v2"),
+      fromQualString("static_runtime::variadic_grouped_accessor_op_v2"));
 }
 
 } // namespace jit
