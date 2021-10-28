@@ -149,9 +149,7 @@ class TestFSDPMemory(FSDPTest):
 
         def cmp(results, expected):
             ret = ""
-            assert (
-                results.keys() == expected.keys()
-            ), f"{list(results.keys())} vs. {list(expected.keys())}"
+            self.assertEqual(results.keys(), expected.keys())
             for k, v in results.items():
                 exp = expected[k]
                 if abs(exp - v) > 1:  # allow 1MB rounding differences
