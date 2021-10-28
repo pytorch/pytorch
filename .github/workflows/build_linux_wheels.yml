@@ -105,7 +105,7 @@ jobs:
         run: |
           COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
           export COMMIT_TIME
-          pip3 install requests
+          pip3 install requests==2.26
           python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
 
 concurrency:

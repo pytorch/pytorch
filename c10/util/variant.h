@@ -235,8 +235,8 @@ namespace std {
 // (See accompanying file LICENSE.md or copy at
 // http://boost.org/LICENSE_1_0.txt)
 
-#ifndef MPARK_CONFIG_HPP
-#define MPARK_CONFIG_HPP
+#ifndef C10_MPARK_CONFIG_HPP
+#define C10_MPARK_CONFIG_HPP
 
 // MSVC 2015 Update 3.
 #if __cplusplus < 201103L && (!defined(_MSC_VER) || _MSC_FULL_VER < 190024210)
@@ -260,70 +260,70 @@ namespace std {
 #endif
 
 #if __has_attribute(always_inline) || defined(__GNUC__)
-#define MPARK_ALWAYS_INLINE __attribute__((__always_inline__)) inline
+#define C10_MPARK_ALWAYS_INLINE __attribute__((__always_inline__)) inline
 #elif defined(_MSC_VER)
-#define MPARK_ALWAYS_INLINE __forceinline
+#define C10_MPARK_ALWAYS_INLINE __forceinline
 #else
-#define MPARK_ALWAYS_INLINE inline
+#define C10_MPARK_ALWAYS_INLINE inline
 #endif
 
 #if __has_builtin(__builtin_addressof) || \
     (defined(__GNUC__) && __GNUC__ >= 7) || defined(_MSC_VER)
-#define MPARK_BUILTIN_ADDRESSOF
+#define C10_MPARK_BUILTIN_ADDRESSOF
 #endif
 
 #if __has_builtin(__builtin_unreachable) || defined(__GNUC__)
-#define MPARK_BUILTIN_UNREACHABLE __builtin_unreachable()
+#define C10_MPARK_BUILTIN_UNREACHABLE __builtin_unreachable()
 #elif defined(_MSC_VER)
-#define MPARK_BUILTIN_UNREACHABLE __assume(false)
+#define C10_MPARK_BUILTIN_UNREACHABLE __assume(false)
 #else
-#define MPARK_BUILTIN_UNREACHABLE
+#define C10_MPARK_BUILTIN_UNREACHABLE
 #endif
 
 #if __has_builtin(__type_pack_element)
-#define MPARK_TYPE_PACK_ELEMENT
+#define C10_MPARK_TYPE_PACK_ELEMENT
 #endif
 
 #if defined(__cpp_constexpr) && __cpp_constexpr >= 200704 && \
     !(defined(__GNUC__) && __GNUC__ == 4 && __GNUC_MINOR__ == 9)
-#define MPARK_CPP11_CONSTEXPR
+#define C10_MPARK_CPP11_CONSTEXPR
 #endif
 
 #if defined(__cpp_constexpr) && __cpp_constexpr >= 201304
-#define MPARK_CPP14_CONSTEXPR
+#define C10_MPARK_CPP14_CONSTEXPR
 #endif
 
 #if __has_feature(cxx_exceptions) || defined(__cpp_exceptions) || \
     (defined(_MSC_VER) && defined(_CPPUNWIND))
-#define MPARK_EXCEPTIONS
+#define C10_MPARK_EXCEPTIONS
 #endif
 
 #if defined(__cpp_generic_lambdas) || defined(_MSC_VER)
-#define MPARK_GENERIC_LAMBDAS
+#define C10_MPARK_GENERIC_LAMBDAS
 #endif
 
 #if defined(__cpp_lib_integer_sequence)
-#define MPARK_INTEGER_SEQUENCE
+#define C10_MPARK_INTEGER_SEQUENCE
 #endif
 
 #if defined(__cpp_return_type_deduction) || defined(_MSC_VER)
-#define MPARK_RETURN_TYPE_DEDUCTION
+#define C10_MPARK_RETURN_TYPE_DEDUCTION
 #endif
 
 #if defined(__cpp_lib_transparent_operators) || defined(_MSC_VER)
-#define MPARK_TRANSPARENT_OPERATORS
+#define C10_MPARK_TRANSPARENT_OPERATORS
 #endif
 
 #if defined(__cpp_variable_templates) || defined(_MSC_VER)
-#define MPARK_VARIABLE_TEMPLATES
+#define C10_MPARK_VARIABLE_TEMPLATES
 #endif
 
 #if !defined(__GLIBCXX__) || __has_include(<codecvt>) // >= libstdc++-5
-#define MPARK_TRIVIALITY_TYPE_TRAITS
-#define MPARK_INCOMPLETE_TYPE_TRAITS
+#define C10_MPARK_TRIVIALITY_TYPE_TRAITS
+#define C10_MPARK_INCOMPLETE_TYPE_TRAITS
 #endif
 
-#endif // MPARK_CONFIG_HPP
+#endif // C10_MPARK_CONFIG_HPP
 
 // MPark.Variant
 //
@@ -333,8 +333,8 @@ namespace std {
 // (See accompanying file LICENSE.md or copy at
 // http://boost.org/LICENSE_1_0.txt)
 
-#ifndef MPARK_IN_PLACE_HPP
-#define MPARK_IN_PLACE_HPP
+#ifndef C10_MPARK_IN_PLACE_HPP
+#define C10_MPARK_IN_PLACE_HPP
 
 #include <c10/util/in_place.h>
 
@@ -342,7 +342,7 @@ namespace std {
 
 namespace c10 {
 
-#ifdef MPARK_VARIABLE_TEMPLATES
+#ifdef C10_MPARK_VARIABLE_TEMPLATES
 template <std::size_t I>
 constexpr in_place_index_t<I> in_place_index{};
 
@@ -352,7 +352,7 @@ constexpr in_place_type_t<T> in_place_type{};
 
 } // namespace c10
 
-#endif // MPARK_IN_PLACE_HPP
+#endif // C10_MPARK_IN_PLACE_HPP
 
 // MPark.Variant
 //
@@ -362,15 +362,15 @@ constexpr in_place_type_t<T> in_place_type{};
 // (See accompanying file LICENSE.md or copy at
 // http://boost.org/LICENSE_1_0.txt)
 
-#ifndef MPARK_LIB_HPP
-#define MPARK_LIB_HPP
+#ifndef C10_MPARK_LIB_HPP
+#define C10_MPARK_LIB_HPP
 
 #include <functional>
 #include <memory>
 #include <type_traits>
 #include <utility>
 
-#define MPARK_RETURN(...)                                  \
+#define C10_MPARK_RETURN(...)                              \
   noexcept(noexcept(__VA_ARGS__))->decltype(__VA_ARGS__) { \
     return __VA_ARGS__;                                    \
   }
@@ -428,7 +428,7 @@ inline constexpr remove_reference_t<T>&& move(T&& t) noexcept {
   return static_cast<remove_reference_t<T>&&>(t);
 }
 
-#ifdef MPARK_INTEGER_SEQUENCE
+#ifdef C10_MPARK_INTEGER_SEQUENCE
 using std::index_sequence;
 using std::index_sequence_for;
 using std::integer_sequence;
@@ -476,63 +476,63 @@ using index_sequence_for = make_index_sequence<sizeof...(Ts)>;
 #endif
 
 // <functional>
-#ifdef MPARK_TRANSPARENT_OPERATORS
+#ifdef C10_MPARK_TRANSPARENT_OPERATORS
 using equal_to = std::equal_to<>;
 #else
 struct equal_to {
   template <typename Lhs, typename Rhs>
   inline constexpr auto operator()(Lhs&& lhs, Rhs&& rhs) const
-      MPARK_RETURN(lib::forward<Lhs>(lhs) == lib::forward<Rhs>(rhs))
+      C10_MPARK_RETURN(lib::forward<Lhs>(lhs) == lib::forward<Rhs>(rhs))
 };
 #endif
 
-#ifdef MPARK_TRANSPARENT_OPERATORS
+#ifdef C10_MPARK_TRANSPARENT_OPERATORS
 using not_equal_to = std::not_equal_to<>;
 #else
 struct not_equal_to {
   template <typename Lhs, typename Rhs>
   inline constexpr auto operator()(Lhs&& lhs, Rhs&& rhs) const
-      MPARK_RETURN(lib::forward<Lhs>(lhs) != lib::forward<Rhs>(rhs))
+      C10_MPARK_RETURN(lib::forward<Lhs>(lhs) != lib::forward<Rhs>(rhs))
 };
 #endif
 
-#ifdef MPARK_TRANSPARENT_OPERATORS
+#ifdef C10_MPARK_TRANSPARENT_OPERATORS
 using less = std::less<>;
 #else
 struct less {
   template <typename Lhs, typename Rhs>
   inline constexpr auto operator()(Lhs&& lhs, Rhs&& rhs) const
-      MPARK_RETURN(lib::forward<Lhs>(lhs) < lib::forward<Rhs>(rhs))
+      C10_MPARK_RETURN(lib::forward<Lhs>(lhs) < lib::forward<Rhs>(rhs))
 };
 #endif
 
-#ifdef MPARK_TRANSPARENT_OPERATORS
+#ifdef C10_MPARK_TRANSPARENT_OPERATORS
 using greater = std::greater<>;
 #else
 struct greater {
   template <typename Lhs, typename Rhs>
   inline constexpr auto operator()(Lhs&& lhs, Rhs&& rhs) const
-      MPARK_RETURN(lib::forward<Lhs>(lhs) > lib::forward<Rhs>(rhs))
+      C10_MPARK_RETURN(lib::forward<Lhs>(lhs) > lib::forward<Rhs>(rhs))
 };
 #endif
 
-#ifdef MPARK_TRANSPARENT_OPERATORS
+#ifdef C10_MPARK_TRANSPARENT_OPERATORS
 using less_equal = std::less_equal<>;
 #else
 struct less_equal {
   template <typename Lhs, typename Rhs>
   inline constexpr auto operator()(Lhs&& lhs, Rhs&& rhs) const
-      MPARK_RETURN(lib::forward<Lhs>(lhs) <= lib::forward<Rhs>(rhs))
+      C10_MPARK_RETURN(lib::forward<Lhs>(lhs) <= lib::forward<Rhs>(rhs))
 };
 #endif
 
-#ifdef MPARK_TRANSPARENT_OPERATORS
+#ifdef C10_MPARK_TRANSPARENT_OPERATORS
 using greater_equal = std::greater_equal<>;
 #else
 struct greater_equal {
   template <typename Lhs, typename Rhs>
   inline constexpr auto operator()(Lhs&& lhs, Rhs&& rhs) const
-      MPARK_RETURN(lib::forward<Lhs>(lhs) >= lib::forward<Rhs>(rhs))
+      C10_MPARK_RETURN(lib::forward<Lhs>(lhs) >= lib::forward<Rhs>(rhs))
 };
 #endif
 } // namespace cpp14
@@ -603,14 +603,15 @@ template <>
 struct Invoke<true /* pmf */, 0 /* is_base_of */> {
   template <typename R, typename T, typename Arg, typename... Args>
   inline static constexpr auto invoke(R T::*pmf, Arg&& arg, Args&&... args)
-      MPARK_RETURN((lib::forward<Arg>(arg).*pmf)(lib::forward<Args>(args)...))
+      C10_MPARK_RETURN(
+          (lib::forward<Arg>(arg).*pmf)(lib::forward<Args>(args)...))
 };
 
 template <>
 struct Invoke<true /* pmf */, 1 /* is_reference_wrapper */> {
   template <typename R, typename T, typename Arg, typename... Args>
   inline static constexpr auto invoke(R T::*pmf, Arg&& arg, Args&&... args)
-      MPARK_RETURN(
+      C10_MPARK_RETURN(
           (lib::forward<Arg>(arg).get().*pmf)(lib::forward<Args>(args)...))
 };
 
@@ -618,7 +619,7 @@ template <>
 struct Invoke<true /* pmf */, 2 /* otherwise */> {
   template <typename R, typename T, typename Arg, typename... Args>
   inline static constexpr auto invoke(R T::*pmf, Arg&& arg, Args&&... args)
-      MPARK_RETURN(
+      C10_MPARK_RETURN(
           ((*lib::forward<Arg>(arg)).*pmf)(lib::forward<Args>(args)...))
 };
 
@@ -626,46 +627,47 @@ template <>
 struct Invoke<false /* pmo */, 0 /* is_base_of */> {
   template <typename R, typename T, typename Arg>
   inline static constexpr auto invoke(R T::*pmo, Arg&& arg)
-      MPARK_RETURN(lib::forward<Arg>(arg).*pmo)
+      C10_MPARK_RETURN(lib::forward<Arg>(arg).*pmo)
 };
 
 template <>
 struct Invoke<false /* pmo */, 1 /* is_reference_wrapper */> {
   template <typename R, typename T, typename Arg>
   inline static constexpr auto invoke(R T::*pmo, Arg&& arg)
-      MPARK_RETURN(lib::forward<Arg>(arg).get().*pmo)
+      C10_MPARK_RETURN(lib::forward<Arg>(arg).get().*pmo)
 };
 
 template <>
 struct Invoke<false /* pmo */, 2 /* otherwise */> {
   template <typename R, typename T, typename Arg>
   inline static constexpr auto invoke(R T::*pmo, Arg&& arg)
-      MPARK_RETURN((*lib::forward<Arg>(arg)).*pmo)
+      C10_MPARK_RETURN((*lib::forward<Arg>(arg)).*pmo)
 };
 
 template <typename R, typename T, typename Arg, typename... Args>
-inline constexpr auto invoke(R T::*f, Arg&& arg, Args&&... args) MPARK_RETURN(
-    Invoke<
-        std::is_function<R>::value,
-        (std::is_base_of<T, lib::decay_t<Arg>>::value         ? 0
-             : is_reference_wrapper<lib::decay_t<Arg>>::value ? 1
-                                                              : 2)>::
-        invoke(f, lib::forward<Arg>(arg), lib::forward<Args>(args)...))
+inline constexpr auto invoke(R T::*f, Arg&& arg, Args&&... args)
+    C10_MPARK_RETURN(
+        Invoke<
+            std::is_function<R>::value,
+            (std::is_base_of<T, lib::decay_t<Arg>>::value         ? 0
+                 : is_reference_wrapper<lib::decay_t<Arg>>::value ? 1
+                                                                  : 2)>::
+            invoke(f, lib::forward<Arg>(arg), lib::forward<Args>(args)...))
 
 #ifdef _MSC_VER
 #pragma warning(push)
 #pragma warning(disable : 4100)
 #endif
-    template <typename F, typename... Args>
-    inline constexpr auto invoke(F&& f, Args&&... args)
-        MPARK_RETURN(lib::forward<F>(f)(lib::forward<Args>(args)...))
+        template <typename F, typename... Args>
+        inline constexpr auto invoke(F&& f, Args&&... args)
+            C10_MPARK_RETURN(lib::forward<F>(f)(lib::forward<Args>(args)...))
 #ifdef _MSC_VER
 #pragma warning(pop)
 #endif
 } // namespace detail_
 
 template <typename F, typename... Args>
-inline constexpr auto invoke(F&& f, Args&&... args) MPARK_RETURN(
+inline constexpr auto invoke(F&& f, Args&&... args) C10_MPARK_RETURN(
     detail_::invoke(lib::forward<F>(f), lib::forward<Args>(args)...))
 
     namespace detail_ {
@@ -748,7 +750,7 @@ using is_nothrow_invocable_r = detail_::
     is_nothrow_invocable_r<is_invocable_r<R, F, Args...>::value, R, F, Args...>;
 
 // <memory>
-#ifdef MPARK_BUILTIN_ADDRESSOF
+#ifdef C10_MPARK_BUILTIN_ADDRESSOF
 template <typename T>
 inline constexpr T* addressof(T& arg) noexcept {
   return __builtin_addressof(arg);
@@ -819,7 +821,7 @@ using all = std::is_same<
     integer_sequence<bool, true, Bs...>,
     integer_sequence<bool, Bs..., true>>;
 
-#ifdef MPARK_TYPE_PACK_ELEMENT
+#ifdef C10_MPARK_TYPE_PACK_ELEMENT
 template <std::size_t I, typename... Ts>
 using type_pack_element_t = __type_pack_element<I, Ts...>;
 #else
@@ -848,7 +850,7 @@ template <std::size_t I, typename... Ts>
 using type_pack_element_t = typename type_pack_element<I, Ts...>::type;
 #endif
 
-#ifdef MPARK_TRIVIALITY_TYPE_TRAITS
+#ifdef C10_MPARK_TRIVIALITY_TYPE_TRAITS
 using std::is_trivially_copy_assignable;
 using std::is_trivially_copy_constructible;
 using std::is_trivially_move_assignable;
@@ -888,13 +890,13 @@ struct push_back<index_sequence<Is...>, J> {
 } // namespace lib
 } // namespace c10
 
-#undef MPARK_RETURN
+#undef C10_MPARK_RETURN
 
-#endif // MPARK_LIB_HPP
+#endif // C10_MPARK_LIB_HPP
 
 namespace c10 {
 
-#ifdef MPARK_RETURN_TYPE_DEDUCTION
+#ifdef C10_MPARK_RETURN_TYPE_DEDUCTION
 
 #define AUTO auto
 #define AUTO_RETURN(...) \
@@ -939,11 +941,11 @@ class bad_variant_access : public std::exception {
 };
 
 [[noreturn]] inline void throw_bad_variant_access() {
-#ifdef MPARK_EXCEPTIONS
+#ifdef C10_MPARK_EXCEPTIONS
   throw bad_variant_access{};
 #else
   std::terminate();
-  MPARK_BUILTIN_UNREACHABLE;
+  C10_MPARK_BUILTIN_UNREACHABLE;
 #endif
 }
 
@@ -953,7 +955,7 @@ class variant;
 template <typename T>
 struct variant_size;
 
-#ifdef MPARK_VARIABLE_TEMPLATES
+#ifdef C10_MPARK_VARIABLE_TEMPLATES
 template <typename T>
 constexpr std::size_t variant_size_v = variant_size<T>::value;
 #endif
@@ -1003,7 +1005,7 @@ namespace detail_ {
 constexpr std::size_t not_found = static_cast<std::size_t>(-1);
 constexpr std::size_t ambiguous = static_cast<std::size_t>(-2);
 
-#ifdef MPARK_CPP14_CONSTEXPR
+#ifdef C10_MPARK_CPP14_CONSTEXPR
 template <typename T, typename... Ts>
 inline constexpr std::size_t find_index() {
   constexpr lib::array<bool, sizeof...(Ts)> matches = {
@@ -1073,7 +1075,7 @@ inline constexpr Trait trait() {
                                         : Trait::Unavailable;
 }
 
-#ifdef MPARK_CPP14_CONSTEXPR
+#ifdef C10_MPARK_CPP14_CONSTEXPR
 template <typename... Traits>
 inline constexpr Trait common_trait(Traits... traits_) {
   Trait result = Trait::TriviallyAvailable;
@@ -1139,7 +1141,7 @@ struct traits {
 namespace access {
 
 struct recursive_union {
-#ifdef MPARK_RETURN_TYPE_DEDUCTION
+#ifdef C10_MPARK_RETURN_TYPE_DEDUCTION
   template <typename V>
   inline static constexpr auto&& get_alt(V&& v, in_place_index_t<0>) {
     return lib::forward<V>(v).head_;
@@ -1194,8 +1196,8 @@ struct variant {
 
 namespace visitation {
 
-#if defined(MPARK_CPP14_CONSTEXPR) && !defined(_MSC_VER)
-#define MPARK_VARIANT_SWITCH_VISIT
+#if defined(C10_MPARK_CPP14_CONSTEXPR) && !defined(_MSC_VER)
+#define C10_MPARK_VARIANT_SWITCH_VISIT
 #endif
 
 struct base {
@@ -1227,38 +1229,38 @@ struct base {
             lib::forward<Alts>(alts)...))
   };
 
-#ifdef MPARK_VARIANT_SWITCH_VISIT
+#ifdef C10_MPARK_VARIANT_SWITCH_VISIT
   template <bool B, typename R, typename... ITs>
   struct dispatcher;
 
   template <typename R, typename... ITs>
   struct dispatcher<false, R, ITs...> {
     template <std::size_t B, typename F, typename... Vs>
-    MPARK_ALWAYS_INLINE static constexpr R dispatch(
+    C10_MPARK_ALWAYS_INLINE static constexpr R dispatch(
         F&&,
         typename ITs::type&&...,
         Vs&&...) {
-      MPARK_BUILTIN_UNREACHABLE;
+      C10_MPARK_BUILTIN_UNREACHABLE;
     }
 
     template <std::size_t I, typename F, typename... Vs>
-    MPARK_ALWAYS_INLINE static constexpr R dispatch_case(F&&, Vs&&...) {
-      MPARK_BUILTIN_UNREACHABLE;
+    C10_MPARK_ALWAYS_INLINE static constexpr R dispatch_case(F&&, Vs&&...) {
+      C10_MPARK_BUILTIN_UNREACHABLE;
     }
 
     template <std::size_t B, typename F, typename... Vs>
-    MPARK_ALWAYS_INLINE static constexpr R dispatch_at(
+    C10_MPARK_ALWAYS_INLINE static constexpr R dispatch_at(
         std::size_t,
         F&&,
         Vs&&...) {
-      MPARK_BUILTIN_UNREACHABLE;
+      C10_MPARK_BUILTIN_UNREACHABLE;
     }
   };
 
   template <typename R, typename... ITs>
   struct dispatcher<true, R, ITs...> {
     template <std::size_t B, typename F>
-    MPARK_ALWAYS_INLINE static constexpr R dispatch(
+    C10_MPARK_ALWAYS_INLINE static constexpr R dispatch(
         F&& f,
         typename ITs::type&&... visited_vs) {
       using Expected = R;
@@ -1273,12 +1275,12 @@ struct base {
     }
 
     template <std::size_t B, typename F, typename V, typename... Vs>
-    MPARK_ALWAYS_INLINE static constexpr R dispatch(
+    C10_MPARK_ALWAYS_INLINE static constexpr R dispatch(
         F&& f,
         typename ITs::type&&... visited_vs,
         V&& v,
         Vs&&... vs) {
-#define MPARK_DISPATCH(I)                                  \
+#define C10_MPARK_DISPATCH(I)                              \
   dispatcher<                                              \
       (I < lib::decay_t<V>::size()),                       \
       R,                                                   \
@@ -1290,7 +1292,7 @@ struct base {
           lib::forward<V>(v),                              \
           lib::forward<Vs>(vs)...)
 
-#define MPARK_DEFAULT(I)                                                      \
+#define C10_MPARK_DEFAULT(I)                                                  \
   dispatcher<(I < lib::decay_t<V>::size()), R, ITs...>::template dispatch<I>( \
       lib::forward<F>(f),                                                     \
       lib::forward<typename ITs::type>(visited_vs)...,                        \
@@ -1299,79 +1301,81 @@ struct base {
 
       switch (v.index()) {
         case B + 0:
-          return MPARK_DISPATCH(B + 0);
+          return C10_MPARK_DISPATCH(B + 0);
         case B + 1:
-          return MPARK_DISPATCH(B + 1);
+          return C10_MPARK_DISPATCH(B + 1);
         case B + 2:
-          return MPARK_DISPATCH(B + 2);
+          return C10_MPARK_DISPATCH(B + 2);
         case B + 3:
-          return MPARK_DISPATCH(B + 3);
+          return C10_MPARK_DISPATCH(B + 3);
         case B + 4:
-          return MPARK_DISPATCH(B + 4);
+          return C10_MPARK_DISPATCH(B + 4);
         case B + 5:
-          return MPARK_DISPATCH(B + 5);
+          return C10_MPARK_DISPATCH(B + 5);
         case B + 6:
-          return MPARK_DISPATCH(B + 6);
+          return C10_MPARK_DISPATCH(B + 6);
         case B + 7:
-          return MPARK_DISPATCH(B + 7);
+          return C10_MPARK_DISPATCH(B + 7);
         case B + 8:
-          return MPARK_DISPATCH(B + 8);
+          return C10_MPARK_DISPATCH(B + 8);
         case B + 9:
-          return MPARK_DISPATCH(B + 9);
+          return C10_MPARK_DISPATCH(B + 9);
         case B + 10:
-          return MPARK_DISPATCH(B + 10);
+          return C10_MPARK_DISPATCH(B + 10);
         case B + 11:
-          return MPARK_DISPATCH(B + 11);
+          return C10_MPARK_DISPATCH(B + 11);
         case B + 12:
-          return MPARK_DISPATCH(B + 12);
+          return C10_MPARK_DISPATCH(B + 12);
         case B + 13:
-          return MPARK_DISPATCH(B + 13);
+          return C10_MPARK_DISPATCH(B + 13);
         case B + 14:
-          return MPARK_DISPATCH(B + 14);
+          return C10_MPARK_DISPATCH(B + 14);
         case B + 15:
-          return MPARK_DISPATCH(B + 15);
+          return C10_MPARK_DISPATCH(B + 15);
         case B + 16:
-          return MPARK_DISPATCH(B + 16);
+          return C10_MPARK_DISPATCH(B + 16);
         case B + 17:
-          return MPARK_DISPATCH(B + 17);
+          return C10_MPARK_DISPATCH(B + 17);
         case B + 18:
-          return MPARK_DISPATCH(B + 18);
+          return C10_MPARK_DISPATCH(B + 18);
         case B + 19:
-          return MPARK_DISPATCH(B + 19);
+          return C10_MPARK_DISPATCH(B + 19);
         case B + 20:
-          return MPARK_DISPATCH(B + 20);
+          return C10_MPARK_DISPATCH(B + 20);
         case B + 21:
-          return MPARK_DISPATCH(B + 21);
+          return C10_MPARK_DISPATCH(B + 21);
         case B + 22:
-          return MPARK_DISPATCH(B + 22);
+          return C10_MPARK_DISPATCH(B + 22);
         case B + 23:
-          return MPARK_DISPATCH(B + 23);
+          return C10_MPARK_DISPATCH(B + 23);
         case B + 24:
-          return MPARK_DISPATCH(B + 24);
+          return C10_MPARK_DISPATCH(B + 24);
         case B + 25:
-          return MPARK_DISPATCH(B + 25);
+          return C10_MPARK_DISPATCH(B + 25);
         case B + 26:
-          return MPARK_DISPATCH(B + 26);
+          return C10_MPARK_DISPATCH(B + 26);
         case B + 27:
-          return MPARK_DISPATCH(B + 27);
+          return C10_MPARK_DISPATCH(B + 27);
         case B + 28:
-          return MPARK_DISPATCH(B + 28);
+          return C10_MPARK_DISPATCH(B + 28);
         case B + 29:
-          return MPARK_DISPATCH(B + 29);
+          return C10_MPARK_DISPATCH(B + 29);
         case B + 30:
-          return MPARK_DISPATCH(B + 30);
+          return C10_MPARK_DISPATCH(B + 30);
         case B + 31:
-          return MPARK_DISPATCH(B + 31);
+          return C10_MPARK_DISPATCH(B + 31);
         default:
-          return MPARK_DEFAULT(B + 32);
+          return C10_MPARK_DEFAULT(B + 32);
       }
 
-#undef MPARK_DEFAULT
-#undef MPARK_DISPATCH
+#undef C10_MPARK_DEFAULT
+#undef C10_MPARK_DISPATCH
     }
 
     template <std::size_t I, typename F, typename... Vs>
-    MPARK_ALWAYS_INLINE static constexpr R dispatch_case(F&& f, Vs&&... vs) {
+    C10_MPARK_ALWAYS_INLINE static constexpr R dispatch_case(
+        F&& f,
+        Vs&&... vs) {
       using Expected = R;
       using Actual = decltype(lib::invoke(
           lib::forward<F>(f),
@@ -1382,7 +1386,7 @@ struct base {
     }
 
     template <std::size_t B, typename F, typename V, typename... Vs>
-    MPARK_ALWAYS_INLINE static constexpr R dispatch_at(
+    C10_MPARK_ALWAYS_INLINE static constexpr R dispatch_at(
         std::size_t index,
         F&& f,
         V&& v,
@@ -1391,85 +1395,85 @@ struct base {
           lib::all<(
               lib::decay_t<V>::size() == lib::decay_t<Vs>::size())...>::value,
           "all of the variants must be the same size.");
-#define MPARK_DISPATCH_AT(I)                                               \
+#define C10_MPARK_DISPATCH_AT(I)                                           \
   dispatcher<(I < lib::decay_t<V>::size()), R>::template dispatch_case<I>( \
       lib::forward<F>(f), lib::forward<V>(v), lib::forward<Vs>(vs)...)
 
-#define MPARK_DEFAULT(I)                                                 \
+#define C10_MPARK_DEFAULT(I)                                             \
   dispatcher<(I < lib::decay_t<V>::size()), R>::template dispatch_at<I>( \
       index, lib::forward<F>(f), lib::forward<V>(v), lib::forward<Vs>(vs)...)
 
       switch (index) {
         case B + 0:
-          return MPARK_DISPATCH_AT(B + 0);
+          return C10_MPARK_DISPATCH_AT(B + 0);
         case B + 1:
-          return MPARK_DISPATCH_AT(B + 1);
+          return C10_MPARK_DISPATCH_AT(B + 1);
         case B + 2:
-          return MPARK_DISPATCH_AT(B + 2);
+          return C10_MPARK_DISPATCH_AT(B + 2);
         case B + 3:
-          return MPARK_DISPATCH_AT(B + 3);
+          return C10_MPARK_DISPATCH_AT(B + 3);
         case B + 4:
-          return MPARK_DISPATCH_AT(B + 4);
+          return C10_MPARK_DISPATCH_AT(B + 4);
         case B + 5:
-          return MPARK_DISPATCH_AT(B + 5);
+          return C10_MPARK_DISPATCH_AT(B + 5);
         case B + 6:
-          return MPARK_DISPATCH_AT(B + 6);
+          return C10_MPARK_DISPATCH_AT(B + 6);
         case B + 7:
-          return MPARK_DISPATCH_AT(B + 7);
+          return C10_MPARK_DISPATCH_AT(B + 7);
         case B + 8:
-          return MPARK_DISPATCH_AT(B + 8);
+          return C10_MPARK_DISPATCH_AT(B + 8);
         case B + 9:
-          return MPARK_DISPATCH_AT(B + 9);
+          return C10_MPARK_DISPATCH_AT(B + 9);
         case B + 10:
-          return MPARK_DISPATCH_AT(B + 10);
+          return C10_MPARK_DISPATCH_AT(B + 10);
         case B + 11:
-          return MPARK_DISPATCH_AT(B + 11);
+          return C10_MPARK_DISPATCH_AT(B + 11);
         case B + 12:
-          return MPARK_DISPATCH_AT(B + 12);
+          return C10_MPARK_DISPATCH_AT(B + 12);
         case B + 13:
-          return MPARK_DISPATCH_AT(B + 13);
+          return C10_MPARK_DISPATCH_AT(B + 13);
         case B + 14:
-          return MPARK_DISPATCH_AT(B + 14);
+          return C10_MPARK_DISPATCH_AT(B + 14);
         case B + 15:
-          return MPARK_DISPATCH_AT(B + 15);
+          return C10_MPARK_DISPATCH_AT(B + 15);
         case B + 16:
-          return MPARK_DISPATCH_AT(B + 16);
+          return C10_MPARK_DISPATCH_AT(B + 16);
         case B + 17:
-          return MPARK_DISPATCH_AT(B + 17);
+          return C10_MPARK_DISPATCH_AT(B + 17);
         case B + 18:
-          return MPARK_DISPATCH_AT(B + 18);
+          return C10_MPARK_DISPATCH_AT(B + 18);
         case B + 19:
-          return MPARK_DISPATCH_AT(B + 19);
+          return C10_MPARK_DISPATCH_AT(B + 19);
         case B + 20:
-          return MPARK_DISPATCH_AT(B + 20);
+          return C10_MPARK_DISPATCH_AT(B + 20);
         case B + 21:
-          return MPARK_DISPATCH_AT(B + 21);
+          return C10_MPARK_DISPATCH_AT(B + 21);
         case B + 22:
-          return MPARK_DISPATCH_AT(B + 22);
+          return C10_MPARK_DISPATCH_AT(B + 22);
         case B + 23:
-          return MPARK_DISPATCH_AT(B + 23);
+          return C10_MPARK_DISPATCH_AT(B + 23);
         case B + 24:
-          return MPARK_DISPATCH_AT(B + 24);
+          return C10_MPARK_DISPATCH_AT(B + 24);
         case B + 25:
-          return MPARK_DISPATCH_AT(B + 25);
+          return C10_MPARK_DISPATCH_AT(B + 25);
         case B + 26:
-          return MPARK_DISPATCH_AT(B + 26);
+          return C10_MPARK_DISPATCH_AT(B + 26);
         case B + 27:
-          return MPARK_DISPATCH_AT(B + 27);
+          return C10_MPARK_DISPATCH_AT(B + 27);
         case B + 28:
-          return MPARK_DISPATCH_AT(B + 28);
+          return C10_MPARK_DISPATCH_AT(B + 28);
         case B + 29:
-          return MPARK_DISPATCH_AT(B + 29);
+          return C10_MPARK_DISPATCH_AT(B + 29);
         case B + 30:
-          return MPARK_DISPATCH_AT(B + 30);
+          return C10_MPARK_DISPATCH_AT(B + 30);
         case B + 31:
-          return MPARK_DISPATCH_AT(B + 31);
+          return C10_MPARK_DISPATCH_AT(B + 31);
         default:
-          return MPARK_DEFAULT(B + 32);
+          return C10_MPARK_DEFAULT(B + 32);
       }
 
-#undef MPARK_DEFAULT
-#undef MPARK_DISPATCH_AT
+#undef C10_MPARK_DEFAULT
+#undef C10_MPARK_DISPATCH_AT
     }
   };
 #else
@@ -1507,7 +1511,7 @@ struct base {
           access::base::get_alt<Is>(lib::forward<Vs>(vs))...);
     }
 
-#ifdef MPARK_RETURN_TYPE_DEDUCTION
+#ifdef C10_MPARK_RETURN_TYPE_DEDUCTION
     template <std::size_t... Is>
     inline static constexpr auto impl(lib::index_sequence<Is...>) {
       return &dispatch<Is...>;
@@ -1537,7 +1541,7 @@ struct base {
 #endif
   };
 
-#ifdef MPARK_RETURN_TYPE_DEDUCTION
+#ifdef C10_MPARK_RETURN_TYPE_DEDUCTION
   template <typename F, typename... Vs>
   inline static constexpr auto make_fmatrix() {
     return make_fmatrix_impl<F, Vs...>::impl(
@@ -1586,7 +1590,7 @@ struct base {
 #endif
 };
 
-#if !defined(MPARK_VARIANT_SWITCH_VISIT) && \
+#if !defined(C10_MPARK_VARIANT_SWITCH_VISIT) && \
     (!defined(_MSC_VER) || _MSC_VER >= 1910)
 template <typename F, typename... Vs>
 using fmatrix_t = decltype(base::make_fmatrix<F, Vs...>());
@@ -1615,7 +1619,7 @@ constexpr fdiagonal_t<F, Vs...> fdiagonal<F, Vs...>::value;
 struct alt {
   template <typename Visitor, typename... Vs>
   inline static constexpr DECLTYPE_AUTO visit_alt(Visitor&& visitor, Vs&&... vs)
-#ifdef MPARK_VARIANT_SWITCH_VISIT
+#ifdef C10_MPARK_VARIANT_SWITCH_VISIT
       DECLTYPE_AUTO_RETURN(base::dispatcher<
                            true,
                            base::dispatch_result_t<
@@ -1643,7 +1647,7 @@ struct alt {
           template <typename Visitor, typename... Vs>
           inline static constexpr DECLTYPE_AUTO
       visit_alt_at(std::size_t index, Visitor&& visitor, Vs&&... vs)
-#ifdef MPARK_VARIANT_SWITCH_VISIT
+#ifdef C10_MPARK_VARIANT_SWITCH_VISIT
           DECLTYPE_AUTO_RETURN(
               base::dispatcher<
                   true,
@@ -1772,7 +1776,7 @@ union recursive_union;
 template <Trait DestructibleTrait, std::size_t Index>
 union recursive_union<DestructibleTrait, Index> {};
 
-#define MPARK_VARIANT_RECURSIVE_UNION(destructible_trait, destructor)      \
+#define C10_MPARK_VARIANT_RECURSIVE_UNION(destructible_trait, destructor)  \
   template <std::size_t Index, typename T, typename... Ts>                 \
   union recursive_union<destructible_trait, Index, T, Ts...> {             \
    public:                                                                 \
@@ -1808,12 +1812,13 @@ union recursive_union<DestructibleTrait, Index> {};
     friend struct access::recursive_union;                                 \
   }
 
-MPARK_VARIANT_RECURSIVE_UNION(Trait::TriviallyAvailable,
-                              ~recursive_union() = default;);
-MPARK_VARIANT_RECURSIVE_UNION(Trait::Available, ~recursive_union(){});
-MPARK_VARIANT_RECURSIVE_UNION(Trait::Unavailable, ~recursive_union() = delete;);
+C10_MPARK_VARIANT_RECURSIVE_UNION(Trait::TriviallyAvailable,
+                                  ~recursive_union() = default;);
+C10_MPARK_VARIANT_RECURSIVE_UNION(Trait::Available, ~recursive_union(){});
+C10_MPARK_VARIANT_RECURSIVE_UNION(Trait::Unavailable,
+                                  ~recursive_union() = delete;);
 
-#undef MPARK_VARIANT_RECURSIVE_UNION
+#undef C10_MPARK_VARIANT_RECURSIVE_UNION
 
 using index_t = unsigned int;
 
@@ -1890,9 +1895,9 @@ struct dtor {
 };
 
 #if !defined(_MSC_VER) || _MSC_VER >= 1910
-#define MPARK_INHERITING_CTOR(type, base) using base::base;
+#define C10_MPARK_INHERITING_CTOR(type, base) using base::base;
 #else
-#define MPARK_INHERITING_CTOR(type, base)        \
+#define C10_MPARK_INHERITING_CTOR(type, base)    \
   template <typename... Args>                    \
   inline explicit constexpr type(Args&&... args) \
       : base(lib::forward<Args>(args)...) {}
@@ -1901,32 +1906,32 @@ struct dtor {
 template <typename Traits, Trait = Traits::destructible_trait>
 class destructor;
 
-#define MPARK_VARIANT_DESTRUCTOR(destructible_trait, definition, destroy) \
-  template <typename... Ts>                                               \
-  class destructor<traits<Ts...>, destructible_trait>                     \
-      : public base<destructible_trait, Ts...> {                          \
-    using super = base<destructible_trait, Ts...>;                        \
-                                                                          \
-   public:                                                                \
-    MPARK_INHERITING_CTOR(destructor, super)                              \
-    using super::operator=;                                               \
-                                                                          \
-    destructor(const destructor&) = default;                              \
-    destructor(destructor&&) = default;                                   \
-    definition destructor& operator=(const destructor&) = default;        \
-    destructor& operator=(destructor&&) = default;                        \
-                                                                          \
-   protected:                                                             \
-    destroy                                                               \
+#define C10_MPARK_VARIANT_DESTRUCTOR(destructible_trait, definition, destroy) \
+  template <typename... Ts>                                                   \
+  class destructor<traits<Ts...>, destructible_trait>                         \
+      : public base<destructible_trait, Ts...> {                              \
+    using super = base<destructible_trait, Ts...>;                            \
+                                                                              \
+   public:                                                                    \
+    C10_MPARK_INHERITING_CTOR(destructor, super)                              \
+    using super::operator=;                                                   \
+                                                                              \
+    destructor(const destructor&) = default;                                  \
+    destructor(destructor&&) = default;                                       \
+    definition destructor& operator=(const destructor&) = default;            \
+    destructor& operator=(destructor&&) = default;                            \
+                                                                              \
+   protected:                                                                 \
+    destroy                                                                   \
   }
 
-MPARK_VARIANT_DESTRUCTOR(
+C10_MPARK_VARIANT_DESTRUCTOR(
     Trait::TriviallyAvailable, ~destructor() = default;
     , inline void destroy() noexcept {
       this->index_ = static_cast<index_t>(-1);
     });
 
-MPARK_VARIANT_DESTRUCTOR(
+C10_MPARK_VARIANT_DESTRUCTOR(
     Trait::Available,
     ~destructor() { destroy(); },
     inline void destroy() noexcept {
@@ -1936,21 +1941,21 @@ MPARK_VARIANT_DESTRUCTOR(
       this->index_ = static_cast<index_t>(-1);
     });
 
-MPARK_VARIANT_DESTRUCTOR(Trait::Unavailable, ~destructor() = delete;
-                         , inline void destroy() noexcept = delete;);
+C10_MPARK_VARIANT_DESTRUCTOR(Trait::Unavailable, ~destructor() = delete;
+                             , inline void destroy() noexcept = delete;);
 
-#undef MPARK_VARIANT_DESTRUCTOR
+#undef C10_MPARK_VARIANT_DESTRUCTOR
 
 template <typename Traits>
 class constructor : public destructor<Traits> {
   using super = destructor<Traits>;
 
  public:
-  MPARK_INHERITING_CTOR(constructor, super)
+  C10_MPARK_INHERITING_CTOR(constructor, super)
   using super::operator=;
 
  protected:
-#ifndef MPARK_GENERIC_LAMBDAS
+#ifndef C10_MPARK_GENERIC_LAMBDAS
   struct ctor {
     template <typename LhsAlt, typename RhsAlt>
     inline void operator()(LhsAlt& lhs_alt, RhsAlt&& rhs_alt) const {
@@ -1972,7 +1977,7 @@ class constructor : public destructor<Traits> {
     if (!rhs.valueless_by_exception()) {
       visitation::alt::visit_alt_at(
           rhs.index(),
-#ifdef MPARK_GENERIC_LAMBDAS
+#ifdef C10_MPARK_GENERIC_LAMBDAS
           [](auto& lhs_alt, auto&& rhs_alt) {
             constructor::construct_alt(
                 lhs_alt, lib::forward<decltype(rhs_alt)>(rhs_alt).value);
@@ -1991,27 +1996,28 @@ class constructor : public destructor<Traits> {
 template <typename Traits, Trait = Traits::move_constructible_trait>
 class move_constructor;
 
-#define MPARK_VARIANT_MOVE_CONSTRUCTOR(move_constructible_trait, definition) \
-  template <typename... Ts>                                                  \
-  class move_constructor<traits<Ts...>, move_constructible_trait>            \
-      : public constructor<traits<Ts...>> {                                  \
-    using super = constructor<traits<Ts...>>;                                \
-                                                                             \
-   public:                                                                   \
-    MPARK_INHERITING_CTOR(move_constructor, super)                           \
-    using super::operator=;                                                  \
-                                                                             \
-    move_constructor(const move_constructor&) = default;                     \
-    definition ~move_constructor() = default;                                \
-    move_constructor& operator=(const move_constructor&) = default;          \
-    move_constructor& operator=(move_constructor&&) = default;               \
+#define C10_MPARK_VARIANT_MOVE_CONSTRUCTOR(                         \
+    move_constructible_trait, definition)                           \
+  template <typename... Ts>                                         \
+  class move_constructor<traits<Ts...>, move_constructible_trait>   \
+      : public constructor<traits<Ts...>> {                         \
+    using super = constructor<traits<Ts...>>;                       \
+                                                                    \
+   public:                                                          \
+    C10_MPARK_INHERITING_CTOR(move_constructor, super)              \
+    using super::operator=;                                         \
+                                                                    \
+    move_constructor(const move_constructor&) = default;            \
+    definition ~move_constructor() = default;                       \
+    move_constructor& operator=(const move_constructor&) = default; \
+    move_constructor& operator=(move_constructor&&) = default;      \
   }
 
-MPARK_VARIANT_MOVE_CONSTRUCTOR(
+C10_MPARK_VARIANT_MOVE_CONSTRUCTOR(
     Trait::TriviallyAvailable,
     move_constructor(move_constructor&& that) = default;);
 
-MPARK_VARIANT_MOVE_CONSTRUCTOR(
+C10_MPARK_VARIANT_MOVE_CONSTRUCTOR(
     Trait::Available,
     move_constructor(move_constructor&& that) noexcept(
         lib::all<std::is_nothrow_move_constructible<Ts>::value...>::value)
@@ -2019,51 +2025,52 @@ MPARK_VARIANT_MOVE_CONSTRUCTOR(
       this->generic_construct(*this, lib::move(that));
     });
 
-MPARK_VARIANT_MOVE_CONSTRUCTOR(Trait::Unavailable,
-                               move_constructor(move_constructor&&) = delete;);
+C10_MPARK_VARIANT_MOVE_CONSTRUCTOR(
+    Trait::Unavailable, move_constructor(move_constructor&&) = delete;);
 
-#undef MPARK_VARIANT_MOVE_CONSTRUCTOR
+#undef C10_MPARK_VARIANT_MOVE_CONSTRUCTOR
 
 template <typename Traits, Trait = Traits::copy_constructible_trait>
 class copy_constructor;
 
-#define MPARK_VARIANT_COPY_CONSTRUCTOR(copy_constructible_trait, definition) \
-  template <typename... Ts>                                                  \
-  class copy_constructor<traits<Ts...>, copy_constructible_trait>            \
-      : public move_constructor<traits<Ts...>> {                             \
-    using super = move_constructor<traits<Ts...>>;                           \
-                                                                             \
-   public:                                                                   \
-    MPARK_INHERITING_CTOR(copy_constructor, super)                           \
-    using super::operator=;                                                  \
-                                                                             \
-    definition copy_constructor(copy_constructor&&) = default;               \
-    ~copy_constructor() = default;                                           \
-    copy_constructor& operator=(const copy_constructor&) = default;          \
-    copy_constructor& operator=(copy_constructor&&) = default;               \
+#define C10_MPARK_VARIANT_COPY_CONSTRUCTOR(                         \
+    copy_constructible_trait, definition)                           \
+  template <typename... Ts>                                         \
+  class copy_constructor<traits<Ts...>, copy_constructible_trait>   \
+      : public move_constructor<traits<Ts...>> {                    \
+    using super = move_constructor<traits<Ts...>>;                  \
+                                                                    \
+   public:                                                          \
+    C10_MPARK_INHERITING_CTOR(copy_constructor, super)              \
+    using super::operator=;                                         \
+                                                                    \
+    definition copy_constructor(copy_constructor&&) = default;      \
+    ~copy_constructor() = default;                                  \
+    copy_constructor& operator=(const copy_constructor&) = default; \
+    copy_constructor& operator=(copy_constructor&&) = default;      \
   }
 
-MPARK_VARIANT_COPY_CONSTRUCTOR(
+C10_MPARK_VARIANT_COPY_CONSTRUCTOR(
     Trait::TriviallyAvailable,
     copy_constructor(const copy_constructor& that) = default;);
 
-MPARK_VARIANT_COPY_CONSTRUCTOR(
+C10_MPARK_VARIANT_COPY_CONSTRUCTOR(
     Trait::Available, copy_constructor(const copy_constructor& that)
     : copy_constructor(valueless_t{}) {
       this->generic_construct(*this, that);
     });
 
-MPARK_VARIANT_COPY_CONSTRUCTOR(
+C10_MPARK_VARIANT_COPY_CONSTRUCTOR(
     Trait::Unavailable, copy_constructor(const copy_constructor&) = delete;);
 
-#undef MPARK_VARIANT_COPY_CONSTRUCTOR
+#undef C10_MPARK_VARIANT_COPY_CONSTRUCTOR
 
 template <typename Traits>
 class assignment : public copy_constructor<Traits> {
   using super = copy_constructor<Traits>;
 
  public:
-  MPARK_INHERITING_CTOR(assignment, super)
+  C10_MPARK_INHERITING_CTOR(assignment, super)
   using super::operator=;
 
   template <std::size_t I, typename... Args>
@@ -2079,7 +2086,7 @@ class assignment : public copy_constructor<Traits> {
   }
 
  protected:
-#ifndef MPARK_GENERIC_LAMBDAS
+#ifndef C10_MPARK_GENERIC_LAMBDAS
   template <typename That>
   struct assigner {
     template <typename ThisAlt, typename ThatAlt>
@@ -2127,7 +2134,7 @@ class assignment : public copy_constructor<Traits> {
     } else {
       visitation::alt::visit_alt_at(
           that.index(),
-#ifdef MPARK_GENERIC_LAMBDAS
+#ifdef C10_MPARK_GENERIC_LAMBDAS
           [this](auto& this_alt, auto&& that_alt) {
             this->assign_alt(
                 this_alt, lib::forward<decltype(that_alt)>(that_alt).value);
@@ -2145,28 +2152,28 @@ class assignment : public copy_constructor<Traits> {
 template <typename Traits, Trait = Traits::move_assignable_trait>
 class move_assignment;
 
-#define MPARK_VARIANT_MOVE_ASSIGNMENT(move_assignable_trait, definition) \
-  template <typename... Ts>                                              \
-  class move_assignment<traits<Ts...>, move_assignable_trait>            \
-      : public assignment<traits<Ts...>> {                               \
-    using super = assignment<traits<Ts...>>;                             \
-                                                                         \
-   public:                                                               \
-    MPARK_INHERITING_CTOR(move_assignment, super)                        \
-    using super::operator=;                                              \
-                                                                         \
-    move_assignment(const move_assignment&) = default;                   \
-    move_assignment(move_assignment&&) = default;                        \
-    ~move_assignment() = default;                                        \
-    move_assignment& operator=(const move_assignment&) = default;        \
-    definition                                                           \
+#define C10_MPARK_VARIANT_MOVE_ASSIGNMENT(move_assignable_trait, definition) \
+  template <typename... Ts>                                                  \
+  class move_assignment<traits<Ts...>, move_assignable_trait>                \
+      : public assignment<traits<Ts...>> {                                   \
+    using super = assignment<traits<Ts...>>;                                 \
+                                                                             \
+   public:                                                                   \
+    C10_MPARK_INHERITING_CTOR(move_assignment, super)                        \
+    using super::operator=;                                                  \
+                                                                             \
+    move_assignment(const move_assignment&) = default;                       \
+    move_assignment(move_assignment&&) = default;                            \
+    ~move_assignment() = default;                                            \
+    move_assignment& operator=(const move_assignment&) = default;            \
+    definition                                                               \
   }
 
-MPARK_VARIANT_MOVE_ASSIGNMENT(
+C10_MPARK_VARIANT_MOVE_ASSIGNMENT(
     Trait::TriviallyAvailable,
     move_assignment& operator=(move_assignment&& that) = default;);
 
-MPARK_VARIANT_MOVE_ASSIGNMENT(
+C10_MPARK_VARIANT_MOVE_ASSIGNMENT(
     Trait::Available,
     move_assignment&
     operator=(move_assignment&& that) noexcept(
@@ -2177,36 +2184,36 @@ MPARK_VARIANT_MOVE_ASSIGNMENT(
       return *this;
     });
 
-MPARK_VARIANT_MOVE_ASSIGNMENT(
+C10_MPARK_VARIANT_MOVE_ASSIGNMENT(
     Trait::Unavailable,
     move_assignment& operator=(move_assignment&&) = delete;);
 
-#undef MPARK_VARIANT_MOVE_ASSIGNMENT
+#undef C10_MPARK_VARIANT_MOVE_ASSIGNMENT
 
 template <typename Traits, Trait = Traits::copy_assignable_trait>
 class copy_assignment;
 
-#define MPARK_VARIANT_COPY_ASSIGNMENT(copy_assignable_trait, definition) \
-  template <typename... Ts>                                              \
-  class copy_assignment<traits<Ts...>, copy_assignable_trait>            \
-      : public move_assignment<traits<Ts...>> {                          \
-    using super = move_assignment<traits<Ts...>>;                        \
-                                                                         \
-   public:                                                               \
-    MPARK_INHERITING_CTOR(copy_assignment, super)                        \
-    using super::operator=;                                              \
-                                                                         \
-    copy_assignment(const copy_assignment&) = default;                   \
-    copy_assignment(copy_assignment&&) = default;                        \
-    ~copy_assignment() = default;                                        \
-    definition copy_assignment& operator=(copy_assignment&&) = default;  \
+#define C10_MPARK_VARIANT_COPY_ASSIGNMENT(copy_assignable_trait, definition) \
+  template <typename... Ts>                                                  \
+  class copy_assignment<traits<Ts...>, copy_assignable_trait>                \
+      : public move_assignment<traits<Ts...>> {                              \
+    using super = move_assignment<traits<Ts...>>;                            \
+                                                                             \
+   public:                                                                   \
+    C10_MPARK_INHERITING_CTOR(copy_assignment, super)                        \
+    using super::operator=;                                                  \
+                                                                             \
+    copy_assignment(const copy_assignment&) = default;                       \
+    copy_assignment(copy_assignment&&) = default;                            \
+    ~copy_assignment() = default;                                            \
+    definition copy_assignment& operator=(copy_assignment&&) = default;      \
   }
 
-MPARK_VARIANT_COPY_ASSIGNMENT(
+C10_MPARK_VARIANT_COPY_ASSIGNMENT(
     Trait::TriviallyAvailable,
     copy_assignment& operator=(const copy_assignment& that) = default;);
 
-MPARK_VARIANT_COPY_ASSIGNMENT(
+C10_MPARK_VARIANT_COPY_ASSIGNMENT(
     Trait::Available,
     copy_assignment&
     operator=(const copy_assignment& that) {
@@ -2214,18 +2221,18 @@ MPARK_VARIANT_COPY_ASSIGNMENT(
       return *this;
     });
 
-MPARK_VARIANT_COPY_ASSIGNMENT(
+C10_MPARK_VARIANT_COPY_ASSIGNMENT(
     Trait::Unavailable,
     copy_assignment& operator=(const copy_assignment&) = delete;);
 
-#undef MPARK_VARIANT_COPY_ASSIGNMENT
+#undef C10_MPARK_VARIANT_COPY_ASSIGNMENT
 
 template <typename... Ts>
 class impl : public copy_assignment<traits<Ts...>> {
   using super = copy_assignment<traits<Ts...>>;
 
  public:
-  MPARK_INHERITING_CTOR(impl, super)
+  C10_MPARK_INHERITING_CTOR(impl, super)
   impl& operator=(const impl& other) = default;
 
   template <std::size_t I, typename Arg>
@@ -2239,7 +2246,7 @@ class impl : public copy_assignment<traits<Ts...>> {
     } else if (this->index() == that.index()) {
       visitation::alt::visit_alt_at(
           this->index(),
-#ifdef MPARK_GENERIC_LAMBDAS
+#ifdef C10_MPARK_GENERIC_LAMBDAS
           [](auto& this_alt, auto& that_alt) {
             using std::swap;
             swap(this_alt.value, that_alt.value);
@@ -2257,7 +2264,7 @@ class impl : public copy_assignment<traits<Ts...>> {
         std::swap(lhs, rhs);
       }
       impl tmp(lib::move(*rhs));
-#ifdef MPARK_EXCEPTIONS
+#ifdef C10_MPARK_EXCEPTIONS
       // EXTENSION: When the move construction of `lhs` into `rhs` throws
       // and `tmp` is nothrow move constructible then we move `tmp` back
       // into `rhs` and provide the strong exception safety guarantee.
@@ -2277,7 +2284,7 @@ class impl : public copy_assignment<traits<Ts...>> {
   }
 
  private:
-#ifndef MPARK_GENERIC_LAMBDAS
+#ifndef C10_MPARK_GENERIC_LAMBDAS
   struct swapper {
     template <typename ThisAlt, typename ThatAlt>
     inline void operator()(ThisAlt& this_alt, ThatAlt& that_alt) const {
@@ -2294,7 +2301,7 @@ class impl : public copy_assignment<traits<Ts...>> {
   }
 };
 
-#undef MPARK_INHERITING_CTOR
+#undef C10_MPARK_INHERITING_CTOR
 
 template <std::size_t I, typename T>
 struct overload_leaf {
@@ -2688,7 +2695,7 @@ inline constexpr bool operator==(
     const variant<Ts...>& rhs) {
   using detail_::visitation::variant;
   using equal_to = detail_::convert_to_bool<lib::equal_to>;
-#ifdef MPARK_CPP14_CONSTEXPR
+#ifdef C10_MPARK_CPP14_CONSTEXPR
   if (lhs.index() != rhs.index())
     return false;
   if (lhs.valueless_by_exception())
@@ -2707,7 +2714,7 @@ inline constexpr bool operator!=(
     const variant<Ts...>& rhs) {
   using detail_::visitation::variant;
   using not_equal_to = detail_::convert_to_bool<lib::not_equal_to>;
-#ifdef MPARK_CPP14_CONSTEXPR
+#ifdef C10_MPARK_CPP14_CONSTEXPR
   if (lhs.index() != rhs.index())
     return true;
   if (lhs.valueless_by_exception())
@@ -2726,7 +2733,7 @@ inline constexpr bool operator<(
     const variant<Ts...>& rhs) {
   using detail_::visitation::variant;
   using less = detail_::convert_to_bool<lib::less>;
-#ifdef MPARK_CPP14_CONSTEXPR
+#ifdef C10_MPARK_CPP14_CONSTEXPR
   if (rhs.valueless_by_exception())
     return false;
   if (lhs.valueless_by_exception())
@@ -2750,7 +2757,7 @@ inline constexpr bool operator>(
     const variant<Ts...>& rhs) {
   using detail_::visitation::variant;
   using greater = detail_::convert_to_bool<lib::greater>;
-#ifdef MPARK_CPP14_CONSTEXPR
+#ifdef C10_MPARK_CPP14_CONSTEXPR
   if (lhs.valueless_by_exception())
     return false;
   if (rhs.valueless_by_exception())
@@ -2774,7 +2781,7 @@ inline constexpr bool operator<=(
     const variant<Ts...>& rhs) {
   using detail_::visitation::variant;
   using less_equal = detail_::convert_to_bool<lib::less_equal>;
-#ifdef MPARK_CPP14_CONSTEXPR
+#ifdef C10_MPARK_CPP14_CONSTEXPR
   if (lhs.valueless_by_exception())
     return true;
   if (rhs.valueless_by_exception())
@@ -2799,7 +2806,7 @@ inline constexpr bool operator>=(
     const variant<Ts...>& rhs) {
   using detail_::visitation::variant;
   using greater_equal = detail_::convert_to_bool<lib::greater_equal>;
-#ifdef MPARK_CPP14_CONSTEXPR
+#ifdef C10_MPARK_CPP14_CONSTEXPR
   if (rhs.valueless_by_exception())
     return true;
   if (lhs.valueless_by_exception())
@@ -2844,7 +2851,7 @@ inline constexpr bool operator!=(monostate, monostate) noexcept {
   return false;
 }
 
-#ifdef MPARK_CPP14_CONSTEXPR
+#ifdef C10_MPARK_CPP14_CONSTEXPR
 namespace detail_ {
 
 inline constexpr bool any(std::initializer_list<bool> bs) {
@@ -2951,7 +2958,7 @@ struct hash<c10::detail_::enabled_type<
     std::size_t result = v.valueless_by_exception()
         ? 299792458 // Random value chosen by the universe upon creation
         : variant::visit_alt(
-#ifdef MPARK_GENERIC_LAMBDAS
+#ifdef C10_MPARK_GENERIC_LAMBDAS
               [](const auto& alt) {
                 using alt_type = c10::lib::decay_t<decltype(alt)>;
                 using value_type =
@@ -2967,7 +2974,7 @@ struct hash<c10::detail_::enabled_type<
   }
 
  private:
-#ifndef MPARK_GENERIC_LAMBDAS
+#ifndef C10_MPARK_GENERIC_LAMBDAS
   struct hasher {
     template <typename Alt>
     inline std::size_t operator()(const Alt& alt) const {

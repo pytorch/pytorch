@@ -24,7 +24,7 @@ inline Tensor view_tensor(
 
 inline DimVector computeStrideForViewAsReal(IntArrayRef oldstride) {
   DimVector res(oldstride.size() + 1);
-  for(size_t i = 0; i < oldstride.size(); i++) {
+  for (const auto i : c10::irange(oldstride.size())) {
     res[i] = oldstride[i] * 2;
   }
   res.back() = 1;

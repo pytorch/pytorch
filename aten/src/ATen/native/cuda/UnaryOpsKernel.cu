@@ -1,19 +1,18 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/native/UnaryOps.h>
 
 #include <limits>
 
 #include <ATen/AccumulateType.h>
-#include <ATen/Context.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/Math.h>
-#include <ATen/native/TensorFactories.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/Math.cuh>
 #include <ATen/NumericUtils.h>
 #include <c10/cuda/CUDAMathCompat.h>
-#include <ATen/NumericUtils.h>
+#include <c10/core/Scalar.h>
 #include <c10/util/complex.h>
 
 namespace at {
@@ -155,7 +154,7 @@ void nan_to_num_kernel_cuda(
 }
 
 void frexp_kernel_cuda(TensorIteratorBase& iter) {
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
   // Reference: https://rocmdocs.amd.com/en/latest/ROCm_API_References/HIP-MATH.html
   //            https://github.com/ROCm-Developer-Tools/HIP/issues/2169
   // ROCm does not support frexp function yet

@@ -12,14 +12,12 @@
     size_t src_numel =                                                \
         src->nbytes() / THCuda##TYPECUDA##Storage_elementSize(state); \
     THArgCheck(self_numel == src_numel, 2, "size does not match");    \
-    THCTensor* selfTensor =                                           \
-        THCTensor_(newWithStorage1d)(state, self, 0, self_numel, 1);  \
-    struct THCuda##TYPECUDA##Tensor* srcTensor =                      \
+    at::Tensor selfTensor = tensor_reclaim(                           \
+        THCTensor_(newWithStorage1d)(state, self, 0, self_numel, 1)); \
+    at::Tensor srcTensor = tensor_reclaim(                            \
         THCuda##TYPECUDA##Tensor_newWithStorage1d(                    \
-            state, src, 0, src_numel, 1);                             \
-    THCTensor_(copy)(state, selfTensor, srcTensor);                   \
-    THCuda##TYPECUDA##Tensor_free(state, srcTensor);                  \
-    THCTensor_(free)(state, selfTensor);                              \
+            state, src, 0, src_numel, 1));                            \
+    selfTensor.copy_(srcTensor);                                      \
   }
 
 #if !defined(THC_REAL_IS_COMPLEXFLOAT) && !defined(THC_REAL_IS_COMPLEXDOUBLE)

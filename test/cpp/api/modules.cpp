@@ -1212,7 +1212,7 @@ TEST_F(ModulesTest, Fold) {
     Fold model(FoldOptions({8, 8}, {3, 3}));
     ASSERT_THROWS_WITH(
         model(torch::randn({1, 3, 16, 16})),
-        "Input Error: Only 3D input Tensors are supported (got 4D)");
+        "Input Error: Only unbatched (2D) or batched (3D) input Tensors are supported (got 4D)");
   }
 }
 
@@ -3558,8 +3558,8 @@ namespace detail {
         bias_k = multihead_attn_module->bias_k.detach();
         bias_v = multihead_attn_module->bias_v.detach();
       } else {
-        bias_k = {};
-        bias_v = {};
+        bias_k.reset();
+        bias_v.reset();
       }
 
       torch::Tensor _Q = decoder_state_tensor.unsqueeze(1).transpose(0, 1);

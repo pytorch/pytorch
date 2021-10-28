@@ -35,6 +35,8 @@ using StmtPtr = NodePtr<Stmt>;
 using VarPtr = NodePtr<Var>;
 
 class ExprHandle;
+class VarHandle;
+class BufHandle;
 
 class Add;
 class And;

@@ -33,7 +33,7 @@ void packGradient(const Gradient& gradient, Node* dnode);
 bool needsGradient(const std::shared_ptr<const Graph>& graph);
 void runOptimization(
     std::shared_ptr<Graph>& graph,
-    bool unroll = true,
+    bool unroll_non_constant_loops = true,
     bool const_prop_user_classes = true);
 void runNondiffOptimization(
     std::shared_ptr<Graph>& graph,
@@ -81,6 +81,10 @@ struct GraphExecutorImplBase {
       size_t remaining_bailout_depth) = 0;
   virtual GraphExecutorState getDebugState() = 0;
   virtual ~GraphExecutorImplBase() = default;
+
+  virtual bool isOptimized() const {
+    return false;
+  }
 
  protected:
   friend struct GraphExecutor;

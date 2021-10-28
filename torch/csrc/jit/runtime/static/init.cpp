@@ -25,6 +25,8 @@ void initStaticModuleBindings(PyObject* module) {
       .def_readonly(
           "output_dealloc_time",
           &StaticRuntime::IndividualMetrics::output_dealloc_time)
+      .def_readonly(
+          "first_iter_time", &StaticRuntime::IndividualMetrics::first_iter_time)
       .def_readonly("total_time", &StaticRuntime::IndividualMetrics::total_time)
       .def_readonly(
           "out_nodes_count", &StaticRuntime::IndividualMetrics::out_nodes_count)
@@ -44,10 +46,6 @@ void initStaticModuleBindings(PyObject* module) {
           &StaticRuntime::IndividualMetrics::instances_per_node_type)
       .def_readonly("out_nodes", &StaticRuntime::IndividualMetrics::out_nodes);
   static_module
-      .def(
-          "__call__",
-          py::overload_cast<const std::vector<at::Tensor>&>(
-              &StaticModule::operator()))
       .def(
           "__call__",
           [](StaticModule& self,

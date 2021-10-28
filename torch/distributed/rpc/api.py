@@ -265,7 +265,7 @@ def _barrier(worker_names):
         )
 
 @_require_initialized
-def _wait_all_workers():
+def _wait_all_workers(timeout=DEFAULT_SHUTDOWN_TIMEOUT):
     r"""
     Block until all local and remote RPC processes reach this method and wait
     for all outstanding work to complete. Every RPC process must call this
@@ -274,7 +274,7 @@ def _wait_all_workers():
     framework will work after this method returns.
     """
     try:
-        _all_gather(None, timeout=DEFAULT_SHUTDOWN_TIMEOUT)
+        _all_gather(None, timeout=timeout)
     except RuntimeError as ex:
         logger.error(
             f"Failed to respond to 'Shutdown Proceed' in time, got error {ex}"
@@ -283,7 +283,7 @@ def _wait_all_workers():
 
 
 @_require_initialized
-def shutdown(graceful=True):
+def shutdown(graceful=True, timeout=DEFAULT_SHUTDOWN_TIMEOUT):
     r"""
     Perform a shutdown of the RPC agent, and then destroy the RPC agent. This
     stops the local agent from accepting outstanding requests, and shuts
@@ -333,7 +333,7 @@ def shutdown(graceful=True):
     """
     if graceful:
         try:
-            _wait_all_workers()
+            _wait_all_workers(timeout)
             _delete_all_user_and_unforked_owner_rrefs()
             _get_current_rpc_agent().join(shutdown=True)
         finally:
