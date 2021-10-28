@@ -46,7 +46,8 @@ TORCH_API Value* emitBuiltinCall(
     Symbol name,
     at::ArrayRef<NamedValue> args,
     at::ArrayRef<NamedValue> kwargs,
-    const c10::optional<NamedValue>& self = c10::nullopt);
+    const c10::optional<NamedValue>& self = c10::nullopt,
+    const c10::optional<int64_t> version = c10::nullopt);
 
 TORCH_API c10::optional<size_t> findInputWithName(
     const std::string& name,

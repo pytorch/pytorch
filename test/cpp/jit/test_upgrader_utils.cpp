@@ -10,13 +10,13 @@ namespace jit {
 
 TEST(UpgraderUtils, FindCorrectUpgrader) {
 
-    UpgraderDB dummy_entry = {
-        {4, "foo__0_3"},
-        {8, "foo__4_7"},
+    std::vector<UpgraderEntry> dummy_entry = {
+        {4, "foo__0_3", "foo.bar()"},
+        {8, "foo__4_7", "foo.bar()"},
     };
 
     auto upgrader = findUpgrader(dummy_entry, 6);
-    EXPECT_EQ(upgrader, "foo__4_7");
+    EXPECT_EQ(upgrader.upgrader_name, "foo__4_7");
 }
 
 } // namespace jit

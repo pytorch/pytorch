@@ -32,7 +32,7 @@ struct OpsReplacer {
             if (version_entry != operator_version_map.end()){
                 auto current_version = getCurrentGlobalVersion();
                 auto upgrader_name = findUpgrader(version_entry->second, current_version);
-                auto upgrader_graph_entry = upgraders_graph.find(upgrader_name);
+                auto upgrader_graph_entry = upgraders_graph.find(upgrader_name.upgrader_name);
                 assert(upgrader_graph_entry != upgraders_graph.end());
                 torch::jit::Graph upgrader_graph;
                 parseIR(upgrader_graph_entry->second, &upgrader_graph);

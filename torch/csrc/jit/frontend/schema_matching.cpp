@@ -1,10 +1,13 @@
 #include <torch/csrc/jit/frontend/schema_matching.h>
+#include "jit/frontend/function_schema_parser.h"
 
 #include <ATen/core/jit_type.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/builtin_functions.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/operator_upgraders/version_map.h>
+#include <torch/csrc/jit/operator_upgraders/utils.h>
 
 namespace torch {
 namespace jit {
@@ -612,7 +615,8 @@ Value* emitBuiltinCall(
     Symbol name,
     at::ArrayRef<NamedValue> args,
     at::ArrayRef<NamedValue> kwargs,
-    const c10::optional<NamedValue>& self) {
+    const c10::optional<NamedValue>& self,
+    const c10::optional<int64_t> version) {
   const auto& variants = getAllOperatorsFor(name);
   const auto& builtin_functions = getAllBuiltinFunctionsFor(name);
 
@@ -624,7 +628,21 @@ Value* emitBuiltinCall(
   }
   for (const auto method : builtin_functions) {
     method->ensure_defined();
-    schemas.push_back(&method->getSchema());
+    // if its an old operator, we need to use the old schema
+    auto op_name = method->name();
+
+    if (version.has_value()) {
+      auto version_entry = operator_version_map.find(op_name);
+      if (version_entry != operator_version_map.end()) {
+        auto old_schema_entry = findUpgrader(version_entry->second, version.value());
+        auto old_schema = parseSchema(old_schema_entry.old_schema);
+        // TODO is this necessary?
+        method->setSchema(old_schema);
+        schemas.push_back(&old_schema);
+      }
+    } else {
+      schemas.push_back(&method->getSchema());
+    }
   }
 
   // no operators found with the same name, print out similarly named operators
