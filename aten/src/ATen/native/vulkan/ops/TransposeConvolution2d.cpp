@@ -245,13 +245,14 @@ bool usable(const Tensor& input) {
 
 static inline std::vector<int64_t> get_conv_transpose_output_size(
     IntArrayRef input_size, IntArrayRef weight_size,
-    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation = IntArrayRef()) {
+    IntArrayRef padding, IntArrayRef stride,
+    IntArrayRef dilation = IntArrayRef(), IntArrayRef output_padding) {
   auto dim = input_size.size();
   std::vector<int64_t> output_size(dim);
   output_size[0] = input_size[input_batch_size_dim];
   output_size[1] = weight_size[weight_input_channels_dim];
   for (size_t d = 2; d < dim; ++d) {
-    output_size[d] = stride[d - 2] * (input_size[d] - 1) + weight_size[d] - 2 * padding[d - 2];
+    output_size[d] = stride[d - 2] * (input_size[d] - 1) + weight_size[d] - 2 * padding[d - 2] + output_padding[d - 2];
   }
   return output_size;
 }
@@ -452,7 +453,8 @@ Tensor TransposeConv2dOpContext::run(const Tensor& input_arg) const {
         unpacked_.filter,
         packed_.padding,
         packed_.stride,
-        packed_.dilation),
+        packed_.dilation,
+        packed_.output_padding),
     input.options(),
   };
 
