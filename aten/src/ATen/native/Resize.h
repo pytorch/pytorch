@@ -10,7 +10,7 @@
 namespace at { namespace native {
 
 using ResizeImplFn = TensorImpl*(*)(TensorImpl*, IntArrayRef, c10::optional<IntArrayRef>, bool);
-using SelectSizeFn = uint64_t(*)(TensorImpl*, IntArrayRef, c10::optional<IntArrayRef>);
+using ComputeStorageSizeFn = uint64_t(*)(TensorImpl*, IntArrayRef, c10::optional<IntArrayRef>);
 using MaybeResizeFn = void(*)(TensorImpl*, uint64_t);
 
 // Template implementation for `resize_`.
@@ -43,9 +43,9 @@ void resize_template(
 
 // Core logic for resize implementations:
 // 1. Short-circuit if we are not really changing anything
-// 2. Select the new storage size
+// 2. Compute the new storage size
 // 3. Actually resize (allocation may happen)
-template <MaybeResizeFn MaybeResize, SelectSizeFn SelectFn>
+template <MaybeResizeFn MaybeResize, ComputeStorageSizeFn ComputeStorageSize>
 TensorImpl* resize_impl_template_(
     TensorImpl* self,
     IntArrayRef size,
@@ -55,7 +55,7 @@ TensorImpl* resize_impl_template_(
     return self;
   }
 
-  uint64_t storage_size = SelectFn(self, size, stride);
+  uint64_t storage_size = ComputeStorageSize(self, size, stride);
 
   if (resize_storage) {
     MaybeResize(self, storage_size);
@@ -117,7 +117,7 @@ static inline void maybe_resize_storage_cpu(TensorImpl* self, uint64_t new_size)
   }
 }
 
-inline uint64_t select_storage_size_default(
+inline uint64_t compute_storage_size_default(
     TensorImpl* self,
     IntArrayRef size,
     c10::optional<IntArrayRef> stride) {
@@ -146,7 +146,7 @@ TensorImpl* resize_impl_cpu_(
 // 2. It only fits in the existing storage if we don't use the
 //    requested strides -> no allocation needed!
 // 3. We have to allocate memory -> allocation needed!
-inline uint64_t select_storage_size_tryreuse(
+inline uint64_t compute_storage_size_tryreuse(
     TensorImpl* self,
     IntArrayRef size,
     c10::optional<IntArrayRef> stride) {
@@ -220,13 +220,13 @@ inline uint64_t select_storage_size_tryreuse(
   return storage_size[selected];
 }
 
-template <MaybeResizeFn MaybeFn>
+template <MaybeResizeFn MaybeResize>
 TensorImpl* resize_impl_tryreuse_(
     TensorImpl* self,
     IntArrayRef size,
     c10::optional<IntArrayRef> stride,
     bool resize_storage = true) {
-  return resize_impl_template_<MaybeFn, &select_storage_size_tryreuse>(
+  return resize_impl_template_<MaybeResize, &compute_storage_size_tryreuse>(
       self, size, stride);
 }
 
