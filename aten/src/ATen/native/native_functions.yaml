@@ -645,6 +645,7 @@
   variants: function, method
   device_check: NoCheck
   device_guard: False
+  tags: inplace_view
   dispatch:
     CompositeExplicitAutograd: as_strided_
 
@@ -3126,7 +3127,7 @@
 - func: mv(Tensor self, Tensor vec) -> Tensor
   variants: function, method
   dispatch:
-    CPU, CUDA, SparseCsrCUDA: mv
+    CompositeExplicitAutograd: mv
     SparseCPU, SparseCUDA, SparseCsrCPU: mv_sparse
 
 - func: mv.out(Tensor self, Tensor vec, *, Tensor(a!) out) -> Tensor(a!)
@@ -3882,6 +3883,7 @@
 # this. If this `Variable` is a view, throws an `std::runtime_error()`.
 - func: detach_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
+  tags: inplace_view
   dispatch:
     CompositeExplicitAutograd: detach_
 
@@ -3909,6 +3911,27 @@
   device_guard: False
   dispatch:
     CompositeExplicitAutograd: slice_backward
+
+- func: slice_scatter(Tensor self, Tensor src, int dim=0, int? start=None, int? end=None, int step=1) -> Tensor
+  variants: function, method
+  device_check: NoCheck
+  device_guard: False
+  dispatch:
+    CompositeExplicitAutograd: slice_scatter
+
+- func: select_scatter(Tensor self, Tensor src, int dim, int index) -> Tensor
+  variants: function, method
+  device_check: NoCheck
+  device_guard: False
+  dispatch:
+    CompositeExplicitAutograd: select_scatter
+
+- func: diagonal_scatter(Tensor self, Tensor src, int offset=0, int dim1=0, int dim2=1) -> Tensor
+  variants: function, method
+  device_check: NoCheck
+  device_guard: False
+  dispatch:
+    CompositeExplicitAutograd: diagonal_scatter
 
 - func: slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
   variants: function, method
@@ -4014,6 +4037,7 @@
   variants: method
   device_check: NoCheck
   device_guard: False
+  tags: inplace_view
   dispatch:
     CompositeExplicitAutograd: squeeze_
 
@@ -4021,6 +4045,7 @@
   variants: method
   device_check: NoCheck
   device_guard: False
+  tags: inplace_view
   dispatch:
     CompositeExplicitAutograd: squeeze_
 
@@ -4028,6 +4053,7 @@
   variants: method
   device_check: NoCheck
   device_guard: False
+  tags: inplace_view
 
 - func: sspaddmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function, method
@@ -4259,6 +4285,7 @@
   device_check: NoCheck
   device_guard: False
   variants: method
+  tags: inplace_view
   dispatch:
     CompositeExplicitAutograd: t_
 
@@ -4365,6 +4392,7 @@
   variants: method
   device_check: NoCheck
   device_guard: False
+  tags: inplace_view
   dispatch:
     CompositeExplicitAutograd: transpose_
 
@@ -4501,6 +4529,7 @@
   variants: method
   device_check: NoCheck
   device_guard: False
+  tags: inplace_view
   dispatch:
     CompositeExplicitAutograd: unsqueeze_
 
@@ -5425,6 +5454,14 @@
 - func: choose_qparams_optimized(Tensor input, int numel, int n_bins, float ratio, int bit_width) -> (Tensor, Tensor)
   variants: function
 
+- func: _autocast_to_reduced_precision(Tensor(a) self, bool cuda_enabled, bool cpu_enabled, ScalarType cuda_dtype, ScalarType cpu_dtype) -> Tensor(a)
+  variants: method
+  device_guard: False
+
+- func: _autocast_to_full_precision(Tensor(a) self, bool cuda_enabled, bool cpu_enabled) -> Tensor(a)
+  variants: method
+  device_guard: False
+
 - func: _to_copy(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, bool non_blocking=False, MemoryFormat? memory_format=None) -> Tensor
   device_check: NoCheck
   device_guard: False
@@ -6098,16 +6135,12 @@
     CPU, CUDA: bitwise_right_shift
 
 - func: tril_(Tensor(a!) self, int diagonal=0) -> Tensor(a!)
+  structured_delegate: tril.out
   variants: method
-  dispatch:
-    CPU: tril_cpu_
-    CUDA: tril_cuda_
 
 - func: triu_(Tensor(a!) self, int diagonal=0) -> Tensor(a!)
+  structured_delegate: triu.out
   variants: method
-  dispatch:
-    CPU: triu_cpu_
-    CUDA: triu_cuda_
 
 - func: digamma_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -6221,24 +6254,24 @@
     CPU, CUDA: cross
 
 - func: triu.out(Tensor self, int diagonal=0, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
   dispatch:
-    CPU: triu_cpu_out
-    CUDA: triu_cuda_out
+    CPU: triu_cpu
+    CUDA: triu_cuda
 
 - func: triu(Tensor self, int diagonal=0) -> Tensor
+  structured_delegate: triu.out
   variants: method, function
-  dispatch:
-    CompositeExplicitAutograd: triu
 
 - func: tril.out(Tensor self, int diagonal=0, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
   dispatch:
-    CPU: tril_cpu_out
-    CUDA: tril_cuda_out
+    CPU: tril_cpu
+    CUDA: tril_cuda
 
 - func: tril(Tensor self, int diagonal=0) -> Tensor
+  structured_delegate: tril.out
   variants: method, function
-  dispatch:
-    CompositeExplicitAutograd: tril
 
 - func: tril_indices(int row, int col, int offset=0, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
@@ -6733,13 +6766,14 @@
     CUDA: legacy_lstsq_cuda
 
 - func: triangular_solve.X(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False, *, Tensor(a!) X, Tensor(b!) M) -> (Tensor(a!) solution, Tensor(b!) cloned_coefficient)
+  structured: True
   dispatch:
     CPU, CUDA: triangular_solve_out
+    SparseCsrCUDA: triangular_solve_out_sparse_csr_cuda
 
 - func: triangular_solve(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False) -> (Tensor solution, Tensor cloned_coefficient)
+  structured_delegate: triangular_solve.X
   variants: method, function
-  dispatch:
-    CPU, CUDA: triangular_solve
 
 - func: symeig.e(Tensor self, bool eigenvectors=False, bool upper=True, *, Tensor(a!) e, Tensor(b!) V) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
   dispatch:
@@ -6786,6 +6820,7 @@
   variants: method
   device_check: NoCheck
   device_guard: False
+  tags: inplace_view
 
 # swapdims, alias for transpose
 - func: swapdims(Tensor(a) self, int dim0, int dim1) -> Tensor(a)
@@ -6797,6 +6832,7 @@
   variants: method
   device_check: NoCheck
   device_guard: False
+  tags: inplace_view
 
 - func: cholesky.out(Tensor self, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:

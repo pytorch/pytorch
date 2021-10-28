@@ -2726,8 +2726,8 @@ def sample_inputs_index_add(op_info, device, dtype, requires_grad, **kwargs):
     # non-contiguous source
     s_nonctg = s.transpose(0, 1)
 
-    idx = make_arg((S,), dtype=torch.int64, low=0, high=S)
-    idx_nonctg = make_arg((S,), dtype=torch.int64, low=0, high=S, noncontiguous=True)
+    idx = make_arg((S,), dtype=torch.int64, low=0, high=S, requires_grad=False)
+    idx_nonctg = make_arg((S,), dtype=torch.int64, low=0, high=S, noncontiguous=True, requires_grad=False)
     samples = [SampleInput(tensor, args=(1, idx, source))
                for tensor, idx, source in product([t, t_nonctg], [idx, idx_nonctg], [s, s_nonctg])]
     samples.extend(SampleInput(tensor, args=(1, idx, source), kwargs=dict(alpha=a))
@@ -2736,7 +2736,7 @@ def sample_inputs_index_add(op_info, device, dtype, requires_grad, **kwargs):
     # Add scalar cases
     scalar_sizes = [(), (1,)]
     ts = (make_arg(size) for size in scalar_sizes)
-    idxs = (make_arg(size, dtype=torch.int64, low=0, high=1) for size in scalar_sizes)
+    idxs = (make_arg(size, dtype=torch.int64, low=0, high=1, requires_grad=False) for size in scalar_sizes)
     ss = (make_arg(size) for size in scalar_sizes)
 
     samples.extend(SampleInput(t, args=(0, idx, s)) for t, idx, s in product(ts, idxs, ss))
@@ -3355,10 +3355,9 @@ def sample_inputs_dist(op_info, device, dtype, requires_grad):
 # Missing to test the nondeterminism of the operation
 # https://github.com/pytorch/pytorch/issues/53352
 def sample_inputs_index_copy(op_info, device, dtype, requires_grad, **kwargs):
-    def make_arg(shape, low=None, high=None, dtype=dtype):
+    def make_arg(shape, low=None, high=None, dtype=dtype, requires_grad=requires_grad):
         return make_tensor(shape, device=device, dtype=dtype,
-                           low=low, high=high,
-                           requires_grad=requires_grad)
+                           low=low, high=high, requires_grad=requires_grad)
 
     t = make_arg((S, S))
     s = make_arg((S, S))
@@ -3379,7 +3378,7 @@ def sample_inputs_index_copy(op_info, device, dtype, requires_grad, **kwargs):
     # Add scalar cases
     scalar_sizes = [(), (1,)]
     ts = (make_arg(size) for size in scalar_sizes)
-    idxs = (make_arg(size, dtype=torch.int64, low=0, high=1) for size in scalar_sizes)
+    idxs = (make_arg(size, dtype=torch.int64, low=0, high=1, requires_grad=False) for size in scalar_sizes)
     ss = (make_arg(size) for size in scalar_sizes)
 
     samples.extend(SampleInput(t, args=(0, idx, s)) for t, idx, s in product(ts, idxs, ss))
@@ -4356,7 +4355,7 @@ def sample_inputs_cov(op_info, device, dtype, requires_grad, **kwargs):
     for t in _generate_correlation_inputs(device, dtype, requires_grad):
         inputs.append(SampleInput(t))
         num_observations = t.numel() if t.ndimension() < 2 else t.size(1)
-        fweights = make_tensor((num_observations,), device, torch.int, low=1, high=10, requires_grad=requires_grad)
+        fweights = make_tensor((num_observations,), device, torch.int, low=1, high=10)
         aweights = make_tensor((num_observations,), device, torch.float, low=0, high=1, requires_grad=requires_grad)
         for correction, fw, aw in product(range(num_observations), [None, fweights], [None, aweights]):
             inputs.append(SampleInput(t, kwargs={'correction': correction, 'fweights': fw, 'aweights': aw}))
@@ -4924,6 +4923,34 @@ def sample_inputs_diagonal_diag_embed(op_info, device, dtype, requires_grad, **k
     def generator():
         for shape, arg in chain(product(shapes_2d, args_2d), product(shapes_3d, args_3d)):
             yield SampleInput(make_arg(shape), args=arg)
+
+    return list(generator())
+
+
+def sample_inputs_diagonal_scatter(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    # Shapes for 2D Tensors
+    shapes_2d = ((M, M), (3, 5), (5, 3))
+
+    # Shapes for 3D Tensors
+    shapes_3d = ((M, M, M),)
+
+    args_2d = ((), (2,), (-2,), (1,))
+    args_3d = ((1, 1, 2), (2, 0, 1), (-2, 0, 1))
+
+    def generator():
+        for input_shape, arg in chain(product(shapes_2d, args_2d), product(shapes_3d, args_3d)):
+            input_ = make_arg(input_shape)
+            # We can programatically figure out the right shape for src:
+            # It should be the same size as input.diagonal(other_args...)
+            if not isinstance(arg, tuple):
+                arg_tuple = (arg,)
+            else:
+                arg_tuple = arg
+            src_shape = input_.diagonal(*arg_tuple).size()
+            src = make_arg(src_shape)
+            yield SampleInput(input_, args=(src, *arg_tuple))
 
     return list(generator())
 
@@ -5767,6 +5794,48 @@ def sample_inputs_select(op_info, device, dtype, requires_grad, **kwargs):
     return list(generator())
 
 
+def sample_inputs_select_scatter(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    cases = (((S, S, S), (S, S), (1, 2)),
+             ((S, S, S), (S, S), (-1, 2)),
+             ((S, S, S), (S, S), (-1, -1)),
+             ((S, S, S), (S, S), (1, -1)),
+             ((S,), (), (0, 2))
+             )
+
+    def generator():
+        for input_shape, src_shape, args in cases:
+            input_ = make_arg(input_shape)
+            src = make_arg(src_shape)
+            yield SampleInput(input_, args=(src, *args))
+
+    return list(generator())
+
+
+def sample_inputs_slice_scatter(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    cases = (((L, L, L), (L, L, L,), (0, 0, L, 1)),
+             ((L, L, L), (L // 2, L, L,), (0, L // 2, L, 1)),
+             ((L, L, L), (L // 4, L, L,), (0, L // 2, L, 2)),
+             ((L, L, L), (L, L, L,), (1, 0, L, 1)),
+             ((L, L, L), (L, L // 2, L,), (1, L // 2, L, 1)),
+             ((L, L, L), (L, L // 4, L,), (1, L // 2, L, 2)),
+             ((L, L, L), (L, L, L,), (2, 0, L, 1)),
+             ((L, L, L), (L, L, L // 2,), (2, L // 2, L, 1)),
+             ((L, L, L), (L, L, L // 4,), (2, L // 2, L, 2)),
+             )
+
+    def generator():
+        for input_shape, src_shape, args in cases:
+            input_ = make_arg(input_shape)
+            src = make_arg(src_shape)
+            yield SampleInput(input_, args=(src, *args))
+
+    return list(generator())
+
+
 def sample_inputs_rbinops(op_info, device, dtype, requires_grad, supports_dtype_kwargs=True, **kwargs):
     def _make_tensor_helper(shape, low=None, high=None):
         return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
@@ -5928,7 +5997,7 @@ def sample_inputs_embedding(op_info, device, dtype, requires_grad, **kwargs):
 
     def make_long_input(shape, *, low, high, noncontiguous=False):
         return make_tensor(shape, device=device, dtype=torch.long, low=low, high=high,
-                           noncontiguous=noncontiguous, requires_grad=requires_grad)
+                           noncontiguous=noncontiguous)
 
     def generator():
         # 0-D index tensor
@@ -7398,6 +7467,11 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_diagonal_diag_embed),
+    OpInfo('diagonal_scatter',
+           dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16),
+           supports_out=False,
+           supports_forward_ad=True,
+           sample_inputs_func=sample_inputs_diagonal_scatter),
     OpInfo('eq',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            supports_autograd=False,
@@ -7702,7 +7776,7 @@ op_db: List[OpInfo] = [
                    dtypes=floating_types_and(torch.half),
                    dtypesIfCPU=floating_types_and(torch.half, torch.bfloat16),
                    # skip testing torch.frexp as it is not supported by ROCm platform yet
-                   decorators=[skipCUDAIfRocm],
+                   decorators=[],
                    supports_out=False,
                    supports_forward_ad=True,
                    skips=(
@@ -7877,7 +7951,7 @@ op_db: List[OpInfo] = [
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
-               # Gradcheck for complex hangs for this function, therefore it raises NotImplementedError for now
+               # Gradcheck for complex is not implemented yet
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD', dtypes=complex_types()),),
            ),
     OpInfo('linalg.eigvalsh',
@@ -9279,6 +9353,16 @@ op_db: List[OpInfo] = [
            assert_jit_shape_analysis=True,
            supports_forward_ad=True,
            supports_out=False),
+    OpInfo('select_scatter',
+           dtypes=all_types_and(torch.bfloat16, torch.half, torch.bool),
+           sample_inputs_func=sample_inputs_select_scatter,
+           supports_forward_ad=True,
+           supports_out=False),
+    OpInfo('slice_scatter',
+           dtypes=all_types_and(torch.bfloat16, torch.half, torch.bool),
+           sample_inputs_func=sample_inputs_slice_scatter,
+           supports_forward_ad=True,
+           supports_out=False),
     UnaryUfuncInfo('signbit',
                    ref=np.signbit,
                    dtypes=all_types_and(torch.bool, torch.bfloat16, torch.half),
@@ -9364,7 +9448,6 @@ op_db: List[OpInfo] = [
     OpInfo('triangular_solve',
            op=torch.triangular_solve,
            dtypes=floating_and_complex_types(),
-           supports_out=False,
            sample_inputs_func=sample_inputs_legacy_solve,
            check_batched_gradgrad=False,
            supports_forward_ad=True,
@@ -9616,9 +9699,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_linalg_pinv_hermitian,
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
-           skips=(
-               # Gradcheck hangs for this function
-               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD'),),
            ),
     OpInfo('eig',
            op=torch.eig,
