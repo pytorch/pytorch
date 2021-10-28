@@ -21,13 +21,10 @@ class Flatten(Module):
 
     Examples::
         >>> input = torch.randn(32, 1, 5, 5)
-        >>> m = nn.Sequential(
-        >>>     nn.Conv2d(1, 32, 5, 1, 1),
-        >>>     nn.Flatten()
-        >>> )
+        >>> m = nn.Flatten()
         >>> output = m(input)
         >>> output.size()
-        torch.Size([32, 288])
+        torch.Size([32, 25])
     """
     __constants__ = ['start_dim', 'end_dim']
     start_dim: int
