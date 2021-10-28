@@ -6153,9 +6153,18 @@ def sample_inputs_gaussian_nll_loss(op_info, device, dtype, requires_grad, **kwa
         for s, r in _generate_sample_shape_reduction():
             for t_s, v_s in product(gen_shape(s), gen_shape(s)):
                 yield _make_tensor(s), _make_tensor(t_s), make_var(v_s), dict(reduction=r)
-                yield _make_tensor(s), _make_tensor(t_s), make_var(v_s), dict(full=True, reduction=r)
-                yield _make_tensor(s), _make_tensor(t_s), make_var(v_s), dict(eps=random.uniform(1e-6, 1e-3), reduction=r)
-                yield _make_tensor(s), _make_tensor(t_s), make_var(v_s), dict(full=True, eps=random.uniform(1e-6, 1e-3), reduction=r)
+                yield (
+                    _make_tensor(s), _make_tensor(t_s), make_var(v_s),
+                    dict(full=True, reduction=r)
+                )
+                yield (
+                    _make_tensor(s), _make_tensor(t_s), make_var(v_s),
+                    dict(eps=random.uniform(1e-6, 1e-3), reduction=r)
+                )
+                yield (
+                    _make_tensor(s), _make_tensor(t_s), make_var(v_s),
+                    dict(full=True, eps=random.uniform(1e-6, 1e-3), reduction=r)
+                )
 
     def gen_inputs():
         for input, target, var, kwargs in gen_shape_kwargs():
