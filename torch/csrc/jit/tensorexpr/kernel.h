@@ -2,6 +2,7 @@
 
 #include <c10/util/variant.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/codegen.h>
@@ -91,10 +92,24 @@ class TORCH_API TensorExprKernel {
  public:
   explicit TensorExprKernel(
       const std::shared_ptr<Graph>& subgraph,
+      const std::string& kernel_func_name,
       std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings =
           {},
       std::vector<int64_t> symbolic_shape_inputs = {},
       bool pre_alloc = false);
+
+  explicit TensorExprKernel(
+      const std::shared_ptr<Graph>& subgraph,
+      std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings =
+          {},
+      std::vector<int64_t> symbolic_shape_inputs = {},
+      bool pre_alloc = false)
+      : TensorExprKernel(
+            subgraph,
+            SubgraphUtils::generateNameForGraph(subgraph),
+            custom_lowerings,
+            symbolic_shape_inputs,
+            pre_alloc) {}
 
   void run(Stack& stack);
   void runFast(
@@ -142,8 +157,6 @@ class TORCH_API TensorExprKernel {
 
   std::vector<DimArg> dimsFromSizes(const std::vector<ExprHandle>& sizes);
   std::vector<ExprHandle> sizesForValue(const torch::jit::Value* v);
-  std::vector<ExprHandle> sizesFromVaryingShape(
-      const c10::VaryingShape<int64_t>& shape);
 
   // These functions broadcast shape and also store a `hasBroadcast_` variable.
   std::vector<ExprHandle> broadcastShapesMut(
@@ -198,7 +211,7 @@ class TORCH_API TensorExprKernel {
   // push the buf args into the stack so NNC IR can access them at runtime.
   void preAllocIntermediateBufs(std::unordered_set<BufPtr>& interm_bufs);
 
-  VarHandle getVarForShape(const c10::ShapeSymbol& ss);
+  ExprHandle getVarForShape(const c10::ShapeSymbol& ss);
   std::vector<ExprHandle>& getStridesForValue(const Value* v);
   BufHandle bindSymbolicShapeInput(const Value* input, const std::string& name);
   std::vector<ExprHandle> sizesFromSymbolicShape(
@@ -254,6 +267,7 @@ class TORCH_API TensorExprKernel {
 
   std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings_;
   bool pre_alloc_{false};
+  const std::string& kernel_func_name_;
 };
 
 TORCH_API int& getTECudaPointwiseLoopLevels();

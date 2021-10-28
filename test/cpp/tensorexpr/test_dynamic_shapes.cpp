@@ -239,6 +239,75 @@ TEST(DynamicShapes, GraphWith2InputsAndBroadcast) {
 #endif
 }
 
+TEST(DynamicShapes, GraphWithPartiallySymbolicOutput) {
+#ifdef TORCH_ENABLE_LLVM
+  // The second input to the graph has a dim of size 1 which should be
+  // broadcasted in the at::mul op.
+  std::shared_ptr<Graph> graph = std::make_shared<Graph>();
+  const auto graph_string = R"IR(
+      graph(%x : Float(1, 5, requires_grad=0, device=cpu),
+            %y : Float(1, 5, requires_grad=0, device=cpu),
+            %SS_2 : int):
+        %4 : Tensor = aten::tanh(%x)
+        %5 : Tensor = aten::mul(%4, %y)
+        return (%5))IR";
+  torch::jit::parseIR(graph_string, graph.get());
+
+  auto x_inp = graph->inputs()[0];
+  auto y_inp = graph->inputs()[1];
+  auto x_type = TensorType::create(at::rand({1, 5}));
+  auto x_dim1_sym = c10::ShapeSymbol::newSymbol();
+  auto x_sym_type = x_type->withSymbolicShapes(std::vector<ShapeSymbol>(
+      {c10::ShapeSymbol::fromStaticSize(1), x_dim1_sym}));
+  graph->inputs().at(0)->setType(x_sym_type);
+  graph->inputs().at(1)->setType(x_sym_type);
+  for (const auto n : graph->nodes()) {
+    n->output()->setType(x_sym_type);
+  }
+
+  // Graph with symbolic shapes:
+  //
+  // graph(%x : Float(1, SS(-2)),
+  //       %y : Float(1, SS(-2)),
+  //       %SS_2 : int):
+  //   %3 : Float(1, SS(-2)) = aten::tanh(%x)
+  //   %4 : Float(1, SS(-2)) = aten::mul(%3, %y)
+  //   return (%4)
+
+  std::vector<int64_t> symbolic_shape_inputs({x_dim1_sym.value()});
+
+  TensorExprKernel kernel(graph, {}, symbolic_shape_inputs);
+
+  // Run with the same static dims as the one we initialized the graph with.
+  {
+    auto a = at::rand({1, 5}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+    auto b = at::rand({1, 5}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+    auto ref = at::mul(at::tanh(a), b);
+
+    std::vector<IValue> stack = fmap<IValue>(std::vector<at::Tensor>({a, b}));
+    stack.push_back(5);
+    kernel.run(stack);
+
+    auto o = stack[0].toTensor();
+    ASSERT_TRUE(at::allclose(o, ref));
+  }
+
+  // Run with inputs having different dims.
+  {
+    auto a = at::rand({1, 100}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+    auto b = at::rand({1, 100}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+    auto ref = at::mul(at::tanh(a), b);
+
+    std::vector<IValue> stack = fmap<IValue>(std::vector<at::Tensor>({a, b}));
+    stack.push_back(100);
+    kernel.run(stack);
+
+    auto o = stack[0].toTensor();
+    ASSERT_TRUE(at::allclose(o, ref));
+  }
+#endif
+}
+
 TEST(DynamicShapes, GraphWithCatAndBroadcast) {
 #ifdef TORCH_ENABLE_LLVM
   std::shared_ptr<Graph> graph = std::make_shared<Graph>();

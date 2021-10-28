@@ -7,7 +7,6 @@
 #include <c10/util/irange.h>
 #include <c10/util/string_utils.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/graph_opt.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
@@ -353,13 +352,16 @@ ArgValue TensorExprKernel::toArg(const torch::jit::Value* v) const {
   return scalars_.at(v);
 }
 
-VarHandle TensorExprKernel::getVarForShape(const c10::ShapeSymbol& ss) {
+ExprHandle TensorExprKernel::getVarForShape(const c10::ShapeSymbol& ss) {
+  if (ss.is_static()) {
+    return LongImm::make(ss.static_size());
+  }
   auto value = ss.value();
   auto it = shapeSymbolToVar_.find(value);
   if (it == shapeSymbolToVar_.end()) {
-    VarHandle var("i", kLong);
+    VarHandle var("ss" + std::to_string(-value), kLong);
     shapeSymbolToVar_.emplace(value, var);
-    return var;
+    return std::move(var);
   }
   return it->second;
 }
@@ -376,15 +378,6 @@ std::vector<ExprHandle> TensorExprKernel::sizesFromSymbolicShape(
   return dims;
 }
 
-std::vector<ExprHandle> TensorExprKernel::sizesFromVaryingShape(
-    const c10::VaryingShape<int64_t>& shape) {
-  std::vector<ExprHandle> dims;
-  for (const auto i : c10::irange(*shape.size())) {
-    dims.push_back(*shape[i]);
-  }
-  return dims;
-}
-
 std::vector<ExprHandle> TensorExprKernel::sizesForValue(
     const torch::jit::Value* v) {
   if (known_sizes_.count(v)) {
@@ -395,9 +388,6 @@ std::vector<ExprHandle> TensorExprKernel::sizesForValue(
   // need to infer it.
   if (v->type()->kind() == TypeKind::TensorType) {
     auto tt = v->type()->cast<TensorType>();
-    if (tt->sizes().concrete_sizes()) {
-      return sizesFromVaryingShape(tt->sizes());
-    }
     return sizesFromSymbolicShape(tt->symbolic_sizes());
   }
 
@@ -879,12 +869,7 @@ BufHandle TensorExprKernel::bindSymbolicShapeInput(
   // TODO: Handle strided tensors with symbolic shapes.
   std::vector<ExprHandle> inputTensorDims;
   for (const auto i : c10::irange(*rank)) {
-    auto sym = symbolicShape[i];
-    if (sym.is_static()) {
-      inputTensorDims.emplace_back(LongImm::make(sym.static_size()));
-    } else {
-      inputTensorDims.emplace_back(getVarForShape(symbolicShape[i]));
-    }
+    inputTensorDims.emplace_back(getVarForShape(symbolicShape[i]));
   }
   BufHandle inBuffer(
       name,
@@ -1303,11 +1288,12 @@ void TensorExprKernel::compile() {
       stmt,
       bufferArgs_,
       device_,
-      SubgraphUtils::generateNameForGraph(graph_));
+      kernel_func_name_);
 }
 
 TensorExprKernel::TensorExprKernel(
     const std::shared_ptr<Graph>& subgraph,
+    const std::string& kernel_func_name,
     std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings,
     std::vector<int64_t> symbolic_shape_inputs,
     bool pre_alloc /*= false*/)
@@ -1315,7 +1301,8 @@ TensorExprKernel::TensorExprKernel(
       code_(subgraph, ""),
       symbolic_shape_inputs_(std::move(symbolic_shape_inputs)),
       custom_lowerings_(std::move(custom_lowerings)),
-      pre_alloc_(pre_alloc) {
+      pre_alloc_(pre_alloc),
+      kernel_func_name_(kernel_func_name) {
   allow_fallback_ = fallbackAllowed();
   if (!allow_fallback_) {
     compile();
@@ -1377,10 +1364,14 @@ std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
     for (size_t i = 0, e = bufOutputs_.size(); i < e; ++i) {
       tensorOutputSizes_[i].clear();
       for (auto t : tensorOutputSymbolicSizes_[i]) {
-        auto input_pos = shapeSymbolInputPos_[t.node()];
-        TORCH_INTERNAL_ASSERT(input_pos < inputs.size());
-        TORCH_INTERNAL_ASSERT(inputs[input_pos].isInt());
-        tensorOutputSizes_[i].emplace_back(inputs[input_pos].toInt());
+        if (t.AsNode<LongImm>()) {
+          tensorOutputSizes_[i].emplace_back(immediateAs<int64_t>(t.node()));
+        } else {
+          auto input_pos = shapeSymbolInputPos_.at(t.node());
+          TORCH_INTERNAL_ASSERT(input_pos < inputs.size());
+          TORCH_INTERNAL_ASSERT(inputs[input_pos].isInt());
+          tensorOutputSizes_[i].emplace_back(inputs[input_pos].toInt());
+        }
       }
       tensorOutputStrides_[i] =
           TensorType::contiguousStridesOf(tensorOutputSizes_[i]);
