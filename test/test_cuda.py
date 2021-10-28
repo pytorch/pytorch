@@ -2810,6 +2810,8 @@ torch.cuda.synchronize()
     def test_autocast_torch_need_autocast_promote(self):
         for op, args in self.autocast_lists.torch_need_autocast_promote:
             self._run_autocast_outofplace(op, args, torch.float32)
+        for op, args in self.autocast_lists.linalg_torch_need_autocast_promote:
+            self._run_autocast_outofplace(op, args, torch.float32, module=torch.linalg)
 
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_torch_expect_builtin_promote(self):
