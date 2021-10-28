@@ -61,9 +61,6 @@
 #define THPStorageType TH_CONCAT_3(THP,Real,StorageType)
 #define THPStorageBaseStr TH_CONCAT_STRING_2(Real,StorageBase)
 
-bool THPByteStorage_init(PyObject *module);
-void THPByteStorage_postInit(PyObject *module);
-
 #include <torch/csrc/generic/Storage.h>
 #include <TH/THGenerateByteType.h>
 
