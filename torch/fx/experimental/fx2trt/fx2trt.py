@@ -8,7 +8,10 @@ from torch.fx.node import _get_qualified_name
 from torch.fx.passes.shape_prop import TensorMetadata
 
 
-TRTInterpreterResult = Tuple[Any, Sequence[str], Sequence[str]]
+class TRTInterpreterResult(NamedTuple):
+    engine: Any
+    input_names: Sequence[str]
+    output_names: Sequence[str]
 
 
 # Borrowed from torch2trt
@@ -43,12 +46,13 @@ def torch_dtype_from_trt(dtype):
 
 
 class TRTModule(torch.nn.Module):
-    def __init__(self, engine=None, input_names=None, output_names=None):
+    def __init__(self, engine=None, input_names=None, output_names=None, cuda_graph_batch_size=-1):
         super(TRTModule, self).__init__()
         self._register_state_dict_hook(TRTModule._on_state_dict)
         self.engine = engine
         self.input_names = input_names
         self.output_names = output_names
+        self.cuda_graph_batch_size = cuda_graph_batch_size
         self.initialized = False
 
         if engine:
@@ -89,6 +93,7 @@ class TRTModule(torch.nn.Module):
         state_dict[prefix + "engine"] = bytearray(self.engine.serialize())
         state_dict[prefix + "input_names"] = self.input_names
         state_dict[prefix + "output_names"] = self.output_names
+        state_dict[prefix + "cuda_graph_batch_size"] = self.cuda_graph_batch_size
 
     def _load_from_state_dict(
         self,
@@ -451,7 +456,7 @@ class TRTInterpreter(torch.fx.Interpreter):
 
         engine = self.builder.build_engine(self.network, builder_config)
         assert engine
-        return engine, self._input_names, self._output_names
+        return TRTInterpreterResult(engine, self._input_names, self._output_names)
 
     def run_node(self, n):
         self._cur_node_name = str(n)
