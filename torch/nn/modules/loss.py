@@ -375,12 +375,12 @@ class GaussianNLLLoss(_Loss):
 class KLDivLoss(_Loss):
     r"""The `Kullback-Leibler divergence`_ loss.
 
-    For tensors of the same shape :math:`y_{\text{model}}, y_{\text{obs}}`,
+    For tensors of the same shape :math:`y_{\text{model}},\ y_{\text{obs}}`,
     we define the **pointwise KL-divergence** as
 
     .. math::
 
-        L(y_{\text{model}}, y_{\text{obs}})
+        L(y_{\text{model}},\ y_{\text{obs}})
             = y_{\text{obs}} \cdot \log \frac{y_{\text{obs}}}{y_{\text{model}}}
             = y_{\text{obs}} \cdot (\log y_{\text{obs}} - \log y_{\text{model}})
 
@@ -389,7 +389,7 @@ class KLDivLoss(_Loss):
     The argument :attr:`input` (:math:`y_{\text{obs}}` above) may also be provided in the
     log-space if :attr:`log_target`\ `= True`.
 
-    To summarise, to compute the above mathematical formulas, this function computes
+    To summarise, this function is roughly equivalent to computing
 
     .. code-block:: python
 
@@ -398,7 +398,7 @@ class KLDivLoss(_Loss):
         else:
             loss_pointwise = target.exp() * (target - input)
 
-    and then reduces it depending on the argument :attr:`reduction` as
+    and then reducing this result depending on the argument :attr:`reduction` as
 
     .. code-block:: python
 
@@ -406,7 +406,7 @@ class KLDivLoss(_Loss):
             loss = loss_pointwise.mean()
         else if reduction == "batchmean": # mathematically correct
             loss = loss_pointwise.sum() / input.size(0)
-        else if (reduction == "mean")
+        else if reduction == "mean":
             loss = loss_pointwise.mean()
         else: # reduction == "pointwise"
             loss = loss_pointwise
@@ -419,9 +419,9 @@ class KLDivLoss(_Loss):
         :math:`P` denotes the distribution of the observations and :math:`Q` denotes the model.
 
     .. note::
-        :attr:`reduction`\ `= 'mean'` doesn't return the true kl divergence value, please use
-        :attr:`reduction`\ `= 'batchmean` which aligns with the mathematical definition.
-        In a future release, `'mean'` will be changed to be the same as `'batchmean'`.
+        :attr:`reduction`\ `= "mean"` doesn't return the true kl divergence value, please use
+        :attr:`reduction`\ `= "batchmean"` which aligns with the mathematical definition.
+        In a future release, `"mean"` will be changed to be the same as `"batchmean"`.
 
     Args:
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
@@ -433,7 +433,7 @@ class KLDivLoss(_Loss):
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is `False`, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: `True`
-        reduction (string, optional): Specifies the reduction to apply to the output. Default: `'mean'`
+        reduction (string, optional): Specifies the reduction to apply to the output. Default: `"mean"`
         log_target (bool, optional): Specifies whether `target` is the log space. Default: `False`
 
     Shape:
