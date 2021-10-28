@@ -797,12 +797,6 @@ at::Tensor& LazyNativeFunctions::t_(at::Tensor& self) {
   return self;
 }
 
-at::Tensor LazyNativeFunctions::tanh(const at::Tensor& self) {
-  LTC_FN_COUNTER("lazy::");
-  return bridge::AtenFromLtcTensor(
-      lazy_tensor_aten_ops::tanh(bridge::GetLtcTensor(self)));
-}
-
 at::Tensor LazyNativeFunctions::tanh_backward(const at::Tensor& grad_output,
                                               const at::Tensor& output) {
   LTC_FN_COUNTER("lazy::");

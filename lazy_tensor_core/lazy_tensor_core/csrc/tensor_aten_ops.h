@@ -679,7 +679,6 @@ LazyTensor take(const LazyTensor& input, const LazyTensor& index);
 
 LazyTensor tan(const LazyTensor& input);
 
-LazyTensor tanh(const LazyTensor& input);
 LazyTensor tanh_backward(const LazyTensor& grad_output,
                          const LazyTensor& output);
 
