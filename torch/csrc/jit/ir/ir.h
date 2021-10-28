@@ -82,6 +82,7 @@ using namespace ::c10::cuda;
 } // namespace cuda
 
 struct Function;
+struct GraphFunction;
 struct MatchedSchema;
 
 // A Graph represents one "function" of computation.
@@ -1373,6 +1374,7 @@ struct Graph {
   friend TORCH_API std::ostream& operator<<(std::ostream& out, const Graph& g);
 
   TORCH_API std::shared_ptr<Graph> copy();
+  TORCH_API std::unique_ptr<Graph> copyUnique();
   TORCH_API void remapTypes(const std::function<TypePtr(TypePtr)>& type_map);
 
  private:
@@ -1380,6 +1382,7 @@ struct Graph {
   TORCH_API void freeNode(Node* n);
   TORCH_API void freeValue(Value* v);
   TORCH_API void freeBlock(Block* b);
+  void cloneFrom(Graph& src);
 };
 
 /** \brief An utility class for setting temporary insertion points.
@@ -1539,7 +1542,7 @@ TORCH_API std::vector<Value*> insertGraph(
  */
 TORCH_API std::vector<Value*> inlineCallTo(
     Node* to_replace,
-    Function* callee,
+    GraphFunction* callee,
     bool use_graph = true);
 
 /** If there is only one value in \p OUTPUTS and its kind is Tuple, insert a
@@ -1547,9 +1550,16 @@ TORCH_API std::vector<Value*> inlineCallTo(
  */
 TORCH_API std::vector<Value*> unpackOutputs(const std::vector<Value*>& outputs);
 
+TORCH_API std::vector<Node*> findAllNodes(Graph& g, Symbol kind, bool recurse);
+TORCH_API std::vector<Node*> findAllNodes(Block& b, Symbol kind, bool recurse);
+TORCH_API std::vector<Node*> findAllNodes(
+    at::ArrayRef<Block*> a,
+    Symbol kind,
+    bool recurse);
+
 struct OperatorSet {
   OperatorSet(std::initializer_list<const char*> sig_literals);
-  std::shared_ptr<std::vector<std::shared_ptr<Operator>>> getOps() const;
+  std::vector<std::shared_ptr<Operator>> getOps() const;
 
  private:
   friend struct Node;
@@ -1583,7 +1593,7 @@ struct OperatorMap {
   }
 
   void insert(const OperatorSet& op_set, T val) {
-    for (auto& op : *op_set.getOps()) {
+    for (auto& op : op_set.getOps()) {
       insert(op, val);
     }
   }

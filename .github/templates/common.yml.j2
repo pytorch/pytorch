@@ -183,7 +183,7 @@ concurrency:
         run: echo "${LABELS}"
 {%- endmacro -%}
 
-{%- macro calculate_docker_image() -%}
+{%- macro calculate_docker_image(always_rebuild) -%}
       - name: Calculate docker image tag
         id: calculate-tag
         run: |
@@ -198,6 +198,7 @@ concurrency:
           BASE_REVISION: ${{ github.event.pull_request.base.sha || github.sha }}
         run: |
           set -x
+{%- if not always_rebuild %}
           # Check if image already exists, if it does then skip building it
           if docker manifest inspect "${DOCKER_IMAGE_BASE}:${DOCKER_TAG}"; then
             exit 0
@@ -222,6 +223,7 @@ concurrency:
             echo "       contact the PyTorch team to restore the original images"
             exit 1
           fi
+{%- endif %}
           echo ::set-output name=rebuild::yes
       - name: Build and push docker image
         if: ${{ steps.check.outputs.rebuild }}

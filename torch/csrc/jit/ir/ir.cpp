@@ -78,6 +78,23 @@ std::string normalizeAttrName(c10::string_view field) {
   return std::string{field};
 }
 
+void findAllNodes(
+    Block& block,
+    Symbol kind,
+    bool recurse,
+    std::vector<Node*>& ret) {
+  for (Node* n : block.nodes()) {
+    if (n->kind() == kind) {
+      ret.push_back(n);
+    }
+    if (recurse) {
+      for (auto b : n->blocks()) {
+        findAllNodes(*b, kind, recurse, ret);
+      }
+    }
+  }
+}
+
 } // namespace
 
 // NB: This overload will become ambiguous with the one Caffe2 provides in its
@@ -736,14 +753,24 @@ void Block::destroy() {
   graph_->freeBlock(this);
 }
 
-std::shared_ptr<Graph> Graph::copy() {
-  auto new_g = std::make_shared<Graph>();
+void Graph::cloneFrom(Graph& src) {
   auto env = [](Value* v) -> Value* {
     AT_ERROR(
         "Graph::copy() encountered a use of a value " + v->debugName() +
         " not in scope. Run lint!");
   };
-  new_g->block()->cloneFrom(this->block(), env);
+  block()->cloneFrom(src.block(), env);
+}
+
+std::shared_ptr<Graph> Graph::copy() {
+  auto new_g = std::make_shared<Graph>();
+  new_g->cloneFrom(*this);
+  return new_g;
+}
+
+std::unique_ptr<Graph> Graph::copyUnique() {
+  auto new_g = std::make_unique<Graph>();
+  new_g->cloneFrom(*this);
   return new_g;
 }
 
@@ -2061,7 +2088,7 @@ void inlineCallStackOfNode(
 // ONNX conversion
 std::vector<Value*> inlineCallTo(
     Node* to_replace,
-    Function* callee,
+    GraphFunction* callee,
     bool inline_optimized_graph /*=true*/) {
   WithInsertPoint guard(to_replace);
   TORCH_INTERNAL_ASSERT(callee->isGraphFunction());
@@ -2180,6 +2207,25 @@ std::vector<Value*> unpackOutputs(const std::vector<Value*>& outputs) {
   return new_outputs;
 }
 
+std::vector<Node*> findAllNodes(
+    at::ArrayRef<Block*> array,
+    Symbol kind,
+    bool recurse) {
+  std::vector<Node*> ret;
+  for (auto block : array) {
+    findAllNodes(*block, kind, recurse, ret);
+  }
+  return ret;
+}
+
+std::vector<Node*> findAllNodes(Block& block, Symbol kind, bool recurse) {
+  return findAllNodes({&block}, kind, recurse);
+}
+
+std::vector<Node*> findAllNodes(Graph& g, Symbol kind, bool recurse) {
+  return findAllNodes(*g.block(), kind, recurse);
+}
+
 std::vector<Value*> insertGraph(
     Graph& g,
     Graph& callee,
@@ -2251,12 +2297,12 @@ OperatorSet::OperatorSet(std::initializer_list<const char*> sig_literals) {
   }
 }
 
-std::shared_ptr<std::vector<std::shared_ptr<Operator>>> OperatorSet::getOps()
+std::vector<std::shared_ptr<Operator>> OperatorSet::getOps()
     const {
-  auto result = std::make_shared<std::vector<std::shared_ptr<Operator>>>();
+  std::vector<std::shared_ptr<Operator>>result;
   for (const auto& kv : ops) {
     auto ops_for_symbol = kv.second;
-    result->insert(result->end(), ops_for_symbol.begin(), ops_for_symbol.end());
+    result.insert(result.end(), ops_for_symbol.begin(), ops_for_symbol.end());
   }
   return result;
 }
