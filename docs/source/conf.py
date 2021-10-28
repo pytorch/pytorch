@@ -423,6 +423,7 @@ def coverage_post_process(app, exception):
     # We go through all the torch submodules and make sure they are
     # properly tested
     missing = set()
+
     def is_not_internal(modname):
         split_name = modname.split(".")
         for name in split_name:
@@ -437,7 +438,7 @@ def coverage_post_process(app, exception):
     for _, modname, ispkg in pkgutil.walk_packages(path=torch.__path__,
                                                    prefix=torch.__name__ + '.'):
         if ispkg and is_not_internal(modname):
-            if not modname in modules:
+            if modname not in modules:
                 missing.add(modname)
 
     expected = set(coverage_missing_automodule)
