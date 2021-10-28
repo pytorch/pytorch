@@ -42,14 +42,14 @@ void THCPByteStorage_postInit(PyObject *module)
   THPByteStorageClass = PyObject_GetAttrString(module, "UntypedStorage");
   if (!THPByteStorageClass) throw python_error();
 
-  at::Backend backend = at::Backend::CPU;
-#ifdef THC_GENERIC_FILE
-  backend = at::Backend::CUDA;
-#endif
+//  at::Backend backend = at::Backend::CPU;
+//#ifdef THC_GENERIC_FILE
+  at::Backend backend = at::Backend::CUDA;
+//#endif
 
-#ifdef THQUANTIZED
-  backend = at::Backend::QuantizedCPU;
-#endif
+//#ifdef THQUANTIZED
+//  backend = at::Backend::QuantizedCPU;
+//#endif
 
-  torch::registerStoragePyTypeObject((PyTypeObject*)THCPByteStorageClass, backend, at::kByte);
+  torch::registerStoragePyTypeObject((PyTypeObject*)THPByteStorageClass, backend, at::kByte);
 }
