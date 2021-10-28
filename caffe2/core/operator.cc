@@ -96,11 +96,11 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
 OperatorBase::OperatorBase(
     const c10::FunctionSchema& fn_schema,
     c10::ArrayRef<c10::IValue> inputs,
-    c10::ArrayRef<caffe2::Tensor> outputs)
+    std::vector<caffe2::Tensor> outputs)
     // NOLINTNEXTLINE(performance-move-const-arg)
     : fn_schema_(make_unique<c10::FunctionSchema>(std::move(fn_schema))),
       newstyle_inputs_(inputs),
-      output_tensors_(outputs.vec()),
+      output_tensors_(std::move(outputs)),
       input_size_(newstyle_inputs_.compute_input_size()) {
   input_tensors_.resize(input_size_);
 }
