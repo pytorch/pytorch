@@ -357,6 +357,7 @@ lazy_tensor_core_sources = [
     "torch/csrc/lazy/core/hash.cpp",
     "torch/csrc/lazy/core/ir.cpp",
     "torch/csrc/lazy/core/ir_metadata.cpp",
+    "torch/csrc/lazy/core/ir_util.cpp",
 ]
 
 libtorch_core_sources = sorted(
@@ -445,6 +446,7 @@ jit_sources_full = [
     "torch/csrc/jit/runtime/register_special_ops.cpp",
     "torch/csrc/jit/passes/remove_inplace_ops.cpp",
     "torch/csrc/jit/passes/utils/check_alias_annotation.cpp",
+    "torch/csrc/jit/passes/autocast.cpp",
 ]
 
 libtorch_core_jit_sources = sorted(jit_sources_full)
