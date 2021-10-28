@@ -197,7 +197,7 @@ autocast casts all inputs to ``float32`` and runs the op in ``float32``.
 ``grid_sample``,
 ``index_put``,
 ``scatter_add``,
-``tensordot``
+``linalg.tensordot``
 
 Some ops not listed here (e.g., binary ops like ``add``) natively promote
 inputs without autocasting's intervention.  If inputs are a mixture of ``float16``
