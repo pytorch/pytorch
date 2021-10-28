@@ -1481,6 +1481,7 @@ class TestNormalizeOperators(JitTestCase):
             "index_put",
             "nn.functional.conv2d",
             "nn.functional.dropout",
+            "nn.functional.embedding",  # Implemented with a lambda
             "polygamma",
             "special.polygamma",
             "repeat",

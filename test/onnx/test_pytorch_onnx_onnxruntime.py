@@ -1,3 +1,5 @@
+# Owner(s): ["module: onnx"]
+
 import unittest
 import onnxruntime
 import torch
@@ -3604,6 +3606,15 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.arange(10)
         self.run_test(OneHot(15), (x))
 
+        class OneHot(torch.nn.Module):
+            def forward(self, x, num_classes):
+                num_classes = num_classes.to(torch.int32)
+                return torch.nn.functional.one_hot(x, num_classes[0])
+
+        x = torch.arange(10)
+        num_classes = 15 * torch.ones(1)
+        self.run_test(OneHot(), (x, num_classes))
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_gather(self):
         class GatherModel(torch.nn.Module):
@@ -3767,6 +3778,19 @@ class TestONNXRuntime(unittest.TestCase):
     def test_reduced_prod(self):
         return self._test_reduced_ops(op=torch.prod)
 
+    def test_reduced_sum_dtypes(self):
+        class NoDimModel(torch.nn.Module):
+            def forward(self, input):
+                return input.sum(dtype=torch.float)
+
+        class DimModel(torch.nn.Module):
+            def forward(self, input):
+                return input.sum(dim=-1, dtype=torch.float)
+
+        input = torch.randn((4, 4), dtype=torch.half)
+        self.run_test(NoDimModel(), input)
+        self.run_test(DimModel(), input)
+
     def test_reduced_min_max(self):
         class ReducedMinMaxModule(torch.nn.Module):
             def forward(self, input):
@@ -3844,6 +3868,28 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(3, 4, 5, requires_grad=True)
         self.run_test(Model(), x)
+
+    def test_softplus(self):
+        class BetaOneModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.softplus(x)
+
+        x = torch.randn(3, 4, 5, requires_grad=True)
+        self.run_test(BetaOneModel(), x)
+
+        class BetaModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.softplus(x, beta=2)
+
+        x = torch.randn(3, 4, 5, requires_grad=True)
+        self.run_test(BetaModel(), x)
+
+        class BetaFloatModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.softplus(x, beta=1.7)
+
+        x = torch.randn(3, 4, 5, requires_grad=True)
+        self.run_test(BetaFloatModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_lstm_no_hidden(self):
@@ -5239,24 +5285,6 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(4, 5)
         self.run_test(model, (x, y))
 
-    @unittest.skip("Enable this once remove is supported by pytorch")
-    @skipIfUnsupportedMinOpsetVersion(11)
-    def test_list_remove(self):
-        class ListModel(torch.nn.Module):
-            def forward(self, x, y):
-                res = []
-                for i in range(x.size(0)):
-                    res += [torch.matmul(x[i], y)]
-                # The following fails with pytorch
-                # RuntimeError: Boolean value of Tensor with more than one value is ambiguous
-                res.remove(res[2])
-                return res
-
-        model = torch.jit.script(ListModel())
-        x = torch.randn(16, 3, 4)
-        y = torch.randn(4, 5)
-        self.run_test(model, (x, y))
-
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_list_set(self):
         class ListModel(torch.nn.Module):
@@ -5333,6 +5361,63 @@ class TestONNXRuntime(unittest.TestCase):
         another_x = torch.randn(5, 6, 7)
         self.run_test(TensorFactory(), x, test_with_inputs=[another_x],
                       input_names=["input_1"], dynamic_axes={"input_1": [0, 1, 2]})
+
+    @skipIfUnsupportedMinOpsetVersion(13)
+    def test_diagonal(self):
+        class DiagonalModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.diagonal(x)
+
+        x = torch.randn(2, 4, 5, 2)
+        # Other test inputs to test dynamic behavior
+        another_x = torch.randn(5, 6, 7, 8)
+        self.run_test(DiagonalModel(), x, test_with_inputs=[another_x],
+                      input_names=["input_1"],
+                      dynamic_axes={"input_1": [0, 1, 2, 3]})
+
+        class DiagonalModelNegOffset(torch.nn.Module):
+            def forward(self, x):
+                return torch.diagonal(x, offset=-1)
+
+        x = torch.randn(2, 4, 5, 2)
+        # Other test inputs to test dynamic behavior
+        another_x = torch.randn(5, 6, 7, 8)
+        self.run_test(DiagonalModelNegOffset(), x, test_with_inputs=[another_x],
+                      input_names=["input_1"],
+                      dynamic_axes={"input_1": [0, 1, 2, 3]})
+
+        class DiagonalModelPosOffset(torch.nn.Module):
+            def forward(self, x):
+                return torch.diagonal(x, offset=1)
+
+        x = torch.randn(2, 4, 5, 2)
+        # Other test inputs to test dynamic behavior
+        another_x = torch.randn(5, 6, 7, 8)
+        self.run_test(DiagonalModelPosOffset(), x, test_with_inputs=[another_x],
+                      input_names=["input_1"],
+                      dynamic_axes={"input_1": [0, 1, 2, 3]})
+
+        class DiagonalModelWithDims(torch.nn.Module):
+            def forward(self, x):
+                return torch.diagonal(x, offset=-1, dim1=1, dim2=2)
+
+        x = torch.randn(2, 4, 5, 2)
+        # Other test inputs to test dynamic behavior
+        another_x = torch.randn(5, 6, 7, 8)
+        self.run_test(DiagonalModelWithDims(), x, test_with_inputs=[another_x],
+                      input_names=["input_1"],
+                      dynamic_axes={"input_1": [0, 1, 2, 3]})
+
+        class DiagonalModelOffsetOverrun(torch.nn.Module):
+            def forward(self, x):
+                return torch.diagonal(x, offset=-2), torch.diagonal(x, offset=5)
+
+        x = torch.randn(2, 4, 5, 2)
+        # Other test inputs to test dynamic behavior
+        another_x = torch.randn(5, 6, 7, 8)
+        self.run_test(DiagonalModelOffsetOverrun(), x, test_with_inputs=[another_x],
+                      input_names=["input_1"],
+                      dynamic_axes={"input_1": [0, 1, 2, 3]})
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_inplace_zero(self):
@@ -6187,7 +6272,8 @@ class TestONNXRuntime(unittest.TestCase):
 
     @disableScriptTest()  # scripting prim::Uninitialized, prim::dtype, prim::unchecked_cast
     @skipIfUnsupportedMinOpsetVersion(11)
-    @unittest.skip("Due to ONNX Loop shape inference issue.")
+    @unittest.skip("Due to ONNX Loop shape inference issue. "
+                   "https://msdata.visualstudio.com/Vienna/_workitems/edit/1352001")
     def test_embedding_bag_dynamic_input(self):
         class EmbeddingModel1D(torch.nn.Module):
             def forward(self, embedding_matrix, input, weights, offsets):
@@ -6796,8 +6882,8 @@ class TestONNXRuntime(unittest.TestCase):
                 eqn = "...ii ->...i"
                 return torch.einsum(eqn, x)
 
-        x = torch.randn(3, 5, 5)
-        self.run_test(EinsumModelBatchDiagonal(), input=(x,))
+        for x in [torch.randn(3, 5, 5), torch.randn(3, 5, 5).to(dtype=torch.bool)]:
+            self.run_test(EinsumModelBatchDiagonal(), input=(x,))
 
         class EinsumModelBatchMatmul(torch.nn.Module):
             def forward(self, x, y):
@@ -6822,8 +6908,8 @@ class TestONNXRuntime(unittest.TestCase):
                 eqn = "ij->ji"
                 return torch.einsum(eqn, x)
 
-        x = torch.randn(3, 4)
-        self.run_test(EinsumModelTranspose(), input=(x,))
+        for x in [torch.randn(3, 4), torch.randn(3, 4).to(dtype=torch.bool)]:
+            self.run_test(EinsumModelTranspose(), input=(x,))
 
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_crossentropyloss(self):
@@ -7328,6 +7414,20 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.tensor([[True, False], [False, False]])
         self.run_test(M(), (x, ))
 
+        class MDim(torch.nn.Module):
+            def forward(self, x):
+                return x.any(dim=1)
+
+        x = torch.rand(3, 4).bool()
+        self.run_test(MDim(), (x, ))
+
+        class MKeepdim(torch.nn.Module):
+            def forward(self, x):
+                return x.any(dim=1, keepdim=True)
+
+        x = torch.rand(3, 4).bool()
+        self.run_test(MKeepdim(), (x, ))
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_all(self):
         class M(torch.nn.Module):
@@ -7336,6 +7436,20 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.tensor([[True, False], [False, False]])
         self.run_test(M(), (x, ))
+
+        class MDim(torch.nn.Module):
+            def forward(self, x):
+                return x.all(dim=1)
+
+        x = torch.rand(3, 4).bool()
+        self.run_test(MDim(), (x, ))
+
+        class MKeepdim(torch.nn.Module):
+            def forward(self, x):
+                return x.all(dim=1, keepdim=True)
+
+        x = torch.rand(3, 4).bool()
+        self.run_test(MKeepdim(), (x, ))
 
     def test_dropout(self):
         class M(torch.nn.Module):

@@ -13982,6 +13982,32 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(mod.weight.grad, torch.tensor([0., 0, 0], device=device))
         self.assertEqual(mod.bias.grad, torch.tensor([0., 0, 0], device=device))
 
+    def test_conv_empty_channel(self, device):
+        in_channels = 0
+        mod = torch.nn.Conv1d(in_channels, 8, 2, stride=2).to(device)
+        inp = torch.randn(2, 0, 15, device=device)
+        self._test_module_empty_input(mod, inp, check_size=False)
+
+        with self.assertRaisesRegex(RuntimeError, "Given groups=1, weight"):
+            inp = torch.randn(2, 1, 0, device=device)
+            mod(inp)
+
+        mod = torch.nn.Conv2d(in_channels, 33, 3, stride=2).to(device)
+        inp = torch.randn(2, 0, 50, 100, device=device)
+        self._test_module_empty_input(mod, inp, check_size=False)
+
+        with self.assertRaisesRegex(RuntimeError, "Given groups=1, weight"):
+            inp = torch.randn(2, 1, 40, 0, device=device)
+            mod(inp)
+
+        mod = torch.nn.Conv3d(in_channels, 33, 3, stride=2).to(device)
+        inp = torch.randn(2, 0, 50, 20, 40, device=device)
+        self._test_module_empty_input(mod, inp, check_size=False)
+
+        with self.assertRaisesRegex(RuntimeError, "Given groups=1, weight"):
+            inp = torch.randn(2, 1, 50, 0, 40, device=device)
+            mod(inp)
+
     def test_group_conv_empty(self, device):
         mod = torch.nn.Conv2d(4, 4, stride=2, kernel_size=3, padding=1, groups=4).to(device)
         inp = torch.randn(0, 4, 4, 4, device=device)
@@ -16350,6 +16376,18 @@ class TestNNDeviceType(NNTestCase):
             with torch.backends.cudnn.flags(enabled=False):
                 self._test_batchnorm_grad(device)
 
+    @onlyCUDA
+    def test_layernorm_half_precision(self):
+        width = 128
+        input = torch.rand(1, 5, width, device="cuda", dtype=torch.half) * 0.1
+        normalized_shape = (width,)
+        weight = torch.ones(width, device="cuda", dtype=torch.half)
+        bias = torch.zeros(width, device="cuda", dtype=torch.half)
+        eps = 1e-5
+
+        output_fp16 = torch.layer_norm(input, normalized_shape, weight, bias, eps)
+        output_fp32 = torch.layer_norm(input.float(), normalized_shape, weight.float(), bias.float(), eps).half()
+        self.assertEqual(output_fp16, output_fp32, atol=0, rtol=0)
 
     def test_hardsigmoid_grad(self, device):
         inputs = (torch.randn(4, 16, 16, device=device) - 0.5) * 10
