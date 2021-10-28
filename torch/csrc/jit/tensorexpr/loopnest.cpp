@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 
 #include <algorithm>
+#include <random>
 #include <stdexcept>
 #include <typeinfo>
 #include <unordered_map>
@@ -3423,6 +3424,19 @@ bool LoopNest::rfactor(
 }
 
 namespace randomization_helper {
+
+int64_t max_transformations(int n_max_transforms) {
+  // This env variable helps control the max number of transformations. This can
+  // be helpful in gradually reducing the number of transformations when we see
+  // an error.
+  static const char* enable_c_str =
+      std::getenv("PYTORCH_TENSOREXPR_RANDOM_MAX_TRANSFORM");
+  if (!enable_c_str) {
+    return n_max_transforms;
+  }
+  return std::stoi(std::string(enable_c_str));
+}
+
 std::vector<std::vector<ForPtr>> GetAllPerfectlyNestedLoopNests(
     std::vector<ForPtr> loops) {
   // Find the first set of loops that can be reordered
@@ -3449,10 +3463,11 @@ std::vector<std::vector<ForPtr>> GetAllPerfectlyNestedLoopNests(
 template <typename T>
 std::tuple<std::vector<T>, std::vector<int>> select_n_randomly(
     std::vector<T>& objects,
-    int n) {
+    int n,
+    std::default_random_engine& random_engine) {
   std::vector<int> indices(objects.size());
   std::iota(indices.begin(), indices.end(), 0);
-  std::random_shuffle(indices.begin(), indices.end());
+  std::shuffle(indices.begin(), indices.end(), random_engine);
 
   std::vector<T> selected_objects;
   std::vector<int> selected_indices;
@@ -3485,7 +3500,7 @@ void printHistory(int index, std::string message) {
 template <typename T>
 std::string join(std::vector<T> indices, char sep = ',') {
   std::string s = "";
-  for (auto index : indices) {
+  for (const auto& index : indices) {
     s += std::to_string(index) + sep;
   }
   return s;
@@ -3493,13 +3508,13 @@ std::string join(std::vector<T> indices, char sep = ',') {
 
 std::string join(std::vector<std::string> indices, char sep = ',') {
   std::string s = "";
-  for (auto index : indices) {
+  for (const auto& index : indices) {
     s += index + sep;
   }
   return s;
 }
 template <typename T>
-std::string indexOf(std::vector<T> objects, T object) {
+std::string indexOf(const std::vector<T>& objects, const T object) {
   return std::to_string(std::distance(
       objects.begin(), std::find(objects.begin(), objects.end(), object)));
 }
@@ -3507,8 +3522,10 @@ std::string indexOf(std::vector<T> objects, T object) {
 } // namespace randomization_helper
 
 void LoopNest::randomTransform(int64_t seed) {
+  std::default_random_engine random_engine(seed);
   std::srand(seed);
-  int n_transforms = std::rand() % 20;
+  int n_transforms =
+      randomization_helper::max_transformations(std::rand() % 20);
   std::string message = "";
   // clang-format off
   //   Transformations list:
@@ -3593,7 +3610,7 @@ void LoopNest::randomTransform(int64_t seed) {
           if (!no_more_inlining) {
             auto bufs = NodeFinder<Buf>::find(root_stmt_);
             if (bufs.size() > 0) {
-              int buf_number = std::rand() % bufs.size();
+              int buf_number = std::rand() % (int)bufs.size();
               message =
                   "computeInline(" + bufs[buf_number]->name_hint() + ");\n";
               randomization_helper::printHistory(i, message);
@@ -3624,9 +3641,9 @@ void LoopNest::randomTransform(int64_t seed) {
           if (loops.size() == 0) {
             break;
           }
-          int loop_n = std::rand() % loops.size();
+          int loop_n = std::rand() % (int)loops.size();
           auto loop = loops[loop_n];
-          int factor = std::rand() % 20 + 1;
+          int factor = (std::rand() % 20) + 1;
           message = "splitWithTail(loops[" + std::to_string(loop_n) + "], " +
               std::to_string(factor) + ");\n";
           randomization_helper::printHistory(i, message);
@@ -3638,9 +3655,9 @@ void LoopNest::randomTransform(int64_t seed) {
           if (loops.size() == 0) {
             break;
           }
-          int loop_n = std::rand() % loops.size();
+          int loop_n = std::rand() % (int)loops.size();
           auto loop = loops[loop_n];
-          int factor = std::rand() % 20 + 1;
+          int factor = (std::rand() % 20) + 1;
           message = "splitWithMask(loops[" + std::to_string(loop_n) + "], " +
               std::to_string(factor) + ")\n";
           randomization_helper::printHistory(i, message);
@@ -3652,18 +3669,19 @@ void LoopNest::randomTransform(int64_t seed) {
           if (loops.size() == 0) {
             break;
           }
-          int loop_n = std::rand() % loops.size();
+          int loop_n = std::rand() % (int)loops.size();
           auto loop = loops[loop_n];
           std::vector<StmtPtr> stmts(
               loop->body()->begin(), loop->body()->end());
           if (stmts.size() == 0) {
             break;
           }
-          int n_pivots = std::rand() % stmts.size() + 1;
+          int n_pivots = (std::rand() % (int)stmts.size()) + 1;
           std::vector<StmtPtr> pivots;
           std::vector<int> chosen_indices;
           std::tie(pivots, chosen_indices) =
-              randomization_helper::select_n_randomly<StmtPtr>(stmts, n_pivots);
+              randomization_helper::select_n_randomly<StmtPtr>(
+                  stmts, n_pivots, random_engine);
           std::unordered_set<StmtPtr> pivots_set(pivots.begin(), pivots.end());
           message = "distributeLoop(loops[" + std::to_string(loop_n) +
               "], pivots=stmts(" + randomization_helper::join(chosen_indices) +
@@ -3678,7 +3696,7 @@ void LoopNest::randomTransform(int64_t seed) {
           if (loops.size() == 0) {
             break;
           }
-          int loop_n = std::rand() % loops.size();
+          int loop_n = std::rand() % (int)loops.size();
           auto loop = loops[loop_n];
 
           message = "distributeLoop(loops[" + std::to_string(loop_n) + "])\n";
@@ -3692,7 +3710,7 @@ void LoopNest::randomTransform(int64_t seed) {
           if (loops.size() == 0) {
             break;
           }
-          int loop_n = std::rand() % loops.size();
+          int loop_n = std::rand() % (int)loops.size();
           auto loop = loops[loop_n];
 
           message = "distributeLoopAndParents(loops[" + std::to_string(loop_n) +
@@ -3707,7 +3725,7 @@ void LoopNest::randomTransform(int64_t seed) {
           if (loops.size() == 0) {
             break;
           }
-          int loop_n = std::rand() % loops.size();
+          int loop_n = std::rand() % (int)loops.size();
           auto loop = loops[loop_n];
 
           message = "distributeLoopOverInnerLoops(loops[" +
@@ -3722,7 +3740,7 @@ void LoopNest::randomTransform(int64_t seed) {
           if (loops.size() == 0) {
             break;
           }
-          int loop_n = std::rand() % loops.size();
+          int loop_n = std::rand() % (int)loops.size();
           auto loop = loops[loop_n];
 
           message = "distributeLoopAndParentsOverInnerLoops(loops[" +
@@ -3740,13 +3758,13 @@ void LoopNest::randomTransform(int64_t seed) {
 
           // Find a random number of loops to fuse
           int num_loops_to_fuse =
-              std::max(2, (int)(std::rand() % loops.size()));
+              std::max(2, (int)(std::rand() % (int)loops.size()));
 
           std::vector<ForPtr> loops_to_fuse;
           std::vector<int> chosen_indices;
           std::tie(loops_to_fuse, chosen_indices) =
               randomization_helper::select_n_randomly<ForPtr>(
-                  loops, num_loops_to_fuse);
+                  loops, num_loops_to_fuse, random_engine);
 
           message = "fuseLoops(loops[" +
               randomization_helper::join(chosen_indices) + "], &fused_loop);\n";
@@ -3769,7 +3787,7 @@ void LoopNest::randomTransform(int64_t seed) {
           for (int i = 0; i < loops.size(); i++) {
             for (int j = i + 1; j < loops.size(); j++) {
               if (findOuterFor(loops[i], loops[j])) {
-                valid_pairs.push_back(std::make_pair(loops[i], loops[j]));
+                valid_pairs.emplace_back(std::make_pair(loops[i], loops[j]));
               }
             }
           }
@@ -3778,7 +3796,7 @@ void LoopNest::randomTransform(int64_t seed) {
           if (valid_pairs.size() == 0) {
             break;
           }
-          int valid_pair_n = std::rand() % valid_pairs.size();
+          int valid_pair_n = std::rand() % (int)valid_pairs.size();
           auto loop_pair = valid_pairs.at(valid_pair_n);
           auto first_loop = std::get<0>(loop_pair);
           auto second_loop = std::get<1>(loop_pair);
@@ -3810,17 +3828,17 @@ void LoopNest::randomTransform(int64_t seed) {
           }
 
           // Randomly pick a set of consecutive loops to reorder
-          int index = rand() % all_nested_loops.size();
+          int index = rand() % (int)all_nested_loops.size();
           auto nested_loops = all_nested_loops.at(index);
 
           // Create a random permutation for reordering
           std::vector<size_t> permutation(nested_loops.size());
           std::iota(permutation.begin(), permutation.end(), 0);
-          std::random_shuffle(permutation.begin(), permutation.end());
+          std::shuffle(permutation.begin(), permutation.end(), random_engine);
 
           // Generate a good history message
           std::vector<std::string> indices;
-          for (auto l : nested_loops) {
+          for (const auto& l : nested_loops) {
             indices.push_back(randomization_helper::indexOf(loops, l));
           }
           message = "reorder(loops[" + randomization_helper::join(indices) +
@@ -3849,12 +3867,12 @@ void LoopNest::randomTransform(int64_t seed) {
             break;
           }
 
-          int index = rand() % all_nested_loops.size();
+          int index = rand() % (int)all_nested_loops.size();
           auto nested_loops = all_nested_loops.at(index);
           if (nested_loops.size() < 2) {
             break;
           }
-          int loop_number = rand() % (nested_loops.size() - 1);
+          int loop_number = rand() % ((int)nested_loops.size() - 1);
           auto x_loop = nested_loops.at(loop_number);
           auto y_loop = nested_loops.at(loop_number + 1);
 
@@ -3883,7 +3901,7 @@ void LoopNest::randomTransform(int64_t seed) {
           if (loops.size() == 0) {
             break;
           }
-          int loop_n = std::rand() % loops.size();
+          int loop_n = std::rand() % (int)loops.size();
           auto loop = loops[loop_n];
 
           message = "unroll(loops[" + std::to_string(loop_n) + "]);\n";
@@ -3897,7 +3915,7 @@ void LoopNest::randomTransform(int64_t seed) {
           if (loops.size() == 0) {
             break;
           }
-          int loop_n = std::rand() % loops.size();
+          int loop_n = std::rand() % (int)loops.size();
           auto loop = loops[loop_n];
 
           message = "normalize(loops[" + std::to_string(loop_n) + "]);\n";
@@ -3921,12 +3939,12 @@ void LoopNest::randomTransform(int64_t seed) {
           }
 
           // Randomly pick a set of consecutive loops to flatten
-          int index = rand() % all_nested_loops.size();
+          int index = rand() % (int)all_nested_loops.size();
           auto nested_loops = all_nested_loops.at(index);
 
           // Generate a good history message
           std::vector<std::string> indices;
-          for (auto l : nested_loops) {
+          for (const auto& l : nested_loops) {
             indices.push_back(randomization_helper::indexOf(loops, l));
           }
           message =
@@ -3942,7 +3960,7 @@ void LoopNest::randomTransform(int64_t seed) {
           if (buffers.size() < 0) {
             break;
           }
-          int buffer_n = std::rand() % buffers.size();
+          int buffer_n = std::rand() % (int)buffers.size();
           auto buffer = buffers[buffer_n];
 
           message = "compressBuffer(buffers[" + std::to_string(buffer_n) +
@@ -3970,7 +3988,7 @@ void LoopNest::randomTransform(int64_t seed) {
           if (loops.size() == 0) {
             break;
           }
-          int loop_n = std::rand() % loops.size();
+          int loop_n = std::rand() % (int)loops.size();
           auto loop = loops[loop_n];
 
           int factor = randomization_helper::find_factor(loop);
@@ -3990,7 +4008,7 @@ void LoopNest::randomTransform(int64_t seed) {
           if (loops.size() == 0) {
             break;
           }
-          int loop_n = std::rand() % loops.size();
+          int loop_n = std::rand() % (int)loops.size();
           auto loop = loops[loop_n];
 
           int factor = randomization_helper::find_factor(loop);
@@ -4019,15 +4037,15 @@ void LoopNest::randomTransform(int64_t seed) {
           auto buffers = BufFinder::find(root_stmt_);
           std::vector<std::pair<StmtPtr, ForPtr>> producer_consumer_pairs;
 
-          for (auto buffer : buffers) {
+          for (const auto& buffer : buffers) {
             auto producers = getAllWritesToBuf(buffer);
             auto consumers = StmtsReadingBuf::find(root_stmt_, buffer);
             if (producers.size() != 1 || consumers.empty()) {
               continue;
             }
 
-            for (auto producer : producers) {
-              for (auto consumer : consumers) {
+            for (const auto& producer : producers) {
+              for (const auto& consumer : consumers) {
                 auto parent_loop = getParentLoop(consumer);
                 auto pc_pair = std::make_pair(producer, parent_loop);
                 producer_consumer_pairs.push_back(pc_pair);
@@ -4040,7 +4058,7 @@ void LoopNest::randomTransform(int64_t seed) {
           }
 
           // Choose a random pair
-          int pair_n = std::rand() % producer_consumer_pairs.size();
+          int pair_n = std::rand() % (int)producer_consumer_pairs.size();
           auto pc_pair = producer_consumer_pairs.at(pair_n);
           auto store = std::get<0>(pc_pair);
           auto for_ptr = std::get<1>(pc_pair);
@@ -4061,10 +4079,10 @@ void LoopNest::randomTransform(int64_t seed) {
           auto loops = NodeFinder<For>::find(root_stmt_);
           std::vector<ForPtr> innermost_loops;
 
-          for (auto loop : loops) {
+          for (const auto& loop : loops) {
             bool containsSubLoops = false;
             if (BlockPtr body = to<Block>(loop->body())) {
-              for (StmtPtr stmt : *body) {
+              for (const StmtPtr& stmt : *body) {
                 if (ForPtr f2 = to<For>(stmt)) {
                   containsSubLoops = true;
                 }
@@ -4079,7 +4097,7 @@ void LoopNest::randomTransform(int64_t seed) {
           if (innermost_loops.size() == 0) {
             break;
           }
-          int loop_n = std::rand() % innermost_loops.size();
+          int loop_n = std::rand() % (int)innermost_loops.size();
           auto loop = innermost_loops[loop_n];
 
           message = "vectorize(loops[" + std::to_string(loop_n) + "]);\n";
