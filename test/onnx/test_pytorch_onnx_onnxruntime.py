@@ -6488,8 +6488,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, b)
         self.run_test(model, c)
 
-    # ONNX supports bfloat16 for opsets >= 13
-    @skipIfUnsupportedMinOpsetVersion(13)
     def test_type_as_bfloat16(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
@@ -6501,12 +6499,20 @@ class TestONNXRuntime(unittest.TestCase):
             x = torch.tensor(3, dtype=type)
             self.run_test(model, x)
 
-    # ONNX supports bfloat16 for opsets >= 13
+    # ONNX supports Gemm op bfloat16 for opsets >= 13
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_linear_bfloat16(self):
         input = torch.randn(128, 20, dtype=torch.bfloat16)
         model = torch.nn.Linear(20, 30).bfloat16()
         self.run_test(model, input)
+
+    def test_one_cast_pytorch_to_onnx_bfloat16(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.zeros(x.size(0)), torch.ones((x.size(1), x.size(0)), dtype=torch.bfloat16)
+
+        x = torch.randn(3, 4, dtype=torch.bfloat16)
+        self.run_test(MyModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_ones_bool(self):
