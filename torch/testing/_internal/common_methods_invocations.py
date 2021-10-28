@@ -6,7 +6,6 @@ import copy
 from enum import Enum
 import operator
 import random
-import numbers
 import unittest
 
 import torch
@@ -36,7 +35,7 @@ from torch.testing._internal.common_utils import \
      random_fullrank_matrix_distinct_singular_value,
      TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, TEST_SCIPY,
      torch_to_numpy_dtype_dict, TEST_WITH_ASAN,
-     GRADCHECK_NONDET_TOL, slowTest,)
+     GRADCHECK_NONDET_TOL, slowTest, noncontiguous_like)
 import torch.testing._internal.opinfo_helper as opinfo_helper
 
 from setuptools import distutils
@@ -155,32 +154,48 @@ class SampleInput(object):
 
         return self._repr_helper(formatter)
 
+    # Applies the transform f(t) -> t to each tensor and dtype in the SampleInput
+    def transform(self, f):
+        def tt(t):
+            def _tt(t):
+                return f(t)
+
+            if isinstance(t, torch.Tensor):
+                return _tt(t)
+            elif isinstance(t, torch.dtype):
+                return _tt(t)
+            elif isinstance(t, list):
+                return list(map(tt, t))
+            elif isinstance(t, tuple):
+                return tuple(map(tt, t))
+            elif isinstance(t, dict):
+                return {k: tt(v) for k, v in t.items()}
+            else:
+                return t
+
+        sample_tt_input, tt_args, tt_kwargs = tt(self.input), tt(self.args), tt(self.kwargs)
+        return (sample_tt_input, tt_args, tt_kwargs)
+
     # Returns the NumPy version of the sample input object in the form of a tuple: (input, args, kwargs)
+    # Converts tensors to ndarrays by calling .detach().cpu().numpy() on them
+    # Converts dtypes by remapping them using torch_to_numpy_dtype_dict
     def numpy(self):
-        # Converts tensors to ndarrays by calling .detach().cpu().numpy() on them
-        # Numbers, strings, and bool are preserved as is
-        # Lists, tuples and dicts are handled by calling this function recursively
-        def to_numpy(x):
-            def _np(t):
+        def to_numpy(t):
+            if isinstance(t, torch.Tensor):
                 return t.detach().cpu().numpy()
+            elif isinstance(t, torch.dtype):
+                return torch_to_numpy_dtype_dict[t]
 
-            if isinstance(x, torch.Tensor):
-                return _np(x)
-            elif isinstance(x, list):
-                return list(map(to_numpy, x))
-            elif isinstance(x, tuple):
-                return tuple(map(to_numpy, x))
-            elif isinstance(x, dict):
-                return {k: to_numpy(v) for k, v in x.items()}
-            elif isinstance(x, torch.dtype):
-                return torch_to_numpy_dtype_dict[x]
-            elif isinstance(x, (numbers.Number, bool, str)):
-                return x
+        return self.transform(to_numpy)
 
-            raise ValueError("Unknown type {0}!".format(type(x)))
+    def noncontiguous(self):
+        def to_noncontiguous(t):
+            if isinstance(t, torch.Tensor):
+                return noncontiguous_like(t)
+            if isinstance(t, torch.dtype):
+                return t
 
-        sample_np_input, np_args, np_kwargs = to_numpy(self.input), to_numpy(self.args), to_numpy(self.kwargs)
-        return (sample_np_input, np_args, np_kwargs)
+        return self.transform(to_noncontiguous)
 
 
 class AliasInfo(object):
@@ -329,6 +344,7 @@ def _getattr_qual(obj, name, default=_NOTHING):
 # test_ops.py:
 #
 #   - that its supported dtypes are specified correctly
+#   - that the operation produces the same results when called with noncontiguous inputs
 #   - that it supports the out= argument properly (if it allows out=),
 #       see https://github.com/pytorch/pytorch/wiki/Developer-FAQ#how-does-out-work-in-pytorch
 #   - that it works with the conjugate view bit properly
@@ -7185,7 +7201,11 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            test_neg_view=False,
-           sample_inputs_func=sample_inputs_view_as_complex),
+           sample_inputs_func=sample_inputs_view_as_complex,
+           skips=(
+               # RuntimeError: Tensor must have a last dimension with stride 1
+               DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples"),
+           )),
     OpInfo('complex',
            dtypes=floating_types(),
            sample_inputs_func=sample_inputs_complex,
@@ -7774,7 +7794,11 @@ op_db: List[OpInfo] = [
            dtypesIfCPU=all_types(),
            dtypesIfCUDA=all_types_and(torch.half),
            supports_autograd=False,
-           sample_inputs_func=sample_inputs_isin),
+           sample_inputs_func=sample_inputs_isin,
+           skips=(
+               # https://github.com/pytorch/pytorch/issues/67432
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='cpu'),  # noqa: B950
+           )),
     OpInfo('kthvalue',
            dtypes=all_types(),
            dtypesIfCPU=all_types_and(torch.bfloat16),
@@ -8134,6 +8158,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_lu_unpack,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
+               # LU_pivots is expected to be a contiguous tensor
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples'),  # noqa: B950
                # cuda gradchecks are slow
                # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_gradgrad', device_type='cuda'),
@@ -10037,6 +10063,8 @@ op_db: List[OpInfo] = [
            supports_autograd=False,
            skips=(
                # Empty tensor data is garbage so it's hard to make comparisons with it.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_noncontiguous_samples'),
+               # Empty tensor data is garbage so it's hard to make comparisons with it.
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
                # Empty tensor data is garbage so it's hard to make comparisons with it.
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_conj_view'),
@@ -10741,6 +10769,8 @@ op_db: List[OpInfo] = [
         dtypes=floating_types_and(torch.bfloat16, torch.float16),
         sample_inputs_func=sample_inputs_embedding,
         skips=(
+            # https://github.com/pytorch/pytorch/issues/67433
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='cuda'),
             # Does not work with lambda
             # Raises : JIT Test does not execute any logic
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),

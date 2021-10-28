@@ -201,6 +201,21 @@ class TestCommon(TestCase):
         for sample_input in sample_inputs:
             self.compare_with_reference(op, op.ref, sample_input)
 
+    # Tests that the function produces the same result when called with
+    #   noncontiguous tensors.
+    @onlyOnCPUAndCUDA
+    @suppress_warnings
+    @ops(op_db, allowed_dtypes=(torch.float32, torch.long, torch.complex64))
+    def test_noncontiguous_samples(self, device, dtype, op):
+        sample_inputs = op.sample_inputs(device, dtype)
+        for sample_input in sample_inputs:
+            t_inp, t_args, t_kwargs = sample_input.input, sample_input.args, sample_input.kwargs
+            n_inp, n_args, n_kwargs = sample_input.noncontiguous()
+
+            expected = op(t_inp, *t_args, **t_kwargs)
+            actual = op(n_inp, *n_args, **n_kwargs)
+            self.assertEqual(actual, expected, exact_device=False)
+
     # Validates ops implement the correct out= behavior
     # See https://github.com/pytorch/pytorch/wiki/Developer-FAQ#how-does-out-work-in-pytorch
     #   for a description of the correct behavior
