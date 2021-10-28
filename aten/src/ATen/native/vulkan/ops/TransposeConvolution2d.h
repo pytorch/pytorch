@@ -21,9 +21,9 @@ class TransposeConv2dOpContext final : public torch::jit::CustomClassHolder {
       const c10::optional<Tensor>& bias,
       IntArrayRef stride,
       IntArrayRef padding,
+      IntArrayRef output_padding,
       IntArrayRef dilation,
       int64_t groups,
-      IntArrayRef output_padding,
       const c10::optional<Scalar>& output_min = c10::nullopt,
       const c10::optional<Scalar>& output_max = c10::nullopt);
 
@@ -33,8 +33,8 @@ class TransposeConv2dOpContext final : public torch::jit::CustomClassHolder {
       std::vector<int64_t>,
       std::vector<int64_t>,
       std::vector<int64_t>,
-      int64_t,
       std::vector<int64_t>,
+      int64_t,
       c10::optional<Scalar>,
       c10::optional<Scalar>>;
 
@@ -47,9 +47,9 @@ class TransposeConv2dOpContext final : public torch::jit::CustomClassHolder {
       const c10::optional<Tensor>& bias,
       IntArrayRef stride,
       IntArrayRef padding,
+      IntArrayRef output_padding,
       IntArrayRef dilation,
       int64_t groups,
-      IntArrayRef output_padding,
       const c10::optional<Scalar>& output_min = c10::nullopt,
       const c10::optional<Scalar>& output_max = c10::nullopt);
 
@@ -65,9 +65,9 @@ class TransposeConv2dOpContext final : public torch::jit::CustomClassHolder {
     std::array<int64_t, 4> filter;
     std::array<int64_t, 2> stride;
     std::array<int64_t, 2> padding;
+    std::array<int64_t, 2> output_padding;
     std::array<int64_t, 2> dilation;
     int32_t groups;
-    std::array<int64_t, 2> output_padding;
     float output_min;
     float output_max;
   } packed_;
@@ -78,9 +78,9 @@ class TransposeConv2dOpContext final : public torch::jit::CustomClassHolder {
     std::vector<int64_t> filter;
     std::vector<int64_t> stride;
     std::vector<int64_t> padding;
+    std::vector<int64_t> output_padding;
     std::vector<int64_t> dilation;
     int64_t groups;
-    std::vector<int64_t> output_padding;
     c10::optional<Scalar> output_min;
     c10::optional<Scalar> output_max;
   } unpacked_;
@@ -96,9 +96,9 @@ c10::intrusive_ptr<TransposeConv2dOpContext> conv2d_transpose_clamp_prepack(
     c10::optional<Tensor>&& bias,
     std::vector<int64_t>&& stride,
     std::vector<int64_t>&& padding,
+    std::vector<int64_t>&& output_padding,
     std::vector<int64_t>&& dilation,
     const int64_t groups,
-    std::vector<int64_t>&& output_padding,
     const c10::optional<Scalar>& output_min,
     const c10::optional<Scalar>& output_max);
 

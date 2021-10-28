@@ -181,9 +181,9 @@ bool available(
     const c10::optional<Tensor>& bias,
     const IntArrayRef stride,
     const IntArrayRef padding,
+    const IntArrayRef /* output_padding */,
     const IntArrayRef dilation,
     const bool transposed,
-    const IntArrayRef /* output_padding */,
     const int64_t groups,
     const c10::optional<Scalar>& output_min,
     const c10::optional<Scalar>& output_max) {
@@ -264,9 +264,9 @@ TransposeConv2dOpContext::TransposeConv2dOpContext(
     const c10::optional<Tensor>& bias,
     const IntArrayRef stride,
     const IntArrayRef padding,
+    const IntArrayRef output_padding,
     const IntArrayRef dilation,
     const int64_t groups,
-    const IntArrayRef output_padding,
     const c10::optional<Scalar>& output_min,
     const c10::optional<Scalar>& output_max)
   : packed_{
@@ -275,9 +275,9 @@ TransposeConv2dOpContext::TransposeConv2dOpContext(
       pack_filter(weight, expand_param_if_needed(dilation, "dilation", 2)),
       pack_params(expand_param_if_needed(stride, "stride", 2)),
       pack_params(expand_param_if_needed(padding, "padding", 2)),
+      pack_params(expand_param_if_needed(output_padding, "output_padding", 2)),
       pack_params(expand_param_if_needed(dilation, "dilation", 2)),
       safe_downcast<int32_t>(groups),
-      pack_params(expand_param_if_needed(output_padding, "output_padding", 2)),
       output_min ? output_min->template to<float>() : -std::numeric_limits<float>::infinity(),
       output_max ? output_max->template to<float>() : +std::numeric_limits<float>::infinity(),
     },
@@ -287,9 +287,9 @@ TransposeConv2dOpContext::TransposeConv2dOpContext(
       weight.sizes().vec(),
       stride.vec(),
       padding.vec(),
+      output_padding.vec(),
       dilation.vec(),
       groups,
-      output_padding.vec(),
       output_min,
       output_max,
     } {
@@ -300,9 +300,9 @@ TransposeConv2dOpContext TransposeConv2dOpContext::create(
     const c10::optional<Tensor>& bias,
     const IntArrayRef stride_arg,
     const IntArrayRef padding_arg,
+    const IntArrayRef output_padding_arg,
     const IntArrayRef dilation_arg,
     const int64_t groups,
-    const IntArrayRef output_padding_arg,
     const c10::optional<Scalar>& output_min,
     const c10::optional<Scalar>& output_max) {
   const auto stride = expand_param_if_needed(stride_arg, "stride", 2);
@@ -316,9 +316,9 @@ TransposeConv2dOpContext TransposeConv2dOpContext::create(
           bias,
           stride,
           padding,
+          output_padding,
           dilation,
           true,
-          output_padding,
           groups,
           output_min,
           output_max),
@@ -333,9 +333,9 @@ TransposeConv2dOpContext TransposeConv2dOpContext::create(
     bias,
     stride_arg,
     padding_arg,
+    output_padding_arg,
     dilation_arg,
     groups,
-    output_padding_arg,
     output_min,
     output_max,
   };
@@ -469,9 +469,9 @@ TransposeConv2dOpContext::State TransposeConv2dOpContext::unpack() const {
     unpacked_.bias,
     unpacked_.stride,
     unpacked_.padding,
+    unpacked_.output_padding,
     unpacked_.dilation,
     unpacked_.groups,
-    unpacked_.output_padding,
     unpacked_.output_min,
     unpacked_.output_max,
   };
@@ -482,9 +482,9 @@ c10::intrusive_ptr<TransposeConv2dOpContext> conv2d_transpose_clamp_prepack(
     c10::optional<Tensor>&& bias,
     std::vector<int64_t>&& stride,
     std::vector<int64_t>&& padding,
+    std::vector<int64_t>&& output_padding,
     std::vector<int64_t>&& dilation,
     const int64_t groups,
-    std::vector<int64_t>&& output_padding,
     const c10::optional<Scalar>& output_min,
     const c10::optional<Scalar>& output_max) {
   return c10::make_intrusive<TransposeConv2dOpContext>(
@@ -493,9 +493,9 @@ c10::intrusive_ptr<TransposeConv2dOpContext> conv2d_transpose_clamp_prepack(
           std::move(bias),
           std::move(stride),
           std::move(padding),
+          std::move(output_padding),
           std::move(dilation),
           groups,
-          std::move(output_padding),
           output_min,
           output_max));
 }
