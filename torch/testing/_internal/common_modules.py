@@ -232,7 +232,11 @@ def no_batch_dim_reference_fn(m, p, *args, **kwargs):
     """
     single_batch_input_args = [input.unsqueeze(0) for input in args]
     with freeze_rng_state():
-        return m(*single_batch_input_args).squeeze(0)
+        output = m(*single_batch_input_args)
+        if isinstance(output, torch.Tensor):
+            return output.squeeze(0)
+        else:
+            return tuple(o.squeeze(0) for o in output)
 
 
 def no_batch_dim_reference_criterion_fn(m, *args, **kwargs):
@@ -374,6 +378,16 @@ def module_inputs_torch_nn_Embedding(module_info, device, dtype, requires_grad, 
     ]
 
 
+def module_inputs_torch_nn_MultiheadAttention(module_info, device, dtype, requires_grad, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    return [
+        ModuleInput(
+            constructor_input=FunctionInput(embed_dim=3, num_heads=3, batch_first=True),
+            forward_input=FunctionInput(make_input((3, 3)), make_input((3, 3)), make_input((3, 3))),
+            reference_fn=no_batch_dim_reference_fn,
+        ),
+    ]
+
 # Database of ModuleInfo entries in alphabetical order.
 module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.AvgPool1d,
@@ -392,6 +406,8 @@ module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.TransformerEncoderLayer,
                module_inputs_func=module_inputs_torch_nn_TransformerEncoderLayer,
                supports_gradgrad=False),
+    ModuleInfo(torch.nn.MultiheadAttention,
+               module_inputs_func=module_inputs_torch_nn_MultiheadAttention),
     ModuleInfo(torch.nn.Embedding,
                module_inputs_func=module_inputs_torch_nn_Embedding),
     ModuleInfo(torch.nn.ReLU,

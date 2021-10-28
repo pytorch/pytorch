@@ -5061,6 +5061,7 @@ def multi_head_attention_forward(
             static_v=static_v,
         )
 
+    is_unbatched = False
     # Shape check.
     if query.dim() == 3:
         key_padding_cond = key_padding_mask is None or key_padding_mask.dim() == 2
@@ -5077,6 +5078,7 @@ def multi_head_attention_forward(
             key_padding_mask = key_padding_mask.unsqueeze(0)
         if attn_mask is not None and attn_mask.dim() == 3:
             assert attn_mask.shape == (num_heads, query.shape[0], key.shape[0])
+        is_unbatched = True
     else:
         assert False, "Shapes should be...."
 
@@ -5222,6 +5224,13 @@ def multi_head_attention_forward(
     if need_weights:
         # average attention weights over heads
         attn_output_weights = attn_output_weights.view(bsz, num_heads, tgt_len, src_len)
-        return attn_output, attn_output_weights.sum(dim=1) / num_heads
+        attn_output_weights = attn_output_weights.sum(dim=1) / num_heads
+
+        if is_unbatched:
+            attn_output = attn_output.squeeze(1)
+            attn_output_weights = attn_output_weights.squeeze(0)
+        return attn_output, attn_output_weights
     else:
+        if is_unbatched:
+            attn_output = attn_output.squeeze(1)
         return attn_output, None
