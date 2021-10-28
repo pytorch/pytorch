@@ -5305,6 +5305,42 @@ class TestQuantizeFxOps(QuantizationTestCase):
         m(data)
         # make sure everything runs
 
+    def test_ref_pattern_multi_use(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 5)
+                self.linear1 = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                y = self.linear(x)
+                z = self.linear1(x)
+                a = torch.mul(z, 5)
+                b = torch.add(z, 5)
+                return (y, a, b)
+
+        m = M().eval()
+        qconfig_dict = {
+            "": None,
+            "object_type": [
+                (torch.nn.Linear, get_default_qconfig("fbgemm")),
+                (torch.nn.ReLU, get_default_qconfig("fbgemm")),
+            ],
+        }
+        m = prepare_fx(m, qconfig_dict)
+        m = convert_fx(m)
+        expected_occurrence = {
+            ns.call_function(torch.quantize_per_tensor): 1,
+            ns.call_module(nnq.Linear): 2,
+            ns.call_method("dequantize"): 2,
+            ns.call_function(torch.add): 1,
+            ns.call_function(torch.mul): 1,
+        }
+        self.checkGraphModuleNodes(
+            m,
+            expected_node_occurrence=expected_occurrence)
+
+
 class TestQuantizeFxOpsNew(QuantizationTestCase):
     def test_ops(self):
         class M(torch.nn.Module):
