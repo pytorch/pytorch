@@ -824,23 +824,24 @@ def configure_extension_build():
 
     # These extensions are built by cmake and copied manually in build_extensions()
     # inside the build_ext implementation
-    extensions.append(
-        Extension(
-            name=str('caffe2.python.caffe2_pybind11_state'),
-            sources=[]),
-    )
-    if cmake_cache_vars['USE_CUDA']:
+    if cmake_cache_vars['BUILD_CAFFE2']:
         extensions.append(
             Extension(
-                name=str('caffe2.python.caffe2_pybind11_state_gpu'),
+                name=str('caffe2.python.caffe2_pybind11_state'),
                 sources=[]),
         )
-    if cmake_cache_vars['USE_ROCM']:
-        extensions.append(
-            Extension(
-                name=str('caffe2.python.caffe2_pybind11_state_hip'),
-                sources=[]),
-        )
+        if cmake_cache_vars['USE_CUDA']:
+            extensions.append(
+                Extension(
+                    name=str('caffe2.python.caffe2_pybind11_state_gpu'),
+                    sources=[]),
+            )
+        if cmake_cache_vars['USE_ROCM']:
+            extensions.append(
+                Extension(
+                    name=str('caffe2.python.caffe2_pybind11_state_hip'),
+                    sources=[]),
+            )
 
     cmdclass = {
         'bdist_wheel': wheel_concatenate,
