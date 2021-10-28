@@ -42,7 +42,7 @@ def _undo_create_differentiable(inps, level=None):
         if isinstance(x, tuple):
             return tree_map(unwrap_tensors, tuple(x))
 
-        raise RuntimeError("Expected tensors, got unsupported type {type(x)}")
+        raise RuntimeError(f"Expected tensors, got unsupported type {type(x)}")
 
     return tree_map(unwrap_tensors, inps)
 
