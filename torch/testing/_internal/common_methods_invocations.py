@@ -2094,7 +2094,7 @@ def sample_inputs_like_fns(self, device, dtype, requires_grad, **kwargs):
 
 def sample_inputs_randint_like(self, device, dtype, requires_grad, **kwargs):
     samples = []
-    low = -10
+    low = 2
     high = 10
 
     for sample in sample_inputs_like_fns(self, device, dtype, requires_grad, **kwargs):
@@ -10124,7 +10124,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
            )),
     OpInfo('randint_like',
-           dtypes=floating_types_and(torch.half, torch.bfloat16, torch.complex64, torch.complex128),
+           dtypes=all_types_and(torch.half, torch.bfloat16),
            op=lambda inp, *args, **kwargs:
                wrapper_set_seed(torch.randint_like, inp, *args, **kwargs),
            supports_out=False,
