@@ -926,6 +926,32 @@ void raw_cudnn_convolution_add_relu_out(
             "\n");
       });
 }
+
+void raw_cudnn_convolution_add_relu_fallback_out(
+    const Tensor& output,
+    const Tensor& input,
+    const Tensor& weight,
+    const Tensor& z,
+    float alpha,
+    const Tensor& bias,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation,
+    int64_t groups,
+    bool benchmark,
+    bool deterministic,
+    bool allow_tf32) {
+
+  // cuDNN Conv-Bias-Activation:
+  // y = act ( alpha1 * conv(x) + alpha2 * z + bias )
+  // In pytorch function `raw_cudnn_convolution_add_relu_out`: alpha1 is 1, alpha 2 is `float alpha`
+
+  raw_cudnn_convolution_forward_out(output, input, weight, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
+  at::Tensor alpha_mul_z_add_bias = at::native::reshape_bias(input.dim(), bias).add(z, alpha);
+  output.add_(alpha_mul_z_add_bias);
+  output.relu_();
+}
+
 }}  // namespace at::native
 
 #endif
