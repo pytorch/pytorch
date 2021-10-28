@@ -114,6 +114,7 @@ class TestCudaFuser(JitTestCase):
         jit_o = jit_op(*args)
         torch.cuda.manual_seed_all(123)
         o = op(*args)
+        self.assertEqual(o.dtype, jit_o.dtype)
         self.assertEqual(o, jit_o)
         self.assertGraphContainsExactly(jit_op.graph_for(*args), FUSION_GUARD, 1, consider_subgraphs=True)
 
@@ -471,6 +472,7 @@ class TestCudaFuser(JitTestCase):
         if dtype in self.support_tensor_dtypes:
             self.assertGraphContains(t_jit.graph_for(x, y), FUSION_GUARD)
         o = t(x, y)
+        self.assertEqual(o.dtype, jit_o.dtype)
         self.assertEqual(o, jit_o, msg=f"""
         failing case:
             {dtype} {operation} {x}
@@ -480,6 +482,14 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
     def test_unary_ops(self):
+        data_types = [
+            *self.int_types,
+            torch.float16,
+            torch.float32,
+            torch.float64
+        ]
+        if TEST_BF16:
+            data_types.append(torch.bfloat16)
         operations = [torch.neg,
                       torch.abs,
                       torch.log,
@@ -496,6 +506,7 @@ class TestCudaFuser(JitTestCase):
                       torch.cosh,
                       torch.sin,
                       torch.asin,
+                      torch.sinh,
                       torch.tan,
                       torch.atan,
                       torch.sqrt,
@@ -506,56 +517,13 @@ class TestCudaFuser(JitTestCase):
                       torch.trunc,
                       torch.frac,
                       torch.reciprocal,
+                      torch.nn.functional.softplus,
+                      torch.nn.functional.gelu,
                       torch.relu,
                       torch.sigmoid,
+                      torch.bitwise_not,
+                      torch.tan,
                       torch.tanh,
-                      torch.nn.functional.silu]
-        for op in operations:
-            self._unary_test_helper(op, torch.float, False)  # test special numbers
-            self._unary_test_helper(op, torch.float, True)  # random data
-
-    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
-    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
-                     "Requires fusion optimization pass to be effective")
-    def test_unary_ops_type_promotion(self):
-        data_types = [
-            *self.int_types,
-            torch.float16,
-            torch.float32,
-            torch.float64
-        ]
-        if TEST_BF16:
-            data_types.append(torch.bfloat16)
-        # Issue #1187 - disabled operators that fail because of mixed data types
-        operations = [torch.neg,
-                      torch.abs,
-                      # torch.log,
-                      # torch.log10,
-                      # torch.log1p,
-                      # torch.log2,
-                      # torch.lgamma,
-                      # torch.exp,
-                      # torch.expm1,
-                      # torch.erf,
-                      # torch.erfc,
-                      # torch.cos,
-                      # torch.acos,
-                      # torch.cosh,
-                      # torch.sin,
-                      # torch.asin,
-                      # torch.tan,
-                      # torch.atan,
-                      # torch.sqrt,
-                      # torch.rsqrt,
-                      torch.ceil,
-                      torch.floor,
-                      torch.round,
-                      torch.trunc,
-                      torch.frac,
-                      # torch.reciprocal,
-                      # torch.relu,
-                      # torch.sigmoid,
-                      # torch.tanh,
                       torch.nn.functional.silu]
         for op, dtype in itertools.product(operations, data_types):
             self._unary_test_helper(op, dtype, False)  # test special numbers
@@ -680,6 +648,7 @@ class TestCudaFuser(JitTestCase):
         jit_o = t_jit(x, y, z)
         jit_o = t_jit(x, y, z)
 
+        self.assertEqual(o.dtype, jit_o.dtype)
         self.assertEqual(o, jit_o)
         self.assertGraphContains(t_jit.graph_for(x, y, z), FUSION_GUARD)
 
@@ -687,47 +656,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
     def test_binary_ops(self):
-        data_types = [
-            torch.float32,
-            torch.float64,
-            torch.int32,
-            torch.int64
-        ]
-        # need some extra support
-        # to handle below with integer inputs, and they
-        # don't look like popular integer ops in models
-        # , TODO: insert assertions in cpp
-        # if decide not to fuse these on int
-        skip_for_integer = [
-            torch.atan2,
-            torch.fmod,
-            torch.pow,
-            torch.div
-        ]
-        operations = [torch.div,
-                      torch.mul,
-                      torch.atan2,
-                      torch.max,
-                      torch.min,
-                      torch.pow,
-                      torch.remainder,
-                      torch.fmod,
-                      torch.eq,
-                      torch.ne,
-                      torch.ge,
-                      torch.gt,
-                      torch.le,
-                      torch.lt]
-        for op, dtype in itertools.product(operations, data_types):
-            if (dtype not in self.int_types) or (op not in skip_for_integer):
-                self._binary_test_helper(op, dtype, True)  # random data
-                # disabled special numbers because of incorrect handling
-                # self._binary_test_helper(op, dtype, False) # special numbers
-
-    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
-    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
-                     "Requires fusion optimization pass to be effective")
-    def test_binary_ops_type_promotion(self):
         # disabled bf16 / fp16 data types because of accuracy tolerance
         data_types = [
             torch.int32,
@@ -740,15 +668,14 @@ class TestCudaFuser(JitTestCase):
         if TEST_BF16:
             data_types.append(torch.bfloat16)
         '''
-        # Issue #1187 - disabled operators that fail because of mixed data types
         operations = [torch.mul,
-                      # torch.div,
-                      # torch.atan2,
-                      # torch.max,
-                      # torch.min,
-                      # torch.pow,
-                      # torch.remainder,
-                      # torch.fmod,
+                      torch.div,
+                      torch.atan2,
+                      torch.max,
+                      torch.min,
+                      torch.pow,
+                      torch.remainder,
+                      torch.fmod,
                       torch.eq,
                       torch.ne,
                       torch.ge,
@@ -882,7 +809,6 @@ class TestCudaFuser(JitTestCase):
         else:
             dtype_arg1 = dtype_arg2 = dtype_arg3 = dtypes
 
-
         def t(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor, alpha: torch.Tensor):
             o = operation(x, y, z)
             o = o + alpha
@@ -914,6 +840,7 @@ class TestCudaFuser(JitTestCase):
         jit_o = t_jit(x, y, z, alpha)
         jit_o = t_jit(x, y, z, alpha)
 
+        self.assertEqual(o.dtype, jit_o.dtype)
         self.assertEqual(o, jit_o)
         self.assertGraphContains(t_jit.graph_for(x, y, z), FUSION_GUARD)
 
@@ -923,23 +850,16 @@ class TestCudaFuser(JitTestCase):
     def test_ternary_ops_type_promotion(self):
         # TODO: update accuracy tolerance for bf16 / fp16 data types
         data_types = [
-            torch.int32,
-            torch.int64,
-            torch.float16,
+            # torch.float16,
             torch.float32,
             torch.float64
         ]
+        '''
         if TEST_BF16:
             data_types.append(torch.bfloat16)
-        # Issue #1187 - disabled operators that fail because of mixed data types
-        # OR missing all tensor argument support
-        # torch.where,
-        # torch.lerp
-        # torch.lerp_scale,
-        # torch.clamp,
-        # torch.threshold
-        # torch.add
-        operations = []
+        '''
+        # TODO: Add Tensor support for clamp
+        operations = [torch.clamp]
         ternary_dtype_combinations = itertools.combinations(data_types, 3)
         for op, dtypes in itertools.product(operations, ternary_dtype_combinations):
             self._ternary_test_helper(op, dtypes, True)  # random data
@@ -962,37 +882,37 @@ class TestCudaFuser(JitTestCase):
         self._run_helper(add_jit, add, x, y, 2.0)
 
         def clamp0(x: torch.Tensor, f: float):
-            o = 1. * torch.clamp(x, min=f)
+            o = 2. * torch.clamp(x, min=f)
             return o
         clamp0_jit = torch.jit.script(clamp0)
         self._run_helper(clamp0_jit, clamp0, x, 0.5)
 
         def clamp1(x: torch.Tensor, f: float, ff: float):
-            o = 1. * torch.clamp(x, min=f, max=ff)
+            o = 2. * torch.clamp(x, min=f, max=ff)
             return o
         clamp1_jit = torch.jit.script(clamp1)
         self._run_helper(clamp1_jit, clamp1, x, -0.2, 0.7)
 
         def threshold(x: torch.Tensor, th: float, val: float):
-            o = 1. * torch.threshold(x, th, val)
+            o = 2. * torch.threshold(x, th, val)
             return o
         threshold_jit = torch.jit.script(threshold)
         self._run_helper(threshold_jit, threshold, x, 0.2, 0.9)
 
         def where(x: torch.Tensor, y: torch.Tensor, cond: torch.Tensor):
-            o = 1. * torch.where(cond, x, y)
+            o = 2. * torch.where(cond, x, y)
             return o
         where_jit = torch.jit.script(where)
         self._run_helper(where_jit, where, x, y, cond)
 
         def lerp(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor):
-            o = 1. * torch.lerp(x, y, z)
+            o = 2. * torch.lerp(x, y, z)
             return o
         lerp_jit = torch.jit.script(lerp)
         self._run_helper(lerp_jit, lerp, x, y, z)
 
         def lerp_scale(x: torch.Tensor, y: torch.Tensor, z: float):
-            o = 1. * torch.lerp(x, y, z)
+            o = 2. * torch.lerp(x, y, z)
             return o
         lerp_scale_jit = torch.jit.script(lerp_scale)
         self._run_helper(lerp_scale_jit, lerp_scale, x, y, 0.5)

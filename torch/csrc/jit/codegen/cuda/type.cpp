@@ -63,11 +63,6 @@ bool alsoBooleanOperator(const UnaryOpType uopt) {
   return uopt >= UnaryOpType::Not && uopt <= UnaryOpType::Not;
 }
 
-bool noFullIntegerSupport(const BinaryOpType bopt) {
-  return bopt == BinaryOpType::Div || bopt == BinaryOpType::Pow ||
-      bopt == BinaryOpType::Fmod;
-}
-
 // Return highest on list (smallest enum val)
 DataType promote_type(const DataType& t1, const DataType& t2) {
   TORCH_CHECK(
@@ -286,8 +281,6 @@ bool needFloatSuffix(BinaryOpType t) {
     case BinaryOpType::Atan2:
     case BinaryOpType::Div:
     case BinaryOpType::Fmod:
-    case BinaryOpType::Max:
-    case BinaryOpType::Min:
     case BinaryOpType::Pow:
       return true;
     default:
@@ -354,6 +347,8 @@ static const char* binary_op_integer_op2string(BinaryOpType t) {
       return "max";
     case BinaryOpType::Min:
       return "min";
+    case BinaryOpType::Fmod:
+      return "fmod";
     default:
       break;
   }
@@ -521,13 +516,15 @@ static const char* supported_casts2string(
     case supported_switch_pair(DataType::Int32, DataType::Float):
     case supported_switch_pair(DataType::Double, DataType::Float):
       return "(float)";
-    case supported_switch_pair(DataType::Double, DataType::Int):
+    case supported_switch_pair(DataType::Int32, DataType::Int):
     case supported_switch_pair(DataType::Float, DataType::Int):
+    case supported_switch_pair(DataType::Double, DataType::Int):
       return "(int64_t)";
-    case supported_switch_pair(DataType::Double, DataType::Int32):
     case supported_switch_pair(DataType::Float, DataType::Int32):
+    case supported_switch_pair(DataType::Double, DataType::Int32):
       return "(int32_t)";
     case supported_switch_pair(DataType::Int, DataType::Double):
+    case supported_switch_pair(DataType::Int32, DataType::Double):
     case supported_switch_pair(DataType::Float, DataType::Double):
       return "(double)";
     case supported_switch_pair(DataType::Float, DataType::Half):
@@ -538,6 +535,8 @@ static const char* supported_casts2string(
       return "__half2float";
     case supported_switch_pair(DataType::BFloat16, DataType::Float):
       return "__bfloat2float";
+    case supported_switch_pair(DataType::Bool, DataType::Double):
+      return "double";
     case supported_switch_pair(DataType::Bool, DataType::Float):
       return "float";
     case supported_switch_pair(DataType::Bool, DataType::Int):

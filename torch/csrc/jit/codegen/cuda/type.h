@@ -170,9 +170,6 @@ bool isLogicalOp(const BinaryOpType bopt);
 // on input, for example bitwise_and is also used for boolean and in the jit
 bool alsoBooleanOperator(const BinaryOpType bopt);
 
-//! Operations that have tricky behaviors with all integer inputs
-bool noFullIntegerSupport(const BinaryOpType bopt);
-
 enum class TernaryOpType { Clamp, Threshold, Where };
 
 enum class ParallelType {

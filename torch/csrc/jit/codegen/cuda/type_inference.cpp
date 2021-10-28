@@ -8,6 +8,8 @@
 
 #include <ATen/ExpandUtils.h>
 #include <ATen/core/jit_type.h>
+#include <ATen/native/TypeProperties.h>
+#include <torch/csrc/jit/codegen/cuda/type_promotion.h>
 
 namespace torch {
 namespace jit {
@@ -23,7 +25,8 @@ at::ScalarType toAccumulateType(const TensorTypePtr& op) {
 }
 
 bool hasTypeAndDevice(const TensorTypePtr& op) {
-  return op->device().has_value() && op->scalarType().has_value();
+  return op != nullptr && op->device().has_value() &&
+      op->scalarType().has_value();
 }
 
 TensorTypePtr getInputTensorType(
@@ -84,10 +87,27 @@ class NaiveTypePropagator {
         }
         break;
       }
-      // unary operations that forward meta info:
-      case aten::neg:
-      case aten::bitwise_not:
+      // unary operations
+      case aten::threshold:
+      case aten::clamp:
       case aten::abs:
+      case aten::neg:
+      case aten::ceil:
+      case aten::floor:
+      case aten::round:
+      case aten::trunc:
+      case aten::frac:
+      case aten::relu:
+      case aten::silu:
+      case aten::gelu:
+      case aten::softplus:
+      case aten::bitwise_not:
+      // TODO: rand_like should support cast.
+      case aten::rand_like: {
+        node->output()->setType(unary_type(node));
+        break;
+      }
+      // unary float operations
       case aten::log:
       case aten::log10:
       case aten::log1p:
@@ -105,47 +125,37 @@ class NaiveTypePropagator {
       case aten::sinh:
       case aten::tan:
       case aten::atan:
+      case aten::atanh:
       case aten::sqrt:
       case aten::rsqrt:
-      case aten::ceil:
-      case aten::floor:
-      case aten::round:
-      case aten::trunc:
-      case aten::frac:
       case aten::reciprocal:
-      case aten::relu:
       case aten::sigmoid:
-      case aten::threshold:
-      case aten::softplus:
-      case aten::clamp:
-      case aten::gelu:
-      case aten::gelu_backward:
-      case aten::silu:
-      case aten::tanh:
-      // TODO: rand_like should support cast.
-      case aten::rand_like: {
-        node->output()->setType(getInputTensorType(node, 0));
+      case aten::tanh: {
+        node->output()->setType(unary_float_type(node));
+        break;
+      }
+      // binary float
+      case aten::atan2: {
+        node->output()->setType(binary_float_type(node));
         break;
       }
       // binary operations that forward meta info and broadcast shape:
+      case aten::gelu_backward:
       case aten::mul:
       case aten::div:
-      case aten::atan2:
-      // TODO: double check type casting logic for min/max/pow
       case aten::min:
       case aten::max:
+      // TODO: first operand for pow can be Tensor / Scalar
       case aten::pow:
       case aten::remainder:
       case aten::fmod:
       case aten::lerp:
       // add/sub could be ternary op and the third argument does not contribute
-      // to neither type promoteion nor shape.
+      // to neither type promotion nor shape.
+      // TODO: Include alpha check for add/sub
       case aten::add:
       case aten::sub: {
-        const auto promoted_type = binary_broadcast_type(
-            getInputTensorType(node, 0, true),
-            getInputTensorType(node, 1, true));
-        node->output()->setType(promoted_type);
+        node->output()->setType(binary_type(node));
         break;
       }
       // Type can be int or bool for "and" and "or", if both are bool should be
@@ -172,6 +182,7 @@ class NaiveTypePropagator {
         node->output()->setType(promoted_type);
         break;
       }
+      // binary comparison
       case aten::lt:
       case aten::le:
       case aten::gt:
@@ -179,7 +190,7 @@ class NaiveTypePropagator {
       case aten::ne:
       case aten::eq: {
         const auto promoted_type = binary_broadcast_type(
-            getInputTensorType(node, 0, true),
+            getInputTensorType(node, 0, false),
             getInputTensorType(node, 1, true),
             at::ScalarType::Bool);
         node->output()->setType(promoted_type);
@@ -468,6 +479,21 @@ class NaiveTypePropagator {
   }
 
  protected:
+  TensorTypePtr unary_type(Node* node) {
+    auto op = getInputTensorType(node, 0, false);
+    return TensorType::create(
+        *op->scalarType(), *op->device(), c10::nullopt, c10::nullopt);
+  }
+
+  TensorTypePtr unary_float_type(Node* node) {
+    auto op = getInputTensorType(node, 0, false);
+    return TensorType::create(
+        computeTypes(TypePromotion::float_op_config, {op}),
+        *op->device(),
+        c10::nullopt,
+        c10::nullopt);
+  }
+
   TensorTypePtr unary_reduce_type(
       const TensorTypePtr& op,
       const std::vector<int64_t>& dims,
@@ -477,6 +503,32 @@ class NaiveTypePropagator {
         "Type and device propagation has failed, or was not provided enough information.");
     return TensorType::create(
         *op->scalarType(), *op->device(), c10::nullopt, c10::nullopt);
+  }
+
+  TensorTypePtr binary_type(Node* node) {
+    auto op0 = node->input(0)->type();
+    auto op1 = node->input(1)->type();
+    auto op0_tensor_type = op0->cast<TensorType>();
+    auto op1_tensor_type = op1->cast<TensorType>();
+    TORCH_CHECK(
+        hasTypeAndDevice(op0_tensor_type) || hasTypeAndDevice(op1_tensor_type),
+        "At least one operand must be a tensor.");
+    auto ptr = (op0_tensor_type != nullptr) ? op0_tensor_type : op1_tensor_type;
+    return TensorType::create(
+        computeTypes(TypePromotion::default_op_config, {op0, op1}),
+        *ptr->device(),
+        c10::nullopt,
+        c10::nullopt);
+  }
+
+  TensorTypePtr binary_float_type(Node* node) {
+    auto op0 = getInputTensorType(node, 0, false);
+    auto op1 = node->input(1)->type();
+    return TensorType::create(
+        computeTypes(TypePromotion::float_op_config, {op0, op1}),
+        *op0->device(),
+        c10::nullopt,
+        c10::nullopt);
   }
 
   // TODO: we should comply to codegen type promotion.

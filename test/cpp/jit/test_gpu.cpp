@@ -185,9 +185,10 @@ TEST(NVFuserTest, FusionExprEvalConstants_CUDA) {
   auto* a = new Int(7);
   auto* b = new Int(3);
 
+  // Avoid div operation because it casts int operands to float
   checkIntValue(evaluator, neg(a), -7);
   checkIntValue(evaluator, add(a, b), 10);
-  checkIntValue(evaluator, neg(mul(sub(a, b), div(a, b))), -8);
+  checkIntValue(evaluator, neg(mul(sub(a, b), add(a, b))), -40);
   checkIntValue(evaluator, mod(a, b), 1);
   checkIntValue(evaluator, ceilDiv(a, b), 3);
 }

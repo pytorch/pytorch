@@ -4,6 +4,7 @@
 
 #include <torch/csrc/jit/codegen/cuda/ir_interface_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
+#include <torch/csrc/jit/codegen/cuda/type_promotion.h>
 
 class Val;
 
@@ -27,21 +28,58 @@ TORCH_CUDA_CU_API TensorView* castOp(DataType dtype, TensorView* v1);
 TORCH_CUDA_CU_API Val* unaryOp(UnaryOpType type, Val* v1);
 TORCH_CUDA_CU_API TensorView* unaryOp(UnaryOpType type, TensorView* v1);
 
+TORCH_CUDA_CU_API Val* unaryOp(
+    UnaryOpType type,
+    Val* v1,
+    const TypePromotionConfig& config);
+TORCH_CUDA_CU_API TensorView* unaryOp(
+    UnaryOpType type,
+    TensorView* v1,
+    const TypePromotionConfig& config);
+
 // Perform binary op type on v1 and v2 and return a type promoted output.
 // Mod, CeilDiv, and LT are considered Int only output operations for now.
-TORCH_CUDA_CU_API Val* binaryOp(BinaryOpType type, Val* v1, Val* v2);
+TORCH_CUDA_CU_API Val* binaryOp(
+    BinaryOpType type,
+    Val* v1,
+    Val* v2,
+    DataType out_dtype = DataType::Null);
 TORCH_CUDA_CU_API TensorView* binaryOp(
     BinaryOpType type,
     TensorView* v1,
-    Val* v2);
+    Val* v2,
+    DataType out_dtype = DataType::Null);
 TORCH_CUDA_CU_API TensorView* binaryOp(
     BinaryOpType type,
     Val* v1,
-    TensorView* v2);
+    TensorView* v2,
+    DataType out_dtype = DataType::Null);
 TORCH_CUDA_CU_API TensorView* binaryOp(
     BinaryOpType type,
     TensorView* v1,
-    TensorView* v2);
+    TensorView* v2,
+    DataType out_dtype = DataType::Null);
+
+TORCH_CUDA_CU_API Val* binaryOp(
+    BinaryOpType type,
+    Val* v1,
+    Val* v2,
+    const TypePromotionConfig& config);
+TORCH_CUDA_CU_API TensorView* binaryOp(
+    BinaryOpType type,
+    TensorView* v1,
+    Val* v2,
+    const TypePromotionConfig& config);
+TORCH_CUDA_CU_API TensorView* binaryOp(
+    BinaryOpType type,
+    Val* v1,
+    TensorView* v2,
+    const TypePromotionConfig& config);
+TORCH_CUDA_CU_API TensorView* binaryOp(
+    BinaryOpType type,
+    TensorView* v1,
+    TensorView* v2,
+    const TypePromotionConfig& config);
 
 // Perform a reduction operation on v1, initial value for reduction is init,
 // reduces across axes, and reduction operation defined by BinaryOp.
@@ -85,9 +123,6 @@ TORCH_CUDA_CU_API TensorView* abs(TensorView*);
 // acos
 TORCH_CUDA_CU_API Val* acos(Val*);
 TORCH_CUDA_CU_API TensorView* acos(TensorView*);
-// address
-TORCH_CUDA_CU_API Val* address(Val*);
-TORCH_CUDA_CU_API TensorView* address(TensorView*);
 // asin
 TORCH_CUDA_CU_API Val* asin(Val*);
 TORCH_CUDA_CU_API TensorView* asin(TensorView*);

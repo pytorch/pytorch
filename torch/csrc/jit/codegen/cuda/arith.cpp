@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
+#include <torch/csrc/jit/codegen/cuda/type_promotion.h>
 #include <cfloat>
 
 namespace torch {
@@ -175,8 +176,9 @@ Val* newValLike(Val* val, DataType dtype) {
 } // namespace
 
 Val* castOp(DataType dtype, Val* v1) {
-  if (v1->getDataType().value() == dtype)
+  if (v1->getDataType().value() == dtype) {
     return v1;
+  }
 
   if (cast_func_str(std::make_pair(v1->getDataType().value(), dtype)) ==
       c10::nullopt) {
@@ -197,14 +199,12 @@ TensorView* castOp(DataType dtype, TensorView* v1) {
   return castOp(dtype, v1->as<Val>())->as<TensorView>();
 }
 
-// UNARY OPERATIONS
-
 Val* unaryOp(UnaryOpType type, Val* v1) {
   TORCH_INTERNAL_ASSERT(
       type != UnaryOpType::Address,
       "The reference operator & is not accessible in the Fusion IR");
-  Val* out = newValLike(v1, v1->getDataType().value());
-  // TODO: We should add the following, but we need to go through shchedulers
+
+  // TODO: We should add the following, but we need to go through schedulers
   // and make sure all calls to "fusion->inputs" includes the output of RandLike
   //
   //  If rand like, there isn't a real dependency on the input value, so map it
@@ -214,6 +214,7 @@ Val* unaryOp(UnaryOpType type, Val* v1) {
   //   v1 = new NamedScalar("__rnd", v1->getDataType().value());
   // }
 
+  Val* out = newValLike(v1, v1->getDataType().value());
   new UnaryOp(type, out, v1);
   return out;
 }
@@ -221,6 +222,21 @@ Val* unaryOp(UnaryOpType type, Val* v1) {
 TensorView* unaryOp(UnaryOpType type, TensorView* v1) {
   return unaryOp(type, v1->as<Val>())->as<TensorView>();
 }
+
+Val* unaryOp(UnaryOpType type, Val* v1, const TypePromotionConfig& config) {
+  auto casted_v1 = promoteValues(config, {v1}).front();
+  return unaryOp(type, casted_v1);
+}
+
+TensorView* unaryOp(
+    UnaryOpType type,
+    TensorView* v1,
+    const TypePromotionConfig& config) {
+  auto casted_v1 = promoteValues(config, {v1}).front();
+  return unaryOp(type, casted_v1)->as<TensorView>();
+}
+
+// UNARY OPERATIONS
 
 #define NVFUSER_DEFINE_UNARY_OP(op_name, op_type) \
   Val* op_name(Val* v) {                          \
@@ -230,44 +246,55 @@ TensorView* unaryOp(UnaryOpType type, TensorView* v1) {
     return unaryOp(UnaryOpType::op_type, tv);     \
   }
 
+NVFUSER_DEFINE_UNARY_OP(set, Set)
+NVFUSER_DEFINE_UNARY_OP(randlike, RandLike)
 NVFUSER_DEFINE_UNARY_OP(abs, Abs)
-NVFUSER_DEFINE_UNARY_OP(acos, Acos)
-NVFUSER_DEFINE_UNARY_OP(address, Address)
-NVFUSER_DEFINE_UNARY_OP(asin, Asin)
-NVFUSER_DEFINE_UNARY_OP(atan, Atan)
-NVFUSER_DEFINE_UNARY_OP(atanh, Atanh)
+NVFUSER_DEFINE_UNARY_OP(notOp, Not)
 NVFUSER_DEFINE_UNARY_OP(ceil, Ceil)
-NVFUSER_DEFINE_UNARY_OP(cos, Cos)
-NVFUSER_DEFINE_UNARY_OP(cosh, Cosh)
-NVFUSER_DEFINE_UNARY_OP(exp, Exp)
-NVFUSER_DEFINE_UNARY_OP(expm1, Expm1)
-NVFUSER_DEFINE_UNARY_OP(erf, Erf)
-NVFUSER_DEFINE_UNARY_OP(erfc, Erfc)
 NVFUSER_DEFINE_UNARY_OP(floor, Floor)
 NVFUSER_DEFINE_UNARY_OP(frac, Frac)
 NVFUSER_DEFINE_UNARY_OP(gelu, Gelu)
-NVFUSER_DEFINE_UNARY_OP(silu, Silu)
-NVFUSER_DEFINE_UNARY_OP(lgamma, Lgamma)
-NVFUSER_DEFINE_UNARY_OP(log, Log)
-NVFUSER_DEFINE_UNARY_OP(log10, Log10)
-NVFUSER_DEFINE_UNARY_OP(log1p, Log1p)
-NVFUSER_DEFINE_UNARY_OP(log2, Log2)
 NVFUSER_DEFINE_UNARY_OP(neg, Neg)
-NVFUSER_DEFINE_UNARY_OP(randlike, RandLike)
-NVFUSER_DEFINE_UNARY_OP(reciprocal, Reciprocal)
 NVFUSER_DEFINE_UNARY_OP(relu, Relu)
-NVFUSER_DEFINE_UNARY_OP(rsqrt, Rsqrt)
 NVFUSER_DEFINE_UNARY_OP(round, Round)
-NVFUSER_DEFINE_UNARY_OP(set, Set)
-NVFUSER_DEFINE_UNARY_OP(sigmoid, Sigmoid)
-NVFUSER_DEFINE_UNARY_OP(sin, Sin)
-NVFUSER_DEFINE_UNARY_OP(sinh, Sinh)
-NVFUSER_DEFINE_UNARY_OP(sqrt, Sqrt)
-NVFUSER_DEFINE_UNARY_OP(tan, Tan)
-NVFUSER_DEFINE_UNARY_OP(tanh, Tanh)
+NVFUSER_DEFINE_UNARY_OP(silu, Silu)
 NVFUSER_DEFINE_UNARY_OP(trunc, Trunc)
-NVFUSER_DEFINE_UNARY_OP(notOp, Not)
 #undef NVFUSER_DEFINE_UNARY_OP
+
+// UNARY FLOAT CAST OPERATIONS
+
+#define NVFUSER_DEFINE_UNARY_FLOAT_OP(op_name, op_type)                       \
+  Val* op_name(Val* v) {                                                      \
+    return unaryOp(UnaryOpType::op_type, v, TypePromotion::float_op_config);  \
+  }                                                                           \
+  TensorView* op_name(TensorView* tv) {                                       \
+    return unaryOp(UnaryOpType::op_type, tv, TypePromotion::float_op_config); \
+  }
+
+NVFUSER_DEFINE_UNARY_FLOAT_OP(acos, Acos)
+NVFUSER_DEFINE_UNARY_FLOAT_OP(asin, Asin)
+NVFUSER_DEFINE_UNARY_FLOAT_OP(atan, Atan)
+NVFUSER_DEFINE_UNARY_FLOAT_OP(atanh, Atanh)
+NVFUSER_DEFINE_UNARY_FLOAT_OP(cos, Cos)
+NVFUSER_DEFINE_UNARY_FLOAT_OP(cosh, Cosh)
+NVFUSER_DEFINE_UNARY_FLOAT_OP(exp, Exp)
+NVFUSER_DEFINE_UNARY_FLOAT_OP(expm1, Expm1)
+NVFUSER_DEFINE_UNARY_FLOAT_OP(erf, Erf)
+NVFUSER_DEFINE_UNARY_FLOAT_OP(erfc, Erfc)
+NVFUSER_DEFINE_UNARY_FLOAT_OP(lgamma, Lgamma)
+NVFUSER_DEFINE_UNARY_FLOAT_OP(log, Log)
+NVFUSER_DEFINE_UNARY_FLOAT_OP(log10, Log10)
+NVFUSER_DEFINE_UNARY_FLOAT_OP(log1p, Log1p)
+NVFUSER_DEFINE_UNARY_FLOAT_OP(log2, Log2)
+NVFUSER_DEFINE_UNARY_FLOAT_OP(reciprocal, Reciprocal)
+NVFUSER_DEFINE_UNARY_FLOAT_OP(rsqrt, Rsqrt)
+NVFUSER_DEFINE_UNARY_FLOAT_OP(sigmoid, Sigmoid)
+NVFUSER_DEFINE_UNARY_FLOAT_OP(sin, Sin)
+NVFUSER_DEFINE_UNARY_FLOAT_OP(sinh, Sinh)
+NVFUSER_DEFINE_UNARY_FLOAT_OP(sqrt, Sqrt)
+NVFUSER_DEFINE_UNARY_FLOAT_OP(tan, Tan)
+NVFUSER_DEFINE_UNARY_FLOAT_OP(tanh, Tanh)
+#undef NVFUSER_DEFINE_UNARY_FLOAT_OP
 
 // BINARY OPERATIONS
 
@@ -280,8 +307,13 @@ TensorView* arithOpOverloads(Val* (*func)(Val*, Val*), T1* v1, T2* v2) {
 }
 
 template <typename T1, typename T2>
-TensorView* arithOpOverloads(BinaryOpType type, T1* v1, T2* v2) {
-  return binaryOp(type, v1->template as<Val>(), v2->template as<Val>())
+TensorView* arithOpOverloads(
+    BinaryOpType type,
+    T1* v1,
+    T2* v2,
+    DataType common_dtype) {
+  return binaryOp(
+             type, v1->template as<Val>(), v2->template as<Val>(), common_dtype)
       ->template as<TensorView>();
 }
 
@@ -315,104 +347,25 @@ TensorView* arithOpOverloads(
       ->template as<TensorView>();
 }
 
-namespace {
-enum class Category { Scalar, ZeroDimTensor, DimTensor };
-
-inline Category getCategory(const Val* v) {
-  if (v->isA<TensorView>()) {
-    if (v->as<TensorView>()->nDims() > 0) {
-      return Category::DimTensor;
-    } else {
-      return Category::ZeroDimTensor;
-    }
-  } else {
-    return Category::Scalar;
-  }
-}
-
-// replicated logic from Aten/native/TypeProperties.cpp, minus complex support
-DataType getCommonType(DataType higher, DataType lower) {
-  if (isFloatingPointType(higher)) {
-    return higher;
-  }
-  if (higher == DataType::Bool || isFloatingPointType(lower)) {
-    return promote_type(higher, lower);
-  }
-  if (higher != DataType::Null) {
-    return higher;
-  }
-  return lower;
-}
-} // namespace
-
-// Type promotion logic for binary operators
-DataType getOutputType(BinaryOpType op_type, Val* v1, Val* v2) {
-  DataType v1_dtype = v1->getDataType().value();
-  DataType v2_dtype = v2->getDataType().value();
-
-  const bool floating_input =
-      isFloatingPointType(v1_dtype) || isFloatingPointType(v2_dtype);
-
-  const bool integer_input =
-      isIntegralType(v1_dtype) || isIntegralType(v2_dtype);
-
-  const bool all_integer_input =
-      isIntegralType(v1_dtype) && isIntegralType(v2_dtype);
-
-  if (all_integer_input) {
-    TORCH_INTERNAL_ASSERT(
-        !(noFullIntegerSupport(op_type)) || (v1->isScalar() && v2->isScalar()),
-        "unsupported op with all integer tensor inputs");
-  }
-
-  // Combine categories
-  const auto v1_cat = getCategory(v1);
-  const auto v2_cat = getCategory(v2);
-  if (v1_cat != v2_cat) {
-    const DataType higher = v1_cat > v2_cat ? v1_dtype : v2_dtype;
-    const DataType lower = v1_cat > v2_cat ? v2_dtype : v1_dtype;
-    const DataType common_type = getCommonType(higher, lower);
-    v1_dtype = common_type;
-    v2_dtype = common_type;
-  }
-
-  if (isIntegerOp(op_type) || (alsoBooleanOperator(op_type) && integer_input)) {
-    // If integer op or maybe bool op with integer inputs meaning binary op
-    if (integer_input && all_integer_input) {
-      return promote_type(v1_dtype, v2_dtype);
-    } else if (integer_input && !all_integer_input) {
-      TORCH_CHECK(
-          !floating_input,
-          "Operator ",
-          op_type,
-          " not supported with floating point inputs.");
-      return isIntegralType(v1_dtype) ? v1_dtype : v2_dtype;
-    } else {
-      TORCH_INTERNAL_ASSERT(
-          false,
-          "Currently no support for float inputs to int operations. ",
-          "Inputs should be manually casted first.");
-    }
-  } else if (isLogicalOp(op_type)) {
+// Output type promotion logic for binary operators
+DataType getOutputType(
+    BinaryOpType op_type,
+    Val* v1,
+    Val* v2,
+    DataType common_dtype) {
+  if (isLogicalOp(op_type)) {
     return DataType::Bool;
-  } else if (alsoBooleanOperator(op_type)) {
-    // If boolean op that can't have floating inputs (& or |)
-    TORCH_CHECK(
-        !floating_input,
-        "Operator ",
-        op_type,
-        " not supported with floating point inputs.");
-    return DataType::Bool;
+  } else if (common_dtype == DataType::Null) {
+    return promote_type(v1->getDataType().value(), v2->getDataType().value());
   } else {
-    // Otherwise do normal type promotion
-    return promote_type(v1_dtype, v2_dtype);
+    return common_dtype;
   }
 }
 
 } // namespace
 
-TORCH_CUDA_CU_API Val* binaryOp(BinaryOpType type, Val* v1, Val* v2) {
-  const auto out_dtype = getOutputType(type, v1, v2);
+Val* binaryOp(BinaryOpType type, Val* v1, Val* v2, DataType common_dtype) {
+  const auto out_dtype = getOutputType(type, v1, v2, common_dtype);
   const auto out_vtype =
       promote_type(v1->getValType().value(), v2->getValType().value());
   auto vals = maybeBroadcast({v1, v2});
@@ -426,57 +379,170 @@ TORCH_CUDA_CU_API Val* binaryOp(BinaryOpType type, Val* v1, Val* v2) {
   return out;
 }
 
-TensorView* binaryOp(BinaryOpType type, TensorView* v1, Val* v2) {
-  return arithOpOverloads(type, v1, v2);
+TensorView* binaryOp(
+    BinaryOpType type,
+    TensorView* v1,
+    Val* v2,
+    DataType common_dtype) {
+  return arithOpOverloads(type, v1, v2, common_dtype);
 }
 
-TensorView* binaryOp(BinaryOpType type, Val* v1, TensorView* v2) {
-  return arithOpOverloads(type, v1, v2);
+TensorView* binaryOp(
+    BinaryOpType type,
+    Val* v1,
+    TensorView* v2,
+    DataType common_dtype) {
+  return arithOpOverloads(type, v1, v2, common_dtype);
 }
 
-TensorView* binaryOp(BinaryOpType type, TensorView* v1, TensorView* v2) {
-  return arithOpOverloads(type, v1, v2);
+TensorView* binaryOp(
+    BinaryOpType type,
+    TensorView* v1,
+    TensorView* v2,
+    DataType common_dtype) {
+  return arithOpOverloads(type, v1, v2, common_dtype);
 }
 
-#define NVFUSER_DEFINE_BINARY_OP(op_name, op_type)      \
-  Val* op_name(Val* v1, Val* v2) {                      \
-    return binaryOp(BinaryOpType::op_type, v1, v2);     \
-  }                                                     \
-  TensorView* op_name(TensorView* v1, Val* v2) {        \
-    return arithOpOverloads(op_name, v1, v2);           \
-  }                                                     \
-  TensorView* op_name(Val* v1, TensorView* v2) {        \
-    return arithOpOverloads(op_name, v1, v2);           \
-  }                                                     \
-  TensorView* op_name(TensorView* v1, TensorView* v2) { \
-    return arithOpOverloads(op_name, v1, v2);           \
+Val* binaryOp(
+    BinaryOpType type,
+    Val* v1,
+    Val* v2,
+    const TypePromotionConfig& config) {
+  std::vector<Val*> operands = {v1, v2};
+  auto common_dtype = computeTypes(config, operands);
+  auto casted_values = promoteValues(operands, common_dtype);
+  return binaryOp(
+      type, casted_values.front(), casted_values.back(), common_dtype);
+}
+
+TensorView* binaryOp(
+    BinaryOpType type,
+    TensorView* v1,
+    Val* v2,
+    const TypePromotionConfig& config) {
+  std::vector<Val*> operands = {v1, v2};
+  auto common_dtype = computeTypes(config, operands);
+  auto casted_values = promoteValues(operands, common_dtype);
+  return binaryOp(
+      type,
+      casted_values.front()->as<TensorView>(),
+      casted_values.back()->as<TensorView>(),
+      common_dtype);
+}
+
+TensorView* binaryOp(
+    BinaryOpType type,
+    Val* v1,
+    TensorView* v2,
+    const TypePromotionConfig& config) {
+  std::vector<Val*> operands = {v1, v2};
+  auto common_dtype = computeTypes(config, operands);
+  auto casted_values = promoteValues(operands, common_dtype);
+  return binaryOp(
+      type,
+      casted_values.front()->as<TensorView>(),
+      casted_values.back()->as<TensorView>(),
+      common_dtype);
+}
+
+TensorView* binaryOp(
+    BinaryOpType type,
+    TensorView* v1,
+    TensorView* v2,
+    const TypePromotionConfig& config) {
+  std::vector<Val*> operands = {v1, v2};
+  auto common_dtype = computeTypes(config, operands);
+  auto casted_values = promoteValues(operands, common_dtype);
+  return binaryOp(
+      type,
+      casted_values.front()->as<TensorView>(),
+      casted_values.back()->as<TensorView>(),
+      common_dtype);
+}
+
+#define NVFUSER_DEFINE_BINARY_FLOAT_OP(op_name, op_type)                \
+  Val* op_name(Val* v1, Val* v2) {                                      \
+    return binaryOp(                                                    \
+        BinaryOpType::op_type, v1, v2, TypePromotion::float_op_config); \
+  }                                                                     \
+  TensorView* op_name(TensorView* v1, Val* v2) {                        \
+    return binaryOp(                                                    \
+        BinaryOpType::op_type, v1, v2, TypePromotion::float_op_config); \
+  }                                                                     \
+  TensorView* op_name(Val* v1, TensorView* v2) {                        \
+    return binaryOp(                                                    \
+        BinaryOpType::op_type, v2, v2, TypePromotion::float_op_config); \
+  }                                                                     \
+  TensorView* op_name(TensorView* v1, TensorView* v2) {                 \
+    return binaryOp(                                                    \
+        BinaryOpType::op_type, v1, v2, TypePromotion::float_op_config); \
   }
 
-NVFUSER_DEFINE_BINARY_OP(add, Add)
-NVFUSER_DEFINE_BINARY_OP(atan2, Atan2)
-NVFUSER_DEFINE_BINARY_OP(div, Div)
-NVFUSER_DEFINE_BINARY_OP(fmod, Fmod)
-NVFUSER_DEFINE_BINARY_OP(mul, Mul)
-NVFUSER_DEFINE_BINARY_OP(pow, Pow)
-NVFUSER_DEFINE_BINARY_OP(remainder, Remainder)
-NVFUSER_DEFINE_BINARY_OP(sub, Sub)
+NVFUSER_DEFINE_BINARY_FLOAT_OP(div, Div)
+NVFUSER_DEFINE_BINARY_FLOAT_OP(atan2, Atan2)
+#undef NVFUSER_DEFINE_BINARY_FLOAT_OP
+
+#define NVFUSER_DEFINE_BINARY_CAST_OP(op_name, op_type)                   \
+  Val* op_name(Val* v1, Val* v2) {                                        \
+    return binaryOp(                                                      \
+        BinaryOpType::op_type, v1, v2, TypePromotion::default_op_config); \
+  }                                                                       \
+  TensorView* op_name(TensorView* v1, Val* v2) {                          \
+    return binaryOp(                                                      \
+        BinaryOpType::op_type, v1, v2, TypePromotion::default_op_config); \
+  }                                                                       \
+  TensorView* op_name(Val* v1, TensorView* v2) {                          \
+    return binaryOp(                                                      \
+        BinaryOpType::op_type, v1, v2, TypePromotion::default_op_config); \
+  }                                                                       \
+  TensorView* op_name(TensorView* v1, TensorView* v2) {                   \
+    return binaryOp(                                                      \
+        BinaryOpType::op_type, v1, v2, TypePromotion::default_op_config); \
+  }
+
 // Integer binary ops
-NVFUSER_DEFINE_BINARY_OP(mod, Mod)
-NVFUSER_DEFINE_BINARY_OP(ceilDiv, CeilDiv)
-NVFUSER_DEFINE_BINARY_OP(lshift, Lshift)
-NVFUSER_DEFINE_BINARY_OP(rshift, Rshift)
+NVFUSER_DEFINE_BINARY_CAST_OP(mod, Mod)
+NVFUSER_DEFINE_BINARY_CAST_OP(ceilDiv, CeilDiv)
+
+NVFUSER_DEFINE_BINARY_CAST_OP(add, Add)
+NVFUSER_DEFINE_BINARY_CAST_OP(fmod, Fmod)
+NVFUSER_DEFINE_BINARY_CAST_OP(mul, Mul)
+NVFUSER_DEFINE_BINARY_CAST_OP(pow, Pow)
+NVFUSER_DEFINE_BINARY_CAST_OP(remainder, Remainder)
+NVFUSER_DEFINE_BINARY_CAST_OP(sub, Sub)
+NVFUSER_DEFINE_BINARY_CAST_OP(lshift, Lshift)
+NVFUSER_DEFINE_BINARY_CAST_OP(rshift, Rshift)
+NVFUSER_DEFINE_BINARY_CAST_OP(andOp, And)
+NVFUSER_DEFINE_BINARY_CAST_OP(orOp, Or)
+NVFUSER_DEFINE_BINARY_CAST_OP(xorOp, Xor)
+#undef NVFUSER_DEFINE_BINARY_CAST_OP
+
+#define NVFUSER_DEFINE_BINARY_COMPARE_OP(op_name, op_type)                   \
+  Val* op_name(Val* v1, Val* v2) {                                           \
+    return binaryOp(                                                         \
+        BinaryOpType::op_type, v1, v2, TypePromotion::comparison_op_config); \
+  }                                                                          \
+  TensorView* op_name(TensorView* v1, Val* v2) {                             \
+    return binaryOp(                                                         \
+        BinaryOpType::op_type, v1, v2, TypePromotion::comparison_op_config); \
+  }                                                                          \
+  TensorView* op_name(Val* v1, TensorView* v2) {                             \
+    return binaryOp(                                                         \
+        BinaryOpType::op_type, v1, v2, TypePromotion::comparison_op_config); \
+  }                                                                          \
+  TensorView* op_name(TensorView* v1, TensorView* v2) {                      \
+    return binaryOp(                                                         \
+        BinaryOpType::op_type, v1, v2, TypePromotion::comparison_op_config); \
+  }
+
 // Logical binary ops
-NVFUSER_DEFINE_BINARY_OP(eq, Eq)
-NVFUSER_DEFINE_BINARY_OP(ge, GE)
-NVFUSER_DEFINE_BINARY_OP(gt, GT)
-NVFUSER_DEFINE_BINARY_OP(le, LE)
-NVFUSER_DEFINE_BINARY_OP(lt, LT)
-NVFUSER_DEFINE_BINARY_OP(ne, NE)
-// Maybe bitwise or boolean op
-NVFUSER_DEFINE_BINARY_OP(andOp, And)
-NVFUSER_DEFINE_BINARY_OP(orOp, Or)
-NVFUSER_DEFINE_BINARY_OP(xorOp, Xor)
-#undef NVFUSER_DEFINE_BINARY_OP
+NVFUSER_DEFINE_BINARY_COMPARE_OP(eq, Eq)
+NVFUSER_DEFINE_BINARY_COMPARE_OP(ge, GE)
+NVFUSER_DEFINE_BINARY_COMPARE_OP(gt, GT)
+NVFUSER_DEFINE_BINARY_COMPARE_OP(le, LE)
+NVFUSER_DEFINE_BINARY_COMPARE_OP(lt, LT)
+NVFUSER_DEFINE_BINARY_COMPARE_OP(ne, NE)
+#undef NVFUSER_DEFINE_BINARY_COMPARE_OP
 
 // REDUCTION OPERATIONS
 
@@ -678,7 +744,7 @@ TensorView* broadcast(
       nBCastDims - n_broadcasts);
 
   if (n_broadcasts == 0) {
-    auto identity = unaryOp(UnaryOpType::Set, inp);
+    auto identity = set(inp);
     TORCH_INTERNAL_ASSERT(
         identity->getValType().value() == ValType::TensorView,
         "Expected identity op, but didn't get a TensorView back.");
@@ -827,8 +893,8 @@ Val* add_alpha(Val* v1, Val* v2, Val* s) {
       s->getValType().value());
 
   auto vals = maybeBroadcast({v1, v2, s});
-  Val* intrm = binaryOp(BinaryOpType::Mul, vals[1], vals[2]);
-  return binaryOp(BinaryOpType::Add, vals[0], intrm);
+  Val* intrm = mul(vals[1], vals[2]);
+  return add(vals[0], intrm);
 }
 TensorView* add_alpha(TensorView* v1, Val* v2, Val* v3) {
   return arithOpOverloads(add_alpha, v1, v2, v3);
@@ -847,8 +913,8 @@ Val* sub_alpha(Val* v1, Val* v2, Val* s) {
       s->getValType().value());
 
   auto vals = maybeBroadcast({v1, v2, s});
-  Val* intrm = binaryOp(BinaryOpType::Mul, vals[1], vals[2]);
-  return binaryOp(BinaryOpType::Sub, vals[0], intrm);
+  Val* intrm = mul(vals[1], vals[2]);
+  return sub(vals[0], intrm);
 }
 TensorView* sub_alpha(TensorView* v1, Val* v2, Val* v3) {
   return arithOpOverloads(sub_alpha, v1, v2, v3);
@@ -862,9 +928,9 @@ TensorView* sub_alpha(TensorView* v1, TensorView* v2, Val* v3) {
 // lerp
 TORCH_CUDA_CU_API Val* lerp(Val* start, Val* end, Val* weight) {
   auto vals = maybeBroadcast({start, end, weight});
-  Val* intrm1 = binaryOp(BinaryOpType::Sub, vals[1], vals[0]);
-  Val* intrm2 = binaryOp(BinaryOpType::Mul, vals[2], intrm1);
-  return binaryOp(BinaryOpType::Add, vals[0], intrm2);
+  Val* intrm1 = sub(vals[1], vals[0]);
+  Val* intrm2 = mul(vals[2], intrm1);
+  return add(vals[0], intrm2);
 }
 TensorView* lerp(TensorView* v1, Val* v2, Val* v3) {
   return arithOpOverloads(lerp, v1, v2, v3);
@@ -895,9 +961,9 @@ Val* addcmul(Val* v1, Val* v2, Val* v3, Val* s) {
       s->getValType().value());
 
   auto vals = maybeBroadcast({v1, v2, v3, s});
-  Val* intrm1 = binaryOp(BinaryOpType::Mul, vals[2], vals[3]);
-  Val* intrm2 = binaryOp(BinaryOpType::Mul, vals[1], intrm1);
-  return binaryOp(BinaryOpType::Add, vals[0], intrm2);
+  Val* intrm1 = mul(vals[2], vals[3]);
+  Val* intrm2 = mul(vals[1], intrm1);
+  return add(vals[0], intrm2);
 }
 TensorView* addcmul(TensorView* v1, Val* v2, Val* v3, Val* v4) {
   return arithOpOverloads(addcmul, v1, v2, v3, v4);
@@ -929,8 +995,14 @@ Val* where(Val* c, Val* v1, Val* v2) {
       "Condition should be of DataType Bool, not ",
       c->getDataType().value());
 
-  // Not actually an add, but need to send a binary op to get output type
-  auto out_dtype = getOutputType(BinaryOpType::Add, v1, v2);
+  auto casted_values =
+      promoteValues(TypePromotion::default_op_config, {v1, v2});
+  v1 = casted_values[0];
+  v2 = casted_values[1];
+
+  TORCH_CHECK(c->getDataType().value() == DataType::Bool);
+  auto out_dtype =
+      promote_type(v1->getDataType().value(), v2->getDataType().value());
   auto out_vtype =
       promote_type(v1->getValType().value(), v2->getValType().value());
   auto vals = maybeBroadcast({c, v1, v2});
@@ -969,10 +1041,6 @@ TensorView* where(TensorView* v1, TensorView* v2, TensorView* v3) {
 // TERNARY OPERATIONS
 
 Val* threshold(Val* in, Val* thresh, Val* value) {
-  const auto in_type = in->getDataType().value();
-  const auto thresh_type = thresh->getDataType().value();
-  const auto value_type = value->getDataType().value();
-
   TORCH_CHECK(
       (thresh->getValType().value() == ValType::Scalar ||
        thresh->getValType().value() == ValType::NamedScalar) &&
@@ -980,24 +1048,9 @@ Val* threshold(Val* in, Val* thresh, Val* value) {
            value->getValType().value() == ValType::NamedScalar),
       "For Threshold operation: Thresh and Value values should be Scalars.");
 
-  if (isFloatingPointType(in_type)) {
-    if (!isFloatingPointType(thresh_type)) {
-      thresh = castOp(DataType::Double, thresh);
-    }
-    if (!isFloatingPointType(value_type)) {
-      value = castOp(DataType::Double, value);
-    }
-
-  } else if (isIntegralType(in_type)) {
-    if (!isIntegralType(thresh_type)) {
-      thresh = castOp(DataType::Int, thresh);
-    }
-    if (!isIntegralType(value_type)) {
-      value = castOp(DataType::Int, value);
-    }
-  }
-
-  Val* out = newValLike(in, in_type);
+  thresh = optionalCast(in->getDataType().value(), thresh);
+  value = optionalCast(in->getDataType().value(), value);
+  Val* out = newValLike(in, in->getDataType().value());
 
   new TernaryOp(TernaryOpType::Threshold, out, in, thresh, value);
   return out;
@@ -1008,35 +1061,16 @@ TensorView* threshold(TensorView* in, Val* thresh, Val* value) {
 }
 
 Val* clamp(Val* in, Val* min_val, Val* max_val) {
-  const auto in_type = in->getDataType().value();
-  const auto min_type = min_val->getDataType().value();
-  const auto max_type = max_val->getDataType().value();
-
   TORCH_CHECK(
       (min_val->getValType().value() == ValType::Scalar ||
        min_val->getValType().value() == ValType::NamedScalar) &&
           (max_val->getValType().value() == ValType::Scalar ||
            max_val->getValType().value() == ValType::NamedScalar),
-      "For Threshold operation: Thresh and Value values should be Scalars.");
+      "For Clamp operation: Min and Max values should be Scalars.");
 
-  if (isFloatingPointType(in_type)) {
-    if (!isFloatingPointType(min_type)) {
-      min_val = castOp(DataType::Double, min_val);
-    }
-    if (!isFloatingPointType(max_type)) {
-      max_val = castOp(DataType::Double, max_val);
-    }
-
-  } else if (isIntegralType(in_type)) {
-    if (!isIntegralType(min_type)) {
-      min_val = castOp(DataType::Int, min_val);
-    }
-    if (!isIntegralType(max_type)) {
-      max_val = castOp(DataType::Int, max_val);
-    }
-  }
-
-  Val* out = newValLike(in, in_type);
+  min_val = optionalCast(in->getDataType().value(), min_val);
+  max_val = optionalCast(in->getDataType().value(), max_val);
+  Val* out = newValLike(in, in->getDataType().value());
 
   new TernaryOp(TernaryOpType::Clamp, out, in, min_val, max_val);
   return out;

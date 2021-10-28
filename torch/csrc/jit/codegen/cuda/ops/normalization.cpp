@@ -20,10 +20,10 @@ TensorView* softmax(TensorView* x, int dim) {
   auto max_val = max(x, {kReductionAxis});
   auto bcast_max = broadcast(max_val, broadcast_mask);
   auto x_max_sub = sub(x, bcast_max);
-  auto exp = unaryOp(UnaryOpType::Exp, x_max_sub);
-  auto sum_exp = sum(exp, {kReductionAxis});
+  auto exp_val = exp(x_max_sub);
+  auto sum_exp = sum(exp_val, {kReductionAxis});
   auto bcast_sum = broadcast(sum_exp, broadcast_mask);
-  auto y = div(exp, bcast_sum);
+  auto y = div(exp_val, bcast_sum);
 
   return y;
 }
@@ -104,7 +104,7 @@ ForwardNormResult layer_norm(
   auto var_sum_bcast = broadcast(welford_out.var_sum, inner_broadcast_mask);
   auto var = div(var_sum_bcast, num_features);
   auto var_eps = add(var, eps);
-  auto invstd = unaryOp(UnaryOpType::Rsqrt, var_eps);
+  auto invstd = rsqrt(var_eps);
 
   auto y = mul(x_sub_mean, invstd);
 
@@ -185,7 +185,7 @@ BackwardNormResult layer_norm_backward(
   auto c3 = mul(x_hat, bcast_c2);
 
   auto inner = sub(sub(a, bcast_b), c3);
-  auto reciprocal_size = unaryOp(UnaryOpType::Reciprocal, num_features);
+  auto reciprocal_size = reciprocal(num_features);
 
   TensorView* dx = nullptr;
   if (output_mask[0]) {
@@ -322,7 +322,7 @@ ForwardNormResult batch_norm(
 
     auto var = div(welford_out.var_sum, num_features);
     auto var_eps = add(var, eps);
-    invstd = unaryOp(UnaryOpType::Rsqrt, var_eps);
+    invstd = rsqrt(var_eps);
     auto invstd_bcast = broadcast(invstd, broadcast_mask);
 
     y = mul(x_sub_mean, invstd_bcast);
@@ -332,7 +332,7 @@ ForwardNormResult batch_norm(
     auto x_sub_mean = sub(x, r_mean_bcasted);
 
     auto var_eps = add(running_var, eps);
-    auto unbiased_invstd = unaryOp(UnaryOpType::Rsqrt, var_eps);
+    auto unbiased_invstd = rsqrt(var_eps);
     auto invstd_bcast = broadcast(unbiased_invstd, broadcast_mask);
 
     // During inference, mean/invstd output are empty tensors
@@ -555,7 +555,7 @@ ForwardNormResult instance_norm(
 
     auto var = div(welford_out.var_sum, N);
     auto var_eps = add(var, eps);
-    invstd = unaryOp(UnaryOpType::Rsqrt, var_eps);
+    invstd = rsqrt(var_eps);
     auto invstd_bcast = broadcast(invstd, x_broadcast_mask);
 
     y = mul(x_sub_mean, invstd_bcast);
@@ -565,7 +565,7 @@ ForwardNormResult instance_norm(
     auto x_sub_mean = sub(x, r_mean_bcasted);
 
     auto var_eps = add(running_var, eps);
-    auto unbiased_invstd = unaryOp(UnaryOpType::Rsqrt, var_eps);
+    auto unbiased_invstd = rsqrt(var_eps);
     auto invstd_bcast =
         broadcast(unbiased_invstd, channels_only_broadcast_mask);
 

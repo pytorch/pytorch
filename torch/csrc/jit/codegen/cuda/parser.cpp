@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ops/all_ops.h>
+#include <torch/csrc/jit/codegen/cuda/type_promotion.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
@@ -22,8 +23,13 @@ typedef Node JitOp;
 namespace fuser {
 namespace cuda {
 
-constexpr auto kNumUnaryOps = 34;
-constexpr auto kNumBinaryOps = 29;
+constexpr auto kNumUnaryOps = 10;
+constexpr auto kNumUnaryFloatOps = 23;
+
+constexpr auto kNumBinaryFloatOps = 3;
+constexpr auto kNumBinaryComparisonOps = 12;
+constexpr auto kNumBinaryCastOps = 14;
+
 constexpr auto kNumBinaryOpsWithAlpha = 4;
 constexpr auto kNumLerpOps = 2;
 constexpr auto kNumLayernormFwd = 2;
@@ -568,7 +574,11 @@ class IrParser {
             Val* alpha = value_map[node->inputs()[2]->unique()];
 
             auto out = alpha->isOneInt()
-                ? binaryOp(op_mapping[node->kind()].first, lhs, rhs)
+                ? binaryOp(
+                      op_mapping[node->kind()].first,
+                      lhs,
+                      rhs,
+                      TypePromotion::default_op_config)
                 : op_mapping[node->kind()].second(lhs, rhs, alpha);
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
@@ -577,12 +587,45 @@ class IrParser {
           nullptr);
     }
 
-    std::array<const char*, kNumBinaryOps> BinaryOp = {
+    std::array<const char*, kNumBinaryFloatOps> BinaryFloatOp = {
         "aten::div(Tensor self, Tensor other) -> Tensor",
         "aten::div(Tensor self, Scalar other) -> Tensor",
+        "aten::atan2(Tensor self, Tensor other) -> Tensor"};
+    for (auto signature : BinaryFloatOp) {
+      auto ptr_op = getOperatorForLiteral(signature);
+      REGISTER_PARSE_RULE(
+          ptr_op,
+          {
+            static std::unordered_map<Symbol, BinaryOpType> op_mapping(
+                {{aten::div, BinaryOpType::Div},
+                 {aten::atan2, BinaryOpType::Atan2}});
+
+            MemoryFormat format;
+            std::list<Val*> list_val;
+            std::tie(format, list_val) = getConsistentValues(
+                c10::nullopt,
+                value_map[node->inputs()[0]->unique()],
+                value_map[node->inputs()[1]->unique()]);
+            auto lhs = list_val.front();
+            list_val.pop_front();
+            auto rhs = list_val.front();
+            list_val.pop_front();
+
+            auto out = binaryOp(
+                op_mapping[node->kind()],
+                lhs,
+                rhs,
+                TypePromotion::float_op_config);
+            value_map.emplace(
+                node->output()->unique(), ValueHolder(out, format));
+          },
+          nullptr,
+          nullptr);
+    }
+
+    std::array<const char*, kNumBinaryCastOps> BinaryCastOp = {
         "aten::mul(Tensor self, Tensor other) -> Tensor",
         "aten::mul(Tensor self, Scalar other) -> Tensor",
-        "aten::atan2(Tensor self, Tensor other) -> Tensor",
         "aten::max(Tensor self, Tensor other) -> Tensor",
         "aten::min(Tensor self, Tensor other) -> Tensor",
         "aten::pow(Tensor self, Tensor exponent) -> Tensor",
@@ -594,7 +637,49 @@ class IrParser {
         "aten::__or__(Tensor self, Tensor other) -> Tensor",
         "aten::__xor__(Tensor self, Tensor other) -> Tensor",
         "aten::__lshift__(Tensor self, Tensor other) -> Tensor",
-        "aten::__rshift__(Tensor self, Tensor other) -> Tensor",
+        "aten::__rshift__(Tensor self, Tensor other) -> Tensor"};
+    for (auto signature : BinaryCastOp) {
+      auto ptr_op = getOperatorForLiteral(signature);
+      REGISTER_PARSE_RULE(
+          ptr_op,
+          {
+            static std::unordered_map<Symbol, BinaryOpType> op_mapping(
+                {{aten::mul, BinaryOpType::Mul},
+                 {aten::min, BinaryOpType::Min},
+                 {aten::max, BinaryOpType::Max},
+                 {aten::pow, BinaryOpType::Pow},
+                 {aten::remainder, BinaryOpType::Remainder},
+                 {aten::fmod, BinaryOpType::Fmod},
+                 {aten::__and__, BinaryOpType::And},
+                 {aten::__or__, BinaryOpType::Or},
+                 {aten::__xor__, BinaryOpType::Xor},
+                 {aten::__lshift__, BinaryOpType::Lshift},
+                 {aten::__rshift__, BinaryOpType::Rshift}});
+
+            MemoryFormat format;
+            std::list<Val*> list_val;
+            std::tie(format, list_val) = getConsistentValues(
+                c10::nullopt,
+                value_map[node->inputs()[0]->unique()],
+                value_map[node->inputs()[1]->unique()]);
+            auto lhs = list_val.front();
+            list_val.pop_front();
+            auto rhs = list_val.front();
+            list_val.pop_front();
+
+            auto out = binaryOp(
+                op_mapping[node->kind()],
+                lhs,
+                rhs,
+                TypePromotion::default_op_config);
+            value_map.emplace(
+                node->output()->unique(), ValueHolder(out, format));
+          },
+          nullptr,
+          nullptr);
+    }
+
+    std::array<const char*, kNumBinaryComparisonOps> BinaryOp = {
         "aten::eq(Tensor self, Tensor other) -> Tensor",
         "aten::eq(Tensor self, Scalar other) -> Tensor",
         "aten::ne(Tensor self, Tensor other) -> Tensor",
@@ -613,27 +698,12 @@ class IrParser {
           ptr_op,
           {
             static std::unordered_map<Symbol, BinaryOpType> op_mapping(
-                {{aten::div, BinaryOpType::Div},
-                 {aten::mul, BinaryOpType::Mul},
-                 {aten::add, BinaryOpType::Add},
-                 {aten::sub, BinaryOpType::Sub},
-                 {aten::atan2, BinaryOpType::Atan2},
-                 {aten::min, BinaryOpType::Min},
-                 {aten::max, BinaryOpType::Max},
-                 {aten::pow, BinaryOpType::Pow},
-                 {aten::remainder, BinaryOpType::Remainder},
-                 {aten::fmod, BinaryOpType::Fmod},
-                 {aten::lt, BinaryOpType::LT},
+                {{aten::lt, BinaryOpType::LT},
                  {aten::le, BinaryOpType::LE},
                  {aten::gt, BinaryOpType::GT},
                  {aten::ge, BinaryOpType::GE},
                  {aten::ne, BinaryOpType::NE},
-                 {aten::eq, BinaryOpType::Eq},
-                 {aten::__and__, BinaryOpType::And},
-                 {aten::__or__, BinaryOpType::Or},
-                 {aten::__xor__, BinaryOpType::Xor},
-                 {aten::__lshift__, BinaryOpType::Lshift},
-                 {aten::__rshift__, BinaryOpType::Rshift}});
+                 {aten::eq, BinaryOpType::Eq}});
 
             MemoryFormat format;
             std::list<Val*> list_val;
@@ -646,7 +716,11 @@ class IrParser {
             auto rhs = list_val.front();
             list_val.pop_front();
 
-            auto out = binaryOp(op_mapping[node->kind()], lhs, rhs);
+            auto out = binaryOp(
+                op_mapping[node->kind()],
+                lhs,
+                rhs,
+                TypePromotion::comparison_op_config);
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },
@@ -654,10 +728,50 @@ class IrParser {
           nullptr);
     }
 
-    // TODO: cast operations should be merged in.
     std::array<const char*, kNumUnaryOps> UnaryOp = {
-        "aten::neg(Tensor self) -> Tensor",
         "aten::abs(Tensor self) -> Tensor",
+        "aten::bitwise_not(Tensor self) -> Tensor",
+        "aten::ceil(Tensor self) -> Tensor",
+        "aten::floor(Tensor self) -> Tensor",
+        "aten::frac(Tensor self) -> Tensor",
+        "aten::neg(Tensor self) -> Tensor",
+        "aten::relu(Tensor self) -> Tensor",
+        "aten::round(Tensor self) -> Tensor",
+        "aten::silu(Tensor self) -> Tensor",
+        "aten::trunc(Tensor self) -> Tensor",
+    };
+    for (auto signature : UnaryOp) {
+      auto ptr_op = getOperatorForLiteral(signature);
+      REGISTER_PARSE_RULE(
+          ptr_op,
+          {
+            static std::unordered_map<Symbol, UnaryOpType> op_mapping({
+                {aten::abs, UnaryOpType::Abs},
+                {aten::bitwise_not, UnaryOpType::Not},
+                {aten::ceil, UnaryOpType::Ceil},
+                {aten::floor, UnaryOpType::Floor},
+                {aten::frac, UnaryOpType::Frac},
+                {aten::neg, UnaryOpType::Neg},
+                {aten::relu, UnaryOpType::Relu},
+                {aten::round, UnaryOpType::Round},
+                {aten::silu, UnaryOpType::Silu},
+                {aten::trunc, UnaryOpType::Trunc},
+            });
+            MemoryFormat format;
+            std::list<Val*> list_val;
+            std::tie(format, list_val) = getConsistentValues(
+                c10::nullopt, value_map[node->inputs()[0]->unique()]);
+            auto operand = list_val.front();
+            list_val.pop_front();
+            auto out = unaryOp(op_mapping[node->kind()], operand);
+            value_map.emplace(
+                node->output()->unique(), ValueHolder(out, format));
+          },
+          nullptr,
+          nullptr);
+    }
+
+    std::array<const char*, kNumUnaryFloatOps> UnaryFloatOp = {
         "aten::log(Tensor self) -> Tensor",
         "aten::log10(Tensor self) -> Tensor",
         "aten::log1p(Tensor self) -> Tensor",
@@ -674,31 +788,19 @@ class IrParser {
         "aten::asin(Tensor self) -> Tensor",
         "aten::sinh(Tensor self) -> Tensor",
         "aten::tan(Tensor self) -> Tensor",
-        "aten::tanh(Tensor self) -> Tensor",
         "aten::atan(Tensor self) -> Tensor",
+        "aten::tanh(Tensor self) -> Tensor",
+        "aten::atanh(Tensor self) -> Tensor",
         "aten::sqrt(Tensor self) -> Tensor",
         "aten::rsqrt(Tensor self) -> Tensor",
-        "aten::ceil(Tensor self) -> Tensor",
-        "aten::floor(Tensor self) -> Tensor",
-        "aten::round(Tensor self) -> Tensor",
-        "aten::trunc(Tensor self) -> Tensor",
-        "aten::bitwise_not(Tensor self) -> Tensor",
-        "aten::frac(Tensor self) -> Tensor",
         "aten::reciprocal(Tensor self) -> Tensor",
-        "aten::relu(Tensor self) -> Tensor",
-        "aten::sigmoid(Tensor self) -> Tensor",
-        "aten::silu(Tensor self) -> Tensor",
-        "aten::autocast_to_fp32(Tensor(a) self) -> Tensor(a)",
-        "aten::autocast_to_fp16(Tensor(a) self) -> Tensor(a)",
-    };
-    for (auto signature : UnaryOp) {
+        "aten::sigmoid(Tensor self) -> Tensor"};
+    for (auto signature : UnaryFloatOp) {
       auto ptr_op = getOperatorForLiteral(signature);
       REGISTER_PARSE_RULE(
           ptr_op,
           {
             static std::unordered_map<Symbol, UnaryOpType> op_mapping({
-                {aten::neg, UnaryOpType::Neg},
-                {aten::abs, UnaryOpType::Abs},
                 {aten::log, UnaryOpType::Log},
                 {aten::log10, UnaryOpType::Log10},
                 {aten::log1p, UnaryOpType::Log1p},
@@ -717,20 +819,11 @@ class IrParser {
                 {aten::tan, UnaryOpType::Tan},
                 {aten::tanh, UnaryOpType::Tanh},
                 {aten::atan, UnaryOpType::Atan},
+                {aten::atanh, UnaryOpType::Atanh},
                 {aten::sqrt, UnaryOpType::Sqrt},
                 {aten::rsqrt, UnaryOpType::Rsqrt},
-                {aten::ceil, UnaryOpType::Ceil},
-                {aten::floor, UnaryOpType::Floor},
-                {aten::round, UnaryOpType::Round},
-                {aten::trunc, UnaryOpType::Trunc},
-                {aten::bitwise_not, UnaryOpType::Not},
-                {aten::frac, UnaryOpType::Frac},
                 {aten::reciprocal, UnaryOpType::Reciprocal},
-                {aten::relu, UnaryOpType::Relu},
                 {aten::sigmoid, UnaryOpType::Sigmoid},
-                {aten::silu, UnaryOpType::Silu},
-                {aten::autocast_to_fp32, UnaryOpType::Set},
-                {aten::autocast_to_fp16, UnaryOpType::Set},
             });
             MemoryFormat format;
             std::list<Val*> list_val;
@@ -738,7 +831,10 @@ class IrParser {
                 c10::nullopt, value_map[node->inputs()[0]->unique()]);
             auto operand = list_val.front();
             list_val.pop_front();
-            auto out = unaryOp(op_mapping[node->kind()], operand);
+            auto out = unaryOp(
+                op_mapping[node->kind()],
+                operand,
+                TypePromotion::float_op_config);
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },
@@ -760,7 +856,7 @@ class IrParser {
             auto operand = list_val.front();
             list_val.pop_front();
 
-            auto out = unaryOp(UnaryOpType::RandLike, operand);
+            auto out = randlike(operand);
             value_map.emplace(node->output()->unique(), out);
           },
           nullptr,
@@ -1805,7 +1901,7 @@ class IrParser {
               auto self = list_val.front();
               list_val.pop_front();
 
-              auto out = unaryOp(UnaryOpType::Set, self);
+              auto out = set(self);
               value_map.emplace(
                   node->output()->unique(), ValueHolder(out, format));
             },
@@ -1928,7 +2024,11 @@ class IrParser {
               auto rhs = list_val.front();
               list_val.pop_front();
 
-              auto out = binaryOp(BinaryOpType::Add, lhs, rhs);
+              auto out = binaryOp(
+                  BinaryOpType::Add,
+                  lhs,
+                  rhs,
+                  TypePromotion::default_op_config);
               value_map.emplace(
                   node->output()->unique(), ValueHolder(out, format));
             }
@@ -1953,10 +2053,7 @@ class IrParser {
             TORCH_INTERNAL_ASSERT(
                 approximate.has_value(),
                 "The approximate (bool) parameter is required.");
-            const bool kApproximate = approximate.value();
-
-            auto out = (kApproximate) ? fast_gelu(self)
-                                      : unaryOp(UnaryOpType::Gelu, self);
+            auto out = (approximate.value()) ? fast_gelu(self) : gelu(self);
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },
