@@ -531,14 +531,23 @@ BAZEL_WORKFLOWS = [
     ),
 ]
 
+DOCKER_IMAGES = {
+    f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-cuda10.2-cudnn7-py3.6-clang9",  # for pytorch/xla
+    f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm4.1-py3.6",                 # for rocm
+    f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm4.2-py3.6",                 # for rocm
+    f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm4.3.1-py3.6",               # for rocm
+}
+
+DOCKER_IMAGES.update({
+    workflow.docker_image_base
+    for workflow in [*LINUX_WORKFLOWS, *BAZEL_WORKFLOWS]
+    if workflow.docker_image_base
+})
+
 DOCKER_WORKFLOWS = [
     DockerWorkflow(
         build_environment="docker-builds",
-        docker_images=sorted({
-            workflow.docker_image_base
-            for workflow in [*LINUX_WORKFLOWS, *BAZEL_WORKFLOWS]
-            if workflow.docker_image_base
-        }),
+        docker_images=sorted(DOCKER_IMAGES),
         # Run weekly to ensure they can build
         is_scheduled="1 * */7 * *",
     ),
