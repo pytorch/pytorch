@@ -1,13 +1,14 @@
 from tools.codegen.model import (Argument, Arguments, BaseTy, BaseType,
                                  FunctionSchema, ListType, NativeFunction,
                                  OptionalType, Return, SelfArgument,
-                                 TensorOptionsArguments, Type, assert_never)
+                                 TensorOptionsArguments, Type)
 from tools.codegen.api.types import (ArgName, BaseCType, Binding, ConstRefCType, NamedCType, CType,
                                      MutRefCType, ArrayCType, ListCType, VectorCType, ArrayRefCType,
                                      OptionalCType, TupleCType, SpecialArgName, boolT, scalarT,
                                      tensorListT, dimnameListT, tensorT, voidT,
                                      BaseTypeToCppMapping, intArrayRefT, tensorOptionsT)
 from tools.codegen import local
+from tools.codegen.utils import assert_never
 from typing import Optional, Sequence, Union, List, Set
 
 # This file describes the translation of JIT schema to the public C++
