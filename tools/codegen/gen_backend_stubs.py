@@ -179,8 +179,12 @@ but expected {expected_overload_count} kernel(s). The expected function schemas 
             # What we really want to error on, though, is if that op doesn't have a derivative formula registered in-tree.
             # We can guess that based on whether or not the op has ANY in-tree non-composite kernels.
             # Technically this has a small chance of false negatives, but it's easier than re-parsing derivatives.yaml here.
-            has_non_composite_in_tree_backend = any(idx.has_kernel(f) for idx in backend_indices.values() if not idx.external)
-            assert not has_non_composite_in_tree_backend, \
+            idxs = [idx for idx in backend_indices.values() if not idx.external and idx.has_kernel(f)]
+            has_non_composite_in_tree_backend = any(
+                idx.has_kernel(f) for idx in backend_indices.values()
+                if not idx.external and idx.dispatch_key != DispatchKey.CompositeImplicitAutograd
+                and idx.dispatch_key != DispatchKey.CompositeExplicitAutograd)
+            assert has_non_composite_in_tree_backend, \
                 f"\nFound an entry for '{f.func.name}' in the yaml. " \
                 "This operator is composite, which means that by default it will decompose into base operators. " \
                 "If decomposing is fine, then you can simply remove the entry from the yaml file. " \
