@@ -8744,7 +8744,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            assert_jit_shape_analysis=False,
            dtypesIfCPU=floating_types(),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.float16),
            skips=(
                # TODO: Reference issue here
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad', dtypes=(torch.float64,)),
