@@ -467,10 +467,12 @@ TEST(LiteInterpreterTest, GetRuntimeByteCodeVersion) {
 }
 
 TEST(LiteInterpreterTest, GetRuntimeOperatorsVersion) {
-  auto runtime_operators_version = _get_runtime_operators_version();
+  auto runtime_operators_version = _get_runtime_operators_min_max_versions();
   AT_ASSERT(
-      runtime_operators_version ==
-      caffe2::serialize::kProducedFileFormatVersion);
+      runtime_operators_version.first ==
+          caffe2::serialize::kMinSupportedFileFormatVersion &&
+      runtime_operators_version.second ==
+          caffe2::serialize::kMaxSupportedFileFormatVersion);
 }
 
 /**
