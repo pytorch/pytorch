@@ -10,8 +10,8 @@
 #include <vector>
 
 #include "lazy_tensors/computation_client/util.h"
-#include "lazy_tensors/literal_util.h"
 #include "lazy_tensors/permutation_util.h"
+#include "lazy_tensors/shape.h"
 
 namespace torch_lazy_tensors {
 
@@ -27,49 +27,6 @@ class Helpers {
     lazy_tensors::Shape output_shape;
     int64_t dynamic_dimension = -1;
   };
-
-  template <class T>
-  static lazy_tensors::Literal ScalarLiteral(T scalar_value,
-                                             lazy_tensors::PrimitiveType type) {
-    switch (type) {
-      case lazy_tensors::PrimitiveType::F64:
-        return lazy_tensors::LiteralUtil::CreateR0<double>(scalar_value);
-      case lazy_tensors::PrimitiveType::F32:
-        return lazy_tensors::LiteralUtil::CreateR0<float>(scalar_value);
-      case lazy_tensors::PrimitiveType::BF16:
-        return lazy_tensors::LiteralUtil::CreateR0<c10::BFloat16>(
-            static_cast<c10::BFloat16>(static_cast<float>(scalar_value)));
-      case lazy_tensors::PrimitiveType::F16:
-        return lazy_tensors::LiteralUtil::CreateR0<c10::Half>(
-            static_cast<c10::Half>(static_cast<float>(scalar_value)));
-      case lazy_tensors::PrimitiveType::S64:
-        return lazy_tensors::LiteralUtil::CreateR0<int64_t>(scalar_value);
-      case lazy_tensors::PrimitiveType::U64:
-        return lazy_tensors::LiteralUtil::CreateR0<uint64_t>(scalar_value);
-      case lazy_tensors::PrimitiveType::S32:
-        return lazy_tensors::LiteralUtil::CreateR0<int32_t>(scalar_value);
-      case lazy_tensors::PrimitiveType::U32:
-        return lazy_tensors::LiteralUtil::CreateR0<uint32_t>(scalar_value);
-      case lazy_tensors::PrimitiveType::S16:
-        return lazy_tensors::LiteralUtil::CreateR0<int16_t>(scalar_value);
-      case lazy_tensors::PrimitiveType::U16:
-        return lazy_tensors::LiteralUtil::CreateR0<uint16_t>(scalar_value);
-      case lazy_tensors::PrimitiveType::S8:
-        return lazy_tensors::LiteralUtil::CreateR0<int8_t>(scalar_value);
-      case lazy_tensors::PrimitiveType::U8:
-        return lazy_tensors::LiteralUtil::CreateR0<uint8_t>(scalar_value);
-      case lazy_tensors::PrimitiveType::PRED:
-        return lazy_tensors::LiteralUtil::CreateR0<bool>(scalar_value);
-      case lazy_tensors::PrimitiveType::C64:
-        return lazy_tensors::LiteralUtil::CreateR0<std::complex<float>>(
-            scalar_value);
-      case lazy_tensors::PrimitiveType::C128:
-        return lazy_tensors::LiteralUtil::CreateR0<std::complex<double>>(
-            scalar_value);
-      default:
-        return lazy_tensors::LiteralUtil::CreateR0<T>(scalar_value);
-    }
-  }
 
   static std::vector<int64_t> GetAllDimensions(size_t rank) {
     return lazy_tensors::util::Iota<int64_t>(rank);

@@ -13,7 +13,7 @@
 #include "lazy_tensors/computation_client/client_data.h"
 #include "lazy_tensors/computation_client/metrics.h"
 #include "lazy_tensors/computation_client/types.h"
-#include "lazy_tensors/literal_util.h"
+#include "lazy_tensors/literal.h"
 #include "lazy_tensors/status.h"
 #include "lazy_tensors/statusor.h"
 
