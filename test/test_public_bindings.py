@@ -1,11 +1,10 @@
 # Owner(s): ["module: autograd"]
 
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests
 
 import torch
-import unittest
 
-class TestPublicBindings(unittest.TestCase):
+class TestPublicBindings(TestCase):
     def test_no_new_bindings(self):
         """
         This test aims to stop the introduction of new JIT bindings into torch._C
