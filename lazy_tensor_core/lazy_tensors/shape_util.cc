@@ -89,8 +89,6 @@ void ShapeUtil::ForEachSubshape(const Shape& shape,
     for (int i = 0; i < shape.dimensions_size(); ++i) {
       hash_value =
           Hash64Combine(hash_value, hash<int64_t>()(shape.dimensions(i)));
-      hash_value = Hash64Combine(hash_value,
-                                 hash<bool>()(shape.is_dynamic_dimension(i)));
     }
 
     hash_value = Hash64Combine(hash_value, LayoutUtil::Hash(shape.layout()));

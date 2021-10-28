@@ -42,10 +42,6 @@ class Shape {
 
   bool IsTuple() const { return is_tuple_; }
 
-  bool is_dynamic_dimension(int dimension) const {
-    return dynamic_dimensions_.at(dimension);
-  }
-
   void set_dynamic_dimension(int dimension, bool is_dynamic) {
     dynamic_dimensions_[dimension] = is_dynamic;
   }

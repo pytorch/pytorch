@@ -366,8 +366,7 @@ void TensorToBuffer(const at::Tensor& tensor,
                     size_t dest_buffer_size, const Device& device) {
   at::Tensor contiguous_tensor = tensor.contiguous();
   lazy_tensors::Shape src_shape = MakeTorchTensorLayout(
-      Helpers::I64List(contiguous_tensor.sizes()), /*dynamic_dimensions=*/{},
-      contiguous_tensor.type().scalarType());
+      Helpers::I64List(contiguous_tensor.sizes()), contiguous_tensor.type().scalarType());
   CopyTensors<SType, DType>(contiguous_tensor.data_ptr<SType>(), src_shape,
                             dest_buffer, dest_buffer_size, dest_shape);
 }
@@ -472,8 +471,7 @@ at::Tensor LiteralToTensor(const lazy_tensors::Literal& literal,
   std::vector<int64_t> dimensions =
       lazy_tensors::util::ToVector<int64_t>(literal.shape().dimensions());
   lazy_tensors::Shape torch_shape = MakeTorchTensorLayout(
-      literal.shape().dimensions(), /*dynamic_dimensions=*/{},
-      literal.shape().at_element_type());
+      literal.shape().dimensions(), literal.shape().at_element_type());
   int64_t total_elements = lazy_tensors::ShapeUtil::ElementsIn(torch_shape);
 
   auto literal_data = literal.data<SType>();
@@ -682,8 +680,7 @@ lazy_tensors::Literal GetTensorLiteral(const at::Tensor& tensor,
   lazy_tensors::Shape computed_shape;
   if (shape == nullptr) {
     auto dimensions = Helpers::I64List(tensor.sizes());
-    computed_shape = MakeTorchTensorLayout(
-        dimensions, /*dynamic_dimensions=*/{}, tensor.type().scalarType());
+    computed_shape = MakeTorchTensorLayout(dimensions, tensor.type().scalarType());
     shape = &computed_shape;
   }
   lazy_tensors::Literal literal(*shape);
@@ -760,8 +757,7 @@ lazy_tensors::Shape MakeShapeWithDeviceLayout(const lazy_tensors::Shape& shape,
       [&](lazy_tensors::Shape* subshape, const lazy_tensors::ShapeIndex&) {
         if (subshape->IsArray()) {
           *subshape = MakeArrayShapeFromDimensions(
-              subshape->dimensions(), subshape->dynamic_dimensions(),
-              subshape->at_element_type(), device_type);
+              subshape->dimensions(), subshape->at_element_type(), device_type);
         }
       });
   return device_shape;
@@ -771,7 +767,6 @@ lazy_tensors::Shape CreateComputationShapeFromTensor(const at::Tensor& tensor,
                                                      const Device* device) {
   Device ltc_device = GetDeviceOrCurrent(device);
   return MakeArrayShapeFromDimensions(Helpers::I64List(tensor.sizes()),
-                                      /*dynamic_dimensions=*/{},
                                       tensor.type().scalarType(),
                                       ltc_device.hw_type);
 }

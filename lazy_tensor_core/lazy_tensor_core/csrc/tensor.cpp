@@ -120,7 +120,7 @@ lazy_tensors::util::MaybeRef<lazy_tensors::Shape> LazyTensor::shape() const {
 lazy_tensors::Shape LazyTensor::shape_with_layout() const {
   auto tensor_shape = shape();
   return MakeArrayShapeFromDimensions(
-      tensor_shape.get().dimensions(), tensor_shape.get().dynamic_dimensions(),
+      tensor_shape.get().dimensions(),
       tensor_shape.get().at_element_type(), GetDevice().hw_type);
 }
 
