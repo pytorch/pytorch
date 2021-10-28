@@ -1,10 +1,9 @@
 from tools.codegen.model import (Argument, FunctionSchema, Return,
-                                 SelfArgument, TensorOptionsArguments, Type,
-                                 assert_never)
+                                 SelfArgument, TensorOptionsArguments, Type)
 
 from tools.codegen.api.types import ArgName, Binding, NamedCType, CType
 from tools.codegen.api import cpp
-from tools.codegen.utils import concatMap
+from tools.codegen.utils import concatMap, assert_never
 
 import itertools
 from typing import Sequence, List, Union

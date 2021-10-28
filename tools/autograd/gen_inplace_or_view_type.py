@@ -18,8 +18,7 @@ from tools.codegen.model import (
     SchemaKind, is_foreach_op,
 )
 from typing import List, Optional, Sequence, Tuple
-from tools.codegen.gen import FileManager
-from tools.codegen.utils import mapMaybe
+from tools.codegen.utils import mapMaybe, FileManager
 from .context import with_native_function_with_differentiability_info
 from .gen_trace_type import (
     MANUAL_AUTOGRAD, type_wrapper_name, tie_return_values, get_return_value

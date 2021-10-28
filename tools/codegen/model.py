@@ -1,15 +1,11 @@
 import re
 
+from tools.codegen.utils import assert_never
+
 from dataclasses import dataclass
-from typing import List, Dict, Optional, Iterator, Tuple, Set, NoReturn, Sequence, Callable, Union
+from typing import List, Dict, Optional, Iterator, Tuple, Set, Sequence, Callable, Union
 from enum import Enum, auto
 import itertools
-
-# A little trick from https://github.com/python/mypy/issues/6366
-# for getting mypy to do exhaustiveness checking
-# TODO: put this somewhere else, maybe
-def assert_never(x: NoReturn) -> NoReturn:
-    raise AssertionError("Unhandled type: {}".format(type(x).__name__))
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #

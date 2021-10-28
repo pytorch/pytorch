@@ -47,8 +47,7 @@ from tools.codegen.api.autograd import (
 from tools.codegen.api import cpp
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.context import native_function_manager, with_native_function
-from tools.codegen.gen import FileManager
-from tools.codegen.utils import mapMaybe
+from tools.codegen.utils import mapMaybe, FileManager
 from tools.codegen.model import (Argument, NativeFunction, SchemaKind,
                                  SelfArgument, TensorOptionsArguments,
                                  BaseType, ListType)
