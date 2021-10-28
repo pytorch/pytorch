@@ -1731,3 +1731,32 @@ TEST(StaticRuntime, IndividualOps_RemainderScalar) {
       /*use_allclose*/ true,
       /*use_equalnan*/ true);
 }
+
+TEST(StaticRuntime, IndividualOps_Where) {
+  const auto where_script = R"JIT(
+    def forward(self, cond, x, y):
+        return torch.where(cond, x, y).clone()
+  )JIT";
+
+  std::vector<IValue> args1_fallback = {
+      torch::tensor({false, true}, at::kBool), at::randn({2}), at::randn({2})};
+  std::vector<IValue> args2_fallback = {
+      torch::tensor({{false, true}, {true, false}}, at::kBool),
+      at::randn({2, 2}),
+      at::randn({2, 2})};
+
+  std::vector<IValue> args1_nnc = {
+      torch::tensor({false, true}, at::kBool),
+      at::randint(-2, 2, {2}, at::kLong),
+      at::randint(-2, 2, {2}, at::kLong)};
+  std::vector<IValue> args2_nnc = {
+      torch::tensor({{false, true}, {true, false}}, at::kBool),
+      at::randint(-2, 2, {2, 2}, at::kLong),
+      at::randint(-2, 2, {2, 2}, at::kLong)};
+
+  testStaticRuntime(where_script, args1_fallback);
+  testStaticRuntime(where_script, args1_fallback, args2_fallback);
+
+  testStaticRuntime(where_script, args1_nnc);
+  testStaticRuntime(where_script, args1_nnc, args2_nnc);
+}
