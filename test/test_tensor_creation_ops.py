@@ -3180,45 +3180,45 @@ class TestTensorCreationMeta(TestCase):
 
     def test_range(self, device):
         e1 = torch.range(2, 5)
-        r1 = torch.range(2, 5, device='meta')
+        r1 = torch.range(2, 5, device=device)
 
         self._assert_meta_tensor_equal(r1, e1)
 
         e2 = torch.range(3, 6, dtype=torch.float32)
-        r2 = torch.range(3, 6, dtype=torch.float32, device='meta')
+        r2 = torch.range(3, 6, dtype=torch.float32, device=device)
 
         self._assert_meta_tensor_equal(r2, e2)
 
     def test_arange(self, device):
         e1 = torch.arange(10)
-        r1 = torch.arange(10, device='meta')
+        r1 = torch.arange(10, device=device)
 
         self._assert_meta_tensor_equal(r1, e1)
 
         e2 = torch.arange(20, dtype=torch.float32)
-        r2 = torch.arange(20, dtype=torch.float32, device='meta')
+        r2 = torch.arange(20, dtype=torch.float32, device=device)
 
         self._assert_meta_tensor_equal(r2, e2)
 
     def test_linspace(self, device):
         e1 = torch.linspace(2, 8, 2)
-        r1 = torch.linspace(2, 8, 2, device='meta')
+        r1 = torch.linspace(2, 8, 2, device=device)
 
         self._assert_meta_tensor_equal(r1, e1)
 
         e2 = torch.linspace(3, 6, 1, dtype=torch.float32)
-        r2 = torch.linspace(3, 6, 1, dtype=torch.float32, device='meta')
+        r2 = torch.linspace(3, 6, 1, dtype=torch.float32, device=device)
 
         self._assert_meta_tensor_equal(r2, e2)
 
     def test_logspace(self, device):
         e1 = torch.logspace(2, 8, 2)
-        r1 = torch.logspace(2, 8, 2, device='meta')
+        r1 = torch.logspace(2, 8, 2, device=device)
 
         self._assert_meta_tensor_equal(r1, e1)
 
         e2 = torch.logspace(3, 6, 1, dtype=torch.float32)
-        r2 = torch.logspace(3, 6, 1, dtype=torch.float32, device='meta')
+        r2 = torch.logspace(3, 6, 1, dtype=torch.float32, device=device)
 
         self._assert_meta_tensor_equal(r2, e2)
 
