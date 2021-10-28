@@ -4927,6 +4927,34 @@ def sample_inputs_diagonal_diag_embed(op_info, device, dtype, requires_grad, **k
     return list(generator())
 
 
+def sample_inputs_diagonal_scatter(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    # Shapes for 2D Tensors
+    shapes_2d = ((M, M), (3, 5), (5, 3))
+
+    # Shapes for 3D Tensors
+    shapes_3d = ((M, M, M),)
+
+    args_2d = ((), (2,), (-2,), (1,))
+    args_3d = ((1, 1, 2), (2, 0, 1), (-2, 0, 1))
+
+    def generator():
+        for input_shape, arg in chain(product(shapes_2d, args_2d), product(shapes_3d, args_3d)):
+            input_ = make_arg(input_shape)
+            # We can programatically figure out the right shape for src:
+            # It should be the same size as input.diagonal(other_args...)
+            if not isinstance(arg, tuple):
+                arg_tuple = (arg,)
+            else:
+                arg_tuple = arg
+            src_shape = input_.diagonal(*arg_tuple).size()
+            src = make_arg(src_shape)
+            yield SampleInput(input_, args=(src, *arg_tuple))
+
+    return list(generator())
+
+
 def sample_inputs_to_sparse(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -5762,6 +5790,48 @@ def sample_inputs_select(op_info, device, dtype, requires_grad, **kwargs):
     def generator():
         for shape, args in cases:
             yield SampleInput(make_arg(shape), args=args)
+
+    return list(generator())
+
+
+def sample_inputs_select_scatter(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    cases = (((S, S, S), (S, S), (1, 2)),
+             ((S, S, S), (S, S), (-1, 2)),
+             ((S, S, S), (S, S), (-1, -1)),
+             ((S, S, S), (S, S), (1, -1)),
+             ((S,), (), (0, 2))
+             )
+
+    def generator():
+        for input_shape, src_shape, args in cases:
+            input_ = make_arg(input_shape)
+            src = make_arg(src_shape)
+            yield SampleInput(input_, args=(src, *args))
+
+    return list(generator())
+
+
+def sample_inputs_slice_scatter(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    cases = (((L, L, L), (L, L, L,), (0, 0, L, 1)),
+             ((L, L, L), (L // 2, L, L,), (0, L // 2, L, 1)),
+             ((L, L, L), (L // 4, L, L,), (0, L // 2, L, 2)),
+             ((L, L, L), (L, L, L,), (1, 0, L, 1)),
+             ((L, L, L), (L, L // 2, L,), (1, L // 2, L, 1)),
+             ((L, L, L), (L, L // 4, L,), (1, L // 2, L, 2)),
+             ((L, L, L), (L, L, L,), (2, 0, L, 1)),
+             ((L, L, L), (L, L, L // 2,), (2, L // 2, L, 1)),
+             ((L, L, L), (L, L, L // 4,), (2, L // 2, L, 2)),
+             )
+
+    def generator():
+        for input_shape, src_shape, args in cases:
+            input_ = make_arg(input_shape)
+            src = make_arg(src_shape)
+            yield SampleInput(input_, args=(src, *args))
 
     return list(generator())
 
@@ -7397,6 +7467,11 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_diagonal_diag_embed),
+    OpInfo('diagonal_scatter',
+           dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16),
+           supports_out=False,
+           supports_forward_ad=True,
+           sample_inputs_func=sample_inputs_diagonal_scatter),
     OpInfo('eq',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            supports_autograd=False,
@@ -9276,6 +9351,16 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
            sample_inputs_func=sample_inputs_select,
            assert_jit_shape_analysis=True,
+           supports_forward_ad=True,
+           supports_out=False),
+    OpInfo('select_scatter',
+           dtypes=all_types_and(torch.bfloat16, torch.half, torch.bool),
+           sample_inputs_func=sample_inputs_select_scatter,
+           supports_forward_ad=True,
+           supports_out=False),
+    OpInfo('slice_scatter',
+           dtypes=all_types_and(torch.bfloat16, torch.half, torch.bool),
+           sample_inputs_func=sample_inputs_slice_scatter,
            supports_forward_ad=True,
            supports_out=False),
     UnaryUfuncInfo('signbit',
