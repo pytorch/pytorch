@@ -483,6 +483,13 @@ class NativeFunction:
     def has_composite_kernel(self) -> bool:
         return self.has_composite_implicit_autograd_kernel or self.has_composite_explicit_autograd_kernel
 
+    @property
+    def is_view_op(self) -> bool:
+        rets = self.func.returns
+        is_non_mutating_view = len(rets) > 0 and any(r.annotation is not None and not r.annotation.is_write for r in rets)
+        is_inplace_view = self.tag is not None and self.tag is Tag.inplace_view
+        return is_non_mutating_view or is_inplace_view
+
 SchemaKind = Enum('SchemaKind', ('functional', 'inplace', 'out'))
 
 # A structured kernel is guaranteed to have a functional and out variant, and
@@ -1236,6 +1243,14 @@ class Arguments:
         return ret
 
     @property
+    def flat_all(self) -> Sequence[Argument]:
+        ret: List[Argument] = []
+        ret.extend(self.flat_positional)
+        ret.extend(self.flat_kwarg_only)
+        ret.extend(self.out)
+        return ret
+
+    @property
     def non_out(self) -> Sequence[Union[Argument, SelfArgument, TensorOptionsArguments]]:
         ret: List[Union[Argument, SelfArgument, TensorOptionsArguments]] = []
         ret.extend(self.positional)
@@ -1258,6 +1273,14 @@ class Arguments:
         if self.tensor_options is not None:
             ret.append(self.tensor_options)
         ret.extend(self.post_tensor_options_kwarg_only)
+        return ret
+
+    @property
+    def all(self) -> Sequence[Union[Argument, SelfArgument, TensorOptionsArguments]]:
+        ret: List[Union[Argument, SelfArgument, TensorOptionsArguments]] = []
+        ret.extend(self.positional)
+        ret.extend(self.kwarg_only)
+        ret.extend(self.out)
         return ret
 
     def signature(self, *, strip_default: bool = False) -> 'Arguments':
@@ -1509,6 +1532,12 @@ class OperatorName:
             return f"{self.name}_{self.overload_name}"
         else:
             return f"{self.name}"
+
+    def remove_inplace(self) -> 'OperatorName':
+        return OperatorName(
+            name=BaseOperatorName(base=self.name.base, inplace=False, dunder_method=self.name.dunder_method),
+            overload_name=self.overload_name
+        )
 
 
 def gets_generated_out_inplace_wrapper(f: NativeFunction, g: NativeFunctionsGroup, b: BackendIndex) -> bool:
