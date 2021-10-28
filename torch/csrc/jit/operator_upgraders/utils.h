@@ -1,4 +1,5 @@
 #pragma once
+#include <iostream>
 #include <string>
 #include <regex>
 #include <vector>
@@ -12,6 +13,7 @@ static UpgraderEntry findUpgrader(std::vector<UpgraderEntry> upgraders_for_schem
     //    1. the version entry must be greater than current_version
     //    2. Among the version entries, we need to see if the current version
     //       is in the upgrader name range
+    std::cout << current_version << std::endl;
     for (const auto& upgrader_entry: upgraders_for_schema) {
         if (upgrader_entry.version_bump > current_version) {
             auto upgrader_name = upgrader_entry.upgrader_name;
@@ -23,6 +25,7 @@ static UpgraderEntry findUpgrader(std::vector<UpgraderEntry> upgraders_for_schem
             int end = std::stoi(tokens[tokens.size()-1]);
 
             if (start <= current_version && current_version <= end) {
+                std::cout << "HERE\n";
                 return upgrader_entry;
             }
 

@@ -624,25 +624,24 @@ Value* emitBuiltinCall(
   std::vector<const FunctionSchema*> schemas;
   schemas.reserve(variants.size());
   for (const std::shared_ptr<Operator>& op : variants) {
-    schemas.push_back(&op->schema());
-  }
-  for (const auto method : builtin_functions) {
-    method->ensure_defined();
-    // if its an old operator, we need to use the old schema
-    auto op_name = method->name();
-
+    auto op_name = op->schema().operator_name().name + "." + op->schema().overload_name();
     if (version.has_value()) {
       auto version_entry = operator_version_map.find(op_name);
       if (version_entry != operator_version_map.end()) {
         auto old_schema_entry = findUpgrader(version_entry->second, version.value());
+        std::cout << "HI: " << old_schema_entry.old_schema << std::endl;
         auto old_schema = parseSchema(old_schema_entry.old_schema);
-        // TODO is this necessary?
-        method->setSchema(old_schema);
+        std::cout << "HO\n";
         schemas.push_back(&old_schema);
       }
     } else {
-      schemas.push_back(&method->getSchema());
+      schemas.push_back(&op->schema());
     }
+  }
+
+  for (const auto method : builtin_functions) {
+    method->ensure_defined();
+    schemas.push_back(&method->getSchema());
   }
 
   // no operators found with the same name, print out similarly named operators
