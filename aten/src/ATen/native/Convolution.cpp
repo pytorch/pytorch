@@ -544,10 +544,11 @@ static void check_shape_forward(const at::Tensor& input,
     bool kernel_size_correct = true;
 
     TORCH_CHECK(input.size(1) == (weight_sizes[1] * groups),
-             "Given groups=", groups, ", weight of size ", weight_sizes,
-             ", expected input", input.sizes(), " to have ",
-             (weight_sizes[1] * groups), " channels, but got ", input.size(1),
-             " channels instead");
+                "Given groups=", groups, ", weight of size ", weight_sizes,
+                ", expected input", input.sizes(), " to have ",
+                (weight_sizes[1] * groups), " channels, but got ", input.size(1),
+                " channels instead");
+
     TORCH_CHECK(!bias.defined() || (bias.ndimension() == 1 && bias.size(0) == weight_sizes[0]),
              "Given weight of size ", weight_sizes,
              ", expected bias to be 1-dimensional with ", weight_sizes[0], " elements",
@@ -850,7 +851,7 @@ at::Tensor _convolution(
 
   check_shape_forward(input, weight_sizes, bias, params);
 
-  if (input.size(0) == 0) {
+  if (input.size(0) == 0 || input.size(1) == 0) {
     // don't send empty inputs through backends
     // but need to compute correct output size first and set up history for params
     std::vector<int64_t> o;
@@ -862,6 +863,9 @@ at::Tensor _convolution(
                           params.output_padding, params.stride, params.dilation,
                           params.groups);
     }
+    if (input.size(1) == 0) {
+      o[input_channels_dim] = 0;
+    }
     if (input_is_mkldnn && weight.is_mkldnn()) {
       // mkldnn will error on the below 0-dim handling code
       return empty_mkldnn(
@@ -871,10 +875,12 @@ at::Tensor _convolution(
           input.options().device_opt(),
           input.options().pinned_memory_opt());
     }
+
     auto weight_view = at::_unsafe_view(weight, -1);
-    auto out = input*weight_view[0];
-    if (bias.defined())
+    auto out = (input.size(1) == 0) ? (input.view(-1) * weight_view) : (input * weight_view[0]);
+    if (bias.defined()) {
       out.add_(bias[0]);
+    }
     return out.view(o);
   }
 

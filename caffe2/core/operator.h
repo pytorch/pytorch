@@ -69,7 +69,7 @@ class TORCH_API OperatorBase : public Observable<OperatorBase> {
   explicit OperatorBase(
       const c10::FunctionSchema& schema,
       std::vector<c10::IValue> inputs,
-      const c10::List<at::Tensor> &outputs);
+      std::vector<caffe2::Tensor> outputs);
 #endif
 
   virtual ~OperatorBase() noexcept;
@@ -803,9 +803,9 @@ class Operator : public OperatorBase {
   explicit Operator(
       const c10::FunctionSchema& fn_schema,
       std::vector<c10::IValue> inputs,
-      const c10::List<at::Tensor> &outputs,
+      std::vector<caffe2::Tensor> outputs,
       StreamId stream = 0)
-      : OperatorBase(fn_schema, std::move(inputs), outputs) {
+      : OperatorBase(fn_schema, std::move(inputs), std::move(outputs)) {
     // In the constructor, we switch to the device so that the child class
     // constructors will run on that device.
     context_.SwitchToDevice(stream);

@@ -1,6 +1,6 @@
 import math
 import operator
-from typing import Any, Tuple, Sequence, Union, List, Optional
+from typing import Callable, Any, Tuple, Sequence, Union, List, Optional
 
 
 import numpy as np
@@ -16,6 +16,7 @@ from torch.fx.experimental.fx2trt.fx2trt import (
 from torch.fx.immutable_collections import immutable_list
 
 ShapeType = Union[Sequence[int], trt.Dims]
+Target = Union[Callable[..., Any], str]
 
 TRT_LOGGER = trt.Logger()
 trt.init_libnvinfer_plugins(TRT_LOGGER, '')
@@ -46,6 +47,20 @@ def get_trt_plugin(
 
     assert plugin is not None, f"Plugin: {plugin_name} could not be fetched"
     return plugin
+
+
+def set_layer_name(layer: trt.ILayer, target: Target, name: str) -> None:
+    """
+    Set the TensorRT layer name to "[TensorRT Layer Type]_[Original Op Name]_[FX Node Name with Suffix]"
+
+    Args:
+        layer (trt.ILayer): A TensorRT layer of which we want to set the name.
+        target (Target): A fx node.target. For call_function node, it's the function that
+            the node represents.
+        name (str): Consists of fx node.name with optional suffix.
+    """
+    target_name = target if isinstance(target, str) else f"acc_ops.{target.__name__}"
+    layer.name = f"[{layer.type.name}]-[{target_name}]-[{name}]"
 
 
 def to_numpy(tensor: Optional[torch.Tensor]) -> Optional[np.ndarray]:
@@ -272,6 +287,7 @@ def add_binary_elementwise_layer(
     lhs_val: Union[int, float, trt.tensorrt.ITensor, torch.Tensor],
     rhs_val: Union[int, float, trt.tensorrt.ITensor, torch.Tensor],
     op_type: trt.ElementWiseOperation,
+    target: Target,
     name: str
 ) -> trt.tensorrt.ITensor:
     """
@@ -292,6 +308,7 @@ def add_binary_elementwise_layer(
         rhs_val (trt.tensorrt.ITensor): Right operand of the binary operation. Similar
             to lhs_val.
         op_type (trt.ElementWiseOperation): Type of the TensorRT elementwise binary operation.
+        target (Target): Target of fx node.
         name (str): The name we want to assign to the created TensorRT layer.
 
     Returns:
@@ -324,7 +341,7 @@ def add_binary_elementwise_layer(
         network, lhs_val, rhs_val, f"{name}_lhs", f"{name}_rhs"
     )
     layer = network.add_elementwise(lhs_val, rhs_val, op_type)
-    layer.name = name
+    set_layer_name(layer, target, name)
     return layer.get_output(0)
 
 
@@ -332,6 +349,7 @@ def add_unary_layer(
     network: trt.INetworkDefinition,
     input_val: trt.tensorrt.ITensor,
     operation_type: trt.UnaryOperation,
+    target: Target,
     name: str,
 ) -> trt.tensorrt.ITensor:
     """
@@ -341,6 +359,7 @@ def add_unary_layer(
         network (trt.INetworkDefinition): TensorRT network object.
         input_val (trt.tensorrt.ITensor): Input to the unary op. Must be a TensorRT tensor.
         op_type (trt.ElementWiseOperation): Type of the TensorRT unary operation.
+        target (Target): Target of fx node.
         name (str): The name we want to assign to the created TensorRT layer.
 
     Returns:
@@ -352,7 +371,7 @@ def add_unary_layer(
             "of the TensorRT region!"
         )
     layer = network.add_unary(input_val, operation_type)
-    layer.name = name
+    set_layer_name(layer, target, name)
     return layer.get_output(0)
 
 
@@ -360,6 +379,7 @@ def add_activation_layer(
     network: trt.INetworkDefinition,
     input_val: trt.tensorrt.ITensor,
     operation_type: trt.ActivationType,
+    target: Target,
     name: str,
 ) -> trt.tensorrt.ITensor:
     """
@@ -371,6 +391,7 @@ def add_activation_layer(
             Must be a TensorRT tensor.
         op_type (trt.ElementWiseOperation): Type of the TensorRT activation
             operation.
+        target (Target): Target of fx node.
         name (str): The name we want to assign to the created TensorRT layer.
 
     Returns:
@@ -382,7 +403,7 @@ def add_activation_layer(
             "of the TensorRT region!"
         )
     layer = network.add_activation(input_val, operation_type)
-    layer.name = name
+    set_layer_name(layer, target, name)
     return layer.get_output(0)
 
 
@@ -449,7 +470,7 @@ def acc_ops_conv2d(network, target, args, kwargs, name):
             bias=bias,
         )
 
-    layer.name = name
+    set_layer_name(layer, target, name)
     layer.stride = kwargs["stride"]
     layer.padding = kwargs["padding"]
     layer.dilation = kwargs["dilation"]
@@ -479,7 +500,7 @@ def acc_ops_flatten(network, target, args, kwargs, name):
         end_dim -= 1
 
     layer = network.add_shuffle(input_val)
-    layer.name = name
+    set_layer_name(layer, target, name)
 
     # If there're dynamic shapes then we need to use shape layers
     # to figure out the final shape after flatten. We first slice
@@ -580,7 +601,7 @@ def acc_ops_size(network, target, args, kwargs, name):
         return torch.Size(input_val.shape)
 
     layer = network.add_shape(input_val)
-    layer.name = name
+    set_layer_name(layer, target, name)
     return layer.get_output(0)
 
 
@@ -607,7 +628,7 @@ def acc_ops_batch_norm(network, target, args, kwargs, name):
     power = np.ones_like(scale)
 
     layer = network.add_scale(input_val, trt.ScaleMode.CHANNEL, bias, scale, power)
-    layer.name = name
+    set_layer_name(layer, target, name)
 
     return layer.get_output(0)
 
@@ -632,10 +653,11 @@ def acc_ops_layer_norm(network, target, args, kwargs, name):
 
     # E[x]
     mean_expected_layer = network.add_reduce(input_val, trt.ReduceOperation.AVG, axes, keep_dims=True)
-    mean_expected_layer.name = f"{name}_mean_expected"
+    set_layer_name(mean_expected_layer, target, f"{name}_mean_expected")
+
     # X-E[x]
     sub_trt = add_binary_elementwise_layer(
-        network, input_val, mean_expected_layer.get_output(0), trt.ElementWiseOperation.SUB, f"{name}_sub"
+        network, input_val, mean_expected_layer.get_output(0), trt.ElementWiseOperation.SUB, target, f"{name}_sub"
     )
     # Variance = mean(pow(x_sub_mean,2))
     pow_tensor = network.add_constant(
@@ -643,22 +665,22 @@ def acc_ops_layer_norm(network, target, args, kwargs, name):
     )
     pow_tensor.name = f"{name}_power"
     pow_var = add_binary_elementwise_layer(
-        network, sub_trt, pow_tensor.get_output(0), trt.ElementWiseOperation.POW, f"{name}_pow_var"
+        network, sub_trt, pow_tensor.get_output(0), trt.ElementWiseOperation.POW, target, f"{name}_pow_var"
     )
     mean_trt_layer = network.add_reduce(pow_var, trt.ReduceOperation.AVG, axes, keep_dims=True)
-    mean_trt_layer.name = f"{name}_mean"
+    set_layer_name(mean_trt_layer, target, f"{name}_mean")
     # Variance + eps
     eps_tensor = network.add_constant(
         (1,) * len(input_val.shape), trt.Weights(np.ascontiguousarray([eps], dtype=np.float32))
     )
     eps_tensor.name = f"{name}_eps"
     add_trt = add_binary_elementwise_layer(
-        network, mean_trt_layer.get_output(0), eps_tensor.get_output(0), trt.ElementWiseOperation.SUM, f"{name}_add"
+        network, mean_trt_layer.get_output(0), eps_tensor.get_output(0), trt.ElementWiseOperation.SUM, target, f"{name}_add"
     )
     # SQRT((Var + eps))
-    sqrt_trt = add_unary_layer(network, add_trt, trt.UnaryOperation.SQRT, f"{name}_sqrt")
+    sqrt_trt = add_unary_layer(network, add_trt, trt.UnaryOperation.SQRT, target, f"{name}_sqrt")
     # (x - E[x]) / sqrt((var + eps))
-    div_trt = add_binary_elementwise_layer(network, sub_trt, sqrt_trt, trt.ElementWiseOperation.DIV, f"{name}_div_trt")
+    div_trt = add_binary_elementwise_layer(network, sub_trt, sqrt_trt, trt.ElementWiseOperation.DIV, target, f"{name}_div_trt")
 
     assert gamma is not None
     gamma_tensor = network.add_constant(gamma.shape, trt.Weights(np.ascontiguousarray(gamma)))  # type: ignore[attr-defined]
@@ -668,10 +690,10 @@ def acc_ops_layer_norm(network, target, args, kwargs, name):
     beta_tensor.name = f"{name}_beta"
     # y * gamma + beta
     scale_layer = add_binary_elementwise_layer(
-        network, div_trt, gamma_tensor.get_output(0), trt.ElementWiseOperation.PROD, f"{name}_scale"
+        network, div_trt, gamma_tensor.get_output(0), trt.ElementWiseOperation.PROD, target, f"{name}_scale"
     )
     return add_binary_elementwise_layer(
-        network, scale_layer, beta_tensor.get_output(0), trt.ElementWiseOperation.SUM, name
+        network, scale_layer, beta_tensor.get_output(0), trt.ElementWiseOperation.SUM, target, name
     )
 
 
@@ -705,7 +727,7 @@ def acc_ops_softmax(network, target, args, kwargs, name):
 
     layer = network.add_softmax(input_val)
     layer.axes = 1 << dim
-    layer.name = name
+    set_layer_name(layer, target, name)
     return layer.get_output(0)
 
 
@@ -757,7 +779,7 @@ def acc_ops_tile(network, target, args, kwargs, name):
     strides = [1] * len(dims)
     layer = network.add_slice(input_val, starts, shapes, strides)
     layer.mode = trt.SliceMode.WRAP
-    layer.name = name
+    set_layer_name(layer, target, name)
 
     if has_dynamic_shape(input_val.shape):
         starts_tensor = network.add_constant(
@@ -773,6 +795,7 @@ def acc_ops_tile(network, target, args, kwargs, name):
             input_shape_layer.get_output(0),
             dims_tensor,
             trt.ElementWiseOperation.PROD,
+            target,
             f"{name}_slice_shapes",
         )
         layer.set_input(1, starts_tensor)
@@ -784,126 +807,126 @@ def acc_ops_tile(network, target, args, kwargs, name):
 def acc_ops_relu(network, target, args, kwargs, name):
     input_val = kwargs["input"]
     operation_type = trt.ActivationType.RELU
-    return add_activation_layer(network, input_val, operation_type, name)
+    return add_activation_layer(network, input_val, operation_type, target, name)
 
 
 @tensorrt_converter(acc_ops.sin)
 def acc_ops_sin(network, target, args, kwargs, name):
     input_val = kwargs["input"]
     operation_type = trt.UnaryOperation.SIN
-    return add_unary_layer(network, input_val, operation_type, name)
+    return add_unary_layer(network, input_val, operation_type, target, name)
 
 
 @tensorrt_converter(acc_ops.cos)
 def acc_ops_cos(network, target, args, kwargs, name):
     input_val = kwargs["input"]
     operation_type = trt.UnaryOperation.COS
-    return add_unary_layer(network, input_val, operation_type, name)
+    return add_unary_layer(network, input_val, operation_type, target, name)
 
 
 @tensorrt_converter(acc_ops.tan)
 def acc_ops_tan(network, target, args, kwargs, name):
     input_val = kwargs["input"]
     operation_type = trt.UnaryOperation.TAN
-    return add_unary_layer(network, input_val, operation_type, name)
+    return add_unary_layer(network, input_val, operation_type, target, name)
 
 
 @tensorrt_converter(acc_ops.sinh)
 def acc_ops_sinh(network, target, args, kwargs, name):
     input_val = kwargs["input"]
     operation_type = trt.UnaryOperation.SINH
-    return add_unary_layer(network, input_val, operation_type, name)
+    return add_unary_layer(network, input_val, operation_type, target, name)
 
 
 @tensorrt_converter(acc_ops.cosh)
 def acc_ops_cosh(network, target, args, kwargs, name):
     input_val = kwargs["input"]
     operation_type = trt.UnaryOperation.COSH
-    return add_unary_layer(network, input_val, operation_type, name)
+    return add_unary_layer(network, input_val, operation_type, target, name)
 
 
 @tensorrt_converter(acc_ops.tanh)
 def acc_ops_tanh(network, target, args, kwargs, name):
     input_val = kwargs["input"]
     operation_type = trt.ActivationType.TANH
-    return add_activation_layer(network, input_val, operation_type, name)
+    return add_activation_layer(network, input_val, operation_type, target, name)
 
 
 @tensorrt_converter(acc_ops.asin)
 def acc_ops_asin(network, target, args, kwargs, name):
     input_val = kwargs["input"]
     operation_type = trt.UnaryOperation.ASIN
-    return add_unary_layer(network, input_val, operation_type, name)
+    return add_unary_layer(network, input_val, operation_type, target, name)
 
 
 @tensorrt_converter(acc_ops.acos)
 def acc_ops_acos(network, target, args, kwargs, name):
     input_val = kwargs["input"]
     operation_type = trt.UnaryOperation.ACOS
-    return add_unary_layer(network, input_val, operation_type, name)
+    return add_unary_layer(network, input_val, operation_type, target, name)
 
 
 @tensorrt_converter(acc_ops.atan)
 def acc_ops_atan(network, target, args, kwargs, name):
     input_val = kwargs["input"]
     operation_type = trt.UnaryOperation.ATAN
-    return add_unary_layer(network, input_val, operation_type, name)
+    return add_unary_layer(network, input_val, operation_type, target, name)
 
 
 @tensorrt_converter(acc_ops.exp)
 def acc_ops_exp(network, target, args, kwargs, name):
     input_val = kwargs["input"]
     operation_type = trt.UnaryOperation.EXP
-    return add_unary_layer(network, input_val, operation_type, name)
+    return add_unary_layer(network, input_val, operation_type, target, name)
 
 
 @tensorrt_converter(acc_ops.log)
 def acc_ops_log(network, target, args, kwargs, name):
     input_val = kwargs["input"]
     operation_type = trt.UnaryOperation.LOG
-    return add_unary_layer(network, input_val, operation_type, name)
+    return add_unary_layer(network, input_val, operation_type, target, name)
 
 
 @tensorrt_converter(acc_ops.sqrt)
 def acc_ops_sqrt(network, target, args, kwargs, name):
     input_val = kwargs["input"]
     operation_type = trt.UnaryOperation.SQRT
-    return add_unary_layer(network, input_val, operation_type, name)
+    return add_unary_layer(network, input_val, operation_type, target, name)
 
 
 @tensorrt_converter(acc_ops.reciprocal)
 def acc_ops_reciprocal(network, target, args, kwargs, name):
     input_val = kwargs["input"]
     operation_type = trt.UnaryOperation.RECIP
-    return add_unary_layer(network, input_val, operation_type, name)
+    return add_unary_layer(network, input_val, operation_type, target, name)
 
 
 @tensorrt_converter(acc_ops.abs)
 def acc_ops_abs(network, target, args, kwargs, name):
     input_val = kwargs["input"]
     operation_type = trt.UnaryOperation.ABS
-    return add_unary_layer(network, input_val, operation_type, name)
+    return add_unary_layer(network, input_val, operation_type, target, name)
 
 
 @tensorrt_converter(acc_ops.neg)
 def acc_ops_neg(network, target, args, kwargs, name):
     input_val = kwargs["input"]
     operation_type = trt.UnaryOperation.NEG
-    return add_unary_layer(network, input_val, operation_type, name)
+    return add_unary_layer(network, input_val, operation_type, target, name)
 
 
 @tensorrt_converter(acc_ops.floor)
 def acc_ops_floor(network, target, args, kwargs, name):
     input_val = kwargs["input"]
     operation_type = trt.UnaryOperation.FLOOR
-    return add_unary_layer(network, input_val, operation_type, name)
+    return add_unary_layer(network, input_val, operation_type, target, name)
 
 
 @tensorrt_converter(acc_ops.ceil)
 def acc_ops_ceil(network, target, args, kwargs, name):
     input_val = kwargs["input"]
     operation_type = trt.UnaryOperation.CEIL
-    return add_unary_layer(network, input_val, operation_type, name)
+    return add_unary_layer(network, input_val, operation_type, target, name)
 
 
 @tensorrt_converter(acc_ops.sum)
@@ -933,7 +956,7 @@ def acc_ops_sum(network, target, args, kwargs, name):
         get_axes_for_reduce_op(dim, network.has_implicit_batch_dimension),
         keepdim,
     )
-    layer.name = name
+    set_layer_name(layer, target, name)
     return layer.get_output(0)
 
 
@@ -956,20 +979,19 @@ def add_acc_ops_full_reduce(network, target, args, kwargs, name, reduce_op):
         get_axes_for_reduce_op(dim, network.has_implicit_batch_dimension),
         False,
     )
-    layer.name = name
+    set_layer_name(layer, target, name)
     return layer.get_output(0)
+
 
 def add_acc_ops_dim_reduce(network, target, args, kwargs, name, reduce_op):
     new_kwargs = kwargs.copy()
     new_kwargs['k'] = 1
-
 
     if reduce_op == trt.ReduceOperation.MAX:
         new_kwargs['largest'] = True
     elif reduce_op == trt.ReduceOperation.MIN:
         new_kwargs['largest'] = False
     new_kwargs['sorted'] = False
-
 
     (topk_out0, topk_out1) = acc_ops_topk(network, target, args, new_kwargs, name + "_topk")
 
@@ -995,45 +1017,51 @@ def add_acc_ops_dim_reduce(network, target, args, kwargs, name, reduce_op):
 
     shuffle_layer0 = network.add_shuffle(input_val)
     shuffle_layer0.reshape_dims = tuple(output_shape)
-    shuffle_layer0.name = name + '_shuffle0'
+    set_layer_name(shuffle_layer0, target, f"{name}_shuffle0")
 
     input_val = topk_out1
     shape = input_val.shape
 
     shuffle_layer1 = network.add_shuffle(input_val)
     shuffle_layer1.reshape_dims = tuple(output_shape)
-    shuffle_layer1.name = name + '_shuffle1'
-
+    set_layer_name(shuffle_layer1, target, f"{name}_shuffle1")
 
     return (shuffle_layer0.get_output(0), shuffle_layer1.get_output(0))
+
 
 @tensorrt_converter(acc_ops.max_full_reduce)
 def acc_ops_max_full_reduce(network, target, args, kwargs, name):
     return add_acc_ops_full_reduce(network, target, args, kwargs, name, trt.ReduceOperation.MAX)
 
+
 @tensorrt_converter(acc_ops.min_full_reduce)
 def acc_ops_min_full_reduce(network, target, args, kwargs, name):
     return add_acc_ops_full_reduce(network, target, args, kwargs, name, trt.ReduceOperation.MIN)
+
 
 @tensorrt_converter(acc_ops.max_dim_reduce)
 def acc_ops_max_dim_reduce(network, target, args, kwargs, name):
     return add_acc_ops_dim_reduce(network, target, args, kwargs, name, trt.ReduceOperation.MAX)
 
+
 @tensorrt_converter(acc_ops.min_dim_reduce)
 def acc_ops_min_dim_reduce(network, target, args, kwargs, name):
     return add_acc_ops_dim_reduce(network, target, args, kwargs, name, trt.ReduceOperation.MIN)
 
+
 @tensorrt_converter(acc_ops.maximum)
 def acc_ops_maximum(network, target, args, kwargs, name):
     return add_binary_elementwise_layer(
-        network, kwargs["input"], kwargs["other"], trt.ElementWiseOperation.MAX, name
+        network, kwargs["input"], kwargs["other"], trt.ElementWiseOperation.MAX, target, name
     )
+
 
 @tensorrt_converter(acc_ops.minimum)
 def acc_ops_minimum(network, target, args, kwargs, name):
     return add_binary_elementwise_layer(
-        network, kwargs["input"], kwargs["other"], trt.ElementWiseOperation.MIN, name
+        network, kwargs["input"], kwargs["other"], trt.ElementWiseOperation.MIN, target, name
     )
+
 
 @tensorrt_converter(acc_ops.max_pool2d)
 def acc_ops_max_pool2d(network, target, args, kwargs, name):
@@ -1061,7 +1089,7 @@ def acc_ops_max_pool2d(network, target, args, kwargs, name):
     )
     layer.stride = stride
     layer.padding = padding
-    layer.name = name
+    set_layer_name(layer, target, name)
 
     if ceil_mode:
         layer.padding_mode = trt.PaddingMode.EXPLICIT_ROUND_UP
@@ -1101,41 +1129,41 @@ def acc_ops_squeeze(network, target, args, kwargs, name):
         output_shape.append(s)
     layer = network.add_shuffle(input_val)
     layer.reshape_dims = tuple(output_shape)
-    layer.name = name
+    set_layer_name(layer, target, name)
     return layer.get_output(0)
 
 
 @tensorrt_converter(acc_ops.add)
 def acc_ops_add(network, target, args, kwargs, name):
     return add_binary_elementwise_layer(
-        network, kwargs["input"], kwargs["other"], trt.ElementWiseOperation.SUM, name
+        network, kwargs["input"], kwargs["other"], trt.ElementWiseOperation.SUM, target, name
     )
 
 
 @tensorrt_converter(acc_ops.sub)
 def acc_ops_sub(network, target, args, kwargs, name):
     return add_binary_elementwise_layer(
-        network, kwargs["input"], kwargs["other"], trt.ElementWiseOperation.SUB, name
+        network, kwargs["input"], kwargs["other"], trt.ElementWiseOperation.SUB, target, name
     )
 
 
 @tensorrt_converter(acc_ops.div)
 def acc_ops_div(network, target, args, kwargs, name):
     return add_binary_elementwise_layer(
-        network, kwargs["input"], kwargs["other"], trt.ElementWiseOperation.DIV, name
+        network, kwargs["input"], kwargs["other"], trt.ElementWiseOperation.DIV, target, name
     )
 
 
 @tensorrt_converter(acc_ops.mul)
 def acc_ops_mul(network, target, args, kwargs, name):
     return add_binary_elementwise_layer(
-        network, kwargs["input"], kwargs["other"], trt.ElementWiseOperation.PROD, name
+        network, kwargs["input"], kwargs["other"], trt.ElementWiseOperation.PROD, target, name
     )
 
 @tensorrt_converter(acc_ops.pow)
 def acc_ops_pow(network, target, args, kwargs, name):
     return add_binary_elementwise_layer(
-        network, kwargs["input"], kwargs["exponent"], trt.ElementWiseOperation.POW, name
+        network, kwargs["input"], kwargs["exponent"], trt.ElementWiseOperation.POW, target, name
     )
 
 @tensorrt_converter(acc_ops.unsqueeze)
@@ -1158,8 +1186,9 @@ def acc_ops_unsqueeze(network, target, args, kwargs, name):
     assert len(get_dynamic_dims(input_val.shape)) <= 1, "Currently we don't support unsqueeze with more than one dynamic dims."
     layer = network.add_shuffle(input_val)
     layer.reshape_dims = tuple(input_val.shape)[:dim] + (1,) + tuple(input_val.shape)[dim:]
-    layer.name = name
+    set_layer_name(layer, target, name)
     return layer.get_output(0)
+
 
 @tensorrt_converter(acc_ops.topk)
 def acc_ops_topk(network, target, args, kwargs, name):
@@ -1182,8 +1211,9 @@ def acc_ops_topk(network, target, args, kwargs, name):
     layer = network.add_topk(
         input_val, operation, k, get_axes_for_reduce_op(dim, network.has_implicit_batch_dimension)
     )
-    layer.name = name
+    set_layer_name(layer, target, name)
     return layer.get_output(0), layer.get_output(1)
+
 
 @tensorrt_converter(acc_ops.adaptive_avg_pool2d)
 def acc_ops_adaptive_avg_pool2d(network, target, args, kwargs, name):
@@ -1219,7 +1249,7 @@ def acc_ops_adaptive_avg_pool2d(network, target, args, kwargs, name):
         input=input_val, type=trt.PoolingType.AVERAGE, window_size=kernel_size
     )
     layer.stride = stride
-    layer.name = name
+    set_layer_name(layer, target, name)
 
     return layer.get_output(0)
 
@@ -1250,6 +1280,7 @@ def acc_ops_avg_pool2d(network, target, args, kwargs, name):
     layer.stride = stride
     layer.padding = padding
     layer.average_count_excludes_padding = False if count_include_pad else True
+    set_layer_name(layer, target, name)
 
     if ceil_mode:
         layer.padding_mode = trt.PaddingMode.EXPLICIT_ROUND_UP
@@ -1294,8 +1325,9 @@ def acc_ops_reshape(network, target, args, kwargs, name):
         shape_layer.name = f"{name}_output_shape"
         layer.set_input(1, shape_layer.get_output(0))
 
-    layer.name = name
+    set_layer_name(layer, target, name)
     return layer.get_output(0)
+
 
 @tensorrt_converter(acc_ops.slice_tensor)
 def acc_ops_slice_tensor(network, target, args, kwargs, name):
@@ -1332,8 +1364,9 @@ def acc_ops_slice_tensor(network, target, args, kwargs, name):
         output_shape[dim] = (stops[i] - starts[i]) // steps[i]
 
     layer = network.add_slice(input_val, start=start, shape=output_shape, stride=stride)
-    layer.name = name
+    set_layer_name(layer, target, name)
     return layer.get_output(0)
+
 
 @tensorrt_converter(acc_ops.split)
 def acc_ops_split(network, target, args, kwargs, name):
@@ -1367,9 +1400,10 @@ def acc_ops_split(network, target, args, kwargs, name):
         start[dim] = offset
         layer = network.add_slice(input_val, start=start, shape=shape, stride=stride)
         offset += split_size
-        layer.name = f"{name}_{i}"
+        set_layer_name(layer, target, f"{name}_{i}")
         output.append(layer.get_output(0))
     return output
+
 
 @tensorrt_converter(acc_ops.linear)
 def acc_ops_linear(network, target, args, kwargs, name):
@@ -1393,7 +1427,7 @@ def acc_ops_linear(network, target, args, kwargs, name):
     # with lowering to fully_connected layer.
     layer = network.add_shuffle(input_val)
     layer.reshape_dims = tuple(input_val.shape) + (1, 1)
-    layer.name = f"{name}_pre_shuffle"
+    set_layer_name(layer, target, f"{name}_pre_shuffle")
     bias = to_numpy(kwargs["bias"])
 
     if network.has_explicit_precision:
@@ -1418,14 +1452,15 @@ def acc_ops_linear(network, target, args, kwargs, name):
             kernel=weight,
             bias=bias,
         )
-    layer.name = f"{name}_linear"
+    set_layer_name(layer, target, name)
 
     # reshape back
     layer = network.add_shuffle(layer.get_output(0))
     layer.reshape_dims = tuple(input_val.shape[:-1]) + (kwargs["weight"].shape[0],)
-    layer.name = f"{name}_post_shuffle"
+    set_layer_name(layer, target, f"{name}_post_shuffle")
 
     return layer.get_output(0)
+
 
 def add_clamp(network, input, val, op):
     acc_ops_clamp_shape = (1,) * len(input.shape)  # broadcast all dimensions
@@ -1457,13 +1492,13 @@ def acc_ops_clamp(network, target, args, kwargs, name):
         clamp_min_layer = add_clamp(
             network, input_val, min_val, trt.ElementWiseOperation.MAX
         )
-        clamp_min_layer.name = f"{name}_clamp_min"
+        set_layer_name(clamp_min_layer, target, f"{name}_clamp_min")
         input_val = clamp_min_layer.get_output(0)
     if max_val is not None:
         clamp_max_layer = add_clamp(
             network, input_val, max_val, trt.ElementWiseOperation.MIN
         )
-        clamp_max_layer.name = f"{name}_clamp_max"
+        set_layer_name(clamp_max_layer, target, f"{name}_clamp_max")
         input_val = clamp_max_layer.get_output(0)
 
     return input_val
@@ -1571,12 +1606,13 @@ def acc_ops_getitem(network, target, args, kwargs, name):
         shape=size,
         stride=stride,
     )
-    layer.name = name
+    set_layer_name(layer, target, name)
 
     # Add shuffle layer to insert dimensions for 'None' and remove dimensions for 'int'.
     if any(not isinstance(s, slice) for s in slices):
         slice_out = layer.get_output(0)
         layer = network.add_shuffle(slice_out)
+        set_layer_name(layer, target, f"{name}_shuffle")
         final_shape = []
         original_idx = 0
         for s in slices:
@@ -1606,7 +1642,7 @@ def acc_ops_cat(network, target, args, kwargs, name):
 
     layer = network.add_concatenation(inputs=tensors)
     layer.axis = kwargs["dim"] - (1 if network.has_implicit_batch_dimension else 0)
-    layer.name = name
+    set_layer_name(layer, target, name)
     return layer.get_output(0)
 
 
@@ -1634,7 +1670,7 @@ def acc_ops_matmul(network, target, args, kwargs, name):
 
     input_val, other_val = broadcast(network, input_val, other_val, f"{name}_input", f"{name}_other", preset_diff)
     layer = network.add_matrix_multiply(input_val, input_matrix_op, other_val, other_matrix_op)
-    layer.name = name
+    set_layer_name(layer, target, name)
     return layer.get_output(0)
 
 
@@ -1649,7 +1685,7 @@ def acc_ops_sigmoid(network, target, args, kwargs, name):
         )
 
     layer = network.add_activation(input=input_val, type=trt.ActivationType.SIGMOID)
-    layer.name = name
+    set_layer_name(layer, target, name)
     return layer.get_output(0)
 
 
@@ -1671,7 +1707,7 @@ def acc_ops_permute(network, target, args, kwargs, name):
 
     layer = network.add_shuffle(input_val)
     layer.second_transpose = tuple(permutation)
-    layer.name = name
+    set_layer_name(layer, target, name)
     return layer.get_output(0)
 
 
@@ -1702,7 +1738,7 @@ def acc_ops_quantize_per_tensor(network, target, args, kwargs, name):
     # "TensorRT 8.0 or above, current TensorRT version:" + trt.__version__
     layer = network.add_quantize(input=input_val, scale=scale)
     layer.axis = 0
-    layer.name = input_val.name + ".per_tensor_quant"
+    set_layer_name(layer, target, f"{input_val.name}_per_tensor_quant")
     return layer.get_output(0)
 
 
@@ -1742,7 +1778,7 @@ def acc_ops_quantize_per_channel(network, target, args, kwargs, name):
     # "TensorRT 8.0 or above, current TensorRT version:" + trt.__version__
     layer = network.add_quantize(input=input_val, scale=scale)
     layer.axis = q_per_channel_axis
-    layer.name = input_val.name + ".per_channel_quant"
+    set_layer_name(layer, target, f"{input_val.name}_per_channel_quant")
     return layer.get_output(0)
 
 
@@ -1787,9 +1823,10 @@ def acc_ops_dequantize(network, target, args, kwargs, name):
     # assert trt.__version__ > "8.0", "Explicit dequantize op is only supported in "
     # "TensorRT 8.0 or above, current TensorRT version:" + trt.__version__
     layer = network.add_dequantize(input=input_val, scale=scale)
-    layer.name = input_val.name + ".dequant"
+    set_layer_name(layer, target, f"{input_val.name}_.dequant")
     layer.axis = q_axis
     return layer.get_output(0)
+
 
 @tensorrt_converter(acc_ops.gelu)
 def acc_ops_gelu(network, target, args, kwargs, name):
@@ -1813,8 +1850,9 @@ def acc_ops_gelu(network, target, args, kwargs, name):
     plugin = get_trt_plugin(plugin_name, field_collection, plugin_version)
 
     layer = network.add_plugin_v2([input_val], plugin)
-    layer.name = name
+    set_layer_name(layer, target, name)
     return layer.get_output(0)
+
 
 @tensorrt_converter(acc_ops.chunk)
 def acc_ops_chunk(network, target, args, kwargs, name):
@@ -1826,7 +1864,6 @@ def acc_ops_chunk(network, target, args, kwargs, name):
     if not isinstance(input_val, trt.tensorrt.ITensor):
         raise RuntimeError(f"chunk received input {input_val} that is not part "
                            "of the TensorRT region!")
-
 
     if network.has_implicit_batch_dimension:
         input_dim_size += 1
@@ -1856,7 +1893,7 @@ def acc_ops_chunk(network, target, args, kwargs, name):
         start[dim] = offset
         layer = network.add_slice(input_val, start=start, shape=shape, stride=stride)
         offset += split_size
-        layer.name = f"{name}_{i}"
+        set_layer_name(layer, target, f"{name}_{i}")
         output.append(layer.get_output(0))
     return output
 
@@ -1877,17 +1914,17 @@ def acc_ops_cumsum(network, target, args, kwargs, name):
     if dim < 0:
         dim = dim % input_dim_size
     loop = network.add_loop()
-    loop.name = name + "_loop"
     trip_limit = None
     if (input_shape[dim] > 0):
         axis = torch.tensor(input_shape[dim], dtype=torch.int32)
-        trip_limit = network.add_constant(axis.shape, to_numpy(axis)).get_output(0)
+        trip_limit_layer = network.add_constant(axis.shape, to_numpy(axis))
     else:
         input_shape = network.add_shape(input_val).get_output(0)
         dim_value = torch.tensor(dim, dtype=torch.int32)
         axis = network.add_constant(dim_value.shape, to_numpy(dim_value)).get_output(0)
-        trip_limit = network.add_gather(input_shape, axis, 0).get_output(0)
-    trip_limit.name = name + "_trip_limit"
+        trip_limit_layer = network.add_gather(input_shape, axis, 0)
+    set_layer_name(trip_limit_layer, target, f"{name}_trip_limit")
+    trip_limit = trip_limit_layer.get_output(0)
 
     loop.add_trip_limit(trip_limit, trt.TripLimit(0))
     iterator = loop.add_iterator(input_val, dim, False)
@@ -1895,16 +1932,22 @@ def acc_ops_cumsum(network, target, args, kwargs, name):
     new_dims = tuple(data.shape)
     zero_tensor = torch.zeros(new_dims, dtype=torch.float32)
     zero_tensor = network.add_constant(zero_tensor.shape, to_numpy(zero_tensor)).get_output(0)
+
     running_sum = loop.add_recurrence(zero_tensor)
+    set_layer_name(running_sum, target, f"{name}_running_sum_1")
     running_sum_tensor = running_sum.get_output(0)
-    current_sum = network.add_elementwise(data, running_sum_tensor, trt.ElementWiseOperation.SUM)
-    current_sum.name = name + "_elementwise_sum_1"
-    running_sum.set_input(1, current_sum.get_output(0))
+
+    current_sum = add_binary_elementwise_layer(network, data, running_sum_tensor, trt.ElementWiseOperation.SUM, target, "sum_1")
+    running_sum.set_input(1, current_sum)
+
     running_sum = loop.add_recurrence(zero_tensor)
+    set_layer_name(running_sum, target, f"{name}_running_sum_2")
     running_sum_tensor = running_sum.get_output(0)
-    current_sum = network.add_elementwise(data, running_sum_tensor, trt.ElementWiseOperation.SUM)
-    current_sum.name = name + "_elementwise_sum_2"
-    running_sum.set_input(1, current_sum.get_output(0))
-    loop_output = loop.add_loop_output(current_sum.get_output(0), trt.LoopOutput.CONCATENATE, dim)
+
+    current_sum = add_binary_elementwise_layer(network, data, running_sum_tensor, trt.ElementWiseOperation.SUM, target, "sum_2")
+    running_sum.set_input(1, current_sum)
+
+    loop_output = loop.add_loop_output(current_sum, trt.LoopOutput.CONCATENATE, dim)
+    set_layer_name(loop_output, target, f"{name}_loop_output")
     loop_output.set_input(1, trip_limit)
     return loop_output.get_output(0)
