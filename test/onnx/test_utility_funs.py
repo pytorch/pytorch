@@ -917,6 +917,33 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         iter = graph.nodes()
         self.assertEqual(next(iter).kind(), "CustomNamespace::Custom")
 
+    def test_autograd_onnx_fallthrough(self):
+        class CustomFunction(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, input):
+                ctx.save_for_backward(input)
+                return input.clamp(min=0)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                input, = ctx.saved_tensors
+                grad_input = grad_output.clone()
+                grad_input[input < 0] = 0
+                return grad_input
+
+        class Custom(torch.nn.Module):
+            def forward(self, input):
+                return CustomFunction.apply(input)
+
+        model = Custom()
+        batch = torch.FloatTensor(1, 3)
+
+        graph, _, _ = self._model_to_graph(model, batch,
+                                           operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH,
+                                           input_names=["batch"], dynamic_axes={"batch": [0, 1]})
+        iter = graph.nodes()
+        self.assertEqual(next(iter).kind(), "prim::PythonOp")
+
     def test_unused_initializers(self):
         class Model(torch.nn.Module):
             def __init__(self):

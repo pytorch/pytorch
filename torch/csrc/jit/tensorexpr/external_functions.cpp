@@ -160,7 +160,7 @@ void nnc_aten_quantized_conv2d_relu(
       reinterpret_cast<ConvPackedParamsBase<2>*>(buf_data[2]);
   const double out_qscale = ((double*)extra_args)[3];
   const int64_t out_qzero = extra_args[4];
-  auto r = convPackedParams->apply(qx, out_qscale, out_qzero);
+  auto r = convPackedParams->apply_relu(qx, out_qscale, out_qzero);
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
 
