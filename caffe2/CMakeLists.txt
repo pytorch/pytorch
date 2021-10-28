@@ -63,23 +63,24 @@ if(INTERN_BUILD_ATEN_OPS)
   set(CMAKE_POSITION_INDEPENDENT_CODE ${__caffe2_CMAKE_POSITION_INDEPENDENT_CODE})
 
   # Generate the headers wrapped by our operator
-  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/contrib/aten/aten_op.h
-  COMMAND
-  "${PYTHON_EXECUTABLE}" ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/gen_op.py
-    --aten_root=${CMAKE_CURRENT_SOURCE_DIR}/../aten
-    --template_dir=${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten
-    --yaml_dir=${CMAKE_CURRENT_BINARY_DIR}/../aten/src/ATen
-    --install_dir=${CMAKE_CURRENT_BINARY_DIR}/contrib/aten
-  DEPENDS
-  ATEN_CPU_FILES_GEN_TARGET
-  ${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml
-  ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/gen_op.py
-  ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/aten_op_template.h)
+  file(GLOB_RECURSE all_python "${PROJECT_SOURCE_DIR}/tools/codegen/*.py")
+  add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/contrib/aten/aten_op.h
+    COMMAND
+      "${PYTHON_EXECUTABLE}" ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/gen_op.py
+      --aten_root=${CMAKE_CURRENT_SOURCE_DIR}/../aten
+      --template_dir=${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten
+      --yaml_dir=${CMAKE_CURRENT_BINARY_DIR}/../aten/src/ATen
+      --install_dir=${CMAKE_CURRENT_BINARY_DIR}/contrib/aten
+    DEPENDS
+      ${all_python}
+      ${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml
+      ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/gen_op.py
+      ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/aten_op_template.h)
 
-  add_custom_target(__aten_op_header_gen
-    DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/contrib/aten/aten_op.h)
-  add_library(aten_op_header_gen INTERFACE)
-  add_dependencies(aten_op_header_gen __aten_op_header_gen)
+  add_custom_target(CAFFE2_ATEN_OP_GEN_TARGET DEPENDS
+      ${CMAKE_CURRENT_BINARY_DIR}/contrib/aten/aten_op.h)
+  add_dependencies(ATEN_CPU_FILES_GEN_LIB CAFFE2_ATEN_OP_GEN_TARGET)
 
   # Add source, includes, and libs to lists
   list(APPEND Caffe2_CPU_SRCS ${ATen_CPU_SRCS})
