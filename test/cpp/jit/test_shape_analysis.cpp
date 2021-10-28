@@ -195,28 +195,28 @@ TEST(ShapeAnalysisTest, DynamicShapesFusion) {
 
   // Testing bad inputs
 
-  // auto first_inp = at::rand({2, 5});
-  // std::vector<std::vector<at::Tensor>> second_inps = {
-  //     {at::rand({3, 4}), at::rand({1, 1})}, // sym shape mismatch
-  //     {at::rand({5, 2}).transpose(0, 1), at::rand({1, 1})}, // discontiguous
-  //     {at::zeros({2, 5}).to(at::ScalarType::Int),
-  //      at::rand({1, 1})}, // wrong dtype
-  //     {at::rand({2, 5, 1}), at::rand({1, 1})}, // wrong # dims
-  //     {at::rand({2, 5}).requires_grad_(true),
-  //      at::rand({1, 1})}, // requires grad
-  //     {at::rand({2, 5}), at::rand({1, 12})}, // concrete dim mismatch (1)
-  // };
-  // if (torch::cuda::is_available()) {
-  //   second_inps.push_back({at::rand({2, 5}).cuda(), at::rand({1, 1})});
-  // }
-  // for (const auto& last_inps : second_inps) {
-  //   // todo - reusing interpreter across iters gave error
-  //   Code code(g, "");
-  //   InterpreterState interp(code);
-  //   auto stack = createStack({at::rand({2, 5}), last_inps[0], last_inps[1]});
-  //   interp.run(stack);
-  //   TORCH_INTERNAL_ASSERT(pop(stack).toTuple()->elements().at(0).isNone());
-  // }
+  auto first_inp = at::rand({2, 5});
+  std::vector<std::vector<at::Tensor>> second_inps = {
+      {at::rand({3, 4}), at::rand({1, 1})}, // sym shape mismatch
+      {at::rand({5, 2}).transpose(0, 1), at::rand({1, 1})}, // discontiguous
+      {at::zeros({2, 5}).to(at::ScalarType::Int),
+       at::rand({1, 1})}, // wrong dtype
+      {at::rand({2, 5, 1}), at::rand({1, 1})}, // wrong # dims
+      {at::rand({2, 5}).requires_grad_(true),
+       at::rand({1, 1})}, // requires grad
+      {at::rand({2, 5}), at::rand({1, 12})}, // concrete dim mismatch (1)
+  };
+  if (torch::cuda::is_available()) {
+    second_inps.push_back({at::rand({2, 5}).cuda(), at::rand({1, 1})});
+  }
+  for (const auto& last_inps : second_inps) {
+    // todo - reusing interpreter across iters gave error
+    Code code(g, "");
+    InterpreterState interp(code);
+    auto stack = createStack({at::rand({2, 5}), last_inps[0], last_inps[1]});
+    interp.run(stack);
+    TORCH_INTERNAL_ASSERT(pop(stack).toTuple()->elements().at(0).isNone());
+  }
 
   // Test good inputs
   Code code(g, "");

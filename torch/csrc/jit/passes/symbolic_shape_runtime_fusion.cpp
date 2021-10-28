@@ -272,7 +272,8 @@ RegisterOperators reg_guard({
                 if (sym_dim_flat_index.count(value)) {
                   sym_dim_index = sym_dim_flat_index[value];
                 } else {
-                  sym_dim_flat_index[value] = (-1) - sym_dim_flat_index.size();
+                  auto size = sym_dim_flat_index.size();
+                  sym_dim_flat_index[value] = (-1) - size;
                   sym_dim_index = sym_dim_flat_index[value];
                 }
                 // TODO: potential optimization - if there is a Symbolic
@@ -291,31 +292,15 @@ RegisterOperators reg_guard({
                   num_symbolic_dims](Stack& stack) {
             at::ArrayRef<IValue> inputs = last(stack, num_inputs);
             drop(stack, num_inputs);
-
-            std::cout << "\nNum inputs: " << num_inputs;
-            std::cout << "\n flattened_input_dims: " << flattened_input_dims;
-            std::cout << "\n num_symbolic_dims: " << flattened_input_dims;
-
             // each invocation we need to reset what value of each symbolic
             // symbol is.
             // TODO: could this be a reference and not allocated on
             // each invocation or would that mess up with multithreaded
             // inference since we are writing to it?
             // TODO - smallvector here ?
-
-            // TODO - faster initialization
-            // std::vector<int64_t> flattened_symbolic_dims(num_symbolic_dims,
-            // -1); did not work on certain platforms
-            std::vector<int64_t> flattened_symbolic_dims;
-            flattened_symbolic_dims.reserve(num_symbolic_dims);
-            for (size_t i = 0; i < num_symbolic_dims; ++i) {
-              flattened_symbolic_dims.push_back(-1);
-            }
+            std::vector<int64_t> flattened_symbolic_dims(num_symbolic_dims, -1);
             size_t flattened_dim_offset = 0;
             for (const auto i : c10::irange(num_inputs)) {
-              std::cout << "\n Flattened dims loop: "
-                        << flattened_symbolic_dims;
-
               at::Tensor tensor = inputs[i].toTensor();
               if (C10_UNLIKELY(
                       tensor.device() != device ||
@@ -347,9 +332,6 @@ RegisterOperators reg_guard({
                 return;
               }
               for (const auto dim_index : c10::irange(num_dims)) {
-                std::cout << "\n Flattened dims loop 2 : "
-                          << flattened_symbolic_dims;
-                std::cout << "index : " << dim_index + flattened_dim_offset << "\n";
                 const int64_t dim_value =
                     flattened_input_dims[dim_index + flattened_dim_offset];
                 const int64_t tensor_dim = sizes[dim_index];
@@ -365,9 +347,7 @@ RegisterOperators reg_guard({
                 } else {
                   // flattened sym indices start at -1,
                   // so -1 -> index 0, -2 -> index 1
-                  std::cout << " dim value: " << dim_value << "\n";
                   const auto flattened_sym_index = (-dim_value) - 1;
-                  std::cout << " flattened sym index << " << flattened_sym_index << " \n";
                   const auto flattened_sym_value =
                       flattened_symbolic_dims[flattened_sym_index];
                   // sym symbol already seen, check value
@@ -382,7 +362,6 @@ RegisterOperators reg_guard({
                       return;
                     }
                   } else {
-                    std::cout << " WRITING " << tensor_dim << " TO INDEX " << flattened_sym_index << "\n";
                     // not seen, write value
                     flattened_symbolic_dims[flattened_sym_index] = tensor_dim;
                   }
