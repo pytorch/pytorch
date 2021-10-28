@@ -537,6 +537,33 @@ void initJITBindings(PyObject* module) {
             }
             return TraceGraph(graph, stack);
           })
+      .def(
+          "_jit_trace_module",
+          [](Module& model, const py::tuple& inputs) {
+            auto graph = model.get_method("forward").graph();
+            Stack stack;
+            push(stack, model._ivalue());
+            stack.reserve(inputs.size() + 1); // captures?
+            for (auto& obj : inputs) {
+              stack.push_back(toTypeInferredIValue(obj));
+            }
+            auto g_inputs = graph->inputs();
+            for (const auto i : c10::irange(inputs.size())) {
+              if (stack[i].isTensor()) {
+                g_inputs[i]->setType(stack[i].type());
+              }
+            }
+            GRAPH_DEBUG("Tracing Graph");
+            auto traced = TraceGraph(graph, stack);
+            GRAPH_DUMP("Traced Graph", traced);
+
+            // the easiest way to replace a graph in a module is
+            // to remove all the nodes in the original graph
+            // clone everything from the traced one
+            graph->block()->clear();
+            graph->block()->cloneFrom(traced->block(), nullptr);
+            GRAPH_DUMP("Copied Graph", graph);
+          })
       .def("_jit_pass_remove_expands", RemoveExpands)
       .def("_jit_pass_erase_number_types", EraseNumberTypes)
       .def("_jit_pass_inline_fork_wait", InlineForkWait)
