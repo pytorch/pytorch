@@ -175,6 +175,12 @@ TORCH_META_FUNC(gelu_backward) (
   build_borrowing_binary_op(maybe_get_output(), grad, self);
 }
 
+TORCH_META_FUNC(hardtanh) (
+  const Tensor& self, const Scalar& min, const Scalar& max
+) {
+  build_unary_op(maybe_get_output(), self);
+}
+
 } // namespace meta
 
 namespace native {
@@ -297,6 +303,15 @@ TORCH_IMPL_FUNC(hardshrink_backward_out) (
   shrink_backward_stub(device_type(), *this, lambd);
 }
 
+TORCH_IMPL_FUNC(hardtanh_out) (
+  const Tensor& self,
+  const Scalar& min,
+  const Scalar& max,
+  const Tensor& result
+) {
+  at::clamp_out(const_cast<Tensor&>(result), self, min, max);
+}
+
 TORCH_IMPL_FUNC(softshrink_out) (
   const Tensor & self, const Scalar& lambd, const Tensor& result
 ) {
@@ -358,18 +373,6 @@ TORCH_IMPL_FUNC(gelu_backward_out_cpu) (
 #else
   GeluBackwardKernel(kCPU, *this);
 #endif
-}
-
-Tensor hardtanh(const Tensor& self, const Scalar& min, const Scalar& max) {
-  return at::clamp(self, min, max);
-}
-
-Tensor& hardtanh_out(const Tensor& self, const Scalar& min, const Scalar& max, Tensor& result) {
-  return at::clamp_out(result, self, min, max);
-}
-
-Tensor& hardtanh_(Tensor& self, const Scalar& min, const Scalar& max) {
-  return at::clamp_(self, min, max);
 }
 
 Tensor& hardtanh_backward_out(const Tensor& grad_output, const Tensor& self, const Scalar& min, const Scalar& max, Tensor& grad_input) {
