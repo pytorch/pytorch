@@ -592,7 +592,12 @@ void FuseListUnpackV2(std::shared_ptr<torch::jit::Graph>& graph) {
       {fromQualString("fb::equally_split"),
        fromQualString("static_runtime::fused_equally_split")},
       {fromQualString("fb::sigrid_transforms"),
-       fromQualString("static_runtime::fused_sigrid_transforms")}};
+       fromQualString("static_runtime::fused_sigrid_transforms")},
+      {fromQualString("static_runtime::variadic_grouped_accessor_op"),
+       fromQualString("static_runtime::fused_variadic_grouped_accessor_op")},
+      {fromQualString("static_runtime::variadic_grouped_accessor_op_v2"),
+       fromQualString(
+           "static_runtime::fused_variadic_grouped_accessor_op_v2")}};
 
   AliasDb alias_db(
       graph, /*isFrozen=*/false, /*enablePreciseTupleContainerAnalysis=*/true);
@@ -779,14 +784,12 @@ void UseVariadicGroupedAccessor(const std::shared_ptr<Graph>& graph) {
   // both versions of this op.
   UseVariadicOp(
       graph,
-      c10::Symbol::fromQualString("grouped_accessor::grouped_accessor_op"),
-      c10::Symbol::fromQualString(
-          "static_runtime::variadic_grouped_accessor_op"));
+      fromQualString("grouped_accessor::grouped_accessor_op"),
+      fromQualString("static_runtime::variadic_grouped_accessor_op"));
   UseVariadicOp(
       graph,
-      c10::Symbol::fromQualString("grouped_accessor::grouped_accessor_op_v2"),
-      c10::Symbol::fromQualString(
-          "static_runtime::variadic_grouped_accessor_op_v2"));
+      fromQualString("grouped_accessor::grouped_accessor_op_v2"),
+      fromQualString("static_runtime::variadic_grouped_accessor_op_v2"));
 }
 
 } // namespace jit
