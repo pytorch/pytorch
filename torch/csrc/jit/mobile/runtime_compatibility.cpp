@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/mobile/runtime_compatibility.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/runtime/operator.h>
+#include <torch/custom_class.h>
 #include <unordered_map>
 
 namespace c10 {
@@ -74,6 +75,10 @@ std::unordered_set<std::string> _get_mobile_supported_types() {
       at::TypeParser::getCustomType().end());
 
   return supported_types;
+}
+
+TORCH_API std::unordered_set<std::string> _get_loaded_custom_classes() {
+  return torch::getAllCustomClassesNames();
 }
 
 } // namespace jit

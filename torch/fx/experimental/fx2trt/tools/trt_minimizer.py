@@ -16,7 +16,8 @@ def lower_mod_default(
     interp = TRTInterpreter(
         mod, InputTensorSpec.from_tensors(inputs), explicit_batch_dimension=True
     )
-    res_mod = TRTModule(*interp.run(max_batch_size=batch_size))
+    interpreter_result = interp.run(max_batch_size=batch_size)
+    res_mod = TRTModule(interpreter_result.engine, interpreter_result.input_names, interpreter_result.output_names)
     return res_mod
 
 

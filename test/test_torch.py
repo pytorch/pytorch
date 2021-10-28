@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Owner(s): ["module: tests"]
+
 import torch
 import torch.utils.data
 import numpy as np
@@ -35,7 +37,7 @@ from torch.testing._internal.common_utils import (
     skipCUDAMemoryLeakCheckIf, BytesIOContext, noarchTest,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
     wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard,
-    bytes_to_scalar)
+    skipIfNotRegistered, bytes_to_scalar)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -234,6 +236,8 @@ class AbstractTestCases:
                            'softmax',
                            'split_with_sizes',
                            'unsafe_split_with_sizes',
+                           '_autocast_to_fp16',
+                           '_autocast_to_fp32',
                            )
             test_namespace(torch.nn)
             test_namespace(torch.nn.functional, 'assert_int_or_pair')
@@ -2471,6 +2475,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             do_test(torch.tensor([[1, 2]]).data)
             do_test(torch.tensor([[1, 2]]).detach())
 
+        @skipIfNotRegistered("LayerNorm", "Skipping as LayerNorm is not registered")
         def test_c10_layer_norm(self):
             # test that we can call c10 ops and they return a reasonable result
             X = torch.rand(5, 5, dtype=torch.float)
@@ -3888,7 +3893,7 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('avg_pool3d_backward_cuda', ['cuda'], test_warning=False)
+        @expectedAlertNondeterministic('avg_pool3d_backward_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -3900,7 +3905,7 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('adaptive_avg_pool2d_backward_cuda', ['cuda'], test_warning=False)
+        @expectedAlertNondeterministic('adaptive_avg_pool2d_backward_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -3912,7 +3917,7 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('adaptive_avg_pool3d_backward_cuda', ['cuda'], test_warning=False)
+        @expectedAlertNondeterministic('adaptive_avg_pool3d_backward_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -3924,7 +3929,7 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('max_pool3d_with_indices_backward_cuda', ['cuda'], test_warning=False)
+        @expectedAlertNondeterministic('max_pool3d_with_indices_backward_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -3936,7 +3941,7 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('adaptive_max_pool2d_backward_cuda', ['cuda'], test_warning=False)
+        @expectedAlertNondeterministic('adaptive_max_pool2d_backward_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -3948,7 +3953,7 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('fractional_max_pool2d_backward_cuda', ['cuda'], test_warning=False)
+        @expectedAlertNondeterministic('fractional_max_pool2d_backward_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -3960,7 +3965,7 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('fractional_max_pool3d_backward_cuda', ['cuda'], test_warning=False)
+        @expectedAlertNondeterministic('fractional_max_pool3d_backward_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -3975,7 +3980,7 @@ else:
             align_corners=False)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('upsample_linear1d_backward_out_cuda', ['cuda'], test_warning=False)
+        @expectedAlertNondeterministic('upsample_linear1d_backward_out_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -3990,7 +3995,7 @@ else:
             align_corners=False)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('upsample_bilinear2d_backward_out_cuda', ['cuda'], test_warning=False)
+        @expectedAlertNondeterministic('upsample_bilinear2d_backward_out_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -4005,7 +4010,7 @@ else:
             align_corners=False)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('upsample_bicubic2d_backward_out_cuda', ['cuda'], test_warning=False)
+        @expectedAlertNondeterministic('upsample_bicubic2d_backward_out_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -4020,7 +4025,7 @@ else:
             align_corners=False)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('upsample_trilinear3d_backward_out_cuda', ['cuda'], test_warning=False)
+        @expectedAlertNondeterministic('upsample_trilinear3d_backward_out_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -4032,7 +4037,7 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('reflection_pad1d_backward_out_cuda', ['cuda'], test_warning=False)
+        @expectedAlertNondeterministic('reflection_pad1d_backward_out_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -4044,7 +4049,7 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('reflection_pad2d_backward_cuda', ['cuda'], test_warning=False)
+        @expectedAlertNondeterministic('reflection_pad2d_backward_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -4056,7 +4061,7 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('reflection_pad3d_backward_out_cuda', ['cuda'], test_warning=False)
+        @expectedAlertNondeterministic('reflection_pad3d_backward_out_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -4068,7 +4073,7 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('replication_pad1d_backward_cuda', ['cuda'], test_warning=False)
+        @expectedAlertNondeterministic('replication_pad1d_backward_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -4080,7 +4085,7 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('replication_pad2d_backward_cuda', ['cuda'], test_warning=False)
+        @expectedAlertNondeterministic('replication_pad2d_backward_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -4092,7 +4097,7 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('replication_pad3d_backward_cuda', ['cuda'], test_warning=False)
+        @expectedAlertNondeterministic('replication_pad3d_backward_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -4118,10 +4123,9 @@ else:
         res = module(input, target, input_lengths, target_lengths)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('ctc_loss_backward_gpu', ['cuda'], test_warning=False)
+        @expectedAlertNondeterministic('ctc_loss_backward_gpu', ['cuda'])
         def backward_func(slf, device):
-            with warnings.catch_warnings(record=True) as w:
-                res.backward(grad)
+            res.backward(grad, retain_graph=True)
 
         backward_func(self, device)
 
@@ -4133,7 +4137,7 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('embedding_bag_backward_cuda_max', ['cuda'], test_warning=False)
+        @expectedAlertNondeterministic('embedding_bag_backward_cuda_max', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -4245,7 +4249,7 @@ else:
             res = op_call(a, dim, index)
             grad = torch.ones_like(res)
 
-            @expectedAlertNondeterministic('scatter_add_cuda_kernel', ['cuda'], test_warning=False)
+            @expectedAlertNondeterministic('scatter_add_cuda_kernel', ['cuda'])
             def backward_func(slf, device):
                 res.backward(grad)
 
@@ -4260,7 +4264,7 @@ else:
         res = torch.nn.functional.grid_sample(input, grid, align_corners=False)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('grid_sampler_2d_backward_cuda', ['cuda'], test_warning=False)
+        @expectedAlertNondeterministic('grid_sampler_2d_backward_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -4272,7 +4276,7 @@ else:
         res = torch.nn.functional.grid_sample(input, grid, align_corners=False)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('grid_sampler_3d_backward_cuda', ['cuda'], test_warning=False)
+        @expectedAlertNondeterministic('grid_sampler_3d_backward_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
