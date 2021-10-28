@@ -3033,8 +3033,8 @@ def sample_inputs_conv2d(op_info, device, dtype, requires_grad, jit_fail_sample=
 def sample_inputs_group_norm(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    # Ordered as input shape, normalized_shape and a kwarg dict for eps
-    cases: Tuple[Tuple[int], Tuple[int], float] = (  # type: ignore[assignment]
+    # Ordered as input shape, num groups, and eps
+    cases: Tuple[Tuple[int], int, float] = (  # type: ignore[assignment]
         ((1, 6, 3), 2, 0.5),
         ((2, 6, 3), 2, -0.5),
         ((1, 2), 1, None),
@@ -3043,7 +3043,7 @@ def sample_inputs_group_norm(opinfo, device, dtype, requires_grad, **kwargs):
 
     def generator():
         for input_shape, num_groups, eps in cases:
-            # Shape of weight and bias should be the same as normalized_shape
+            # Shape of weight and bias should be the same as num_channels
             weight = make_arg(input_shape[1])
             bias = make_arg(input_shape[1])
             yield SampleInput(
@@ -3061,9 +3061,10 @@ def sample_inputs_instance_norm(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     make_arg_without_requires_grad = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
 
-    # Ordered as: input shape, kwargs for  momentum, eps
+    # Ordered as: input shape, kwargs for momentum, eps
     cases: Tuple[Tuple[int], dict] = (  # type: ignore[assignment]
         ((S, S, S), {'momentum': 0.5, 'eps': 0.6}),
+        ((S, S, S), {'momentum': 0.5, 'eps': 0.6, 'use_input_stats': True}),
         ((3, 2, 4), {'momentum': -1.2}),
         ((3, 2, 4), {'momentum': 0.0}),
         ((3, 2, 3, 4), {'momentum': -1.0, 'eps': 0.5}),
@@ -3109,7 +3110,6 @@ def sample_inputs_instance_norm(opinfo, device, dtype, requires_grad, **kwargs):
             )
 
         # Test case for no optional kwargs
-        # running_mean and running_var are required in evaluation mode (training: False) but not in training mode
         yield SampleInput(make_arg((1, 2, 3)), kwargs={})
 
     return list(generator())
@@ -3155,7 +3155,7 @@ def sample_inputs_layer_norm(opinfo, device, dtype, requires_grad, **kwargs):
 def sample_inputs_local_response_norm(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    # Ordered as input shape, normalized_shape and a kwarg dict for eps
+    # Ordered as input shape, size and a kwarg dict for alpha, beta, and k
     cases: Tuple[Tuple[int], Tuple[int], dict] = (  # type: ignore[assignment]
         ((1, 6, 3), 2, {'alpha': 3e-05, 'beta': 0.5, 'k': 1.25}),
         ((1, 6, 3), 2, {'beta': 0.5, 'k': 1.25}),
@@ -3172,11 +3172,7 @@ def sample_inputs_local_response_norm(opinfo, device, dtype, requires_grad, **kw
 
     def generator():
         for input_shape, size, kwargs in cases:
-            yield SampleInput(
-                make_arg(input_shape),
-                args=(size,),
-                kwargs=kwargs
-            )
+            yield SampleInput(make_arg(input_shape), args=(size,), kwargs=kwargs)
 
     return list(generator())
 
