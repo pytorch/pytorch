@@ -1779,3 +1779,18 @@ TEST(StaticRuntime, IndividualOps_View) {
   testStaticRuntime(src, args1);
   testStaticRuntime(src, args1, args2);
 }
+
+TEST(StaticRuntime, IndividualOps_Size) {
+  const auto src = R"JIT(
+      def forward(self, x, dim: int):
+          return x.size(dim)
+  )JIT";
+
+  std::vector<IValue> args1{at::randn({1}), 0};
+  std::vector<IValue> args2{at::randn({1}), -1};
+  std::vector<IValue> args3{at::randn({2, 4}), 1};
+
+  testStaticRuntime(src, args1);
+  testStaticRuntime(src, args2);
+  testStaticRuntime(src, args1, args3);
+}
