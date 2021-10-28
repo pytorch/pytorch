@@ -2592,6 +2592,24 @@ def sample_inputs_histogramdd(op_info, device, dtype, requires_grad):
 
     return sample_inputs
 
+def sample_inputs_histc(op_info, device, dtype, requires_grad):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    sizes = ((), (S,), (S, S), (S, S, S), (S, 1, S), (S, 0, S))
+
+    sample_inputs = []
+    for size, min, max in product(sizes, [0, -10], [0, 10]):
+        input_tensor = make_arg(size)
+
+        sample_inputs.append(SampleInput(input_tensor,
+                                         kwargs=dict(min=min, max=max)))
+
+        for bins in range(1, 5):
+            sample_inputs.append(SampleInput(input_tensor,
+                                             kwargs=dict(bins=bins, min=min, max=max)))
+
+    return sample_inputs
+
 def sample_inputs_bincount(op_info, device, dtype, requires_grad):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
@@ -10122,6 +10140,12 @@ op_db: List[OpInfo] = [
                # https://github.com/pytorch/pytorch/issues/58507
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
            )),
+    OpInfo('histc',
+           dtypes=floating_types(),
+           sample_inputs_func=sample_inputs_histc,
+           supports_out=True,
+           supports_autograd=False,
+           ),
     OpInfo('bincount',
            dtypes=integral_types_and(),
            sample_inputs_func=sample_inputs_bincount,
