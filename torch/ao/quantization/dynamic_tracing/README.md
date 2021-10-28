@@ -71,6 +71,29 @@ m (Parent)
    |- _auto_quant_state (AutoQuantizationState)
 ```
 
+Each `AutoQuantizationState` instance stores (a) subgraphs of seen quantizeable ops
+and (b) observers. Here is an example (in pseudocode, actual variable names many
+change):
+
+```
+AutoQuantizationState(
+  (seen_ops): {
+    0: (type): <built-in method add of type object at 0x112a7fe50>
+       (input_tensor_infos): [
+         QTensorInfo(id=0, inf_dtype=torch.float32),
+         QTensorInfo(id=1, inf_dtype=torch.float32),
+       ],
+       (output_tensor_infos): [
+         QTensorInfo(id=2, inf_dtype=torch.quint8),
+       ],
+  }
+  (tensor_id_to_observer): ModuleDict(
+    (0): MinMaxObserver(...),
+    ...
+  )
+)
+```
+
 During program execution, the following overrides will be called, in order:
 1. m.__call__ override start
 2. m.conv.__call__ override start, end
