@@ -6589,7 +6589,7 @@ def reference_layer_norm(inp: np.ndarray, normalized_shape: Tuple[int], weight=N
         Y = Y * weight.reshape(-1)
     elif weight is not None and bias is not None:
         Y = Y * weight.reshape(-1) + bias.reshape(-1)
-    return Y
+    return Y.reshape(*inp.shape)
 
 def reference_group_norm(inp: np.ndarray, num_groups: int, weight=None, bias=None, eps=1e-5):
     inp_view = inp
