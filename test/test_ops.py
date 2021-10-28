@@ -203,17 +203,13 @@ class TestCommon(TestCase):
 
     # @ops((op for op in op_db if op.error_and_warning_inputs_func is not None), dtypes=OpDTypes.none)
     @onlyOnCPUAndCUDA
-    @ops([op for op in op_db if op.error_and_warning_inputs_func is not None], dtypes=OpDTypes.none)
-    def test_errors_and_warnings(self, device, op):
-        negative_inputs = op.error_and_warning_inputs(device)
-        for ni in negative_inputs:
-            si = ni.sample_input
-            if ni.is_warning:
-                with self.assertWarnsOnceRegex(ni.error_type, ni.error_regex):
-                    op(si.input, *si.args, **si.kwargs)
-            else:  # it's an error
-                with self.assertRaisesRegex(ni.error_type, ni.error_regex):
-                    op(si.input, *si.args, **si.kwargs)
+    @ops([op for op in op_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)
+    def test_errors(self, device, op):
+        error_inputs = op.error_inputs(device)
+        for ei in error_inputs:
+            si = ei.sample_input
+            with self.assertRaisesRegex(ei.error_type, ei.error_regex):
+                op(si.input, *si.args, **si.kwargs)
 
     # Validates ops implement the correct out= behavior
     # See https://github.com/pytorch/pytorch/wiki/Developer-FAQ#how-does-out-work-in-pytorch
