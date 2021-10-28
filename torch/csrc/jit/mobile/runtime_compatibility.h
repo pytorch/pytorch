@@ -17,7 +17,8 @@ struct OperatorInfo {
 };
 
 struct RuntimeCompatibilityInfo {
-  uint64_t bytecode_version;
+  uint64_t min_supported_bytecode_version;
+  uint64_t max_supported_bytecode_version;
   std::unordered_map<std::string, OperatorInfo> operator_info;
   std::unordered_set<std::string> supported_types;
 
