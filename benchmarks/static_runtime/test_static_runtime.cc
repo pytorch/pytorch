@@ -1760,3 +1760,22 @@ TEST(StaticRuntime, IndividualOps_Where) {
   testStaticRuntime(where_script, args1_nnc);
   testStaticRuntime(where_script, args1_nnc, args2_nnc);
 }
+
+TEST(StaticRuntime, IndividualOps_View) {
+  // Note that clone is not technically necessary here since this is not
+  // an out variant, but it suppresses warnings about only have one op
+  // in testStaticRuntime
+  const auto src = R"IR(
+    graph(%input : Tensor, %shape : int[]):
+        %none : NoneType = prim::Constant()
+        %view : Tensor = aten::view(%input, %shape)
+        %res : Tensor = aten::clone(%view, %none)
+        return (%res)
+  )IR";
+
+  std::vector<IValue> args1{at::randn({2, 2}), c10::List<int64_t>(4)};
+  std::vector<IValue> args2{at::randn({2, 2, 2}), c10::List<int64_t>({4, 2})};
+
+  testStaticRuntime(src, args1);
+  testStaticRuntime(src, args1, args2);
+}
