@@ -510,7 +510,7 @@ size_t SchedulerRuntimeInfo::getVectorizableWidth(TensorView* tv) {
 
   // If we don't have an record, either it is a tv with innermost
   //  broadcast, or it is an intermediate tensor allocated by fuser
-  auto tv_root = TensorDomain::noReductions(tv->getRootDomain());
+  auto tv_root = TensorDomain::noReductions(tv->getMaybeRFactorDomain());
   auto tv_root_size = tv_root.size();
 
   // Filter out 0-dim tensors

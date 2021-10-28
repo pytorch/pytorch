@@ -201,7 +201,7 @@ TensorDomain* TransformReplay::fullSelfReplay(
           new_self_root->getRootDomain(),
           new_rfactor_domain,
           new_domain,
-          new_self_root->contiguity());
+          self->contiguity());
     }
   }
 

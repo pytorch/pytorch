@@ -489,16 +489,12 @@ class MisalignedVectorizationModifier {
     const auto& consumer_contig = consumer_fuser_tv->domain()->contiguity();
     const auto& producer_contig = producer_fuser_tv->domain()->contiguity();
 
-    // No rfactor should exist in the producer TVs
-    TORCH_INTERNAL_ASSERT(
-        !producer_tv->domain()->hasRFactor(),
-        "Invalid producer tensor: ",
-        producer_fuser_tv);
-    auto producer_root_domain = producer_fuser_tv->getRootDomain();
+    auto producer_root_domain = producer_fuser_tv->getMaybeRFactorDomain();
 
     // Calculate extent of merged root domains
     kir::Val* extent = nullptr;
-    auto consumer_root_idx = int(consumer_fuser_tv->getRootDomain().size()) - 1;
+    auto consumer_root_idx =
+        int(consumer_fuser_tv->getMaybeRFactorDomain().size()) - 1;
     for (int i = int(producer_root_domain.size()) - 1; i >= 0; --i) {
       auto producer_root_id = producer_root_domain.at(i);
 

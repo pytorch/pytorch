@@ -735,10 +735,10 @@ std::unordered_set<IterDomain*> FindAllMappedDims::from(
     IterDomain* id) {
   TORCH_INTERNAL_ASSERT(
       std::find_if(
-          tv->getRootDomain().begin(),
-          tv->getRootDomain().end(),
+          tv->getMaybeRFactorDomain().begin(),
+          tv->getMaybeRFactorDomain().end(),
           [&id](IterDomain* root_id) { return root_id == id; }) !=
-          tv->getRootDomain().end(),
+          tv->getMaybeRFactorDomain().end(),
       "Tried to map out ",
       id,
       " from TV ",
@@ -759,7 +759,7 @@ bool hasInnerDim(
     std::unordered_set<IterDomain*> vector_dims,
     bool should_vectorize) {
   const auto& root_dom = TensorDomain::noBroadcasts(
-      TensorDomain::noReductions(tv->getRootDomain()));
+      TensorDomain::noReductions(tv->getMaybeRFactorDomain()));
 
   // Don't vectorize 0-dim tensors
   if (root_dom.size() == 0) {
@@ -778,17 +778,18 @@ bool hasInnerDim(
   }
 
   auto root_pos_it = std::find_if(
-      tv->getRootDomain().begin(),
-      tv->getRootDomain().end(),
+      tv->getMaybeRFactorDomain().begin(),
+      tv->getMaybeRFactorDomain().end(),
       [&inner_most_dim](IterDomain* id) { return inner_most_dim == id; });
 
-  TORCH_INTERNAL_ASSERT(root_pos_it != tv->getRootDomain().end());
+  TORCH_INTERNAL_ASSERT(root_pos_it != tv->getMaybeRFactorDomain().end());
   auto inner_most_dim_pos =
-      std::distance(tv->getRootDomain().begin(), root_pos_it);
+      std::distance(tv->getMaybeRFactorDomain().begin(), root_pos_it);
 
   const auto& contiguity = tv->domain()->contiguity();
 
-  TORCH_INTERNAL_ASSERT(contiguity.size() == tv->getRootDomain().size());
+  TORCH_INTERNAL_ASSERT(
+      contiguity.size() == tv->getMaybeRFactorDomain().size());
 
   // Don't vectorize if inner most dimension is not contiguous
   if (!contiguity[inner_most_dim_pos]) {
@@ -806,8 +807,8 @@ std::vector<TensorView*> getInputsOutputsWithInnerDim(
   }
 
   IterDomain* inner_most_id = nullptr;
-  for (auto it = reference_tv->getRootDomain().rbegin();
-       it != reference_tv->getRootDomain().rend();
+  for (auto it = reference_tv->getMaybeRFactorDomain().rbegin();
+       it != reference_tv->getMaybeRFactorDomain().rend();
        it++) {
     if ((*it)->isReduction() && reference_tv->isFusionInput()) {
       continue;

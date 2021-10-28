@@ -61,8 +61,12 @@ class TVDomainGuard {
   ~TVDomainGuard();
 };
 
-// Return inputs of provided IterDomains that are IterDomains
-std::vector<IterDomain*> iterDomainInputsOf(const std::vector<IterDomain*>&);
+//! Return inputs of provided IterDomains that are IterDomains. A list
+//! of input IterDomain can be optionally given. Otherwise,
+//! IterDomains with no defining expression are returned.
+std::vector<IterDomain*> iterDomainInputsOf(
+    const std::vector<IterDomain*>& input_ids,
+    const std::vector<IterDomain*>& all_inputs = {});
 
 // Return inputs of provided IterDomains that are IterDomains, order as the
 // second provided vector.

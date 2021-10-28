@@ -70,8 +70,11 @@ TVDomainGuard::~TVDomainGuard() {
 }
 
 std::vector<IterDomain*> iterDomainInputsOf(
-    const std::vector<IterDomain*>& input_ids) {
-  auto inputs = IterVisitor::getInputsTo({input_ids.begin(), input_ids.end()});
+    const std::vector<IterDomain*>& input_ids,
+    const std::vector<IterDomain*>& all_inputs) {
+  auto inputs = IterVisitor::getInputsTo(
+      {input_ids.begin(), input_ids.end()},
+      {all_inputs.begin(), all_inputs.end()});
   std::vector<IterDomain*> id_inputs(
       ir_utils::filterByType<IterDomain>(inputs).begin(),
       ir_utils::filterByType<IterDomain>(inputs).end());
@@ -81,7 +84,7 @@ std::vector<IterDomain*> iterDomainInputsOf(
 std::vector<IterDomain*> iterDomainInputsOfOrderedAs(
     const std::vector<IterDomain*>& of,
     const std::vector<IterDomain*>& order) {
-  auto inputs_vec = iterDomainInputsOf(of);
+  auto inputs_vec = iterDomainInputsOf(of, order);
 
   std::unordered_set<IterDomain*> inputs_set(
       inputs_vec.begin(), inputs_vec.end());

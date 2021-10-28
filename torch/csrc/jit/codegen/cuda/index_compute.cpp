@@ -61,7 +61,7 @@ class ContigIDs : public OptInDispatch {
     return contig_ids.find(id) != contig_ids.end();
   }
 
-  // Split outputs are not conitguous, don't need to do anything.
+  // Split outputs are not contiguous, don't need to do anything.
   void handle(Split*) override {}
 
   void handle(Merge* merge) override {
@@ -173,7 +173,7 @@ class ContigIDs : public OptInDispatch {
  public:
   ContigIDs() = delete;
 
-  // Check through thie history of ids whose inputs map to root_domain with
+  // Check through the history of ids whose inputs map to root_domain with
   // contiguity root_contiguity. Return unordered_set of all merges that are
   // contiguous. Ignore root order is primarily used for predicate generation.
   // In this case we can linearize indexing of any ID that only consists of
@@ -198,7 +198,10 @@ class ContigIDs : public OptInDispatch {
 
     for (const auto i : c10::irange(root_domain_.size())) {
       // If a root domain has halo, can't use merged domain even if
-      // both inputs are contiguous.
+      // both inputs are contiguous. HaloInfo is also initialized for
+      // rfactor root domains, which should just return "zero"
+      // RootAxisInfo. This should be safe as no rfactor tensor should
+      // need halo.
       if (root_contiguity_[i] &&
           !gpu_lower->haloInfo().getRootAxisInfo(root_domain_[i]).hasHalo()) {
         auto kir_root_domain_i =
@@ -647,7 +650,7 @@ void IndexCompute::handle(Merge* merge) {
   if (!hasZeroMerged(out_id) && contig_ids.find(out_id) != contig_ids.end()) {
     // Contiguous indexing path
     auto input_ids = ir_utils::iterDomainInputsOfOrderedAs(
-        {merge->out()}, td_->getRootDomain());
+        {merge->out()}, td_->getMaybeRFactorDomain());
 
     // Shouldn't hit this, but don't want to segfault if somehow we do.
     TORCH_INTERNAL_ASSERT(!input_ids.empty());
@@ -771,7 +774,7 @@ IndexCompute::IndexCompute(
         return b;
       })) {
     ContigIDs contig_finder(
-        td_->domain(), td_->getRootDomain(), root_contiguity);
+        td_->domain(), td_->getMaybeRFactorDomain(), root_contiguity);
     contig_ids = contig_finder.contigIDs();
     auto within_contig = contig_finder.withinContigIDs();
     for (auto contig_id : contig_ids) {
@@ -1381,54 +1384,51 @@ std::vector<kir::Val*> Index::getGlobalProducerStridedIndices(
     }
   }
 
+  TORCH_INTERNAL_ASSERT(
+      root_dom.size() == producer_tv->domain()->contiguity().size());
   kir::Val* cur_contig_stride = ir_builder.create<kir::Int>(1);
-  // if we have rfactor we can't simplify the indexing like this, we would need
-  // to fix contiguity size to be rfactor size not root size
-  if (root_dom.size() == producer_tv->domain()->contiguity().size()) {
-    for (const auto i : c10::irange(root_dom.size())) {
-      auto dim = root_dom.size() - i - 1;
-      if (root_dom[dim]->isReduction()) {
-        continue;
-      }
-      if (root_dom[dim]->getIterType() == IterType::BroadcastWithoutStride) {
-        continue;
-      }
+  for (const auto i : c10::irange(root_dom.size())) {
+    auto dim = root_dom.size() - i - 1;
+    if (root_dom[dim]->isReduction()) {
+      continue;
+    }
+    if (root_dom[dim]->getIterType() == IterType::BroadcastWithoutStride) {
+      continue;
+    }
 
-      kir::Val* root_ind = nullptr;
-      auto kir_root_dom =
-          gpu_lower->lowerValue(root_dom[dim])->as<kir::IterDomain>();
-      if (producer_indexing.indexMap().find(kir_root_dom) !=
-          producer_indexing.indexMap().end()) {
-        root_ind = producer_indexing.indexMap().at(kir_root_dom);
-      } else if (
-          root_dom[dim]->getIterType() == IterType::BroadcastWithStride) {
-        root_ind = zero;
-      }
+    kir::Val* root_ind = nullptr;
+    auto kir_root_dom =
+        gpu_lower->lowerValue(root_dom[dim])->as<kir::IterDomain>();
+    if (producer_indexing.indexMap().find(kir_root_dom) !=
+        producer_indexing.indexMap().end()) {
+      root_ind = producer_indexing.indexMap().at(kir_root_dom);
+    } else if (root_dom[dim]->getIterType() == IterType::BroadcastWithStride) {
+      root_ind = zero;
+    }
 
-      TORCH_INTERNAL_ASSERT(
-          root_ind != nullptr,
-          "Couldn't find root mapping for TV",
-          producer_tv->name(),
-          " dim: ",
-          i,
-          " id: ",
-          root_dom[dim]);
+    TORCH_INTERNAL_ASSERT(
+        root_ind != nullptr,
+        "Couldn't find root mapping for TV",
+        producer_tv->name(),
+        " dim: ",
+        i,
+        " id: ",
+        root_dom[dim]);
 
-      if (producer_tv->domain()->contiguity()[dim]) {
-        // If contig, used the stored stride which may be the previous
-        // dimensions stride * previous dimensions size
-        strides[dim] = cur_contig_stride;
-        // Prepare for the next dimension which may also be contiguous, multiply
-        // by extent of this dimension
-        auto root_dim_extent = getHaloExtentOfRootAxis(root_dom[dim]);
-        cur_contig_stride =
-            ir_builder.mulExpr(cur_contig_stride, root_dim_extent);
-      } else {
-        // If non contiguous dimension, keep local stride information, set cur
-        // stride to local stride * local raw extent
-        auto root_dim_extent = getHaloExtentOfRootAxis(root_dom[dim]);
-        cur_contig_stride = ir_builder.mulExpr(strides[dim], root_dim_extent);
-      }
+    if (producer_tv->domain()->contiguity()[dim]) {
+      // If contig, used the stored stride which may be the previous
+      // dimensions stride * previous dimensions size
+      strides[dim] = cur_contig_stride;
+      // Prepare for the next dimension which may also be contiguous, multiply
+      // by extent of this dimension
+      auto root_dim_extent = getHaloExtentOfRootAxis(root_dom[dim]);
+      cur_contig_stride =
+          ir_builder.mulExpr(cur_contig_stride, root_dim_extent);
+    } else {
+      // If non contiguous dimension, keep local stride information, set cur
+      // stride to local stride * local raw extent
+      auto root_dim_extent = getHaloExtentOfRootAxis(root_dom[dim]);
+      cur_contig_stride = ir_builder.mulExpr(strides[dim], root_dim_extent);
     }
   }
 
@@ -1840,54 +1840,51 @@ std::vector<kir::Val*> Index::getGlobalConsumerStridedIndices(
     }
   }
 
+  TORCH_INTERNAL_ASSERT(
+      root_dom.size() == consumer_tv->domain()->contiguity().size());
   kir::Val* cur_contig_stride = ir_builder.oneVal();
-  // if we have rfactor we can't simplify the indexing like this, we would need
-  // to fix contiguity size to be rfactor size not root size
-  if (root_dom.size() == consumer_tv->domain()->contiguity().size()) {
-    for (const auto i : c10::irange(root_dom.size())) {
-      auto dim = root_dom.size() - i - 1;
-      if (root_dom[dim]->isReduction()) {
-        continue;
-      }
-      if (root_dom[dim]->getIterType() == IterType::BroadcastWithoutStride) {
-        continue;
-      }
+  for (const auto i : c10::irange(root_dom.size())) {
+    auto dim = root_dom.size() - i - 1;
+    if (root_dom[dim]->isReduction()) {
+      continue;
+    }
+    if (root_dom[dim]->getIterType() == IterType::BroadcastWithoutStride) {
+      continue;
+    }
 
-      kir::Val* root_ind = nullptr;
-      auto kir_root_dom =
-          gpu_lower->lowerValue(root_dom[dim])->as<kir::IterDomain>();
-      if (consumer_indexing.indexMap().find(kir_root_dom) !=
-          consumer_indexing.indexMap().end()) {
-        root_ind = consumer_indexing.indexMap().at(kir_root_dom);
-      } else if (
-          root_dom[dim]->getIterType() == IterType::BroadcastWithStride) {
-        root_ind = zero;
-      }
+    kir::Val* root_ind = nullptr;
+    auto kir_root_dom =
+        gpu_lower->lowerValue(root_dom[dim])->as<kir::IterDomain>();
+    if (consumer_indexing.indexMap().find(kir_root_dom) !=
+        consumer_indexing.indexMap().end()) {
+      root_ind = consumer_indexing.indexMap().at(kir_root_dom);
+    } else if (root_dom[dim]->getIterType() == IterType::BroadcastWithStride) {
+      root_ind = zero;
+    }
 
-      TORCH_INTERNAL_ASSERT(
-          root_ind != nullptr,
-          "Couldn't find root mapping for TV",
-          consumer_tv->name(),
-          " dim: ",
-          i,
-          " id: ",
-          root_dom[dim]);
+    TORCH_INTERNAL_ASSERT(
+        root_ind != nullptr,
+        "Couldn't find root mapping for TV",
+        consumer_tv->name(),
+        " dim: ",
+        i,
+        " id: ",
+        root_dom[dim]);
 
-      if (consumer_tv->domain()->contiguity()[dim]) {
-        // If contig, used the stored stride which may be the previous
-        // dimensions stride * previous dimensions size
-        strides[dim] = cur_contig_stride;
-        // Prepare for the next dimension which may also be contiguous, multiply
-        // by extent of this dimension
-        auto root_dim_extent = getHaloExtentOfRootAxis(root_dom[dim]);
-        cur_contig_stride =
-            ir_builder.mulExpr(cur_contig_stride, root_dim_extent);
-      } else {
-        // If non contiguous dimension, keep local stride information, set cur
-        // stride to local stride * local raw extent
-        cur_contig_stride = ir_builder.mulExpr(
-            strides[dim], getHaloExtentOfRootAxis(root_dom[dim]));
-      }
+    if (consumer_tv->domain()->contiguity()[dim]) {
+      // If contig, used the stored stride which may be the previous
+      // dimensions stride * previous dimensions size
+      strides[dim] = cur_contig_stride;
+      // Prepare for the next dimension which may also be contiguous, multiply
+      // by extent of this dimension
+      auto root_dim_extent = getHaloExtentOfRootAxis(root_dom[dim]);
+      cur_contig_stride =
+          ir_builder.mulExpr(cur_contig_stride, root_dim_extent);
+    } else {
+      // If non contiguous dimension, keep local stride information, set cur
+      // stride to local stride * local raw extent
+      cur_contig_stride = ir_builder.mulExpr(
+          strides[dim], getHaloExtentOfRootAxis(root_dom[dim]));
     }
   }
 

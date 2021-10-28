@@ -297,7 +297,7 @@ TensorDomain* TransformRFactor::runReplay(
       new_root,
       rfactor_root,
       new_domain,
-      std::vector<bool>(new_root.size(), true));
+      std::vector<bool>(rfactor_root.size(), true));
 }
 
 // We want to take any axes marked in axes and remove them from the TensorDomain

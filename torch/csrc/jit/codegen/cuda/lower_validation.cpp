@@ -199,13 +199,13 @@ void checkContiguity(
           .mapConsumerToProducer(consumer->domain(), producer->domain());
 
   std::unordered_map<IterDomain*, bool> producer_domain_contiguity;
-  for (const auto idx : c10::irange(producer->getRootDomain().size())) {
-    auto root = producer->getRootDomain()[idx];
+  for (const auto idx : c10::irange(producer->getMaybeRFactorDomain().size())) {
+    auto root = producer->getMaybeRFactorDomain()[idx];
     auto contiguity = producer->domain()->contiguity()[idx];
     producer_domain_contiguity.insert({root, contiguity});
   }
 
-  for (auto consumer_root : consumer->getRootDomain()) {
+  for (auto consumer_root : consumer->getMaybeRFactorDomain()) {
     if (domains.find(consumer_root) != domains.end()) {
       auto producer_root = root_c2p[consumer_root];
       TORCH_INTERNAL_ASSERT(
@@ -352,13 +352,11 @@ class VectorizeValidator : public OptInDispatch {
 
     TORCH_INTERNAL_ASSERT(validator.vectorized_id_ != nullptr);
 
-    // TODO: Contiguity is based on root domain not rfactor. Seems this
-    // generally doesn't cause problems, though contiguity should be on rfactor
-    // domain as that's the domain we index on.
+    // Contiguity is based on rfactor domain.
     IterDomain* last_root_dim = nullptr;
     int last_root_dim_pos = -1;
-    for (size_t i = tv->getRootDomain().size(); i > 0; i--) {
-      auto r_id = tv->getRootDomain()[i - 1];
+    for (size_t i = tv->getMaybeRFactorDomain().size(); i > 0; i--) {
+      auto r_id = tv->getMaybeRFactorDomain()[i - 1];
       if (r_id->isReduction() || r_id->isBroadcast()) {
         continue;
       }
