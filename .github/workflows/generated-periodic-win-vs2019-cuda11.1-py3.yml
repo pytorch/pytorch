@@ -13,6 +13,7 @@ on:
 env:
   BUILD_ENVIRONMENT: periodic-win-vs2019-cuda11.1-py3
   BUILD_WHEEL: 1
+  MAX_JOBS: 8
   CUDA_VERSION: "11.1"
   IN_CI: 1
   IS_GHA: 1
