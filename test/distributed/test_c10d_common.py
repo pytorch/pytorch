@@ -718,6 +718,25 @@ class DummyProcessGroup(dist.ProcessGroup):
 
         return DummyWork()
 
+    def barrier(self, opts=None):
+        store = c10d._get_default_store()
+        key = "TEST:DummyProcessGroup:barrier"
+        if self.rank() == 0:
+            worker_count = 0
+            # By default, TCPServer lives on rank 0. So rank 0 needs to make
+            # sure that it does not exit too early before other ranks finish
+            # using the store.
+            # Note that, _store_based_barrier does not solve this problem, as
+            # all ranks need to run at least one store.add(key, 0) before
+            # exiting, but there is no guarantee that rank 0 is still alive at
+            # that point.
+            while worker_count < self.size() - 1:
+                worker_count = store.add(key, 0)
+        else:
+            store.add(key, 1)
+
+        return DummyWork()
+
     def broadcast(self, tensor_list, opts=None):
         for tensor in tensor_list:
             tensor.add_(1)
@@ -774,23 +793,6 @@ class PythonProcessGroupTest(MultiProcessTestCase):
     def create_dummy(store, rank, size, timeout):
         return DummyProcessGroup(rank, size)
 
-    def _store_barrier(self, name):
-        store = c10d._get_default_store()
-        key = f"TEST:PythonProcessGroupTest:{name}"
-        if self.rank == 0:
-            worker_count = 0
-            # By default, TCPServer lives on rank 0. So rank 0 needs to make
-            # sure that it does not exit too early before other ranks finish
-            # using the store.
-            # Note that, _store_based_barrier does not solve this problem, as
-            # all ranks need to run at least one store.add(key, 0) before
-            # exiting, but there is no guarantee that rank 0 is still alive at
-            # that point.
-            while worker_count < self.world_size - 1:
-                worker_count = store.add(key, 0)
-        else:
-            store.add(key, 1)
-
     def test_collectives(self):
         dist.Backend.register_backend("dummy", PythonProcessGroupTest.create_dummy)
 
@@ -822,7 +824,7 @@ class PythonProcessGroupTest(MultiProcessTestCase):
         dist.reduce_scatter(output_tensor, input_tensor_list)
         self.assertEqual(output_tensor, torch.zeros(2, 2) + 1)
 
-        self._store_barrier("test_collectives")
+        dist.barrier()
         dist.destroy_process_group()
 
     def test_send_recv(self):
@@ -842,7 +844,7 @@ class PythonProcessGroupTest(MultiProcessTestCase):
         dist.recv(input_tensor, (self.rank + 1) % self.world_size)
         self.assertEqual(input_tensor, torch.zeros(2, 2) + 2)
 
-        self._store_barrier("test_send_recv")
+        dist.barrier()
         # intentionally not calling into `destroy_process_group` as not all
         # user applications would explicitly that.
 
