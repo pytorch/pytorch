@@ -179,6 +179,15 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
 
                 Models exported this way are probably runnable only by Caffe2.
 
+            * ``OperatorExportTypes.ONNX_ATEN_STRICT_FALLBACK``: Similar to
+              ``OperatorExportTypes.ONNX_ATEN_FALLBACK`` as it will try to export each ATen op
+              (in the TorchScript namespace "aten") as a regular ONNX op. If it is unable to do so
+              (e.g. because support has not been added to convert a particular torch op to ONNX),
+              fall back to exporting an ATen op.
+              The difference lies on the fact that no changes are done to the graph
+              specfically for Caffe2. Models exported should be runnable by any runtime
+              engine with ONNX and Aten support, such as ONNX Runtime.
+
         opset_version (int, default 9):
             Must be ``== _onnx_main_opset or in _onnx_stable_opsets``,
             defined in torch/onnx/symbolic_helper.py.

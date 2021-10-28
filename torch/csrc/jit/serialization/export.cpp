@@ -104,7 +104,9 @@ void validateBlock(
     } else {
       if (node->kind() == aten::expand) {
         if (operator_export_type ==
-            onnx_torch::OperatorExportTypes::ONNX_ATEN_FALLBACK) {
+                onnx_torch::OperatorExportTypes::ONNX_ATEN_FALLBACK ||
+            operator_export_type ==
+                onnx_torch::OperatorExportTypes::ONNX_ATEN_STRICT_FALLBACK) {
           WithInsertPoint guard(node);
           auto* new_node =
               b->owningGraph()->insertNode(b->owningGraph()->create(
@@ -127,6 +129,8 @@ void validateBlock(
       }
       bool is_aten_enabled = operator_export_type ==
               onnx_torch::OperatorExportTypes::ONNX_ATEN_FALLBACK ||
+          operator_export_type ==
+              onnx_torch::OperatorExportTypes::ONNX_ATEN_STRICT_FALLBACK ||
           operator_export_type == onnx_torch::OperatorExportTypes::ONNX_ATEN ||
           operator_export_type ==
               onnx_torch::OperatorExportTypes::ONNX_FALLTHROUGH;

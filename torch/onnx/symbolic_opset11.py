@@ -99,7 +99,8 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
         indices_list = sym_help._unpack_list(indices_list_value)
     else:
         indices_list = [indices_list_value]
-    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+    if sym_help._operator_export_type in {torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK,
+                                          torch.onnx.OperatorExportTypes.ONNX_ATEN_STRICT_FALLBACK}:
         args = [self] + indices_list + [values, accumulate]
         return g.op("ATen", *args, operator_s="index_put")
 
@@ -224,7 +225,8 @@ def __interpolate(g, input, size, scale_factor, mode, align_corners, recompute_s
 def gather(g, self, dim, index, sparse_grad=False):
     if sym_help._maybe_get_const(sparse_grad, "i"):
         return _unimplemented("gather", "sparse_grad == True")
-    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+    if sym_help._operator_export_type in {torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK,
+                                          torch.onnx.OperatorExportTypes.ONNX_ATEN_STRICT_FALLBACK}:
         return g.op("ATen", self, dim, index, sparse_grad, operator_s="gather")
     return g.op("GatherElements", self, index, axis_i=dim)
 
@@ -232,7 +234,8 @@ def gather(g, self, dim, index, sparse_grad=False):
 @parse_args("v", "i", "v", "v")
 def scatter(g, self, dim, index, src):
     from torch.onnx.symbolic_opset9 import expand_as
-    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+    if sym_help._operator_export_type in {torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK,
+                                          torch.onnx.OperatorExportTypes.ONNX_ATEN_STRICT_FALLBACK}:
         return g.op("ATen", self, dim, index, src, operator_s="scatter")
     src_type = src.type().scalarType()
     src = sym_help._maybe_get_scalar(src)
@@ -550,6 +553,7 @@ def arange(g, *args):
 def _dim_arange(g, like, dim):
     like_shape = g.op("Shape", like)
     stop = g.op("Gather", like_shape, g.op("Constant", value_t=torch.tensor(dim)), axis_i=0)
+    # Caffe2-specific op
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
         return g.op("_caffe2::Range", stop)
     return arange(g, stop, 4, None, None, None)
@@ -611,7 +615,8 @@ def mm(g, self, other):
 
 
 def index(g, self, index):
-    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+    if sym_help._operator_export_type in {torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK,
+                                          torch.onnx.OperatorExportTypes.ONNX_ATEN_STRICT_FALLBACK}:
         return g.op("ATen", self, index, operator_s="index")
 
     if sym_help._is_packed_list(index):
@@ -632,7 +637,8 @@ def index(g, self, index):
 
 def index_fill(g, self, dim, index, value):
     dim_value = sym_help._parse_arg(dim, "i")
-    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+    if sym_help._operator_export_type in {torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK,
+                                          torch.onnx.OperatorExportTypes.ONNX_ATEN_STRICT_FALLBACK}:
         return g.op("ATen", self, index, value, dim_i=dim_value, operator_s="index_fill")
     expanded_index_shape, expanded_index = sym_help._index_fill_reshape_helper(g, self, dim, index)
     value = sym_help._maybe_get_scalar(value)
@@ -643,7 +649,8 @@ def index_fill(g, self, dim, index, value):
 
 def index_copy(g, self, dim, index, source):
     dim_value = sym_help._parse_arg(dim, "i")
-    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+    if sym_help._operator_export_type in {torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK,
+                                          torch.onnx.OperatorExportTypes.ONNX_ATEN_STRICT_FALLBACK}:
         return g.op("ATen", self, index, source, dim_i=dim_value, operator_s="index_copy")
     expanded_index_shape, expanded_index = sym_help._index_fill_reshape_helper(g, self, dim, index)
     return scatter(g, self, dim, expanded_index, source)

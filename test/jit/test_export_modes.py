@@ -84,6 +84,22 @@ class TestExportModes(JitTestCase):
             do_constant_folding=False,
             operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK)
 
+    @skipIfNoLapack
+    def test_aten_strict_fallback(self):
+        class ModelWithAtenNotONNXOp(nn.Module):
+            def forward(self, x, y):
+                abcd = x + y
+                defg = torch.linalg.qr(abcd)
+                return defg
+
+        x = torch.rand(3, 4)
+        y = torch.rand(3, 4)
+        torch.onnx.export_to_pretty_string(
+            ModelWithAtenNotONNXOp(), (x, y), None,
+            add_node_names=False,
+            do_constant_folding=False,
+            operator_export_type=OperatorExportTypes.ONNX_ATEN_STRICT_FALLBACK)
+
     # torch.fmod is using to test ONNX_ATEN.
     # If you plan to remove fmod from aten, or found this test failed.
     # please contact @Rui.

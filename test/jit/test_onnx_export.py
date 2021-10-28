@@ -323,6 +323,13 @@ class TestONNXExport(JitTestCase):
             do_constant_folding=False,
             operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK)
 
+        f = io.BytesIO()
+        torch.onnx.export_to_pretty_string(
+            FooMod(), (torch.rand(3, 4),), f,
+            add_node_names=False,
+            do_constant_folding=False,
+            operator_export_type=OperatorExportTypes.ONNX_ATEN_STRICT_FALLBACK)
+
 
     def test_export_dynamic_slice(self):
         class DynamicSliceExportMod(torch.jit.ScriptModule):

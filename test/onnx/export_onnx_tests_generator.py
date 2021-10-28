@@ -78,7 +78,7 @@ def print_stats(FunctionalModule_nums, nn_module):
         fun(info, l)
 
 
-def convert_tests(testcases, sets=1):
+def convert_tests(testcases, operator_export_type, sets=1):
     print("Collect {} test cases from PyTorch.".format(len(testcases)))
     failed = 0
     FunctionalModule_nums = 0
@@ -96,7 +96,7 @@ def convert_tests(testcases, sets=1):
             input = gen_input(t)
             f = io.BytesIO()
             torch.onnx._export(module, input, f,
-                               operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
+                               operator_export_type=operator_export_type)
             onnx_model = onnx.load_from_string(f.getvalue())
             onnx.checker.check_model(onnx_model)
             onnx.helper.strip_doc_string(onnx_model)
@@ -137,4 +137,5 @@ def convert_tests(testcases, sets=1):
 
 if __name__ == "__main__":
     testcases = module_tests + new_module_tests
-    convert_tests(testcases)
+    convert_tests(testcases, torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
+    convert_tests(testcases, torch.onnx.OperatorExportTypes.ONNX_ATEN_STRICT_FALLBACK)
