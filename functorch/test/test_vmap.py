@@ -3128,7 +3128,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('linalg.multi_dot'),
         xfail('nanmean'),
         xfail('nn.functional.layer_norm'),
-        xfail('nn.functional.nll_loss'),
         xfail('vstack'),
         xfail('block_diag'),
         xfail('nn.functional.dropout'),
