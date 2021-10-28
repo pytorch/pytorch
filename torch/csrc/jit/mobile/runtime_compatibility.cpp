@@ -57,6 +57,7 @@ std::unordered_map<std::string, OperatorInfo> _get_runtime_ops_and_info() {
 
 RuntimeCompatibilityInfo RuntimeCompatibilityInfo::get() {
   return RuntimeCompatibilityInfo{
+      caffe2::serialize::kMinSupportedBytecodeVersion,
       _get_runtime_bytecode_version(),
       _get_runtime_ops_and_info(),
       _get_mobile_supported_types()};
