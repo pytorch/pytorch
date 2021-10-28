@@ -6058,6 +6058,87 @@ def sample_inputs_mse_loss(op_info, device, dtype, requires_grad, **kwargs):
         for shape, kwargs in shapes_and_kwargs
     ]
 
+
+def sample_inputs_soft_margin_loss(op_info, device, dtype, requires_grad, **kwargs):
+    _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    shapes_and_kwargs = [
+        ((), None),
+        ((S,), dict(reduction="mean")),
+        ((S,), dict(reduction="sum")),
+        ((S,), dict(reduction="none")),
+        ((S, S), None),
+        ((S, S, S), None),
+    ]
+
+    return [
+        SampleInput(_make_tensor(shape), args=(_make_tensor(shape, requires_grad=False),), kwargs=kwargs)
+        for shape, kwargs in shapes_and_kwargs
+    ]
+
+
+def sample_inputs_multi_margin_loss(op_info, device, dtype, requires_grad, **kwargs):
+    _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    shapes_and_kwargs = [
+        ((S,), None),
+    ]
+
+    return [
+        SampleInput(_make_tensor(shape), args=(torch.tensor(0, device=device, requires_grad=False),), kwargs=kwargs)
+        for shape, kwargs in shapes_and_kwargs
+    ]
+
+
+def sample_inputs_multilabel_margin_loss(op_info, device, dtype, requires_grad, **kwargs):
+    _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    shapes_and_kwargs = [
+        ((S,S), None),
+    ]
+
+    return [
+        SampleInput(_make_tensor(shape), args=(torch.zeros(shape, device=device, requires_grad=False, dtype=torch.int64),), kwargs=kwargs)
+        for shape, kwargs in shapes_and_kwargs
+    ]
+
+
+def sample_inputs_multilabel_soft_margin_loss(op_info, device, dtype, requires_grad, **kwargs):
+    _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    shapes_and_kwargs = [
+        ((S,), dict(reduction="mean")),
+        ((S,), dict(reduction="sum")),
+        ((S,), dict(reduction="none")),
+        ((S, S), None),
+        ((S, S, S), None),
+    ]
+
+    return [
+        SampleInput(_make_tensor(shape), args=(_make_tensor(shape, requires_grad=False),), kwargs=kwargs)
+        for shape, kwargs in shapes_and_kwargs
+    ]
+
+
+def sample_inputs_margin_ranking_loss(op_info, device, dtype, requires_grad, **kwargs):
+    _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    shapes_and_kwargs = [
+        ((), None),
+        ((S,), dict(reduction="mean")),
+        ((S,), dict(reduction="sum")),
+        ((S,), dict(reduction="none")),
+        ((S, S), None),
+        ((S, S, S), None),
+    ]
+
+    return [
+        SampleInput(_make_tensor(shape), args=(_make_tensor(shape, requires_grad=False),
+                                               _make_tensor(shape, requires_grad=False)), kwargs=kwargs)
+        for shape, kwargs in shapes_and_kwargs
+    ]
+
+
 def sample_inputs_grid_sample(op_info, device, dtype, requires_grad, **kwargs):
     _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -11191,6 +11272,46 @@ op_db: List[OpInfo] = [
             #                                                        ~~~~~~ <--- HERE
             DecorateInfo(unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit", dtypes=(torch.float32,),),
         ),
+    ),
+    OpInfo(
+        "nn.functional.soft_margin_loss",
+        ref=_NOTHING,
+        dtypesIfCPU=floating_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+        supports_out=False,
+        sample_inputs_func=sample_inputs_soft_margin_loss,
+    ),
+    OpInfo(
+        "nn.functional.multi_margin_loss",
+        ref=_NOTHING,
+        dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+        supports_out=False,
+        supports_gradgrad=False,
+        sample_inputs_func=sample_inputs_multi_margin_loss,
+    ),
+    OpInfo(
+        "nn.functional.multilabel_margin_loss",
+        ref=_NOTHING,
+        dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+        supports_out=False,
+        supports_gradgrad=False,
+        sample_inputs_func=sample_inputs_multilabel_margin_loss,
+    ),
+    OpInfo(
+        "nn.functional.multilabel_soft_margin_loss",
+        ref=_NOTHING,
+        supports_out=False,
+        dtypesIfCUDA=floating_types_and(torch.float16),
+        sample_inputs_func=sample_inputs_multilabel_soft_margin_loss,
+    ),
+    OpInfo(
+        "nn.functional.margin_ranking_loss",
+        ref=_NOTHING,
+        dtypesIfCPU=all_types_and(torch.bfloat16),
+        dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
+        supports_out=False,
+        sample_inputs_func=sample_inputs_margin_ranking_loss,
+        supports_forward_ad=True,
     ),
     OpInfo(
         "argsort",
