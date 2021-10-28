@@ -17,6 +17,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     IS_MACOS,
     TEST_WITH_DEV_DBG_ASAN,
+    TEST_WITH_TSAN,
 )
 
 
@@ -33,7 +34,7 @@ if not (IS_WINDOWS or IS_MACOS or TEST_WITH_DEV_DBG_ASAN):
 
     class LocalTimerTest(unittest.TestCase):
         def setUp(self):
-            self.ctx = mp.get_context('spawn')
+            self.ctx = mp.get_context("spawn")
             self.mp_queue = self.ctx.Queue()
             self.max_interval = 0.01
             self.server = timer.LocalTimerServer(self.mp_queue, self.max_interval)
@@ -103,6 +104,7 @@ if not (IS_WINDOWS or IS_MACOS or TEST_WITH_DEV_DBG_ASAN):
             with timer.expires(after=timeout):
                 time.sleep(duration)
 
+        @unittest.skipIf(TEST_WITH_TSAN, "test is tsan incompatible")
         def test_timer(self):
             timeout = 0.1
             duration = 1
@@ -110,7 +112,6 @@ if not (IS_WINDOWS or IS_MACOS or TEST_WITH_DEV_DBG_ASAN):
             p.start()
             p.join()
             self.assertEqual(-signal.SIGKILL, p.exitcode)
-
 
     def _enqueue_on_interval(mp_queue, n, interval, sem):
         """
@@ -125,6 +126,7 @@ if not (IS_WINDOWS or IS_MACOS or TEST_WITH_DEV_DBG_ASAN):
 
 # timer is not supported on windows or macos
 if not (IS_WINDOWS or IS_MACOS or TEST_WITH_DEV_DBG_ASAN):
+
     class MultiprocessingRequestQueueTest(unittest.TestCase):
         def test_get(self):
             mp_queue = mp.Queue()
@@ -139,6 +141,10 @@ if not (IS_WINDOWS or IS_MACOS or TEST_WITH_DEV_DBG_ASAN):
             self.assertEqual(1, len(requests))
             self.assertIn(request, requests)
 
+        @unittest.skipIf(
+            TEST_WITH_TSAN,
+            "test incompatible with tsan",
+        )
         def test_get_size(self):
             """
             Creates a "producer" process that enqueues ``n`` elements
@@ -151,7 +157,9 @@ if not (IS_WINDOWS or IS_MACOS or TEST_WITH_DEV_DBG_ASAN):
             interval = 0.1
             sem = mp.Semaphore(0)
 
-            p = mp.Process(target=_enqueue_on_interval, args=(mp_queue, n, interval, sem))
+            p = mp.Process(
+                target=_enqueue_on_interval, args=(mp_queue, n, interval, sem)
+            )
             p.start()
 
             sem.acquire()  # blocks until the process has started to run the function
@@ -174,7 +182,9 @@ if not (IS_WINDOWS or IS_MACOS or TEST_WITH_DEV_DBG_ASAN):
             interval = 0.1
             sem = mp.Semaphore(0)
 
-            p = mp.Process(target=_enqueue_on_interval, args=(mp_queue, n, interval, sem))
+            p = mp.Process(
+                target=_enqueue_on_interval, args=(mp_queue, n, interval, sem)
+            )
             p.start()
 
             sem.acquire()  # blocks until the process has started to run the function
@@ -184,6 +194,7 @@ if not (IS_WINDOWS or IS_MACOS or TEST_WITH_DEV_DBG_ASAN):
 
 # timer is not supported on windows or macos
 if not (IS_WINDOWS or IS_MACOS or TEST_WITH_DEV_DBG_ASAN):
+
     class LocalTimerServerTest(unittest.TestCase):
         def setUp(self):
             self.mp_queue = mp.Queue()
@@ -205,7 +216,9 @@ if not (IS_WINDOWS or IS_MACOS or TEST_WITH_DEV_DBG_ASAN):
             time.sleep(wait)
             self.server.stop()
             watchdog_call_count = self.server._run_watchdog.call_count
-            self.assertGreaterEqual(watchdog_call_count, int(wait / self.max_interval) - 1)
+            self.assertGreaterEqual(
+                watchdog_call_count, int(wait / self.max_interval) - 1
+            )
             self.assertLessEqual(watchdog_call_count, int(wait / self.max_interval) + 1)
 
         def test_watchdog_empty_queue(self):

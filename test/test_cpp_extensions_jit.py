@@ -1,3 +1,5 @@
+# Owner(s): ["module: cpp-extensions"]
+
 import os
 import shutil
 import sys
