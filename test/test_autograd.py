@@ -7809,6 +7809,24 @@ class TestAutogradForwardMode(TestCase):
             # No differentiable outputs, shouldn't error
             eq = foo == bar
 
+    def test_backward_graph_destruction(self):
+        def fn():
+            a = torch.rand(10, requires_grad=True)
+
+            da = fwAD.make_dual(torch.rand_like(a), a)
+
+            # Create an object with a c++ cycle as:
+            # db -> AutogradMeta -> ForwardGrad -> db's grad
+            # db's grad -> AutogradMeta -> MulBackward
+            # MulBackward -> SavedVariable -> db
+            db = da.exp()
+
+        with fwAD.dual_level():
+            fn()
+        # This test make sure that we don't deadlock on exit of this
+        # context manager. If you do, there is something wrong with the
+        # locking of the forward ad level most likely
+
 # Generic device type autograd tests.
 class TestAutogradDeviceType(TestCase):
 
