@@ -11,6 +11,8 @@
 #include <ATen/quantized/Quantizer.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/irange.h>
+#include <torch/csrc/jit/serialization/import_source.h>
+#include <torch/csrc/jit/serialization/pickle.h>
 #include <torch/csrc/jit/tensorexpr/exceptions.h>
 #include <torch/csrc/jit/tensorexpr/external_functions_registry.h>
 
@@ -127,8 +129,8 @@ void nnc_aten_quantized_conv2d(
       x_qscale,
       x_qzero,
       at::TensorOptions(toQIntType(x_qdtype)));
-  auto convPackedParams =
-      reinterpret_cast<ConvPackedParamsBase<2>*>(buf_data[2]);
+  auto uiptr = ((uintptr_t*)buf_data[2])[0];
+  auto convPackedParams = reinterpret_cast<ConvPackedParamsBase<2>*>(uiptr);
   const double out_qscale = ((double*)extra_args)[3];
   const int64_t out_qzero = extra_args[4];
   auto r = convPackedParams->apply(qx, out_qscale, out_qzero);
@@ -157,11 +159,11 @@ void nnc_aten_quantized_conv2d_relu(
       x_qscale,
       x_qzero,
       at::TensorOptions(toQIntType(x_qdtype)));
-  auto convPackedParams =
-      reinterpret_cast<ConvPackedParamsBase<2>*>(buf_data[2]);
+  auto uiptr = ((uintptr_t*)buf_data[2])[0];
+  auto convPackedParams = reinterpret_cast<ConvPackedParamsBase<2>*>(uiptr);
   const double out_qscale = ((double*)extra_args)[3];
   const int64_t out_qzero = extra_args[4];
-  auto r = convPackedParams->apply(qx, out_qscale, out_qzero);
+  auto r = convPackedParams->apply_relu(qx, out_qscale, out_qzero);
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
 
@@ -242,7 +244,7 @@ void nnc_aten_quantized_conv2d_prepack(
   std::vector<at::Tensor> tensors =
       constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
 
-  const double w_qscale = extra_args[7];
+  const double w_qscale = ((double*)extra_args)[7];
   const int64_t w_qzero = extra_args[8];
   const c10::ScalarType w_qdtype = static_cast<c10::ScalarType>(extra_args[9]);
   auto qw = at::from_blob_quantized_per_tensor_affine(
@@ -268,10 +270,10 @@ void nnc_aten_quantized_conv2d_prepack(
       quantized_conv2d_prepack(qw, b, strides, paddings, dilations, groups);
   TORCH_INTERNAL_ASSERT(
       prepacked, buildErrorMessage("Quantized conv2d prepack failed"));
-  ConvParamsSerializationType serialized = serialize_conv<2>(prepacked);
-  static std::vector<ConvParamsSerializationType> cache;
-  cache.push_back(serialized);
-  memcpy(buf_data[0], &serialized, sizeof(serialized));
+  static std::vector<c10::intrusive_ptr<ConvPackedParamsBase<2>>> cache;
+  cache.push_back(prepacked);
+  auto uiptr = reinterpret_cast<std::uintptr_t>(cache.back().get());
+  ((uintptr_t*)buf_data[0])[0] = uiptr;
 }
 
 void nnc_aten_upsample_nearest2d(
