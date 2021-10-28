@@ -954,7 +954,7 @@ static void removeSequenceSplitConcat(Block* b) {
 // Work around limitation from ONNX that the block input cannot be used directly
 // as block output. Inserts an Identity node inside the block, and have the
 // block return the output of the Identity.
-void insertIdentityForInputUsedAsOutput(Block* b) {
+static void insertIdentityForInputUsedAsOutput(Block* b) {
   for (auto out : b->outputs()) {
     auto n = out->node();
     if (nullptr != n && n->kind() == prim::Param) {

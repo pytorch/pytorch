@@ -48,4 +48,3 @@ def prim_unchecked_cast(g, self):
         return g.op("OptionalGetElement", self)
     else:
         return self
-

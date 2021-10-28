@@ -348,7 +348,6 @@ def _decide_external_data_format(use_external_data_format, operator_export_type,
         model_file_location = str()
     return val_use_external_data_format, model_file_location
 
-
 def _decide_input_format(model, args):
     try:
         sig = inspect.signature(model.forward)
@@ -380,7 +379,6 @@ def _decide_input_format(model, args):
     except Exception as e:
         warnings.warn("Skipping _decide_input_format\n {}".format(e.args[0]))
         return args
-
 
 def _trace(func, args, operator_export_type, return_outs=False):
     # Special case for common case of passing a single Tensor
@@ -1193,6 +1191,7 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
                                 b_in.setType(inputs[i].type())
                             if i > 0 and (i + 1) < len(inputs):
                                 if not inputs[i + 1].type().isSubtypeOf(NoneType.get()):
+                                    # For optional block inputs, input type could be None. Don't propagate NoneType.
                                     b_in.setType(inputs[i + 1].type())
                         torch._C._jit_pass_onnx_block(b, new_block, operator_export_type, env,
                                                       is_sub_block)
