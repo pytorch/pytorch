@@ -132,7 +132,7 @@ TensorImpl* resize_impl_cpu_(
     bool resize_storage) {
   return resize_impl_template_<
       &maybe_resize_storage_cpu,
-      &select_storage_size_default>(self, size, stride);
+      &compute_storage_size_default>(self, size, stride);
 }
 
 const Tensor& resize_(
