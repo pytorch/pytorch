@@ -1,21 +1,25 @@
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
-
 #include <ATen/native/Cross.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace native {
+namespace at {
+namespace meta {
+
+TORCH_META_FUNC(cross)
+(const Tensor & input, const Tensor & other, const c10::optional<int64_t> dimension) {
+  MetaBase::set_output(input.sizes(), input.options());
+}
+
+} // namespace meta
+
+namespace native {
 
 DEFINE_DISPATCH(cross_stub);
 
-Tensor cross(const Tensor & input, const Tensor & other, const c10::optional<int64_t> dimension) {
-  Tensor out = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  native::cross_out(input, other, dimension, out);
-  return out;
-}
-
-Tensor & cross_out(const Tensor & input, const Tensor & other, const c10::optional<int64_t> dimension, Tensor & out) {
+TORCH_IMPL_FUNC(cross_out)
+(const Tensor& input, const Tensor& other, const c10::optional<int64_t> dimension, const Tensor& out) {
   auto device_res = input.device().type();
   TORCH_CHECK(device_res == kCPU || device_res == kCUDA, "cross only supports CPU and CUDA devices, out got: ", device_res);
   auto device1 = input.device().type();
@@ -48,7 +52,6 @@ Tensor & cross_out(const Tensor & input, const Tensor & other, const c10::option
   }
 
   cross_stub(device1, out, input, other, dim);
-  return out;
 }
 
 }} // namespace at::native

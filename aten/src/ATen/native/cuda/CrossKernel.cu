@@ -59,7 +59,7 @@ void launch_cross_kernel(const TensorIteratorBase& iter, int64_t ostride,
   });
 }
 
-void cross_impl(Tensor& result, const Tensor& x1, const Tensor& x2, int64_t dim) {
+void cross_impl(const Tensor& result, const Tensor& x1, const Tensor& x2, int64_t dim) {
   const int64_t ostride = result.stride(dim);
   const int64_t x1stride = x1.stride(dim);
   const int64_t x2stride = x2.stride(dim);
