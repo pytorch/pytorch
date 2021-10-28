@@ -61,13 +61,13 @@ void call_caffe2_op_from_c10(
   std::vector<IValue> inputs = torch::jit::pop(*stack, num_inputs);
 
   // Convert outputs to caffe2::Tensor
-  c10::SmallVector<caffe2::Tensor, 6> outputs_c2(num_outputs);
+  std::vector<caffe2::Tensor> outputs_c2(num_outputs);
   for (auto i : c10::irange(num_outputs)) {
     outputs_c2[i] = caffe2::Tensor(outputs.get(i));
   }
 
   const StreamId stream(-1);
-  auto new_outputs_c2 = (*call_op)(schema, std::move(inputs), outputs_c2, stream);
+  outputs_c2 = (*call_op)(schema, inputs, std::move(outputs_c2), stream);
 
 
   bool return_tensor_list = false;
@@ -81,12 +81,12 @@ void call_caffe2_op_from_c10(
   }
   if (return_tensor_list) {
     for (auto i : c10::irange(num_outputs)) {
-      outputs.set(i, at::Tensor(std::move(new_outputs_c2[i])));
+      outputs.set(i, at::Tensor(std::move(outputs_c2[i])));
     }
     torch::jit::push(*stack, outputs);
   } else {
     for (auto i : c10::irange(num_outputs)) {
-      torch::jit::push(*stack, at::Tensor(std::move(new_outputs_c2[i])));
+      torch::jit::push(*stack, at::Tensor(std::move(outputs_c2[i])));
     }
   }
 

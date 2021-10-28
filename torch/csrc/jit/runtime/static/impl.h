@@ -43,7 +43,7 @@ TORCH_API std::string dumpValueSet(
 // - output_aliases:
 //     values that are either outputs or contain aliases of outputs
 // - external_aliases:
-//     values that are inputs, constants, outputs, or their aliases.
+//     values that are inputs, constants, or their aliases.
 //     The output aliases that end up here are as a result of aliasDb failing to
 //     recognize them as outputs due to collection object (e.g., Tuple) aliasing
 //     inputs.
@@ -170,10 +170,6 @@ class TORCH_API StaticModule {
   using DefInfo = std::pair<int, int>;
 
  public:
-  std::vector<at::Tensor> operator()(const std::vector<at::Tensor>& inps);
-
-  // This interface only works if StaticModule was initialized
-  // with a TorchScript module, otherwise use the above interface
   c10::IValue operator()(
       const std::vector<c10::IValue>& args,
       const std::unordered_map<std::string, c10::IValue>& kwargs);
@@ -274,14 +270,11 @@ class TORCH_API StaticRuntime {
 
   C10_DISABLE_COPY_AND_ASSIGN(StaticRuntime);
 
-  std::vector<at::Tensor> operator()(const std::vector<at::Tensor>& inps);
-
-  // This interface only works if StaticModule was initialized
-  // with a TorchScript module, otherwise use the above interface
-  // IValueList should be a std::vector<IValue> (lvalue or rvalue)
-  template <class IValueList>
   c10::IValue operator()(
-      IValueList&& args,
+      const std::vector<c10::IValue>& args,
+      const std::unordered_map<std::string, c10::IValue>& kwargs);
+  c10::IValue operator()(
+      std::vector<c10::IValue>&& args,
       const std::unordered_map<std::string, c10::IValue>& kwargs);
 
   void display_nodes(
@@ -368,6 +361,11 @@ class TORCH_API StaticRuntime {
   bool isManagedOutputTensor(const IValue& ivalue);
 
  private:
+  template <typename IValueList>
+  c10::IValue run_impl(
+      IValueList&& args,
+      const std::unordered_map<std::string, c10::IValue>& kwargs);
+
   // helper method for copying input args/kwargs into inputs_
   void set_inputs(
       const std::vector<c10::IValue>& args,
@@ -463,6 +461,11 @@ class TORCH_API ProcessedNode {
 
   // Output is readwrite
   IValue& Output(size_t i) {
+    DCHECK(i < outputs_size_);
+    return outputs_[i];
+  }
+
+  const IValue& Output(size_t i) const {
     DCHECK(i < outputs_size_);
     return outputs_[i];
   }

@@ -29,7 +29,7 @@ constexpr const char* PREALLOCATED_OUTPUT_ARGNAME =
 using _CallCaffe2OpFunc = std::vector<caffe2::Tensor> (
     const c10::FunctionSchema &schema,
     c10::ArrayRef<c10::IValue> inputs,
-    c10::ArrayRef<caffe2::Tensor> outputs,
+    std::vector<caffe2::Tensor> &&outputs,
     StreamId stream);
 
 TORCH_API void call_caffe2_op_from_c10(
@@ -41,9 +41,9 @@ template <typename Caffe2Operator>
 std::vector<caffe2::Tensor> call_caffe2_operator(
     const c10::FunctionSchema &schema,
     c10::ArrayRef<c10::IValue> inputs,
-    c10::ArrayRef<caffe2::Tensor> outputs,
+    std::vector<caffe2::Tensor> &&outputs,
     StreamId stream) {
-  Caffe2Operator op(schema, inputs, outputs, stream);
+  Caffe2Operator op(schema, inputs, std::move(outputs), stream);
   op.Run(stream);
   return std::move(op).move_output_tensors();
 }
