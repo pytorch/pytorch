@@ -43,12 +43,13 @@ def torch_dtype_from_trt(dtype):
 
 
 class TRTModule(torch.nn.Module):
-    def __init__(self, engine=None, input_names=None, output_names=None):
+    def __init__(self, engine=None, input_names=None, output_names=None, cuda_graph_batch_size=-1):
         super(TRTModule, self).__init__()
         self._register_state_dict_hook(TRTModule._on_state_dict)
         self.engine = engine
         self.input_names = input_names
         self.output_names = output_names
+        self.cuda_graph_batch_size = cuda_graph_batch_size
         self.initialized = False
 
         if engine:
@@ -89,6 +90,7 @@ class TRTModule(torch.nn.Module):
         state_dict[prefix + "engine"] = bytearray(self.engine.serialize())
         state_dict[prefix + "input_names"] = self.input_names
         state_dict[prefix + "output_names"] = self.output_names
+        state_dict[prefix + "cuda_graph_batch_size"] = self.cuda_graph_batch_size
 
     def _load_from_state_dict(
         self,
