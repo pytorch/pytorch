@@ -24,20 +24,15 @@ struct TORCH_API GraphFunction : public Function {
 
   void run(Stack& stack) override;
 
-  void run(Stack&& stack) override;
-
   c10::intrusive_ptr<c10::ivalue::Future> runAsync(
       Stack& stack,
       TaskLauncher taskLauncher = at::launch) override;
-
-  IValue operator()(std::vector<IValue> stack, const Kwargs& kwargs = Kwargs())
-      override;
 
   std::shared_ptr<Graph> graph() const {
     return graph_;
   }
 
-  std::shared_ptr<Graph> optimized_graph() const override {
+  std::shared_ptr<Graph> optimized_graph() const {
     std::lock_guard<std::recursive_mutex> lock(compile_mutex);
     auto& optimized_graph = optimized_graphs_[currentSpecialization()];
     if (optimized_graph) {
@@ -50,22 +45,8 @@ struct TORCH_API GraphFunction : public Function {
     return *optimized_graph;
   }
 
-  void clear_execution_info() override {
-    std::lock_guard<std::recursive_mutex> lock(compile_mutex);
-    for (auto& graph : optimized_graphs_) {
-      graph.reset();
-    }
-    for (auto& executor : executors_) {
-      executor.reset();
-    }
-  }
-
   const c10::QualifiedName& qualname() const override {
     return name_;
-  }
-
-  const std::string& name() const override {
-    return name_.name();
   }
 
   // if this isn't yet defined, run its method_creator function
@@ -82,13 +63,6 @@ struct TORCH_API GraphFunction : public Function {
 
   const FunctionSchema& getSchema() const override;
 
-  std::string pretty_print_schema() const override {
-    AT_ASSERT(schema_);
-    std::stringstream ss;
-    ss << *schema_;
-    return ss.str();
-  }
-
   GraphExecutorState getDebugState() {
     return get_executor().getDebugState();
   }
@@ -100,7 +74,7 @@ struct TORCH_API GraphFunction : public Function {
     return true;
   }
 
-  void check_single_output() override {
+  void check_single_output() {
     TORCH_CHECK(
         graph()->outputs().size() == 1,
         "Method (but not graphs in general) require a single output. Use None/Tuple for 0 or 2+ outputs");
