@@ -6,12 +6,11 @@
 
 namespace c10 {
 
-class IValue;
+struct IValue;
 using Stack = std::vector<IValue>;
 
 class OperatorHandle;
 class KernelFunction;
-struct OperatorKernel;
 
 // This kernel implements the behavior of falling through to the next available
 // registered dispatch key.  The implementation of this function is FAST; it is
