@@ -1816,6 +1816,15 @@ void initJitScriptBindings(PyObject* module) {
         std::istringstream in(buffer);
         return _get_model_bytecode_version(in);
       });
+  m.def("_get_mobile_model_contained_types", [](const std::string& filename) {
+    return _get_mobile_model_contained_types(filename);
+  });
+  m.def(
+      "_get_mobile_model_contained_types_from_buffer",
+      [](const std::string& buffer) {
+        std::istringstream in(buffer);
+        return _get_mobile_model_contained_types(in);
+      });
   py::class_<OperatorInfo>(m, "OperatorInfo")
       .def_readonly("num_schema_args", &OperatorInfo::num_schema_args);
   m.def("_get_model_ops_and_info", [](const std::string& filename) {
@@ -1921,6 +1930,10 @@ void initJitScriptBindings(PyObject* module) {
   });
 
   m.def("_get_graph_executor_optimize", &torch::jit::getGraphExecutorOptimize);
+
+  m.def(
+      "_enable_mobile_interface_call_export",
+      &torch::jit::enableMobileInterfaceCallExport);
 
   m.def("_create_module_with_type", [](const ClassTypePtr& type) {
      return Module(get_python_cu(), type);

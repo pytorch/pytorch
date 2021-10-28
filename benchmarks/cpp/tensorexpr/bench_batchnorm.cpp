@@ -75,11 +75,11 @@ BENCHMARK_DEFINE_F(BatchNorm, ATen)(benchmark::State& state) {
 
 BENCHMARK_DEFINE_F(BatchNorm, NNC)(benchmark::State& state) {
 
-  Placeholder input("input", kFloat, {N_, C_, H_, W_});
-  Placeholder weight("weight", kFloat, {C_});
-  Placeholder bias("bias", kFloat, {C_});
-  Placeholder mean("mean", kFloat, {C_});
-  Placeholder var("var", kFloat, {C_});
+  BufHandle input("input", {N_, C_, H_, W_}, kFloat);
+  BufHandle weight("weight", {C_}, kFloat);
+  BufHandle bias("bias", {C_}, kFloat);
+  BufHandle mean("mean", {C_}, kFloat);
+  BufHandle var("var", {C_}, kFloat);
   VarHandle eps("eps", kFloat);
 
   using axis = const VarHandle&;
@@ -137,11 +137,11 @@ BENCHMARK_DEFINE_F(BatchNorm, ATenRelu)(benchmark::State& state) {
 
 BENCHMARK_DEFINE_F(BatchNorm, NNCRelu)(benchmark::State& state) {
 
-  Placeholder input("input", kFloat, {N_, C_, H_, W_});
-  Placeholder weight("weight", kFloat, {C_});
-  Placeholder bias("bias", kFloat, {C_});
-  Placeholder mean("mean", kFloat, {C_});
-  Placeholder var("var", kFloat, {C_});
+  BufHandle input("input", {N_, C_, H_, W_}, kFloat);
+  BufHandle weight("weight", {C_}, kFloat);
+  BufHandle bias("bias", {C_}, kFloat);
+  BufHandle mean("mean", {C_}, kFloat);
+  BufHandle var("var", {C_}, kFloat);
   VarHandle eps("eps", kFloat);
 
   using axis = const VarHandle&;

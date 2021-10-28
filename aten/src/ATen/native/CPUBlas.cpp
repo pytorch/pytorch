@@ -1,5 +1,9 @@
 #include <ATen/native/CPUBlas.h>
+#include <ATen/native/mkl/LinearAlgebra.h>
 #include <ATen/Config.h>
+
+#include <c10/util/SmallBuffer.h>
+#include <c10/util/C++17.h>
 
 #include <climits>
 
@@ -62,7 +66,7 @@ namespace {
 bool use_blas_gemm(
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
-    int64_t &lda, int64_t &ldb, int64_t &ldc) {
+    int64_t lda, int64_t ldb, int64_t ldc) {
   const bool transa_ = transa != TransposeType::NoTranspose;
   const bool transb_ = transb != TransposeType::NoTranspose;
   return (
@@ -250,6 +254,154 @@ void gemm(
       kCPU, kLong,
       transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
 }
+
+template <typename scalar_t>
+static void gemm_batched_mkl_impl(
+      TransposeType transa, TransposeType transb,
+      int64_t batch_size, int64_t m, int64_t n, int64_t k,
+      scalar_t alpha,
+      const scalar_t **a, int64_t lda,
+      const scalar_t **b, int64_t ldb,
+      scalar_t beta,
+      scalar_t **c, int64_t ldc) {
+  for (int64_t i = 0; i < batch_size;) {
+    int sub_batch = std::min(batch_size - i, int64_t{INT_MAX});
+    mkl_gemm_batched(transa, transb, sub_batch, m, n, k, alpha,
+                     &a[i], lda, &b[i], ldb, beta, &c[i], ldc);
+    i += sub_batch;
+  }
+}
+
+template <typename scalar_t>
+using is_blas_library_type = std::integral_constant<bool,
+    std::is_same<scalar_t, double>::value ||
+    std::is_same<scalar_t, float>::value ||
+    std::is_same<scalar_t, c10::complex<double>>::value ||
+    std::is_same<scalar_t, c10::complex<float>>::value>;
+
+template <typename scalar_t>
+void gemm_batched_generic(
+    TransposeType transa, TransposeType transb,
+    int64_t batch_size, int64_t m, int64_t n, int64_t k,
+    scalar_t alpha,
+    const scalar_t **a, int64_t lda,
+    const scalar_t **b, int64_t ldb,
+    scalar_t beta,
+    scalar_t **c, int64_t ldc) {
+  for (int64_t batch = 0; batch < batch_size; ++batch) {
+    gemm(transa, transb, m, n, k, alpha, a[batch], lda, b[batch], ldb, beta, c[batch], ldc);
+  }
+}
+
+template <typename scalar_t>
+void gemm_batched(
+    TransposeType transa, TransposeType transb,
+    int64_t batch_size, int64_t m, int64_t n, int64_t k,
+    scalar_t alpha,
+    const scalar_t **a, int64_t lda,
+    const scalar_t **b, int64_t ldb,
+    scalar_t beta,
+    scalar_t **c, int64_t ldc) {
+  if (batch_size == 1) {
+    return gemm(transa, transb, m, n, k, alpha, a[0], lda, b[0], ldb, beta, c[0], ldc);
+  }
+
+  c10::guts::if_constexpr<AT_MKL_ENABLED() && is_blas_library_type<scalar_t>::value>(
+      [&](auto _) {
+        internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
+        if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
+          gemm_batched_mkl_impl(
+              transa, transb, batch_size, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+        } else {
+          gemm_batched_generic(
+              transa, transb, batch_size, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+        }
+      },
+      [&](auto _) {
+        gemm_batched_generic(
+            transa, transb, batch_size, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+      }
+    );
+}
+
+template <typename scalar_t>
+void gemm_batched_with_stride_generic(
+    TransposeType transa, TransposeType transb,
+    int64_t batch_size, int64_t m, int64_t n, int64_t k,
+    scalar_t alpha,
+    const scalar_t *a, int64_t lda, int64_t batch_stride_a,
+    const scalar_t *b, int64_t ldb, int64_t batch_stride_b,
+    scalar_t beta,
+    scalar_t *c, int64_t ldc, int64_t batch_stride_c) {
+  for (int64_t batch = 0; batch < batch_size; ++batch) {
+    const auto a_batch = a + batch_stride_a * batch;
+    const auto b_batch = b + batch_stride_b * batch;
+    const auto c_batch = c + batch_stride_c * batch;
+    gemm(transa, transb, m, n, k, alpha, a_batch, lda, b_batch, ldb, beta, c_batch, ldc);
+  }
+}
+
+template <typename scalar_t>
+void gemm_batched_with_stride(
+    TransposeType transa, TransposeType transb,
+    int64_t batch_size, int64_t m, int64_t n, int64_t k,
+    scalar_t alpha,
+    const scalar_t *a, int64_t lda, int64_t batch_stride_a,
+    const scalar_t *b, int64_t ldb, int64_t batch_stride_b,
+    scalar_t beta,
+    scalar_t *c, int64_t ldc, int64_t batch_stride_c) {
+  if (batch_size == 1) {
+    return gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+  }
+
+  c10::guts::if_constexpr<AT_MKL_ENABLED() && is_blas_library_type<scalar_t>::value>(
+      [&](auto _) {
+        internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
+        if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
+          c10::SmallBuffer<const scalar_t*, 16> a_ptrs(batch_size);
+          c10::SmallBuffer<const scalar_t*, 16> b_ptrs(batch_size);
+          c10::SmallBuffer<scalar_t*, 16> c_ptrs(batch_size);
+
+          for (int64_t batch = 0; batch < batch_size; ++batch) {
+            a_ptrs[batch] = a + batch_stride_a * batch;
+            b_ptrs[batch] = b + batch_stride_b * batch;
+            c_ptrs[batch] = c + batch_stride_c * batch;
+          }
+          gemm_batched_mkl_impl(
+              transa, transb, batch_size, m, n, k, alpha, a_ptrs.data(), lda,
+              b_ptrs.data(), ldb, beta, c_ptrs.data(), ldc);
+        } else {
+          gemm_batched_with_stride_generic(
+              transa, transb, batch_size, m, n, k, alpha, a, lda, batch_stride_a,
+              b, ldb, batch_stride_b, beta, c, ldc, batch_stride_c);
+        }
+      },
+      [&](auto _) {
+        gemm_batched_with_stride_generic(transa, transb, batch_size, m, n, k, alpha,
+                                         a, lda, batch_stride_a, b, ldb, batch_stride_b,
+                                         beta, c, ldc, batch_stride_c);
+      });
+}
+
+#define INSTANTIATE_BATCHED_GEMM(scalar_t, DType)               \
+  template void gemm_batched(                                   \
+      TransposeType transa, TransposeType transb,               \
+      int64_t batch_size, int64_t m, int64_t n, int64_t k,      \
+      scalar_t alpha,                                           \
+      const scalar_t **a, int64_t lda,                          \
+      const scalar_t **b, int64_t ldb,                          \
+      scalar_t beta,                                            \
+      scalar_t **c, int64_t ldc);                               \
+  template void gemm_batched_with_stride(                       \
+      TransposeType transa, TransposeType transb,               \
+      int64_t batch_size, int64_t m, int64_t n, int64_t k,      \
+      scalar_t alpha,                                           \
+      const scalar_t *a, int64_t lda, int64_t batch_stride_a,   \
+      const scalar_t *b, int64_t ldb, int64_t batch_stride_b,   \
+      scalar_t beta,                                            \
+      scalar_t *c, int64_t ldc, int64_t batch_stride_c);
+
+AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(INSTANTIATE_BATCHED_GEMM)
 
 DEFINE_DISPATCH(axpy_stub);
 

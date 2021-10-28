@@ -1185,8 +1185,8 @@ bool InsertObserversHelper::valueNeedsToBeQuantized(
     Value* v,
     const QConfig& qconfig) {
   if (isBiasOfConvOrLinear(v) ||
-      !(v->type()->isSubtypeOf(TensorType::get()) ||
-        v->type()->isSubtypeOf(ListType::ofTensors())) ||
+      !(v->type()->isSubtypeOf(*TensorType::get()) ||
+        v->type()->isSubtypeOf(*ListType::ofTensors())) ||
       isEmbeddingBagNonInput(v)) {
     return false;
   }

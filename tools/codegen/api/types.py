@@ -30,9 +30,22 @@ class BaseCppType:
 
 # The set of all non-templated, valid, fully-qualified names of C++ types that are used in the codegen.
 # Templated types get their own dataclass, mainly to make namespace parsing easier.
-intT = BaseCppType('', 'int64_t')
+byteT = BaseCppType('', 'uint8_t')
+charT = BaseCppType('', 'int8_t')
+shortT = BaseCppType('', 'int16_t')
+# It would be more symmetric for this to be called intT, but it easy to mix
+# this up with JIT int (which is int64_t in C++), so we intentionally don't
+# define intT to make it obvious when you've stuffed it up
+int32T = BaseCppType('', 'int32_t')
+longT = BaseCppType('', 'int64_t')
+halfT = BaseCppType('at', 'Half')
 doubleT = BaseCppType('', 'double')
+floatT = BaseCppType('', 'float')
+complexHalfT = BaseCppType('c10', 'complex<c10::Half>')  # stuffing template param here is an abuse
+complexFloatT = BaseCppType('c10', 'complex<float>')
+complexDoubleT = BaseCppType('c10', 'complex<double>')
 boolT = BaseCppType('', 'bool')
+bfloat16T = BaseCppType('at', 'BFloat16')
 voidT = BaseCppType('', 'void')
 stringT = BaseCppType('c10', 'string_view')
 generatorT = BaseCppType('at', 'Generator')
@@ -56,7 +69,7 @@ typeAndSizeT = BaseCppType('torch::autograd::generated', 'TypeAndSize')
 tensorGeometryT = BaseCppType('at', 'TensorGeometry')
 
 BaseTypeToCppMapping: Dict[BaseTy, BaseCppType] = {
-    BaseTy.int: intT,
+    BaseTy.int: longT,
     BaseTy.float: doubleT,
     BaseTy.bool: boolT,
     BaseTy.str: stringT,

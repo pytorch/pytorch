@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <c10/util/irange.h>
 #include <torch/torch.h>
 
 #include <test/cpp/api/optim_baseline.h>
@@ -36,7 +37,7 @@ bool test_optimizer_xor(Options options) {
   while (running_loss > 0.1) {
     auto inputs = torch::empty({kBatchSize, 2});
     auto labels = torch::empty({kBatchSize});
-    for (size_t i = 0; i < kBatchSize; i++) {
+    for (const auto i : c10::irange(kBatchSize)) {
       inputs[i] = torch::randint(2, {2}, torch::kInt64);
       labels[i] = inputs[i][0].item<int64_t>() ^ inputs[i][1].item<int64_t>();
     }
@@ -112,7 +113,7 @@ void check_exact_values(
   torch::Tensor input =
       torch::tensor({0.1, 0.2, 0.3, 0.4, 0.5, 0.6}, torch::kFloat64).reshape({3, 2});
 
-  for (size_t i = 0; i < kIterations; ++i) {
+  for (const auto i : c10::irange(kIterations)) {
     optimizer.zero_grad();
     auto output = model->forward(input);
     auto loss = output.sum();
@@ -124,7 +125,7 @@ void check_exact_values(
     if (i % kSampleEvery == 0) {
       ASSERT_TRUE(
           expected_parameters.at(i / kSampleEvery).size() == parameters.size());
-      for (size_t p = 0; p < parameters.size(); ++p) {
+      for (const auto p : c10::irange(parameters.size())) {
         ASSERT_TRUE(parameters[p]->defined());
         // Always compare using double dtype, regardless of the original dtype of the tensors
         auto computed = parameters[p]->flatten().to(torch::kFloat64);
@@ -143,7 +144,8 @@ void check_exact_values(
 TEST(OptimTest, OptimizerAccessors) {
   auto options = AdagradOptions(1.0);
   std::vector<torch::Tensor> params;
-  for (size_t i = 0; i < 3; i++) {
+  for (const auto i : c10::irange(3)) {
+    (void)i; // Suppress unused variable warning
     params.push_back(torch::randn(10));
   }
   auto optimizer = Adagrad(params, options);
@@ -155,7 +157,7 @@ TEST(OptimTest, OptimizerAccessors) {
   // NOLINTNEXTLINE(modernize-use-emplace)
   params_groups.push_back(OptimizerParamGroup(params));
   auto& params_1 = params_groups[1].params();
-  for (size_t i = 0; i < params_1.size(); i++) {
+  for (const auto i : c10::irange(params_1.size())) {
     torch::equal(params[i], params_1[i]);
   }
 
@@ -225,7 +227,7 @@ TEST(OptimTest, OldInterface) {
 
     std::vector<torch::Tensor> params_;
     OLD_INTERFACE_WARNING_CHECK(params_ = optimizer.parameters());
-    for (size_t p = 0; p < size; ++p) {
+    for (const auto p : c10::irange(size)) {
       ASSERT_TRUE(params_[p].allclose(parameters[p]));
     }
   }

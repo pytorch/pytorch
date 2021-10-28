@@ -131,6 +131,8 @@ class RReLU(Module):
         - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
         - Output: :math:`(*)`, same shape as the input.
 
+    .. image:: ../scripts/activation_images/RReLU.png
+
     Examples::
 
         >>> m = nn.RReLU(0.1, 0.3)
@@ -308,6 +310,8 @@ class Hardsigmoid(Module):
         - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
         - Output: :math:`(*)`, same shape as the input.
 
+    .. image:: ../scripts/activation_images/Hardsigmoid.png
+
     Examples::
 
         >>> m = nn.Hardsigmoid()
@@ -367,6 +371,8 @@ class SiLU(Module):
         - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
         - Output: :math:`(*)`, same shape as the input.
 
+    .. image:: ../scripts/activation_images/SiLU.png
+
     Examples::
 
         >>> m = nn.SiLU()
@@ -400,6 +406,8 @@ class Mish(Module):
     Shape:
         - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
         - Output: :math:`(*)`, same shape as the input.
+
+    .. image:: ../scripts/activation_images/Mish.png
 
     Examples::
 
@@ -439,6 +447,8 @@ class Hardswish(Module):
     Shape:
         - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
         - Output: :math:`(*)`, same shape as the input.
+
+    .. image:: ../scripts/activation_images/Hardswish.png
 
     Examples::
 
