@@ -74,7 +74,7 @@ TORCH_LIBRARY(vulkan_prepack, m) {
       "vulkan_prepack::conv2d_clamp_run(Tensor X, "
       "__torch__.torch.classes.vulkan.Conv2dOpContext W_prepack) -> Tensor Y"));
   m.def(TORCH_SELECTIVE_SCHEMA(
-      "vulkan_prepack::conv2d_tranpose_clamp_prepack(Tensor W, Tensor? B, int[2] stride, "
+      "vulkan_prepack::conv2d_transpose_clamp_prepack(Tensor W, Tensor? B, int[2] stride, "
       "int[2] padding, int[2] output_padding, int[2] dilation, int groups, "
       "Scalar? output_min=None, Scalar? output_max=None) "
       "-> __torch__.torch.classes.vulkan.TransposeConv2dOpContext"));
