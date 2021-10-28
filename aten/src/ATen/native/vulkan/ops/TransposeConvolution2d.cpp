@@ -245,8 +245,8 @@ bool usable(const Tensor& input) {
 
 static inline std::vector<int64_t> get_conv_transpose_output_size(
     IntArrayRef input_size, IntArrayRef weight_size,
-    IntArrayRef padding, IntArrayRef stride,
-    IntArrayRef dilation = IntArrayRef(), IntArrayRef output_padding) {
+    IntArrayRef padding, IntArrayRef output_padding,
+    IntArrayRef stride, IntArrayRef dilation = IntArrayRef()) {
   auto dim = input_size.size();
   std::vector<int64_t> output_size(dim);
   output_size[0] = input_size[input_batch_size_dim];
@@ -300,9 +300,9 @@ TransposeConv2dOpContext TransposeConv2dOpContext::create(
     const c10::optional<Tensor>& bias,
     const IntArrayRef stride_arg,
     const IntArrayRef padding_arg,
-    const IntArrayRef output_padding_arg,
     const IntArrayRef dilation_arg,
     const int64_t groups,
+    const IntArrayRef output_padding_arg,
     const c10::optional<Scalar>& output_min,
     const c10::optional<Scalar>& output_max) {
   const auto stride = expand_param_if_needed(stride_arg, "stride", 2);
@@ -452,7 +452,7 @@ Tensor TransposeConv2dOpContext::run(const Tensor& input_arg) const {
         v_input.sizes(),
         unpacked_.filter,
         packed_.padding,
-        packed_.output_padding,
+        packed_.output_padding
         packed_.stride,
         packed_.dilation),
     input.options(),
