@@ -1822,8 +1822,6 @@ TEST(JitTracing, Basic) {
   auto graph = build_lstm();
   auto stack = createStack({input, hx, cx, w_ih, w_hh});
   auto traced = TraceGraph(graph, stack);
-  std::cerr << "input(0)->type() = " << *traced->block()->inputs().at(0)->type()
-            << std::endl;
   Tensor prof_out;
   pop(stack, prof_out);
 
