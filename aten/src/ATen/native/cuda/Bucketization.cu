@@ -3,7 +3,6 @@
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/BucketizationUtils.h>
-#include <THC/THC.h>
 #include <ATen/native/Resize.h>
 
 namespace at {
