@@ -1,6 +1,5 @@
 #include <c10/util/variant.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
-#include <ctime>
 
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
