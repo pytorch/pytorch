@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/NumericUtils.h>
+#include <ATen/native/Resize.h>
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
@@ -343,7 +344,7 @@ Tensor _histc_cuda_template(
       c10::nullopt /* pin_memory */);
   input_t minvalue = min;
   input_t maxvalue = max;
-  if (min == max && input.numel() > 0) {
+  if (min == max && self.numel() > 0) {
     minvalue = *self.min().cpu().data_ptr<input_t>();
     maxvalue = *self.max().cpu().data_ptr<input_t>();
   }
