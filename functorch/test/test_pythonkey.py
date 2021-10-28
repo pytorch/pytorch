@@ -23,7 +23,10 @@ from functools import partial, wraps
 import functorch
 from functorch import (
     grad, vjp, vmap, jacrev, grad_and_value,
-    make_fx, nnc_jit, compiled_function, compiled_module,
+    make_fx,
+)
+from functorch.compile import (
+    nnc_jit, compiled_function, compiled_module,
     partition_with_recompute_fwd_in_bwd
 )
 

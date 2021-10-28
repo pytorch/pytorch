@@ -9,19 +9,24 @@ import functools
 import textwrap
 from . import _C
 
+# Top-level APIs. Please think carefully before adding something to the
+# top-level namespace:
+# - private helper functions should go into functorch._src
+# - very experimental things should go into functorch.experimental
+# - compilation related things should go into functorch.compile
+
+# functorch transforms
 from ._src.vmap import vmap
 from ._src.eager_transforms import grad, grad_and_value, vjp, jacrev
+from ._src.python_key import make_fx
+
+# utilities. Maybe these should go in their own namespace in the future?
 from ._src.make_functional import (
     make_functional_with_buffers,
     make_functional,
     combine_state_for_ensemble,
     FunctionalModule,
 )
-from ._src.python_key import wrap_key, PythonTensor, pythonkey_trace, make_fx, nnc_jit, make_nnc
-from ._src.nnc_compile import nnc_compile, get_ops
-from ._src.eager_compilation import compiled_function, compiled_module, tvm_compile, draw_joint_graph, default_partition, partition_with_recompute_fwd_in_bwd
-from ._src.operator_authoring import pointwise_operator
-
 
 # Monkeypatching lol
 _old_cross_entropy = torch.nn.functional.cross_entropy
