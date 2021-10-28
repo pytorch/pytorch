@@ -2917,11 +2917,12 @@ def sample_inputs_adaptive_max_pool1d(op_info, device, dtype, requires_grad, **k
 
     # Ordered as (input shape, output size)
     cases = (
-    #    ((0, 8, 8), (5,)),
-    #    0 batch size doesn't work,  cannot reshape tensor of 0 elements into shape [0, 8, -1]
+        # ((0, 8, 8), (5,)),
+        # 0 batch size doesn't work,  cannot reshape tensor of 0 elements into shape [0, 8, -1]
         ((3, 8, 8), 5),
         ((3, 8, 8), 1)
     )
+
     def generator():
         for shapes, return_idx in product(cases, (True, False)):
             yield SampleInput(make_arg(shapes[0]), args=(shapes[1], return_idx))
@@ -2933,8 +2934,8 @@ def sample_inputs_adaptive_max_pool2d(op_info, device, dtype, requires_grad, **k
 
     # Ordered as (input shape, output size)
     cases = (
-    #    ((0, 8, 8, 8), (5, 7)),
-    #    0 batch size doesn't work,  cannot reshape tensor of 0 elements into shape [0, 8, -1]
+        # ((0, 8, 8, 8), (5, 7)),
+        # 0 batch size doesn't work,  cannot reshape tensor of 0 elements into shape [0, 8, -1]
         ((1, 8, 8, 8), (5, 7)),
         ((2, 8, 8, 8), (None, 7)),
         ((2, 8, 8, 8), (1, 1)),
@@ -2955,8 +2956,8 @@ def sample_inputs_adaptive_max_pool3d(op_info, device, dtype, requires_grad, **k
 
     # Ordered as (input shape, output size)
     cases = (
-    #    ((0, 8, 8, 8, 8), (5, 7, 4)),
-    #    0 batch size doesn't work,  cannot reshape tensor of 0 elements into shape [0, 8, -1]
+        # ((0, 8, 8, 8, 8), (5, 7, 4)),
+        # 0 batch size doesn't work,  cannot reshape tensor of 0 elements into shape [0, 8, -1]
         ((1, 8, 4, 3, 7), (None, None, None)),
         ((1, 8, 4, 3, 7), (1, 1, 1)),
         ((3, 3, 8, 8, 6), (5, 7, None)),
