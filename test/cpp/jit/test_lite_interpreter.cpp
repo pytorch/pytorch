@@ -1377,32 +1377,26 @@ TEST(LiteInterpreterTest, OperatorCacheDifferentiatesDefaultArgs) {
 }
 
 TEST(LiteInterpreterTest, Upgrader) {
-  // std::vector<IValue> operators{
-  //     to_tuple({"aten::add", "Tensor", 3}),
-  // };
-  // Module m = load(
-  //     "/data/users/chenlai/fbsource/fbcode/caffe2/test/jit/fixtures/test_versioned_div_tensor_v3.pt");
-  mobile::Module m_module =
-      _load_for_mobile("/data/users/chenlai/data/prod_models/old_op.ptl");
+  std::string filePath(__FILE__);
+  auto test_model_file = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file.append("upgrader_models/test_div_tensor_v2.ptl");
+  mobile::Module m_module = _load_for_mobile(test_model_file);
   std::vector<IValue> inputs = {
-      IValue(torch::ones({1})), IValue(torch::ones({1}))};
-  m_module.forward(inputs);
-
-  TORCH_CHECK(false);
+      IValue(6 * torch::ones({1})), IValue(3 * torch::ones({1}))};
+  auto actual_output = m_module.forward(inputs);
+  auto expect_output = 2.0 * torch::ones({1});
+  auto actual_output_list = actual_output.toTuple()->elements();
+  ASSERT_TRUE(actual_output_list[0].toTensor().equal(expect_output));
 }
 
 TEST(LiteInterpreterTest, JitUpgrader) {
-  // std::vector<IValue> operators{
-  //     to_tuple({"aten::add", "Tensor", 3}),
-  // };
-  // Module m = load(
-  //     "/data/users/chenlai/fbsource/fbcode/caffe2/test/jit/fixtures/test_versioned_div_tensor_v3.pt");
   Module m = load("/data/users/chenlai/data/prod_models/old_op.ptl");
   std::vector<IValue> inputs = {
-      IValue(torch::ones({1})), IValue(torch::ones({1}))};
-  m.forward(inputs);
-
-  TORCH_CHECK(false);
+      IValue(6 * torch::ones({1})), IValue(3 * torch::ones({1}))};
+  auto actual_output = m.forward(inputs);
+  auto expect_output = 2.0 * torch::ones({1});
+  auto actual_output_list = actual_output.toTuple()->elements();
+  ASSERT_TRUE(actual_output_list[0].toTensor().equal(expect_output));
 }
 
 TEST(RunTimeTest, UpgraderBytecode) {
@@ -1434,9 +1428,7 @@ TEST(RunTimeTest, UpgraderBytecode) {
       to_tuple({"aten::div", "Tensor", 2}),
       to_tuple({"aten::div", "Tensor_mode", 3}),
   };
-  std::vector<IValue> constants{
-      to_tuple({"trunc", true}),
-  };
+  std::vector<IValue> constants{IValue("trunc"), IValue(true)};
   int64_t model_version = caffe2::serialize::kProducedBytecodeVersion;
   // 2. Parse the function
   std::string function_name("test_function");

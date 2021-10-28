@@ -69,7 +69,8 @@ const std::vector<std::pair<std::string, c10::IValue>> upgraders = {
          }),
          //  constants
          to_tuple_2(std::vector<c10::IValue>{
-             to_tuple_2({"trunc", true}),
+             c10::IValue("trunc"),
+             c10::IValue(true),
          }),
          //  types
          to_tuple_2(std::vector<c10::IValue>{
