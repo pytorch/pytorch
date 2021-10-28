@@ -14,8 +14,8 @@
 #include <c10/util/irange.h>
 #include <torch/custom_class.h>
 
-torch::class_<LinearPackedParamsBase> register_linear_params();
-torch::class_<EmbeddingPackedParamsBase> register_embedding_params();
+int register_linear_params();
+int register_embedding_params();
 
 #ifdef USE_FBGEMM
 
@@ -406,11 +406,11 @@ TORCH_API torch::class_<ConvPackedParamsBase<2>> register_conv_params<2>();
 template
 TORCH_API torch::class_<ConvPackedParamsBase<3>> register_conv_params<3>();
 
-torch::class_<LinearPackedParamsBase> register_linear_params() {
+int register_linear_params() {
   using SerializationType = std::tuple<at::Tensor, c10::optional<at::Tensor>>;
   static auto register_linear_params =
-      torch::class_<LinearPackedParamsBase>(
-          "quantized", "LinearPackedParamsBase")
+      torch::selective_class_<LinearPackedParamsBase>(
+          "quantized", TORCH_SELECTIVE_CLASS("LinearPackedParamsBase"))
           .def_pickle(
               [](const c10::intrusive_ptr<LinearPackedParamsBase>& params)
                   -> SerializationType { // __getstate__
@@ -464,11 +464,11 @@ torch::class_<LinearPackedParamsBase> register_linear_params() {
                    return bias;
                  })
               .def("unpack", &LinearPackedParamsBase::unpack);
-  return register_linear_params;
+  return 0;
 }
 
 
-torch::class_<EmbeddingPackedParamsBase> register_embedding_params() {
+int register_embedding_params() {
   // Type for __getstate__/__setstate__ serialization
   //
   // Element 0 is the version of the PackedParam structure
@@ -483,8 +483,8 @@ torch::class_<EmbeddingPackedParamsBase> register_embedding_params() {
     std::vector<int64_t>>;
 
   static auto register_embedding_params =
-    torch::class_<EmbeddingPackedParamsBase>(
-      "quantized", "EmbeddingPackedParamsBase")
+    torch::selective_class_<EmbeddingPackedParamsBase>(
+      "quantized", TORCH_SELECTIVE_CLASS("EmbeddingPackedParamsBase"))
       .def_pickle(
           [](const c10::intrusive_ptr<EmbeddingPackedParamsBase>& params)
               -> EmbeddingParamsSerializationType { // __getstate__ call
@@ -520,7 +520,7 @@ torch::class_<EmbeddingPackedParamsBase> register_embedding_params() {
       .def("bit_rate", &EmbeddingPackedParamsBase::bit_rate)
       .def("version", &EmbeddingPackedParamsBase::version);
 
-  return register_embedding_params;
+  return 0;
 }
 
 namespace {

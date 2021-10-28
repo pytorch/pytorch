@@ -11,7 +11,7 @@
 #include <torch/custom_class.h>
 #include <torch/library.h>
 
-torch::class_<LinearPackedParamsBase> register_linear_params();
+int register_linear_params();
 
 namespace at { namespace native {
 
