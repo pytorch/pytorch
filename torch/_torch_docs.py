@@ -185,12 +185,12 @@ acosh(input, *, out=None) -> Tensor
 
 Returns a new tensor with the inverse hyperbolic cosine of the elements of :attr:`input`.
 
+.. math::
+    \text{out}_{i} = \cosh^{-1}(\text{input}_{i})
+
 Note:
     The domain of the inverse hyperbolic cosine is `[1, inf)` and values outside this range
     will be mapped to ``NaN``, except for `+ INF` for which the output is mapped to `+ INF`.
-
-.. math::
-    \text{out}_{i} = \cosh^{-1}(\text{input}_{i})
 """ + r"""
 Args:
     {input}
