@@ -16,7 +16,7 @@ using internal::convolution2d::createConv2dClampPrePackOpContext;
 using internal::convolution2d::createConv2dTransposeClampPrePackOpContext;
 
 TORCH_LIBRARY(xnnpack, m) {
-  m.class_<LinearOpContext>("LinearOpContext")
+  m.class_<LinearOpContext>(TORCH_SELECTIVE_CLASS("LinearOpContext"))
     .def_pickle(
         [](const c10::intrusive_ptr<LinearOpContext>& op_context)
             -> SerializationTypeLinearPrePack { // __getstate__
@@ -33,7 +33,7 @@ TORCH_LIBRARY(xnnpack, m) {
               std::move(std::get<3>(state)));
         });
 
-  m.class_<Conv2dOpContext>("Conv2dOpContext")
+  m.class_<Conv2dOpContext>(TORCH_SELECTIVE_CLASS("Conv2dOpContext"))
     .def_pickle(
         [](const c10::intrusive_ptr<Conv2dOpContext>& op_context)
             -> SerializationTypeConv2dPrePack { // __getstate__
@@ -55,7 +55,7 @@ TORCH_LIBRARY(xnnpack, m) {
               std::move(std::get<7>(state)));
         });
 
-  m.class_<TransposeConv2dOpContext>("TransposeConv2dOpContext")
+  m.class_<TransposeConv2dOpContext>(TORCH_SELECTIVE_CLASS("TransposeConv2dOpContext"))
     .def_pickle(
         [](const c10::intrusive_ptr<TransposeConv2dOpContext>& op_context)
             -> SerializationTypeTransposeConv2dPrePack { // __getstate__
