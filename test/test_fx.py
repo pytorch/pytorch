@@ -1908,6 +1908,16 @@ class TestFX(JitTestCase):
         input = torch.randn(33, 44)
         self.assertEqual(gm(input), torch.relu(torch.neg(input)))
 
+    def test_prepend_self(self):
+        graph : torch.fx.Graph = torch.fx.Graph()
+        x : torch.fx.Node = graph.create_node('placeholder', 'x')
+        b : torch.fx.Node = graph.create_node('call_function', target=torch.relu, args=(x,))
+        output : torch.fx.Node = graph.output(b)
+
+        b.prepend(b)
+        x.append(b)
+        self.assertEqual(len(graph.nodes), 3)
+
     def test_erase_node_error(self):
         st = SimpleTest()
         traced = symbolic_trace(st)
@@ -3188,6 +3198,7 @@ class TestOperatorSignatures(JitTestCase):
                            'expand_as',
                            'fill_',
                            'hstack',
+                           'histogramdd',
                            'igamma',
                            'igammac',
                            'linalg.multi_dot',
@@ -3259,7 +3270,7 @@ class TestOperatorSignatures(JitTestCase):
                     raise RuntimeError(f'Did not match any schemas for op {op.name}!')
 
         except Exception as e:
-            assert op.name in known_no_schema or "nn.functional" in op.name or "_masked." in op.name
+            assert op.name in known_no_schema or "nn.functional" in op.name or "_masked." in op.name, op.name
 
 
 class TestFXAPIBackwardCompatibility(JitTestCase):

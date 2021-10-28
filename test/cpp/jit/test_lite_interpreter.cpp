@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/mobile/backport.h>
 #include <torch/csrc/jit/mobile/backport_manager.h>
 #include <torch/csrc/jit/mobile/import.h>
+#include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/model_compatibility.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/mobile/parse_bytecode.h>
@@ -361,7 +362,7 @@ struct ClassNamespaceValue : public SugaredValue {
 
   std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
-      Function& m,
+      GraphFunction& m,
       const std::string& name) override {
     const auto fullName = c10::QualifiedName(basename_, name);
 
@@ -386,7 +387,7 @@ struct ClassNamespaceValue : public SugaredValue {
 struct TestModuleResolver : public Resolver {
   std::shared_ptr<SugaredValue> resolveValue(
       const std::string& name,
-      Function& m,
+      GraphFunction& m,
       const SourceRange& loc) override {
     if (name == "torch") {
       return std::make_shared<BuiltinModule>("aten");
@@ -646,7 +647,7 @@ TEST(LiteInterpreterTest, isCompatibleSuccess) {
   std::unordered_map<std::string, OperatorInfo> model_ops;
   model_ops["aten::add.Scalar"] = OperatorInfo{2};
 
-  std::unordered_set<std::string> types = {"List", "int"};
+  std::unordered_set<std::string> types = {"List", "int", "NamedTuple"};
   auto model_info = ModelCompatibilityInfo{
       caffe2::serialize::kMaxSupportedBytecodeVersion, model_ops, types};
 
@@ -688,7 +689,7 @@ TEST(LiteInterpreterTest, isCompatibleFail) {
 
   // test trivial failure due to type
   runtime_info = RuntimeCompatibilityInfo::get();
-  std::unordered_set<std::string> types = {"List", "int", "NamedTuple"};
+  std::unordered_set<std::string> types = {"List", "int", "Sequence"};
 
   model_info = ModelCompatibilityInfo{
       caffe2::serialize::kMaxSupportedBytecodeVersion, model_ops, types};
@@ -1369,6 +1370,92 @@ TEST(LiteInterpreterTest, OperatorCacheDifferentiatesDefaultArgs) {
   testLiteModuleCompareResultTensors(m, inputs, "forward");
   testLiteModuleCompareResultTensors(m, inputs, "forward2");
   testLiteModuleCompareResultTensors(m, inputs, "forward3");
+}
+
+TEST(RunTimeTest, RuntimeCall) {
+  //     def call(x):
+  //         return x + x
+  //
+  //     def forward(a):
+  //         x = a + call(a)
+  //         y = a + call(x)
+  //         return y
+
+  std::vector<IValue> instructionsCall{
+      to_tuple({"STORE", 1, 0}),
+      to_tuple({"LOAD", 1, 0}),
+      to_tuple({"MOVE", 1, 0}),
+      to_tuple({"LOADC", 0, 0}),
+      to_tuple({"OP", 0, 0}),
+      to_tuple({"RET", 0, 0}),
+  };
+  std::vector<IValue> instructionsFoo{
+      to_tuple({"STORE", 1, 0}),
+      to_tuple({"LOAD", 1, 0}),
+      to_tuple({"LOAD", 1, 0}),
+      to_tuple({"MOVE", 1, 0}),
+      to_tuple({"CALL", 0, 0}),
+      to_tuple({"LOADC", 0, 0}),
+      to_tuple({"OP", 0, 0}),
+      to_tuple({"CALL", 0, 0}),
+      to_tuple({"LOADC", 0, 0}),
+      to_tuple({"OP", 0, 0}),
+      to_tuple({"RET", 0, 0}),
+  };
+  std::vector<IValue> operatorsFoo{
+      to_tuple({"aten::add", "Tensor", 3}),
+  };
+  std::vector<IValue> constantsFoo{
+      1,
+  };
+  std::vector<IValue> operatorsCall{
+      to_tuple({"aten::add", "Tensor", 3}),
+  };
+  std::vector<IValue> constantsCall{
+      1,
+  };
+  int64_t model_version = caffe2::serialize::kProducedBytecodeVersion;
+
+  auto foo = std::make_unique<mobile::Function>(c10::QualifiedName("foo"));
+  c10::ivalue::TupleElements debug_handles_m_tuple;
+  parseInstructions(
+      "foo",
+      std::move(*c10::ivalue::Tuple::create(instructionsFoo)).elements(),
+      debug_handles_m_tuple,
+      foo.get());
+  parseOperators(
+      std::move(*c10::ivalue::Tuple::create(operatorsFoo)).elements(),
+      model_version,
+      1,
+      foo.get());
+  parseConstants(
+      std::move(*c10::ivalue::Tuple::create(constantsFoo)).elements(),
+      foo.get());
+  const size_t rsize = 5;
+  parseRegisterSize(rsize, foo.get());
+
+  auto call = std::make_unique<mobile::Function>(c10::QualifiedName("call"));
+  parseInstructions(
+      "call",
+      std::move(*c10::ivalue::Tuple::create(instructionsCall)).elements(),
+      debug_handles_m_tuple,
+      call.get());
+  parseOperators(
+      std::move(*c10::ivalue::Tuple::create(operatorsCall)).elements(),
+      model_version,
+      1,
+      call.get());
+  parseConstants(
+      std::move(*c10::ivalue::Tuple::create(constantsCall)).elements(),
+      call.get());
+  parseRegisterSize(rsize, call.get());
+
+  foo->append_function(*call);
+
+  std::vector<IValue> inputs{at::tensor(1)};
+  foo->run(inputs);
+  auto output = inputs[0];
+  ASSERT_EQ(output, at::tensor(7));
 }
 
 } // namespace jit
