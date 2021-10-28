@@ -3034,7 +3034,7 @@ def sample_inputs_group_norm(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     # Ordered as input shape, normalized_shape and a kwarg dict for eps
-    cases: Tuple[Tuple[int], Tuple[int], dict] = (  # type: ignore[assignment]
+    cases: Tuple[Tuple[int], Tuple[int], float] = (  # type: ignore[assignment]
         ((1, 6, 3), 2, 0.5),
         ((2, 6, 3), 2, -0.5),
         ((1, 2), 1, None),
@@ -3157,24 +3157,26 @@ def sample_inputs_local_response_norm(opinfo, device, dtype, requires_grad, **kw
 
     # Ordered as input shape, normalized_shape and a kwarg dict for eps
     cases: Tuple[Tuple[int], Tuple[int], dict] = (  # type: ignore[assignment]
-        ((1, 6, 3), 2, 0.5),
-        ((2, 6, 3), 2, -0.5),
-        ((1, 2), 1, None),
-        ((0, 2), 1, None),
+        ((1, 6, 3), 2, {'alpha': 3e-05, 'beta': 0.5, 'k': 1.25}),
+        ((1, 6, 3), 2, {'beta': 0.5, 'k': 1.25}),
+        ((1, 6, 3), 2, {'alpha': 3e-05, 'k': 1.25}),
+        ((1, 6, 3), 2, {'alpha': 3e-05, 'beta': 0.5}),
+        ((1, 6, 3), 2, {'alpha': 3e-05}),
+        ((1, 6, 3), 2, {'beta': 0.5}),
+        ((1, 6, 3), 2, {'k': 1.25}),
+        ((1, 6, 3), 2, {}),
+        ((2, 6, 3), 2, {'alpha': 3e-05, 'beta': 0.5, 'k': 1.25}),
+        ((1, 1, 2), 1, {'alpha': 3e-05, 'beta': 0.5, 'k': 1.25}),
+        ((0, 1, 2), 1, {'alpha': 3e-05, 'beta': 0.5, 'k': 1.25}),
     )
 
     def generator():
-        for input_shape, num_groups, eps in cases:
-            # Shape of weight and bias should be the same as normalized_shape
-            weight = make_arg(input_shape[1])
-            bias = make_arg(input_shape[1])
+        for input_shape, size, kwargs in cases:
             yield SampleInput(
                 make_arg(input_shape),
-                args=(num_groups,),
-                kwargs={'weight': weight, 'bias': bias} if eps is None else {'weight': weight, 'bias': bias, 'eps': eps}
+                args=(size,),
+                kwargs=kwargs
             )
-        # Without any optional args
-        yield SampleInput(make_arg((1, 2)), args=(1,))
 
     return list(generator())
 
@@ -8651,7 +8653,11 @@ op_db: List[OpInfo] = [
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
-           decorators=[],
+           decorators=[
+               # RuntimeError: Cannot insert a Tensor that requires grad as a constant.
+               # Consider making it a parameter or input, or detaching the gradient
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,))
+           ],
            sample_inputs_func=sample_inputs_instance_norm,),
     OpInfo('nn.functional.layer_norm',
            aten_name='layer_norm',
@@ -8668,11 +8674,15 @@ op_db: List[OpInfo] = [
            ],
            sample_inputs_func=sample_inputs_layer_norm,),
     OpInfo('nn.functional.local_response_norm',
-           dtypes=floating_types(),
+           dtypes=floating_types_and(torch.int64),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
-           decorators=[],
-           sample_inputs_func=sample_inputs_instance_norm,),
+           decorators=[
+               # RuntimeError: falseINTERNAL ASSERT FAILED at
+               # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":185, please report a bug to PyTorch.
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,))
+           ],
+           sample_inputs_func=sample_inputs_local_response_norm,),
     OpInfo('nn.functional.pad',
            variant_test_name='constant',
            aten_name='constant_pad_nd',
