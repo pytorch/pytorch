@@ -109,6 +109,17 @@ class TORCH_API LoopNest {
 
   StmtPtr simplify();
 
+  // Sanitize variables and buffer names.
+  // The pass assigns predefined names for loop index variables
+  // (i,j,k,l,m,n,o,p,i1,j1,k1,...) and ensures these names are not conflicting
+  // anywhere. It also removes duplicates from other Buf nad Var names as well
+  // as replaces illegal characters in them with underscores.
+  //
+  // Note: since it's currently technically possible to use the same variable
+  // as index in two different loops, this transformation finds such cases and
+  // introduces new variables to avoid duplication.
+  static StmtPtr sanitizeNames(StmtPtr s);
+
   bool computeInline(StmtPtr s);
   bool computeInline(BufPtr b);
   void inlineIntermediateBufs(bool allow_duplicated_work);
@@ -589,6 +600,9 @@ struct BufLoadOrStoreUse {
  */
 std::unordered_map<BufPtr, std::vector<BufLoadOrStoreUse>> findLoadOrStoreUses(
     StmtPtr s);
+
+// replaces all invalid characters with underscore
+TORCH_API std::string sanitizeName(const std::string& input_name);
 
 } // namespace tensorexpr
 } // namespace jit

@@ -178,6 +178,34 @@ bool OptimizeCat(const std::shared_ptr<Graph>& graph) {
   return false;
 }
 
+void annotateInputShapes(
+    const std::shared_ptr<Graph>& graph,
+    const std::vector<c10::optional<at::Tensor>>& example_inputs) {
+  TORCH_INTERNAL_ASSERT(
+      graph->inputs().size() == example_inputs.size(),
+      buildErrorMessage("Given inputs do not match the fuser graph inputs."));
+  for (size_t idx = 0; idx < example_inputs.size(); idx++) {
+    if (auto t = example_inputs[idx]) {
+      auto concrete_tensor_type = tensorTypeInCurrentExecutionContext(*t);
+      graph->inputs().at(idx)->setType(concrete_tensor_type);
+    }
+  }
+}
+
+std::shared_ptr<Graph> removeUnusedSelfArgument(
+    const std::shared_ptr<Graph>& graph) {
+  if (graph->inputs().size() == 0) {
+    return graph;
+  }
+  jit::Value* self_argument = graph->inputs().at(0);
+  if (self_argument->uses().size() != 0 ||
+      !self_argument->type()->is_module()) {
+    return graph;
+  }
+  graph->eraseInput(0);
+  return graph;
+}
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch

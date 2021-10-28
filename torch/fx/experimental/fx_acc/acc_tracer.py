@@ -1,4 +1,3 @@
-# type: ignore[]
 import ast
 import builtins
 import copy
@@ -111,7 +110,7 @@ class Acc_Rewriter(ast.NodeTransformer):
             exc_msg = _reuse_loc(ast.Constant(None))
         elif isinstance(node_for_exc, ast.Call):
             # E.g. `raise AssertionError("error message")`
-            name_node_of_exc = node_for_exc.func
+            name_node_of_exc = node_for_exc.func  # type: ignore[assignment]
             if not isinstance(name_node_of_exc, ast.Name):
                 return if_node
             # Most assertions just take a single string arg, but some may not; skip
@@ -251,7 +250,7 @@ def _rewrite(mod_to_rewrite: nn.Module, allow_list: Optional[Set] = None) -> nn.
     # functions that are attrs of this moodule. Return the new, rewritten module
     # hierarchy.
     def rewrite_module(m: nn.Module):
-        base_class = type(m)
+        base_class : Type[nn.Module] = type(m)
 
         # Keep track of all the ConditionalExceptionWrappers that the
         # Acc_Rewriter calls into in this module so we can add them in init
@@ -259,7 +258,7 @@ def _rewrite(mod_to_rewrite: nn.Module, allow_list: Optional[Set] = None) -> nn.
         all_added_wrappers: Set[Type[Exception]] = set()
 
         # Note: Make this a subclass of our base class.
-        class RewrittenModule(base_class):
+        class RewrittenModule(base_class):  # type: ignore[valid-type, misc]
             # Keep track of the base_class so that symbolic tracing can
             # determine what kind of module this originally was later on.
             _base_class_origin = base_class
@@ -279,6 +278,7 @@ def _rewrite(mod_to_rewrite: nn.Module, allow_list: Optional[Set] = None) -> nn.
                     continue
 
                 # Only rewrite those Modules explicitly in the allow_list.
+                assert allow_list is not None
                 if base_class not in allow_list:
                     vars()[method_name] = method
                 else:

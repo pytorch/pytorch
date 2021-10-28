@@ -58,6 +58,13 @@ bool testHasInplaceOp(const std::string& jit_script) {
   return HasInplaceOp(graph, alias_db);
 }
 
+bool testModuleHasOp(const std::string& jit_script, const char* op_name) {
+  script::Module module("module");
+  module.define(jit_script);
+
+  return forwardHasOp(module, op_name);
+}
+
 Node* getNodeWithKind(const StaticModule& smodule, const std::string& kind) {
   for (auto& pnode : smodule.nodes()) {
     if (std::string(pnode.node()->kind().toQualString()) == kind) {
@@ -67,6 +74,10 @@ Node* getNodeWithKind(const StaticModule& smodule, const std::string& kind) {
   return nullptr;
 }
 
+bool hasNodeWithKind(const StaticModule& smodule, const std::string& kind) {
+  return getNodeWithKind(smodule, kind) != nullptr;
+}
+
 } // namespace
 
 TEST(StaticRuntime, InPlace) {
@@ -74,6 +85,13 @@ TEST(StaticRuntime, InPlace) {
   EXPECT_TRUE(testHasInplaceOp(reshape_inplace_script_1));
   EXPECT_TRUE(testHasInplaceOp(sigmoid_inplace_script));
   EXPECT_FALSE(testHasInplaceOp(sigmoid_out_script));
+}
+
+TEST(StaticRuntime, ModuleHasOp) {
+  EXPECT_TRUE(testModuleHasOp(reshape_inplace_script, "aten::sigmoid_"));
+  EXPECT_TRUE(testModuleHasOp(reshape_inplace_script_1, "aten::reshape"));
+  EXPECT_TRUE(testModuleHasOp(sigmoid_inplace_script, "aten::clone"));
+  EXPECT_FALSE(testModuleHasOp(reshape_inplace_script_1, "aten::add_"));
 }
 
 TEST(StaticRuntime, CanEnableStaticRuntime) {
@@ -141,7 +159,7 @@ TEST(StaticRuntime, Sigmoid) {
 
 TEST(StaticRuntime, Clone) {
   auto a = at::randn({2, 3});
-  auto b = at::empty_strided({3, 2}, {1, 3});
+  auto b = at::randn({3, 2}).as_strided({3, 2}, {1, 3});
   auto c = at::randn({1, 2, 3, 4});
   auto d = at::randn({1, 0, 3, 4});
   std::vector<IValue> args_0{b, c10::MemoryFormat::Contiguous};
@@ -208,6 +226,29 @@ TEST(StaticRuntime, EmbeddingBag) {
   testStaticRuntime(embedding_bag_sum_last_offset, args);
   testStaticRuntime(embedding_bag_mean_last_offset, args);
   testStaticRuntime(embedding_bag_max_last_offset, args);
+}
+
+TEST(StaticRuntime, EmbeddingBagWithManagedOutput) {
+  const std::string embedding_bag_managed_output = R"JIT(
+    def forward(self, a: Tensor, b: Tensor, c: Tensor):
+        # The outputs of embedding_bag become an intermediate tensors
+        # since they are not directly returned from the graph.
+        x, y, z, _ = torch.embedding_bag(a, b, c)
+        return x + x
+  )JIT";
+
+  at::Tensor weight = torch::randn({3, 12}, at::ScalarType::Float);
+  at::Tensor input = torch::tensor({0, 1, 0, 2});
+  at::Tensor offset = torch::tensor({0, 2, 4});
+  std::vector<IValue> args{weight, input, offset};
+
+  at::Tensor weight2 = torch::randn({4, 13}, at::ScalarType::Float);
+  at::Tensor input2 = torch::tensor({0, 1, 0, 2});
+  at::Tensor offset2 = torch::tensor({0, 2, 4});
+  std::vector<IValue> args2{weight2, input2, offset2};
+
+  testStaticRuntime(embedding_bag_managed_output, args);
+  testStaticRuntime(embedding_bag_managed_output, args, args2);
 }
 
 TEST(StaticRuntime, LayerNorm) {
@@ -583,29 +624,40 @@ TEST(StaticRuntime, IndividualOps_to) {
     std::vector<IValue> args0{a, b, c, d, e};
     std::vector<IValue> args1{a, b, c, d};
     std::vector<IValue> args2{a, other, c, d, e};
+    std::vector<IValue> args3{a, c10::nullopt, c, d};
 
-    testStaticRuntime(to_script_0, args0); // to.dtype
-    testStaticRuntime(to_script_1, args0); // to.dtype, strided
-    testStaticRuntime(to_script_2, args1); // to.prim_dtype
-    testStaticRuntime(to_script_3, args2); // to.other
-    testStaticRuntime(to_script_4, {a}); // alias
+    testStaticRuntime(to_script_dtype, args0);
+    testStaticRuntime(to_script_dtype_strided, args0);
+    testStaticRuntime(to_script_prim_dtype, args1);
+    if (!d) {
+      testStaticRuntime(to_script_prim_dtype, args3);
+    }
+    testStaticRuntime(to_script_other, args2);
+    testStaticRuntime(to_script_alias, {a});
 
     // dynamic shapes
-    testStaticRuntime(to_script_0, args0, {a2, b, c, d, e}); // to.dtype
-    testStaticRuntime(to_script_1, args0, {a2, b, c, d, e}); // to.dtype
-    testStaticRuntime(to_script_2, args1, {a2, b, c, d}); // to.prim_dtype
-    testStaticRuntime(to_script_3, args2, {a2, a2_other, c, d, e}); // to.other
-    testStaticRuntime(to_script_4, {a}, {a2});
+    testStaticRuntime(to_script_dtype, args0, {a2, b, c, d, e});
+    testStaticRuntime(to_script_dtype_strided, args0, {a2, b, c, d, e});
+    testStaticRuntime(to_script_prim_dtype, args1, {a2, b, c, d});
+    if (!d) {
+      testStaticRuntime(to_script_prim_dtype, args3, {a2, c10::nullopt, c, d});
+    }
+    testStaticRuntime(to_script_other, args2, {a2, a2_other, c, d, e});
+    testStaticRuntime(to_script_alias, {a}, {a2});
   };
-  // float->float, NCHW->NHWC
-  test_to(at::ScalarType::Float, true, true, c10::MemoryFormat::ChannelsLast);
-  // float->half
-  test_to(at::ScalarType::Half, true, false, c10::MemoryFormat::Preserve);
-  // float->float
-  test_to(at::ScalarType::Float, false, false, c10::MemoryFormat::Contiguous);
-  // TODO: check if fbgemm is enabled properly in this case
-  // half->float, NCHW->NHWC
-  test_to(at::ScalarType::Half, false, true, c10::MemoryFormat::ChannelsLast);
+  for (const bool non_blocking : {false, true}) {
+    for (const bool copy : {false, true}) {
+      // float->float, NCHW->NHWC
+      test_to(at::ScalarType::Float, non_blocking, copy, c10::MemoryFormat::ChannelsLast);
+      // float->half
+      test_to(at::ScalarType::Half, non_blocking, copy, c10::MemoryFormat::Preserve);
+      // float->float
+      test_to(at::ScalarType::Float, non_blocking, copy, c10::MemoryFormat::Contiguous);
+      // TODO: check if fbgemm is enabled properly in this case
+      // half->float, NCHW->NHWC
+      test_to(at::ScalarType::Half, non_blocking, copy, c10::MemoryFormat::ChannelsLast);
+    }
+  }
 }
 
 TEST(StaticRuntime, IndividualOps_Detach) {
@@ -620,10 +672,10 @@ TEST(StaticRuntime, IndividualOps_Detach) {
 }
 
 TEST(StaticRuntime, IndividualOps_ExpandAs) {
-  auto a = at::randn({3,1});
-  auto b = at::randn({3,2});
-  auto c = at::randn({4,1});
-  auto d = at::randn({4,2});
+  auto a = at::randn({3, 1});
+  auto b = at::randn({3, 2});
+  auto c = at::randn({4, 1});
+  auto d = at::randn({4, 2});
   std::vector<IValue> args{a, b};
   std::vector<IValue> args2{c, d};
   testStaticRuntime(expand_as_script, args);
@@ -703,9 +755,9 @@ TEST(StaticRuntime, LongModel) {
   at::Tensor output_1 = mod.forward(input_ivalues).toTensor();
 
   // run static runtime
-  std::vector<at::Tensor> input_tensors({a, b, c});
+  std::vector<c10::IValue> input_tensors({a, b, c});
   torch::jit::StaticModule smod(mod);
-  at::Tensor output_2 = smod(input_tensors)[0];
+  at::Tensor output_2 = smod(input_tensors, {}).toTensor();
   smod.runtime().check_for_memory_leak();
   EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
 }
@@ -721,9 +773,9 @@ TEST(StaticRuntime, TrivialModel) {
   at::Tensor output_1 = mod.forward(input_ivalues).toTensor();
 
   // run static runtime
-  std::vector<at::Tensor> input_tensors({a, b, c});
+  std::vector<c10::IValue> input_tensors({a, b, c});
   torch::jit::StaticModule smod(mod);
-  at::Tensor output_2 = smod(input_tensors)[0];
+  at::Tensor output_2 = smod(input_tensors, {}).toTensor();
   smod.runtime().check_for_memory_leak();
   EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
 }
@@ -737,9 +789,9 @@ TEST(StaticRuntime, LeakyReLU) {
   at::Tensor output_1 = mod.forward(input_ivalues).toTensor();
 
   // run static runtime
-  std::vector<at::Tensor> input_tensors({inputs});
+  std::vector<c10::IValue> input_tensors({inputs});
   torch::jit::StaticModule smod(mod);
-  at::Tensor output_2 = smod(input_tensors)[0];
+  at::Tensor output_2 = smod(input_tensors, {}).toTensor();
   smod.runtime().check_for_memory_leak();
   EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
 }
@@ -761,8 +813,10 @@ TEST(StaticRuntime, DeepWide) {
       auto output_1 = getTensor(mod.forward(inputs));
 
       // run static runtime
-      std::vector<at::Tensor> input_tensors({ad_emb_packed, user_emb, wide});
-      at::Tensor output_2 = smod(input_tensors)[0];
+      std::vector<c10::IValue> input_tensors({ad_emb_packed, user_emb, wide});
+      auto outputs = smod(input_tensors, {}).toTuple()->elements();
+      ASSERT_TRUE(outputs.size() > 0);
+      at::Tensor output_2 = outputs[0].toTensor();
       smod.runtime().check_for_memory_leak();
       EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
     }
@@ -831,7 +885,7 @@ TEST(StaticRuntime, KWargsAPI_2) {
              {"wide", wide}});
 
         // run static runtime
-        c10::IValue output_ivalue = smod({}, kwargs);
+        c10::IValue output_ivalue = smod(std::vector<IValue>{}, kwargs);
         smod.runtime().check_for_memory_leak();
 
         at::Tensor output_2 = getTensor(output_ivalue);
@@ -859,9 +913,9 @@ TEST(StaticRuntime, CleanUpMemory) {
   for (auto cleanup_activations : {true, false}) {
     for (auto enable_out_variant : {true, false}) {
       for (auto optimize_memory : {true, false}) {
-        for (auto optimize_graph_output_memory : {true, false}) {
-          if (optimize_graph_output_memory && !optimize_memory) {
-            // when optimize_graph_output_memory is enabled, optimize_memory
+        for (auto manage_output_tensors : {true, false}) {
+          if (manage_output_tensors && !enable_out_variant) {
+            // when manage_output_tensors is enabled, enable_out_variant
             // must be enabled too
             continue;
           }
@@ -873,14 +927,15 @@ TEST(StaticRuntime, CleanUpMemory) {
           VLOG(1) << "cleanup_activations: " << cleanup_activations
                   << ", enable_out_variant: " << enable_out_variant
                   << ", optimize_memory: " << optimize_memory
-                  << ", optimize_graph_output_memory: "
-                  << optimize_graph_output_memory;
+                  << ", manage_output_tensors: "
+                  << manage_output_tensors;
           torch::jit::StaticModuleOptions opts{
               cleanup_activations,
               enable_out_variant,
               optimize_memory,
-              optimize_graph_output_memory};
+              manage_output_tensors};
           torch::jit::StaticModule smod(mod, false, opts);
+          torch::jit::StaticRuntime runtime(smod);
 
           for (int batch_size : {1, 8, 32}) {
             for (int i = 0; i < 2; ++i) {
@@ -894,17 +949,155 @@ TEST(StaticRuntime, CleanUpMemory) {
               auto output_1 = getTensor(mod.forward(inputs));
 
               // run static runtime
-              std::vector<at::Tensor> input_tensors(
+              std::vector<c10::IValue> input_tensors(
                   {ad_emb_packed, user_emb, wide});
-              at::Tensor output_2 = smod(input_tensors)[0];
-              smod.runtime().check_for_memory_leak();
+              auto outputs = runtime(input_tensors, {}).toTuple()->elements();
+              ASSERT_TRUE(outputs.size() > 0);
+              auto output_2 = outputs[0].toTensor();
+              runtime.check_for_memory_leak();
               EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
+              if (manage_output_tensors) {
+                runtime.deallocateOutputTensors();
+                runtime.checkOutputTensorMemoryLeaks();
+              }
             }
           }
         }
       }
     }
   }
+}
+
+TEST(StaticRuntime, ManageOutputTensors) {
+  const std::string test_graph = R"IR(
+    graph(%0 : Tensor):
+      # With manage_output_tensor enabled, this tensor is managed.
+      %1 : Tensor = aten::abs(%0)
+      # The output container object is never managed.
+      %2 : (Tensor) = prim::TupleConstruct(%1)
+      return (%2)
+  )IR";
+  auto a = at::randn({2, 2});
+  auto b = at::randn({2, 2, 2});
+  std::vector<at::IValue> args{a};
+  std::vector<at::IValue> args2{b};
+  testStaticRuntime(test_graph, args);
+  testStaticRuntime(test_graph, args, args2);
+}
+
+TEST(StaticRuntime, ManageOutputTensorsReturnsOutputContainingManagedOutputTensor) {
+  const std::string test_graph = R"IR(
+    graph(%0 : Tensor):
+      # With manage_output_tensor enabled, this tensor is managed.
+      %1 : Tensor = aten::abs(%0)
+      # The output container object is never managed.
+      %2 : (Tensor) = prim::TupleConstruct(%1)
+      return (%2)
+  )IR";
+  auto g = std::make_shared<torch::jit::Graph>();
+  torch::jit::parseIR(test_graph, g.get());
+  torch::jit::StaticModuleOptions opts{
+    /*cleanup_activations=*/true,
+    /*enable_out_variant=*/true,
+    /*optimize_memory=*/true,
+    /*manage_output_tensors=*/true};
+  auto a = at::randn({2, 2});
+  std::vector<at::IValue> args{a};
+  torch::jit::StaticModule smod(g, opts);
+  torch::jit::StaticRuntime runtime(smod);
+  // Profile run.
+  {
+    IValue tuple = runtime(args, {});
+    ASSERT_TRUE(tuple.isTuple());
+    ASSERT_EQ(tuple.toTuple()->elements().size(), 1);
+    // Do not manage intput value.
+    EXPECT_FALSE(runtime.isManagedOutputTensor(args[0]));
+    // Do not manage direct output value.
+    EXPECT_FALSE(runtime.isManagedOutputTensor(tuple));
+    IValue element = tuple.toTuple()->elements()[0];
+    // Tensor to be managed, but not yet from the profile run.
+    EXPECT_FALSE(runtime.isManagedOutputTensor(element));
+    tuple = IValue();
+    runtime.deallocateOutputTensors();
+    runtime.checkOutputTensorMemoryLeaks();
+  }
+  // Second run that manages output tensors.
+  {
+    IValue tuple = runtime(args, {});
+    ASSERT_TRUE(tuple.isTuple());
+    ASSERT_EQ(tuple.toTuple()->elements().size(), 1);
+    // Do not manage intput value.
+    EXPECT_FALSE(runtime.isManagedOutputTensor(args[0]));
+    // Do not manage direct output value.
+    EXPECT_FALSE(runtime.isManagedOutputTensor(tuple));
+    IValue element = tuple.toTuple()->elements()[0];
+    // Tensor to be managed, but not yet from the profile run.
+    EXPECT_TRUE(runtime.isManagedOutputTensor(element));
+    tuple = IValue();
+    runtime.deallocateOutputTensors();
+    runtime.checkOutputTensorMemoryLeaks();
+  }
+}
+
+TEST(StaticRuntime, ManageOutputTensorsWithDeallocateOutputTensors) {
+  const int embedding_size = 32;
+  const int num_features = 50;
+  torch::jit::Module mod = getDeepAndWideSciptModel();
+
+  torch::jit::StaticModuleOptions opts{
+    /*cleanup_activations=*/true,
+    /*enable_out_variant=*/true,
+    /*optimize_memory=*/true,
+    /*manage_output_tensors=*/true};
+  torch::jit::StaticModule smod(mod, false, opts);
+  torch::jit::StaticRuntime runtime(smod);
+  // Reenter the runtime with the input with the same shape/different shapes.
+  for (int batch_size : {8, 8, 24, 8}) {
+    auto ad_emb_packed =
+      torch::randn({batch_size, 1, embedding_size});
+    auto user_emb = torch::randn({batch_size, 1, embedding_size});
+    auto wide = torch::randn({batch_size, num_features});
+    std::vector<c10::IValue> input_tensors(
+        {ad_emb_packed, user_emb, wide});
+    runtime(input_tensors, {});
+    runtime.check_for_memory_leak();
+    runtime.deallocateOutputTensors();
+    runtime.checkOutputTensorMemoryLeaks();
+  }
+}
+
+TEST(StaticRuntime, ManageOutputTensorsWithoutDeallocateOutputTensors) {
+  const int embedding_size = 32;
+  const int num_features = 50;
+  torch::jit::Module mod = getDeepAndWideSciptModel();
+
+  torch::jit::StaticModuleOptions opts{
+    /*cleanup_activations=*/true,
+    /*enable_out_variant=*/true,
+    /*optimize_memory=*/true,
+    /*manage_output_tensors=*/true};
+  torch::jit::StaticModule smod(mod, false, opts);
+  torch::jit::StaticRuntime runtime(smod);
+  int batch_size = 8;
+  auto ad_emb_packed =
+    torch::randn({batch_size, 1, embedding_size});
+  auto user_emb = torch::randn({batch_size, 1, embedding_size});
+  auto wide = torch::randn({batch_size, num_features});
+  std::vector<c10::IValue> input_tensors(
+      {ad_emb_packed, user_emb, wide});
+  // Profile run.
+  runtime(input_tensors, {});
+  runtime.deallocateOutputTensors();
+  // Run again to allocate output Tensors without deallocating them.
+  runtime(input_tensors, {});
+  // Memory leak checking fails.
+  EXPECT_THROW(runtime.checkOutputTensorMemoryLeaks(), std::exception);
+  // Calling the runtime without deallocation fails too.
+  EXPECT_THROW(runtime(input_tensors, {}), std::exception);
+  // After deallocation, everything works fine.
+  runtime.deallocateOutputTensors();
+  runtime.checkOutputTensorMemoryLeaks();
+  runtime(input_tensors, {});
 }
 
 TEST(StaticRuntime, FusionPass) {
@@ -939,7 +1132,7 @@ TEST(StaticRuntime, FusionPass) {
 
 TEST(
     ProcessedNode,
-    VerifyOutputsNotOverlappingWithImmutableInputsWithImmutableArguments) {
+    VerifyNoMemoryOverlapWithImmutableInputsWithImmutableArguments) {
   script::Module module("module");
   // Not using out= variant.
   module.define(sigmoid_script);
@@ -947,19 +1140,20 @@ TEST(
   Node* sigmoid_node = getNodeWithKind(smodule, "aten::sigmoid");
   const at::IValue a = torch::randn({2, 3});
   at::IValue b = torch::randn({3, 1});
-  std::vector<const IValue*> ivalue_inputs{&a};
-  ProcessedNode pnode(sigmoid_node, std::move(ivalue_inputs), true);
+  std::unique_ptr<const IValue*[]> ivalue_inputs = std::make_unique<const IValue*[]>(1);
+  ivalue_inputs[0] = &a;
+  ProcessedNode pnode(sigmoid_node, std::move(ivalue_inputs), 1, true);
 
   pnode.Output(0) = b;
-  EXPECT_TRUE(pnode.verify_outputs_not_overlapping_with_immutable_inputs());
+  EXPECT_TRUE(pnode.verify_no_memory_overlap());
 
   pnode.Output(0) = a;
-  EXPECT_FALSE(pnode.verify_outputs_not_overlapping_with_immutable_inputs());
+  EXPECT_FALSE(pnode.verify_no_memory_overlap());
 }
 
 TEST(
     ProcessedNode,
-    VerifyOutputsNotOverlappingWithImmutableInputsWithMutableArguments) {
+    VerifyNoMemoryOverlapWithImmutableInputsWithMutableArguments) {
   script::Module module("module");
   // Using out= variant.
   module.define(sigmoid_inplace_script);
@@ -967,14 +1161,47 @@ TEST(
   Node* sigmoid_node = getNodeWithKind(smodule, "aten::sigmoid");
   const at::IValue a = torch::randn({2, 3});
   at::IValue b = torch::randn({3, 1});
-  std::vector<const IValue*> ivalue_inputs{&a};
-  ProcessedNode pnode(sigmoid_node, std::move(ivalue_inputs), true);
+  std::unique_ptr<const IValue*[]> ivalue_inputs = std::make_unique<const IValue*[]>(1);
+  ivalue_inputs[0] = &a;
+  ProcessedNode pnode(sigmoid_node, std::move(ivalue_inputs), 1, true);
 
   pnode.Output(0) = b;
-  EXPECT_TRUE(pnode.verify_outputs_not_overlapping_with_immutable_inputs());
+  EXPECT_TRUE(pnode.verify_no_memory_overlap());
 
   pnode.Output(0) = a;
-  EXPECT_TRUE(pnode.verify_outputs_not_overlapping_with_immutable_inputs());
+  EXPECT_TRUE(pnode.verify_no_memory_overlap());
+}
+
+TEST(ProcessedNode, VerifyNoMemoryOverlapWithOverlappingOutputs) {
+  auto g = std::make_shared<torch::jit::Graph>();
+  torch::jit::parseIR(
+      R"IR(
+    graph(%0):
+      %1 : Tensor, %2 : Tensor = prim::ListUnpack(%0)
+      return (%1, %2))IR",
+      g.get());
+  torch::jit::StaticModule smodule(g);
+  Node* list_unpack_node = getNodeWithKind(smodule, "prim::ListUnpack");
+  {
+    auto a = at::randn({2, 3});
+    IValue ivalue(a);
+    std::unique_ptr<const IValue*[]> inputs = std::make_unique<const IValue*[]>(1);
+    inputs[0] = &ivalue;
+    ProcessedNode list_unpack_pnode(list_unpack_node, std::move(inputs), 1, /*enable_out_variant=*/true);
+    ASSERT_EQ(list_unpack_pnode.outputs().size(), 2);
+    EXPECT_TRUE(list_unpack_pnode.verify_no_memory_overlap());
+  }
+  {
+    auto a = at::randn({2, 3});
+    IValue ivalue(a);
+    std::unique_ptr<const IValue*[]> inputs = std::make_unique<const IValue*[]>(1);
+    inputs[0] = &ivalue;
+    ProcessedNode list_unpack_pnode(list_unpack_node, std::move(inputs), 1, /*enable_out_variant=*/true);
+    auto b = at::randn({2, 3});
+    list_unpack_pnode.Output(0) = b;
+    list_unpack_pnode.Output(1) = b;
+    EXPECT_FALSE(list_unpack_pnode.verify_no_memory_overlap());
+  }
 }
 
 TEST(StaticRuntime, IndividualOps_isinstance) {
@@ -1022,13 +1249,15 @@ TEST(StaticRuntime, IndividualOps_Index) {
   testStaticRuntime(index_without_none_script, args_a, args_b);
 
   // Index with None
-  // When indexing with none, the shape of `a` becomes [2, 1, 2],
+  // When indexing with none, the shape of `f` becomes [2, 1, 2],
   // so the mask must be reshaped appropriately.
-  auto idx_a_reshape = torch::tensor({{{0, 1}}, {{0, 0}}}, at::kBool);
-  std::vector<IValue> args_a_with_none{a, idx_a_reshape};
+  auto f = at::rand({2, 1, 2});
+  auto idx_f_reshape = torch::tensor({{{0, 1}}, {{0, 0}}}, at::kBool);
+  std::vector<IValue> args_f_with_none{f, idx_f_reshape};
+  args_f_with_none.emplace_back();
 
-  testStaticRuntime(index_with_none_script, args_a_with_none);
-  testStaticRuntime(index_with_none_script, args_a_with_none, args_b);
+  testStaticRuntime(index_with_none_script, args_f_with_none);
+  testStaticRuntime(index_with_none_script, args_f_with_none, {IValue(b), IValue(idx_b), IValue()});
 
   // Index with multiple tensors
   auto c = at::randn({2, 2});
@@ -1277,10 +1506,10 @@ TEST(StaticRuntime, IndividualOps_FmodScalar) {
 
 TEST(StaticRuntime, QEmbeddingBagByteUnpack) {
   auto a = torch::randn({8, 16}, at::ScalarType::Float);
-  auto b = torch::randn({8*2, 16*2}, at::ScalarType::Float);
+  auto b = torch::randn({8 * 2, 16 * 2}, at::ScalarType::Float);
 
   testStaticRuntime(embedding_bag_byte_prepack_script, {a});
-  testStaticRuntime(embedding_bag_byte_prepack_script, {a},{b});
+  testStaticRuntime(embedding_bag_byte_prepack_script, {a}, {b});
 }
 
 TEST(StaticRuntime, IndividualOps_LinalgNorm_ScalarOrd) {
@@ -1363,4 +1592,112 @@ TEST(StaticRuntime, SignedLog1p) {
 
   std::vector<IValue> args2 = {at::randn({3, 3, 3})};
   testStaticRuntime(signed_log1p_script, args1, args2, true);
+}
+
+TEST(StaticRuntime, RemoveImmutableInputDictLookupsWithImmutableInputDict) {
+  script::Module module("module");
+  module.define(getitem_immutable_input_dict_script);
+  torch::jit::StaticModule smodule(module);
+  EXPECT_FALSE(hasNodeWithKind(smodule, "aten::__getitem__"));
+  EXPECT_TRUE(hasNodeWithKind(smodule, "static_runtime::dict_unpack"));
+
+  auto a = at::randn({2, 4});
+  auto b = at::randn({2, 4});
+  c10::Dict<c10::IValue, c10::IValue> dict(
+      c10::IntType::get(), c10::TensorType::get());
+  dict.insert(0, a);
+  dict.insert(1, b);
+  testStaticRuntime(getitem_immutable_input_dict_script, {dict});
+
+  c10::Dict<c10::IValue, c10::IValue> dict0(
+      c10::IntType::get(), c10::TensorType::get());
+  auto a0 = at::randn({3, 4});
+  auto b0 = at::randn({3, 4});
+  dict0.insert(0, a0);
+  dict0.insert(1, b0);
+  testStaticRuntime(getitem_immutable_input_dict_script, {dict0});
+}
+
+TEST(StaticRuntime, RemoveImmutableInputDictLookupsWithMutableInputDict) {
+  script::Module module("module");
+  module.define(getitem_mutable_input_dict_script);
+  torch::jit::StaticModule smodule(module);
+  EXPECT_TRUE(hasNodeWithKind(smodule, "aten::__getitem__"));
+  EXPECT_FALSE(hasNodeWithKind(smodule, "static_runtime::dict_unpack"));
+}
+
+TEST(StaticRuntime, VarTupleUnpack) {
+  script::Module module("module");
+  module.define(var_tuple_unpack_script);
+  torch::jit::StaticModule smodule(module);
+  EXPECT_FALSE(hasNodeWithKind(smodule, "prim::TupleUnpack"));
+  EXPECT_TRUE(hasNodeWithKind(smodule, "static_runtime::VarTupleUnpack"));
+
+  auto a = at::randn({2, 2});
+  auto b = at::randn({3, 3, 3});
+  std::vector<IValue> args1{c10::ivalue::Tuple::create(a, a), c10::ivalue::Tuple::create(1, 2)};
+  std::vector<IValue> args2{c10::ivalue::Tuple::create(b, b), c10::ivalue::Tuple::create(1, 2)};
+
+  testStaticRuntime(var_tuple_unpack_script, args1);
+  testStaticRuntime(var_tuple_unpack_script, args1, args2);
+}
+
+TEST(StaticRuntime, VarTupleUnpack_NotApplied) {
+  script::Module module("module");
+  // In this script, the optimization is not applied since there is a computation between
+  // the TupleUnpack nodes.
+  module.define(var_tuple_unpack_not_applied_script);
+  torch::jit::StaticModule smodule(module);
+  EXPECT_FALSE(hasNodeWithKind(smodule, "static_runtime::VarTupleUnpack"));
+  EXPECT_TRUE(hasNodeWithKind(smodule, "prim::TupleUnpack"));
+}
+
+TEST(StaticRuntime, IndividualOps_RemainderTensor) {
+  const auto remainder_tensor = R"JIT(
+    def forward(self, x, y):
+        return torch.remainder(x, y).clone()
+  )JIT";
+
+  std::vector<IValue> args1 = {
+      at::randint(0, 10, {2, 2}), at::randint(0, 10, {2, 2})};
+  std::vector<IValue> args2 = {
+      at::randint(0, 10, {3, 3}), at::randint(0, 10, {3, 3})};
+
+  // Use allclose and equalnan since outputs may be NaN.
+  testStaticRuntime(
+      remainder_tensor,
+      args1,
+      /*args2*/ {},
+      /*use_alloclose*/ true,
+      /*use_equalnan*/ true);
+  testStaticRuntime(
+      remainder_tensor,
+      args1,
+      args2,
+      /*use_allclose*/ true,
+      /*use_equalnan*/ true);
+}
+
+TEST(StaticRuntime, IndividualOps_RemainderScalar) {
+  const auto remainder_scalar = R"JIT(
+    def forward(self, x, y: int):
+        return torch.remainder(x, y).clone()
+  )JIT";
+
+  std::vector<IValue> args1 = {at::randint(0, 10, {2, 2}), 4};
+  std::vector<IValue> args2 = {at::randint(0, 10, {3, 3}), 4};
+
+  // Use allclose and equalnan since outputs may be NaN.
+  testStaticRuntime(
+      remainder_scalar,
+      args1,
+      /*args2*/ {},
+      /*use_alloclose*/ true,
+      /*use_equalnan*/ true);
+  testStaticRuntime(
+      remainder_scalar,
+      args1,
+      args2,
+      /*use_allclose*/ true,
+      /*use_equalnan*/ true);
 }

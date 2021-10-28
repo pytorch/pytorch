@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Owner(s): ["module: tests"]
+
 import torch
 import torch.utils.data
 import numpy as np
@@ -34,7 +36,8 @@ from torch.testing._internal.common_utils import (
     do_test_dtypes, IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, load_tests, slowTest,
     skipCUDAMemoryLeakCheckIf, BytesIOContext, noarchTest,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
-    wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard)
+    wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard,
+    skipIfNotRegistered, bytes_to_scalar)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -43,7 +46,7 @@ from torch.testing._internal.common_device_type import (
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
     skipMeta,
     PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyOnCPUAndCUDA,
-    expectedAlertNondeterministic)
+    expectedAlertNondeterministic, get_all_device_types)
 from typing import Dict, List, Tuple
 import torch.backends.quantized
 import torch.testing._internal.data
@@ -121,14 +124,25 @@ class AbstractTestCases:
         def test_dir(self):
             dir(torch)
 
+        def test_wildcard_import(self):
+            exec('from torch import *')
+
         @wrapDeterministicFlagAPITest
         def test_deterministic_flag(self):
-            for deterministic in [True, False]:
-                torch.use_deterministic_algorithms(deterministic)
+            for deterministic, warn_only in product([True, False], [True, False]):
+                torch.use_deterministic_algorithms(deterministic, warn_only=warn_only)
                 self.assertEqual(deterministic, torch.are_deterministic_algorithms_enabled())
+                self.assertEqual(warn_only, torch.is_deterministic_algorithms_warn_only_enabled())
 
-            with self.assertRaisesRegex(RuntimeError, r"use_deterministic_algorithms expects a bool, but got int"):
+            with self.assertRaisesRegex(
+                    TypeError,
+                    r"_set_deterministic_algorithms\(\): argument 'mode' \(position 1\) must be bool, not int"):
                 torch.use_deterministic_algorithms(1)
+
+            with self.assertRaisesRegex(
+                    TypeError,
+                    r"_set_deterministic_algorithms\(\): argument 'warn_only' must be bool, not int"):
+                torch.use_deterministic_algorithms(False, warn_only=1)
 
         def test_type_conversion_via_dtype_name(self):
             x = torch.tensor([1])
@@ -183,6 +197,9 @@ class AbstractTestCases:
                         continue
                     if name in ['real', 'imag']:
                         y = torch.randn(1, dtype=torch.cfloat)
+                        var = getattr(y, name)
+                    elif name in ["H", "mT", "mH"]:
+                        y = torch.randn(1, 1)
                         var = getattr(y, name)
                     else:
                         var = getattr(ns, name)
@@ -249,7 +266,7 @@ class AbstractTestCases:
                         torch.where(condition, x, y)
 
         def test_where_bool_tensor(self):
-            for d in torch.testing.get_all_device_types():
+            for d in get_all_device_types():
                 a = torch.tensor([True, False], device=d)
                 res = torch.where(a > 0)
                 self.assertEqual(1, len(res))
@@ -276,7 +293,7 @@ class AbstractTestCases:
 
             height = 5
             width = 5
-            for device in torch.testing.get_all_device_types():
+            for device in get_all_device_types():
                 for dt1 in get_all_dtypes():
                     for dt2 in get_all_dtypes():
                         for contiguous in [True, False]:
@@ -518,6 +535,15 @@ class AbstractTestCases:
             # Make sure autograd was propagated to the original tensor
             # declared with requires_grad.
             self.assertTrue(t.grad is not None)
+
+            # Make sure invalid subclasses raise nice errors
+            class BadSubTensor():
+                member_var = object()
+
+            err_msg = "Creating a Tensor subclass from a class that does not inherit from Tensor"
+            with self.assertRaisesRegex(RuntimeError, err_msg):
+                s0 = t0.as_subclass(BadSubTensor)
+
 
         def test_type(self):
             x = torch.randn(3, 3).double()
@@ -930,7 +956,7 @@ class AbstractTestCases:
                 reference[0.0, :, 0.0] = 1
 
         def test_index_add(self):
-            for device in torch.testing.get_all_device_types():
+            for device in get_all_device_types():
                 for dest_contig, src_contig, index_contig in product([True, False], repeat=3):
                     for other_sizes in ((), (4, 5)):
                         for dtype in [torch.int, torch.long]:
@@ -961,7 +987,7 @@ class AbstractTestCases:
         # specific dtypes on cuda:
         # https://github.com/pytorch/pytorch/issues/29153
         def test_index_add_all_dtypes(self):
-            for device in torch.testing.get_all_device_types():
+            for device in get_all_device_types():
                 for dtype in get_all_math_dtypes(device):
                     for idx_dtype in [torch.int, torch.long]:
                         size = [5, 5]
@@ -1773,6 +1799,9 @@ class AbstractTestCases:
             bools = torch.BoolStorage.from_buffer(f, 'big')
             self.assertEqual(bools.size(), 4)
             self.assertEqual(bools.tolist(), [False, True, True, True])
+            bytes = torch.ByteStorage.from_buffer(a)
+            self.assertEqual(bytes.nbytes(), 4)
+            self.assertEqual(bytes.tolist(), [1, 2, 3, 4])
 
         def test_storage_casts(self):
             storage = torch.IntStorage([-1, 0, 1, 2, 3, 4])
@@ -1861,6 +1890,7 @@ class AbstractTestCases:
                 size = 10000
                 s1 = torch.FloatStorage.from_file(filename, True, size)
                 t1 = torch.FloatTensor(s1).copy_(torch.randn(size))
+                self.assertEqual(s1.data_ptr(), torch.FloatTensor(s1).data_ptr())
 
                 # check mapping
                 s2 = torch.FloatStorage.from_file(filename, True, size)
@@ -2443,6 +2473,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             do_test(torch.tensor([[1, 2]]).data)
             do_test(torch.tensor([[1, 2]]).detach())
 
+        @skipIfNotRegistered("LayerNorm", "Skipping as LayerNorm is not registered")
         def test_c10_layer_norm(self):
             # test that we can call c10 ops and they return a reasonable result
             X = torch.rand(5, 5, dtype=torch.float)
@@ -2681,7 +2712,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
         def test_normal_shape(self):
             warned = False
-            for device in torch.testing.get_all_device_types():
+            for device in get_all_device_types():
                 tensor1 = torch.rand(1, device=device)
                 tensor4 = torch.rand(4, device=device)
                 tensor120 = torch.rand(120, device=device)
@@ -2993,11 +3024,120 @@ class TestTorchDeviceType(TestCase):
         self.assertIsInstance(torch.inf, float)
         self.assertEqual(torch.inf, math.inf)
 
-    @dtypes(torch.float32, torch.complex64)
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64,
+            torch.bool, torch.float32, torch.complex64, torch.float64,
+            torch.complex128)
+    def test_bytes_to_scalar(self, device, dtype):
+        def rand_byte():
+            if dtype == torch.bool:
+                return torch.randint(0, 2, ()).item()
+            else:
+                return torch.randint(0, 256, ()).item()
+
+        element_size = torch._utils._element_size(dtype)
+
+        for i in range(10):
+            bytes_list = [rand_byte() for _ in range(element_size)]
+            scalar = bytes_to_scalar(bytes_list, dtype, device)
+            self.assertEqual(scalar.storage()._untyped().tolist(), bytes_list)
+
+    @dtypes(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64,
+            torch.bool, torch.float32, torch.complex64, torch.float64,
+            torch.complex128)
     def test_storage(self, device, dtype):
-        v = torch.randn(3, 5, dtype=dtype, device=device)
+        v = make_tensor((3, 5), device, dtype, low=-9, high=9)
         self.assertEqual(v.storage()[0], v[0][0])
         self.assertEqual(v.storage()[14], v[2][4])
+        v_s = v.storage()
+
+        for el_num in range(v.numel()):
+            dim0 = el_num // v.size(1)
+            dim1 = el_num % v.size(1)
+            self.assertEqual(
+                v_s[el_num],
+                v[dim0][dim1])
+
+        v_s_byte = v.storage()._untyped()
+        el_size = v.element_size()
+
+        for el_num in range(v.numel()):
+            start = el_num * el_size
+            end = start + el_size
+            dim0 = el_num // v.size(1)
+            dim1 = el_num % v.size(1)
+            self.assertEqual(
+                bytes_to_scalar(v_s_byte[start:end], dtype, device),
+                v[dim0][dim1])
+
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64,
+            torch.bool, torch.float32, torch.complex64, torch.float64,
+            torch.complex128, torch.quint8, torch.qint8, torch.qint32,
+            torch.quint4x2)
+    def test_storage_setitem(self, device, dtype):
+        # Skip quantized dtypes for CUDA, since they're not supported
+        if torch.device(device).type == 'cuda':
+            if dtype in [torch.quint8, torch.qint8, torch.qint32, torch.quint4x2]:
+                return
+
+        storage_type_name = torch.storage._dtype_to_storage_type_map()[dtype]
+        if torch.device(device).type == 'cuda':
+            storage_type = eval('torch.cuda.' + storage_type_name)
+        else:
+            storage_type = eval('torch.' + storage_type_name)
+
+        N = 10
+
+        s = storage_type(N)
+        s[:] = 0
+        l = [0] * N
+        self.assertEqual(s, storage_type(l))
+
+        for i in range(N):
+            s[i] = i
+            l[i] = i
+
+        self.assertEqual(s, storage_type(l))
+
+        l[2:7] = [1] * 5
+        s[2:7] = 1
+        self.assertEqual(s, storage_type(l))
+
+
+    @onlyOnCPUAndCUDA
+    @dtypes(*get_all_dtypes())
+    def test_tensor_from_storage(self, device, dtype):
+        a = make_tensor((4, 5, 3), device, dtype, low=-9, high=9)
+        a_s = a.storage()
+        b = torch.tensor(a_s, device=device, dtype=dtype).reshape(a.size())
+        self.assertEqual(a, b)
+        c = torch.tensor(a_s._untyped(), device=device, dtype=dtype).reshape(a.size())
+        self.assertEqual(a, c)
+
+        for error_dtype in get_all_dtypes():
+            if error_dtype == dtype:
+                continue
+            with self.assertRaisesRegex(RuntimeError, r'Expected a Storage of type'):
+                error_storage = a.to(error_dtype).storage()
+                torch.tensor(error_storage, device=device, dtype=dtype)
+
+    @onlyOnCPUAndCUDA
+    @dtypes(*get_all_dtypes())
+    def test_set_storage(self, device, dtype):
+        a = make_tensor((4, 5, 3), device, dtype, low=-9, high=9)
+        a_s = a.storage()
+        b = torch.tensor([], device=device, dtype=dtype).set_(a_s).reshape(a.size())
+        self.assertEqual(a, b)
+        c = torch.tensor([], device=device, dtype=dtype).set_(a_s._untyped()).reshape(a.size())
+        self.assertEqual(a, c)
+
+        for error_dtype in get_all_dtypes():
+            if error_dtype == dtype:
+                continue
+            with self.assertRaisesRegex(RuntimeError, r'Expected a Storage of type'):
+                error_storage = a.to(error_dtype).storage()
+                b = torch.tensor([], device=device, dtype=dtype).set_(error_storage)
 
     @dtypes(torch.float32, torch.complex64)
     def test_deepcopy(self, device, dtype):
@@ -3021,6 +3161,10 @@ class TestTorchDeviceType(TestCase):
         w[2].sub_(1)
         for i in range(a.numel()):
             self.assertEqual(w[1][1][i], q[1][1][i] - 1)
+
+        # Check that deepcopy preserves attributes
+        a.foo = 3
+        self.assertEqual(deepcopy(a).foo, 3)
 
     @dtypes(torch.float32, torch.complex64)
     def test_deepcopy_scalar(self, device, dtype):
@@ -3747,7 +3891,7 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('avg_pool3d_backward_cuda', 'cuda')
+        @expectedAlertNondeterministic('avg_pool3d_backward_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -3759,7 +3903,7 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('adaptive_avg_pool2d_backward_cuda', 'cuda')
+        @expectedAlertNondeterministic('adaptive_avg_pool2d_backward_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -3771,7 +3915,7 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('adaptive_avg_pool3d_backward_cuda', 'cuda')
+        @expectedAlertNondeterministic('adaptive_avg_pool3d_backward_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -3783,7 +3927,7 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('max_pool3d_with_indices_backward_cuda', 'cuda')
+        @expectedAlertNondeterministic('max_pool3d_with_indices_backward_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -3795,7 +3939,7 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('adaptive_max_pool2d_backward_cuda', 'cuda')
+        @expectedAlertNondeterministic('adaptive_max_pool2d_backward_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -3807,7 +3951,7 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('fractional_max_pool2d_backward_cuda', 'cuda')
+        @expectedAlertNondeterministic('fractional_max_pool2d_backward_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -3819,7 +3963,7 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('fractional_max_pool3d_backward_cuda', 'cuda')
+        @expectedAlertNondeterministic('fractional_max_pool3d_backward_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -3834,7 +3978,7 @@ else:
             align_corners=False)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('upsample_linear1d_backward_out_cuda', 'cuda')
+        @expectedAlertNondeterministic('upsample_linear1d_backward_out_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -3849,7 +3993,7 @@ else:
             align_corners=False)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('upsample_bilinear2d_backward_out_cuda', 'cuda')
+        @expectedAlertNondeterministic('upsample_bilinear2d_backward_out_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -3864,7 +4008,7 @@ else:
             align_corners=False)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('upsample_bicubic2d_backward_out_cuda', 'cuda')
+        @expectedAlertNondeterministic('upsample_bicubic2d_backward_out_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -3879,7 +4023,7 @@ else:
             align_corners=False)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('upsample_trilinear3d_backward_out_cuda', 'cuda')
+        @expectedAlertNondeterministic('upsample_trilinear3d_backward_out_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -3891,7 +4035,7 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('reflection_pad1d_backward_out_cuda', 'cuda')
+        @expectedAlertNondeterministic('reflection_pad1d_backward_out_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -3903,7 +4047,7 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('reflection_pad2d_backward_cuda', 'cuda')
+        @expectedAlertNondeterministic('reflection_pad2d_backward_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -3915,7 +4059,7 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('reflection_pad3d_backward_out_cuda', 'cuda')
+        @expectedAlertNondeterministic('reflection_pad3d_backward_out_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -3927,7 +4071,7 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('replication_pad1d_backward_cuda', 'cuda')
+        @expectedAlertNondeterministic('replication_pad1d_backward_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -3939,7 +4083,7 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('replication_pad2d_backward_cuda', 'cuda')
+        @expectedAlertNondeterministic('replication_pad2d_backward_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -3951,7 +4095,7 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('replication_pad3d_backward_cuda', 'cuda')
+        @expectedAlertNondeterministic('replication_pad3d_backward_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -3962,7 +4106,7 @@ else:
         input = torch.randn(2, 3, 5, 5, device=device)
         target = torch.rand(2, 5, 5, device=device).mul(3).floor().long()
 
-        @expectedAlertNondeterministic('nll_loss2d_forward_out_cuda_template', 'cuda')
+        @expectedAlertNondeterministic('nll_loss2d_forward_out_cuda_template', ['cuda'])
         def forward_func(slf, device):
             module(input, target)
 
@@ -3977,9 +4121,9 @@ else:
         res = module(input, target, input_lengths, target_lengths)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('ctc_loss_backward_gpu', 'cuda')
+        @expectedAlertNondeterministic('ctc_loss_backward_gpu', ['cuda'])
         def backward_func(slf, device):
-            res.backward(grad)
+            res.backward(grad, retain_graph=True)
 
         backward_func(self, device)
 
@@ -3991,7 +4135,7 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('embedding_bag_backward_cuda_max', 'cuda')
+        @expectedAlertNondeterministic('embedding_bag_backward_cuda_max', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -4004,7 +4148,7 @@ else:
             index = torch.tensor([[3]], device=device)
             src = torch.tensor([[1.0]], device=device)
 
-            @expectedAlertNondeterministic('scatter_add_cuda_kernel', 'cuda')
+            @expectedAlertNondeterministic('scatter_add_cuda_kernel', ['cuda'])
             def forward_func(slf, device):
                 op_call(input, dim, index, src)
 
@@ -4036,7 +4180,7 @@ else:
             indices = torch.tensor([0, 0], device=device)
             values = torch.tensor([0., 1.], device=device)
 
-            @expectedAlertNondeterministic('put_', 'cuda')
+            @expectedAlertNondeterministic('put_', ['cuda'])
             def forward_func(slf, device):
                 op_call(a, indices, values, accumulate=True)
 
@@ -4049,7 +4193,7 @@ else:
         def test_func(op_call):
             a = torch.tensor([], device=device)
 
-            @expectedAlertNondeterministic('_histc_cuda', 'cuda')
+            @expectedAlertNondeterministic('_histc_cuda', ['cuda'])
             def forward_func(slf, device):
                 res = op_call(a, min=0, max=3)
 
@@ -4062,7 +4206,7 @@ else:
         def test_func(op_call):
             a = torch.tensor([], device=device, dtype=torch.long)
 
-            @expectedAlertNondeterministic('_bincount_cuda', 'cuda')
+            @expectedAlertNondeterministic('_bincount_cuda', ['cuda'])
             def forward_func(slf, device):
                 res = op_call(a)
 
@@ -4074,7 +4218,7 @@ else:
     # Ensures that kthvalue throws nondeterministic alerts in the correct cases
     @dtypes(torch.double)
     def test_nondeterministic_alert_kthvalue(self, device, dtype):
-        @expectedAlertNondeterministic('kthvalue CUDA', 'cuda')
+        @expectedAlertNondeterministic('kthvalue CUDA', ['cuda'])
         def test_func(slf, device, call_type):
             S = 10
             k = 5
@@ -4103,7 +4247,7 @@ else:
             res = op_call(a, dim, index)
             grad = torch.ones_like(res)
 
-            @expectedAlertNondeterministic('scatter_add_cuda_kernel', 'cuda')
+            @expectedAlertNondeterministic('scatter_add_cuda_kernel', ['cuda'])
             def backward_func(slf, device):
                 res.backward(grad)
 
@@ -4118,7 +4262,7 @@ else:
         res = torch.nn.functional.grid_sample(input, grid, align_corners=False)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('grid_sampler_2d_backward_cuda', 'cuda')
+        @expectedAlertNondeterministic('grid_sampler_2d_backward_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -4130,7 +4274,7 @@ else:
         res = torch.nn.functional.grid_sample(input, grid, align_corners=False)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('grid_sampler_3d_backward_cuda', 'cuda')
+        @expectedAlertNondeterministic('grid_sampler_3d_backward_cuda', ['cuda'])
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -4181,7 +4325,7 @@ else:
             else:
                 self.fail(f"'{call_type}' is not a valid call type")
 
-        @expectedAlertNondeterministic('median CUDA with indices output', 'cuda')
+        @expectedAlertNondeterministic('median CUDA with indices output', ['cuda'])
         def test_func_expect_error(slf, device, call_type):
             test_func(slf, device, call_type)
 
@@ -4694,8 +4838,8 @@ else:
     @tf32_on_and_off(0.005)
     def test_cdist_non_contiguous(self, device):
         for cm in ['use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
-            x = torch.randn(5, 7, device=device).transpose(-1, -2)
-            y = torch.randn(5, 3, device=device).transpose(-1, -2)
+            x = torch.randn(5, 7, device=device).mT
+            y = torch.randn(5, 3, device=device).mT
             actual = torch.cdist(x, y, p=2, compute_mode=cm)
             expected = self._brute_cdist(x, y, p=2)
             self.assertFalse(x.is_contiguous())
@@ -4721,8 +4865,8 @@ else:
     @tf32_on_and_off()
     def test_cdist_non_contiguous_batch(self, device):
         for cm in ['use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
-            x = torch.randn(4, 3, 2, 5, 7, device=device).transpose(-1, -2)
-            y = torch.randn(4, 3, 2, 5, 3, device=device).transpose(-1, -2)
+            x = torch.randn(4, 3, 2, 5, 7, device=device).mT
+            y = torch.randn(4, 3, 2, 5, 3, device=device).mT
             actual = torch.cdist(x, y, p=2, compute_mode=cm)
             expected = self._brute_cdist(x, y, p=2)
             self.assertFalse(x.is_contiguous())
@@ -4730,14 +4874,14 @@ else:
             self.assertEqual(expected, actual)
 
             x = torch.randn(7, 2, 7, 5, device=device)
-            y = torch.randn(7, 2, 5, 3, device=device).transpose(-1, -2)
+            y = torch.randn(7, 2, 5, 3, device=device).mT
             actual = torch.cdist(x, y, p=2, compute_mode=cm)
             expected = self._brute_cdist(x, y, p=2)
             self.assertTrue(x.is_contiguous())
             self.assertFalse(y.is_contiguous())
             self.assertEqual(expected, actual)
 
-            x = torch.randn(4, 5, 7, device=device).transpose(-1, -2)
+            x = torch.randn(4, 5, 7, device=device).mT
             y = torch.randn(4, 3, 5, device=device)
             actual = torch.cdist(x, y, p=2, compute_mode=cm)
             expected = self._brute_cdist(x, y, p=2)
@@ -7095,15 +7239,102 @@ else:
                 _test_helper(x, op, unary=True)
 
     @skipMeta
-    @dtypes(*get_all_dtypes())
-    def test_dlpack_conversion(self, device, dtype):
-        # DLpack does not explicitly support bool
-        # It does it through uint8 type
-        if dtype is torch.bool:
-            return
-        x = make_tensor((5,), device, dtype, low=-9, high=9)
+    @onlyOnCPUAndCUDA
+    @dtypes(*get_all_dtypes(include_bool=False))
+    def test_dlpack_capsule_conversion(self, device, dtype):
+        # DLpack does not explicitly support bool (xref dmlc/dlpack#75)
+        x = make_tensor((5,), device, dtype)
         z = from_dlpack(to_dlpack(x))
         self.assertEqual(z, x)
+
+    @skipMeta
+    @onlyOnCPUAndCUDA
+    @dtypes(*get_all_dtypes(include_bool=False))
+    def test_dlpack_protocol_conversion(self, device, dtype):
+        x = make_tensor((5,), device, dtype)
+        z = from_dlpack(x)
+        self.assertEqual(z, x)
+
+    @skipMeta
+    @onlyOnCPUAndCUDA
+    def test_dlpack_shared_storage(self, device):
+        x = make_tensor((5,), device, torch.float64)
+        z = from_dlpack(to_dlpack(x))
+        z[0] = z[0] + 20.0
+        self.assertEqual(z, x)
+
+    @skipMeta
+    @onlyCUDA
+    @dtypes(*get_all_dtypes(include_bool=False))
+    def test_dlpack_conversion_with_streams(self, device, dtype):
+        # Create a stream where the tensor will reside
+        stream = torch.cuda.Stream()
+        with torch.cuda.stream(stream):
+            # Do an operation in the actual stream
+            x = make_tensor((5,), device, dtype) + 1
+        # DLPack protocol helps establish a correct stream order
+        # (hence data dependency) at the exchange boundary.
+        # DLPack manages this synchronization for us, so we don't need to
+        # explicitly wait until x is populated
+        stream = torch.cuda.Stream()
+        with torch.cuda.stream(stream):
+            z = from_dlpack(x)
+        stream.synchronize()
+        self.assertEqual(z, x)
+
+    @skipMeta
+    @onlyCUDA
+    @dtypes(*get_all_dtypes(include_bool=False))
+    def test_dlpack_conversion_with_diff_streams(self, device, dtype):
+        from torch._C import _from_dlpack
+        stream_a = torch.cuda.Stream()
+        stream_b = torch.cuda.Stream()
+        # DLPack protocol helps establish a correct stream order
+        # (hence data dependency) at the exchange boundary.
+        # the `tensor.__dlpack__` method will insert a synchronization event
+        # in the current stream to make sure that it was correctly populated.
+        with torch.cuda.stream(stream_a):
+            x = make_tensor((5,), device, dtype) + 1
+            z = _from_dlpack(x.__dlpack__(stream_b.cuda_stream))
+            stream_a.synchronize()
+        stream_b.synchronize()
+        self.assertEqual(z, x)
+
+    @skipMeta
+    @onlyOnCPUAndCUDA
+    @dtypes(*get_all_dtypes(include_bool=False))
+    def test_dlpack_tensor_invalid_stream(self, device, dtype):
+        with self.assertRaises(TypeError):
+            x = make_tensor((5,), device, dtype)
+            x.__dlpack__(stream=object())
+
+    @skipMeta
+    def test_dlpack_error_on_bool_tensor(self):
+        x = torch.tensor([True], dtype=torch.bool)
+        with self.assertRaises(RuntimeError):
+            to_dlpack(x)
+
+    # TODO: increase tests once NumPy supports the `__dlpack__` protocol
+
+    @skipMeta
+    def test_dlpack_export_requires_grad(self):
+        x = torch.zeros(10, dtype=torch.float32, requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError, r"require gradient"):
+            x.__dlpack__()
+
+    @skipMeta
+    def test_dlpack_export_is_conj(self):
+        x = torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j])
+        y = torch.conj(x)
+        with self.assertRaisesRegex(RuntimeError, r"conjugate bit"):
+            y.__dlpack__()
+
+    @skipMeta
+    def test_dlpack_export_non_strided(self):
+        x = torch.sparse_coo_tensor([[0]], [1], size=(1,))
+        y = torch.conj(x)
+        with self.assertRaisesRegex(RuntimeError, r"strided"):
+            y.__dlpack__()
 
     @onlyCUDA
     @unittest.skipIf(PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property")
@@ -8053,7 +8284,7 @@ class TestTorch(AbstractTestCases._TestTorchMixin):
         self.assertEqual(y.grad.foo, 2)
 
     def test_subclass_preserved(self):
-        class MyTensor(torch._C._TensorBase):
+        class MyTensor(torch.Tensor):
             pass
 
         x = MyTensor(torch.empty(2))
@@ -8300,6 +8531,13 @@ class TestTorch(AbstractTestCases._TestTorchMixin):
         finally:
             torch.set_num_threads(num_threads)
 
+    def test_conj_neg_tolist(self):
+        x = torch.randn(2, dtype=torch.cfloat)
+        y1 = x.conj()
+        y1_expect = x.conj_physical()
+        y2 = y1.imag
+        self.assertEqual(y1, y1_expect.tolist())
+        self.assertEqual(y2, y1_expect.imag.tolist())
 
 # TODO: these empy classes are temporarily instantiated for XLA compatibility
 #   once XLA updates their test suite it should be removed

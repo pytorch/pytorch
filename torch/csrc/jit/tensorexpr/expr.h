@@ -288,6 +288,11 @@ class TORCH_API BufHandle : public ExprHandle {
   template <typename T>
   inline ExprHandle load(const std::vector<T>& args) const;
 
+  inline ExprHandle load(const std::vector<ExprHandle>& args) const;
+
+  StorePtr store(const std::vector<ExprHandle>& args, const ExprHandle& val)
+      const;
+
   bool operator==(const BufHandle& other) const {
     return this->node() == other.node();
   }

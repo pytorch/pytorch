@@ -372,7 +372,7 @@ struct alignas(2) Half {
   }
 
   // HIP wants __host__ __device__ tag, CUDA does not
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
   C10_HOST_DEVICE Half() = default;
 #else
   Half() = default;
@@ -453,7 +453,9 @@ overflows(From f) {
     // allow for negative numbers to wrap using two's complement arithmetic.
     // For example, with uint8, this allows for `a - b` to be treated as
     // `a + 255 * b`.
-    return f > limit::max() ||
+    constexpr bool can_overflow =
+        std::numeric_limits<From>::digits > limit::digits;
+    return (can_overflow && f > limit::max()) ||
         (f < 0 && -static_cast<uint64_t>(f) > limit::max());
   } else {
     return f < limit::lowest() || f > limit::max();

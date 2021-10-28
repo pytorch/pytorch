@@ -14,6 +14,7 @@ set(TENSOREXPR_TEST_SRCS
   ${TENSOREXPR_TEST_ROOT}/test_kernel.cpp
   ${TENSOREXPR_TEST_ROOT}/test_loopnest.cpp
   ${TENSOREXPR_TEST_ROOT}/test_memdependency.cpp
+  ${TENSOREXPR_TEST_ROOT}/test_ops.cpp
   ${TENSOREXPR_TEST_ROOT}/test_reductions.cpp
   ${TENSOREXPR_TEST_ROOT}/test_registerizer.cpp
   ${TENSOREXPR_TEST_ROOT}/test_simplify.cpp
@@ -37,6 +38,9 @@ add_executable(test_tensorexpr
 target_link_libraries(test_tensorexpr PRIVATE torch gtest)
 target_include_directories(test_tensorexpr PRIVATE ${ATen_CPU_INCLUDE})
 target_compile_definitions(test_tensorexpr PRIVATE USE_GTEST)
+if(NOT MSVC)
+  target_compile_options(test_tensorexpr PRIVATE -Wno-unused-variable)
+endif()
 
 add_executable(tutorial_tensorexpr ${TENSOREXPR_TEST_ROOT}/tutorial.cpp)
 target_link_libraries(tutorial_tensorexpr PRIVATE torch)

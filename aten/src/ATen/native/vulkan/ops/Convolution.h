@@ -15,12 +15,12 @@ enum Conv2dMethod {
   Conv2dPointwise,
   Conv2dSlidingWindow,
   Conv2dWinograd_2_3,
+  Conv2dTranspose,
 };
 
 class Conv2dOpContext final : public torch::jit::CustomClassHolder {
  public:
   static Conv2dOpContext create(
-      api::Resource::Pool& pool,
       const Tensor& weight,
       const c10::optional<Tensor>& bias,
       IntArrayRef stride,
@@ -47,7 +47,6 @@ class Conv2dOpContext final : public torch::jit::CustomClassHolder {
 
  private:
   Conv2dOpContext(
-      api::Resource::Pool& pool,
       const Tensor& weight,
       const c10::optional<Tensor>& bias,
       IntArrayRef stride,
@@ -95,6 +94,7 @@ class Conv2dOpContext final : public torch::jit::CustomClassHolder {
   } unpacked_;
 
   Conv2dMethod method_;
+  bool transposed_;
 };
 
 Tensor conv2d_clamp_run(

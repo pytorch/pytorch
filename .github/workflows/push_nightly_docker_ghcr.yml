@@ -8,7 +8,7 @@ on:
 
 jobs:
   build-publish-docker:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository == 'pytorch/pytorch' }}
     runs-on: linux.2xlarge
     env:
       GHCR_PAT: ${{ secrets.GHCR_PAT }}
