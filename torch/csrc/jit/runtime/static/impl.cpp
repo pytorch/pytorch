@@ -111,6 +111,7 @@ void OptimizeGraph(
   ConstantPropagation(graph);
   RemoveImmutableInputDictLookups(graph);
   UseVariadicTupleUnpack(graph);
+  UseVariadicGroupedAccessor(graph);
   GRAPH_DUMP("Final graph after optimizations: ", graph);
 }
 
