@@ -160,6 +160,49 @@ def remove_quant_dequant_pairs(quantized: QuantizedGraphModule) -> QuantizedGrap
     quantized = QuantizedGraphModule(quantized_root, quantized.graph, quantized_root.preserved_attr_names)
     return quantized
 
+def duplicate_dequantize_node(quantized: QuantizedGraphModule) -> QuantizedGraphModule:
+    """
+    If a dequantize node has multiple uses, duplicate it and create one dequantize node for each use.
+    This is to enable the pattern matching to map from individual quant - dequant - ref_module to
+    final quantized module.
+    """
+    quantized_root = quantized
+    for node in quantized.graph.nodes:
+        if (node.op == "call_method" and node.target == "dequantize" or
+           (node.op == "call_function" and node.target == torch.dequantize)):
+            users = list(node.users)
+            if len(users) > 1:
+                for user in users:
+                    with quantized.graph.inserting_before(node):
+                        new_node = quantized.graph.create_node("call_method", "dequantize", node.args, {})
+                    user.replace_input_with(node, new_node)
+                quantized.graph.erase_node(node)
+
+    quantized = QuantizedGraphModule(quantized_root, quantized.graph, quantized_root.preserved_attr_names)
+    return quantized
+
+def remove_extra_dequantize(quantized: QuantizedGraphModule) -> QuantizedGraphModule:
+    """
+    Removes duplicate dequant nodes in the graph, for an operator that has multiple dequant nodes as a user,
+    replace them with a single dequant node that can be shared across all the uses.
+    """
+    quantized_root = quantized
+    for node in quantized.graph.nodes:
+        users = list(node.users)
+        dequant_users = [user for user in node.users if user.op == "call_method" and user.target == "dequantize" or
+                         (user.op == "call_function" and user.target == torch.dequantize)]
+
+        if len(dequant_users) > 1:
+            with quantized.graph.inserting_after(node):
+                unique_dq = quantized.graph.create_node("call_method", "dequantize", users[0].args, {})
+            for dequant in dequant_users:
+                dequant.replace_all_uses_with(unique_dq)
+                quantized.graph.erase_node(dequant)
+
+    quantized = QuantizedGraphModule(quantized_root, quantized.graph, quantized_root.preserved_attr_names)
+    return quantized
+
+
 def restore_state(
         observed: GraphModule
 ) -> Tuple[Dict[Pattern, QuantizeHandler], Dict[str, Tuple[str, type]], Dict[str, Any]]:
@@ -595,7 +638,9 @@ def convert(model: GraphModule, is_reference: bool = False,
     preserved_attributes = set(convert_custom_config_dict.get("preserved_attributes", []))
     model = QuantizedGraphModule(model, act_post_process_removed_graph, preserved_attributes)
     if not is_reference:
+        model = duplicate_dequantize_node(model)
         model = fold_weight(model, node_name_to_scope)
         model = lower_to_fbgemm(model)
         model = remove_quant_dequant_pairs(model)
+        model = remove_extra_dequantize(model)
     return model
