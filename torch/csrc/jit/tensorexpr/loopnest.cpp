@@ -3805,8 +3805,10 @@ void LoopNest::randomTransform(int64_t seed) {
               randomization_helper::indexOf(loops, first_loop);
           std::string second_index =
               randomization_helper::indexOf(loops, second_loop);
-          message = "reorderAxis(loops[" + first_index + "], loops[" +
-              second_index + "]);\n";
+          message = "reorderAxis(loops[";
+          message += first_index;
+          message += "], loops[";
+          message += second_index + "]);\n";
           randomization_helper::printHistory(i, message);
           // reorder the axis
           reorderAxis(first_loop, second_loop);
@@ -3838,6 +3840,7 @@ void LoopNest::randomTransform(int64_t seed) {
 
           // Generate a good history message
           std::vector<std::string> indices;
+          indices.reserve(nested_loops.size());
           for (const auto& l : nested_loops) {
             indices.push_back(randomization_helper::indexOf(loops, l));
           }
@@ -3886,10 +3889,12 @@ void LoopNest::randomTransform(int64_t seed) {
               randomization_helper::indexOf(loops, x_loop);
           std::string y_loop_index =
               randomization_helper::indexOf(loops, y_loop);
-          message =
-              "tile(loops[" + x_loop_index + "], loops[" + y_loop_index + "], ";
-          message += std::to_string(x_factor) + ", " +
-              std::to_string(y_factor) + ");\n";
+          message = "tile(loops[";
+          message += x_loop_index;
+          message += "], loops[";
+          message += y_loop_index + "], ";
+          message += std::to_string(x_factor);
+          message += ", " + std::to_string(y_factor) + ");\n";
           randomization_helper::printHistory(i, message);
           // tile
           tile(x_loop, y_loop, x_factor, y_factor);
@@ -3944,6 +3949,7 @@ void LoopNest::randomTransform(int64_t seed) {
 
           // Generate a good history message
           std::vector<std::string> indices;
+          indices.reserve(nested_loops.size());
           for (const auto& l : nested_loops) {
             indices.push_back(randomization_helper::indexOf(loops, l));
           }
