@@ -2857,6 +2857,23 @@ def sample_inputs_max_min_binary(op_info, device, dtype, requires_grad, **kwargs
                   for input_tensor, other_tensor in args_for_binary_op)
     return inputs
 
+
+def sample_inputs_adaptive_avg_pool1d(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # Ordered as (input shape, output size)
+    cases = (
+        ((0, 8, 8), (5,)),
+        ((3, 8, 8), 5),
+        ((3, 8, 8), 1)
+    )
+
+    def generator():
+        for input_shape, output_size in cases:
+            yield SampleInput(make_arg(input_shape), args=(output_size,))
+
+    return list(generator())
+
 def sample_inputs_adaptive_avg_pool2d(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -2875,20 +2892,6 @@ def sample_inputs_adaptive_avg_pool2d(op_info, device, dtype, requires_grad, **k
 
     return list(generator())
 
-def sample_inputs_adaptive_avg_pool1d(op_info, device, dtype, requires_grad, **kwargs):
-    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-
-    # Ordered as (input shape, output size)
-    cases = (
-        ((0, 8, 8), (5,)),
-        ((3, 8, 8), 5),
-    )
-
-    def generator():
-        for input_shape, output_size in cases:
-            yield SampleInput(make_arg(input_shape), args=(output_size,))
-
-    return list(generator())
 
 def sample_inputs_adaptive_avg_pool3d(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -2897,6 +2900,7 @@ def sample_inputs_adaptive_avg_pool3d(op_info, device, dtype, requires_grad, **k
     cases = (
         ((0, 8, 8, 8, 8), (5, 7, 4)),
         ((1, 8, 4, 3, 7), (None, None, None)),
+        ((1, 8, 4, 3, 7), (1, 1, 1)),
         ((3, 3, 8, 8, 6), (5, 7, None)),
         ((1, 3, 8, 8, 6), (5, None, 2)),
         ((3, 3, 8, 8, 6), (None, 3, 2)),
@@ -2907,6 +2911,65 @@ def sample_inputs_adaptive_avg_pool3d(op_info, device, dtype, requires_grad, **k
             yield SampleInput(make_arg(input_shape), args=(output_size,))
 
     return list(generator())
+
+def sample_inputs_adaptive_max_pool1d(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # Ordered as (input shape, output size)
+    cases = (
+    #    ((0, 8, 8), (5,)),
+    #    0 batch size doesn't work,  cannot reshape tensor of 0 elements into shape [0, 8, -1]
+        ((3, 8, 8), 5),
+        ((3, 8, 8), 1)
+    )
+    def generator():
+        for shapes, return_idx in product(cases, (True, False)):
+            yield SampleInput(make_arg(shapes[0]), args=(shapes[1], return_idx))
+
+    return list(generator())
+
+def sample_inputs_adaptive_max_pool2d(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # Ordered as (input shape, output size)
+    cases = (
+    #    ((0, 8, 8, 8), (5, 7)),
+    #    0 batch size doesn't work,  cannot reshape tensor of 0 elements into shape [0, 8, -1]
+        ((1, 8, 8, 8), (5, 7)),
+        ((2, 8, 8, 8), (None, 7)),
+        ((2, 8, 8, 8), (1, 1)),
+        ((1, 8, 4, 3), (5, None)),
+        ((1, 8, 4, 3), (None, None)),
+        ((1, 8, 4, 3), (5)),
+    )
+
+    def generator():
+        for shapes, return_idx in product(cases, (True, False)):
+            yield SampleInput(make_arg(shapes[0]), args=(shapes[1], return_idx))
+
+    return list(generator())
+
+
+def sample_inputs_adaptive_max_pool3d(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # Ordered as (input shape, output size)
+    cases = (
+    #    ((0, 8, 8, 8, 8), (5, 7, 4)),
+    #    0 batch size doesn't work,  cannot reshape tensor of 0 elements into shape [0, 8, -1]
+        ((1, 8, 4, 3, 7), (None, None, None)),
+        ((1, 8, 4, 3, 7), (1, 1, 1)),
+        ((3, 3, 8, 8, 6), (5, 7, None)),
+        ((1, 3, 8, 8, 6), (5, None, 2)),
+        ((3, 3, 8, 8, 6), (None, 3, 2)),
+    )
+
+    def generator():
+        for shapes, return_idx in product(cases, (True, False)):
+            yield SampleInput(make_arg(shapes[0]), args=(shapes[1], return_idx))
+
+    return list(generator())
+
 
 def sample_inputs_max_pool2d(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -8394,23 +8457,6 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_cosine_similarity),
-    OpInfo('nn.functional.adaptive_avg_pool2d',
-           dtypes=floating_types(),
-           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
-           skips=(
-               # RuntimeError:
-               # adaptive_avg_pool2d(Tensor input, int[2] output_size) -> (Tensor):
-               # Expected a value of type 'List[int]' for argument 'output_size' but
-               # instead found type 'Tuple[NoneType, int]'. :
-               #   File "<string>", line 3
-               # def the_method(i0):
-               #     return torch.nn.functional.adaptive_avg_pool2d(i0, (None, 7))
-               #            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-           ),
-           supports_out=False,
-           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
-           sample_inputs_func=sample_inputs_adaptive_avg_pool2d),
     OpInfo('nn.functional.adaptive_avg_pool1d',
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
@@ -8430,6 +8476,23 @@ op_db: List[OpInfo] = [
            supports_out=False,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=sample_inputs_adaptive_avg_pool1d),
+    OpInfo('nn.functional.adaptive_avg_pool2d',
+           dtypes=floating_types(),
+           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+           skips=(
+               # RuntimeError:
+               # adaptive_avg_pool2d(Tensor input, int[2] output_size) -> (Tensor):
+               # Expected a value of type 'List[int]' for argument 'output_size' but
+               # instead found type 'Tuple[NoneType, int]'. :
+               #   File "<string>", line 3
+               # def the_method(i0):
+               #     return torch.nn.functional.adaptive_avg_pool2d(i0, (None, 7))
+               #            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+           ),
+           supports_out=False,
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           sample_inputs_func=sample_inputs_adaptive_avg_pool2d),
     OpInfo('nn.functional.adaptive_avg_pool3d',
            dtypesIfCPU=floating_types_and(torch.half),
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
@@ -8449,6 +8512,61 @@ op_db: List[OpInfo] = [
            supports_out=False,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=sample_inputs_adaptive_avg_pool3d),
+    OpInfo('nn.functional.adaptive_max_pool1d',
+           dtypes=floating_types(),
+           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+           skips=(
+               # RuntimeError:
+               # adaptive_avg_pool3d(Tensor input, int[3] output_size) -> (Tensor):
+               # Expected a value of type 'List[int]' for argument 'output_size' but
+               # instead found type 'Tuple[NoneType, NoneType]'. :
+               #   File "<string>", line 3
+               #
+               # def the_method(i0):
+               #     return torch.nn.functional.adaptive_avg_pool2d(i0, (None, None, None))
+               #            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
+               #
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+           ),
+           supports_out=False,
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           sample_inputs_func=sample_inputs_adaptive_max_pool1d),
+    OpInfo('nn.functional.adaptive_max_pool2d',
+           dtypes=floating_types(),
+           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+           skips=(
+               # RuntimeError:
+               # adaptive_avg_pool2d(Tensor input, int[2] output_size) -> (Tensor):
+               # Expected a value of type 'List[int]' for argument 'output_size' but
+               # instead found type 'Tuple[NoneType, int]'. :
+               #   File "<string>", line 3
+               # def the_method(i0):
+               #     return torch.nn.functional.adaptive_avg_pool2d(i0, (None, 7))
+               #            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+           ),
+           supports_out=False,
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           sample_inputs_func=sample_inputs_adaptive_max_pool2d),
+    OpInfo('nn.functional.adaptive_max_pool3d',
+           dtypesIfCPU=floating_types(),
+           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+           skips=(
+               # RuntimeError:
+               # adaptive_avg_pool3d(Tensor input, int[3] output_size) -> (Tensor):
+               # Expected a value of type 'List[int]' for argument 'output_size' but
+               # instead found type 'Tuple[NoneType, NoneType, NoneType]'. :
+               #   File "<string>", line 3
+               #
+               # def the_method(i0):
+               #     return torch.nn.functional.adaptive_avg_pool3d(i0, (None, None, None))
+               #            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
+               #
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+           ),
+           supports_out=False,
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           sample_inputs_func=sample_inputs_adaptive_max_pool3d),
     OpInfo('nn.functional.avg_pool1d',
            aten_name='avg_pool1d',
            supports_autograd=True,
