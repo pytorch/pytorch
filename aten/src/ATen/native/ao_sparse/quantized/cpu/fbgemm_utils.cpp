@@ -1,3 +1,5 @@
+#include "torch/custom_class.h"
+#include "torch/library.h"
 #include <ATen/ATen.h>
 
 #include <torch/custom_class.h>
@@ -8,10 +10,10 @@
 
 namespace ao {
 namespace sparse {
-torch::class_<LinearPackedParamsBase> register_linear_params() {
+int register_linear_params() {
   static auto register_linear_params =
-      torch::class_<LinearPackedParamsBase>(
-          "sparse", "LinearPackedParamsBase")
+      torch::selective_class_<LinearPackedParamsBase>(
+          "sparse", TORCH_SELECTIVE_CLASS("LinearPackedParamsBase"))
           .def_pickle(
               [](const c10::intrusive_ptr<LinearPackedParamsBase>& params)
                   -> LinearPackedSerializationType { // __getstate__
@@ -65,7 +67,8 @@ torch::class_<LinearPackedParamsBase> register_linear_params() {
 #endif // USE_FBGEMM
                 TORCH_CHECK(false, "Unknown qengine");
               });
-  return register_linear_params;
+  // Dummy return so that this function can be called from a global scope ensuring class is registered
+  return 0;
 }
 
 namespace {
