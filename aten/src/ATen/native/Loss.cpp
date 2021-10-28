@@ -1,7 +1,8 @@
+#include "ATen/core/Reduction.h"
+#include "c10/util/Exception.h"
 #include <ATen/ATen.h>
 #include <ATen/CPUApplyUtils.h>
 #include <ATen/Dispatch.h>
-#include <ATen/MetaFunctions.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/PointwiseOps.h>
@@ -32,14 +33,8 @@ TORCH_META_FUNC(smooth_l1_loss)
     return;
   }
 
-  Tensor reduction_output;
-  if (reduction == Reduction::Mean) {
-    reduction_output = at::meta::mean(maybe_get_output(), 0);
-  }
-  if (reduction == Reduction::Sum) {
-    reduction_output = at::meta::sum(maybe_get_output(), 0);
-  }
-  at::native::resize_(maybe_get_output(), reduction_output.sizes());
+  TORCH_INTERNAL_ASSERT(reduction == Reduction::Mean || reduction == Reduction::Sum);
+  MetaBase::set_output({}, input.options());
 }
 
 } // namespace meta
