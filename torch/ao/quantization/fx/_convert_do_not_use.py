@@ -35,6 +35,14 @@ from torch.ao.quantization.quantize import (
 
 from .convert import restore_state
 
+# these are tuples so that they can work with isinstance(module, tuple_of_classes)
+WEIGHTED_MODULE_CLASSES = (
+    torch.nn.Linear,
+    torch.nn.Conv1d,
+    torch.nn.Conv2d,
+    torch.nn.Conv3d
+)
+
 FUSED_MODULE_CLASSES = (
     torch.nn.intrinsic.LinearReLU,
     torch.nn.intrinsic.ConvReLU1d,
@@ -187,11 +195,8 @@ def _convert_do_not_use(
         elif node.op == "call_module":
             if is_activation_post_process(modules[node.target]):
                 replace_observer_with_quantize_dequantize_node(model.graph, node, modules)
-            elif type(modules[node.target]) in set([
-                    torch.nn.Linear,
-                    torch.nn.Conv1d,
-                    torch.nn.Conv2d,
-                    torch.nn.Conv3d]).union(QAT_MODULE_CLASSES).union(FUSED_MODULE_CLASSES):
+            elif type(modules[node.target]) in set(
+                    WEIGHTED_MODULE_CLASSES).union(QAT_MODULE_CLASSES).union(FUSED_MODULE_CLASSES):
                 # TODO: refactor this part to a function
                 original_module = modules[node.target]
                 qconfig = original_module.qconfig
