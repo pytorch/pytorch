@@ -82,7 +82,7 @@
     [self cleanup];
     TORCH_CHECK(
         false,
-        "Error compiling model",
+        "Error compiling the MLModel",
         [error localizedDescription].UTF8String);
     return NO;
   }
@@ -104,7 +104,9 @@
   }
   if (error || !_mlModel) {
     TORCH_CHECK(
-        false, "Error loading MLModel", error.localizedDescription.UTF8String);
+        false,
+        "Error loading the MLModel",
+        error.localizedDescription.UTF8String);
   }
 
   _compiledModelPath = compiledModelPath.path;
@@ -135,7 +137,7 @@
 
     return outputFeature;
   } else {
-    TORCH_CHECK(false, "Core ML is available on iOS 11.0 and above");
+    TORCH_CHECK(false, "Core ML is not available on your device");
     return nil;
   }
 }
@@ -163,7 +165,7 @@
     // https://developers.google.com/protocol-buffers/docs/pythontutorial#parsing-and-serialization
     NSData* data = [NSData dataWithBytes:spec.c_str() length:spec.length()];
     BOOL ret = [data writeToFile:modelPath atomically:YES];
-    TORCH_CHECK(ret, "Save MLModel failed!", modelPath.UTF8String);
+    TORCH_CHECK(ret, "Error saving the MLModel", modelPath.UTF8String);
   }
   return modelPath;
 }
