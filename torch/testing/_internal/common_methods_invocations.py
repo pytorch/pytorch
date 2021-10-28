@@ -2832,6 +2832,33 @@ def sample_inputs_sort(op_info, device, dtype, requires_grad, **kwargs):
                    kwargs=dict(dim=0, descending=True, stable=True)))
     return samples
 
+def sample_inputs_threshold(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+    sizes = ((), (S,), (S, S), (S, S, S), (S, S, S, S))
+    samples = []
+    for x_size in sizes:
+        # threshold and values args must be numbers
+        samples.append(SampleInput(make_arg(x_size), args=(make_arg(()).item(), make_arg(()).item())))
+    return samples
+
+def sample_inputs_celu(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+    sizes = ((), (S,), (S, S), (S, S, S), (S, S, S, S))
+    samples = []
+    # in place ops cause errors for autograd
+    inplace_options = [False] if requires_grad else [False, True]
+
+    # in place op errors on CPU don't work because we share the data with numpy
+    if device == 'cpu':
+        inplace_options = [False]
+
+    for (x_size, inplace) in product(sizes, inplace_options):
+        samples.append(SampleInput(make_arg(x_size), kwargs={'alpha': 0.5, 'inplace': inplace}))
+        samples.append(SampleInput(make_arg(x_size), kwargs={'alpha': 0.5}))
+        samples.append(SampleInput(make_arg(x_size), kwargs={'inplace': inplace}))
+        samples.append(SampleInput(make_arg(x_size)))
+    return samples
+
 def sample_inputs_argsort(*args, **kwargs):
     return [sample_input for sample_input in sample_inputs_sort(*args, **kwargs) if "stable" not in sample_input.kwargs]
 
@@ -6898,6 +6925,11 @@ def reference_logsigmoid(x):
         -np.log1p(np.exp(-x)))
 
 
+def reference_hardsigmoid(x):
+    y = np.where(x <= -3, 0, x)
+    return np.where(y >= 3, 1, y / 6 + 0.5)
+
+
 def reference_lgamma(x):
     # scipy.special.gammaln returns `-inf` when input is `-inf`.
     # While Pytorch, C and C++, all return `inf` when input is `-inf`.
@@ -9382,6 +9414,28 @@ op_db: List[OpInfo] = [
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            supports_forward_ad=True,
            supports_out=False),
+    OpInfo(
+        'nn.functional.celu',
+        ref=lambda x, alpha=1.0, inplace=False: np.maximum(0., x) + np.minimum(0., alpha * (np.exp(x / alpha) - 1)),
+        dtypes=floating_types(),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        supports_forward_ad=False,
+        supports_autograd=True,
+        assert_autodiffed=False,
+        supports_gradgrad=True,
+        supports_out=False,
+        sample_inputs_func=sample_inputs_celu
+    ),
+    UnaryUfuncInfo(
+        'nn.functional.hardsigmoid',
+        ref=reference_hardsigmoid,
+        dtypes=floating_types(),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        supports_autograd=True,
+        supports_gradgrad=False,
+        # technically takes `inplace` kwarg, but supports_out only works with `out`
+        supports_out=False,
+    ),
     UnaryUfuncInfo(
         'nn.functional.logsigmoid',
         aten_name="log_sigmoid",
@@ -9392,6 +9446,77 @@ op_db: List[OpInfo] = [
         assert_autodiffed=False,
         supports_gradgrad=True,
         supports_out=False,
+    ),
+    UnaryUfuncInfo(
+        'nn.functional.mish',
+        ref=lambda x: x * np.tanh(reference_softplus(x)),
+        dtypes=floating_types(),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        supports_forward_ad=False,
+        supports_autograd=True,
+        assert_autodiffed=False,
+        supports_gradgrad=True,
+        # technically takes `inplace` kwarg, but supports_out only works with `out`
+        supports_out=False,
+    ),
+    UnaryUfuncInfo(
+        'nn.functional.sigmoid',
+        aten_name="sigmoid",
+        ref=reference_sigmoid,
+        dtypes=all_types_and_complex_and(torch.bfloat16, torch.bool),
+        dtypesIfCUDA=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
+        supports_forward_ad=True,
+        supports_autograd=True,
+        assert_autodiffed=False,
+        supports_gradgrad=True,
+        supports_out=False,
+    ),
+    UnaryUfuncInfo(
+        'nn.functional.softsign',
+        ref=lambda x: x / (x.abs() + 1),
+        dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
+        dtypesIfCUDA=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
+        supports_forward_ad=True,
+        supports_autograd=True,
+        assert_autodiffed=False,
+        supports_gradgrad=True,
+        supports_out=False,
+    ),
+    UnaryUfuncInfo(
+        'nn.functional.tanh',
+        ref=np.tanh,
+        dtypes=all_types_and_complex_and(torch.bfloat16, torch.bool),
+        dtypesIfCUDA=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
+        supports_forward_ad=True,
+        supports_autograd=True,
+        assert_autodiffed=False,
+        supports_gradgrad=True,
+        supports_out=False,
+    ),
+    UnaryUfuncInfo(
+        # separate from torch.tanh because this is deprecated
+        'nn.functional.tanhshrink',
+        ref=lambda x: x - np.tanh(x),
+        dtypes=all_types_and_complex_and(torch.bfloat16),
+        dtypesIfCUDA=all_types_and_complex_and(torch.float16, torch.bfloat16),
+        supports_forward_ad=True,
+        supports_autograd=True,
+        assert_autodiffed=False,
+        supports_gradgrad=True,
+        supports_out=False,
+    ),
+    OpInfo(
+        # separate from torch.tanh because this is deprecated
+        'nn.functional.threshold',
+        ref=lambda x, threshold, value: np.where(x > threshold, x, value).astype(x.dtype),
+        dtypes=all_types_and(torch.bfloat16),
+        dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
+        supports_forward_ad=False,
+        supports_autograd=True,
+        assert_autodiffed=False,
+        supports_gradgrad=True,
+        supports_out=False,
+        sample_inputs_func=sample_inputs_threshold,
     ),
     OpInfo('nextafter',
            dtypes=floating_types_and(torch.bfloat16),
