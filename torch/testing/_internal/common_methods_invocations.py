@@ -8460,19 +8460,6 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.adaptive_avg_pool1d',
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
-           skips=(
-               # RuntimeError:
-               # adaptive_avg_pool3d(Tensor input, int[3] output_size) -> (Tensor):
-               # Expected a value of type 'List[int]' for argument 'output_size' but
-               # instead found type 'Tuple[NoneType, NoneType]'. :
-               #   File "<string>", line 3
-               #
-               # def the_method(i0):
-               #     return torch.nn.functional.adaptive_avg_pool2d(i0, (None, None, None))
-               #            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
-               #
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-           ),
            supports_out=False,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=sample_inputs_adaptive_avg_pool1d),
@@ -8515,19 +8502,6 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.adaptive_max_pool1d',
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
-           skips=(
-               # RuntimeError:
-               # adaptive_avg_pool3d(Tensor input, int[3] output_size) -> (Tensor):
-               # Expected a value of type 'List[int]' for argument 'output_size' but
-               # instead found type 'Tuple[NoneType, NoneType]'. :
-               #   File "<string>", line 3
-               #
-               # def the_method(i0):
-               #     return torch.nn.functional.adaptive_avg_pool2d(i0, (None, None, None))
-               #            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
-               #
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-           ),
            supports_out=False,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=sample_inputs_adaptive_max_pool1d),
@@ -8536,12 +8510,12 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            skips=(
                # RuntimeError:
-               # adaptive_avg_pool2d(Tensor input, int[2] output_size) -> (Tensor):
+               # adaptive_max_pool2d(Tensor input, int[2] output_size) -> (Tensor):
                # Expected a value of type 'List[int]' for argument 'output_size' but
                # instead found type 'Tuple[NoneType, int]'. :
                #   File "<string>", line 3
                # def the_method(i0):
-               #     return torch.nn.functional.adaptive_avg_pool2d(i0, (None, 7))
+               #     return torch.nn.functional.adaptive_max_pool2d(i0, (None, 7))
                #            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
            ),
@@ -8553,13 +8527,13 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            skips=(
                # RuntimeError:
-               # adaptive_avg_pool3d(Tensor input, int[3] output_size) -> (Tensor):
+               # adaptive_max_pool3d(Tensor input, int[3] output_size) -> (Tensor):
                # Expected a value of type 'List[int]' for argument 'output_size' but
                # instead found type 'Tuple[NoneType, NoneType, NoneType]'. :
                #   File "<string>", line 3
                #
                # def the_method(i0):
-               #     return torch.nn.functional.adaptive_avg_pool3d(i0, (None, None, None))
+               #     return torch.nn.functional.adaptive_max_pool3d(i0, (None, None, None))
                #            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
                #
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
