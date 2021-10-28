@@ -12,7 +12,7 @@
 #include <ATen/cuda/CUDAConfig.h>
 
 #if AT_CUDNN_ENABLED()
-#include <ATen/cudnn/cudnn-wrapper.h>
+#include <cudnn_version.h>
 #endif
 
 #endif
