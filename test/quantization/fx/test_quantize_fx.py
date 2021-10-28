@@ -181,15 +181,21 @@ class BinaryOpRelu(torch.nn.Module):
 def _user_func_with_complex_return_type(x):
     return list(torch.split(x, 1, 1))
 
-def lower_to_trt(model, sample_input, shape_ranges):
+def lower_to_trt(model, inputs, shape_ranges):
     """ Lower a quantized model to TensorRT
     """
-    model = acc_tracer.trace(model, [sample_input])  # type: ignore[attr-defined]
+    assert len(inputs) == 1, "lower_to_trt only works for one input currently"
+    model = acc_tracer.trace(model, inputs)  # type: ignore[attr-defined]
+    # TODO: test multiple inputs setting and enable multiple inputs
+    input_specs = [
+        InputTensorSpec(
+            torch.Size([-1, *inputs[0].shape[1:]]), torch.float,
+            shape_ranges=shape_ranges, has_batch_dim=True)
+    ]
+
     interp = TRTInterpreter(
         model,
-        [InputTensorSpec(
-            torch.Size([-1, *sample_input.shape[1:]]), torch.float,
-            shape_ranges=shape_ranges, has_batch_dim=True)],
+        input_specs,
         explicit_batch_dimension=True, explicit_precision=True)
     engine, input_names, output_names = interp.run(fp16_mode=False, int8_mode=True)
     trt_mod = TRTModule(engine, input_names, output_names)
@@ -5305,6 +5311,42 @@ class TestQuantizeFxOps(QuantizationTestCase):
         m(data)
         # make sure everything runs
 
+    def test_ref_pattern_multi_use(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 5)
+                self.linear1 = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                y = self.linear(x)
+                z = self.linear1(x)
+                a = torch.mul(z, 5)
+                b = torch.add(z, 5)
+                return (y, a, b)
+
+        m = M().eval()
+        qconfig_dict = {
+            "": None,
+            "object_type": [
+                (torch.nn.Linear, get_default_qconfig("fbgemm")),
+                (torch.nn.ReLU, get_default_qconfig("fbgemm")),
+            ],
+        }
+        m = prepare_fx(m, qconfig_dict)
+        m = convert_fx(m)
+        expected_occurrence = {
+            ns.call_function(torch.quantize_per_tensor): 1,
+            ns.call_module(nnq.Linear): 2,
+            ns.call_method("dequantize"): 2,
+            ns.call_function(torch.add): 1,
+            ns.call_function(torch.mul): 1,
+        }
+        self.checkGraphModuleNodes(
+            m,
+            expected_node_occurrence=expected_occurrence)
+
+
 class TestQuantizeFxOpsNew(QuantizationTestCase):
     def test_ops(self):
         class M(torch.nn.Module):
@@ -5345,36 +5387,94 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
             ),
             weight=torch.ao.quantization.default_weight_observer
         )
-        self.backend_config_dict = get_tensorrt_backend_config_dict()
+        self.trt_backend_config_dict = get_tensorrt_backend_config_dict()
+
+    def _test_module(
+            self,
+            m,
+            inputs,
+            shape_ranges,
+            no_prepare=None,
+            no_convert=None):
+        """
+        Args:
+          m: the float module we want to test
+          inputs: list of inputs for the module
+          shape_ranges: a list of shape_range, where every shape_range is a tuple of
+          three tuples
+          ((min_input_shape), (optimized_input_shape), (max_input_shape)).
+          Each shape_range is used to populate a TensorRT optimization profile.
+          e.g. If the input shape varies from (1, 224) to (100, 224) and we want to optimize
+          for (25, 224) because it's the most common input shape, then we set shape_ranges to
+          ((1, 224), (25, 225), (100, 224))
+          no_prepare: node occurrence after prepare
+          no_convert: node occurrence after convert
+        """
+        m = m.eval()
+        prepared = prepare_fx(m, {"": self.qconfig}, backend_config_dict=self.trt_backend_config_dict)
+        self.checkGraphModuleNodes(prepared, expected_node_occurrence=no_prepare)
+        # calibration
+        prepared(*inputs)
+        quantized = _convert_fx_do_not_use(prepared, is_reference=True)
+        self.checkGraphModuleNodes(quantized, expected_node_occurrence=no_convert)
+        # lower to trt
+        trt_mod = lower_to_trt(quantized, inputs, shape_ranges)
+        inputs_cuda = [i.cuda() for i in inputs]
+        # make sure it runs
+        trt_mod(*inputs_cuda)
+
 
     def test_conv(self):
-        class Conv2d(torch.nn.Module):
-            def __init__(self, *args):
+        class Conv2dModule(torch.nn.Module):
+            def __init__(self):
                 super().__init__()
-                self.conv = torch.nn.Conv2d(*args)
+                self.conv = torch.nn.Conv2d(3, 3, 3)
 
             def forward(self, x):
                 return self.conv(x)
 
         conv2d_input = torch.rand(1, 3, 224, 224)
-        conv2d_module_args = (3, 3, 3)
-
-        m = Conv2d(*conv2d_module_args).eval()
-        prepared = prepare_fx(m, {"": self.qconfig}, backend_config_dict=self.backend_config_dict)
-        # calibration
-        prepared(conv2d_input)
-        quantized = _convert_fx_do_not_use(prepared, is_reference=True)
-        node_occurrence = {
+        no_convert = {
             ns.call_function(torch.quantize_per_tensor): 2,
             ns.call_method("dequantize"): 2
         }
-        self.checkGraphModuleNodes(quantized, expected_node_occurrence=node_occurrence)
-        # lower to trt
-        trt_mod = lower_to_trt(quantized, conv2d_input, [((1, 3, 224, 224), (5, 3, 224, 224), (10, 3, 224, 224))])
-        # make sure it runs
-        trt_mod(conv2d_input.cuda())
+        self._test_module(
+            Conv2dModule(),
+            [conv2d_input],
+            [((1, 3, 224, 224),
+              (5, 3, 224, 224),
+              (10, 3, 224, 224))],
+            no_convert=no_convert)
 
     def test_linear(self):
+        class LinearModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 10)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        linear_input = torch.rand(8, 5)
+
+        shape_ranges = [
+            ((1, 5),
+             (5, 5),
+             (10, 5))
+        ]
+        no_convert = {
+            ns.call_function(torch.quantize_per_tensor): 2,
+            ns.call_method("dequantize"): 2,
+        }
+        self._test_module(
+            LinearModule(),
+            [linear_input],
+            shape_ranges,
+            no_convert=no_convert)
+
+    def test_unsupported_qconfig(self):
+        """ Check that we won't quantize the model if the qconfig is not supported
+        """
         class LinearModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -5386,24 +5486,19 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
         linear_module_input = torch.rand(8, 5)
 
         m = LinearModule().eval()
-        prepared = prepare_fx(m, {"": self.qconfig}, backend_config_dict=self.backend_config_dict)
+        trt_unsupported_qconfig = default_qconfig
+        prepared = prepare_fx(m, {"": trt_unsupported_qconfig}, backend_config_dict=self.trt_backend_config_dict)
         # calibration
         prepared(linear_module_input)
         quantized = _convert_fx_do_not_use(prepared, is_reference=True)
         node_occurrence = {
-            ns.call_function(torch.quantize_per_tensor): 2,
-            ns.call_method("dequantize"): 2,
+            ns.call_function(torch.quantize_per_tensor): 0,
+            ns.call_method("dequantize"): 0,
+            ns.call_module(torch.nn.Linear): 1,
+            ns.call_module(torch.nn.quantized._reference.Linear): 0,
         }
+        # check model is not quantized
         self.checkGraphModuleNodes(quantized, expected_node_occurrence=node_occurrence)
-        # lower to trt
-        trt_mod = lower_to_trt(
-            quantized,
-            linear_module_input,
-            [((1, *linear_module_input.shape[1:]),
-              (5, *linear_module_input.shape[1:]),
-              (10, *linear_module_input.shape[1:]))])
-        # make sure it runs
-        trt_mod(linear_module_input.cuda())
 
 class TestQuantizeFxModels(QuantizationTestCase):
     @skipIfNoFBGEMM

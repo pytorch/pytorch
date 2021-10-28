@@ -41,18 +41,13 @@ static void convolution_q8(benchmark::State& state, const char* net, bool per_ch
   const size_t inputPixelStride = groups * groupInputChannels;
   const size_t effectiveKernelHeight = (kernelHeight - 1) * dilation + 1;
   const size_t effectiveKernelWidth = (kernelWidth - 1) * dilation + 1;
-  const size_t paddingLeft = effectiveKernelWidth / 2;
-  const size_t paddingTop = effectiveKernelHeight / 2;
-  const size_t paddingRight = effectiveKernelWidth - 1 - paddingLeft;
-  const size_t paddingBottom = effectiveKernelHeight - 1 - paddingTop;
+  const size_t paddingWidth = effectiveKernelWidth / 2;
+  const size_t paddingHeight = effectiveKernelHeight / 2;
   const size_t outputHeight =
-      (paddingTop + inputHeight + paddingBottom - effectiveKernelHeight) /
-          subsampling +
+      (inputHeight + paddingHeight * 2 - effectiveKernelHeight) / subsampling +
       1;
   const size_t outputWidth =
-      (paddingLeft + inputWidth + paddingRight - effectiveKernelWidth) /
-          subsampling +
-      1;
+      (inputWidth + paddingWidth * 2 - effectiveKernelWidth) / subsampling + 1;
 
   std::vector<uint8_t> input(
       batchSize * inputHeight * inputWidth * inputPixelStride);
@@ -78,10 +73,8 @@ static void convolution_q8(benchmark::State& state, const char* net, bool per_ch
   std::vector<float> requantization_scale(
       num_zero_points_padded, 0.5 * 0.5 / 0.5);
   status = pytorch_qnnp_create_convolution2d_nhwc_q8(
-      paddingTop,
-      paddingRight,
-      paddingBottom,
-      paddingLeft,
+      paddingHeight,
+      paddingWidth,
       kernelHeight,
       kernelWidth,
       subsampling,

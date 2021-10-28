@@ -6,12 +6,14 @@ import torch
 import torch.fx
 from torch.fx.node import _get_qualified_name
 from torch.fx.passes.shape_prop import TensorMetadata
+import numpy
 
 
 class TRTInterpreterResult(NamedTuple):
     engine: Any
     input_names: Sequence[str]
     output_names: Sequence[str]
+    serialized_cache: bytearray
 
 
 # Borrowed from torch2trt
@@ -420,6 +422,7 @@ class TRTInterpreter(torch.fx.Interpreter):
         force_fp32_output=False,
         strict_type_constraints=False,
         algorithm_selector=None,
+        timing_cache=None,
     ) -> TRTInterpreterResult:
         # For float outputs, we set their dtype to fp16 only if fp16_mode=True and
         # force_fp32_output=False.
@@ -437,6 +440,13 @@ class TRTInterpreter(torch.fx.Interpreter):
         self.builder.max_batch_size = max_batch_size
         builder_config = self.builder.create_builder_config()
         builder_config.max_workspace_size = max_workspace_size
+
+        cache = None
+        if timing_cache:
+            cache_file = numpy.array(timing_cache)
+            cache = builder_config.create_timing_cache(cache_file.tobytes())
+            builder_config.set_timing_cache(cache, True)
+
         if fp16_mode:
             builder_config.set_flag(trt.BuilderFlag.FP16)
 
@@ -456,7 +466,11 @@ class TRTInterpreter(torch.fx.Interpreter):
 
         engine = self.builder.build_engine(self.network, builder_config)
         assert engine
-        return TRTInterpreterResult(engine, self._input_names, self._output_names)
+
+        serialized_cache = bytearray(builder_config.get_timing_cache().serialize()) \
+            if builder_config.get_timing_cache() else bytearray()
+
+        return TRTInterpreterResult(engine, self._input_names, self._output_names, serialized_cache)
 
     def run_node(self, n):
         self._cur_node_name = str(n)
