@@ -29,7 +29,6 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-#include "jit/passes/dead_code_elimination.h"
 
 namespace torch {
 namespace jit {
@@ -894,42 +893,6 @@ StmtPtr computeInlineImpl(
       return nullptr;
     }
   }
-
-  // This is a hack and we should instead not throw exceptions in compute-inline
-  // bool failed = false;
-  // try {
-  //   auto t = Stmt::clone(root_stmt_);
-  //   StorePtr relevant_store{nullptr};
-  //   auto stores = NodeFinder<Store>::find(t);
-  //   for (auto s : stores) {
-  //     if (s->buf() == b) {
-  //       auto reductions = NodeFinder<ReduceOp>::find(s);
-  //       if (!reductions.empty()) {
-  //         // Cannot inline a reduction computation
-  //         return false;
-  //       }
-  //       if (relevant_store != nullptr) {
-  //         // Cannot inline Buf with multiple Tensors
-  //         return false;
-  //       }
-  //       relevant_store = s;
-  //     }
-  //   }
-  //   TORCH_INTERNAL_ASSERT(
-  //       relevant_store,
-  //       buildErrorMessage(
-  //           "Cannot find a relevant store to inline a buf in the fuser."));
-
-  //   GRAPH_DEBUG("ComputeInline: Def: ", std::to_string(relevant_store));
-  //   FunctionInliner inliner(relevant_store, output_bufs_);
-  //   t = t->accept_mutator(&inliner);
-  // } catch (...) {
-  //   failed = true;
-  // }
-
-  // if (failed) {
-  //   return false;
-  // }
 
   // Find producers.
   StorePtr relevant_store{nullptr};

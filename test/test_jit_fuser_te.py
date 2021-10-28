@@ -922,8 +922,8 @@ class TestTEFuser(JitTestCase):
 
     def test_relu(self):
         for device in self.devices:
-            x = torch.randn(4, 8, 10, dtype=torch.float, device=device)
-            y = torch.randn(4, 8, 10, dtype=torch.float, device=device)
+            x = torch.randn(4, 4, dtype=torch.float, device=device)
+            y = torch.randn(4, 4, dtype=torch.float, device=device)
 
             ge = self.checkTrace(self.fn_test_relu, (x, y))
             self.assertAllFused(ge.graph_for(x, y))
@@ -1852,10 +1852,10 @@ class TestTEFuser(JitTestCase):
                 xs.grad = None
         torch.testing.assert_close(y, ys)
 
-    # def test_relu_fwd_bwd(self):
-    #     def eager(x):
-    #         return torch.relu(x * 1.01)
-    #     self._test_fwd_bwd(eager)
+    def test_relu_fwd_bwd(self):
+        def eager(x):
+            return torch.relu(x * 1.01)
+        self._test_fwd_bwd(eager)
 
     def test_hardswish_fwd_bwd(self):
         def eager(x):
