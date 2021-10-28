@@ -3,6 +3,8 @@
 functorch
 ===================================
 
+.. currentmodule:: functorch
+
 functorch is `JAX-like <https://github.com/google/jax>`_ composable function transforms for PyTorch.
 
 It aims to provide composable vmap and grad transforms that work with PyTorch modules
@@ -21,7 +23,7 @@ There are a number of use cases that are tricky to do in PyTorch today:
 - efficiently computing Jacobians and Hessians
 - efficiently computing batched Jacobians and Hessians
 
-Composing `vmap`, `grad`, and `vjp` transforms allows us to express the above without designing a separate subsystem for each.
+Composing :func:`vmap`, :func:`grad`, and :func:`vjp` transforms allows us to express the above without designing a separate subsystem for each.
 This idea of composable function transforms comes from the `JAX framework <https://github.com/google/jax>`_.
 
 Read More
