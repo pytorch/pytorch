@@ -27,15 +27,7 @@ struct BuiltinOpFunction : public Function {
     return doc_string_;
   }
 
-  bool isGraphFunction() const override {
-    return false;
-  }
-
   void run(Stack& stack) override {
-    callable_(stack);
-  }
-
-  void run(Stack&& stack) override {
     callable_(stack);
   }
 
@@ -48,19 +40,8 @@ struct BuiltinOpFunction : public Function {
     return res;
   }
 
-  at::IValue operator()(std::vector<at::IValue> stack, const Kwargs& kwargs)
-      override {
-    getSchema().checkAndNormalizeInputs(stack, kwargs);
-    callable_(stack);
-    return stack.front();
-  }
-
   const c10::QualifiedName& qualname() const override {
     return name_;
-  }
-
-  const std::string& name() const override {
-    return name_.name();
   }
 
   // if this isn't yet defined, run its method_creator function
@@ -68,22 +49,10 @@ struct BuiltinOpFunction : public Function {
     // nop
   }
 
-  std::shared_ptr<Graph> optimized_graph() const override {
-    TORCH_INTERNAL_ASSERT(false , "BuiltinFunction had a graph requested "
-      "from it. This probably indicates that the JIT calling context needs a "
-      "special case on Function::isGraphFunction()");
-  }
-
-  void clear_execution_info() override {
-    TORCH_INTERNAL_ASSERT(false , "BuiltinFunction had a graph requested "
-      "from it. This probably indicates that the JIT calling context needs a "
-      "special case on Function::isGraphFunction()");
-  }
-
   GraphExecutor& get_executor() override {
     TORCH_INTERNAL_ASSERT(false , "BuiltinFunction had a GraphExecutor requested "
       "from it. This probably indicates that the JIT calling context needs a "
-      "special case on Function::isGraphFunction()");
+      "special case on torch::jit::tryToGraphFunction()");
   }
 
   const c10::FunctionSchema& getSchema() const override {
@@ -92,24 +61,6 @@ struct BuiltinOpFunction : public Function {
 
   size_t num_inputs() const override {
     return schema_.arguments().size();
-  }
-
-  void check_single_output() override {
-    TORCH_CHECK(schema_.returns().size() == 1);
-  }
-
-  std::string pretty_print_schema() const override {
-    #ifdef __NVCC__
-    // Disable the "statement is unreachable" warning
-    #pragma diag_suppress code_is_unreachable
-    #endif
-
-    TORCH_INTERNAL_ASSERT(false);
-    return "";
-
-    #ifdef __NVCC__
-    #pragma diag_default code_is_unreachable
-    #endif
   }
 
   Function& setSchema(c10::FunctionSchema schema) override {

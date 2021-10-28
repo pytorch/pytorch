@@ -35,40 +35,38 @@ struct TORCH_API Function {
     return no_doc_string;
   }
 
-  virtual bool isGraphFunction() const = 0;
+  virtual bool isGraphFunction() const {
+    return false;
+  }
 
   virtual void run(Stack& stack) = 0;
-
-  virtual void run(Stack&& stack) = 0;
 
   virtual c10::intrusive_ptr<c10::ivalue::Future> runAsync(
       Stack& stack,
       TaskLauncher taskLauncher = at::launch) = 0;
 
-  virtual at::IValue operator()(
-      std::vector<at::IValue> stack,
-      const Kwargs& kwargs = Kwargs()) = 0;
+  at::IValue operator()(
+    Stack stack,
+    const Kwargs& kwargs = Kwargs()) {
+    getSchema().checkAndNormalizeInputs(stack, kwargs);
+    run(stack);
+    return stack.front();
+  }
 
   virtual const c10::QualifiedName& qualname() const = 0;
 
-  virtual const std::string& name() const = 0;
+  const std::string& name() const {
+    return qualname().name();
+  }
 
   // if this isn't yet defined, run its method_creator function
   virtual void ensure_defined() = 0;
-
-  virtual std::shared_ptr<Graph> optimized_graph() const = 0;
-
-  virtual void clear_execution_info() = 0;
 
   virtual GraphExecutor& get_executor() = 0;
 
   virtual const c10::FunctionSchema& getSchema() const = 0;
 
   virtual size_t num_inputs() const = 0;
-
-  virtual void check_single_output() = 0;
-
-  virtual std::string pretty_print_schema() const = 0;
 
   virtual Function& setSchema(c10::FunctionSchema schema) = 0;
 
