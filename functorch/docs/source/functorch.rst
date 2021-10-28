@@ -36,7 +36,7 @@ that takes three values and returns three values:
 However, if you want to do something like compute a jacobian over the parameters
 of the model, then there needs to be a way to construct a function where the
 parameters are the inputs to the function.
-That's what :func:`make_functional` and :func:`make_functional_with_buffer` are for:
+That's what :func:`make_functional` and :func:`make_functional_with_buffers` are for:
 given a `torch.nn.Module`, these return a new function that accepts `parameters`
 and the inputs to the Module's forward pass.
 
