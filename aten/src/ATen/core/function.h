@@ -77,11 +77,24 @@ struct TORCH_API Function {
 
   virtual Function& setSchema(c10::FunctionSchema schema) = 0;
 
+  // call() defines how different interpreter implementations interacts with
+  // Function objects. Basically interpreters need to provide a callback to
+  // communicate to Functions what to do if provided a Code object.
+  // Alternatively we could design the signature to return an optional Code
+  // object, but that requires special handling the null case in interpreter
+  // and the fallback behavior is not well defined by interpreter but rather
+  // Function themselves, so a callback approach is more reasonable than
+  // returning values.
+  // If call() returns true, then callback completes successfully, otherwise
+  // call() returns false.
+
+  // Overload for server interpreter, a bailout size is needed for graph executor.
   virtual bool call(Stack&, size_t, c10::function_ref<void(const Code&)>) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(false);
     return false;
   }
 
+  // Overload for mobile interpreter.
   virtual bool call(Stack&, c10::function_ref<void(const mobile::Code&)>) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(false);
     return false;
