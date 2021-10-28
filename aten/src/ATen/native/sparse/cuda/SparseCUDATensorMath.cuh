@@ -1,7 +1,6 @@
 #pragma once
 
 #include <ATen/cuda/detail/TensorInfo.cuh>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <c10/macros/Macros.h>
 
 namespace at { namespace native {

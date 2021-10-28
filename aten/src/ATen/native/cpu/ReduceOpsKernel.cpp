@@ -13,6 +13,7 @@
 #include <ATen/native/cpu/Reduce.h>
 
 #include <c10/util/Optional.h>
+#include <c10/util/irange.h>
 #include <ATen/AccumulateType.h>
 
 namespace at { namespace native { namespace {
@@ -54,7 +55,8 @@ static inline void cpu_cum_base_kernel(const Tensor& result,
     auto* result_data_bytes = data[0];
     const auto* self_data_bytes = data[1];
 
-    for (int64_t i = 0; i < n; ++i) {
+    for (const auto i : c10::irange(n)) {
+      (void)i; //Suppress unused variable warning
       f(
         (scalar_t*)result_data_bytes, result_dim_stride,
         (scalar_t*)self_data_bytes, self_dim_stride, init_val
@@ -77,7 +79,7 @@ static void cumsum_cpu_kernel(const Tensor& result, const Tensor& self, int64_t 
       const scalar_t* self_data, auto self_dim_stride, scalar_t init_val) {
         // NOLINTNEXTLINE(bugprone-signed-char-misuse)
         auto cum_number = (at::acc_type<scalar_t, false>)init_val;
-        for (int64_t i = 0; i < self_dim_size; ++i) {
+        for (const auto i : c10::irange(self_dim_size)) {
           cum_number += self_data[i * self_dim_stride];
           result_data[i * result_dim_stride] = (scalar_t)cum_number;
         }
@@ -96,7 +98,7 @@ static void cumprod_cpu_kernel(const Tensor& result, const Tensor& self, int64_t
       const scalar_t* self_data, auto self_dim_stride, scalar_t init_val) {
         // NOLINTNEXTLINE(bugprone-signed-char-misuse)
         auto cum_number = (at::acc_type<scalar_t, false>)init_val;
-        for (int64_t i = 0; i < self_dim_size; ++i) {
+        for (const auto i : c10::irange(self_dim_size)) {
           cum_number *= self_data[i * self_dim_stride];
           result_data[i * result_dim_stride] = (scalar_t)cum_number;
         }
@@ -114,7 +116,7 @@ static void logcumsumexp_cpu_kernel(Tensor& result, const Tensor& self, int64_t 
       scalar_t* result_data, auto result_dim_stride,
       const scalar_t* self_data, auto self_dim_stride, scalar_t init_val) {
         scalar_t cum_number = (at::acc_type<scalar_t, false>)init_val;
-        for (int64_t i = 0; i < self_dim_size; ++i) {
+        for (const auto i : c10::irange(self_dim_size)) {
           scalar_t x = self_data[i * self_dim_stride];
 
           // Reference : https://www.tensorflow.org/api_docs/python/tf/math/cumulative_logsumexp
@@ -163,24 +165,29 @@ static void std_var_kernel_impl(TensorIterator& iter, int64_t correction, bool t
 }
 
 static void prod_kernel_impl(TensorIterator& iter) {
-  // Workaround for the error: '*' in boolean context, suggest '&&' instead [-Werror=int-in-bool-context]
+  // Workaround for the error: '*' in boolean context, suggest '&&' instead
+  // [-Werror=int-in-bool-context]
   if (iter.dtype() == ScalarType::Bool) {
     using scalar_t = bool;
     binary_kernel_reduce_vec(
-      iter,
-      [=](scalar_t a, scalar_t b) -> scalar_t { return a && b; },
-      [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b) { return a && b; },
-      // NOLINTNEXTLINE(bugprone-argument-comment)
-      /*identity=*/1);
+        iter,
+        [=](scalar_t a, scalar_t b)
+            __ubsan_ignore_undefined__ -> scalar_t { return a && b; },
+        [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b)
+            __ubsan_ignore_undefined__ { return a && b; },
+        // NOLINTNEXTLINE(bugprone-argument-comment)
+        /*identity=*/1);
   } else {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "prod_cpu", [&] {
       binary_kernel_reduce_vec(
-        iter,
-        [=](scalar_t a, scalar_t b) -> scalar_t { return a * b; },
-        [=](Vectorized <scalar_t> a, Vectorized <scalar_t> b) { return a * b; },
-        // NOLINTNEXTLINE(bugprone-argument-comment)
-        /*identity=*/1);
-      });
+          iter,
+          [=](scalar_t a, scalar_t b)
+              __ubsan_ignore_undefined__ -> scalar_t { return a * b; },
+          [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b)
+              __ubsan_ignore_undefined__ { return a * b; },
+          // NOLINTNEXTLINE(bugprone-argument-comment)
+          /*identity=*/1);
+    });
   }
 }
 

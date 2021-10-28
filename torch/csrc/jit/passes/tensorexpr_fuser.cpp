@@ -140,6 +140,7 @@ const OperatorSet& supported_eltwise_set() {
       "aten::sigmoid(Tensor self) -> Tensor",
       "aten::relu(Tensor self) -> Tensor",
       "aten::leaky_relu(Tensor self, Scalar negative_slope=0.01) -> Tensor",
+      "aten::softplus(Tensor self, Scalar beta=1, Scalar threshold=20) -> Tensor",
       "aten::relu6(Tensor self) -> Tensor",
       "aten::gelu(Tensor self) -> Tensor",
       "aten::addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor",
@@ -484,7 +485,7 @@ class TensorExprFuser {
     auto sinputs = subgraph->inputs();
     AT_ASSERT(inputs.size() == sinputs.size());
     for (const auto i : c10::irange(inputs.size())) {
-      if (inputs[i]->type()->isSubtypeOf(TensorType::get())) {
+      if (inputs[i]->type()->isSubtypeOf(*TensorType::get())) {
         Value* soutput = graph->insert(aten::size, {inputs[i]});
         aliasDb_->createValue(soutput);
         GRAPH_DEBUG(
@@ -541,7 +542,7 @@ class TensorExprFuser {
       }
 
       auto tensor_inputs = filter(n->inputs(), [](Value* v) {
-        return v->type()->isSubtypeOf(TensorType::get());
+        return v->type()->isSubtypeOf(*TensorType::get());
       });
       GRAPH_DEBUG("Building sizes for ", getHeader(n));
       bool all_inputs_have_sizes = true;
@@ -1301,7 +1302,7 @@ Operation createTensorExprOp(const Node* node) {
   auto kernel =
       std::make_shared<tensorexpr::TensorExprKernel>(node->g(attr::Subgraph));
   return [kernel](Stack& stack) {
-    RECORD_FUNCTION("TensorExpr", std::vector<c10::IValue>());
+    RECORD_FUNCTION(kernel->getKernelName(), std::vector<c10::IValue>());
     kernel->run(stack);
     return 0;
   };

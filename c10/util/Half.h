@@ -11,7 +11,9 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/C++17.h>
+#include <c10/util/TypeSafeSignMath.h>
 #include <c10/util/complex.h>
+#include <type_traits>
 
 #if defined(__cplusplus) && (__cplusplus >= 201103L)
 #include <cmath>
@@ -49,6 +51,8 @@
 #else
 #define C10_DEVICE_HOST_FUNCTION
 #endif
+
+#include <typeinfo> // operator typeid
 
 namespace c10 {
 
@@ -256,9 +260,9 @@ inline float fp16_ieee_to_fp32_value(uint16_t h) {
    * exponent == 0). However, they also do not operate on denormal inputs, and
    * do not produce denormal results.
    */
-  const uint32_t exp_offset = UINT32_C(0xE0) << 23;
+  constexpr uint32_t exp_offset = UINT32_C(0xE0) << 23;
   // const float exp_scale = 0x1.0p-112f;
-  uint32_t scale_bits = (uint32_t)15 << 23;
+  constexpr uint32_t scale_bits = (uint32_t)15 << 23;
   float exp_scale_val;
   std::memcpy(&exp_scale_val, &scale_bits, sizeof(exp_scale_val));
   const float exp_scale = exp_scale_val;
@@ -296,8 +300,8 @@ inline float fp16_ieee_to_fp32_value(uint16_t h) {
    * single-precision number to get the numerical equivalent of the input
    * half-precision number.
    */
-  const uint32_t magic_mask = UINT32_C(126) << 23;
-  const float magic_bias = 0.5f;
+  constexpr uint32_t magic_mask = UINT32_C(126) << 23;
+  constexpr float magic_bias = 0.5f;
   const float denormalized_value =
       fp32_from_bits((two_w >> 17) | magic_mask) - magic_bias;
 
@@ -309,7 +313,7 @@ inline float fp16_ieee_to_fp32_value(uint16_t h) {
    * - Combine the result of conversion of exponent and mantissa with the sign
    * of the input number.
    */
-  const uint32_t denormalized_cutoff = UINT32_C(1) << 27;
+  constexpr uint32_t denormalized_cutoff = UINT32_C(1) << 27;
   const uint32_t result = sign |
       (two_w < denormalized_cutoff ? fp32_to_bits(denormalized_value)
                                    : fp32_to_bits(normalized_value));
@@ -328,8 +332,8 @@ inline float fp16_ieee_to_fp32_value(uint16_t h) {
 inline uint16_t fp16_ieee_from_fp32_value(float f) {
   // const float scale_to_inf = 0x1.0p+112f;
   // const float scale_to_zero = 0x1.0p-110f;
-  uint32_t scale_to_inf_bits = (uint32_t)239 << 23;
-  uint32_t scale_to_zero_bits = (uint32_t)17 << 23;
+  constexpr uint32_t scale_to_inf_bits = (uint32_t)239 << 23;
+  constexpr uint32_t scale_to_zero_bits = (uint32_t)17 << 23;
   float scale_to_inf_val, scale_to_zero_val;
   std::memcpy(&scale_to_inf_val, &scale_to_inf_bits, sizeof(scale_to_inf_val));
   std::memcpy(
@@ -372,7 +376,7 @@ struct alignas(2) Half {
   }
 
   // HIP wants __host__ __device__ tag, CUDA does not
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
   C10_HOST_DEVICE Half() = default;
 #else
   Half() = default;
@@ -453,10 +457,10 @@ overflows(From f) {
     // allow for negative numbers to wrap using two's complement arithmetic.
     // For example, with uint8, this allows for `a - b` to be treated as
     // `a + 255 * b`.
-    return f > limit::max() ||
-        (f < 0 && -static_cast<uint64_t>(f) > limit::max());
+    return greater_than_max<To>(f) ||
+        (c10::is_negative(f) && -static_cast<uint64_t>(f) > limit::max());
   } else {
-    return f < limit::lowest() || f > limit::max();
+    return f < limit::lowest() || greater_than_max<To>(f);
   }
 }
 

@@ -430,6 +430,18 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
   void abortTimedOutCollectives(
       std::unordered_set<std::string>& abortedCommIds);
 
+  // Performs a health check by initializing dummy NCCL communicators and then
+  // destroying them. This will help indicate and signal any NCCL-related issues
+  // prior to the first collective. The actual initialization and subsequent
+  // destruction is ran on a separate thread and the main thread is signalled
+  // about timeouts/errors to report to the application.
+  void runHealthCheck();
+
+  // Destroys initialized NCCL communicators in devNCCLComMap_ given by input
+  // key. Throws if there are no communicators to destroy. Also removes
+  // communicators from the cache and clears used device indices.
+  void destroyNCCLComms(const std::string& devNCCLCommMapKey);
+
   void workCleanupLoop();
 
  protected:

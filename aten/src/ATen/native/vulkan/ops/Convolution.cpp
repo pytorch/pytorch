@@ -2,7 +2,6 @@
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/utils/ParamUtils.h>
 #include <ATen/native/vulkan/ops/Common.h>
-#include <ATen/native/vulkan/ops/Persistent.h>
 #include <ATen/native/vulkan/api/Utils.h>
 
 namespace at {
@@ -54,7 +53,11 @@ Conv2dMethod determine_method(
     const IntArrayRef stride,
     const IntArrayRef padding,
     const IntArrayRef dilation,
-    const int64_t groups) {
+    const int64_t groups,
+    const bool transposed) {
+  if (transposed)
+    return Conv2dTranspose;
+
   if (is_depthwise(filter, groups))
     return Conv2dDepthwise;
   if (is_pointwise(filter))
@@ -67,7 +70,6 @@ Conv2dMethod determine_method(
 vTensor pack_weights_dw(
     api::Context* const context,
     api::Command::Buffer& command_buffer,
-    api::Resource::Pool& pool,
     const Tensor& weight) {
   /* Source */
   const IntArrayRef src_filter = weight.sizes();
@@ -86,7 +88,6 @@ vTensor pack_weights_dw(
 
   vTensor v_weight{
       context,
-      &pool,
       {
           4,
           dst_kh_sz,
@@ -128,7 +129,6 @@ vTensor pack_weights_dw(
 vTensor pack_weights_2d(
     api::Context* const context,
     api::Command::Buffer& command_buffer,
-    api::Resource::Pool& pool,
     const Tensor& weight) {
   /* Source */
   const IntArrayRef src_filter = weight.sizes();
@@ -149,7 +149,6 @@ vTensor pack_weights_2d(
 
   vTensor v_weight{
       context,
-      &pool,
       {
           4,
           dst_kh_sz,
@@ -193,10 +192,76 @@ vTensor pack_weights_2d(
   return v_weight;
 }
 
+vTensor pack_weights_2d_reverse(
+    api::Context* const context,
+    api::Command::Buffer& command_buffer,
+    const Tensor& weight,
+    bool reversed) {
+  /* Source */
+  const IntArrayRef src_filter = weight.sizes();
+  const float* const src_weight_ptr = weight.data_ptr<float>();
+
+  const int64_t src_kw_sz = src_filter[Layout::Filter::width];
+  const int64_t src_kh_sz = src_filter[Layout::Filter::height];
+  const int64_t src_kernel_sz = src_kw_sz * src_kh_sz;
+  const int64_t src_block_sz = src_kernel_sz * src_filter[Layout::Filter::input];
+
+  const int64_t num_stacks = div_up(src_filter[Layout::Filter::output], INT64_C(4));
+  const int64_t stack_depth = api::utils::align_up(src_filter[Layout::Filter::input], INT64_C(4));
+
+  /* Destination */
+  const int64_t dst_kw_sz = src_kw_sz * stack_depth;
+  const int64_t dst_kh_sz = src_kh_sz * num_stacks;
+  const int64_t dst_kernel_sz = dst_kw_sz * dst_kh_sz;
+
+  vTensor v_weight{
+      context,
+      {
+          4,
+          dst_kh_sz,
+          dst_kw_sz,
+      },
+      weight.options(),
+  };
+
+  using Future = vTensor::Future<float, vTensor::Access::Write>;
+  Future v_weight_future = v_weight.host<float, vTensor::Access::Write>(command_buffer);
+  Future::Payload v_weight_payload = v_weight_future.wait();
+
+  float* const dst_weight_ptr = v_weight_payload.get();
+  memset(dst_weight_ptr, 0, v_weight.nbytes());
+
+  for (int64_t src_oc = 0; src_oc < src_filter[Layout::Filter::output]; ++src_oc) {
+    /* Source */
+    const float* const src_weight_oc_ptr = src_weight_ptr + src_oc * src_block_sz;
+
+    /* Destination */
+    const int64_t dst_oh = src_oc / 4;
+    const int64_t dst_c = src_oc % 4;
+
+    float* const dst_weight_c_ptr = dst_weight_ptr + dst_c * dst_kernel_sz;
+
+    for (int64_t src_ic = 0; src_ic < src_filter[Layout::Filter::input]; ++src_ic) {
+      for (int64_t src_ih = 0; src_ih < src_kh_sz; ++src_ih) {
+        const int64_t dst_h = reversed ? (src_kh_sz - 1 - src_ih) : src_ih;
+        for (int64_t src_iw = 0; src_iw < src_kw_sz; ++src_iw) {
+          const int64_t dst_w = reversed ? (src_kw_sz - 1 - src_iw) : src_iw;
+          const int64_t dst_w_offset = dst_w * stack_depth;
+          memcpy(
+              dst_weight_c_ptr + (dst_oh * src_kh_sz + dst_h) * dst_kw_sz + src_ic + dst_w_offset,
+              src_weight_oc_ptr + src_ic * src_kernel_sz + src_ih * src_kw_sz + src_iw,
+              sizeof(float));
+        }
+      }
+    }
+  }
+
+  return v_weight;
+}
+
 vTensor pack_weights_2d_winograd_2_3(
     api::Context* const context,
     api::Command::Buffer& command_buffer,
-    api::Resource::Pool& pool,
     const Tensor& weight) {
   /* Source */
   const IntArrayRef src_filter = weight.sizes();
@@ -216,7 +281,6 @@ vTensor pack_weights_2d_winograd_2_3(
 
   vTensor v_weight{
       context,
-      &pool,
       {
         4,
         4*dst_oh_sz,
@@ -289,9 +353,9 @@ vTensor pack_weights_2d_winograd_2_3(
 }
 
 vTensor pack_weights(
-    api::Resource::Pool& pool,
     const Tensor& weight_arg,
-    const Conv2dMethod conv_method) {
+    const Conv2dMethod conv_method,
+    const bool transposed) {
   if (weight_arg.is_vulkan()) {
     return convert(weight_arg);
   }
@@ -299,13 +363,12 @@ vTensor pack_weights(
   api::Context* const context = api::context();
   api::Command::Buffer& command_buffer = context->command().pool.stream();
 
-  const Tensor weight = weight_arg.contiguous();
+  const Tensor weight = transposed ? at::permute(weight_arg, {1, 0, 2, 3}).contiguous() : weight_arg.contiguous();
 
   if (conv_method == Conv2dDepthwise) {
     return pack_weights_dw(
         context,
         command_buffer,
-        pool,
         weight);
   }
 
@@ -313,19 +376,23 @@ vTensor pack_weights(
     return pack_weights_2d_winograd_2_3(
         context,
         command_buffer,
-        pool,
         weight);
+  }
+  if (conv_method == Conv2dTranspose) {
+    return pack_weights_2d_reverse(
+        context,
+        command_buffer,
+        weight,
+        true);
   }
 
   return pack_weights_2d(
       context,
       command_buffer,
-      pool,
       weight);
 }
 
 vTensor pack_biases(
-    api::Resource::Pool& pool,
     const c10::optional<Tensor>& bias,
     const Tensor& weight) {
   if (bias && bias->is_vulkan()) {
@@ -339,7 +406,6 @@ vTensor pack_biases(
   const int64_t packed_w = div_up(src_w, INT64_C(4));
   vTensor v_bias{
     context,
-    &pool,
     {
       4,
       1,
@@ -378,16 +444,20 @@ vTensor pack_biases(
 
 std::array<int64_t, 4> pack_filter(
     const Tensor& weight,
-    const IntArrayRef dilation) {
+    const IntArrayRef dilation,
+    const bool transposed) {
   const IntArrayRef filter = weight.sizes();
 
   const auto effective = [](const int64_t k, const int64_t d) {
     return k + (k - 1) * (d - 1);
   };
 
+  const size_t filter_output_ind = transposed ? Layout::TransposedFilter::output : Layout::Filter::output;
+  const size_t filter_input_ind = transposed ? Layout::TransposedFilter::input : Layout::Filter::input;
+
   return {
-    align_up(filter[Layout::Filter::output], INT64_C(4)),
-    align_up(filter[Layout::Filter::input], INT64_C(4)),
+    align_up(filter[filter_output_ind], INT64_C(4)),
+    align_up(filter[filter_input_ind], INT64_C(4)),
     effective(
         filter[Layout::Filter::height],
         dilation[Layout::Parameter::height]),
@@ -430,7 +500,8 @@ bool available(
                                        ((bias->device().is_cpu()) ||
                                         (c10::DeviceType::Vulkan == bias->device().type())) &&
                                        (kFloat == bias->scalar_type()) &&
-                                       (transposed ? false /* to be addded in the future */
+                                       (transposed ? (weight.size(Layout::TransposedFilter::output) ==
+                                                          bias->size(Layout::Filter::output))
                                                    : (weight.size(Layout::Filter::output) ==
                                                           bias->size(Layout::Filter::output))))
                                     : true) &&
@@ -441,8 +512,10 @@ bool available(
          (padding[Layout::Parameter::height] >= 0) &&
          (padding[Layout::Parameter::width] >= 0) &&
          // Dilation
-         (dilation[Layout::Parameter::height] > 0) &&
-         (dilation[Layout::Parameter::width] > 0) &&
+         (transposed ? (dilation[Layout::Parameter::height] == 1) &&
+                       (dilation[Layout::Parameter::width] == 1)
+                     : (dilation[Layout::Parameter::height] > 0) &&
+                       (dilation[Layout::Parameter::width] > 0)) &&
          // Groups
          (groups > 0) &&
          // Input
@@ -470,6 +543,28 @@ bool usable(const Tensor& input) {
          true;
 }
 
+static inline std::vector<int64_t> get_conv_output_size(
+    IntArrayRef input_size, IntArrayRef weight_size,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation = IntArrayRef(),
+    const bool transposed = false
+) {
+  if (transposed) {
+    auto dim = input_size.size();
+    std::vector<int64_t> output_size(dim);
+    output_size[0] = input_size[input_batch_size_dim];
+    output_size[1] = weight_size[weight_input_channels_dim];
+    for (size_t d = 2; d < dim; ++d) {
+      output_size[d] = stride[d - 2] * (input_size[d] - 1) + weight_size[d] - 2 * padding[d - 2];
+    }
+    return output_size;
+  }
+  return conv_output_size(
+    input_size,
+    weight_size,
+    padding,
+    stride,
+    dilation);
+}
 
 Tensor convolution(
     const Tensor& input,
@@ -482,7 +577,6 @@ Tensor convolution(
     const IntArrayRef output_padding,
     const int64_t groups) {
   return Conv2dOpContext::create(
-      api::context()->resource().pool,
       weight,
       bias,
       stride,
@@ -505,22 +599,21 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
 } // namespace
 
 Conv2dOpContext::Conv2dOpContext(
-    api::Resource::Pool& pool,
     const Tensor& weight,
     const c10::optional<Tensor>& bias,
     const IntArrayRef stride,
     const IntArrayRef padding,
     const IntArrayRef dilation,
-    const bool /* transposed */,
+    const bool transposed,
     const IntArrayRef /* output_padding */,
     const int64_t groups,
     const Conv2dMethod method,
     const c10::optional<Scalar>& output_min,
     const c10::optional<Scalar>& output_max)
   : packed_{
-      pack_weights(pool, weight, method),
-      pack_biases(pool, bias, weight),
-      pack_filter(weight, expand_param_if_needed(dilation, "dilation", 2)),
+      pack_weights(weight, method, transposed),
+      pack_biases(bias, weight),
+      pack_filter(weight, expand_param_if_needed(dilation, "dilation", 2), transposed),
       pack_params(expand_param_if_needed(stride, "stride", 2)),
       pack_params(expand_param_if_needed(padding, "padding", 2)),
       pack_params(expand_param_if_needed(dilation, "dilation", 2)),
@@ -539,11 +632,11 @@ Conv2dOpContext::Conv2dOpContext(
       output_min,
       output_max,
     },
-    method_(method) {
+    method_(method),
+    transposed_(transposed) {
 }
 
 Conv2dOpContext Conv2dOpContext::create(
-    api::Resource::Pool& pool,
     const Tensor& weight,
     const c10::optional<Tensor>& bias,
     const IntArrayRef stride_arg,
@@ -581,11 +674,11 @@ Conv2dOpContext Conv2dOpContext::create(
       stride,
       padding,
       dilation,
-      groups);
+      groups,
+      transposed);
 
   // Pass in the originals
   return Conv2dOpContext{
-    pool,
     weight,
     bias,
     stride_arg,
@@ -623,7 +716,7 @@ void Conv2dOpContext::conv2d_sliding_window(
       ivec4 src_filter;
     } block {
       v_output.extents(),
-      safe_downcast<int32_t>(packed_.filter[Layout::Filter::input]),
+      safe_downcast<int32_t>(packed_.filter[Layout::Filter::input]), /* this is aligned up */
       {
         safe_downcast<int32_t>(packed_.filter[Layout::Filter::width]),
         safe_downcast<int32_t>(packed_.filter[Layout::Filter::height]),
@@ -828,12 +921,13 @@ Tensor Conv2dOpContext::run(const Tensor& input_arg) const {
 
   vTensor v_output{
     context,
-    conv_output_size(
+    get_conv_output_size(
         v_input.sizes(),
         unpacked_.filter,
         packed_.padding,
         packed_.stride,
-        packed_.dilation),
+        packed_.dilation,
+        transposed_),
     input.options(),
   };
 
@@ -849,6 +943,12 @@ Tensor Conv2dOpContext::run(const Tensor& input_arg) const {
     case Conv2dPointwise:
       conv2d_sliding_window(
         VK_KERNEL(conv2d_pw_2x2),
+        v_output,
+        v_input);
+      break;
+    case Conv2dTranspose:
+      conv2d_sliding_window(
+        VK_KERNEL(conv_transpose2d),
         v_output,
         v_input);
       break;
@@ -887,7 +987,6 @@ c10::intrusive_ptr<Conv2dOpContext> conv2d_clamp_prepack(
     const c10::optional<Scalar>& output_max) {
   return c10::make_intrusive<Conv2dOpContext>(
       Conv2dOpContext::create(
-          persistent()->pool,
           std::move(weight),
           std::move(bias),
           std::move(stride),
