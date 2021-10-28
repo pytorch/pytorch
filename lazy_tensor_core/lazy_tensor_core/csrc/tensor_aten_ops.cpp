@@ -119,7 +119,6 @@
 #include "lazy_tensor_core/csrc/ops/var.h"
 #include "lazy_tensor_core/csrc/ops/var_mean.h"
 #include "lazy_tensor_core/csrc/ops/view.h"
-#include "lazy_tensor_core/csrc/shape_builder.h"
 #include "lazy_tensor_core/csrc/tensor.h"
 #include "lazy_tensor_core/csrc/tensor_ops.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
@@ -228,8 +227,8 @@ std::vector<int64_t> CheckIntList(c10::ArrayRef<int64_t> list, size_t length,
 
 // Returns a 1-D shape for batch norm weight or bias based on the input shape.
 lazy_tensors::Shape BatchNormFeaturesShape(const LazyTensor& input) {
-  auto input_shape = input.shape();
-  return ShapeBuilder(input.dtype()).Add(input_shape.get(), 1).Build();
+  auto input_shape = input.shape().get();
+  return lazy_tensors::Shape(input_shape.at_element_type(), input_shape.dimensions()[1]);
 }
 
 // Returns the IR for the given input or the provided default value broadcasted
