@@ -198,7 +198,7 @@ coverage_ignore_classes = [
 # We should NOT add anything to this list, see the CI failure message
 # on how to solve missing automodule issues
 coverage_missing_automodule = [
-    # "torch",  # temporarily removed to see how this failure looks in CI
+    "torch",
     "torch.ao",
     "torch.ao.nn",
     "torch.ao.nn.sparse",
