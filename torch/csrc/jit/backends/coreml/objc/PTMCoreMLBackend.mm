@@ -99,7 +99,7 @@ struct CoreMLConfig {
         allow_low_precision_([dict[@"allow_low_precision"] boolValue]) {
     TORCH_CHECK(
         coreMLVersion_ >= SUPPORTED_COREML_VER,
-        "Only Core ML version 4 and above are supported");
+        "Only Core ML version 4 or above are supported");
   }
   int64_t coreMLVersion() const {
     return coreMLVersion_;
