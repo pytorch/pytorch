@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Owner(s): ["oncall: jit"]
+
 import torch
 
 # This is how we include tests located in test/jit/...
