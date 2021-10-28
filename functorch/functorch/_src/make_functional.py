@@ -199,6 +199,9 @@ def make_split_names(lst):
     return [name.split('.') for name in lst]
 
 class FunctionalModuleWithBuffers(nn.Module):
+    """
+    This is the callable object returned by :func:`make_functional_with_buffers`.
+    """
     def __init__(self, stateless_model, param_names, buffer_names):
         super(FunctionalModuleWithBuffers, self).__init__()
         self.stateless_model = stateless_model
@@ -231,6 +234,9 @@ class FunctionalModuleWithBuffers(nn.Module):
             _swap_state(self.stateless_model, self.split_names, old_state)
 
 class FunctionalModule(nn.Module):
+    """
+    This is the callable object returned by :func:`make_functional`.
+    """
     def __init__(self, stateless_model, param_names):
         super(FunctionalModule, self).__init__()
         self.stateless_model = stateless_model
@@ -254,42 +260,48 @@ class FunctionalModule(nn.Module):
             _swap_state(self.stateless_model, self.split_names, old_state)
 
 def make_functional(model: nn.Module):
-    """make_functional(model) -> func, weights
+    """make_functional(model) -> func, params
 
-    Given an nn.Module, make_functional extracts the state (weights)
+    Given a torch.nn.Module, make_functional extracts the state (params)
     and returns a functional version of the model, `func`. This makes
     it so that it is possible use transforms over the parameters of
     `model`.
 
     `func` can be invoked as follows:
-    ```
-    import torch
-    import torch.nn as nn
-    from functorch import make_functional
 
-    x = torch.randn(4, 3)
-    model = nn.Linear(3, 3)
-    func, params = make_functional(model)
-    func(params, x)
-    ```
+    .. code-block:: python
 
-    And here is an example of applying the grad transform:
-    ```
-    import torch
-    import torch.nn as nn
-    from functorch import make_functional, grad
+        import torch
+        import torch.nn as nn
+        from functorch import make_functional
 
-    x = torch.randn(4, 3)
-    t = torch.randn(4, 3)
-    model = nn.Linear(3, 3)
-    func, params = make_functional(model)
+        x = torch.randn(4, 3)
+        model = nn.Linear(3, 3)
+        func, params = make_functional(model)
+        func(params, x)
 
-    def compute_loss(params, x, t):
-        y = func(params, x)
-        return nn.functional.mse_loss(y, t)
+    And here is an example of applying the grad transform over the parameters
+    of a model.
 
-    grad_weights = grad(compute_loss)(params, x, t)
-    ```
+    .. code-block:: python
+
+        import torch
+        import torch.nn as nn
+        from functorch import make_functional, grad
+
+        x = torch.randn(4, 3)
+        t = torch.randn(4, 3)
+        model = nn.Linear(3, 3)
+        func, params = make_functional(model)
+
+        def compute_loss(params, x, t):
+            y = func(params, x)
+            return nn.functional.mse_loss(y, t)
+
+        grad_weights = grad(compute_loss)(params, x, t)
+
+    If the model has any buffers, please use :func:`make_functional_with_buffers` instead.
+
     """
     buffers = list(model.buffers())
     if len(buffers) > 0:
@@ -301,39 +313,43 @@ def make_functional(model: nn.Module):
 def make_functional_with_buffers(model: nn.Module):
     """make_functional_with_buffers(model) -> func, params, buffers
 
-    Given an nn.Module, make_functional_with_buffers extracts the state
+    Given a torch.nn.Module, make_functional_with_buffers extracts the state
     (params and buffers) and returns a functional version of the model `func`
     that can be invoked like a function.
 
     `func` can be invoked as follows:
-    ```
-    import torch
-    import torch.nn as nn
-    from functorch import make_functional_with_buffers
 
-    x = torch.randn(4, 3)
-    model = nn.Linear(3, 3)
-    func, params, buffers = make_functional_with_buffers(model)
-    func(params, buffers, x)
-    ```
+    .. code-block:: python
 
-    And here is an example of applying the grad transform:
-    ```
-    import torch
-    import torch.nn as nn
-    from functorch import make_functional_with_buffers, grad
+        import torch
+        import torch.nn as nn
+        from functorch import make_functional_with_buffers
 
-    x = torch.randn(4, 3)
-    t = torch.randn(4, 3)
-    model = nn.Linear(3, 3)
-    func, params, buffers = make_functional_with_buffers(model)
+        x = torch.randn(4, 3)
+        model = nn.Linear(3, 3)
+        func, params, buffers = make_functional_with_buffers(model)
+        func(params, buffers, x)
 
-    def compute_loss(params, buffers, x, t):
-        y = func(params, buffers, x)
-        return nn.functional.mse_loss(y, t)
+    And here is an example of applying the grad transform over the parameters
+    of a model:
 
-    grad_weights = grad(compute_loss)(params, buffers, x, t)
-    ```
+    .. code-block:: python
+
+        import torch
+        import torch.nn as nn
+        from functorch import make_functional_with_buffers, grad
+
+        x = torch.randn(4, 3)
+        t = torch.randn(4, 3)
+        model = nn.Linear(3, 3)
+        func, params, buffers = make_functional_with_buffers(model)
+
+        def compute_loss(params, buffers, x, t):
+            y = func(params, buffers, x)
+            return nn.functional.mse_loss(y, t)
+
+        grad_weights = grad(compute_loss)(params, buffers, x, t)
+
     """
     return FunctionalModuleWithBuffers._create_from(model)
 
@@ -347,6 +363,8 @@ def transpose_stack(tuple_of_tuple_of_tensors):
 def combine_state_for_ensemble(models):
     """combine_state_for_ensemble(models) -> func, params, buffers
 
+    Prepares a list of torch.nn.Modules for ensembling with :func:`vmap`.
+
     Given a list of `M` nn.Modules of the same class, stacks all of their
     parameters and buffers together to make `params` and `buffers`.
     Each parameter and buffer in the result will have an additional dimension
@@ -355,7 +373,23 @@ def combine_state_for_ensemble(models):
     `combine_state_for_ensemble` also returns `func`, a functional version
     of one of the models in `models`. One cannot directly run
     `func(params, buffers, *args, **kwargs)` directly, you probably want to
-    use vmap(func, ...)(params, buffers, *args, **kwargs)
+    use `vmap(func, ...)(params, buffers, *args, **kwargs)`
+
+    Here's an example of how to ensemble over a very simple model:
+
+    .. code-block:: python
+
+        num_models = 5
+        batch_size = 64
+        in_features, out_features = 3, 3
+        models = [torch.nn.Linear(in_features, out_features) for i in range(num_models)]
+        data = torch.randn(batch_size, 3)
+
+        fmodel, params, buffers = combine_state_for_ensemble(models)
+        output = vmap(fmodel, (0, 0, None))(params, buffers, data)
+
+        assert output.shape == (num_models, batch_size, out_features)
+
     """
     funcs, params, buffers = zip(*[make_functional_with_buffers(model)
                                    for model in models])
