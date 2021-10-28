@@ -3127,7 +3127,7 @@
 - func: mv(Tensor self, Tensor vec) -> Tensor
   variants: function, method
   dispatch:
-    CPU, CUDA, SparseCsrCUDA: mv
+    CompositeExplicitAutograd: mv
     SparseCPU, SparseCUDA, SparseCsrCPU: mv_sparse
 
 - func: mv.out(Tensor self, Tensor vec, *, Tensor(a!) out) -> Tensor(a!)
