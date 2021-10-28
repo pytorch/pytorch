@@ -227,6 +227,7 @@ class API_AVAILABLE(ios(11.0), macos(10.13)) CoreMLBackend
     const std::string& model = modelDict.at("model").toStringRef();
     const std::string& sha256 = modelDict.at("hash").toStringRef();
     PTMCoreMLExecutor* executor = [PTMCoreMLExecutor new];
+    executor.backend = config.backend();
     bool result = [executor compileMLModel:model identifier:sha256];
     TORCH_CHECK(result, "Compiling MLModel failed!");
     auto executorWrapper = c10::make_intrusive<CoreMLExecutorWrapper>(
