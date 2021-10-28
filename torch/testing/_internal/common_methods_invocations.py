@@ -6094,11 +6094,12 @@ def sample_inputs_multilabel_margin_loss(op_info, device, dtype, requires_grad, 
     _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     shapes_and_kwargs = [
-        ((S,S), None),
+        ((S, S), None),
     ]
 
     return [
-        SampleInput(_make_tensor(shape), args=(torch.zeros(shape, device=device, requires_grad=False, dtype=torch.int64),), kwargs=kwargs)
+        SampleInput(_make_tensor(shape),
+                    args=(torch.zeros(shape, device=device, requires_grad=False, dtype=torch.int64),), kwargs=kwargs)
         for shape, kwargs in shapes_and_kwargs
     ]
 
