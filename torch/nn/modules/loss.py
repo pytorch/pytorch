@@ -373,7 +373,7 @@ class GaussianNLLLoss(_Loss):
 
 
 class KLDivLoss(_Loss):
-    r"""The `Kullback-Leibler divergence`_ loss.
+    r"""The Kullback-Leibler divergence loss.
 
     For tensors of the same shape :math:`y_{\text{model}},\ y_{\text{obs}}`,
     we define the **pointwise KL-divergence** as
@@ -452,8 +452,6 @@ class KLDivLoss(_Loss):
                 return p / p.sum(1, keepdim=True)
         >>> target = normalize(torch.rand(3, 5))
         >>> output = kl_loss(input, target)
-
-    .. _`kullback-leibler divergence`: https://en.wikipedia.org/wiki/Kullback-Leibler_divergence
     """
     __constants__ = ['reduction']
 
