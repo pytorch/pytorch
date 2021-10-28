@@ -272,45 +272,27 @@ _STATIC_AND_RUNTIME_TEST(CONVOLUTION_OP, 3x3_without_padding,
       .iterations(3)
 )
 
-_STATIC_AND_RUNTIME_TEST(CONVOLUTION_OP, 3x3_with_left_padding,
-  ConvolutionOperatorTester()
-      .inputSize(13, 12)
-      .paddingLeft(1)
-      .kernelSize(3, 3)
-      .groupInputChannels(15)
-      .groupOutputChannels(17)
-      .iterations(3)
-)
+_STATIC_AND_RUNTIME_TEST(
+    CONVOLUTION_OP,
+    3x3_with_width_padding,
+    ConvolutionOperatorTester()
+        .inputSize(13, 12)
+        .paddingWidth(1)
+        .kernelSize(3, 3)
+        .groupInputChannels(15)
+        .groupOutputChannels(17)
+        .iterations(3))
 
-_STATIC_AND_RUNTIME_TEST(CONVOLUTION_OP, 3x3_with_right_padding,
-  ConvolutionOperatorTester()
-      .inputSize(13, 12)
-      .paddingRight(1)
-      .kernelSize(3, 3)
-      .groupInputChannels(15)
-      .groupOutputChannels(17)
-      .iterations(3)
-)
-
-_STATIC_AND_RUNTIME_TEST(CONVOLUTION_OP, 3x3_with_top_padding,
-  ConvolutionOperatorTester()
-      .inputSize(13, 12)
-      .paddingTop(1)
-      .kernelSize(3, 3)
-      .groupInputChannels(15)
-      .groupOutputChannels(17)
-      .iterations(3)
-)
-
-_STATIC_AND_RUNTIME_TEST(CONVOLUTION_OP, 3x3_with_bottom_padding,
-  ConvolutionOperatorTester()
-      .inputSize(13, 12)
-      .paddingBottom(1)
-      .kernelSize(3, 3)
-      .groupInputChannels(15)
-      .groupOutputChannels(17)
-      .iterations(3)
-)
+_STATIC_AND_RUNTIME_TEST(
+    CONVOLUTION_OP,
+    3x3_with_height_padding,
+    ConvolutionOperatorTester()
+        .inputSize(13, 12)
+        .paddingHeight(1)
+        .kernelSize(3, 3)
+        .groupInputChannels(15)
+        .groupOutputChannels(17)
+        .iterations(3))
 
 _STATIC_TEST(CONVOLUTION_OP, 3x3_with_input_stride,
   ConvolutionOperatorTester()
@@ -833,49 +815,29 @@ _STATIC_AND_RUNTIME_TEST(CONVOLUTION_OP, 3x3_without_padding_per_channel,
       .per_channel(true)
 )
 
-_STATIC_AND_RUNTIME_TEST(CONVOLUTION_OP, 3x3_with_left_padding_per_channel,
-  ConvolutionOperatorTester()
-      .inputSize(13, 12)
-      .paddingLeft(1)
-      .kernelSize(3, 3)
-      .groupInputChannels(15)
-      .groupOutputChannels(17)
-      .iterations(3)
-      .per_channel(true)
-)
+_STATIC_AND_RUNTIME_TEST(
+    CONVOLUTION_OP,
+    3x3_with_width_padding_per_channel,
+    ConvolutionOperatorTester()
+        .inputSize(13, 12)
+        .paddingWidth(1)
+        .kernelSize(3, 3)
+        .groupInputChannels(15)
+        .groupOutputChannels(17)
+        .iterations(3)
+        .per_channel(true))
 
-_STATIC_AND_RUNTIME_TEST(CONVOLUTION_OP, 3x3_with_right_padding_per_channel,
-  ConvolutionOperatorTester()
-      .inputSize(13, 12)
-      .paddingRight(1)
-      .kernelSize(3, 3)
-      .groupInputChannels(15)
-      .groupOutputChannels(17)
-      .iterations(3)
-      .per_channel(true)
-)
-
-_STATIC_AND_RUNTIME_TEST(CONVOLUTION_OP, 3x3_with_top_padding_per_channel,
-  ConvolutionOperatorTester()
-      .inputSize(13, 12)
-      .paddingTop(1)
-      .kernelSize(3, 3)
-      .groupInputChannels(15)
-      .groupOutputChannels(17)
-      .iterations(3)
-      .per_channel(true)
-)
-
-_STATIC_AND_RUNTIME_TEST(CONVOLUTION_OP, 3x3_with_bottom_padding_per_channel,
-  ConvolutionOperatorTester()
-      .inputSize(13, 12)
-      .paddingBottom(1)
-      .kernelSize(3, 3)
-      .groupInputChannels(15)
-      .groupOutputChannels(17)
-      .iterations(3)
-      .per_channel(true)
-)
+_STATIC_AND_RUNTIME_TEST(
+    CONVOLUTION_OP,
+    3x3_with_height_padding_per_channel,
+    ConvolutionOperatorTester()
+        .inputSize(13, 12)
+        .paddingHeight(1)
+        .kernelSize(3, 3)
+        .groupInputChannels(15)
+        .groupOutputChannels(17)
+        .iterations(3)
+        .per_channel(true))
 
 _STATIC_TEST(CONVOLUTION_OP, 3x3_with_input_stride_per_channel,
   ConvolutionOperatorTester()
