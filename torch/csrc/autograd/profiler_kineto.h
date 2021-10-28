@@ -385,30 +385,28 @@ wraps their registration in an init function which is called from
 `torch/csrc/autograd/init.cpp`. This pattern of registration for faux python
 dependencies in libtorch is common in the PyTorch codebase.
 */
-enum class CallType {
-    kPyCall = 0,
-    kPyModuleCall,
-    kCCall
-};
+enum CallType { kPyCall = 0, kPyModuleCall, kCCall };
 
 struct PyTraceEvent {
-  PyTraceEvent(int64_t t0, int64_t t1, std::string name, PyTraceEvent* parent, CallType call_type)
-    : t0_(t0), t1_(t1), name_(name), parent_(parent), call_type_(call_type) {}
   int64_t t0_;
   int64_t t1_;
   std::string name_;
 
+  uint64_t thread_id_;
   PyTraceEvent* parent_;
   CallType call_type_;
+
+  // We only observe us, however this discards information about ordering.
+  int32_t t0_epsilon_;
+  int32_t t1_epsilon_;
 };
 
-using TriggerFn = void (*)();
+enum Command { kStart = 0, kStop, kClear };
+using CallFn = void (*)(Command);
 using TraceEventsFn = std::vector<std::unique_ptr<PyTraceEvent>> (*)();
 
 void registerFunctions(
-  TriggerFn start,
-  TriggerFn stop,
-  TriggerFn clear,
+  CallFn call,
   TraceEventsFn get_events
 );
 

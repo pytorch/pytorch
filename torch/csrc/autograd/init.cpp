@@ -81,8 +81,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
           bool, /* profile_memory */
           bool, /* with_stack */
           bool, /* with_flops */
-          bool, /* with_modules */
-          bool  /* with_python_debug_profile */
+          bool  /* with_modules */
           >());
 
   py::class_<LegacyEvent>(m, "ProfilerEvent")
