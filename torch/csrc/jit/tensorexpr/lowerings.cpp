@@ -1506,13 +1506,19 @@ RegisterNNCLoweringsFunction aten_dequantize(
 #endif
 );
 
-RegisterNNCLoweringsFunction quantized_conv2d(
-    {"quantized::conv2d.new(Tensor qx, __torch__.torch.classes.quantized.Conv2dPackedParamsBase packed_weight, float output_scale, int output_zero_point) -> (Tensor)"},
-    computeQuantizedConv2d);
+// TODO: Fix CustomClass register for FunctionSchemeParser in internal build
+// RegisterNNCLoweringsFunction quantized_conv2d(
+//    {"quantized::conv2d.new(Tensor qx,
+//    __torch__.torch.classes.quantized.Conv2dPackedParamsBase packed_weight,
+//    float output_scale, int output_zero_point) -> (Tensor)"},
+//    computeQuantizedConv2d);
 
-RegisterNNCLoweringsFunction quantized_conv2d_relu(
-    {"quantized::conv2d_relu.new(Tensor qx, __torch__.torch.classes.quantized.Conv2dPackedParamsBase packed_weight, float output_scale, int output_zero_point) -> (Tensor)"},
-    computeQuantizedConv2dRelu);
+// TODO: Fix CustomClass register for FunctionSchemeParser in internal build
+// RegisterNNCLoweringsFunction quantized_conv2d_relu(
+//    {"quantized::conv2d_relu.new(Tensor qx,
+//    __torch__.torch.classes.quantized.Conv2dPackedParamsBase packed_weight,
+//    float output_scale, int output_zero_point) -> (Tensor)"},
+//    computeQuantizedConv2dRelu);
 
 RegisterNNCLoweringsFunction quantized_add(
     {"quantized::add(Tensor qa, Tensor qb, float scale, int zero_point) -> (Tensor qc)"},
