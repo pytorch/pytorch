@@ -82,6 +82,7 @@ class TestCppExtensionAOT(common.TestCase):
         # 2 * sigmoid(0) = 2 * 0.5 = 1
         self.assertEqual(z, torch.ones_like(z))
 
+    @common.skipIfRocm
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_cublas_extension(self):
         from torch_test_cpp_extension import cublas_extension
@@ -90,6 +91,7 @@ class TestCppExtensionAOT(common.TestCase):
         z = cublas_extension.noop_cublas_function(x)
         self.assertEqual(z, x)
 
+    @common.skipIfRocm
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_cusolver_extension(self):
         from torch_test_cpp_extension import cusolver_extension
