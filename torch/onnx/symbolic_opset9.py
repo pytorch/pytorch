@@ -387,7 +387,10 @@ def _reduce_with_dtype(onnx_op, name, allow_multi_dim_support=True):
     def reduce(g, *args, **kwargs):
         @parse_args("v", "none")
         def reduce_nodim(g, self, dtype):
-            if dtype.node().kind() != "prim::Constant":
+            if dtype.node().kind() == "onnx::Constant":
+                dtype = sym_help._get_const(dtype, "i", "dtype")
+                self = g.op("Cast", self, to_i=sym_help.scalar_type_to_onnx[dtype])
+            elif dtype.node().kind() != "prim::Constant":
                 return _unimplemented(name, "dtype")
             return symbolic(g, self)
 
@@ -395,7 +398,10 @@ def _reduce_with_dtype(onnx_op, name, allow_multi_dim_support=True):
 
         @parse_args("v", dim_desc, "i", "none")
         def reduce_dim(g, self, dim, keepdim, dtype):
-            if dtype.node().kind() != "prim::Constant":
+            if dtype.node().kind() == "onnx::Constant":
+                dtype = sym_help._get_const(dtype, "i", "dtype")
+                self = g.op("Cast", self, to_i=sym_help.scalar_type_to_onnx[dtype])
+            elif dtype.node().kind() != "prim::Constant":
                 return _unimplemented(name, "dtype")
             return symbolic(g, self, dim, keepdim)
         return reduce_nodim, reduce_dim
@@ -822,10 +828,10 @@ def softmax(g, input, dim, dtype=None):
         softmax = g.op("Cast", softmax, to_i=sym_help.scalar_type_to_onnx[parsed_dtype])
     return softmax
 
-@parse_args("v", "t", "v")
 def softplus(g, self, beta, threshold):
-    if beta != 1:
-        return _unimplemented("beta", "has to be 1")
+    beta_const = sym_help._maybe_get_const(beta, "f")
+    if beta_const != 1:
+        return g.op("Div", g.op("Softplus", g.op("Mul", self, beta)), beta)
     return g.op("Softplus", self)
 
 
@@ -2529,13 +2535,29 @@ def isnan(g, input):
     output = g.op("IsNaN", input)
     return output
 
-def _any(g, input):
+def _any(g, *args):
+    # aten::any(Tensor self)
+    if len(args) == 1:
+        input = args[0]
+        dim, keepdim = None, 0
+    # aten::any(Tensor self, int dim, bool keepdim)
+    else:
+        input, dim, keepdim = args
+        dim = [_parse_arg(dim, "i")]
+        keepdim = _parse_arg(keepdim, "i")
     input = _cast_Long(g, input, False)  # type: ignore[name-defined]
-    input_sum = sym_help._reducesum_helper(g, input, keepdims_i=0)
+    input_sum = sym_help._reducesum_helper(g, input,
+                                           axes_i=dim, keepdims_i=keepdim)
     return gt(g, input_sum, g.op("Constant", value_t=torch.LongTensor([0])))
 
-def _all(g, input):
-    return g.op("Not", _any(g, g.op("Not", input)))
+def _all(g, *args):
+    input = g.op("Not", args[0])
+    # aten::all(Tensor self)
+    if len(args) == 1:
+        return g.op("Not", _any(g, input))
+    # aten::all(Tensor self, int dim, bool keepdim)
+    else:
+        return g.op("Not", _any(g, input, args[1], args[2]))
 
 
 @parse_args("v", "i", "i", "i")
@@ -2659,11 +2681,12 @@ def prim_tolist(g, input, dim_val, elem_ty_val):
     return input
 
 
-@parse_args('v', 'i')
 def one_hot(g, self, num_classes):
     values = g.op("Constant", value_t=torch.LongTensor([0, 1]))
-    depth = g.op("Constant", value_t=torch.LongTensor([num_classes]))
-    return g.op("OneHot", self, depth, values, axis_i=-1)
+    # onnxruntime supports limited type combinations for OneHot.
+    if num_classes.type().scalarType() in ("Byte", "Char", "Int", "Short"):
+        num_classes = g.op("Cast", num_classes, to_i=sym_help.cast_pytorch_to_onnx["Long"])
+    return g.op("OneHot", self, num_classes, values, axis_i=-1)
 
 
 @parse_args("v", "i", "v", "v")

@@ -61,6 +61,7 @@ ALLOW_LIST = [
     ("aten::_baddbmm_mkl_", datetime.date(2021, 10, 31)),
     ("aten::grid_sampler_2d_backward", datetime.date(2021, 10, 21)),
     ("prim::TensorExprDynamicGuard", datetime.date(2021, 11, 20)),
+    ("caffe2::", datetime.date(2021, 10, 23)),
 ]
 
 ALLOW_LIST_COMPILED = [

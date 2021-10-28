@@ -518,8 +518,6 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
 
     requires_derivative = (not undifferentiable) and (len(differentiable_inputs) > 0) and (len(differentiable_outputs) > 0)
 
-    requires_fw_derivatives = not undifferentiable and len(fw_derivatives) > 0
-
     if info is not None and info.has_derivatives and not requires_derivative:
         raise RuntimeError(f'ERROR: derivative ignored for {name} -- specified an autograd function without derivative')
 
@@ -977,10 +975,17 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
     if is_out_fn:
         body.append(emit_forbid_fw_derivatives(is_out_fn=True))
     else:
-        if requires_fw_derivatives:
+        if requires_derivative:
             body.extend(emit_fw_derivatives())
-        else:
-            body.append(emit_forbid_fw_derivatives())
+            if len(fw_derivatives) == 0:
+                body.append(emit_forbid_fw_derivatives())
+            else:
+                assert len(fw_derivatives) == len(differentiable_outputs), (
+                    "Expected the number of forward derivatives implemented to match the "
+                    "number of differentiable outputs. NB: This only applies when at least "
+                    "one forward derivative is implemented. Not implementing any forward "
+                    "derivatives is also okay, and we would require inputs to the op to "
+                    "not have associated tangents in that case.")
 
     if requires_derivative:
         # Save only after the forward AD has been set up
