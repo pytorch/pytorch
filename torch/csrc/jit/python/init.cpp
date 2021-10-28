@@ -542,18 +542,11 @@ void initJITBindings(PyObject* module) {
           [](Module& model, const py::tuple& inputs) {
             auto graph = model.get_method("forward").graph();
             Stack stack;
-            push(stack, model._ivalue());
             stack.reserve(inputs.size() + 1); // captures?
+            push(stack, model._ivalue());
             for (auto& obj : inputs) {
               stack.push_back(toTypeInferredIValue(obj));
             }
-            auto g_inputs = graph->inputs();
-            for (const auto i : c10::irange(inputs.size())) {
-              if (stack[i].isTensor()) {
-                g_inputs[i]->setType(stack[i].type());
-              }
-            }
-            GRAPH_DEBUG("Tracing Graph");
             auto traced = TraceGraph(graph, stack);
             GRAPH_DUMP("Traced Graph", traced);
 
