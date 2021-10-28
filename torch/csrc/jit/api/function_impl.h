@@ -34,14 +34,15 @@ struct TORCH_API GraphFunction : public Function {
 
   std::shared_ptr<Graph> optimized_graph() const {
     std::lock_guard<std::recursive_mutex> lock(compile_mutex);
-    if (optimized_graph_) {
-      return *optimized_graph_;
+    auto& optimized_graph = optimized_graphs_[currentSpecialization()];
+    if (optimized_graph) {
+      return *optimized_graph;
     }
-    optimized_graph_ = graph_->copy();
+    optimized_graph = graph_->copy();
     if (getGraphExecutorOptimize()) {
-      preoptimizeGraph(*optimized_graph_);
+      preoptimizeGraph(*optimized_graph);
     }
-    return *optimized_graph_;
+    return *optimized_graph;
   }
 
   const c10::QualifiedName& qualname() const override {
@@ -82,12 +83,13 @@ struct TORCH_API GraphFunction : public Function {
   GraphExecutor& get_executor() {
     ensure_defined();
     std::lock_guard<std::recursive_mutex> lock(compile_mutex);
-    if (executor_) {
-      return *executor_;
+    auto& executor = executors_[currentSpecialization()];
+    if (executor) {
+      return *executor;
     }
     check_single_output();
-    executor_ = GraphExecutor(optimized_graph(), name_.name());
-    return *executor_;
+    executor = GraphExecutor(optimized_graph(), name_.name());
+    return *executor;
   }
 
   bool call(
@@ -99,14 +101,29 @@ struct TORCH_API GraphFunction : public Function {
   }
 
  private:
+  enum SpecializationKey {
+    AutocastOff,
+    CpuAutocastOn,
+    GpuAutocastOn,
+    CpuGpuAutocastOn,
+
+    // This provides the number of specializations
+    // (Must be last entry)
+    TotalCount
+  };
+
+  SpecializationKey currentSpecialization() const;
+
+ private:
   c10::QualifiedName name_;
   // The original, non-optimized graph
   std::shared_ptr<Graph> graph_; // for debugging and for inlining
 
   // Optimized graph, computed lazily. Used for inlining.
-  // Note: this graph is not specialized, only generic optimizations are applied
-  // here.
-  mutable c10::optional<std::shared_ptr<Graph>> optimized_graph_;
+  mutable std::array<
+      c10::optional<std::shared_ptr<Graph>>,
+      SpecializationKey::TotalCount>
+      optimized_graphs_;
 
   // GraphFunctions are invokable from multiple threads, so this lock needs to
   // be held when we're initializing graph executor for the first time or
@@ -115,7 +132,10 @@ struct TORCH_API GraphFunction : public Function {
   // (e.g. optimized_graph() from get_executor()).
   mutable std::recursive_mutex compile_mutex;
 
-  c10::optional<GraphExecutor> executor_; // for execution
+  // executor_[0] - autocast off
+  // executor_[1] - autocast on
+  std::array<c10::optional<GraphExecutor>, SpecializationKey::TotalCount>
+      executors_;
 
   // an optional function that actually creates the method when
   // ensure_defined() is called. This is used by the compiler so
