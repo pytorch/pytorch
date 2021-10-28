@@ -403,7 +403,7 @@ class FullyShardedDataParallel(nn.Module):
             # CPU grad shard in pinned memory so that we can do a non-blocking
             # transfer.
             p._cpu_grad = torch.zeros_like(  # type: ignore[attr-defined]
-                p.data,
+                p,
                 device=torch.device("cpu")
             ).pin_memory()
 
@@ -683,11 +683,11 @@ class FullyShardedDataParallel(nn.Module):
             # offloading params. This is so param and grad reside on same device
             # which is needed for the optimizer step.
             if self.cpu_offload.offload_params:
-                # Note that similar to FairScale, we specify non_blocking=True
+                # We specify non_blocking=True
                 # and ensure the appropriate synchronization is done by waiting
                 # streams in _wait_for_post_backward.
                 param._cpu_grad.copy_(  # type: ignore[attr-defined]
-                    param.grad.data, non_blocking=True
+                    param.grad.detach(), non_blocking=True
                 )
                 # Don't let this memory get reused until after the transfer.
                 param.grad.data.record_stream(torch.cuda.current_stream())
@@ -731,8 +731,10 @@ class FullyShardedDataParallel(nn.Module):
 
         torch.cuda.current_stream().wait_stream(self._streams["post_backward"])
         if self.cpu_offload.offload_params:
-            # Similar to FairScale, we need to wait for the non-blocking GPU ->
-            # CPU grad transfers to finish.
+            # We need to wait for the non-blocking GPU ->
+            # CPU grad transfers to finish. TODO investigate why this is needed
+            # and if we can remove it, as we've done transfer on post_backward
+            # stream and synchronized it above.
             torch.cuda.current_stream().synchronize()
 
         # A backward pass is done, clean up below.
