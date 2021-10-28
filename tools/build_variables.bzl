@@ -357,6 +357,7 @@ lazy_tensor_core_sources = [
     "torch/csrc/lazy/core/hash.cpp",
     "torch/csrc/lazy/core/ir.cpp",
     "torch/csrc/lazy/core/ir_metadata.cpp",
+    "torch/csrc/lazy/core/ir_util.cpp",
 ]
 
 libtorch_core_sources = sorted(
@@ -851,6 +852,9 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/Context.cpp",
     "aten/src/ATen/DLConvertor.cpp",
     "aten/src/ATen/ExpandUtils.cpp",
+    "aten/src/ATen/FunctionalInverses.cpp",
+    "aten/src/ATen/FunctionalStorageImpl.cpp",
+    "aten/src/ATen/FunctionalTensorWrapper.cpp",
     "aten/src/ATen/MemoryOverlap.cpp",
     "aten/src/ATen/MapAllocator.cpp",
     "aten/src/ATen/NamedTensorUtils.cpp",
