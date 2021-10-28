@@ -73,19 +73,6 @@ std::tuple<Tensor, Tensor> nll_loss_forward_decomposition(
     const c10::optional<Tensor> & weight,
     int64_t reduction, int64_t ignore_index) {
 
-  bool has_ignore_index = ignore_index >= 0;
-  if (has_ignore_index) {
-    // fallback
-    if (target.dim() > 1) {
-      static auto op = c10::Dispatcher::singleton()
-        .findSchemaOrThrow("aten::nll_loss_nd", "");
-      return slow_fallback<Tensor, Tensor>(op, {self, target, weight, reduction, ignore_index});
-    } else {
-      static auto op = c10::Dispatcher::singleton()
-        .findSchemaOrThrow("aten::nll_loss_forward", "");
-      return slow_fallback<Tensor, Tensor>(op, {self, target, weight, reduction, ignore_index});
-    }
-  }
   // self can be [N, C, ...] or [C]
   // target can be [N, ...] or []
 
@@ -117,17 +104,35 @@ std::tuple<Tensor, Tensor> nll_loss_forward_decomposition(
       {}, result.numel(), self_.scalar_type(),
       self_.layout(), self_.device(), nullopt);
 
+  bool has_ignore_index = ignore_index >= 0;
+  Tensor ignore_index_mask;
+  if (has_ignore_index) {
+    ignore_index_mask = target != ignore_index;
+    result = result * ignore_index_mask;
+    total_weight = ignore_index_mask.sum().to(self_);
+  }
+
   // Apply the reduction
   if (result.dim() > 0) {
     if (reduction == Reduction::Sum) {
       result = result.sum();
     } else if (reduction == Reduction::Mean) {
       if (!weight || !weight->defined()) {
-        result = result.mean();
+        if (has_ignore_index) {
+          TORCH_INTERNAL_ASSERT(ignore_index_mask.defined());
+          // total_weight is ignore_index_mask.sum()
+          result = result.sum() / total_weight;
+        } else {
+          result = result.mean();
+        }
       } else {
         TORCH_INTERNAL_ASSERT(weight_.defined());
         weight_ = weight_.expand(self_.sizes());
         auto wsum = at::gather(weight_, channel_dim, target_).squeeze(channel_dim);
+        if (has_ignore_index) {
+          TORCH_INTERNAL_ASSERT(ignore_index_mask.defined());
+          wsum = wsum * ignore_index_mask;
+        }
         wsum = wsum.sum();
         result = result.sum() / wsum;
         total_weight = wsum;
@@ -136,6 +141,10 @@ std::tuple<Tensor, Tensor> nll_loss_forward_decomposition(
   } else if (reduction == Reduction::Mean && weight && weight->defined()) {
     // here weight is [C] and target is [1]
     auto wsum = at::gather(*weight, channel_dim, target_).squeeze(channel_dim);
+    if (has_ignore_index) {
+      TORCH_INTERNAL_ASSERT(ignore_index_mask.defined());
+      wsum = wsum * ignore_index_mask;
+    }
     total_weight = wsum.sum();
   }
 
@@ -244,6 +253,7 @@ at::Tensor nll_loss_backward_plumbing(
 
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("nll_loss_forward", nll_loss_forward_decomposition);
+  m.impl("nll_loss2d_forward", nll_loss_forward_decomposition);
   m.impl("nll_loss_backward", nll_loss_backward_plumbing);
   VMAP_SUPPORT("mse_loss", mse_loss_batch_rule);
   VMAP_SUPPORT("mse_loss_backward", mse_loss_backward_batch_rule);
