@@ -402,7 +402,7 @@ class FullyShardedDataParallel(nn.Module):
             # backward pass. In this case, it's important to pre-allocate the
             # CPU grad shard in pinned memory so that we can do a non-blocking
             # transfer.
-            p._cpu_grad = torch.zeros_like(
+            p._cpu_grad = torch.zeros_like(  # type: ignore[attr-defined]
                 p.data,
                 device=torch.device("cpu")
             ).pin_memory()
@@ -686,13 +686,15 @@ class FullyShardedDataParallel(nn.Module):
                 # Note that similar to FairScale, we specify non_blocking=True
                 # and ensure the appropriate synchronization is done by waiting
                 # streams in _wait_for_post_backward.
-                param._cpu_grad.copy_(param.grad.data, non_blocking=True)
+                param._cpu_grad.copy_(  # type: ignore[attr-defined]
+                    param.grad.data, non_blocking=True
+                )
                 # Don't let this memory get reused until after the transfer.
                 param.grad.data.record_stream(torch.cuda.current_stream())
                 # Point param.grad.data to CPU grad to offload it. Note that
                 # the transfer is async so it is not necessarily done until we
                 # explicitly synchronize in backward.
-                param.grad.data = param._cpu_grad
+                param.grad.data = param._cpu_grad  # type: ignore[attr-defined]
 
             # After _post_backward_hook returns, orig_grad_data will eventually
             # go out of scope, at which point it could otherwise be freed for
