@@ -7776,7 +7776,7 @@ op_db: List[OpInfo] = [
                    dtypes=floating_types_and(torch.half),
                    dtypesIfCPU=floating_types_and(torch.half, torch.bfloat16),
                    # skip testing torch.frexp as it is not supported by ROCm platform yet
-                   decorators=[skipCUDAIfRocm],
+                   decorators=[],
                    supports_out=False,
                    supports_forward_ad=True,
                    skips=(
