@@ -46,8 +46,8 @@ def build_int8_trt(rn18):
         [InputTensorSpec(torch.Size([-1, *data.shape[1:]]), torch.float,
                          shape_ranges=[((1, 3, 224, 224), (5, 3, 224, 224), (10, 3, 224, 224))], has_batch_dim=True)],
         explicit_batch_dimension=True, explicit_precision=True, logger_level=trt.Logger.VERBOSE)
-    engine, input_names, output_names = interp.run(fp16_mode=False, int8_mode=True)
-    trt_mod = TRTModule(engine, input_names, output_names)
+    interpreter_result = interp.run(fp16_mode=False, int8_mode=True)
+    trt_mod = TRTModule(interpreter_result.engine, interpreter_result.input_names, interpreter_result.output_names)
     trt_res = trt_mod(data.cuda())
     print("explicit quant result diff max", torch.max(ref_res - trt_res.cpu()))
     return trt_mod
@@ -74,8 +74,8 @@ def build_int8_trt_implicit_quant(rn18):
     shape_prop.ShapeProp(traced_rn18).propagate(data)
     traced_rn18 = NormalizeArgs(traced_rn18).transform()
     interp = TRTInterpreter(traced_rn18, InputTensorSpec.from_tensors([data]), logger_level=trt.Logger.VERBOSE)
-    engine, input_names, output_names = interp.run(fp16_mode=False, int8_mode=True, strict_type_constraints=True)
-    trt_mod = TRTModule(engine, input_names, output_names)
+    interpreter_result = interp.run(fp16_mode=False, int8_mode=True, strict_type_constraints=True)
+    trt_mod = TRTModule(interpreter_result.engine, interpreter_result.input_names, interpreter_result.output_names)
     trt_res = trt_mod(data.cuda())
     print("implicit quant result diff max", torch.max(ref_res - trt_res.cpu()))
     return trt_mod
