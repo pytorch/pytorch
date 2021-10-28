@@ -17311,7 +17311,9 @@ class TestNNDeviceType(NNTestCase):
 
     def test_conv_double_backward_strided_with_3D_input_and_weight(self, device):
         # Test that _convolution_double_backward() outputs the correct grad shapes
-        # for 3D input / weight when stride > 1.
+        # for 3D input / weight when stride > 1. This is an ad-hoc regression test for a
+        # specific case that was uncovered during the convolution consolidation effort.
+        # The test can be safely deleted if _convolution_double_backward() is removed.
 
         input = torch.randn(2, 3, 6, device=device)
         weight = torch.randn(3, 3, 3, device=device)
