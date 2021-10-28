@@ -40,7 +40,7 @@ inline TensorImpl* resize_impl_cuda_(
   if (device_guard) {
     guard.set_index(self->storage().device().index());
   }
-  resize_impl_template_<&maybe_resize_storage_cuda, &select_storage_size_default>(
+  resize_impl_template_<&maybe_resize_storage_cuda, &compute_storage_size_default>(
       self, size, stride);
   return self;
 }
