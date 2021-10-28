@@ -772,6 +772,7 @@ static inline Tensor diff_helper(const Tensor& self, int64_t n, int64_t dim) {
   bool is_kBool = self.dtype() == at::kBool;
 
   for (const auto i : c10::irange(n)) {
+    (void)i; //Suppress unused variable warning
     if (is_kBool){
       result = at::logical_xor(at::narrow(result, dim, 1, out_len), at::narrow(result, dim, 0, out_len));
     } else{
