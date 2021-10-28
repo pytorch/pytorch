@@ -167,6 +167,21 @@ class TestSortAndSelect(TestCase):
         self.assertEqual(vm, torch.arange(255, dtype=dtype, device=device))
         self.assertEqual(im, t0.sort().indices)
 
+    def test_sort_restride(self, device):
+        lin, col = 3, 5
+        x = torch.randn(lin, col, dtype=torch.float, device=device)
+        values = torch.empty(1, device=device)
+        indices = torch.empty(0, device=device, dtype=torch.long)
+        tensor = x[:, 0]
+        torch.sort(tensor, out=(values, indices))
+        # Check: outputs were restrided
+        self.assertEqual(tensor.stride(), values.stride())
+        self.assertEqual(tensor.stride(), indices.stride())
+        # Check: 'tensor'  indexed by 'indices' is equal to 'values'
+        self.assertEqual(tensor[indices], values)
+        # Check: sorted
+        self.assertTrue((values.narrow(0, 1, lin - 1) >= values.narrow(0, 0, lin - 1)).all())
+
     def _test_sort_discontiguous(self, device, dtype):
         # on CUDA 2048 vs >2048 have different code path for the dim being sorted
         sizes = (5, 7, 2049)
@@ -187,11 +202,9 @@ class TestSortAndSelect(TestCase):
                     self.assertTrue((t.unsqueeze(-1).transpose(dim, -1) == r1.values.unsqueeze(-1)).any(dim=dim).any(dim=-1).all())
 
                     # assert stride is preserved
-                    if self.device_type == 'cuda':
-                        # FIXME: this behavior should be true for all cases, not
-                        # just the one specified in if condition
-                        self.assertEqual(r1.values.stride(), t.stride())
-                        self.assertEqual(r1.indices.stride(), t.stride())
+                    self.assertEqual(r1.values.stride(), t.stride())
+                    self.assertEqual(r1.indices.stride(), t.stride())
+
 
     @onlyCUDA
     @dtypes(torch.float32)
