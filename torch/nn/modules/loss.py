@@ -453,7 +453,7 @@ class KLDivLoss(_Loss):
         >>> target = normalize(torch.rand(3, 5))
         >>> output = kl_loss(input, target)
 
-    .. _`Kullback-Leibler divergence`: https://en.wikipedia.org/wiki/Kullback-Leibler_divergence
+    .. _`Kullback-Leibler divergence`: https://en.wikipedia.org/wiki/Kullback-Leibler\_divergence
     """
     __constants__ = ['reduction']
 
