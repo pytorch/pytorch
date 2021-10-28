@@ -193,8 +193,8 @@ TEST_F(Quantization, QuantUpsampleNearst2dDequantUInt8) {
   const auto graph_string = R"IR(
       graph(%x : Float(1, 1, 2, 2, strides=[2, 2, 2, 1], device=cpu)):
         %2 : int = prim::Constant[value=13]()
-        %3 : NoneType = prim::Constant()
-        %4 : float[] = prim::Constant[value=[2., 2.]]()
+        %4 : NoneType = prim::Constant()
+        %3 : int[] = prim::Constant[value=[4, 4]]()
         %qz : int = prim::Constant[value=13]()
         %qs : float = prim::Constant[value=0.1]()
         %q : QUInt8(1, 1, 2, 2) = aten::quantize_per_tensor(%x, %qs, %qz, %2)
@@ -206,8 +206,7 @@ TEST_F(Quantization, QuantUpsampleNearst2dDequantUInt8) {
 
   auto x = at::rand({1, 1, 2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
   auto q = at::quantize_per_tensor(x, 0.1f, 13, at::kQUInt8);
-  auto qu =
-      at::upsample_nearest2d(q, c10::nullopt, at::ArrayRef<double>({2.f, 2.f}));
+  auto qu = at::upsample_nearest2d(q, at::ArrayRef<long>({4, 4}), c10::nullopt);
   auto y_expected = at::dequantize(qu);
 
   TensorExprKernel k(graph);
