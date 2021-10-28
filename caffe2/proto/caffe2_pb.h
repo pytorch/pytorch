@@ -115,12 +115,12 @@ inline TORCH_API at::Device OptionToDevice(const caffe2::DeviceOption option) {
   switch (type) {
     case caffe2::PROTO_CPU:
       if (option.has_numa_node_id()) {
-        id = option.numa_node_id();
+        id = static_cast<c10::DeviceIndex>(option.numa_node_id());
       }
       break;
     case caffe2::PROTO_CUDA:
     case caffe2::PROTO_HIP:
-      id = option.device_id();
+      id = static_cast<c10::DeviceIndex>(option.device_id());
       break;
   }
   return at::Device(ProtoToType(type), id);

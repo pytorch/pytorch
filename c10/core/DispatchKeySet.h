@@ -280,6 +280,10 @@ C10_API bool isBackendDispatchKey(DispatchKey t);
 // Resolve alias dispatch key to DispatchKeySet if applicable
 C10_API DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t);
 
+// Resolve alias dispatch key to DispatchKeySet if applicable,
+// and chek if k is a part of that set
+C10_API bool runtimeDispatchKeySetHas(DispatchKey t, DispatchKey k);
+
 // Returns a DispatchKeySet of all backend keys mapped to Autograd dispatch key
 // t, DispatchKeySet is empty if t is not alias of DispatchKey::Autograd.
 C10_API DispatchKeySet getBackendKeySetFromAutograd(DispatchKey t);

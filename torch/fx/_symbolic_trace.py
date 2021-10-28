@@ -319,6 +319,7 @@ class Tracer(TracerBase):
                     if not hasattr(self.root, qualname):
                         break
                     i += 1
+                self.tensor_attrs[a] = qualname
                 setattr(self.root, qualname, a)
 
             return self.create_node('get_attr', qualname, (), {})
@@ -457,7 +458,9 @@ class Tracer(TracerBase):
                 def replace_ph(x):
                     nonlocal cnt
                     cnt += 1
-                    out = self.create_proxy('placeholder', f'{name}_{str(cnt)}', (), {})
+                    param = sig.parameters[name]
+                    default = () if param.default is inspect.Parameter.empty else (param.default,)
+                    out = self.create_proxy('placeholder', f'{name}_{str(cnt)}', default, {})
                     if x == PH:
                         return out
                     # Union[int, bool] == bool in Python <= 3.6

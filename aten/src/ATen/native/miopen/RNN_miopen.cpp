@@ -8,6 +8,7 @@
 
 #include <ATen/cuda/CUDAConfig.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 #if !AT_ROCM_ENABLED()
 
@@ -136,7 +137,7 @@ std::vector<TensorDescriptor> rnn_descriptor_sequence(const Tensor& tensor, IntA
 
 std::vector<TensorDescriptor> rnn_descriptor(const Tensor& tensor, int64_t N) {
     std::vector<TensorDescriptor> descriptors(N);
-    for (int64_t i = 0; i < N ; i++) {
+    for (const auto i : c10::irange(N)) {
         descriptors[i].set(tensor, 5);
     }
 
@@ -246,7 +247,7 @@ Tensor permute_wei_for_miopen(Tensor wei, int64_t mode)
 
 void _viewOrCopyParams(MatrixRef<Tensor> params_from, MatrixRef<Tensor> params_to, bool copy) {
     TORCH_CHECK(params_from.size(0) == params_to.size(0), "number of layers mismatch");
-    for (size_t i = 0; i < params_from.size(0); i++) {
+    for (const auto i : c10::irange(params_from.size(0))) {
         auto layer_params_from = params_from[i];
         auto layer_params_to = params_to[i];
         // NOTE: these lists have all weights before all biases, so if the layer
@@ -268,7 +269,7 @@ void _viewOrCopyParams(MatrixRef<Tensor> params_from, MatrixRef<Tensor> params_t
 
 void _copyParams_and_permute(MatrixRef<Tensor> params_from, MatrixRef<Tensor> params_to, int64_t mode) {
     TORCH_CHECK(params_from.size(0) == params_to.size(0), "number of layers mismatch");
-    for (size_t i = 0; i < params_from.size(0); i++) {
+    for (const auto i : c10::irange(params_from.size(0))) {
         auto layer_params_from = params_from[i];
         auto layer_params_to = params_to[i];
         for (auto a = layer_params_from.begin(), b = layer_params_to.begin();
@@ -327,11 +328,11 @@ std::pair<std::vector<Tensor>, size_t> get_parameters(miopenHandle_t handle, con
     auto elem_size = dataSize(getMiopenDataType(weight_buf));
     auto bias_mode = rnn.bias_mode;
 
-    for (int64_t layer = 0; layer < num_layers; layer++) {
+    for (const auto layer : c10::irange(num_layers)) {
         size_t layer_params_count = 0;
 
         // Get layer params
-        for (int64_t linear_id = 0; linear_id < num_linear_layers; linear_id++) {
+        for (const auto linear_id : c10::irange(num_linear_layers)) {
             FilterDescriptor lin_layer_mat_desc;
             size_t offset;
             MIOPEN_CHECK(miopenGetRNNLayerParamOffset(
@@ -366,7 +367,7 @@ std::pair<std::vector<Tensor>, size_t> get_parameters(miopenHandle_t handle, con
 
         // Get bias params
         if (bias_mode == miopenRNNwithBias) {
-            for (int64_t linear_id = 0; linear_id < num_linear_layers; linear_id++) {
+            for (const auto linear_id : c10::irange(num_linear_layers)) {
                 FilterDescriptor lin_layer_mat_desc;
                 size_t offset;
                 MIOPEN_CHECK(miopenGetRNNLayerBiasOffset(
@@ -776,7 +777,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> miopen_rnn_backward(
     if (output_mask[3]) {
         dw = at::native::miopen_rnn_backward_weight(input, weight, weight_stride0, weight_buf, hx, cx, output, mode, hidden_size, num_layers, batch_first, dropout, train, bidirectional, batch_sizes, dropout_state, reserve, ws);
         if (mode > 1) {
-            for (int i = 0; i < dw.size(); i++) {
+            for (const auto i : c10::irange(dw.size())) {
                 dw[i] = permute_wei_for_miopen(dw[i], mode);
             }
         }

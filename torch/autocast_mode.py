@@ -2,6 +2,17 @@ import torch
 import functools
 import warnings
 
+from typing import Any, Optional
+from .types import _dtype
+
+def autocast_decorator(autocast_instance, func):
+    @functools.wraps(func)
+    def decorate_autocast(*args, **kwargs):
+        with autocast_instance:
+            return func(*args, **kwargs)
+    decorate_autocast.__script_unsupported = '@autocast() decorator is not supported in script mode'  # type: ignore[attr-defined]
+    return decorate_autocast
+
 class autocast(object):
     r"""
     Instances of :class:`autocast` serve as context managers or decorators that
@@ -124,10 +135,21 @@ class autocast(object):
 
     Args:
         device_type(string, required):  Whether to use 'cuda' or 'cpu' device
-        enabled(bool, optional, default=True)":  Whether autocasting should be enabled in the region.
-        dtype(torch_dtype, optional):  Whether to use torch.float16 or torch.bfloat16
+        enabled(bool, optional, default=True):  Whether autocasting should be enabled in the region.
+        dtype(torch_dtype, optional):  Whether to use torch.float16 or torch.bfloat16.
+        cache_enabled(bool, optional, default=True):  Whether the weight cache inside autocast should be enabled.
     """
-    def __init__(self, device_type, enabled=True, **kwargs):
+    def __init__(self, device_type : str,
+                 dtype : Optional[_dtype] = None,
+                 enabled : bool = True,
+                 cache_enabled : Optional[bool] = None):
+        if torch._jit_internal.is_scripting():
+            self._enabled = enabled
+            self.device = device_type
+            self.fast_dtype = dtype
+            # TODO: support get_autocast_gpu/cpu_dtype
+            assert dtype is not None
+            return
         self.device = device_type
         if self.device == 'cuda':
             self.fast_dtype = torch.get_autocast_gpu_dtype()
@@ -135,14 +157,14 @@ class autocast(object):
             self.fast_dtype = torch.get_autocast_cpu_dtype()
         else:
             raise RuntimeError('User specified autocast device_type must be \'cuda\' or \'cpu\'')
+        self._cache_enabled = torch.is_autocast_cache_enabled()
         if torch.cuda.amp.common.amp_definitely_not_available() and self.device == 'cuda':
             warnings.warn('User provided device_type of \'cuda\', but CUDA is not available. Disabling')
             enabled = False
-        for key, value in kwargs.items():
-            if key == 'dtype':
-                self.fast_dtype = value
-            if not (key == 'dtype'):
-                raise RuntimeError('Unrecognized optional argument supplied to autocast context manager: ' + str(key))
+        if dtype is not None:
+            self.fast_dtype = dtype
+        if cache_enabled is not None:
+            self._cache_enabled = cache_enabled
 
         if self.device == 'cpu':
             supported_dtype = [torch.bfloat16]
@@ -157,20 +179,29 @@ class autocast(object):
         self._enabled = enabled
 
     def __enter__(self):
+        if torch._jit_internal.is_scripting():
+            assert self.fast_dtype is not None
+            return self
+
+        self.prev_cache_enabled = torch.is_autocast_cache_enabled()
         if self.device == 'cpu':
             self.prev = torch.is_autocast_cpu_enabled()
             self.prev_fastdtype = torch.get_autocast_cpu_dtype()
             torch.set_autocast_cpu_enabled(self._enabled)
-            torch.set_autocast_cpu_dtype(self.fast_dtype)
+            torch.set_autocast_cpu_dtype(self.fast_dtype)  # type: ignore[arg-type]
             torch.autocast_increment_nesting()
         else:
             self.prev = torch.is_autocast_enabled()
             self.prev_fastdtype = torch.get_autocast_gpu_dtype()
-            torch.set_autocast_gpu_dtype(self.fast_dtype)
+            torch.set_autocast_gpu_dtype(self.fast_dtype)  # type: ignore[arg-type]
             torch.set_autocast_enabled(self._enabled)
             torch.autocast_increment_nesting()
+        torch.set_autocast_cache_enabled(self._cache_enabled)
 
-    def __exit__(self, *args):
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any):  # type: ignore[override]
+        if torch._jit_internal.is_scripting():
+            return
+
         # Drop the cache when we exit to a nesting level that's outside any instance of autocast.
         if self.device == 'cpu':
             if torch.autocast_decrement_nesting() == 0:
@@ -182,11 +213,10 @@ class autocast(object):
                 torch.clear_autocast_cache()
             torch.set_autocast_enabled(self.prev)
             torch.set_autocast_gpu_dtype(self.prev_fastdtype)
+        torch.set_autocast_cache_enabled(self.prev_cache_enabled)
         return False
 
     def __call__(self, func):
-        @functools.wraps(func)
-        def decorate_autocast(*args, **kwargs):
-            with self:
-                return func(*args, **kwargs)
-        return decorate_autocast
+        if torch._jit_internal.is_scripting():
+            return func
+        return autocast_decorator(self, func)

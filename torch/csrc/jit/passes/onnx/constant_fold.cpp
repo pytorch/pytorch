@@ -476,7 +476,7 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     // If rank of indices is 0, rank of output tensor should be
     // rank_of_input - 1.
     if (q < 1) {
-      updated_val = updated_val.squeeze();
+      updated_val = updated_val.squeeze(axis);
     }
     return c10::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::Range) {
@@ -488,6 +488,12 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     return c10::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::Equal) {
     updated_val = at::eq(inputTensorValues[0], inputTensorValues[1]);
+    return c10::optional<at::Tensor>(updated_val);
+  } else if (node->kind() == onnx::Greater) {
+    updated_val = at::greater(inputTensorValues[0], inputTensorValues[1]);
+    return c10::optional<at::Tensor>(updated_val);
+  } else if (node->kind() == onnx::Less) {
+    updated_val = at::less(inputTensorValues[0], inputTensorValues[1]);
     return c10::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::Neg) {
     updated_val = at::neg(inputTensorValues[0]);

@@ -1,3 +1,5 @@
+# Owner(s): ["NNC"]
+
 import operator
 import unittest
 import contextlib
@@ -841,7 +843,7 @@ class TestTEFuser(JitTestCase):
                 inputs = get_lstm_inputs(device)
                 ge = self.checkTrace(LSTMCellC, inputs)
                 graph = ge.graph_for(*inputs)
-                self.assertLastGraphAllFused()
+                self.assertAllFused(ge.graph_for(*inputs))
                 # XXX: TE fuser can handle concats inside a fusion group.
                 # FileCheck().check("FusedConcat").check_next("return").run(str(graph))
 
@@ -1255,6 +1257,7 @@ class TestTEFuser(JitTestCase):
             F.hardtanh,
             F.hardsigmoid,
             F.hardswish,
+            F.softplus,
             torch.sqrt,
             torch.rsqrt,
             F.gelu,
@@ -1961,6 +1964,18 @@ class TestTEFuser(JitTestCase):
             for fn in [bn, bn_no_weight, bn_no_bias, bn_neither]:
                 test(fn, (i, x))
 
+    def test_profiler(self):
+        @torch.jit.script
+        def test(x, y, z):
+            return x * y + z
+
+        args = [torch.randn(4) for _ in range(3)]
+        with torch.autograd.profiler.profile() as prof:
+            for _ in range(3):
+                test(*args)
+        self.assertIn("fused_mul_add", prof.table())
+
+
 works_list = [
     '__radd__',
     '__rdiv__',
@@ -1995,6 +2010,7 @@ works_list = [
     'fmod.autodiffed',
     'ge',
     'gt',
+    'isnan',
     'le',
     'lerp',
     'lgamma',
@@ -2015,6 +2031,7 @@ works_list = [
     'nn.functional.hardshrink',
     'nn.functional.hardsigmoid',
     'nn.functional.hardswish',
+    'nn.functional.softplus',
     'nn.functional.hardtanh',
     'nn.functional.leaky_relu',
     'nn.functional.relu',
@@ -2025,14 +2042,19 @@ works_list = [
     'remainder',
     'remainder.autodiffed',
     'reshape',
+    'reshape_as',
     'round',
+    'rsub',
+    'rsub.rsub_tensor',
     'rsqrt',
     'sigmoid',
+    'sign',
     'sin',
     'sinh',
     'sqrt',
     'sub',
     'sum',
+    't',
     'tan',
     'tanh',
     'transpose',
@@ -2040,7 +2062,17 @@ works_list = [
     'trunc',
     'unsqueeze',
     'view',
+    'view_as',
     'where',
+    'bool',
+    'byte',
+    'char',
+    'double',
+    'float',
+    'half',
+    'int',
+    'long',
+    'short',
 ]
 
 known_failures = [
@@ -2051,12 +2083,7 @@ known_failures = [
 
 # If your OpInfo test causes this test to fail, add it here
 skip_ops = [
-    # Causing SIGSEGV
-    # Reference: https://github.com/pytorch/pytorch/pull/59442/checks?check_run_id=2746156896
-    't',
     'conj'
-    'view',
-    'reshape',
 ]
 
 def get_name(op):
@@ -2067,8 +2094,6 @@ def get_name(op):
 
 class TestNNCOpInfo(TestCase):
     def te_compile(self, device, dtype, op):
-        # If adding new OpInfo tests cause this test to fail, add it into here
-        skip_ops = ['view', 'reshape']
         if op.name in skip_ops:
             return
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
