@@ -14,7 +14,7 @@ caffe2::Tensor contiguous(caffe2::Tensor t) {
 }
 
 
-IValueInterface::IValueInterface(ArrayRef<c10::IValue> values):
+IValueInterface::IValueInterface(c10::ArrayRef<c10::IValue> values):
   size_(values.size()) {
   auto values_tmp = std::make_unique<c10::IValue[]>(size_);
   std::copy_n(values.data(), size_, values_tmp.get());
@@ -104,7 +104,7 @@ INSTANTIATE_TO(uint32_t);
 INSTANTIATE_TO(uint64_t);
 INSTANTIATE_TO(int64_t);
 INSTANTIATE_TO(bool);
-INSTANTIATE_TO(c10::intrusive_ptr<caffe2::Blob>);;
+INSTANTIATE_TO(c10::intrusive_ptr<caffe2::Blob>);
 INSTANTIATE_TO(c10::intrusive_ptr<ivalue::ConstantString>);
 INSTANTIATE_TO(c10::intrusive_ptr<ivalue::Object>);
 INSTANTIATE_TO(at::Scalar);
