@@ -1060,6 +1060,7 @@ void StaticRuntime::benchmark(
             << " ms" << std::endl;
   std::cout << "First iter time: " << results.first_iter_time << " ms"
             << std::endl;
+  std::cout << "Number of operators: " << nodes_.size() << std::endl;
 
   if (planner_) {
     std::cout << "Total number of managed tensors: "
