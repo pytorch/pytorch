@@ -36,5 +36,7 @@ inline c10::Symbol fromQualString(const std::string& qual_string) {
   return c10::Symbol::fromQualString(qual_string);
 }
 
+TORCH_API void UseVariadicGroupedAccessor(const std::shared_ptr<Graph>& graph);
+
 } // namespace jit
 } // namespace torch
