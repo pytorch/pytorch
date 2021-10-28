@@ -201,7 +201,6 @@ class TestCommon(TestCase):
         for sample_input in sample_inputs:
             self.compare_with_reference(op, op.ref, sample_input)
 
-    # @ops((op for op in op_db if op.error_and_warning_inputs_func is not None), dtypes=OpDTypes.none)
     @onlyOnCPUAndCUDA
     @ops([op for op in op_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)
     def test_errors(self, device, op):
