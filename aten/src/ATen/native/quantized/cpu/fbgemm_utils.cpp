@@ -361,12 +361,28 @@ Tensor ConvertConvWeightsToChannelLastTensor<3>(
 
 #endif // USE_FBGEMM
 
-    template <int kSpatialDim = 2>
-    TORCH_API torch::class_<ConvPackedParamsBase<kSpatialDim>>
-    register_conv_params() {
+namespace {
+  // This is really terrible, but couldnt figure out a better way to constexpr convert int to
+  // string and then perform string concatenation on/with it
+  constexpr const char* _hack_int_to_class_name(int x) {
+    switch(x) {
+      case 2:
+        return "Conv2dPackedParamsBase";
+      case 3:
+        return "Conv3dPackedParamsBase";
+      default:
+        assert(false);
+        return "NotAValidDimension";
+    }
+  }
+}
+
+template <int kSpatialDim = 2>
+TORCH_API int
+register_conv_params() {
   static auto register_conv_params =
-    torch::class_<ConvPackedParamsBase<kSpatialDim>>(
-        "quantized", "Conv" + c10::to_string(kSpatialDim) + "dPackedParamsBase")
+    torch::selective_class_<ConvPackedParamsBase<kSpatialDim>>(
+        "quantized", TORCH_SELECTIVE_CLASS(_hack_int_to_class_name(kSpatialDim)))
     .def_pickle(
         [](const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& params)
         -> ConvParamsSerializationType { // __getstate__
@@ -398,13 +414,13 @@ Tensor ConvertConvWeightsToChannelLastTensor<3>(
     .def("dilation", &ConvPackedParamsBase<kSpatialDim>::dilation)
     .def("groups", &ConvPackedParamsBase<kSpatialDim>::groups)
     .def("transpose", &ConvPackedParamsBase<kSpatialDim>::transpose);
-  return register_conv_params;
+  return 0;
 }
 
 template
-TORCH_API torch::class_<ConvPackedParamsBase<2>> register_conv_params<2>();
+TORCH_API int register_conv_params<2>();
 template
-TORCH_API torch::class_<ConvPackedParamsBase<3>> register_conv_params<3>();
+TORCH_API int register_conv_params<3>();
 
 int register_linear_params() {
   using SerializationType = std::tuple<at::Tensor, c10::optional<at::Tensor>>;
@@ -464,6 +480,7 @@ int register_linear_params() {
                    return bias;
                  })
               .def("unpack", &LinearPackedParamsBase::unpack);
+  // Dummy return so that this function can easily be called from a global scope ensuring class is registered
   return 0;
 }
 

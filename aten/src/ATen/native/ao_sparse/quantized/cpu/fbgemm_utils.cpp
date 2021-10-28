@@ -65,7 +65,7 @@ int register_linear_params() {
 #endif // USE_FBGEMM
                 TORCH_CHECK(false, "Unknown qengine");
               });
-  // Dummy return so that this function can be called from a global scope ensuring class is registered
+  // Dummy return so that this function can easily be called from a global scope ensuring class is registered
   return 0;
 }
 
