@@ -118,11 +118,8 @@ def _gen_torch_functional_registered_ops():
     # but we are currently only able to compile some of the functions. additionally,
     # some functions directly map to their aten:: implementations.
     # TODO: add support for more ops
-    opnames = ["stft", "istft", "lu", "cdist", "norm", "unique", "unique_consecutive"]
-    ops = [getattr(torch.functional, name) for name in opnames]
-    linalg_opnames = ["tensordot"]
-    ops += [getattr(torch.linalg.functional, name) for name in linalg_opnames]
-    return set(ops)
+    ops = ["stft", "istft", "lu", "cdist", "norm", "unique", "unique_consecutive", "tensordot"]
+    return set(getattr(torch.functional, name) for name in ops)
 
 _functional_registered_ops = _gen_torch_functional_registered_ops()
 
