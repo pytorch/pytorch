@@ -20,6 +20,11 @@ from test_sparse import CUSPARSE_SPMM_COMPLEX128_SUPPORTED
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
 
+def _check_cusparse_triangular_solve_available():
+    version = _get_torch_cuda_version()
+    # cusparseSpSM was added in 11.3.1 but we don't have access to patch version
+    min_supported_version = (11, 4)
+    return version >= min_supported_version
 
 def _check_cusparse_spgemm_available():
     # cusparseSpGEMM was added in 11.0
@@ -836,6 +841,78 @@ class TestSparseCSR(TestCase):
         _test_spadd_shape(0, [100, 100])
         _test_spadd_shape(10, [100, 1])
         _test_spadd_shape(10, [1, 100])
+
+    @onlyCUDA
+    @skipCUDAIf(
+        not _check_cusparse_triangular_solve_available(),
+        "cuSparse Generic API SpSV is not available"
+    )
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
+                        torch.float64: 1e-8, torch.complex128: 1e-8})
+    def test_sparse_triangular_solve(self, device, dtype):
+
+        def run_test(n, k, upper, unitriangular, transpose):
+            triangle_function = torch.triu if upper else torch.tril
+            A = make_tensor((n, n), dtype=dtype, device=device)
+            A = triangle_function(A)
+            A_sparse = A.to_sparse_csr()
+            B = make_tensor((n, k), dtype=dtype, device=device)
+
+            expected = torch.triangular_solve(B, A, upper=upper, unitriangular=unitriangular, transpose=transpose)
+            expected_X = expected.solution
+
+            actual = torch.triangular_solve(B, A_sparse, upper=upper, unitriangular=unitriangular, transpose=transpose)
+            actual_X = actual.solution
+            actual_A_clone = actual.cloned_coefficient
+            self.assertTrue(actual_A_clone.numel() == 0)
+            self.assertEqual(actual_X, expected_X)
+
+            # test out with C contiguous strides
+            out = torch.empty_strided((n, k), (k, 1), dtype=dtype, device=device)
+            torch.triangular_solve(
+                B, A_sparse,
+                upper=upper, unitriangular=unitriangular, transpose=transpose, out=(out, actual_A_clone)
+            )
+            self.assertEqual(out, expected_X)
+
+            # test out with F contiguous strides
+            # TODO (@ivanyashchuk): mixed memory format doesn't work yet for cuda
+            # out is F contiguous but B is C contiguous
+            if self.device_type == 'cuda' and (n > 0 and k > 1):
+                with self.assertRaisesRegex(RuntimeError, "INTERNAL ASSERT FAILED"):
+                    out = torch.empty_strided((n, k), (1, n), dtype=dtype, device=device)
+                    torch.triangular_solve(
+                        B, A_sparse,
+                        upper=upper, unitriangular=unitriangular, transpose=transpose, out=(out, actual_A_clone)
+                    )
+            else:
+                out = torch.empty_strided((n, k), (1, n), dtype=dtype, device=device)
+                torch.triangular_solve(
+                    B, A_sparse,
+                    upper=upper, unitriangular=unitriangular, transpose=transpose, out=(out, actual_A_clone)
+                )
+                self.assertEqual(out, expected_X)
+                self.assertEqual(out.stride(), (1, n))
+
+            # test out with discontiguous strides
+            out = torch.empty_strided((2 * n, k), (1, 2 * n), dtype=dtype, device=device)[::2]
+            if n > 0 and k > 0:
+                self.assertFalse(out.is_contiguous())
+                self.assertFalse(out.t().is_contiguous())
+            before_stride = out.stride()
+            torch.triangular_solve(
+                B, A_sparse,
+                upper=upper, unitriangular=unitriangular, transpose=transpose, out=(out, actual_A_clone)
+            )
+            self.assertEqual(out, expected_X)
+            self.assertEqual(out.stride(), before_stride)
+
+        ks = [0, 1, 3]
+        ns = [5, 3, 0]
+        for (k, n), (upper, unitriangular, transpose) in itertools.product(itertools.product(ks, ns),
+                                                                           itertools.product([True, False], repeat=3)):
+            run_test(n, k, upper, unitriangular, transpose)
 
     @dtypes(*get_all_dtypes())
     def test_coo_csr_conversion(self, device, dtype):
