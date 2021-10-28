@@ -1,7 +1,7 @@
 #include <fmt/format.h>
 #include <gtest/gtest.h>
 #include <torch/csrc/deploy/unity/tests/test_unity.h>
-#include <torch/csrc/deploy/unity/unity.h>
+#include <torch/csrc/deploy/unity/xar_environment.h>
 
 namespace torch {
 namespace deploy {
@@ -9,8 +9,11 @@ namespace deploy {
 TEST(UnityTest, TestUnitySimpleModel) {
   // use a different path for unit test. Normally don't specify the path will
   // use the default one.
-  Unity unity(2, TEST_PYTHON_APP_DIR);
-  auto I = unity.getInterpreterManager().acquireOne();
+  std::unique_ptr<Environment> env =
+      std::make_unique<XarEnvironment>(TEST_PYTHON_APP_DIR);
+  InterpreterManager m(2, std::move(env));
+
+  auto I = m.acquireOne();
 
   auto noArgs = at::ArrayRef<Obj>();
   auto input = I.global("torch", "randn")({32, 256});

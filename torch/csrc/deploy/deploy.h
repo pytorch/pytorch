@@ -3,6 +3,7 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/api/include/torch/imethod.h>
 #include <torch/csrc/deploy/interpreter/interpreter_impl.h>
+#include <torch/csrc/deploy/noop_environment.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <cassert>
 #include <fstream>
@@ -111,7 +112,11 @@ struct TORCH_API LoadBalancer {
 struct TORCH_API InterpreterManager {
   explicit InterpreterManager(
       size_t nInterp = 2,
-      const c10::optional<std::string>& pythonPath = c10::nullopt);
+      std::unique_ptr<Environment> env = std::make_unique<NoopEnvironment>());
+
+  ~InterpreterManager() {
+    environment_->teardown();
+  }
 
   // get a free model, guarenteed that no other user of acquireOne has the same
   // model. It _is_ possible that other users will be using the interpreter.
@@ -161,6 +166,7 @@ struct TORCH_API InterpreterManager {
   std::vector<Interpreter> instances_;
   LoadBalancer resources_;
   std::unordered_map<std::string, std::string> registeredModuleSource_;
+  std::unique_ptr<Environment> environment_;
 };
 
 struct TORCH_API ReplicatedObjImpl {

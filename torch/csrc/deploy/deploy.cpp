@@ -59,9 +59,10 @@ static bool writeDeployInterpreter(FILE* dst) {
 
 InterpreterManager::InterpreterManager(
     size_t nInterp,
-    const c10::optional<std::string>& pythonPath)
-    : resources_(nInterp) {
+    std::unique_ptr<Environment> env)
+    : resources_(nInterp), environment_(std::move(env)) {
   TORCH_DEPLOY_TRY
+  environment_->setup();
   for (const auto i : c10::irange(nInterp)) {
     instances_.emplace_back(this);
     auto I = instances_.back().acquireSession();
@@ -79,9 +80,7 @@ InterpreterManager::InterpreterManager(
           }
         });
 
-    if (pythonPath) {
-      I.global("sys", "path").attr("append")({pythonPath.value()});
-    }
+    environment_->configureInterpreter(&instances_.back());
   }
 
   // Pre-registered modules.

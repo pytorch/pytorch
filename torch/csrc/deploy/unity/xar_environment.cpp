@@ -2,19 +2,33 @@
 #include <dlfcn.h>
 #include <fmt/format.h>
 #include <sys/stat.h>
-#include <torch/csrc/deploy/unity/unity.h>
-#include <filesystem>
+#include <torch/csrc/deploy/unity/xar_environment.h>
 
 namespace torch {
 namespace deploy {
-Unity::Unity(int nInterp, std::string pythonAppDir)
+
+XarEnvironment::XarEnvironment(std::string pythonAppDir)
     : pythonAppDir_(std::move(pythonAppDir)),
-      pythonAppRoot_(pythonAppDir_ + "/python_app_root") {
+      pythonAppRoot_(pythonAppDir_ + "/python_app_root") {}
+
+void XarEnvironment::setup() {
   setupPythonApp();
   preloadSharedLibraries();
-  interpreterManager_ =
-      std::make_unique<InterpreterManager>(nInterp, pythonAppRoot_);
-  mainModule_ = lookupMainModule();
+}
+
+void XarEnvironment::teardown() {
+  // We should delete the pythonAppDir_ here. However if we did that, the
+  // next time we run the executable, we will get issue to load shared
+  // libraries since the path we add to LD_LIBRARY_PATH does not exist yet.
+  // Also the pythonAppDir_ will anyway be re-created the next time we run the
+  // executable.
+  //
+  // Keep this method empty for now.
+}
+
+void XarEnvironment::configureInterpreter(Interpreter* interp) {
+  auto I = interp->acquireSession();
+  I.global("sys", "path").attr("append")({pythonAppRoot_});
 }
 
 /*
@@ -36,7 +50,7 @@ bool _dirExists(const std::string& dirPath) {
 extern "C" char _binary_python_app_start[];
 extern "C" char _binary_python_app_end[];
 
-void Unity::setupPythonApp() {
+void XarEnvironment::setupPythonApp() {
   TORCH_CHECK(
       !alreadySetupPythonApp_,
       "Already setup the python application. It should only been done once!");
@@ -56,6 +70,12 @@ void Unity::setupPythonApp() {
       fmt::format(
           "The python app root {} must exist before running the binary. Otherwise there will be issues to find dynamic libraries. Please create the directory and rerun",
           pythonAppRoot_));
+
+  /*
+   * NOTE: we remove the pythonAppDir_ below. Anything under it will be gone.
+   * Normally the directory just contains potential stuff left over from the
+   * past runs. It should be pretty safe to discard them.
+   */
   std::string rmCmd = fmt::format("rm -rf {}", pythonAppDir_);
   TORCH_CHECK(system(rmCmd.c_str()) == 0, "Fail to remove the directory.");
 
@@ -63,7 +83,7 @@ void Unity::setupPythonApp() {
   auto r = mkdir(pythonAppDir_.c_str(), 0777);
   TORCH_CHECK(r == 0, "Failed to create directory: ", strerror(errno));
 
-  std::string pythonAppArchive = std::string(pythonAppDir_) + "/python_app.pkg";
+  std::string pythonAppArchive = std::string(pythonAppDir_) + "/python_app.xar";
   auto fp = fopen(pythonAppArchive.c_str(), "wb");
   TORCH_CHECK(fp != nullptr, "Fail to create file: ", strerror(errno));
   auto written = fwrite(_binary_python_app_start, 1, pythonAppPkgSize, fp);
@@ -78,7 +98,7 @@ void Unity::setupPythonApp() {
   alreadySetupPythonApp_ = true;
 }
 
-void Unity::preloadSharedLibraries() {
+void XarEnvironment::preloadSharedLibraries() {
   // preload the following libraries since the CustomLoader has some limitations
   // 1. CustomLoader can not find the correct order to loader them
   // 2. CustomLoader use RTLD_LOCAL so the symbol defined in one lib can not be
@@ -93,22 +113,6 @@ void Unity::preloadSharedLibraries() {
         ": ",
         dlerror());
   }
-}
-
-// the way we lookup main module follows how an xar file is setup
-std::string Unity::lookupMainModule() {
-  auto I = getInterpreterManager().acquireOne();
-  auto mainModule =
-      I.global("__manifest__", "fbmake").attr("get")({"main_module"});
-  std::ostringstream ss;
-  ss << mainModule.toIValue();
-  LOG(INFO) << "main module is " << ss.str();
-  return ss.str();
-}
-
-void Unity::runMainModule() {
-  auto I = getInterpreterManager().acquireOne();
-  I.global("runpy", "run_module")({mainModule_});
 }
 
 } // namespace deploy
