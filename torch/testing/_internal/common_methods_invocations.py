@@ -254,23 +254,23 @@ def _getattr_qual(obj, name, default=_NOTHING):
 #        against every PyTorch operator
 #
 # All these goals are still a work in progress. Not every operator has an
-#   OpInfo, and some operator tests that could be automatically generated 
+#   OpInfo, and some operator tests that could be automatically generated
 #   still have to be written manually.
 #
 # It's helpful to understand that OpInfos are both about test simplification and
-#   modularity. PyTorch is a complicated framework with many interrelated systems, 
+#   modularity. PyTorch is a complicated framework with many interrelated systems,
 #   too many for any one person to keep track of. An OpInfo can be thought of as the
 #   interface between an operator implementer and those other systems. Instead of
 #   requiring the implementer of torch.foo understand how to test its forward
 #   mode AD or NNC support that's typically handled automatically just by
-#   defining an OpInfo. 
-# 
-# It's often surprising to OpInfo writers that just implementing an OpInfo 
-#   typically can't verify an operator is actually implemented correctly: 
-#   
-# "If an OpInfo doesn't validate my op works as expected, what's the point 
+#   defining an OpInfo.
+#
+# It's often surprising to OpInfo writers that just implementing an OpInfo
+#   typically can't verify an operator is actually implemented correctly:
+#
+# "If an OpInfo doesn't validate my op works as expected, what's the point
 #     of it?"
-#  
+#
 # But the point of is the above. OpInfos are intended to let you focus on testing
 #   the operator logic you're familiar with instead of having to write tests for
 #   how the operator interacts with each of PyTorch's many systems.
@@ -341,15 +341,15 @@ def _getattr_qual(obj, name, default=_NOTHING):
 # THE (OPTIONAL) ERROR INPUTS FUNCTION
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #
-# OpInfos may optionally specify "error inputs" through an error function. If 
+# OpInfos may optionally specify "error inputs" through an error function. If
 #   specified test_errors in test_ops.py will call the op with these inputs
 #   and validate that the desired error is thrown.
 #
-# Error inputs automate a common testing pattern where multiple inputs are 
+# Error inputs automate a common testing pattern where multiple inputs are
 #   passed to an operation and the errors they thrown are reviewed. Tests
 #   written in this style should be ported to the new OpInfo pattern.
 #
-# Error inputs are specified using the ErrorInputs class, which contains 
+# Error inputs are specified using the ErrorInputs class, which contains
 #   a SampleInput (see above) and data about the expected error.
 #
 # OPINFO FILE ORGANIZATION
@@ -425,14 +425,14 @@ def _getattr_qual(obj, name, default=_NOTHING):
 #   - torch
 #   - torch.fft
 #   - torch.linalg,
-#   - torch.special 
-#   - torch.nn.functional 
-# then you should typically add an OpInfo for it. 
+#   - torch.special
+#   - torch.nn.functional
+# then you should typically add an OpInfo for it.
 #
-# As mentioned a couple times above, implementing an OpInfo is not 
-#   usually sufficient testing (unless the operator is a unary elementwise 
-#   operator). The OpInfo will only test the properties described in the 
-#   "WHAT'S TESTED" section. It DOES NOT verify that the operator is 
+# As mentioned a couple times above, implementing an OpInfo is not
+#   usually sufficient testing (unless the operator is a unary elementwise
+#   operator). The OpInfo will only test the properties described in the
+#   "WHAT'S TESTED" section. It DOES NOT verify that the operator is
 #   implemented correctly.
 #
 # TIPS FOR WRITING AN OPINFO AND OPINFO TESTS
@@ -471,7 +471,7 @@ def _getattr_qual(obj, name, default=_NOTHING):
 #
 # In the future we expect OpInfo coverage to improve and cover
 #   the great majority of PyTorch's (public) operators.
-# 
+#
 
 # Classes and methods for the operator database
 class OpInfo(object):
