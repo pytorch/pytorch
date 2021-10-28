@@ -1236,6 +1236,7 @@
     MkldnnCPU: copy_mkldnn_
     SparseCPU, SparseCUDA, SparseHIP, SparseXPU: copy_sparse_wrapper_
     CompositeExplicitAutograd: copy_
+    SparseCsrCPU, SparseCsrCUDA: copy_sparse_csr_
 
 - func: _copy_from(Tensor self, Tensor dst, bool non_blocking=False) -> Tensor
   dispatch: {}
@@ -1777,6 +1778,7 @@
     Meta: empty_meta
     MkldnnCPU: empty_mkldnn
     SparseCPU, SparseCUDA: empty_sparse
+    SparseCsrCPU, SparseCsrCUDA: empty_sparse_csr
 
 # We do not make new_empty a composite that calls into new_empty_strided, as the strided version
 # is significantly more difficult to implement by different backends
@@ -1822,6 +1824,7 @@
     CPU, Meta: resize_
     CUDA: resize_cuda_
     QuantizedCPU: quantized_resize_cpu_
+    SparseCsrCPU, SparseCsrCUDA: resize_sparse_csr_
 
 - func: empty_quantized(int[] size, Tensor qtensor, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   category_override: factory
@@ -2733,6 +2736,7 @@
 - func: matrix_exp(Tensor self) -> Tensor
   variants: function, method
 
+# This function should be deprecated in favor of differential_analytic_matrix_function in FunctionsManual.cpp
 - func: matrix_exp_backward(Tensor self, Tensor grad) -> Tensor
 
 # DEPRECATED: Use torch.aminmax instead
@@ -3028,7 +3032,8 @@
   structured_delegate: mm.out
   variants: function, method
   dispatch:
-    SparseCPU, SparseCUDA, SparseCsrCPU, SparseCsrCUDA: _sparse_mm
+    SparseCPU, SparseCUDA: _sparse_mm
+    SparseCsrCPU, SparseCsrCUDA: _sparse_csr_mm
 
 - func: mm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -5420,6 +5425,14 @@
 - func: choose_qparams_optimized(Tensor input, int numel, int n_bins, float ratio, int bit_width) -> (Tensor, Tensor)
   variants: function
 
+- func: _autocast_to_reduced_precision(Tensor(a) self, bool cuda_enabled, bool cpu_enabled, ScalarType cuda_dtype, ScalarType cpu_dtype) -> Tensor(a)
+  variants: method
+  device_guard: False
+
+- func: _autocast_to_full_precision(Tensor(a) self, bool cuda_enabled, bool cpu_enabled) -> Tensor(a)
+  variants: method
+  device_guard: False
+
 - func: _to_copy(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, bool non_blocking=False, MemoryFormat? memory_format=None) -> Tensor
   device_check: NoCheck
   device_guard: False
@@ -6728,13 +6741,14 @@
     CUDA: legacy_lstsq_cuda
 
 - func: triangular_solve.X(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False, *, Tensor(a!) X, Tensor(b!) M) -> (Tensor(a!) solution, Tensor(b!) cloned_coefficient)
+  structured: True
   dispatch:
     CPU, CUDA: triangular_solve_out
+    SparseCsrCUDA: triangular_solve_out_sparse_csr_cuda
 
 - func: triangular_solve(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False) -> (Tensor solution, Tensor cloned_coefficient)
+  structured_delegate: triangular_solve.X
   variants: method, function
-  dispatch:
-    CPU, CUDA: triangular_solve
 
 - func: symeig.e(Tensor self, bool eigenvectors=False, bool upper=True, *, Tensor(a!) e, Tensor(b!) V) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
   dispatch:
@@ -7091,6 +7105,18 @@
   variants: method, function
   dispatch:
     CPU: histogram_cpu
+
+- func: _histogramdd_bin_edges(Tensor self, int[] bins, *, float[]? range=None, Tensor? weight=None, bool density=False) -> Tensor[]
+  dispatch:
+    CPU: histogramdd_bin_edges_cpu
+
+- func: _histogramdd_from_bin_cts(Tensor self, int[] bins, *, float[]? range=None, Tensor? weight=None, bool density=False) -> Tensor
+  dispatch:
+    CPU: histogramdd_cpu
+
+- func: _histogramdd_from_bin_tensors(Tensor self, Tensor[] bins, *, Tensor? weight=None, bool density=False) -> Tensor
+  dispatch:
+    CPU: histogramdd_cpu
 
 - func: fmod.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -8257,6 +8283,16 @@
   dispatch:
     CPU: searchsorted_cpu
     CUDA: searchsorted_cuda
+
+# [Note about _torch_cuda_cu_linker_symbol_op and torch_cuda_cu]
+# This is a DUMMY function to force the linking against torch_cuda_cu on Windows.
+# Otherwise, the Windows linker will optimize and not include torch_cuda_cu even when we
+# want it to be included. This is similar to what we do with warp_size for torch_cuda_cpp,
+# described as the solution to this issue: https://github.com/pytorch/pytorch/issues/31611
+# This op should NOT be used or exposed or edited or else Windows builds (with BUILD_SPLIT_CUDA) will break.
+- func: _torch_cuda_cu_linker_symbol_op(Tensor self) -> Tensor
+  dispatch:
+    CUDA: _torch_cuda_cu_linker_symbol_op_cuda
 
 - func: searchsorted.Tensor_out(Tensor sorted_sequence, Tensor self, *, bool out_int32=False, bool right=False, Tensor(a!) out) -> Tensor(a!)
   dispatch:

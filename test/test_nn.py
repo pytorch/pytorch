@@ -10518,19 +10518,24 @@ class TestNN(NNTestCase):
 
     def test_upsamplingLinear1d(self):
         for align_corners in [True, False]:
-            kwargs = dict(mode='linear', align_corners=align_corners)
+            for recompute_scale_factor in [True, False]:
+                kwargs = dict(
+                    mode='linear', align_corners=align_corners, recompute_scale_factor=recompute_scale_factor
+                )
+                # test float scale factor up & downsampling
+                for scale_factor in [0.5, 1.5, 2]:
+                    m = nn.Upsample(scale_factor=scale_factor, **kwargs)
+                    in_t = torch.ones(1, 1, 2)
+                    out_size = int(math.floor(in_t.shape[-1] * scale_factor))
+                    with warnings.catch_warnings(record=True) as w:
+                        out_t = m(in_t)
+                    self.assertEqual(torch.ones(1, 1, out_size), out_t.data)
 
-            # test float scale factor up & downsampling
-            for scale_factor in [0.5, 1.5, 2]:
-                m = nn.Upsample(scale_factor=scale_factor, **kwargs)
-                in_t = torch.ones(1, 1, 2)
-                out_size = int(math.floor(in_t.shape[-1] * scale_factor))
-                with warnings.catch_warnings(record=True) as w:
-                    out_t = m(in_t)
-                self.assertEqual(torch.ones(1, 1, out_size), out_t.data)
-
-                input = torch.randn(1, 1, 2, requires_grad=True)
-                gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), (input,))
+                    input = torch.randn(1, 1, 2, requires_grad=True)
+                    if not recompute_scale_factor:
+                        gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), (input,))
+                    else:
+                        gradcheck(lambda x: F.interpolate(x, scale_factor=scale_factor, **kwargs), (input,))
 
     def test_upsamplingLinear1d_spatial_invariance(self):
         m = nn.Upsample(scale_factor=3, mode='linear', align_corners=False)
@@ -13977,6 +13982,32 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(mod.weight.grad, torch.tensor([0., 0, 0], device=device))
         self.assertEqual(mod.bias.grad, torch.tensor([0., 0, 0], device=device))
 
+    def test_conv_empty_channel(self, device):
+        in_channels = 0
+        mod = torch.nn.Conv1d(in_channels, 8, 2, stride=2).to(device)
+        inp = torch.randn(2, 0, 15, device=device)
+        self._test_module_empty_input(mod, inp, check_size=False)
+
+        with self.assertRaisesRegex(RuntimeError, "Given groups=1, weight"):
+            inp = torch.randn(2, 1, 0, device=device)
+            mod(inp)
+
+        mod = torch.nn.Conv2d(in_channels, 33, 3, stride=2).to(device)
+        inp = torch.randn(2, 0, 50, 100, device=device)
+        self._test_module_empty_input(mod, inp, check_size=False)
+
+        with self.assertRaisesRegex(RuntimeError, "Given groups=1, weight"):
+            inp = torch.randn(2, 1, 40, 0, device=device)
+            mod(inp)
+
+        mod = torch.nn.Conv3d(in_channels, 33, 3, stride=2).to(device)
+        inp = torch.randn(2, 0, 50, 20, 40, device=device)
+        self._test_module_empty_input(mod, inp, check_size=False)
+
+        with self.assertRaisesRegex(RuntimeError, "Given groups=1, weight"):
+            inp = torch.randn(2, 1, 50, 0, 40, device=device)
+            mod(inp)
+
     def test_group_conv_empty(self, device):
         mod = torch.nn.Conv2d(4, 4, stride=2, kernel_size=3, padding=1, groups=4).to(device)
         inp = torch.randn(0, 4, 4, 4, device=device)
@@ -16345,6 +16376,18 @@ class TestNNDeviceType(NNTestCase):
             with torch.backends.cudnn.flags(enabled=False):
                 self._test_batchnorm_grad(device)
 
+    @onlyCUDA
+    def test_layernorm_half_precision(self):
+        width = 128
+        input = torch.rand(1, 5, width, device="cuda", dtype=torch.half) * 0.1
+        normalized_shape = (width,)
+        weight = torch.ones(width, device="cuda", dtype=torch.half)
+        bias = torch.zeros(width, device="cuda", dtype=torch.half)
+        eps = 1e-5
+
+        output_fp16 = torch.layer_norm(input, normalized_shape, weight, bias, eps)
+        output_fp32 = torch.layer_norm(input.float(), normalized_shape, weight.float(), bias.float(), eps).half()
+        self.assertEqual(output_fp16, output_fp32, atol=0, rtol=0)
 
     def test_hardsigmoid_grad(self, device):
         inputs = (torch.randn(4, 16, 16, device=device) - 0.5) * 10
