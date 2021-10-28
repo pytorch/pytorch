@@ -1982,6 +1982,73 @@ class TestFrozenOptimizations(JitTestCase):
 
         self.assertEqual(mod_to_device(*test_vals_to_device), script_mod(*test_vals_to_device))
 
+    @staticmethod
+    def conv():
+        # Generic composable conv for testing purposes
+        return nn.Conv2d(8, 8, 1)
+
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    def test_collapse_adjacent_conversions(self):
+
+        with set_default_dtype(torch.float):
+            mod = nn.Sequential(self.conv(), self.conv()).eval()
+            scripted_mod = torch.jit.script(mod)
+            scripted_mod = torch.jit.freeze(scripted_mod)
+            self.run_pass("convert_frozen_ops_to_mkldnn", scripted_mod.graph)
+            FileCheck().check("to_mkldnn").check("prim::mkldnn_convolution").check("prim::mkldnn_convolution").check("to_dense").run(scripted_mod.graph)
+            FileCheck().check_count("to_mkldnn", 1, exactly=True).run(scripted_mod.graph)
+
+            inp = torch.rand([1, 8, 8, 8])
+            self.assertEqual(scripted_mod(inp), mod(inp))
+            self.assertEqual(scripted_mod(inp), mod(inp))
+
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    def test_mkldnn_fuser_broadcasting(self):
+        class Add(nn.Module):
+            def __init__(self, tensor):
+                super().__init__()
+                self.tensor = tensor
+
+            def forward(self, x):
+                return x + self.tensor
+
+        with set_default_dtype(torch.float):
+            for add_inp in [8], [8, 8, 1]:
+                mod = nn.Sequential(self.conv(), Add(torch.rand(add_inp))).eval()
+                scripted_mod = torch.jit.script(mod)
+                scripted_mod = torch.jit.freeze(scripted_mod)
+                self.run_pass("convert_frozen_ops_to_mkldnn", scripted_mod.graph)
+                FileCheck().check("prim::BroadcastMKLDNNTensors").run(scripted_mod.graph)
+                inp = torch.rand([1, 8, 8, 8])
+                self.assertEqual(scripted_mod(inp), mod(inp))
+                self.assertEqual(scripted_mod(inp), mod(inp))
+
+                # for good measure, check that broadcasting does not work without this op
+                # so we can remove the op if it ever gets supported
+                with self.assertRaisesRegex(RuntimeError, ""):
+                    torch.rand([1, 8, 8, 8]).to_mkldnn() + torch.rand(add_inp).to_mkldnn()
+
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    def test_mkldnn_inplace_removal(self):
+        class AddMul(nn.Module):
+            def __init__(self, tensor):
+                super().__init__()
+                self.tensor = tensor
+
+            def forward(self, x):
+                return x.add_(self.tensor).div_(self.tensor) - 4
+
+        with set_default_dtype(torch.float):
+            mod = nn.Sequential(self.conv(), AddMul(torch.rand([8]))).eval()
+            scripted_mod = torch.jit.script(mod)
+            scripted_mod = torch.jit.freeze(scripted_mod)
+            self.run_pass("convert_frozen_ops_to_mkldnn", scripted_mod.graph)
+            # add gets uninplaced and reinplaced
+            FileCheck().check("aten::to_mkldnn").check("aten::add_").check("aten::div_").run(scripted_mod.graph)
+            inp = torch.rand([1, 8, 8, 8])
+            self.assertEqual(scripted_mod(inp), mod(inp))
+            self.assertEqual(scripted_mod(inp), mod(inp))
+
     @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
     @skipIfNoTorchVision
     def test_maxpool_mkldnn(self):
@@ -2184,6 +2251,26 @@ class TestFrozenOptimizations(JitTestCase):
                         # `inplace=False` is intentional, otherwise we modify the input
                         # and we aren't testing aten impls anyways
                         self.assertEqual(aten_op(x, inplace=False), m(x).to_dense())
+
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    def test_scalar_mul(self):
+        with set_default_dtype(torch.float):
+            class Mod(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.mod = nn.Conv2d(8, 8, 1, padding=1)
+
+                def forward(self, x):
+                    a1 = self.mod(x) * 4
+                    return a1 * 4 + a1 * 5.
+
+            mod = Mod().eval()
+            scripted = torch.jit.freeze(torch.jit.script(mod))
+            optimized = torch.jit.optimize_for_inference(scripted)
+            inp = torch.rand([1, 8, 8, 8])
+            # a1 cant be inplaced for first use, can for second
+            FileCheck().check("ScalarMul(").check("ScalarMul_").run(optimized.graph)
+            self.assertEqual(optimized(inp), mod(inp))
 
 @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
 class TestMKLDNNReinplacing(JitTestCase):
