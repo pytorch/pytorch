@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import timeit
 import torch
-from functorch import pointwise_operator
+from functorch.compile import pointwise_operator
 
 WRITE_CSV = False
 CUDA = False
