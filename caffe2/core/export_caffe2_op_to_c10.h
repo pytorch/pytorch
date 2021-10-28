@@ -16,10 +16,6 @@ class OperatorHandle;
 using Stack = std::vector<IValue>;
 }
 
-namespace torch {
-class Library;
-}
-
 namespace caffe2 {
 namespace detail {
 
