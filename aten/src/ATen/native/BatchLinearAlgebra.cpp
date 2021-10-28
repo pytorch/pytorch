@@ -3957,19 +3957,50 @@ Tensor& linalg_solve_triangular_out(
   // and X = B after the algortihm. We just anotate that A is conjugated later on
   // The solution will be written into out_f, so it'll be conjugated already
 
-  Tensor A_f;  // The A that will go into fortran
-  bool A_is_conj = A_.is_conj() != out_f.is_conj();
-  bool A_is_neg = A_.is_neg() != out_f.is_neg();
-  bool A_is_f_contig = (A_.stride(-1) == 1) == transpose_A;
-  if C10_LIKELY (is_row_or_column_contiguous(A_) && !((A_is_conj && A_is_f_contig) || A_is_neg)) {
-    A_f = A_;
-  } else {
-    // We choose C-contig rather than F-contig because it has better memory access in solvers
-    // We resolve the conj as well
-    A_f = A_.clone(at::MemoryFormat::Contiguous);
-    A_is_f_contig = transpose_A;
+  Tensor A_f = A_;  // The A that will go into fortran
+
+  bool A_is_conj = A_f.is_conj() != out_f.is_conj();
+  bool A_is_neg = A_f.is_neg() != out_f.is_neg();
+  bool A_is_f_contig = (A_f.stride(-1) == 1) == transpose_A;
+  if C10_UNLIKELY (!is_row_or_column_contiguous(A_f)) {
+    // We first anotate with flags on A_f all the conj / transpose / neg coming from out
+    // and then we clone the resulting tensor to resolve all of them in memory
+    A_f = out_f.is_conj() ? A_f.conj() : A_f;
     A_is_conj = false;
+    A_f = out_f.is_neg() ? A_f._neg_view() : A_f;
     A_is_neg = false;
+    // This choice is to be consistent with how we flip `upper` later on
+    A_f = transpose_A ? A_f.clone(at::MemoryFormat::Contiguous)
+                      : cloneBatchedColumnMajor(A_f);
+    A_is_f_contig = true;
+  } else if C10_UNLIKELY (A_is_f_contig && A_is_conj) {
+    if C10_UNLIKELY (A_is_neg) {
+      // Cases A_is_neg (remember that B.is_neg() iff out_f.is_same(B))
+      // -AX = -B => A(-X) = B. Nothing to do as X.is_same(B). In this case A_is_neg == false
+      // -AX = B. We resolve the neg in memory
+      // AX = -B => -A -X = B. We resolve the neg in memory for A,
+      //                       Since X.is_same(B), we already have that X.is_neg() == true
+      // We do the neg with a view, as this will be resolved in the clone below
+      A_f = A_is_neg ? A_f._neg_view() : A_f;
+      A_is_neg = false;
+    }
+    // We resolve the transpose if necessary and then leave A_f F-transposed,
+    // as BLAS can handle the case F-transposed and conjugated
+    A_f = at::clone(transpose_A ? A_f.mT() : A_f, at::MemoryFormat::Contiguous);
+    A_is_f_contig = false;
+    if (transpose_A) {
+      upper = !upper;
+    }
+    // As we've already resolved the conj of A in the clone
+    A_is_conj = out_f.is_conj();
+  } else if C10_UNLIKELY (A_is_neg) {
+    // We follow the same logic as above, only that in this case we need to perform the
+    // negation in memory
+    A_f = -A_f;
+    A_is_neg = false;
+    // As we've already resolved the conj of A in the negationa bove
+    A_is_conj = out_f.is_conj();
+  } else {
   }
   // Invariant: out_f is F-contig and A_f is F-ready
 
