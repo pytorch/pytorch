@@ -1,8 +1,10 @@
 #pragma once
 
+#include <vector>
+
+#include <ATen/core/function.h>
 #include <ATen/core/function_schema.h>
 #include <ATen/core/ivalue.h>
-#include <vector>
 
 namespace torch {
 namespace jit {
@@ -12,13 +14,16 @@ enum OpCode : uint8_t;
 namespace mobile {
 struct Code;
 
-class Function {
+class TORCH_API Function : public torch::jit::Function {
  public:
-  TORCH_API Function(c10::QualifiedName name);
-  TORCH_API bool run(Stack& stack) const;
-  c10::IValue operator()(Stack& stack) const;
-  const std::string& name() const;
-  TORCH_API const c10::QualifiedName& qualname() const;
+  explicit Function(c10::QualifiedName name);
+  void run(Stack& stack) override;
+  at::IValue operator()(Stack& stack);
+  void ensure_defined() override {}
+  size_t num_inputs() const override;
+  const c10::QualifiedName& qualname() const override;
+  bool call(Stack&, c10::function_ref<void(const mobile::Code&)>) override;
+
   void append_instruction(OpCode op, int X, int N, int64_t dbg_handle);
   void append_instruction(OpCode op, int X, int N);
   bool append_operator(
@@ -29,15 +34,16 @@ class Function {
                                 are removed */
   void append_constant(const c10::IValue& constant);
   void append_type(const c10::TypePtr& type);
-  TORCH_API void append_function(mobile::Function& func);
+  void append_function(mobile::Function& func);
 
   void set_register_size(size_t size);
 
   int64_t get_debug_handle(size_t pc) const;
   const std::shared_ptr<Code> get_code() const;
 
-  void setSchema(c10::FunctionSchema schema);
-  const at::optional<c10::FunctionSchema>& getSchema() const;
+  torch::jit::Function& setSchema(c10::FunctionSchema schema) override;
+  bool hasSchema() const;
+  const c10::FunctionSchema& getSchema() const override;
 
   // Returns the debug handle corresponding to where the execution
   // is halted due to exception.
