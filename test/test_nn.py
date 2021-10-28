@@ -17274,6 +17274,7 @@ class TestNNDeviceType(NNTestCase):
     @skipCUDAIfRocm
     @skipCUDAIfNoCudnn
     @dtypes(torch.float, torch.float16)
+    @precisionOverride({torch.half: 0.002, torch.float: 1e-4})
     def test_cudnn_convolution_relu(self, device, dtype):
         for batch, groups, image_size, kernel_size, memory_format in \
                 product((1, 2, 3),
