@@ -67,6 +67,12 @@ void InterpreterState::saveExceptionDebugHandle() {
   }
 }
 
+void InterpreterState::callFunction(torch::jit::Function& f, Stack& stack) {
+  bool newFrame =
+      f.call(stack, [&](const mobile::Code& code) { enterFrame(code); });
+  (frames_.rbegin() + (newFrame ? 1 : 0))->step();
+}
+
 bool InterpreterState::run(Stack& stack) {
   while (true) {
     try {
@@ -125,9 +131,8 @@ bool InterpreterState::run(Stack& stack) {
           frame.step();
         } break;
         case CALL: {
-          auto& function = frame.getCode().functions_.at(inst.X);
-          frame.step();
-          enterFrame(*function->get_code());
+          auto& function = *frame.getCode().functions_.at(inst.X);
+          callFunction(function, stack);
         } break;
         case INTERFACE_CALL: {
           torch::jit::Function& method =
