@@ -449,7 +449,7 @@ class KLDivLoss(_Loss):
         >>> input = F.log_softmax(torch.randn(3, 5, requires_grad=True))
         >>> # Sample a batch of distributions. Usually this would come from the dataset
         >>> def normalize(p):
-        >>>     return p / p.sum(1, keepdim=True)
+        ...     return p / p.sum(1, keepdim=True)
         >>> target = normalize(torch.rand(3, 5))
         >>> output = kl_loss(input, target)
     """
