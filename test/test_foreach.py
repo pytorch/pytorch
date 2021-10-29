@@ -1,4 +1,4 @@
-# Owner(s): ["high priority"]
+# Owner(s): ["module: mta"]
 
 import itertools
 from numbers import Number
