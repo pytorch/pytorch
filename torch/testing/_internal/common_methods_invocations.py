@@ -6353,6 +6353,20 @@ def sample_inputs_gaussian_nll_loss(op_info, device, dtype, requires_grad, **kwa
 
     return list(gen_inputs())
 
+def _generate_sample_inputs_nn_loss(op_info, device, dtype, requires_grad, **kwargs):
+    _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    for s, r in _generate_sample_shape_reduction():
+        yield _make_tensor(s), _make_tensor(s), dict(reduction=r)
+
+def sample_inputs_hinge_embedding_loss(op_info, device, dtype, requires_grad, **kwargs):
+    def gen_inputs():
+        for input, target, d in _generate_sample_inputs_nn_loss(op_info, device, dtype, requires_grad, **kwargs):
+            d['margin'] = random.uniform(-9, 9)
+            yield SampleInput(input, args=(target, ), kwargs=d)
+
+    return list(gen_inputs())
+
 def sample_inputs_pairwise_distance(op_info, device, dtype, requires_grad, **kwargs):
     make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -11492,6 +11506,14 @@ op_db: List[OpInfo] = [
             # please report a bug to PyTorch.
             DecorateInfo(unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit", dtypes=(torch.float32,),),
         ),
+    ),
+    OpInfo(
+        "nn.functional.hinge_embedding_loss",
+        ref=_NOTHING,
+        dtypesIfCPU=floating_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        supports_out=False,
+        sample_inputs_func=sample_inputs_hinge_embedding_loss,
     ),
     OpInfo(
         "argsort",
