@@ -6,7 +6,6 @@
 #include "lazy_tensor_core/csrc/torch_util.h"
 #include "lazy_tensors/computation_client/util.h"
 #include "lazy_tensors/shape_util.h"
-#include "lazy_tensors/util.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
