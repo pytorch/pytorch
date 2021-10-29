@@ -3217,6 +3217,7 @@ class TestOperatorSignatures(JitTestCase):
                            'special.zeta',
                            'stack',
                            'to_sparse',
+                           'unique',
                            'view',
                            'view_as',
                            'nn.functional.hardshrink',
