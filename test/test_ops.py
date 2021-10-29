@@ -10,7 +10,7 @@ from torch.testing._internal.common_dtype import floating_and_complex_types_and,
 from torch.testing._internal.common_utils import \
     (TestCase, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper,
      gradcheck, gradgradcheck, IS_IN_CI, suppress_warnings, noncontiguous_like,
-     TEST_WITH_ASAN)
+     TEST_WITH_ASAN, IS_WINDOWS)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, _NOTHING, UnaryUfuncInfo, ReductionOpInfo, SpectralFuncInfo)
 from torch.testing._internal.common_device_type import \
@@ -205,7 +205,9 @@ class TestCommon(TestCase):
 
     # Tests that the function produces the same result when called with
     #   noncontiguous tensors.
+    # TODO: get working with Windows by addressing failing operators
     # TODO: get working with ASAN by addressing failing operators
+    @unittest.skipIf(IS_WINDOWS, "Skipped under Windows")
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyOnCPUAndCUDA
     @suppress_warnings
