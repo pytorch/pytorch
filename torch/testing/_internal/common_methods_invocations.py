@@ -6375,6 +6375,30 @@ def sample_inputs_huber_loss(op_info, device, dtype, requires_grad, **kwargs):
 
     return list(gen_inputs())
 
+def sample_inputs_poisson_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
+    _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    def gen_shape_kwargs():
+        for s, r in _generate_sample_shape_reduction():
+            for li in (True, False):
+                for f in (True, False):
+                    yield (
+                        _make_tensor(s), _make_tensor(s),
+                        dict(log_input=li, full=f, reduction=r)
+                    )
+                    yield (
+                        _make_tensor(s), _make_tensor(s),
+                        dict(log_input=li, full=f,
+                             eps=random.uniform(1e-8, 1e-3),
+                             reduction=r)
+                    )
+
+    def gen_inputs():
+        for input, target, kwargs in gen_shape_kwargs():
+            yield SampleInput(input, args=(target, ), kwargs=kwargs)
+
+    return list(gen_inputs())
+
 def sample_inputs_pairwise_distance(op_info, device, dtype, requires_grad, **kwargs):
     make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -11535,6 +11559,37 @@ op_db: List[OpInfo] = [
             # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":270,
             # please report a bug to PyTorch.
             DecorateInfo(unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit", dtypes=(torch.float32,),),
+        )
+    ),
+    OpInfo(
+        "nn.functional.poisson_nll_loss",
+        ref=_NOTHING,
+        dtypesIfCPU=all_types_and(torch.bfloat16),
+        dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
+        supports_out=False,
+        supports_forward_ad=True,
+        sample_inputs_func=sample_inputs_poisson_nll_loss,
+        skips=(
+            # https://github.com/pytorch/pytorch/issues/67461
+            # torch.autograd.gradcheck.GradcheckError: Jacobian mismatch for output 0 with respect to input 0
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestGradients",
+                "test_fn_grad",
+                dtypes=(torch.float64,),
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestGradients",
+                "test_fn_gradgrad",
+                dtypes=(torch.float64,),
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestGradients",
+                "test_forward_mode_AD",
+                dtypes=(torch.float64,),
+            ),
         ),
     ),
     OpInfo(
