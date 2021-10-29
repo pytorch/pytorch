@@ -5537,7 +5537,7 @@ class TestLinalg(TestCase):
             with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
                 torch.linalg.householder_product(reflectors, tau)
 
-    @precisionOverride({torch.complex64: 5e-6})
+    @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
@@ -5551,7 +5551,7 @@ class TestLinalg(TestCase):
             check_errors = fn == torch.linalg.lu_factor
             if singular and check_errors:
                 # It may or may not throw as the LU decomposition without pivoting
-                # may still succeed for sinuglar matrices
+                # may still succeed for singular matrices
                 try:
                     LU, pivots = fn(A, pivot=pivot)
                 except RuntimeError:
@@ -5572,7 +5572,7 @@ class TestLinalg(TestCase):
         sizes = ((3, 3), (5, 5), (4, 2), (3, 4), (0, 0), (0, 1), (1, 0))
         batches = ((0,), (2,), (3,), (1, 0), (3, 5))
         # Non pivoting just implemented for CUDA
-        pivots = (True, False) if device.type == "cuda" else (True,)
+        pivots = (True, False) if self.device_type == "cuda" else (True,)
         fns = (partial(torch.lu, get_infos=True), torch.linalg.lu_factor, torch.linalg.lu_factor_ex)
         for ms, batch, pivot, singular, fn in itertools.product(sizes, batches, pivots, (True, False), fns):
             m, n = ms
