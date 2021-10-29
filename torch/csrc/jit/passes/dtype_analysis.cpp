@@ -44,8 +44,8 @@ std::unique_ptr<Stack> MTensorArgumentCreator(Node* n) {
     } else if (inp->type() == IntType::get()) {
       stack->emplace_back(1);
     } else if (inp->type() == BoolType::get()) {
-      // For now just not support bool until we know it is safe.
-      throw std::runtime_error("Unsupported input type for Tensor argument");
+      throw std::runtime_error(
+          "Bool currently unsupported, need to verify it's safe to add for all ops");
       stack->emplace_back(false);
     } else {
       // Arrays of values are specifically not handled due
@@ -112,8 +112,7 @@ c10::optional<Tensor> inferWithMetaTensor(Node* n) {
   return c10::nullopt;
 }
 
-bool setDtype(Value* value, ScalarType scalarType) {
-  // returns if anything was changed
+bool setDtype(Value* value, ScalarType scalarType, bool can_overwrite_dtype=false) {
   auto tensor_type = value->type()->cast<TensorType>();
   TORCH_INTERNAL_ASSERT(tensor_type, "Expecting a tensor type");
   if (!tensor_type->scalarType().has_value()) {
@@ -121,10 +120,12 @@ bool setDtype(Value* value, ScalarType scalarType) {
     return true;
   }
   if (tensor_type->scalarType().value() != scalarType) {
-    // Have to overwrite the dtype if it has been set to a diffferent value
-    // in a previous run of dtype analysis (eg in testing with cached graphs)
-
-    // Due to SSA, there shouldn't be a reason why this overwrite is not valid.
+    TORCH_INTERNAL_ASSERT(
+        can_overwrite_dtype,
+        "Expected tensor type to be ",
+        scalarType,
+        " but found ",
+        tensor_type->scalarType().value());
     value->setType(tensor_type->withScalarType(scalarType));
     return true;
   }
@@ -213,10 +214,6 @@ struct DtypePropagationPass {
         break;
     }
 
-    TORCH_INTERNAL_ASSERT(
-        n->blocks().empty(), "Do not handle this block structure");
-
-    // process non-block nodes
     bool has_tensor_output =
         std::any_of(n->outputs().begin(), n->outputs().end(), [](Value* v) {
           return (bool)v->type()->cast<TensorType>();
@@ -227,11 +224,9 @@ struct DtypePropagationPass {
       return false;
     }
 
-    bool changed = false;
-    // Main dispatch loop for the abstract interpreter
     switch (n->kind()) {
       case prim::Constant:
-        // This seems to already been propagated by something else in freezing
+        // This is already been propagated by something else in freezing
         return false;
       case prim::ListConstruct:
       case prim::ListUnpack:
@@ -239,12 +234,12 @@ struct DtypePropagationPass {
         break;
       default:
         if (n->kind().is_aten()) {
-          changed = processAtenOps(n);
+          return processAtenOps(n);
         } else {
           TORCH_INTERNAL_ASSERT(false, "not supported IR");
         }
     }
-    return changed;
+    return false;
   }
 
   bool mergeTensorProperties(
@@ -254,13 +249,6 @@ struct DtypePropagationPass {
     // After Month1: implement the merge function
     TORCH_INTERNAL_ASSERT(list1.size() == 0, "Not implemented yet");
     return false;
-    /*
-    TORCH_INTERNAL_ASSERT(oneList.size() == anotherList.size());
-
-    for (auto i : c10::irange(oneList.size())) {
-    }
-    return false;
-    */
   }
 
   bool processIf(Node* node) {
@@ -288,22 +276,7 @@ struct DtypePropagationPass {
       DtypePropRule rule = *prop_fn;
       return rule(n);
     }
-
-    bool changed = tryApplyDtypeMetaTensor(n);
-
-    switch (n->kind()) {
-      case aten::append:
-        // auto elementType =
-        // n->input()->type()->expect<ListType>()->containedTypes()[0]; if
-        // (auto itp  = elementType->cast<TensorType>()) {
-        //   //itp->
-        //   auto otp = elementType->cast<TensorType>()->containedTypes()[0];
-        //   ListType::create(otp->withScalarType(i))
-        // }
-        break;
-    }
-
-    return changed;
+    return tryApplyDtypeMetaTensor(n);
   }
 
   void buildDtypeRuleRegistry() {
@@ -315,25 +288,8 @@ struct DtypePropagationPass {
     dtype_prop_registry_->insert(
         *ops_one_tensor_in_shape_transform(), setDtypeToFirstArg);
   }
-  /*
-  AliasDb* getOrCreateAliasDb() {
-    if (!aliasDb_) {
-      aliasDb_ = std::make_unique<AliasDb>(graph_);
-    }
-    return aliasDb_.get();
-  }
-  */
-
-  /*
-  // This one is a special rule -- mean take the ScalarType if specified,
-  otherwise Tensor type
-  // This is an example where the dtype rule has to be extracted from the
-  implementation
-  "aten::mean(Tensor self, *, ScalarType? dtype) -> Tensor",
-  */
   std::unique_ptr<OperatorMap<DtypePropRule>> dtype_prop_registry_;
   std::shared_ptr<Graph> graph_;
-  // std::unique_ptr<AliasDb> aliasDb_ = nullptr;
 };
 
 } // anonymous namespace
