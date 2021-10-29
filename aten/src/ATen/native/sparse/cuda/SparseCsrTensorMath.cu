@@ -19,6 +19,7 @@
 #include <ATen/cuda/ThrustAllocator.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 
+#include <ATen/native/sparse/cuda/SparseBlasImpl.h>
 #include <ATen/native/sparse/cuda/SparseCUDABlas.h>
 #include <ATen/native/sparse/cuda/SparseCUDATensorMath.cuh>
 
@@ -187,11 +188,16 @@ Tensor& add_out_sparse_csr_cuda(
     const Scalar& alpha,
     SparseCsrTensor& out) {
   if (self.layout() == kStrided) {
-    return add_out_dense_sparse_csr_cuda(out, self, other, alpha);
+    add_out_dense_sparse_csr_cuda(out, self, other, alpha);
   } else {
     TORCH_CHECK(
-        false,
-        "NotImplementedError: Addition of sparse CSR tensors is not yet implemented.")
+        self.sizes().equals(other.sizes()),
+        "torch.add: Expected input tensors to have the same shape, but got tensor `self` with shape ",
+        self.sizes(),
+        " and tensor `other` with shape ",
+        other.sizes());
+    at::native::resize_as_sparse_csr_(out, self);
+    sparse::impl::cuda::add_out_sparse_csr(self, other, Scalar(1), alpha, out);
   }
   return out;
 }
