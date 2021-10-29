@@ -16,10 +16,6 @@ std::vector<int64_t> ComputeShapeStrides(const lazy_tensors::Shape& shape);
 
 std::vector<int64_t> ComputeArrayStrides(c10::ArrayRef<int64_t> sizes);
 
-// Converts a literal to an at::Tensor of the given element type.
-at::Tensor MakeTensorFromLiteral(const lazy_tensors::Literal& literal,
-                                 at::ScalarType dest_element_type);
-
 std::vector<at::Tensor> DataHandlesToTensors(
     c10::ArrayRef<lazy_tensors::ComputationClient::DataPtr> data_handles,
     at::ScalarType dest_element_type);
@@ -43,14 +39,6 @@ torch::lazy::hash_t TensorHash(const at::Tensor& tensor);
 std::vector<lazy_tensors::ComputationClient::DataPtr> CreateTensorsData(
     const std::vector<at::Tensor>& tensors,
     const std::vector<std::string>& devices);
-
-// Creates a literal out of an ATEN tensor. If shape is specified, that
-// shape+layout will be used, otherwise one will be generated out of the ATEN
-// tensor shape. The device argument (can be nullptr for the default device)
-// tells the API that the created Literal will be sent to such device.
-lazy_tensors::Literal GetTensorLiteral(const at::Tensor& tensor,
-                                       const lazy_tensors::Shape* shape,
-                                       const Device* device);
 
 // If "shape" is a tuple, return the element shapes, otherwise return a
 // singleton list containing the original shape.
@@ -78,10 +66,6 @@ lazy_tensors::PrimitiveType GetDevicePrimitiveType(
 // Converts the given scalar type to a primitive type.
 lazy_tensors::PrimitiveType MakeLtcPrimitiveType(at::ScalarType scalar_type,
                                                  const Device* device);
-
-bool RequiresRawTypeCasting(at::ScalarType scalar_type, const Device* device);
-
-c10::ScalarType GetShapeDimensionType(const Device* device);
 
 template<typename... TupleType>
 std::vector<std::vector<int64_t>> CreateComputationShapeFromMetaTensors(const std::tuple<TupleType...>& tensors) {
