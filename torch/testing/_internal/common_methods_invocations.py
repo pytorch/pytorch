@@ -2777,7 +2777,8 @@ def sample_inputs_index_add(op_info, device, dtype, requires_grad, **kwargs):
     samples.extend(SampleInput(t.detach().clone().requires_grad_(requires_grad),
                                args=(0, idx.detach().clone(), s.detach().clone())) for t, idx, s in product(ts, idxs, ss))
     samples.extend(SampleInput(t.detach().clone().requires_grad_(requires_grad),
-                               args=(0, idx.detach().clone(), s.detach().clone()), kwargs=dict(alpha=a)) for t, idx, s, a in product(ts, idxs, ss, [-1, 0, 2]))
+                               args=(0, idx.detach().clone(), s.detach().clone()),
+                               kwargs=dict(alpha=a)) for t, idx, s, a in product(ts, idxs, ss, [-1, 0, 2]))
     return samples
 
 def sample_inputs_sort(op_info, device, dtype, requires_grad, **kwargs):
@@ -8138,7 +8139,7 @@ op_db: List[OpInfo] = [
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
                # RuntimeError: element 0 of tensors does not require grad and does not have a grad_fn
-               DecorateInfo(unittest.skip("element 0 of tensors does not require grad and does not have a grad_fn"), 'TestCommon', 'test_noncontiguous_samples'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_noncontiguous_samples'),
            )),
     OpInfo('linalg.vector_norm',
            op=torch.linalg.vector_norm,
