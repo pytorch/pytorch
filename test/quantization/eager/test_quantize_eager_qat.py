@@ -895,11 +895,14 @@ class TestLinearBNQATModule(TestCase):
             result_ref = m_ref(data)
             self.assertEqual(result_ref, result_fused)
 
+            m_fused.apply(torch.ao.quantization.disable_fake_quant)
             m_ref.apply(torch.ao.quantization.disable_fake_quant)
 
+            result_fused = m_fused(data)
             result_unfused = m(data)
             result_ref = m_ref(data)
             self.assertEqual(result_ref, result_unfused)
+            self.assertEqual(result_ref, result_fused)
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
