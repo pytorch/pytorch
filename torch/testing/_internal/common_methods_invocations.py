@@ -1762,18 +1762,18 @@ def sample_inputs_t(op_info, device, dtype, requires_grad, **kwargs):
 
 
 def sample_inputs_mm(op_info, device, dtype, requires_grad, **kwargs):
-    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
+    make_arg = partial(make_tensor, device=device, dtype=dtype)
 
     first_shape, second_shape = (S, M), (M, S)
     sample_inputs = []
 
     sample_inputs.append(
-        SampleInput(make_arg(first_shape).requires_grad_(requires_grad),
-                    args=(make_arg(second_shape).requires_grad_(requires_grad),)))
+        SampleInput(make_arg(first_shape, requires_grad=requires_grad),
+                    args=(make_arg(second_shape, requires_grad=requires_grad),)))
 
     if dtype.is_complex:
         sample_inputs.append(
-            SampleInput(make_arg(first_shape).requires_grad_(requires_grad),
+            SampleInput(make_arg(first_shape, requires_grad=requires_grad),
                         args=(make_arg(second_shape).conj().requires_grad_(requires_grad),)))
 
         sample_inputs.append(
@@ -2758,11 +2758,15 @@ def sample_inputs_index_add(op_info, device, dtype, requires_grad, **kwargs):
     idx = make_arg((S,), dtype=torch.int64, low=0, high=S, requires_grad=False)
 
     samples = [SampleInput(t.detach().clone().requires_grad_(requires_grad),
-                           args=(1, idx.detach().clone(), s.detach().clone()))]
+                           args=(1,
+                                 idx.detach().clone(),
+                                 s.detach().clone().requires_grad_(requires_grad)))]
 
     for alpha in (-1, 0, 2):
         samples.append(SampleInput(t.detach().clone().requires_grad_(requires_grad),
-                                   args=(1, idx.detach().clone(), s.detach().clone()),
+                                   args=(1,
+                                         idx.detach().clone(),
+                                         s.detach().clone().requires_grad_(requires_grad)),
                                    kwargs=dict(alpha=alpha)))
 
     # Add scalar cases
