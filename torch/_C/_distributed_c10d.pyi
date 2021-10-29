@@ -48,6 +48,7 @@ class Logger:
         device_ids: List[int],
         output_device: int,
         broadcast_buffers: bool,
+        has_sync_bn: bool,
     ): ...
     ...
 

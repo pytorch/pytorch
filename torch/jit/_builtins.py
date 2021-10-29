@@ -135,7 +135,7 @@ def _get_builtin_table():
     def register_all(mod):
         for name in dir(mod):
             v = getattr(mod, name)
-            if callable(v) and not _is_special_functional_bound_op(v) and v is not torch.no_grad:
+            if callable(v) and not _is_special_functional_bound_op(v) and v is not torch.no_grad and v is not torch.autocast:
                 _builtin_ops.append((v, "aten::" + name))
     for mod in _modules_containing_builtins:
         register_all(mod)
