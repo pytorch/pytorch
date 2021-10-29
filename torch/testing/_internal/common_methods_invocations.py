@@ -6270,6 +6270,30 @@ def sample_inputs_grid_sample(op_info, device, dtype, requires_grad, **kwargs):
 
     return sample_inputs
 
+def sample_inputs_ctc_loss(op_info, device, dtype, requires_grad, **kwargs):
+    input_length = 50
+    batch = 16
+    num_char = 20
+    target_length = 30
+
+    def make_log_probs(s):
+        t = make_tensor(s, device=device, dtype=dtype)
+        log_probs = t.log_softmax(2).to(device=device, dtype=dtype).detach().requires_grad_(requires_grad=requires_grad)
+        return log_probs
+
+    def gen_inputs():
+        reductions = ('none', 'mean', 'sum')
+        zero_inf = (True, False)
+        for r, z in product(reductions, zero_inf):
+            log_probs = make_log_probs((input_length, batch, num_char))
+            targets = torch.randint(1, num_char, (batch, target_length), dtype=torch.long, device=device)
+            input_lengths = torch.full((batch, ), input_length, dtype=torch.long, device=device)
+            target_lengths = torch.randint(10, target_length, (batch, ), dtype=torch.long, device=device)
+
+            yield SampleInput(log_probs, args=(targets, input_lengths, target_lengths,), kwargs=dict(reduction=r, zero_infinity=z))
+
+    return list(gen_inputs())
+
 def sample_inputs_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
     shape = (2, 3)
     num_classes = shape[1]
@@ -11505,6 +11529,37 @@ op_db: List[OpInfo] = [
         ),
         sample_inputs_func=sample_inputs_masked_reduction,
         gradcheck_wrapper=gradcheck_wrapper_masked_operation
+    ),
+    OpInfo(
+        "nn.functional.ctc_loss",
+        ref=_NOTHING,
+        dtypes=floating_types(),
+        supports_out=False,
+        sample_inputs_func=sample_inputs_ctc_loss,
+        skips=(
+            # https://github.com/pytorch/pytorch/issues/67462
+            # torch.autograd.gradcheck.GradcheckError: Jacobian mismatch for output 0 with respect to input 0
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestGradients",
+                "test_fn_grad",
+                dtypes=(torch.float64,),
+            ),
+            # RuntimeError: derivative for aten::_ctc_loss_backward is not implemented
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestGradients",
+                "test_fn_gradgrad",
+                dtypes=(torch.float64,),
+            ),
+            # RuntimeError: derivative for aten::_ctc_loss_backward is not implemented
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestJit",
+                "test_variant_consistency_jit",
+                dtypes=(torch.float32,),
+            ),
+        ),
     ),
     OpInfo(
         "nn.functional.nll_loss",
