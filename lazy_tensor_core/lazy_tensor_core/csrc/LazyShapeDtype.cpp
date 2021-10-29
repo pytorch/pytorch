@@ -45,6 +45,7 @@
 
 #include "lazy_tensor_core/csrc/ts_backend/LazyShapeDtype.h"
 
+#include "lazy_tensor_core/csrc/helpers.h"
 #include "torch/csrc/api/include/torch/enum.h"
 
 namespace torch_lazy_tensors {
@@ -65,10 +66,10 @@ std::vector<std::vector<int64_t>> compute_shape_index_select(const at::Tensor & 
     const at::Tensor & index) {
   // Based on definition of https://pytorch.org/docs/stable/generated/torch.index_select.html.
   // Promote Rank 0 index tensor to a 1 * 1 tensor.
+  dim = Helpers::GetCanonicalDimensionIndex(dim, self.dim());
   auto index_dim = index.dim() > 0 ? index.dim() : 1;
   auto index_size = index.dim() > 0 ? index.size(0) : 1;
   TORCH_CHECK(index_dim == 1);
-  TORCH_CHECK(dim >= 0 && dim < self.dim());
 
   auto self_sizes = self.sizes();
   std::vector<int64_t> output_sizes(self_sizes.begin(), self_sizes.end());
@@ -96,15 +97,12 @@ std::vector<std::vector<int64_t>> compute_shape_cat(at::TensorList tensors, int6
   std::vector<int64_t> out_shape(tensors[0].sizes().begin(), tensors[0].sizes().end());
 
   int64_t rank = tensors[0].sizes().size();
-  int64_t canonical_dim = dim % rank;
-  if (canonical_dim < 0) {
-      canonical_dim += rank;
-  }
+  dim = Helpers::GetCanonicalDimensionIndex(dim, rank);
   size_t extended_dim_shape = 0;
   for (auto& tensor: tensors) {
-    extended_dim_shape += tensor.sizes()[canonical_dim];
+    extended_dim_shape += tensor.sizes()[dim];
   }
-  out_shape[canonical_dim] = extended_dim_shape;
+  out_shape[dim] = extended_dim_shape;
   return {out_shape};
 }
 
