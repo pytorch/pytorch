@@ -6314,6 +6314,45 @@ def sample_inputs_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
 
     return list(gen_inputs())
 
+def _generate_sample_shape_reduction():
+    shapes = ((S,), (S, S), (S, S, S))
+    reductions = ('none', 'mean', 'sum')
+    for s, r in product(shapes, reductions):
+        yield s, r
+
+def sample_inputs_gaussian_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
+    _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_var = partial(make_tensor, low=0, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    def gen_shape(shape):
+        yield shape
+        # Broadcast
+        yield (*shape[:-1], 1)
+        yield shape[:-1]
+
+    def gen_shape_kwargs():
+        for s, r in _generate_sample_shape_reduction():
+            for t_s, v_s in product(gen_shape(s), gen_shape(s)):
+                yield _make_tensor(s), _make_tensor(t_s), make_var(v_s), dict(reduction=r)
+                yield (
+                    _make_tensor(s), _make_tensor(t_s), make_var(v_s),
+                    dict(full=True, reduction=r)
+                )
+                yield (
+                    _make_tensor(s), _make_tensor(t_s), make_var(v_s),
+                    dict(eps=random.uniform(1e-6, 1e-3), reduction=r)
+                )
+                yield (
+                    _make_tensor(s), _make_tensor(t_s), make_var(v_s),
+                    dict(full=True, eps=random.uniform(1e-6, 1e-3), reduction=r)
+                )
+
+    def gen_inputs():
+        for input, target, var, kwargs in gen_shape_kwargs():
+            yield SampleInput(input, args=(target, var, ), kwargs=kwargs)
+
+    return list(gen_inputs())
+
 def sample_inputs_pairwise_distance(op_info, device, dtype, requires_grad, **kwargs):
     make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -11435,6 +11474,22 @@ op_db: List[OpInfo] = [
             # def the_method(i0, i1):
             #     return torch.nn.functional.nll_loss(i0, i1, weight=tensor([8.4784, 1.7658, 4.3228], dtype=torch.float32))
             #                                                        ~~~~~~ <--- HERE
+            DecorateInfo(unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit", dtypes=(torch.float32,),),
+        ),
+    ),
+    OpInfo(
+        "nn.functional.gaussian_nll_loss",
+        ref=_NOTHING,
+        dtypesIfCPU=all_types_and(torch.bfloat16),
+        dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
+        supports_out=False,
+        supports_forward_ad=True,
+        sample_inputs_func=sample_inputs_gaussian_nll_loss,
+        skips=(
+            # JIT does not support variadic tensors.
+            # RuntimeError: input->type()->kind() == TypeKind::OptionalType
+            # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":270,
+            # please report a bug to PyTorch.
             DecorateInfo(unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit", dtypes=(torch.float32,),),
         ),
     ),
