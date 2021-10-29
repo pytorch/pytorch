@@ -8,7 +8,7 @@ import itertools
 from torch.testing import get_all_complex_dtypes, get_all_fp_dtypes, make_tensor
 from torch.testing._internal.common_cuda import SM53OrLater, SM80OrLater, TEST_CUSPARSE_GENERIC
 from torch.testing._internal.common_utils import \
-    (IS_MACOS, IS_WINDOWS, TestCase, run_tests, load_tests, coalescedonoff)
+    (IS_MACOS, IS_WINDOWS, TEST_WITH_ROCM, TestCase, run_tests, load_tests, coalescedonoff)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoCusparseGeneric,
      precisionOverride, skipMeta, skipCUDAIf)
@@ -842,6 +842,49 @@ class TestSparseCSR(TestCase):
         _test_spadd_shape(0, [100, 100])
         _test_spadd_shape(10, [100, 1])
         _test_spadd_shape(10, [1, 100])
+
+    @onlyCUDA
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_sparse_add(self, device, dtype):
+        def run_test(m, n, index_dtype):
+
+            if TEST_WITH_ROCM and dtype.is_complex:
+                self.skipTest("ROCm doesn't work with complex dtype correctly.")
+
+            alpha = random.random()
+            nnz1 = random.randint(0, m * n)
+            nnz2 = random.randint(0, m * n)
+            nnz3 = random.randint(0, m * n)
+
+            if TEST_WITH_ROCM:
+                # ROCm fails when nnz = 0
+                nnz1, nnz2, nnz3 = max(1, nnz1), max(1, nnz2), max(1, nnz3)
+
+            S1 = self.genSparseCSRTensor([m, n], nnz1, dtype=dtype, device=device, index_dtype=index_dtype)
+            S2 = self.genSparseCSRTensor([m, n], nnz2, dtype=dtype, device=device, index_dtype=index_dtype)
+            S3 = self.genSparseCSRTensor([m, n], nnz3, dtype=dtype, device=device, index_dtype=index_dtype)
+
+            expected = torch.add(S1.to_dense(), S2.to_dense(), alpha=alpha)
+            actual = torch.add(S1, S2, alpha=alpha, out=S3)
+
+            self.assertEqual(actual.to_dense(), expected)
+            self.assertEqual(S3.to_dense(), expected)
+
+        for index_dtype in [torch.int32, torch.int64]:
+            for m, n in itertools.product([3, 5], [3, 5]):
+                run_test(m, n, index_dtype)
+
+    @onlyCUDA
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_sparse_add_errors(self, device, dtype):
+        def run_test(index_type):
+            a = self.genSparseCSRTensor((2, 2), 3, dtype=dtype, device=device, index_dtype=index_dtype)
+            b = self.genSparseCSRTensor((2, 1), 2, dtype=dtype, device=device, index_dtype=index_dtype)
+            with self.assertRaisesRegex(RuntimeError, "Expected input tensors to have the same shape"):
+                torch.add(a, b)
+
+        for index_dtype in [torch.int32, torch.int64]:
+            run_test(index_dtype)
 
     @onlyCUDA
     @skipCUDAIf(
