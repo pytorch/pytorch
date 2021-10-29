@@ -995,7 +995,7 @@ class MultiheadAttention(Module):
           size, :math:`L` is the target sequence length, and :math:`S` is the source sequence length. Only returned
           when ``need_weights=True``.
         """
-        org_dim  = query.dim()
+        org_dim = query.dim()
         if self.batch_first and org_dim == 3:
             query, key, value = [x.transpose(1, 0) for x in (query, key, value)]
 

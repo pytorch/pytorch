@@ -5080,7 +5080,7 @@ def multi_head_attention_forward(
             assert attn_mask.shape == (num_heads, query.shape[0], key.shape[0])
         is_unbatched = True
     else:
-        assert False, "Shapes should be...."
+        raise AssertionError("Shapes should be....")
 
     # set up shape vars
     tgt_len, bsz, embed_dim = query.shape
