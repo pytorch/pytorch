@@ -69,7 +69,7 @@ namespace {
     const auto arguments_begin = stack->size() - num_arguments;
     auto arguments = torch::jit::last(stack, num_arguments);
 
-    for (int64_t idx = 0; idx < num_arguments; ++idx) {
+    for (uint64_t idx = 0; idx < num_arguments; ++idx) {
       const auto& ivalue = arguments[idx];
       if (ivalue.isTensor()) {
         at::Tensor t = ivalue.toTensor();
@@ -91,7 +91,7 @@ namespace {
     const auto returns_begin = stack->size() - num_returns;
     auto returns = torch::jit::last(stack, num_returns);
 
-    for (int64_t idx = 0; idx < num_returns; ++idx) {
+    for (uint64_t idx = 0; idx < num_returns; ++idx) {
       const auto& ivalue = returns[idx];
       if (ivalue.isTensor()) {
         at::Tensor t = ivalue.toTensor();
