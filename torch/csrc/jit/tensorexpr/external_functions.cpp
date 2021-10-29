@@ -131,6 +131,7 @@ void nnc_aten_quantized_conv2d(
   const double out_qscale = ((double*)extra_args)[3];
   const int64_t out_qzero = extra_args[4];
   auto r = convPackedParams->apply(qx, out_qscale, out_qzero);
+  r = r.contiguous();
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
 
@@ -161,6 +162,7 @@ void nnc_aten_quantized_conv2d_relu(
   const double out_qscale = ((double*)extra_args)[3];
   const int64_t out_qzero = extra_args[4];
   auto r = convPackedParams->apply_relu(qx, out_qscale, out_qzero);
+  r = r.contiguous();
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
 
@@ -206,6 +208,7 @@ void nnc_aten_quantized_add(
           .findSchemaOrThrow("quantized::add", "")
           .typed<at::Tensor(at::Tensor, at::Tensor, double, int64_t)>();
   auto r = qadd_op.call(qa, qb, out_qscale, out_qzero);
+  r = r.contiguous();
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
 
@@ -242,23 +245,15 @@ void nnc_aten_upsample_nearest2d(
   double scale_factor_h = ((double*)extra_args)[5];
   double scale_factor_w = ((double*)extra_args)[6];
 
-  c10::optional<at::IntArrayRef> output_size_arg = c10::nullopt;
-  if (output_size_h != -1) {
-    output_size_arg = {output_size_h, output_size_w};
-  }
-  c10::optional<at::ArrayRef<double>> scale_factors_arg = c10::nullopt;
-
-  c10::optional<double> scales_h = c10::nullopt;
-  c10::optional<double> scales_w = c10::nullopt;
-  if (scale_factor_h != -1.f) {
-    scales_h = scale_factor_h;
-    scale_factors_arg = {scale_factor_h, scale_factor_w};
-  }
-  if (scale_factor_w != -1.f) {
-    scales_w = scale_factor_w;
-  }
-
-  auto r = at::upsample_nearest2d(x, output_size_arg, scale_factors_arg);
+  auto r = at::upsample_nearest2d(
+      x,
+      (output_size_h != -1)
+          ? c10::optional<at::IntArrayRef>({output_size_h, output_size_w})
+          : c10::nullopt,
+      (scale_factor_h != -1.f) ? c10::optional<at::ArrayRef<double>>(
+                                     {scale_factor_h, scale_factor_w})
+                               : c10::nullopt);
+  r = r.contiguous();
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
 
