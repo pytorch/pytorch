@@ -27,11 +27,6 @@ bool TensorCompare(const at::Tensor& t1, const at::Tensor& t2);
 lazy_tensors::ComputationClient::DataPtr TensorToDataHandle(
     const at::Tensor& tensor, const Device& device);
 
-void PopulateTensorBuffer(const at::Tensor& tensor,
-                          const lazy_tensors::Shape& dest_shape,
-                          void* dest_buffer, size_t dest_buffer_size,
-                          const Device& device);
-
 torch::lazy::hash_t TensorHash(const at::Tensor& tensor);
 
 // Retrieves the device data handles by parallel uploading data onto the
