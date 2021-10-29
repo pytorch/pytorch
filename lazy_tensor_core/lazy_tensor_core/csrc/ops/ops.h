@@ -103,8 +103,6 @@ NodePtr Log(const torch::lazy::Value& input);
 
 NodePtr Log1p(const torch::lazy::Value& input);
 
-NodePtr Sqrt(const torch::lazy::Value& input);
-
 NodePtr Rsqrt(const torch::lazy::Value& input);
 
 NodePtr ReciprocalOp(const torch::lazy::Value& input);

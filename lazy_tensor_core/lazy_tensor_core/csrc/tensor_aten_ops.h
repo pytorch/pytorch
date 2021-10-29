@@ -642,8 +642,6 @@ std::vector<LazyTensor> split_with_sizes(const LazyTensor& input,
                                          std::vector<int64_t> split_size,
                                          int64_t dim);
 
-LazyTensor sqrt(const LazyTensor& input);
-
 // Squeeze out all trivial (size 1) dimensions.
 LazyTensor squeeze(const LazyTensor& input);
 
