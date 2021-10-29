@@ -122,6 +122,12 @@ add_and_mul_ops = set([
     torch.Tensor.mul,
 ])
 
+# TODO(future): reuse global mapping
+known_module_fusion_patterns = [
+    (torch.nn.Conv2d, torch.nn.ReLU),
+    (torch.nn.Conv2d, torch.nn.BatchNorm2d),
+]
+
 # validity checks
 # TODO: move these out
 for m in module_types_supported_by_quantization_preserves_dtype:

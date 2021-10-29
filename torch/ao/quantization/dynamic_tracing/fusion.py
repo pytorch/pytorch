@@ -6,6 +6,10 @@ from .utils import (
     get_next_seen_ops,
 )
 
+from .mappings import (
+    known_module_fusion_patterns,
+)
+
 def get_module_fusion_fqns(
     module: torch.nn.Module,
 ) -> List[List[str]]:
@@ -25,17 +29,11 @@ def get_module_fusion_fqns(
             continue
         qstate = child._auto_quant_state
 
-        # TODO(future): reuse global mapping
-        known_fusion_patterns = [
-            (torch.nn.Conv2d, torch.nn.ReLU),
-            (torch.nn.Conv2d, torch.nn.BatchNorm2d),
-        ]
-
         # Walk the subgraphs and record the FQNs of all known module fusions.
         # For now, this is brute forced for simplicity, can be optimized later if
         # necessaary.
         for idx, seen_op in qstate.idx_to_seen_ops.items():
-            for fusion_pattern in known_fusion_patterns:
+            for fusion_pattern in known_module_fusion_patterns:
                 cur_fqns = []
                 cur_seen_op = seen_op
                 is_match = True
