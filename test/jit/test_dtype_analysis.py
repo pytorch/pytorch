@@ -66,10 +66,10 @@ class TestDtypeAnalysis(JitTestCase):
             fail_text = f"Failed for shapes {in_shapes}, and dtypes {in_dtypes}"
             raise AssertionError(fail_text)
 
-    def assert_dtype_equal_custom_args(self, fn, args, kwargs={}):
+    def assert_dtype_equal_custom_args(self, fn, args):
         try:
             # Eager execution
-            expected_res = fn(*args, **kwargs)
+            expected_res = fn(*args)
         except RuntimeError as e:
             return
 
@@ -217,3 +217,18 @@ class TestDtypeAnalysis(JitTestCase):
 
         with self.assertRaises(RuntimeError):
             conv2d_fn(conv_in.input, weight, bias)
+
+    def test_combined(self):
+        # Test a case with both custom rules and metatensors
+
+        def func(input, weight, bias, y):
+            conv_out = torch.nn.functional.conv2d(input, weight, bias)
+            flattened = torch.flatten(conv_out, start_dim=2)
+            add_res = flattened + y
+            return add_res
+
+        conv_ins = sample_inputs_conv2d(None, "cpu", torch.int8, False)
+        conv_in = conv_ins[-1]
+        y_val = torch.rand((1,), dtype=torch.float32)
+        input_args = [conv_in.input, *conv_in.args, y_val]
+        self.assert_dtype_equal_custom_args(func, input_args)
