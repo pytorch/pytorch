@@ -2795,6 +2795,44 @@ def sample_inputs_sort(op_info, device, dtype, requires_grad, **kwargs):
 def sample_inputs_argsort(*args, **kwargs):
     return [sample_input for sample_input in sample_inputs_sort(*args, **kwargs) if "stable" not in sample_input.kwargs]
 
+def sample_inputs_unique(op_info, device, dtype, requires_grad, **kwargs):
+    sizes = ((), (S,), (S, S), (S, S, S), (S, 1, S), (S, 0, S))
+
+    sample_inputs = []
+    for shape, sorted, return_inverse, return_counts in product(sizes, [False, True], [False, True], [False, True]):
+        dim_choices = [None] + list(range(-len(shape), len(shape)))
+
+        # torch.unique cannot be called if the input tensor has a zero dimension which isn't the selected dimension
+        if 0 in shape:
+            dim_choices = [shape.index(0)]
+        else:
+            dim_choices = [None] + list(range(0, len(shape)))
+
+        for dim in dim_choices:
+            kwargs = dict(sorted=sorted, return_inverse=return_inverse, return_counts=return_counts, dim=dim)
+
+            # construct a test case with a single unique value (0)
+            input_t = torch.zeros(shape, dtype=dtype, device=device, requires_grad=requires_grad)
+            sample_inputs.append(SampleInput(input_t, kwargs=kwargs))
+
+            if dtype is torch.bool:
+                # if bool dtype, (attempt to) construct a test case with mixed False and True values
+                input_t = make_tensor(shape, dtype=torch.bool, device=device, requires_grad=requires_grad)
+                sample_inputs.append(SampleInput(input_t, kwargs=kwargs))
+            else:
+                # (attempt to) construct a test case with mixed values with varying counts
+                for x in range(1, 5):
+                    mask_t = make_tensor(shape, dtype=torch.bool, device=device, requires_grad=False)
+                    input_t = torch.where(mask_t, input_t, torch.tensor(x, dtype=dtype, device=device))
+                input_t.requires_grad_(requires_grad)
+                sample_inputs.append(SampleInput(input_t, kwargs=kwargs))
+
+                # construct a test case with unique values
+                input_t = torch.randperm(input_t.numel(), dtype=dtype, device=device, requires_grad=requires_grad).reshape(shape)
+                sample_inputs.append(SampleInput(input_t, kwargs=kwargs))
+
+    return sample_inputs
+
 def sample_inputs_index_fill(op_info, device, dtype, requires_grad, **kwargs):
     samples = []
     t = make_tensor((S, S, S), device, dtype,
@@ -9911,6 +9949,21 @@ op_db: List[OpInfo] = [
            skips=(
                # sort does not correctly warn when resizing out= inputs
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out'),
+           )),
+    OpInfo('unique',
+           dtypes=all_types_and(torch.bool),
+           sample_inputs_func=sample_inputs_unique,
+           supports_out=False,
+           supports_autograd=False,
+           skips=(
+               # RuntimeError:
+               # 'Tensor (inferred)' object has no attribute or method 'unique'.:
+               #   File "<string>", line 3
+               #
+               #  def the_method(i0):
+               #      return i0.unique(sorted=False, return_inverse=False, return_counts=False, dim=None)
+               #                 ~~~~~~~~~ <--- HERE
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
            )),
     OpInfo('put',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
