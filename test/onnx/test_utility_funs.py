@@ -17,7 +17,7 @@ import onnx
 import io
 import copy
 import unittest
-
+from typing import List
 
 skip = unittest.skip
 
@@ -128,23 +128,20 @@ class TestUtilityFuns_opset9(_BaseTestCase):
     def test_output_list(self):
         class PaddingLayer(torch.jit.ScriptModule):
             @torch.jit.script_method
-            def forward(self, input_t, n):
-                # type: (Tensor, int) -> Tensor
+            def forward(self, input_t: torch.Tensor, n: int) -> List[torch.Tensor]:
                 for i in range(n):
                     input_t = input_t * 2
-                return input_t
+                return [input_t]
 
         input_t = torch.ones(size=[10], dtype=torch.long)
         n = 2
         model = torch.jit.script(PaddingLayer())
-        example_output = model(input_t, n)
 
         with self.assertRaises(RuntimeError):
             torch.onnx._export(model,
                                (input_t, n),
                                "test.onnx",
-                               opset_version=self.opset_version,
-                               example_outputs=[example_output])
+                               opset_version=self.opset_version)
 
     def test_constant_fold_transpose(self):
         class TransposeModule(torch.nn.Module):
