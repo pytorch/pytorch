@@ -87,6 +87,7 @@ from ..utils import (
 from .backend_config_dict.utils import (
     get_pattern_to_quantize_handlers,
     get_pattern_to_dtype_configs,
+    get_pattern_to_input_type_to_index,
 )
 
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union, Set
@@ -111,12 +112,12 @@ def node_arg_is_bias(node: Node, arg: Any) -> bool:
     if not isinstance(node, Node) or node.op != 'call_function':
         return False
 
-    idx = BIAS_INDEX_DICT.get(node.target, None)
-    return (
-        idx is not None and
-        ((len(node.args) > idx and arg is node.args[idx]) or
-            node.kwargs.get('bias', None) is arg)
-    )
+    for i, node_arg in enumerate(node.args):
+        if arg is node_arg and i in \
+           BIAS_INDEX_DICT[node.target]:  # type: ignore[index]
+            return True
+
+    return node.kwargs.get('bias', None) is arg
 
 def is_input_arg_dtype_supported_by_backend(
     arg: Argument,
@@ -1251,6 +1252,24 @@ def prepare(
             quant_patterns, additional_quant_patterns)
     else:
         patterns = get_pattern_to_quantize_handlers(backend_config_dict)
+
+    # TODO: make WEIGHT_INDEX_DICT and BIAS_INDEX_DICT an argument to the functions that needs them
+    # TODO: refactor this part to return WEIGHT_INDEX_DICT and BIAS_INDEX_DICT
+    pattern_to_input_type_to_index = get_pattern_to_input_type_to_index(backend_config_dict)
+    for pattern, input_type_to_index in pattern_to_input_type_to_index.items():
+        for input_type, index in input_type_to_index.items():
+            index_dicts = {
+                "weight": WEIGHT_INDEX_DICT,
+                "bias": BIAS_INDEX_DICT,
+                "input": {}  # not used right now
+            }
+            assert input_type in index_dicts.keys(), \
+                f"input type must be one of {index_dicts.keys()} but got: {input_type}"
+            index_dict = index_dicts[input_type]
+            if pattern in index_dict:
+                index_dict[pattern].append(index)
+            else:
+                index_dict[pattern] = [index]
 
     convert_dict_to_ordered_dict(qconfig_dict)
     convert_dict_to_ordered_dict(equalization_qconfig_dict)
