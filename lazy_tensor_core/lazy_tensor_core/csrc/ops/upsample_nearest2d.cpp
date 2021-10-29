@@ -2,7 +2,6 @@
 
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
 #include "lazy_tensors/computation_client/util.h"
-#include "lazy_tensors/util.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
