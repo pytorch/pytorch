@@ -10622,7 +10622,12 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_histc,
            supports_out=True,
            supports_autograd=False,
-           ),
+           skips=(
+               # CUDA histc returns a float tensor but does not correctly warn when passed an integral out tensor
+               # "AssertionError: RuntimeError not raised : Expected RuntimeError when doing an unsafe cast
+               # from a result of dtype torch.float32 into an out= with dtype torch.long"
+               DecorateInfo(unittest.skip("Expected failure!"), 'TestCommon', 'test_out'),
+           )),
     OpInfo('bincount',
            dtypes=integral_types_and(),
            sample_inputs_func=sample_inputs_bincount,
