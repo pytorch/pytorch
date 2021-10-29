@@ -15,7 +15,7 @@ import numpy as np
 from torch._six import inf
 import collections.abc
 
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 from torch.testing import make_non_contiguous, make_tensor
 from torch.testing._internal.common_dtype import (
@@ -4928,6 +4928,34 @@ def sample_inputs_diagonal_diag_embed(op_info, device, dtype, requires_grad, **k
     return list(generator())
 
 
+def sample_inputs_diagonal_scatter(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    # Shapes for 2D Tensors
+    shapes_2d = ((M, M), (3, 5), (5, 3))
+
+    # Shapes for 3D Tensors
+    shapes_3d = ((M, M, M),)
+
+    args_2d = ((), (2,), (-2,), (1,))
+    args_3d = ((1, 1, 2), (2, 0, 1), (-2, 0, 1))
+
+    def generator():
+        for input_shape, arg in chain(product(shapes_2d, args_2d), product(shapes_3d, args_3d)):
+            input_ = make_arg(input_shape)
+            # We can programatically figure out the right shape for src:
+            # It should be the same size as input.diagonal(other_args...)
+            if not isinstance(arg, tuple):
+                arg_tuple = (arg,)
+            else:
+                arg_tuple = arg
+            src_shape = input_.diagonal(*arg_tuple).size()
+            src = make_arg(src_shape)
+            yield SampleInput(input_, args=(src, *arg_tuple))
+
+    return list(generator())
+
+
 def sample_inputs_to_sparse(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -5767,6 +5795,48 @@ def sample_inputs_select(op_info, device, dtype, requires_grad, **kwargs):
     return list(generator())
 
 
+def sample_inputs_select_scatter(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    cases = (((S, S, S), (S, S), (1, 2)),
+             ((S, S, S), (S, S), (-1, 2)),
+             ((S, S, S), (S, S), (-1, -1)),
+             ((S, S, S), (S, S), (1, -1)),
+             ((S,), (), (0, 2))
+             )
+
+    def generator():
+        for input_shape, src_shape, args in cases:
+            input_ = make_arg(input_shape)
+            src = make_arg(src_shape)
+            yield SampleInput(input_, args=(src, *args))
+
+    return list(generator())
+
+
+def sample_inputs_slice_scatter(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    cases = (((L, L, L), (L, L, L,), (0, 0, L, 1)),
+             ((L, L, L), (L // 2, L, L,), (0, L // 2, L, 1)),
+             ((L, L, L), (L // 4, L, L,), (0, L // 2, L, 2)),
+             ((L, L, L), (L, L, L,), (1, 0, L, 1)),
+             ((L, L, L), (L, L // 2, L,), (1, L // 2, L, 1)),
+             ((L, L, L), (L, L // 4, L,), (1, L // 2, L, 2)),
+             ((L, L, L), (L, L, L,), (2, 0, L, 1)),
+             ((L, L, L), (L, L, L // 2,), (2, L // 2, L, 1)),
+             ((L, L, L), (L, L, L // 4,), (2, L // 2, L, 2)),
+             )
+
+    def generator():
+        for input_shape, src_shape, args in cases:
+            input_ = make_arg(input_shape)
+            src = make_arg(src_shape)
+            yield SampleInput(input_, args=(src, *args))
+
+    return list(generator())
+
+
 def sample_inputs_rbinops(op_info, device, dtype, requires_grad, supports_dtype_kwargs=True, **kwargs):
     def _make_tensor_helper(shape, low=None, high=None):
         return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
@@ -6093,6 +6163,15 @@ def sample_inputs_grid_sample(op_info, device, dtype, requires_grad, **kwargs):
 
 
 def _add_loss_reduction_kwargs(sample_inputs_generator):
+    """Decorates a sample input func to add the reduction arg and its parameters.
+
+    This loosens the contract of a sample input function to allow it
+    to yield values rather than return a list of them.
+
+    Note that this produces a cross product of SampleInput values,
+    which is often an excessive level of testing. Consider updating
+    this to sample which inputs it crosses against.
+    """
     @functools.wraps(sample_inputs_generator)
     def with_loss_reduction_kwargs(*args, **kwargs):
         sample_inputs = list(sample_inputs_generator(*args, **kwargs))
@@ -6103,7 +6182,9 @@ def _add_loss_reduction_kwargs(sample_inputs_generator):
             {'reduction': 'none'},
         ]
         for input, kwargs in product(sample_inputs, reduction_kwargs):
-            input = copy.copy(input)
+            input = copy.copy(input)  # keep the old sample input unmodified
+            # Combine the old kwargs with ours, preferring our values
+            # in the event of a conflict.
             input.kwargs = {**input.kwargs, **kwargs}
             sample_inputs.append(input)
         return sample_inputs
@@ -6126,7 +6207,7 @@ def sample_inputs_margin_ranking_loss(op_info, device, dtype, requires_grad, **k
         for kwargs in [{}, {'margin': 1.0}]:
             yield SampleInput(_make_tensor(shape), args=(_make_tensor(shape, requires_grad=False),
                                                          _make_tensor(shape, requires_grad=False)),
-                                                         kwargs=kwargs)
+                              kwargs=kwargs)
 
 
 @_add_loss_reduction_kwargs
@@ -7505,6 +7586,11 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_diagonal_diag_embed),
+    OpInfo('diagonal_scatter',
+           dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16),
+           supports_out=False,
+           supports_forward_ad=True,
+           sample_inputs_func=sample_inputs_diagonal_scatter),
     OpInfo('eq',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            supports_autograd=False,
@@ -7809,7 +7895,7 @@ op_db: List[OpInfo] = [
                    dtypes=floating_types_and(torch.half),
                    dtypesIfCPU=floating_types_and(torch.half, torch.bfloat16),
                    # skip testing torch.frexp as it is not supported by ROCm platform yet
-                   decorators=[skipCUDAIfRocm],
+                   decorators=[],
                    supports_out=False,
                    supports_forward_ad=True,
                    skips=(
@@ -7984,7 +8070,7 @@ op_db: List[OpInfo] = [
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
-               # Gradcheck for complex hangs for this function, therefore it raises NotImplementedError for now
+               # Gradcheck for complex is not implemented yet
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD', dtypes=complex_types()),),
            ),
     OpInfo('linalg.eigvalsh',
@@ -9386,6 +9472,16 @@ op_db: List[OpInfo] = [
            assert_jit_shape_analysis=True,
            supports_forward_ad=True,
            supports_out=False),
+    OpInfo('select_scatter',
+           dtypes=all_types_and(torch.bfloat16, torch.half, torch.bool),
+           sample_inputs_func=sample_inputs_select_scatter,
+           supports_forward_ad=True,
+           supports_out=False),
+    OpInfo('slice_scatter',
+           dtypes=all_types_and(torch.bfloat16, torch.half, torch.bool),
+           sample_inputs_func=sample_inputs_slice_scatter,
+           supports_forward_ad=True,
+           supports_out=False),
     UnaryUfuncInfo('signbit',
                    ref=np.signbit,
                    dtypes=all_types_and(torch.bool, torch.bfloat16, torch.half),
@@ -9722,9 +9818,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_linalg_pinv_hermitian,
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
-           skips=(
-               # Gradcheck hangs for this function
-               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD'),),
            ),
     OpInfo('eig',
            op=torch.eig,
