@@ -206,16 +206,6 @@ NodePtr Take(const torch::lazy::Value& input, const torch::lazy::Value& index) {
                    std::move(result_shape));
 }
 
-NodePtr LogDet(const torch::lazy::Value& input) {
-  const lazy_tensors::Shape& input_shape = ir::GetShapeFromTsValue(input);
-  CHECK_GE(input_shape.rank(), 2) << input_shape;
-  // The input tensor is ...,N,N
-  lazy_tensors::Shape logdet_shape(input_shape);
-  logdet_shape.DeleteDimension(input_shape.rank() - 1);
-  logdet_shape.DeleteDimension(input_shape.rank() - 2);
-  return GenericOp(OpKind(at::aten::logdet), {input}, logdet_shape);
-}
-
 NodePtr Inverse(const torch::lazy::Value& input) {
   return GenericOp(OpKind(at::aten::inverse), {input}, ir::GetShapeFromTsValue(input));
 }

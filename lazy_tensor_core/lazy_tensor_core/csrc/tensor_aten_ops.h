@@ -388,8 +388,6 @@ LazyTensor ts_log_softmax_backward(const LazyTensor& grad_output,
 LazyTensor log1p(const LazyTensor& input);
 void log1p_(LazyTensor& input);
 
-LazyTensor logdet(const LazyTensor& input);
-
 LazyTensor logsumexp(const LazyTensor& input, std::vector<int64_t> dimensions,
                      bool keep_reduced_dimensions);
 
@@ -403,8 +401,6 @@ void masked_fill_(LazyTensor& input, const LazyTensor& mask,
 
 void masked_scatter_(LazyTensor& input, const LazyTensor& mask,
                      const LazyTensor& source);
-
-LazyTensor masked_select(const LazyTensor& input, const LazyTensor& mask);
 
 LazyTensor max(
     const LazyTensor& input, const LazyTensor& other,
@@ -518,8 +514,6 @@ std::pair<LazyTensor, LazyTensor> nms(const LazyTensor& boxes,
                                       const LazyTensor& score_threshold,
                                       const LazyTensor& iou_threshold,
                                       int64_t output_size);
-
-LazyTensor nonzero(const LazyTensor& input);
 
 LazyTensor normal(double mean, const LazyTensor& std);
 

@@ -12,10 +12,6 @@ namespace {
 lazy_tensors::Shape NodeOutputShape(const torch::lazy::Value& input,
                                     c10::ArrayRef<int64_t> output_sizes) {
   const lazy_tensors::Shape& input_shape = ir::GetShapeFromTsValue(input);
-  auto info = Helpers::GetDynamicReshapeInfo(input_shape, output_sizes);
-  if (info) {
-    return std::move(info->output_shape);
-  }
   const auto complete_output_sizes =
       GetCompleteShape(output_sizes, input_shape.dimensions());
   return lazy_tensors::ShapeUtil::MakeShape(input_shape.at_element_type(),

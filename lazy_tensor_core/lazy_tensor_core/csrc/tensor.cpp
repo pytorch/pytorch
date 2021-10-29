@@ -120,7 +120,7 @@ lazy_tensors::util::MaybeRef<lazy_tensors::Shape> LazyTensor::shape() const {
 lazy_tensors::Shape LazyTensor::shape_with_layout() const {
   auto tensor_shape = shape();
   return MakeArrayShapeFromDimensions(
-      tensor_shape.get().dimensions(), tensor_shape.get().dynamic_dimensions(),
+      tensor_shape.get().dimensions(),
       tensor_shape.get().at_element_type(), GetDevice().hw_type);
 }
 
@@ -461,46 +461,24 @@ LazyTensor LazyTensor::CopyTensorToDevice(const Device& device) {
   return Create(ToTensor(/*detached=*/true), device);
 }
 
-torch::lazy::Value LazyTensor::MaybeCastIrValue(
-    torch::lazy::Value ir_value, const Device& device,
-    c10::optional<at::ScalarType> logical_element_type) const {
-  if (!logical_element_type) {
-    logical_element_type = dtype_optional();
-  }
-  if (logical_element_type &&
-      RequiresRawTypeCasting(*logical_element_type, &device)) {
-    ir_value =
-        torch::lazy::MakeNode<ir::ops::Cast>(ir_value, *logical_element_type);
-  }
-  return ir_value;
-}
-
 LazyTensor LazyTensor::CreateFrom(torch::lazy::Value ir_value) const {
-  ir_value = MaybeCastIrValue(std::move(ir_value), GetDevice(),
-                              /*logical_element_type=*/c10::nullopt);
   return Create(std::move(ir_value), GetDevice(), dtype_optional());
 }
 
 LazyTensor LazyTensor::CreateFrom(torch::lazy::Value ir_value,
                                   const Device& device) const {
-  ir_value = MaybeCastIrValue(std::move(ir_value), device,
-                              /*logical_element_type=*/c10::nullopt);
   return Create(std::move(ir_value), device, dtype_optional());
 }
 
 LazyTensor LazyTensor::CreateFrom(
     torch::lazy::Value ir_value,
     c10::optional<at::ScalarType> logical_element_type_opt) const {
-  ir_value = MaybeCastIrValue(std::move(ir_value), GetDevice(),
-                              logical_element_type_opt);
   return Create(std::move(ir_value), GetDevice(), logical_element_type_opt);
 }
 
 LazyTensor LazyTensor::CreateFrom(torch::lazy::Value ir_value,
                                   const Device& device,
                                   at::ScalarType logical_element_type) const {
-  ir_value =
-      MaybeCastIrValue(std::move(ir_value), device, logical_element_type);
   return Create(std::move(ir_value), device, logical_element_type);
 }
 

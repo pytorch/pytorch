@@ -179,10 +179,6 @@ class LazyTensor {
 
   std::shared_ptr<View> CreateView(ViewInfo view_info) const;
 
-  torch::lazy::Value MaybeCastIrValue(
-      torch::lazy::Value ir_value, const Device& device,
-      c10::optional<at::ScalarType> logical_element_type) const;
-
   // We build a graph accumulating operations, but at a given point we
   // need to force a rendering, otherwise the graph can grow without control.
   // Think:

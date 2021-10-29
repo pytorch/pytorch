@@ -87,7 +87,7 @@ class LayoutManager {
     }
     return ints;
   }
-
+  // TODO(whc) see if this stuff can also be deleted
   static std::vector<int64_t> ParseLayout(const std::string& list_str,
                                           int64_t rank) {
     std::vector<int64_t> ints = ParseIntList(list_str);
@@ -105,66 +105,22 @@ class LayoutManager {
   LayoutMap layouts_;
 };
 
-double PaddingFactor(int64_t size, int padding) {
-  int rem = static_cast<int>(size % padding);
-  return 1.0 + (rem > 0 ? static_cast<double>(padding - rem) /
-                              static_cast<double>(size)
-                        : 0.0);
-}
-
-lazy_tensors::Shape MakeShapeWithSortedLayout(c10::ArrayRef<int64_t> dimensions,
-                                              c10::ScalarType type) {
-  // Place bigger dimensions on most minor layout locations.
-  std::vector<int64_t> layout = lazy_tensors::util::Iota<int64_t>(
-      dimensions.size(), dimensions.size() - 1, -1);
-  std::sort(layout.begin(), layout.end(), [&](int64_t a, int64_t b) {
-    return dimensions[a] > dimensions[b];
-  });
-  return lazy_tensors::ShapeUtil::MakeShapeWithLayout(type, dimensions, layout);
-}
-
-lazy_tensors::Shape* SetDynamicDimensions(
-    lazy_tensors::Shape* shape, c10::ArrayRef<bool> dynamic_dimensions) {
-  if (!dynamic_dimensions.empty()) {
-    CHECK_EQ(dynamic_dimensions.size(), shape->rank());
-    for (size_t i = 0; i < dynamic_dimensions.size(); ++i) {
-      shape->set_dynamic_dimension(i, dynamic_dimensions[i]);
-    }
-  }
-  return shape;
-}
-
-lazy_tensors::Shape MakeShapeWithLayout(c10::ScalarType type,
-                                        c10::ArrayRef<int64_t> dimensions,
-                                        c10::ArrayRef<bool> dynamic_dimensions,
-                                        c10::ArrayRef<int64_t> layout) {
-  lazy_tensors::Shape shape =
-      lazy_tensors::ShapeUtil::MakeShapeWithLayout(type, dimensions, layout);
-  SetDynamicDimensions(&shape, dynamic_dimensions);
-  return shape;
-}
-
 }  // namespace
 
 lazy_tensors::Shape MakeTorchTensorLayout(
-    c10::ArrayRef<int64_t> dimensions, c10::ArrayRef<bool> dynamic_dimensions,
-    c10::ScalarType type) {
+    c10::ArrayRef<int64_t> dimensions, c10::ScalarType type) {
   lazy_tensors::Shape shape =
       lazy_tensors::ShapeUtil::MakeShapeWithDescendingLayout(type, dimensions);
-  SetDynamicDimensions(&shape, dynamic_dimensions);
   return shape;
 }
 
 lazy_tensors::Shape MakeArrayShapeFromDimensions(
-    c10::ArrayRef<int64_t> dimensions, c10::ArrayRef<bool> dynamic_dimensions,
-    c10::ScalarType type, DeviceType device_type) {
+    c10::ArrayRef<int64_t> dimensions, c10::ScalarType type, DeviceType device_type) {
   auto layout_ptr = LayoutManager::Get()->GetLayout(dimensions);
   if (layout_ptr != nullptr) {
-    return MakeShapeWithLayout(type, dimensions, dynamic_dimensions,
-                               *layout_ptr);
+    return lazy_tensors::ShapeUtil::MakeShapeWithLayout(type, dimensions, *layout_ptr);
   }
-
-  return MakeTorchTensorLayout(dimensions, dynamic_dimensions, type);
+  return MakeTorchTensorLayout(dimensions, type);
 }
 
 }  // namespace torch_lazy_tensors

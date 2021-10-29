@@ -60,7 +60,6 @@
 #include "lazy_tensor_core/csrc/ops/logsumexp.h"
 #include "lazy_tensor_core/csrc/ops/masked_fill.h"
 #include "lazy_tensor_core/csrc/ops/masked_scatter.h"
-#include "lazy_tensor_core/csrc/ops/masked_select.h"
 #include "lazy_tensor_core/csrc/ops/max_in_dim.h"
 #include "lazy_tensor_core/csrc/ops/max_pool_nd.h"
 #include "lazy_tensor_core/csrc/ops/max_pool_nd_backward.h"
@@ -74,7 +73,6 @@
 #include "lazy_tensor_core/csrc/ops/nll_loss2d.h"
 #include "lazy_tensor_core/csrc/ops/nll_loss2d_backward.h"
 #include "lazy_tensor_core/csrc/ops/nms.h"
-#include "lazy_tensor_core/csrc/ops/nonzero.h"
 #include "lazy_tensor_core/csrc/ops/normal.h"
 #include "lazy_tensor_core/csrc/ops/not_supported.h"
 #include "lazy_tensor_core/csrc/ops/ops.h"
@@ -119,7 +117,6 @@
 #include "lazy_tensor_core/csrc/ops/var.h"
 #include "lazy_tensor_core/csrc/ops/var_mean.h"
 #include "lazy_tensor_core/csrc/ops/view.h"
-#include "lazy_tensor_core/csrc/shape_builder.h"
 #include "lazy_tensor_core/csrc/tensor.h"
 #include "lazy_tensor_core/csrc/tensor_ops.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
@@ -227,16 +224,17 @@ std::vector<int64_t> CheckIntList(c10::ArrayRef<int64_t> list, size_t length,
 
 // Returns a 1-D shape for batch norm weight or bias based on the input shape.
 lazy_tensors::Shape BatchNormFeaturesShape(const LazyTensor& input) {
-  auto input_shape = input.shape();
-  return ShapeBuilder(input.dtype()).Add(input_shape.get(), 1).Build();
+  auto input_shape = input.shape().get();
+  return lazy_tensors::Shape(input_shape.at_element_type(),
+                             input_shape.dimensions()[1]);
 }
 
 // Returns the IR for the given input or the provided default value broadcasted
 // to the default shape, if the input is undefined.
 torch::lazy::Value GetIrValueOrDefault(const LazyTensor& input,
-                              const at::Scalar& default_value,
-                              const lazy_tensors::Shape& default_shape,
-                              const Device& device) {
+                                       const at::Scalar& default_value,
+                                       const lazy_tensors::Shape& default_shape,
+                                       const Device& device) {
   return input.is_null() ? LazyGraphExecutor::Get()->GetIrValueForScalar(
                                default_value, default_shape, device)
                          : input.GetIrValue();
@@ -274,7 +272,7 @@ ViewInfo CreateAsStridedViewInfo(const lazy_tensors::Shape& input_shape,
                                  std::vector<int64_t> stride,
                                  c10::optional<int64_t> storage_offset) {
   lazy_tensors::Shape result_shape =
-      Helpers::GetDynamicReshape(input_shape, size);
+      lazy_tensors::ShapeUtil::MakeShape(input_shape.at_element_type(), size);
   AsStridedInfo as_strided_info;
   as_strided_info.stride = std::move(stride);
   if (storage_offset) {
@@ -804,8 +802,7 @@ LazyTensor erfinv(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::Erfinv(input.GetIrValue()));
 }
 
-LazyTensor expand(const LazyTensor& input,
-                  std::vector<int64_t> size) {
+LazyTensor expand(const LazyTensor& input, std::vector<int64_t> size) {
   auto input_shape = input.shape();
   return input.CreateFrom(torch::lazy::MakeNode<ir::ops::Expand>(
       input.GetIrValue(),
@@ -870,7 +867,7 @@ LazyTensor full(c10::ArrayRef<int64_t> size, const at::Scalar& fill_value,
                 const Device& device, at::ScalarType scalar_type) {
   CheckShapeDimensions(size);
   lazy_tensors::Shape shape = MakeArrayShapeFromDimensions(
-      size, /*dynamic_dimensions=*/{}, scalar_type, device.hw_type);
+      size, scalar_type, device.hw_type);
   return LazyTensor::Create(
       LazyGraphExecutor::Get()->GetIrValueForScalar(fill_value, shape, device),
       device, scalar_type);
@@ -1123,10 +1120,6 @@ void log1p_(LazyTensor& input) {
   input.SetInPlaceIrValue(ir::ops::Log1p(input.GetIrValue()));
 }
 
-LazyTensor logdet(const LazyTensor& input) {
-  return input.CreateFrom(ir::ops::LogDet(input.GetIrValue()));
-}
-
 LazyTensor logsumexp(const LazyTensor& input, std::vector<int64_t> dimensions,
                      bool keep_reduced_dimensions) {
   return input.CreateFrom(torch::lazy::MakeNode<ir::ops::Logsumexp>(
@@ -1158,12 +1151,6 @@ void masked_scatter_(LazyTensor& input, const LazyTensor& mask,
   input.SetIrValue(torch::lazy::MakeNode<ir::ops::MaskedScatter>(
       input.GetIrValue(), MaybeExpand(mask.GetIrValue(), input.shape()),
       source.GetIrValue()));
-}
-
-LazyTensor masked_select(const LazyTensor& input, const LazyTensor& mask) {
-  NodePtr node = torch::lazy::MakeNode<ir::ops::MaskedSelect>(
-      input.GetIrValue(), mask.GetIrValue());
-  return input.CreateFrom(torch::lazy::Value(node, 0));
 }
 
 LazyTensor max(const LazyTensor& input, const LazyTensor& other,
@@ -1475,11 +1462,6 @@ std::pair<LazyTensor, LazyTensor> nms(const LazyTensor& boxes,
                          at::ScalarType::Int),
       LazyTensor::Create(torch::lazy::Value(node, 1), boxes.GetDevice(),
                          at::ScalarType::Int));
-}
-
-LazyTensor nonzero(const LazyTensor& input) {
-  NodePtr node = torch::lazy::MakeNode<ir::ops::NonZero>(input.GetIrValue());
-  return input.CreateFrom(torch::lazy::Value(node, 0), at::ScalarType::Long);
 }
 
 LazyTensor normal(double mean, const LazyTensor& std) {
@@ -2134,8 +2116,8 @@ LazyTensor view(const LazyTensor& input, c10::ArrayRef<int64_t> output_size) {
   auto input_shape = input.shape();
   std::vector<int64_t> complete_dimensions =
       GetCompleteShape(output_size, input_shape.get().dimensions());
-  lazy_tensors::Shape shape =
-      Helpers::GetDynamicReshape(input_shape, complete_dimensions);
+  lazy_tensors::Shape shape = lazy_tensors::ShapeUtil::MakeShape(
+      input_shape.get().at_element_type(), complete_dimensions);
   ViewInfo view_info(ViewInfo::Type::kReshape, std::move(shape), input_shape);
   return input.CreateViewTensor(std::move(view_info));
 }
