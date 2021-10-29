@@ -22,7 +22,6 @@
 #include "lazy_tensor_core/csrc/torch_util.h"
 #include "lazy_tensor_core/csrc/ts_backend/backend_impl.h"
 #include "lazy_tensor_core/csrc/version.h"
-#include "lazy_tensors/computation_client/computation_client.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/computation_client/metrics.h"
 #include "lazy_tensors/computation_client/metrics_analysis.h"
@@ -60,12 +59,10 @@ Device GetDeviceOrCurrent(const std::string& device_str) {
 }
 
 void PrepareToExit() {
-  lazy_tensors::ComputationClient* client =
-      lazy_tensors::ComputationClient::GetIfInitialized();
-  if (client != nullptr) {
-    LazyGraphExecutor::Get()->WaitDeviceOps({});
-    client->PrepareToExit();
-  }
+  //TODO(whc) should we hook this interface up? It does nothing currently
+  torch_lazy_tensors::compiler::getBackendRegistrar()->PrepareToExit();
+  //TODO(whc) can I call this unconditionally? 
+  LazyGraphExecutor::Get()->WaitDeviceOps({});
 }
 
 std::string GetTensorsDump(
@@ -385,19 +382,19 @@ py::object LtcNms(const at::Tensor& boxes, const at::Tensor& scores,
   return result_tuple;
 }
 
-py::dict GetMemoryInfo(const std::string& device_str) {
-  lazy_tensors::ComputationClient::MemoryInfo mem_info;
-  {
-    NoGilSection nogil;
-    Device device = GetDeviceOrCurrent(device_str);
-    mem_info = lazy_tensors::ComputationClient::Get()->GetMemoryInfo(
-        device.ToString());
-  }
-  auto py_dict = py::dict();
-  py_dict["kb_free"] = mem_info.kb_free;
-  py_dict["kb_total"] = mem_info.kb_total;
-  return py_dict;
-}
+// py::dict GetMemoryInfo(const std::string& device_str) {
+//   lazy_tensors::ComputationClient::MemoryInfo mem_info;
+//   {
+//     NoGilSection nogil;
+//     Device device = GetDeviceOrCurrent(device_str);
+//     mem_info = torch_lazy_tensors::compiler::getBackendRegistrar()->GetMemoryInfo(
+//         device.ToString());
+//   }
+//   auto py_dict = py::dict();
+//   py_dict["kb_free"] = mem_info.kb_free;
+//   py_dict["kb_total"] = mem_info.kb_total;
+//   return py_dict;
+// }
 
 void InitLtcModuleBindings(py::module m) {
   m.def("_prepare_to_exit", []() { PrepareToExit(); });
@@ -459,10 +456,10 @@ void InitLtcModuleBindings(py::module m) {
   m.def("_ltc_get_tensor_id",
         [](const at::Tensor& tensor) { return GetTensorId(tensor); });
   m.def("_ltc_get_devices", []() {
-    return lazy_tensors::ComputationClient::Get()->GetLocalDevices();
+    return torch_lazy_tensors::compiler::getBackendRegistrar()->GetLocalDevices();
   });
   m.def("_ltc_get_all_devices", []() {
-    return lazy_tensors::ComputationClient::Get()->GetAllDevices();
+    return torch_lazy_tensors::compiler::getBackendRegistrar()->GetAllDevices();
   });
   m.def("_ltc_real_devices", [](const std::vector<std::string>& devices) {
     std::vector<std::string> ltc_devices;
@@ -476,18 +473,18 @@ void InitLtcModuleBindings(py::module m) {
         [](const std::vector<std::string>& devices) {
           auto replication_devices =
               std::make_shared<std::vector<std::string>>(devices);
-          lazy_tensors::ComputationClient::Get()->SetReplicationDevices(
+          torch_lazy_tensors::compiler::getBackendRegistrar()->SetReplicationDevices(
               std::move(replication_devices));
         });
   m.def("_ltc_get_replication_devices", []() {
     auto replication_devices =
-        lazy_tensors::ComputationClient::Get()->GetReplicationDevices();
+        torch_lazy_tensors::compiler::getBackendRegistrar()->GetReplicationDevices();
     return replication_devices != nullptr ? *replication_devices
                                           : std::vector<std::string>();
   });
   m.def("_ltc_get_replication_devices_count", []() {
     auto replication_devices =
-        lazy_tensors::ComputationClient::Get()->GetReplicationDevices();
+        torch_lazy_tensors::compiler::getBackendRegistrar()->GetReplicationDevices();
     return replication_devices != nullptr ? replication_devices->size() : 0;
   });
 
@@ -636,9 +633,9 @@ void InitLtcModuleBindings(py::module m) {
         return GetLiveTensorsReport(nodes_threshold, device);
       },
       py::arg("nodes_threshold") = 100, py::arg("device") = "");
-  m.def("_ltc_memory_info", [](const std::string& device) -> py::object {
-    return GetMemoryInfo(device);
-  });
+  // m.def("_ltc_memory_info", [](const std::string& device) -> py::object {
+  //   return GetMemoryInfo(device);
+  // });
   m.def("_ltc_init_ts_backend", []() { compiler::InitTorchScriptBackend(); });
 }
 

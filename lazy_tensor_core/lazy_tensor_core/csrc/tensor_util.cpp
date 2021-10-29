@@ -11,6 +11,7 @@
 #include <numeric>
 #include <thread>
 
+#include "lazy_tensor_core/csrc/compiler/backend_impl_interface.h"
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_computation_client.h"
 #include "lazy_tensors/computation_client/multi_wait.h"
@@ -319,35 +320,38 @@ bool TensorCompare(const at::Tensor& t1, const at::Tensor& t2) {
                      contiguous_t1.numel() * contiguous_t1.itemsize()) == 0;
 }
 
-lazy_tensors::ComputationClient::DataPtr TensorToDataHandle(
-    const at::Tensor& tensor, const Device& device) {
-  return MakeComputationDataFromTensor(
-      tensor, lazy_tensors::Shape(tensor.scalar_type(), tensor.sizes()),
-      device.ToString());
+compiler::DataPtr TensorToDataHandle(const at::Tensor& tensor,
+                                     const Device& device) {
+  return torch_lazy_tensors::compiler::getBackendRegistrar()
+      ->MakeComputationDataFromTensor(
+          tensor, lazy_tensors::Shape(tensor.scalar_type(), tensor.sizes()),
+          device.ToString());
 }
 
-std::vector<lazy_tensors::ComputationClient::DataPtr> CreateTensorsData(
+std::vector<compiler::DataPtr> CreateTensorsData(
     const std::vector<at::Tensor>& tensors,
     const std::vector<std::string>& devices) {
   CHECK_EQ(tensors.size(), devices.size());
-  std::vector<lazy_tensors::ComputationClient::DataPtr> result;
+  std::vector<compiler::DataPtr> result;
   result.reserve(tensors.size());
   for (size_t i = 0; i < tensors.size(); ++i) {
     Device device(devices[i]);
     lazy_tensors::Shape shape(tensors[i].scalar_type(), tensors[i].sizes());
     result.push_back(
-        MakeComputationDataFromTensor(tensors[i], shape, devices[i]));
+        torch_lazy_tensors::compiler::getBackendRegistrar()
+            ->MakeComputationDataFromTensor(tensors[i], shape, devices[i]));
   }
   return result;
 }
 
 std::vector<at::Tensor> DataHandlesToTensors(
-    c10::ArrayRef<lazy_tensors::ComputationClient::DataPtr> data_handles,
+    c10::ArrayRef<compiler::DataPtr> data_handles,
     at::ScalarType dest_element_type) {
   std::vector<at::Tensor> tensors;
   for (const auto& handle : data_handles) {
     tensors.push_back(
-        lazy_tensors::MakeTensorFromComputationData(handle, dest_element_type));
+        torch_lazy_tensors::compiler::getBackendRegistrar()
+            ->MakeTensorFromComputationData(handle, dest_element_type));
   }
   return tensors;
 }
@@ -386,153 +390,6 @@ torch::lazy::hash_t TensorHash(const at::Tensor& tensor) {
       LOG(ERROR) << "Unsupported scalar type: " << ctensor.scalar_type();
   }
 }
-
-at::ScalarType TensorTypeFromLtcType(lazy_tensors::PrimitiveType ltc_type) {
-  switch (ltc_type) {
-    case lazy_tensors::PrimitiveType::BF16:
-      return UseBF16() || DowncastBF16() ? at::ScalarType::Float
-                                         : at::ScalarType::BFloat16;
-    case lazy_tensors::PrimitiveType::F16:
-      return UseF16() || DowncastF16() ? at::ScalarType::Float
-                                       : at::ScalarType::Half;
-    case lazy_tensors::PrimitiveType::F32:
-      return DowncastBF16() || DowncastF16() ? at::ScalarType::Double
-                                             : at::ScalarType::Float;
-    case lazy_tensors::PrimitiveType::F64:
-      return at::ScalarType::Double;
-    case lazy_tensors::PrimitiveType::PRED:
-      return at::ScalarType::Bool;
-    case lazy_tensors::PrimitiveType::U8:
-      return at::ScalarType::Byte;
-    case lazy_tensors::PrimitiveType::S8:
-      return at::ScalarType::Char;
-    case lazy_tensors::PrimitiveType::S16:
-    case lazy_tensors::PrimitiveType::U16:
-      return at::ScalarType::Short;
-    case lazy_tensors::PrimitiveType::S32:
-    case lazy_tensors::PrimitiveType::U32:
-      return at::ScalarType::Int;
-    case lazy_tensors::PrimitiveType::S64:
-    case lazy_tensors::PrimitiveType::U64:
-      return at::ScalarType::Long;
-    case lazy_tensors::PrimitiveType::C64:
-      return at::ScalarType::ComplexFloat;
-    case lazy_tensors::PrimitiveType::C128:
-      return at::ScalarType::ComplexDouble;
-    default:
-      LOG(ERROR) << "Type not supported: " << ltc_type;
-  }
-}
-
-lazy_tensors::PrimitiveType TensorTypeToLtcType(at::ScalarType scalar_type) {
-  switch (scalar_type) {
-    case at::ScalarType::Double:
-      return lazy_tensors::PrimitiveType::F64;
-    case at::ScalarType::Float:
-      return lazy_tensors::PrimitiveType::F32;
-    case at::ScalarType::BFloat16:
-      return lazy_tensors::PrimitiveType::BF16;
-    case at::ScalarType::Half:
-      return lazy_tensors::PrimitiveType::F16;
-    case at::ScalarType::Bool:
-      return lazy_tensors::PrimitiveType::PRED;
-    case at::ScalarType::Byte:
-      return lazy_tensors::PrimitiveType::U8;
-    case at::ScalarType::Char:
-      return lazy_tensors::PrimitiveType::S8;
-    case at::ScalarType::Short:
-      return lazy_tensors::PrimitiveType::S16;
-    case at::ScalarType::Int:
-      return lazy_tensors::PrimitiveType::S32;
-    case at::ScalarType::Long:
-      return lazy_tensors::PrimitiveType::S64;
-    case at::ScalarType::ComplexFloat:
-      return lazy_tensors::PrimitiveType::C64;
-    case at::ScalarType::ComplexDouble:
-      return lazy_tensors::PrimitiveType::C128;
-    default:
-      LOG(ERROR) << "Type not supported: " << scalar_type;
-  }
-}
-
-lazy_tensors::PrimitiveType GetDevicePrimitiveType(
-    lazy_tensors::PrimitiveType type, const Device* device) {
-  Device ltc_device = GetDeviceOrCurrent(device);
-  switch (type) {
-    case lazy_tensors::PrimitiveType::F64:
-      if (UseF16()) {
-        return lazy_tensors::PrimitiveType::F16;
-      }
-      if (UseBF16()) {
-        return lazy_tensors::PrimitiveType::BF16;
-      }
-      if (DowncastBF16() || DowncastF16()) {
-        return lazy_tensors::PrimitiveType::F32;
-      }
-      return ltc_device.hw_type != DeviceType::TPU
-                 ? lazy_tensors::PrimitiveType::F64
-                 : lazy_tensors::PrimitiveType::F32;
-    case lazy_tensors::PrimitiveType::F32:
-      if (UseF16() || DowncastF16()) {
-        return lazy_tensors::PrimitiveType::F16;
-      }
-      return UseBF16() || DowncastBF16() ? lazy_tensors::PrimitiveType::BF16
-                                         : lazy_tensors::PrimitiveType::F32;
-    case lazy_tensors::PrimitiveType::U16:
-      return ltc_device.hw_type != DeviceType::TPU
-                 ? lazy_tensors::PrimitiveType::U16
-                 : lazy_tensors::PrimitiveType::U32;
-    case lazy_tensors::PrimitiveType::S16:
-      return ltc_device.hw_type != DeviceType::TPU
-                 ? lazy_tensors::PrimitiveType::S16
-                 : lazy_tensors::PrimitiveType::S32;
-    case lazy_tensors::PrimitiveType::S64:
-      return Use32BitLong() ? lazy_tensors::PrimitiveType::S32
-                            : lazy_tensors::PrimitiveType::S64;
-    case lazy_tensors::PrimitiveType::U64:
-      return Use32BitLong() ? lazy_tensors::PrimitiveType::U32
-                            : lazy_tensors::PrimitiveType::U64;
-    case lazy_tensors::PrimitiveType::C128:
-      return ltc_device.hw_type != DeviceType::TPU
-                 ? lazy_tensors::PrimitiveType::C128
-                 : lazy_tensors::PrimitiveType::C64;
-    default:
-      return type;
-  }
-}
-
-lazy_tensors::PrimitiveType MakeLtcPrimitiveType(at::ScalarType scalar_type,
-                                                 const Device* device) {
-  switch (scalar_type) {
-    case at::ScalarType::Double:
-      return GetDevicePrimitiveType(lazy_tensors::PrimitiveType::F64, device);
-    case at::ScalarType::Float:
-      return GetDevicePrimitiveType(lazy_tensors::PrimitiveType::F32, device);
-    case at::ScalarType::BFloat16:
-      return GetDevicePrimitiveType(lazy_tensors::PrimitiveType::BF16, device);
-    case at::ScalarType::Half:
-      return GetDevicePrimitiveType(lazy_tensors::PrimitiveType::F16, device);
-    case at::ScalarType::Bool:
-      return GetDevicePrimitiveType(lazy_tensors::PrimitiveType::PRED, device);
-    case at::ScalarType::Byte:
-      return GetDevicePrimitiveType(lazy_tensors::PrimitiveType::U8, device);
-    case at::ScalarType::Char:
-      return GetDevicePrimitiveType(lazy_tensors::PrimitiveType::S8, device);
-    case at::ScalarType::Short:
-      return GetDevicePrimitiveType(lazy_tensors::PrimitiveType::S16, device);
-    case at::ScalarType::Int:
-      return GetDevicePrimitiveType(lazy_tensors::PrimitiveType::S32, device);
-    case at::ScalarType::Long:
-      return GetDevicePrimitiveType(lazy_tensors::PrimitiveType::S64, device);
-    case at::ScalarType::ComplexFloat:
-      return GetDevicePrimitiveType(lazy_tensors::PrimitiveType::C64, device);
-    case at::ScalarType::ComplexDouble:
-      return GetDevicePrimitiveType(lazy_tensors::PrimitiveType::C128, device);
-    default:
-      LOG(ERROR) << "Type not supported: " << scalar_type;
-  }
-}
-
 bool IsSpecialScalar(const at::Scalar& value) {
   static bool no_scalars =
       lazy_tensors::sys_util::GetEnvBool("NO_SPECIAL_SCALARS", false);

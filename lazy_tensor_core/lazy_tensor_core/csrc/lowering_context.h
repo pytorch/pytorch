@@ -6,9 +6,9 @@
 #include <utility>
 #include <vector>
 
+#include "lazy_tensor_core/csrc/compiler/data.h"
 #include "lazy_tensor_core/csrc/device.h"
 #include "lazy_tensor_core/csrc/ir_util.h"
-#include "lazy_tensors/computation_client/computation_client.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/core/platform/macros.h"
 #include "lazy_tensors/shape_util.h"
@@ -39,7 +39,7 @@ class LoweringContext {
 
   // Retrieves the vector holding all the tensors associated with the parameter
   // instructions which have been created.
-  const std::vector<lazy_tensors::ComputationClient::DataPtr>&
+  const std::vector<compiler::DataPtr>&
   GetParametersData() const;
 
   // Get the shape of the result tuple component, given by index.
@@ -52,7 +52,7 @@ class LoweringContext {
   // Build the computation capturing all the operations created with the
   // embedded builder (returned by the builder() API).
   virtual lazy_tensors::StatusOr<
-      std::shared_ptr<lazy_tensors::GenericComputation>>
+      std::shared_ptr<compiler::GenericComputation>>
   Build() = 0;
 
   // Lowers the given node as the result of the computation. Only used for the
@@ -78,7 +78,7 @@ class LoweringContext {
 
  protected:
   Device device_;
-  std::vector<lazy_tensors::ComputationClient::DataPtr> parameters_;
+  std::vector<compiler::DataPtr> parameters_;
   std::vector<size_t> parameter_sequence_;
   Util::EmissionMap emit_status_;
 };

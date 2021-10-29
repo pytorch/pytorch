@@ -1,8 +1,7 @@
 #include "lazy_tensor_core/csrc/device.h"
 
 #include <c10/util/Optional.h>
-
-#include "lazy_tensors/computation_client/computation_client.h"
+#include "lazy_tensor_core/csrc/compiler/backend_impl_interface.h"
 #include "lazy_tensors/str_split.h"
 
 namespace torch_lazy_tensors {
@@ -25,13 +24,13 @@ std::string DeviceTypeToString(DeviceType hw_type) {
 void ParseDevice(const std::string& device_spec, Device* device) {
   if (device_spec.empty()) {
     std::string default_device_spec =
-        lazy_tensors::ComputationClient::Get()->GetDefaultDevice();
+        torch_lazy_tensors::compiler::getBackendRegistrar()->GetDefaultDevice();
     CHECK(!default_device_spec.empty());
     return ParseDevice(default_device_spec, device);
   }
   if (device_spec[0] == ':') {
     std::string default_device_spec =
-        lazy_tensors::ComputationClient::Get()->GetDefaultDevice();
+        torch_lazy_tensors::compiler::getBackendRegistrar()->GetDefaultDevice();
     auto pos = default_device_spec.find(':');
     CHECK_NE(pos, std::string::npos) << default_device_spec;
     return ParseDevice(default_device_spec.substr(0, pos) + device_spec,

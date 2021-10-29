@@ -14,6 +14,7 @@
 #include "lazy_tensor_core/csrc/torch_util.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_computation_client.h"
 #include "lazy_tensors/shape_util.h"
+#include "lazy_tensors/computation_client/metrics.h"
 
 namespace torch_lazy_tensors {
 
@@ -27,7 +28,7 @@ LazyTensor LazyTensor::Create(const at::Tensor& tensor, const Device& device) {
 }
 
 LazyTensor LazyTensor::Create(
-    lazy_tensors::ComputationClient::DataPtr handle,
+    compiler::DataPtr handle,
     c10::optional<at::ScalarType> logical_element_type) {
   LazyTensor xtensor(std::move(handle), logical_element_type);
   LazyGraphExecutor::Get()->RegisterTensor(xtensor.data_ptr());
@@ -57,7 +58,7 @@ LazyTensor LazyTensor::Create(std::shared_ptr<Data> data) {
 LazyTensor::LazyTensor(const at::Tensor& tensor, const Device& device)
     : data_(std::make_shared<Data>(tensor, device)) {}
 
-LazyTensor::LazyTensor(lazy_tensors::ComputationClient::DataPtr handle,
+LazyTensor::LazyTensor(compiler::DataPtr handle,
                        c10::optional<at::ScalarType> logical_element_type)
     : data_(std::make_shared<Data>(handle, Device(handle->device()),
                                    logical_element_type)) {}
@@ -126,7 +127,7 @@ std::ptrdiff_t LazyTensor::GetViewAliasId() const {
              : 0;
 }
 
-lazy_tensors::ComputationClient::DataPtr LazyTensor::GetDataHandle() {
+compiler::DataPtr LazyTensor::GetDataHandle() {
   // Data can coexist with a view, but we need to check that the view did
   // not receive any updates before calling the current IR valid.
   bool up_to_date = true;
@@ -137,7 +138,7 @@ lazy_tensors::ComputationClient::DataPtr LazyTensor::GetDataHandle() {
     ir_value = std::move(ir_value_updated.ir_value);
   }
   if (up_to_date) {
-    lazy_tensors::ComputationClient::DataPtr handle = CurrentDataHandle();
+    compiler::DataPtr handle = CurrentDataHandle();
     if (handle != nullptr) {
       CHECK(handle->HasValue())
           << "Trying to access data while an async operation is in flight: "
@@ -161,16 +162,16 @@ lazy_tensors::ComputationClient::DataPtr LazyTensor::GetDataHandle() {
   return data()->handle;
 }
 
-lazy_tensors::ComputationClient::DataPtr LazyTensor::CurrentDataHandle() const {
+compiler::DataPtr LazyTensor::CurrentDataHandle() const {
   return data()->handle;
 }
 
 void LazyTensor::SetDataHandle(
-    lazy_tensors::ComputationClient::DataPtr handle) {
+    compiler::DataPtr handle) {
   SetDataHandle(std::move(handle), /*sync=*/true);
 }
 
-void LazyTensor::SetDataHandle(lazy_tensors::ComputationClient::DataPtr handle,
+void LazyTensor::SetDataHandle(compiler::DataPtr handle,
                                bool sync) {
   data()->handle = std::move(handle);
   // Assigning a device data should always clear the IR node, to allow graph
@@ -232,7 +233,7 @@ torch::lazy::Value LazyTensor::GetIrValue() const {
   if (ir_value) {
     return ir_value;
   }
-  lazy_tensors::ComputationClient::DataPtr handle = CurrentDataHandle();
+  compiler::DataPtr handle = CurrentDataHandle();
   if (handle != nullptr) {
     // In case of tensor node, we do not clear the data when we set the IR
     // node. This because we want further calls to GetIrValue() to fetch the
@@ -269,7 +270,7 @@ c10::optional<at::Tensor> LazyTensor::CurrentTensorData() const {
 
 torch::lazy::Value LazyTensor::GetIrValueForTensor(const at::Tensor& tensor,
                                                    const Device& device) const {
-  lazy_tensors::ComputationClient::DataPtr data;
+  compiler::DataPtr data;
   bool read_only = false;
   if (tensor.dim() == 0 && tensor.numel() == 1) {
     at::Scalar value = tensor.item();
@@ -433,7 +434,7 @@ void LazyTensor::UpdateFromTensorOut(const LazyTensor& tensor) {
 }
 
 torch::lazy::Value LazyTensor::CreateTensorNode(
-    lazy_tensors::ComputationClient::DataPtr data, bool read_only) const {
+    compiler::DataPtr data, bool read_only) const {
   data->SetInfo(std::make_shared<LazyGraphExecutor::DeviceDataInfo>(
       GetUniqueId(), read_only));
   return torch::lazy::MakeNode<ir::ops::DeviceData>(std::move(data));

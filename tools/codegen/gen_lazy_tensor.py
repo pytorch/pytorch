@@ -154,6 +154,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
                 "lazy_tensor_core/csrc/helpers.h",
                 "lazy_tensor_core/csrc/tensor.h",
                 "lazy_tensor_core/csrc/tensor_util.h",
+                "lazy_tensors/computation_client/metrics.h",
                 f"{output_dir}/{backend_key}NativeFunctions.h",
                 f"{output_dir}/{backend_key}LazyIr.h",
                 f"{output_dir}/{backend_key}ShapeDtype.h",
@@ -174,6 +175,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
             'lazy_ir_sysinc': [f'#include <{path}>' for path in [
                 "c10/core/ScalarType.h",
                 "c10/util/Optional.h",
+                "ATen/Tensor.h",
                 "vector",
             ]],
             'lazy_ir_inc': [f'#include "{path}"' for path in [

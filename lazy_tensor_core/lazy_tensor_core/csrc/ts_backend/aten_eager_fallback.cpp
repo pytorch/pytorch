@@ -41,7 +41,7 @@ void ltc_eager_fallback(const c10::OperatorHandle& op,
   // Call the actual boxed CPU fallback.
   eager_fallback(
       op, stack,
-      lazy_tensors::compiler::TSComputationClient::HardwareDeviceType());
+      torch_lazy_tensors::compiler::getBackendRegistrar()->HardwareDeviceType());
 }
 
 TORCH_LIBRARY_IMPL(_, Lazy, m) {

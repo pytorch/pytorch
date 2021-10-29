@@ -33,12 +33,12 @@ size_t TSLoweringContext::AddResult(const torch::lazy::Output& output) {
   return AddResult(GetOutputOp(output));
 }
 
-lazy_tensors::StatusOr<std::shared_ptr<lazy_tensors::GenericComputation>>
+lazy_tensors::StatusOr<std::shared_ptr<compiler::GenericComputation>>
 TSLoweringContext::Build() {
   for (torch::jit::Value* output : root_tuple_) {
     graph_->block()->registerOutput(output);
   }
-  return std::shared_ptr<lazy_tensors::GenericComputation>(
+  return std::shared_ptr<compiler::GenericComputation>(
       new GenericComputationTS(graph_));
 }
 
@@ -65,8 +65,8 @@ void TSLoweringContext::AssignOutputOp(const torch::lazy::Output& output,
 }
 
 torch::jit::Value* TSLoweringContext::GetParameter(
-    const std::shared_ptr<lazy_tensors::client::Data>& data) {
-  lazy_tensors::client::Data::OpaqueHandle handle = data->GetOpaqueHandle();
+    const std::shared_ptr<compiler::Data>& data) {
+  compiler::Data::OpaqueHandle handle = data->GetOpaqueHandle();
   auto it = parameters_map_.find(handle);
   if (it == parameters_map_.end()) {
     torch::jit::Value* param =

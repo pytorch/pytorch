@@ -9,7 +9,6 @@
 #include "lazy_tensor_core/csrc/compiler/backend_impl_interface.h"
 #include "lazy_tensor_core/csrc/ir_util.h"
 #include "lazy_tensor_core/csrc/lowering_context.h"
-#include "lazy_tensors/computation_client/computation_client.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
 
 // TODO(whc) don't have ir util depend on ts_backend

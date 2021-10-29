@@ -7,7 +7,6 @@
 #include "lazy_tensor_core/csrc/aten_ltc_bridge.h"
 #include "lazy_tensor_core/csrc/device.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
-#include "lazy_tensors/computation_client/computation_client.h"
 
 namespace torch_lazy_tensors {
 namespace {
@@ -40,7 +39,7 @@ struct LTCGuardImpl : public c10::impl::DeviceGuardImplInterface {
   }
 
   c10::DeviceIndex deviceCount() const noexcept override {
-    return lazy_tensors::ComputationClient::Get()->GetNumDevices();
+    return torch_lazy_tensors::compiler::getBackendRegistrar()->GetNumDevices();
   }
 };
 

@@ -3,9 +3,9 @@
 #include <string>
 #include <vector>
 
+#include "lazy_tensor_core/csrc/compiler/data.h"
 #include "lazy_tensors/computation_client/async_task.h"
 #include "lazy_tensors/computation_client/cache.h"
-#include "lazy_tensors/computation_client/computation_client.h"
 #include "lazy_tensors/computation_client/util.h"
 #include "torch/csrc/lazy/core/ir.h"
 
@@ -17,16 +17,16 @@ namespace torch_lazy_tensors {
 // and executed independently.
 class OpByOpExecutor {
  public:
-  using AsyncResult = std::vector<lazy_tensors::ComputationClient::DataPtr>;
+  using AsyncResult = std::vector<compiler::DataPtr>;
   using AsyncTask = lazy_tensors::util::AsyncTask<AsyncResult>;
 
   static OpByOpExecutor* Get();
 
-  std::vector<lazy_tensors::ComputationClient::ExecuteChainedOp> BuildOps(
-      c10::ArrayRef<torch::lazy::Value> roots, const std::string& device,
-      c10::ArrayRef<std::string> devices);
+//   std::vector<lazy_tensors::ComputationClient::ExecuteChainedOp> BuildOps(
+//       c10::ArrayRef<torch::lazy::Value> roots, const std::string& device,
+//       c10::ArrayRef<std::string> devices);
 
-  std::vector<lazy_tensors::ComputationClient::DataPtr> Execute(
+  std::vector<compiler::DataPtr> Execute(
       c10::ArrayRef<torch::lazy::Value> roots, const std::string& device,
       c10::ArrayRef<std::string> devices);
 
@@ -37,7 +37,7 @@ class OpByOpExecutor {
  private:
   using CompileCache =
       lazy_tensors::util::Cache<torch::lazy::hash_t,
-                                lazy_tensors::ComputationClient::Computation,
+                                compiler::Computation,
                                 torch::lazy::HashReducer>;
 
   explicit OpByOpExecutor(size_t compile_cache_size);

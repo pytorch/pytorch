@@ -8,7 +8,6 @@
 #include "lazy_tensor_core/csrc/lazy_graph_executor.h"
 #include "lazy_tensor_core/csrc/tensor_impl.h"
 #include "lazy_tensor_core/csrc/torch_util.h"
-#include "lazy_tensors/computation_client/computation_client.h"
 
 namespace torch_lazy_tensors {
 namespace bridge {
@@ -31,7 +30,7 @@ class AtenLtcDeviceMapper {
  private:
   AtenLtcDeviceMapper() {
     for (auto& device_str :
-         lazy_tensors::ComputationClient::Get()->GetLocalDevices()) {
+         torch_lazy_tensors::compiler::getBackendRegistrar()->GetLocalDevices()) {
       devices_.emplace_back(device_str);
       devices_ordinals_[devices_.back()] = devices_.size() - 1;
     }
@@ -265,7 +264,7 @@ c10::Device LtcDeviceToAtenDevice(const Device& device) {
 }
 
 std::string ToLtcString(const c10::Device& device) {
-  return c10::str("lazy:", device.index());
+  return lazy_tensors::StrCat("lazy:", device.index());
 }
 
 c10::Device AtenDefaultDevice() {

@@ -2,6 +2,8 @@
 
 #include "lazy_tensor_core/csrc/ts_backend/ts_node_lowering.h"
 #include "lazy_tensors/computation_client/sys_util.h"
+#include "third_party/computation_client/cache.h"
+
 namespace torch_lazy_tensors {
 namespace ir {
 using torch::lazy::Output;

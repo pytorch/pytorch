@@ -1,9 +1,9 @@
-#include "ATen/MetaFunctions.h"
 #include <ATen/Operators.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/CPUFallback.h>
 #include <torch/library.h>
 
+#include "ATen/MetaFunctions.h"
 #include "lazy_tensor_core/csrc/aten_ltc_bridge.h"
 #include "lazy_tensor_core/csrc/function_call_tracker.h"
 #include "lazy_tensor_core/csrc/helpers.h"
@@ -18,17 +18,18 @@
 #include "lazy_tensor_core/csrc/ts_backend/aten_autograd_ops_ts.h"
 #include "lazy_tensor_core/csrc/ts_backend/aten_eager_fallback.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_computation_client.h"
-
+#include "lazy_tensors/computation_client/metrics.h"
 namespace torch_lazy_tensors {
-namespace ir{
-namespace ops{
-// TODO(whc) forward declare these since they aren't defined in the autogenned header;
-// this will be solved when moving cat() to codegen
-std::vector<std::vector<int64_t>> compute_shape_cat(at::TensorList tensors, int64_t dim);
-std::vector<c10::ScalarType> compute_dtype_cat(at::TensorList tensors, int64_t dim);
-}
-}
-
+namespace ir {
+namespace ops {
+// TODO(whc) forward declare these since they aren't defined in the autogenned
+// header; this will be solved when moving cat() to codegen
+std::vector<std::vector<int64_t>> compute_shape_cat(at::TensorList tensors,
+                                                    int64_t dim);
+std::vector<c10::ScalarType> compute_dtype_cat(at::TensorList tensors,
+                                               int64_t dim);
+}  // namespace ops
+}  // namespace ir
 
 namespace {
 
@@ -159,14 +160,18 @@ at::Tensor LazyNativeFunctions::cat(at::TensorList tensors, int64_t dim) {
   auto lazy_tensors = bridge::GetLtcTensors(tensors);
   std::vector<torch::lazy::Value> values;
   values.reserve(lazy_tensors.size());
-  for (auto& tensor: lazy_tensors){
+  for (auto& tensor : lazy_tensors) {
     values.emplace_back(tensor.GetIrValue());
   }
 
-  auto out_shapes = torch_lazy_tensors::ir::ops::compute_shape_cat(tensors, dim);
-  auto out_dtypes = torch_lazy_tensors::ir::ops::compute_dtype_cat(tensors, dim);
-  auto node = torch::lazy::MakeNode<ir::ops::Cat>(values, dim, out_dtypes, out_shapes);
-  auto result = bridge::AtenFromLtcTensor(lazy_tensors[0].CreateFrom(torch::lazy::Value(node, 0), out_dtypes[0]));
+  auto out_shapes =
+      torch_lazy_tensors::ir::ops::compute_shape_cat(tensors, dim);
+  auto out_dtypes =
+      torch_lazy_tensors::ir::ops::compute_dtype_cat(tensors, dim);
+  auto node =
+      torch::lazy::MakeNode<ir::ops::Cat>(values, dim, out_dtypes, out_shapes);
+  auto result = bridge::AtenFromLtcTensor(
+      lazy_tensors[0].CreateFrom(torch::lazy::Value(node, 0), out_dtypes[0]));
   return result;
 }
 
@@ -186,8 +191,8 @@ LazyNativeFunctions::convolution_backward_overrideable(
     int64_t groups, std::array<bool, 3> output_mask) {
   // Lower to cudnn_convolution_backward when possbile
   if (at::globalContext().userEnabledCuDNN() &&
-      lazy_tensors::compiler::TSComputationClient::HardwareDeviceType() ==
-          at::kCUDA) {
+      torch_lazy_tensors::compiler::getBackendRegistrar()
+              ->HardwareDeviceType() == at::kCUDA) {
     LTC_FN_COUNTER("lazy::");
     auto result = lazy_tensor_aten_ops::convolution_backward_overrideable(
         bridge::GetLtcTensor(grad_output), bridge::GetLtcTensor(input),
@@ -226,7 +231,7 @@ LazyNativeFunctions::convolution_backward_overrideable(
   const auto kernel_size = weight.sizes().slice(2);
   CHECK(kernel_size.size() == 2 || kernel_size.size() == 3);
   const at::DeviceType device_type =
-      lazy_tensors::compiler::TSComputationClient::HardwareDeviceType();
+      torch_lazy_tensors::compiler::getBackendRegistrar()->HardwareDeviceType();
   if (transposed) {
     at::TensorOptions options = at::TensorOptions().device(device_type);
     auto&& x_result =
@@ -361,7 +366,7 @@ at::Tensor LazyNativeFunctions::empty(
     c10::optional<bool> pin_memory,
     c10::optional<at::MemoryFormat> memory_format) {
   const auto device_type =
-      lazy_tensors::compiler::TSComputationClient::HardwareDeviceType();
+      torch_lazy_tensors::compiler::getBackendRegistrar()->HardwareDeviceType();
   at::TensorOptions options = at::TensorOptions()
                                   .device(c10::Device(device_type))
                                   .layout(layout)
@@ -388,7 +393,8 @@ at::Tensor LazyNativeFunctions::expand(const at::Tensor& self,
       bridge::GetLtcTensor(self), lazy_tensors::util::ToVector<int64_t>(size)));
 }
 
-at::Tensor& LazyNativeFunctions::fill_(at::Tensor & self, const at::Scalar & value) {
+at::Tensor& LazyNativeFunctions::fill_(at::Tensor& self,
+                                       const at::Scalar& value) {
   LTC_FN_COUNTER("lazy::");
   LazyTensor self_tensor = bridge::GetLtcTensor(self);
   lazy_tensor_aten_ops::fill_(self_tensor, value);
@@ -556,40 +562,47 @@ at::Tensor LazyNativeFunctions::permute(const at::Tensor& self,
       lazy_tensor_aten_ops::permute(self_tensor, Helpers::I64List(dims)));
 }
 
-at::Tensor& LazyNativeFunctions::random_(at::Tensor& self, int64_t from, c10::optional<int64_t> to,
+at::Tensor& LazyNativeFunctions::random_(
+    at::Tensor& self, int64_t from, c10::optional<int64_t> to,
     c10::optional<at::Generator> generator) {
   LTC_FN_COUNTER("lazy::");
 
   if (generator && generator->defined()) {
-    return at::native::call_fallback_fn<&ltc_eager_fallback,
-        ATEN_OP2(random_, from)>::call(self, from, to, generator);
+    return at::native::call_fallback_fn<
+        &ltc_eager_fallback, ATEN_OP2(random_, from)>::call(self, from, to,
+                                                            generator);
   }
 
   auto selfTensor = bridge::GetLtcTensor(self);
-  selfTensor.SetInPlaceIrValue(torch::lazy::MakeNode<ir::ops::Random>(selfTensor.GetIrValue(), from, to));
+  selfTensor.SetInPlaceIrValue(torch::lazy::MakeNode<ir::ops::Random>(
+      selfTensor.GetIrValue(), from, to));
   return self;
 }
 
-at::Tensor& LazyNativeFunctions::random_(at::Tensor& self, int64_t to, c10::optional<at::Generator> generator) {
+at::Tensor& LazyNativeFunctions::random_(
+    at::Tensor& self, int64_t to, c10::optional<at::Generator> generator) {
   LTC_FN_COUNTER("lazy::");
 
   if (generator && generator->defined()) {
     return at::native::call_fallback_fn<&ltc_eager_fallback,
-        ATEN_OP2(random_, to)>::call(self, to, generator);
+                                        ATEN_OP2(random_, to)>::call(self, to,
+                                                                     generator);
   }
 
   auto selfTensor = bridge::GetLtcTensor(self);
-  selfTensor.SetInPlaceIrValue(torch::lazy::MakeNode<ir::ops::Random>(selfTensor.GetIrValue(), c10::nullopt, to));
+  selfTensor.SetInPlaceIrValue(torch::lazy::MakeNode<ir::ops::Random>(
+      selfTensor.GetIrValue(), c10::nullopt, to));
   return self;
 }
 
-at::Tensor& LazyNativeFunctions::random_(at::Tensor& self,
-    c10::optional<at::Generator> generator) {
+at::Tensor& LazyNativeFunctions::random_(
+    at::Tensor& self, c10::optional<at::Generator> generator) {
   LTC_FN_COUNTER("lazy::");
 
   if (generator && generator->defined()) {
     return at::native::call_fallback_fn<&ltc_eager_fallback,
-        ATEN_OP(random_)>::call(self, generator);
+                                        ATEN_OP(random_)>::call(self,
+                                                                generator);
   }
 
   auto selfTensor = bridge::GetLtcTensor(self);

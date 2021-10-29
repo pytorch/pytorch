@@ -3,6 +3,7 @@
 #include <sstream>
 #include <stdexcept>
 
+#include "lazy_tensor_core/csrc/compiler/backend_impl_interface.h"
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
 #include "lazy_tensor_core/csrc/python_util.h"
 #include "lazy_tensors/computation_client/sys_util.h"
@@ -18,7 +19,7 @@ LoweringContext::LoweringContext(const std::string& name, Device device,
                                  Util::EmissionMap emit_status)
     : device_(std::move(device)), emit_status_(std::move(emit_status)) {}
 
-const std::vector<lazy_tensors::ComputationClient::DataPtr>&
+const std::vector<compiler::DataPtr>&
 LoweringContext::GetParametersData() const {
   return parameters_;
 }

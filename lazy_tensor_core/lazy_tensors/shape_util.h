@@ -6,7 +6,6 @@
 #include <complex>
 
 #include "lazy_tensor_core/csrc/device.h"
-#include "lazy_tensors/primitive_types.h"
 #include "lazy_tensors/shape.h"
 #include "torch/csrc/jit/tensorexpr/types.h"
 #include "torch/csrc/lazy/core/hash.h"

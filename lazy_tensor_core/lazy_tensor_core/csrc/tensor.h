@@ -1,8 +1,8 @@
 #pragma once
 
+#include "lazy_tensor_core/csrc/compiler/backend_impl_interface.h"
 #include "lazy_tensor_core/csrc/device.h"
 #include "lazy_tensor_core/csrc/view.h"
-#include "lazy_tensors/computation_client/computation_client.h"
 #include "torch/csrc/lazy/core/ir.h"
 
 namespace torch_lazy_tensors {
@@ -13,7 +13,7 @@ class LazyTensor {
   // held. The lazy tensor is nothing more than a shared pointer to a Data
   // object.
   struct Data {
-    Data(lazy_tensors::ComputationClient::DataPtr handle, const Device& device,
+    Data(compiler::DataPtr handle, const Device& device,
          c10::optional<at::ScalarType> logical_element_type)
         : handle(std::move(handle)),
           logical_element_type(logical_element_type),
@@ -39,7 +39,7 @@ class LazyTensor {
 
     ~Data();
 
-    lazy_tensors::ComputationClient::DataPtr handle;
+    compiler::DataPtr handle;
     torch::lazy::Value ir_value;
     std::shared_ptr<View> view;
     c10::optional<at::ScalarType> logical_element_type;
@@ -51,7 +51,7 @@ class LazyTensor {
 
   static LazyTensor Create(const at::Tensor& tensor, const Device& device);
   static LazyTensor Create(
-      lazy_tensors::ComputationClient::DataPtr handle,
+      compiler::DataPtr handle,
       c10::optional<at::ScalarType> logical_element_type = c10::nullopt);
 
   static LazyTensor Create(
@@ -64,7 +64,8 @@ class LazyTensor {
   // Create a new lazy tensor with the same metadata of the input tensor (with
   // possible overrides), and the new IR value.
   LazyTensor CreateFrom(torch::lazy::Value ir_value) const;
-  LazyTensor CreateFrom(torch::lazy::Value ir_value, const Device& device) const;
+  LazyTensor CreateFrom(torch::lazy::Value ir_value,
+                        const Device& device) const;
   LazyTensor CreateFrom(
       torch::lazy::Value ir_value,
       c10::optional<at::ScalarType> logical_element_type_opt) const;
@@ -112,15 +113,14 @@ class LazyTensor {
 
   // Fetches the data behind the tensor. If the tensor has a graph defining
   // its current value, executes the graph and fetches the data result.
-  lazy_tensors::ComputationClient::DataPtr GetDataHandle();
+  compiler::DataPtr GetDataHandle();
 
   // Fetches the current value of the data, which can be missing (nullptr)
   // in case the tensor has a graph defining its current value,
-  lazy_tensors::ComputationClient::DataPtr CurrentDataHandle() const;
+  compiler::DataPtr CurrentDataHandle() const;
 
-  void SetDataHandle(lazy_tensors::ComputationClient::DataPtr handle);
-  void SetDataHandle(lazy_tensors::ComputationClient::DataPtr handle,
-                     bool sync);
+  void SetDataHandle(compiler::DataPtr handle);
+  void SetDataHandle(compiler::DataPtr handle, bool sync);
 
   // Retrieves the current IR Node, or nullptr in case no active IR Node is
   // available.
@@ -150,7 +150,7 @@ class LazyTensor {
 
  private:
   LazyTensor(const at::Tensor& tensor, const Device& device);
-  LazyTensor(lazy_tensors::ComputationClient::DataPtr handle,
+  LazyTensor(compiler::DataPtr handle,
              c10::optional<at::ScalarType> logical_element_type = c10::nullopt);
   LazyTensor(torch::lazy::Value ir_value, const Device& device,
              c10::optional<at::ScalarType> logical_element_type = c10::nullopt);
@@ -168,8 +168,8 @@ class LazyTensor {
 
   void SetTensorData(at::Tensor tensor_data);
 
-  torch::lazy::Value CreateTensorNode(lazy_tensors::ComputationClient::DataPtr data,
-                             bool read_only) const;
+  torch::lazy::Value CreateTensorNode(compiler::DataPtr data,
+                                      bool read_only) const;
 
   View::IrNode GetViewUpdate(const std::shared_ptr<View>& view) const;
 
@@ -186,7 +186,7 @@ class LazyTensor {
   void TryLimitGraphSize();
 
   torch::lazy::Value GetIrValueForTensor(const at::Tensor& tensor,
-                                const Device& device) const;
+                                         const Device& device) const;
 
   static int64_t GetNextTensorId();
 

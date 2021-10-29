@@ -1,7 +1,7 @@
 #pragma once
 
 #include "lazy_tensor_core/csrc/ts_backend/ts_lowering_context.h"
-#include "lazy_tensors/computation_client/cache.h"
+#include "lazy_tensors/computation_client/sys_util.h"
 #include "lazy_tensors/shape.h"
 #include "torch/csrc/lazy/core/ir.h"
 #include "ts_node_lowering.h"

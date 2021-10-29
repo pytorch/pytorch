@@ -6,7 +6,7 @@ namespace compiler {
 std::atomic<const BackendImplInterface*> backend_impl_registry;
 
 BackendRegistrar::BackendRegistrar(
-    BackendImplInterface* backend_impl_interface) {
+    const BackendImplInterface* backend_impl_interface) {
   backend_impl_registry.store(backend_impl_interface);
 }
 
@@ -16,6 +16,26 @@ std::unique_ptr<NodeLowering> NodeLowering::Create(ir::LoweringContext* loctx) {
 
 NodeLowering* NodeLowering::Get() {
   return getBackendRegistrar()->GetNodeLowering();
+}
+
+std::vector<std::string> GetCompilationDevices(
+    const std::string& device, c10::ArrayRef<std::string> devices) {
+  return torch_lazy_tensors::compiler::getBackendRegistrar()
+      ->GetCompilationDevices(device, devices);
+}
+
+at::Tensor MakeTensorFromComputationData(
+    const torch_lazy_tensors::compiler::DataPtr data,
+    c10::optional<at::ScalarType> logical_scalar_type) {
+  return torch_lazy_tensors::compiler::getBackendRegistrar()
+      ->MakeTensorFromComputationData(data, logical_scalar_type);
+}
+
+torch_lazy_tensors::compiler::DataPtr MakeComputationDataFromTensor(
+    const at::Tensor& tensor, const lazy_tensors::Shape& shape,
+    const std::string& device) {
+  return torch_lazy_tensors::compiler::getBackendRegistrar()
+      ->MakeComputationDataFromTensor(tensor, shape, device);
 }
 
 }  // namespace compiler
@@ -38,36 +58,3 @@ std::unique_ptr<LoweringContext> LoweringContext::Create(
 
 }  // namespace ir
 }  // namespace torch_lazy_tensors
-
-namespace lazy_tensors {
-
-ComputationClient* ComputationClient::Get() {
-  return torch_lazy_tensors::compiler::getBackendRegistrar()
-      ->GetComputationClient();
-}
-
-ComputationClient* ComputationClient::GetIfInitialized() {
-  return torch_lazy_tensors::compiler::getBackendRegistrar()
-      ->GetComputationClientIfInitialized();
-}
-
-std::vector<std::string> ComputationClient::GetCompilationDevices(
-    const std::string& device, c10::ArrayRef<std::string> devices) {
-  return torch_lazy_tensors::compiler::getBackendRegistrar()
-      ->GetCompilationDevices(device, devices);
-}
-
-at::Tensor MakeTensorFromComputationData(
-    const ComputationClient::DataPtr data,
-    c10::optional<at::ScalarType> logical_scalar_type) {
-  return torch_lazy_tensors::compiler::getBackendRegistrar()
-      ->MakeTensorFromComputationData(data, logical_scalar_type);
-}
-
-ComputationClient::DataPtr MakeComputationDataFromTensor(
-    const at::Tensor& tensor, const Shape& shape, const std::string& device) {
-  return torch_lazy_tensors::compiler::getBackendRegistrar()
-      ->MakeComputationDataFromTensor(tensor, shape, device);
-}
-
-}  // namespace lazy_tensors
