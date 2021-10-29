@@ -2,6 +2,7 @@
 
 #include <c10/util/StringUtil.h>
 #include <c10/util/string_view.h>
+#include <c10/util/irange.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
@@ -450,7 +451,9 @@ inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
 
   if (arg.default_value()) {
     out << "=";
-    if (type->kind() == c10::TypeKind::StringType || (unopt_type->kind() == c10::TypeKind::StringType && !arg.default_value().value().isNone())) {
+    if ((type->kind() == c10::TypeKind::StringType ||
+        unopt_type->kind() == c10::TypeKind::StringType) &&
+        arg.default_value().value().isString()) {
       printQuotedString(out, arg.default_value().value().toStringRef());
     } else {
       out << arg.default_value().value();

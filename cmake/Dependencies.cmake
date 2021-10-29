@@ -1618,6 +1618,12 @@ if(NOT INTERN_BUILD_MOBILE)
     set(CMAKE_CXX_STANDARD 14)
   endif()
 
+  # use cub in a safe manner, see:
+  # https://github.com/pytorch/pytorch/pull/55292
+  if(NOT ${CUDA_VERSION} LESS 11.5)
+    string(APPEND CMAKE_CUDA_FLAGS " -DCUB_WRAPPED_NAMESPACE=at_cuda_detail")
+  endif()
+
   if(CUDA_HAS_FP16 OR NOT ${CUDA_VERSION} LESS 7.5)
     message(STATUS "Found CUDA with FP16 support, compiling with torch.cuda.HalfTensor")
     string(APPEND CMAKE_CUDA_FLAGS " -DCUDA_HAS_FP16=1"
