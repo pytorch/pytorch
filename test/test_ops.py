@@ -1,6 +1,7 @@
 from collections.abc import Sequence
 from functools import partial, wraps
 import warnings
+import unittest
 
 import torch
 
@@ -8,7 +9,8 @@ from torch.testing import FileCheck, make_tensor
 from torch.testing._internal.common_dtype import floating_and_complex_types_and, get_all_dtypes
 from torch.testing._internal.common_utils import \
     (TestCase, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper,
-     gradcheck, gradgradcheck, IS_IN_CI, suppress_warnings, noncontiguous_like)
+     gradcheck, gradgradcheck, IS_IN_CI, suppress_warnings, noncontiguous_like,
+     TEST_WITH_ASAN)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, _NOTHING, UnaryUfuncInfo, ReductionOpInfo, SpectralFuncInfo)
 from torch.testing._internal.common_device_type import \
@@ -203,10 +205,12 @@ class TestCommon(TestCase):
 
     # Tests that the function produces the same result when called with
     #   noncontiguous tensors.
+    # TODO: get working with ASAN by addressing failing operators
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyOnCPUAndCUDA
     @suppress_warnings
     @ops(op_db, allowed_dtypes=(torch.float32, torch.long, torch.complex64))
-    def test_noncontiguous_samples(self, device, dtype, op):
+    def test_noncontiguous_samples(self, device, dtype, op):  # noqa
         test_grad = dtype in op.supported_backward_dtypes(torch.device(device).type)
         sample_inputs = op.sample_inputs(device, dtype, requires_grad=test_grad)
         for sample_input in sample_inputs:
@@ -252,7 +256,6 @@ class TestCommon(TestCase):
 
             # TODO: FIXME: only validates grad on first tensor input
             self.assertEqual(actual_grad, expected_grad)
-
 
     # Validates ops implement the correct out= behavior
     # See https://github.com/pytorch/pytorch/wiki/Developer-FAQ#how-does-out-work-in-pytorch

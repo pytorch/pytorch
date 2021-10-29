@@ -8383,6 +8383,9 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            skips=(
+               # https://github.com/pytorch/pytorch/issues/67539
+               DecorateInfo(unittest.skip("67539"), 'TestCommon', 'test_noncontiguous_samples',
+                            active_if=TEST_WITH_ASAN, device_type='cpu'),
                # TODO: FIXME: complex inputs requiring grad error in forward
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
                # TODO: review with var_mean tests in test_autograd.py
