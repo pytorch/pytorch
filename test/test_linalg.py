@@ -2298,19 +2298,18 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @onlyCPU
     @dtypes(*floating_and_complex_types())
-    def test_eig_with_nan(self, dtype):
-        a = torch.randn((3, 3), dtype=dtype)
-        l, v = torch.linalg.eig(a)
-
-
-        a = torch.tensor([[3, 2, float('nan')], [4, 5, float('nan')], [1, 2, 3]], dtype=dtype)
-        with torch.linalg.nancheck(False):
-            with self.assertRaisesRegex(RuntimeError, "eig failed with SIGINT."):
-                torch.linalg.eig(a)
-
-        with torch.linalg.nancheck(True):
+    def test_eig_with_nan(self, device, dtype):
+        with self.assertRaisesRegex(RuntimeError, "linalg_eig: input tensor should not"):
+            a = torch.eye(5,5, device=device, dtype=dtype) * np.nan
             values, vectors = torch.linalg.eig(a)
-            self.assertEqual(values.shape, torch.Tensor([3]))
+
+        with self.assertRaisesRegex(RuntimeError, "linalg_eig: input tensor should not"):
+            batched_a = torch.ones(10, 5, 5, device=device)
+            e = torch.eye(5, 5, device=device)
+            e.fill_diagonal_(float('nan'))
+            batched_a[3] = e
+
+            values, vectors = torch.linalg.eig(batched_a)
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma

@@ -14,6 +14,7 @@
 #include <c10/util/irange.h>
 
 #include <vector>
+#include <iostream>
 
 // First the required LAPACK implementations are registered here.
 // A comment above the registered LAPACK routine suggest which batched
@@ -2598,7 +2599,8 @@ static Tensor& linalg_eig_make_complex_eigenvectors(Tensor& complex_vectors, con
 
 DEFINE_DISPATCH(linalg_eig_stub);
 
-std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Tensor& values, Tensor& vectors, Tensor& infos, bool compute_eigenvectors) {
+std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Tensor& values, Tensor& vectors,
+                                                 Tensor& infos, bool compute_eigenvectors) {
   // MAGMA doesn't have GPU interface for GEEV routine, it requires inputs to be on CPU
   // therefore we create all intermediate tensors on CPU
   auto options = input.options().device(at::kCPU);
@@ -2678,11 +2680,15 @@ std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Tensor& va
     linalg_eig_stub(input.device().type(), real_imag_values, maybe_complex_vectors, infos, input, compute_eigenvectors);
   }
 
+  std::cout << "POST LINALG EIG STUB\n";
+
   // if input is not complex we need to do some post-processing
   if (!input.is_complex()) {
     // extract real and imaginary parts of the output
     auto real_values = real_imag_values.slice(/*dim=*/-1, /*start=*/0, /*end*/input.size(-1));
     auto imag_values = real_imag_values.slice(/*dim=*/-1, /*start=*/input.size(-1));
+
+    std::cout << "EXTRACTION OF STUFF FROM COMPLEX\n";
 
     // if the imaginary part is zero we don't need to do anything
     bool is_zero_imag = at::all(imag_values == 0.0).item().toBool();
@@ -2691,6 +2697,7 @@ std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Tensor& va
       if (compute_eigenvectors) {
         vectors.copy_(maybe_complex_vectors);  // does nothing for !vectors.is_complex() because vectors.is_same(maybe_complex_vectors) == true
       }
+      std::cout << "IS ZERO IMAG\n";
       return std::tuple<Tensor&, Tensor&>(values, vectors);
     }
 
@@ -2707,6 +2714,9 @@ std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Tensor& va
       }
     }
   }
+
+  std::cout << "LAST RETURN\n";
+
 
   return std::tuple<Tensor&, Tensor&>(values, vectors);
 }
@@ -2790,7 +2800,8 @@ std::tuple<Tensor&, Tensor&> linalg_eig_out(const Tensor& input, Tensor& values,
 
   // Now check LAPACK/MAGMA error codes
   if (input.dim() > 2) {
-    batchCheckErrors(infos, "torch.linalg.eig");
+    batchCheckErrors(infos
+, "torch.linalg.eig");
   } else {
     singleCheckErrors(infos.item().toInt(), "torch.linalg.eig");
   }
@@ -2799,6 +2810,8 @@ std::tuple<Tensor&, Tensor&> linalg_eig_out(const Tensor& input, Tensor& values,
 }
 
 std::tuple<Tensor, Tensor> linalg_eig(const Tensor& input) {
+  TORCH_CHECK(input.isfinite().all().item<bool>(), "linalg_eig: input tensor should not contain infs or NaNs.");
+
   ScalarType complex_dtype = toComplexType(input.scalar_type());
   Tensor values = at::empty({0}, input.options().dtype(complex_dtype));
   Tensor vectors = at::empty({0}, input.options().dtype(complex_dtype));

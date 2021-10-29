@@ -7,6 +7,8 @@
 
 #include <c10/util/irange.h>
 
+#include <iostream>
+
 namespace at { namespace native {
 
 namespace {
@@ -139,6 +141,8 @@ void apply_eig(const Tensor& self, bool eigenvectors, Tensor& vals_, Tensor& vec
   int64_t n = self.size(-1);
   auto self_data = self.data_ptr<scalar_t>();
 
+  std::cout << "apply eig\n";
+
   auto vals_data = vals_.data_ptr<scalar_t>();
   scalar_t* wr = vals_data;
 
@@ -154,7 +158,7 @@ void apply_eig(const Tensor& self, bool eigenvectors, Tensor& vals_, Tensor& vec
     rwork_data = rwork.data_ptr<value_t>();
   }
 
-  if (n > 0) {
+  if (n > 0 && !self.isnan().any().item<uint8_t>()) {
     // call lapackEig once to get the optimal size for work data
     scalar_t wkopt;
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -183,6 +187,8 @@ std::tuple<Tensor, Tensor> eig_kernel_impl(const Tensor& self, bool& eigenvector
       at::TensorOptions(self.dtype()));
   self_.copy_(self);
 
+
+  std::cout << "eig kernel impl\n";
   auto options = self.options().memory_format(LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
   // the API is slightly different for the complex vs real case: if the input
@@ -201,11 +207,14 @@ std::tuple<Tensor, Tensor> eig_kernel_impl(const Tensor& self, bool& eigenvector
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t info;
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "eig_cpu", [&]{
-    apply_eig<scalar_t>(self_, eigenvectors, vals_, vecs_, &info);
-  });
-  // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
-  singleCheckErrors(info, "eig_cpu");
+  if (!self_.isnan().any().item<uint8_t>()) {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "eig_cpu", [&]{
+      apply_eig<scalar_t>(self_, eigenvectors, vals_, vecs_, &info);
+    });
+    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
+    singleCheckErrors(info, "eig_cpu");
+  }
+
   return std::tuple<Tensor, Tensor>(vals_, vecs_);
 }
 
@@ -239,7 +248,7 @@ void apply_linalg_eig(Tensor& values, Tensor& vectors, Tensor& input, Tensor& in
   int64_t ldvl = 1;
 
   Tensor rwork;
-  value_t* rwork_data = nullptr;
+   value_t* rwork_data;// = nullptr;
   if (input.is_complex()) {
     ScalarType real_dtype = toValueType(input.scalar_type());
     rwork = at::empty({lda * 2}, input.options().dtype(real_dtype));
@@ -248,8 +257,8 @@ void apply_linalg_eig(Tensor& values, Tensor& vectors, Tensor& input, Tensor& in
 
   // call lapackEig once to get the optimal size for work data
   scalar_t work_query;
-  lapackEig<scalar_t, value_t>(jobvl, jobvr, n, input_data, lda, values_data,
-    lvectors_data, ldvl, rvectors_data, ldvr, &work_query, -1, rwork_data, &infos_data[0]);
+  lapackEig<scalar_t, value_t>(jobvl, jobvr, n, nullptr, lda, nullptr,
+    nullptr, ldvl, nullptr, ldvr, &work_query, -1, rwork_data, &infos_data[0]);
 
   int lwork = std::max<int>(1, static_cast<int>(real_impl<scalar_t, value_t>(work_query)));
   Tensor work = at::empty({lwork}, input.dtype());
@@ -261,7 +270,7 @@ void apply_linalg_eig(Tensor& values, Tensor& vectors, Tensor& input, Tensor& in
     scalar_t* rvectors_working_ptr = compute_eigenvectors ? &rvectors_data[i * input_matrix_stride] : nullptr;
     int* info_working_ptr = &infos_data[i];
     lapackEig<scalar_t, value_t>(jobvl, jobvr, n, input_working_ptr, lda, values_working_ptr,
-      lvectors_data, ldvl, rvectors_working_ptr, ldvr, work_data, lwork, rwork_data, info_working_ptr);
+                                 lvectors_data, ldvl, rvectors_working_ptr, ldvr, work_data, lwork, rwork_data, info_working_ptr);
   }
 #endif
 }
