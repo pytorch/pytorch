@@ -532,3 +532,67 @@ def get_next_seen_ops(
                 if output_tensor_id == input_tensor_info.id:
                     results.append(seen_op)
     return results
+
+class HookType(enum.Enum):
+    """
+    Describes the various types of function and module hooks that are used
+    to implement quantization syntax transforms.
+    """
+    # Hooks which are run before, during and after a quantizeable op.
+    # Usually used for op input and output observation, subsituating
+    # quantized kernels, and dynamically looking up arguments to quantized
+    # kernels.
+    OP_HOOKS = 0
+    # Hooks which are run before or after a `torch.nn.Module` which
+    # is a non-leaf. Usually used for dtype transforms if the user requests
+    # that the inputs or outputs of a certain module are of some dtype.
+    MODULE_IO_HOOKS = 1
+    # Hooks which are run before a non-quantizeable op which requires
+    # `torch.float` inputs. Any inputs which are not floats are converted
+    # back to floats.
+    ARG_DEQUANTS = 2
+    # Everything else
+    NONE = 3
+
+def get_torch_function_hook_type(
+    parent_module: Optional[torch.nn.Module],
+    func: Callable,
+) -> HookType:
+    parent_module_has_qstate = parent_module and \
+        hasattr(parent_module, '_auto_quant_state')
+    needs_op_hooks = parent_module_has_qstate and \
+        parent_module._auto_quant_state.cur_op_needs_hooks(func)  # type: ignore[union-attr, operator]
+
+    if needs_op_hooks:
+        return HookType.OP_HOOKS
+    elif parent_module_has_qstate:
+        return HookType.ARG_DEQUANTS
+    else:
+        return HookType.NONE
+
+def get_module_hook_type(
+    parent_module: Optional[torch.nn.Module],
+    cur_module: torch.nn.Module,
+) -> HookType:
+    parent_module_has_qstate = parent_module is not None and \
+        hasattr(parent_module, '_auto_quant_state')
+    needs_op_hooks = parent_module_has_qstate and \
+        parent_module._auto_quant_state.cur_op_needs_hooks(cur_module)  # type: ignore[union-attr, operator]
+    # We need IO hooks if
+    # * we are calling forward on a module (always True here)
+    # * that module has quant state
+    # * that module does not need op hooks for the parent
+    needs_io_hooks = (
+        hasattr(cur_module, '_auto_quant_state') and
+        (not needs_op_hooks)
+    )
+    needs_arg_dequants = parent_module_has_qstate and not needs_op_hooks
+
+    if needs_op_hooks:
+        return HookType.OP_HOOKS
+    elif needs_io_hooks:
+        return HookType.MODULE_IO_HOOKS
+    elif needs_arg_dequants:
+        return HookType.ARG_DEQUANTS
+    else:
+        return HookType.NONE

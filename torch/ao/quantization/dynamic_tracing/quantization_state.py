@@ -452,6 +452,7 @@ class AutoQuantizationState(torch.nn.Module):
                     # TODO: handle module -> add_scalar -> add_scalar
                     prev_op = get_prev_seen_op(
                         self.idx_to_seen_ops, seen_op)
+                    assert prev_op is not None
                     # TODO: the following line needs to only check fqn
                     # for modules, not for functions
                     fqn_last_part = prev_op.fqn.split('.')[-1]

@@ -106,11 +106,13 @@ There are three flavors of hooks:
 
 1. op hooks.  These are called from the parent module on individual ops, and used
 to implement quantization of op subgraphs.
-2. I/O hooks.  These are called from the parent module on child modules only,
+2. module I/O hooks.  These are called from the parent module on child modules only,
 and used to enforce dtype of module outputs, if needed.  For example, if the model
 needs to output a fp32 tensor and the last op is int8, the conversion to fp32
 will happen in this hook (and not in the op hook).
-3. arg dequant hooks.  TODO(future PR): fold this into (2)
+3. arg dequant hooks.  These are called when the current op requires `torch.float`
+tensors.  Any non-quantizeable op will go through these, and have any quantized
+tensor arguments dequantized.
 
 ## Code overview
 
@@ -133,9 +135,9 @@ def __torch_function__(cls, func, types, args, kwargs):
 
     # only some ops are quantizeable, the following line allows us to terminate
     # early for unquantizeable ones
-    needs_op_hooks = quant_state.cur_op_needs_hooks(func)
+    hook_type = get_torch_function_hook_type(parent_module, func)
 
-    if needs_op_hooks:
+    if hook_type is HookType.OP_HOOKS:
 
         # this line will throw an exception if control flow over quantizeable ops
         # is detected
@@ -165,31 +167,28 @@ def record_module(self, *args, **kwargs):
     cur_module = self
     cur_qstate = self._auto_quant_state
 
+
     # the framework calculates when the current module needs op_hooks, io hooks
     # or arg_dequants
-    needs_op_hooks = ...
-    needs_io_hooks = ...
-    needs_arg_dequants = ...
+    hook_type = get_module_hook_type(parent_module, func)
 
-    if needs_op_hooks:
+    if hook_type is HookType.OP_HOOKS:
         # call before, during and after hooks on parent_qstate with the current op
         # execute original forward
         ...
 
-    elif needs_io_hooks:
+    elif hook_type is HookType.MODULE_IO_HOOKS:
         # execute original forward
         # call hook on outputs of module for dtype transitions
         ...
 
-    elif needs_arg_dequants:
+    elif hook_type is HookType.ARG_DEQUANTS:
         # dequantize incoming arguments, if they are quantized
         # execute original forward
         ...
 
     else:
         # execute original forward
-
-    # TODO(future PR): look into combining needs_io_hooks and needs_arg_dequants
 
     ...
 

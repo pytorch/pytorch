@@ -1,3 +1,5 @@
+# Owner(s): ["NNC"]
+
 import torch
 import numpy as np
 import torch._C._te as te

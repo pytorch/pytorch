@@ -11,6 +11,9 @@ from .utils import (
     trace_with_inputs,
     is_leaf,
     pack_weights_for_functionals,
+    HookType,
+    get_torch_function_hook_type,
+    get_module_hook_type,
 )
 from . import auto_trace_rewrite
 
@@ -37,7 +40,6 @@ def add_auto_observation(
             return x
 
     cur_module = None
-    modules_to_introspect = set()
     first_call = True
     module_stack : List[torch.nn.Module] = []
     # Counter for tensor IDs, will be modified inplace by quant state.
@@ -76,23 +78,24 @@ def add_auto_observation(
 
             nonlocal qtensor_id
             kwargs = kwargs if kwargs else {}
-            can_have_op_hooks = cur_module and cur_module in modules_to_introspect
-            needs_op_hooks = can_have_op_hooks and \
-                cur_module._auto_quant_state.cur_op_needs_hooks(func)
+            # if we are in a function, the current module is always a parent
+            parent_module = cur_module
+            hook_type = get_torch_function_hook_type(parent_module, func)
 
-            if needs_op_hooks:
-                qstate = cur_module._auto_quant_state
-                fqn = module_id_to_fqn[id(cur_module)] if cur_module else None
+            if hook_type is HookType.OP_HOOKS:
+                assert parent_module is not None
+                qstate = parent_module._auto_quant_state
+                fqn = module_id_to_fqn[id(parent_module)] if parent_module else None
                 if not first_call:
                     qstate.validate_cur_op(func)
                 # run "before" hook
                 args, kwargs = qstate.op_prepare_before_hook(
-                    func, args, kwargs, first_call, qtensor_id, fqn, cur_module)
+                    func, args, kwargs, first_call, qtensor_id, fqn, parent_module)
                 # forward
                 output = super().__torch_function__(func, types, args, kwargs)
                 # run "after" hook
                 output = qstate.op_prepare_after_hook(
-                    func, output, args, first_call, qtensor_id, cur_module)
+                    func, output, args, first_call, qtensor_id, parent_module)
                 qstate.mark_cur_op_complete(func)
             else:
                 output = super().__torch_function__(func, types, args, kwargs)
@@ -169,21 +172,9 @@ def add_auto_observation(
                         fqn = module_id_to_fqn.get(id(self), None)
                         logger.debug(f"\nstarting fqn {fqn}")
 
-                    can_have_op_hooks = parent_module is not None and \
-                        hasattr(parent_module, '_auto_quant_state')
-                    needs_op_hooks = can_have_op_hooks and \
-                        parent_module._auto_quant_state.cur_op_needs_hooks(cur_module)  # type: ignore[union-attr, operator]
-                    # We need IO hooks if
-                    # * we are calling forward on a module (always True here)
-                    # * that module has quant state
-                    # * that module does not need op hooks for the parent
-                    needs_io_hooks = (
-                        hasattr(cur_module, '_auto_quant_state') and
-                        (not needs_op_hooks)
-                    )
-                    needs_arg_dequants = can_have_op_hooks and not needs_op_hooks
+                    hook_type = get_module_hook_type(parent_module, cur_module)
 
-                    if needs_op_hooks:
+                    if hook_type is HookType.OP_HOOKS:
                         assert parent_module is not None
                         parent_qstate = parent_module._auto_quant_state
                         assert isinstance(parent_qstate, AutoQuantizationState)
@@ -204,7 +195,7 @@ def add_auto_observation(
                             cur_module)
                         parent_qstate.mark_cur_op_complete(cur_module)
 
-                    elif needs_io_hooks:
+                    elif hook_type is HookType.MODULE_IO_HOOKS:
                         # TODO(future PR): add inputs io hook
 
                         cur_qstate = cur_module._auto_quant_state
@@ -219,7 +210,7 @@ def add_auto_observation(
                             output, first_call, qtensor_id)
                         cur_qstate.validate_is_at_last_seen_idx()
 
-                    elif needs_arg_dequants:
+                    elif hook_type is HookType.ARG_DEQUANTS:
                         output = orig_module_call(self, *args, **kwargs)
                         # if this fp32 was inplace, make sure to set the output dtype
                         # back to torch.float
@@ -267,7 +258,6 @@ def add_auto_observation(
                             else:
                                 v._auto_quant_state = AutoQuantizationState(
                                     v.qconfig)
-                            modules_to_introspect.add(v)
                         else:
                             if not isinstance(v, AutoQuantizationState):
                                 assert hasattr(v, '_auto_quant_state')
@@ -324,29 +314,25 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                 return super().__torch_function__(func, types, args, kwargs)
 
             kwargs = kwargs if kwargs else {}
-            can_have_op_hooks = cur_module and \
-                hasattr(cur_module, '_auto_quant_state')
-            needs_op_hooks = can_have_op_hooks and \
-                cur_module is not None and \
-                isinstance(cur_module._auto_quant_state, AutoQuantizationState) and \
-                cur_module._auto_quant_state.cur_op_needs_hooks(func)
-            needs_arg_dequants = can_have_op_hooks and not needs_op_hooks
+            # if we are in a function, the current module is always a parent
+            parent_module = cur_module
+            hook_type = get_torch_function_hook_type(parent_module, func)
 
             if enable_logging:
                 with torch._C.DisableTorchFunction():
                     logger.debug(
                         f"__torch_function__ {func} " +
-                        f"op_hooks {needs_op_hooks} " +
+                        f"hook_type {hook_type} " +
                         # f"arg_types {[type(arg) for arg in args]}) " +
                         f"arg_dtypes {[arg.dtype if isinstance(arg, torch.Tensor) else None for arg in args]}")
 
-            if needs_op_hooks:
-                assert cur_module is not None
-                qstate = cur_module._auto_quant_state
+            if hook_type is HookType.OP_HOOKS:
+                assert parent_module is not None
+                qstate = parent_module._auto_quant_state
                 # before hooks
                 qstate.validate_cur_op(func)
                 func, args, kwargs = qstate.op_convert_before_hook(
-                    func, args, kwargs, cur_module)
+                    func, args, kwargs, parent_module)
 
                 # forward
                 output = super().__torch_function__(func, types, args, kwargs)
@@ -354,7 +340,7 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                 output = qstate.op_convert_after_hook(func, output)
                 qstate.mark_cur_op_complete(func)
 
-            elif needs_arg_dequants:
+            elif hook_type is HookType.ARG_DEQUANTS:
                 # disabling torch function to prevent infinite recursion on
                 # getset
                 # TODO(future PR): handle more dtypes
@@ -368,7 +354,7 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                     args = tuple(new_args)
                 output = super().__torch_function__(func, types, args, kwargs)
 
-            else:
+            else:  # HookType.NONE
                 output = super().__torch_function__(func, types, args, kwargs)
 
             # TODO: is this right? Don't really understand this
@@ -443,26 +429,15 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                 try:
                     parent_module = module_stack[-1] if len(module_stack) else None
                     module_stack.append(self)
-                    can_have_op_hooks = parent_module is not None and \
-                        hasattr(parent_module, '_auto_quant_state')
-                    needs_op_hooks = can_have_op_hooks and \
-                        parent_module is not None and \
-                        isinstance(parent_module._auto_quant_state, AutoQuantizationState) and \
-                        parent_module._auto_quant_state.cur_op_needs_hooks(cur_module)
-                    needs_io_hooks = (
-                        hasattr(cur_module, '_auto_quant_state') and
-                        (not needs_op_hooks)
-                    )
-                    needs_arg_dequants = can_have_op_hooks and not needs_op_hooks
+                    hook_type = get_module_hook_type(parent_module, cur_module)
                     if enable_logging:
                         logger.debug(
                             f"record_module {type(self)} " +
                             # f"arg_types {[type(arg) for arg in args]} " +
                             f"arg_dtypes {[arg.dtype if isinstance(arg, torch.Tensor) else None for arg in args]} " +
-                            f"op_hooks {needs_op_hooks} io_hooks {needs_io_hooks} " +
-                            f"arg_dequants {needs_arg_dequants}")
+                            f"hook_type {hook_type}")
 
-                    if needs_op_hooks:
+                    if hook_type is HookType.OP_HOOKS:
                         # before hooks
                         assert parent_module is not None
                         assert isinstance(parent_module._auto_quant_state, AutoQuantizationState)
@@ -478,7 +453,7 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                         output = qstate.op_convert_after_hook(cur_module, output)
                         qstate.mark_cur_op_complete(cur_module)
 
-                    elif needs_io_hooks:
+                    elif hook_type is HookType.MODULE_IO_HOOKS:
                         cur_qstate = cur_module._auto_quant_state
                         if enable_logging:
                             logger.debug(cur_qstate)
@@ -493,7 +468,7 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                         output = cur_qstate.outputs_convert_hook(output)
                         cur_qstate.validate_is_at_last_seen_idx()
 
-                    elif needs_arg_dequants:
+                    elif hook_type is HookType.ARG_DEQUANTS:
                         # disabling torch function to prevent infinite recursion on
                         # getset
                         # TODO(future PR): handle more dtypes
