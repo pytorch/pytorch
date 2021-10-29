@@ -16,6 +16,7 @@ set(BACKEND_WITH_COMPILER_SRCS
   ${JIT_TEST_ROOT}/test_backend_compiler_preprocess.cpp
 )
 if(USE_KINETO)
+  # Testing edge profiler for backend use, profiler_edge should only be aded when USE_KINETO flag is on
   list(APPEND BACKEND_WITH_COMPILER_SRCS ${TORCH_SRC_DIR}/csrc/jit/mobile/profiler_edge.cpp)
 endif()
 
