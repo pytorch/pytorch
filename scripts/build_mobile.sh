@@ -73,5 +73,6 @@ if [ -z "$MAX_JOBS" ]; then
 fi
 
 echo "Will install headers and libs to $INSTALL_PREFIX for further project usage."
+cat build.ninja
 cmake --build . --target install -- "-j${MAX_JOBS}"
 echo "Installation completed, now you can copy the headers/libs from $INSTALL_PREFIX to your project directory."
