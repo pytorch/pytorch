@@ -1312,11 +1312,12 @@ class TestReductions(TestCase):
         self.assertEqual(torch.bucketize(values_3d, boundaries, out=output, right=True), expected_result)
 
         # simple float 1d boundary and 1d input with output int32 type
-        values_1d_float = values_1d.to(torch.float32)
-        boundaries = torch.tensor([0.9, 1, 2, 2, 3, 3, 4, 4.1, 9, 9], device=device, dtype=torch.float32)
-        expected_result = torch.tensor([1, 2, 4, 6, 8, 8, 8, 8, 8], device=device, dtype=torch.int32)
-        self.assertEqual(torch.searchsorted(boundaries, values_1d_float, out_int32=True), expected_result)
-        self.assertEqual(torch.bucketize(values_1d_float, boundaries, out_int32=True), expected_result)
+        for dtype in [torch.float32, torch.float16]:
+            values_1d_float = values_1d.to(dtype)
+            boundaries = torch.tensor([0.9, 1, 2, 2, 3, 3, 4, 4.1, 9, 9], device=device, dtype=dtype)
+            expected_result = torch.tensor([1, 2, 4, 6, 8, 8, 8, 8, 8], device=device, dtype=torch.int32)
+            self.assertEqual(torch.searchsorted(boundaries, values_1d_float, out_int32=True), expected_result)
+            self.assertEqual(torch.bucketize(values_1d_float, boundaries, out_int32=True), expected_result)
 
         # multiple dimension input with 0 elements
         boundaries = torch.tensor([1, 2, 3, 4, 5, 6], device=device, dtype=torch.int64)
