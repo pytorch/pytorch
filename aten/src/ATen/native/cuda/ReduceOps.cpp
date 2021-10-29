@@ -56,15 +56,15 @@ void aminmax_kernel_impl(
   aminmax_launch_kernel(iter);
 }
 
-void min_all_kernel_impl(Tensor& result, const Tensor& input) {
+void min_all_kernel_impl(const Tensor& result, const Tensor& input) {
   auto dtype = input.scalar_type();
-  auto iter = make_reduction("min_all", result, input, IntArrayRef{}, false, dtype);
+  auto iter = meta::make_reduction(input, result, IntArrayRef{}, false, dtype);
   min_all_launch_kernel(iter);
 }
 
-void max_all_kernel_impl(Tensor& result, const Tensor& input) {
+void max_all_kernel_impl(const Tensor& result, const Tensor& input) {
   auto dtype = input.scalar_type();
-  auto iter = make_reduction("max_all", result, input, IntArrayRef{}, false, dtype);
+  auto iter = meta::make_reduction(input, result, IntArrayRef{}, false, dtype);
   max_all_launch_kernel(iter);
 }
 
