@@ -5,6 +5,7 @@
 #include <ATen/core/Reduction.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/PointwiseOps.h>
+#include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 #include <c10/util/Exception.h>
@@ -37,7 +38,7 @@ TORCH_META_FUNC(mse_loss)
 
   TORCH_INTERNAL_ASSERT(reduction == Reduction::Mean || reduction == Reduction::Sum);
 
-  MetaBase::set_output({}, input.options());
+  at::native::resize_output(maybe_get_output(), {});
 }
 
 } // namespace meta
