@@ -1121,10 +1121,6 @@ void log1p_(LazyTensor& input) {
   input.SetInPlaceIrValue(ir::ops::Log1p(input.GetIrValue()));
 }
 
-LazyTensor logdet(const LazyTensor& input) {
-  return input.CreateFrom(ir::ops::LogDet(input.GetIrValue()));
-}
-
 LazyTensor logsumexp(const LazyTensor& input, std::vector<int64_t> dimensions,
                      bool keep_reduced_dimensions) {
   return input.CreateFrom(torch::lazy::MakeNode<ir::ops::Logsumexp>(

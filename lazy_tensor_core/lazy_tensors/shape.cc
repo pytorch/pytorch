@@ -5,14 +5,12 @@ namespace lazy_tensors {
 
 Shape::Shape(at::ScalarType element_type, c10::ArrayRef<int64_t> dimensions)
     : at_element_type_(element_type),
-      dimensions_(dimensions.begin(), dimensions.end()),
-      dynamic_dimensions_(dimensions.size(), false) {}
+      dimensions_(dimensions.begin(), dimensions.end()) {}
 
 Shape::Shape(const client::ShapeData& shape_data)
     : at_element_type_(
           torch_lazy_tensors::TensorTypeFromLtcType(shape_data.element_type())),
-      dimensions_(shape_data.dimensions()),
-      dynamic_dimensions_(shape_data.dimensions().size(), false) {
+      dimensions_(shape_data.dimensions()) {
   for (const client::ShapeData& element_shape : shape_data.element_shapes()) {
     element_shapes_.push_back(Shape(element_shape));
   }
@@ -21,34 +19,9 @@ Shape::Shape(const client::ShapeData& shape_data)
   }
 }
 
-void Shape::DeleteDimension(int64_t dim_to_delete) {
-  CHECK(IsArray());
-  CHECK_GE(dim_to_delete, 0);
-  CHECK_LT(dim_to_delete, dimensions_.size());
-  dimensions_.erase(dimensions_.begin() + dim_to_delete);
-  for (int64_t i = 0; i < layout_.minor_to_major().size();) {
-    if (layout_.minor_to_major(i) == dim_to_delete) {
-      layout_.mutable_minor_to_major()->erase(
-          layout_.mutable_minor_to_major()->begin() + i);
-      continue;
-    }
-    if (layout_.minor_to_major(i) > dim_to_delete) {
-      (*layout_.mutable_minor_to_major())[i] -= 1;
-    }
-    ++i;
-  }
-}
-
 void Shape::set_element_type(at::ScalarType value) {
   at_element_type_ = value;
 }
-
-bool Shape::IsDynamicMode() { return dynamic_mode_.load(); }
-
-void Shape::SetDynamicMode() { dynamic_mode_ = true; }
-
-std::atomic<bool> Shape::dynamic_mode_{false};
-
 
 client::ShapeData ToShapeData(const Shape& shape) {
   std::vector<client::ShapeData> element_shapes;

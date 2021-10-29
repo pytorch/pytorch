@@ -388,8 +388,6 @@ LazyTensor ts_log_softmax_backward(const LazyTensor& grad_output,
 LazyTensor log1p(const LazyTensor& input);
 void log1p_(LazyTensor& input);
 
-LazyTensor logdet(const LazyTensor& input);
-
 LazyTensor logsumexp(const LazyTensor& input, std::vector<int64_t> dimensions,
                      bool keep_reduced_dimensions);
 

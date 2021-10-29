@@ -175,8 +175,6 @@ NodePtr MinUnary(const torch::lazy::Value& input);
 
 NodePtr Take(const torch::lazy::Value& input, const torch::lazy::Value& index);
 
-NodePtr LogDet(const torch::lazy::Value& input);
-
 NodePtr Inverse(const torch::lazy::Value& input);
 
 NodePtr IsNan(const torch::lazy::Value& input);

@@ -42,27 +42,12 @@ class Shape {
 
   bool IsTuple() const { return is_tuple_; }
 
-  void set_dynamic_dimension(int dimension, bool is_dynamic) {
-    dynamic_dimensions_[dimension] = is_dynamic;
-  }
-
-  c10::ArrayRef<bool> dynamic_dimensions() const {
-    LOG(FATAL) << "Not implemented yet.";
-  }
-
-  // Removes the dimension at index dim_to_delete entirely, reducing the rank
-  // by 1.
-  void DeleteDimension(int64_t dim_to_delete);
-
   c10::ScalarType at_element_type() const { return at_element_type_; }
   void set_element_type(at::ScalarType value);
 
   // Methods for accessing the dimensions array.
   int dimensions_size() const { return dimensions_.size(); }
   int64_t dimensions(int index) const {
-    if (dynamic_mode_.load()) {
-      throw std::runtime_error("Exact shape not known");
-    }
     CHECK_LT(index, dimensions_.size());
     return dimensions_[index];
   }
@@ -73,9 +58,6 @@ class Shape {
   }
 
   c10::ArrayRef<int64_t> dimensions() const {
-    if (dynamic_mode_.load()) {
-      throw std::runtime_error("Exact shape not known");
-    }
     return dimensions_;
   }
 
@@ -97,18 +79,12 @@ class Shape {
            dimensions_ == other.dimensions_;
   }
 
-  static bool IsDynamicMode();
-
-  static void SetDynamicMode();
-
  private:
   bool is_tuple_ = false;
   c10::ScalarType at_element_type_;
   std::vector<int64_t> dimensions_;
-  std::vector<bool> dynamic_dimensions_;
   std::vector<Shape> element_shapes_;
   Layout layout_;
-  static std::atomic<bool> dynamic_mode_;
 };
 
 class ProgramShape {
