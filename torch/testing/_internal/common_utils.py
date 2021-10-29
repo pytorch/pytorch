@@ -2328,6 +2328,10 @@ def random_well_conditioned_matrix(*shape, dtype, device, mean=1.0, sigma=0.001)
 #   dimension are separated by zeros or (whenever possible) nans
 # TODO: consider more complicated noncontiguity schemes
 def noncontiguous_like(t):
+    # Short-circuits if t is already noncontiguous
+    if not t.is_contiguous():
+        return t
+
     # Special-cases 0-dim tensors
     if t.ndim == 0:
         result = t.detach().unsqueeze(0).repeat_interleave(2, dim=-1)
@@ -2335,7 +2339,9 @@ def noncontiguous_like(t):
             result[0] = math.nan
         else:
             result[0] = 0
-        return result[1]
+        result.set_(result.storage(), 1, t.size(), ())
+        result.requires_grad_(t.requires_grad)
+        return result
 
     # 1+ dim tensor case
     result = torch.repeat_interleave(t.detach(), 2, dim=-1)
@@ -2343,7 +2349,12 @@ def noncontiguous_like(t):
         result[..., 1::2] = math.nan
     else:
         result[..., 1::2] = 0
-    return result[..., ::2].detach()
+
+    strides = list(result.stride())
+    strides[-1] = strides[-1] * 2
+    result.set_(result.storage(), result.storage_offset(), t.size(), stride=tuple(strides))
+    result.requires_grad_(t.requires_grad)
+    return result
 
 # TODO: remove this (prefer make_symmetric_matrices below)
 def random_symmetric_matrix(l, *batches, **kwargs):
