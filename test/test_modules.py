@@ -1,4 +1,4 @@
-# Owner(s): ["high priority"]
+# Owner(s): ["module: nn"]
 
 from itertools import product
 from inspect import signature, isgenerator
