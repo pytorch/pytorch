@@ -2,7 +2,7 @@
 
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Dict, Set
+from typing import Dict, Set, List, Iterable
 
 import jinja2
 import json
@@ -17,6 +17,7 @@ DOCKER_REGISTRY = "308535385114.dkr.ecr.us-east-1.amazonaws.com"
 GITHUB_DIR = Path(__file__).resolve().parent.parent
 
 WINDOWS_CPU_TEST_RUNNER = "windows.4xlarge"
+# contains 1 gpu
 WINDOWS_CUDA_TEST_RUNNER = "windows.8xlarge.nvidia.gpu"
 WINDOWS_RUNNERS = {
     WINDOWS_CPU_TEST_RUNNER,
@@ -24,7 +25,8 @@ WINDOWS_RUNNERS = {
 }
 
 LINUX_CPU_TEST_RUNNER = "linux.2xlarge"
-LINUX_CUDA_TEST_RUNNER = "linux.8xlarge.nvidia.gpu"
+# contains 1 gpu
+LINUX_CUDA_TEST_RUNNER = "linux.4xlarge.nvidia.gpu"
 LINUX_RUNNERS = {
     LINUX_CPU_TEST_RUNNER,
     LINUX_CUDA_TEST_RUNNER,
@@ -57,6 +59,7 @@ LABEL_CIFLOW_NOARCH = "ciflow/noarch"
 LABEL_CIFLOW_VULKAN = "ciflow/vulkan"
 LABEL_CIFLOW_PREFIX = "ciflow/"
 LABEL_CIFLOW_SLOW_GRADCHECK = "ciflow/slow-gradcheck"
+LABEL_CIFLOW_DOCKER = "ciflow/docker"
 
 
 @dataclass
@@ -219,6 +222,30 @@ class CIWorkflow:
                 output_file.write("\n")
         print(output_file_path)
 
+@dataclass
+class DockerWorkflow:
+    build_environment: str
+    docker_images: List[str]
+
+    # Optional fields
+    ciflow_config: CIFlowConfig = field(default_factory=CIFlowConfig)
+    cuda_version: str = ''
+    is_scheduled: str = ''
+
+    def generate_workflow_file(self, workflow_template: jinja2.Template) -> None:
+        output_file_path = GITHUB_DIR / "workflows/generated-docker-builds.yml"
+        with open(output_file_path, "w") as output_file:
+            GENERATED = "generated"  # Note that please keep the variable GENERATED otherwise phabricator will hide the whole file
+            output_file.writelines([f"# @{GENERATED} DO NOT EDIT MANUALLY\n"])
+            try:
+                content = workflow_template.render(asdict(self))
+            except Exception as e:
+                print(f"Failed on template: {workflow_template}", file=sys.stderr)
+                raise e
+            output_file.write(content)
+            if content[-1] != "\n":
+                output_file.write("\n")
+        print(output_file_path)
 
 WINDOWS_WORKFLOWS = [
     CIWorkflow(
@@ -386,17 +413,6 @@ LINUX_WORKFLOWS = [
         build_environment="linux-bionic-cuda10.2-py3.9-gcc7",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
-        num_test_shards=2,
-        ciflow_config=CIFlowConfig(
-            run_on_canary=True,
-            labels={LABEL_CIFLOW_SLOW, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA}
-        ),
-    ),
-    CIWorkflow(
-        arch="linux",
-        build_environment="linux-xenial-cuda10.2-py3.6-gcc7",
-        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7",
-        test_runner_type=LINUX_CUDA_TEST_RUNNER,
         enable_jit_legacy_test=1,
         enable_multigpu_test=1,
         enable_nogpu_no_avx_test=1,
@@ -404,7 +420,8 @@ LINUX_WORKFLOWS = [
         enable_slow_test=1,
         num_test_shards=2,
         ciflow_config=CIFlowConfig(
-            labels=set([LABEL_CIFLOW_SLOW, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA]),
+            run_on_canary=True,
+            labels={LABEL_CIFLOW_SLOW, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA}
         ),
     ),
     CIWorkflow(
@@ -514,6 +531,27 @@ BAZEL_WORKFLOWS = [
     ),
 ]
 
+DOCKER_IMAGES = {
+    f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-cuda10.2-cudnn7-py3.6-clang9",  # for pytorch/xla
+    f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm4.1-py3.6",                 # for rocm
+    f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm4.2-py3.6",                 # for rocm
+    f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm4.3.1-py3.6",               # for rocm
+}
+
+DOCKER_IMAGES.update({
+    workflow.docker_image_base
+    for workflow in [*LINUX_WORKFLOWS, *BAZEL_WORKFLOWS]
+    if workflow.docker_image_base
+})
+
+DOCKER_WORKFLOWS = [
+    DockerWorkflow(
+        build_environment="docker-builds",
+        docker_images=sorted(DOCKER_IMAGES),
+        # Run weekly to ensure they can build
+        is_scheduled="1 * */7 * *",
+    ),
+]
 
 def main() -> None:
     jinja_env = jinja2.Environment(
@@ -525,6 +563,7 @@ def main() -> None:
         (jinja_env.get_template("linux_ci_workflow.yml.j2"), LINUX_WORKFLOWS),
         (jinja_env.get_template("windows_ci_workflow.yml.j2"), WINDOWS_WORKFLOWS),
         (jinja_env.get_template("bazel_ci_workflow.yml.j2"), BAZEL_WORKFLOWS),
+        (jinja_env.get_template("docker_builds_ci_workflow.yml.j2"), DOCKER_WORKFLOWS),
     ]
     # Delete the existing generated files first, this should align with .gitattributes file description.
     existing_workflows = GITHUB_DIR.glob("workflows/generated-*")
@@ -536,6 +575,9 @@ def main() -> None:
 
     ciflow_ruleset = CIFlowRuleset()
     for template, workflows in template_and_workflows:
+        # added Iterable check to appease the mypy gods
+        if not isinstance(workflows, Iterable):
+            raise Exception(f"How is workflows not iterable? {workflows}")
         for workflow in workflows:
             workflow.generate_workflow_file(workflow_template=template)
             ciflow_ruleset.add_label_rule(workflow.ciflow_config.labels, workflow.build_environment)

@@ -308,9 +308,7 @@ static inline void checkAllSameDim(TensorList tensors, int64_t dim) {
   }
 }
 
-static inline std::tuple<Tensor,Tensor> _linalg_broadcast_batch_dims(const Tensor& arg1, const Tensor& arg2, const char* name) {
-  linearSolveCheckInputs(arg1, arg2, name);
-
+static inline std::tuple<std::vector<int64_t>, std::vector<int64_t>> _linalg_broadcast_batch_dims(const Tensor& arg1, const Tensor& arg2) {
   // broadcast the batch dimensions of arg1 and arg2.
   IntArrayRef arg1_batch_sizes(arg1.sizes().data(), arg1.ndimension() - 2);
   IntArrayRef arg2_batch_sizes(arg2.sizes().data(), arg2.ndimension() - 2);
@@ -321,6 +319,14 @@ static inline std::tuple<Tensor,Tensor> _linalg_broadcast_batch_dims(const Tenso
 
   std::vector<int64_t> arg2_expand_size({expand_batch_portion});
   arg2_expand_size.insert(arg2_expand_size.end(), { arg2.size(-2), arg2.size(-1) });
+  return std::make_tuple(std::move(arg1_expand_size), std::move(arg2_expand_size));
+}
+
+static inline std::tuple<Tensor,Tensor> _linalg_broadcast_batch_dims(const Tensor& arg1, const Tensor& arg2, const char* name) {
+  linearSolveCheckInputs(arg1, arg2, name);
+
+  std::vector<int64_t> arg1_expand_size, arg2_expand_size;
+  std::tie(arg1_expand_size, arg2_expand_size) = at::native::_linalg_broadcast_batch_dims(arg1, arg2);
 
   Tensor arg1_broadcasted  = arg1.expand(arg1_expand_size);
   Tensor arg2_broadcasted = arg2.expand(arg2_expand_size);
