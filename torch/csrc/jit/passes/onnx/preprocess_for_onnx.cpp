@@ -153,6 +153,7 @@ static void ReplaceAddWithConcat(Block* b) {
         concat_node->addInput(it->input(0));
         concat_node->addInput(it->input(1));
         concat_node->outputs()[0]->setType(TensorType::fromNumberType(*elem));
+        concat_node->copyMetadata(*it);
         it->replaceAllUsesWith(concat_node);
         it->removeAllInputs();
         it.destroyCurrent();
@@ -207,6 +208,7 @@ static void fuseListAndListUnpack(Block* b) {
           gather_node->insertBefore(*it);
           gather_node->addInput(it->input());
           gather_node->addInput(gather_indices->output());
+          gather_node->copyMetadata(*it);
           output->replaceAllUsesWith(gather_node->output());
         }
       }

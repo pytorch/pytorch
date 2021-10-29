@@ -299,63 +299,6 @@ struct PeepholeOptimizeImpl {
           changed = true;
         }
       }
-
-      // [aliasing sensitive optimizations]
-      // aliasing sensitive peephole transforms are not run at the moment,
-      // because compilation cost of creating alias db is not worth
-      // the limited speedup of these optimizations
-      // runAliasingSensitivePeepholeTransformations(node);
-    }
-    return changed;
-  }
-
-  // if either the inputs or outputs of an op alias graph's inputs or
-  // outputs, the transformations below are invalid
-  // An example:
-  //
-  // def test_write(x):
-  //     s = 0
-  //     s += x
-  //     s += x
-  //     return s
-  //
-  bool runAliasingSensitivePeepholeTransformations(Node* node) {
-    // this code is not currently enabled, see [aliasing sensitive
-    // optimizations]
-    TORCH_INTERNAL_ASSERT(false);
-    bool changed = false;
-    if (node->matches(
-            "aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor",
-            /*const_inputs=*/{attr::alpha, attr::other}) ||
-        node->matches(
-            "aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor",
-            /*const_inputs=*/{attr::alpha, attr::other})) {
-      // x + 0 == x - 0 == x
-      if (node->get<at::Scalar>(attr::alpha)->toDouble() == 1 &&
-          node->get<at::Scalar>(attr::other)->toDouble() == 0) {
-        GRAPH_UPDATE(
-            getHeader(node),
-            " (x + 0 == x - 0 == x) is replaced with ",
-            node->input(0)->debugName());
-        node->output()->replaceAllUsesWith(node->input(0));
-        changed = true;
-      }
-    } else if (
-        node->matches(
-            "aten::mul(Tensor self, Scalar other) -> Tensor",
-            /*const_inputs=*/attr::other) ||
-        node->matches(
-            "aten::div(Tensor self, Scalar other) -> Tensor",
-            /*const_inputs=*/attr::other)) {
-      // x * 1 == x / 1 == x
-      if (node->get<at::Scalar>(attr::other)->toDouble() == 1) {
-        GRAPH_UPDATE(
-            getHeader(node),
-            " (x * 1 == x / 1 == x) is replaced with ",
-            node->input(0)->debugName());
-        node->output()->replaceAllUsesWith(node->input(0));
-        changed = true;
-      }
     }
     return changed;
   }
