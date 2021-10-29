@@ -18012,7 +18012,6 @@ class TestNNDeviceType(NNTestCase):
             F.leaky_relu_(x)
 
     # Merge into OpInfo?
-    @onlyOnCPUAndCUDA
     def test_leaky_relu_inplace_with_neg_slope(self, device):
         a = torch.tensor([-1., 1.], device=device, requires_grad=True)
         b = torch.nn.functional.leaky_relu_(a.clone(), -2)
@@ -18025,7 +18024,6 @@ class TestNNDeviceType(NNTestCase):
             b.backward(torch.ones(2, device=device))
 
     # Merge into OpInfo?
-    @onlyOnCPUAndCUDA
     def test_leaky_relu_inplace_with_zero_slope(self, device):
         a = torch.tensor([-2., 0., 2.], device=device, requires_grad=True)
         b = torch.nn.functional.leaky_relu_(a.clone(), 0.0)
