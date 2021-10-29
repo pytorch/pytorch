@@ -1254,8 +1254,8 @@ class CosineEmbeddingLoss(_Loss):
 
 class MarginRankingLoss(_Loss):
     r"""Creates a criterion that measures the loss given
-    inputs :math:`x1`, :math:`x2`, two 1D mini-batch `Tensors`,
-    and a label 1D mini-batch tensor :math:`y` (containing 1 or -1).
+    inputs :math:`x1`, :math:`x2`, two 1D mini-batch or 0D `Tensors`,
+    and a label 1D mini-batch or 0D `Tensor` :math:`y` (containing 1 or -1).
 
     If :math:`y = 1` then it assumed the first input should be ranked higher
     (have a larger value) than the second input, and vice-versa for :math:`y = -1`.
@@ -1284,10 +1284,10 @@ class MarginRankingLoss(_Loss):
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
 
     Shape:
-        - Input1: :math:`(N)` where `N` is the batch size.
-        - Input2: :math:`(N)`, same shape as the Input1.
-        - Target: :math:`(N)`, same shape as the inputs.
-        - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(N)`.
+        - Input1: :math:`(N)` or :math:`()` where `N` is the batch size.
+        - Input2: :math:`(N)` or :math:`()`, same shape as the Input1.
+        - Target: :math:`(N)` or :math:`()`, same shape as the inputs.
+        - Output: scalar. If :attr:`reduction` is ``'none'`` and Input size is not :math:`()`, then :math:`(N)`.
 
     Examples::
 
