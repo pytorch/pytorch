@@ -3218,6 +3218,7 @@ class TestOperatorSignatures(JitTestCase):
                            'stack',
                            'to_sparse',
                            'unique',
+                           'unique_consecutive',
                            'view',
                            'view_as',
                            'nn.functional.hardshrink',
