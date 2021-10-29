@@ -325,11 +325,11 @@ void launch_stable_sort_kernel(
   TORCH_CHECK(nbatch > 0, "Cannot sort dimension of length ", nsort);
   int64_t *indices_ptr = indices.data_ptr<int64_t>();
 
-#if defined(USE_ROCM)
-  constexpr bool is_rocm = true;
-#else
+//#if defined(USE_ROCM)
+//  constexpr bool is_rocm = true;
+//#else
   constexpr bool is_rocm = false;
-#endif
+//#endif
 
   AT_DISPATCH_ALL_TYPES_AND3(kBool, kHalf, kBFloat16, self.scalar_type(), "sort", [&]{
     c10::guts::if_constexpr<!(is_rocm && std::is_same<scalar_t, c10::BFloat16>::value)>([&](auto _){

@@ -45,6 +45,7 @@
 
 #ifdef USE_ROCM
 #define NO_ROCM(x)
+#define TO_ROCM_HIP_CUB(x) ::hipcub
 #else
 #define NO_ROCM(x) x
 #endif
@@ -78,6 +79,30 @@ namespace cub = ::at_cuda_detail::cub;
 }}
 #endif
 
+#if defined(__HIP_PLATFORM_HCC__)
+
+// backport https://github.com/NVIDIA/cub/pull/306 for c10::BFloat16
+template <>
+struct ::hipcub::FpLimits<c10::BFloat16>
+{
+    static __host__ __device__ __forceinline__ c10::BFloat16 Max() {
+        unsigned short max_word = 0x7F7F;
+        return reinterpret_cast<c10::BFloat16&>(max_word);
+    }
+
+    static __host__ __device__ __forceinline__ c10::BFloat16 Lowest() {
+        unsigned short lowest_word = 0xFF7F;
+        return reinterpret_cast<c10::BFloat16&>(lowest_word);
+    }
+};
+
+//template <> struct ::hipcub::NumericTraits<c10::BFloat16>: ::hipcub::BaseTraits<::hipcub::FLOATING_POINT, true, false, unsigned short, c10::BFloat16> {};
+template <>
+struct ::hipcub::NumericTraits<c10::BFloat16>:
+       ::hipcub::BaseTraits<::hipcub::FLOATING_POINT, true, false, unsigned short, c10::BFloat16> {};
+
+#endif
+
 namespace at {
 namespace cuda {
 namespace cub {
@@ -93,11 +118,18 @@ struct cuda_type<c10::Half> {
   using type = __half;
 };
 
-#if CUB_SUPPORTS_NV_BFLOAT16()
+#if !defined(USE_ROCM) && CUB_SUPPORTS_NV_BFLOAT16()
 
 template<>
 struct cuda_type<c10::BFloat16> {
   using type = __nv_bfloat16;
+};
+
+#elif defined(USE_ROCM)
+
+template<>
+struct cuda_type<c10::BFloat16> {
+  using type = hip_bfloat16;
 };
 
 #endif
