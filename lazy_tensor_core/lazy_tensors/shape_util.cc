@@ -86,7 +86,7 @@ void ShapeUtil::ForEachSubshape(const Shape& shape,
   size_t hash_value = hash<c10::ScalarType>()(shape.at_element_type());
 
   if (shape.tuple_shapes().empty()) {
-    for (int i = 0; i < shape.dimensions_size(); ++i) {
+    for (int i = 0; i < shape.rank(); ++i) {
       hash_value =
           Hash64Combine(hash_value, hash<int64_t>()(shape.dimensions(i)));
     }

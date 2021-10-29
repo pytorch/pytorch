@@ -68,9 +68,6 @@ class Literal {
     value_.index_put_({at::indexing::TensorIndex(index_tensor)}, value);
   }
 
-  template <typename NativeT>
-  void PopulateR1(lazy_tensors::Span<const NativeT> values);
-
   const at::Tensor& value() const { return value_; }
 
  private:
@@ -112,16 +109,6 @@ template <>
 inline void Literal::Set<std::complex<double>>(
     lazy_tensors::Span<const int64_t> multi_index, std::complex<double> value) {
   LOG(FATAL) << "Not implemented yet.";
-}
-
-template <typename NativeT>
-inline void Literal::PopulateR1(lazy_tensors::Span<const NativeT> values) {
-  CHECK(shape().IsArray());
-  CHECK_EQ(shape().rank(), 1);
-  CHECK_EQ(ShapeUtil::ElementsIn(shape()), values.size());
-  CHECK_EQ(shape().at_element_type(), c10::CppTypeToScalarType<NativeT>::value);
-  auto data_span = data<NativeT>();
-  std::copy(values.begin(), values.end(), data_span.begin());
 }
 
 class LiteralSlice {

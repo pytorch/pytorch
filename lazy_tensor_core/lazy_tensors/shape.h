@@ -36,20 +36,18 @@ class Shape {
                                 c10::Join(",", dimensions_), "]");
   }
 
-  int64_t rank() const { return dimensions_.size(); }
-
-  bool IsArray() const { return false; }
-
-  bool IsTuple() const { return is_tuple_; }
-
   c10::ScalarType at_element_type() const { return at_element_type_; }
   void set_element_type(at::ScalarType value);
 
-  // Methods for accessing the dimensions array.
-  int dimensions_size() const { return dimensions_.size(); }
+  int64_t rank() const { return dimensions_.size(); }
+
   int64_t dimensions(int index) const {
     CHECK_LT(index, dimensions_.size());
     return dimensions_[index];
+  }
+
+  c10::ArrayRef<int64_t> dimensions() const {
+    return dimensions_;
   }
 
   void set_dimensions(int index, int64_t value) {
@@ -57,10 +55,9 @@ class Shape {
     dimensions_[index] = value;
   }
 
-  c10::ArrayRef<int64_t> dimensions() const {
-    return dimensions_;
-  }
-
+  // TODO(whc) remove tuple support? or keep it (But make dimensions() methods
+  // work consistently with it somehow?)
+  bool IsTuple() const { return is_tuple_; }
   int tuple_shapes_size() const { return element_shapes_.size(); }
 
   const Shape& tuple_shapes(int index) const {
@@ -70,8 +67,8 @@ class Shape {
   }
   const std::vector<Shape>& tuple_shapes() const { return element_shapes_; }
 
+  // Todo(whc) remove layout?
   const Layout& layout() const { return layout_; }
-
   Layout* mutable_layout() { return &layout_; }
 
   bool operator==(const Shape& other) const {

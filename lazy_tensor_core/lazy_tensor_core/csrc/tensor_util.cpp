@@ -752,14 +752,6 @@ std::vector<lazy_tensors::Shape> GetComponentShapes(
 lazy_tensors::Shape MakeShapeWithDeviceLayout(const lazy_tensors::Shape& shape,
                                               DeviceType device_type) {
   lazy_tensors::Shape device_shape(shape);
-  lazy_tensors::ShapeUtil::ForEachMutableSubshape(
-      &device_shape,
-      [&](lazy_tensors::Shape* subshape, const lazy_tensors::ShapeIndex&) {
-        if (subshape->IsArray()) {
-          *subshape = MakeArrayShapeFromDimensions(
-              subshape->dimensions(), subshape->at_element_type(), device_type);
-        }
-      });
   return device_shape;
 }
 
