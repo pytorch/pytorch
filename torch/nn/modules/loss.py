@@ -375,39 +375,31 @@ class GaussianNLLLoss(_Loss):
 class KLDivLoss(_Loss):
     r"""The Kullback-Leibler divergence loss measure
 
-    `Kullback-Leibler divergence`_ is a useful distance measure for continuous distributions and is often useful when
-    performing direct regression over the space of (discretely sampled) continuous output distributions. It is defined
-    as:
+    `Kullback-Leibler divergence`_ is a useful distance measure for continuous
+    distributions and is often useful when performing direct regression over
+    the space of (discretely sampled) continuous output distributions.
+
+    As with :class:`~torch.nn.NLLLoss`, the `input` given is expected to contain
+    *log-probabilities* and is not restricted to a 2D Tensor.
+    The targets are interpreted as *probabilities* by default, but could be considered
+    as *log-probabilities* with :attr:`log_target` set to ``True``.
+
+    This criterion expects a `target` `Tensor` of the same size as the
+    `input` `Tensor`.
+
+    The unreduced (i.e. with :attr:`reduction` set to ``'none'``) loss can be described as:
 
     .. math::
+        l(x,y) = L = \{ l_1,\dots,l_N \}, \quad
+        l_n = y_n \cdot \left( \log y_n - x_n \right)
 
-        l(x, y) = L = \{ l_1, \dots, l_N \}
-        \quad l_n = y_n \cdot \log \frac{y_n}{x_n} = y_n \cdot \left( \log y_n - \log x_n \right)
-
-    where the index :math:`N` spans all dimensions of ``input`` and :math:`L` has the same shape as ``input``.
-
-    For numerical stability, the ``input`` is expected to already be log-probabilities:
+    where the index :math:`N` spans all dimensions of ``input`` and :math:`L` has the same
+    shape as ``input``. If :attr:`reduction` is not ``'none'`` (default ``'mean'``), then:
 
     .. math::
-
-        l_n = y_n \cdot \left( \log y_n - x^\prime_n \right)
-        \quad \text{with } x^\prime_n = \log x_n
-
-    The ``target`` is expected to be probabilities of the same size as ``input``, but can be interpreted as
-    log-probabilities by setting ``log_target=True``:
-
-    .. math::
-
-        l_n = \exp y^\prime_n \cdot \left( y^\prime_n - x^\prime_n \right)
-        \quad \text{with } x^\prime_n = \log x_n,\, y^\prime_n = \log y_n
-
-    If ``reduction`` is not ``"none"`` (default ``"mean"``), then:
-
-    .. math::
-        \ell(x, y) =
-        \begin{cases}
-            \operatorname{mean}(L), & \text{if} \quad \texttt{reduction = "mean"}; \\
-            \operatorname{sum}(L),  & \text{if} \quad \texttt{reduction = "sum"}.
+        \ell(x, y) = \begin{cases}
+            \operatorname{mean}(L), & \text{if reduction} = \text{`mean';} \\
+            \operatorname{sum}(L),  & \text{if reduction} = \text{`sum'.}
         \end{cases}
 
     In default :attr:`reduction` mode ``'mean'``, the losses are averaged for each minibatch over observations
@@ -1262,8 +1254,8 @@ class CosineEmbeddingLoss(_Loss):
 
 class MarginRankingLoss(_Loss):
     r"""Creates a criterion that measures the loss given
-    inputs :math:`x1`, :math:`x2`, two 1D mini-batch `Tensors`,
-    and a label 1D mini-batch tensor :math:`y` (containing 1 or -1).
+    inputs :math:`x1`, :math:`x2`, two 1D mini-batch or 0D `Tensors`,
+    and a label 1D mini-batch or 0D `Tensor` :math:`y` (containing 1 or -1).
 
     If :math:`y = 1` then it assumed the first input should be ranked higher
     (have a larger value) than the second input, and vice-versa for :math:`y = -1`.
@@ -1292,10 +1284,10 @@ class MarginRankingLoss(_Loss):
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
 
     Shape:
-        - Input1: :math:`(N)` where `N` is the batch size.
-        - Input2: :math:`(N)`, same shape as the Input1.
-        - Target: :math:`(N)`, same shape as the inputs.
-        - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(N)`.
+        - Input1: :math:`(N)` or :math:`()` where `N` is the batch size.
+        - Input2: :math:`(N)` or :math:`()`, same shape as the Input1.
+        - Target: :math:`(N)` or :math:`()`, same shape as the inputs.
+        - Output: scalar. If :attr:`reduction` is ``'none'`` and Input size is not :math:`()`, then :math:`(N)`.
 
     Examples::
 

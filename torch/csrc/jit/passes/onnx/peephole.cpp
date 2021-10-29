@@ -320,6 +320,7 @@ void pushPackingPastRnn(Block* b) {
         Node* shape = b->owningGraph()->create(onnx::Shape);
         shape->insertAfter(rnn_input->node());
         shape->addInput(rnn_input);
+        shape->copyMetadata(n);
         batch_sizes->replaceFirstUseWith(shape->output());
         user->inputs().at(1)->node()->t_(
             attr::value, at::native::ones_like(const_val_t));
@@ -342,6 +343,7 @@ void pushPackingPastRnn(Block* b) {
     Node* newPackPadded = b->owningGraph()->create(prim::PackPadded, 2);
     newPackPadded->copyMetadata(n);
     newPackPadded->insertAfter(next);
+    newPackPadded->copyMetadata(next);
 
     // make things consume from the new PackPadded
     next->outputs().at(0)->replaceAllUsesWith(newPackPadded->outputs().at(0));
@@ -654,6 +656,7 @@ static void eraseListConstruct(Node* n, int opset_version) {
           seq_node->copyMetadata(n);
           seq_node->insertBefore(lc_node);
           seq_node->output()->copyMetadata(lc_node->output());
+          seq_node->copyMetadata(lc_node);
           lc_node->replaceAllUsesWith(seq_node);
         }
       }
@@ -706,6 +709,7 @@ static void eraseListUnpack(Node* n, int opset_version) {
       seq_at_n->addInput(seq_idx_n->output());
       seq_at_n->output()->setType(n->output(i)->type());
       seq_at_n->insertBefore(n);
+      seq_at_n->copyMetadata(n);
       n->output(i)->replaceAllUsesWith(seq_at_n->output());
     }
   }
@@ -882,6 +886,7 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
         cast_node->addInput(origLogSoftmaxNode->inputs().at(0));
         cast_node->i_(attr::to, onnx_type);
         cast_node->insertBefore(origLogSoftmaxNode);
+        cast_node->copyMetadata(castNode);
         origLogSoftmaxNode->replaceInputWith(
             origLogSoftmaxNode->inputs().at(0), cast_node->output());
       }
@@ -896,6 +901,7 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
       softmaxCrossEntropyNode->insertBefore(origNllLossNode);
       softmaxCrossEntropyNode->addInput(origLogSoftmaxNode->inputs().at(0));
       softmaxCrossEntropyNode->addInput(origNllLossNode->inputs().at(1));
+      softmaxCrossEntropyNode->copyMetadata(origNllLossNode);
       // optional weight input is provided
       if (origNllLossNode->inputs().size() == 3) {
         softmaxCrossEntropyNode->addInput(origNllLossNode->inputs().at(2));
