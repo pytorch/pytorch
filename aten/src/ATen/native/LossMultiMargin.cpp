@@ -12,9 +12,9 @@ namespace {
 void multi_margin_loss_shape_check(
   int64_t& nframe,
   int64_t& dim,
-  const int64_t& ndims,
   const Tensor& input,
   const Tensor& target) {
+  const std::int64_t ndims = input.dim();
   bool valid_inputs = (ndims == 2 && input.size(1) != 0) || (ndims == 1 && input.size(0) != 0) || ndims == 0;
   if (ndims <= 1) {
     nframe = 1;
@@ -122,11 +122,10 @@ void multi_margin_loss_out_cpu_template(
     int64_t reduction) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t nframe, dim;
-  const auto ndims = input.dim();
 
   TORCH_CHECK(p == 1 || p == 2, "only p == 1 and p == 2 supported");
 
-  multi_margin_loss_shape_check(nframe, dim, ndims, input, target);
+  multi_margin_loss_shape_check(nframe, dim, input, target);
 
   // produce a scalar output for 1d input
   if (reduction == Reduction::None && target.dim() > 0) {
@@ -230,11 +229,10 @@ void multi_margin_loss_backward_out_cpu_template(
     int64_t reduction) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t nframe, dim;
-  const auto ndims = input.dim();
 
   TORCH_CHECK(p == 1 || p == 2, "only p == 1 and p == 2 supported");
 
-  multi_margin_loss_shape_check(nframe, dim, ndims, input, target);
+  multi_margin_loss_shape_check(nframe, dim, input, target);
   grad_input.resize_as_(input);
   TORCH_CHECK(grad_input.is_contiguous(), "grad_input must be contiguous");
 
