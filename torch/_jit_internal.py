@@ -70,12 +70,18 @@ def createResolutionCallbackFromEnv(lookup_base):
         while i < len(expr) and expr[i] not in (',', '[', ']'):
             i += 1
 
+        key = expr[:i].strip()
         # Special case logic for the empty Tuple as a subscript (used
         # in the type annotation `Tuple[()]`)
-        if expr[:i] == '()':
+        if key == '()':
             return (), i
 
-        base = lookupInModule(expr[:i].strip(), module)
+        # Special case logic for NoneType used inside a subscript, like
+        # `Union[float, None]``.
+        if key == 'None':
+            return None, i
+
+        base = lookupInModule(key, module)
         assert base is not None, f"Unresolvable type {expr[:i]}"
         if i == len(expr) or expr[i] != '[':
             return base, i
@@ -394,13 +400,14 @@ def createResolutionCallbackForClassMethods(cls):
         captures.update(get_closure(fn))
         captures.update(get_type_hint_captures(fn))
 
-    def lookup_in_class(key):
-        if key in captures:
-            return captures[key]
-        else:
-            return getattr(builtins, key, None)
+    class env(object):
+        def __getattr__(self, key):
+            if key in captures:
+                return captures[key]
+            else:
+                return getattr(builtins, key, None)
 
-    return lookup_in_class
+    return createResolutionCallbackFromEnv(env())
 
 
 def boolean_dispatch(arg_name, arg_index, default, if_true, if_false, module_name, func_name):

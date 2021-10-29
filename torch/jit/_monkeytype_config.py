@@ -31,26 +31,28 @@ def is_torch_native_class(cls):
     root_module = sys.modules.get(parent_modules[0])
     return root_module is torch
 
-def get_type(type):
+def get_type(type_obj):
     """
     Helper function which converts the given type to a torchScript acceptable format.
     """
-    if isinstance(type, str):
-        return type
-    elif inspect.getmodule(type) == typing:
+    if isinstance(type_obj, str):
+        return type_obj
+    elif type_obj is type(None):
+        return "None"
+    elif inspect.getmodule(type_obj) == typing:
         # If the type is a type imported from typing
         # like Tuple, List, Dict then replace `typing.`
         # with a null string. This needs to be done since
         # typing.List is not accepted by TorchScript.
-        type_to_string = str(type)
-        return type_to_string.replace(type.__module__ + '.', '')
-    elif is_torch_native_class(type):
+        type_to_string = str(type_obj)
+        return type_to_string.replace(type_obj.__module__ + '.', '')
+    elif is_torch_native_class(type_obj):
         # If the type is a subtype of torch module, then TorchScript expects a fully qualified name
         # for the type which is obtained by combining the module name and type name.
-        return type.__module__ + '.' + type.__name__
+        return type_obj.__module__ + '.' + type_obj.__name__
     else:
         # For all other types use the name for the type.
-        return type.__name__
+        return type_obj.__name__
 
 def get_optional_of_element_type(types):
     """
@@ -118,11 +120,8 @@ if _IS_MONKEYTYPE_INSTALLED:
             for arg, types in all_args.items():
                 types = list(types)
                 type_length = len(types)
-                if type_length == 2 and type(None) in types:
-                    # TODO: To remove this check once Union suppport in TorchScript lands.
-                    all_args[arg] = get_optional_of_element_type(types)
-                elif type_length > 1:
-                    all_args[arg] = 'Any'
+                if type_length > 1:
+                    all_args[arg] = 'Union[' + ", ".join([get_type(t) for t in types]) + ']'
                 elif type_length == 1:
                     all_args[arg] = get_type(types[0])
             return all_args

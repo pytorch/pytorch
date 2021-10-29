@@ -3,9 +3,9 @@
 import os
 import sys
 import torch
-from torch.testing._internal.jit_utils import JitTestCase, make_global
+from torch.testing._internal.jit_utils import JitTestCase, make_global, FileCheck
 from torch.jit._monkeytype_config import _IS_MONKEYTYPE_INSTALLED
-from typing import List, Dict, Tuple, Any, Optional, NamedTuple  # noqa: F401
+from typing import List, Dict, Tuple, Any, Optional, NamedTuple, Union  # noqa: F401
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -41,18 +41,18 @@ class TestPDT(JitTestCase):
 
         make_global(TestPDTModel)
         pdt_model = TestPDTModel()
-        inp: List[Tuple[Any, ...]] = [(20, ), (2.7, ), (False, ), ]
+        inp: List[Tuple[Any, ...]] = [(20, ), (2.7, ), ("a_str", ), ]
         scripted_pdt_model = torch.jit.script(pdt_model, example_inputs={pdt_model: inp})
         self.assertEqual(scripted_pdt_model(50), pdt_model(50))
         self.assertEqual(scripted_pdt_model(1.8), pdt_model(1.8))
-        self.assertTrue(scripted_pdt_model(True), pdt_model(True))
+        self.assertTrue(scripted_pdt_model("some_str"), pdt_model("some_str"))
 
     def test_nested_nn_module_class(self):
         class NestedPDTInner(torch.nn.Module):
             def __init__(self):
                 super().__init__()
 
-            def forward(self, x):
+            def forward(self, x) -> Union[float, int, str]:
                 if isinstance(x, int):
                     return x * 10
                 return x
@@ -68,18 +68,18 @@ class TestPDT(JitTestCase):
         make_global(NestedPDTInner, NestedModulePDTWrapper)
         inner_pdt_model = NestedPDTInner()
         wrapped_pdt_model = NestedModulePDTWrapper(inner_pdt_model)
-        inp: List[Tuple[Any, ...]] = [(20, ), (False, )]
+        inp: List[Tuple[Any, ...]] = [(20, ), (2.0, ), ("a_str", )]
         scripted_pdt_model = torch.jit.script(wrapped_pdt_model, example_inputs={wrapped_pdt_model: inp})
         self.assertEqual(scripted_pdt_model(30), wrapped_pdt_model(30))
         self.assertEqual(scripted_pdt_model(1.9), wrapped_pdt_model(1.9))
-        self.assertTrue(scripted_pdt_model(True), wrapped_pdt_model(True))
+        self.assertTrue(scripted_pdt_model("some_str"), wrapped_pdt_model("some_str"))
 
     def test_nested_nn_module_class_with_args(self):
         class NestedModulePDTInner(torch.nn.Module):
             def __init__(self):
                 super().__init__()
 
-            def forward(self, x, y):
+            def forward(self, x, y) -> Union[float, int, str]:
                 if isinstance(x, int):
                     return x * 10 + y
                 return x
@@ -96,12 +96,12 @@ class TestPDT(JitTestCase):
         inner_pdt_model = NestedModulePDTInner()
         outer_pdt_model = NestedModulePDTOuter(inner_pdt_model)
         inner_input: List[Tuple[Any, ...]] = [(10, 10), (1.9, 20), ]
-        outer_input: List[Tuple[Any, ...]] = [(20, ), (False, )]
+        outer_input: List[Tuple[Any, ...]] = [(20, ), ("a_str", ), (2.0, )]
         scripted_pdt_model = torch.jit.script(outer_pdt_model, example_inputs={inner_pdt_model: inner_input,
                                               outer_pdt_model: outer_input, })
         self.assertEqual(scripted_pdt_model(30), outer_pdt_model(30))
         self.assertEqual(scripted_pdt_model(1.9), outer_pdt_model(1.9))
-        self.assertTrue(scripted_pdt_model(True), outer_pdt_model(True))
+        self.assertTrue(scripted_pdt_model("some_str"), outer_pdt_model("some_str"))
 
     def test_nested_function_in_forward(self):
         class NestedFunctionInForward(torch.nn.Module):
@@ -112,18 +112,18 @@ class TestPDT(JitTestCase):
                 return self.fun(x) + 10
 
             def fun(self, x):
-                if isinstance(x, bool):
-                    return 0
+                if isinstance(x, str):
+                    return 2
                 elif isinstance(x, int):
                     return x + 1
                 return 0
 
         make_global(NestedFunctionInForward)
         pdt_model = NestedFunctionInForward()
-        inp: List[Tuple[Any, ...]] = [(-1, ), (False, )]
+        inp: List[Tuple[Any, ...]] = [(-1, ), ("a_str", )]
         scripted_pdt_model = torch.jit.script(pdt_model, example_inputs={pdt_model: inp})
         self.assertEqual(scripted_pdt_model(30), pdt_model(30))
-        self.assertEqual(scripted_pdt_model(True), pdt_model(True))
+        self.assertEqual(scripted_pdt_model("some_str"), pdt_model("some_str"))
 
     def test_nn_module_with_export_function(self):
         class TestModelWithExport(torch.nn.Module):
@@ -131,23 +131,23 @@ class TestPDT(JitTestCase):
                 super().__init__()
 
             @torch.jit.export
-            def fn(self, x, y) -> Any:
-                assert not (isinstance(x, bool) and isinstance(y, bool))
-                if isinstance(x, int) and isinstance(y, int):
-                    return x + y
-                elif isinstance(x, float) and isinstance(y, float):
-                    return x - y
+            def fn(self, x) -> int:
+                assert not isinstance(x, bool)
+                if isinstance(x, int):
+                    return x + 1
+                elif isinstance(x, float):
+                    return int(x - 2.0)
                 else:
                     return -1
 
 
         make_global(TestModelWithExport)
         pdt_model = TestModelWithExport()
-        inp: List[Tuple[Any, ...]] = [(20, 10, ), (2.7, 8.9, ), ]
+        inp: List[Tuple[Any, ...]] = [(20, ), (2.7, ), ("some_str", )]
         scripted_pdt_model = torch.jit.script(pdt_model, example_inputs={pdt_model.fn: inp})
-        self.assertEqual(scripted_pdt_model.fn(10, 90), pdt_model.fn(10, 90))
-        self.assertEqual(scripted_pdt_model.fn(1.8, 2.2), pdt_model.fn(1.8, 2.2))
-        self.assertTrue(scripted_pdt_model.fn(torch.ones(1), 2), pdt_model.fn(torch.ones(1), 2))
+        self.assertEqual(scripted_pdt_model.fn(10), pdt_model.fn(10))
+        self.assertEqual(scripted_pdt_model.fn(1.8), pdt_model.fn(1.8))
+        self.assertTrue(scripted_pdt_model.fn("another_string"), pdt_model.fn("another_string"))
 
     def test_class_methods(self):
         class PDTModel:
@@ -340,9 +340,7 @@ class TestPDT(JitTestCase):
             return a
 
         def test_multiple_type_refinement(a):
-            if isinstance(a, bool):
-                return 1
-            elif isinstance(a, int):
+            if isinstance(a, int):
                 return 1 + a
             elif isinstance(a, float):
                 return 1 + int(a)
@@ -358,12 +356,11 @@ class TestPDT(JitTestCase):
         self.assertEqual(scripted_fn([10, 11, 14]), test_multiple_types([10, 11, 14]))
 
         scripted_fn = torch.jit.script(test_multiple_type_refinement, example_inputs=[(1,), ("abc", ), (8.9,),
-                                       ([3, 4, 5],), (True, ), ({"a": True}, ), ])
+                                       ([3, 4, 5],), ({"a": True}, ), ])
         self.assertEqual(scripted_fn(10), test_multiple_type_refinement(10))
         self.assertEqual(scripted_fn("def"), test_multiple_type_refinement("def"))
         self.assertEqual(scripted_fn(7.89999), test_multiple_type_refinement(7.89999))
         self.assertEqual(scripted_fn([10, 11, 14]), test_multiple_type_refinement([10, 11, 14]))
-        self.assertEqual(scripted_fn(False), test_multiple_type_refinement(False))
         self.assertEqual(scripted_fn({"abc" : True, "def": False}), test_multiple_type_refinement({"abc" : True, "def": False}))
 
     def test_class_as_profiled_types(self):
@@ -456,3 +453,23 @@ class TestPDT(JitTestCase):
 
         scripted_fn = torch.jit.script(test_none, example_inputs=[(None, ), (torch.Tensor(1), )])
         self.assertEqual(scripted_fn(torch.ones(1), ), test_none(torch.ones(1), ))
+
+    def test_union_without_none(self):
+        def fn_union(a) -> Any:
+            if isinstance(a, int):
+                return a + 1
+
+            if isinstance(a, str):
+                return a + "_suffix"
+
+            return a
+
+        make_global(fn_union)
+
+        scripted_fn = torch.jit.script(fn_union, example_inputs=[(1, ), ("I am a string", ), (2.3, )])
+
+        FileCheck().check("Union[float, int, str]").run(scripted_fn.graph)
+
+        self.assertEqual(scripted_fn(10), fn_union(10))
+        self.assertEqual(scripted_fn(30.9), fn_union(30.9))
+        self.assertEqual(scripted_fn("my_string"), fn_union("my_string"))
