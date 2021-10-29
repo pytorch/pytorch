@@ -1986,8 +1986,7 @@ def sample_inputs_baddbmm(op_info, device, dtype, requires_grad, **kwargs):
         sample_inputs.append(
             SampleInput(
                 args[0].transpose(-1, 1).detach().requires_grad_(requires_grad),
-                args=(
-                      args[1].transpose(-1, 1).conj().detach().requires_grad_(requires_grad),
+                args=(args[1].transpose(-1, 1).conj().detach().requires_grad_(requires_grad),
                       args[2].transpose(-1, 1).conj().detach().requires_grad_(requires_grad)),
                 kwargs=dict(beta=beta * (1 + 2j), alpha=alpha * (2 + 3j)),))
 
@@ -3847,7 +3846,7 @@ def np_unary_ufunc_integer_promotion_wrapper(fn):
 
 def sample_inputs_spectral_ops(self, device, dtype, requires_grad=False, **kwargs):
     nd_tensor = partial(make_tensor, (S, S + 1, S + 2), device=device,
-                       dtype=dtype, requires_grad=requires_grad)
+                        dtype=dtype, requires_grad=requires_grad)
     oned_tensor = partial(make_tensor, (31,), device=device,
                           dtype=dtype, requires_grad=requires_grad)
 
@@ -4410,8 +4409,7 @@ def sample_inputs_cov(op_info, device, dtype, requires_grad, **kwargs):
         fweights = make_tensor((num_observations,), device, torch.int, low=1, high=10)
         aweights = make_tensor((num_observations,), device, torch.float, low=0, high=1, requires_grad=requires_grad)
         for correction, fw, aw in product(range(num_observations), [None, fweights], [None, aweights]):
-            inputs.append(SampleInput(
-                                      t.detach().clone().requires_grad_(requires_grad),
+            inputs.append(SampleInput(t.detach().clone().requires_grad_(requires_grad),
                                       kwargs={'correction': correction, 'fweights': fw, 'aweights': aw}))
     return inputs
 
@@ -4539,12 +4537,14 @@ def sample_inputs_pow(op_info, device, dtype, requires_grad, **kwargs):
             ((), 1e-3, 1e-3 + 1, 0, requires_grad, (1, S, 1), 0, 1, 0.1, requires_grad, requires_grad),
         )
         cases = test_cases + tests_require_resizing
-        samples = list(SampleInput(
-            (make_arg(shape_b, low=low_b, high=high_b) + additive_b).requires_grad_(b_grad),
-            args=((make_arg(shape_e, low=low_e, high=high_e) + additive_e).requires_grad_(e_grad),),
-            broadcasts_input=broadcasts_input)
-            for shape_b, low_b, high_b, additive_b, b_grad, shape_e, low_e,
-                high_e, additive_e, e_grad, broadcasts_input in cases)
+
+        samples = []
+        for (shape_b, low_b, high_b, additive_b, b_grad, shape_e, low_e,
+             high_e, additive_e, e_grad, broadcasts_input) in cases:
+            si = SampleInput((make_arg(shape_b, low=low_b, high=high_b) + additive_b).requires_grad_(b_grad),
+                             args=((make_arg(shape_e, low=low_e, high=high_e) + additive_e).requires_grad_(e_grad),),
+                             broadcasts_input=broadcasts_input)
+            samples.append(si)
 
         tensor_scalar_inputs = (
             ((2, 2), 0, 5, 1e-3, requires_grad, (3.14,)),
@@ -4566,24 +4566,7 @@ def sample_inputs_pow(op_info, device, dtype, requires_grad, **kwargs):
             (make_arg(shape, high=high, low=low) + 1e-3 * (1 + 1j)).requires_grad_(b_grad),
             args=arg)
             for shape, low, high, b_grad, arg in args_tuple)
-    elif dtype == torch.bool:
-        arg_tuple = (0, 1, 1., 2.3)
-        samples = list(SampleInput(
-            make_arg((2, 2), requires_grad=requires_grad),
-            args=(arg,))
-            for arg in arg_tuple)
-
-        dtypes_list = [torch.float64, torch.float32, torch.int64, torch.int32]
-        more_samples = list(SampleInput(
-            make_tensor((2, 2), device, dtype=torch.bool, requires_grad=requires_grad),
-            args=(make_arg((2, 2), requires_grad=requires_grad),))
-            for dtype in dtypes_list)
-
-        samples = [*samples, *more_samples]
-        samples.append(SampleInput(
-            make_tensor((2, 2, 2), device, dtype=torch.bool, requires_grad=requires_grad),
-            args=(make_tensor((2, 1), device, dtype=torch.float64, requires_grad=requires_grad),)))
-    else:
+    else:  # integral dtype
         exp_tuple = (1, 2, 3)
         samples = list(SampleInput(
             make_arg((2, 2), requires_grad=requires_grad),
@@ -4804,14 +4787,12 @@ def sample_inputs_clamp_scalar(op_info, device, dtype, requires_grad):
         tensor.detach().clone().requires_grad_(requires_grad),
         args=vals) for tensor, vals in product(tensors, min_max_vals)]
     output += [
-        SampleInput(
-                    tensors[0].detach().clone().requires_grad_(requires_grad),
+        SampleInput(tensors[0].detach().clone().requires_grad_(requires_grad),
                     args=(0.5, None)),
-        SampleInput(
-                    tensors[0].detach().clone().requires_grad_(requires_grad),
+        SampleInput(tensors[0].detach().clone().requires_grad_(requires_grad),
                     args=(None, 0.5))]
     empty_tensor = make_tensor((), device=device, dtype=dtype, low=None, high=None, requires_grad=requires_grad)
-    output += [SampleInput(empty_tensor, args=(0.0, 1.0)), ]
+    output.append(SampleInput(empty_tensor, args=(0.0, 1.0)))
     return output
 
 def sample_kwargs_clamp_scalar(device, dtype, input):
@@ -8420,6 +8401,9 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            skips=(
+               # https://github.com/pytorch/pytorch/issues/67539
+               DecorateInfo(unittest.skip("67539"), 'TestCommon', 'test_noncontiguous_samples',
+                            active_if=TEST_WITH_ASAN, device_type='cpu'),
                # TODO: FIXME: complex inputs requiring grad error in forward
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
                # TODO: fix along with var_mean autograd tests
@@ -9112,12 +9096,12 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_permute),
     OpInfo('pow',
-           dtypes=all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool),
+           dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
            # Due to AVX2 curently not being fully supported for Float16, log_vml_cpu can't be enabled
            # for Float16, causing this test to fail. pow's autograd for Float16 is thus currently
            # unsupported on CPU.
-           backward_dtypes=all_types_and_complex_and(torch.bfloat16, torch.bool),
-           backward_dtypesIfCUDA=all_types_and_complex_and(torch.bfloat16, torch.half),
+           backward_dtypes=floating_and_complex_types_and(torch.bfloat16),
+           backward_dtypesIfCUDA=floating_and_complex_types_and(torch.bfloat16, torch.half),
            sample_inputs_func=sample_inputs_pow,
            supports_inplace_autograd=False,
            supports_forward_ad=True,
