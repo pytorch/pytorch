@@ -237,7 +237,7 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
 
         m = M().eval()
         prepared = prepare_fx(
-            m, {"": self.qconfig}, backend_config_dict=self.backend_config_dict)
+            m, {"": self.qconfig}, backend_config_dict=self.trt_backend_config_dict)
         self.assertTrue(len(dict(prepared.named_children())) == 1)
         quantized = _convert_fx_do_not_use(prepared, is_reference=True)
         node_occurrence = {
