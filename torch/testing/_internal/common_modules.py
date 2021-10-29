@@ -2,6 +2,7 @@ import torch
 from copy import deepcopy
 from functools import wraps, partial
 from itertools import chain
+import itertools
 import torch.nn.functional as F
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import floating_types
@@ -232,12 +233,7 @@ def no_batch_dim_reference_fn(m, p, *args, **kwargs):
     """
     single_batch_input_args = [input.unsqueeze(0) for input in args]
     with freeze_rng_state():
-        output = m(*single_batch_input_args)
-        if isinstance(output, torch.Tensor):
-            return output.squeeze(0)
-        else:
-            return tuple(o.squeeze(0) for o in output)
-
+        return m(*single_batch_input_args).squeeze(0)
 
 def no_batch_dim_reference_criterion_fn(m, *args, **kwargs):
     """Reference function for criterion supporting no batch dimensions."""
@@ -247,6 +243,19 @@ def no_batch_dim_reference_criterion_fn(m, *args, **kwargs):
         return output.squeeze(0)
     # reduction is 'sum' or 'mean' which results in a 0D tensor
     return output
+
+
+def no_batch_dim_reference_mha(m, p, *args, **kwargs):
+    """Reference function for MultiheadAttention supporting no batch dimensions.
+
+    The module is passed the input and target in batched form with a single item.
+    The output is squeezed to compare with the no-batch input.
+    """
+    dim = 0 if kwargs.get('batch_first', True) else 1
+    single_batch_input_args = [input.unsqueeze(dim) for input in args]
+    with freeze_rng_state():
+        output = m(*single_batch_input_args)
+        return (output[0].squeeze(dim), output[1].squeeze(0))
 
 
 def generate_regression_criterion_inputs(make_input):
@@ -380,13 +389,28 @@ def module_inputs_torch_nn_Embedding(module_info, device, dtype, requires_grad, 
 
 def module_inputs_torch_nn_MultiheadAttention(module_info, device, dtype, requires_grad, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-    return [
-        ModuleInput(
-            constructor_input=FunctionInput(embed_dim=3, num_heads=3, batch_first=True),
-            forward_input=FunctionInput(make_input((3, 3)), make_input((3, 3)), make_input((3, 3))),
-            reference_fn=no_batch_dim_reference_fn,
-        ),
-    ]
+    samples = []
+    bool_vals = (True, False)
+    for bias, add_bias_kv, add_zero_attn in itertools.product(bool_vals, bool_vals, bool_vals):
+        samples.append(
+            ModuleInput(
+                constructor_input=FunctionInput(embed_dim=3, num_heads=3, batch_first=True,
+                                                bias=bias, add_bias_kv=add_bias_kv, add_zero_attn=add_zero_attn),
+                forward_input=FunctionInput(make_input((3, 3)), make_input((3, 3)), make_input((3, 3))),
+                reference_fn=no_batch_dim_reference_mha,
+            )
+        )
+        samples.append(
+            ModuleInput(
+                constructor_input=FunctionInput(embed_dim=3, num_heads=3, batch_first=False,
+                                                bias=bias, add_bias_kv=add_bias_kv, add_zero_attn=add_zero_attn),
+                forward_input=FunctionInput(make_input((3, 3)), make_input((3, 3)), make_input((3, 3))),
+                reference_fn=partial(no_batch_dim_reference_mha, batch_first=False),
+            )
+        )
+
+    return samples
+
 
 # Database of ModuleInfo entries in alphabetical order.
 module_db: List[ModuleInfo] = [
