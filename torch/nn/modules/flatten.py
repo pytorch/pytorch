@@ -21,10 +21,16 @@ class Flatten(Module):
 
     Examples::
         >>> input = torch.randn(32, 1, 5, 5)
+        >>> #With default parameters
         >>> m = nn.Flatten()
         >>> output = m(input)
         >>> output.size()
         torch.Size([32, 25])
+        >>> #With non-default parameters
+        >>> m = nn.Flatten(0, 2)
+        >>> output = m(input)
+        >>> output.size()
+        torch.Size([160, 5])
     """
     __constants__ = ['start_dim', 'end_dim']
     start_dim: int
