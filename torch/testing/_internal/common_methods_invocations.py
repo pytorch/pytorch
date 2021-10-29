@@ -2811,6 +2811,10 @@ def sample_inputs_unique(op_info, device, dtype, requires_grad, **kwargs):
         for dim in dim_choices:
             kwargs = dict(sorted=sorted, return_inverse=return_inverse, return_counts=return_counts, dim=dim)
 
+            # sample inputs without sorted=True are reused for torch.unique_consecutive which does not take a sorted kwarg
+            if not sorted:
+                kwargs.pop("sorted")
+
             # construct a test case with a single unique value (0)
             input_t = torch.zeros(shape, dtype=dtype, device=device, requires_grad=requires_grad)
             sample_inputs.append(SampleInput(input_t, kwargs=kwargs))
@@ -2832,6 +2836,10 @@ def sample_inputs_unique(op_info, device, dtype, requires_grad, **kwargs):
                 sample_inputs.append(SampleInput(input_t, kwargs=kwargs))
 
     return sample_inputs
+
+def sample_inputs_unique_consecutive(*args, **kwargs):
+    return [sample_input for sample_input in sample_inputs_unique(*args, **kwargs)
+            if "sorted" not in sample_input.kwargs]
 
 def sample_inputs_index_fill(op_info, device, dtype, requires_grad, **kwargs):
     samples = []
@@ -9963,6 +9971,14 @@ op_db: List[OpInfo] = [
                #  def the_method(i0):
                #      return i0.unique(sorted=False, return_inverse=False, return_counts=False, dim=None)
                #                 ~~~~~~~~~ <--- HERE
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+           )),
+    OpInfo('unique_consecutive',
+           dtypes=all_types_and(torch.bool),
+           sample_inputs_func=sample_inputs_unique_consecutive,
+           supports_out=False,
+           supports_autograd=False,
+           skips=(
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
            )),
     OpInfo('put',
