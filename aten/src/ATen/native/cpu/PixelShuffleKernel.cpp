@@ -3,6 +3,8 @@
 #include <ATen/Parallel.h>
 #include <ATen/native/cpu/utils.h>
 #include <ATen/native/cpu/PixelShuffleKernel.h>
+#include <ATen/cpu/vec/vec.h>
+#include <c10/util/irange.h>
 
 namespace at { namespace native {
 
@@ -39,7 +41,7 @@ void cpu_pixel_shuffle(
     int64_t n{0}, c{0}, h{0}, s1{0}, w{0}, s2{0};
     data_index_init(begin, n, nbatch, c, sub_channels, h, height, s1, S, w, width, s2, S);
 
-    for (int64_t i = begin; i < end; i++) {
+    for (const auto i : c10::irange(begin, end)) {
       int64_t input_offset = n * stride_n + c * stride_c + s1 * stride_s1 +
           s2 * stride_s2 + h * stride_h + w * stride_w;
       output_data[i] = input_data[input_offset];
@@ -77,16 +79,41 @@ void cpu_pixel_shuffle_channels_last(
 
   // input tensor shape of [n, h, w, c, s1, s2]
   // output tensor shape of [n, h, s1, w, s2, c]
-  at::parallel_for(0, numel, 0, [&](int64_t begin, int64_t end) {
-    int64_t n{0}, h{0}, s1{0}, w{0}, s2{0}, c{0};
-    data_index_init(begin, n, nbatch, h, height, s1, S, w, width, s2, S, c, sub_channels);
+  using Vec = vec::Vectorized<scalar_t>;
+  at::parallel_for(0, nbatch * height, 0, [&](int64_t begin, int64_t end) {
+    // temp buffer holding each channel lane
+    std::unique_ptr<scalar_t []> buffer(new scalar_t[channels]);
+    scalar_t* buffer_ptr = buffer.get();
 
-    for (int64_t i = begin; i < end; i++) {
-      int64_t input_offset = n * stride_n + h * stride_h + w * stride_w +
-          c * stride_c + s1 * stride_s1 + s2 * stride_s2;
-      output_data[i] = input_data[input_offset];
+    int64_t n{0}, h{0};
+    data_index_init(begin, n, nbatch, h, height);
+    for (const auto i : c10::irange(begin, end)) {
+      for (const auto w : c10::irange(width)) {
+        scalar_t* input_ptr = input_data + n * stride_n + h * stride_h + w * stride_w;
 
-      data_index_step(n, nbatch, h, height, s1, S, w, width, s2, S, c, sub_channels);
+        // step 1: transpose each channel lane
+        //   from: [c, s1*s2]
+        //   to:   [s1*s2, c]
+        utils::transpose(sub_channels, S * S, input_ptr, S * S, buffer.get(), sub_channels);
+
+        // step 2: copy from temp buffer to output
+        for (const auto s1 : c10::irange(S)) {
+          scalar_t* x_ptr = buffer.get() + s1 * S * sub_channels;
+          scalar_t* y_ptr = output_data + i * width * channels + s1 * width * S * sub_channels + w * S * sub_channels;
+
+          int64_t size = S * sub_channels;
+          int64_t d = 0;
+          for (; d < size - (size % Vec::size()); d += Vec::size()) {
+            Vec data_vec = Vec::loadu(x_ptr + d);
+            data_vec.store(y_ptr + d);
+          }
+          for (; d < size; d++) {
+            y_ptr[d] = x_ptr[d];
+          }
+        }
+      }
+
+      data_index_step(n, nbatch, h, height);
     }
   });
 }
@@ -122,7 +149,7 @@ void cpu_pixel_unshuffle(
     int64_t n{0}, c{0}, s1{0}, s2{0}, h{0}, w{0};
     data_index_init(begin, n, nbatch, c, sub_channels, s1, S, s2, S, h, height, w, width);
 
-    for (int64_t i = begin; i < end; i++) {
+    for (const auto i : c10::irange(begin, end)) {
       int64_t input_offset = n * stride_n + c * stride_c + h * stride_h +
           s1 * stride_s1 + w * stride_w + s2 * stride_s2;
       output_data[i] = input_data[input_offset];
@@ -164,7 +191,7 @@ void cpu_pixel_unshuffle_channels_last(
     int64_t n{0}, h{0}, w{0}, c{0}, s1{0}, s2{0};
     data_index_init(begin, n, nbatch, h, height, w, width, c, sub_channels, s1, S, s2, S);
 
-    for (int64_t i = begin; i < end; i++) {
+    for (const auto i : c10::irange(begin, end)) {
       int64_t input_offset = n * stride_n + h * stride_h + s1 * stride_s1 +
           w * stride_w + s2 * stride_s2 + c * stride_c;
       output_data[i] = input_data[input_offset];
