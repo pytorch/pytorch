@@ -69,13 +69,71 @@ kir::Bool* ParallelizedDomainPredicate::PredicateInfo::getPredicate() const {
   return pred;
 }
 
+namespace {
+
+std::unordered_set<Val*> getNonUnswitchedRootDomains(
+    const std::vector<kir::ForLoop*>& loops,
+    size_t unswitched_loop_index) {
+  const auto gpu_lower = GpuLower::current();
+
+  std::vector<Val*> non_unswited_leaf_domains;
+  std::transform(
+      loops.begin(),
+      loops.begin() + unswitched_loop_index,
+      std::back_inserter(non_unswited_leaf_domains),
+      [&](kir::ForLoop* loop) {
+        return gpu_lower->caIndexMap().toFusion(loop->iter_domain());
+      });
+
+  auto non_unswitched_inputs =
+      IterVisitor::getInputsTo(non_unswited_leaf_domains);
+
+  auto non_unswitched_root_doms =
+      ir_utils::filterByType<IterDomain>(non_unswitched_inputs);
+
+  std::unordered_set<Val*> non_unswitched_concrete_root_domains;
+
+  std::transform(
+      non_unswitched_root_doms.begin(),
+      non_unswitched_root_doms.end(),
+      std::inserter(
+          non_unswitched_concrete_root_domains,
+          non_unswitched_concrete_root_domains.end()),
+      [&](auto root_dom) {
+        return gpu_lower->caIndexMap().getConcreteMappedID(root_dom);
+      });
+
+  return non_unswitched_concrete_root_domains;
+}
+
+bool isFullyUnswitched(
+    kir::IterDomain* loop_id,
+    const std::unordered_set<Val*>& non_unswitched_root_domains) {
+  const auto gpu_lower = GpuLower::current();
+
+  auto root_vals =
+      IterVisitor::getInputsTo({gpu_lower->caIndexMap().toFusion(loop_id)});
+
+  auto root_domains = ir_utils::filterByType<IterDomain>(root_vals);
+
+  return std::none_of(
+      root_domains.begin(), root_domains.end(), [&](auto root_dom) {
+        auto concrete_root_dom =
+            gpu_lower->caIndexMap().getConcreteMappedID(root_dom);
+        return non_unswitched_root_domains.count(concrete_root_dom) > 0;
+      });
+}
+
+} // namespace
+
 std::unordered_map<
     ParallelType,
     ParallelizedDomainPredicate::PredicateInfo,
     TypeHash>
 ParallelizedDomainPredicate::getPredicateMap(
     const kir::Expr* expr,
-    const std::vector<kir::ForLoop*>& loops) {
+    const std::vector<kir::ForLoop*>& loops,
+    kir::ForLoop* unswitched_loop) {
   const auto gpu_lower = GpuLower::current();
   kir::IrBuilder ir_builder(gpu_lower->kernel());
 
@@ -95,14 +153,34 @@ ParallelizedDomainPredicate::getPredicateMap(
   // threading dimension. If yes and it's used in the given expr, the
   // domain needs to be protected by a predicate on the thread/block
   // index.
-  for (auto loop : loops) {
+
+  bool within_unswitch = false;
+  std::unordered_set<Val*> non_unswitched_root_domains;
+
+  for (const auto i : c10::irange(loops.size())) {
+    auto loop = loops[i];
+
+    // Parallel dimensions need not be predicated if fully unswitched.
+    if (loop == unswitched_loop) {
+      within_unswitch = true;
+      non_unswitched_root_domains = getNonUnswitchedRootDomains(loops, i);
+    }
+
     auto loop_id = loop->iter_domain();
     auto loop_ptype = loop_id->parallelType();
+
     // Not necessary to add a predicate if the paralle type is exact
     if (!isParallelTypeThread(loop_ptype) ||
         gpu_lower->parallelDimensionMap().isExact(loop_ptype)) {
       continue;
     }
+
+    // Parallel dimensions need not be predicated if fully unswitched.
+    if (within_unswitch &&
+        isFullyUnswitched(loop_id, non_unswitched_root_domains)) {
+      continue;
+    }
+
     for (auto tv : output_tvs) {
       // Check if the loop domain is used by the output tensor
       auto it = std::find_if(
@@ -516,8 +594,25 @@ void UnswitchPredicate::predicateOn(kir::Expr* tv_expr) {
     }
   }
 
-  // Note that non-exact parallelized leaf domains do not need to be
-  // predicated in the case of unswitch (#1182).
+  // Adds new predicates for parallelized domains
+  auto pred_map = ParallelizedDomainPredicate::getPredicateMap(
+      tv_expr, for_loops_, unrolled_loop_);
+  for (auto pt : kParallelTypeThreads) {
+    auto pred_info_it = pred_map.find(pt);
+    if (pred_info_it == pred_map.end()) {
+      continue;
+    }
+    const auto& new_info = pred_info_it->second;
+    auto& predicated =
+        parallelized_dom_predicates_
+            .insert({pt, ParallelizedDomainPredicate::PredicateInfo{pt}})
+            .first->second;
+    for (auto id : new_info.ids()) {
+      if (predicated.addDomain(id)) {
+        predicates_.push_back(new_info.getPredicate());
+      }
+    }
+  }
 }
 
 void UnswitchPredicate::openLoop(kir::ForLoop* fl) {

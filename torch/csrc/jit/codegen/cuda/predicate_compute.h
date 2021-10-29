@@ -65,7 +65,8 @@ class ParallelizedDomainPredicate {
   static std::unordered_map<ParallelType, PredicateInfo, TypeHash>
   getPredicateMap(
       const kir::Expr* expr,
-      const std::vector<kir::ForLoop*>& loops);
+      const std::vector<kir::ForLoop*>& loops,
+      kir::ForLoop* unswitched_loop = nullptr);
 };
 
 //! Keys to identify unique unswitch predicates. Just consists of a
@@ -171,6 +172,13 @@ class TORCH_CUDA_CU_API UnswitchPredicate {
 
   //! The predicates that have been recorded but not yet finalized
   std::vector<MergedPredicates> pending_predicates_;
+
+  //! Track which parallelized domains have been predicated
+  std::unordered_map<
+      ParallelType,
+      ParallelizedDomainPredicate::PredicateInfo,
+      TypeHash>
+      parallelized_dom_predicates_;
 
   //! The predicates that have been generated.
   std::vector<kir::Bool*> predicates_;

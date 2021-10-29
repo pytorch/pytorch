@@ -18148,6 +18148,58 @@ TEST(NVFuserTest, FusionRfactorContigIDs_CUDA) {
   testValidate(&fusion, outputs, aten_inputs, {ref}, __LINE__, __FILE__);
 }
 
+TEST(NVFuserTest, FusionIssue1223_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = sum(tv1, {0, 1});
+  fusion.addOutput(tv2);
+
+  auto tv3 = add(tv0, new Double(0));
+  fusion.addOutput(tv3);
+
+  tv2->split(0, 4);
+  tv2->split(1, 1, false);
+  tv2->split(-1, 4);
+
+  tv2->axis(1)->parallelize(ParallelType::Unswitch);
+  tv2->axis(-3)->parallelize(ParallelType::TIDx);
+  tv2->axis(-1)->parallelize(ParallelType::TIDy);
+
+  tv1->computeAt(tv2, -1);
+
+  // Make TIDx and TIDy non-exact
+  tv3->split(0, 32);
+  tv3->split(-1, 32);
+  tv3->axis(1)->parallelize(ParallelType::TIDx);
+  tv3->axis(3)->parallelize(ParallelType::TIDy);
+
+  // The second axis of both tv1 and tv2 are fully unswitched, so they
+  // don't need to predicate the parallel type usage of TIDy, whereas
+  // the first axis is only partially unswitched, i.e., part of its
+  // split output domains is outside the unswitched axis, so the first
+  // axis, which uses TIDx, needs to predicate the parallel
+  // dimension. Previously, as reported in issue #1223, unswitched
+  // expressions didn't predicate parallel dimensions. It should be
+  // fixed by PR #1222.
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor at_t0 = at::ones({11, 10}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_outputs = fe.runFusion({at_t0});
+
+  auto at_t1 = (at_t0 + 1).sum();
+
+  testValidate(
+      &fusion, cg_outputs, {at_t0}, {at_t1, at_t0}, __LINE__, __FILE__);
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)
