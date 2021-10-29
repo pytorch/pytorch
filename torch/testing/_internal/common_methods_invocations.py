@@ -3030,6 +3030,91 @@ def sample_inputs_conv2d(op_info, device, dtype, requires_grad, jit_fail_sample=
     return list(generator())
 
 
+def sample_inputs_group_norm(opinfo, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # Ordered as input shape, num groups, and eps
+    cases: Tuple[Tuple[int], int, float] = (  # type: ignore[assignment]
+        ((1, 6, 3), 2, 0.5),
+        ((2, 6, 3), 2, -0.5),
+        ((1, 2), 1, None),
+        ((0, 2), 1, None),
+    )
+
+    def generator():
+        for input_shape, num_groups, eps in cases:
+            # Shape of weight and bias should be the same as num_channels
+            weight = make_arg(input_shape[1])
+            bias = make_arg(input_shape[1])
+            yield SampleInput(
+                make_arg(input_shape),
+                args=(num_groups,),
+                kwargs={'weight': weight, 'bias': bias} if eps is None else {'weight': weight, 'bias': bias, 'eps': eps}
+            )
+        # Without any optional args
+        yield SampleInput(make_arg((1, 2)), args=(1,))
+
+    return list(generator())
+
+
+def sample_inputs_instance_norm(opinfo, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_arg_without_requires_grad = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
+
+    # Ordered as: input shape, kwargs for momentum, eps
+    cases: Tuple[Tuple[int], dict] = (  # type: ignore[assignment]
+        ((S, S, S), {'momentum': 0.5, 'eps': 0.6}),
+        ((S, S, S), {'momentum': 0.5, 'eps': 0.6, 'use_input_stats': True}),
+        ((3, 2, 4), {'momentum': -1.2}),
+        ((3, 2, 4), {'momentum': 0.0}),
+        ((3, 2, 3, 4), {'momentum': -1.0, 'eps': 0.5}),
+        ((3, 2, 3, 4), {'momentum': -1.0, 'eps': 0.5}),
+    )
+
+    def generator():
+        for input_shape, kwargs in cases:
+            # args: running mean, running var, weight and bias should necessarily be of shape: (channels,)
+            channels = input_shape[1] if len(input_shape) > 1 else 0
+            weight = make_arg(channels) if channels > 0 else None
+            bias = make_arg(channels) if channels > 0 else None
+            running_mean = make_arg_without_requires_grad(channels, low=0)
+            running_var = make_arg_without_requires_grad(channels, low=0)
+            new_kwargs = {
+                'running_mean': running_mean,
+                'running_var': running_var,
+                'weight': make_arg(channels),
+                'bias': make_arg(channels),
+                **kwargs
+            }
+
+            yield SampleInput(
+                make_arg(input_shape),
+                args=(),
+                kwargs=new_kwargs
+            )
+
+        # Checking for permutations of weights and biases as `None`
+        weights = [channels, None, None]
+        biases = [None, channels, None]
+
+        for weight, bias in zip(weights, biases):
+            yield SampleInput(
+                make_arg(input_shape),
+                args=(),
+                kwargs={
+                    'running_mean': running_mean,
+                    'running_var': running_var,
+                    'weight': make_arg(channels),
+                    'bias': make_arg(channels)
+                }
+            )
+
+        # Test case for no optional kwargs
+        yield SampleInput(make_arg((1, 2, 3)), kwargs={})
+
+    return list(generator())
+
+
 def sample_inputs_layer_norm(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -3065,6 +3150,32 @@ def sample_inputs_layer_norm(opinfo, device, dtype, requires_grad, **kwargs):
         # yield SampleInput(make_arg((1, 2)), args=((2,), None, make_arg((2,))))
 
     return list(generator())
+
+
+def sample_inputs_local_response_norm(opinfo, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # Ordered as input shape, size and a kwarg dict for alpha, beta, and k
+    cases: Tuple[Tuple[int], Tuple[int], dict] = (  # type: ignore[assignment]
+        ((1, 6, 3), 2, {'alpha': 3e-05, 'beta': 0.5, 'k': 1.25}),
+        ((1, 6, 3), 2, {'beta': 0.5, 'k': 1.25}),
+        ((1, 6, 3), 2, {'alpha': 3e-05, 'k': 1.25}),
+        ((1, 6, 3), 2, {'alpha': 3e-05, 'beta': 0.5}),
+        ((1, 6, 3), 2, {'alpha': 3e-05}),
+        ((1, 6, 3), 2, {'beta': 0.5}),
+        ((1, 6, 3), 2, {'k': 1.25}),
+        ((1, 6, 3), 2, {}),
+        ((2, 6, 3), 2, {'alpha': 3e-05, 'beta': 0.5, 'k': 1.25}),
+        ((1, 1, 2), 1, {'alpha': 3e-05, 'beta': 0.5, 'k': 1.25}),
+        ((0, 1, 2), 1, {'alpha': 3e-05, 'beta': 0.5, 'k': 1.25}),
+    )
+
+    def generator():
+        for input_shape, size, kwargs in cases:
+            yield SampleInput(make_arg(input_shape), args=(size,), kwargs=kwargs)
+
+    return list(generator())
+
 
 def sample_inputs_hardswish(self, device, dtype, requires_grad):
     N = 5
@@ -6546,6 +6657,25 @@ def reference_layer_norm(inp: np.ndarray, normalized_shape: Tuple[int], weight=N
         Y = Y * weight.reshape(-1) + bias.reshape(-1)
     return Y.reshape(*inp.shape)
 
+def reference_group_norm(inp: np.ndarray, num_groups: int, weight=None, bias=None, eps=1e-5):
+    inp_view = inp
+    if np.prod(inp.shape) != 0:
+        inp_view = inp.reshape((inp.shape[0], num_groups, -1))
+    mean = inp_view.mean(axis=-1, keepdims=True)
+    var = inp_view.var(axis=-1, ddof=0, keepdims=True)
+    Y = (inp_view - mean) / np.sqrt(var + eps)
+    Y = Y.reshape(inp.shape)
+    if weight is not None:
+        # weight is a vector of length equal to the channel
+        if len(Y.shape) > 2:
+            weight = np.tile(np.expand_dims(weight, 1), [1] + list(inp.shape[2:]))
+        Y = Y * weight
+    if bias is not None:
+        # bias is a vector of length equal to the channel
+        if len(Y.shape) > 2:
+            bias = np.tile(np.expand_dims(bias, 1), [1] + list(inp.shape[2:]))
+        Y = Y + bias
+    return Y
 
 def gradcheck_wrapper_hermitian_input(op, input, *args, **kwargs):
     """Gradcheck wrapper for functions that take Hermitian matrices as input.
@@ -8576,6 +8706,30 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
            ),
            supports_out=False,),
+    OpInfo('nn.functional.group_norm',
+           aten_name='group_norm',
+           aliases=('group_norm',),
+           ref=reference_group_norm,
+           dtypes=floating_types(),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           supports_out=False,
+           decorators=[
+               # RuntimeError: Cannot insert a Tensor that requires grad as a constant.
+               # Consider making it a parameter or input, or detaching the gradient
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,))
+           ],
+           sample_inputs_func=sample_inputs_group_norm,),
+    OpInfo('nn.functional.instance_norm',
+           # no ref because instance_norm will often have numerical instability (large numbers or nan)
+           dtypes=floating_types(),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           supports_out=False,
+           decorators=[
+               # RuntimeError: Cannot insert a Tensor that requires grad as a constant.
+               # Consider making it a parameter or input, or detaching the gradient
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,))
+           ],
+           sample_inputs_func=sample_inputs_instance_norm,),
     OpInfo('nn.functional.layer_norm',
            aten_name='layer_norm',
            aliases=('layer_norm',),
@@ -8590,6 +8744,16 @@ op_db: List[OpInfo] = [
                )
            ],
            sample_inputs_func=sample_inputs_layer_norm,),
+    OpInfo('nn.functional.local_response_norm',
+           dtypes=floating_types_and(torch.int64),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           supports_out=False,
+           decorators=[
+               # RuntimeError: falseINTERNAL ASSERT FAILED at
+               # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":185, please report a bug to PyTorch.
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,))
+           ],
+           sample_inputs_func=sample_inputs_local_response_norm,),
     OpInfo('nn.functional.pad',
            variant_test_name='constant',
            aten_name='constant_pad_nd',
