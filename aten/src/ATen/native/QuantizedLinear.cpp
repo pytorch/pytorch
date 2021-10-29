@@ -206,9 +206,9 @@ void CalcColOffsetsTranspose(
     const int8_t* Bint8,
     int32_t B_zero_point,
     int32_t* col_offsets) {
-  for (int i = 0; i < N; ++i) {
+  for (const auto i : c10::irange(N)) {
     int32_t sum = 0;
-    for (int j = 0; j < K; ++j) {
+    for (const auto j : c10::irange(K)) {
       sum += Bint8[i * K + j];
     }
     col_offsets[i] = sum - B_zero_point * K;
@@ -353,7 +353,7 @@ bool CheckAndSaturate(T max_val, T* element) {
 void HandleWeightsSaturation(int64_t N, float* weight) {
   const float kFp16Max = RawUint16ToFp16(0x7BFF);
   bool found_out_of_range = false;
-  for (int64_t i = 0; i < N; ++i) {
+  for (const auto i : c10::irange(N)) {
     if (CheckAndSaturate<float>(kFp16Max, weight + i)) {
       found_out_of_range = true;
     }

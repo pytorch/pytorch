@@ -161,7 +161,7 @@ if(BUILD_CAFFE2 AND (NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE))
   # add_subdirectory(test) # todo: use caffe2_gtest_main instead of gtest_main because we will need to call GlobalInit
   add_subdirectory(transforms)
 endif()
-if(NOT BUILD_CAFFE2)
+if(NOT BUILD_CAFFE2 AND (NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE))
   add_subdirectory(proto)
 endif()
 
@@ -588,6 +588,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/jit/mobile/backport_manager.cpp
       ${TORCH_SRC_DIR}/csrc/jit/serialization/onnx.cpp
       ${TORCH_SRC_DIR}/csrc/jit/serialization/export.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/serialization/export_bytecode.cpp
       ${TORCH_SRC_DIR}/csrc/jit/serialization/export_module.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/cpu/fused_kernel.cpp
       ${TORCH_SRC_DIR}/csrc/jit/api/module_save.cpp
@@ -1055,7 +1056,8 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   if(BUILD_SPLIT_CUDA AND MSVC)
     # -INCLUDE is used to ensure torch_cuda_cpp/cu are linked against in a project that relies on them.
     target_link_libraries(torch_cuda_cpp INTERFACE "-INCLUDE:?warp_size@cuda@at@@YAHXZ")
-    target_link_libraries(torch_cuda_cu INTERFACE "-INCLUDE:?searchsorted_cuda@native@at@@YA?AVTensor@2@AEBV32@0_N1@Z")
+    # See [Note about _torch_cuda_cu_linker_symbol_op and torch_cuda_cu] in native_functions.yaml
+    target_link_libraries(torch_cuda_cu INTERFACE "-INCLUDE:?_torch_cuda_cu_linker_symbol_op_cuda@native@at@@YA?AVTensor@2@AEBV32@@Z")
   elseif(USE_CUDA AND MSVC)
     # -INCLUDE is used to ensure torch_cuda is linked against in a project that relies on them.
     # Related issue: https://github.com/pytorch/pytorch/issues/31611
@@ -1851,7 +1853,7 @@ if(BUILD_TEST)
   endif()
 
   # For special tests that explicitly uses dependencies, we add them here
-  if(USE_MPI)
+  if(BUILD_CAFFE2 AND USE_MPI)
     target_link_libraries(mpi_test ${MPI_CXX_LIBRARIES})
     if(USE_CUDA)
       target_link_libraries(mpi_gpu_test ${MPI_CXX_LIBRARIES})
