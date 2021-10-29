@@ -426,7 +426,7 @@ TensorView* binaryOp(
   return binaryOp(
       type,
       casted_values.front()->as<TensorView>(),
-      casted_values.back()->as<TensorView>(),
+      casted_values.back(),
       common_dtype);
 }
 
@@ -440,7 +440,7 @@ TensorView* binaryOp(
   auto casted_values = promoteValues(operands, common_dtype);
   return binaryOp(
       type,
-      casted_values.front()->as<TensorView>(),
+      casted_values.front(),
       casted_values.back()->as<TensorView>(),
       common_dtype);
 }
