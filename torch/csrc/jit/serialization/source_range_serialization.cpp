@@ -17,21 +17,22 @@ class SourceRangeSerializer {
   // Serialize Source as Tuple[str, Optional[str], int, List[int]]
   // This caches serialized sources, since many SourceRanges can
   // refer to the same one.
-  c10::IValue serialize_source(const std::shared_ptr<Source>& s);
+  c10::IValue serialize_source(const std::shared_ptr<SourceView>& s);
 
-  std::unordered_map<std::shared_ptr<Source>, c10::IValue> serialized_sources;
+  std::unordered_map<std::shared_ptr<SourceView>, c10::IValue>
+      serialized_sources;
 };
 
 SourceRange SourceRangeDeserializer::deserialize(const c10::IValue& iv) {
   const auto& tup_elems = iv.toTuple()->elements();
   TORCH_INTERNAL_ASSERT(tup_elems.size() == 3);
-  std::shared_ptr<Source> source_ = deserialize_source(tup_elems[0]);
+  std::shared_ptr<SourceView> source_ = deserialize_source(tup_elems[0]);
   int64_t start_ = tup_elems[1].toInt();
   int64_t end_ = tup_elems[2].toInt();
   return SourceRange(source_, start_, end_);
 }
 
-std::shared_ptr<Source> SourceRangeDeserializer::deserialize_source(
+std::shared_ptr<SourceView> SourceRangeDeserializer::deserialize_source(
     const c10::IValue& iv) {
   auto tup = iv.toTuple();
   auto it = cached_sources.find(tup);
@@ -58,7 +59,7 @@ c10::IValue SourceRangeSerializer::serialize(const SourceRange& sr) {
 }
 
 c10::IValue SourceRangeSerializer::serialize_source(
-    const std::shared_ptr<Source>& s) {
+    const std::shared_ptr<SourceView>& s) {
   if (serialized_sources.count(s)) {
     return serialized_sources.at(s);
   }

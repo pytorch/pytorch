@@ -11,6 +11,7 @@
 #include <c10/util/Exception.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/core/QEngine.h>
+#include <c10/util/irange.h>
 
 #include <memory>
 #include <mutex>
@@ -351,7 +352,7 @@ static inline void manual_seed(uint64_t seed) {
   // available. In that case, we must not seed CUDA; it will fail!
   const auto num_gpus = detail::getCUDAHooks().getNumGPUs();
   if (hasCUDA() && num_gpus > 0) {
-    for (int i = 0; i < num_gpus; i++) {
+    for (const auto i : c10::irange(num_gpus)) {
       auto cuda_gen = globalContext().defaultGenerator(
         Device(at::kCUDA, static_cast<c10::DeviceIndex>(i))
       );
