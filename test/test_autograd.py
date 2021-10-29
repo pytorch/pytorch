@@ -1,3 +1,5 @@
+# Owner(s): ["module: autograd"]
+
 import gc
 import io
 import math
@@ -2784,7 +2786,7 @@ class TestAutograd(TestCase):
         # TODO: review if this can be ported to OpInfos or moved to test_linalg.py
         def run_symeig_test(k, sizes, largest=True):
             A = torch.rand(*sizes).double()
-            A = A.matmul(A.transpose(-1, -2)) / 10
+            A = (A @ A.mT) / 10
             A.requires_grad_(True)
 
             gradcheck(lambda A: func(k, A, largest), A, check_batched_grad=False)
@@ -2800,7 +2802,7 @@ class TestAutograd(TestCase):
             A = A.detach().requires_grad_(True)
             D, U = func(k, A, largest)
             (D.sum() + U.sum()).backward()
-            self.assertEqual(A.grad, A.grad.transpose(-1, -2))
+            self.assertEqual(A.grad, A.grad.mT)
 
         # the tests below take about 1-2 minutes to finish,
         # but we want to be extra sure that the backward is correct.
@@ -4323,6 +4325,39 @@ class TestAutograd(TestCase):
                                     fail_msg = bwd_fail_err_msg
                                 with self.assertRaisesRegex(RuntimeError, fail_msg):
                                     run()
+
+    def test_gradcheck_forward_ad_batched_grad(self):
+        x = torch.rand(2, dtype=torch.double, requires_grad=True)
+
+        # multiple inputs and outputs with non-tensors inputs
+        def fn1(a: torch.Tensor, b: int):
+            return a.clone(), a + 1
+        gradcheck(fn1, (x, 1), check_forward_ad=True, check_backward_ad=False, check_batched_grad=True,
+                  check_undefined_grad=False)
+
+        # unrelated inputs: tangent for c is None
+        def fn2(a: torch.Tensor, c: torch.Tensor):
+            return a.clone()
+        gradcheck(fn2, (x, x.clone()), check_forward_ad=True, check_backward_ad=False, check_batched_grad=True,
+                  check_undefined_grad=False)
+
+        class Fn(Function):
+            @staticmethod
+            def forward(ctx, foo):
+                return foo * 2
+
+            @staticmethod
+            def vjp(ctx, gO):
+                return gO * 2
+
+            @staticmethod
+            def jvp(ctx, gI):
+                torch.randn_like(gI)
+                return gI * 2
+
+        msg = "vmap: We do not yet support calling random operations inside of vmap"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            gradcheck(Fn.apply, (x,), check_forward_ad=True, check_batched_grad=True, check_batched_forward_grad=True)
 
     def test_version_counter(self):
         x = torch.randn(1, 2)
@@ -7443,6 +7478,13 @@ class TestAutogradFunctional(TestCase):
         self.assertEqual(hvp, torch.mm(hes, v.unsqueeze(1)).squeeze(1))
         self.assertEqual(vhp, torch.mm(v.unsqueeze(0), hes).squeeze(0))
 
+class TestAutogradForwardModeBatchedGrad(TestCase):
+    def test_out_of_place_basic(self):
+        a = torch.rand(4, 4, dtype=torch.double, requires_grad=True)
+        b = torch.rand(4, 4, dtype=torch.double, requires_grad=True)
+        self.assertTrue(gradcheck(torch.sin, a))
+        self.assertTrue(gradcheck(torch.add, (a, b)))
+
 class TestAutogradForwardMode(TestCase):
     def tearDown(self):
         # Ensure that a failing test won't make others fail
@@ -7759,6 +7801,31 @@ class TestAutogradForwardMode(TestCase):
             with self.assertRaisesRegex(RuntimeError, "out= function"):
                 torch.add(foo, bar, out=bar)
 
+    def test_non_differentiable(self):
+        with fwAD.dual_level():
+            foo = fwAD.make_dual(torch.rand(2), torch.rand(2))
+            bar = torch.rand(2)
+
+            # No differentiable outputs, shouldn't error
+            eq = foo == bar
+
+    def test_backward_graph_destruction(self):
+        def fn():
+            a = torch.rand(10, requires_grad=True)
+
+            da = fwAD.make_dual(torch.rand_like(a), a)
+
+            # Create an object with a c++ cycle as:
+            # db -> AutogradMeta -> ForwardGrad -> db's grad
+            # db's grad -> AutogradMeta -> MulBackward
+            # MulBackward -> SavedVariable -> db
+            db = da.exp()
+
+        with fwAD.dual_level():
+            fn()
+        # This test make sure that we don't deadlock on exit of this
+        # context manager. If you do, there is something wrong with the
+        # locking of the forward ad level most likely
 
 # Generic device type autograd tests.
 class TestAutogradDeviceType(TestCase):
@@ -8880,6 +8947,16 @@ class TestAutogradDeviceType(TestCase):
         x = torch.randn(3, 3, requires_grad=True)
         out = torch.signbit(x)
         self.assertFalse(out.requires_grad)
+
+    def test_warning_in_backward(self, device):
+        # Test warning during backward are always propagated as python warnings (gh-50209)
+        # NOTE: For device=cuda, warning gets propagated from a worker thread
+        a = torch.zeros((), device=device, requires_grad=True)
+        b = torch._C._nn._test_warn_in_autograd(a)
+
+        with self.assertWarnsRegex(UserWarning, "Warn from backward"):
+            b.backward()
+
 
 class TestAutogradInferenceMode(TestCase):
     def _is_inference_tensor(self, tensor):
