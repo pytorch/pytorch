@@ -1,11 +1,13 @@
 #include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/Dispatch.h>
 #include <ATen/CPUApplyUtils.h>
+#include <ATen/Dispatch.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/core/Reduction.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/PointwiseOps.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
+#include <c10/util/Exception.h>
 
 constexpr float EPSILON = 1e-12;
 
@@ -30,8 +32,10 @@ TORCH_META_FUNC(mse_loss)
   build_borrowing_binary_op(maybe_get_output(), input, target);
 
   if (reduction != Reduction::None) {
-    MetaBase::set_output(input.sizes(), input.options());
+    return;
   }
+
+  TORCH_INTERNAL_ASSERT(reduction == Reduction::Mean || reduction == Reduction::Sum);
 
   MetaBase::set_output({}, input.options());
 }
@@ -473,12 +477,12 @@ TORCH_IMPL_FUNC(mse_loss_out)
     auto iter = TensorIterator::borrowing_binary_op(loss, input, target);
     mse_stub(iter.device_type(), iter);
     if (reduction == Reduction::Mean) {
-      at::mean_out(const_cast<Tensor&>(result), iter.output(), 0);
+      at::mean_out(const_cast<Tensor&>(result), iter.output(), IntArrayRef{});
     } else {
-      at::sum_out(const_cast<Tensor&>(result), iter.output(), 0);
+      at::sum_out(const_cast<Tensor&>(result), iter.output(), IntArrayRef{});
     }
   } else {
-    auto iter = TensorIterator::borrowing_binary_op(result, input, target);
+    TensorIterator iter = *this;
     mse_stub(iter.device_type(), iter);
   }
 }
