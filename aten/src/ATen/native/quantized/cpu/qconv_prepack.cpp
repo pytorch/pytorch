@@ -91,7 +91,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeight<
         !transpose,
         "Per Channel Quantization is currently disabled for transposed conv");
     zero_points.resize(output_channels);
-    for (int i = 0; i < output_channels; ++i) {
+    for (const auto i : c10::irange(output_channels)) {
       zero_points[i] = weight.q_per_channel_zero_points()[i].item<int32_t>();
     }
   } else {
@@ -120,11 +120,11 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeight<
   const int inner_size =
       kernel_d * kernel_h * kernel_w * input_channels_per_group;
   for (const auto g : c10::irange(groups)) {
-    for (int i = 0; i < output_channels_per_group; ++i) {
+    for (const auto i : c10::irange(output_channels_per_group)) {
       // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       const int c = g * output_channels_per_group + i;
       int32_t sum = 0;
-      for (int j = 0; j < inner_size; ++j) {
+      for (const auto j : c10::irange(inner_size)) {
         sum += static_cast<int32_t>(weight_data_int8[c * inner_size + j]);
       }
       if (qtype == c10::kPerTensorAffine) {
@@ -140,7 +140,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeight<
     scales = {static_cast<float>(weight.q_scale())};
   } else if (qtype == c10::kPerChannelAffine) {
     scales.resize(output_channels);
-    for (int i = 0; i < output_channels; ++i) {
+    for (const auto i : c10::irange(output_channels)) {
       scales[i] = weight.q_per_channel_scales()[i].item<float>();
     }
   }
@@ -330,7 +330,8 @@ class QConvPackWeightInt8 final {
       int64_t groups) {
     torch::List<int64_t> output_padding;
     output_padding.reserve(kSpatialDim);
-    for (int idx = 0; idx < kSpatialDim; ++idx) {
+    for (const auto idx : c10::irange(kSpatialDim)) {
+      (void)idx; //Suppress unused variable warning
       output_padding.push_back((int64_t)0);
     }
     return _run(weight, bias, stride, padding, output_padding, dilation, groups,

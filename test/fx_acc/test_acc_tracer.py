@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: fx"]
+
 import unittest
 from typing import Callable, List
 
@@ -1941,5 +1943,7 @@ class AccTracerTest(unittest.TestCase):
                 acc_ops.gelu,
                 acc_ops.cumsum,
                 acc_ops.chunk,
+                acc_ops.rescale_quantize_per_tensor,
+                acc_ops.rescale_quantize_per_channel,
             },
         )

@@ -15,7 +15,6 @@ import platform
 import textwrap
 import ctypes
 import warnings
-from .autocast_mode import autocast
 if sys.version_info < (3,):
     raise Exception("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
 
@@ -654,6 +653,7 @@ def manager_path():
         raise RuntimeError("Unable to find torch_shm_manager at " + path)
     return path.encode('utf-8')
 
+from .autocast_mode import autocast
 
 # Shared memory manager needs to know the exact location of manager executable
 _C._initExtension(manager_path())
@@ -802,6 +802,11 @@ quantized_lstm = torch.ops.aten.quantized_lstm
 quantized_gru = torch.ops.aten.quantized_gru
 
 from torch.utils.dlpack import from_dlpack, to_dlpack
+
+# Import experimental masked operations support. See
+# [RFC-0016](https://github.com/pytorch/rfcs/pull/27) for more
+# information.
+from . import _masked
 
 
 def _register_device_module(device_type, module):

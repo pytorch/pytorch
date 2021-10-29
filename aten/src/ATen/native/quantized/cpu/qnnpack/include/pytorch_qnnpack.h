@@ -13,6 +13,8 @@
 #include <stdint.h>
 
 #include <pthreadpool.h>
+#include <qnnpack/log.h>
+#include <qnnpack/operator.h>
 
 #ifdef __cplusplus
 extern "C" {
