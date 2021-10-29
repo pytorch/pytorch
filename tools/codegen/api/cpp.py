@@ -8,7 +8,7 @@ from tools.codegen.api.types import (ArgName, BaseCType, Binding, ConstRefCType,
                                      tensorListT, dimnameListT, tensorT, voidT,
                                      BaseTypeToCppMapping, intArrayRefT, tensorOptionsT)
 from tools.codegen import local
-from typing import Optional, Sequence, Union, List, Set
+from typing import Optional, Sequence, Union, List, Set, Dict, Any
 
 # This file describes the translation of JIT schema to the public C++
 # API, which is what people use when they call functions like at::add.
@@ -306,70 +306,74 @@ def arguments(
             cpp_no_default_args=cpp_no_default_args)
     ]
 
-# map the C++ code to convert an ivalue to different types, based on schema type
-TYPE_CONVERSION = {
-        BaseTy.Generator: {
-            "default": "({}).toGenerator(),",
-            "optional": "({}).toOptional<at::Generator>(),"
-        },
-        BaseTy.ScalarType: {
-            "default": "({}).toScalarType(),",
-            "optional": "({}).toOptional<ScalarType>(),"
-        },
-        BaseTy.Tensor: {
-            "default": "({}).toTensor(),",
-            "optional": "toOptionalTensor({}),",
-            "list": "({}).toTensorList()->elements(),",
-        },
-        BaseTy.int: {
-            "default": "({}).toInt(),",
-            "optional": "({}).toOptional<int64_t>(),",
-            "list": "({}).toIntList()->elements(),",
-        },
-        BaseTy.Dimname: {
-            "default": "({}).toDimname(),",
-            "optional": "({}).toOptional<at::Dimname>(),",
-        },
-        BaseTy.float: {
-            "default": "({}).toDouble(),",
-            "optional": "({}).toOptional<double>(),",
-            "list": "({}).toDoubleList()->elements(),",
-        },
-        BaseTy.str: {
-            "default": "({}).toString()->string(),",
-            "optional": "({}).toOptional<c10::string_view>(),",
-        },
-        BaseTy.bool: {
-            "default": "({}).toBool(),",
-            "optional": "({}).toOptional<bool>(),",
-            "list": "({}).toBoolList()->elements(),",
-        },
-        BaseTy.Layout: {
-            "default": "({}).toLayout(),",
-            "optional": "({}).toOptional<at::Layout>(),",
-        },
-        BaseTy.Device: {
-            "default": "({}).toDevice(),",
-            "optional": "({}).toOptional<c10::Device>(),",
-        },
-        BaseTy.Scalar: {
-            "default": "({}).toScalar(),",
-            "optional": "({}).toOptional<at::Scalar>(),",
-        },
-        BaseTy.MemoryFormat: {
-            "default": "({}).toMemoryFormat(),",
-            "optional": "({}).toOptional<at::MemoryFormat>(),",
-        },
-        BaseTy.QScheme: {
-            "default": "({}).toQScheme(),",
-            "optional": "({}).toOptional<at::QScheme>(),",
-        },
-        BaseTy.Storage: {
-            "default": "({}).toStorage(),",
-            "optional": "({}).toOptional<at::Storage>(),",
-        },
-        BaseTy.Stream: {
-            "default": "({}).toStream(),",
-            "optional": "({}).toOptional<c10::Stream>(),",
-        },
-    }
+
+def argumenttype_ivalue_convert_wrapper(arg: Argument, ival_str: str) -> (str, str):
+    result = argumenttype_ivalue_convert(arg.type, ival_str, arg.name)
+    return '\n'.join(result['code']), result['val_name']
+
+
+# Take an argument in JIT type format, returns the C++ code to convert an ivalue from stack to corresponding C++ type.
+def argumenttype_ivalue_convert(t: Type, ival: str, arg_name: str) -> Dict[str, Any]:
+    if isinstance(t, BaseType):
+        ctype = argumenttype_type(t=t, mutable=True, binds=name).cpp_type(strip_ref=True)
+        return {
+            "code": [f"const {ctype} {arg_name}_base = {ival}.to<{ctype}>();"],
+            "val_name": f"{arg_name}_base",
+            "ctype": ctype,
+        }
+    elif isinstance(t, OptionalType):
+        in_name = arg_name + "_opt_in"
+        out_name = arg_name + "_opt_out"
+        connector = '\n\t'
+        res = argumenttype_ivalue_convert(t.elem, in_name, arg_name)
+        ctype = f"c10::optional<{res['ctype']}>"
+        code = f"""
+{arg_name + "_opt"} = {ival}.toOptional<c10::IValue>();
+{ctype} {out_name};
+if ({arg_name + "_opt"}.has_value()) {{
+    const c10::IValue {in_name} = {arg_name + "_opt"}.value();
+    {connector.join(res['code'])}
+    {out_name} = {ctype}({res['val_name']});
+}} else {{
+    {out_name} = {ctype}();
+}}
+        """.split('\n')
+        return {
+            "code": code,
+            "val_name": out_name,
+            "ctype": ctype,
+        }
+    elif isinstance(t, ListType):
+        in_name = arg_name + "_list_in"
+        out_name = arg_name + "_list_out"
+        elem_name = arg_name + "_elem"
+        code = [f"const c10::List<c10::IValue> {in_name} = {ival}.toList();"]
+        res = argumenttype_ivalue_convert(t.elem, elem_name, arg_name)
+        connector = '\n\t'
+        # we have to use c10::List for optional element. e.g., Tensor?[] -> c10::List<c10::optional<at::Tensor>>
+        if isinstance(t.elem, OptionalType):
+            ctype = f"c10::List<{res['ctype']}>"
+            code.extend(f"""
+{ctype} {out_name};
+for (auto {elem_name}: {in_name}) {{
+    {connector.join(res['code'])}
+    {out_name}.push_back({res['val_name']});
+}}
+            """.split('\n'))
+        else:
+            # use ArrayRef as default.
+            ctype = f"at::ArrayRef<{res['ctype']}>"
+            vec_name = arg_name + "_vec"
+            code.extend(f"""
+std::vector<{res['ctype']}> {vec_name};
+for (auto {elem_name}: {in_name}) {{
+    {connector.join(res['code'])}
+    {vec_name}.push_back({res['val_name']});
+}}
+{ctype} {out_name}({vec_name});
+            """.split('\n'))
+        return {
+            "code": code,
+            "val_name": out_name,
+            "ctype": ctype,
+        }
