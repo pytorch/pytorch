@@ -79,60 +79,117 @@ templates_path = ['_templates']
 
 # TODO: document these and remove them from here.
 
-coverage_ignore_modules = [
-    "torch.autograd",
-    "torch.cuda",
-    "torch.distributed",
-    "torch.distributions",
-    "torch.hub",
-    "torch.jit.unsupported_tensor_ops",
-    "torch.onnx",
-    "torch.nn.quantized.functional",
-    "torchvision",
-]
-
 coverage_ignore_functions = [
+    # torch.autograd
+    "register_py_tensor_class_for_device",
+    "variable",
+    # torch.cuda
+    "check_error",
+    "cudart",
+    "is_bf16_supported",
+    # torch.distributed.autograd
+    "is_available",
+    # torch.distributed.elastic.events
+    "construct_and_record_rdzv_event",
+    "record_rdzv_event",
+    # torch.distributed.elastic.metrics
+    "initialize_metrics",
+    # torch.distributed.elastic.rendezvous.registry
+    "get_rendezvous_handler",
+    # torch.distributed.launch
+    "launch",
+    "main",
+    "parse_args",
+    # torch.distributed.rpc
+    "is_available",
+    # torch.distributed.run
+    "config_from_args",
+    "determine_local_world_size",
+    "get_args_parser",
+    "get_rdzv_endpoint",
+    "get_use_env",
+    "main",
+    "parse_args",
+    "parse_min_max_nnodes",
+    "run",
+    "run_script_path",
+    # torch.distributions.constraints
+    "is_dependent",
+    # torch.hub
+    "import_module",
     # torch.jit
-    "annotate",
     "export_opnames",
-    "fuser",
-    "indent",
-    "interface",
-    "is_tracing",
-    "make_module",
-    "make_tuple",
-    "optimized_execution",
-    "script_method",
-    "validate_map_location",
-    "verify",
-    "whichmodule",
-    "wrap_check_inputs",
-    # torch
-    # TODO: This should be documented eventually, but only after
-    # we build out more support for meta functions and actually
-    # do a release with it
-    "empty_meta",
+    # torch.jit.unsupported_tensor_ops
+    "execWrapper",
+    # torch.onnx
+    "unregister_custom_op_symbolic",
 ]
 
 coverage_ignore_classes = [
+    # torch.cuda
+    "BFloat16Storage",
+    "BFloat16Tensor",
+    "BoolStorage",
+    "BoolTensor",
+    "ByteStorage",
+    "ByteTensor",
+    "CharStorage",
+    "CharTensor",
+    "ComplexDoubleStorage",
+    "ComplexFloatStorage",
+    "CudaError",
+    "DeferredCudaCallError",
+    "DoubleStorage",
+    "DoubleTensor",
+    "FloatStorage",
+    "FloatTensor",
+    "HalfStorage",
+    "HalfTensor",
+    "IntStorage",
+    "IntTensor",
+    "LongStorage",
+    "LongTensor",
+    "ShortStorage",
+    "ShortTensor",
+    "UntypedStorage",
+    "cudaStatus",
+    # torch.distributed.elastic.multiprocessing.errors
+    "ChildFailedError",
+    "ProcessFailure",
+    # torch.distributions.constraints
+    "cat",
+    "greater_than",
+    "greater_than_eq",
+    "half_open_interval",
+    "independent",
+    "integer_interval",
+    "interval",
+    "less_than",
+    "multinomial",
+    "stack",
+    # torch.distributions.transforms
+    "AffineTransform",
+    "CatTransform",
+    "ComposeTransform",
+    "CorrCholeskyTransform",
+    "ExpTransform",
+    "IndependentTransform",
+    "PowerTransform",
+    "ReshapeTransform",
+    "SigmoidTransform",
+    "SoftmaxTransform",
+    "StackTransform",
+    "StickBreakingTransform",
+    "TanhTransform",
+    "Transform",
     # torch.jit
-    "Attribute",
     "CompilationUnit",
-    "ConstMap",
     "Error",
     "Future",
-    "ONNXTracedModule",
-    "OrderedDictWrapper",
-    "OrderedModuleDict",
-    "RecursiveScriptModule",
     "ScriptFunction",
-    "ScriptMeta",
-    "ScriptModule",
-    "ScriptWarning",
-    "TopLevelTracedModule",
-    "TracedModule",
-    "TracerWarning",
-    "TracingCheckError",
+    # torch.onnx
+    "CheckerError",
+    "ExportTypes",
 ]
 
 # The suffix(es) of source filenames.
