@@ -4,6 +4,8 @@
 #include <ATen/native/LossMulti.h>
 #include <c10/util/irange.h>
 
+#include <cassert>
+
 namespace at {
 namespace native {
 
@@ -15,7 +17,10 @@ void multi_margin_loss_shape_check(
   const Tensor& input,
   const Tensor& target) {
   const std::int64_t ndims = input.dim();
-  bool valid_inputs = (ndims == 2 && input.size(1) != 0) || (ndims == 1 && input.size(0) != 0) || ndims == 0;
+  assert(ndims >= 0);
+  TORCH_CHECK(ndims <= 2,
+              "Expected vector or matrix with optional 0-dim batch size, but got: ",
+              input.sizes());
   if (ndims <= 1) {
     nframe = 1;
     dim = ndims == 0 ? 1 : input.size(0);
@@ -24,12 +29,10 @@ void multi_margin_loss_shape_check(
     dim = input.size(1);
   }
 
-  TORCH_CHECK(
-              valid_inputs,
-              "Expected non-empty vector or matrix with optional 0-dim batch size, but got: ",
+  TORCH_CHECK(dim != 0,
+              "Expected non-empty vector or matrix, but got: ",
               input.sizes());
-  TORCH_CHECK(
-              valid_inputs && target.dim() <= 1 && target.numel() == nframe,
+  TORCH_CHECK(target.dim() <= 1 && target.numel() == nframe,
               "inconsistent target size, got: ",
               target.sizes());
 }
