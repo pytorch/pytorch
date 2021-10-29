@@ -115,7 +115,7 @@ c10::IValue preprocess(
   }
 
   auto method = mod.get_method(FLAGS_method_name);
-  auto graph = method.function().graph()->copy();
+  auto graph = toGraphFunction(method.function()).graph()->copy();
   auto sizes = getInputSizes(compile_spec);
 
   std::string llvm_asm_code;
