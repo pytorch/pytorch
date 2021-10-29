@@ -250,4 +250,4 @@ if is_available():
 
 else:
     # Make sure the rest of the distributed package can still be imported
-    RRef = None
+    RRef = None  # type: ignore

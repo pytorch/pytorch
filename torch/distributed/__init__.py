@@ -69,10 +69,10 @@ if is_available():
 
 else:
     # Make sure the rest of the distributed package can still be imported
-    _remote_device = None
-    GradBucket = None
-    ProcessGroup = None
-    Store = None
-    PrefixStore = None
-    ReduceOp = namedtuple("ReduceOp", ("SUM",))(None)
-    group = namedtuple("Group", ("WORLD",))(None)
+    _remote_device = None  # type: ignore
+    GradBucket = None  # type: ignore
+    ProcessGroup = None  # type: ignore
+    Store = None  # type: ignore
+    PrefixStore = None  # type: ignore
+    ReduceOp = namedtuple("ReduceOp", ("SUM",))(None)  # type: ignore
+    group = namedtuple("Group", ("WORLD",))(None)  # type: ignore
