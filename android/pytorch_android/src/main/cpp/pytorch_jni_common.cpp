@@ -4,6 +4,7 @@
 #include <string>
 
 #include <c10/core/MemoryFormat.h>
+#include <c10/util/irange.h>
 
 #include <fbjni/ByteBuffer.h>
 #include <fbjni/fbjni.h>
@@ -97,7 +98,7 @@ static at::Tensor newAtTensor(
   std::vector<int64_t> shapeVec{};
   shapeVec.reserve(rank);
   auto numel = 1;
-  for (auto i = 0; i < rank; ++i) {
+  for (const auto i : c10::irange(rank)) {
     shapeVec.push_back(shapeArr[i]);
     numel *= shapeArr[i];
   }
@@ -521,7 +522,7 @@ at::IValue JIValue::JIValueToAtIValue(
 
     std::vector<at::IValue> elements;
     elements.reserve(n);
-    for (auto i = 0; i < n; ++i) {
+    for (const auto i : c10::irange(n)) {
       auto jivalue_element = jarray->getElement(i);
       auto element = JIValue::JIValueToAtIValue(jivalue_element);
       elements.push_back(std::move(element));
@@ -535,7 +536,7 @@ at::IValue JIValue::JIValueToAtIValue(
     size_t n = jArrayPinned.size();
     c10::List<bool> list{};
     list.reserve(n);
-    for (size_t i = 0; i < n; ++i) {
+    for (const auto i : c10::irange(n)) {
       list.push_back(jArrayPinned[i]);
     }
     return at::IValue{std::move(list)};
@@ -547,7 +548,7 @@ at::IValue JIValue::JIValueToAtIValue(
     size_t n = jArrayPinned.size();
     c10::List<int64_t> list{};
     list.reserve(n);
-    for (size_t i = 0; i < n; ++i) {
+    for (const auto i : c10::irange(n)) {
       list.push_back(jArrayPinned[i]);
     }
     return at::IValue{std::move(list)};
@@ -559,7 +560,7 @@ at::IValue JIValue::JIValueToAtIValue(
     size_t n = jArrayPinned.size();
     c10::List<double> list{};
     list.reserve(n);
-    for (size_t i = 0; i < n; ++i) {
+    for (const auto i : c10::irange(n)) {
       list.push_back(jArrayPinned[i]);
     }
     return at::IValue{std::move(list)};
@@ -572,7 +573,7 @@ at::IValue JIValue::JIValueToAtIValue(
     size_t n = jArray->size();
     c10::List<at::Tensor> list{};
     list.reserve(n);
-    for (size_t i = 0; i < n; ++i) {
+    for (const auto i : c10::irange(n)) {
       list.push_back(
           TensorHybrid::newAtTensorFromJTensor(jArray->getElement(i)));
     }
@@ -594,7 +595,7 @@ at::IValue JIValue::JIValueToAtIValue(
     c10::impl::GenericList list{c10::unshapedType(first_element.type())};
     list.reserve(n);
     list.push_back(first_element);
-    for (auto i = 1; i < n; ++i) {
+    for (const auto i : c10::irange(1, n)) {
       auto jivalue_element = jarray->getElement(i);
       auto element = JIValue::JIValueToAtIValue(jivalue_element);
       list.push_back(element);
