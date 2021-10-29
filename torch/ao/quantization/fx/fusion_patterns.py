@@ -40,7 +40,8 @@ class FuseHandler(ABC):
 @register_fusion_pattern((torch.nn.functional.relu, (torch.nn.BatchNorm1d, torch.nn.Conv1d)))
 @register_fusion_pattern((torch.nn.functional.relu, (torch.nn.BatchNorm2d, torch.nn.Conv2d)))
 @register_fusion_pattern((torch.nn.functional.relu, (torch.nn.BatchNorm3d, torch.nn.Conv3d)))
-class ConvBNReLUFusion(FuseHandler):
+@register_fusion_pattern((torch.nn.BatchNorm1d, torch.nn.Linear))
+class ConvOrLinearBNReLUFusion(FuseHandler):
     def __init__(self, quantizer: QuantizerCls, node: Node):
         super().__init__(quantizer, node)
         self.relu_node = None
@@ -57,8 +58,8 @@ class ConvBNReLUFusion(FuseHandler):
             assert isinstance(node.args[0], Node)
             node = node.args[0]
         assert node.op == 'call_module'
-        self.conv_node = node
-        self.conv = quantizer.modules[self.conv_node.target]
+        self.conv_or_linear_node = node
+        self.conv_or_linear = quantizer.modules[self.conv_or_linear_node.target]
 
     def fuse(self, quantizer: QuantizerCls, load_arg: Callable,
              fuse_custom_config_dict: Dict[str, Any] = None) -> Node:
@@ -74,32 +75,32 @@ class ConvBNReLUFusion(FuseHandler):
                 # TODO: get inplace argument from functional
                 relu = torch.nn.ReLU()
             op_list.append(relu)
-            relu.training = self.conv.training
+            relu.training = self.conv_or_linear.training
             if self.bn_node is not None:
                 op_list.append(self.bn)
-            op_list.append(self.conv)
+            op_list.append(self.conv_or_linear)
         else:
             assert self.bn_node is not None
             op_list.append(self.bn)
-            op_list.append(self.conv)
+            op_list.append(self.conv_or_linear)
 
-        # the modules are added in order of relu - bn - conv
+        # the modules are added in order of relu - bn - conv_or_linear
         # so we need to correct it
         op_list.reverse()
         op_type_list = tuple(type(m) for m in op_list)
-        conv_parent_name, conv_name = _parent_name(self.conv_node.target)
+        conv_or_linear_parent_name, conv_or_linear_name = _parent_name(self.conv_or_linear_node.target)
         fuser_method = get_fuser_method(op_type_list, additional_fuser_method_mapping)
         if fuser_method is None:
             raise NotImplementedError("Cannot fuse modules: {}".format(op_type_list))
         fused = fuser_method(*op_list)
-        setattr(quantizer.modules[conv_parent_name], conv_name, fused)
+        setattr(quantizer.modules[conv_or_linear_parent_name], conv_or_linear_name, fused)
 
         # TODO: do we need to make sure bn is only used once?
         if self.bn_node is not None:
             parent_name, name = _parent_name(self.bn_node.target)
             setattr(quantizer.modules[parent_name], name, torch.nn.Identity())
         # relu may be used multiple times, so we don't set relu to identity
-        return quantizer.fused_graph.node_copy(self.conv_node, load_arg)
+        return quantizer.fused_graph.node_copy(self.conv_or_linear_node, load_arg)
 
 @register_fusion_pattern((torch.nn.functional.relu, torch.nn.Linear))
 @register_fusion_pattern((torch.nn.ReLU, torch.nn.Linear))

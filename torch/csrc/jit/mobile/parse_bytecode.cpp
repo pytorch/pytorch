@@ -124,24 +124,18 @@ void parseConstants(
     function->append_constant(constant);
   }
 }
-
 void parseTypes(
     const c10::ivalue::TupleElements& types_list,
     mobile::Function* function) {
-  static const c10::QualifiedName classPrefix = "__torch__.torch.classes";
-  for (const auto& t : types_list) {
-    c10::QualifiedName qn(t.toStringRef());
-    if (classPrefix.isPrefixOf(qn)) {
-      auto classType = getCustomClass(qn.qualifiedName());
-      TORCH_CHECK(
-          classType,
-          "The implementation of class ",
-          qn.qualifiedName(),
-          " cannot be found.");
-      function->append_type(classType);
-    } else {
-      function->append_type(c10::parseType(t.toStringRef()));
-    }
+  std::vector<std::string> types_string_list;
+  types_string_list.resize(types_list.size());
+  for (size_t i = 0; i < types_list.size(); i++) {
+    types_string_list[i] = types_list[i].toString()->string();
+  }
+
+  std::vector<c10::TypePtr> types_ptr_list = c10::parseType(types_string_list);
+  for (auto& type_ptr : types_ptr_list) {
+    function->append_type(type_ptr);
   }
 }
 
