@@ -616,17 +616,19 @@ TensorView* reductionOp(
   TORCH_CHECK(axes.size() > 0, "No reduction axis specified");
 
   std::vector<unsigned int> uint_axes;
+  const int ndims = tv->domain()->noReductions().size();
   for (int axis : axes) {
-    if (axis < 0)
-      axis += int(tv->nDims());
+    if (axis < 0) {
+      axis += ndims;
+    }
 
     TORCH_CHECK(
-        axis >= 0 && (unsigned int)axis < tv->nDims(),
+        axis >= 0 && axis < ndims,
         "Reduction on invalid axis, recieved: ",
         axis,
         " however tensor view only has ",
-        tv->nDims(),
-        " dims.");
+        ndims,
+        " non-reduction dims.");
 
     uint_axes.push_back((unsigned int)axis);
   }
@@ -815,17 +817,19 @@ WelfordResult Welford(
 
   // Check and collect reduction axes
   std::vector<unsigned int> uint_axes;
+  const int ndims = tv->domain()->noReductions().size();
   for (int axis : axes) {
-    if (axis < 0)
-      axis += int(tv->nDims());
+    if (axis < 0) {
+      axis += ndims;
+    }
 
     TORCH_CHECK(
-        axis >= 0 && (unsigned int)axis < tv->nDims(),
+        axis >= 0 && axis < ndims,
         "Reduction on invalid axis, recieved: ",
         axis,
         " however tensor view only has ",
-        tv->nDims(),
-        " dims.");
+        ndims,
+        " non-reduction dims.");
 
     uint_axes.push_back((unsigned int)axis);
   }
