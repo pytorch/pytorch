@@ -6270,6 +6270,29 @@ def sample_inputs_grid_sample(op_info, device, dtype, requires_grad, **kwargs):
 
     return sample_inputs
 
+def sample_inputs_cosine_embedding_loss(op_info, device, dtype, requires_grad, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    def make_target(shape):
+        shape = () if len(shape) == 1 else (shape[0], )
+        t = torch.randint(0, 2, shape, device=device, dtype=torch.long)
+        # Label with -1 or 1
+        t = t * 2 - 1
+        target = t.to(dtype=dtype).detach()
+        return target
+
+    def gen_inputs():
+        shapes = ((S, S), (S,))
+        reductions = ('none', 'mean', 'sum')
+        for s, r in product(shapes, reductions):
+            yield SampleInput(
+                make_input(s),
+                args=(make_input(s), make_target(s)),
+                kwargs=dict(reduction=r, margin=random.uniform(-1, 1))
+            )
+
+    return list(gen_inputs())
+
 def sample_inputs_ctc_loss(op_info, device, dtype, requires_grad, **kwargs):
     input_length = 50
     batch = 16
@@ -11559,6 +11582,19 @@ op_db: List[OpInfo] = [
                 "test_variant_consistency_jit",
                 dtypes=(torch.float32,),
             ),
+        ),
+    ),
+    OpInfo(
+        "nn.functional.cosine_embedding_loss",
+        ref=_NOTHING,
+        dtypesIfCPU=all_types_and(torch.bfloat16, torch.bool),
+        dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+        supports_out=False,
+        sample_inputs_func=sample_inputs_cosine_embedding_loss,
+        skips=(
+            # https://github.com/pytorch/pytorch/issues/67463
+            # test_forward_mode_AD hangs forever
+            DecorateInfo(unittest.skip("Skipped!"), "TestGradients", "test_forward_mode_AD", dtypes=(torch.float64,),),
         ),
     ),
     OpInfo(
