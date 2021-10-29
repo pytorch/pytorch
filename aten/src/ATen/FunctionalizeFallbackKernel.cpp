@@ -14,7 +14,7 @@ namespace {
     for (uint64_t idx = 0; idx < num_arguments; ++idx) {
       const auto& ivalue = arguments[idx];
       if (ivalue.isTensor()) {
-        at::Tensor t = ivalue.toTensor();
+        auto t = ivalue.toTensor();
         at::functionalization::impl::sync(t);
         auto t_new = c10::IValue(at::functionalization::impl::from_functional_tensor(t));
         (*stack)[arguments_begin + idx] = t_new;
@@ -36,7 +36,7 @@ namespace {
     for (int64_t idx = 0; idx < num_returns; ++idx) {
       const auto& ivalue = returns[idx];
       if (ivalue.isTensor()) {
-        at::Tensor t = ivalue.toTensor();
+        auto t = ivalue.toTensor();
         auto t_new = c10::IValue(at::functionalization::impl::to_functional_tensor(t));
         (*stack)[returns_begin + idx] = t_new;
       } else if (ivalue.isTensorList()) {
