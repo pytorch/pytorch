@@ -2919,8 +2919,8 @@ def sample_inputs_adaptive_max_pool1d(op_info, device, dtype, requires_grad, **k
     cases = (
         # ((0, 8, 8), (5,)),
         # 0 batch size doesn't work,  cannot reshape tensor of 0 elements into shape [0, 8, -1]
-        ((3, 8, 8), 5),
-        ((3, 8, 8), 1)
+        ((3, 4, 4), 3),
+        ((3, 4, 4), 1)
     )
 
     def generator():
@@ -2936,12 +2936,12 @@ def sample_inputs_adaptive_max_pool2d(op_info, device, dtype, requires_grad, **k
     cases = (
         # ((0, 8, 8, 8), (5, 7)),
         # 0 batch size doesn't work,  cannot reshape tensor of 0 elements into shape [0, 8, -1]
-        ((1, 8, 8, 8), (5, 7)),
-        ((2, 8, 8, 8), (None, 7)),
-        ((2, 8, 8, 8), (1, 1)),
-        ((1, 8, 4, 3), (5, None)),
-        ((1, 8, 4, 3), (None, None)),
-        ((1, 8, 4, 3), (5)),
+        ((1, 4, 4, 4), (2, 3)),
+        ((2, 4, 4, 4), (None, 3)),
+        ((2, 4, 4, 4), (1, 1)),
+        ((1, 4, 4, 3), (3, None)),
+        ((1, 4, 4, 3), (None, None)),
+        ((1, 4, 4, 3), (3)),
     )
 
     def generator():
@@ -2958,11 +2958,11 @@ def sample_inputs_adaptive_max_pool3d(op_info, device, dtype, requires_grad, **k
     cases = (
         # ((0, 8, 8, 8, 8), (5, 7, 4)),
         # 0 batch size doesn't work,  cannot reshape tensor of 0 elements into shape [0, 8, -1]
-        ((1, 8, 4, 3, 7), (None, None, None)),
-        ((1, 8, 4, 3, 7), (1, 1, 1)),
-        ((3, 3, 8, 8, 6), (5, 7, None)),
-        ((1, 3, 8, 8, 6), (5, None, 2)),
-        ((3, 3, 8, 8, 6), (None, 3, 2)),
+        ((1, 4, 4, 3, 5), (None, None, None)),
+        ((1, 4, 4, 3, 5), (1, 1, 1)),
+        ((3, 3, 4, 4, 6), (2, 3, None)),
+        ((1, 3, 4, 4, 6), (3, None, 2)),
+        ((3, 3, 4, 4, 6), (None, 3, 2)),
     )
 
     def generator():
@@ -8467,7 +8467,7 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.adaptive_avg_pool2d',
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
-           skips=(
+           decorators=(
                # RuntimeError:
                # adaptive_avg_pool2d(Tensor input, int[2] output_size) -> (Tensor):
                # Expected a value of type 'List[int]' for argument 'output_size' but
@@ -8476,7 +8476,7 @@ op_db: List[OpInfo] = [
                # def the_method(i0):
                #     return torch.nn.functional.adaptive_avg_pool2d(i0, (None, 7))
                #            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
            ),
            supports_out=False,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
@@ -8484,7 +8484,7 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.adaptive_avg_pool3d',
            dtypesIfCPU=floating_types_and(torch.half),
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
-           skips=(
+           decorators=(
                # RuntimeError:
                # adaptive_avg_pool3d(Tensor input, int[3] output_size) -> (Tensor):
                # Expected a value of type 'List[int]' for argument 'output_size' but
@@ -8495,7 +8495,7 @@ op_db: List[OpInfo] = [
                #     return torch.nn.functional.adaptive_avg_pool3d(i0, (None, None, None))
                #            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
                #
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
            ),
            supports_out=False,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
@@ -8509,7 +8509,7 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.adaptive_max_pool2d',
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
-           skips=(
+           decorators=(
                # RuntimeError:
                # adaptive_max_pool2d(Tensor input, int[2] output_size) -> (Tensor):
                # Expected a value of type 'List[int]' for argument 'output_size' but
@@ -8518,7 +8518,7 @@ op_db: List[OpInfo] = [
                # def the_method(i0):
                #     return torch.nn.functional.adaptive_max_pool2d(i0, (None, 7))
                #            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
            ),
            supports_out=False,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
@@ -8526,7 +8526,7 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.adaptive_max_pool3d',
            dtypesIfCPU=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
-           skips=(
+           decorators=(
                # RuntimeError:
                # adaptive_max_pool3d(Tensor input, int[3] output_size) -> (Tensor):
                # Expected a value of type 'List[int]' for argument 'output_size' but
@@ -8537,7 +8537,7 @@ op_db: List[OpInfo] = [
                #     return torch.nn.functional.adaptive_max_pool3d(i0, (None, None, None))
                #            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
                #
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
            ),
            supports_out=False,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
