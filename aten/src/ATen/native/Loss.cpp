@@ -34,7 +34,7 @@ TORCH_META_FUNC(smooth_l1_loss)
   }
 
   TORCH_INTERNAL_ASSERT(reduction == Reduction::Mean || reduction == Reduction::Sum);
-  MetaBase::set_output({}, input.options());
+  at::native::resize_(maybe_get_output(), {});
 }
 
 } // namespace meta
