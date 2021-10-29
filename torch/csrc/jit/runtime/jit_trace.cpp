@@ -8,15 +8,15 @@
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
-#include <torch/csrc/jit/runtime/profiling_record.h>
 #include <torch/csrc/jit/runtime/jit_trace.h>
+#include <torch/csrc/jit/runtime/profiling_record.h>
 
 #include <torch/csrc/jit/ir/ir_views.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/frozen_graph_optimizations.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <unordered_map>
-#include <jit/passes/dead_code_elimination.h>
 
 namespace torch {
 
@@ -24,6 +24,9 @@ namespace jit {
 
 namespace {
 
+// A helper structure to mantain the mappings
+// between values from a scripted graph and
+// a traced graph
 struct TracingData {
   std::unordered_map<Value*, Value*> old_to_new_;
   std::shared_ptr<Graph> traced_graph_ = nullptr;
@@ -33,12 +36,12 @@ struct TracingData {
   }
 };
 
+// create a node in the traced graph that corresponds to `node`
+// in the scripted graph. Similar to how `cloneNode` works
 Node* traceNode(Node* node, TracingData& td, Stack& stack) {
   GRAPH_DEBUG("Tracing node ", getHeader(node));
   auto* block = td.traced_graph_->block();
-  auto env = [&td](Value* v) {
-    return td.old_to_new_.at(v);
-  };
+  auto env = [&td](Value* v) { return td.old_to_new_.at(v); };
 
   auto new_node = block->appendNode(td.traced_graph_->createClone(node, env));
   for (size_t i = 0; i < node->outputs().size(); ++i) {
@@ -56,13 +59,19 @@ Node* traceNode(Node* node, TracingData& td, Stack& stack) {
 }
 
 void eraseAllOutputs(Node* opt_pn) {
+  // NOLINTNEXTLINE
   for (int i = opt_pn->outputs().size() - 1; i >= 0; i--) {
     opt_pn->eraseOutput(i);
   }
 }
 
-void insertTracingNodes(Block*, ProfilingRecord* , TracingData&);
+void insertTracingNodes(Block*, ProfilingRecord*, TracingData&);
 
+// The subtlety in `createPropNodeForIfBlock` is that we need to create
+// a "propagate" node that will propagate the mapping between the outputs
+// of a then/else block and the outputs in the traced graph onto the outputs
+// of the if node in the scripted node. Note, if nodes will disappear in the
+// the traced graph but they are still used in the scripted graph.
 void createPropNodeForIfBlock(
     Block* b,
     Node* n,
@@ -93,11 +102,13 @@ void createPropNodeForIfBlock(
         }
       };
 
-   // uncomment for debugging
-  //opt_pn->i_(Symbol::attr("propagate"), 1);
+  // uncomment for debugging
+  // opt_pn->i_(Symbol::attr("propagate"), 1);
   opt_pn->setCallback(optional_profiler);
 }
 
+// loop counter is implicit in the loop body outputs, we need to make
+// it explicit so it can used in 2+ iterations
 void traceLoopCounter(Node* n, ProfilingRecord* pr, TracingData& td) {
   LoopView lv(n);
   auto opt_pn = pr->createProfileIValueNode(lv.currentTripCount());
@@ -108,7 +119,7 @@ void traceLoopCounter(Node* n, ProfilingRecord* pr, TracingData& td) {
     // frame_id is unused
     int64_t frame_id = 0;
     pop(stack, frame_id);
-    int64_t loop_counter;
+    int64_t loop_counter = 0;
     pop(stack, loop_counter);
     WithInsertPoint wip(td.traced_graph_->block());
     auto lc = td.traced_graph_->insertConstant(loop_counter);
@@ -117,12 +128,19 @@ void traceLoopCounter(Node* n, ProfilingRecord* pr, TracingData& td) {
   };
 
   // uncomment for debugging
-  //opt_pn->i_(Symbol::attr("loop_counter"), 1);
+  // opt_pn->i_(Symbol::attr("loop_counter"), 1);
   opt_pn->setCallback(optional_profiler);
 }
 
+// Similar to how we propagate the mappings for If nodes, we need to propagate
+// the mappings from the loop body to the beginning of the block in case we
+// run another iteration and to the outputs of the Loop node, for any logic
+// downstream that uses the output values of the loop node
 static void traceLoop(Node* n, ProfilingRecord* pr, TracingData& td) {
   std::vector<Value*> empty_values{};
+
+  // this is a propagation node for block inputs (phi values)
+  // these come from either `prim::Loop` inputs or loop body outputs
   {
     auto opt_pn = pr->createProfileIValueNode(empty_values);
     eraseAllOutputs(opt_pn);
@@ -150,7 +168,7 @@ static void traceLoop(Node* n, ProfilingRecord* pr, TracingData& td) {
     };
 
     // uncomment for debugging
-    //opt_pn->i_(Symbol::attr("loop_entry"), 1);
+    // opt_pn->i_(Symbol::attr("loop_entry"), 1);
     opt_pn->setCallback(optional_profiler);
   }
 
@@ -159,12 +177,14 @@ static void traceLoop(Node* n, ProfilingRecord* pr, TracingData& td) {
     traceLoopCounter(n, pr, td);
   }
 
+  // this is a propagation node for loop outputs
   {
     auto opt_pn = pr->createProfileIValueNode(empty_values);
     eraseAllOutputs(opt_pn);
     LoopView(n).bodyBlock()->appendNode(opt_pn);
 
-    opt_pn->i_(Symbol::attr("loop_propagate"), 1);
+    // opt_pn->i_(Symbol::attr("loop_propagate"), 1);
+
     std::function<void(Stack&)> optional_profiler = [pr, n, &td](Stack& stack) {
       std::lock_guard<std::mutex> lock(pr->mutex_);
 
@@ -188,11 +208,13 @@ static void traceLoop(Node* n, ProfilingRecord* pr, TracingData& td) {
     };
 
     // uncomment for debugging
-    //opt_pn->i_(Symbol::attr("loop_exit"), 1);
+    // opt_pn->i_(Symbol::attr("loop_exit"), 1);
     opt_pn->setCallback(optional_profiler);
   }
 }
 
+// walks all the nodes in a block and adds profiled nodes to each node
+// see the comment for `optional_profiler` below
 void insertTracingNodes(Block* block, ProfilingRecord* pr, TracingData& td) {
   for (auto it = block->nodes().begin(); it != block->nodes().end();) {
     auto n = *it;
@@ -216,6 +238,10 @@ void insertTracingNodes(Block* block, ProfilingRecord* pr, TracingData& td) {
     eraseAllOutputs(opt_pn);
     opt_pn->insertAfter(n);
 
+    // we only use the `opt_pn->node()` to trigger the handler
+    // we still capture the actual scripted node `n` we want to trace
+    // we look at its inputs, map them to the inputs in the traced graph
+    // and create a new node with `traceNode`
     std::function<void(Stack&)> optional_profiler = [pr, n, &td](Stack& stack) {
       std::lock_guard<std::mutex> lock(pr->mutex_);
 
@@ -243,9 +269,16 @@ void insertTracingNodes(Block* block, ProfilingRecord* pr, TracingData& td) {
 }
 } // namespace
 
-std::shared_ptr<Graph> TraceGraph(
-    std::shared_ptr<Graph> graph,
-    Stack& stack) {
+// To trace graph we create a profile node for every one
+// in a scripted graph. When a profiled node handler runs
+// we insert a new traced node in a trace graph
+// If the profiled node handler is called in a loop
+// we will have multiple nodes.
+// We also maintain the mapping between the outputs of traced
+// nodes and the outputs of the node in the scripted graph.
+// There are a few subtleties with tracing Ifs and Loops
+// discussed above
+std::shared_ptr<Graph> TraceGraph(std::shared_ptr<Graph> graph, Stack& stack) {
   TracingData td;
   GRAPH_DUMP("Before Inline:", graph);
   Inline(*graph.get());
