@@ -12,6 +12,7 @@
 #include <torch/csrc/autograd/VariableTypeUtils.h>
 
 #include <vector>
+#include "c10/util/Exception.h"
 
 namespace torch { namespace autograd {
 
@@ -41,9 +42,24 @@ void _foreach_tensor(
   }
 }
 
-bool isTensorOfLists(const at::TypePtr& type) {
+bool isTensorList(const at::TypePtr& type) {
   auto as_list = type->castRaw<at::ListType>();
   return as_list && as_list->getElementType()->castRaw<at::TensorType>();
+}
+
+bool afterSetIsWildcard(const at::AliasInfo& alias_info) {
+  if (alias_info.beforeSets().size() == 0) {
+    return false;
+  }
+  TORCH_CHECK(alias_info.beforeSets().size() == 1);
+  TORCH_CHECK(alias_info.afterSets().size() == 1);
+  if (alias_info.beforeSet() == *alias_info.afterSets().begin()) {
+    return false;
+  }
+  TORCH_CHECK(
+      alias_info.isWildcardAfter(),
+      "Only supported changed after set is wildcard set");
+  return true;
 }
 }
 
@@ -88,7 +104,7 @@ void autogradNotImplementedFallbackImpl(const c10::OperatorHandle& op, c10::Disp
           "Please rewrite your function as a composite function.");
       aliased_input_idx = i;
     }
-    if (alias_info->afterSets().size() != 0) {
+    if (afterSetIsWildcard(*alias_info)) {
       aliased_input_enters_list = true;
     }
   }
@@ -96,7 +112,7 @@ void autogradNotImplementedFallbackImpl(const c10::OperatorHandle& op, c10::Disp
     const at::AliasInfo* alias_info = returns[i].alias_info();
     is_inplace_output.push_back(alias_info != nullptr && alias_info->isWrite());
     any_is_inplace_output |= alias_info != nullptr && alias_info->isWrite();
-    if (aliased_input_enters_list && isTensorOfLists(returns[i].type())) {
+    if (aliased_input_enters_list && isTensorList(returns[i].type())) {
       is_aliased_output.push_back(true);
       continue;
     }
@@ -109,11 +125,10 @@ void autogradNotImplementedFallbackImpl(const c10::OperatorHandle& op, c10::Disp
     // output to alias it
     if (aliased_input_enters_list) {
       const auto& return_type = returns[i].type();
-      auto as_list = return_type->castRaw<at::ListType>();
-      if (as_list && as_list->getElementType()->castRaw<at::TensorType>()) {
+      if (isTensorList(return_type)) {
         TORCH_CHECK(
             aliased_output_idx == -1,
-            "Expected only a single output tensor list in the operator schema to have a non-write alias annotation (i.e., 'Tensor(a)'). "
+            "Expected only a single output to alias an input (i.e. Tensor(a) or Tensor[] where an input enters the wildcard set). "
             "Non-composite functions where multiple outputs are aliased with inputs aren't supported."
             "Please rewrite your function as a composite function.");
         aliased_output_idx = i;
@@ -129,6 +144,14 @@ void autogradNotImplementedFallbackImpl(const c10::OperatorHandle& op, c10::Disp
       aliased_output_idx = i;
     }
   }
+  if (aliased_input_enters_list &&
+      (aliased_output_idx == -1 ||
+       !isTensorList(returns[aliased_output_idx].type()))) {
+    TORCH_CHECK(
+        false,
+        "Got an input tensor annotated with an afterset of * but none of the outputs are tensor lists.");
+  }
+
   size_t num_tensor_inputs = 0;  // Only used for DEBUG-only checks
   _foreach_tensor([&](size_t _, size_t idx_arg, const at::Tensor& t) {
     if (grad_mode && t.requires_grad()) {
@@ -264,7 +287,7 @@ void autogradNotImplementedInplaceOrViewFallbackImpl(const c10::OperatorHandle& 
   for (const auto i : c10::irange(num_arguments)) {
     const at::AliasInfo* alias_info = arguments[i].alias_info();
     if (alias_info != nullptr) {
-      if (alias_info->afterSets().size() != 0) {
+      if (afterSetIsWildcard(*alias_info)) {
         aliased_input_enters_list = true;
       }
       if (!alias_info->isWrite()) {
@@ -311,6 +334,13 @@ void autogradNotImplementedInplaceOrViewFallbackImpl(const c10::OperatorHandle& 
           "Please rewrite your function as a composite function.");
       aliased_output_idx = i;
     }
+  }
+  if (aliased_input_enters_list &&
+      (aliased_output_idx == -1 ||
+       !isTensorList(returns[aliased_output_idx].type()))) {
+    TORCH_CHECK(
+        false,
+        "Got an input tensor annotated with an afterset of * but none of the outputs are tensor lists.");
   }
 
   // See NOTE [ Limitations of ADInplaceOrView boxed kernel ] above
