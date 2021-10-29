@@ -11,6 +11,7 @@
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/frontend/code_template.h>
@@ -74,7 +75,6 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
-
 
 using namespace torch::autograd::profiler;
 
@@ -474,7 +474,7 @@ TEST(ControlFlowTest, Basic) {
   auto cu = compile(cf_examples);
 
   auto run = [&](const std::string& name, std::vector<IValue> stack) {
-    auto graph = cu->get_function(name).graph();
+    auto graph = toGraphFunction(cu->get_function(name)).graph();
     Code code(graph, "");
     InterpreterState interp(code);
     interp.run(stack);
@@ -1610,7 +1610,7 @@ TEST(LoopPeelerTest, NoInductionVariableUse) {
     )JIT";
 
   auto cu = compile(str_func_def);
-  auto& f = cu->get_function("test_peel_n_times");
+  auto& f = toGraphFunction(cu->get_function("test_peel_n_times"));
   auto stack = createStack({});
   // peeling loop once
   {
@@ -1652,7 +1652,7 @@ TEST(LoopPeelerTest, YesInductionVariableUse) {
     )JIT";
 
   auto cu = compile(str_func_def);
-  auto& f = cu->get_function("test_peel_n_times");
+  auto& f = toGraphFunction(cu->get_function("test_peel_n_times"));
   auto stack = createStack({});
   // peeling loop once
   {
@@ -1698,7 +1698,7 @@ TEST(LoopPeelerTest, LoopWithTerminationCondition) {
   // the peel changes the termination condition to false
   // so the original loop doesn't run
   auto cu = compile(str_func_def);
-  auto& f = cu->get_function("test_with_cond_times");
+  auto& f = toGraphFunction(cu->get_function("test_with_cond_times"));
   auto stack = createStack({});
   // peeling 5 iterations should update the termination
   // condition to false
@@ -1743,7 +1743,7 @@ TEST(LoopPeelerTest, SimpleNestedLoops) {
     )JIT";
 
   auto cu = compile(str_func_def);
-  auto& f = cu->get_function("test_nested_loops");
+  auto& f = toGraphFunction(cu->get_function("test_nested_loops"));
   auto stack = createStack({});
 
   {
@@ -1783,7 +1783,7 @@ TEST(LoopPeelerTest, SimpleNestedLoops2) {
     )JIT";
 
   auto cu = compile(str_func_def);
-  auto& f = cu->get_function("test_nested_loops");
+  auto& f = toGraphFunction(cu->get_function("test_nested_loops"));
   auto stack = createStack({});
   {
     LoopsPeeler peeler(true_pred, 1);
@@ -1808,26 +1808,26 @@ TEST(LoopPeelerTest, SimpleNestedLoops2) {
   }
 }
 
-TEST(JitTracing, Basic2) {
-  // run `python test_jit_fuser_te.py TestTEFuser.test_save_mobilenet`
-  // to generate `test/mobilenet_v3_large.pt`
-  Module model = torch::jit::load("test/mobilenet_v3_large.pt");
-  model.eval();
-  model = freeze_module(model);
-  auto graph = model.get_method("forward").graph();
-  GRAPH_DUMP("Before OptimizeFrozenGraph:", graph);
-  OptimizeFrozenGraph(graph, true);
-  auto x = at::randn({1, 3, 224, 224}, at::kCPU);
-  Stack stack;
-  push(stack, model._ivalue());
-  push(stack, x);
+TEST(JitTracing, Basic) {
+  constexpr int batch_size = 4;
+  constexpr int input_size = 256;
+
+  int hidden_size = 2 * input_size;
+
+  auto input = at::randn({batch_size, input_size}, at::kCPU);
+  auto hx = at::randn({batch_size, hidden_size}, at::kCPU);
+  auto cx = at::randn({batch_size, hidden_size}, at::kCPU);
+  auto w_ih = t_def(at::randn({4 * hidden_size, input_size}, at::kCPU));
+  auto w_hh = t_def(at::randn({4 * hidden_size, hidden_size}, at::kCPU));
+
+  auto graph = build_lstm();
+  auto stack = createStack({input, hx, cx, w_ih, w_hh});
   auto traced = TraceGraph(graph, stack);
   Tensor prof_out;
   pop(stack, prof_out);
 
   {
-    push(stack, model._ivalue());
-    push(stack, x);
+    stack = createStack({input, hx, cx, w_ih, w_hh});
     Code cd(traced, "traced");
     InterpreterState is{cd};
     is.run(stack);
@@ -1837,14 +1837,13 @@ TEST(JitTracing, Basic2) {
   }
 
   {
-    push(stack, model._ivalue());
-    push(stack, x);
+    stack = createStack({input, hx, cx, w_ih, w_hh});
     Code cd(graph, "graph");
     InterpreterState is{cd};
     is.run(stack);
-    Tensor traced_out;
-    pop(stack, traced_out);
-    torch::allclose(prof_out, traced_out);
+    Tensor scripted_out;
+    pop(stack, scripted_out);
+    torch::allclose(prof_out, scripted_out);
   }
 }
 
@@ -1861,7 +1860,7 @@ TEST(InsertAndEliminateRedundantGuardsTest, Basic) {
   )JIT";
 
   auto cu = compile(basic_example);
-  auto& fun = cu->get_function("basic");
+  auto& fun = toGraphFunction(cu->get_function("basic"));
   auto pr = ProfilingRecord::instrumentGraph(fun.graph());
   auto x = at::randn({2, 3}, at::kCPU);
   auto y = at::randn({2, 3}, at::kCPU);
@@ -1912,7 +1911,7 @@ TEST(InsertBailOutsTest, Basic) {
   )JIT";
 
   auto cu = compile(basic_example);
-  auto& fun = cu->get_function("basic_loop");
+  auto& fun = toGraphFunction(cu->get_function("basic_loop"));
   auto pr = ProfilingRecord::instrumentGraph(fun.graph());
   auto x = at::randn({2, 3}, at::kCPU);
   auto y = at::randn({2, 3}, at::kCPU);
@@ -2006,7 +2005,7 @@ def foo(x):
     return bar(x)*baz(x)*11
   )";
   auto cu = compile(text);
-  const Function& foo = cu->get_function("foo");
+  const auto& foo = toGraphFunction(cu->get_function("foo"));
   for (Node* n : foo.optimized_graph()->nodes()) {
     if (n->kind() == prim::Constant) {
       if (!n->hasAttribute(attr::value) ||
@@ -2088,7 +2087,7 @@ def c(x):
     return x
   )";
   auto cu = compile(text);
-  const Function& baz = cu->get_function("c");
+  const auto& baz = toGraphFunction(cu->get_function("c"));
   std::unordered_map<std::string, InlinedCallStack*> callstack_objects;
   for (Node* n : baz.optimized_graph()->nodes()) {
     if (n->kind() == prim::Constant) {
@@ -2133,7 +2132,8 @@ TEST(InlinedCallStackTest, BlockAnnotation) {
       return self.A0.forward(x, y, z) + self.B0.forward(x)
   )");
 
-  auto graph = c.get_method("forward").function().optimized_graph();
+  auto graph =
+      toGraphFunction(c.get_method("forward").function()).optimized_graph();
   std::stringstream add_ss, mul_ss;
   for (Node* n : graph->nodes()) {
     if (n->kind() == prim::If) {
@@ -2194,7 +2194,8 @@ TEST(InlinedCallStackTest, SelfCallMethods) {
       return self.A0.forward(x, y) + self.call_b(x)
   )");
 
-  auto graph = c.get_method("forward").function().optimized_graph();
+  auto graph =
+      toGraphFunction(c.get_method("forward").function()).optimized_graph();
   std::unordered_map<std::string, size_t> module_hierarchies;
   for (Node* n : graph->nodes()) {
     auto hierarchy = torch::jit::utils::getNodesModuleHierarchy(*n);
@@ -2707,6 +2708,19 @@ TEST(ComputeFlopsTest, Basic) {
   // Test aten::addmm
   flops = computeFlops(std::string("aten::addmm"), extra_args);
   ASSERT_EQ(flops, 43200);
+
+  // Test aten::bmm
+  extra_args.clear();
+  mat1_sizes = {7, 5, 6};
+  mat2_sizes = {7, 6, 3};
+  extra_args["mat1_size"] = at::IValue(at::IntArrayRef(mat1_sizes));
+  extra_args["mat2_size"] = at::IValue(at::IntArrayRef(mat2_sizes));
+  flops = computeFlops(std::string("aten::bmm"), extra_args);
+  ASSERT_EQ(flops, 1260);
+
+  // Test aten::baddbmm
+  flops = computeFlops(std::string("aten::baddbmm"), extra_args);
+  ASSERT_EQ(flops, 1260);
 
   // Test mm out of range
   extra_args.clear();

@@ -1,3 +1,5 @@
+# Owner(s): ["NNC"]
+
 import operator
 import unittest
 import contextlib
@@ -145,23 +147,6 @@ class TestTEFuser(JitTestCase):
         # shape changed if we don't trigger recompilation
         # we would compute the wrong result silently
         self.assertEqual(scripted(a, a), fused_kernel(a, a))
-
-
-    def test_save_alexnet(self):
-        import torchvision.models as models
-        from torch.testing._internal.common_utils import set_default_dtype
-        with set_default_dtype(torch.float):
-            model = models.alexnet()
-            model = torch.jit.script(model)
-            torch.jit.save(model, "alexnet.pt")
-
-    def test_save_mobilenet(self):
-        import torchvision.models as models
-        from torch.testing._internal.common_utils import set_default_dtype
-        with set_default_dtype(torch.float):
-            model = models.mobilenet_v3_large()
-            model = torch.jit.script(model)
-            torch.jit.save(model, "mobilenet_v3_large.pt")
 
     def test_sum_simple(self):
         def func(x):
@@ -1978,6 +1963,18 @@ class TestTEFuser(JitTestCase):
             x = torch.randn(16, device=device)
             for fn in [bn, bn_no_weight, bn_no_bias, bn_neither]:
                 test(fn, (i, x))
+
+    def test_profiler(self):
+        @torch.jit.script
+        def test(x, y, z):
+            return x * y + z
+
+        args = [torch.randn(4) for _ in range(3)]
+        with torch.autograd.profiler.profile() as prof:
+            for _ in range(3):
+                test(*args)
+        self.assertIn("fused_mul_add", prof.table())
+
 
 works_list = [
     '__radd__',

@@ -95,7 +95,7 @@ at::SmallVector<int64_t, kSpatialDim + 2> MakeDeConvOutputShape(
   output_shape.resize(kSpatialDim + 2);
   output_shape[0] = N;  // Batch size
   output_shape[1] = M;  // Output channels
-  for (int64_t idx = 0; idx < kSpatialDim; ++idx) {
+  for (const auto idx : c10::irange(kSpatialDim)) {
     output_shape[idx + 2] = compute_deconv_shape(input_shape[idx],
                                                  kernel[idx],
                                                  stride[idx],
@@ -250,7 +250,7 @@ void PackedConvWeight<kSpatialDim>::GetQuantizationParams(
     const int M = w->outputChannels();
     output_multiplier_float->resize(M);
     act_times_w_scale->resize(M);
-    for (int i = 0; i < M; ++i) {
+    for (const auto i : c10::irange(M)) {
       act_times_w_scale->at(i) = (act_scale * w_scale[i]);
       output_multiplier_float->at(i) = act_times_w_scale->at(i) / out_scale;
     }
@@ -653,7 +653,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
         c10::nullopt);
     auto* qnnp_w_data = qnnp_weight.template data_ptr<c10::quint8>();
     auto wt_numel = weight_contig.numel();
-    for (int i = 0; i < wt_numel; ++i) {
+    for (const auto i : c10::irange(wt_numel)) {
       qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
     }
     at::Tensor qbias;
