@@ -2544,6 +2544,7 @@ void apply_linalg_eig(Tensor& values, Tensor& vectors, Tensor& input, Tensor& in
 TORCH_CHECK(false, "Calling torch.linalg.eig on a CUDA tensor requires compiling PyTorch with MAGMA. "
                    "Either transfer the tensor to the CPU before calling torch.linalg.eig or recompile with MAGMA.");
 #else
+ TORCH_CHECK(input.isfinite().all().item<bool>(), "apply_linalg_eig: input tensor should not contain infs or NaNs.");
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.device() == at::kCPU);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(values.device() == at::kCPU);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos.device() == at::kCPU);

@@ -2296,7 +2296,6 @@ class TestLinalg(TestCase):
                 torch.linalg.eig(a, out=(out_w, out_v))
 
     @skipCPUIfNoLapack
-    @onlyCPU
     @dtypes(*floating_and_complex_types())
     def test_eig_with_nan(self, device, dtype):
         with self.assertRaisesRegex(RuntimeError, "linalg_eig: input tensor should not"):

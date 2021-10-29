@@ -14,7 +14,6 @@
 #include <c10/util/irange.h>
 
 #include <vector>
-#include <iostream>
 
 // First the required LAPACK implementations are registered here.
 // A comment above the registered LAPACK routine suggest which batched
@@ -2680,15 +2679,11 @@ std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Tensor& va
     linalg_eig_stub(input.device().type(), real_imag_values, maybe_complex_vectors, infos, input, compute_eigenvectors);
   }
 
-  std::cout << "POST LINALG EIG STUB\n";
-
   // if input is not complex we need to do some post-processing
   if (!input.is_complex()) {
     // extract real and imaginary parts of the output
     auto real_values = real_imag_values.slice(/*dim=*/-1, /*start=*/0, /*end*/input.size(-1));
     auto imag_values = real_imag_values.slice(/*dim=*/-1, /*start=*/input.size(-1));
-
-    std::cout << "EXTRACTION OF STUFF FROM COMPLEX\n";
 
     // if the imaginary part is zero we don't need to do anything
     bool is_zero_imag = at::all(imag_values == 0.0).item().toBool();
@@ -2697,7 +2692,6 @@ std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Tensor& va
       if (compute_eigenvectors) {
         vectors.copy_(maybe_complex_vectors);  // does nothing for !vectors.is_complex() because vectors.is_same(maybe_complex_vectors) == true
       }
-      std::cout << "IS ZERO IMAG\n";
       return std::tuple<Tensor&, Tensor&>(values, vectors);
     }
 
@@ -2714,9 +2708,6 @@ std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Tensor& va
       }
     }
   }
-
-  std::cout << "LAST RETURN\n";
-
 
   return std::tuple<Tensor&, Tensor&>(values, vectors);
 }
