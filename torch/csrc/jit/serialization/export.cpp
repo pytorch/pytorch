@@ -445,7 +445,7 @@ GraphEncoder::GraphEncoder(
 
   // If graph proto size exceed maximum protobuf size of 2GB, set
   // use_external_data_format to true.
-  if (!use_external_data_format && !onnx_file_path.empty() &&
+  if (!use_external_data_format &&
       GetGraphProtoSize(model_proto_.mutable_graph(), graph, initializers) >
           INT_MAX) {
     GRAPH_DEBUG(
@@ -459,8 +459,8 @@ GraphEncoder::GraphEncoder(
   if (use_external_data_format) {
     TORCH_CHECK(
         !onnx_file_path.empty(),
-        "For large model export, f in torch.onnx.export must be a non-empty string "
-        "specifying the location of the model.");
+        "For large model export, f in torch.onnx.export must be a non-empty string. "
+        "Please specify the location of the model.");
   }
 
   auto* imp = model_proto_.add_opset_import();

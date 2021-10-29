@@ -390,7 +390,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_model_test_with_external_data(model, x)
 
     @skipIfUnsupportedMinOpsetVersion(9)  # Because external data format was released with Opset 9.
-    def test_largemodel_with_external_data(self):
+    def test_large_model_with_external_data(self):
         class LargeModel(torch.nn.Module):
             def __init__(self):
                 super(LargeModel, self).__init__()
@@ -408,7 +408,31 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.tensor([2], dtype=torch.long)
         self.run_model_test_with_external_data(LargeModel(), x)
-        # self.run_test(LargeModel(), (x))
+
+    @skipIfUnsupportedMinOpsetVersion(9)  # Because external data format was released with Opset 9.
+    def test_large_model_with_non_str_file(self):
+        class LargeModel(torch.nn.Module):
+            def __init__(self):
+                super(LargeModel, self).__init__()
+                dim = 5
+                n = 40 * 4 * 10 ** 6
+                self.emb = torch.nn.Embedding(n, dim)
+                self.lin1 = torch.nn.Linear(dim, 1)
+                self.seq = torch.nn.Sequential(
+                    self.emb,
+                    self.lin1,
+                )
+
+            def forward(self, input):
+                return self.seq(input)
+
+        x = torch.tensor([2], dtype=torch.long)
+        f = io.BytesIO()
+        with self.assertRaises(RuntimeError) as e:
+            torch.onnx.export(LargeModel(), x, f)
+
+        self.assertEqual("For large model export, f in torch.onnx.export must be a non-empty string " +
+                            "specifying the location of the model.", e.exception.args[0])
 
     def test_fuse_conv_bn1d(self):
         class Fuse(torch.nn.Module):

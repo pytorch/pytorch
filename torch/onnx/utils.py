@@ -718,6 +718,10 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
                                                              opset_version)
             val_add_node_names = _decide_add_node_names(add_node_names, operator_export_type)
             val_do_constant_folding = _decide_constant_folding(do_constant_folding, operator_export_type, training)
+            # f can be a non-string in regular-sized model export case, but for large model export, f must be a non-empty
+            # string specifying the location of the model. For large model cases, if f is not a non-empty string,
+            # then returns an empty string, which is an error condition for the large model export code path
+            # later (but not for regular model export code path).
             if isinstance(f, str):
                 model_file_location = f
             else:
@@ -742,9 +746,6 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
 
             torch._C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
             node_attr_to_name = {}  # type: ignore[var-annotated]
-            # Default val_use_external_data_format = False, decide whether to change its value by
-            # the model size in _export_onnx().
-            val_use_external_data_format = False
             if export_modules_as_functions is not None:
                 # NOTE: cannot call DCE after this pass. DCE will remove function definition nodes.
                 node_attr_to_name = torch._C._jit_pass_onnx_function_extraction(
@@ -753,13 +754,13 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
                 proto, export_map, val_use_external_data_format = graph._export_onnx(
                     params_dict, opset_version, dynamic_axes, defer_weight_export,
                     operator_export_type, not verbose, val_keep_init_as_ip, custom_opsets,
-                    val_add_node_names, val_use_external_data_format, model_file_location,
+                    val_add_node_names, False, model_file_location,
                     node_attr_to_name)
             else:
                 proto, export_map, val_use_external_data_format = graph._export_onnx(
                     {}, opset_version, dynamic_axes, False, operator_export_type,
                     not verbose, val_keep_init_as_ip, custom_opsets, val_add_node_names,
-                    val_use_external_data_format, model_file_location,
+                    False, model_file_location,
                     node_attr_to_name)
             if export_type == ExportTypes.PROTOBUF_FILE:
                 assert(len(export_map) == 0)
