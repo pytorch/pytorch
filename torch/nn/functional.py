@@ -5082,12 +5082,15 @@ def multi_head_attention_forward(
         key = key.unsqueeze(1)
         value = value.unsqueeze(1)
         if key_padding_mask is not None:
+            assert key_padding_mask.dim() == 1, \
+                f"For unbatched 2D query, key_padding_mask should be 1-D but received {key_padding_mask.dim()}-D tensor"
             key_padding_mask = key_padding_mask.unsqueeze(0)
         if attn_mask is not None and attn_mask.dim() == 3:
             assert attn_mask.shape == (num_heads, query.shape[0], key.shape[0])
         is_unbatched = True
     else:
-        raise AssertionError("Shapes should be....")
+        raise AssertionError(
+            f"query should be unbatched 2D or batched 3D tensor but received {query.dim()}-D query tensor")
 
     # set up shape vars
     tgt_len, bsz, embed_dim = query.shape

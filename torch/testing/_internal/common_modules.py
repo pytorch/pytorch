@@ -252,9 +252,13 @@ def no_batch_dim_reference_mha(m, p, *args, **kwargs):
     The output is squeezed to compare with the no-batch input.
     """
     dim = 0 if kwargs.get('batch_first', True) else 1
+    if 'batch_first' in kwargs:
+        kwargs.pop('batch_first')
+    if 'key_padding_mask' in kwargs and kwargs['key_padding_mask'] is not None:
+        kwargs['key_padding_mask'] = kwargs['key_padding_mask'].unsqueeze(0)
     single_batch_input_args = [input.unsqueeze(dim) for input in args]
     with freeze_rng_state():
-        output = m(*single_batch_input_args)
+        output = m(*single_batch_input_args, **kwargs)
         return (output[0].squeeze(dim), output[1].squeeze(0))
 
 
@@ -391,12 +395,16 @@ def module_inputs_torch_nn_MultiheadAttention(module_info, device, dtype, requir
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     samples = []
     bool_vals = (True, False)
-    for bias, add_bias_kv, add_zero_attn in itertools.product(bool_vals, bool_vals, bool_vals):
+    key_padding_masks = (None, torch.tensor([False, False, True], device=device, dtype=torch.bool))
+    attn_masks = (None, )  # Grad tests fails with attn_mask.
+    products = itertools.product(bool_vals, bool_vals, bool_vals, key_padding_masks, attn_masks)
+    for bias, add_bias_kv, add_zero_attn, key_padding_mask, attn_mask in products:
         samples.append(
             ModuleInput(
                 constructor_input=FunctionInput(embed_dim=3, num_heads=3, batch_first=True,
                                                 bias=bias, add_bias_kv=add_bias_kv, add_zero_attn=add_zero_attn),
-                forward_input=FunctionInput(make_input((3, 3)), make_input((3, 3)), make_input((3, 3))),
+                forward_input=FunctionInput(make_input((3, 3)), make_input((3, 3)), make_input((3, 3)),
+                                            key_padding_mask=key_padding_mask, attn_mask=attn_mask),
                 reference_fn=no_batch_dim_reference_mha,
             )
         )
@@ -404,7 +412,8 @@ def module_inputs_torch_nn_MultiheadAttention(module_info, device, dtype, requir
             ModuleInput(
                 constructor_input=FunctionInput(embed_dim=3, num_heads=3, batch_first=False,
                                                 bias=bias, add_bias_kv=add_bias_kv, add_zero_attn=add_zero_attn),
-                forward_input=FunctionInput(make_input((3, 3)), make_input((3, 3)), make_input((3, 3))),
+                forward_input=FunctionInput(make_input((3, 3)), make_input((3, 3)), make_input((3, 3)),
+                                            key_padding_mask=key_padding_mask, attn_mask=attn_mask),
                 reference_fn=partial(no_batch_dim_reference_mha, batch_first=False),
             )
         )
