@@ -8839,7 +8839,7 @@ op_db: List[OpInfo] = [
            backward_dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            skips=(
                # FIXME: bfloat16 backward support likely depends on CUDA11+ and SM53+
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', active_if=IS_WINDOWS),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
            ),
            supports_forward_ad=False,
            supports_out=False),
@@ -8849,8 +8849,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_glu,
            dtypesIfCPU=floating_types(),
            dtypesIfROCM=floating_types_and(torch.float16, torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
-           backward_dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_forward_ad=False,
            supports_out=False),
     UnaryUfuncInfo(
