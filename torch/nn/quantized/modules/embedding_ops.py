@@ -139,8 +139,11 @@ class Embedding(torch.nn.Module):
                           utilities or provided by user
         """
         if hasattr(mod, 'weight_fake_quant'):
-            assert type(mod) == nn.qat.Embedding, 'nnq.' + cls.__name__ + '.from_float ' + \
-                'with fake quant only works for ' + nn.qat.Embedding.__name__
+            assert type(mod) == nn.qat.Embedding or type(mod) == nn.qat.FusedFakeQuantEmbedding, \
+                'nnq.' + cls.__name__ + '.from_float with fake quant only works for ' + \
+                nn.qat.Embedding.__module__ + '.' + nn.qat.Embedding.__name__ + ' or ' + \
+                torch.nn.qat.FusedFakeQuantEmbedding.__module__ + '.' + \
+                torch.nn.qat.FusedFakeQuantEmbedding.__name__
             weight_observer = mod.weight_fake_quant
             activation_post_process = mod.activation_post_process
         else:

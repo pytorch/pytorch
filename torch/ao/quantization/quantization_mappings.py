@@ -79,6 +79,7 @@ DEFAULT_STATIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nnqat.Conv3d: nnq.Conv3d,
     nnqat.EmbeddingBag: nnq.EmbeddingBag,
     nnqat.Embedding: nnq.Embedding,
+    nnqat.FusedFakeQuantEmbedding: nnq.Embedding,
 }
 
 # Default map for swapping float module to qat modules
