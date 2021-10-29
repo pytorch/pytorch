@@ -322,6 +322,38 @@ def get_target_activation_dtype_for_node(
     else:
         raise AssertionError(f'need to handle {node.format_node()}')
 
+def get_target_dtype_for_weight_and_bias(
+    arg: Argument,
+    node: Node,
+    qconfig: QConfigAny,
+    inputs_seen_counter: int,
+    outputs_seen_counter: int,
+    input_quantized_idxs: List[int],
+    output_quantized_idxs: List[int],
+    qhandler: Optional[QuantizeHandler],
+    modules: Dict[str, torch.nn.Module],
+    cache_for_no_tensor_check: Dict[Node, bool],
+) -> Optional[torch.dtype]:
+    is_weight = node_arg_is_weight(node, arg)
+    is_bias = node_arg_is_bias(node, arg)
+    if qconfig is not None:
+        a_dtype, w_dtype, _ = get_qconfig_dtypes(qconfig)
+        if is_weight:
+            return w_dtype
+        elif is_bias:
+            # using the same logic that we have in the current flow for now,
+            # we can change it later if we add bias in qconfig
+            # we do not have bias setting in the qconfig yet
+            if a_dtype == torch.float16 and w_dtype == torch.float16:
+                b_dtype = torch.float16
+            else:
+                b_dtype = torch.float
+            return b_dtype
+    return get_target_activation_dtype_for_node(
+        arg, qconfig, inputs_seen_counter, outputs_seen_counter,
+        input_quantized_idxs, output_quantized_idxs, qhandler,
+        modules, cache_for_no_tensor_check)
+
 def maybe_insert_input_observer_for_arg_or_kwarg(
     node: Union[Node, Any],
     arg: Argument,
@@ -329,6 +361,7 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
     model: torch.nn.Module,
     modules: Dict[str, torch.nn.Module],
     graph: Graph,
+    node_name_to_current_dtpe: Dict[str, Any],
     node_name_to_target_dtype: Dict[str, Any],
     qhandler: Optional[QuantizeHandler],
     prepare_custom_config_dict: Dict[str, Any],
@@ -457,6 +490,7 @@ def maybe_insert_input_observers_for_node(
     model: torch.nn.Module,
     modules: Dict[str, torch.nn.Module],
     graph: Graph,
+    node_name_to_current_dtype: Dict[str, Any],
     node_name_to_target_dtype: Dict[str, Any],
     qhandler: Optional[QuantizeHandler],
     prepare_custom_config_dict: Dict[str, Any],
@@ -485,6 +519,7 @@ def maybe_insert_input_observers_for_node(
     for arg in node.args:
         new_arg = maybe_insert_input_observer_for_arg_or_kwarg(
             node, arg, qconfig, model, modules, graph,
+            node_name_to_current_dtype,
             node_name_to_target_dtype,
             qhandler, prepare_custom_config_dict)
         new_args.append(new_arg)
@@ -493,6 +528,7 @@ def maybe_insert_input_observers_for_node(
     for k, kwarg in node.kwargs.items():
         new_kwarg = maybe_insert_input_observer_for_arg_or_kwarg(
             node, kwarg, qconfig, model, modules, graph,
+            node_name_to_current_dtype,
             node_name_to_target_dtype,
             qhandler, prepare_custom_config_dict)
         new_kwargs[k] = new_kwarg
@@ -554,6 +590,7 @@ def maybe_insert_output_observer_for_node(
     modules: Dict[str, torch.nn.Module],
     graph: Graph,
     matches: Dict[str, MatchResult],
+    node_name_to_current_dtype: Dict[str, Any],
     node_name_to_target_dtype: Dict[str, Any],
     matched_pattern: Any,
     qhandler: Optional[QuantizeHandler],
@@ -928,12 +965,29 @@ def insert_observers_for_model(
             input_quantized_idxs, output_quantized_idxs, qhandler,
             modules, cache_for_no_tensor_check)
 
+        for arg in node.args:
+            node_name_to_target_dtype[arg.name] = get_target_activation_dtype_for_node(
+                arg, node, qconfig, inputs_seen_counter, outputs_seen_counter,
+                input_quantized_idxs, output_quantized_idxs, qhandler,
+                modules, cache_for_no_tensor_check)
+
+        for k, arg in node.kwargs:
+            node_name_to_target_dtype[arg.name] = get_target_activation_dtype_for_node(
+                arg, node, qconfig, inputs_seen_counter, outputs_seen_counter,
+                input_quantized_idxs, output_quantized_idxs, qhandler,
+                modules, cache_for_no_tensor_check)
+
     # Second, for nodes with known input dtypes, propagate them throughout the
     # graph. For example, if there is a call such as
     #   x1 = x0.masked_fill(mask, 1)
     # we propagate the type of mask to be torch.bool
     propagate_dtypes_for_known_nodes(
         model.graph, node_name_to_target_dtype, matches)
+
+    # initialize node_name_to_current_dtype
+    node_name_to_current_dtype: DIct[str, Any] = dict()
+    for node_name, dtype in node_name_to_target_dtype:
+        node_name_to_current_dtype[node_name] = None if dtype is None else torch.float
 
     # After this point, the current node and all of its arguments
     # have a dtype assigned. Now, we insert observers for inputs
@@ -1011,6 +1065,7 @@ def insert_observers_for_model(
                     # this modifies node inplace
                     maybe_insert_input_observers_for_node(
                         node, qconfig, model, modules, graph,
+                        node_name_to_current_dtype,
                         node_name_to_target_dtype,
                         qhandler, prepare_custom_config_dict)
 
