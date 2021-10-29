@@ -51,27 +51,13 @@ bool use_hardswish(const Tensor& input) {
       !input.requires_grad() && true;
 }
 
-Tensor hardswish(const Tensor& input) {
-  Tensor padded_input = mobile::allocate_padded_contiguous_if_needed(
-      input, input.suggest_memory_format());
-
-  Tensor output = mobile::empty_with_tail_padding(
-      padded_input.sizes(),
-      padded_input.options().dtype(),
-      input.suggest_memory_format(),
-      padded_input.names());
-
-  hardswish_impl(padded_input, output);
-  return output.contiguous(input.suggest_memory_format());
-}
-
 const Tensor& hardswish_out(const Tensor& input, const Tensor& result) {
   Tensor padded_input = mobile::allocate_padded_contiguous_if_needed(
       input, input.suggest_memory_format());
 
-  // Don't need to allocate output if input is contiguous & already padded
-  if (result.data_ptr() == padded_input.data_ptr()) {
-    hardswish_impl(input, result);
+  // Don't need to allocate output if result is contiguous & already padded
+  if (mobile::is_padded_contiguous(result, result.suggest_memory_format())) {
+    hardswish_impl(padded_input, result);
   } else {
     Tensor output = mobile::empty_with_tail_padding(
         padded_input.sizes(),
@@ -84,9 +70,6 @@ const Tensor& hardswish_out(const Tensor& input, const Tensor& result) {
   return result;
 }
 
-const Tensor& hardswish_(const Tensor& input) {
-  return hardswish_out(input, input);
-}
 } // namespace xnnpack
 } // namespace native
 } // namespace at

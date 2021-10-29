@@ -11,11 +11,6 @@ from torch.testing._internal.common_methods_invocations import (
 from torch.testing._internal.common_utils import set_default_dtype
 from torch.testing._internal.jit_utils import JitTestCase
 
-# from torch.testing import FileCheck
-# from torch.testing._internal.common_utils import make_tensor
-
-# from textwrap import dedent
-
 if __name__ == "__main__":
     raise RuntimeError(
         "This test file is not meant to be run directly, use:\n\n"
@@ -47,6 +42,10 @@ class TestDtypeAnalysis(JitTestCase):
 
     def prop_dtype_on_graph(self, graph, example_inputs):
         graph_inputs = list(graph.inputs())
+
+        # We need to clear shape information because torch.jit.script
+        # will return a cached graph if the function is scripted twice.
+        torch._C._jit_pass_erase_shape_information(graph)
 
         self.assertEqual(len(graph_inputs), len(example_inputs))
         for graph_i, example_i in zip(graph_inputs, example_inputs):
@@ -116,6 +115,7 @@ class TestDtypeAnalysis(JitTestCase):
 
         input_shapes = [
             ((2, 2),),  # Simple Case
+            ((0, 2),),  # Size 0 Tensor
             ((),),  # zerodim
         ]
 
@@ -139,9 +139,10 @@ class TestDtypeAnalysis(JitTestCase):
         functions = [add, div]
 
         input_shapes = [
-            ((1, 1, 1), (1, 1)),  # Different Dim, non-zerodim
+            ((1, 1, 2), (1, 2)),  # Different Dim, non-zerodim
             ((), (1, 2)),  # One zerodim
             ((1, 2), ()),  # Other zerodim
+            ((2, 0, 3), (1, 3)),  # Test a tensor with a dim of 0
             ((), ()),  # both zerodim
         ]
 
