@@ -60,6 +60,75 @@ class TestShardedTensorNNInit(ShardedTensorTestBase):
         torch.nn.init.uniform_(local_tensor_clone, a=a, b=b)
         self.assertEqual(local_tensor_clone, sharded_tensor.local_shards()[0].tensor)
 
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
+    def test_init_sharded_tensor_with_normal(self):
+        """ Test torch.nn.init.normal_(ShardedTensor, mean, std) """
+
+        spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
+            ],
+        )
+        h, w = 8, 2
+        expected_h = 2
+        expected_device = torch.device(f"cuda:{self.rank}")
+        mean, std = 10, 5
+
+        seed = 1234
+        dtype = torch.double
+
+        sharded_tensor = _sharded_tensor.empty(spec, h, w, dtype=dtype)
+        self.assertEqual(1, len(sharded_tensor.local_shards()))
+
+        # Clone local tensor to ensure torch.nn.init starts from the same input
+        local_tensor_clone = torch.clone(sharded_tensor.local_shards()[0].tensor)
+        torch.manual_seed(seed)
+        torch.nn.init.normal_(sharded_tensor, mean=mean, std=std)
+
+        torch.manual_seed(seed)
+        torch.nn.init.normal_(local_tensor_clone, mean=mean, std=std)
+        self.assertEqual(local_tensor_clone, sharded_tensor.local_shards()[0].tensor)
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
+    def test_init_sharded_tensor_with_kaiming_uniform(self):
+        """ Test torch.nn.init.kaiming_uniform_(ShardedTensor, a, mode, nonlinearit) """
+
+        spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
+            ],
+        )
+        h, w = 8, 2
+        expected_h = 2
+        expected_device = torch.device(f"cuda:{self.rank}")
+        a, mode, nonlinearity = 0, 'fan_in', 'leaky_relu'
+
+        seed = 1234
+        dtype = torch.double
+
+        sharded_tensor = _sharded_tensor.empty(spec, h, w, dtype=dtype)
+        self.assertEqual(1, len(sharded_tensor.local_shards()))
+
+        # Clone local tensor to ensure torch.nn.init starts from the same input
+        local_tensor_clone = torch.clone(sharded_tensor.local_shards()[0].tensor)
+        torch.manual_seed(seed)
+        torch.nn.init.kaiming_normal_(sharded_tensor, a=a, mode=mode, nonlinearity=nonlinearity)
+
+        torch.manual_seed(seed)
+        torch.nn.init.kaiming_normal_(local_tensor_clone, a=a, mode=mode, nonlinearity=nonlinearity)
+        self.assertEqual(local_tensor_clone, sharded_tensor.local_shards()[0].tensor)
 
 if __name__ == '__main__':
     run_tests()
