@@ -1163,11 +1163,7 @@ Tensor sspaddmm(const Tensor& self, const Tensor& mat1, const Tensor& mat2,
 // sparse dims. Ideally in the future there should be unified reduction function
 // for ops like sum, max, and min.
 // --------------------------------------------------------------------
-Tensor _sparse_sum(const SparseTensor& input) {
-  return input.coalesce().values().sum();
-}
-
-Tensor _sparse_sum(const SparseTensor& input, ScalarType dtype) {
+Tensor _sparse_sum(const SparseTensor& input, c10::optional<ScalarType> dtype) {
   // don't have to do a conversion to the correct dtype first
   // just need to setup the accumulator correctly
   return input.coalesce().values().sum(dtype);
@@ -1203,8 +1199,9 @@ Tensor _sparse_sum(const SparseTensor& input, IntArrayRef dims_to_sum, c10::opti
   // new values
   Tensor new_values;
   if (sum_dense_dim) {
-      new_values = values.sum(dense_dims_to_sum_v, false, dtype);
-  } else {
+    new_values = values.sum(dense_dims_to_sum_v, false, dtype);
+  }
+  else {
     if (!dtype.has_value() && isIntegralType(input.scalar_type(), /*includeBool=*/false) && input.scalar_type() != ScalarType::Long) {
       new_values = values.to(ScalarType::Long, false, false, at::MemoryFormat::Contiguous);
     } else {
@@ -1246,14 +1243,6 @@ Tensor _sparse_sum(const SparseTensor& input, IntArrayRef dims_to_sum, c10::opti
     return new_sparse;
   }
 
-}
-
-Tensor _sparse_sum(const SparseTensor& input, IntArrayRef dims_to_sum, ScalarType dtype) {
-  return _sparse_sum(input, dims_to_sum, c10::optional<c10::ScalarType>(dtype));
-}
-
-Tensor _sparse_sum(const SparseTensor& input, IntArrayRef dims_to_sum) {
-  return _sparse_sum(input, dims_to_sum, c10::nullopt);
 }
 
 // --------------------------------------------------------------------

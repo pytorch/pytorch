@@ -4861,16 +4861,11 @@
   dispatch:
     SparseCPU, SparseCUDA: norm_sparse
 
-# TODO: reduce signatures down to one when optional args is available
-- func: _sparse_sum(Tensor self) -> Tensor
+- func: _sparse_sum.dtype(Tensor self, *, ScalarType? dtype=None) -> Tensor
 
-- func: _sparse_sum.dtype(Tensor self, *, ScalarType dtype) -> Tensor
-
-- func: _sparse_sum.dim(Tensor self, int[1] dim) -> Tensor
+- func: _sparse_sum.dim_dtype(Tensor self, int[1] dim, *, ScalarType? dtype=None) -> Tensor
   dispatch:
     CompositeExplicitAutograd: _sparse_sum
-
-- func: _sparse_sum.dim_dtype(Tensor self, int[1] dim, *, ScalarType dtype) -> Tensor
 
 - func: _sparse_sum_backward(Tensor grad, Tensor self, int[] dim) -> Tensor
   dispatch:

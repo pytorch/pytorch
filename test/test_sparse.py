@@ -1531,7 +1531,7 @@ class TestSparse(TestCase):
             S = self._gen_sparse(sparse_dims, nnz, with_size, dtype, device, coalesced)[0]
             run_tests(S.requires_grad_(True), test_dim)
 
-    @dtypes(torch.int8, torch.int16, torch.int32, torch.int64, torch.float32, torch.float64)
+    @dtypes(*get_all_dtypes(include_bool=False, include_half=False, include_bfloat16=False))
     def test_sparse_sum_int(self, device, dtype):
         x = torch.sparse_coo_tensor([[0, 1], [1, 0]], [1, 2], dtype=dtype, device=device)
         y = x.to_dense()
@@ -1549,7 +1549,7 @@ class TestSparse(TestCase):
         for p in params:
             self.assertEqual(torch.sparse.sum(x, **p).dtype, torch.sum(y, **p).dtype)
 
-        if dtype in (torch.int8, torch.int16, torch.int32, torch.int64):
+        if dtype in get_all_int_dtypes():
             self.assertEqual(torch.sparse.sum(x).dtype, torch.int64)
             self.assertEqual(torch.sparse.sum(x, dim=0).dtype, torch.int64)
             self.assertEqual(torch.sparse.sum(x, dim=(0, 1)).dtype, torch.int64)
