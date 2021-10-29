@@ -4,6 +4,7 @@ import itertools
 import collections
 import copy
 from enum import Enum
+import functools
 import operator
 import random
 import numbers
@@ -14,7 +15,7 @@ import numpy as np
 from torch._six import inf
 import collections.abc
 
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 from torch.testing import make_non_contiguous, make_tensor
 from torch.testing._internal.common_dtype import (
@@ -6059,87 +6060,6 @@ def sample_inputs_mse_loss(op_info, device, dtype, requires_grad, **kwargs):
     ]
 
 
-def sample_inputs_soft_margin_loss(op_info, device, dtype, requires_grad, **kwargs):
-    _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-
-    shapes_and_kwargs = [
-        ((), None),
-        ((S,), dict(reduction="mean")),
-        ((S,), dict(reduction="sum")),
-        ((S,), dict(reduction="none")),
-        ((S, S), None),
-        ((S, S, S), None),
-    ]
-
-    return [
-        SampleInput(_make_tensor(shape), args=(_make_tensor(shape, requires_grad=False),), kwargs=kwargs)
-        for shape, kwargs in shapes_and_kwargs
-    ]
-
-
-def sample_inputs_multi_margin_loss(op_info, device, dtype, requires_grad, **kwargs):
-    _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-
-    shapes_and_kwargs = [
-        ((S,), None),
-    ]
-
-    return [
-        SampleInput(_make_tensor(shape), args=(torch.tensor(0, device=device, requires_grad=False),), kwargs=kwargs)
-        for shape, kwargs in shapes_and_kwargs
-    ]
-
-
-def sample_inputs_multilabel_margin_loss(op_info, device, dtype, requires_grad, **kwargs):
-    _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-
-    shapes_and_kwargs = [
-        ((S, S), None),
-    ]
-
-    return [
-        SampleInput(_make_tensor(shape),
-                    args=(torch.zeros(shape, device=device, requires_grad=False, dtype=torch.int64),), kwargs=kwargs)
-        for shape, kwargs in shapes_and_kwargs
-    ]
-
-
-def sample_inputs_multilabel_soft_margin_loss(op_info, device, dtype, requires_grad, **kwargs):
-    _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-
-    shapes_and_kwargs = [
-        ((S,), dict(reduction="mean")),
-        ((S,), dict(reduction="sum")),
-        ((S,), dict(reduction="none")),
-        ((S, S), None),
-        ((S, S, S), None),
-    ]
-
-    return [
-        SampleInput(_make_tensor(shape), args=(_make_tensor(shape, requires_grad=False),), kwargs=kwargs)
-        for shape, kwargs in shapes_and_kwargs
-    ]
-
-
-def sample_inputs_margin_ranking_loss(op_info, device, dtype, requires_grad, **kwargs):
-    _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-
-    shapes_and_kwargs = [
-        ((), None),
-        ((S,), dict(reduction="mean")),
-        ((S,), dict(reduction="sum")),
-        ((S,), dict(reduction="none")),
-        ((S, S), None),
-        ((S, S, S), None),
-    ]
-
-    return [
-        SampleInput(_make_tensor(shape), args=(_make_tensor(shape, requires_grad=False),
-                                               _make_tensor(shape, requires_grad=False)), kwargs=kwargs)
-        for shape, kwargs in shapes_and_kwargs
-    ]
-
-
 def sample_inputs_grid_sample(op_info, device, dtype, requires_grad, **kwargs):
     _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -6170,6 +6090,94 @@ def sample_inputs_grid_sample(op_info, device, dtype, requires_grad, **kwargs):
             )
 
     return sample_inputs
+
+
+def _add_loss_reduction_kwargs(sample_inputs_generator):
+    @functools.wraps(sample_inputs_generator)
+    def with_loss_reduction_kwargs(*args, **kwargs):
+        sample_inputs = list(sample_inputs_generator(*args, **kwargs))
+
+        reduction_kwargs = [
+            {'reduction': 'mean'},
+            {'reduction': 'sum'},
+            {'reduction': 'none'},
+        ]
+        for input, kwargs in product(sample_inputs, reduction_kwargs):
+            input = copy.copy(input)
+            input.kwargs = {**input.kwargs, **kwargs}
+            sample_inputs.append(input)
+        return sample_inputs
+
+    return with_loss_reduction_kwargs
+
+
+@_add_loss_reduction_kwargs
+def sample_inputs_margin_ranking_loss(op_info, device, dtype, requires_grad, **kwargs):
+    _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    shapes = [
+        (),
+        (S,),
+        (S, S),
+        (S, S, S),
+    ]
+
+    for shape in shapes:
+        for kwargs in [{}, {'margin': 1.0}]:
+            yield SampleInput(_make_tensor(shape), args=(_make_tensor(shape, requires_grad=False),
+                                                         _make_tensor(shape, requires_grad=False)),
+                                                         kwargs=kwargs)
+
+
+@_add_loss_reduction_kwargs
+def sample_inputs_multi_margin_loss(op_info, device, dtype, requires_grad, **kwargs):
+    _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_target = partial(_make_tensor, dtype=torch.long, requires_grad=False)
+
+    inputs = [
+        ((), make_target([], low=0, high=1), {}),
+        ((S,), make_target([], low=0, high=S), {"p": 1}),
+        ((S,), make_target([1], low=0, high=S), {"p": 2}),
+        ((S, M), make_target([S], low=0, high=M), {"margin": 1.0}),
+        ((M, S), make_target([M], low=0, high=S), {"weight": None}),
+    ]
+
+    for input_shape, target, kwargs in inputs:
+        yield SampleInput(_make_tensor(input_shape), args=(target,), kwargs=kwargs)
+
+
+@_add_loss_reduction_kwargs
+def sample_inputs_multilabel_margin_loss(op_info, device, dtype, requires_grad, **kwargs):
+    _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_target = partial(_make_tensor, dtype=torch.long, requires_grad=False)
+
+    inputs = [
+        ([], make_target([], low=0, high=1)),
+        ([S], make_target([S], low=0, high=S)),
+        ([M, S], make_target([M, S], low=0, high=S)),
+    ]
+
+    for shape, target in inputs:
+        yield SampleInput(_make_tensor(shape), args=(target,))
+
+
+@_add_loss_reduction_kwargs
+def sample_inputs_multilabel_soft_margin_loss(op_info, device, dtype, requires_grad, **kwargs):
+    _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    shapes = [
+        (S,),
+        (S, S),
+    ]
+
+    for shape in shapes:
+        input = _make_tensor(shape)
+        target = _make_tensor(shape, requires_grad=False)
+        weight = _make_tensor(shape)
+        # Produce one with weight and one without.
+        yield SampleInput(input, args=(target,), kwargs={})
+        # yield SampleInput(input, args=(target,), kwargs={'weight': weight})
+
 
 def sample_inputs_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
     shape = (2, 3)
@@ -6214,6 +6222,24 @@ def sample_inputs_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
             yield SampleInput(input, args=(target,), kwargs=kwargs)
 
     return list(gen_inputs())
+
+
+@_add_loss_reduction_kwargs
+def sample_inputs_soft_margin_loss(op_info, device, dtype, requires_grad, **kwargs):
+    _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    shapes = [
+        (),
+        (S,),
+        (S,),
+        (S,),
+        (S, S),
+        (S, S, S),
+    ]
+
+    for shape in shapes:
+        yield SampleInput(_make_tensor(shape), args=(_make_tensor(shape, requires_grad=False),))
+
 
 def sample_inputs_pairwise_distance(op_info, device, dtype, requires_grad, **kwargs):
     make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -11258,29 +11284,13 @@ op_db: List[OpInfo] = [
         gradcheck_wrapper=gradcheck_wrapper_masked_operation
     ),
     OpInfo(
-        "nn.functional.nll_loss",
+        "nn.functional.margin_ranking_loss",
         ref=_NOTHING,
-        dtypesIfCPU=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        dtypesIfCPU=all_types_and(torch.bfloat16),
+        dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
         supports_out=False,
-        sample_inputs_func=sample_inputs_nll_loss,
-        skips=(
-            # RuntimeError:
-            # undefined value tensor:
-            #   File "<string>", line 3
-            # def the_method(i0, i1):
-            #     return torch.nn.functional.nll_loss(i0, i1, weight=tensor([8.4784, 1.7658, 4.3228], dtype=torch.float32))
-            #                                                        ~~~~~~ <--- HERE
-            DecorateInfo(unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit", dtypes=(torch.float32,),),
-        ),
-    ),
-    OpInfo(
-        "nn.functional.soft_margin_loss",
-        ref=_NOTHING,
-        dtypesIfCPU=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
-        supports_out=False,
-        sample_inputs_func=sample_inputs_soft_margin_loss,
+        sample_inputs_func=sample_inputs_margin_ranking_loss,
+        supports_forward_ad=True,
     ),
     OpInfo(
         "nn.functional.multi_margin_loss",
@@ -11306,13 +11316,29 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_multilabel_soft_margin_loss,
     ),
     OpInfo(
-        "nn.functional.margin_ranking_loss",
+        "nn.functional.nll_loss",
         ref=_NOTHING,
-        dtypesIfCPU=all_types_and(torch.bfloat16),
-        dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
+        dtypesIfCPU=floating_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
-        sample_inputs_func=sample_inputs_margin_ranking_loss,
-        supports_forward_ad=True,
+        sample_inputs_func=sample_inputs_nll_loss,
+        skips=(
+            # RuntimeError:
+            # undefined value tensor:
+            #   File "<string>", line 3
+            # def the_method(i0, i1):
+            #     return torch.nn.functional.nll_loss(i0, i1, weight=tensor([8.4784, 1.7658, 4.3228], dtype=torch.float32))
+            #                                                        ~~~~~~ <--- HERE
+            DecorateInfo(unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit", dtypes=(torch.float32,),),
+        ),
+    ),
+    OpInfo(
+        "nn.functional.soft_margin_loss",
+        ref=_NOTHING,
+        dtypesIfCPU=floating_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+        supports_out=False,
+        sample_inputs_func=sample_inputs_soft_margin_loss,
     ),
     OpInfo(
         "argsort",
