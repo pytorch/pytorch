@@ -3117,9 +3117,9 @@ def sample_inputs_bilinear(self, device, dtype, requires_grad):
         if not has_bias:
             sample_inputs.append(SampleInput(input_tensor1, args=(input_tensor2, weight,)))
             continue
-
         bias = create_tensor([out_feat])
         sample_inputs.append(SampleInput(input_tensor1, args=(input_tensor2, weight, bias)))
+
     return sample_inputs
 
 def sample_inputs_glu(self, device, dtype, requires_grad):
@@ -8837,6 +8837,10 @@ op_db: List[OpInfo] = [
            dtypesIfROCM=floating_types_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            backward_dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
+           skips=(
+               # FIXME: bfloat16 backward support likely depends on CUDA11+ and SM53+
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', active_if=IS_WINDOWS),
+           ),
            supports_forward_ad=False,
            supports_out=False),
     OpInfo('nn.functional.glu',
