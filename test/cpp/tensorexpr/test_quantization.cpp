@@ -206,7 +206,7 @@ TEST_F(Quantization, QuantUpsampleNearst2dDequantUInt8) {
 
   auto x = at::rand({1, 1, 2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
   auto q = at::quantize_per_tensor(x, 0.1f, 13, at::kQUInt8);
-  auto qu = at::upsample_nearest2d(q, at::ArrayRef<long>({4, 4}), c10::nullopt);
+  auto qu = at::upsample_nearest2d(q, {4, 4});
   auto y_expected = at::dequantize(qu);
 
   TensorExprKernel k(graph);
