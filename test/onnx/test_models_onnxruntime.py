@@ -1,3 +1,5 @@
+# Owner(s): ["module: onnx"]
+
 import unittest
 import onnxruntime  # noqa: F401
 
