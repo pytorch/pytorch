@@ -2671,7 +2671,11 @@ def sample_inputs_searchsorted(op_info, device, dtype, requires_grad):
     for size, noncontiguous, out_int32, right in product(sizes, [False, True], [False, True], [False, True]):
         unsorted_tensor = make_arg(size, noncontiguous=noncontiguous)
         input_tensor = make_arg(size, noncontiguous=noncontiguous)
-        boundary_tensor, sorter = torch.sort(unsorted_tensor)
+        if np.product(size) == 0:
+            boundary_tensor = unsorted_tensor
+            sorter = make_arg(size, noncontiguous=noncontiguous)
+        else:
+            boundary_tensor, sorter = torch.sort(unsorted_tensor)
         side = "right" if right else "left"
 
         inputs.append(SampleInput(boundary_tensor, args=(input_tensor,), kwargs=dict(out_int32=out_int32, right=right)))
