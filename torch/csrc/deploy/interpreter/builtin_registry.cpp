@@ -11,11 +11,10 @@ namespace deploy {
 static const size_t NUM_FROZEN_PY_BUILTIN_MODULES = 6;
 static const size_t NUM_FROZEN_PY_STDLIB_MODULES = 680;
 
-extern "C" struct _frozen _PyImport_FrozenModules[];
 extern "C" struct _frozen _PyImport_FrozenModules_torch[];
 extern "C" PyObject* initModule(void);
+
 REGISTER_TORCH_DEPLOY_BUILTIN(cpython_internal, PyImport_FrozenModules);
-REGISTER_TORCH_DEPLOY_BUILTIN(frozenpython, _PyImport_FrozenModules);
 REGISTER_TORCH_DEPLOY_BUILTIN(
     frozentorch,
     _PyImport_FrozenModules_torch,
