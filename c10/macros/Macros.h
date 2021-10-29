@@ -464,8 +464,7 @@ __host__ __device__
 #endif
 #endif
 
-#endif // C10_MACROS_MACROS_H_
-
+#ifndef HAS_DEMANGLE
 #if defined(__ANDROID__) || defined(_WIN32) || defined(__EMSCRIPTEN__) || \
     defined(__XROS__)
 #define HAS_DEMANGLE 0
@@ -475,3 +474,6 @@ __host__ __device__
 #else
 #define HAS_DEMANGLE 1
 #endif
+#endif // HAS_DEMANGLE
+
+#endif // C10_MACROS_MACROS_H_
