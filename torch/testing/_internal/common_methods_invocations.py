@@ -6513,7 +6513,6 @@ def sample_inputs_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
 
     return list(gen_inputs())
 
-
 def _generate_sample_shape_reduction():
     shapes = ((S,), (S, S), (S, S, S))
     reductions = ('none', 'mean', 'sum')
