@@ -1,5 +1,6 @@
 #pragma once
-#include <conv_utils.h>
+
+#include <cstdlib>
 
 namespace qnnpack {
 class PrePackConvWeights final {

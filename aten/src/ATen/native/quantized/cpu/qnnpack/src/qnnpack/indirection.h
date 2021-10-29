@@ -29,7 +29,7 @@ PYTORCH_QNNP_INTERNAL void pytorch_qnnp_indirection_init_dwconv2d(
     size_t step_height,
     size_t step_width);
 
-PYTORCH_QNNP_INTERNAL void pytorch_qnnp_indirection_init_deconv2d(
+PYTORCH_QNNP_INTERNAL void pytorch_qnnp_indirection_init_deconv3d(
     pytorch_qnnp_operator_t op,
     size_t output_tile_size,
     size_t tiled_output_size);

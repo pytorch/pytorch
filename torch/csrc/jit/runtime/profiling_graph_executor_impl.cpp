@@ -721,7 +721,7 @@ GraphExecutorState ProfilingGraphExecutorImpl::getDebugState() {
 
 Node* insertFallbackFunctionCall(
     Graph* graph,
-    Function* func,
+    GraphFunction* func,
     ArrayRef<Value*> inputs) {
   auto tuple_type = func->graph()->return_node()->input(0)->type();
   Value* fn_constant = graph->insertNode(graph->create(prim::Constant))
@@ -740,7 +740,7 @@ Node* insertFallbackFunctionCall(
   return fun_unpack_tuple;
 }
 
-Function* createFallbackPathFunction(
+GraphFunction* createFallbackPathFunction(
     Block* b,
     const std::string& function_name) {
   auto value_map = [](Value* v) { return v; };

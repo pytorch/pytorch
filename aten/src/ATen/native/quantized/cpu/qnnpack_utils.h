@@ -183,12 +183,9 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
     convolution->dilation_depth = kSpatialDim == 3 ? dilation_[0] : 1;
     convolution->dilation_height = dilation_[kSpatialDim - 2];
     convolution->dilation_width = dilation_[kSpatialDim - 1];
-    convolution->input_padding_top = padding_[kSpatialDim - 2];
-    convolution->input_padding_left = padding_[kSpatialDim - 1];
-    convolution->input_padding_bottom = padding_[kSpatialDim - 2];
-    convolution->input_padding_right = padding_[kSpatialDim - 1];
-    convolution->input_padding_front = kSpatialDim == 3 ? padding_[0] : 0;
-    convolution->input_padding_back = kSpatialDim == 3 ? padding_[0] : 0;
+    convolution->input_padding_height = padding_[kSpatialDim - 2];
+    convolution->input_padding_width = padding_[kSpatialDim - 1];
+    convolution->input_padding_depth = kSpatialDim == 3 ? padding_[0] : 0;
     convolution->per_channel = is_per_channel;
     convolution->transpose = transpose_;
 
