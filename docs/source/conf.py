@@ -450,7 +450,7 @@ def coverage_post_process(app, exception):
         mods = ", ".join(unexpected_missing)
         output.append(f"\nYou added the following module(s) to the PyTorch namespace '{mods}' "
                       "but they have no corresponding entry in a doc .rst file. You should "
-                      "either make sure that the .rst file that contains its documentations "
+                      "either make sure that the .rst file that contains the module's documentation "
                       "properly contains either '.. automodule:: mod_name' (if you do not want "
                       "the paragraph added by the automodule, you can simply use py:module) or "
                       "make the module private (by appending an '_' at the beginning of its name.")
