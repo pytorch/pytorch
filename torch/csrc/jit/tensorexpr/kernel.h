@@ -2,6 +2,7 @@
 
 #include <c10/util/variant.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/codegen.h>
@@ -91,9 +92,21 @@ class TORCH_API TensorExprKernel {
  public:
   explicit TensorExprKernel(
       const std::shared_ptr<Graph>& subgraph,
+      const std::string& kernel_func_name,
       std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings =
           {},
       bool pre_alloc = false);
+
+  explicit TensorExprKernel(
+      const std::shared_ptr<Graph>& subgraph,
+      std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings =
+          {},
+      bool pre_alloc = false)
+      : TensorExprKernel(
+            subgraph,
+            SubgraphUtils::generateNameForGraph(subgraph),
+            custom_lowerings,
+            pre_alloc) {}
 
   void run(Stack& stack);
   void runFast(
@@ -235,6 +248,7 @@ class TORCH_API TensorExprKernel {
 
   std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings_;
   bool pre_alloc_{false};
+  const std::string& kernel_func_name_;
 };
 
 TORCH_API int& getTECudaPointwiseLoopLevels();
