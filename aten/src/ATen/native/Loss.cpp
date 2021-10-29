@@ -473,9 +473,9 @@ TORCH_IMPL_FUNC(mse_loss_out)
     auto iter = TensorIterator::borrowing_binary_op(loss, input, target);
     mse_stub(iter.device_type(), iter);
     if (reduction == Reduction::Mean) {
-      at::mean_out(result, iter.output(), 0);
+      at::mean_out(const_cast<Tensor&>(result), iter.output(), 0);
     } else {
-      at::sum_out(result, iter.output(), 0);
+      at::sum_out(const_cast<Tensor&>(result), iter.output(), 0);
     }
   } else {
     auto iter = TensorIterator::borrowing_binary_op(result, input, target);
