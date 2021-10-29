@@ -34,6 +34,7 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss(const Tensor& log_probs, const Tensor
 #include <ATen/cudnn/Utils.h>
 
 #include <ATen/TensorUtils.h>
+#include <c10/util/irange.h>
 
 namespace at { namespace native {
 
@@ -57,7 +58,7 @@ bool _use_cudnn_ctc_loss(
     for (const auto input_length : input_lengths) {
       use_cudnn &= ((input_length == max_input_length) ? 1 : 0);
     }
-    for (size_t b = 0; b < target_lengths.size(); b++) {
+    for (const auto b : c10::irange(target_lengths.size())) {
       // target length < 256 is documented, but we see illegal memory accesses
       // when target lengths > input lengths for CuDNN
       use_cudnn &=

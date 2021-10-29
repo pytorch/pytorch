@@ -224,6 +224,21 @@ c10::optional<IValue> toIValueProp(const Value* v) {
   }
   return c10::nullopt;
 }
+
+// batch_norm and instance_norm have incorrect annotations, because
+// (a!)? annotations aren't supported, so these checks would fail.
+// Their behavior also varies depending on the `training` and
+// `use_input_stats` arguments.
+// There are custom implementations in alias_analysis.cpp for these ops.
+bool shouldIgnoreNode(const Node* n) {
+  switch (n->kind()) {
+    case aten::batch_norm:
+    case aten::instance_norm:
+      return true;
+    default:
+      return false;
+  }
+}
 } // namespace
 
 void checkAliasAnnotation(
@@ -232,6 +247,9 @@ void checkAliasAnnotation(
     const std::string& unqualifiedOpName) {
   // Find the node that corresponds to our op name
   const auto node = findNodeForOp(*graph, unqualifiedOpName);
+  if (shouldIgnoreNode(node)) {
+    return;
+  }
 
   // Build the stack to use as input to the op
   Stack stack;
