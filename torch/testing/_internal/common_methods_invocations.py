@@ -6367,6 +6367,14 @@ def sample_inputs_hinge_embedding_loss(op_info, device, dtype, requires_grad, **
 
     return list(gen_inputs())
 
+def sample_inputs_huber_loss(op_info, device, dtype, requires_grad, **kwargs):
+    def gen_inputs():
+        for input, target, d in _generate_sample_inputs_nn_loss(op_info, device, dtype, requires_grad, **kwargs):
+            d['delta'] = random.uniform(1e-3, 9)
+            yield SampleInput(input, args=(target, ), kwargs=d)
+
+    return list(gen_inputs())
+
 def sample_inputs_pairwise_distance(op_info, device, dtype, requires_grad, **kwargs):
     make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -11514,6 +11522,20 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         sample_inputs_func=sample_inputs_hinge_embedding_loss,
+    ),
+    OpInfo(
+        "nn.functional.huber_loss",
+        ref=_NOTHING,
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        supports_out=False,
+        sample_inputs_func=sample_inputs_huber_loss,
+        skips=(
+            # JIT does not support variadic tensors.
+            # RuntimeError: input->type()->kind() == TypeKind::OptionalType
+            # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":270,
+            # please report a bug to PyTorch.
+            DecorateInfo(unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit", dtypes=(torch.float32,),),
+        ),
     ),
     OpInfo(
         "argsort",
