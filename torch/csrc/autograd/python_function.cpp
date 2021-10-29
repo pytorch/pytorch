@@ -589,7 +589,7 @@ static void _trace_post_record(
   // to the original tuple type.
   if (!unpack_output) {
     std::vector<TypePtr> new_tuple_values;
-    for (int i = 0; i < num_outputs; ++i) {
+    for (const auto i : c10::irange(num_outputs)) {
       TypePtr ptr = node->outputs()[i]->type();
       new_tuple_values.push_back(ptr);
     }

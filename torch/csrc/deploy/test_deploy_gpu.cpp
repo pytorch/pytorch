@@ -84,3 +84,34 @@ TEST(TorchDeployGPUTest, TensorRT) {
         output.allclose(model(at::IValue{input}).toIValue().toTensor()));
   }
 }
+
+// OSS build does not have bultin numpy support yet. Use this flag to guard the
+// test case.
+#if HAS_NUMPY
+TEST(TorchpyTest, TestNumpy) {
+  torch::deploy::InterpreterManager m(2);
+  auto noArgs = at::ArrayRef<torch::deploy::Obj>();
+  auto I = m.acquireOne();
+  auto mat35 = I.global("numpy", "random").attr("rand")({3, 5});
+  auto mat58 = I.global("numpy", "random").attr("rand")({5, 8});
+  auto mat38 = I.global("numpy", "matmul")({mat35, mat58});
+  EXPECT_EQ(2, mat38.attr("shape").attr("__len__")(noArgs).toIValue().toInt());
+  EXPECT_EQ(3, mat38.attr("shape").attr("__getitem__")({0}).toIValue().toInt());
+  EXPECT_EQ(8, mat38.attr("shape").attr("__getitem__")({1}).toIValue().toInt());
+}
+#endif
+
+#if HAS_PYYAML
+TEST(TorchpyTest, TestPyYAML) {
+  const std::string kDocument = "a: 1\n";
+
+  torch::deploy::InterpreterManager m(2);
+  auto I = m.acquireOne();
+
+  auto load = I.global("yaml", "load")({kDocument});
+  EXPECT_EQ(1, load.attr("__getitem__")({"a"}).toIValue().toInt());
+
+  auto dump = I.global("yaml", "dump")({load});
+  EXPECT_EQ(kDocument, dump.toIValue().toString()->string());
+}
+#endif
