@@ -32,7 +32,7 @@ TORCH_META_FUNC(mse_loss)
  int64_t reduction) {
   build_borrowing_binary_op(maybe_get_output(), input, target);
 
-  if (reduction != Reduction::None) {
+  if (reduction == Reduction::None) {
     return;
   }
 
