@@ -474,7 +474,9 @@ class TRTInterpreter(torch.fx.Interpreter):
         if timing_cache:
             cache_file = numpy.array(timing_cache)
             cache = builder_config.create_timing_cache(cache_file.tobytes())
-            builder_config.set_timing_cache(cache, True)
+        else:
+            cache = builder_config.create_timing_cache(b"")
+        builder_config.set_timing_cache(cache, False)
 
         if fp16_mode:
             builder_config.set_flag(trt.BuilderFlag.FP16)
@@ -496,7 +498,7 @@ class TRTInterpreter(torch.fx.Interpreter):
         engine = self.builder.build_engine(self.network, builder_config)
         assert engine
 
-        serialized_cache = bytearray(builder_config.get_timing_cache().serialize()) \
+        serialized_cache = bytearray(cache.serialize()) \
             if builder_config.get_timing_cache() else bytearray()
 
         return TRTInterpreterResult(engine, self._input_names, self._output_names, serialized_cache)
