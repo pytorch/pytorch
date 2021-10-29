@@ -111,6 +111,7 @@ void OptimizeGraph(
   ConstantPropagation(graph);
   RemoveImmutableInputDictLookups(graph);
   UseVariadicTupleUnpack(graph);
+  UseVariadicGroupedAccessor(graph);
   GRAPH_DUMP("Final graph after optimizations: ", graph);
 }
 
@@ -900,6 +901,17 @@ void StaticRuntime::set_inputs(
   }
 }
 
+void StaticRuntime::create_memory_planner() {
+  if (!planner_) {
+    planner_ = std::make_unique<MemoryPlanner>(
+        this,
+        static_module_.values_share_same_storage(),
+        static_module_.value_group(),
+        static_module_.opts().enable_out_variant,
+        static_module_.opts().manage_output_tensors);
+  }
+}
+
 template <typename IValueList>
 c10::IValue StaticRuntime::run_impl(
     IValueList&& args,
@@ -931,14 +943,7 @@ c10::IValue StaticRuntime::run_impl(
     // MemoryPlanner is created after the first invocation of `run()`. This is
     // done intentionally because MemoryPlanner uses `Tensor` sizes of the
     // previous `run()` for memory planning of subsequent runs
-    if (!planner_) {
-      planner_ = std::make_unique<MemoryPlanner>(
-          this,
-          static_module_.values_share_same_storage(),
-          static_module_.value_group(),
-          static_module_.opts().enable_out_variant,
-          static_module_.opts().manage_output_tensors);
-    }
+    create_memory_planner();
     planner_->deallocate();
     // clean up owning refs of input tensors
     clean_up_input_ivalues();
@@ -1059,6 +1064,7 @@ void StaticRuntime::benchmark(
             << " ms" << std::endl;
   std::cout << "First iter time: " << results.first_iter_time << " ms"
             << std::endl;
+  std::cout << "Number of operators: " << nodes_.size() << std::endl;
 
   if (planner_) {
     std::cout << "Total number of managed tensors: "
@@ -1176,14 +1182,7 @@ void StaticRuntime::display_nodes(
     // MemoryPlanner is created after the first invocation of `run()`. This is
     // done intentionally because MemoryPlanner uses `Tensor` sizes of the
     // previous `run()` for memory planning of subsequent runs
-    if (!planner_) {
-      planner_ = std::make_unique<MemoryPlanner>(
-          this,
-          static_module_.values_share_same_storage(),
-          static_module_.value_group(),
-          static_module_.opts().enable_out_variant,
-          static_module_.opts().manage_output_tensors);
-    }
+    create_memory_planner();
     planner_->deallocate();
     // clean up owning refs of input tensors
     clean_up_input_ivalues();
@@ -1245,14 +1244,7 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
     }
     timer.Start();
     if (static_module_.opts().cleanup_activations) {
-      if (!planner_) {
-        planner_ = std::make_unique<MemoryPlanner>(
-            this,
-            static_module_.values_share_same_storage(),
-            static_module_.value_group(),
-            static_module_.opts().enable_out_variant,
-            static_module_.opts().manage_output_tensors);
-      }
+      create_memory_planner();
       planner_->deallocate();
       // clean up owning refs of input tensors
       clean_up_input_ivalues();
