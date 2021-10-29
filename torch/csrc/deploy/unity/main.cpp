@@ -17,8 +17,8 @@ std::string lookupMainModule(InterpreterManager& m) {
 }
 
 int doMain(int argc, char** argv) {
-  std::unique_ptr<Environment> env = std::make_unique<XarEnvironment>();
-  InterpreterManager m(2, std::move(env));
+  std::shared_ptr<Environment> env = std::make_shared<XarEnvironment>();
+  InterpreterManager m(2, env);
 
   auto mainModule = lookupMainModule(m);
   auto I = m.acquireOne();

@@ -9,21 +9,19 @@ namespace deploy {
 
 XarEnvironment::XarEnvironment(std::string pythonAppDir)
     : pythonAppDir_(std::move(pythonAppDir)),
-      pythonAppRoot_(pythonAppDir_ + "/python_app_root") {}
-
-void XarEnvironment::setup() {
+      pythonAppRoot_(pythonAppDir_ + "/python_app_root") {
   setupPythonApp();
   preloadSharedLibraries();
 }
 
-void XarEnvironment::teardown() {
+XarEnvironment::~XarEnvironment() {
   // We should delete the pythonAppDir_ here. However if we did that, the
   // next time we run the executable, we will get issue to load shared
   // libraries since the path we add to LD_LIBRARY_PATH does not exist yet.
   // Also the pythonAppDir_ will anyway be re-created the next time we run the
   // executable.
   //
-  // Keep this method empty for now.
+  // Keep the teardown step a noop for now.
 }
 
 void XarEnvironment::configureInterpreter(Interpreter* interp) {

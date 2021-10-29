@@ -12,19 +12,7 @@ class Interpreter;
  */
 class Environment {
  public:
-  virtual ~Environment() {}
-  /*
-   * Setup the environment. E.g., for the embedded xar, we need extract it out
-   * to the file system.
-   */
-  virtual void setup() = 0;
-  /*
-   * Cleanup the environment.
-   */
-  virtual void teardown() = 0;
-  /*
-   * Do the configuration on the interpreter. E.g., append to sys.path.
-   */
+  virtual ~Environment() = default;
   virtual void configureInterpreter(Interpreter* interp) = 0;
 };
 

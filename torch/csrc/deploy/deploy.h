@@ -59,9 +59,10 @@ class TORCH_API Interpreter {
   std::unique_ptr<InterpreterImpl> pImpl_;
   bool customLoader_ = false;
   InterpreterManager* manager_; // optional if managed by one
+  std::shared_ptr<Environment> env_;
 
  public:
-  Interpreter(InterpreterManager* manager);
+  Interpreter(InterpreterManager* manager, std::shared_ptr<Environment> env);
   InterpreterSession acquireSession() const {
     TORCH_DEPLOY_TRY
     return InterpreterSession(pImpl_->acquireSession(), manager_);
@@ -112,11 +113,7 @@ struct TORCH_API LoadBalancer {
 struct TORCH_API InterpreterManager {
   explicit InterpreterManager(
       size_t nInterp = 2,
-      std::unique_ptr<Environment> env = std::make_unique<NoopEnvironment>());
-
-  ~InterpreterManager() {
-    environment_->teardown();
-  }
+      std::shared_ptr<Environment> env = std::make_shared<NoopEnvironment>());
 
   // get a free model, guarenteed that no other user of acquireOne has the same
   // model. It _is_ possible that other users will be using the interpreter.
@@ -166,7 +163,6 @@ struct TORCH_API InterpreterManager {
   std::vector<Interpreter> instances_;
   LoadBalancer resources_;
   std::unordered_map<std::string, std::string> registeredModuleSource_;
-  std::unique_ptr<Environment> environment_;
 };
 
 struct TORCH_API ReplicatedObjImpl {
