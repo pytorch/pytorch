@@ -5,6 +5,7 @@
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/executor_utils.h>
+#include <torch/csrc/jit/codegen/fuser/cuda/fused_kernel.h>
 #include <torch/csrc/jit/codegen/fuser/cuda/resource_strings.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
@@ -53,44 +54,6 @@ static bool is_zero(ExprPtr expr) {
 
 static const at::cuda::NVRTC& nvrtc() {
   return at::globalContext().getNVRTC();
-}
-
-// query codegen output arch and target
-static void codegenOutputQuery(
-    const cudaDeviceProp* const prop,
-    int& major,
-    int& minor,
-    bool& compile_to_sass) {
-  using CudaVersion = std::pair<int, int>;
-  CudaVersion nvrtc_version;
-  AT_CUDA_NVRTC_CHECK(
-      nvrtc().nvrtcVersion(&nvrtc_version.first, &nvrtc_version.second));
-
-  AT_ASSERT(nvrtc_version.first >= 6);
-
-  CudaVersion dev_version = CudaVersion(prop->major, prop->minor);
-  CudaVersion max_dev_version(dev_version);
-  // NOLINTNEXTLINE(bugprone-branch-clone)
-  if (nvrtc_version.first <= 7) { // 7 supports 2-5.x
-    max_dev_version = CudaVersion(5, 0);
-  } else if (nvrtc_version.first <= 8) { // 8 supports 2-6.x
-    max_dev_version = CudaVersion(6, 0);
-  } else if (nvrtc_version.first <= 9) { // 9 supports 3-7.2
-    max_dev_version = CudaVersion(7, 2);
-  } else if (nvrtc_version.first <= 10) { // 10 supports 3-7.5
-    max_dev_version = CudaVersion(7, 5);
-  } else if (nvrtc_version.first == 11 && nvrtc_version.second == 0) {
-    // 11.0 supports 3-8.0
-    max_dev_version = CudaVersion(8, 0);
-  }
-  if (dev_version > max_dev_version) {
-    dev_version = max_dev_version;
-  }
-  major = dev_version.first;
-  minor = dev_version.second;
-
-  // if we are clamping major/minor, sass is not compatible
-  compile_to_sass = (major == prop->major) && (minor == prop->minor);
 }
 
 std::string CudaPrinter::dtypeToCppString(const Dtype& dtype) {
@@ -1279,7 +1242,7 @@ void CudaCodeGen::CompileToNVRTC(
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int major, minor;
   bool compile_to_sass = false;
-  codegenOutputQuery(prop, major, minor, compile_to_sass);
+  fuser::cuda::codegenOutputQuery(prop, major, minor, compile_to_sass);
 
   // Creates the NVRTC program
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
