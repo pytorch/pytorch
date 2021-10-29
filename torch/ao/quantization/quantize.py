@@ -22,7 +22,8 @@ from torch.ao.quantization.qconfig import (
     add_module_to_qconfig_obs_ctr,
     default_dynamic_qconfig,
     float16_dynamic_qconfig,
-    float_qparams_weight_only_qconfig)
+    float_qparams_weight_only_qconfig,
+    float_qparams_weight_only_qconfig_4bit)
 
 def is_activation_post_process(module):
     return (isinstance(module, torch.ao.quantization.ObserverBase) or
@@ -369,6 +370,11 @@ def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
         elif dtype == torch.quint8:
             qconfig_spec = {
                 nn.EmbeddingBag : float_qparams_weight_only_qconfig,
+                nn.Embedding : float_qparams_weight_only_qconfig,
+            }
+        elif dtype == torch.quint4x2:
+            qconfig_spec = {
+                nn.EmbeddingBag : float_qparams_weight_only_qconfig_4bit,
             }
         else:
             raise ValueError(
@@ -380,6 +386,8 @@ def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
             default_qconfig = float16_dynamic_qconfig
         elif dtype is torch.quint8:
             default_qconfig = float_qparams_weight_only_qconfig
+        elif dtype is torch.quint4x2:
+            default_qconfig = float_qparams_weight_only_qconfig_4bit
         else:
             raise RuntimeError('Unknown dtype specified for quantize_dynamic: ', str(dtype))
         qconfig_spec = dict(zip(qconfig_spec, itertools.repeat(default_qconfig)))

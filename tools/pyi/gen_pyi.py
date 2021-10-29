@@ -6,7 +6,8 @@ import argparse
 from tools.codegen.model import Variant
 from tools.codegen.api.python import (PythonSignatureGroup,
                                       PythonSignatureNativeFunctionPair)
-from tools.codegen.gen import FileManager, parse_native_yaml
+from tools.codegen.gen import parse_native_yaml
+from tools.codegen.utils import FileManager
 from typing import Sequence, List, Dict
 
 from ..autograd.gen_python_functions import should_generate_py_binding, load_signatures, group_overloads
@@ -282,6 +283,9 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
     unsorted_function_hints.update({
         'set_flush_denormal': ['def set_flush_denormal(mode: _bool) -> _bool: ...'],
         'get_default_dtype': ['def get_default_dtype() -> _dtype: ...'],
+        'asarray': ['def asarray(obj: Any, *, dtype: Optional[_dtype]=None, '
+                    'device: Union[_device, str, None]=None, copy: Optional[_bool]=None, '
+                    'requires_grad: _bool=False) -> Tensor: ...'],
         'from_numpy': ['def from_numpy(ndarray) -> Tensor: ...'],
         'frombuffer': ['def frombuffer(buffer: Any, *, dtype: _dtype, count: int=-1, '
                        'offset: int=0, device: Union[_device, str, None]=None, '
@@ -555,7 +559,7 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
     dt = ('Double', 'Float', 'Long', 'Int',
           'Short', 'Char', 'Byte', 'Bool',
           'Half', 'BFloat16', 'ComplexDouble',
-          'ComplexFloat', 'QUInt8', 'QInt8', 'QInt32', 'QUInt4x2')
+          'ComplexFloat', 'QUInt8', 'QInt8', 'QInt32', 'QUInt4x2', 'QUInt2x4')
     for c in dt:
         legacy_storage_base_hints.append('class {}StorageBase(object): ...'.format(c))
     for c in dt:
@@ -576,7 +580,7 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
                          ['float32', 'float', 'float64', 'double', 'float16', 'bfloat16', 'half',
                           'uint8', 'int8', 'int16', 'short', 'int32', 'int', 'int64', 'long',
                           'complex32', 'complex64', 'cfloat', 'complex128', 'cdouble',
-                          'quint8', 'qint8', 'qint32', 'bool', 'quint4x2']]
+                          'quint8', 'qint8', 'qint32', 'bool', 'quint4x2', 'quint2x4']]
 
     # Generate __all__ directive
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

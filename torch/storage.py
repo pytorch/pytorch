@@ -203,6 +203,7 @@ def _dtype_to_storage_type_map():
         torch.qint32: 'QInt32Storage',
         torch.quint8: 'QUInt8Storage',
         torch.quint4x2: 'QUInt4x2Storage',
+        torch.quint2x4: 'QUInt2x4Storage',
     }
 
 @lru_cache(maxsize=None)
@@ -286,10 +287,11 @@ class TypedStorage:
                 self._storage = eval(self.__module__).UntypedStorage(int(args[0]) * self.element_size())
 
             elif len(args) == 1 and isinstance(args[0], collections.abc.Sequence):
-                if self.dtype in [torch.quint8, torch.quint4x2, torch.qint32, torch.qint8]:
+                if self.dtype in [torch.quint8, torch.quint4x2, torch.quint2x4, torch.qint32, torch.qint8]:
                     interpret_dtypes = {
                         torch.quint8: torch.uint8,
                         torch.quint4x2: torch.uint8,
+                        torch.quint2x4: torch.uint8,
                         torch.qint32: torch.int32,
                         torch.qint8: torch.int8
                     }
@@ -359,10 +361,11 @@ class TypedStorage:
     def __setitem__(self, idx, value):
         if not isinstance(idx, (int, slice)):
             raise RuntimeError(f"can't index a {type(self)} with {type(idx)}")
-        if self.dtype in [torch.quint8, torch.quint4x2, torch.qint32, torch.qint8]:
+        if self.dtype in [torch.quint8, torch.quint4x2, torch.quint2x4, torch.qint32, torch.qint8]:
             interpret_dtypes = {
                 torch.quint8: torch.uint8,
                 torch.quint4x2: torch.uint8,
+                torch.quint2x4: torch.uint8,
                 torch.qint32: torch.int32,
                 torch.qint8: torch.int8
             }
@@ -385,10 +388,11 @@ class TypedStorage:
         elif not isinstance(idx, int):
             raise RuntimeError(f"can't index a {type(self)} with {type(idx)}")
 
-        if self.dtype in [torch.quint8, torch.quint4x2, torch.qint32, torch.qint8]:
+        if self.dtype in [torch.quint8, torch.quint4x2, torch.quint2x4, torch.qint32, torch.qint8]:
             interpret_dtypes = {
                 torch.quint8: torch.uint8,
                 torch.quint4x2: torch.uint8,
+                torch.quint2x4: torch.uint8,
                 torch.qint32: torch.int32,
                 torch.qint8: torch.int8
             }

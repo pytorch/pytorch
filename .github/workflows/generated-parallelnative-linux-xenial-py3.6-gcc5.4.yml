@@ -44,6 +44,7 @@ jobs:
       LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
     if: ${{ (github.repository == 'pytorch/pytorch') && (
             (github.event_name == 'push') ||
+            (github.event_name == 'schedule') ||
             (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cpu') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux')) ||
             (false))
          }}
@@ -272,6 +273,7 @@ jobs:
       ENABLE_NOARCH_TEST: ''
       NUM_TEST_SHARDS: 1
       MULTIGPU_RUNNER_TYPE: linux.16xlarge.nvidia.gpu
+      DISTRIBUTED_GPU_RUNNER_TYPE: linux.8xlarge.nvidia.gpu
       NOGPU_RUNNER_TYPE: linux.2xlarge
       PR_BODY: ${{ github.event.pull_request.body }}
     outputs:
@@ -391,9 +393,11 @@ jobs:
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
-        # Time out the test phase after 3.5 hours
-        timeout-minutes: 210
+        # Time out the test phase after 240 minutes
+        timeout-minutes: 240
         run: |
+          set -x
+
           if [[ $TEST_CONFIG == 'multigpu' ]]; then
             TEST_COMMAND=.jenkins/pytorch/multigpu-test.sh
           elif [[ $BUILD_ENVIRONMENT == *onnx* ]]; then

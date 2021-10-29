@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/frontend/function_schema_parser.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/lowerings.h>
 #include <torch/csrc/jit/tensorexpr/operators/operators.h>
@@ -6,33 +7,45 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-std::unordered_map<std::string, NNCLoweringFunction>& getNNCLoweringRegistry() {
-  static std::unordered_map<std::string, NNCLoweringFunction>
-      lowering_registry_;
+FunctionSchemaMap<NNCLoweringFunction>& getNNCLoweringRegistry() {
+  static FunctionSchemaMap<NNCLoweringFunction> lowering_registry_;
   return lowering_registry_;
 }
 
-NNCLoweringFunction getStandardLoweringFor(const std::string& op) {
+NNCLoweringFunction getStandardLoweringFor(const std::string& schema_str) {
   const auto& lowerings = getNNCLoweringRegistry();
-  if (lowerings.count(op)) {
-    return lowerings.at(op);
+  if (auto l = lowerings.find(parseSchema(schema_str))) {
+    return *l;
   }
   return nullptr;
 }
 
+RegisterNNCLoweringsFunction::RegisterNNCLoweringsFunction(
+    const std::vector<std::string>& schemas,
+    NNCLoweringFunction fn) {
+  for (const auto& schema_str : schemas) {
+    getNNCLoweringRegistry().insert(parseSchema(schema_str), fn);
+  }
+}
+
 namespace {
-RegisterNNCLoweringFunction aten_dropout("aten::dropout", computeNoop);
+RegisterNNCLoweringsFunction aten_dropout(
+    {"aten::dropout(Tensor input, float p, bool train) -> (Tensor)"},
+    computeNoop);
 
-RegisterNNCLoweringFunction prepacked_conv2d_clamp_run(
-    "prepacked::conv2d_clamp_run",
-    computePrepackedConv2dClampRun);
+// TODO: convert to schema, add a test
+// RegisterNNCLoweringsFunction prepacked_conv2d_clamp_run(
+//     {"prepacked::conv2d_clamp_run"},
+//     computePrepackedConv2dClampRun);
 
-RegisterNNCLoweringFunction prepacked_linear_clamp_run(
-    "prepacked::linear_clamp_run",
-    computePrepackedLinearClampRun);
+// TODO: convert to schema, add a test
+// RegisterNNCLoweringsFunction prepacked_linear_clamp_run(
+//     {"prepacked::linear_clamp_run"},
+//     computePrepackedLinearClampRun);
 
-RegisterNNCLoweringFunction aten_sub(
-    "aten::sub",
+RegisterNNCLoweringsFunction aten_sub(
+    {"aten::sub.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> (Tensor)",
+     "aten::sub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -51,8 +64,9 @@ RegisterNNCLoweringFunction aten_sub(
                 "aten_sub", inputs, outputShape, outputType, sub_lambda);
     });
 
-RegisterNNCLoweringFunction aten_mul(
-    "aten::mul",
+RegisterNNCLoweringsFunction aten_mul(
+    {"aten::mul.Scalar(Tensor self, Scalar other) -> (Tensor)",
+     "aten::mul.Tensor(Tensor self, Tensor other) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -67,8 +81,9 @@ RegisterNNCLoweringFunction aten_mul(
           });
     });
 
-RegisterNNCLoweringFunction aten_div(
-    "aten::div",
+RegisterNNCLoweringsFunction aten_div(
+    {"aten::div.Scalar(Tensor self, Scalar other) -> (Tensor)",
+     "aten::div.Tensor(Tensor self, Tensor other) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -84,8 +99,9 @@ RegisterNNCLoweringFunction aten_div(
           });
     });
 
-RegisterNNCLoweringFunction aten___and__(
-    "aten::__and__",
+RegisterNNCLoweringsFunction aten___and__(
+    {"aten::__and__.Scalar(Tensor self, Scalar other) -> (Tensor)",
+     "aten::__and__.Tensor(Tensor self, Tensor other) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -100,8 +116,9 @@ RegisterNNCLoweringFunction aten___and__(
           });
     });
 
-RegisterNNCLoweringFunction aten___or__(
-    "aten::__or__",
+RegisterNNCLoweringsFunction aten___or__(
+    {"aten::__or__.Scalar(Tensor self, Scalar other) -> (Tensor)",
+     "aten::__or__.Tensor(Tensor self, Tensor other) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -116,8 +133,9 @@ RegisterNNCLoweringFunction aten___or__(
           });
     });
 
-RegisterNNCLoweringFunction aten___xor__(
-    "aten::__xor__",
+RegisterNNCLoweringsFunction aten___xor__(
+    {"aten::__xor__.Scalar(Tensor self, Scalar other) -> (Tensor)",
+     "aten::__xor__.Tensor(Tensor self, Tensor other) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -132,8 +150,9 @@ RegisterNNCLoweringFunction aten___xor__(
           });
     });
 
-RegisterNNCLoweringFunction aten___lshift__(
-    "aten::__lshift__",
+RegisterNNCLoweringsFunction aten___lshift__(
+    {"aten::__lshift__.Scalar(Tensor self, Scalar other) -> (Tensor)",
+     "aten::__lshift__.Tensor(Tensor self, Tensor other) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -148,8 +167,9 @@ RegisterNNCLoweringFunction aten___lshift__(
           });
     });
 
-RegisterNNCLoweringFunction aten___rshift__(
-    "aten::__rshift__",
+RegisterNNCLoweringsFunction aten___rshift__(
+    {"aten::__rshift__.Scalar(Tensor self, Scalar other) -> (Tensor)",
+     "aten::__rshift__.Tensor(Tensor self, Tensor other) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -164,8 +184,9 @@ RegisterNNCLoweringFunction aten___rshift__(
           });
     });
 
-RegisterNNCLoweringFunction aten_eq(
-    "aten::eq",
+RegisterNNCLoweringsFunction aten_eq(
+    {"aten::eq.Scalar(Tensor self, Scalar other) -> (Tensor)",
+     "aten::eq.Tensor(Tensor self, Tensor other) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -180,8 +201,9 @@ RegisterNNCLoweringFunction aten_eq(
           });
     });
 
-RegisterNNCLoweringFunction aten_ne(
-    "aten::ne",
+RegisterNNCLoweringsFunction aten_ne(
+    {"aten::ne.Scalar(Tensor self, Scalar other) -> (Tensor)",
+     "aten::ne.Tensor(Tensor self, Tensor other) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -196,8 +218,9 @@ RegisterNNCLoweringFunction aten_ne(
           });
     });
 
-RegisterNNCLoweringFunction aten_ge(
-    "aten::ge",
+RegisterNNCLoweringsFunction aten_ge(
+    {"aten::ge.Scalar(Tensor self, Scalar other) -> (Tensor)",
+     "aten::ge.Tensor(Tensor self, Tensor other) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -212,8 +235,9 @@ RegisterNNCLoweringFunction aten_ge(
           });
     });
 
-RegisterNNCLoweringFunction aten_gt(
-    "aten::gt",
+RegisterNNCLoweringsFunction aten_gt(
+    {"aten::gt.Scalar(Tensor self, Scalar other) -> (Tensor)",
+     "aten::gt.Tensor(Tensor self, Tensor other) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -228,8 +252,9 @@ RegisterNNCLoweringFunction aten_gt(
           });
     });
 
-RegisterNNCLoweringFunction aten_le(
-    "aten::le",
+RegisterNNCLoweringsFunction aten_le(
+    {"aten::le.Scalar(Tensor self, Scalar other) -> (Tensor)",
+     "aten::le.Tensor(Tensor self, Tensor other) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -244,8 +269,9 @@ RegisterNNCLoweringFunction aten_le(
           });
     });
 
-RegisterNNCLoweringFunction aten_lt(
-    "aten::lt",
+RegisterNNCLoweringsFunction aten_lt(
+    {"aten::lt.Scalar(Tensor self, Scalar other) -> (Tensor)",
+     "aten::lt.Tensor(Tensor self, Tensor other) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -260,8 +286,8 @@ RegisterNNCLoweringFunction aten_lt(
           });
     });
 
-RegisterNNCLoweringFunction aten_min(
-    "aten::min",
+RegisterNNCLoweringsFunction aten_min_pointwise(
+    {"aten::min.other(Tensor self, Tensor other) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -276,8 +302,8 @@ RegisterNNCLoweringFunction aten_min(
           });
     });
 
-RegisterNNCLoweringFunction aten_max(
-    "aten::max",
+RegisterNNCLoweringsFunction aten_max_pointwise(
+    {"aten::max.other(Tensor self, Tensor other) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -292,8 +318,9 @@ RegisterNNCLoweringFunction aten_max(
           });
     });
 
-RegisterNNCLoweringFunction aten_masked_fill(
-    "aten::masked_fill",
+RegisterNNCLoweringsFunction aten_masked_fill(
+    {"aten::masked_fill.Scalar(Tensor self, Tensor mask, Scalar value) -> (Tensor)",
+     "aten::masked_fill.Tensor(Tensor self, Tensor mask, Tensor value) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -312,8 +339,9 @@ RegisterNNCLoweringFunction aten_masked_fill(
           },
           /*promote_inputs*/ false);
     });
-RegisterNNCLoweringFunction aten_clamp(
-    "aten::clamp",
+RegisterNNCLoweringsFunction aten_clamp(
+    {"aten::clamp(Tensor self, Scalar? min=None, Scalar? max=None) -> (Tensor)",
+     "aten::clamp.Tensor(Tensor self, Tensor? min=None, Tensor? max=None) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -358,8 +386,8 @@ RegisterNNCLoweringFunction aten_clamp(
           false /* promote_inputs */);
     });
 
-RegisterNNCLoweringFunction aten_addcmul(
-    "aten::addcmul",
+RegisterNNCLoweringsFunction aten_addcmul(
+    {"aten::addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -375,8 +403,8 @@ RegisterNNCLoweringFunction aten_addcmul(
              const ExprHandle& a3) { return a0 + a3 * a1 * a2; });
     });
 
-RegisterNNCLoweringFunction aten_sigmoid(
-    "aten::sigmoid",
+RegisterNNCLoweringsFunction aten_sigmoid(
+    {"aten::sigmoid(Tensor self) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -391,8 +419,8 @@ RegisterNNCLoweringFunction aten_sigmoid(
           });
     });
 
-RegisterNNCLoweringFunction aten_reciprocal(
-    "aten::reciprocal",
+RegisterNNCLoweringsFunction aten_reciprocal(
+    {"aten::reciprocal(Tensor self) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -405,8 +433,8 @@ RegisterNNCLoweringFunction aten_reciprocal(
           [](const ExprHandle& a) { return ExprHandle(1.0f) / a; });
     });
 
-RegisterNNCLoweringFunction aten_neg(
-    "aten::neg",
+RegisterNNCLoweringsFunction aten_neg(
+    {"aten::neg(Tensor self) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -417,8 +445,8 @@ RegisterNNCLoweringFunction aten_neg(
           });
     });
 
-RegisterNNCLoweringFunction aten_isnan(
-    "aten::isnan",
+RegisterNNCLoweringsFunction aten_isnan(
+    {"aten::isnan(Tensor self) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -436,8 +464,8 @@ RegisterNNCLoweringFunction aten_isnan(
           });
     });
 
-RegisterNNCLoweringFunction aten_relu(
-    "aten::relu",
+RegisterNNCLoweringsFunction aten_relu(
+    {"aten::relu(Tensor self) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -453,8 +481,8 @@ RegisterNNCLoweringFunction aten_relu(
           });
     });
 
-RegisterNNCLoweringFunction aten_leaky_relu(
-    "aten::leaky_relu",
+RegisterNNCLoweringsFunction aten_leaky_relu(
+    {"aten::leaky_relu(Tensor self, Scalar negative_slope=0.01) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -473,8 +501,8 @@ RegisterNNCLoweringFunction aten_leaky_relu(
           });
     });
 
-RegisterNNCLoweringFunction aten_relu6(
-    "aten::relu6",
+RegisterNNCLoweringsFunction aten_relu6(
+    {"aten::relu6(Tensor self) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -491,8 +519,8 @@ RegisterNNCLoweringFunction aten_relu6(
           });
     });
 
-RegisterNNCLoweringFunction aten_gelu(
-    "aten::gelu",
+RegisterNNCLoweringsFunction aten_gelu(
+    {"aten::gelu(Tensor self) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -510,12 +538,12 @@ RegisterNNCLoweringFunction aten_gelu(
           });
     });
 
-RegisterNNCLoweringFunction aten_batch_norm(
-    "aten::batch_norm",
+RegisterNNCLoweringsFunction aten_batch_norm(
+    {"aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> (Tensor)"},
     computeBatchNorm);
 
-RegisterNNCLoweringFunction aten_log(
-    "aten::log",
+RegisterNNCLoweringsFunction aten_log(
+    {"aten::log(Tensor self) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -526,8 +554,8 @@ RegisterNNCLoweringFunction aten_log(
           });
     });
 
-RegisterNNCLoweringFunction aten_log10(
-    "aten::log10",
+RegisterNNCLoweringsFunction aten_log10(
+    {"aten::log10(Tensor self) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -542,8 +570,8 @@ RegisterNNCLoweringFunction aten_log10(
           });
     });
 
-RegisterNNCLoweringFunction aten_log1p(
-    "aten::log1p",
+RegisterNNCLoweringsFunction aten_log1p(
+    {"aten::log1p(Tensor self) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -558,8 +586,8 @@ RegisterNNCLoweringFunction aten_log1p(
           });
     });
 
-RegisterNNCLoweringFunction aten_log2(
-    "aten::log2",
+RegisterNNCLoweringsFunction aten_log2(
+    {"aten::log2(Tensor self) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -574,8 +602,8 @@ RegisterNNCLoweringFunction aten_log2(
           });
     });
 
-RegisterNNCLoweringFunction aten_exp(
-    "aten::exp",
+RegisterNNCLoweringsFunction aten_exp(
+    {"aten::exp(Tensor self) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -586,8 +614,8 @@ RegisterNNCLoweringFunction aten_exp(
           });
     });
 
-RegisterNNCLoweringFunction aten_expm1(
-    "aten::expm1",
+RegisterNNCLoweringsFunction aten_expm1(
+    {"aten::expm1(Tensor self) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -602,8 +630,8 @@ RegisterNNCLoweringFunction aten_expm1(
           });
     });
 
-RegisterNNCLoweringFunction aten_erf(
-    "aten::erf",
+RegisterNNCLoweringsFunction aten_erf(
+    {"aten::erf(Tensor self) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -614,8 +642,8 @@ RegisterNNCLoweringFunction aten_erf(
           });
     });
 
-RegisterNNCLoweringFunction aten_erfc(
-    "aten::erfc",
+RegisterNNCLoweringsFunction aten_erfc(
+    {"aten::erfc(Tensor self) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -630,8 +658,8 @@ RegisterNNCLoweringFunction aten_erfc(
           });
     });
 
-RegisterNNCLoweringFunction aten_cos(
-    "aten::cos",
+RegisterNNCLoweringsFunction aten_cos(
+    {"aten::cos(Tensor self) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -642,8 +670,8 @@ RegisterNNCLoweringFunction aten_cos(
           });
     });
 
-RegisterNNCLoweringFunction aten_sin(
-    "aten::sin",
+RegisterNNCLoweringsFunction aten_sin(
+    {"aten::sin(Tensor self) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -654,8 +682,8 @@ RegisterNNCLoweringFunction aten_sin(
           });
     });
 
-RegisterNNCLoweringFunction aten_tan(
-    "aten::tan",
+RegisterNNCLoweringsFunction aten_tan(
+    {"aten::tan(Tensor self) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -666,8 +694,8 @@ RegisterNNCLoweringFunction aten_tan(
           });
     });
 
-RegisterNNCLoweringFunction aten_type_as(
-    "aten::type_as",
+RegisterNNCLoweringsFunction aten_type_as(
+    {"aten::type_as(Tensor self, Tensor other) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -682,8 +710,10 @@ RegisterNNCLoweringFunction aten_type_as(
           [dtype](const ExprHandle& lhs) { return Cast::make(dtype, lhs); });
     });
 
-RegisterNNCLoweringFunction aten_pow(
-    "aten::pow",
+RegisterNNCLoweringsFunction aten_pow(
+    {"aten::pow.Tensor_Scalar(Tensor self, Scalar exponent) -> (Tensor)",
+     "aten::pow.Tensor_Tensor(Tensor self, Tensor exponent) -> (Tensor)",
+     "aten::pow.Scalar(Scalar self, Tensor exponent) -> Tensor"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -724,8 +754,9 @@ RegisterNNCLoweringFunction aten_pow(
           });
     });
 
-RegisterNNCLoweringFunction aten_fmod(
-    "aten::fmod",
+RegisterNNCLoweringsFunction aten_fmod(
+    {"aten::fmod.Scalar(Tensor self, Scalar other) -> (Tensor)",
+     "aten::fmod.Tensor(Tensor self, Tensor other) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -740,8 +771,9 @@ RegisterNNCLoweringFunction aten_fmod(
           });
     });
 
-RegisterNNCLoweringFunction aten_lerp(
-    "aten::lerp",
+RegisterNNCLoweringsFunction aten_lerp(
+    {"aten::lerp.Scalar(Tensor self, Tensor end, Scalar weight) -> (Tensor)",
+     "aten::lerp.Tensor(Tensor self, Tensor end, Tensor weight) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -756,8 +788,10 @@ RegisterNNCLoweringFunction aten_lerp(
              const ExprHandle& weight) { return a + weight * (end - a); });
     });
 
-RegisterNNCLoweringFunction aten_remainder(
-    "aten::remainder",
+RegisterNNCLoweringsFunction aten_remainder(
+    {"aten::remainder.Scalar(Tensor self, Scalar other) -> (Tensor)",
+     "aten::remainder.Scalar_Tensor(Scalar self, Tensor other) -> (Tensor)",
+     "aten::remainder.Tensor(Tensor self, Tensor other) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -802,12 +836,12 @@ RegisterNNCLoweringFunction aten_remainder(
       }
     });
 
-RegisterNNCLoweringFunction prim_ConstantChunk(
-    "prim::ConstantChunk",
+RegisterNNCLoweringsFunction prim_ConstantChunk(
+    {"prim::ConstantChunk(...) -> (...)"},
     computeChunk);
 
-RegisterNNCLoweringFunction aten_acos(
-    "aten::acos",
+RegisterNNCLoweringsFunction aten_acos(
+    {"aten::acos(Tensor self) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -822,8 +856,8 @@ RegisterNNCLoweringFunction aten_acos(
           });
     });
 
-RegisterNNCLoweringFunction aten_asin(
-    "aten::asin",
+RegisterNNCLoweringsFunction aten_asin(
+    {"aten::asin(Tensor self) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -838,8 +872,8 @@ RegisterNNCLoweringFunction aten_asin(
           });
     });
 
-RegisterNNCLoweringFunction aten_cosh(
-    "aten::cosh",
+RegisterNNCLoweringsFunction aten_cosh(
+    {"aten::cosh(Tensor self) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -854,8 +888,8 @@ RegisterNNCLoweringFunction aten_cosh(
           });
     });
 
-RegisterNNCLoweringFunction aten_sinh(
-    "aten::sinh",
+RegisterNNCLoweringsFunction aten_sinh(
+    {"aten::sinh(Tensor self) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -870,8 +904,8 @@ RegisterNNCLoweringFunction aten_sinh(
           });
     });
 
-RegisterNNCLoweringFunction aten_atan(
-    "aten::atan",
+RegisterNNCLoweringsFunction aten_atan(
+    {"aten::atan(Tensor self) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -886,8 +920,8 @@ RegisterNNCLoweringFunction aten_atan(
           });
     });
 
-RegisterNNCLoweringFunction aten_atan2(
-    "aten::atan2",
+RegisterNNCLoweringsFunction aten_atan2(
+    {"aten::atan2(Tensor self, Tensor other) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -904,8 +938,8 @@ RegisterNNCLoweringFunction aten_atan2(
           });
     });
 
-RegisterNNCLoweringFunction aten_tanh(
-    "aten::tanh",
+RegisterNNCLoweringsFunction aten_tanh(
+    {"aten::tanh(Tensor self) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -920,8 +954,8 @@ RegisterNNCLoweringFunction aten_tanh(
           });
     });
 
-RegisterNNCLoweringFunction aten_hardtanh(
-    "aten::hardtanh",
+RegisterNNCLoweringsFunction aten_hardtanh(
+    {"aten::hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -939,8 +973,8 @@ RegisterNNCLoweringFunction aten_hardtanh(
           });
     });
 
-RegisterNNCLoweringFunction aten_softplus(
-    "aten::softplus",
+RegisterNNCLoweringsFunction aten_softplus(
+    {"aten::softplus(Tensor self, Scalar beta=1, Scalar threshold=20) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -965,8 +999,8 @@ RegisterNNCLoweringFunction aten_softplus(
           });
     });
 
-RegisterNNCLoweringFunction aten_hardsigmoid(
-    "aten::hardsigmoid",
+RegisterNNCLoweringsFunction aten_hardsigmoid(
+    {"aten::hardsigmoid(Tensor self) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -984,8 +1018,8 @@ RegisterNNCLoweringFunction aten_hardsigmoid(
           });
     });
 
-RegisterNNCLoweringFunction aten_hardswish(
-    "aten::hardswish",
+RegisterNNCLoweringsFunction aten_hardswish(
+    {"aten::hardswish(Tensor self) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -1005,8 +1039,8 @@ RegisterNNCLoweringFunction aten_hardswish(
           });
     });
 
-RegisterNNCLoweringFunction aten_hardshrink(
-    "aten::hardshrink",
+RegisterNNCLoweringsFunction aten_hardshrink(
+    {"aten::hardshrink(Tensor self, Scalar lambd=0.5) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -1026,8 +1060,8 @@ RegisterNNCLoweringFunction aten_hardshrink(
           });
     });
 
-RegisterNNCLoweringFunction aten_sqrt(
-    "aten::sqrt",
+RegisterNNCLoweringsFunction aten_sqrt(
+    {"aten::sqrt(Tensor self) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -1042,8 +1076,8 @@ RegisterNNCLoweringFunction aten_sqrt(
           });
     });
 
-RegisterNNCLoweringFunction aten_rsqrt(
-    "aten::rsqrt",
+RegisterNNCLoweringsFunction aten_rsqrt(
+    {"aten::rsqrt(Tensor self) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -1058,8 +1092,8 @@ RegisterNNCLoweringFunction aten_rsqrt(
           });
     });
 
-RegisterNNCLoweringFunction aten_abs(
-    "aten::abs",
+RegisterNNCLoweringsFunction aten_abs(
+    {"aten::abs(Tensor self) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -1075,15 +1109,15 @@ RegisterNNCLoweringFunction aten_abs(
           kIntegralTypes | kFloatingPointTypes | kBoolType);
     });
 
-RegisterNNCLoweringFunction aten_sign(
-    "aten::sign",
+RegisterNNCLoweringsFunction aten_sign(
+    {"aten::sign(Tensor self) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
        at::Device device) { return computeSign(inputs, outputShape); });
 
-RegisterNNCLoweringFunction aten_ceil(
-    "aten::ceil",
+RegisterNNCLoweringsFunction aten_ceil(
+    {"aten::ceil(Tensor self) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -1096,8 +1130,8 @@ RegisterNNCLoweringFunction aten_ceil(
           [](const ExprHandle& a) { return ceil(a); });
     });
 
-RegisterNNCLoweringFunction aten_floor(
-    "aten::floor",
+RegisterNNCLoweringsFunction aten_floor(
+    {"aten::floor(Tensor self) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -1110,8 +1144,8 @@ RegisterNNCLoweringFunction aten_floor(
           [](const ExprHandle& a) { return floor(a); });
     });
 
-RegisterNNCLoweringFunction aten_round(
-    "aten::round",
+RegisterNNCLoweringsFunction aten_round(
+    {"aten::round(Tensor self) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -1124,8 +1158,8 @@ RegisterNNCLoweringFunction aten_round(
           [](const ExprHandle& a) { return round(a); });
     });
 
-RegisterNNCLoweringFunction aten_trunc(
-    "aten::trunc",
+RegisterNNCLoweringsFunction aten_trunc(
+    {"aten::trunc(Tensor self) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -1138,8 +1172,8 @@ RegisterNNCLoweringFunction aten_trunc(
           [](const ExprHandle& a) { return trunc(a); });
     });
 
-RegisterNNCLoweringFunction aten__cast_Float(
-    "aten::_cast_Float",
+RegisterNNCLoweringsFunction aten__cast_Float(
+    {"aten::_cast_Float(Tensor self, bool non_blocking=False) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -1152,8 +1186,12 @@ RegisterNNCLoweringFunction aten__cast_Float(
           [](const ExprHandle& a) { return cast<float>(a); });
     });
 
-RegisterNNCLoweringFunction aten_to(
-    "aten::to",
+RegisterNNCLoweringsFunction aten_to(
+    {"aten::to.dtype(Tensor(a) self, int dtype, bool non_blocking=False, bool copy=False, int? memory_format=None) -> (Tensor(a))",
+     "aten::to.dtype_layout(Tensor(a) self, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, bool non_blocking=False, bool copy=False, int? memory_format=None) -> (Tensor(a))",
+     "aten::to.device(Tensor(a) self, Device device, int dtype, bool non_blocking=False, bool copy=False, int? memory_format=None) -> (Tensor(a))",
+     "aten::to.prim_Device(Tensor(a) self, Device? device, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)",
+     "aten::to.prim_dtype(Tensor(a) self, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -1172,8 +1210,8 @@ RegisterNNCLoweringFunction aten_to(
           });
     });
 
-RegisterNNCLoweringFunction aten_threshold(
-    "aten::threshold",
+RegisterNNCLoweringsFunction aten_threshold(
+    {"aten::threshold(Tensor self, Scalar threshold, Scalar value) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -1190,8 +1228,11 @@ RegisterNNCLoweringFunction aten_threshold(
           });
     });
 
-RegisterNNCLoweringFunction aten_where(
-    "aten::where",
+RegisterNNCLoweringsFunction aten_where(
+    {"aten::where.ScalarOther(Tensor condition, Tensor self, Scalar other) -> (Tensor)",
+     "aten::where.ScalarSelf(Tensor condition, Scalar self, Tensor other) -> (Tensor)",
+     "aten::where.self(Tensor condition, Tensor self, Tensor other) -> (Tensor)",
+     "aten::where.Scalar(Tensor condition, Scalar self, Scalar other) -> Tensor"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -1206,8 +1247,8 @@ RegisterNNCLoweringFunction aten_where(
           });
     });
 
-RegisterNNCLoweringFunction aten_frac(
-    "aten::frac",
+RegisterNNCLoweringsFunction aten_frac(
+    {"aten::frac(Tensor self) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -1224,8 +1265,8 @@ RegisterNNCLoweringFunction aten_frac(
           kFloatingPointTypes);
     });
 
-RegisterNNCLoweringFunction aten_lgamma(
-    "aten::lgamma",
+RegisterNNCLoweringsFunction aten_lgamma(
+    {"aten::lgamma(Tensor self) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -1240,44 +1281,47 @@ RegisterNNCLoweringFunction aten_lgamma(
           });
     });
 
-RegisterNNCLoweringFunction aten_rand_like(
-    "aten::rand_like",
-    [](const std::vector<ArgValue>& inputs,
-       const std::vector<ExprHandle>& outputShape,
-       const c10::optional<ScalarType>& outputType,
-       at::Device device) {
-      return computeOneOperand(
-          "aten_rand_like",
-          inputs,
-          outputShape,
-          outputType,
-          [](const ExprHandle& a) {
-            return Intrinsics::make(IntrinsicsOp::kRand, a.dtype());
-          });
-    });
+// TODO: convert to schema, add a test
+// RegisterNNCLoweringsFunction aten_rand_like(
+//     {"aten::rand_like"},
+//     [](const std::vector<ArgValue>& inputs,
+//        const std::vector<ExprHandle>& outputShape,
+//        const c10::optional<ScalarType>& outputType,
+//        at::Device device) {
+//       return computeOneOperand(
+//           "aten_rand_like",
+//           inputs,
+//           outputShape,
+//           outputType,
+//           [](const ExprHandle& a) {
+//             return Intrinsics::make(IntrinsicsOp::kRand, a.dtype());
+//           });
+//     });
 
-RegisterNNCLoweringFunction aten_slice(
-    "aten::slice",
-    [](const std::vector<ArgValue>& inputs,
-       const std::vector<ExprHandle>& outputShape,
-       const c10::optional<ScalarType>& outputType,
-       at::Device device) {
-      return Compute(
-          "aten_slice",
-          c10::fmap<DimArg>(outputShape),
-          [&](const std::vector<VarHandle>& axes) {
-            int64_t dim =
-                at::maybe_wrap_dim(c10::get<int64_t>(inputs[1]), axes.size());
-            ExprHandle start = constant(inputs[2]);
-            ExprHandle stride = constant(inputs[4]);
+// TODO: convert to schema, add a test
+// RegisterNNCLoweringsFunction aten_slice(
+//     {"aten::slice"},
+//     [](const std::vector<ArgValue>& inputs,
+//        const std::vector<ExprHandle>& outputShape,
+//        const c10::optional<ScalarType>& outputType,
+//        at::Device device) {
+//       return Compute(
+//           "aten_slice",
+//           c10::fmap<DimArg>(outputShape),
+//           [&](const std::vector<VarHandle>& axes) {
+//             int64_t dim =
+//                 at::maybe_wrap_dim(c10::get<int64_t>(inputs[1]),
+//                 axes.size());
+//             ExprHandle start = constant(inputs[2]);
+//             ExprHandle stride = constant(inputs[4]);
 
-            std::vector<ExprHandle> newAxes(axes.begin(), axes.end());
-            newAxes[dim] = stride * newAxes[dim] + start;
-            return tensorOrConstant(inputs[0], newAxes);
-          });
-    });
-RegisterNNCLoweringFunction aten_unsqueeze(
-    "aten::unsqueeze",
+//             std::vector<ExprHandle> newAxes(axes.begin(), axes.end());
+//             newAxes[dim] = stride * newAxes[dim] + start;
+//             return tensorOrConstant(inputs[0], newAxes);
+//           });
+//     });
+RegisterNNCLoweringsFunction aten_unsqueeze(
+    {"aten::unsqueeze(Tensor(a) self, int dim) -> (Tensor(a))"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -1308,8 +1352,8 @@ RegisterNNCLoweringFunction aten_unsqueeze(
             return broadcast(c10::get<BufHandle>(inputs[0]), indices);
           });
     });
-RegisterNNCLoweringFunction aten_t(
-    "aten::t",
+RegisterNNCLoweringsFunction aten_t(
+    {"aten::t(Tensor(a) self) -> (Tensor(a))"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -1317,9 +1361,11 @@ RegisterNNCLoweringFunction aten_t(
       return computeTranspose(
           {inputs[0], (int64_t)1, (int64_t)0}, outputShape, outputType, device);
     });
-RegisterNNCLoweringFunction aten_transpose("aten::transpose", computeTranspose);
-RegisterNNCLoweringFunction aten_permute(
-    "aten::permute",
+RegisterNNCLoweringsFunction aten_transpose(
+    {"aten::transpose.int(Tensor(a) self, int dim0, int dim1) -> (Tensor(a))"},
+    computeTranspose);
+RegisterNNCLoweringsFunction aten_permute(
+    {"aten::permute(Tensor(a) self, int[] dims) -> (Tensor(a))"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -1350,23 +1396,37 @@ RegisterNNCLoweringFunction aten_permute(
             return A.load(new_axes);
           });
     });
-RegisterNNCLoweringFunction aten_expand("aten::expand", computeExpand);
-RegisterNNCLoweringFunction aten_expand_as("aten::expand_as", computeExpand);
+RegisterNNCLoweringsFunction aten_expand(
+    {"aten::expand(Tensor(a) self, int[] size, *, bool implicit=False) -> (Tensor(a))",
+     "aten::expand_as(Tensor(a) self, Tensor other) -> (Tensor(a))"},
+    computeExpand);
 
-RegisterNNCLoweringFunction aten_flatten("aten::flatten", computeFlatten);
-RegisterNNCLoweringFunction aten_view("aten::view", computeReshape);
-RegisterNNCLoweringFunction aten_reshape("aten::reshape", computeReshape);
+// TODO: convert to schema, add a test
+// RegisterNNCLoweringsFunction aten_flatten({"aten::flatten"}, computeFlatten);
+RegisterNNCLoweringsFunction aten_view(
+    {"aten::reshape(Tensor(a) self, int[] shape) -> (Tensor(a))",
+     "aten::reshape_as(Tensor(a) self, Tensor other) -> (Tensor(a))",
+     "aten::view(Tensor(a) self, int[] size) -> (Tensor(a))",
+     "aten::view_as(Tensor(a) self, Tensor other) -> (Tensor(a))"},
+    computeReshape);
 
 // aten::mm is a subset of aten::matmul where both inputs are rank 2
-RegisterNNCLoweringFunction aten_mm("aten::mm", computeMatmul);
-RegisterNNCLoweringFunction aten_matmul("aten::matmul", computeMatmul);
+RegisterNNCLoweringsFunction aten_matmul(
+    {"aten::mm(Tensor self, Tensor mat2) -> (Tensor)",
+     "aten::matmul(Tensor self, Tensor other) -> (Tensor)"},
+    computeMatmul);
 
-RegisterNNCLoweringFunction aten_cat("aten::cat", computeCat);
+RegisterNNCLoweringsFunction aten_cat(
+    {"aten::cat(Tensor[] tensors, int dim=0) -> (Tensor)"},
+    computeCat);
 
-RegisterNNCLoweringFunction aten_sum("aten::sum", computeSum);
+RegisterNNCLoweringsFunction aten_sum(
+    {"aten::sum(Tensor self, *, int? dtype=None) -> (Tensor)",
+     "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, int? dtype=None) -> (Tensor)"},
+    computeSum);
 
-RegisterNNCLoweringFunction aten_softmax(
-    "aten::softmax",
+RegisterNNCLoweringsFunction aten_softmax(
+    {"aten::softmax.int(Tensor self, int dim, int? dtype=None) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -1374,8 +1434,8 @@ RegisterNNCLoweringFunction aten_softmax(
       return computeSoftmax(inputs, outputShape, false);
     });
 
-RegisterNNCLoweringFunction aten_log_softmax(
-    "aten::log_softmax",
+RegisterNNCLoweringsFunction aten_log_softmax(
+    {"aten::log_softmax.int(Tensor self, int dim, int? dtype=None) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,
@@ -1383,18 +1443,26 @@ RegisterNNCLoweringFunction aten_log_softmax(
       return computeSoftmax(inputs, outputShape, true);
     });
 
-RegisterNNCLoweringFunction aten_conv2d("aten::conv2d", computeConv2d);
+RegisterNNCLoweringsFunction aten_conv2d(
+    {"aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=[1, 1], int[2] padding=[0, 0], int[2] dilation=[1, 1], int groups=1) -> (Tensor)"},
+    computeConv2d);
 
-RegisterNNCLoweringFunction aten_addmm("aten::addmm", computeAddMM);
+RegisterNNCLoweringsFunction aten_addmm(
+    {"aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> (Tensor)"},
+    computeAddMM);
 
-RegisterNNCLoweringFunction aten_mean("aten::mean", computeMean);
+RegisterNNCLoweringsFunction aten_mean(
+    {"aten::mean(Tensor self, *, int? dtype=None) -> (Tensor)",
+     "aten::mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, int? dtype=None) -> (Tensor)"},
+    computeMean);
 
-RegisterNNCLoweringFunction aten_adaptive_avg_pool2d(
-    "aten::adaptive_avg_pool2d",
+RegisterNNCLoweringsFunction aten_adaptive_avg_pool2d(
+    {"aten::adaptive_avg_pool2d(Tensor self, int[2] output_size) -> (Tensor)"},
     computeAdaptiveAvgPool2d);
 
-RegisterNNCLoweringFunction aten_add(
-    "aten::add",
+RegisterNNCLoweringsFunction aten_add(
+    {"aten::add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> (Tensor)",
+     "aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,

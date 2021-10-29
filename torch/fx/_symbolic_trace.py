@@ -319,6 +319,7 @@ class Tracer(TracerBase):
                     if not hasattr(self.root, qualname):
                         break
                     i += 1
+                self.tensor_attrs[a] = qualname
                 setattr(self.root, qualname, a)
 
             return self.create_node('get_attr', qualname, (), {})

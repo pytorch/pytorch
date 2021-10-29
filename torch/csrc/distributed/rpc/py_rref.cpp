@@ -72,7 +72,7 @@ TypePtr tryInferTypeWithTypeHint(
     TORCH_CHECK(
         type_hint_ptr != nullptr &&
             module.value().type()->isSubtypeOfExt(
-                type_hint_ptr, &subtype_check_msg),
+                *type_hint_ptr, &subtype_check_msg),
         module.value().type()->repr_str(),
         " is not a subtype of the type hint: ",
         type_qualified_name.qualifiedName(),
@@ -191,10 +191,10 @@ py::object PyRRef::toHere(const float timeoutSeconds) const {
 
     if (rref_->isPyObj()) {
       // python_rpc_handler deserialization will acquires GIL.
-      auto rfr_values = value.toTuple()->elements();
+      auto rfr_values = value.toTuple()->elements().vec();
       auto& pythonRpcHandler = PythonRpcHandler::getInstance();
       auto ret = pythonRpcHandler.deserialize(
-          SerializedPyObj::fromIValues(rfr_values));
+          SerializedPyObj::fromIValues(std::move(rfr_values)));
       pythonRpcHandler.handleException(ret);
       return ret;
     } else {
