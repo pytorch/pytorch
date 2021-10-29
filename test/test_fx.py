@@ -3207,6 +3207,7 @@ class TestOperatorSignatures(JitTestCase):
                            'H',   # Implemented with a lambda
                            'mT',  # Implemented with a lambda
                            'mH',  # Implemented with a lambda
+                           'nonzero',
                            'norm',
                            'polygamma',
                            'special.polygamma',
