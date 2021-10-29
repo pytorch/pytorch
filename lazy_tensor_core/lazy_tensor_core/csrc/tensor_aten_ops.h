@@ -687,9 +687,6 @@ LazyTensor tanh_backward(const LazyTensor& grad_output,
 
 LazyTensor threshold(const LazyTensor& input, float threshold, float value);
 
-LazyTensor threshold_backward(const LazyTensor& grad_output,
-                              const LazyTensor& input, float threshold);
-
 LazyTensor to(LazyTensor& input, c10::optional<Device> device,
               c10::optional<at::ScalarType> scalar_type);
 
