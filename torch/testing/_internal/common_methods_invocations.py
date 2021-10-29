@@ -4255,7 +4255,7 @@ def sample_inputs_linalg_lu_factor(op_info, device, dtype, requires_grad=False, 
     def generate_samples():
         batch_shapes = ((), (3,), (3, 3))
         # pivot=False only supported in CUDA
-        pivots = (True, False) if dtype == "cuda" else (True,)
+        pivots = (True, False) if device.dtype == "cuda" else (True,)
         deltas = (-2, -1, 0, +1, +2)
         for batch_shape, pivot, delta in product(batch_shapes, pivots, deltas):
             shape = batch_shape + (S + delta, S)
@@ -8205,38 +8205,26 @@ op_db: List[OpInfo] = [
            aten_name='linalg_lu_factor',
            op=torch.linalg.lu_factor,
            dtypes=floating_and_complex_types(),
-           supports_inplace_autograd=False,
-           # we use in-place operations which cannot be avoided.
-           # This causes vmap failures, hence we skip batched gradient checks
-           check_batched_grad=False,
            check_batched_gradgrad=False,
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_linalg_lu_factor,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack]),
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack]),
     OpInfo('linalg.lu_factor_ex',
            aten_name='linalg_lu_factor_ex',
            op=torch.linalg.lu_factor_ex,
            dtypes=floating_and_complex_types(),
-           supports_inplace_autograd=False,
-           # we use in-place operations which cannot be avoided.
-           # This causes vmap failures, hence we skip batched gradient checks
-           check_batched_grad=False,
            check_batched_gradgrad=False,
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_linalg_lu_factor,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack]),
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack]),
     OpInfo('lu',
            op=torch.lu,
            dtypes=floating_and_complex_types(),
-           supports_inplace_autograd=False,
-           # we use in-place operations which cannot be avoided.
-           # This causes vmap failures, hence we skip batched gradient checks
-           check_batched_grad=False,
            check_batched_gradgrad=False,
            supports_forward_ad=True,
            supports_out=False,
            sample_inputs_func=sample_inputs_lu,
-           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
+           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
            skips=(
                # we skip jit tests because `lu` is a torch function
                # RuntimeError:

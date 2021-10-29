@@ -5572,7 +5572,7 @@ class TestLinalg(TestCase):
         sizes = ((3, 3), (5, 5), (4, 2), (3, 4), (0, 0), (0, 1), (1, 0))
         batches = ((0,), (2,), (3,), (1, 0), (3, 5))
         # Non pivoting just implemented for CUDA
-        pivots = (True, False) if device == "cuda" else (True,)
+        pivots = (True, False) if device.type == "cuda" else (True,)
         fns = (partial(torch.lu, get_infos=True), torch.linalg.lu_factor, torch.linalg.lu_factor_ex)
         for ms, batch, pivot, singular, fn in itertools.product(sizes, batches, pivots, (True, False), fns):
             m, n = ms

@@ -1836,7 +1836,7 @@ static void apply_lu_factor_looped_magma(const Tensor& input, const Tensor& pivo
       int* infos_working_ptr = &infos_data[i];
       magmaLu<scalar_t>(m, n, input_working_ptr, leading_dimension, pivots_working_ptr, infos_working_ptr);
     }
-    // Why can we safely do non_blocking?
+    // We can do non_blocking because magmaLuNoPiv synchronizes
     pivots.copy_(pivots_cpu, /*non_blocking=*/true);
   } else {
     for (decltype(batch_size) i = 0; i < batch_size; i++) {
@@ -1845,7 +1845,7 @@ static void apply_lu_factor_looped_magma(const Tensor& input, const Tensor& pivo
       magmaLuNoPiv<scalar_t>(m, n, input_working_ptr, leading_dimension, infos_working_ptr);
     }
   }
-  infos.copy_(infos_cpu, /*non_blocking=*/true);
+  infos.copy_(infos_cpu);
 #endif
 }
 
@@ -1930,7 +1930,7 @@ static void apply_lu_factor(const Tensor& input, const Tensor& pivots, const Ten
   // MAGMA does not work with batch_size == 0.
   // CuSolver does not work when the matrices have no elements
   if (input.numel() == 0) {
-    // zero out the infos as it will have one element if the input is a matrix
+    // zero out the infos as it will have one element if the input is a matrix of size (0, 0)
     infos.zero_();
     return;
   }
