@@ -221,12 +221,6 @@ if(INTERN_BUILD_ATEN_OPS)
       ${GEN_VULKAN_FLAGS}
   )
 
-  file(GLOB_RECURSE header_templates "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/templates/*\.h")
-  file(GLOB_RECURSE source_templates "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/templates/*\.cpp")
-
-  file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/aten/src/ATen)
-  file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/aten/src/ATen/core)
-
   foreach(gen_type "headers" "sources" "declarations_yaml")
     execute_process(
         COMMAND ${GEN_COMMAND}
@@ -246,6 +240,12 @@ if(INTERN_BUILD_ATEN_OPS)
     file(READ "${CMAKE_BINARY_DIR}/aten/src/ATen/generated_${gen_type}.txt-core" "core_generated_${gen_type}")
   endforeach()
 
+  file(GLOB_RECURSE header_templates "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/templates/*\.h")
+  file(GLOB_RECURSE source_templates "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/templates/*\.cpp")
+
+  file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/aten/src/ATen)
+  file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/aten/src/ATen/core)
+
   add_custom_command(
     OUTPUT ${generated_headers} ${cuda_generated_headers} ${core_generated_headers}
     COMMAND ${GEN_COMMAND} --generate headers
@@ -253,20 +253,6 @@ if(INTERN_BUILD_ATEN_OPS)
       ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/native_functions.yaml
     WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
     )
-
-  # Generated headers used from a CUDA (.cu) file are
-  # not tracked correctly in CMake. We make the libATen.so depend explicitly
-  # on building the generated ATen files to workaround.
-  add_custom_target(ATEN_CPU_FILES_GEN_TARGET DEPENDS
-      ${generated_headers} ${core_generated_headers}
-      ${generated_sources} ${core_generated_sources}
-      ${generated_declarations_yaml})
-  add_custom_target(ATEN_CUDA_FILES_GEN_TARGET DEPENDS
-      ${cuda_generated_headers} ${cuda_generated_sources})
-  add_library(ATEN_CPU_FILES_GEN_LIB INTERFACE)
-  add_library(ATEN_CUDA_FILES_GEN_LIB INTERFACE)
-  add_dependencies(ATEN_CPU_FILES_GEN_LIB ATEN_CPU_FILES_GEN_TARGET)
-  add_dependencies(ATEN_CUDA_FILES_GEN_LIB ATEN_CUDA_FILES_GEN_TARGET)
 
   add_custom_command(
     OUTPUT ${generated_sources} ${cuda_generated_sources} ${core_generated_sources}
@@ -286,6 +272,20 @@ if(INTERN_BUILD_ATEN_OPS)
       ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/native_functions.yaml
     WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
     )
+
+  # Generated headers used from a CUDA (.cu) file are
+  # not tracked correctly in CMake. We make the libATen.so depend explicitly
+  # on building the generated ATen files to workaround.
+  add_custom_target(ATEN_CPU_FILES_GEN_TARGET DEPENDS
+      ${generated_headers} ${core_generated_headers}
+      ${generated_sources} ${core_generated_sources}
+      ${generated_declarations_yaml})
+  add_custom_target(ATEN_CUDA_FILES_GEN_TARGET DEPENDS
+      ${cuda_generated_headers} ${cuda_generated_sources})
+  add_library(ATEN_CPU_FILES_GEN_LIB INTERFACE)
+  add_library(ATEN_CUDA_FILES_GEN_LIB INTERFACE)
+  add_dependencies(ATEN_CPU_FILES_GEN_LIB ATEN_CPU_FILES_GEN_TARGET)
+  add_dependencies(ATEN_CUDA_FILES_GEN_LIB ATEN_CUDA_FILES_GEN_TARGET)
 endif()
 
 function(append_filelist name outputvar)
