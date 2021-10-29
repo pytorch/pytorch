@@ -204,13 +204,6 @@ void comparison_op_check(const Tensor& self, const Tensor& other, const Tensor& 
       native::check_convert(self.item(), other.scalar_type());
     }
   }
-  // In-place operation To avoid overflow during type promotion we will check that
-  // both dtypes of self and other are same
-  if (result.is_same(self)) {
-    TORCH_CHECK(self.dtype() == other.dtype(),
-                "Expected object of scalar type ", self.dtype(), " but got scalar type ",
-                other.dtype(), " for argument 'other'");
-  }
 }
 
 #define CREATE_COMPARISON_SCALAR_TENSOR_META_FUNC(func)                     \
@@ -915,9 +908,6 @@ Tensor comparison_op(const Tensor& self, const Tensor& other, OutImpl& out_impl)
 // To avoid overflow during type promotion we will check that both dtypes of self and other are same
 template <typename OutImpl>
 Tensor& comparison_op_(Tensor& self, const Tensor& other, OutImpl& out_impl) {
-  TORCH_CHECK(self.dtype() == other.dtype(),
-              "Expected object of scalar type ", self.dtype(), " but got scalar type ",
-              other.dtype(), " for argument 'other'");
   return out_impl(self, self, other);
 }
 
