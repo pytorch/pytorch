@@ -17,14 +17,16 @@ from torch._C import OptionalType
 # Note [Edit Symbolic Files]
 # EDITING THIS FILE AND SYMBOLIC_OPSET<VERSION> FILES? READ THIS FIRST!
 #
-# - These files are ONLY for ATen operators (e.g., operators that show up in the
-#   trace as aten::blah).  If you need to special case a primitive operator,
-#   look at _run_symbolic_function
-# - Parameter ordering does NOT necessarily match what is in VariableType.cpp;
-#   tensors are always first, then non-tensor arguments.
-# - Parameter names must *exactly* match the names in VariableType.cpp, because
+# - These files are by default for ATen operators (e.g., operators that show up in
+#   the trace as aten::blah). Symbolic functions for other domains are wrapped under
+#   a class defined individually based on domain name.
+#   For example, symbolic functions for primitive operators (e.g., prim::Constant)
+#   are defined under `class Prim`. See symbolic_opset9.py.
+# - Parameter names must *exactly* match the names in
+#   aten/src/ATen/native/native_functions.yaml, because
 #   dispatch is done with keyword arguments.
-# - Looking for inplace ops?  They're detected by the trailing underscore, and
+# - Looking for inplace ops?  They're detected by
+#   `_jit_pass_onnx_remove_inplace_ops_for_onnx`, and
 #   transparently dispatched to their non inplace versions in
 #   "run_symbolic_function".   See Note [Export inplace]
 #
@@ -42,6 +44,18 @@ from torch._C import OptionalType
 # on the number of dimensions which is better than relying on
 # concrete shapes. Doing so will make the export symbolics
 # more robust to different graphs.
+#
+# ----------------------------------------------------------------------------------
+# Extra context for Symbolic functions
+# ----------------------------------------------------------------------------------
+#
+# In general, symbolic functions only requires knowing inputs and attributes to
+# the original node. In rare circumstances, extra context may be required.
+# For example, symbolic function for `prim::Loop` needs access to the subblock of
+# the original node. In these cases, extra context can be accessed through
+# `SymbolicFunctionState`, defined in "symbolic_helper.py". During export,
+# the values of the state are updated in `_run_symbolic_function` in "utils.py",
+# preserving the extra context for the node that is being converted at that time.
 
 # ---------------------------------------------------------------------------------
 # Helper functions
@@ -866,6 +880,39 @@ _training_mode = None
 def _set_training_mode(training_mode):
     global _training_mode
     _training_mode = training_mode
+
+# Symbolic function state.
+class SymbolicFunctionState:
+    params_dict = None
+    env = None
+    # Current node that is being converted.
+    cur_node = None
+    # Current onnx block that converted nodes are being appended to.
+    onnx_block = None
+
+_symbolic_function_state = SymbolicFunctionState()
+def _set_symbolic_function_state(params_dict, env, cur_node, onnx_block):
+    global _symbolic_function_state
+    _symbolic_function_state.params_dict = params_dict
+    _symbolic_function_state.env = env
+    _symbolic_function_state.cur_node = cur_node
+    _symbolic_function_state.onnx_block = onnx_block
+
+def _clear_symbolic_function_state():
+    global _symbolic_function_state
+    _symbolic_function_state.params_dict = None
+    _symbolic_function_state.env = None
+    _symbolic_function_state.cur_node = None
+    _symbolic_function_state.onnx_block = None
+
+def _get_symbolic_function_state():
+    global _symbolic_function_state
+    assert _symbolic_function_state.params_dict is not None
+    assert _symbolic_function_state.env is not None
+    assert _symbolic_function_state.cur_node is not None
+    assert _symbolic_function_state.onnx_block is not None
+    return _symbolic_function_state
+
 
 _onnx_shape_inference = False
 # This function is for debug use only.

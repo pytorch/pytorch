@@ -27,21 +27,9 @@ def register_version(domain, version):
 
 def register_ops_helper(domain, version, iter_version):
     version_ops = get_ops_in_version(iter_version)
-    for op in version_ops:
-        if op[0] == "_len":
-            op = ("len", op[1])
-        if op[0] == "_list":
-            op = ("list", op[1])
-        if op[0] == "_any":
-            op = ("any", op[1])
-        if op[0] == "_all":
-            op = ("all", op[1])
-        domain_register = domain
-        if op[0].startswith("prim_"):
-            op = (op[0][5:], op[1])
-            domain_register = "prim"
-        if isfunction(op[1]) and not is_registered_op(op[0], domain_register, version):
-            register_op(op[0], op[1], domain_register, version)
+    for domain, op_name, op_func in version_ops:
+        if not is_registered_op(op_name, domain, version):
+            register_op(op_name, op_func, domain, version)
 
 
 def register_ops_in_version(domain, version):
@@ -74,8 +62,25 @@ def register_ops_in_version(domain, version):
 
 
 def get_ops_in_version(version):
-    return getmembers(_symbolic_versions[version])
+    members = getmembers(_symbolic_versions[version])
+    domain_opname_ops = []
+    for obj in members:
+        if isinstance(obj[1], type) and hasattr(obj[1], "domain"):
+            ops = getmembers(obj[1])
+            for op in ops:
+                domain_opname_ops.append((obj[1].domain, op[0], op[1]))
 
+        elif isfunction(obj[1]):
+            if obj[0] == "_len":
+                obj = ("len", obj[1])
+            if obj[0] == "_list":
+                obj = ("list", obj[1])
+            if obj[0] == "_any":
+                obj = ("any", obj[1])
+            if obj[0] == "_all":
+                obj = ("all", obj[1])
+            domain_opname_ops.append(("", obj[0], obj[1]))
+    return domain_opname_ops
 
 def is_registered_version(domain, version):
     global _registry
@@ -109,8 +114,8 @@ def unregister_op(opname, domain, version):
 def get_op_supported_version(opname, domain, version):
     iter_version = version
     while iter_version <= _onnx_main_opset:
-        ops = [op[0] for op in get_ops_in_version(iter_version)]
-        if opname in ops:
+        ops = [(op[0], op[1]) for op in get_ops_in_version(iter_version)]
+        if (domain, opname) in ops:
             return iter_version
         iter_version += 1
     return None
