@@ -24,6 +24,7 @@
 #include <functional>
 #include <limits>
 #include <numeric>
+#include <string>
 
 namespace at {
 namespace meta {
@@ -153,33 +154,28 @@ Tensor det(const Tensor& self) {
   return at::linalg_det(self);
 }
 
-Tensor& linalg_det_out(const Tensor& self, Tensor& out) {
-  checkSameDevice("torch.linalg.det", out, self, "out");
-  checkLinalgCompatibleDtype("torch.linalg.det", out, self, "out");
-  squareCheckInputs(self);
-  TORCH_CHECK((at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type())),
-              "Expected a floating point or complex tensor as input");
-
-  IntArrayRef out_sizes(self.sizes().data(), self.dim() - 2);
-  at::native::resize_output(out, out_sizes);
-
-  auto det = std::get<0>(at::native::_det_lu_based_helper(self));
-  out.copy_(det);
-  return out;
-}
-
 Tensor linalg_det(const Tensor& self) {
-  squareCheckInputs(self);
-  TORCH_CHECK((at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type())),
-              "Expected a floating point or complex tensor as input");
+  squareCheckInputs(self, "linalg.det");
+  checkFloatingOrComplex(self, "linalg.det");
 
   return std::get<0>(at::_det_lu_based_helper(self));
 }
 
+Tensor& linalg_det_out(const Tensor& self, Tensor& out) {
+  checkSameDevice("torch.linalg.det", out, self, "out");
+  checkLinalgCompatibleDtype("torch.linalg.det", out, self, "out");
+
+  IntArrayRef out_sizes(self.sizes().data(), self.dim() - 2);
+  at::native::resize_output(out, out_sizes);
+
+  auto det = at::native::linalg_det(self);
+  out.copy_(det);
+  return out;
+}
+
 Tensor logdet(const Tensor& self) {
-  squareCheckInputs(self);
-  TORCH_CHECK((at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type())),
-              "Expected a floating point tensor as input");
+  squareCheckInputs(self, "logdet");
+  checkFloatingOrComplex(self, "logdet");
 
   c10::ExclusivelyOwned<Tensor> det_P, diag_U;
   std::tie(det_P, diag_U) = _lu_det_P_diag_U(self);
@@ -200,10 +196,10 @@ Tensor logdet(const Tensor& self) {
 }
 
 std::tuple<Tensor, Tensor> linalg_slogdet(const Tensor& self) {
-  squareCheckInputs(self);
+  squareCheckInputs(self, "linalg.slogdet");
   ScalarType t = self.scalar_type();
   TORCH_CHECK(t == ScalarType::Double || t == ScalarType::Float || t == ScalarType::ComplexFloat || t == ScalarType::ComplexDouble,
-              "linalg_slogdet: expected a tensor of float, double, cfloat or cdouble types but got ", t);
+              "linalg.slogdet: expected a tensor of float, double, cfloat or cdouble types but got ", t);
 
   c10::ExclusivelyOwned<Tensor> det_P, diag_U;
   std::tie(det_P, diag_U) = _lu_det_P_diag_U(self);
@@ -218,12 +214,12 @@ std::tuple<Tensor, Tensor> linalg_slogdet(const Tensor& self) {
 
 // TODO: implement _out variant avoiding copy and using already allocated storage directly
 std::tuple<Tensor&, Tensor&> linalg_slogdet_out(const Tensor& input, Tensor& sign, Tensor& logabsdet) {
-  checkSameDevice("linalg_slogdet", sign, input, "sign");
-  checkSameDevice("linalg_slogdet", logabsdet, input, "logabsdet");
-  checkLinalgCompatibleDtype("linalg_slogdet", sign, input, "sign");
+  checkSameDevice("linalg.slogdet", sign, input, "sign");
+  checkSameDevice("linalg.slogdet", logabsdet, input, "logabsdet");
+  checkLinalgCompatibleDtype("linalg.slogdet", sign, input, "sign");
   ScalarType real_dtype = toValueType(input.scalar_type());
   // logabsdet is always real-valued here
-  checkLinalgCompatibleDtype("linalg_slogdet", logabsdet.scalar_type(), real_dtype, "logabsdet");
+  checkLinalgCompatibleDtype("linalg.slogdet", logabsdet.scalar_type(), real_dtype, "logabsdet");
 
   Tensor sign_tmp, logabsdet_tmp;
   std::tie(sign_tmp, logabsdet_tmp) = at::linalg_slogdet(input);
@@ -301,7 +297,7 @@ Tensor linalg_pinv(
   ScalarType t = input.scalar_type();
   TORCH_CHECK((t == ScalarType::Double || t == ScalarType::Float || t == ScalarType::ComplexFloat || t == ScalarType::ComplexDouble)
               && input.dim() >= 2,
-              "linalg_pinv(", t, "{", input.sizes(), "}): expected a tensor with 2 or more dimensions "
+              "linalg.pinv(", t, "{", input.sizes(), "}): expected a tensor with 2 or more dimensions "
               "of float, double, cfloat or cdouble types");
 
   Tensor atol, rtol;
@@ -366,8 +362,8 @@ Tensor& linalg_pinv_out(
     const optional<Tensor>& rtol,
     bool hermitian,
     Tensor& result) {
-  checkSameDevice("linalg_pinv", result, input);
-  checkLinalgCompatibleDtype("linalg_pinv", result, input);
+  checkSameDevice("linalg.pinv", result, input);
+  checkLinalgCompatibleDtype("linalg.pinv", result, input);
   Tensor result_tmp = at::linalg_pinv(input, atol, rtol, hermitian);
   at::native::resize_output(result, result_tmp.sizes());
   result.copy_(result_tmp);
@@ -380,8 +376,8 @@ Tensor& linalg_pinv_out(
     optional<double> rtol,
     bool hermitian,
     Tensor& result) {
-  checkSameDevice("linalg_pinv", result, input);
-  checkLinalgCompatibleDtype("linalg_pinv", result, input);
+  checkSameDevice("linalg.pinv", result, input);
+  checkLinalgCompatibleDtype("linalg.pinv", result, input);
   Tensor result_tmp = at::linalg_pinv(input, atol, rtol, hermitian);
   at::native::resize_output(result, result_tmp.sizes());
   result.copy_(result_tmp);
@@ -389,8 +385,8 @@ Tensor& linalg_pinv_out(
 }
 
 Tensor& linalg_pinv_out(const Tensor& input, const Tensor& rcond, bool hermitian, Tensor& result) {
-  checkSameDevice("linalg_pinv", result, input);
-  checkLinalgCompatibleDtype("linalg_pinv", result, input);
+  checkSameDevice("linalg.pinv", result, input);
+  checkLinalgCompatibleDtype("linalg.pinv", result, input);
 
   Tensor result_tmp = at::linalg_pinv(input, rcond, hermitian);
   at::native::resize_output(result, result_tmp.sizes());
@@ -427,7 +423,7 @@ Tensor linalg_matrix_power_impl(
     c10::optional<Tensor> _out) {
   auto out = _out.value_or(Tensor());
 
-  squareCheckInputs(self);
+  squareCheckInputs(self, "linalg.matrix_power");
   if (_out.has_value()) {
     checkSameDevice("matrix_power", out, self);
     checkLinalgCompatibleDtype("matrix_power", out, self);
@@ -2251,9 +2247,8 @@ Tensor backward_analytic_function_of_a_matrix(
 // Mathematics 2019, 7, 1174.
 //
 Tensor linalg_matrix_exp(const Tensor& a) {
-  squareCheckInputs(a);
-  TORCH_CHECK((at::isFloatingType(a.scalar_type()) || at::isComplexType(a.scalar_type())),
-              "Expected a floating point or complex tensor as input. Got: ", a.scalar_type());
+  squareCheckInputs(a, "linalg.matrix_exp");
+  checkFloatingOrComplex(a, "matrix_exp");
 
   NoTF32Guard disable_tf32;
 
@@ -2524,11 +2519,8 @@ static Tensor& linalg_vector_norm_impl(const Tensor& self, const Scalar& scalar_
       "but got ", opt_dtype.value());
   }
 
+  checkFloatingOrComplex(self, "linalg.vector_norm");
   ScalarType in_dtype = opt_dtype.value_or(self.scalar_type());
-  TORCH_CHECK(
-      at::isFloatingType(in_dtype) || at::isComplexType(in_dtype),
-      "linalg.vector_norm only supports floating point and complex dtypes, but got: ",
-      toString(in_dtype));
 
   IntArrayRef dim = opt_dim.value_or(IntArrayRef{});
 
@@ -2714,21 +2706,20 @@ void _linalg_cond_check_ord(c10::variant<Scalar, c10::string_view> ord_variant) 
     Scalar* ord = c10::get_if<Scalar>(&ord_variant);
     double abs_ord = std::abs(ord->toDouble());
     TORCH_CHECK(abs_ord == 2.0 || abs_ord == 1.0 || abs_ord == INFINITY,
-      "linalg_cond got an invalid norm type: ", ord->toDouble());
+      "linalg.cond got an invalid norm type: ", ord->toDouble());
   } else if (ord_variant.index() == 1) {
     c10::string_view* ord = c10::get_if<c10::string_view>(&ord_variant);
     TORCH_CHECK(*ord == "fro" || *ord == "nuc",
-      "linalg_cond got an invalid norm type: ", *ord);
+      "linalg.cond got an invalid norm type: ", *ord);
   } else {
     TORCH_CHECK(false,
-      "linalg_cond: something went wrong while checking the norm type");
+      "linalg.cond: something went wrong while checking the norm type");
   }
 }
 
 // Numerical or None norms
 Tensor linalg_cond(const Tensor& self, const optional<Scalar>& opt_ord) {
-  TORCH_CHECK(self.dim() >= 2, "linalg_cond only supports matrices or batches of matrices, but got a tensor with ",
-    self.dim(), " dimensions.");
+  TORCH_CHECK(self.dim() >= 2, "linalg.cond: The input tensor must have at least 2 dimensions.");
 
   // The default case is using 2-norm
   Scalar ord = opt_ord.has_value() ? opt_ord.value() : 2;
@@ -2759,19 +2750,18 @@ Tensor linalg_cond(const Tensor& self, const optional<Scalar>& opt_ord) {
   }
 
   // ord == ±1 ord == ±inf
-  // since at::inverse is used in the implementation, self has to be a tensor consisting of square matrices
-  // the same check as squareCheckInputs(self) but with a slightly more informative error message
-  TORCH_CHECK(self.size(-1) == self.size(-2),
-              "linalg_cond with ±1 or ±inf norm types only supports square matrices or batches of square matrices "
-              "but got ", self.size(-1), " by ", self.size(-2), " matrices");
-
+  if (ord.isFloatingPoint()) { // ord == ±1
+    squareCheckInputs(self, ("linalg.cond(ord=" + std::to_string(ord.to<double>()) + ")").c_str());
+  } else { // ord == ±inf
+    squareCheckInputs(self, ("linalg.cond(ord=" + std::to_string(ord.to<int64_t>()) + ")").c_str());
+  }
   return _linalg_cond_helper(self, ord_variant);
 }
 
 Tensor& linalg_cond_out(const Tensor& self, const optional<Scalar>& opt_ord, Tensor& result) {
-  checkSameDevice("linalg_cond", result, self);
+  checkSameDevice("linalg.cond", result, self);
   ScalarType real_dtype = toValueType(self.scalar_type());
-  checkLinalgCompatibleDtype("linalg_cond", result.scalar_type(), real_dtype);
+  checkLinalgCompatibleDtype("linalg.cond", result.scalar_type(), real_dtype);
 
   Tensor result_tmp = at::linalg_cond(self, opt_ord);
   at::native::resize_output(result, result_tmp.sizes());
@@ -2781,13 +2771,7 @@ Tensor& linalg_cond_out(const Tensor& self, const optional<Scalar>& opt_ord, Ten
 
 // Frobenius or nuclear norms
 Tensor linalg_cond(const Tensor& self, c10::string_view ord) {
-  // the same checks as squareCheckInputs(self) but with a slightly more informative error message
-  TORCH_CHECK(self.dim() >= 2, "linalg_cond only supports matrices or batches of matrices, but got a tensor with ",
-    self.dim(), " dimensions.");
-  TORCH_CHECK(self.size(-1) == self.size(-2),
-              "linalg_cond with frobenius or nuclear norm types only supports square matrices or batches of square matrices "
-              "but got ", self.size(-1), " by ", self.size(-2), " matrices");
-
+  squareCheckInputs(self, ("linalg.cond(ord=" + std::string(ord) + ")").c_str());
   c10::variant<Scalar, c10::string_view> ord_variant = ord;
   _linalg_cond_check_ord(ord_variant);
 
@@ -2809,9 +2793,9 @@ Tensor linalg_cond(const Tensor& self, c10::string_view ord) {
 
 // TODO: implement _out variant avoiding copy and using already allocated storage directly
 Tensor& linalg_cond_out(const Tensor& self, c10::string_view ord, Tensor& result) {
-  checkSameDevice("linalg_cond", result, self);
+  checkSameDevice("linalg.cond", result, self);
   ScalarType real_dtype = toValueType(self.scalar_type());
-  checkLinalgCompatibleDtype("linalg_cond", result.scalar_type(), real_dtype);
+  checkLinalgCompatibleDtype("linalg.cond", result.scalar_type(), real_dtype);
 
   Tensor result_tmp = at::linalg_cond(self, ord);
   at::native::resize_output(result, result_tmp.sizes());
