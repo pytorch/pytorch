@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: jit"]
+
 from test_jit import JitTestCase
 from torch.testing._internal.common_utils import run_tests
 
