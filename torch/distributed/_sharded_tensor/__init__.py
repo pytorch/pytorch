@@ -291,7 +291,7 @@ def full(sharding_spec: ShardingSpec,
 
 def init_from_local_shards(
         local_shards: List[Shard],
-        sharded_tensor_metadata: ShardedTensorMetadata,
+        *global_size,
         process_group=None,
         init_rrefs=False):
     """
@@ -301,11 +301,8 @@ def init_from_local_shards(
     Args:
         local_shards (List[:class `torch.distributed._sharded_tensor.Shard`]): A list
             of shards that represent the local shards on this rank.
-        sharded_tensor_metadata (:class:`torch.distributed._sharded_tensor.ShardedTensorMetadata`)
-            The ShardedTensorMetadata that created manually, represents the global metadata
-            of the ShardedTensor, must comply with `local_shards` defined in each rank.
-            Note that `sharded_tensor_metadata` must be valid and should also contain
-            local shards metadata.
+        global_size (int...):  a list, tuple, or `torch.Size` of integers defining the
+            shape of the overall sharded tensor.
 
     Keyword args:
         process_group (ProcessGroup, optional): The process group to work on. If None,
@@ -317,10 +314,33 @@ def init_from_local_shards(
 
     Returns:
         A :class:`ShardedTensor` object handle on this rank
+
+
+    Examples:
+      Suppose we want construct a sharded tensor on two ranks, global size = (10, 5),
+      each shard have a (5, 5) local tensor, we can do it like below:
+
+      on rank 0:
+        >>> local_shard_metadata = ShardMetadata(
+        >>>     shard_offsets=[0, 0]
+        >>>     shard_lengths=[5, 5]
+        >>>     placement="rank:0/cuda:0"
+        >>> )
+        >>> local_shards = [Shard(torch.randn(5, 5), local_shard_metadata)]
+        >>> sharded_tensor = init_from_local_shards(local_shards, [10, 5])
+
+      on rank 1:
+        >>> local_shard_metadata = ShardMetadata(
+        >>>     shard_offsets=[5, 0]
+        >>>     shard_lengths=[5, 5]
+        >>>     placement="rank:1/cuda:1"
+        >>> )
+        >>> local_shards = [Shard(torch.randn(5, 5), local_shard_metadata)]
+        >>> sharded_tensor = init_from_local_shards(local_shards, [10, 5])
     """
     return ShardedTensor._init_from_local_shards(
         local_shards,
-        sharded_tensor_metadata,
+        *global_size,
         process_group=process_group,
         init_rrefs=init_rrefs
     )
