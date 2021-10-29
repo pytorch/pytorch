@@ -2,6 +2,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/native/BucketizationUtils.h>
 #include <ATen/native/Resize.h>
+#include <c10/util/irange.h>
 
 /* Implement a TF like searchsorted and a bucketize function running on cpu
  *
@@ -58,7 +59,7 @@ void searchsorted_cpu_contiguous(Tensor& result, const Tensor& input, const Tens
 
   bool is_1d_boundaries = boundaries.dim() == 1;
   at::parallel_for(0, numel_in, SEARCHSORTED_GRAIN_SIZE, [&](int64_t start, int64_t end) {
-    for (int64_t i = start; i < end; ++i) {
+    for (const auto i : c10::irange(start, end)) {
       // If boundaries tensor is 1d, we always search the entire boundary tensor
       int64_t start_bd = is_1d_boundaries ? 0 : i / idim_in * idim_bd;
       const input_t *data_bd_start = &data_bd[start_bd];
@@ -75,14 +76,26 @@ void searchsorted_cpu_contiguous(Tensor& result, const Tensor& input, const Tens
 
 void dispatch(Tensor& result, const Tensor& input, const Tensor& boundaries, bool out_int32, bool right) {
   if (!out_int32) {
-    AT_DISPATCH_ALL_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "searchsorted_out_cpu", [&] {
-      searchsorted_cpu_contiguous<scalar_t, int64_t>(result, input, boundaries, right);
-    });
+    AT_DISPATCH_ALL_TYPES_AND2(
+        ScalarType::Half,
+        ScalarType::BFloat16,
+        input.scalar_type(),
+        "searchsorted_out_cpu",
+        [&] {
+          searchsorted_cpu_contiguous<scalar_t, int64_t>(
+              result, input, boundaries, right);
+        });
   }
   else {
-    AT_DISPATCH_ALL_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "searchsorted_out_cpu", [&] {
-      searchsorted_cpu_contiguous<scalar_t, int>(result, input, boundaries, right);
-    });
+    AT_DISPATCH_ALL_TYPES_AND2(
+        ScalarType::Half,
+        ScalarType::BFloat16,
+        input.scalar_type(),
+        "searchsorted_out_cpu",
+        [&] {
+          searchsorted_cpu_contiguous<scalar_t, int>(
+              result, input, boundaries, right);
+        });
   }
 }
 

@@ -4,6 +4,7 @@
 // device code.
 
 #include <c10/macros/Macros.h>
+#include <c10/util/irange.h>
 
 namespace at { namespace detail {
 

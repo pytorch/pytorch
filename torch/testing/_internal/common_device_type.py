@@ -1071,24 +1071,13 @@ class expectedAlertNondeterministic:
     #       no others. If None, then the alert is expected to be triggered
     #       for all devices. Default: None
     #
-    # Keyword args:
-    #
-    #   test_warning (bool, optional): If True, tests warnings in addition
-    #       to errors. If False, only errors are tested. Default: True
-    #
-    # TODO: `test_warning=False` is only needed as a workaround for issue
-    #       https://github.com/pytorch/pytorch/issues/50209. Once CUDA
-    #       backward function warnings behave properly, we can remove this
-    #       argument and always test for warnings.
-    #
-    def __init__(self, caller_name, device_types=None, *, test_warning=True):
+    def __init__(self, caller_name, device_types=None):
         if device_types is not None:
             assert isinstance(device_types, list)
             for device_type in device_types:
                 assert isinstance(device_type, str)
         self.device_types = device_types
         self.error_message = caller_name + ' does not have a deterministic implementation, but you set'
-        self.test_warning = test_warning
 
     def __call__(self, fn):
         @wraps(fn)
@@ -1118,7 +1107,7 @@ class expectedAlertNondeterministic:
                         raise
 
             # Check that warnings are thrown correctly
-            if self.test_warning and should_alert:
+            if should_alert:
                 with DeterministicGuard(True, warn_only=True):
                     with slf.assertWarnsRegex(
                             UserWarning,
@@ -1146,15 +1135,18 @@ def skipCPUIfNoMkl(fn):
 def skipCUDAIfNoMagma(fn):
     return skipCUDAIf('no_magma', "no MAGMA library detected")(skipCUDANonDefaultStreamIf(True)(fn))
 
+def has_cusolver():
+    version = _get_torch_cuda_version()
+    # cuSolver is disabled on cuda < 10.1.243
+    return version >= (10, 2)
+
 # Skips a test on CUDA if cuSOLVER is not available
 def skipCUDAIfNoCusolver(fn):
-    version = _get_torch_cuda_version()
-    return skipCUDAIf(version < (10, 2), "cuSOLVER not available")(fn)
+    return skipCUDAIf(not has_cusolver(), "cuSOLVER not available")(fn)
 
 # Skips a test if both cuSOLVER and MAGMA are not available
 def skipCUDAIfNoMagmaAndNoCusolver(fn):
-    version = _get_torch_cuda_version()
-    if version >= (10, 2):
+    if has_cusolver():
         return fn
     else:
         # cuSolver is disabled on cuda < 10.1.243, tests depend on MAGMA

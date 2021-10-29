@@ -48,7 +48,7 @@ You can reuse your favorite Python packages such as NumPy, SciPy, and Cython to 
 | Linux (ppc64le) GPU | <center>—</center> | [![Build Status](https://powerci.osuosl.org/job/pytorch-master-nightly-py3-linux-ppc64le-gpu/badge/icon)](https://powerci.osuosl.org/job/pytorch-master-nightly-py3-linux-ppc64le-gpu/) | <center>—</center> |
 | Linux (aarch64) CPU | [![Build Status](http://openlabtesting.org:15000/badge?project=pytorch%2Fpytorch&job_name=pytorch-arm64-build-daily-master-py36)](https://status.openlabtesting.org/builds/builds?project=pytorch%2Fpytorch&job_name=pytorch-arm64-build-daily-master-py36) | [![Build Status](http://openlabtesting.org:15000/badge?project=pytorch%2Fpytorch&job_name=pytorch-arm64-build-daily-master-py37)](https://status.openlabtesting.org/builds/builds?project=pytorch%2Fpytorch&job_name=pytorch-arm64-build-daily-master-py37) | [![Build Status](http://openlabtesting.org:15000/badge?project=pytorch%2Fpytorch&job_name=pytorch-arm64-build-daily-master-py38)](https://status.openlabtesting.org/builds/builds?project=pytorch%2Fpytorch&job_name=pytorch-arm64-build-daily-master-py38) |
 
-See also the [ci.pytorch.org HUD](https://hud.pytorch.org/build2/pytorch-master).
+See also the [CI HUD at hud.pytorch.org](https://hud.pytorch.org/ci/pytorch/pytorch/master).
 
 
 ## More About PyTorch
@@ -150,8 +150,7 @@ No wrapper code needs to be written. You can see [a tutorial here](https://pytor
 ## Installation
 
 ### Binaries
-Commands to install from binaries via Conda or pip wheels are on our website:
-[https://pytorch.org](https://pytorch.org)
+Commands to install binaries via Conda or pip wheels are on our website: [https://pytorch.org/get-started/locally/](https://pytorch.org/get-started/locally/)
 
 
 #### NVIDIA Jetson Platforms
@@ -366,23 +365,23 @@ readthedocs theme.
 cd docs/
 pip install -r requirements.txt
 ```
-You can then build the documentation by running ``make <format>`` from the
-``docs/`` folder. Run ``make`` to get a list of all available output formats.
+You can then build the documentation by running `make <format>` from the
+`docs/` folder. Run `make` to get a list of all available output formats.
 
-If you get a katex error run ```npm install katex```.  If it persists, try
-```npm install -g katex```
+If you get a katex error run `npm install katex`.  If it persists, try
+`npm install -g katex`
 
 ### Previous Versions
 
 Installation instructions and binaries for previous PyTorch versions may be found
-on [Our Website](https://pytorch.org/previous-versions).
+on [our website](https://pytorch.org/previous-versions).
 
 
 ## Getting Started
 
 Three-pointers to get you started:
 - [Tutorials: get you started with understanding and using PyTorch](https://pytorch.org/tutorials/)
-- [Examples: easy to understand pytorch code across all domains](https://github.com/pytorch/examples)
+- [Examples: easy to understand PyTorch code across all domains](https://github.com/pytorch/examples)
 - [The API Reference](https://pytorch.org/docs/)
 - [Glossary](https://github.com/pytorch/pytorch/blob/master/GLOSSARY.md)
 
