@@ -54,7 +54,6 @@ PTLTC_UNARY_OP(Log1p, at::aten::log1p);
 PTLTC_UNARY_OP(Erf, at::aten::erf);
 PTLTC_UNARY_OP(Erfc, at::aten::erfc);
 PTLTC_UNARY_OP(Erfinv, at::aten::erfinv);
-PTLTC_UNARY_OP(Sqrt, at::aten::sqrt);
 PTLTC_UNARY_OP(Rsqrt, at::aten::rsqrt);
 PTLTC_UNARY_OP(Ceil, at::aten::ceil);
 PTLTC_UNARY_OP(Round, at::aten::round);

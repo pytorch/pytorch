@@ -45,6 +45,7 @@ full_codegen:
   - softplus
   - softplus_backward
   - sort
+  - sqrt
   - sum
   - sum.dim_IntList
   - topk
@@ -83,7 +84,6 @@ supported:
   - repeat
   - select.int
   - slice.Tensor
-  - sqrt
   - squeeze
   - squeeze.dim
   - squeeze_

@@ -1845,10 +1845,6 @@ std::vector<LazyTensor> split_with_sizes(const LazyTensor& input,
   return input.MakeOutputTensors(node);
 }
 
-LazyTensor sqrt(const LazyTensor& input) {
-  return input.CreateFrom(ir::ops::Sqrt(input.GetIrValue()));
-}
-
 LazyTensor squeeze(const LazyTensor& input) {
   auto input_shape = input.shape();
   auto output_dimensions = BuildSqueezedDimensions(
