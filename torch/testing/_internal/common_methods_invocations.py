@@ -2599,13 +2599,13 @@ def sample_inputs_histc(op_info, device, dtype, requires_grad):
 
     sample_inputs = []
     for size, min, max in product(sizes, [0, -10], [0, 10]):
-        input_tensor = make_arg(size)
-
-        sample_inputs.append(SampleInput(input_tensor,
+        # construct sample input omitting bins arg
+        sample_inputs.append(SampleInput(make_arg(size),
                                          kwargs=dict(min=min, max=max)))
 
-        for bins in range(1, 5):
-            sample_inputs.append(SampleInput(input_tensor,
+        # construct sample inputs with a few different bins values
+        for bins in [1, 3, 10]:
+            sample_inputs.append(SampleInput(make_arg(size),
                                              kwargs=dict(bins=bins, min=min, max=max)))
 
     return sample_inputs
