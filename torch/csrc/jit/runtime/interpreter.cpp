@@ -172,6 +172,20 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     frames.pop_back();
   }
 
+  void callFunction(
+      Function& f,
+      Stack& stack,
+      size_t bailOut = GraphExecutor::getDefaultNumBailOuts(),
+      bool next = true) {
+    bool newFrame = f.call(stack, bailOut, [&](const Code& code) {
+      enterFrame(code, stack.size() - code.num_inputs());
+      checkAndStartRecordFunction(frames.back(), stack);
+    });
+    if (next) {
+      (frames.rbegin() + (newFrame ? 1 : 0))->pc++;
+    }
+  }
+
   // relative to the end of the register list so that when we call
   // functions we are referring to the registers of the currenly executing
   // function.
@@ -185,32 +199,6 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
       out << val;
       out << "\n";
     }
-  }
-
-  void runBuiltinFunction(Stack& stack, Function* fn) {
-    // BuiltinOpFunction directly invokes a void(Stack&) to implement
-    // custom C++ classes. Call run() here with the stack, and we will
-    // get the results from that C++ method back in the stack. Advance
-    // the PC by 1 without adding any new frame.
-    fn->run(stack);
-    ++frames.back().pc;
-  }
-
-  void runGraphFunction(Stack& stack, Function* fn) {
-    const Code& code =
-        // consider passing
-        // `frames.back().function->remaining_bailout_depth_` into
-        // `get_executor().getPlanFor()` to propagate caller's depth
-        // restrictions onto children while this strategy has a
-        // potential to reduce the number of compilations for too
-        // dynamic callers we might miss opportunities where a caller is
-        // dynamic but a callee gets stable arguments
-        fn->get_executor()
-            .getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts())
-            .code;
-    ++frames.back().pc;
-    enterFrame(code, stack.size() - code.num_inputs());
-    checkAndStartRecordFunction(frames.back(), stack);
   }
 
 #if defined(__GNUC__) || defined(__clang__)
@@ -292,7 +280,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             push(stack, IValue());
             push(stack, IValue());
             push(stack, IValue());
-            runGraphFunction(stack, &f);
+            callFunction(f, stack);
             continue;
           }
           case INST(OP): {
@@ -395,11 +383,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           case INST(CALL): {
             INST_GUARD;
             Function* fn = frame.function->function_table_[inst.X];
-            if (!fn->isGraphFunction()) {
-              runBuiltinFunction(stack, fn);
-            } else {
-              runGraphFunction(stack, fn);
-            }
+            callFunction(*fn, stack);
             continue;
           }
           case INST(INTERFACE_CALL): {
@@ -422,11 +406,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                     ->type()
                     ->getMethod(
                         frame.function->constant_table_[inst.X].toStringRef());
-            if (!function.isGraphFunction()) {
-              runBuiltinFunction(stack, &function);
-            } else {
-              runGraphFunction(stack, &function);
-            }
+            callFunction(function, stack);
             continue;
           }
           case INST(RET): {
@@ -576,11 +556,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                 frame.function->remaining_bailout_depth_ > 0
                 ? frame.function->remaining_bailout_depth_ - 1
                 : 0;
-            const Code& code = frame.function->function_table_[inst.X]
-                                   ->get_executor()
-                                   .getPlanFor(stack, remaining_bailout_depth)
-                                   .code;
-            size_t num_inputs = code.num_inputs();
+            auto& f = *frame.function->function_table_[inst.X];
+            size_t num_inputs = f.num_inputs();
             size_t base_pointer = frame.base_pointer;
             TORCH_INTERNAL_ASSERT(stack.size() >= num_inputs);
             size_t inputs_start = stack.size() - num_inputs;
@@ -590,8 +567,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             }
             stack.resize(base_pointer + num_inputs);
             leaveFrame();
-            enterFrame(code, base_pointer);
-            checkAndStartRecordFunction(frames.back(), stack);
+
+            callFunction(f, stack, remaining_bailout_depth, false);
             continue;
           }
           case INST(LIST_UNPACK): {
@@ -649,9 +626,10 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           case INST(FORK): {
             INST_GUARD;
             // Move inputs to a separate stack
-            Function* forked_fn = frame.function->function_table_[inst.X];
+            auto& forked_fn =
+                toGraphFunction(*frame.function->function_table_[inst.X]);
             InterpreterState forked_interpreter(
-                forked_fn->get_executor()
+                forked_fn.get_executor()
                     .getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts())
                     .code,
                 taskLauncher_);

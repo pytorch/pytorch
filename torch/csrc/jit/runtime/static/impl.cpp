@@ -901,7 +901,18 @@ void StaticRuntime::set_inputs(
   }
 }
 
-c10::IValue StaticRuntime::moveOutputsToTuple(size_t num_outputs) {
+void StaticRuntime::create_memory_planner() {
+  if (!planner_) {
+    planner_ = std::make_unique<MemoryPlanner>(
+        this,
+        static_module_.values_share_same_storage(),
+        static_module_.value_group(),
+        static_module_.opts().enable_out_variant,
+        static_module_.opts().manage_output_tensors);
+  }
+}
+
+c10::IValue StaticRuntime::move_outputs_to_tuple(size_t num_outputs) {
 #ifndef NDEBUG
   for (const auto i : c10::irange(num_outputs)) {
     // The exact output tensor should never be managed.
@@ -962,14 +973,7 @@ c10::IValue StaticRuntime::run_impl(
     // MemoryPlanner is created after the first invocation of `run()`. This is
     // done intentionally because MemoryPlanner uses `Tensor` sizes of the
     // previous `run()` for memory planning of subsequent runs
-    if (!planner_) {
-      planner_ = std::make_unique<MemoryPlanner>(
-          this,
-          static_module_.values_share_same_storage(),
-          static_module_.value_group(),
-          static_module_.opts().enable_out_variant,
-          static_module_.opts().manage_output_tensors);
-    }
+    create_memory_planner();
     planner_->deallocate();
     // clean up owning refs of input tensors
     clean_up_input_ivalues();
@@ -977,7 +981,7 @@ c10::IValue StaticRuntime::run_impl(
 
   // no need to keep references of outputs in static runtime anymore
   if (static_module_.num_outputs() > 1) {
-    return moveOutputsToTuple(static_module_.num_outputs());
+    return move_outputs_to_tuple(static_module_.num_outputs());
   }
 #ifndef NDEBUG
   check_for_memory_leak(false);
@@ -1082,6 +1086,7 @@ void StaticRuntime::benchmark(
             << " ms" << std::endl;
   std::cout << "First iter time: " << results.first_iter_time << " ms"
             << std::endl;
+  std::cout << "Number of operators: " << nodes_.size() << std::endl;
 
   if (planner_) {
     std::cout << "Total number of managed tensors: "
@@ -1199,14 +1204,7 @@ void StaticRuntime::display_nodes(
     // MemoryPlanner is created after the first invocation of `run()`. This is
     // done intentionally because MemoryPlanner uses `Tensor` sizes of the
     // previous `run()` for memory planning of subsequent runs
-    if (!planner_) {
-      planner_ = std::make_unique<MemoryPlanner>(
-          this,
-          static_module_.values_share_same_storage(),
-          static_module_.value_group(),
-          static_module_.opts().enable_out_variant,
-          static_module_.opts().manage_output_tensors);
-    }
+    create_memory_planner();
     planner_->deallocate();
     // clean up owning refs of input tensors
     clean_up_input_ivalues();
@@ -1268,14 +1266,7 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
     }
     timer.Start();
     if (static_module_.opts().cleanup_activations) {
-      if (!planner_) {
-        planner_ = std::make_unique<MemoryPlanner>(
-            this,
-            static_module_.values_share_same_storage(),
-            static_module_.value_group(),
-            static_module_.opts().enable_out_variant,
-            static_module_.opts().manage_output_tensors);
-      }
+      create_memory_planner();
       planner_->deallocate();
       // clean up owning refs of input tensors
       clean_up_input_ivalues();
@@ -1287,7 +1278,7 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
     // no need to keep references of outputs in static runtime anymore
     c10::IValue output;
     if (static_module_.num_outputs() > 1) {
-      output = moveOutputsToTuple(static_module_.num_outputs());
+      output = move_outputs_to_tuple(static_module_.num_outputs());
     }
 
 #ifndef NDEBUG
