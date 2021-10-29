@@ -419,6 +419,10 @@ c10::IValue make_custom_class(CtorArgs&&... args) {
   return c10::IValue(std::move(userClassInstance));
 }
 
+
+// Alternative api for creating a torchbind class over torch::class_ this api is preffered to prevent size regressions
+// on Edge usecases. Must be used in conjunction with TORCH_SELECTIVE_CLASS macro aka
+// selective_class<foo>("foo_namespace", TORCH_SELECTIVE_CLASS("foo"))
 template <class CurClass>
 inline class_<CurClass> selective_class_(const std::string& namespace_name, detail::SelectiveStr<true> className) {
   auto class_name = std::string(className.operator const char *());
