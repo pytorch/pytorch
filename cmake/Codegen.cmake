@@ -248,8 +248,7 @@ if(INTERN_BUILD_ATEN_OPS)
 
   add_custom_command(
     OUTPUT ${generated_headers} ${cuda_generated_headers} ${core_generated_headers}
-    COMMAND ${GEN_COMMAND}
-      --generate headers
+    COMMAND ${GEN_COMMAND} --generate headers
     DEPENDS ${all_python} ${header_templates}
       ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/native_functions.yaml
     WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
@@ -271,8 +270,7 @@ if(INTERN_BUILD_ATEN_OPS)
 
   add_custom_command(
     OUTPUT ${generated_sources} ${cuda_generated_sources} ${core_generated_sources}
-    COMMAND ${GEN_COMMAND}
-      --generate sources
+    COMMAND ${GEN_COMMAND} --generate sources
     DEPENDS ${all_python} ${source_templates}
       ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/native_functions.yaml
     WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
@@ -283,8 +281,7 @@ if(INTERN_BUILD_ATEN_OPS)
       ${generated_declarations_yaml}
       ${cuda_generated_declarations_yaml}
       ${core_generated_declarations_yaml}
-    COMMAND ${GEN_COMMAND}
-      --generate declarations_yaml
+    COMMAND ${GEN_COMMAND} --generate declarations_yaml
     DEPENDS ${all_python}
       ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/native_functions.yaml
     WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
