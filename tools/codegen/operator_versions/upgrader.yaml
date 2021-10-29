@@ -1,0 +1,91 @@
+div_Tensor_0_3:
+    constants:
+    - - trunc
+      - true
+    instructions:
+    - - - STOREN
+        - 1
+        - 2
+      - - LOAD
+        - 1
+        - 0
+      - - OP
+        - 0
+        - 0
+      - - JF
+        - 3
+        - 0
+      - - LOADC
+        - 1
+        - 0
+      - - JMP
+        - 3
+        - 0
+      - - LOAD
+        - 2
+        - 0
+      - - OP
+        - 0
+        - 0
+      - - STORE
+        - 3
+        - 0
+      - - MOVE
+        - 3
+        - 0
+      - - JF
+        - 5
+        - 0
+      - - LOAD
+        - 1
+        - 0
+      - - LOAD
+        - 2
+        - 0
+      - - OP
+        - 1
+        - 0
+      - - JMP
+        - 5
+        - 0
+      - - LOAD
+        - 1
+        - 0
+      - - LOAD
+        - 2
+        - 0
+      - - LOADC
+        - 0
+        - 0
+      - - OP
+        - 2
+        - 0
+      - - STORE
+        - 4
+        - 0
+      - - DROPR
+        - 2
+        - 0
+      - - DROPR
+        - 1
+        - 0
+      - - MOVE
+        - 4
+        - 0
+      - - RET
+        - 0
+        - 0
+    operators:
+    - - - aten::is_floating_point
+        - ''
+        - 1
+      - - aten::div
+        - Tensor
+        - 2
+      - - aten::div
+        - Tensor_mode
+        - 3
+    register_size:
+    - 4
+    types:
+    - []

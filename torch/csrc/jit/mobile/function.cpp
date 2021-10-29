@@ -8,7 +8,7 @@
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
-#include "jit/mobile/upgrader.h"
+#include <torch/csrc/jit/mobile/upgrader.h>
 
 namespace torch {
 namespace jit {
@@ -218,11 +218,10 @@ std::shared_ptr<Function> Function::get(
   }
   parseInstructions(
       qualified_name,
-      std::move(
-          c10::ivalue::TupleElements(bytecode_list[BYTECODE_INDEX_INSTRUCTION]
+       c10::ivalue::TupleElements(bytecode_list[BYTECODE_INDEX_INSTRUCTION]
                                          .toTuple()
                                          ->elements()
-                                         .vec())),
+                                         .vec()),
       debug_handles_m_tuple,
       foo.get());
   std::cout << "parse operator: " << std::endl;
@@ -231,8 +230,8 @@ std::shared_ptr<Function> Function::get(
     item.dump();
   }
   parseOperators(
-      std::move(c10::ivalue::TupleElements(
-          bytecode_list[BYTECODE_INDEX_OPERATOR].toTuple()->elements().vec())),
+      c10::ivalue::TupleElements(
+          bytecode_list[BYTECODE_INDEX_OPERATOR].toTuple()->elements().vec()),
       model_version,
       1,
       foo.get());

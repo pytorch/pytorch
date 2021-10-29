@@ -6,7 +6,7 @@
 #include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <torch/custom_class_detail.h>
 #include <iostream>
-#include "jit/mobile/upgrader.h"
+#include <torch/csrc/jit/mobile/upgrader.h>
 
 namespace torch {
 namespace jit {

@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/parse_bytecode.h>
 #include <torch/csrc/jit/mobile/parse_operators.h>
-#include "jit/mobile/function.h"
+#include <torch/csrc/jit/mobile/function.h>
 
 #include <ATen/core/ivalue.h>
 #include <c10/util/ScopeExit.h>
