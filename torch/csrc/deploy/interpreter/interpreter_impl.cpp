@@ -1,11 +1,13 @@
+#include <torch/csrc/deploy/interpreter/interpreter_impl.h>
+
 #include <dlfcn.h>
 
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
-#include <torch/csrc/deploy/interpreter/interpreter_impl.h>
 
 #include <pybind11/embed.h>
 #include <pybind11/functional.h>
+#include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 
@@ -296,8 +298,14 @@ struct __attribute__((visibility("hidden"))) ConcreteInterpreterSessionImpl
               obj.storages_[i], scalarTypeToTypeMeta(obj.types_[i])));
       storages[i] = std::move(new_storage);
     }
+    py::tuple dtypes(obj.types_.size());
+    for (size_t i = 0, N = obj.types_.size(); i < N; ++i) {
+      auto dtype = (PyObject*)torch::getTHPDtype(obj.types_[i]);
+      Py_INCREF(dtype);
+      dtypes[i] = dtype;
+    }
     py::object result = interp_->loadStorage(
-        id, obj.containerFile_, py::bytes(obj.data_), storages);
+        id, obj.containerFile_, py::bytes(obj.data_), storages, dtypes);
     return wrap(result);
   }
   void unload(int64_t id) override {
