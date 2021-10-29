@@ -317,8 +317,7 @@ def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False)
 def _is_fp(value):
     if value:
         if isinstance(value, torch.Tensor):
-            type = value.dtype
-            return type in (torch.float16, torch.float32, torch.float64, torch.bfloat16)
+            return value.dtype in (torch.float16, torch.float32, torch.float64, torch.bfloat16)
         else:
             type = value.type().scalarType()
             if type is None:
@@ -888,7 +887,7 @@ cast_pytorch_to_onnx = {
     "Bool": torch.onnx.TensorProtoDataType.BOOL,
     "ComplexFloat": torch.onnx.TensorProtoDataType.COMPLEX64,
     "ComplexDouble": torch.onnx.TensorProtoDataType.COMPLEX128,
-    "BFloat16": torch.onnx.TensorProtoDataType.FLOAT16,
+    "BFloat16": torch.onnx.TensorProtoDataType.BFLOAT16,
     "Undefined": torch.onnx.TensorProtoDataType.UNDEFINED,
 }
 
