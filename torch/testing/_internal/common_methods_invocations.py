@@ -2673,7 +2673,7 @@ def sample_inputs_searchsorted(op_info, device, dtype, requires_grad):
         input_tensor = make_arg(size, noncontiguous=noncontiguous)
         if np.product(size) == 0:
             boundary_tensor = unsorted_tensor
-            sorter = make_tensor(size, dtype=torch.int64, device=device, requires_grad=requires_grad, noncontiguous=noncontiguous)
+            sorter = make_tensor(size, dtype=torch.int64, device=device, noncontiguous=noncontiguous)
         else:
             boundary_tensor, sorter = torch.sort(unsorted_tensor)
         side = "right" if right else "left"
