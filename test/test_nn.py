@@ -17309,6 +17309,38 @@ class TestNNDeviceType(NNTestCase):
             out = model(input)
             self.assertTrue(out.is_contiguous(memory_format=memory_format))
 
+    def test_conv_double_backward_strided_with_3D_input_and_weight(self, device):
+        # Test that _convolution_double_backward() outputs the correct grad shapes
+        # for 3D input / weight when stride > 1. This is an ad-hoc regression test for a
+        # specific case that was uncovered during the convolution consolidation effort.
+        # The test can be safely deleted if _convolution_double_backward() is removed.
+
+        input = torch.randn(2, 3, 6, device=device)
+        weight = torch.randn(3, 3, 3, device=device)
+        bias = torch.randn(3, device=device)
+        stride = (2,)
+        padding = (1,)
+        dilation = (1,)
+        transposed = False
+        output_padding = (0,)
+        groups = 1
+        output = torch.ops.aten.convolution(input, weight, bias, stride, padding, dilation, transposed,
+                                            output_padding, groups)
+
+        ggI = torch.randn(input.shape, device=device)
+        ggW = torch.randn(weight.shape, device=device)
+        ggB = torch.randn(bias.shape, device=device)
+        gO = torch.randn(output.shape, device=device)
+        output_mask = [True, True, True]
+        grad_grad_output, grad_input, grad_weight = torch.ops.aten._convolution_double_backward(
+            ggI, ggW, ggB, gO, weight, input, stride, padding, dilation, transposed,
+            output_padding, groups, False, False, False, False, output_mask)
+
+        # Make sure the correct shapes are computed.
+        self.assertEqual(grad_grad_output.shape, gO.shape)
+        self.assertEqual(grad_input.shape, input.shape)
+        self.assertEqual(grad_weight.shape, weight.shape)
+
     def test_nll_loss_mismatched_batch(self, device):
         x = torch.randn((10, 3), requires_grad=True, device=device)
         # t should have size (10,)
