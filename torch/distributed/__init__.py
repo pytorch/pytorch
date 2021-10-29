@@ -1,6 +1,7 @@
 import os
 import sys
 from enum import Enum
+from collections import namedtuple
 
 import torch
 
@@ -65,3 +66,13 @@ if is_available():
     )
 
     from .remote_device import _remote_device
+
+else:
+    # Make sure the rest of the distributed package can still be imported
+    _remote_device = None
+    GradBucket = None
+    ProcessGroup = None
+    Store = None
+    PrefixStore = None
+    ReduceOp = namedtuple("ReduceOp", ("SUM",))(None)
+    group = namedtuple("Group", ("WORLD",))(None)

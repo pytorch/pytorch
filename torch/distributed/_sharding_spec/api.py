@@ -16,7 +16,6 @@ class PlacementSpec(ABC):
     """
     pass
 
-
 @dataclass
 class DevicePlacementSpec(PlacementSpec):
     """

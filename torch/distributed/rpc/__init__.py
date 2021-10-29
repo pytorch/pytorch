@@ -247,3 +247,7 @@ if is_available():
         info.update(api._get_current_rpc_agent().get_debug_info())
         info.update(dist_autograd._get_debug_info())
         return info
+
+else:
+    # Make sure the rest of the distributed package can still be imported
+    RRef = None

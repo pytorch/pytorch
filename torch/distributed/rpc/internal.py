@@ -9,7 +9,9 @@ from enum import Enum
 
 import torch
 import torch.distributed as dist
-from torch._C._distributed_rpc import _get_current_rpc_agent
+
+if dist.is_available():
+    from torch._C._distributed_rpc import _get_current_rpc_agent
 
 
 # Thread local tensor tables to store tensors while pickling torch.Tensor
