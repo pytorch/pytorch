@@ -2834,29 +2834,11 @@ def sample_inputs_sort(op_info, device, dtype, requires_grad, **kwargs):
 
 def sample_inputs_threshold(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
-    sizes = ((), (S,), (S, S), (S, S, S), (S, S, S, S))
+    sizes = ((), (S,), (S, S), (S, S, S))
     samples = []
     for x_size in sizes:
         # threshold and values args must be numbers
         samples.append(SampleInput(make_arg(x_size), args=(make_arg(()).item(), make_arg(()).item())))
-    return samples
-
-def sample_inputs_celu(op_info, device, dtype, requires_grad, **kwargs):
-    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
-    sizes = ((), (S,), (S, S), (S, S, S), (S, S, S, S))
-    samples = []
-    # in place ops cause errors for autograd
-    inplace_options = [False] if requires_grad else [False, True]
-
-    # in place op errors on CPU don't work because we share the data with numpy
-    if device == 'cpu':
-        inplace_options = [False]
-
-    for (x_size, inplace) in product(sizes, inplace_options):
-        samples.append(SampleInput(make_arg(x_size), kwargs={'alpha': 0.5, 'inplace': inplace}))
-        samples.append(SampleInput(make_arg(x_size), kwargs={'alpha': 0.5}))
-        samples.append(SampleInput(make_arg(x_size), kwargs={'inplace': inplace}))
-        samples.append(SampleInput(make_arg(x_size)))
     return samples
 
 def sample_inputs_argsort(*args, **kwargs):
@@ -6926,8 +6908,9 @@ def reference_logsigmoid(x):
 
 
 def reference_hardsigmoid(x):
-    y = np.where(x <= -3, 0, x)
-    return np.where(y >= 3, 1, y / 6 + 0.5)
+    int = x / 6 + 0.5
+    y = np.where(int < 0, 0, int)
+    return np.where(y > 1, 1, y).astype(x.dtype)
 
 
 def reference_lgamma(x):
@@ -9414,7 +9397,7 @@ op_db: List[OpInfo] = [
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            supports_forward_ad=True,
            supports_out=False),
-    OpInfo(
+    UnaryUfuncInfo(
         'nn.functional.celu',
         ref=lambda x, alpha=1.0, inplace=False: np.maximum(0., x) + np.minimum(0., alpha * (np.exp(x / alpha) - 1)),
         dtypes=floating_types(),
@@ -9424,7 +9407,18 @@ op_db: List[OpInfo] = [
         assert_autodiffed=False,
         supports_gradgrad=True,
         supports_out=False,
-        sample_inputs_func=sample_inputs_celu
+        sample_kwargs=lambda device, dtype, input: ({'alpha': 0.8}, {'alpha': 0.8}),
+        inplace_variant=lambda x, alpha=1.0: torch.nn.functional.celu(x, alpha, inplace=True),
+        decorators=[
+            DecorateInfo(
+                toleranceOverride({torch.float16: tol(atol=1e-03, rtol=1.2e-03), torch.bfloat16: tol(atol=1e-03, rtol=1.2e-03)}), 
+                'TestUnaryUfuncs', 'test_reference_numerics_normal', device_type='cuda',),
+            DecorateInfo(
+                toleranceOverride({torch.float16: tol(atol=1e-03, rtol=1.2e-03), torch.bfloat16: tol(atol=1e-03, rtol=1.2e-03)}), 
+                'TestUnaryUfuncs', 'test_reference_numerics_hard', device_type='cuda',),
+            DecorateInfo(
+                toleranceOverride({torch.float16: tol(atol=1e-03, rtol=1.2e-03), torch.bfloat16: tol(atol=1e-03, rtol=1.2e-03)}), 
+                'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='cuda',), ],
     ),
     UnaryUfuncInfo(
         'nn.functional.hardsigmoid',
@@ -9432,9 +9426,24 @@ op_db: List[OpInfo] = [
         dtypes=floating_types(),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         supports_autograd=True,
+        assert_autodiffed=False,
         supports_gradgrad=False,
-        # technically takes `inplace` kwarg, but supports_out only works with `out`
         supports_out=False,
+        inplace_variant=partial(torch.nn.functional.hardsigmoid, inplace=True),
+        decorators=[
+            DecorateInfo(
+                toleranceOverride({torch.float16: tol(atol=1e-04, rtol=0.001)}), 
+                'TestUnaryUfuncs', 'test_reference_numerics_normal', device_type='cuda',),
+            DecorateInfo(
+                toleranceOverride({torch.float16: tol(atol=1e-04, rtol=0.001)}), 
+                'TestUnaryUfuncs', 'test_reference_numerics_hard', device_type='cuda',),
+            DecorateInfo(
+                toleranceOverride({torch.float16: tol(atol=1e-04, rtol=0.001)}), 
+                'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='cuda',), ],
+        skips=[
+            # still want to test that first derivative works though second derivative doesn't
+            DecorateInfo(unittest.expectedFailure, 'TestGradients', "test_inplace_gradgrad")
+        ]
     ),
     UnaryUfuncInfo(
         'nn.functional.logsigmoid',
@@ -9456,24 +9465,22 @@ op_db: List[OpInfo] = [
         supports_autograd=True,
         assert_autodiffed=False,
         supports_gradgrad=True,
-        # technically takes `inplace` kwarg, but supports_out only works with `out`
         supports_out=False,
-    ),
-    UnaryUfuncInfo(
-        'nn.functional.sigmoid',
-        aten_name="sigmoid",
-        ref=reference_sigmoid,
-        dtypes=all_types_and_complex_and(torch.bfloat16, torch.bool),
-        dtypesIfCUDA=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
-        supports_forward_ad=True,
-        supports_autograd=True,
-        assert_autodiffed=False,
-        supports_gradgrad=True,
-        supports_out=False,
+        inplace_variant=partial(torch.nn.functional.mish, inplace=True),
+        decorators=[
+            DecorateInfo(
+                toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-03)}), 
+                'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='cuda',),
+            DecorateInfo(
+                toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-03)}), 
+                'TestUnaryUfuncs', 'test_reference_numerics_hard', device_type='cuda',),
+            DecorateInfo(
+                toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-03)}), 
+                'TestUnaryUfuncs', 'test_reference_numerics_normal', device_type='cuda',), ],
     ),
     UnaryUfuncInfo(
         'nn.functional.softsign',
-        ref=lambda x: x / (x.abs() + 1),
+        ref=lambda x: x / (np.abs(x) + 1),
         dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
         dtypesIfCUDA=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
         supports_forward_ad=True,
@@ -9481,20 +9488,20 @@ op_db: List[OpInfo] = [
         assert_autodiffed=False,
         supports_gradgrad=True,
         supports_out=False,
+        decorators=[
+            DecorateInfo(
+                toleranceOverride({torch.float16: tol(atol=1e-03, rtol=1.3e-04)}), 
+                'TestUnaryUfuncs', 'test_reference_numerics_extremal',),
+            DecorateInfo(
+                toleranceOverride({torch.float16: tol(atol=1e-03, rtol=1.3e-04)}), 
+                'TestUnaryUfuncs', 'test_reference_numerics_hard',),
+            DecorateInfo(
+                toleranceOverride({torch.float16: tol(atol=1e-03, rtol=1.3e-04)}), 
+                'TestUnaryUfuncs', 'test_reference_numerics_normal',), ],
+        skips=(DecorateInfo(
+            unittest.expectedFailure, 'TestUnaryUfuncs', "test_reference_numerics_hard", dtypes=(torch.complex64,)),),
     ),
     UnaryUfuncInfo(
-        'nn.functional.tanh',
-        ref=np.tanh,
-        dtypes=all_types_and_complex_and(torch.bfloat16, torch.bool),
-        dtypesIfCUDA=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
-        supports_forward_ad=True,
-        supports_autograd=True,
-        assert_autodiffed=False,
-        supports_gradgrad=True,
-        supports_out=False,
-    ),
-    UnaryUfuncInfo(
-        # separate from torch.tanh because this is deprecated
         'nn.functional.tanhshrink',
         ref=lambda x: x - np.tanh(x),
         dtypes=all_types_and_complex_and(torch.bfloat16),
@@ -9504,9 +9511,18 @@ op_db: List[OpInfo] = [
         assert_autodiffed=False,
         supports_gradgrad=True,
         supports_out=False,
+        decorators=[
+            DecorateInfo(
+                toleranceOverride({torch.bfloat16: tol(atol=1e-02, rtol=1.6e-02)}), 
+                'TestUnaryUfuncs', 'test_reference_numerics_extremal',),
+            DecorateInfo(
+                toleranceOverride({torch.bfloat16: tol(atol=1e-02, rtol=1.6e-02)}), 
+                'TestUnaryUfuncs', 'test_reference_numerics_hard',),
+            DecorateInfo(
+                toleranceOverride({torch.bfloat16: tol(atol=1e-02, rtol=1.6e-02)}), 
+                'TestUnaryUfuncs', 'test_reference_numerics_normal',), ],
     ),
     OpInfo(
-        # separate from torch.tanh because this is deprecated
         'nn.functional.threshold',
         ref=lambda x, threshold, value: np.where(x > threshold, x, value).astype(x.dtype),
         dtypes=all_types_and(torch.bfloat16),
@@ -10127,6 +10143,7 @@ op_db: List[OpInfo] = [
                    )),
     UnaryUfuncInfo('tanh',
                    ref=np.tanh,
+                   aliases=('nn.functional.tanh',),
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -10146,6 +10163,7 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal',
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
                                     active_if=(IS_MACOS or IS_WINDOWS)),
+                       DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_jit_alias_remapping'),
                    )),
     OpInfo('tensor_split',
            ref=np.array_split,
@@ -11438,7 +11456,7 @@ op_db: List[OpInfo] = [
            ),
            sample_inputs_func=sample_inputs_logcumsumexp),
     UnaryUfuncInfo('sigmoid',
-                   aliases=('special.expit', ),
+                   aliases=('special.expit', 'nn.functional.sigmoid'),
                    ref=reference_sigmoid if TEST_SCIPY else _NOTHING,
                    decorators=(precisionOverride({torch.float16: 1e-2,
                                                   torch.complex64: 1e-1,
@@ -11456,7 +11474,8 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_hard',
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal',
-                                    device_type='cpu', dtypes=[torch.cfloat, torch.cdouble])),
+                                    device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
+                       DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_jit_alias_remapping')),
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    safe_casts_outputs=True,
