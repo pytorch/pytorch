@@ -2297,9 +2297,8 @@ OperatorSet::OperatorSet(std::initializer_list<const char*> sig_literals) {
   }
 }
 
-std::vector<std::shared_ptr<Operator>> OperatorSet::getOps()
-    const {
-  std::vector<std::shared_ptr<Operator>>result;
+std::vector<std::shared_ptr<Operator>> OperatorSet::getOps() const {
+  std::vector<std::shared_ptr<Operator>> result;
   for (const auto& kv : ops) {
     auto ops_for_symbol = kv.second;
     result.insert(result.end(), ops_for_symbol.begin(), ops_for_symbol.end());
