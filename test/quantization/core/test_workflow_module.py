@@ -38,7 +38,6 @@ import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 from torch.quantization.quantization_mappings import (
     get_default_qat_module_mappings,
-    get_default_static_quant_module_mappings,
 )
 from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
 from torch.testing._internal.common_utils import TestCase
