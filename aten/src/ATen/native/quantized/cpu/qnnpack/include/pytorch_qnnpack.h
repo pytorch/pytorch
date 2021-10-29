@@ -40,10 +40,8 @@ enum pytorch_qnnp_status pytorch_qnnp_deinitialize(void);
 typedef struct pytorch_qnnp_operator* pytorch_qnnp_operator_t;
 
 enum pytorch_qnnp_status pytorch_qnnp_create_convolution2d_nhwc_q8(
-    uint32_t input_padding_top,
-    uint32_t input_padding_right,
-    uint32_t input_padding_bottom,
-    uint32_t input_padding_left,
+    uint32_t input_padding_height,
+    uint32_t input_padding_width,
     uint32_t kernel_height,
     uint32_t kernel_width,
     uint32_t subsampling_height,
@@ -66,12 +64,9 @@ enum pytorch_qnnp_status pytorch_qnnp_create_convolution2d_nhwc_q8(
     pytorch_qnnp_operator_t* convolution);
 
 enum pytorch_qnnp_status pytorch_qnnp_create_convolution3d_ndhwc_q8(
-    uint32_t input_padding_front,
-    uint32_t input_padding_top,
-    uint32_t input_padding_right,
-    uint32_t input_padding_back,
-    uint32_t input_padding_bottom,
-    uint32_t input_padding_left,
+    uint32_t input_padding_depth,
+    uint32_t input_padding_height,
+    uint32_t input_padding_width,
     uint32_t kernel_depth,
     uint32_t kernel_height,
     uint32_t kernel_width,
@@ -120,10 +115,8 @@ enum pytorch_qnnp_status pytorch_qnnp_setup_convolution_ndhwc_q8(
     pthreadpool_t threadpool);
 
 enum pytorch_qnnp_status pytorch_qnnp_create_deconvolution2d_nhwc_q8(
-    uint32_t input_padding_top,
-    uint32_t input_padding_right,
-    uint32_t input_padding_bottom,
-    uint32_t input_padding_left,
+    uint32_t input_padding_height,
+    uint32_t input_padding_width,
     uint32_t adjustment_height,
     uint32_t adjustment_width,
     uint32_t kernel_height,
@@ -227,10 +220,8 @@ enum pytorch_qnnp_status pytorch_qnnp_setup_global_average_pooling_nwc_q8(
     size_t output_stride);
 
 enum pytorch_qnnp_status pytorch_qnnp_create_average_pooling2d_nhwc_q8(
-    uint32_t input_padding_top,
-    uint32_t input_padding_right,
-    uint32_t input_padding_bottom,
-    uint32_t input_padding_left,
+    uint32_t input_padding_height,
+    uint32_t input_padding_width,
     uint32_t pooling_height,
     uint32_t pooling_width,
     uint32_t stride_height,
@@ -257,10 +248,8 @@ enum pytorch_qnnp_status pytorch_qnnp_setup_average_pooling2d_nhwc_q8(
     pthreadpool_t threadpool);
 
 enum pytorch_qnnp_status pytorch_qnnp_create_max_pooling2d_nhwc_u8(
-    uint32_t input_padding_top,
-    uint32_t input_padding_right,
-    uint32_t input_padding_bottom,
-    uint32_t input_padding_left,
+    uint32_t input_padding_height,
+    uint32_t input_padding_width,
     uint32_t pooling_height,
     uint32_t pooling_width,
     uint32_t stride_height,
