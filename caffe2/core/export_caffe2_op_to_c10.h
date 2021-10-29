@@ -6,7 +6,6 @@
     !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
 #include <caffe2/core/tensor.h>
 #include <ATen/core/boxing/BoxedKernel.h>
-#include <c10/core/Stream.h>
 #include <vector>
 
 namespace c10 {
@@ -22,11 +21,20 @@ namespace detail {
 constexpr const char* PREALLOCATED_OUTPUT_ARGNAME =
     "_caffe2_preallocated_outputs";
 
-using _CallCaffe2OpFunc = std::vector<caffe2::Tensor> (
-    const c10::FunctionSchema &schema,
+using _CallCaffe2OpFunc = std::vector<caffe2::Tensor>(
+    const c10::FunctionSchema& schema,
     c10::ArrayRef<c10::IValue> inputs,
-    std::vector<caffe2::Tensor> &&outputs,
-    StreamId stream);
+    std::vector<caffe2::Tensor> &&outputs);
+
+template <class Caffe2Operator>
+inline std::vector<caffe2::Tensor> _call_caffe2_op(
+    const c10::FunctionSchema& schema,
+    c10::ArrayRef<c10::IValue> inputs,
+    std::vector<caffe2::Tensor> &&outputs) {
+  Caffe2Operator op(schema, inputs, std::move(outputs), -1);
+  op.Run(-1);
+  return std::move(op).move_output_tensors();
+}
 
 TORCH_API void call_caffe2_op_from_c10(
     const c10::OperatorHandle &opHandle,
@@ -34,38 +42,24 @@ TORCH_API void call_caffe2_op_from_c10(
     _CallCaffe2OpFunc *call_op);
 
 template <typename Caffe2Operator>
-std::vector<caffe2::Tensor> call_caffe2_operator(
-    const c10::FunctionSchema &schema,
-    c10::ArrayRef<c10::IValue> inputs,
-    std::vector<caffe2::Tensor> &&outputs,
-    StreamId stream) {
-  Caffe2Operator op(schema, inputs, std::move(outputs), stream);
-  op.Run(stream);
-  return std::move(op).move_output_tensors();
-}
-
-template <typename Caffe2Operator>
 void boxed_caffe2_operator(const OperatorHandle& opHandle, c10::Stack* stack) {
   call_caffe2_op_from_c10(
       opHandle,
       stack,
-      &call_caffe2_operator<Caffe2Operator>);
+      &_call_caffe2_op<Caffe2Operator>);
 }
 
-struct TORCH_API InitCPUDefinition {
-  InitCPUDefinition(const char *name, c10::BoxedKernel kernel);
+template <c10::DispatchKey key>
+struct TORCH_API RegisterDefinition {
+  RegisterDefinition(const char *name, c10::BoxedKernel kernel);
 };
 
-struct TORCH_API InitCUDADefinition {
-  InitCUDADefinition(const char *name, c10::BoxedKernel kernel);
-};
+extern template class RegisterDefinition<c10::DispatchKey::CPU>;
+extern template class RegisterDefinition<c10::DispatchKey::CUDA>;
+extern template class RegisterDefinition<c10::DispatchKey::HIP>;
 
-struct TORCH_API InitHIPDefinition {
-  InitHIPDefinition(const char *name, c10::BoxedKernel kernel);
-};
-
-struct TORCH_API InitSchema {
-  InitSchema(const char *schema_str);
+struct TORCH_API RegisterSchema {
+  RegisterSchema(const char *schema_str);
 };
 
 } // namespace detail
@@ -113,40 +107,36 @@ struct TORCH_API InitSchema {
 
 #define C10_EXPORT_CAFFE2_OP_TO_C10_SCHEMA_ONLY(OperatorName, OperatorSchema) \
   /* Register the op schema with the c10 dispatcher */                        \
-  static const caffe2::detail::InitSchema                               \
-  C10_CONCATENATE(InitSchemaLibrary_IMPL_static_init_, C10_UID)(        \
-      OperatorSchema);
+  static const caffe2::detail::RegisterSchema                                 \
+    C10_ANONYMOUS_VARIABLE(RegisterSchema_static_init_)(OperatorSchema);
+
+#define _C10_EXPORT_CAFFE2_OP_TO_C10_KEY(                                     \
+    OperatorName, OperatorClass, Key)                                         \
+  /* Register call_caffe2_op_from_c10 as a kernel with the c10 dispatcher */  \
+  static const caffe2::detail::RegisterDefinition<c10::DispatchKey::Key>      \
+    C10_ANONYMOUS_VARIABLE(Register##Key##Definition_static_init_)(           \
+        "_caffe2::" #OperatorName,                                            \
+        c10::BoxedKernel::makeFromFunction<                                   \
+            &::caffe2::detail::boxed_caffe2_operator<OperatorClass>>());
 
 #define C10_EXPORT_CAFFE2_OP_TO_C10_CPU_KERNEL_ONLY(                    \
     OperatorName, OperatorClass)                                        \
-  static const caffe2::detail::InitCPUDefinition                        \
-  C10_CONCATENATE(InitCPULibrary_IMPL_static_init_, C10_UID)(           \
-      "_caffe2::" #OperatorName,                                        \
-      c10::BoxedKernel::makeFromFunction<                               \
-      &::caffe2::detail::boxed_caffe2_operator<OperatorClass>>());
+  _C10_EXPORT_CAFFE2_OP_TO_C10_KEY(OperatorName, OperatorClass, CPU)
 
-#define C10_EXPORT_CAFFE2_OP_TO_C10_CPU(                                     \
-    OperatorName, OperatorSchema, OperatorClass)                             \
-  C10_EXPORT_CAFFE2_OP_TO_C10_SCHEMA_ONLY(OperatorName, OperatorSchema)      \
+#define C10_EXPORT_CAFFE2_OP_TO_C10_CPU(                                \
+    OperatorName, OperatorSchema, OperatorClass)                        \
+  C10_EXPORT_CAFFE2_OP_TO_C10_SCHEMA_ONLY(OperatorName, OperatorSchema) \
   C10_EXPORT_CAFFE2_OP_TO_C10_CPU_KERNEL_ONLY(OperatorName, OperatorClass)
 
 #define C10_EXPORT_CAFFE2_OP_TO_C10_CUDA(OperatorName, OperatorClass)   \
-  static const caffe2::detail::InitCUDADefinition                       \
-  C10_CONCATENATE(InitCUDALibrary_IMPL_static_init_, C10_UID)(          \
-      "_caffe2::" #OperatorName,                                        \
-      c10::BoxedKernel::makeFromFunction<                               \
-      &::caffe2::detail::boxed_caffe2_operator<OperatorClass>>());
+  _C10_EXPORT_CAFFE2_OP_TO_C10_KEY(OperatorName, OperatorClass, CUDA)
 
 
 // You should never manually call the C10_EXPORT_CAFFE2_OP_TO_C10_HIP macro .
 // The C10_EXPORT_CAFFE2_OP_TO_C10_CUDA macro from above will be automatically
 // rewritten to C10_EXPORT_CAFFE2_OP_TO_C10_HIP by hipify .
 #define C10_EXPORT_CAFFE2_OP_TO_C10_HIP(OperatorName, OperatorClass)    \
-  static const caffe2::detail::InitHIPDefinition                        \
-  C10_CONCATENATE(InitHIPLibrary_IMPL_static_init_, C10_UID)(           \
-      "_caffe2::" #OperatorName,                                        \
-      c10::BoxedKernel::makeFromFunction<                               \
-      &::caffe2::detail::boxed_caffe2_operator<OperatorClass>>());      \
+  _C10_EXPORT_CAFFE2_OP_TO_C10_KEY(OperatorName, OperatorClass, HIP)
 
 
 #else

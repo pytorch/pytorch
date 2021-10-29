@@ -13,14 +13,8 @@
 namespace caffe2 {
 namespace detail {
 
-// This function is inline in the hope that compilers optimizing for speed will
-// inline it into call_caffe2_op_from_c10, allowing call_op to be inlined and
-// avoiding the function pointer indirection, while compilers optimizing for
-// binary size will keep it a separate function instead of inlining it into
-// a template and will reuse the binary code of this function between ops.
-// We measured and confirmed that binary size off the instagram ios app is
-// reduced when having _call_caffe2_op_from_c10 separate from the templated
-// call_caffe2_op_from_c10.
+// We only manipulate the stack inside of this function, so the header
+// does not depend on Tensor or IValue at all.
 void call_caffe2_op_from_c10(
     const OperatorHandle &opHandle,
     c10::Stack* stack,
@@ -66,8 +60,7 @@ void call_caffe2_op_from_c10(
     outputs_c2[i] = caffe2::Tensor(outputs.get(i));
   }
 
-  const StreamId stream(-1);
-  outputs_c2 = (*call_op)(schema, inputs, std::move(outputs_c2), stream);
+  outputs_c2 = (*call_op)(schema, inputs, std::move(outputs_c2));
 
 
   bool return_tensor_list = false;
@@ -120,38 +113,24 @@ static FunctionSchema make_function_schema_for_c10(const char* schema_str) {
 #endif
 }
 
-InitCPUDefinition::InitCPUDefinition(const char *name, c10::BoxedKernel kernel) {
-  static torch::Library cpu_lib(
-      torch::Library::IMPL, "_caffe2", c10::DispatchKey::CPU,
-      __FILE__, __LINE__);
-  if (c10::impl::dispatch_key_allowlist_check(c10::DispatchKey::CPU)) {
-    cpu_lib.impl(name, torch::CppFunction::makeFromBoxedKernel(std::move(kernel)));
+template <c10::DispatchKey key>
+RegisterDefinition<key>::RegisterDefinition(const char *name, c10::BoxedKernel kernel) {
+  if (c10::impl::dispatch_key_allowlist_check(key)) {
+    static torch::Library m(
+        torch::Library::IMPL, "_caffe2", key, __FILE__, __LINE__);
+    m.impl(name, torch::CppFunction::makeFromBoxedKernel(std::move(kernel)));
   }
 }
 
-InitCUDADefinition::InitCUDADefinition(const char *name, c10::BoxedKernel kernel) {
-  static torch::Library cuda_lib(
-      torch::Library::IMPL, "_caffe2", c10::DispatchKey::CUDA,
-      __FILE__, __LINE__);
-  if (c10::impl::dispatch_key_allowlist_check(c10::DispatchKey::CUDA)) {
-    cuda_lib.impl(name, torch::CppFunction::makeFromBoxedKernel(std::move(kernel)));
-  }
-}
+template class RegisterDefinition<c10::DispatchKey::CPU>;
+template class RegisterDefinition<c10::DispatchKey::CUDA>;
+template class RegisterDefinition<c10::DispatchKey::HIP>;
 
-InitHIPDefinition::InitHIPDefinition(const char *name, c10::BoxedKernel kernel) {
-  static torch::Library hip_lib(
-      torch::Library::IMPL, "_caffe2", c10::DispatchKey::HIP,
-      __FILE__, __LINE__);
-  if (c10::impl::dispatch_key_allowlist_check(c10::DispatchKey::HIP)) {
-    hip_lib.impl(name, torch::CppFunction::makeFromBoxedKernel(std::move(kernel)));
-  }
-}
-
-InitSchema::InitSchema(const char *schema_str) {
-  static torch::Library schema_lib(
+RegisterSchema::RegisterSchema(const char *schema_str) {
+  static torch::Library m(
       torch::Library::FRAGMENT, "_caffe2", c10::nullopt,
       __FILE__, __LINE__);
-  schema_lib.def(make_function_schema_for_c10(schema_str));
+  m.def(make_function_schema_for_c10(schema_str));
 }
 
 }  // namespace detail
