@@ -8,6 +8,7 @@ from torch.nn import Conv2d, BatchNorm2d, ReLU, init
 from torch.nn.intrinsic.qat import ConvBn2d, ConvBnReLU2d
 from torch.nn.modules.utils import _pair
 import torch.nn.quantized as nnq
+import torch.nn.qat as nnqat
 from torch.ao.quantization import (
     prepare,
     convert,
@@ -17,6 +18,7 @@ from torch.ao.quantization import (
     DeQuantStub,
     default_qconfig,
     default_qat_qconfig,
+    get_default_qat_qconfig,
     FixedQParamsFakeQuantize,
 )
 from torch.testing._internal.common_utils import TestCase
@@ -851,6 +853,39 @@ class TestConvBNQATModule(TestCase):
 
             qat_op_optim.step()
             qat_ref_op_optim.step()
+
+class TestEmbeddingBagQATModule(TestCase):
+    def test_qat_embedding_bag_errors(self):
+        default_qat_qconfig = get_default_qat_qconfig(torch.backends.quantized.engine)
+
+        # Test constructor parameters checks here.
+        with self.assertRaisesRegex(AssertionError,
+                                    "qconfig must be provided for QAT module"):
+            nnqat.EmbeddingBag(10, 5, qconfig=None)
+
+        with self.assertRaisesRegex(AssertionError,
+                                    "Embedding Bag weights requires a qscheme of " +
+                                    "torch.per_channel_affine_float_qparams"):
+            nnqat.EmbeddingBag(10, 5, qconfig=default_qat_qconfig)
+
+        # Test from_float checks here.
+        embed = nn.Embedding(10, 5)
+        with self.assertRaisesRegex(AssertionError,
+                                    "qat.EmbeddingBag.from_float only works for EmbeddingBag"):
+            nnqat.EmbeddingBag.from_float(embed)
+        embed_bag = nn.EmbeddingBag(10, 5)
+        with self.assertRaisesRegex(AssertionError,
+                                    "Input float module must have qconfig defined"):
+            nnqat.EmbeddingBag.from_float(embed_bag)
+        embed_bag.qconfig = None
+        with self.assertRaisesRegex(AssertionError,
+                                    "Input float module must have a valid qconfig"):
+            nnqat.EmbeddingBag.from_float(embed_bag)
+        embed_bag.qconfig = default_qat_qconfig
+        with self.assertRaisesRegex(AssertionError,
+                                    "Embedding Bag weights requires a qscheme of " +
+                                    "torch.per_channel_affine_float_qparams"):
+            nnqat.EmbeddingBag.from_float(embed_bag)
 
 
 if __name__ == '__main__':
