@@ -16,7 +16,7 @@ std::string lookupMainModule(InterpreterManager& m) {
   return ss.str();
 }
 
-int doMain(int argc, char** argv) {
+int doMain(int /* argc */, char** /* argv */) {
   std::shared_ptr<Environment> env = std::make_shared<XarEnvironment>();
   InterpreterManager m(2, env);
 
@@ -29,6 +29,7 @@ int doMain(int argc, char** argv) {
 } // namespace deploy
 } // namespace torch
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 int main(int argc, char** argv) {
   return torch::deploy::doMain(argc, argv);
 }

@@ -12,7 +12,7 @@ constexpr const char* DEFAULT_PYTHON_APP_DIR = "/tmp/torch_deploy_python_app";
 class XarEnvironment : public Environment {
  public:
   explicit XarEnvironment(std::string pythonAppDir = DEFAULT_PYTHON_APP_DIR);
-  ~XarEnvironment();
+  ~XarEnvironment() override;
   void configureInterpreter(Interpreter* interp) override;
 
  private:

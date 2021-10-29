@@ -14,6 +14,7 @@ XarEnvironment::XarEnvironment(std::string pythonAppDir)
   preloadSharedLibraries();
 }
 
+// NOLINTNEXTLINE(modernize-use-equals-default)
 XarEnvironment::~XarEnvironment() {
   // We should delete the pythonAppDir_ here. However if we did that, the
   // next time we run the executable, we will get issue to load shared

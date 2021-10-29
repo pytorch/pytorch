@@ -8,7 +8,7 @@ namespace deploy {
 
 class PathEnvironment : public Environment {
  public:
-  PathEnvironment(std::string path) : path_(std::move(path)) {}
+  explicit PathEnvironment(std::string path) : path_(std::move(path)) {}
   void configureInterpreter(Interpreter* interp) override;
 
  private:
