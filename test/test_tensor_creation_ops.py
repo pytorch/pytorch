@@ -1,3 +1,5 @@
+# Owner(s): ["module: tensor creation"]
+
 import torch
 import numpy as np
 

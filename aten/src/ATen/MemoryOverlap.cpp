@@ -1,6 +1,7 @@
 #include <ATen/MemoryOverlap.h>
 #include <ATen/core/TensorBase.h>
 #include <c10/core/Layout.h>
+#include <c10/util/irange.h>
 
 namespace at {
 
@@ -17,7 +18,7 @@ MemOverlap has_internal_overlap(TensorImpl* t) {
 
   auto strides = t->strides();
   auto sizes = t->sizes();
-  for (size_t i = 0; i < strides.size(); ++i) {
+  for (const auto i : c10::irange(strides.size())) {
     if (strides[i] == 0 && sizes[i] > 1) {
       return MemOverlap::YES;
     }
