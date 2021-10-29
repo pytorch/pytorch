@@ -210,7 +210,7 @@ class TestCommon(TestCase):
     @onlyOnCPUAndCUDA
     @suppress_warnings
     @ops(op_db, allowed_dtypes=(torch.float32, torch.long, torch.complex64))
-    def test_noncontiguous_samples(self, device, dtype, op):  # noqa
+    def test_noncontiguous_samples(self, device, dtype, op):
         test_grad = dtype in op.supported_backward_dtypes(torch.device(device).type)
         sample_inputs = op.sample_inputs(device, dtype, requires_grad=test_grad)
         for sample_input in sample_inputs:
