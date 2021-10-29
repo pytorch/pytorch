@@ -75,6 +75,7 @@ set(JIT_TEST_SRCS
   ${JIT_TEST_ROOT}/test_union.cpp
   ${JIT_TEST_ROOT}/test_utils.cpp
   ${JIT_TEST_ROOT}/test_script_profile.cpp
+  ${JIT_TEST_ROOT}/test_shape_analysis.cpp
   ${JIT_TEST_ROOT}/test_jit_logging_levels.cpp
 )
 
