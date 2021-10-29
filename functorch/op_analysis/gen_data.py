@@ -79,25 +79,13 @@ def get_ops_for_key(key):
 batched_registrations = get_ops_for_key('FuncTorchBatched')
 all_ops = get_ops_for_key(None)
 
-# Find all occurrences of things inside of STOP_DECOMPOSE(...) using regex
-# Look in ../functorch/csrc/BatchRulesStopDecomposition.cpp
-# Example:
-# STOP_DECOMPOSE(sin); => sin
-with open('../functorch/csrc/BatchRulesStopDecomposition.cpp') as f:
-    content = f.read()
-    stop_decomposition_regex = re.compile(r'STOP_DECOMPOSE\((.*)\);')
-    stop_decomposition_matches = stop_decomposition_regex.findall(content)
-    stop_decomposition_matches = [m.strip() for m in stop_decomposition_matches]
-    stop_decomposition_ops = set(stop_decomposition_matches)
-
 composite_ops = get_ops_for_key('CompositeImplicitAutograd')
-decomposed_ops = composite_ops - stop_decomposition_ops
 
 
-vmap_ops = (batched_registrations - stop_decomposition_ops) | (composite_ops - stop_decomposition_ops)
+vmap_ops = batched_registrations
 noncomposite_ops = all_ops - composite_ops
 
-ops = yaml.load(open('/home/chilli/fb/pytorch/aten/src/ATen/native/native_functions.yaml', 'r').read())
+ops = yaml.load(open('/home/chilli/fb/pytorch/aten/src/ATen/native/native_functions.yaml', 'r').read(), Loader=yaml.CLoader)
 
 annotated_ops = {a.strip(): b.strip() for a,b in list(csv.reader(open('annotated_ops.txt')))}
 from collections import defaultdict
@@ -133,8 +121,6 @@ def annotate_ops(ops, is_unique):
             categorization['inplace'] += 1
             op['meta'] = 'inplace'
             continue
-        if 'slow_conv3d_backward.grad_input' in op['full_name']:
-            import pdb; pdb.set_trace()
         if not is_unique and 'a!' in op['func'].lower():
             categorization['out'] += 1
             op['meta'] = 'out'
