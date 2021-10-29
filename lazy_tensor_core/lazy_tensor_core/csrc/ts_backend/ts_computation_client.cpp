@@ -22,8 +22,8 @@ namespace compiler {
 
 ComputationClient::DataPtr TSComputationClient::CreateDataPlaceholder(
     std::string device, Shape shape) {
-  return std::make_shared<TSComputationClient::TSData>(
-      lazy_tensors::ToShapeData(shape), std::move(device));
+  return std::make_shared<TSComputationClient::TSData>(shape,
+                                                       std::move(device));
 }
 
 std::vector<ComputationClient::ComputationPtr> TSComputationClient::Compile(
@@ -63,10 +63,8 @@ std::vector<ComputationClient::DataPtr> TSComputationClient::ExecuteComputation(
   for (torch::jit::IValue component : stack) {
     at::Tensor result = component.toTensor();
     at::IntArrayRef result_sizes = result.sizes();
-    lazy_tensors::PrimitiveType element_type =
-        torch_lazy_tensors::TensorTypeToLtcType(result.scalar_type());
-    client::ShapeData shape(
-        element_type,
+    lazy_tensors::Shape shape(
+        result.scalar_type(),
         std::vector<int64_t>(result_sizes.begin(), result_sizes.end()));
     results.push_back(
         std::make_shared<TSComputationClient::TSData>(result, shape, device));

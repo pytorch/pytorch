@@ -58,49 +58,6 @@ int64_t Helpers::GetCanonicalPosition(c10::ArrayRef<int64_t> dimensions,
   return pos;
 }
 
-Helpers::MinMax Helpers::MinMaxValues(lazy_tensors::PrimitiveType type) {
-  switch (type) {
-    case lazy_tensors::PrimitiveType::S8:
-      return {std::numeric_limits<int8_t>::lowest(),
-              std::numeric_limits<int8_t>::max()};
-    case lazy_tensors::PrimitiveType::U8:
-      return {std::numeric_limits<uint8_t>::lowest(),
-              std::numeric_limits<uint8_t>::max()};
-    case lazy_tensors::PrimitiveType::S16:
-      return {std::numeric_limits<int16_t>::lowest(),
-              std::numeric_limits<int16_t>::max()};
-    case lazy_tensors::PrimitiveType::U16:
-      return {std::numeric_limits<uint16_t>::lowest(),
-              std::numeric_limits<uint16_t>::max()};
-    case lazy_tensors::PrimitiveType::S32:
-      return {static_cast<int64_t>(std::numeric_limits<int32_t>::lowest()),
-              static_cast<int64_t>(std::numeric_limits<int32_t>::max())};
-    case lazy_tensors::PrimitiveType::U32:
-      return {static_cast<int64_t>(std::numeric_limits<uint32_t>::lowest()),
-              static_cast<int64_t>(std::numeric_limits<uint32_t>::max())};
-    case lazy_tensors::PrimitiveType::S64:
-      return {static_cast<int64_t>(std::numeric_limits<int64_t>::lowest()),
-              static_cast<int64_t>(std::numeric_limits<int64_t>::max())};
-    case lazy_tensors::PrimitiveType::U64:
-      return {static_cast<int64_t>(std::numeric_limits<uint64_t>::lowest()),
-              static_cast<int64_t>(std::numeric_limits<uint64_t>::max())};
-    case lazy_tensors::PrimitiveType::F16:
-      return {static_cast<float>(std::numeric_limits<c10::Half>::lowest()),
-              static_cast<float>(std::numeric_limits<c10::Half>::max())};
-    case lazy_tensors::PrimitiveType::BF16:
-    case lazy_tensors::PrimitiveType::F32:
-      return {std::numeric_limits<float>::lowest(),
-              std::numeric_limits<float>::max()};
-    case lazy_tensors::PrimitiveType::F64:
-      return {std::numeric_limits<double>::lowest(),
-              std::numeric_limits<double>::max()};
-    case lazy_tensors::PrimitiveType::PRED:
-      return {0, 1};
-    default:
-      LOG(ERROR) << "Unsupported type " << type;
-  }
-}
-
 std::vector<int64_t> Helpers::MakeTransposePermutation(int64_t dim0,
                                                        int64_t dim1,
                                                        int64_t rank) {

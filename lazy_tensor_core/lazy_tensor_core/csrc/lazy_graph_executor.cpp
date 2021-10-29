@@ -682,10 +682,8 @@ LazyGraphExecutor::FetchTensorData(std::vector<LazyTensor>* tensors,
         tensor.CurrentDataHandle();
     if (handle == nullptr && config.force_ltc_data) {
       const Device& tensor_device = tensor.GetDevice();
-      lazy_tensors::Shape shape =
-          MakeShapeWithDeviceLayout(tensor.shape(), tensor_device.hw_type);
       handle = lazy_tensors::ComputationClient::Get()->CreateDataPlaceholder(
-          tensor_device.ToString(), std::move(shape));
+          tensor_device.ToString(), std::move(tensor.shape()));
       tensor.SetDataHandle(handle, config.sync_ltc_data);
     }
     tensors_data.emplace_back(std::move(handle));
@@ -782,8 +780,7 @@ LazyGraphExecutor::CompilationResult LazyGraphExecutor::Compile(
   auto computation = ConsumeValue(lowering_ctx->Build());
   lazy_tensors::ProgramShape program_shape =
       ConsumeValue(computation->GetProgramShape());
-  lazy_tensors::Shape shape =
-      MakeShapeWithDeviceLayout(program_shape.result(), coll.device.hw_type);
+  lazy_tensors::Shape shape = program_shape.result();
 
   std::vector<lazy_tensors::ComputationClient::CompileInstance> instances;
   instances.push_back(
@@ -1060,6 +1057,15 @@ std::vector<at::Tensor> LazyGraphExecutor::GetTensorsFused(
                       async != nullptr ? &async->indices : nullptr);
 }
 
+// This gets tensors from the backend
+ // for TS backend, we'd ideally just cut through these layers and
+ // not need to copy the tensor, just move it
+
+ // for XLA backend, a copy is going to have to happen, 
+
+ // could we replace the 'Data' object with an at::Tensor, which is 'undefined' unless
+ // a backend attaches a buffer to it?  That way we can have a 'PopulateTensor' method on backend,
+ // which can either attach an existing tensor buffer to the wrapper, or copy data?
 std::vector<at::Tensor> LazyGraphExecutor::FetchTensors(
     std::vector<LazyTensor>* tensors,
     c10::ArrayRef<lazy_tensors::ComputationClient::DataPtr> tensors_data,

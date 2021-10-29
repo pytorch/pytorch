@@ -64,10 +64,6 @@ class Helpers {
   static int64_t GetCanonicalPosition(c10::ArrayRef<int64_t> dimensions,
                                       int64_t dim, int64_t pos);
 
-
-  // Retrieves type's minimum and maximum values.
-  static MinMax MinMaxValues(lazy_tensors::PrimitiveType type);
-
   // Gathers the input using the order specified by the permutation. For each i,
   // output[i] = input[permutation[i]]. The given permutation must be the same
   // size as the input.

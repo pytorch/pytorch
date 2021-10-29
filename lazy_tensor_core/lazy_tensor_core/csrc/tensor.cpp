@@ -3,7 +3,6 @@
 #include "lazy_tensor_core/csrc/debug_util.h"
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/ir_dump_util.h"
-#include "lazy_tensor_core/csrc/layout_manager.h"
 #include "lazy_tensor_core/csrc/lazy_graph_executor.h"
 #include "lazy_tensor_core/csrc/ops/arithmetic_ir_ops.h"
 #include "lazy_tensor_core/csrc/ops/cast.h"
@@ -115,13 +114,6 @@ lazy_tensors::util::MaybeRef<lazy_tensors::Shape> LazyTensor::shape() const {
   return lazy_tensors::ShapeUtil::MakeShape(
       data()->tensor_data->type().scalarType(),
       Helpers::I64List(data()->tensor_data->sizes()));
-}
-
-lazy_tensors::Shape LazyTensor::shape_with_layout() const {
-  auto tensor_shape = shape();
-  return MakeArrayShapeFromDimensions(
-      tensor_shape.get().dimensions(),
-      tensor_shape.get().at_element_type(), GetDevice().hw_type);
 }
 
 const Device& LazyTensor::GetDevice() const { return data()->device; }

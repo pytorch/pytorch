@@ -6,7 +6,6 @@
 
 #include "lazy_tensor_core/csrc/aten_ltc_bridge.h"
 #include "lazy_tensor_core/csrc/device.h"
-#include "lazy_tensor_core/csrc/layout_manager.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensors/computation_client/computation_client.h"
 
@@ -152,6 +151,9 @@ void LTCTensorImpl::SetupSizeProperties() {
       at::IntArrayRef strides = tensor_.CurrentTensorData()->strides();
       updated_strides.assign(strides.begin(), strides.end());
     } else {
+      // TODO(whc) confirmed this path is still used (fails tests without it)
+      // but I wonder if we can use some c10 utility to set the default strides
+      // instead?
       updated_strides = ComputeArrayStrides(shape.get().dimensions());
     }
     for (int i = 0; i < updated_strides.size(); i++) {

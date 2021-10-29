@@ -5,6 +5,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "lazy_tensors/shape.h"
 
 namespace lazy_tensors {
 
@@ -30,42 +31,6 @@ enum class PrimitiveType {
 
 namespace client {
 
-class ShapeData {
- public:
-  ShapeData() : element_type_(PrimitiveType::INVALID) {}
-
-  ShapeData(PrimitiveType element_type, std::vector<int64_t> dimensions)
-      : element_type_(element_type), dimensions_(std::move(dimensions)) {}
-
-  ShapeData(std::vector<ShapeData> element_shapes)
-      : element_type_(PrimitiveType::TUPLE),
-        element_shapes_(std::move(element_shapes)) {}
-
-  ShapeData(PrimitiveType element_type, std::vector<int64_t> dimensions,
-            std::vector<ShapeData> element_shapes,
-            std::vector<int64_t> minor_to_major)
-      : element_type_(element_type),
-        dimensions_(std::move(dimensions)),
-        element_shapes_(std::move(element_shapes)),
-        minor_to_major_(std::move(minor_to_major)) {}
-
-  PrimitiveType element_type() const { return element_type_; }
-
-  const std::vector<int64_t>& dimensions() const { return dimensions_; }
-
-  const std::vector<ShapeData>& element_shapes() const {
-    return element_shapes_;
-  }
-
-  const std::vector<int64_t>& minor_to_major() const { return minor_to_major_; }
-
- private:
-  PrimitiveType element_type_;
-  std::vector<int64_t> dimensions_;
-  std::vector<ShapeData> element_shapes_;
-  std::vector<int64_t> minor_to_major_;
-};
-
 class Data {
  public:
   struct Info {
@@ -74,14 +39,14 @@ class Data {
 
   using OpaqueHandle = int64_t;
 
-  Data(std::string device, ShapeData shape)
+  Data(std::string device, lazy_tensors::Shape shape)
       : device_(std::move(device)), shape_(std::move(shape)) {}
 
   virtual ~Data() {}
 
   const std::string& device() const { return device_; }
 
-  const ShapeData& shape() const { return shape_; }
+  const lazy_tensors::Shape& shape() const { return shape_; }
 
   Info* info() const { return info_.get(); }
 
@@ -98,7 +63,7 @@ class Data {
 
  private:
   std::string device_;
-  ShapeData shape_;
+  lazy_tensors::Shape shape_;
   std::shared_ptr<Info> info_;
 };
 
@@ -113,12 +78,12 @@ struct TensorSource {
   using PopulateFn = std::function<void(const TensorSource&, void*, size_t)>;
 
   TensorSource() = default;
-  TensorSource(ShapeData shape, std::string device, PopulateFn populate_fn)
+  TensorSource(lazy_tensors::Shape shape, std::string device, PopulateFn populate_fn)
       : shape(std::move(shape)),
         device(std::move(device)),
         populate_fn(std::move(populate_fn)) {}
 
-  ShapeData shape;
+  lazy_tensors::Shape shape;
   std::string device;
   PopulateFn populate_fn;
 };

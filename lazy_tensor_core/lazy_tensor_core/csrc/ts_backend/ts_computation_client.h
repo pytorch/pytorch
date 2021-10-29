@@ -12,10 +12,10 @@ class TSComputationClient : public ComputationClient {
   class TSData : public Data {
     public:
 
-      TSData(const at::Tensor& data, client::ShapeData shape, std::string device)
+      TSData(const at::Tensor& data, lazy_tensors::Shape shape, std::string device)
           : Data(std::move(device), std::move(shape)), data_(data) {}
 
-      TSData(client::ShapeData shape, std::string device)
+      TSData(lazy_tensors::Shape shape, std::string device)
           : Data(std::move(device), std::move(shape)) {}
 
       OpaqueHandle GetOpaqueHandle() override {
