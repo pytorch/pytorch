@@ -4,6 +4,7 @@
 #include <ATen/native/cpu/utils.h>
 #include <ATen/native/cpu/ChannelShuffleKernel.h>
 #include <ATen/cpu/vec/vec.h>
+#include <c10/util/irange.h>
 
 namespace at { namespace native {
 
@@ -34,7 +35,7 @@ void cpu_channel_shuffle(
     int64_t g = 0;
     data_index_init(begin, n, nbatch, oc, channels_per_group, g, groups);
 
-    for (int64_t i = begin; i < end; i++) {
+    for (const auto i : c10::irange(begin, end)) {
       scalar_t* output_ptr = output_data + i * image_size;
       scalar_t* input_ptr = input_data + n * channels * image_size +
           g * channels_per_group * image_size + oc * image_size;
@@ -70,7 +71,7 @@ void cpu_channel_shuffle_cl(
   // 4d: parallel on dimension of n, h, w
   // 5d: parallel on dimension of n, d, h, w
   at::parallel_for(0, nbatch * image_size, 0, [&](int64_t begin, int64_t end) {
-    for (int64_t i = begin; i < end; i++) {
+    for (const auto i : c10::irange(begin, end)) {
       scalar_t* output_ptr = output_data + i * channels;
       scalar_t* input_ptr = input_data + i * channels;
 
