@@ -385,8 +385,8 @@ class KLDivLoss(_Loss):
             = y_{\text{obs}} \cdot (\log y_{\text{obs}} - \log y_{\text{model}})
 
     As to avoid underflow issues, to compute this quantity, this loss expects the argument
-    :attr:`input` (:math:`y_{\text{model}}` in the notation above) in the log-space.
-    The argument :attr:`target` (:math:`y_{\text{obs}}` above) may also be provided in the
+    :attr:`input`---:math:`y_{\text{model}}` in the notation above---in the log-space.
+    The argument :attr:`target`---:math:`y_{\text{obs}}` above---may also be provided in the
     log-space if :attr:`log_target`\ `= True`.
 
     To summarise, this function is roughly equivalent to computing
@@ -449,7 +449,7 @@ class KLDivLoss(_Loss):
         >>> input = F.log_softmax(torch.randn(3, 5, requires_grad=True))
         >>> # Sample a batch of distributions. Usually this would come from the dataset
         >>> def normalize(p):
-                return p / p.sum(1, keepdim=True)
+        >>>     return p / p.sum(1, keepdim=True)
         >>> target = normalize(torch.rand(3, 5))
         >>> output = kl_loss(input, target)
     """
