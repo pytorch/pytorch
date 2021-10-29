@@ -46,7 +46,6 @@ PTLTC_UNARY_OP(Sinh, at::aten::sinh);
 PTLTC_UNARY_OP(Atan, at::aten::atan);
 PTLTC_UNARY_OP(Atanh, at::aten::atanh);
 PTLTC_UNARY_OP(Tan, at::aten::tan);
-PTLTC_UNARY_OP(Tanh, at::aten::tanh);
 PTLTC_UNARY_OP(Neg, at::aten::neg);
 PTLTC_UNARY_OP(Expm1, at::aten::expm1);
 PTLTC_UNARY_OP(Log, at::aten::log);

@@ -1935,10 +1935,6 @@ LazyTensor tan(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::Tan(input.GetIrValue()));
 }
 
-LazyTensor tanh(const LazyTensor& input) {
-  return input.CreateFrom(ir::ops::Tanh(input.GetIrValue()));
-}
-
 LazyTensor tanh_backward(const LazyTensor& grad_output,
                          const LazyTensor& output) {
   return mul(grad_output, rsub(pow(output, 2), 1, 1));
