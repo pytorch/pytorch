@@ -126,12 +126,11 @@ def ort_compare_with_pytorch(ort_outs, output, rtol, atol):
 
 def run_model_test(self, model, batch_size=2, state_dict=None,
                    input=None, use_gpu=True, rtol=0.001, atol=1e-7,
-                   example_outputs=None, do_constant_folding=True,
-                   dynamic_axes=None, test_with_inputs=None,
-                   input_names=None, output_names=None,
-                   fixed_batch_size=False, dict_check=True,
-                   training=None, remained_onnx_input_idx=None,
-                   flatten=True):
+                   do_constant_folding=True, dynamic_axes=None,
+                   test_with_inputs=None, input_names=None,
+                   output_names=None, fixed_batch_size=False,
+                   dict_check=True, training=None,
+                   remained_onnx_input_idx=None, flatten=True):
     if training is not None and training == torch.onnx.TrainingMode.TRAINING:
         model.train()
     elif training is None or training == torch.onnx.TrainingMode.EVAL:
@@ -5987,6 +5986,18 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(PixelShuffle(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
+    def test_reciprocal(self):
+        class ReciprocalModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.reciprocal(x)
+
+        model = ReciprocalModel()
+        x = torch.tensor([2, 4])
+        self.run_test(model, x.to(torch.long))
+        self.run_test(model, x.to(torch.float))
+        self.run_test(model, x.to(torch.double))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_scalar_type(self):
         class ArithmeticModel(torch.nn.Module):
             def forward(self, x):
@@ -5995,12 +6006,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.ones(2, 3, dtype=torch.float32)
         self.run_test(ArithmeticModel(), x)
 
-        class ReciprocalModel(torch.nn.Module):
-            def forward(self, x):
-                return torch.reciprocal(x)
-
-        x = torch.tensor([2.0, 4.0], dtype=torch.double)
-        self.run_test(ReciprocalModel(), x)
 
         class ComparisonModel(torch.nn.Module):
             def forward(self, x, y):

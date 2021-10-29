@@ -1,4 +1,4 @@
-
+import enum
 import torch
 import warnings
 import inspect
@@ -909,6 +909,27 @@ scalar_name_to_pytorch = {
     "complex64": "ComplexFloat",
     "complex128": "ComplexDouble"
 }
+
+
+
+class ScalarType(enum.IntEnum):
+    """A human-readable name for a key into scalar_type_to_pytorch_type."""
+    UINT8 = 0
+    INT8 = enum.auto()
+    SHORT = enum.auto()
+    INT = enum.auto()
+    INT64 = enum.auto()
+    HALF = enum.auto()
+    FLOAT = enum.auto()
+    DOUBLE = enum.auto()
+    COMPLEX32 = enum.auto()
+    COMPLEX64 = enum.auto()
+    COMPLEX128 = enum.auto()
+    BOOL = enum.auto()
+    QINT8 = enum.auto()
+    QUINT8 = enum.auto()
+    QINT32 = enum.auto()
+    BFLOAT16 = enum.auto()
 
 
 # This indicates each scalar type's corresponding
