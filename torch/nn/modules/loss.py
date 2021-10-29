@@ -384,16 +384,16 @@ class KLDivLoss(_Loss):
             = y_{\text{obs}} \cdot \log \frac{y_{\text{obs}}}{y_{\text{model}}}
             = y_{\text{obs}} \cdot (\log y_{\text{obs}} - \log y_{\text{model}})
 
-    As to avoid underflow issues, to compute this quantity, we expect the argument :attr:`target`
-    (:math:`y_{\text{model}}` in the notation above) in the log-space.
-    The argument :attr:`input` (:math:`y_{\text{obs}}` above) may also be provided in the
+    As to avoid underflow issues, to compute this quantity, this loss expects the argument
+    :attr:`input` (:math:`y_{\text{model}}` in the notation above) in the log-space.
+    The argument :attr:`target` (:math:`y_{\text{obs}}` above) may also be provided in the
     log-space if :attr:`log_target`\ `= True`.
 
     To summarise, this function is roughly equivalent to computing
 
     .. code-block:: python
 
-        if (not log_target): # default
+        if not log_target: # default
             loss_pointwise = target * (target.log() - input)
         else:
             loss_pointwise = target.exp() * (target - input)
@@ -402,13 +402,13 @@ class KLDivLoss(_Loss):
 
     .. code-block:: python
 
-        if (reduction == "mean")          # default
+        if reduction == "mean":  # default
             loss = loss_pointwise.mean()
-        else if reduction == "batchmean": # mathematically correct
+        elif reduction == "batchmean":  # mathematically correct
             loss = loss_pointwise.sum() / input.size(0)
-        else if reduction == "mean":
-            loss = loss_pointwise.mean()
-        else: # reduction == "pointwise"
+        elif reduction == "sum":
+            loss = loss_pointwise.sum()
+        else:  # reduction == "none"
             loss = loss_pointwise
 
     .. note::
@@ -445,9 +445,9 @@ class KLDivLoss(_Loss):
     Examples::
 
         >>> kl_loss = nn.KLDivLoss(reduction="batchmean")
-        # input should be a distribution in the log space
+        >>> # input should be a distribution in the log space
         >>> input = F.log_softmax(torch.randn(3, 5, requires_grad=True))
-        # Sample a batch of distributions. Usually this would come from the dataset
+        >>> # Sample a batch of distributions. Usually this would come from the dataset
         >>> def normalize(p):
                 return p / p.sum(1, keepdim=True)
         >>> target = normalize(torch.rand(3, 5))
