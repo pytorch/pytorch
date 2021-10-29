@@ -197,6 +197,7 @@ if(INTERN_BUILD_ATEN_OPS)
         --op-dependency "${OP_DEPENDENCY}"
         --root-ops "${SELECTED_OP_LIST}"
         OUTPUT_VARIABLE OP_REGISTRATION_WHITELIST
+        OUTPUT_STRIP_TRAILING_WHITESPACE
       )
       separate_arguments(OP_REGISTRATION_WHITELIST)
       message(STATUS "Custom build with op registration whitelist: ${OP_REGISTRATION_WHITELIST}")
@@ -231,7 +232,6 @@ if(INTERN_BUILD_ATEN_OPS)
     )
 
     if(NOT RETURN_VALUE EQUAL 0)
-      message(STATUS "${RETURN_VALUES}")
       message(FATAL_ERROR "Failed to get generated_${gen_type} list")
     endif()
 
