@@ -1,17 +1,16 @@
 # Owner(s): ["oncall: jit"]
 
-import torch
-from torch.testing._internal.jit_utils import JitTestCase, execWrapper
 import operator
-
-
-from torch.testing import FileCheck
-from torch.testing._internal.common_utils import make_tensor
-from torch.testing._internal.common_methods_invocations import sample_inputs_cat_concat
-from torch import nn
-
-
 from textwrap import dedent
+
+import torch
+from torch import nn
+from torch.testing import FileCheck
+from torch.testing._internal.common_methods_invocations import (
+    sample_inputs_cat_concat,
+)
+from torch.testing._internal.common_utils import make_tensor
+from torch.testing._internal.jit_utils import JitTestCase, execWrapper
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -113,9 +112,6 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         FileCheck().check("*, 3, 2, *").check("*, 3, *, *) = prim::If").run(foo.graph)
 
     def test_unary_shape_functions(self):
-        def apply(fn):
-            return lambda x: fn(x)
-
         unary_ops = [
             torch.nn.functional.hardtanh,
         ]
@@ -126,10 +122,23 @@ class TestSymbolicShapeAnalysis(JitTestCase):
             torch._C._jit_pass_propagate_shapes_on_graph(t.graph)
             self.assertEqual(next(t.graph.outputs()).type().symbolic_sizes(), [2, 2])
 
-    def test_binary_shape_functions(self):
-        def apply(fn):
-            return lambda x, y: fn(x, y)
+    def test_unary_shape_fns_inplace(self):
+        def mul_inplace(x: torch.Tensor):
+            y = x.mul_(2)
+            return y
 
+        unary_ops = [
+            mul_inplace
+        ]
+        for fn in unary_ops:
+            # t = torch.jit.trace(fn, torch.rand([4, 4]))  # For some reason tracing is erroring out.
+            t = torch.jit.script(fn)
+            ten_input = next(t.graph.inputs())
+            ten_input.setType(ten_input.type().with_sizes([2, 2]))
+            torch._C._jit_pass_propagate_shapes_on_graph(t.graph)
+            self.assertEqual(next(t.graph.outputs()).type().symbolic_sizes(), [2, 2])
+
+    def test_binary_shape_functions(self):
         binary_ops = [
             operator.__mul__,
             operator.__truediv__,
@@ -144,6 +153,30 @@ class TestSymbolicShapeAnalysis(JitTestCase):
             inputs = list(t.graph.inputs())
             inputs[0].setType(inputs[0].type().with_sizes(size_1))
             inputs[1].setType(inputs[1].type().with_sizes(size_2))
+            torch._C._jit_pass_propagate_shapes_on_graph(t.graph)
+            self.assertEqual(next(t.graph.outputs()).type().symbolic_sizes(), [4, 4, 8])
+            break
+
+    def test_binary_shape_fns_inplace(self):
+        def div_inplace_tensor(x: torch.Tensor, y: torch.Tensor):
+            z = x.div_(y)
+            return z
+
+        def add_inplace_tensor(x: torch.Tensor, y: torch.Tensor):
+            z = x.add_(y)
+            return z
+
+        binary_ops = [
+            div_inplace_tensor,
+            add_inplace_tensor,
+        ]
+
+        for fn in binary_ops:
+            size_1 = [4, 4, 8]  # x (can't broadcast because it's an inplace op)
+            t = torch.jit.script(fn)
+            inputs = list(t.graph.inputs())
+            inputs[0].setType(inputs[0].type().with_sizes(size_1))
+            # Intentionally not populate the type of inputs[1]
             torch._C._jit_pass_propagate_shapes_on_graph(t.graph)
             self.assertEqual(next(t.graph.outputs()).type().symbolic_sizes(), [4, 4, 8])
 
