@@ -59,9 +59,9 @@ TORCH_IMPL_FUNC(smooth_l1_loss_out)
     auto iter = TensorIterator::borrowing_binary_op(loss, input, target);
     smooth_l1_stub(iter.device_type(), iter, beta);
     if (reduction == Reduction::Mean) {
-      at::mean_out(const_cast<Tensor&>(result), iter.output(), 0);
+      at::mean_out(const_cast<Tensor&>(result), iter.output(), IntArrayRef{});
     } else {
-      at::sum_out(const_cast<Tensor&>(result), iter.output(), 0);
+      at::sum_out(const_cast<Tensor&>(result), iter.output(), IntArrayRef{});
     }
   } else {
     TensorIterator iter = *this;
