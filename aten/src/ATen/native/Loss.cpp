@@ -34,7 +34,7 @@ TORCH_META_FUNC(smooth_l1_loss)
   }
 
   TORCH_INTERNAL_ASSERT(reduction == Reduction::Mean || reduction == Reduction::Sum);
-  at::native::resize_(maybe_get_output(), {});
+  maybe_get_output().resize_({});
 }
 
 } // namespace meta
@@ -64,8 +64,7 @@ TORCH_IMPL_FUNC(smooth_l1_loss_out)
       at::sum_out(const_cast<Tensor&>(result), iter.output(), IntArrayRef{});
     }
   } else {
-    TensorIterator iter = *this;
-    smooth_l1_stub(device_type(), iter, beta);
+    smooth_l1_stub(device_type(), *this, beta);
   }
 }
 

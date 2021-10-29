@@ -651,7 +651,7 @@ void fmin_kernel(TensorIteratorBase& iter) {
   }
 }
 
-void smooth_l1_kernel(TensorIterator& iter, double beta) {
+void smooth_l1_kernel(TensorIteratorBase& iter, double beta) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
         kBFloat16, kHalf, iter.dtype(), "smooth_l1_cpu", [&]() {
         using Vec = Vectorized<scalar_t>;

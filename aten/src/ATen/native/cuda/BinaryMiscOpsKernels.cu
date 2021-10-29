@@ -12,7 +12,7 @@
 
 namespace at { namespace native {
 
-void smooth_l1_kernel_cuda(TensorIterator& iter, double beta) {
+void smooth_l1_kernel_cuda(TensorIteratorBase& iter, double beta) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "smooth_l1_cuda", [&iter, beta]() {
     scalar_t beta_val(beta);
     gpu_kernel(iter, [beta_val] GPU_LAMBDA (scalar_t a, scalar_t b) -> scalar_t {
