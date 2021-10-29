@@ -72,6 +72,17 @@ class TRTModule(torch.nn.Module):
         self.output_binding_indices_in_order: Sequence[int] = [
             self.engine.get_binding_index(name) for name in self.output_names
         ]
+        primary_input_outputs = set()
+        primary_input_outputs.update(self.input_binding_indices_in_order)
+        primary_input_outputs.update(self.output_binding_indices_in_order)
+        self.hidden_output_binding_indices_in_order: Sequence[int] = []
+        self.hidden_output_names: Sequence[str] = []
+        for i in range(self.engine.num_bindings):
+            if i not in primary_input_outputs:
+                self.hidden_output_binding_indices_in_order.append(i)
+                self.hidden_output_names.append(self.engine.get_binding_name(i))
+
+        assert self.engine.num_bindings == (len(self.input_names) + len(self.output_names) + len(self.hidden_output_names))
 
         self.input_dtypes: Sequence[torch.dtype] = [
             torch_dtype_from_trt(self.engine.get_binding_dtype(idx))
@@ -84,6 +95,10 @@ class TRTModule(torch.nn.Module):
         self.output_dtypes: Sequence[torch.dtype] = [
             torch_dtype_from_trt(self.engine.get_binding_dtype(idx))
             for idx in self.output_binding_indices_in_order
+        ]
+        self.hidden_output_dtypes: Sequence[torch.dtype] = [
+            torch_dtype_from_trt(self.engine.get_binding_dtype(idx))
+            for idx in self.hidden_output_binding_indices_in_order
         ]
 
     def _check_initialized(self):
@@ -144,7 +159,7 @@ class TRTModule(torch.nn.Module):
                 batch_size = inputs[0].shape[0]
                 contiguous_inputs: List[torch.Tensor] = [i.contiguous() for i in inputs]
                 bindings: List[Any] = [None] * (
-                    len(self.input_names) + len(self.output_names)
+                    len(self.input_names) + len(self.output_names) + len(self.hidden_output_names)
                 )
 
                 for i, input_name in enumerate(self.input_names):
@@ -185,6 +200,20 @@ class TRTModule(torch.nn.Module):
                         device=torch.cuda.current_device(),
                     )
                     outputs.append(output)
+                    bindings[idx] = output.data_ptr()
+                for i, idx in enumerate(self.hidden_output_binding_indices_in_order):
+                    if self.engine.has_implicit_batch_dimension:
+                        shape = (batch_size,) + tuple(
+                            self.engine.get_binding_shape(idx)
+                        )
+                    else:
+                        shape = tuple(self.context.get_binding_shape(idx))
+
+                    output = torch.empty(  # type: ignore[call-overload]
+                        size=shape,
+                        dtype=self.hidden_output_dtypes[i],
+                        device=torch.cuda.current_device(),
+                    )
                     bindings[idx] = output.data_ptr()
 
             with torch.autograd.profiler.record_function("TRTModule:TensorRTRuntime"):
