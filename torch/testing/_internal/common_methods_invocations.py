@@ -6312,8 +6312,6 @@ def sample_inputs_soft_margin_loss(op_info, device, dtype, requires_grad, **kwar
     shapes = [
         (),
         (S,),
-        (S,),
-        (S,),
         (S, S),
         (S, S, S),
     ]
