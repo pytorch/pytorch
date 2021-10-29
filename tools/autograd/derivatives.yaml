@@ -1111,6 +1111,7 @@
 
 - name: linalg_householder_product(Tensor input, Tensor tau) -> Tensor
   input, tau: householder_product_backward(grad, result, input, tau)
+  result: householder_product_jvp(input_t, tau_t, result, input_p, tau_p)
 
 - name: ormqr(Tensor self, Tensor input2, Tensor input3, bool left=True, bool transpose=False) -> Tensor
   self: not_implemented("ormqr")
@@ -1265,6 +1266,20 @@
 
 - name: slice_backward(Tensor grad_output, int[] input_sizes, int dim, int start, int end, int step) -> Tensor
   grad_output: grad.slice(dim, start, end, step)
+
+- name: slice_scatter(Tensor self, Tensor src, int dim=0, int? start=None, int? end=None, int step=1) -> Tensor
+  self: slice_scatter(grad, zeros_like(src), dim, start, end, step)
+  src: grad.slice(dim, start, end, step)
+  result: auto_linear
+
+- name: select_scatter(Tensor self, Tensor src, int dim, int index) -> Tensor
+  self: select_scatter(grad, zeros_like(src), dim, index)
+  src: grad.select(dim, index)
+  result: auto_linear
+
+- name: diagonal_scatter(Tensor self, Tensor src, int offset=0, int dim1=0, int dim2=1) -> Tensor
+  self: diagonal_scatter(grad, zeros_like(src), offset, dim1, dim2)
+  src: grad.diagonal(offset, dim1, dim2)
   result: auto_linear
 
 - name: slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
@@ -1791,16 +1806,12 @@
   input: upsample_nearest3d_backward(grad, output_size, input.sizes(), scale_factors)
 
 - name: native_pixel_shuffle(Tensor self, int upscale_factor) -> Tensor
-  self: native_pixel_shuffle_backward(grad, self.sizes(), upscale_factor)
-
-- name: native_pixel_shuffle_backward(Tensor grad_output, int[] input_sizes, int upscale_factor) -> Tensor
-  grad_output: native_pixel_shuffle(grad, upscale_factor)
+  self: native_pixel_unshuffle(grad, upscale_factor)
+  result: auto_linear
 
 - name: native_pixel_unshuffle(Tensor self, int downscale_factor) -> Tensor
-  self: native_pixel_unshuffle_backward(grad, self.sizes(), downscale_factor)
-
-- name: native_pixel_unshuffle_backward(Tensor grad_output, int[] input_sizes, int downscale_factor) -> Tensor
-  grad_output: native_pixel_unshuffle(grad, downscale_factor)
+  self: native_pixel_shuffle(grad, downscale_factor)
+  result: auto_linear
 
 - name: _adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor
   self: _adaptive_avg_pool2d_backward(grad, self)

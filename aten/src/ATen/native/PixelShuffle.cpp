@@ -4,9 +4,6 @@
 #include <c10/util/Exception.h>
 
 #include <ATen/native/cpu/PixelShuffleKernel.h>
-#include <algorithm>
-#include <numeric>
-#include <vector>
 
 namespace at {
 namespace native {
@@ -28,16 +25,6 @@ Tensor pixel_shuffle_cpu(const Tensor& self, int64_t upscale_factor) {
   return output;
 }
 
-Tensor pixel_shuffle_backward_cpu(const Tensor& grad_output, IntArrayRef input_sizes, int64_t upscale_factor) {
-  auto grad_input = at::empty({0}, grad_output.options());
-  auto memory_format = grad_output.suggest_memory_format();
-  grad_input.resize_(input_sizes, memory_format);
-  auto grad_output_ = grad_output.contiguous(memory_format);
-
-  pixel_shuffle_backward_kernel(kCPU, grad_input, grad_output_, upscale_factor);
-  return grad_input;
-}
-
 Tensor pixel_unshuffle_cpu(const Tensor& self, int64_t downscale_factor) {
   // Format: (B1, ..., Bn), C, H, W
   std::vector<int64_t> output_sizes(self.sizes().begin(), self.sizes().end() - 3);
@@ -53,16 +40,6 @@ Tensor pixel_unshuffle_cpu(const Tensor& self, int64_t downscale_factor) {
 
   pixel_unshuffle_kernel(kCPU, output, input, downscale_factor);
   return output;
-}
-
-Tensor pixel_unshuffle_backward_cpu(const Tensor& grad_output, IntArrayRef input_sizes, int64_t downscale_factor) {
-  auto grad_input = at::empty({0}, grad_output.options());
-  auto memory_format = grad_output.suggest_memory_format();
-  grad_input.resize_(input_sizes, memory_format);
-  auto grad_output_ = grad_output.contiguous(memory_format);
-
-  pixel_unshuffle_backward_kernel(kCPU, grad_input, grad_output_, downscale_factor);
-  return grad_input;
 }
 
 Tensor pixel_shuffle(const Tensor& self, int64_t upscale_factor) {
@@ -177,8 +154,6 @@ Tensor math_pixel_unshuffle(const Tensor& self, int64_t downscale_factor) {
 }
 
 DEFINE_DISPATCH(pixel_shuffle_kernel);
-DEFINE_DISPATCH(pixel_shuffle_backward_kernel);
 DEFINE_DISPATCH(pixel_unshuffle_kernel);
-DEFINE_DISPATCH(pixel_unshuffle_backward_kernel);
 
 }} // namespace at::native
