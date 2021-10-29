@@ -23,15 +23,17 @@ static void PrepareDivisionForONNXOnBlock(Block* block) {
             auto* longtensor =
                 subgraph->insertNode(subgraph->createNumToTensor(input))
                     ->output();
+            longtensor->node()->copyMetadata(input->node());
             auto* nonblocking = subgraph->insertConstant(0);
             auto* cast =
                 subgraph->create(aten::_cast_Float, {longtensor, nonblocking});
+            cast->copyMetadata(*it);
             return subgraph->insertNode(cast)->output();
           });
 
       it->replaceInput(0, floattensor_inputs[0]);
       it->replaceInput(1, floattensor_inputs[1]);
-      it->output()->setType(TensorType::fromNumberType(FloatType::get()));
+      it->output()->setType(TensorType::fromNumberType(*FloatType::get()));
     }
   }
 }

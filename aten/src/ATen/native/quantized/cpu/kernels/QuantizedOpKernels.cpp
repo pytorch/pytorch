@@ -104,9 +104,9 @@ Tensor qcat_nhwc_kernel(
   // which causes an internal compiler error if they're not
   AT_DISPATCH_QINT_TYPES(output.scalar_type(), "qcat_nhwc", [&, N, H, W]() {
     using Vec = Vectorized<scalar_t>;
-    for (int64_t batch = 0; batch < N; ++batch) {
-      for (int64_t row = 0; row < H; ++row) {
-        for (int64_t col = 0; col < W; ++col) {
+    for (const auto batch : c10::irange(N)) {
+      for (const auto row : c10::irange(H)) {
+        for (const auto col : c10::irange(W)) {
           // loop over input tensors
           for (const auto tidx : c10::irange(Cs_in.size())) {
             scalar_t::underlying* optr =
@@ -1294,13 +1294,13 @@ void qmaxpool_2d_nhwc_kernel(
     scalar_t* odata = static_cast<scalar_t*>(qy.data_ptr());
 
     // Loop over N
-    for (int64_t b = 0; b < qx.size(0); ++b) {
+    for (const auto b : c10::irange(qx.size(0))) {
       // Loop over H
       auto* i_p =
           reinterpret_cast<scalar_t::underlying*>(idata + b * iW * iH * iC);
-      for (int64_t row = 0; row < oH; ++row) {
+      for (const auto row : c10::irange(oH)) {
         // Loop over W
-        for (int64_t col = 0; col < oW; ++col) {
+        for (const auto col : c10::irange(oW)) {
           // Pointer to output data for this specific N,H,W position
           auto* o_p = reinterpret_cast<scalar_t::underlying*>(
               odata + b * oH * oW * iC + row * oW * iC + col * iC);
@@ -1328,7 +1328,7 @@ void qmaxpool_2d_nhwc_kernel(
             int64_t x, y;
             for (y = h_start; y < h_end; y += dH) {
               for (x = w_start; x < w_end; x += dW) {
-                for (int i = 0; i < 4; ++i) {
+                for (const auto i : c10::irange(4)) {
                   tcntr = y * iW + x;
                   auto vals = Vectorized<scalar_t>::loadu(
                       i_p + tcntr * iC + c + Vectorized<scalar_t>::size() * i);
@@ -1336,7 +1336,7 @@ void qmaxpool_2d_nhwc_kernel(
                 }
               } // for x
             } // for y
-            for (int i = 0; i < 4; ++i) {
+            for (const auto i : c10::irange(4)) {
               accs[i].store(o_p + c + Vectorized<scalar_t>::size() * i);
             }
           } // for c
@@ -1417,18 +1417,18 @@ void do_avg_pool_nhwc_on_AVX_n(
     for (int c = c_start; c < csize; c += cb_step) {
       int cend = std::min(cb_size, (csize - c) / vec_width);
       // initialize loop
-      for (int ic = 0; ic < cend; ic++) {
+      for (const auto ic : c10::irange(cend)) {
         acc_buffer[ic] = Vectorized<int32_t>(input_zero_point_m_size);
       }
       // compute loop
-      for (int id = dstart; id < dend; id++) {
-        for (int ih = hstart; ih < hend; ih++) {
-          for (int iw = wstart; iw < wend; iw++) {
+      for (const auto id : c10::irange(dstart, dend)) {
+        for (const auto ih : c10::irange(hstart, hend)) {
+          for (const auto iw : c10::irange(wstart, wend)) {
             const int i_idx =
                 (id * wsize * hsize + ih * wsize + iw) *
                     csize +
                 c;
-            for (int ic = 0; ic < cend; ic++) {
+            for (const auto ic : c10::irange(cend)) {
               auto vals = vec::convert_to_int32<typename T::underlying>(
                   i_p + i_idx + ic * vec_width);
               acc_buffer[ic] = acc_buffer[ic] + vals;
@@ -1493,9 +1493,9 @@ void do_avg_pool_on_AVX_n(
       int64_t tcntr = 0;
 
       Vectorized<int32_t> acc(input_zero_point_m_size);
-      for (int64_t id = dstart; id < dend; id++) {
-        for (int64_t ih = hstart; ih < hend; ih++) {
-          for (int64_t iw = wstart; iw < wend; iw++) {
+      for (const auto id : c10::irange(dstart, dend)) {
+        for (const auto ih : c10::irange(hstart, hend)) {
+          for (const auto iw : c10::irange(wstart, wend)) {
             tcntr = id * stride_D + ih * stride_H + iw * stride_W;
             auto vals = vec::convert_to_int32<typename T::underlying>(
                 i_p + tcntr * channel_multiplier + c * stride_C);
@@ -1546,11 +1546,11 @@ void _qadaptive_avg_pool_kernel(
     int input_zero_point = qx.q_zero_point();
     int output_zero_point = qy.q_zero_point();
 
-    for (int64_t od = 0; od < osizeD; od++) {
+    for (const auto od : c10::irange(osizeD)) {
       int istartD = (int)std::floor((float)(od * isizeD) / osizeD);
       int iendD = (int)std::ceil((float)((od + 1) * isizeD) / osizeD);
       int kD = iendD - istartD;
-      for (int64_t oh = 0; oh < osizeH; oh++) {
+      for (const auto oh : c10::irange(osizeH)) {
         int istartH = (int)std::floor((float)(oh * isizeH) / osizeH);
         int iendH = (int)std::ceil((float)((oh + 1) * isizeH) / osizeH);
         int kH = iendH - istartH;
@@ -1603,9 +1603,9 @@ void _qadaptive_avg_pool_kernel(
           for (; c < sizeC; ++c) {
             int32_t acc_int32 = input_zero_point_m_size;
             int64_t tcntr = 0;
-            for (int64_t id = 0; id < kD; ++id) {
-              for (int64_t ih = 0; ih < kH; ++ih) {
-                for (int64_t iw = 0; iw < kW; ++iw) {
+            for (const auto id : c10::irange(kD)) {
+              for (const auto ih : c10::irange(kH)) {
+                for (const auto iw : c10::irange(kW)) {
                   tcntr = id * istrideD +
                           ih * istrideH +
                           iw * istrideW;
@@ -1945,7 +1945,7 @@ int64_t do_quantized_bilinear_on_AVX_n(
           pos1 + h1p * input_width * channels);
       pos1_int_v[3] = vec::convert_to_int32<typename T::underlying>(
           pos1 + (h1p * input_width + w1p) * channels);
-      for (int i = 0; i < 4; i++) {
+      for (const auto i : c10::irange(4)) {
         int32_t pos1_int[vec_width];
         float pos1_fp[vec_width];
         pos1_int_v[i].store(pos1_int);
@@ -1999,13 +1999,13 @@ void qupsample_bilinear2d_nhwc_kernel(
         const auto rwidth = area_pixel_compute_scale<float>(
             input_width, output_width, align_corners, scales_w);
 
-        for (int64_t b = 0; b < nbatch; ++b) {
+        for (const auto b : c10::irange(nbatch)) {
           auto* i_p = reinterpret_cast<typename scalar_t::underlying*>(
               idata + b * input_height * input_width * channels);
           auto* o_p = reinterpret_cast<typename scalar_t::underlying*>(
               odata + b * output_height * output_width * channels);
 
-          for (int64_t h2 = 0; h2 < output_height; ++h2) {
+          for (const auto h2 : c10::irange(output_height)) {
             const auto h1r = area_pixel_compute_source_index<float>(
                 rheight, h2, align_corners, /*cubic=*/false);
 
@@ -2014,7 +2014,7 @@ void qupsample_bilinear2d_nhwc_kernel(
             const float h1lambda = h1r - h1;
             const float h0lambda = static_cast<float>(1.) - h1lambda;
 
-            for (int64_t w2 = 0; w2 < output_width; ++w2) {
+            for (const auto w2 : c10::irange(output_width)) {
               const auto w1r = area_pixel_compute_source_index<float>(
                   rwidth, w2, align_corners, /*cubic=*/false);
               const int64_t w1 = w1r;
@@ -2250,7 +2250,7 @@ void _fake_quantize_tensor_helper(
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "fake_quantize_tensor_cachemask_kernel_type_handling", [&] {
     iter_combined.for_each([&](char** data, const int64_t* strides, int64_t n) {
-      for (int64_t i = 0; i < n; i++) {
+      for (const auto i : c10::irange(n)) {
         scalar_t* output_val = (scalar_t*)(data[0] + i * strides[0]);
         bool* mask_val = (bool*)(data[1] + i * strides[1]);
         scalar_t* input_val = (scalar_t*)(data[2] + i * strides[2]);
@@ -2319,7 +2319,7 @@ void fake_quantize_learnable_tensor_grad_kernel_cpu(
         (to move onto different elements), can allow accessing of the input and assignment
         to the right output.
     */
-    for (int64_t i = 0; i < n; i++) {
+    for (const auto i : c10::irange(n)) {
       float* dXOutput = (float*)(data[0] + i * strides[0]);
       float* dScaleOutput = (float*)(data[1] + i * strides[1]);
       float* dZeroPointOutput = (float*)(data[2] + i * strides[2]);
@@ -2429,7 +2429,7 @@ void fake_quantize_learnable_channel_grad_kernel_cpu(
         please see the implemenetation of
         fake_quantize_learnable_tensor_grad_kernel_cpu.
     */
-    for (int64_t i = 0; i < n; i++) {
+    for (const auto i : c10::irange(n)) {
       float* dx_output = (float*)(data[0] + i * strides[0]);
       float* dscale_output = (float*)(data[1] + i * strides[1]);
       float* dzero_point_output = (float*)(data[2] + i * strides[2]);
@@ -2516,7 +2516,7 @@ void quantized_normalize_kernel(
     int64_t kNonVecRemInChannel = NPerChannel % kIntVLen;
 
     at::parallel_for(0, M, 1, [&](int64_t start, int64_t end) {
-      for (int64_t i = start; i < end; ++i) {
+      for (const auto i : c10::irange(start, end)) {
 
         scalar_t* X_ptr = X_data + i * N;
         scalar_t* Y_ptr = Y_data + i * N;
@@ -2546,7 +2546,7 @@ void quantized_normalize_kernel(
 
           // if scaling per channel, scaling parameters can be pre-multiplied
           // with normalization parameters
-          for (int64_t chIdx = 0; chIdx < channels_per_group; chIdx++) {
+          for (const auto chIdx : c10::irange(channels_per_group)) {
             int scalingIdx = (i * channels_per_group + chIdx) % (num_channels);
             float gamma = gamma_null ? 1.0f : gamma_data[scalingIdx];
             // scale_x / layer_std * gamma
@@ -2558,7 +2558,7 @@ void quantized_normalize_kernel(
             int64_t chStartIdx = chIdx * NPerChannel;
             int64_t chEndIdx = chStartIdx + NPerChannel;
 
-            for (int64_t vecIdx = 0; vecIdx < kNumIntVecInChannel; vecIdx++) {
+            for (const auto vecIdx : c10::irange(kNumIntVecInChannel)) {
               int64_t vecStartIdx = chStartIdx + vecIdx * kIntVLen;
               auto qXVec = qVec::loadu(X_ptr + vecStartIdx);
               auto dqXVec = qXVec.dequantize(x_fake_scale_vec, x_zp_vec,
@@ -2584,7 +2584,7 @@ void quantized_normalize_kernel(
 
         } else {
 
-          for (int64_t vecIdx = 0; vecIdx < kNumIntVecInLayer; vecIdx++) {
+          for (const auto vecIdx : c10::irange(kNumIntVecInLayer)) {
             int64_t vecStartIdx = vecIdx * kIntVLen;
             auto qXVec = qVec::loadu(X_ptr + vecStartIdx);
             auto dqXVec = qXVec.dequantize(x_fake_scale_vec, x_zp_vec,
@@ -2638,7 +2638,7 @@ void quantize_tensor_per_tensor_affine_cpu(
         qparams.precision = CHAR_BIT * sizeof(underlying_t);
         int num_tasks = at::get_num_threads();
         at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
-          for (int task_id = begin; task_id < end; ++task_id) {
+          for (const auto task_id : c10::irange(begin, end)) {
             fbgemm::Quantize<underlying_t, false /*LEGACY*/>(
                 // NOLINTNEXTLINE(bugprone-argument-comment)
                 rd, /*src=*/
@@ -2672,7 +2672,7 @@ void dequantize_tensor_per_tensor_affine_cpu(
         float* rd = rtensor.data_ptr<float>();
         int num_tasks = at::get_num_threads();
         at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
-          for (int task_id = begin; task_id < end; ++task_id) {
+          for (const auto task_id : c10::irange(begin, end)) {
             fbgemm::Dequantize<underlying_t>(
                 // NOLINTNEXTLINE(bugprone-argument-comment)
                 qd, /*src=*/
@@ -2700,7 +2700,7 @@ void quantize_tensor_arm(
     const float scale,
     const int32_t zero_point) {
   auto out = qtensor.data_ptr<T>();
-  for (int i = 0; i < N; ++i) {
+  for (const auto i : c10::irange(N)) {
     out[i] = at::native::quantize_val<T>(scale, zero_point, in[i]);
   }
 }
@@ -2802,7 +2802,7 @@ void quantize_tensor_per_tensor_affine_cpu(
         const float* const rdata = rtensor.data_ptr<float>();
         auto qdata = qtensor.data_ptr<scalar_t>();
         auto numel = rtensor.numel();
-        for (int i = 0; i < numel; ++i) {
+        for (const auto i : c10::irange(numel)) {
           qdata[i] = quantize_val<scalar_t>(scale, zero_point, rdata[i]);
         }
       });
@@ -2820,7 +2820,7 @@ void dequantize_tensor_per_tensor_affine_cpu(
         const auto* qd = qtensor.data_ptr<scalar_t>();
         float* rd = rtensor.data_ptr<float>();
         auto numel = qtensor.numel();
-        for (auto i = 0; i < numel; ++i) {
+        for (const auto i : c10::irange(numel)) {
           rd[i] = dequantize_val<scalar_t>(scale, zero_point, qd[i]);
         }
       });
@@ -2857,9 +2857,9 @@ void quantize_tensor_per_channel_impl(
     // channels_last contig.
     // If axis = 0 and channels_last contig, implementation for channels
     // first (NCHW) works.
-    for (auto b = 0; b < batches; ++b) {
-      for (auto e = 0; e < elements_per_channel; ++e) {
-        for (auto c = 0; c < channels; ++c) {
+    for (const auto b : c10::irange(batches)) {
+      for (const auto e : c10::irange(elements_per_channel)) {
+        for (const auto c : c10::irange(channels)) {
           auto i = b * channels * elements_per_channel + e * channels + c;
           out[i] = at::native::quantize_val<T>(
               scales_data[c], zero_points_data[c], in[i]);
@@ -2867,9 +2867,9 @@ void quantize_tensor_per_channel_impl(
       }
     }
   } else {
-    for (auto b = 0; b < batches; ++b) {
-      for (auto c = 0; c < channels; ++c) {
-        for (auto e = 0; e < elements_per_channel; ++e) {
+    for (const auto b : c10::irange(batches)) {
+      for (const auto c : c10::irange(channels)) {
+        for (const auto e : c10::irange(elements_per_channel)) {
           auto i = b * channels * elements_per_channel +
               c * elements_per_channel + e;
           out[i] = at::native::quantize_val<T>(
@@ -2919,7 +2919,7 @@ void quantize_tensor_per_channel_impl<c10::quint8>(
   // Copy zero_points with magic int (int64_t) into int32_t array
   std::vector<float> inv_scales(channels);
   std::vector<int32_t> zero_points_int32t(channels);
-  for (int i = 0; i < channels; ++i) {
+  for (const auto i : c10::irange(channels)) {
     inv_scales[i] = 1.0f / (float)scales_data[i];
     zero_points_int32t[i] = (int32_t)(uint32_t)zero_points_data[i] - 0x4B400000;
   }
@@ -2930,8 +2930,8 @@ void quantize_tensor_per_channel_impl<c10::quint8>(
     // channels_last contig.
     // If axis = 0 and channels_last contig, implementation for channels
     // first (NCHW) works.
-    for (uint32_t b = 0; b < batches; ++b) {
-      for (uint32_t e = 0; e < elements_per_channel; ++e) {
+    for (const auto b : c10::irange(batches)) {
+      for (const auto e : c10::irange(elements_per_channel)) {
         uint32_t c = 0;
         while (c + 8 < channels) {
           const int32x4_t voffset0123 = vld1q_s32(&zero_points_int32t[c]);
@@ -2965,8 +2965,8 @@ void quantize_tensor_per_channel_impl<c10::quint8>(
       }
     }
   } else {
-    for (uint32_t b = 0; b < batches; ++b) {
-      for (uint32_t c = 0; c < channels; ++c) {
+    for (const auto b : c10::irange(batches)) {
+      for (const auto c : c10::irange(channels)) {
         uint32_t e = 0;
         const int32x4_t voffset = vdupq_n_s32(zero_points_int32t[c]);
         const float32x4_t vinv_scale = vdupq_n_f32(inv_scales[c]);
@@ -3001,7 +3001,7 @@ void quantize_tensor_per_channel_impl<c10::quint8>(
   // Copy zero_points (int64_t) into int16_t array
   std::vector<float> inv_scales(channels);
   std::vector<int16_t> zero_points_int16t(channels);
-  for (int i = 0; i < channels; ++i) {
+  for (const auto i : c10::irange(channels)) {
     inv_scales[i] = 1.0f / (float)scales_data[i];
     zero_points_int16t[i] = (int16_t)(uint16_t)zero_points_data[i];
   }
@@ -3012,8 +3012,8 @@ void quantize_tensor_per_channel_impl<c10::quint8>(
     // channels_last contig.
     // If axis = 0 and channels_last contig, implementation for channels
     // first (NCHW) works.
-    for (uint32_t b = 0; b < batches; ++b) {
-      for (uint32_t e = 0; e < elements_per_channel; ++e) {
+    for (const auto b : c10::irange(batches)) {
+      for (const auto e : c10::irange(elements_per_channel)) {
         uint32_t c = 0;
         while (c + 8 < channels) {
           const int16x8_t vzero_point = vld1q_s16(&zero_points_int16t[c]);
@@ -3043,8 +3043,8 @@ void quantize_tensor_per_channel_impl<c10::quint8>(
       }
     }
   } else {
-    for (uint32_t b = 0; b < batches; ++b) {
-      for (uint32_t c = 0; c < channels; ++c) {
+    for (const auto b : c10::irange(batches)) {
+      for (const auto c : c10::irange(channels)) {
         uint32_t e = 0;
         const int16x8_t vzero_point = vdupq_n_s16(zero_points_int16t[c]);
         const float32x4_t vinv_scale = vdupq_n_f32(inv_scales[c]);
@@ -3123,9 +3123,9 @@ void dequantize_per_channel_affine_kernel(
   const auto elem_per_byte = 8 / bit_width;
   if (axis == 1 && (rtensor.is_contiguous(MemoryFormat::ChannelsLast) ||
       rtensor.is_contiguous(MemoryFormat::ChannelsLast3d))) {
-    for (auto b = 0; b < batches; ++b) {
-      for (auto e = 0; e < elements_per_channel; ++e) {
-        for (auto c = 0; c < channel; ++c) {
+    for (const auto b : c10::irange(batches)) {
+      for (const auto e : c10::irange(elements_per_channel)) {
+        for (const auto c : c10::irange(channel)) {
           auto i = b * channel * elements_per_channel + e * channel + c;
           // We need to convert the qint8 value to float to ensure the
           // subtraction subexpression returns a float
@@ -3139,9 +3139,9 @@ void dequantize_per_channel_affine_kernel(
       }
     }
   } else {
-    for (auto b = 0; b < batches; ++b) {
-      for (auto c = 0; c < channel; ++c) {
-        for (auto e = 0; e < elements_per_channel; ++e) {
+    for (const auto b : c10::irange(batches)) {
+      for (const auto c : c10::irange(channel)) {
+        for (const auto e : c10::irange(elements_per_channel)) {
           auto i = b * channel * elements_per_channel +
               c * elements_per_channel + e;
           // We need to convert the qint8 value to float to ensure the
@@ -3201,9 +3201,9 @@ void quantize_tensor_per_channel_float_qparams_cpu(
         int qvalue = 0;
         if (axis == 1 && (rtensor.is_contiguous(MemoryFormat::ChannelsLast) ||
             rtensor.is_contiguous(MemoryFormat::ChannelsLast3d))) {
-          for (auto b = 0; b < batches; ++b) {
-            for (auto e = 0; e < elements_per_channel; ++e) {
-              for (auto c = 0; c < channel; ++c) {
+          for (const auto b : c10::irange(batches)) {
+            for (const auto e : c10::irange(elements_per_channel)) {
+              for (const auto c : c10::irange(channel)) {
                 auto i = b * channel * elements_per_channel + e * channel + c;
                 qvalue = quantize_val_float_qparams(
                     scales_data[c], zero_points_data[c], rdata[i], quant_min, quant_max);
@@ -3217,9 +3217,9 @@ void quantize_tensor_per_channel_float_qparams_cpu(
             }
           }
         } else {
-          for (auto b = 0; b < batches; ++b) {
-            for (auto c = 0; c < channel; ++c) {
-              for (auto e = 0; e < elements_per_channel; ++e) {
+          for (const auto b : c10::irange(batches)) {
+            for (const auto c : c10::irange(channel)) {
+              for (const auto e : c10::irange(elements_per_channel)) {
                 auto i = b * channel * elements_per_channel +
                     c * elements_per_channel + e;
                 qvalue = quantize_val_float_qparams(
@@ -3263,7 +3263,7 @@ void quantize_tensor_per_tensor_affine_sub_byte_cpu(
       auto qdata = reinterpret_cast<underlying_t*>(qtensor.data_ptr<scalar_t>());
       auto numel = rtensor.numel();
       const auto elem_per_byte = CHAR_BIT / bit_width;
-      for (int i = 0; i < numel; ++i) {
+      for (const auto i : c10::irange(numel)) {
         float inv_scale = scale == 0 ? 1.0f : 1.0f / scale;
         int64_t qvalue = lrintf(std::nearbyint(rdata[i] * inv_scale) + zero_point);
         qvalue = std::max(quant_min, std::min(qvalue, quant_max));
@@ -3296,7 +3296,7 @@ void dequantize_tensor_per_tensor_affine_sub_byte_cpu(
       auto numel = rtensor.numel();
       const auto elem_per_byte = CHAR_BIT / bit_width;
 
-      for (int i = 0; i < numel; ++i) {
+      for (const auto i : c10::irange(numel)) {
         // NOLINTNEXTLINE(clang-analyzer-core.DivideZero)
         underlying_t qvalue = qdata[i / elem_per_byte];
         qvalue >>= (i % elem_per_byte) * bit_width;
