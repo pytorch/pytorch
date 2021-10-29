@@ -314,6 +314,36 @@ class TestCuda(TestCase):
                                     "out of memory|hipErrorOutOfMemory"):
             torch.cuda.check_error(2)
 
+    def test_cuda_memory_usage(self):
+        # If None, the nvidia-smi command is not configured on the machine
+        if torch.cuda.memory_usage() is not None:
+            gc.collect()
+            torch.cuda.empty_cache()
+            mem = None
+            prev = torch.cuda.memory_usage()
+            self.assertGreaterEqual(prev, 0)
+            self.assertLessEqual(prev, 100)
+            current_device = torch.cuda.current_device()
+            total_memory = torch.cuda.get_device_properties(current_device).total_memory
+            try:
+                mem = torch.cuda.caching_allocator_alloc(int(total_memory * 0.2), current_device)
+                new_usage = torch.cuda.memory_usage()
+                self.assertGreater(new_usage, prev)
+                self.assertLessEqual(new_usage, 100)
+            finally:
+                if mem is not None:
+                    torch.cuda.caching_allocator_delete(mem)
+
+    def test_cuda_utilization(self):
+        # If None, the nvidia-smi command is not configured on the machine
+        if torch.cuda.utilization() is not None:
+            utilization = torch.cuda.utilization()
+            self.assertGreaterEqual(utilization, 0)
+            self.assertLessEqual(utilization, 100)
+            utilization = torch.cuda.utilization(torch.cuda.current_device())
+            self.assertGreaterEqual(utilization, 0)
+            self.assertLessEqual(utilization, 100)
+
     def test_cuda_get_device_name(self):
         # Testing the behaviour with None as an argument
         current_device = torch.cuda.current_device()

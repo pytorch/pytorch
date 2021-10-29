@@ -10,6 +10,7 @@ It is lazily initialized, so you can always import it, and use
 
 import contextlib
 import os
+import subprocess
 import torch
 import traceback
 import warnings
@@ -571,6 +572,57 @@ def get_sync_debug_mode() -> int:
     _lazy_init()
     return torch._C._cuda_get_sync_debug_mode()
 
+def memory_usage(device_idx: Optional[int] = None) -> Optional[int]:
+    r"""Returns the current GPU memory usage, as a percentage.
+
+    Will return None if unable to access this statistic.
+
+    Args:
+        device_idx (int, optional): selected device. Returns
+            the memory usage percentage for the current device, given by
+            :func:`~torch.cuda.current_device`, if :attr:`device_idx` is ``None``
+            (default).
+    """
+    if device_idx is None:
+        device_idx = torch.cuda.current_device()
+    run = subprocess.run(
+        "nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader,nounits",
+        stdout=subprocess.PIPE, shell=True
+    )
+    if run.returncode == 0:
+        output_lines = run.stdout.decode().splitlines()  # Lines in format of "###, ####"
+        try:
+            used_mem, total_mem = output_lines[device_idx].split(", ")
+            return 100 * int(used_mem) // int(total_mem)
+        except ValueError:
+            return None
+    return None
+
+def utilization(device_idx: Optional[int] = None) -> Optional[int]:
+    r"""Returns the percentage of time in the past sample period that the current GPU was being used.
+    The sample period varies from 1/16 of a second to 1 second depending on the device.
+
+    Will return None if unable to access this statistic.
+
+    Args:
+        device_idx (int, optional): selected device. Returns
+            the utilization time percentage for the current device, given by
+            :func:`~torch.cuda.current_device`, if :attr:`device_idx` is ``None``
+            (default).
+    """
+    if device_idx is None:
+        device_idx = torch.cuda.current_device()
+    run = subprocess.run(
+        "nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits",
+        stdout=subprocess.PIPE, shell=True
+    )
+    if run.returncode == 0:
+        try:
+            output_lines = run.stdout.decode().splitlines()
+            return int(output_lines[device_idx])
+        except ValueError:
+            return None
+    return None
 
 from .memory import *  # noqa: F403
 
