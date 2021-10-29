@@ -349,10 +349,6 @@ LazyTensor hardtanh_backward(const LazyTensor& grad_output,
                              const LazyTensor& input, const at::Scalar& min_val,
                              const at::Scalar& max_val);
 
-LazyTensor leaky_relu(const LazyTensor& input, double negative_slope);
-LazyTensor leaky_relu_backward(const LazyTensor& grad_output,
-                               const LazyTensor& input, double negative_slope,
-                               bool self_is_result);
 LazyTensor lerp(const LazyTensor& input, const LazyTensor& end,
                 const LazyTensor& weight);
 LazyTensor lerp(const LazyTensor& input, const LazyTensor& end,

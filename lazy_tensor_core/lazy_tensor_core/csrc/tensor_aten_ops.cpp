@@ -52,8 +52,6 @@
 #include "lazy_tensor_core/csrc/ops/kth_value.h"
 #include "lazy_tensor_core/csrc/ops/l1_loss.h"
 #include "lazy_tensor_core/csrc/ops/l1_loss_backward.h"
-#include "lazy_tensor_core/csrc/ops/leaky_relu.h"
-#include "lazy_tensor_core/csrc/ops/leaky_relu_backward.h"
 #include "lazy_tensor_core/csrc/ops/linear_interpolation.h"
 #include "lazy_tensor_core/csrc/ops/log_base.h"
 #include "lazy_tensor_core/csrc/ops/logsumexp.h"
@@ -1029,20 +1027,6 @@ LazyTensor hardtanh_backward(const LazyTensor& grad_output,
   return grad_output.CreateFrom(
       torch::lazy::MakeNode<ir::ops::HardtanhBackward>(
           grad_output.GetIrValue(), input.GetIrValue(), min_val, max_val));
-}
-
-LazyTensor leaky_relu(const LazyTensor& input, double negative_slope) {
-  return input.CreateFrom(torch::lazy::MakeNode<ir::ops::LeakyRelu>(
-      input.GetIrValue(), negative_slope));
-}
-
-LazyTensor leaky_relu_backward(const LazyTensor& grad_output,
-                               const LazyTensor& input, double negative_slope,
-                               bool self_is_result) {
-  return grad_output.CreateFrom(
-      torch::lazy::MakeNode<ir::ops::LeakyReluBackward>(
-          grad_output.GetIrValue(), input.GetIrValue(), negative_slope,
-          self_is_result));
 }
 
 LazyTensor lerp(const LazyTensor& input, const LazyTensor& end,
