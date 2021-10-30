@@ -19,21 +19,32 @@ full_codegen:
   - elu
   - elu_backward
   - embedding_dense_backward
+  - eq.Scalar
+  - eq.Tensor
   - exp
   - floor
   - frac
+  - ge.Scalar
+  - ge.Tensor
   - gelu
   - gelu_backward
+  - gt.Scalar
+  - gt.Tensor
   - kl_div_backward
+  - le.Scalar
+  - le.Tensor
   - log2
   - log_sigmoid_backward
   - log_sigmoid_forward
+  - lt.Tensor
   - mean
   - mean.dim
   - mm
   - mv
   - native_layer_norm
   - native_layer_norm_backward
+  - ne.Scalar
+  - ne.Tensor
   - nll_loss_backward
   - nll_loss_forward
   - relu
@@ -101,18 +112,7 @@ supported:
   - sub.Tensor
   - sub.Scalar
   - view
-  - ne.Scalar
-  - ne.Tensor
-  - eq.Scalar
-  - eq.Tensor
-  - ge.Scalar
-  - ge.Tensor
-  - le.Scalar
-  - le.Tensor
-  - gt.Scalar
-  - gt.Tensor
   - lt.Scalar
-  - lt.Tensor
   - index_select
   - alias
   - tanh_backward

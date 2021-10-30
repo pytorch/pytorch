@@ -224,10 +224,6 @@ LazyTensor diagonal(const LazyTensor& input, int64_t offset, int64_t dim1,
 LazyTensor einsum(const std::string& equation,
                   c10::ArrayRef<LazyTensor> tensors);
 
-LazyTensor eq(const LazyTensor& input, const at::Scalar& other);
-
-LazyTensor eq(const LazyTensor& input, const LazyTensor& other);
-
 LazyTensor erf(const LazyTensor& input);
 
 LazyTensor erfc(const LazyTensor& input);
@@ -269,18 +265,10 @@ LazyTensor full_like(const LazyTensor& input, const at::Scalar& fill_value,
 LazyTensor gather(const LazyTensor& input, int64_t dim,
                   const LazyTensor& index);
 
-LazyTensor ge(const LazyTensor& input, const at::Scalar& other);
-
-LazyTensor ge(const LazyTensor& input, const LazyTensor& other);
-
 LazyTensor gelu(const LazyTensor& input);
 LazyTensor gelu_backward(const LazyTensor& grad, const LazyTensor& input);
 
 LazyTensor ger(const LazyTensor& input, const LazyTensor& vec2);
-
-LazyTensor gt(const LazyTensor& input, const at::Scalar& other);
-
-LazyTensor gt(const LazyTensor& input, const LazyTensor& other);
 
 // Gather slices from input into a result with shape specified by indices. The
 // shape of the indices are first made consistent using broadcast semantics.
@@ -347,10 +335,6 @@ LazyTensor l1_loss_backward(const LazyTensor& grad_output,
                             const LazyTensor& input, const LazyTensor& target,
                             int64_t reduction);
 
-LazyTensor le(const LazyTensor& input, const at::Scalar& other);
-
-LazyTensor le(const LazyTensor& input, const LazyTensor& other);
-
 LazyTensor hardshrink(const LazyTensor& input, const at::Scalar& lambda);
 LazyTensor hardshrink_backward(const LazyTensor& grad_out,
                                const LazyTensor& input,
@@ -392,8 +376,6 @@ LazyTensor logsumexp(const LazyTensor& input, std::vector<int64_t> dimensions,
                      bool keep_reduced_dimensions);
 
 LazyTensor lt(const LazyTensor& input, const at::Scalar& other);
-
-LazyTensor lt(const LazyTensor& input, const LazyTensor& other);
 
 // In-place version of the method above.
 void masked_fill_(LazyTensor& input, const LazyTensor& mask,
@@ -491,10 +473,6 @@ std::tuple<LazyTensor, LazyTensor, LazyTensor> ts_native_batch_norm_backward(
     const LazyTensor& running_var, const LazyTensor& save_mean,
     const LazyTensor& save_invstd, bool training, double eps,
     c10::ArrayRef<bool> output_mask);
-
-LazyTensor ne(const LazyTensor& input, const at::Scalar& other);
-
-LazyTensor ne(const LazyTensor& input, const LazyTensor& other);
 
 LazyTensor neg(const LazyTensor& input);
 

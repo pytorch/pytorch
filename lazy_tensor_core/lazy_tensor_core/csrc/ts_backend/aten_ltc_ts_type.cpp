@@ -381,20 +381,6 @@ at::Tensor LazyNativeFunctions::empty_strided(
       t, size, stride, /*storage_offset=*/0);
 }
 
-at::Tensor LazyNativeFunctions::eq(const at::Tensor& self,
-                                   const at::Scalar& other) {
-  LTC_FN_COUNTER("lazy::");
-  return bridge::AtenFromLtcTensor(
-      lazy_tensor_aten_ops::eq(bridge::GetLtcTensor(self), other));
-}
-
-at::Tensor LazyNativeFunctions::eq(const at::Tensor& self,
-                                   const at::Tensor& other) {
-  LTC_FN_COUNTER("lazy::");
-  return bridge::AtenFromLtcTensor(lazy_tensor_aten_ops::eq(
-      bridge::GetLtcTensor(self), bridge::GetLtcTensor(other)));
-}
-
 at::Tensor LazyNativeFunctions::expand(const at::Tensor& self,
                                        at::IntArrayRef size, bool implicit) {
   LTC_FN_COUNTER("lazy::");
@@ -409,54 +395,12 @@ at::Tensor& LazyNativeFunctions::fill_(at::Tensor & self, const at::Scalar & val
   return self;
 }
 
-at::Tensor LazyNativeFunctions::ge(const at::Tensor& self,
-                                   const at::Scalar& other) {
-  LTC_FN_COUNTER("lazy::");
-  return bridge::AtenFromLtcTensor(
-      lazy_tensor_aten_ops::ge(bridge::GetLtcTensor(self), other));
-}
-
-at::Tensor LazyNativeFunctions::ge(const at::Tensor& self,
-                                   const at::Tensor& other) {
-  LTC_FN_COUNTER("lazy::");
-  return bridge::AtenFromLtcTensor(lazy_tensor_aten_ops::ge(
-      bridge::GetLtcTensor(self), bridge::GetLtcTensor(other)));
-}
-
-at::Tensor LazyNativeFunctions::gt(const at::Tensor& self,
-                                   const at::Scalar& other) {
-  LTC_FN_COUNTER("lazy::");
-  return bridge::AtenFromLtcTensor(
-      lazy_tensor_aten_ops::gt(bridge::GetLtcTensor(self), other));
-}
-
-at::Tensor LazyNativeFunctions::gt(const at::Tensor& self,
-                                   const at::Tensor& other) {
-  LTC_FN_COUNTER("lazy::");
-  return bridge::AtenFromLtcTensor(lazy_tensor_aten_ops::gt(
-      bridge::GetLtcTensor(self), bridge::GetLtcTensor(other)));
-}
-
 at::Tensor LazyNativeFunctions::index_select(const at::Tensor& self,
                                              int64_t dim,
                                              const at::Tensor& index) {
   LTC_FN_COUNTER("lazy::");
   return bridge::AtenFromLtcTensor(lazy_tensor_aten_ops::index_select(
       bridge::GetLtcTensor(self), dim, bridge::GetLtcTensor(index)));
-}
-
-at::Tensor LazyNativeFunctions::le(const at::Tensor& self,
-                                   const at::Scalar& other) {
-  LTC_FN_COUNTER("lazy::");
-  return bridge::AtenFromLtcTensor(
-      lazy_tensor_aten_ops::le(bridge::GetLtcTensor(self), other));
-}
-
-at::Tensor LazyNativeFunctions::le(const at::Tensor& self,
-                                   const at::Tensor& other) {
-  LTC_FN_COUNTER("lazy::");
-  return bridge::AtenFromLtcTensor(lazy_tensor_aten_ops::le(
-      bridge::GetLtcTensor(self), bridge::GetLtcTensor(other)));
 }
 
 at::Tensor LazyNativeFunctions::leaky_relu(const at::Tensor& self,
@@ -481,13 +425,6 @@ at::Tensor LazyNativeFunctions::lt(const at::Tensor& self,
   LTC_FN_COUNTER("lazy::");
   return bridge::AtenFromLtcTensor(
       lazy_tensor_aten_ops::lt(bridge::GetLtcTensor(self), other));
-}
-
-at::Tensor LazyNativeFunctions::lt(const at::Tensor& self,
-                                   const at::Tensor& other) {
-  LTC_FN_COUNTER("lazy::");
-  return bridge::AtenFromLtcTensor(lazy_tensor_aten_ops::lt(
-      bridge::GetLtcTensor(self), bridge::GetLtcTensor(other)));
 }
 
 at::Tensor LazyNativeFunctions::max_pool2d(
@@ -580,20 +517,6 @@ LazyNativeFunctions::native_batch_norm_backward(
                      : undefined,
       output_mask[2] ? bridge::AtenFromLtcTensor(std::get<2>(gradients))
                      : undefined);
-}
-
-at::Tensor LazyNativeFunctions::ne(const at::Tensor& self,
-                                   const at::Scalar& other) {
-  LTC_FN_COUNTER("lazy::");
-  return bridge::AtenFromLtcTensor(
-      lazy_tensor_aten_ops::ne(bridge::GetLtcTensor(self), other));
-}
-
-at::Tensor LazyNativeFunctions::ne(const at::Tensor& self,
-                                   const at::Tensor& other) {
-  LTC_FN_COUNTER("lazy::");
-  return bridge::AtenFromLtcTensor(lazy_tensor_aten_ops::ne(
-      bridge::GetLtcTensor(self), bridge::GetLtcTensor(other)));
 }
 
 // We need to explicitly override max pooling operators and just call the

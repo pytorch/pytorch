@@ -291,13 +291,6 @@ LazyTensor DispatchComparisonOp(c10::Symbol kind, const LazyTensor& input,
   return LazyTensor::Create(node, input.GetDevice(), at::ScalarType::Bool);
 }
 
-// Same as above, with the second input a tensor as well.
-LazyTensor DispatchComparisonOp(c10::Symbol kind, const LazyTensor& input,
-                                const LazyTensor& other) {
-  NodePtr node =
-      ir::ops::ComparisonOp(kind, input.GetIrValue(), other.GetIrValue());
-  return LazyTensor::Create(node, input.GetDevice(), at::ScalarType::Bool);
-}
 }  // namespace
 
 //////////////////////////////////////////////////////////////////////////////
@@ -781,14 +774,6 @@ LazyTensor diagonal(const LazyTensor& input, int64_t offset, int64_t dim1,
   return input.CreateViewTensor(std::move(view_info));
 }
 
-LazyTensor eq(const LazyTensor& input, const at::Scalar& other) {
-  return DispatchComparisonOp(at::aten::eq, input, other);
-}
-
-LazyTensor eq(const LazyTensor& input, const LazyTensor& other) {
-  return DispatchComparisonOp(at::aten::eq, input, other);
-}
-
 LazyTensor erf(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::Erf(input.GetIrValue()));
 }
@@ -894,24 +879,8 @@ LazyTensor gather(const LazyTensor& input, int64_t dim,
       index.GetIrValue()));
 }
 
-LazyTensor ge(const LazyTensor& input, const at::Scalar& other) {
-  return DispatchComparisonOp(at::aten::ge, input, other);
-}
-
-LazyTensor ge(const LazyTensor& input, const LazyTensor& other) {
-  return DispatchComparisonOp(at::aten::ge, input, other);
-}
-
 LazyTensor ger(const LazyTensor& input, const LazyTensor& vec2) {
   return input.CreateFrom(ir::ops::Ger(input.GetIrValue(), vec2.GetIrValue()));
-}
-
-LazyTensor gt(const LazyTensor& input, const at::Scalar& other) {
-  return DispatchComparisonOp(at::aten::gt, input, other);
-}
-
-LazyTensor gt(const LazyTensor& input, const LazyTensor& other) {
-  return DispatchComparisonOp(at::aten::gt, input, other);
 }
 
 LazyTensor index(const LazyTensor& input, c10::ArrayRef<LazyTensor> indices,
@@ -1034,14 +1003,6 @@ LazyTensor l1_loss_backward(const LazyTensor& grad_output,
       GetReductionMode(reduction)));
 }
 
-LazyTensor le(const LazyTensor& input, const at::Scalar& other) {
-  return DispatchComparisonOp(at::aten::le, input, other);
-}
-
-LazyTensor le(const LazyTensor& input, const LazyTensor& other) {
-  return DispatchComparisonOp(at::aten::le, input, other);
-}
-
 LazyTensor hardshrink(const LazyTensor& input, const at::Scalar& lambda) {
   return input.CreateFrom(
       torch::lazy::MakeNode<ir::ops::Hardshrink>(input.GetIrValue(), lambda));
@@ -1129,10 +1090,6 @@ LazyTensor logsumexp(const LazyTensor& input, std::vector<int64_t> dimensions,
 }
 
 LazyTensor lt(const LazyTensor& input, const at::Scalar& other) {
-  return DispatchComparisonOp(at::aten::lt, input, other);
-}
-
-LazyTensor lt(const LazyTensor& input, const LazyTensor& other) {
   return DispatchComparisonOp(at::aten::lt, input, other);
 }
 
@@ -1414,14 +1371,6 @@ std::tuple<LazyTensor, LazyTensor, LazyTensor> ts_native_batch_norm_backward(
   LazyTensor grad_bias = input.CreateFrom(torch::lazy::Value(node, 2));
   return std::make_tuple(std::move(grad_input), std::move(grad_weight),
                          std::move(grad_bias));
-}
-
-LazyTensor ne(const LazyTensor& input, const at::Scalar& other) {
-  return DispatchComparisonOp(at::aten::ne, input, other);
-}
-
-LazyTensor ne(const LazyTensor& input, const LazyTensor& other) {
-  return DispatchComparisonOp(at::aten::ne, input, other);
 }
 
 LazyTensor neg(const LazyTensor& input) {
