@@ -2852,7 +2852,7 @@ def sample_inputs_unique(op_info, device, dtype, requires_grad, **kwargs):
 
         # construct a test case with mixed 0s and 1s
         input_t = make_tensor(shape, dtype=torch.bool, device=device, requires_grad=False)\
-                .to(dtype).requires_grad_(requires_grad)
+            .to(dtype).requires_grad_(requires_grad)
         sample_inputs.append(SampleInput(input_t, kwargs=kwargs.copy()))
 
         # construct a test case with many different values
