@@ -1908,6 +1908,16 @@ class TestFX(JitTestCase):
         input = torch.randn(33, 44)
         self.assertEqual(gm(input), torch.relu(torch.neg(input)))
 
+    def test_prepend_self(self):
+        graph : torch.fx.Graph = torch.fx.Graph()
+        x : torch.fx.Node = graph.create_node('placeholder', 'x')
+        b : torch.fx.Node = graph.create_node('call_function', target=torch.relu, args=(x,))
+        output : torch.fx.Node = graph.output(b)
+
+        b.prepend(b)
+        x.append(b)
+        self.assertEqual(len(graph.nodes), 3)
+
     def test_erase_node_error(self):
         st = SimpleTest()
         traced = symbolic_trace(st)
@@ -3177,7 +3187,6 @@ class TestOperatorSignatures(JitTestCase):
     @onlyCPU
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_get_torch_func_signature_exhaustive(self, device, dtype, op):
-        # Sorted and one entry on each line to minimize merge conflicts.
         if not isinstance(op.op, types.BuiltinFunctionType):
             raise unittest.SkipTest("This path doesn't work on Python functions")
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
