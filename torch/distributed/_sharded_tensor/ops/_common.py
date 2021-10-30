@@ -8,7 +8,7 @@ from torch.distributed._sharding_spec._internals import (
 )
 
 
-def _handle_col_wise_sharding_common(
+def _handle_col_wise_sharding_base(
     op_func,
     sharding_dim_size,
     col_dim,
@@ -21,6 +21,29 @@ def _handle_col_wise_sharding_common(
     gathered_per_sample_weights=None,
     gathered_offsets=None,
 ):
+    """
+    For col-wise sharding of weight, lots of logic are common.
+    So we extract the common logic and put in this function:
+    Step 1. To get input from each rank and
+    Step 2. To perform the op on the concatenated tensor.
+    Step 3. To distribute results to each rank with col rearrangement.
+    Step 4. To concatenate all results from all ranks.
+
+    Args:
+        op_func: operator which is applied to the input tensor.
+        sharding_dim_size: the max size of the column each rank gets.
+        col_dim: dim of result tensor after the operation.
+        input: tensor to be applied op on.
+        world_size: number of ranks.
+        weight: shareded weight tensor.
+        local_shard: col-wise sharded weight tensor.
+        pg: process group.
+        mode: aggregation mode of EmbeddingBag.
+        gathered_per_sample_weights: per_sample_weights across all ranks.
+        gathered_offsets: offsets across all ranks.
+
+    Return: final result of input being applied with the op.
+    """
     # allgather the inputs first.
     gathered_inputs = [torch.zeros_like(input) for _ in range(world_size)]
     dist.all_gather(gathered_inputs, input, group=pg)
@@ -54,6 +77,24 @@ def _handle_col_wise_sharding_common(
 def _result_distribute_with_col_rearrange(
     results, input, sharding_dim_size, world_size, weight, pg
 ):
+    """
+    For col-wise sharding of weight, we need to distribute
+    results to each rank. We do them in this function.
+    Note that, if the index in the Sharding Spec is not equal to
+    the rank number, we need to do the rearrangement based on the
+    order given by the Sharding Spec (placement).
+
+    Args:
+        results: results from ops applied to inputs from all ranks.
+            We need to distribute them back to their original ranks.
+        input: tensor to be applied op to.
+        sharding_dim_size: the max size of the column each rank gets.
+        world_size: number of ranks.
+        weight: shareded weight tensor.
+        pg: process group.
+
+    Return: column rearranged result.
+    """
     # Process results and outputs for all2all.
     dims = list(results[0].size())
     dims[0] = sharding_dim_size
@@ -97,7 +138,29 @@ def _result_distribute_with_col_rearrange(
     return output.index_select(0, torch.tensor(indices, device=output.device))
 
 
-def _handle_lookup_distribute_common(input_sorted, input, world_size, weight):
+def _handle_row_wise_lookup_distribute(input_sorted, input, world_size, weight):
+    """
+    In the circumstance of row-wise sharding of weight, we need to distribute
+    the sorted lookup IDs of embedding/embeddingBag to each rank.
+    If the index in the placement is not equal to the rank number, we need to
+    do the rearrangement based on the order given by the Sharding Spec (placement).
+
+    Args:
+        input_sorted: sorted lookup IDs of embedding/embeddingBag.
+        input: tensor to be applied op on.
+        world_size: number of ranks.
+        weight: shareded weight tensor.
+
+    Return:
+        input_sorted: sorted lookup IDs of embedding/embeddingBag
+            Rearrangement performed if it is needed.
+        input_split_sizes: size of IDs to be assigned to each rank.
+        sharded_dim_size_max: the max size of the row each rank gets.
+        input_split_rearrange_indices: indices of row rearrangement.
+        rearrange_indices_1d_second_order: reverse indices of row
+            rearrangement, which will be used to restore the original
+            order.
+    """
     # Decide which rank the input goes to by check the sharding range.
     split_size = get_split_size(weight.size(0), world_size)
     rearrange_rows = False
@@ -145,14 +208,28 @@ def _handle_lookup_distribute_common(input_sorted, input, world_size, weight):
     )
 
 
-def _communicate_size_to_each_rank_common(
-    input_size_list, world_size, input, pg, tensor_type=torch.int
+def _communicate_size_to_each_rank(
+    input_size_list, output_size, input, pg, tensor_type=torch.int
 ):
+    """
+    In the circumstance of row-wise sharding of weight, we need to first
+    communicate the input length to each rank because each rank gets a
+    different one.
+
+    Args:
+        input_size_list: list of sizes to be sent to each rank.
+        output_size: length of the output tensor.
+        input: tensor to be applied op on.
+        pg: process group.
+        tensor_type: dtype of tensor.
+
+    Return: A list of communication results (int).
+    """
     input_size_list_tensor = torch.tensor(
         input_size_list, dtype=tensor_type, device=input.device
     )
     output_size_list_tensor = torch.empty(
-        world_size, dtype=tensor_type, device=input.device
+        output_size, dtype=tensor_type, device=input.device
     )
     dist.all_to_all_single(
         output_size_list_tensor,
@@ -162,18 +239,24 @@ def _communicate_size_to_each_rank_common(
     return output_size_list_tensor.tolist()
 
 
-def _communicate_list_to_each_rank_common(
-    input_lists, output_lists, world_size, input, pg, tensor_type=torch.int64
+def _communicate_list_to_each_rank(
+    input_tensor_list, output_lists, input, pg, tensor_type=torch.int64
 ):
-    input_tensor_list = []
-    for input_list in input_lists:
-        if isinstance(input_list, torch.Tensor):
-            input_tensor_list = input_lists
-            break
-        else:
-            input_tensor_list.append(
-                torch.tensor(input_list, dtype=tensor_type, device=input.device)
-            )
+    """
+    In the circumstance of row-wise sharding of weight, we need to
+    communicate a list of input tensors to each rank. Because the
+    input could be a list of list, we need to first convert the list
+    to a tensor.
+
+    Args:
+        input_tensor_list: list of tensors to be sent to each rank.
+        output_lists: list of sizes to be obtained from each rank.
+        input: tensor to be applied op on.
+        pg: process group.
+        tensor_type: dtype of tensor.
+
+    Return: A list of communication results (tensors).
+    """
     output_tensor_list = []
     for output_list in output_lists:
         output_tensor_list.append(
