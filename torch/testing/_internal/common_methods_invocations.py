@@ -6127,14 +6127,15 @@ def sample_inputs_nonzero(op_info, device, dtype, requires_grad, **kwargs):
         inputs.append(zeros)
 
         # construct input with mixed zero and non-zero elements
-        non_zeros = make_arg(shape)
+        mixed = make_arg(shape).requires_grad_(False)
         mask_t = make_tensor(shape, dtype=torch.bool, device=device, requires_grad=False)
-        inputs.append(torch.where(mask_t, zeros, non_zeros))
+        mixed[mask_t] = 0
+        inputs.append(mixed)
 
     def generator():
-        for input_t in inputs:
-            yield(SampleInput(input_t, kwargs=dict(as_tuple=False)))
-            yield(SampleInput(input_t, kwargs=dict(as_tuple=True)))
+        for input_t, as_tuple in product(inputs, [False, True]):
+            yield(SampleInput(input_t.detach().clone().requires_grad_(requires_grad),
+                              kwargs=dict(as_tuple=as_tuple)))
 
     return list(generator())
 
