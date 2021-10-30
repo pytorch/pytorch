@@ -6129,13 +6129,13 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @onlyCUDA
     def test_addmm_addbmm_overflow(self, device, dtype):
         inp = torch.zeros(128, 128, dtype=torch.half, device=device)
-        mat1 = torch.ones(128, 1000, dtype=torch.half, device=device)*100
-        mat2 = torch.ones(1000, 128, dtype=torch.half, device=device)*100
+        mat1 = torch.ones(128, 1000, dtype=torch.half, device=device) * 100
+        mat2 = torch.ones(1000, 128, dtype=torch.half, device=device) * 100
         out = torch.addmm(inp, mat1, mat2, alpha=0.001, beta=0.)
         self.assertFalse(out.isinf().any())
 
-        mat1 = torch.ones(3, 128, 1000, dtype=torch.half, device=device)*100
-        mat2 = torch.ones(3, 1000, 128, dtype=torch.half, device=device)*100
+        mat1 = torch.ones(3, 128, 1000, dtype=torch.half, device=device) * 100
+        mat2 = torch.ones(3, 1000, 128, dtype=torch.half, device=device) * 100
         out = torch.addbmm(inp, mat1, mat2, alpha=0.001, beta=0.)
         self.assertFalse(out.isinf().any())
 
