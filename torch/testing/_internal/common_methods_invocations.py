@@ -2830,6 +2830,46 @@ def sample_inputs_sort(op_info, device, dtype, requires_grad, **kwargs):
 def sample_inputs_argsort(*args, **kwargs):
     return [sample_input for sample_input in sample_inputs_sort(*args, **kwargs) if "stable" not in sample_input.kwargs]
 
+def sample_inputs_unique(op_info, device, dtype, requires_grad, **kwargs):
+    sizes = ((), (S,), (S, S), (S, S, S), (S, 1, S), (S, 0, S))
+
+    sample_inputs = []
+    for shape, sorted, return_inverse, return_counts, dim in \
+            product(sizes, [False, True], [False, True], [False, True], [None, -2, -1, 0, 1, 2]):
+        # torch.unique cannot be called if the input tensor has a zero dimension which isn't the selected dim
+        if 0 in shape and shape.index(0) is not dim:
+            continue
+
+        # skip invalid dim args
+        if dim is not None and (dim < -len(shape) or dim >= len(shape)):
+            continue
+
+        kwargs = dict(sorted=sorted, return_inverse=return_inverse, return_counts=return_counts, dim=dim)
+
+        # construct a test case with only one distinct value
+        input_t = torch.zeros(shape, dtype=dtype, device=device, requires_grad=requires_grad)
+        sample_inputs.append(SampleInput(input_t, kwargs=kwargs.copy()))
+
+        # construct a test case with mixed 0s and 1s
+        input_t = make_tensor(shape, dtype=torch.bool, device=device, requires_grad=False)\
+            .to(dtype).requires_grad_(requires_grad)
+        sample_inputs.append(SampleInput(input_t, kwargs=kwargs.copy()))
+
+        # construct a test case with many different values
+        input_t = make_tensor(shape, dtype=dtype, device=device, requires_grad=requires_grad)
+        sample_inputs.append(SampleInput(input_t, kwargs=kwargs.copy()))
+
+    return sample_inputs
+
+def sample_inputs_unique_consecutive(*args, **kwargs):
+    def generator():
+        for sample_input in sample_inputs_unique(*args, **kwargs):
+            if not sample_input.kwargs["sorted"]:
+                sample_input.kwargs.pop("sorted")
+                yield sample_input
+
+    return list(generator())
+
 def sample_inputs_index_fill(op_info, device, dtype, requires_grad, **kwargs):
     samples = []
     t = make_tensor((S, S, S), device, dtype,
@@ -10385,6 +10425,31 @@ op_db: List[OpInfo] = [
            skips=(
                # sort does not correctly warn when resizing out= inputs
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out'),
+           )),
+    OpInfo('unique',
+           dtypes=all_types_and(torch.bool, torch.bfloat16),
+           dtypesIfCUDA=all_types_and(torch.bool, torch.float16),
+           sample_inputs_func=sample_inputs_unique,
+           supports_out=False,
+           supports_autograd=False,
+           skips=(
+               # RuntimeError:
+               # 'Tensor (inferred)' object has no attribute or method 'unique'.:
+               #   File "<string>", line 3
+               #
+               #  def the_method(i0):
+               #      return i0.unique(sorted=False, return_inverse=False, return_counts=False, dim=None)
+               #                 ~~~~~~~~~ <--- HERE
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+           )),
+    OpInfo('unique_consecutive',
+           dtypes=all_types_and(torch.bool, torch.bfloat16),
+           dtypesIfCUDA=all_types_and(torch.bool, torch.float16),
+           sample_inputs_func=sample_inputs_unique_consecutive,
+           supports_out=False,
+           supports_autograd=False,
+           skips=(
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
            )),
     OpInfo('put',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
