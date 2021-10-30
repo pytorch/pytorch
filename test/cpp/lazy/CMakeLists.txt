@@ -4,6 +4,7 @@ set(LAZY_TEST_ROOT ${TORCH_ROOT}/test/cpp/lazy)
 set(LAZY_TEST_SRCS
   ${LAZY_TEST_ROOT}/test_ir.cpp
   ${LAZY_TEST_ROOT}/test_misc.cpp
+  ${LAZY_TEST_ROOT}/test_ir_util.cpp
 )
 
 add_executable(test_lazy

@@ -41,13 +41,14 @@ from torch.testing._internal.common_utils import (
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta,
+    expectedFailureXLA,
     instantiate_device_type_tests,
     skipCUDAVersionIn,
     onlyCUDA, onlyCPU,
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
     skipMeta,
     PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyNativeDeviceTypes,
-    expectedAlertNondeterministic, get_all_device_types)
+    expectedAlertNondeterministic, get_all_device_types, skipXLA)
 from typing import Dict, List, Tuple
 import torch.backends.quantized
 import torch.testing._internal.data
@@ -237,6 +238,8 @@ class AbstractTestCases:
                            'softmax',
                            'split_with_sizes',
                            'unsafe_split_with_sizes',
+                           '_autocast_to_fp16',
+                           '_autocast_to_fp32',
                            )
             test_namespace(torch.nn)
             test_namespace(torch.nn.functional, 'assert_int_or_pair')
@@ -8030,6 +8033,18 @@ else:
 
         _test_helper(remove_hook=True)
         _test_helper(remove_hook=False)
+
+    @skipXLA
+    def test_skip_xla(self, device):
+        if self.device_type == 'xla':
+            # Should not reach here!
+            self.assertTrue(False)
+
+    @expectedFailureXLA
+    def test_expected_failure_xla(self, device):
+        if self.device_type == 'xla':
+            self.assertTrue(False)
+
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.
 class TestDevicePrecision(TestCase):

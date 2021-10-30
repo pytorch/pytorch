@@ -439,6 +439,8 @@ class TestTesting(TestCase):
     @dtypes(torch.bool, torch.long, torch.float, torch.cfloat)
     def test_make_tensor(self, device, dtype):
         def check(size, low, high, requires_grad, noncontiguous):
+            if dtype not in [torch.float, torch.cfloat]:
+                requires_grad = False
             t = make_tensor(size, device, dtype, low=low, high=high,
                             requires_grad=requires_grad, noncontiguous=noncontiguous)
 
@@ -452,10 +454,7 @@ class TestTesting(TestCase):
             if t.numel() > 0 and dtype in [torch.long, torch.float]:
                 self.assertTrue(t.le(high).logical_and(t.ge(low)).all().item())
 
-            if dtype in [torch.float, torch.cfloat]:
-                self.assertEqual(t.requires_grad, requires_grad)
-            else:
-                self.assertFalse(t.requires_grad)
+            self.assertEqual(t.requires_grad, requires_grad)
 
             if t.numel() > 1:
                 self.assertEqual(t.is_contiguous(), not noncontiguous)
