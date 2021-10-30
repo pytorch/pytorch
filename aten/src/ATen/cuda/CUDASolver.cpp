@@ -2,7 +2,6 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/cuda/CUDASolver.h>
 #include <c10/cuda/CUDACachingAllocator.h>
-#include <c10/macros/Export.h>
 
 #ifdef CUDART_VERSION
 
@@ -10,7 +9,7 @@ namespace at {
 namespace cuda {
 namespace solver {
 
-C10_EXPORT const char* cusolverGetErrorMessage(cusolverStatus_t status) {
+const char* cusolverGetErrorMessage(cusolverStatus_t status) {
   switch (status) {
     case CUSOLVER_STATUS_SUCCESS:                     return "CUSOLVER_STATUS_SUCCES";
     case CUSOLVER_STATUS_NOT_INITIALIZED:             return "CUSOLVER_STATUS_NOT_INITIALIZED";
