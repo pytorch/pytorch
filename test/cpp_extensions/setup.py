@@ -48,6 +48,19 @@ if torch.cuda.is_available() and (CUDA_HOME is not None or ROCM_HOME is not None
                             'nvcc': ['-O2']})
     ext_modules.append(extension)
 
+if torch.cuda.is_available() and CUDA_HOME is not None:
+    cublas_extension = CUDAExtension(
+        name='torch_test_cpp_extension.cublas_extension',
+        sources=['cublas_extension.cpp']
+    )
+    ext_modules.append(cublas_extension)
+
+    cusolver_extension = CUDAExtension(
+        name='torch_test_cpp_extension.cusolver_extension',
+        sources=['cusolver_extension.cpp']
+    )
+    ext_modules.append(cusolver_extension)
+
 setup(
     name='torch_test_cpp_extension',
     packages=['torch_test_cpp_extension'],
