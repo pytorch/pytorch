@@ -6138,7 +6138,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         mat2 = torch.ones(3, 1000, 128, dtype=torch.half, device=device)*100
         out = torch.addbmm(inp, mat1, mat2, alpha=0.001, beta=0.)
         self.assertFalse(out.isinf().any())
-        
+
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @onlyCUDA
     def test_matmul_45724(self, device):
