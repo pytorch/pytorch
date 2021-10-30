@@ -9411,13 +9411,13 @@ op_db: List[OpInfo] = [
         inplace_variant=lambda x, alpha=1.0: torch.nn.functional.celu(x, alpha, inplace=True),
         decorators=[
             DecorateInfo(
-                toleranceOverride({torch.float16: tol(atol=1e-03, rtol=1.2e-03), torch.bfloat16: tol(atol=1e-03, rtol=1.2e-03)}), 
+                toleranceOverride({torch.float16: tol(atol=1e-03, rtol=1.2e-03), torch.bfloat16: tol(atol=1e-03, rtol=1.2e-03)}),
                 'TestUnaryUfuncs', 'test_reference_numerics_normal', device_type='cuda',),
             DecorateInfo(
-                toleranceOverride({torch.float16: tol(atol=1e-03, rtol=1.2e-03), torch.bfloat16: tol(atol=1e-03, rtol=1.2e-03)}), 
+                toleranceOverride({torch.float16: tol(atol=1e-03, rtol=1.2e-03), torch.bfloat16: tol(atol=1e-03, rtol=1.2e-03)}),
                 'TestUnaryUfuncs', 'test_reference_numerics_hard', device_type='cuda',),
             DecorateInfo(
-                toleranceOverride({torch.float16: tol(atol=1e-03, rtol=1.2e-03), torch.bfloat16: tol(atol=1e-03, rtol=1.2e-03)}), 
+                toleranceOverride({torch.float16: tol(atol=1e-03, rtol=1.2e-03), torch.bfloat16: tol(atol=1e-03, rtol=1.2e-03)}),
                 'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='cuda',), ],
     ),
     UnaryUfuncInfo(
@@ -9432,13 +9432,13 @@ op_db: List[OpInfo] = [
         inplace_variant=partial(torch.nn.functional.hardsigmoid, inplace=True),
         decorators=[
             DecorateInfo(
-                toleranceOverride({torch.float16: tol(atol=1e-04, rtol=0.001)}), 
+                toleranceOverride({torch.float16: tol(atol=1e-04, rtol=0.001)}),
                 'TestUnaryUfuncs', 'test_reference_numerics_normal', device_type='cuda',),
             DecorateInfo(
-                toleranceOverride({torch.float16: tol(atol=1e-04, rtol=0.001)}), 
+                toleranceOverride({torch.float16: tol(atol=1e-04, rtol=0.001)}),
                 'TestUnaryUfuncs', 'test_reference_numerics_hard', device_type='cuda',),
             DecorateInfo(
-                toleranceOverride({torch.float16: tol(atol=1e-04, rtol=0.001)}), 
+                toleranceOverride({torch.float16: tol(atol=1e-04, rtol=0.001)}),
                 'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='cuda',), ],
         skips=[
             # still want to test that first derivative works though second derivative doesn't
@@ -9469,13 +9469,13 @@ op_db: List[OpInfo] = [
         inplace_variant=partial(torch.nn.functional.mish, inplace=True),
         decorators=[
             DecorateInfo(
-                toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-03)}), 
+                toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-03)}),
                 'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='cuda',),
             DecorateInfo(
-                toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-03)}), 
+                toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-03)}),
                 'TestUnaryUfuncs', 'test_reference_numerics_hard', device_type='cuda',),
             DecorateInfo(
-                toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-03)}), 
+                toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-03)}),
                 'TestUnaryUfuncs', 'test_reference_numerics_normal', device_type='cuda',), ],
     ),
     UnaryUfuncInfo(
@@ -9490,13 +9490,13 @@ op_db: List[OpInfo] = [
         supports_out=False,
         decorators=[
             DecorateInfo(
-                toleranceOverride({torch.float16: tol(atol=1e-03, rtol=1.3e-04)}), 
+                toleranceOverride({torch.float16: tol(atol=1e-03, rtol=1.3e-04)}),
                 'TestUnaryUfuncs', 'test_reference_numerics_extremal',),
             DecorateInfo(
-                toleranceOverride({torch.float16: tol(atol=1e-03, rtol=1.3e-04)}), 
+                toleranceOverride({torch.float16: tol(atol=1e-03, rtol=1.3e-04)}),
                 'TestUnaryUfuncs', 'test_reference_numerics_hard',),
             DecorateInfo(
-                toleranceOverride({torch.float16: tol(atol=1e-03, rtol=1.3e-04)}), 
+                toleranceOverride({torch.float16: tol(atol=1e-03, rtol=1.3e-04)}),
                 'TestUnaryUfuncs', 'test_reference_numerics_normal',), ],
         skips=(DecorateInfo(
             unittest.expectedFailure, 'TestUnaryUfuncs', "test_reference_numerics_hard", dtypes=(torch.complex64,)),),
@@ -9513,13 +9513,13 @@ op_db: List[OpInfo] = [
         supports_out=False,
         decorators=[
             DecorateInfo(
-                toleranceOverride({torch.bfloat16: tol(atol=1e-02, rtol=1.6e-02)}), 
+                toleranceOverride({torch.bfloat16: tol(atol=1e-02, rtol=1.6e-02)}),
                 'TestUnaryUfuncs', 'test_reference_numerics_extremal',),
             DecorateInfo(
-                toleranceOverride({torch.bfloat16: tol(atol=1e-02, rtol=1.6e-02)}), 
+                toleranceOverride({torch.bfloat16: tol(atol=1e-02, rtol=1.6e-02)}),
                 'TestUnaryUfuncs', 'test_reference_numerics_hard',),
             DecorateInfo(
-                toleranceOverride({torch.bfloat16: tol(atol=1e-02, rtol=1.6e-02)}), 
+                toleranceOverride({torch.bfloat16: tol(atol=1e-02, rtol=1.6e-02)}),
                 'TestUnaryUfuncs', 'test_reference_numerics_normal',), ],
     ),
     OpInfo(
