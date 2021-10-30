@@ -100,7 +100,6 @@
 #include "lazy_tensor_core/csrc/ops/std_mean.h"
 #include "lazy_tensor_core/csrc/ops/svd.h"
 #include "lazy_tensor_core/csrc/ops/symeig.h"
-#include "lazy_tensor_core/csrc/ops/threshold.h"
 #include "lazy_tensor_core/csrc/ops/topk.h"
 #include "lazy_tensor_core/csrc/ops/triangular_solve.h"
 #include "lazy_tensor_core/csrc/ops/tril.h"
@@ -1938,11 +1937,6 @@ LazyTensor tan(const LazyTensor& input) {
 LazyTensor tanh_backward(const LazyTensor& grad_output,
                          const LazyTensor& output) {
   return mul(grad_output, rsub(pow(output, 2), 1, 1));
-}
-
-LazyTensor threshold(const LazyTensor& input, float threshold, float value) {
-  return input.CreateFrom(torch::lazy::MakeNode<ir::ops::Threshold>(
-      input.GetIrValue(), threshold, value));
 }
 
 LazyTensor to(LazyTensor& input, c10::optional<Device> device,

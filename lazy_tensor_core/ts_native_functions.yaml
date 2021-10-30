@@ -49,6 +49,7 @@ full_codegen:
   - sum
   - sum.dim_IntList
   - tanh
+  - threshold
   - threshold_backward
   - topk
   - trace
@@ -93,7 +94,6 @@ supported:
   - stack
   - t
   - t_
-  - threshold
   - transpose.int
   - transpose_
   - unsqueeze
