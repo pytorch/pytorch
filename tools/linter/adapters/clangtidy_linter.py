@@ -9,8 +9,8 @@ import subprocess
 import sys
 import time
 from enum import Enum
+from pathlib import Path
 from typing import Any, List, NamedTuple, Optional, Pattern
-from install.clang_tidy import INSTALLATION_PATH, OUTPUT_DIR, PLATFORM_TO_HASH, PLATFORM_TO_URL, download  # type: ignore[import]
 
 
 IS_WINDOWS: bool = os.name == "nt"
@@ -126,10 +126,11 @@ for dir in include_dir:
 def check_file(
     filename: str,
     binary: str,
+    build_dir: str,
 ) -> List[LintMessage]:
     try:
         proc = run_command(
-            [binary, "-p=build", *include_args, filename],
+            [binary, f"-p={build_dir}", *include_args, filename],
         )
     except (OSError) as err:
         return [
@@ -148,24 +149,35 @@ def check_file(
                 bypassChangedLineFiltering=None,
             )
         ]
+    lint_messages = []
+    try:
+        # Change the current working directory to the build directory, since
+        # clang-tidy will report files relative to the build directory.
+        saved_cwd = os.getcwd()
+        os.chdir(build_dir)
 
-    return [
-        LintMessage(
-            path=match["file"],
-            name=match["code"],
-            description=match["message"],
-            line=int(match["line"]),
-            char=int(match["column"])
-            if match["column"] is not None and not match["column"].startswith("-")
-            else None,
-            code="CLANGTIDY",
-            severity=severities.get(match["severity"], LintSeverity.ERROR),
-            original=None,
-            replacement=None,
-            bypassChangedLineFiltering=None,
-        )
-        for match in RESULTS_RE.finditer(proc.stdout.decode())
-    ]
+        for match in RESULTS_RE.finditer(proc.stdout.decode()):
+            # Convert the reported path to an absolute path.
+            abs_path = str(Path(match["file"]).resolve())
+            message = LintMessage(
+                path=abs_path,
+                name=match["code"],
+                description=match["message"],
+                line=int(match["line"]),
+                char=int(match["column"])
+                if match["column"] is not None and not match["column"].startswith("-")
+                else None,
+                code="CLANGTIDY",
+                severity=severities.get(match["severity"], LintSeverity.ERROR),
+                original=None,
+                replacement=None,
+                bypassChangedLineFiltering=None,
+            )
+            lint_messages.append(message)
+    finally:
+        os.chdir(saved_cwd)
+
+    return lint_messages
 
 
 def main() -> None:
@@ -175,8 +187,14 @@ def main() -> None:
     )
     parser.add_argument(
         "--binary",
-        required=False,
+        required=True,
         help="clang-tidy binary path",
+    )
+    parser.add_argument(
+        "--build_dir",
+        required=True,
+        help=("Where the compile_commands.json file is located. "
+              "Gets passed to clang-tidy -p"),
     )
     parser.add_argument(
         "--verbose",
@@ -190,26 +208,34 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if not args.binary:
-        ok = download("clang-tidy", OUTPUT_DIR, PLATFORM_TO_URL, PLATFORM_TO_HASH)
-        if not ok:
-            err_msg = LintMessage(
-                path="clangtidy_linte.rpy",
-                line=None,
-                char=None,
-                code="CLANGTIDY",
-                severity=LintSeverity.ERROR,
-                name="command-failed",
-                original=None,
-                replacement=None,
-                description=(
-                    f"Failed to download clang-tidy binary from {PLATFORM_TO_URL}"
-                ),
-                bypassChangedLineFiltering=None,
-            )
-            print(json.dumps(err_msg._asdict()), flush=True)
-            exit(0)
-        args.binary = INSTALLATION_PATH
+    logging.basicConfig(
+        format="<%(threadName)s:%(levelname)s> %(message)s",
+        level=logging.NOTSET
+        if args.verbose
+        else logging.DEBUG
+        if len(args.filenames) < 1000
+        else logging.INFO,
+        stream=sys.stderr,
+    )
+
+    if not os.path.exists(args.binary):
+        err_msg = LintMessage(
+            path="<none>",
+            line=None,
+            char=None,
+            code="CLANGTIDY",
+            severity=LintSeverity.ERROR,
+            name="command-failed",
+            original=None,
+            replacement=None,
+            description=(
+                f"Could not find clang-tidy binary at {args.binary},"
+                " you may need to run `lintrunner init`."
+            ),
+            bypassChangedLineFiltering=None,
+        )
+        print(json.dumps(err_msg._asdict()), flush=True)
+        exit(0)
 
     with concurrent.futures.ThreadPoolExecutor(
         max_workers=os.cpu_count(),
@@ -220,6 +246,7 @@ def main() -> None:
                 check_file,
                 filename,
                 args.binary,
+                args.build_dir,
             ): filename
             for filename in args.filenames
         }
