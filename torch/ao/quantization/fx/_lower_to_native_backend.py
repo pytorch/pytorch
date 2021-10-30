@@ -18,7 +18,7 @@ def _lower_ref_linear_module(model: QuantizedGraphModule) -> QuantizedGraphModul
     # TODO: maybe orgnize this better (e.g. break down to more functions)
     # to make this function more readable
     for n in model.graph.nodes:
-        if not is_match(modules, n, pattern, max_uses=1):
+        if not is_match(modules, n, pattern):
             continue
         q_node = n
         linear_node = q_node.args[0]
