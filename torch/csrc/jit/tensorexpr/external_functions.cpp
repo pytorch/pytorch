@@ -4,8 +4,8 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/core/Tensor.h>
-#include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/native/quantized/cpu/conv_packed_params.h>
+#include <ATen/native/quantized/cpu/qadd.h>
 #include <ATen/native/xnnpack/OpContext.h>
 #include <ATen/quantized/Quantizer.h>
 #include <c10/core/TensorOptions.h>
@@ -203,11 +203,7 @@ void nnc_aten_quantized_add(
       at::TensorOptions(toQIntType(b_qdtype)));
   const double out_qscale = ((double*)extra_args)[6];
   const int64_t out_qzero = extra_args[7];
-  auto qadd_op =
-      c10::Dispatcher::singleton()
-          .findSchemaOrThrow("quantized::add", "")
-          .typed<at::Tensor(at::Tensor, at::Tensor, double, int64_t)>();
-  auto r = qadd_op.call(qa, qb, out_qscale, out_qzero);
+  auto r = at::native::quantized_add(qa, qb, out_qscale, out_qzero);
   r = r.contiguous();
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
