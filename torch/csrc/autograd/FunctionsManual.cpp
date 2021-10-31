@@ -4364,19 +4364,17 @@ Tensor plu_backward_base(
   auto U_principal_H = U_principal.mH();
   auto U_grad_principal = U_grad.narrow(-2, 0, k).narrow(-1, 0, k);
 
-  auto phi_L = L_principal_H.matmul(L_grad_principal).tril_(-1);
-  auto phi_U = U_grad_principal.matmul(U_principal_H).triu_();
+  auto phi_L = L_principal_H.matmul(L_grad_principal).tril(-1);
+  auto phi_U = U_grad_principal.matmul(U_principal_H).triu();
 
   auto phi = phi_L + phi_U;
-  auto psi = at::zeros_like(self);
 
   Tensor self_grad;
   if (m <= n) {
     auto U_complement = U.narrow(-2, 0, k).narrow(-1, k, n - k);
     auto U_grad_complement = U_grad.narrow(-2, 0, k).narrow(-1, k, n - k);
 
-    auto phi_complement = U_grad_complement.matmul(U_complement.mH()).tril_(-1);
-    phi.sub_(phi_complement);
+    auto phi_complement = U_grad_complement.matmul(U_complement.mH()).tril(-1);
 
     // recall the result for X1_grad and X2_grad from above.
     // It can be rewritten as
@@ -4384,19 +4382,16 @@ Tensor plu_backward_base(
     // psi = (psi1 | psi2)
     //     = ([L^H L_grad o 1_L + U1_grad U1^H o 1_U - U2_grad U2^H o 1_L] U1^{-H} | U2_grad),
     // so it is filled in parts.
-    //
-    // fill psi2 in
-    psi.narrow(-2, 0, k).narrow(-1, k, n - k).copy_(U_grad_complement);
 
     // solve for psi1 to avoid the inversion of U1^H
     auto psi_principal = std::get<0>(at::triangular_solve(
-      phi.mH(),
+      (phi - phi_complement).mH(),
       U_principal,
       /*upper=*/true,
       /*transpose=*/false,
       /*unitriangular=*/false
     )).mH();
-    psi.narrow(-2, 0, k).narrow(-1, 0, k).copy_(psi_principal);
+    auto psi = at::cat({psi_principal, U_grad_complement}, /*dim=*/-1);
 
     // solve for the grad to avoid the inversion of L1^H
     self_grad = P.matmul(
@@ -4415,19 +4410,17 @@ Tensor plu_backward_base(
     auto L_complement = L.narrow(-2, k, m - k).narrow(-1, 0, k);
     auto L_grad_complement = L_grad.narrow(-2, k, m - k).narrow(-1, 0, k);
 
-    auto phi_complement = L_complement.mH().matmul(L_grad_complement).triu_();
-    phi.sub_(phi_complement);
+    auto phi_complement = L_complement.mH().matmul(L_grad_complement).triu();
 
-    psi.narrow(-2, k, m - k).narrow(-1, 0, k).copy_(L_grad_complement);
 
     auto psi_principal = std::get<0>(at::triangular_solve(
-      phi,
+      phi - phi_complement,
       L_principal_H,
       /*upper=*/true,
       /*transpose=*/false,
       /*unitriangular=*/true
     ));
-    psi.narrow(-2, 0, k).narrow(-1, 0, k).copy_(psi_principal);
+    auto psi = at::cat({psi_principal, L_grad_complement}, -2);
 
     self_grad = std::get<0>(at::triangular_solve(
       P.matmul(psi).mT(),
