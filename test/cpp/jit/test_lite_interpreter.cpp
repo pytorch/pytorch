@@ -362,7 +362,7 @@ struct ClassNamespaceValue : public SugaredValue {
 
   std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
-      Function& m,
+      GraphFunction& m,
       const std::string& name) override {
     const auto fullName = c10::QualifiedName(basename_, name);
 
@@ -387,7 +387,7 @@ struct ClassNamespaceValue : public SugaredValue {
 struct TestModuleResolver : public Resolver {
   std::shared_ptr<SugaredValue> resolveValue(
       const std::string& name,
-      Function& m,
+      GraphFunction& m,
       const SourceRange& loc) override {
     if (name == "torch") {
       return std::make_shared<BuiltinModule>("aten");
@@ -464,6 +464,15 @@ TEST(LiteInterpreterTest, GetRuntimeByteCodeVersion) {
   AT_ASSERT(
       runtime_bytecode_version ==
       caffe2::serialize::kMaxSupportedBytecodeVersion);
+}
+
+TEST(LiteInterpreterTest, GetRuntimeOperatorsVersion) {
+  auto runtime_operators_version = _get_runtime_operators_min_max_versions();
+  AT_ASSERT(
+      runtime_operators_version.first ==
+          caffe2::serialize::kMinSupportedFileFormatVersion &&
+      runtime_operators_version.second ==
+          caffe2::serialize::kMaxSupportedFileFormatVersion);
 }
 
 /**
