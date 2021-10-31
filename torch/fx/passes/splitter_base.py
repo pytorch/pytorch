@@ -655,8 +655,13 @@ class _SplitterBase:
         current_cpu_nodes, current_acc_nodes = self.starter_nodes()
         visited_nodes: NodeSet = set()
 
-        # If there are CPU nodes, start with them
-        acc_subgraph: bool = not current_cpu_nodes
+        # Determine which subgraph to start from based on node dependency
+        acc_subgraph: bool = True
+        for n in current_cpu_nodes:
+            if self.deps[n] <= visited_nodes:
+                acc_subgraph = False
+                break
+
         current_subgraph_nodes: NodeList = []
 
         # Result accumulator
