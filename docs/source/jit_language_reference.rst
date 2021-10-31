@@ -812,6 +812,8 @@ check the correctness of the model as you go.
 
 .. autofunction:: torch.jit.is_scripting
 
+.. autofunction:: torch.jit.is_tracing
+
 
 Attribute Lookup On Python Modules
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

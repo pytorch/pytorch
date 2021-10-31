@@ -2862,7 +2862,7 @@ void dequantize_tensor_arm<c10::quint8>(
 
   const float32x4_t scale_fp32x4 = vdupq_n_f32(scale);
   // Zero point is restricted to be in bounds of an unsigned 8 bit integer
-  const uint16x8_t zero_point_u16x8 = vdupq_n_u16(static_cast<uint16_t>(zero_point));
+  const uint8x8_t zero_point_u8x8 = vget_low_u8(vdupq_n_u8(static_cast<uint8_t>(zero_point)));
 
   int i;
   for (i = 0; i + 16 <= N; i += 16) {
@@ -2872,8 +2872,8 @@ void dequantize_tensor_arm<c10::quint8>(
     // Each input element and the zero point are restricted to be in bounds of
     // an unsigned 8 bit integer, so the difference will fit in a signed 16 bit
     // integer
-    const int16x8_t minus_zp_low_s16 = vreinterpretq_s16_u16(vsubq_u16(vmovl_u8(vget_low_u8(vin_u8)), zero_point_u16x8)); // 0 ... 7
-    const int16x8_t minus_zp_high_s16 = vreinterpretq_s16_u16(vsubq_u16(VMOVL_HIGH_U8(vin_u8), zero_point_u16x8)); // 8 ... 15
+    const int16x8_t minus_zp_low_s16 = vreinterpretq_s16_u16(vsubl_u8(vget_low_u8(vin_u8), zero_point_u8x8)); // 0 ... 7
+    const int16x8_t minus_zp_high_s16 = vreinterpretq_s16_u16(vsubl_u8(vget_high_u8(vin_u8), zero_point_u8x8)); // 8 ... 15
 
     const int32x4_t minus_zp_low_low = vmovl_s16(vget_low_s16(minus_zp_low_s16)); // 0 ... 3
     const int32x4_t minus_zp_low_high = VMOVL_HIGH_S16(minus_zp_low_s16); // 4 ... 7
