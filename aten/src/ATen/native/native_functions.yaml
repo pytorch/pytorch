@@ -5332,7 +5332,7 @@
 - func: dequantize.self(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    CPU: dequantize_cpu
+    CPU, CUDA: dequantize_cpu_or_cuda
     QuantizedCPU, QuantizedCUDA: dequantize_quantized
 
 - func: dequantize.tensors(Tensor[] tensors) -> Tensor[]
@@ -6694,6 +6694,9 @@
     CUDA: nonzero_cuda
 
 - func: nonzero_numpy(Tensor self) -> Tensor[]
+  variants: method, function
+
+- func: argwhere(Tensor self) -> Tensor
   variants: method, function
 
 - func: gather.out(Tensor self, int dim, Tensor index, *, bool sparse_grad=False, Tensor(a!) out) -> Tensor(a!)

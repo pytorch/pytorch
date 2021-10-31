@@ -193,8 +193,8 @@ const std::shared_ptr<Code> Function::get_code() const {
   return code_;
 }
 
-int64_t Function::getExceptionDebugHandle() const {
-  return getInterpretersExceptionDebugHandle();
+const std::vector<int64_t>& Function::getExceptionDebugHandles() const {
+  return getInterpretersExceptionDebugHandles();
 }
 
 } // namespace mobile
