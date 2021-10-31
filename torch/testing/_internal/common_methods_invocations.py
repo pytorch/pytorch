@@ -1198,23 +1198,6 @@ def sample_inputs_linalg_matrix_power(op_info, device, dtype, requires_grad):
 
     return inputs
 
-def sample_inputs_logical_binaryops(op_info, device, dtype, requires_grad, **kwargs):
-    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-
-    cases = (
-        ((1,), (3,)),
-        ((0,), (0,)),
-        ((1, 2), (3, 1)),
-        ((), (1, 2)),
-        ((), ()),
-    )
-
-    def generator():
-        for input_, other in cases:
-            yield SampleInput(make_arg(input_), args=(make_arg(other),))
-
-    return list(generator())
-
 def sample_inputs_hsplit(op_info, device, dtype, requires_grad):
     return (SampleInput(make_tensor((6,), device, dtype,
                                     low=None, high=None,
@@ -8283,7 +8266,7 @@ op_db: List[OpInfo] = [
     BinaryUfuncInfo('logical_and',
                     ref=np.logical_and,
                     dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-                    sample_inputs_func=sample_inputs_logical_binaryops,
+                    sample_inputs_func=sample_inputs_binary_pwise,
                     supports_autograd=False,
                     # FIXME: logical_and does not accept scalar inputs
                     skips=(
@@ -8292,7 +8275,7 @@ op_db: List[OpInfo] = [
     BinaryUfuncInfo('logical_or',
                     ref=np.logical_or,
                     dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-                    sample_inputs_func=sample_inputs_logical_binaryops,
+                    sample_inputs_func=sample_inputs_binary_pwise,
                     supports_autograd=False,
                     # FIXME: logical_or does not accept scalar inputs
                     skips=(
@@ -8301,7 +8284,7 @@ op_db: List[OpInfo] = [
     BinaryUfuncInfo('logical_xor',
                     ref=np.logical_xor,
                     dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-                    sample_inputs_func=sample_inputs_logical_binaryops,
+                    sample_inputs_func=sample_inputs_binary_pwise,
                     supports_autograd=False,
                     # FIXME: logical_xor does not accept scalar inputs
                     skips=(
