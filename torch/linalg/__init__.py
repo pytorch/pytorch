@@ -1927,8 +1927,8 @@ Args:
     A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
 
 Keyword args:
-    pivot (bool, optional): [Only on CUDA] Whether to compute the LU decomposition with partial pivoting,
-                            or the regular LU decomposition. Default: `True`.
+    pivot (bool, optional): Whether to compute the LU decomposition with partial pivoting, or the regular LU
+                            decomposition. :attr:`pivot`\ `= False` not supported on CPU. Default: `True`.
     out (tuple, optional): tuple of two tensors to write the output to. Ignored if `None`. Default: `None`.
 
 Returns:
@@ -1960,8 +1960,7 @@ linalg.lu_factor_ex(A, *, pivot=True, check_errors=False, out=None) -> (Tensor, 
 
 This is a version of :func:`~lu_factor` that does not perform error checks unless :attr:`check_errors`\ `= True`.
 
-It also returns the :attr:`info` tensor returned by `LAPACK's getrf`_. This tensor contains integers
-denoting the errors that may have happened during the computation of this function.
+It also returns the :attr:`info` tensor returned by `LAPACK's getrf`_.
 
 """ + fr"""
 .. note:: {common_notes["sync_note_ex"]}

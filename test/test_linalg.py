@@ -5537,7 +5537,7 @@ class TestLinalg(TestCase):
             with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
                 torch.linalg.householder_product(reflectors, tau)
 
-    @precisionOverride({torch.complex64: 5e-6})
+    @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
@@ -5551,7 +5551,7 @@ class TestLinalg(TestCase):
             check_errors = fn == torch.linalg.lu_factor
             if singular and check_errors:
                 # It may or may not throw as the LU decomposition without pivoting
-                # may still succeed for sinuglar matrices
+                # may still succeed for singular matrices
                 try:
                     LU, pivots = fn(A, pivot=pivot)
                 except RuntimeError:
@@ -5572,7 +5572,7 @@ class TestLinalg(TestCase):
         sizes = ((3, 3), (5, 5), (4, 2), (3, 4), (0, 0), (0, 1), (1, 0))
         batches = ((0,), (2,), (3,), (1, 0), (3, 5))
         # Non pivoting just implemented for CUDA
-        pivots = (True, False) if device == "cuda" else (True,)
+        pivots = (True, False) if self.device_type == "cuda" else (True,)
         fns = (partial(torch.lu, get_infos=True), torch.linalg.lu_factor, torch.linalg.lu_factor_ex)
         for ms, batch, pivot, singular, fn in itertools.product(sizes, batches, pivots, (True, False), fns):
             m, n = ms
@@ -6105,6 +6105,20 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                     m2 = torch.randn(k, m, device=device).to(dtype)
                     self.assertRaisesRegex(RuntimeError, f"{n}x{k + 1}.*{k}x{m}", lambda: torch.addmm(M, m1, m2))
                     self.assertRaisesRegex(RuntimeError, f"{n}x{k + 1}.*{k}x{m}", lambda: torch.mm(m1, m2))
+
+    @dtypes(torch.half)
+    @onlyCUDA
+    def test_addmm_addbmm_overflow(self, device, dtype):
+        inp = torch.zeros(128, 128, dtype=torch.half, device=device)
+        mat1 = torch.ones(128, 1000, dtype=torch.half, device=device) * 100
+        mat2 = torch.ones(1000, 128, dtype=torch.half, device=device) * 100
+        out = torch.addmm(inp, mat1, mat2, alpha=0.001, beta=0.)
+        self.assertFalse(out.isinf().any())
+
+        mat1 = torch.ones(3, 128, 1000, dtype=torch.half, device=device) * 100
+        mat2 = torch.ones(3, 1000, 128, dtype=torch.half, device=device) * 100
+        out = torch.addbmm(inp, mat1, mat2, alpha=0.001, beta=0.)
+        self.assertFalse(out.isinf().any())
 
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @onlyCUDA
