@@ -212,7 +212,7 @@ class TestCommon(TestCase):
     # TODO: get working with ASAN by addressing failing operators
     @unittest.skipIf(IS_WINDOWS, "Skipped under Windows")
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @suppress_warnings
     @ops(op_db, allowed_dtypes=(torch.float32, torch.long, torch.complex64))
     def test_noncontiguous_samples(self, device, dtype, op):
