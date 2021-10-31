@@ -140,7 +140,27 @@ void CUDAGraph::capture_end() {
   // Trailing NULL, NULL, 0 arguments were recommended by Cuda driver people,
   // who prefer not to report error message through these arguments moving forward
   // (they prefer return value, or errors on api calls internal to the capture)
-  AT_CUDA_CHECK(cudaGraphInstantiate(&graph_exec_, graph_, NULL, NULL, 0));
+
+
+  int version;
+  AT_CUDA_CHECK(cudaDriverGetVersion(&version));
+  if (version < 11040) {
+    AT_CUDA_CHECK(cudaGraphInstantiate(&graph_exec_, graph_, NULL, NULL, 0));
+  } else {
+    // If there's a chance we're using capturable cudaMallocAsync, in typical graph
+    // usage some tensors (e.g. the tensors used for graph IO) are not freed between
+    // graph replays. To accommodate these, the graph's internal bookkeeping requires
+    // that we instantiate with
+    // cudaGraphInstantiateFlagAutoFreeOnLaunch. See
+    // cudaGraphLaunch
+    // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__GRAPH.html#group__CUDART__GRAPH_1g1accfe1da0c605a577c22d9751a09597
+    // cudaGraphInstantiateWithFlags
+    // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__GRAPH.html#group__CUDART__GRAPH_1ga2c652a24ba93e52b99a47bec0888233
+    AT_CUDA_CHECK(cudaGraphInstantiateWithFlags(&graph_exec_,
+                                                graph_,
+                                                cudaGraphInstantiateFlagAutoFreeOnLaunch));
+  }
+
   has_graph_exec_ = true;
 
   auto* gen = get_generator_or_default<CUDAGeneratorImpl>(

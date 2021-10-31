@@ -1458,7 +1458,7 @@ class THCCachingAllocator {
   }
 };
 
-THCCachingAllocator thc_caching_allocator;
+THCCachingAllocator caching_allocator;
 
 // Returns whether to force all allocations to bypass the caching allocator and
 // go straight to cudaMalloc.  This setting is useful when debugging GPU memory
