@@ -2052,12 +2052,15 @@ works_list = [
     'sign',
     'sin',
     'sinh',
+    'softsign'
     'sqrt',
     'sub',
     'sum',
     't',
     'tan',
     'tanh',
+    'tanhshrink'
+    'threshold'
     'transpose',
     'true_divide',
     'trunc',
