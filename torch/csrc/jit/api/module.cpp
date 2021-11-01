@@ -242,7 +242,7 @@ IValue Module::operator()(std::vector<IValue> inputs) {
     IValue result = Method(_ivalue(), pre_hook)({tuple_input});
     if (!result.isNone()) {
       if (result.isTuple()) {
-        inputs = result.toTupleRef().elements().vec();
+        inputs = result.toTuple()->elements().vec();
       } else {
         inputs = {result};
       }

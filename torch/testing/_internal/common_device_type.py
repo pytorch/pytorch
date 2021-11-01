@@ -792,6 +792,13 @@ class skipMetaIf(skipIf):
     def __init__(self, dep, reason):
         super().__init__(dep, reason, device_type='meta')
 
+# Skips a test on XLA if the condition is true.
+class skipXLAIf(skipIf):
+
+    def __init__(self, dep, reason):
+        super().__init__(dep, reason, device_type='xla')
+
+
 def _has_sufficient_memory(device, size):
     if torch.device(device).type == 'cuda':
         if not torch.cuda.is_available():
@@ -1057,6 +1064,9 @@ def expectedFailureCUDA(fn):
 def expectedFailureMeta(fn):
     return expectedFailure('meta')(fn)
 
+def expectedFailureXLA(fn):
+    return expectedFailure('xla')(fn)
+
 # This decorator checks that the decorated function produces a nondeterministic
 # alert for the expected device types
 class expectedAlertNondeterministic:
@@ -1230,3 +1240,6 @@ def skipCUDAIfNoCudnn(fn):
 
 def skipMeta(fn):
     return skipMetaIf(True, "test doesn't work with meta tensors")(fn)
+
+def skipXLA(fn):
+    return skipXLAIf(True, "Marked as skipped for XLA")(fn)

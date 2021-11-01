@@ -74,10 +74,12 @@ c10::IValue InlinedCallStackSerializer::serialize_module_instance_info(
   if (m_inst_it != serialized_module_instance_info_.end()) {
     return m_inst_it->second;
   }
+  std::vector<c10::IValue> elements;
   // Module instance info is serialized as
   // {type name, instance name}
+  elements = {module_type_name, module_instance_name};
   serialized_module_instance_info_[key_val] =
-      c10::ivalue::Tuple::create({module_type_name, module_instance_name});
+      c10::ivalue::Tuple::create(std::move(elements));
   return serialized_module_instance_info_[key_val];
 }
 
@@ -93,10 +95,11 @@ std::vector<char> CallStackDebugInfoPickler::pickle(
      * are serialized as a tuple of 3 elements
      * {debug_handle, source_range_tag, serialized_callstack}
      */
-    elements.reserve(4);
+    elements.reserve(3);
     elements.emplace_back(debug_handle);
     int64_t source_range_tag{kInvalidSourceRangeTag};
-    const auto& source_range =
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
+    const auto source_range =
         std::get<kDebugInfoTupleSourceRangeIndex>(it.second);
     const SourceRange& sr = source_range.findSourceRangeThatGenerated()
         ? source_range.findSourceRangeThatGenerated().value()
@@ -107,10 +110,12 @@ std::vector<char> CallStackDebugInfoPickler::pickle(
     }
     elements.emplace_back(source_range_tag);
     elements.emplace_back(std::get<kDebugInfoTupleNodeNameIndex>(it.second));
-    const auto& inlined_cs_ptr =
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
+    const auto inlined_cs_ptr =
         std::get<kDebugInfoTupleInlinedCSIndex>(it.second);
     elements.emplace_back(css_.serialize(inlined_cs_ptr, source_range_tags));
-    ivalues.emplace_back(c10::ivalue::Tuple::create(elements));
+    c10::IValue tuple = c10::ivalue::Tuple::create(elements);
+    ivalues.emplace_back(tuple);
   }
   std::vector<at::Tensor> table;
   c10::IValue ivalue = c10::ivalue::Tuple::create(std::move(ivalues));
@@ -181,7 +186,7 @@ c10::optional<ModuleInstanceInfo> InlinedCallStackDeserializer::
   if (it != cached_module_instance_info_.end()) {
     return it->second;
   }
-  const auto& tup_elems = iv.toTupleRef().elements();
+  const auto& tup_elems = iv.toTuple()->elements();
   TORCH_CHECK(tup_elems.size() == 2);
   std::string type_name = tup_elems[0].toString()->string();
   std::string instance_name = tup_elems[1].toString()->string();
@@ -218,7 +223,7 @@ ska::flat_hash_map<int64_t, DebugInfoTuple> CallStackDebugInfoUnpickler::
   ska::flat_hash_map<int64_t, DebugInfoTuple> callstack_ptrs;
   auto ivalues = std::move(*std::move(ival).toTuple()).elements();
   for (auto& val : ivalues) {
-    const auto& tup_elems = val.toTupleRef().elements();
+    const auto& tup_elems = val.toTuple()->elements();
     TORCH_CHECK(
         tup_elems.size() == 4,
         "Pickled map must have four elements: "
