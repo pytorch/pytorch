@@ -657,7 +657,6 @@ class AbstractCommTest(object):
             self.assertEqual(len(set(obj_list)), 1)
 
     def _test_warn_not_in_group(self, backend):
-
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
             backend,
