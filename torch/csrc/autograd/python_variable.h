@@ -44,10 +44,13 @@ static inline bool THPVariable_CheckExact(PyObject *obj) {
 
 inline bool THPVariable_Check(PyObject *obj)
 {
+  if (!THPVariableClass)
+      return false;
+
   const auto result = PyObject_IsInstance(obj, THPVariableClass);
   if (result == -1)
       throw python_error();
-  return THPVariableClass && result;
+  return result;
 }
 
 inline const at::Tensor& THPVariable_Unpack(THPVariable* var) {
