@@ -341,7 +341,7 @@ void createObject(
 void isinstance(Stack& stack, at::ArrayRef<at::TypePtr> types) {
   at::TypePtr ty = pop(stack).type();
   for (const at::TypePtr& candidate : types) {
-    if (ty->isSubtypeOf(candidate)) {
+    if (ty->isSubtypeOf(*candidate)) {
       push(stack, true);
       return;
     }

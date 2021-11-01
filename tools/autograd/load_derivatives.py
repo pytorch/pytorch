@@ -10,7 +10,7 @@ import yaml
 from tools.codegen.api.autograd import (Derivative, DifferentiabilityInfo,
                                         SavedAttribute, ForwardDerivative)
 from tools.codegen.api.types import (Binding, CppSignatureGroup, NamedCType, BaseCType, VectorCType,
-                                     intArrayRefT, tensorOptionsT, typeAndSizeT, intT, boolT,
+                                     intArrayRefT, tensorOptionsT, typeAndSizeT, longT, boolT,
                                      tensorGeometryT, scalarTypeT, SpecialArgName,
                                      OptionalCType, stringT)
 from tools.codegen.api import cpp
@@ -518,17 +518,17 @@ def saved_variables(
         # replace self.size(2) with self_size_2
         (r'{}.size\((\w+)\)', {
             'suffix': lambda m: '_argsize_{}'.format(*m.groups()),
-            'nctype': lambda name: NamedCType(name, BaseCType(intT)),
+            'nctype': lambda name: NamedCType(name, BaseCType(longT)),
         }),
         # replace self.numel() with self_numel
         (r'{}.numel\(\)', {
             'suffix': '_numel',
-            'nctype': lambda name: NamedCType(name, BaseCType(intT)),
+            'nctype': lambda name: NamedCType(name, BaseCType(longT)),
         }),
         # replace to_args_sizes(self) with self_args_sizes
         (r'to_args_sizes\({}\)', {
             'suffix': '_args_sizes',
-            'nctype': lambda name: NamedCType(name, VectorCType(VectorCType(BaseCType(intT)))),
+            'nctype': lambda name: NamedCType(name, VectorCType(VectorCType(BaseCType(longT)))),
         }),
         # replace to_args_scalartypes(self) with self_args_scalartypes
         (r'to_args_scalartypes\({}\)', {
@@ -547,7 +547,7 @@ def saved_variables(
         # replace self.dim() with self_dim
         (r'{}.dim\(\)', {
             'suffix': '_dim',
-            'nctype': lambda name: NamedCType(name, BaseCType(intT)),
+            'nctype': lambda name: NamedCType(name, BaseCType(longT)),
         }),
         # replace self.strides() with self_strides
         (r'{}.strides\(\)', {

@@ -432,7 +432,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         auto* node = p_node->node();
         std::vector<TypePtr> candidates = node->tys(attr::types);
         for (const auto& candidate_type : candidates) {
-          if (input_type->isSubtypeOf(candidate_type)) {
+          if (input_type->isSubtypeOf(*candidate_type)) {
             p_node->Output(0) = true;
             return;
           }
@@ -486,5 +486,60 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         }
       };
     });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::view,
+    aten_view,
+    [](Node* n) -> SROperator {
+      if (!n->matches(torch::schema(
+              "aten::view(Tensor(a) self, int[] size) -> (Tensor(a))"))) {
+        LogAndDumpSchema(n);
+        return nullptr;
+      }
+      return [](ProcessedNode* p_node) {
+        const auto& input = p_node->Input(0).toTensor();
+        const auto size = p_node->Input(1).toIntList();
+        p_node->Output(0) = at::native::view(input, size.vec());
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::size,
+    aten_size,
+    [](Node* n) -> SROperator {
+      if (!n->matches(
+              torch::schema("aten::size(Tensor self, int dim) -> int"))) {
+        LogAndDumpSchema(n);
+        return nullptr;
+      }
+      return [](ProcessedNode* p_node) {
+        const auto& input = p_node->Input(0).toTensor();
+        auto dim = p_node->Input(1).toInt();
+        const auto ndim = input.dim();
+
+        if (dim < 0 || dim >= ndim) {
+          dim = c10::maybe_wrap_dim(dim, ndim);
+        }
+        p_node->Output(0) = input.sizes()[dim];
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::squeeze,
+    aten_squeeze,
+    [](Node* n) -> SROperator {
+      if (!n->matches(torch::schema(
+              "aten::squeeze.dim(Tensor(a) self, int dim) -> Tensor(a)"))) {
+        LogAndDumpSchema(n);
+        return nullptr;
+      }
+
+      return [](ProcessedNode* p_node) {
+        const auto& self = p_node->Input(0).toTensor();
+        const auto dim = p_node->Input(1).toInt();
+        p_node->Output(0) = at::native::squeeze(self, dim);
+      };
+    });
+
 } // namespace jit
 } // namespace torch

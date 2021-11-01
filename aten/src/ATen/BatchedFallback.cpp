@@ -36,7 +36,7 @@ static bool areAnyArgumentsTensorList(const FunctionSchema& schema) {
   return std::any_of(
       schema.arguments().begin(),
       schema.arguments().end(),
-      [] (const Argument& arg) { return arg.type()->isSubtypeOf(ListType::ofTensors()); });
+      [] (const Argument& arg) { return arg.type()->isSubtypeOf(*ListType::ofTensors()); });
 }
 
 // Returns if an operator is in-place. An operator is inplace if:
