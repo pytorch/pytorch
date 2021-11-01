@@ -727,14 +727,6 @@ at::Tensor LazyNativeFunctions::tanh_backward(const at::Tensor& grad_output,
       bridge::GetLtcTensor(grad_output), bridge::GetLtcTensor(output)));
 }
 
-at::Tensor LazyNativeFunctions::threshold(const at::Tensor& self,
-                                          const at::Scalar& threshold,
-                                          const at::Scalar& value) {
-  LTC_FN_COUNTER("lazy::");
-  return bridge::AtenFromLtcTensor(lazy_tensor_aten_ops::threshold(
-      bridge::GetLtcTensor(self), threshold.to<double>(), value.to<double>()));
-}
-
 at::Tensor LazyNativeFunctions::transpose(const at::Tensor& self, int64_t dim0,
                                           int64_t dim1) {
   LTC_FN_COUNTER("lazy::");

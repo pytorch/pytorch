@@ -28,7 +28,6 @@
 #include "lazy_tensor_core/csrc/ops/select.h"
 #include "lazy_tensor_core/csrc/ops/squeeze.h"
 #include "lazy_tensor_core/csrc/ops/stack.h"
-#include "lazy_tensor_core/csrc/ops/threshold.h"
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_backward.h"
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_forward.h"
 #include "lazy_tensor_core/csrc/ops/unselect.h"
@@ -266,10 +265,6 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
     if (node->op().op == at::aten::stack) {
       return LowerStack(
           torch::lazy::NodeCast<ir::ops::Stack>(node, ir::OpKind(at::aten::stack)));
-    }
-    if (node->op().op == at::aten::threshold) {
-      return LowerThreshold(
-          torch::lazy::NodeCast<ir::ops::Threshold>(node, ir::OpKind(at::aten::threshold)));
     }
     if (node->op().op == at::aten::unsqueeze) {
       return LowerUnsqueeze(torch::lazy::NodeCast<ir::ops::Unsqueeze>(
@@ -731,16 +726,6 @@ class TSNodeLowering : public torch_lazy_tensors::compiler::TSNodeLoweringInterf
             ->output());
     arguments.emplace_back(stack->dim());
     return LowerBuiltin(stack, arguments);
-  }
-
-  TSOpVector LowerThreshold(const ir::ops::Threshold* node) {
-    std::vector<torch::jit::NamedValue> arguments;
-    for (auto& operand : node->operands()) {
-      arguments.emplace_back(loctx()->GetOutputOp(operand));
-    }
-    arguments.emplace_back(node->threshold());
-    arguments.emplace_back(node->value());
-    return LowerBuiltin(node, arguments);
   }
 
   TSOpVector LowerUnselect(const ir::ops::Unselect* node) {
