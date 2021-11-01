@@ -200,6 +200,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
                 "torch/csrc/lazy/core/ir.h",
                 "lazy_tensor_core/csrc/ts_backend/ts_node_lowering.h",
                 "torch/csrc/lazy/core/hash.h",
+                "lazy_tensors/str_join.h",
                 node_base_hdr if node_base_hdr is not None else None
             ] if path is not None],
             'external_backend_headers': f'#include "{output_dir}/{backend_key}NativeFunctions.h"',

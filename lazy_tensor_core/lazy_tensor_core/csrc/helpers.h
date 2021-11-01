@@ -64,23 +64,6 @@ class Helpers {
   static int64_t GetCanonicalPosition(c10::ArrayRef<int64_t> dimensions,
                                       int64_t dim, int64_t pos);
 
-  // Gathers the input using the order specified by the permutation. For each i,
-  // output[i] = input[permutation[i]]. The given permutation must be the same
-  // size as the input.
-  template <typename Container>
-  static std::vector<typename Container::value_type> Permute(
-      c10::ArrayRef<int64_t> permutation, const Container& input) {
-    using T = typename Container::value_type;
-    CHECK(input.size() == permutation.size() &&
-          lazy_tensors::IsPermutation(permutation))
-        << "Invalid permutation specified";
-    std::vector<T> output(input.size());
-    for (size_t i = 0; i < permutation.size(); ++i) {
-      output[i] = input[permutation[i]];
-    }
-    return output;
-  }
-
   // Creates a transposition from the given input and dimensions.
   static std::vector<int64_t> MakeTransposePermutation(int64_t dim0,
                                                        int64_t dim1,

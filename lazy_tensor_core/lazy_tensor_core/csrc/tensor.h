@@ -171,7 +171,8 @@ class LazyTensor {
   torch::lazy::Value CreateTensorNode(compiler::BackendDataPtr data,
                                       bool read_only) const;
 
-  View::IrNode GetViewUpdate(const std::shared_ptr<View>& view) const;
+  std::tuple<torch::lazy::Value, bool> GetViewUpdate(
+      const std::shared_ptr<View>& view) const;
 
   std::shared_ptr<View> UpdateView(std::shared_ptr<View> view,
                                    torch::lazy::Value ir_value) const;

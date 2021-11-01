@@ -101,11 +101,8 @@ class Alias {
     std::vector<ViewInfo> view_infos;
   };
 
-  explicit Alias(torch::lazy::Value ir_value) : ir_value_(std::move(ir_value)) {}
-
-  const torch::lazy::Value& ir_value() const { return ir_value_; }
-
-  const std::vector<UpdateData>& updates() const { return updates_; }
+  explicit Alias(torch::lazy::Value ir_value)
+      : root_ir_value_(std::move(ir_value)) {}
 
   size_t generation() const { return generation_; }
 
@@ -118,7 +115,7 @@ class Alias {
 
  private:
   // The IR value which is the root at which the view was created.
-  torch::lazy::Value ir_value_;
+  torch::lazy::Value root_ir_value_;
   // The stacked updates on the view. Orders matter, as most recent updates
   // might overwrite older ones.
   std::vector<UpdateData> updates_;
@@ -129,11 +126,6 @@ class Alias {
 
 class View {
  public:
-  struct IrNode {
-    torch::lazy::Value ir_value;
-    bool updated;
-  };
-
   View(lazy_tensors::Shape shape, std::shared_ptr<Alias> alias,
        ViewInfo view_info);
   View(lazy_tensors::Shape shape, std::shared_ptr<Alias> alias,
@@ -151,7 +143,7 @@ class View {
   // Extracts the current IrNode out of a view, into a IrNode structure
   // where the updated fields tells whether a new IR value has been created, or
   // the cached one returned.
-  IrNode GetViewIrNode();
+  std::tuple<torch::lazy::Value, bool> GetViewIrNode();
 
   bool IsUpToDate() const {
     return ir_value_ && generation_ == alias_->generation();
