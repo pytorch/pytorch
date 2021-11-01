@@ -436,12 +436,14 @@ struct PyTraceEvent {
   PyTraceEvent* parent_;
   CallType call_type_;
 
-  // We only observe us, however this discards information about ordering.
-  int32_t t0_epsilon_;
-  int32_t t1_epsilon_;
+  // Index in the list of raw call and return events. This allows one to
+  // convert a vector of PyTraceEvents back into the constituent call and
+  // return events, even when events share the same timestamp.
+  size_t call_idx_;
+  size_t return_idx_;
 };
 
-enum Command { kStart = 0, kStop, kClear };
+enum Command { kStartOne = 0, kStartAll, kStop, kClear };
 using CallFn = void (*)(Command);
 using TraceEventsFn = std::vector<std::unique_ptr<PyTraceEvent>> (*)();
 

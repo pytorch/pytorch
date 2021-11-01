@@ -60,17 +60,15 @@ TORCH_API void registerFunctions(
 }
 
 void call(Command c) {
-  TORCH_INTERNAL_ASSERT(
-    call_fn != nullptr,
-    "No registration for python_tracer::call_fn");
-  call_fn(c);
+  if (call_fn != nullptr) {
+    call_fn(c);
+  }
 }
 
 auto get_events() {
-  TORCH_INTERNAL_ASSERT(
-    get_events_fn != nullptr,
-    "No registration for python_tracer::get_final_events_fn");
-  return get_events_fn();
+  return get_events_fn != nullptr
+    ? get_events_fn()
+    : std::vector<std::unique_ptr<PyTraceEvent>>();
 }
 
 // We do not want `getTimeUs` to be directly visible, but we need a way for
@@ -87,15 +85,12 @@ struct Replay {
     return enter_ ? frame_->t0_ : frame_->t1_;
   }
 
-  int32_t epsilon() {
-    return enter_ ? frame_->t0_epsilon_ : frame_->t1_epsilon_;
+  size_t idx() {
+    return enter_ ? frame_->call_idx_ : frame_->return_idx_;
   }
 
   bool operator<(Replay& other) {
-    if (t() == other.t()) {
-      return epsilon() < other.epsilon();
-    }
-    return t() < other.t();
+    return idx() < other.idx();
   }
 };
 
@@ -344,16 +339,15 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
       }
     }
 
-    std::vector<std::unique_ptr<python_tracer::PyTraceEvent>> py_events;
-    for (auto& e : python_tracer::get_events()) {
-      // The Python tracer traces all threads, but the profiler only records
-      // operations originating from the thread where profiler was enabled.
-      // Because the Python tracer assigns the thread which enabled the profiler
-      // to ID zero we can filter all other threads; this can be relaxed later
-      // to enable full multi-threaded profiling.
-      if (!e->thread_id_) {
-        py_events.push_back(std::move(e));
-      }
+    addPythonEvents();
+  }
+
+  void addPythonEvents() {
+    auto py_events = python_tracer::get_events();
+    for (const auto& e : py_events) {
+      TORCH_INTERNAL_ASSERT(
+        !e->thread_id_,
+        "Profiler expects only single threaded Python tracing.");
     }
 
     // The remainder of this function merges the Python and Kineto event
@@ -363,18 +357,14 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
       return;
     }
 
-    // In order to determine the state of the python interpreter when a
-    // particular op is called, we have to replay the python events and note
-    // timestamps which are associate with op start times.
+    // Kineto event times
     std::vector<int64_t> op_start_times;
-    std::vector<python_tracer::PyTraceEvent*> py_stack;
-    ska::flat_hash_map<int64_t, python_tracer::PyTraceEvent*> op_py_map;
-
     for (const auto& a : cpu_trace->activities) {
       op_start_times.push_back(a.startTime);
     }
     std::sort(op_start_times.begin(), op_start_times.end());
 
+    // Python events
     std::vector<python_tracer::Replay> py_replay;
     for (const auto& e : py_events) {
       py_replay.push_back({ e.get(), true });
@@ -382,6 +372,11 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
     }
     std::sort(py_replay.begin(), py_replay.end());
 
+    // In order to determine the state of the python interpreter when a
+    // particular op is called, we have to replay the python events and note
+    // timestamps which are associated with op start times.
+    std::vector<python_tracer::PyTraceEvent*> py_stack;
+    ska::flat_hash_map<int64_t, python_tracer::PyTraceEvent*> op_py_map;
     auto replay_it = py_replay.begin();
     for (auto t : op_start_times) {
       while (replay_it != py_replay.end() && replay_it->t() <= t) {
@@ -419,10 +414,14 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
     for (size_t idx = 0; idx < activities.size(); ++idx) {
       auto& activity = activities[idx];
 
+      // Add any python events that occurred between this Kineto event and the
+      // previous Kineto event.
       while (py_events_it != py_events.end() && (*py_events_it)->t1_ <= activity.endTime) {
         push_py_event();
       }
 
+      // If the kineto event has a stack that means the JIT model has a stack
+      // associated with it that we need to respect.
       if (!kineto_events_[idx].hasStack()) {
         std::vector<std::string> py_names;
         _push_reverse_order(op_py_map.at(activity.startTime), py_names);
@@ -432,6 +431,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
       cpu_trace->activities.push_back(activity);
     }
 
+    // Add any Python events which finish after the last Kineto event.
     while (py_events_it != py_events.end()) {
       push_py_event();
     }
@@ -779,7 +779,7 @@ void enableProfiler(
 
   if (activities.count(ActivityType::CPU) || config.state == ProfilerState::NVTX) {
     if (config.with_stack) {
-      python_tracer::call(python_tracer::Command::kStart);
+      python_tracer::call(python_tracer::Command::kStartOne);
     }
     pushProfilingCallbacks(scopes);
   }
