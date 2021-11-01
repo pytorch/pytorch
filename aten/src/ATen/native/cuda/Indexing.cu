@@ -15,7 +15,7 @@
 #include <ATen/cuda/CUDAUtils.h>
 
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/cub.cuh>
+#include <ATen/cuda/cub.h>
 #include <c10/util/irange.h>
 #include <c10/core/QScheme.h>
 
