@@ -30,7 +30,7 @@ class RegisterInterface {
     DeregisterProfilingNode(canFuseNodeIndex_);
   }
 
-private:
+ private:
   int canFuseNodeIndex_;
 };
 
