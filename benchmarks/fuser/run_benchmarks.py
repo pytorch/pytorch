@@ -5,8 +5,6 @@ import torch
 import inspect
 import itertools
 
-from functorch import pointwise_operator
-
 torch.set_num_threads(1)
 torch._C._debug_set_fusion_group_inlining(False)
 
