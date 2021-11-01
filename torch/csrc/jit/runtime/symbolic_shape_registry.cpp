@@ -58,6 +58,22 @@ const std::string shape_compute_functions =
         def unary(self: List[int]):
           return _copy(self)
 
+        def broadcast_inplace(a: List[int], b: List[int]):
+          dimsA = len(a)
+          dimsB = len(b)
+          if dimsB > dimsA:
+            raise AssertionError("The dims of tensor b ({}) must be less than or equal to"
+                                 "the dims of tensor a ({}) ".format(dimsB, dimsA))
+          for dimA in range(dimsA):
+            dimB = dimsB - dimsA + dimA
+            sizeA = a[dimA]
+            sizeB = b[dimB] if (dimB >= 0) else 1
+            if sizeA != sizeB and sizeB != 1:
+                # TODO: only assertion error is bound in C++ compilation right now
+                raise AssertionError("The size of tensor a {} must match the size of tensor b ("
+                                "{}) at non-singleton dimension {}".format(sizeA, sizeB, dimA))
+          return _copy(a)
+
         def expand(self: List[int], sizes: List[int]):
           assert len(sizes) >= len(self)
           ndim = len(sizes)
@@ -644,13 +660,10 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::gt.Tensor(Tensor self, Tensor other) -> Tensor", "broadcast"},
       {"aten::rsub.Tensor(Tensor self, Scalar other, Scalar alpha=1) -> Tensor", "unary"},
       {"aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor", "broadcast"},
-      {"aten::add_.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor", "broadcast"},
       {"aten::add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor", "unary"},
       {"aten::hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1) -> Tensor", "unary"},
       {"aten::hardswish(Tensor self) -> Tensor", "unary"},
-      {"aten::hardswish_(Tensor self) -> Tensor", "unary"},
       {"aten::hardsigmoid(Tensor self) -> Tensor", "unary"},
-      {"aten::hardsigmoid_(Tensor self) -> Tensor", "unary"},
       {"aten::dropout(Tensor input, float p, bool train) -> Tensor", "unary"},
       {"aten::adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor", "adaptive_avg_pool2d"},
       {"aten::gelu(Tensor self) -> Tensor", "unary"},
@@ -719,6 +732,79 @@ std::unordered_map<const FunctionSchema*, std::shared_ptr<Graph>>
 // CompilationUnit that holds all these Functions and keeps them alive.
 auto compilation_unit = std::make_shared<CompilationUnit>();
 
+const at::optional<const FunctionSchema*> getInplaceVariant(
+    const FunctionSchema& base_schema) {
+  auto& inplace_variants =
+      getAllOperatorsFor(c10::Symbol::fromQualString(base_schema.name() + "_"));
+
+  for (const auto& variant : inplace_variants) {
+    // Need to check that all args are the same except for the first, which
+    // is almost the same except for the Alias info
+    const FunctionSchema* schema = &variant->schema();
+    if (!schema->isSubtypeOf(base_schema, false)) {
+      continue;
+    }
+
+    Argument self_arg = schema->arguments()[0];
+    if (!self_arg.alias_info()->isWrite()) {
+      continue;
+    }
+
+    Argument ret_arg = schema->returns()[0];
+    if (!ret_arg.alias_info()->isWrite()) {
+      continue;
+    }
+
+    return schema;
+  }
+  return at::nullopt;
+}
+
+void registerSchema(
+    const FunctionSchema* schema_string,
+    const std::string& shape_compute_function_name,
+    std::unordered_map<std::string, std::shared_ptr<Graph>>& reused_functions,
+    const CompilationUnit& module) {
+  if (reused_functions.count(shape_compute_function_name)) {
+    auto graph = reused_functions[shape_compute_function_name];
+
+    // allow extra unused arguments to map multiple functions to e.g. unary
+    TORCH_INTERNAL_ASSERT(
+        graph->inputs().size() <= schema_string->arguments().size());
+
+    cached_schema_to_graph[schema_string] = graph;
+    return;
+  }
+
+  Function& shape_compute_function =
+      module.get_function(shape_compute_function_name);
+  std::shared_ptr<Graph> graph =
+      toGraphFunction(shape_compute_function).graph();
+  Inline(*graph);
+
+  // ATEN operators can return multiple unboxed values, this in contrast to
+  // functions defined in TorchScript or User-Registered Operators
+  // Which must use a Tuple
+  // Here, modify the shape graph of aten operators with multiple outputs
+  // so that they correspond to each other
+  if (schema_string->returns().size() > 1) {
+    TORCH_INTERNAL_ASSERT(
+        graph->outputs().size() == 1 &&
+        graph->outputs().at(0)->node()->kind() == prim::TupleConstruct);
+    auto tuple_node = graph->outputs().at(0)->node();
+    graph->eraseOutput(0);
+    for (Value* v : tuple_node->inputs()) {
+      graph->registerOutput(v);
+    }
+  }
+  // allow extra unused arguments to map multiple functions to e.g. unary
+  TORCH_INTERNAL_ASSERT(
+      graph->inputs().size() <= schema_string->arguments().size());
+
+  cached_schema_to_graph[schema_string] = graph;
+  reused_functions[shape_compute_function_name] = graph;
+}
+
 void loadModule(const CompilationUnit& module) {
   std::unordered_map<std::string, std::shared_ptr<Graph>> reused_functions;
 
@@ -727,40 +813,27 @@ void loadModule(const CompilationUnit& module) {
     const FunctionSchema* schema_string = &pair.first->schema();
     const std::string& shape_compute_function_name = pair.second;
 
-    if (reused_functions.count(shape_compute_function_name)) {
-      cached_schema_to_graph[schema_string] =
-          reused_functions[shape_compute_function_name];
-      continue;
-    }
+    registerSchema(
+        schema_string, shape_compute_function_name, reused_functions, module);
 
-    Function& shape_compute_function =
-        module.get_function(shape_compute_function_name);
-    std::shared_ptr<Graph> graph =
-        toGraphFunction(shape_compute_function).graph();
-    Inline(*graph);
-
-    // ATEN operators can return multiple unboxed values, this in contrast to
-    // functions defined in TorchScript or User-Registered Operators
-    // Which must use a Tuple
-    // Here, modify the shape graph of aten operators with multiple outputs
-    // so that they correspond to each other
-    if (pair.first->schema().returns().size() > 1) {
-      TORCH_INTERNAL_ASSERT(
-          graph->outputs().size() == 1 &&
-          graph->outputs().at(0)->node()->kind() == prim::TupleConstruct);
-      auto tuple_node = graph->outputs().at(0)->node();
-      graph->eraseOutput(0);
-      for (Value* v : tuple_node->inputs()) {
-        graph->registerOutput(v);
+    // Register the inplace variant if any for functions with common shape forms
+    if (shape_compute_function_name == "unary") {
+      auto inplace_schema = getInplaceVariant(*schema_string);
+      if (inplace_schema.has_value()) {
+        registerSchema(
+            inplace_schema.value(), "unary", reused_functions, module);
       }
     }
-
-    // allow extra unused arguments to map multiple functions to e.g. unary
-    TORCH_INTERNAL_ASSERT(
-        graph->inputs().size() <= pair.first->schema().arguments().size());
-
-    cached_schema_to_graph[schema_string] = graph;
-    reused_functions[shape_compute_function_name] = graph;
+    if (shape_compute_function_name == "broadcast") {
+      auto inplace_schema = getInplaceVariant(*schema_string);
+      if (inplace_schema.has_value()) {
+        registerSchema(
+            inplace_schema.value(),
+            "broadcast_inplace",
+            reused_functions,
+            module);
+      }
+    }
   }
 }
 
