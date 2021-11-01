@@ -485,7 +485,7 @@ class OpInfo(object):
                  sample_inputs_func=None,  # function to generate sample inputs
 
                  # the following metadata relates to dtype support and is tested for correctness in test_ops.py
-                 dtypes=None,  # dtypes this function is expected to work with on CPU
+                 dtypes=None,  # dtypes this function is expected to work with on CPU and external backends.
                  dtypesIfCUDA=None,  # dtypes this function is expected to work with on CUDA
                  dtypesIfROCM=None,  # dtypes this function is expected to work with on ROCM
                  backward_dtypes=None,  # backward dtypes this function is expected to work with
@@ -545,7 +545,8 @@ class OpInfo(object):
                  assert_jit_shape_analysis=False,  # assert that jit shape analysis fully propagates shape
                  ):
 
-        assert dtypes is not None
+        assert dtypes is not None, ("`dtypes` argument for OpInfo should not be None,",
+                                    f"but found None for {name}")
         dtypes_args = (dtypes, dtypesIfCUDA, dtypesIfROCM)
         # Validates the dtypes are generated from the dispatch-related functions
         for dtype_list in dtypes_args:
