@@ -67,17 +67,6 @@ LazyTensor Cross(const LazyTensor& input, const LazyTensor& other,
   return lazy_tensor_aten_ops::stack({s1, s2, s3}, canonical_dim);
 }
 
-LazyTensor MakeMatrixWithDiagonal(const LazyTensor& input, int64_t diagonal) {
-  int64_t size = input.shape().get().dimensions(0);
-  LazyTensor identity =
-      lazy_tensor_aten_ops::eye(size, size, input.GetDevice(), input.dtype());
-  auto padding = diagonal >= 0
-                     ? std::vector<int64_t>{diagonal, 0, 0, diagonal}
-                     : std::vector<int64_t>{0, -diagonal, -diagonal, 0};
-  return lazy_tensor_aten_ops::constant_pad_nd(
-      lazy_tensor_aten_ops::mul(identity, input), padding, 0);
-}
-
 LazyTensor Select(const LazyTensor& input, int64_t dim, int64_t index) {
   auto shape = input.shape();
   dim = Helpers::GetCanonicalDimensionIndex(dim, shape.get().rank());
