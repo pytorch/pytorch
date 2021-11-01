@@ -11076,7 +11076,7 @@ op_db: List[OpInfo] = [
     ),
     ReductionOpInfo(
         '_masked.mean',
-        ref=reference_reduction_numpy(np.mean) if np.lib.NumpyVersion(np.__version__) >= '1.20.0' else None,
+        ref=reference_reduction_numpy(np.mean) if np.lib.NumpyVersion(np.__version__) >= '1.20.2' else None,
         method_variant=None,
         nan_policy='propagate',
         supports_out=False,
