@@ -37,8 +37,6 @@ jobs:
           auto-update-conda: true
           python-version: 3.8
       - name: Install ios Dependencies
-        env:
-          HOMEBREW_NO_AUTO_UPDATE: 1
         run: |
           brew install libtool
       - name: Run Fastlane
