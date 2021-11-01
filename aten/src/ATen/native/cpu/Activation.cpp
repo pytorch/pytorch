@@ -321,21 +321,6 @@ void shrink_backward_kernel(TensorIteratorBase& iter, const Scalar& lambd) {
   });
 }
 
-void hardtanh_backward_kernel(TensorIterator& iter, const Scalar& min, const Scalar& max) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardshrink_backward_cpu", [&] {
-    auto min_val = min.to<scalar_t>();
-    auto max_val = max.to<scalar_t>();
-    cpu_kernel_vec(
-        iter,
-        [=](scalar_t grad_val, scalar_t self_val) {
-          return (self_val <= min_val || self_val >= max_val) ? scalar_t(0) : grad_val;
-        },
-        [=](Vectorized<scalar_t> grad_val, Vectorized<scalar_t> self_val) {
-          return ((self_val > min_val) & (self_val < max_val)) & grad_val;
-        });
-  });
-}
-
 void hardswish_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardswish_cpu", [&]() {
     const scalar_t zero(0.0f);
@@ -627,7 +612,6 @@ REGISTER_DISPATCH(elu_stub, &elu_kernel);
 REGISTER_DISPATCH(elu_backward_stub, &elu_backward_kernel);
 REGISTER_DISPATCH(GeluKernel, &GeluKernelImpl);
 REGISTER_DISPATCH(GeluBackwardKernel, &GeluBackwardKernelImpl);
-REGISTER_DISPATCH(hardtanh_backward_stub, &hardtanh_backward_kernel);
 REGISTER_DISPATCH(hardsigmoid_stub, &hardsigmoid_kernel);
 REGISTER_DISPATCH(hardsigmoid_backward_stub, &hardsigmoid_backward_kernel);
 REGISTER_DISPATCH(hardswish_stub, &hardswish_kernel);

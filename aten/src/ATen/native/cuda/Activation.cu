@@ -322,16 +322,6 @@ void shrink_backward_kernel(TensorIteratorBase& iter, const Scalar& value) {
   });
 }
 
-void hardtanh_backward_kernel(TensorIterator& iter, const Scalar& min, const Scalar& max) {
-  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Half, iter.dtype(), "hardtanh_backward_cuda", [&]() {
-    auto min_val = min.to<scalar_t>();
-    auto max_val = max.to<scalar_t>();
-    gpu_kernel(iter, [min_val, max_val]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-      return (b <= min_val) || (b >= max_val) ? scalar_t(0) : a;
-    });
-  });
-}
-
 void softplus_kernel(TensorIteratorBase& iter, const Scalar& beta_, const Scalar& threshold_) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "softplus_cuda", [&]() {
     auto beta = beta_.to<scalar_t>();
@@ -586,7 +576,6 @@ void mish_backward_kernel(TensorIterator& iter) {
 
 } // namespace
 
-REGISTER_DISPATCH(hardtanh_backward_stub, &hardtanh_backward_kernel);
 REGISTER_DISPATCH(hardshrink_stub, &hardshrink_kernel);
 REGISTER_DISPATCH(log_sigmoid_backward_stub, &log_sigmoid_backward_kernel);
 REGISTER_DISPATCH(softshrink_stub, &softshrink_kernel);
