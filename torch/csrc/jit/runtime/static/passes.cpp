@@ -535,10 +535,8 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
   for (auto it = nodes.begin(); it != nodes.end(); ++it) {
     Node* node = *it;
     const std::string node_qual_string = node->kind().toQualString();
-    if (node_qual_string == "fb::sigrid_transforms_torch_bind" ||
-        node_qual_string == "fb::gather_ranges_to_dense" ||
-        node_qual_string == "fb::gather_ranges_to_dense_v2" ||
-        node_qual_string == "fb::variadic_sigrid_transforms_torch_bind") {
+    if (node_qual_string == "fb::gather_ranges_to_dense" ||
+        node_qual_string == "fb::gather_ranges_to_dense_v2") {
       const Value* value_out = node->outputs()[0];
       if (value_out->uses().size() > 1) {
         continue;
@@ -596,11 +594,17 @@ void FuseListUnpackV2(std::shared_ptr<torch::jit::Graph>& graph) {
       {fromQualString("static_runtime::variadic_grouped_accessor_op"),
        fromQualString("static_runtime::fused_variadic_grouped_accessor_op")},
       {fromQualString("static_runtime::variadic_grouped_accessor_op_v2"),
+       fromQualString("static_runtime::fused_variadic_grouped_accessor_op_v2")},
+      {fromQualString("fb::sigrid_transforms_torch_bind"),
+       fromQualString("static_runtime::fused_sigrid_transforms_torch_bind")},
+      {fromQualString("fb::variadic_sigrid_transforms_torch_bind"),
        fromQualString(
-           "static_runtime::fused_variadic_grouped_accessor_op_v2")}};
+           "static_runtime::fused_variadic_sigrid_transforms_torch_bind")}};
 
   AliasDb alias_db(
-      graph, /*isFrozen=*/false, /*enablePreciseTupleContainerAnalysis=*/true);
+      graph,
+      /*isFrozen=*/false,
+      /*enablePreciseTupleContainerAnalysis=*/true);
   const std::vector<Value*> graph_outputs(
       graph->outputs().begin(), graph->outputs().end());
   auto nodes = graph->nodes();
