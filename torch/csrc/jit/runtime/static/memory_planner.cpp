@@ -205,8 +205,8 @@ void MemoryPlanner::allocateManagedTensors() {
       DCHECK_EQ(storageImpl, tensor->storage().unsafeGetStorageImpl());
     }
 #endif
-    reused_tensors_ += managed_tensors_[group_idx].second.size();
-    reused_tensors_ -= 1;
+    DCHECK_NE(managed_tensors_[group_idx].second.size(), 0);
+    reused_tensors_ += managed_tensors_[group_idx].second.size() - 1;
     storageImpl->set_data_ptr_noswap(
         at::DataPtr(src, src, nullptr, c10::Device(c10::DeviceType::CPU)));
     storageImpl->set_nbytes(tensor_size);

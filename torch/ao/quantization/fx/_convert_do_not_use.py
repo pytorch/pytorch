@@ -1,4 +1,4 @@
-from typing import Any, Dict, Tuple, List
+from typing import Any, Dict, List
 import torch
 from torch.fx import (
     GraphModule,
@@ -14,16 +14,11 @@ from ..utils import (
     get_qparam_dict,
 )
 
-from .quantization_types import Pattern
 from .match_utils import (
     find_matches,
 )
 from .graph_module import (
-    is_observed_module,
     QuantizedGraphModule,
-)
-from .quantization_patterns import (
-    QuantizeHandler,
 )
 from ._equalize import update_obs_for_equalization, convert_eq_obs
 from .utils import (
@@ -38,24 +33,25 @@ from torch.ao.quantization.quantize import (
     is_activation_post_process,
 )
 
-
-def restore_state(
-        observed: GraphModule
-) -> Tuple[Dict[Pattern, QuantizeHandler], Dict[str, Tuple[str, type]], Dict[str, Any]]:
-    assert is_observed_module(observed), \
-        'incoming model must be produced by prepare_fx'
-    prepare_custom_config_dict: Dict[str, Any] = \
-        observed._prepare_custom_config_dict  # type: ignore[assignment]
-    node_name_to_scope: Dict[str, Tuple[str, type]] = observed._node_name_to_scope  # type: ignore[assignment]
-    patterns: Dict[Pattern, QuantizeHandler] = observed._patterns  # type: ignore[assignment]
-    return patterns, node_name_to_scope, prepare_custom_config_dict
+from .convert import restore_state
 
 def _convert_do_not_use(
         model: GraphModule, is_reference: bool = False,
         convert_custom_config_dict: Dict[str, Any] = None,
         is_standalone_module: bool = False,
         _remove_qconfig_flag: bool = True) -> QuantizedGraphModule:
-    """ standalone_module means it a submodule that is not inlined in
+    """
+    We will convert an observed model (a module with observer calls) to a reference
+    quantized model, the rule is simple:
+    1. for each observer module call in the graph, we'll convert it to calls to
+       quantize and dequantize functions based on the observer instance
+    2. for weighted operations like linear/conv, we need to convert them to reference
+       quantized module, this requires us to know whether the dtype configured for the
+       weight is supported in the backend, this is done in prepare step and the result
+       is stored in observed_node_names, we can decide whether we need to swap the
+       module based on this set
+
+    standalone_module means it a submodule that is not inlined in
     parent module, and will be quantized separately as one unit.
 
     Returns a quantized standalone module, whether input/output is quantized is
@@ -65,7 +61,7 @@ def _convert_do_not_use(
     """
     if convert_custom_config_dict is None:
         convert_custom_config_dict = {}
-    patterns, node_name_to_scope, prepare_custom_config_dict = restore_state(model)
+    patterns, node_name_to_scope, prepare_custom_config_dict, observed_node_names = restore_state(model)
     qconfig_map: Dict[str, QConfigAny] = model._qconfig_map  # type: ignore[assignment]
 
     assert is_reference, "convert2 only supports reference option"
@@ -178,8 +174,11 @@ def _convert_do_not_use(
                     torch.nn.Conv3d]:
                 fmodule = modules[node.target]
                 qconfig = fmodule.qconfig
+
+                is_observed = node.name in observed_node_names
+                is_weight_quantized = weight_is_statically_quantized(qconfig)
                 # TODO: rename weight_is_statically_quantized to weight_is_int8_quantized
-                if qconfig is not None and weight_is_statically_quantized(qconfig):
+                if qconfig is not None and is_observed and is_weight_quantized:
                     weight_post_process = qconfig.weight()
                     # run weight observer
                     weight_post_process(fmodule.weight)  # type: ignore[operator]
