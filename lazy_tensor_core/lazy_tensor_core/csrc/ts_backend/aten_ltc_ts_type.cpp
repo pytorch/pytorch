@@ -403,23 +403,6 @@ at::Tensor LazyNativeFunctions::index_select(const at::Tensor& self,
       bridge::GetLtcTensor(self), dim, bridge::GetLtcTensor(index)));
 }
 
-at::Tensor LazyNativeFunctions::leaky_relu(const at::Tensor& self,
-                                           const at::Scalar& negative_slope) {
-  LTC_FN_COUNTER("lazy::");
-  return bridge::AtenFromLtcTensor(lazy_tensor_aten_ops::leaky_relu(
-      bridge::GetLtcTensor(self), negative_slope.toDouble()));
-}
-
-at::Tensor LazyNativeFunctions::leaky_relu_backward(const at::Tensor& grad_output,
-                                                    const at::Tensor& input,
-                                                    const at::Scalar& negative_slope,
-                                                    bool self_is_result) {
-  LTC_FN_COUNTER("lazy::");
-  return bridge::AtenFromLtcTensor(lazy_tensor_aten_ops::leaky_relu_backward(
-      bridge::GetLtcTensor(grad_output), bridge::GetLtcTensor(input),
-      negative_slope.toDouble(), self_is_result));
-}
-
 at::Tensor LazyNativeFunctions::lt(const at::Tensor& self,
                                    const at::Scalar& other) {
   LTC_FN_COUNTER("lazy::");
