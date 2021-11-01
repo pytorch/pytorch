@@ -31,7 +31,7 @@ def get_module_fusion_fqns(
 
         # Walk the subgraphs and record the FQNs of all known module fusions.
         # For now, this is brute forced for simplicity, can be optimized later if
-        # necessaary.
+        # necessary.
         for idx, seen_op in qstate.idx_to_seen_ops.items():
             for fusion_pattern in known_module_fusion_patterns:
                 cur_fqns = []

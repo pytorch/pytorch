@@ -4,7 +4,7 @@ import torch
 import torch.nn.functional as F
 
 from .mappings import (
-    q_mod_to_float_mod_mapping,
+    ops_are_related,
 )
 
 from .utils import (
@@ -141,30 +141,8 @@ class AutoQuantizationState(torch.nn.Module):
             expected_op = seen_op.type
         except IndexError:
             _raise_obs_not_found_error(cur_op)
-        if isinstance(cur_op, torch.nn.Module):
-            cur_type = type(cur_op)
-            is_related = (
-                (cur_type == expected_op) or
-                (
-                    cur_type in q_mod_to_float_mod_mapping and
-                    q_mod_to_float_mod_mapping[cur_type] == expected_op
-                )
-            )
-            if not is_related:
-                _raise_obs_op_mismatch(cur_op, expected_op)
-        else:
-            # TODO: move to mapping
-            is_related = (
-                (cur_op == expected_op) or
-                (cur_op is torch.add and expected_op is torch.Tensor.add) or
-                (cur_op is torch.Tensor.add and expected_op is torch.add) or
-                # TODO: add other flavors of add to complete this
-                (cur_op is torch.add and expected_op is torch.Tensor.add_) or
-                (cur_op is torch.mul and expected_op is torch.Tensor.mul) or
-                (cur_op is torch.Tensor.mul and expected_op is torch.mul)
-            )
-            if not is_related:
-                _raise_obs_op_mismatch(cur_op, expected_op)
+        if not ops_are_related(cur_op, expected_op):
+            _raise_obs_op_mismatch(cur_op, expected_op)
 
     def mark_cur_op_complete(self, cur_op: Callable) -> None:
         """
@@ -484,7 +462,7 @@ class AutoQuantizationState(torch.nn.Module):
             elif func_output_dtype_type == FuncOutputDTypeType.DTYPE_DEFAULT_BC_UNSUPPORTED_SYNTAX:
                 dtype_to_use = torch.float
             else:
-                if op == torch.cat:
+                if isinstance(args[0], (tuple, list)):  # for torch.cat
                     dtype_to_use = args[0][0]._qtensor_info.inf_dtype
                 else:
                     dtype_to_use = args[0]._qtensor_info.inf_dtype
@@ -535,7 +513,8 @@ class AutoQuantizationState(torch.nn.Module):
         # potentially quantize args, based on arg_quant_infos
         new_args = []
         tensor_arg_idx = 0
-        if op == torch.ops.quantized.cat:
+        # TODO: refactor this to use iterate_and_apply
+        if isinstance(args[0], (tuple, list)):  # torch.cat variants
             # input tensors
             new_first_arg = []
             for arg in args[0]:

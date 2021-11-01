@@ -10,6 +10,7 @@ from torch.quantization.quantization_mappings import (
 )
 
 import operator
+from typing import Callable
 
 # TODO(future PR): reuse all of these with existing quantization mappings
 
@@ -127,6 +128,28 @@ known_module_fusion_patterns = [
     (torch.nn.Conv2d, torch.nn.ReLU),
     (torch.nn.Conv2d, torch.nn.BatchNorm2d),
 ]
+
+def ops_are_related(cur_op: Callable, expected_op_type: Callable) -> bool:
+    if isinstance(cur_op, torch.nn.Module):
+        cur_type = type(cur_op)
+        is_related = (
+            (cur_type == expected_op_type) or
+            (
+                cur_type in q_mod_to_float_mod_mapping and
+                q_mod_to_float_mod_mapping[cur_type] == expected_op_type
+            )
+        )
+    else:
+        is_related = (
+            (cur_op == expected_op_type) or
+            (cur_op is torch.add and expected_op_type is torch.Tensor.add) or
+            (cur_op is torch.Tensor.add and expected_op_type is torch.add) or
+            # TODO: add other flavors of add to complete this
+            (cur_op is torch.add and expected_op_type is torch.Tensor.add_) or
+            (cur_op is torch.mul and expected_op_type is torch.Tensor.mul) or
+            (cur_op is torch.Tensor.mul and expected_op_type is torch.mul)
+        )
+    return is_related
 
 # validity checks
 # TODO: move these out
