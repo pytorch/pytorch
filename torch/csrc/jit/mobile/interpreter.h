@@ -16,7 +16,7 @@ struct InterpreterState {
  private:
   void enterFrame(const Code&);
   void leaveFrame();
-  void saveExceptionDebugHandle();
+  void saveExceptionDebugHandles();
   void callFunction(torch::jit::Function& f, Stack& stack);
 
   c10::IValue& reg(size_t reg);
@@ -24,14 +24,7 @@ struct InterpreterState {
   std::vector<Frame> frames_;
 };
 
-// Interpreter executes instruction in a loop one by one
-// from a list of instructions. PC is a program counter pointer
-// pointing to the current instruction being executed.
-// This function returns the current PC.
-// Note that this is set only when exception occurs.
-// since this is a thread local variable and setting it for
-// every instruction will add overhead of thread local variable access.
-DebugHandle getInterpretersExceptionDebugHandle();
+const std::vector<DebugHandle>& getInterpretersExceptionDebugHandles();
 } // namespace mobile
 } // namespace jit
 } // namespace torch

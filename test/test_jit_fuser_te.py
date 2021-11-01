@@ -1992,6 +1992,7 @@ works_list = [
     'ceil',
     'clamp',
     'clamp.scalar',
+    'contiguous',
     'cos',
     'cosh',
     'div.no_rounding_mode',
