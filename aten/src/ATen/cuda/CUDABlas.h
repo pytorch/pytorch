@@ -70,11 +70,11 @@ template <>
 void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16));
 #endif
 
-#define CUDABLAS_BGEMM_ARGTYPES(Dtype)                                       \
-  char transa, char transb, int64_t m, int64_t n, int64_t k, Dtype alpha,   \
-      const Dtype *a, int64_t lda, int64_t stridea, \
-      const Dtype *b, int64_t ldb, int64_t strideb, \
-      Dtype beta, Dtype *c, int64_t ldc, int64_t stridec, int64_t num_batches
+#define CUDABLAS_BGEMM_ARGTYPES(Dtype)                                                              \
+  char transa, char transb, int64_t m, int64_t n, int64_t k, at::acc_type< Dtype , true > alpha,    \
+      const Dtype *a, int64_t lda, int64_t stridea,                                                 \
+      const Dtype *b, int64_t ldb, int64_t strideb,                                                 \
+      at::acc_type < Dtype , true > beta, Dtype *c, int64_t ldc, int64_t stridec, int64_t num_batches
 
 template <typename Dtype>
 inline void bgemm(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {

@@ -241,8 +241,9 @@ const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, co
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!result_->is_conj());
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "baddbmm_cuda", [&] {
-    scalar_t alpha_val = alpha.to<scalar_t>();
-    scalar_t beta_val = beta.to<scalar_t>();
+    using acc_t = at::acc_type<scalar_t, true>;
+    acc_t alpha_val = alpha.to<acc_t>();
+    acc_t beta_val = beta.to<acc_t>();
     scalar_t* batch1_ptr = batch1_->data_ptr<scalar_t>();
     scalar_t* batch2_ptr = batch2_->data_ptr<scalar_t>();
     scalar_t* result_ptr = result_->data_ptr<scalar_t>();
