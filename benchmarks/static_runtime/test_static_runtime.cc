@@ -95,8 +95,46 @@ TEST(StaticRuntime, ModuleHasOp) {
 }
 
 TEST(StaticRuntime, CanEnableStaticRuntime) {
+  const auto while_script = R"JIT(
+    def forward(self, a: Tensor, x: int):
+        c = 0
+        while c < x:
+            a = a * a
+            c += 2
+        return a
+  )JIT";
+
+  const auto for_script = R"JIT(
+    def forward(self, a: Tensor, x: int):
+        for c in range(x):
+            a = a * a
+        return a
+  )JIT";
+
+  const auto if_script = R"JIT(
+    def forward(self, a: Tensor, b: bool):
+        if b:
+            return a
+        else:
+            return a * a
+  )JIT";
+
+  const auto is_script = R"JIT(
+    def forward(self, a: Tensor, b: Tensor):
+        return a is b
+  )JIT";
+
+  const auto is_not_script = R"JIT(
+    def forward(self, a: Tensor, b: Tensor):
+        return a is not b
+  )JIT";
+
   EXPECT_TRUE(testCanEnableStaticRuntime(reshape_inplace_script));
+  EXPECT_FALSE(testCanEnableStaticRuntime(for_script));
+  EXPECT_FALSE(testCanEnableStaticRuntime(while_script));
   EXPECT_FALSE(testCanEnableStaticRuntime(if_script));
+  EXPECT_FALSE(testCanEnableStaticRuntime(is_script));
+  EXPECT_FALSE(testCanEnableStaticRuntime(is_not_script));
 }
 
 TEST(StaticRuntime, NestedOutput) {
@@ -681,10 +719,8 @@ TEST(StaticRuntime, IndividualOps_Detach) {
   auto b = at::randn({3, 2, 2});
   std::vector<IValue> args{a};
   std::vector<IValue> args2{b};
-  testStaticRuntime(detach_script_0, args);
-  testStaticRuntime(detach_script_0, args, args2);
-  testStaticRuntime(detach_script_1, args);
-  testStaticRuntime(detach_script_1, args, args2);
+  testStaticRuntime(detach_script, args);
+  testStaticRuntime(detach_script, args, args2);
 }
 
 TEST(StaticRuntime, IndividualOps_ExpandAs) {
