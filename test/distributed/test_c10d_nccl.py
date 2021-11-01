@@ -2626,6 +2626,11 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         with self.assertRaisesRegex(RuntimeError, "Invalid function argument"):
             c10d.barrier(device_ids=self.rank)
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_nccl_warn_not_in_group(self):
+        self._test_warn_not_in_group(backend="nccl")
+
 
 if __name__ == "__main__":
     assert (
