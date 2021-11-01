@@ -645,6 +645,7 @@
   variants: function, method
   device_check: NoCheck
   device_guard: False
+  tags: inplace_view
   dispatch:
     CompositeExplicitAutograd: as_strided_
 
@@ -1236,6 +1237,7 @@
     MkldnnCPU: copy_mkldnn_
     SparseCPU, SparseCUDA, SparseHIP, SparseXPU: copy_sparse_wrapper_
     CompositeExplicitAutograd: copy_
+    SparseCsrCPU, SparseCsrCUDA: copy_sparse_csr_
 
 - func: _copy_from(Tensor self, Tensor dst, bool non_blocking=False) -> Tensor
   dispatch: {}
@@ -1823,6 +1825,7 @@
     CPU, Meta: resize_
     CUDA: resize_cuda_
     QuantizedCPU: quantized_resize_cpu_
+    SparseCsrCPU, SparseCsrCUDA: resize_sparse_csr_
 
 - func: empty_quantized(int[] size, Tensor qtensor, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   category_override: factory
@@ -2734,6 +2737,7 @@
 - func: matrix_exp(Tensor self) -> Tensor
   variants: function, method
 
+# This function should be deprecated in favor of differential_analytic_matrix_function in FunctionsManual.cpp
 - func: matrix_exp_backward(Tensor self, Tensor grad) -> Tensor
 
 # DEPRECATED: Use torch.aminmax instead
@@ -3029,7 +3033,8 @@
   structured_delegate: mm.out
   variants: function, method
   dispatch:
-    SparseCPU, SparseCUDA, SparseCsrCPU, SparseCsrCUDA: _sparse_mm
+    SparseCPU, SparseCUDA: _sparse_mm
+    SparseCsrCPU, SparseCsrCUDA: _sparse_csr_mm
 
 - func: mm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -3122,7 +3127,7 @@
 - func: mv(Tensor self, Tensor vec) -> Tensor
   variants: function, method
   dispatch:
-    CPU, CUDA, SparseCsrCUDA: mv
+    CompositeExplicitAutograd: mv
     SparseCPU, SparseCUDA, SparseCsrCPU: mv_sparse
 
 - func: mv.out(Tensor self, Tensor vec, *, Tensor(a!) out) -> Tensor(a!)
@@ -3878,6 +3883,7 @@
 # this. If this `Variable` is a view, throws an `std::runtime_error()`.
 - func: detach_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
+  tags: inplace_view
   dispatch:
     CompositeExplicitAutograd: detach_
 
@@ -3905,6 +3911,27 @@
   device_guard: False
   dispatch:
     CompositeExplicitAutograd: slice_backward
+
+- func: slice_scatter(Tensor self, Tensor src, int dim=0, int? start=None, int? end=None, int step=1) -> Tensor
+  variants: function, method
+  device_check: NoCheck
+  device_guard: False
+  dispatch:
+    CompositeExplicitAutograd: slice_scatter
+
+- func: select_scatter(Tensor self, Tensor src, int dim, int index) -> Tensor
+  variants: function, method
+  device_check: NoCheck
+  device_guard: False
+  dispatch:
+    CompositeExplicitAutograd: select_scatter
+
+- func: diagonal_scatter(Tensor self, Tensor src, int offset=0, int dim1=0, int dim2=1) -> Tensor
+  variants: function, method
+  device_check: NoCheck
+  device_guard: False
+  dispatch:
+    CompositeExplicitAutograd: diagonal_scatter
 
 - func: slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
   variants: function, method
@@ -4010,6 +4037,7 @@
   variants: method
   device_check: NoCheck
   device_guard: False
+  tags: inplace_view
   dispatch:
     CompositeExplicitAutograd: squeeze_
 
@@ -4017,6 +4045,7 @@
   variants: method
   device_check: NoCheck
   device_guard: False
+  tags: inplace_view
   dispatch:
     CompositeExplicitAutograd: squeeze_
 
@@ -4024,6 +4053,7 @@
   variants: method
   device_check: NoCheck
   device_guard: False
+  tags: inplace_view
 
 - func: sspaddmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function, method
@@ -4255,6 +4285,7 @@
   device_check: NoCheck
   device_guard: False
   variants: method
+  tags: inplace_view
   dispatch:
     CompositeExplicitAutograd: t_
 
@@ -4361,6 +4392,7 @@
   variants: method
   device_check: NoCheck
   device_guard: False
+  tags: inplace_view
   dispatch:
     CompositeExplicitAutograd: transpose_
 
@@ -4497,6 +4529,7 @@
   variants: method
   device_check: NoCheck
   device_guard: False
+  tags: inplace_view
   dispatch:
     CompositeExplicitAutograd: unsqueeze_
 
@@ -5299,7 +5332,7 @@
 - func: dequantize.self(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    CPU: dequantize_cpu
+    CPU, CUDA: dequantize_cpu_or_cuda
     QuantizedCPU, QuantizedCUDA: dequantize_quantized
 
 - func: dequantize.tensors(Tensor[] tensors) -> Tensor[]
@@ -5420,6 +5453,14 @@
 
 - func: choose_qparams_optimized(Tensor input, int numel, int n_bins, float ratio, int bit_width) -> (Tensor, Tensor)
   variants: function
+
+- func: _autocast_to_reduced_precision(Tensor(a) self, bool cuda_enabled, bool cpu_enabled, ScalarType cuda_dtype, ScalarType cpu_dtype) -> Tensor(a)
+  variants: method
+  device_guard: False
+
+- func: _autocast_to_full_precision(Tensor(a) self, bool cuda_enabled, bool cpu_enabled) -> Tensor(a)
+  variants: method
+  device_guard: False
 
 - func: _to_copy(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, bool non_blocking=False, MemoryFormat? memory_format=None) -> Tensor
   device_check: NoCheck
@@ -6094,16 +6135,12 @@
     CPU, CUDA: bitwise_right_shift
 
 - func: tril_(Tensor(a!) self, int diagonal=0) -> Tensor(a!)
+  structured_delegate: tril.out
   variants: method
-  dispatch:
-    CPU: tril_cpu_
-    CUDA: tril_cuda_
 
 - func: triu_(Tensor(a!) self, int diagonal=0) -> Tensor(a!)
+  structured_delegate: triu.out
   variants: method
-  dispatch:
-    CPU: triu_cpu_
-    CUDA: triu_cuda_
 
 - func: digamma_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -6217,24 +6254,24 @@
     CPU, CUDA: cross
 
 - func: triu.out(Tensor self, int diagonal=0, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
   dispatch:
-    CPU: triu_cpu_out
-    CUDA: triu_cuda_out
+    CPU: triu_cpu
+    CUDA: triu_cuda
 
 - func: triu(Tensor self, int diagonal=0) -> Tensor
+  structured_delegate: triu.out
   variants: method, function
-  dispatch:
-    CompositeExplicitAutograd: triu
 
 - func: tril.out(Tensor self, int diagonal=0, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
   dispatch:
-    CPU: tril_cpu_out
-    CUDA: tril_cuda_out
+    CPU: tril_cpu
+    CUDA: tril_cuda
 
 - func: tril(Tensor self, int diagonal=0) -> Tensor
+  structured_delegate: tril.out
   variants: method, function
-  dispatch:
-    CompositeExplicitAutograd: tril
 
 - func: tril_indices(int row, int col, int offset=0, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
@@ -6659,6 +6696,9 @@
 - func: nonzero_numpy(Tensor self) -> Tensor[]
   variants: method, function
 
+- func: argwhere(Tensor self) -> Tensor
+  variants: method, function
+
 - func: gather.out(Tensor self, int dim, Tensor index, *, bool sparse_grad=False, Tensor(a!) out) -> Tensor(a!)
   structured: True
   dispatch:
@@ -6729,13 +6769,14 @@
     CUDA: legacy_lstsq_cuda
 
 - func: triangular_solve.X(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False, *, Tensor(a!) X, Tensor(b!) M) -> (Tensor(a!) solution, Tensor(b!) cloned_coefficient)
+  structured: True
   dispatch:
     CPU, CUDA: triangular_solve_out
+    SparseCsrCUDA: triangular_solve_out_sparse_csr_cuda
 
 - func: triangular_solve(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False) -> (Tensor solution, Tensor cloned_coefficient)
+  structured_delegate: triangular_solve.X
   variants: method, function
-  dispatch:
-    CPU, CUDA: triangular_solve
 
 - func: symeig.e(Tensor self, bool eigenvectors=False, bool upper=True, *, Tensor(a!) e, Tensor(b!) V) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
   dispatch:
@@ -6782,6 +6823,7 @@
   variants: method
   device_check: NoCheck
   device_guard: False
+  tags: inplace_view
 
 # swapdims, alias for transpose
 - func: swapdims(Tensor(a) self, int dim0, int dim1) -> Tensor(a)
@@ -6793,6 +6835,7 @@
   variants: method
   device_check: NoCheck
   device_guard: False
+  tags: inplace_view
 
 - func: cholesky.out(Tensor self, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -7092,6 +7135,18 @@
   variants: method, function
   dispatch:
     CPU: histogram_cpu
+
+- func: _histogramdd_bin_edges(Tensor self, int[] bins, *, float[]? range=None, Tensor? weight=None, bool density=False) -> Tensor[]
+  dispatch:
+    CPU: histogramdd_bin_edges_cpu
+
+- func: _histogramdd_from_bin_cts(Tensor self, int[] bins, *, float[]? range=None, Tensor? weight=None, bool density=False) -> Tensor
+  dispatch:
+    CPU: histogramdd_cpu
+
+- func: _histogramdd_from_bin_tensors(Tensor self, Tensor[] bins, *, Tensor? weight=None, bool density=False) -> Tensor
+  dispatch:
+    CPU: histogramdd_cpu
 
 - func: fmod.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -8258,6 +8313,16 @@
   dispatch:
     CPU: searchsorted_cpu
     CUDA: searchsorted_cuda
+
+# [Note about _torch_cuda_cu_linker_symbol_op and torch_cuda_cu]
+# This is a DUMMY function to force the linking against torch_cuda_cu on Windows.
+# Otherwise, the Windows linker will optimize and not include torch_cuda_cu even when we
+# want it to be included. This is similar to what we do with warp_size for torch_cuda_cpp,
+# described as the solution to this issue: https://github.com/pytorch/pytorch/issues/31611
+# This op should NOT be used or exposed or edited or else Windows builds (with BUILD_SPLIT_CUDA) will break.
+- func: _torch_cuda_cu_linker_symbol_op(Tensor self) -> Tensor
+  dispatch:
+    CUDA: _torch_cuda_cu_linker_symbol_op_cuda
 
 - func: searchsorted.Tensor_out(Tensor sorted_sequence, Tensor self, *, bool out_int32=False, bool right=False, Tensor(a!) out) -> Tensor(a!)
   dispatch:

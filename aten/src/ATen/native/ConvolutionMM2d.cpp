@@ -52,20 +52,17 @@ static inline void slow_conv2d_shape_check(
   }
 
   const int64_t ndim = input.dim();
-  const int64_t dim_batch = 0;
   const int64_t dim_planes = 1;
   const int64_t dim_height = 2;
   const int64_t dim_width = 3;
 
-  // Allow for empty batch size but not other dimensions
-  bool valid_empty = ndim == 4 && input.size(dim_batch) == 0 &&
-      input.size(dim_planes) != 0 && input.size(dim_height) != 0 &&
-      input.size(dim_width) != 0;
-
-  TORCH_CHECK(
-      (input.numel() > 0 || valid_empty) && ndim == 4,
-      "non-empty 4D input tensor expected but got: ",
-      input.sizes());
+  // Allow for empty batch size and channel size but not other dimensions
+  TORCH_CHECK(ndim == 4, "Expected 4D input tensor, but got: ", input.sizes());
+  for (int64_t dim = 2; dim < ndim; ++dim) {
+    TORCH_CHECK(input.size(dim) != 0,
+                "Expected non-zero size for input dimension ", dim,
+                ", but got input shape: ", input.sizes(), ". Only the batch and channel dimensions support size 0.");
+  }
 
   const int64_t input_height = input.size(dim_height);
   const int64_t input_width = input.size(dim_width);
@@ -109,7 +106,9 @@ static inline void slow_conv2d_shape_check(
     if (weight.dim() == 2) {
       n_input_plane /= (kernel_height * kernel_width);
     }
-    check_dim_size(input, ndim, dim_planes, n_input_plane);
+    if (input.size(1) != 0) {
+      check_dim_size(input, ndim, dim_planes, n_input_plane);
+    }
   }
 
   if (grad_output.defined()) {
@@ -529,6 +528,7 @@ std::tuple<Tensor, Tensor> slow_conv2d_forward_cpu(
       padding,
       output,
       finput);
+
   return std::make_tuple(output, finput);
 }
 
@@ -558,6 +558,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_backward_out_cpu(
   if (grad_bias.defined()) {
     at::sum_out(grad_bias, grad_output, IntArrayRef{0, 2, 3});
   }
+
 
   if (grad_weight.defined()) {
     grad_weight.resize_(weight.sizes());
