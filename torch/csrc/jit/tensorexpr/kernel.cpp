@@ -1046,11 +1046,12 @@ void TensorExprKernel::bindConstant(const torch::jit::Value* v) {
   auto val = toIValue(v).value();
   if (torch::isCustomClass(val)) {
     auto name_hint = "const_" + sanitizeName(v->debugName());
-    auto dtype = Dtype(ScalarType::Float);
+    auto dtype = Dtype(ScalarType::Char);
     std::vector<ExprPtr> dims;
     BufPtr buf = alloc<Buf>(name_hint, dims, dtype);
     auto dataPtr = val.toObjectRef().getSlot(0).toCapsule().get();
-    constants_.push_back({buf, dataPtr});
+    dims.push_back(alloc<LongImm>(sizeof(dataPtr)));
+    constants_.push_back({buf, nullptr, const_cast<Node*>(v->node())});
     bufs_[v] = buf;
     return;
   }
