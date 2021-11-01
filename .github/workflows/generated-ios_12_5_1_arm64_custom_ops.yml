@@ -11,20 +11,13 @@ on:
       - master
       - release/*
   workflow_dispatch:
+concurrency:
+  group: ios_12_5_1_arm64_custom_ops-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
 
 env:
   IN_CI: 1
   IS_GHA: 1
-
-# Parameters from upstream job
-#  environment:
-#    BUILD_ENVIRONMENT: << parameters.build_environment >>
-#    IOS_ARCH: << parameters.ios_arch >>
-#    IOS_PLATFORM: << parameters.ios_platform >>
-#    SELECTED_OP_LIST: << parameters.op_list >>
-#    USE_PYTORCH_METAL: << parameters.use_metal >>
-#    BUILD_LITE_INTERPRETER: << parameters.lite_interpreter >>
-#    USE_COREML_DELEGATE: << parameters.use_coreml >>
 
 jobs:
 
