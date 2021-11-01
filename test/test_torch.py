@@ -7392,6 +7392,27 @@ else:
         self.assertEqual(z, x)
 
     @skipMeta
+    @onlyCUDA
+    def test_dlpack_default_stream(self, device):
+        class DLPackTensor:
+            def __init__(self, tensor):
+                self.tensor = tensor
+
+            def __dlpack_device__(self):
+                return self.tensor.__dlpack_device__()
+
+            def __dlpack__(self, stream=None):
+                assert stream == 1
+                capsule = self.tensor.__dlpack__(stream)
+                converted = True
+                return capsule
+
+        # CUDA-based tests runs on non-default streams
+        with torch.cuda.stream(torch.cuda.default_stream()):
+            x = DLPackTensor(make_tensor((5,), device, torch.float32))
+            from_dlpack(x)
+
+    @skipMeta
     @onlyNativeDeviceTypes
     @dtypes(*get_all_dtypes(include_bool=False))
     def test_dlpack_tensor_invalid_stream(self, device, dtype):
