@@ -27,7 +27,7 @@ bool insertableIValue(const IValue& ivalue) {
   if (ivalue.isList() || ivalue.isTuple()) {
     c10::ArrayRef<IValue> elems;
     if (ivalue.isTuple()) {
-      elems = ivalue.toTupleRef().elements();
+      elems = ivalue.toTuple()->elements();
     } else {
       elems = ivalue.toListRef();
     }

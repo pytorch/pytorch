@@ -85,8 +85,8 @@ void parseInstructions(
                               debugHandlesTableElements,
                               "function_debug_handles",
                               BYTECODE_INDEX_MODULE_DEBUG_HANDLES)
-                              .toTupleRef()
-                              .elements())[0]
+                              .toTuple()
+                              ->elements())[0]
                              .toIntList();
     TORCH_CHECK(
         debug_handles_list.size() == ins_list.size(),
