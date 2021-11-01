@@ -260,9 +260,12 @@ class _DataPipeMeta(GenericMeta):
 
     def __new__(cls, name, bases, namespace, **kwargs):
         if "__iter__" in namespace:
-            namespace["__iter__"] = _data_pipe_decorator(
-                namespace["__iter__"],
-                'enumerate(DataPipe)#{}'.format(name))
+            func_name = namespace["__iter__"]
+            if not hasattr(func_name, "decorated"):
+                func_name.decorated = True
+                namespace["__iter__"] = _data_pipe_decorator(
+                    func_name,
+                    'enumerate(DataPipe)#{}'.format(name))
 
         # For Python > 3.6
         cls.__origin__ = None
@@ -345,7 +348,7 @@ class _DataPipeMeta(GenericMeta):
 
 def _data_pipe_decorator(func, profile_name):
     def wrapper(*args, **kwargs):
-        iterator = iter(func(*args, **kwargs))
+        iterator = func(*args, **kwargs)
         try:
             while True:
                 with torch.autograd.profiler.record_function(profile_name):
