@@ -461,20 +461,23 @@ torch_mobile_tracer_sources = [
     "torch/csrc/jit/mobile/model_tracer/KernelDTypeTracer.cpp",
 ]
 
-torch_mobile_core = [
+torch_mobile_core_sources = [
+    "torch/csrc/jit/mobile/function.cpp",
+    "torch/csrc/jit/mobile/import.cpp",
+    "torch/csrc/jit/mobile/interpreter.cpp",
+    "torch/csrc/jit/mobile/module.cpp",
+    "torch/csrc/jit/mobile/parse_bytecode.cpp",
+    "torch/csrc/jit/mobile/parse_operators.cpp",
+]
+
+torch_mobile_extra_sources = [
     # backend_debug_info.cpp provides
     # __torch__.torch.classes.backend.BackendDebugInfo class
     # This should not be needed eventually.
     # TODO: Remove this dependency
     "torch/csrc/jit/backends/backend_debug_info.cpp",
-    "torch/csrc/jit/mobile/function.cpp",
-    "torch/csrc/jit/mobile/import.cpp",
-    "torch/csrc/jit/mobile/interpreter.cpp",
     "torch/csrc/jit/mobile/model_compatibility.cpp",
-    "torch/csrc/jit/mobile/module.cpp",
     "torch/csrc/jit/mobile/observer.cpp",
-    "torch/csrc/jit/mobile/parse_bytecode.cpp",
-    "torch/csrc/jit/mobile/parse_operators.cpp",
     "torch/csrc/jit/runtime/register_prim_ops.cpp",
     "torch/csrc/jit/runtime/register_special_ops.cpp",
 ]
@@ -493,7 +496,7 @@ libtorch_lite_eager_symbolication = [
 ]
 
 # TODO: core_trainer_sources is not necessary for libtorch lite
-libtorch_lite_cmake_sources = sorted(core_trainer_sources + core_sources_common + torch_mobile_core)
+libtorch_lite_cmake_sources = sorted(core_trainer_sources + core_sources_common + torch_mobile_core_sources + torch_mobile_extra_sources)
 
 libtorch_cmake_sources = libtorch_core_sources + libtorch_core_jit_sources
 
