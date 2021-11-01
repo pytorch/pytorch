@@ -19,20 +19,6 @@ class GenericComputationTS : public GenericComputation {
       : graph_(graph),
         graph_executor_(std::move(graph), "") {}
 
-  lazy_tensors::StatusOr<ProgramShape> GetProgramShape()
-      const override {
-    std::vector<std::string> parameter_names;
-    for (torch::jit::Value* input : graph_->inputs()) {
-      parameter_names.push_back(input->debugName());
-    }
-    // NB: The return type is only used by certain backends to assing a physical
-    // layout. This backend doesn't use it for anything, so it's ok to leave it
-    // empty.
-    std::vector<lazy_tensors::Shape> parameters(parameter_names.size());
-    return ProgramShape(parameters, parameter_names,
-                                      lazy_tensors::Shape());
-  }
-
   std::shared_ptr<torch::jit::Graph> graph() const { return graph_; }
 
   torch::jit::GraphExecutor& graph_executor() { return graph_executor_; }
@@ -40,6 +26,9 @@ class GenericComputationTS : public GenericComputation {
  private:
   std::shared_ptr<torch::jit::Graph> graph_;
   torch::jit::GraphExecutor graph_executor_;
+  std::vector<std::string> parameter_names_;
+  std::vector<lazy_tensors::Shape> parameter_shapes_;
+  lazy_tensors::Shape result_shape_;
 };
 
 class TSLoweringContext : public ir::LoweringContext {

@@ -7,35 +7,15 @@
 namespace torch_lazy_tensors {
 namespace compiler {
 
-class ProgramShape {
- public:
-  ProgramShape(std::vector<lazy_tensors::Shape> parameters,
-               std::vector<std::string> parameter_names, lazy_tensors::Shape result)
-      : parameters_(std::move(parameters)),
-        parameter_names_(std::move(parameter_names)),
-        result_(std::move(result)) {
-    CHECK_EQ(parameters_.size(), parameter_names_.size());
-  }
-
-  int parameters_size() const { return parameters_.size(); }
-
-  const std::vector<lazy_tensors::Shape>& parameters() const { return parameters_; }
-
-  const std::vector<std::string>& parameter_names() const {
-    return parameter_names_;
-  }
-
-  const lazy_tensors::Shape& result() const { return result_; }
-
- private:
-  std::vector<lazy_tensors::Shape> parameters_;
-  std::vector<std::string> parameter_names_;
-  lazy_tensors::Shape result_;
-};
-
 class GenericComputation {
  public:
-  virtual lazy_tensors::StatusOr<ProgramShape> GetProgramShape() const = 0;
+  virtual int parameters_size() const  = 0;
+
+  virtual const std::vector<lazy_tensors::Shape>& parameter_shapes() const = 0;
+
+  virtual const std::vector<std::string>& parameter_names() const = 0;
+
+  virtual const lazy_tensors::Shape& result_shape() const = 0;
 
   virtual ~GenericComputation() = default;
 };
@@ -48,23 +28,18 @@ struct ExecuteComputationOptions : public ExecuteOptions {};
 
 class Computation {
  public:
-  Computation(std::shared_ptr<GenericComputation> computation,
-              ProgramShape program_shape, std::vector<std::string> devices)
+  Computation(std::shared_ptr<GenericComputation> computation, std::vector<std::string> devices)
       : computation_(std::move(computation)),
-        program_shape_(std::move(program_shape)),
         devices_(std::move(devices)) {}
 
   virtual ~Computation() {}
 
   GenericComputation* computation() const { return computation_.get(); }
 
-  const ProgramShape& program_shape() const { return program_shape_; }
-
   const std::vector<std::string>& devices() const { return devices_; }
 
  private:
   std::shared_ptr<GenericComputation> computation_;
-  ProgramShape program_shape_;
   std::vector<std::string> devices_;
 };
 using ComputationPtr = std::shared_ptr<Computation>;

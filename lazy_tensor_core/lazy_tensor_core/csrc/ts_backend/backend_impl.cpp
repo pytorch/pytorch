@@ -148,10 +148,8 @@ std::vector<ComputationPtr> TSBackendImpl::Compile(
   for (const auto& instance : instances) {
     auto ts_computation = static_cast<const ts_backend::GenericComputationTS*>(
         instance.computation.get());
-    ProgramShape program_shape =
-        ConsumeValue(ts_computation->GetProgramShape());
     ts_computations.push_back(std::make_shared<Computation>(
-        instance.computation, program_shape, instance.devices));
+        instance.computation, instance.devices));
   }
   return ts_computations;
 }

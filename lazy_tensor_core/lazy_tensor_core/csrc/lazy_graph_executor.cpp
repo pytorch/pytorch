@@ -769,9 +769,6 @@ LazyGraphExecutor::CompilationResult LazyGraphExecutor::Compile(
   }
 
   auto computation = ConsumeValue(lowering_ctx->Build());
-  compiler::ProgramShape program_shape =
-      ConsumeValue(computation->GetProgramShape());
-  // lazy_tensors::Shape shape = program_shape.result();
 
   std::vector<compiler::CompileInstance> instances;
   instances.push_back(
@@ -786,7 +783,10 @@ LazyGraphExecutor::CompilationResult LazyGraphExecutor::Compile(
           std::move(instances));
   VLOG(3) << "Compiling IR graph hash " << torch::lazy::HashToString(coll.hash)
           << " on device " << coll.device << " done!";
-  CHECK_EQ(program_shape.parameters_size(), po_data->parameters_data.size());
+  if (computation) {
+    // TODO(whc) should computation be allowed null here? (becuase it is in one case)
+    CHECK_EQ(computation->parameters_size(), po_data->parameters_data.size());
+  }
 
   return {/*device=*/coll.device,
           /*emitted_nodes=*/lowering_ctx->GetEmittedNodeCount(),
