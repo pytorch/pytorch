@@ -156,14 +156,14 @@ void TsNode::AddOperand(NodePtr node, size_t index) {
   operands_as_outputs_.push_back(Output(operands_.back().get(), index));
 }
 
-TSOpVector TsNode::Lower(TSNodeLoweringInterface& tsLoweringInterface,
-                         std::shared_ptr<torch::jit::GraphFunction> function,
+TSOpVector TsNode::Lower(std::shared_ptr<torch::jit::GraphFunction> function,
                          ts_backend::TSLoweringContext* loctx) const {
   // TODO(whc) beginning to invert the design here.  Move to provide a Lower()
   // method on each node, starting with codegen.  Once we delete most
   // non-codegen ops, make this pure-virtual and put Lower() on the remaining
-  // non-codegen ops.
-  return tsLoweringInterface.LowerNonCodegenOps(this);
+  // non-codegen ops.  For now, returning empty list here triggers fallback to
+  // old lowering path.
+  return {};
 }
 
 }  // namespace ir

@@ -51,7 +51,13 @@ class TSNodeLowering
   bool Lower(const torch::lazy::Node* node) override {
     if (auto* tsnode =
             dynamic_cast<const torch_lazy_tensors::ir::TsNode*>(node)) {
-      TSOpVector ops = tsnode->Lower(*this, function_, loctx());
+      // First, we call the node lowering function, which exists for newly
+      // codegenned or refactored nodes
+      TSOpVector ops = tsnode->Lower(function_, loctx());
+      if (ops.empty()) {
+        // Then fall back to legacy lowering code, which should be gradually removed
+        ops = LowerNonCodegenOps(node);
+      }
       if (ops.empty()) {
         return false;
       }
@@ -389,30 +395,14 @@ class TSNodeLowering
       const torch::lazy::Node* node,
       const std::vector<torch::jit::NamedValue>& arguments,
       const std::vector<torch::jit::NamedValue>& kwarguments = {}) {
-    return LowerBuiltin(node->op().op, arguments, kwarguments);
+    return LowerTSBuiltin(function_, node->op().op, arguments, kwarguments);
+  }
+  TSOpVector LowerBuiltin(
+    c10::Symbol sym, const std::vector<torch::jit::NamedValue>& arguments,
+    const std::vector<torch::jit::NamedValue>& kwarguments = {}) {
+    return LowerTSBuiltin(function_, sym, arguments, kwarguments);
   }
 
-  TSOpVector LowerBuiltin(
-      c10::Symbol sym, const std::vector<torch::jit::NamedValue>& arguments,
-      const std::vector<torch::jit::NamedValue>& kwarguments = {}) override {
-    auto builtin =
-        std::make_shared<torch::jit::BuiltinFunction>(sym, at::nullopt);
-    auto magic_method = std::make_shared<torch::jit::MagicMethod>("", builtin);
-    auto ret = magic_method->call({}, *function_, arguments, kwarguments, 0);
-    auto sv = dynamic_cast<torch::jit::SimpleValue*>(ret.get());
-    CHECK(sv);
-    if (sv->getValue()->type()->kind() == c10::TypeKind::TupleType) {
-      const auto tuple_call_result = sv->asTuple({}, *function_);
-      TSOpVector tuple_result;
-      for (const auto& tuple_component : tuple_call_result) {
-        auto tuple_component_sv =
-            dynamic_cast<torch::jit::SimpleValue*>(tuple_component.get());
-        tuple_result.push_back(tuple_component_sv->getValue());
-      }
-      return tuple_result;
-    }
-    return {sv->getValue()};
-  }
 
   TSOpVector LowerAsStrided(const ir::ops::AsStrided* node) {
     std::vector<torch::jit::NamedValue> arguments;
@@ -755,6 +745,30 @@ class TSNodeLowering
 
   std::shared_ptr<torch::jit::GraphFunction> function_;
 };
+
+
+TSOpVector LowerTSBuiltin(
+    std::shared_ptr<torch::jit::GraphFunction> function,
+    c10::Symbol sym, const std::vector<torch::jit::NamedValue>& arguments,
+    const std::vector<torch::jit::NamedValue>& kwarguments) {
+  auto builtin =
+      std::make_shared<torch::jit::BuiltinFunction>(sym, at::nullopt);
+  auto magic_method = std::make_shared<torch::jit::MagicMethod>("", builtin);
+  auto ret = magic_method->call({}, *function, arguments, kwarguments, 0);
+  auto sv = dynamic_cast<torch::jit::SimpleValue*>(ret.get());
+  CHECK(sv);
+  if (sv->getValue()->type()->kind() == c10::TypeKind::TupleType) {
+    const auto tuple_call_result = sv->asTuple({}, *function);
+    TSOpVector tuple_result;
+    for (const auto& tuple_component : tuple_call_result) {
+      auto tuple_component_sv =
+          dynamic_cast<torch::jit::SimpleValue*>(tuple_component.get());
+      tuple_result.push_back(tuple_component_sv->getValue());
+    }
+    return tuple_result;
+  }
+  return {sv->getValue()};
+}
 
 TSNodeLoweringInterface* GetTSNodeLowering() {
   static TSNodeLoweringInterface* ts_node_lowering =

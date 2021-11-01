@@ -1,6 +1,6 @@
 #pragma once
 
-#include "lazy_tensor_core/csrc/ts_backend/ts_lowering_context.h"
+#include "lazy_tensor_core/csrc/lowering_context.h"
 #include "lazy_tensors/computation_client/sys_util.h"
 #include "lazy_tensors/shape.h"
 #include "torch/csrc/lazy/core/ir.h"
@@ -85,8 +85,7 @@ class TsNode : public torch::lazy::Node {
   // Lower is a backend-specific method since it returns a backend specific
   // type. hence, it is convenient to define it differently per-backend rather
   // than at Node API
-  virtual TSOpVector Lower(TSNodeLoweringInterface& tsLoweringInterface,
-                           std::shared_ptr<torch::jit::GraphFunction> function,
+  virtual TSOpVector Lower(std::shared_ptr<torch::jit::GraphFunction> function,
                            ts_backend::TSLoweringContext* loctx) const;
 
  private:
