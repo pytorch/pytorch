@@ -82,6 +82,7 @@ using namespace ::c10::cuda;
 } // namespace cuda
 
 struct Function;
+struct GraphFunction;
 struct MatchedSchema;
 
 // A Graph represents one "function" of computation.
@@ -1373,6 +1374,7 @@ struct Graph {
   friend TORCH_API std::ostream& operator<<(std::ostream& out, const Graph& g);
 
   TORCH_API std::shared_ptr<Graph> copy();
+  TORCH_API std::unique_ptr<Graph> copyUnique();
   TORCH_API void remapTypes(const std::function<TypePtr(TypePtr)>& type_map);
 
  private:
@@ -1380,6 +1382,7 @@ struct Graph {
   TORCH_API void freeNode(Node* n);
   TORCH_API void freeValue(Value* v);
   TORCH_API void freeBlock(Block* b);
+  void cloneFrom(Graph& src);
 };
 
 /** \brief An utility class for setting temporary insertion points.
@@ -1539,13 +1542,20 @@ TORCH_API std::vector<Value*> insertGraph(
  */
 TORCH_API std::vector<Value*> inlineCallTo(
     Node* to_replace,
-    Function* callee,
+    GraphFunction* callee,
     bool use_graph = true);
 
 /** If there is only one value in \p OUTPUTS and its kind is Tuple, insert a
  * tuple unpack node and return the resulting values.
  */
 TORCH_API std::vector<Value*> unpackOutputs(const std::vector<Value*>& outputs);
+
+TORCH_API std::vector<Node*> findAllNodes(Graph& g, Symbol kind, bool recurse);
+TORCH_API std::vector<Node*> findAllNodes(Block& b, Symbol kind, bool recurse);
+TORCH_API std::vector<Node*> findAllNodes(
+    at::ArrayRef<Block*> a,
+    Symbol kind,
+    bool recurse);
 
 struct OperatorSet {
   OperatorSet(std::initializer_list<const char*> sig_literals);
@@ -1640,6 +1650,82 @@ struct OperatorMap {
   std::vector<OpMapType> getAllKeysAndValues() const {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<OpMapType> keys_values;
+    for (auto& symbol_mapping : map) {
+      auto& vec = symbol_mapping.second;
+      for (auto& pair : vec) {
+        keys_values.push_back(pair);
+      }
+    }
+    return keys_values;
+  }
+
+ private:
+  friend struct Node;
+  MapType map;
+};
+
+template <typename T>
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+struct FunctionSchemaMap {
+  // Type aliasing
+  using FuncSchemaMapType = typename std::pair<FunctionSchema, T>;
+  using ValueType = std::vector<FuncSchemaMapType>;
+  using MapType = std::unordered_map<Symbol, ValueType>;
+
+  FunctionSchemaMap() = default;
+  void insert(const FunctionSchema& schema, T val) {
+    // Remove if exists before insert
+    erase(schema);
+    map[Symbol::fromQualString(schema.name())].emplace_back(
+        std::make_pair(schema, val));
+  }
+
+  void erase(const FunctionSchema& schema) {
+    auto it = map.find(Symbol::fromQualString(schema.name()));
+    if (it == map.end()) {
+      return;
+    }
+    for (auto vit = it->second.begin(); vit != it->second.end(); ++vit) {
+      if (vit->first == schema) {
+        it->second.erase(vit);
+        break;
+      }
+    }
+    if (it->second.size() == 0) {
+      map.erase(Symbol::fromQualString(schema.name()));
+    }
+  }
+
+  bool contains(const FunctionSchema& schema) const {
+    const auto it = map.find(Symbol::fromQualString(schema.name()));
+    if (it == map.end()) {
+      return false;
+    }
+    for (auto vit = it->second.begin(); vit != it->second.end(); ++vit) {
+      if (vit->first->schema() == schema) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  c10::optional<T> find(const FunctionSchema& schema) const {
+    const auto it = map.find(Symbol::fromQualString(schema.name()));
+    if (it == map.end()) {
+      return c10::nullopt;
+    }
+    for (auto vit = it->second.begin(); vit != it->second.end(); ++vit) {
+      if (vit->first == schema) {
+        return vit->second;
+      }
+    }
+    return c10::nullopt;
+  }
+
+  // TODO: return iterator
+  std::vector<FuncSchemaMapType> getAllKeysAndValues() const {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    std::vector<FuncSchemaMapType> keys_values;
     for (auto& symbol_mapping : map) {
       auto& vec = symbol_mapping.second;
       for (auto& pair : vec) {

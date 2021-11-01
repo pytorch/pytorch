@@ -1,3 +1,5 @@
+# Owner(s): ["module: dataloader"]
+
 import math
 import sys
 import errno
@@ -834,6 +836,9 @@ class BulkLoadingSampler(torch.utils.data.Sampler):
     TEST_WITH_TSAN,
     "Fails with TSAN with the following error: starting new threads after multi-threaded "
     "fork is not supported. Dying (set die_after_fork=0 to override)")
+@unittest.skipIf(
+    TEST_WITH_ASAN,
+    "DataLoader tests hang in ASAN, see: https://github.com/pytorch/pytorch/issues/66223")
 class TestDataLoader(TestCase):
 
     def setUp(self):

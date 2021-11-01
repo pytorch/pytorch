@@ -8,6 +8,6 @@ here.
 """
 from torch.ao.quantization.fx.fusion_patterns import (
     FuseHandler,
-    ConvBNReLUFusion,
+    ConvOrLinearBNReLUFusion,
     ModuleReLUFusion
 )

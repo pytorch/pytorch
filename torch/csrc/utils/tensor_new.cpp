@@ -16,6 +16,8 @@
 #include <torch/csrc/autograd/generated/variable_factories.h>
 
 #include <ATen/ATen.h>
+#include <ATen/DLConvertor.h>
+#include <ATen/dlpack.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/TracerMode.h>
@@ -201,7 +203,7 @@ void recursive_store(char* data, IntArrayRef sizes, IntArrayRef strides, int64_t
   PyObject** items = PySequence_Fast_ITEMS(seq.get());
   for(const auto i : c10::irange(n)) {
 #ifdef USE_NUMPY
-    if (PyArray_Check(items[i])) {
+    if (is_numpy_available() && PyArray_Check(items[i])) {
       TORCH_WARN_ONCE(
         "Creating a tensor from a list of numpy.ndarrays is extremely slow. "
         "Please consider converting the list to a single numpy.ndarray with "
@@ -976,6 +978,197 @@ Tensor new_tensor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyO
     return new_tensor;
   }
   throw std::runtime_error("new_tensor(): invalid arguments");
+}
+
+Tensor tensor_frombuffer(PyObject* buffer, ScalarType dtype, int64_t count, int64_t offset, bool requires_grad) {
+  auto elsize = at::elementSize(dtype);
+  size_t actual_count = 0;
+
+  Py_buffer view;
+  if (PyObject_GetBuffer(buffer, &view, PyBUF_WRITABLE) < 0) {
+    TORCH_CHECK(
+        PyObject_GetBuffer(buffer, &view, PyBUF_SIMPLE) >= 0,
+        "could not retrieve buffer from object");
+    TORCH_WARN_ONCE(
+        "The given buffer is not writable, and PyTorch does "
+        "not support non-writable tensors. This means you can write to the "
+        "underlying (supposedly non-writable) buffer using the tensor. "
+        "You may want to copy the buffer to protect its data or make it writable "
+        "before converting it to a tensor. This type of warning will be "
+        "suppressed for the rest of this program.");
+    PyErr_Clear();
+  }
+
+  Py_INCREF(view.obj);
+  THPObjectPtr obj(view.obj);
+
+  auto len = view.len;
+  auto buf = view.buf;
+  PyBuffer_Release(&view);
+
+  TORCH_CHECK_VALUE(
+      len > 0 && count != 0,
+      "both buffer length (", len, ") and count (", count, ") must not be 0");
+  TORCH_CHECK_VALUE(
+      offset >= 0 && offset < len,
+      "offset (", offset, " bytes) must be non-negative and no greater than "
+      "buffer length (", len, " bytes) minus 1");
+  TORCH_CHECK_VALUE(
+      count > 0 || (len - offset) % elsize == 0,
+      "buffer length (", len - offset, " bytes) after offset (", offset, " bytes) "
+      "must be a multiple of element size (", elsize, ")");
+
+  if (count < 0) {
+    actual_count = (len - offset) / elsize;
+  } else {
+    actual_count = static_cast<size_t>(count);
+  }
+
+  TORCH_CHECK_VALUE(
+      static_cast<size_t>(offset) + actual_count * elsize <= len,
+      "requested buffer length (", actual_count, " * ", elsize, " bytes) "
+      "after offset (", offset, " bytes) must not be greater than actual "
+      "buffer length (", len, " bytes)");
+
+  auto offset_buf = static_cast<char*>(buf) + offset;
+  auto options = TensorOptions()
+      .dtype(dtype)
+      .device(c10::kCPU);
+
+  auto tensor = at::for_blob(offset_buf, static_cast<int64_t>(actual_count))
+                    .options(options)
+                    .deleter([obj = obj.release()](void*) {
+                      pybind11::gil_scoped_acquire gil;
+                      Py_DECREF(obj);
+                    })
+                    .make_tensor();
+  tensor.set_requires_grad(requires_grad);
+  return tensor;
+}
+
+Tensor tensor_fromDLPack(PyObject *data) {
+  DLManagedTensor * dlMTensor = (DLManagedTensor *)PyCapsule_GetPointer(data, "dltensor");
+  TORCH_CHECK(dlMTensor,
+    "from_dlpack received an invalid capsule. "
+    "Note that DLTensor capsules can be consumed only once, "
+    "so you might have already constructed a tensor from it once.");
+
+  // atensor steals the ownership of the underlying storage. It also passes a
+  // destructor function that will be called when the underlying storage goes
+  // out of scope. When the destructor is called, the dlMTensor is destructed too.
+  auto atensor = at::fromDLPack(dlMTensor);
+
+  // Make sure this capsule will never be used again.
+  PyCapsule_SetName(data, "used_dltensor");
+
+  // It is possible that the call to at::fromDLPack is the very first
+  // call to create a Tensor in PyTorch. If so, then _lazy_init has
+  // not been called, and the attempt to call createPyObject will fail
+  // because cuda ATen types have not been registered in Python yet.
+  // so if we have a cuda tensor, then we need to make sure
+  // we have called _lazy_init here
+  if(atensor.is_cuda()) {
+    py::module::import("torch.cuda").attr("init")();
+  }
+  return atensor;
+}
+
+Tensor asarray(
+    PyObject* obj,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Device> device,
+    c10::optional<bool> copy,
+    bool requires_grad) {
+  Tensor tensor;
+
+  bool force_copy = copy.value_or(false);
+  bool force_alias = !copy.value_or(true);
+  bool should_warn_numpy_not_writable = false;
+
+  auto dtype_unwrapped =
+      dtype.value_or(torch::tensors::get_default_scalar_type());
+
+  // Check whether 'obj' is a 'Tensor'
+  if (THPVariable_Check(obj)) {
+    tensor = THPVariable_Unpack(obj);
+  }
+
+#ifdef USE_NUMPY
+  // Check whether 'obj' is a NumPy Array
+  if (is_numpy_available() && PyArray_Check(obj)) {
+    tensor = tensor_from_numpy(obj, /*warn_if_not_writeable=*/false);
+    should_warn_numpy_not_writable = !PyArray_ISWRITEABLE((PyArrayObject*) obj);
+  }
+#endif
+
+  // Check whether 'obj' is a 'DLPack' capsule
+  if (!tensor.defined() && PyCapsule_IsValid(obj, "dltensor") != 0) {
+    tensor = tensor_fromDLPack(obj);
+  }
+
+  // Check whether 'obj' implements the buffer protocol
+  if (!tensor.defined() && PyObject_CheckBuffer(obj) != 0) {
+    tensor = tensor_frombuffer(obj, dtype_unwrapped, -1, 0, requires_grad);
+  }
+
+  if (tensor.defined()) {
+    // Given an aliasable tensor, should we copy it?
+    bool wrong_device = device.has_value() && device.value() != tensor.device();
+    bool wrong_dtype =
+        dtype.has_value() && dtype.value() != tensor.scalar_type();
+    bool needs_copying = !copy.has_value() && (wrong_device || wrong_dtype);
+
+    // Given a defined tensor, we copy it if either we have to (copy=True) or
+    // if we need to (copy=None) because of mismatched device or dtype.
+    if (force_copy || needs_copying) {
+      if (wrong_device || wrong_dtype) {
+        tensor = tensor.to(
+            device.value_or(tensor.device()),
+            dtype.value_or(tensor.scalar_type()));
+      } else {
+        tensor = tensor.clone();
+      }
+    } else {
+      // If we are not copying, we have to check whther we have the tensor
+      // in the right device, with the right dtype.
+      TORCH_CHECK_VALUE(
+          !wrong_device,
+          "can't alias tensor from device '", tensor.device(),
+          "' to '", device.value(), "'.");
+      TORCH_CHECK_VALUE(
+          !wrong_dtype,
+          "can't alias tensor with dtype '", tensor.scalar_type(),
+          "' into dtype '", dtype.value(), "'.");
+      // If tensor is a NumPy Array view, we warn the user about non-writeable
+      // arrays if this is the case.
+      if (should_warn_numpy_not_writable) {
+        warn_numpy_not_writeable();
+      }
+    }
+
+    // Setting 'requires_grad' when the tensor is not a leaf does not work.
+    // Whenever that happens, we have to use 'detach'.
+    if (!tensor.is_leaf() && !requires_grad) {
+      tensor = tensor.detach();
+    } else {
+      tensor.set_requires_grad(requires_grad);
+    }
+  } else {
+    // Undefined tensor means it does not implement neither DLPack nor
+    // the buffer protocol. Last case is a sequence, in which case we must
+    // copy (copy can't be false).
+    TORCH_CHECK_VALUE(
+        !force_alias, "can't alias arbitrary sequence into a tensor.");
+
+    // Make tensor from sequence, inferring its type, and then convert
+    // it to the desired type.
+    tensor = internal_new_from_data(
+        TensorOptions(), dtype_unwrapped, device, obj, false, false, true);
+    tensor = tensor.to(dtype_unwrapped);
+    tensor.set_requires_grad(requires_grad);
+  }
+
+  return tensor;
 }
 
 }} // namespace torch::utils
