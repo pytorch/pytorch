@@ -27,6 +27,7 @@ except ImportError:  # Python > 3.6
     class GenericMeta(_ProtocolMeta, ABCMeta):  # type: ignore[no-redef]
         pass
 
+import torch
 
 class Integer(numbers.Integral):
     pass
@@ -258,6 +259,11 @@ class _DataPipeMeta(GenericMeta):
     type: _DataPipeType
 
     def __new__(cls, name, bases, namespace, **kwargs):
+        if "__iter__" in namespace:
+            namespace["__iter__"] = _data_pipe_decorator(
+                namespace["__iter__"],
+                'enumerate(DataPipe)#{}'.format(name))
+
         # For Python > 3.6
         cls.__origin__ = None
         # Need to add _is_protocol for Python 3.7 _ProtocolMeta
@@ -337,6 +343,17 @@ class _DataPipeMeta(GenericMeta):
     def __hash__(self):
         return hash((self.__name__, self.type))
 
+def _data_pipe_decorator(func, profile_name):
+    def wrapper(*args, **kwargs):
+        iterator = iter(func(*args, **kwargs))
+        try:
+            while True:
+                with torch.autograd.profiler.record_function(profile_name):
+                    yield next(iterator)
+        except StopIteration:
+            pass
+
+    return wrapper
 
 def _dp_init_subclass(sub_cls, *args, **kwargs):
     # Add function for datapipe instance to reinforce the type
