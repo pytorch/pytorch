@@ -9560,6 +9560,7 @@ op_db: List[OpInfo] = [
                    aliases=('negative', ),
                    ref=np.negative,
                    dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
+                   supports_forward_ad=True,
                    assert_autodiffed=True,),
     OpInfo('dist',
            op=torch.dist,
