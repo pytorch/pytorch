@@ -20,12 +20,6 @@ class GenericComputation {
   virtual ~GenericComputation() = default;
 };
 
-struct ExecuteOptions {
-  bool explode_tuple = true;
-};
-
-struct ExecuteComputationOptions : public ExecuteOptions {};
-
 class Computation {
  public:
   Computation(std::shared_ptr<GenericComputation> computation, std::vector<std::string> devices)
@@ -43,7 +37,6 @@ class Computation {
   std::vector<std::string> devices_;
 };
 using ComputationPtr = std::shared_ptr<Computation>;
-
 
 // TODO(whc)
 // what is vector<device> used for here?

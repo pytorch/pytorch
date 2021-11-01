@@ -883,14 +883,13 @@ LazyGraphExecutor::ScheduleSyncTensorsGraph(
       std::move(cached_computation));
 
   auto syncfn = [async, hash = coll->hash]() {
-    compiler::ExecuteComputationOptions options;
     try {
       VLOG(3) << "Executing IR graph hash " << torch::lazy::HashToString(hash)
               << " on device " << async->device << " ...";
       auto results = torch_lazy_tensors::compiler::getBackendRegistrar()
                          ->ExecuteComputation(
                              *async->cached_computation->computation,
-                             async->parameters_data, async->device, options);
+                             async->parameters_data, async->device);
       VLOG(3) << "Executing IR graph hash " << torch::lazy::HashToString(hash)
               << " on device " << async->device << " done!";
 

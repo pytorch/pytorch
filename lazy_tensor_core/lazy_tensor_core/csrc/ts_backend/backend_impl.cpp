@@ -104,8 +104,7 @@ class TSBackendImpl : public BackendImplInterface {
 
   std::vector<DataPtr> ExecuteComputation(
       const Computation& computation, c10::ArrayRef<DataPtr> arguments,
-      const std::string& device,
-      const ExecuteComputationOptions& options) const override;
+      const std::string& device) const override;
 
   std::string GetResourceDomain(const std::string& device) const override;
 
@@ -156,7 +155,7 @@ std::vector<ComputationPtr> TSBackendImpl::Compile(
 
 std::vector<DataPtr> TSBackendImpl::ExecuteComputation(
     const Computation& computation, c10::ArrayRef<DataPtr> arguments,
-    const std::string& device, const ExecuteComputationOptions& options) const {
+    const std::string& device) const {
   torch::jit::GraphExecutor& graph_executor =
       static_cast<
           torch_lazy_tensors::compiler::ts_backend::GenericComputationTS*>(

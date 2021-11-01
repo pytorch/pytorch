@@ -31,14 +31,30 @@ class BackendImplInterface {
   virtual std::vector<std::string> GetCompilationDevices(
       const std::string& device, c10::ArrayRef<std::string> devices) const = 0;
 
-  virtual at::Tensor MakeTensorFromComputationData(
-      const DataPtr data,
-      c10::optional<at::ScalarType> logical_scalar_type) const = 0;
+/**
+ * APIs for moving data to/from backend
+ */
 
+  // To
   virtual DataPtr
   MakeComputationDataFromTensor(const at::Tensor& tensor,
                                 const lazy_tensors::Shape& shape,
                                 const std::string& device) const = 0;
+  // To (somewhat duplicated)
+  virtual std::vector<DataPtr> TransferToServer(
+      c10::ArrayRef<at::Tensor> tensors) const = 0;
+  
+  // To (in a different/async way)
+  virtual DataPtr CreateDataPlaceholder(std::string device, lazy_tensors::Shape shape) const = 0;
+
+  // From
+  virtual at::Tensor MakeTensorFromComputationData(
+      const DataPtr data,
+      c10::optional<at::ScalarType> logical_scalar_type) const = 0;
+
+  virtual std::vector<at::Tensor> TransferFromServer(
+      c10::ArrayRef<DataPtr> handles) const = 0;
+
 
   virtual lazy_tensors::StatusOr<std::string> GetComputationBackendText(
       const GenericComputation* computation) const = 0;
@@ -49,25 +65,21 @@ class BackendImplInterface {
 
   /// computation client interfaces//////
 
-  virtual DataPtr CreateDataPlaceholder(std::string device, lazy_tensors::Shape shape) const = 0;
 
-  virtual std::vector<DataPtr> TransferToServer(
-      c10::ArrayRef<at::Tensor> tensors) const = 0;
-
-  virtual std::vector<at::Tensor> TransferFromServer(
-      c10::ArrayRef<DataPtr> handles) const = 0;
 
   virtual std::vector<ComputationPtr> Compile(
       std::vector<CompileInstance> instances) const = 0;
 
   virtual std::vector<DataPtr> ExecuteComputation(
       const Computation& computation, c10::ArrayRef<DataPtr> arguments,
-      const std::string& device, const ExecuteComputationOptions& options) const = 0;
+      const std::string& device) const = 0;
 
+  // Identifies a 'host' in distributed setting? Used to hash a particular host's graph?
+  // -- why do we need this, and should it be renamed if we do?  Should it be one per gpu in mgpu setting? 
   virtual std::string GetResourceDomain(const std::string& device) const = 0;
 
   virtual std::string GetDefaultDevice() const = 0;
-
+  
   virtual size_t GetNumDevices() const = 0;
 
   virtual std::vector<std::string> GetLocalDevices() const = 0;
