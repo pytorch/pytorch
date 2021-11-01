@@ -1475,6 +1475,7 @@ class TestNormalizeOperators(JitTestCase):
             "mT",  # Implemented with a lambda
             "mH",  # Implemented with a lambda
             "gradient",
+            "histogramdd",
             "igamma",
             "igammac",
             "index_put",
@@ -1489,6 +1490,8 @@ class TestNormalizeOperators(JitTestCase):
             "resize_as_",
             "special.zeta",
             "to_sparse",
+            "unique",
+            "unique_consecutive",
             "view",
             "view_as",
             "unfold",

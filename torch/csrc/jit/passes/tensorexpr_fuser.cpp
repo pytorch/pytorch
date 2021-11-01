@@ -1302,7 +1302,7 @@ Operation createTensorExprOp(const Node* node) {
   auto kernel =
       std::make_shared<tensorexpr::TensorExprKernel>(node->g(attr::Subgraph));
   return [kernel](Stack& stack) {
-    RECORD_FUNCTION("TensorExpr", std::vector<c10::IValue>());
+    RECORD_FUNCTION(kernel->getKernelName(), std::vector<c10::IValue>());
     kernel->run(stack);
     return 0;
   };
