@@ -65,7 +65,8 @@ int register_linear_params() {
 #endif // USE_FBGEMM
                 TORCH_CHECK(false, "Unknown qengine");
               });
-  // Dummy return so that this function can easily be called from a global scope ensuring class is registered
+  // (1) we can't (easily) return the static initializer itself because it can have a different type because of selective build
+  // (2) we can't return void and be able to call the function in the global scope
   return 0;
 }
 
