@@ -36,7 +36,7 @@ constexpr auto kNumLayernormFwd = 2;
 constexpr auto kNumBatchnormFwd = 3;
 constexpr auto kNumInstancenormFwd = 1;
 constexpr auto kNumSumToSize = 2;
-constexpr auto kNumAutocastOps = 3;
+constexpr auto kNumAutocastOps = 2;
 
 namespace {
 
@@ -1886,9 +1886,8 @@ class IrParser {
 
     {
       std::array<const char*, kNumAutocastOps> AutocastOps = {
-          "aten::autocast_to_fp16(Tensor(a) self) -> Tensor(a)",
-          "aten::autocast_to_bf16(Tensor(a) self) -> Tensor(a)",
-          "aten::autocast_to_fp32(Tensor(a) self) -> Tensor(a)"};
+          "aten::_autocast_to_reduced_precision(Tensor(a) self, bool cuda_enabled, bool cpu_enabled, ScalarType cuda_dtype, ScalarType cpu_dtype) -> Tensor(a)",
+          "aten::_autocast_to_full_precision(Tensor(a) self, bool cuda_enabled, bool cpu_enabled) -> Tensor(a)"};
       for (auto signature : AutocastOps) {
         auto ptr_op = getOperatorForLiteral(signature);
         REGISTER_PARSE_RULE(

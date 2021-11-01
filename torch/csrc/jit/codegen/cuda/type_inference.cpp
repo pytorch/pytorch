@@ -424,38 +424,51 @@ class NaiveTypePropagator {
         }
         break;
       }
-      case aten::autocast_to_fp16: {
-        const auto in_type = getInputTensorType(node, 0);
+      case aten::_autocast_to_reduced_precision: {
+        const auto in_type = node->input(0)->type()->cast<TensorType>();
+        TORCH_CHECK(
+            hasTypeAndDevice(in_type),
+            "Type and device propagation has failed, or was not provided enough information.");
+        const auto in_scalar_type = in_type->scalarType();
+        const auto in_device = in_type->device();
+        const auto cuda_enabled = constant_as<bool>(node->input(1));
+        const auto cpu_enabled = constant_as<bool>(node->input(2));
+        const auto cuda_dtype = constant_as<c10::ScalarType>(node->input(3));
+        const auto cpu_dtype = constant_as<c10::ScalarType>(node->input(4));
+        TORCH_CHECK(
+            cuda_enabled.has_value() && cpu_enabled.has_value() &&
+                cuda_dtype.has_value() && cpu_dtype.has_value(),
+            "_autocast_to_reduced_precision requires all scalar inputs to be constant.");
         if (in_type->scalarType() == at::ScalarType::Float) {
-          node->output()->setType(
-              in_type->withScalarType(at::ScalarType::Half));
-        } else {
-          node->output()->setType(in_type);
+          if (in_device->is_cuda() && cuda_enabled.value()) {
+            node->output()->setType(
+                in_type->withScalarType(cuda_dtype.value()));
+            break;
+          } else if (in_device->is_cpu() && cpu_enabled.value()) {
+            node->output()->setType(in_type->withScalarType(cpu_dtype.value()));
+            break;
+          }
         }
+        node->output()->setType(in_type);
         break;
       }
-      case aten::autocast_to_bf16: {
+      case aten::_autocast_to_full_precision: {
         const auto in_type = node->input(0)->type()->cast<TensorType>();
-        const auto in_scalar_type = in_type->scalarType();
         TORCH_CHECK(
             hasTypeAndDevice(in_type),
             "Type and device propagation has failed, or was not provided enough information.");
-        if (in_scalar_type == at::ScalarType::Float) {
-          node->output()->setType(
-              in_type->withScalarType(at::ScalarType::BFloat16));
-        } else {
-          node->output()->setType(in_type);
-        }
-        break;
-      }
-      case aten::autocast_to_fp32: {
-        const auto in_type = node->input(0)->type()->cast<TensorType>();
         const auto in_scalar_type = in_type->scalarType();
+        const auto in_device = in_type->device();
+        const auto cuda_enabled = constant_as<bool>(node->input(1));
+        const auto cpu_enabled = constant_as<bool>(node->input(2));
         TORCH_CHECK(
-            hasTypeAndDevice(in_type),
-            "Type and device propagation has failed, or was not provided enough information.");
-        if (in_scalar_type == at::ScalarType::Half ||
-            in_scalar_type == at::ScalarType::BFloat16) {
+            cuda_enabled.has_value() && cpu_enabled.has_value(),
+            "_autocast_to_full_precision requires enable flag to be constant.");
+
+        if ((in_scalar_type == at::ScalarType::Half ||
+             in_scalar_type == at::ScalarType::BFloat16) &&
+            ((in_device->is_cuda() && cuda_enabled.value()) ||
+             (in_device->is_cpu() && cpu_enabled.value()))) {
           node->output()->setType(
               in_type->withScalarType(at::ScalarType::Float));
         } else {
