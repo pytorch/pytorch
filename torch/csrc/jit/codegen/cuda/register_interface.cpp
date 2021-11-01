@@ -19,10 +19,17 @@ class RegisterInterface {
  public:
   RegisterInterface() : canFuseNodeIndex_(RegisterProfilingNode(canFuseNode)) {
     auto ptr = getFuserInterface();
+    ptr->fn_compile_n = &compileCudaFusionGroup;
+    ptr->fn_run_n_s = &runCudaFusionGroup;
+    ptr->fn_fuse_graph = &CudaFuseGraph;
+    ptr->fn_can_fuse_n = &isFusibleCudaFusionGroup;
 	ptr->fn_insert_profile_inodes = &InsertProfileNodes;
-  }  ~RegisterInterface() {
+  }
+
+  ~RegisterInterface() {
     DeregisterProfilingNode(canFuseNodeIndex_);
   }
+
 private:
   int canFuseNodeIndex_;
 };
