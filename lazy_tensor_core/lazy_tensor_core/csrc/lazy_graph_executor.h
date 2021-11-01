@@ -191,12 +191,6 @@ class LazyGraphExecutor {
                                c10::ArrayRef<size_t> indices,
                                ir::LoweringContext* lowering_ctx);
 
-  // Runs an asynchronous syn operation using the op-by-op executor.
-  using OpByOpAsync = lazy_tensors::util::AsyncTask<int>;
-  OpByOpAsync SyncTensorsGraphOpByOp(std::vector<LazyTensor>* tensors,
-                                     c10::ArrayRef<std::string> devices,
-                                     const SyncTensorsConfig& config);
-
   std::shared_ptr<Async> SyncTensorsGraphInternal(
       std::vector<LazyTensor>* tensors, c10::ArrayRef<std::string> devices,
       const SyncTensorsConfig& config);
@@ -215,8 +209,6 @@ class LazyGraphExecutor {
       std::vector<compiler::DataPtr> parameters_data,
       std::string device, ComputationCache::TypePtr cached_computation);
 
-  // Implementation of the GetTensors() API using the op-by-op executor.
-  std::vector<at::Tensor> GetTensorsOpByOp(std::vector<LazyTensor>* tensors);
   std::vector<at::Tensor> GetTensorsFused(std::vector<LazyTensor>* tensors);
 
   std::vector<at::Tensor> FetchTensors(
