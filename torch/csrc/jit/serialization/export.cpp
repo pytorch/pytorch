@@ -459,8 +459,9 @@ GraphEncoder::GraphEncoder(
   if (use_external_data_format) {
     TORCH_CHECK(
         !onnx_file_path.empty(),
-        "For large model export, f in torch.onnx.export must be a non-empty string. "
-        "Please specify the location of the model.");
+        "The serialized model is larger than the 2GiB limit imposed by the protobuf library. ",
+        "Therefore the output file must be a file path, so that the ONNX external data can ",
+        "be written to the same directory. Please specify the output file name.");
   }
 
   auto* imp = model_proto_.add_opset_import();

@@ -428,11 +428,11 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.tensor([2], dtype=torch.long)
         f = io.BytesIO()
-        with self.assertRaises(RuntimeError) as e:
+        err_msg = ("The serialized model is larger than the 2GiB limit imposed by the protobuf library. "
+                   "Therefore the output file must be a file path, so that the ONNX external data can be written to "
+                   "the same directory. Please specify the output file name.")
+        with self.assertRaisesRegex(RuntimeError, err_msg):
             torch.onnx.export(LargeModel(), x, f)
-
-        self.assertEqual("For large model export, f in torch.onnx.export must be a non-empty string " +
-                            "specifying the location of the model.", e.exception.args[0])
 
     def test_fuse_conv_bn1d(self):
         class Fuse(torch.nn.Module):

@@ -115,11 +115,6 @@ def export(model, args, f, export_params=True, verbose=False, training=None,
         else:
             operator_export_type = OperatorExportTypes.ONNX
 
-    if use_external_data_format is not None:
-        warnings.warn("`use_external_data_format' is deprecated and ignored. Will be removed in next "
-                      "PyTorch release. The code will work as it is False if models are not larger than 2GB, "
-                      "Otherwise set to False because of size limits imposed by Protocol Buffers.")
-
     _export(model, args, f, export_params, verbose, training, input_names, output_names,
             operator_export_type=operator_export_type, opset_version=opset_version,
             do_constant_folding=do_constant_folding, dynamic_axes=dynamic_axes,
@@ -718,10 +713,8 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
                                                              opset_version)
             val_add_node_names = _decide_add_node_names(add_node_names, operator_export_type)
             val_do_constant_folding = _decide_constant_folding(do_constant_folding, operator_export_type, training)
-            # f can be a non-string in regular-sized model export case, but for large model export, f must be a non-empty
-            # string specifying the location of the model. For large model cases, if f is not a non-empty string,
-            # then returns an empty string, which is an error condition for the large model export code path
-            # later (but not for regular model export code path).
+            # Normally f can be a file-like object, but for large models, the external data format requires a
+            # valid `model_file_location`. Code in export.cpp will enforce this.
             if isinstance(f, str):
                 model_file_location = f
             else:
@@ -754,14 +747,12 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
                 proto, export_map, val_use_external_data_format = graph._export_onnx(
                     params_dict, opset_version, dynamic_axes, defer_weight_export,
                     operator_export_type, not verbose, val_keep_init_as_ip, custom_opsets,
-                    val_add_node_names, False, model_file_location,
-                    node_attr_to_name)
+                    val_add_node_names, model_file_location, node_attr_to_name)
             else:
                 proto, export_map, val_use_external_data_format = graph._export_onnx(
                     {}, opset_version, dynamic_axes, False, operator_export_type,
                     not verbose, val_keep_init_as_ip, custom_opsets, val_add_node_names,
-                    False, model_file_location,
-                    node_attr_to_name)
+                    model_file_location, node_attr_to_name)
             if export_type == ExportTypes.PROTOBUF_FILE:
                 assert(len(export_map) == 0)
                 with torch.serialization._open_file_like(f, "wb") as opened_file:
