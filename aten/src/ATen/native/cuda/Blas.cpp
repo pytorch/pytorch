@@ -171,8 +171,9 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!result_->is_conj());
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, scalar_type, "addmm_cuda", [&] {
-    scalar_t alpha_val = alpha.to<scalar_t>();
-    scalar_t beta_val = beta.to<scalar_t>();
+    using acc_t = at::acc_type<scalar_t, true>;
+    acc_t alpha_val = alpha.to<acc_t>();
+    acc_t beta_val = beta.to<acc_t>();
     scalar_t* mat1_ptr = mat1_->data_ptr<scalar_t>();
     scalar_t* mat2_ptr = mat2_->data_ptr<scalar_t>();
     scalar_t* result_ptr = result_->data_ptr<scalar_t>();

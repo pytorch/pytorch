@@ -14,6 +14,7 @@
  */
 
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/AccumulateType.h>
 
 namespace at {
 namespace cuda {
@@ -40,9 +41,9 @@ private:
 
 /* LEVEL 3 BLAS FUNCTIONS */
 
-#define CUDABLAS_GEMM_ARGTYPES(Dtype)                                       \
-  char transa, char transb, int64_t m, int64_t n, int64_t k, Dtype alpha,   \
-      const Dtype *a, int64_t lda, const Dtype *b, int64_t ldb, Dtype beta, \
+#define CUDABLAS_GEMM_ARGTYPES(Dtype)                                                               \
+  char transa, char transb, int64_t m, int64_t n, int64_t k, at::acc_type < Dtype , true> alpha,    \
+      const Dtype *a, int64_t lda, const Dtype *b, int64_t ldb, at::acc_type < Dtype , true > beta, \
       Dtype *c, int64_t ldc
 
 template <typename Dtype>
