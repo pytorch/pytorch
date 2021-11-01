@@ -5,7 +5,6 @@
 #include <vector>
 
 #include "lazy_tensor_core/csrc/device.h"
-#include "lazy_tensors/computation_client/client_data.h"
 #include "lazy_tensors/layout.h"
 #include "lazy_tensors/str_cat.h"
 #include "lazy_tensors/str_join.h"
@@ -19,17 +18,15 @@ class Shape {
   Shape(at::ScalarType element_type, c10::ArrayRef<int64_t> dimensions);
 
   Shape(c10::ArrayRef<Shape> element_shapes)
-      : at_element_type_(c10::ScalarType::Undefined),
-        element_shapes_(element_shapes.begin(), element_shapes.end()),
-        is_tuple_(true) {
+      : is_tuple_(true),
+        at_element_type_(c10::ScalarType::Undefined),
+        element_shapes_(element_shapes.begin(), element_shapes.end()) {
     CHECK(element_shapes.size() > 0);
     // TODO(whc) it's not really clear what the definition of element shape
     // should be for a tuple shape.  However, for tuple shapes, we appear
     // to be accessing the element_type field in some places.  Fix this.
     at_element_type_ = element_shapes[0].at_element_type();
-        }
-
-  Shape(const client::ShapeData& shape_data);
+  }
 
   std::string ToString(bool print_layout = false) const {
     return lazy_tensors::StrCat(toString(at_element_type_), "[",
@@ -46,9 +43,7 @@ class Shape {
     return dimensions_[index];
   }
 
-  c10::ArrayRef<int64_t> dimensions() const {
-    return dimensions_;
-  }
+  c10::ArrayRef<int64_t> dimensions() const { return dimensions_; }
 
   void set_dimensions(int index, int64_t value) {
     CHECK_LT(index, dimensions_.size());
@@ -67,10 +62,6 @@ class Shape {
   }
   const std::vector<Shape>& tuple_shapes() const { return element_shapes_; }
 
-  // Todo(whc) remove layout?
-  const Layout& layout() const { return layout_; }
-  Layout* mutable_layout() { return &layout_; }
-
   bool operator==(const Shape& other) const {
     return at_element_type_ == other.at_element_type_ &&
            dimensions_ == other.dimensions_;
@@ -81,7 +72,6 @@ class Shape {
   c10::ScalarType at_element_type_;
   std::vector<int64_t> dimensions_;
   std::vector<Shape> element_shapes_;
-  Layout layout_;
 };
 
 class ProgramShape {
@@ -113,8 +103,5 @@ class ProgramShape {
 inline std::ostream& operator<<(std::ostream& out, const Shape& shape) {
   return out << shape.ToString();
 }
-
-// TODO(whc) took away inline temporarily, figured we'd delete this anyway
-client::ShapeData ToShapeData(const Shape& shape);
 
 }  // namespace lazy_tensors

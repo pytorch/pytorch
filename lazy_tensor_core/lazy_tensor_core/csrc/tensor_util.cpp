@@ -12,7 +12,6 @@
 #include <thread>
 
 #include "lazy_tensor_core/csrc/helpers.h"
-#include "lazy_tensor_core/csrc/layout_manager.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_computation_client.h"
 #include "lazy_tensors/computation_client/multi_wait.h"
 #include "lazy_tensors/computation_client/sys_util.h"
@@ -229,29 +228,6 @@ void CopyData(D* dest, const S* source, int64_t n, const CopyCasted&) {
   StridedCopy(dest, 1, source, 1, n);
 }
 
-std::vector<int64_t> GetIterationDimensions(const lazy_tensors::Shape& shape) {
-  // We want to favor the most minor dimension as core iteration dimension, as
-  // this walks one of the two tensors buffers in a cache friendly fashion.
-  // Though, if the most minor dimension is too small, we will end up doing more
-  // StridedCopy() iterations in CopyTensors().
-  // So we select the most minor dimension, unless one of the other dimensions
-  // is more than kMinorDimScale times the most minor one.
-  static const int64_t kMinorDimScale = 8;
-  std::vector<int64_t> iter_dims =
-      lazy_tensors::util::ToVector<int64_t>(shape.layout().minor_to_major());
-  size_t index = 0;
-  int64_t scaled_dim_size = kMinorDimScale * shape.dimensions(iter_dims[index]);
-  for (size_t i = 1; i < iter_dims.size(); ++i) {
-    int64_t dim = iter_dims[i];
-    if (shape.dimensions(dim) > scaled_dim_size) {
-      index = i;
-      scaled_dim_size = shape.dimensions(dim);
-    }
-  }
-  std::swap(iter_dims[0], iter_dims[index]);
-  return iter_dims;
-}
-
 struct CopyPartition {
   explicit CopyPartition(c10::ArrayRef<int64_t> dimensions)
       : base(dimensions.size()), limit(dimensions.begin(), dimensions.end()) {}
@@ -320,219 +296,7 @@ void SlicedCopy(c10::ArrayRef<int64_t> dimensions, const SType* src_data,
   }
 }
 
-template <typename SType, typename DType>
-void CopyTensors(const void* src_buffer, const lazy_tensors::Shape& src_shape,
-                 void* dest_buffer, size_t dest_buffer_size,
-                 const lazy_tensors::Shape& dest_shape) {
-  CHECK(lazy_tensors::ShapeUtil::SameDimensions(src_shape, dest_shape))
-      << src_shape << " vs. " << dest_shape;
-
-  int64_t total_elements = lazy_tensors::ShapeUtil::ElementsIn(src_shape);
-  CHECK_EQ(dest_buffer_size, total_elements * sizeof(DType));
-
-  const SType* src_data = reinterpret_cast<const SType*>(src_buffer);
-  DType* dest_data = reinterpret_cast<DType*>(dest_buffer);
-  if (src_shape.layout().minor_to_major() ==
-      dest_shape.layout().minor_to_major()) {
-    CopyData<DType, SType>(dest_data, src_data, total_elements,
-                           typename CopyType < NeedCast<SType>::value ||
-                               NeedCast<DType>::value > ::type());
-  } else if (total_elements > 0) {
-    // We issue a multi-threaded copy by slicing the bigger dimension and
-    // assigning its copy to different threads. This code is only valid for
-    // ranks >= 2, but the layout check above covers the case.
-    std::vector<int64_t> src_strides = ComputeShapeStrides(src_shape);
-    std::vector<int64_t> dest_strides = ComputeShapeStrides(dest_shape);
-    std::vector<int64_t> iter_dims = GetIterationDimensions(dest_shape);
-    std::vector<CopyPartition> parts =
-        CreateCopyPartitions(dest_shape.dimensions(), iter_dims.front());
-    auto mwait = std::make_shared<lazy_tensors::util::MultiWait>(parts.size());
-    for (size_t i = 0; i < parts.size(); ++i) {
-      auto copy_fn = [&, i]() {
-        SlicedCopy<SType, DType>(dest_shape.dimensions(), src_data, src_strides,
-                                 dest_data, dest_strides, iter_dims, parts[i]);
-      };
-      lazy_tensors::env::ScheduleClosure(
-          lazy_tensors::util::MultiWait::Completer(mwait, std::move(copy_fn)));
-    }
-    mwait->Wait();
-  }
-}
-
-template <typename SType, typename DType>
-void TensorToBuffer(const at::Tensor& tensor,
-                    const lazy_tensors::Shape& dest_shape, void* dest_buffer,
-                    size_t dest_buffer_size, const Device& device) {
-  at::Tensor contiguous_tensor = tensor.contiguous();
-  lazy_tensors::Shape src_shape = MakeTorchTensorLayout(
-      Helpers::I64List(contiguous_tensor.sizes()), contiguous_tensor.type().scalarType());
-  CopyTensors<SType, DType>(contiguous_tensor.data_ptr<SType>(), src_shape,
-                            dest_buffer, dest_buffer_size, dest_shape);
-}
-
-template <typename SType>
-void TensorToBufferSType(const at::Tensor& tensor,
-                         const lazy_tensors::Shape& dest_shape,
-                         void* dest_buffer, size_t dest_buffer_size,
-                         const Device& device) {
-  switch (dest_shape.at_element_type()) {
-    case c10::ScalarType::BFloat16:
-      TensorToBuffer<SType, c10::BFloat16>(tensor, dest_shape, dest_buffer,
-                                           dest_buffer_size, device);
-      break;
-    case c10::ScalarType::Half:
-      TensorToBuffer<SType, c10::Half>(tensor, dest_shape, dest_buffer,
-                                       dest_buffer_size, device);
-      break;
-    case c10::ScalarType::Float:
-      TensorToBuffer<SType, float>(tensor, dest_shape, dest_buffer,
-                                   dest_buffer_size, device);
-      break;
-    case c10::ScalarType::Double:
-      TensorToBuffer<SType, double>(tensor, dest_shape, dest_buffer,
-                                    dest_buffer_size, device);
-      break;
-    case c10::ScalarType::Bool:
-      TensorToBuffer<SType, bool>(tensor, dest_shape, dest_buffer,
-                                  dest_buffer_size, device);
-      break;
-    case c10::ScalarType::Byte:
-      TensorToBuffer<SType, uint8_t>(tensor, dest_shape, dest_buffer,
-                                     dest_buffer_size, device);
-      break;
-    case c10::ScalarType::Char:
-      TensorToBuffer<SType, int8_t>(tensor, dest_shape, dest_buffer,
-                                    dest_buffer_size, device);
-      break;
-    case c10::ScalarType::Short:
-      TensorToBuffer<SType, int16_t>(
-          tensor, dest_shape, dest_buffer, dest_buffer_size, device);
-      break;
-    // c10 doesn't have a uint16 type
-    // case lazy_tensors::PrimitiveType::U16:
-    //   TensorToBuffer<SType, lazy_tensors::uint16>(
-    //       tensor, dest_shape, dest_buffer, dest_buffer_size, device);
-    //   break;
-    case c10::ScalarType::Int:
-      TensorToBuffer<SType, int32_t>(tensor, dest_shape, dest_buffer,
-                                     dest_buffer_size, device);
-      break;
-    // c10 doesn't have a uint32 type
-    // case lazy_tensors::PrimitiveType::U32:
-    //   TensorToBuffer<SType, lazy_tensors::uint32>(
-    //       tensor, dest_shape, dest_buffer, dest_buffer_size, device);
-    //   break;
-    case c10::ScalarType::Long:
-      TensorToBuffer<SType, int64_t>(tensor, dest_shape, dest_buffer,
-                                     dest_buffer_size, device);
-      break;
-    // c10 doesn't have a uint64 type
-    // case lazy_tensors::PrimitiveType::U64:
-    //   TensorToBuffer<SType, lazy_tensors::uint64>(
-    //       tensor, dest_shape, dest_buffer, dest_buffer_size, device);
-    //   break;
-    case c10::ScalarType::ComplexFloat:
-      TensorToBuffer<SType, c10::complex<float>>(
-          tensor, dest_shape, dest_buffer, dest_buffer_size, device);
-      break;
-    case c10::ScalarType::ComplexDouble:
-      TensorToBuffer<SType, c10::complex<double>>(
-          tensor, dest_shape, dest_buffer, dest_buffer_size, device);
-      break;
-    default:
-      LOG(ERROR) << "Destination shape type not supported: " << dest_shape;
-  }
-}
-
-lazy_tensors::ComputationClient::DataPtr TensorToDataHandle(
-    const at::Tensor& tensor, const lazy_tensors::Shape& shape,
-    const Device& device) {
-  auto populate_fn =
-      [&](const lazy_tensors::ComputationClient::TensorSource& source_tensor,
-          void* dest_buffer, size_t dest_buffer_size) {
-        PopulateTensorBuffer(tensor, source_tensor.shape, dest_buffer,
-                             dest_buffer_size, device);
-      };
-
-  std::vector<lazy_tensors::client::TensorSource> source_tensors;
-  source_tensors.emplace_back(lazy_tensors::ToShapeData(shape),
-                              device.ToString(), std::move(populate_fn));
-
-  auto handles = std::vector<lazy_tensors::ComputationClient::DataPtr>{
-      MakeComputationDataFromTensor(tensor, shape, device.ToString())};
-  CHECK_EQ(handles.size(), 1);
-  return std::move(handles.front());
-}
-
 }  // namespace
-
-void PopulateTensorBuffer(const at::Tensor& tensor,
-                          const lazy_tensors::Shape& dest_shape,
-                          void* dest_buffer, size_t dest_buffer_size,
-                          const Device& device) {
-  switch (tensor.type().scalarType()) {
-    case at::ScalarType::Double:
-      TensorToBufferSType<double>(tensor, dest_shape, dest_buffer,
-                                  dest_buffer_size, device);
-      break;
-    case at::ScalarType::Float:
-      TensorToBufferSType<float>(tensor, dest_shape, dest_buffer,
-                                 dest_buffer_size, device);
-      break;
-    case at::ScalarType::BFloat16:
-      TensorToBufferSType<at::BFloat16>(tensor, dest_shape, dest_buffer,
-                                        dest_buffer_size, device);
-      break;
-    case at::ScalarType::Half:
-      TensorToBufferSType<at::Half>(tensor, dest_shape, dest_buffer,
-                                    dest_buffer_size, device);
-      break;
-    case at::ScalarType::Bool:
-      TensorToBufferSType<bool>(tensor, dest_shape, dest_buffer,
-                                dest_buffer_size, device);
-      break;
-    case at::ScalarType::Byte:
-      TensorToBufferSType<uint8_t>(tensor, dest_shape, dest_buffer,
-                                   dest_buffer_size, device);
-      break;
-    case at::ScalarType::Char:
-      TensorToBufferSType<int8_t>(tensor, dest_shape, dest_buffer,
-                                  dest_buffer_size, device);
-      break;
-    case at::ScalarType::Short:
-      TensorToBufferSType<int16_t>(tensor, dest_shape, dest_buffer,
-                                   dest_buffer_size, device);
-      break;
-    case at::ScalarType::Int:
-      TensorToBufferSType<int32_t>(tensor, dest_shape, dest_buffer,
-                                   dest_buffer_size, device);
-      break;
-    case at::ScalarType::Long:
-      TensorToBufferSType<int64_t>(tensor, dest_shape, dest_buffer,
-                                   dest_buffer_size, device);
-      break;
-    case at::ScalarType::ComplexFloat:
-      TensorToBufferSType<c10::complex<float>>(tensor, dest_shape, dest_buffer,
-                                               dest_buffer_size, device);
-      break;
-    case at::ScalarType::ComplexDouble:
-      TensorToBufferSType<c10::complex<double>>(tensor, dest_shape, dest_buffer,
-                                                dest_buffer_size, device);
-      break;
-    default:
-      LOG(ERROR) << "Tensor type not supported: " << tensor.type();
-  }
-}
-
-std::vector<int64_t> ComputeShapeStrides(const lazy_tensors::Shape& shape) {
-  std::vector<int64_t> strides(shape.rank());
-  int64_t stride = 1;
-  for (auto dim : shape.layout().minor_to_major()) {
-    strides[dim] = stride;
-    stride *= shape.dimensions(dim);
-  }
-  return strides;
-}
 
 std::vector<int64_t> ComputeArrayStrides(c10::ArrayRef<int64_t> sizes) {
   std::vector<int64_t> strides(sizes.size(), 1);
@@ -557,8 +321,9 @@ bool TensorCompare(const at::Tensor& t1, const at::Tensor& t2) {
 
 lazy_tensors::ComputationClient::DataPtr TensorToDataHandle(
     const at::Tensor& tensor, const Device& device) {
-  return TensorToDataHandle(
-      tensor, CreateComputationShapeFromTensor(tensor, &device), device);
+  return MakeComputationDataFromTensor(
+      tensor, lazy_tensors::Shape(tensor.scalar_type(), tensor.sizes()),
+      device.ToString());
 }
 
 std::vector<lazy_tensors::ComputationClient::DataPtr> CreateTensorsData(
@@ -569,8 +334,7 @@ std::vector<lazy_tensors::ComputationClient::DataPtr> CreateTensorsData(
   result.reserve(tensors.size());
   for (size_t i = 0; i < tensors.size(); ++i) {
     Device device(devices[i]);
-    lazy_tensors::Shape shape =
-        CreateComputationShapeFromTensor(tensors[i], &device);
+    lazy_tensors::Shape shape(tensors[i].scalar_type(), tensors[i].sizes());
     result.push_back(
         MakeComputationDataFromTensor(tensors[i], shape, devices[i]));
   }
@@ -621,34 +385,6 @@ torch::lazy::hash_t TensorHash(const at::Tensor& tensor) {
     default:
       LOG(ERROR) << "Unsupported scalar type: " << ctensor.scalar_type();
   }
-}
-
-std::vector<lazy_tensors::Shape> GetComponentShapes(
-    const lazy_tensors::Shape& shape) {
-  std::vector<lazy_tensors::Shape> component_shapes;
-  if (shape.IsTuple()) {
-    for (const lazy_tensors::Shape& component_shape : shape.tuple_shapes()) {
-      CHECK(!component_shape.IsTuple()) << shape;
-      component_shapes.push_back(component_shape);
-    }
-  } else {
-    component_shapes.push_back(shape);
-  }
-  return component_shapes;
-}
-
-lazy_tensors::Shape MakeShapeWithDeviceLayout(const lazy_tensors::Shape& shape,
-                                              DeviceType device_type) {
-  lazy_tensors::Shape device_shape(shape);
-  return device_shape;
-}
-
-lazy_tensors::Shape CreateComputationShapeFromTensor(const at::Tensor& tensor,
-                                                     const Device* device) {
-  Device ltc_device = GetDeviceOrCurrent(device);
-  return MakeArrayShapeFromDimensions(Helpers::I64List(tensor.sizes()),
-                                      tensor.type().scalarType(),
-                                      ltc_device.hw_type);
 }
 
 at::ScalarType TensorTypeFromLtcType(lazy_tensors::PrimitiveType ltc_type) {

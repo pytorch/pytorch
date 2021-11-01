@@ -12,8 +12,6 @@
 
 namespace torch_lazy_tensors {
 
-std::vector<int64_t> ComputeShapeStrides(const lazy_tensors::Shape& shape);
-
 std::vector<int64_t> ComputeArrayStrides(c10::ArrayRef<int64_t> sizes);
 
 std::vector<at::Tensor> DataHandlesToTensors(
@@ -27,11 +25,6 @@ bool TensorCompare(const at::Tensor& t1, const at::Tensor& t2);
 lazy_tensors::ComputationClient::DataPtr TensorToDataHandle(
     const at::Tensor& tensor, const Device& device);
 
-void PopulateTensorBuffer(const at::Tensor& tensor,
-                          const lazy_tensors::Shape& dest_shape,
-                          void* dest_buffer, size_t dest_buffer_size,
-                          const Device& device);
-
 torch::lazy::hash_t TensorHash(const at::Tensor& tensor);
 
 // Retrieves the device data handles by parallel uploading data onto the
@@ -39,20 +32,6 @@ torch::lazy::hash_t TensorHash(const at::Tensor& tensor);
 std::vector<lazy_tensors::ComputationClient::DataPtr> CreateTensorsData(
     const std::vector<at::Tensor>& tensors,
     const std::vector<std::string>& devices);
-
-// If "shape" is a tuple, return the element shapes, otherwise return a
-// singleton list containing the original shape.
-std::vector<lazy_tensors::Shape> GetComponentShapes(
-    const lazy_tensors::Shape& shape);
-
-// Create a shape with "device_type" compatible layout from the given "shape".
-lazy_tensors::Shape MakeShapeWithDeviceLayout(const lazy_tensors::Shape& shape,
-                                              DeviceType device_type);
-
-// Create the shape to be used within a lowered computation, to represent a
-// given tensor data.
-lazy_tensors::Shape CreateComputationShapeFromTensor(const at::Tensor& tensor,
-                                                     const Device* device);
 
 at::ScalarType TensorTypeFromLtcType(lazy_tensors::PrimitiveType ltc_type);
 

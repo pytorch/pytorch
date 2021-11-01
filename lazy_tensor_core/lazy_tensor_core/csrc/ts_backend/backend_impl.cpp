@@ -59,7 +59,7 @@ class TSBackendImpl : public BackendImplInterface {
         lazy_tensors::compiler::TSComputationClient::HardwareDeviceType());
     return std::make_shared<
         lazy_tensors::compiler::TSComputationClient::TSData>(
-        tensor.to(options), lazy_tensors::ToShapeData(shape), device);
+        tensor.to(options), shape, device);
   }
 
   lazy_tensors::StatusOr<std::string> GetComputationBackendText(

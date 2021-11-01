@@ -39,44 +39,6 @@ class ShapeUtil {
   static int64_t ElementsIn(const Shape& shape) {
     return util::Multiply<int64_t>(shape.dimensions());
   }
-
-  static int64_t ByteSizeOfPrimitiveType(PrimitiveType primitive_type) {
-    switch (primitive_type) {
-      case PrimitiveType::PRED:
-        return sizeof(int8_t);
-      case PrimitiveType::S8:
-        return sizeof(int8_t);
-      case PrimitiveType::S16:
-        return sizeof(int16_t);
-      case PrimitiveType::S32:
-        return sizeof(int32_t);
-      case PrimitiveType::S64:
-        return sizeof(int64_t);
-      case PrimitiveType::U8:
-        return sizeof(uint8_t);
-      case PrimitiveType::U16:
-        return sizeof(uint16_t);
-      case PrimitiveType::U32:
-        return sizeof(uint32_t);
-      case PrimitiveType::U64:
-        return sizeof(uint64_t);
-      case PrimitiveType::BF16:
-        return sizeof(float) / 2;
-      case PrimitiveType::F16:
-        return sizeof(float) / 2;
-      case PrimitiveType::F32:
-        return sizeof(float);
-      case PrimitiveType::F64:
-        return sizeof(double);
-      case PrimitiveType::C64:
-        return sizeof(std::complex<float>);
-      case PrimitiveType::C128:
-        return sizeof(std::complex<double>);
-      default:
-        LOG(FATAL) << "Unhandled primitive type " << primitive_type;
-    }
-  }
-
   static bool SameDimensions(const Shape& lhs, const Shape& rhs) {
     return lhs.dimensions() == rhs.dimensions();
   }
@@ -106,36 +68,7 @@ class ShapeUtil {
 
   static Shape MakeShape(c10::ScalarType element_type,
                          c10::ArrayRef<int64_t> dimensions) {
-    return MakeShapeWithDescendingLayout(element_type, dimensions);
-  }
-
-  static Shape MakeShapeWithLayout(c10::ScalarType element_type,
-                                   c10::ArrayRef<int64_t> dimensions,
-                                   c10::ArrayRef<int64_t> minor_to_major,
-                                   c10::ArrayRef<Tile> tiles = {},
-                                   int64_t element_size_in_bits = 0,
-                                   int64_t memory_space = 0) {
-    CHECK(tiles.empty());
-    CHECK_EQ(element_size_in_bits, 0);
-    CHECK_EQ(memory_space, 0);
-    CHECK_EQ(dimensions.size(), minor_to_major.size());
-    // ScalarType doesn't include invalid or tuple, so we can assume this
-    // CHECK(element_type != PrimitiveType::INVALID &&
-    //           element_type != PrimitiveType::TUPLE);
-    Layout layout;
-    for (int64_t dimension_number : minor_to_major) {
-      layout.add_minor_to_major(dimension_number);
-    }
-    Shape shape(element_type, dimensions);
-    *shape.mutable_layout() = layout;
-    return shape;
-  }
-
-  static Shape MakeShapeWithDescendingLayout(
-      c10::ScalarType element_type, c10::ArrayRef<int64_t> dimensions) {
-    std::vector<int64_t> layout(dimensions.size());
-    std::iota(layout.rbegin(), layout.rend(), static_cast<int64_t>(0));
-    return MakeShapeWithLayout(element_type, dimensions, layout);
+    return lazy_tensors::Shape(element_type, dimensions);
   }
 
   // Returns the number of elements in the given tuple shape.
@@ -176,50 +109,5 @@ class ShapeUtil {
   // Compute a hash for `shape`.
   static size_t Hash(const Shape& shape);
 };
-
-inline at::ScalarType PrimitiveToScalarType(
-    lazy_tensors::PrimitiveType scalar_type) {
-  switch (scalar_type) {
-    case lazy_tensors::PrimitiveType::S8: {
-      return at::ScalarType::Char;
-    }
-    case lazy_tensors::PrimitiveType::S16: {
-      return at::ScalarType::Short;
-    }
-    case lazy_tensors::PrimitiveType::S32: {
-      return at::ScalarType::Int;
-    }
-    case lazy_tensors::PrimitiveType::S64: {
-      return at::ScalarType::Long;
-    }
-    case lazy_tensors::PrimitiveType::U8: {
-      return at::ScalarType::Byte;
-    }
-    case lazy_tensors::PrimitiveType::U16: {
-      return at::ScalarType::Short;
-    }
-    case lazy_tensors::PrimitiveType::U32: {
-      return at::ScalarType::Int;
-    }
-    case lazy_tensors::PrimitiveType::U64: {
-      return at::ScalarType::Long;
-    }
-    case lazy_tensors::PrimitiveType::F16: {
-      return at::ScalarType::Half;
-    }
-    case lazy_tensors::PrimitiveType::F32: {
-      return at::ScalarType::Float;
-    }
-    case lazy_tensors::PrimitiveType::F64: {
-      return at::ScalarType::Double;
-    }
-    case lazy_tensors::PrimitiveType::PRED: {
-      return at::ScalarType::Bool;
-    }
-    default: {
-      LOG(FATAL) << "Not implemented yet.";
-    }
-  }
-}
 
 }  // namespace lazy_tensors

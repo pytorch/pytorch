@@ -10,7 +10,6 @@
 #include "lazy_tensor_core/csrc/data_ops.h"
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/ir_util.h"
-#include "lazy_tensor_core/csrc/layout_manager.h"
 #include "lazy_tensor_core/csrc/lazy_graph_executor.h"
 #include "lazy_tensor_core/csrc/ops/adaptive_avg_pool2d.h"
 #include "lazy_tensor_core/csrc/ops/adaptive_avg_pool3d.h"
@@ -865,8 +864,7 @@ LazyTensor fmod(const LazyTensor& input, const at::Scalar& other,
 LazyTensor full(c10::ArrayRef<int64_t> size, const at::Scalar& fill_value,
                 const Device& device, at::ScalarType scalar_type) {
   CheckShapeDimensions(size);
-  lazy_tensors::Shape shape = MakeArrayShapeFromDimensions(
-      size, scalar_type, device.hw_type);
+  lazy_tensors::Shape shape = lazy_tensors::Shape(scalar_type, size);
   return LazyTensor::Create(
       LazyGraphExecutor::Get()->GetIrValueForScalar(fill_value, shape, device),
       device, scalar_type);

@@ -8,9 +8,6 @@ namespace torch {
 namespace lazy {
 
 torch::lazy::hash_t SingleShapeHash(const lazy_tensors::Shape& shape, torch::lazy::hash_t seed) {
-  for (auto dim : shape.layout().minor_to_major()) {
-    seed = HashCombine(seed, (uint64_t)dim);
-  }
   for (auto dim : shape.dimensions()) {
     seed = HashCombine(seed, (uint64_t)dim);
   }
@@ -90,8 +87,6 @@ void ShapeUtil::ForEachSubshape(const Shape& shape,
       hash_value =
           Hash64Combine(hash_value, hash<int64_t>()(shape.dimensions(i)));
     }
-
-    hash_value = Hash64Combine(hash_value, LayoutUtil::Hash(shape.layout()));
   } else {
     hash_value = 0;
     for (const Shape& subshape : shape.tuple_shapes()) {

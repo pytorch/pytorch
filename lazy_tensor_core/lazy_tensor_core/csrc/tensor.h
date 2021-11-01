@@ -102,7 +102,6 @@ class LazyTensor {
   void SetScalarType(c10::optional<at::ScalarType> logical_element_type);
 
   lazy_tensors::util::MaybeRef<lazy_tensors::Shape> shape() const;
-  lazy_tensors::Shape shape_with_layout() const;
 
   const Device& GetDevice() const;
   int64_t GetUniqueId() const;
