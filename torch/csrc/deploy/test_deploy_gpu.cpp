@@ -36,6 +36,7 @@ TEST(TorchDeployGPUTest, SimpleModel) {
     auto M = model.acquireSession();
     M.self.attr("to")({"cuda"});
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<at::IValue> inputs;
   {
     auto I = p.acquireSession();

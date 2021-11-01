@@ -2936,6 +2936,21 @@ static const OperatorGeneratorArgs opGenArgs2[] = {
           }
         },
         aliasAnalysisFromSchema()),
+    // This operator is generated inside the compiler for indexing into
+    // ModuleList without a statically determinable key. Accordingly,
+    // self must be a ModuleType and the output must be an InterfaceType.
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
+            "prim::ModuleContainerIndex.list(Any self, int ind) -> Any"),
+        [](Stack& stack) {
+          IValue ind = pop(stack);
+          IValue module_dict = pop(stack);
+          std::stringstream ss;
+          ss << ind.toInt();
+          push(
+              stack, torch::jit::Object(module_dict.toObject()).attr(ss.str()));
+        },
+        aliasAnalysisFromSchema()),
 
 #define DEFINE_DIVMOD_MIXED_OP(type_a, type_b)                               \
   OperatorGeneratorArgs(                                                     \
