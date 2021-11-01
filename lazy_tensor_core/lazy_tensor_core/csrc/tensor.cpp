@@ -132,9 +132,9 @@ compiler::BackendDataPtr LazyTensor::GetDataHandle() {
   bool up_to_date = true;
   torch::lazy::Value ir_value;
   if (data()->view != nullptr) {
-    View::IrNode ir_value_updated = GetViewUpdate(data()->view);
-    up_to_date = !ir_value_updated.updated;
-    ir_value = std::move(ir_value_updated.ir_value);
+    bool updated = false;
+    std::tie(ir_value, updated) = GetViewUpdate(data()->view);
+    up_to_date = !updated;
   }
   if (up_to_date) {
     compiler::BackendDataPtr handle = CurrentDataHandle();
@@ -251,7 +251,7 @@ torch::lazy::Value LazyTensor::GetIrValue() const {
 
 torch::lazy::Value LazyTensor::CurrentIrValue() const {
   if (data()->view != nullptr) {
-    return GetViewUpdate(data()->view).ir_value;
+    return std::get<0>(GetViewUpdate(data()->view));
   }
   return data()->ir_value;
 }
@@ -285,14 +285,14 @@ torch::lazy::Value LazyTensor::GetIrValueForTensor(const at::Tensor& tensor,
   return CreateTensorNode(std::move(data), read_only);
 }
 
-View::IrNode LazyTensor::GetViewUpdate(
+std::tuple<torch::lazy::Value, bool> LazyTensor::GetViewUpdate(
     const std::shared_ptr<View>& view) const {
-  View::IrNode ir_value_updated = view->GetViewIrNode();
-  if (ir_value_updated.updated) {
+  auto value_with_update = view->GetViewIrNode();
+  if (std::get<1>(value_with_update)) {
     data()->handle = nullptr;
     data()->tensor_data = c10::nullopt;
   }
-  return ir_value_updated;
+  return value_with_update;
 }
 
 std::shared_ptr<View> LazyTensor::UpdateView(

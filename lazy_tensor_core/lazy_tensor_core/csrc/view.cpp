@@ -16,9 +16,7 @@
 #include "lazy_tensor_core/csrc/ops/unselect.h"
 #include "lazy_tensor_core/csrc/ops/update_slice.h"
 #include "lazy_tensor_core/csrc/ops/view.h"
-#include "lazy_tensors/computation_client/util.h"
 #include "lazy_tensors/permutation_util.h"
-#include "lazy_tensors/shape_util.h"
 
 namespace torch_lazy_tensors {
 namespace {
@@ -177,10 +175,10 @@ void Alias::Update(torch::lazy::Value ir_value, std::vector<ViewInfo> view_infos
 
 torch::lazy::Value Alias::SyncUpdateOperations() {
   for (auto& update_data : updates_) {
-    ir_value_ = ApplyUpdate(ir_value_, update_data);
+    root_ir_value_ = ApplyUpdate(root_ir_value_, update_data);
   }
   updates_.clear();
-  return ir_value_;
+  return root_ir_value_;
 }
 
 View::View(lazy_tensors::Shape shape, std::shared_ptr<Alias> alias,
@@ -207,7 +205,7 @@ std::shared_ptr<View> View::CreateSubView(lazy_tensors::Shape shape,
                                 std::move(view_infos));
 }
 
-View::IrNode View::GetViewIrNode() {
+std::tuple<torch::lazy::Value, bool> View::GetViewIrNode() {
   if (IsUpToDate()) {
     return {ir_value_, false};
   }

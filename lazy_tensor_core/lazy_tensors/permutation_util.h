@@ -1,10 +1,9 @@
 #pragma once
 
-#include <c10/util/Logging.h>
+#include <c10/util/ArrayRef.h>
+#include <c10/util/Exception.h>
 
 #include <vector>
-
-#include "lazy_tensors/str_join.h"
 
 namespace lazy_tensors {
 
@@ -13,17 +12,18 @@ std::vector<int64_t> InversePermutation(
 
 bool IsPermutation(c10::ArrayRef<int64_t> permutation);
 
-bool IsIdentityPermutation(c10::ArrayRef<int64_t> permutation);
-
+// Gathers the input using the order specified by the permutation. For each i,
+// output[i] = input[permutation[i]]. The given permutation must be the same
+// size as the input.
 template <typename Container>
-inline std::vector<typename Container::value_type> PermuteInverse(
-    const Container& input, c10::ArrayRef<int64_t> permutation) {
+std::vector<typename Container::value_type> Permute(
+    c10::ArrayRef<int64_t> permutation, const Container& input) {
   using T = typename Container::value_type;
-  c10::ArrayRef<T> data(input);
-  CHECK(IsPermutation(permutation));
-  std::vector<T> output(data.size());
+  TORCH_CHECK(input.size() == permutation.size() && IsPermutation(permutation),
+              "Invalid permutation specified");
+  std::vector<T> output(input.size());
   for (size_t i = 0; i < permutation.size(); ++i) {
-    output[permutation[i]] = data[i];
+    output[i] = input[permutation[i]];
   }
   return output;
 }
