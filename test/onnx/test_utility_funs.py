@@ -143,11 +143,10 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         n = 2
         model = torch.jit.script(PaddingLayer())
 
-        with self.assertRaises(RuntimeError):
-            torch.onnx._export(model,
-                               (input_t, n),
-                               "test.onnx",
-                               opset_version=self.opset_version)
+        torch.onnx._export(model,
+                           (input_t, n),
+                           "test.onnx",
+                           opset_version=self.opset_version)
 
     def test_constant_fold_transpose(self):
         class TransposeModule(torch.nn.Module):
