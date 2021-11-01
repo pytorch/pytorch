@@ -676,12 +676,14 @@ class AbstractCommTest(object):
                 dist.all_gather(xs, x, group=group)
             with self.assertWarnsOnceRegex(UserWarning, msg.format("all_reduce")):
                 dist.all_reduce(x, group=group)
+            with self.assertWarnsOnceRegex(UserWarning, msg.format("barrier")):
+                dist.barrier(group=group)
             with self.assertWarnsOnceRegex(UserWarning, msg.format("broadcast")):
                 dist.broadcast(x, src=0, group=group)
-
         else:
             dist.all_gather(xs, x, group=group)
             dist.all_reduce(x, group=group)
+            dist.barrier(group=group)
             dist.broadcast(x, src=0, group=group)
 
 

@@ -272,7 +272,7 @@ def _rank_not_in_group(group: ProcessGroup):
 
 
 def _warn_not_in_group(op_name):
-    global_rank = GroupMember.WORLD.rank() if is_initialized() else -1
+    global_rank = -1 if GroupMember.WORLD is None else GroupMember.WORLD.rank()
     warnings.warn(
         f"Running {op_name} on global rank {global_rank} which does not "
         "belong to the given group."
