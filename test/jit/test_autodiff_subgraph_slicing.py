@@ -372,3 +372,30 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         FileCheck().check("prim::If").check("aten::select").check_next("aten::select")\
             .check_next("aten::add_").check("Differentiable").run(graph)
         self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 2)
+
+    def test_aliased_outputs(self):
+
+        with enable_profiling_mode_for_profiling_tests():
+            with disable_autodiff_subgraph_inlining():
+
+                # @torch.jit.script
+                # def method1(a, b):
+                #     c = a + b
+                #     return (torch.split(c, [2, 1, 3]), c)
+
+                @torch.jit.script
+                def method1(a, b):
+                    c = a + b
+                    d = c.t().relu() + c
+                    e = d + c
+                    return e
+
+                x = torch.rand(6, 6, requires_grad=True)
+                y = torch.rand(6, 6, requires_grad=True)
+
+                method1(x, y)
+                method1(x, y)
+                method1(x, y)
+                #scripted = self.checkScript(method1, (x, weight, b1, b2))
+                # check_types requires last_graph on scripted to be set, so we just skip it
+                #check_against_reference(self, scripted, method1, lambda x: x, (x, weight, b1, b2), check_types=False)

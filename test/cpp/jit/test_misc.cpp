@@ -1386,6 +1386,39 @@ TEST(ThreadLocalDebugInfoTest, Basic) {
   }
 }
 
+TEST(AutodiffNick, Basic) {
+    auto graph_string = R"IR(
+    graph(%a : Tensor):
+      %b : Tensor = aten::split_with_sizes(%a)
+      %1 : int[] = prim::Constant[value=[2, 2, 1]]()
+      %2 : Tensor = aten::split_with_sizes(%b, %1)
+      %3 : (Tensor[], Tensor[]) = prim::TupleConstruct(%b, %2)
+      return (%3))IR";
+  auto graph = std::make_shared<Graph>();
+  torch::jit::parseIR(graph_string, graph.get());
+
+  auto x = at::randn({5, 1}, at::kCPU);
+  x.requires_grad_(true);
+  auto stack = createStack({x.clone()});
+
+  EnableProfilingGuard epg;
+  GraphFunction f("fallbackGraphs", graph, nullptr);
+  {
+    auto x = at::randn({5, 1}, at::kCPU);
+    x.requires_grad_(true);
+    auto stack = createStack({x.clone()});
+    f.run(stack);
+  }
+
+  {
+    auto x = at::randn({5, 1}, at::kCPU);
+    x.requires_grad_(true);
+    auto stack = createStack({x.clone()});
+    f.run(stack);
+  }
+  
+}
+
 TEST(FallbackGraphsTest, Basic) {
   static const auto nestGraphIntoFallbackGraph =
       [](const std::shared_ptr<Graph>& graph) {

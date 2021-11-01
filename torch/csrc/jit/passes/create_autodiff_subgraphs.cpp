@@ -246,9 +246,24 @@ class SubgraphSlicer {
   // Try to merge `producer` into `consumer`. If successful, this destroys
   // `producer` and returns the `consumer` group.
   c10::optional<Node*> tryMerge(Node* consumer, Node* producer) {
+
     AT_ASSERT(consumer->kind() == prim::DifferentiableGraph);
     bool canMerge = shouldConsiderForMerge(producer) &&
         aliasDb_.moveBeforeTopologicallyValid(producer, consumer);
+
+    // We need to check that no producer output aliases
+    // any differentiable graph output as this is not currently supported by autodiff.
+    // Note, this is conservative since not every output of `producer` becomes
+    // the output of DifferentiableGraph
+    ValueSet producer_values_set(producer->outputs().begin(), producer->outputs().end());
+    ValueSet consumer_values_set(consumer->outputs().begin(), consumer->outputs().end());
+
+    GRAPH_DEBUG("Checking the output of ", *producer, " mayAlias ", getHeader(consumer),
+      aliasDb_.mayAlias(producer_values_set, consumer_values_set));
+
+    auto node_has_multiuses = std::any_of(producer->outputs().begin(), producer->outputs().end(), [](Value* v){return v->uses().size() != 1; });
+
+    canMerge = canMerge && (!node_has_multiuses || !aliasDb_.mayAlias(producer_values_set, consumer_values_set);
 
     if (!canMerge) {
       return c10::nullopt;
