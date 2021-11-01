@@ -38,10 +38,6 @@
 namespace torch {
 namespace jit {
 
-IValue to_tuple(std::initializer_list<IValue> ivalues) {
-  return c10::ivalue::Tuple::create(ivalues);
-}
-
 IValue to_tuple(std::vector<IValue> ivalues) {
   return c10::ivalue::Tuple::create(std::move(ivalues));
 }
@@ -967,16 +963,16 @@ void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
   BytecodeExportSet exportSet = moduleMethodsTuple(m, dummy_uniquer);
   pushFunctionToIValues(std::move(exportSet), elements, dummy, dummy_uniquer);
   for (const auto& element : elements) {
-    auto table = element.toTupleRef().elements()[1];
+    auto table = element.toTuple()->elements()[1];
     auto row =
-        table.toTupleRef().elements().at(BYTECODE_INDEX_OPERATOR).toTuple();
+        table.toTuple()->elements().at(BYTECODE_INDEX_OPERATOR).toTuple();
     TORCH_INTERNAL_ASSERT(
         row->elements().at(0).toStringRef() == "operators",
         "Expected operators but found ",
         row->elements().at(0).toStringRef());
-    const auto& ops_list = row->elements().at(1).toTupleRef().elements();
+    const auto& ops_list = row->elements().at(1).toTuple()->elements();
     for (const auto& op : ops_list) {
-      const auto& op_item = op.toTupleRef().elements();
+      const auto& op_item = op.toTuple()->elements();
       TORCH_CHECK(
           op_item.size() >= 2,
           "There should be either two parts (name and overload name), ",

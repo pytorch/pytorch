@@ -357,6 +357,7 @@ struct TORCH_API LegacyEvent {
 // a std::vector resize from taking a large amount of time inside
 // a profiling  event
 struct RangeEventList {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,modernize-use-equals-default)
   RangeEventList() {
     events_.reserve(kReservedCapacity);
   }
@@ -369,6 +370,7 @@ struct RangeEventList {
 
   std::vector<LegacyEvent> consolidate() {
     std::lock_guard<std::mutex> lock(mutex_);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<LegacyEvent> result;
     result.insert(
         result.begin(),

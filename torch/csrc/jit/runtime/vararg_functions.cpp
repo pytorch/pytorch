@@ -218,7 +218,7 @@ void percentFormat(Stack& stack, size_t num_inputs) {
   auto args = last(stack, num_inputs - 1)[0];
   auto args_size = 1; // assumed size
   if (args.isTuple()) {
-    args_size = args.toTupleRef().elements().size();
+    args_size = args.toTuple()->elements().size();
   }
   std::stringstream ss;
   size_t used_args = 0;
@@ -243,7 +243,7 @@ void percentFormat(Stack& stack, size_t num_inputs) {
     char key = format_str.at(format_idx);
     IValue arg;
     if (args.isTuple()) {
-      arg = args.toTupleRef().elements()[used_args];
+      arg = args.toTuple()->elements()[used_args];
     } else {
       arg = args;
     }
@@ -269,40 +269,11 @@ void listUnpack(Stack& stack, size_t num_outputs) {
 }
 
 void tupleConstruct(Stack& stack, size_t num_inputs) {
-  switch (num_inputs) {
-    case 0:
-      stack.push_back(c10::ivalue::Tuple::create());
-      break;
-    case 1:
-      stack.back() = c10::ivalue::Tuple::create(std::move(stack.back()));
-      break;
-    case 2: {
-      auto tuple = c10::ivalue::Tuple::create(
-          std::move(stack[stack.size() - 2]),
-          std::move(stack[stack.size() - 1]));
-      stack.pop_back();
-      stack.back() = std::move(tuple);
-      break;
-    }
-    case 3: {
-      auto tuple = c10::ivalue::Tuple::create(
-          std::move(stack[stack.size() - 3]),
-          std::move(stack[stack.size() - 2]),
-          std::move(stack[stack.size() - 1]));
-      stack.pop_back();
-      stack.pop_back();
-      stack.back() = std::move(tuple);
-      break;
-    }
-    default: {
-      std::vector<IValue> elems{
-          std::make_move_iterator(stack.end() - num_inputs),
-          std::make_move_iterator(stack.end())};
-      drop(stack, num_inputs - 1);
-      stack.back() = c10::ivalue::Tuple::create(std::move(elems));
-      break;
-    }
-  }
+  std::vector<IValue> elems{
+      std::make_move_iterator(stack.end() - num_inputs),
+      std::make_move_iterator(stack.end())};
+  drop(stack, num_inputs);
+  push(stack, c10::ivalue::Tuple::create(std::move(elems)));
 }
 
 void namedTupleConstruct(
@@ -381,10 +352,12 @@ void isinstance(Stack& stack, at::ArrayRef<at::TypePtr> types) {
 
 void tupleSlice(Stack& stack, size_t begin, size_t end) {
   auto tuple = pop(stack).toTuple();
-  push(
-      stack,
-      c10::ivalue::Tuple::create(
-          tuple->elements().asArrayRef().slice(begin, end - begin)));
+  std::vector<IValue> output_elems;
+  output_elems.reserve(end - begin);
+  for (const auto i : c10::irange(begin, end)) {
+    output_elems.emplace_back(tuple->elements()[i]);
+  }
+  push(stack, c10::ivalue::Tuple::create(std::move(output_elems)));
 }
 
 void dequantize(Stack& stack) {
