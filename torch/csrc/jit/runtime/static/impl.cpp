@@ -32,6 +32,14 @@
 namespace torch {
 namespace jit {
 
+// A manually curated set of ops that are disallowed in static runtime.
+// These are rarely-used ops. Disallowing them typically eliminates
+// corner cases in graph optimizations, allowing for more aggressive
+// optimizations and better performance.
+bool isUnsupportedOp(const NodeKind& kind) {
+  return kind == aten::__is__ || kind == aten::__isnot__;
+}
+
 // graph must be frozen or canEnableStaticRuntime would return false if there's
 // any prim::CallMethod op left in the graph
 bool canEnableStaticRuntime(const std::shared_ptr<torch::jit::Graph>& graph) {
@@ -44,14 +52,15 @@ bool canEnableStaticRuntime(const std::shared_ptr<torch::jit::Graph>& graph) {
       VLOG(1) << "Found nested sub-blocks in graph at node: "
               << PrintNode(node);
     }
-    if (node->kind() == prim::Constant) {
+    const auto kind = node->kind();
+    if (kind == prim::Constant) {
       continue;
     }
     // check if can get op from Node
     const Operator* op = node->maybeOperator();
-    if (!op && !nativeOpIsRegistered(node->kind())) {
+    if (isUnsupportedOp(kind) || (!op && !nativeOpIsRegistered(kind))) {
       can_support = false;
-      LOG(WARNING) << "Found unsupported op: " << node->kind().toQualString();
+      LOG(WARNING) << "Found unsupported op: " << kind.toQualString();
     }
   }
   if (has_blocks) {
