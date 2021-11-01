@@ -771,14 +771,13 @@ LazyGraphExecutor::CompilationResult LazyGraphExecutor::Compile(
   auto computation = ConsumeValue(lowering_ctx->Build());
   compiler::ProgramShape program_shape =
       ConsumeValue(computation->GetProgramShape());
-  lazy_tensors::Shape shape = program_shape.result();
+  // lazy_tensors::Shape shape = program_shape.result();
 
   std::vector<compiler::CompileInstance> instances;
   instances.push_back(
       {std::move(computation), coll.device.ToString(),
        torch_lazy_tensors::compiler::getBackendRegistrar()
-           ->GetCompilationDevices(coll.device.ToString(), devices),
-       &shape});
+           ->GetCompilationDevices(coll.device.ToString(), devices)});
 
   VLOG(3) << "Compiling IR graph hash " << torch::lazy::HashToString(coll.hash)
           << " on device " << coll.device << " ...";

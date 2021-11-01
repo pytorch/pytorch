@@ -69,20 +69,22 @@ class Computation {
 };
 using ComputationPtr = std::shared_ptr<Computation>;
 
+
+// TODO(whc)
+// what is vector<device> used for here?
+// what is compilation_device?
 struct CompileInstance {
   CompileInstance() = default;
   CompileInstance(std::shared_ptr<GenericComputation> computation,
                   std::string compilation_device,
-                  std::vector<std::string> devices, const lazy_tensors::Shape* output_shape)
+                  std::vector<std::string> devices)
       : computation(std::move(computation)),
         compilation_device(std::move(compilation_device)),
-        devices(std::move(devices)),
-        output_shape(output_shape) {}
+        devices(std::move(devices)) {}
 
   std::shared_ptr<GenericComputation> computation;
   std::string compilation_device;
   std::vector<std::string> devices;
-  const lazy_tensors::Shape* output_shape = nullptr;
 };
 
 class Data {
