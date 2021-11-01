@@ -12,7 +12,7 @@ std::tuple<Tensor, Tensor> attn(
   return std::tuple<Tensor, Tensor>(o, a);
 }
 
-Tensor attn_backward_q(
+Tensor attn_q_backward(
     const Tensor& grad_o,
     const Tensor& grad_a,
     const Tensor& a,
@@ -30,7 +30,7 @@ Tensor attn_backward_q(
   return grad_q;
 }
 
-Tensor attn_backward_k(
+Tensor attn_k_backward(
     const Tensor& grad_o,
     const Tensor& grad_a,
     const Tensor& a,
@@ -39,20 +39,20 @@ Tensor attn_backward_k(
     const Tensor& v) {
   Tensor grad_k = at::zeros_like(q);
   if (grad_o.defined()) {
-    auto intermediate =
-        at::matmul(grad_o, at::transpose(v, 0, 1)) * (1 - pow(a, 2));
+    auto intermediate = at::matmul(grad_o, at::transpose(v, 0, 1)) * (1 - pow(a, 2));
     grad_k += at::matmul(at::transpose(intermediate, 0, 1), q);
   }
   if (grad_a.defined()) {
     grad_k += at::matmul(at::transpose(grad_a * (1 - pow(a, 2)), 0, 1), q);
   }
   return grad_k;
-}
+  }
 
-Tensor attn_backward_v(const Tensor& grad_o, const Tensor& a, const Tensor& v) {
+Tensor attn_v_backward(const Tensor& grad_o, const Tensor& a, const Tensor& v) {
   Tensor grad_v = at::zeros_like(v);
   if (grad_o.defined()) {
     grad_v += at::matmul(at::transpose(a, 0, 1), grad_o);
   }
+  return grad_v;
 }
 }} // namespace at::native

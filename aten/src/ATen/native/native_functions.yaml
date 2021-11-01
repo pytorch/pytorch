@@ -547,11 +547,11 @@
   dispatch:
     CompositeExplicitAutograd: attn
 
-- func: attn_backward_q(Tensor grad_o, Tensor grad_a, Tensor a, Tensor q, Tensor k, Tensor v) -> Tensor grad_q
+- func: attn_q_backward(Tensor grad_o, Tensor grad_a, Tensor a, Tensor q, Tensor k, Tensor v) -> Tensor grad_q
 
-- func: attn_backward_k(Tensor grad_o, Tensor grad_a, Tensor a, Tensor q, Tensor k, Tensor v) -> Tensor grad_k
+- func: attn_k_backward(Tensor grad_o, Tensor grad_a, Tensor a, Tensor q, Tensor k, Tensor v) -> Tensor grad_k
 
-- func: attn_backward_v(Tensor grad_o, Tensor a, Tensor v) -> Tensor grad_v
+- func: attn_v_backward(Tensor grad_o, Tensor a, Tensor v) -> Tensor grad_v
 
 - func: argmax(Tensor self, int? dim=None, bool keepdim=False) -> Tensor
   structured_delegate: argmax.out
