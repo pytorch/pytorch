@@ -2715,7 +2715,7 @@ def sample_inputs_index_put(op_info, device, dtype, requires_grad, **kwargs):
 # Missing to test the nondeterminism of the operation
 # https://github.com/pytorch/pytorch/issues/53352
 def sample_inputs_index_add(op_info, device, dtype, requires_grad, **kwargs):
-    # These testa are pretty much the same as those from index_copy.
+    # These tests are pretty much the same as those from index_copy.
     # Perhaps merge?
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
@@ -9860,7 +9860,10 @@ op_db: List[OpInfo] = [
     OpInfo('index_copy',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_inplace_autograd=False,
-           supports_out=True,
+           # An out= variant exists but is not exposed to the Python API
+           # Reason similar to that for index_add
+           # See: https://github.com/pytorch/pytorch/pull/65993#discussion_r737760723
+           supports_out=False,
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_index_copy,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
