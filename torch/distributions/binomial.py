@@ -1,4 +1,3 @@
-from math import log
 import torch
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
