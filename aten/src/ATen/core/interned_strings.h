@@ -266,6 +266,8 @@ namespace c10 {
   _(aten, ne_)                       \
   _(aten, not_equal)                 \
   _(aten, not_equal_)                \
+  _(aten, nonzero)                   \
+  _(aten, argwhere)                  \
   _(aten, _ger)                      \
   _(aten, ger)                       \
   _(aten, outer)                     \
@@ -463,6 +465,7 @@ namespace c10 {
   _(attr, df_output_vjps)            \
   _(attr, axes)                      \
   _(attr, axis)                      \
+  _(attr, symbolic_shape_inputs)     \
   _(attr, broadcast)                 \
   _(attr, direction)                 \
   _(attr, ends)                      \
