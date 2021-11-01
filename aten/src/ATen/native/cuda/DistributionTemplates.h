@@ -254,6 +254,9 @@ void distribution_binary_kernel(TensorIterator &iter, PhiloxCudaState philox_arg
   const input_t_1 *input_data_1 = static_cast<const input_t_1 *>(iter.data_ptr(1));
   const input_t_2 *input_data_2 = static_cast<const input_t_2 *>(iter.data_ptr(2));
 
+  const int num_threads = at::cuda::warp_size() * 2;
+  const int thread_work_size = 4;
+  const int block_work_size = thread_work_size * num_threads;
   int64_t grid = (numel + block_work_size - 1) / block_work_size;
   auto stream = at::cuda::getCurrentCUDAStream();
 
