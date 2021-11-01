@@ -56,7 +56,6 @@ std::unique_ptr<Function> compileMethod(
 
   std::vector<at::Tensor> parameters;
   auto params = c10::impl::GenericList(c10::AnyType::get());
-
   auto const_descriptors = kernel->getConstantDescriptors();
   for (const auto& cd : const_descriptors) {
     auto sizes = getConstSizes(cd.buf);
