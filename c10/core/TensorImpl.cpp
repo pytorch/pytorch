@@ -97,12 +97,11 @@ void TensorImpl::_set_fw_grad(
     const at::TensorBase& new_grad,
     const at::TensorBase& self,
     uint64_t level,
-    bool is_inplace_op,
-    bool is_make_dual) {
+    bool is_inplace_op) {
   if (!autograd_meta_)
     autograd_meta_ = impl::GetAutogradMetaFactory()->make();
   autograd_meta_->set_fw_grad(
-      new_grad, self, level, is_inplace_op, is_make_dual);
+      new_grad, self, level, is_inplace_op);
 }
 
 TensorImpl::TensorImpl(

@@ -1055,7 +1055,7 @@
 
 - name: neg(Tensor self) -> Tensor
   self: grad.neg()
-  result: self_t.neg()
+  result: auto_element_wise
 
 - name: nextafter(Tensor self, Tensor other) -> Tensor
   self: not_implemented("nextafter")
@@ -1112,6 +1112,7 @@
 
 - name: linalg_householder_product(Tensor input, Tensor tau) -> Tensor
   input, tau: householder_product_backward(grad, result, input, tau)
+  result: householder_product_jvp(input_t, tau_t, result, input_p, tau_p)
 
 - name: ormqr(Tensor self, Tensor input2, Tensor input3, bool left=True, bool transpose=False) -> Tensor
   self: not_implemented("ormqr")
@@ -1266,6 +1267,20 @@
 
 - name: slice_backward(Tensor grad_output, int[] input_sizes, int dim, int start, int end, int step) -> Tensor
   grad_output: grad.slice(dim, start, end, step)
+
+- name: slice_scatter(Tensor self, Tensor src, int dim=0, int? start=None, int? end=None, int step=1) -> Tensor
+  self: slice_scatter(grad, zeros_like(src), dim, start, end, step)
+  src: grad.slice(dim, start, end, step)
+  result: auto_linear
+
+- name: select_scatter(Tensor self, Tensor src, int dim, int index) -> Tensor
+  self: select_scatter(grad, zeros_like(src), dim, index)
+  src: grad.select(dim, index)
+  result: auto_linear
+
+- name: diagonal_scatter(Tensor self, Tensor src, int offset=0, int dim1=0, int dim2=1) -> Tensor
+  self: diagonal_scatter(grad, zeros_like(src), offset, dim1, dim2)
+  src: grad.diagonal(offset, dim1, dim2)
   result: auto_linear
 
 - name: slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
@@ -1644,7 +1659,7 @@
 
 - name: relu(Tensor self) -> Tensor
   self: threshold_backward(grad, result, 0)
-  result: threshold_backward(self_t, self_p, 0)
+  result: auto_element_wise
 
 - name: silu(Tensor self) -> Tensor
   self: "GradMode::is_enabled() ? infinitely_differentiable_silu_backward(grad, self) : silu_backward(grad, self)"
@@ -2339,6 +2354,11 @@
 
 - name: empty_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   self: non_differentiable
+  output_differentiability: [False]
+
+- name: _new_zeros_with_same_meta(Tensor self, Tensor other) -> Tensor
+  self: non_differentiable
+  other: non_differentiable
   output_differentiability: [False]
 
 - name: _test_warn_in_autograd(Tensor self) -> Tensor
