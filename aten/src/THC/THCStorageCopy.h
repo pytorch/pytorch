@@ -7,16 +7,7 @@
 #include <ATen/core/Tensor.h>
 
 #include <THC/generic/THCStorageCopy.h>
-#include <THC/THCGenerateAllTypes.h>
-
-#include <THC/generic/THCStorageCopy.h>
-#include <THC/THCGenerateComplexTypes.h>
-
-#include <THC/generic/THCStorageCopy.h>
-#include <THC/THCGenerateBoolType.h>
-
-#include <THC/generic/THCStorageCopy.h>
-#include <THC/THCGenerateBFloat16Type.h>
+#include <THC/THCGenerateByteType.h>
 
 // reclaim tensor ownership from an owning raw pointer
 inline at::Tensor tensor_reclaim(c10::TensorImpl *tensor) {
