@@ -13,6 +13,8 @@ static constexpr auto kMMOp = "aten::mm";
 static constexpr auto kAddMMOp = "aten::addmm";
 static constexpr auto kMulOp = "aten::mul";
 static constexpr auto kAddOp = "aten::add";
+static constexpr auto kBMMOp = "aten::bmm";
+static constexpr auto kBAddBMMOp = "aten::baddbmm";
 
 static constexpr auto kInputSize = "input_size";
 static constexpr auto kWeightSize = "weight_size";
@@ -123,6 +125,32 @@ std::unordered_map<std::string, c10::IValue> saveExtraArgs(const at::RecordFunct
 
     at::Tensor mat = inputs[0].toTensor();
     map[kMatSize] = at::IValue(mat.sizes());
+  } else if (fname == kBMMOp) {
+    std::vector<int> tensors{0, 1};
+    bool check = validateInput(fname, 2, inputs, tensors);
+    if (!check) {
+      return map;
+    }
+
+    at::Tensor left = inputs[0].toTensor();
+    at::Tensor right = inputs[1].toTensor();
+    map[kMat1Size] = at::IValue(left.sizes());
+    map[kMat2Size] = at::IValue(right.sizes());
+  } else if (fname == kBAddBMMOp) {
+    std::vector<int> tensors{0, 1, 2};
+    bool check = validateInput(fname, 3, inputs, tensors);
+    if (!check) {
+      return map;
+    }
+
+    // Exact FLOP count depends on scaling factors alpha and beta but
+    // just assume these are +=1.
+    // (similar to http://www.netlib.org/lapack/lawnspdf/lawn41.pdf,
+    // "Operations Count for the BLAS and LAPACK", Table 3, SGEMM)
+    at::Tensor left = inputs[1].toTensor();
+    at::Tensor right = inputs[2].toTensor();
+    map[kMat1Size] = at::IValue(left.sizes());
+    map[kMat2Size] = at::IValue(right.sizes());
   }
 
   return map;
@@ -219,6 +247,47 @@ uint64_t computeFlops(const std::string &op_name, const std::unordered_map<std::
       flops *= dim;
     }
     flops /= overlap_dim;
+    for(int64_t dim : mat2_size) {
+      flops *= dim;
+    }
+    flops *= gemm_multiply_factor;
+    return flops;
+  } else if (op_name == kBMMOp || op_name == kBAddBMMOp) {
+    if (extra_args.find(kMat1Size) == extra_args.end()
+        || extra_args.find(kMat2Size) == extra_args.end()) {
+      TORCH_WARN("Calculating flops for ", op_name, " requires mat1_size and mat2_size in saved arguments.");
+      return 0;
+    }
+    auto mat1_sizes_ref = extra_args.at(kMat1Size);
+    auto mat2_sizes_ref = extra_args.at(kMat2Size);
+    if (!mat1_sizes_ref.isIntList() || !mat2_sizes_ref.isIntList()) {
+      TORCH_WARN("Failed to compute flops for op ", op_name, " because it requires mat1_size and mat2_size to be IntList.");
+      return 0;
+    }
+
+    std::vector<int64_t> mat1_size = mat1_sizes_ref.toIntVector();
+    std::vector<int64_t> mat2_size = mat2_sizes_ref.toIntVector();
+    if (mat1_size.size() == 0) {
+      return 0;
+    }
+
+    int64_t batch_size = mat1_size.front();
+    if (batch_size == 0) {
+      return 0;
+    }
+
+    int64_t overlap_dim = mat1_size.back();
+    if (overlap_dim == 0) {
+      return 0;
+    }
+
+    const uint64_t gemm_multiply_factor = 2;
+    uint64_t flops = 1;
+    for(int64_t dim : mat1_size) {
+      flops *= dim;
+    }
+    flops /= overlap_dim;
+    flops /= batch_size;
     for(int64_t dim : mat2_size) {
       flops *= dim;
     }
