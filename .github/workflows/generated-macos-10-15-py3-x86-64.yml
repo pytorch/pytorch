@@ -1,7 +1,7 @@
 # @generated DO NOT EDIT MANUALLY
 # Template is at:    .github/templates/macos_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: macos-10-13-py3
+name: macos-10-15-py3-x86-64
 
 on:
   pull_request:
@@ -17,7 +17,7 @@ defaults:
   run:
     shell: bash -x -e -l {0}
 env:
-  BUILD_ENVIRONMENT: macos-10-13-py3
+  BUILD_ENVIRONMENT: macos-10-15-py3-x86-64
   IN_CI: 1
   IS_GHA: 1
 
@@ -42,10 +42,10 @@ jobs:
         run: echo "${LABELS}"
 
   build-test:
-    runs-on: macos-10.13
+    runs-on: macos-10.15
     needs: [ciflow_should_run]
     env:
-      JOB_BASE_NAME: macos-10-13-py3
+      JOB_BASE_NAME: macos-10-15-py3-x86-64
       # For sccache access (only on non-forked PRs)
       AWS_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.MACOS_SCCACHE_S3_SECRET_ACCESS_KEY }}
@@ -62,7 +62,7 @@ jobs:
           auto-update-conda: true
           python-version: 3.8
           activate-environment: build
-      - name: Install macOS Dependencies
+      - name: Install macOS homebrew dependencies
         run: |
           # Install dependencies
           brew install libomp
@@ -74,9 +74,13 @@ jobs:
           echo "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> "${GITHUB_ENV}"
       - name: Build
         run: |
+          echo "CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname "$(which conda)")/../"}" >> "${GITHUB_ENV}"
           .jenkins/pytorch/macos-build.sh
+      - name: Test
+        run: |
+          .jenkins/pytorch/macos-test.sh
 
 
 concurrency:
-  group: macos-10-13-py3-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: macos-10-15-py3-x86-64-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true

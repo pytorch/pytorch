@@ -33,7 +33,11 @@ env:
 jobs:
 !{{ common.ciflow_should_run_job(ciflow_config) }}
 {% block build_test +%}
+{%- if exclude_test %}
+  build:
+{%- else %}
   build-test:
+{%- endif %}
     runs-on: !{{ test_runner_type }}
     needs: [!{{ ciflow_config.root_job_name }}]
     env:
@@ -44,7 +48,7 @@ jobs:
     steps:
       !{{ common.checkout_pytorch("recursive") }}
       !{{ common.setup_miniconda("3.8") }}
-      - name: Install macOS Dependencies
+      - name: Install macOS homebrew dependencies
         run: |
           # Install dependencies
           brew install libomp
@@ -56,7 +60,13 @@ jobs:
           echo "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> "${GITHUB_ENV}"
       - name: Build
         run: |
+          echo "CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname "$(which conda)")/../"}" >> "${GITHUB_ENV}"
           .jenkins/pytorch/macos-build.sh
+{%- if not exclude_test %}
+      - name: Test
+        run: |
+          .jenkins/pytorch/macos-test.sh
+{%- endif %}
 {% endblock +%}
 
 !{{ common.concurrency(build_environment) }}
