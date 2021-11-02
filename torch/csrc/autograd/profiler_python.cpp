@@ -58,7 +58,7 @@ static PyTypeObject TraceContextType = {
     sizeof(TraceContext),       /* tp_basicsize */
     0,                          /* tp_itemsize */
     nullptr,                    /* tp_dealloc */
-    nullptr,                    /* tp_vectorcall_offset */
+    0,                          /* tp_vectorcall_offset */  // NOLINT: modernize-use-nullptr
     nullptr,                    /* tp_getattr */
     nullptr,                    /* tp_setattr */
     nullptr,                    /* tp_reserved */
