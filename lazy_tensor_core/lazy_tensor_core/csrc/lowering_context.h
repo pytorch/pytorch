@@ -8,10 +8,7 @@
 
 #include "lazy_tensor_core/csrc/compiler/data.h"
 #include "lazy_tensor_core/csrc/device.h"
-#include "lazy_tensor_core/csrc/ir_util.h"
-#include "lazy_tensors/computation_client/debug_macros.h"
-#include "lazy_tensors/core/platform/macros.h"
-#include "lazy_tensors/shape_util.h"
+#include "lazy_tensor_core/csrc/ir_util.h" // This is already landed on master, needs rebase
 #include "torch/csrc/lazy/core/ir.h"
 
 namespace torch_lazy_tensors {
@@ -70,9 +67,7 @@ class LoweringContext {
 
   // Build the computation capturing all the operations created with the
   // embedded builder (returned by the builder() API).
-  virtual lazy_tensors::StatusOr<
-      std::shared_ptr<compiler::Computation>>
-  Build() = 0;
+  virtual compiler::ComputationPtr Build() = 0;
 
   // Lowers the given node as the result of the computation. Only used for the
   // operator-by-operator execution, mostly for debugging purposes.
@@ -84,14 +79,6 @@ class LoweringContext {
   virtual void AddParameter(const torch::lazy::Output& output, size_t index,
                             const lazy_tensors::Shape& shape,
                             const std::string& name);
-
-  // Indicates that the output and the parameter given by their respective
-  // indices can use the same storage. The underlying back-end can safely ignore
-  // this information, but it can be used to implement efficient in-place
-  // operations in a semantically functional model.
-  virtual void SetUpAlias(const lazy_tensors::ShapeIndex& output_index,
-                          int64_t param_number,
-                          const lazy_tensors::ShapeIndex& param_index);
 
   size_t GetEmittedNodeCount() const { return emit_status_.size(); }
 

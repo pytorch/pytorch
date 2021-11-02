@@ -33,8 +33,7 @@ size_t TSLoweringContext::AddResult(const torch::lazy::Output& output) {
   return AddResult(GetOutputOp(output));
 }
 
-lazy_tensors::StatusOr<std::shared_ptr<compiler::Computation>>
-TSLoweringContext::Build() {
+ComputationPtr TSLoweringContext::Build() {
   for (torch::jit::Value* output : root_tuple_) {
     graph_->block()->registerOutput(output);
   }

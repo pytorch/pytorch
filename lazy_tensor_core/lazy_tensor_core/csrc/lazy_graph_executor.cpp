@@ -757,7 +757,7 @@ LazyGraphExecutor::CompilationResult LazyGraphExecutor::Compile(
     BuildInputOutputAliases(tensors, coll.indices, lowering_ctx.get());
   }
 
-  ComputationPtr computation = ConsumeValue(lowering_ctx->Build());
+  ComputationPtr computation = lowering_ctx->Build();
 
   VLOG(3) << "Compiling IR graph hash " << torch::lazy::HashToString(coll.hash)
           << " on device " << coll.device << " ...";
@@ -821,7 +821,9 @@ void LazyGraphExecutor::BuildInputOutputAliases(
             lowering_ctx->GetResultShape(output_index);
         if (lazy_tensors::Shape(parameters_data[i]->shape()) == root_shape &&
             alias_map[output_index] < 0) {
-          lowering_ctx->SetUpAlias({static_cast<int64_t>(output_index)}, i, {});
+
+          // TODO(whc) deleted this interface until we see a need (no TS impl)
+          // lowering_ctx->SetUpAlias({static_cast<int64_t>(output_index)}, i, {});
           alias_map[output_index] = i;
 
           VLOG(6) << "Aliased paramter " << i << " with output " << output_index

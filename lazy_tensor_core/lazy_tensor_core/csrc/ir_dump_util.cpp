@@ -260,7 +260,7 @@ std::string DumpUtil::ToBackend(c10::ArrayRef<torch::lazy::Value> values,
   for (auto& ir_value : values) {
     lowering_ctx->AddResult(ir_value);
   }
-  auto computation = ConsumeValue(lowering_ctx->Build());
+  auto computation = lowering_ctx->Build();
   return ConsumeValue(
       compiler::getBackendRegistrar()->GetComputationBackendText(
           computation));

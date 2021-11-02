@@ -43,8 +43,7 @@ class TSLoweringContext : public ir::LoweringContext {
 
   size_t AddResult(const torch::lazy::Output& output) override;
 
-  lazy_tensors::StatusOr<std::shared_ptr<Computation>>
-  Build() override;
+  ComputationPtr Build() override;
 
   // Retrieves the lowered operation for a output. If the requested output is
   // not available yet, the graph behind the output's Node is lowered, and the
