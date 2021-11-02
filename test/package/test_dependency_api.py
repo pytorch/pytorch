@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: package/deploy"]
+
 import importlib
 from io import BytesIO
 from sys import version_info
