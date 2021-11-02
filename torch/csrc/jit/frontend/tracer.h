@@ -190,10 +190,12 @@ struct TORCH_API NoWarn {
 };
 
 struct WithNestedTracingFrame {
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   WithNestedTracingFrame() {
     getTracingState()->enterFrame();
   }
 
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~WithNestedTracingFrame() {
     getTracingState()->leaveFrame();
   }
