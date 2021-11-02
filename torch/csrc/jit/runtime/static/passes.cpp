@@ -527,65 +527,6 @@ void ReplaceWithCopy(
 // NB: The alias type of the fused op needs to be changed to
 // c10::AliasAnalysisKind::PURE_FUNCTION to make alias analysis work.
 void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
-  AliasDb alias_db(
-      graph, /*isFrozen=*/false, /*enablePreciseTupleContainerAnalysis=*/true);
-  const std::vector<Value*> graph_outputs(
-      graph->outputs().begin(), graph->outputs().end());
-  auto nodes = graph->nodes();
-  for (auto it = nodes.begin(); it != nodes.end(); ++it) {
-    Node* node = *it;
-    const std::string node_qual_string = node->kind().toQualString();
-    if (node_qual_string == "fb::gather_ranges_to_dense" ||
-        node_qual_string == "fb::gather_ranges_to_dense_v2") {
-      const Value* value_out = node->outputs()[0];
-      if (value_out->uses().size() > 1) {
-        continue;
-      }
-
-      Node* list_unpack_node = value_out->uses()[0].user;
-      if (list_unpack_node->kind() != prim::ListUnpack) {
-        continue;
-      }
-
-      auto list_unpack_outputs = list_unpack_node->outputs();
-      if (list_unpack_outputs.empty()) {
-        continue;
-      }
-
-      if (node_qual_string != "fb::equally_split") {
-        // If any output of the ListUnpack node is unmanaged, disable fusion
-        // since the fused op assumes all outputs are either managed or not.
-        // "fb::equally_split" is excluded here since it does doublecheck
-        // individual outputs without having this assumption.
-        const std::vector<Value*> list_unpack_outputs_vec(
-            list_unpack_outputs.begin(), list_unpack_outputs.end());
-        if (alias_db.mayContainAlias(list_unpack_outputs_vec, graph_outputs)) {
-          continue;
-        }
-      }
-      // handle outputs
-      for (Value* out : list_unpack_outputs) {
-        Value* new_out = node->addOutput();
-        new_out->copyMetadata(out);
-        out->replaceAllUsesWith(new_out);
-      }
-
-      auto it_next = it;
-      ++it_next; // it_next points to list_unpack
-      it_next.destroyCurrent(); // remove list_unpack
-
-      node->eraseOutput(0);
-    }
-  }
-
-#ifndef NDEBUG
-  graph->lint();
-  AliasDb db2(graph);
-  torch::jit::Lint(&db2);
-#endif
-}
-
-void FuseListUnpackV2(std::shared_ptr<torch::jit::Graph>& graph) {
   const FastMap<c10::Symbol, c10::Symbol> unfused_to_fused = {
       {fromQualString("fb::equally_split"),
        fromQualString("static_runtime::fused_equally_split")},
@@ -599,7 +540,11 @@ void FuseListUnpackV2(std::shared_ptr<torch::jit::Graph>& graph) {
        fromQualString("static_runtime::fused_sigrid_transforms_torch_bind")},
       {fromQualString("fb::variadic_sigrid_transforms_torch_bind"),
        fromQualString(
-           "static_runtime::fused_variadic_sigrid_transforms_torch_bind")}};
+           "static_runtime::fused_variadic_sigrid_transforms_torch_bind")},
+      {fromQualString("fb::gather_ranges_to_dense"),
+       fromQualString("static_runtime::fused_gather_ranges_to_dense")},
+      {fromQualString("fb::gather_ranges_to_dense_v2"),
+       fromQualString("static_runtime::fused_gather_ranges_to_dense_v2")}};
 
   AliasDb alias_db(
       graph,
