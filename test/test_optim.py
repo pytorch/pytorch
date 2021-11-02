@@ -119,13 +119,13 @@ class TestOptim(TestCase):
 
         initial_value = fn().item()
         for _i in range(200):
+            optimizer.step(fn)
             for scheduler in schedulers:
                 if isinstance(scheduler, ReduceLROnPlateau):
                     val_loss = fn()
                     scheduler.step(val_loss)
                 else:
                     scheduler.step()
-            optimizer.step(fn)
         self.assertLess(fn().item(), initial_value)
 
     def _test_state_dict(self, weight, bias, input, constructor):
@@ -1983,8 +1983,10 @@ class TestLRScheduler(TestCase):
                                  msg='LR is wrong in epoch {}: expected {}, got {}'.format(
                                      epoch, target[epoch], param_group['lr']), atol=1e-5, rtol=0)
             if epoch >= swa_start:
+                self.opt.step()
                 swa_scheduler.step()
             elif scheduler is not None:
+                self.opt.step()
                 scheduler.step()
 
     def test_swalr_hypers(self):
