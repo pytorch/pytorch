@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: fx"]
+
 import torch
 import torch.fx.experimental.fx_acc.acc_ops as acc_ops
 import torch.nn as nn
@@ -28,7 +30,7 @@ class TestSoftmaxConverter(AccTestCase):
             Softmax(dim),
             inputs,
             expected_ops={acc_ops.softmax},
-            test_implicit_batch_dim=(dim % len(inputs[0].shape) != 0),
+            test_implicit_batch_dim=(dim is None or dim % len(inputs[0].shape) != 0),
         )
 
     def test_softmax_with_dynamic_shape(self):

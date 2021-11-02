@@ -26,7 +26,7 @@ add_custom_command(
   VERBATIM
 )
 
-add_library(torch_deploy libtorch_deployinterpreter.o ${DEPLOY_DIR}/deploy.cpp ${DEPLOY_DIR}/loader.cpp)
+add_library(torch_deploy libtorch_deployinterpreter.o ${DEPLOY_DIR}/deploy.cpp ${DEPLOY_DIR}/loader.cpp ${DEPLOY_DIR}/path_environment.cpp)
 target_link_libraries(torch_deploy PRIVATE crypt pthread dl util m z ffi lzma readline nsl ncursesw panelw) # for python builtins
 target_link_libraries(torch_deploy PUBLIC "-Wl,--no-as-needed" shm torch fmt::fmt-header-only protobuf::libprotobuf-lite)
 
@@ -46,6 +46,10 @@ target_include_directories(test_deploy_lib BEFORE PRIVATE ${PYTHON_INC_DIR})
 add_executable(deploy_benchmark ${DEPLOY_DIR}/example/benchmark.cpp)
 target_include_directories(deploy_benchmark PRIVATE ${PYTORCH_ROOT}/torch)
 target_link_libraries(deploy_benchmark PUBLIC torch_deploy)
+
+add_executable(interactive_embedded_interpreter ${DEPLOY_DIR}/interactive_embedded_interpreter.cpp)
+target_include_directories(interactive_embedded_interpreter PRIVATE ${PYTORCH_ROOT}/torch)
+target_link_libraries(interactive_embedded_interpreter PUBLIC torch_deploy)
 
 if(INSTALL_TEST)
   install(TARGETS test_deploy DESTINATION bin)
