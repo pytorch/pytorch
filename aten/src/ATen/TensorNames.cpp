@@ -56,7 +56,7 @@ TensorNames::TensorNames(ArrayRef<Dimname> names, int64_t start, int64_t end) {
   start = maybe_wrap_dim(start, names.size());
   end = maybe_wrap_dim(end, names.size());
   names_.reserve(end - start);
-  for (int64_t idx = start; idx < end; ++idx) {
+  for (const auto idx : c10::irange(start, end)) {
     names_.emplace_back(names, idx);
   }
 }

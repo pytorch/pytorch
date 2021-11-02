@@ -1421,7 +1421,7 @@ static inline std::vector<Tensor> get_stack_inputs(TensorList tensors, int64_t d
   std::vector<Tensor> inputs(tensors.size());
   at::IntArrayRef entry_shape = tensors[0].sizes();
   inputs[0] = tensors[0].unsqueeze(dim);
-  for (size_t i = 1; i < tensors.size(); ++i) {
+  for (const auto i : c10::irange(1, tensors.size())) {
     TORCH_CHECK(tensors[i].sizes() == entry_shape,
       "stack expects each tensor to be equal size, but got ", entry_shape,
       " at entry 0 and ", tensors[i].sizes(), " at entry ", i);
@@ -1449,7 +1449,7 @@ bool inline can_use_native_serial_stack(Tensor& result, TensorList tensors, int6
   if (result.dtype() != firstTensor.dtype()) return false;
 
   // Inputs cannot alias the output tensor
-  for (size_t i = 0; i < tensors.size(); i++) {
+  for (const auto i : c10::irange(tensors.size())) {
     auto lap = at::get_overlap_status(result, tensors[i]);
     TORCH_CHECK(lap != at::MemOverlapStatus::PARTIAL &&
         lap != at::MemOverlapStatus::FULL, 0,
@@ -1471,7 +1471,7 @@ bool inline can_use_native_serial_stack(Tensor& result, TensorList tensors, int6
 
   // check remainder of inputs
   auto const &first_tensor_shape = firstTensor.sizes();
-  for (size_t i = 1; i < tensors.size(); i++) {
+  for (const auto i : c10::irange(1, tensors.size())) {
     auto const &tensor = tensors[i];
     TORCH_CHECK(tensors[i].sizes() == firstTensor.sizes(),
       "stack expects each tensor to be equal size, but got ", first_tensor_shape,
@@ -2561,4 +2561,27 @@ std::vector<Tensor> unflatten_dense_tensors(const Tensor& flat, TensorList tenso
   return outputs;
 }
 
-}} // at::native
+at::Tensor slice_scatter(const at::Tensor& self, const at::Tensor& src, int64_t dim, c10::optional<int64_t> start, c10::optional<int64_t> end, int64_t step) {
+    auto output = self.clone();
+    auto slice = output.slice(dim, start, end, step);
+    TORCH_CHECK(slice.sizes() == src.sizes(), "expected src to have a size equal to the slice of self. src size = ", src.sizes(), ", slice size = ", slice.sizes());
+    slice.copy_(src);
+    return output;
+}
+at::Tensor select_scatter(const at::Tensor& self, const at::Tensor& src, int64_t dim, int64_t index) {
+    auto output = self.clone();
+    auto slice = output.select(dim, index);
+    TORCH_CHECK(slice.sizes() == src.sizes(), "expected src to have a size equal to the slice of self. src size = ", src.sizes(), ", slice size = ", slice.sizes());
+    slice.copy_(src);
+    return output;
+}
+at::Tensor diagonal_scatter(const at::Tensor& self, const at::Tensor& src, int64_t offset, int64_t dim1, int64_t dim2) {
+    auto output = self.clone();
+    auto slice = output.diagonal(offset, dim1, dim2);
+    TORCH_CHECK(slice.sizes() == src.sizes(), "expected src to have a size equal to the slice of self. src size = ", src.sizes(), ", slice size = ", slice.sizes());
+    slice.copy_(src);
+    return output;
+}
+
+} // namespace native
+} // namespace at

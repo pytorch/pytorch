@@ -21,7 +21,7 @@ on:
     steps:
       !{{ common.setup_ec2_linux() }}
       !{{ common.checkout_pytorch("recursive") }}
-      !{{ common.calculate_docker_image() }}
+      !{{ common.calculate_docker_image(false) }}
       - name: Pull Docker image
         run: |
           !{{ common.pull_docker("${DOCKER_IMAGE}") }}
@@ -82,7 +82,7 @@ on:
         run: |
           COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
           export COMMIT_TIME
-          pip3 install requests==2.26
+          pip3 install requests==2.26 boto3==1.16.34
           python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
       - name: Test
         # Time out the test phase after 3.5 hours

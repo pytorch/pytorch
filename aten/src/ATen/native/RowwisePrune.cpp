@@ -1,6 +1,7 @@
 // Copyright 2004-present Facebook. All Rights Reserved.
 
 #include <ATen/ATen.h>
+#include <c10/util/irange.h>
 
 
 namespace at {
@@ -15,7 +16,7 @@ std::tuple<Tensor, Tensor> _rowwise_prune_helper(
   int num_non_masked_rows = 0;
   auto mask_contig = mask.contiguous();
   auto mask_data = mask_contig.data_ptr<bool>();
-  for (int i = 0; i < mask.numel(); ++i) {
+  for (const auto i : c10::irange(mask.numel())) {
     num_non_masked_rows += (((mask_data[i] == true)) ? 1 : 0);
   }
   int num_cols = weights.size(1);
@@ -32,7 +33,7 @@ std::tuple<Tensor, Tensor> _rowwise_prune_helper(
         compressed_indices_mapping.data_ptr<input_t>();
     auto weights_data = weights.data_ptr<scalar_t>();
     int last_row_kept = 0;
-    for (int i = 0; i < mask.numel(); i++) {
+    for (const auto i : c10::irange(mask.numel())) {
       if (mask_data[i]) {
         memcpy(pruned_2d_tensor_data + last_row_kept * num_cols,
               weights_data + i * num_cols,
