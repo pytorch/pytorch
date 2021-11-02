@@ -194,10 +194,5 @@ def optimize_for_inference(mod: ScriptModule) -> ScriptModule:
         raise RuntimeError(
             "optimize_for_inference expects a ScriptModule as input. "
             "Please use torch.jit.script or torch.jit.trace to script your 'nn.Module'.")
-
-    if hasattr(mod, "training"):
-        mod = freeze(mod.eval())
-
-    torch._C._jit_pass_convert_frozen_ops_to_mkldnn(mod.graph)
-    torch._C._jit_pass_fuse_frozen_conv_add_relu(mod.graph)
+    torch._C._jit_pass_optimize_for_inference(mod._c)
     return mod
