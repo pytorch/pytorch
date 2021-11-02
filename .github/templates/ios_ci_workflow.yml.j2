@@ -27,6 +27,7 @@ defaults:
   run:
     shell: bash -l {0}
 env:
+  BUILD_ENVIRONMENT: !{{ build_environment }}
   IN_CI: 1
   IS_GHA: 1
 
