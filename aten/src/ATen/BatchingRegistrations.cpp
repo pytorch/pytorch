@@ -1,4 +1,5 @@
 #include <torch/library.h>
+#include <ATen/RedispatchFunctions.h>
 #include <ATen/VmapTransforms.h>
 #include <ATen/BatchedFallback.h>
 #include <ATen/native/ResizeCommon.h>
@@ -544,6 +545,8 @@ static void checkBasicAsStridedValidForSlice(
 Tensor _new_zeros_with_same_meta_batching_rule(
     const Tensor& self,
     const Tensor& other) {
+  TORCH_CHECK(isBatchedTensor(self) && !isBatchedTensor(other),
+      "Only the 'batched grad' use case is supported in PyTorch core.")
   auto sizes = other.sizes();
   auto strides = other.strides();
   auto storage_offset = other.storage_offset();
@@ -573,6 +576,18 @@ Tensor _new_zeros_with_same_meta_batching_rule(
   auto result = at::_new_zeros_with_meta(self_physical_tensor, new_physical_sizes, new_physical_strides, storage_offset, new_storage_numel);
   return self_physical_view.getPhysicalToLogicalMap().apply(result);
 }
+
+Tensor _make_dual_batching_rule(
+  c10::DispatchKeySet ks,
+  const Tensor& primal,
+  const Tensor& tangent,
+  int64_t level
+) {
+  DispatchKeySet after_batched_keyset =
+      DispatchKeySet(DispatchKeySet::FULL_AFTER, c10::DispatchKey::Batched);
+  return at::redispatch::_make_dual(ks & after_batched_keyset, primal, tangent, level);
+}
+
 
 // What are the semantics of as_strided inside of vmap?
 // y = vmap(lambda x: x.as_strided(sizes, strides, offset))(xs)
@@ -1059,7 +1074,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("size.int", static_cast<int64_t (*)(const Tensor&, int64_t)>(native::size));
   m.impl("_add_batch_dim", native::_add_batch_dim);
   m.impl("_remove_batch_dim", native::_remove_batch_dim);
-  m.impl("_make_dual", native::_make_dual);
+  m.impl("_make_dual", _make_dual_batching_rule);
   m.impl("is_same_size", native::is_same_size);
   m.impl("_new_zeros_with_same_meta", _new_zeros_with_same_meta_batching_rule);
 
