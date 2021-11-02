@@ -955,7 +955,6 @@ class TestSparseCSR(TestCase):
             self.assertEqual(csr_sparse.to_dense(), dense)
 
     @dtypes(*get_all_dtypes(include_bool=False, include_half=False, include_bfloat16=False))
-    @dtypesIfCUDA(*get_all_int_dtypes())
     def test_direct_coo_csr_conversion(self, device, dtype):
         for m, n in itertools.product([5, 2, 0], [5, 2, 0]):
             size = (m, n)
