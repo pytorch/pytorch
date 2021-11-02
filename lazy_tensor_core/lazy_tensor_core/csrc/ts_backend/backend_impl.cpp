@@ -43,11 +43,11 @@ class TSBackendImpl : public BackendImplInterface {
     return std::make_shared<TSData>(tensor.to(options), shape, device);
   }
 
-  lazy_tensors::StatusOr<std::string> GetComputationBackendText(
+  std::string GetComputationBackendText(
       const ComputationPtr computation) const override {
-    auto ts_computation = static_cast<
-        torch_lazy_tensors::compiler::ts_backend::TSComputation*>(
-        computation.get());
+    auto ts_computation =
+        static_cast<torch_lazy_tensors::compiler::ts_backend::TSComputation*>(
+            computation.get());
     return ts_computation->graph()->toString();
   }
 
@@ -81,16 +81,6 @@ class TSBackendImpl : public BackendImplInterface {
 
   DataPtr CreateDataPlaceholder(std::string device,
                                 lazy_tensors::Shape shape) const override;
-
-  std::vector<DataPtr> TransferToServer(
-      c10::ArrayRef<at::Tensor> tensors) const override {
-    LOG(FATAL) << "Not implemented yet.";
-  }
-
-  std::vector<at::Tensor> TransferFromServer(
-      c10::ArrayRef<DataPtr> handles) const override {
-    LOG(FATAL) << "Not implemented yet.";
-  }
 
   std::vector<ComputationPtr> Compile(
       std::vector<ComputationPtr> instances) const override;
@@ -148,8 +138,8 @@ std::vector<DataPtr> TSBackendImpl::ExecuteComputation(
     Computation& computation, c10::ArrayRef<DataPtr> arguments,
     const std::string& device) const {
   torch::jit::GraphExecutor& graph_executor =
-      static_cast<compiler::ts_backend::TSComputation&>(
-          computation).graph_executor();
+      static_cast<compiler::ts_backend::TSComputation&>(computation)
+          .graph_executor();
   std::vector<torch::jit::IValue> stack;
   for (auto argument : arguments) {
     const auto ts_data =

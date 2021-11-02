@@ -1,18 +1,51 @@
 #pragma once
 
+#include <ATen/Tensor.h>
+
 #include <atomic>
 
-#include <ATen/Tensor.h>
-#include "lazy_tensor_core/csrc/lowering_context.h"
 #include "lazy_tensor_core/csrc/compiler/data.h"
+#include "lazy_tensor_core/csrc/lowering_context.h"
 #include "lazy_tensors/shape.h"
-#include "lazy_tensors/statusor.h"
 
 namespace torch_lazy_tensors {
 namespace compiler {
 
 class BackendImplInterface {
  public:
+  /**
+   * Initialization/Teardown
+   * */
+  // No-op by default. Allows custom functionality to be exposed through
+  // extension bindings.
+  virtual void InitializeAtenBindings() const {}
+
+  virtual void PrepareToExit() const = 0;
+
+  /**
+   * Configuration
+   * */
+
+  virtual void SetRngSeed(size_t seed) const = 0;
+
+  /**
+   * Data Transfer
+   * */
+
+  virtual DataPtr MakeComputationDataFromTensor(
+      const at::Tensor& tensor, const lazy_tensors::Shape& shape,
+      const std::string& device) const = 0;
+
+  virtual DataPtr CreateDataPlaceholder(std::string device,
+                                        lazy_tensors::Shape shape) const = 0;
+
+  virtual at::Tensor MakeTensorFromComputationData(
+      const DataPtr data,
+      c10::optional<at::ScalarType> logical_scalar_type) const = 0;
+
+  /**
+   * Lowering, Compilation, Execution
+   * */
 
   virtual std::unique_ptr<ir::LoweringContext> CreateLoweringContext(
       const std::string& name, Device device,
@@ -22,44 +55,9 @@ class BackendImplInterface {
   virtual std::unique_ptr<ir::LoweringContext> CreateLoweringContext(
       const std::string& name, Device device) const = 0;
 
+  // TODO(whc) need to keep this?
   virtual std::vector<std::string> GetCompilationDevices(
       const std::string& device, c10::ArrayRef<std::string> devices) const = 0;
-
-/**
- * APIs for moving data to/from backend
- */
-
-  // To
-  virtual DataPtr
-  MakeComputationDataFromTensor(const at::Tensor& tensor,
-                                const lazy_tensors::Shape& shape,
-                                const std::string& device) const = 0;
-  // To (somewhat duplicated)
-  virtual std::vector<DataPtr> TransferToServer(
-      c10::ArrayRef<at::Tensor> tensors) const = 0;
-  
-  // To (in a different/async way)
-  virtual DataPtr CreateDataPlaceholder(std::string device, lazy_tensors::Shape shape) const = 0;
-
-  // From
-  virtual at::Tensor MakeTensorFromComputationData(
-      const DataPtr data,
-      c10::optional<at::ScalarType> logical_scalar_type) const = 0;
-
-  virtual std::vector<at::Tensor> TransferFromServer(
-      c10::ArrayRef<DataPtr> handles) const = 0;
-
-
-  virtual lazy_tensors::StatusOr<std::string> GetComputationBackendText(
-      const ComputationPtr computation) const = 0;
-
-  // No-op by default. Allows custom functionality to be exposed through
-  // extension bindings.
-  virtual void InitializeAtenBindings() const {}
-
-  /// computation client interfaces//////
-
-
 
   virtual std::vector<ComputationPtr> Compile(
       std::vector<ComputationPtr> instances) const = 0;
@@ -68,12 +66,18 @@ class BackendImplInterface {
       Computation& computation, c10::ArrayRef<DataPtr> arguments,
       const std::string& device) const = 0;
 
-  // Identifies a 'host' in distributed setting? Used to hash a particular host's graph?
-  // -- why do we need this, and should it be renamed if we do?  Should it be one per gpu in mgpu setting? 
+  /**
+   * Device Configuration
+   * */
+
+  // Identifies a 'host' in distributed setting? Used to hash a particular
+  // host's graph?
+  // -- why do we need this, and should it be renamed if we do?  Should it be
+  // one per gpu in mgpu setting?
   virtual std::string GetResourceDomain(const std::string& device) const = 0;
 
   virtual std::string GetDefaultDevice() const = 0;
-  
+
   virtual size_t GetNumDevices() const = 0;
 
   virtual std::vector<std::string> GetLocalDevices() const = 0;
@@ -83,17 +87,21 @@ class BackendImplInterface {
   virtual void SetReplicationDevices(
       std::shared_ptr<std::vector<std::string>> devices) const = 0;
 
-  virtual std::shared_ptr<std::vector<std::string>> GetReplicationDevices() const = 0;
-
-  virtual void SetRngSeed(size_t seed) const = 0;
-
-//   virtual std::map<std::string, Metric> GetMetrics() const = 0;
-
-//   virtual MemoryInfo GetMemoryInfo(const std::string& device) = 0;
-
-  virtual void PrepareToExit() const = 0;
+  virtual std::shared_ptr<std::vector<std::string>> GetReplicationDevices()
+      const = 0;
 
   virtual at::DeviceType HardwareDeviceType() const = 0;
+
+  /**
+   * Debug/Metrics
+   * */
+
+  //   virtual std::map<std::string, Metric> GetMetrics() const = 0;
+
+  //   virtual MemoryInfo GetMemoryInfo(const std::string& device) = 0;
+
+  virtual std::string GetComputationBackendText(
+      const ComputationPtr computation) const = 0;
 };
 
 extern std::atomic<const BackendImplInterface*> backend_impl_registry;
