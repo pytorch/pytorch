@@ -45,18 +45,21 @@
 
 #ifdef USE_ROCM
 #define NO_ROCM(x)
-#define TO_ROCM_HIP_CUB(x) ::hipcub
+#define ROCM_HIPCUB(x) ::hipcub
 #else
 #define NO_ROCM(x) x
+#define ROCM_HIPCUB(x) x
 #endif
 
-#if !defined(USE_ROCM) && !CUB_SUPPORTS_NV_BFLOAT16()
+#if (!defined(USE_ROCM) && !CUB_SUPPORTS_NV_BFLOAT16()) || \
+     (defined(USE_ROCM) && ROCM_VERSION >= 40500)
 
+#if !defined(USE_ROCM)
 namespace at_cuda_detail {
+#endif
 // backport https://github.com/NVIDIA/cub/pull/306 for c10::BFloat16
-
 template <>
-struct cub::FpLimits<c10::BFloat16>
+struct ROCM_HIPCUB(cub)::FpLimits<c10::BFloat16>
 {
     static __host__ __device__ __forceinline__ c10::BFloat16 Max() {
         unsigned short max_word = 0x7F7F;
@@ -69,38 +72,19 @@ struct cub::FpLimits<c10::BFloat16>
     }
 };
 
-template <> struct cub::NumericTraits<c10::BFloat16>: cub::BaseTraits<cub::FLOATING_POINT, true, false, unsigned short, c10::BFloat16> {};
-}
+template <>
+struct ROCM_HIPCUB(cub)::NumericTraits<c10::BFloat16>:
+       ROCM_HIPCUB(cub)::BaseTraits<ROCM_HIPCUB(cub)::FLOATING_POINT, true, false, unsigned short, c10::BFloat16> {};
+#if !defined(USE_ROCM)
+} // namespace at_cuda_detail
+#endif
+
 #endif
 
 #if !defined(USE_ROCM)
 namespace at { namespace native {
 namespace cub = ::at_cuda_detail::cub;
 }}
-#endif
-
-#if defined(__HIP_PLATFORM_HCC__)
-
-// backport https://github.com/NVIDIA/cub/pull/306 for c10::BFloat16
-template <>
-struct ::hipcub::FpLimits<c10::BFloat16>
-{
-    static __host__ __device__ __forceinline__ c10::BFloat16 Max() {
-        unsigned short max_word = 0x7F7F;
-        return reinterpret_cast<c10::BFloat16&>(max_word);
-    }
-
-    static __host__ __device__ __forceinline__ c10::BFloat16 Lowest() {
-        unsigned short lowest_word = 0xFF7F;
-        return reinterpret_cast<c10::BFloat16&>(lowest_word);
-    }
-};
-
-//template <> struct ::hipcub::NumericTraits<c10::BFloat16>: ::hipcub::BaseTraits<::hipcub::FLOATING_POINT, true, false, unsigned short, c10::BFloat16> {};
-template <>
-struct ::hipcub::NumericTraits<c10::BFloat16>:
-       ::hipcub::BaseTraits<::hipcub::FLOATING_POINT, true, false, unsigned short, c10::BFloat16> {};
-
 #endif
 
 namespace at {
@@ -125,7 +109,7 @@ struct cuda_type<c10::BFloat16> {
   using type = __nv_bfloat16;
 };
 
-#elif defined(USE_ROCM)
+#elif (defined(USE_ROCM) && ROCM_VERSION >= 40500)
 
 template<>
 struct cuda_type<c10::BFloat16> {
