@@ -178,7 +178,7 @@ test_python_shard() {
     exit 1
   fi
   if [[ "$BUILD_ENVIRONMENT" == *cuda* || "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-    time python test/run_test.py --exclude-jit-executor --exclide-distributed-tests --shard "$1" "$NUM_TEST_SHARDS" --verbose --determine-from="$DETERMINE_FROM" -- --run-parallel "$PYTORCH_DEVICE_COUNT"
+    time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --shard "$1" "$NUM_TEST_SHARDS" --verbose --determine-from="$DETERMINE_FROM" -- --run-parallel "$PYTORCH_DEVICE_COUNT"
   else
     time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --shard "$1" "$NUM_TEST_SHARDS" --verbose --determine-from="$DETERMINE_FROM"
   fi
