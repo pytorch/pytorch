@@ -67,7 +67,7 @@ if(INTERN_BUILD_ATEN_OPS)
     set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/MapAllocator.cpp PROPERTIES COMPILE_FLAGS "-fno-openmp")
   endif()
 
-  file(GLOB cpu_kernel_cpp_in "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cpu/*.cpp" "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/quantized/cpu/kernels/*.cpp")
+  file(GLOB cpu_kernel_cpp_in "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cpu/*.cpp" "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/quantized/cpu/kernels/*.cpp")
 
   list(APPEND CPU_CAPABILITY_NAMES "DEFAULT")
   list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}")
@@ -129,10 +129,10 @@ if(INTERN_BUILD_ATEN_OPS)
   # See NOTE [ Linking AVX and non-AVX files ]
   foreach(i RANGE ${NUM_CPU_CAPABILITY_NAMES})
     foreach(IMPL ${cpu_kernel_cpp_in})
-      string(REPLACE "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/" "" NAME ${IMPL})
+      file(RELATIVE_PATH NAME "${PROJECT_SOURCE_DIR}/aten/src/ATen/" "${IMPL}")
       list(GET CPU_CAPABILITY_NAMES ${i} CPU_CAPABILITY)
       set(NEW_IMPL ${CMAKE_BINARY_DIR}/aten/src/ATen/${NAME}.${CPU_CAPABILITY}.cpp)
-      configure_file(${IMPL} ${NEW_IMPL} COPYONLY)
+      configure_file("${PROJECT_SOURCE_DIR}/cmake/IncludeSource.cpp.in" ${NEW_IMPL})
       set(cpu_kernel_cpp ${NEW_IMPL} ${cpu_kernel_cpp}) # Create list of copies
       list(GET CPU_CAPABILITY_FLAGS ${i} FLAGS)
       if(MSVC)
