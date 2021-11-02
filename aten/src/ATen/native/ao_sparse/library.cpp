@@ -5,7 +5,7 @@
 
 namespace ao {
 namespace sparse {
-torch::class_<LinearPackedParamsBase> register_linear_params();
+int register_linear_params();
 }}
 
 // Register operators
