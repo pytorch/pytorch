@@ -1229,6 +1229,12 @@
 
 - func: conv_transpose3d.input(Tensor input, Tensor weight, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] output_padding=0, int groups=1, int[3] dilation=1) -> Tensor
 
+# out-of-place variant of copy_()
+# This doesn't need to be exposed to python, but is needed for functionalization.
+- func: copy(Tensor self, Tensor src, bool non_blocking=False) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: copy
+
 - func: copy_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)
   variants: method
   device_check: NoCheck
@@ -2116,7 +2122,7 @@
 
 - func: grid_sampler_2d(Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> Tensor
   dispatch:
-    CPU: grid_sampler_2d_cpu
+    CPU, QuantizedCPU: grid_sampler_2d_cpu
     CUDA: grid_sampler_2d_cuda
 
 # `grid_sampler_2d_backward` takes in `output_mask` to optimize performance for
@@ -3127,7 +3133,7 @@
 - func: mv(Tensor self, Tensor vec) -> Tensor
   variants: function, method
   dispatch:
-    CPU, CUDA, SparseCsrCUDA: mv
+    CompositeExplicitAutograd: mv
     SparseCPU, SparseCUDA, SparseCsrCPU: mv_sparse
 
 - func: mv.out(Tensor self, Tensor vec, *, Tensor(a!) out) -> Tensor(a!)
@@ -5332,7 +5338,7 @@
 - func: dequantize.self(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    CPU: dequantize_cpu
+    CPU, CUDA: dequantize_cpu_or_cuda
     QuantizedCPU, QuantizedCUDA: dequantize_quantized
 
 - func: dequantize.tensors(Tensor[] tensors) -> Tensor[]
@@ -6135,16 +6141,12 @@
     CPU, CUDA: bitwise_right_shift
 
 - func: tril_(Tensor(a!) self, int diagonal=0) -> Tensor(a!)
+  structured_delegate: tril.out
   variants: method
-  dispatch:
-    CPU: tril_cpu_
-    CUDA: tril_cuda_
 
 - func: triu_(Tensor(a!) self, int diagonal=0) -> Tensor(a!)
+  structured_delegate: triu.out
   variants: method
-  dispatch:
-    CPU: triu_cpu_
-    CUDA: triu_cuda_
 
 - func: digamma_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -6258,24 +6260,24 @@
     CPU, CUDA: cross
 
 - func: triu.out(Tensor self, int diagonal=0, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
   dispatch:
-    CPU: triu_cpu_out
-    CUDA: triu_cuda_out
+    CPU: triu_cpu
+    CUDA: triu_cuda
 
 - func: triu(Tensor self, int diagonal=0) -> Tensor
+  structured_delegate: triu.out
   variants: method, function
-  dispatch:
-    CompositeExplicitAutograd: triu
 
 - func: tril.out(Tensor self, int diagonal=0, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
   dispatch:
-    CPU: tril_cpu_out
-    CUDA: tril_cuda_out
+    CPU: tril_cpu
+    CUDA: tril_cuda
 
 - func: tril(Tensor self, int diagonal=0) -> Tensor
+  structured_delegate: tril.out
   variants: method, function
-  dispatch:
-    CompositeExplicitAutograd: tril
 
 - func: tril_indices(int row, int col, int offset=0, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
@@ -6698,6 +6700,9 @@
     CUDA: nonzero_cuda
 
 - func: nonzero_numpy(Tensor self) -> Tensor[]
+  variants: method, function
+
+- func: argwhere(Tensor self) -> Tensor
   variants: method, function
 
 - func: gather.out(Tensor self, int dim, Tensor index, *, bool sparse_grad=False, Tensor(a!) out) -> Tensor(a!)
