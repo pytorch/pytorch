@@ -17,6 +17,7 @@ struct InterpreterState {
   void enterFrame(const Code&);
   void leaveFrame();
   void saveExceptionDebugHandle();
+  void callFunction(torch::jit::Function& f, Stack& stack);
 
   c10::IValue& reg(size_t reg);
   std::vector<c10::IValue> registers_;
