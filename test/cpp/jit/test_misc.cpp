@@ -46,6 +46,7 @@
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
+#include <torch/csrc/jit/runtime/jit_trace.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
 #include <torch/csrc/jit/runtime/symbolic_script.h>
 #include <torch/csrc/jit/serialization/import.h>
@@ -58,6 +59,8 @@
 #include <c10/util/Exception.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
 
+#include <torch/csrc/jit/passes/freeze_module.h>
+#include <torch/csrc/jit/passes/frozen_graph_optimizations.h>
 #include <algorithm>
 #include <cstddef>
 #include <functional>
@@ -67,6 +70,7 @@
 #include <stdexcept>
 #include <string>
 #include <tuple>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -1803,6 +1807,46 @@ TEST(LoopPeelerTest, SimpleNestedLoops2) {
   }
 }
 
+TEST(JitTracing, Basic) {
+  constexpr int batch_size = 4;
+  constexpr int input_size = 256;
+
+  int hidden_size = 2 * input_size;
+
+  auto input = at::randn({batch_size, input_size}, at::kCPU);
+  auto hx = at::randn({batch_size, hidden_size}, at::kCPU);
+  auto cx = at::randn({batch_size, hidden_size}, at::kCPU);
+  auto w_ih = t_def(at::randn({4 * hidden_size, input_size}, at::kCPU));
+  auto w_hh = t_def(at::randn({4 * hidden_size, hidden_size}, at::kCPU));
+
+  auto graph = build_lstm();
+  auto stack = createStack({input, hx, cx, w_ih, w_hh});
+  auto traced = TraceGraph(graph, stack);
+  Tensor prof_out;
+  pop(stack, prof_out);
+
+  {
+    stack = createStack({input, hx, cx, w_ih, w_hh});
+    Code cd(traced, "traced");
+    InterpreterState is{cd};
+    is.run(stack);
+    Tensor traced_out;
+    pop(stack, traced_out);
+    torch::allclose(prof_out, traced_out);
+  }
+
+  {
+    stack = createStack({input, hx, cx, w_ih, w_hh});
+    Code cd(graph, "graph");
+    InterpreterState is{cd};
+    is.run(stack);
+    Tensor scripted_out;
+    pop(stack, scripted_out);
+    torch::allclose(prof_out, scripted_out);
+  }
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InsertAndEliminateRedundantGuardsTest, Basic) {
   static const auto basic_example = R"JIT(
   def basic(x, y):
@@ -2661,6 +2705,19 @@ TEST(ComputeFlopsTest, Basic) {
   // Test aten::addmm
   flops = computeFlops(std::string("aten::addmm"), extra_args);
   ASSERT_EQ(flops, 43200);
+
+  // Test aten::bmm
+  extra_args.clear();
+  mat1_sizes = {7, 5, 6};
+  mat2_sizes = {7, 6, 3};
+  extra_args["mat1_size"] = at::IValue(at::IntArrayRef(mat1_sizes));
+  extra_args["mat2_size"] = at::IValue(at::IntArrayRef(mat2_sizes));
+  flops = computeFlops(std::string("aten::bmm"), extra_args);
+  ASSERT_EQ(flops, 1260);
+
+  // Test aten::baddbmm
+  flops = computeFlops(std::string("aten::baddbmm"), extra_args);
+  ASSERT_EQ(flops, 1260);
 
   // Test mm out of range
   extra_args.clear();

@@ -1071,24 +1071,13 @@ class expectedAlertNondeterministic:
     #       no others. If None, then the alert is expected to be triggered
     #       for all devices. Default: None
     #
-    # Keyword args:
-    #
-    #   test_warning (bool, optional): If True, tests warnings in addition
-    #       to errors. If False, only errors are tested. Default: True
-    #
-    # TODO: `test_warning=False` is only needed as a workaround for issue
-    #       https://github.com/pytorch/pytorch/issues/50209. Once CUDA
-    #       backward function warnings behave properly, we can remove this
-    #       argument and always test for warnings.
-    #
-    def __init__(self, caller_name, device_types=None, *, test_warning=True):
+    def __init__(self, caller_name, device_types=None):
         if device_types is not None:
             assert isinstance(device_types, list)
             for device_type in device_types:
                 assert isinstance(device_type, str)
         self.device_types = device_types
         self.error_message = caller_name + ' does not have a deterministic implementation, but you set'
-        self.test_warning = test_warning
 
     def __call__(self, fn):
         @wraps(fn)
@@ -1118,7 +1107,7 @@ class expectedAlertNondeterministic:
                         raise
 
             # Check that warnings are thrown correctly
-            if self.test_warning and should_alert:
+            if should_alert:
                 with DeterministicGuard(True, warn_only=True):
                     with slf.assertWarnsRegex(
                             UserWarning,
