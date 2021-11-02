@@ -15,7 +15,7 @@ on:
 # For setup-miniconda, see https://github.com/conda-incubator/setup-miniconda/issues/179
 defaults:
   run:
-    shell: bash -l {0}
+    shell: bash -x -e -l {0}
 env:
   BUILD_ENVIRONMENT: ios_12_5_1_arm64_full_jit
   IN_CI: 1
@@ -68,7 +68,6 @@ jobs:
           conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi requests typing_extensions --yes
       - name: Run Fastlane
         run: |
-          set -x
           cd ios/TestApp
           # install fastlane
           sudo gem install bundler && bundle install
@@ -88,7 +87,6 @@ jobs:
           rm cert.txt
       - name: Build
         run: |
-          set -x
           export TCLLIBPATH="/usr/local/lib"
           python -VV
           export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname "$(which conda)")/../"}
