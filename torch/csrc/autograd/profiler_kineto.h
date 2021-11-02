@@ -427,7 +427,7 @@ dependencies in libtorch is common in the PyTorch codebase.
 */
 enum CallType { kPyCall = 0, kPyModuleCall, kCCall };
 
-struct PyTraceEvent {
+struct TORCH_API PyTraceEvent {
   int64_t t0_;
   int64_t t1_;
   std::string name_;
@@ -447,14 +447,14 @@ enum Command { kStartOne = 0, kStartAll, kStop, kClear };
 using CallFn = void (*)(Command);
 using TraceEventsFn = std::vector<std::unique_ptr<PyTraceEvent>> (*)();
 
-void registerFunctions(
+TORCH_API void registerFunctions(
   CallFn call,
   TraceEventsFn get_events
 );
 
 // Because we are interleaving events, the Python tracer should use the same
 // timer as the profiler.
-int64_t now();
+TORCH_API int64_t now();
 }  // namespace python_tracer
 
 } // namespace profiler

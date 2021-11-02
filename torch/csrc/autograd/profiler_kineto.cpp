@@ -52,7 +52,7 @@ CallFn call_fn;
 TraceEventsFn get_events_fn;
 }  // namespace
 
-TORCH_API void registerFunctions(
+void registerFunctions(
     CallFn call,
     TraceEventsFn get_events) {
   call_fn = call;
@@ -73,7 +73,7 @@ auto get_events() {
 
 // We do not want `getTimeUs` to be directly visible, but we need a way for
 // the python tracer to use the same timing convention as the profiler.
-TORCH_API int64_t now() {
+int64_t now() {
   return getTimeUs();
 }
 
