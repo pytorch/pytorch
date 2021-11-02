@@ -282,9 +282,9 @@ TEST(TestQTensor, FromBlobQuantizedPerChannel) {
 }
 
 #if defined(__ARM_NEON__) || defined(__aarch64__)
-TEST(TestQTensor, TestArmVectorizedAndParallelQuantizeDequantize) {
+TEST(TestQTensor, TestArmVectorizedQuantizeDequantize) {
   const float scale = 7;
-  const int numel = 132; // Each thread has 2 vectorized dequantize + 1 non-vectorized
+  const int numel = 132;
 
   std::vector<float> x_values;
   for (int i = 0; i < numel; i++) {
