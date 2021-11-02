@@ -64,6 +64,9 @@ def _compare_tensors_internal(a: torch.Tensor, b: torch.Tensor, *, rtol, atol, e
     debug_msg : Optional[str]
     # Integer (including bool) comparisons are identity comparisons
     # when rtol is zero and atol is less than one
+    if a.is_meta and b.is_meta:
+        return (a.size() == b.size() and a.stride() == b.stride() and a.dtype == b.dtype, None)
+
     if (
         (is_integral(a.dtype) and rtol == 0 and atol < 1)
         or a.dtype is torch.bool

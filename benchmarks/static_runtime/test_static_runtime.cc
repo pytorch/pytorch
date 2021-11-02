@@ -95,8 +95,46 @@ TEST(StaticRuntime, ModuleHasOp) {
 }
 
 TEST(StaticRuntime, CanEnableStaticRuntime) {
+  const auto while_script = R"JIT(
+    def forward(self, a: Tensor, x: int):
+        c = 0
+        while c < x:
+            a = a * a
+            c += 2
+        return a
+  )JIT";
+
+  const auto for_script = R"JIT(
+    def forward(self, a: Tensor, x: int):
+        for c in range(x):
+            a = a * a
+        return a
+  )JIT";
+
+  const auto if_script = R"JIT(
+    def forward(self, a: Tensor, b: bool):
+        if b:
+            return a
+        else:
+            return a * a
+  )JIT";
+
+  const auto is_script = R"JIT(
+    def forward(self, a: Tensor, b: Tensor):
+        return a is b
+  )JIT";
+
+  const auto is_not_script = R"JIT(
+    def forward(self, a: Tensor, b: Tensor):
+        return a is not b
+  )JIT";
+
   EXPECT_TRUE(testCanEnableStaticRuntime(reshape_inplace_script));
+  EXPECT_FALSE(testCanEnableStaticRuntime(for_script));
+  EXPECT_FALSE(testCanEnableStaticRuntime(while_script));
   EXPECT_FALSE(testCanEnableStaticRuntime(if_script));
+  EXPECT_FALSE(testCanEnableStaticRuntime(is_script));
+  EXPECT_FALSE(testCanEnableStaticRuntime(is_not_script));
 }
 
 TEST(StaticRuntime, NestedOutput) {
@@ -681,10 +719,8 @@ TEST(StaticRuntime, IndividualOps_Detach) {
   auto b = at::randn({3, 2, 2});
   std::vector<IValue> args{a};
   std::vector<IValue> args2{b};
-  testStaticRuntime(detach_script_0, args);
-  testStaticRuntime(detach_script_0, args, args2);
-  testStaticRuntime(detach_script_1, args);
-  testStaticRuntime(detach_script_1, args, args2);
+  testStaticRuntime(detach_script, args);
+  testStaticRuntime(detach_script, args, args2);
 }
 
 TEST(StaticRuntime, IndividualOps_ExpandAs) {
@@ -1759,4 +1795,54 @@ TEST(StaticRuntime, IndividualOps_Where) {
 
   testStaticRuntime(where_script, args1_nnc);
   testStaticRuntime(where_script, args1_nnc, args2_nnc);
+}
+
+TEST(StaticRuntime, IndividualOps_View) {
+  // Note that clone is not technically necessary here since this is not
+  // an out variant, but it suppresses warnings about only have one op
+  // in testStaticRuntime
+  const auto src = R"IR(
+    graph(%input : Tensor, %shape : int[]):
+        %none : NoneType = prim::Constant()
+        %view : Tensor = aten::view(%input, %shape)
+        %res : Tensor = aten::clone(%view, %none)
+        return (%res)
+  )IR";
+
+  std::vector<IValue> args1{at::randn({2, 2}), c10::List<int64_t>(4)};
+  std::vector<IValue> args2{at::randn({2, 2, 2}), c10::List<int64_t>({4, 2})};
+
+  testStaticRuntime(src, args1);
+  testStaticRuntime(src, args1, args2);
+}
+
+TEST(StaticRuntime, IndividualOps_Size) {
+  const auto src = R"JIT(
+      def forward(self, x, dim: int):
+          return x.size(dim)
+  )JIT";
+
+  std::vector<IValue> args1{at::randn({1}), 0};
+  std::vector<IValue> args2{at::randn({1}), -1};
+  std::vector<IValue> args3{at::randn({2, 4}), 1};
+
+  testStaticRuntime(src, args1);
+  testStaticRuntime(src, args2);
+  testStaticRuntime(src, args1, args3);
+}
+
+TEST(StaticRuntime, IndividuaOps_Squeeze) {
+  // Note: this is a native op, not an out variant, but clone anyways
+  // to silence warnings in testStaticRuntime
+  const auto src = R"JIT(
+    def forward(self, inp, dim: int):
+        return inp.squeeze(dim).clone()
+  )JIT";
+
+  const auto a = at::randn({2, 2});
+  const auto b = at::randn({2, 2, 2});
+
+  testStaticRuntime(src, {a, 0});
+  testStaticRuntime(src, {a, 1});
+  testStaticRuntime(src, {a, -1}, {b, 2});
 }
