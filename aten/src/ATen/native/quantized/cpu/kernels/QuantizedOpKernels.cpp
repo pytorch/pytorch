@@ -2691,6 +2691,9 @@ void dequantize_tensor_per_tensor_affine_cpu(
 #else // USE_FBGEMM
 
 #if defined(__ARM_NEON__) || defined(__aarch64__)
+
+const static int PARALLEL_THRESHOLD = 1 << 20;
+
 // Generic template defaults to naive quantize implementation
 template <typename T>
 void quantize_tensor_arm(
@@ -2894,19 +2897,26 @@ void quantize_tensor_per_tensor_affine_cpu(
     int64_t zero_point) {
   check_tensor_memory_format(rtensor, qtensor);
   const float* rdata = rtensor.data_ptr<float>();
+  int numel = rtensor.numel();
 #if defined(__ARM_NEON__) || defined(__aarch64__)
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(), "quantize_tensor_per_tensor_affine_cpu", [&]() {
         scalar_t* qdata = qtensor.data_ptr<scalar_t>();
-        quantize_tensor_arm<scalar_t>(
-            rdata, qdata, rtensor.numel(), scale, zero_point);
+        auto quantize_range = [&](int64_t begin, int64_t end) {
+          quantize_tensor_arm<scalar_t>(
+            rdata + begin, qdata + begin, end - begin, scale, zero_point);
+        };
+        if (numel >= PARALLEL_THRESHOLD) {
+          at::parallel_for(0, numel, 1, quantize_range);
+        } else {
+          quantize_range(0, numel);
+        }
       });
 #else
   // Fallback path
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(), "quantize_tensor_per_tensor_affine_cpu", [&]() {
         scalar_t* qdata = qtensor.data_ptr<scalar_t>();
-        int numel = rtensor.numel();
         for (const auto i : c10::irange(numel)) {
           qdata[i] = quantize_val<scalar_t>(scale, zero_point, rdata[i]);
         }
@@ -2921,19 +2931,26 @@ void dequantize_tensor_per_tensor_affine_cpu(
     int64_t zero_point) {
   check_tensor_memory_format(qtensor, rtensor);
   float* rdata = rtensor.data_ptr<float>();
+  int numel = qtensor.numel();
 #if defined(__ARM_NEON__) || defined(__aarch64__)
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(), "dequantize_tensor_per_tensor_affine_cpu", [&]() {
         const scalar_t* qdata = qtensor.data_ptr<scalar_t>();
-        dequantize_tensor_arm<scalar_t>(
-            qdata, rdata, qtensor.numel(), scale, zero_point);
+        auto dequantize_range = [&](int64_t begin, int64_t end) {
+          dequantize_tensor_arm<scalar_t>(
+            qdata + begin, rdata + begin, end - begin, scale, zero_point);
+        };
+        if (numel >= PARALLEL_THRESHOLD) {
+          at::parallel_for(0, numel, 1, dequantize_range);
+        } else {
+          dequantize_range(0, numel);
+        }
       });
 #else
   // Fallback path
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(), "dequantize_tensor_per_tensor_affine_cpu", [&]() {
         const scalar_t* qdata = qtensor.data_ptr<scalar_t>();
-        int numel = qtensor.numel();
         for (const auto i : c10::irange(numel)) {
           rdata[i] = dequantize_val<scalar_t>(scale, zero_point, qdata[i]);
         }
