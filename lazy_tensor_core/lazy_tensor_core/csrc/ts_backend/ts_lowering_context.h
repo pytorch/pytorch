@@ -71,8 +71,7 @@ class TSLoweringContext : public ir::LoweringContext {
   // If a parameter associated with data has already been declared, it will be
   // returned. Otherwise a new one will be created, associated with the tensor
   // held in data.
-  torch::jit::Value* GetParameter(
-      const std::shared_ptr<Data>& data);
+  torch::jit::Value* GetParameter(BackendDataPtr data);
 
   std::shared_ptr<torch::jit::Graph> graph() const { return graph_; }
 
@@ -85,7 +84,7 @@ class TSLoweringContext : public ir::LoweringContext {
   size_t AddResult(torch::jit::Value* op);
 
   std::shared_ptr<torch::jit::Graph> graph_;
-  std::unordered_map<Data::OpaqueHandle, Parameter>
+  std::unordered_map<BackendData::Handle, Parameter>
       parameters_map_;
   std::vector<torch::jit::Value*> root_tuple_;
   torch::lazy::OutputMap<torch::jit::Value*> emitted_outputs_;

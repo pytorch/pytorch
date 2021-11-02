@@ -55,7 +55,7 @@ class LoweringContext {
 
   // Retrieves the vector holding all the tensors associated with the parameter
   // instructions which have been created.
-  const std::vector<compiler::DataPtr>&
+  const std::vector<compiler::BackendDataPtr>&
   GetParametersData() const;
 
   // Get the shape of the result tuple component, given by index.
@@ -84,7 +84,7 @@ class LoweringContext {
 
  protected:
   Device device_;
-  std::vector<compiler::DataPtr> parameters_;
+  std::vector<compiler::BackendDataPtr> parameters_;
   std::vector<size_t> parameter_sequence_;
   Util::EmissionMap emit_status_;
 };

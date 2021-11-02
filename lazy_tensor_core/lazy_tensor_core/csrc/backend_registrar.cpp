@@ -17,13 +17,13 @@ std::vector<std::string> GetCompilationDevices(
 }
 
 at::Tensor MakeTensorFromComputationData(
-    const torch_lazy_tensors::compiler::DataPtr data,
+    const torch_lazy_tensors::compiler::BackendDataPtr data,
     c10::optional<at::ScalarType> logical_scalar_type) {
   return torch_lazy_tensors::compiler::getBackendRegistrar()
       ->MakeTensorFromComputationData(data, logical_scalar_type);
 }
 
-torch_lazy_tensors::compiler::DataPtr MakeComputationDataFromTensor(
+torch_lazy_tensors::compiler::BackendDataPtr MakeComputationDataFromTensor(
     const at::Tensor& tensor, const lazy_tensors::Shape& shape,
     const std::string& device) {
   return torch_lazy_tensors::compiler::getBackendRegistrar()

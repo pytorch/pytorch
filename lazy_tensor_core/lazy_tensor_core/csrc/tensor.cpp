@@ -27,7 +27,7 @@ LazyTensor LazyTensor::Create(const at::Tensor& tensor, const Device& device) {
 }
 
 LazyTensor LazyTensor::Create(
-    compiler::DataPtr handle,
+    compiler::BackendDataPtr handle,
     c10::optional<at::ScalarType> logical_element_type) {
   LazyTensor xtensor(std::move(handle), logical_element_type);
   LazyGraphExecutor::Get()->RegisterTensor(xtensor.data_ptr());
@@ -57,7 +57,7 @@ LazyTensor LazyTensor::Create(std::shared_ptr<Data> data) {
 LazyTensor::LazyTensor(const at::Tensor& tensor, const Device& device)
     : data_(std::make_shared<Data>(tensor, device)) {}
 
-LazyTensor::LazyTensor(compiler::DataPtr handle,
+LazyTensor::LazyTensor(compiler::BackendDataPtr handle,
                        c10::optional<at::ScalarType> logical_element_type)
     : data_(std::make_shared<Data>(handle, Device(handle->device()),
                                    logical_element_type)) {}
@@ -126,7 +126,7 @@ std::ptrdiff_t LazyTensor::GetViewAliasId() const {
              : 0;
 }
 
-compiler::DataPtr LazyTensor::GetDataHandle() {
+compiler::BackendDataPtr LazyTensor::GetDataHandle() {
   // Data can coexist with a view, but we need to check that the view did
   // not receive any updates before calling the current IR valid.
   bool up_to_date = true;
@@ -137,7 +137,7 @@ compiler::DataPtr LazyTensor::GetDataHandle() {
     ir_value = std::move(ir_value_updated.ir_value);
   }
   if (up_to_date) {
-    compiler::DataPtr handle = CurrentDataHandle();
+    compiler::BackendDataPtr handle = CurrentDataHandle();
     if (handle != nullptr) {
       CHECK(handle->HasValue())
           << "Trying to access data while an async operation is in flight: "
@@ -161,16 +161,16 @@ compiler::DataPtr LazyTensor::GetDataHandle() {
   return data()->handle;
 }
 
-compiler::DataPtr LazyTensor::CurrentDataHandle() const {
+compiler::BackendDataPtr LazyTensor::CurrentDataHandle() const {
   return data()->handle;
 }
 
 void LazyTensor::SetDataHandle(
-    compiler::DataPtr handle) {
+    compiler::BackendDataPtr handle) {
   SetDataHandle(std::move(handle), /*sync=*/true);
 }
 
-void LazyTensor::SetDataHandle(compiler::DataPtr handle,
+void LazyTensor::SetDataHandle(compiler::BackendDataPtr handle,
                                bool sync) {
   data()->handle = std::move(handle);
   // Assigning a device data should always clear the IR node, to allow graph
@@ -232,7 +232,7 @@ torch::lazy::Value LazyTensor::GetIrValue() const {
   if (ir_value) {
     return ir_value;
   }
-  compiler::DataPtr handle = CurrentDataHandle();
+  compiler::BackendDataPtr handle = CurrentDataHandle();
   if (handle != nullptr) {
     // In case of tensor node, we do not clear the data when we set the IR
     // node. This because we want further calls to GetIrValue() to fetch the
@@ -269,7 +269,7 @@ c10::optional<at::Tensor> LazyTensor::CurrentTensorData() const {
 
 torch::lazy::Value LazyTensor::GetIrValueForTensor(const at::Tensor& tensor,
                                                    const Device& device) const {
-  compiler::DataPtr data;
+  compiler::BackendDataPtr data;
   bool read_only = false;
   if (tensor.dim() == 0 && tensor.numel() == 1) {
     at::Scalar value = tensor.item();
@@ -433,7 +433,7 @@ void LazyTensor::UpdateFromTensorOut(const LazyTensor& tensor) {
 }
 
 torch::lazy::Value LazyTensor::CreateTensorNode(
-    compiler::DataPtr data, bool read_only) const {
+    compiler::BackendDataPtr data, bool read_only) const {
   data->SetInfo(std::make_shared<LazyGraphExecutor::DeviceDataInfo>(
       GetUniqueId(), read_only));
   return torch::lazy::MakeNode<ir::ops::DeviceData>(std::move(data));

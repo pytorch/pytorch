@@ -6,19 +6,24 @@
 namespace torch_lazy_tensors {
 namespace compiler {
 
-// TODO(whc) rename this to BackendTensorData or something?  BackendDataHandle?
-class Data {
+class BackendData {
  public:
   struct Info {
+    /**
+     * Used by Lazy Graph Executor to tag info on BackendData objs
+     * */
     virtual ~Info() {}
   };
+  /**
+   * Represents (Tensor) data stored on a backend device
+   * in its native format.
+   * */
+  using Handle = int64_t;
 
-  using OpaqueHandle = int64_t;
-
-  Data(std::string device, lazy_tensors::Shape shape)
+  BackendData(std::string device, lazy_tensors::Shape shape)
       : device_(std::move(device)), shape_(std::move(shape)) {}
 
-  virtual ~Data() {}
+  virtual ~BackendData() {}
 
   const std::string& device() const { return device_; }
 
@@ -31,9 +36,9 @@ class Data {
     return info;
   }
 
-  virtual OpaqueHandle GetOpaqueHandle() = 0;
+  virtual Handle GetOpaqueHandle() = 0;
 
-  virtual void Assign(const Data& data) = 0;
+  virtual void Assign(const BackendData& data) = 0;
 
   virtual bool HasValue() const = 0;
 
@@ -43,7 +48,7 @@ class Data {
   std::shared_ptr<Info> info_;
 };
 
-using DataPtr = std::shared_ptr<Data>;
+using BackendDataPtr = std::shared_ptr<BackendData>;
 
 }
 }  // namespace torch_lazy_tensors

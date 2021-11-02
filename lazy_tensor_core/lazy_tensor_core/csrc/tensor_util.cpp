@@ -319,7 +319,7 @@ bool TensorCompare(const at::Tensor& t1, const at::Tensor& t2) {
                      contiguous_t1.numel() * contiguous_t1.itemsize()) == 0;
 }
 
-compiler::DataPtr TensorToDataHandle(const at::Tensor& tensor,
+compiler::BackendDataPtr TensorToDataHandle(const at::Tensor& tensor,
                                      const Device& device) {
   return torch_lazy_tensors::compiler::getBackendRegistrar()
       ->MakeComputationDataFromTensor(
@@ -327,11 +327,11 @@ compiler::DataPtr TensorToDataHandle(const at::Tensor& tensor,
           device.ToString());
 }
 
-std::vector<compiler::DataPtr> CreateTensorsData(
+std::vector<compiler::BackendDataPtr> CreateTensorsData(
     const std::vector<at::Tensor>& tensors,
     const std::vector<std::string>& devices) {
   CHECK_EQ(tensors.size(), devices.size());
-  std::vector<compiler::DataPtr> result;
+  std::vector<compiler::BackendDataPtr> result;
   result.reserve(tensors.size());
   for (size_t i = 0; i < tensors.size(); ++i) {
     Device device(devices[i]);
@@ -344,7 +344,7 @@ std::vector<compiler::DataPtr> CreateTensorsData(
 }
 
 std::vector<at::Tensor> DataHandlesToTensors(
-    c10::ArrayRef<compiler::DataPtr> data_handles,
+    c10::ArrayRef<compiler::BackendDataPtr> data_handles,
     at::ScalarType dest_element_type) {
   std::vector<at::Tensor> tensors;
   for (const auto& handle : data_handles) {

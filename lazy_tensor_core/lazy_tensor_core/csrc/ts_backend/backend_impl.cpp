@@ -30,13 +30,13 @@ class TSBackendImpl : public BackendImplInterface {
   }
 
   at::Tensor MakeTensorFromComputationData(
-      const DataPtr data,
+      const BackendDataPtr data,
       c10::optional<at::ScalarType> logical_scalar_type) const override {
     const auto ts_data = std::static_pointer_cast<TSData>(data);
     return ts_data->data();
   }
 
-  DataPtr MakeComputationDataFromTensor(
+  BackendDataPtr MakeComputationDataFromTensor(
       const at::Tensor& tensor, const lazy_tensors::Shape& shape,
       const std::string& device) const override {
     at::TensorOptions options = tensor.options().device(HardwareDeviceType());
@@ -54,20 +54,20 @@ class TSBackendImpl : public BackendImplInterface {
   //////////////computation client interfaces///////////////////////
 
  public:
-  class TSData : public Data {
+  class TSData : public BackendData {
    public:
     TSData(const at::Tensor& data, lazy_tensors::Shape shape,
            std::string device)
-        : Data(device, shape), data_(data) {}
+        : BackendData(device, shape), data_(data) {}
 
     TSData(lazy_tensors::Shape shape, std::string device)
-        : Data(device, shape) {}
+        : BackendData(device, shape) {}
 
-    OpaqueHandle GetOpaqueHandle() override {
+    Handle GetOpaqueHandle() override {
       return reinterpret_cast<int64_t>(this);
     }
 
-    void Assign(const Data& data) override {
+    void Assign(const BackendData& data) override {
       data_ = static_cast<const TSData&>(data).data_;
     }
 
@@ -79,14 +79,14 @@ class TSBackendImpl : public BackendImplInterface {
     at::Tensor data_;
   };
 
-  DataPtr CreateDataPlaceholder(std::string device,
+  BackendDataPtr CreateDataPlaceholder(std::string device,
                                 lazy_tensors::Shape shape) const override;
 
   std::vector<ComputationPtr> Compile(
       std::vector<ComputationPtr> instances) const override;
 
-  std::vector<DataPtr> ExecuteComputation(
-      Computation& computation, c10::ArrayRef<DataPtr> arguments,
+  std::vector<BackendDataPtr> ExecuteComputation(
+      Computation& computation, c10::ArrayRef<BackendDataPtr> arguments,
       const std::string& device) const override;
 
   std::string GetResourceDomain(const std::string& device) const override;
@@ -120,7 +120,7 @@ class TSBackendImpl : public BackendImplInterface {
   at::DeviceType HardwareDeviceType() const override;
 };
 
-DataPtr TSBackendImpl::CreateDataPlaceholder(std::string device,
+BackendDataPtr TSBackendImpl::CreateDataPlaceholder(std::string device,
                                              lazy_tensors::Shape shape) const {
   return std::make_shared<TSBackendImpl::TSData>(shape, std::move(device));
 }
@@ -134,8 +134,8 @@ std::vector<ComputationPtr> TSBackendImpl::Compile(
   return instances;
 }
 
-std::vector<DataPtr> TSBackendImpl::ExecuteComputation(
-    Computation& computation, c10::ArrayRef<DataPtr> arguments,
+std::vector<BackendDataPtr> TSBackendImpl::ExecuteComputation(
+    Computation& computation, c10::ArrayRef<BackendDataPtr> arguments,
     const std::string& device) const {
   torch::jit::GraphExecutor& graph_executor =
       static_cast<compiler::ts_backend::TSComputation&>(computation)
@@ -149,7 +149,7 @@ std::vector<DataPtr> TSBackendImpl::ExecuteComputation(
     stack.emplace_back(ts_data->data());
   }
   graph_executor.run(stack);
-  std::vector<torch_lazy_tensors::compiler::DataPtr> results;
+  std::vector<torch_lazy_tensors::compiler::BackendDataPtr> results;
   for (torch::jit::IValue component : stack) {
     at::Tensor result = component.toTensor();
     at::IntArrayRef result_sizes = result.sizes();

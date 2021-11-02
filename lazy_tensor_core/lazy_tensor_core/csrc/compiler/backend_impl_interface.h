@@ -32,15 +32,15 @@ class BackendImplInterface {
    * Data Transfer
    * */
 
-  virtual DataPtr MakeComputationDataFromTensor(
+  virtual BackendDataPtr MakeComputationDataFromTensor(
       const at::Tensor& tensor, const lazy_tensors::Shape& shape,
       const std::string& device) const = 0;
 
-  virtual DataPtr CreateDataPlaceholder(std::string device,
+  virtual BackendDataPtr CreateDataPlaceholder(std::string device,
                                         lazy_tensors::Shape shape) const = 0;
 
   virtual at::Tensor MakeTensorFromComputationData(
-      const DataPtr data,
+      const BackendDataPtr data,
       c10::optional<at::ScalarType> logical_scalar_type) const = 0;
 
   /**
@@ -62,8 +62,8 @@ class BackendImplInterface {
   virtual std::vector<ComputationPtr> Compile(
       std::vector<ComputationPtr> instances) const = 0;
 
-  virtual std::vector<DataPtr> ExecuteComputation(
-      Computation& computation, c10::ArrayRef<DataPtr> arguments,
+  virtual std::vector<BackendDataPtr> ExecuteComputation(
+      Computation& computation, c10::ArrayRef<BackendDataPtr> arguments,
       const std::string& device) const = 0;
 
   /**
