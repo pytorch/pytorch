@@ -559,6 +559,17 @@ static void _trace_post_record(
   }
 
   node->i_(jit::attr::inplace, is_inplace);
+  if (node) {
+    auto module_name = PyDict_GetItemString(((PyTypeObject*)op_obj)->tp_dict, "__module__");
+    if (module_name) {
+      Py_ssize_t size;
+      const char *ptr = PyUnicode_AsUTF8AndSize(module_name, &size);
+      if (ptr) {
+          auto modname = std::string(ptr);
+          node->s_(jit::attr::module, modname);
+      }
+    }
+  }
 
   // Isolate C variable ptrs in a vector
   int num_outputs = PyTuple_GET_SIZE(output_objects);
@@ -619,20 +630,6 @@ PyObject* process_outputs(PyObject *op_obj, const std::shared_ptr<PyNode>& cdata
     for (auto& var : unpacked.input_vars) {
       grad_fn->input_info.emplace_back(var);
     }
-  }
-
-  auto module_name = PyDict_GetItemString(((PyTypeObject*)op_obj)->tp_dict, "__module__");
-  if (!module_name) {
-    return NULL;
-  }
-  Py_ssize_t size;
-  const char *ptr = PyUnicode_AsUTF8AndSize(module_name, &size);
-  if (!ptr) {
-      return NULL;
-  }
-  auto modname = std::string(ptr);
-  if (node) {
-    node->s_(jit::attr::module, modname);
   }
 
   bool is_inplace = static_cast<bool>(grad_fn->dirty_tensors);
