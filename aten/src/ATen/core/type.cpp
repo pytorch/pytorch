@@ -435,11 +435,10 @@ MatchTypeReturn matchTypeVariables(
     return ss.str();
   } else if (auto lt_formal = formal->castRaw<ListType>()) {
     if (auto lt_actual = actual->castRaw<ListType>()) {
-      const auto innerMatch = matchTypeVariables(
+      auto innerMatch = matchTypeVariables(
           lt_formal->getElementType(), lt_actual->getElementType(), type_env);
       if (!innerMatch.success()) {
         // propagate the errMsg onward
-        // NOLINTNEXTLINE(performance-no-automatic-move)
         return innerMatch;
       }
       return MatchTypeReturn::Success();
@@ -462,10 +461,9 @@ MatchTypeReturn matchTypeVariables(
         return MatchTypeReturn("Cannot match tuples of mismatched size");
       }
       for (size_t i = 0; i < tp_formal->elements().size(); ++i) {
-        const auto result = matchTypeVariables(
+        auto result = matchTypeVariables(
             tp_formal->elements()[i], tp_actual->elements()[i], type_env);
         if (!result.success()) {
-          // NOLINTNEXTLINE(performance-no-automatic-move)
           return result;
         }
       }
@@ -477,10 +475,9 @@ MatchTypeReturn matchTypeVariables(
     }
   } else if (auto lt_formal = formal->castRaw<FutureType>()) {
     if (auto lt_actual = actual->castRaw<FutureType>()) {
-      const auto innerMatch = matchTypeVariables(
+      auto innerMatch = matchTypeVariables(
           lt_formal->getElementType(), lt_actual->getElementType(), type_env);
       if (!innerMatch.success()) {
-        // NOLINTNEXTLINE(performance-no-automatic-move)
         return innerMatch;
       }
       return MatchTypeReturn::Success();
@@ -491,10 +488,9 @@ MatchTypeReturn matchTypeVariables(
     }
   } else if (auto lt_formal = formal->castRaw<RRefType>()) {
     if (auto lt_actual = actual->castRaw<RRefType>()) {
-      const auto innerMatch = matchTypeVariables(
+      auto innerMatch = matchTypeVariables(
           lt_formal->getElementType(), lt_actual->getElementType(), type_env);
       if (!innerMatch.success()) {
-        // NOLINTNEXTLINE(performance-no-automatic-move)
         return innerMatch;
       }
       return MatchTypeReturn::Success();
@@ -505,10 +501,9 @@ MatchTypeReturn matchTypeVariables(
     }
   } else if (auto opt_formal = formal->castRaw<OptionalType>()) {
     if (auto opt_actual = actual->castRaw<OptionalType>()) {
-      const auto optionedMatch = matchTypeVariables(
+      auto optionedMatch = matchTypeVariables(
           opt_formal->getElementType(), opt_actual->getElementType(), type_env);
       if (!optionedMatch.success()) {
-        // NOLINTNEXTLINE(performance-no-automatic-move)
         return optionedMatch;
       }
     } else if (!actual->isSubtypeOf(*NoneType::get())) {
