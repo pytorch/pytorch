@@ -618,8 +618,7 @@ void initJITBindings(PyObject* module) {
             }
           },
           py::arg("graph"),
-          py::arg("threshold") = py::none()
-          )
+          py::arg("threshold") = py::none())
 #if defined(BUILDING_TESTS) && !defined(USE_ROCM)
       .def(
           "_jit_run_cpp_tests",

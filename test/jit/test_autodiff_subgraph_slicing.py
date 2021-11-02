@@ -376,6 +376,10 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
     def test_aliased_outputs(self):
 
         with enable_profiling_mode_for_profiling_tests():
+
+            # Case 1: aliasing between relu and split_with_sizes
+            # is within a DifferentiableGraph. It should be valid
+            # to merge both split_with_sizes in relu in one graph
             input_str = """
     graph(%a : Tensor):
         %b : Tensor = aten::relu(%a)
@@ -391,6 +395,11 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
                 .check("aten::relu").check("aten::split_with_sizes") \
                 .run(graph)
 
+            # Case 2: aliasing between relu and split_with_sizes
+            # are both outputs of a Diff graph. It should be invalid
+            # to merge both split_with_sizes in relu in one graph
+            # i.e. relu and split_with_sizes should be in different
+            # differentiable graphs
             input_str = """
     graph(%a : Tensor):
         %b : Tensor = aten::relu(%a)

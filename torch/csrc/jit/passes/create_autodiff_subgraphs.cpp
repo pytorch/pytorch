@@ -246,25 +246,23 @@ class SubgraphSlicer {
   // Try to merge `producer` into `consumer`. If successful, this destroys
   // `producer` and returns the `consumer` group.
   c10::optional<Node*> tryMerge(Node* consumer, Node* producer) {
-
     AT_ASSERT(consumer->kind() == prim::DifferentiableGraph);
     bool canMerge = shouldConsiderForMerge(producer) &&
         aliasDb_.moveBeforeTopologicallyValid(producer, consumer);
 
-    // We need to check that no producer output aliases
-    // any differentiable graph output as this is not currently supported by autodiff.
-    // Note, this is conservative since not every output of `producer` becomes
-    // the output of DifferentiableGraph
-    ValueSet producer_values_set(producer->outputs().begin(), producer->outputs().end());
-    ValueSet consumer_values_set(consumer->outputs().begin(), consumer->outputs().end());
+    // We need to check that no producer's output aliases
+    // any differentiable graph's output as this is not currently supported by
+    // autodiff producer's output is only used by the differentiable graph, it
+    // should be valid to merge the producer, as aliasing will be contained
+    // within the subgraph
+    auto node_has_multiuses = std::any_of(
+        producer->outputs().begin(), producer->outputs().end(), [](Value* v) {
+          return v->uses().size() != 1;
+        });
 
-    GRAPH_DEBUG("Checking the output of ", *producer, " mayAlias ", getHeader(consumer), " ",
-      aliasDb_.mayContainAlias(producer->outputs(), consumer->outputs()));
-    consumer->g(attr::Subgraph)->dump();
-
-    auto node_has_multiuses = std::any_of(producer->outputs().begin(), producer->outputs().end(), [](Value* v){return v->uses().size() != 1; });
-
-    canMerge = canMerge && (!node_has_multiuses || !aliasDb_.mayContainAlias(producer->outputs(), consumer->outputs()));
+    canMerge = canMerge &&
+        (!node_has_multiuses ||
+         !aliasDb_.mayContainAlias(producer->outputs(), consumer->outputs()));
 
     if (!canMerge) {
       return c10::nullopt;
