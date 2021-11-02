@@ -21,7 +21,6 @@ on:
 {%- endif %}
   workflow_dispatch:
 
-!{{ common.concurrency(build_environment) }}
 # For setup-miniconda, see https://github.com/conda-incubator/setup-miniconda/issues/179
 defaults:
   run:
@@ -82,3 +81,5 @@ jobs:
           export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname "$(which conda)")/../"}
           scripts/build_ios.sh
 {% endblock +%}
+
+!{{ common.concurrency(build_environment) }}

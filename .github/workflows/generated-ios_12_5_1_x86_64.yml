@@ -12,14 +12,12 @@ on:
       - release/*
   workflow_dispatch:
 
-concurrency:
-  group: ios_12_5_1_x86_64-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
-  cancel-in-progress: true
 # For setup-miniconda, see https://github.com/conda-incubator/setup-miniconda/issues/179
 defaults:
   run:
     shell: bash -l {0}
 env:
+  BUILD_ENVIRONMENT: ios_12_5_1_x86_64
   IN_CI: 1
   IS_GHA: 1
 
@@ -95,3 +93,8 @@ jobs:
           python -VV
           export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname "$(which conda)")/../"}
           scripts/build_ios.sh
+
+
+concurrency:
+  group: ios_12_5_1_x86_64-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
