@@ -2628,9 +2628,21 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_nccl_warn_not_in_group(self):
+    @with_dist_debug_levels(levels=["DETAIL"])
+    def test_nccl_warn_not_in_group_debug_detail(self):
         self._test_warn_not_in_group(backend="nccl")
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @with_dist_debug_levels(levels=["INFO"])
+    def test_nccl_warn_not_in_group_debug_info(self):
+        self._test_warn_not_in_group(backend="nccl")
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @with_dist_debug_levels(levels=["OFF"])
+    def test_nccl_warn_not_in_group_debug_off(self):
+        self._test_warn_not_in_group(backend="nccl")
 
 if __name__ == "__main__":
     assert (
