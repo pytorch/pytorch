@@ -138,17 +138,16 @@ def is_input_arg_dtype_supported_by_backend(
     is_weight = node_arg_is_weight(node, arg)
     is_bias = node_arg_is_bias(node, arg)
     is_activation = not (is_weight or is_bias)
-    input_activation_dtype = dtype_config.get("input_activation_dtype", None)
     if is_activation:
+        input_activation_dtype = dtype_config.get("input_activation_dtype", None)
         return input_activation_dtype is None or node_name_to_target_dtype[arg.name][node.name] == input_activation_dtype
     elif is_weight:
-        # TODO: we need to refactor get_target_activation_dtype_for_node to include
-        # weight, and maybe have a separate current_node_name_to_dtype dict
-        # return weight_dtype is None or node_name_to_target_dtype[arg.name] == weight_dtype
-        raise RuntimeError("weight is not handled yet")
+        weight_dtype = dtype_config.get("weight_dtype", None)
+        return weight_dtype is None or node_name_to_target_dtype[arg.name][node.name] == weight_dtype
     elif is_bias:
+        bias_dtype = dtype_config.get("bias_dtype", None)
         # Note: config for bias is not supported in qconfig currently
-        raise RuntimeError("bias is not handled yet")
+        return bias_dtype is None or node_name_to_target_dtype[arg.name][node.name] == bias_dtype
     return True
 
 def is_output_dtype_supported_by_backend(
