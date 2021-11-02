@@ -14,7 +14,6 @@ namespace at { namespace native {
 // more than 1024/2048 elements along the selected dimension.
 // Otherwise, we do an inplace bitonic sort (see sortKeyValueInplace).
 bool should_use_small_sort(const TensorBase &self, int64_t dim) {
-  int64_t ndim = self.dim();
   int64_t nsort = self.sizes()[dim];
   int64_t threshold;
   if (self.scalar_type() == kLong || self.scalar_type() == kDouble) {
@@ -47,7 +46,6 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::opt
   checkAllSameGPU(__func__, {self_arg, values_arg, indices_arg});
 
   bool is_non_overlapping_and_dense = self.is_non_overlapping_and_dense();
-  int64_t numel = self.numel();
   int64_t ndim = self.dim();
   dim = maybe_wrap_dim(dim, ndim);
   int64_t nsort = self.sizes()[dim];
