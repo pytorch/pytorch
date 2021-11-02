@@ -270,7 +270,7 @@ Tensor _sparse_csr_addmm(
 Tensor add_sparse_csr(const Tensor& self, const Tensor& other, const Scalar& alpha) {
   auto commonDtype = at::result_type(self, other);
   alpha_check(commonDtype, alpha);
-  Tensor result = at::empty({0}, self.options().dtype(commonDtype));
+  Tensor result = at::empty({0, 0}, self.options().dtype(commonDtype));
   return at::add_out(result, self, other, alpha); // redispatch!
 }
 
