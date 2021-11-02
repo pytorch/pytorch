@@ -44,7 +44,7 @@
  */
 
 #include "lazy_tensor_core/csrc/ts_backend/LazyShapeDtype.h"
-
+#include "aten/src/ATen/WrapDimUtils.h"
 #include "torch/csrc/api/include/torch/enum.h"
 
 namespace torch_lazy_tensors {
