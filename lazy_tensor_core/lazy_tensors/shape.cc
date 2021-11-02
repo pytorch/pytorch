@@ -1,6 +1,5 @@
 #include "lazy_tensors/shape.h"
 
-#include "lazy_tensor_core/csrc/tensor_util.h"
 namespace lazy_tensors {
 
 Shape::Shape(at::ScalarType element_type, c10::ArrayRef<int64_t> dimensions)

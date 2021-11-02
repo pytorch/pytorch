@@ -1,8 +1,11 @@
 #pragma once
+
 #include <c10/util/Optional.h>
+#include <c10/core/Scalar.h>
 
 #include <complex>
 
+#include "lazy_tensor_core/csrc/device.h"
 #include "lazy_tensors/primitive_types.h"
 #include "lazy_tensors/shape.h"
 #include "torch/csrc/jit/tensorexpr/types.h"
