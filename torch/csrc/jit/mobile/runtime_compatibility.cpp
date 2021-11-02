@@ -18,6 +18,12 @@ uint64_t _get_runtime_bytecode_version() {
   return caffe2::serialize::kMaxSupportedBytecodeVersion;
 }
 
+std::pair<uint64_t, uint64_t> _get_runtime_operators_min_max_versions() {
+  return std::pair<uint64_t, uint64_t>(
+      caffe2::serialize::kMinSupportedFileFormatVersion,
+      caffe2::serialize::kMaxSupportedFileFormatVersion);
+}
+
 /*
  * Returns all registered PyTorch ops and their versioning
  */
