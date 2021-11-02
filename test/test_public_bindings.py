@@ -11,7 +11,7 @@ from types import ModuleType
 
 try:
     import tensorrt as trt
-except:
+except Exception:
     trt = {}
 
 class TestPublicBindings(TestCase):
