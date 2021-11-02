@@ -8,9 +8,6 @@
 version: 2.1
 
 parameters:
-  run_binary_tests:
-    type: boolean
-    default: false
   run_build:
     type: boolean
     default: true
@@ -6640,7 +6637,13 @@ workflows:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           package_type: libtorch
           upload_subfolder: cu111
-    when: << pipeline.parameters.run_binary_tests >>
+    triggers:
+      - schedule:
+          cron: "30 1 1,15 * *"
+          filters:
+            branches:
+              only:
+                - lts/release/1.8
   build:
     jobs:
       - docker_build_job:
