@@ -23,7 +23,6 @@ import onnx
 import io
 import copy
 import unittest
-from typing import List
 
 skip = unittest.skip
 
