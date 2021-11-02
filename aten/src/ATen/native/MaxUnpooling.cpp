@@ -14,7 +14,7 @@ Tensor& max_unpooling2d_forward_out_cpu(
   auto owidth = output_size[1];
   TORCH_CHECK(
       indices_.scalar_type() == at::ScalarType::Long,
-      "elements in indices should be type int64");
+      "elements in indices should be type int64 but got: ", indices_.scalar_type());
   TORCH_CHECK(
       output_size.size() == 2,
       "There should be exactly two elements (height, width) in output_size, but got ", output_size.size(), " elements.");
@@ -196,10 +196,11 @@ Tensor& max_unpooling2d_backward_out_cpu(const Tensor& grad_output_,
 
   TORCH_CHECK(
       indices_.scalar_type() == at::ScalarType::Long,
-      "elements in indices should be type int64");
+      "elements in indices should be type int64 but got type: ", indices_.scalar_type());
   TORCH_CHECK(
-      self.sizes() == indices_.sizes(), "Input shape must match indices shape");
-  TORCH_CHECK(output_size.size() == 2, "Output size must be 2");
+      self.sizes() == indices_.sizes(), "Input shape (", self.sizes(), ") must match indices shape (",
+      indices_.sizes(), ")");
+  TORCH_CHECK(output_size.size() == 2, "Output size must be 2 but got: ", output_size.size());
 
   auto memory_format = self.suggest_memory_format();
   auto grad_output = grad_output_.contiguous(memory_format);
