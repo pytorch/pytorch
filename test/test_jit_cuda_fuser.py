@@ -2326,7 +2326,6 @@ class TestCudaFuser(JitTestCase):
         self.assertEqual(jit_o.dtype, torch.float)
         self.assertEqual(x.grad.dtype, x.dtype)
 
-    @unittest.skipIf(True, "autocast + bfloat broken #1244")
     @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
@@ -2365,7 +2364,6 @@ class TestCudaFuser(JitTestCase):
         self.assertEqual(x.grad.dtype, x.dtype)
         self.assertEqual(y.grad.dtype, y.dtype)
 
-    @unittest.skipIf(True, "autocast + bfloat broken #1244")
     @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
