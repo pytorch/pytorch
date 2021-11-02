@@ -2694,12 +2694,11 @@ void dequantize_tensor_per_tensor_affine_cpu(
 // Generic template defaults to naive quantize implementation
 template <typename T>
 void quantize_tensor_arm(
-    const float* in,
-    Tensor& qtensor,
+    const float* __restrict__ in,
+    T* __restrict__ out,
     const int64_t N,
     const float scale,
     const int32_t zero_point) {
-  auto out = qtensor.data_ptr<T>();
   for (const auto i : c10::irange(N)) {
     out[i] = at::native::quantize_val<T>(scale, zero_point, in[i]);
   }
@@ -2713,14 +2712,14 @@ void quantize_tensor_arm(
 // TODO Make quantize_tensor_arm work for other datatypes too (int8, int32).
 template <>
 void quantize_tensor_arm<c10::quint8>(
-    const float* in,
-    Tensor& qtensor,
+    const float* __restrict__ in,
+    c10::quint8* __restrict__ out,
     const int64_t N,
     const float scale,
     const int32_t zero_point) {
   const float inv_scale = 1.0f / scale;
   uint32_t i = 0;
-  auto out = (uint8_t*)qtensor.data_ptr<c10::quint8>();
+  uint8_t* out_underlying = reinterpret_cast<uint8_t*>(out);
   const float32x4_t vinv_scale = vdupq_n_f32(inv_scale);
 #if defined(__ARM_NEON__)
   // magic float and magic int to take care of rounding
@@ -2752,11 +2751,11 @@ void quantize_tensor_arm<c10::quint8>(
     const int16x8_t vraw01234567 =
         vcombine_s16(vqmovn_s32(vraw0123), vqmovn_s32(vraw4567));
     const uint8x8_t vout01234567 = vqmovun_s16(vraw01234567);
-    vst1_u8(out, vout01234567);
-    out += 8;
+    vst1_u8(out_underlying, vout01234567);
+    out_underlying += 8;
   }
   for (; i < N; ++i) {
-    (*out++) = at::native::quantize_val_arm(scale, zero_point, (*in++));
+    (*out_underlying++) = at::native::quantize_val_arm(scale, zero_point, (*in++));
   }
 #else
   const int16x8_t vzero_point = vdupq_n_s16((int16_t)(uint16_t)zero_point);
@@ -2770,11 +2769,11 @@ void quantize_tensor_arm<c10::quint8>(
     const int16x8_t v01234567_packed = vqaddq_s16(
         vqmovn_high_s32(vqmovn_s32(v0123_rounded), v4567_rounded), vzero_point);
     const uint8x8_t vout01234567 = vqmovun_s16(v01234567_packed);
-    vst1_u8(out, vout01234567);
-    out += 8;
+    vst1_u8(out_underlying, vout01234567);
+    out_underlying += 8;
   }
   for (; i < N; ++i) {
-    (*out++) = at::native::quantize_val_arm(scale, zero_point, (*in++));
+    (*out_underlying++) = at::native::quantize_val_arm(scale, zero_point, (*in++));
   }
 #endif
 }
@@ -2893,27 +2892,26 @@ void quantize_tensor_per_tensor_affine_cpu(
     Tensor& qtensor,
     double scale,
     int64_t zero_point) {
+  check_tensor_memory_format(rtensor, qtensor);
+  const float* rdata = rtensor.data_ptr<float>();
 #if defined(__ARM_NEON__) || defined(__aarch64__)
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(), "quantize_tensor_per_tensor_affine_cpu", [&]() {
-        check_tensor_memory_format(rtensor, qtensor);
-        const float* const rdata = rtensor.data_ptr<float>();
+        scalar_t* qdata = qtensor.data_ptr<scalar_t>();
         quantize_tensor_arm<scalar_t>(
-            rdata, qtensor, rtensor.numel(), scale, zero_point);
+            rdata, qdata, rtensor.numel(), scale, zero_point);
       });
 #else
   // Fallback path
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(), "quantize_tensor_per_tensor_affine_cpu", [&]() {
-        check_tensor_memory_format(rtensor, qtensor);
-        const float* const rdata = rtensor.data_ptr<float>();
-        auto qdata = qtensor.data_ptr<scalar_t>();
-        auto numel = rtensor.numel();
+        scalar_t* qdata = qtensor.data_ptr<scalar_t>();
+        int numel = rtensor.numel();
         for (const auto i : c10::irange(numel)) {
           qdata[i] = quantize_val<scalar_t>(scale, zero_point, rdata[i]);
         }
       });
-#endif // __ARM_NEON__
+#endif // defined(__ARM_NEON__) || defined(__aarch64__)
 }
 
 void dequantize_tensor_per_tensor_affine_cpu(
