@@ -376,26 +376,35 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
     def test_aliased_outputs(self):
 
         with enable_profiling_mode_for_profiling_tests():
-            with disable_autodiff_subgraph_inlining():
+            input_str = """
+    graph(%a : Tensor):
+        %b : Tensor = aten::relu(%a)
+        %0 : int[] = prim::Constant[value=[2, 2, 1]]()
+        %1 : int = prim::Constant[value=0]()
+        %2 : Tensor[] = aten::split_with_sizes(%b, %0, %1)
+        return (%2)
+    """
 
-                # @torch.jit.script
-                # def method1(a, b):
-                #     c = a + b
-                #     return (torch.split(c, [2, 1, 3]), c)
+            graph = torch._C.parse_ir(input_str)
+            torch._C._jit_pass_create_autodiff_subgraphs(graph, 1)
+            FileCheck().check("with prim::DifferentiableGraph") \
+                .check("aten::relu").check("aten::split_with_sizes") \
+                .run(graph)
 
-                @torch.jit.script
-                def method1(a, b):
-                    c = a + b
-                    d = c.t().relu() + c
-                    e = d + c
-                    return e
+            input_str = """
+    graph(%a : Tensor):
+        %b : Tensor = aten::relu(%a)
+        %0 : int[] = prim::Constant[value=[2, 2, 1]]()
+        %1 : int = prim::Constant[value=0]()
+        %2 : Tensor[] = aten::split_with_sizes(%b, %0, %1)
+        %3 : (Tensor[], Tensor[]) = prim::TupleConstruct(%b, %2)
+        return (%3)
+"""
 
-                x = torch.rand(6, 6, requires_grad=True)
-                y = torch.rand(6, 6, requires_grad=True)
-
-                method1(x, y)
-                method1(x, y)
-                method1(x, y)
-                #scripted = self.checkScript(method1, (x, weight, b1, b2))
-                # check_types requires last_graph on scripted to be set, so we just skip it
-                #check_against_reference(self, scripted, method1, lambda x: x, (x, weight, b1, b2), check_types=False)
+            graph = torch._C.parse_ir(input_str)
+            torch._C._jit_pass_create_autodiff_subgraphs(graph, 1)
+            FileCheck().check("with prim::DifferentiableGraph") \
+                .check("aten::relu") \
+                .check("with prim::DifferentiableGraph") \
+                .check("aten::split_with_sizes") \
+                .run(graph)

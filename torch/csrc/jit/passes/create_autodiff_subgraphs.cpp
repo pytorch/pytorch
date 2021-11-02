@@ -258,12 +258,13 @@ class SubgraphSlicer {
     ValueSet producer_values_set(producer->outputs().begin(), producer->outputs().end());
     ValueSet consumer_values_set(consumer->outputs().begin(), consumer->outputs().end());
 
-    GRAPH_DEBUG("Checking the output of ", *producer, " mayAlias ", getHeader(consumer),
-      aliasDb_.mayAlias(producer_values_set, consumer_values_set));
+    GRAPH_DEBUG("Checking the output of ", *producer, " mayAlias ", getHeader(consumer), " ",
+      aliasDb_.mayContainAlias(producer->outputs(), consumer->outputs()));
+    consumer->g(attr::Subgraph)->dump();
 
     auto node_has_multiuses = std::any_of(producer->outputs().begin(), producer->outputs().end(), [](Value* v){return v->uses().size() != 1; });
 
-    canMerge = canMerge && (!node_has_multiuses || !aliasDb_.mayAlias(producer_values_set, consumer_values_set);
+    canMerge = canMerge && (!node_has_multiuses || !aliasDb_.mayContainAlias(producer->outputs(), consumer->outputs()));
 
     if (!canMerge) {
       return c10::nullopt;
