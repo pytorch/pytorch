@@ -4,10 +4,8 @@
 #include <ostream>
 #include <vector>
 
-#include "lazy_tensor_core/csrc/device.h"
-#include "lazy_tensors/layout.h"
-#include "lazy_tensors/str_cat.h"
-#include "lazy_tensors/str_join.h"
+#include <c10/core/Scalar.h>
+#include <c10/util/Logging.h>
 
 namespace lazy_tensors {
 
@@ -29,8 +27,7 @@ class Shape {
   }
 
   std::string ToString(bool print_layout = false) const {
-    return lazy_tensors::StrCat(toString(at_element_type_), "[",
-                                c10::Join(",", dimensions_), "]");
+    return c10::str(toString(at_element_type_), "[", c10::Join(",", dimensions_), "]");
   }
 
   c10::ScalarType at_element_type() const { return at_element_type_; }
