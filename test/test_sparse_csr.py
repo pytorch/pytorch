@@ -693,8 +693,8 @@ class TestSparseCSR(TestCase):
             m2 = maybe_transpose(t3, torch.randn(50, 25, device=device).to(dtype))
             _test_addmm_addmv(self, torch.addmm, M, m1, m2, transpose_out=t4, layout=torch.sparse_csr, all_sparse=True)
 
-    @dtypes(*floating_and_complex_types())
-    @dtypesIfCUDA(*torch.testing.get_all_complex_dtypes(),
+    @dtypesIfCUDA(torch.complex64,
+                  *((torch.complex128,) if CUSPARSE_SPMM_COMPLEX128_SUPPORTED else ()),
                   *torch.testing.get_all_fp_dtypes(include_bfloat16=SM80OrLater,
                                                    include_half=SM53OrLater))
     @skipCUDAIf(
