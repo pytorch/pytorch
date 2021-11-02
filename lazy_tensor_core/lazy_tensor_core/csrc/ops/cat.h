@@ -1,6 +1,7 @@
 #pragma once
 
 #include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
+#include "lazy_tensor_core/csrc/ts_backend/ts_node_lowering.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
