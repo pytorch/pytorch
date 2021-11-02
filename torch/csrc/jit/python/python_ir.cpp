@@ -191,7 +191,9 @@ void initPythonIRBindings(PyObject* module_) {
   py::class_<AliasDb, std::shared_ptr<AliasDb>>(m, "AliasDb")
       .def("dump", &AliasDb::dump)
       .def("to_graphviz_str", &AliasDb::toGraphviz)
-      .def("__str__", &AliasDb::toString);
+      .def("__str__", &AliasDb::toString)
+      .def("is_mutable", &AliasDb::isMutable)
+      .def("writes_to_alias", &AliasDb::writesToAlias);
 
 #define GS(name) def(#name, &Graph ::name)
   py::class_<Graph, std::shared_ptr<Graph>>(m, "Graph")
