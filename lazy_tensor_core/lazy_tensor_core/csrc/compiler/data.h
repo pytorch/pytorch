@@ -2,59 +2,11 @@
 
 #include <string.h>
 #include "lazy_tensors/shape.h"
-#include "lazy_tensors/statusor.h"
 
 namespace torch_lazy_tensors {
 namespace compiler {
 
-class GenericComputation {
- public:
-  virtual int parameters_size() const  = 0;
-
-  virtual const std::vector<lazy_tensors::Shape>& parameter_shapes() const = 0;
-
-  virtual const std::vector<std::string>& parameter_names() const = 0;
-
-  virtual const lazy_tensors::Shape& result_shape() const = 0;
-
-  virtual ~GenericComputation() = default;
-};
-
-class Computation {
- public:
-  Computation(std::shared_ptr<GenericComputation> computation, std::vector<std::string> devices)
-      : computation_(std::move(computation)),
-        devices_(std::move(devices)) {}
-
-  virtual ~Computation() {}
-
-  GenericComputation* computation() const { return computation_.get(); }
-
-  const std::vector<std::string>& devices() const { return devices_; }
-
- private:
-  std::shared_ptr<GenericComputation> computation_;
-  std::vector<std::string> devices_;
-};
-using ComputationPtr = std::shared_ptr<Computation>;
-
-// TODO(whc)
-// what is vector<device> used for here?
-// what is compilation_device?
-struct CompileInstance {
-  CompileInstance() = default;
-  CompileInstance(std::shared_ptr<GenericComputation> computation,
-                  std::string compilation_device,
-                  std::vector<std::string> devices)
-      : computation(std::move(computation)),
-        compilation_device(std::move(compilation_device)),
-        devices(std::move(devices)) {}
-
-  std::shared_ptr<GenericComputation> computation;
-  std::string compilation_device;
-  std::vector<std::string> devices;
-};
-
+// TODO(whc) rename this to BackendTensorData or something?  BackendDataHandle?
 class Data {
  public:
   struct Info {

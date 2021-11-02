@@ -1,6 +1,5 @@
 #include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 
-#include "lazy_tensor_core/csrc/ts_backend/ts_node_lowering.h"
 #include "lazy_tensors/computation_client/sys_util.h"
 #include "third_party/computation_client/cache.h"
 

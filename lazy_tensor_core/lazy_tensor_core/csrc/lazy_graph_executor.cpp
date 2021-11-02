@@ -757,23 +757,18 @@ LazyGraphExecutor::CompilationResult LazyGraphExecutor::Compile(
     BuildInputOutputAliases(tensors, coll.indices, lowering_ctx.get());
   }
 
-  auto computation = ConsumeValue(lowering_ctx->Build());
-
-  std::vector<compiler::CompileInstance> instances;
-  instances.push_back(
-      {std::move(computation), coll.device.ToString(),
-       torch_lazy_tensors::compiler::getBackendRegistrar()
-           ->GetCompilationDevices(coll.device.ToString(), devices)});
+  ComputationPtr computation = ConsumeValue(lowering_ctx->Build());
 
   VLOG(3) << "Compiling IR graph hash " << torch::lazy::HashToString(coll.hash)
           << " on device " << coll.device << " ...";
-  std::vector<std::shared_ptr<compiler::Computation>> computations =
+  std::vector<ComputationPtr> computations =
       torch_lazy_tensors::compiler::getBackendRegistrar()->Compile(
-          std::move(instances));
+          {computation});
   VLOG(3) << "Compiling IR graph hash " << torch::lazy::HashToString(coll.hash)
           << " on device " << coll.device << " done!";
   if (computation) {
-    // TODO(whc) should computation be allowed null here? (becuase it is in one case)
+    // TODO(whc) should computation be allowed null here? (becuase it is in one
+    // case)
     CHECK_EQ(computation->parameters_size(), po_data->parameters_data.size());
   }
 
@@ -886,10 +881,10 @@ LazyGraphExecutor::ScheduleSyncTensorsGraph(
     try {
       VLOG(3) << "Executing IR graph hash " << torch::lazy::HashToString(hash)
               << " on device " << async->device << " ...";
-      auto results = torch_lazy_tensors::compiler::getBackendRegistrar()
-                         ->ExecuteComputation(
-                             *async->cached_computation->computation,
-                             async->parameters_data, async->device);
+      auto results =
+          torch_lazy_tensors::compiler::getBackendRegistrar()
+              ->ExecuteComputation(*async->cached_computation->computation,
+                                   async->parameters_data, async->device);
       VLOG(3) << "Executing IR graph hash " << torch::lazy::HashToString(hash)
               << " on device " << async->device << " done!";
 
@@ -954,7 +949,7 @@ std::vector<at::Tensor> LazyGraphExecutor::GetTensorsFused(
 // for TS backend, we'd ideally just cut through these layers and
 // not need to copy the tensor, just move it
 
- // for XLA backend, a copy is going to have to happen,
+// for XLA backend, a copy is going to have to happen,
 
 // could we replace the 'Data' object with an at::Tensor, which is 'undefined'
 // unless a backend attaches a buffer to it?  That way we can have a

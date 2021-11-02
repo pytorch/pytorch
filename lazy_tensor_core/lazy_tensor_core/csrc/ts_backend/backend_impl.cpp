@@ -52,10 +52,10 @@ class TSBackendImpl : public BackendImplInterface {
   }
 
   lazy_tensors::StatusOr<std::string> GetComputationBackendText(
-      const GenericComputation* computation) const override {
+      const ComputationPtr computation) const override {
     auto ts_computation = static_cast<
-        const torch_lazy_tensors::compiler::ts_backend::GenericComputationTS*>(
-        computation);
+        torch_lazy_tensors::compiler::ts_backend::TSComputation*>(
+        computation.get());
     return ts_computation->graph()->toString();
   }
 
@@ -68,7 +68,8 @@ class TSBackendImpl : public BackendImplInterface {
            std::string device)
         : Data(device, shape), data_(data) {}
 
-    TSData(lazy_tensors::Shape shape, std::string device) :Data(device, shape) {}
+    TSData(lazy_tensors::Shape shape, std::string device)
+        : Data(device, shape) {}
 
     OpaqueHandle GetOpaqueHandle() override {
       return reinterpret_cast<int64_t>(this);
@@ -100,10 +101,10 @@ class TSBackendImpl : public BackendImplInterface {
   }
 
   std::vector<ComputationPtr> Compile(
-      std::vector<CompileInstance> instances) const override;
+      std::vector<ComputationPtr> instances) const override;
 
   std::vector<DataPtr> ExecuteComputation(
-      const Computation& computation, c10::ArrayRef<DataPtr> arguments,
+      Computation& computation, c10::ArrayRef<DataPtr> arguments,
       const std::string& device) const override;
 
   std::string GetResourceDomain(const std::string& device) const override;
@@ -119,7 +120,8 @@ class TSBackendImpl : public BackendImplInterface {
   void SetReplicationDevices(
       std::shared_ptr<std::vector<std::string>> devices) const override;
 
-  std::shared_ptr<std::vector<std::string>> GetReplicationDevices() const override;
+  std::shared_ptr<std::vector<std::string>> GetReplicationDevices()
+      const override;
 
   void SetRngSeed(size_t seed) const override {
     LOG(FATAL) << "Not implemented yet.";
@@ -142,25 +144,20 @@ DataPtr TSBackendImpl::CreateDataPlaceholder(std::string device,
 }
 
 std::vector<ComputationPtr> TSBackendImpl::Compile(
-    std::vector<CompileInstance> instances) const {
-  std::vector<ComputationPtr> ts_computations;
+    std::vector<ComputationPtr> instances) const {
   for (const auto& instance : instances) {
-    auto ts_computation = static_cast<const ts_backend::GenericComputationTS*>(
-        instance.computation.get());
-    ts_computations.push_back(std::make_shared<Computation>(
-        instance.computation, instance.devices));
+    auto ts_computation =
+        static_cast<ts_backend::TSComputation*>(instance.get());
   }
-  return ts_computations;
+  return instances;
 }
 
 std::vector<DataPtr> TSBackendImpl::ExecuteComputation(
-    const Computation& computation, c10::ArrayRef<DataPtr> arguments,
+    Computation& computation, c10::ArrayRef<DataPtr> arguments,
     const std::string& device) const {
   torch::jit::GraphExecutor& graph_executor =
-      static_cast<
-          torch_lazy_tensors::compiler::ts_backend::GenericComputationTS*>(
-          computation.computation())
-          ->graph_executor();
+      static_cast<compiler::ts_backend::TSComputation&>(
+          computation).graph_executor();
   std::vector<torch::jit::IValue> stack;
   for (auto argument : arguments) {
     const auto ts_data =
@@ -214,18 +211,17 @@ void TSBackendImpl::SetReplicationDevices(
   CHECK_EQ(devices->size(), size_t(1)) << "Replication not supported yet";
 }
 
-std::shared_ptr<std::vector<std::string>>
-TSBackendImpl::GetReplicationDevices() const {
+std::shared_ptr<std::vector<std::string>> TSBackendImpl::GetReplicationDevices()
+    const {
   return nullptr;
 }
 
-void TSBackendImpl::PrepareToExit() const {
-
-}
+void TSBackendImpl::PrepareToExit() const {}
 
 at::DeviceType TSBackendImpl::HardwareDeviceType() const {
   static auto device_type =
-      lazy_tensors::sys_util::GetEnvBool("LTC_TS_CUDA", false) ? at::kCUDA : at::kCPU;
+      lazy_tensors::sys_util::GetEnvBool("LTC_TS_CUDA", false) ? at::kCUDA
+                                                               : at::kCPU;
   // The first CUDA usage could happen via lazy tensors. Initialize CUDA here to
   // account for that, at::scalar_tensor constructor triggers everything we
   // need.
@@ -244,7 +240,8 @@ compiler::BackendImplInterface* GetTSBackendImpl() {
 
 void InitTorchScriptBackend() {
   static std::unique_ptr<compiler::BackendRegistrar> s_registrar;
-  s_registrar.reset(new compiler::BackendRegistrar(compiler::GetTSBackendImpl()));
+  s_registrar.reset(
+      new compiler::BackendRegistrar(compiler::GetTSBackendImpl()));
 }
 };  // namespace compiler
 }  // namespace torch_lazy_tensors

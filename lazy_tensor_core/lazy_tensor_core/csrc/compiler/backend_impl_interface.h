@@ -57,7 +57,7 @@ class BackendImplInterface {
 
 
   virtual lazy_tensors::StatusOr<std::string> GetComputationBackendText(
-      const GenericComputation* computation) const = 0;
+      const ComputationPtr computation) const = 0;
 
   // No-op by default. Allows custom functionality to be exposed through
   // extension bindings.
@@ -68,10 +68,10 @@ class BackendImplInterface {
 
 
   virtual std::vector<ComputationPtr> Compile(
-      std::vector<CompileInstance> instances) const = 0;
+      std::vector<ComputationPtr> instances) const = 0;
 
   virtual std::vector<DataPtr> ExecuteComputation(
-      const Computation& computation, c10::ArrayRef<DataPtr> arguments,
+      Computation& computation, c10::ArrayRef<DataPtr> arguments,
       const std::string& device) const = 0;
 
   // Identifies a 'host' in distributed setting? Used to hash a particular host's graph?

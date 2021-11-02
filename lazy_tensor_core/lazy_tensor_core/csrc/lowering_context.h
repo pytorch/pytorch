@@ -15,6 +15,25 @@
 #include "torch/csrc/lazy/core/ir.h"
 
 namespace torch_lazy_tensors {
+
+namespace compiler {
+
+class Computation {
+ public:
+  virtual int parameters_size() const  = 0;
+
+  virtual const std::vector<lazy_tensors::Shape>& parameter_shapes() const = 0;
+
+  virtual const std::vector<std::string>& parameter_names() const = 0;
+
+  virtual const lazy_tensors::Shape& result_shape() const = 0;
+
+  virtual ~Computation() = default;
+};
+
+using ComputationPtr = std::shared_ptr<Computation>;
+}
+
 namespace ir {
 
 // Keeps track of the code generation state.
@@ -52,7 +71,7 @@ class LoweringContext {
   // Build the computation capturing all the operations created with the
   // embedded builder (returned by the builder() API).
   virtual lazy_tensors::StatusOr<
-      std::shared_ptr<compiler::GenericComputation>>
+      std::shared_ptr<compiler::Computation>>
   Build() = 0;
 
   // Lowers the given node as the result of the computation. Only used for the

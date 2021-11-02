@@ -127,17 +127,16 @@ class LazyGraphExecutor {
   struct CompilationResult {
     Device device;
     size_t emitted_nodes = 0;
-    std::shared_ptr<compiler::Computation> computation;
+    compiler::ComputationPtr computation;
     std::vector<compiler::DataPtr> parameters_data;
   };
 
   struct CachedComputation {
     CachedComputation(
-        std::shared_ptr<compiler::Computation>
-            computation)
+        compiler::ComputationPtr computation)
         : computation(std::move(computation)) {}
 
-    std::shared_ptr<compiler::Computation> computation;
+    compiler::ComputationPtr computation;
   };
 
   using ComputationCache =

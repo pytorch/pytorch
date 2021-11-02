@@ -263,7 +263,7 @@ std::string DumpUtil::ToBackend(c10::ArrayRef<torch::lazy::Value> values,
   auto computation = ConsumeValue(lowering_ctx->Build());
   return ConsumeValue(
       compiler::getBackendRegistrar()->GetComputationBackendText(
-          computation.get()));
+          computation));
 }
 
 }  // namespace ir

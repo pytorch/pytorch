@@ -1,10 +1,12 @@
 #pragma once
 
 #include "lazy_tensor_core/csrc/lowering_context.h"
+#include "lazy_tensor_core/csrc/ts_backend/ts_lowering_context.h"
 #include "lazy_tensors/computation_client/sys_util.h"
 #include "lazy_tensors/shape.h"
 #include "torch/csrc/lazy/core/ir.h"
-#include "ts_node_lowering.h"
+#include "torch/csrc/jit/ir/ir.h"
+#include "torch/csrc/jit/api/function_impl.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -13,6 +15,7 @@ using NodePtr = torch::lazy::NodePtr;
 using Node = torch::lazy::Node;
 using OpKind = torch::lazy::OpKind;
 using OpList = torch::lazy::OpList;
+using TSOpVector = std::vector<torch::jit::Value*>;
 
 namespace ops {
   using NodePtr = torch::lazy::NodePtr;

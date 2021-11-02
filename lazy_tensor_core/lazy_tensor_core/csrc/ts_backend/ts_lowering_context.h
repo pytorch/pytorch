@@ -13,7 +13,7 @@ class NodeLowering;
 
 namespace ts_backend {
 
-class GenericComputationTS : public GenericComputation {
+class TSComputation : public Computation {
  public:
   GenericComputationTS(std::shared_ptr<torch::jit::Graph> graph)
       : graph_(graph),
@@ -43,7 +43,7 @@ class TSLoweringContext : public ir::LoweringContext {
 
   size_t AddResult(const torch::lazy::Output& output) override;
 
-  lazy_tensors::StatusOr<std::shared_ptr<GenericComputation>>
+  lazy_tensors::StatusOr<std::shared_ptr<Computation>>
   Build() override;
 
   // Retrieves the lowered operation for a output. If the requested output is
