@@ -150,7 +150,7 @@ No wrapper code needs to be written. You can see [a tutorial here](https://pytor
 ## Installation
 
 ### Binaries
-Commands to install binaries via Conda or pip wheels are on our website: [https://pytorch.org/get-started/locally/](https://pytorch.org/get-started/locally/)
+Commands to install binaries through Conda or pip wheels are on our website: [https://pytorch.org/get-started/locally/](https://pytorch.org/get-started/locally/)
 
 
 #### NVIDIA Jetson Platforms
