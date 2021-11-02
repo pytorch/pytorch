@@ -46,7 +46,7 @@ from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, Criteri
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, precisionOverride, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, onlyCPU, \
     skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, skipCUDAIfRocmVersionLessThan, skipCUDAIfNotMiopenSuggestNHWC, \
-    onlyOnCPUAndCUDA, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, skipMeta, get_all_device_types
+    onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, skipMeta, get_all_device_types
 from torch.nn import MultiheadAttention
 
 from hypothesis import given
@@ -13359,7 +13359,7 @@ class TestNNDeviceType(NNTestCase):
         if self.device_type == 'cuda':
             self._test_LayerNorm_cuda_half(device)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_LayerNorm_numeric(self, device):
         def layer_norm_ref(X, gamma, beta, normalized_shape, eps):
             feature_size = np.prod(normalized_shape)
@@ -13385,7 +13385,7 @@ class TestNNDeviceType(NNTestCase):
             Y_cpu = layer_norm(X.cpu())
             self.assertEqual(Y_cpu, Y, rtol=0, atol=1e-5)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_GroupNorm_general(self, device):
         self._test_GroupNorm_general(device)
 
@@ -13439,7 +13439,7 @@ class TestNNDeviceType(NNTestCase):
         helper(self, (4, 8, 10, 10), 4)
         helper(self, (2, 30, 9, 9), 3)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_GroupNorm_numeric(self, device):
         def group_norm_ref(X, gamma, beta, groups, channels, eps):
             batch_size = X.size()[0]
@@ -13469,7 +13469,7 @@ class TestNNDeviceType(NNTestCase):
             Y_cpu = group_norm(X.cpu())
             self.assertEqual(Y_cpu, Y, rtol=0, atol=1e-5)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(torch.float64, torch.complex128)
     def test_pad(self, device, dtype):
         # Assert assertion errors are raised for invalid circular padding values
@@ -13500,7 +13500,7 @@ class TestNNDeviceType(NNTestCase):
             out.fill_(4)
             self.assertTrue(torch.all(torch.abs(inputs) < 2))
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(torch.float64, torch.complex128)
     def test_ReplicationPad_empty(self, device, dtype):
         for mod, inp in [
@@ -13612,7 +13612,7 @@ class TestNNDeviceType(NNTestCase):
             out.backward(g)
             self.assertEqual(x.grad[:, :, 1:-1, 1:-1, 1:-1], g[:, :, pf + 1 : -pbk - 1, pt + 1 : -pbt - 1, pl + 1 : -pr - 1])
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_Bilinear_empty(self, device):
         mod = torch.nn.Bilinear(20, 30, 40).to(device)
         inp1 = torch.randn(0, 10, 20, requires_grad=True, device=device)
@@ -13627,7 +13627,8 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(inp1.grad, torch.zeros_like(inp1))
         self.assertEqual(inp2.grad, torch.zeros_like(inp2))
 
-    @onlyOnCPUAndCUDA
+    @expectedFailureMeta  # RuntimeError: cannot reshape tensor of 0 elements into shape [1, 0, -1]
+    @onlyNativeDeviceTypes
     def test_TransformerEncoderLayer_empty(self, device):
         for batch_first, input_shape in [(True, (0, 10, 512)),
                                          (False, (10, 0, 512))]:
@@ -13635,7 +13636,8 @@ class TestNNDeviceType(NNTestCase):
             encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8, batch_first=batch_first).to(device)
             self._test_module_empty_input(encoder_layer, input, check_size=False)
 
-    @onlyOnCPUAndCUDA
+    @expectedFailureMeta  # RuntimeError: cannot reshape tensor of 0 elements into shape [1, 0, -1]
+    @onlyNativeDeviceTypes
     def test_TransformerEncoder_empty(self, device):
         for batch_first, input_shape in [(True, (0, 10, 512)),
                                          (False, (10, 0, 512))]:
@@ -13644,7 +13646,8 @@ class TestNNDeviceType(NNTestCase):
             transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=6).to(device)
             self._test_module_empty_input(transformer_encoder, input, check_size=False)
 
-    @onlyOnCPUAndCUDA
+    @expectedFailureMeta  # RuntimeError: cannot reshape tensor of 0 elements into shape [1, 0, -1]
+    @onlyNativeDeviceTypes
     def test_TransformerDecoderLayer_empty(self, device):
         for batch_first, memory_shape, tgt_shape in [(True, (0, 10, 512), (0, 20, 512)),
                                                      (False, (10, 0, 512), (20, 0, 512))]:
@@ -13653,7 +13656,8 @@ class TestNNDeviceType(NNTestCase):
             decoder_layer = nn.TransformerDecoderLayer(d_model=512, nhead=8, batch_first=batch_first).to(device)
             self._test_module_empty_inputs(decoder_layer, [tgt, memory])
 
-    @onlyOnCPUAndCUDA
+    @expectedFailureMeta  # RuntimeError: cannot reshape tensor of 0 elements into shape [1, 0, -1]
+    @onlyNativeDeviceTypes
     def test_TransformerDecoder_empty(self, device):
         for batch_first, memory_shape, tgt_shape in [(True, (0, 10, 512), (0, 20, 512)),
                                                      (False, (10, 0, 512), (20, 0, 512))]:
@@ -13663,7 +13667,8 @@ class TestNNDeviceType(NNTestCase):
             transformer_decoder = nn.TransformerDecoder(decoder_layer, num_layers=6).to(device)
             self._test_module_empty_inputs(transformer_decoder, [tgt, memory])
 
-    @onlyOnCPUAndCUDA
+    @expectedFailureMeta  # RuntimeError: cannot reshape tensor of 0 elements into shape [1, 0, -1]
+    @onlyNativeDeviceTypes
     def test_Transformer_empty(self, device):
         for batch_first, src_shape, tgt_shape in [(True, (10, 0, 512), (20, 0, 512))]:
             transformer_model = nn.Transformer(nhead=16, num_encoder_layers=12).to(device)
@@ -13671,7 +13676,7 @@ class TestNNDeviceType(NNTestCase):
             tgt = torch.rand(*tgt_shape, requires_grad=True, device=device)
             self._test_module_empty_inputs(transformer_model, [src, tgt])
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(torch.float32, torch.complex64)
     def test_ReflectionPad_empty(self, device, dtype):
         for mod, inp in [
@@ -13716,7 +13721,7 @@ class TestNNDeviceType(NNTestCase):
 
             self.assertEqual(x.grad, ref_x.grad)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_LocalResponseNorm_empty(self, device):
         mod = torch.nn.LocalResponseNorm(2).to(device)
         inp = torch.ones(0, 5, 24, 24, device=device)
@@ -13743,7 +13748,7 @@ class TestNNDeviceType(NNTestCase):
 
             self.assertEqual(x.grad, ref_x.grad)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)
     def test_MarginLoss_empty(self, device, dtype):
         for mod, x, y in [
@@ -13770,7 +13775,7 @@ class TestNNDeviceType(NNTestCase):
                 y = torch.ones(10, 0, device=device).type(torch.long)
                 mod(x, y)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)
     def test_adaptive_pooling_zero_batch(self, dtype, device):
         inp = torch.ones(0, 10, dtype=dtype, device=device)
@@ -13785,7 +13790,7 @@ class TestNNDeviceType(NNTestCase):
         mod = torch.nn.AdaptiveAvgPool3d((5, 5, 5)).to(device)
         self._test_module_empty_input(mod, inp, check_size=False)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_FractionalMaxPool2d_zero_batch(self, device):
         mod = nn.FractionalMaxPool2d(3, output_ratio=(0.5, 0.5))
         inp = torch.ones(0, 16, 50, 32, device=device)
@@ -13795,7 +13800,7 @@ class TestNNDeviceType(NNTestCase):
             inp = torch.randn(1, 0, 50, 32, device=device)
             mod(inp)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_FractionalMaxPool3d_zero_batch(self, device):
         mod = nn.FractionalMaxPool3d(3, output_ratio=(0.5, 0.5, 0.5)).to(device)
         inp = torch.ones(0, 16, 50, 32, 32, device=device)
@@ -13805,7 +13810,7 @@ class TestNNDeviceType(NNTestCase):
             inp = torch.randn(1, 0, 50, 32, 32, device=device)
             mod(inp)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_Unfold_empty(self, device):
         inp = torch.randn(0, 3, 3, 4, device=device)
         unfold = torch.nn.Unfold(kernel_size=(2, 3)).to(device)
@@ -13816,7 +13821,7 @@ class TestNNDeviceType(NNTestCase):
             unfold = torch.nn.Unfold(kernel_size=(2, 3)).to(device)
             unfold(inp)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_MaxPool_zero_batch_dim(self, device):
         inp = torch.randn(0, 16, 50, device=device)
         mod = torch.nn.MaxPool1d(3, stride=2).to(device)
@@ -13841,7 +13846,7 @@ class TestNNDeviceType(NNTestCase):
             inp = torch.ones(1, 0, 50, 44, 31, device=device)
             mod(inp)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_MaxUnpool_zero_batch_dim(self, device):
         pool = torch.nn.MaxPool1d(2, stride=2, return_indices=True).to(device)
         unpool = torch.nn.MaxUnpool1d(2, stride=2).to(device)
@@ -13875,7 +13880,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(inp.grad, torch.zeros_like(inp))
         self.assertEqual(unpool_out, torch.zeros_like(unpool_out))
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_AdaptiveMaxPool_zero_batch_dim(self, device):
         inp = torch.randn(0, 16, 50, device=device)
         mod = torch.nn.AdaptiveMaxPool1d(3).to(device)
@@ -14032,7 +14037,7 @@ class TestNNDeviceType(NNTestCase):
             with torch.backends.cudnn.flags(enabled=False):
                 self._test_module_empty_input(mod, inp, check_size=False)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_AvgPool2d_empty(self, device):
         avgpool = torch.nn.AvgPool2d(3, stride=2).to(device)
         inp = torch.randn(0, 16, 20, 32, device=device)
@@ -14152,7 +14157,7 @@ class TestNNDeviceType(NNTestCase):
                     verify_reduction_scalars(input, reduction, output)
 
     # verify that bogus reduction strings are errors
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_invalid_reduction_strings(self, device):
         input = torch.randn(3, 5, requires_grad=True, device=device)
         cinput = torch.randn(3, 5, requires_grad=True, device=device, dtype=torch.cfloat)
@@ -14200,7 +14205,7 @@ class TestNNDeviceType(NNTestCase):
             # FIXME: should we allow derivatives on these?
             v(lambda: F.soft_margin_loss(input, input.sign().detach(), reduction=reduction))
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_smooth_l1_loss_vs_huber_loss(self, device):
         def _make_test_tensor(shape, contiguous=True):
             if contiguous:
@@ -14317,7 +14322,7 @@ class TestNNDeviceType(NNTestCase):
         y = torch.nn.functional.max_pool2d(x, 1, stride=(2, 2), padding=0, ceil_mode=True)
         self.assertEqual(y.size(), (1, 1, 3, 4))
 
-    @onlyOnCPUAndCUDA   # TODO: fix on XLA
+    @onlyNativeDeviceTypes   # TODO: fix on XLA
     def test_adaptive_avg_pool2d_output_size_one(self, device):
         def helper(size, memory_format):
             x = torch.randint(1, 10, size, dtype=torch.float, device=device, requires_grad=True)
@@ -14345,7 +14350,7 @@ class TestNNDeviceType(NNTestCase):
         for mf in (torch.contiguous_format, torch.channels_last, 'non_contiguous'):
             helper((2, 3, 6, 6), mf)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_adaptive_avg_pool3d_output_size_one(self, device):
         x = torch.randn((2, 3, 6, 6, 6) , dtype=torch.float, device=device, requires_grad=True)
 
@@ -14361,7 +14366,8 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(out.stride(), [c, 1, 1, 1, 1])
 
 
-    @onlyOnCPUAndCUDA
+    @expectedFailureMeta  # Runtime Error not raised for meta
+    @onlyNativeDeviceTypes
     @dtypes(torch.uint8, torch.int8, torch.short, torch.int, torch.long)
     def test_adaptive_pooling_no_suppot_input(self, device, dtype):
         for numel in (2, 3):
@@ -14374,7 +14380,7 @@ class TestNNDeviceType(NNTestCase):
                 with self.assertRaisesRegex(RuntimeError, "not implemented"):
                     output = module(input)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     def test_avg_pool2d_nhwc(self, device, dtype):
@@ -14505,7 +14511,7 @@ class TestNNDeviceType(NNTestCase):
         helper(1, 100000, 32, 32, ks=4)
         helper(1, 100000, 1, 4, ks=(1, 4))  # test for max_pool1d
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     def test_max_pool2d_nhwc(self, device, dtype):
@@ -14825,7 +14831,7 @@ class TestNNDeviceType(NNTestCase):
     # with an offset array. Compare against an equivalent 2D input that uses
     # padding indices to fill in the gaps indicated by the offset array
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(torch.float32, torch.float64)
     @dtypesIfCUDA(torch.half, torch.bfloat16)
     def test_embedding_bag_1D_padding_idx(self, device, dtype):
@@ -14958,7 +14964,7 @@ class TestNNDeviceType(NNTestCase):
     # Check correctness of torch.nn.functional.embedding_bag forward and
     # backward functions with padding_idx, given a 2D indices input. Compare
     # against torch.nn.functional.embedding followed by a reduction.
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(torch.float32, torch.float64)
     @dtypesIfCUDA(torch.half, torch.bfloat16)
     def test_embedding_bag_2D_padding_idx(self, device, dtype):
@@ -16395,7 +16401,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertTrue(gradcheck(F.hardsigmoid, (inputs,)))
 
     # currently fails on XLA
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_hardswish_grad(self, device):
         inputs = (torch.randn(4, 16, 16, device=device) - 0.5) * 10
         inputs.requires_grad = True
@@ -16715,7 +16721,7 @@ class TestNNDeviceType(NNTestCase):
 
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float)
-    @onlyOnCPUAndCUDA  # TODO: Fails on XLA
+    @onlyNativeDeviceTypes  # TODO: Fails on XLA
     def test_max_pool_nan_inf(self, device, dtype):
         for adaptive in ['', 'adaptive_']:
             for num_dim in [1, 2, 3]:
@@ -16738,7 +16744,7 @@ class TestNNDeviceType(NNTestCase):
                 res2 = fn(x2, 1 if adaptive else 3)
                 self.assertTrue(math.isinf(res2.item()))
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)
     def test_grid_sample_nan_inf(self, device, dtype):
         input = torch.zeros([1, 1, 3, 3], device=device, dtype=dtype)
@@ -16748,7 +16754,8 @@ class TestNNDeviceType(NNTestCase):
                                                      padding_mode=padding_mode, align_corners=False)
             self.assertEqual(sample, torch.zeros([1, 1, 1, 2], device=device, dtype=dtype))
 
-    @onlyOnCPUAndCUDA
+    @expectedFailureMeta  # RuntimeError: Unrecognized tensor type ID: Meta
+    @onlyNativeDeviceTypes
     def test_fractional_max_pool2d(self, device):
         x = torch.randn(1, 2, 7, 7, requires_grad=True, device=device)
         samples = x.new(1, 2, 2).uniform_()
@@ -16785,7 +16792,8 @@ class TestNNDeviceType(NNTestCase):
                 # Incorrect output_size
                 F.fractional_max_pool2d(x, (2, 2), output_size=output_size, _random_samples=samples)
 
-    @onlyOnCPUAndCUDA
+    @expectedFailureMeta  # RuntimeError: Unrecognized tensor type ID: Meta
+    @onlyNativeDeviceTypes
     def test_fractional_max_pool3d(self, device):
         x = torch.randn(1, 2, 7, 7, 7, requires_grad=True, device=device)
         samples = x.new(1, 2, 3).uniform_()
@@ -16822,7 +16830,7 @@ class TestNNDeviceType(NNTestCase):
 
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float)
-    @onlyOnCPUAndCUDA  # TODO: Fails on XLA
+    @onlyNativeDeviceTypes  # TODO: Fails on XLA
     def test_fractional_max_pool_nan_inf(self, device, dtype):
         for num_dim in [2, 3]:
             fn_name = 'FractionalMaxPool{}d'.format(num_dim)
@@ -16837,7 +16845,7 @@ class TestNNDeviceType(NNTestCase):
             res2.backward(torch.randn_like(res2))
             self.assertTrue(math.isinf(res2.item()))
 
-    @onlyOnCPUAndCUDA  # TODO: RuntimeError message different on XLA
+    @onlyNativeDeviceTypes  # TODO: RuntimeError message different on XLA
     def test_pooling_zero_stride(self, device):
         for op in ('max', 'avg'):
             for num_dim in [1, 2, 3]:
@@ -17072,7 +17080,7 @@ class TestNNDeviceType(NNTestCase):
         self._test_bfloat16_ops(torch.nn.AdaptiveAvgPool2d((3, 5)), device, inp_dims=(8, 4, 16, 16), prec=0.05)
         self._test_bfloat16_ops(torch.nn.AdaptiveAvgPool3d((3, 5, 7)), device, inp_dims=(8, 4, 16, 16, 16), prec=0.05)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_softmax_bfloat16(self, device):
         for dim in [0, 1, 2, 3]:
             self._test_bfloat16_ops(torch.nn.Softmax(dim=dim), device, inp_dims=(16, 33, 15, 16), prec=1e-2)
@@ -17810,7 +17818,7 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             F.silu(x, inplace=True)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_mish_inplace_overlap(self, device):
         x = torch.randn((1, 6), device=device).expand((6, 6))
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
@@ -17847,7 +17855,7 @@ class TestNNDeviceType(NNTestCase):
         F.threshold(x, 0.5, 0.5, inplace=True)
         F.threshold_(x, 0.5, 0.5)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_triplet_margin_with_distance_loss_default_parity(self, device):
         # Test for `nn.TripletMarginWithDistanceLoss` and
         # `F.triplet_margin_with_distance_loss`.  Checks
@@ -17881,7 +17889,7 @@ class TestNNDeviceType(NNTestCase):
             self.assertTrue(gradcheck(lambda a, p, n: loss_op(a, p, n),
                             (anchor, positive, negative)))
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_triplet_margin_with_distance_loss(self, device):
         # Test for parity between `nn.TripletMarginWithDistanceLoss` and
         # `F.triplet_margin_with_distance_loss`.
