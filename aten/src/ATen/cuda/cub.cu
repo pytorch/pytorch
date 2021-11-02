@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/cuda/cub.cuh>
+#include <ATen/cuda/CUDAConfig.h>
 
 namespace at {
 namespace cuda {
@@ -54,7 +55,12 @@ AT_INSTANTIATE_SORT_PAIRS(int64_t, 4)
 #define AT_INSTANTIATE_SORT_PAIRS_8(scalar_t, ScalarType)   \
   AT_INSTANTIATE_SORT_PAIRS(scalar_t, 8)
 
-AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, AT_INSTANTIATE_SORT_PAIRS_8)
+AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, AT_INSTANTIATE_SORT_PAIRS_8)
+
+// BFloat16 is not supported by ROCm's radix sort
+#if !AT_ROCM_ENABLED()
+AT_INSTANTIATE_SORT_PAIRS(c10::BFloat16, 8)
+#endif
 
 }  // namespace detail
 
