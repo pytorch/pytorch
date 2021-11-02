@@ -7,8 +7,6 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-import unittest
-
 import torch.distributed.elastic.utils.store as store_util
 from torch.distributed.elastic.utils.logging import get_logger
 from torch.testing._internal.common_utils import run_tests, TestCase
