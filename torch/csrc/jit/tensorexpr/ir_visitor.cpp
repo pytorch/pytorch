@@ -104,6 +104,12 @@ void IRVisitor::visit(LoadPtr v) {
 
 void IRVisitor::visit(BufPtr v) {
   v->base_handle()->accept(this);
+  if (v->qscale()) {
+    v->qscale()->accept(this);
+  }
+  if (v->qzero()) {
+    v->qzero()->accept(this);
+  }
 }
 
 void IRVisitor::visit(StorePtr v) {
