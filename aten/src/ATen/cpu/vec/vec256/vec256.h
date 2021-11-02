@@ -28,29 +28,28 @@
 namespace at {
 namespace vec {
 
-// Note [Acceptable use of anonymous namespace in header]
+// Note [CPU_CAPABILITY namespace]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// Yes you saw right, this is an anonymous namespace in a header.  This header,
-// and all of its subheaders, REQUIRE their code to be entirely inlined into
-// the compilation unit that uses them.  It's important that these functions have
-// internal linkage so that kernels for different architectures don't get
-// combined during linking. It's sufficient to label functions "static", but
-// class methods must be an unnamed namespace to have internal linkage (since
-// static means something different in the context of classes).
-namespace {
+// This header, and all of its subheaders, will be compiled with
+// different architecture flags for each supported set of vector
+// intrinsics. So we need to make sure they aren't inadvertently
+// linked together. We do this by declaring objects in an `inline
+// namespace` which changes the name mangling, but can still be
+// accessed as `at::vec`.
+inline namespace CPU_CAPABILITY {
 
- C10_UNUSED std::ostream& operator<<(std::ostream& stream, const c10::qint32& val) {
-     stream << val.val_;
-     return stream;
- }
- C10_UNUSED std::ostream& operator<<(std::ostream& stream, const c10::qint8& val) {
-     stream << static_cast<int>(val.val_);
-     return stream;
- }
- C10_UNUSED std::ostream& operator<<(std::ostream& stream, const c10::quint8& val) {
-     stream << static_cast<unsigned int>(val.val_);
-     return stream;
- }
+inline std::ostream& operator<<(std::ostream& stream, const c10::qint32& val) {
+  stream << val.val_;
+  return stream;
+}
+inline std::ostream& operator<<(std::ostream& stream, const c10::qint8& val) {
+  stream << static_cast<int>(val.val_);
+  return stream;
+}
+inline std::ostream& operator<<(std::ostream& stream, const c10::quint8& val) {
+  stream << static_cast<unsigned int>(val.val_);
+  return stream;
+}
 
 template <typename T>
 std::ostream& operator<<(std::ostream& stream, const Vectorized<T>& vec) {

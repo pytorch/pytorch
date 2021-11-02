@@ -8,7 +8,7 @@
 namespace at {
 namespace vec {
 
-namespace {
+inline namespace CPU_CAPABILITY {
 
 
 template <>
