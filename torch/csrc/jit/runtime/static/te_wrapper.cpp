@@ -27,10 +27,6 @@ void TEWrapper::call(const std::vector<void*>& args) {
   cg->call_raw(args);
 }
 
-bool TEWrapper::supports(const at::Tensor& t) {
-  return t.is_contiguous() && t.dtype().Match<float>();
-}
-
 void optimizePointwise(LoopNest* ln, Tensor target, int width) {
   std::vector<ForPtr> loops = ln->getLoopStmtsFor(target);
   ForPtr inner, tail;
@@ -69,10 +65,6 @@ std::shared_ptr<TEWrapper> wrapTECompute(
 
 void TEWrapper::call(const std::vector<void*>& args) {
   DCHECK(0 && "Invalid call");
-}
-
-bool TEWrapper::supports(const at::Tensor& t) {
-  return false;
 }
 
 std::shared_ptr<TEWrapper> wrapTECompute(
@@ -228,6 +220,29 @@ std::shared_ptr<TEWrapper> createSignedLog1p() {
   GRAPH_DEBUG("Final stmt: ", *ln.root_stmt());
   wrap = wrapTECompute(wrap, &ln, {output, A, N});
   updateNNCCache(signed_log1p_symbol, wrap);
+  return wrap;
+}
+
+std::shared_ptr<TEWrapper> createWhere() {
+  auto wrap = lookupNNCCache(aten::where);
+  if (wrap) {
+    return wrap;
+  }
+  wrap = std::make_shared<TEWrapper>();
+  auto N = VarHandle("N", kLong);
+  BufHandle cond("cond", {N}, kBool);
+  BufHandle x("x", {N}, kLong);
+  BufHandle y("y", {N}, kLong);
+
+  Tensor res = Compute("res", {N}, [&](const VarHandle& i) {
+    auto cond_i = cond.load(i);
+    auto x_i = x.load(i);
+    auto y_i = y.load(i);
+    return ifThenElse(cond_i, x_i, y_i);
+  });
+
+  wrap = wrapTECompute(wrap, res, {cond, x, y, N});
+  updateNNCCache(aten::where, wrap);
   return wrap;
 }
 

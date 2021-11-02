@@ -60,6 +60,10 @@ ALLOW_LIST = [
     ("aten::_fused_moving_avg_obs_fq_helper", datetime.date(2021, 10, 21)),
     ("aten::_baddbmm_mkl_", datetime.date(2021, 10, 31)),
     ("aten::grid_sampler_2d_backward", datetime.date(2021, 10, 21)),
+    ("prim::TensorExprDynamicGuard", datetime.date(2021, 11, 20)),
+    ("caffe2::", datetime.date(2021, 10, 23)),
+    ("prepacked::unpack_prepacked_sizes_conv2d", datetime.date(9999, 1, 1)),
+    ("prepacked::unpack_prepacked_sizes_linear", datetime.date(9999, 1, 1)),
 ]
 
 ALLOW_LIST_COMPILED = [
