@@ -77,10 +77,11 @@ jobs:
         env:
           AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
+          AWS_REGION: us-east-1
         run: |
-          aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
-          bash /tmp/ecr-login.sh
-          rm /tmp/ecr-login.sh
+          export AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          aws ecr get-login-password --region $AWS_REGION | docker login --username AWS \
+              --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
       - name: Chown workspace
         env:
           ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
