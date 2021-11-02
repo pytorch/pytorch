@@ -395,4 +395,3 @@ Tensor masked_scale_cuda(const Tensor& self, const Tensor& mask, double scale){
 
 }
 }
-
