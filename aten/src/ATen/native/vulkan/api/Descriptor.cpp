@@ -1,4 +1,5 @@
 #include <ATen/native/vulkan/api/Descriptor.h>
+#include <ATen/native/vulkan/api/Utils.h>
 
 namespace at {
 namespace native {
@@ -90,16 +91,18 @@ void allocate_descriptor_sets(
       descriptor_sets && (count > 0u),
       "Invalid usage!");
 
-  const std::vector<VkDescriptorSetLayout> descriptor_set_layouts{
-    count,
-    descriptor_set_layout,
-  };
+  std::vector<VkDescriptorSetLayout> descriptor_set_layouts(count);
+  fill(
+    descriptor_set_layouts.begin(),
+    descriptor_set_layouts.end(),
+    descriptor_set_layout
+  );
 
   const VkDescriptorSetAllocateInfo descriptor_set_allocate_info{
     VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
     nullptr,
     descriptor_pool,
-    descriptor_set_layouts.size(),
+    utils::safe_downcast<uint32_t>(descriptor_set_layouts.size()),
     descriptor_set_layouts.data(),
   };
 

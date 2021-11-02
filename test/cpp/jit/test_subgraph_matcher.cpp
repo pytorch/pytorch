@@ -500,6 +500,7 @@ graph(%x):
   return (%y))IR",
       &pattern1);
   // No support for patterns with subblocks
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(findPatternMatches(pattern1, graph));
 
   parseIR(
@@ -512,6 +513,7 @@ graph(%x):
   // Not supported multi-output pattern, because not the whole pattern is
   // covered by a traversal up from the first output (`%z = ...` is not
   // visited). See the note "Multi-output Patterns" in subgraph_matcher.h.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(findPatternMatches(pattern2, graph));
 }
 

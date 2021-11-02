@@ -53,9 +53,10 @@ def gen_autograd(
 
     template_path = os.path.join(autograd_dir, 'templates')
 
+    native_funcs = parse_native_yaml(native_functions_path).native_functions
     fns = list(sorted(filter(
         operator_selector.is_native_function_selected_for_training,
-        parse_native_yaml(native_functions_path)), key=lambda f: cpp.name(f.func)))
+        native_funcs), key=lambda f: cpp.name(f.func)))
     fns_with_diff_infos: List[NativeFunctionWithDifferentiabilityInfo] = match_differentiability_info(fns, differentiability_infos)
 
     # Generate VariableType.h/cpp
@@ -65,7 +66,7 @@ def gen_autograd(
         gen_inplace_or_view_type(out, native_functions_path, fns_with_diff_infos, template_path)
 
         # operator filter not applied as tracing sources are excluded in selective build
-        gen_trace_type(out, native_functions_path, template_path)
+        gen_trace_type(out, native_funcs, template_path)
     # Generate Functions.h/cpp
     gen_autograd_functions_lib(
         out, differentiability_infos, template_path)

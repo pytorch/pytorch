@@ -5,6 +5,7 @@
 #include <ATen/native/quantized/cpu/packed_params.h>
 #include <ATen/native/quantized/cpu/embedding_packed_params.h>
 #include <c10/core/QScheme.h>
+#include <c10/util/irange.h>
 
 #ifdef USE_FBGEMM
 #include <fbgemm/Fbgemm.h>
@@ -50,6 +51,18 @@ struct TORCH_API PackedLinearWeight : public LinearPackedParamsBase {
       double output_scale,
       int64_t output_zero_point) override;
 
+  at::Tensor& apply_out(
+      const at::Tensor& input,
+      double output_scale,
+      int64_t output_zero_point,
+      at::Tensor& output) override;
+
+  at::Tensor& apply_relu_out(
+      const at::Tensor& input,
+      double output_scale,
+      int64_t output_zero_point,
+      at::Tensor& output) override;
+
   at::Tensor apply_dynamic(at::Tensor input, bool reduce_range=false) override;
   at::Tensor apply_dynamic_relu(at::Tensor input, bool reduce_range=false) override;
 
@@ -65,10 +78,11 @@ struct TORCH_API PackedLinearWeight : public LinearPackedParamsBase {
 
  private:
   template <bool ReluFused>
-  at::Tensor apply_impl(
-      at::Tensor input,
+  at::Tensor& apply_impl(
+      const at::Tensor& input,
       double output_scale,
-      int64_t output_zero_point);
+      int64_t output_zero_point,
+      at::Tensor& output);
 
   template <bool ReluFused>
   at::Tensor apply_dynamic_impl(at::Tensor input, bool reduce_range=false);
@@ -227,7 +241,7 @@ inline void convert_uint8_int8(
     int len,
     const uint8_t* src_uint8,
     int8_t* dst_int8) {
-  for (int i = 0; i < len; ++i) {
+  for (const auto i : c10::irange(len)) {
     dst_int8[i] = static_cast<int8_t>(static_cast<int32_t>(src_uint8[i]) - 128);
   }
 }
@@ -237,7 +251,7 @@ inline void convert_int8_uint8(
     int len,
     const int8_t* src_int8,
     uint8_t* dst_uint8) {
-  for (int i = 0; i < len; ++i) {
+  for (const auto i : c10::irange(len)) {
     dst_uint8[i] =
         static_cast<uint8_t>(static_cast<int32_t>(src_int8[i]) + 128);
   }
@@ -320,6 +334,7 @@ struct TORCH_API PackedEmbeddingBagWeight : public EmbeddingPackedParamsBase {
         bit_rate_(bit_rate),
         q_scheme(q_scheme),
         version_(version) {
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.Move)
     if (!packed_w.is_contiguous()) {
       packed_w = packed_w.contiguous();
     }

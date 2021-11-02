@@ -34,6 +34,7 @@ struct PyTensorType {
   THPDtype* dtype;
   THPLayout* layout;
   bool is_cuda;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,modernize-avoid-c-arrays)
   char name[64];
   int backend;
   int scalar_type;
@@ -131,6 +132,7 @@ PyObject *Tensor_is_sparse_csr(PyTensorType *self, void *unused) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 static struct PyMethodDef metaclass_methods[] = {
   {"__instancecheck__", Tensor_instancecheck, METH_O, nullptr},
   {nullptr}
@@ -138,6 +140,7 @@ static struct PyMethodDef metaclass_methods[] = {
 
 typedef PyObject *(*getter)(PyObject *, void *);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 static struct PyGetSetDef metaclass_properties[] = {
   {"dtype",        (getter)Tensor_dtype, nullptr, nullptr, nullptr},
   {"layout",       (getter)Tensor_layout, nullptr, nullptr, nullptr},
@@ -381,6 +384,7 @@ static bool PyTensorType_Check(PyObject* obj) {
 }
 
 void py_set_default_tensor_type(PyObject* obj) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   PyTensorType *type;
   if (PyTensorType_Check(obj)) {
     type = (PyTensorType*)obj;

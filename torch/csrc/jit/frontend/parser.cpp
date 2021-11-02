@@ -46,7 +46,7 @@ Decl mergeTypesFromTypeComment(
 }
 
 struct ParserImpl {
-  explicit ParserImpl(const std::shared_ptr<Source>& source)
+  explicit ParserImpl(const std::shared_ptr<SourceView>& source)
       : L(source), shared(sharedParserData()) {}
 
   Ident parseIdent() {
@@ -264,6 +264,7 @@ struct ParserImpl {
   }
   Expr parseExp(int precedence) {
     TreeRef prefix;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int unary_prec;
     if (shared.isUnary(L.cur().kind, &unary_prec)) {
       auto kind = L.cur().kind;
@@ -283,6 +284,7 @@ struct ParserImpl {
     } else {
       prefix = parseBaseExp();
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int binary_prec;
     while (shared.isBinary(L.cur().kind, &binary_prec)) {
       if (binary_prec <= precedence) // not allowed to parse something which is
@@ -799,7 +801,7 @@ struct ParserImpl {
   SharedParserData& shared;
 };
 
-Parser::Parser(const std::shared_ptr<Source>& src)
+Parser::Parser(const std::shared_ptr<SourceView>& src)
     : pImpl(new ParserImpl(src)) {}
 
 Parser::~Parser() = default;

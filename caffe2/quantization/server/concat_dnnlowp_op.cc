@@ -120,7 +120,9 @@ bool ConcatDNNLowPOp<T>::RunOnDevice() {
     {
       int nthreads = dnnlowp_get_num_threads();
       int tid = dnnlowp_get_thread_num();
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int before_begin, before_end;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int after_begin, after_end;
 
       Get1DPartitionOf2D(

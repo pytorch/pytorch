@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/frontend/schema_matching.h>
 
 #include <ATen/core/jit_type.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/builtin_functions.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/runtime/operator.h>
@@ -29,21 +30,21 @@ static inline bool isIntOrFloatUsedAsList(
 
 /// Returns true if `type` is a Tuple in which all the elements have the
 /// same type or if it's a subtype of `list_type_`.
-inline bool convertibleToList(const TypePtr& type, const TypePtr& list_type_) {
-  auto list_type = list_type_->cast<ListType>();
+bool convertibleToList(const TypePtr& type, const TypePtr& list_type_) {
+  auto list_type = list_type_->castRaw<ListType>();
   if (!list_type) {
     return false;
   }
-  if (type->isSubtypeOf(list_type_)) {
+  if (type->isSubtypeOf(*list_type_)) {
     return true;
   }
-  if (auto tuple = type->cast<TupleType>()) {
+  if (auto tuple = type->castRaw<TupleType>()) {
     return std::all_of(
         tuple->elements().begin(),
         tuple->elements().end(),
         [&](const TypePtr& t) {
           // TODO: resolve VarType if necessary
-          return t->isSubtypeOf(list_type->getElementType());
+          return t->isSubtypeOf(*list_type->getElementType());
         });
   }
   return false;
@@ -60,7 +61,7 @@ Value* tryConvertToType(
   // treat conversion to Optional[T] as conversions to T
   if (OptionalTypePtr op = concrete_type->cast<OptionalType>()) {
     if (value->type()->kind() != OptionalType::Kind &&
-        !value->type()->isSubtypeOf(NoneType::get())) {
+        !value->type()->isSubtypeOf(*NoneType::get())) {
       return tryConvertToType(
           loc, graph, op->getElementType(), value, allow_conversions);
     }
@@ -78,7 +79,7 @@ Value* tryConvertToType(
 
     // inductively apply implicit conversions to tuples
     if (auto concrete_tuple = concrete_type->cast<TupleType>()) {
-      if (!value_tuple->isSubtypeOf(concrete_tuple) &&
+      if (!value_tuple->isSubtypeOf(*concrete_tuple) &&
           concrete_tuple->elements().size() == value_tuple->elements().size()) {
         auto unpacked = createTupleUnpack(value);
         std::vector<Value*> converted;
@@ -98,7 +99,7 @@ Value* tryConvertToType(
   // implicit conversions
   if (allow_conversions) {
     // Convert tensor or number to concrete int/float types
-    bool value_isa_tensor = value->type()->isSubtypeOf(TensorType::get());
+    bool value_isa_tensor = value->type()->isSubtypeOf(*TensorType::get());
     bool value_equals_number = *value->type() == *NumberType::get();
     bool concrete_float = *concrete_type == *FloatType::get();
     bool concrete_complex = *concrete_type == *ComplexType::get();
@@ -125,8 +126,8 @@ Value* tryConvertToType(
     }
 
     // Convert strings to device
-    if (value->type()->isSubtypeOf(StringType::get()) &&
-        concrete_type->isSubtypeOf(DeviceObjType::get())) {
+    if (value->type()->isSubtypeOf(*StringType::get()) &&
+        concrete_type->isSubtypeOf(*DeviceObjType::get())) {
       return graph.insert(aten::device, {value}, {}, loc);
     }
   }
@@ -184,7 +185,7 @@ static Value* tryMatchArgument(
   value = tryConvertToType(loc, graph, concrete_type, value, allow_conversions);
   std::stringstream ss;
   if (!value->type()->isSubtypeOfExt(
-          concrete_type, /*why_not=*/(failure_messages) ? &ss : nullptr)) {
+          *concrete_type, /*why_not=*/(failure_messages) ? &ss : nullptr)) {
     if (failure_messages) {
       auto& ostream = err()
           << arg.formatTypeMismatchMsg(value->type()->repr_str());
@@ -202,7 +203,7 @@ static Value* tryMatchArgument(
       }
 
       if (auto v = value->type()->cast<ListType>()) {
-        if (v->getElementType()->isSubtypeOf(TensorType::get())) {
+        if (v->getElementType()->isSubtypeOf(*TensorType::get())) {
           ostream << "Empty lists default to List[Tensor]. Add a variable "
                      "annotation to the assignment to create an empty list "
                      "of another type (torch.jit.annotate(List[T, []]) where T "
@@ -221,7 +222,7 @@ static Value* tryMatchArgument(
 c10::optional<size_t> findInputWithName(
     const std::string& name,
     at::ArrayRef<NamedValue> kwargs) {
-  for (size_t i = 0; i < kwargs.size(); ++i) {
+  for (const auto i : c10::irange(kwargs.size())) {
     if (kwargs[i].name() == name)
       return i;
   }
@@ -329,7 +330,7 @@ static c10::optional<MatchedSchema> tryMatchSchema(
 
   // if we finish the loop will we have consumed all arguments?
   size_t used_args = 0;
-  for (size_t schema_i = 0; schema_i < schema.arguments().size(); ++schema_i) {
+  for (const auto schema_i : c10::irange(schema.arguments().size())) {
     const auto& arg = schema.arguments()[schema_i];
     c10::optional<NamedValue> actual_named_value;
     if (arg.name() == "self" && self) {
@@ -429,7 +430,7 @@ static c10::optional<MatchedSchema> tryMatchSchema(
     return c10::nullopt;
   }
   // check for unused kwargs
-  for (size_t i = 0; i < kwargs.size(); ++i) {
+  for (const auto i : c10::irange(kwargs.size())) {
     const auto& nv = kwargs[i];
     if (!used_kwarg[i]) {
       if (failure_messages) {
@@ -533,7 +534,7 @@ std::pair<size_t, MatchedSchema> matchSchemas(
   for (bool allow_conversions : {false, true}) {
     // clear previous error messages
     failure_messages.str("");
-    for (size_t i = 0; i < schemas.size(); ++i) {
+    for (const auto i : c10::irange(schemas.size())) {
       const auto matched_schema = tryMatchSchema(
           *schemas[i],
           loc,
@@ -651,10 +652,12 @@ Value* emitBuiltinCall(
   if (matched.first < variants.size()) {
     return emitBuiltinNode(matched.second, loc, graph, name);
   } else {
-    Function* fn = builtin_functions[matched.first - variants.size()];
+    auto& fn = *builtin_functions[matched.first - variants.size()];
     // we inline builtin calls because they are normally very small
     // wrappers and are not useful for keeping around to debug
-    return insertGraph(graph, *fn->graph(), matched.second.inputs).at(0);
+    return insertGraph(
+               graph, *toGraphFunction(fn).graph(), matched.second.inputs)
+        .at(0);
   }
 }
 

@@ -51,6 +51,7 @@ class IDEEPSafeEnqueueBlobsOp final : public IDEEPOperator {
     CAFFE_ENFORCE(queue);
     auto size = queue->getNumBlobs();
     CAFFE_ENFORCE(
+        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
         OutputSize() == size + 1,
         "Expected " + caffe2::to_string(size + 1) + ", " +
             " got: " + caffe2::to_string(size));

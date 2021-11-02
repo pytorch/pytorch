@@ -21,7 +21,7 @@ set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} ${common_srcs})
 
 # We will only build the perf kernel files if the compiler supports avx2
 # extensions.
-if(CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
+if(CXX_AVX2_FOUND)
   add_library(Caffe2_perfkernels_avx STATIC ${avx_srcs})
   add_library(Caffe2_perfkernels_avx2 STATIC ${avx2_srcs})
   add_dependencies(Caffe2_perfkernels_avx Caffe2_PROTO)

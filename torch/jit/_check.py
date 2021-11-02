@@ -100,7 +100,7 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
             if (self.using_deprecated_ast
                     and not isinstance(node, ast.NameConstant)):
                 return False
-            if node.value:  # type: ignore
+            if node.value:  # type: ignore[attr-defined]
                 return False
 
         return True
@@ -220,7 +220,7 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
         containers = {"List", "Dict", "Optional"}
 
         try:
-            ann_type = node.args[0].value.id    # type: ignore
+            ann_type = node.args[0].value.id    # type: ignore[attr-defined]
         except AttributeError:
             return
 

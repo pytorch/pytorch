@@ -11,6 +11,7 @@
 #include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
 #include <torch/csrc/jit/codegen/fuser/kernel_spec.h>
 #include <torch/csrc/jit/codegen/fuser/tensor_info.h>
+#include <torch/csrc/jit/passes/graph_fuser.h>
 
 #include <algorithm>
 #include <iostream> // TODO: remove, debugging only
@@ -214,6 +215,7 @@ void launchFusion(
 
   // Computes map_size, numel from the first input
   at::IntArrayRef map_size;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   uint32_t numel;
   std::vector<int64_t> keep_alive_size;
   if (fusion.chunkDesc()[0].isNoop()) {
@@ -326,7 +328,7 @@ void launchFusion(
 
 bool runFusion(const int64_t key, Stack& stack, std::string* code_out) {
   // Short-circuits if fusion isn't enabled
-  if (!canFuseOnCPU() && !canFuseOnGPU())
+  if (!canFuseOnCPULegacy() && !canFuseOnGPU())
     return false;
 
   // Acquires the FusionSpec
@@ -361,7 +363,7 @@ bool runFusion(const int64_t key, Stack& stack, std::string* code_out) {
   // Attempts to run fallback if device fusion is disabled
   if (device.is_cuda() && !canFuseOnGPU())
     return false;
-  if (device.is_cpu() && !canFuseOnCPU())
+  if (device.is_cpu() && !canFuseOnCPULegacy())
     return false;
   if (device.is_xpu())
     return false;

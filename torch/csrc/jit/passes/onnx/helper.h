@@ -42,11 +42,21 @@ TORCH_API c10::optional<at::ScalarType> ONNXTypeToATenType(int32_t onnx_type);
 // Use int return type as no sable way exists to forward declare protobuf enum
 TORCH_API int ATenTypeToOnnxType(at::ScalarType at_type);
 
+TORCH_API void ONNXLintGraph(const std::shared_ptr<Graph>& graph);
+
 Node* createONNXUnsqueeze(
     Graph* graph,
     Node* n_to_insert_before,
     Value* input,
     int axis,
+    int opset_version);
+
+bool isValidToTransformToONNXConcatNode(Node* lc_node);
+
+Node* transformToONNXConcatNode(
+    Graph* graph,
+    Node* lc_node,
+    bool need_new_input,
     int opset_version);
 
 } // namespace jit

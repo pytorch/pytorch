@@ -64,6 +64,7 @@
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/deform_conv_op.h"
 #include "caffe2/operators/deform_conv_op_impl.h"
+#include "caffe2/utils/GpuAtomics.cuh"
 
 namespace caffe2 {
 
@@ -407,7 +408,7 @@ __global__ void deformable_col2im_gpu_kernel(
               cur_w + dx,
               height,
               width);
-          atomicAdd(grad_im + cur_bottom_grad_pos, weight * cur_top_grad);
+          gpu_atomic_add(grad_im + cur_bottom_grad_pos, weight * cur_top_grad);
         }
       }
     }

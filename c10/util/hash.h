@@ -1,8 +1,9 @@
 #pragma once
 
+#include <c10/util/ArrayRef.h>
+#include <c10/util/complex.h>
 #include <functional>
 #include <vector>
-#include <c10/util/complex.h>
 namespace c10 {
 
 // NOTE: hash_combine is based on implementation from Boost
@@ -106,15 +107,22 @@ struct hash<std::tuple<Types...>> {
   }
 };
 
-// Specialization for std::vector
 template <typename T>
-struct hash<std::vector<T>> {
-  size_t operator()(const std::vector<T>& v) const {
+struct hash<c10::ArrayRef<T>> {
+  size_t operator()(c10::ArrayRef<T> v) const {
     size_t seed = 0;
     for (const auto& elem : v) {
       seed = hash_combine(seed, _hash_detail::simple_get_hash(elem));
     }
     return seed;
+  }
+};
+
+// Specialization for std::vector
+template <typename T>
+struct hash<std::vector<T>> {
+  size_t operator()(const std::vector<T>& v) const {
+    return hash<c10::ArrayRef<T>>()(v);
   }
 };
 
@@ -146,6 +154,5 @@ struct hash<c10::complex<T>> {
     return get_hash(c.real(), c.imag());
   }
 };
-
 
 } // namespace c10

@@ -42,6 +42,7 @@ bool CTCGreedyDecoderOp<CPUContext>::RunOnDevice() {
     for (int32_t t = 0; t < seq_len_i; ++t) {
       auto* prob_data = getTensorDataPtr(inputs, t, i);
       int curr_label =
+          // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
           std::max_element(prob_data, prob_data + num_classes) - prob_data;
       if (curr_label != 0 &&
           (!merge_repeated_ || (previous_label != curr_label))) {

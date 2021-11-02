@@ -1,15 +1,15 @@
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/NumericLimits.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/NumericUtils.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <c10/util/Exception.h>
-#include <THC/THCAtomics.cuh>
-#include <THC/THCNumerics.cuh>
 
 #include <algorithm>
 #include <cfloat>
@@ -69,7 +69,7 @@ __global__ void fractional_max_pool2d_out_cuda_frame(
         for (int w = poolW; w < poolW + poolSizeW; ++w) {
           scalar_t val = input[batch][plane][h][w];
           // for consistency with THNN, favor the first max
-          if (val > maxVal || THCNumerics<scalar_t>::isnan(val)) {
+          if (val > maxVal || at::_isnan(val)) {
             maxIndex = h * input.size(3) + w;
             maxVal = val;
           }
@@ -79,7 +79,7 @@ __global__ void fractional_max_pool2d_out_cuda_frame(
           int w = i + poolW;
           scalar_t val = input[batch][plane][h][w];
           // for consistency with THNN, favor the first max
-          if (val > maxVal || THCNumerics<scalar_t>::isnan(val)) {
+          if (val > maxVal || at::_isnan(val)) {
             maxIndex = h * input.size(3) + w;
             maxVal = val;
           }
@@ -114,7 +114,7 @@ __global__ void fractional_max_pool2d_backward_out_cuda_frame(
     int inputH = index / gradInput.size(3);
     assert(inputH < gradInput.size(2));
 
-    gpuAtomicAdd(
+    gpuAtomicAddNoReturn(
       &gradInput[batch][plane][inputH][inputW],
       gradOutput[batch][plane][outputH][outputW]
     );
@@ -134,12 +134,10 @@ TORCH_IMPL_FUNC(fractional_max_pool2d_out_cuda) (
   int planeDim = 0;
   int dimh = 1;
   int dimw = 2;
-  int numBatch = 1;
 
   int ndims = input.ndimension();
 
   if (ndims == 4) {
-    numBatch = input.size(0);
     planeDim++;
     dimh++;
     dimw++;
@@ -161,6 +159,10 @@ TORCH_IMPL_FUNC(fractional_max_pool2d_out_cuda) (
     output_ = output_.reshape({1, numPlanes, outputH, outputW});
     indices_ = indices_.reshape({1, numPlanes, outputH, outputW});
     input_ = input_.reshape({1, input.size(0), input.size(1), input.size(2)});
+  }
+
+  if (output_.numel() == 0) {
+    return;
   }
 
   // block is limited to 4 warps
@@ -221,6 +223,9 @@ void fractional_max_pool2d_backward_out_cuda_template(
 
   /* resize */
   gradInput.resize_as_(input);
+  if (gradInput.numel() == 0) {
+    return;
+  }
   gradInput.zero_();
 
   auto gradInput_ = gradInput;
@@ -243,7 +248,7 @@ void fractional_max_pool2d_backward_out_cuda_template(
             gradInput_.size(0));
   dim3 block(outputPlaneSize > 128 ? 128 : outputPlaneSize);
 
-  auto devIndices = indices.packed_accessor<int64_t, 4>();
+  auto devIndices = indices_.packed_accessor<int64_t, 4>();
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(gradOutput.scalar_type(),
     "fractional_max_pool2d_backward_out_cuda_frame",
     [&] {

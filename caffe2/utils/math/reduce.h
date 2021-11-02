@@ -32,7 +32,8 @@ TORCH_API void ReduceMin(
     const T alpha,
     const T* X,
     T* Y,
-    Context* context);
+    Context* context,
+    bool allow_broadcast_fastpath=false);
 
 // Y = alpha * ReduceMax(X)
 template <typename T, class Context>
@@ -43,7 +44,8 @@ TORCH_API void ReduceMax(
     const T alpha,
     const T* X,
     T* Y,
-    Context* context);
+    Context* context,
+    bool allow_broadcast_fastpath=false);
 
 // Y = alpha * ReduceSum(X)
 template <typename T, class Context>
@@ -54,7 +56,8 @@ TORCH_API void ReduceSum(
     const T alpha,
     const T* X,
     T* Y,
-    Context* context);
+    Context* context,
+    bool allow_broadcast_fastpath=false);
 
 // Y = alpha * ReduceMean(X)
 template <typename T, class Context>
@@ -65,7 +68,8 @@ TORCH_API void ReduceMean(
     const T alpha,
     const T* X,
     T* Y,
-    Context* context);
+    Context* context,
+    bool allow_broadcast_fastpath=false);
 
 // Y = alpha * ReduceL1(X)
 template <typename T, class Context>
@@ -76,7 +80,8 @@ TORCH_API void ReduceL1(
     const T alpha,
     const T* X,
     T* Y,
-    Context* context);
+    Context* context,
+    bool allow_broadcast_fastpath=false);
 
 // Y = alpha * ReduceL2(X)
 template <typename T, class Context>
@@ -87,7 +92,8 @@ TORCH_API void ReduceL2(
     const T alpha,
     const T* X,
     T* Y,
-    Context* context);
+    Context* context,
+    bool allow_broadcast_fastpath=false);
 
 // Computes mean and variance over axes.
 template <typename T, class Context>
@@ -98,7 +104,8 @@ TORCH_API void Moments(
     const T* X,
     T* mean,
     T* var,
-    Context* context);
+    Context* context,
+    bool allow_broadcast_fastpath=false);
 
 } // namespace math
 

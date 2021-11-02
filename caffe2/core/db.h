@@ -68,7 +68,7 @@ class TORCH_API Transaction {
   /**
    * Puts the key value pair to the database.
    */
-  virtual void Put(const string& key, const string& value) = 0;
+  virtual void Put(const std::string& key, std::string&& value) = 0;
   /**
    * Commits the current writes.
    */

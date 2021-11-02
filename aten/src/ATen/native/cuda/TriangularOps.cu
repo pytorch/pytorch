@@ -1,3 +1,4 @@
+#include <ATen/ceil_div.h>
 #include <ATen/Context.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/Dispatch.h>
@@ -6,7 +7,6 @@
 #include <ATen/native/Resize.h>
 
 #include <ATen/cuda/CUDAApplyUtils.cuh>
-#include <ATen/cuda/detail/IndexUtils.cuh>
 
 namespace at {
 namespace native {
@@ -55,7 +55,7 @@ __global__ void triu_tril_kernel(
 }
 
 template <bool upper>
-Tensor& triu_tril_cuda_template(Tensor& result, const Tensor& self, int64_t k, const char* name) {
+void triu_tril_cuda_template(const Tensor& result, const Tensor& self, int64_t k, const char* name) {
   int64_t N = self.numel();
   dim3 dim_block = cuda::getApplyBlock();
   dim3 dim_grid((N + dim_block.x - 1) / dim_block.x);
@@ -76,35 +76,18 @@ Tensor& triu_tril_cuda_template(Tensor& result, const Tensor& self, int64_t k, c
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
   });
-  return result;
 }
 
-Tensor& tril_cuda_(Tensor &self, int64_t k) {
-  return tril_cuda_out(self, k, self);
+TORCH_IMPL_FUNC(tril_cuda)(const Tensor& self, int64_t k, const Tensor &result) {
+  if (self.numel() != 0) {
+    triu_tril_cuda_template<false>(result, self, k, "tril");
+  }
 }
 
-Tensor& tril_cuda_out(const Tensor& self, int64_t k, Tensor &result) {
-  if (result.sizes() != self.sizes()) {
-    result.resize_as_(self);
+TORCH_IMPL_FUNC(triu_cuda)(const Tensor& self, int64_t k, const Tensor &result) {
+  if (self.numel() != 0) {
+    triu_tril_cuda_template<true>(result, self, k, "triu");
   }
-  if (self.numel() == 0) {
-    return result;
-  }
-  return triu_tril_cuda_template<false>(result, self, k, "tril");
-}
-
-Tensor& triu_cuda_(Tensor &self, int64_t k) {
-  return triu_cuda_out(self, k, self);
-}
-
-Tensor& triu_cuda_out(const Tensor& self, int64_t k, Tensor &result) {
-  if (result.sizes() != self.sizes()) {
-    result.resize_as_(self);
-  }
-  if (self.numel() == 0) {
-    return result;
-  }
-  return triu_tril_cuda_template<true>(result, self, k, "triu");
 }
 
 // Copy the kth diagonal of a matrix B to a vector A.
@@ -150,8 +133,8 @@ Tensor& apply_diag(Tensor& result, const Tensor& self, int64_t dimension) {
 
   TensorArg result_arg{result, "result", 1};
   TensorArg self_arg{self, "self", 2};
-  checkAllSameGPU("diag", {result_arg, self_arg});
-  checkSameType("diag", result_arg, self_arg);
+  checkAllSameGPU(__func__, {result_arg, self_arg});
+  checkSameType(__func__, result_arg, self_arg);
 
   int nDimension = self.dim();
   if (nDimension == 2) {
@@ -173,7 +156,7 @@ Tensor& apply_diag(Tensor& result, const Tensor& self, int64_t dimension) {
           int(sz),
           int(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock)));
       const dim3 grid(
-          std::min(int(1024), cuda::ATenCeilDiv(int(sz), int(threads.x))));
+          std::min(int(1024), ceil_div(int(sz), int(threads.x))));
       auto start =
           (dimension >= 0 ? dimension * self_stride_1
                           : -dimension * self_stride_0);
@@ -202,7 +185,7 @@ Tensor& apply_diag(Tensor& result, const Tensor& self, int64_t dimension) {
       const dim3 threads(std::min(
           int(sz), at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock));
       const dim3 grid(
-          std::min(int(1024), cuda::ATenCeilDiv(int(sz), int(threads.x))));
+          std::min(int(1024), ceil_div(int(sz), int(threads.x))));
       auto start =
           (dimension >= 0 ? dimension * result_stride_1
                           : -dimension * result_stride_0);
@@ -224,9 +207,12 @@ Tensor& apply_diag(Tensor& result, const Tensor& self, int64_t dimension) {
 }
 
 Tensor& diag_cuda_out(const Tensor& self, int64_t dimension, Tensor& result) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(ScalarType::Half, ScalarType::Bool, self.scalar_type(), "diag_cuda", [&] {
-    apply_diag<scalar_t>(result, self, dimension);
-  });
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+      ScalarType::Half, ScalarType::BFloat16, ScalarType::Bool,
+      self.scalar_type(), "diag_cuda",
+      [&] {
+        apply_diag<scalar_t>(result, self, dimension);
+      });
   return result;
 }
 

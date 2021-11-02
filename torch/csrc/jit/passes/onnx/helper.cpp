@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 
 #include <onnx/onnx_pb.h>
@@ -88,6 +89,7 @@ c10::optional<at::ScalarType> ONNXTypeToATenType(int32_t onnx_type) {
 Node* addNodeToBlock(Block* block, Symbol kind, ArrayRef<Value*> inputs) {
   auto new_node = block->appendNode(block->owningGraph()->create(kind));
   for (auto input : inputs) {
+    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
     auto new_input = new_node->addInput(input);
   }
   return new_node;
@@ -156,6 +158,96 @@ Node* createONNXUnsqueeze(
     unsqueeze_node->is_(attr::axes, {0});
   }
   return unsqueeze_node;
+}
+
+bool isValidToTransformToONNXConcatNode(Node* lc_node) {
+  return !lc_node->inputs().empty();
+}
+
+Node* transformToONNXConcatNode(
+    Graph* g,
+    Node* lc_node,
+    bool need_new_input,
+    int opset_version) {
+  // ListConstruct Int[] output case, we need to transform to ONNX
+  // Concat to ensure the output is a single tensor(dynamic) type in
+  // order to be consumed as inputs
+  std::vector<Value*> unsqueezed;
+  auto new_node = need_new_input ? g->return_node() : lc_node;
+
+  for (auto* input : lc_node->inputs()) {
+    auto new_input =
+        need_new_input ? g->addInput()->copyMetadata(input) : input;
+
+    Node* unsqueezed_node =
+        createONNXUnsqueeze(g, new_node, new_input, 0, opset_version);
+    unsqueezed.emplace_back(unsqueezed_node->output());
+  }
+
+  Node* concat_node = need_new_input
+      ? g->insertNode(g->create(onnx::Concat, 1))
+      : g->create(onnx::Concat, 1)->insertBefore(lc_node);
+  concat_node->i_(attr::axis, 0);
+  for (auto v : unsqueezed) {
+    concat_node->addInput(v);
+  }
+
+  return concat_node;
+}
+
+void ONNXLintGraph(
+    const Block* b,
+    std::vector<NodeKind>& n_miss_sourceRange,
+    std::vector<NodeKind>& n_miss_scope) {
+  for (const auto* n : b->nodes()) {
+    for (const auto* sub_b : n->blocks()) {
+      ONNXLintGraph(sub_b, n_miss_sourceRange, n_miss_scope);
+    }
+
+    if (nullptr == n->sourceRange().source()) {
+      GRAPH_DEBUG("Node does not set sourceRange:", *n);
+      n_miss_sourceRange.emplace_back(n->kind());
+    }
+    if (n->scopeName() == "") {
+      GRAPH_DEBUG("Node does not set scope:", *n);
+      n_miss_scope.emplace_back(n->kind());
+    }
+  }
+}
+
+void ONNXLintGraph(const std::shared_ptr<Graph>& graph) {
+  // 1. Print nodes that does not have scope/source range covered.
+  std::vector<NodeKind> n_miss_sourceRange, n_miss_scope;
+  ONNXLintGraph(graph->block(), n_miss_sourceRange, n_miss_scope);
+  auto count_const = [](const std::vector<NodeKind>& vec) -> size_t {
+    size_t count = 0;
+    for (auto k : vec) {
+      switch (k) {
+        case prim::Constant:
+        case prim::ListConstruct:
+        case onnx::Constant:
+          count++;
+          break;
+      }
+    }
+    return count;
+  };
+  auto const_count_src = count_const(n_miss_sourceRange);
+  auto const_count_scope = count_const(n_miss_scope);
+  GRAPH_UPDATE("Missing sourceRange.")
+  GRAPH_UPDATE(
+      "Total ",
+      n_miss_sourceRange.size(),
+      " nodes. Including ",
+      const_count_src,
+      " constants.");
+  GRAPH_UPDATE("Missing scope.")
+  GRAPH_UPDATE(
+      "Total ",
+      n_miss_scope.size(),
+      " nodes. Including ",
+      const_count_scope,
+      " constants.");
 }
 
 } // namespace jit

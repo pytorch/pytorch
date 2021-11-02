@@ -1,3 +1,4 @@
+// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <math.h>
 #include <vector>
 #include <ATen/ATen.h>
@@ -6,6 +7,7 @@
 #include <ATen/native/UpSample.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/TensorIterator.h>
+#include <c10/util/irange.h>
 
 namespace at {
 namespace native {
@@ -51,10 +53,11 @@ void cpu_upsample_linear_backward(
       return grad_input_data + c * input_width + w;
     };
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t iw0, iw1;
     scalar_t w0lambda, w1lambda;
-    for (int64_t c = begin; c < end; c++){
-      for (int64_t ow = 0; ow < output_width; ow++) {
+    for (const auto c : c10::irange(begin, end)) {
+      for (const auto ow : c10::irange(output_width)) {
         compute_source_index_and_lambda(
             iw0, iw1, w0lambda, w1lambda, width_scale, ow, input_width, output_width, align_corners);
         scalar_t grad_output_value = grad_output_data[c * output_slice_size + ow];
@@ -74,13 +77,14 @@ void cpu_upsample_linear_backward(
       return grad_input_data + c * input_height * input_width + h * input_width + w;
     };
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t ih0, ih1, iw0, iw1;
     scalar_t h0lambda, h1lambda, w0lambda, w1lambda;
-    for (int64_t c = begin; c < end; c++) {
-      for (int64_t oh = 0; oh < output_height; oh++) {
+    for (const auto c : c10::irange(begin, end)) {
+      for (const auto oh : c10::irange(output_height)) {
         compute_source_index_and_lambda(
             ih0, ih1, h0lambda, h1lambda, height_scale, oh, input_height, output_height, align_corners);
-        for (int64_t ow = 0; ow < output_width; ow++) {
+        for (const auto ow : c10::irange(output_width)) {
           compute_source_index_and_lambda(
               iw0, iw1, w0lambda, w1lambda, width_scale, ow, input_width, output_width, align_corners);
           scalar_t grad_output_value = grad_output_data[c * output_slice_size + oh * output_width + ow];
@@ -106,16 +110,17 @@ void cpu_upsample_linear_backward(
           d * input_height * input_width + h * input_width + w;
     };
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t id0, id1, ih0, ih1, iw0, iw1;
     scalar_t d0lambda, d1lambda, h0lambda, h1lambda, w0lambda, w1lambda;
-    for (int64_t c = begin; c < end; c++) {
-      for (int64_t od = 0; od < output_depth; od++) {
+    for (const auto c : c10::irange(begin, end)) {
+      for (const auto od : c10::irange(output_depth)) {
         compute_source_index_and_lambda(
             id0, id1, d0lambda, d1lambda, depth_scale, od, input_depth, output_depth, align_corners);
-        for (int64_t oh = 0; oh < output_height; oh++) {
+        for (const auto oh : c10::irange(output_height)) {
           compute_source_index_and_lambda(
               ih0, ih1, h0lambda, h1lambda, height_scale, oh, input_height, output_height, align_corners);
-          for (int64_t ow = 0; ow < output_width; ow++) {
+          for (const auto ow : c10::irange(output_width)) {
             compute_source_index_and_lambda(
                 iw0, iw1, w0lambda, w1lambda, width_scale, ow, input_width, output_width, align_corners);
             scalar_t grad_output_value = grad_output_data[c * output_slice_size +

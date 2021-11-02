@@ -99,16 +99,16 @@ void getrf<c10::complex<float>>(
 
 template <>
 void getrs<double>(
-    cusolverDnHandle_t handle, int n, int nrhs, double* dA, int lda, int* ipiv, double* ret, int ldb, int* info) {
+    cusolverDnHandle_t handle, int n, int nrhs, double* dA, int lda, int* ipiv, double* ret, int ldb, int* info, cublasOperation_t trans) {
   TORCH_CUSOLVER_CHECK(cusolverDnDgetrs(
-    handle, CUBLAS_OP_N, n, nrhs, dA, lda, ipiv, ret, ldb, info));
+    handle, trans, n, nrhs, dA, lda, ipiv, ret, ldb, info));
 }
 
 template <>
 void getrs<float>(
-    cusolverDnHandle_t handle, int n, int nrhs, float* dA, int lda, int* ipiv, float* ret, int ldb, int* info) {
+    cusolverDnHandle_t handle, int n, int nrhs, float* dA, int lda, int* ipiv, float* ret, int ldb, int* info, cublasOperation_t trans) {
   TORCH_CUSOLVER_CHECK(cusolverDnSgetrs(
-    handle, CUBLAS_OP_N, n, nrhs, dA, lda, ipiv, ret, ldb, info));
+    handle, trans, n, nrhs, dA, lda, ipiv, ret, ldb, info));
 }
 
 template <>
@@ -121,10 +121,11 @@ void getrs<c10::complex<double>>(
     int* ipiv,
     c10::complex<double>* ret,
     int ldb,
-    int* info) {
+    int* info,
+    cublasOperation_t trans) {
   TORCH_CUSOLVER_CHECK(cusolverDnZgetrs(
       handle,
-      CUBLAS_OP_N,
+      trans,
       n,
       nrhs,
       reinterpret_cast<cuDoubleComplex*>(dA),
@@ -145,10 +146,11 @@ void getrs<c10::complex<float>>(
     int* ipiv,
     c10::complex<float>* ret,
     int ldb,
-    int* info) {
+    int* info,
+    cublasOperation_t trans) {
   TORCH_CUSOLVER_CHECK(cusolverDnCgetrs(
       handle,
-      CUBLAS_OP_N,
+      trans,
       n,
       nrhs,
       reinterpret_cast<cuComplex*>(dA),
@@ -161,57 +163,138 @@ void getrs<c10::complex<float>>(
 
 
 template<>
+void gesvd_buffersize<float>(CUDASOLVER_GESVD_BUFFERSIZE_ARGTYPES()) {
+  TORCH_CUSOLVER_CHECK(cusolverDnSgesvd_bufferSize(handle, m, n, lwork));
+}
+
+template<>
+void gesvd_buffersize<double>(CUDASOLVER_GESVD_BUFFERSIZE_ARGTYPES()) {
+  TORCH_CUSOLVER_CHECK(cusolverDnDgesvd_bufferSize(handle, m, n, lwork));
+}
+
+template<>
+void gesvd_buffersize<c10::complex<float>>(CUDASOLVER_GESVD_BUFFERSIZE_ARGTYPES()) {
+  TORCH_CUSOLVER_CHECK(cusolverDnCgesvd_bufferSize(handle, m, n, lwork));
+}
+
+template<>
+void gesvd_buffersize<c10::complex<double>>(CUDASOLVER_GESVD_BUFFERSIZE_ARGTYPES()) {
+  TORCH_CUSOLVER_CHECK(cusolverDnZgesvd_bufferSize(handle, m, n, lwork));
+}
+
+
+template<>
+void gesvd<float>(CUDASOLVER_GESVD_ARGTYPES(float, float)) {
+  TORCH_CUSOLVER_CHECK(cusolverDnSgesvd(
+      handle, jobu, jobvt, m, n, A, lda, S, U, ldu, VT, ldvt, work, lwork, rwork, info));
+}
+
+template<>
+void gesvd<double>(CUDASOLVER_GESVD_ARGTYPES(double, double)) {
+  TORCH_CUSOLVER_CHECK(cusolverDnDgesvd(
+      handle, jobu, jobvt, m, n, A, lda, S, U, ldu, VT, ldvt, work, lwork, rwork, info));
+}
+
+
+template<>
+void gesvd<c10::complex<float>>(CUDASOLVER_GESVD_ARGTYPES(c10::complex<float>, float)) {
+  TORCH_CUSOLVER_CHECK(cusolverDnCgesvd(
+      handle, jobu, jobvt, m, n,
+      reinterpret_cast<cuComplex*>(A),
+      lda, S,
+      reinterpret_cast<cuComplex*>(U),
+      ldu,
+      reinterpret_cast<cuComplex*>(VT),
+      ldvt,
+      reinterpret_cast<cuComplex*>(work),
+      lwork, rwork, info
+  ));
+}
+
+template<>
+void gesvd<c10::complex<double>>(CUDASOLVER_GESVD_ARGTYPES(c10::complex<double>, double)) {
+  TORCH_CUSOLVER_CHECK(cusolverDnZgesvd(
+      handle, jobu, jobvt, m, n,
+      reinterpret_cast<cuDoubleComplex*>(A),
+      lda, S,
+      reinterpret_cast<cuDoubleComplex*>(U),
+      ldu,
+      reinterpret_cast<cuDoubleComplex*>(VT),
+      ldvt,
+      reinterpret_cast<cuDoubleComplex*>(work),
+      lwork, rwork, info
+  ));
+}
+
+
+template<>
+void gesvdj_buffersize<float>(
+    cusolverDnHandle_t handle, cusolverEigMode_t jobz, int econ, int m, int n, float *A, int lda, float *S,
+    float *U, int ldu, float *V, int ldv, int *lwork, gesvdjInfo_t params
+) {
+  TORCH_CUSOLVER_CHECK(cusolverDnSgesvdj_bufferSize(handle, jobz, econ, m, n, A, lda, S, U, ldu, V, ldv, lwork, params));
+}
+
+template<>
+void gesvdj_buffersize<double>(
+    cusolverDnHandle_t handle, cusolverEigMode_t jobz, int econ, int m, int n, double *A, int lda, double *S,
+    double *U, int ldu, double *V, int ldv, int *lwork, gesvdjInfo_t params
+) {
+  TORCH_CUSOLVER_CHECK(cusolverDnDgesvdj_bufferSize(handle, jobz, econ, m, n, A, lda, S, U, ldu, V, ldv, lwork, params));
+}
+
+template<>
+void gesvdj_buffersize<c10::complex<float>>(
+    cusolverDnHandle_t handle, cusolverEigMode_t jobz, int econ, int m, int n, c10::complex<float> *A, int lda, float *S,
+    c10::complex<float> *U, int ldu, c10::complex<float> *V, int ldv, int *lwork, gesvdjInfo_t params
+) {
+  TORCH_CUSOLVER_CHECK(cusolverDnCgesvdj_bufferSize(handle, jobz, econ, m, n,
+    reinterpret_cast<cuComplex*>(A),
+    lda,
+    S,
+    reinterpret_cast<cuComplex*>(U),
+    ldu,
+    reinterpret_cast<cuComplex*>(V),
+    ldv, lwork, params));
+}
+
+template<>
+void gesvdj_buffersize<c10::complex<double>>(
+    cusolverDnHandle_t handle, cusolverEigMode_t jobz, int econ, int m, int n, c10::complex<double> *A, int lda, double *S,
+    c10::complex<double> *U, int ldu, c10::complex<double> *V, int ldv, int *lwork, gesvdjInfo_t params
+) {
+  TORCH_CUSOLVER_CHECK(cusolverDnZgesvdj_bufferSize(handle, jobz, econ, m, n,
+    reinterpret_cast<cuDoubleComplex*>(A),
+    lda,
+    S,
+    reinterpret_cast<cuDoubleComplex*>(U),
+    ldu,
+    reinterpret_cast<cuDoubleComplex*>(V),
+    ldv, lwork, params));
+}
+
+
+template<>
 void gesvdj<float>(
     cusolverDnHandle_t handle, cusolverEigMode_t jobz, int econ, int m, int n, float* A, int lda, float* S, float* U,
-    int ldu, float *V, int ldv, int *info, gesvdjInfo_t params
+    int ldu, float *V, int ldv, float* work, int lwork, int *info, gesvdjInfo_t params
 ) {
-  int lwork;
-  TORCH_CUSOLVER_CHECK(cusolverDnSgesvdj_bufferSize(handle, jobz, econ, m, n, A, lda, S, U, ldu, V, ldv, &lwork, params));
-
-  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
-  auto dataPtr = allocator.allocate(sizeof(float)*lwork);
-
-  TORCH_CUSOLVER_CHECK(cusolverDnSgesvdj(
-    handle, jobz, econ, m, n, A, lda, S, U, ldu, V, ldv,
-    static_cast<float*>(dataPtr.get()),
-    lwork, info, params));
+  TORCH_CUSOLVER_CHECK(cusolverDnSgesvdj(handle, jobz, econ, m, n, A, lda, S, U, ldu, V, ldv, work, lwork, info, params));
 }
 
 template<>
 void gesvdj<double>(
     cusolverDnHandle_t handle, cusolverEigMode_t jobz, int econ, int m, int n, double* A, int lda, double* S, double* U,
-    int ldu, double *V, int ldv, int *info, gesvdjInfo_t params
+    int ldu, double *V, int ldv, double* work, int lwork, int *info, gesvdjInfo_t params
 ) {
-  int lwork;
-  TORCH_CUSOLVER_CHECK(cusolverDnDgesvdj_bufferSize(handle, jobz, econ, m, n, A, lda, S, U, ldu, V, ldv, &lwork, params));
-
-  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
-  auto dataPtr = allocator.allocate(sizeof(double)*lwork);
-
-  TORCH_CUSOLVER_CHECK(cusolverDnDgesvdj(
-    handle, jobz, econ, m, n, A, lda, S, U, ldu, V, ldv,
-    static_cast<double*>(dataPtr.get()),
-    lwork, info, params));
+  TORCH_CUSOLVER_CHECK(cusolverDnDgesvdj(handle, jobz, econ, m, n, A, lda, S, U, ldu, V, ldv, work, lwork, info, params));
 }
 
 template<>
 void gesvdj<c10::complex<float>>(
     cusolverDnHandle_t handle, cusolverEigMode_t jobz, int econ, int m, int n, c10::complex<float>* A, int lda, float* S, c10::complex<float>* U,
-    int ldu, c10::complex<float> *V, int ldv, int *info, gesvdjInfo_t params
+    int ldu, c10::complex<float> *V, int ldv, c10::complex<float>* work, int lwork, int *info, gesvdjInfo_t params
 ) {
-  int lwork;
-  TORCH_CUSOLVER_CHECK(cusolverDnCgesvdj_bufferSize(
-    handle, jobz, econ, m, n,
-    reinterpret_cast<cuComplex*>(A),
-    lda, S,
-    reinterpret_cast<cuComplex*>(U),
-    ldu,
-    reinterpret_cast<cuComplex*>(V),
-    ldv, &lwork, params));
-
-  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
-  auto dataPtr = allocator.allocate(sizeof(cuComplex)*lwork);
-
   TORCH_CUSOLVER_CHECK(cusolverDnCgesvdj(
     handle, jobz, econ, m, n,
     reinterpret_cast<cuComplex*>(A),
@@ -220,28 +303,15 @@ void gesvdj<c10::complex<float>>(
     ldu,
     reinterpret_cast<cuComplex*>(V),
     ldv,
-    static_cast<cuComplex*>(dataPtr.get()),
+    reinterpret_cast<cuComplex*>(work),
     lwork, info, params));
 }
 
 template<>
 void gesvdj<c10::complex<double>>(
     cusolverDnHandle_t handle, cusolverEigMode_t jobz, int econ, int m, int n, c10::complex<double>* A, int lda, double* S, c10::complex<double>* U,
-    int ldu, c10::complex<double> *V, int ldv, int *info, gesvdjInfo_t params
+    int ldu, c10::complex<double> *V, int ldv, c10::complex<double>* work, int lwork, int *info, gesvdjInfo_t params
 ) {
-  int lwork;
-  TORCH_CUSOLVER_CHECK(cusolverDnZgesvdj_bufferSize(
-    handle, jobz, econ, m, n,
-    reinterpret_cast<cuDoubleComplex*>(A),
-    lda, S,
-    reinterpret_cast<cuDoubleComplex*>(U),
-    ldu,
-    reinterpret_cast<cuDoubleComplex*>(V),
-    ldv, &lwork, params));
-
-  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
-  auto dataPtr = allocator.allocate(sizeof(cuDoubleComplex)*lwork);
-
   TORCH_CUSOLVER_CHECK(cusolverDnZgesvdj(
     handle, jobz, econ, m, n,
     reinterpret_cast<cuDoubleComplex*>(A),
@@ -250,7 +320,7 @@ void gesvdj<c10::complex<double>>(
     ldu,
     reinterpret_cast<cuDoubleComplex*>(V),
     ldv,
-    static_cast<cuDoubleComplex*>(dataPtr.get()),
+    reinterpret_cast<cuDoubleComplex*>(work),
     lwork, info, params));
 }
 
@@ -466,6 +536,73 @@ void potrfBatched<c10::complex<double>>(
     lda, info, batchSize));
 }
 
+template <>
+void geqrf_bufferSize<float>(CUDASOLVER_GEQRF_BUFFERSIZE_ARGTYPES(float)) {
+  TORCH_CUSOLVER_CHECK(
+      cusolverDnSgeqrf_bufferSize(handle, m, n, A, lda, lwork));
+}
+
+template <>
+void geqrf_bufferSize<double>(CUDASOLVER_GEQRF_BUFFERSIZE_ARGTYPES(double)) {
+  TORCH_CUSOLVER_CHECK(
+      cusolverDnDgeqrf_bufferSize(handle, m, n, A, lda, lwork));
+}
+
+template <>
+void geqrf_bufferSize<c10::complex<float>>(
+    CUDASOLVER_GEQRF_BUFFERSIZE_ARGTYPES(c10::complex<float>)) {
+  TORCH_CUSOLVER_CHECK(cusolverDnCgeqrf_bufferSize(
+      handle, m, n, reinterpret_cast<cuComplex*>(A), lda, lwork));
+}
+
+template <>
+void geqrf_bufferSize<c10::complex<double>>(
+    CUDASOLVER_GEQRF_BUFFERSIZE_ARGTYPES(c10::complex<double>)) {
+  TORCH_CUSOLVER_CHECK(cusolverDnZgeqrf_bufferSize(
+      handle, m, n, reinterpret_cast<cuDoubleComplex*>(A), lda, lwork));
+}
+
+template <>
+void geqrf<float>(CUDASOLVER_GEQRF_ARGTYPES(float)) {
+  TORCH_CUSOLVER_CHECK(
+      cusolverDnSgeqrf(handle, m, n, A, lda, tau, work, lwork, devInfo));
+}
+
+template <>
+void geqrf<double>(CUDASOLVER_GEQRF_ARGTYPES(double)) {
+  TORCH_CUSOLVER_CHECK(
+      cusolverDnDgeqrf(handle, m, n, A, lda, tau, work, lwork, devInfo));
+}
+
+template <>
+void geqrf<c10::complex<float>>(
+    CUDASOLVER_GEQRF_ARGTYPES(c10::complex<float>)) {
+  TORCH_CUSOLVER_CHECK(cusolverDnCgeqrf(
+      handle,
+      m,
+      n,
+      reinterpret_cast<cuComplex*>(A),
+      lda,
+      reinterpret_cast<cuComplex*>(tau),
+      reinterpret_cast<cuComplex*>(work),
+      lwork,
+      devInfo));
+}
+
+template <>
+void geqrf<c10::complex<double>>(
+    CUDASOLVER_GEQRF_ARGTYPES(c10::complex<double>)) {
+  TORCH_CUSOLVER_CHECK(cusolverDnZgeqrf(
+      handle,
+      m,
+      n,
+      reinterpret_cast<cuDoubleComplex*>(A),
+      lda,
+      reinterpret_cast<cuDoubleComplex*>(tau),
+      reinterpret_cast<cuDoubleComplex*>(work),
+      lwork,
+      devInfo));
+}
 
 template<>
 void potrs<float>(
@@ -644,6 +781,78 @@ void orgqr<c10::complex<double>>(
       m, n, k,
       reinterpret_cast<cuDoubleComplex*>(A), lda,
       reinterpret_cast<const cuDoubleComplex*>(tau),
+      reinterpret_cast<cuDoubleComplex*>(work), lwork,
+      devInfo));
+}
+
+template <>
+void ormqr_bufferSize<float>(CUDASOLVER_ORMQR_BUFFERSIZE_ARGTYPES(float)) {
+  TORCH_CUSOLVER_CHECK(
+      cusolverDnSormqr_bufferSize(handle, side, trans, m, n, k, A, lda, tau, C, ldc, lwork));
+}
+
+template <>
+void ormqr_bufferSize<double>(CUDASOLVER_ORMQR_BUFFERSIZE_ARGTYPES(double)) {
+  TORCH_CUSOLVER_CHECK(
+      cusolverDnDormqr_bufferSize(handle, side, trans, m, n, k, A, lda, tau, C, ldc, lwork));
+}
+
+template <>
+void ormqr_bufferSize<c10::complex<float>>(
+    CUDASOLVER_ORMQR_BUFFERSIZE_ARGTYPES(c10::complex<float>)) {
+  TORCH_CUSOLVER_CHECK(cusolverDnCunmqr_bufferSize(
+      handle, side, trans,
+      m, n, k,
+      reinterpret_cast<const cuComplex*>(A), lda,
+      reinterpret_cast<const cuComplex*>(tau),
+      reinterpret_cast<const cuComplex*>(C), ldc,
+      lwork));
+}
+
+template <>
+void ormqr_bufferSize<c10::complex<double>>(
+    CUDASOLVER_ORMQR_BUFFERSIZE_ARGTYPES(c10::complex<double>)) {
+  TORCH_CUSOLVER_CHECK(cusolverDnZunmqr_bufferSize(
+      handle, side, trans,
+      m, n, k,
+      reinterpret_cast<const cuDoubleComplex*>(A), lda,
+      reinterpret_cast<const cuDoubleComplex*>(tau),
+      reinterpret_cast<const cuDoubleComplex*>(C), ldc,
+      lwork));
+}
+
+template <>
+void ormqr<float>(CUDASOLVER_ORMQR_ARGTYPES(float)) {
+  TORCH_CUSOLVER_CHECK(
+      cusolverDnSormqr(handle, side, trans, m, n, k, A, lda, tau, C, ldc, work, lwork, devInfo));
+}
+
+template <>
+void ormqr<double>(CUDASOLVER_ORMQR_ARGTYPES(double)) {
+  TORCH_CUSOLVER_CHECK(
+      cusolverDnDormqr(handle, side, trans, m, n, k, A, lda, tau, C, ldc, work, lwork, devInfo));
+}
+
+template <>
+void ormqr<c10::complex<float>>(CUDASOLVER_ORMQR_ARGTYPES(c10::complex<float>)) {
+  TORCH_CUSOLVER_CHECK(cusolverDnCunmqr(
+      handle, side, trans,
+      m, n, k,
+      reinterpret_cast<const cuComplex*>(A), lda,
+      reinterpret_cast<const cuComplex*>(tau),
+      reinterpret_cast<cuComplex*>(C), ldc,
+      reinterpret_cast<cuComplex*>(work), lwork,
+      devInfo));
+}
+
+template <>
+void ormqr<c10::complex<double>>(CUDASOLVER_ORMQR_ARGTYPES(c10::complex<double>)) {
+  TORCH_CUSOLVER_CHECK(cusolverDnZunmqr(
+      handle, side, trans,
+      m, n, k,
+      reinterpret_cast<const cuDoubleComplex*>(A), lda,
+      reinterpret_cast<const cuDoubleComplex*>(tau),
+      reinterpret_cast<cuDoubleComplex*>(C), ldc,
       reinterpret_cast<cuDoubleComplex*>(work), lwork,
       devInfo));
 }
@@ -1171,6 +1380,156 @@ void xpotrs(
     cusolverDnHandle_t handle, cusolverDnParams_t params, cublasFillMode_t uplo, int64_t n, int64_t nrhs, cudaDataType dataTypeA, const void *A,
     int64_t lda, cudaDataType dataTypeB, void *B, int64_t ldb, int *info) {
   TORCH_CUSOLVER_CHECK(cusolverDnXpotrs(handle, params, uplo, n, nrhs, dataTypeA, A, lda, dataTypeB, B, ldb, info));
+}
+
+template <>
+void xgeqrf_bufferSize<float>(CUDASOLVER_XGEQRF_BUFFERSIZE_ARGTYPES(float)) {
+  TORCH_CUSOLVER_CHECK(cusolverDnXgeqrf_bufferSize(
+      handle,
+      params,
+      m,
+      n,
+      CUDA_R_32F,
+      reinterpret_cast<const void*>(A),
+      lda,
+      CUDA_R_32F,
+      reinterpret_cast<const void*>(tau),
+      CUDA_R_32F,
+      workspaceInBytesOnDevice,
+      workspaceInBytesOnHost));
+}
+
+template <>
+void xgeqrf_bufferSize<double>(CUDASOLVER_XGEQRF_BUFFERSIZE_ARGTYPES(double)) {
+  TORCH_CUSOLVER_CHECK(cusolverDnXgeqrf_bufferSize(
+      handle,
+      params,
+      m,
+      n,
+      CUDA_R_64F,
+      reinterpret_cast<const void*>(A),
+      lda,
+      CUDA_R_64F,
+      reinterpret_cast<const void*>(tau),
+      CUDA_R_64F,
+      workspaceInBytesOnDevice,
+      workspaceInBytesOnHost));
+}
+
+template <>
+void xgeqrf_bufferSize<c10::complex<float>>(
+    CUDASOLVER_XGEQRF_BUFFERSIZE_ARGTYPES(c10::complex<float>)) {
+  TORCH_CUSOLVER_CHECK(cusolverDnXgeqrf_bufferSize(
+      handle,
+      params,
+      m,
+      n,
+      CUDA_C_32F,
+      reinterpret_cast<const void*>(A),
+      lda,
+      CUDA_C_32F,
+      reinterpret_cast<const void*>(tau),
+      CUDA_C_32F,
+      workspaceInBytesOnDevice,
+      workspaceInBytesOnHost));
+}
+
+template <>
+void xgeqrf_bufferSize<c10::complex<double>>(
+    CUDASOLVER_XGEQRF_BUFFERSIZE_ARGTYPES(c10::complex<double>)) {
+  TORCH_CUSOLVER_CHECK(cusolverDnXgeqrf_bufferSize(
+      handle,
+      params,
+      m,
+      n,
+      CUDA_C_64F,
+      reinterpret_cast<const void*>(A),
+      lda,
+      CUDA_C_64F,
+      reinterpret_cast<const void*>(tau),
+      CUDA_C_64F,
+      workspaceInBytesOnDevice,
+      workspaceInBytesOnHost));
+}
+
+template <>
+void xgeqrf<float>(CUDASOLVER_XGEQRF_ARGTYPES(float)) {
+  TORCH_CUSOLVER_CHECK(cusolverDnXgeqrf(
+      handle,
+      params,
+      m,
+      n,
+      CUDA_R_32F,
+      reinterpret_cast<void*>(A),
+      lda,
+      CUDA_R_32F,
+      reinterpret_cast<void*>(tau),
+      CUDA_R_32F,
+      reinterpret_cast<void*>(bufferOnDevice),
+      workspaceInBytesOnDevice,
+      reinterpret_cast<void*>(bufferOnHost),
+      workspaceInBytesOnHost,
+      info));
+}
+
+template <>
+void xgeqrf<double>(CUDASOLVER_XGEQRF_ARGTYPES(double)) {
+  TORCH_CUSOLVER_CHECK(cusolverDnXgeqrf(
+      handle,
+      params,
+      m,
+      n,
+      CUDA_R_64F,
+      reinterpret_cast<void*>(A),
+      lda,
+      CUDA_R_64F,
+      reinterpret_cast<void*>(tau),
+      CUDA_R_64F,
+      reinterpret_cast<void*>(bufferOnDevice),
+      workspaceInBytesOnDevice,
+      reinterpret_cast<void*>(bufferOnHost),
+      workspaceInBytesOnHost,
+      info));
+}
+
+template <>
+void xgeqrf<c10::complex<float>>(CUDASOLVER_XGEQRF_ARGTYPES(c10::complex<float>)) {
+  TORCH_CUSOLVER_CHECK(cusolverDnXgeqrf(
+      handle,
+      params,
+      m,
+      n,
+      CUDA_C_32F,
+      reinterpret_cast<void*>(A),
+      lda,
+      CUDA_C_32F,
+      reinterpret_cast<void*>(tau),
+      CUDA_C_32F,
+      reinterpret_cast<void*>(bufferOnDevice),
+      workspaceInBytesOnDevice,
+      reinterpret_cast<void*>(bufferOnHost),
+      workspaceInBytesOnHost,
+      info));
+}
+
+template <>
+void xgeqrf<c10::complex<double>>(CUDASOLVER_XGEQRF_ARGTYPES(c10::complex<double>)) {
+  TORCH_CUSOLVER_CHECK(cusolverDnXgeqrf(
+      handle,
+      params,
+      m,
+      n,
+      CUDA_C_64F,
+      reinterpret_cast<void*>(A),
+      lda,
+      CUDA_C_64F,
+      reinterpret_cast<void*>(tau),
+      CUDA_C_64F,
+      reinterpret_cast<void*>(bufferOnDevice),
+      workspaceInBytesOnDevice,
+      reinterpret_cast<void*>(bufferOnHost),
+      workspaceInBytesOnHost,
+      info));
 }
 
 template <>

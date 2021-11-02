@@ -57,6 +57,7 @@ inline void vector_to_parameters(const torch::Tensor& vec, std::vector<torch::Te
 
   // Pointer for slicing the vector for each parameter
   int64_t pointer = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t num_param;
   for (torch::Tensor& param : parameters) {
     // Ensure the parameters are located in the same device

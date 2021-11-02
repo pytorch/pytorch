@@ -1,4 +1,5 @@
 #include "quant_decode_op.h"
+// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <stdint.h>
 #include "caffe2/core/tensor.h"
 #include <c10/util/typeid.h>
@@ -52,6 +53,7 @@ class GetQuantDecodeGradient : public GradientMakerBase {
     CAFFE_ENFORCE_EQ(Def().input_size(), Def().output_size() + 1);
     vector<string> gradient_op_inputs;
     for (int i = 0; i < Def().input_size(); i++) {
+      // NOLINTNEXTLINE(performance-inefficient-vector-operation)
       gradient_op_inputs.push_back(I(i));
     }
     for (int i = 0; i < Def().output_size(); i++) {

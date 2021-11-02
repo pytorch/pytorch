@@ -10,7 +10,7 @@ import unittest
 import torch
 import torch.utils.benchmark as benchmark_utils
 from torch.testing._internal.common_utils import TestCase, run_tests, IS_SANDCASTLE, IS_WINDOWS, slowTest
-from torch.testing._internal import expecttest
+import expecttest
 import numpy as np
 
 
@@ -170,7 +170,7 @@ class TestBenchmarkUtils(TestCase):
     @unittest.skipIf(IS_SANDCASTLE, "C++ timing is OSS only.")
     def test_timer_tiny_fast_snippet(self):
         timer = benchmark_utils.Timer(
-            'auto x = 1;',
+            'auto x = 1;(void)x;',
             timer=timeit.default_timer,
             language=benchmark_utils.Language.CPP,
         )
@@ -271,7 +271,7 @@ class TestBenchmarkUtils(TestCase):
         )
 
         # Check against strings so we can reuse expect infra.
-        self.regularizeAndAssertExpectedInline(m.mean, """8.001365835795602e-09""")
+        self.regularizeAndAssertExpectedInline(m.mean, """8.0013658357956e-09""")
         self.regularizeAndAssertExpectedInline(m.median, """7.983151323215967e-09""")
         self.regularizeAndAssertExpectedInline(len(m.times), """125""")
         self.regularizeAndAssertExpectedInline(m.number_per_run, """10000000""")

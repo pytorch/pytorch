@@ -1,17 +1,14 @@
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
-#include <ATen/LegacyTHFunctionsCUDA.h>
+#include <ATen/ceil_div.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/CUDAFunctions.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/cuda/LaunchUtils.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
-
-#include <THC/THCReduceApplyUtils.cuh>
-#include <THC/THCTensorMathReduce.cuh>
-#include <THC/THCNumerics.cuh>
+#include <ATen/native/cuda/block_reduce.cuh>
 
 #include <curand.h>
 #include <curand_kernel.h>
@@ -20,6 +17,16 @@
 namespace at { namespace native {
 
 namespace {
+
+template <typename T>
+inline __device__ bool _isinf(T x) { return ::isinf(x); }
+
+inline __device__ bool _isinf(c10::Half x) {
+  return ::isinf(static_cast<float>(x));
+}
+inline __device__ bool _isinf(c10::BFloat16 x) {
+  return ::isinf(static_cast<float>(x));
+}
 
 #define MAX_NUM_BLOCKS 200
 
@@ -35,13 +42,13 @@ __global__ void renormRowsL1(scalar_t* dist, long rows, long cols) {
     scalar_t sum = static_cast<scalar_t>(0);
     for (int64_t col = threadIdx.x; col < cols; col += blockDim.x) {
       val = dist[row * cols + col];
-      CUDA_KERNEL_ASSERT(!THCNumerics<scalar_t>::lt(val, zero)); // ! < 0 for NaN handling
+      CUDA_KERNEL_ASSERT(!(val < zero)); // ! < 0 for NaN handling
       sum = sum + val;
     }
 
-    sum = reduceBlock(smem, blockDim.x, sum, ReduceAdd<scalar_t>(), zero);
+    sum = cuda_utils::BlockReduceSum(sum, smem);
     if (threadIdx.x == 0) {
-      CUDA_KERNEL_ASSERT(!THCNumerics<scalar_t>::lt(val, zero)); // ! < 0 for NaN handling
+      CUDA_KERNEL_ASSERT(!(val < zero)); // ! < 0 for NaN handling
       smem[0] = sum;
     }
     __syncthreads();
@@ -63,14 +70,15 @@ void renormRows(Tensor& t) {
   auto props = at::cuda::getCurrentDeviceProperties();
   CUDA_KERNEL_ASSERT(props != NULL);
   int numSM = props->multiProcessorCount;
-  int maxThreads = props->maxThreadsPerBlock;
+  const int64_t maxThreads = std::min(
+      props->maxThreadsPerBlock, cuda_utils::kCUDABlockReduceMaxThreads);
 
   dim3 grid(rows < numSM * 4 ? rows : numSM * 4);
-  dim3 block(cols < maxThreads ? cols : maxThreads);
+  dim3 block(std::min(maxThreads, C10_WARP_SIZE * ceil_div(cols, int64_t{C10_WARP_SIZE})));
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(t.scalar_type(), "renormRows_cuda", [&] {
     renormRowsL1<scalar_t>
-        <<<grid, block, block.x * sizeof(scalar_t),
+        <<<grid, block, (block.x / C10_WARP_SIZE) * sizeof(scalar_t),
         at::cuda::getCurrentCUDAStream()>>>(t.data_ptr<scalar_t>(),
             rows, cols);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -174,11 +182,9 @@ __global__ void sampleMultinomialOnce(
 ) {
   extern __shared__  unsigned char my_smem[];
   __shared__ bool found;
+  __shared__ unsigned foundPos;
 
-  // Shared Memory hold blockdim.x T for holding the cumulative sum,
-  // blockDim.x AccT for normalizing the probabilities,
-  scalar_t *smem = reinterpret_cast<scalar_t *>(my_smem);
-  accscalar_t *asmem = reinterpret_cast<accscalar_t *>(&my_smem[blockDim.x * sizeof(scalar_t)]);
+  accscalar_t *smem = reinterpret_cast<accscalar_t *>(my_smem);
 
   accscalar_t accZero = static_cast<accscalar_t>(0);
   scalar_t zero = static_cast<scalar_t>(0);
@@ -191,28 +197,29 @@ __global__ void sampleMultinomialOnce(
     scalar_t val;
     for (int cat = threadIdx.x; cat < categories; cat += blockDim.x) {
       val = dist[curDist * stride_dist + cat * stride_categories];
-      CUDA_KERNEL_ASSERT(!THCNumerics<scalar_t>::isnan(val));
-      CUDA_KERNEL_ASSERT(!THCNumerics<scalar_t>::isinf(val));
-      CUDA_KERNEL_ASSERT(val >= zero);
+      CUDA_KERNEL_ASSERT(!at::_isnan(val));
+      CUDA_KERNEL_ASSERT(!_isinf(val));
+      CUDA_KERNEL_ASSERT(!(val < zero));
       sum = sum + static_cast<accscalar_t>(val);
     }
 
     // threadIdx.x == 0 has the sum value from this
-    sum = reduceBlock(asmem, blockDim.x, sum, ReduceAdd<accscalar_t>(), accZero);
+    sum = cuda_utils::BlockReduceSum(sum, smem);
 
     // Broadcast sum and sample value
     if (threadIdx.x == 0) {
       // Make sure the sum of our distribution didn't overflow
-      CUDA_KERNEL_ASSERT(!THCNumerics<accscalar_t>::isinf(sum));
+      CUDA_KERNEL_ASSERT(!_isinf(val));
       CUDA_KERNEL_ASSERT(sum > accZero);
 
-      asmem[0] = sum;
-      smem[0] = sampled[curDist];
+      foundPos = 0;
+      smem[0] = sum;
+      smem[1] = sampled[curDist];
     }
     __syncthreads();
 
-    sum = asmem[0];
-    scalar_t sample = smem[0];
+    sum = smem[0];
+    scalar_t sample = static_cast<scalar_t>(smem[1]);
     __syncthreads();
 
     if (sum == accZero) {
@@ -225,24 +232,23 @@ __global__ void sampleMultinomialOnce(
     }
 
     int chunks = (categories + (int)blockDim.x - 1) / blockDim.x;
-    scalar_t prevHighProb = zero;
+    accscalar_t prevHighProb = accZero;
     found = false;
 
     for (int chunk = 0; chunk < chunks && !found; ++chunk) {
       // All threads in bounds load a value
       int cat = chunk * blockDim.x + threadIdx.x;
 
-      accscalar_t a_dist_val = cat < categories ?
-                               static_cast<accscalar_t>(dist[curDist * stride_dist + cat * stride_categories]) / sum :
-                               accZero;
-      scalar_t dist_val = static_cast<scalar_t>(a_dist_val);
+      accscalar_t dist_val = cat < categories ?
+                             static_cast<accscalar_t>(dist[curDist * stride_dist + cat * stride_categories]) / sum :
+                             accZero;
 
       smem[threadIdx.x] = dist_val;
       __syncthreads();
 
       // Perform an inclusive prefix sum of the shared memory contents
       for (int offset = 1; offset < blockDim.x; offset *= 2) {
-        scalar_t val = zero;
+        accscalar_t val = accZero;
 
         if (threadIdx.x >= offset) {
           val = smem[threadIdx.x - offset] + smem[threadIdx.x];
@@ -257,20 +263,21 @@ __global__ void sampleMultinomialOnce(
 
       // Each thread will check to see if the sample falls in its
       // bucket
-      scalar_t curBucket = smem[threadIdx.x] + prevHighProb;
-      scalar_t prevBucket =
-          threadIdx.x == 0 ? prevHighProb :
-          smem[threadIdx.x - 1] + prevHighProb;
+      scalar_t curBucket =
+          static_cast<scalar_t>(smem[threadIdx.x] + prevHighProb);
+      scalar_t prevBucket = static_cast<scalar_t>(
+          threadIdx.x == 0 ? prevHighProb
+                          : smem[threadIdx.x - 1] + prevHighProb);
       bool inBucket =
           (cat < categories) &&
           (!(sample >= curBucket) &&
-           (sample >= prevBucket) &&
-           (dist_val > zero));
+          (sample >= prevBucket) &&
+          (dist_val > zero));
 
       if (inBucket) {
         // We're done; we have the sample
         // Torch indices are 1-based
-        dest[curDist] = cat;
+        atomicMax(&foundPos, cat);
         found = true;
       }
 
@@ -280,17 +287,21 @@ __global__ void sampleMultinomialOnce(
       __syncthreads();
     }
 
-    if (threadIdx.x == 0 && !found) {
-      // This should address a rare bug where we don't select a valid index. This likely occurs when
-      // due to floating point arithmetic rounding errors, our cumulative sum does not add up to 1, but
-      // and our uniform sample is greater than this value. In this case we likely have unitialized memory
-      // in dest[curDist]. So basically we will loop through the distribution and pick the largest index
-      // where the distribution is non-zero. This is obviously terribly inefficient, but due to the
-      // rarity in which this occurs, this should not be an issue.
-      for (int cat = categories - 1; cat >= 0; --cat) {
-        if (dist[curDist * stride_dist + cat * stride_categories] > zero) {
-          dest[curDist] = cat;
-          break;
+    if (threadIdx.x == 0) {
+      if (found) {
+          dest[curDist] = foundPos;
+      } else {
+        // This should address a rare bug where we don't select a valid index. This likely occurs when
+        // due to floating point arithmetic rounding errors, our cumulative sum does not add up to 1, but
+        // and our uniform sample is greater than this value. In this case we likely have unitialized memory
+        // in dest[curDist]. So basically we will loop through the distribution and pick the largest index
+        // where the distribution is non-zero. This is obviously terribly inefficient, but due to the
+        // rarity in which this occurs, this should not be an issue.
+        for (int cat = categories - 1; cat >= 0; --cat) {
+          if (dist[curDist * stride_dist + cat * stride_categories] > zero) {
+            dest[curDist] = cat;
+            break;
+          }
         }
       }
     }
@@ -322,8 +333,10 @@ void multinomial_with_replacement_kernel_impl(
     int numSM = props->multiProcessorCount;
     int maxThreads = props->maxThreadsPerBlock;
     int maxShared = props->sharedMemPerBlock;
-    int requiredShared = (numCategories < maxThreads ? numCategories : maxThreads)
-                         * (sizeof(scalar_t) + sizeof(accscalar_t));
+
+    int requiredWarps = at::ceil_div(numCategories, C10_WARP_SIZE);
+    int requiredThreads = std::min(maxThreads, requiredWarps * C10_WARP_SIZE);
+    int requiredShared = requiredThreads * sizeof(accscalar_t);
 
     if (n_sample == 1 && maxShared >= requiredShared) {
       // Optimized allocation-free implementation
@@ -335,8 +348,8 @@ void multinomial_with_replacement_kernel_impl(
                                           self_v.options().pinned_memory_opt());
       at::native::uniform_(sampled, 0.0, 1.0, generator);
 
-      dim3 block(numCategories < maxThreads ? numCategories : maxThreads);
-      dim3 grid(numDist < numSM * 4 ? numDist : numSM * 4);
+      dim3 block(requiredThreads);
+      dim3 grid(std::min(static_cast<int>(numDist), numSM * 4));
 
       sampleMultinomialOnce<scalar_t, accscalar_t>
           <<<grid, block,
@@ -386,7 +399,7 @@ void multinomial_with_replacement_kernel_impl(
       renormRows(normDist);
 
       // Prefix sum along rows
-      at::_cumsum_out(prefixSum, normDist, 1);
+      at::cuda::cumsum_out(prefixSum, normDist, 1);
 
       PhiloxCudaState rng_engine_inputs;
 

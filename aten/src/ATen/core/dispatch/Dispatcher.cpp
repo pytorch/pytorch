@@ -32,7 +32,7 @@ private:
 };
 }
 
-OpRegistrationListener::~OpRegistrationListener() {}
+OpRegistrationListener::~OpRegistrationListener()= default;
 
 Dispatcher::Dispatcher()
 : operators_()
@@ -41,7 +41,7 @@ Dispatcher::Dispatcher()
 , listeners_(std::make_unique<detail::RegistrationListenerList>())
 , mutex_() {}
 
-Dispatcher::~Dispatcher() {}
+Dispatcher::~Dispatcher() = default;
 
 C10_EXPORT Dispatcher& Dispatcher::realSingleton() {
   static Dispatcher _singleton;
@@ -201,6 +201,7 @@ RegistrationHandleRAII Dispatcher::registerImpl(
     *this,
     dispatch_key,
     std::move(kernel),
+    // NOLINTNEXTLINE(performance-move-const-arg)
     std::move(cpp_signature),
     std::move(inferred_function_schema),
     std::move(debug)
@@ -213,7 +214,7 @@ RegistrationHandleRAII Dispatcher::registerImpl(
   });
 }
 
-void Dispatcher::deregisterImpl_(const OperatorHandle& op, const OperatorName& op_name, c10::optional<DispatchKey> dispatch_key, std::list<impl::AnnotatedKernel>::iterator handle) {
+void Dispatcher::deregisterImpl_(const OperatorHandle& op, const OperatorName& op_name, c10::optional<DispatchKey> dispatch_key, impl::OperatorEntry::AnnotatedKernelContainerIterator handle) {
   std::lock_guard<std::mutex> lock(mutex_);
 
   op.operatorDef_->op.deregisterKernel_(*this, dispatch_key, handle);
@@ -319,6 +320,19 @@ std::vector<OperatorHandle> Dispatcher::findDanglingImpls() const {
       }
     }
     return opsWithDanglingImpls;
+  });
+}
+
+std::vector<OperatorName> Dispatcher::getRegistrationsForDispatchKey(c10::optional<DispatchKey> k) const {
+  return operatorLookupTable_.read([&] (const ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) -> std::vector<OperatorName> {
+    std::vector<OperatorName> op_names;
+    for (const auto& op : operatorLookupTable) {
+      // If no DispatchKey is specified, print all of the operators.
+      if (!k || op.second.hasKernelForDispatchKey(*k)) {
+          op_names.push_back(op.first);
+      }
+    }
+    return op_names;
   });
 }
 

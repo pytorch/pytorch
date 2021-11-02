@@ -29,7 +29,7 @@ check_gradle() {
 }
 
 parse_abis_list() {
-  ABIS_LIST="armeabi-v7a,arm64-v8a,x86,x86_64"
+  ABIS_LIST="x86"
   CUSTOM_ABIS_LIST=false
   if [ $# -gt 0 ]; then
     ABIS_LIST=$1
@@ -59,7 +59,8 @@ build_android() {
     ANDROID_ABI="$abi" \
       BUILD_ROOT="$ANDROID_BUILD_ROOT" \
       "$PYTORCH_DIR/scripts/build_android.sh" \
-      -DANDROID_CCACHE="$(which ccache)"
+      -DANDROID_CCACHE="$(which ccache)" \
+      -DUSE_LITE_INTERPRETER_PROFILER="OFF"
 
     echo "$abi build output lib,include at $ANDROID_BUILD_ROOT/install"
     ln -s "$ANDROID_BUILD_ROOT/install/lib" "$LIB_DIR/$abi"

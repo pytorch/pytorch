@@ -1,20 +1,18 @@
 #import <ATen/native/metal/MetalCommandBuffer.h>
-#import <ATen/native/metal/mpscnn/MPSCNNContext.h>
+#import <ATen/native/metal/MetalContext.h>
 #import <ATen/native/metal/mpscnn/MPSImage+Tensor.h>
-
-#include <mutex>
 
 NSString* thread_local_storage_key = @"PTMetalCommandBuffer";
 @implementation MetalCommandBuffer {
   NSMutableArray* _images;
-  std::mutex _mutex;
+  NSMutableSet<id<PTMetalCommandBuffer>>* _delegates;
 }
 
 + (MetalCommandBuffer*)newBuffer {
   MetalCommandBuffer* cb = [MetalCommandBuffer new];
-  cb->_buffer = [[MPSCNNContext sharedInstance].commandQueue commandBuffer];
-  cb->_thread = [NSThread currentThread];
+  cb->_buffer = [[MetalContext sharedInstance].commandQueue commandBuffer];
   cb->_images = [NSMutableArray new];
+  cb->_delegates = [NSMutableSet new];
   return cb;
 }
 
@@ -23,25 +21,33 @@ NSString* thread_local_storage_key = @"PTMetalCommandBuffer";
   thd.name = thread_local_storage_key;
   NSMutableDictionary* dict = [thd threadDictionary];
   MetalCommandBuffer* cb = dict[thread_local_storage_key];
-  if (!cb) {
-    cb = [MetalCommandBuffer new];
-    cb->_buffer = [[MPSCNNContext sharedInstance].commandQueue commandBuffer];
-    cb->_thread = thd;
-    cb->_images = [NSMutableArray new];
+  if (!cb || !cb.valid) {
+    cb = [MetalCommandBuffer newBuffer];
+    // The command buffer should only be retained by the thread-local storage.
     dict[thread_local_storage_key] = cb;
   }
   return cb;
 }
 
-- (void)flush {
-  [[_thread threadDictionary] removeObjectForKey:thread_local_storage_key];
+- (BOOL)valid {
+  return _buffer != nil && _buffer.status == 0;
+}
+
+- (void)addSubscriber:(id<PTMetalCommandBuffer>)subscriber {
+  if (subscriber) {
+    [_delegates addObject:subscriber];
+  }
+}
+- (void)removeSubscriber:(id<PTMetalCommandBuffer>)subscriber {
+  if (subscriber) {
+    [_delegates removeObject:subscriber];
+  }
 }
 
 - (void)add:(MPSTemporaryImage*)image {
   if (![image isTemporaryImage]) {
     return;
   }
-  std::lock_guard<std::mutex> g(_mutex);
   [_images addObject:image];
 }
 
@@ -49,24 +55,41 @@ NSString* thread_local_storage_key = @"PTMetalCommandBuffer";
   if (![image isTemporaryImage]) {
     return;
   }
-  std::lock_guard<std::mutex> g(_mutex);
   [_images removeObject:image];
 }
 
-- (void)synchronize {
+- (void)commit {
   if (_buffer.status == 0) {
-    // recycle all temporary images manually before flushing the command buffer
-    [self recycle];
+    [self beginSynchronization];
     [_buffer commit];
     [_buffer waitUntilCompleted];
-    [[_thread threadDictionary] removeObjectForKey:thread_local_storage_key];
+    [self endSynchronization];
   }
 }
 
-- (void)recycle {
+- (void)beginSynchronization {
+  for (id<PTMetalCommandBuffer> delegate in _delegates) {
+    if ([delegate respondsToSelector:@selector(beginSynchronization)]) {
+      [delegate beginSynchronization];
+    };
+  }
+  // recycle all temporary images manually before flushing the command buffer
   for (MPSTemporaryImage* image in _images) {
     [image recycle];
   }
+}
+
+- (void)endSynchronization {
+  for (id<PTMetalCommandBuffer> delegate in _delegates) {
+    if ([delegate respondsToSelector:@selector(endSynchronization:)]) {
+      [delegate endSynchronization:_buffer.error];
+    };
+  }
+  [_delegates removeAllObjects];
+  [_images removeAllObjects];
+  _buffer = nil;
+  [[NSThread currentThread].threadDictionary
+      removeObjectForKey:thread_local_storage_key];
 }
 
 - (BOOL)isEqual:(id)object {
@@ -74,7 +97,7 @@ NSString* thread_local_storage_key = @"PTMetalCommandBuffer";
     return NO;
   }
   MetalCommandBuffer* mc = (MetalCommandBuffer*)object;
-  return (_thread == mc.thread && _buffer == mc.buffer);
+  return _buffer == mc.buffer;
 }
 
 @end

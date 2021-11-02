@@ -5,11 +5,14 @@
 # LICENSE file in the root directory of this source tree.
 
 import ipaddress
+import random
 import re
 import socket
+import time
+import weakref
 from datetime import timedelta
 from threading import Event, Thread
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple, Union
 
 
 def _parse_rendezvous_config(config_str: str) -> Dict[str, str]:
@@ -142,6 +145,21 @@ def _matches_machine_hostname(host: str) -> bool:
     return False
 
 
+def _delay(seconds: Union[float, Tuple[float, float]]) -> None:
+    """Suspends the current thread for ``seconds``.
+
+    Args:
+        seconds:
+            Either the delay, in seconds, or a tuple of a lower and an upper
+            bound within which a random delay will be picked.
+    """
+    if isinstance(seconds, tuple):
+        seconds = random.uniform(*seconds)
+    # Ignore delay requests that are less than 10 milliseconds.
+    if seconds >= 0.01:
+        time.sleep(seconds)
+
+
 class _PeriodicTimer:
     """Represents a timer that periodically runs a specified function.
 
@@ -161,7 +179,9 @@ class _PeriodicTimer:
         kwargs: Dict[str, Any]
         stop_event: Event
 
+    _name: Optional[str]
     _thread: Optional[Thread]
+    _finalizer: Optional[weakref.finalize]
 
     # The context that is shared between the timer and the background thread.
     _ctx: _Context
@@ -173,17 +193,33 @@ class _PeriodicTimer:
         *args: Any,
         **kwargs: Any,
     ) -> None:
+        self._name = None
+
         self._ctx = self._Context()
         self._ctx.interval = interval.total_seconds()
-        self._ctx.function = function  # type: ignore
+        self._ctx.function = function  # type: ignore[assignment]
         self._ctx.args = args or ()
         self._ctx.kwargs = kwargs or {}
         self._ctx.stop_event = Event()
 
         self._thread = None
+        self._finalizer = None
 
-    def __del__(self) -> None:
-        self.cancel()
+    @property
+    def name(self) -> Optional[str]:
+        """Gets the name of the timer."""
+        return self._name
+
+    def set_name(self, name: str) -> None:
+        """Sets the name of the timer.
+
+        The specified name will be assigned to the background thread and serves
+        for debugging and troubleshooting purposes.
+        """
+        if self._thread:
+            raise RuntimeError("The timer has already started.")
+
+        self._name = name
 
     def start(self) -> None:
         """Start the timer."""
@@ -191,21 +227,35 @@ class _PeriodicTimer:
             raise RuntimeError("The timer has already started.")
 
         self._thread = Thread(
-            target=self._run, name="PeriodicTimer", args=(self._ctx,), daemon=True
+            target=self._run, name=self._name or "PeriodicTimer", args=(self._ctx,), daemon=True
         )
+
+        # We avoid using a regular finalizer (a.k.a. __del__) for stopping the
+        # timer as joining a daemon thread during the interpreter shutdown can
+        # cause deadlocks. The weakref.finalize is a superior alternative that
+        # provides a consistent behavior regardless of the GC implementation.
+        self._finalizer = weakref.finalize(
+            self, self._stop_thread, self._thread, self._ctx.stop_event
+        )
+
+        # We do not attempt to stop our background thread during the interpreter
+        # shutdown. At that point we do not even know whether it still exists.
+        self._finalizer.atexit = False
 
         self._thread.start()
 
     def cancel(self) -> None:
         """Stop the timer at the next opportunity."""
-        if not self._thread:
-            return
-
-        self._ctx.stop_event.set()
-
-        self._thread.join()
+        if self._finalizer:
+            self._finalizer()
 
     @staticmethod
     def _run(ctx) -> None:
         while not ctx.stop_event.wait(ctx.interval):
             ctx.function(*ctx.args, **ctx.kwargs)
+
+    @staticmethod
+    def _stop_thread(thread, stop_event):
+        stop_event.set()
+
+        thread.join()

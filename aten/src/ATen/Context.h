@@ -1,17 +1,17 @@
 #pragma once
 
 #include <ATen/core/ATenGeneral.h>
-#include <ATen/Tensor.h>
-#include <ATen/Utils.h>
-#include <ATen/core/ATenGeneral.h>
 #include <ATen/core/Generator.h>
 #include <ATen/CPUGeneratorImpl.h>
 #include <ATen/core/LegacyTypeDispatch.h>
+#include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/detail/HIPHooksInterface.h>
+#include <ATen/detail/ORTHooksInterface.h>
 #include <c10/util/Exception.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/core/QEngine.h>
+#include <c10/util/irange.h>
 
 #include <memory>
 #include <mutex>
@@ -73,8 +73,14 @@ class TORCH_API Context {
   static bool hasXLA() {
     return c10::impl::hasDeviceGuardImpl(at::DeviceType::XLA);
   }
+  static bool hasLazy() {
+    return c10::impl::hasDeviceGuardImpl(at::DeviceType::Lazy);
+  }
   static bool hasMLC() {
     return c10::impl::hasDeviceGuardImpl(at::DeviceType::MLC);
+  }
+  static bool hasORT() {
+    return c10::impl::hasDeviceGuardImpl(at::DeviceType::ORT);
   }
   // defined in header so that getNonVariableType has ability to inline
   // call_once check. getNonVariableType is called fairly frequently
@@ -143,7 +149,8 @@ class TORCH_API Context {
   //    }
 
   bool deterministicAlgorithms() const;
-  void setDeterministicAlgorithms(bool);
+  bool deterministicAlgorithmsWarnOnly() const;
+  void setDeterministicAlgorithms(bool, bool);
 
   // Note [Writing Nondeterministic Operations]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -166,6 +173,12 @@ class TORCH_API Context {
   //
   // * Have an entry in the list of nondeterministic PyTorch operations in the
   //   docstring of `use_deterministic_algorithms()` in torch/__init__.py
+  //
+  // * Have a test function in `test/test_torch.py` whose name begins with
+  //   `test_nondeterministic_alert_`. Alternatively, if CuBLAS workspace
+  //   configuration is the reason for nondeterminism, the operation should be
+  //   included in the `test_cublas_config_nondeterministic_alert` test. Any new
+  //   tests should ideally follow a pattern similar to the existing ones.
   //
   // `example_func()` below shows an example of the comments and error-throwing code
   // for a nondeterministic operation:
@@ -222,6 +235,7 @@ class TORCH_API Context {
   bool enabled_cudnn = true;
   bool deterministic_cudnn = false;
   bool _deterministic_algorithms = false;
+  bool _deterministic_algorithms_warn_only = false;
   bool benchmark_cudnn = false;
   bool allow_tf32_cudnn = true;
   bool allow_tf32_cublas = true;
@@ -283,6 +297,10 @@ static inline bool hasMLC() {
   return globalContext().hasMLC();
 }
 
+static inline bool hasORT() {
+  return globalContext().hasORT();
+}
+
 // Despite its name, this function returns the number of *CUDA* GPUs.
 static inline size_t getNumGPUs() {
   // WARNING: DO NOT ADD LOGIC TO HANDLE OTHER DEVICE TYPES TO THIS
@@ -334,7 +352,7 @@ static inline void manual_seed(uint64_t seed) {
   // available. In that case, we must not seed CUDA; it will fail!
   const auto num_gpus = detail::getCUDAHooks().getNumGPUs();
   if (hasCUDA() && num_gpus > 0) {
-    for (int i = 0; i < num_gpus; i++) {
+    for (const auto i : c10::irange(num_gpus)) {
       auto cuda_gen = globalContext().defaultGenerator(
         Device(at::kCUDA, static_cast<c10::DeviceIndex>(i))
       );

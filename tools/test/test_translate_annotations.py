@@ -1,7 +1,7 @@
 import re
 import unittest
 
-from tools.translate_annotations import parse_annotation, parse_diff, translate
+from tools.linter.translate_annotations import parse_annotation, parse_diff, translate
 
 flake8_regex \
     = r'^(?P<filename>.*?):(?P<lineNumber>\d+):(?P<columnNumber>\d+): (?P<errorCode>\w+\d+) (?P<errorDesc>.*)'

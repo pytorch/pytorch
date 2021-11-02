@@ -20,7 +20,7 @@
 //
 //   cpu_kernel_vec(iter,
 //     [](float a, float b) { return a * b; },
-//     [](Vec256<float> a, Vec256<float> b) { return a * b; });
+//     [](Vectorized<float> a, Vectorized<float> b) { return a * b; });
 //
 // See BinaryOpsKernel.cpp for the complete implementation
 //
@@ -28,11 +28,12 @@
 
 #include <stdint.h>
 #include <c10/util/C++17.h>
+#include <c10/util/irange.h>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/cpu/IsContiguous.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/TensorIteratorDynamicCasting.h>
-#include <ATen/cpu/vec256/vec256.h>
+#include <ATen/cpu/vec/vec.h>
 
 #ifndef _MSC_VER
 #pragma GCC diagnostic push
@@ -41,7 +42,7 @@
 
 namespace at { namespace native { namespace {
 
-using namespace vec256;
+using namespace vec;
 
 template <typename traits, std::size_t... INDEX>
 typename traits::ArgsTuple
@@ -120,7 +121,7 @@ basic_loop(char* C10_RESTRICT data[], const int64_t* strides_, int64_t i, int64_
   // Copying strides to temporary array helps auto vectorization in older GCC
   // versions.
   int64_t strides[ntensors];
-  for (int arg = 0; arg < ntensors; arg++) {
+  for (const auto arg : c10::irange(ntensors)) {
     strides[arg] = strides_[arg];
   }
 
@@ -178,7 +179,7 @@ multiple_outputs_loop(char* C10_RESTRICT data[], const int64_t* strides_, int64_
   // Copying strides to temporary array helps auto vectorization in older GCC
   // versions.
   int64_t strides[ntensors];
-  for (int arg = 0; arg < ntensors; arg++) {
+  for (const auto arg : c10::irange(ntensors)) {
     strides[arg] = strides_[arg];
   }
 
@@ -200,11 +201,11 @@ static inline void
 vectorized_loop(char** C10_RESTRICT data_, int64_t n, int64_t S, func_t&& op, vec_func_t&& vop) {
   using traits = function_traits<vec_func_t>;
   using scalar_t = typename function_traits<func_t>::result_type;
-  using Vec = Vec256<scalar_t>;
+  using Vec = Vectorized<scalar_t>;
   constexpr int ntensors = traits::arity + 1;
 
   char* C10_RESTRICT data[ntensors];
-  for (int arg = 0; arg < ntensors; arg++) {
+  for (const auto arg : c10::irange(ntensors)) {
     data[arg] = data_[arg];
   }
 
@@ -220,7 +221,7 @@ vectorized_loop(char** C10_RESTRICT data_, int64_t n, int64_t S, func_t&& op, ve
   }
   if (i < n) {
     int64_t strides[ntensors];
-    for (int arg = 0; arg < ntensors; arg++) {
+    for (const auto arg : c10::irange(ntensors)) {
       strides[arg] = (S > 0 && arg == S) ? 0 : sizeof(scalar_t);
     }
     basic_loop(data, strides, i, n, std::forward<func_t>(op));
@@ -249,7 +250,7 @@ static inline void unroll_contiguous_scalar_checks(
 }
 
 template <typename func_t>
-void cpu_kernel(TensorIteratorBase& iter, func_t&& op) {
+void cpu_kernel(TensorIteratorBase& iter, func_t&& op, int64_t grain_size = at::internal::GRAIN_SIZE) {
   using traits = function_traits<func_t>;
   // this could be extended to work with void return types
   TORCH_INTERNAL_ASSERT(iter.ninputs() == traits::arity);
@@ -258,15 +259,10 @@ void cpu_kernel(TensorIteratorBase& iter, func_t&& op) {
   TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter));
 
   iter.for_each([&](char** data, const int64_t* strides, int64_t n) {
-    if (is_contiguous<traits>(strides)) {
+    // basic loop can handle 1d slices with arbitrary strides, and 1d slices is all that
+    // iter.for_each is ever sending to the loop lambda
       basic_loop(data, strides, 0, n, std::forward<func_t>(op));
-    } else {
-      using Indices = std::make_index_sequence<traits::arity>;
-      unroll_contiguous_scalar_checks<traits>(strides, Indices{}, [&](size_t _idx) {
-        basic_loop(data, strides, 0, n, std::forward<func_t>(op));
-      });
-    }
-  });
+  }, grain_size);
   iter.cast_outputs();
 }
 
@@ -280,25 +276,18 @@ void cpu_kernel(TensorIteratorBase& iter, func_t&& op) {
 // We could extend `needs_dynamic_casting` to support both `std::tuple` and
 // `thrust::tuple` in the future.
 template <typename func_t>
-void cpu_kernel_multiple_outputs(TensorIteratorBase& iter, func_t&& op) {
+void cpu_kernel_multiple_outputs(TensorIteratorBase& iter, func_t&& op, int64_t grain_size = at::internal::GRAIN_SIZE) {
   using traits = function_traits<func_t>;
   TORCH_INTERNAL_ASSERT(iter.ninputs() == traits::arity);
 
   iter.for_each([&](char** data, const int64_t* strides, int64_t n) {
-    if (is_contiguous<traits>(strides)) {
-      multiple_outputs_loop(data, strides, 0, n, std::forward<func_t>(op));
-    } else {
-      using Indices = std::make_index_sequence<traits::arity>;
-      unroll_contiguous_scalar_checks<traits>(strides, Indices{}, [&](size_t _idx) {
-        multiple_outputs_loop(data, strides, 0, n, std::forward<func_t>(op));
-      });
-    }
-  });
+    multiple_outputs_loop(data, strides, 0, n, std::forward<func_t>(op));
+  }, grain_size);
   iter.cast_outputs();
 }
 
 template <bool check_dynamic_cast=true, typename func_t, typename vec_func_t>
-void cpu_kernel_vec(TensorIteratorBase& iter, func_t&& op, vec_func_t&& vop) {
+void cpu_kernel_vec(TensorIteratorBase& iter, func_t&& op, vec_func_t&& vop, int64_t grain_size = at::internal::GRAIN_SIZE) {
   using traits = function_traits<func_t>;
   // this could be extended to work with void return types
   TORCH_INTERNAL_ASSERT(iter.ninputs() == traits::arity);
@@ -322,7 +311,7 @@ void cpu_kernel_vec(TensorIteratorBase& iter, func_t&& op, vec_func_t&& vop) {
         }
       });
     }
-  });
+  }, grain_size);
   iter.cast_outputs();
 }
 
@@ -336,14 +325,7 @@ void cpu_serial_kernel(TensorIteratorBase& iter, func_t&& op, const Range& range
   TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter));
 
   iter.serial_for_each([&](char** data, const int64_t* strides, int64_t n) {
-    if (is_contiguous<traits>(strides)) {
-      basic_loop(data, strides, 0, n, std::forward<func_t>(op));
-    } else {
-      using Indices = std::make_index_sequence<traits::arity>;
-      unroll_contiguous_scalar_checks<traits>(strides, Indices{}, [&](size_t _idx) {
-        basic_loop(data, strides, 0, n, std::forward<func_t>(op));
-      });
-    }
+    basic_loop(data, strides, 0, n, std::forward<func_t>(op));
   }, range);
   iter.cast_outputs();
 }

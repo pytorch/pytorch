@@ -16,7 +16,7 @@ static void quantize_per_channel_4d_contiguous(benchmark::State& state) {
 
   at::Tensor qa;
   for (auto _ : state) {
-    qa = at::native::quantize_per_channel_cpu(
+    qa = at::native::quantize_per_channel(
         a, scales, zero_points, 1, at::ScalarType::QUInt8);
   }
 }
@@ -36,7 +36,7 @@ static void quantize_per_channel_4d_channels_last(benchmark::State& state) {
 
   at::Tensor qa;
   for (auto _ : state) {
-    qa = at::native::quantize_per_channel_cpu(
+    qa = at::native::quantize_per_channel(
         a, scales, zero_points, 1, at::ScalarType::QUInt8);
   }
 }
@@ -52,7 +52,7 @@ static void quantize_per_channel_2d(benchmark::State& state) {
 
   at::Tensor qa;
   for (auto _ : state) {
-    qa = at::native::quantize_per_channel_cpu(
+    qa = at::native::quantize_per_channel(
         a, scales, zero_points, 0, at::ScalarType::QUInt8);
   }
 }

@@ -10,6 +10,7 @@
 #include <torch/csrc/utils/python_strings.h>
 
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 #include <sstream>
 
@@ -89,7 +90,7 @@ std::pair<std::shared_ptr<Graph>, Stack> createGraphByTracing(
       [&func](Stack inputs) -> Stack {
         size_t num_func_inputs = inputs.size();
         py::tuple py_inputs(num_func_inputs);
-        for (size_t i = 0; i < num_func_inputs; ++i) {
+        for (const auto i : c10::irange(num_func_inputs)) {
           py_inputs[i] = py::cast(inputs[i]);
         }
         auto out = func(*py_inputs);

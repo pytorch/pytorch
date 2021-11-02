@@ -18,6 +18,7 @@ def default_eval_fn(model, calib_data):
     for data, target in calib_data:
         model(data)
 
+# TODO(future PR): fix the typo, should be `__all__`
 _all__ = [
     'QuantWrapper', 'QuantStub', 'DeQuantStub',
     # Top level API for eager mode quantization
@@ -42,8 +43,10 @@ _all__ = [
     'default_eval_fn', 'get_observer_dict',
     'register_activation_post_process_hook',
     # Observers
-    'ObserverBase', 'WeightObserver', 'observer', 'default_observer',
+    'ObserverBase', 'WeightObserver', 'HistogramObserver',
+    'observer', 'default_observer',
     'default_weight_observer', 'default_placeholder_observer',
+    'default_per_channel_weight_observer',
     # FakeQuantize (for qat)
     'default_fake_quant', 'default_weight_fake_quant',
     'default_symmetric_fixed_qparams_fake_quant',

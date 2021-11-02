@@ -16,5 +16,13 @@ inline c10::optional<Module> as_module(const py::object& obj) {
   return c10::nullopt;
 }
 
+inline c10::optional<Object> as_object(const py::object& obj) {
+  if (py::isinstance(
+          obj, py::module::import("torch.jit").attr("RecursiveScriptClass"))) {
+    return py::cast<Object>(obj.attr("_c"));
+  }
+  return c10::nullopt;
+}
+
 } // namespace jit
 } // namespace torch

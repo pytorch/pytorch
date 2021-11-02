@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/native/DispatchStub.h>
+#include <ATen/native/LinearAlgebraUtils.h>
 #include <c10/util/complex.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/Scalar.h>
@@ -8,12 +9,6 @@
 namespace at {
 namespace native {
 namespace cpublas {
-
-enum TransposeType {
-  Transpose,
-  NoTranspose,
-  // ConjTranspose, -- Not implemented
-};
 
 namespace internal {
 void normalize_last_dims(
@@ -93,6 +88,26 @@ void gemm(
     const int64_t *b, int64_t ldb,
     int64_t beta,
     int64_t *c, int64_t ldc);
+
+template <typename scalar_t>
+void gemm_batched(
+    TransposeType transa, TransposeType transb,
+    int64_t batch_size, int64_t m, int64_t n, int64_t k,
+    scalar_t alpha,
+    const scalar_t * const *a, int64_t lda,
+    const scalar_t * const *b, int64_t ldb,
+    const scalar_t beta,
+    scalar_t * const *c, int64_t ldc);
+
+template <typename scalar_t>
+void gemm_batched_with_stride(
+    TransposeType transa, TransposeType transb,
+    int64_t batch_size, int64_t m, int64_t n, int64_t k,
+    scalar_t alpha,
+    const scalar_t *a, int64_t lda, int64_t batch_stride_a,
+    const scalar_t *b, int64_t ldb, int64_t batch_stride_b,
+    scalar_t beta,
+    scalar_t *c, int64_t ldc, int64_t batch_stride_c);
 
 using axpy_fn = void(*)(at::ScalarType type, int64_t n, const Scalar& a, const void *x, int64_t incx, void *y, int64_t incy);
 

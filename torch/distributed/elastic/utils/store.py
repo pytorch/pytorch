@@ -6,7 +6,6 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-import warnings
 from datetime import timedelta
 from typing import List
 
@@ -49,9 +48,6 @@ def synchronize(
     Note: The data on the path is not deleted, as a result there can be stale data if
         you use the same key_prefix twice.
     """
-    warnings.warn(
-        "This is an experimental API and will be changed in future.", FutureWarning
-    )
     store.set_timeout(timedelta(seconds=barrier_timeout))
     store.set(f"{key_prefix}{rank}", data)
     agent_data = get_all(store, key_prefix, world_size)
@@ -67,8 +63,5 @@ def barrier(
     Note: Since the data is not removed from the store, the barrier can be used
         once per unique ``key_prefix``.
     """
-    warnings.warn(
-        "This is an experimental API and will be changed in future.", FutureWarning
-    )
     data = f"{rank}".encode(encoding="UTF-8")
     synchronize(store, data, rank, world_size, key_prefix, barrier_timeout)

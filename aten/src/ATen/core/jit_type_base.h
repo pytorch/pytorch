@@ -21,7 +21,7 @@ namespace c10 {
   _(DictType)               \
   _(NumberType)             \
   _(FloatType)              \
-  _(ComplexType)      \
+  _(ComplexType)            \
   _(FutureType)             \
   _(RRefType)               \
   _(IntType)                \
@@ -44,7 +44,8 @@ namespace c10 {
   _(ScalarTypeType)         \
   _(AnyListType)            \
   _(AnyTupleType)           \
-  _(AnyClassType)
+  _(AnyClassType)           \
+  _(UnionType)
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -86,10 +87,23 @@ struct TORCH_API Type : std::enable_shared_from_this<Type> {
   // This additional information should only contain details that are not obvious
   // from the annotation_str() that describes the type. For instance it is clear that `int <: str` is false
   // but not clear why `Foo <: InterfaceBar` might be false.
-  virtual bool isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const;
+  virtual bool isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const;
   virtual bool is_module() const;
-  bool isSubtypeOf(const TypePtr& rhs) const {
+  bool isSubtypeOf(const Type& rhs) const {
     return isSubtypeOfExt(rhs, nullptr);
+  }
+  // Compatibility shims to accommodate existing code that passes shared_ptrs around.
+  // Ideally, we would just delete this, but it should be harmless.
+  template <typename T>
+  typename std::enable_if<std::is_base_of<Type, T>::value, bool>::type
+  isSubtypeOf(const std::shared_ptr<T>& rhs) const {
+    return isSubtypeOf(*rhs);
+  }
+
+  template <typename T>
+  typename std::enable_if<std::is_base_of<Type, T>::value, bool>::type
+  isSubtypeOfExt(const std::shared_ptr<T>& rhs, std::ostream* why_not) const {
+    return isSubtypeOfExt(*rhs, why_not);
   }
 
   // How this type will appear in FunctionSchema declarations
@@ -125,6 +139,10 @@ struct TORCH_API Type : std::enable_shared_from_this<Type> {
 
   TypeKind kind() const {
     return kind_;
+  }
+
+  bool isUnionType() const {
+    return false;
   }
 
   virtual bool requires_grad() const {
@@ -203,7 +221,7 @@ struct TORCH_API Type : std::enable_shared_from_this<Type> {
   // contained_types
   TypePtr withContained(std::vector<TypePtr> contained_types) {
     auto current_contained = containedTypes();
-    AT_ASSERT(current_contained.size() == contained_types.size());
+    TORCH_INTERNAL_ASSERT(current_contained.size() == contained_types.size());
     if (current_contained.equals(contained_types)) {
       return shared_from_this();
     }

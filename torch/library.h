@@ -214,6 +214,23 @@ public:
     );
   }
 
+  /// Create a function from a boxed kernel functor which defines
+  /// `operator()(const OperatorHandle&, DispatchKeySet, Stack*)`
+  /// (receiving arguments from boxed calling convention) and inherits
+  /// from `c10::OperatorKernel`.  Unlike makeFromBoxedFunction, functions
+  /// registered in this way can also carry additional state which
+  /// is managed by the functor; this is useful if you're writing an
+  /// adapter to some other implementation, e.g., a Python callable, which
+  /// is dynamically associated with the registered kernel.
+  template<class KernelFunctor>
+  static CppFunction makeFromBoxedFunctor(std::unique_ptr<KernelFunctor> kernelFunctor) {
+    return CppFunction(
+      c10::KernelFunction::makeFromBoxedFunctor(std::move(kernelFunctor)),
+      /* cpp_signature */ c10::nullopt, // not known for boxed functions
+      /* schema */ nullptr
+    );
+  }
+
   /// Create a function from an unboxed kernel function.
   /// This is typically used to register common operators.
   template<typename FuncPtr, std::enable_if_t<c10::guts::is_function_type<FuncPtr>::value, std::nullptr_t> = nullptr>
@@ -292,14 +309,18 @@ inline CppFunction dispatch(c10::DeviceType type, Func&& raw_f) {
         return c10::DispatchKey::CUDA;
       case c10::DeviceType::XLA:
         return c10::DispatchKey::XLA;
+      case c10::DeviceType::Lazy:
+        return c10::DispatchKey::Lazy;
       case c10::DeviceType::MLC:
         return c10::DispatchKey::MLC;
       case c10::DeviceType::Meta:
         return c10::DispatchKey::Meta;
       case c10::DeviceType::HIP:
         return c10::DispatchKey::HIP;
-      case c10::DeviceType::MSNPU:
-        return c10::DispatchKey::MSNPU;
+      case c10::DeviceType::ORT:
+        return c10::DispatchKey::ORT;
+      case c10::DeviceType::HPU:
+        return c10::DispatchKey::HPU;
       default:
         TORCH_CHECK(false,
           "Device type ", t, " cannot be overloaded at dispatch time, "
@@ -387,6 +408,13 @@ namespace detail {
 
 namespace detail {
 
+  // dummy class for non selected custom torchbind classes
+  class ClassNotSelected {
+    public:
+      ClassNotSelected& def_pickle(...){ return *this;}
+      ClassNotSelected& def(...){ return *this;}
+  };
+
   // A SelectiveStr is like a const char*, except that it also comes
   // with a type brand that says whether or not the name is enabled or
   // not.  If the string is disabled, then (at compile time) we DON'T generate
@@ -396,12 +424,13 @@ namespace detail {
   template <bool enabled>
   class SelectiveStr {
   public:
-    constexpr SelectiveStr(const char* name) : name_(name) {}
+    constexpr explicit SelectiveStr(const char* name) : name_(name) {}
     constexpr operator const char*() { return name_; }
   private:
     const char* name_;
   };
 
+#define TORCH_SELECTIVE_CLASS(n) torch::detail::SelectiveStr<c10::impl::custom_class_allowlist_check(n)>(n)
 #define TORCH_SELECTIVE_NAME(n) torch::detail::SelectiveStr<c10::impl::op_allowlist_check(n)>(n)
 #define TORCH_SELECTIVE_SCHEMA(n) torch::detail::SelectiveStr<c10::impl::schema_allowlist_check(n)>(n)
 
@@ -658,7 +687,16 @@ public:
   }
 
   template <class CurClass>
-  inline class_<CurClass> class_(const std::string& className);
+  inline torch::class_<CurClass> class_(const std::string& className);
+
+  // These overloads enable the use of selective build on classes registered within
+  // a library. The API is the same as before with 1 minor change. Instead of
+  // m.class_<foo>("foo") you instead do m.class_<foo>(TORCH_SELECTIVE_CLASS("foo"))
+  template <class CurClass>
+  inline torch::class_<CurClass> class_(detail::SelectiveStr<true> className);
+
+  template <class CurClass>
+  inline detail::ClassNotSelected class_(detail::SelectiveStr<false> className);
 
 private:
   Kind kind_;

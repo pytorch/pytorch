@@ -11,6 +11,7 @@
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/frontend/code_template.h>
@@ -38,6 +39,7 @@
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/pass_manager.h>
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
+#include <torch/csrc/jit/passes/restore_mutation.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/argument_spec.h>
@@ -45,6 +47,7 @@
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
+#include <torch/csrc/jit/runtime/jit_trace.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
 #include <torch/csrc/jit/runtime/symbolic_script.h>
 #include <torch/csrc/jit/serialization/import.h>
@@ -57,6 +60,8 @@
 #include <c10/util/Exception.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
 
+#include <torch/csrc/jit/passes/freeze_module.h>
+#include <torch/csrc/jit/passes/frozen_graph_optimizations.h>
 #include <algorithm>
 #include <cstddef>
 #include <functional>
@@ -66,6 +71,7 @@
 #include <stdexcept>
 #include <string>
 #include <tuple>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -151,8 +157,8 @@ TEST(THNNConvTest, Basic) {
   at::Tensor bias = torch::randn({out_channels});
 
   // run forward eagerly
-  at::Tensor output, finput, fgradinput;
-  std::tie(output, finput, fgradinput) = at::thnn_conv2d_forward(
+  at::Tensor output, finput;
+  std::tie(output, finput) = at::_slow_conv2d_forward(
       input, weight, kernel_size, bias, stride, padding);
 
   // make grad_outputs
@@ -160,12 +166,10 @@ TEST(THNNConvTest, Basic) {
       torch::randn_like(output, at::MemoryFormat::Preserve);
   at::Tensor grad_finput =
       torch::zeros_like(finput, at::MemoryFormat::Preserve);
-  at::Tensor grad_fgradinput =
-      torch::zeros_like(fgradinput, at::MemoryFormat::Preserve);
 
   // run backward eagerly
   at::Tensor grad_input, grad_weight, grad_bias;
-  std::tie(grad_input, grad_weight, grad_bias) = at::thnn_conv2d_backward(
+  std::tie(grad_input, grad_weight, grad_bias) = at::_slow_conv2d_backward(
       grad_output,
       input,
       weight,
@@ -173,7 +177,6 @@ TEST(THNNConvTest, Basic) {
       stride,
       padding,
       finput,
-      fgradinput,
       {true, true, true});
 
   // make JIT graph
@@ -187,7 +190,7 @@ TEST(THNNConvTest, Basic) {
   auto biasg = graph->addInput("bias");
 
   Value* conv = graph->insert(
-      aten::thnn_conv2d_forward,
+      aten::_slow_conv2d_forward,
       {inputg, weightg, ksz_val, biasg, kst_val, pad_val});
   auto outputs = conv->node()->outputs();
   for (auto output : outputs) {
@@ -211,7 +214,6 @@ TEST(THNNConvTest, Basic) {
   tensor_list tensor_grads_in;
   tensor_grads_in.push_back(grad_output);
   tensor_grads_in.push_back(grad_finput);
-  tensor_grads_in.push_back(grad_fgradinput);
 
   // Get outputs from the interpreter
   tensor_list tensors_out, tensor_grads_out;
@@ -222,7 +224,6 @@ TEST(THNNConvTest, Basic) {
   tensor_list expected_tensors_out, expected_tensor_grads_out;
   expected_tensors_out.push_back(output);
   expected_tensors_out.push_back(finput);
-  expected_tensors_out.push_back(fgradinput);
   expected_tensor_grads_out.push_back(grad_input);
   expected_tensor_grads_out.push_back(grad_weight);
   expected_tensor_grads_out.push_back(grad_bias);
@@ -473,7 +474,7 @@ TEST(ControlFlowTest, Basic) {
   auto cu = compile(cf_examples);
 
   auto run = [&](const std::string& name, std::vector<IValue> stack) {
-    auto graph = cu->get_function(name).graph();
+    auto graph = toGraphFunction(cu->get_function(name)).graph();
     Code code(graph, "");
     InterpreterState interp(code);
     interp.run(stack);
@@ -502,23 +503,45 @@ TEST(SchemaParserTest, NestedArrays) {
   // nested arrays
   auto s = parseSchema("at::what(int[][4] foo) -> ()");
   ASSERT_TRUE(s.arguments().at(0).N() == 4);
-  ASSERT_TRUE(IntType::get()->isSubtypeOf(s.arguments()
-                                              .at(0)
-                                              .type()
-                                              ->expectRef<ListType>()
-                                              .getElementType()
-                                              ->expectRef<ListType>()
-                                              .getElementType()));
+  ASSERT_TRUE(IntType::get()->isSubtypeOf(*s.arguments()
+                                               .at(0)
+                                               .type()
+                                               ->expectRef<ListType>()
+                                               .getElementType()
+                                               ->expectRef<ListType>()
+                                               .getElementType()));
   auto s2 = parseSchema("at::what(int[][] foo) -> ()");
-  ASSERT_TRUE(IntType::get()->isSubtypeOf(s2.arguments()
-                                              .at(0)
-                                              .type()
-                                              ->expectRef<ListType>()
-                                              .getElementType()
-                                              ->expectRef<ListType>()
-                                              .getElementType()));
+  ASSERT_TRUE(IntType::get()->isSubtypeOf(*s2.arguments()
+                                               .at(0)
+                                               .type()
+                                               ->expectRef<ListType>()
+                                               .getElementType()
+                                               ->expectRef<ListType>()
+                                               .getElementType()));
 }
 
+TEST(SchemaParserTest, OutVariant) {
+  auto schema_with_out = parseSchema(
+      "at::foo(Tensor self, *, Tensor(a!) f, Tensor(b!) l) -> (Tensor(a!) f, Tensor(b!) l)");
+  ASSERT_TRUE(schema_with_out.arguments().at(1).is_out());
+  ASSERT_TRUE(schema_with_out.arguments().at(2).is_out());
+
+  auto schema_without_out =
+      parseSchema("at::foo(Tensor self, *, int scalar) -> (int)");
+
+  for (const auto& arg : schema_without_out.arguments()) {
+    ASSERT_TRUE(!arg.is_out());
+  }
+
+  auto schema_with_is_write = parseSchema(
+      "aten::ne_.Scalar(Tensor(a!) self, Scalar other) -> (Tensor(a!))");
+
+  for (const auto& arg : schema_with_is_write.arguments()) {
+    ASSERT_TRUE(!arg.is_out());
+  }
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SchemaParserTest, NamedReturns) {
   // named returns
   parseSchema("at::what(Tensor! i_will_be_written_to) -> ()");
@@ -532,7 +555,7 @@ TEST(SchemaParserTest, Futures) {
   // futures
   auto s4 = parseSchema("at::what(Future(int) foo) -> ()");
   ASSERT_TRUE(IntType::get()->isSubtypeOf(
-      s4.arguments().at(0).type()->expectRef<FutureType>().getElementType()));
+      *s4.arguments().at(0).type()->expectRef<FutureType>().getElementType()));
 }
 
 TEST(SchemaParserTest, AnnotatedAliasSets) {
@@ -546,15 +569,16 @@ TEST(SchemaParserTest, BeforeAfterSets) {
       " -> (Tensor(b|c)[](a!))");
 
   // The list itself is annotated with `a`
-  const auto& aliasInfo = *s.arguments().at(0).alias_info();
+  const AliasInfo* aliasInfo = s.arguments().at(0).alias_info();
+  ASSERT_NE(aliasInfo, nullptr);
   ASSERT_TRUE(
-      aliasInfo.beforeSets() ==
+      aliasInfo->beforeSets() ==
       std::unordered_set<Symbol>{Symbol::fromQualString("alias::a")});
-  ASSERT_TRUE(aliasInfo.isWrite());
+  ASSERT_TRUE(aliasInfo->isWrite());
 
   // Check the contained types
-  ASSERT_TRUE(!aliasInfo.containedTypes().empty());
-  const auto& containedAliasInfo = aliasInfo.containedTypes()[0];
+  ASSERT_TRUE(!aliasInfo->containedTypes().empty());
+  const auto& containedAliasInfo = aliasInfo->containedTypes()[0];
   const auto expected = std::unordered_set<Symbol>{
       Symbol::fromQualString("alias::b"),
       Symbol::fromQualString("alias::c"),
@@ -570,19 +594,20 @@ TEST(SchemaParserTest, BeforeAfterSets2) {
       " -> (Tensor(b|c)[](a!))");
 
   // The list itself is annotated with `a`
-  const auto& aliasInfo = *s.arguments().at(0).alias_info();
+  const AliasInfo* aliasInfo = s.arguments().at(0).alias_info();
+  ASSERT_NE(aliasInfo, nullptr);
   ASSERT_EQ(
-      aliasInfo.beforeSets(),
+      aliasInfo->beforeSets(),
       std::unordered_set<Symbol>{Symbol::fromQualString("alias::a")});
   ASSERT_EQ(
-      aliasInfo.afterSets(),
+      aliasInfo->afterSets(),
       std::unordered_set<Symbol>{Symbol::fromQualString("alias::a")});
-  ASSERT_TRUE(aliasInfo.isWrite());
-  ASSERT_EQ(aliasInfo.containedTypes().size(), 1);
+  ASSERT_TRUE(aliasInfo->isWrite());
+  ASSERT_EQ(aliasInfo->containedTypes().size(), 1);
 
   // Check the contained types
-  ASSERT_TRUE(!aliasInfo.containedTypes().empty());
-  const auto& containedAliasInfo = aliasInfo.containedTypes()[0];
+  ASSERT_TRUE(!aliasInfo->containedTypes().empty());
+  const auto& containedAliasInfo = aliasInfo->containedTypes()[0];
   const auto expectedBefore = std::unordered_set<Symbol>{
       Symbol::fromQualString("alias::b"),
   };
@@ -823,12 +848,6 @@ void checkScopeCallbacks() {
   TORCH_CHECK(found_user_scope);
 }
 
-static bool should_run = false;
-
-static bool shouldRunCallback(const RecordFunctionCallback&) {
-  return should_run;
-}
-
 static TracedTestValues traced_inputs;
 static TracedTestValues traced_outputs;
 static std::unordered_set<std::string> ts_input_names;
@@ -843,6 +862,7 @@ std::unique_ptr<at::ObserverContext> tracedInputsCallback(
       if (input.isTensor()) {
         sizes.push_back(input.toTensor().sizes().vec());
       } else if (input.isScalar()) {
+        // NOLINTNEXTLINE(modernize-use-emplace)
         sizes.push_back(std::vector<int64_t>());
       }
     }
@@ -968,6 +988,7 @@ TEST(RecordFunctionTest, SampledCallbacks) {
 
   sampled_cb_ctr = 0;
   removeCallback(handle);
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   handle = setup_sampled_callback(1.0);
   run_test_function();
 
@@ -991,6 +1012,7 @@ TEST(RecordFunctionTest, RecordFunctionGuard) {
   addGlobalCallback(RecordFunctionCallback(
       [](const RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
         std::lock_guard<std::mutex> lock(guard_mtx);
+        // NOLINTNEXTLINE(modernize-use-emplace)
         fn_names.push_back(fn.name().str());
         return nullptr;
       }));
@@ -1030,6 +1052,7 @@ TEST(RecordFunctionTest, Callbacks) {
   GraphOptimizerEnabledGuard opt_guard(false);
 
   auto h1 = add_remove_test_add_cb<1>();
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   auto h2 = add_remove_test_add_cb<2>();
   auto h3 = add_remove_test_add_cb<3>();
 
@@ -1159,25 +1182,31 @@ TEST(RecordFunctionTest, ShouldRun) {
   // disabling the inlining of method calls
   GraphOptimizerEnabledGuard opt_guard(false);
 
-  should_run = false;
   static bool ran = false;
-  addGlobalCallback(
-      RecordFunctionCallback(
-          [](const RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
-            ran = true;
-            return nullptr;
-          })
-          .setShouldRun(shouldRunCallback));
+  auto handle = addGlobalCallback(RecordFunctionCallback(
+      [](const RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
+        ran = true;
+        return nullptr;
+      }));
 
   { RECORD_USER_SCOPE("test"); }
 
-  TORCH_CHECK(!ran);
+  EXPECT_TRUE(ran) << "first run didn't happen";
+  ran = false;
 
-  should_run = true;
+  disableCallback(handle);
 
   { RECORD_USER_SCOPE("test"); }
 
-  TORCH_CHECK(ran);
+  EXPECT_FALSE(ran) << "second run happened but shouldn't have";
+  ran = false;
+
+  reenableCallback(handle);
+
+  { RECORD_USER_SCOPE("test"); }
+
+  EXPECT_TRUE(ran) << "run after re-enable didn't happen";
+  ran = false;
 
   clearCallbacks();
 }
@@ -1269,6 +1298,7 @@ class TestThreadLocalDebugInfo : public c10::DebugInfoBase {
     model_id_ = model_id;
   }
 
+  // NOLINTNEXTLINE(modernize-use-override,modernize-use-equals-default)
   virtual ~TestThreadLocalDebugInfo() {}
 
  private:
@@ -1465,11 +1495,11 @@ TEST(NoneSchemaMatchTest, Basic) {
   RegisterOperators reg({
       Operator(
           "prim::test_none() -> int?",
-          [](Stack* stack) { push(stack, IValue()); },
+          [](Stack& stack) { push(stack, IValue()); },
           aliasAnalysisFromSchema()),
       Operator(
           "prim::is_none(int? a) -> bool",
-          [](Stack* stack) {
+          [](Stack& stack) {
             IValue a = pop(stack);
             if (a.isNone()) {
               push(stack, true);
@@ -1580,7 +1610,7 @@ TEST(LoopPeelerTest, NoInductionVariableUse) {
     )JIT";
 
   auto cu = compile(str_func_def);
-  auto& f = cu->get_function("test_peel_n_times");
+  auto& f = toGraphFunction(cu->get_function("test_peel_n_times"));
   auto stack = createStack({});
   // peeling loop once
   {
@@ -1622,7 +1652,7 @@ TEST(LoopPeelerTest, YesInductionVariableUse) {
     )JIT";
 
   auto cu = compile(str_func_def);
-  auto& f = cu->get_function("test_peel_n_times");
+  auto& f = toGraphFunction(cu->get_function("test_peel_n_times"));
   auto stack = createStack({});
   // peeling loop once
   {
@@ -1668,7 +1698,7 @@ TEST(LoopPeelerTest, LoopWithTerminationCondition) {
   // the peel changes the termination condition to false
   // so the original loop doesn't run
   auto cu = compile(str_func_def);
-  auto& f = cu->get_function("test_with_cond_times");
+  auto& f = toGraphFunction(cu->get_function("test_with_cond_times"));
   auto stack = createStack({});
   // peeling 5 iterations should update the termination
   // condition to false
@@ -1713,7 +1743,7 @@ TEST(LoopPeelerTest, SimpleNestedLoops) {
     )JIT";
 
   auto cu = compile(str_func_def);
-  auto& f = cu->get_function("test_nested_loops");
+  auto& f = toGraphFunction(cu->get_function("test_nested_loops"));
   auto stack = createStack({});
 
   {
@@ -1753,7 +1783,7 @@ TEST(LoopPeelerTest, SimpleNestedLoops2) {
     )JIT";
 
   auto cu = compile(str_func_def);
-  auto& f = cu->get_function("test_nested_loops");
+  auto& f = toGraphFunction(cu->get_function("test_nested_loops"));
   auto stack = createStack({});
   {
     LoopsPeeler peeler(true_pred, 1);
@@ -1778,6 +1808,46 @@ TEST(LoopPeelerTest, SimpleNestedLoops2) {
   }
 }
 
+TEST(JitTracing, Basic) {
+  constexpr int batch_size = 4;
+  constexpr int input_size = 256;
+
+  int hidden_size = 2 * input_size;
+
+  auto input = at::randn({batch_size, input_size}, at::kCPU);
+  auto hx = at::randn({batch_size, hidden_size}, at::kCPU);
+  auto cx = at::randn({batch_size, hidden_size}, at::kCPU);
+  auto w_ih = t_def(at::randn({4 * hidden_size, input_size}, at::kCPU));
+  auto w_hh = t_def(at::randn({4 * hidden_size, hidden_size}, at::kCPU));
+
+  auto graph = build_lstm();
+  auto stack = createStack({input, hx, cx, w_ih, w_hh});
+  auto traced = TraceGraph(graph, stack);
+  Tensor prof_out;
+  pop(stack, prof_out);
+
+  {
+    stack = createStack({input, hx, cx, w_ih, w_hh});
+    Code cd(traced, "traced");
+    InterpreterState is{cd};
+    is.run(stack);
+    Tensor traced_out;
+    pop(stack, traced_out);
+    torch::allclose(prof_out, traced_out);
+  }
+
+  {
+    stack = createStack({input, hx, cx, w_ih, w_hh});
+    Code cd(graph, "graph");
+    InterpreterState is{cd};
+    is.run(stack);
+    Tensor scripted_out;
+    pop(stack, scripted_out);
+    torch::allclose(prof_out, scripted_out);
+  }
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InsertAndEliminateRedundantGuardsTest, Basic) {
   static const auto basic_example = R"JIT(
   def basic(x, y):
@@ -1790,7 +1860,7 @@ TEST(InsertAndEliminateRedundantGuardsTest, Basic) {
   )JIT";
 
   auto cu = compile(basic_example);
-  auto& fun = cu->get_function("basic");
+  auto& fun = toGraphFunction(cu->get_function("basic"));
   auto pr = ProfilingRecord::instrumentGraph(fun.graph());
   auto x = at::randn({2, 3}, at::kCPU);
   auto y = at::randn({2, 3}, at::kCPU);
@@ -1841,7 +1911,7 @@ TEST(InsertBailOutsTest, Basic) {
   )JIT";
 
   auto cu = compile(basic_example);
-  auto& fun = cu->get_function("basic_loop");
+  auto& fun = toGraphFunction(cu->get_function("basic_loop"));
   auto pr = ProfilingRecord::instrumentGraph(fun.graph());
   auto x = at::randn({2, 3}, at::kCPU);
   auto y = at::randn({2, 3}, at::kCPU);
@@ -1935,7 +2005,7 @@ def foo(x):
     return bar(x)*baz(x)*11
   )";
   auto cu = compile(text);
-  const Function& foo = cu->get_function("foo");
+  const auto& foo = toGraphFunction(cu->get_function("foo"));
   for (Node* n : foo.optimized_graph()->nodes()) {
     if (n->kind() == prim::Constant) {
       if (!n->hasAttribute(attr::value) ||
@@ -1976,7 +2046,7 @@ def foo(x):
   }
 
   // Check that inlining doesn't corrupt callstack of the callee's nodes.
-  const Function& baz = cu->get_function("baz");
+  const auto& baz = toGraphFunction(cu->get_function("baz"));
   for (Node* n : baz.optimized_graph()->nodes()) {
     if (n->kind() == prim::Constant) {
       if (!n->hasAttribute(attr::value) ||
@@ -2017,7 +2087,7 @@ def c(x):
     return x
   )";
   auto cu = compile(text);
-  const Function& baz = cu->get_function("c");
+  const auto& baz = toGraphFunction(cu->get_function("c"));
   std::unordered_map<std::string, InlinedCallStack*> callstack_objects;
   for (Node* n : baz.optimized_graph()->nodes()) {
     if (n->kind() == prim::Constant) {
@@ -2025,6 +2095,7 @@ def c(x):
           n->kindOf(attr::value) != AttributeKind::s) {
         continue;
       }
+      // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
       std::string v = n->s(attr::value);
       if (n->callstack()) {
         callstack_objects[v] = n->callstack()->get();
@@ -2037,6 +2108,107 @@ def c(x):
   // callstack entries for them.
   ASSERT_TRUE(callstack_objects.count("a1") && callstack_objects.count("a2"));
   ASSERT_TRUE(callstack_objects.at("a1") == callstack_objects.at("a2"));
+}
+
+TEST(InlinedCallStackTest, BlockAnnotation) {
+  Module a("A");
+  a.define(R"(
+    def forward(self, x, y, z: int):
+      if (z == 1):
+        return x + y
+      else:
+        return x * y
+  )");
+  Module b("B");
+  b.define(R"(
+    def forward(self, x):
+      return x + 2
+  )");
+  Module c("C");
+  c.register_module("A0", a);
+  c.register_module("B0", b);
+  c.define(R"(
+    def forward(self, x, y, z: int):
+      return self.A0.forward(x, y, z) + self.B0.forward(x)
+  )");
+
+  auto graph =
+      toGraphFunction(c.get_method("forward").function()).optimized_graph();
+  std::stringstream add_ss, mul_ss;
+  for (Node* n : graph->nodes()) {
+    if (n->kind() == prim::If) {
+      for (Block* block : n->blocks()) {
+        for (Node* if_node : block->nodes()) {
+          if (if_node->kind() == aten::add) {
+            for (const auto& e : if_node->callstack().value()->vec()) {
+              add_ss << std::get<1>(e);
+            }
+            add_ss << if_node->sourceRange();
+          }
+          if (if_node->kind() == aten::mul) {
+            for (const auto& e : if_node->callstack().value()->vec()) {
+              mul_ss << std::get<1>(e);
+            }
+            mul_ss << if_node->sourceRange();
+          }
+        }
+      }
+    }
+  }
+  ASSERT_NE(add_ss.str().find("line 3"), std::string::npos);
+  ASSERT_NE(add_ss.str().find("line 4"), std::string::npos);
+  ASSERT_NE(
+      add_ss.str().find("return self.A0.forward(x, y, z)"), std::string::npos);
+  ASSERT_NE(add_ss.str().find("return x + y"), std::string::npos);
+  ASSERT_NE(mul_ss.str().find("line 3"), std::string::npos);
+  ASSERT_NE(mul_ss.str().find("line 6"), std::string::npos);
+  ASSERT_NE(
+      mul_ss.str().find("return self.A0.forward(x, y, z)"), std::string::npos);
+  ASSERT_NE(mul_ss.str().find("return x * y"), std::string::npos);
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(InlinedCallStackTest, SelfCallMethods) {
+  Module a("A");
+  a.define(R"(
+    def my_new_method(self, x):
+      return x * 3
+    def forward_impl_(self, x, y):
+      return self.my_new_method(x) + y
+    def forward(self, x, y):
+      y = y + 2
+      return self.forward_impl_(x, y)
+  )");
+  Module b("B");
+  b.define(R"(
+    def forward(self, x):
+      return x + 2
+  )");
+  Module c("C");
+  c.register_module("A0", a);
+  c.register_module("B0", b);
+  c.define(R"(
+    def call_b(self, x):
+      return self.B0.forward(x)
+    def forward(self, x, y):
+      return self.A0.forward(x, y) + self.call_b(x)
+  )");
+
+  auto graph =
+      toGraphFunction(c.get_method("forward").function()).optimized_graph();
+  std::unordered_map<std::string, size_t> module_hierarchies;
+  for (Node* n : graph->nodes()) {
+    auto hierarchy = torch::jit::utils::getNodesModuleHierarchy(*n);
+    if (module_hierarchies.count(hierarchy) == 0) {
+      module_hierarchies[hierarchy] = 0;
+    }
+    module_hierarchies[hierarchy] += 1;
+  }
+  ASSERT_EQ(module_hierarchies["A0(A)"], 2);
+  ASSERT_EQ(module_hierarchies["A0(A).SELF(A).SELF(A)"], 2);
+  ASSERT_EQ(module_hierarchies["A0(A).SELF(A)"], 1);
+  ASSERT_EQ(module_hierarchies["SELF(C)"], 1);
+  ASSERT_EQ(module_hierarchies["SELF(C).B0(B)"], 1);
 }
 
 TEST(AutogradSymbolsTest, Basic) {
@@ -2091,7 +2263,7 @@ TEST(FuturesTest, Basic) {
   ASSERT_FALSE(f1->hasValue());
   int32_t sat1 = 0;
   int32_t sat2 = 0;
-  f1->addCallback([&]() { ++sat1; });
+  f1->addCallback([&](Future& /* unused */) { ++sat1; });
   f1->markCompleted(43);
   ASSERT_TRUE(f1->completed());
   ASSERT_TRUE(f1->hasValue());
@@ -2099,7 +2271,7 @@ TEST(FuturesTest, Basic) {
   ASSERT_EQ(sat1, 1);
   ASSERT_EQ(f1->constValue().toInt(), 43);
   ASSERT_EQ(f1->value().toInt(), 43);
-  f1->addCallback([&]() { ++sat2; });
+  f1->addCallback([&](Future& /* unused */) { ++sat2; });
   ASSERT_EQ(sat1, 1);
   ASSERT_EQ(sat2, 1);
 }
@@ -2109,7 +2281,7 @@ TEST(FuturesTest, Error) {
   auto f1 = c10::make_intrusive<Future>(IntType::get());
   int sat1 = 0;
   int sat2 = 0;
-  f1->addCallback([&]() { ++sat1; });
+  f1->addCallback([&](Future& /* unused */) { ++sat1; });
   f1->setError(
       std::make_exception_ptr(c10::ivalue::Future::FutureError("Failed")));
   ASSERT_EQ(sat1, 1);
@@ -2122,7 +2294,7 @@ TEST(FuturesTest, Error) {
   } catch (const std::exception& e) {
     ASSERT_TRUE(strcmp(e.what(), "Failed") == 0);
   }
-  f1->addCallback([&]() { ++sat2; });
+  f1->addCallback([&](Future& /* unused */) { ++sat2; });
   ASSERT_EQ(sat1, 1);
   ASSERT_EQ(sat2, 1);
   f1->setErrorIfNeeded(
@@ -2136,14 +2308,14 @@ TEST(FuturesTest, Error) {
 TEST(FuturesTest, Then) {
   auto f1 = c10::make_intrusive<Future>(IntType::get());
   auto f2 = f1->then(
-      [f1]() -> IValue { return f1->constValue().toInt() + 1; },
+      [](Future& f1) -> IValue { return f1.constValue().toInt() + 1; },
       IntType::get());
   auto f3 = f2->then(
-      [f2]() -> IValue { return f2->constValue().toInt() * 3; },
+      [](Future& f2) -> IValue { return f2.constValue().toInt() * 3; },
       IntType::get());
   bool done = false;
-  f3->addCallback([f3, &done]() {
-    ASSERT_EQ(f3->constValue().toInt(), (42 + 1) * 3);
+  f3->addCallback([&done](Future& f3) {
+    ASSERT_EQ(f3.constValue().toInt(), (42 + 1) * 3);
     done = true;
   });
   ASSERT_FALSE(done);
@@ -2260,7 +2432,7 @@ TEST(FuturesTest, CollectAny) {
 
 TEST(TLSFutureCallbacksTest, Basic) {
   // cb that verifies the profiler is enabled
-  auto profilerEnabledCb = []() {
+  auto profilerEnabledCb = [](Future& /* unused */) {
     ASSERT_TRUE(torch::autograd::profiler::profilerEnabled());
   };
   // test running callbacks with propagation of TLS state.
@@ -2270,7 +2442,7 @@ TEST(TLSFutureCallbacksTest, Basic) {
         torch::autograd::profiler::ProfilerConfig(
             torch::autograd::profiler::ProfilerState::CPU, false, false));
     auto s1 = c10::make_intrusive<Future>(IntType::get());
-    s1->addCallback(wrapPropagateTLSState<void>(profilerEnabledCb));
+    s1->addCallback(wrapPropagateTLSState(profilerEnabledCb));
     std::thread t([s1 = std::move(s1)]() { s1->markCompleted(); });
     // Since we join here, we can ensure that all callbacks corresponding to
     // markCompleted() have finished.
@@ -2285,8 +2457,8 @@ TEST(TLSFutureCallbacksTest, Basic) {
             torch::autograd::profiler::ProfilerState::CPU, false, false));
     auto s1 = c10::make_intrusive<Future>(IntType::get());
     auto s2 = s1->then(
-        wrapPropagateTLSState<c10::IValue>([&profilerEnabledCb]() {
-          profilerEnabledCb();
+        wrapPropagateTLSState([&profilerEnabledCb](Future& s1) {
+          profilerEnabledCb(s1);
           return at::IValue(1);
         }),
         IntType::get());
@@ -2306,40 +2478,44 @@ TEST(ProfilerDisableInCallbackTest, Basic) {
       torch::autograd::profiler::ProfilerConfig(
           torch::autograd::profiler::ProfilerState::CPU, false, false));
   auto s1 = c10::make_intrusive<Future>(IntType::get());
-  auto verifyProfilerCb = wrapPropagateTLSState<void>([&profilerEnabledCb] {
-    // Ensure the profiler is still enabled in this thread.
-    profilerEnabledCb();
-    auto t1 = torch::ones({2, 2});
-    auto t2 = torch::ones({2, 2});
-    torch::add(t1, t2);
-    // Don't cleanup TLSState, and just consolidate.
-    auto opts = torch::autograd::profiler::ProfilerDisableOptions(false, true);
-    auto thread_event_lists =
-        torch::autograd::profiler::disableProfilerLegacy(std::move(opts));
-    // Ensure that the events from this thread are still profiled and we obtain
-    // the expected in events in our consolidated list when calling
-    // disableProfilerLegacy().
-    bool found_ones = false;
-    bool found_add = false;
-    for (const auto& li : thread_event_lists) {
-      for (const auto& evt : li) {
-        if (strcmp(evt.name(), "aten::add") == 0) {
-          found_add = true;
-        } else if (strcmp(evt.name(), "aten::ones") == 0) {
-          found_ones = true;
+  auto verifyProfilerCb =
+      wrapPropagateTLSState([&profilerEnabledCb](Future& /* unused */) {
+        // Ensure the profiler is still enabled in this thread.
+        profilerEnabledCb();
+        auto t1 = torch::ones({2, 2});
+        auto t2 = torch::ones({2, 2});
+        torch::add(t1, t2);
+        // Don't cleanup TLSState, and just consolidate.
+        auto opts =
+            torch::autograd::profiler::ProfilerDisableOptions(false, true);
+        auto thread_event_lists =
+            // NOLINTNEXTLINE(performance-move-const-arg)
+            torch::autograd::profiler::disableProfilerLegacy(std::move(opts));
+        // Ensure that the events from this thread are still profiled and we
+        // obtain the expected in events in our consolidated list when calling
+        // disableProfilerLegacy().
+        bool found_ones = false;
+        bool found_add = false;
+        for (const auto& li : thread_event_lists) {
+          for (const auto& evt : li) {
+            if (strcmp(evt.name(), "aten::add") == 0) {
+              found_add = true;
+            } else if (strcmp(evt.name(), "aten::ones") == 0) {
+              found_ones = true;
+            }
+          }
+          if (found_add && found_ones) {
+            break;
+          }
         }
-      }
-      if (found_add && found_ones) {
-        break;
-      }
-    }
-    ASSERT_TRUE(found_ones);
-    ASSERT_TRUE(found_add);
-  });
+        ASSERT_TRUE(found_ones);
+        ASSERT_TRUE(found_add);
+      });
 
   s1->addCallback(verifyProfilerCb);
   // Disable the profiler, but do not consolidate results in the main thread.
   auto opts = torch::autograd::profiler::ProfilerDisableOptions(true, false);
+  // NOLINTNEXTLINE(performance-move-const-arg)
   torch::autograd::profiler::disableProfilerLegacy(std::move(opts));
   std::thread t([s1 = std::move(s1)]() { s1->markCompleted(at::IValue(1)); });
   t.join();
@@ -2354,7 +2530,113 @@ TEST(ProfilerDisableInCallbackTest, Basic) {
   // Runs callback inline
   s1->markCompleted(at::IValue(1));
   opts = torch::autograd::profiler::ProfilerDisableOptions(true, false);
+  // NOLINTNEXTLINE(performance-move-const-arg)
   torch::autograd::profiler::disableProfilerLegacy(std::move(opts));
+}
+
+TEST(RecordDebugHandles, Basic) {
+  // Enable the profiler in this thread
+  const std::set<torch::autograd::profiler::ActivityType> activities(
+      {torch::autograd::profiler::ActivityType::CPU});
+  torch::autograd::profiler::prepareProfiler(
+      torch::autograd::profiler::ProfilerConfig(
+          torch::autograd::profiler::ProfilerState::KINETO, false, false),
+      activities);
+  torch::autograd::profiler::enableProfiler(
+      torch::autograd::profiler::ProfilerConfig(
+          torch::autograd::profiler::ProfilerState::KINETO, false, false),
+      activities);
+  {
+    RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS("my_function", 42, {});
+    float x{5.9999}, y{2.1212};
+    float z = x / y;
+  }
+  {
+    RECORD_USER_SCOPE_WITH_INPUTS("not_my_function", {});
+    float x{5.9999}, y{2.1212};
+    float z = x / y;
+  }
+  auto profiler_results_ptr = torch::autograd::profiler::disableProfiler();
+  const auto& kineto_events = profiler_results_ptr->events();
+  size_t my_events{0};
+  for (const auto& e : kineto_events) {
+    if (e.name() == "my_function") {
+      ASSERT_EQ(e.debugHandle(), 42);
+      my_events++;
+    } else if (e.name() == "not_my_function") {
+      ASSERT_EQ(e.debugHandle(), -1);
+      my_events++;
+    }
+  }
+  ASSERT_EQ(my_events, 2);
+}
+
+TEST(RecordDebugHandles, ScopedCallbacks) {
+  // Enable the profiler in this thread
+  torch::autograd::profiler::prepareProfiler(
+      torch::autograd::profiler::ProfilerConfig(
+          torch::autograd::profiler::ProfilerState::KINETO, false, false),
+      {torch::autograd::profiler::ActivityType::CPU});
+  torch::autograd::profiler::enableProfiler(
+      torch::autograd::profiler::ProfilerConfig(
+          torch::autograd::profiler::ProfilerState::KINETO, false, false),
+      {torch::autograd::profiler::ActivityType::CPU});
+
+  {
+    auto a = torch::rand({128, 128});
+    auto b = torch::rand({128, 128});
+    auto c = a + b;
+  }
+  auto profiler_results_ptr = torch::autograd::profiler::disableProfiler();
+  ASSERT_TRUE(profiler_results_ptr->events().size() > 0);
+
+  // Enable the profiler in this thread
+  torch::autograd::profiler::prepareProfiler(
+      torch::autograd::profiler::ProfilerConfig(
+          torch::autograd::profiler::ProfilerState::KINETO, false, false),
+      {torch::autograd::profiler::ActivityType::CPU});
+  torch::autograd::profiler::enableProfiler(
+      torch::autograd::profiler::ProfilerConfig(
+          torch::autograd::profiler::ProfilerState::KINETO, false, false),
+      {torch::autograd::profiler::ActivityType::CPU},
+      {at::RecordScope::LITE_INTERPRETER});
+  {
+    auto a = torch::rand({128, 128});
+    auto b = torch::rand({128, 128});
+    auto c = a + b;
+  }
+  profiler_results_ptr = torch::autograd::profiler::disableProfiler();
+  ASSERT_TRUE(profiler_results_ptr->events().size() == 0);
+
+  torch::autograd::profiler::prepareProfiler(
+      torch::autograd::profiler::ProfilerConfig(
+          torch::autograd::profiler::ProfilerState::KINETO, false, false),
+      {torch::autograd::profiler::ActivityType::CPU});
+  torch::autograd::profiler::enableProfiler(
+      torch::autograd::profiler::ProfilerConfig(
+          torch::autograd::profiler::ProfilerState::KINETO, false, false),
+      {torch::autograd::profiler::ActivityType::CPU},
+      {at::RecordScope::LITE_INTERPRETER});
+  {
+    RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS("my_function", 42, {});
+    auto a = torch::rand({128, 128});
+    auto b = torch::rand({128, 128});
+    auto c = a + b;
+  }
+  {
+    RECORD_USER_SCOPE_WITH_INPUTS("not_my_function", {});
+    auto a = torch::rand({128, 128});
+    auto b = torch::rand({128, 128});
+    auto c = a + b;
+  }
+  profiler_results_ptr = torch::autograd::profiler::disableProfiler();
+  const auto& kineto_events = profiler_results_ptr->events();
+  for (const auto& e : kineto_events) {
+    if (e.name() == "my_function") {
+      ASSERT_EQ(e.debugHandle(), 42);
+    }
+  }
+  ASSERT_TRUE(profiler_results_ptr->events().size() == 1);
 }
 
 TEST(IValueKWargsTest, Basic) {
@@ -2423,6 +2705,23 @@ TEST(ComputeFlopsTest, Basic) {
   flops = computeFlops(std::string("aten::mm"), extra_args);
   ASSERT_EQ(flops, 43200);
 
+  // Test aten::addmm
+  flops = computeFlops(std::string("aten::addmm"), extra_args);
+  ASSERT_EQ(flops, 43200);
+
+  // Test aten::bmm
+  extra_args.clear();
+  mat1_sizes = {7, 5, 6};
+  mat2_sizes = {7, 6, 3};
+  extra_args["mat1_size"] = at::IValue(at::IntArrayRef(mat1_sizes));
+  extra_args["mat2_size"] = at::IValue(at::IntArrayRef(mat2_sizes));
+  flops = computeFlops(std::string("aten::bmm"), extra_args);
+  ASSERT_EQ(flops, 1260);
+
+  // Test aten::baddbmm
+  flops = computeFlops(std::string("aten::baddbmm"), extra_args);
+  ASSERT_EQ(flops, 1260);
+
   // Test mm out of range
   extra_args.clear();
   flops = computeFlops(std::string("aten::mm"), extra_args);
@@ -2443,6 +2742,13 @@ TEST(ComputeFlopsTest, Basic) {
   ASSERT_EQ(flops, 360);
 }
 
+TEST(TestConstant, TensorGrad) {
+  auto graph = std::make_shared<Graph>();
+  IValue ten = torch::randn({3, 5}).requires_grad_(true);
+  auto con = tryInsertConstant(*graph, ten);
+  ASSERT_TRUE(con == c10::nullopt);
+}
+
 TEST(TestMutation, Basic) {
   auto graph = std::make_shared<Graph>();
   std::unordered_map<std::string, Value*> vmap;
@@ -2461,6 +2767,40 @@ graph(%x.1 : Tensor):
   testing::FileCheck().check("aten::add_")->run(*graph);
   RemoveTensorMutation(graph, [](Node*) { return true; });
   testing::FileCheck().check_not("aten::add_")->run(*graph);
+}
+
+TEST(TestInplaceToFunctionalActivation, Basic) {
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(
+      R"IR(
+graph(%x.1 : Tensor):
+  %2 : int = prim::Constant[value=1]()
+  %x.3 : Tensor = aten::add(%x.1, %2, %2)
+  %y : Tensor = aten::relu_(%x.3)
+  return (%y))IR",
+      &*graph,
+      vmap);
+  InplaceToFunctionalActivation(graph);
+  testing::FileCheck().check("aten::relu")->run(*graph);
+  testing::FileCheck().check_not("aten::relu_")->run(*graph);
+}
+
+TEST(TestFunctionalToInplaceActivation, Basic) {
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(
+      R"IR(
+graph(%x.1 : Tensor):
+  %2 : int = prim::Constant[value=1]()
+  %x.3 : Tensor = aten::add(%x.1, %2, %2)
+  %y : Tensor = aten::relu(%x.3)
+  return (%y))IR",
+      &*graph,
+      vmap);
+  FunctionalToInplaceActivation(graph);
+  testing::FileCheck().check("aten::relu_")->run(*graph);
+  testing::FileCheck().check_not("aten::relu(")->run(*graph);
 }
 
 } // namespace jit

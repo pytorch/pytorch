@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: jit"]
+
 import os
 import sys
 from textwrap import dedent
@@ -77,3 +79,18 @@ class TestJitUtils(JitTestCase):
         self.assertEqual(
             [],
             torch._jit_internal.get_callable_argument_names(fn_hybrid_args))
+
+    def test_checkscriptassertraisesregex(self):
+        def fn():
+            tup = (1, 2)
+            return tup[2]
+
+        self.checkScriptRaisesRegex(fn, (), Exception, "range", name="fn")
+
+        s = dedent("""
+        def fn():
+            tup = (1, 2)
+            return tup[2]
+        """)
+
+        self.checkScriptRaisesRegex(s, (), Exception, "range", name="fn")

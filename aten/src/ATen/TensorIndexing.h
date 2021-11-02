@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/util/Optional.h>
+#include <c10/util/irange.h>
 #include <ATen/core/TensorBody.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/Functions.h>
@@ -104,29 +105,37 @@ TORCH_API std::ostream& operator<<(std::ostream& stream, const Slice& slice);
 // `torch.tensor([1, 2])`) | `torch::tensor({1, 2})`
 struct TORCH_API TensorIndex final {
   // Case 1: `at::indexing::None`
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.UninitializedObject)
   TensorIndex(c10::nullopt_t) : type_(TensorIndexType::None) {}
 
   // Case 2: "..." / `at::indexing::Ellipsis`
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.UninitializedObject)
   TensorIndex(at::indexing::EllipsisIndexType) : type_(TensorIndexType::Ellipsis) {}
   TensorIndex(const char *str) : TensorIndex(at::indexing::Ellipsis) {
+    // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.UninitializedObject)
     TORCH_CHECK_VALUE(
       strcmp(str, "...") == 0,
       "Expected \"...\" to represent an ellipsis index, but got \"", str, "\"");
   }
 
   // Case 3: Integer value
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.UninitializedObject)
   TensorIndex(int64_t integer) : integer_(integer), type_(TensorIndexType::Integer) {}
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.UninitializedObject)
   TensorIndex(int integer) : TensorIndex((int64_t)integer) {}
 
   // Case 4: Boolean value
   template <class T,
             class = typename std::enable_if<std::is_same<bool, T>::value>::type >
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.UninitializedObject)
   TensorIndex(T boolean) : boolean_(boolean), type_(TensorIndexType::Boolean) {}
 
   // Case 5: Slice represented in `at::indexing::Slice` form
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.UninitializedObject)
   TensorIndex(Slice slice) : slice_(std::move(slice)), type_(TensorIndexType::Slice) {}
 
   // Case 6: Tensor value
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.UninitializedObject)
   TensorIndex(Tensor tensor) : tensor_(std::move(tensor)), type_(TensorIndexType::Tensor) {}
 
   inline bool is_none() const {
@@ -266,13 +275,8 @@ static inline void recordTensorIndex(const Tensor& tensor, std::vector<Tensor>& 
 static inline c10::List<c10::optional<Tensor>> typeConvertIndices(const Tensor& self, std::vector<Tensor>&& indices) {
   c10::List<c10::optional<Tensor>> converted_inds;
   converted_inds.reserve(indices.size());
-  for (size_t i = 0; i < indices.size(); ++i) {
-    const auto &ind = indices[i];
-    if (ind.defined()) {
-      converted_inds.push_back(ind.to(ind.options().device(self.device())));
-    } else {
-      converted_inds.push_back(std::move(indices[i]));
-    }
+  for (const auto &i: indices){
+    converted_inds.push_back(std::move(i));
   }
   return converted_inds;
 }
@@ -332,7 +336,7 @@ static inline Tensor scalarToTensor(const Scalar& v, const TensorOptions& option
 // strip away unit dimensions from the left of 'src'
 static inline IntArrayRef slicePrefix1sSize(const IntArrayRef& sizes) {
   size_t first_non1_src = sizes.size();
-  for (size_t i = 0; i < sizes.size(); ++i) {
+  for (const auto i : c10::irange(sizes.size())) {
     if (sizes[i] != 1) {
       first_non1_src = i;
       break;
@@ -348,6 +352,9 @@ static inline void copy_to(const Tensor& dst, const Tensor& src) {
     // This is not a perfect solution: when src & dst have different shapes, constants will still
     // appear. Users can workaround that case by dst[index..] = src.reshape(..)
     dst.copy_(src);
+    return;
+  } else if (src.sizes().size() == 0 && src.device().type() == at::kCPU) {
+    dst.fill_(src.item());
     return;
   }
   auto src_view = src.view(slicePrefix1sSize(src.sizes()));
@@ -433,7 +440,7 @@ static inline Tensor applySlicing(
     "too many indices for tensor of dimension ", (int)self_sizes.size());
 
   Tensor result = self;
-  for (size_t i = 0; i < indices.size(); i++) {
+  for (const auto i : c10::irange(indices.size())) {
     auto& obj = indices[i];
     result = handleDimInMultiDimIndexing(
       /*prev_dim_result=*/result,

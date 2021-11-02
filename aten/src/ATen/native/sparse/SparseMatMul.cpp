@@ -2,7 +2,6 @@
 #include <ATen/Config.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/Parallel.h>
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/native/Resize.h>
@@ -20,6 +19,7 @@ using namespace at::sparse;
       https://doi.org/10.1007/BF02070824
 */
 namespace {
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 void csr_to_coo(const int64_t n_row, const int64_t Ap[], int64_t Bi[]) {
   /*
     Expands a compressed row pointer into a row indices array
@@ -40,9 +40,13 @@ void csr_to_coo(const int64_t n_row, const int64_t Ap[], int64_t Bi[]) {
 int64_t _csr_matmult_maxnnz(
     const int64_t n_row,
     const int64_t n_col,
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     const int64_t Ap[],
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     const int64_t Aj[],
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     const int64_t Bp[],
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     const int64_t Bj[]) {
   /*
     Compute needed buffer size for matrix `C` in `C = A@B` operation.
@@ -75,14 +79,23 @@ template<class scalar_t>
 void _csr_matmult(
     const int64_t n_row,
     const int64_t n_col,
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     const int64_t Ap[],
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     const int64_t Aj[],
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     const scalar_t Ax[],
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     const int64_t Bp[],
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     const int64_t Bj[],
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     const scalar_t Bx[],
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     int64_t Cp[],
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     int64_t Cj[],
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     scalar_t Cx[]) {
   /*
     Compute CSR entries for matrix C = A@B.
@@ -223,7 +236,7 @@ Tensor sparse_sparse_matmul_cpu(const Tensor& mat1_, const Tensor& mat2_) {
   auto output = at::native::empty_like(mat1_);
   output.sparse_resize_and_clear_({mat1_.size(0), mat2_.size(1)}, mat1_.sparse_dim(), 0);
 
-  AT_DISPATCH_FLOATING_TYPES(mat1_.scalar_type(), "sparse_matmul", [&] {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(mat1_.scalar_type(), "sparse_matmul", [&] {
     sparse_matmul_kernel<scalar_t>(output, mat1_.coalesce(), mat2_.coalesce());
   });
   return output;

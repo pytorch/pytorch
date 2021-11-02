@@ -50,6 +50,7 @@ std::vector<int> nms_cpu_upright(
   std::vector<int> keep;
   while (order.size() > 0) {
     // exit if already enough proposals
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     if (topN >= 0 && keep.size() >= topN) {
       break;
     }
@@ -132,7 +133,7 @@ std::vector<int> soft_nms_cpu_upright(
 
     // Find proposal with max score among remaining proposals
     int max_pos;
-    auto max_score = GetSubArray(*out_scores, pending).maxCoeff(&max_pos);
+    GetSubArray(*out_scores, pending).maxCoeff(&max_pos);
     int i = pending[max_pos];
     keep.push_back(i);
 
@@ -561,6 +562,7 @@ std::vector<int> nms_cpu_rotated(
   std::vector<int> keep;
   while (order.size() > 0) {
     // exit if already enough proposals
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     if (topN >= 0 && keep.size() >= topN) {
       break;
     }
@@ -632,7 +634,7 @@ std::vector<int> soft_nms_cpu_rotated(
 
     // Find proposal with max score among remaining proposals
     int max_pos;
-    auto max_score = GetSubArray(*out_scores, pending).maxCoeff(&max_pos);
+    GetSubArray(*out_scores, pending).maxCoeff(&max_pos);
     int i = pending[max_pos];
     keep.push_back(i);
 

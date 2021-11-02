@@ -60,6 +60,10 @@ constexpr bool op_allowlist_contains(string_view allowlist, string_view item) {
 // and should be registered
 constexpr bool op_allowlist_check(string_view op_name) {
   assert(op_name.find("::") != string_view::npos);
+  // Use assert() instead of throw() due to a gcc bug. See:
+  // https://stackoverflow.com/questions/34280729/throw-in-constexpr-function
+  // https://github.com/fmtlib/fmt/issues/682
+  assert(op_name.find("(") == string_view::npos);
 #if !defined(TORCH_OPERATOR_WHITELIST)
   // If the TORCH_OPERATOR_WHITELIST parameter is not defined,
   // all ops are to be registered
@@ -84,6 +88,21 @@ constexpr bool schema_allowlist_check(string_view schema) {
   return true;
 #else
   return op_allowlist_check(schema.substr(0, schema.find("(")));
+#endif
+}
+
+// Returns true iff the given custom class name is on the allowlist
+// and should be registered
+constexpr bool custom_class_allowlist_check(string_view custom_class_name) {
+#if !defined(TORCH_CUSTOM_CLASS_ALLOWLIST)
+  // If the TORCH_CUSTOM_CLASS_ALLOWLIST parameter is not defined,
+  // all custom classes are to be registered
+  (void)custom_class_name;
+  return true;
+#else
+  return op_allowlist_contains(
+    C10_STRINGIZE(TORCH_CUSTOM_CLASS_ALLOWLIST),
+    custom_class_name);
 #endif
 }
 

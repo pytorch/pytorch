@@ -16,6 +16,7 @@ namespace caffe2 {
 
 using namespace std;
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 template <typename T, bool ReluFused>
 SumDNNLowPOp<T, ReluFused>::SumDNNLowPOp(
     const OperatorDef& operator_def,
@@ -76,6 +77,7 @@ bool SumDNNLowPOp<T, ReluFused>::RunOnDevice() {
       // fast path when we have 2 uint8_t inputs with AVX2 / FMA support
       // NOTE: this path does addition in floating point unlike slow path that
       // does everything in fixed-point. So they are numerically different.
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
       array<const T*, 2> input_data;
       for (int i = 0; i < 2; ++i) {
         input_data[i] = InputTensorCPU_(i).template data<T>();
@@ -86,6 +88,7 @@ bool SumDNNLowPOp<T, ReluFused>::RunOnDevice() {
 #endif
       {
         constexpr int VLEN = 8;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         int j_begin, j_end;
         tie(j_begin, j_end) = Get1DPartition(
             len, dnnlowp_get_num_threads(), dnnlowp_get_thread_num(), VLEN);
@@ -117,6 +120,7 @@ bool SumDNNLowPOp<T, ReluFused>::RunOnDevice() {
 #pragma omp parallel
 #endif
       {
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         int j_begin, j_end;
         tie(j_begin, j_end) = Get1DPartition(
             len, dnnlowp_get_num_threads(), dnnlowp_get_thread_num());
@@ -147,6 +151,7 @@ bool SumDNNLowPOp<T, ReluFused>::RunOnDevice() {
 #pragma omp parallel
 #endif
     {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int j_begin, j_end;
       tie(j_begin, j_end) = Get1DPartition(
           len, dnnlowp_get_num_threads(), dnnlowp_get_thread_num());

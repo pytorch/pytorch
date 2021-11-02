@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/cuda/Loops.cuh>
@@ -515,7 +516,7 @@ __noinline__ __host__ __device__ scalar_t calc_igamma(scalar_t a, scalar_t x) {
 
 namespace at { namespace native {
 
-void igamma_kernel_cuda(TensorIterator& iter) {
+void igamma_kernel_cuda(TensorIteratorBase& iter) {
 
   AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "igamma_cuda", [&]() {
     gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
@@ -524,7 +525,7 @@ void igamma_kernel_cuda(TensorIterator& iter) {
   });
 }
 
-void igammac_kernel_cuda(TensorIterator& iter) {
+void igammac_kernel_cuda(TensorIteratorBase& iter) {
 
   AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "igammac_cuda", [&]() {
     gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {

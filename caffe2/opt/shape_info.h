@@ -74,7 +74,7 @@ struct TORCH_API ShapeInfo {
 
   void setDimType(int idx, TensorBoundShape_DimType type) {
     CAFFE_ENFORCE(
-        dim_type.size() > idx, dim_type.size(), "vs", dim_type.size());
+        dim_type.size() > static_cast<unsigned>(idx), dim_type.size(), "vs", dim_type.size());
     dim_type[idx] = type;
     dim_type_is_set = true;
   }
@@ -88,7 +88,7 @@ struct TORCH_API ShapeInfo {
   }
 
   TensorBoundShape_DimType getDimType(int idx) const {
-    if (dim_type.size() > idx) {
+    if (dim_type.size() > static_cast<unsigned>(idx)) {
       return dim_type[idx];
     } else {
       return TensorBoundShape_DimType_UNKNOWN;

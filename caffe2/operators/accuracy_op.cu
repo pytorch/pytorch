@@ -1,7 +1,9 @@
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/accuracy_op.h"
+#include "caffe2/utils/GpuAtomics.cuh"
 #include "caffe2/utils/math.h"
 
+#include "caffe2/utils/cub_namespace.cuh"
 #include <cub/block/block_reduce.cuh>
 
 namespace caffe2 {
@@ -34,7 +36,7 @@ __global__ void AccuracyKernel(
     __syncthreads();
   }
   if (threadIdx.x == 0) {
-    atomicAdd(accuracy, static_cast<float>(correct));
+    gpu_atomic_add(accuracy, static_cast<float>(correct));
   }
 }
 

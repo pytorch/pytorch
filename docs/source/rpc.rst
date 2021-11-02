@@ -12,6 +12,13 @@ machines.
      APIs in the RPC package are stable. There are multiple ongoing work items
      to improve performance and error handling, which will ship in future releases.
 
+.. warning ::
+    CUDA support was introduced in PyTorch 1.9 and is still a **beta** feature.
+    Not all features of the RPC package are yet compatible with CUDA support and
+    thus their use is discouraged. These unsupported features include: RRefs,
+    JIT compatibility, dist autograd and dist optimizier, and profiling. These
+    shortcomings will be addressed in future releases.
+
 .. note ::
     Please refer to `PyTorch Distributed Overview <https://pytorch.org/tutorials/beginner/dist_overview.html>`__
     for a brief introduction to all features related to distributed training.
@@ -184,56 +191,13 @@ Example::
     :inherited-members:
 
 
-Process Group Backend
-"""""""""""""""""""""
-
-.. warning ::
-     The Process Group Backend will be deprecated soon, we recommend using the
-     TensorPipe Backend instead.
-
-The Process Group agent instantiates a process group from
-the :mod:`~torch.distributed` module and utilizes its point-to-point
-communication capabilities to send RPC messages. Internally, the process
-group uses `the Gloo library <https://github.com/facebookincubator/gloo/>`_.
-
-Gloo has been hardened by years of extensive use in PyTorch and is thus very
-reliable. However, as it was designed to perform collective communication, it
-may not always be the best fit for RPC. For example, each networking operation
-is synchronous and blocking, which means that it cannot be run in parallel with
-others. Moreover, it opens a connection between all pairs of nodes, and brings
-down all of them when one fails, thus reducing the resiliency and the elasticity
-of the system.
-
-Example::
-
-    >>> import os
-    >>> from torch.distributed import rpc
-    >>> os.environ['MASTER_ADDR'] = 'localhost'
-    >>> os.environ['MASTER_PORT'] = '29500'
-    >>>
-    >>> rpc.init_rpc(
-    >>>     "worker1",
-    >>>     rank=0,
-    >>>     world_size=2,
-    >>>     backend=rpc.BackendType.PROCESS_GROUP,
-    >>>     rpc_backend_options=rpc.ProcessGroupRpcBackendOptions(
-    >>>         num_send_recv_threads=16,
-    >>>         rpc_timeout=20 # 20 second timeout
-    >>>     )
-    >>> )
-    >>>
-    >>> # omitting init_rpc invocation on worker2
-
-
-.. autoclass:: ProcessGroupRpcBackendOptions
-    :members:
-    :inherited-members:
-
-
 .. _rref:
 
 RRef
 ----
+
+.. warning ::
+    RRefs are not currently supported when using CUDA tensors
 
 An ``RRef`` (Remote REFerence) is a reference to a value of some type ``T``
 (e.g. ``Tensor``) on a remote worker. This handle keeps the referenced remote
@@ -259,6 +223,9 @@ details.
 RemoteModule
 ------------
 
+.. warning ::
+    RemoteModule is not currently supported when using CUDA tensors
+
 ``RemoteModule`` is an easy way to create an nn.Module remotely on a different
 process. The actual module resides on a remote host, but the local host has a
 handle to this module and invoke this module similar to a regular nn.Module.
@@ -271,6 +238,9 @@ asynchronously if needed via additional APIs supported by RemoteModule.
 
 Distributed Autograd Framework
 ------------------------------
+
+.. warning ::
+    Distributed autograd is not currently supported when using CUDA tensors
 
 This module provides an RPC-based distributed autograd framework that can be
 used for applications such as model parallel training. In short, applications
@@ -290,6 +260,9 @@ using RPC. For more details see :ref:`distributed-autograd-design`.
 
 Distributed Optimizer
 ---------------------
+
+.. warning ::
+    Distributed optimizer is not currently supported when using CUDA tensors
 
 .. automodule:: torch.distributed.optim
     :members: DistributedOptimizer
@@ -312,7 +285,7 @@ to use `the profiler <https://pytorch.org/docs/stable/autograd.html#profiler>`__
 
 -  `Getting started with Distributed RPC Framework <https://pytorch.org/tutorials/intermediate/rpc_tutorial.html>`__
 -  `Implementing a Parameter Server using Distributed RPC Framework <https://pytorch.org/tutorials/intermediate/rpc_param_server_tutorial.html>`__
--  `Combining Distributed DataParallel with Distributed RPC Framework <https://pytorch.org/tutorials/advanced/rpc_ddp_tutorial.html>`__
+-  `Combining Distributed DataParallel with Distributed RPC Framework <https://pytorch.org/tutorials/advanced/rpc_ddp_tutorial.html>`__ (covers **RemoteModule** as well)
 -  `Profiling RPC-based Workloads <https://pytorch.org/tutorials/recipes/distributed_rpc_profiling.html>`__
 -  `Implementing batch RPC processing <https://pytorch.org/tutorials/intermediate/rpc_async_execution.html>`__
 -  `Distributed Pipeline Parallel <https://pytorch.org/tutorials/intermediate/dist_pipeline_parallel_tutorial.html>`__

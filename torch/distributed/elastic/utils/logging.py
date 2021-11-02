@@ -12,12 +12,14 @@ import os
 import warnings
 from typing import Optional
 
+from torch.distributed.elastic.utils.log_level import get_log_level
+
 
 def get_logger(name: Optional[str] = None):
     """
     Util function to set up a simple logger that writes
     into stderr. The loglevel is fetched from the LOGLEVEL
-    env. variable or INFO as default. The function will use the
+    env. variable or WARNING as default. The function will use the
     module name of the caller if no name is provided.
 
     Args:
@@ -32,7 +34,7 @@ def get_logger(name: Optional[str] = None):
 
 def _setup_logger(name: Optional[str] = None):
     log = logging.getLogger(name)
-    log.setLevel(os.environ.get("LOGLEVEL", "INFO"))
+    log.setLevel(os.environ.get("LOGLEVEL", get_log_level()))
     return log
 
 
@@ -48,7 +50,6 @@ def _derive_module_name(depth: int = 1) -> Optional[str]:
         assert depth < len(stack)
         # FrameInfo is just a named tuple: (frame, filename, lineno, function, code_context, index)
         frame_info = stack[depth]
-        filename = frame_info[1]
 
         module = inspect.getmodule(frame_info[0])
         if module:
@@ -57,6 +58,7 @@ def _derive_module_name(depth: int = 1) -> Optional[str]:
             # inspect.getmodule(frame_info[0]) does NOT work (returns None) in
             # binaries built with @mode/opt
             # return the filename (minus the .py extension) as modulename
+            filename = frame_info[1]
             module_name = os.path.splitext(os.path.basename(filename))[0]
         return module_name
     except Exception as e:

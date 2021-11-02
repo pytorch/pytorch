@@ -4,7 +4,7 @@
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/serialization/export.h>
-#include <torch/csrc/jit/serialization/import.h>
+#include <torch/csrc/jit/serialization/import_read.h>
 
 namespace torch {
 namespace jit {
@@ -104,6 +104,8 @@ IValue pickle_load(const std::vector<char>& data) {
 
   return readArchiveAndTensors(
       "data",
+      /*pickle_prefix=*/"",
+      /*tensor_prefix=*/"",
       /*type_resolver=*/c10::nullopt,
       /*obj_loader=*/c10::nullopt,
       /*device=*/c10::nullopt,

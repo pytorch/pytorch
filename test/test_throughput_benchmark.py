@@ -1,7 +1,7 @@
+# Owner(s): ["module: unknown"]
 
 import torch
 from torch.utils import ThroughputBenchmark
-from torch.testing import assert_allclose
 
 from torch.testing._internal.common_utils import run_tests, TestCase, TemporaryFileName
 
@@ -56,7 +56,7 @@ class TestThroughputBenchmark(TestCase):
             # or just unpack the list of inputs
             module_result = module(*inputs[i])
             bench_result = bench.run_once(*inputs[i])
-            assert_allclose(bench_result, module_result)
+            torch.testing.assert_close(bench_result, module_result)
 
         stats = bench.benchmark(
             num_calling_threads=4,

@@ -14,12 +14,18 @@ parameters:
   run_build:
     type: boolean
     default: true
+  run_master_build:
+    type: boolean
+    default: false
+  run_slow_gradcheck_build:
+    type: boolean
+    default: false
 
 executors:
   windows-with-nvidia-gpu:
     machine:
       resource_class: windows.gpu.nvidia.medium
-      image: windows-server-2019-nvidia:stable
+      image: windows-server-2019-nvidia:previous
       shell: bash.exe
 
   windows-xlarge-cpu-with-nvidia-cuda:

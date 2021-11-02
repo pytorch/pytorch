@@ -106,12 +106,16 @@ void TestStack(TensorOptions T, Tensor& t) {
 void TestSize(TensorOptions T, Tensor& t) {
   auto scalar = randn({}, T);
   // Throw StartsWith("dimension specified as 0 but tensor has no dimensions")
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(scalar.size(0));
   // Throw StartsWith("dimension specified as -1 but tensor has no dimensions")
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(scalar.size(-1));
   // Throw StartsWith("dimension specified as 0 but tensor has no dimensions")
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(scalar.stride(0));
   // Throw StartsWith("dimension specified as -1 but tensor has no dimensions")
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(scalar.stride(-1));
 
   auto empty = randn({0}, T);
@@ -128,8 +132,10 @@ void TestMatmul(TensorOptions T, Tensor& t, TensorOptions AccT) {
 
   // 0-d
   // Throw StartsWith("both arguments to matmul need to be at least 1D")
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(scalar.matmul(d2));
   // Throw StartsWith("both arguments to matmul need to be at least 1D")
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(d2.matmul(scalar));
 
   // 1-d
@@ -191,6 +197,7 @@ void TestMatmul(TensorOptions T, Tensor& t, TensorOptions AccT) {
   // non-expandable case
   auto d5wrong = randn({2, 4, 2, 4, 3, 2}, T);
   // Throw Contains("must match the size")
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(d5.matmul(d5wrong));
 }
 
@@ -210,6 +217,7 @@ void TestStandardGammaGrad(TensorOptions T, Tensor& t) {
   auto t1 = randn({3, 4}, T);
   auto t2 = randn({3, 4}, T).toType(kDouble);
   // Throw StartsWith("expected scalar type")
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(at::_standard_gamma_grad(t1, t2));
 }
 

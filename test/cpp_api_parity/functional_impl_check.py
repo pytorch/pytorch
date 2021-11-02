@@ -193,6 +193,7 @@ def write_test_to_test_class(
             device=device,
             test_instance_class=test_instance_class,
         )
+        try_remove_folder(test_params.cpp_tmp_folder)
         unit_test_name = 'test_torch_nn_functional_{}'.format(test_params.functional_variant_name)
         unit_test_class.functional_test_params_map[unit_test_name] = test_params
 

@@ -7,7 +7,7 @@
 """Per-layer profilers."""
 import copy
 import time
-from typing import Generator, List, Union, Sequence
+from typing import Any, Generator, List, Union, Sequence
 
 import torch
 from torch import Tensor
@@ -41,7 +41,7 @@ def detach(batch: Batch) -> None:
         batch[i] = x.detach().requires_grad_(x.requires_grad)
 
 
-def profile_times(module: nn.Sequential, sample: TensorOrTensors, timeout: float, device: torch.device,) -> List[int]:
+def profile_times(module: nn.Sequential, sample: Union[List[Any], Tensor], timeout: float, device: torch.device,) -> List[int]:
     """Profiles elapsed times per layer."""
     if any(p.grad is not None for p in module.parameters()):
         raise ValueError("some parameter already has gradient")
@@ -82,7 +82,7 @@ def profile_times(module: nn.Sequential, sample: TensorOrTensors, timeout: float
 
 
 def profile_sizes(
-    module: nn.Sequential, input: TensorOrTensors, chunks: int, param_scale: float, device: torch.device,
+    module: nn.Sequential, input: Union[List[Any], Tensor], chunks: int, param_scale: float, device: torch.device,
 ) -> List[int]:
     """Profiles CUDA memory usage per layer."""
     if device.type != "cuda":
@@ -105,7 +105,7 @@ def profile_sizes(
         latent_size = memory_after - memory_before
 
         # Analyze size of parameters.
-        param_size = sum(p.storage().size() * p.storage().element_size() for p in layer.parameters())
+        param_size = sum(p.storage().nbytes() for p in layer.parameters())
 
         # Combine size of parameters and activations with normalize scales.
         size = latent_size * latent_scale + param_size * param_scale

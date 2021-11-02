@@ -5,6 +5,8 @@
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
+
+#include <c10/util/irange.h>
 #include <c10/util/math_compat.h>
 
 #include <algorithm>
@@ -97,6 +99,7 @@ Tensor q_avg_pool3d(
     bool ceil_mode,
     bool count_include_pad,
     c10::optional<int64_t> divisor_override) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int kD, kW, kH, dD, dW, dH, padD, padW, padH;
   std::tie(kW, kH, kD) = get_kernel(kernel_size);
   std::tie(dW, dH, dD) = get_stride(stride, kW, kH, kD);
@@ -153,7 +156,7 @@ Tensor q_avg_pool3d(
         divisor_override);
   } else {
     at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
-      for (auto b = start; b < end; b++) {
+      for (const auto b : c10::irange(start, end)) {
         qavg_pool3d_nhwc_stub(
             input_nhwc.device().type(),
             input_nhwc,

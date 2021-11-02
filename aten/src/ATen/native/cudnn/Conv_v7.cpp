@@ -2,6 +2,8 @@
 
 #if AT_CUDNN_ENABLED()
 
+#include <ATen/native/cudnn/Macros.h>
+
 #include <limits>
 #include <vector>
 #include <sstream>
@@ -9,15 +11,16 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Config.h>
+#include <ATen/cuda/CUDAGraphsUtils.cuh>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/native/cudnn/ConvShared.h>
 
-#include <THC/THC.h>
 #include <ATen/cudnn/Types.h>
 #include <ATen/cudnn/Utils.h>
 #include <ATen/native/utils/ParamsHash.h>
 
 #include <ATen/TensorUtils.h>
+#include <c10/util/irange.h>
 
 #include <functional>
 #include <iterator>
@@ -129,14 +132,14 @@ struct Workspace {
     // workspace fail with some 64bit indexing error instead of an OOM error. In such case,
     // we manually fail with OOM.
     TORCH_CHECK_WITH(CUDAOutOfMemoryError, size < 1_TiB, "Not enough memory for workspace!");
-    data = THCudaMalloc(globalContext().lazyInitCUDA(), size);
+    data = c10::cuda::CUDACachingAllocator::raw_alloc(size);
   }
   Workspace(const Workspace&) = delete;
   Workspace(Workspace&&) = default;
   Workspace& operator=(Workspace&&) = default;
   ~Workspace() {
     if (data) {
-      THCudaFree(globalContext().lazyInitCUDA(), data);
+      c10::cuda::CUDACachingAllocator::raw_delete(data);
     }
   }
 
@@ -198,11 +201,10 @@ size_t getMaxWorkspaceSize(
   size_t max_block_size = 0;
   size_t tmp_bytes = 0;  // Only used for filling pointer parameters that aren't used later
 
-  int device;
-  THCudaCheck(cudaGetDevice(&device));
+  const auto device = c10::cuda::current_device();
   c10::cuda::CUDACachingAllocator::cacheInfo(device, &tmp_bytes, &max_block_size);
 
-  for (int i = 0; i < n_algo; i++) {
+  for (const auto i : c10::irange(n_algo)) {
     cudnnStatus_t err;
     size_t sz;
     err = getWorkspaceSize(args, algo[i], &sz);
@@ -227,7 +229,7 @@ std::vector<perf_t> getValidAlgorithms(perf_t *perfResults, const ConvolutionArg
 
   std::vector<perf_t> result;
   result.reserve(n_algo);
-  for (int i = 0; i < n_algo; i++) {
+  for (const auto i : c10::irange(n_algo)) {
     perf_t perf = perfResults[i];
 
     // TODO: Shouldn't all returned results be successful?
@@ -290,6 +292,7 @@ struct algorithm_search<cudnnConvolutionFwdAlgoPerf_t> {
     } else {
       size_t max_ws_size = getMaxWorkspaceSize(args, algos, num_algos);
       Workspace ws(max_ws_size);
+      at::cuda::errorIfCapturingCudnnBenchmark("cudnnFind");
       AT_CUDNN_CHECK_WITH_SHAPES(cudnnFindConvolutionForwardAlgorithmEx(
           args.handle,
           args.idesc.desc(), args.input.data_ptr(),
@@ -360,6 +363,7 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgoPerf_t> {
     } else {
       size_t max_ws_size = getMaxWorkspaceSize(args, algos, num_algos);
       Workspace ws(max_ws_size);
+      at::cuda::errorIfCapturingCudnnBenchmark("cudnnFind");
       AT_CUDNN_CHECK_WITH_SHAPES(cudnnFindConvolutionBackwardDataAlgorithmEx(
           args.handle,
           args.wdesc.desc(), args.weight.data_ptr(),
@@ -432,6 +436,7 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgoPerf_t> {
     } else {
       size_t max_ws_size = getMaxWorkspaceSize(args, algos, num_algos);
       Workspace ws(max_ws_size);
+      at::cuda::errorIfCapturingCudnnBenchmark("cudnnFind");
       AT_CUDNN_CHECK_WITH_SHAPES(cudnnFindConvolutionBackwardFilterAlgorithmEx(
           args.handle,
           args.idesc.desc(), args.input.data_ptr(),
@@ -574,7 +579,7 @@ static inline void split_batch_dim_to_32bit_out(
   int64_t split_size = std::max<int64_t>(max_worksize / max_inner_size, 1L);
   int64_t num_splits = (n + split_size - 1) / split_size;
   if (split_size * max_inner_size < int_max) {
-    for (int64_t i = 0; i < num_splits; i++) {
+    for (const auto i : c10::irange(num_splits)) {
       int64_t start = split_size * i;
       int64_t split_size_ = std::min<int64_t>(split_size, n - start);
       Tensor input_ = input.narrow(0, start, split_size_);
@@ -613,6 +618,8 @@ if (args.params.dataType == CUDNN_DATA_FLOAT) {                                 
 // Convolution forward / Transposed convolution backward
 //
 // ---------------------------------------------------------------------
+
+#if !HAS_CUDNN_V8()
 
 void raw_cudnn_convolution_forward_out_32bit(
     const Tensor& output, const Tensor& input, const Tensor& weight,
@@ -664,6 +671,8 @@ void raw_cudnn_convolution_forward_out(
     bool benchmark, bool deterministic, bool allow_tf32) {
   split_batch_dim_to_32bit_out(output, input, weight, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32, 1024 * 1024 * 256, raw_cudnn_convolution_forward_out_32bit);
 }
+
+#endif // !HAS_CUDNN_V8()
 
 // ---------------------------------------------------------------------
 //
@@ -796,7 +805,7 @@ void raw_cudnn_convolution_backward_weight_out(
   int64_t split_size = std::max<int64_t>(1024 * 1024 * 512 / max_inner_size, 1L);
   int64_t num_splits = (n + split_size - 1) / split_size;
   if (split_size * max_inner_size < int_max) {
-    for (int64_t i = 0; i < num_splits; i++) {
+    for (const auto i : c10::irange(num_splits)) {
       int64_t start = split_size * i;
       int64_t split_size_ = std::min<int64_t>(split_size, n - start);
       Tensor input_ = input.narrow(0, start, split_size_);

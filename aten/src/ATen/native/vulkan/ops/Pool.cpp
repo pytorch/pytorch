@@ -94,14 +94,14 @@ Tensor adaptive_avg_pool2d(
   return convert(v_output);
 }
 
-Tensor avg_pool2d(
+Tensor pool2d(
     const Tensor& self_arg,
     const IntArrayRef kernel_arg,
     IntArrayRef stride_arg,
     const IntArrayRef padding_arg,
+    const IntArrayRef dilation_arg,
     const bool ceil_mode,
-    const bool /* count_include_pad */,
-    const c10::optional<int64_t> /* divisor_override */) {
+    const api::Shader::Descriptor& shader_descriptor) {
   if (stride_arg.empty()) {
     stride_arg = kernel_arg;
   }
@@ -121,7 +121,7 @@ Tensor avg_pool2d(
   const auto kernel = normalize(kernel_arg);
   const auto stride = normalize(stride_arg);
   const auto padding = normalize(padding_arg);
-  const auto dilation = std::array<int64_t, 2>{1, 1};
+  const auto dilation = normalize(dilation_arg);
 
   const int64_t output_height = pooling_output_shape(
       input_size[Layout::Activation4D::height],
@@ -182,6 +182,7 @@ Tensor avg_pool2d(
         ivec4 kernel;
         ivec2 stride;
         ivec2 padding;
+        ivec2 dilation;
       } block {
         v_output.extents(),
         safe_downcast<int32_t>(
@@ -201,6 +202,10 @@ Tensor avg_pool2d(
           safe_downcast<int32_t>(padding[Layout::Parameter::width]),
           safe_downcast<int32_t>(padding[Layout::Parameter::height]),
         },
+        {
+          safe_downcast<int32_t>(dilation[Layout::Parameter::width]),
+          safe_downcast<int32_t>(dilation[Layout::Parameter::height]),
+        },
       };
 
       context->dispatch(
@@ -210,7 +215,7 @@ Tensor avg_pool2d(
             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
           },
-          VK_KERNEL(avg_pool2d),
+          shader_descriptor,
           v_output.extents(),
           context->gpu().adapter->local_work_group_size(),
           // Write-only access bypasses synchronization but inserts appropriate
@@ -237,11 +242,49 @@ Tensor avg_pool2d(
   return convert(v_output);
 }
 
+Tensor avg_pool2d(
+    const Tensor& self_arg,
+    const IntArrayRef kernel_arg,
+    IntArrayRef stride_arg,
+    const IntArrayRef padding_arg,
+    const bool ceil_mode,
+    const bool /* count_include_pad */,
+    const c10::optional<int64_t> /* divisor_override */) {
+  return pool2d(
+    self_arg,
+    kernel_arg,
+    stride_arg,
+    padding_arg,
+    {1,1},
+    ceil_mode,
+    VK_KERNEL(avg_pool2d)
+  );
+}
+
+Tensor max_pool2d(
+    const Tensor& self_arg,
+    const IntArrayRef kernel_arg,
+    IntArrayRef stride_arg,
+    const IntArrayRef padding_arg,
+    const IntArrayRef dilation_arg,
+    const bool ceil_mode) {
+  return pool2d(
+    self_arg,
+    kernel_arg,
+    stride_arg,
+    padding_arg,
+    dilation_arg,
+    ceil_mode,
+    VK_KERNEL(max_pool2d)
+  );
+}
+
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
-  m.impl("_adaptive_avg_pool2d", TORCH_FN(adaptive_avg_pool2d));
-  m.impl("avg_pool2d", TORCH_FN(avg_pool2d));
+  m.impl(TORCH_SELECTIVE_NAME("aten::_adaptive_avg_pool2d"), TORCH_FN(adaptive_avg_pool2d));
+  m.impl(TORCH_SELECTIVE_NAME("aten::avg_pool2d"), TORCH_FN(avg_pool2d));
+  m.impl(TORCH_SELECTIVE_NAME("aten::max_pool2d"), TORCH_FN(max_pool2d));
 }
 
 #endif /* USE_VULKAN_API */

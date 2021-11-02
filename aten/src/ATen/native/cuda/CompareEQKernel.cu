@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/DispatchStub.h>
@@ -17,7 +18,7 @@ struct CompareEqFunctor {
   }
 };
 
-void eq_kernel_cuda(TensorIterator& iter) {
+void eq_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kHalf, kBFloat16, kBool, iter.common_dtype(), "eq_cuda", [&]() {
     gpu_kernel_with_scalars(iter, CompareEqFunctor<scalar_t>());
   });

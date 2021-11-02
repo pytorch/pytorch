@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
-#include <c10/core/impl/InlineStreamGuard.h>
 #include <c10/core/impl/FakeGuardImpl.h>
+#include <c10/core/impl/InlineStreamGuard.h>
 
 using namespace c10;
 using namespace c10::impl;
@@ -21,7 +21,6 @@ static Stream stream(DeviceIndex index, StreamId sid) {
 
 using TestGuard = InlineStreamGuard<TestGuardImpl>;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InlineStreamGuard, Constructor) {
   TestGuardImpl::setDeviceIndex(0);
   TestGuardImpl::resetStreams();
@@ -40,8 +39,6 @@ TEST(InlineStreamGuard, Constructor) {
   ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(0), 0);
 }
 
-
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InlineStreamGuard, ResetStreamSameSameDevice) {
   TestGuardImpl::setDeviceIndex(0);
   TestGuardImpl::resetStreams();
@@ -59,7 +56,6 @@ TEST(InlineStreamGuard, ResetStreamSameSameDevice) {
   ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(0), 0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InlineStreamGuard, ResetStreamDifferentSameDevice) {
   TestGuardImpl::setDeviceIndex(0);
   TestGuardImpl::resetStreams();
@@ -79,7 +75,6 @@ TEST(InlineStreamGuard, ResetStreamDifferentSameDevice) {
   ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(0), 0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InlineStreamGuard, ResetStreamDifferentDevice) {
   TestGuardImpl::setDeviceIndex(0);
   TestGuardImpl::resetStreams();
@@ -101,11 +96,11 @@ TEST(InlineStreamGuard, ResetStreamDifferentDevice) {
   ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(0), 0);
 }
 
-// -- OptionalInlineStreamGuard -------------------------------------------------------
+// -- OptionalInlineStreamGuard
+// -------------------------------------------------------
 
 using OptionalTestGuard = InlineOptionalStreamGuard<TestGuardImpl>;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InlineOptionalStreamGuard, Constructor) {
   TestGuardImpl::setDeviceIndex(0);
   TestGuardImpl::resetStreams();
@@ -142,7 +137,6 @@ TEST(InlineOptionalStreamGuard, Constructor) {
   ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(0), 0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InlineOptionalStreamGuard, ResetStreamSameDevice) {
   TestGuardImpl::setDeviceIndex(0);
   TestGuardImpl::resetStreams();
@@ -160,7 +154,6 @@ TEST(InlineOptionalStreamGuard, ResetStreamSameDevice) {
   ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(0), 0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InlineOptionalStreamGuard, ResetStreamDifferentDevice) {
   TestGuardImpl::setDeviceIndex(0);
   TestGuardImpl::resetStreams();
@@ -178,4 +171,45 @@ TEST(InlineOptionalStreamGuard, ResetStreamDifferentDevice) {
   ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(2), 0);
   ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(1), 0);
   ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(0), 0);
+}
+
+// -- InlineMultiStreamGuard
+// -------------------------------------------------------
+
+using MultiTestGuard = InlineMultiStreamGuard<TestGuardImpl>;
+
+TEST(InlineMultiStreamGuard, Constructor) {
+  TestGuardImpl::resetStreams();
+  {
+    std::vector<Stream> streams;
+    MultiTestGuard g(streams);
+    ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(0), 0);
+    ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(1), 0);
+  }
+  ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(0), 0);
+  ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(1), 0);
+  {
+    std::vector<Stream> streams = {stream(0, 2)};
+    MultiTestGuard g(streams);
+    ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(0), 2);
+    ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(1), 0);
+  }
+  ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(0), 0);
+  ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(1), 0);
+  {
+    std::vector<Stream> streams = {stream(1, 3)};
+    MultiTestGuard g(streams);
+    ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(0), 0);
+    ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(1), 3);
+  }
+  ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(0), 0);
+  ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(1), 0);
+  {
+    std::vector<Stream> streams = {stream(0, 2), stream(1, 3)};
+    MultiTestGuard g(streams);
+    ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(0), 2);
+    ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(1), 3);
+  }
+  ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(0), 0);
+  ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(1), 0);
 }

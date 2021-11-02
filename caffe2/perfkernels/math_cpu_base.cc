@@ -7,6 +7,7 @@
 #include <cstdint>
 
 #include "common.h"
+// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include "math.h"
 
 #include <c10/util/irange.h>
@@ -45,7 +46,9 @@ void quantize_and_compress__base(
   reinterpret_cast<float*>(output_data + 2)[0] = minimum_element;
   reinterpret_cast<float*>(output_data + 2)[1] = maximum_element;
 
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   float gap = (maximum_element - minimum_element) / ((1 << bitwidth) - 1.0f);
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   float gap_inverse = 1. / (gap + QEPSILON);
   uint8_t max_q = (1 << bitwidth) - 1;
   uint64_t bit_start = 0;
@@ -128,6 +131,7 @@ void decompress_and_dequantize__base(
       reinterpret_cast<const float*>(input_data + 2)[1];
   const uint64_t bitwidth = input_data[0];
   const float gap =
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       (maximum_element - minimum_element) / ((1 << bitwidth) - 1.f) +
       QEPSILON; // for exact recovering
 
@@ -144,6 +148,7 @@ void decompress_and_dequantize__base(
     uint64_t i = 0;
     for (; i < stride; ++i) {
       output_data[start + i] =
+          // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-narrowing-conversions)
           ((input_data[10 + i] >> bit_start) & mask) * gap + minimum_element;
     }
     bit_start += bitwidth;

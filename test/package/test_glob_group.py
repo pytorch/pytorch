@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: package/deploy"]
+
 from typing import Iterable
 
 from torch.package import GlobGroup
@@ -7,7 +9,7 @@ try:
     from .common import PackageTestCase
 except ImportError:
     # Support the case where we run this file directly.
-    from common import PackageTestCase  # type: ignore
+    from common import PackageTestCase
 
 
 class TestGlobGroup(PackageTestCase):

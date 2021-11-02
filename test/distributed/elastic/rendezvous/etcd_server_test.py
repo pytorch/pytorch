@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: r2p"]
+
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
@@ -13,8 +15,10 @@ from torch.distributed.elastic.rendezvous.etcd_rendezvous import (
 )
 from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
 
+if os.getenv("CIRCLECI"):
+    print("T85992919 temporarily disabling in circle ci", file=sys.stderr)
+    sys.exit(0)
 
-@unittest.skipIf(os.getenv("CIRCLECI"), "T85992919 temporarily disabling in circle ci")
 class EtcdServerTest(unittest.TestCase):
     def test_etcd_server_start_stop(self):
         server = EtcdServer()

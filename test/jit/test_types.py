@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: jit"]
+
 from collections import namedtuple
 from typing import Dict, List, Optional, Tuple
 
@@ -21,6 +23,24 @@ if __name__ == '__main__':
                        "instead.")
 
 class TestTypesAndAnnotation(JitTestCase):
+    def test_pep585_type(self):
+        # TODO add test to use PEP585 type annotation for return type after py3.9
+        # see: https://www.python.org/dev/peps/pep-0585/#id5
+        def fn(x: torch.Tensor) -> Tuple[Tuple[torch.Tensor], Dict[str, int]]:
+            xl: list[tuple[torch.Tensor]] = []
+            xd: dict[str, int] = {}
+            xl.append((x,))
+            xd['foo'] = 1
+            return xl.pop(), xd
+
+        self.checkScript(fn, [torch.randn(2, 2)])
+
+        x = torch.randn(2, 2)
+        expected = fn(x)
+        scripted = torch.jit.script(fn)(x)
+
+        self.assertEquals(expected, scripted)
+
     def test_types_as_values(self):
         def fn(m: torch.Tensor) -> torch.device:
             return m.device
@@ -122,7 +142,9 @@ class TestTypesAndAnnotation(JitTestCase):
             wrong : List[int] = [0.5]
             return wrong
 
-        with self.assertRaisesRegex(RuntimeError, "Lists must contain only a single type"):
+        with self.assertRaisesRegex(RuntimeError, "List type annotation"
+                                    r" `List\[int\]` did not match the "
+                                    "types of the given list elements"):
             torch.jit.script(wrong_type)
 
     def test_optional_no_element_type_annotation(self):
@@ -250,3 +272,37 @@ class TestTypesAndAnnotation(JitTestCase):
                 x = 5
                 if 1 == 1:
                     x : Optional[int] = 7
+
+    def test_annotate_outside_init(self):
+        msg = "annotations on instance attributes must be declared in __init__"
+        highlight = "self.x: int"
+
+        # Simple case
+        with self.assertRaisesRegexWithHighlight(ValueError, msg, highlight):
+            @torch.jit.script
+            class BadModule(object):
+                def __init__(self, x: int):
+                    self.x = x
+
+                def set(self, val: int):
+                    self.x: int = val
+
+        # Type annotation in a loop
+        with self.assertRaisesRegexWithHighlight(ValueError, msg, highlight):
+            @torch.jit.script
+            class BadModuleLoop(object):
+                def __init__(self, x: int):
+                    self.x = x
+
+                def set(self, val: int):
+                    for i in range(3):
+                        self.x: int = val
+
+        # Type annotation in __init__, should not fail
+        @torch.jit.script
+        class GoodModule(object):
+            def __init__(self, x: int):
+                self.x: int = x
+
+            def set(self, val: int):
+                self.x = val

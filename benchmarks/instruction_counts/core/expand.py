@@ -74,7 +74,7 @@ def _generate_torchscript_file(model_src: str, name: str) -> Optional[str]:
     cast(importlib.abc.Loader, loader).exec_module(module)
 
     # And again, the type checker has no way of knowing that this line is valid.
-    jit_model = module.jit_model  # type: ignore
+    jit_model = module.jit_model  # type: ignore[attr-defined]
     assert isinstance(
         jit_model,
         (torch.jit.ScriptFunction, torch.jit.ScriptModule)

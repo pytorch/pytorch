@@ -230,7 +230,7 @@ def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete=None):
     return exp, ssi, sei
 
 
-def scalar(name, scalar, collections=None, new_style=False):
+def scalar(name, scalar, collections=None, new_style=False, double_precision=False):
     """Outputs a `Summary` protocol buffer containing a single scalar value.
     The generated Summary has a Tensor.proto containing the input Tensor.
     Args:
@@ -248,15 +248,20 @@ def scalar(name, scalar, collections=None, new_style=False):
     """
     scalar = make_np(scalar)
     assert scalar.squeeze().ndim == 0, "scalar should be 0D"
+    # python float is double precision in numpy
     scalar = float(scalar)
     if new_style:
+        tensor = TensorProto(float_val=[scalar], dtype="DT_FLOAT")
+        if double_precision:
+            tensor = TensorProto(double_val=[scalar], dtype="DT_DOUBLE")
+
         plugin_data = SummaryMetadata.PluginData(plugin_name="scalars")
         smd = SummaryMetadata(plugin_data=plugin_data)
         return Summary(
             value=[
                 Summary.Value(
                     tag=name,
-                    tensor=TensorProto(float_val=[scalar], dtype="DT_FLOAT"),
+                    tensor=tensor,
                     metadata=smd,
                 )
             ]
@@ -498,13 +503,13 @@ def make_video(tensor, fps):
 
 
 def audio(tag, tensor, sample_rate=44100):
-    tensor = make_np(tensor)
-    tensor = tensor.squeeze()
-    if abs(tensor).max() > 1:
+    array = make_np(tensor)
+    array = array.squeeze()
+    if abs(array).max() > 1:
         print('warning: audio amplitude out of range, auto clipped.')
-        tensor = tensor.clip(-1, 1)
-    assert(tensor.ndim == 1), 'input tensor should be 1 dimensional.'
-    tensor = (tensor * np.iinfo(np.int16).max).astype('<i2')
+        array = array.clip(-1, 1)
+    assert(array.ndim == 1), 'input tensor should be 1 dimensional.'
+    array = (array * np.iinfo(np.int16).max).astype('<i2')
 
     import io
     import wave
@@ -513,13 +518,13 @@ def audio(tag, tensor, sample_rate=44100):
     wave_write.setnchannels(1)
     wave_write.setsampwidth(2)
     wave_write.setframerate(sample_rate)
-    wave_write.writeframes(tensor.data)
+    wave_write.writeframes(array.data)
     wave_write.close()
     audio_string = fio.getvalue()
     fio.close()
     audio = Summary.Audio(sample_rate=sample_rate,
                           num_channels=1,
-                          length_frames=tensor.shape[-1],
+                          length_frames=array.shape[-1],
                           encoded_audio_string=audio_string,
                           content_type='audio/wav')
     return Summary(value=[Summary.Value(tag=tag, audio=audio)])

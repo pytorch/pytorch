@@ -1,4 +1,5 @@
 #include <ATen/native/vulkan/ops/Tensor.h>
+#include <ATen/native/vulkan/ops/Common.h>
 #include <c10/util/accumulate.h>
 
 namespace at {
@@ -207,7 +208,7 @@ vTensor::Buffer allocate_buffer(
     };
   }();
 
-  return pool->buffer({
+  return pool->create_buffer({
       buffer_bytes(sizes, options.dtype()),
       // Usage
       {
@@ -255,9 +256,9 @@ uvec3 image_extents(const IntArrayRef sizes) {
   }
 
   return {
-    width,
-    height,
-    div_up(depth, INT64_C(4)),
+    safe_downcast<uint32_t>(width),
+    safe_downcast<uint32_t>(height),
+    safe_downcast<uint32_t>(div_up(depth, INT64_C(4))),
   };
 }
 
@@ -271,14 +272,16 @@ vTensor::Image allocate_image(
 
   verify(options);
 
-  return pool->image({
+  return pool->create_image({
       VK_IMAGE_TYPE_3D,
       vk_format(options.dtype()),
       extents,
       // Usage
       {
         VK_IMAGE_USAGE_SAMPLED_BIT |
-            VK_IMAGE_USAGE_STORAGE_BIT,
+            VK_IMAGE_USAGE_STORAGE_BIT |
+            VK_IMAGE_USAGE_TRANSFER_SRC_BIT | // for vkCmdCopyImage
+            VK_IMAGE_USAGE_TRANSFER_DST_BIT,  // for vkCmdCopyImage
         {
           VMA_MEMORY_USAGE_GPU_ONLY,
           0u,
@@ -324,7 +327,7 @@ vTensor::Buffer allocate_staging(
   TORCH_CHECK(!sizes.empty(), "Invalid Vulkan tensor size!");
   verify(options);
 
-  return pool->buffer({
+  return pool->create_buffer({
       buffer_bytes(sizes, options.dtype()),
       // Usage
       {
@@ -502,6 +505,18 @@ vTensor::View::View(
     sizes_(sizes),
     strides_(sizes.size()) {
   ops::verify(options);
+}
+
+vTensor::View::~View() {
+  release();
+}
+
+void vTensor::View::release() {
+  pool_->register_image_cleanup(image_);
+  pool_->register_buffer_cleanup(buffer_);
+  if (staging_) {
+      pool_->register_buffer_cleanup(staging_);
+  }
 }
 
 class vTensor::View::CMD final {
@@ -790,7 +805,7 @@ void vTensor::View::CMD::copy_buffer_to_image(
       },
       VK_KERNEL(nchw_to_image),
       extents,
-      view_.context_->gpu().adapter->local_work_group_size(),
+      adaptive_work_group_size(extents),
       image,
       buffer,
       view_.context_->resource().pool.uniform(block).object);
@@ -848,7 +863,7 @@ void vTensor::View::CMD::copy_image_to_buffer(
       },
       VK_KERNEL(image_to_nchw),
       view_.extents(),
-      view_.context_->gpu().adapter->local_work_group_size(),
+      adaptive_work_group_size(view_.extents()),
       image,
       buffer,
       view_.context_->resource().pool.uniform(block).object);

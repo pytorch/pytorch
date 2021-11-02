@@ -9,14 +9,14 @@ namespace at {
 namespace cuda {
 
 MempoolId_t graph_pool_handle() {
-#if CUDA_VERSION >= 11000
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   // uuid count starts at 1. 0 is reserved to mean "wasn't set by graph_pool_handle".
   static std::atomic<CaptureId_t> uuid{1};
   // Sets just the second value, to distinguish it from MempoolId_ts created from
   // cudaStreamGetCaptureInfo id_s in capture_begin.
   return {0, uuid++};
 #else
-  TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0");
+  TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0 and not yet supported on ROCM");
   return {0, 0};
 #endif
 }
@@ -45,13 +45,13 @@ MempoolId_t graph_pool_handle() {
 CUDAGraph::CUDAGraph()
   // CUDAStreams may not be default-constructed.
   : capture_stream_(at::cuda::getCurrentCUDAStream()) {
-#if CUDA_VERSION < 11000
-  TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0");
+#if (defined(CUDA_VERSION) && CUDA_VERSION < 11000) || defined(USE_ROCM)
+  TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0 and not yet supported on ROCM");
 #endif
 }
 
 void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/) {
-#if CUDA_VERSION >= 11000
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   TORCH_CHECK(!has_graph_exec_,
               "This CUDAGraph instance already owns a captured graph. "
               "To capture a new graph, create a new instance.");
@@ -120,12 +120,12 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/) {
   // kernel will end up as part of the capture or not.
   c10::cuda::CUDACachingAllocator::notifyCaptureBegin(capture_dev_, id_, mempool_id_);
 #else
-  TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0");
+  TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0 and not yet supported on ROCM");
 #endif
 }
 
 void CUDAGraph::capture_end() {
-#if CUDA_VERSION >= 11000
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   auto stream = at::cuda::getCurrentCUDAStream();
 
   TORCH_CHECK(stream == capture_stream_,
@@ -156,38 +156,46 @@ void CUDAGraph::capture_end() {
   AT_CUDA_CHECK(cudaGraphDestroy(graph_));
   has_graph_ = false;
 #else
-  TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0");
+  TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0 and not yet supported on ROCM");
 #endif
 }
 
 void CUDAGraph::replay() {
-#if CUDA_VERSION >= 11000
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   TORCH_CHECK(has_graph_exec_,
               "Called CUDAGraph::replay without a preceding successful capture.");
 
+  c10::OptionalDeviceGuard device_guard{capture_stream_.device()};
+
+  // Just like any RNG consumer kernel!
+  auto* gen = get_generator_or_default<CUDAGeneratorImpl>(
+      c10::nullopt, cuda::detail::getDefaultCUDAGenerator());
+  PhiloxCudaState rng_engine_inputs;
   {
-    c10::OptionalDeviceGuard device_guard{capture_stream_.device()};
+    std::lock_guard<std::mutex> lock(gen->mutex_);
+    rng_engine_inputs = gen->philox_cuda_state(wholegraph_increment_);
+  }
+  offset_extragraph_.fill_(int64_t(rng_engine_inputs.offset_.val));
 
-    // Just like any RNG consumer kernel!
-    auto* gen = get_generator_or_default<CUDAGeneratorImpl>(
-        c10::nullopt, cuda::detail::getDefaultCUDAGenerator());
-    PhiloxCudaState rng_engine_inputs;
-    {
-      std::lock_guard<std::mutex> lock(gen->mutex_);
-      rng_engine_inputs = gen->philox_cuda_state(wholegraph_increment_);
-    }
-    offset_extragraph_.fill_(int64_t(rng_engine_inputs.offset_.val));
+  // graph_exec_ may be replayed in any stream.
+  AT_CUDA_CHECK(cudaGraphLaunch(graph_exec_, at::cuda::getCurrentCUDAStream()));
 
-    // graph_exec_ may be replayed in any stream.
-    AT_CUDA_CHECK(cudaGraphLaunch(graph_exec_, at::cuda::getCurrentCUDAStream()));
+  int version;
+  AT_CUDA_CHECK(cudaDriverGetVersion(&version));
+  if (version < 11040) {
+    // Workaround for bug in libcuda.so that causes replayed graphs with
+    // certain topologies to be corrupted (kernels elided, internal syncs
+    // ignored) when replayed back to back without a sync in between.
+    // The bug is fixed in CUDA 11.4+.
+    cudaDeviceSynchronize();
   }
 #else
-  TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0");
+  TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0 and not yet supported on ROCM");
 #endif
 }
 
 void CUDAGraph::reset() {
-#if CUDA_VERSION >= 11000
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   // I'd prefer these checks throw exceptions, not print warnings,
   // but the destructor calls reset(), and at least one CI build
   // refuses to compile with a throwing destructor.
@@ -218,17 +226,17 @@ void CUDAGraph::reset() {
     C10_CUDA_CHECK_WARN(cudaGraphExecDestroy(graph_exec_));
   }
 #else
-  TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0");
+  TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0 and not yet supported on ROCM");
 #endif
 }
 
 // Returns an id another graph's capture_begin can use to share the same memory pool as this graph.
 MempoolId_t CUDAGraph::pool() {
-#if CUDA_VERSION >= 11000
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   TORCH_CHECK(has_graph_exec_,
               "Called CUDAGraph::pool() without a preceding successful capture.");
 #else
-  TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0");
+  TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0 and not yet supported on ROCM");
 #endif
   return mempool_id_;
 }

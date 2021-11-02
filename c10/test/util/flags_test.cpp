@@ -4,12 +4,10 @@
 
 #include <c10/util/Flags.h>
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(c10_flags_test_only_flag, true, "Only used in test.");
 
 namespace c10_test {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(FlagsTest, TestGflagsCorrectness) {
 #ifdef C10_USE_GFLAGS
   EXPECT_EQ(FLAGS_c10_flags_test_only_flag, true);

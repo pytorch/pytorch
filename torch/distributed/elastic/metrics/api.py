@@ -13,7 +13,6 @@ from collections import namedtuple
 from functools import wraps
 from typing import Dict, Optional
 
-
 MetricData = namedtuple("MetricData", ["timestamp", "group_name", "name", "value"])
 
 

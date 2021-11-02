@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/erase_number_types.h>
 #include <torch/csrc/jit/passes/onnx.h>
@@ -46,6 +47,7 @@ Value* ConvertSliceToIndex(Node* slice, Value* size, Node* insertBefore) {
        end,
        step});
 
+  sliced_index_n->copyMetadata(insertBefore);
   auto sliced_index = sliced_index_n->insertBefore(insertBefore)->output();
   return sliced_index;
 }
@@ -89,8 +91,9 @@ std::unordered_map<int64_t, ConvertedIndex> MergeSliceAndSelectToIndices(
         dim = dim + rank - dim_offset;
       } else {
         std::cerr
-            << "Error: ONNX Remove Inplace Ops - Cannot export ellipsis indexing for input "
-            << "of unknown rank.";
+            << "Error: Cannot export ellipsis indexing for input "
+            << "of unknown rank. Check https://pytorch.org/docs/stable/onnx.html#indexing"
+            << "for details.";
       }
     }
     dim = dim + dim_offset;
@@ -183,7 +186,7 @@ std::vector<Value*> ReshapeToAdvancedIndexingFormat(
   size_t min_index_dim = dim_index_map.size();
   size_t max_index_dim = 0;
   size_t tensor_ind_count = 0;
-  for (size_t i = 0; i < dim_index_map.size(); ++i) {
+  for (const auto i : c10::irange(dim_index_map.size())) {
     auto index_i = dim_index_map.find(i);
     AT_ASSERT(index_i != dim_index_map.end());
     if (index_i->second.orig_node_kind == aten::index) {
@@ -198,12 +201,13 @@ std::vector<Value*> ReshapeToAdvancedIndexingFormat(
   if (((max_index_dim - min_index_dim + 1) != tensor_ind_count) &&
       tensor_ind_count != 0) {
     AT_ERROR(
-        "Only consecutive 1-d tensor indices are supported in exporting aten::index_put to ONNX.");
+        "Only consecutive 1-d tensor indices are supported in exporting aten::index_put to ONNX.",
+        "Check https://pytorch.org/docs/stable/onnx.html#indexing for details");
   }
 
   size_t tensor_ind_offset = tensor_ind_count == 0 ? 0 : tensor_ind_count - 1;
   WithInsertPoint guard(index_put_node);
-  for (size_t i = 0; i < dim_index_map.size(); ++i) {
+  for (const auto i : c10::irange(dim_index_map.size())) {
     size_t ind_size = 0;
     auto index_i = dim_index_map.find(i);
     AT_ASSERT(index_i != dim_index_map.end());
@@ -318,6 +322,7 @@ std::vector<Value*> ConvertIndexPutToONNX(
        index_put_node->input(2),
        index_put_node->input(3)});
   new_index_put_node->insertBefore(index_put_node);
+  new_index_put_node->copyMetadata(index_put_node);
   auto new_index_put = new_index_put_node->output();
   new_index_put->copyMetadata(index_put_node->output());
   index_put_node->output()->replaceAllUsesWith(new_index_put);

@@ -8,7 +8,8 @@
 namespace torch {
 namespace jit {
 namespace {
-c10::FunctionSchema getIsAvailableSchema() {
+// NOLINTNEXTLINE(clang-diagnostic-unneeded-internal-declaration)
+inline c10::FunctionSchema getIsAvailableSchema() {
   c10::Argument self("self", c10::AnyType::get());
   c10::Argument available("available", c10::BoolType::get());
   c10::FunctionSchema preprocessor_schema(
@@ -21,7 +22,8 @@ c10::FunctionSchema getIsAvailableSchema() {
 
 constexpr static auto kBackendsNamespace = "__backends__";
 
-c10::FunctionSchema getCompileSchema() {
+// NOLINTNEXTLINE(clang-diagnostic-unneeded-internal-declaration)
+inline c10::FunctionSchema getCompileSchema() {
   c10::Argument self("self", c10::AnyType::get());
   c10::Argument mod("processed", c10::AnyType::get());
   auto any_dict_ty =
@@ -37,7 +39,8 @@ c10::FunctionSchema getCompileSchema() {
   return compile_schema;
 }
 
-c10::FunctionSchema getExecuteSchema() {
+// NOLINTNEXTLINE(clang-diagnostic-unneeded-internal-declaration)
+inline c10::FunctionSchema getExecuteSchema() {
   auto any_list_ty = c10::ListType::create(c10::AnyType::get());
   c10::Argument self("self", c10::AnyType::get());
   c10::Argument handle("handle", c10::AnyType::get());

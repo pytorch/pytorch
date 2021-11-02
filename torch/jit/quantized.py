@@ -263,7 +263,7 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
         if dtype != torch.int8 and dtype != torch.float16:
             raise RuntimeError('Unsupported dtype: {}'.format(dtype))
 
-        self.all_weights = []  # type: ignore
+        self.all_weights = []
         for layer in range(self.num_layers):
             for direction in range(num_directions):
                 layer_input_size = self.input_size if layer == 0 else self.hidden_size * num_directions
@@ -475,7 +475,7 @@ class QuantizedGRU(QuantizedRNNBase):
 
 def quantize_rnn_cell_modules(module):
     warnings.warn("quantize_rnn_cell_modules function has been deprecated. "
-                  "Please use torch.quantization.quantize_dynamic API instead.")
+                  "Please use torch.ao.quantization.quantize_dynamic API instead.")
     reassign = {}
     for name, mod in module.named_modules():
         if mod is module:
@@ -496,7 +496,7 @@ def quantize_rnn_cell_modules(module):
 
 def quantize_linear_modules(module, dtype=torch.int8):
     warnings.warn("quantize_linear_modules function has been deprecated. "
-                  "Please use torch.quantization.quantize_dynamic API instead.")
+                  "Please use torch.ao.quantization.quantize_dynamic API instead.")
 
     reassign = {}
     for name, mod in module.named_modules():
@@ -521,7 +521,7 @@ def quantize_linear_modules(module, dtype=torch.int8):
 
 def quantize_rnn_modules(module, dtype=torch.int8):
     warnings.warn("quantize_rnn_modules function has been deprecated. "
-                  "Please use torch.quantization.quantize_dynamic API instead.")
+                  "Please use torch.ao.quantization.quantize_dynamic API instead.")
     reassign = {}
     for name, mod in module.named_modules():
         if mod is module:

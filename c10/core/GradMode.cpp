@@ -4,13 +4,11 @@
 
 namespace c10 {
 
-thread_local bool GradMode_enabled = true;
-
 bool GradMode::is_enabled() {
-  return GradMode_enabled;
+  return AutogradState::get_tls_state().get_grad_mode();
 }
 
 void GradMode::set_enabled(bool enabled) {
-  GradMode_enabled = enabled;
+  AutogradState::get_tls_state().set_grad_mode(enabled);
 }
 } // namespace c10

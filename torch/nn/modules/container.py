@@ -7,7 +7,7 @@ import torch
 from .module import Module
 from torch._jit_internal import _copy_to_script_wrapper
 
-from typing import Any, Iterable, Iterator, Mapping, Optional, TYPE_CHECKING, overload, Tuple, TypeVar, Union
+from typing import Any, Dict, Iterable, Iterator, Mapping, Optional, TYPE_CHECKING, overload, Tuple, TypeVar, Union
 
 if TYPE_CHECKING:
     from torch.nn import Parameter
@@ -70,6 +70,8 @@ class Sequential(Module):
                   ('relu2', nn.ReLU())
                 ]))
     """
+
+    _modules: Dict[str, Module]  # type: ignore[assignment]
 
     @overload
     def __init__(self, *args: Module) -> None:
@@ -164,6 +166,8 @@ class ModuleList(Module):
                 return x
     """
 
+    _modules: Dict[str, Module]  # type: ignore[assignment]
+
     def __init__(self, modules: Optional[Iterable[Module]] = None) -> None:
         super(ModuleList, self).__init__()
         if modules is not None:
@@ -250,8 +254,7 @@ class ModuleList(Module):
             self.add_module(str(offset + i), module)
         return self
 
-    def forward(self):
-        raise NotImplementedError()
+    # remove forward alltogether to fallback on Module's _forward_unimplemented
 
 
 class ModuleDict(Module):
@@ -297,6 +300,8 @@ class ModuleDict(Module):
                 x = self.activations[act](x)
                 return x
     """
+
+    _modules: Dict[str, Module]  # type: ignore[assignment]
 
     def __init__(self, modules: Optional[Mapping[str, Module]] = None) -> None:
         super(ModuleDict, self).__init__()
@@ -393,8 +398,7 @@ class ModuleDict(Module):
                 # that's too cumbersome to type correctly with overloads, so we add an ignore here
                 self[m[0]] = m[1]  # type: ignore[assignment]
 
-    def forward(self):
-        raise NotImplementedError()
+    # remove forward alltogether to fallback on Module's _forward_unimplemented
 
 
 class ParameterList(Module):
@@ -420,6 +424,8 @@ class ParameterList(Module):
                     x = self.params[i // 2].mm(x) + p.mm(x)
                 return x
     """
+
+    _parameters: Dict[str, 'Parameter']  # type: ignore[assignment]
 
     def __init__(self, parameters: Optional[Iterable['Parameter']] = None) -> None:
         super(ParameterList, self).__init__()
@@ -562,6 +568,8 @@ class ParameterDict(Module):
                 x = self.params[choice].mm(x)
                 return x
     """
+
+    _parameters: Dict[str, 'Parameter']  # type: ignore[assignment]
 
     def __init__(self, parameters: Optional[Mapping[str, 'Parameter']] = None) -> None:
         super(ParameterDict, self).__init__()

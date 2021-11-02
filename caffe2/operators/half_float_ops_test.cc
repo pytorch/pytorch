@@ -40,6 +40,7 @@ TEST(Float16, SimpleTest) {
   EXPECT_TRUE(outputBlob->IsType<Tensor>());
   const TensorCPU& outputTensor = outputBlob->Get<Tensor>();
   EXPECT_EQ(outputTensor.numel(), 5);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   EXPECT_NO_THROW(outputTensor.data<at::Half>());
 
   // decode fp16 -> fp32
@@ -95,7 +96,9 @@ TEST(Float16, UniformDistributionTest) {
     mean += x;
     var += x * x;
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   mean /= tot_size;
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   var /= tot_size;
   LOG(INFO) << "m " << mean << " " << var;
 

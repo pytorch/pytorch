@@ -25,6 +25,7 @@ bool SummarizeOp<float, CPUContext>::RunOnDevice() {
     standard_deviation += diff * diff;
   }
   // Unbiased or biased? Let's do unbiased now.
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   standard_deviation = N == 1 ? 0 : std::sqrt(standard_deviation / (N - 1));
   if (to_file_) {
     (*log_file_) << min << " " << max << " " << mean << " "

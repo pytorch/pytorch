@@ -2,6 +2,7 @@
 #include <ATen/Config.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/cuda/CUDAEvent.h>
+#include <ATen/cuda/CUDAGraphsUtils.cuh>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/MatrixRef.h>
@@ -10,6 +11,7 @@
 #include <ATen/TensorUtils.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 #if !AT_CUDNN_ENABLED()
 
@@ -190,7 +192,7 @@ namespace {
 
   std::vector<TensorDescriptor> rnn_descriptor(const Tensor& tensor, int64_t N) {
     std::vector<TensorDescriptor> descriptors(N);
-    for (int64_t i = 0; i < N; i++) {
+    for (const auto i : c10::irange(N)) {
       descriptors[i].set(tensor, 5);
     }
     return descriptors;
@@ -469,10 +471,10 @@ namespace {
     int64_t num_layers = rnn.num_directions() * rnn.num_layers;
     size_t cur_offset = 0;
     size_t global_layer_params_count = 0;
-    for (int64_t layer = 0; layer < num_layers; layer++) {
+    for (const auto layer : c10::irange(num_layers)) {
       size_t layer_params_count = 0;
       for (auto cudnn_method : cudnn_methods) {
-        for (int64_t linear_id = 0; linear_id < num_linear_layers; linear_id++) {
+        for (const auto linear_id : c10::irange(num_linear_layers)) {
           FilterDescriptor lin_layer_mat_desc;
           void* matrix_pointer;
           AT_CUDNN_CHECK(cudnn_method(
@@ -565,7 +567,7 @@ namespace {
     } else {
       data_ptrs.reserve(num_dir_layers * 2 * 2);
     }
-    for (int64_t layer = 0; layer < num_dir_layers; layer++) {
+    for (const auto layer : c10::irange(num_dir_layers)) {
       for (auto cudnn_method : cudnn_methods) {
         // This API returns a separate pointer for weight of every gate,
         // but we represent them as a single tensor, so we're only interested
@@ -628,7 +630,7 @@ namespace {
   void _viewOrCopyParams(MatrixRef<Tensor> params_from, MatrixRef<Tensor> params_to,
                          bool copy, bool allow_type_change=false) {
     TORCH_INTERNAL_ASSERT(params_from.size(0) == params_to.size(0), "number of layers mismatch");
-    for (size_t i = 0; i < params_from.size(0); i++) {
+    for (const auto i : c10::irange(params_from.size(0))) {
       auto layer_params_from = params_from[i];
       auto layer_params_to = params_to[i];
       // NOTE: these lists have all weights before all biases, so if the layer
@@ -725,7 +727,8 @@ namespace {
                 (tensors.seq_length >=20 && bsize <=96) ||
                 (tensors.seq_length >=10 && bsize <=32));
       }
-    } else if (prop->major >= 8) {
+    } else if (prop->major >= 8 && prop->multiProcessorCount >= 98) {
+      // SM count check excludes A30 (similar issue to A40)
       if (prop->minor == 6) {
         // Excludes sm_86 GPU devices from using persistent rnn.
         // This is because there are some edge cases that will throw exceptions with cudnn 8.0.5 on Nvidia A40 GPU.
@@ -843,7 +846,7 @@ copy_weights_to_flat_buf_views(
   _viewOrCopyParams(weight, params, /*copy=*/true, allow_type_change);
   if (set_orig_weights_to_flat_buf) {
     // Update the storage
-    for (size_t i = 0; i < weight.size(0); i++) {
+    for (const auto i : c10::irange(weight.size(0))) {
       // There is a special case for LSTM with projections and no bias,
       // where weight copy is done in 0->0, 1->1, 2->4 layout
       if (weight[i].size() == 3 && params[i].size() == 5) {
@@ -911,7 +914,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     bool fn_train, bool fn_bidirectional, IntArrayRef fn_batch_sizes, const c10::optional<Tensor>& fn_dropout_state_opt
     ) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& weight_buf_r = c10::value_or_else(weight_buf_r_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> weight_buf_r_maybe_owned = at::borrow_from_optional_tensor(weight_buf_r_opt);
+  const Tensor& weight_buf_r = *weight_buf_r_maybe_owned;
   const Tensor& cx = c10::value_or_else(cx_opt, [] {return Tensor();});
   const Tensor& fn_dropout_state = c10::value_or_else(fn_dropout_state_opt, [] {return Tensor();});
 
@@ -1291,7 +1295,8 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
     std::array<bool, 4> output_mask
     ) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& cx = c10::value_or_else(cx_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> cx_maybe_owned = at::borrow_from_optional_tensor(cx_opt);
+  const Tensor& cx = *cx_maybe_owned;
   const Tensor& grad_output_r = c10::value_or_else(grad_output_r_opt, [] {return Tensor();});
   const Tensor& grad_hy_r = c10::value_or_else(grad_hy_r_opt, [] {return Tensor();});
   const Tensor& grad_cy_r = c10::value_or_else(grad_cy_r_opt, [] {return Tensor();});
@@ -1371,6 +1376,30 @@ std::tuple<Tensor, Tensor> pack_hidden<std::tuple<Tensor, Tensor>>(const Tensor&
   return std::make_tuple(hx, cx);
 }
 
+/**
+ * Note [DropoutState and CUDA graph capture]
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ * (1) Telling a capturing stream to wait on an event recorded in a non-capturing stream is an error.
+ * (2) Telling a non-capturing stream to wait on an event recorded during capture is also an error.
+ *
+ * So DropoutState's usage syncs could error if an RNN with dropout is called in an uncaptured region
+ * then called in a captured region (triggering 1), or called in a captured region then called
+ # in an uncaptured region (triggering 2).
+ *
+ * To prevent 1 and 2, lock() only syncs on the last usage event if it was recorded in the same
+ * capture state as the current state (which also means the same graph, if capture is in progress).
+ *
+ * The solution should be safe as long as capture obeys the following restrictions:
+ *  - Only one capture may be underway at a time in a given process.
+ *  - While a capture is underway, no calls to eager ops on noncapturing streams (on any thread)
+ *    may interleave with the captured ops.
+ *
+ * TODO: As people experiment with capture, keep an eye out for use cases that might need to
+ * relax those restrictions.
+ *
+ * See https://github.com/pytorch/pytorch/pull/56433 for more discussion.
+ */
+
 struct DropoutState {
   // Both buffer and event are lazily instantiated when a dropout state is needed
   // for the first time. Note that in this case needed != used, as we don't need
@@ -1378,6 +1407,12 @@ struct DropoutState {
   at::Tensor buffer;
   c10::optional<cuda::CUDAEvent> event;
   std::mutex mutex;
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+  // cudaStreamGetCaptureInfo will never give back a capture id of 0, so 0 can serve
+  // as a sentinel value that capture was not underway.
+  cuda::CaptureId_t capture_id_last_lock = 0;
+  cuda::CaptureId_t capture_id_last_unlock = 0;
+#endif
 
   // Every time we use a dropout state, we need to synchronize with its event,
   // to make sure all previous uses finish running before this one starts. Once
@@ -1390,13 +1425,38 @@ struct DropoutState {
     // could then define it before we get to unlock().
     mutex.lock();
     if (event) {
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+      // See Note [DropoutState and CUDA graph capture]
+      cudaStreamCaptureStatus status;
+      AT_CUDA_CHECK(cudaStreamGetCaptureInfo(cuda::getCurrentCUDAStream(),
+                                             &status,
+                                             &capture_id_last_lock));
+      if (status == cudaStreamCaptureStatus::cudaStreamCaptureStatusNone) {
+        capture_id_last_lock = 0;
+      }
+      if (capture_id_last_lock == capture_id_last_unlock) {
+        event->block(cuda::getCurrentCUDAStream());
+      }
+#else
       event->block(cuda::getCurrentCUDAStream());
+#endif
     }
   }
 
   void unlock() {
     if (event) {
       event->record();
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+      // See Note [DropoutState and CUDA graph capture]
+      cudaStreamCaptureStatus status;
+      AT_CUDA_CHECK(cudaStreamGetCaptureInfo(cuda::getCurrentCUDAStream(),
+                                             &status,
+                                             &capture_id_last_unlock));
+      if (status == cudaStreamCaptureStatus::cudaStreamCaptureStatusNone) {
+        capture_id_last_unlock = 0;
+      }
+      TORCH_INTERNAL_ASSERT(capture_id_last_unlock == capture_id_last_lock);
+#endif
     }
     mutex.unlock();
   }
@@ -1466,7 +1526,7 @@ Tensor try_get_weight_buf(
     AT_ASSERT(num_ptrs % 5 == 0);
     if (has_biases) {
       AT_ASSERT(num_ptrs == num_parameters);
-      for (int64_t i = 0; i < num_parameters; i++) {
+      for (const auto i : c10::irange(num_parameters)) {
         if (expected_data_ptrs[i] != parameters[i].data_ptr()) return {};
       }
     } else {

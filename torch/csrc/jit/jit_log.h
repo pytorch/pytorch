@@ -1,7 +1,9 @@
 #pragma once
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <memory>
+#include <ostream>
 #include <string>
+#include <unordered_map>
 
 // `TorchScript` offers a simple logging facility that can enabled by setting an
 // environment variable `PYTORCH_JIT_LOG_LEVEL`.
@@ -48,9 +50,17 @@ enum class JitLoggingLevels {
   GRAPH_DEBUG,
 };
 
-std::string TORCH_API getHeader(const Node* node);
+TORCH_API std::string get_jit_logging_levels();
 
-std::string TORCH_API log_function(const std::shared_ptr<Graph>& graph);
+TORCH_API void set_jit_logging_levels(std::string level);
+
+TORCH_API void set_jit_logging_output_stream(std::ostream& out_stream);
+
+TORCH_API std::ostream& get_jit_logging_output_stream();
+
+TORCH_API std::string getHeader(const Node* node);
+
+TORCH_API std::string log_function(const std::shared_ptr<Graph>& graph);
 
 TORCH_API ::torch::jit::JitLoggingLevels jit_log_level();
 
@@ -73,10 +83,11 @@ TORCH_API std::ostream& operator<<(
     std::ostream& out,
     ::torch::jit::JitLoggingLevels level);
 
-#define JIT_LOG(level, ...)                                  \
-  if (is_enabled(__FILE__, level)) {                         \
-    std::cerr << ::torch::jit::jit_log_prefix(               \
-        level, __FILE__, __LINE__, ::c10::str(__VA_ARGS__)); \
+#define JIT_LOG(level, ...)                                         \
+  if (is_enabled(__FILE__, level)) {                                \
+    ::torch::jit::get_jit_logging_output_stream()                   \
+        << ::torch::jit::jit_log_prefix(                            \
+               level, __FILE__, __LINE__, ::c10::str(__VA_ARGS__)); \
   }
 
 // tries to reconstruct original python source

@@ -69,6 +69,7 @@ public:
     std::vector<npy_intp> npy_dims(dims.begin(), dims.end());
 
     result.copied = force_copy || atensor.need_reorder();
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     void *outPtr;
     if (result.copied) {
       result.obj = py::reinterpret_steal<py::object>(

@@ -172,7 +172,7 @@ class LazyModuleMixin:
 
     def __init__(self: _LazyProtocol, *args, **kwargs):
         # Mypy doesnt like this super call in a mixin
-        super().__init__(*args, **kwargs)  # type: ignore
+        super().__init__(*args, **kwargs)  # type: ignore[misc]
         self._load_hook = self._register_load_state_dict_pre_hook(self._lazy_load_hook)
         self._initialize_hook = self.register_forward_pre_hook(self._infer_parameters)
         warnings.warn('Lazy modules are a new feature under heavy development '

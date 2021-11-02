@@ -1,8 +1,8 @@
 #import <ATen/native/metal/MetalCommandBuffer.h>
 #import <ATen/native/metal/MetalTensorImpl.h>
 #import <ATen/native/metal/MetalTensorImplStorage.h>
-#import <ATen/native/metal/MetalUtils.h>
-#import <ATen/native/metal/mpscnn/MPSCNNContext.h>
+#import <ATen/native/metal/MetalTensorUtils.h>
+#import <ATen/native/metal/MetalContext.h>
 #import <ATen/native/metal/mpscnn/MPSCNNUtils.h>
 #import <ATen/native/metal/mpscnn/MPSImage+Tensor.h>
 #import <ATen/native/metal/mpscnn/MPSImageUtils.h>
@@ -14,9 +14,21 @@ namespace at {
 namespace native {
 namespace metal {
 
+// TODO: Move this function to MetalContext
+template<typename T>
+id<MTLBuffer> _makeMTLBuffer(const std::vector<T>& src) {
+    id<MTLBuffer> buffer = [[MetalContext sharedInstance].device
+          newBufferWithLength:src.size() * sizeof(T)
+                      options:MTLResourceOptionCPUCacheModeWriteCombined];
+    memcpy(buffer.contents, src.data(), src.size() * sizeof(T));
+    return buffer;
+}
+
 Tensor transpose(const Tensor& input, int64_t dim0, int64_t dim1) {
   TORCH_CHECK(input.is_metal());
   auto ndims = input.dim();
+  // Support maximum eight channels on mobile
+  TORCH_CHECK(ndims <= 8);
   dim0 = maybe_wrap_dim(dim0, ndims);
   dim1 = maybe_wrap_dim(dim1, ndims);
   if (dim0 == dim1) {
@@ -25,31 +37,30 @@ Tensor transpose(const Tensor& input, int64_t dim0, int64_t dim1) {
   auto outputSizes = input.sizes().vec();
   std::swap(outputSizes[dim0], outputSizes[dim1]);
   MPSImage* X = imageFromTensor(input);
-  MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
+  MetalCommandBuffer* commandBuffer = getCommandBuffer(input);
   if (input.dim() == 2) {
     MetalTensorImplStorage mt{outputSizes};
-    mt.texture()->allocateTemporaryTextureStorage(outputSizes, commandBuffer);
+    mt.texture()->allocateTemporaryStorage(outputSizes, commandBuffer);
     MPSImage* Y = mt.texture()->image();
     MPSImageTranspose* transpose = [[MPSImageTranspose alloc]
-        initWithDevice:[MPSCNNContext sharedInstance].device];
+        initWithDevice:[MetalContext sharedInstance].device];
     [transpose encodeToCommandBuffer:commandBuffer.buffer
                          sourceImage:X
                     destinationImage:Y];
     auto output = makeTensor(std::move(mt), input.options());
     return output;
   } else {
-    id<MTLBuffer> sizeBuf1 = makeMTLBuffer<ushort>(
+    id<MTLBuffer> sizeBuf1 = _makeMTLBuffer<ushort>(
         std::vector<ushort>{input.sizes().begin(), input.sizes().end()});
-    id<MTLBuffer> sizeBuf2 = makeMTLBuffer<ushort>(
+    id<MTLBuffer> sizeBuf2 = _makeMTLBuffer<ushort>(
         std::vector<ushort>{outputSizes.begin(), outputSizes.end()});
-    id<MTLBuffer> indexBuf = makeMTLBuffer(std::vector<ushort>(input.dim(), 1));
     MetalTensorImplStorage mt{outputSizes};
-    mt.texture()->allocateTemporaryTextureStorage(outputSizes, commandBuffer);
+    mt.texture()->allocateTemporaryStorage(outputSizes, commandBuffer);
     MPSImage* Y = mt.texture()->image();
     id<MTLComputeCommandEncoder> encoder =
         [commandBuffer.buffer computeCommandEncoder];
     id<MTLComputePipelineState> state =
-        [[MPSCNNContext sharedInstance] specializedPipelineState:@"transpose"
+        [[MetalContext sharedInstance] specializedPipelineState:"transpose"
                                                        Constants:@[
                                                          @(dim0),
                                                          @(dim1),
@@ -65,16 +76,12 @@ Tensor transpose(const Tensor& input, int64_t dim0, int64_t dim1) {
     [encoder setTexture:[Y texture] atIndex:1];
     [encoder setBuffer:sizeBuf1 offset:0 atIndex:0];
     [encoder setBuffer:sizeBuf2 offset:0 atIndex:1];
-    [encoder setBuffer:indexBuf offset:0 atIndex:2];
 
     const auto& launchParams =
         mpscnn::spatialPointwiseKernelLaunchParams(state, Y);
     [encoder dispatchThreadgroups:launchParams.threadgroupsPerGrid
             threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
     [encoder endEncoding];
-    [X markRead];
-    [Y markRead];
-
     auto output = makeTensor(std::move(mt), input.options());
     return output;
   }

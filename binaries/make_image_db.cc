@@ -243,7 +243,6 @@ void ConvertImageDataset(
 
   constexpr auto key_max_length = 256;
   char key_cstr[key_max_length];
-  string value;
   int count = 0;
   for (auto i = 0; i < lines.size(); i++) {
     // Get serialized proto for this entry
@@ -255,7 +254,7 @@ void ConvertImageDataset(
     DCHECK_LE(key_len, sizeof(key_cstr));
 
     // Put in db
-    transaction->Put(string(key_cstr), value);
+    transaction->Put(string(key_cstr), std::move(value));
 
     if (++count % 1000 == 0) {
       // Commit the current writes.

@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: jit"]
+
 import os
 import sys
 
@@ -111,3 +113,7 @@ class TestLogging(JitTestCase):
             self.assertEqual(logger.get_counter_val('foo'), 1)
         finally:
             torch.jit._logging.set_logger(old_logger)
+
+    def test_logging_levels_set(self):
+        torch._C._jit_set_logging_option('foo')
+        self.assertEqual('foo', torch._C._jit_get_logging_option())

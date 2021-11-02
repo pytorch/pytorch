@@ -3,7 +3,7 @@
 #include <c10/core/Backend.h>
 #include <c10/util/Exception.h>
 
-#include <iostream>
+#include <ostream>
 
 namespace c10 {
 enum class Layout : int8_t { Strided, Sparse, SparseCsr, Mkldnn, NumOptions };
@@ -18,6 +18,7 @@ inline Layout layout_from_backend(Backend backend) {
     case Backend::SparseCPU:
     case Backend::SparseCUDA:
     case Backend::SparseHIP:
+    case Backend::SparseVE:
     case Backend::SparseXPU:
       return Layout::Sparse;
     case Backend::MkldnnCPU:

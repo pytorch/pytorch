@@ -9,7 +9,7 @@
 namespace torch {
 namespace jit {
 
-struct MutationRemover {
+struct TORCH_API MutationRemover {
   MutationRemover(
       std::shared_ptr<Graph> graph,
       c10::optional<std::function<bool(Node*)>> mutation_filter = c10::nullopt)
@@ -31,49 +31,11 @@ struct MutationRemover {
             "aten::normal_(Tensor(a!) self, float mean=0, float std=1, *, Generator? generator=None) -> Tensor(a!)");
   }
 
-  bool inplaceOpVariant(Node* n) {
-    if (!n->kind().is_aten()) {
-      return false;
-    }
+  bool inplaceOpVariant(Node* n);
 
-    if (isSpecialMappedOp(n)) {
-      return true;
-    }
-
-    auto name = n->schema().name();
-    bool inplace_op = name.at(name.size() - 1) == '_';
-    if (!inplace_op) {
-      return false;
-    }
-
-    // needs to have alias analysis by schema
-    auto op = n->maybeOperator();
-    if (!op) {
-      return false;
-    }
-    if (op->aliasAnalysisKind() != AliasAnalysisKind::FROM_SCHEMA) {
-      return false;
-    }
-
-    // all inplace ops at time of writing have a single input that is mutated
-    // and returned. check that this is true, anything else could have strange
-    // semantics,
-    if (n->outputs().size() != 1 || n->inputs().size() == 0) {
-      return false;
-    }
-    auto inputs = n->inputs();
-    if (!getOrCreateAliasDb()->writesToAlias(n, {inputs.at(0)}) ||
-        getOrCreateAliasDb()->writesToAlias(
-            n, {inputs.slice(1).begin(), inputs.slice(1).end()})) {
-      return false;
-    }
-
-    auto new_schema = name.substr(0, name.size() - 1);
-    return getAllOperatorsFor(Symbol::fromQualString(new_schema)).size() != 0;
-  }
+  static bool hasSideEffectOrAlias(Value* v, AliasDb* aliasDb);
 
  private:
-  bool newMemoryLocation(Value* v);
   Node* createSpecialMappedOp(Node* n);
   bool listMutationFollowingListConstruct(Node* n);
   bool tryMakeCreationAndMutationAtomic(
@@ -111,6 +73,10 @@ TORCH_API bool RemoveListMutation(const std::shared_ptr<Graph>& graph);
 TORCH_API bool RemoveTensorMutation(
     const std::shared_ptr<Graph>& graph,
     c10::optional<std::function<bool(Node*)>> mutation_filter = c10::nullopt);
+
+// Replaces in-place aten activation ops with their functional equivalence
+TORCH_API bool InplaceToFunctionalActivation(
+    const std::shared_ptr<Graph>& graph);
 
 } // namespace jit
 } // namespace torch

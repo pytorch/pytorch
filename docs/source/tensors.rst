@@ -177,6 +177,9 @@ Tensor class reference
      use ``tensor.new_*`` creation ops.
 
 .. autoattribute:: Tensor.T
+.. autoattribute:: Tensor.H
+.. autoattribute:: Tensor.mT
+.. autoattribute:: Tensor.mH
 
 .. autosummary::
     :toctree: generated
@@ -220,14 +223,17 @@ Tensor class reference
     Tensor.addmv_
     Tensor.addr
     Tensor.addr_
+    Tensor.adjoint
     Tensor.allclose
     Tensor.amax
     Tensor.amin
+    Tensor.aminmax
     Tensor.angle
     Tensor.apply_
     Tensor.argmax
     Tensor.argmin
     Tensor.argsort
+    Tensor.argwhere
     Tensor.asin
     Tensor.asin_
     Tensor.arcsin
@@ -256,6 +262,10 @@ Tensor class reference
     Tensor.bitwise_or_
     Tensor.bitwise_xor
     Tensor.bitwise_xor_
+    Tensor.bitwise_left_shift
+    Tensor.bitwise_left_shift_
+    Tensor.bitwise_right_shift
+    Tensor.bitwise_right_shift_
     Tensor.bmm
     Tensor.bool
     Tensor.byte
@@ -276,13 +286,19 @@ Tensor class reference
     Tensor.contiguous
     Tensor.copy_
     Tensor.conj
+    Tensor.conj_physical
+    Tensor.conj_physical_
+    Tensor.resolve_conj
+    Tensor.resolve_neg
     Tensor.copysign
     Tensor.copysign_
     Tensor.cos
     Tensor.cos_
     Tensor.cosh
     Tensor.cosh_
+    Tensor.corrcoef
     Tensor.count_nonzero
+    Tensor.cov
     Tensor.acosh
     Tensor.acosh_
     Tensor.arccosh
@@ -322,6 +338,7 @@ Tensor class reference
     Tensor.divide_
     Tensor.dot
     Tensor.double
+    Tensor.dsplit
     Tensor.eig
     Tensor.element_size
     Tensor.eq
@@ -378,6 +395,8 @@ Tensor class reference
     Tensor.hardshrink
     Tensor.heaviside
     Tensor.histc
+    Tensor.histogram
+    Tensor.hsplit
     Tensor.hypot
     Tensor.hypot_
     Tensor.i0
@@ -408,7 +427,9 @@ Tensor class reference
     Tensor.isnan
     Tensor.is_contiguous
     Tensor.is_complex
+    Tensor.is_conj
     Tensor.is_floating_point
+    Tensor.is_inference
     Tensor.is_leaf
     Tensor.is_pinned
     Tensor.is_set_to
@@ -475,6 +496,7 @@ Tensor class reference
     Tensor.max
     Tensor.maximum
     Tensor.mean
+    Tensor.nanmean
     Tensor.median
     Tensor.nanmedian
     Tensor.min
@@ -523,6 +545,7 @@ Tensor class reference
     Tensor.pinverse
     Tensor.polygamma
     Tensor.polygamma_
+    Tensor.positive
     Tensor.pow
     Tensor.pow_
     Tensor.prod
@@ -556,6 +579,7 @@ Tensor class reference
     Tensor.resize_
     Tensor.resize_as_
     Tensor.retain_grad
+    Tensor.retains_grad
     Tensor.roll
     Tensor.rot90
     Tensor.round
@@ -661,6 +685,7 @@ Tensor class reference
     Tensor.vdot
     Tensor.view
     Tensor.view_as
+    Tensor.vsplit
     Tensor.where
     Tensor.xlogy
     Tensor.xlogy_

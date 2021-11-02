@@ -83,7 +83,7 @@ class TestBoxWithNMSLimitOp(serial.SerializedTestCase):
         self.assertReferenceChecks(gc, op, [scores, boxes], ref)
 
     @given(**HU_CONFIG)
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_score_thresh(self, gc):
         in_centers = [(0, 0), (20, 20), (50, 50)]
         in_scores = [0.7, 0.85, 0.6]
@@ -102,7 +102,7 @@ class TestBoxWithNMSLimitOp(serial.SerializedTestCase):
         self.assertReferenceChecks(gc, op, [scores, boxes], ref)
 
     @given(det_per_im=st.integers(1, 3), **HU_CONFIG)
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_detections_per_im(self, det_per_im, gc):
         in_centers = [(0, 0), (20, 20), (50, 50)]
         in_scores = [0.7, 0.85, 0.6]
@@ -131,7 +131,7 @@ class TestBoxWithNMSLimitOp(serial.SerializedTestCase):
         output_classes_include_bg_cls=st.booleans(),
         **HU_CONFIG
     )
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_multiclass(
         self,
         num_classes,

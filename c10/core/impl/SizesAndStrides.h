@@ -19,7 +19,8 @@ namespace impl {
 // the number of strides. The memory layout is as follows:
 //
 // 1 size_t for the size
-// 5 eightbytes of inline sizes and 5 eightbytes of inline strides, OR pointer to out-of-line array
+// 5 eightbytes of inline sizes and 5 eightbytes of inline strides, OR pointer
+// to out-of-line array
 class C10_API SizesAndStrides {
  public:
   // TODO: different iterator types for sizes & strides to prevent
@@ -238,11 +239,16 @@ class C10_API SizesAndStrides {
     if (newSize == oldSize) {
       return;
     }
-    if (C10_LIKELY(newSize <= C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE && isInline())) {
+    if (C10_LIKELY(
+            newSize <= C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE && isInline())) {
       if (oldSize < newSize) {
-        const auto bytesToZero = (newSize - oldSize) * sizeof(inlineStorage_[0]);
+        const auto bytesToZero =
+            (newSize - oldSize) * sizeof(inlineStorage_[0]);
         memset(&inlineStorage_[oldSize], 0, bytesToZero);
-        memset(&inlineStorage_[C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE + oldSize], 0, bytesToZero);
+        memset(
+            &inlineStorage_[C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE + oldSize],
+            0,
+            bytesToZero);
       }
       size_ = newSize;
     } else {
@@ -267,14 +273,19 @@ class C10_API SizesAndStrides {
   }
 
   void allocateOutOfLineStorage(size_t size) {
-    outOfLineStorage_ = static_cast<int64_t *>(malloc(storageBytes(size)));
-    TORCH_CHECK(outOfLineStorage_, "Could not allocate memory for Tensor SizesAndStrides!");
+    outOfLineStorage_ = static_cast<int64_t*>(malloc(storageBytes(size)));
+    TORCH_CHECK(
+        outOfLineStorage_,
+        "Could not allocate memory for Tensor SizesAndStrides!");
   }
 
   void resizeOutOfLineStorage(size_t newSize) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!isInline());
-    outOfLineStorage_ = static_cast<int64_t *>(realloc(outOfLineStorage_, storageBytes(newSize)));
-    TORCH_CHECK(outOfLineStorage_, "Could not allocate memory for Tensor SizesAndStrides!");
+    outOfLineStorage_ = static_cast<int64_t*>(
+        realloc(outOfLineStorage_, storageBytes(newSize)));
+    TORCH_CHECK(
+        outOfLineStorage_,
+        "Could not allocate memory for Tensor SizesAndStrides!");
   }
 
   void copyDataOutline(const SizesAndStrides& rhs) noexcept {
@@ -283,10 +294,9 @@ class C10_API SizesAndStrides {
 
   size_t size_;
   union {
-    int64_t *outOfLineStorage_;
+    int64_t* outOfLineStorage_;
     int64_t inlineStorage_[C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE * 2]{};
   };
-
 };
 
 } // namespace impl

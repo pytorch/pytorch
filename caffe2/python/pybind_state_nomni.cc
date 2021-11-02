@@ -504,6 +504,7 @@ void addNomnigraphMethods(pybind11::module& m) {
           [](Caffe2Annotation& annot) {
             auto DeviceOption = py::module::import("caffe2.proto.caffe2_pb2")
                                     .attr("DeviceOption");
+            // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
             auto proto = annot.getDeviceOption();
             std::string serialized_proto;
             proto.SerializeToString(&serialized_proto);
@@ -526,6 +527,7 @@ void addNomnigraphMethods(pybind11::module& m) {
           [](Caffe2Annotation& annot) {
             auto opDef = py::module::import("caffe2.proto.caffe2_pb2")
                                     .attr("OperatorDef");
+            // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
             auto proto = annot.getOperatorDef();
             std::string serialized_proto;
             proto.SerializeToString(&serialized_proto);

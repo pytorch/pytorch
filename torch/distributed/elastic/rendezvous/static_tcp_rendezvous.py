@@ -52,12 +52,13 @@ class StaticTCPRendezvous(RendezvousHandler):
         log.info("Creating TCPStore as the c10d::Store implementation")
         if not self._store:
             is_master = self.rank == 0
-            self._store = TCPStore(
+            self._store = TCPStore(  # type: ignore[call-arg]
                 self.master_addr,
                 self.master_port,
                 self.world_size,
                 is_master,
                 self.timeout,
+                multi_tenant=True,
             )
         store = PrefixStore(self.run_id, self._store)
         return store, self.rank, self.world_size

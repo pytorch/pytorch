@@ -1,3 +1,5 @@
+# Owner(s): ["module: tests"]
+
 import torch
 from torch import tensor
 
@@ -8,10 +10,11 @@ from functools import reduce
 
 import numpy as np
 
-from torch.testing._internal.common_utils import TestCase, run_tests, make_tensor
+from torch.testing import make_tensor
+from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, dtypes, dtypesIfCPU, dtypesIfCUDA,
-    onlyOnCPUAndCUDA)
+    onlyNativeDeviceTypes)
 
 
 class TestIndexing(TestCase):
@@ -125,7 +128,7 @@ class TestIndexing(TestCase):
 
         self.assertRaises(TypeError, delitem)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(torch.half, torch.double)
     def test_advancedindex(self, device, dtype):
         # Tests for Integer Array Indexing, Part I - Purely integer array
@@ -729,17 +732,97 @@ class TestIndexing(TestCase):
         N = (1 << 31) + 5
         dt = torch.int8
         a = torch.ones(N, dtype=dt, device=device)
-        indices = torch.LongTensor([0, 1, -2, -1])
-        values = torch.tensor([10, 11, 12, 13], dtype=dt, device=device)
+        indices = torch.tensor([-2, 0, -2, -1, 0, -1, 1], device=device, dtype=torch.long)
+        values = torch.tensor([6, 5, 6, 6, 5, 7, 11], dtype=dt, device=device)
 
         a.index_put_((indices, ), values, accumulate=True)
 
         self.assertEqual(a[0], 11)
         self.assertEqual(a[1], 12)
         self.assertEqual(a[2], 1)
-        self.assertEqual(a[-100], 1)
+        self.assertEqual(a[-3], 1)
         self.assertEqual(a[-2], 13)
         self.assertEqual(a[-1], 14)
+
+        a = torch.ones((2, N), dtype=dt, device=device)
+        indices0 = torch.tensor([0, -1, 0, 1], device=device, dtype=torch.long)
+        indices1 = torch.tensor([-2, -1, 0, 1], device=device, dtype=torch.long)
+        values = torch.tensor([12, 13, 10, 11], dtype=dt, device=device)
+
+        a.index_put_((indices0, indices1), values, accumulate=True)
+
+        self.assertEqual(a[0, 0], 11)
+        self.assertEqual(a[0, 1], 1)
+        self.assertEqual(a[1, 0], 1)
+        self.assertEqual(a[1, 1], 12)
+        self.assertEqual(a[:, 2], torch.ones(2, dtype=torch.int8))
+        self.assertEqual(a[:, -3], torch.ones(2, dtype=torch.int8))
+        self.assertEqual(a[0, -2], 13)
+        self.assertEqual(a[1, -2], 1)
+        self.assertEqual(a[-1, -1], 14)
+        self.assertEqual(a[0, -1], 1)
+
+    @onlyNativeDeviceTypes
+    def test_index_put_accumulate_expanded_values(self, device):
+        # checks the issue with cuda: https://github.com/pytorch/pytorch/issues/39227
+        # and verifies consistency with CPU result
+        t = torch.zeros((5, 2))
+        t_dev = t.to(device)
+        indices = [
+            torch.tensor([0, 1, 2, 3]),
+            torch.tensor([1, ]),
+        ]
+        indices_dev = [i.to(device) for i in indices]
+        values0d = torch.tensor(1.0)
+        values1d = torch.tensor([1.0, ])
+
+        out_cuda = t_dev.index_put_(indices_dev, values0d.to(device), accumulate=True)
+        out_cpu = t.index_put_(indices, values0d, accumulate=True)
+        self.assertEqual(out_cuda.cpu(), out_cpu)
+
+        out_cuda = t_dev.index_put_(indices_dev, values1d.to(device), accumulate=True)
+        out_cpu = t.index_put_(indices, values1d, accumulate=True)
+        self.assertEqual(out_cuda.cpu(), out_cpu)
+
+        t = torch.zeros(4, 3, 2)
+        t_dev = t.to(device)
+
+        indices = [
+            torch.tensor([0, ]),
+            torch.arange(3)[:, None],
+            torch.arange(2)[None, :],
+        ]
+        indices_dev = [i.to(device) for i in indices]
+        values1d = torch.tensor([-1.0, -2.0])
+        values2d = torch.tensor([[-1.0, -2.0], ])
+
+        out_cuda = t_dev.index_put_(indices_dev, values1d.to(device), accumulate=True)
+        out_cpu = t.index_put_(indices, values1d, accumulate=True)
+        self.assertEqual(out_cuda.cpu(), out_cpu)
+
+        out_cuda = t_dev.index_put_(indices_dev, values2d.to(device), accumulate=True)
+        out_cpu = t.index_put_(indices, values2d, accumulate=True)
+        self.assertEqual(out_cuda.cpu(), out_cpu)
+
+    @onlyNativeDeviceTypes
+    def test_index_put_accumulate_duplicate_indices(self, device):
+        for i in range(1, 512):
+            # generate indices by random walk, this will create indices with
+            # lots of duplicates interleaved with each other
+            delta = torch.empty(i, dtype=torch.double, device=device).uniform_(-1, 1)
+            indices = delta.cumsum(0).long()
+
+            input = torch.randn(indices.abs().max() + 1, device=device)
+            values = torch.randn(indices.size(0), device=device)
+            output = input.index_put((indices,), values, accumulate=True)
+
+            input_list = input.tolist()
+            indices_list = indices.tolist()
+            values_list = values.tolist()
+            for i, v in zip(indices_list, values_list):
+                input_list[i] += v
+
+            self.assertEqual(output, input_list)
 
     def test_multiple_byte_mask(self, device):
         v = torch.randn(5, 7, 3, device=device)
@@ -757,6 +840,24 @@ class TestIndexing(TestCase):
         num_ones = (c > 0).sum()
         r = v[c > 0]
         self.assertEqual(r.shape, (num_ones, 3))
+
+    def test_jit_indexing(self, device):
+        def fn1(x):
+            x[x < 50] = 1.0
+            return x
+
+        def fn2(x):
+            x[0:50] = 1.0
+            return x
+
+        scripted_fn1 = torch.jit.script(fn1)
+        scripted_fn2 = torch.jit.script(fn2)
+        data = torch.arange(100, device=device, dtype=torch.float)
+        out = scripted_fn1(data.detach().clone())
+        ref = torch.tensor(np.concatenate((np.ones(50), np.arange(50, 100))), device=device, dtype=torch.float)
+        self.assertEqual(out, ref)
+        out = scripted_fn2(data.detach().clone())
+        self.assertEqual(out, ref)
 
     def test_int_indices(self, device):
         v = torch.randn(5, 7, 3, device=device)
@@ -1038,6 +1139,18 @@ class TestIndexing(TestCase):
 
         for accumulate in [True, False]:
             self.assertRaises(RuntimeError, lambda: torch.index_put_(b, (idx,), c, accumulate=accumulate))
+
+    @onlyCUDA
+    def test_cpu_indices(self, device):
+        idx = torch.tensor([0, 1])
+        b = torch.zeros(2, device=device)
+        x = torch.ones(10, device=device)
+        x[idx] = b  # index_put_
+        ref = torch.ones(10, device=device)
+        ref[:2] = 0
+        self.assertEqual(x, ref, atol=0, rtol=0)
+        out = x[idx]  # index
+        self.assertEqual(out, torch.zeros(2, device=device), atol=0, rtol=0)
 
     @dtypes(torch.long, torch.float32)
     def test_take_along_dim(self, device, dtype):
