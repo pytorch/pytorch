@@ -931,7 +931,7 @@ std::unique_ptr<GraphFunction> SubGraphCloneHelper::buildGraphFromNodes(
     const std::vector<Node*>& nodes,
     const std::string& name) {
   auto observer_subgraph = std::make_shared<Graph>();
-  auto build_observer_graph = [&](Function& func) {
+  auto build_observer_graph = [&](GraphFunction& func) {
     buildObserverSubgraph(nodes, func.graph());
   };
   return torch::make_unique<GraphFunction>(
