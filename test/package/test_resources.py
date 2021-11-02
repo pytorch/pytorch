@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Owner(s): ["oncall: package/deploy"]
+
 from io import BytesIO
 from sys import version_info
 from textwrap import dedent
