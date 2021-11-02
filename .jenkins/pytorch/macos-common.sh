@@ -2,6 +2,9 @@
 
 # Common prelude for macos-build.sh and macos-test.sh
 
+# shellcheck source=./common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+
 sysctl -a | grep machdep.cpu
 
 # NOTE: mkl 2021.3.0+ cmake requires sub-command PREPEND, may break the build
