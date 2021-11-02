@@ -51,7 +51,7 @@ TEST(IValueTest, Basic) {
       at::ivalue::Tuple::create({IValue(3.4), IValue(4), IValue(foo)}));
   ASSERT_EQ(foo.use_count(), 3);
   ASSERT_TRUE(the_list.isTuple());
-  auto first = the_list.toTuple()->elements()[1];
+  auto first = the_list.toTupleRef().elements()[1];
   ASSERT_EQ(first.toInt(), 4);
   // Make sure toTupleRef has test coverage too.
   first = the_list.toTupleRef().elements()[1];
@@ -89,8 +89,8 @@ TEST(IValueTest, Basic) {
   IValue complex_tuple(
       at::ivalue::Tuple::create({IValue(c10::complex<double>(3.4, 4.7)), IValue(foo1)}));
   ASSERT_TRUE(complex_tuple.isTuple());
-  ASSERT_EQ(complex_tuple.toTuple()->elements()[0].toComplexDouble(), c10::complex<double>(3.4, 4.7));
-  ASSERT_EQ(complex_tuple.toTuple()->elements()[1], foo1);
+  ASSERT_EQ(complex_tuple.toTupleRef().elements()[0].toComplexDouble(), c10::complex<double>(3.4, 4.7));
+  ASSERT_EQ(complex_tuple.toTupleRef().elements()[1], foo1);
 }
 
 TEST(IValueTest, BasicStorage) {

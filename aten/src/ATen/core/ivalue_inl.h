@@ -332,7 +332,7 @@ struct TORCH_API TupleElements {
 
   // It would be nice to make this noncopyable to prevent people from
   // writing code like `auto output =
-  // forward(...).toTuple()->elements()` (which does refcount bumps on
+  // forward(...).toTupleRef().elements()` (which does refcount bumps on
   // each element, unlike the more efficient but verbose
   // ```
   // auto outputIntrusivePtr = forward(...).toTuple();
@@ -1716,7 +1716,7 @@ template <
             guts::negation<std::is_constructible<IValue, Args>>...>::value,
         std::nullptr_t> = nullptr>
 std::tuple<Args...> generic_to(IValue ivalue, _fake_type<std::tuple<Args...>>) {
-  const auto& vals = ivalue.toTuple()->elements();
+  const auto& vals = ivalue.toTupleRef().elements();
   TORCH_CHECK(vals.size() == sizeof...(Args));
   return detail::generic_to_tuple_impl<std::tuple<Args...>>(vals, Indices{});
 }
