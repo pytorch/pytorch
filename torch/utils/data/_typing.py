@@ -355,9 +355,9 @@ def hook_iterator(namespace, profile_name):
         @functools.wraps(func)
         def wrap_generator(*args, **kwargs):
             gen = func(*args, **kwargs)
-            with context():
-                response = gen.send(None)
             try:
+                with context():
+                    response = gen.send(None)
                 while True:
                     request = yield response
                     with context():
@@ -369,6 +369,7 @@ def hook_iterator(namespace, profile_name):
     else:
         if '__next__' in namespace:
             next_func = namespace['__next__']
+
             @functools.wraps(next_func)
             def wrap_next(*args, **kwargs):
                 with context():
