@@ -561,7 +561,7 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
     }
 
     const Value* value_out = node->outputs()[0];
-    if (value_out->uses().size() > 1) {
+    if (value_out->uses().size() != 1) {
       continue;
     }
 
