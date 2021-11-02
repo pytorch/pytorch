@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: fx"]
+
 import builtins
 import contextlib
 import copy
@@ -715,6 +717,34 @@ class TestFX(JitTestCase):
         traced2 = symbolic_trace(wfq)
         traced2.graph.lint()
         traced2(torch.rand(4, 4))
+
+    def test_tensor_attribute_coalseced(self):
+
+        def count_attrs(fx_module):
+            targets = set()
+            for node in traced.graph.nodes:
+                if node.op == 'get_attr':
+                    targets.add(node.target)
+            return len(targets)
+
+        val = torch.tensor(5)
+
+        def f(x):
+            return x + val + val
+        traced = symbolic_trace(f)
+        traced.graph.lint()
+        self.assertEqual(count_attrs(traced), 1)
+
+        val2 = torch.tensor(5)
+
+        def f(x):
+            val = torch.tensor(5)
+            return x + val + val2
+
+        traced = symbolic_trace(f)
+        traced.graph.lint()
+        self.assertEqual(count_attrs(traced), 2)
+
 
     def test_symbolic_trace_sequential(self):
         class Simple(torch.nn.Module):
@@ -1707,6 +1737,18 @@ class TestFX(JitTestCase):
 
         self.assertTrue('typing.List[float]' in str(graph))
 
+    def test_layout(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return torch.empty_like(x, layout=torch.strided, pin_memory=False).fill_(0)
+
+        traced = symbolic_trace(M())
+        x = torch.rand(5, 9, 3, 4)
+        self.assertEqual(traced(x), torch.zeros_like(x))
+
     def test_ellipsis(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -1865,6 +1907,16 @@ class TestFX(JitTestCase):
 
         input = torch.randn(33, 44)
         self.assertEqual(gm(input), torch.relu(torch.neg(input)))
+
+    def test_prepend_self(self):
+        graph : torch.fx.Graph = torch.fx.Graph()
+        x : torch.fx.Node = graph.create_node('placeholder', 'x')
+        b : torch.fx.Node = graph.create_node('call_function', target=torch.relu, args=(x,))
+        output : torch.fx.Node = graph.output(b)
+
+        b.prepend(b)
+        x.append(b)
+        self.assertEqual(len(graph.nodes), 3)
 
     def test_erase_node_error(self):
         st = SimpleTest()
@@ -2687,6 +2739,39 @@ class TestFX(JitTestCase):
 
         a.graph.lint()
 
+    def test_delete_unused_submodules_leaf(self):
+        class SubModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = self.relu(x)
+                return x
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.submod = SubModule()
+
+            def forward(self, x):
+                x = self.submod(x)
+                return x
+
+        model = Model()
+
+        class MyCustomTracer(torch.fx.Tracer):
+            def is_leaf_module(self, m: torch.nn.Module, module_qualified_name : str) -> bool:
+                return module_qualified_name == "submod"
+
+        inputs = torch.randn(1, 10)
+        traced_graph = MyCustomTracer().trace(model)
+        gm2 = torch.fx.GraphModule(model, traced_graph)
+        gm2.delete_all_unused_submodules()
+        torch.testing.assert_allclose(gm2(inputs), model(inputs))
+
     def test_tracing_graphmodules_as_leaf_submodules(self):
         class A(torch.nn.Module):
             def forward(self, t):
@@ -3113,10 +3198,15 @@ class TestOperatorSignatures(JitTestCase):
                            'expand_as',
                            'fill_',
                            'hstack',
+                           'histogramdd',
                            'igamma',
                            'igammac',
                            'linalg.multi_dot',
                            'lu',
+                           'T',   # Implemented with a lambda
+                           'H',   # Implemented with a lambda
+                           'mT',  # Implemented with a lambda
+                           'mH',  # Implemented with a lambda
                            'norm',
                            'polygamma',
                            'special.polygamma',
@@ -3133,6 +3223,21 @@ class TestOperatorSignatures(JitTestCase):
                            'vstack',
                            'where',
                            'zero_',
+                           'bfloat16',
+                           'bool',
+                           'byte',
+                           'char',
+                           'double',
+                           'float',
+                           'half',
+                           'int',
+                           'long',
+                           'short',
+                           'empty_like',
+                           'ones_like',
+                           'randn_like',
+                           'zeros_like',
+                           'full_like',
                            '__getitem__',
                            '__radd__',
                            '__rsub__',
@@ -3165,7 +3270,7 @@ class TestOperatorSignatures(JitTestCase):
                     raise RuntimeError(f'Did not match any schemas for op {op.name}!')
 
         except Exception as e:
-            assert op.name in known_no_schema or "nn.functional" in op.name
+            assert op.name in known_no_schema or "nn.functional" in op.name or "_masked." in op.name, op.name
 
 
 class TestFXAPIBackwardCompatibility(JitTestCase):
@@ -3498,9 +3603,6 @@ class TestFunctionalTracing(JitTestCase):
         "hardshrink": ARG_TYPE_MISMATCH,
         "layer_norm": ARG_TYPE_MISMATCH,
         "lp_pool1d": ARG_TYPE_MISMATCH,
-        "max_pool1d_with_indices": ARG_TYPE_MISMATCH,
-        "max_pool2d_with_indices": ARG_TYPE_MISMATCH,
-        "max_pool3d_with_indices": ARG_TYPE_MISMATCH,
         "pairwise_distance": ARG_TYPE_MISMATCH,
 
         "affine_grid": CONTROL_FLOW,
@@ -3535,6 +3637,9 @@ class TestFunctionalTracing(JitTestCase):
         "leaky_relu": CONTROL_FLOW,
         "local_response_norm": CONTROL_FLOW,
         "margin_ranking_loss": CONTROL_FLOW,
+        "max_pool1d_with_indices": CONTROL_FLOW,
+        "max_pool2d_with_indices": CONTROL_FLOW,
+        "max_pool3d_with_indices": CONTROL_FLOW,
         "mse_loss": CONTROL_FLOW,
         "multi_head_attention_forward": CONTROL_FLOW,
         "multi_margin_loss": CONTROL_FLOW,

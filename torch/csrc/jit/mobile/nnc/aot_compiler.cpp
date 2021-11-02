@@ -33,11 +33,28 @@ std::vector<int64_t> getConstSizes(const BufPtr b) {
   return r;
 }
 
-void compileFunction(
-    std::shared_ptr<tensorexpr::TensorExprKernel> kernel,
-    Function* func) {
-  std::vector<at::Tensor> parameters;
+std::vector<mobile::nnc::InputSpec> toInputSpecs(
+    const std::vector<std::vector<int64_t>>& inputSizes) {
+  std::vector<mobile::nnc::InputSpec> specs;
+  for (const auto& sizes : inputSizes) {
+    mobile::nnc::InputSpec spec;
+    spec.sizes_ = sizes;
+    // TODO: get and set input dtype
+    spec.dtype_ = c10::ScalarType::Float;
+    specs.emplace_back(std::move(spec));
+  }
+  return specs;
+}
 
+std::unique_ptr<Function> compileMethod(
+    std::shared_ptr<tensorexpr::TensorExprKernel> kernel,
+    const std::string& method_name,
+    const std::vector<std::vector<int64_t>>& sizes) {
+  auto func = std::make_unique<Function>();
+  func->set_name(method_name);
+  func->set_input_specs(toInputSpecs(sizes));
+
+  std::vector<at::Tensor> parameters;
   auto const_descriptors = kernel->getConstantDescriptors();
   for (const auto& cd : const_descriptors) {
     auto sizes = getConstSizes(cd.buf);
@@ -59,26 +76,33 @@ void compileFunction(
     OutputSpec output;
     output.sizes_ = getConstSizes(ba.buf());
     // TODO: assert the output is a buffer and not a scalar
-    // TODO: use actual dtype
-    output.dtype_ = c10::ScalarType::Float;
+    output.dtype_ = ba.buf()->dtype().scalar_type();
     out_spec.push_back(output);
   }
   func->set_output_specs(out_spec);
+
+  return func;
 }
 
 std::pair<std::unique_ptr<Function>, const std::string> aotCompile(
     const std::string& method_name,
     std::shared_ptr<Graph>& g,
-    const std::vector<int64_t>& sizes) {
-  auto g2 = g->copy();
+    const std::vector<std::vector<int64_t>>& sizes,
+    const std::string& kernel_func_name) {
   GRAPH_DEBUG("Input sizes ", sizes);
+  GRAPH_DEBUG("Method name ", method_name);
 
   RemoveTensorMutation(g);
   EliminateDeadCode(g->block());
   g = tensorexpr::removeUnusedSelfArgument(g);
   GRAPH_DUMP("graph before shape propagation ", g);
 
-  std::vector<c10::optional<at::Tensor>> example_inputs = {at::rand(sizes)};
+  std::vector<c10::optional<at::Tensor>> example_inputs;
+  for (const auto& size : sizes) {
+    auto example_input = at::rand(size);
+    example_inputs.emplace_back(example_input);
+  }
+
   tensorexpr::annotateInputShapes(g, example_inputs);
 
   PropagateShapesOnGraph(g);
@@ -88,20 +112,12 @@ std::pair<std::unique_ptr<Function>, const std::string> aotCompile(
   GRAPH_DUMP("graph after shape propagation ", g);
 
   std::shared_ptr<tensorexpr::TensorExprKernel> kernel =
-      std::make_shared<tensorexpr::TensorExprKernel>(g);
+      std::make_shared<tensorexpr::TensorExprKernel>(
+          TensorExprKernel(g, kernel_func_name));
+
   const std::string compiled_assembly = kernel->getCodeText();
 
-  g = g2;
-
-  auto func = std::make_unique<Function>();
-  func->set_name(method_name);
-
-  InputSpec input;
-  input.sizes_ = sizes;
-  input.dtype_ = c10::ScalarType::Float;
-  func->set_input_specs({input});
-
-  compileFunction(kernel, func.get());
+  auto func = compileMethod(kernel, method_name, sizes);
   return std::make_pair(std::move(func), compiled_assembly);
 }
 

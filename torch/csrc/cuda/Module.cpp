@@ -4,6 +4,7 @@
 #include <ATen/CUDAGeneratorImpl.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <ATen/cuda/CachingHostAllocator.h>
 #include <ATen/cuda/detail/CUDAHooks.h>
 #ifdef USE_NCCL
 #include <torch/csrc/cuda/python_nccl.h>
@@ -191,7 +192,7 @@ PyObject * THCPModule_getCompiledVersion(PyObject *self, PyObject *noargs)
 PyObject * THCPModule_cudaHostAllocator(PyObject *_unused, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
-  c10::Allocator* allocator = THCState_getCudaHostAllocator(state);
+  c10::Allocator* allocator = at::cuda::getCachingHostAllocator();
   return PyLong_FromVoidPtr(allocator);
   END_HANDLE_TH_ERRORS
 }
@@ -526,18 +527,7 @@ static PyObject * THCPModule_initExtension(PyObject *self, PyObject *noargs)
   if (!m) throw python_error();
 
   // Register Storage Python objects with DynamicTypes.cpp
-  THCPDoubleStorage_postInit(m);
-  THCPFloatStorage_postInit(m);
-  THCPHalfStorage_postInit(m);
-  THCPLongStorage_postInit(m);
-  THCPIntStorage_postInit(m);
-  THCPShortStorage_postInit(m);
-  THCPCharStorage_postInit(m);
   THCPByteStorage_postInit(m);
-  THCPBoolStorage_postInit(m);
-  THCPBFloat16Storage_postInit(m);
-  THCPComplexDoubleStorage_postInit(m);
-  THCPComplexFloatStorage_postInit(m);
 
   bool has_half = true;
 
