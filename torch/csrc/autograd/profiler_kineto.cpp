@@ -81,15 +81,15 @@ struct Replay {
   PyTraceEvent* frame_;
   bool enter_;
 
-  int64_t t() {
+  int64_t t() const {
     return enter_ ? frame_->t0_ : frame_->t1_;
   }
 
-  size_t idx() {
+  size_t idx() const {
     return enter_ ? frame_->call_idx_ : frame_->return_idx_;
   }
 
-  bool operator<(Replay& other) {
+  bool operator<(const Replay& other) const {
     return idx() < other.idx();
   }
 };

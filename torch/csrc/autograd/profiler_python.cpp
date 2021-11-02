@@ -318,8 +318,6 @@ PythonTracer::PythonTracer() : active_(false) {
         .ptr();
 }
 
-
-
 void PythonTracer::start(size_t max_threads) {
     TORCH_CHECK(!active_, "PythonTracer is already active")
     TORCH_CHECK(!trace_contexts_.size(), "PythonTracer should not have active contexts");
@@ -491,7 +489,7 @@ class PyTraceReplay {
 
  private:
     PyTraceReplay();
-    std::vector<std::unique_ptr<PyTraceEvent>> replay_stack();
+    std::vector<std::unique_ptr<PyTraceEvent>> replay_stack() const;
 
     struct ReplayFrame {
         int64_t t0_;
@@ -527,7 +525,7 @@ PyTraceReplay::PyTraceReplay()
 }
 
 
-std::vector<std::unique_ptr<PyTraceEvent>> PyTraceReplay::replay_stack() {
+std::vector<std::unique_ptr<PyTraceEvent>> PyTraceReplay::replay_stack() const {
     const auto& tracer = PythonTracer::singleton();
 
     // We want to prune paths to a sensible prefix. For example
@@ -565,15 +563,15 @@ std::vector<std::unique_ptr<PyTraceEvent>> PyTraceReplay::replay_stack() {
 
         auto push_frame = [&](std::string name, CallType call_type) {
             ReplayFrame frame {
-                .t0_ = t,
-                .t1_ = -1,  // Placeholder
-                .name_ = name,
-                .call_type_ = call_type,
-                .id_ = id_counter++,
-                .parent_id_ = stack.size() ? stack.back().id_ : 0,
-                .thread_id_ = raw_event.thread_id_,
-                .call_idx_ = event_idx,
-                .return_idx_ = 0  // Placeholder
+                /*t0_=*/ t,
+                /*t1_=*/ -1,  // Placeholder
+                /*name_=*/ name,
+                /*call_type_=*/ call_type,
+                /*id_=*/ id_counter++,
+                /*parent_id_=*/ stack.size() ? stack.back().id_ : 0,
+                /*thread_id_=*/ raw_event.thread_id_,
+                /*call_idx_=*/ event_idx,
+                /*return_idx_=*/ 0  // Placeholder
             };
             stack.push_back(frame);
         };
@@ -620,18 +618,16 @@ std::vector<std::unique_ptr<PyTraceEvent>> PyTraceReplay::replay_stack() {
     ska::flat_hash_map<size_t, PyTraceEvent*> event_id_map {{0, nullptr}};
     std::vector<std::unique_ptr<PyTraceEvent>> out;
     for (auto& r : results) {
-        out.push_back(std::unique_ptr<PyTraceEvent>(  // NOLINT: modernize-make-unique
-            new PyTraceEvent {
-                .t0_ = r.t0_,
-                .t1_ = r.t1_,
-                .name_ = r.name_,
-                .thread_id_ = r.thread_id_,
-                .parent_ = nullptr,
-                .call_type_ = r.call_type_,
-                .call_idx_ = r.call_idx_,
-                .return_idx_ = r.return_idx_
-            }
-        ));
+        out.push_back(std::make_unique<PyTraceEvent>(PyTraceEvent{
+            /*t0_=*/ r.t0_,
+            /*t1_=*/ r.t1_,
+            /*name_=*/ r.name_,
+            /*thread_id_=*/ r.thread_id_,
+            /*parent_=*/ nullptr,
+            /*call_type_=*/ r.call_type_,
+            /*call_idx_=*/ r.call_idx_,
+            /*return_idx_=*/ r.return_idx_
+        }));
         event_id_map.insert({r.id_, out.back().get()});
     }
 
@@ -676,7 +672,6 @@ int PythonTracer::py_profile_fn(
     return 0;
 }
 
-
 void PythonTracer::call(Command c) {
     switch (c) {
         case Command::kStartOne:
@@ -699,7 +694,6 @@ void PythonTracer::call(Command c) {
             break;
     }
 };
-
 
 void init() {
     TORCH_CHECK(PyType_Ready(&TraceContextType) == 0);
