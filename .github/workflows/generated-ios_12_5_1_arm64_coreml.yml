@@ -65,7 +65,7 @@ jobs:
           conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi requests typing_extensions --yes
       - name: Run Fastlane
         run: |
-          set -e
+          set -x
           cd ios/TestApp
           # install fastlane
           sudo gem install bundler && bundle install
@@ -85,8 +85,8 @@ jobs:
           rm cert.txt
       - name: Build
         run: |
-          set -e
+          set -x
           export TCLLIBPATH="/usr/local/lib"
-          # export
+          python -VV
           export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname "$(which conda)")/../"}
-          bash scripts/build_ios.sh
+          scripts/build_ios.sh
