@@ -286,6 +286,24 @@ struct TORCH_API TupleElements {
   explicit TupleElements(std::vector<IValue> elements)
   : inlineSize_(0), elementsVector_(std::move(elements)) {}
 
+  explicit TupleElements(c10::ArrayRef<IValue> elements)
+  : inlineSize_(elements.size() <= 3 ? elements.size() : 0) {
+    switch (inlineSize_) {
+      case 3:
+        new (&elementsInline_[2]) IValue(elements[2]);
+        C10_FALLTHROUGH;
+      case 2:
+        new (&elementsInline_[1]) IValue(elements[1]);
+        C10_FALLTHROUGH;
+      case 1:
+        new (&elementsInline_[0]) IValue(elements[0]);
+        break;
+      case 0:
+        new (&elementsVector_) std::vector<IValue>(elements.begin(), elements.end());
+        break;
+    }
+  }
+
   explicit TupleElements(IValue&& e1)
   : inlineSize_(1) {
     new (&elementsInline_[0]) IValue(std::move(e1));
@@ -567,25 +585,25 @@ struct TORCH_API Tuple : c10::intrusive_ptr_target {
   static c10::intrusive_ptr<Tuple> createNamed(
       std::vector<IValue> elements_,
       std::shared_ptr<TupleType> type_) {
-    return c10::make_intrusive<Tuple>(std::move(elements_), type_);
+    return c10::make_intrusive<Tuple>(std::move(elements_), std::move(type_));
   }
 
   static c10::intrusive_ptr<Tuple> createNamed(
       TupleElements elements_,
       std::shared_ptr<TupleType> type_) {
-    return c10::make_intrusive<Tuple>(std::move(elements_), type_);
+    return c10::make_intrusive<Tuple>(std::move(elements_), std::move(type_));
   }
 
   static c10::intrusive_ptr<Tuple> createNamed(
       std::initializer_list<IValue> elements_,
       std::shared_ptr<TupleType> type_) {
-    return createNamed(std::vector<IValue>(elements_), std::move(type_));
+    return createNamed(TupleElements(c10::ArrayRef<IValue>(elements_)), std::move(type_));
   }
 
   // MSVC apparently can't disambiguate the other two overloads of
   // create when passed an initializer_list without this.
   static c10::intrusive_ptr<Tuple> create(std::initializer_list<IValue> elements_) {
-    return create(std::vector<IValue>(elements_));
+    return create(c10::ArrayRef<IValue>(elements_));
   }
 
   static c10::intrusive_ptr<Tuple> create(std::vector<IValue> elements_) {
@@ -594,6 +612,10 @@ struct TORCH_API Tuple : c10::intrusive_ptr_target {
 
   static c10::intrusive_ptr<Tuple> create(TupleElements elements_) {
     return c10::make_intrusive<Tuple>(std::move(elements_));
+  }
+
+  static c10::intrusive_ptr<Tuple> create(c10::ArrayRef<IValue> elements_) {
+    return create(TupleElements(elements_));
   }
 
   static c10::intrusive_ptr<Tuple> create(IValue e1) {
@@ -608,10 +630,25 @@ struct TORCH_API Tuple : c10::intrusive_ptr_target {
     return c10::make_intrusive<Tuple>(std::move(e1), std::move(e2), std::move(e3));
   }
 
+ private:
+  // Workaround inability to use `>` operator in template argument list.
+  template <typename... Args>
+  static constexpr bool hasMoreThanThreeArgs() {
+    return sizeof...(Args) > 3;
+  }
+
+ public:
   template <typename... Args>
   static c10::intrusive_ptr<Tuple> create(Args&&... elements_) {
-    return c10::make_intrusive<Tuple>(
-        std::vector<IValue>{IValue(std::forward<Args>(elements_))...});
+    switch (sizeof...(Args)) {
+      case 1:
+      case 2:
+      case 3:
+        return create(IValue(std::forward<Args>(elements_))...);
+      default:
+        return create(
+            std::vector<IValue>{IValue(std::forward<Args>(elements_))...});
+    }
   }
 
   // Again, it would be nice to make this noncopyable, but there's a
