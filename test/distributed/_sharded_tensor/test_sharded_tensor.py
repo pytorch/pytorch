@@ -1687,6 +1687,37 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
 
 class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
 
+    @with_comms(init_rpc=False)
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
+    def test_local_shards(self):
+        shard_offsets = [(self.rank // 2) * 5, (self.rank % 2) * 5]
+        local_shard_metadata = ShardMetadata(
+            shard_offsets=shard_offsets,
+            shard_lengths=[5, 5],
+            placement=f"rank:{self.rank}/cuda:{self.rank}"
+        )
+
+        local_tensor = torch.randn(5, 5, device=f"cuda:{self.rank}")
+        local_shard = _sharded_tensor.Shard(local_tensor, local_shard_metadata)
+        local_shard_from_offsets = _sharded_tensor.Shard.from_tensor_and_offsets(
+            local_tensor,
+            shard_offsets=shard_offsets,
+            rank=self.rank
+        )
+        self.assertEqual(local_shard.metadata, local_shard_from_offsets.metadata)
+
+        wrong_local_shard_metadata = ShardMetadata(
+            shard_offsets=shard_offsets,
+            shard_lengths=[6, 5],
+            placement=f"rank:{self.rank}/cuda:{self.rank}"
+        )
+        with self.assertRaisesRegex(ValueError, 'Shard tensor size does not match'):
+            local_shard_from_wrong_meta = _sharded_tensor.Shard(
+                local_tensor,
+                metadata=wrong_local_shard_metadata,
+            )
+
     @with_comms
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
