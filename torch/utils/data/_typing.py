@@ -2,6 +2,8 @@
 # https://github.com/python/cpython/blob/master/Lib/typing.py
 
 import collections
+import functools
+import inspect
 import numbers
 import sys
 from typing import (Any, Dict, Iterator, Generic, List, Set, Tuple, TypeVar, Union,
@@ -259,13 +261,8 @@ class _DataPipeMeta(GenericMeta):
     type: _DataPipeType
 
     def __new__(cls, name, bases, namespace, **kwargs):
-        if "__iter__" in namespace:
-            func_name = namespace["__iter__"]
-            if not hasattr(func_name, "decorated"):
-                func_name.decorated = True
-                namespace["__iter__"] = _data_pipe_decorator(
-                    func_name,
-                    'enumerate(DataPipe)#{}'.format(name))
+        if '__iter__' in namespace:
+            hook_iterator(namespace, 'enumerate(DataPipe)#{}'.format(name))
 
         # For Python > 3.6
         cls.__origin__ = None
@@ -346,17 +343,38 @@ class _DataPipeMeta(GenericMeta):
     def __hash__(self):
         return hash((self.__name__, self.type))
 
-def _data_pipe_decorator(func, profile_name):
-    def wrapper(*args, **kwargs):
-        iterator = func(*args, **kwargs)
-        try:
-            while True:
-                with torch.autograd.profiler.record_function(profile_name):
-                    yield next(iterator)
-        except StopIteration:
-            pass
 
-    return wrapper
+def hook_iterator(namespace, profile_name):
+
+    def context():
+        return torch.autograd.profiler.record_function(profile_name)
+
+    func = namespace['__iter__']
+
+    if inspect.isgeneratorfunction(func):
+        @functools.wraps(func)
+        def wrap_generator(*args, **kwargs):
+            gen = func(*args, **kwargs)
+            with context():
+                response = gen.send(None)
+            try:
+                while True:
+                    request = yield response
+                    with context():
+                        response = gen.send(request)
+            except StopIteration as e:
+                return e.value
+
+        namespace['__iter__'] = wrap_generator
+    else:
+        if '__next__' in namespace:
+            next_func = namespace['__next__']
+            @functools.wraps(next_func)
+            def wrap_next(*args, **kwargs):
+                with context():
+                    return next_func(*args, **kwargs)
+
+            namespace['__next__'] = wrap_next
 
 def _dp_init_subclass(sub_cls, *args, **kwargs):
     # Add function for datapipe instance to reinforce the type
