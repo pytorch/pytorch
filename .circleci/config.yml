@@ -294,24 +294,6 @@ pytorch_params: &pytorch_params
     CI_MASTER: << pipeline.parameters.run_master_build >>
   resource_class: << parameters.resource_class >>
 
-pytorch_android_params: &pytorch_android_params
-  parameters:
-    build_environment:
-      type: string
-      default: ""
-    op_list:
-      type: string
-      default: ""
-    lite_interpreter:
-      type: string
-      default: "1"
-  environment:
-    BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single
-    DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c"
-    PYTHON_VERSION: "3.6"
-    SELECTED_OP_LIST: << parameters.op_list >>
-    BUILD_LITE_INTERPRETER: << parameters.lite_interpreter >>
-
 pytorch_ios_params: &pytorch_ios_params
   parameters:
     build_environment:
@@ -1512,43 +1494,6 @@ jobs:
     - store_artifacts:
         path: ~/workspace/build_android_x86_32_artifacts/artifacts.tgz
         destination: artifacts.tgz
-
-  pytorch_android_gradle_custom_build_single:
-    <<: *pytorch_android_params
-    resource_class: large
-    machine:
-      image: ubuntu-2004:202104-01
-    steps:
-    - checkout
-    - calculate_docker_image_tag
-    - setup_linux_system_environment
-    - checkout
-    - calculate_docker_image_tag
-    - setup_ci_environment
-    - run:
-        name: pytorch android gradle custom build single architecture (for PR)
-        no_output_timeout: "1h"
-        command: |
-          set -e
-          # Unlike other gradle jobs, it's not worth building libtorch in a separate CI job and share via docker, because:
-          # 1) Not shareable: it's custom selective build, which is different from default libtorch mobile build;
-          # 2) Not parallelizable by architecture: it only builds libtorch for one architecture;
-
-          echo "DOCKER_IMAGE: ${DOCKER_IMAGE}:${DOCKER_TAG}"
-          time docker pull ${DOCKER_IMAGE}:${DOCKER_TAG} >/dev/null
-
-          git submodule sync && git submodule update -q --init --recursive --depth 1 --jobs 0
-          VOLUME_MOUNTS="-v /home/circleci/project/:/var/lib/jenkins/workspace"
-          export id=$(docker run --env-file "${BASH_ENV}" ${VOLUME_MOUNTS} --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE}:${DOCKER_TAG})
-
-          export COMMAND='((echo "export GRADLE_OFFLINE=1" && echo "export BUILD_LITE_INTERPRETER=${BUILD_LITE_INTERPRETER}" && echo "sudo chown -R jenkins workspace && cd workspace && ./.circleci/scripts/build_android_gradle.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
-          echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
-
-          # Skip docker push as this job is purely for size analysis purpose.
-          # Result binaries are already in `/home/circleci/project/` as it's mounted instead of copied.
-
-    - upload_binary_size_for_android_build:
-        build_type: custom-build-single
 
   pytorch_ios_build:
     <<: *pytorch_ios_params
@@ -6662,16 +6607,6 @@ workflows:
           name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build-x86_32
           requires:
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_32_build
-      - pytorch_android_gradle_custom_build_single:
-          filters:
-            branches:
-              only:
-                - /gh\/.*\/head/
-                - /pull\/.*/
-          lite_interpreter: "0"
-          name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit
-          requires:
-            - docker-pytorch-linux-xenial-py3-clang5-android-ndk-r19c
       - pytorch_android_gradle_build:
           filters:
             branches:
