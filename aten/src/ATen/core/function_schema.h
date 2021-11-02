@@ -172,6 +172,10 @@ inline bool operator==(const Argument& lhs, const Argument& rhs) {
                    && *lhs.alias_info() == *rhs.alias_info()));
 }
 
+inline bool operator!=(const Argument& lhs, const Argument& rhs) {
+  return !(lhs == rhs);
+}
+
 bool operator==(const FunctionSchema& lhs, const FunctionSchema& rhs);
 
 struct FunctionSchema {
@@ -451,7 +455,9 @@ inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
 
   if (arg.default_value()) {
     out << "=";
-    if (type->kind() == c10::TypeKind::StringType || (unopt_type->kind() == c10::TypeKind::StringType && !arg.default_value().value().isNone())) {
+    if ((type->kind() == c10::TypeKind::StringType ||
+        unopt_type->kind() == c10::TypeKind::StringType) &&
+        arg.default_value().value().isString()) {
       printQuotedString(out, arg.default_value().value().toStringRef());
     } else {
       out << arg.default_value().value();
