@@ -21,6 +21,7 @@ RegisterNNCLoweringsFunction::RegisterNNCLoweringsFunction(
 }
 
 namespace {
+// NOLINTNEXTLINE
 int nnc_lowerings_lazy_registration() {
   RegisterNNCLoweringsFunction aten_dropout(
       {"aten::dropout(Tensor input, float p, bool train) -> (Tensor)"},
@@ -1553,6 +1554,7 @@ int nnc_lowerings_lazy_registration() {
 } // namespace
 
 NNCLoweringFunction getStandardLoweringFor(const std::string& schema_str) {
+  // NOLINTNEXTLINE
   static const int once = nnc_lowerings_lazy_registration();
   const auto& lowerings = getNNCLoweringRegistry();
   if (auto l = lowerings.find(parseSchema(schema_str))) {
