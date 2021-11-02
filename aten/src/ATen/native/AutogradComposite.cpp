@@ -9,10 +9,7 @@ namespace native {
 at::Tensor _make_dual(const at::Tensor& primal, const at::Tensor& tangent, int64_t level) {
   TORCH_CHECK(!primal._fw_grad(level).defined(), "Making a dual Tensor based on a Tensor that "
               "already has a forward gradient at the same level ", level, " is not supported.");
-
-  auto dual_tensor = primal.view(primal.sizes());
-  dual_tensor._set_fw_grad(tangent, level, /* is_inplace_op */ false, /* is_make_dual */ true);
-  return dual_tensor;
+  return primal.view(primal.sizes());
 }
 
 /// This function can be used to unpack a given dual Tensor to get its primal and tangent. The returned primal
@@ -22,7 +19,7 @@ std::tuple<at::Tensor, at::Tensor> _unpack_dual(const at::Tensor& tensor, int64_
   return std::tuple<at::Tensor, at::Tensor>(tensor._fw_primal(level), tensor._fw_grad(level));
 }
 
-// See NOTE [Two New-zero Funcitons]
+// See NOTE [Two New-zero Functions]
 Tensor _new_zeros_with_meta(
     const at::Tensor& self,
     IntArrayRef sizes,

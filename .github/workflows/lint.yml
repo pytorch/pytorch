@@ -105,7 +105,7 @@ jobs:
       - name: Ensure all test files have header containing ownership information
         if: always()
         run: |
-          (! git grep -L "# Owner(s): \[" test/distributed/**/test_*.py) || (printf "The above test files are missing a comment header with ownership information; please add the following line\n\n# Owner(s): [\"<owner: label>\"]\n\nto the top of each test file. The owner should be an existing pytorch/pytorch label."; false)
+          (! git grep -L "# Owner(s): \[" ./test/distributed/**/test_*.py || (printf "The above test files are missing a comment header with ownership information; please add the following line\n\n# Owner(s): [\"<owner: label>\"]\n\nto the top of each test file. The owner should be an existing pytorch/pytorch label."; false))
 
   clang-format:
     runs-on: ubuntu-18.04

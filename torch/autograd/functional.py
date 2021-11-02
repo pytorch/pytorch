@@ -424,21 +424,14 @@ def _construct_standard_basis_for(tensors: Tuple[torch.Tensor, ...], tensor_nume
 def _jacfwd(func, inputs, strict=False, vectorize=False):
     if strict:
         raise RuntimeError('torch.autograd.functional.jacobian: `strict=True` '
-                           'and `forward_ad=True` are not supported together (yet). '
+                           'and `use_forward_ad=True` are not supported together (yet). '
                            'Please either set `strict=False` or '
-                           '`forward_ad=False`.')
+                           '`use_forward_ad=False`.')
     is_inputs_tuple, inputs = _as_tuple(inputs, "inputs", "jacobian")
-    outputs = func(*inputs)
-    is_outputs_tuple, outputs = _as_tuple(outputs,
-                                          "outputs of the user-provided function",
-                                          "jacobian")
+    output_info = []
+
     if vectorize:
         # See NOTE: [Computing jacobian with vmap and grad for multiple outputs]
-        if strict:
-            raise RuntimeError('torch.autograd.functional.jacobian: `strict=True` '
-                               'and `vectorized=True` are not supported together. '
-                               'Please either set `strict=False` or '
-                               '`vectorize=False`.')
         input_numels = tuple(input.numel() for input in inputs)
 
         # Step 1: Prepare tangents
@@ -449,18 +442,22 @@ def _jacfwd(func, inputs, strict=False, vectorize=False):
             with fwAD.dual_level():
                 dual_inputs = tuple(
                     fwAD.make_dual(input, tangent.view_as(input)) for input, tangent in zip(inputs, tangents))
-                dual_outputs = _as_tuple(func(*dual_inputs))
+                _is_outputs_tuple, dual_outputs = _as_tuple(func(*dual_inputs), "outputs")
+                output_info.append(_is_outputs_tuple)
                 jv = []
+                primal_outs = []
                 for dual_out in dual_outputs:
                     primal, tangent = fwAD.unpack_dual(dual_out)
+                    primal_outs.append(primal)
                     if tangent is not None:
                         jv.append(tangent)
                     else:
                         jv.append(torch.zeros_like(primal))
+                output_info.append(primal_outs)
                 return tuple(jv)
 
         outputs_before_split = _vmap(jvp)(tangents)
-
+        is_outputs_tuple, outputs  = output_info
         # Step 3: for each of the output tangents, split along dim 0
         jacobian_input_output = []
         for jac, output_i in zip(outputs_before_split, outputs):
@@ -477,10 +474,11 @@ def _jacfwd(func, inputs, strict=False, vectorize=False):
         # Omit [Step 4] because everything is already transposed w/ forward AD
         return _tuple_postprocess(jacobian_input_output, (is_outputs_tuple, is_inputs_tuple))
     else:
-        raise NotImplementedError("Only vectorized path is implemented")
+        raise NotImplementedError("Computing Jacobian using forward-AD or forward-over-reverse Hessian is"
+                                  "only implemented for `vectorize=True`.")
 
 
-def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False, forward_ad=False):
+def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False, use_forward_ad=False):
     r"""Function that computes the Jacobian of a given function.
 
     Args:
@@ -505,6 +503,9 @@ def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False, fo
             because this feature is still experimental, there may be performance
             cliffs. See :func:`torch.autograd.grad`'s ``batched_grad`` parameter for
             more information.
+        use_forward_ad (bool, optional): If ``True``, the Jacobian will be computed
+            with forward-mode AD. Currently this flag should be invoked with
+            ``vectorized=True`` only.
 
     Returns:
         Jacobian (Tensor or nested tuple of Tensors): if there is a single
@@ -516,7 +517,8 @@ def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False, fo
         ``i``\th output and ``j``\th input and will have as size the
         concatenation of the sizes of the corresponding output and the
         corresponding input and will have same dtype and device as the
-        corresponding input.
+        corresponding input. If ``use_forward_ad=True``, the dtype will be
+        that of the output; otherwise, the input.
 
     Example:
 
@@ -544,12 +546,12 @@ def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False, fo
          tensor([[3., 0.],
                  [0., 3.]]))
     """
-    if forward_ad:
+    if use_forward_ad:
         if create_graph:
-            raise RuntimeError('torch.autograd.functional.jacobian: `create_graph=True` '
-                               'and `forward_ad=True` are not supported together (yet). '
-                               'Please either set `strict=False` or '
-                               '`forward_ad=False`.')
+            raise NotImplementedError('torch.autograd.functional.jacobian: `create_graph=True` '
+                                      'and `use_forward_ad=True` are not supported together (yet). '
+                                      'Please either set `create_graph=False` or '
+                                      '`use_forward_ad=False`.')
         return _jacfwd(func, inputs, strict, vectorize)
 
     with torch.enable_grad():
@@ -677,7 +679,7 @@ def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False, fo
 
         return _tuple_postprocess(jacobian, (is_outputs_tuple, is_inputs_tuple))
 
-def hessian(func, inputs, create_graph=False, strict=False, vectorize=False, forward_ad=False):
+def hessian(func, inputs, create_graph=False, strict=False, vectorize=False, use_forward_ad=False):
     r"""Function that computes the Hessian of a given scalar function.
 
     Args:
@@ -703,6 +705,10 @@ def hessian(func, inputs, create_graph=False, strict=False, vectorize=False, for
             use `torch._C._debug_only_display_vmap_fallback_warnings(True)`
             to show any performance warnings and file us issues if
             warnings exist for your use case. Defaults to ``False``.
+        use_forward_ad (bool, optional): If ``True``, the Hessian will be computed
+            by first doing reverse-mode AD and then forward-mode AD. Otherwise,
+            the "outer" Jacobian will also be computed in reverse-mode AD.
+            Currently this flag should be invoked with the``vectorized=True`` only.
 
     Returns:
         Hessian (Tensor or a tuple of tuple of Tensors): if there is a single input,
@@ -769,14 +775,15 @@ def hessian(func, inputs, create_graph=False, strict=False, vectorize=False, for
         return out.squeeze()
 
     def jac_func(*inp):
-        if forward_ad:
-            # Ensure the graph is created (and not detached)
+        if use_forward_ad:
+            # _grad_preprocess requires create_graph=True and input to require_grad
+            # or else the input will be detached
             inp = tuple(t.requires_grad_(True) for t in inp)
         jac = jacobian(ensure_single_output_function, inp, create_graph=True)
         _check_requires_grad(jac, "jacobian", strict=strict)
         return jac
 
-    res = jacobian(jac_func, inputs, create_graph=create_graph, strict=strict, vectorize=vectorize, forward_ad=forward_ad)
+    res = jacobian(jac_func, inputs, create_graph=create_graph, strict=strict, vectorize=vectorize, use_forward_ad=use_forward_ad)
     return _tuple_postprocess(res, (is_inputs_tuple, is_inputs_tuple))
 
 
