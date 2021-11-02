@@ -30,10 +30,8 @@ static inline size_t compute_output_dimension(
 }
 
 enum pytorch_qnnp_status pytorch_qnnp_create_average_pooling2d_nhwc_q8(
-    uint32_t input_padding_top,
-    uint32_t input_padding_right,
-    uint32_t input_padding_bottom,
-    uint32_t input_padding_left,
+    uint32_t input_padding_height,
+    uint32_t input_padding_width,
     uint32_t pooling_height,
     uint32_t pooling_width,
     uint32_t stride_height,
@@ -145,8 +143,7 @@ enum pytorch_qnnp_status pytorch_qnnp_create_average_pooling2d_nhwc_q8(
     goto error;
   }
 
-  const bool any_padding = (input_padding_left | input_padding_top |
-                            input_padding_right | input_padding_bottom) != 0;
+  const bool any_padding = (input_padding_width | input_padding_height) != 0;
   const uint32_t kr = pytorch_qnnp_params.q8avgpool.kr;
   const uint32_t mr = pytorch_qnnp_params.q8avgpool.mr;
   const uint32_t qr = pytorch_qnnp_params.q8avgpool.qr;
@@ -162,11 +159,8 @@ enum pytorch_qnnp_status pytorch_qnnp_create_average_pooling2d_nhwc_q8(
     average_pooling->zero_pointer = zero_buffer;
   }
 
-  average_pooling->input_padding_top = input_padding_top;
-  average_pooling->input_padding_right = input_padding_right;
-  average_pooling->input_padding_bottom = input_padding_bottom;
-  average_pooling->input_padding_left = input_padding_left;
-
+  average_pooling->input_padding_height = input_padding_height;
+  average_pooling->input_padding_width = input_padding_width;
   average_pooling->kernel_height = pooling_height;
   average_pooling->kernel_width = pooling_width;
   average_pooling->stride_height = stride_height;
@@ -239,13 +233,11 @@ enum pytorch_qnnp_status pytorch_qnnp_setup_average_pooling2d_nhwc_q8(
   average_pooling->input_pixel_stride = input_pixel_stride;
 
   average_pooling->output_height = compute_output_dimension(
-      average_pooling->input_padding_top + input_height +
-          average_pooling->input_padding_bottom,
+      input_height + average_pooling->input_padding_height * 2,
       average_pooling->kernel_height,
       average_pooling->stride_height);
   average_pooling->output_width = compute_output_dimension(
-      average_pooling->input_padding_left + input_width +
-          average_pooling->input_padding_right,
+      input_width + average_pooling->input_padding_width * 2,
       average_pooling->kernel_width,
       average_pooling->stride_width);
   average_pooling->output = output;
