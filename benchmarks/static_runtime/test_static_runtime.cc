@@ -1830,3 +1830,19 @@ TEST(StaticRuntime, IndividualOps_Size) {
   testStaticRuntime(src, args2);
   testStaticRuntime(src, args1, args3);
 }
+
+TEST(StaticRuntime, IndividuaOps_Squeeze) {
+  // Note: this is a native op, not an out variant, but clone anyways
+  // to silence warnings in testStaticRuntime
+  const auto src = R"JIT(
+    def forward(self, inp, dim: int):
+        return inp.squeeze(dim).clone()
+  )JIT";
+
+  const auto a = at::randn({2, 2});
+  const auto b = at::randn({2, 2, 2});
+
+  testStaticRuntime(src, {a, 0});
+  testStaticRuntime(src, {a, 1});
+  testStaticRuntime(src, {a, -1}, {b, 2});
+}
