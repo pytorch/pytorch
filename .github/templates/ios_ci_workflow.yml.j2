@@ -42,12 +42,7 @@ jobs:
       IOS_SIGN_KEY_2022: ${{ secrets.IOS_SIGN_KEY_2022 }}
     steps:
       !{{ common.checkout_pytorch("recursive") }}
-      - name: Setup miniconda
-        uses: conda-incubator/setup-miniconda@v2
-        with:
-          auto-update-conda: true
-          python-version: 3.8
-          activate-environment: build
+      !{{ common.setup_miniconda("3.8") }}
       - name: Install ios / conda Dependencies
         run: |
           # Install dependencies

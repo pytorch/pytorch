@@ -234,3 +234,12 @@ concurrency:
           export IMAGE_NAME=${DOCKER_IMAGE_BASE#308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/}
           ./build_docker.sh
 {%- endmacro -%}
+
+{%- macro setup_miniconda(python_version) -%}
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
+        with:
+          auto-update-conda: true
+          python-version: !{{ python_version }}
+          activate-environment: build
+{%- endmacro -%}
