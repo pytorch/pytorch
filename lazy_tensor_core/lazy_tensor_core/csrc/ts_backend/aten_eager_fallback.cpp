@@ -2,9 +2,9 @@
 
 #include <unordered_map>
 
+#include "lazy_tensor_core/csrc/compiler/backend_impl_interface.h"
 #include "lazy_tensor_core/csrc/function_call_tracker.h"
 #include "lazy_tensor_core/csrc/ts_backend/EagerFallback.h"
-#include "lazy_tensor_core/csrc/ts_backend/ts_computation_client.h"
 #include "lazy_tensors/computation_client/metrics.h"
 
 namespace torch_lazy_tensors {

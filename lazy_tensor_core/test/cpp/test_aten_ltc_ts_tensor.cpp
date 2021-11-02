@@ -8,7 +8,6 @@
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/torch_util.h"
 #include "lazy_tensor_core/csrc/ts_backend/backend_impl.h"
-#include "lazy_tensor_core/csrc/ts_backend/ts_computation_client.h"
 #include "lazy_tensors/computation_client/metrics.h"
 #include "lazy_tensors/permutation_util.h"
 #include "torch_ltc_ts_test.h"

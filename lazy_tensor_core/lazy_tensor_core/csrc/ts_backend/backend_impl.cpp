@@ -1,6 +1,5 @@
 #include "lazy_tensor_core/csrc/ts_backend/backend_impl.h"
 
-#include "lazy_tensor_core/csrc/ts_backend/ts_computation_client.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_lowering_context.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
