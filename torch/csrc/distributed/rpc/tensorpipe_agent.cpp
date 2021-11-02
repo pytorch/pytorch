@@ -359,7 +359,6 @@ TensorPipeAgent::TensorPipeAgent(
     std::string selfName,
     worker_id_t selfId,
     int worldSize,
-    c10::intrusive_ptr<::c10d::ProcessGroup> processGroup,
     TensorPipeRpcBackendOptions opts,
     std::unordered_map<std::string, DeviceMap> reverseDeviceMaps,
     std::vector<c10::Device> devices,
@@ -378,8 +377,7 @@ TensorPipeAgent::TensorPipeAgent(
       rankToNameStore_("names", store),
       nameToAddressStore_("addrs", store),
       shutdownStore_("shutdown", store),
-      worldSize_(worldSize),
-      processGroup_(std::move(processGroup)) {
+      worldSize_(worldSize) {
   // collect worker names
   prepareNames();
 
