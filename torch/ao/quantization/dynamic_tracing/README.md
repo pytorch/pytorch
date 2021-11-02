@@ -232,7 +232,7 @@ It also contains the following hooks:
 2. function before and after hooks (used for dtype transitions and observation)
 3. function replacement hooks (used for substiting quantized kernels)
 
-### auto_trace_rewrite.py
+### auto_trace_rewriter.py
 
 This file defines a custom FX tracer which can encode the transforms captured
 by `AutoQuantizationState` into an FX graph. This is useful because it provides

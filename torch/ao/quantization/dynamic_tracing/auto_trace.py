@@ -15,7 +15,7 @@ from .utils import (
     get_torch_function_hook_type,
     get_module_hook_type,
 )
-from . import auto_trace_rewrite
+from . import auto_trace_rewriter
 
 logger = logging.getLogger('auto_trace')
 logging.basicConfig(level=logging.DEBUG)
@@ -77,6 +77,7 @@ def add_auto_observation(
                 logger.debug(f'__torch_function__ {str(func)} len_args {len(args)}')
 
             nonlocal qtensor_id
+            nonlocal cur_module
             kwargs = kwargs if kwargs else {}
             # if we are in a function, the current module is always a parent
             parent_module = cur_module
@@ -532,7 +533,7 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                 torch.nn.Sequential.forward = orig_nn_sequential_forward  # type: ignore[assignment]
 
         def rewrite_for_scripting(self):
-            return auto_trace_rewrite.rewrite_for_scripting(self)
+            return auto_trace_rewriter.rewrite_for_scripting(self)
 
     pack_weights_for_functionals(module)
     module.__class__ = QuantizationDispatchModule
