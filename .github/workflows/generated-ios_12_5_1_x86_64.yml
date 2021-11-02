@@ -67,7 +67,9 @@ jobs:
           brew install libtool
           conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi requests typing_extensions --yes
       - name: Run Fastlane
+        shell: bash -e {0}
         run: |
+          set -x
           cd ios/TestApp
           # install fastlane
           sudo gem install bundler && bundle install
