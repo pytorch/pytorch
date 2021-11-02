@@ -17,6 +17,7 @@ DOCKER_REGISTRY = "308535385114.dkr.ecr.us-east-1.amazonaws.com"
 GITHUB_DIR = Path(__file__).resolve().parent.parent
 
 WINDOWS_CPU_TEST_RUNNER = "windows.4xlarge"
+# contains 1 gpu
 WINDOWS_CUDA_TEST_RUNNER = "windows.8xlarge.nvidia.gpu"
 WINDOWS_RUNNERS = {
     WINDOWS_CPU_TEST_RUNNER,
@@ -24,7 +25,8 @@ WINDOWS_RUNNERS = {
 }
 
 LINUX_CPU_TEST_RUNNER = "linux.2xlarge"
-LINUX_CUDA_TEST_RUNNER = "linux.8xlarge.nvidia.gpu"
+# contains 1 gpu
+LINUX_CUDA_TEST_RUNNER = "linux.4xlarge.nvidia.gpu"
 LINUX_RUNNERS = {
     LINUX_CPU_TEST_RUNNER,
     LINUX_CUDA_TEST_RUNNER,
@@ -411,17 +413,6 @@ LINUX_WORKFLOWS = [
         build_environment="linux-bionic-cuda10.2-py3.9-gcc7",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
-        num_test_shards=2,
-        ciflow_config=CIFlowConfig(
-            run_on_canary=True,
-            labels={LABEL_CIFLOW_SLOW, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA}
-        ),
-    ),
-    CIWorkflow(
-        arch="linux",
-        build_environment="linux-xenial-cuda10.2-py3.6-gcc7",
-        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7",
-        test_runner_type=LINUX_CUDA_TEST_RUNNER,
         enable_jit_legacy_test=1,
         enable_multigpu_test=1,
         enable_nogpu_no_avx_test=1,
@@ -429,7 +420,8 @@ LINUX_WORKFLOWS = [
         enable_slow_test=1,
         num_test_shards=2,
         ciflow_config=CIFlowConfig(
-            labels=set([LABEL_CIFLOW_SLOW, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA]),
+            run_on_canary=True,
+            labels={LABEL_CIFLOW_SLOW, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA}
         ),
     ),
     CIWorkflow(
@@ -539,14 +531,23 @@ BAZEL_WORKFLOWS = [
     ),
 ]
 
+DOCKER_IMAGES = {
+    f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-cuda10.2-cudnn7-py3.6-clang9",  # for pytorch/xla
+    f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm4.1-py3.6",                 # for rocm
+    f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm4.2-py3.6",                 # for rocm
+    f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm4.3.1-py3.6",               # for rocm
+}
+
+DOCKER_IMAGES.update({
+    workflow.docker_image_base
+    for workflow in [*LINUX_WORKFLOWS, *BAZEL_WORKFLOWS]
+    if workflow.docker_image_base
+})
+
 DOCKER_WORKFLOWS = [
     DockerWorkflow(
         build_environment="docker-builds",
-        docker_images=sorted({
-            workflow.docker_image_base
-            for workflow in [*LINUX_WORKFLOWS, *BAZEL_WORKFLOWS]
-            if workflow.docker_image_base
-        }),
+        docker_images=sorted(DOCKER_IMAGES),
         # Run weekly to ensure they can build
         is_scheduled="1 * */7 * *",
     ),
