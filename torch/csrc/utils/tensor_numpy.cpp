@@ -171,8 +171,8 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor) {
 void warn_numpy_not_writeable() {
   TORCH_WARN_ONCE(
     "The given NumPy array is not writable, and PyTorch does "
-    "not support non-writable tensors. This means you can write to the "
-    "underlying (supposedly non-writable) NumPy array using the tensor. "
+    "not support non-writable tensors. This means writing to this tensor "
+    "will result in undefined behavior. "
     "You may want to copy the array to protect its data or make it writable "
     "before converting it to a tensor. This type of warning will be "
     "suppressed for the rest of this program.");
