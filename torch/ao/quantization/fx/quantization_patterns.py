@@ -47,7 +47,7 @@ from .utils import (
 
 from ..qconfig import QConfigAny
 
-from abc import ABC, abstractmethod
+from abc import ABC
 import operator
 import warnings
 
@@ -169,8 +169,6 @@ class QuantizeHandler(ABC):
         """
         return True
 
-
-    @abstractmethod
     def convert(self,
                 node: Node,
                 qconfig: QConfigAny,
