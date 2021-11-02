@@ -24,9 +24,10 @@ on:
 # For setup-miniconda, see https://github.com/conda-incubator/setup-miniconda/issues/179
 defaults:
   run:
-    shell: bash -x -e -l {0}
+    shell: bash -e -l {0}
 env:
   BUILD_ENVIRONMENT: !{{ build_environment }}
+  COMPACT_JOB_NAME: !{{ build_environment }}
   IN_CI: 1
   IS_GHA: 1
 

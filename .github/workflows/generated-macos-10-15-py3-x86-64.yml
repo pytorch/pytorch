@@ -15,9 +15,10 @@ on:
 # For setup-miniconda, see https://github.com/conda-incubator/setup-miniconda/issues/179
 defaults:
   run:
-    shell: bash -x -e -l {0}
+    shell: bash -e -l {0}
 env:
   BUILD_ENVIRONMENT: macos-10-15-py3-x86-64
+  COMPACT_JOB_NAME: macos-10-15-py3-x86-64
   IN_CI: 1
   IS_GHA: 1
 
