@@ -303,13 +303,7 @@ const auto to_script_alias = R"JIT(
       return (c)
 )JIT";
 
-const auto detach_script_0 = R"JIT(
-  def forward(self, input: Tensor):
-      a = input.detach()
-      return input is a
-)JIT";
-
-const auto detach_script_1 = R"JIT(
+const auto detach_script = R"JIT(
   def forward(self, input: Tensor):
       a = input.detach()
       return a.clone()
@@ -584,20 +578,6 @@ const auto bmm_script = R"JIT(
 const auto addmm_script = R"JIT(
   def forward(self, inp: Tensor, mat1: Tensor, mat2: Tensor, beta: float, alpha: float):
    return torch.addmm(inp, mat1, mat2, alpha=alpha, beta=beta).clone()
-)JIT";
-
-const auto if_script = R"JIT(
-  def forward(self, a: Tensor, b: Tensor, x: bool):
-    c = (a + b).relu().half().float()
-    d = b * c
-    if x:
-      e = a.flatten().half() * b.flatten().half()
-    else:
-      e = a.flatten().half() + b.flatten().half()
-    f = e.float().relu()
-    g = {"d": d, "b": b}
-    h = {"e": e, "f": f}
-    return [g, h]
 )JIT";
 
 const auto var_cat_script = R"JIT(
