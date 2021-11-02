@@ -2816,26 +2816,30 @@ void dequantize_tensor_arm<c10::qint8>(
   const int8_t* in_underlying = reinterpret_cast<const int8_t*>(in);
 
   const float32x4_t scale_fp32x4 = vdupq_n_f32(scale);
-  const float32x4_t minus_scale_times_zero_point_fp32x4 =
-      vdupq_n_f32(-scale * zero_point);
+  // Zero point is restricted to be in bounds of a signed 8 bit integer
+  const int8x8_t zero_point_s8x8 = vget_low_s8(vdupq_n_s8(static_cast<int8_t>(zero_point)));
 
   int i;
   for (i = 0; i + 16 <= N; i += 16) {
     const int8x16_t vin_s8 = vld1q_s8(in_underlying);
 
-    const int16x8_t vin_low_s16 = vmovl_s8(vget_low_s8(vin_s8)); // 0 ... 7
-    const int16x8_t vin_high_s16 = VMOVL_HIGH_S8(vin_s8); // 8 ... 15
+    // Extract upper or lower values to int16x8 and subtract zero point
+    // Each input element and the zero point are restricted to be in bounds of
+    // a signed 8 bit integer, so the difference will fit in a signed 16 bit
+    // integer
+    const int16x8_t minus_zp_low_s16 = vsubl_s8(vget_low_s8(vin_s8), zero_point_s8x8); // 0 ... 7
+    const int16x8_t minus_zp_high_s16 = vsubl_s8(vget_high_s8(vin_s8), zero_point_s8x8); // 8 ... 15
 
-    const int32x4_t vin_s32_low_low = vmovl_s16(vget_low_s16(vin_low_s16)); // 0 ... 3
-    const int32x4_t vin_s32_low_high = VMOVL_HIGH_S16(vin_low_s16); // 4 ... 7
-    const int32x4_t vin_s32_high_low = vmovl_s16(vget_low_s16(vin_high_s16)); // 8 ... 11
-    const int32x4_t vin_s32_high_high = VMOVL_HIGH_S16(vin_high_s16); // 12 ... 15
+    const int32x4_t minus_zp_low_low = vmovl_s16(vget_low_s16(minus_zp_low_s16)); // 0 ... 3
+    const int32x4_t minus_zp_low_high = VMOVL_HIGH_S16(minus_zp_low_s16); // 4 ... 7
+    const int32x4_t minus_zp_high_low = vmovl_s16(vget_low_s16(minus_zp_high_s16)); // 8 ... 11
+    const int32x4_t minus_zp_high_high = VMOVL_HIGH_S16(minus_zp_high_s16); // 12 ... 15
 
-    // Store            (... * scale) + (-scale * zero point))         int32 -> fp32
-    vst1q_f32(out,      vmlaq_f32(minus_scale_times_zero_point_fp32x4, vcvtq_f32_s32(vin_s32_low_low), scale_fp32x4));
-    vst1q_f32(out + 4,  vmlaq_f32(minus_scale_times_zero_point_fp32x4, vcvtq_f32_s32(vin_s32_low_high), scale_fp32x4));
-    vst1q_f32(out + 8,  vmlaq_f32(minus_scale_times_zero_point_fp32x4, vcvtq_f32_s32(vin_s32_high_low), scale_fp32x4));
-    vst1q_f32(out + 12, vmlaq_f32(minus_scale_times_zero_point_fp32x4, vcvtq_f32_s32(vin_s32_high_high), scale_fp32x4));
+    // Store            * scale   int32->fp32
+    vst1q_f32(out,      vmulq_f32(vcvtq_f32_s32(minus_zp_low_low), scale_fp32x4));
+    vst1q_f32(out + 4,  vmulq_f32(vcvtq_f32_s32(minus_zp_low_high), scale_fp32x4));
+    vst1q_f32(out + 8,  vmulq_f32(vcvtq_f32_s32(minus_zp_high_low), scale_fp32x4));
+    vst1q_f32(out + 12, vmulq_f32(vcvtq_f32_s32(minus_zp_high_high), scale_fp32x4));
 
     out += 16;
     in += 16;
@@ -2857,26 +2861,30 @@ void dequantize_tensor_arm<c10::quint8>(
   const uint8_t* in_underlying = reinterpret_cast<const uint8_t*>(in);
 
   const float32x4_t scale_fp32x4 = vdupq_n_f32(scale);
-  const float32x4_t minus_scale_times_zero_point_fp32x4 =
-      vdupq_n_f32(-scale * zero_point);
+  // Zero point is restricted to be in bounds of an unsigned 8 bit integer
+  const uint8x8_t zero_point_u8x8 = vget_low_u8(vdupq_n_u8(static_cast<uint8_t>(zero_point)));
 
   int i;
   for (i = 0; i + 16 <= N; i += 16) {
     const uint8x16_t vin_u8 = vld1q_u8(in_underlying);
 
-    const uint16x8_t vin_low_u16 = vmovl_u8(vget_low_u8(vin_u8)); // 0 ... 7
-    const uint16x8_t vin_high_u16 = VMOVL_HIGH_U8(vin_u8); // 8 ... 15
+    // Extract upper or lower values to uint16x8 and subtract zero point
+    // Each input element and the zero point are restricted to be in bounds of
+    // an unsigned 8 bit integer, so the difference will fit in a signed 16 bit
+    // integer
+    const int16x8_t minus_zp_low_s16 = vreinterpretq_s16_u16(vsubl_u8(vget_low_u8(vin_u8), zero_point_u8x8)); // 0 ... 7
+    const int16x8_t minus_zp_high_s16 = vreinterpretq_s16_u16(vsubl_u8(vget_high_u8(vin_u8), zero_point_u8x8)); // 8 ... 15
 
-    const uint32x4_t vin_u32_low_low = vmovl_u16(vget_low_u16(vin_low_u16)); // 0 ... 3
-    const uint32x4_t vin_u32_low_high = VMOVL_HIGH_U16(vin_low_u16); // 4 ... 7
-    const uint32x4_t vin_u32_high_low = vmovl_u16(vget_low_u16(vin_high_u16)); // 8 ... 11
-    const uint32x4_t vin_u32_high_high = VMOVL_HIGH_U16(vin_high_u16); // 12 ... 15
+    const int32x4_t minus_zp_low_low = vmovl_s16(vget_low_s16(minus_zp_low_s16)); // 0 ... 3
+    const int32x4_t minus_zp_low_high = VMOVL_HIGH_S16(minus_zp_low_s16); // 4 ... 7
+    const int32x4_t minus_zp_high_low = vmovl_s16(vget_low_s16(minus_zp_high_s16)); // 8 ... 11
+    const int32x4_t minus_zp_high_high = VMOVL_HIGH_S16(minus_zp_high_s16); // 12 ... 15
 
-    // Store            (... * scale) + (-scale * zero point))         uint32 -> fp32
-    vst1q_f32(out,      vmlaq_f32(minus_scale_times_zero_point_fp32x4, vcvtq_f32_u32(vin_u32_low_low), scale_fp32x4));
-    vst1q_f32(out + 4,  vmlaq_f32(minus_scale_times_zero_point_fp32x4, vcvtq_f32_u32(vin_u32_low_high), scale_fp32x4));
-    vst1q_f32(out + 8,  vmlaq_f32(minus_scale_times_zero_point_fp32x4, vcvtq_f32_u32(vin_u32_high_low), scale_fp32x4));
-    vst1q_f32(out + 12, vmlaq_f32(minus_scale_times_zero_point_fp32x4, vcvtq_f32_u32(vin_u32_high_high), scale_fp32x4));
+    // Store            * scale   int32->fp32
+    vst1q_f32(out,      vmulq_f32(vcvtq_f32_s32(minus_zp_low_low), scale_fp32x4));
+    vst1q_f32(out + 4,  vmulq_f32(vcvtq_f32_s32(minus_zp_low_high), scale_fp32x4));
+    vst1q_f32(out + 8,  vmulq_f32(vcvtq_f32_s32(minus_zp_high_low), scale_fp32x4));
+    vst1q_f32(out + 12, vmulq_f32(vcvtq_f32_s32(minus_zp_high_high), scale_fp32x4));
 
     out += 16;
     in += 16;
