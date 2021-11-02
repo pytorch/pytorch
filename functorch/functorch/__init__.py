@@ -71,6 +71,16 @@ setattr(torch.Tensor, 'backward', _backward)
 _old_str = torch._tensor_str._str
 
 
+def prep_value(text, indent=4):
+    first_line_txt = ''
+    lines = text.split('\n')
+    lines[0] = lines[0]
+    lines[0] = ' ' * indent + first_line_txt + lines[0]
+    for i in range(1, len(lines)):
+        lines[i] = ' ' * (indent + len(first_line_txt)) + lines[i]
+    return '\n'.join(lines)
+
+
 @functools.wraps(_old_str)
 def _functorch_str(tensor):
     level = _C.maybe_get_level(tensor)
@@ -79,13 +89,20 @@ def _functorch_str(tensor):
 
     value = _C.get_unwrapped(tensor)
     value_repr = repr(value)
-    value_repr = textwrap.indent(value_repr, '  ')
     if _C.is_batchedtensor(tensor):
         bdim = _C.maybe_get_bdim(tensor)
         assert bdim != -1
-        return f'BatchedTensor(lvl={level}, bdim={bdim}, value=\\\n{value_repr})'
+        return (
+            f'BatchedTensor(lvl={level}, bdim={bdim}, value=\n'
+            f'{prep_value(value_repr)}\n'
+            f')'
+        )
     if _C.is_gradtrackingtensor(tensor):
-        return f'GradTrackingTensor(lvl={level}, value=\\\n{value_repr})'
+        return (
+            f'GradTrackingTensor(lvl={level}, value=\n'
+            f'{prep_value(value_repr)}\n'
+            f')'
+        )
 
     raise ValueError("We don't know how to print this, please file us an issue")
 
