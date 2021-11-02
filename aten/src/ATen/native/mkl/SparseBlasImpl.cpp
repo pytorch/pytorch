@@ -100,6 +100,7 @@ void inline col_indices_and_values_resize_(const Tensor& input, int64_t nnz) {
 /*
   Resizes `input` tensor and fills it with the data from MKL.
 */
+#if AT_USE_MKL_SPARSE()
 template <typename scalar_t>
 void mkl_result_copy_(const Tensor& input, sparse_matrix_t mkl_desc) {
   sparse_index_base_t indexing = SPARSE_INDEX_BASE_ZERO;
@@ -133,6 +134,7 @@ void mkl_result_copy_(const Tensor& input, sparse_matrix_t mkl_desc) {
       crow_indices.data_ptr<MKL_INT>(), rows_start, rows * sizeof(MKL_INT));
   crow_indices.data_ptr<MKL_INT>()[rows] = nnz;
 }
+#endif
 
 /*
   Computes a sparse matrix-dense matrix product defined as
