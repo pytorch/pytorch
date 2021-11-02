@@ -375,18 +375,18 @@ class GaussianNLLLoss(_Loss):
 class KLDivLoss(_Loss):
     r"""The Kullback-Leibler divergence loss.
 
-    For tensors of the same shape :math:`y_{\text{model}},\ y_{\text{obs}}`,
-    we define the **pointwise KL-divergence** as
+    For tensors of the same shape :math:`y_{\text{pred}},\ y_{\text{true}}`,
+    where :math:`y_{\text{pred}}` is the :attr:`input` and :math:`y_{\text{true}}` is the
+    :attr:`target`, we define the **pointwise KL-divergence** as
 
     .. math::
 
-        L(y_{\text{model}},\ y_{\text{obs}})
-            = y_{\text{obs}} \cdot \log \frac{y_{\text{obs}}}{y_{\text{model}}}
-            = y_{\text{obs}} \cdot (\log y_{\text{obs}} - \log y_{\text{model}})
+        L(y_{\text{pred}},\ y_{\text{true}})
+            = y_{\text{true}} \cdot \log \frac{y_{\text{true}}}{y_{\text{pred}}}
+            = y_{\text{true}} \cdot (\log y_{\text{true}} - \log y_{\text{pred}})
 
-    As to avoid underflow issues, to compute this quantity, this loss expects the argument
-    :attr:`input`---:math:`y_{\text{model}}` in the notation above---in the log-space.
-    The argument :attr:`target`---:math:`y_{\text{obs}}` above---may also be provided in the
+    To avoid underflow issues when computing this quantity, this loss expects the argument
+    :attr:`input` in the log-space. The argument :attr:`target` may also be provided in the
     log-space if :attr:`log_target`\ `= True`.
 
     To summarise, this function is roughly equivalent to computing
@@ -414,12 +414,12 @@ class KLDivLoss(_Loss):
     .. note::
         As all the other losses in PyTorch, this function expects the first argument,
         :attr:`input`, to be the output of the model (e.g. the neural network)
-        and the second, :attr:`target`, to be the obsevations in the dataset.
+        and the second, :attr:`target`, to be the observations in the dataset.
         This differs from the standard mathematical notation :math:`KL(P\ ||\ Q)` where
         :math:`P` denotes the distribution of the observations and :math:`Q` denotes the model.
 
-    .. note::
-        :attr:`reduction`\ `= "mean"` doesn't return the true kl divergence value, please use
+    .. warning::
+        :attr:`reduction`\ `= "mean"` doesn't return the true KL divergence value, please use
         :attr:`reduction`\ `= "batchmean"` which aligns with the mathematical definition.
         In a future release, `"mean"` will be changed to be the same as `"batchmean"`.
 
@@ -448,10 +448,11 @@ class KLDivLoss(_Loss):
         >>> # input should be a distribution in the log space
         >>> input = F.log_softmax(torch.randn(3, 5, requires_grad=True))
         >>> # Sample a batch of distributions. Usually this would come from the dataset
-        >>> def normalize(p):
-        ...     return p / p.sum(1, keepdim=True)
-        >>> target = normalize(torch.rand(3, 5))
+        >>> target = F.softmax(torch.rand(3, 5))
         >>> output = kl_loss(input, target)
+
+        >>> log_target = F.log_softmax(torch.rand(3, 5))
+        >>> output = kl_loss(input, log_target, log_target=True)
     """
     __constants__ = ['reduction']
 
