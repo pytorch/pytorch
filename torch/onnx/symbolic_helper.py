@@ -3,7 +3,7 @@ import torch
 import warnings
 import inspect
 from sys import maxsize as maxsize
-from typing import Set
+from typing import Set, Dict, Optional
 
 import torch.onnx
 # This import monkey-patches graph manipulation methods on Graph, used for the
@@ -882,13 +882,14 @@ def _set_training_mode(training_mode):
     _training_mode = training_mode
 
 # Symbolic function state.
-class SymbolicFunctionState:
-    params_dict = None
-    env = None
+class SymbolicFunctionState(object):
+    # Skip check due to cannot import IValue from torch._C
+    params_dict = None  # type: ignore[var-annotated]
+    env: Optional[Dict[torch._C.Value, torch._C.Value]] = None
     # Current node that is being converted.
-    cur_node = None
+    cur_node: Optional[torch._C.Node] = None
     # Current onnx block that converted nodes are being appended to.
-    onnx_block = None
+    onnx_block: Optional[torch._C.Block] = None
 
 _symbolic_function_state = SymbolicFunctionState()
 def _set_symbolic_function_state(params_dict, env, cur_node, onnx_block):
