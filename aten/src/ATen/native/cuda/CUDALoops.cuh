@@ -121,13 +121,13 @@ static inline void launch_vectorized_kernel(int64_t N, const func_t& f, array_t 
   }
 }
 
-template<char const *name, 
-         typename result_type, 
+template<char const *name,
+         typename result_type,
          typename compute_type,
-         typename array_t, 
-         typename inp_calc_t, 
-         typename out_calc_t, 
-         typename loader_t, 
+         typename array_t,
+         typename inp_calc_t,
+         typename out_calc_t,
+         typename loader_t,
          typename storer_t>
 static inline void launch_jitted_unrolled_kernel(
   int64_t N, const std::string& f, array_t data,
@@ -135,7 +135,6 @@ static inline void launch_jitted_unrolled_kernel(
 
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
   int64_t grid = (N + block_work_size - 1) / block_work_size;
-  // auto stream = at::cuda::getCurrentCUDAStream();
 
   std::cout << "jitting is true!" << std::endl;
   std::cout << "launch_unrolled_kernel!" << std::endl;
@@ -149,8 +148,8 @@ static inline void launch_jitted_unrolled_kernel(
     std::string string_name{name};
     std::string compute_type_str = at::cuda::jit::typeName<compute_type>();
     std::string result_type_str = at::cuda::jit::typeName<result_type>();
-    auto code = at::cuda::jit::generate_code(nTensors, f, string_name, 
-                                             compute_type_str, result_type_str, 
+    auto code = at::cuda::jit::generate_code(nTensors, f, string_name,
+                                             compute_type_str, result_type_str,
                                              contiguous, dynamic_casting);
     std::cout << "generated code: " << std::endl;
     std::cout << code << std::endl;
@@ -171,71 +170,49 @@ static inline void launch_jitted_unrolled_kernel(
 }
 
 template<
-  char const *name, 
-  typename result_type, 
-  typename compute_type, 
-  int arity, 
+  char const *name,
+  typename result_type,
+  typename compute_type,
+  int arity,
   typename array_t>
 static inline void launch_jitted_vectorized_kernel(int64_t N, const std::string& f, array_t data) {
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
   int64_t grid = (N + block_work_size - 1) / block_work_size;
-  // auto stream = at::cuda::getCurrentCUDAStream();
 
-  // std::cout << "launch_jitted_vectorized_kernel!" << std::endl;
-  // const int vec_size = memory::jitted_can_vectorize_up_to<result_type, compute_type, arity>(data);
-  // std::cout << "jitted vec_size is " << vec_size << std::endl;
+  std::cout << "launch_jitted_vectorized_kernel!" << std::endl;
+  const int vec_size = memory::jitted_can_vectorize_up_to<result_type, compute_type, arity>(data);
+  std::cout << "jitted vec_size is " << vec_size << std::endl;
 
-  // // TODO: replace with vectorized kernel call
-  // // TODO: currently the jit string assumes OffsetCalculators, not TrivialOffsetCalculators
-  // //   that's why this function is currently not called
-  // auto input_calc = TrivialOffsetCalculator<arity>();
-  // auto output_calc = TrivialOffsetCalculator<1>();
-  // auto loader = memory::LoadWithoutCast();
-  // auto storer = memory::StoreWithoutCast();
-  
-  // static at::cuda::jit::NvrtcFunction fn;
-  // if (!fn.function) {
-  //   std::cout << "generating code\n";
-  //   constexpr int nTensors = array_t::size();
-  //   constexpr bool dynamic_casting = !std::is_same<decltype(loader), memory::LoadWithoutCast>() || !std::is_same<decltype(storer), memory::StoreWithoutCast>();
-  //   static_assert(dynamic_casting == false);
-  //   std::string string_name{name};
-  //   std::string compute_type_str = at::cuda::jit::typeName<compute_type>();
-  //   std::string result_type_str = at::cuda::jit::typeName<result_type>();
-  //   auto code = at::cuda::jit::generate_code(nTensors, f, string_name, 
-  //                                            compute_type_str, result_type_str, 
-  //                                            /*contiguous=*/true, dynamic_casting);
-  //   // std::cout << "generated code: " << std::endl;
-  //   // std::cout << code << std::endl;
-  //   fn = at::cuda::jit::jit_pwise_function(code, name); // TODO proper name
-  // }
+  //TODO handle 2 and 4 vec sizes, so far only one vecsize will be compiled (4)
+  static at::cuda::jit::NvrtcFunction fn;
+  if (!fn.function) {
+    std::cout << "generating code\n";
+    constexpr int nTensors = array_t::size();
+    std::string string_name{name};
+    std::string compute_type_str = at::cuda::jit::typeName<compute_type>();
+    std::string result_type_str = at::cuda::jit::typeName<result_type>();
+    auto code = at::cuda::jit::generate_code(nTensors, f, string_name,
+                                              compute_type_str, result_type_str,
+                                              /*contiguous=*/true, /*dynamic_casting=*/false,
+                                              /*vectorized=*/true, vec_size);
+    std::cout << "generated code: " << std::endl;
+    std::cout << code << std::endl;
+    std::string kernel_name = string_name + "_vectorized";
+    fn = at::cuda::jit::jit_pwise_function(code, kernel_name); // TODO proper name
+  }
 
-  // // packs args
-  // std::array<void*, 6> args = {
-  //   (void*)&N,
-  //   (void*)&data,
-  //   (void*)&input_offset_calculator,
-  //   (void*)&output_offset_calculator,
-  //   (void*)&loader,
-  //   (void*)&storer
-  // };
-  // at::cuda::jit::launch_jitted_pwise_function(fn, args, grid, num_threads);
-  // C10_CUDA_KERNEL_LAUNCH_CHECK();
+  // packs args
+  std::array<void*, 6> args = {
+    (void*)&N,
+    (void*)&data,
+    nullptr,
+    nullptr,
+    nullptr,
+    nullptr,
+  };
+  at::cuda::jit::launch_jitted_pwise_function(fn, args, grid, num_threads);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-  // TODO: provide nvrtc scaffold
-  // TODO: provide inline caching with (static?) pointers
-  
-  // TODO support vectorization
-  // switch (vec_size) {
-  //   case 4:
-  //     break;
-  //   case 2:
-  //     break;
-  //   case 1:
-  //     break;
-  //   default:
-  //     TORCH_INTERNAL_ASSERT(false, "Unexpected jit vectorization size");
-  // }
 }
 
 template<typename func_t, typename array_t, typename inp_calc_t, typename out_calc_t, typename loader_t, typename storer_t>
@@ -267,17 +244,17 @@ void jitted_gpu_kernel_impl(TensorIteratorBase& iter, const std::string& f, cons
   bool contiguous = iter.is_contiguous();
 
   if (!dynamic_casting) {
-    // if (contiguous) {
-    //   std::cout << "jitted_gpu_kernel_impl !dynamic_casting and contiguous" << std::endl;
-    //   launch_jitted_vectorized_kernel<name, result_type, compute_type, arity>(numel, f, data);
-    // } else {
+    if (contiguous) {
+      std::cout << "jitted_gpu_kernel_impl !dynamic_casting and contiguous" << std::endl;
+      launch_jitted_vectorized_kernel<name, result_type, compute_type, arity>(numel, f, data);
+    } else {
       std::cout << "jitted_gpu_kernel_impl !dynamic_casting " << std::endl;
       auto input_offset_calculator = make_input_offset_calculator<arity>(iter);
       auto output_offset_calculator = make_output_offset_calculator(iter);
       auto loader = memory::LoadWithoutCast();
       auto storer = memory::StoreWithoutCast();
       launch_jitted_unrolled_kernel<name, result_type, compute_type>(numel, f, data, input_offset_calculator, output_offset_calculator, loader, storer, contiguous);
-    // }
+    }
   } else {
     at::detail::Array<ScalarType, arity> dtypes;
     for (auto i = decltype(arity){0}; i < arity; ++i) {

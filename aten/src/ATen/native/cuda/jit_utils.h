@@ -16,13 +16,13 @@ struct NvrtcFunction {
 };
 
 // Silly functions
-std::string silly_generate_code();
+//std::string silly_generate_code();
 
-void launch_silly_jitted_pwise_function(
-    NvrtcFunction function,
-    std::array<void*, 4>& args,
-    const int nBlocks,
-    const int kBlockSize);
+// void launch_silly_jitted_pwise_function(
+//     NvrtcFunction function,
+//     std::array<void*, 4>& args,
+//     const int nBlocks,
+//     const int kBlockSize);
 
 // Serious functions
 std::string generate_code(
@@ -32,7 +32,9 @@ std::string generate_code(
     const std::string& common_type,
     const std::string& result_type,
     bool contiguous,
-    bool dynamic_casting);
+    bool dynamic_casting,
+    bool vectorized=false,
+    int vec_size=0);
 NvrtcFunction jit_pwise_function(
     const std::string& code,
     const std::string& kernel_name);
@@ -43,7 +45,8 @@ void launch_jitted_pwise_function(
     const int kBlockSize);
 
 template <typename T> inline std::string typeName(){
-    return std::string("void");
+    TORCH_INTERNAL_ASSERT(false, "invalid type");
+    return "void";
 }
 
 #define TYPE_NAME_FN(ctype, name) \

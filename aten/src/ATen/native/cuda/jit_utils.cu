@@ -8,6 +8,7 @@
 //#include <c10/util/Optional.h>
 #include <ATen/native/cuda/jit_utils.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
+#include <c10/util/irange.h>
 namespace at{
 
 namespace cuda{
@@ -28,16 +29,16 @@ torch::jit::CodeTemplate load_code_template(const std::string& path) {
 
 }
 
-std::string silly_generate_code() {
-    torch::jit::TemplateEnv env;
-    env.s("name", "i0");
-    env.s("scalar_t", "float");
-    env.s("nTensorArgs", "2");
-    env.s("nInputTensors", "1");
-    static auto cuda_template = load_code_template(
-      "/private/home/mruberry/git/pytorch/aten/src/ATen/native/cuda/silly_code_template.cuh");
-    return cuda_template.format(env);
-}
+// std::string silly_generate_code() {
+//     torch::jit::TemplateEnv env;
+//     env.s("name", "i0");
+//     env.s("scalar_t", "float");
+//     env.s("nTensorArgs", "2");
+//     env.s("nInputTensors", "1");
+//     static auto cuda_template = load_code_template(
+//       "/private/home/mruberry/git/pytorch/aten/src/ATen/native/cuda/silly_code_template.cuh");
+//     return cuda_template.format(env);
+// }
 
 std::string generate_code(
     int nTensors,
@@ -46,7 +47,9 @@ std::string generate_code(
     const std::string& common_type,
     const std::string& result_type,
     bool contiguous,
-    bool dynamic_casting) {
+    bool dynamic_casting,
+    bool vectorized,
+    int vec_size) {
   torch::jit::TemplateEnv env;
   env.s("index_type", "unsigned int");
   const int nInputs = nTensors - 1;
@@ -63,42 +66,70 @@ std::string generate_code(
   }
   env.s("declare_load_arrays", declare_load_arrays.str());
   std::stringstream declare_store_arrays;
-  declare_store_arrays << common_type << " out"
+  declare_store_arrays << result_type << " out"
                        << "[" << std::to_string(thread_work_size) << "];\n";
   env.s("declare_store_arrays", declare_store_arrays.str());
-  if (!dynamic_casting) {
-    env.s("loader", "LoadWithoutCast");
-    env.s("storer", "StoreWithoutCast");
-  } else {
-    env.s(
-        "loader", std::string("LoadWithCast<" + std::to_string(nInputs) + ">"));
-    env.s("storer", "StoreWithCast");
-  }
-  std::stringstream load_inputs;
   const int nOutputs = 1; // FIXME
-  for (int i = 0; i < nInputs; i++) {
-    auto i_string = std::to_string(i);
-    load_inputs << "arg" << i_string << "[j] = l.load<" << common_type
-                << ">(data[" << std::to_string(i + nOutputs)
-                << "], input_offsets[" << i_string << "], " << i_string
-                << ");\n";
-  }
-  env.s("load_inputs", load_inputs.str());
-  std::stringstream store_outputs;
-  store_outputs << "s.store<" << result_type
-                << ">(out[j], data[0], output_offsets[0]);\n";
-  env.s("store_outputs", store_outputs.str());
   std::stringstream functor_args;
   for (int i = 0; i < nInputs - 1; i++) {
     functor_args << "arg" << std::to_string(i) << "[j], ";
   }
   functor_args << "arg" << std::to_string(nInputs - 1) << "[j]";
   env.s("args", functor_args.str());
+  if (!vectorized) {
+    if (!dynamic_casting) {
+      env.s("loader", "LoadWithoutCast");
+      env.s("storer", "StoreWithoutCast");
+    } else {
+      env.s(
+          "loader", std::string("LoadWithCast<" + std::to_string(nInputs) + ">"));
+      env.s("storer", "StoreWithCast");
+    }
+    std::stringstream load_inputs;
+    for (int i = 0; i < nInputs; i++) {
+      auto i_string = std::to_string(i);
+      load_inputs << "arg" << i_string << "[j] = l.load<" << common_type
+                  << ">(data[" << std::to_string(i + nOutputs)
+                  << "], input_offsets[" << i_string << "], " << i_string
+                  << ");\n";
+    }
+    env.s("load_inputs", load_inputs.str());
+    std::stringstream store_outputs;
+    store_outputs << "s.store<" << result_type
+                  << ">(out[j], data[0], output_offsets[0]);\n";
+    env.s("store_outputs", store_outputs.str());
+      static auto cuda_template = load_code_template(
+        "/home/ngimel/local/pytorch/aten/src/ATen/native/cuda/jit_code_template.cuh");
+    return cuda_template.format(env);
+  } else {
+    env.s("vec_size", std::to_string(vec_size));
+    env.s("result_type", result_type);
+    std::stringstream vector_pointers;
+    for (const auto i : c10::irange(nInputs)){
+      auto i_string = std::to_string(i);
+      vector_pointers << "vec_t_input * vec" << i_string <<
+      " = reinterpret_cast<vec_t_input *>(data[" << i_string << "+1])" <<
+      " + block_work_size / vec_size * idx;\n";
+    }
+    env.s("vector_pointers", vector_pointers.str());
+    std::stringstream load_vectorized_inputs;
+    for (const auto i : c10::irange(nInputs)) {
+      auto i_string = std::to_string(i);
+      load_vectorized_inputs << "v = vec" << i_string << "[thread_idx];\n";
+      load_vectorized_inputs << "#pragma unroll\n";
+      load_vectorized_inputs << "for (int j=0; j < vec_size; j++){\n";
+      load_vectorized_inputs << "  arg" << i_string << "[vec_size * i + j] = v.val[j];\n";
+      load_vectorized_inputs << "}\n";
+    }
+    env.s("load_vectorized_inputs", load_vectorized_inputs.str());
 
-  static auto cuda_template = load_code_template(
-      "/private/home/mruberry/git/pytorch/aten/src/ATen/native/cuda/jit_code_template.cuh");
-  return cuda_template.format(env);
+    static auto cuda_template = load_code_template(
+      "/home/ngimel/local/pytorch/aten/src/ATen/native/cuda/jit_vectorized_template.cuh");
+    return cuda_template.format(env);
+  }
+
 }
+
 
 NvrtcFunction jit_pwise_function(
     const std::string& code,
@@ -216,30 +247,7 @@ void launch_jitted_pwise_function(
 }
 
 // TODO: may need/want to initialize CUDA context here (refactor into nvrtc call)
-void launch_silly_jitted_pwise_function(
-    NvrtcFunction function,
-    std::array<void*, 4>& args,
-    const int nBlocks,
-    const int kBlockSize) {
 
-  std::cout << "launching silly jitted pwise function" << std::endl;
-
-  const auto& nvrtc = at::globalContext().getNVRTC();
-  // Launches kernel on current stream
-  auto stream = at::cuda::getCurrentCUDAStream();
-  AT_CUDA_DRIVER_CHECK(nvrtc.cuLaunchKernel(
-    function.function,
-    nBlocks,
-    1,
-    1,
-    kBlockSize,
-    1,
-    1,
-    0,
-    stream,
-    args.data(),
-    nullptr));
-}
 
 }
 }
