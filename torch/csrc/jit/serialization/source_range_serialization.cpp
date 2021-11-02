@@ -24,7 +24,7 @@ class SourceRangeSerializer {
 };
 
 SourceRange SourceRangeDeserializer::deserialize(const c10::IValue& iv) {
-  const auto& tup_elems = iv.toTuple()->elements();
+  const auto& tup_elems = iv.toTupleRef().elements();
   TORCH_INTERNAL_ASSERT(tup_elems.size() == 3);
   std::shared_ptr<SourceView> source_ = deserialize_source(tup_elems[0]);
   int64_t start_ = tup_elems[1].toInt();
@@ -117,7 +117,7 @@ void ConcreteSourceRangeUnpickler::unpickle() {
 
   unpickled_records = std::make_shared<SourceRangeRecords>();
   for (auto& val : ivalues) {
-    const auto& tup_elems = val.toTuple()->elements();
+    const auto& tup_elems = val.toTupleRef().elements();
     int64_t offset = tup_elems[kByteOffsetIndex].toInt();
     auto source_range = deserializer->deserialize(tup_elems[kSourceRangeIndex]);
     unpickled_records->emplace_back(offset, std::move(source_range));

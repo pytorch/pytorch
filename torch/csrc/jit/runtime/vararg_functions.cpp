@@ -218,7 +218,7 @@ void percentFormat(Stack& stack, size_t num_inputs) {
   auto args = last(stack, num_inputs - 1)[0];
   auto args_size = 1; // assumed size
   if (args.isTuple()) {
-    args_size = args.toTuple()->elements().size();
+    args_size = args.toTupleRef().elements().size();
   }
   std::stringstream ss;
   size_t used_args = 0;
@@ -243,7 +243,7 @@ void percentFormat(Stack& stack, size_t num_inputs) {
     char key = format_str.at(format_idx);
     IValue arg;
     if (args.isTuple()) {
-      arg = args.toTuple()->elements()[used_args];
+      arg = args.toTupleRef().elements()[used_args];
     } else {
       arg = args;
     }
