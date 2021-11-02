@@ -36,11 +36,12 @@ TEST(TorchDeployGPUTest, SimpleModel) {
     auto M = model.acquireSession();
     M.self.attr("to")({"cuda"});
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<at::IValue> inputs;
   {
     auto I = p.acquireSession();
     auto eg = I.self.attr("load_pickle")({"model", "example.pkl"}).toIValue();
-    inputs = eg.toTuple()->elements();
+    inputs = eg.toTupleRef().elements();
     inputs[0] = inputs[0].toTensor().to("cuda");
   }
   at::Tensor output = model(inputs).toTensor();
