@@ -242,7 +242,6 @@ libtorch_python_generated_sources = [
 genrule(
     name = "all_generated_code",
     srcs = [
-        "aten/src/ATen/Declarations.yaml",
         "aten/src/ATen/native/native_functions.yaml",
     ],
     outs = libtorch_cpp_generated_sources + libtorch_python_generated_sources,
