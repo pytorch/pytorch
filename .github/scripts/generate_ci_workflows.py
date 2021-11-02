@@ -547,7 +547,7 @@ BAZEL_WORKFLOWS = [
 IOS_WORKFLOWS = [
     CIWorkflow(
         arch="macos",
-        build_environment="ios_12_5_1_arm64",
+        build_environment="ios-12-5-1-arm64",
         exclude_test=True,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_IOS, LABEL_CIFLOW_MACOS},
@@ -555,7 +555,7 @@ IOS_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="macos",
-        build_environment="ios_12_5_1_arm64_coreml",
+        build_environment="ios-12-5-1-arm64-coreml",
         exclude_test=True,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_IOS, LABEL_CIFLOW_MACOS},
@@ -563,7 +563,7 @@ IOS_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="macos",
-        build_environment="ios_12_5_1_arm64_full_jit",
+        build_environment="ios-12-5-1-arm64-full-jit",
         exclude_test=True,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_IOS, LABEL_CIFLOW_MACOS},
@@ -571,7 +571,7 @@ IOS_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="macos",
-        build_environment="ios_12_5_1_arm64_custom_ops",
+        build_environment="ios-12-5-1-arm64-custom-ops",
         exclude_test=True,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_IOS, LABEL_CIFLOW_MACOS},
@@ -579,7 +579,7 @@ IOS_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="macos",
-        build_environment="ios_12_5_1_arm64_metal",
+        build_environment="ios-12-5-1-arm64-metal",
         exclude_test=True,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_IOS, LABEL_CIFLOW_MACOS},
@@ -587,7 +587,7 @@ IOS_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="macos",
-        build_environment="ios_12_5_1_x86_64",
+        build_environment="ios-12-5-1-x86-64",
         exclude_test=True,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_IOS, LABEL_CIFLOW_MACOS},
@@ -595,7 +595,7 @@ IOS_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="macos",
-        build_environment="ios_12_5_1_x86_64_coreml",
+        build_environment="ios-12-5-1-x86-64-coreml",
         exclude_test=True,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_IOS, LABEL_CIFLOW_MACOS},
@@ -603,7 +603,7 @@ IOS_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="macos",
-        build_environment="ios_12_5_1_x86_64_full_jit",
+        build_environment="ios-12-5-1-x86-64-full-jit",
         exclude_test=True,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_IOS, LABEL_CIFLOW_MACOS},
