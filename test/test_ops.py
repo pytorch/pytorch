@@ -16,7 +16,7 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_methods_invocations import \
     (op_db, _NOTHING, UnaryUfuncInfo, ReductionOpInfo, SpectralFuncInfo)
 from torch.testing._internal.common_device_type import \
-    (deviceCountAtLeast, instantiate_device_type_tests, ops, onlyCUDA, onlyOnCPUAndCUDA, skipCUDAIfRocm, OpDTypes)
+    (deviceCountAtLeast, instantiate_device_type_tests, ops, onlyCUDA, onlyNativeDeviceTypes, skipCUDAIfRocm, OpDTypes, skipMeta)
 from torch.testing._internal.common_jit import JitCommonTestCase, check_against_reference
 from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, create_traced_fn, \
     check_alias_annotation
@@ -58,8 +58,9 @@ class TestCommon(TestCase):
 
     # Validates that each OpInfo specifies its forward and backward dtypes
     #   correctly for CPU and CUDA devices
+    @skipMeta
     @skipCUDAIfRocm
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @ops(op_db, dtypes=OpDTypes.none)
     def test_dtypes(self, device, op):
         # dtypes to try to backward in
@@ -197,7 +198,7 @@ class TestCommon(TestCase):
 
     # Tests that the function and its (ndarray-accepting) reference produce the same
     #   values on the tensors from sample_inputs func for the corresponding op.
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @suppress_warnings
     @ops(_ref_test_ops, allowed_dtypes=(torch.float32, torch.long, torch.complex64))
     def test_reference_testing(self, device, dtype, op):
@@ -211,7 +212,7 @@ class TestCommon(TestCase):
     # TODO: get working with ASAN by addressing failing operators
     @unittest.skipIf(IS_WINDOWS, "Skipped under Windows")
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @suppress_warnings
     @ops(op_db, allowed_dtypes=(torch.float32, torch.long, torch.complex64))
     def test_noncontiguous_samples(self, device, dtype, op):
