@@ -2,14 +2,27 @@
 
 #include <torch/jit.h>
 #include "lazy_tensor_core/csrc/lowering_context.h"
+#include "lazy_tensor_core/csrc/ts_backend/ts_node_lowering.h"
 #include "torch/csrc/jit/runtime/graph_executor.h"
-
 namespace torch_lazy_tensors {
 namespace compiler {
 
 using TSOpVector = std::vector<torch::jit::Value*>;
 
-class NodeLowering;
+class TSNodeLoweringInterface {
+  /**
+   * This interface is only needed for legacy ops, and can be removed once all ops
+   * implement TSNode->lower().
+   * */
+ public:
+  TSNodeLoweringInterface() = default;
+
+  virtual ~TSNodeLoweringInterface() = default;
+
+  virtual bool Lower(const torch::lazy::Node* node) = 0;
+
+  static std::unique_ptr<TSNodeLoweringInterface> Create(ir::LoweringContext* loctx);
+};
 
 namespace ts_backend {
 
@@ -76,7 +89,7 @@ class TSLoweringContext : public ir::LoweringContext {
       parameters_map_;
   std::vector<torch::jit::Value*> root_tuple_;
   torch::lazy::OutputMap<torch::jit::Value*> emitted_outputs_;
-  std::unique_ptr<NodeLowering> lowering_;
+  std::unique_ptr<TSNodeLoweringInterface> lowering_;
 };
 
 }  // namespace ts_backend

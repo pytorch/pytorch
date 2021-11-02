@@ -1,6 +1,6 @@
 #include "lazy_tensor_core/csrc/ops/convolution_backward_overrideable.h"
 
-#include "lazy_tensor_core/csrc/compiler/node_lowering.h"
+#include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -23,7 +23,7 @@ ConvolutionBackwardOverrideable::ConvolutionBackwardOverrideable(
       transposed_(transposed),
       groups_(groups) {
   SetShapeDeferred(
-      [&]() { return compiler::NodeLowering::Get()->Infer(this); });
+      [&]() { return compiler::InferShape(this); });
 }
 
 ConvolutionBackwardOverrideable::ConvolutionBackwardOverrideable(

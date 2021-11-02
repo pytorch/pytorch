@@ -1,6 +1,6 @@
 #include "lazy_tensor_core/csrc/ops/cat.h"
 
-#include "lazy_tensor_core/csrc/compiler/node_lowering.h"
+#include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
 #include "lazy_tensors/computation_client/util.h"
 
 namespace torch_lazy_tensors {

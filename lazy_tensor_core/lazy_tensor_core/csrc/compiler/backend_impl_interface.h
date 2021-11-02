@@ -5,7 +5,6 @@
 #include <ATen/Tensor.h>
 #include "lazy_tensor_core/csrc/lowering_context.h"
 #include "lazy_tensor_core/csrc/compiler/data.h"
-#include "lazy_tensor_core/csrc/compiler/node_lowering.h"
 #include "lazy_tensors/shape.h"
 #include "lazy_tensors/statusor.h"
 
@@ -14,11 +13,6 @@ namespace compiler {
 
 class BackendImplInterface {
  public:
-  virtual std::unique_ptr<NodeLowering> CreateNodeLowering(
-      ir::LoweringContext* loctx) const = 0;
-
-  // For inference only.
-  virtual NodeLowering* GetNodeLowering() const = 0;
 
   virtual std::unique_ptr<ir::LoweringContext> CreateLoweringContext(
       const std::string& name, Device device,

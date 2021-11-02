@@ -1,6 +1,6 @@
 #include "lazy_tensor_core/csrc/ops/update_slice.h"
 
-#include "lazy_tensor_core/csrc/compiler/node_lowering.h"
+#include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
 #include "lazy_tensor_core/csrc/ops/ltc_ops.h"
 
 namespace torch_lazy_tensors {
@@ -14,7 +14,7 @@ UpdateSlice::UpdateSlice(const torch::lazy::Value& input,
              /*num_outputs=*/1, torch::lazy::MHash(base_indices)),
       base_indices_(base_indices.begin(), base_indices.end()) {
   SetShapeDeferred(
-      [&]() { return compiler::NodeLowering::Get()->Infer(this); });
+      [&]() { return compiler::InferShape(this); });
 }
 
 NodePtr UpdateSlice::Clone(OpList operands) const {

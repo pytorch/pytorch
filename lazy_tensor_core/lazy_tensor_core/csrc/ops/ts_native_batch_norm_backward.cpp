@@ -1,6 +1,6 @@
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_backward.h"
 
-#include "lazy_tensor_core/csrc/compiler/node_lowering.h"
+#include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -21,7 +21,7 @@ TSNativeBatchNormBackward::TSNativeBatchNormBackward(
       eps_(eps),
       output_mask_(output_mask) {
   SetShapeDeferred(
-      [&]() { return compiler::NodeLowering::Get()->Infer(this); });
+      [&]() { return compiler::InferShape(this); });
 }
 
 TSNativeBatchNormBackward::TSNativeBatchNormBackward(
@@ -37,7 +37,7 @@ TSNativeBatchNormBackward::TSNativeBatchNormBackward(
       eps_(eps),
       output_mask_(output_mask) {
   SetShapeDeferred(
-      [&]() { return compiler::NodeLowering::Get()->Infer(this); });
+      [&]() { return compiler::InferShape(this); });
 }
 
 NodePtr TSNativeBatchNormBackward::Clone(OpList operands) const {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
+#include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_node_lowering.h"
 
 namespace torch_lazy_tensors {
@@ -40,7 +41,6 @@ class Cat : public TsNode {
     return cat_out;
 
   }
-
 
  private:
   int64_t dim_;

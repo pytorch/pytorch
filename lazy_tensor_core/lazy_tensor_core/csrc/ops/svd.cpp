@@ -1,6 +1,6 @@
 #include "lazy_tensor_core/csrc/ops/svd.h"
 
-#include "lazy_tensor_core/csrc/compiler/node_lowering.h"
+#include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
 #include "lazy_tensors/computation_client/util.h"
 
 namespace torch_lazy_tensors {
@@ -13,7 +13,7 @@ SVD::SVD(const torch::lazy::Value& input, bool some, bool compute_uv)
       some_(some),
       compute_uv_(compute_uv) {
   SetShapeDeferred(
-      [&]() { return compiler::NodeLowering::Get()->Infer(this); });
+      [&]() { return compiler::InferShape(this); });
 }
 
 NodePtr SVD::Clone(OpList operands) const {

@@ -4,7 +4,7 @@
 
 #include <cmath>
 
-#include "lazy_tensor_core/csrc/compiler/node_lowering.h"
+#include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/ops/arithmetic_ir_ops.h"
 #include "lazy_tensor_core/csrc/ops/constant.h"
@@ -31,7 +31,7 @@ using torch::lazy::ScopePusher;
   NodePtr name(const torch::lazy::Value& input0, const torch::lazy::Value& input1) {                   \
     NodePtr node = GenericOp(OpKind(sym), {input0, input1});                 \
     std::dynamic_pointer_cast<TsNode>(node)->SetShapeDeferred(                                                  \
-        [&]() { return compiler::NodeLowering::Get()->Infer(node.get()); }); \
+        [&]() { return compiler::InferShape(node.get()); }); \
     return node;                                                             \
   }
 
@@ -105,7 +105,7 @@ NodePtr Clamp(const torch::lazy::Value& input, const torch::lazy::Value& min, co
 NodePtr Ger(const torch::lazy::Value& input, const torch::lazy::Value& other) {
   NodePtr node = GenericOp(OpKind(at::aten::ger), {input, other});
   std::dynamic_pointer_cast<TsNode>(node)->SetShapeDeferred(
-      [&]() { return compiler::NodeLowering::Get()->Infer(node.get()); });
+      [&]() { return compiler::InferShape(node.get()); });
   return node;
 }
 
@@ -114,7 +114,7 @@ NodePtr AdaptiveAvgPool3dBackward(const torch::lazy::Value& grad_output,
   NodePtr node = GenericOp(OpKind(at::aten::adaptive_avg_pool3d_backward),
                            {grad_output, input});
   std::dynamic_pointer_cast<TsNode>(node)->SetShapeDeferred(
-      [&]() { return compiler::NodeLowering::Get()->Infer(node.get()); });
+      [&]() { return compiler::InferShape(node.get()); });
   return node;
 }
 
@@ -123,14 +123,14 @@ NodePtr AdaptiveAvgPool2dBackward(const torch::lazy::Value& grad_output,
   NodePtr node = GenericOp(OpKind(at::aten::adaptive_avg_pool2d_backward),
                            {grad_output, input});
   std::dynamic_pointer_cast<TsNode>(node)->SetShapeDeferred(
-      [&]() { return compiler::NodeLowering::Get()->Infer(node.get()); });
+      [&]() { return compiler::InferShape(node.get()); });
   return node;
 }
 
 NodePtr ComparisonOp(c10::Symbol kind, const torch::lazy::Value& input, const torch::lazy::Value& other) {
   NodePtr node = GenericOp(OpKind(kind), {input, other});
   std::dynamic_pointer_cast<TsNode>(node)->SetShapeDeferred(
-      [&]() { return compiler::NodeLowering::Get()->Infer(node.get()); });
+      [&]() { return compiler::InferShape(node.get()); });
   return node;
 }
 
@@ -143,7 +143,7 @@ NodePtr BroadcastTensors(OpList tensors) {
   NodePtr node = GenericOp(OpKind(at::aten::broadcast_tensors), tensors,
                            /*num_outputs=*/tensors.size());
   std::dynamic_pointer_cast<TsNode>(node)->SetShapeDeferred(
-      [&]() { return compiler::NodeLowering::Get()->Infer(node.get()); });
+      [&]() { return compiler::InferShape(node.get()); });
   return node;
 }
 
@@ -216,7 +216,7 @@ NodePtr Lerp(const torch::lazy::Value& start, const torch::lazy::Value& end, con
 NodePtr LogicalAnd(const torch::lazy::Value& input, const torch::lazy::Value& other) {
   NodePtr node = GenericOp(OpKind(at::aten::logical_and), {input, other});
   std::dynamic_pointer_cast<TsNode>(node)->SetShapeDeferred(
-      [&]() { return compiler::NodeLowering::Get()->Infer(node.get()); });
+      [&]() { return compiler::InferShape(node.get()); });
   return node;
 }
 

@@ -1,6 +1,6 @@
 #include "lazy_tensor_core/csrc/ops/expand.h"
 
-#include "lazy_tensor_core/csrc/compiler/node_lowering.h"
+#include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
 #include "lazy_tensors/computation_client/util.h"
 
 namespace torch_lazy_tensors {
@@ -14,7 +14,7 @@ Expand::Expand(const torch::lazy::Value& input, std::vector<int64_t> size,
       size_(std::move(size)),
       is_scalar_expand_(is_scalar_expand) {
   SetShapeDeferred(
-      [&]() { return compiler::NodeLowering::Get()->Infer(this); });
+      [&]() { return compiler::InferShape(this); });
 }
 
 NodePtr Expand::Clone(OpList operands) const {

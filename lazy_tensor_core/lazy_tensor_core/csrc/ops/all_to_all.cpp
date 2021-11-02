@@ -1,6 +1,6 @@
 #include "lazy_tensor_core/csrc/ops/all_to_all.h"
 
-#include "lazy_tensor_core/csrc/compiler/node_lowering.h"
+#include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
 #include "lazy_tensor_core/csrc/ops/ltc_ops.h"
 #include "lazy_tensors/shape_util.h"
 
@@ -21,7 +21,7 @@ AllToAll::AllToAll(const torch::lazy::Value& input,
       split_count_(split_count),
       groups_(std::move(groups)) {
   SetShapeDeferred(
-      [&]() { return compiler::NodeLowering::Get()->Infer(this); });
+      [&]() { return compiler::InferShape(this); });
 }
 
 NodePtr AllToAll::Clone(OpList operands) const {

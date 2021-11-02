@@ -1,6 +1,6 @@
 #include "lazy_tensor_core/csrc/ops/generic_slice.h"
 
-#include "lazy_tensor_core/csrc/compiler/node_lowering.h"
+#include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
 #include "lazy_tensor_core/csrc/ops/ltc_ops.h"
 
 namespace torch_lazy_tensors {
@@ -15,7 +15,7 @@ GenericSlice::GenericSlice(const torch::lazy::Value& input,
       base_indices_(base_indices.begin(), base_indices.end()),
       sizes_(sizes.begin(), sizes.end()) {
   SetShapeDeferred(
-      [&]() { return compiler::NodeLowering::Get()->Infer(this); });
+      [&]() { return compiler::InferShape(this); });
 }
 
 NodePtr GenericSlice::Clone(OpList operands) const {

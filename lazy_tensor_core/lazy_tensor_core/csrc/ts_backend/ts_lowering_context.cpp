@@ -1,6 +1,8 @@
+#include "lazy_tensor_core/csrc/ts_backend/ts_node_lowering.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_lowering_context.h"
 
-#include "lazy_tensor_core/csrc/compiler/node_lowering.h"
+#include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
+#include "lazy_tensors/str_cat.h"
 
 namespace torch_lazy_tensors {
 namespace compiler {
@@ -9,7 +11,7 @@ namespace ts_backend {
 TSLoweringContext::TSLoweringContext(const std::string& name, Device device)
     : ir::LoweringContext(name, device),
       graph_(std::make_shared<torch::jit::Graph>()) {
-  lowering_ = NodeLowering::Create(this);
+  lowering_ = TSNodeLoweringInterface::Create(this);
 }
 
 TSLoweringContext::TSLoweringContext(
@@ -18,7 +20,7 @@ TSLoweringContext::TSLoweringContext(
     ir::Util::EmissionMap emit_status)
     : ir::LoweringContext(name, device, post_order, emit_status),
       graph_(std::make_shared<torch::jit::Graph>()) {
-  lowering_ = NodeLowering::Create(this);
+  lowering_ = TSNodeLoweringInterface::Create(this);
   for (auto node : post_order) {
     bool ok = lowering_->Lower(node);
     CHECK(ok) << "Failed to lower: " << *node;

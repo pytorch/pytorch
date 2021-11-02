@@ -10,14 +10,6 @@ BackendRegistrar::BackendRegistrar(
   backend_impl_registry.store(backend_impl_interface);
 }
 
-std::unique_ptr<NodeLowering> NodeLowering::Create(ir::LoweringContext* loctx) {
-  return getBackendRegistrar()->CreateNodeLowering(loctx);
-}
-
-NodeLowering* NodeLowering::Get() {
-  return getBackendRegistrar()->GetNodeLowering();
-}
-
 std::vector<std::string> GetCompilationDevices(
     const std::string& device, c10::ArrayRef<std::string> devices) {
   return torch_lazy_tensors::compiler::getBackendRegistrar()

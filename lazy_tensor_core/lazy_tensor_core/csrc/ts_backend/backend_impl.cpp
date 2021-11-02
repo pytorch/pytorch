@@ -2,7 +2,7 @@
 
 #include "lazy_tensor_core/csrc/ts_backend/ts_computation_client.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_lowering_context.h"
-#include "lazy_tensor_core/csrc/ts_backend/ts_node_lowering.h"
+#include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/computation_client/sys_util.h"
 
@@ -11,13 +11,6 @@ namespace compiler {
 
 class TSBackendImpl : public BackendImplInterface {
  public:
-  std::unique_ptr<NodeLowering> CreateNodeLowering(
-      ir::LoweringContext* loctx) const override {
-    return CreateTSNodeLowering(loctx);
-  }
-
-  NodeLowering* GetNodeLowering() const override { return GetTSNodeLowering(); }
-
   std::unique_ptr<ir::LoweringContext> CreateLoweringContext(
       const std::string& name, Device device,
       c10::ArrayRef<torch::lazy::Node*> post_order,
