@@ -49,11 +49,25 @@ class InterpValue {
   AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, VALUE_CTOR);
 #undef VALUE_CTOR
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  explicit InterpValue(c10::quint8 v) : dtype_(kQUInt8) {
+    QUInt8values.emplace_back(v.val_);
+  }
+
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  explicit InterpValue(c10::qint8 v) : dtype_(kQInt8) {
+    QInt8values.emplace_back(v.val_);
+  }
+
 #define VALUE_VEC_CTOR(Type, Name)        \
   InterpValue(const std::vector<Type>& v) \
       : dtype_(Dtype(k##Name, v.size())), Name##values(v) {}
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, VALUE_VEC_CTOR);
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  VALUE_VEC_CTOR(c10::quint8, QUInt8)
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  VALUE_VEC_CTOR(c10::qint8, QInt8)
 #undef VALUE_VEC_CTOR
 
   template <typename T>
@@ -73,6 +87,8 @@ class InterpValue {
 
 #define VALUE_STORAGE(Type, Name) std::vector<Type> Name##values;
   AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, VALUE_STORAGE);
+  VALUE_STORAGE(c10::qint8, QInt8);
+  VALUE_STORAGE(c10::quint8, QUInt8);
 #undef VALUE_STORAGE
   void* ptr;
 };
@@ -86,6 +102,8 @@ class InterpValue {
     return Name##values[0];                   \
   }
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, VALUE_AS_DISPATCH);
+VALUE_AS_DISPATCH(c10::quint8, QUInt8);
+VALUE_AS_DISPATCH(c10::qint8, QInt8);
 #undef VALUE_AS_DISPATCH
 
 #define VALUE_AS_VEC_DISPATCH(Type, Name)                             \
@@ -97,7 +115,24 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, VALUE_AS_DISPATCH);
     return Name##values;                                              \
   }
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, VALUE_AS_VEC_DISPATCH);
+VALUE_AS_VEC_DISPATCH(c10::quint8, QUInt8);
+VALUE_AS_VEC_DISPATCH(c10::qint8, QInt8);
 #undef VALUE_AS_VEC_DISPATCH
+
+template <typename Type>
+auto underlyingValue(Type x) {
+  return x;
+}
+
+template <>
+inline auto underlyingValue<c10::quint8>(c10::quint8 x) {
+  return x.val_;
+}
+
+template <>
+inline auto underlyingValue<c10::qint8>(c10::qint8 x) {
+  return x.val_;
+}
 
 template <typename To, typename From>
 To raw_bitcast(const From& src) {
@@ -204,6 +239,10 @@ class ExprEval {
   } break;
       // NOLINTNEXTLINE(modernize-use-emplace)
       AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TYPE_CASE);
+      // NOLINTNEXTLINE(modernize-use-emplace)
+      TYPE_CASE(c10::quint8, QUInt8);
+      // NOLINTNEXTLINE(modernize-use-emplace)
+      TYPE_CASE(c10::qint8, QInt8);
 #undef TYPE_CASE
       case ScalarType::Bool: {
         // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -229,6 +268,8 @@ class ExprEval {
     ret_value_ = InterpValue(ret_val_arg[0]);    \
   } break;
       AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TYPE_CASE);
+      TYPE_CASE(c10::quint8, QUInt8);
+      TYPE_CASE(c10::qint8, QInt8);
 #undef TYPE_CASE
       case ScalarType::Bool: {
         // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
