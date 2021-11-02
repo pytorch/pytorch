@@ -38,6 +38,26 @@ TORCH_API std::string dumpValueSet(
     const FastSet<const Value*>& value_set,
     const char* set_name = "");
 
+TORCH_API inline bool doesNotHeapAllocateWhenStoredInIValue(const Type& type) {
+  switch (type.kind()) {
+    // NOTE: NumberType may allocate because it includes complex.
+    case TypeKind::NoneType:
+      return true;
+    case TypeKind::IntType:
+      return true;
+    case TypeKind::FloatType:
+      return true;
+    case TypeKind::BoolType:
+      return true;
+    case TypeKind::DeviceObjType:
+      return true;
+    case TypeKind::StreamObjType:
+      return true;
+    default:
+      return false;
+  }
+}
+
 // Group values used by `graph` into three categories:
 //
 // - output_aliases:
@@ -277,23 +297,14 @@ class TORCH_API StaticRuntime {
       std::vector<c10::IValue>&& args,
       const std::unordered_map<std::string, c10::IValue>& kwargs);
 
-  void display_nodes(
-      const std::vector<c10::IValue>& args,
-      const std::unordered_map<std::string, c10::IValue>& kwargs);
-
   void benchmark(
-      const std::vector<c10::IValue>& args,
-      const std::unordered_map<std::string, c10::IValue>& kwargs,
+      const std::vector<std::vector<c10::IValue>>& args_list,
+      const std::vector<std::unordered_map<std::string, c10::IValue>>&
+          kwargs_list,
       const int warmup_runs,
       const int main_runs,
       bool print_per_node_time = false,
       bool generate_ai_pep_output = false);
-
-  float benchmark_model(
-      const std::vector<c10::IValue>& args,
-      const std::unordered_map<std::string, c10::IValue>& kwargs,
-      const int warmup_runs,
-      const int main_runs);
 
   struct IndividualMetrics {
     float setup_time{0.0};
@@ -313,8 +324,9 @@ class TORCH_API StaticRuntime {
   };
 
   IndividualMetrics benchmark_individual_ops(
-      const std::vector<c10::IValue>& args,
-      const std::unordered_map<std::string, c10::IValue>& kwargs,
+      const std::vector<std::vector<c10::IValue>>& args_list,
+      const std::vector<std::unordered_map<std::string, c10::IValue>>&
+          kwargs_list,
       const int warmup_runs,
       const int main_runs);
 
@@ -380,6 +392,19 @@ class TORCH_API StaticRuntime {
       ival = IValue();
     }
   }
+
+  void create_memory_planner();
+
+  float benchmark_model(
+      const std::vector<std::vector<c10::IValue>>& args_list,
+      const std::vector<std::unordered_map<std::string, c10::IValue>>&
+          kwargs_list,
+      const int warmup_runs,
+      const int main_runs);
+
+  void display_nodes(
+      const std::vector<c10::IValue>& args,
+      const std::unordered_map<std::string, c10::IValue>& kwargs);
 
   // Memory planning is only enabled if sm->opts().cleanup_activations is true.
   // Otherwise, the memory used by activations is cached inside the static
