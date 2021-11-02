@@ -102,11 +102,10 @@ void validateBlock(
             "\n\nDefined at:\n" + getNodeStackTraceString(node))
       }
     } else {
+#ifdef BUILD_CAFFE2
       if (node->kind() == aten::expand) {
         if (operator_export_type ==
-                onnx_torch::OperatorExportTypes::ONNX_ATEN_FALLBACK ||
-            operator_export_type ==
-                onnx_torch::OperatorExportTypes::ONNX_ATEN_STRICT_FALLBACK) {
+            onnx_torch::OperatorExportTypes::ONNX_ATEN_FALLBACK) {
           WithInsertPoint guard(node);
           auto* new_node =
               b->owningGraph()->insertNode(b->owningGraph()->create(
@@ -119,6 +118,7 @@ void validateBlock(
           new_node->s_(Symbol::fromQualString("attr::operator"), "expand");
         }
       }
+#endif
       if (node->kind() == prim::PackPadded || node->kind() == prim::PadPacked) {
         if (operator_export_type !=
             onnx_torch::OperatorExportTypes::ONNX_FALLTHROUGH) {
@@ -129,8 +129,6 @@ void validateBlock(
       }
       bool is_aten_enabled = operator_export_type ==
               onnx_torch::OperatorExportTypes::ONNX_ATEN_FALLBACK ||
-          operator_export_type ==
-              onnx_torch::OperatorExportTypes::ONNX_ATEN_STRICT_FALLBACK ||
           operator_export_type == onnx_torch::OperatorExportTypes::ONNX_ATEN ||
           operator_export_type ==
               onnx_torch::OperatorExportTypes::ONNX_FALLTHROUGH;

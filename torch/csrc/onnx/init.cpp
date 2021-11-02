@@ -30,7 +30,6 @@ void initONNXBindings(PyObject* module) {
       .value("ONNX", OperatorExportTypes::ONNX)
       .value("ONNX_ATEN", OperatorExportTypes::ONNX_ATEN)
       .value("ONNX_ATEN_FALLBACK", OperatorExportTypes::ONNX_ATEN_FALLBACK)
-      .value("ONNX_ATEN_STRICT_FALLBACK", OperatorExportTypes::ONNX_ATEN_STRICT_FALLBACK)
       .value("ONNX_FALLTHROUGH", OperatorExportTypes::ONNX_FALLTHROUGH);
 
   py::enum_<TrainingMode>(onnx, "TrainingMode")
@@ -40,7 +39,7 @@ void initONNXBindings(PyObject* module) {
 
   onnx.attr("PRODUCER_VERSION") = py::str(TORCH_VERSION);
 
-#ifdef PYTORCH_ONNX_CAFFE2_BUNDLE
+#ifdef BUILD_CAFFE2
   onnx.attr("PYTORCH_ONNX_CAFFE2_BUNDLE") = true;
 #else
   onnx.attr("PYTORCH_ONNX_CAFFE2_BUNDLE") = false;

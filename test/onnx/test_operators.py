@@ -594,8 +594,6 @@ class TestOperators(TestCase):
         offset = torch.tensor([0]).long()
         self.assertONNX(emb_bag, (input, offset), keep_initializers_as_inputs=True,
                         operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
-        self.assertONNX(emb_bag, (input, offset), keep_initializers_as_inputs=True,
-                        operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_STRICT_FALLBACK)
 
     def test_implicit_expand(self):
         x = torch.randn(3, 4, requires_grad=True)
@@ -793,8 +791,6 @@ class TestOperators(TestCase):
         x = torch.randn(20, 5, 10, 10)
         self.assertONNX(model, x,
                         operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
-        self.assertONNX(model, x,
-                        operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_STRICT_FALLBACK)
 
     def test_pixel_shuffle(self):
         x = torch.randn(2, 8, 3, 4).float()

@@ -7,7 +7,6 @@ enum class OperatorExportTypes {
   ONNX, // Strict ONNX export
   ONNX_ATEN, // ONNX With ATen op everywhere
   ONNX_ATEN_FALLBACK, // ONNX export with ATen fallback
-  ONNX_ATEN_STRICT_FALLBACK, // ONNX export with ATen fallback without Caffe2 specifics
   ONNX_FALLTHROUGH, // Export supported ONNX ops. Pass through unsupported ops.
 };
 

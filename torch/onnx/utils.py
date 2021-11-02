@@ -206,7 +206,8 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     torch._C._jit_pass_onnx_preprocess_caffe2(graph)
 
     # Caffe2-specific optimization
-    if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK:
+    if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK and\
+            torch.onnx.PYTORCH_ONNX_CAFFE2_BUNDLE:
         torch.onnx.symbolic_helper._quantized_ops.clear()
         # Unpack quantized weights for conv and linear ops and insert into graph.
         torch._C._jit_pass_onnx_unpack_quantized_weights(graph, params_dict)
@@ -1020,7 +1021,8 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
         sym_registry.register_version("", opset_version)
 
         # Caffe2-specific: Quantized op symbolics are registered for opset 9 only.
-        if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK and opset_version == 9:
+        if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK and opset_version == 9 and\
+                torch.onnx.PYTORCH_ONNX_CAFFE2_BUNDLE:
             import torch.onnx.symbolic_caffe2
             torch.onnx.symbolic_caffe2.register_quantized_ops("caffe2", opset_version)
 
@@ -1042,8 +1044,7 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
         elif ns == "aten":
             is_exportable_aten_op = sym_registry.is_registered_op(op_name, "", opset_version)
             is_onnx_aten_export = operator_export_type == OperatorExportTypes.ONNX_ATEN
-            is_aten_fallback_export = operator_export_type in {OperatorExportTypes.ONNX_ATEN_FALLBACK,
-                                                               OperatorExportTypes.ONNX_ATEN_STRICT_FALLBACK}
+            is_aten_fallback_export = operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK
             if is_onnx_aten_export or (not is_exportable_aten_op and is_aten_fallback_export):
                 # Direct ATen export requested
                 attrs = {k + "_" + n.kindOf(k)[0]: n[k] for k in n.attributeNames()}
@@ -1175,7 +1176,8 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
         elif ns == "quantized":
             domain = ""
             # Caffe2-specific quantized op
-            if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK:
+            if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK and\
+                    torch.onnx.PYTORCH_ONNX_CAFFE2_BUNDLE:
                 domain = "caffe2"
             symbolic_fn = _find_symbolic_in_registry(domain, op_name, opset_version, operator_export_type)
             if symbolic_fn is None:
