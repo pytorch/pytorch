@@ -885,12 +885,9 @@ std::vector<ExprHandle>& TensorExprKernel::getStridesForValue(
   auto tt = v->type()->cast<TensorType>();
   auto rank = tt->symbolic_sizes().rank();
   auto concrete_strides = tt->strides().concrete_sizes();
-  if (concrete_strides) {
-    for (auto cs : *concrete_strides) {
-      strides.push_back(LongImm::make(cs));
-    }
-  } else {
-    throw std::runtime_error("Only concrete strides are handled");
+  TORCH_INTERNAL_ASSERT(concrete_strides, "Only concrete strides are handled");
+  for (auto cs : *concrete_strides) {
+    strides.push_back(LongImm::make(cs));
   }
   inputToStrides_.emplace(v, std::move(strides));
   return inputToStrides_[v];
@@ -1321,6 +1318,11 @@ void TensorExprKernel::compile() {
     bufferArgs_.emplace_back(BufHandle(c.buf));
   }
 
+  if (has_symbolic_shapes_) {
+    tensorOutputSizes_.resize(bufOutputs_.size());
+    tensorOutputStrides_.resize(bufOutputs_.size());
+  }
+
   // Generate code.
   codegen_ = CreateCodeGen(
       getCodeGenName(backendType),
@@ -1398,8 +1400,8 @@ std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
     // symbolic shape input params passed in to this call.
     TORCH_INTERNAL_ASSERT(
         tensorOutputSymbolicSizes_.size() == bufOutputs_.size());
-    tensorOutputSizes_.resize(bufOutputs_.size());
-    tensorOutputStrides_.resize(bufOutputs_.size());
+    TORCH_INTERNAL_ASSERT(tensorOutputSizes_.size() == bufOutputs_.size());
+    TORCH_INTERNAL_ASSERT(tensorOutputStrides_.size() == bufOutputs_.size());
     for (size_t i = 0, e = bufOutputs_.size(); i < e; ++i) {
       tensorOutputSizes_[i].clear();
       for (auto t : tensorOutputSymbolicSizes_[i]) {

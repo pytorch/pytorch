@@ -92,6 +92,18 @@ class TORCH_API TensorExprKernel {
   };
 
  public:
+  // Constructor Params:
+  //  * subgraph
+  //      - the graph that needs to be compiled.
+  //  * kernel_func_name
+  //      - the name that should be used for the generated kernel.
+  //  * custom_lowerings
+  //      - map that represents custom lowering definitions for a set of ops.
+  //  * symbolic_shape_inputs
+  //      - a list of symbolic graph inputs that represent the symbolic dims of
+  //        the input tensors.
+  //  * pre_alloc
+  //      - a flag to control pre-allocation of buffers.
   explicit TensorExprKernel(
       const std::shared_ptr<Graph>& subgraph,
       const std::string& kernel_func_name,
@@ -213,12 +225,6 @@ class TORCH_API TensorExprKernel {
   // push the buf args into the stack so NNC IR can access them at runtime.
   void preAllocIntermediateBufs(std::unordered_set<BufPtr>& interm_bufs);
 
-  ExprHandle getVarForShape(const c10::ShapeSymbol& ss);
-  std::vector<ExprHandle>& getStridesForValue(const Value* v);
-  BufHandle bindSymbolicShapeInput(const Value* input, const std::string& name);
-  std::vector<ExprHandle> sizesFromSymbolicShape(
-      const c10::SymbolicShape& shape);
-
  private:
   struct UnpackedTensorOptions {
     c10::optional<c10::ScalarType> dtype;
@@ -232,6 +238,12 @@ class TORCH_API TensorExprKernel {
           device(opts.device_opt()),
           pinned_memory(opts.pinned_memory_opt()) {}
   };
+
+  ExprHandle getVarForShape(const c10::ShapeSymbol& ss);
+  std::vector<ExprHandle>& getStridesForValue(const Value* v);
+  BufHandle bindSymbolicShapeInput(const Value* input, const std::string& name);
+  std::vector<ExprHandle> sizesFromSymbolicShape(
+      const c10::SymbolicShape& shape);
 
   int64_t nInputs_ = 0;
   std::vector<CodeGen::BufferArg> bufferArgs_;
