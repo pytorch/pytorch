@@ -186,6 +186,7 @@ class DistributedOptimizer:
     """
 
     def __init__(self, optimizer_class, params_rref, *args, **kwargs):
+        torch._C._log_api_usage_once("torch.distributed.optim.DistributedOptimizer")
         per_worker_params_rref = defaultdict(list)
         for param in params_rref:
             per_worker_params_rref[param.owner()].append(param)
