@@ -349,10 +349,8 @@ Tensor qnnpack_avg_pool2d(
   pytorch_qnnp_operator_t qnnpack_operator{nullptr};
   const pytorch_qnnp_status createStatus =
       pytorch_qnnp_create_average_pooling2d_nhwc_q8(
-          padH /* input_padding_top */,
-          padW /* input_padding_right */,
-          padH /* input_padding_bottom */,
-          padW /* input_padding_left */,
+          padH /* input_padding_height */,
+          padW /* input_padding_width */,
           kH /* kernel height */,
           kW /* kernel width */,
           dH /* stride height */,

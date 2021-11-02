@@ -153,6 +153,19 @@ if((NOT BLAS_LIBRARIES)
 endif()
 
 if((NOT BLAS_LIBRARIES)
+    AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "flexi")))
+  check_fortran_libraries(
+  BLAS_LIBRARIES
+  BLAS
+  sgemm
+  ""
+  "flexiblas")
+  if(BLAS_LIBRARIES)
+    set(BLAS_INFO "flexi")
+  endif(BLAS_LIBRARIES)
+endif()
+
+if((NOT BLAS_LIBRARIES)
     AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "open")))
   check_fortran_libraries(
   BLAS_LIBRARIES

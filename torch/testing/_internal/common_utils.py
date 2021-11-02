@@ -1635,7 +1635,7 @@ class TestCase(expecttest.TestCase):
     def safeToDense(self, t):
         return t.coalesce().to_dense()
 
-    # Compares torch function with reference function for given sample input (object of SampleInput)
+    # Compares a torch function with a reference function for a given sample input (object of SampleInput)
     # Note: only values are compared, type comparison is not done here
     def compare_with_reference(self, torch_fn, ref_fn, sample_input, **kwargs):
         n_inp, n_args, n_kwargs = sample_input.numpy()
@@ -2322,6 +2322,39 @@ def random_well_conditioned_matrix(*shape, dtype, device, mean=1.0, sigma=0.001)
     s = (torch.randn(*(shape[:-2] + (min(m, n),)), dtype=primitive_dtype[dtype], device=device) * sigma + mean) \
         .sort(-1, descending=True).values.to(dtype)
     return (u * s.unsqueeze(-2)) @ vh
+
+# Returns a noncontiguous (tensor with the same shape and values as t
+# The noncontiguous tensor is constructed such that elements in the innermost
+#   dimension are separated by zeros or (whenever possible) nans
+# TODO: consider more complicated noncontiguity schemes
+def noncontiguous_like(t):
+    # Short-circuits if t is already noncontiguous
+    if not t.is_contiguous():
+        return t
+
+    # Special-cases 0-dim tensors
+    if t.ndim == 0:
+        result = t.detach().unsqueeze(0).repeat_interleave(2, dim=-1)
+        if t.dtype.is_floating_point or t.dtype.is_complex:
+            result[0] = math.nan
+        else:
+            result[0] = 0
+        result.set_(result.storage(), 1, t.size(), ())
+        result.requires_grad_(t.requires_grad)
+        return result
+
+    # 1+ dim tensor case
+    result = torch.repeat_interleave(t.detach(), 2, dim=-1)
+    if t.dtype.is_floating_point or t.dtype.is_complex:
+        result[..., 1::2] = math.nan
+    else:
+        result[..., 1::2] = 0
+
+    strides = list(result.stride())
+    strides[-1] = strides[-1] * 2
+    result.set_(result.storage(), result.storage_offset(), t.size(), stride=tuple(strides))
+    result.requires_grad_(t.requires_grad)
+    return result
 
 # TODO: remove this (prefer make_symmetric_matrices below)
 def random_symmetric_matrix(l, *batches, **kwargs):
