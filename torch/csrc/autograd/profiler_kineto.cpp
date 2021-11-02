@@ -425,6 +425,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
       if (!kineto_events_[idx].hasStack()) {
         std::vector<std::string> py_names;
         _push_reverse_order(op_py_map.at(activity.startTime), py_names);
+        kineto_events_[idx].stack(py_names);
         activity.addMetadata("Call stack", stacksToStr(py_names, ";"));
       }
 
