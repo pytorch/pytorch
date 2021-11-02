@@ -3,7 +3,6 @@
 #include <c10/util/Optional.h>
 
 #include "lazy_tensors/computation_client/computation_client.h"
-#include "lazy_tensors/str_cat.h"
 #include "lazy_tensors/str_split.h"
 
 namespace torch_lazy_tensors {
@@ -62,7 +61,7 @@ Device::Device(const std::string& device_spec) {
 }
 
 std::string Device::ToString() const {
-  return lazy_tensors::StrCat(DeviceTypeToString(hw_type), ":", ordinal);
+  return c10::str(DeviceTypeToString(hw_type), ":", ordinal);
 }
 
 const Device* GetDefaultDevice() {

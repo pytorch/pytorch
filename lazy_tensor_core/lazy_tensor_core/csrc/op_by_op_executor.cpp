@@ -12,7 +12,6 @@
 #include "lazy_tensors/computation_client/metrics.h"
 #include "lazy_tensors/computation_client/sys_util.h"
 #include "lazy_tensors/computation_client/util.h"
-#include "lazy_tensors/str_cat.h"
 #include "torch/csrc/lazy/core/hash.h"
 
 namespace torch_lazy_tensors {
@@ -63,7 +62,7 @@ std::shared_ptr<lazy_tensors::GenericComputation> BuildNodeComputation(
   const auto& operands = node->operands();
   for (size_t i = 0; i < operands.size(); ++i) {
     loctx->AddParameter(operands[i], i, *input_shapes[i],
-                        lazy_tensors::StrCat("p", i));
+                        c10::str("p", i));
   }
   loctx->LowerNodeToResult(node);
   return ConsumeValue(loctx->Build());

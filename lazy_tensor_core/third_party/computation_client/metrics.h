@@ -2,6 +2,7 @@
 #define COMPUTATION_CLIENT_METRICS_H_
 
 #include <atomic>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -9,7 +10,6 @@
 #include <vector>
 
 #include "lazy_tensors/computation_client/sys_util.h"
-#include "lazy_tensors/str_cat.h"
 
 namespace lazy_tensors {
 namespace metrics {
@@ -176,7 +176,7 @@ class Counter {
   } while (0)
 
 #define LTC_FN_COUNTER(ns) \
-  LTC_COUNTER(lazy_tensors::StrCat(ns, __FUNCTION__), 1)
+  LTC_COUNTER(c10::str(ns, __FUNCTION__), 1)
 
 #define LTC_VALUE_METRIC(name, value)                      \
   do {                                                     \
