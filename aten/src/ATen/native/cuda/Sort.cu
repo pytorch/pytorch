@@ -10,7 +10,6 @@
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/native/cuda/SortUtils.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>
-#include <ATen/native/Sorting.h>
 
 namespace at { namespace native {
 
@@ -28,7 +27,7 @@ bool should_use_small_sort(const Tensor &self, int64_t dim) {
 
 std::vector<int64_t> infer_dense_strides_dim_last(const Tensor & self, int64_t dim);
 
-void fillSliceWithIndex(const Tensor& t,int dim) {
+void fillSliceWithIndex(Tensor& t,int dim) {
   if (t.numel()) {
     auto sizes = DimVector(t.dim(), 1);
     sizes[dim] = t.sizes()[dim];
@@ -254,6 +253,25 @@ __global__ void sort_postprocess_kernel(const scalar_t *in, scalar_t *out, int64
   }
 }
 
+
+__global__ void fill_index_and_segment_kernel(
+    int2 *data, int numel, at::cuda::detail::IntDivider<uint32_t> nsort_divider) {
+  CUDA_KERNEL_LOOP(idx, numel) {
+    auto div_mod = nsort_divider.divmod(idx);
+    auto segment = static_cast<int>(div_mod.div);
+    auto sort = static_cast<int>(div_mod.mod);
+    data[idx] = int2{segment, sort};
+  }
+}
+
+__global__ void fill_reverse_indices_kernel(
+    int64_t *data, int numel, at::cuda::detail::IntDivider<uint32_t> nsort_divider) {
+  CUDA_KERNEL_LOOP(idx, numel) {
+    data[idx] = nsort_divider.mod(idx);
+  }
+}
+
+
 template<typename scalar_t>
 inline void segmented_sort_pairs_by_full_sort(
   int64_t nsegments, int64_t nsort, int64_t n, bool descending, const Tensor &indices,
@@ -261,25 +279,30 @@ inline void segmented_sort_pairs_by_full_sort(
 ) {
   int64_t segment_bits = std::max<int64_t>(1L, static_cast<int64_t>(std::ceil(std::log2(nsegments))));
 
-  auto int_options = indices.options().dtype(kInt);
-  auto indices_and_segment = at::empty({nsegments, nsort, 2}, int_options);
-  indices_and_segment.select(-1, 0).copy_(  // segment id
-    at::arange(nsegments, int_options).view({nsegments, 1}).expand({nsegments, nsort}));
-  indices_and_segment.select(-1, 1).copy_(  // reverse indices
-    at::arange(nsort, int_options).view({1, nsort}).expand({nsegments, nsort}));
+  const auto numel = nsort * nsegments;
+  auto cuda_allocator = at::cuda::getCUDADeviceAllocator();
+  auto indices_and_segment = cuda_allocator->allocate(numel * sizeof(int2));
+  auto i_s_ptr = static_cast<int2 *>(indices_and_segment.get());
 
-  auto i_s_ptr = reinterpret_cast<int2 *>(indices_and_segment.data_ptr<int>());
-  auto indices_and_segment2 = at::empty_like(indices_and_segment);
-  auto i_s_ptr2 = reinterpret_cast<int2 *>(indices_and_segment2.data_ptr<int>());
+  using namespace at::cuda::detail;
+  dim3 block = CUDA_NUM_THREADS;
+  dim3 grid = GET_BLOCKS(numel);
+  auto stream = c10::cuda::getCurrentCUDAStream();
+  at::cuda::detail::IntDivider<uint32_t> nsort_divider(nsort);
+  fill_index_and_segment_kernel<<<grid, block, 0, stream>>>(
+      i_s_ptr, numel, nsort_divider);
 
-  at::cuda::cub::sort_pairs<scalar_t, int2>(
+  auto indices_and_segment2 = cuda_allocator->allocate(nsegments * nsort * sizeof(int2));
+  auto i_s_ptr2 = static_cast<int2 *>(indices_and_segment2.get());
+
+  at::cuda::cub::radix_sort_pairs<scalar_t, int2>(
     self_ptr, nullptr, i_s_ptr, i_s_ptr2,
     n, descending);
 
   TORCH_INTERNAL_ASSERT(segment_bits <= 32);
 
   // sort on lower 32bits, i.e. segment index
-  at::cuda::cub::sort_keys<int64_t>(
+  at::cuda::cub::radix_sort_keys<int64_t>(
     reinterpret_cast<int64_t *>(i_s_ptr2), reinterpret_cast<int64_t *>(i_s_ptr),
     n, false, 0, segment_bits);
 
@@ -287,19 +310,39 @@ inline void segmented_sort_pairs_by_full_sort(
     self_ptr, values_ptr, indices_ptr, i_s_ptr, nsegments, nsort);
 }
 
+template<typename scalar_t>
+void segmented_sort_pairs(
+    int64_t nsegments, int64_t nsort, int64_t n, bool descending,
+    const scalar_t *self_ptr, scalar_t *values_ptr, int64_t *indices_ptr) {
+  const auto numel = nsort * nsegments;
+  auto cuda_allocator = at::cuda::getCUDADeviceAllocator();
+  auto reverse_indices = cuda_allocator->allocate(numel * sizeof(int64_t));
+  int64_t *reverse_indices_ptr = static_cast<int64_t *>(reverse_indices.get());
+
+  using namespace at::cuda::detail;
+  dim3 block = CUDA_NUM_THREADS;
+  dim3 grid = GET_BLOCKS(numel);
+  auto stream = c10::cuda::getCurrentCUDAStream();
+  at::cuda::detail::IntDivider<uint32_t> nsort_divider(nsort);
+  fill_reverse_indices_kernel<<<grid, block, 0, stream>>>(
+      reverse_indices_ptr, numel, nsort_divider);
+
+  at::cuda::cub::segmented_sort_pairs(self_ptr, values_ptr,
+                                      reverse_indices_ptr, indices_ptr, n, nsegments,
+                                      offset_t{(int)nsort, 0}, offset_t{(int)nsort, 1}, descending);
+}
+
 }  // namespace
 
 // We perform a segmented sort in cub with inputs that have
 // more than 1024/2048 elements along the selected dimension.
 // Otherwise, we do an inplace bitonic sort (see sortKeyValueInplace).
-void sort_cuda_kernel(
-    const Tensor& self,
-    int64_t dim,
-    bool descending,
-    bool stable,
-    const Tensor& values,
-    const Tensor& indices) {
+std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::optional<bool> stable, int64_t dim, bool descending, Tensor & values, Tensor & indices) {
   // this algorithm is always stable
+  TORCH_INTERNAL_ASSERT(stable.has_value(), "sort_out(): c10::optional<bool> for stable has to have value.");
+  TensorArg self_arg{self, "self", 1}, values_arg{values, "values", 2}, indices_arg{indices, "indices", 3};
+  checkAllSameGPU(__func__, {self_arg, values_arg, indices_arg});
+
   bool is_non_overlapping_and_dense = self.is_non_overlapping_and_dense();
   int64_t numel = self.numel();
   int64_t ndim = self.dim();
@@ -316,10 +359,37 @@ void sort_cuda_kernel(
   TORCH_CHECK(self_dtype != ScalarType::ComplexFloat && self_dtype != ScalarType::ComplexDouble,
     "Sort currently does not support complex dtypes on CUDA.");
 
+  if (ndim == 0) {
+    if (!values.defined()) {
+      values = self.clone();
+    } else {
+      values.resize_as_(self);
+      values.copy_(self);
+    }
+    if (!indices.defined()) {
+      indices = at::zeros({}, self.options().dtype(kLong));
+    } else {
+      indices.resize_as_(self);
+      indices.zero_();
+    }
+    return std::forward_as_tuple(values, indices);
+  }
+
   // use inplace algorithm for smaller input sizes without stable=True
-  if (should_use_small_sort(self, dim) && !stable) {
+  if (should_use_small_sort(self, dim) && !stable.value()) {
     // from thc: sorted->values, indices->indices, input->self
+
+    if (!values.defined()) {
+      values = at::empty_like(self);
+    }
+    if (!indices.defined()) {
+      indices = at::empty_like(self, self.options().dtype(kLong));
+    }
+
     // Make sure sufficient output space is allocated
+    auto self_size = self.sizes();
+    at::native::resize_output(values, self_size);
+    at::native::resize_output(indices, self_size);
     fillSliceWithIndex(indices, dim);
 
     // We sort k/v pairs in-place; copy unsorted input to output
@@ -328,7 +398,7 @@ void sort_cuda_kernel(
     // Sort using our in-place k/v kernel that supports arbitrary
     // layout
     sortKeyValueInplace(values, indices, dim, descending);
-    return;
+    return std::forward_as_tuple(values, indices);
   }
 
   Tensor self_;
@@ -345,6 +415,19 @@ void sort_cuda_kernel(
   Tensor values_tmp, indices_tmp;
   void *values_ptr_;
   int64_t *indices_ptr;
+  if (!values.defined()) {
+    if (is_non_overlapping_and_dense) {
+      values = at::empty_strided(self.sizes(), self.strides(), self.options());
+    } else {
+      auto strides = at::infer_dense_strides(self.sizes(), self.strides());
+      values = at::empty_strided(self.sizes(), strides, self.options());
+    }
+  } else {
+    TORCH_CHECK(self_.scalar_type() == values.scalar_type(),
+      "Unexpected dtype for values, expect ", self_.scalar_type(), ", got ", values.scalar_type());
+    values.resize_as_(self);
+  }
+
   if (values.strides() == self_.strides() && (newself || get_overlap_status(self, values) == MemOverlapStatus::NO)) {
     values_ptr_ = values.data_ptr();
   } else {
@@ -352,6 +435,18 @@ void sort_cuda_kernel(
     values_ptr_ = values_tmp.data_ptr();
   }
 
+  if (!indices.defined()) {
+    if (is_non_overlapping_and_dense) {
+      indices = at::empty_strided(self.sizes(), self.strides(), self.options().dtype(kLong));
+    } else {
+      auto strides = at::infer_dense_strides(self.sizes(), self.strides());
+      indices = at::empty_strided(self.sizes(), strides, self.options().dtype(kLong));
+    }
+  } else {
+    TORCH_CHECK(kLong == indices.scalar_type(),
+      "Unexpected dtype for values, expect torch.long, got ", indices.scalar_type());
+    indices.resize_as_(self);
+  }
   if (indices.strides() != self_.strides()) {
     indices_tmp = at::empty_strided(self_.sizes(), self_.strides(), self_.options().dtype(kLong));
     indices_ptr = indices_tmp.data_ptr<int64_t>();
@@ -360,11 +455,12 @@ void sort_cuda_kernel(
   }
 
   if (numel == 0) {
-    return;
+    return std::forward_as_tuple(values, indices);
   }
 
   int64_t numel_or_intmax = std::min(numel, static_cast<int64_t>(std::numeric_limits<int>::max()));
   int64_t nbatch = (numel_or_intmax / nsort) * nsort;
+  TORCH_CHECK(nbatch > 0, "Cannot sort dimension of length ", nsort);
 
 #if defined(USE_ROCM)
   constexpr bool is_rocm = true;
@@ -385,10 +481,8 @@ void sort_cuda_kernel(
           segmented_sort_pairs_by_full_sort(nsegments, nsort, n, descending,
             indices, self_ptr, values_ptr, indices_ptr);
         } else {
-          auto reverse_indices = at::arange(nsort, indices.options()).view({1, nsort}).expand({nsegments, nsort}).contiguous();
-          at::cuda::cub::segmented_sort_pairs(self_ptr, values_ptr,
-            reverse_indices.data_ptr<int64_t>(), indices_ptr, n, nsegments,
-            offset_t{(int)nsort, 0}, offset_t{(int)nsort, 1}, descending);
+          segmented_sort_pairs(nsegments, nsort, n, descending,
+                               self_ptr, values_ptr, indices_ptr);
         }
 
         remaining -= n;
@@ -405,9 +499,20 @@ void sort_cuda_kernel(
   if (indices_tmp.defined()) {
     indices.copy_(indices_tmp);
   }
+  return std::forward_as_tuple(values, indices);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-REGISTER_DISPATCH(sort_stub, &sort_cuda_kernel);
+std::tuple<Tensor &,Tensor &> sort_out_cuda(const Tensor & self, int64_t dim, bool descending, Tensor & values, Tensor & indices) {
+  return sort_out_stable_cuda(self, /*stable=*/false, dim, descending, values, indices);
+}
+
+std::tuple<Tensor,Tensor> sort_stable_cuda(const Tensor & self, c10::optional<bool> stable, int64_t dim, bool descending) {
+  Tensor values, indices;
+  return sort_out_stable_cuda(self, stable, dim, descending, values, indices);
+}
+
+std::tuple<Tensor,Tensor> sort_cuda(const Tensor & self, int64_t dim, bool descending) {
+  return sort_stable_cuda(self, /*stable=*/false, dim, descending);
+}
 
 }}  // namespace at::native

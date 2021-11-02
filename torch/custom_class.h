@@ -344,7 +344,7 @@ class class_ : public ::torch::detail::class_base {
     auto setstate_schema = classTypePtr->getMethod("__setstate__").getSchema();
     auto arg_type = setstate_schema.arguments().at(1).type();
     TORCH_CHECK(
-        ser_type->isSubtypeOf(arg_type),
+        ser_type->isSubtypeOf(*arg_type),
         "__getstate__'s return type should be a subtype of "
         "input argument of __setstate__. Got ",
         ser_type->repr_str(),
@@ -441,4 +441,22 @@ inline class_<CurClass> Library::class_(const std::string& className) {
   return torch::class_<CurClass>(*ns_, className);
 }
 
+const std::unordered_set<std::string> getAllCustomClassesNames();
+
+template <class CurClass>
+inline class_<CurClass> Library::class_(detail::SelectiveStr<true> className) {
+  auto class_name = std::string(className.operator const char *());
+  TORCH_CHECK(kind_ == DEF || kind_ == FRAGMENT,
+    "class_(\"", class_name, "\"): Cannot define a class inside of a TORCH_LIBRARY_IMPL block.  "
+    "All class_()s should be placed in the (unique) TORCH_LIBRARY block for their namespace.  "
+    "(Error occurred at ", file_, ":", line_, ")");
+  TORCH_INTERNAL_ASSERT(ns_.has_value(), file_, ":", line_);
+  return torch::class_<CurClass>(*ns_, class_name);
 }
+
+template <class CurClass>
+inline detail::ClassNotSelected Library::class_(detail::SelectiveStr<false>) {
+  return detail::ClassNotSelected();
+}
+
+} // namespace torch

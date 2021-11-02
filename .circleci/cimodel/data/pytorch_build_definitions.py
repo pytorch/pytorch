@@ -352,28 +352,6 @@ def instantiate_configs(only_slow_gradcheck):
                                         tags_list=RC_PATTERN)
             c.dependent_tests = gen_docs_configs(c)
 
-        if (
-            compiler_name != "clang"
-            and not rocm_version
-            and not is_libtorch
-            and not is_vulkan
-            and not is_pure_torch
-            and not is_noarch
-            and not is_slow_gradcheck
-            and not only_slow_gradcheck
-            and not build_only
-        ):
-            distributed_test = Conf(
-                c.gen_build_name("") + "distributed",
-                [],
-                is_xla=False,
-                restrict_phases=["test"],
-                is_libtorch=False,
-                is_important=True,
-                parent_build=c,
-            )
-            c.dependent_tests.append(distributed_test)
-
         config_list.append(c)
 
     return config_list

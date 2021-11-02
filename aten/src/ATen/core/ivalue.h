@@ -205,7 +205,7 @@ struct TORCH_API IValue final {
   }
 
   IValue& operator=(IValue const& rhs) & {
-    IValue(rhs).swap(*this);
+    *this = IValue(rhs);
     return *this;
   }
 

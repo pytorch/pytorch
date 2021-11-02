@@ -36,6 +36,8 @@ ALLOW_LIST = [
     # Internal, profiler-specific ops
     ("profiler::_call_end_callbacks_on_jit_fut*", datetime.date(9999, 1, 1)),
     ("profiler::_record_function_enter", datetime.date(9999, 1, 1)),
+    ("aten::linalg_matrix_rank", datetime.date(2021, 10, 30)),
+    ("aten::linalg_pinv", datetime.date(2021, 10, 30)),
     ("aten::_cholesky_helper", datetime.date(9999, 1, 1)),
     ("aten::_lstsq_helper", datetime.date(9999, 1, 1)),
     ("aten::_syevd_helper", datetime.date(9999, 1, 1)),
@@ -52,6 +54,14 @@ ALLOW_LIST = [
     ("aten::randperm", datetime.date(9999, 1, 1)),
     ("aten::thnn_conv2d_forward", datetime.date(2021, 9, 30)),
     ("aten::thnn_conv2d_backward", datetime.date(2021, 9, 30)),
+    ("aten::_log_softmax_backward_data", datetime.date(2021, 10, 21)),
+    ("aten::_softmax_backward_data", datetime.date(2021, 10, 21)),
+    ("aten::fused_moving_avg_obs_fake_quant", datetime.date(2021, 10, 21)),
+    ("aten::_fused_moving_avg_obs_fq_helper", datetime.date(2021, 10, 21)),
+    ("aten::_baddbmm_mkl_", datetime.date(2021, 10, 31)),
+    ("aten::grid_sampler_2d_backward", datetime.date(2021, 10, 21)),
+    ("prim::TensorExprDynamicGuard", datetime.date(2021, 11, 20)),
+    ("caffe2::", datetime.date(2021, 10, 23)),
 ]
 
 ALLOW_LIST_COMPILED = [

@@ -204,13 +204,6 @@ void comparison_op_check(const Tensor& self, const Tensor& other, const Tensor& 
       native::check_convert(self.item(), other.scalar_type());
     }
   }
-  // In-place operation To avoid overflow during type promotion we will check that
-  // both dtypes of self and other are same
-  if (result.is_same(self)) {
-    TORCH_CHECK(self.dtype() == other.dtype(),
-                "Expected object of scalar type ", self.dtype(), " but got scalar type ",
-                other.dtype(), " for argument 'other'");
-  }
 }
 
 #define CREATE_COMPARISON_SCALAR_TENSOR_META_FUNC(func)                     \
@@ -624,18 +617,21 @@ Tensor& mul_(Tensor& self, const Scalar& other) {
   return at::mul_out(self, wrapped_scalar_tensor(other), self); // redispatch!
 }
 
-Tensor mul_zerotensor(const Tensor& self, const Tensor& other) {
-  std::cout<<"Entering mul_zerotensor\n";
-  TORCH_CHECK(self.sizes() == other.sizes());
+void size_and_device_check(const Tensor& self, const Tensor& other) {
+  // if one of the self or other is a Scalar Tensor
+  if (!(self.sizes().size() == 0 || other.sizes().size() == 0)) {
+    TORCH_CHECK(self.sizes() == other.sizes());
+  }
   TORCH_CHECK(self.device() == other.device());
+}
+
+Tensor mul_zerotensor(const Tensor& self, const Tensor& other) {
   auto commonDtype = at::result_type(self, other);
   auto result_options = self.options().dtype(commonDtype);
   return at::efficientzerotensor(self.sizes(), result_options);
 }
 
 Tensor add_zerotensor(const Tensor& self, const Tensor& other, const Scalar& alpha) {
-  TORCH_CHECK(self.sizes() == other.sizes());
-  TORCH_CHECK(self.device() == other.device());
   auto commonDtype = at::result_type(self, other);
   if (self.is_zerotensor()) {
     return (commonDtype == other.scalar_type()) ? other.mul(alpha) : other.to(commonDtype).mul(alpha);
@@ -939,9 +935,6 @@ Tensor comparison_op(const Tensor& self, const Tensor& other, OutImpl& out_impl)
 // To avoid overflow during type promotion we will check that both dtypes of self and other are same
 template <typename OutImpl>
 Tensor& comparison_op_(Tensor& self, const Tensor& other, OutImpl& out_impl) {
-  TORCH_CHECK(self.dtype() == other.dtype(),
-              "Expected object of scalar type ", self.dtype(), " but got scalar type ",
-              other.dtype(), " for argument 'other'");
   return out_impl(self, self, other);
 }
 

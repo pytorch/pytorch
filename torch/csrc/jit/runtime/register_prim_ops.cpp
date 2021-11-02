@@ -117,6 +117,38 @@ static const OperatorGeneratorArgs opGenArgs[] = {
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::numpy_T.a(Tensor(a) self) -> Tensor(a)"),
+        [](Stack& stack) {
+          at::Tensor a;
+          pop(stack, a);
+          push(stack, a.numpy_T());
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::matrix_H.a(Tensor(a) self) -> Tensor(a)"),
+        [](Stack& stack) {
+          at::Tensor a;
+          pop(stack, a);
+          push(stack, a.matrix_H());
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::mT.a(Tensor(a) self) -> Tensor(a)"),
+        [](Stack& stack) {
+          at::Tensor a;
+          pop(stack, a);
+          push(stack, a.mT());
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::mH.a(Tensor(a) self) -> Tensor(a)"),
+        [](Stack& stack) {
+          at::Tensor a;
+          pop(stack, a);
+          push(stack, a.mH());
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::layout(Tensor a) -> int"),
         [](Stack& stack) {
           at::Tensor a;
@@ -1164,16 +1196,6 @@ void dictKeys(Stack& stack) {
   push(stack, keys);
 }
 
-void dictIndex(Stack& stack) {
-  auto key = pop(stack);
-  auto dict = pop(stack).toGenericDict();
-  auto value = dict.find(key);
-  if (value == dict.end()) {
-    AT_ERROR("KeyError: ", key);
-  }
-  push(stack, value->value());
-}
-
 template <bool has_default>
 void dictGet(Stack& stack) {
   IValue default_value;
@@ -1295,7 +1317,7 @@ void dictConstructFromList(Stack& stack) {
       tup_type->elements().at(0), tup_type->elements().at(1));
   dict.reserve(list.size());
   for (IValue input : list) {
-    const auto tup = input.toTuple()->elements();
+    const auto& tup = input.toTuple()->elements();
     dict.insert_or_assign(tup[0], tup[1]);
   }
   push(stack, dict);

@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
-#include <ATen/ATen.h>
+#include <ATen/Functions.h>
+#include <ATen/Tensor.h>
 #include <c10/util/irange.h>
 
 namespace torch {
@@ -340,7 +341,7 @@ void createObject(
 void isinstance(Stack& stack, at::ArrayRef<at::TypePtr> types) {
   at::TypePtr ty = pop(stack).type();
   for (const at::TypePtr& candidate : types) {
-    if (ty->isSubtypeOf(candidate)) {
+    if (ty->isSubtypeOf(*candidate)) {
       push(stack, true);
       return;
     }
@@ -363,7 +364,7 @@ void dequantize(Stack& stack) {
   auto iv = pop(stack);
   if (iv.isTuple()) {
     auto tuple = iv.toTuple();
-    auto elems = tuple->elements();
+    const auto& elems = tuple->elements();
     std::vector<IValue> output_elems;
     output_elems.reserve(elems.size());
     for (const auto& elem : elems) {

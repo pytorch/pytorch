@@ -12,6 +12,7 @@
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/Parallel.h>
+#include <c10/util/irange.h>
 #include <torch/library.h>
 
 #ifdef USE_FBGEMM
@@ -65,16 +66,16 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
         int nc = std::min(NC - C, BLOCK_SZ);
 
         // 1. copy columns from src to buf
-        for (int c = 0; c < nc; c++) {
+        for (const auto c : c10::irange(nc)) {
           memcpy(bp + c * BLOCK_SZ, spo + c * NR, nr * sizeof(scalar_t));
         }
 
         // 2. transpose buf in place
         int rc_max = std::max(nr, nc);
         int rc_min = std::min(nr, nc);
-        for (int r = 0; r < rc_max; r++) {
+        for (const auto r : c10::irange(rc_max)) {
           int end = std::min(r, rc_min);
-          for (int c = 0; c < end; c++) {
+          for (const auto c : c10::irange(end)) {
             scalar_t tmp = bp[r + BLOCK_SZ * c];
             bp[r + BLOCK_SZ * c] = bp[r * BLOCK_SZ + c];
             bp[r * BLOCK_SZ + c] = tmp;
@@ -82,7 +83,7 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
         }
 
         // 3. copy rows from buf to dst
-        for (int r = 0; r < nr; r++) {
+        for (const auto r : c10::irange(nr)) {
           memcpy(rpo + r * NC, bp + r * BLOCK_SZ, nc * sizeof(scalar_t));
         }
       }

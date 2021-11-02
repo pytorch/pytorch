@@ -60,7 +60,6 @@ struct Pipeline final {
 
     struct Descriptor final {
       VkDescriptorSetLayout descriptor_set_layout;
-      size_t push_constant_size=128;
     };
 
     /*

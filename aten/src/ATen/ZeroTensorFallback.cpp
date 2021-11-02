@@ -93,5 +93,7 @@ namespace at {
     // m.impl("add.Tensor", torch::CppFunction::makeFallthrough());
     m.impl("copy_", torch::CppFunction::makeFallthrough());
     m.impl("clone", torch::CppFunction::makeFallthrough());
+    // it's okay to return a new tensor here since we disallow in-place operation on ZeroTensors
+    m.impl("alias_with_sizes_and_strides", torch::CppFunction::makeFallthrough());
   }
 } // namespace at

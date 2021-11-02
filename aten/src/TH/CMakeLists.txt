@@ -52,6 +52,7 @@ install(FILES
   THGenerateIntTypes.h
   THGenerateQUInt8Type.h
   THGenerateQUInt4x2Type.h
+  THGenerateQUInt2x4Type.h
   THGenerateQInt8Type.h
   THGenerateQInt32Type.h
   THGenerateQTypes.h

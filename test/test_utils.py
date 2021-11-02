@@ -1,6 +1,7 @@
 import sys
 import os
 import contextlib
+import http
 import io
 import re
 import shutil
@@ -656,6 +657,7 @@ class TestHub(TestCase):
                          SUM_OF_HUB_EXAMPLE)
 
     @retry(URLError, tries=3)
+    @retry(http.client.RemoteDisconnected, tries=3)
     def test_load_state_dict_from_url(self):
         loaded_state = hub.load_state_dict_from_url(TORCHHUB_EXAMPLE_RELEASE_URL)
         self.assertEqual(sum_of_state_dict(loaded_state),
