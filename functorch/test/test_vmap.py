@@ -3157,7 +3157,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.adaptive_avg_pool3d'),
         xfail('nn.functional.avg_pool1d'),
         xfail('nn.functional.avg_pool3d'),
-        xfail('nn.functional.pairwise_distance'),
         xfail('nn.functional.pixel_shuffle'),
         xfail('nn.functional.pixel_unshuffle'),
     }))
