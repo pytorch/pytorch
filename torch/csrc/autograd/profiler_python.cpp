@@ -53,13 +53,44 @@ struct TraceContext {
 
 // CPython boilerplate to define `TraceContext` as a proper python object.
 static PyTypeObject TraceContextType = {
-    PyVarObject_HEAD_INIT(NULL, 0)
-    .tp_name = "TraceContext",
-    .tp_basicsize = sizeof(TraceContext),
-    .tp_itemsize = 0,
-    .tp_flags = Py_TPFLAGS_DEFAULT,
-    .tp_doc = "Thread local metadata used by the Python tracer.",
-    .tp_new = PyType_GenericNew,
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "TraceContext",             /* tp_name */
+    sizeof(TraceContext),       /* tp_basicsize */
+    0,                          /* tp_itemsize */
+    nullptr,                    /* tp_dealloc */
+    nullptr,                    /* tp_vectorcall_offset */
+    nullptr,                    /* tp_getattr */
+    nullptr,                    /* tp_setattr */
+    nullptr,                    /* tp_reserved */
+    nullptr,                    /* tp_repr */
+    nullptr,                    /* tp_as_number */
+    nullptr,                    /* tp_as_sequence */
+    nullptr,                    /* tp_as_mapping */
+    nullptr,                    /* tp_hash  */
+    nullptr,                    /* tp_call */
+    nullptr,                    /* tp_str */
+    nullptr,                    /* tp_getattro */
+    nullptr,                    /* tp_setattro */
+    nullptr,                    /* tp_as_buffer */
+    Py_TPFLAGS_DEFAULT,         /* tp_flags */
+    "Python tracer TLS",        /* tp_doc */
+    nullptr,                    /* tp_traverse */
+    nullptr,                    /* tp_clear */
+    nullptr,                    /* tp_richcompare */
+    0,                          /* tp_weaklistoffset */
+    nullptr,                    /* tp_iter */
+    nullptr,                    /* tp_iternext */
+    nullptr,                    /* tp_methods */
+    nullptr,                    /* tp_members */
+    nullptr,                    /* tp_getset */
+    nullptr,                    /* tp_base */
+    nullptr,                    /* tp_dict */
+    nullptr,                    /* tp_descr_get */
+    nullptr,                    /* tp_descr_set */
+    0,                          /* tp_dictoffset */
+    nullptr,                    /* tp_init */
+    nullptr,                    /* tp_alloc */
+    PyType_GenericNew,          /* tp_new */
 };
 
 // CPython has a more expressive set of events for tracing / profiling:
@@ -125,7 +156,8 @@ struct RawEvent {
     RawEvent(TraceTag tag, int lasti, TraceContext* ctx)
             : tag_(static_cast<uint8_t>(tag)),
               thread_id_(ctx->thread_id_),
-              lasti_(static_cast<uint16_t>(lasti)) {
+              lasti_(static_cast<uint16_t>(lasti)),
+              misc_() {
         int64_t t = now() - ctx->initial_us_;
         t_ = static_cast<uint32_t>(t);
 
@@ -145,7 +177,11 @@ struct RawEvent {
         misc_.arg_ = arg;
     }
 
-    union Misc {
+    uint8_t tag_;
+    uint8_t thread_id_;
+    uint16_t lasti_;
+    uint32_t t_;
+    union {
         // TraceTag::kPy_Call
         PyCodeObject* f_code_;
 
@@ -156,13 +192,7 @@ struct RawEvent {
         // TraceTag::kC_Return
         // ** Unused (placeholder) **
         void* null_;
-    };
-
-    uint8_t tag_;
-    uint8_t thread_id_;
-    uint16_t lasti_;
-    uint32_t t_;
-    Misc misc_;
+    } misc_;
 
     TraceTag tag() const {
         return static_cast<TraceTag>(tag_);
@@ -180,7 +210,7 @@ struct RawEvent {
     }
 };
 
-static_assert(sizeof(RawEvent) == 16);
+static_assert(sizeof(RawEvent) == 16, "RawEvent should be exactly 16 bytes.");
 
 
 // std::hash doesn't have a specialization for pairs so we have to define one.
@@ -239,7 +269,9 @@ class PythonTracer {
     //   to segfault and simply caching the strings is inexpensive.
     struct CodeDescription {
         CodeDescription(int line_no, std::string filename, std::string funcname)
-            : line_no_(line_no), filename_(filename), funcname_(funcname) {}
+            : line_no_(line_no),
+              filename_(std::move(filename)),
+              funcname_(std::move(funcname)) {}
         int line_no_;
         std::string filename_;
         std::string funcname_;
@@ -275,7 +307,7 @@ PythonTracer& PythonTracer::singleton() {
     return singleton_;
 }
 
-PythonTracer::PythonTracer() {
+PythonTracer::PythonTracer() : active_(false) {
     path_prefixes_ = py::module::import("torch.profiler.python_tracer")
         .attr("_prefix_regex")().cast<std::string>();
 
@@ -370,7 +402,7 @@ void PythonTracer::stop() {
     PyThreadState* initial_thread_state = PyThreadState_Get();
     for (const auto i : trace_contexts_) {
         PyThreadState_Swap(i->thread_state_);
-        PyEval_SetProfile(NULL, NULL);
+        PyEval_SetProfile(nullptr, nullptr);
     }
     PyThreadState_Swap(initial_thread_state);
     active_ = false;
@@ -588,7 +620,7 @@ std::vector<std::unique_ptr<PyTraceEvent>> PyTraceReplay::replay_stack() {
     ska::flat_hash_map<size_t, PyTraceEvent*> event_id_map {{0, nullptr}};
     std::vector<std::unique_ptr<PyTraceEvent>> out;
     for (auto& r : results) {
-        out.push_back(std::unique_ptr<PyTraceEvent>(
+        out.push_back(std::unique_ptr<PyTraceEvent>(  // NOLINT: modernize-make-unique
             new PyTraceEvent {
                 .t0_ = r.t0_,
                 .t1_ = r.t1_,
