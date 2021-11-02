@@ -15,7 +15,10 @@ on:
 concurrency:
   group: ios_12_5_1_arm64-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
-
+# For setup-miniconda, see https://github.com/conda-incubator/setup-miniconda/issues/179
+defaults:
+  run:
+    shell: bash -l {0}
 env:
   IN_CI: 1
   IS_GHA: 1

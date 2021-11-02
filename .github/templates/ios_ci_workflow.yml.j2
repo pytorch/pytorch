@@ -22,7 +22,10 @@ on:
   workflow_dispatch:
 
 !{{ common.concurrency(build_environment) }}
-
+# For setup-miniconda, see https://github.com/conda-incubator/setup-miniconda/issues/179
+defaults:
+  run:
+    shell: bash -l {0}
 env:
   IN_CI: 1
   IS_GHA: 1
