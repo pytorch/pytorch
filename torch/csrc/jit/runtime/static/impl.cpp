@@ -112,7 +112,6 @@ void OptimizeGraph(
 #ifdef FBCODE_CAFFE2
     ReplaceWithCopy(graph);
     FuseListUnpack(graph);
-    FuseListUnpackV2(graph);
     EnableStaticRuntimeLayerNorm(graph);
 #endif
   }
