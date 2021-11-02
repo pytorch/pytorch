@@ -110,6 +110,31 @@ Tensor _fw_primal(c10::DispatchKeySet ks, const Tensor & self, int64_t level) {
   return result;
 }
 
+// We need this so that set_fw_grad properly detects that _make_dual is
+Tensor _make_dual(c10::DispatchKeySet ks, const Tensor& primal, const Tensor& tangent, int64_t level) {
+  auto& primal_ = unpack(primal, "primal", 0);
+  auto& tangent_ = unpack(tangent, "tangent", 0);
+  std::shared_ptr<ViewBackward0> grad_fn;
+  if (compute_requires_grad(primal_)) {
+    grad_fn = std::make_shared<ViewBackward0>(); // Why is the
+    grad_fn->self_sizes = primal_.sizes().vec();
+    grad_fn->set_next_edges(collect_next_edges(primal_));
+  }
+
+  auto result = ([&]() {
+    at::AutoDispatchBelowAutograd guard;
+    return at::redispatch::_make_dual(ks & c10::after_autograd_keyset, primal_, tangent_, level);
+  })();
+
+  if (grad_fn) {
+    set_history(flatten_tensor_args(result), grad_fn);
+  }
+
+  result._set_fw_grad(tangent_, level,  /* is_inplace_op */ false);
+  TORCH_CHECK(level == 0, "Invalid level given to _make_dual");
+  return result;
+}
+
 // We don't have an outplace copy, so this can't be generated automatically
 Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool non_blocking) {
   // TODO: once copy is exposed in Declarations.yaml we may be able to bind
@@ -145,7 +170,7 @@ Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool n
     } else {
       new_fw_grad = src_fw_grad;
     }
-    self._set_fw_grad(new_fw_grad, /* level */ 0, /* is_inplace_op */ true,  /* is_make_dual */ false);
+    self._set_fw_grad(new_fw_grad, /* level */ 0, /* is_inplace_op */ true);
   }
 
   return self;
@@ -256,6 +281,8 @@ TORCH_LIBRARY_IMPL(aten, Autograd, m) {
   m.impl("detach_", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::detach_)));
   m.impl("copy_", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::copy_)));
   m.impl("_fw_primal", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::_fw_primal)));
+  m.impl("_make_dual", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::_make_dual)));
+
 }
 
 }  // namespace
@@ -311,11 +338,35 @@ namespace ADInplaceOrView {
     return result;
   }
 
+
+  Tensor _make_dual(c10::DispatchKeySet ks, const Tensor & primal, const Tensor & tangent, int64_t level) {
+    auto tmp = ([&]() {
+      at::AutoDispatchBelowADInplaceOrView guard;
+      // Make an empty shallow copy, the as_view call below will fill in the proper fields
+      return Tensor(primal.getIntrusivePtr()->shallow_copy_and_detach(
+        /*version_counter=*/0,
+        /*allow_tensor_metadata_change=*/false));
+    })();
+    std::function<at::Tensor(const at::Tensor&)> func=nullptr;
+    if (!primal.unsafeGetTensorImpl()->support_as_strided()) {
+      auto size_vec = primal.sizes().vec();
+      func = [=](const at::Tensor& input_base) {
+        return input_base.view(size_vec);
+      };
+    }
+    auto result = as_view(/* base */ primal, /* output */ tmp, /* is_bw_differentiable */ true,
+                          /* is_fw_differentiable */ false, /* view_func */ func, /* creation_meta */ CREATION_META_DEFINITION);
+
+    return result;
+  }
+
   namespace {
     TORCH_LIBRARY_IMPL(aten, ADInplaceOrView, m) {
       m.impl("copy_", torch::dispatch(DispatchKey::ADInplaceOrView, TORCH_FN(ADInplaceOrView::copy_)));
       m.impl("detach", torch::dispatch(DispatchKey::ADInplaceOrView, TORCH_FN(ADInplaceOrView::detach)));
       m.impl("_fw_primal", torch::dispatch(DispatchKey::ADInplaceOrView, TORCH_FN(ADInplaceOrView::_fw_primal)));
+      m.impl("_make_dual", torch::dispatch(DispatchKey::ADInplaceOrView, TORCH_FN(ADInplaceOrView::_make_dual)));
+
     }
   } // namespace
 } // namespace ADInplaceOrView

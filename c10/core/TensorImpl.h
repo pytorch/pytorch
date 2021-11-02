@@ -158,8 +158,7 @@ struct C10_API AutogradMetaInterface {
       const at::TensorBase& new_grad,
       const at::TensorBase& self,
       uint64_t level,
-      bool is_inplace_op,
-      bool is_make_dual) = 0;
+      bool is_inplace_op) = 0;
   virtual ~AutogradMetaInterface();
 };
 
@@ -1117,8 +1116,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       const at::TensorBase& new_grad,
       const at::TensorBase& self,
       uint64_t level,
-      bool is_inplace_op,
-      bool is_make_dual);
+      bool is_inplace_op);
 
   /**
    * Return a typed data pointer to the actual data which this tensor refers to.
