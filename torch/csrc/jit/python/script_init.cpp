@@ -92,7 +92,7 @@ struct PythonResolver : public Resolver {
 
   std::shared_ptr<SugaredValue> resolveValue(
       const std::string& name,
-      Function& m,
+      GraphFunction& m,
       const SourceRange& loc) override {
     pybind11::gil_scoped_acquire ag;
     py::object obj = rcb_(name);
@@ -531,7 +531,7 @@ static std::shared_ptr<Graph> _propagate_and_assign_input_shapes(
 
 void addFunctionToModule(Module& module, const StrongFunctionPtr& func) {
   // Make a graph with a fake self argument
-  auto graph = func.function_->graph()->copy();
+  auto graph = toGraphFunction(*func.function_).graph()->copy();
   auto v = graph->insertInput(0, "self");
   v->setType(module._ivalue()->type());
   const auto name = QualifiedName(*module.type()->name(), "forward");
@@ -1414,11 +1414,13 @@ void initJitScriptBindings(PyObject* module) {
           py::arg("_extra_files") = ExtraFilesMap())
       .def_property_readonly(
           "graph",
-          [](const StrongFunctionPtr& self) { return self.function_->graph(); })
+          [](const StrongFunctionPtr& self) {
+            return toGraphFunction(*self.function_).graph();
+          })
       .def_property_readonly(
           "inlined_graph",
           [](const StrongFunctionPtr& self) {
-            auto g = self.function_->graph()->copy();
+            auto g = toGraphFunction(*self.function_).graph()->copy();
             Inline(*g);
             return g;
           })
@@ -1440,12 +1442,16 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "get_debug_state",
           [](const StrongFunctionPtr& self) {
-            return self.function_->get_executor().getDebugState();
+            return toGraphFunction(*self.function_)
+                .get_executor()
+                .getDebugState();
           })
       .def(
           "_debug_flush_compilation_cache",
           [](const StrongFunctionPtr& self) {
-            return self.function_->get_executor().debugFlushCompilationCache();
+            toGraphFunction(*self.function_)
+                .get_executor()
+                .debugFlushCompilationCache();
           })
       .def_property_readonly(
           "name",
@@ -1479,7 +1485,7 @@ void initJitScriptBindings(PyObject* module) {
       .def_property_readonly(
           "inlined_graph",
           [](const Method& self) {
-            auto g = self.function().graph()->copy();
+            auto g = toGraphFunction(self.function()).graph()->copy();
             Inline(*g);
             return g;
           })
@@ -1930,6 +1936,10 @@ void initJitScriptBindings(PyObject* module) {
   });
 
   m.def("_get_graph_executor_optimize", &torch::jit::getGraphExecutorOptimize);
+
+  m.def(
+      "_enable_mobile_interface_call_export",
+      &torch::jit::enableMobileInterfaceCallExport);
 
   m.def("_create_module_with_type", [](const ClassTypePtr& type) {
      return Module(get_python_cu(), type);

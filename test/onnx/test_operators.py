@@ -1,3 +1,4 @@
+# Owner(s): ["module: onnx"]
 
 from test_pytorch_common import TestCase, run_tests, flatten, skipIfNoLapack, \
     BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
