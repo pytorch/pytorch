@@ -260,19 +260,20 @@ jobs:
     runs-on: ubuntu-18.04
     needs: [ciflow_should_run]
     env:
-      TEST_RUNNER_TYPE: linux.8xlarge.nvidia.gpu
+      TEST_RUNNER_TYPE: linux.4xlarge.nvidia.gpu
       ENABLE_DISTRIBUTED_TEST: 1
-      ENABLE_JIT_LEGACY_TEST: ''
-      ENABLE_MULTIGPU_TEST: ''
-      ENABLE_NOGPU_NO_AVX_TEST: ''
-      ENABLE_NOGPU_NO_AVX2_TEST: ''
-      ENABLE_SLOW_TEST: ''
+      ENABLE_JIT_LEGACY_TEST: 1
+      ENABLE_MULTIGPU_TEST: 1
+      ENABLE_NOGPU_NO_AVX_TEST: 1
+      ENABLE_NOGPU_NO_AVX2_TEST: 1
+      ENABLE_SLOW_TEST: 1
       ENABLE_DOCS_TEST: ''
       ENABLE_BACKWARDS_COMPAT_TEST: ''
       ENABLE_XLA_TEST: ''
       ENABLE_NOARCH_TEST: ''
       NUM_TEST_SHARDS: 2
       MULTIGPU_RUNNER_TYPE: linux.16xlarge.nvidia.gpu
+      DISTRIBUTED_GPU_RUNNER_TYPE: linux.8xlarge.nvidia.gpu
       NOGPU_RUNNER_TYPE: linux.2xlarge
       PR_BODY: ${{ github.event.pull_request.body }}
     outputs:
