@@ -1035,16 +1035,9 @@ REGISTER_OPERATOR_FUNCTOR(aten::pow, aten_pow, [](Node* n) -> SROperator {
   LogAndDumpSchema(n);
   return nullptr;
 });
-// out variant takes precedence over native
-// NB: This impl doesn't work for cpu->cuda copy/cast or vice versa.
-REGISTER_OPERATOR_FUNCTOR(
-    static_runtime::to_copy,
-    aten_to_copy,
-    [](Node* n) -> SROperator {
-      // support 4- or 5-arg for adindexer/adfinder models
-      // Keep TORCH_CHECK here because there is no alternative for fallback
-      TORCH_CHECK(n->inputs().size() == 4 || n->inputs().size() == 5);
-      return [](ProcessedNode* p_node) {
+
+namespace {
+void to_copy_functor(ProcessedNode* p_node) {
         const auto& self = p_node->Input(0).toTensor();
         // ignore input 3 (copy)
         auto non_blocking = p_node->Input(2).toBool(); // non_blocking
@@ -1098,7 +1091,19 @@ REGISTER_OPERATOR_FUNCTOR(
         fastResizeToZero(out_t);
         at::native::to_copy_out(
             out_t, self, non_blocking, copy_strides, memory_format);
-      };
+      }
+} // namespace
+
+// out variant takes precedence over native
+// NB: This impl doesn't work for cpu->cuda copy/cast or vice versa.
+REGISTER_OPERATOR_FUNCTOR(
+    static_runtime::to_copy,
+    aten_to_copy,
+    [](Node* n) -> SROperator {
+      // support 4- or 5-arg for adindexer/adfinder models
+      // Keep TORCH_CHECK here because there is no alternative for fallback
+      TORCH_CHECK(n->inputs().size() == 4 || n->inputs().size() == 5);
+      return to_copy_functor;
     });
 
 // Out variants for view ops are registered to a separate registry because
