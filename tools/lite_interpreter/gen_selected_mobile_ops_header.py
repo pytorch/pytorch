@@ -127,7 +127,7 @@ def main() -> None:
     print("Loading yaml file: ", model_file_name)
     loaded_model = {}
     with open(model_file_name, "rb") as model_file:
-        loaded_model = yaml.load(model_file)
+        loaded_model = yaml.safe_load(model_file)
 
 
     root_operators_set = set(loaded_model)
