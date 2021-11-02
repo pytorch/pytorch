@@ -131,24 +131,6 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         for node in graph.nodes():
             self.assertNotEqual(node.kind(), "onnx::SplitToSequence")
 
-    def test_output_list(self):
-        class PaddingLayer(torch.jit.ScriptModule):
-            @torch.jit.script_method
-            def forward(self, input_t: torch.Tensor, n: int) -> List[torch.Tensor]:
-                for i in range(n):
-                    input_t = input_t * 2
-                return [input_t]
-
-        input_t = torch.ones(size=[10], dtype=torch.long)
-        n = 2
-        model = torch.jit.script(PaddingLayer())
-
-        with self.assertRaises(RuntimeError):
-            torch.onnx._export(model,
-                               (input_t, n),
-                               "test.onnx",
-                               opset_version=self.opset_version)
-
     def test_constant_fold_transpose(self):
         class TransposeModule(torch.nn.Module):
             def forward(self, x):
