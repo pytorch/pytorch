@@ -14,7 +14,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, dtypes, dtypesIfCPU, dtypesIfCUDA,
-    onlyNativeDeviceTypes, skipMeta)
+    onlyNativeDeviceTypes)
 
 
 class TestIndexing(TestCase):
@@ -1079,7 +1079,6 @@ class TestIndexing(TestCase):
         x[1] = torch.arange(5, 7, device=device)
         self.assertEqual(x.tolist(), [[0, 1], [5, 6]])
 
-    @skipMeta
     def test_byte_tensor_assignment(self, device):
         x = torch.arange(0., 16, device=device).view(4, 4)
         b = torch.ByteTensor([True, False, True, False]).to(device)
@@ -1389,7 +1388,6 @@ class NumpyTests(TestCase):
         a[b] = 1.
         self.assertEqual(a, tensor([[1., 1., 1.]], device=device))
 
-    @skipMeta
     def test_boolean_assignment_value_mismatch(self, device):
         # A boolean assignment should fail when the shape of the values
         # cannot be broadcast to the subscription. (see also gh-3458)
@@ -1497,8 +1495,8 @@ class NumpyTests(TestCase):
         expected = b.float().unsqueeze(1).expand(100, 100)
         self.assertEqual(a, expected)
 
-instantiate_device_type_tests(TestIndexing, globals())
-instantiate_device_type_tests(NumpyTests, globals())
+instantiate_device_type_tests(TestIndexing, globals(), except_for='meta')
+instantiate_device_type_tests(NumpyTests, globals(), except_for='meta')
 
 if __name__ == '__main__':
     run_tests()
