@@ -11,6 +11,7 @@ on:
       - master
       - release/*
   workflow_dispatch:
+
 concurrency:
   group: ios_12_5_1_arm64_coreml-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
@@ -58,6 +59,7 @@ jobs:
         with:
           auto-update-conda: true
           python-version: 3.8
+          activate-environment: ${{ github.run_id }}_${{ github.run_number }}
       - name: Install ios / conda Dependencies
         run: |
           # Install dependencies

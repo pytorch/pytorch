@@ -20,6 +20,7 @@ on:
       - release/*
 {%- endif %}
   workflow_dispatch:
+
 !{{ common.concurrency(build_environment) }}
 
 env:
@@ -43,6 +44,7 @@ jobs:
         with:
           auto-update-conda: true
           python-version: 3.8
+          activate-environment: build
       - name: Install ios / conda Dependencies
         run: |
           # Install dependencies
