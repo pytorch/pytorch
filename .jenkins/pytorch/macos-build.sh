@@ -14,19 +14,18 @@ fi
 # The way this is done is by detecting the command of the parent pid of the current process and checking whether
 # that is sccache, and wrapping sccache around the process if its parent were not already sccache.
 function write_sccache_stub() {
-  output_directory=$1
-  output_script=$2
+  output=$1
 
-  printf "#!/bin/sh\nif [ \$(ps auxc \$(ps auxc -o ppid \$\$ | grep \$\$ | rev | cut -d' ' -f1 | rev) | tr '\\\\n' ' ' | rev | cut -d' ' -f2 | rev) != sccache ]; then\n  exec sccache %s \"\$@\"\nelse\n  exec %s \"\$@\"\nfi" "$(which "$1")" "$(which "$1")" > "${output_directory}/${output_script}"
-  chmod a+x "${output_directory}/${output_script}"
+  printf "#!/bin/sh\nif [ \$(ps auxc \$(ps auxc -o ppid \$\$ | grep \$\$ | rev | cut -d' ' -f1 | rev) | tr '\\\\n' ' ' | rev | cut -d' ' -f2 | rev) != sccache ]; then\n  exec sccache %s \"\$@\"\nelse\n  exec %s \"\$@\"\nfi" "$(which "$1")" "$(which "$1")" > "${output}"
+  chmod a+x "${output}"
 }
 
 if which sccache > /dev/null; then
   # Create temp directory for sccache shims
   tmp_dir=$(mktemp -d)
   trap 'rm -rfv ${tmp_dir}' EXIT
-  write_sccache_stub clang++
-  write_sccache_stub clang
+  write_sccache_stub "${tmp_dir}/clang++"
+  write_sccache_stub "${tmp_dir}/clang"
 
   export PATH="${tmp_dir}:$PATH"
 fi
