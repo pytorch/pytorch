@@ -95,6 +95,7 @@ void mv<c10::complex<double>>(MKL_SPARSE_MV_ARGTYPES(c10::complex<double>)) {
       reinterpret_cast<MKL_Complex16*>(y)));
 }
 
+#if !defined(_WIN32)
 template <>
 void add<float>(MKL_SPARSE_ADD_ARGTYPES(float)) {
   TORCH_MKLSPARSE_CHECK(mkl_sparse_s_add(operation, A, alpha, B, C));
@@ -113,6 +114,7 @@ void add<c10::complex<double>>(MKL_SPARSE_ADD_ARGTYPES(c10::complex<double>)) {
   TORCH_MKLSPARSE_CHECK(mkl_sparse_z_add(
       operation, A, to_mkl_complex<double, MKL_Complex16>(alpha), B, C));
 }
+#endif // !defined(_WIN32)
 
 template <>
 void export_csr<float>(MKL_SPARSE_EXPORT_CSR_ARGTYPES(float)) {
