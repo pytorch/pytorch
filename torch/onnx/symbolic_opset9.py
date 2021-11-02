@@ -3261,7 +3261,5 @@ def broadcast_tensors(g, self):
 
 @parse_args("v", "f", "f", "v")
 def uniform(g, self, from_, to, generator):
-    from_v = g.op("Constant", value_t=torch.tensor(from_, dtype=torch.float))
-    to_v = g.op("Constant", value_t=torch.tensor(to, dtype=torch.float))
     kwargs = {"from_f": from_, "to_f": to}
-    return g.op("Uniform", self, generator, **kwargs)
+    return g.op("RandomUniform", self, generator, **kwargs)
