@@ -74,8 +74,8 @@ bool Function::append_operator(
   if (!promoted_op) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(pArgs);
     const auto& args = *pArgs;
-    if (model_version == 0x3LL &&
-        opname == c10::OperatorName("aten::_convolution", "")) {
+    if (model_version == 0x3LL && opname.name == "aten::_convolution" &&
+        opname.overload_name.empty()) {
       // Since byte-code versions 0x4L, convolution has an additional
       // default-value argument (allow_tf32=True, see
       // https://github.com/pytorch/pytorch/pull/40737). This wrapper handles
