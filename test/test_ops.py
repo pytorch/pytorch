@@ -18,7 +18,7 @@ from torch.testing._internal.common_methods_invocations import \
     (op_db, _NOTHING, UnaryUfuncInfo, ReductionOpInfo, SpectralFuncInfo)
 from torch.testing._internal.common_device_type import \
     (deviceCountAtLeast, instantiate_device_type_tests, ops, onlyCPU,
-     onlyCUDA, onlyNativeDeviceTypes, skipCUDAIfRocm, OpDTypes, skipMeta)
+     onlyCUDA, onlyNativeDeviceTypes, OpDTypes, skipMeta)
 from torch.testing._internal.common_jit import JitCommonTestCase, check_against_reference
 from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, create_traced_fn, \
     check_alias_annotation
@@ -65,7 +65,6 @@ class TestCommon(TestCase):
     # Validates that each OpInfo specifies its forward and backward dtypes
     #   correctly for CPU and CUDA devices
     @skipMeta
-    @skipCUDAIfRocm
     @onlyNativeDeviceTypes
     @ops(op_db, dtypes=OpDTypes.none)
     def test_dtypes(self, device, op):
@@ -149,7 +148,6 @@ class TestCommon(TestCase):
         device_type = torch.device(device).type
         claimed_supported = set(op.supported_dtypes(device_type))
         supported_dtypes = set(supported_dtypes)
-
         supported_but_unclaimed = supported_dtypes - claimed_supported
         claimed_but_unsupported = claimed_supported - supported_dtypes
         msg = """The supported dtypes for {0} on {1} according to its OpInfo are
@@ -183,7 +181,6 @@ class TestCommon(TestCase):
         self.assertEqual(supported_backward_dtypes, claimed_backward_supported, msg=msg)
 
     # Validates that each OpInfo works correctly on different CUDA devices
-    @skipCUDAIfRocm
     @onlyCUDA
     @deviceCountAtLeast(2)
     @ops(op_db, allowed_dtypes=(torch.float32, torch.long))
