@@ -8920,6 +8920,33 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_broadcast_python_scalar'),
         ),
     ),
+    BinaryUfuncInfo('logical_and',
+                    ref=np.logical_and,
+                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                    sample_inputs_func=sample_inputs_binary_pwise,
+                    supports_autograd=False,
+                    # FIXME: logical_and does not accept scalar inputs
+                    skips=(
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_broadcast_python_scalar'),
+                    )),
+    BinaryUfuncInfo('logical_or',
+                    ref=np.logical_or,
+                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                    sample_inputs_func=sample_inputs_binary_pwise,
+                    supports_autograd=False,
+                    # FIXME: logical_or does not accept scalar inputs
+                    skips=(
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_broadcast_python_scalar'),
+                    )),
+    BinaryUfuncInfo('logical_xor',
+                    ref=np.logical_xor,
+                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                    sample_inputs_func=sample_inputs_binary_pwise,
+                    supports_autograd=False,
+                    # FIXME: logical_xor does not accept scalar inputs
+                    skips=(
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_broadcast_python_scalar'),
+                    )),
     # `softmax` supports different dtypes based on whether `dtype` argument,
     # is passed or not. Hence two OpInfo entries, one with dtype and other without.
     OpInfo('softmax',
