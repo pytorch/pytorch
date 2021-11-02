@@ -895,14 +895,17 @@ at::Tensor _convolution(
   }
 
   at::MemoryFormat backend_memory_format = at::MemoryFormat::Contiguous;
-
+#if !defined(C10_MOBILE)
+  // cudnn and miopen are guaranteed not to be on mobile, and T102591915
+  // suggests that maybe the cudnn condition sometimes segfaults (though
+  // I can't imagine how)
   if (detail::getCUDAHooks().compiledWithCuDNN() && cudnn_conv_use_channels_last(input, weight)) {
     backend_memory_format = (k == 5) ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast;
   }
-
   if (detail::getCUDAHooks().compiledWithMIOpen() && miopen_conv_use_channels_last(input, weight)) {
     backend_memory_format = (k == 5) ? at::MemoryFormat::Contiguous /*at::MemoryFormat::ChannelsLast3d*/ : at::MemoryFormat::ChannelsLast;
   }
+#endif
 
   Tensor output;
   if (params.is_depthwise(input, weight)) {
@@ -1337,22 +1340,13 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const c10::option
         auto input_shape = input.sizes().slice(2);
         auto grad_output_shape = gO.sizes().slice(2);
 
-        if (kernel_size.size() == 1) {
-          auto expected_input_shape = (kernel_size[0] - 1) * gi_conv_params.dilation[1]
-            - 2 * gi_conv_params.padding[1]
-            + (gi_conv_params.stride[1] * (grad_output_shape[0] - 1) + 1);
-          if (expected_input_shape != input_shape[0]) {
-            gi_conv_params.output_padding[1] = input_shape[0] - expected_input_shape;
-          }
-        } else {
-          for (const auto i : c10::irange(kernel_size.size())) {
-            // Check if whole input has been used or not
-            auto expected_input_shape = (kernel_size[i] - 1) * gi_conv_params.dilation[i]
-              - 2 * gi_conv_params.padding[i]
-              + (gi_conv_params.stride[i] * (grad_output_shape[i] - 1) + 1);
-            if (expected_input_shape != input_shape[i]) {
-              gi_conv_params.output_padding[i] = input_shape[i] - expected_input_shape;
-            }
+        for (const auto i : c10::irange(kernel_size.size())) {
+          // Check if whole input has been used or not
+          auto expected_input_shape = (kernel_size[i] - 1) * gi_conv_params.dilation[i]
+            - 2 * gi_conv_params.padding[i]
+            + (gi_conv_params.stride[i] * (grad_output_shape[i] - 1) + 1);
+          if (expected_input_shape != input_shape[i]) {
+            gi_conv_params.output_padding[i] = input_shape[i] - expected_input_shape;
           }
         }
 
