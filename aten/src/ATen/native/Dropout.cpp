@@ -87,7 +87,7 @@ ALIAS_SPECIALIZATION(_feature_alpha_dropout, true,  true )
 } // anomymous namepsace
 
 std::tuple<Tensor,Tensor>
-native_dropout_cpu(const Tensor& input, double p, double scale, bool train) {
+native_dropout_cpu(const Tensor& input, double p, c10::optional<double> scale, c10::optional<bool> train) {
   if (input.numel() == 0) {
     return std::make_tuple(input, at::empty_like(input, input.options()));
   }
@@ -95,9 +95,9 @@ native_dropout_cpu(const Tensor& input, double p, double scale, bool train) {
   Tensor mask = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   Tensor output;
 
-  if (train) {
+  if (!train.has_value() || *train) {
     mask.bernoulli_(p);
-    output = input.mul(mask).mul_(scale);
+    output = input.mul(mask).mul_(scale.has_value() ? *scale : 1.0 / p);
   } else {
     output = input;
   }
