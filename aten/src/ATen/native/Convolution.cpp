@@ -901,7 +901,7 @@ at::Tensor _convolution(
   // cudnn and miopen are guaranteed not to be on mobile, and T102591915
   // suggests that maybe the cudnn condition sometimes segfaults (though
   // I can't imagine how)
-  if (detail::getCUDAHooks().compiledWithCuDNN() && cudnn_conv_use_channels_last(input, weight)) {
+  if (detail::getCUDAHooks().compiledWithCuDNN()) {
     backend_memory_format = cudnn_conv_suggest_memory_format(input, weight);
   }
   if (detail::getCUDAHooks().compiledWithMIOpen() && miopen_conv_use_channels_last(input, weight)) {
