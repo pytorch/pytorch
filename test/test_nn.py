@@ -9727,9 +9727,6 @@ class TestNN(NNTestCase):
         with self.assertRaisesRegex(ValueError, "but got: 'garbage'"):
             F.grid_sample(input, grid, padding_mode='garbage', align_corners=False)
 
-        with self.assertRaisesRegex(RuntimeError, "expected input and grid to have same dtype"):
-            F.grid_sample(input.float(), grid.double(), align_corners=False)
-
         with self.assertRaisesRegex(RuntimeError, "expected 4D or 5D input"):
             F.grid_sample(input[0], grid, align_corners=False)
 
