@@ -46,6 +46,9 @@ const char* _mklGetErrorString(sparse_status_t error) {
   return "<unknown>";
 }
 
+// There are link errors when compiling with create_csr functions on Windows.
+// See https://github.com/pytorch/pytorch/pull/50937#issuecomment-779272492
+#if !defined(_WIN32)
 template <>
 void create_csr<float>(MKL_SPARSE_CREATE_CSR_ARGTYPES(float)) {
   TORCH_MKLSPARSE_CHECK(mkl_sparse_s_create_csr(
@@ -82,6 +85,7 @@ void create_csr<c10::complex<double>>(
       col_indx,
       reinterpret_cast<MKL_Complex16*>(values)));
 }
+#endif // !defined(_WIN32)
 
 template <>
 void mv<float>(MKL_SPARSE_MV_ARGTYPES(float)) {
