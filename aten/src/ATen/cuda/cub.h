@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <c10/core/ScalarType.h>
+#include <ATen/cuda/CUDAConfig.h>
 
 // NOTE: These templates are intentionally not defined in this header,
 // which aviods re-compiling them for each translation unit. If you get
@@ -40,7 +41,9 @@ void radix_sort_pairs(
     const key_t *keys_in, key_t *keys_out,
     const value_t *values_in, value_t *values_out,
     int64_t n, bool descending=false, int64_t begin_bit=0, int64_t end_bit=sizeof(key_t)*8) {
-  static_assert(std::is_trivially_copyable<value_t>::value, "Value must be trivially copyable");
+  static_assert(std::is_trivially_copyable<value_t>::value ||
+                AT_ROCM_ENABLED(),  // ROCm incorrectly fails this check for vector types
+                "radix_sort_pairs value type must be trivially copyable");
   // Make key type opaque, so all inputs of a certain size use the same template instantiation
   using opaque_t = detail::OpaqueType<sizeof(value_t)>;
   static_assert(sizeof(value_t) <= 8 && (sizeof(value_t) & (sizeof(value_t) - 1)) == 0, "");
