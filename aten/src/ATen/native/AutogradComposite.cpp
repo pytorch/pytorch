@@ -22,7 +22,7 @@ std::tuple<at::Tensor, at::Tensor> _unpack_dual(const at::Tensor& tensor, int64_
   return std::tuple<at::Tensor, at::Tensor>(tensor._fw_primal(level), tensor._fw_grad(level));
 }
 
-// See NOTE [Two New-zero Funcitons]
+// See NOTE [Two New-zero Functions]
 Tensor _new_zeros_with_meta(
     const at::Tensor& self,
     IntArrayRef sizes,

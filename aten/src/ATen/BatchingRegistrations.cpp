@@ -544,6 +544,8 @@ static void checkBasicAsStridedValidForSlice(
 Tensor _new_zeros_with_same_meta_batching_rule(
     const Tensor& self,
     const Tensor& other) {
+  TORCH_CHECK(isBatchedTensor(self) && !isBatchedTensor(other),
+      "Only the 'batched grad' use case is supported in PyTorch core.")
   auto sizes = other.sizes();
   auto strides = other.strides();
   auto storage_offset = other.storage_offset();
