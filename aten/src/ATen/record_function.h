@@ -27,6 +27,8 @@ enum class C10_API_ENUM RecordScope : uint8_t {
   TORCHSCRIPT_FUNCTION,
   // Kernel Function dtype Tag
   KERNEL_FUNCTION_DTYPE,
+  // Torchbind custom class,
+  CUSTOM_CLASS,
   // Kernel Function dtype Tag
   LITE_INTERPRETER,
   // User defined scope (e.g. with record_function())

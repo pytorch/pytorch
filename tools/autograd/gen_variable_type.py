@@ -47,8 +47,7 @@ from tools.codegen.api.autograd import (
 from tools.codegen.api import cpp
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.context import native_function_manager, with_native_function
-from tools.codegen.gen import FileManager
-from tools.codegen.utils import mapMaybe
+from tools.codegen.utils import mapMaybe, FileManager
 from tools.codegen.model import (Argument, NativeFunction, SchemaKind,
                                  SelfArgument, TensorOptionsArguments,
                                  BaseType, ListType)
@@ -329,7 +328,7 @@ auto ${inp}_p = toNonOptPrimal(${inp});
 FW_DERIVATIVE_SETTER_TENSOR = CodeTemplate("""\
 if (${out_arg}_new_fw_grad.defined()) {
   // The hardcoded 0 here will need to be updated once we support multiple levels.
-  ${out_arg}._set_fw_grad(${out_arg}_new_fw_grad, /* level */ 0, /* is_inplace_op */ ${is_inplace}, /* is_make_dual */ false);
+  ${out_arg}._set_fw_grad(${out_arg}_new_fw_grad, /* level */ 0, /* is_inplace_op */ ${is_inplace});
 }
 """)
 
@@ -339,7 +338,7 @@ for (auto i=0; i<${out_arg}.size(); ++i) {
   if (${out_arg}_new_fw_grad[i].defined()) {
   // The hardcoded 0 here will need to be updated once we support multiple levels.
     ${out_arg}[i]._set_fw_grad(
-        ${out_arg}_new_fw_grad[i], /* level */ 0, /* is_inplace_op */ ${is_inplace}, /* is_make_dual */ false);
+        ${out_arg}_new_fw_grad[i], /* level */ 0, /* is_inplace_op */ ${is_inplace});
   }
 }
 """)
@@ -474,7 +473,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
     is_out_fn = f.func.kind() == SchemaKind.out
     returns_void = len(f.func.returns) == 0
     base_name = get_base_name(f)
-    view_info = get_view_info(fn)
+    view_info = get_view_info(f)
 
     def gen_differentiable_input(
         arg: Union[Argument, SelfArgument, TensorOptionsArguments]
@@ -812,7 +811,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         unpacked_args = [b.name for b in unpacked_bindings]
         base_type_call = emit_dispatch_call(f, 'self_', unpacked_args)
 
-        if get_view_info(fn) is not None or modifies_arguments(f):
+        if get_view_info(f) is not None or modifies_arguments(f):
             guard = 'at::AutoDispatchBelowAutograd guard;'
         else:
             guard = 'at::AutoDispatchBelowADInplaceOrView guard;'
