@@ -38,7 +38,7 @@ struct SourceImporterImpl : public Resolver,
 
   std::shared_ptr<SugaredValue> resolveValue(
       const std::string& name,
-      Function& m,
+      GraphFunction& m,
       const SourceRange& loc) override;
   TypePtr resolveType(const std::string& name, const SourceRange& loc) override;
 

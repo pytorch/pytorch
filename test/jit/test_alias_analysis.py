@@ -11,11 +11,11 @@ class TestAliasAnalysis(JitTestCase):
     def test_becomes_wildcard_annotations(self):
         graph_str = """
         graph(%a.1 : Tensor, %b.1 : Tensor):
-            %11 : NoneType = prim::Constant() # /private/home/eellison/pytorch/test/jit/test_alias_analysis.py:18:8
+            %11 : NoneType = prim::Constant()
             %8 : int = prim::Constant[value=0]()
-            %7 : int = prim::Constant[value=1]() # /private/home/eellison/pytorch/test/jit/test_alias_analysis.py:20:31
-            %x.1 : Tensor = aten::add(%a.1, %b.1, %7) # /private/home/eellison/pytorch/test/jit/test_alias_analysis.py:19:16
-            %y.1 : Tensor[] = aten::split(%x.1, %7, %8) # /private/home/eellison/pytorch/test/jit/test_alias_analysis.py:20:16
+            %7 : int = prim::Constant[value=1]()
+            %x.1 : Tensor = aten::add(%a.1, %b.1, %7)
+            %y.1 : Tensor[] = aten::split(%x.1, %7, %8)
             return ()
         """
         graph = parse_ir(graph_str)
