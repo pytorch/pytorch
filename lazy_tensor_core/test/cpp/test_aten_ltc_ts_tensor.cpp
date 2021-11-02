@@ -4076,16 +4076,18 @@ TEST_F(AtenLtcTsTensorTest, TestIndexSelect) {
           torch::empty({2}, torch::TensorOptions(index_scalar_type));
       b[0] = 0;
       b[1] = 2;
-      torch::Tensor c0 = torch::index_select(a, 0, b);
-      torch::Tensor c1 = torch::index_select(a, 1, b);
-      ForEachDevice([&](const torch::Device& device) {
-        torch::Tensor xla_a = CopyToDevice(a, device);
-        torch::Tensor xla_b = CopyToDevice(b, device);
-        torch::Tensor xla_c0 = torch::index_select(xla_a, 0, xla_b);
-        torch::Tensor xla_c1 = torch::index_select(xla_a, 1, xla_b);
-        AllEqual(c0, xla_c0);
-        AllEqual(c1, xla_c1);
-      });
+      for (auto offset : {-2, 0}) {
+        torch::Tensor c0 = torch::index_select(a, 0 + offset, b);
+        torch::Tensor c1 = torch::index_select(a, 1 + offset, b);
+        ForEachDevice([&](const torch::Device& device) {
+          torch::Tensor xla_a = CopyToDevice(a, device);
+          torch::Tensor xla_b = CopyToDevice(b, device);
+          torch::Tensor xla_c0 = torch::index_select(xla_a, 0 + offset, xla_b);
+          torch::Tensor xla_c1 = torch::index_select(xla_a, 1 + offset, xla_b);
+          AllEqual(c0, xla_c0);
+          AllEqual(c1, xla_c1);
+        });
+      }
     }
   }
 }

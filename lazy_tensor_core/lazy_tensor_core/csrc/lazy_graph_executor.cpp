@@ -1061,7 +1061,7 @@ std::vector<at::Tensor> LazyGraphExecutor::GetTensorsFused(
  // for TS backend, we'd ideally just cut through these layers and
  // not need to copy the tensor, just move it
 
- // for XLA backend, a copy is going to have to happen, 
+ // for XLA backend, a copy is going to have to happen,
 
  // could we replace the 'Data' object with an at::Tensor, which is 'undefined' unless
  // a backend attaches a buffer to it?  That way we can have a 'PopulateTensor' method on backend,

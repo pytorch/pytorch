@@ -30,6 +30,7 @@ full_codegen:
   - gelu_backward
   - gt.Scalar
   - gt.Tensor
+  - index_select
   - kl_div_backward
   - le.Scalar
   - le.Tensor
@@ -113,7 +114,6 @@ supported:
   - sub.Scalar
   - view
   - lt.Scalar
-  - index_select
   - alias
   - tanh_backward
 autograd:
