@@ -2,6 +2,7 @@
 #define COMPUTATION_CLIENT_METRICS_H_
 
 #include <atomic>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
