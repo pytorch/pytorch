@@ -65,20 +65,9 @@ struct TensorSpec {
     TORCH_CHECK(spec.count == 3);
     name_ = spec[0];
     dtype_ = (TensorType)spec[1].intValue;
-    NSArray* sizes = parse(spec[2]);
-    for (NSString* dim in sizes) {
-      sizes_.emplace_back(dim.integerValue);
-    }
-  }
-  int64_t numel() const {
-    return std::accumulate(
-        begin(sizes_), end(sizes_), 1, std::multiplies<int64_t>());
   }
   NSString* name() {
     return name_;
-  }
-  std::vector<int64_t> sizes() {
-    return sizes_;
   }
   TensorType dtype() {
     return dtype_;
@@ -87,7 +76,6 @@ struct TensorSpec {
  private:
   NSString* name_ = @"";
   TensorType dtype_ = TensorType::Float;
-  std::vector<int64_t> sizes_{};
 };
 
 struct CoreMLConfig {
@@ -99,7 +87,7 @@ struct CoreMLConfig {
         allow_low_precision_([dict[@"allow_low_precision"] boolValue]) {
     TORCH_CHECK(
         coreMLVersion_ >= SUPPORTED_COREML_VER,
-        "Only Core ML version 4 and above are supported");
+        "Only Core ML version 4 or above are supported");
   }
   int64_t coreMLVersion() const {
     return coreMLVersion_;
@@ -185,7 +173,12 @@ struct API_AVAILABLE(ios(11.0), macos(10.13)) CoreMLExecutorWrapper
       TORCH_CHECK(val.multiArrayValue);
       // Currently, only Float type is supported
       TORCH_CHECK(val.multiArrayValue.dataType == MLMultiArrayDataTypeFloat32);
-      auto tensor = at::empty(spec.sizes(), scalarType(spec.dtype()));
+      std::vector<int64_t> outputShape;
+      for (int i = 0; i < val.multiArrayValue.shape.count; ++i) {
+        outputShape.emplace_back(val.multiArrayValue.shape[i].integerValue);
+      }
+      auto tensor =
+          at::empty(IntArrayRef(outputShape), scalarType(spec.dtype()));
       int64_t count = val.multiArrayValue.count;
       memcpy(
           tensor.data_ptr<float>(),
@@ -227,6 +220,7 @@ class API_AVAILABLE(ios(11.0), macos(10.13)) CoreMLBackend
     const std::string& model = modelDict.at("model").toStringRef();
     const std::string& sha256 = modelDict.at("hash").toStringRef();
     PTMCoreMLExecutor* executor = [PTMCoreMLExecutor new];
+    executor.backend = config.backend();
     bool result = [executor compileMLModel:model identifier:sha256];
     TORCH_CHECK(result, "Compiling MLModel failed!");
     auto executorWrapper = c10::make_intrusive<CoreMLExecutorWrapper>(

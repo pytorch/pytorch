@@ -58,8 +58,8 @@ class TRTSplitter(splitter_base._SplitterBase):
         # Current code for lowering is place-holder, subject to future change
         # based on feeds model's actual status
         interp = TRTInterpreter(mod, InputTensorSpec.from_tensors(inputs))
-        engine, input_names, output_names = interp.run(*inputs)
-        return TRTModule(engine, input_names, output_names)
+        interpreter_result = interp.run(*inputs)
+        return TRTModule(interpreter_result.engine, interpreter_result.input_names, interpreter_result.output_names)
 
     def _find_culprit(self, mod: torch.fx.GraphModule, inputs: Tensors):
         """
