@@ -11,6 +11,7 @@
 #if AT_USE_MKL_SPARSE()
 #include <ATen/mkl/SparseBlas.h>
 #include <ATen/mkl/SparseDescriptors.h>
+#include <ATen/mkl/Utils.h>
 #endif
 
 namespace at {
