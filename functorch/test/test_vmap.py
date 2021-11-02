@@ -975,9 +975,11 @@ class TestVmapAPI(TestCase):
 
         vmap(vmap(foo))(x)
         expected = textwrap.dedent("""\
-            BatchedTensor(lvl=3, bdim=0, value=\\
-              BatchedTensor(lvl=2, bdim=0, value=\\
-                tensor([[3.1400]])))""")
+                BatchedTensor(lvl=3, bdim=0, value=
+                    BatchedTensor(lvl=2, bdim=0, value=
+                        tensor([[3.1400]])
+                    )
+                )""")
         self.assertEqual(buf, expected)
 
 
