@@ -6787,8 +6787,7 @@ class TestAutogradFunctional(TestCase):
         self.assertEqual(result_backward_mode, expected)
 
         if test_forward_ad:
-            result_forward_mode = autogradF.jacobian(f, inputs, forward_ad=True, vectorize=True)
-            print(result_forward_mode, expected)
+            result_forward_mode = autogradF.jacobian(f, inputs, use_forward_ad=True, vectorize=True)
             self.assertEqual(result_forward_mode, expected)
 
     def test_jacobian_vectorize_correctness_simple(self):
@@ -6861,7 +6860,7 @@ class TestAutogradFunctional(TestCase):
 
         x = torch.randn(3)
         y = torch.randn(3)
-        # The Jacobin computed using forward AD has the dtype of the output
+        # The Jacobian computed using forward AD has the dtype of the output
         # but the Jacobian computed with reverse AD has dtype of input
         self._check_jacobian_vectorize_correctness(f, (x, y), test_forward_ad=False)
 
@@ -6870,7 +6869,7 @@ class TestAutogradFunctional(TestCase):
         result = autogradF.hessian(f, inputs, vectorize=True)
         self.assertEqual(result, expected)
 
-        result_forward_mode = autogradF.hessian(f, inputs, forward_ad=True, vectorize=True)
+        result_forward_mode = autogradF.hessian(f, inputs, use_forward_ad=True, vectorize=True)
         self.assertEqual(result_forward_mode, expected)
 
     def test_hessian_vectorize_correctness_simple(self):
@@ -7841,6 +7840,24 @@ class TestAutogradForwardMode(TestCase):
 
             # No differentiable outputs, shouldn't error
             eq = foo == bar
+
+    def test_backward_graph_destruction(self):
+        def fn():
+            a = torch.rand(10, requires_grad=True)
+
+            da = fwAD.make_dual(torch.rand_like(a), a)
+
+            # Create an object with a c++ cycle as:
+            # db -> AutogradMeta -> ForwardGrad -> db's grad
+            # db's grad -> AutogradMeta -> MulBackward
+            # MulBackward -> SavedVariable -> db
+            db = da.exp()
+
+        with fwAD.dual_level():
+            fn()
+        # This test make sure that we don't deadlock on exit of this
+        # context manager. If you do, there is something wrong with the
+        # locking of the forward ad level most likely
 
 # Generic device type autograd tests.
 class TestAutogradDeviceType(TestCase):

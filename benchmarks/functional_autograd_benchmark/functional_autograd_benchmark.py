@@ -75,7 +75,7 @@ MODELS = [
     ModelDef("resnet18", vision_models.get_resnet18, FAST_TASKS, []),
     ModelDef("fcn_resnet", vision_models.get_fcn_resnet, FAST_TASKS, []),
     ModelDef("detr", vision_models.get_detr, FAST_TASKS, []),
-    ModelDef("ppl_simple_reg", ppl_models.get_simple_regression, ["jacfwd", "jacrev"], []),
+    ModelDef("ppl_simple_reg", ppl_models.get_simple_regression, ALL_TASKS, []),
     ModelDef("ppl_robust_reg", ppl_models.get_robust_regression, ALL_TASKS, []),
     ModelDef("wav2letter", audio_text_models.get_wav2letter, FAST_TASKS, []),
     ModelDef("deepspeech", audio_text_models.get_deepspeech, FAST_TASKS_NO_DOUBLE_BACK, DOUBLE_BACKWARD_TASKS),

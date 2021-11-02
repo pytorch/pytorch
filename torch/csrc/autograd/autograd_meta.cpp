@@ -92,7 +92,7 @@ namespace {
 
 // This function is will ensure that the fw_grad_ is properly a view of the base for inplace ops on
 // Tensors that do not have forward grad originally.
-void AutogradMeta::set_fw_grad(const at::TensorBase& new_grad_base, const at::TensorBase& self_base, uint64_t level, bool is_inplace_op, bool is_make_dual) {
+void AutogradMeta::set_fw_grad(const at::TensorBase& new_grad_base, const at::TensorBase& self_base, uint64_t level, bool is_inplace_op) {
   // Lazy initialization
   {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -159,14 +159,14 @@ void AutogradMeta::set_fw_grad(const at::TensorBase& new_grad_base, const at::Te
             new_grad = new_fw_grad_value;
           }
 
-          base._set_fw_grad(new_base_fw_grad, level, /* is_inplace_op */ false, /* is_make_dual */ false);
+          base._set_fw_grad(new_base_fw_grad, level, /* is_inplace_op */ false);
         }
       }
     }
 
     // Enforce the basic layout constraint
     if (!has_same_meta(new_grad, self)) {
-      if (is_view_ && !is_make_dual) {
+      if (is_view_) {
         auto this_view_meta = static_cast<DifferentiableViewMeta*>(this);
         TORCH_INTERNAL_ASSERT(!this_view_meta->has_fw_view(),
             "Expected the output of forward differentiable view operations to have the tangent have the same layout as primal")
