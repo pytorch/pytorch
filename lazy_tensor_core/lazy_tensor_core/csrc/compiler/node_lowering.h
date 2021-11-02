@@ -8,6 +8,18 @@ namespace compiler {
 
 
 class NodeLowering {
+  /**
+   * NodeLowering is an internal interface within a backend.
+   * 
+   * Its intended use is by backend lowering context impl to perform lowering
+   *   created inside TSLoweringContext() using NodeLowering::Create
+   *
+   * But, it leaked out into Ops/ classes for shape inference.
+   * Used from Ops/ classes to do shape inference (to be discontinued..)
+   *   NodeLowering::Get() producs the lowering used by Ops/
+   *     and is implemented via backend_registrar 
+   *      
+   * */
  public:
   NodeLowering(ir::LoweringContext* loctx) : loctx_(loctx) {}
 
