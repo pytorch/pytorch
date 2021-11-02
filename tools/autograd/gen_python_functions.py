@@ -85,7 +85,7 @@ _SKIP_PYTHON_BINDINGS = [
     'slice', 'randint(_out)?',
     'item', '_local_scalar_dense', 'to',
     '_to_copy',
-    'copy_sparse_to_sparse_', 'copy_',
+    'copy_sparse_to_sparse_', 'copy_', 'copy',
     'numpy_T', 'matrix_H', 'mT', 'mH',  # these need to be an attributes in Python, not functions
     'nonzero(_(out|numpy))?',
     'set_data',

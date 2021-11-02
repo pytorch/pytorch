@@ -1229,6 +1229,12 @@
 
 - func: conv_transpose3d.input(Tensor input, Tensor weight, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] output_padding=0, int groups=1, int[3] dilation=1) -> Tensor
 
+# out-of-place variant of copy_()
+# This doesn't need to be exposed to python, but is needed for functionalization.
+- func: copy(Tensor self, Tensor src, bool non_blocking=False) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: copy
+
 - func: copy_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)
   variants: method
   device_check: NoCheck

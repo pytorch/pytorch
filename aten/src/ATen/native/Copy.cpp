@@ -250,6 +250,12 @@ Tensor& copy_(Tensor& self, const Tensor& src, bool non_blocking) {
   return self;
 }
 
+Tensor copy(const Tensor& self, const Tensor& src, bool non_blocking) {
+  auto result = at::empty_like(self);
+  result.copy_(src, non_blocking);
+  return result;
+}
+
 void copy_ignoring_overlaps(const Tensor &dst, const Tensor &src) {
   // Called when we are copying into an overlapping index `dst`, but we don't
   // care which writer wins. Hacky but it works. This is only used by
