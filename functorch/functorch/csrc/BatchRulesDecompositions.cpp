@@ -86,6 +86,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   OP_DECOMPOSE(negative);
   OP_DECOMPOSE2(not_equal, Tensor );
   OP_DECOMPOSE(outer);
+  OP_DECOMPOSE(pairwise_distance);
   OP_DECOMPOSE(qr);
   OP_DECOMPOSE(ravel);
   OP_DECOMPOSE(reshape);
