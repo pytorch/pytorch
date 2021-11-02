@@ -8717,9 +8717,9 @@ op_db: List[OpInfo] = [
            supports_out=False,
            assert_jit_shape_analysis=False,
            dtypesIfCPU=floating_types(),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.float16),
            skips=(
-               # TODO: Reference issue here
+               # See: https://github.com/pytorch/pytorch/issues/67657
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad', dtypes=(torch.float64,)),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_gradgrad', dtypes=(torch.float64,)),
            ),
@@ -8730,9 +8730,9 @@ op_db: List[OpInfo] = [
            supports_out=False,
            assert_jit_shape_analysis=False,
            dtypesIfCPU=floating_types(),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.float16),
            skips=(
-               # TODO: Reference issue here
+               # See: https://github.com/pytorch/pytorch/issues/67660
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad', dtypes=(torch.float64,)),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_gradgrad', dtypes=(torch.float64,)),
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
@@ -8746,7 +8746,7 @@ op_db: List[OpInfo] = [
            dtypesIfCPU=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.float16),
            skips=(
-               # TODO: Reference issue here
+               # See: https://github.com/pytorch/pytorch/issues/67658
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad', dtypes=(torch.float64,)),
                # Derivative for aten::max_unpool3d_backward is not yet implemented
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_gradgrad', dtypes=(torch.float64,)),
