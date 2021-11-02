@@ -72,10 +72,13 @@ void validateBlock(
       "\n\nGraph we tried to export:\n" + b->owningGraph()->toString());
     // Special error messages for certain types of operators
     if (node->kind() == prim::PythonOp) {
-      auto py_node = static_cast<PythonOp*>(node);
-      FAIL_EXPORT(
-          "Couldn't export Python operator " + py_node->name() +
-          "\n\nDefined at:\n" + getNodeStackTraceString(node))
+      if (operator_export_type !=
+          onnx_torch::OperatorExportTypes::ONNX_FALLTHROUGH) {
+        auto py_node = static_cast<PythonOp*>(node);
+        FAIL_EXPORT(
+            "Couldn't export Python operator " + py_node->name() +
+            "\n\nDefined at:\n" + getNodeStackTraceString(node))
+      }
     } else {
       if (node->kind() == aten::expand) {
         if (operator_export_type ==

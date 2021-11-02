@@ -331,6 +331,40 @@ Tensor& c2_argmin_out(
   }
   return output;
 }
+
+void where_out(
+    const at::Tensor& cond,
+    const at::Tensor& x,
+    const at::Tensor& y,
+    at::Tensor& out) {
+  TORCH_CHECK(x.scalar_type() == y.scalar_type());
+  TORCH_CHECK(out.scalar_type() == x.scalar_type());
+  TORCH_CHECK(cond.scalar_type() == at::ScalarType::Bool);
+  TORCH_CHECK(x.sizes() == y.sizes());
+
+  at::native::resize_(out, x.sizes(), c10::nullopt);
+  TORCH_CHECK(out.is_contiguous());
+
+  const auto num_elems = x.numel();
+  AT_DISPATCH_ALL_TYPES(x.scalar_type(), "where_out_x", [&] {
+    const auto cond_contig = cond.expect_contiguous();
+    const auto x_contig = x.expect_contiguous();
+    const auto y_contig = y.expect_contiguous();
+
+    const auto* data_cond = cond_contig->data_ptr<bool>();
+    const auto* data_x = x_contig->data_ptr<scalar_t>();
+    const auto* data_y = y_contig->data_ptr<scalar_t>();
+    auto* data_out = out.data_ptr<scalar_t>();
+    for (const auto i : c10::irange(num_elems)) {
+      if (data_cond[i]) {
+        data_out[i] = data_x[i];
+      } else {
+        data_out[i] = data_y[i];
+      }
+    }
+  });
+}
+
 } // namespace native
 } // namespace at
 
@@ -668,7 +702,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::relu, aten_relu, [](Node* n) -> SROperator {
       p_node->Output(0) = create_empty_from(in0_t);
     }
     auto& out_t = p_node->Output(0).toTensor();
-    if (!te->supports(in0_t)) {
+    if (!te->checkInput<float>(in0_t)) {
       fastResizeToZero(out_t);
       at::cpu::threshold_out(out_t, in0_t, 0, 0);
     } else {
@@ -691,7 +725,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::tanh, aten_tanh, [](Node* n) -> SROperator {
       p_node->Output(0) = create_empty_from(in0_t);
     }
     auto& out_t = p_node->Output(0).toTensor();
-    if (!te->supports(in0_t)) {
+    if (!te->checkInput<float>(in0_t)) {
       fastResizeToZero(out_t);
       at::cpu::tanh_out(out_t, in0_t);
     } else {
@@ -717,7 +751,7 @@ REGISTER_OPERATOR_FUNCTOR(
           p_node->Output(0) = create_empty_from(in0_t);
         }
         auto& out_t = p_node->Output(0).toTensor();
-        if (!te->supports(in0_t)) {
+        if (!te->checkInput<float>(in0_t)) {
           fastResizeToZero(out_t);
           at::cpu::sigmoid_out(out_t, in0_t);
         } else {
@@ -749,7 +783,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::logit, aten_logit, [](Node* n) -> SROperator {
       p_node->Output(0) = create_empty_from(in0_t);
     }
     auto& out_t = p_node->Output(0).toTensor();
-    if (!te || !te->supports(in0_t)) {
+    if (!te || !te->checkInput<float>(in0_t)) {
       const auto& in0_t = p_node->Input(0).toTensor();
       const auto in1_d = p_node->Input(1).toOptional<double>();
       fastResizeToZero(out_t);
@@ -1049,6 +1083,7 @@ bool check_to_will_alias(
 
 // Force inlining so we don't have to branch on whether args is null
 // at runtime.
+template <bool has_constant_non_tensor_dtype_and_flags, bool has_memory_format>
 C10_ALWAYS_INLINE void to_copy_functor_impl(
     ProcessedNode* p_node,
     const ToArgs* args) {
@@ -1060,13 +1095,16 @@ C10_ALWAYS_INLINE void to_copy_functor_impl(
 
   c10::optional<c10::MemoryFormat> memory_format;
   c10::optional<ToArgs> my_args;
-  if (args) {
-    memory_format = args->memory_format.value_or(c10::MemoryFormat::Preserve);
-  } else {
+  if (!args) {
     my_args = extract_to_args(p_node);
     args = &my_args.value();
-    memory_format = args->memory_format.value_or(c10::MemoryFormat::Preserve);
   }
+  if (has_memory_format) {
+    memory_format = args->memory_format.value_or(c10::MemoryFormat::Preserve);
+  } else {
+    memory_format = c10::MemoryFormat::Preserve;
+  }
+
   if (memory_format == c10::MemoryFormat::Preserve) {
     if (self.is_non_overlapping_and_dense()) {
       memory_format = c10::nullopt;
@@ -1079,11 +1117,12 @@ C10_ALWAYS_INLINE void to_copy_functor_impl(
   bool need_to_allocate_output = true;
   if (p_node->Output(0).isTensor()) {
     const auto& existing_output = p_node->Output(0).toTensor();
-    if (existing_output.dtype() != args->dtype ||
-        existing_output.layout() != args->layout ||
-        existing_output.device() != self.device() ||
-        !existing_output.is_contiguous(
-            memory_format.value_or(c10::MemoryFormat::Contiguous))) {
+    if ((!has_constant_non_tensor_dtype_and_flags &&
+         (existing_output.dtype() != args->dtype ||
+          existing_output.layout() != args->layout ||
+          existing_output.device() != self.device())) ||
+        (has_memory_format && !existing_output.is_contiguous(
+            memory_format.value_or(c10::MemoryFormat::Contiguous)))) {
       need_to_allocate_output = true;
     } else {
       need_to_allocate_output = false;
@@ -1101,7 +1140,7 @@ C10_ALWAYS_INLINE void to_copy_functor_impl(
         c10::nullopt,
         memory_format);
   } else {
-    if (p_node->inputs().size() == 5) {
+    if (has_memory_format) {
       memory_format = p_node->Input(4).toOptional<c10::MemoryFormat>().value_or(
           c10::MemoryFormat::Preserve);
     } else {
@@ -1119,23 +1158,45 @@ C10_ALWAYS_INLINE void to_copy_functor_impl(
       out_t, self, non_blocking, copy_strides, memory_format);
 }
 
+
+template<bool has_constant_non_tensor_dtype_and_flags, bool has_memory_format>
 void to_copy_functor(ProcessedNode* p_node) {
-  to_copy_functor_impl(p_node, nullptr);
+  to_copy_functor_impl<has_constant_non_tensor_dtype_and_flags, has_memory_format>(p_node, nullptr);
 }
 
-} // namespace
+template<bool has_constant_non_tensor_dtype_and_flags, bool has_memory_format>
+void to_maybe_copy_out_functor(ProcessedNode* p_node) {
+  // TODO: can we avoid checking our arguments every time? If not,
+  // what is different about this case from the copying case?  One
+  // difference: the copying case does not care if the dtype of self
+  // changes between iterations, because it's always going to copy
+  // into the output tensor. Here, we care because of
+  // check_to_will_alias.
+  ToArgs args = extract_to_args(p_node);
+  const auto& self = p_node->Input(0).toTensor();
+  if (check_to_will_alias(p_node, self, args)) {
+    // Don't write our Tensor output. This leaves it None if it
+    // was never allocated (and there is a special case in the
+    // memory planner to not start managing in this case), but
+    // if we are oscillating between aliasing and needing to
+    // copy, we should just leave our output in place so as not
+    // to confuse the memory planner.
+    p_node->Output(1) = false;
+  } else {
+    p_node->Output(1) = true;
+    to_copy_functor_impl<has_constant_non_tensor_dtype_and_flags, has_memory_format>(p_node, &args);
+  }
+}
 
-// out variant takes precedence over native
-// NB: This impl doesn't work for cpu->cuda copy/cast or vice versa.
-REGISTER_OPERATOR_FUNCTOR(
-    static_runtime::to_copy,
-    aten_to_copy,
-    [](Node* n) -> SROperator {
-      // support 4- or 5-arg for adindexer/adfinder models
-      // Keep TORCH_CHECK here because there is no alternative for fallback
-      TORCH_CHECK(n->inputs().size() == 4 || n->inputs().size() == 5);
-      return to_copy_functor;
-    });
+bool node_has_constant_non_tensor_dtype_and_flags(Node* n) {
+  const auto* input1 = n->inputs()[1];
+  return
+          input1->type()->kind() != TypeKind::TensorType &&
+          input1->node()->kind() == prim::Constant &&
+          n->inputs()[2]->node()->kind() == prim::Constant &&
+          n->inputs()[3]->node()->kind() == prim::Constant;
+}
+} // namespace
 
 REGISTER_OPERATOR_FUNCTOR(
     static_runtime::to_maybe_copy_out,
@@ -1144,36 +1205,21 @@ REGISTER_OPERATOR_FUNCTOR(
       // support 4- or 5-arg for adindexer/adfinder models
       // Keep TORCH_CHECK here because there is no alternative for fallback
       TORCH_CHECK(n->inputs().size() == 4 || n->inputs().size() == 5);
-      return [](ProcessedNode* p_node) {
-        ToArgs args = extract_to_args(p_node);
-        const auto& self = p_node->Input(0).toTensor();
-        if (check_to_will_alias(p_node, self, args)) {
-          if (p_node->Output(0).isNone()) {
-            // We will never use this (unless check_to_will_alias
-            // returns false in a future iteration), but creating a
-            // defined tensor lets us avoid a check for undefined in
-            // MemoryPlanner::allocateManagedTensors().
-            p_node->Output(0) = create_empty_from(self);
-          }
-          DCHECK(p_node->Output(0).isTensor());
-          p_node->Output(1) = false;
+      const bool has_constant_non_tensor_dtype_and_flags = node_has_constant_non_tensor_dtype_and_flags(n);
+      const bool has_memory_format = n->inputs().size() == 5;
+      if (has_constant_non_tensor_dtype_and_flags) {
+        if (has_memory_format) {
+          return to_maybe_copy_out_functor<true, true>;
         } else {
-          // need to keep Output(0) in a reasonable state!
-          if (p_node->Output(0).isTensor() &&
-              !p_node->Output(0).toTensor().defined()) {
-            p_node->Output(0) = IValue();
-          }
-          p_node->Output(1) = true;
-          // XXX: need to fuse this here, with the following goals:
-          // 1) don't repeat checks from check_to_will_alias
-          // 2) reset dtype and layout of output if we are transitioning back
-          // and forth between alias & not alias modes (add a test for that!) 3)
-          // allow ourselves to remove the check for undefined in
-          // MemoryPlanner::deallocate by producing some kind of reasonable
-          // output tensor in the other branch
-          to_copy_functor_impl(p_node, &args);
+          return to_maybe_copy_out_functor<true, false>;
         }
-      };
+      } else {
+        if (has_memory_format) {
+          return to_maybe_copy_out_functor<false, true>;
+        } else {
+          return to_maybe_copy_out_functor<false, false>;
+        }
+      }
     });
 
 REGISTER_OPERATOR_FUNCTOR(
@@ -1205,6 +1251,32 @@ REGISTER_OPERATOR_FUNCTOR(
           p_node->Output(0) = p_node->Input(0);
         }
       };
+    });
+
+// out variant takes precedence over native
+// NB: This impl doesn't work for cpu->cuda copy/cast or vice versa.
+REGISTER_OPERATOR_FUNCTOR(
+    static_runtime::to_copy,
+    aten_to_copy,
+    [](Node* n) -> SROperator {
+      // support 4- or 5-arg for adindexer/adfinder models
+      // Keep TORCH_CHECK here because there is no alternative for fallback
+      TORCH_CHECK(n->inputs().size() == 4 || n->inputs().size() == 5);
+      const bool has_constant_non_tensor_dtype_and_flags = node_has_constant_non_tensor_dtype_and_flags(n);
+      const bool has_memory_format = n->inputs().size() == 5;
+      if (has_constant_non_tensor_dtype_and_flags) {
+        if (has_memory_format) {
+          return to_copy_functor<true, true>;
+        } else {
+          return to_copy_functor<true, false>;
+        }
+      } else {
+        if (has_memory_format) {
+          return to_copy_functor<false, true>;
+        } else {
+          return to_copy_functor<false, false>;
+        }
+      }
     });
 
 // Out variants for view ops are registered to a separate registry because
@@ -1903,31 +1975,6 @@ REGISTER_OPERATOR_FUNCTOR(aten::linear, aten_linear, [](Node* n) -> SROperator {
   };
 });
 
-REGISTER_OPERATOR_FUNCTOR(aten::fmod, aten_fmod, [](Node* n) -> SROperator {
-  if (!n->matches(torch::schema(
-          "aten::fmod.Scalar(Tensor self, Scalar other) -> Tensor")) &&
-      !n->matches(torch::schema(
-          "aten::fmod.Tensor(Tensor self, Tensor other) -> Tensor"))) {
-    LogAndDumpSchema(n);
-    return nullptr;
-  }
-  return [](ProcessedNode* p_node) {
-    const auto& in0_t = p_node->Input(0).toTensor();
-    const auto& in1_t = p_node->Input(1).isTensor()
-        ? p_node->Input(1).toTensor()
-        : at::native::wrapped_scalar_tensor(p_node->Input(1).toScalar());
-
-    if (p_node->Output(0).isNone()) {
-      p_node->Output(0) = at::cpu::fmod(in0_t, in1_t);
-    } else {
-      auto& out_t = p_node->Output(0).toTensor();
-      fastResizeToZero(out_t);
-
-      at::cpu::fmod_out(out_t, in0_t, in1_t);
-    }
-  };
-});
-
 REGISTER_OPERATOR_FUNCTOR(aten::linalg_norm, aten_linalg_norm, [](Node* n) -> SROperator {
   if (n->matches(torch::schema(
           "aten::linalg_norm(Tensor self, Scalar? ord=None, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor"))) {
@@ -2136,7 +2183,7 @@ REGISTER_OPERATOR_FUNCTOR(
           p_node->Output(0) = create_empty_from(input);
         }
         auto& out = p_node->Output(0).toTensor();
-        if (!te || !te->supports(input)) {
+        if (!te || !te->checkInput<float>(input)) {
           fastResizeToZero(out);
           signed_log1p_out(out, input);
           return;
@@ -2184,5 +2231,41 @@ REGISTER_OPERATOR_FUNCTOR(
       LogAndDumpSchema(n);
       return nullptr;
     });
+
+REGISTER_OPERATOR_FUNCTOR(aten::where, aten_where, [](Node* n) -> SROperator {
+  if (n->matches(torch::schema(
+          "aten::where.self(Tensor condition, Tensor self, Tensor other) -> Tensor"))) {
+    auto te = createWhere();
+    return [te = std::move(te)](ProcessedNode* p_node) {
+      const auto& cond = p_node->Input(0).toTensor();
+      const auto& self = p_node->Input(1).toTensor();
+      const auto& other = p_node->Input(2).toTensor();
+
+      if (p_node->Output(0).isNone()) {
+        p_node->Output(0) = create_empty_from(self);
+      }
+      auto& out = p_node->Output(0).toTensor();
+
+      if (!te || !te->checkInput<bool>(cond) ||
+          !te->checkInput<int64_t>(self) || !te->checkInput<int64_t>(other)) {
+        fastResizeToZero(out);
+        at::native::where_out(cond, self, other, out);
+      } else {
+        at::native::resize_(out, self.sizes(), c10::nullopt);
+        auto num_elems = self.numel();
+        te->call(
+            {out.data_ptr(),
+             cond.data_ptr(),
+             self.data_ptr(),
+             other.data_ptr(),
+             &num_elems});
+      }
+    };
+  }
+
+  LogAndDumpSchema(n);
+  return nullptr;
+});
+
 } // namespace jit
 } // namespace torch
