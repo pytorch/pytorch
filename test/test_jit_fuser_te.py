@@ -2037,6 +2037,9 @@ works_list = [
     'nn.functional.leaky_relu',
     'nn.functional.relu',
     'nn.functional.relu6',
+    'nn.functional.softsign',
+    'nn.functional.tanhshrink',
+    'nn.functional.threshold',
     'permute',
     'pow',
     'reciprocal',
@@ -2052,15 +2055,12 @@ works_list = [
     'sign',
     'sin',
     'sinh',
-    'softsign'
     'sqrt',
     'sub',
     'sum',
     't',
     'tan',
     'tanh',
-    'tanhshrink'
-    'threshold'
     'transpose',
     'true_divide',
     'trunc',

@@ -9488,10 +9488,10 @@ op_db: List[OpInfo] = [
             DecorateInfo(
                 toleranceOverride({torch.bfloat16: tol(atol=1e-02, rtol=1.6e-02)}), 'TestUnaryUfuncs',), ],
         skips=(DecorateInfo(unittest.expectedFailure,
-                            'TestUnaryUfuncs', "test_reference_numerics_extremal",
+                            'TestUnaryUfuncs', "test_reference_numerics_normal",
                             dtypes=(torch.complex64,), active_if=(IS_MACOS or IS_WINDOWS)),
                DecorateInfo(unittest.expectedFailure,
-                            'TestUnaryUfuncs', "test_reference_normal_extremal",
+                            'TestUnaryUfuncs', "test_reference_normal_hard",
                             dtypes=(torch.complex64,), active_if=(IS_MACOS)),
                DecorateInfo(unittest.expectedFailure,
                             'TestUnaryUfuncs', "test_reference_numerics_extremal",
