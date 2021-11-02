@@ -276,6 +276,212 @@ void quantile_impl(
   out.copy_(values_below);
 }
 
+template <class T>
+void recursivePartialSorter(
+    T* data,
+    int64_t startOffset,
+    int64_t size,
+    int64_t* quantileIndexes,
+    int64_t qsize) {
+  if (size <= 0)
+    return;
+
+  if (qsize == 1) {
+    std::nth_element(
+        data + startOffset,
+        data + quantileIndexes[0],
+        data + startOffset + size);
+  } else // Perhaps can be improved for the qsize==2 case.
+  {
+    // Can the splitting be more optimal.
+    int64_t centerQuantile = qsize / 2;
+    int64_t pivot = quantileIndexes[centerQuantile];
+
+    recursivePartialSorter(
+        data, startOffset, size, quantileIndexes + centerQuantile, 1);
+
+    int64_t lower_data_size = pivot - startOffset;
+    int64_t upper_data_size = size - lower_data_size;
+    if (centerQuantile > 0)
+      recursivePartialSorter(
+          data, startOffset, lower_data_size, quantileIndexes, centerQuantile);
+    if ((qsize - centerQuantile) > 1) // Redundent if equal to 1.
+      recursivePartialSorter(
+          data,
+          pivot,
+          upper_data_size,
+          quantileIndexes + centerQuantile,
+          qsize - centerQuantile);
+  }
+}
+
+Tensor interp1(
+    Tensor x,
+    Tensor y,
+    Tensor xl,
+    Tensor xu,
+    Tensor xm,
+    const QUANTILE_INTERPOLATION_MODE& interpolation) {
+  // Note: x, xl, and xu are sorted and if a belongs to xl or xu it belongs to x
+  // too.
+  int64_t* xp = x.data_ptr<int64_t>();
+  int64_t* xlp = xl.data_ptr<int64_t>();
+  int64_t* xup = xu.data_ptr<int64_t>();
+  Tensor ylower = at::empty_like(xl, y.options());
+  Tensor yupper = at::empty_like(xl, y.options());
+
+  AT_DISPATCH_ALL_TYPES_AND(
+      ScalarType::BFloat16,
+      y.scalar_type(),
+      "oss_quantile_interp1",
+      [&] {
+        scalar_t* yp = y.data_ptr<scalar_t>();
+        scalar_t* ylowerp = ylower.data_ptr<scalar_t>();
+        scalar_t* yupperp = yupper.data_ptr<scalar_t>();
+
+        int64_t i = 0;
+        int64_t j = 0;
+        int64_t n = xl.numel();
+        while (i < n) {
+          if (xlp[i] == xp[j])
+            ylowerp[i++] = yp[j];
+          else
+            j++;
+        }
+        i = 0;
+        j = 0;
+        while (i < n) {
+          if (xup[i] == xp[j])
+            yupperp[i++] = yp[j];
+          else
+            j++;
+        }
+      });
+
+  Tensor delta;
+  if (interpolation == QUANTILE_INTERPOLATION_MODE::MIDPOINT) {
+    delta = ((xu - xl) > 0).to(ScalarType::Double) / 2;
+  } else // == 4 linear
+  {
+    delta = xm - xl;
+  }
+
+  Tensor result =
+      at::lerp(
+          ylower.to(ScalarType::Double), yupper.to(ScalarType::Double), delta)
+          .to(ylower.options());
+  return result;
+}
+
+void oss_quantile_impl(
+    const Tensor& out,
+    const Tensor& self,
+    const Tensor& q,
+    const optional<int64_t> _dim,
+    const bool keepdim,
+    const QUANTILE_INTERPOLATION_MODE& interpolation,
+    const bool ignore_nan) {
+  NoNamesGuard guard;
+
+  TORCH_CHECK(self.numel() > 0, "quantile() input tensor must be non-empty");
+  TORCH_CHECK(q.dim() == 1, "The quantiles must be a 1D array of values.");
+  TORCH_CHECK(
+      self.is_cpu() && q.is_cpu(),
+      "The quantile computation is only supported on cpu.");
+  TORCH_CHECK(
+      q.scalar_type() == ScalarType::Float || q.scalar_type() == ScalarType::Double,
+      "The quantiles must be of type 'float' or 'double'.");
+
+  // The algorithm use the fact that q is sorted.
+  auto sort_result = q.sort();
+
+  // Must be double to avoid round-off issues when converting to index.
+  // Can handle sizes up to 2^53 = 9_007_199_254_740_992 >> Anything that ever
+  // fits in RAM.
+  Tensor qs = std::get<0>(sort_result).to(ScalarType::Double);
+  Tensor qs_index = std::get<1>(sort_result);
+
+  TORCH_CHECK(
+      !(qs[0].lt(0).item<bool>() || qs[-1].lt(0).item<bool>()),
+      "The quantiles must be in the range [0, 1].");
+
+  // Size of the result (bytes)
+  int64_t result_size = q.numel() * q.dtype().itemsize();
+
+  int64_t size;
+  Tensor partialSortTensor = self.clone();
+
+  // NaN is only an option for FP.
+  if (ignore_nan && (self.is_floating_point())) {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+        self.scalar_type(), "oss_quantile_remove_nan", [&] {
+          scalar_t* src_ptr = self.data_ptr<scalar_t>();
+          scalar_t* dest_ptr = partialSortTensor.data_ptr<scalar_t>();
+          size = 0;
+          for (int i = 0; i < self.numel(); i++) {
+            auto val = src_ptr[i];
+            if (!std::isnan(val))
+              dest_ptr[size++] = val;
+          }
+        });
+  } else {
+    size = self.numel();
+  }
+
+  Tensor qi;
+  if (interpolation == QUANTILE_INTERPOLATION_MODE::LOWER) {
+    qi = (qs * (size - 1)).to(ScalarType::Long);
+  } else if (interpolation == QUANTILE_INTERPOLATION_MODE::HIGHER) {
+    qi = (qs * (size - 1)).ceil().to(ScalarType::Long);
+  } else if (interpolation == QUANTILE_INTERPOLATION_MODE::NEAREST) {
+    qi = (qs * (size - 1)).round().to(ScalarType::Long);
+  } else if (
+      interpolation == QUANTILE_INTERPOLATION_MODE::LINEAR ||
+      interpolation == QUANTILE_INTERPOLATION_MODE::MIDPOINT) {
+    auto combined = at::stack(
+        {(qs * (size - 1)).to(ScalarType::Long),
+         (qs * (size - 1)).ceil().to(ScalarType::Long)},
+        0);
+    auto unique = at::_unique(combined, true, false);
+    qi = std::get<0>(unique);
+  } else {
+    TORCH_CHECK(false, "Unknown quantile interpolation method.");
+  }
+
+  // Recursively partially sort the tensor data.
+  AT_DISPATCH_ALL_TYPES_AND(
+      ScalarType::BFloat16, self.scalar_type(), "oss_quantile_cpu", [&] {
+        recursivePartialSorter(
+            partialSortTensor.data_ptr<scalar_t>(),
+            0,
+            size,
+            qi.data_ptr<int64_t>(),
+            qi.numel());
+      });
+
+  // Extract the quantiles and reorder them according to the order of the input.
+  Tensor result;
+
+  if (interpolation == QUANTILE_INTERPOLATION_MODE::LOWER ||
+      interpolation == QUANTILE_INTERPOLATION_MODE::HIGHER ||
+      interpolation == QUANTILE_INTERPOLATION_MODE::NEAREST) {
+    result = at::empty_like(q, self.options());
+    result.index_put_({qs_index}, partialSortTensor.index({qi}));
+  } else {
+    Tensor computed_values = partialSortTensor.index({qi});
+    Tensor qm = qs * (size - 1);
+    Tensor ql = qm.to(ScalarType::Long);
+    Tensor qu = qm.ceil().to(ScalarType::Long);
+
+    Tensor sorted_result = interp1(
+        qi, partialSortTensor.index({qi}), ql, qu, qm, interpolation);
+    result = at::empty_like(q, self.options());
+    result.index_put_({qs_index}, sorted_result);
+  }
+
+  out.copy_(result);
+}
+
 std::tuple<Tensor&, Tensor&> kthvalue_out_impl_cpu(
     Tensor& values,
     Tensor& indices,
@@ -580,6 +786,44 @@ Tensor quantile(
   return at::native::quantile(
       // NOLINTNEXTLINE(performance-move-const-arg)
       self, at::scalar_tensor(q, self.options()), std::move(dim), keepdim, interpolation);
+}
+
+Tensor& oss_quantile_out_cpu(
+    const Tensor& self,
+    const Tensor& q,
+    optional<int64_t> dim,
+    bool keepdim,
+    const c10::string_view interpolation,
+    Tensor& out) {
+  oss_quantile_impl(
+      out,
+      self,
+      q,
+      // NOLINTNEXTLINE(performance-move-const-arg)
+      std::move(dim),
+      keepdim,
+      get_quantile_interpolation_mode(interpolation),
+      /*ignore_nan=*/false);
+  return out;
+}
+
+Tensor oss_quantile_cpu(
+    const Tensor& self,
+    const Tensor& q,
+    optional<int64_t> dim,
+    bool keepdim,
+    const c10::string_view interpolation) {
+  Tensor out = at::empty({0}, self.options());
+  oss_quantile_impl(
+      out,
+      self,
+      q,
+      // NOLINTNEXTLINE(performance-move-const-arg)
+      std::move(dim),
+      keepdim,
+      get_quantile_interpolation_mode(interpolation),
+      /*ignore_nan=*/false);
+  return out;
 }
 
 Tensor& nanquantile_out(
