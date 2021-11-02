@@ -352,7 +352,9 @@ template<template<typename> class bernoulli_tensor_kernel, typename RNG>
 Tensor& bernoulli_impl_(Tensor& self, const Tensor& p_, c10::optional<Generator> gen) {
   NoNamesGuard guard;
   at::assert_no_internal_overlap(self);
-  bernoulli_tensor_kernel<RNG>()(self, p_, gen);
+  auto p_device = p_.to(self.device());
+  c10::MaybeOwned<Tensor> p = expand_inplace(self, p_device);
+  bernoulli_tensor_kernel<RNG>()(self, *p, gen);
   return self;
 }
 

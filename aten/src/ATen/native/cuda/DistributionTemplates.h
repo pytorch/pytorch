@@ -429,7 +429,7 @@ void normal_and_transform(TensorIteratorBase& iter, RNG gen, transform_t transfo
 // ==================================================== Normal ========================================================
 
 template<typename RNG>
-void normal_kernel(Tensor& self, double mean_, double std_, RNG gen) {
+void normal_kernel(const TensorBase &self, double mean_, double std_, RNG gen) {
   auto iter = TensorIterator::borrowing_nullary_op(self);
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "normal_kernel_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
@@ -445,7 +445,7 @@ void normal_kernel(Tensor& self, double mean_, double std_, RNG gen) {
 
 template<typename RNG>
 struct NormalKernel {
-  void operator()(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
+  void operator()(const TensorBase &self, double mean, double std, c10::optional<Generator> gen) {
     normal_kernel(self, mean, std, check_generator<RNG>(gen));
   }
 };
@@ -573,7 +573,7 @@ struct CauchyKernel {
 
 template<typename scalar_t, typename prob_t>
 void bernoulli_tensor_cuda_kernel(
-    at::Tensor& ret, const at::Tensor& p,
+    const TensorBase &ret, const at::TensorBase &p,
     PhiloxCudaState philox_args) {
   auto functor = [philox_args] __device__(
           int n, scalar_t& v1, scalar_t& v2, scalar_t& v3, scalar_t& v4,
@@ -617,21 +617,19 @@ void bernoulli_tensor_cuda_kernel(
 }
 
 template<typename RNG>
-void bernoulli_kernel(Tensor& self, const Tensor& p_, RNG gen) {
+void bernoulli_kernel(const TensorBase &self, const TensorBase &p, RNG gen) {
   PhiloxCudaState rng_engine_inputs;
   {
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(gen->mutex_);
     rng_engine_inputs = gen->philox_cuda_state(10);
   }
-  auto p_CUDA = p_.to(kCUDA);
-  c10::MaybeOwned<Tensor> p = expand_inplace(self, p_CUDA);
   AT_DISPATCH_ALL_TYPES_AND3(
     at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::Bool, self.scalar_type(), "bernoulli_tensor_cuda_self_", [&] {
       using self_t = scalar_t;
-      AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, p->scalar_type(), "bernoulli_tensor_cuda_p_", [&] {
+      AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, p.scalar_type(), "bernoulli_tensor_cuda_p_", [&] {
         using p_t = scalar_t;
-        return bernoulli_tensor_cuda_kernel<self_t, p_t>(self, *p, rng_engine_inputs);
+        return bernoulli_tensor_cuda_kernel<self_t, p_t>(self, p, rng_engine_inputs);
       });
    });
 }
@@ -654,7 +652,7 @@ struct BernoulliKernel {
   void operator()(TensorIteratorBase& iter, double p, c10::optional<Generator> gen) {
     bernoulli_kernel(iter, p, check_generator<RNG>(gen));
   }
-  void operator()(Tensor& self, const Tensor& p_, c10::optional<Generator> gen) {
+  void operator()(const TensorBase &self, const TensorBase &p_, c10::optional<Generator> gen) {
     bernoulli_kernel(self, p_, check_generator<RNG>(gen));
   }
 };
