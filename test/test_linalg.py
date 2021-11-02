@@ -1642,7 +1642,7 @@ class TestLinalg(TestCase):
                 run_test_case(a, p)
             except numpy.linalg.LinAlgError:
                 # Numpy may fail to converge for some BLAS backends (although this is very rare)
-                # See the discussion in #67675
+                # See the discussion in https://github.com/pytorch/pytorch/issues/67675
                 pass
 
         # test for 0x0 matrices. NumPy doesn't work for such input, we return 0
