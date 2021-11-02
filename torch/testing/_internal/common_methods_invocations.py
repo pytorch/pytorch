@@ -9491,11 +9491,11 @@ op_db: List[OpInfo] = [
                             'TestUnaryUfuncs', "test_reference_numerics_normal",
                             dtypes=(torch.complex64,), active_if=(IS_MACOS or IS_WINDOWS)),
                DecorateInfo(unittest.expectedFailure,
-                            'TestUnaryUfuncs', "test_reference_normal_hard",
+                            'TestUnaryUfuncs', "test_reference_numerics_hard",
                             dtypes=(torch.complex64,), active_if=(IS_MACOS)),
                DecorateInfo(unittest.expectedFailure,
                             'TestUnaryUfuncs', "test_reference_numerics_extremal",
-                            dtypes=(torch.complex64,), active_if=(IS_MACOS)),)
+                            dtypes=(torch.complex64,), active_if=(IS_MACOS or IS_WINDOWS)),)
     ),
     OpInfo(
         'nn.functional.threshold',
