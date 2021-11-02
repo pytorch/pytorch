@@ -7,37 +7,43 @@ def maybe_log_functional_input(name, handle, is_logging):
         assert torch._is_functional_tensor(handle)
         log_input(name, torch._from_functional_tensor(handle))
 
-def fooo():
-    print("ENABLE")
-    torch._enable_functionalization()
-
-def barr():
-    print("DISABLE")
-    torch._disable_functionalization()
+def are_aliased(x, y):
+    if x._base is None and y._base is None:
+        return False
+    if x._base is not None and y._base is None:
+        return x._base is y
+    if x._base is None and y._base is not None:
+        return y._base is x
+    return x._base is y._base
 
 
 class TestFunctionalization(TestCase):
 
-    def assert_functionalization(self, func, inpt):
+    def assert_functionalization(self, func, inpt, logging=True):
         input_clone = inpt.clone()
 
         input_clone2 = inpt.clone()
-        input_clone_logging = LoggingTensor(inpt.clone())
-
         input_functional = torch._to_functional_tensor(input_clone2)
-        input_functional_logging = torch._to_functional_tensor(input_clone_logging)
 
-        # Runs expecttests for LoggingTensor output.
-        torch._enable_functionalization()
-        func(input_functional_logging, logging=True)
-        torch._disable_functionalization()
+        if logging:
+            input_clone_logging = LoggingTensor(inpt.clone())
+            input_functional_logging = torch._to_functional_tensor(input_clone_logging)
+
+            # Runs expecttests for LoggingTensor output.
+            torch._enable_functionalization()
+            try:
+                func(input_functional_logging, logging=True)
+            finally:
+                torch._disable_functionalization()
 
         # Compare outputs (and mutated inputs), with and without functionalization.
         out_ref = func(inpt, logging=False)
 
         torch._enable_functionalization()
-        out_functional = func(input_functional, logging=False)
-        torch._disable_functionalization()
+        try:
+            out_functional = func(input_functional, logging=False)
+        finally:
+            torch._disable_functionalization()
 
         # We need to sync the input tensors first, in case there are any queued mutations left.
         torch._sync(input_functional)
@@ -79,19 +85,17 @@ $4 = torch._ops.aten.mul($3, $3)""")
 
         input_functional = torch._to_functional_tensor(torch.ones(4, 2))
         torch._enable_functionalization()
-        y, z = f(input_functional)
-        torch._sync(y)
-        torch._sync(z)
-        torch._disable_functionalization()
+        try:
+            y, z = f(input_functional)
+            torch._sync(y)
+            torch._sync(z)
+        finally:
+            torch._disable_functionalization()
 
         # y and z are aliases inside of the function, and that aliasing relationship should be maintained.
         _y = torch._from_functional_tensor(y)
         _z = torch._from_functional_tensor(z)
-        # We don't currently have a good way of testing aliasing relationships in python so...
-        _y_frozen = _y.clone()
-        self.assertTrue(torch.allclose(_y_frozen, _y))
-        _z.add_(1)
-        self.assertFalse(torch.allclose(_y_frozen, _y))
+        self.assertTrue(are_aliased(_y, _z))
 
     def test_diagonal(self):
         def f(x, *, logging: bool):
@@ -112,6 +116,35 @@ $4 = torch._ops.aten.mul($3, $3)""")
             else:
                 return z
         self.assert_functionalization(f, torch.ones(2, 2))
+
+    def test_diagonal_mutated_input(self):
+        def f(x, *, logging: bool):
+            # simple test: there are pending updates afterwards, which the test syncs manually
+            tmp = torch.ones(2)
+            y = x.diagonal()
+            y.add_(tmp)
+            return x
+        x = torch.ones(2, 2)
+        self.assert_functionalization(f, x, logging=False)
+
+    def test_copy__functionalized(self):
+        def f(x, *, logging: bool):
+            # simple test: functionalizing copy_() should call its out-of-place variant
+            with capture_logs() as logs:
+                maybe_log_functional_input("x", x, logging)
+                tmp = torch.zeros(2, 2)
+                # NOTE: LoggingTensor isn't a mode, which means that the diagonal call
+                # will not be logged. This is fine for testing.
+                tmp_slice = tmp.diagonal()
+                tmp_slice.copy_(x)
+            if logging:
+                self.assertExpectedInline('\n'.join(logs), """\
+$0 = input('x')
+$1 = torch._ops.aten.copy(tensor([0., 0.]), $0)""")
+            else:
+                return x
+        x = torch.ones(2)
+        self.assert_functionalization(f, x, logging=True)
 
     def test_split(self):
         def f(x, *, logging: bool):
