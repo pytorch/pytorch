@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: distributed"]
+
 import torch
 from torch.testing._internal.common_utils import TestCase
 from torch.distributed._sharding_spec import (

@@ -1,4 +1,6 @@
-#include <conv_utils.h>
+#include <pytorch_qnnpack.h>
+#include <qnnpack/log.h>
+#include <qnnpack/operator.h>
 #include <qnnpack/pack.h>
 #include <qnnpack_func.h>
 #include <cstring>

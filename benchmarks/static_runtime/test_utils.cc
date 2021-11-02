@@ -142,8 +142,8 @@ void compareResults(
     return;
   } else if (expect.isTuple()) {
     EXPECT_TRUE(actual.isTuple());
-    auto lhs = expect.toTuple()->elements();
-    auto rhs = actual.toTuple()->elements();
+    auto lhs = expect.toTupleRef().elements();
+    auto rhs = actual.toTupleRef().elements();
     EXPECT_TRUE(lhs.size() == rhs.size());
     for (size_t i = 0; i < lhs.size(); i++) {
       compareResults(lhs[i], rhs[i]);
@@ -275,6 +275,18 @@ void testStaticRuntime(
 
   // make sure inputs were not modified
   compareTensorLists(args_tensors, args_copy, use_allclose, use_equalnan);
+}
+
+bool hasProcessedNodeWithName(
+    torch::jit::StaticModule& smodule,
+    const char* name) {
+  for (torch::jit::ProcessedNode& pnode : smodule.runtime().nodes()) {
+    auto op_name = pnode.node()->kind().toQualString();
+    if (strcmp(op_name, name) == 0) {
+      return true;
+    }
+  }
+  return false;
 }
 
 } // namespace test
