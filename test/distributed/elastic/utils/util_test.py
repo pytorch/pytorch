@@ -11,7 +11,7 @@ import unittest
 
 import torch.distributed.elastic.utils.store as store_util
 from torch.distributed.elastic.utils.logging import get_logger
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class TestStore:
@@ -19,7 +19,7 @@ class TestStore:
         return f"retrieved:{key}"
 
 
-class StoreUtilTest(unittest.TestCase):
+class StoreUtilTest(TestCase):
     def test_get_data(self):
         store = TestStore()
         data = store_util.get_all(store, "test/store", 10)
@@ -53,7 +53,7 @@ class StoreUtilTest(unittest.TestCase):
             self.assertEqual(f"data{idx}", actual_str)
 
 
-class UtilTest(unittest.TestCase):
+class UtilTest(TestCase):
     def test_get_logger_different(self):
         logger1 = get_logger("name1")
         logger2 = get_logger("name2")
