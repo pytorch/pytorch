@@ -59,7 +59,7 @@ jobs:
         with:
           auto-update-conda: true
           python-version: 3.8
-          activate-environment: ${{ github.run_id }}_${{ github.run_number }}
+          activate-environment: build
       - name: Install ios / conda Dependencies
         run: |
           # Install dependencies
