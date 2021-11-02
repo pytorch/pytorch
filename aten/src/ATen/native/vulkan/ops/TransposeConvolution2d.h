@@ -10,23 +10,19 @@ namespace native {
 namespace vulkan {
 namespace ops {
 
-enum Conv2dMethod {
-  Conv2dDepthwise,
-  Conv2dPointwise,
-  Conv2dSlidingWindow,
-  Conv2dWinograd_2_3,
+enum TransposeConv2dMethod {
+  TransposeConv2dSlidingWindow,
 };
 
-class Conv2dOpContext final : public torch::jit::CustomClassHolder {
+class TransposeConv2dOpContext final : public torch::jit::CustomClassHolder {
  public:
-  static Conv2dOpContext create(
+  static TransposeConv2dOpContext create(
       const Tensor& weight,
       const c10::optional<Tensor>& bias,
       IntArrayRef stride,
       IntArrayRef padding,
-      IntArrayRef dilation,
-      bool transposed,
       IntArrayRef output_padding,
+      IntArrayRef dilation,
       int64_t groups,
       const c10::optional<Scalar>& output_min = c10::nullopt,
       const c10::optional<Scalar>& output_max = c10::nullopt);
@@ -34,6 +30,7 @@ class Conv2dOpContext final : public torch::jit::CustomClassHolder {
   using State = std::tuple<
       Tensor,
       c10::optional<Tensor>,
+      std::vector<int64_t>,
       std::vector<int64_t>,
       std::vector<int64_t>,
       std::vector<int64_t>,
@@ -45,25 +42,19 @@ class Conv2dOpContext final : public torch::jit::CustomClassHolder {
   State unpack() const;
 
  private:
-  Conv2dOpContext(
+  TransposeConv2dOpContext(
       const Tensor& weight,
       const c10::optional<Tensor>& bias,
       IntArrayRef stride,
       IntArrayRef padding,
-      IntArrayRef dilation,
-      bool transposed,
       IntArrayRef output_padding,
+      IntArrayRef dilation,
       int64_t groups,
-      const Conv2dMethod method,
       const c10::optional<Scalar>& output_min = c10::nullopt,
       const c10::optional<Scalar>& output_max = c10::nullopt);
 
-  void conv2d_sliding_window(
+  void conv2d_transpose_sliding_window(
       const api::Shader::Descriptor& shader,
-      vTensor& v_output,
-      const vTensor& v_input) const;
-
-  void conv2d_winograd_2_3(
       vTensor& v_output,
       const vTensor& v_input) const;
 
@@ -74,6 +65,7 @@ class Conv2dOpContext final : public torch::jit::CustomClassHolder {
     std::array<int64_t, 4> filter;
     std::array<int64_t, 2> stride;
     std::array<int64_t, 2> padding;
+    std::array<int64_t, 2> output_padding;
     std::array<int64_t, 2> dilation;
     int32_t groups;
     float output_min;
@@ -86,24 +78,25 @@ class Conv2dOpContext final : public torch::jit::CustomClassHolder {
     std::vector<int64_t> filter;
     std::vector<int64_t> stride;
     std::vector<int64_t> padding;
+    std::vector<int64_t> output_padding;
     std::vector<int64_t> dilation;
     int64_t groups;
     c10::optional<Scalar> output_min;
     c10::optional<Scalar> output_max;
   } unpacked_;
 
-  Conv2dMethod method_;
 };
 
-Tensor conv2d_clamp_run(
+Tensor conv2d_transpose_clamp_run(
     const Tensor& input,
-    const c10::intrusive_ptr<Conv2dOpContext>& context);
+    const c10::intrusive_ptr<TransposeConv2dOpContext>& context);
 
-c10::intrusive_ptr<Conv2dOpContext> conv2d_clamp_prepack(
+c10::intrusive_ptr<TransposeConv2dOpContext> conv2d_transpose_clamp_prepack(
     Tensor&& weight,
     c10::optional<Tensor>&& bias,
     std::vector<int64_t>&& stride,
     std::vector<int64_t>&& padding,
+    std::vector<int64_t>&& output_padding,
     std::vector<int64_t>&& dilation,
     const int64_t groups,
     const c10::optional<Scalar>& output_min,
