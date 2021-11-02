@@ -272,9 +272,6 @@ void MemoryPlanner::deallocate() {
       const auto& storage = tensor->storage();
       size_t current_size = compute_aligned_tensor_size(storage.nbytes());
       at::StorageImpl* tensorStorageImpl = storage.unsafeGetStorageImpl();
-      // Comparing pointers to objects that aren't part of the same
-      // array is UB, but we're doing memory allocation here and we
-      // need this, so cast to uintptr_t.
       if (C10_UNLIKELY(first_time)) {
         tensorStorageImpl->reset();
 
@@ -288,6 +285,17 @@ void MemoryPlanner::deallocate() {
               std::move(*tensorStorageImpl));
         }
         newImpl = &managed_tensor_storage_impls_.back().second;
+        // We want to manage StorageImpls' lifetimes ourselves, but TensorImpl
+        // expects to refcount them. unsafe_adapt_non_heap_allocated is our
+        // escape hatch: it sets the reference count for the StorageImpl to an
+        // impractically high value so that it will never get deallocated by
+        // intrusive_ptr, leaving us free to manage its lifetime as we see fit.
+        // (Note that allowing it to be deallocated by intrusive_ptr would be
+        // UB, because that would entail deleting an object that wasn't
+        // allocated with operator new.)
+        //
+        // For more information, see the doc comment for
+        // intrusive_ptr::unsafe_adapt_non_heap_allocated.
         tensor->unsafeGetTensorImpl()->set_storage_keep_dtype(at::Storage(
             c10::intrusive_ptr<at::StorageImpl>::
                 unsafe_adapt_non_heap_allocated(newImpl, tensors.size())));

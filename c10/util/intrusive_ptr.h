@@ -115,7 +115,7 @@ class C10_API intrusive_ptr_target {
 #pragma GCC diagnostic ignored "-Wexceptions"
 #endif
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        // Second and third conditions are there to accommodate
+        // Second condition is there to accommodate
         // unsafe_adapt_non_heap_allocated: since we are doing our own
         // deallocation in that case, it is correct for each
         // expected_decref to have happened (some user code tried to
@@ -501,7 +501,7 @@ class intrusive_ptr final {
    *
    * `expected_decrefs` is a debugging parameter: it indicates the
    * number of strong owners the intrusive_ptr_target in question is
-   * expected to get. In most use cases, this will likely be 1
+   * expected to get. In most use cases, this will likely be 1.
    *
    * The reason this method exists is for manually sharing
    * StorageImpls across Tensors in the static runtime. It needs
@@ -513,7 +513,7 @@ class intrusive_ptr final {
       size_t expected_decrefs) {
     intrusive_ptr result(raw_ptr, raw::DontIncreaseRefcount{});
     // INT_MAX is impractically huge for a reference count, while
-    // being in no danger of overflowing. We actually only need to
+    // being in no danger of overflowing size_t. We actually only need to
     // initialize the refcount to 2 -- we are just doing an unbalanced
     // incref to prevent the non-heap-allocated target from being
     // freed, and we are optimizing that incref by directly
