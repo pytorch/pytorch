@@ -80,16 +80,24 @@ struct TORCH_API GraphFunction : public Function {
         "Method (but not graphs in general) require a single output. Use None/Tuple for 0 or 2+ outputs");
   }
 
-  GraphExecutor& get_executor() override {
+  GraphExecutor& get_executor() {
     ensure_defined();
     std::lock_guard<std::recursive_mutex> lock(compile_mutex);
     auto& executor = executors_[currentSpecialization()];
     if (executor) {
-      return executor;
+      return *executor;
     }
     check_single_output();
     executor = GraphExecutor(optimized_graph(), name_.name());
-    return executor;
+    return *executor;
+  }
+
+  bool call(
+      Stack& stack,
+      size_t bailOut,
+      c10::function_ref<void(const Code&)> f) override {
+    f(get_executor().getPlanFor(stack, bailOut).code);
+    return true;
   }
 
  private:
@@ -126,7 +134,8 @@ struct TORCH_API GraphFunction : public Function {
 
   // executor_[0] - autocast off
   // executor_[1] - autocast on
-  std::array<GraphExecutor, SpecializationKey::TotalCount> executors_;
+  std::array<c10::optional<GraphExecutor>, SpecializationKey::TotalCount>
+      executors_;
 
   // an optional function that actually creates the method when
   // ensure_defined() is called. This is used by the compiler so

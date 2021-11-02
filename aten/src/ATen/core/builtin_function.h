@@ -23,7 +23,7 @@ struct BuiltinOpFunction : public Function {
     TORCH_INTERNAL_ASSERT(schema_.returns().size() == 1);
   }
 
-  const std::string& doc_string() const override {
+  c10::string_view doc_string() const override {
     return doc_string_;
   }
 
@@ -49,12 +49,6 @@ struct BuiltinOpFunction : public Function {
     // nop
   }
 
-  GraphExecutor& get_executor() override {
-    TORCH_INTERNAL_ASSERT(false , "BuiltinFunction had a GraphExecutor requested "
-      "from it. This probably indicates that the JIT calling context needs a "
-      "special case on torch::jit::tryToGraphFunction()");
-  }
-
   const c10::FunctionSchema& getSchema() const override {
     return schema_;
   }
@@ -66,6 +60,16 @@ struct BuiltinOpFunction : public Function {
   Function& setSchema(c10::FunctionSchema schema) override {
     schema_ = std::move(schema);
     return *this;
+  }
+
+  bool call(Stack& stack, size_t, c10::function_ref<void(const Code&)>) override {
+    run(stack);
+    return false;
+  }
+
+  bool call(Stack& stack, c10::function_ref<void(const mobile::Code&)>) override {
+    run(stack);
+    return false;
   }
 
   ~BuiltinOpFunction() override {}
