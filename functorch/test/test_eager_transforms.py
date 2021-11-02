@@ -492,9 +492,11 @@ class TestGradTransform(TestCase):
 
         grad(grad(foo))(x)
         expected = textwrap.dedent("""\
-            GradTrackingTensor(lvl=3, value=\\
-              GradTrackingTensor(lvl=2, value=\\
-                tensor(3.1400)))""")
+                GradTrackingTensor(lvl=3, value=
+                    GradTrackingTensor(lvl=2, value=
+                        tensor(3.1400)
+                    )
+                )""")
         self.assertEqual(buf, expected)
 
     def test_no_grad_outside(self, device):
