@@ -90,7 +90,7 @@ bool Function::append_operator(
       // from model. We can use it to handle backward compatibility.
       if (num_specified_args &&
           num_specified_args.value() < static_cast<int64_t>(args.size())) {
-        fn = [fn, num_specified_args, args](Stack& stack) {
+        fn = [fn, num_specified_args, &args](Stack& stack) {
           std::vector<IValue> out_args;
           // The following logic pops and temporarily stores all out arguments
           // from the stack (which can be 0 or more, and always appended to the
