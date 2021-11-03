@@ -875,7 +875,8 @@ def _test_backward_mul_by_grad_output(outputs, inputs, check_sparse_nnz) -> bool
 def _test_undefined_forward_mode(func, outputs, inputs):
     fwAD = torch.autograd.forward_ad
     
-    all_v, all_u, all_u_dense = _make_vectors(inputs, outputs, use_forward_ad=True)
+    inp_tensors_idx, inp_tensors = _get_inp_tensors(inputs)
+    all_v, all_u, all_u_dense = _make_vectors(inp_tensors, outputs, use_forward_ad=True)
 
     tensor_inputs = tuple(i for i in inputs if is_tensor_like(i) and i.requires_grad)
     
@@ -919,9 +920,7 @@ def _test_undefined_forward_mode(func, outputs, inputs):
                     val1, res1 = fwAD.unpack_dual(d_o1)
                     val2, res2 = fwAD.unpack_dual(d_o2)
                     
-                    if res1 is None:
-                        assert res2 is None
-                    else:
+                    if not (res1 is None or res2 is None):
                         assert torch.equal(res1, res2)
     return True
 
@@ -1032,7 +1031,8 @@ def _real_and_imag_input(fn, complex_inp_indices):
 
 
 def _gradcheck_real_imag(gradcheck_fn, func, func_out, tupled_inputs, outputs, eps, rtol,
-                         atol, check_grad_dtypes, check_forward_ad, check_backward_ad, nondet_tol):
+                         atol, check_grad_dtypes, check_forward_ad, check_backward_ad, nondet_tol, 
+                         check_undefined_grad):
     complex_out_indices = [i for i, o in enumerate(outputs) if o.is_complex()]
     has_any_complex_output = any(o.is_complex() for o in _as_tuple(func_out))
     if check_backward_ad:
@@ -1052,6 +1052,9 @@ def _gradcheck_real_imag(gradcheck_fn, func, func_out, tupled_inputs, outputs, e
         else:
             gradcheck_fn(func, func_out, tupled_inputs, outputs, eps,
                          rtol, atol, check_grad_dtypes, nondet_tol)
+        if check_undefined_grad:
+            _test_undefined_backward_mode(func, outputs, tupled_inputs)
+
 
     if check_forward_ad:
         complex_inp_indices = [i for i, inp in enumerate(tupled_inputs) if is_tensor_like(inp) and inp.is_complex()]
@@ -1071,10 +1074,14 @@ def _gradcheck_real_imag(gradcheck_fn, func, func_out, tupled_inputs, outputs, e
             gradcheck_fn(real_fn, real_func_out, real_inputs, diff_real_func_out, eps,
                          rtol, atol, check_grad_dtypes, nondet_tol, complex_indices=complex_inp_indices,
                          use_forward_ad=True)
+            if check_undefined_grad:
+                _test_undefined_forward_mode(imag_fn, imag_func_out, imag_inputs)
+                _test_undefined_forward_mode(real_fn, real_func_out, real_inputs)
         else:
             gradcheck_fn(func, func_out, tupled_inputs, outputs, eps,
                          rtol, atol, check_grad_dtypes, nondet_tol, use_forward_ad=True)
-
+            if check_undefined_grad:
+                _test_undefined_forward_mode(func, outputs, tupled_inputs)
 
 def _slow_gradcheck(func, func_out, tupled_inputs, outputs, eps, rtol, atol, check_grad_dtypes,
                     nondet_tol, *, use_forward_ad=False, complex_indices=None, test_imag=False):
@@ -1403,16 +1410,11 @@ def _gradcheck_helper(func, inputs, eps, atol, rtol, check_sparse_nnz, nondet_to
     gradcheck_fn = _fast_gradcheck if fast_mode else _slow_gradcheck
     _gradcheck_real_imag(gradcheck_fn, func, func_out, tupled_inputs, outputs, eps,
                          rtol, atol, check_grad_dtypes, check_forward_ad=check_forward_ad,
-                         check_backward_ad=check_backward_ad, nondet_tol=nondet_tol)
+                         check_backward_ad=check_backward_ad, nondet_tol=nondet_tol,
+                         check_undefined_grad=check_undefined_grad)
 
     if check_batched_forward_grad:
         _test_batched_grad_forward_ad(func, tupled_inputs)
-
-    if check_undefined_grad:
-        if check_forward_ad:
-            _test_undefined_forward_mode(func, outputs, tupled_inputs)
-        else:
-            _test_undefined_backward_mode(func, outputs, tupled_inputs)
 
     # Short circuit because remaining tests rely on backward AD to be implemented
     if not check_backward_ad:
