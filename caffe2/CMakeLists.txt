@@ -178,6 +178,7 @@ if(BUILD_SPLIT_CUDA)
   set(Caffe2_GPU_SRCS_CU
       "${PROJECT_SOURCE_DIR}/aten/src/ATen/cuda/CUDABlas.cpp"
       "${PROJECT_SOURCE_DIR}/aten/src/ATen/cuda/CUDASolver.cpp"
+      "${PROJECT_SOURCE_DIR}/aten/src/ATen/cuda/CUDASparseBlas.cpp"
       "${PROJECT_SOURCE_DIR}/aten/src/ATen/cuda/CublasHandlePool.cpp"
       "${PROJECT_SOURCE_DIR}/aten/src/ATen/cuda/CusolverDnHandlePool.cpp"
       "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/Activation.cpp"
