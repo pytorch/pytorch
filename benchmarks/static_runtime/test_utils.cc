@@ -175,10 +175,10 @@ void compareResults(
 } // namespace
 
 std::shared_ptr<Graph> getGraphFromIR(const std::string& ir) {
-    auto graph = std::make_shared<Graph>();
-    std::unordered_map<std::string, Value*> vmap;
-    parseIR(ir, graph.get(), vmap);
-    return graph;
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(ir, graph.get(), vmap);
+  return graph;
 }
 
 void testStaticRuntime(
@@ -206,19 +206,18 @@ void testStaticRuntime(
         continue;
       }
       StaticModuleOptions opts{
-        .cleanup_activations = true,
-        .enable_out_variant = enable_out_variant,
-        .optimize_memory = enable_out_variant,
-        .manage_output_tensors = manage_output_tensors
-      };
+          .cleanup_activations = true,
+          .enable_out_variant = enable_out_variant,
+          .optimize_memory = enable_out_variant,
+          .manage_output_tensors = manage_output_tensors};
       auto smodule = test_context->makeStaticModule(opts);
       StaticRuntime runtime(smodule);
       auto actual = runtime(args, {});
       if (actual.isTensor()) {
         EXPECT_GE(smodule.nodes().size(), 2)
-          << "If we only have one node, the output of the op we are testing is "
-          << "not being managed by the memory planner! A failure here "
-          << "can typically be fixed by clone()ing the output of the test script.";
+            << "If we only have one node, the output of the op we are testing is "
+            << "not being managed by the memory planner! A failure here "
+            << "can typically be fixed by clone()ing the output of the test script.";
       }
       runtime.check_for_memory_leak();
       // first run
@@ -239,7 +238,8 @@ void testStaticRuntime(
           runtime.deallocateOutputTensors();
           runtime.checkOutputTensorMemoryLeaks();
         }
-        // Run static runtime again with an input of the shape observed during the profile run.
+        // Run static runtime again with an input of the shape observed during
+        // the profile run.
         expect = test_context->getExpected(args);
         actual = runtime(args, {});
         runtime.check_for_memory_leak();
