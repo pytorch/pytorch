@@ -210,6 +210,10 @@ class TestDtypeAnalysis(JitTestCase):
                 input_args = [sample_input.input, *sample_input.args]
                 self.assert_dtype_equal_custom_args(fn, input_args)
 
+    def test_conv_no_mixed_args(self):
+        def conv2d_fn(input, weight, bias):
+            return torch.nn.functional.conv2d(input, weight, bias)
+
         # Now make sure that conv2d doesn't support mixed args
         conv_ins = sample_inputs_conv2d(None, "cpu", torch.float, False)
         conv_in = conv_ins[-1]
@@ -219,12 +223,20 @@ class TestDtypeAnalysis(JitTestCase):
         with self.assertRaises(RuntimeError):
             conv2d_fn(conv_in.input, weight, bias)
 
+        # Check that we also don't propagate
+        graph = torch.jit.script(conv2d_fn).graph  # Note this is a cached graph
+        self.prop_dtype_on_graph(graph, [conv_in.input, weight, bias])
+        actual_dtype = self.node_output_dtype(graph)
+        self.assertEqual(actual_dtype, None)
+
+
     def test_combined(self):
         # Test a case with both custom rules and metatensors
 
         def func(input, weight, bias, y):
             conv_out = torch.nn.functional.conv2d(input, weight, bias)
-            flattened = torch.flatten(conv_out, start_dim=2)
+            conv_2 = conv_out + y
+            flattened = torch.flatten(conv_2, start_dim=2)
             add_res = flattened + y
             return add_res
 
