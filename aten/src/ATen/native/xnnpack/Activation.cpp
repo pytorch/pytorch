@@ -55,7 +55,6 @@ const Tensor& hardswish_out(const Tensor& input, const Tensor& result) {
   Tensor padded_input = mobile::allocate_padded_contiguous_if_needed(
       input, input.suggest_memory_format());
 
-  // Don't need to allocate output if result is contiguous & already padded
   if (mobile::is_padded_contiguous(result, result.suggest_memory_format())) {
     hardswish_impl(padded_input, result);
   } else {
