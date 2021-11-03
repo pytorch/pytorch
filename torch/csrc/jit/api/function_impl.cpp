@@ -16,7 +16,7 @@
 namespace torch {
 namespace jit {
 namespace {
-c10::FunctionSchema defaultSchemaFor(const Function& function) {
+c10::FunctionSchema defaultSchemaFor(const GraphFunction& function) {
   std::vector<c10::Argument> args;
   std::vector<c10::Argument> returns;
   Graph& g = *function.graph();
@@ -32,6 +32,29 @@ c10::FunctionSchema defaultSchemaFor(const Function& function) {
   }
   return {function.name(), "", std::move(args), std::move(returns)};
 }
+
+template <typename T, typename F>
+T* tryToGraphFunctionImpl(F& function) noexcept {
+  if (!function.isGraphFunction()) {
+    return nullptr;
+  }
+
+  return static_cast<T*>(&function);
+}
+
+template <typename T, typename F>
+T& toGraphFunctionImpl(F& function) {
+  if (auto* g = tryToGraphFunctionImpl<T>(function)) {
+    return *g;
+  }
+
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "Failed to downcast a Function to a GraphFunction. "
+      "This probably indicates that the JIT calling context needs a "
+      "special case on tryToGraphFunction() instead.");
+}
+
 } // namespace
 
 void placeholderCreator(GraphFunction&) {
@@ -42,22 +65,10 @@ void GraphFunction::run(Stack& stack) {
   get_executor().run(stack);
 }
 
-void GraphFunction::run(Stack&& stack) {
-  run(stack);
-}
-
 c10::intrusive_ptr<c10::ivalue::Future> GraphFunction::runAsync(
     Stack& stack,
     TaskLauncher taskLauncher) {
   return get_executor().runAsync(stack, std::move(taskLauncher));
-}
-
-IValue GraphFunction::operator()(
-    std::vector<IValue> stack,
-    const Kwargs& kwargs) {
-  getSchema().checkAndNormalizeInputs(stack, kwargs);
-  run(stack);
-  return stack.front();
 }
 
 void GraphFunction::ensure_defined() {
@@ -119,6 +130,18 @@ void preoptimizeGraph(std::shared_ptr<Graph>& graph) {
 #endif
 
   ConstantPooling(graph);
+}
+
+GraphFunction* tryToGraphFunction(Function& function) noexcept {
+  return tryToGraphFunctionImpl<GraphFunction>(function);
+}
+
+GraphFunction& toGraphFunction(Function& function) {
+  return toGraphFunctionImpl<GraphFunction>(function);
+}
+
+const GraphFunction& toGraphFunction(const Function& function) {
+  return toGraphFunctionImpl<const GraphFunction>(function);
 }
 
 } // namespace jit

@@ -17,38 +17,6 @@
 
 #include <ATen/native/cuda/Resize.h>
 
-THCTensor *THCTensor_new(THCState *state, caffe2::TypeMeta type_meta) {
-  auto scalar_type = at::typeMetaToScalarType(type_meta);
-  switch (scalar_type) {
-    case at::ScalarType::Byte:
-      return THCudaByteTensor_new(state);
-    case at::ScalarType::Char:
-      return THCudaCharTensor_new(state);
-    case at::ScalarType::Short:
-      return THCudaShortTensor_new(state);
-    case at::ScalarType::Int:
-      return THCudaIntTensor_new(state);
-    case at::ScalarType::Long:
-      return THCudaLongTensor_new(state);
-    case at::ScalarType::Half:
-      return THCudaHalfTensor_new(state);
-    case at::ScalarType::Float:
-      return THCudaTensor_new(state);
-    case at::ScalarType::Double:
-      return THCudaDoubleTensor_new(state);
-    case at::ScalarType::Bool:
-      return THCudaBoolTensor_new(state);
-    case at::ScalarType::BFloat16:
-      return THCudaBFloat16Tensor_new(state);
-    case at::ScalarType::ComplexFloat:
-      return THCudaComplexFloatTensor_new(state);
-    case at::ScalarType::ComplexDouble:
-      return THCudaComplexDoubleTensor_new(state);
-    default:
-      AT_ERROR("unexpected ScalarType: ", toString(scalar_type));
-  }
-}
-
 void THCTensor_resizeAs(THCState *state, THCTensor *self, THCTensor *src) {
   int isSame = 0;
   int d;

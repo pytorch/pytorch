@@ -51,19 +51,19 @@ TORCH_API c10::intrusive_ptr<ConstantString> ConstantString::create(
 }
 
 bool operator==(const ivalue::Tuple& lhs, const ivalue::Tuple& rhs) {
-  return lhs.elements_.size() == rhs.elements_.size() &&
+  return lhs.size() == rhs.size() &&
       // see [container equality]
       std::equal(
-             lhs.elements_.cbegin(),
-             lhs.elements_.cend(),
-             rhs.elements_.cbegin(),
+             lhs.elements().cbegin(),
+             lhs.elements().cend(),
+             rhs.elements().cbegin(),
              _fastEqualsForContainer);
 }
 
 TupleTypePtr Tuple::type() const {
   if (!type_) {
     type_ = TupleType::create(
-        fmap(elements_, [&](const IValue& v) { return v.type(); }));
+        fmap(elements(), [&](const IValue& v) { return v.type(); }));
   }
   return type_;
 }

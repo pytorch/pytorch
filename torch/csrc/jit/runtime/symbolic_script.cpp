@@ -1366,7 +1366,7 @@ const std::vector<std::string> functions = {
             result = torch.softplus(self, beta, threshold)
             def backward(grad_output):
                 z = torch.exp(result * beta)
-                return torch.where( (result * beta) > threshold, grad_output, grad_output * (z - 1.) / z), None, None
+                return torch.where((result * beta) > threshold, grad_output, grad_output * (z - 1.) / z), None, None
             return result, backward
 
         def fmod(self,
@@ -1538,7 +1538,7 @@ void loadModule(const CompilationUnit& module) {
       continue;
 
     GradientPair pair;
-    pair.forward = method->graph();
+    pair.forward = toGraphFunction(*method).graph();
 
     // lookup the backward function
     Node* forward_tuple = pair.forward->outputs().at(0)->node();

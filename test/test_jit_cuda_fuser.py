@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: jit"]
+
 import unittest
 import os
 import random
@@ -244,7 +246,7 @@ class TestCudaFuser(JitTestCase):
                 for axis in [-1, 2]:
                     def make_func(op):
                         def func(x: torch.Tensor):
-                            o = torch.mul(x, 1.0)
+                            o = torch.mul(x, 2.0)
                             o = op(o, dim=[axis])
                             return o
                         return func
@@ -596,7 +598,7 @@ class TestCudaFuser(JitTestCase):
                      "Requires fusion optimization pass to be effective")
     def test_unary_bitwise(self):
         def bit_not(x: torch.Tensor):
-            return ~(x + 0)
+            return ~(x + 1)
 
         jitted = torch.jit.script(bit_not)
         x = torch.randn(4, 8, 32, 32, dtype=torch.float, device="cuda").mul(5).to(torch.long)
@@ -1782,7 +1784,7 @@ class TestCudaFuser(JitTestCase):
         x = torch.randn([4, 5, 6], dtype=dtype, device=device)
 
         def t(x: torch.Tensor):
-            o = torch.add(x, 0)
+            o = torch.add(x, 1)
             o = torch.sum(o, dim=[0, 1, 2])
             return o
         t_jit = torch.jit.script(t)
@@ -1827,7 +1829,7 @@ class TestCudaFuser(JitTestCase):
         x = torch.randn([1, 4, 8], dtype=dtype, device=device)
 
         def t(x: torch.Tensor):
-            o = torch.add(x, 0)
+            o = torch.add(x, 1)
             o = torch.sum(o, dim=[0])
             o = torch.sum(o, dim=[0])
             return o
@@ -2082,7 +2084,7 @@ class TestCudaFuser(JitTestCase):
 
         def t(x: torch.Tensor, p: float, train: bool):
             o = torch.nn.functional.dropout(x, p, training=train)
-            o = o + 0.0
+            o = o * 2.0
             return o
 
         t_jit = torch.jit.script(t)
@@ -2099,6 +2101,7 @@ class TestCudaFuser(JitTestCase):
             num_zeros = num_elems - jit_o.detach().count_nonzero().item()
             percent_zeros = num_zeros / num_elems
 
+            print("percent_zero: ", percent_zeros, " p: " , prob)
             self.assertTrue((percent_zeros >= (prob - 0.01)) and (percent_zeros <= (prob + 0.01)))
             self.assertGraphContainsExactly(t_jit.graph_for(x, prob, True), FUSION_GUARD, 1, consider_subgraphs=True)
 
@@ -2114,7 +2117,7 @@ class TestCudaFuser(JitTestCase):
 
         def t(x: torch.Tensor, p: float, train: bool):
             o = torch.nn.functional.dropout(x, p, training=train)
-            o = o * 1.0
+            o = o * 2.0
             return o
 
         t_jit = torch.jit.script(t)
@@ -2145,7 +2148,7 @@ class TestCudaFuser(JitTestCase):
 
         def t(x: torch.Tensor, fast : bool):
             o = torch.nn.functional.gelu(x, fast)
-            o = o * 1.0
+            o = o * 2.0
             return o
 
         t_jit = torch.jit.script(t)
@@ -2164,7 +2167,7 @@ class TestCudaFuser(JitTestCase):
 
         def t(x: torch.Tensor, p: float, train: bool):
             o = torch.nn.functional.dropout(x, p, training=train)
-            o = o + 0.0
+            o = o * 2.0
             return o
 
         t_jit = torch.jit.script(t)
@@ -2689,7 +2692,7 @@ class TestCudaFuser(JitTestCase):
                                                track_running_stats=track_running_stats).to(dtype=dtype)
 
             def forward(self, x):
-                o = x * 1.0
+                o = x * 2.0
                 o = self.bn(o)
                 return o
 

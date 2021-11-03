@@ -84,6 +84,10 @@ def freeze(mod, preserved_attrs: Optional[List[str]] = None, optimize_numerics: 
         assert frozen_module(torch.tensor(1)) == torch.tensor(13)
 
     Note:
+        Freezing submodule attributes is also supported:
+        frozen_module = torch.jit.freeze(scripted_module, preserved_attrs=["submodule.version"])
+
+    Note:
         If you're not sure why an attribute is not being inlined as a constant, you can run
         `dump_alias_db` on frozen_module.forward.graph to see if freezing has detected the
         attribute is being modified.

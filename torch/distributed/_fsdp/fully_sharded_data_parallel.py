@@ -21,6 +21,7 @@ from torch.distributed import ProcessGroup
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.nn.parameter import Parameter
 
+from .flatten_params_wrapper import FlattenParamsWrapper
 from .utils import (
     _apply_to_tensors,
 )
@@ -86,14 +87,13 @@ class FullyShardedDataParallel(nn.Module):
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
-        self.module = module
         self.process_group = process_group or _get_default_group()
         self.rank = self.process_group.rank()
         self.world_size = self.process_group.size()
         # device for computation, if module is on GPU, use module.device;
         # if module is on CPU, use current device;
         self.compute_device = _get_default_cuda_device(module)
-        self.compute_dtype = next(module.parameters()).dtype
+        self.compute_dtype = _get_data_type(module)
 
         # Free full params and keep shard only after forward
         self.reshard_after_forward = True
@@ -115,7 +115,15 @@ class FullyShardedDataParallel(nn.Module):
         for param_name, param in module.named_parameters():
             if not hasattr(param, "_is_sharded"):
                 params.append(param)
-        self.params = params
+
+        self._fsdp_wrapped_module: nn.Module = FlattenParamsWrapper(
+            module, param_list=params
+        )
+        del module  # free original module in case it helps garbage collection
+        if self._fsdp_wrapped_module.flat_param is not None:
+            self.params = [self._fsdp_wrapped_module.flat_param]
+        else:
+            self.params = []
 
         # Shard module parameters in place
         self._shard_parameters()
@@ -131,6 +139,12 @@ class FullyShardedDataParallel(nn.Module):
 
         # Flag to guard against preparing gradients multiple times per backward pass.
         self._pre_backward_hook_has_run = False
+
+    @property
+    def module(self) -> FlattenParamsWrapper:
+        """make model.module accessible, just like DDP."""
+        assert isinstance(self._fsdp_wrapped_module, FlattenParamsWrapper)
+        return self._fsdp_wrapped_module
 
     # setting two factors 'self.gradient_predivide_factor'
     # and 'self.gradient_postdivide_factor' to avoid underflow and overflow
@@ -223,8 +237,11 @@ class FullyShardedDataParallel(nn.Module):
     def _get_shard(self, tensor: torch.Tensor) -> Tuple[torch.Tensor, int]:
         """Return the local shard of a full tensor."""
         # Shard using torch.chunk to match all-gather/reduce-scatter.
-        chunks = list(torch.flatten(tensor).chunk(self.world_size))
+        chunks = torch.flatten(tensor).chunk(self.world_size)
         if len(chunks) < (self.rank + 1):
+            # If there are not enough chunks to shard across ranks, create an
+            # empty chunk that will just be padded with zeros to be the
+            # appropriate size.
             chunk = chunks[0].new_empty(0)
         else:
             chunk = chunks[self.rank]
@@ -235,6 +252,9 @@ class FullyShardedDataParallel(nn.Module):
         ), "Chunk's size should be equal or smaller than \
             the first chunk's size."
 
+        # We always need to clone here, because regardless of padding the
+        # original parameter, of which this chunk is a view of, is deallocated
+        # after _get_shard.
         shard = chunk.clone()
         if num_to_pad > 0:
             shard = F.pad(shard, [0, num_to_pad])
@@ -252,12 +272,16 @@ class FullyShardedDataParallel(nn.Module):
         return self.module.__getitem__(key)  # type: ignore[operator]
 
     def _reset_lazy_init(self) -> None:
-        """Reset instance so :func:`_lazy_init` will run on the next forward."""
+        """
+        Reset instance so :func:`_lazy_init` will run on the next forward.
+        Currently this is only called in __init__
+        """
         self._is_root: Optional[bool] = None
         self._streams: Dict[str, torch.cuda.Stream] = {}
         for p in self.params:
             if hasattr(p, "_local_shard"):
-                # reset attributes that are added in _init_param_attributes
+                # reset attributes that are added in _init_param_attributes, as
+                # part of _lazy_init
                 del p._local_shard  # type: ignore[attr-defined]
 
     def _lazy_init(self) -> None:
@@ -273,6 +297,7 @@ class FullyShardedDataParallel(nn.Module):
         # happen in __init__, but _is_root can only be determined after the
         # entire model hierarchy is setup, thus we run it lazily.
         if self._is_root is None:
+            # _is_root means that we are in the outermost module's forward.
             self._set_is_root()
             self._setup_streams()
 
@@ -298,14 +323,18 @@ class FullyShardedDataParallel(nn.Module):
         are set by :func:`_shard_parameters`:
             ``_is_sharded``: ``True`` if the Parameter is sharded or ``False``
                 if the Parameter is intentionally not sharded (in which case we
-                will all-reduce grads for this param).
+                will all-reduce grads for this param). Currently the only way
+                `_is_sharded = False` is if world_size = 1.
             ``_orig_size``: the size of the original Parameter (before sharding)
         A few attributes are set here:
-            ``_local_shard``: a single shard of the parameters.
+            ``_local_shard``: a single shard of the parameter. This is needed to
+                recover the shard after rebuilding full parameter in forward
+                and backward.
             ``_full_param_padded``: the full weight (padded to be evenly
                 divisible by ``world_size``), used for computation in the
-                forward and backward pass. This will be resized in place and
-                only materialized (via all-gather) as needed.
+                forward and backward pass. It is initialized with the
+                appropriate size and then has its storage freed. This will be
+                resized in place and only materialized (via all-gather) as needed.
         Another attribute is set by :func:`_register_post_backward_hooks`:
             ``_shard_bwd_hook``: it holds the parameter's AccumulateGrad object
                 and the registered post hook handle.
@@ -784,11 +813,24 @@ def _get_default_cuda_device(module: nn.Module) -> torch.device:
         compute_device = next(module.parameters()).device
         if compute_device.type == "cuda":
             return compute_device
+    # e.g., if module does not have parameters, it will throw StopIteration,
+    # in this case, instead of raising exception, return cuda device.
     except StopIteration:
         pass
     # Fall back to current CUDA device
     return torch.device("cuda")
 
+def _get_data_type(module: nn.Module) -> torch.dtype:
+    """Try to infer data type from module parameters."""
+    try:
+        dtype = next(module.parameters()).dtype
+        return dtype
+    # e.g., if module does not have parameters, it will throw StopIteration,
+    # in this case, instead of raising exception, return torch.float32.
+    except StopIteration:
+        pass
+    # Fall back to torch.float32
+    return torch.float32
 
 def _free_storage(data: torch.Tensor) -> None:
     """Free underlying storage of a Tensor."""
