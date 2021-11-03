@@ -136,6 +136,29 @@ class AbstractTestCases:
                 self.assertEqual(deterministic, torch.are_deterministic_algorithms_enabled())
                 self.assertEqual(warn_only, torch.is_deterministic_algorithms_warn_only_enabled())
 
+                if deterministic:
+                    if warn_only:
+                        debug_mode = 1
+                    else:
+                        debug_mode = 2
+                else:
+                    debug_mode = 0
+
+                self.assertEqual(debug_mode, torch.get_deterministic_debug_mode())
+
+            for debug_mode in [0, 1, 2]:
+                torch.set_deterministic_debug_mode(debug_mode)
+                self.assertEqual(debug_mode, torch.get_deterministic_debug_mode())
+                deterministic = debug_mode in [1, 2]
+                warn_only = debug_mode == 1
+
+                self.assertEqual(deterministic, torch.are_deterministic_algorithms_enabled())
+                self.assertEqual(warn_only, torch.is_deterministic_algorithms_warn_only_enabled())
+
+            for debug_mode, debug_mode_str in [(0, 'default'), (1, 'warn'), (2, 'error')]:
+                torch.set_deterministic_debug_mode(debug_mode_str)
+                self.assertEqual(debug_mode, torch.get_deterministic_debug_mode())
+
             with self.assertRaisesRegex(
                     TypeError,
                     r"_set_deterministic_algorithms\(\): argument 'mode' \(position 1\) must be bool, not int"):
