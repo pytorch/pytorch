@@ -9,7 +9,7 @@ from typing import Any, List
 
 import torch
 from torch import TensorType
-from torch.fx import Graph
+from torch._C import Graph
 
 
 def apply_input_props_using_example(graph: Graph, example_input: List[Any]):
@@ -18,6 +18,14 @@ def apply_input_props_using_example(graph: Graph, example_input: List[Any]):
     using the example supplied.
     """
     graph_inputs = list(graph.inputs())
+    if len(graph_inputs) == 0:
+        return
+
+    # Strip self args off for methods
+    in_0 = graph_inputs[0]
+    if isinstance(in_0.type(), torch._C.ClassType) and in_0.debugName() == "self":
+        graph_inputs = graph_inputs[1:]
+
     if not len(graph_inputs) == len(example_input):
         raise RuntimeError(
             "Number of inputs in graph does not match number of inputs in the example")
