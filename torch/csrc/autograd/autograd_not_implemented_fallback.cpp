@@ -12,7 +12,6 @@
 #include <torch/csrc/autograd/VariableTypeUtils.h>
 
 #include <vector>
-#include "c10/util/Exception.h"
 
 namespace torch { namespace autograd {
 
