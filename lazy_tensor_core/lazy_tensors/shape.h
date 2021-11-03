@@ -25,17 +25,12 @@ class Shape {
   int64_t size(int index) const { return sizes_.at(index); }
   void set_size(int index, int64_t value) { sizes_.at(index) = value; }
 
-  // TODO(whc) remove tuple support? or keep it (But make sizes() methods
-  // work consistently with it somehow?)
-  bool IsTuple() const { return is_tuple_; }
-
   bool operator==(const Shape& other) const {
     return scalar_type_ == other.scalar_type_ &&
            sizes_ == other.sizes_;
   }
 
  private:
-  bool is_tuple_ = false;
   c10::ScalarType scalar_type_ {c10::ScalarType::Undefined};
   std::vector<int64_t> sizes_;
 };
