@@ -1,7 +1,7 @@
 # @generated DO NOT EDIT MANUALLY
 # Template is at:    .github/templates/android_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single
+name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit
 
 on:
   pull_request:
@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
 
 env:
-  BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single
+  BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit
   DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c
   SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
   XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
@@ -31,7 +31,7 @@ env:
   CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
   CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
 concurrency:
-  group: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 jobs:
@@ -59,7 +59,7 @@ jobs:
     runs-on: linux.2xlarge
     needs: [ciflow_should_run]
     env:
-      JOB_BASE_NAME: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-build-and-test
+      JOB_BASE_NAME: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit-build-and-test
       NUM_TEST_SHARDS: 1
     steps:
       - name: Display EC2 information
@@ -80,10 +80,12 @@ jobs:
           AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+          aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
+          bash /tmp/ecr-login.sh
+          rm /tmp/ecr-login.sh
       - name: Chown workspace
+        env:
+          ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
         run: |
           retry () {
               "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
@@ -255,6 +257,8 @@ jobs:
         run: .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
+        env:
+          ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
