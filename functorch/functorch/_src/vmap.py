@@ -186,7 +186,7 @@ def vmap(func: Callable, in_dims: in_dims_t = 0, out_dims: out_dims_t = 0) -> Ca
             Must return one or more Tensors.
         in_dims (int or nested structure): Specifies which dimension of the
             inputs should be mapped over. `in_dims` should have a structure
-            like the inputs. If the `in_dim` for a particular input is None,
+            like the inputs. If the `in_dims` for a particular input is None,
             then that indicates there is no map dimension. Default: 0.
         out_dims (int or Tuple[int]): Specifies where the mapped dimension
             should appear in the outputs. If `out_dims` is a Tuple, then it should
