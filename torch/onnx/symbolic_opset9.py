@@ -3262,6 +3262,7 @@ def broadcast_tensors(g, self):
 class Prim:
     domain = "prim"
 
+    @staticmethod
     def ConstantSplit(g, self, split_size, dim):
         size = sym_help._get_tensor_dim_size(self, dim)
         if size is None:
@@ -3272,11 +3273,11 @@ class Prim:
             splits.append(leftover)
         return g.op("Split", self, split_i=splits, axis_i=dim, outputs=len(splits))
 
-
     # TODO: It would be better to export this as a chunk directly, as this is
     # less sensitive to changes in input size.
     # TODO: Once we have proper scoping, stop reimplementing chunk, delete this
     # method, and use the desugared version
+    @staticmethod
     def ConstantChunk(g, self, chunks, dim):
         dim_size = sym_help._get_tensor_dim_size(self, dim)
         if dim_size is None:
@@ -3284,12 +3285,15 @@ class Prim:
         split_size = (dim_size + chunks - 1) // chunks
         return Prim.ConstantSplit(g, self, split_size, dim)
 
+    @staticmethod
     def shape(g, self):
         return g.op("Shape", self)
 
+    @staticmethod
     def max(g, self, other):
         return g.op("Max", self, other)
 
+    @staticmethod
     def min(g, self, other=None):
         if not other:
             if (sym_help._is_packed_list(self)):
@@ -3297,15 +3301,19 @@ class Prim:
             return min(g, self)
         return min(g, self, other)
 
+    @staticmethod
     def data(g, self):
         return self
 
+    @staticmethod
     def ListConstruct(g, *inputs, **kwargs):
         return None
 
+    @staticmethod
     def ListUnpack(g, *inputs, **kwargs):
         return None
 
+    @staticmethod
     def Uninitialized(g, *inputs, **kwargs):
         return None
 
@@ -3313,10 +3321,11 @@ class Prim:
     # if x is an optional Tensor, unchecked_cast will cast
     # x to Tensor, so the rest of the graph knows that x is a Tensor
     # this doesn't do anything in runtime and is a noop in ONNX
+    @staticmethod
     def unchecked_cast(g, self):
         return self
 
-
+    @staticmethod
     def dtype(g, self):
         dtype = sym_help._try_get_scalar_type(self)
         if dtype is None:
@@ -3324,10 +3333,10 @@ class Prim:
         dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
         return g.op("Constant", value_t=torch.tensor(dtype))
 
-
     # tolist is currently supported only for 1D input tensors.
     # dim_val and elem_ty_val represent dimension and type annotations
     # that need to match dimension and type of the input tensor.
+    @staticmethod
     def tolist(g, input, dim_val, elem_ty_val):
         dim = sym_help._maybe_get_const(dim_val, "i")
         if dim > 1:
@@ -3337,6 +3346,7 @@ class Prim:
     # -----------------------------------------------------------------------------
     # Symbolic functions that need extra context
     # -----------------------------------------------------------------------------
+    @staticmethod
     def device(g, *inputs, **kwargs):
         symbolic_function_state = sym_help._get_symbolic_function_state()
         n = symbolic_function_state.cur_node
@@ -3346,6 +3356,7 @@ class Prim:
 
         return _unimplemented("prim::device", "output type is not `DeviceObjType`.")
 
+    @staticmethod
     def Loop(g, *inputs, **attrs):
         symbolic_function_state = sym_help._get_symbolic_function_state()
         n = symbolic_function_state.cur_node
@@ -3371,7 +3382,7 @@ class Prim:
                     b_in.setType(inputs[i].type())
                 if i > 0 and (i + 1) < len(inputs):
                     b_in.setType(inputs[i + 1].type())
-            torch._C._jit_pass_onnx_block(b, new_block, operator_export_type, env, is_sub_block)
+            torch._C._jit_pass_onnx_block(b, new_block, operator_export_type, env, is_sub_block)  # type:ignore[arg-type]
         new_op_outputs = torch._C._jit_pass_fixup_onnx_controlflow_node(new_node, opset_version)
         # Run shape type inference for Loop after subblock is converted.
         from torch.onnx.symbolic_helper import _onnx_shape_inference
@@ -3379,6 +3390,7 @@ class Prim:
             torch._C._jit_pass_onnx_node_shape_type_inference(new_node, params_dict, opset_version)
         return new_op_outputs
 
+    @staticmethod
     def If(g, *inputs, **attrs):
         symbolic_function_state = sym_help._get_symbolic_function_state()
         n = symbolic_function_state.cur_node
@@ -3422,7 +3434,7 @@ class Prim:
             block_idx = 0 if const_value else 1
             current_b = list(n.blocks())[block_idx]
             is_sub_block = True
-            env = torch._C._jit_pass_onnx_block(current_b, block, operator_export_type, env,
+            env = torch._C._jit_pass_onnx_block(current_b, block, operator_export_type, env,  # type:ignore[arg-type]
                                                 is_sub_block)
             if_output_list = list(n.outputs())
             current_b_list = list(current_b.outputs())
@@ -3439,8 +3451,7 @@ class Prim:
             new_node = new_op_outputs[0].node() if n.outputsSize() > 1 else new_op_outputs.node()
             for b in n.blocks():
                 new_block = new_node.addBlock()
-                torch._C._jit_pass_onnx_block(b, new_block, operator_export_type, env,
-                                            is_sub_block)
+                torch._C._jit_pass_onnx_block(b, new_block, operator_export_type, env, is_sub_block)  # type:ignore[arg-type]
             new_op_outputs = torch._C._jit_pass_fixup_onnx_controlflow_node(new_node, opset_version)
             # Run shape type inference for If after subblock is converted.
             from torch.onnx.symbolic_helper import _onnx_shape_inference
@@ -3448,6 +3459,7 @@ class Prim:
                 torch._C._jit_pass_onnx_node_shape_type_inference(new_node, params_dict, opset_version)
             return new_op_outputs
 
+    @staticmethod
     def Constant(g, *inputs, **attrs):
         symbolic_function_state = sym_help._get_symbolic_function_state()
         n = symbolic_function_state.cur_node
@@ -3476,6 +3488,7 @@ class Onnx:
     # -----------------------------------------------------------------------------
     # Symbolic functions that need extra context
     # -----------------------------------------------------------------------------
+    @staticmethod
     def Placeholder(g, *inputs, **attrs):
         symbolic_function_state = sym_help._get_symbolic_function_state()
         n = symbolic_function_state.cur_node

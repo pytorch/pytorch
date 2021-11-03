@@ -904,6 +904,7 @@ def normal(g, loc, scale, seed):
 class Prim:
     domain = "prim"
 
+    @staticmethod
     def ConstantChunk(g, self, chunks, dim):
         input_shape = g.op("Shape", self)
         axis = g.op("Constant", value_t=torch.tensor([dim], dtype=torch.long))

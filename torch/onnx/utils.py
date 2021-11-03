@@ -1069,9 +1069,7 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
             attrs["outputs"] = outputs
             return _graph_at(g, op_name, *inputs, aten=True, **attrs)
         else:
-            raise RuntimeError("ONNX export failed on an operator with unrecognized namespace {}::{}. "
-                               "If you are trying to export a custom operator, make sure you registered "
-                               "it with the right domain and version.".format(ns, op_name))
+            sym_registry.raise_unsupported_operator_error(domain, op_name, opset_version)
     except RuntimeError:
         if operator_export_type == OperatorExportTypes.ONNX_FALLTHROUGH:
             return None
