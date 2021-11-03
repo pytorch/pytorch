@@ -163,12 +163,12 @@ unsigned int m1;  // Magic number: m' above.
 unsigned int shift;  // Shift amounts.
 };
 
-template <int NARGS, typename index_t = uint32_t>
+template <int NARGS>
 struct TrivialOffsetCalculator {
   // The offset for each argument. Wrapper around fixed-size array.
   // The offsets are in # of elements, not in bytes.
-  Array<${index_type}, NARGS> get(index_t linear_idx) const {
-    offset_type offsets;
+  Array<${index_type}, NARGS> get(${index_type} linear_idx) const {
+    Array<${index_type}, NARGS> offsets;
     #pragma unroll
     for (int arg = 0; arg < NARGS; arg++) {
       offsets[arg] = linear_idx;
@@ -217,8 +217,8 @@ extern "C" __global__
 void ${name}_kernel(
     const int numel,
     Array<char*, ${nInputs}+1> data, //[${nInputs}+1],
-    OffsetCalculator<${nInputs}> input_calculator,
-    OffsetCalculator<1> output_calculator,
+    ${offset_calculator}<${nInputs}> input_calculator,
+    ${offset_calculator}<1> output_calculator,
     ${loader} l,
     ${storer} s) {
 ${declare_load_arrays}

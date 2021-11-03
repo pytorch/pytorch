@@ -85,6 +85,11 @@ std::string generate_code(
           "loader", std::string("LoadWithCast<" + std::to_string(nInputs) + ">"));
       env.s("storer", "StoreWithCast");
     }
+    if (contiguous) {
+      env.s("offset_calculator", "TrivialOffsetCalculator");
+    } else {
+      env.s("offset_calculator", "OffsetCalculator");
+    }
     std::stringstream load_inputs;
     for (int i = 0; i < nInputs; i++) {
       auto i_string = std::to_string(i);

@@ -264,17 +264,17 @@ void jitted_gpu_kernel_impl(TensorIteratorBase& iter, const std::string& f, cons
     auto storer = memory::StoreWithCast(iter.dtype(0));
     // TODO: make TrivialOffsetCalculator work, the current CUDA jit string assumes
     //   an OffsetCalculator instead
-    // if (contiguous) {
-    //   std::cout << "jitted_gpu_kernel_impl dynamic_casting and contiguous" << std::endl;
-    //   auto input_offset_calculator = TrivialOffsetCalculator<arity>();
-    //   auto output_offset_calculator = TrivialOffsetCalculator<1>();
-    //   launch_jitted_unrolled_kernel<name, result_type, compute_type>(numel, f, data, input_offset_calculator, output_offset_calculator, loader, storer, contiguous);
-    // } else {
+    if (contiguous) {
+      std::cout << "jitted_gpu_kernel_impl dynamic_casting and contiguous" << std::endl;
+      auto input_offset_calculator = TrivialOffsetCalculator<arity>();
+      auto output_offset_calculator = TrivialOffsetCalculator<1>();
+      launch_jitted_unrolled_kernel<name, result_type, compute_type>(numel, f, data, input_offset_calculator, output_offset_calculator, loader, storer, contiguous);
+    } else {
       std::cout << "jitted_gpu_kernel_impl dynamic_casting" << std::endl;
       auto input_offset_calculator = make_input_offset_calculator<arity>(iter);
       auto output_offset_calculator = make_output_offset_calculator(iter);
       launch_jitted_unrolled_kernel<name, result_type, compute_type>(numel, f, data, input_offset_calculator, output_offset_calculator, loader, storer, contiguous);
-    // }
+    }
   }
 }
 
