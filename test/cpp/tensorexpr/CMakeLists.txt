@@ -15,11 +15,13 @@ set(TENSOREXPR_TEST_SRCS
   ${TENSOREXPR_TEST_ROOT}/test_loopnest.cpp
   ${TENSOREXPR_TEST_ROOT}/test_memdependency.cpp
   ${TENSOREXPR_TEST_ROOT}/test_ops.cpp
+  ${TENSOREXPR_TEST_ROOT}/test_quantization.cpp
   ${TENSOREXPR_TEST_ROOT}/test_reductions.cpp
   ${TENSOREXPR_TEST_ROOT}/test_registerizer.cpp
   ${TENSOREXPR_TEST_ROOT}/test_simplify.cpp
   ${TENSOREXPR_TEST_ROOT}/test_te_fuser_pass.cpp
   ${TENSOREXPR_TEST_ROOT}/test_type.cpp
+  ${TENSOREXPR_TEST_ROOT}/test_stmttracer.cpp
 )
 
 if(USE_CUDA)

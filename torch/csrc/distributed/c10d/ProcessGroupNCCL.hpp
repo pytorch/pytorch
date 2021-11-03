@@ -24,6 +24,9 @@
 #include <torch/custom_class.h>
 
 namespace c10d {
+// Environment variable which controls whether we perform a NCCL healt check
+// which ensures communicators are healthy at the beginning of init.
+constexpr const char* ENABLE_NCCL_HEALTH_CHECK = "ENABLE_NCCL_HEALTH_CHECK";
 
 // Environment variable which controls whether or not wait() is blocking or
 // non-blocking.
