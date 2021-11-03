@@ -9,11 +9,12 @@ import torch
 import re
 import collections
 from torch._six import string_classes
+from typing import Any, Tuple
 
 np_str_obj_array_pattern = re.compile(r'[SaUO]')
 
 
-def default_convert(data):
+def default_convert(data: Any):
     r"""Converts each NumPy array data field into a tensor"""
     elem_type = type(data)
     if isinstance(data, torch.Tensor):
@@ -40,7 +41,7 @@ default_collate_err_msg_format = (
     "dicts or lists; found {}")
 
 
-def default_collate(batch):
+def default_collate(batch: Tuple[Any]):
     r"""Puts each data field into a tensor with outer dimension batch size"""
 
     elem = batch[0]
