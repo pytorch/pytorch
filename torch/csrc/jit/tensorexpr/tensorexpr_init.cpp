@@ -807,10 +807,7 @@ void initTensorExprBindings(PyObject* module) {
             return self.getCodeText(attr);
           },
           py::arg("attr") = "")
-      .def("recompile",
-          [](TensorExprKernel& self) {
-            self.recompile();
-          });
+      .def("recompile", [](TensorExprKernel& self) { self.recompile(); });
 
   py::class_<CodeGen>(te, "CodeGen")
       .def(
@@ -890,7 +887,9 @@ void initTensorExprBindings(PyObject* module) {
   te.def("is_graph_compilable", &tensorexpr::isGraphCompilable);
   te.def("fixup_missing_shape_info", &tensorexpr::fixupMissingShapeInfo);
   te.def("remove_graph_output", &tensorexpr::removeGraphOutput);
-  te.def("replace_list_output_with_tuple", &tensorexpr::replaceListOutputWithTuple);
+  te.def(
+      "replace_list_output_with_tuple",
+      &tensorexpr::replaceListOutputWithTuple);
   te.def("set_llvm_target_triple", [](const c10::optional<std::string>& val) {
     tensorexpr::LLVMTargetTriple() = val;
   });
