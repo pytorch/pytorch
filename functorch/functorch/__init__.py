@@ -18,7 +18,7 @@ from . import _C
 # functorch transforms
 from ._src.vmap import vmap
 from ._src.eager_transforms import grad, grad_and_value, vjp, jacrev
-from ._src.python_key import make_fx
+from ._src.python_key import make_fx, pythonkey_decompose
 
 # utilities. Maybe these should go in their own namespace in the future?
 from ._src.make_functional import (
