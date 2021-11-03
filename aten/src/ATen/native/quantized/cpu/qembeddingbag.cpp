@@ -11,7 +11,7 @@
 #include <ATen/Parallel.h>
 #include <c10/util/irange.h>
 
-torch::class_<EmbeddingPackedParamsBase> register_embedding_params();
+int register_embedding_params();
 
 namespace {
 
