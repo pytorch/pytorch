@@ -4843,63 +4843,6 @@ class TestNN(NNTestCase):
 
         self.assertEqual(res_old, res_F)
 
-        def test_embedding_with_kwargs(self):
-            opts = {
-                "max_norm": 2.,
-                "norm_type": .5,
-                "scale_grad_by_freq": False,
-                "sparse": True,
-                "padding_idx": 2
-            }
-            inp = torch.tensor([
-                [1, 3, 2],
-                [0, 2, 1]
-            ], dtype=torch.long)
-            embeddings = torch.rand(4, 3, requires_grad=True)
-
-            embed_old = torch.nn.Embedding(
-                4, 3,
-                max_norm=opts['max_norm'],
-                norm_type=opts['norm_type'],
-                scale_grad_by_freq=opts['scale_grad_by_freq'],
-                sparse=opts['sparse'],
-                padding_idx=opts['padding_idx']
-            )
-            embed_old.weight.data = embeddings.data
-            res_old = embed_old(inp)
-
-            res_F = F.embedding(
-                inp,
-                embeddings,
-                max_norm=opts['max_norm'],
-                norm_type=opts['norm_type'],
-                scale_grad_by_freq=opts['scale_grad_by_freq'],
-                sparse=opts['sparse'],
-                padding_idx=opts['padding_idx']
-            )
-            self.assertEqual(res_old, res_F)
-
-            embed_old = torch.nn.Embedding(4, 3)
-            embed_old = embed_old.from_pretrained(
-                embeddings,
-                max_norm=opts['max_norm'],
-                norm_type=opts['norm_type'],
-                scale_grad_by_freq=opts['scale_grad_by_freq'],
-                sparse=opts['sparse'],
-                padding_idx=opts['padding_idx'])
-            res_old = embed_old(inp)
-            res_F = F.embedding(
-                inp,
-                embeddings,
-                max_norm=opts['max_norm'],
-                norm_type=opts['norm_type'],
-                scale_grad_by_freq=opts['scale_grad_by_freq'],
-                sparse=opts['sparse'],
-                padding_idx=opts['padding_idx']
-            )
-
-            self.assertEqual(res_old, res_F)
-
     def test_embedding_bag_functional(self):
         a = torch.tensor([
             [1, 3, 2],
