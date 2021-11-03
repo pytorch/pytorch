@@ -103,8 +103,8 @@ def exporter_context(model, mode):
 
 def export(model, args, f, export_params=True, verbose=False, training=None,
            input_names=None, output_names=None, operator_export_type=None,
-           opset_version=None, do_constant_folding=True, example_outputs=None,
-           dynamic_axes=None, keep_initializers_as_inputs=None, custom_opsets=None,
+           opset_version=None, do_constant_folding=True, dynamic_axes=None,
+           keep_initializers_as_inputs=None, custom_opsets=None,
            use_external_data_format=None, export_modules_as_functions=False):
     if operator_export_type is None:
         if torch.onnx.PYTORCH_ONNX_CAFFE2_BUNDLE:
@@ -112,9 +112,6 @@ def export(model, args, f, export_params=True, verbose=False, training=None,
         else:
             operator_export_type = OperatorExportTypes.ONNX
 
-    if example_outputs is not None:
-        warnings.warn("`example_outputs' is deprecated and ignored. Will be removed in "
-                      "next PyTorch release.")
     if use_external_data_format is not None:
         warnings.warn("`use_external_data_format' is deprecated and ignored. Will be removed in next "
                       "PyTorch release. The code will work as it is False if models are not larger than 2GB, "
@@ -122,8 +119,8 @@ def export(model, args, f, export_params=True, verbose=False, training=None,
 
     _export(model, args, f, export_params, verbose, training, input_names, output_names,
             operator_export_type=operator_export_type, opset_version=opset_version,
-            do_constant_folding=do_constant_folding, example_outputs=example_outputs,
-            dynamic_axes=dynamic_axes, keep_initializers_as_inputs=keep_initializers_as_inputs,
+            do_constant_folding=do_constant_folding, dynamic_axes=dynamic_axes,
+            keep_initializers_as_inputs=keep_initializers_as_inputs,
             custom_opsets=custom_opsets, use_external_data_format=use_external_data_format,
             export_modules_as_functions=export_modules_as_functions)
 
@@ -493,7 +490,7 @@ def _get_example_outputs(model, args):
 def _model_to_graph(model, args, verbose=False,
                     input_names=None, output_names=None,
                     operator_export_type=OperatorExportTypes.ONNX,
-                    example_outputs=None, do_constant_folding=True,
+                    do_constant_folding=True,
                     _disable_torch_constant_prop=False, fixed_batch_size=False,
                     training=None, dynamic_axes=None):
     r"""Converts model into an ONNX graph.
@@ -523,16 +520,7 @@ def _model_to_graph(model, args, verbose=False,
                             module=module)
     from torch.onnx.symbolic_helper import _onnx_shape_inference
     if isinstance(model, torch.jit.ScriptModule) or isinstance(model, torch.jit.ScriptFunction):
-        if example_outputs is None:
-            example_outputs = _get_example_outputs(model, args)
-        else:
-            # example_outpus specified
-            if isinstance(example_outputs, (torch.Tensor, int, float, bool)):
-                example_outputs = (example_outputs,)
-
-            if isinstance(example_outputs, list):
-                example_outputs = [example_outputs]
-
+        example_outputs = _get_example_outputs(model, args)
         out_vars, desc = torch.jit._flatten(tuple(example_outputs))
         torch._C._jit_pass_onnx_assign_output_shape(graph, out_vars, desc, _onnx_shape_inference)
     else:
@@ -583,15 +571,15 @@ def _model_to_graph(model, args, verbose=False,
 
 def export_to_pretty_string(model, args, f, export_params=True, verbose=False, training=None,
                             input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
-                            export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None,
-                            google_printer=False, opset_version=None, keep_initializers_as_inputs=None,
-                            custom_opsets=None, add_node_names=True, do_constant_folding=True, dynamic_axes=None):
+                            export_type=ExportTypes.PROTOBUF_FILE, google_printer=False, opset_version=None,
+                            keep_initializers_as_inputs=None, custom_opsets=None, add_node_names=True,
+                            do_constant_folding=True, dynamic_axes=None):
     if f is not None:
         warnings.warn("'f' is deprecated and ignored. It will be removed in the next PyTorch release.")
     return _export_to_pretty_string(model, args, f, export_params, verbose, training,
                                     input_names, output_names, operator_export_type,
-                                    export_type, example_outputs, google_printer,
-                                    opset_version, do_constant_folding=do_constant_folding,
+                                    export_type, google_printer, opset_version,
+                                    do_constant_folding=do_constant_folding,
                                     add_node_names=add_node_names,
                                     keep_initializers_as_inputs=keep_initializers_as_inputs,
                                     custom_opsets=custom_opsets, dynamic_axes=dynamic_axes)
@@ -599,8 +587,7 @@ def export_to_pretty_string(model, args, f, export_params=True, verbose=False, t
 
 def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, training=None,
                              input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
-                             export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None,
-                             google_printer=False, opset_version=None,
+                             export_type=ExportTypes.PROTOBUF_FILE, google_printer=False, opset_version=None,
                              do_constant_folding=True, keep_initializers_as_inputs=None,
                              fixed_batch_size=False, custom_opsets=None, add_node_names=True,
                              onnx_shape_inference=True, dynamic_axes=None):
@@ -623,7 +610,7 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
         args = _decide_input_format(model, args)
         graph, params_dict, torch_out = _model_to_graph(model, args, verbose, input_names,
                                                         output_names, operator_export_type,
-                                                        example_outputs, val_do_constant_folding,
+                                                        val_do_constant_folding,
                                                         fixed_batch_size=fixed_batch_size,
                                                         training=training, dynamic_axes=dynamic_axes)
 
@@ -696,9 +683,8 @@ def _reset_trace_module_map():
 
 def _export(model, args, f, export_params=True, verbose=False, training=None,
             input_names=None, output_names=None, operator_export_type=None,
-            export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None,
-            opset_version=None, do_constant_folding=True,
-            dynamic_axes=None, keep_initializers_as_inputs=None,
+            export_type=ExportTypes.PROTOBUF_FILE, opset_version=None,
+            do_constant_folding=True, dynamic_axes=None, keep_initializers_as_inputs=None,
             fixed_batch_size=False, custom_opsets=None, add_node_names=True,
             use_external_data_format=None, onnx_shape_inference=True,
             export_modules_as_functions=False):
@@ -752,7 +738,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             graph, params_dict, torch_out = \
                 _model_to_graph(model, args, verbose, input_names,
                                 output_names, operator_export_type,
-                                example_outputs, val_do_constant_folding,
+                                val_do_constant_folding,
                                 fixed_batch_size=fixed_batch_size,
                                 training=training,
                                 dynamic_axes=dynamic_axes)

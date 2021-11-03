@@ -31,8 +31,8 @@ def _export(*args, **kwargs):
 
 def export(model, args, f, export_params=True, verbose=False, training=TrainingMode.EVAL,
            input_names=None, output_names=None, operator_export_type=None,
-           opset_version=None, do_constant_folding=True, example_outputs=None,
-           dynamic_axes=None, keep_initializers_as_inputs=None, custom_opsets=None,
+           opset_version=None, do_constant_folding=True, dynamic_axes=None,
+           keep_initializers_as_inputs=None, custom_opsets=None,
            use_external_data_format=None, export_modules_as_functions=False):
     r"""
     Exports a model into ONNX format. If ``model`` is not a
@@ -185,14 +185,11 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
         do_constant_folding (bool, default False): Apply the constant-folding optimization.
             Constant-folding will replace some of the ops that have all constant inputs
             with pre-computed constant nodes.
-        example_outputs (T or a tuple of T, where T is Tensor or convertible to Tensor, default None):
-            Deprecated and ignored. Will be removed in next PyTorch release.
         dynamic_axes (dict<string, dict<int, string>> or dict<string, list(int)>, default empty dict):
 
             By default the exported model will have the shapes of all input and output tensors
-            set to exactly match those given in ``args`` (and ``example_outputs`` when that arg is
-            required). To specify axes of tensors as dynamic (i.e. known only at run-time), set
-            ``dynamic_axes`` to a dict with schema:
+            set to exactly match those given in ``args``. To specify axes of tensors as
+            dynamic (i.e. known only at run-time), set ``dynamic_axes`` to a dict with schema:
 
             * KEY (str): an input or output name. Each name must also be provided in ``input_names`` or
               ``output_names``.
@@ -305,7 +302,7 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
     from torch.onnx import utils
     return utils.export(model, args, f, export_params, verbose, training,
                         input_names, output_names, operator_export_type, opset_version,
-                        do_constant_folding, example_outputs, dynamic_axes,
+                        do_constant_folding, dynamic_axes,
                         keep_initializers_as_inputs, custom_opsets,
                         use_external_data_format, export_modules_as_functions)
 
