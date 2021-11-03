@@ -149,8 +149,9 @@ using DtypePropRule = std::function<bool(Node*)>;
 // Function to propagate dtype information for a node
 // Returns true if the dtype information was changed
 
-bool setDtypeToFirstArg(Node* n) {
+bool setIfAllDtypeMatch(Node* n) {
   // Sets all tesnsor outputs to the dtype of the first input
+  // only if all inputs are the same dtype, otherwise do nothing
   auto first_arg = n->inputs().at(0);
   auto tensor_type = first_arg->type()->cast<TensorType>();
   TORCH_INTERNAL_ASSERT(tensor_type, "Expecting a tensor type");
@@ -158,6 +159,21 @@ bool setDtypeToFirstArg(Node* n) {
   if (!scalar_type.has_value()) {
     return false;
   }
+  for (auto arg : n->inputs()) {
+    tensor_type = arg->type()->cast<TensorType>();
+    if (!tensor_type) {
+      continue;
+    }
+    auto arg_scalar_type = tensor_type->scalarType();
+
+    if (!arg_scalar_type.has_value()) { // Allow None for optional args
+      continue;
+    }
+    if (arg_scalar_type != scalar_type) {
+      return false;
+    }
+  }
+
 
   bool changed = false;
   for (auto output : n->outputs()) {
@@ -284,9 +300,9 @@ struct DtypePropagationPass {
     dtype_prop_registry_ = std::make_unique<OperatorMap<DtypePropRule>>();
 
     dtype_prop_registry_->insert(
-        *nn_ops_first_input_preserving(), setDtypeToFirstArg);
+        *nn_ops_first_input_preserving(), setIfAllDtypeMatch);
     dtype_prop_registry_->insert(
-        *ops_one_tensor_in_shape_transform(), setDtypeToFirstArg);
+        *ops_one_tensor_in_shape_transform(), setIfAllDtypeMatch);
   }
   std::unique_ptr<OperatorMap<DtypePropRule>> dtype_prop_registry_;
   std::shared_ptr<Graph> graph_;
