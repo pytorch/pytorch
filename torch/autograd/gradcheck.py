@@ -1,5 +1,4 @@
 import torch
-from torch._C import InferredType
 from torch.types import _TensorOrTensors
 import torch.testing
 from torch.overrides import is_tensor_like
@@ -921,7 +920,9 @@ def _test_undefined_forward_mode(func, outputs, inputs):
                     val2, res2 = fwAD.unpack_dual(d_o2)
 
                     if not (res1 is None or res2 is None):
-                        assert torch.equal(res1, res2)
+                        if not torch.equal(res1, res2):
+                            raise GradcheckError("Mismatch in tangent values for output with index: ", index_o,
+                                                 " when input: ", inp, " has an undefined tangent value")
     return True
 
 def _test_undefined_backward_mode(func, outputs, inputs) -> bool:
@@ -1264,7 +1265,7 @@ def _fast_gradcheck(func, func_out, inputs, outputs, eps, rtol,
     inp_tensors_idx, inp_tensors = _get_inp_tensors(inputs)
     # Backward mode computes v^T * J (VJP)
     # Since we computed J * u (JVP) through finite difference method, we perform an equality check
-    # between VJP * u, JVP * v
+    # between VJP * u, v * JVP
     # ----
     # Forward mode computes J * u (JVP)
     # Since we already compute JVP through finite difference method,

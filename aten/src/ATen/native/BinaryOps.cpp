@@ -606,10 +606,6 @@ Tensor& floor_divide_(Tensor& self, const Tensor& other) {
 // TODO: Make this structured to undo the perf regression from native:: removal
 // in call here
 Tensor mul(const Tensor& self, const Scalar& other) {
-  // prob ok if self never requires grad
-  if (self.is_zerotensor()) {
-    return self;
-  }
   return at::mul(self, wrapped_scalar_tensor(other)); // redispatch!
 }
 
@@ -626,12 +622,14 @@ void size_and_device_check(const Tensor& self, const Tensor& other) {
 }
 
 Tensor mul_zerotensor(const Tensor& self, const Tensor& other) {
+  size_and_device_check(self, other);
   auto commonDtype = at::result_type(self, other);
   auto result_options = self.options().dtype(commonDtype);
   return at::_efficientzerotensor(self.sizes(), result_options);
 }
 
 Tensor add_zerotensor(const Tensor& self, const Tensor& other, const Scalar& alpha) {
+  size_and_device_check(self, other);
   auto commonDtype = at::result_type(self, other);
   if (self.is_zerotensor()) {
     return (commonDtype == other.scalar_type()) ? other.mul(alpha) : other.to(commonDtype).mul(alpha);

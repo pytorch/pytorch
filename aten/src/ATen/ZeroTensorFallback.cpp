@@ -9,7 +9,7 @@
 namespace at {
 
   // TODO: add a note explaining the design decisions
-  // ZeroTensors are designed to be immutable. Thus, we error out
+  // ZeroTensors are designed to be immutable. Thus, we error out when an in-place operation is performed on ZeroTensors
   void zeroTensorFallback(const c10::OperatorHandle& op, DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
     const auto& arguments = op.schema().arguments();
     const auto num_arguments = arguments.size();
@@ -33,6 +33,9 @@ namespace at {
     }
 
     if (is_write.has_value() && !*is_write) {
+      // We assume that view operators automatically handle the ZeroTensor bit
+      // correctly by propagating the dispatch key in key_set.
+      // This is not necessarily always right, so you should test these cases.
       op.redispatchBoxed(dispatch_keys & c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, DispatchKey::ZeroTensor), stack);
       return;
     }
@@ -88,12 +91,12 @@ namespace at {
     m.impl("empty_like", torch::CppFunction::makeFallthrough());
     m.impl("empty_strided", torch::CppFunction::makeFallthrough());
     m.impl("mul.Scalar", torch::CppFunction::makeFallthrough());
-    // specific registeration in native_functions.yaml
-    // m.impl("mul.Tensor", torch::CppFunction::makeFallthrough());
-    // m.impl("add.Tensor", torch::CppFunction::makeFallthrough());
     m.impl("copy_", torch::CppFunction::makeFallthrough());
     m.impl("clone", torch::CppFunction::makeFallthrough());
-    // it's okay to return a new tensor here since we disallow in-place operation on ZeroTensors
     m.impl("alias_with_sizes_and_strides", torch::CppFunction::makeFallthrough());
+    // The functions in the list below have a specific registeration in native_functions.yaml and
+    // do not use the fallback.
+    // m.impl("mul.Tensor", torch::CppFunction::makeFallthrough());
+    // m.impl("add.Tensor", torch::CppFunction::makeFallthrough());
   }
 } // namespace at
