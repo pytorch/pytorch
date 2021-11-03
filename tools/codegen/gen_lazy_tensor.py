@@ -154,6 +154,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
                 "lazy_tensor_core/csrc/helpers.h",
                 "lazy_tensor_core/csrc/tensor.h",
                 "lazy_tensor_core/csrc/tensor_util.h",
+                "lazy_tensors/computation_client/metrics.h",
                 f"{output_dir}/{backend_key}NativeFunctions.h",
                 f"{output_dir}/{backend_key}LazyIr.h",
                 f"{output_dir}/{backend_key}ShapeDtype.h",
@@ -174,11 +175,11 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
             'lazy_ir_sysinc': [f'#include <{path}>' for path in [
                 "c10/core/ScalarType.h",
                 "c10/util/Optional.h",
+                "ATen/Tensor.h",
                 "vector",
             ]],
             'lazy_ir_inc': [f'#include "{path}"' for path in [
                 "torch/csrc/lazy/core/ir.h",
-                "lazy_tensor_core/csrc/compiler/node_lowering.h"
             ]],
             'DispatchKey': backend_dispatch_key,
             'dispatch_namespace': backend_dispatch_key.lower(),
@@ -197,8 +198,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
             ]],
             'lazy_ir_inc': [f'#include "{path}"' for path in [
                 "torch/csrc/lazy/core/ir.h",
-                "lazy_tensor_core/csrc/compiler/node_lowering.h",
-                "lazy_tensor_core/csrc/ts_backend/ts_lowering_context.h",
+                "lazy_tensor_core/csrc/ts_backend/ts_node_lowering.h",
                 "torch/csrc/lazy/core/hash.h",
                 node_base_hdr if node_base_hdr is not None else None
             ] if path is not None],

@@ -1,6 +1,6 @@
 #include "lazy_tensor_core/csrc/ops/index_along_dim.h"
 
-#include "lazy_tensor_core/csrc/compiler/node_lowering.h"
+#include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -13,7 +13,7 @@ IndexAlongDim::IndexAlongDim(OpKind op, const torch::lazy::Value& buffer,
              /*num_outputs=*/1, torch::lazy::MHash(dim)),
       dim_(dim) {
   SetShapeDeferred(
-      [&]() { return compiler::NodeLowering::Get()->Infer(this); });
+      [&]() { return compiler::InferShape(this); });
 }
 
 std::string IndexAlongDim::ToString() const {

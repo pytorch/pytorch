@@ -1,6 +1,7 @@
 #include "lazy_tensor_core/csrc/ts_backend/ts_lowering_context.h"
 
-#include "lazy_tensor_core/csrc/compiler/node_lowering.h"
+#include "lazy_tensor_core/csrc/ts_backend/ts_node_lowering.h"
+#include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
 
 namespace torch_lazy_tensors {
 namespace compiler {
@@ -9,7 +10,7 @@ namespace ts_backend {
 TSLoweringContext::TSLoweringContext(const std::string& name, Device device)
     : ir::LoweringContext(name, device),
       graph_(std::make_shared<torch::jit::Graph>()) {
-  lowering_ = NodeLowering::Create(this);
+  lowering_ = TSNodeLoweringInterface::Create(this);
 }
 
 TSLoweringContext::TSLoweringContext(
@@ -18,7 +19,7 @@ TSLoweringContext::TSLoweringContext(
     ir::Util::EmissionMap emit_status)
     : ir::LoweringContext(name, device, post_order, emit_status),
       graph_(std::make_shared<torch::jit::Graph>()) {
-  lowering_ = NodeLowering::Create(this);
+  lowering_ = TSNodeLoweringInterface::Create(this);
   for (auto node : post_order) {
     bool ok = lowering_->Lower(node);
     CHECK(ok) << "Failed to lower: " << *node;
@@ -33,13 +34,12 @@ size_t TSLoweringContext::AddResult(const torch::lazy::Output& output) {
   return AddResult(GetOutputOp(output));
 }
 
-lazy_tensors::StatusOr<std::shared_ptr<lazy_tensors::GenericComputation>>
-TSLoweringContext::Build() {
+ComputationPtr TSLoweringContext::Build() {
   for (torch::jit::Value* output : root_tuple_) {
     graph_->block()->registerOutput(output);
   }
-  return std::shared_ptr<lazy_tensors::GenericComputation>(
-      new GenericComputationTS(graph_));
+  return std::shared_ptr<compiler::Computation>(
+      new TSComputation(graph_));
 }
 
 torch::jit::Value* TSLoweringContext::GetOutputOp(const torch::lazy::Output& output) {
@@ -64,9 +64,8 @@ void TSLoweringContext::AssignOutputOp(const torch::lazy::Output& output,
   emitted_outputs_[output] = std::move(op);
 }
 
-torch::jit::Value* TSLoweringContext::GetParameter(
-    const std::shared_ptr<lazy_tensors::client::Data>& data) {
-  lazy_tensors::client::Data::OpaqueHandle handle = data->GetOpaqueHandle();
+torch::jit::Value* TSLoweringContext::GetParameter(BackendDataPtr data) {
+  BackendData::Handle handle = data->GetOpaqueHandle();
   auto it = parameters_map_.find(handle);
   if (it == parameters_map_.end()) {
     torch::jit::Value* param =

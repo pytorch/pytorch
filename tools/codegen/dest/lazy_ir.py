@@ -101,8 +101,7 @@ class {schema.node_name} : public {self.node_base} {{
     return ss.str();
   }}
 
-  TSOpVector Lower(TSNodeLoweringInterface& tsLoweringInterface,
-                   std::shared_ptr<torch::jit::GraphFunction> function,
+  TSOpVector Lower(std::shared_ptr<torch::jit::GraphFunction> function,
                    ts_backend::TSLoweringContext* loctx) const override {{
     {ts_lowering_body(f)}
   }}

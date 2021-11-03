@@ -3,9 +3,6 @@
 #include <sstream>
 #include <stdexcept>
 
-#include "lazy_tensor_core/csrc/compiler/node_lowering.h"
-#include "lazy_tensor_core/csrc/python_util.h"
-#include "lazy_tensors/computation_client/sys_util.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -18,7 +15,7 @@ LoweringContext::LoweringContext(const std::string& name, Device device,
                                  Util::EmissionMap emit_status)
     : device_(std::move(device)), emit_status_(std::move(emit_status)) {}
 
-const std::vector<lazy_tensors::ComputationClient::DataPtr>&
+const std::vector<compiler::BackendDataPtr>&
 LoweringContext::GetParametersData() const {
   return parameters_;
 }
@@ -32,10 +29,6 @@ void LoweringContext::AddParameter(const torch::lazy::Output& output, size_t ind
                                    const std::string& name) {
   LOG(FATAL) << "Not implemented.";
 }
-
-void LoweringContext::SetUpAlias(const lazy_tensors::ShapeIndex& output_index,
-                                 int64_t param_number,
-                                 const lazy_tensors::ShapeIndex& param_index) {}
 
 }  // namespace ir
 }  // namespace torch_lazy_tensors

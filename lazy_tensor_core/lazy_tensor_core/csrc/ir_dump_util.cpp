@@ -9,8 +9,6 @@
 #include "lazy_tensor_core/csrc/compiler/backend_impl_interface.h"
 #include "lazy_tensor_core/csrc/ir_util.h"
 #include "lazy_tensor_core/csrc/lowering_context.h"
-#include "lazy_tensors/computation_client/computation_client.h"
-#include "lazy_tensors/computation_client/debug_macros.h"
 
 // TODO(whc) don't have ir util depend on ts_backend
 // temporary hack to use Node shape printing from TsNode::shape()
@@ -134,7 +132,7 @@ std::string GenerateDotNodeLabel(
   static const size_t kMaxValueSize = 64;
   std::stringstream ss;
   ss << node->op() << "\\n";
-  if(auto tsnode = dynamic_cast<const TsNode*>(node)){
+  if (auto tsnode = dynamic_cast<const TsNode*>(node)) {
     ss << tsnode->shape();
   } else {
     ss << "{TODO implement Node::shape}";
@@ -162,9 +160,10 @@ std::string GenerateDotNodeSpec(
   return ss.str();
 }
 
-std::string GenerateTextNodeSpec(const torch::lazy::Node* node, const NodeIdMap& id_map) {
+std::string GenerateTextNodeSpec(const torch::lazy::Node* node,
+                                 const NodeIdMap& id_map) {
   std::stringstream ss;
-  if(auto tsnode = dynamic_cast<const TsNode*>(node)){
+  if (auto tsnode = dynamic_cast<const TsNode*>(node)) {
     ss << tsnode->shape() << " ";
   } else {
     ss << "{TODO implement Node::shape} ";
@@ -198,7 +197,8 @@ std::string DumpUtil::ToDot(c10::ArrayRef<torch::lazy::Node*> nodes) {
 std::string DumpUtil::PostOrderToDot(
     c10::ArrayRef<torch::lazy::Node*> post_order,
     c10::ArrayRef<torch::lazy::Node*> roots) {
-  std::unordered_map<const torch::lazy::Node*, size_t> roots_ids = GetRootsIds(roots);
+  std::unordered_map<const torch::lazy::Node*, size_t> roots_ids =
+      GetRootsIds(roots);
   NodeIdMap id_map = GenerateIdMap(post_order);
   std::stringstream ss;
   ss << "digraph G {\n";
@@ -238,7 +238,8 @@ std::string DumpUtil::ToText(c10::ArrayRef<torch::lazy::Node*> nodes) {
 std::string DumpUtil::PostOrderToText(
     c10::ArrayRef<torch::lazy::Node*> post_order,
     c10::ArrayRef<torch::lazy::Node*> roots) {
-  std::unordered_map<const torch::lazy::Node*, size_t> roots_ids = GetRootsIds(roots);
+  std::unordered_map<const torch::lazy::Node*, size_t> roots_ids =
+      GetRootsIds(roots);
   NodeIdMap id_map = GenerateIdMap(post_order);
   std::stringstream ss;
   ss << "IR {\n";
@@ -261,10 +262,9 @@ std::string DumpUtil::ToBackend(c10::ArrayRef<torch::lazy::Value> values,
   for (auto& ir_value : values) {
     lowering_ctx->AddResult(ir_value);
   }
-  auto computation = ConsumeValue(lowering_ctx->Build());
-  return ConsumeValue(
-      compiler::getBackendRegistrar()->GetComputationBackendText(
-          computation.get()));
+  auto computation = lowering_ctx->Build();
+  return compiler::getBackendRegistrar()->GetComputationBackendText(
+      computation);
 }
 
 }  // namespace ir

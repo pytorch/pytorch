@@ -1,6 +1,6 @@
 #include "lazy_tensor_core/csrc/ops/collective_permute.h"
 
-#include "lazy_tensor_core/csrc/compiler/node_lowering.h"
+#include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
 #include "lazy_tensor_core/csrc/ops/ltc_ops.h"
 #include "lazy_tensors/shape_util.h"
 
@@ -15,7 +15,7 @@ CollectivePermute::CollectivePermute(
              /*num_outputs=*/2, torch::lazy::MHash(source_target_pairs)),
       source_target_pairs_(std::move(source_target_pairs)) {
   SetShapeDeferred(
-      [&]() { return compiler::NodeLowering::Get()->Infer(this); });
+      [&]() { return compiler::InferShape(this); });
 }
 
 NodePtr CollectivePermute::Clone(OpList operands) const {

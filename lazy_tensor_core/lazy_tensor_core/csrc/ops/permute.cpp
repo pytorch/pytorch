@@ -1,8 +1,9 @@
 #include "lazy_tensor_core/csrc/ops/permute.h"
 
-#include "lazy_tensor_core/csrc/compiler/node_lowering.h"
+#include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensors/computation_client/util.h"
+#include "lazy_tensors/shape_util.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -13,7 +14,7 @@ Permute::Permute(const torch::lazy::Value& input, std::vector<int64_t> dims)
              /*num_outputs=*/1, torch::lazy::MHash(dims)),
       dims_(std::move(dims)) {
   SetShapeDeferred(
-      [&]() { return compiler::NodeLowering::Get()->Infer(this); });
+      [&]() { return compiler::InferShape(this); });
 }
 
 NodePtr Permute::Clone(OpList operands) const {

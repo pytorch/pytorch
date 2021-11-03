@@ -71,32 +71,6 @@ class Shape {
   std::vector<Shape> element_shapes_;
 };
 
-class ProgramShape {
- public:
-  ProgramShape(std::vector<Shape> parameters,
-               std::vector<std::string> parameter_names, Shape result)
-      : parameters_(std::move(parameters)),
-        parameter_names_(std::move(parameter_names)),
-        result_(std::move(result)) {
-    CHECK_EQ(parameters_.size(), parameter_names_.size());
-  }
-
-  int parameters_size() const { return parameters_.size(); }
-
-  const std::vector<Shape>& parameters() const { return parameters_; }
-
-  const std::vector<std::string>& parameter_names() const {
-    return parameter_names_;
-  }
-
-  const Shape& result() const { return result_; }
-
- private:
-  std::vector<Shape> parameters_;
-  std::vector<std::string> parameter_names_;
-  Shape result_;
-};
-
 inline std::ostream& operator<<(std::ostream& out, const Shape& shape) {
   return out << shape.ToString();
 }

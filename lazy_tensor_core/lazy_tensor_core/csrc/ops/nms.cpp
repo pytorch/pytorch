@@ -1,6 +1,6 @@
 #include "lazy_tensor_core/csrc/ops/nms.h"
 
-#include "lazy_tensor_core/csrc/compiler/node_lowering.h"
+#include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
 #include "lazy_tensor_core/csrc/ops/ltc_ops.h"
 #include "lazy_tensors/computation_client/util.h"
 
@@ -15,7 +15,7 @@ Nms::Nms(const torch::lazy::Value& boxes, const torch::lazy::Value& scores,
              /*num_outputs=*/2, torch::lazy::MHash(output_size)),
       output_size_(output_size) {
   SetShapeDeferred(
-      [&]() { return compiler::NodeLowering::Get()->Infer(this); });
+      [&]() { return compiler::InferShape(this); });
 }
 
 NodePtr Nms::Clone(OpList operands) const {

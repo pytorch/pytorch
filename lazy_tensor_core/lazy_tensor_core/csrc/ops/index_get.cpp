@@ -1,6 +1,6 @@
 #include "lazy_tensor_core/csrc/ops/index_get.h"
 
-#include "lazy_tensor_core/csrc/compiler/node_lowering.h"
+#include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -12,7 +12,7 @@ IndexGet::IndexGet(const torch::lazy::Value& base,
              /*num_outputs=*/1, torch::lazy::MHash(start_dim)),
       start_dim_(start_dim) {
   SetShapeDeferred(
-      [&]() { return compiler::NodeLowering::Get()->Infer(this); });
+      [&]() { return compiler::InferShape(this); });
 }
 
 std::string IndexGet::ToString() const {

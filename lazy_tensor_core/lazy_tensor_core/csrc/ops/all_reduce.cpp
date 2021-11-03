@@ -1,6 +1,6 @@
 #include "lazy_tensor_core/csrc/ops/all_reduce.h"
 
-#include "lazy_tensor_core/csrc/compiler/node_lowering.h"
+#include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
 #include "lazy_tensor_core/csrc/ops/ltc_ops.h"
 #include "lazy_tensors/computation_client/util.h"
 #include "lazy_tensors/shape_util.h"
@@ -30,7 +30,7 @@ AllReduce::AllReduce(AllReduceType reduce_type, OpList operands,
       scale_(scale),
       groups_(std::move(groups)) {
   SetShapeDeferred(
-      [&]() { return compiler::NodeLowering::Get()->Infer(this); });
+      [&]() { return compiler::InferShape(this); });
 }
 
 NodePtr AllReduce::Clone(OpList operands) const {

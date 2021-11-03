@@ -1,7 +1,7 @@
 #include "lazy_tensor_core/csrc/ops/squeeze.h"
 
-#include "lazy_tensor_core/csrc/compiler/node_lowering.h"
-
+#include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
+#include "lazy_tensor_core/csrc/ts_backend/ts_node_lowering.h"
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
@@ -11,7 +11,7 @@ Squeeze::Squeeze(const torch::lazy::Value& input, int dim)
            /*num_outputs=*/1, torch::lazy::MHash(dim)),
       dim_(dim) {
   SetShapeDeferred(
-      [&]() { return compiler::NodeLowering::Get()->Infer(this); });
+      [&]() { return compiler::InferShape(this); });
 }
 
 NodePtr Squeeze::Clone(OpList operands) const {

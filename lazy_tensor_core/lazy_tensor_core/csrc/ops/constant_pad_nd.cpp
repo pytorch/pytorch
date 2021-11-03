@@ -1,6 +1,6 @@
 #include "lazy_tensor_core/csrc/ops/constant_pad_nd.h"
 
-#include "lazy_tensor_core/csrc/compiler/node_lowering.h"
+#include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/ops/scalar.h"
 
@@ -15,7 +15,7 @@ ConstantPadNd::ConstantPadNd(const torch::lazy::Value& input,
       pad_(std::move(pad)),
       value_(value) {
   SetShapeDeferred(
-      [&]() { return compiler::NodeLowering::Get()->Infer(this); });
+      [&]() { return compiler::InferShape(this); });
 }
 
 NodePtr ConstantPadNd::Clone(OpList operands) const {

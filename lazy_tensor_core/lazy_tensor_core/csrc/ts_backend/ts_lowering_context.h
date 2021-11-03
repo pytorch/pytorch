@@ -1,36 +1,58 @@
 #pragma once
 
 #include <torch/jit.h>
-#include "lazy_tensor_core/csrc/lowering_context.h"
-#include "torch/csrc/jit/runtime/graph_executor.h"
 
+#include "lazy_tensor_core/csrc/lowering_context.h"
+#include "lazy_tensor_core/csrc/ts_backend/ts_node_lowering.h"
+#include "torch/csrc/jit/runtime/graph_executor.h"
 namespace torch_lazy_tensors {
 namespace compiler {
 
 using TSOpVector = std::vector<torch::jit::Value*>;
 
-class NodeLowering;
+class TSNodeLoweringInterface {
+  /**
+   * This interface is only needed for legacy ops, and can be removed once all
+   * ops implement TSNode->lower().
+   * */
+ public:
+  TSNodeLoweringInterface() = default;
+
+  virtual ~TSNodeLoweringInterface() = default;
+
+  virtual bool Lower(const torch::lazy::Node* node) = 0;
+
+  static std::unique_ptr<TSNodeLoweringInterface> Create(
+      ir::LoweringContext* loctx);
+};
 
 namespace ts_backend {
 
-class GenericComputationTS : public lazy_tensors::GenericComputation {
+class TSComputation : public Computation {
  public:
-  GenericComputationTS(std::shared_ptr<torch::jit::Graph> graph)
-      : graph_(graph),
-        graph_executor_(std::move(graph), "") {}
-
-  lazy_tensors::StatusOr<lazy_tensors::ProgramShape> GetProgramShape()
-      const override {
-    std::vector<std::string> parameter_names;
+  TSComputation(std::shared_ptr<torch::jit::Graph> graph)
+      : graph_(graph), graph_executor_(std::move(graph), "") {
     for (torch::jit::Value* input : graph_->inputs()) {
-      parameter_names.push_back(input->debugName());
+      parameter_names_.push_back(input->debugName());
     }
-    // NB: The return type is only used by certain backends to assing a physical
-    // layout. This backend doesn't use it for anything, so it's ok to leave it
-    // empty.
-    std::vector<lazy_tensors::Shape> parameters(parameter_names.size());
-    return lazy_tensors::ProgramShape(parameters, parameter_names,
-                                      lazy_tensors::Shape());
+  }
+
+  int parameters_size() const override { return parameter_names_.size(); }
+
+  const std::vector<lazy_tensors::Shape>& parameter_shapes() const override {
+    throw std::runtime_error(
+        "TODO(whc) implement TS computation shapes or change interface");
+    return parameter_shapes_;
+  }
+
+  const std::vector<std::string>& parameter_names() const override {
+    return parameter_names_;
+  }
+
+  const lazy_tensors::Shape& result_shape() const override {
+    throw std::runtime_error(
+        "TODO(whc) implement TS computation shapes or change interface");
+    return result_shape_;
   }
 
   std::shared_ptr<torch::jit::Graph> graph() const { return graph_; }
@@ -40,6 +62,9 @@ class GenericComputationTS : public lazy_tensors::GenericComputation {
  private:
   std::shared_ptr<torch::jit::Graph> graph_;
   torch::jit::GraphExecutor graph_executor_;
+  std::vector<std::string> parameter_names_;
+  std::vector<lazy_tensors::Shape> parameter_shapes_;
+  lazy_tensors::Shape result_shape_;
 };
 
 class TSLoweringContext : public ir::LoweringContext {
@@ -54,8 +79,7 @@ class TSLoweringContext : public ir::LoweringContext {
 
   size_t AddResult(const torch::lazy::Output& output) override;
 
-  lazy_tensors::StatusOr<std::shared_ptr<lazy_tensors::GenericComputation>>
-  Build() override;
+  ComputationPtr Build() override;
 
   // Retrieves the lowered operation for a output. If the requested output is
   // not available yet, the graph behind the output's Node is lowered, and the
@@ -70,8 +94,7 @@ class TSLoweringContext : public ir::LoweringContext {
   // If a parameter associated with data has already been declared, it will be
   // returned. Otherwise a new one will be created, associated with the tensor
   // held in data.
-  torch::jit::Value* GetParameter(
-      const std::shared_ptr<lazy_tensors::client::Data>& data);
+  torch::jit::Value* GetParameter(BackendDataPtr data);
 
   std::shared_ptr<torch::jit::Graph> graph() const { return graph_; }
 
@@ -84,11 +107,10 @@ class TSLoweringContext : public ir::LoweringContext {
   size_t AddResult(torch::jit::Value* op);
 
   std::shared_ptr<torch::jit::Graph> graph_;
-  std::unordered_map<lazy_tensors::client::Data::OpaqueHandle, Parameter>
-      parameters_map_;
+  std::unordered_map<BackendData::Handle, Parameter> parameters_map_;
   std::vector<torch::jit::Value*> root_tuple_;
   torch::lazy::OutputMap<torch::jit::Value*> emitted_outputs_;
-  std::unique_ptr<NodeLowering> lowering_;
+  std::unique_ptr<TSNodeLoweringInterface> lowering_;
 };
 
 }  // namespace ts_backend

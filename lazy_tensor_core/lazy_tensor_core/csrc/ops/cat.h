@@ -1,6 +1,8 @@
 #pragma once
 
 #include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
+#include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
+#include "lazy_tensor_core/csrc/ts_backend/ts_node_lowering.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -15,8 +17,7 @@ class Cat : public TsNode {
 
   int64_t dim() const { return dim_; };
 
-  TSOpVector Lower(TSNodeLoweringInterface& tsLoweringInterface,
-                   std::shared_ptr<torch::jit::GraphFunction> function,
+  TSOpVector Lower(std::shared_ptr<torch::jit::GraphFunction> function,
                    ts_backend::TSLoweringContext* loctx) const override {
     std::vector<torch::jit::NamedValue> arguments;
     std::vector<torch::jit::NamedValue> kwarguments;
@@ -34,13 +35,12 @@ class Cat : public TsNode {
             ->insertNode(graph->createList(tensor_list[0]->type(), tensor_list))
             ->output());
     arguments.emplace_back(dim());
-    TSOpVector cat_out = tsLoweringInterface.LowerBuiltin(op().op, arguments, kwarguments);
+    TSOpVector cat_out = compiler::LowerTSBuiltin(function, op().op, arguments, kwarguments);
     CHECK_EQ(cat_out.size(), 1);
 
     return cat_out;
 
   }
-
 
  private:
   int64_t dim_;

@@ -4,7 +4,7 @@
 #include <ATen/Functions.h>
 
 #include "lazy_tensor_core/csrc/aten_ltc_bridge.h"
-#include "lazy_tensor_core/csrc/compiler/node_lowering.h"
+#include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/lazy_graph_executor.h"
 #include "lazy_tensor_core/csrc/ops/arithmetic_ir_ops.h"
@@ -158,7 +158,7 @@ NodePtr IndexFillOp(const torch::lazy::Value& buffer, int64_t dim,
   NodePtr node = torch::lazy::MakeNode<ir::ops::IndexAlongDim>(
       torch::lazy::OpKind(at::aten::index_fill), buffer, index_rank1, value, dim);
   ir::TsNodeSetShapeDeferred(
-      node, [&]() { return compiler::NodeLowering::Get()->Infer(node.get()); });
+      node, [&]() { return compiler::InferShape(node.get()); });
   return node;
 }
 
@@ -169,7 +169,7 @@ NodePtr IndexAddOp(const torch::lazy::Value& buffer, int64_t dim,
   NodePtr node = torch::lazy::MakeNode<ir::ops::IndexAlongDim>(
       torch::lazy::OpKind(at::aten::index_add), buffer, index_rank1, source, dim);
   ir::TsNodeSetShapeDeferred(
-      node, [&]() { return compiler::NodeLowering::Get()->Infer(node.get()); });
+      node, [&]() { return compiler::InferShape(node.get()); });
   return node;
 }
 
@@ -180,7 +180,7 @@ NodePtr IndexCopyOp(const torch::lazy::Value& buffer, int64_t dim,
   NodePtr node = torch::lazy::MakeNode<ir::ops::IndexAlongDim>(
       torch::lazy::OpKind(at::aten::index_copy), buffer, index_rank1, source, dim);
   ir::TsNodeSetShapeDeferred(
-      node, [&]() { return compiler::NodeLowering::Get()->Infer(node.get()); });
+      node, [&]() { return compiler::InferShape(node.get()); });
   return node;
 }
 
