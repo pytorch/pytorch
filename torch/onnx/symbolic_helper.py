@@ -886,11 +886,11 @@ class SymbolicFunctionState:
     def __init__(self):
         # Skip check due to cannot import IValue from torch._C
         self.params_dict = None  # type: ignore[var-annotated]
-        self.env = None  # type: Optional[Dict[torch._C.Value, torch._C.Value]]
+        self.env: Optional[Dict[torch._C.Value, torch._C.Value]] = None
         # Current node that is being converted.
-        self.cur_node = None  # type: Optional[torch._C.Node]
+        self.cur_node: Optional[torch._C.Node] = None
         # Current onnx block that converted nodes are being appended to.
-        self.onnx_block = None  # type: Optional[torch._C.Block]
+        self.onnx_block: Optional[torch._C.Block] = None
 
 _symbolic_function_state = SymbolicFunctionState()
 def _set_symbolic_function_state(params_dict, env, cur_node, onnx_block):
