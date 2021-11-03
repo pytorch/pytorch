@@ -2,8 +2,8 @@
 
 namespace lazy_tensors {
 
-Shape::Shape(at::ScalarType scalar_type, c10::ArrayRef<int64_t> dimensions)
+Shape::Shape(at::ScalarType scalar_type, c10::ArrayRef<int64_t> sizes)
     : scalar_type_(scalar_type),
-      dimensions_(dimensions.begin(), dimensions.end()) {}
+      sizes_(sizes.begin(), sizes.end()) {}
 
 }  // namespace lazy_tensors

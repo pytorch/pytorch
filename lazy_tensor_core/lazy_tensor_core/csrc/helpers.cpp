@@ -107,14 +107,14 @@ lazy_tensors::Shape Helpers::GetPromotedShape(
     const lazy_tensors::Shape& shape1, const lazy_tensors::Shape& shape2) {
   return lazy_tensors::ShapeUtil::MakeShape(
       shape1.scalar_type(),
-      GetPromotedShape(shape1.dimensions(), shape2.dimensions()));
+      GetPromotedShape(shape1.sizes(), shape2.sizes()));
 }
 
 lazy_tensors::Shape Helpers::GetPromotedBinaryOpShape(
     const lazy_tensors::Shape& shape1, const lazy_tensors::Shape& shape2) {
   return lazy_tensors::ShapeUtil::MakeShape(
       promoteTypes(shape1.scalar_type(), shape2.scalar_type()),
-      GetPromotedShape(shape1.dimensions(), shape2.dimensions()));
+      GetPromotedShape(shape1.sizes(), shape2.sizes()));
 }
 
 }  // namespace torch_lazy_tensors

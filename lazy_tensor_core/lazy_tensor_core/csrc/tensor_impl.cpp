@@ -140,7 +140,7 @@ void LTCTensorImpl::SetupSizeProperties() {
     auto shape = tensor_.shape();
     c10::SmallVector<int64_t, 5> updated_sizes;
     numel_ = 1;
-    for (auto dim : shape.get().dimensions()) {
+    for (auto dim : shape.get().sizes()) {
       updated_sizes.push_back(dim);
       numel_ *= dim;
     }
@@ -153,7 +153,7 @@ void LTCTensorImpl::SetupSizeProperties() {
       // TODO(whc) confirmed this path is still used (fails tests without it)
       // but I wonder if we can use some c10 utility to set the default strides
       // instead?
-      updated_strides = ComputeArrayStrides(shape.get().dimensions());
+      updated_strides = ComputeArrayStrides(shape.get().sizes());
     }
     for (int i = 0; i < updated_strides.size(); i++) {
       sizes_and_strides_.stride_at_unchecked(i) = updated_strides[i];

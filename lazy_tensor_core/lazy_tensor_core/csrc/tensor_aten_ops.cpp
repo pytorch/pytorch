@@ -46,12 +46,12 @@ using namespace torch_lazy_tensors::ir;
 
 torch::lazy::Value MaybeExpand(const torch::lazy::Value& input,
                                const lazy_tensors::Shape& target_shape) {
-  if (ir::GetShapeFromTsValue(input).dimensions() ==
-      target_shape.dimensions()) {
+  if (ir::GetShapeFromTsValue(input).sizes() ==
+      target_shape.sizes()) {
     return input;
   }
   return torch::lazy::MakeNode<ir::ops::Expand>(
-      input, lazy_tensors::util::ToVector<int64_t>(target_shape.dimensions()),
+      input, lazy_tensors::util::ToVector<int64_t>(target_shape.sizes()),
       /*is_scalar_expand=*/false);
 }
 
@@ -61,7 +61,7 @@ std::vector<int64_t> GetExpandDimensions(const lazy_tensors::Shape& shape,
   int64_t base = dimensions.size() - shape.rank();
   for (size_t i = 0; i < shape.rank(); ++i) {
     if (dimensions[base + i] == -1) {
-      dimensions[base + i] = shape.dimensions(i);
+      dimensions[base + i] = shape.size(i);
     }
   }
   return dimensions;
@@ -71,7 +71,7 @@ std::vector<int64_t> GetExpandDimensions(const lazy_tensors::Shape& shape,
 lazy_tensors::Shape BatchNormFeaturesShape(const LazyTensor& input) {
   auto input_shape = input.shape().get();
   return lazy_tensors::Shape(input_shape.scalar_type(),
-                             input_shape.dimensions()[1]);
+                             input_shape.sizes()[1]);
 }
 
 // Returns the IR for the given input or the provided default value broadcasted
@@ -257,7 +257,7 @@ LazyTensor narrow(const LazyTensor& input, int64_t dim, int64_t start,
   auto input_shape = input.shape();
   dim = Helpers::GetCanonicalDimensionIndex(dim, input_shape.get().rank());
   lazy_tensors::Shape narrow_shape = input_shape;
-  narrow_shape.set_dimensions(dim, length);
+  narrow_shape.set_size(dim, length);
 
   ViewInfo::Type view_type =
       (lazy_tensors::ShapeUtil::ElementsIn(input_shape) ==
@@ -266,7 +266,7 @@ LazyTensor narrow(const LazyTensor& input, int64_t dim, int64_t start,
           : ViewInfo::Type::kNarrow;
   ViewInfo view_info(view_type, std::move(narrow_shape), input_shape);
   view_info.indices[dim] =
-      Helpers::GetCanonicalPosition(input_shape.get().dimensions(), dim, start);
+      Helpers::GetCanonicalPosition(input_shape.get().sizes(), dim, start);
   return input.CreateViewTensor(std::move(view_info));
 }
 
@@ -384,9 +384,9 @@ void copy_(LazyTensor& input, LazyTensor& src) {
     auto input_shape = input.shape();
     at::Tensor src_tensor = src.ToTensor(/*detached=*/true);
     if (!lazy_tensors::util::Equal(src_tensor.sizes(),
-                                   input_shape.get().dimensions())) {
+                                   input_shape.get().sizes())) {
       src_tensor = src_tensor.expand(lazy_tensors::util::ToVector<int64_t>(
-          input_shape.get().dimensions()));
+          input_shape.get().sizes()));
     }
     input.UpdateFromTensor(std::move(src_tensor), /*sync=*/false);
   }
@@ -401,8 +401,8 @@ LazyTensor slice(const LazyTensor& input, int64_t dim, int64_t start,
   auto input_shape = input.shape();
   dim = Helpers::GetCanonicalDimensionIndex(dim, input_shape.get().rank());
   start =
-      Helpers::GetCanonicalPosition(input_shape.get().dimensions(), dim, start);
-  end = Helpers::GetCanonicalPosition(input_shape.get().dimensions(), dim, end);
+      Helpers::GetCanonicalPosition(input_shape.get().sizes(), dim, start);
+  end = Helpers::GetCanonicalPosition(input_shape.get().sizes(), dim, end);
   // PyTorch allows tensor[-1:0] to return a 0-dim tensor.
   if (start > end) {
     end = start;
@@ -417,7 +417,7 @@ LazyTensor slice(const LazyTensor& input, int64_t dim, int64_t start,
 LazyTensor squeeze(const LazyTensor& input) {
   auto input_shape = input.shape();
   auto output_dimensions = BuildSqueezedDimensions(
-      input_shape.get().dimensions(), /*squeeze_dim=*/-1);
+      input_shape.get().sizes(), /*squeeze_dim=*/-1);
   return view(input, output_dimensions);
 }
 
@@ -426,7 +426,7 @@ LazyTensor squeeze(const LazyTensor& input, int64_t dim) {
   int64_t squeeze_dim =
       Helpers::GetCanonicalDimensionIndex(dim, input.shape().get().rank());
   auto output_dimensions =
-      BuildSqueezedDimensions(input_shape.get().dimensions(), squeeze_dim);
+      BuildSqueezedDimensions(input_shape.get().sizes(), squeeze_dim);
   return view(input, output_dimensions);
 }
 
@@ -510,7 +510,7 @@ LazyTensor unsqueeze(const LazyTensor& input, int64_t dim) {
   int64_t squeeze_dim =
       Helpers::GetCanonicalDimensionIndex(dim, input_shape.get().rank() + 1);
   auto dimensions =
-      BuildUnsqueezeDimensions(input_shape.get().dimensions(), squeeze_dim);
+      BuildUnsqueezeDimensions(input_shape.get().sizes(), squeeze_dim);
   return view(input, dimensions);
 }
 
@@ -524,7 +524,7 @@ void unsqueeze_(LazyTensor& input, int64_t dim) {
 LazyTensor view(const LazyTensor& input, c10::ArrayRef<int64_t> output_size) {
   auto input_shape = input.shape();
   std::vector<int64_t> complete_dimensions =
-      GetCompleteShape(output_size, input_shape.get().dimensions());
+      GetCompleteShape(output_size, input_shape.get().sizes());
   lazy_tensors::Shape shape = lazy_tensors::ShapeUtil::MakeShape(
       input_shape.get().scalar_type(), complete_dimensions);
   ViewInfo view_info(ViewInfo::Type::kReshape, std::move(shape), input_shape);

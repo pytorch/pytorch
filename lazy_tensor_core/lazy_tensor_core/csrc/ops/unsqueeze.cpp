@@ -11,7 +11,7 @@ namespace {
 
 lazy_tensors::Shape NodeOutputShape(const torch::lazy::Value& input, int dim) {
   const lazy_tensors::Shape& shape = ir::GetShapeFromTsValue(input);
-  auto dimensions = BuildUnsqueezeDimensions(shape.dimensions(), dim);
+  auto dimensions = BuildUnsqueezeDimensions(shape.sizes(), dim);
   return lazy_tensors::ShapeUtil::MakeShape(shape.scalar_type(), dimensions);
 }
 

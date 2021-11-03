@@ -33,11 +33,11 @@ LazyTensor Cross(const LazyTensor& input, const LazyTensor& other,
         Helpers::GetCanonicalDimensionIndex(*dim, input.shape().get().rank());
   } else {
     auto input_shape_ref = input.shape();
-    auto dim_3_it = std::find((*input_shape_ref).dimensions().begin(),
-                              (*input_shape_ref).dimensions().end(), 3);
-    CHECK(dim_3_it != (*input_shape_ref).dimensions().end())
+    auto dim_3_it = std::find((*input_shape_ref).sizes().begin(),
+                              (*input_shape_ref).sizes().end(), 3);
+    CHECK(dim_3_it != (*input_shape_ref).sizes().end())
         << "No dimension of size 3 in input: " << (*input_shape_ref).ToString();
-    canonical_dim = dim_3_it - (*input_shape_ref).dimensions().begin();
+    canonical_dim = dim_3_it - (*input_shape_ref).sizes().begin();
   }
   CHECK_EQ(input.size(canonical_dim), 3)
       << "Invalid cross argument: dimension " << canonical_dim
@@ -71,7 +71,7 @@ LazyTensor Select(const LazyTensor& input, int64_t dim, int64_t index) {
   auto shape = input.shape();
   dim = Helpers::GetCanonicalDimensionIndex(dim, shape.get().rank());
   LazyTensor result = lazy_tensor_aten_ops::narrow(input, dim, index, 1);
-  auto new_dims = Helpers::DropDimensions(shape.get().dimensions(), {dim});
+  auto new_dims = Helpers::DropDimensions(shape.get().sizes(), {dim});
   return lazy_tensor_aten_ops::view(result, new_dims);
 }
 

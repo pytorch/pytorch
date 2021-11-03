@@ -85,7 +85,7 @@ int64_t LazyTensor::size(int64_t dim) const {
   auto tensor_shape = shape();
   int rank = tensor_shape.get().rank();
   int dim_index = Helpers::GetCanonicalDimensionIndex(dim, rank);
-  return tensor_shape.get().dimensions(dim_index);
+  return tensor_shape.get().size(dim_index);
 }
 
 at::ScalarType LazyTensor::dtype() const {
@@ -297,11 +297,11 @@ View::IrNode LazyTensor::GetViewUpdate(
 
 std::shared_ptr<View> LazyTensor::UpdateView(
     std::shared_ptr<View> view, torch::lazy::Value ir_value) const {
-  if (ir::GetShapeFromTsValue(ir_value).dimensions() !=
-      view->shape().dimensions()) {
+  if (ir::GetShapeFromTsValue(ir_value).sizes() !=
+      view->shape().sizes()) {
     CHECK_EQ(lazy_tensors::util::Multiply<int64_t>(
-                 ir::GetShapeFromTsValue(ir_value).dimensions()),
-             lazy_tensors::util::Multiply<int64_t>(view->shape().dimensions()));
+                 ir::GetShapeFromTsValue(ir_value).sizes()),
+             lazy_tensors::util::Multiply<int64_t>(view->shape().sizes()));
 
     ViewInfo view_info(ViewInfo::Type::kReshape,
                        ir::GetShapeFromTsValue(ir_value), view->shape());

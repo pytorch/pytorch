@@ -35,16 +35,16 @@ lazy_tensors::Shape Diagonal::MakeDiagonalShape(
   std::vector<int64_t> dimensions;
   for (int64_t dim = 0; dim < shape.rank(); ++dim) {
     if (dim != dim1 && dim != dim2) {
-      dimensions.push_back(shape.dimensions(dim));
+      dimensions.push_back(shape.size(dim));
     }
   }
   int64_t dsize;
   if (offset >= 0) {
     dsize = std::max<int64_t>(
-        std::min(shape.dimensions(dim1), shape.dimensions(dim2) - offset), 0);
+        std::min(shape.size(dim1), shape.size(dim2) - offset), 0);
   } else {
     dsize = std::max<int64_t>(
-        std::min(shape.dimensions(dim1) + offset, shape.dimensions(dim2)), 0);
+        std::min(shape.size(dim1) + offset, shape.size(dim2)), 0);
   }
   dimensions.push_back(dsize);
   return lazy_tensors::ShapeUtil::MakeShape(shape.scalar_type(), dimensions);

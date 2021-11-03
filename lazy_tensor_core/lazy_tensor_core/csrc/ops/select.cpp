@@ -32,7 +32,7 @@ lazy_tensors::Shape Select::MakeSelectShape(const lazy_tensors::Shape& shape,
                                             int64_t end, int64_t stride) {
   int64_t effective_stride = GetStride(start, end, stride);
   lazy_tensors::Shape select_shape(shape);
-  select_shape.set_dimensions(
+  select_shape.set_size(
       dim, (end - start + effective_stride - 1) / effective_stride);
   return select_shape;
 }

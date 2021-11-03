@@ -137,7 +137,7 @@ std::vector<LazyTensor> WrapIndicesOnce(const LazyTensor& base,
   CHECK_LE(indices.size(), base_shape_ref.get().rank());
   for (size_t dim_idx = 0; dim_idx < indices.size(); ++dim_idx) {
     const LazyTensor& dim_index = indices[dim_idx];
-    int64_t dim_size = base_shape_ref.get().dimensions(dim_idx + start_dim);
+    int64_t dim_size = base_shape_ref.get().size(dim_idx + start_dim);
     LazyTensor wrapped_dim_index = LazyTensor::Create(
         dim_index.GetIrValue() +
             LazyGraphExecutor::Get()->GetIrValueForScalar(

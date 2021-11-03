@@ -39,10 +39,10 @@ class ShapeIndex {
 class ShapeUtil {
  public:
   static int64_t ElementsIn(const Shape& shape) {
-    return util::Multiply<int64_t>(shape.dimensions());
+    return util::Multiply<int64_t>(shape.sizes());
   }
   static bool SameDimensions(const Shape& lhs, const Shape& rhs) {
-    return lhs.dimensions() == rhs.dimensions();
+    return lhs.sizes() == rhs.sizes();
   }
 
   static bool Compatible(const Shape& lhs, const Shape& rhs) {

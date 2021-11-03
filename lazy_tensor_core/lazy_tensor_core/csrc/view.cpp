@@ -31,7 +31,7 @@ torch::lazy::Value ApplyViewInfo(torch::lazy::Value ir_value, const ViewInfo& vi
           view_info.select->end, view_info.select->stride);
     case ViewInfo::Type::kNarrow:
       return torch::lazy::MakeNode<ir::ops::GenericSlice>(ir_value, view_info.indices,
-                                                 view_info.shape.dimensions());
+                                                 view_info.shape.sizes());
     case ViewInfo::Type::kNoOp:
       return ir_value;
     case ViewInfo::Type::kPermute:
@@ -39,15 +39,15 @@ torch::lazy::Value ApplyViewInfo(torch::lazy::Value ir_value, const ViewInfo& vi
     case ViewInfo::Type::kReshape:
       return torch::lazy::MakeNode<ir::ops::View>(
           ir_value,
-          lazy_tensors::util::ToVector<int64_t>(view_info.shape.dimensions()));
+          lazy_tensors::util::ToVector<int64_t>(view_info.shape.sizes()));
     case ViewInfo::Type::kResize:
       return torch::lazy::MakeNode<ir::ops::Resize>(
           ir_value,
-          lazy_tensors::util::ToVector<int64_t>(view_info.shape.dimensions()));
+          lazy_tensors::util::ToVector<int64_t>(view_info.shape.sizes()));
     case ViewInfo::Type::kAsStrided:
       return torch::lazy::MakeNode<ir::ops::AsStrided>(
           ir_value,
-          lazy_tensors::util::ToVector<int64_t>(view_info.shape.dimensions()),
+          lazy_tensors::util::ToVector<int64_t>(view_info.shape.sizes()),
           view_info.as_strided->stride, view_info.as_strided->offset);
     case ViewInfo::Type::kDiagonal:
       return torch::lazy::MakeNode<ir::ops::Diagonal>(
@@ -92,18 +92,18 @@ torch::lazy::Value ApplyUpdate(torch::lazy::Value ir_value,
       case ViewInfo::Type::kReshape:
         result = torch::lazy::MakeNode<ir::ops::View>(
             result, lazy_tensors::util::ToVector<int64_t>(
-                        view_info.source_shape.dimensions()));
+                        view_info.source_shape.sizes()));
         break;
       case ViewInfo::Type::kResize:
         result = torch::lazy::MakeNode<ir::ops::Resize>(
             result, lazy_tensors::util::ToVector<int64_t>(
-                        view_info.source_shape.dimensions()));
+                        view_info.source_shape.sizes()));
         break;
       case ViewInfo::Type::kAsStrided:
         result = torch::lazy::MakeNode<ir::ops::AsStridedViewUpdate>(
             tmp_values[i - 1], result,
             lazy_tensors::util::ToVector<int64_t>(
-                view_info.source_shape.dimensions()),
+                view_info.source_shape.sizes()),
             view_info.as_strided->stride, view_info.as_strided->offset);
         break;
       case ViewInfo::Type::kDiagonal:

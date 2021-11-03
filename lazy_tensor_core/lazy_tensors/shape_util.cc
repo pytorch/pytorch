@@ -9,7 +9,7 @@ namespace torch {
 namespace lazy {
 
 torch::lazy::hash_t SingleShapeHash(const lazy_tensors::Shape& shape, torch::lazy::hash_t seed) {
-  for (auto dim : shape.dimensions()) {
+  for (auto dim : shape.sizes()) {
     seed = HashCombine(seed, (uint64_t)dim);
   }
   return HashCombine(seed, static_cast<int>(shape.scalar_type()));
@@ -41,7 +41,7 @@ namespace lazy_tensors {
   if (shape.tuple_shapes().empty()) {
     for (int i = 0; i < shape.rank(); ++i) {
       hash_value =
-          Hash64Combine(hash_value, hash<int64_t>()(shape.dimensions(i)));
+          Hash64Combine(hash_value, hash<int64_t>()(shape.size(i)));
     }
   } else {
     hash_value = 0;
