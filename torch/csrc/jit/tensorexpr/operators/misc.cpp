@@ -456,11 +456,17 @@ static std::pair<ScalarType, std::vector<BufHandle>> processCatList(
     bufInputs.push_back(buf);
     TORCH_INTERNAL_ASSERT(
         buf.node()->dims().size() > 0, buildErrorMessage("Invalid buf rank"));
-    if (buf.node()->dims().size() == 1 &&
-        immediateAs<int>(buf.node()->dim(0)) == 0) {
-      continue;
+    // Ignore buffers that are 0-sized on any dimension.
+    bool hasEmptyDims = false;
+    for (const auto& dim : buf.node()->dims()) {
+      if (immediateAs<int64_t>(dim) == 0ll) {
+        hasEmptyDims = true;
+        break;
+      }
     }
-    nonEmptyInputs.push_back(buf);
+    if (!hasEmptyDims) {
+      nonEmptyInputs.push_back(buf);
+    }
   }
   ScalarType highType = bufInputs[0].dtype().scalar_type();
   for (const auto& input : bufInputs) {
