@@ -904,6 +904,8 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                 local_loss = cast(torch.Tensor, local_optim.step(closure=closure_local))
                 ddp_loss = cast(torch.Tensor, zero_optim.step(closure=closure_ddp)).to(cpu_device)
 
+                # Increased tolerances are needed to pass test when using TensorFloat32
+                # see https://github.com/pytorch/pytorch/issues/67764
                 assert torch.allclose(
                     local_loss, ddp_loss, rtol=1e-03
                 ), "Losses differ between local optim and ZeroRedundancyOptimizer"
