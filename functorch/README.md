@@ -223,15 +223,6 @@ def forward(self, x_1):
     return mul
 ```
 
-We can also try compiling it with NNC (even more experimental)!.
-
-```py
->>> from functorch import nnc_jit
->>> jit_f = nnc_jit(grad(f))
-```
-
-Check `examples/nnc` for some example benchmarks.
-
 ### Working with NN modules: make_functional and friends
 
 Sometimes you may want to perform a transform with respect to the parameters

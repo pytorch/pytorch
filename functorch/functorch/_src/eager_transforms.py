@@ -487,7 +487,3 @@ def grad(f, argnums=0, has_aux=False):
         grad, value = results
         return grad
     return wrapper
-
-def vjpfull(f, primals, tangents):
-    out, vjpfn = vjp(f, *primals)
-    return out, vjpfn(*tangents)
