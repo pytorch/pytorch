@@ -56,7 +56,6 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-
 c10::optional<std::string>& LLVMTargetTriple() {
   static c10::optional<std::string> triple = c10::nullopt;
   return triple;
@@ -69,7 +68,6 @@ c10::optional<std::string>& LLVMTargetAttrs() {
   static c10::optional<std::string> cpu = c10::nullopt;
   return cpu;
 }
-
 
 namespace {
 
@@ -438,7 +436,6 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
     c10::optional<std::string> cpu,
     c10::optional<std::string> attrs)
     : context_(std::make_unique<llvm::LLVMContext>()), irb_(getContext()) {
-
   if (!triple) {
     triple = LLVMTargetTriple();
   }
@@ -506,8 +503,8 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   emitKernel(stmt, params);
 
   jit_->addModule(std::move(module_), std::move(context_));
-//   auto sym = jit_->findSymbol("wrapper");
-//   kernelAddress_ = assertSuccess(sym.getAddress());
+  //   auto sym = jit_->findSymbol("wrapper");
+  //   kernelAddress_ = assertSuccess(sym.getAddress());
 }
 
 llvm::LLVMContext& LLVMCodeGenImpl::getContext() {
@@ -523,6 +520,14 @@ llvm::Type* LLVMCodeGenImpl::dtypeToLLVM(Dtype dtype) {
 
     AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
+    case ScalarType::QInt8:
+      return CharTy_;
+      break;
+
+    case ScalarType::QUInt8:
+      return ByteTy_;
+      break;
+
     default:
       throw unsupported_dtype();
   }
@@ -1004,9 +1009,11 @@ void LLVMCodeGenImpl::visit(CastPtr v) {
   }
 
   bool destUnsigned = v->dtype().scalar_type() == ScalarType::Byte ||
+      v->dtype().scalar_type() == ScalarType::QUInt8 ||
       v->dtype().scalar_type() == ScalarType::Bool;
   bool srcUnsigned =
       v->src_value()->dtype().scalar_type() == ScalarType::Byte ||
+      v->src_value()->dtype().scalar_type() == ScalarType::QUInt8 ||
       v->src_value()->dtype().scalar_type() == ScalarType::Bool;
 
   // Scalar casts
