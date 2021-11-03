@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+from contextlib import suppress
 import sys
 from unittest import mock
 
@@ -7,7 +8,9 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._fsdp import FullyShardedDataParallel
-from torch.distributed._fsdp.fully_sharded_data_parallel import TrainingState_
+from torch.distributed._fsdp.fully_sharded_data_parallel import (
+    TrainingState_, CPUOffload
+)
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     TEST_SKIPS,
@@ -17,7 +20,20 @@ from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
 )
 
-# get full params of a model recursively
+from enum import Enum
+
+
+class FSDPInitMode(Enum):
+    # Move model to CUDA before wrap
+    CUDA_BEFORE = 1
+    # Move model to CUDA after wrap
+    CUDA_AFTER = 2
+    # Don't move model to CUDA at all.
+    CUDA_NEVER = 3
+
+# get full params of a model recursively. Note that if CPU offloading, it will
+# also automatically move the parameters to GPU, due to _rebuild_full_params
+# call.
 def get_full_params(model, recurse=True):
     if recurse:
         # get all params for any nested FSDP instances.
@@ -30,6 +46,8 @@ def get_full_params(model, recurse=True):
         if model.module.flat_param is not None:
             model.module._unflatten_params()
 
+def _maybe_cuda(model, move_to_cuda):
+    return model.cuda() if move_to_cuda else model
 
 class DummyProcessGroup:
     def __init__(self, rank: int, size: int):
@@ -45,7 +63,8 @@ class DummyProcessGroup:
 
 class TransformerWithSharedParams(nn.Module):
     def __init__(
-        self, group, *unused_args, d_vocab=23, d_model=16, add_bn=True, **unused_kwargs
+        self, group, *args, d_vocab=23, d_model=16, add_bn=True,
+        fsdp_init_mode=FSDPInitMode.CUDA_AFTER, **kwargs
     ):
         super().__init__()
         self.rank = group.rank()
@@ -54,6 +73,7 @@ class TransformerWithSharedParams(nn.Module):
         assert (
             d_vocab >= 12
         ), "dim of vocab should be larger than 12, as we use torch.arange(12) as input"
+
         self.embed_tokens = nn.Embedding(d_vocab, d_model)
         self.transformer = nn.Transformer(
             d_model=d_model,
@@ -73,6 +93,8 @@ class TransformerWithSharedParams(nn.Module):
 
         self.bs = 2
         self.bn = torch.nn.BatchNorm1d(self.bs) if add_bn else torch.nn.Identity()
+        move_to_cuda = fsdp_init_mode == FSDPInitMode.CUDA_BEFORE
+        self = _maybe_cuda(self, move_to_cuda)
 
     def get_input(self, device):
         torch.manual_seed(1 + self.rank)  # keep everything deterministic
@@ -99,36 +121,37 @@ class TransformerWithSharedParams(nn.Module):
 
 
 class NestedWrappedModule(nn.Module):
-    def __init__(self, group, wrap_fsdp, wrap_everything=False):
+    def __init__(self, group, wrap_fsdp, *args, wrap_everything=False, fsdp_init_mode=FSDPInitMode.CUDA_AFTER, **kwargs):
         super().__init__()
         self.rank = group.rank()
         self.world_size = group.size()
+        move_to_cuda = fsdp_init_mode == FSDPInitMode.CUDA_BEFORE
 
         def _maybe_wrap(layer):
             if wrap_fsdp:
-                return FullyShardedDataParallel(layer, group)
+                return FullyShardedDataParallel(layer, group, *args, **kwargs)
             return layer
 
         torch.manual_seed(0)  # keep everything deterministic
 
         if wrap_everything:
             self.module = nn.Sequential(
-                _maybe_wrap(nn.Linear(8, 4)),
-                _maybe_wrap(nn.Linear(4, 16)),
-                _maybe_wrap(nn.Linear(16, 4)),
-                _maybe_wrap(nn.Linear(4, 8)),
+                _maybe_wrap(_maybe_cuda(nn.Linear(8, 4), move_to_cuda)),
+                _maybe_wrap(_maybe_cuda(nn.Linear(4, 16), move_to_cuda)),
+                _maybe_wrap(_maybe_cuda(nn.Linear(16, 4), move_to_cuda)),
+                _maybe_wrap(_maybe_cuda(nn.Linear(4, 8), move_to_cuda)),
             )
         else:
             self.module = nn.Sequential(
-                nn.Linear(8, 4),
+                _maybe_cuda(nn.Linear(8, 4), move_to_cuda),
                 _maybe_wrap(
                     nn.Sequential(
-                        _maybe_wrap(nn.Linear(4, 16)),
-                        nn.Linear(16, 16),
-                    )
+                        _maybe_wrap(_maybe_cuda(nn.Linear(4, 16), move_to_cuda)),
+                        _maybe_cuda(nn.Linear(16, 16), move_to_cuda),
+                    ),
                 ),
-                _maybe_wrap(nn.Linear(16, 4)),
-                nn.Linear(4, 8),
+                _maybe_wrap(_maybe_cuda(nn.Linear(16, 4), move_to_cuda)),
+                _maybe_cuda(nn.Linear(4, 8), move_to_cuda),
             )
 
     def get_input(self, device):
@@ -182,8 +205,23 @@ class ModuleWithDelay(nn.Module):
 
 
 class NestedWrappedModuleWithDelay(ModuleWithDelay):
-    def __init__(self, group, wrap_fsdp, **kwargs):
-        super().__init__(NestedWrappedModule(group, wrap_fsdp), **kwargs)
+    def __init__(
+        self,
+        group,
+        wrap_fsdp,
+        fsdp_init_mode=FSDPInitMode.CUDA_AFTER,
+        cpu_offload=None,
+        **kwargs
+    ):
+        super().__init__(
+            NestedWrappedModule(
+                group,
+                wrap_fsdp,
+                fsdp_init_mode=fsdp_init_mode,
+                cpu_offload=cpu_offload
+            ),
+            **kwargs
+        )
 
 
 class DummyDDP(nn.Module):
@@ -196,18 +234,18 @@ class DummyDDP(nn.Module):
 
 
 class MixtureOfExperts(NestedWrappedModule):
-    def __init__(self, group, wrap_fsdp, delay_before_free_ms=0):
+    def __init__(self, group, wrap_fsdp, *args, delay_before_free_ms=0, fsdp_init_mode=FSDPInitMode.CUDA_BEFORE, **kwargs):
         super().__init__(group, wrap_fsdp)
         self.group = group
         self.delay_before_free_ms = delay_before_free_ms
         self.wrap_fsdp = wrap_fsdp
-
+        self.move_to_cuda = fsdp_init_mode == FSDPInitMode.CUDA_BEFORE
         # "expert" params are different on each rank
         torch.manual_seed(42 + group.rank())
         d_expert = 23
         d_shared = 12
         d_input = 8
-        expert = nn.Linear(d_expert, d_shared)
+        expert = _maybe_cuda(nn.Linear(d_expert, d_shared), self.move_to_cuda)
 
         self.num_expert_params = sum([p.numel() for p in expert.parameters()])
         for p in expert.parameters():
@@ -216,19 +254,22 @@ class MixtureOfExperts(NestedWrappedModule):
         # everything else is shared
         torch.manual_seed(0)
 
-        shared = nn.Linear(d_shared, d_expert)
+        shared = _maybe_cuda(nn.Linear(d_shared, d_expert), self.move_to_cuda)
 
         if wrap_fsdp:
             # we create a process group of size 1 for the expert params
             expert_group = torch.distributed.new_group(
                 [group.rank()]
             )  # world size 1 means no shard
-            expert = FullyShardedDataParallel(expert, expert_group)  # type: ignore[assignment]
+            expert = FullyShardedDataParallel(expert, expert_group, **kwargs)  # type: ignore[assignment]
 
-            shared = FullyShardedDataParallel(shared, group)  # type: ignore[assignment]
+            shared = FullyShardedDataParallel(shared, group, **kwargs)  # type: ignore[assignment]
 
         self.module = nn.Sequential(
-            nn.Linear(d_input, d_shared), shared, expert, nn.Linear(d_shared, d_input)
+            _maybe_cuda(nn.Linear(d_input, d_shared), self.move_to_cuda),
+            shared,
+            expert,
+            _maybe_cuda(nn.Linear(d_shared, d_input), self.move_to_cuda)
         )
 
     def forward(self, x):
@@ -318,7 +359,9 @@ class FSDPTest(MultiProcessTestCase):
         dist.destroy_process_group()
         sys.exit(0)
 
-    def _train_for_several_steps(self, model, num_steps, autocast, lr=0.01):
+    def _train_for_several_steps(self, model, num_steps, autocast, lr=0.01, fsdp_cpu_offload=None):
+        cpu_offload_params = fsdp_cpu_offload and fsdp_cpu_offload.offload_params
+
         model_device = next(model.parameters()).device
         # use SGD with momentum instead of Adam, since Adam is scale invariant
         # and this makes it bad for tests
@@ -329,19 +372,40 @@ class FSDPTest(MultiProcessTestCase):
                 # Inputs always cuda regardless of cpu offloading, or model.device
                 input = model.module.get_input(torch.device("cuda"))
                 output = model(*input)
+                # Post-forward, if CPU offloading model param should be on CPU.
+                if cpu_offload_params and isinstance(model, FullyShardedDataParallel):
+                    for p in model.parameters():
+                        # Params should always be on CPU, even if
+                        # p._is_sharded=False
+                        self.assertEqual(p.device, torch.device("cpu"))
+
                 loss = model.module.get_loss(input, output).to(model_device)
             assert (
                 loss.dtype == torch.float32
             ), "loss data type should be float32, as the original \
                  parameter data type is float32."
             model.module.run_backward(loss)
+            # Post-backward, if CPU offloading model params should be on CPU.
+            if cpu_offload_params and isinstance(model, FullyShardedDataParallel):
+                for p in model.parameters():
+                    # Params should always be on CPU, even if
+                    # p._is_sharded=False
+                    self.assertEqual(p.device, torch.device("cpu"))
             optim.step()
         if isinstance(model, FullyShardedDataParallel):
             model._assert_state(TrainingState_.IDLE)
         return loss.detach()
 
     def _test_identical_outputs(
-        self, model_init_fn, ref_ddp_fn=None, num_steps=2, use_cuda=True, lr=0.01
+        self,
+        model_init_fn,
+        *args,
+        ref_ddp_fn=None,
+        num_steps=2,
+        fsdp_init_mode=FSDPInitMode.CUDA_AFTER,
+        lr=0.01,
+        cpu_offload=CPUOffload(),
+        **kwargs
     ):
         group = dist.distributed_c10d._get_default_group()
         rank = group.rank()
@@ -354,25 +418,60 @@ class FSDPTest(MultiProcessTestCase):
         else:
             model = ref_ddp_fn(model)
         ref_loss = self._train_for_several_steps(
-            model, num_steps, autocast=False, lr=lr
+            model, num_steps, autocast=False, lr=lr, fsdp_cpu_offload=cpu_offload
         )
         ref_full_params = list(model.parameters())
 
         # Confirm we get the same behavior using FullyShardedDataParallel.
-        model = model_init_fn(group=group, wrap_fsdp=True)
-        model = FullyShardedDataParallel(model)
-        if use_cuda:
+        try:
+            model = model_init_fn(group=group, wrap_fsdp=True, fsdp_init_mode=fsdp_init_mode, cpu_offload=cpu_offload)
+        except Exception as e:
+            raise ValueError(f"model_Init_fn {model_init_fn} got error {str(e)}")
+
+        cpu_offload = cpu_offload or CPUOffload()  # disabled if not specified.
+        model = FullyShardedDataParallel(model, cpu_offload=cpu_offload)
+        # Call model.cuda() after init FSDP if specified.
+        if fsdp_init_mode == FSDPInitMode.CUDA_AFTER:
             model = model.cuda()
-        else:
-            assert next(model.parameters()).device == torch.device(
-                "cpu"
-            ), "module parameters should be placed on cpu if use_cuda is False."
-        shard_loss = self._train_for_several_steps(
-            model, num_steps, autocast=False, lr=lr
+
+        # Note that we don't do this check for FSDPInitMode.CUDA_AFTER since we
+        # expect FSDP code to raise error that we check below, in the case of
+        # offload params.
+        if fsdp_init_mode != FSDPInitMode.CUDA_AFTER and cpu_offload.offload_params:
+            for p in model.parameters():
+                # Should be on CPU regardless of if param is sharded.
+                self.assertEqual(p.device, torch.device("cpu"), f"Mismatch, cpu offload is {cpu_offload}")
+
+        only_check_err = fsdp_init_mode == FSDPInitMode.CUDA_AFTER and cpu_offload.offload_params
+        ctx = (
+            self.assertRaisesRegex(AssertionError, "Expected param to be on CPU")
+            if only_check_err else suppress()
         )
+        with ctx:
+            shard_loss = self._train_for_several_steps(
+                model, num_steps, autocast=False, lr=lr,
+                fsdp_cpu_offload=cpu_offload,
+            )
+        # We only check for errors in the case we have the following setup:
+        # model = FSDP(model, cpu_offload=True)
+        # model = model.cuda()
+        # so skip the rest of this logic.
+        if only_check_err:
+            return
+        # If CPU offload, next call will change model params to GPU. Sanity
+        # check that params are on CPU before.
+        if cpu_offload.offload_params:
+            device_set = {p.device for p in model.parameters()}
+            self.assertEqual(
+                {torch.device("cpu")},
+                device_set,
+                f"Got device set {device_set}"
+            )
         get_full_params(model)
         shard_full_params = list(model.parameters())
 
+        if cpu_offload.offload_params:
+            shard_loss = shard_loss.cuda()
         torch.testing.assert_allclose(ref_loss, shard_loss)
         self.assertEqual(
             ref_full_params,
