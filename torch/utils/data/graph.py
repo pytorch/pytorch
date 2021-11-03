@@ -3,11 +3,11 @@ import pickle
 
 from torch.utils.data import IterableDataset
 
-from typing import Any, Dict
+from typing import Any, Dict, Generator
 
 reduce_ex_hook = None
 
-PRIMITIVE = (int, float, complex, str, bytes, bytearray)
+PRIMITIVE = (int, float, complex, str, bytes, bytearray, Generator)
 
 
 def stub_unpickler():
