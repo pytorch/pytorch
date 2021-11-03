@@ -2116,7 +2116,7 @@
 
 - func: grid_sampler_2d(Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> Tensor
   dispatch:
-    CPU: grid_sampler_2d_cpu
+    CPU, QuantizedCPU: grid_sampler_2d_cpu
     CUDA: grid_sampler_2d_cuda
 
 # `grid_sampler_2d_backward` takes in `output_mask` to optimize performance for
@@ -5332,7 +5332,7 @@
 - func: dequantize.self(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    CPU: dequantize_cpu
+    CPU, CUDA: dequantize_cpu_or_cuda
     QuantizedCPU, QuantizedCUDA: dequantize_quantized
 
 - func: dequantize.tensors(Tensor[] tensors) -> Tensor[]
@@ -6694,6 +6694,9 @@
     CUDA: nonzero_cuda
 
 - func: nonzero_numpy(Tensor self) -> Tensor[]
+  variants: method, function
+
+- func: argwhere(Tensor self) -> Tensor
   variants: method, function
 
 - func: gather.out(Tensor self, int dim, Tensor index, *, bool sparse_grad=False, Tensor(a!) out) -> Tensor(a!)
@@ -8625,6 +8628,7 @@
   python_module: nn
   dispatch:
     CPU, CUDA: hardsigmoid_out
+    QuantizedCPU: hardsigmoid_out_quantized_cpu
 
 - func: hardsigmoid(Tensor self) -> Tensor
   structured_delegate: hardsigmoid.out
