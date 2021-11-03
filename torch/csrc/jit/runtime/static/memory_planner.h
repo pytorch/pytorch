@@ -107,7 +107,7 @@ class MemoryPlanner {
     // integer type and carry on.
     const auto impl_p = reinterpret_cast<uintptr_t>(impl);
     const auto start =
-      reinterpret_cast<uintptr_t>(managed_tensor_storage_impls_.data());
+        reinterpret_cast<uintptr_t>(managed_tensor_storage_impls_.data());
     const auto end = reinterpret_cast<uintptr_t>(
         &managed_tensor_storage_impls_[managed_tensor_storage_impls_.size()]);
     return impl_p >= start && impl_p < end;
