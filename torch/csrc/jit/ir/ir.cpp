@@ -77,6 +77,23 @@ std::string normalizeAttrName(c10::string_view field) {
   return std::string{field};
 }
 
+void findAllNodes(
+    Block& block,
+    Symbol kind,
+    bool recurse,
+    std::vector<Node*>& ret) {
+  for (Node* n : block.nodes()) {
+    if (n->kind() == kind) {
+      ret.push_back(n);
+    }
+    if (recurse) {
+      for (auto b : n->blocks()) {
+        findAllNodes(*b, kind, recurse, ret);
+      }
+    }
+  }
+}
+
 } // namespace
 
 // NB: This overload will become ambiguous with the one Caffe2 provides in its
@@ -735,14 +752,24 @@ void Block::destroy() {
   graph_->freeBlock(this);
 }
 
-std::shared_ptr<Graph> Graph::copy() {
-  auto new_g = std::make_shared<Graph>();
+void Graph::cloneFrom(Graph& src) {
   auto env = [](Value* v) -> Value* {
     AT_ERROR(
         "Graph::copy() encountered a use of a value " + v->debugName() +
         " not in scope. Run lint!");
   };
-  new_g->block()->cloneFrom(this->block(), env);
+  block()->cloneFrom(src.block(), env);
+}
+
+std::shared_ptr<Graph> Graph::copy() {
+  auto new_g = std::make_shared<Graph>();
+  new_g->cloneFrom(*this);
+  return new_g;
+}
+
+std::unique_ptr<Graph> Graph::copyUnique() {
+  auto new_g = std::make_unique<Graph>();
+  new_g->cloneFrom(*this);
   return new_g;
 }
 
@@ -1537,6 +1564,14 @@ void Node::removeAllInputs() {
   inputs_.clear();
 }
 
+void Node::removeAllOutputs() {
+  op_ = nullptr;
+  size_t init_osize = outputs_.size();
+  for (auto i : c10::irange(init_osize)) {
+    eraseOutput(init_osize - i - 1);
+  }
+}
+
 void Node::permuteInputs(const std::vector<size_t>& new_order) {
   op_ = nullptr;
   AT_ASSERT(new_order.size() == inputs_.size());
@@ -2060,10 +2095,9 @@ void inlineCallStackOfNode(
 // ONNX conversion
 std::vector<Value*> inlineCallTo(
     Node* to_replace,
-    Function* callee,
+    GraphFunction* callee,
     bool inline_optimized_graph /*=true*/) {
   WithInsertPoint guard(to_replace);
-  TORCH_INTERNAL_ASSERT(callee->isGraphFunction());
   std::unordered_map<Value*, Value*> value_map;
   std::vector<torch::jit::Value*> new_outputs;
 
@@ -2177,6 +2211,25 @@ std::vector<Value*> unpackOutputs(const std::vector<Value*>& outputs) {
     tup->node()->destroy();
   }
   return new_outputs;
+}
+
+std::vector<Node*> findAllNodes(
+    at::ArrayRef<Block*> array,
+    Symbol kind,
+    bool recurse) {
+  std::vector<Node*> ret;
+  for (auto block : array) {
+    findAllNodes(*block, kind, recurse, ret);
+  }
+  return ret;
+}
+
+std::vector<Node*> findAllNodes(Block& block, Symbol kind, bool recurse) {
+  return findAllNodes({&block}, kind, recurse);
+}
+
+std::vector<Node*> findAllNodes(Graph& g, Symbol kind, bool recurse) {
+  return findAllNodes(*g.block(), kind, recurse);
 }
 
 std::vector<Value*> insertGraph(
