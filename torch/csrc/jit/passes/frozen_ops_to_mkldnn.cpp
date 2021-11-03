@@ -393,7 +393,7 @@ static std::function<void(at::Tensor output, at::Tensor input)> hardtanh_helper(
   auto min_val = n->f(attr::min_val);
   auto max_val = n->f(attr::max_val);
   return [min_val, max_val](at::Tensor output, at::Tensor input) {
-    at::cpu::hardtanh_out(output, input, min_val, max_val);
+    at::cpu::clamp_out(output, input, min_val, max_val);
   };
 }
 
