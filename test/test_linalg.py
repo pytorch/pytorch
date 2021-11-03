@@ -1640,7 +1640,7 @@ class TestLinalg(TestCase):
         for p in norm_types:
             try:
                 run_test_case(a, p)
-            except numpy.linalg.LinAlgError:
+            except np.linalg.LinAlgError:
                 # Numpy may fail to converge for some BLAS backends (although this is very rare)
                 # See the discussion in https://github.com/pytorch/pytorch/issues/67675
                 pass
