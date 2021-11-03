@@ -14,8 +14,11 @@ from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_
     skipCUDANonDefaultStreamIf, TEST_WITH_ASAN, TEST_WITH_UBSAN, TEST_WITH_TSAN, \
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, DeterministicGuard, TEST_SKIP_NOARCH, \
     _TestParametrizer, dtype_name, TEST_WITH_MIOPEN_SUGGEST_NHWC
-from torch.testing._internal.common_cuda import _get_torch_cuda_version
+from torch.testing._internal.common_cuda import _get_torch_cuda_version, TEST_CUSPARSE_GENERIC
 from torch.testing._internal.common_dtype import get_all_dtypes
+
+# The implementation should be moved here as soon as the deprecation period is over.
+from torch.testing._legacy import get_all_device_types  # noqa: F401
 
 try:
     import psutil  # type: ignore[import]
@@ -187,8 +190,8 @@ except ImportError:
 #         In addition to accepting multiple dtypes, the @dtypes decorator
 #         can accept a sequence of tuple pairs of dtypes. The test template
 #         will be called with each tuple for its "dtype" argument.
-#     - @onlyOnCPUAndCUDA
-#         Skips the test if the device is not a CPU or CUDA device
+#     - @onlyNativeDeviceTypes
+#         Skips the test if the device is not a native device type (currently CPU, CUDA, Meta)
 #     - @onlyCPU
 #         Skips the test if the device is not a CPU device
 #     - @onlyCUDA
@@ -789,6 +792,13 @@ class skipMetaIf(skipIf):
     def __init__(self, dep, reason):
         super().__init__(dep, reason, device_type='meta')
 
+# Skips a test on XLA if the condition is true.
+class skipXLAIf(skipIf):
+
+    def __init__(self, dep, reason):
+        super().__init__(dep, reason, device_type='xla')
+
+
 def _has_sufficient_memory(device, size):
     if torch.device(device).type == 'cuda':
         if not torch.cuda.is_available():
@@ -906,12 +916,14 @@ class deviceCountAtLeast(object):
 
         return multi_fn
 
-# Only runs the test on the CPU and CUDA (the native device types)
-def onlyOnCPUAndCUDA(fn):
+# Only runs the test on the native device type (currently CPU, CUDA, Meta)
+def onlyNativeDeviceTypes(fn):
+    NATIVE_DEVICES = ('cpu', 'cuda', 'meta')
+
     @wraps(fn)
     def only_fn(self, *args, **kwargs):
-        if self.device_type != 'cpu' and self.device_type != 'cuda':
-            reason = "onlyOnCPUAndCUDA: doesn't run on {0}".format(self.device_type)
+        if self.device_type not in NATIVE_DEVICES:
+            reason = "onlyNativeDeviceTypes: doesn't run on {0}".format(self.device_type)
             raise unittest.SkipTest(reason)
 
         return fn(self, *args, **kwargs)
@@ -1036,63 +1048,85 @@ def onlyCUDA(fn):
     return onlyOn('cuda')(fn)
 
 
+def disablecuDNN(fn):
+
+    @wraps(fn)
+    def disable_cudnn(self, *args, **kwargs):
+        if self.device_type == 'cuda' and self.has_cudnn():
+            with torch.backends.cudnn.flags(enabled=False):
+                return fn(self, *args, **kwargs)
+        return fn(self, *args, **kwargs)
+
+    return disable_cudnn
+
+
 def expectedFailureCUDA(fn):
     return expectedFailure('cuda')(fn)
 
 def expectedFailureMeta(fn):
     return expectedFailure('meta')(fn)
 
+def expectedFailureXLA(fn):
+    return expectedFailure('xla')(fn)
+
+# This decorator checks that the decorated function produces a nondeterministic
+# alert for the expected device types
 class expectedAlertNondeterministic:
-    def __init__(self, caller_name, device_type=None, fn_has_device_arg=True):
-        self.device_type = device_type
+    # Args:
+    #
+    #   caller_name (str): Name of the operation that produces the
+    #       nondeterministic alert. This name is expected to appear
+    #       in the error/warning message.
+    #
+    #   device_types (list[str], optional): If provided, the alert is
+    #       expected to only be triggered for the specified devices, and
+    #       no others. If None, then the alert is expected to be triggered
+    #       for all devices. Default: None
+    #
+    def __init__(self, caller_name, device_types=None):
+        if device_types is not None:
+            assert isinstance(device_types, list)
+            for device_type in device_types:
+                assert isinstance(device_type, str)
+        self.device_types = device_types
         self.error_message = caller_name + ' does not have a deterministic implementation, but you set'
-        self.fn_has_device_arg = fn_has_device_arg
 
     def __call__(self, fn):
         @wraps(fn)
         def efail_fn(slf, device, *args, **kwargs):
+            should_alert = self.device_types is None or slf.device_type in self.device_types
+
+            # Check that errors are thrown correctly
             with DeterministicGuard(True):
-                # If a nondeterministic error is expected for this case,
-                # check that it is raised
-                if self.device_type is None or self.device_type == slf.device_type:
+                if should_alert:
+                    with slf.assertRaisesRegex(
+                            RuntimeError,
+                            self.error_message,
+                            msg='expected a non-deterministic error, but it was not raised'):
+                        fn(slf, device, *args, **kwargs)
+
+                else:
+                    # If a nondeterministic error is not expected, make sure
+                    # that it is not raised
                     try:
-                        if self.fn_has_device_arg:
-                            fn(slf, device, *args, **kwargs)
-                        else:
-                            fn(slf, *args, **kwargs)
-                    except RuntimeError as e:
-                        if self.error_message not in str(e):
-                            slf.fail(
-                                'expected non-deterministic error message to start with "'
-                                + self.error_message
-                                + '" but got this instead: "' + str(e) + '"')
-                        return
-                    else:
-                        slf.fail('expected a non-deterministic error, but it was not raised')
-
-                # If a nondeterministic error is not expected for this case,
-                # make sure that it is not raised
-                try:
-                    if self.fn_has_device_arg:
                         return fn(slf, device, *args, **kwargs)
-                    else:
-                        return fn(slf, *args, **kwargs)
-                except RuntimeError as e:
-                    if 'does not have a deterministic implementation' in str(e):
-                        slf.fail(
-                            'did not expect non-deterministic error message, '
-                            + 'but got this: "' + str(e) + '"')
-                    # Reraise exceptions unrelated to nondeterminism
-                    raise
+                    except RuntimeError as e:
+                        if 'does not have a deterministic implementation' in str(e):
+                            slf.fail(
+                                'did not expect non-deterministic error message, '
+                                + 'but got one anyway: "' + str(e) + '"')
+                        # Reraise exceptions unrelated to nondeterminism
+                        raise
 
-        @wraps(fn)
-        def efail_fn_no_device(slf, *args, **kwargs):
-            return efail_fn(slf, None, *args, **kwargs)
+            # Check that warnings are thrown correctly
+            if should_alert:
+                with DeterministicGuard(True, warn_only=True):
+                    with slf.assertWarnsRegex(
+                            UserWarning,
+                            self.error_message):
+                        fn(slf, device, *args, **kwargs)
 
-        if self.fn_has_device_arg:
-            return efail_fn
-        else:
-            return efail_fn_no_device
+        return efail_fn
 
 # Skips a test on CPU if LAPACK is not available.
 def skipCPUIfNoLapack(fn):
@@ -1113,15 +1147,18 @@ def skipCPUIfNoMkl(fn):
 def skipCUDAIfNoMagma(fn):
     return skipCUDAIf('no_magma', "no MAGMA library detected")(skipCUDANonDefaultStreamIf(True)(fn))
 
+def has_cusolver():
+    version = _get_torch_cuda_version()
+    # cuSolver is disabled on cuda < 10.1.243
+    return version >= (10, 2)
+
 # Skips a test on CUDA if cuSOLVER is not available
 def skipCUDAIfNoCusolver(fn):
-    version = _get_torch_cuda_version()
-    return skipCUDAIf(version < (10, 2), "cuSOLVER not available")(fn)
+    return skipCUDAIf(not has_cusolver(), "cuSOLVER not available")(fn)
 
 # Skips a test if both cuSOLVER and MAGMA are not available
 def skipCUDAIfNoMagmaAndNoCusolver(fn):
-    version = _get_torch_cuda_version()
-    if version >= (10, 2):
+    if has_cusolver():
         return fn
     else:
         # cuSolver is disabled on cuda < 10.1.243, tests depend on MAGMA
@@ -1196,9 +1233,15 @@ def skipCUDAIfCudnnVersionLessThan(version=0):
         return wrap_fn
     return dec_fn
 
+# Skips a test on CUDA if cuSparse generic API is not available
+def skipCUDAIfNoCusparseGeneric(fn):
+    return skipCUDAIf(not TEST_CUSPARSE_GENERIC, "cuSparse Generic API not available")(fn)
 
 def skipCUDAIfNoCudnn(fn):
     return skipCUDAIfCudnnVersionLessThan(0)(fn)
 
 def skipMeta(fn):
     return skipMetaIf(True, "test doesn't work with meta tensors")(fn)
+
+def skipXLA(fn):
+    return skipXLAIf(True, "Marked as skipped for XLA")(fn)

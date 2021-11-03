@@ -13,6 +13,7 @@
 namespace torch {
 namespace jit {
 
+// overlap of [a, b) and [c, d)
 bool overlap(size_t a, size_t b, size_t c, size_t d) {
   TORCH_INTERNAL_ASSERT(a <= b);
   TORCH_INTERNAL_ASSERT(c <= d);
@@ -282,36 +283,57 @@ void printAllocations(std::vector<MemAllocation> allocations) {
             << "\n";
 }
 
+void printLiveRangesAndSizes(
+    std::vector<std::pair<UniqueLiveRange, size_t>> lvrs) {
+  auto cmp = liveRangeStartCmp();
+  std::sort(lvrs.begin(), lvrs.end(), [&cmp](auto a, auto b) {
+    return cmp(a.first, b.first);
+  });
+  std::cout << "\"live_ranges_sizes\": {\n";
+  for (const auto& item : lvrs) {
+    std::cout << "(" << item.first.lvr.begin << "," << item.first.lvr.end << ")"
+              << ":" << item.second << ",\n";
+  }
+  std::cout << "},\n"
+            << "\n";
+}
+
+std::tuple<LivenessMap, FastMap<const Value*, LiveRange>, ValueGroup>
+getLiveness(const std::shared_ptr<Graph>& graph, bool frozen) {
+  AliasDb alias_db(graph, frozen);
+  jit::ValueGroup vg{};
+  vg.init(graph, alias_db);
+  auto liveness = jit::GetLiveness(graph, vg, alias_db);
+  return std::make_tuple(liveness.first, liveness.second, vg);
+}
+
 std::pair<
     FastMap<const Value*, std::pair<UniqueLiveRange, size_t>>,
     FastMap<const Value*, std::pair<UniqueLiveRange, size_t>>>
-getManagedAndUnManagedValues(const std::shared_ptr<Graph>& graph, bool frozen) {
-  AliasDb alias_db(graph, frozen);
-  FastSet<const Value*> always_alive_values =
-      jit::GetAlwaysAliveValues(graph, alias_db);
-  FastMap<const Value*, LiveRange> live_ranges =
-      jit::GetLiveness(graph, always_alive_values, alias_db).second;
-
+getManagedAndUnManagedValues(
+    const std::vector<Node*>& nodes,
+    FastMap<const Value*, LiveRange>& live_ranges,
+    const ValueGroup& value_group) {
   FastMap<const Value*, std::pair<UniqueLiveRange, size_t>> managed_values{};
   FastMap<const Value*, std::pair<UniqueLiveRange, size_t>> unmanaged_values{};
   FastMap<Node*, bool> node_has_out_variant;
-  for (auto* node : graph->nodes()) {
+  for (auto* node : nodes) {
     auto has_out = hasOutVariant(node);
     node_has_out_variant.insert({node, has_out});
   }
 
-  for (auto node : graph->nodes()) {
+  for (auto node : nodes) {
     if (!node_has_out_variant[node]) {
       for (const auto& out_v : node->outputs()) {
         unmanaged_values.insert(
             {out_v,
-             {{live_ranges[out_v], out_v->debugName()},
+             {{live_ranges[out_v], out_v},
               computeStorageSize(*out_v).value_or(0)}});
       }
       continue;
     }
-    for (const auto* out_v : node->outputs()) {
-      if (always_alive_values.count(out_v)) {
+    for (const auto& out_v : node->outputs()) {
+      if (value_group.isAlwaysAlive(out_v)) {
         continue;
       }
       auto size = computeStorageSize(*out_v);
@@ -320,20 +342,19 @@ getManagedAndUnManagedValues(const std::shared_ptr<Graph>& graph, bool frozen) {
       if (size > (size_t)0 &&
           !isOptimizableContainerType(node, node_has_out_variant)) {
         managed_values.insert(
-            {out_v, {{live_ranges[out_v], out_v->debugName()}, size.value()}});
+            {out_v, {{live_ranges[out_v], out_v}, size.value()}});
       } else {
         unmanaged_values.insert(
             {out_v,
-             {{live_ranges[out_v], out_v->debugName()},
+             {{live_ranges[out_v], out_v},
               computeStorageSize(*out_v).value_or(0)}});
       }
     }
   }
 
-  for (auto* val : always_alive_values) {
-    auto size = computeStorageSize(*val);
-    unmanaged_values.insert(
-        {val, {{live_ranges[val], val->debugName()}, size.value_or(0)}});
+  std::vector<std::pair<UniqueLiveRange, size_t>> lvrs(managed_values.size());
+  for (const auto& item : managed_values) {
+    lvrs.emplace_back(std::make_pair(item.second.first, item.second.second));
   }
 
   return std::make_pair(unmanaged_values, managed_values);
@@ -597,16 +618,24 @@ void planMemoryWithTracing(
 
 std::pair<size_t, FastMap<const Value*, std::pair<UniqueLiveRange, size_t>>>
 planMemory(const std::shared_ptr<Graph>& graph, Strategy strat, bool frozen) {
+  LivenessMap lm;
+  FastMap<const Value*, LiveRange> lvrs;
+  ValueGroup vg;
+  std::tie(lm, lvrs, vg) = getLiveness(graph, frozen);
+
+  std::vector<Node*> nodes(graph->nodes().begin(), graph->nodes().end());
   FastMap<const Value*, std::pair<UniqueLiveRange, size_t>> managed_values,
       unmanaged_values;
   std::tie(unmanaged_values, managed_values) =
-      getManagedAndUnManagedValues(graph, frozen);
+      getManagedAndUnManagedValues(nodes, lvrs, vg);
+
   SortedLiveRangeMap<size_t> managed_live_ranges;
   for (auto& item : managed_values) {
     auto ulvr = item.second.first;
     auto size = item.second.second;
     managed_live_ranges.insert({ulvr, size});
   }
+
   std::vector<MemAllocation> allocations;
   switch (strat) {
     case Strategy::NAIVE: {
@@ -618,23 +647,23 @@ planMemory(const std::shared_ptr<Graph>& graph, Strategy strat, bool frozen) {
       break;
     };
     case Strategy::GREEDY_BY_SIZE_WITH_SMALLEST_GAP: {
-      allocations = greedyBySizeWithSmallestGap(managed_live_ranges);
+      allocations = greedyBySizeWithSmallestGap(lm, managed_live_ranges);
       break;
     }
     case Strategy::GREEDY_BY_SIZE_WITH_FIRST_GAP: {
-      allocations = greedyBySizeWithFirstGap(managed_live_ranges);
+      allocations = greedyBySizeWithFirstGap(lm, managed_live_ranges);
       break;
     }
     case Strategy::GREEDY_BY_LONGEST_AND_SIZE_WITH_SMALLEST_GAP: {
-      allocations = greedyByLongestAndSizeWithSmallestGap(managed_live_ranges);
+      allocations = greedyByLongestAndSizeWithSmallestGap(lm, managed_live_ranges);
       break;
     }
     case Strategy::GREEDY_BY_LONGEST_AND_SIZE_WITH_FIRST_GAP: {
-      allocations = greedyByLongestAndSizeWithFirstGap(managed_live_ranges);
+      allocations = greedyByLongestAndSizeWithFirstGap(lm, managed_live_ranges);
       break;
     }
     case Strategy::GREEDY_BY_BREADTH: {
-      allocations = greedyByOperatorBreadth(managed_values);
+      allocations = greedyByOperatorBreadth(lm, managed_values);
       break;
     }
     default:
