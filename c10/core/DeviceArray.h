@@ -3,7 +3,7 @@
 namespace c10 {
 
 template <typename T>
-class C10_API DeviceArray {
+class DeviceArray {
  public:
   DeviceArray(c10::Allocator& allocator, size_t size)
       : data_ptr_(allocator.allocate(size * sizeof(T))) {
