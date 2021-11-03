@@ -128,7 +128,19 @@ TensorIteratorConfig& TensorIteratorConfig::add_borrowed_input(const TensorBase&
 
 TensorIteratorConfig& TensorIteratorConfig::declare_static_dtype_and_device(ScalarType dtype, Device device) {
   TORCH_CHECK(!check_all_same_dtype_, "check_all_same_dtype(false) must be called before declare_static_dtype(...)");
-  static_dtype_and_device_ = c10::make_optional(std::make_pair(dtype, device));
+  static_dtype_ = dtype;
+  static_device_ = device;
+  return *this;
+}
+
+TensorIteratorConfig& TensorIteratorConfig::declare_static_dtype(ScalarType dtype) {
+  TORCH_CHECK(!check_all_same_dtype_, "check_all_same_dtype(false) must be called before declare_static_dtype(...)");
+  static_dtype_ = dtype;
+  return *this;
+}
+
+TensorIteratorConfig& TensorIteratorConfig::declare_static_device(Device device) {
+  static_device_ = device;
   return *this;
 }
 
@@ -327,12 +339,20 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
     //   the device it should be allocated on.
     if (!op.is_type_defined()) {
       TORCH_INTERNAL_ASSERT(op.is_output, "Found type undefined input tensor!");
-      if (config.static_dtype_and_device_.has_value()) {
-        op.target_dtype = config.static_dtype_and_device_->first;
-        op.device = config.static_dtype_and_device_->second;
+
+      if (config.static_dtype_.has_value()) {
+        op.target_dtype = config.static_dtype_.value();
+      } else {
+        has_undefined_outputs = true;
+      }
+
+      if (config.static_device_.has_value()) {
+        op.device = config.static_device_.value();
       } else {
         TORCH_INTERNAL_ASSERT(config.check_all_same_device_);
-        has_undefined_outputs = true;
+      }
+
+      if (has_undefined_outputs || !op.device.has_value()) {
         continue;
       }
     }
@@ -418,12 +438,21 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
   //   - checks that all tensors are on the same device, if requested
   //   - checks that the common dtype can safely cast to each output, if requested
   //   - creates temporaries for CPU operations, if needed and requested
+  common_device_ = common_device;
   int max_cpu_scalars_on_non_cpu = config.allow_cpu_scalars_ ? 1 : 0;
   int current_cpu_scalars_on_non_cpu = 0;
   for (auto& op : operands_) {
-    if (!op.is_type_defined()) {
+    bool is_type_defined = op.is_type_defined();
+    bool is_device_defined = op.is_device_defined();
+
+    if (!is_type_defined) {
       op.target_dtype = common_dtype_;
+    }
+    if (!is_device_defined) {
       op.device = common_device;
+    }
+
+    if (!is_type_defined && !is_device_defined) {
       continue;
     }
 
@@ -441,10 +470,10 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
         TORCH_CHECK(current_cpu_scalars_on_non_cpu < max_cpu_scalars_on_non_cpu,
                     "Trying to pass too many CPU scalars to non-CPU kernel!");
         ++current_cpu_scalars_on_non_cpu;
-      } else if (op.device != common_device) {
+      } else if (op.device.value() != common_device) {
         TORCH_CHECK(false,
                     "Expected all tensors to be on the same device, but "
-                    "found at least two devices, ", common_device, " and ", op.device, "!");
+                    "found at least two devices, ", common_device, " and ", op.device.value(), "!");
       }
     }
 
@@ -490,7 +519,6 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
         op.target_dtype = common_dtype_;
       }
     }
-    common_device_ = common_device;
   }
 }
 
@@ -864,7 +892,7 @@ void TensorIteratorBase::build_comparison_op(
   // want the output to be bool. Otherwise (e.g. 'torch.eq(a, b, out=c)') we
   // don't coerce the output.
   if (!out.defined()) {
-    config.declare_static_dtype_and_device(kBool, a.device());
+    config.declare_static_dtype(kBool);
   }
 
   // Note [special-case bool outputs]
@@ -943,7 +971,8 @@ void TensorIteratorBase::build_unary_force_boolean_op(const TensorBase& out, con
   build(TensorIteratorConfig()
       .set_check_mem_overlap(true)
       .check_all_same_dtype(false)
-      .declare_static_dtype_and_device(at::kBool, a.device())
+      .declare_static_dtype(at::kBool)
+      .declare_static_device(a.device())
       .add_owned_output(out)
       .add_owned_input(a));
 }

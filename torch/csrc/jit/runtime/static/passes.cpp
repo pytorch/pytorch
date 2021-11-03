@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
+#include <torch/csrc/jit/passes/variadic_ops.h>
 #include <torch/csrc/jit/runtime/graph_iterator.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
 
@@ -347,6 +348,9 @@ TORCH_LIBRARY_FRAGMENT(static_runtime, m) {
   m.def(torch::schema(
       "static_runtime::VarTupleUnpack(...) -> ...",
       c10::AliasAnalysisKind::CONSERVATIVE));
+  m.def(torch::schema(
+      "static_runtime::fused_equally_split(Tensor input, int num_split, int dim) -> ...",
+      c10::AliasAnalysisKind::PURE_FUNCTION));
 }
 
 void FuseSignLog1P(std::shared_ptr<torch::jit::Graph>& graph) {
@@ -397,7 +401,7 @@ void FuseTupleUnpackBlock(const TupleUnpackBlock& nodes) {
   TORCH_CHECK(nodes.size() > 0);
   auto graph = nodes[0]->owningGraph();
   auto var_unpack = graph->create(
-      c10::Symbol::fromQualString("static_runtime::VarTupleUnpack"),
+      fromQualString("static_runtime::VarTupleUnpack"),
       /* num_outputs */ 0);
   var_unpack->insertAfter(nodes[nodes.size() - 1]);
   for (Node* node : nodes) {
@@ -429,27 +433,26 @@ void ReplaceWithCopy(
 
   const std::map<c10::Symbol, c10::Symbol> supported = {
 #ifdef FBCODE_CAFFE2
-      {c10::Symbol::fromQualString("aten::permute"),
-       c10::Symbol::fromQualString("static_runtime::permute_copy")},
+      {fromQualString("aten::permute"),
+       fromQualString("static_runtime::permute_copy")},
 #endif
-      {c10::Symbol::fromQualString("aten::narrow"),
-       c10::Symbol::fromQualString("aten::narrow_copy")},
-      {c10::Symbol::fromQualString("aten::reshape"),
-       c10::Symbol::fromQualString("static_runtime::reshape_copy")},
-      {c10::Symbol::fromQualString("aten::flatten"),
-       c10::Symbol::fromQualString("static_runtime::flatten_copy")}};
+      {fromQualString("aten::narrow"), fromQualString("aten::narrow_copy")},
+      {fromQualString("aten::reshape"),
+       fromQualString("static_runtime::reshape_copy")},
+      {fromQualString("aten::flatten"),
+       fromQualString("static_runtime::flatten_copy")}};
 
   // for ops that have overloads, match the schema
   const std::vector<std::pair<c10::FunctionSchema, c10::Symbol>> supported_schema = {
       {torch::schema(
            "aten::to.prim_dtype(Tensor(a) self, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)"),
-       c10::Symbol::fromQualString("static_runtime::to_copy")},
+       fromQualString("static_runtime::to_copy")},
       {torch::schema(
            "aten::to.dtype(Tensor(a) self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor(a)"),
-       c10::Symbol::fromQualString("static_runtime::to_copy")},
+       fromQualString("static_runtime::to_copy")},
       {torch::schema(
            "aten::to.other(Tensor(a) self, Tensor other, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor(a)"),
-       c10::Symbol::fromQualString("static_runtime::to_copy")}};
+       fromQualString("static_runtime::to_copy")}};
 
   auto match_schema = [&supported_schema](
                           const Node* node, c10::Symbol& out_matched_symbol) {
@@ -524,87 +527,29 @@ void ReplaceWithCopy(
 // NB: The alias type of the fused op needs to be changed to
 // c10::AliasAnalysisKind::PURE_FUNCTION to make alias analysis work.
 void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
-  AliasDb alias_db(
-      graph, /*isFrozen=*/false, /*enablePreciseTupleContainerAnalysis=*/true);
-  const std::vector<Value*> graph_outputs(
-      graph->outputs().begin(), graph->outputs().end());
-  auto nodes = graph->nodes();
-  std::vector<Node*> equally_splits_to_remove;
-  for (auto it = nodes.begin(); it != nodes.end(); ++it) {
-    Node* node = *it;
-    const std::string node_qual_string = node->kind().toQualString();
-    if (node_qual_string == "fb::sigrid_transforms" ||
-        node_qual_string == "fb::sigrid_transforms_torch_bind" ||
-        node_qual_string == "fb::equally_split" ||
-        node_qual_string == "fb::gather_ranges_to_dense" ||
-        node_qual_string == "fb::gather_ranges_to_dense_v2" ||
-        node_qual_string == "fb::variadic_sigrid_transforms_torch_bind") {
-      const Value* value_out = node->outputs()[0];
-      if (value_out->uses().size() > 1) {
-        continue;
-      }
-
-      Node* list_unpack_node = value_out->uses()[0].user;
-      if (list_unpack_node->kind() != prim::ListUnpack) {
-        continue;
-      }
-
-      auto list_unpack_outputs = list_unpack_node->outputs();
-      if (list_unpack_outputs.empty()) {
-        continue;
-      }
-
-      if (node_qual_string != "fb::equally_split") {
-        // If any output of the ListUnpack node is unmanaged, disable fusion
-        // since the fused op assumes all outputs are either managed or not.
-        // "fb::equally_split" is excluded here since it does doublecheck
-        // individual outputs without having this assumption.
-        const std::vector<Value*> list_unpack_outputs_vec(
-            list_unpack_outputs.begin(), list_unpack_outputs.end());
-        if (alias_db.mayContainAlias(list_unpack_outputs_vec, graph_outputs)) {
-          continue;
-        }
-      }
-      // handle outputs
-      for (Value* out : list_unpack_outputs) {
-        Value* new_out = node->addOutput();
-        new_out->copyMetadata(out);
-        out->replaceAllUsesWith(new_out);
-      }
-
-      auto it_next = it;
-      ++it_next; // it_next points to list_unpack
-      it_next.destroyCurrent(); // remove list_unpack
-
-      node->eraseOutput(0);
-
-      if (node_qual_string == "fb::equally_split" &&
-          node->outputs().size() == 1) {
-        // This captures a case of `y = fb::equally_split(x, 1, _)` where y
-        // becomes just an alias of x.
-        // If this case is found, replace y with x to avoid executing this op.
-        equally_splits_to_remove.push_back(node);
-      }
-    }
-  }
-
-  for (Node* node : equally_splits_to_remove) {
-    node->output(0)->replaceAllUsesWith(node->input(0));
-    node->destroy();
-  }
-
-#ifndef NDEBUG
-  graph->lint();
-  AliasDb db2(graph);
-  torch::jit::Lint(&db2);
-#endif
-}
-
-void FuseListUnpackV2(std::shared_ptr<torch::jit::Graph>& graph) {
-  const FastMap<c10::Symbol, c10::Symbol> unfused_to_fused = {};
+  const FastMap<c10::Symbol, c10::Symbol> unfused_to_fused = {
+      {fromQualString("fb::equally_split"),
+       fromQualString("static_runtime::fused_equally_split")},
+      {fromQualString("fb::sigrid_transforms"),
+       fromQualString("static_runtime::fused_sigrid_transforms")},
+      {fromQualString("static_runtime::variadic_grouped_accessor_op"),
+       fromQualString("static_runtime::fused_variadic_grouped_accessor_op")},
+      {fromQualString("static_runtime::variadic_grouped_accessor_op_v2"),
+       fromQualString("static_runtime::fused_variadic_grouped_accessor_op_v2")},
+      {fromQualString("fb::sigrid_transforms_torch_bind"),
+       fromQualString("static_runtime::fused_sigrid_transforms_torch_bind")},
+      {fromQualString("fb::variadic_sigrid_transforms_torch_bind"),
+       fromQualString(
+           "static_runtime::fused_variadic_sigrid_transforms_torch_bind")},
+      {fromQualString("fb::gather_ranges_to_dense"),
+       fromQualString("static_runtime::fused_gather_ranges_to_dense")},
+      {fromQualString("fb::gather_ranges_to_dense_v2"),
+       fromQualString("static_runtime::fused_gather_ranges_to_dense_v2")}};
 
   AliasDb alias_db(
-      graph, /*isFrozen=*/false, /*enablePreciseTupleContainerAnalysis=*/true);
+      graph,
+      /*isFrozen=*/false,
+      /*enablePreciseTupleContainerAnalysis=*/true);
   const std::vector<Value*> graph_outputs(
       graph->outputs().begin(), graph->outputs().end());
   auto nodes = graph->nodes();
@@ -616,7 +561,7 @@ void FuseListUnpackV2(std::shared_ptr<torch::jit::Graph>& graph) {
     }
 
     const Value* value_out = node->outputs()[0];
-    if (value_out->uses().size() > 1) {
+    if (value_out->uses().size() != 1) {
       continue;
     }
 
@@ -631,7 +576,7 @@ void FuseListUnpackV2(std::shared_ptr<torch::jit::Graph>& graph) {
     }
 
     const bool is_equally_split =
-        node->kind() == c10::Symbol::fromQualString("fb::equally_split");
+        node->kind() == fromQualString("fb::equally_split");
     if (!is_equally_split) {
       // If any output of the ListUnpack node is unmanaged, disable fusion
       // since the fused op assumes all outputs are either managed or not.
@@ -684,7 +629,7 @@ void FuseListUnpackV2(std::shared_ptr<torch::jit::Graph>& graph) {
 
 void EnableStaticRuntimeLayerNorm(std::shared_ptr<torch::jit::Graph>& graph) {
   const c10::Symbol static_runtime_layer_norm_symbol =
-      c10::Symbol::fromQualString("static_runtime::layer_norm");
+      fromQualString("static_runtime::layer_norm");
   auto nodes = graph->nodes();
   std::vector<std::pair<Node*, Node*>> replacement;
   for (auto it = nodes.begin(); it != nodes.end(); ++it) {
@@ -761,7 +706,7 @@ void RemoveImmutableInputDictLookups(
     key->moveBefore(marker);
   }
   const c10::Symbol static_runtime_dict_unpack_symbol =
-      c10::Symbol::fromQualString("static_runtime::dict_unpack");
+      fromQualString("static_runtime::dict_unpack");
   for (auto& it : dict_to_getitems) {
     Value* dict = it.first;
     std::vector<Node*>& getitems = it.second;
@@ -781,6 +726,19 @@ void RemoveImmutableInputDictLookups(
   }
   graph->setInsertPoint(graph->block());
   marker->destroy();
+}
+
+void UseVariadicGroupedAccessor(const std::shared_ptr<Graph>& graph) {
+  // Migration to v2 is still in progress. For now, SR will support
+  // both versions of this op.
+  UseVariadicOp(
+      graph,
+      fromQualString("grouped_accessor::grouped_accessor_op"),
+      fromQualString("static_runtime::variadic_grouped_accessor_op"));
+  UseVariadicOp(
+      graph,
+      fromQualString("grouped_accessor::grouped_accessor_op_v2"),
+      fromQualString("static_runtime::variadic_grouped_accessor_op_v2"));
 }
 
 } // namespace jit

@@ -12,17 +12,27 @@ import warnings
 
 # This file exports ONNX ops for opset 12
 
+def einsum_helper(g, equation, tensors):
+    if not tensors:
+        raise RuntimeError("Einsum inputs are empty.")
+    # ONNX does not support bool for Einsum inputs.
+    if tensors[0].type().scalarType() == "Bool":
+        tensors = [g.op("Cast", tensor, to_i=sym_help.cast_pytorch_to_onnx["Long"]) for tensor in tensors]
+        return g.op("Cast", g.op("Einsum", *tensors, equation_s=equation), to_i=sym_help.cast_pytorch_to_onnx["Bool"])
+    else:
+        return g.op("Einsum", *tensors, equation_s=equation)
+
 @parse_args("s", "v")
 def einsum(g, equation, tensor_list):
     tensors = sym_help._unpack_list(tensor_list)
-    return g.op("Einsum", *tensors, equation_s=equation)
+    return einsum_helper(g, equation, tensors)
 
 @parse_args("v", "v")
 def outer(g, input, other):
     # make sure to cast other to self's type
     if other.type().scalarType() != input.type().scalarType():
         other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx[input.type().scalarType()])
-    return g.op("Einsum", input, other, equation_s="i,j->ij")
+    return einsum_helper(g, "i,j->ij", [input, other])
 
 @parse_args("v", "f", "i")
 def dropout(g, input, p, train):

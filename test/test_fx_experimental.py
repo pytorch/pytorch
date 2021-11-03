@@ -1481,6 +1481,7 @@ class TestNormalizeOperators(JitTestCase):
             "index_put",
             "nn.functional.conv2d",
             "nn.functional.dropout",
+            "nn.functional.embedding",  # Implemented with a lambda
             "polygamma",
             "special.polygamma",
             "repeat",
@@ -1489,6 +1490,8 @@ class TestNormalizeOperators(JitTestCase):
             "resize_as_",
             "special.zeta",
             "to_sparse",
+            "unique",
+            "unique_consecutive",
             "view",
             "view_as",
             "unfold",
