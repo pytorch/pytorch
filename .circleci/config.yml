@@ -6506,15 +6506,6 @@ workflows:
     when: << pipeline.parameters.run_binary_tests >>
   build:
     jobs:
-      - docker_build_job:
-          name: "docker-pytorch-linux-bionic-rocm4.1-py3.6"
-          image_name: "pytorch-linux-bionic-rocm4.1-py3.6"
-      - docker_build_job:
-          name: "docker-pytorch-linux-bionic-rocm4.2-py3.6"
-          image_name: "pytorch-linux-bionic-rocm4.2-py3.6"
-      - docker_build_job:
-          name: "docker-pytorch-linux-bionic-rocm4.3.1-py3.6"
-          image_name: "pytorch-linux-bionic-rocm4.3.1-py3.6"
       - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_6_gcc5_4_build
           requires:
@@ -6677,15 +6668,6 @@ workflows:
               only:
                 - /gh\/.*\/head/
                 - /pull\/.*/
-          name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single
-          requires:
-            - docker-pytorch-linux-xenial-py3-clang5-android-ndk-r19c
-      - pytorch_android_gradle_custom_build_single:
-          filters:
-            branches:
-              only:
-                - /gh\/.*\/head/
-                - /pull\/.*/
           lite_interpreter: "0"
           name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit
           requires:
@@ -6703,63 +6685,6 @@ workflows:
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_64_build
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v7a_build
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v8a_build
-      - pytorch_ios_build:
-          build_environment: pytorch-ios-12.5.1-x86_64_build
-          ios_arch: x86_64
-          ios_platform: SIMULATOR
-          lite_interpreter: "1"
-          name: pytorch_ios_12_5_1_x86_64_build
-      - pytorch_ios_build:
-          build_environment: pytorch-ios-12.5.1-x86_64_full_jit_build
-          ios_arch: x86_64
-          ios_platform: SIMULATOR
-          lite_interpreter: "0"
-          name: pytorch_ios_12_5_1_x86_64_full_jit_build
-      - pytorch_ios_build:
-          build_environment: pytorch-ios-12.5.1-arm64_build
-          context: org-member
-          ios_arch: arm64
-          ios_platform: OS
-          lite_interpreter: "1"
-          name: pytorch_ios_12_5_1_arm64_build
-      - pytorch_ios_build:
-          build_environment: pytorch-ios-12.5.1-arm64_metal_build
-          context: org-member
-          ios_arch: arm64
-          ios_platform: OS
-          lite_interpreter: "1"
-          name: pytorch_ios_12_5_1_arm64_metal_build
-          use_metal: "1"
-      - pytorch_ios_build:
-          build_environment: pytorch-ios-12.5.1-arm64_full_jit_build
-          context: org-member
-          ios_arch: arm64
-          ios_platform: OS
-          lite_interpreter: "0"
-          name: pytorch_ios_12_5_1_arm64_full_jit_build
-      - pytorch_ios_build:
-          build_environment: pytorch-ios-12.5.1-arm64_custom_build
-          context: org-member
-          ios_arch: arm64
-          ios_platform: OS
-          lite_interpreter: "1"
-          name: pytorch_ios_12_5_1_arm64_custom_build
-          op_list: mobilenetv2.yaml
-      - pytorch_ios_build:
-          build_environment: pytorch-ios-12.5.1-x86_64_coreml_build
-          ios_arch: x86_64
-          ios_platform: SIMULATOR
-          lite_interpreter: "1"
-          name: pytorch_ios_12_5_1_x86_64_coreml_build
-          use_coreml: "1"
-      - pytorch_ios_build:
-          build_environment: pytorch-ios-12.5.1-arm64_coreml_build
-          context: org-member
-          ios_arch: arm64
-          ios_platform: OS
-          lite_interpreter: "1"
-          name: pytorch_ios_12_5_1_arm64_coreml_build
-          use_coreml: "1"
       - binary_linux_build:
           build_environment: manywheel 3.7m cu102 devtoolset7
           docker_image: pytorch/manylinux-cuda102

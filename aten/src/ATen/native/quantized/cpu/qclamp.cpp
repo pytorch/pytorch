@@ -128,33 +128,13 @@ Tensor clamp_quantized_cpu(
   return qy;
 }
 
-// hardtanh is clamp with default min==-1.0f and default max==1.0f
-Tensor hardtanh_quantized_cpu(
+Tensor& clamp_out_quantized_cpu(
     const Tensor& qx,
-    const Scalar& min,
-    const Scalar& max) {
-  Tensor qy;
-  qy = quantized_clamp_impl(qx, min, max);
-  return qy;
-}
-
-Tensor& hardtanh_out_quantized_cpu(const Tensor& qx,
-    const Scalar& min,
-    const Scalar& max,
+    const optional<Scalar>& min,
+    const optional<Scalar>& max,
     Tensor& result) {
-  result = quantized_clamp_impl(qx, min, max);
+  result = clamp_quantized_cpu(qx, min, max);
   return result;
-}
-
-Tensor& hardtanh_quantized_cpu_(
-    Tensor& self,
-    const Scalar& min,
-    const Scalar& max) {
-  Tensor qy;
-  qy = quantized_clamp_impl(self, min, max);
-  // This can be optimized in a future PR if it becomes a bottleneck.
-  self.copy_(qy);
-  return self;
 }
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
