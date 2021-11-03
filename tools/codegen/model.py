@@ -488,7 +488,8 @@ class NativeFunction:
         rets = self.func.returns
         is_non_mutating_view = len(rets) > 0 and any(r.annotation is not None and not r.annotation.is_write for r in rets)
         is_inplace_view = self.tag is not None and self.tag is Tag.inplace_view
-        return is_non_mutating_view or is_inplace_view
+        is_wildcard_view = any(inp.annotation is not None and inp.annotation.alias_set_after != "" for inp in self.func.schema_order_arguments())
+        return is_non_mutating_view or is_inplace_view or is_wildcard_view
 
 SchemaKind = Enum('SchemaKind', ('functional', 'inplace', 'out'))
 
@@ -911,7 +912,7 @@ class Annotation:
     # we can conveniently assume it is canonically ordered
     alias_set: Tuple[str, ...]
     is_write: bool
-    alias_set_after: Tuple[str, ...]
+    alias_set_after: str
 
     @staticmethod
     def parse(ann: str) -> 'Annotation':
