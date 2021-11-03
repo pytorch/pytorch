@@ -1485,8 +1485,16 @@ TEST(LiteInterpreterUpgraderTest, DivTensorV2) {
 #endif // !defined(FB_XPLAT_BUILD)
 
 TEST(LiteInterpreterUpgraderTest, Upgrader) {
-  auto upgrader_size = kUpgraderBytecode.size();
-  ASSERT_EQ(upgrader_size, 1);
+  std::vector<std::unique_ptr<mobile::Function>> upgrader_functions;
+  for (auto const& [upgrader_name, upgrader_bytecode] : kUpgraderBytecode) {
+    std::unique_ptr<mobile::Function> func = mobile::Function::get(
+        upgrader_name,
+        upgrader_bytecode,
+        caffe2::serialize::kMaxSupportedBytecodeVersion);
+    ASSERT_NE(func, nullptr);
+    upgrader_functions.push_back(std::move(func));
+  }
+  ASSERT_EQ(kUpgraderBytecode.size(), upgrader_functions.size());
 }
 
 } // namespace jit
