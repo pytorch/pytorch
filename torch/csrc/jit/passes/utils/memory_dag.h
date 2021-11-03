@@ -123,6 +123,8 @@ class TORCH_API MemoryDAG {
   bool mayAliasImpl(const Element* a, const Element* b) const;
   bool mayContainAliasImpl(const Element* contained, const Element* container)
       const;
+  const MemoryLocations& getAllContainedMemoryLocations(
+      const Element* elem) const;
   void collectAllContainedMemoryLocationsImpl(
       const Element* elem,
       MemoryLocations& cont) const;

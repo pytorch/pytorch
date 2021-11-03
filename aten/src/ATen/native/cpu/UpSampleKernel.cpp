@@ -5,6 +5,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/cpu/utils.h>
+#include <c10/util/irange.h>
 
 namespace at {
 namespace native {
@@ -45,7 +46,7 @@ struct Interpolate {
       scalar_t wts = *(scalar_t*)&data[1][i * strides[1]];
       scalar_t t = Interpolate<n - 1, scalar_t, index_t, interp_size>::eval(src + ids, &data[2 * interp_size], &strides[2 * interp_size], i);
       scalar_t output = t * wts;
-      for (int j=1; j<interp_size; j++) {
+      for (const auto j : c10::irange(1, interp_size)) {
         ids = *(index_t*)&data[2 * j + 0][i * strides[2 * j + 0]];
         wts = *(scalar_t*)&data[2 * j + 1][i * strides[2 * j + 1]];
         t = Interpolate<n - 1, scalar_t, index_t, interp_size>::eval(src + ids, &data[2 * interp_size], &strides[2 * interp_size], i);
@@ -62,7 +63,7 @@ struct Interpolate<1, scalar_t, index_t, interp_size> {
       scalar_t wts = *(scalar_t*)&data[1][i * strides[1]];
       scalar_t t = *(scalar_t *)&src[ids];
       scalar_t output = t * wts;
-      for (int j=1; j<interp_size; j++) {
+      for (const auto j : c10::irange(1, interp_size)) {
         ids = *(index_t*)&data[2 * j + 0][i * strides[2 * j + 0]];
         wts = *(scalar_t*)&data[2 * j + 1][i * strides[2 * j + 1]];
         t = *(scalar_t *)&src[ids];
@@ -206,7 +207,7 @@ template <typename scalar_t, typename index_t, int out_ndims, int interp_size>
 static inline void basic_loop(char** data, const int64_t* strides, int64_t n) {
   char* dst = data[0];
   char* src = data[1];
-  for (int64_t i = 0; i < n; i++) {
+  for (const auto i : c10::irange(n)) {
     *(scalar_t*)&dst[i * strides[0]] = interpolate<out_ndims, scalar_t, index_t, interp_size>(
         src + i * strides[1], &data[2], &strides[2], i);
   }
@@ -297,7 +298,7 @@ void cpu_upsample_nearest_channels_last(
     int64_t ow = 0;
     data_index_init(begin, n, num_batches, oh, output_height, ow, output_width);
 
-    for (int64_t i = begin; i < end; i++) {
+    for (const auto i : c10::irange(begin, end)) {
       int64_t ih = nearest_idx(oh, input_height, output_height, scales[0]);
       int64_t iw = nearest_idx(ow, input_width, output_width, scales[1]);
       scalar_t* output_ptr = output_data + i * channels;
@@ -315,7 +316,7 @@ void cpu_upsample_nearest_channels_last(
     int64_t ow = 0;
     data_index_init(begin, n, num_batches, od, output_depth, oh, output_height, ow, output_width);
 
-    for (int64_t i = begin; i < end; i++) {
+    for (const auto i : c10::irange(begin, end)) {
       int64_t id = nearest_idx(od, input_depth, output_depth, scales[0]);
       int64_t ih = nearest_idx(oh, input_height, output_height, scales[1]);
       int64_t iw = nearest_idx(ow, input_width, output_width, scales[2]);
@@ -390,11 +391,11 @@ void cpu_upsample_linear_channels_last(
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t ih0, ih1, iw0, iw1;
     scalar_t h0lambda, h1lambda, w0lambda, w1lambda;
-    for (int64_t n = begin; n < end; n++) {
-      for (int64_t oh = 0; oh < output_height; oh++) {
+    for (const auto n : c10::irange(begin, end)) {
+      for (const auto oh : c10::irange(output_height)) {
         compute_source_index_and_lambda(
             ih0, ih1, h0lambda, h1lambda, height_scale, oh, input_height, output_height, align_corners);
-        for (int64_t ow = 0; ow < output_width; ow++) {
+        for (const auto ow : c10::irange(output_width)) {
           compute_source_index_and_lambda(
               iw0, iw1, w0lambda, w1lambda, width_scale, ow, input_width, output_width, align_corners);
 
@@ -444,14 +445,14 @@ void cpu_upsample_linear_channels_last(
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t id0, id1, ih0, ih1, iw0, iw1;
     scalar_t d0lambda, d1lambda, h0lambda, h1lambda, w0lambda, w1lambda;
-    for (int64_t n = begin; n < end; n++) {
-      for (int64_t od = 0; od < output_depth; od++) {
+    for (const auto n : c10::irange(begin, end)) {
+      for (const auto od : c10::irange(output_depth)) {
         compute_source_index_and_lambda(
             id0, id1, d0lambda, d1lambda, depth_scale, od, input_depth, output_depth, align_corners);
-        for (int64_t oh = 0; oh < output_height; oh++) {
+        for (const auto oh : c10::irange(output_height)) {
           compute_source_index_and_lambda(
               ih0, ih1, h0lambda, h1lambda, height_scale, oh, input_height, output_height, align_corners);
-          for (int64_t ow = 0; ow < output_width; ow++) {
+          for (const auto ow : c10::irange(output_width)) {
             compute_source_index_and_lambda(
                 iw0, iw1, w0lambda, w1lambda, width_scale, ow, input_width, output_width, align_corners);
 
@@ -523,7 +524,8 @@ struct HelperInterpBase {
     auto new_shape = std::vector<int64_t>(ndims, 1);
     new_shape[reshape_dim] = output_size;
 
-    for (int j=0; j<interp_size; j++) {
+    for (const auto j : c10::irange(interp_size)) {
+      (void)j; //Suppress unused variable warning
       output.emplace_back(empty(new_shape, CPU(c10::CppTypeToScalarType<int64_t>())));
       output.emplace_back(empty(new_shape, CPU(output_type)));
     }
@@ -543,7 +545,8 @@ struct HelperInterpNearest : public HelperInterpBase {
     auto new_shape = std::vector<int64_t>(ndims, 1);
     new_shape[reshape_dim] = output_size;
 
-    for (int j=0; j<interp_size; j++) {
+    for (const auto j : c10::irange(interp_size)) {
+      (void)j; //Suppress unused variable warning
       output.emplace_back(empty(new_shape, CPU(c10::CppTypeToScalarType<int64_t>())));
       // Defines weights for consistency, but not used
       output.emplace_back(at::ones(new_shape, CPU(output_type)));
@@ -578,7 +581,7 @@ struct HelperInterpNearest : public HelperInterpBase {
         auto input_index_ptr = output[0].data_ptr<int64_t>();
         int64_t input_index;
 
-        for (int64_t i=0; i<output_size; i++) {
+        for (const auto i : c10::irange(output_size)) {
           const scalar_t real_input_index = area_pixel_compute_source_index<scalar_t>(
               scale, i, /*align_corners=*/true, /*cubic=*/false);
           input_index = static_cast<int64_t>(floorf(real_input_index));
@@ -625,7 +628,7 @@ struct HelperInterpLinear : public HelperInterpBase {
         auto input_index1_ptr = output[2].data_ptr<int64_t>();
         auto lambda1_ptr = output[3].data_ptr<scalar_t>();
 
-        for (int64_t i=0; i<output_size; i++) {
+        for (const auto i : c10::irange(output_size)) {
 
           compute_source_index_and_lambda<scalar_t>(
             input_index0_ptr[i], input_index1_ptr[i],
@@ -683,14 +686,14 @@ struct HelperInterpCubic : public HelperInterpBase {
         int64_t * idx_ptr;
         scalar_t * wt_ptr;
 
-        for (int64_t i=0; i<output_size; i++) {
+        for (const auto i : c10::irange(output_size)) {
 
           const scalar_t real_input_index = area_pixel_compute_source_index<scalar_t>(
               scale, i, align_corners, /*cubic=*/true);
           input_index = static_cast<int64_t>(floorf(real_input_index));
           get_cubic_upsample_coefficients<scalar_t>(coeffs, real_input_index - input_index);
 
-          for (int j=0; j<interp_size; j++) {
+          for (const auto j : c10::irange(interp_size)) {
             idx_ptr = output[2 * j + 0].data_ptr<int64_t>();
             idx_ptr[i] = static_cast<int64_t>(std::max(std::min(input_index + j - 1, input_size - 1), zero)) * stride;
             wt_ptr = output[2 * j + 1].data_ptr<scalar_t>();
@@ -728,7 +731,7 @@ void upsample_generic_Nd_kernel_impl(
   );
   TORCH_INTERNAL_ASSERT(strides.size() == 2 + out_ndims);
 
-  for (int i=0; i<out_ndims; i++) {
+  for (const auto i : c10::irange(out_ndims)) {
     shape[i + 2] = oshape[i + 2];
     strides[i + 2] = 0;
   }
@@ -744,7 +747,7 @@ void upsample_generic_Nd_kernel_impl(
     input_scalar_type = at::ScalarType::Float;
   }
 
-  for (int i=0; i<out_ndims; i++) {
+  for (const auto i : c10::irange(out_ndims)) {
     // NOLINTNEXTLINE(performance-inefficient-vector-operation)
     indices_weights.emplace_back(
       F::compute_indices_weights(
@@ -909,8 +912,8 @@ void cpu_upsample_nearest_backward(
   int64_t input_slice_size = input_depth * input_height * input_width;
 
   auto loop1d = [&](int64_t begin, int64_t end) {
-    for (int64_t c = begin; c < end; c++){
-      for (int64_t ow = 0; ow < output_width; ow++) {
+    for (const auto c : c10::irange(begin, end)) {
+      for (const auto ow : c10::irange(output_width)) {
         int64_t iw = nearest_idx(ow, input_width, output_width, scales[0]);
         int64_t output_offset = c * output_slice_size + ow;
         int64_t input_offset = c * input_slice_size + iw;
@@ -920,10 +923,10 @@ void cpu_upsample_nearest_backward(
   };
 
   auto loop2d = [&](int64_t begin, int64_t end) {
-    for (int64_t c = begin; c < end; c++) {
-      for (int64_t oh = 0; oh < output_height; oh++) {
+    for (const auto c : c10::irange(begin, end)) {
+      for (const auto oh : c10::irange(output_height)) {
         int64_t ih = nearest_idx(oh, input_height, output_height, scales[0]);
-        for (int64_t ow = 0; ow < output_width; ow++) {
+        for (const auto ow : c10::irange(output_width)) {
           int64_t iw = nearest_idx(ow, input_width, output_width, scales[1]);
           int64_t output_offset = c * output_slice_size + oh * output_width + ow;
           int64_t input_offset = c * input_slice_size + ih * input_width + iw;
@@ -934,12 +937,12 @@ void cpu_upsample_nearest_backward(
   };
 
   auto loop3d = [&](int64_t begin, int64_t end) {
-    for (int64_t c = begin; c < end; c++) {
-      for (int64_t od = 0; od < output_depth; od++) {
+    for (const auto c : c10::irange(begin, end)) {
+      for (const auto od : c10::irange(output_depth)) {
         int64_t id = nearest_idx(od, input_depth, output_depth, scales[0]);
-        for (int64_t oh = 0; oh < output_height; oh++) {
+        for (const auto oh : c10::irange(output_height)) {
           int64_t ih = nearest_idx(oh, input_height, output_height, scales[1]);
-          for (int64_t ow = 0; ow < output_width; ow++) {
+          for (const auto ow : c10::irange(output_width)) {
             int64_t iw = nearest_idx(ow, input_width, output_width, scales[2]);
             int64_t output_offset = c * output_slice_size +
                 od *  output_height * output_width + oh * output_width + ow;

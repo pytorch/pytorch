@@ -23,6 +23,11 @@ class FoldedGraphModule(torch.fx.GraphModule):
         const_subgraph: Optional[torch.fx.Graph] = None,
         fx_const_folded_attrs_name: str = None,
     ):
+        # In init, we set graph's owning module to root which will make graph's
+        # owning module be None because graph already have a owning module. We
+        # need owning module to run DCE. To work around we set the number of
+        # graph's owners to 0.
+        graph._owners = 0
         super().__init__(root, graph)
         self.const_subgraph_module = (
             None
@@ -151,14 +156,6 @@ def split_const_subgraphs(
 
     const_gm, non_const_gm = split.submod_0, split.submod_1
     const_mod_name, non_const_mod_name = "submod_0", "submod_1"
-
-    # Later we are creating get_attr nodes from main module get_attr nodes and we use the
-    # same node.target. If there's a get_attr that refers to an attributes in a module and
-    # this module is not included in non_const_gm then we would have a trouble when creating
-    # get_attr ndoes because it will try to find the module that owns the attribute first.
-    # Setting owning_module here makes the owning_module of non_const_gm.graph to None then
-    # the check when creating get_attr nodes will get skipped.
-    non_const_gm.graph.owning_module = split
 
     # The module that a call_module node refers to gets copied to submodules during split.
     # The path to the module also gets inlined, i.e. mod.a.b -> mod_a_b. Here we need to

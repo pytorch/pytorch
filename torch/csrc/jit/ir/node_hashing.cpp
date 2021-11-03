@@ -23,6 +23,10 @@ bool tensorEqual(const at::Tensor& lhs, const at::Tensor& rhs) {
   if (lhs.is_mkldnn() || rhs.is_mkldnn()) {
     return false;
   }
+  // If device is not equal, lhs.equal(rhs) would throw an error.
+  if (lhs.device() != rhs.device()) {
+    return false;
+  }
   return lhs.options().type_equal(rhs.options()) && lhs.equal(rhs);
 }
 
