@@ -177,13 +177,13 @@ NVFUSER_BENCHMARK_RUN(NvFuserScheduler_LayerNorm_BWD_fp32)
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_LayerNorm_BWD_fp32)
     // ->RangeMultiplier(2)
-    ->Ranges({{2, 16}, {32768, 32 * 1024 * 1024}})
+    ->Ranges({{2, 16}, {32768, 16 * 1024 * 1024}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_LayerNorm_BWD_fp32)
     // ->RangeMultiplier(2)
-    ->Ranges({{32768, 32 * 1024 * 1024}, {2, 16}})
+    ->Ranges({{32768, 16 * 1024 * 1024}, {2, 16}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
@@ -233,13 +233,13 @@ BENCHMARK(Baseline_LayerNorm_BWD_fp32)
 
 BENCHMARK(Baseline_LayerNorm_BWD_fp32)
     // ->RangeMultiplier(2)
-    ->Ranges({{2, 16}, {32768, 32 * 1024 * 1024}})
+    ->Ranges({{2, 16}, {32768, 16 * 1024 * 1024}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
 BENCHMARK(Baseline_LayerNorm_BWD_fp32)
     // ->RangeMultiplier(2)
-    ->Ranges({{32768, 32 * 1024 * 1024}, {2, 16}})
+    ->Ranges({{32768, 16 * 1024 * 1024}, {2, 16}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 

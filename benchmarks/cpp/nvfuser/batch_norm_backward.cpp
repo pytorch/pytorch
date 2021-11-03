@@ -168,6 +168,9 @@ static void Baseline_BatchNorm_BWD(
       true);
   cudaDeviceSynchronize();
 
+  // Sync everything up before we start
+  clearL2Cache();
+  cudaDeviceSynchronize();
   for (auto _ : benchmark_state) {
     CudaKernelTimer timer;
 
@@ -183,6 +186,8 @@ static void Baseline_BatchNorm_BWD(
         std::get<3>(fwd_result));
 
     benchmark_state.SetIterationTime(timer.elapsed() / 1000.0);
+    cudaDeviceSynchronize();
+    clearL2Cache();
     cudaDeviceSynchronize();
   }
 
@@ -216,7 +221,7 @@ NVFUSER_BENCHMARK_DEFINE(
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_BatchNorm_BWD_fp32)
     // ->RangeMultiplier(2)
-    ->Ranges({{64, 512}, {32, 128}, {2, 128}})
+    ->Ranges({{64, 512}, {32, 128}, {2, 64}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
@@ -249,7 +254,7 @@ NVFUSER_BENCHMARK_RUN(NvFuserScheduler_BatchNorm_BWD_fp16)
 BENCHMARK(Baseline_BatchNorm_BWD_cuDNN_fp32)
     // ->RangeMultiplier(2)
     // cuDNN didn't make it to 1024
-    ->Ranges({{64, 512}, {32, 128}, {2, 128}})
+    ->Ranges({{64, 512}, {32, 128}, {2, 64}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 

@@ -323,7 +323,7 @@ NVFUSER_BENCHMARK_DEFINE(
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_SBR_fp32)
     // ->RangeMultiplier(2)
-    ->Ranges({{8, 8}, {640, 640}, {64, 256}})
+    ->Ranges({{8, 8}, {640, 640}, {64, 128}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
@@ -335,7 +335,7 @@ NVFUSER_BENCHMARK_DEFINE(
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_SBR_fp16)
     // ->RangeMultiplier(2)
-    ->Ranges({{8, 8}, {640, 640}, {64, 256}})
+    ->Ranges({{8, 8}, {640, 640}, {64, 128}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
@@ -349,7 +349,7 @@ NVFUSER_BENCHMARK_DEFINE(
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_SBR_Norm_fp32)
     // ->RangeMultiplier(2)
-    ->Ranges({{8, 8}, {640, 640}, {64, 256}})
+    ->Ranges({{8, 8}, {640, 640}, {64, 128}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
@@ -361,7 +361,7 @@ NVFUSER_BENCHMARK_DEFINE(
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_SBR_Norm_fp16)
     // ->RangeMultiplier(2)
-    ->Ranges({{8, 8}, {640, 640}, {64, 256}})
+    ->Ranges({{8, 8}, {640, 640}, {64, 128}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
@@ -373,7 +373,7 @@ static void Baseline_SBR_fp32(benchmark::State& benchmark_state) {
 
 BENCHMARK(Baseline_SBR_fp32)
     // ->RangeMultiplier(2)
-    ->Ranges({{8, 8}, {640, 640}, {64, 256}})
+    ->Ranges({{8, 8}, {640, 640}, {64, 128}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
@@ -383,7 +383,7 @@ static void Baseline_SBR_fp16(benchmark::State& benchmark_state) {
 
 BENCHMARK(Baseline_SBR_fp16)
     // ->RangeMultiplier(2)
-    ->Ranges({{8, 8}, {640, 640}, {64, 256}})
+    ->Ranges({{8, 8}, {640, 640}, {64, 128}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
@@ -395,7 +395,7 @@ static void Baseline_SBR_Norm_fp32(benchmark::State& benchmark_state) {
 
 BENCHMARK(Baseline_SBR_Norm_fp32)
     // ->RangeMultiplier(2)
-    ->Ranges({{8, 8}, {640, 640}, {64, 256}})
+    ->Ranges({{8, 8}, {640, 640}, {64, 128}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
@@ -405,6 +405,6 @@ static void Baseline_SBR_Norm_fp16(benchmark::State& benchmark_state) {
 
 BENCHMARK(Baseline_SBR_Norm_fp16)
     // ->RangeMultiplier(2)
-    ->Ranges({{8, 8}, {640, 640}, {64, 256}})
+    ->Ranges({{8, 8}, {640, 640}, {64, 128}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();

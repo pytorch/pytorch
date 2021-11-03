@@ -91,6 +91,57 @@ static void NvFuserScheduler_Reduction(
       (iter_size * reduction_size + iter_size) * int64_t(dataTypeSize(dtype)));
 }
 
+static void Baseline_Reduction(
+    benchmark::State& benchmark_state,
+    DataType dtype,
+    int reduction_dim) {
+  auto reduction_size = benchmark_state.range(0);
+  auto iter_size = benchmark_state.range(1);
+
+  at::manual_seed(0);
+  auto options =
+      at::TensorOptions().dtype(data_type_to_aten(dtype)).device(at::kCUDA, 0);
+  at::Tensor aten_input =
+      (reduction_dim ? at::randn({iter_size, reduction_size}, options)
+                     : at::randn({reduction_size, iter_size}, options));
+
+  // Sync everything up before we start
+  clearL2Cache();
+  cudaDeviceSynchronize();
+  for (auto _ : benchmark_state) {
+    CudaKernelTimer timer;
+    auto output = aten_input.sum({reduction_dim});
+    benchmark_state.SetIterationTime(timer.elapsed() / 1000.0);
+    cudaDeviceSynchronize();
+    clearL2Cache();
+    cudaDeviceSynchronize();
+  }
+
+  benchmark_state.SetBytesProcessed(
+      int64_t(benchmark_state.iterations()) *
+      (iter_size * reduction_size + iter_size) * int64_t(dataTypeSize(dtype)));
+}
+
+//------------------------------------------------------------------------------
+
+static void Baseline_Reduction_Outer_fp32(benchmark::State& benchmark_state) {
+  Baseline_Reduction(benchmark_state, DataType::Float, 0);
+}
+
+static void Baseline_Reduction_Outer_fp16(benchmark::State& benchmark_state) {
+  Baseline_Reduction(benchmark_state, DataType::Half, 0);
+}
+
+static void Baseline_Reduction_Inner_fp32(benchmark::State& benchmark_state) {
+  Baseline_Reduction(benchmark_state, DataType::Float, 1);
+}
+
+static void Baseline_Reduction_Inner_fp16(benchmark::State& benchmark_state) {
+  Baseline_Reduction(benchmark_state, DataType::Half, 1);
+}
+
+//------------------------------------------------------------------------------
+
 NVFUSER_BENCHMARK_DEFINE(
     NvFuserScheduler_Reduction_Outer_fp32,
     setupReduction,
@@ -124,13 +175,13 @@ NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Reduction_Outer_fp32)
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Reduction_Outer_fp32)
     // ->RangeMultiplier(2)
-    ->Ranges({{32768, 128 * 1024 * 1024}, {2, 16}})
+    ->Ranges({{32768, 64 * 1024 * 1024}, {2, 16}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Reduction_Outer_fp32)
     // ->RangeMultiplier(2)
-    ->Ranges({{2, 16}, {32768, 128 * 1024 * 1024}})
+    ->Ranges({{2, 16}, {32768, 64 * 1024 * 1024}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
@@ -148,13 +199,13 @@ NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Reduction_Outer_fp16)
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Reduction_Outer_fp16)
     // ->RangeMultiplier(2)
-    ->Ranges({{32768, 128 * 1024 * 1024}, {2, 16}})
+    ->Ranges({{32768, 64 * 1024 * 1024}, {2, 16}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Reduction_Outer_fp16)
     // ->RangeMultiplier(2)
-    ->Ranges({{2, 16}, {32768, 128 * 1024 * 1024}})
+    ->Ranges({{2, 16}, {32768, 64 * 1024 * 1024}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
@@ -172,13 +223,13 @@ NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Reduction_Inner_fp32)
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Reduction_Inner_fp32)
     // ->RangeMultiplier(2)
-    ->Ranges({{32768, 128 * 1024 * 1024}, {2, 16}})
+    ->Ranges({{32768, 64 * 1024 * 1024}, {2, 16}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Reduction_Inner_fp32)
     // ->RangeMultiplier(2)
-    ->Ranges({{2, 16}, {32768, 128 * 1024 * 1024}})
+    ->Ranges({{2, 16}, {32768, 64 * 1024 * 1024}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
@@ -196,17 +247,115 @@ NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Reduction_Inner_fp16)
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Reduction_Inner_fp16)
     // ->RangeMultiplier(2)
-    ->Ranges({{32768, 128 * 1024 * 1024}, {2, 16}})
+    ->Ranges({{32768, 64 * 1024 * 1024}, {2, 16}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Reduction_Inner_fp16)
     // ->RangeMultiplier(2)
-    ->Ranges({{2, 16}, {32768, 128 * 1024 * 1024}})
+    ->Ranges({{2, 16}, {32768, 64 * 1024 * 1024}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Reduction_Inner_fp16)
+    // ->RangeMultiplier(2)
+    ->Ranges({{128, 1024 * 16}, {128, 1024 * 16}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+//------------------------------------------------------------------------------
+
+BENCHMARK(Baseline_Reduction_Outer_fp32)
+    // ->RangeMultiplier(2)
+    ->Ranges({{1, 1024 * 1024}, {160, 320}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Baseline_Reduction_Outer_fp32)
+    // ->RangeMultiplier(2)
+    ->Ranges({{32768, 64 * 1024 * 1024}, {2, 16}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Baseline_Reduction_Outer_fp32)
+    // ->RangeMultiplier(2)
+    ->Ranges({{2, 16}, {32768, 64 * 1024 * 1024}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Baseline_Reduction_Outer_fp32)
+    // ->RangeMultiplier(2)
+    ->Ranges({{128, 1024 * 16}, {128, 1024 * 16}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Baseline_Reduction_Outer_fp16)
+    // ->RangeMultiplier(2)
+    ->Ranges({{1, 1024 * 1024}, {160, 320}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Baseline_Reduction_Outer_fp16)
+    // ->RangeMultiplier(2)
+    ->Ranges({{32768, 64 * 1024 * 1024}, {2, 16}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Baseline_Reduction_Outer_fp16)
+    // ->RangeMultiplier(2)
+    ->Ranges({{2, 16}, {32768, 64 * 1024 * 1024}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Baseline_Reduction_Outer_fp16)
+    // ->RangeMultiplier(2)
+    ->Ranges({{128, 1024 * 16}, {128, 1024 * 16}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Baseline_Reduction_Inner_fp32)
+    // ->RangeMultiplier(2)
+    ->Ranges({{1, 1024 * 1024}, {160, 320}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Baseline_Reduction_Inner_fp32)
+    // ->RangeMultiplier(2)
+    ->Ranges({{32768, 64 * 1024 * 1024}, {2, 16}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Baseline_Reduction_Inner_fp32)
+    // ->RangeMultiplier(2)
+    ->Ranges({{2, 16}, {32768, 64 * 1024 * 1024}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Baseline_Reduction_Inner_fp32)
+    // ->RangeMultiplier(2)
+    ->Ranges({{128, 1024 * 16}, {128, 1024 * 16}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Baseline_Reduction_Inner_fp16)
+    // ->RangeMultiplier(2)
+    ->Ranges({{1, 1024 * 1024}, {160, 320}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Baseline_Reduction_Inner_fp16)
+    // ->RangeMultiplier(2)
+    ->Ranges({{32768, 64 * 1024 * 1024}, {2, 16}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Baseline_Reduction_Inner_fp16)
+    // ->RangeMultiplier(2)
+    ->Ranges({{2, 16}, {32768, 64 * 1024 * 1024}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Baseline_Reduction_Inner_fp16)
     // ->RangeMultiplier(2)
     ->Ranges({{128, 1024 * 16}, {128, 1024 * 16}})
     ->Unit(benchmark::kMicrosecond)

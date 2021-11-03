@@ -358,8 +358,6 @@ NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Softmax_Inner_fp16)
 
 //------------------------------------------------------------------------------
 
-
-
 BENCHMARK(Baseline_Softmax_Outer_fp32)
     // ->RangeMultiplier(2)
     ->Ranges({{1, 1024 * 1024}, {160, 320}})

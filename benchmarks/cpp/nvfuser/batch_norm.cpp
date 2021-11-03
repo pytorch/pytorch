@@ -148,9 +148,9 @@ static void Baseline_BatchNorm(
       kMomentum,
       kEps,
       true);
-// aten::native_batch_norm_backward(Tensor grad_out, Tensor input, Tensor? weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_invstd, bool train, float eps, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
-  cudaDeviceSynchronize();
 
+  clearL2Cache();
+  cudaDeviceSynchronize();
   for (auto _ : benchmark_state) {
     CudaKernelTimer timer;
     auto output = at::batch_norm(
@@ -164,6 +164,8 @@ static void Baseline_BatchNorm(
         kEps,
         true);
     benchmark_state.SetIterationTime(timer.elapsed() / 1000.0);
+    cudaDeviceSynchronize();
+    clearL2Cache();
     cudaDeviceSynchronize();
   }
   benchmark_state.SetBytesProcessed(
@@ -194,7 +196,7 @@ NVFUSER_BENCHMARK_DEFINE(
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_BatchNorm_fp32)
     // ->RangeMultiplier(2)
-    ->Ranges({{64, 512}, {32, 128}, {2, 128}})
+    ->Ranges({{64, 512}, {32, 128}, {2, 64}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
@@ -212,7 +214,7 @@ NVFUSER_BENCHMARK_DEFINE(
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_BatchNorm_fp16)
     // ->RangeMultiplier(2)
-    ->Ranges({{64, 1024}, {32, 128}, {2, 128}})
+    ->Ranges({{64, 512}, {32, 128}, {2, 128}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
@@ -227,7 +229,7 @@ NVFUSER_BENCHMARK_RUN(NvFuserScheduler_BatchNorm_fp16)
 BENCHMARK(Baseline_BatchNorm_cuDNN_fp32)
     // ->RangeMultiplier(2)
     // cuDNN didn't make it to 1024
-    ->Ranges({{64, 512}, {32, 128}, {2, 128}})
+    ->Ranges({{64, 512}, {32, 128}, {2, 64}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
@@ -239,7 +241,7 @@ BENCHMARK(Baseline_BatchNorm_cuDNN_fp32)
 
 BENCHMARK(Baseline_BatchNorm_cuDNN_fp16)
     // ->RangeMultiplier(2)
-    ->Ranges({{64, 1024}, {32, 128}, {2, 128}})
+    ->Ranges({{64, 512}, {32, 128}, {2, 128}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 

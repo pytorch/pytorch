@@ -190,7 +190,7 @@ NVFUSER_BENCHMARK_DEFINE(
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_InstanceNorm_fp32)
     // ->RangeMultiplier(2)
-    ->Ranges({{8, 8}, {640, 640}, {64, 256}})
+    ->Ranges({{8, 8}, {640, 640}, {64, 128}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
@@ -209,7 +209,7 @@ NVFUSER_BENCHMARK_RUN(NvFuserScheduler_InstanceNorm_fp16)
 
 BENCHMARK(Baseline_InstanceNorm_fp32)
     // ->RangeMultiplier(2)
-    ->Ranges({{8, 8}, {640, 640}, {64, 256}})
+    ->Ranges({{8, 8}, {640, 640}, {64, 128}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
