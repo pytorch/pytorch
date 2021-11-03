@@ -191,7 +191,7 @@ py::object PyRRef::toHere(const float timeoutSeconds) const {
 
     if (rref_->isPyObj()) {
       // python_rpc_handler deserialization will acquires GIL.
-      auto rfr_values = value.toTuple()->elements().vec();
+      auto rfr_values = value.toTupleRef().elements().vec();
       auto& pythonRpcHandler = PythonRpcHandler::getInstance();
       auto ret = pythonRpcHandler.deserialize(
           SerializedPyObj::fromIValues(std::move(rfr_values)));

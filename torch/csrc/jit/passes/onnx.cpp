@@ -269,6 +269,30 @@ void NodeToONNX(
     for (const auto i : c10::irange(num_old_outputs)) {
       auto old = old_outputs[i];
       if (outputs[i]) {
+        bool exist_in_env =
+            (env.end() !=
+             std::find_if(
+                 env.begin(), env.end(), [&outputs, i](const auto& vt) {
+                   return vt.second == outputs[i];
+                 }));
+        // Update ONNX value debug name with ATen value debug name if existed.
+        // Skip if ONNX value already exist in environment.
+        // This implies the op is a noop, and the value is owned by
+        // other node created elsewhere.
+        if (old->hasDebugName() && !exist_in_env) {
+          auto old_name = outputs[i]->debugName();
+          auto new_name = old->debugNameBase();
+          auto debug_names = new_block->owningGraph()->debugNames();
+          auto exist_name = debug_names.find(new_name);
+          outputs[i]->setDebugName(new_name);
+          if (exist_name != debug_names.end()) {
+            // setDebugName changes name of existing value with same name.
+            // Set again to revert the changes, but update name for new value
+            // with suffix.
+            exist_name->second->setDebugName(new_name);
+          }
+          ConstantValueMap::UpdateValueName(old_name, outputs[i]->debugName());
+        }
         // Allow symbolic() to skip specifying the type of the return node.
         // Unfortunately, they are on the hook for all internal nodes
         // (though in practice, the types are not computed.)
@@ -287,8 +311,7 @@ void NodeToONNX(
 
           // Copy over source location and scope information to all nodes
           // created by the symbolic
-          const_node->output()->node()->setSourceRange(node->sourceRange());
-          const_node->output()->node()->setScope(node->scope());
+          const_node->copyMetadata(node);
           new_block->appendNode(const_node);
           ONNXShapeTypeInference(const_node, empty_params_dict, opset_version);
           env[old] = const_node->output();
@@ -300,8 +323,10 @@ void NodeToONNX(
 
           // Copy over source location and scope information to all nodes
           // created by the symbolic
-          outputs[i]->node()->setSourceRange(node->sourceRange());
-          outputs[i]->node()->setScope(node->scope());
+          // Do not set metadata if outputs[i] is already in env.
+          if (!exist_in_env) {
+            outputs[i]->node()->copyMetadata(node);
+          }
           env[old] = outputs[i];
         }
       } else {
