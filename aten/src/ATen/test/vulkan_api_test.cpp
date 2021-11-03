@@ -1673,7 +1673,7 @@ TEST(VulkanAPITest, transposed_conv2d) {
   constexpr int64_t groups = 1;
   constexpr std::array<int64_t, 2u> stride{1, 2};
   constexpr std::array<int64_t, 2u> padding{1, 0};
-  constexpr std::array<int64_t, 2u> output_padding{0, 0};
+  constexpr std::array<int64_t, 2u> output_padding{0, 1};
   //TODO: Support conv_transpose2d with dilation != 1
   constexpr std::array<int64_t, 2u> dilation{1, 1};
 
