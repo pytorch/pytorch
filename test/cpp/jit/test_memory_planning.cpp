@@ -343,13 +343,6 @@ void test(
   ASSERT_TRUE(
       actual_managed_allocs.size() == 1 &&
       actual_managed_allocs.begin()->second == total_size);
-  for (const auto& item : actual_unmanaged_allocs) {
-    ASSERT_TRUE(
-        planned_unmanaged_allocs[reconciled_nodes_map[item.first]] ==
-        item.second)
-        << planned_unmanaged_allocs[reconciled_nodes_map[item.first]] << "\n"
-        << item.second;
-  }
   assertAllClose(baseline, res);
 }
 
@@ -460,17 +453,57 @@ TEST(MemoryPlannerTest, LSTMLinearScan) {
 }
 
 TEST(MemoryPlannerTest, LSTMGreedyBySizeWithSmallestGap) {
-  StorageAttrs expected_storage = {3328, DeviceType::CPU};
+  StorageAttrs expected_storage = {3072, DeviceType::CPU};
   std::vector<AllocAttrs> expected_allocs = {
-      {1024, 1280, TTP((Vec{1, 256}), (Vec{256, 1}))},
-      {1024, 2304, TTP((Vec{1, 256}), (Vec{256, 1}))},
-      {1024, 256, TTP((Vec{1, 256}), (Vec{256, 1}))},
-      {256, 1280, TTP((Vec{1, 64}), (Vec{64, 1}))},
+      {1024, 0, TTP((Vec{1, 256}), (Vec{256, 1}))},
+      {1024, 1024, TTP((Vec{1, 256}), (Vec{256, 1}))},
+      {1024, 2048, TTP((Vec{1, 256}), (Vec{256, 1}))},
       {256, 0, TTP((Vec{1, 64}), (Vec{64, 1}))},
-      {256, 1536, TTP((Vec{1, 64}), (Vec{64, 1}))},
-      {256, 1792, TTP((Vec{1, 64}), (Vec{64, 1}))},
       {256, 256, TTP((Vec{1, 64}), (Vec{64, 1}))},
       {256, 512, TTP((Vec{1, 64}), (Vec{64, 1}))},
+      {256, 768, TTP((Vec{1, 64}), (Vec{64, 1}))},
+      {256, 1024, TTP((Vec{1, 64}), (Vec{64, 1}))},
+      {256, 768, TTP((Vec{1, 64}), (Vec{64, 1}))},
+      {256, 0, TTP((Vec{1, 64}), (Vec{64, 1}))},
+  };
+  testLSTM(
+      expected_storage,
+      expected_allocs,
+      Strategy::GREEDY_BY_SIZE_WITH_SMALLEST_GAP);
+}
+
+TEST(MemoryPlannerTest, LSTMGreedyBySizeWithFirstGap) {
+  StorageAttrs expected_storage = {3072, DeviceType::CPU};
+  std::vector<AllocAttrs> expected_allocs = {
+      {1024, 0, TTP((Vec{1, 256}), (Vec{256, 1}))},
+      {1024, 1024, TTP((Vec{1, 256}), (Vec{256, 1}))},
+      {1024, 2048, TTP((Vec{1, 256}), (Vec{256, 1}))},
+      {256, 0, TTP((Vec{1, 64}), (Vec{64, 1}))},
+      {256, 256, TTP((Vec{1, 64}), (Vec{64, 1}))},
+      {256, 512, TTP((Vec{1, 64}), (Vec{64, 1}))},
+      {256, 768, TTP((Vec{1, 64}), (Vec{64, 1}))},
+      {256, 1024, TTP((Vec{1, 64}), (Vec{64, 1}))},
+      {256, 768, TTP((Vec{1, 64}), (Vec{64, 1}))},
+      {256, 0, TTP((Vec{1, 64}), (Vec{64, 1}))},
+  };
+  testLSTM(
+      expected_storage,
+      expected_allocs,
+      Strategy::GREEDY_BY_SIZE_WITH_FIRST_GAP);
+}
+
+TEST(MemoryPlannerTest, LSTMGreedyByLongestAndSizeWithSmallestGap) {
+  StorageAttrs expected_storage = {3072, DeviceType::CPU};
+  std::vector<AllocAttrs> expected_allocs = {
+      {1024, 0, TTP((Vec{1, 256}), (Vec{256, 1}))},
+      {1024, 1024, TTP((Vec{1, 256}), (Vec{256, 1}))},
+      {1024, 2048, TTP((Vec{1, 256}), (Vec{256, 1}))},
+      {256, 256, TTP((Vec{1, 64}), (Vec{64, 1}))},
+      {256, 0, TTP((Vec{1, 64}), (Vec{64, 1}))},
+      {256, 512, TTP((Vec{1, 64}), (Vec{64, 1}))},
+      {256, 1024, TTP((Vec{1, 64}), (Vec{64, 1}))},
+      {256, 768, TTP((Vec{1, 64}), (Vec{64, 1}))},
+      {256, 1024, TTP((Vec{1, 64}), (Vec{64, 1}))},
       {256, 256, TTP((Vec{1, 64}), (Vec{64, 1}))},
   };
   testLSTM(
@@ -479,58 +512,18 @@ TEST(MemoryPlannerTest, LSTMGreedyBySizeWithSmallestGap) {
       Strategy::GREEDY_BY_LONGEST_AND_SIZE_WITH_SMALLEST_GAP);
 }
 
-TEST(MemoryPlannerTest, LSTMGreedyBySizeWithFirstGap) {
-  StorageAttrs expected_storage = {3328, DeviceType::CPU};
-  std::vector<AllocAttrs> expected_allocs = {
-      {1024, 1280, TTP((Vec{1, 256}), (Vec{256, 1}))},
-      {1024, 2304, TTP((Vec{1, 256}), (Vec{256, 1}))},
-      {1024, 256, TTP((Vec{1, 256}), (Vec{256, 1}))},
-      {256, 1280, TTP((Vec{1, 64}), (Vec{64, 1}))},
-      {256, 0, TTP((Vec{1, 64}), (Vec{64, 1}))},
-      {256, 1536, TTP((Vec{1, 64}), (Vec{64, 1}))},
-      {256, 1792, TTP((Vec{1, 64}), (Vec{64, 1}))},
-      {256, 256, TTP((Vec{1, 64}), (Vec{64, 1}))},
-      {256, 512, TTP((Vec{1, 64}), (Vec{64, 1}))},
-      {256, 256, TTP((Vec{1, 64}), (Vec{64, 1}))},
-  };
-  testLSTM(
-      expected_storage,
-      expected_allocs,
-      Strategy::GREEDY_BY_LONGEST_AND_SIZE_WITH_FIRST_GAP);
-}
-
-TEST(MemoryPlannerTest, LSTMGreedyByLongestAndSizeWithSmallestGap) {
-  StorageAttrs expected_storage = {3328, DeviceType::CPU};
-  std::vector<AllocAttrs> expected_allocs = {
-      {1024, 1280, TTP((Vec{1, 256}), (Vec{256, 1}))},
-      {1024, 2304, TTP((Vec{1, 256}), (Vec{256, 1}))},
-      {1024, 256, TTP((Vec{1, 256}), (Vec{256, 1}))},
-      {256, 1280, TTP((Vec{1, 64}), (Vec{64, 1}))},
-      {256, 0, TTP((Vec{1, 64}), (Vec{64, 1}))},
-      {256, 1536, TTP((Vec{1, 64}), (Vec{64, 1}))},
-      {256, 1792, TTP((Vec{1, 64}), (Vec{64, 1}))},
-      {256, 256, TTP((Vec{1, 64}), (Vec{64, 1}))},
-      {256, 512, TTP((Vec{1, 64}), (Vec{64, 1}))},
-      {256, 256, TTP((Vec{1, 64}), (Vec{64, 1}))},
-  };
-  testLSTM(
-      expected_storage,
-      expected_allocs,
-      Strategy::GREEDY_BY_LONGEST_AND_SIZE_WITH_FIRST_GAP);
-}
-
 TEST(MemoryPlannerTest, LSTMGreedyByLongestAndSizeWithFirstGap) {
-  StorageAttrs expected_storage = {3328, DeviceType::CPU};
+  StorageAttrs expected_storage = {3072, DeviceType::CPU};
   std::vector<AllocAttrs> expected_allocs = {
-      {1024, 1280, TTP((Vec{1, 256}), (Vec{256, 1}))},
-      {1024, 2304, TTP((Vec{1, 256}), (Vec{256, 1}))},
-      {1024, 256, TTP((Vec{1, 256}), (Vec{256, 1}))},
-      {256, 1280, TTP((Vec{1, 64}), (Vec{64, 1}))},
-      {256, 0, TTP((Vec{1, 64}), (Vec{64, 1}))},
-      {256, 1536, TTP((Vec{1, 64}), (Vec{64, 1}))},
-      {256, 1792, TTP((Vec{1, 64}), (Vec{64, 1}))},
+      {1024, 0, TTP((Vec{1, 256}), (Vec{256, 1}))},
+      {1024, 1024, TTP((Vec{1, 256}), (Vec{256, 1}))},
+      {1024, 2048, TTP((Vec{1, 256}), (Vec{256, 1}))},
       {256, 256, TTP((Vec{1, 64}), (Vec{64, 1}))},
+      {256, 0, TTP((Vec{1, 64}), (Vec{64, 1}))},
       {256, 512, TTP((Vec{1, 64}), (Vec{64, 1}))},
+      {256, 1024, TTP((Vec{1, 64}), (Vec{64, 1}))},
+      {256, 768, TTP((Vec{1, 64}), (Vec{64, 1}))},
+      {256, 1024, TTP((Vec{1, 64}), (Vec{64, 1}))},
       {256, 256, TTP((Vec{1, 64}), (Vec{64, 1}))},
   };
   testLSTM(

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Owner(s): ["module: unknown"]
+
 import sys
 import os
 import io
@@ -34,8 +36,8 @@ class SimpleModel(torch.nn.Module):
 class QuantModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.quant = torch.quantization.QuantStub()
-        self.dequant = torch.quantization.DeQuantStub()
+        self.quant = torch.ao.quantization.QuantStub()
+        self.dequant = torch.ao.quantization.DeQuantStub()
         self.core = SimpleModel()
 
     def forward(self, x):
@@ -101,9 +103,7 @@ class TestModelDump(TestCase):
     def open_html_model(self, wd, model, extra_files=None):
         buf = io.BytesIO()
         torch.jit.save(model, buf, _extra_files=extra_files)
-        info = torch.utils.model_dump.get_model_info(buf)
-        skeleton = torch.utils.model_dump.get_inline_skeleton()
-        page = torch.utils.model_dump.burn_in_info(skeleton, info)
+        page = torch.utils.model_dump.get_info_and_burn_skeleton(buf)
         wd.get("data:text/html;charset=utf-8," + urllib.parse.quote(page))
 
     def open_section_and_get_body(self, wd, name):
@@ -155,14 +155,14 @@ class TestModelDump(TestCase):
 
     def get_quant_model(self):
         fmodel = QuantModel().eval()
-        fmodel = torch.quantization.fuse_modules(fmodel, [
+        fmodel = torch.ao.quantization.fuse_modules(fmodel, [
             ["core.layer1", "core.relu1"],
             ["core.layer2", "core.relu2"],
         ])
-        fmodel.qconfig = torch.quantization.get_default_qconfig("qnnpack")
-        prepped = torch.quantization.prepare(fmodel)
+        fmodel.qconfig = torch.ao.quantization.get_default_qconfig("qnnpack")
+        prepped = torch.ao.quantization.prepare(fmodel)
         prepped(torch.randn(2, 16))
-        qmodel = torch.quantization.convert(prepped)
+        qmodel = torch.ao.quantization.convert(prepped)
         return qmodel
 
     @unittest.skipUnless("qnnpack" in supported_qengines, "QNNPACK not available")
@@ -218,6 +218,22 @@ class TestModelDump(TestCase):
         check_memory(
             torch.jit.freeze(torch.jit.script(SimpleModel()).eval()),
             simple_model_memory)
+
+        # Make sure we can handle a model with both constants and data tensors.
+        class ComposedModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w1 = torch.zeros(1, 2)
+                self.w2 = torch.ones(2, 2)
+
+            def forward(self, arg):
+                return arg * self.w2 + self.w1
+
+        check_memory(
+            torch.jit.freeze(
+                torch.jit.script(ComposedModule()).eval(),
+                preserved_attrs=["w1"]),
+            4 * (2 + 4))
 
 
 if __name__ == '__main__':

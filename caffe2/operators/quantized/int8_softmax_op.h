@@ -38,7 +38,6 @@ class Int8SoftmaxOp final : public Operator<CPUContext> {
      * in-place, we may overwrite these parameters later, when we set
      * quantization parameters for output tensor.
      */
-    const uint8_t X_zero_point = X.zero_point;
     const float X_scale = X.scale;
 
     Y->scale = Y_scale;

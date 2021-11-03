@@ -5,17 +5,25 @@
 namespace torch {
 namespace jit {
 
-using OffsetFinder =
-    size_t(UniqueLiveRange, size_t, std::vector<MemAllocation>);
+enum GAP_PRIORITY { FIRST, SMALLEST };
 
-OffsetFinder findOffsetWithSmallestGap;
+size_t findGapOffset(
+    UniqueLiveRange unalloced_ulvr,
+    size_t size,
+    std::unordered_map<const Value*, MemAllocation> ordered_allocations,
+    const LivenessMap& liveness_map,
+    GAP_PRIORITY gap_priority);
 
-OffsetFinder findFirstOffset;
-
-MemAllocation makeAllocation(
+void makeAllocation(
     UniqueLiveRange ulvr,
     size_t size,
-    std::vector<MemAllocation>& ordered_allocations,
-    OffsetFinder findOffset);
+    std::unordered_map<const Value*, MemAllocation>& current_allocations,
+    const LivenessMap& liveness_map,
+    GAP_PRIORITY gap_priority = GAP_PRIORITY::SMALLEST);
+
+std::vector<MemAllocation> orderAllocations(
+    const std::unordered_map<const Value*, MemAllocation>&
+        current_allocations);
+
 } // namespace jit
 } // namespace torch

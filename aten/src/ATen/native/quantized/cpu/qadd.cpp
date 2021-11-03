@@ -28,7 +28,6 @@ inline void check_inputs(const Tensor& qa, const Tensor& qb) {
   TORCH_CHECK(
       qa.qscheme() == qb.qscheme(),
       "Both inputs to Add must have the same quantization shceme.");
-  TORCH_CHECK(qa.numel() == qb.numel(), "Add operands must be the same size!");
   TORCH_CHECK(
       qa.scalar_type() == qb.scalar_type(),
       "Add operands should have same data type.");
@@ -310,4 +309,9 @@ TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
 }
 
 }  // namespace
+
+Tensor quantized_add(Tensor qa, Tensor qb, double scale, int64_t zero_point){
+  return qadd<false>(qa, qb, scale, zero_point);
+}
+
 }}  // namespace at::native

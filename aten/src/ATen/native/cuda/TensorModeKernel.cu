@@ -15,7 +15,7 @@
 #include <thrust/sort.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/native/cuda/TensorModeKernel.cuh>
-#include <THC/THCThrustAllocator.cuh>
+#include <ATen/cuda/ThrustAllocator.h>
 
 namespace at {
 namespace native {
@@ -27,7 +27,7 @@ void calculate_mode(
     const Tensor& self,
     std::vector<int64_t>& position,
     int dim) {
-  THCThrustAllocator thrust_allocator(globalContext().lazyInitCUDA());
+  at::cuda::ThrustAllocator thrust_allocator;
   auto stream = at::cuda::getCurrentCUDAStream();
   auto policy = thrust::cuda::par(thrust_allocator).on(stream);
 

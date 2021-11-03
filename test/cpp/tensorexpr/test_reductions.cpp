@@ -8,6 +8,7 @@
 
 #include <test/cpp/tensorexpr/test_base.h>
 
+#include <c10/util/irange.h>
 #include <test/cpp/tensorexpr/padded_buffer.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/eval.h>
@@ -28,7 +29,7 @@ TEST(Reductions, ReduceSum0D_1) {
 
   BufHandle b("b", {M}, kFloat);
   std::vector<float> in(M);
-  for (int j = 0; j < M; ++j) {
+  for (const auto j : c10::irange(M)) {
     in[j] = j;
   }
 
@@ -43,7 +44,7 @@ TEST(Reductions, ReduceSum0D_1) {
   SimpleIREvaluator cg(s, {b, c});
 
   cg.call({in, out});
-  for (int i = 0; i < M; ++i) {
+  for (const auto i : c10::irange(M)) {
     ASSERT_EQ(out[i], in[i]);
   }
 }
@@ -73,7 +74,7 @@ TEST(Reductions, ReduceSum0D_2) {
 TEST(Reductions, ReduceSum1D) {
   BufHandle b("b", {10}, kFloat);
   std::vector<float> in(10);
-  for (int j = 0; j < 10; ++j) {
+  for (const auto j : c10::irange(10)) {
     in[j] = j;
   }
 
@@ -100,8 +101,8 @@ TEST(Reductions, ReduceSum2D) {
 
   BufHandle b("b", {m, n}, kFloat);
   std::vector<float> in(M * N);
-  for (int i = 0; i < M; ++i) {
-    for (int j = 0; j < N; ++j) {
+  for (const auto i : c10::irange(M)) {
+    for (const auto j : c10::irange(N)) {
       in[i * N + j] = j;
     }
   }
@@ -119,12 +120,12 @@ TEST(Reductions, ReduceSum2D) {
   cg.call({in, out, 5, 7});
 
   float expected = 0;
-  for (int i = 0; i < N; ++i) {
+  for (const auto i : c10::irange(N)) {
     // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     expected += i;
   }
 
-  for (int i = 0; i < M; ++i) {
+  for (const auto i : c10::irange(M)) {
     ASSERT_EQ(out[i], expected);
   }
 }
@@ -151,14 +152,14 @@ TEST(Reductions, ReduceSum3D) {
   std::vector<float> eData(2, 1.0f);
 
   for (int i = 0; i < 2 * 3; ++i) {
-    for (int j = 0; j < M; ++j) {
+    for (const auto j : c10::irange(M)) {
       bData[i * M + j] = j;
     }
   }
 
   cg.call({bData, cData, M});
   float expected = 0;
-  for (int i = 0; i < M; ++i) {
+  for (const auto i : c10::irange(M)) {
     // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     expected += i;
   }
@@ -179,7 +180,7 @@ TEST(Reductions, ReduceSum3D) {
   // We're combining an additional dimension of 3, so the sum is 3x.
   expected = expected * 3;
 
-  for (int i = 0; i < 2; ++i) {
+  for (const auto i : c10::irange(2)) {
     ASSERT_EQ(dData[i], expected);
   }
 
@@ -194,7 +195,7 @@ TEST(Reductions, ReduceSum3D) {
   SimpleIREvaluator cg3(s3, {c, e});
   cg3.call({cData, eData});
 
-  for (int i = 0; i < 2; ++i) {
+  for (const auto i : c10::irange(2)) {
     ASSERT_EQ(eData[i], expected);
   }
 }
@@ -226,7 +227,7 @@ TEST(Reductions, ReduceSum10D) {
 
   // NOLINTNEXTLINE(bugprone-integer-division)
   float expected = InputSize / OutputSize;
-  for (int i = 0; i < OutputSize; ++i) {
+  for (const auto i : c10::irange(OutputSize)) {
     ASSERT_EQ(out[i], expected);
   }
 }
@@ -238,8 +239,8 @@ TEST(Reductions, ReduceProduct) {
 
   BufHandle b("b", {M, N}, kFloat);
   std::vector<float> in(M * N);
-  for (int i = 0; i < M; ++i) {
-    for (int j = 0; j < N; ++j) {
+  for (const auto i : c10::irange(M)) {
+    for (const auto j : c10::irange(N)) {
       in[i * N + j] = 2 + j;
     }
   }
@@ -260,12 +261,12 @@ TEST(Reductions, ReduceProduct) {
   cg.call({in, out});
 
   float expected = 1;
-  for (int i = 0; i < N; ++i) {
+  for (const auto i : c10::irange(N)) {
     // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     expected *= 2 + i;
   }
 
-  for (int i = 0; i < M; ++i) {
+  for (const auto i : c10::irange(M)) {
     ASSERT_EQ(out[i], expected);
   }
 }
@@ -276,7 +277,7 @@ TEST(Reductions, ReduceMax) {
 
   std::vector<float> in(10);
   std::vector<float> out(1, -1.f);
-  for (int j = 0; j < 10; ++j) {
+  for (const auto j : c10::irange(10)) {
     in[j] = j;
   }
 
@@ -316,7 +317,7 @@ TEST(Reductions, ReduceMinCustomInitializer) {
 
   std::vector<float> in(10);
   std::vector<float> out(1, -1.f);
-  for (int j = 0; j < 10; ++j) {
+  for (const auto j : c10::irange(10)) {
     in[j] = 10 + j;
   }
 
@@ -374,7 +375,7 @@ TEST(Reductions, ReduceAnyAll) {
   std::vector<int> out(4, 0);
 
   // input has 0-39 in 4 rows.
-  for (int i = 0; i < 40; ++i) {
+  for (const auto i : c10::irange(40)) {
     in[i] = i;
   }
   cg.call({in, out, 1});
@@ -438,8 +439,8 @@ TEST(Reductions, ReduceMatmul2D) {
   std::vector<float> tB_(6);
 
   std::vector<float> out(9, -1.f);
-  for (int i = 0; i < 3; ++i) {
-    for (int j = 0; j < 2; ++j) {
+  for (const auto i : c10::irange(3)) {
+    for (const auto j : c10::irange(2)) {
       tA_[i * 2 + j] = i * 2 + j;
       tB_[j * 3 + i] = i * 2 + j;
     }
@@ -465,7 +466,7 @@ TEST(Reductions, ReduceMatmul2D) {
   std::vector<float> expected(
       {1.f, 3.f, 5.f, 3.f, 13.f, 23.f, 5.f, 23.f, 41.f});
 
-  for (int i = 0; i < 9; ++i) {
+  for (const auto i : c10::irange(9)) {
     ASSERT_EQ(out[i], expected[i]);
   }
 }
@@ -473,7 +474,7 @@ TEST(Reductions, ReduceMatmul2D) {
 TEST(Reductions, ReduceRfactorLike) {
   BufHandle in("in", {10, 10}, kFloat);
   std::vector<float> in_(100);
-  for (int i = 0; i < 100; ++i) {
+  for (const auto i : c10::irange(100)) {
     in_[i] = i;
   }
   std::vector<float> in_rf_(10, -2.f);
@@ -522,14 +523,14 @@ TEST(Reductions, ReduceAsProducer) {
 
   for (int i = 0; i < 2 * 3; ++i) {
     aData[i] = 6 - i;
-    for (int j = 0; j < M; ++j) {
+    for (const auto j : c10::irange(M)) {
       bData[i * M + j] = j;
     }
   }
 
   cg.call({aData, bData, dData, M});
   float expected = 0;
-  for (int i = 0; i < M; ++i) {
+  for (const auto i : c10::irange(M)) {
     // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     expected += i;
   }
@@ -564,7 +565,7 @@ TEST(Reductions, ReduceAsConsumer) {
   std::vector<float> dData(2, 6.0f);
 
   for (int i = 0; i < 2 * 3; ++i) {
-    for (int j = 0; j < M; ++j) {
+    for (const auto j : c10::irange(M)) {
       bData[i * M + j] = j + 1;
       aData[i * M + j] = 6 - i;
     }
@@ -573,16 +574,16 @@ TEST(Reductions, ReduceAsConsumer) {
   cg.call({aData, bData, dData, M});
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   float expected[2] = {0, 0};
-  for (int i = 0; i < 2; ++i) {
-    for (int j = 0; j < 3; ++j) {
-      for (int k = 0; k < M; ++k) {
+  for (const auto i : c10::irange(2)) {
+    for (const auto j : c10::irange(3)) {
+      for (const auto k : c10::irange(M)) {
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         expected[i] += (k + 1) * (6 - (i * 3 + j));
       }
     }
   }
 
-  for (int i = 0; i < 2; ++i) {
+  for (const auto i : c10::irange(2)) {
     ASSERT_EQ(dData[i], expected[i]);
   }
 }
@@ -591,8 +592,8 @@ TEST(Reductions, SplitReduceAxis) {
   BufHandle in("in", {16, 8}, kFloat);
 
   std::vector<float> in_(16 * 8);
-  for (int i = 0; i < 16; ++i) {
-    for (int j = 0; j < 8; ++j) {
+  for (const auto i : c10::irange(16)) {
+    for (const auto j : c10::irange(8)) {
       in_[i * 8 + j] = i;
     }
   }
@@ -611,7 +612,7 @@ TEST(Reductions, SplitReduceAxis) {
   SimpleIREvaluator cg(s, {in, tensor});
   cg.call({in_, out});
 
-  for (int i = 0; i < 16; ++i) {
+  for (const auto i : c10::irange(16)) {
     ASSERT_EQ(out[i], i * 8);
   }
 }
@@ -620,8 +621,8 @@ TEST(Reductions, SplitNonReduceAxis) {
   BufHandle in("in", {16, 8}, kFloat);
 
   std::vector<float> in_(16 * 8);
-  for (int i = 0; i < 16; ++i) {
-    for (int j = 0; j < 8; ++j) {
+  for (const auto i : c10::irange(16)) {
+    for (const auto j : c10::irange(8)) {
       in_[i * 8 + j] = i;
     }
   }
@@ -640,7 +641,7 @@ TEST(Reductions, SplitNonReduceAxis) {
   SimpleIREvaluator cg(s, {in, tensor});
   cg.call({in_, out});
 
-  for (int i = 0; i < 16; ++i) {
+  for (const auto i : c10::irange(16)) {
     ASSERT_EQ(out[i], i * 8);
   }
 }
@@ -689,7 +690,7 @@ TEST(Reductions, ReorderedReductionInitializer) {
   SimpleIREvaluator cg2(s, {in, tensor});
   cg2.call({in_, out2});
 
-  for (int i = 0; i < 16; ++i) {
+  for (const auto i : c10::irange(16)) {
     ASSERT_EQ(out1[i], out2[i]);
   }
 }
@@ -807,7 +808,7 @@ TEST(Reductions, ReduceRepeatedInternalRfactor) {
   LoopNest orig_loop({c});
 
   // Try rfactoring N outer loops
-  for (int rfac_number = 1; rfac_number < 5; rfac_number++) {
+  for (const auto rfac_number : c10::irange(1, 5)) {
     LoopNest refloop(orig_loop);
     LoopNest loop(orig_loop);
     refloop.prepareForCodegen();
@@ -817,7 +818,7 @@ TEST(Reductions, ReduceRepeatedInternalRfactor) {
 
     BufPtr tmp_buf = c.buf();
 
-    for (int idx = 0; idx < rfac_number; idx++) {
+    for (const auto idx : c10::irange(rfac_number)) {
       auto reduce = loop.getAllWritesToBuf(tmp_buf)[1];
       ASSERT_TRUE(loop.rfactor(
           reduce, loop.getLoopStmtsFor(tmp_buf).at(idx), &tmp_buf));
@@ -846,7 +847,7 @@ TEST(Reductions, ReduceSplitTail) {
     in[j] = j;
   }
 
-  for (int i = 0; i < 3; ++i) {
+  for (const auto i : c10::irange(3)) {
     std::vector<float> out(M, -1.f);
 
     Tensor c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
@@ -876,7 +877,7 @@ TEST(Reductions, ReduceSplitNoTail) {
     in[j] = j;
   }
 
-  for (int i = 0; i < 3; ++i) {
+  for (const auto i : c10::irange(3)) {
     std::vector<float> out(M, -1.f);
 
     Tensor c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
@@ -908,7 +909,7 @@ TEST(Reductions, ReduceOverSplitTail) {
     in[j] = j;
   }
 
-  for (int i = 0; i < 3; ++i) {
+  for (const auto i : c10::irange(3)) {
     std::vector<float> out(M, -1.f);
 
     Tensor c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
@@ -939,7 +940,7 @@ TEST(Reductions, ReduceSplitMask) {
     in[j] = j;
   }
 
-  for (int i = 0; i < 3; ++i) {
+  for (const auto i : c10::irange(3)) {
     std::vector<float> out(M, -1.f);
 
     Tensor c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
@@ -969,7 +970,7 @@ TEST(Reductions, ReduceSplitNoMask) {
     in[j] = j;
   }
 
-  for (int i = 0; i < 3; ++i) {
+  for (const auto i : c10::irange(3)) {
     std::vector<float> out(M, -1.f);
 
     Tensor c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
@@ -1000,7 +1001,7 @@ TEST(Reductions, ReduceOverSplitMask) {
     in[j] = j;
   }
 
-  for (int i = 0; i < 3; ++i) {
+  for (const auto i : c10::irange(3)) {
     std::vector<float> out(M, -1.f);
 
     Tensor c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
@@ -1029,7 +1030,7 @@ TEST(Reductions, ReduceSplitRfactor) {
 
   BufHandle b("b", {M, N, K}, kFloat);
   std::vector<float> in(M * N * K);
-  for (int m = 0; m < M; ++m) {
+  for (const auto m : c10::irange(M)) {
     for (int j = 0; j < N * K; ++j) {
       in[m * N * K + j] = j;
     }
@@ -1056,7 +1057,8 @@ TEST(Reductions, ReduceSplitRfactor) {
   SimpleIREvaluator cg(s, {b, c});
 
   cg.call({in, out});
-  for (int i = 0; i < M; ++i) {
+  for (const auto i : c10::irange(M)) {
+    (void)i; // Suppress unused variable warning
     ASSERT_EQ(out[0], 4950);
   }
 }
@@ -1134,12 +1136,12 @@ TEST(Reductions, ReduceInlineReduction) {
   PaddedBuffer<float> a_v(M);
   PaddedBuffer<float> b_v(M, N, K);
 
-  for (int i = 0; i < M; i++) {
+  for (const auto i : c10::irange(M)) {
     a_v(i) = i * i;
   }
-  for (int i = 0; i < M; i++) {
-    for (int j = 0; j < N; j++) {
-      for (int k = 0; k < K; k++) {
+  for (const auto i : c10::irange(M)) {
+    for (const auto j : c10::irange(N)) {
+      for (const auto k : c10::irange(K)) {
         b_v(i, j, k) = j * j * k;
       }
     }
@@ -1169,9 +1171,9 @@ TEST(Reductions, ReduceInlineConsumer) {
   PaddedBuffer<float> a_v(M, N, K);
   PaddedBuffer<float> b_v(M, N, K);
 
-  for (int i = 0; i < M; i++) {
-    for (int j = 0; j < N; j++) {
-      for (int k = 0; k < K; k++) {
+  for (const auto i : c10::irange(M)) {
+    for (const auto j : c10::irange(N)) {
+      for (const auto k : c10::irange(K)) {
         a_v(i, j, k) = i * i + k;
         b_v(i, j, k) = j * j + k;
       }
@@ -1226,9 +1228,9 @@ TEST(Reductions, ReduceInlineReducerInternal) {
   PaddedBuffer<float> a_v(M, N, K);
   PaddedBuffer<float> b_v(M, N, K);
 
-  for (int i = 0; i < M; i++) {
-    for (int j = 0; j < N; j++) {
-      for (int k = 0; k < K; k++) {
+  for (const auto i : c10::irange(M)) {
+    for (const auto j : c10::irange(N)) {
+      for (const auto k : c10::irange(K)) {
         a_v(i, j, k) = i * i + k;
         b_v(i, j, k) = j * j + k;
       }
@@ -1319,9 +1321,9 @@ TEST(Reductions, ReductionCacheAccessesOperatorAxis) {
   PaddedBuffer<float> e_before(L, "e_before");
   PaddedBuffer<float> e_after(L, "e_after");
 
-  for (int l = 0; l < L; l++) {
-    for (int m = 0; m < M; m++) {
-      for (int n = 0; n < N; n++) {
+  for (const auto l : c10::irange(L)) {
+    for (const auto m : c10::irange(M)) {
+      for (const auto n : c10::irange(N)) {
         a_v(l, m, n) = at::randn({1}).item().to<float>();
         b_v(l, m, n) = at::randn({1}).item().to<float>();
       }
@@ -1392,9 +1394,9 @@ TEST(Reductions, ReductionCacheAccessesOuterReduceAxis) {
   PaddedBuffer<float> e_before(L, "e_before");
   PaddedBuffer<float> e_after(L, "e_after");
 
-  for (int l = 0; l < L; l++) {
-    for (int m = 0; m < M; m++) {
-      for (int n = 0; n < N; n++) {
+  for (const auto l : c10::irange(L)) {
+    for (const auto m : c10::irange(M)) {
+      for (const auto n : c10::irange(N)) {
         a_v(l, m, n) = at::randn({1}).item().to<float>();
         b_v(l, m, n) = at::randn({1}).item().to<float>();
       }
@@ -1465,9 +1467,9 @@ TEST(Reductions, ReductionCacheAccessesInnerReduceAxis) {
   PaddedBuffer<float> e_before(L, "e_before");
   PaddedBuffer<float> e_after(L, "e_after");
 
-  for (int l = 0; l < L; l++) {
-    for (int m = 0; m < M; m++) {
-      for (int n = 0; n < N; n++) {
+  for (const auto l : c10::irange(L)) {
+    for (const auto m : c10::irange(M)) {
+      for (const auto n : c10::irange(N)) {
         a_v(l, m, n) = at::randn({1}).item().to<float>();
         b_v(l, m, n) = at::randn({1}).item().to<float>();
       }
@@ -1782,8 +1784,8 @@ TEST(Reductions, ReductionRfactorCacheTempInner) {
 
 TEST(Reductions, ReductionVectorize) {
   std::vector<float> in_(8 * 8);
-  for (int i = 0; i < 8; ++i) {
-    for (int j = 0; j < 8; ++j) {
+  for (const auto i : c10::irange(8)) {
+    for (const auto j : c10::irange(8)) {
       in_[i * 8 + j] = i;
     }
   }
@@ -1820,7 +1822,7 @@ TEST(Reductions, ReductionVectorize) {
   s = IRSimplifier::simplify(l.root_stmt());
   SimpleIREvaluator cg_after(s, {in, tensor});
   cg_after.call({in_, out_after});
-  for (int i = 0; i < 8; ++i) {
+  for (const auto i : c10::irange(8)) {
     ASSERT_EQ(out_before[i], out_after[i]);
   }
 }
@@ -1836,8 +1838,8 @@ TEST(Reductions, ReductionVectorizeInner) {
 
 TEST(Reductions, ReductionVectorizeRfactor) {
   std::vector<float> in_(8 * 8);
-  for (int i = 0; i < 8; ++i) {
-    for (int j = 0; j < 8; ++j) {
+  for (const auto i : c10::irange(8)) {
+    for (const auto j : c10::irange(8)) {
       in_[i * 8 + j] = i;
     }
   }

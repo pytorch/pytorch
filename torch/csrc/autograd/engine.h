@@ -12,6 +12,7 @@
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/input_buffer.h>
 #include <torch/csrc/autograd/saved_variable_hooks.h>
+#include <torch/csrc/autograd/utils/warnings.h>
 
 #include <deque>
 #include <exception>
@@ -171,6 +172,8 @@ struct GraphTask: std::enable_shared_from_this<GraphTask> {
   // To protect reads and writes to final_callbacks_. Intentionally no reusing
   // mutex_ as the two are protecting different data structures.
   std::mutex final_callbacks_lock_;
+
+  utils::DelayWarningHandler warning_handler_;
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   GraphTask(
