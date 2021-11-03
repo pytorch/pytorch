@@ -7,7 +7,7 @@ import torch.nn as nn
 import torch.nn.quantized as nnq
 from torch.nn.intrinsic import _FusedModule
 
-from torch.quantization.quantization_mappings import (
+from torch.ao.quantization.quantization_mappings import (
     get_default_dynamic_quant_module_mappings,
     get_default_static_quant_module_mappings,
     get_default_qat_module_mappings,
@@ -18,15 +18,16 @@ from torch.quantization.quantization_mappings import (
 )
 
 from torch.ao.quantization.stubs import DeQuantStub, QuantWrapper
-from torch.quantization.qconfig import (
+from torch.ao.quantization.qconfig import (
     add_module_to_qconfig_obs_ctr,
     default_dynamic_qconfig,
     float16_dynamic_qconfig,
-    float_qparams_weight_only_qconfig)
+    float_qparams_weight_only_qconfig,
+    float_qparams_weight_only_qconfig_4bit)
 
 def is_activation_post_process(module):
-    return (isinstance(module, torch.quantization.ObserverBase) or
-            isinstance(module, torch.quantization.FakeQuantizeBase))
+    return (isinstance(module, torch.ao.quantization.ObserverBase) or
+            isinstance(module, torch.ao.quantization.FakeQuantizeBase))
 
 def _propagate_qconfig_helper(module, qconfig_dict, allow_list=None,
                               qconfig_parent=None, prefix=''):
@@ -54,7 +55,7 @@ def _propagate_qconfig_helper(module, qconfig_dict, allow_list=None,
     module_qconfig = qconfig_dict.get(prefix, module_qconfig)
     module_qconfig = getattr(module, 'qconfig', module_qconfig)
 
-    torch.quantization.qconfig.assert_valid_qconfig(module_qconfig, module)
+    torch.ao.quantization.qconfig.assert_valid_qconfig(module_qconfig, module)
 
     qconfig_with_device_check = add_module_to_qconfig_obs_ctr(module_qconfig, module)
     module.qconfig = qconfig_with_device_check
@@ -64,7 +65,6 @@ def _propagate_qconfig_helper(module, qconfig_dict, allow_list=None,
         _propagate_qconfig_helper(child, qconfig_dict, allow_list,
                                   qconfig_with_device_check, module_prefix)
 
-# TODO(jerryzh): expose allow_list
 def propagate_qconfig_(module, qconfig_dict=None, allow_list=None):
     r"""Propagate qconfig through the module hierarchy and assign `qconfig`
     attribute on each leaf module
@@ -75,6 +75,7 @@ def propagate_qconfig_(module, qconfig_dict=None, allow_list=None):
             quantization configuration, qconfig applies to all submodules of a
             given module unless qconfig for the submodules are specified (when
             the submodule already has qconfig attribute)
+        allow_list: a set that lists out allowable modules to be propagated with qconfig
 
     Return:
         None, module is modified inplace with qconfig attached
@@ -369,6 +370,11 @@ def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
         elif dtype == torch.quint8:
             qconfig_spec = {
                 nn.EmbeddingBag : float_qparams_weight_only_qconfig,
+                nn.Embedding : float_qparams_weight_only_qconfig,
+            }
+        elif dtype == torch.quint4x2:
+            qconfig_spec = {
+                nn.EmbeddingBag : float_qparams_weight_only_qconfig_4bit,
             }
         else:
             raise ValueError(
@@ -380,6 +386,8 @@ def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
             default_qconfig = float16_dynamic_qconfig
         elif dtype is torch.quint8:
             default_qconfig = float_qparams_weight_only_qconfig
+        elif dtype is torch.quint4x2:
+            default_qconfig = float_qparams_weight_only_qconfig_4bit
         else:
             raise RuntimeError('Unknown dtype specified for quantize_dynamic: ', str(dtype))
         qconfig_spec = dict(zip(qconfig_spec, itertools.repeat(default_qconfig)))
@@ -394,7 +402,7 @@ def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
     convert(model, mapping, inplace=True)
     return model
 
-def prepare_qat(model, mapping=None, inplace=False):
+def prepare_qat(model, mapping=None, inplace=False, allow_list=None):
     r"""
     Prepares a copy of the model for quantization calibration or
     quantization-aware training and converts it to quantized version.
@@ -408,6 +416,7 @@ def prepare_qat(model, mapping=None, inplace=False):
                  replaced.
         inplace: carry out model transformations in-place, the original module
                  is mutated
+        allow_list: a set that lists out allowable modules to be propagated with qconfig
     """
     torch._C._log_api_usage_once("quantization_api.quantize.prepare_qat")
     if mapping is None:
@@ -416,7 +425,7 @@ def prepare_qat(model, mapping=None, inplace=False):
     if not inplace:
         model = copy.deepcopy(model)
 
-    propagate_qconfig_(model, qconfig_dict=None)
+    propagate_qconfig_(model, qconfig_dict=None, allow_list=allow_list)
     convert(model, mapping=mapping, inplace=True, remove_qconfig=False)
     prepare(model, observer_non_leaf_module_list=set(mapping.values()), inplace=True)
     return model

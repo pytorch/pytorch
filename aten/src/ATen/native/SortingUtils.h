@@ -2,6 +2,7 @@
 
 #include <ATen/NumericUtils.h>
 #include <ATen/native/Resize.h>
+#include <c10/util/irange.h>
 
 namespace at {
 namespace native {
@@ -97,7 +98,7 @@ void topk_impl_loop(
     const bool largest,
     const bool sorted,
     char** data, const int64_t* strides, const int64_t n) {
-  for (int64_t i = 0; i < n; ++i) {
+  for (const auto i : c10::irange(n)) {
     TensorAccessor<scalar_t, 1> mode_values(
         reinterpret_cast<scalar_t*>(data[0] + i * strides[0]),
         &k, &mode_values_stride);
@@ -113,7 +114,7 @@ void topk_impl_loop(
 
     using elem_t = std::pair<accscalar_t, int64_t>;
     std::vector<elem_t> queue(n);
-    for (int64_t j = 0; j < n; j++) {
+    for (const auto j : c10::irange(n)) {
       queue[j].first = tmp_values[j];
       queue[j].second = j;
     }
@@ -157,7 +158,7 @@ void topk_impl_loop(
       }
     }
 
-    for (int64_t j = 0; j < k; j++) {
+    for (const auto j : c10::irange(k)) {
       mode_values[j] = queue[j].first;
       mode_indices[j] = queue[j].second;
     }
