@@ -19,6 +19,154 @@ namespace torch {
 namespace jit {
 using namespace torch::jit::tensorexpr;
 
+TEST(ExternalCall, Conv1d_float) {
+  BufHandle Input("Input", {1, 100, 115}, kFloat);
+  BufHandle Weight("Weight", {100, 1, 7}, kFloat);
+  BufHandle Bias("Bias", {100}, kFloat);
+  BufHandle ResultBuf("Result", {1, 100, 115}, kFloat);
+  int64_t stride = 1;
+  int64_t pad = 3;
+  int64_t dilation = 1;
+  int64_t groups = 100;
+
+  Tensor Result = Tensor(
+      ResultBuf.node(),
+      ExternalCall::make(
+          ResultBuf,
+          "nnc_aten_conv1d",
+          {Input, Weight, Bias},
+          {stride, pad, dilation, groups}));
+  LoopNest l({Result});
+  l.prepareForCodegen();
+  l.simplify();
+
+  auto options = at::TensorOptions()
+                     .dtype(at::kFloat)
+                     .layout(at::kStrided)
+                     .device(at::kCPU)
+                     .requires_grad(false);
+  at::Tensor input = at::ones({1, 100, 115}, options) * 5.f;
+  at::Tensor weight = at::ones({100, 1, 7}, options) * 6.f;
+  at::Tensor bias = at::ones({100}, options) * 11.f;
+  at::Tensor ref =
+      at::conv1d(input, weight, bias, {stride}, {pad}, {dilation}, groups);
+
+  at::Tensor nnc_result;
+  std::vector<float> input_buf(1 * 100 * 115, 5.f);
+  std::vector<float> weight_buf(100 * 1 * 7, 6.f);
+  std::vector<float> bias_buf(100, 11.f);
+  std::vector<float> result_buf(1 * 100 * 115, -1.f);
+
+#ifdef TORCH_ENABLE_LLVM
+  LLVMCodeGen llvm_codegen(l.root_stmt(), {Input, Weight, Bias, Result});
+
+  llvm_codegen.call({input_buf, weight_buf, bias_buf, result_buf});
+  nnc_result = at::from_blob(result_buf.data(), {1, 100, 115}, options);
+  ASSERT_TRUE(at::allclose(nnc_result, ref));
+#endif
+
+  SimpleIREvaluator ir_eval(l.root_stmt(), {Input, Weight, Bias, Result});
+
+  ir_eval.call({input_buf, weight_buf, bias_buf, result_buf});
+  nnc_result = at::from_blob(result_buf.data(), {1, 100, 115}, options);
+  ASSERT_TRUE(at::allclose(nnc_result, ref));
+}
+
+TEST(ExternalCall, Conv1d_int) {
+  // A similar test, but now using kInt tensors
+  BufHandle Input("Input", {1, 100, 115}, kInt);
+  BufHandle Weight("Weight", {100, 1, 7}, kInt);
+  BufHandle Bias("Bias", {100}, kInt);
+  BufHandle ResultBuf("Result", {1, 100, 115}, kInt);
+  int64_t stride = 1;
+  int64_t pad = 3;
+  int64_t dilation = 1;
+  int64_t groups = 100;
+
+  Tensor Result = Tensor(
+      ResultBuf.node(),
+      ExternalCall::make(
+          ResultBuf,
+          "nnc_aten_conv1d",
+          {Input, Weight, Bias},
+          {stride, pad, dilation, groups}));
+  LoopNest l({Result});
+  l.prepareForCodegen();
+  l.simplify();
+
+  auto options = at::TensorOptions()
+                     .dtype(at::kInt)
+                     .layout(at::kStrided)
+                     .device(at::kCPU)
+                     .requires_grad(false);
+  at::Tensor input = at::ones({1, 100, 115}, options) * 5;
+  at::Tensor weight = at::ones({100, 1, 7}, options) * 6;
+  at::Tensor bias = at::ones({100}, options) * 11;
+  at::Tensor ref =
+      at::conv1d(input, weight, bias, {stride}, {pad}, {dilation}, groups);
+
+  at::Tensor nnc_result;
+  std::vector<int32_t> input_buf(1 * 100 * 115, 5);
+  std::vector<int32_t> weight_buf(100 * 1 * 7, 6);
+  std::vector<int32_t> bias_buf(100, 11);
+  std::vector<int32_t> result_buf(1 * 100 * 115, -1);
+
+#ifdef TORCH_ENABLE_LLVM
+  LLVMCodeGen llvm_codegen(l.root_stmt(), {Input, Weight, Bias, Result});
+
+  llvm_codegen.call({input_buf, weight_buf, bias_buf, result_buf});
+  nnc_result = at::from_blob(result_buf.data(), {1, 100, 115}, options);
+  ASSERT_TRUE(at::allclose(nnc_result, ref));
+#endif
+
+  SimpleIREvaluator ir_eval(l.root_stmt(), {Input, Weight, Bias, Result});
+
+  ir_eval.call({input_buf, weight_buf, bias_buf, result_buf});
+  nnc_result = at::from_blob(result_buf.data(), {1, 100, 115}, options);
+  ASSERT_TRUE(at::allclose(nnc_result, ref));
+}
+
+TEST(ExternalCall, Conv1d_nobias_noargs) {
+  BufHandle Input("Input", {1, 1, 115}, kFloat);
+  BufHandle Weight("Weight", {10, 1, 7}, kFloat);
+  BufHandle ResultBuf("Result", {1, 10, 109}, kFloat);
+
+  Tensor Result = Tensor(
+      ResultBuf.node(),
+      ExternalCall::make(ResultBuf, "nnc_aten_conv1d", {Input, Weight}, {}));
+  LoopNest l({Result});
+  l.prepareForCodegen();
+  l.simplify();
+
+  auto options = at::TensorOptions()
+                     .dtype(at::kFloat)
+                     .layout(at::kStrided)
+                     .device(at::kCPU)
+                     .requires_grad(false);
+  at::Tensor input = at::ones({1, 1, 115}, options) * 5.f;
+  at::Tensor weight = at::ones({10, 1, 7}, options) * 6.f;
+  at::Tensor ref = at::conv1d(input, weight);
+
+  at::Tensor nnc_result;
+  std::vector<float> input_buf(1 * 1 * 115, 5.f);
+  std::vector<float> weight_buf(10 * 1 * 7, 6.f);
+  std::vector<float> result_buf(1 * 10 * 109, -1.f);
+
+#ifdef TORCH_ENABLE_LLVM
+  LLVMCodeGen llvm_codegen(l.root_stmt(), {Input, Weight, Result});
+
+  llvm_codegen.call({input_buf, weight_buf, result_buf});
+  nnc_result = at::from_blob(result_buf.data(), {1, 10, 109}, options);
+  ASSERT_TRUE(at::allclose(nnc_result, ref));
+#endif
+
+  SimpleIREvaluator ir_eval(l.root_stmt(), {Input, Weight, Result});
+
+  ir_eval.call({input_buf, weight_buf, result_buf});
+  nnc_result = at::from_blob(result_buf.data(), {1, 10, 109}, options);
+  ASSERT_TRUE(at::allclose(nnc_result, ref));
+}
+
 TEST(ExternalCall, Conv2d_float) {
   BufHandle Input("Input", {1, 3, 224, 224}, kFloat);
   BufHandle Weight("Weight", {16, 3, 3, 3}, kFloat);
