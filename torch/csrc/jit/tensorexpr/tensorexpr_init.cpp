@@ -886,7 +886,9 @@ void initTensorExprBindings(PyObject* module) {
   te.def("is_graph_compilable", &tensorexpr::isGraphCompilable);
   te.def("fixup_missing_shape_info", &tensorexpr::fixupMissingShapeInfo);
   te.def("remove_graph_output", &tensorexpr::removeGraphOutput);
-  te.def("replace_list_output_with_tuple", &tensorexpr::replaceListOutputWithTuple);
+  te.def(
+      "replace_list_output_with_tuple",
+      &tensorexpr::replaceListOutputWithTuple);
 }
 } // namespace jit
 } // namespace torch
