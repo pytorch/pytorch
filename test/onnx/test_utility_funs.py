@@ -1066,6 +1066,35 @@ class TestUtilityFuns_opset9(_BaseTestCase):
             self.assertNotEqual(node.kind(), "prim::Constant")
         self.assertEqual(len(list(graph.nodes())), 2)  # onnx::Sub and onnx::Add nodes only.
 
+    def test_onnx_value_name(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.in_weight = torch.nn.Parameter(torch.Tensor(3, 3))
+                self.in_bias = torch.nn.Parameter(torch.Tensor(3))
+
+            def forward(self, x):
+                start = 0
+                end = None
+                weight = self.in_weight
+                bias = self.in_bias
+                weight = weight[start:end, :]
+                if bias is not None:
+                    bias = bias[start:end]
+                return torch.nn.functional.linear(x, weight, bias)
+
+        model = MyModule()
+        x = torch.randn(3, 3)
+        f = io.BytesIO()
+
+        model.eval()
+        torch.onnx.export(model, (x,), f,
+                          opset_version=self.opset_version,
+                          keep_initializers_as_inputs=True)
+        graph = onnx.load(io.BytesIO(f.getvalue()))
+        self.assertEqual(graph.graph.input[1].name, "in_weight")
+        self.assertEqual(graph.graph.input[2].name, "in_bias")
+
     def test_duplicated_output_node(self):
         class DuplicatedOutputNet(torch.nn.Module):
             def __init__(self, input_size, num_classes):

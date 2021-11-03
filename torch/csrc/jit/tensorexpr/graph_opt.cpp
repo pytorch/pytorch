@@ -371,11 +371,12 @@ std::shared_ptr<Graph> replaceListOutputWithTuple(
   return graph;
 }
 
-bool tryTrimmingGraph(
-    const std::shared_ptr<Graph>& graph) {
+bool tryTrimmingGraph(const std::shared_ptr<Graph>& graph) {
   Node* ret = graph->return_node();
-  std::unordered_set<Value*> graph_inputs(graph->inputs().begin(), graph->inputs().end());
-  std::unordered_set<Value*> outputs(graph->outputs().begin(), graph->outputs().end());
+  std::unordered_set<Value*> graph_inputs(
+      graph->inputs().begin(), graph->inputs().end());
+  std::unordered_set<Value*> outputs(
+      graph->outputs().begin(), graph->outputs().end());
   bool changed = false;
   for (int idx = 0; idx < ret->inputs().size(); idx++) {
     auto v = ret->inputs()[idx];
@@ -397,12 +398,11 @@ bool tryTrimmingGraph(
   return changed;
 }
 
-std::shared_ptr<Graph> trimGraph(
-    const std::shared_ptr<Graph>& graph) {
+std::shared_ptr<Graph> trimGraph(const std::shared_ptr<Graph>& graph) {
   bool changed = true;
   int max_iters = 1000;
   int iter = 0;
-  while(changed && iter++ < max_iters) {
+  while (changed && iter++ < max_iters) {
     if (!JIT_OPT_ALLOWED)
       break;
     changed = tryTrimmingGraph(graph);

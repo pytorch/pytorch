@@ -30,8 +30,7 @@ void inlineCalls(Block* block) {
               fun_type->function()->name(),
               "' to ",
               *cur);
-          GRAPH_UPDATE(
-              "Function body: ", *fun_type->function()->optimized_graph());
+          GRAPH_UPDATE("Function body: ", graphFunction->optimized_graph());
           inlineCallTo(cur, graphFunction);
         }
       } break;
@@ -41,7 +40,7 @@ void inlineCalls(Block* block) {
           Function& function = class_type->getMethod(name);
           if (auto graphFunction = tryToGraphFunction(function)) {
             GRAPH_UPDATE("Inlining method '", function.name(), "' to ", *cur);
-            GRAPH_UPDATE("Function body: ", *function.optimized_graph());
+            GRAPH_UPDATE("Function body: ", graphFunction->optimized_graph());
             inlineCallTo(cur, graphFunction);
           }
         }
