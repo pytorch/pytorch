@@ -29,7 +29,7 @@ void _fft_fill_with_conjugate_symmetry_slice(
   // n-dimensions. This advances iter_index by one row, while updating in_ptr
   // and out_ptr to point to the new row of data.
   auto advance_index = [&] () __ubsan_ignore_undefined__ {
-    for (size_t i = 1; i < iter_index.size(); ++i) {
+    for (const auto i : c10::irange(1, iter_index.size())) {
       if (iter_index[i] + 1 < signal_half_sizes[i]) {
         ++iter_index[i];
         in_ptr += in_strides[i];
@@ -93,7 +93,7 @@ void _fft_fill_with_conjugate_symmetry_slice(
     while (numel_remaining > 0) {
       auto end = std::min(signal_half_sizes[0], numel_remaining);
       out_ptr[0] = std::conj(in_ptr[0]);
-      for (int64_t i = 1; i < end; ++i) {
+      for (const auto i : c10::irange(1, end)) {
         out_ptr[(signal_half_sizes[0] - i) * out_strides[0]] = std::conj(in_ptr[i * in_strides[0]]);
       }
       numel_remaining -= end;
@@ -448,7 +448,7 @@ static Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_sizes,
   const auto batch_size = input.sizes()[0];
   DimVector signal_size(signal_ndim + 1);
   signal_size[0] = batch_size;
-  for (int64_t i = 0; i < signal_ndim; ++i) {
+  for (const auto i : c10::irange(signal_ndim)) {
     auto in_size = input.sizes()[i + 1];
     auto out_size = out_sizes[dim[i]];
     signal_size[i + 1] = std::max(in_size, out_size);
@@ -460,7 +460,7 @@ static Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_sizes,
 
   batched_sizes[0] = batch_size;
   DimVector batched_out_sizes(batched_sizes.begin(), batched_sizes.end());
-  for (size_t i = 0; i < dim.size(); ++i) {
+  for (const auto i : c10::irange(dim.size())) {
     batched_out_sizes[i + 1] = out_sizes[dim[i]];
   }
 
@@ -485,7 +485,7 @@ static Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_sizes,
     out_strides[dim_permute[i]] = batch_numel * out.strides()[0];
     batch_numel *= out_sizes[dim_permute[i]];
   }
-  for (int64_t i = batch_dims; i < ndim; ++i) {
+  for (const auto i : c10::irange(batch_dims, ndim)) {
     out_strides[dim_permute[i]] = out.strides()[1 + (i - batch_dims)];
   }
   out.as_strided_(out_sizes, out_strides, out.storage_offset());

@@ -674,10 +674,7 @@ Caffe2Ops Caffe2Backend::CreateReciprocal(
   Caffe2Ops ret;
   auto* c2_op = ret.ops.Add();
 
-  caffe2::Argument exponent;
-  exponent.set_name("exponent");
-  exponent.set_f(-1.0);
-  BuildOperator(c2_op, "Pow", {node.input(0)}, {node.output(0)}, {exponent});
+  BuildOperator(c2_op, "Reciprocal", {node.input(0)}, {node.output(0)}, {});
   return ret;
 }
 

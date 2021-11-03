@@ -14,7 +14,7 @@
 THTensor *THTensor_(new)(void)
 {
   return c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
-             c10::intrusive_ptr<at::StorageImpl>::reclaim(THStorage_(new)()),
+             c10::intrusive_ptr<at::StorageImpl>::reclaim(THByteStorage_new()),
              at::DispatchKey::CPU,
 #ifdef THQUANTIZED
              caffe2::TypeMeta::Make<quantized_t>()

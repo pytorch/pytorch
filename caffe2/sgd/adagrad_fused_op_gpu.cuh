@@ -10,7 +10,7 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/GpuAtomics.cuh"
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 #define SEGREDUCE_MINBLOCKS 8
 #else
 #define SEGREDUCE_MINBLOCKS 16
@@ -31,7 +31,7 @@ constexpr int kWarpSize = 32;
 
 template <typename T>
 inline __device__ T shfl_xor(const T val, int laneMask, int width = kWarpSize) {
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
   return __shfl_xor_sync(0xffffffff, val, laneMask, width);
 #else
   return __shfl_xor(val, laneMask, width);
@@ -108,8 +108,9 @@ static inline __device__ void gpuAtomicAdd(float* address, float val) {
 }
 
 static inline __device__ void gpuAtomicAdd(c10::Half* address, c10::Half val) {
-#if (                         \
-    (CUDA_VERSION < 10000) || \
+#if (                      \
+    (defined(USE_ROCM)) || \
+    (defined(CUDA_VERSION) && (CUDA_VERSION < 10000)) || \
     (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 700)))
   unsigned int* address_as_ui =
       (unsigned int*)((char*)address - ((size_t)address & 2));
@@ -136,7 +137,7 @@ template <
     typename T,
     bool ExactBlock = false,
     roundOption roundOpt = NEAREST>
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(1024, SEGREDUCE_MINBLOCKS)
 #endif
 __global__ void rowwise_sparse_adagrad_fused_length_sum_gradient_kernel(
