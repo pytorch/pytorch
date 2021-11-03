@@ -249,22 +249,9 @@ void handleBlock(Block* block, AutocastContext initial_state) {
         break;
 
       case prim::CallMethod:
-        // TODO: limit it only to amp related node;
-        if (auto class_type = node->input(0)->type()->cast<ClassType>()) {
-          const auto& name = node->s(attr::name);
-          const auto& function = class_type->getMethod(name);
-          if (!function.isGraphFunction()) {
-            TORCH_INTERNAL_ASSERT(
-                !incompatible_amp.has_value() || incompatible_amp.value(),
-                "Calls are not expected with AMP & JIT");
-            incompatible_amp = true;
-          }
-        } else {
-          TORCH_INTERNAL_ASSERT(
-              !incompatible_amp.has_value() || incompatible_amp.value(),
-              "Unexpected prim::CallMethod form with AMP & JIT");
-          incompatible_amp = true;
-        }
+        // Assume all CallMethod should be run in full precision now.
+        castTensorInputs(
+            node, aten::_autocast_to_full_precision, current_state());
         break;
 
       case prim::Enter:
