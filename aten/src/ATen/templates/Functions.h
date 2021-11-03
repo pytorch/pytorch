@@ -215,7 +215,7 @@ inline bool is_inference(const Tensor& tensor) {
 }
 
 inline bool is_zerotensor(const Tensor& tensor) {
-  return tensor.is_conj();
+  return tensor.is_zerotensor();
 }
 
 inline bool is_conj(const Tensor& tensor) {
