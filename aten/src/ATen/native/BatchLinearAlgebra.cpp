@@ -222,15 +222,11 @@ TORCH_META_FUNC(triangular_solve)(const Tensor& self, const Tensor& A, bool uppe
     auto nrows = A.size(-2);
 
     // make column major strides for BLAS
-    auto solution_strides = at::detail::defaultStrides(self_broadcast_size);
-    solution_strides[ndim - 2] = 1;
-    solution_strides[ndim - 1] = nrows;
+    const auto solution_strides = at::native::contiguous_strides(self_broadcast_size, /*f-contig=*/true);
     set_output(0, self_broadcast_size, solution_strides, self.options(), {});
 
     // make column major strides for BLAS
-    auto clone_A_strides = at::detail::defaultStrides(A_broadcast_size);
-    clone_A_strides[ndim - 2] = 1;
-    clone_A_strides[ndim - 1] = nrows;
+    auto clone_A_strides = at::native::contiguous_strides(A_broadcast_size, /*f_contig=*/true);
     set_output(1, A_broadcast_size, clone_A_strides, A.options(), {});
   } else if (A.layout() == Layout::SparseCsr) {
     // no broadcasting for non-strided layout
