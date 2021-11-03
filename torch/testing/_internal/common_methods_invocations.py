@@ -9146,7 +9146,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_types_and(torch.int64),
            dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            sample_inputs_func=sample_inputs_conv1d,
-           # gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            skips=(
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":103, please report a bug to PyTorch.
