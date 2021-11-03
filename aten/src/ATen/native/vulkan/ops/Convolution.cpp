@@ -457,37 +457,6 @@ bool usable(const Tensor& input) {
          true;
 }
 
-
-Tensor convolution(
-    const Tensor& input,
-    const Tensor& weight,
-    const c10::optional<Tensor>& bias,
-    const IntArrayRef stride,
-    const IntArrayRef padding,
-    const IntArrayRef dilation,
-    const bool transposed,
-    const IntArrayRef output_padding,
-    const int64_t groups) {
-  return Conv2dOpContext::create(
-      weight,
-      bias,
-      stride,
-      padding,
-      dilation,
-      transposed,
-      output_padding,
-      groups
-  ).run(input);
-}
-
-#ifdef USE_VULKAN_API
-
-TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
-  m.impl("convolution_overrideable", convolution);
-}
-
-#endif /* USE_VULKAN_API */
-
 } // namespace
 
 Conv2dOpContext::Conv2dOpContext(
