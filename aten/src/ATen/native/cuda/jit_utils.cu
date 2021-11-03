@@ -122,6 +122,13 @@ std::string generate_code(
       load_vectorized_inputs << "}\n";
     }
     env.s("load_vectorized_inputs", load_vectorized_inputs.str());
+    std::stringstream load_unrolled_inputs;
+    for (const auto i: c10::irange(nInputs)){
+      auto i_string = std::to_string(i);
+      load_unrolled_inputs << "arg" << i_string << "[j] = load<" << common_type
+        << ">(data[" << std::to_string(i + nOutputs) << "], linear_idx);\n";
+    }
+    env.s("load_unrolled_inputs", load_unrolled_inputs.str());
 
     static auto cuda_template = load_code_template(
       "/home/ngimel/local/pytorch/aten/src/ATen/native/cuda/jit_vectorized_template.cuh");

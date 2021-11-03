@@ -67,19 +67,15 @@ Array(const Array&) = default;
 Array& operator=(const Array&) = default;
 };
 
-struct LoadWithoutCast {
 template <typename scalar_t>
-__device__ scalar_t load(char* base_ptr, uint32_t offset, int arg=0) {
+__device__ __inline__ scalar_t load(char* base_ptr, uint32_t offset) {
     return *(reinterpret_cast<scalar_t*>(base_ptr) + offset);
 }
-};
 
-struct StoreWithoutCast {
 template<typename scalar_t>
-__device__ void store(scalar_t value, char *base_ptr, uint32_t offset) {
+__device__ __inline__ void store(scalar_t value, char *base_ptr, uint32_t offset) {
     *(reinterpret_cast<scalar_t *>(base_ptr) + offset) = value;
 }
-};
 
 // aligned vector generates vectorized load/store on CUDA
 template<typename scalar_t, int vec_size>
@@ -105,12 +101,34 @@ void ${name}_vectorized_kernel(
     int remaining = N - block_work_size * blockIdx.x;
     auto thread_idx = threadIdx.x;
     int idx = blockIdx.x;
+    ${declare_load_arrays}
+    ${declare_store_arrays}
 
     if (remaining < block_work_size) {
-        assert("not ready yet!");
+      #pragma unroll
+      for (int j = 0; j < thread_work_size; j++){
+        if (thread_idx >= remaining) {
+          break;
+        }
+        int linear_idx = thread_idx + block_work_size * idx;
+        ${load_unrolled_inputs}
+        thread_idx += num_threads;
+      }
+      #pragma unroll
+      for (int j = 0; j < thread_work_size; j++) {
+        out[j] = ${name}<${scalar_type}>(${args});
+      }
+      thread_idx = threadIdx.x;
+      #pragma unroll
+      for (int j = 0; j < thread_work_size; j++) {
+        if (thread_idx >= remaining) {
+            break;
+        }
+        int linear_idx = thread_idx + block_work_size * idx;
+        store<${result_type}>(out[j], data[0], linear_idx);
+        thread_idx += num_threads;
+      }
     } else {
-      ${declare_load_arrays}
-      ${declare_store_arrays}
       static constexpr int loop_size = thread_work_size / vec_size;
 //actual loading
       using vec_t_input = aligned_vector<${scalar_type}, vec_size>;
