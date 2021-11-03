@@ -1029,12 +1029,12 @@ def add_acc_ops_dim_reduce(network, target, args, kwargs, name, reduce_op):
     return (shuffle_layer0.get_output(0), shuffle_layer1.get_output(0))
 
 
-@tensorrt_converter(acc_ops.max_full_reduce)
+@tensorrt_converter(acc_ops.max_full_reduce, no_implicit_batch_dim=True)
 def acc_ops_max_full_reduce(network, target, args, kwargs, name):
     return add_acc_ops_full_reduce(network, target, args, kwargs, name, trt.ReduceOperation.MAX)
 
 
-@tensorrt_converter(acc_ops.min_full_reduce)
+@tensorrt_converter(acc_ops.min_full_reduce, no_implicit_batch_dim=True)
 def acc_ops_min_full_reduce(network, target, args, kwargs, name):
     return add_acc_ops_full_reduce(network, target, args, kwargs, name, trt.ReduceOperation.MIN)
 
@@ -1368,7 +1368,7 @@ def acc_ops_slice_tensor(network, target, args, kwargs, name):
     return layer.get_output(0)
 
 
-@tensorrt_converter(acc_ops.split)
+@tensorrt_converter(acc_ops.split, no_explicit_batch_dim=True)
 def acc_ops_split(network, target, args, kwargs, name):
     input_val = kwargs["input"]
 
@@ -1828,7 +1828,7 @@ def acc_ops_dequantize(network, target, args, kwargs, name):
     return layer.get_output(0)
 
 
-@tensorrt_converter(acc_ops.gelu)
+@tensorrt_converter(acc_ops.gelu, no_implicit_batch_dim=True)
 def acc_ops_gelu(network, target, args, kwargs, name):
     input_val = kwargs["input"]
     if not isinstance(input_val, trt.tensorrt.ITensor):
@@ -1897,7 +1897,7 @@ def acc_ops_chunk(network, target, args, kwargs, name):
         output.append(layer.get_output(0))
     return output
 
-@tensorrt_converter(acc_ops.cumsum)
+@tensorrt_converter(acc_ops.cumsum, no_implicit_batch_dim=True)
 def acc_ops_cumsum(network, target, args, kwargs, name):
     input_val = kwargs["input"]
     dim = kwargs["dim"]
