@@ -31,14 +31,33 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 
 class TestShardedEmbedding(ShardedTensorTestBase):
-    def _run_sharded_embedding(self, spec, input_size, num_embeddings, embedding_dim):
+    def _run_sharded_embedding(
+        self,
+        spec,
+        input_size,
+        num_embeddings,
+        embedding_dim,
+        max_norm=None,
+        norm_type=2.0,
+        padding_idx=None,
+    ):
         # Use same seed.
         torch.manual_seed(0)
-        local_embedding = torch.nn.Embedding(num_embeddings, embedding_dim).cuda(
-            self.rank
-        )
+        local_embedding = torch.nn.Embedding(
+            num_embeddings,
+            embedding_dim,
+            max_norm=max_norm,
+            norm_type=norm_type,
+            padding_idx=padding_idx,
+        ).cuda(self.rank)
 
-        sharded_embedding = torch.nn.Embedding(num_embeddings, embedding_dim)
+        sharded_embedding = torch.nn.Embedding(
+            num_embeddings,
+            embedding_dim,
+            max_norm=max_norm,
+            norm_type=norm_type,
+            padding_idx=padding_idx,
+        )
 
         # Copy the weights from local embedding
         sharded_embedding.weight = local_embedding.weight
@@ -58,8 +77,20 @@ class TestShardedEmbedding(ShardedTensorTestBase):
         self.assertEqual(local_output, sharded_output)
 
         # Validate for torch.nn.functional.embedding version.
-        local_output = torch.nn.functional.embedding(inp, local_embedding.weight)
-        sharded_output = torch.nn.functional.embedding(inp, sharded_embedding.weight)
+        local_output = torch.nn.functional.embedding(
+            inp,
+            local_embedding.weight,
+            max_norm=max_norm,
+            norm_type=norm_type,
+            padding_idx=padding_idx,
+        )
+        sharded_output = torch.nn.functional.embedding(
+            inp,
+            sharded_embedding.weight,
+            max_norm=max_norm,
+            norm_type=norm_type,
+            padding_idx=padding_idx,
+        )
 
         self.assertEqual(local_output, sharded_output)
 
@@ -73,6 +104,13 @@ class TestShardedEmbedding(ShardedTensorTestBase):
             self._run_sharded_embedding(spec, [8, 6, 5, 4], 23, 13)
             self._run_sharded_embedding(spec, [8, 6, 5, 4, 7], 23, 16)
             self._run_sharded_embedding(spec, [4], 15, 14)
+            self._run_sharded_embedding(spec, [34], 15, 14, padding_idx=10)
+            self._run_sharded_embedding(spec, [8, 6, 5, 4], 23, 13, padding_idx=12)
+            self._run_sharded_embedding(spec, [4, 5, 6], 23, 13, max_norm=2.5)
+            self._run_sharded_embedding(
+                spec, [8, 16], 12, 12, max_norm=1.25, norm_type=1.0
+            )
+            self._run_sharded_embedding(spec, [30], 15, 14, max_norm=2.0)
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(4)
@@ -83,11 +121,24 @@ class TestShardedEmbedding(ShardedTensorTestBase):
             self._run_sharded_embedding(spec, [5, 12], 16, 22)
             self._run_sharded_embedding(spec, [5, 4], 32, 12)
             self._run_sharded_embedding(spec, [6, 7, 6], 64, 11)
+            self._run_sharded_embedding(spec, [5, 12], 16, 22, max_norm=2.5)
+            self._run_sharded_embedding(spec, [6, 7, 6], 64, 11, padding_idx=30)
+            self._run_sharded_embedding(spec, [6, 5, 3], 26, 11, max_norm=2.0)
 
             # Test uneven split.
             self._run_sharded_embedding(spec, [8, 6, 5, 4], 19, 11)
             self._run_sharded_embedding(spec, [6, 7, 6], 21, 11)
             self._run_sharded_embedding(spec, [4], 21, 11)
+            self._run_sharded_embedding(spec, [8, 6, 5, 4], 21, 11, padding_idx=10)
+            self._run_sharded_embedding(
+                spec,
+                [6, 16],
+                27,
+                11,
+                max_norm=2.0,
+            )
+            self._run_sharded_embedding(spec, [4], 14, 11, max_norm=2.5)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     run_tests()

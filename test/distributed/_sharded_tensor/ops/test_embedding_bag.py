@@ -32,16 +32,38 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 class TestShardedEmbeddingBag(ShardedTensorTestBase):
     def _run_sharded_embedding_bag(
-        self, spec, input_size, num_embeddings, embedding_dim, mode, offset_size=None
+        self,
+        spec,
+        input_size,
+        num_embeddings,
+        embedding_dim,
+        mode,
+        include_last_offset=False,
+        offset_size=None,
+        max_norm=None,
+        norm_type=2.0,
+        padding_idx=None,
     ):
         # Use same seed.
         torch.manual_seed(0)
         local_embedding_bag = torch.nn.EmbeddingBag(
-            num_embeddings, embedding_dim, mode=mode
+            num_embeddings,
+            embedding_dim,
+            mode=mode,
+            max_norm=max_norm,
+            norm_type=norm_type,
+            include_last_offset=include_last_offset,
+            padding_idx=padding_idx,
         ).cuda(self.rank)
 
         sharded_embedding_bag = torch.nn.EmbeddingBag(
-            num_embeddings, embedding_dim, mode=mode
+            num_embeddings,
+            embedding_dim,
+            mode=mode,
+            max_norm=max_norm,
+            norm_type=norm_type,
+            include_last_offset=include_last_offset,
+            padding_idx=padding_idx,
         )
 
         # Copy the weights from local embedding bag.
@@ -67,17 +89,23 @@ class TestShardedEmbeddingBag(ShardedTensorTestBase):
             while offsets is None or (offsets.size(0) != offset_size):
                 offsets = torch.randint(input_size[0], (offset_size,))
                 offsets[0] = 0
+                if include_last_offset:
+                    offsets[-1] = input_size[0]
                 offsets = (
                     torch.unique(offsets, sorted=True).contiguous().cuda(self.rank)
                 )
 
         sharded_output = sharded_embedding_bag(
-            inp, offsets=offsets, per_sample_weights=per_sample_weights
+            inp,
+            offsets=offsets,
+            per_sample_weights=per_sample_weights,
         )
 
         # Run local computation
         local_output = local_embedding_bag(
-            inp, offsets=offsets, per_sample_weights=per_sample_weights
+            inp,
+            offsets=offsets,
+            per_sample_weights=per_sample_weights,
         )
 
         # Verify
@@ -90,6 +118,10 @@ class TestShardedEmbeddingBag(ShardedTensorTestBase):
             offsets=offsets,
             mode=mode,
             per_sample_weights=per_sample_weights,
+            include_last_offset=include_last_offset,
+            max_norm=max_norm,
+            norm_type=norm_type,
+            padding_idx=padding_idx,
         )
         sharded_output = torch.nn.functional.embedding_bag(
             inp,
@@ -97,6 +129,10 @@ class TestShardedEmbeddingBag(ShardedTensorTestBase):
             offsets=offsets,
             mode=mode,
             per_sample_weights=per_sample_weights,
+            include_last_offset=include_last_offset,
+            max_norm=max_norm,
+            norm_type=norm_type,
+            padding_idx=padding_idx,
         )
 
         self.assertEqual(local_output, sharded_output)
@@ -119,11 +155,46 @@ class TestShardedEmbeddingBag(ShardedTensorTestBase):
         self._run_sharded_embedding_bag(spec, [5, 5], 17, 14, "sum")
         self._run_sharded_embedding_bag(spec, [5, 4], 17, 12, "mean")
         self._run_sharded_embedding_bag(spec, [6, 7], 21, 11, "max")
+        self._run_sharded_embedding_bag(spec, [5, 5], 17, 14, "sum", max_norm=2.5)
+        self._run_sharded_embedding_bag(
+            spec, [5, 4], 17, 12, "mean", max_norm=2.0, norm_type=1.0
+        )
+        self._run_sharded_embedding_bag(
+            spec, [6, 7], 21, 11, "max", max_norm=1.5, norm_type=1.0
+        )
+        self._run_sharded_embedding_bag(spec, [5, 5], 17, 14, "sum", padding_idx=6)
         self._run_sharded_embedding_bag(spec, [8, 6], 24, 13, "sum")
         self._run_sharded_embedding_bag(spec, [4, 3], 16, 14, "max")
         self._run_sharded_embedding_bag(spec, [8], 23, 13, "sum", offset_size=3)
         self._run_sharded_embedding_bag(spec, [5], 17, 12, "mean", offset_size=2)
         self._run_sharded_embedding_bag(spec, [12], 16, 12, "max", offset_size=4)
+        self._run_sharded_embedding_bag(
+            spec, [8], 23, 13, "sum", offset_size=3, include_last_offset=True
+        )
+        self._run_sharded_embedding_bag(
+            spec, [12], 16, 12, "max", offset_size=4, include_last_offset=True
+        )
+        self._run_sharded_embedding_bag(
+            spec, [12], 17, 12, "sum", offset_size=3, max_norm=1.25
+        )
+        self._run_sharded_embedding_bag(
+            spec, [5], 17, 12, "mean", offset_size=2, max_norm=1.25
+        )
+        self._run_sharded_embedding_bag(
+            spec, [5], 17, 12, "max", offset_size=2, max_norm=1.15
+        )
+        self._run_sharded_embedding_bag(spec, [4, 3], 16, 14, "sum", padding_idx=12)
+        self._run_sharded_embedding_bag(spec, [4, 3], 16, 14, "mean", padding_idx=12)
+        self._run_sharded_embedding_bag(spec, [4, 3], 16, 14, "max", padding_idx=12)
+        self._run_sharded_embedding_bag(
+            spec, [12], 17, 12, "sum", offset_size=3, max_norm=1.25, padding_idx=10
+        )
+        self._run_sharded_embedding_bag(
+            spec, [5], 17, 12, "mean", offset_size=2, max_norm=1.25, padding_idx=10
+        )
+        self._run_sharded_embedding_bag(
+            spec, [5], 17, 12, "max", offset_size=2, max_norm=1.15, padding_idx=10
+        )
 
 
 if __name__ == "__main__":
