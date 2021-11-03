@@ -337,8 +337,7 @@ TORCH_INTERNAL_ASSERT(${out_arg}.size() == ${out_arg}_new_fw_grad.size());
 for (auto i=0; i<${out_arg}.size(); ++i) {
   if (${out_arg}_new_fw_grad[i].defined()) {
   // The hardcoded 0 here will need to be updated once we support multiple levels.
-    ${out_arg}[i]._set_fw_grad(
-        ${out_arg}_new_fw_grad[i], /* level */ 0, /* is_inplace_op */ ${is_inplace});
+    ${out_arg}[i]._set_fw_grad(${out_arg}_new_fw_grad[i], /* level */ 0, /* is_inplace_op */ ${is_inplace});
   }
 }
 """)

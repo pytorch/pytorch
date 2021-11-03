@@ -106,21 +106,12 @@
 - func: _unpack_dual(Tensor(a) dual, int level) -> (Tensor(a) primal, Tensor tangent)
   variants: function
 
-# NOTE [Two New-zero Functions]
-# The following two functions are used internally for forward AD
-# We need two functions here because we'd like a version to use for non-batched
-# forward that can accept non-strided tensors, and another variant specifically
-# when self is batched. Note that this is possible because a batching rule does
-# not need to redispatch to the same function.
-#
-# _new_zeros_with_same_meta needs to be CompositeExplicitAutograd for
+# _new_zeros_with_same_feature_meta needs to be CompositeExplicitAutograd for
 # jvp support in functorch
-- func: _new_zeros_with_same_meta(Tensor self, Tensor other) -> Tensor
+- func: _new_zeros_with_same_feature_meta(Tensor self, Tensor other, int num_feature_dims) -> Tensor
   variants: function
   dispatch:
-    CompositeExplicitAutograd: _new_zeros_with_same_meta
-
-- func: _new_zeros_with_meta(Tensor self, int[] size, int[] stride, int storage_offset, int storage_numel) -> Tensor
+    CompositeExplicitAutograd: _new_zeros_with_same_feature_meta
 
 - func: rename_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)
   variants: method
@@ -2134,7 +2125,7 @@
 
 - func: grid_sampler_2d(Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> Tensor
   dispatch:
-    CPU: grid_sampler_2d_cpu
+    CPU, QuantizedCPU: grid_sampler_2d_cpu
     CUDA: grid_sampler_2d_cuda
 
 # `grid_sampler_2d_backward` takes in `output_mask` to optimize performance for
@@ -6712,6 +6703,9 @@
     CUDA: nonzero_cuda
 
 - func: nonzero_numpy(Tensor self) -> Tensor[]
+  variants: method, function
+
+- func: argwhere(Tensor self) -> Tensor
   variants: method, function
 
 - func: gather.out(Tensor self, int dim, Tensor index, *, bool sparse_grad=False, Tensor(a!) out) -> Tensor(a!)
