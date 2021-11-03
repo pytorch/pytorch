@@ -11,7 +11,7 @@ import sys
 from typing_extensions import Literal
 
 YamlShellBool = Literal["''", 1]
-Arch = Literal["windows", "linux"]
+Arch = Literal["windows", "linux", "macos"]
 
 DOCKER_REGISTRY = "308535385114.dkr.ecr.us-east-1.amazonaws.com"
 GITHUB_DIR = Path(__file__).resolve().parent.parent
@@ -30,6 +30,12 @@ LINUX_CUDA_TEST_RUNNER = "linux.4xlarge.nvidia.gpu"
 LINUX_RUNNERS = {
     LINUX_CPU_TEST_RUNNER,
     LINUX_CUDA_TEST_RUNNER,
+}
+
+MACOS_TEST_RUNNER = "macos-10.15"
+
+MACOS_RUNNERS = {
+    MACOS_TEST_RUNNER
 }
 
 CUDA_RUNNERS = {
@@ -61,6 +67,8 @@ LABEL_CIFLOW_VULKAN = "ciflow/vulkan"
 LABEL_CIFLOW_PREFIX = "ciflow/"
 LABEL_CIFLOW_SLOW_GRADCHECK = "ciflow/slow-gradcheck"
 LABEL_CIFLOW_DOCKER = "ciflow/docker"
+LABEL_CIFLOW_IOS = "ciflow/ios"
+LABEL_CIFLOW_MACOS = "ciflow/macos"
 
 
 @dataclass
@@ -140,9 +148,9 @@ class CIWorkflow:
     # Required fields
     arch: Arch
     build_environment: str
-    test_runner_type: str
 
     # Optional fields
+    test_runner_type: str = ''
     ciflow_config: CIFlowConfig = field(default_factory=CIFlowConfig)
     cuda_version: str = ''
     docker_image_base: str = ''
@@ -200,6 +208,11 @@ class CIWorkflow:
             assert LABEL_CIFLOW_LINUX in self.ciflow_config.labels
         if self.arch == 'windows':
             assert LABEL_CIFLOW_WIN in self.ciflow_config.labels
+        if self.arch == 'macos':
+            assert LABEL_CIFLOW_MACOS in self.ciflow_config.labels
+        # Make sure that jobs with tests have a test_runner_type
+        if not self.exclude_test:
+            assert self.test_runner_type != ''
         if self.test_runner_type in CUDA_RUNNERS:
             assert LABEL_CIFLOW_CUDA in self.ciflow_config.labels
         if self.test_runner_type in CPU_RUNNERS and not self.exclude_test:
@@ -544,6 +557,73 @@ BAZEL_WORKFLOWS = [
     ),
 ]
 
+IOS_WORKFLOWS = [
+    CIWorkflow(
+        arch="macos",
+        build_environment="ios-12-5-1-arm64",
+        exclude_test=True,
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_IOS, LABEL_CIFLOW_MACOS},
+        ),
+    ),
+    CIWorkflow(
+        arch="macos",
+        build_environment="ios-12-5-1-arm64-coreml",
+        exclude_test=True,
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_IOS, LABEL_CIFLOW_MACOS},
+        ),
+    ),
+    CIWorkflow(
+        arch="macos",
+        build_environment="ios-12-5-1-arm64-full-jit",
+        exclude_test=True,
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_IOS, LABEL_CIFLOW_MACOS},
+        ),
+    ),
+    CIWorkflow(
+        arch="macos",
+        build_environment="ios-12-5-1-arm64-custom-ops",
+        exclude_test=True,
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_IOS, LABEL_CIFLOW_MACOS},
+        ),
+    ),
+    CIWorkflow(
+        arch="macos",
+        build_environment="ios-12-5-1-arm64-metal",
+        exclude_test=True,
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_IOS, LABEL_CIFLOW_MACOS},
+        ),
+    ),
+    CIWorkflow(
+        arch="macos",
+        build_environment="ios-12-5-1-x86-64",
+        exclude_test=True,
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_IOS, LABEL_CIFLOW_MACOS},
+        ),
+    ),
+    CIWorkflow(
+        arch="macos",
+        build_environment="ios-12-5-1-x86-64-coreml",
+        exclude_test=True,
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_IOS, LABEL_CIFLOW_MACOS},
+        ),
+    ),
+    CIWorkflow(
+        arch="macos",
+        build_environment="ios-12-5-1-x86-64-full-jit",
+        exclude_test=True,
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_IOS, LABEL_CIFLOW_MACOS},
+        ),
+    ),
+]
+
 DOCKER_IMAGES = {
     f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-cuda10.2-cudnn7-py3.6-clang9",  # for pytorch/xla
     f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm4.1-py3.6",                 # for rocm
@@ -576,6 +656,7 @@ def main() -> None:
         (jinja_env.get_template("linux_ci_workflow.yml.j2"), LINUX_WORKFLOWS),
         (jinja_env.get_template("windows_ci_workflow.yml.j2"), WINDOWS_WORKFLOWS),
         (jinja_env.get_template("bazel_ci_workflow.yml.j2"), BAZEL_WORKFLOWS),
+        (jinja_env.get_template("ios_ci_workflow.yml.j2"), IOS_WORKFLOWS),
         (jinja_env.get_template("docker_builds_ci_workflow.yml.j2"), DOCKER_WORKFLOWS),
         (jinja_env.get_template("android_ci_workflow.yml.j2"), ANDROID_WORKFLOWS),
     ]
