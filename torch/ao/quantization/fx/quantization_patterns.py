@@ -47,7 +47,7 @@ from .utils import (
 
 from ..qconfig import QConfigAny
 
-from abc import ABC, abstractmethod
+from abc import ABC
 import operator
 import warnings
 
@@ -130,8 +130,6 @@ class QuantizeHandler(ABC):
         """
         # TODO(future PR): potentially clean up and deduplicate these
         # mappings.
-        print("all node:", self.all_node_args_are_tensors)
-        print("input output:", self.input_output_observed())
         return self.all_node_args_are_tensors and self.input_output_observed()
 
     def should_mark_output_quantized_from_input_quantized_status(
@@ -171,8 +169,6 @@ class QuantizeHandler(ABC):
         """
         return True
 
-
-    @abstractmethod
     def convert(self,
                 node: Node,
                 qconfig: QConfigAny,
