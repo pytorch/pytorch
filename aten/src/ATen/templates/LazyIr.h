@@ -10,22 +10,17 @@ ${external_backend_headers}
 namespace torch_lazy_tensors {
 namespace ir {
 
-static lazy_tensors::Shape convertShape(
+static std::vector<lazy_tensors::Shape> convertShape(
     const std::vector<at::ScalarType>& dtypes,
     const std::vector<std::vector<int64_t>>& shapes) {
-  CHECK_EQ(dtypes.size(), shapes.size());
-  if (dtypes.size() == 1) {
-    return lazy_tensors::Shape(dtypes[0], shapes[0]);
-  }
+  TORCH_INTERNAL_ASSERT(dtypes.size() == shapes.size());
 
   std::vector<lazy_tensors::Shape> shape;
   for (int i = 0; i < dtypes.size(); i++) {
     shape.emplace_back(dtypes[i], shapes[i]);
   }
 
-  // Since we are going to remove lazy_tensors::Shape very soon, this
-  // copy-by-value is not worth fixing.
-  return lazy_tensors::Shape(shape);
+  return shape;
 }
 
 namespace ops {

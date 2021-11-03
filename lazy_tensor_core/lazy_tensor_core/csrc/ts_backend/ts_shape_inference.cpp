@@ -46,33 +46,6 @@ lazy_tensors::Shape InferComparison(const torch::lazy::Node* node) {
                                 ir::GetShapeFromTsOutput(rhs).sizes()));
 }
 
-lazy_tensors::Shape InferBatchNorm(const torch::lazy::Node* node) {
-  const torch::lazy::Output& input = node->operand(0);
-  const torch::lazy::Output& running_mean = node->operand(3);
-  const torch::lazy::Output& running_var = node->operand(4);
-  return lazy_tensors::ShapeUtil::MakeTupleShape(
-      {ir::GetShapeFromTsOutput(input), ir::GetShapeFromTsOutput(running_mean),
-       ir::GetShapeFromTsOutput(running_var)});
-}
-
-lazy_tensors::Shape InferBatchNormBackward(const torch::lazy::Node* node) {
-  const torch::lazy::Output& input = node->operand(1);
-  const torch::lazy::Output& weight = node->operand(2);
-  return lazy_tensors::ShapeUtil::MakeTupleShape(
-      {ir::GetShapeFromTsOutput(input), ir::GetShapeFromTsOutput(weight),
-       ir::GetShapeFromTsOutput(weight)});
-}
-
-lazy_tensors::Shape InferConvolutionBackwardOverrideable(
-    const ir::ops::ConvolutionBackwardOverrideable* conv_backward) {
-  const torch::lazy::Output& self = conv_backward->operand(0);
-  const torch::lazy::Output& input = conv_backward->operand(1);
-  const torch::lazy::Output& weight = conv_backward->operand(2);
-  return lazy_tensors::ShapeUtil::MakeTupleShape(
-      {ir::GetShapeFromTsOutput(input), ir::GetShapeFromTsOutput(weight),
-       ir::GetShapeFromTsOutput(self)});
-}
-
 lazy_tensors::Shape InferConvolutionOverrideable(
     const ir::ops::ConvolutionOverrideable* conv) {
   const auto& operands = conv->operands();
@@ -169,21 +142,10 @@ lazy_tensors::Shape InferShape(const torch::lazy::Node* node) {
       return lazy_tensors::Shape(
           ir::GetShapeFromTsOutput(argument).scalar_type(), expand->size());
     }
-    case at::aten::convolution_backward_overrideable: {
-      return InferConvolutionBackwardOverrideable(
-          torch::lazy::NodeCast<ir::ops::ConvolutionBackwardOverrideable>(
-              node, ir::OpKind(at::aten::convolution_backward_overrideable)));
-    }
     case at::aten::convolution_overrideable: {
       return InferConvolutionOverrideable(
           torch::lazy::NodeCast<ir::ops::ConvolutionOverrideable>(
               node, ir::OpKind(at::aten::convolution_overrideable)));
-    }
-    case at::aten::native_batch_norm: {
-      return InferBatchNorm(node);
-    }
-    case at::aten::native_batch_norm_backward: {
-      return InferBatchNormBackward(node);
     }
     case at::aten::permute: {
       auto permute = torch::lazy::NodeCast<ir::ops::Permute>(

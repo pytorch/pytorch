@@ -16,7 +16,7 @@ namespace lazy_tensors {
 
 class Literal {
  public:
-  Literal() : shape_(ShapeUtil::MakeTupleShape({})) {}
+  Literal() = default;
 
   explicit Literal(const Shape& shape);
 

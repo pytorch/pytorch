@@ -23,7 +23,7 @@ lazy_tensors::Shape NodeOutputShape(const torch::lazy::Value& input,
 
 View::View(const torch::lazy::Value& input, std::vector<int64_t> output_size)
     : TsNode(torch::lazy::OpKind(at::aten::view), {input},
-             NodeOutputShape(input, output_size),
+             {NodeOutputShape(input, output_size)},
              /*num_outputs=*/1, torch::lazy::MHash(output_size)),
       output_size_(std::move(output_size)) {}
 

@@ -17,7 +17,7 @@ torch::lazy::hash_t SingleShapeHash(const lazy_tensors::Shape& shape, torch::laz
 
 // The hash is deterministic to enable easier debugging between separate runs.
 torch::lazy::hash_t ShapeHash(const lazy_tensors::Shape& shape) {
-  DCHECK(!shape.IsTuple());
+  CHECK(!shape.IsTuple());
   torch::lazy::hash_t hash = (uint32_t)0xa5d2d6916;
   return torch::lazy::SingleShapeHash(shape, hash);
 }

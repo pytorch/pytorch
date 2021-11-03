@@ -7,7 +7,7 @@ namespace ops {
 Generic::Generic(OpKind op, OpList operands,
                  lazy_tensors::Shape shape, size_t num_outputs,
                  torch::lazy::hash_t hash_seed)
-    : TsNode(std::move(op), operands, std::move(shape), num_outputs, hash_seed),
+    : TsNode(std::move(op), operands, {std::move(shape)}, num_outputs, hash_seed),
       hash_seed_(hash_seed) {}
 
 Generic::Generic(OpKind op, OpList operands,

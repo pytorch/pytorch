@@ -31,7 +31,7 @@ Cat::Cat(std::vector<torch::lazy::Value> values, int64_t dim,
          const std::vector<at::ScalarType>& out_dtypes,
          const std::vector<std::vector<int64_t>>& out_shapes)
     : TsNode(torch::lazy::OpKind(at::aten::cat), values,
-             convertShape(out_dtypes, out_shapes),
+             {convertShape(out_dtypes, out_shapes)},
              /*num_outputs=*/1, torch::lazy::MHash(dim)),
       dim_(dim),
       at_dtypes_(out_dtypes),

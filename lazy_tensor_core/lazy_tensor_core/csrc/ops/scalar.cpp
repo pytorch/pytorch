@@ -16,7 +16,7 @@ Scalar::Scalar(const at::Scalar& value, lazy_tensors::Shape shape)
 
 Scalar::Scalar(const at::Scalar& value, c10::ScalarType type)
     : TsNode(OpKind(at::prim::Constant),
-           lazy_tensors::ShapeUtil::MakeShape(type, {}),
+           {lazy_tensors::ShapeUtil::MakeShape(type, {})},
            /*num_outputs=*/1, ScalarHash(value)),
       value_(std::move(value)) {}
 

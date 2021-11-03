@@ -13,7 +13,7 @@ namespace ops {
 GetDimensionsSize::GetDimensionsSize(const torch::lazy::Value& input,
                                      std::vector<int64_t> dimensions)
     : TsNode(ltc_get_dimensions_size, {input},
-             lazy_tensors::ShapeUtil::MakeShape(c10::ScalarType::Int, {}),
+             {lazy_tensors::ShapeUtil::MakeShape(c10::ScalarType::Int, {})},
              /*num_outputs=*/1, torch::lazy::MHash(dimensions)),
       dimensions_(std::move(dimensions)) {}
 

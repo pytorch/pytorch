@@ -14,15 +14,14 @@ TSNativeBatchNormBackward::TSNativeBatchNormBackward(
     : TsNode(torch::lazy::OpKind(at::aten::native_batch_norm_backward),
            {grad_out, input, weight, running_mean, running_var, save_mean,
             save_invstd},
+           {ir::GetShapeFromTsValue(input), ir::GetShapeFromTsValue(weight),
+            ir::GetShapeFromTsValue(weight)},
            /*num_outputs=*/3,
            torch::lazy::MHash(training, eps, output_mask[0],
                                      output_mask[1], output_mask[2])),
       training_(training),
       eps_(eps),
-      output_mask_(output_mask) {
-  SetShapeDeferred(
-      [&]() { return compiler::InferShape(this); });
-}
+      output_mask_(output_mask) {}
 
 TSNativeBatchNormBackward::TSNativeBatchNormBackward(
     const torch::lazy::Value& grad_out, const torch::lazy::Value& input, const torch::lazy::Value& weight,
@@ -30,15 +29,14 @@ TSNativeBatchNormBackward::TSNativeBatchNormBackward(
     std::array<bool, 3> output_mask)
     : TsNode(torch::lazy::OpKind(at::aten::native_batch_norm_backward),
            {grad_out, input, weight, save_mean, save_invstd},
+           {ir::GetShapeFromTsValue(input), ir::GetShapeFromTsValue(weight),
+            ir::GetShapeFromTsValue(weight)},
            /*num_outputs=*/3,
            torch::lazy::MHash(training, eps, output_mask[0],
                                      output_mask[1], output_mask[2])),
       training_(training),
       eps_(eps),
-      output_mask_(output_mask) {
-  SetShapeDeferred(
-      [&]() { return compiler::InferShape(this); });
-}
+      output_mask_(output_mask) {}
 
 std::string TSNativeBatchNormBackward::ToString() const {
   std::stringstream ss;

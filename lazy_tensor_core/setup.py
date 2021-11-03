@@ -254,7 +254,6 @@ extra_compile_args = [
     '-std=c++14',
     '-Wno-sign-compare',
     '-Wno-unknown-pragmas',
-    '-Wno-deprecated-declarations',
     '-Wno-return-type',
 ]
 
