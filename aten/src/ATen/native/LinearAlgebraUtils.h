@@ -35,22 +35,22 @@ template<class Vec>
 static inline Vec contiguous_strides_template(const IntArrayRef sizes, const bool f_contig=false) {
   // f_contig chooses between Fortran (F-contiguous) and C-contiguous strides
   const auto n = sizes.size();
-	if (n == 0) {
-		return Vec{};
-	} else if (n == 1) {
-		return Vec{1l};
-	}
-	// Matrix or batch of matrices
+  if (n == 0) {
+    return Vec{};
+  } else if (n == 1) {
+    return Vec{1l};
+  }
+  // Matrix or batch of matrices
   auto strides = Vec(n);
-	const auto last_idx = n - 1;
-	const auto snd_last_idx = n - 2;
+  const auto last_idx = n - 1;
+  const auto snd_last_idx = n - 2;
   // We'll fill the first two strides afterwards, otherwise the first step
   // in the for loop is wrong
   strides[snd_last_idx] = std::max(sizes[last_idx], 1l);
-	for (int i = snd_last_idx - 1; i >= 0; --i) {
-		strides[i] = strides[i + 1] * std::max(sizes[i + 1], 1l);
-	}
-	strides[last_idx] = f_contig ? std::max(sizes[snd_last_idx], 1l) : 1l;
+  for (int i = snd_last_idx - 1; i >= 0; --i) {
+    strides[i] = strides[i + 1] * std::max(sizes[i + 1], 1l);
+  }
+  strides[last_idx] = f_contig ? std::max(sizes[snd_last_idx], 1l) : 1l;
   if (f_contig) {
     // We filled the wrong stride before so we correct it
     strides[snd_last_idx] = 1l;
