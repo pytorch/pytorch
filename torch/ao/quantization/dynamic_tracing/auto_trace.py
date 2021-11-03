@@ -48,6 +48,9 @@ def add_auto_observation(
     # id=1, we know that the output of op_n is the input to op_n+2.
     qtensor_id = [0]
     module_id_to_fqn: Dict[int, str] = {}
+    # Counter for global quantizeable ops, useful for intermediate activation
+    # logging.
+    global_op_idx = [0]
 
     class QuantizationInterceptionProxy(torch.Tensor):
         """
@@ -96,7 +99,8 @@ def add_auto_observation(
                 output = super().__torch_function__(func, types, args, kwargs)
                 # run "after" hook
                 output = qstate.op_prepare_after_hook(
-                    func, output, args, first_call, qtensor_id, parent_module)
+                    func, output, args, first_call, qtensor_id, parent_module,
+                    global_op_idx)
                 qstate.mark_cur_op_complete(func)
             else:
                 output = super().__torch_function__(func, types, args, kwargs)
@@ -193,7 +197,7 @@ def add_auto_observation(
                         # TODO is it correct to call_cur_module twice here?
                         output = parent_qstate.op_prepare_after_hook(
                             cur_module, output, args, first_call, qtensor_id,
-                            cur_module)
+                            cur_module, global_op_idx)
                         parent_qstate.mark_cur_op_complete(cur_module)
 
                     elif hook_type is HookType.MODULE_IO_HOOKS:
@@ -264,6 +268,8 @@ def add_auto_observation(
                                 assert hasattr(v, '_auto_quant_state')
                                 v._auto_quant_state.reset_to_new_call()
 
+                global_op_idx[0] = 0
+
                 output = super().__call__(*new_args, **new_kwargs)
                 return output
             finally:
@@ -287,6 +293,9 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
             return x
 
     module_id_to_fqn: Dict[int, str] = {}
+    # Counter for global quantizeable ops, useful for intermediate activation
+    # logging.
+    global_op_idx = [0]
 
     class QuantizationDispatchProxy(torch.Tensor):
         """
@@ -338,7 +347,8 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                 # forward
                 output = super().__torch_function__(func, types, args, kwargs)
                 # after hooks
-                output = qstate.op_convert_after_hook(func, output)
+                output = qstate.op_convert_after_hook(
+                    func, output, global_op_idx)
                 qstate.mark_cur_op_complete(func)
 
             elif hook_type is HookType.ARG_DEQUANTS:
@@ -451,7 +461,8 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                         # forward
                         output = orig_module_call(self, *args, **kwargs)
                         # after hooks
-                        output = qstate.op_convert_after_hook(cur_module, output)
+                        output = qstate.op_convert_after_hook(
+                            cur_module, output, global_op_idx)
                         qstate.mark_cur_op_complete(cur_module)
 
                     elif hook_type is HookType.MODULE_IO_HOOKS:
@@ -508,6 +519,8 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                     module_id_to_fqn[id(v)] = k
                     if hasattr(v, '_auto_quant_state'):
                         v._auto_quant_state.reset_to_new_call()
+
+                global_op_idx[0] = 0
 
                 needs_io_hooks = hasattr(self, '_auto_quant_state')
 

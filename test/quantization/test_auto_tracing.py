@@ -1,6 +1,7 @@
 import collections
 import copy
 import math
+import tabulate
 import unittest
 
 import torch
@@ -22,6 +23,9 @@ from torch.quantization.quantize_fx import (
 )
 
 import torch.ao.quantization._quantize_dynamic_tracing as _quantize_dynamic_tracing
+import torch.ao.ns._numeric_suite_dynamic_tracing as ns
+# TODO(future PR): move these utils out of the FX folder
+import torch.ao.ns._numeric_suite_fx as ns_fx
 
 def _allclose(a, b):
     if isinstance(a, tuple):
@@ -909,6 +913,56 @@ class TestAutoTracing(AutoTracingTestCase):
             m, qconfig, (torch.randn(1, 1, 1),),
             # the module is not symbolically traceable
             do_fx_comparison=False)
+
+    # TODO(future PR): move into a separate test file
+    def test_numeric_suite(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(1, 1, 1)
+                self.conv2 = nn.Sequential(nn.Conv2d(1, 1, 1))
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.conv2(x)
+                x = x + x
+                return x
+
+        m = M().eval()
+        m.qconfig = torch.quantization.default_qconfig
+        example_args = (torch.randn(1, 1, 2, 2),)
+        mp = _quantize_dynamic_tracing.prepare(m, example_args)
+        out_p = mp(*example_args)
+        mq = _quantize_dynamic_tracing.convert(copy.deepcopy(mp))
+        out_q = mq(*example_args)
+
+        mp, mq = ns.add_loggers('mp', mp, 'mq', mq)
+
+        mp(*example_args)
+        mq(*example_args)
+
+        act_comparison = ns.extract_logger_info(mp, mq, 'mq')
+        ns_fx.extend_logger_results_with_comparison(
+            act_comparison, 'mp', 'mq', torch.ao.ns.fx.utils.compute_sqnr,
+            'sqnr')
+
+        # TODO(future PR): enforce validity of the result above, using
+        # NS for FX utils. Will need some refactoring.
+
+        # TODO(future PR): consider adding a util for below
+        to_print = []
+        for idx, (layer_name, v) in enumerate(act_comparison.items()):
+            to_print.append([
+                layer_name,
+                v['node_output']['mq'][0]['fqn'],
+                v['node_output']['mq'][0]['ref_node_target_type'],
+                v['node_output']['mq'][0]['sqnr']])
+
+        # debugging only, TODO(future PR) remove this once we have
+        # better tooling
+        if False:
+            print(tabulate.tabulate(
+                to_print, headers=['layer_name', 'fqn', 'type', 'sqnr']))
 
 
 @skipIfNoFBGEMM
