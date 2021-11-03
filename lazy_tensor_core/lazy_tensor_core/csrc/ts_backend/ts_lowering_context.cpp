@@ -1,8 +1,7 @@
-#include "lazy_tensor_core/csrc/ts_backend/ts_node_lowering.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_lowering_context.h"
 
+#include "lazy_tensor_core/csrc/ts_backend/ts_node_lowering.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
-#include "lazy_tensors/str_cat.h"
 
 namespace torch_lazy_tensors {
 namespace compiler {

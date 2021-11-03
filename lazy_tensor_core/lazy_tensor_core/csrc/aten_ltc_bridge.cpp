@@ -264,7 +264,7 @@ c10::Device LtcDeviceToAtenDevice(const Device& device) {
 }
 
 std::string ToLtcString(const c10::Device& device) {
-  return lazy_tensors::StrCat("lazy:", device.index());
+  return c10::str("lazy:", device.index());
 }
 
 c10::Device AtenDefaultDevice() {

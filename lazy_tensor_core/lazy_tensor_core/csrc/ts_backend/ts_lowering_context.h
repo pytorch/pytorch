@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/jit.h>
+
 #include "lazy_tensor_core/csrc/lowering_context.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_node_lowering.h"
 #include "torch/csrc/jit/runtime/graph_executor.h"
@@ -11,8 +12,8 @@ using TSOpVector = std::vector<torch::jit::Value*>;
 
 class TSNodeLoweringInterface {
   /**
-   * This interface is only needed for legacy ops, and can be removed once all ops
-   * implement TSNode->lower().
+   * This interface is only needed for legacy ops, and can be removed once all
+   * ops implement TSNode->lower().
    * */
  public:
   TSNodeLoweringInterface() = default;
@@ -21,16 +22,38 @@ class TSNodeLoweringInterface {
 
   virtual bool Lower(const torch::lazy::Node* node) = 0;
 
-  static std::unique_ptr<TSNodeLoweringInterface> Create(ir::LoweringContext* loctx);
+  static std::unique_ptr<TSNodeLoweringInterface> Create(
+      ir::LoweringContext* loctx);
 };
 
 namespace ts_backend {
 
 class TSComputation : public Computation {
  public:
-  GenericComputationTS(std::shared_ptr<torch::jit::Graph> graph)
-      : graph_(graph),
-        graph_executor_(std::move(graph), "") {}
+  TSComputation(std::shared_ptr<torch::jit::Graph> graph)
+      : graph_(graph), graph_executor_(std::move(graph), "") {
+    for (torch::jit::Value* input : graph_->inputs()) {
+      parameter_names_.push_back(input->debugName());
+    }
+  }
+
+  int parameters_size() const override { return parameter_names_.size(); }
+
+  const std::vector<lazy_tensors::Shape>& parameter_shapes() const override {
+    throw std::runtime_error(
+        "TODO(whc) implement TS computation shapes or change interface");
+    return parameter_shapes_;
+  }
+
+  const std::vector<std::string>& parameter_names() const override {
+    return parameter_names_;
+  }
+
+  const lazy_tensors::Shape& result_shape() const override {
+    throw std::runtime_error(
+        "TODO(whc) implement TS computation shapes or change interface");
+    return result_shape_;
+  }
 
   std::shared_ptr<torch::jit::Graph> graph() const { return graph_; }
 
@@ -84,8 +107,7 @@ class TSLoweringContext : public ir::LoweringContext {
   size_t AddResult(torch::jit::Value* op);
 
   std::shared_ptr<torch::jit::Graph> graph_;
-  std::unordered_map<BackendData::Handle, Parameter>
-      parameters_map_;
+  std::unordered_map<BackendData::Handle, Parameter> parameters_map_;
   std::vector<torch::jit::Value*> root_tuple_;
   torch::lazy::OutputMap<torch::jit::Value*> emitted_outputs_;
   std::unique_ptr<TSNodeLoweringInterface> lowering_;
