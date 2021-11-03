@@ -755,21 +755,21 @@ static inline void diff_check(const Tensor& self, int64_t n, int64_t dim, const 
       self.dim()>= 1,
       "diff expects input to be at least one-dimensional");
 
-  auto prepend_size = (prepend.has_value()) ? prepend.value().size(dim) : 0;
-  auto append_size = (append.has_value()) ? append.value().size(dim) : 0;
-  auto size_along_dim = self.size(dim) + prepend_size + append_size;
-  TORCH_CHECK(
-       n >= 1 && n < size_along_dim,
-       "diff expects n to be at least 1 and < size along dim after prepend and append=", size_along_dim, " but got ", n);
-
   diff_check_compatible_shape(self, prepend, dim);
   diff_check_compatible_shape(self, append, dim);
 }
 
 static inline Tensor diff_helper(const Tensor& self, int64_t n, int64_t dim) {
+  if (n == 0){
+    auto result = at::zeros_like(self);
+    result.copy_(self);
+    return result;
+  }
+
   auto out_len = self.size(dim) - 1;
   auto result = self;
   bool is_kBool = self.dtype() == at::kBool;
+  n = n >= self.size(dim) ? self.size(dim) : n;
 
   for (const auto i : c10::irange(n)) {
     (void)i; //Suppress unused variable warning
@@ -786,7 +786,7 @@ static inline Tensor diff_helper(const Tensor& self, int64_t n, int64_t dim) {
 
 Tensor diff(const Tensor& self, int64_t n, int64_t dim, const c10::optional<Tensor>& prepend, const c10::optional<Tensor>& append) {
   diff_check(self, n, dim, prepend, append);
-  if (!prepend.has_value() && !append.has_value()) {
+  if ((!prepend.has_value() && !append.has_value()) || n == 0) {
     return diff_helper(self, n, dim);
   } else {
     auto a = prepend_append_on_dim(self, prepend, append, dim);
@@ -795,6 +795,14 @@ Tensor diff(const Tensor& self, int64_t n, int64_t dim, const c10::optional<Tens
 }
 
 static inline Tensor& diff_out_helper(const Tensor& self, int64_t n, int64_t dim, Tensor& result) {
+  if (n == 0){
+    at::native::resize_output(result, self.sizes());
+    check_scalar_type_device_layout_equal(result, self);
+    result.copy_(self);
+    return result;
+  }
+
+  n = n >= self.size(dim) ? self.size(dim) : n;
   auto out_len = self.size(dim) - n;
   auto prev_result = self;
 
@@ -814,7 +822,7 @@ static inline Tensor& diff_out_helper(const Tensor& self, int64_t n, int64_t dim
 
 Tensor& diff_out(const Tensor& self, int64_t n, int64_t dim, const c10::optional<Tensor>& prepend, const c10::optional<Tensor>& append, Tensor& result) {
   diff_check(self, n, dim, prepend, append);
-  if (!prepend.has_value() && !append.has_value()) {
+  if ((!prepend.has_value() && !append.has_value()) || n == 0) {
     return diff_out_helper(self, n, dim, result);
   } else {
     auto a = prepend_append_on_dim(self, prepend, append, dim);
