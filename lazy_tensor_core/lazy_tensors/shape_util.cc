@@ -1,5 +1,6 @@
 #include "lazy_tensors/shape_util.h"
 
+#include "c10/util/logging_is_not_google_glog.h"
 #include "lazy_tensors/core/platform/errors.h"
 #include "lazy_tensors/core/platform/hash.h"
 #include "lazy_tensors/layout_util.h"
@@ -16,65 +17,20 @@ torch::lazy::hash_t SingleShapeHash(const lazy_tensors::Shape& shape, torch::laz
 
 // The hash is deterministic to enable easier debugging between separate runs.
 torch::lazy::hash_t ShapeHash(const lazy_tensors::Shape& shape) {
+  DCHECK(!shape.IsTuple());
   torch::lazy::hash_t hash = (uint32_t)0xa5d2d6916;
-  lazy_tensors::ShapeUtil::ForEachSubshape(shape,
-                             [&](const lazy_tensors::Shape& subshape, const lazy_tensors::ShapeIndex&) {
-                               hash = torch::lazy::SingleShapeHash(subshape, hash);
-                             });
-  return hash;
+  return torch::lazy::SingleShapeHash(shape, hash);
 }
 
 
 torch::lazy::hash_t Hash(const lazy_tensors::Shape& shape) {
   return ShapeHash(shape);
 }
+
 }  // namespace lazy
 }  // namespace torch
 
 namespace lazy_tensors {
-
-/* static */ int64_t ShapeUtil::TupleElementCount(const Shape& shape) {
-  CHECK(shape.IsTuple()) << shape;
-  return shape.tuple_shapes_size();
-}
-
-namespace {
-
-// Helper for ForEachSubshape which visits the subshapes of the given shape in
-// DFS pre-order starting with the index.
-Status ForEachSubshapeHelper(const Shape& shape,
-                             const ShapeUtil::StatusVisitorFunction& func,
-                             ShapeIndex* index) {
-  TF_RETURN_IF_ERROR(func(shape, *index));
-  if (shape.IsTuple()) {
-    for (int64_t i = 0; i < ShapeUtil::TupleElementCount(shape); ++i) {
-      // Track the sub-shape position, which can be used by the visitor
-      // function.
-      index->push_back(i);
-      TF_RETURN_IF_ERROR(ForEachSubshapeHelper(
-          ShapeUtil::GetTupleElementShape(shape, i), func, index));
-      index->pop_back();
-    }
-  }
-  return Status::OK();
-}
-
-}  // namespace
-
-void ShapeUtil::ForEachSubshape(const Shape& shape,
-                                const VisitorFunction& func) {
-  ShapeIndex index;
-  // Can safely ignore error since the visitor closure always returns
-  // Status::OK().
-  ForEachSubshapeHelper(
-      shape,
-      [&func](const Shape& subshape, const ShapeIndex& index) {
-        func(subshape, index);
-        return Status::OK();
-      },
-      &index)
-      .IgnoreError();
-}
 
 /*static*/ size_t ShapeUtil::Hash(const Shape& shape) {
   using lazy_tensors::hash;
