@@ -113,11 +113,11 @@ class TORCH_API Reducer {
   // buckets, each of which is specified as a list of indices into the
   // variables list for **a single replica** (i.e. `variables[0]`).
   explicit Reducer(
-      std::vector<std::vector<at::Tensor>> replicas,
+      std::vector<at::Tensor> params,
       std::vector<std::vector<size_t>> bucket_indices,
       std::vector<size_t> per_bucket_size_limits,
       c10::intrusive_ptr<c10d::ProcessGroup> process_group,
-      std::vector<std::vector<bool>> expect_sparse_gradients,
+      std::vector<bool> expect_sparse_gradients,
       int64_t bucket_bytes_cap,
       bool find_unused_parameters,
       bool gradient_as_bucket_view,
@@ -145,9 +145,9 @@ class TORCH_API Reducer {
   void prepare_for_forward();
 
   // Returns the relative time in nanoseconds when gradients were ready,
-  // with respect to the time `prepare_for_backward` was called. The outer
-  // vector is for model replicas and the inner vector is for parameters.
-  std::vector<std::vector<int64_t>> get_backward_stats() const {
+  // with respect to the time `prepare_for_backward` was called. The
+  // vector is for parameters for a single model replica.
+  std::vector<int64_t> get_backward_stats() const {
     return backward_stats_;
   }
 
@@ -185,6 +185,11 @@ class TORCH_API Reducer {
   // rebuilt.
   bool rebuild_buckets();
 
+  // Install futures that should be awaited at end of backwards. Currently these
+  // are only used by user-defined custom buffer reduction hooks, but can be generalized
+  // to any user-originating futures that need to be awaited.
+  void install_futures(c10::List<c10::intrusive_ptr<c10::ivalue::Future>> futs);
+
   // Returns true if we should rebuild buckets, else false. We only rebuild
   // buckets once after the first iteration and never rebuild them if
   // find_unused_parameters_.
@@ -201,10 +206,9 @@ class TORCH_API Reducer {
       c10::intrusive_ptr<c10d::ProcessGroup::Work> forwardPassWorkHandle,
       bool useStaticWorldSize);
 
-  // Retrieve on-device tensors used to track locally unused parameters. For
-  // each replica, it is a tensor where index i = 1 if the Variable with that
-  // index has been used.
-  std::vector<at::Tensor> get_local_used_maps_on_device() const;
+  // Retrieve on-device tensors used to track locally unused parameters. It is
+  // a tensor where index i = 1 if the Variable with that index has been used.
+  at::Tensor get_local_used_map_on_device() const;
 
   // An function for users to set sample_rate of collecting
   // runtime stats. The time stats will be recorded for the
@@ -236,13 +240,13 @@ class TORCH_API Reducer {
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   mutable std::mutex mutex_;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  const std::vector<std::vector<at::Tensor>> replicas_;
+  const std::vector<at::Tensor> params_;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const c10::intrusive_ptr<::c10d::ProcessGroup> process_group_;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  std::vector<std::vector<bool>> expect_sparse_gradients_;
+  std::vector<bool> expect_sparse_gradients_;
 
-  std::vector<std::vector<std::shared_ptr<torch::autograd::Node>>>
+  std::vector<std::shared_ptr<torch::autograd::Node>>
       grad_accumulators_; // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unordered_map<torch::autograd::Node*, size_t> gradAccToVariableMap_;
@@ -274,24 +278,26 @@ class TORCH_API Reducer {
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool ddp_graph_static_{true};
   // Locally used parameter maps indicating if parameters are used locally
-  // during the current iteration or no_sync session if no_sync is on. One
-  // tensor for each model replica and each tensor is one-dim int32 tensor of
-  // number of parameters. These tensors are marked in autograd_hook to indicate
-  // the corresponding param has been used, and get allreduced in the end of
-  // backward of current iteration or no_sync session for figuring out the
-  // globally unused parameters.
+  // during the current iteration or no_sync session if no_sync is on.
+  // Each map is a one-dim int32 tensor of number of parameters. These tensors
+  // are marked in autograd_hook to indicate the corresponding param has been
+  // used, and get allreduced in the end of backward step of current iteration
+  // or no_sync session for figuring out the globally unused parameters.
   //
-  // local_used_maps_:     CPU tensors for bookkeeping locally used params
-  // local_used_maps_dev_: dev tensors for reducing globally unused params
-  std::vector<at::Tensor> local_used_maps_;
-  std::vector<at::Tensor> local_used_maps_dev_;
+  // local_used_map_:     CPU tensor for bookkeeping locally used params
+  // local_used_map_dev_: dev tensor for reducing globally unused params
+  at::Tensor local_used_map_;
+  at::Tensor local_used_map_dev_;
   // Indicate that reduction is done and D2H copy is done as well.
-  bool local_used_maps_reduced_;
+  bool local_used_map_reduced_;
 
   // Weak pointer to associated DDP logger.
   std::weak_ptr<c10d::Logger> logger_;
+  // List of futures installed by Reducer::install_futures that should be awaited
+  // at the end of backwards pass.
+  c10::optional<c10::List<c10::intrusive_ptr<c10::ivalue::Future>>> installed_futures_{c10::nullopt};
 
-  // Work handle for allreduce on local_used_maps_
+  // Work handle for allreduce on local_used_map_
   c10::intrusive_ptr<c10d::ProcessGroup::Work> local_used_work_;
 
   void mark_variable_ready_dense(size_t variable_index);
@@ -474,7 +480,7 @@ class TORCH_API Reducer {
   // We collect the relative timestamp of every gradient being ready
   // when executing autograd. This can be used to derive a timeline of
   // the point in time buckets were ready, or ideal bucket assignment/ordering.
-  std::vector<std::vector<int64_t>> backward_stats_;
+  std::vector<int64_t> backward_stats_;
 
   bool should_collect_runtime_stats();
   void record_forward_compute_start_time();
@@ -607,8 +613,8 @@ compute_bucket_assignment_by_size(
 
 // Verify models across all processes are the same as model on rank 0 with
 // respect to no. of params and matching dtype/size/layout.
-TORCH_API void verify_replica0_across_processes(
+TORCH_API void verify_params_across_processes(
     const c10::intrusive_ptr<c10d::ProcessGroup>& process_group,
-    const std::vector<std::vector<at::Tensor>>& model_replicas,
+    const std::vector<at::Tensor>& params,
     const c10::optional<std::weak_ptr<c10d::Logger>>& logger);
 } // namespace c10d
