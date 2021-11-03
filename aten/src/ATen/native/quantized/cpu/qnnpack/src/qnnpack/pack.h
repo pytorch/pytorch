@@ -8,6 +8,7 @@
 
 #pragma once
 #include <qnnpack/math.h>
+#include <stdint.h>
 
 // Legend:
 //  dq: Design-time Quantization

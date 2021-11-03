@@ -254,6 +254,7 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/passes/shape_analysis.cpp",
     "torch/csrc/jit/passes/integer_value_refinement.cpp",
     "torch/csrc/jit/passes/symbolic_shape_analysis.cpp",
+    "torch/csrc/jit/passes/symbolic_shape_runtime_fusion.cpp",
     "torch/csrc/jit/passes/specialize_autogradzero.cpp",
     "torch/csrc/jit/passes/update_differentiable_graph_requires_grad.cpp",
     "torch/csrc/jit/passes/variadic_ops.cpp",
@@ -285,6 +286,7 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/runtime/script_profile.cpp",
     "torch/csrc/jit/runtime/symbolic_script.cpp",
     "torch/csrc/jit/runtime/symbolic_shape_registry.cpp",
+    "torch/csrc/jit/runtime/jit_trace.cpp",
     "torch/csrc/jit/serialization/callstack_debug_info_serialization.cpp",
     "torch/csrc/jit/serialization/import.cpp",
     "torch/csrc/jit/serialization/import_export_helpers.cpp",
@@ -321,6 +323,7 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/tensorexpr/operators/misc.cpp",
     "torch/csrc/jit/tensorexpr/operators/norm.cpp",
     "torch/csrc/jit/tensorexpr/operators/pointwise.cpp",
+    "torch/csrc/jit/tensorexpr/operators/quantization.cpp",
     "torch/csrc/jit/tensorexpr/operators/reduction.cpp",
     "torch/csrc/jit/tensorexpr/operators/softmax.cpp",
     "torch/csrc/jit/tensorexpr/reduction.cpp",
@@ -356,6 +359,7 @@ lazy_tensor_core_sources = [
     "torch/csrc/lazy/core/hash.cpp",
     "torch/csrc/lazy/core/ir.cpp",
     "torch/csrc/lazy/core/ir_metadata.cpp",
+    "torch/csrc/lazy/core/ir_util.cpp",
 ]
 
 libtorch_core_sources = sorted(
@@ -444,6 +448,7 @@ jit_sources_full = [
     "torch/csrc/jit/runtime/register_special_ops.cpp",
     "torch/csrc/jit/passes/remove_inplace_ops.cpp",
     "torch/csrc/jit/passes/utils/check_alias_annotation.cpp",
+    "torch/csrc/jit/passes/autocast.cpp",
 ]
 
 libtorch_core_jit_sources = sorted(jit_sources_full)
@@ -519,6 +524,7 @@ libtorch_extra_sources = libtorch_core_jit_sources + [
     "torch/csrc/jit/mobile/train/sequential.cpp",
     "torch/csrc/jit/serialization/onnx.cpp",
     "torch/csrc/jit/serialization/export.cpp",
+    "torch/csrc/jit/serialization/export_bytecode.cpp",
     "torch/csrc/jit/serialization/export_module.cpp",
     "torch/csrc/jit/serialization/import_legacy.cpp",
     "torch/csrc/utils/byte_order.cpp",
@@ -748,7 +754,6 @@ libtorch_python_core_sources = [
     "torch/csrc/jit/passes/onnx/fixup_onnx_controlflow.cpp",
     "torch/csrc/jit/passes/onnx/list_model_parameters.cpp",
     "torch/csrc/jit/passes/onnx/function_substitution.cpp",
-    "torch/csrc/jit/passes/onnx/fold_if_node.cpp",
     "torch/csrc/jit/passes/onnx/helper.cpp",
     "torch/csrc/jit/passes/onnx/peephole.cpp",
     "torch/csrc/jit/passes/onnx/preprocess_for_onnx.cpp",
@@ -757,6 +762,7 @@ libtorch_python_core_sources = [
     "torch/csrc/jit/passes/onnx/unpack_quantized_weights.cpp",
     "torch/csrc/jit/passes/onnx/remove_inplace_ops_for_onnx.cpp",
     "torch/csrc/jit/passes/onnx/shape_type_inference.cpp",
+    "torch/csrc/jit/passes/onnx/function_extraction.cpp",
     "torch/csrc/jit/python/pybind_utils.cpp",
     "torch/csrc/jit/passes/onnx/pattern_conversion/common.cpp",
     "torch/csrc/jit/passes/onnx/pattern_conversion/pattern_encapsulation.cpp",
@@ -848,6 +854,10 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/Context.cpp",
     "aten/src/ATen/DLConvertor.cpp",
     "aten/src/ATen/ExpandUtils.cpp",
+    "aten/src/ATen/FunctionalInverses.cpp",
+    "aten/src/ATen/FunctionalStorageImpl.cpp",
+    "aten/src/ATen/FunctionalTensorWrapper.cpp",
+    "aten/src/ATen/FunctionalizeFallbackKernel.cpp",
     "aten/src/ATen/MemoryOverlap.cpp",
     "aten/src/ATen/MapAllocator.cpp",
     "aten/src/ATen/NamedTensorUtils.cpp",
