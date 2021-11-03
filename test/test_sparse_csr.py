@@ -11,7 +11,7 @@ from torch.testing._internal.common_utils import \
     (IS_MACOS, IS_WINDOWS, TEST_WITH_ROCM, TestCase, run_tests, load_tests, coalescedonoff)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoCusparseGeneric,
-     precisionOverride, skipMeta, skipCUDAIf)
+     precisionOverride, skipMeta, skipCUDAIf, skipCPUIfNoMklSparse)
 from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing._internal.common_dtype import floating_types, get_all_dtypes
 from test_sparse import CUSPARSE_SPMM_COMPLEX128_SUPPORTED
@@ -573,6 +573,7 @@ class TestSparseCSR(TestCase):
                 with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
                     torch.addmm(s, csr, m2)
 
+    @skipCPUIfNoMklSparse
     @skipCUDAIfNoCusparseGeneric
     @dtypes(*floating_and_complex_types())
     @dtypesIfCUDA(*get_all_complex_dtypes(),
@@ -839,6 +840,7 @@ class TestSparseCSR(TestCase):
         _test_spadd_shape(10, [100, 1])
         _test_spadd_shape(10, [1, 100])
 
+    @skipCPUIfNoMklSparse
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_sparse_add(self, device, dtype):
         def run_test(m, n, index_dtype):
