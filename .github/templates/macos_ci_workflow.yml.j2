@@ -72,6 +72,7 @@ jobs:
       - name: Test
         run: |
           .jenkins/pytorch/macos-test.sh
+      !{{ common.render_test_results() }}
 {%- endif %}
 {% endblock +%}
 
