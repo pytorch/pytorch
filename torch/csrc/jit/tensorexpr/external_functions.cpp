@@ -475,6 +475,29 @@ void nnc_prepacked_conv2d_clamp_run(
 
 #endif // USE_XNNPACK
 
+void nnc_aten_embedding(
+    int64_t bufs_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int8_t* buf_dtypes,
+    int64_t args_num,
+    int64_t* extra_args) {
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+
+  at::Tensor& r = tensors[0];
+  const at::Tensor& weight = tensors[1];
+  const at::Tensor& indices = tensors[2];
+  try {
+    r = at::embedding(weight, indices);
+  } catch (...) {
+  }
+  // TODO: have to copy output because at::embedding doesnt have an out variant
+  // and NNC's external calls don't support allocations
+  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+}
+
 #ifndef C10_MOBILE
 
 const static RegisterNNCExternalFunction nnc_conv2d(
@@ -514,6 +537,10 @@ const static RegisterNNCExternalFunction nnc_addmm(
 const static RegisterNNCExternalFunction nnc_triangular_solve(
     "nnc_aten_triangular_solve",
     nnc_aten_triangular_solve);
+
+const static RegisterNNCExternalFunction nnc_embedding(
+    "nnc_aten_embedding",
+    nnc_aten_embedding);
 
 #ifdef USE_XNNPACK
 const static RegisterNNCExternalFunction reg_nnc_prepacked_linear_clamp_run(

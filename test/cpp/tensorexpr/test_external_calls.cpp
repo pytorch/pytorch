@@ -375,6 +375,57 @@ TEST(ExternalCall, Addmm_float) {
   ASSERT_TRUE(at::allclose(nnc_result, ref));
 }
 
+TEST(ExternalCall, Embedding) {
+  BufHandle Weight("Weight", {256, 100}, kFloat);
+  BufHandle Indices("Indices", {1, 115}, kLong);
+  BufHandle ResultBuf("Result", {1, 115, 100}, kFloat);
+  int64_t padding_idx = -1;
+  bool scale_grad_by_freq = false;
+  bool sparse = false;
+
+  Tensor Result = Tensor(
+      ResultBuf.node(),
+      ExternalCall::make(
+          ResultBuf,
+          "nnc_aten_embedding",
+          {Weight, Indices},
+          {padding_idx, (int64_t)scale_grad_by_freq, (int64_t)sparse}));
+  LoopNest l({Result});
+  l.prepareForCodegen();
+  l.simplify();
+
+  auto options = at::TensorOptions()
+                     .layout(at::kStrided)
+                     .device(at::kCPU)
+                     .requires_grad(false);
+
+  at::Tensor weight = at::ones({256, 100}, options.dtype(at::kFloat)) * 5.f;
+  at::Tensor indices = at::ones({1, 115}, options.dtype(at::kLong)) * 6;
+  at::Tensor ref =
+      at::embedding(weight, indices, padding_idx, scale_grad_by_freq, sparse);
+
+  at::Tensor nnc_result;
+  std::vector<float> weight_buf(256 * 100, 5.f);
+  std::vector<int64_t> indices_buf(1 * 115, 6);
+  std::vector<float> result_buf(1 * 115 * 100, -1.f);
+
+#ifdef TORCH_ENABLE_LLVM
+  LLVMCodeGen llvm_codegen(l.root_stmt(), {Weight, Indices, Result});
+
+  llvm_codegen.call({weight_buf, indices_buf, result_buf});
+  nnc_result = at::from_blob(
+      result_buf.data(), {1, 115, 100}, options.dtype(at::kFloat));
+  ASSERT_TRUE(at::allclose(nnc_result, ref));
+#endif
+
+  SimpleIREvaluator ir_eval(l.root_stmt(), {Weight, Indices, Result});
+
+  ir_eval.call({weight_buf, indices_buf, result_buf});
+  nnc_result = at::from_blob(
+      result_buf.data(), {1, 115, 100}, options.dtype(at::kFloat));
+  ASSERT_TRUE(at::allclose(nnc_result, ref));
+}
+
 #ifdef USE_XNNPACK
 
 TEST(ExternalCall, Prepacked_Linear_float) {
