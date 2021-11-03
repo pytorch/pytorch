@@ -34,7 +34,7 @@ class Helpers {
 
   static std::vector<int64_t> GetAllDimensions(
       const lazy_tensors::Shape& shape) {
-    return lazy_tensors::util::Iota<int64_t>(shape.rank());
+    return lazy_tensors::util::Iota<int64_t>(shape.dim());
   }
 
   // Converts an iterable container to a vector of int64's.

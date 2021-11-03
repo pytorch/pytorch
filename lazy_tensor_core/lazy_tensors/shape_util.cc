@@ -39,7 +39,7 @@ namespace lazy_tensors {
   size_t hash_value = hash<c10::ScalarType>()(shape.scalar_type());
 
   if (shape.tuple_shapes().empty()) {
-    for (int i = 0; i < shape.rank(); ++i) {
+    for (int i = 0; i < shape.dim(); ++i) {
       hash_value =
           Hash64Combine(hash_value, hash<int64_t>()(shape.size(i)));
     }

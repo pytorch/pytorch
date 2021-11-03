@@ -125,7 +125,7 @@ ViewInfo::ViewInfo(Type view_type, lazy_tensors::Shape shape,
                    lazy_tensors::Shape source_shape)
     : view_type(view_type),
       shape(std::move(shape)),
-      indices(source_shape.rank(), 0),
+      indices(source_shape.dim(), 0),
       source_shape(std::move(source_shape)) {}
 
 ViewInfo::ViewInfo(Type view_type, lazy_tensors::Shape source_shape,

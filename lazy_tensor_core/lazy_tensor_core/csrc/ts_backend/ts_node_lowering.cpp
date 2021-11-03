@@ -385,7 +385,7 @@ class TSNodeLowering : public TSNodeLoweringInterface {
     const auto& sizes = node->sizes();
     const lazy_tensors::Shape& input_shape = ir::GetShapeFromTsOutput(input);
     CHECK_EQ(sizes.size(), base_indices.size());
-    CHECK_EQ(input_shape.rank(), base_indices.size());
+    CHECK_EQ(input_shape.dim(), base_indices.size());
     for (size_t dim = 0; dim < base_indices.size(); ++dim) {
       int64_t start = base_indices[dim];
       base = GenerateSlice(/*base=*/base, /*dim=*/dim, /*start=*/start,
@@ -474,7 +474,7 @@ class TSNodeLowering : public TSNodeLoweringInterface {
     const torch::lazy::Output& source_argument = node->operand(1);
     const lazy_tensors::Shape& source_shape =
         ir::GetShapeFromTsOutput(source_argument);
-    CHECK_EQ(source_shape.rank(), base_indices.size());
+    CHECK_EQ(source_shape.dim(), base_indices.size());
     torch::jit::Value* base = dest;
     for (size_t dim = 0; dim < base_indices.size(); ++dim) {
       int64_t start = base_indices[dim];

@@ -83,7 +83,7 @@ LazyTensor::Data* LazyTensor::data() const {
 
 int64_t LazyTensor::size(int64_t dim) const {
   auto tensor_shape = shape();
-  int rank = tensor_shape.get().rank();
+  int rank = tensor_shape.get().dim();
   int dim_index = Helpers::GetCanonicalDimensionIndex(dim, rank);
   return tensor_shape.get().size(dim_index);
 }

@@ -134,7 +134,7 @@ std::vector<LazyTensor> WrapIndicesOnce(const LazyTensor& base,
                                         int start_dim) {
   std::vector<LazyTensor> canonical_indices;
   auto base_shape_ref = base.shape();
-  CHECK_LE(indices.size(), base_shape_ref.get().rank());
+  CHECK_LE(indices.size(), base_shape_ref.get().dim());
   for (size_t dim_idx = 0; dim_idx < indices.size(); ++dim_idx) {
     const LazyTensor& dim_index = indices[dim_idx];
     int64_t dim_size = base_shape_ref.get().size(dim_idx + start_dim);
@@ -207,8 +207,8 @@ CanonicalIndexInfo GetCanonicalIndexInfo(
 }
 
 torch::lazy::Value EnsureRank1(const torch::lazy::Value& index) {
-  CHECK_LE(ir::GetShapeFromTsValue(index).rank(), 1);
-  return ir::GetShapeFromTsValue(index).rank() == 0
+  CHECK_LE(ir::GetShapeFromTsValue(index).dim(), 1);
+  return ir::GetShapeFromTsValue(index).dim() == 0
              ? torch::lazy::MakeNode<ir::ops::Expand>(
                    index, std::vector<int64_t>{1},
                    /*is_scalar_expand=*/false)
@@ -222,7 +222,7 @@ LazyTensor IndexByTensors(const LazyTensor& base,
     return base;
   }
   auto canonical_indices = WrapIndicesOnce(base, indices, start_dim);
-  int64_t indices_rank = canonical_indices.front().shape().get().rank();
+  int64_t indices_rank = canonical_indices.front().shape().get().dim();
   // Stack the indices to allow the whole multi-indexing to be dispatched with a
   // single gather.
   LazyTensor indices_nd =
@@ -241,7 +241,7 @@ torch::lazy::Value IndexPutByTensors(
     return base.GetIrValue();
   }
   auto canonical_indices = WrapIndicesOnce(base, indices, start_dim);
-  int64_t indices_rank = canonical_indices.front().shape().get().rank();
+  int64_t indices_rank = canonical_indices.front().shape().get().dim();
   // Stack the indices to allow the whole multi-indexing to be dispatched with a
   // single scatter.
   LazyTensor indices_nd =
@@ -258,7 +258,7 @@ NodePtr IndexFill(const LazyTensor& base, int64_t dim, const LazyTensor& index,
   CHECK_EQ(index.dtype(), at::ScalarType::Long)
       << "Fill index is expected to be of scalar type Long, but it is "
       << index.dtype();
-  CHECK_LE(index.shape().get().rank(), 1)
+  CHECK_LE(index.shape().get().dim(), 1)
       << "Fill index is supposed to be a vector";
   return IndexFillOp(
       base.GetIrValue(), dim, index.GetIrValue(),
@@ -271,9 +271,9 @@ NodePtr IndexFill(const LazyTensor& base, int64_t dim, const LazyTensor& index,
   CHECK_EQ(index.dtype(), at::ScalarType::Long)
       << "Fill index is expected to be of scalar type Long, but it is "
       << index.dtype();
-  CHECK_LE(index.shape().get().rank(), 1)
+  CHECK_LE(index.shape().get().dim(), 1)
       << "Fill index is supposed to be a vector";
-  CHECK_EQ(value.shape().get().rank(), 0)
+  CHECK_EQ(value.shape().get().dim(), 0)
       << "Fill only supports a 0-dimensional value tensor";
   return IndexFillOp(base.GetIrValue(), dim, index.GetIrValue(),
                      value.GetIrValue());
@@ -286,7 +286,7 @@ torch::lazy::Value IndexAdd(const LazyTensor& base, int64_t dim,
       << "Add index is expected to be of scalar type Long or scalar type Int, "
          "but it is "
       << index.dtype();
-  CHECK_LE(index.shape().get().rank(), 1)
+  CHECK_LE(index.shape().get().dim(), 1)
       << "Add index is supposed to be a vector";
   return IndexAddOp(base.GetIrValue(), dim, index.GetIrValue(),
                     source.GetIrValue());
@@ -298,7 +298,7 @@ torch::lazy::Value IndexCopy(const LazyTensor& base, int64_t dim,
   CHECK_EQ(index.dtype(), at::ScalarType::Long)
       << "Copy index is expected to be of scalar type Long, but it is "
       << index.dtype();
-  CHECK_LE(index.shape().get().rank(), 1)
+  CHECK_LE(index.shape().get().dim(), 1)
       << "Copy index is supposed to be a vector";
   return IndexCopyOp(base.GetIrValue(), dim, index.GetIrValue(),
                      source.GetIrValue());
