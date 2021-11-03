@@ -4,21 +4,16 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+from typing import Callable, Union, Tuple
 import torch
 from functools import partial, wraps
 import contextlib
-import collections
-import torch.nn as nn
-import torch.nn.functional as F
 from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
 from typing import Callable, Tuple, Union
 from .pytree_hacks import tree_map_, treespec_pprint
-from collections import namedtuple
 import torch.autograd.forward_ad as fwAD
-import gc
 
 from .vmap import vmap
-from .make_functional import make_functional_deprecated_v1, make_functional_with_buffers_deprecated_v1
 
 from functorch._C import (
     _wrap_for_grad,
@@ -26,6 +21,9 @@ from functorch._C import (
     _grad_increment_nesting,
     _grad_decrement_nesting,
 )
+
+argnums_t = Union[int, Tuple[int, ...]]
+
 
 def _create_differentiable(inps, level=None):
     def create_differentiable(x):
@@ -431,8 +429,8 @@ def jacfwd(f):
         return result
     return wrapper_fn
 
-def grad_and_value(f, argnums=0, has_aux=False):
-    @wraps(f)
+def grad_and_value(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Callable:
+    @wraps(func)
     def wrapper(*args, **kwargs):
         level = _grad_increment_nesting()
         output, aux, grad_input = None, None, None
@@ -444,7 +442,7 @@ def grad_and_value(f, argnums=0, has_aux=False):
                 diff_args = _slice_argnums(args, argnums)
                 tree_map_(partial(_create_differentiable, level=level), diff_args)
 
-                output = f(*args, **kwargs)
+                output = func(*args, **kwargs)
                 if has_aux:
                     output, aux = output
 
@@ -477,13 +475,100 @@ def grad_and_value(f, argnums=0, has_aux=False):
         return grad_input, output
     return wrapper
 
-def grad(f, argnums=0, has_aux=False):
-    @wraps(f)
+def grad(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Callable:
+    """``grad`` operator helps computing gradients of :attr:`func` with respect to the
+    input(s) specified by :attr:`argnums`. This operator can be nested to
+    compute higher-order gradients.
+
+    Args:
+        func (Callable): A Python function that takes one or more arguments.
+            Must return a single-element Tensor. If specified :attr:`has_aux` equals ``True``,
+            function can return a tuple of single-element Tensor and other auxiliairy objects:
+            ``(output, aux)``.
+        argnums (int or Tuple[int]): Specifies arguments to compute gradients with respect to.
+            :attr:`argnums` can be single integer or tuple of integers. Default: 0.
+        has_aux (bool): Flag indicating that :attr:`func` returns a tensor and other
+            auxiliairy objects: ``(output, aux)``. Default: False.
+
+    Returns:
+        Function to compute gradients with respect to its inputs. By default, the output of
+        the function is the gradient tensor with respect to the first argument.
+        If specified :attr:`has_aux` equals ``True``, tuple of gradients and output auxiliairy objects
+        is returned. If :attr:`argnums` is a tuple of integers, a tuple of output gradients with
+        respect to each :attr:`argnums` value is returned.
+
+    Example of using ``grad``:
+
+        >>> from functorch import grad
+        >>> x = torch.randn([])
+        >>> cos_x = grad(lambda x: torch.sin(x))(x)
+        >>> assert torch.allclose(cos_x, x.cos())
+        >>>
+        >>> # Second-order gradients
+        >>> neg_sin_x = grad(grad(lambda x: torch.sin(x)))(x)
+        >>> assert torch.allclose(neg_sin_x, -x.sin())
+
+    When composed with ``vmap``, ``grad`` can be used to compute per-sample-gradients:
+
+        >>> from functorch import vmap
+        >>> batch_size, feature_size = 3, 5
+        >>>
+        >>> def model(weights, feature_vec):
+        >>>     # Very simple linear model with activation
+        >>>     assert feature_vec.dim() == 1
+        >>>     return feature_vec.dot(weights).relu()
+        >>>
+        >>> def compute_loss(weights, example, target):
+        >>>     y = model(weights, example)
+        >>>     return ((y - target) ** 2).mean()  # MSELoss
+        >>>
+        >>> weights = torch.randn(feature_size, requires_grad=True)
+        >>> examples = torch.randn(batch_size, feature_size)
+        >>> targets = torch.randn(batch_size)
+        >>> inputs = (weights, examples, targets)
+        >>> grad_weight_per_example = vmap(grad(compute_loss), in_dims=(None, 0, 0))(*inputs)
+
+    Example of using ``grad`` with :attr:`has_aux` and :attr:`argnums`:
+
+        >>> def my_loss_func(y, y_pred):
+        >>>    loss_per_sample = (0.5 * y_pred - y) ** 2
+        >>>    loss = loss_per_sample.mean()
+        >>>    return loss, (y_pred, loss_per_sample)
+        >>>
+        >>> fn = grad(my_loss_func, argnums=(0, 1), has_aux=True)
+        >>> y_true = torch.rand(4)
+        >>> y_preds = torch.rand(4, requires_grad=True)
+        >>> out = fn(y_true, y_preds)
+        >>> > output is ((grads w.r.t y_true, grads w.r.t y_preds), (y_pred, loss_per_sample))
+
+    .. note:
+        Using PyTorch ``torch.no_grad`` together with ``grad``.
+
+        Case 1: Using ``torch.no_grad`` inside a function:
+
+            >>> def f(x):
+            >>>     with torch.no_grad():
+            >>>         c = x ** 2
+            >>>     return x - c
+
+        In this case, ``grad(f)(x)`` will respect the inner ``torch.no_grad``.
+
+        Case 2: Using ``grad`` inside ``torch.no_grad`` context manager:
+
+            >>> with torch.no_grad():
+            >>>     grad(f)(x)
+
+        In this case, ``grad`` will respect the inner ``torch.no_grad``, but not the
+        outer one. This is because ``grad`` is a "function transform": its result
+        should not depend on the result of a context manager outside of ``f``.
+
+    """
+    @wraps(func)
     def wrapper(*args, **kwargs):
-        results = grad_and_value(f, argnums, has_aux=has_aux)(*args, **kwargs)
+        results = grad_and_value(func, argnums, has_aux=has_aux)(*args, **kwargs)
         if has_aux:
-            grad, (value, aux) = results
+            grad, (_, aux) = results
             return grad, aux
-        grad, value = results
+        grad, _ = results
         return grad
     return wrapper
