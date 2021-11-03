@@ -874,12 +874,12 @@ def _test_backward_mul_by_grad_output(outputs, inputs, check_sparse_nnz) -> bool
 
 def _test_undefined_forward_mode(func, outputs, inputs):
     fwAD = torch.autograd.forward_ad
-    
+
     inp_tensors_idx, inp_tensors = _get_inp_tensors(inputs)
     all_v, all_u, all_u_dense = _make_vectors(inp_tensors, outputs, use_forward_ad=True)
 
     tensor_inputs = tuple(i for i in inputs if is_tensor_like(i) and i.requires_grad)
-    
+
     with fwAD.dual_level():
         fw_grads = []
         dual_inputs = []
@@ -893,38 +893,38 @@ def _test_undefined_forward_mode(func, outputs, inputs):
                 # make_dual, so read it explicitly from the dual tensor
                 fw_grads.append(fwAD.unpack_dual(inp)[1])
             dual_inputs.append(inp)
-        
+
         for i, (fw_grad, u) in enumerate(zip(fw_grads, all_u)):
             fw_grad.copy_(u.view_as(fw_grad))
-        
+
         dual_inputs_idx = 0
         for inp in inputs:
             if is_tensor_like(inp) and inp.requires_grad:
                 dual_inp_obj = dual_inputs[dual_inputs_idx]
-                
+
                 # case 1 (Materialized Zero Tensor Tangent)
                 dual_inputs[dual_inputs_idx] = fwAD.make_dual(inp, torch.zeros_like(inp))
                 raw_outputs = _as_tuple(func(*dual_inputs))
                 dual_outputs1 = filter(_is_float_or_complex_tensor, raw_outputs)
-                
+
                 # case 2 (Efficient Zero Tensor Tangent since we don't make a dual object and pass a regular tensor)
                 dual_inputs[dual_inputs_idx] = inp
                 raw_outputs = _as_tuple(func(*dual_inputs))
                 dual_outputs2 = filter(_is_float_or_complex_tensor, raw_outputs)
 
-                # reset 
+                # reset
                 dual_inputs[dual_inputs_idx] = dual_inp_obj
                 dual_inputs_idx +=1
 
                 for index_o, (d_o1, d_o2) in enumerate(zip(dual_outputs1, dual_outputs2)):
                     val1, res1 = fwAD.unpack_dual(d_o1)
                     val2, res2 = fwAD.unpack_dual(d_o2)
-                    
+
                     if not (res1 is None or res2 is None):
                         assert torch.equal(res1, res2)
     return True
 
-def _test_undefined_backward_mode(func, outputs, inputs) -> bool:        
+def _test_undefined_backward_mode(func, outputs, inputs) -> bool:
     diff_input_list: List[torch.Tensor] = list(_iter_tensors(inputs, True))
     if not diff_input_list:
         raise GradcheckError("no Tensors requiring grad found in input")
@@ -1031,7 +1031,7 @@ def _real_and_imag_input(fn, complex_inp_indices):
 
 
 def _gradcheck_real_imag(gradcheck_fn, func, func_out, tupled_inputs, outputs, eps, rtol,
-                         atol, check_grad_dtypes, check_forward_ad, check_backward_ad, nondet_tol, 
+                         atol, check_grad_dtypes, check_forward_ad, check_backward_ad, nondet_tol,
                          check_undefined_grad):
     complex_out_indices = [i for i, o in enumerate(outputs) if o.is_complex()]
     has_any_complex_output = any(o.is_complex() for o in _as_tuple(func_out))
@@ -1264,10 +1264,10 @@ def _fast_gradcheck(func, func_out, inputs, outputs, eps, rtol,
     inp_tensors_idx, inp_tensors = _get_inp_tensors(inputs)
     # Backward mode computes v^T * J (VJP)
     # Since we computed J * u (JVP) through finite difference method, we perform an equality check
-    # between VJP * u, JVP * v 
+    # between VJP * u, JVP * v
     # ----
     # Forward mode computes J * u (JVP)
-    # Since we already compute JVP through finite difference method, 
+    # Since we already compute JVP through finite difference method,
     # we don't need v for correctness check here as asserted below
     all_v, all_u, all_u_dense = _make_vectors(inp_tensors, outputs, use_forward_ad=use_forward_ad)
 
@@ -1276,7 +1276,6 @@ def _fast_gradcheck(func, func_out, inputs, outputs, eps, rtol,
         assert all_v is None
         analytical_vJu = _get_analytical_jacobian_forward_ad(func, inputs, _as_tuple(func_out),
                                                              all_u=all_u, check_grad_dtypes=check_grad_dtypes)
-        
     else:
         if not outputs:
             _check_no_differentiable_outputs_fast(func, func_out, inputs, inp_tensors_idx, all_u, eps, nondet_tol)
