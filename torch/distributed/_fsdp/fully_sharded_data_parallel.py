@@ -93,7 +93,7 @@ class FullyShardedDataParallel(nn.Module):
         # device for computation, if module is on GPU, use module.device;
         # if module is on CPU, use current device;
         self.compute_device = _get_default_cuda_device(module)
-        self.compute_dtype = next(module.parameters()).dtype
+        self.compute_dtype = _get_data_type(module)
 
         # Free full params and keep shard only after forward
         self.reshard_after_forward = True
@@ -813,11 +813,24 @@ def _get_default_cuda_device(module: nn.Module) -> torch.device:
         compute_device = next(module.parameters()).device
         if compute_device.type == "cuda":
             return compute_device
+    # e.g., if module does not have parameters, it will throw StopIteration,
+    # in this case, instead of raising exception, return cuda device.
     except StopIteration:
         pass
     # Fall back to current CUDA device
     return torch.device("cuda")
 
+def _get_data_type(module: nn.Module) -> torch.dtype:
+    """Try to infer data type from module parameters."""
+    try:
+        dtype = next(module.parameters()).dtype
+        return dtype
+    # e.g., if module does not have parameters, it will throw StopIteration,
+    # in this case, instead of raising exception, return torch.float32.
+    except StopIteration:
+        pass
+    # Fall back to torch.float32
+    return torch.float32
 
 def _free_storage(data: torch.Tensor) -> None:
     """Free underlying storage of a Tensor."""
