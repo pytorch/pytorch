@@ -37,6 +37,7 @@ MATH_TRANSPILATIONS = collections.OrderedDict(
         ("std::fabs", ("::fabs")),
         ("std::fmod", ("::fmod")),
         ("std::remainder", ("::remainder")),
+        ("std::frexp", ("::frexp")),
     ]
 )
 
