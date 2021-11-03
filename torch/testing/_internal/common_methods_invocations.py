@@ -929,50 +929,6 @@ def sample_inputs_masked_reduction(op_info, device, dtype, requires_grad, **kwar
     return inputs
 
 
-def _generate_masked_reduction_mask(input_shape, device, **kwargs):
-    yield None
-    yield make_tensor(input_shape, device, torch.bool, requires_grad=False)
-    if len(input_shape) > 3:
-        # broadcast last mask dimension:
-        yield make_tensor(input_shape[:-1] + (1,), device, torch.bool, requires_grad=False)
-        # broadcast middle mask dimension:
-        yield make_tensor(input_shape[:1] + (1,) + input_shape[2:], device, torch.bool, requires_grad=False)
-        # broadcast first mask dimension:
-        yield make_tensor((1,) + input_shape[1:], device, torch.bool, requires_grad=False)
-        # mask.ndim < input.ndim
-        yield make_tensor(input_shape[2:], device, torch.bool, requires_grad=False)
-        # mask.ndim == 1
-        yield make_tensor(input_shape[-1:], device, torch.bool, requires_grad=False)
-        # masks that require broadcasting of inputs (mask.ndim >
-        # input.ndim) will not be supported, however, we may
-        # reconsider this if there will be demand on this kind of
-        # degenerate cases.
-
-
-def sample_inputs_masked_reduction(op_info, device, dtype, requires_grad, **kwargs):
-    """Sample inputs for masked reduction operators.
-
-    Masked reduction operator is a reduction operator with trailing
-    mask optional argument. A mask is a bool tensor with the same
-    shape as input or a shape that is broadcastable to input shape.
-    """
-    inputs: List[SampleInput] = []
-    kwargs['supports_multiple_dims'] = op_info.supports_multiple_dims
-    for sample_input in sample_inputs_reduction(op_info, device, dtype, requires_grad, **kwargs):
-        for mask in _generate_masked_reduction_mask(sample_input.input.shape, device, **kwargs):
-            sample_input_args, sample_input_kwargs = sample_input.args, dict(mask=mask, **sample_input.kwargs)
-            inputs.append(SampleInput(sample_input.input, args=sample_input_args, kwargs=sample_input_kwargs))
-            if(not requires_grad and dtype.is_floating_point and
-               sample_input.input.ndim == 2 and mask is not None and
-               mask.shape == sample_input.input.shape):
-                for v in [torch.inf, -torch.inf, torch.nan]:
-                    t = sample_input.input.clone()
-                    t.diagonal()[:] = v
-                    inputs.append(SampleInput(t, args=sample_input_args, kwargs=sample_input_kwargs))
-
-    return inputs
-
-
 # NOTE [Reductions]:
 #
 # For testing purposes, we relax the definition of a reduction operator
