@@ -1426,7 +1426,7 @@ TEST(RunTimeTest, RuntimeCall) {
   };
   int64_t model_version = caffe2::serialize::kProducedBytecodeVersion;
 
-  auto foo = std::make_unique<mobile::Function>(c10::QualifiedName("foo"));
+  auto foo = std::make_shared<mobile::Function>(c10::QualifiedName("foo"));
   c10::ivalue::TupleElements debug_handles_m_tuple;
   parseInstructions(
       "foo",
@@ -1460,7 +1460,7 @@ TEST(RunTimeTest, RuntimeCall) {
       call.get());
   parseRegisterSize(rsize, call.get());
 
-  foo->append_function(*call);
+  foo->append_function(std::move(call));
 
   std::vector<IValue> inputs{at::tensor(1)};
   foo->run(inputs);

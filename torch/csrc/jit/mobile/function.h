@@ -34,7 +34,7 @@ class TORCH_API Function : public torch::jit::Function {
                                 are removed */
   void append_constant(const c10::IValue& constant);
   void append_type(const c10::TypePtr& type);
-  void append_function(mobile::Function& func);
+  void append_function(std::unique_ptr<mobile::Function> func);
 
   void set_register_size(size_t size);
 

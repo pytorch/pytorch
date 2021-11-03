@@ -308,7 +308,7 @@ void BytecodeDeserializer::init_upgrader(mobile::Function* function) {
   for (auto const& [upgrader_name, upgrader_bytecode] : kUpgraderBytecode) {
     std::unique_ptr<mobile::Function> func = mobile::Function::get(
         upgrader_name, upgrader_bytecode, operator_version_);
-    function->append_function(*func);
+    function->append_function(std::move(func));
   }
 }
 
@@ -389,7 +389,7 @@ void BytecodeDeserializer::parseMethods(
       debug_handles_m_tuple =
           std::move(*std::move((*debug_handles)[i]).toTuple()).elements();
     }
-
+    init_upgrader(function.get());
     // 1. First pass all operators from models
     parseOperators(
         std::move(ops_list),
@@ -408,7 +408,9 @@ void BytecodeDeserializer::parseMethods(
         function_name,
         std::move(ins_list),
         debug_handles_m_tuple,
-        function.get());
+        function.get(),
+        use_upgrader,
+        operator_version_);
 
     parseConstants(consts_list, function.get());
 

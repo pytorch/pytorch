@@ -141,8 +141,8 @@ void Function::append_type(const at::TypePtr& type) {
   code_->types_.push_back(type);
 }
 
-void Function::append_function(mobile::Function& function) {
-  code_->functions_.push_back(&function);
+void Function::append_function(std::unique_ptr<mobile::Function> func) {
+  code_->functions_.push_back(std::move(func));
 }
 
 void Function::set_register_size(size_t size) {
