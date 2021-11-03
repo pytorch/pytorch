@@ -91,12 +91,6 @@ WORKFLOW_DATA = [
         is_master_only=False,
         is_pr_only=True),
     AndroidGradleJob(
-        "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single",
-        "pytorch_android_gradle_custom_build_single",
-        [DOCKER_REQUIREMENT_NDK],
-        is_master_only=False,
-        is_pr_only=True),
-    AndroidGradleJob(
         "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit",
         "pytorch_android_gradle_custom_build_single",
         [DOCKER_REQUIREMENT_NDK],
