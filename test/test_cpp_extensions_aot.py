@@ -83,6 +83,7 @@ class TestCppExtensionAOT(common.TestCase):
         self.assertEqual(z, torch.ones_like(z))
 
     @common.skipIfRocm
+    @unittest.skipIf(common.IS_WINDOWS, "Windows not supported")
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_cublas_extension(self):
         from torch_test_cpp_extension import cublas_extension
@@ -92,6 +93,7 @@ class TestCppExtensionAOT(common.TestCase):
         self.assertEqual(z, x)
 
     @common.skipIfRocm
+    @unittest.skipIf(common.IS_WINDOWS, "Windows not supported")
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_cusolver_extension(self):
         from torch_test_cpp_extension import cusolver_extension
