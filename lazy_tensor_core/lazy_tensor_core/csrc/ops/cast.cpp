@@ -20,7 +20,7 @@ lazy_tensors::Shape NodeOutputShape(const torch::lazy::Value& input,
 }  // namespace
 Cast::Cast(const torch::lazy::Value& input, at::ScalarType dtype,
            c10::optional<at::ScalarType> stype)
-    : TsNode(ltc_cast, {input}, NodeOutputShape(input, dtype),
+    : TsNode(ltc_cast, {input}, {NodeOutputShape(input, dtype)},
              /*num_outputs=*/1,
              torch::lazy::MHash(101, static_cast<int>(dtype),
                                 OptionalOr<int>(stype, -1))),

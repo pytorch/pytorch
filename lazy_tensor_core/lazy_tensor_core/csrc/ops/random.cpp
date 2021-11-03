@@ -13,7 +13,7 @@ namespace ops {
 // be "aten::random_" here.
 Random::Random(const torch::lazy::Value& input, const c10::optional<int64_t>& from, const c10::optional<int64_t>& to)
     : TsNode(torch::lazy::OpKind(c10::Symbol::fromQualString("aten::random_")),
-        {input}, ir::GetShapeFromTsValue(input))
+        {input}, {ir::GetShapeFromTsValue(input)})
     , from(from)
     , to(to) {}
 

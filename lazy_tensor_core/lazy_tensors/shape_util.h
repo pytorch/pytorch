@@ -49,10 +49,6 @@ class ShapeUtil {
     return lhs == rhs;
   }
 
-  static Shape MakeTupleShape(c10::ArrayRef<Shape> shapes) {
-    return Shape(shapes);
-  }
-
   static Shape MakeShape(c10::ScalarType element_type,
                          c10::ArrayRef<int64_t> dimensions) {
     return lazy_tensors::Shape(element_type, dimensions);

@@ -9,7 +9,7 @@ IndexPut::IndexPut(const torch::lazy::Value& base,
                    const torch::lazy::Value& indices, int64_t start_dim,
                    const torch::lazy::Value& values, bool accumulate)
     : TsNode(OpKind(at::aten::index_put), {base, indices, values},
-             ir::GetShapeFromTsValue(base),
+             {ir::GetShapeFromTsValue(base)},
              /*num_outputs=*/1, torch::lazy::MHash(start_dim, accumulate)),
       start_dim_(start_dim),
       accumulate_(accumulate) {}

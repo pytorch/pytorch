@@ -13,6 +13,8 @@ ConvolutionBackwardOverrideable::ConvolutionBackwardOverrideable(
     bool transposed, std::vector<int64_t> output_padding, int64_t groups)
     : TsNode(torch::lazy::OpKind(at::aten::convolution_backward_overrideable),
              {grad_output, input, weight},
+             {ir::GetShapeFromTsValue(input), ir::GetShapeFromTsValue(weight),
+              ir::GetShapeFromTsValue(grad_output)},
              /*num_outputs=*/3,
              torch::lazy::MHash(stride, padding, dilation, transposed,
                                 output_padding, groups)),
@@ -21,10 +23,7 @@ ConvolutionBackwardOverrideable::ConvolutionBackwardOverrideable(
       dilation_(std::move(dilation)),
       output_padding_(std::move(output_padding)),
       transposed_(transposed),
-      groups_(groups) {
-  SetShapeDeferred(
-      [&]() { return compiler::InferShape(this); });
-}
+      groups_(groups) {}
 
 ConvolutionBackwardOverrideable::ConvolutionBackwardOverrideable(
     const torch::lazy::Value& grad_output, const torch::lazy::Value& input,

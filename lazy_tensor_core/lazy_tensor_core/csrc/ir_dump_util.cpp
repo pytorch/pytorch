@@ -164,7 +164,7 @@ std::string GenerateTextNodeSpec(const torch::lazy::Node* node,
                                  const NodeIdMap& id_map) {
   std::stringstream ss;
   if (auto tsnode = dynamic_cast<const TsNode*>(node)) {
-    ss << tsnode->shape() << " ";
+    ss << tsnode->shapes() << " ";
   } else {
     ss << "{TODO implement Node::shape} ";
   }
