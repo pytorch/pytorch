@@ -190,8 +190,8 @@ except ImportError:
 #         In addition to accepting multiple dtypes, the @dtypes decorator
 #         can accept a sequence of tuple pairs of dtypes. The test template
 #         will be called with each tuple for its "dtype" argument.
-#     - @onlyOnCPUAndCUDA
-#         Skips the test if the device is not a CPU or CUDA device
+#     - @onlyNativeDeviceTypes
+#         Skips the test if the device is not a native device type (currently CPU, CUDA, Meta)
 #     - @onlyCPU
 #         Skips the test if the device is not a CPU device
 #     - @onlyCUDA
@@ -792,6 +792,13 @@ class skipMetaIf(skipIf):
     def __init__(self, dep, reason):
         super().__init__(dep, reason, device_type='meta')
 
+# Skips a test on XLA if the condition is true.
+class skipXLAIf(skipIf):
+
+    def __init__(self, dep, reason):
+        super().__init__(dep, reason, device_type='xla')
+
+
 def _has_sufficient_memory(device, size):
     if torch.device(device).type == 'cuda':
         if not torch.cuda.is_available():
@@ -909,12 +916,14 @@ class deviceCountAtLeast(object):
 
         return multi_fn
 
-# Only runs the test on the CPU and CUDA (the native device types)
-def onlyOnCPUAndCUDA(fn):
+# Only runs the test on the native device type (currently CPU, CUDA, Meta)
+def onlyNativeDeviceTypes(fn):
+    NATIVE_DEVICES = ('cpu', 'cuda', 'meta')
+
     @wraps(fn)
     def only_fn(self, *args, **kwargs):
-        if self.device_type != 'cpu' and self.device_type != 'cuda':
-            reason = "onlyOnCPUAndCUDA: doesn't run on {0}".format(self.device_type)
+        if self.device_type not in NATIVE_DEVICES:
+            reason = "onlyNativeDeviceTypes: doesn't run on {0}".format(self.device_type)
             raise unittest.SkipTest(reason)
 
         return fn(self, *args, **kwargs)
@@ -1056,6 +1065,9 @@ def expectedFailureCUDA(fn):
 
 def expectedFailureMeta(fn):
     return expectedFailure('meta')(fn)
+
+def expectedFailureXLA(fn):
+    return expectedFailure('xla')(fn)
 
 # This decorator checks that the decorated function produces a nondeterministic
 # alert for the expected device types
@@ -1230,3 +1242,6 @@ def skipCUDAIfNoCudnn(fn):
 
 def skipMeta(fn):
     return skipMetaIf(True, "test doesn't work with meta tensors")(fn)
+
+def skipXLA(fn):
+    return skipXLAIf(True, "Marked as skipped for XLA")(fn)
