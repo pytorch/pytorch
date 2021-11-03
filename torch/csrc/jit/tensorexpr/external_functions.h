@@ -13,7 +13,13 @@
   _(nnc_aten_mm)                      \
   _(nnc_aten_adaptive_avg_pool2d)     \
   _(nnc_aten_mean)                    \
-  _(nnc_aten_addmm)
+  _(nnc_aten_addmm)                   \
+  _(nnc_aten_quantized_conv2d)        \
+  _(nnc_aten_quantized_conv2d_relu)   \
+  _(nnc_aten_quantized_add)           \
+  _(nnc_aten_quantize_per_tensor)     \
+  _(nnc_aten_dequantize)              \
+  _(nnc_aten_upsample_nearest2d)
 
 #define DECLARE_EXTERNAL_FUNCTION(NAME) \
   TORCH_API void NAME(                  \
