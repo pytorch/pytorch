@@ -1,7 +1,7 @@
 # @generated DO NOT EDIT MANUALLY
 # Template is at:    .github/templates/macos_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: macos-10-15-py3-x86-64
+name: macos-10-15-py3-arm64
 
 on:
   pull_request:
@@ -17,8 +17,8 @@ defaults:
   run:
     shell: bash -e -l {0}
 env:
-  BUILD_ENVIRONMENT: macos-10-15-py3-x86-64
-  COMPACT_JOB_NAME: macos-10-15-py3-x86-64
+  BUILD_ENVIRONMENT: macos-10-15-py3-arm64
+  COMPACT_JOB_NAME: macos-10-15-py3-arm64
   IN_CI: 1
   IS_GHA: 1
 
@@ -42,11 +42,11 @@ jobs:
       - name: print labels
         run: echo "${LABELS}"
 
-  build-test:
+  build:
     runs-on: macos-10.15
     needs: [ciflow_should_run]
     env:
-      JOB_BASE_NAME: macos-10-15-py3-x86-64
+      JOB_BASE_NAME: macos-10-15-py3-arm64
       # For sccache access (only on non-forked PRs)
       AWS_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.MACOS_SCCACHE_S3_SECRET_ACCESS_KEY }}
@@ -77,14 +77,8 @@ jobs:
         run: |
           echo "CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname "$(which conda)")/../"}" >> "${GITHUB_ENV}"
           .jenkins/pytorch/macos-build.sh
-      - name: Build / Test lite interpreter
-        run: |
-          BUILD_LITE_INTERPRETER=1 .jenkins/pytorch/macos-lite-interpreter-build-test.sh
-      - name: Test
-        run: |
-          .jenkins/pytorch/macos-test.sh
 
 
 concurrency:
-  group: macos-10-15-py3-x86-64-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: macos-10-15-py3-arm64-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
