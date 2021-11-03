@@ -52,7 +52,7 @@ def get_file_binaries_from_pathnames(pathnames: Iterable, mode: str):
         if not isinstance(pathname, str):
             raise TypeError("Expected string type for pathname, but got {}"
                             .format(type(pathname)))
-        yield pathname, StreamWrapper(open(pathname, mode))  #open(pathname, mode)  #StreamWrapper(open(pathname, mode))
+        yield pathname, StreamWrapper(open(pathname, mode))
 
 def validate_pathname_binary_tuple(data: Tuple[str, IOBase]):
     if not isinstance(data, tuple):
