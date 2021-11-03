@@ -31,7 +31,9 @@ void testStaticRuntime(
 
 std::shared_ptr<Graph> getGraphFromIR(const std::string& ir);
 
-bool hasProcessedNodeWithName(torch::jit::StaticModule& smodule, const char *name);
+bool hasProcessedNodeWithName(
+    torch::jit::StaticModule& smodule,
+    const char* name);
 
 } // namespace test
 } // namespace jit

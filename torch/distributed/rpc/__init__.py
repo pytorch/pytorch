@@ -110,7 +110,7 @@ if is_available():
                 :ref:`rpc-backends` for more information and find which options
                 are available.
         """
-
+        torch._C._log_api_usage_once("torch.distributed.init_rpc")
         if backend is not None and not isinstance(
             backend, backend_registry.BackendType
         ):
