@@ -432,6 +432,10 @@
   self: copysign_tensor_self_backward(grad, self, result)
   result: auto_element_wise
 
+- name: copy(Tensor self, Tensor src, bool non_blocking=False) -> Tensor
+  self: zeros_like(self)
+  src: grad
+
 - name: cos(Tensor self) -> Tensor
   self: grad * -self.sin().conj()
   result: auto_element_wise
