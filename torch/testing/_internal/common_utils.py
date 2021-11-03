@@ -623,7 +623,7 @@ def is_avx512_vnni_supported():
         return False
     with open("/proc/cpuinfo", encoding="ascii") as f:
         lines = f.read()
-    return any(s in lines for s in ("avx512_vnni", "avx512vnni"))
+    return "vnni" in lines
 
 IS_AVX512_VNNI_SUPPORTED = is_avx512_vnni_supported()
 
