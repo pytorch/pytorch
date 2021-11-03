@@ -2,9 +2,11 @@
 #include <ATen/native/cuda/TensorModeKernel.cuh>
 #include <ATen/native/cuda/TensorModeKernel.h>
 #include <ATen/Dispatch.h>
+#include <ATen/native/NonEmptyUtils.h>
 #include <ATen/native/TensorCompare.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/ThrustAllocator.h>
+#include <c10/core/DeviceArray.h>
 
 #include <thrust/device_ptr.h>
 #include <thrust/device_vector.h>
@@ -17,18 +19,6 @@
 
 namespace at {
 namespace native {
-
-static inline int64_t ensure_nonempty_dim(int64_t dim) {
-  return std::max(dim, int64_t{1});
-}
-
-static inline int64_t ensure_nonempty_size(const TensorBase& t, int64_t dim) {
-  return t.dim() == 0 ? 1 : t.size(dim);
-}
-
-static inline int64_t ensure_nonempty_stride(const TensorBase& t, int64_t dim) {
-  return t.dim() == 0 ? 1 : t.stride(dim);
-}
 
 template <typename scalar_t>
 void calculate_mode(
@@ -59,9 +49,8 @@ void calculate_mode(
   scalar_t* iter_end = data + n_element;
 
   auto cuda_allocator = at::cuda::getCUDADeviceAllocator();
-  auto sort_buffer = cuda_allocator->allocate(n_element * sizeof(int64_t));
-  auto sort_buffer_ptr = thrust::device_pointer_cast(
-      static_cast<int64_t*>(sort_buffer.get()));
+  auto sort_buffer = c10::DeviceArray<int64_t>(*cuda_allocator, n_element);
+  auto sort_buffer_ptr = thrust::device_pointer_cast(sort_buffer.get());
   auto count_from_zero_iter = thrust::make_counting_iterator(int64_t{0});
   thrust::copy_n(policy, count_from_zero_iter, n_element, sort_buffer_ptr);
 
@@ -83,11 +72,11 @@ void calculate_mode(
                    thrust::not_equal_to<scalar_t>());
 
   // Count frequency of each element
-  auto keys = cuda_allocator->allocate(unique * sizeof(scalar_t));
-  auto counts = cuda_allocator->allocate(unique * sizeof(int64_t));
+  auto keys = c10::DeviceArray<scalar_t>(*cuda_allocator, unique);
+  auto counts = c10::DeviceArray<int64_t>(*cuda_allocator, unique);
 
-  auto keys_ptr = thrust::device_pointer_cast(static_cast<scalar_t*>(keys.get()));
-  auto counts_ptr = thrust::device_pointer_cast(static_cast<int64_t*>(counts.get()));
+  auto keys_ptr = thrust::device_pointer_cast(keys.get());
+  auto counts_ptr = thrust::device_pointer_cast(counts.get());
 
   thrust::reduce_by_key(
       policy,
