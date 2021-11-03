@@ -7,22 +7,17 @@ namespace torch_lazy_tensors {
 namespace ir {
 
 // TODO(whc) don't duplicate this
-static lazy_tensors::Shape convertShape(
+static std::vector<lazy_tensors::Shape> convertShape(
     const std::vector<at::ScalarType>& dtypes,
     const std::vector<std::vector<int64_t>>& shapes) {
-  CHECK_EQ(dtypes.size(), shapes.size());
-  if (dtypes.size() == 1) {
-    return lazy_tensors::Shape(dtypes[0], shapes[0]);
-  }
+  TORCH_INTERNAL_ASSERT(dtypes.size() == shapes.size());
 
   std::vector<lazy_tensors::Shape> shape;
   for (int i = 0; i < dtypes.size(); i++) {
     shape.emplace_back(dtypes[i], shapes[i]);
   }
 
-  // Since we are going to remove lazy_tensors::Shape very soon, this
-  // copy-by-value is not worth fixing.
-  return lazy_tensors::Shape(shape);
+  return shape;
 }
 
 namespace ops {
@@ -31,7 +26,7 @@ Cat::Cat(std::vector<torch::lazy::Value> values, int64_t dim,
          const std::vector<at::ScalarType>& out_dtypes,
          const std::vector<std::vector<int64_t>>& out_shapes)
     : TsNode(torch::lazy::OpKind(at::aten::cat), values,
-             {convertShape(out_dtypes, out_shapes)},
+             convertShape(out_dtypes, out_shapes),
              /*num_outputs=*/1, torch::lazy::MHash(dim)),
       dim_(dim),
       at_dtypes_(out_dtypes),
