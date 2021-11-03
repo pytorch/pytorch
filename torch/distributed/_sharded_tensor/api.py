@@ -359,7 +359,7 @@ class ShardedTensor(object):
             if not local_shard_tensor.is_contiguous():
                 raise ValueError('Only torch.contiguous_format memory_format is currently supported')
 
-            if shard_meta.shard_lengths != list(local_shard_tensor.size()):
+            if shard_meta.shard_sizes != list(local_shard_tensor.size()):
                 raise ValueError(
                     f'Local shard tensor is incompatible with local ShardMetadata! '
                     f'local shard tensor size: {local_shard_tensor.size()}, '
