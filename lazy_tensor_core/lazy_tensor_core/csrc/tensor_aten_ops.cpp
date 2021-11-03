@@ -57,9 +57,9 @@ torch::lazy::Value MaybeExpand(const torch::lazy::Value& input,
 
 std::vector<int64_t> GetExpandDimensions(const lazy_tensors::Shape& shape,
                                          std::vector<int64_t> dimensions) {
-  CHECK_GE(dimensions.size(), shape.rank()) << shape;
-  int64_t base = dimensions.size() - shape.rank();
-  for (size_t i = 0; i < shape.rank(); ++i) {
+  CHECK_GE(dimensions.size(), shape.dim()) << shape;
+  int64_t base = dimensions.size() - shape.dim();
+  for (size_t i = 0; i < shape.dim(); ++i) {
     if (dimensions[base + i] == -1) {
       dimensions[base + i] = shape.size(i);
     }
@@ -172,7 +172,7 @@ void bernoulli_(LazyTensor& input, const LazyTensor& probability) {
 LazyTensor constant_pad_nd(const LazyTensor& input, c10::ArrayRef<int64_t> pad,
                            const at::Scalar& value) {
   std::vector<int64_t> complete_pad(pad.begin(), pad.end());
-  complete_pad.resize(2 * input.shape().get().rank());
+  complete_pad.resize(2 * input.shape().get().dim());
   return input.CreateFrom(torch::lazy::MakeNode<ir::ops::ConstantPadNd>(
       input.GetIrValue(), complete_pad, value));
 }
@@ -255,7 +255,7 @@ LazyTensor mul(const LazyTensor& input, const at::Scalar& other,
 LazyTensor narrow(const LazyTensor& input, int64_t dim, int64_t start,
                   int64_t length) {
   auto input_shape = input.shape();
-  dim = Helpers::GetCanonicalDimensionIndex(dim, input_shape.get().rank());
+  dim = Helpers::GetCanonicalDimensionIndex(dim, input_shape.get().dim());
   lazy_tensors::Shape narrow_shape = input_shape;
   narrow_shape.set_size(dim, length);
 
@@ -343,7 +343,7 @@ LazyTensor permute(const LazyTensor& input, c10::ArrayRef<int64_t> dims) {
   auto input_shape = input.shape();
   ViewInfo view_info(
       ViewInfo::Type::kPermute, input_shape,
-      Helpers::GetCanonicalDimensionIndices(dims, input_shape.get().rank()));
+      Helpers::GetCanonicalDimensionIndices(dims, input_shape.get().dim()));
   return input.CreateViewTensor(std::move(view_info));
 }
 
@@ -399,7 +399,7 @@ LazyTensor select(const LazyTensor& input, int64_t dim, int64_t index) {
 LazyTensor slice(const LazyTensor& input, int64_t dim, int64_t start,
                  int64_t end, int64_t step) {
   auto input_shape = input.shape();
-  dim = Helpers::GetCanonicalDimensionIndex(dim, input_shape.get().rank());
+  dim = Helpers::GetCanonicalDimensionIndex(dim, input_shape.get().dim());
   start =
       Helpers::GetCanonicalPosition(input_shape.get().sizes(), dim, start);
   end = Helpers::GetCanonicalPosition(input_shape.get().sizes(), dim, end);
@@ -424,7 +424,7 @@ LazyTensor squeeze(const LazyTensor& input) {
 LazyTensor squeeze(const LazyTensor& input, int64_t dim) {
   auto input_shape = input.shape();
   int64_t squeeze_dim =
-      Helpers::GetCanonicalDimensionIndex(dim, input.shape().get().rank());
+      Helpers::GetCanonicalDimensionIndex(dim, input.shape().get().dim());
   auto output_dimensions =
       BuildSqueezedDimensions(input_shape.get().sizes(), squeeze_dim);
   return view(input, output_dimensions);
@@ -438,7 +438,7 @@ void squeeze_(LazyTensor& input) {
 void squeeze_(LazyTensor& input, int64_t dim) {
   input.SetIrValue(torch::lazy::MakeNode<ir::ops::Squeeze>(
       input.GetIrValue(),
-      Helpers::GetCanonicalDimensionIndex(dim, input.shape().get().rank())));
+      Helpers::GetCanonicalDimensionIndex(dim, input.shape().get().dim())));
 }
 
 LazyTensor stack(c10::ArrayRef<LazyTensor> tensors, int64_t dim) {
@@ -448,7 +448,7 @@ LazyTensor stack(c10::ArrayRef<LazyTensor> tensors, int64_t dim) {
     values.push_back(tensor.GetIrValue());
   }
   int64_t canonical_dim = Helpers::GetCanonicalDimensionIndex(
-      dim, tensors.front().shape().get().rank() + 1);
+      dim, tensors.front().shape().get().dim() + 1);
   return tensors[0].CreateFrom(
       torch::lazy::MakeNode<ir::ops::Stack>(values, canonical_dim));
 }
@@ -492,7 +492,7 @@ LazyTensor tanh_backward(const LazyTensor& grad_output,
 LazyTensor transpose(const LazyTensor& input, int64_t dim0, int64_t dim1) {
   auto input_shape = input.shape();
   auto permute_dims = Helpers::MakeTransposePermutation(
-      /*dim0=*/dim0, /*dim1=*/dim1, /*rank=*/input_shape.get().rank());
+      /*dim0=*/dim0, /*dim1=*/dim1, /*rank=*/input_shape.get().dim());
   ViewInfo view_info(ViewInfo::Type::kPermute, input_shape, permute_dims);
   return input.CreateViewTensor(std::move(view_info));
 }
@@ -500,7 +500,7 @@ LazyTensor transpose(const LazyTensor& input, int64_t dim0, int64_t dim1) {
 void transpose_(LazyTensor& input, int64_t dim0, int64_t dim1) {
   auto input_shape = input.shape();
   auto permute_dims = Helpers::MakeTransposePermutation(
-      /*dim0=*/dim0, /*dim1=*/dim1, /*rank=*/input_shape.get().rank());
+      /*dim0=*/dim0, /*dim1=*/dim1, /*rank=*/input_shape.get().dim());
   ViewInfo view_info(ViewInfo::Type::kPermute, input_shape, permute_dims);
   return input.ModifyCurrentView(std::move(view_info));
 }
@@ -508,7 +508,7 @@ void transpose_(LazyTensor& input, int64_t dim0, int64_t dim1) {
 LazyTensor unsqueeze(const LazyTensor& input, int64_t dim) {
   auto input_shape = input.shape();
   int64_t squeeze_dim =
-      Helpers::GetCanonicalDimensionIndex(dim, input_shape.get().rank() + 1);
+      Helpers::GetCanonicalDimensionIndex(dim, input_shape.get().dim() + 1);
   auto dimensions =
       BuildUnsqueezeDimensions(input_shape.get().sizes(), squeeze_dim);
   return view(input, dimensions);
@@ -516,7 +516,7 @@ LazyTensor unsqueeze(const LazyTensor& input, int64_t dim) {
 
 void unsqueeze_(LazyTensor& input, int64_t dim) {
   int squeeze_dim =
-      Helpers::GetCanonicalDimensionIndex(dim, input.shape().get().rank() + 1);
+      Helpers::GetCanonicalDimensionIndex(dim, input.shape().get().dim() + 1);
   input.SetIrValue(torch::lazy::MakeNode<ir::ops::Unsqueeze>(input.GetIrValue(),
                                                              squeeze_dim));
 }

@@ -30,7 +30,7 @@ LazyTensor Cross(const LazyTensor& input, const LazyTensor& other,
   int64_t canonical_dim;
   if (dim) {
     canonical_dim =
-        Helpers::GetCanonicalDimensionIndex(*dim, input.shape().get().rank());
+        Helpers::GetCanonicalDimensionIndex(*dim, input.shape().get().dim());
   } else {
     auto input_shape_ref = input.shape();
     auto dim_3_it = std::find((*input_shape_ref).sizes().begin(),
@@ -42,7 +42,7 @@ LazyTensor Cross(const LazyTensor& input, const LazyTensor& other,
   CHECK_EQ(input.size(canonical_dim), 3)
       << "Invalid cross argument: dimension " << canonical_dim
       << " does not have size 3";
-  CHECK_LT(canonical_dim, input.shape().get().rank())
+  CHECK_LT(canonical_dim, input.shape().get().dim())
       << "Invalid cross argument: dimension " << canonical_dim
       << " out of range";
   // Extract the slices for each axis.
@@ -69,7 +69,7 @@ LazyTensor Cross(const LazyTensor& input, const LazyTensor& other,
 
 LazyTensor Select(const LazyTensor& input, int64_t dim, int64_t index) {
   auto shape = input.shape();
-  dim = Helpers::GetCanonicalDimensionIndex(dim, shape.get().rank());
+  dim = Helpers::GetCanonicalDimensionIndex(dim, shape.get().dim());
   LazyTensor result = lazy_tensor_aten_ops::narrow(input, dim, index, 1);
   auto new_dims = Helpers::DropDimensions(shape.get().sizes(), {dim});
   return lazy_tensor_aten_ops::view(result, new_dims);

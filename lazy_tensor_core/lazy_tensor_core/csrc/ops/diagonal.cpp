@@ -33,7 +33,7 @@ lazy_tensors::Shape Diagonal::MakeDiagonalShape(
     const lazy_tensors::Shape& shape, int64_t offset, int64_t dim1,
     int64_t dim2) {
   std::vector<int64_t> dimensions;
-  for (int64_t dim = 0; dim < shape.rank(); ++dim) {
+  for (int64_t dim = 0; dim < shape.dim(); ++dim) {
     if (dim != dim1 && dim != dim2) {
       dimensions.push_back(shape.size(dim));
     }

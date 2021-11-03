@@ -110,9 +110,9 @@ lazy_tensors::Shape InferRepeat(const ir::ops::Repeat* repeat) {
   const torch::lazy::Output& input = repeat->operand(0);
   const lazy_tensors::Shape& input_shape = ir::GetShapeFromTsOutput(input);
   const auto& repeats = repeat->repeats();
-  CHECK_GE(repeats.size(), input_shape.rank());
+  CHECK_GE(repeats.size(), input_shape.dim());
 
-  int64_t num_new_dimensions = repeats.size() - input_shape.rank();
+  int64_t num_new_dimensions = repeats.size() - input_shape.dim();
   std::vector<int64_t> padded_size(num_new_dimensions, 1);
   padded_size.insert(padded_size.end(), input_shape.sizes().begin(),
                      input_shape.sizes().end());

@@ -13,7 +13,7 @@ class Shape {
  public:
   Shape() : scalar_type_(c10::ScalarType::Undefined) {}
 
-  Shape(at::ScalarType scalar_type, c10::ArrayRef<int64_t> dimensions);
+  Shape(at::ScalarType scalar_type, c10::ArrayRef<int64_t> sizes);
 
   Shape(c10::ArrayRef<Shape> element_shapes)
       : is_tuple_(true),
@@ -33,7 +33,7 @@ class Shape {
   c10::ScalarType scalar_type() const { return scalar_type_; }
   void set_scalar_type(at::ScalarType value) { scalar_type_ = value; }
 
-  int64_t rank() const { return sizes_.size(); }
+  int64_t dim() const { return sizes_.size(); }
 
   int64_t size(int index) const {
     CHECK_LT(index, sizes_.size());
