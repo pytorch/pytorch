@@ -610,12 +610,7 @@ LazyGraphExecutor::SyncTensorCollection LazyGraphExecutor::CollectSyncTensors(
       }
     }
   }
-  // Mix the hash with the resource domain hashes as compile handles are only
-  // valid within a domain (usually a single host).
-  coll.hash = torch::lazy::MHash(
-      coll.hash,
-      torch_lazy_tensors::compiler::getBackendRegistrar()->GetResourceDomain(
-          coll.device.ToString()));
+
   if (!at_tensors.empty()) {
     LTC_COUNTER("SyncTensorsToData", at_tensors.size());
     std::vector<compiler::BackendDataPtr> handles =
