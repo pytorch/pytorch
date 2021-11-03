@@ -11,6 +11,7 @@
 #include <TH/THGenerateQInt8Type.h>
 #include <TH/THGenerateQInt32Type.h>
 #include <TH/THGenerateQUInt4x2Type.h>
+#include <TH/THGenerateQUInt2x4Type.h>
 
 #ifdef THQLocalGenerateManyTypes
 #undef THQLocalGenerateManyTypes
