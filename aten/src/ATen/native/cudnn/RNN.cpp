@@ -11,6 +11,7 @@
 #include <ATen/TensorUtils.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 #if !AT_CUDNN_ENABLED()
 
@@ -191,7 +192,7 @@ namespace {
 
   std::vector<TensorDescriptor> rnn_descriptor(const Tensor& tensor, int64_t N) {
     std::vector<TensorDescriptor> descriptors(N);
-    for (int64_t i = 0; i < N; i++) {
+    for (const auto i : c10::irange(N)) {
       descriptors[i].set(tensor, 5);
     }
     return descriptors;
@@ -470,10 +471,10 @@ namespace {
     int64_t num_layers = rnn.num_directions() * rnn.num_layers;
     size_t cur_offset = 0;
     size_t global_layer_params_count = 0;
-    for (int64_t layer = 0; layer < num_layers; layer++) {
+    for (const auto layer : c10::irange(num_layers)) {
       size_t layer_params_count = 0;
       for (auto cudnn_method : cudnn_methods) {
-        for (int64_t linear_id = 0; linear_id < num_linear_layers; linear_id++) {
+        for (const auto linear_id : c10::irange(num_linear_layers)) {
           FilterDescriptor lin_layer_mat_desc;
           void* matrix_pointer;
           AT_CUDNN_CHECK(cudnn_method(
@@ -566,7 +567,7 @@ namespace {
     } else {
       data_ptrs.reserve(num_dir_layers * 2 * 2);
     }
-    for (int64_t layer = 0; layer < num_dir_layers; layer++) {
+    for (const auto layer : c10::irange(num_dir_layers)) {
       for (auto cudnn_method : cudnn_methods) {
         // This API returns a separate pointer for weight of every gate,
         // but we represent them as a single tensor, so we're only interested
@@ -629,7 +630,7 @@ namespace {
   void _viewOrCopyParams(MatrixRef<Tensor> params_from, MatrixRef<Tensor> params_to,
                          bool copy, bool allow_type_change=false) {
     TORCH_INTERNAL_ASSERT(params_from.size(0) == params_to.size(0), "number of layers mismatch");
-    for (size_t i = 0; i < params_from.size(0); i++) {
+    for (const auto i : c10::irange(params_from.size(0))) {
       auto layer_params_from = params_from[i];
       auto layer_params_to = params_to[i];
       // NOTE: these lists have all weights before all biases, so if the layer
@@ -845,7 +846,7 @@ copy_weights_to_flat_buf_views(
   _viewOrCopyParams(weight, params, /*copy=*/true, allow_type_change);
   if (set_orig_weights_to_flat_buf) {
     // Update the storage
-    for (size_t i = 0; i < weight.size(0); i++) {
+    for (const auto i : c10::irange(weight.size(0))) {
       // There is a special case for LSTM with projections and no bias,
       // where weight copy is done in 0->0, 1->1, 2->4 layout
       if (weight[i].size() == 3 && params[i].size() == 5) {
@@ -1406,7 +1407,7 @@ struct DropoutState {
   at::Tensor buffer;
   c10::optional<cuda::CUDAEvent> event;
   std::mutex mutex;
-#if CUDA_VERSION >= 11000
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   // cudaStreamGetCaptureInfo will never give back a capture id of 0, so 0 can serve
   // as a sentinel value that capture was not underway.
   cuda::CaptureId_t capture_id_last_lock = 0;
@@ -1424,7 +1425,7 @@ struct DropoutState {
     // could then define it before we get to unlock().
     mutex.lock();
     if (event) {
-#if CUDA_VERSION >= 11000
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
       // See Note [DropoutState and CUDA graph capture]
       cudaStreamCaptureStatus status;
       AT_CUDA_CHECK(cudaStreamGetCaptureInfo(cuda::getCurrentCUDAStream(),
@@ -1445,7 +1446,7 @@ struct DropoutState {
   void unlock() {
     if (event) {
       event->record();
-#if CUDA_VERSION >= 11000
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
       // See Note [DropoutState and CUDA graph capture]
       cudaStreamCaptureStatus status;
       AT_CUDA_CHECK(cudaStreamGetCaptureInfo(cuda::getCurrentCUDAStream(),
@@ -1525,7 +1526,7 @@ Tensor try_get_weight_buf(
     AT_ASSERT(num_ptrs % 5 == 0);
     if (has_biases) {
       AT_ASSERT(num_ptrs == num_parameters);
-      for (int64_t i = 0; i < num_parameters; i++) {
+      for (const auto i : c10::irange(num_parameters)) {
         if (expected_data_ptrs[i] != parameters[i].data_ptr()) return {};
       }
     } else {

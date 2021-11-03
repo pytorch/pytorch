@@ -1,13 +1,11 @@
 #pragma once
 
 #include <assert.h>
-#include <ATen/ATen.h>
 #include <ATen/core/Array.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/DeviceUtils.cuh>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/detail/FunctionTraits.h>
-#include <THC/THCDeviceUtils.cuh>
-#include <THC/THCGeneral.hpp>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/MemoryAccess.cuh>

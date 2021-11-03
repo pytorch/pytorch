@@ -14,7 +14,7 @@
 namespace at {
 namespace native {
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 constexpr int CAT_ARRAY_BATCH_SIZE = 1024;
 #else
 constexpr int CAT_ARRAY_BATCH_SIZE = 128;
@@ -546,7 +546,7 @@ Tensor& cat_out_cuda(TensorList inputs, int64_t dimension, Tensor& out) {
     });
   allSameType = allSameType && (out.scalar_type() == firstType);
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
   if (inputs.size() > 1 &&
       out.dim() <= CAT_ARRAY_MAX_INPUT_DIMS &&
       at::cuda::detail::canUse32BitIndexMath(out) &&
