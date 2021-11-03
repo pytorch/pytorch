@@ -182,6 +182,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
         store2 = dist.TCPStore(addr, port, 1, True, multi_tenant=True)  # type: ignore[call-arg] # noqa: F841
 
     @skip_if_win32()
+    @retry_on_connect_failures
     def test_init_pg_and_rpc_with_same_socket(self):
         addr = DEFAULT_HOSTNAME
         port = common.find_free_port()

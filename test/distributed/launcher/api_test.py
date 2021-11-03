@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Owner(s): ["oncall: r2p"]
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -31,6 +32,7 @@ from torch.distributed.launcher.api import (
 )
 from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
+    TEST_WITH_TSAN,
     sandcastle_skip_if,
 )
 
@@ -269,6 +271,7 @@ class ElasticLaunchTest(unittest.TestCase):
             )("-u", path("bin/test_script.py"), f"--touch_file_dir={self.test_dir}")
         record_mock.assert_called_once()
 
+    @unittest.skipIf(TEST_WITH_TSAN, "test incompatible with tsan")
     def test_launch_elastic_multiple_agents(self):
         min_nodes = 1
         max_nodes = 2

@@ -43,7 +43,7 @@ TORCH_API std::string dumpValueSet(
 // - output_aliases:
 //     values that are either outputs or contain aliases of outputs
 // - external_aliases:
-//     values that are inputs, constants, outputs, or their aliases.
+//     values that are inputs, constants, or their aliases.
 //     The output aliases that end up here are as a result of aliasDb failing to
 //     recognize them as outputs due to collection object (e.g., Tuple) aliasing
 //     inputs.
@@ -170,12 +170,11 @@ class TORCH_API StaticModule {
   using DefInfo = std::pair<int, int>;
 
  public:
-  std::vector<at::Tensor> operator()(const std::vector<at::Tensor>& inps);
-
-  // This interface only works if StaticModule was initialized
-  // with a TorchScript module, otherwise use the above interface
   c10::IValue operator()(
-      c10::ArrayRef<c10::IValue> args,
+      const std::vector<c10::IValue>& args,
+      const std::unordered_map<std::string, c10::IValue>& kwargs);
+  c10::IValue operator()(
+      std::vector<c10::IValue>&& args,
       const std::unordered_map<std::string, c10::IValue>& kwargs);
 
   const Graph& graph() const {
@@ -271,31 +270,21 @@ class TORCH_API StaticRuntime {
 
   C10_DISABLE_COPY_AND_ASSIGN(StaticRuntime);
 
-  std::vector<at::Tensor> operator()(const std::vector<at::Tensor>& inps);
-
-  // This interface only works if StaticModule was initialized
-  // with a TorchScript module, otherwise use the above interface
   c10::IValue operator()(
-      c10::ArrayRef<c10::IValue> args,
+      const std::vector<c10::IValue>& args,
       const std::unordered_map<std::string, c10::IValue>& kwargs);
-
-  void display_nodes(
-      c10::ArrayRef<c10::IValue> args,
+  c10::IValue operator()(
+      std::vector<c10::IValue>&& args,
       const std::unordered_map<std::string, c10::IValue>& kwargs);
 
   void benchmark(
-      c10::ArrayRef<c10::IValue> args,
-      const std::unordered_map<std::string, c10::IValue>& kwargs,
+      const std::vector<std::vector<c10::IValue>>& args_list,
+      const std::vector<std::unordered_map<std::string, c10::IValue>>&
+          kwargs_list,
       const int warmup_runs,
       const int main_runs,
       bool print_per_node_time = false,
       bool generate_ai_pep_output = false);
-
-  float benchmark_model(
-      c10::ArrayRef<c10::IValue> args,
-      const std::unordered_map<std::string, c10::IValue>& kwargs,
-      const int warmup_runs,
-      const int main_runs);
 
   struct IndividualMetrics {
     float setup_time{0.0};
@@ -315,8 +304,9 @@ class TORCH_API StaticRuntime {
   };
 
   IndividualMetrics benchmark_individual_ops(
-      c10::ArrayRef<c10::IValue> args,
-      const std::unordered_map<std::string, c10::IValue>& kwargs,
+      const std::vector<std::vector<c10::IValue>>& args_list,
+      const std::vector<std::unordered_map<std::string, c10::IValue>>&
+          kwargs_list,
       const int warmup_runs,
       const int main_runs);
 
@@ -363,9 +353,17 @@ class TORCH_API StaticRuntime {
   bool isManagedOutputTensor(const IValue& ivalue);
 
  private:
+  template <typename IValueList>
+  c10::IValue run_impl(
+      IValueList&& args,
+      const std::unordered_map<std::string, c10::IValue>& kwargs);
+
   // helper method for copying input args/kwargs into inputs_
   void set_inputs(
-      c10::ArrayRef<c10::IValue> args,
+      const std::vector<c10::IValue>& args,
+      const std::unordered_map<std::string, c10::IValue>& kwargs);
+  void set_inputs(
+      std::vector<c10::IValue>&& args,
       const std::unordered_map<std::string, c10::IValue>& kwargs);
 
   // clean up owning refs of input IValues
@@ -374,6 +372,21 @@ class TORCH_API StaticRuntime {
       ival = IValue();
     }
   }
+
+  void create_memory_planner();
+
+  float benchmark_model(
+      const std::vector<std::vector<c10::IValue>>& args_list,
+      const std::vector<std::unordered_map<std::string, c10::IValue>>&
+          kwargs_list,
+      const int warmup_runs,
+      const int main_runs);
+
+  void display_nodes(
+      const std::vector<c10::IValue>& args,
+      const std::unordered_map<std::string, c10::IValue>& kwargs);
+
+  IValue move_outputs_to_tuple(size_t num_outputs);
 
   // Memory planning is only enabled if sm->opts().cleanup_activations is true.
   // Otherwise, the memory used by activations is cached inside the static
@@ -398,7 +411,6 @@ class TORCH_API ProcessedNode {
 
   ProcessedNode(const ProcessedNode& rhs)
       : node_(rhs.node_),
-        function_kind_(rhs.function_kind_),
         fn_(rhs.fn_),
         inputs_(std::make_unique<const IValue*[]>(rhs.inputs_size_)),
         outputs_(std::make_unique<IValue[]>(rhs.outputs_size_)),
@@ -416,7 +428,6 @@ class TORCH_API ProcessedNode {
       return *this;
     }
     node_ = rhs.node_;
-    function_kind_ = rhs.function_kind_;
     fn_ = rhs.fn_;
 
     if (!inputs_ || inputs_size_ != rhs.inputs_size_) {
@@ -461,6 +472,11 @@ class TORCH_API ProcessedNode {
     return outputs_[i];
   }
 
+  const IValue& Output(size_t i) const {
+    DCHECK(i < outputs_size_);
+    return outputs_[i];
+  }
+
   void set_input(size_t index, const IValue* ival) {
     inputs_[index] = ival;
   }
@@ -476,11 +492,11 @@ class TORCH_API ProcessedNode {
   std::vector<IValue> clone_inputs() const;
 
   bool has_out_variant() const {
-    return function_kind_ == FunctionKind::kOutVariant;
+    return fn_.kind == FunctionKind::kOutVariant;
   }
 
   bool has_native() const {
-    return function_kind_ == FunctionKind::kNativeFunction;
+    return fn_.kind == FunctionKind::kNativeFunction;
   }
 
   bool verify_no_memory_overlap() const;
@@ -490,14 +506,21 @@ class TORCH_API ProcessedNode {
   }
 
  private:
+  C10_NODISCARD bool verify_outputs_dont_overlap_each_other() const;
+
+  C10_NODISCARD bool verify_inputs_dont_overlap_outputs() const;
+
   Node* node_;
   enum class FunctionKind {
     kOutVariant,
     kNativeFunction,
     kInterpreterFallback,
   };
-  FunctionKind function_kind_;
-  std::function<void(ProcessedNode*)> fn_;
+  struct Function {
+    std::function<void(ProcessedNode*)> f;
+    FunctionKind kind = FunctionKind::kOutVariant;
+  };
+  Function fn_;
   std::unique_ptr<const IValue*[]> inputs_; // unowned
   std::unique_ptr<IValue[]> outputs_;
   size_t inputs_size_;

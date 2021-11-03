@@ -2,6 +2,9 @@ from typing import List, cast
 
 import torch
 import torch.distributed as dist
+from torch.distributed._sharded_tensor.ops._common import (
+    _handle_col_wise_sharding_common,
+)
 from torch.distributed._sharding_spec import ChunkShardingSpec
 from torch.distributed._sharding_spec._internals import (
     get_split_size,
@@ -112,45 +115,16 @@ def sharded_linear(types, args, kwargs, pg):
         raise RuntimeError(f'nn.Linear weight sharded on dim {sharding_dim} not supported!')
 
 def _handle_col_wise_sharding(input, world_size, weight, local_shard_t, bias, pg):
-    # allgather the inputs first.
-    gathered_inputs = [torch.zeros_like(input) for _ in range(world_size)]
-    dist.all_gather(gathered_inputs, input, group=pg)
-
-    # matmul all the inputs.
-    results = []
-    for i, inp in enumerate(gathered_inputs):
-        results.append(inp.matmul(local_shard_t).t())
-
-    # Process inputs and outputs for all2all.
-    sharding_dim_size = weight.size()[0]
-    output = torch.empty((sharding_dim_size, input.size(0)), device=input.device)
-    combined_results = torch.cat(results)
-
-    # Compute output splits
-    split_size = get_split_size(sharding_dim_size, world_size)
-    output_split_sizes = [0] * world_size
-    for idx, placement in enumerate(weight._sharding_spec.placements):
-        output_split_sizes[placement.rank()] = get_chunked_dim_size(
-            sharding_dim_size, split_size, idx
-        )
-
-    # distribute the outputs using all2all.
-    dist.all_to_all_single(output, combined_results, output_split_sizes=output_split_sizes, group=pg)
-
-    # Check if we need to rearrange columns appropriately for output.
-    rearrange_columns = any([idx != placement.rank() for idx, placement in enumerate(weight._sharding_spec.placements)])
-    if rearrange_columns:
-        indices = []
-        for placement in weight._sharding_spec.placements:
-            dim_size = output_split_sizes[placement.rank()]
-            start = sum([split_size if i < placement.rank() else 0 for i, split_size in enumerate(output_split_sizes)])
-            indices += list(range(start, start + dim_size))
-
-        output = output.index_select(0, torch.tensor(indices, device=output.device))
-
-    # add bias and return result.
-    return output.t() + bias
-
+    return _handle_col_wise_sharding_common(
+        torch.matmul,
+        weight.size(0),
+        len(input.size()) - 1,
+        input,
+        world_size,
+        weight,
+        local_shard_t,
+        pg,
+    ) + bias
 
 def _handle_row_wise_sharding(input, world_size, weight, rank, local_shard_t, bias, pg):
     # alltoall to gather all the appropriate inputs.
