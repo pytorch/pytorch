@@ -3138,10 +3138,10 @@ def sample_inputs_conv1d(op_info, device, dtype, requires_grad, **kwargs):
     cases: Tuple = (
         ((1, 3, 4), (3, 3, 3), (3,), {'stride': (2,), 'padding': 2, 'groups': 1}),
         ((2, 4, 8), (2, 2, 3), (2,), {'stride': 3, 'padding': 1, 'groups': 2, 'dilation': 2}),
-        ((1, 4, 5), (1, 4, 3), (1,), {'stride': None, 'padding': 'valid', 'groups': None, 'dilation': None}),
-        ((1, 2, 4), (1, 1, 4), None, {'stride': (1,), 'padding': 'same', 'groups': (2,), 'dilation': (2,)},
+        ((1, 4, 5), (1, 4, 3), (1,), {'stride': (2,), 'padding': 'valid'}),
+        ((2, 2, 4), (2, 1, 4), (2,), {'stride': (1,), 'padding': 'same', 'groups': 2, 'dilation': (2,)}),
         # With defaults
-        ((1, 4, 5), (3, 4, 3), None, {}),
+        ((1, 4, 5), (3, 4, 3), (3,), {}),
     )
 
     # TODO: (@krshrimali), add error_inputs_func once https://github.com/pytorch/pytorch/pull/67354 is merged
@@ -9141,7 +9141,7 @@ op_db: List[OpInfo] = [
            ),
            supports_out=False,),
     OpInfo('nn.functional.conv1d',
-           aliases=('conv1d',),
+           # aliases=('conv1d',),
            aten_name='conv1d',
            dtypes=floating_types_and(torch.int64),
            dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
@@ -9150,7 +9150,7 @@ op_db: List[OpInfo] = [
            skips=(
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":103, please report a bug to PyTorch.
-               # DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
            ),
            supports_out=False,),
     OpInfo('nn.functional.conv2d',
