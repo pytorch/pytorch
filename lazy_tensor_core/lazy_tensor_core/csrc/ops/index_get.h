@@ -13,8 +13,6 @@ class IndexGet : public TsNode {
 
   std::string ToString() const override;
 
-  NodePtr Clone(OpList operands) const override;
-
   int64_t start_dim() const { return start_dim_; }
 
  private:

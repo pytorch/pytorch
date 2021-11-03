@@ -18,10 +18,6 @@ ConstantPadNd::ConstantPadNd(const torch::lazy::Value& input,
       [&]() { return compiler::InferShape(this); });
 }
 
-NodePtr ConstantPadNd::Clone(OpList operands) const {
-  return torch::lazy::MakeNode<ConstantPadNd>(operands.at(0), pad_, value_);
-}
-
 std::string ConstantPadNd::ToString() const {
   std::stringstream ss;
   ss << TsNode::ToString() << ", pad=(" << c10::Join(", ", pad_) << ")"

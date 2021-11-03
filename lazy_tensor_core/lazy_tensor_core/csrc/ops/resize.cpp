@@ -22,10 +22,6 @@ Resize::Resize(const torch::lazy::Value& input, std::vector<int64_t> size)
           /*num_outputs=*/1, torch::lazy::MHash(size)),
       size_(std::move(size)) {}
 
-NodePtr Resize::Clone(OpList operands) const {
-  return torch::lazy::MakeNode<Resize>(operands.at(0), size_);
-}
-
 std::string Resize::ToString() const {
   std::stringstream ss;
   ss << TsNode::ToString() << ", size=(" << c10::Join(", ", size_) << ")";

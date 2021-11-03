@@ -23,10 +23,6 @@ Unsqueeze::Unsqueeze(const torch::lazy::Value& input, int dim)
            /*num_outputs=*/1, torch::lazy::MHash(dim)),
       dim_(dim) {}
 
-NodePtr Unsqueeze::Clone(OpList operands) const {
-  return torch::lazy::MakeNode<Unsqueeze>(operands.at(0), dim_);
-}
-
 std::string Unsqueeze::ToString() const {
   std::stringstream ss;
   ss << TsNode::ToString() << ", dim=" << dim_;

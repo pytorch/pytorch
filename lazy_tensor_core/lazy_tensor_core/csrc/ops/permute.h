@@ -10,8 +10,6 @@ class Permute : public TsNode {
  public:
   Permute(const torch::lazy::Value& input, std::vector<int64_t> dims);
 
-  NodePtr Clone(OpList operands) const override;
-
   std::string ToString() const override;
 
   const std::vector<int64_t>& dims() const { return dims_; }

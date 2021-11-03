@@ -22,10 +22,6 @@ Diagonal::Diagonal(const torch::lazy::Value& input, int64_t offset,
       dim1_(dim1),
       dim2_(dim2) {}
 
-NodePtr Diagonal::Clone(OpList operands) const {
-  return torch::lazy::MakeNode<Diagonal>(operands.at(0), offset_, dim1_, dim2_);
-}
-
 std::string Diagonal::ToString() const {
   std::stringstream ss;
   ss << TsNode::ToString() << ", offset=" << offset_ << ", dim1=" << dim1_

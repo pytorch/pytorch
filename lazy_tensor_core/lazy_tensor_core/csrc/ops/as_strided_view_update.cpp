@@ -34,11 +34,6 @@ std::string AsStridedViewUpdate::ToString() const {
   return ss.str();
 }
 
-NodePtr AsStridedViewUpdate::Clone(OpList operands) const {
-  return torch::lazy::MakeNode<AsStridedViewUpdate>(operands.at(0), operands.at(1), size_,
-                                       stride_, storage_offset_);
-}
-
 }  // namespace ops
 }  // namespace ir
 }  // namespace torch_lazy_tensors

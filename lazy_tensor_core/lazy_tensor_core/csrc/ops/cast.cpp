@@ -27,10 +27,6 @@ Cast::Cast(const torch::lazy::Value& input, at::ScalarType dtype,
       dtype_(dtype),
       stype_(stype) {}
 
-NodePtr Cast::Clone(OpList operands) const {
-  return torch::lazy::MakeNode<Cast>(operands.at(0), dtype_, stype_);
-}
-
 std::string Cast::ToString() const {
   std::stringstream ss;
   ss << TsNode::ToString();

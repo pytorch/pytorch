@@ -15,10 +15,6 @@ Stack::Stack(OpList values, int64_t dim)
       [&]() { return compiler::InferShape(this); });
 }
 
-NodePtr Stack::Clone(OpList operands) const {
-  return torch::lazy::MakeNode<Stack>(operands, dim_);
-}
-
 std::string Stack::ToString() const {
   std::stringstream ss;
   ss << TsNode::ToString() << ", dim=" << dim_;

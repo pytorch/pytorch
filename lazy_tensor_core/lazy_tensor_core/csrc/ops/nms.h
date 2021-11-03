@@ -12,8 +12,6 @@ class Nms : public TsNode {
       const torch::lazy::Value& score_threshold,
       const torch::lazy::Value& iou_threshold, int64_t output_size);
 
-  NodePtr Clone(OpList operands) const override;
-
   std::string ToString() const override;
 
   int64_t output_size() const { return output_size_; }

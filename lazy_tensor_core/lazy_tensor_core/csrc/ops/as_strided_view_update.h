@@ -17,8 +17,6 @@ class AsStridedViewUpdate : public TsNode {
 
   std::string ToString() const override;
 
-  NodePtr Clone(OpList operands) const override;
-
   const std::vector<int64_t>& size() const { return size_; }
 
   const std::vector<int64_t>& stride() const { return stride_; }

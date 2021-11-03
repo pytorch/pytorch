@@ -13,8 +13,6 @@ class DeviceData : public TsNode {
 
   std::string ToString() const override;
 
-  NodePtr Clone(OpList operands) const override;
-
   const std::shared_ptr<compiler::BackendData>& data() const {
     return data_;
   }

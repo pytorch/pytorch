@@ -15,8 +15,6 @@ class ConstantPadNd : public TsNode {
 
   std::string ToString() const override;
 
-  NodePtr Clone(OpList operands) const override;
-
   const at::Scalar& value() const { return value_; }
 
   const std::vector<int64_t>& pad() const { return pad_; }

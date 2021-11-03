@@ -12,8 +12,6 @@ class GenericSlice : public TsNode {
                c10::ArrayRef<int64_t> base_indices,
                c10::ArrayRef<int64_t> sizes);
 
-  NodePtr Clone(OpList operands) const override;
-
   std::string ToString() const override;
 
   const std::vector<int64_t>& base_indices() const { return base_indices_; }

@@ -11,8 +11,6 @@ class Squeeze : public TsNode {
   // Squeeze out the specified dimension index, -1 for all trivial dimensions.
   Squeeze(const torch::lazy::Value& input, int dim);
 
-  NodePtr Clone(OpList operands) const override;
-
   std::string ToString() const override;
 
   int dim() const { return dim_; }

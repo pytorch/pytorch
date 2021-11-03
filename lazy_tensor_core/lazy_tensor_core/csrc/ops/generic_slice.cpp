@@ -18,10 +18,6 @@ GenericSlice::GenericSlice(const torch::lazy::Value& input,
       [&]() { return compiler::InferShape(this); });
 }
 
-NodePtr GenericSlice::Clone(OpList operands) const {
-  return torch::lazy::MakeNode<GenericSlice>(operands.at(0), base_indices_, sizes_);
-}
-
 std::string GenericSlice::ToString() const {
   std::stringstream ss;
   ss << TsNode::ToString() << ", base_indices=("

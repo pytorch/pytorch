@@ -27,8 +27,6 @@ class Generic : public TsNode {
   Generic(OpKind op, lazy_tensors::Shape shape, size_t num_outputs,
           torch::lazy::hash_t hash_seed);
 
-  NodePtr Clone(OpList operands) const override;
-
  private:
   torch::lazy::hash_t hash_seed_;
 };

@@ -18,11 +18,6 @@ CollectivePermute::CollectivePermute(
       [&]() { return compiler::InferShape(this); });
 }
 
-NodePtr CollectivePermute::Clone(OpList operands) const {
-  return torch::lazy::MakeNode<CollectivePermute>(operands.at(0), operands.at(1),
-                                     source_target_pairs_);
-}
-
 std::string CollectivePermute::ToString() const {
   std::stringstream ss;
   ss << TsNode::ToString() << ", source_target_pairs=(";

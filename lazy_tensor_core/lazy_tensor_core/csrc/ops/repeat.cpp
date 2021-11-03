@@ -14,10 +14,6 @@ Repeat::Repeat(const torch::lazy::Value& input, std::vector<int64_t> repeats)
       [&]() { return compiler::InferShape(this); });
 }
 
-NodePtr Repeat::Clone(OpList operands) const {
-  return torch::lazy::MakeNode<Repeat>(operands.at(0), repeats_);
-}
-
 std::string Repeat::ToString() const {
   std::stringstream ss;
   ss << TsNode::ToString() << ", repeats=(" << c10::Join(", ", repeats_) << ")";

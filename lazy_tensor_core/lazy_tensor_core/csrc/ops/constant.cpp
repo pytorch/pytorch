@@ -22,10 +22,6 @@ std::string Constant::ToString() const {
   return ss.str();
 }
 
-NodePtr Constant::Clone(OpList operands) const {
-  return torch::lazy::MakeNode<Constant>(value_.Clone());
-}
-
 }  // namespace ops
 }  // namespace ir
 }  // namespace torch_lazy_tensors

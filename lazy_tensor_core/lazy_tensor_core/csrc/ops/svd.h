@@ -12,8 +12,6 @@ class SVD : public TsNode {
 
   std::string ToString() const override;
 
-  NodePtr Clone(OpList operands) const override;
-
   bool some() const { return some_; }
 
   bool compute_uv() const { return compute_uv_; }

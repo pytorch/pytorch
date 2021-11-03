@@ -13,8 +13,6 @@ class Constant : public TsNode {
 
   std::string ToString() const override;
 
-  NodePtr Clone(OpList operands) const override;
-
   const lazy_tensors::Literal& value() const { return value_; }
 
  private:

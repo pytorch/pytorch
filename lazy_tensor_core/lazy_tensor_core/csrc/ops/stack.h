@@ -12,8 +12,6 @@ class Stack : public TsNode {
 
   std::string ToString() const override;
 
-  NodePtr Clone(OpList operands) const override;
-
   int64_t dim() const { return dim_; };
 
  private:

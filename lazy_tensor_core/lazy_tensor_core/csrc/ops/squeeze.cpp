@@ -14,10 +14,6 @@ Squeeze::Squeeze(const torch::lazy::Value& input, int dim)
       [&]() { return compiler::InferShape(this); });
 }
 
-NodePtr Squeeze::Clone(OpList operands) const {
-  return torch::lazy::MakeNode<Squeeze>(operands.at(0), dim_);
-}
-
 std::string Squeeze::ToString() const {
   std::stringstream ss;
   ss << TsNode::ToString() << ", dim=" << dim_;

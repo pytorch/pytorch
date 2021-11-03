@@ -20,10 +20,6 @@ std::string DeviceData::ToString() const {
   return ss.str();
 }
 
-NodePtr DeviceData::Clone(OpList operands) const {
-  return torch::lazy::MakeNode<DeviceData>(data_);
-}
-
 const DeviceData* DeviceData::Cast(const torch::lazy::Node* node) {
   return torch::lazy::NodeCast<DeviceData>(node, ltc_device_data);
 }

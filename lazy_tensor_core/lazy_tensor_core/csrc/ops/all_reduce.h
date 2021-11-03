@@ -15,8 +15,6 @@ class AllReduce : public TsNode {
 
   std::string ToString() const override;
 
-  NodePtr Clone(OpList operands) const override;
-
   AllReduceType reduce_type() const { return reduce_type_; }
 
   double scale() const { return scale_; }
