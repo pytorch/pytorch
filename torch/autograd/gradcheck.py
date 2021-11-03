@@ -1052,9 +1052,6 @@ def _gradcheck_real_imag(gradcheck_fn, func, func_out, tupled_inputs, outputs, e
         else:
             gradcheck_fn(func, func_out, tupled_inputs, outputs, eps,
                          rtol, atol, check_grad_dtypes, nondet_tol)
-        if check_undefined_grad:
-            _test_undefined_backward_mode(func, outputs, tupled_inputs)
-
 
     if check_forward_ad:
         complex_inp_indices = [i for i, inp in enumerate(tupled_inputs) if is_tensor_like(inp) and inp.is_complex()]
@@ -1425,6 +1422,9 @@ def _gradcheck_helper(func, inputs, eps, atol, rtol, check_sparse_nnz, nondet_to
             _test_batched_grad(tupled_inputs, o, i)
 
     _test_backward_mul_by_grad_output(outputs, tupled_inputs, check_sparse_nnz)
+
+    if check_undefined_grad:
+        _test_undefined_backward_mode(func, outputs, tupled_inputs)
     return True
 
 
