@@ -5910,7 +5910,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_full_like(self):
         class FullLikeModel(torch.nn.Module):
             def forward(self, x):
-                return torch.full_like(x, 4)
+                return torch.full_like(x, 1.3, dtype=torch.int)
 
         x = torch.tensor(12)
         self.run_test(FullLikeModel(), x)
