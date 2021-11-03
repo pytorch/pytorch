@@ -575,6 +575,7 @@ class TestSparseCSR(TestCase):
             with self.assertRaisesRegex(RuntimeError, err_msg):
                 csr.matmul(bad_vec)
 
+    @skipCPUIfNoMklSparse
     @dtypes(torch.double)
     def test_mm(self, device, dtype):
         def test_shape(di, dj, dk, nnz):
