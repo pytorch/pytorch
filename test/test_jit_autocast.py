@@ -32,9 +32,24 @@ class TestAutocast(JitTestCase):
         @torch.jit.script
         def fn(a, b):
             with autocast():
-                return torch.mm(a, b)
-        result = fn(self.a_fp32, self.b_fp32)
-        self.assertEqual(result.dtype, torch.float16)
+                x = torch.mm(a, b)
+                y = torch.sum(x)
+                return x, y
+        x, y = fn(self.a_fp32, self.b_fp32)
+        self.assertEqual(x.dtype, torch.float16)
+        self.assertEqual(y.dtype, torch.float32)
+
+    @unittest.skipIf(not TEST_CUDA, "No cuda")
+    def test_linear_bf16(self):
+        @torch.jit.script
+        def fn(a, b):
+            with autocast(dtype=torch.bfloat16):
+                x = torch.mm(a, b)
+                y = torch.sum(x)
+                return x, y
+        x, y = fn(self.a_fp32, self.b_fp32)
+        self.assertEqual(x.dtype, torch.bfloat16)
+        self.assertEqual(y.dtype, torch.float32)
 
     @unittest.skipIf(not TEST_CUDA, "No cuda")
     def test_minimal_cpu(self):
