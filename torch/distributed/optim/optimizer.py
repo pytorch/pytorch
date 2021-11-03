@@ -1,6 +1,7 @@
 from typing import List, Optional
 import logging
 
+import torch
 import torch.distributed.rpc as rpc
 import torch.jit as jit
 import torch.nn as nn
