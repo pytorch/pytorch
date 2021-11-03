@@ -942,7 +942,8 @@ struct CudaGraphFuser {
         continue;
       }
       // TODO: output(1) & output(2) should also be marked
-      if (n->kind() == aten::native_batch_norm) {
+      if (n->kind() == aten::native_batch_norm ||
+          n->kind() == aten::_batch_norm_impl_index) {
         TORCH_INTERNAL_ASSERT(
             shape_of.count(n->input(0)) > 0,
             "buildShapeExpressions failed at accessing input shapes");
@@ -959,6 +960,18 @@ struct CudaGraphFuser {
           shape_of.emplace(n->output(1), shape_of.at(n->input(2)));
           // use shape of weight here for grad_bias
           shape_of.emplace(n->output(2), shape_of.at(n->input(2)));
+        }
+        continue;
+      }
+      if (n->kind() == aten::_batch_norm_impl_index_backward) {
+        TORCH_INTERNAL_ASSERT(
+            shape_of.count(n->input(1)) > 0,
+            "buildShapeExpressions failed at accessing input shapes");
+        shape_of.emplace(n->output(0), shape_of.at(n->input(1)));
+        if (shape_of.count(n->input(3)) > 0) {
+          shape_of.emplace(n->output(1), shape_of.at(n->input(3)));
+          // use shape of weight here for grad_bias
+          shape_of.emplace(n->output(2), shape_of.at(n->input(3)));
         }
         continue;
       }
@@ -1961,8 +1974,11 @@ void CudaFuseGraph(std::shared_ptr<Graph>& graph) {
   // We might have emitted a fair amount of useless shape propagating code, so
   // remove it
   EliminateDeadCode(graph);
+
+  GRAPH_DEBUG("After ECS & Dead code removal: ", *graph);
   // Improve the quality of shape propagation code that was left
   PeepholeOptimizeShapeExpressions(graph->block());
+  GRAPH_DEBUG("After PeepholeOptimizeShapeExpressions: ", *graph);
 
   // TODO: we need to properly restore shape information after fusion.
   // shamelessly use tool from NNC.
