@@ -17,7 +17,7 @@ TORCH_API bool IsPermutation(c10::ArrayRef<int64_t> permutation);
 // output[i] = input[permutation[i]]. The given permutation must be the same
 // size as the input.
 template <typename Container>
-TORCH_API std::vector<typename Container::value_type> Permute(
+std::vector<typename Container::value_type> Permute(
     c10::ArrayRef<int64_t> permutation,
     const Container& input) {
   using T = typename Container::value_type;

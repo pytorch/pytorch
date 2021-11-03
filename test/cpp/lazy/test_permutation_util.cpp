@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <c10/util/Exception.h>
-#include <torch/csrc/lazy/tensor/permutation_util.h>
+#include <torch/csrc/lazy/core/permutation_util.h>
 
 namespace torch {
 namespace lazy {

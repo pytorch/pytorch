@@ -1,4 +1,4 @@
-#include <torch/csrc/lazy/tensor/permutation_util.h>
+#include <torch/csrc/lazy/core/permutation_util.h>
 
 #include <algorithm>
 #include <numeric>
