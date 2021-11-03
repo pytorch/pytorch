@@ -28,6 +28,11 @@ inline std::ostream& operator<<(std::ostream& str, Strategy rhs) {
 typedef struct MemRegion {
   size_t offset;
   size_t size;
+
+  size_t nextOffset() const {
+    return offset + size;
+  }
+
 } MemRegion;
 
 inline std::ostream& operator<<(std::ostream& str, MemRegion reg) {
@@ -56,7 +61,7 @@ bool overlapMemRegion(const MemRegion& reg1, const MemRegion& reg2);
 
 struct UniqueLiveRange {
   LiveRange lvr;
-  std::string id;
+  const Value* id;
 };
 
 bool overlapLiveRange(
@@ -90,6 +95,7 @@ struct liveRangeEndCmp {
 
 template <typename T>
 using SortedLiveRangeMap = std::map<UniqueLiveRange, T, liveRangeStartCmp>;
+
 struct TORCH_API MemAllocation {
   UniqueLiveRange ulvr;
   MemRegion reg;
@@ -98,6 +104,8 @@ struct TORCH_API MemAllocation {
 inline std::ostream& operator<<(std::ostream& str, MemAllocation rhs) {
   return str << rhs.ulvr << ", " << rhs.reg;
 }
+
+void printAllocations(std::vector<MemAllocation> allocations);
 
 inline bool operator==(const MemAllocation lhs, const MemAllocation rhs) {
   return lhs.ulvr == rhs.ulvr && lhs.reg == rhs.reg;
@@ -142,15 +150,14 @@ using namespace torch::jit;
 template <>
 struct hash<MemRegion> {
   size_t operator()(const MemRegion& reg) const {
-    return std::hash<size_t>()(reg.offset) ^
-        (std::hash<size_t>()(reg.size) << 1);
+    return c10::get_hash(reg.offset, reg.size);
   }
 };
 
 template <>
 struct hash<UniqueLiveRange> {
   size_t operator()(const UniqueLiveRange& ulvr) const {
-    return std::hash<LiveRange>()(ulvr.lvr) ^ (std::hash<string>()(ulvr.id));
+    return c10::get_hash(ulvr.lvr, ulvr.id);
   }
 };
 

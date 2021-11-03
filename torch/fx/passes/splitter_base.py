@@ -11,7 +11,7 @@ from torch.fx._compatibility import compatibility
 
 from .operator_support import (
     get_node_target,
-    OperatorSupport,
+    OperatorSupportBase,
 )
 from .graph_drawer import FxGraphDrawer
 from .shape_prop import ShapeProp
@@ -82,7 +82,7 @@ class FxNetAccNodesFinder:
     def __init__(
         self,
         module: torch.fx.GraphModule,
-        operator_support: OperatorSupport,
+        operator_support: OperatorSupportBase,
         allow_non_tensor: bool,
     ):
         self.module = module
@@ -226,7 +226,7 @@ class _SplitterBase:
         self,
         module: torch.fx.GraphModule,
         sample_input: Tensors,
-        operator_support: OperatorSupport,
+        operator_support: OperatorSupportBase,
         settings: _SplitterSettingBase,
     ):
         """
@@ -655,8 +655,13 @@ class _SplitterBase:
         current_cpu_nodes, current_acc_nodes = self.starter_nodes()
         visited_nodes: NodeSet = set()
 
-        # If there are CPU nodes, start with them
-        acc_subgraph: bool = not current_cpu_nodes
+        # Determine which subgraph to start from based on node dependency
+        acc_subgraph: bool = True
+        for n in current_cpu_nodes:
+            if self.deps[n] <= visited_nodes:
+                acc_subgraph = False
+                break
+
         current_subgraph_nodes: NodeList = []
 
         # Result accumulator

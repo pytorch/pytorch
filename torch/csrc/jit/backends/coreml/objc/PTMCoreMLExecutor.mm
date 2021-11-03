@@ -68,7 +68,7 @@
   _modelPath = [self _save:modelSpecs
                 identifier:[NSString stringWithCString:identifier.c_str()
                                               encoding:NSUTF8StringEncoding]];
-  NSError* error;
+  NSError* error = nil;
   NSURL* compiledModelPath = nil;
   if (@available(iOS 11.0, macOS 10.13, *)) {
     compiledModelPath =
@@ -82,7 +82,7 @@
     [self cleanup];
     TORCH_CHECK(
         false,
-        "Error compiling model",
+        "Error compiling the MLModel",
         [error localizedDescription].UTF8String);
     return NO;
   }
@@ -104,7 +104,9 @@
   }
   if (error || !_mlModel) {
     TORCH_CHECK(
-        false, "Error loading MLModel", error.localizedDescription.UTF8String);
+        false,
+        "Error loading the MLModel",
+        error.localizedDescription.UTF8String);
   }
 
   _compiledModelPath = compiledModelPath.path;
@@ -113,12 +115,11 @@
 
 - (id<MLFeatureProvider>)forwardWithInputs:
     (const std::vector<PTMCoreMLFeatureSpecs>&)inputs {
-  NSError* error;
+  NSError* error = nil;
   PTMCoreMLFeatureProvider* inputFeature = [[PTMCoreMLFeatureProvider alloc]
       initWithFeatureSpecs:inputs
              CoreMLVersion:self.coreMLVersion];
   if (inputFeature == nil) {
-    NSLog(@"inputFeature is not initialized.");
     return nil;
   }
   if (@available(iOS 11.0, macOS 10.13, *)) {
@@ -136,14 +137,14 @@
 
     return outputFeature;
   } else {
-    TORCH_CHECK("Core ML is available on iOS 11.0 and above");
+    TORCH_CHECK(false, "Core ML is not available on your device");
     return nil;
   }
 }
 
 - (BOOL)cleanup {
   NSFileManager* fileManager = [NSFileManager defaultManager];
-  NSError* error;
+  NSError* error = nil;
   if (![fileManager fileExistsAtPath:_modelPath]) {
     [fileManager removeItemAtPath:_modelPath error:&error];
   }
@@ -164,7 +165,7 @@
     // https://developers.google.com/protocol-buffers/docs/pythontutorial#parsing-and-serialization
     NSData* data = [NSData dataWithBytes:spec.c_str() length:spec.length()];
     BOOL ret = [data writeToFile:modelPath atomically:YES];
-    TORCH_CHECK(ret, "Save MLModel failed!", modelPath.UTF8String);
+    TORCH_CHECK(ret, "Error saving the MLModel", modelPath.UTF8String);
   }
   return modelPath;
 }
