@@ -263,7 +263,7 @@ NodePtr IndexFill(const LazyTensor& base, int64_t dim, const LazyTensor& index,
   return IndexFillOp(
       base.GetIrValue(), dim, index.GetIrValue(),
       LazyGraphExecutor::Get()->GetIrValueForScalar(
-          value, base.shape().get().at_element_type(), base.GetDevice()));
+          value, base.shape().get().scalar_type(), base.GetDevice()));
 }
 
 NodePtr IndexFill(const LazyTensor& base, int64_t dim, const LazyTensor& index,

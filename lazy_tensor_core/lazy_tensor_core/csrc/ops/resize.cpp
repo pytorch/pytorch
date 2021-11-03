@@ -10,7 +10,7 @@ namespace {
 
 lazy_tensors::Shape NodeOutputShape(const torch::lazy::Value& input,
                                     c10::ArrayRef<int64_t> size) {
-  return lazy_tensors::ShapeUtil::MakeShape(ir::GetShapeFromTsValue(input).at_element_type(), size);
+  return lazy_tensors::ShapeUtil::MakeShape(ir::GetShapeFromTsValue(input).scalar_type(), size);
 }
 
 }  // namespace

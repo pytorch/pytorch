@@ -186,7 +186,7 @@ NodePtr MaxUnary(const torch::lazy::Value& input) {
            0);
   return GenericOp(
       OpKind(at::aten::max), {input},
-      lazy_tensors::ShapeUtil::MakeShape(ir::GetShapeFromTsValue(input).at_element_type(), {}));
+      lazy_tensors::ShapeUtil::MakeShape(ir::GetShapeFromTsValue(input).scalar_type(), {}));
 }
 
 NodePtr MinUnary(const torch::lazy::Value& input) {
@@ -194,12 +194,12 @@ NodePtr MinUnary(const torch::lazy::Value& input) {
            0);
   return GenericOp(
       OpKind(at::aten::min), {input},
-      lazy_tensors::ShapeUtil::MakeShape(ir::GetShapeFromTsValue(input).at_element_type(), {}));
+      lazy_tensors::ShapeUtil::MakeShape(ir::GetShapeFromTsValue(input).scalar_type(), {}));
 }
 
 NodePtr Take(const torch::lazy::Value& input, const torch::lazy::Value& index) {
   lazy_tensors::Shape result_shape = ir::GetShapeFromTsValue(index);
-  result_shape.set_element_type(ir::GetShapeFromTsValue(input).at_element_type());
+  result_shape.set_scalar_type(ir::GetShapeFromTsValue(input).scalar_type());
   return GenericOp(OpKind(at::aten::take), {input, index},
                    std::move(result_shape));
 }

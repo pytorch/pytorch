@@ -15,7 +15,7 @@ lazy_tensors::Shape NodeOutputShape(const torch::lazy::Value& input,
   const lazy_tensors::Shape& input_shape = ir::GetShapeFromTsValue(input);
   const auto complete_output_sizes =
       GetCompleteShape(output_sizes, input_shape.dimensions());
-  return lazy_tensors::ShapeUtil::MakeShape(input_shape.at_element_type(),
+  return lazy_tensors::ShapeUtil::MakeShape(input_shape.scalar_type(),
                                             complete_output_sizes);
 }
 
