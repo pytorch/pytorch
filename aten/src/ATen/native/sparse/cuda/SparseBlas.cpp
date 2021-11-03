@@ -46,7 +46,7 @@ Tensor& addmm_out_sparse_csr_dense_cuda(
   // Also structured kernels do not support sparse output
   IntArrayRef self__sizes;
   c10::MaybeOwned<Tensor> self_;
-  if (&result != &self) {
+  if (&result != &self && self.layout() == kStrided) {
     self_ = expand_size(self, {mat1_sizes[0], mat2_sizes[1]}, "addmm");
     self__sizes = self_->sizes();
   } else {
@@ -60,10 +60,12 @@ Tensor& addmm_out_sparse_csr_dense_cuda(
   }
 
   if (&result != &self) {
-    at::native::resize_output(result, self__sizes);
-    if (beta.toComplexDouble() != 0.0) {
-      at::native::copy_(result, *self_);
+    if (result.layout() == kStrided) {
+      at::native::resize_output(result, self__sizes);
+    } else {
+      at::native::resize_as_sparse_csr_(result, *self_);
     }
+    result.copy_(*self_);
   }
 
   IntArrayRef result_sizes = result.sizes();
@@ -71,21 +73,24 @@ Tensor& addmm_out_sparse_csr_dense_cuda(
     return result;
   }
 
-  if (mat1._nnz() == 0) {
-    // By definition, when beta==0, values in self should be ignored. nans and
-    // infs should not propagate
+  if (mat1._nnz() == 0 && mat2.layout() == kStrided) {
+    // According to docs, when beta==0 values in self should be ignored
+    // nans and infs should not propagate
     if (beta.toComplexDouble() == 0.) {
-      return result.zero_();
+      result.zero_();
+    } else {
+      result.mul_(beta);
     }
-    return at::mul_out(
-        result,
-        self,
-        at::native::scalar_tensor(
-            beta,
-            self.scalar_type(),
-            c10::nullopt /* layout */,
-            at::kCPU,
-            c10::nullopt /* pin_memory */));
+    return result;
+  }
+
+  if (mat2.is_sparse_csr() && (mat1._nnz() == 0 || mat2._nnz() == 0)) {
+    if (beta.toComplexDouble() == 0.) {
+      result.values().zero_();
+    } else {
+      result.values().mul_(beta);
+    }
+    return result;
   }
 
   sparse::impl::cuda::addmm_out_sparse_csr(mat1, mat2, beta, alpha, result);
@@ -140,6 +145,31 @@ Tensor& addmv_out_sparse_csr_cuda(
 
   sparse::impl::cuda::addmv_out_sparse_csr(mat, vec, beta, alpha, result);
   return result;
+}
+
+/*
+  Solves a system of linear equations whose coefficients are represented in a sparse triangular matrix A:
+  op(A) X = B.
+
+  Args:
+  * `B` - dense Tensor of size m × nrhs.
+  * `A` - sparse Tensor of size m × m.
+  * `upper` - controls whether upper or lower triangular part of A is considered in computations.
+  * `transpose` - if true then op(A) = A^T.
+  * `unitriangular` - if true then the diagonal elements of A are assumed to be one.
+  * `X` - dense Tensor of size m × nrhs.
+  * `clone_A` - cloned matrix A, required only for compatibility with strided layout interface.
+*/
+std::tuple<Tensor&, Tensor&> triangular_solve_out_sparse_csr_cuda(
+    const Tensor& B,
+    const Tensor& A,
+    bool upper,
+    bool transpose,
+    bool unitriangular,
+    Tensor& X,
+    Tensor& clone_A) {
+  sparse::impl::cuda::triangular_solve_out_sparse_csr(A, B, X, upper, transpose, unitriangular);
+  return std::tuple<Tensor&, Tensor&>(X, clone_A);
 }
 
 } // namespace native
