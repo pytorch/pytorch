@@ -233,7 +233,6 @@ void initPythonIRBindings(PyObject* module_) {
              bool add_node_names,
              bool use_external_data_format,
              const std::string& onnx_file_path,
-             const ValAttrNameMap& val_attr_to_name,
              const NodeAttrNameMap& node_attr_to_name) {
             std::string graph;
             std::shared_ptr<::ONNX_NAMESPACE::ModelProto> model_proto;
@@ -258,7 +257,6 @@ void initPythonIRBindings(PyObject* module_) {
                     add_node_names,
                     use_external_data_format,
                     onnx_file_path,
-                    val_attr_to_name,
                     node_attr_to_name);
             std::unordered_map<std::string, py::bytes>
                 python_serialized_export_map;
@@ -289,7 +287,6 @@ void initPythonIRBindings(PyObject* module_) {
           py::arg("add_node_names") = true,
           py::arg("use_external_data_format") = false,
           py::arg("onnx_file_path") = std::string(),
-          py::arg("val_attr_to_name") = ValAttrNameMap(),
           py::arg("node_attr_to_name") = NodeAttrNameMap())
       .def(
           "_pretty_print_onnx",
