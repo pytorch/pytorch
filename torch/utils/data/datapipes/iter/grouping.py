@@ -1,9 +1,9 @@
 import random
-import warnings
 
 from collections import defaultdict
 
 from torch.utils.data import IterDataPipe, functional_datapipe, DataChunk
+from torch.utils.data.datapipes.utils.common import deprecation_warning_torchdata
 from typing import Any, Callable, DefaultDict, Iterator, List, Optional, Sized, TypeVar
 
 T_co = TypeVar('T_co', covariant=True)
@@ -185,8 +185,7 @@ class BucketBatcherIterDataPipe(IterDataPipe[DataChunk[T_co]]):
         assert batch_size > 0, "Batch size is required to be larger than 0!"
         assert batch_num > 0, "Number of batches is required to be larger than 0!"
         assert bucket_num > 0, "Number of buckets is required to be larger than 0!"
-
-        warnings.warn("`BucketBatcher` is going to be removed from PyTorch Core")
+        deprecation_warning_torchdata(type(self).__name__)
         super().__init__()
 
         # TODO: Verify _datapippe is not going to be serialized twice

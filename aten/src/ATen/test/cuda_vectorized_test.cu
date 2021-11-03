@@ -25,7 +25,7 @@ void reset_buffers() {
   }
 }
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 TEST(TestLoops, HasSameArgTypes) {
   // This is a compile-time unit test. If this file compiles without error,
   // then the test passes and during runtime, we just need to return.
