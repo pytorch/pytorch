@@ -20,10 +20,6 @@ Select::Select(const torch::lazy::Value& input, int64_t dim, int64_t start,
       end_(end),
       stride_(stride) {}
 
-NodePtr Select::Clone(OpList operands) const {
-  return torch::lazy::MakeNode<Select>(operands.at(0), dim_, start_, end_, stride_);
-}
-
 std::string Select::ToString() const {
   std::stringstream ss;
   ss << TsNode::ToString() << ", dim=" << dim_ << ", start=" << start_

@@ -18,11 +18,6 @@ Nms::Nms(const torch::lazy::Value& boxes, const torch::lazy::Value& scores,
       [&]() { return compiler::InferShape(this); });
 }
 
-NodePtr Nms::Clone(OpList operands) const {
-  return torch::lazy::MakeNode<Nms>(operands.at(0), operands.at(1), operands.at(2),
-                       operands.at(3), output_size_);
-}
-
 std::string Nms::ToString() const {
   std::stringstream ss;
   ss << TsNode::ToString() << ", output_size=" << output_size_;

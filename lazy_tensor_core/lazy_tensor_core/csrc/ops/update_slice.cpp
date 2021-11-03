@@ -17,10 +17,6 @@ UpdateSlice::UpdateSlice(const torch::lazy::Value& input,
       [&]() { return compiler::InferShape(this); });
 }
 
-NodePtr UpdateSlice::Clone(OpList operands) const {
-  return torch::lazy::MakeNode<UpdateSlice>(operands.at(0), operands.at(1), base_indices_);
-}
-
 std::string UpdateSlice::ToString() const {
   std::stringstream ss;
   ss << TsNode::ToString() << ", base_indices=("

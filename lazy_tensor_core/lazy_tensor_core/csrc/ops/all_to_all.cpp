@@ -24,11 +24,6 @@ AllToAll::AllToAll(const torch::lazy::Value& input,
       [&]() { return compiler::InferShape(this); });
 }
 
-NodePtr AllToAll::Clone(OpList operands) const {
-  return torch::lazy::MakeNode<AllToAll>(operands.at(0), operands.at(1), split_dimension_,
-                            concat_dimension_, split_count_, groups_);
-}
-
 std::string AllToAll::ToString() const {
   std::stringstream ss;
   ss << TsNode::ToString() << ", split_dimension=" << split_dimension_

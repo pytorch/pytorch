@@ -15,8 +15,6 @@ class AllToAll : public TsNode {
 
   std::string ToString() const override;
 
-  NodePtr Clone(OpList operands) const override;
-
   int64_t split_dimension() const { return split_dimension_; }
 
   int64_t concat_dimension() const { return concat_dimension_; }

@@ -10,8 +10,6 @@ class Bernoulli : public TsNode {
  public:
   Bernoulli(const torch::lazy::Value& probability, const torch::lazy::Value& seed,
             lazy_tensors::Shape shape);
-
-  NodePtr Clone(OpList operands) const override;
 };
 
 }  // namespace ops

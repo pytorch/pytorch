@@ -21,10 +21,6 @@ std::string IndexGet::ToString() const {
   return ss.str();
 }
 
-NodePtr IndexGet::Clone(OpList operands) const {
-  return torch::lazy::MakeNode<IndexGet>(operands.at(0), operands.at(1), start_dim_);
-}
-
 }  // namespace ops
 }  // namespace ir
 }  // namespace torch_lazy_tensors

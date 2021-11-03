@@ -21,11 +21,6 @@ std::string IndexPut::ToString() const {
   return ss.str();
 }
 
-NodePtr IndexPut::Clone(OpList operands) const {
-  return torch::lazy::MakeNode<IndexPut>(operands.at(0), operands.at(1), start_dim_,
-                            operands.at(2), accumulate_);
-}
-
 }  // namespace ops
 }  // namespace ir
 }  // namespace torch_lazy_tensors

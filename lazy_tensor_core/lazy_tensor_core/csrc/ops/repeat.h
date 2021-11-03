@@ -10,8 +10,6 @@ class Repeat : public TsNode {
  public:
   Repeat(const torch::lazy::Value& input, std::vector<int64_t> repeats);
 
-  NodePtr Clone(OpList operands) const override;
-
   std::string ToString() const override;
 
   const std::vector<int64_t>& repeats() const { return repeats_; }

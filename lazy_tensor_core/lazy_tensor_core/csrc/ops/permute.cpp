@@ -17,10 +17,6 @@ Permute::Permute(const torch::lazy::Value& input, std::vector<int64_t> dims)
       [&]() { return compiler::InferShape(this); });
 }
 
-NodePtr Permute::Clone(OpList operands) const {
-  return torch::lazy::MakeNode<Permute>(operands.at(0), dims_);
-}
-
 std::string Permute::ToString() const {
   std::stringstream ss;
   ss << TsNode::ToString() << ", dims=(" << c10::Join(", ", dims_) << ")";

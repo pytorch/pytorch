@@ -46,16 +46,6 @@ ConvolutionOverrideable::ConvolutionOverrideable(
       [&]() { return compiler::InferShape(this); });
 }
 
-NodePtr ConvolutionOverrideable::Clone(OpList operands) const {
-  return operands.size() == 3
-             ? torch::lazy::MakeNode<ConvolutionOverrideable>(
-                   operands.at(0), operands.at(1), operands.at(2), stride_,
-                   padding_, dilation_, transposed_, output_padding_, groups_)
-             : torch::lazy::MakeNode<ConvolutionOverrideable>(
-                   operands.at(0), operands.at(1), stride_, padding_, dilation_,
-                   transposed_, output_padding_, groups_);
-}
-
 std::string ConvolutionOverrideable::ToString() const {
   std::stringstream ss;
   ss << TsNode::ToString() << ", stride=(" << c10::Join(", ", stride_)

@@ -17,10 +17,6 @@ Expand::Expand(const torch::lazy::Value& input, std::vector<int64_t> size,
       [&]() { return compiler::InferShape(this); });
 }
 
-NodePtr Expand::Clone(OpList operands) const {
-  return torch::lazy::MakeNode<Expand>(operands.at(0), size_, is_scalar_expand_);
-}
-
 std::string Expand::ToString() const {
   std::stringstream ss;
   ss << TsNode::ToString() << ", size=(" << c10::Join(", ", size_)

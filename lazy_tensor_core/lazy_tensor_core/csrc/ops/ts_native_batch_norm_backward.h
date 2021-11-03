@@ -22,8 +22,6 @@ class TSNativeBatchNormBackward : public TsNode {
                             const torch::lazy::Value& save_invstd, bool training, double eps,
                             std::array<bool, 3> output_mask);
 
-  NodePtr Clone(OpList operands) const override;
-
   std::string ToString() const override;
 
   bool training() const { return training_; }

@@ -33,12 +33,6 @@ AllReduce::AllReduce(AllReduceType reduce_type, OpList operands,
       [&]() { return compiler::InferShape(this); });
 }
 
-NodePtr AllReduce::Clone(OpList operands) const {
-  std::vector<torch::lazy::Value> operand_list(operands.begin(), operands.end() - 1);
-  return torch::lazy::MakeNode<AllReduce>(reduce_type_, operand_list, operands.back(),
-                             scale_, groups_);
-}
-
 std::string AllReduce::ToString() const {
   std::stringstream ss;
   ss << TsNode::ToString()

@@ -21,12 +21,6 @@ TSNativeBatchNormForward::TSNativeBatchNormForward(
       [&]() { return compiler::InferShape(this); });
 }
 
-NodePtr TSNativeBatchNormForward::Clone(OpList operands) const {
-  return torch::lazy::MakeNode<TSNativeBatchNormForward>(
-      operands.at(0), operands.at(1), operands.at(2), operands.at(3),
-      operands.at(4), training_, momentum_, eps_);
-}
-
 std::string TSNativeBatchNormForward::ToString() const {
   std::stringstream ss;
   ss << TsNode::ToString() << ", training=" << training_

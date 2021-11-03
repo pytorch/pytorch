@@ -78,13 +78,6 @@ class TsNode : public torch::lazy::Node {
     return operands_as_outputs_.at(i);
   }
 
-  // TODO(whc) We'll delete Clone since it's not used.  But it needs to be
-  // removed from all the legacy ops, so I'm moving it from Node to TsNode
-  // for now, and we'll delete it later once we've moved more ops to codegen
-  virtual NodePtr Clone(OpList operands) const {
-    LOG(ERROR) << "Cloning not implemented for TsNode";
-  }
-
   // Lower is a backend-specific method since it returns a backend specific
   // type. hence, it is convenient to define it differently per-backend rather
   // than at Node API

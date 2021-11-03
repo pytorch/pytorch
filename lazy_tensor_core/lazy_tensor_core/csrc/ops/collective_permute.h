@@ -15,8 +15,6 @@ class CollectivePermute : public TsNode {
 
   std::string ToString() const override;
 
-  NodePtr Clone(OpList operands) const override;
-
   const std::vector<std::pair<int64_t, int64_t>>& source_target_pairs() const {
     return source_target_pairs_;
   }

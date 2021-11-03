@@ -11,8 +11,6 @@ class UpdateSlice : public TsNode {
   UpdateSlice(const torch::lazy::Value& input, const torch::lazy::Value& source,
               c10::ArrayRef<int64_t> base_indices);
 
-  NodePtr Clone(OpList operands) const override;
-
   std::string ToString() const override;
 
   const std::vector<int64_t>& base_indices() const { return base_indices_; }

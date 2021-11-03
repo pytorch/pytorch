@@ -40,19 +40,6 @@ TSNativeBatchNormBackward::TSNativeBatchNormBackward(
       [&]() { return compiler::InferShape(this); });
 }
 
-NodePtr TSNativeBatchNormBackward::Clone(OpList operands) const {
-  if (operands.size() == 5) {
-    return torch::lazy::MakeNode<TSNativeBatchNormBackward>(
-        operands.at(0), operands.at(1), operands.at(2), operands.at(3),
-        operands.at(4), training_, eps_, output_mask_);
-  }
-  CHECK_EQ(operands.size(), 7);
-  return torch::lazy::MakeNode<TSNativeBatchNormBackward>(
-      operands.at(0), operands.at(1), operands.at(2), operands.at(3),
-      operands.at(4), operands.at(5), operands.at(6), training_, eps_,
-      output_mask_);
-}
-
 std::string TSNativeBatchNormBackward::ToString() const {
   std::stringstream ss;
   ss << TsNode::ToString() << ", training=" << training_ << ", eps=" << eps_;

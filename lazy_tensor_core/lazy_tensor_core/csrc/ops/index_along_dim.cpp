@@ -22,11 +22,6 @@ std::string IndexAlongDim::ToString() const {
   return ss.str();
 }
 
-NodePtr IndexAlongDim::Clone(OpList operands) const {
-  return torch::lazy::MakeNode<IndexAlongDim>(op(), operands.at(0), operands.at(1),
-                                 operands.at(2), dim_);
-}
-
 }  // namespace ops
 }  // namespace ir
 }  // namespace torch_lazy_tensors

@@ -13,8 +13,6 @@ class GetDimensionsSize : public TsNode {
   GetDimensionsSize(const torch::lazy::Value& input,
                     std::vector<int64_t> dimensions);
 
-  NodePtr Clone(OpList operands) const override;
-
   std::string ToString() const override;
 
   const std::vector<int64_t>& dimensions() const { return dimensions_; }

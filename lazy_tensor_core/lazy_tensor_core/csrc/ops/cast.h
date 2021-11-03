@@ -16,8 +16,6 @@ class Cast : public TsNode {
 
   std::string ToString() const override;
 
-  NodePtr Clone(OpList operands) const override;
-
   const at::ScalarType dtype() const { return dtype_; };
 
   const c10::optional<at::ScalarType>& stype() const { return stype_; };

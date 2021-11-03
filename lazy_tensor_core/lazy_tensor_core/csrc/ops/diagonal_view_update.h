@@ -12,8 +12,6 @@ class DiagonalViewUpdate : public TsNode {
                      const torch::lazy::Value& input, int64_t offset,
                      int64_t dim1, int64_t dim2);
 
-  NodePtr Clone(OpList operands) const override;
-
   std::string ToString() const override;
 
   int64_t offset() const { return offset_; }

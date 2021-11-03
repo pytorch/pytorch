@@ -16,10 +16,6 @@ SVD::SVD(const torch::lazy::Value& input, bool some, bool compute_uv)
       [&]() { return compiler::InferShape(this); });
 }
 
-NodePtr SVD::Clone(OpList operands) const {
-  return torch::lazy::MakeNode<SVD>(operands.at(0), some_, compute_uv_);
-}
-
 std::string SVD::ToString() const {
   std::stringstream ss;
   ss << TsNode::ToString() << ", some=" << some_

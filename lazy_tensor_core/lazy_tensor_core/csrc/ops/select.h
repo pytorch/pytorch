@@ -11,8 +11,6 @@ class Select : public TsNode {
   Select(const torch::lazy::Value& input, int64_t dim, int64_t start,
          int64_t end, int64_t stride);
 
-  NodePtr Clone(OpList operands) const override;
-
   std::string ToString() const override;
 
   int64_t dim() const { return dim_; }

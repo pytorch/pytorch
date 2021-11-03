@@ -32,10 +32,6 @@ std::string AsStrided::ToString() const {
   return ss.str();
 }
 
-NodePtr AsStrided::Clone(OpList operands) const {
-  return torch::lazy::MakeNode<AsStrided>(operands.at(0), size_, stride_, storage_offset_);
-}
-
 bool AsStrided::StrideIsSupported(const lazy_tensors::Shape& input_shape,
                                   c10::ArrayRef<int64_t> size,
                                   c10::ArrayRef<int64_t> stride,

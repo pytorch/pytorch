@@ -24,8 +24,6 @@ class ConvolutionOverrideable : public TsNode {
                           std::vector<int64_t> dilation, bool transposed,
                           std::vector<int64_t> output_padding, int64_t groups);
 
-  NodePtr Clone(OpList operands) const override;
-
   std::string ToString() const override;
 
   const std::vector<int64_t>& stride() const { return stride_; }
