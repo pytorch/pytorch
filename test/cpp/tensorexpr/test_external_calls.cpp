@@ -426,6 +426,48 @@ TEST(ExternalCall, Embedding) {
   ASSERT_TRUE(at::allclose(nnc_result, ref));
 }
 
+TEST(ExternalCall, MaxReduction) {
+  BufHandle Input("Input", {1, 115, 152}, kFloat);
+  BufHandle ResultBuf("Result", {1, 152}, kFloat);
+  int64_t dim = 1;
+  bool keep_dim = false;
+
+  Tensor Result = Tensor(
+      ResultBuf.node(),
+      ExternalCall::make(
+          ResultBuf, "nnc_aten_max_red", {Input}, {dim, (int64_t)keep_dim}));
+  LoopNest l({Result});
+  l.prepareForCodegen();
+  l.simplify();
+
+  auto options = at::TensorOptions()
+                     .dtype(at::kFloat)
+                     .layout(at::kStrided)
+                     .device(at::kCPU)
+                     .requires_grad(false);
+
+  at::Tensor input = at::ones({1, 115, 152}, options) * 5.f;
+  at::Tensor ref = std::get<0>(at::max(input, dim, keep_dim));
+
+  at::Tensor nnc_result;
+  std::vector<float> input_buf(1 * 115 * 152, 5.f);
+  std::vector<float> result_buf(1 * 152, -1.f);
+
+#ifdef TORCH_ENABLE_LLVM
+  LLVMCodeGen llvm_codegen(l.root_stmt(), {Input, Result});
+
+  llvm_codegen.call({input_buf, result_buf});
+  nnc_result = at::from_blob(result_buf.data(), {1, 152}, options);
+  ASSERT_TRUE(at::allclose(nnc_result, ref));
+#endif
+
+  SimpleIREvaluator ir_eval(l.root_stmt(), {Input, Result});
+
+  ir_eval.call({input_buf, result_buf});
+  nnc_result = at::from_blob(result_buf.data(), {1, 152}, options);
+  ASSERT_TRUE(at::allclose(nnc_result, ref));
+}
+
 #ifdef USE_XNNPACK
 
 TEST(ExternalCall, Prepacked_Linear_float) {

@@ -384,6 +384,28 @@ void nnc_aten_mean(
   }
 }
 
+void nnc_aten_max_red(
+    int64_t bufs_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int8_t* buf_dtypes,
+    int64_t args_num,
+    int64_t* extra_args) {
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+
+  at::Tensor& r = tensors[0];
+  const at::Tensor& x = tensors[1];
+  int64_t max_dim = extra_args[0];
+  bool keep_dim = extra_args[1];
+  try {
+    r = std::get<0>(at::max(x, max_dim, keep_dim));
+  } catch (...) {
+  }
+  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+}
+
 void nnc_aten_addmm(
     int64_t bufs_num,
     void** buf_data,
@@ -530,6 +552,9 @@ const static RegisterNNCExternalFunction nnc_adaptive_avg_pool2d(
 const static RegisterNNCExternalFunction nnc_mean(
     "nnc_aten_mean",
     nnc_aten_mean);
+const static RegisterNNCExternalFunction nnc_max_red(
+    "nnc_aten_max_red",
+    nnc_aten_max_red);
 const static RegisterNNCExternalFunction nnc_addmm(
     "nnc_aten_addmm",
     nnc_aten_addmm);
