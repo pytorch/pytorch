@@ -6,12 +6,14 @@ import torch
 import torch.fx
 from torch.fx.node import _get_qualified_name
 from torch.fx.passes.shape_prop import TensorMetadata
+import numpy
 
 
 class TRTInterpreterResult(NamedTuple):
     engine: Any
     input_names: Sequence[str]
     output_names: Sequence[str]
+    serialized_cache: bytearray
 
 
 # Borrowed from torch2trt
@@ -70,6 +72,17 @@ class TRTModule(torch.nn.Module):
         self.output_binding_indices_in_order: Sequence[int] = [
             self.engine.get_binding_index(name) for name in self.output_names
         ]
+        primary_input_outputs = set()
+        primary_input_outputs.update(self.input_binding_indices_in_order)
+        primary_input_outputs.update(self.output_binding_indices_in_order)
+        self.hidden_output_binding_indices_in_order: Sequence[int] = []
+        self.hidden_output_names: Sequence[str] = []
+        for i in range(self.engine.num_bindings):
+            if i not in primary_input_outputs:
+                self.hidden_output_binding_indices_in_order.append(i)
+                self.hidden_output_names.append(self.engine.get_binding_name(i))
+
+        assert self.engine.num_bindings == (len(self.input_names) + len(self.output_names) + len(self.hidden_output_names))
 
         self.input_dtypes: Sequence[torch.dtype] = [
             torch_dtype_from_trt(self.engine.get_binding_dtype(idx))
@@ -82,6 +95,10 @@ class TRTModule(torch.nn.Module):
         self.output_dtypes: Sequence[torch.dtype] = [
             torch_dtype_from_trt(self.engine.get_binding_dtype(idx))
             for idx in self.output_binding_indices_in_order
+        ]
+        self.hidden_output_dtypes: Sequence[torch.dtype] = [
+            torch_dtype_from_trt(self.engine.get_binding_dtype(idx))
+            for idx in self.hidden_output_binding_indices_in_order
         ]
 
     def _check_initialized(self):
@@ -142,7 +159,7 @@ class TRTModule(torch.nn.Module):
                 batch_size = inputs[0].shape[0]
                 contiguous_inputs: List[torch.Tensor] = [i.contiguous() for i in inputs]
                 bindings: List[Any] = [None] * (
-                    len(self.input_names) + len(self.output_names)
+                    len(self.input_names) + len(self.output_names) + len(self.hidden_output_names)
                 )
 
                 for i, input_name in enumerate(self.input_names):
@@ -184,6 +201,20 @@ class TRTModule(torch.nn.Module):
                     )
                     outputs.append(output)
                     bindings[idx] = output.data_ptr()
+                for i, idx in enumerate(self.hidden_output_binding_indices_in_order):
+                    if self.engine.has_implicit_batch_dimension:
+                        shape = (batch_size,) + tuple(
+                            self.engine.get_binding_shape(idx)
+                        )
+                    else:
+                        shape = tuple(self.context.get_binding_shape(idx))
+
+                    output = torch.empty(  # type: ignore[call-overload]
+                        size=shape,
+                        dtype=self.hidden_output_dtypes[i],
+                        device=torch.cuda.current_device(),
+                    )
+                    bindings[idx] = output.data_ptr()
 
             with torch.autograd.profiler.record_function("TRTModule:TensorRTRuntime"):
                 if self.engine.has_implicit_batch_dimension:
@@ -222,11 +253,17 @@ class TRTModule(torch.nn.Module):
 
 
 CONVERTERS = {}
+NO_IMPLICIT_BATCH_DIM_SUPPORT = {}
+NO_EXPLICIT_BATCH_DIM_SUPPORT = {}
 
 
-def tensorrt_converter(key):
+def tensorrt_converter(key, no_implicit_batch_dim=False, no_explicit_batch_dim=False):
     def register_converter(converter):
         CONVERTERS[key] = converter
+        if no_implicit_batch_dim:
+            NO_IMPLICIT_BATCH_DIM_SUPPORT[key] = converter
+        if no_explicit_batch_dim:
+            NO_EXPLICIT_BATCH_DIM_SUPPORT[key] = converter
         return converter
 
     return register_converter
@@ -420,6 +457,7 @@ class TRTInterpreter(torch.fx.Interpreter):
         force_fp32_output=False,
         strict_type_constraints=False,
         algorithm_selector=None,
+        timing_cache=None,
     ) -> TRTInterpreterResult:
         # For float outputs, we set their dtype to fp16 only if fp16_mode=True and
         # force_fp32_output=False.
@@ -437,6 +475,15 @@ class TRTInterpreter(torch.fx.Interpreter):
         self.builder.max_batch_size = max_batch_size
         builder_config = self.builder.create_builder_config()
         builder_config.max_workspace_size = max_workspace_size
+
+        cache = None
+        if timing_cache:
+            cache_file = numpy.array(timing_cache)
+            cache = builder_config.create_timing_cache(cache_file.tobytes())
+        else:
+            cache = builder_config.create_timing_cache(b"")
+        builder_config.set_timing_cache(cache, False)
+
         if fp16_mode:
             builder_config.set_flag(trt.BuilderFlag.FP16)
 
@@ -456,7 +503,11 @@ class TRTInterpreter(torch.fx.Interpreter):
 
         engine = self.builder.build_engine(self.network, builder_config)
         assert engine
-        return TRTInterpreterResult(engine, self._input_names, self._output_names)
+
+        serialized_cache = bytearray(cache.serialize()) \
+            if builder_config.get_timing_cache() else bytearray()
+
+        return TRTInterpreterResult(engine, self._input_names, self._output_names, serialized_cache)
 
     def run_node(self, n):
         self._cur_node_name = str(n)
