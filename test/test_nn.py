@@ -17957,7 +17957,7 @@ class TestNNDeviceType(NNTestCase):
             F.elu_(x)
 
     # Merge into OpInfo?
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_elu_inplace_with_neg_alpha(self, device):
         a = torch.tensor([-1., 1.], device=device, requires_grad=True)
         b = torch.nn.functional.elu_(a.clone(), alpha=-2)
