@@ -426,21 +426,22 @@ void UseVariadicTupleUnpack(const std::shared_ptr<Graph>& graph) {
   }
 }
 
+// This macro makes maps from c10::Symbol -> c10::Symbol a lot easier to read.
+#define OP_PAIR(first, second) \
+  { fromQualString(first), fromQualString(second) }
+
 void ReplaceWithCopy(
     std::shared_ptr<torch::jit::Graph>& graph,
     bool outputs_are_immutable) {
   AliasDb db(graph);
 
-  const std::map<c10::Symbol, c10::Symbol> supported = {
+  const FastMap<c10::Symbol, c10::Symbol> supported = {
 #ifdef FBCODE_CAFFE2
-      {fromQualString("aten::permute"),
-       fromQualString("static_runtime::permute_copy")},
+      OP_PAIR("aten::permute", "static_runtime::permute_copy"),
 #endif
-      {fromQualString("aten::narrow"), fromQualString("aten::narrow_copy")},
-      {fromQualString("aten::reshape"),
-       fromQualString("static_runtime::reshape_copy")},
-      {fromQualString("aten::flatten"),
-       fromQualString("static_runtime::flatten_copy")}};
+      OP_PAIR("aten::narrow", "aten::narrow_copy"),
+      OP_PAIR("aten::reshape", "static_runtime::reshape_copy"),
+      OP_PAIR("aten::flatten", "static_runtime::flatten_copy")};
 
   // for ops that have overloads, match the schema
   const std::vector<std::pair<c10::FunctionSchema, c10::Symbol>> supported_schema = {
@@ -561,23 +562,27 @@ void EliminateTrivialEquallySplit(std::shared_ptr<torch::jit::Graph>& graph) {
 // c10::AliasAnalysisKind::PURE_FUNCTION to make alias analysis work.
 void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
   const FastMap<c10::Symbol, c10::Symbol> unfused_to_fused = {
-      {fromQualString("fb::equally_split"),
-       fromQualString("static_runtime::fused_equally_split")},
-      {fromQualString("fb::sigrid_transforms"),
-       fromQualString("static_runtime::fused_sigrid_transforms")},
-      {fromQualString("static_runtime::variadic_grouped_accessor_op"),
-       fromQualString("static_runtime::fused_variadic_grouped_accessor_op")},
-      {fromQualString("static_runtime::variadic_grouped_accessor_op_v2"),
-       fromQualString("static_runtime::fused_variadic_grouped_accessor_op_v2")},
-      {fromQualString("fb::sigrid_transforms_torch_bind"),
-       fromQualString("static_runtime::fused_sigrid_transforms_torch_bind")},
-      {fromQualString("fb::variadic_sigrid_transforms_torch_bind"),
-       fromQualString(
-           "static_runtime::fused_variadic_sigrid_transforms_torch_bind")},
-      {fromQualString("fb::gather_ranges_to_dense"),
-       fromQualString("static_runtime::fused_gather_ranges_to_dense")},
-      {fromQualString("fb::gather_ranges_to_dense_v2"),
-       fromQualString("static_runtime::fused_gather_ranges_to_dense_v2")}};
+      OP_PAIR("fb::equally_split", "static_runtime::fused_equally_split"),
+      OP_PAIR(
+          "fb::sigrid_transforms", "static_runtime::fused_sigrid_transforms"),
+      OP_PAIR(
+          "static_runtime::variadic_grouped_accessor_op",
+          "static_runtime::fused_variadic_grouped_accessor_op"),
+      OP_PAIR(
+          "static_runtime::variadic_grouped_accessor_op_v2",
+          "static_runtime::fused_variadic_grouped_accessor_op_v2"),
+      OP_PAIR(
+          "fb::sigrid_transforms_torch_bind",
+          "static_runtime::fused_sigrid_transforms_torch_bind"),
+      OP_PAIR(
+          "fb::variadic_sigrid_transforms_torch_bind",
+          "static_runtime::fused_variadic_sigrid_transforms_torch_bind"),
+      OP_PAIR(
+          "fb::gather_ranges_to_dense",
+          "static_runtime::fused_gather_ranges_to_dense"),
+      OP_PAIR(
+          "fb::gather_ranges_to_dense_v2",
+          "static_runtime::fused_gather_ranges_to_dense_v2")};
 
   AliasDb alias_db(
       graph,
