@@ -914,7 +914,7 @@ def _test_undefined_forward_mode(func, outputs, inputs):
 
                 # reset
                 dual_inputs[dual_inputs_idx] = dual_inp_obj
-                dual_inputs_idx +=1
+                dual_inputs_idx += 1
 
                 for index_o, (d_o1, d_o2) in enumerate(zip(dual_outputs1, dual_outputs2)):
                     val1, res1 = fwAD.unpack_dual(d_o1)

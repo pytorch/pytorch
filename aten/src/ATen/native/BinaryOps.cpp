@@ -628,7 +628,7 @@ void size_and_device_check(const Tensor& self, const Tensor& other) {
 Tensor mul_zerotensor(const Tensor& self, const Tensor& other) {
   auto commonDtype = at::result_type(self, other);
   auto result_options = self.options().dtype(commonDtype);
-  return at::efficientzerotensor(self.sizes(), result_options);
+  return at::_efficientzerotensor(self.sizes(), result_options);
 }
 
 Tensor add_zerotensor(const Tensor& self, const Tensor& other, const Scalar& alpha) {

@@ -1058,7 +1058,7 @@ Tensor zeros(IntArrayRef size,
   return result.zero_();
 }
 
-Tensor efficientzerotensor(IntArrayRef size,
+Tensor _efficientzerotensor(IntArrayRef size,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
