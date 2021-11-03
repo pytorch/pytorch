@@ -454,27 +454,66 @@ class ComputeStaticUnboxingWrapper:
             else:
                 sig = sig_group.signature
             argument_str = "(std::move(peek(stack, {pos}, {args_num})))"
-            arguments: List[str] = []
-            args_num = len(f.func.arguments.flat_positional)
+            # argument to variable name mapping
+            arguments: Dict[str, str] = {}
+            code: List[str] = []
+            args_num = len(f.func.arguments.flat_non_out) + (0 if f.func.arguments.out is None else len(f.func.arguments.out))
+            tensor_option_args: Dict[str, str] = {}
+            tensor_option_arg = f.func.arguments.tensor_options
 
             # parse arguments into C++ code
-            for i, arg in enumerate(f.func.arguments.flat_positional):
+            for i, arg in enumerate(f.func.arguments.flat_non_out + (list(f.func.arguments.out) if f.func.arguments.out else [] )):
                 ivalue_str = argument_str.format(pos=i, args_num=args_num)
-                code, val_name = cpp.argumenttype_ivalue_convert_wrapper(arg, ivalue_str)
-                print(code, val_name)
+                res = cpp.argumenttype_ivalue_convert(arg.type, ivalue_str, arg.name)
+                # handle tensor options and other keyword arguments
+                if tensor_option_arg and arg.name in tensor_option_arg.__dict__:
+                    tensor_option_args[arg.name] = res['val_name']
+                arguments[arg.name] = res['val_name']
 
-            # handle tensor method
-            if sig.method:
-                print(sig.func)
+                code.extend(res['code'])
+
+            if tensor_option_arg:
+                code.append(f"""
+        const auto options = TensorOptions()
+            .dtype({tensor_option_args['dtype']})
+            .layout({tensor_option_args['layout']})
+            .device({tensor_option_args['device']});
+                """)
+                arguments['options'] = 'options'
+
+            connector = "\n\t\t"
+            # find dispatch native function name
+            if tensor_option_arg is not None or f.func.name.name.base.endswith('_like'):
+                namespace = 'torch'
+            else:
+                namespace = 'at'
+            # handle method
+            if Variant.method in f.variants:
+                print("Method: " + sig.decl())
                 self_arg = f.func.arguments.self_arg
-                assert self_arg is not None, "self argument is None for a method."
-                # self_str = gen_arg_str(self_arg.argument.type, )
+                assert self_arg is not None, "No self argument"
+                arg_list = ",\n\t\t\t".join([arguments[a.name] for a in sig.arguments() if a.name != self_arg.argument.name])
+                function_call = f"""
+        auto result_ = {arguments[self_arg.argument.name]}.{sig.name()}(
+            {arg_list}
+        );
+    """
+            else:
+                print("Function: " + sig.decl())
+                arg_list = ",\n\t\t\t".join([arguments[a.name] for a in sig.arguments()])
+                function_call = f"""
+        auto result_ = {namespace}::{sig.name()}(
+            {arg_list}
+        );
+"""
             return f"""
 Operator(
     "aten::{sig.func}",
     [](Stack & stack) {{
-                autograd::profiler::RecordFunction record("{sig.decl()}");
-        drop(stack, {len(sig.arguments())});
+        autograd::profiler::RecordFunction record("{sig.name()}");
+        {connector.join(code)}
+        {function_call}
+        drop(stack, {args_num});
         pack(stack, std::move(result_));
         return 0;
     }}
