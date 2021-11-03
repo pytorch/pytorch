@@ -77,9 +77,6 @@ jobs:
         run: |
           echo "CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname "$(which conda)")/../"}" >> "${GITHUB_ENV}"
           .jenkins/pytorch/macos-build.sh
-      - name: Build / Test lite interpreter
-        run: |
-          BUILD_LITE_INTERPRETER=1 .jenkins/pytorch/macos-lite-interpreter-build-test.sh
       - name: Test
         run: |
           .jenkins/pytorch/macos-test.sh

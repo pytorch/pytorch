@@ -177,7 +177,6 @@ class CIWorkflow:
     enable_xla_test: YamlShellBool = "''"
     enable_noarch_test: YamlShellBool = "''"
     enable_force_on_cpu_test: YamlShellBool = "''"
-    enable_lite_interpreter: bool = False
 
     def __post_init__(self) -> None:
         if not self.build_generates_artifacts:
@@ -638,7 +637,15 @@ MACOS_WORKFLOWS = [
         arch="macos",
         build_environment="macos-10-15-py3-x86-64",
         test_runner_type=MACOS_TEST_RUNNER_10_15,
-        enable_lite_interpreter=True,
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_MACOS},
+        ),
+    ),
+    CIWorkflow(
+        arch="macos",
+        build_environment="macos-10-15-py3-lite-interpreter-x86-64",
+        test_runner_type=MACOS_TEST_RUNNER_10_15,
+        exclude_test=True,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_MACOS},
         ),

@@ -28,6 +28,7 @@
       "linux-xenial-py3.6-gcc7",
       "linux-xenial-py3.6-gcc7-bazel-test",
       "macos-10-15-py3-arm64",
+      "macos-10-15-py3-lite-interpreter-x86-64",
       "macos-10-15-py3-x86-64",
       "parallelnative-linux-xenial-py3.6-gcc5.4",
       "periodic-libtorch-linux-xenial-cuda11.1-py3.6-gcc7",
@@ -132,6 +133,7 @@
       "ios-12-5-1-x86-64-coreml",
       "ios-12-5-1-x86-64-full-jit",
       "macos-10-15-py3-arm64",
+      "macos-10-15-py3-lite-interpreter-x86-64",
       "macos-10-15-py3-x86-64"
     ],
     "ciflow/mobile": [
