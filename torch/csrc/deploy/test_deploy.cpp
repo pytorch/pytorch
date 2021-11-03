@@ -29,12 +29,12 @@ void compare_torchpy_jit(const char* model_filename, const char* jit_filename) {
     eg = I.self.attr("load_pickle")({"model", "example.pkl"}).toIValue();
   }
 
-  at::Tensor output = model(eg.toTuple()->elements()).toTensor();
+  at::Tensor output = model(eg.toTupleRef().elements()).toTensor();
 
   // Reference
   auto ref_model = torch::jit::load(jit_filename);
   at::Tensor ref_output =
-      ref_model.forward(eg.toTuple()->elements()).toTensor();
+      ref_model.forward(eg.toTupleRef().elements()).toTensor();
 
   ASSERT_TRUE(ref_output.allclose(output, 1e-03, 1e-05));
 }
@@ -321,6 +321,29 @@ TEST(TorchpyTest, FxModule) {
   for (const auto i : c10::irange(nthreads)) {
     ASSERT_TRUE(ref_output.equal(outputs[i]));
   }
+}
+
+// Moving a tensor between interpreters should share the underlying storage.
+TEST(TorchpyTest, TensorSerializationSharing) {
+  torch::deploy::InterpreterManager manager(2);
+  manager.registerModuleSource("test_module", R"PYTHON(
+import torch
+
+def get_tensor():
+    return torch.ones(2, 2)
+)PYTHON");
+
+  auto I = manager.acquireOne();
+  auto I2 = manager.acquireOne();
+
+  auto objOnI =
+      I.global("test_module", "get_tensor")(at::ArrayRef<at::IValue>{});
+  auto replicated = I.createMovable(objOnI);
+  auto objOnI2 = I2.fromMovable(replicated);
+
+  auto tensorOnI = objOnI.toIValue().toTensor();
+  auto tensorOnI2 = objOnI2.toIValue().toTensor();
+  ASSERT_TRUE(tensorOnI.storage().is_alias_of(tensorOnI2.storage()));
 }
 
 #ifdef TEST_CUSTOM_LIBRARY
