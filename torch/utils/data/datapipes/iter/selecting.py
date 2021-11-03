@@ -118,6 +118,9 @@ class FilterIterDataPipe(IterDataPipe[T_co]):
         return r
 
     def __getstate__(self):
+        if IterDataPipe.getstate_hook is not None:
+            return IterDataPipe.getstate_hook(self)
+
         if DILL_AVAILABLE:
             dill_function = dill.dumps(self.filter_fn)
         else:
