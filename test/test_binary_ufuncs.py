@@ -19,7 +19,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta, instantiate_device_type_tests, onlyCUDA, onlyCPU, dtypes, dtypesIfCUDA,
     dtypesIfCPU, deviceCountAtLeast, precisionOverride, onlyNativeDeviceTypes,
-    skipCUDAIfRocm, skipIf, ops)
+    skipCUDAIfRocm, skipIf, skipMeta, ops)
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and, integral_types_and, get_all_dtypes, get_all_int_dtypes, get_all_math_dtypes,
@@ -916,6 +916,7 @@ class TestBinaryUfuncs(TestCase):
             self._test_pow(base, first_exp)
             self._test_pow(base, second_exp)
 
+    @skipMeta
     @onlyNativeDeviceTypes
     def test_pow_scalar_type_promotion(self, device):
         # Test against a scalar and non-scalar input
@@ -2764,6 +2765,7 @@ class TestBinaryUfuncs(TestCase):
                 TypeError, 'received an invalid combination of arguments'):
             actual = torch.cumulative_trapezoid(torch.randn((3, 3)), x=torch.randn((3, 3)), dx=3)
 
+    @skipMeta
     @dtypes(torch.double)
     def test_pow_scalar_overloads_mem_overlap(self, device, dtype):
         sz = 3
