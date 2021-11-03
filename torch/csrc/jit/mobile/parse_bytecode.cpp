@@ -7,7 +7,6 @@
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <torch/custom_class_detail.h>
-#include <iostream>
 
 namespace torch {
 namespace jit {
@@ -121,20 +120,27 @@ void parseInstructions(
           (function->get_code()->op_names_[X].overload_name.empty()
                ? ""
                : "_" + function->get_code()->op_names_[X].overload_name);
-      std::cout << "parsing OP" << operator_name << std::endl;
       auto it = kOperatorVersionMap.find(operator_name);
+      // Find out if there is an upgrader for this operator
       if (it != kOperatorVersionMap.end()) {
         auto upgrader_list = it->second;
+        // Loop all upgraders for this operator, and find out if there exists a
+        // valid upgrader. Use iteration here instead of other faster search
+        // algorithm, because the number of upgrader per operator will be just a
+        // few and tend to keep the code light-weight from binary size concern.
         for (const auto& upgrader : upgrader_list) {
-          std::cout << "upgrader name is " << upgrader.upgrader_name
-                    << " index: " << upgrader.index << std::endl;
           if (operator_version <= upgrader.max_version &&
               operator_version >= upgrader.min_version) {
             auto func_name = function->get_code()
                                  ->functions_[upgrader.index]
                                  ->qualname()
                                  .qualifiedName();
-            std::cout << "func name: " << func_name << std::endl;
+            // If there exists a valid upgrader, change the instruction OP to
+            // CALL, and the index will point to the according upgrader
+            // function. All upgrader function are available in
+            // function->get_code()->functions_. It's a vector of function
+            // pointer and they are initialized in the same order as the global
+            // vector kUpgraderBytecode.
             op_code = OpCode::CALL;
             X = upgrader.index;
             break;
