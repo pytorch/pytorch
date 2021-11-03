@@ -93,7 +93,11 @@ def convert_to_onnx(model, input=None, opset_version=9, do_constant_folding=True
                        onnx_shape_inference=onnx_shape_inference)
 
     # compute onnxruntime output prediction
-    ort_sess = onnxruntime.InferenceSession(f.getvalue())
+    so = onnxruntime.SessionOptions()
+    # suppress ort warnings.
+    # 0:Verbose, 1:Info, 2:Warning. 3:Error, 4:Fatal. Default is 2.
+    so.log_severity_level = 3
+    ort_sess = onnxruntime.InferenceSession(f.getvalue(), so)
     return ort_sess
 
 
@@ -359,6 +363,9 @@ class TestONNXRuntime(unittest.TestCase):
                 ort_sess_opt.graph_optimization_level = \
                     onnxruntime.GraphOptimizationLevel.ORT_ENABLE_EXTENDED if ort_optim_on else \
                     onnxruntime.GraphOptimizationLevel.ORT_DISABLE_ALL
+                # suppress ort warnings.
+                # 0:Verbose, 1:Info, 2:Warning. 3:Error, 4:Fatal. Default is 2.
+                ort_sess_opt.log_severity_level = 3
                 ort_sess = onnxruntime.InferenceSession(model_file_name, sess_options=ort_sess_opt)
                 input_copy = copy.deepcopy(input)
                 ort_outs = run_ort(ort_sess, input_copy)
