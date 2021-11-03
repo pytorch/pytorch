@@ -16,7 +16,7 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
   out << "(";
 
   bool seen_kwarg_only = false;
-  for(size_t i = 0; i < schema.arguments().size(); ++i) {
+  for (const auto i : c10::irange(schema.arguments().size())) {
     if (i > 0) out << ", ";
     if (schema.arguments()[i].kwarg_only() && !seen_kwarg_only) {
       out << "*, ";
@@ -35,7 +35,7 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
 
   const auto& returns = schema.returns();
   out << "(";
-  for(size_t i = 0; i < returns.size(); ++i) {
+  for (const auto i : c10::irange(returns.size())) {
     if (i > 0) {
       out << ", ";
     }
@@ -53,7 +53,7 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
 
 inline size_t findFirstOutArg(const std::vector<Argument>& args) {
   // find the start of out args in the schema
-  for (size_t out_start_idx = 0; out_start_idx < args.size(); out_start_idx++) {
+  for (const auto out_start_idx : c10::irange(args.size())) {
     if (args.at(out_start_idx).is_out()) {
       return out_start_idx;
     }
@@ -122,7 +122,7 @@ inline bool FunctionSchema::isBackwardCompatibleWith(
         && arguments().size() >= old.arguments().size())) {
     return false;
   }
-  for (size_t i = 0; i < returns().size(); ++i) {
+  for (const auto i : c10::irange(returns().size())) {
     // Backwards compatibility requires covariance on argument types
     // (i.e. more generic), and contravariance on return types (i.e.
     //  more specific).
@@ -138,7 +138,7 @@ inline bool FunctionSchema::isBackwardCompatibleWith(
   size_t new_out_start_idx = findFirstOutArg(arguments());
 
   // make sure among the default args, they are backward compatible
-  for (size_t i = 0; i < old_out_start_idx; i++) {
+  for (const auto i : c10::irange(old_out_start_idx)) {
     if (!arguments().at(i).isBackwardCompatibleWith(
           old.arguments().at(i), why_not)) {
       return false;
@@ -146,7 +146,7 @@ inline bool FunctionSchema::isBackwardCompatibleWith(
   }
 
   // // Validate that all new arguments provided has a default value
-  for (size_t i = old_out_start_idx; i < new_out_start_idx; ++i) {
+  for (const auto i : c10::irange(old_out_start_idx, new_out_start_idx)) {
     if (!arguments().at(i).default_value()) {
       if (why_not) {
         *why_not
@@ -160,7 +160,7 @@ inline bool FunctionSchema::isBackwardCompatibleWith(
   }
 
   // now compare the out args
-  for (size_t i = old_out_start_idx; i < old.arguments().size(); i++) {
+  for (const auto i : c10::irange(old_out_start_idx, old.arguments().size())) {
     if (!arguments()
              .at(i - old_out_start_idx + new_out_start_idx)
              .isBackwardCompatibleWith(old.arguments().at(i), why_not)) {
@@ -238,7 +238,7 @@ inline void FunctionSchema::checkAndNormalizeInputs(
       *this);
 
   size_t consumed_kwargs = 0;
-  for (size_t pos = 0; pos < arguments().size(); ++pos) {
+  for (const auto pos : c10::irange(arguments().size())) {
     const auto& argument = arguments()[pos];
     if (pos < inputs.size()) {
       checkArg(inputs[pos], argument, pos);
@@ -298,7 +298,7 @@ inline bool isSubtypeOfList(
   if (child.size() != parent.size()) {
     return false;
   }
-  for (size_t i = 0; i < child.size(); ++i) {
+  for (const auto i : c10::irange(child.size())) {
     const Argument& c = child[i];
     const Argument& p = parent[i];
     if (c.name() != p.name()) {

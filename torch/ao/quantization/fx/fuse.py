@@ -5,33 +5,30 @@ from torch.fx import (
     Node,
     map_arg
 )
-
 from torch.fx.graph import Graph
-
 from ..utils import (
     get_combined_dict
 )
-
+from .graph_module import (
+    FusedGraphModule
+)
+from .match_utils import is_match
 from .pattern_utils import (
     get_default_fusion_patterns,
 )
 
-from .match_utils import is_match
-
-from .graph_module import (
-    FusedGraphModule
-)
-
 from .fusion_patterns import *  # noqa: F401,F403
+
+from typing import Callable, Tuple
+from typing import Optional
 
 from .quantization_types import Pattern
 
-from typing import Callable, Tuple
-
 
 class Fuser:
-    def fuse(self, model: GraphModule,
-             fuse_custom_config_dict: Dict[str, Any] = None) -> GraphModule:
+    def fuse(
+        self, model: GraphModule, fuse_custom_config_dict: Optional[Dict[str, Any]] = None
+    ) -> GraphModule:
         if fuse_custom_config_dict is None:
             fuse_custom_config_dict = {}
 
