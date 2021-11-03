@@ -882,14 +882,15 @@ def _set_training_mode(training_mode):
     _training_mode = training_mode
 
 # Symbolic function state.
-class SymbolicFunctionState(object):
-    # Skip check due to cannot import IValue from torch._C
-    params_dict = None  # type: ignore[var-annotated]
-    env = None  # type: Optional[Dict[torch._C.Value, torch._C.Value]]
-    # Current node that is being converted.
-    cur_node = None  # type: Optional[torch._C.Node]
-    # Current onnx block that converted nodes are being appended to.
-    onnx_block = None  # type: Optional[torch._C.Block]
+class SymbolicFunctionState:
+    def __init__(self):
+        # Skip check due to cannot import IValue from torch._C
+        self.params_dict = None  # type: ignore[var-annotated]
+        self.env = None  # type: Optional[Dict[torch._C.Value, torch._C.Value]]
+        # Current node that is being converted.
+        self.cur_node = None  # type: Optional[torch._C.Node]
+        # Current onnx block that converted nodes are being appended to.
+        self.onnx_block = None  # type: Optional[torch._C.Block]
 
 _symbolic_function_state = SymbolicFunctionState()
 def _set_symbolic_function_state(params_dict, env, cur_node, onnx_block):
