@@ -69,13 +69,21 @@ namespace at { namespace cuda { namespace solver {
 const char* cusolverGetErrorMessage(cusolverStatus_t status);
 }}} // namespace at::cuda::solver
 
-#define TORCH_CUSOLVER_CHECK(EXPR)                                \
-  do {                                                            \
-    cusolverStatus_t __err = EXPR;                                \
-    TORCH_CHECK(__err == CUSOLVER_STATUS_SUCCESS,                 \
-                "cusolver error: ",                               \
-                at::cuda::solver::cusolverGetErrorMessage(__err), \
-                ", when calling `" #EXPR "`");                    \
+#define TORCH_CUSOLVER_CHECK(EXPR)                                              \
+  do {                                                                          \
+    cusolverStatus_t __err = EXPR;                                              \
+    if (__err == CUSOLVER_STATUS_EXECUTION_FAILED) {                            \
+      TORCH_CHECK(__err == CUSOLVER_STATUS_SUCCESS,                             \
+                  "cusolver error: ",                                           \
+                  at::cuda::solver::cusolverGetErrorMessage(__err),             \
+                  ", when calling `" #EXPR "`",                                 \
+                  ". This error may appear if the input matrix contains NaN."); \
+    } else {                                                                    \
+      TORCH_CHECK(__err == CUSOLVER_STATUS_SUCCESS,                             \
+                  "cusolver error: ",                                           \
+                  at::cuda::solver::cusolverGetErrorMessage(__err),             \
+                  ", when calling `" #EXPR "`");                                \
+    }                                                                           \
   } while (0)
 
 #else
@@ -89,7 +97,7 @@ const char* cusolverGetErrorMessage(cusolverStatus_t status);
 // This is here instead of in c10 because NVRTC is loaded dynamically via a stub
 // in ATen, and we need to use its nvrtcGetErrorString.
 // See NOTE [ USE OF NVRTC AND DRIVER API ].
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 
 #define AT_CUDA_DRIVER_CHECK(EXPR)                                                                               \
   do {                                                                                                           \

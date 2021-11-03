@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NamedTensorUtils.h>
+#include <c10/util/irange.h>
 
 namespace at { namespace native {
 
@@ -16,8 +17,10 @@ Tensor make_feature_noise(const Tensor& input) {
   sizes.reserve(input.dim());
   sizes.push_back(input_sizes[0]);
   sizes.push_back(input_sizes[1]);
-  for (int64_t i = 2; i < input.dim(); ++i)
+  for (const auto i : c10::irange(2, input.dim())) {
+    (void)i; //Suppress unused variable warning
     sizes.push_back(1);
+  }
   return at::empty(sizes, input.options());
 }
 

@@ -26,11 +26,14 @@ login() {
     docker login -u AWS --password-stdin "$1"
 }
 
-# Retry on timeouts (can happen on job stampede).
-retry login "${registry}"
 
-# Logout on exit
-trap "docker logout ${registry}" EXIT
+# Only run these steps if not on github actions
+if [[ -z "${GITHUB_ACTIONS}" ]]; then
+  # Retry on timeouts (can happen on job stampede).
+  retry login "${registry}"
+  # Logout on exit
+  trap "docker logout ${registry}" EXIT
+fi
 
 # export EC2=1
 # export JENKINS=1
@@ -45,8 +48,8 @@ trap "docker logout ${registry}" EXIT
 
 docker push "${image}:${tag}"
 
-docker save -o "${IMAGE_NAME}:${tag}.tar" "${image}:${tag}"
-
 if [ -z "${DOCKER_SKIP_S3_UPLOAD:-}" ]; then
+  trap "rm -rf ${IMAGE_NAME}:${tag}.tar" EXIT
+  docker save -o "${IMAGE_NAME}:${tag}.tar" "${image}:${tag}"
   aws s3 cp "${IMAGE_NAME}:${tag}.tar" "s3://ossci-linux-build/pytorch/base/${IMAGE_NAME}:${tag}.tar" --acl public-read
 fi

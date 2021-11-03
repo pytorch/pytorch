@@ -24,6 +24,9 @@
 #include <torch/custom_class.h>
 
 namespace c10d {
+// Environment variable which controls whether we perform a NCCL healt check
+// which ensures communicators are healthy at the beginning of init.
+constexpr const char* ENABLE_NCCL_HEALTH_CHECK = "ENABLE_NCCL_HEALTH_CHECK";
 
 // Environment variable which controls whether or not wait() is blocking or
 // non-blocking.
@@ -429,6 +432,18 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
   // communicators associated with timed out collectives.
   void abortTimedOutCollectives(
       std::unordered_set<std::string>& abortedCommIds);
+
+  // Performs a health check by initializing dummy NCCL communicators and then
+  // destroying them. This will help indicate and signal any NCCL-related issues
+  // prior to the first collective. The actual initialization and subsequent
+  // destruction is ran on a separate thread and the main thread is signalled
+  // about timeouts/errors to report to the application.
+  void runHealthCheck();
+
+  // Destroys initialized NCCL communicators in devNCCLComMap_ given by input
+  // key. Throws if there are no communicators to destroy. Also removes
+  // communicators from the cache and clears used device indices.
+  void destroyNCCLComms(const std::string& devNCCLCommMapKey);
 
   void workCleanupLoop();
 

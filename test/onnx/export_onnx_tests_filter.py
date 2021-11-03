@@ -8,6 +8,8 @@ import google.protobuf.text_format
 import test_onnx_common
 import traceback
 
+from torch.testing._internal.common_device_type import get_all_device_types
+
 _fail_test_dir = os.path.join(os.path.dirname(
     os.path.realpath(__file__)), "fail", "generated")
 
@@ -28,7 +30,7 @@ def collect_generated_testcases(root_dir=test_onnx_common.pytorch_converted_dir,
                 model_file = os.path.join(dir_name, "model.onnx")
                 data_dir_pattern = os.path.join(dir_name, "test_data_set_*")
                 for data_dir in glob.glob(data_dir_pattern):
-                    for device in torch.testing.get_all_device_types():
+                    for device in get_all_device_types():
                         run_generated_test(model_file, data_dir, device)
                 if expect:
                     expect_file = os.path.join(_expect_dir,
