@@ -2,14 +2,14 @@
 
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/core/context_gpu.h"
-#include "caffe2/operators/pool_op.h"
 #include "caffe2/cuda_rtc/common_rtc.h"
+#include "caffe2/operators/pool_op.h"
 
 namespace caffe2 {
 namespace {
 class AveragePool {};
 class MaxPool {};
-}  // namespace
+} // namespace
 
 namespace {
 
@@ -98,7 +98,6 @@ __global__ void %s(
 }
 )";
 
-
 class MaxPoolRTCFunction : public CudaRTCFunction<MaxPoolRTCFunction> {
  public:
   MaxPoolRTCFunction() : CudaRTCFunction(), name_(GetUniqueName()) {}
@@ -132,7 +131,6 @@ class MaxPoolGradientRTCFunction
   string name_;
 };
 
-
 template <>
 string MaxPoolRTCFunction::GetSource(
     const int output_size,
@@ -149,9 +147,22 @@ string MaxPoolRTCFunction::GetSource(
     const int pad_l) {
   char buffer[65536];
   int nbytes = snprintf(
-      buffer, 65536, kMaxPoolForwardNCHWSource, name_.c_str(), output_size,
-      channels, height, width, pooled_height, pooled_width, kernel_h, kernel_w,
-      stride_h, stride_w, pad_t, pad_l);
+      buffer,
+      65536,
+      kMaxPoolForwardNCHWSource,
+      name_.c_str(),
+      output_size,
+      channels,
+      height,
+      width,
+      pooled_height,
+      pooled_width,
+      kernel_h,
+      kernel_w,
+      stride_h,
+      stride_w,
+      pad_t,
+      pad_l);
   DCHECK_GE(nbytes, 0);
   DCHECK_LT(nbytes, 65536);
   return string(buffer);
@@ -174,16 +185,29 @@ string MaxPoolGradientRTCFunction::GetSource(
     const int pad_l) {
   char buffer[65536];
   int nbytes = snprintf(
-      buffer, 65536, kMaxPoolBackwardNCHWSource, name_.c_str(), output_size,
-      num, channels, height, width, pooled_height, pooled_width, kernel_h,
-      kernel_w, stride_h, stride_w, pad_t, pad_l);
+      buffer,
+      65536,
+      kMaxPoolBackwardNCHWSource,
+      name_.c_str(),
+      output_size,
+      num,
+      channels,
+      height,
+      width,
+      pooled_height,
+      pooled_width,
+      kernel_h,
+      kernel_w,
+      stride_h,
+      stride_w,
+      pad_t,
+      pad_l);
   DCHECK_GE(nbytes, 0);
   DCHECK_LT(nbytes, 65536);
   return string(buffer);
 }
 
-}  // namespace
-
+} // namespace
 
 class MaxPoolRTCOp final : public ConvPoolOpBase<CUDAContext> {
  public:
@@ -196,7 +220,8 @@ class MaxPoolRTCOp final : public ConvPoolOpBase<CUDAContext> {
 
   bool RunOnDeviceWithOrderNCHW() override {
     auto& X = Input(0);
-    auto output_sizes = ConvPoolOpBase<CUDAContext>::GetOutputSize(X, X.dim32(1));
+    auto output_sizes =
+        ConvPoolOpBase<CUDAContext>::GetOutputSize(X, X.dim32(1));
     auto* Y = Output(0, output_sizes, at::dtype<float>());
 
     if (input_dims_ != X.sizes()) {
@@ -307,7 +332,9 @@ class MaxPoolGradientRTCOp final : public ConvPoolOpBase<CUDAContext> {
 
 namespace {
 REGISTER_CUDA_OPERATOR_WITH_ENGINE(MaxPool, NVRTC, MaxPoolRTCOp);
-REGISTER_CUDA_OPERATOR_WITH_ENGINE(MaxPoolGradient, NVRTC,
-                                   MaxPoolGradientRTCOp);
-}  // namespace
-}  // namespace caffe2
+REGISTER_CUDA_OPERATOR_WITH_ENGINE(
+    MaxPoolGradient,
+    NVRTC,
+    MaxPoolGradientRTCOp);
+} // namespace
+} // namespace caffe2
