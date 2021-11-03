@@ -984,6 +984,11 @@ void initPythonIRBindings(PyObject* module_) {
             return g.partial_eval_shape_graph;
           })
       .def(
+          "partial_evaluated_graphs",
+          [](ShapeComputeGraphMapping& g) {
+            return g.partial_evaluated_graphs;
+          })
+      .def(
           "graph_output_to_symbolic_shape_dim",
           [](ShapeComputeGraphMapping& g) {
             return g.graph_output_to_symbolic_shape_dim_;

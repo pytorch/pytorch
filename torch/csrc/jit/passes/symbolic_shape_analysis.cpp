@@ -724,6 +724,7 @@ struct SymbolicShapeGraphAnalyzer {
     updateGraphWithSymbolicShapeEqualities(discovered_sym_shape_equalities);
     return ShapeComputeGraphMapping(
         stitched_shape_compute_graph,
+        partial_evaluated_graphs,
         enclosing_graph_value_to_shape_graph_input_,
         graph_output_to_symbolic_shape_dim);
   }
