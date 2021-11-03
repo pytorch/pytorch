@@ -80,4 +80,4 @@ class CloseRebatchingQueueOp : public Operator<CPUContext> {
     return true;
   }
 };
-} // caffe2
+} // namespace caffe2
