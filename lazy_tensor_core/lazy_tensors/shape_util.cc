@@ -36,20 +36,13 @@ namespace lazy_tensors {
   using lazy_tensors::hash;
   using lazy_tensors::Hash64Combine;
 
+  CHECK(!shape.IsTuple());
   size_t hash_value = hash<c10::ScalarType>()(shape.scalar_type());
 
-  if (shape.tuple_shapes().empty()) {
-    for (int i = 0; i < shape.dim(); ++i) {
-      hash_value =
-          Hash64Combine(hash_value, hash<int64_t>()(shape.size(i)));
-    }
-  } else {
-    hash_value = 0;
-    for (const Shape& subshape : shape.tuple_shapes()) {
-      hash_value = Hash64Combine(hash_value, ShapeUtil::Hash(subshape));
-    }
+  for (int i = 0; i < shape.dim(); ++i) {
+    hash_value =
+        Hash64Combine(hash_value, hash<int64_t>()(shape.size(i)));
   }
-
   return hash_value;
 }
 
