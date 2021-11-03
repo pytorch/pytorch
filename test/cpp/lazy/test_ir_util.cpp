@@ -12,7 +12,7 @@ namespace lazy {
 class TestNode : public Node {
  public:
   explicit TestNode()
-      : Node(OpKind(), /* num_outputs */ 1, /* hash_seed */ Hash("")) {}
+      : Node(OpKind(), /* num_outputs */ 1, /* hash_seed */ Hash(0)) {}
   ~TestNode() override {}
 
   void AddOperand(Value v) {
