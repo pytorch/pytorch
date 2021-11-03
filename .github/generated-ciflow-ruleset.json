@@ -4,6 +4,14 @@
     "ciflow/all": [
       "caffe2-linux-xenial-py3.6-gcc5.4",
       "docker-builds",
+      "ios-12-5-1-arm64",
+      "ios-12-5-1-arm64-coreml",
+      "ios-12-5-1-arm64-custom-ops",
+      "ios-12-5-1-arm64-full-jit",
+      "ios-12-5-1-arm64-metal",
+      "ios-12-5-1-x86-64",
+      "ios-12-5-1-x86-64-coreml",
+      "ios-12-5-1-x86-64-full-jit",
       "libtorch-linux-xenial-cuda10.2-py3.6-gcc7",
       "libtorch-linux-xenial-cuda11.3-py3.6-gcc7",
       "linux-bionic-cuda10.2-py3.9-gcc7",
@@ -74,6 +82,16 @@
       "win-vs2019-cpu-py3",
       "win-vs2019-cuda11.3-py3"
     ],
+    "ciflow/ios": [
+      "ios-12-5-1-arm64",
+      "ios-12-5-1-arm64-coreml",
+      "ios-12-5-1-arm64-custom-ops",
+      "ios-12-5-1-arm64-full-jit",
+      "ios-12-5-1-arm64-metal",
+      "ios-12-5-1-x86-64",
+      "ios-12-5-1-x86-64-coreml",
+      "ios-12-5-1-x86-64-full-jit"
+    ],
     "ciflow/libtorch": [
       "libtorch-linux-xenial-cuda10.2-py3.6-gcc7",
       "libtorch-linux-xenial-cuda11.3-py3.6-gcc7",
@@ -101,6 +119,16 @@
       "periodic-linux-xenial-cuda10.2-py3-gcc7-slow-gradcheck",
       "periodic-linux-xenial-cuda11.1-py3.6-gcc7",
       "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single"
+    ],
+    "ciflow/macos": [
+      "ios-12-5-1-arm64",
+      "ios-12-5-1-arm64-coreml",
+      "ios-12-5-1-arm64-custom-ops",
+      "ios-12-5-1-arm64-full-jit",
+      "ios-12-5-1-arm64-metal",
+      "ios-12-5-1-x86-64",
+      "ios-12-5-1-x86-64-coreml",
+      "ios-12-5-1-x86-64-full-jit"
     ],
     "ciflow/mobile": [
       "linux-xenial-py3-clang5-mobile-build",
