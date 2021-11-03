@@ -2233,9 +2233,9 @@ def download_file(url, binary=True):
 
 def find_free_port():
     """
-    Binds to an available port then returns that port number.
+    Finds an available port and returns that port number.
 
-    NOTE: If this function is being used to allocate a port to Store (or 
+    NOTE: If this function is being used to allocate a port to Store (or
     indirectly via init_process_group or init_rpc), it should be used
     in conjuction with the `retry_on_connect_failures` decorator as there is a potential
     race condition where the allocated port may become unavailable before it can be used
