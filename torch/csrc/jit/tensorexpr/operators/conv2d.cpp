@@ -381,10 +381,7 @@ Tensor computeConv1d(
       ResultBuf,
       "nnc_aten_conv1d",
       {inp, w, b},
-      {strides[0],
-       padding[0],
-       dilation[0],
-       groups});
+      {strides[0], padding[0], dilation[0], groups});
   return Tensor(ResultBuf.node(), s);
 }
 

@@ -1,9 +1,14 @@
 #include <torch/csrc/jit/tensorexpr/external_functions.h>
 
+#include <ATen/ATen.h>
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/native/quantized/cpu/conv_packed_params.h>
+#include <ATen/native/quantized/cpu/qadd.h>
 #include <ATen/native/xnnpack/OpContext.h>
+#include <ATen/quantized/Quantizer.h>
+#include <c10/core/TensorOptions.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/tensorexpr/exceptions.h>
 #include <torch/csrc/jit/tensorexpr/external_functions_registry.h>
@@ -99,6 +104,200 @@ void nnc_aten_conv2d(
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
 
+void nnc_aten_quantized_conv2d(
+    int64_t bufs_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int8_t* buf_dtypes,
+    int64_t,
+    int64_t* extra_args) {
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+  const double x_qscale = ((double*)extra_args)[0];
+  const int64_t x_qzero = extra_args[1];
+  const c10::ScalarType x_qdtype = static_cast<c10::ScalarType>(extra_args[2]);
+  at::Tensor qx = at::from_blob_quantized_per_tensor_affine(
+      buf_data[1],
+      // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
+      tensors[1].sizes(),
+      [](void*) {},
+      // NOLINTNEXTLINE
+      x_qscale,
+      x_qzero,
+      at::TensorOptions(toQIntType(x_qdtype)));
+  auto convPackedParams =
+      reinterpret_cast<ConvPackedParamsBase<2>*>(buf_data[2]);
+  const double out_qscale = ((double*)extra_args)[3];
+  const int64_t out_qzero = extra_args[4];
+  auto r = convPackedParams->apply(qx, out_qscale, out_qzero);
+  r = r.contiguous();
+  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+}
+
+void nnc_aten_quantized_conv2d_relu(
+    int64_t bufs_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int8_t* buf_dtypes,
+    int64_t,
+    int64_t* extra_args) {
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+  const double x_qscale = ((double*)extra_args)[0];
+  const int64_t x_qzero = extra_args[1];
+  const c10::ScalarType x_qdtype = static_cast<c10::ScalarType>(extra_args[2]);
+  at::Tensor qx = at::from_blob_quantized_per_tensor_affine(
+      buf_data[1],
+      // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
+      tensors[1].sizes(),
+      [](void*) {},
+      // NOLINTNEXTLINE
+      x_qscale,
+      x_qzero,
+      at::TensorOptions(toQIntType(x_qdtype)));
+  auto convPackedParams =
+      reinterpret_cast<ConvPackedParamsBase<2>*>(buf_data[2]);
+  const double out_qscale = ((double*)extra_args)[3];
+  const int64_t out_qzero = extra_args[4];
+  auto r = convPackedParams->apply_relu(qx, out_qscale, out_qzero);
+  r = r.contiguous();
+  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+}
+
+void nnc_aten_quantized_add(
+    int64_t bufs_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int8_t* buf_dtypes,
+    int64_t,
+    int64_t* extra_args) {
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+
+  const double a_qscale = ((double*)extra_args)[0];
+  const int64_t a_qzero = extra_args[1];
+  const c10::ScalarType a_qdtype = static_cast<c10::ScalarType>(extra_args[2]);
+  at::Tensor qa = at::from_blob_quantized_per_tensor_affine(
+      buf_data[1],
+      // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
+      tensors[1].sizes(),
+      [](void*) {},
+      // NOLINTNEXTLINE
+      a_qscale,
+      a_qzero,
+      at::TensorOptions(toQIntType(a_qdtype)));
+  const double b_qscale = ((double*)extra_args)[3];
+  const int64_t b_qzero = extra_args[4];
+  const c10::ScalarType b_qdtype = static_cast<c10::ScalarType>(extra_args[5]);
+  at::Tensor qb = at::from_blob_quantized_per_tensor_affine(
+      buf_data[2],
+      // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
+      tensors[2].sizes(),
+      [](void*) {},
+      // NOLINTNEXTLINE
+      b_qscale,
+      b_qzero,
+      at::TensorOptions(toQIntType(b_qdtype)));
+  const double out_qscale = ((double*)extra_args)[6];
+  const int64_t out_qzero = extra_args[7];
+  auto r = at::native::quantized_add(qa, qb, out_qscale, out_qzero);
+  r = r.contiguous();
+  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+}
+
+void nnc_aten_upsample_nearest2d(
+    int64_t bufs_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int8_t* buf_dtypes,
+    int64_t,
+    int64_t* extra_args) {
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+  // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
+  at::Tensor x = tensors[0];
+  const double x_qscale = ((double*)extra_args)[0];
+  const int64_t x_qzero = extra_args[1];
+  const int64_t x_qdtype = extra_args[2];
+  const auto is_quantized = x_qdtype != -1;
+  if (is_quantized) {
+    x = at::from_blob_quantized_per_tensor_affine(
+        buf_data[1],
+        // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
+        tensors[1].sizes(),
+        [](void*) {},
+        // NOLINTNEXTLINE
+        x_qscale,
+        x_qzero,
+        at::TensorOptions(toQIntType(static_cast<c10::ScalarType>(x_qdtype))));
+  }
+
+  int64_t output_size_h = extra_args[3];
+  int64_t output_size_w = extra_args[4];
+  double scale_factor_h = ((double*)extra_args)[5];
+  double scale_factor_w = ((double*)extra_args)[6];
+
+  auto r = at::upsample_nearest2d(
+      x,
+      (output_size_h != -1)
+          ? c10::optional<at::IntArrayRef>({output_size_h, output_size_w})
+          : c10::nullopt,
+      (scale_factor_h != -1.f) ? c10::optional<at::ArrayRef<double>>(
+                                     {scale_factor_h, scale_factor_w})
+                               : c10::nullopt);
+  r = r.contiguous();
+  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+}
+
+void nnc_aten_quantize_per_tensor(
+    int64_t bufs_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int8_t* buf_dtypes,
+    int64_t,
+    int64_t* extra_args) {
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+  // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
+  at::Tensor x = tensors[1];
+  const double qscale = ((double*)extra_args)[0];
+  const int64_t qzero = extra_args[1];
+  const c10::ScalarType qdtype = static_cast<c10::ScalarType>(extra_args[2]);
+  auto r = at::quantize_per_tensor(x, qscale, qzero, qdtype);
+  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+}
+
+void nnc_aten_dequantize(
+    int64_t bufs_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int8_t* buf_dtypes,
+    int64_t,
+    int64_t* extra_args) {
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+  const double qscale = ((double*)extra_args)[0];
+  const int64_t qzero = extra_args[1];
+  const int64_t qdtype = extra_args[2];
+  at::Tensor qx = at::from_blob_quantized_per_tensor_affine(
+      buf_data[1],
+      // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
+      tensors[1].sizes(),
+      [](void*) {},
+      // NOLINTNEXTLINE
+      qscale,
+      qzero,
+      at::TensorOptions(toQIntType(static_cast<c10::ScalarType>(qdtype))));
+  auto r = at::dequantize(qx);
+  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+}
+
 void nnc_aten_conv1d(
     int64_t bufs_num,
     void** buf_data,
@@ -116,13 +315,13 @@ void nnc_aten_conv1d(
   if (args_num > 0) {
     // Check that if the extra arguments are provided, then the bias tensor is
     // also present
-    TORCH_INTERNAL_ASSERT(args_num == 7 && bufs_num == 4);
+    TORCH_INTERNAL_ASSERT(args_num == 4 && bufs_num == 4);
     const at::Tensor& b = tensors[3];
 
     int64_t stride = extra_args[0];
-    int64_t padding = extra_args[2];
-    int64_t dilation = extra_args[4];
-    int64_t groups = extra_args[6];
+    int64_t padding = extra_args[1];
+    int64_t dilation = extra_args[2];
+    int64_t groups = extra_args[3];
 
     try {
       r = at::conv1d(x, w, b, {stride}, {padding}, {dilation}, groups);
@@ -199,9 +398,9 @@ void nnc_aten_max_red(
   at::Tensor& r = tensors[0];
   const at::Tensor& x = tensors[1];
   int64_t max_dim = extra_args[0];
-  int64_t keep_dim = extra_args[1];
+  bool keep_dim = extra_args[1];
   try {
-    r =  std::get<1>(at::max(x, max_dim, keep_dim));
+    r = std::get<0>(at::max(x, max_dim, keep_dim));
   } catch (...) {
   }
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
@@ -309,18 +508,6 @@ void nnc_aten_embedding(
   std::vector<at::Tensor> tensors =
       constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
 
-  /*
-struct TORCH_API embedding {
-  using schema = at::Tensor (const at::Tensor &, const at::Tensor &, int64_t, bool, bool);
-  using ptr_schema = schema*;
-  // See Note [static constexpr char* members for windows NVCC]
-  STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(name, "aten::embedding")
-  STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(overload_name, "")
-  STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(schema_str, "embedding(Tensor weight, Tensor indices, int padding_idx=-1, bool scale_grad_by_freq=False, bool sparse=False) -> Tensor")
-  static at::Tensor call(const at::Tensor & weight, const at::Tensor & indices, int64_t padding_idx, bool scale_grad_by_freq, bool sparse);
-  static at::Tensor redispatch(c10::DispatchKeySet dispatchKeySet, const at::Tensor & weight, const at::Tensor & indices, int64_t padding_idx, bool scale_grad_by_freq, bool sparse);
-};
-   */
   at::Tensor& r = tensors[0];
   const at::Tensor& weight = tensors[1];
   const at::Tensor& indices = tensors[2];
@@ -338,6 +525,24 @@ struct TORCH_API embedding {
 const static RegisterNNCExternalFunction nnc_conv2d(
     "nnc_aten_conv2d",
     nnc_aten_conv2d);
+const static RegisterNNCExternalFunction nnc_quantized_conv2d(
+    "nnc_aten_quantized_conv2d",
+    nnc_aten_quantized_conv2d);
+const static RegisterNNCExternalFunction nnc_quantized_conv2d_relu(
+    "nnc_aten_quantized_conv2d_relu",
+    nnc_aten_quantized_conv2d_relu);
+const static RegisterNNCExternalFunction nnc_quantized_add(
+    "nnc_aten_quantized_add",
+    nnc_aten_quantized_add);
+const static RegisterNNCExternalFunction nnc_quantize_per_tensor(
+    "nnc_aten_quantize_per_tensor",
+    nnc_aten_quantize_per_tensor);
+const static RegisterNNCExternalFunction nnc_dequantize(
+    "nnc_aten_dequantize",
+    nnc_aten_dequantize);
+const static RegisterNNCExternalFunction nnc_upsample_nearest2d(
+    "nnc_aten_upsample_nearest2d",
+    nnc_aten_upsample_nearest2d);
 const static RegisterNNCExternalFunction nnc_conv1d(
     "nnc_aten_conv1d",
     nnc_aten_conv1d);
@@ -347,7 +552,9 @@ const static RegisterNNCExternalFunction nnc_adaptive_avg_pool2d(
 const static RegisterNNCExternalFunction nnc_mean(
     "nnc_aten_mean",
     nnc_aten_mean);
-const static RegisterNNCExternalFunction nnc_max_red("nnc_aten_max_red", nnc_aten_max_red);
+const static RegisterNNCExternalFunction nnc_max_red(
+    "nnc_aten_max_red",
+    nnc_aten_max_red);
 const static RegisterNNCExternalFunction nnc_addmm(
     "nnc_aten_addmm",
     nnc_aten_addmm);
