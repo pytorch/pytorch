@@ -32,6 +32,14 @@
 namespace torch {
 namespace jit {
 
+// A manually curated set of ops that are disallowed in static runtime.
+// These are rarely-used ops. Disallowing them typically eliminates
+// corner cases in graph optimizations, allowing for more aggressive
+// optimizations and better performance.
+bool isUnsupportedOp(const NodeKind& kind) {
+  return kind == aten::__is__ || kind == aten::__isnot__;
+}
+
 // graph must be frozen or canEnableStaticRuntime would return false if there's
 // any prim::CallMethod op left in the graph
 bool canEnableStaticRuntime(const std::shared_ptr<torch::jit::Graph>& graph) {
@@ -44,14 +52,15 @@ bool canEnableStaticRuntime(const std::shared_ptr<torch::jit::Graph>& graph) {
       VLOG(1) << "Found nested sub-blocks in graph at node: "
               << PrintNode(node);
     }
-    if (node->kind() == prim::Constant) {
+    const auto kind = node->kind();
+    if (kind == prim::Constant) {
       continue;
     }
     // check if can get op from Node
     const Operator* op = node->maybeOperator();
-    if (!op && !nativeOpIsRegistered(node->kind())) {
+    if (isUnsupportedOp(kind) || (!op && !nativeOpIsRegistered(kind))) {
       can_support = false;
-      LOG(WARNING) << "Found unsupported op: " << node->kind().toQualString();
+      LOG(WARNING) << "Found unsupported op: " << kind.toQualString();
     }
   }
   if (has_blocks) {
@@ -103,7 +112,6 @@ void OptimizeGraph(
 #ifdef FBCODE_CAFFE2
     ReplaceWithCopy(graph);
     FuseListUnpack(graph);
-    FuseListUnpackV2(graph);
     EnableStaticRuntimeLayerNorm(graph);
 #endif
   }
@@ -912,6 +920,36 @@ void StaticRuntime::create_memory_planner() {
   }
 }
 
+c10::IValue StaticRuntime::move_outputs_to_tuple(size_t num_outputs) {
+#ifndef NDEBUG
+  for (const auto i : c10::irange(num_outputs)) {
+    // The exact output tensor should never be managed.
+    DCHECK(!isManagedOutputTensor(*outputs_[i]));
+  }
+#endif
+  switch (num_outputs) {
+    case 1:
+      return c10::ivalue::Tuple::create(std::move(*outputs_[0]));
+    case 2:
+      return c10::ivalue::Tuple::create(
+          std::move(*outputs_[0]), std::move(*outputs_[1]));
+    case 3:
+      return c10::ivalue::Tuple::create(
+          std::move(*outputs_[0]),
+          std::move(*outputs_[1]),
+          std::move(*outputs_[2]));
+    default: {
+      std::vector<c10::IValue> outputs;
+      outputs.reserve(num_outputs);
+      for (const auto i : c10::irange(num_outputs)) {
+        // use move here. Otherwise, clean up outputs_[i] explicitly
+        outputs.emplace_back(std::move(*outputs_[i]));
+      }
+      return c10::ivalue::Tuple::create(std::move(outputs));
+    }
+  }
+}
+
 template <typename IValueList>
 c10::IValue StaticRuntime::run_impl(
     IValueList&& args,
@@ -951,15 +989,7 @@ c10::IValue StaticRuntime::run_impl(
 
   // no need to keep references of outputs in static runtime anymore
   if (static_module_.num_outputs() > 1) {
-    std::vector<c10::IValue> outputs;
-    outputs.reserve(static_module_.num_outputs());
-    for (const auto i : c10::irange(static_module_.num_outputs())) {
-      // The exact output tensor should never be managed.
-      DCHECK(!isManagedOutputTensor(*outputs_[i]));
-      // use move here. Otherwise, clean up outputs_[i] explicitly
-      outputs.emplace_back(std::move(*outputs_[i]));
-    }
-    return c10::ivalue::Tuple::create(std::move(outputs));
+    return move_outputs_to_tuple(static_module_.num_outputs());
   }
 #ifndef NDEBUG
   check_for_memory_leak(false);
@@ -1150,7 +1180,7 @@ bool display_ivalue(const IValue& iv) {
     std::cout << "Dict {" << iv.toGenericDict().size() << "}\n";
     return true;
   } else if (iv.isTuple()) {
-    std::cout << "Tuple {" << iv.toTuple()->elements().size() << "}\n";
+    std::cout << "Tuple {" << iv.toTupleRef().elements().size() << "}\n";
     return true;
   } else if (iv.isInt()) {
     std::cout << "int {" << iv.toInt() << "}\n";
@@ -1287,13 +1317,7 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
       // no need to keep references of outputs in static runtime anymore
       c10::IValue output;
       if (static_module_.num_outputs() > 1) {
-        std::vector<c10::IValue> outputs;
-        outputs.reserve(static_module_.num_outputs());
-        for (const auto k : c10::irange(static_module_.num_outputs())) {
-          // use move here. Otherwise, clean up outputs_[i] explicitly
-          outputs.emplace_back(std::move(*outputs_[k]));
-        }
-        output = c10::ivalue::Tuple::create(std::move(outputs));
+        output = move_outputs_to_tuple(static_module_.num_outputs());
       }
 
 #ifndef NDEBUG
