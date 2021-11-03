@@ -612,6 +612,39 @@ TEST_F(Kernel, CatAndInlineWithAConstantDim) {
   ASSERT_TRUE(at::allclose(o, ref));
 }
 
+TEST_F(Kernel, CatWithEmptyInputs) {
+  bool curr_cat_wo_conditionals = getCatWoConditionals();
+  for (auto cat_wo_conditionals : {true, false}) {
+    getCatWoConditionals() = cat_wo_conditionals;
+    const auto graph_string = R"IR(
+        graph(%0 : Float(0, 64, strides=[64, 1], requires_grad=0, device=cpu),
+              %1 : Float(10, 64, strides=[64, 1], requires_grad=0, device=cpu)):
+          %3 : int = prim::Constant[value=0]()
+          %6 : Float(0, 64, strides=[64, 1], requires_grad=0, device=cpu) = aten::tanh(%0)
+          %7 : Float(10, 64, strides=[64, 1], requires_grad=0, device=cpu) = aten::tanh(%1)
+          %10 : Tensor[] = prim::ListConstruct(%6, %7)
+          %11 : Float(10, 64, strides=[64, 1], requires_grad=0, device=cpu) = aten::cat(%10, %3)
+          return (%11))IR";
+
+    auto graph = std::make_shared<Graph>();
+    parseIR(graph_string, &*graph);
+    TensorExprKernel k(graph);
+
+    auto a = at::rand({0, 64}, TensorOptions(kCPU).dtype(at::kFloat));
+    auto b = at::rand({10, 64}, TensorOptions(kCPU).dtype(at::kFloat));
+    auto ref = at::cat({at::tanh(a), at::tanh(b)}, 0);
+
+    std::vector<at::Tensor> inputs = {a, b};
+    std::vector<IValue> stack = fmap<IValue>(inputs);
+    k.run(stack);
+    auto o = stack[0].toTensor();
+    ASSERT_EQ(o.sizes(), ref.sizes());
+    ASSERT_EQ(o.dtype(), ref.dtype());
+    ASSERT_TRUE(at::allclose(o, ref));
+  }
+  getCatWoConditionals() = curr_cat_wo_conditionals;
+}
+
 TEST_F(Kernel, CatWoConditionals) {
   getCatWoConditionals() = true;
   const auto graph_string = R"IR(
