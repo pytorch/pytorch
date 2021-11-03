@@ -65,20 +65,16 @@ class LoweringContext {
   // assigned position within the tuple.
   virtual size_t AddResult(const torch::lazy::Output& output) = 0;
 
-  // Build the computation capturing all the operations created with the
-  // embedded builder (returned by the builder() API).
-  virtual compiler::ComputationPtr Build() = 0;
-
-  // Lowers the given node as the result of the computation. Only used for the
-  // operator-by-operator execution, mostly for debugging purposes.
-  virtual void LowerNodeToResult(const torch::lazy::Node* node);
-
   // Associates the given output with the input parameter of the given index and
   // shape. Only used for the operator-by-operator execution, mostly for
   // debugging purposes.
   virtual void AddParameter(const torch::lazy::Output& output, size_t index,
                             const lazy_tensors::Shape& shape,
                             const std::string& name);
+
+  // Build the computation capturing all the operations created with the
+  // embedded builder (returned by the builder() API).
+  virtual compiler::ComputationPtr Build() = 0;
 
   size_t GetEmittedNodeCount() const { return emit_status_.size(); }
 
