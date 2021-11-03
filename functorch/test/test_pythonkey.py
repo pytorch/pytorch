@@ -23,7 +23,7 @@ from functools import partial, wraps
 import functorch
 from functorch import (
     grad, vjp, vmap, jacrev, grad_and_value,
-    make_fx,
+    make_fx, pythonkey_decompose
 )
 from functorch.compile import (
     nnc_jit, compiled_function, compiled_module,
@@ -101,6 +101,20 @@ class TestPythonKey(TestCase):
         fx_f = make_fx(vjp_fn)(cotangent, True, True)
         new_cotangent = torch.randn(())
         self.assertEqual(fx_f(new_cotangent, True, True), vjp_fn(new_cotangent))
+
+    def test_make_fx_no_decompose(self, device):
+        def f(x):
+            return torch.tanh(x).sum()
+
+        fx_f = make_fx(grad(f))(torch.randn(5))
+        ops = set([i.target for i in fx_f.graph.nodes])
+
+        self.assertEqual(torch.ops.aten.tanh_backward in ops, True)
+
+        with pythonkey_decompose():
+            fx_f = make_fx(grad(f))(torch.randn(5))
+        ops = set([i.target for i in fx_f.graph.nodes])
+        self.assertEqual(torch.ops.aten.tanh_backward in ops, False)
 
     @unittest.expectedFailure
     def test_nnc_jit(self, device):

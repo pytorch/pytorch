@@ -16,6 +16,38 @@ import torch.fx._pytree as fx_pytree
 from .nnc_compile import nnc_compile
 from enum import Enum
 import warnings
+from contextlib import contextmanager
+
+decomposition_table = {}
+
+def register_decomposition(aten_op):
+    def decomposition_decorator(f):
+        decomposition_table[aten_op] = f
+        return f
+    return decomposition_decorator
+
+@register_decomposition(torch.ops.aten.tanh_backward)
+def tanh_backward_decomposition(out_grad, y):
+    return torch.sub(out_grad, out_grad * y * y)
+
+@register_decomposition(torch.ops.aten.sigmoid_backward)
+def sigmoid_backward_decomposition(out_grad, y):
+    return out_grad * (y * (1 - y))
+
+@register_decomposition(torch.ops.aten._s_where)
+def _s_where_decomposition(a, b, c):
+    return torch.where(a, b, c)
+
+USE_DECOMPOSE = False
+
+@contextmanager
+def pythonkey_decompose():
+    global USE_DECOMPOSE
+    USE_DECOMPOSE = True
+    try:
+        yield USE_DECOMPOSE
+    finally:
+        USE_DECOMPOSE = False
 
 class PythonTensor(torch.Tensor):
     elem: torch.Tensor
@@ -42,6 +74,8 @@ class PythonTensor(torch.Tensor):
     __torch_function__ = _disabled_torch_function_impl
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        if func in decomposition_table and USE_DECOMPOSE:
+            return decomposition_table[func](*args, **kwargs)
         def unwrap_proxy(e):
             return e.proxy if isinstance(e, PythonTensor) else e
 
