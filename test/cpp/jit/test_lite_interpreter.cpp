@@ -466,6 +466,15 @@ TEST(LiteInterpreterTest, GetRuntimeByteCodeVersion) {
       caffe2::serialize::kMaxSupportedBytecodeVersion);
 }
 
+TEST(LiteInterpreterTest, GetRuntimeOperatorsVersion) {
+  auto runtime_operators_version = _get_runtime_operators_min_max_versions();
+  AT_ASSERT(
+      runtime_operators_version.first ==
+          caffe2::serialize::kMinSupportedFileFormatVersion &&
+      runtime_operators_version.second ==
+          caffe2::serialize::kMaxSupportedFileFormatVersion);
+}
+
 /**
  * The test below is disarmed for FB internal xplat builds since
  * BUCK requires us to pass in the script_module_v4.ptl file in
