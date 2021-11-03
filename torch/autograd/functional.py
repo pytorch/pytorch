@@ -457,7 +457,7 @@ def _jacfwd(func, inputs, strict=False, vectorize=False):
                 return tuple(jv)
 
         outputs_before_split = _vmap(jvp)(tangents)
-        is_outputs_tuple, outputs  = output_info
+        is_outputs_tuple, outputs = output_info
         # Step 3: for each of the output tangents, split along dim 0
         jacobian_input_output = []
         for jac, output_i in zip(outputs_before_split, outputs):
@@ -466,7 +466,7 @@ def _jacfwd(func, inputs, strict=False, vectorize=False):
                 # We need to transpose the Jacobian because in forward AD, the
                 # batch dimension represents that of the inputs
                 jacobian_input_i_output_j = jac.permute(*range(1, jac.ndim), 0) \
-                    .reshape(tuple([*output_i.shape, *input_j.shape]))
+                    .reshape(tuple([*output_i.shape, *input_j.shape]))  # noqa: C409
 
                 jacobian_output_i_output.append(jacobian_input_i_output_j)
             jacobian_input_output.append(jacobian_output_i_output)

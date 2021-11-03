@@ -110,13 +110,20 @@ Tensor _fw_primal(c10::DispatchKeySet ks, const Tensor & self, int64_t level) {
   return result;
 }
 
-// We need this so that set_fw_grad properly detects that _make_dual is
+// NB: We need a manual variable type kernel so that set_fw_grad properly detects that _make_dual is
+// not a forward-differentiable view
+//
+// This function can be used to create a dual Tensor that holds a tangent to compute forward mode gradients.
+// Note that the dual Tensor's primal is a view of the given primal and the given tangent is used as-is.
+// This function is backward differentiable.
 Tensor _make_dual(c10::DispatchKeySet ks, const Tensor& primal, const Tensor& tangent, int64_t level) {
+  TORCH_CHECK(!primal._fw_grad(level).defined(), "Making a dual Tensor based on a Tensor that "
+      "already has a forward gradient at the same level ", level, " is not supported.");
   auto& primal_ = unpack(primal, "primal", 0);
   auto& tangent_ = unpack(tangent, "tangent", 0);
   std::shared_ptr<ViewBackward0> grad_fn;
   if (compute_requires_grad(primal_)) {
-    grad_fn = std::make_shared<ViewBackward0>(); // Why is the
+    grad_fn = std::make_shared<ViewBackward0>();
     grad_fn->self_sizes = primal_.sizes().vec();
     grad_fn->set_next_edges(collect_next_edges(primal_));
   }
@@ -130,8 +137,8 @@ Tensor _make_dual(c10::DispatchKeySet ks, const Tensor& primal, const Tensor& ta
     set_history(flatten_tensor_args(result), grad_fn);
   }
 
-  result._set_fw_grad(tangent_, level,  /* is_inplace_op */ false);
   TORCH_CHECK(level == 0, "Invalid level given to _make_dual");
+  result._set_fw_grad(tangent_, level,  /* is_inplace_op */ false);
   return result;
 }
 
@@ -338,7 +345,7 @@ namespace ADInplaceOrView {
     return result;
   }
 
-
+  // NB: This does not redispatch any further
   Tensor _make_dual(c10::DispatchKeySet ks, const Tensor & primal, const Tensor & tangent, int64_t level) {
     auto tmp = ([&]() {
       at::AutoDispatchBelowADInplaceOrView guard;
