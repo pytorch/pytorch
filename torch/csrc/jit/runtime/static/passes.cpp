@@ -524,6 +524,39 @@ void ReplaceWithCopy(
 #endif
 }
 
+void EliminateTrivialEquallySplit(std::shared_ptr<torch::jit::Graph>& graph) {
+  const auto equally_split = fromQualString("fb::equally_split");
+  std::vector<Node*> to_remove;
+  for (auto* node : graph->nodes()) {
+    if (node->kind() != equally_split) {
+      continue;
+    }
+
+    const Value* value_out = node->outputs()[0];
+    if (value_out->uses().size() != 1) {
+      continue;
+    }
+
+    Node* list_unpack_node = value_out->uses()[0].user;
+    if (list_unpack_node->kind() != prim::ListUnpack) {
+      continue;
+    }
+
+    auto list_unpack_outputs = list_unpack_node->outputs();
+    if (list_unpack_outputs.size() != 1) {
+      continue;
+    }
+
+    list_unpack_node->output()->replaceAllUsesWith(node->input(0));
+    list_unpack_node->destroy();
+    to_remove.push_back(node);
+  }
+
+  for (Node* node : to_remove) {
+    node->destroy();
+  }
+}
+
 // NB: The alias type of the fused op needs to be changed to
 // c10::AliasAnalysisKind::PURE_FUNCTION to make alias analysis work.
 void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
@@ -587,16 +620,6 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
       if (alias_db.mayContainAlias(list_unpack_outputs_vec, graph_outputs)) {
         continue;
       }
-    }
-
-    if (is_equally_split && list_unpack_outputs.size() == 1) {
-      // This captures a case of `y = fb::equally_split(x, 1, _)` where y
-      // becomes just an alias of x.
-      // If this case is found, replace y with x to avoid executing this op.
-      list_unpack_node->output()->replaceAllUsesWith(node->input(0));
-      list_unpack_node->destroy();
-      to_remove.push_back(node);
-      continue;
     }
 
     const auto& new_sym = unfused_to_fused_it->second;
