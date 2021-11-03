@@ -255,10 +255,6 @@ def vmap(func: Callable, in_dims: in_dims_t = 0, out_dims: out_dims_t = 0) -> Ca
         vmap does not provide general autobatching or handle variable-length
         sequences out of the box.
     """
-    return _vmap(func, in_dims, out_dims)
-
-# A version of vmap but without the initial "experimental prototype" warning
-def _vmap(func: Callable, in_dims: in_dims_t = 0, out_dims: out_dims_t = 0) -> Callable:
     @functools.wraps(func)
     def wrapped(*args, **kwargs):
         _check_out_dims_is_int_or_int_pytree(out_dims, func)
