@@ -2108,11 +2108,13 @@ class TestLRScheduler(TestCase):
     def _test(self, schedulers, targets, epochs=10):
         if isinstance(schedulers, _LRScheduler):
             schedulers = [schedulers]
+
         def get_optimizer(scheduler):
             if hasattr(scheduler, "optimizer"):
                 return scheduler.optimizer
             else:
-                assert isinstance(scheduler, ChainedScheduler), f"Error: scheduler={scheduler} does not have an optimizer and is not a chained scheduler."
+                assert isinstance(scheduler, ChainedScheduler), \
+                    f"Error: scheduler={scheduler} does not have an optimizer and is not a chained scheduler."
                 return get_optimizer(scheduler._schedulers[0])
         optimizers = set()
         for scheduler in schedulers:
