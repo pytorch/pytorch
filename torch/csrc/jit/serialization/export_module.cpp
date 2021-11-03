@@ -38,9 +38,7 @@
 namespace torch {
 namespace jit {
 
-IValue to_tuple(std::vector<IValue> ivalues) {
-  return c10::ivalue::Tuple::create(std::move(ivalues));
-}
+char const* toString(OpCode op);
 
 IValue Table(const std::vector<std::pair<std::string, IValue>>& entries) {
   std::vector<IValue> ivalue_entries;
