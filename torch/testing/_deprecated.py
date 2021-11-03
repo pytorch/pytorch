@@ -9,13 +9,14 @@ from typing import Any, Callable, Dict, Optional, Tuple, Union
 
 import torch
 
-from . import _dtype_getters
+from . import _legacy
 
 
 __all__ = [
     "rand",
     "randn",
     "assert_allclose",
+    "get_all_device_types",
 ]
 
 
@@ -89,15 +90,15 @@ def assert_allclose(
     )
 
 
-def _dtype_getter_instructions(name: str, args: Tuple[Any, ...], kwargs: Dict[str, Any], return_value: Any) -> str:
-    return f"This call to {name}(...) can be replaced with {return_value}."
-
-
-# We iterate over all public dtype getters and expose them here with an added deprecation warning
-for name in _dtype_getters.__all__:
-    if name.startswith("_"):
-        continue
-    fn = getattr(_dtype_getters, name)
-
-    globals()[name] = warn_deprecated(_dtype_getter_instructions)(fn)
+# We iterate over all dtype getters and expose them here with an added deprecation warning
+for name in _legacy.__all_dtype_getters__:
+    fn = getattr(_legacy, name)
+    instructions = (
+        lambda name, args, kwargs, return_value: f"This call to {name}(...) can be replaced with {return_value}."
+    )
+    globals()[name] = warn_deprecated(instructions)(fn)
     __all__.append(name)
+
+
+instructions = lambda name, args, kwargs, return_value: f"This call can be replaced with {return_value}."  # noqa: E731
+get_all_device_types = warn_deprecated(instructions)(_legacy.get_all_device_types)

@@ -146,6 +146,18 @@ You can also query ``Folder`` objects with the ``has_file()`` method.
     exporter_file_structure = exporter.file_structure()
     found: bool = exporter_file_structure.has_file("package_a/subpackage.py")
 
+See why a given module was included as a dependency?
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Say there is a given module ``foo``, and you want to know why your :class:`PackageExporter` is pulling in ``foo`` as a dependency.
+
+:meth:`PackageExporter.get_rdeps` will return all modules that directly depend on ``foo``.
+
+If you would like to see how a given module ``src`` depends on ``foo``, the :meth:`PackageExporter.all_paths` method will
+return a DOT-formatted graph showing all the dependency paths between ``src`` and ``foo``.
+
+If you would just like to see the whole dependency graph of your :class:`PackageExporter`, you can use :meth:`PackageExporter.dependency_graph_string`.
+
 
 Include arbitrary resources with my package and access them later?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

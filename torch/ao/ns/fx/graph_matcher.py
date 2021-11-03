@@ -7,7 +7,7 @@ toq = torch.ops.quantized
 from torch.fx import GraphModule
 from torch.fx.graph import Graph, Node
 
-from torch.quantization.utils import getattr_from_fqn
+from torch.ao.quantization.utils import getattr_from_fqn
 from .ns_types import NSSubgraph, NSNodeTargetType
 from .mappings import (
     get_base_name_to_sets_of_related_ops,
@@ -18,7 +18,7 @@ from .pattern_utils import (
     get_reversed_fusions,
     end_node_matches_reversed_fusion,
 )
-from torch.quantization import (
+from torch.ao.quantization import (
     ObserverBase,
     FakeQuantizeBase,
 )

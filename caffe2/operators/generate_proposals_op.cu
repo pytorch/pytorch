@@ -5,8 +5,9 @@
 #include "caffe2/operators/generate_proposals_op_util_boxes.h" // BBOX_XFORM_CLIP_DEFAULT
 #include "caffe2/operators/generate_proposals_op_util_nms.h"
 #include "caffe2/operators/generate_proposals_op_util_nms_gpu.h"
+#include "caffe2/utils/cub_namespace.cuh"
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 #include <cfloat>
 #endif
 

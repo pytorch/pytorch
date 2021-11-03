@@ -63,7 +63,7 @@ private:
 
   at::TensorOptions optionsFor(const Tensor& ten) {
     at::Device device = ten.GetDevice();
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
     if (backend() == at::Backend::HIP) {
       device = at::Device(kCUDA, device.index());
     }
@@ -107,7 +107,7 @@ private:
     auto at_sizes = src.sizes();
     caffe2::TypeMeta type_meta = typeMetaFor(src);
     at::Device device = src.device();
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
     if (device.is_cuda()) {
       device = at::Device(at::DeviceType::HIP, device.index());
     }
