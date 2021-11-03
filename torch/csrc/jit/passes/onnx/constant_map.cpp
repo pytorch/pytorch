@@ -23,8 +23,8 @@ ConstantValueMap& ConstantValueMap::getInstance() {
 void ConstantValueMap::SetRank(
     const std::string& tensorName,
     size_t rankValue) {
-  ConstantValueMap::getInstance().rankMap.emplace(tensorName, rankValue);
-  ConstantValueMap::getInstance().useInferredTypeMap.emplace(tensorName, true);
+  ConstantValueMap::getInstance().rankMap[tensorName] = rankValue;
+  ConstantValueMap::getInstance().useInferredTypeMap[tensorName] = true;
 }
 
 bool ConstantValueMap::HasRank(const std::string& tensorName) {
@@ -42,8 +42,8 @@ c10::optional<size_t> ConstantValueMap::GetRank(const std::string& tensorName) {
 void ConstantValueMap::SetShape(
     const std::string& tensorName,
     const c10::SymbolicShape& shapeValue) {
-  ConstantValueMap::getInstance().shapeMap.emplace(tensorName, shapeValue);
-  ConstantValueMap::getInstance().useInferredTypeMap.emplace(tensorName, true);
+  ConstantValueMap::getInstance().shapeMap[tensorName] = shapeValue;
+  ConstantValueMap::getInstance().useInferredTypeMap[tensorName] = true;
 }
 
 bool ConstantValueMap::HasShape(const std::string& tensorName) {
@@ -62,7 +62,7 @@ c10::optional<c10::SymbolicShape> ConstantValueMap::GetShape(
 void ConstantValueMap::SetValue(
     const std::string& tensorName,
     const at::Tensor& value) {
-  ConstantValueMap::getInstance().tensorValueMap.emplace(tensorName, value);
+  ConstantValueMap::getInstance().tensorValueMap[tensorName] = value;
 }
 
 bool ConstantValueMap::HasValue(const std::string& tensorName) {
@@ -151,7 +151,7 @@ std::vector<int64_t> ConstantValueMap::GetValueInto1DInt64Vector(
 void ConstantValueMap::SetTypeReliable(
     const std::string& tensorName,
     bool value) {
-  ConstantValueMap::getInstance().typeReliableMap.emplace(tensorName, value);
+  ConstantValueMap::getInstance().typeReliableMap[tensorName] = value;
 }
 
 bool ConstantValueMap::HasTypeReliable(const std::string& tensorName) {
@@ -170,7 +170,7 @@ c10::optional<bool> ConstantValueMap::GetTypeReliable(
 void ConstantValueMap::SetUseInferredType(
     const std::string& tensorName,
     bool value) {
-  ConstantValueMap::getInstance().useInferredTypeMap.emplace(tensorName, value);
+  ConstantValueMap::getInstance().useInferredTypeMap[tensorName] = value;
 }
 
 bool ConstantValueMap::HasUseInferredType(const std::string& tensorName) {
