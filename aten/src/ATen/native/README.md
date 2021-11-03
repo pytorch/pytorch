@@ -255,7 +255,7 @@ contains Tensors that alias the input.
   - `func: chunk(Tensor(a -> *) self, int chunks, int dim=0) -> Tensor[]`
 We assume lists contain memory which aliases the heap, so in order to correctly set up the aliasing
 relationship between the output and input, we annotate that the input Tensor enters the wildcard set `(a -> *)`.
-For more details, see the JIT [README](torch/csrc/jit/OVERVIEW.md#aliasing-and-mutation-annotations-in-functionschema).
+For more details, see the JIT [README](https://github.com/pytorch/pytorch/blob/master/torch/csrc/jit/OVERVIEW.md#aliasing-and-mutation-annotations-in-functionschema).
 
 We have some asserts to check whether a developer uses these annotations correctly and throw asserts
 if she doesn't. For example, any out function must use the `(a!)` annotation as described above.
