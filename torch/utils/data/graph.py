@@ -52,6 +52,9 @@ def list_connected_datapipes(scan_obj, exclude_primitive):
 
 
 def traverse(datapipe, exclude_primitive=False):
+    if not isinstance(datapipe, IterableDataset):
+        raise RuntimeError("Expected `IterDataPipe`, but {} is found".format(type(datapipe)))
+
     items = list_connected_datapipes(datapipe, exclude_primitive)
     d: Dict[Any, Any] = {datapipe: {}}
     for item in items:
