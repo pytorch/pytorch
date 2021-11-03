@@ -298,6 +298,45 @@ void nnc_aten_dequantize(
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
 
+void nnc_aten_conv1d(
+    int64_t bufs_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int8_t* buf_dtypes,
+    int64_t args_num,
+    int64_t* extra_args) {
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+
+  at::Tensor& r = tensors[0];
+  const at::Tensor& x = tensors[1];
+  const at::Tensor& w = tensors[2];
+  if (args_num > 0) {
+    // Check that if the extra arguments are provided, then the bias tensor is
+    // also present
+    TORCH_INTERNAL_ASSERT(args_num == 4 && bufs_num == 4);
+    const at::Tensor& b = tensors[3];
+
+    int64_t stride = extra_args[0];
+    int64_t padding = extra_args[1];
+    int64_t dilation = extra_args[2];
+    int64_t groups = extra_args[3];
+
+    try {
+      r = at::conv1d(x, w, b, {stride}, {padding}, {dilation}, groups);
+    } catch (...) {
+    }
+  } else {
+    try {
+      r = at::conv1d(x, w);
+    } catch (...) {
+    }
+  }
+
+  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+}
+
 void nnc_aten_adaptive_avg_pool2d(
     int64_t bufs_num,
     void** buf_data,
@@ -459,6 +498,9 @@ const static RegisterNNCExternalFunction nnc_dequantize(
 const static RegisterNNCExternalFunction nnc_upsample_nearest2d(
     "nnc_aten_upsample_nearest2d",
     nnc_aten_upsample_nearest2d);
+const static RegisterNNCExternalFunction nnc_conv1d(
+    "nnc_aten_conv1d",
+    nnc_aten_conv1d);
 const static RegisterNNCExternalFunction nnc_adaptive_avg_pool2d(
     "nnc_aten_adaptive_avg_pool2d",
     nnc_aten_adaptive_avg_pool2d);

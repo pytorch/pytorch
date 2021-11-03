@@ -1446,6 +1446,9 @@ RegisterNNCLoweringsFunction aten_log_softmax(
       return computeSoftmax(inputs, outputShape, true);
     });
 
+RegisterNNCLoweringsFunction aten_conv1d(
+    {"aten::conv1d(Tensor input, Tensor weight, Tensor? bias=None, int[1] stride=1, int[1] padding=0, int[1] dilation=1, int groups=1) -> (Tensor)"},
+    computeConv1d);
 RegisterNNCLoweringsFunction aten_conv2d(
     {"aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=[1, 1], int[2] padding=[0, 0], int[2] dilation=[1, 1], int groups=1) -> (Tensor)"},
     computeConv2d);
