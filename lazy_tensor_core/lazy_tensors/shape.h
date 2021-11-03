@@ -27,27 +27,27 @@ class Shape {
   }
 
   std::string ToString(bool print_layout = false) const {
-    return c10::str(toString(scalar_type_), "[", c10::Join(",", dimensions_), "]");
+    return c10::str(toString(scalar_type_), "[", c10::Join(",", sizes_), "]");
   }
 
   c10::ScalarType scalar_type() const { return scalar_type_; }
   void set_scalar_type(at::ScalarType value) { scalar_type_ = value; }
 
-  int64_t rank() const { return dimensions_.size(); }
+  int64_t rank() const { return sizes_.size(); }
 
-  int64_t dimensions(int index) const {
-    CHECK_LT(index, dimensions_.size());
-    return dimensions_[index];
+  int64_t size(int index) const {
+    CHECK_LT(index, sizes_.size());
+    return sizes_[index];
   }
 
-  c10::ArrayRef<int64_t> dimensions() const { return dimensions_; }
+  c10::ArrayRef<int64_t> sizes() const { return sizes_; }
 
-  void set_dimensions(int index, int64_t value) {
-    CHECK_LT(index, dimensions_.size());
-    dimensions_[index] = value;
+  void set_size(int index, int64_t value) {
+    CHECK_LT(index, sizes_.size());
+    sizes_[index] = value;
   }
 
-  // TODO(whc) remove tuple support? or keep it (But make dimensions() methods
+  // TODO(whc) remove tuple support? or keep it (But make sizes() methods
   // work consistently with it somehow?)
   bool IsTuple() const { return is_tuple_; }
   int tuple_shapes_size() const { return element_shapes_.size(); }
@@ -61,13 +61,13 @@ class Shape {
 
   bool operator==(const Shape& other) const {
     return scalar_type_ == other.scalar_type_ &&
-           dimensions_ == other.dimensions_;
+           sizes_ == other.sizes_;
   }
 
  private:
   bool is_tuple_ = false;
   c10::ScalarType scalar_type_;
-  std::vector<int64_t> dimensions_;
+  std::vector<int64_t> sizes_;
   std::vector<Shape> element_shapes_;
 };
 

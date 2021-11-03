@@ -210,7 +210,7 @@ class TSNodeLowering : public TSNodeLoweringInterface {
         GenerateClone(loctx()->GetOutputOp(node->operand(0)));
     const torch::lazy::Output& input_op = node->operand(1);
     const lazy_tensors::Shape& input_shape = ir::GetShapeFromTsOutput(input_op);
-    const auto input_dimensions = input_shape.dimensions();
+    const auto input_dimensions = input_shape.sizes();
     std::vector<torch::jit::NamedValue> dest_arguments;
     dest_arguments.emplace_back(destination);
     dest_arguments.emplace_back(
@@ -479,7 +479,7 @@ class TSNodeLowering : public TSNodeLoweringInterface {
     for (size_t dim = 0; dim < base_indices.size(); ++dim) {
       int64_t start = base_indices[dim];
       base = GenerateSlice(/*base=*/base, /*dim=*/dim, /*start=*/start,
-                           /*end=*/start + source_shape.dimensions(dim),
+                           /*end=*/start + source_shape.size(dim),
                            /*step=*/1);
     }
     GenerateCopy(base, loctx()->GetOutputOp(source_argument));

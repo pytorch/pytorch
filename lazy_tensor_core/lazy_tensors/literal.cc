@@ -7,7 +7,7 @@
 namespace lazy_tensors {
 
 Literal::Literal(const Shape& shape) : shape_(shape) {
-  std::vector<int64_t> dimensions = util::ToVector<int64_t>(shape.dimensions());
+  std::vector<int64_t> dimensions = util::ToVector<int64_t>(shape.sizes());
   at::TensorOptions options(shape.scalar_type());
   value_ = at::empty(dimensions, options);
 }
