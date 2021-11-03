@@ -258,75 +258,74 @@ class ModifiesVarChecker : public IRVisitor {
 //  d[i] = 0;
 //  for j
 //    d[i] += e[i, j];
-class StmtCounter {
+class StmtTrace {
  public:
   void append(int32_t id) {
-    counter_.emplace_back(id);
+    trace_.emplace_back(id);
   }
   void pop() {
-    counter_.pop_back();
+    trace_.pop_back();
   }
 
-  const std::vector<int32_t> getCounter() {
-    return counter_;
+  const std::vector<int32_t>& getTrace() {
+    return trace_;
   }
 
-  bool operator==(StmtCounter& counter) {
-    auto compare = counter.getCounter();
-    if (counter_.size() != compare.size()) {
+  bool operator==(StmtTrace& trace) {
+    auto compare = trace.getTrace();
+    if (trace_.size() != compare.size()) {
       return false;
     }
     int size = compare.size();
     for (int i = 0; i < size; i++) {
-      if (counter_.at(i) != compare.at(i)) {
+      if (trace_.at(i) != compare.at(i)) {
         return false;
       }
     }
     return true;
   }
 
-  bool operator<(StmtCounter& counter) {
-    auto compare = counter.getCounter();
-    int size =
-        counter_.size() < compare.size() ? counter_.size() : compare.size();
+  bool operator<(StmtTrace& trace) {
+    auto compare = trace.getTrace();
+    int size = trace_.size() < compare.size() ? trace_.size() : compare.size();
     for (int i = 0; i < size; i++) {
-      if (counter_.at(i) > compare.at(i)) {
+      if (trace_.at(i) > compare.at(i)) {
         return false;
       }
     }
-    return !(*this == counter);
+    return !(*this == trace);
   }
 
-  bool operator>(StmtCounter& counter) {
-    auto compare = counter.getCounter();
-    int size =
-        counter_.size() < compare.size() ? counter_.size() : compare.size();
+  bool operator>(StmtTrace& trace) {
+    auto compare = trace.getTrace();
+    int size = trace_.size() < compare.size() ? trace_.size() : compare.size();
     for (int i = 0; i < size; i++) {
-      if (counter_.at(i) < compare.at(i)) {
+      if (trace_.at(i) < compare.at(i)) {
         return false;
       }
     }
-    return !(*this == counter);
+    return !(*this == trace);
   }
 
-  std::string getCounterString() {
+  std::string getTraceString() {
     std::string cstr = "";
-    for (int i = 0; i < counter_.size(); i++) {
-      cstr += std::to_string(counter_.at(i));
+    for (int i = 0; i < trace_.size(); i++) {
+      cstr += std::to_string(trace_.at(i));
       cstr += ":";
     }
     return cstr;
   }
 
  private:
-  std::vector<int32_t> counter_;
+  std::vector<int32_t> trace_;
 };
 
-// Visit Stmts and Record their PCs
-class StmtRecorder : public IRVisitor {
+// Traverse the root stmt to identify the position of each stmt in the AST,
+// i.e., a StmtTrace
+class StmtTracer : public IRVisitor {
  public:
-  StmtCounter getStmtCounter() {
-    return counter_;
+  StmtTrace getStmtTrace() {
+    return trace_;
   }
 
  private:
@@ -340,9 +339,9 @@ class StmtRecorder : public IRVisitor {
 
     int count = 0;
     for (StmtPtr s : *v) {
-      counter_.append(count);
+      trace_.append(count);
       s->accept(this);
-      counter_.pop();
+      trace_.pop();
       count++;
     }
   }
@@ -362,23 +361,24 @@ class StmtRecorder : public IRVisitor {
     flatten_ = false;
   }
 
-  StmtCounter counter_;
+  StmtTrace trace_;
   bool flatten_ = false;
 };
 
 enum AccMode { READ, WRITE, REDUCE };
 
-// Traverses the IR to identify all reads/writes to a buf, and their PCs
-using BufAccessInfo = std::tuple<StmtPtr, AccMode, StmtCounter>;
-class BufAccesses : public StmtRecorder {
+// Traverses the IR to identify all reads/writes to a buf, and their positions
+// in the AST which is represented as a StmtTrace
+using BufAccessInfo = std::tuple<StmtPtr, AccMode, StmtTrace>;
+class BufAccesses : public StmtTracer {
  public:
   BufAccesses(BufPtr b) : buf_(b) {}
 
-  std::vector<std::tuple<StmtPtr, AccMode, StmtCounter>> accesses() {
+  std::vector<std::tuple<StmtPtr, AccMode, StmtTrace>> accesses() {
     return accesses_;
   }
 
-  static std::vector<std::tuple<StmtPtr, AccMode, StmtCounter>> find(
+  static std::vector<std::tuple<StmtPtr, AccMode, StmtTrace>> find(
       StmtPtr s,
       BufPtr b) {
     BufAccesses finder(b);
@@ -387,7 +387,7 @@ class BufAccesses : public StmtRecorder {
   }
 
  private:
-  bool readsBuffer(StmtPtr s) {
+  bool readBuffer(StmtPtr s) {
     auto loads1 = NodeFinder<Load>::find(s);
     for (auto l : loads1) {
       if (l->buf() == buf_) {
@@ -405,7 +405,7 @@ class BufAccesses : public StmtRecorder {
     return false;
   }
 
-  bool writesBuffer(StmtPtr s) {
+  bool writeBuffer(StmtPtr s) {
     auto writes1 = NodeFinder<Store>::find(s);
     for (auto w : writes1) {
       if (w->buf() == buf_) {
@@ -422,18 +422,19 @@ class BufAccesses : public StmtRecorder {
   }
 
   void insertAccesses(StmtPtr s) {
-    if (readsBuffer(s) && writesBuffer(s)) {
-      auto acc = std::make_tuple(s, AccMode::REDUCE, getStmtCounter());
+    bool has_reads = readBuffer(s), has_writes = writeBuffer(s);
+    if (has_reads && has_writes) {
+      auto acc = std::make_tuple(s, AccMode::REDUCE, getStmtTrace());
       accesses_.push_back(acc);
       return;
     }
-    if (readsBuffer(s)) {
-      auto acc = std::make_tuple(s, AccMode::READ, getStmtCounter());
+    if (has_reads) {
+      auto acc = std::make_tuple(s, AccMode::READ, getStmtTrace());
       accesses_.push_back(acc);
       return;
     }
-    if (writesBuffer(s)) {
-      auto acc = std::make_tuple(s, AccMode::WRITE, getStmtCounter());
+    if (has_writes) {
+      auto acc = std::make_tuple(s, AccMode::WRITE, getStmtTrace());
       accesses_.push_back(acc);
     }
   }
