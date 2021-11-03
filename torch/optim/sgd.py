@@ -80,7 +80,7 @@ class SGD(Optimizer):
     """
 
     def __init__(self, params, lr=required, momentum=0, dampening=0,
-                 weight_decay=0, nesterov=False):
+                 weight_decay=0, nesterov=False, maximize=False):
         if lr is not required and lr < 0.0:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if momentum < 0.0:
@@ -89,7 +89,7 @@ class SGD(Optimizer):
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
 
         defaults = dict(lr=lr, momentum=momentum, dampening=dampening,
-                        weight_decay=weight_decay, nesterov=nesterov)
+                        weight_decay=weight_decay, nesterov=nesterov, maximize=maximize)
         if nesterov and (momentum <= 0 or dampening != 0):
             raise ValueError("Nesterov momentum requires a momentum and zero dampening")
         super(SGD, self).__init__(params, defaults)
@@ -120,6 +120,7 @@ class SGD(Optimizer):
             momentum = group['momentum']
             dampening = group['dampening']
             nesterov = group['nesterov']
+            maximize = group['maximize']
             lr = group['lr']
 
             for p in group['params']:
@@ -140,7 +141,8 @@ class SGD(Optimizer):
                   momentum=momentum,
                   lr=lr,
                   dampening=dampening,
-                  nesterov=nesterov)
+                  nesterov=nesterov,
+                  maximize=maximize,)
 
             # update momentum_buffers in state
             for p, momentum_buffer in zip(params_with_grad, momentum_buffer_list):
