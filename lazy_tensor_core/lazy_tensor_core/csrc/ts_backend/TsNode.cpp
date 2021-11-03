@@ -73,9 +73,7 @@ TsNode::TsNode(OpKind op, OpList operands,
                const std::function<lazy_tensors::Shape()>& shape_fn,
                size_t num_outputs, torch::lazy::hash_t hash_seed)
     : TsNode(op, operands, std::vector<lazy_tensors::Shape>{}, num_outputs, hash_seed) {
-  auto shape = GetOpShape(shape_fn);
-  CHECK(!shape.IsTuple());
-  shapes_.push_back(std::move(shape));
+  shapes_.push_back(GetOpShape(shape_fn));
 }
 
 TsNode::TsNode(OpKind op, OpList operands, size_t num_outputs,
@@ -84,16 +82,13 @@ TsNode::TsNode(OpKind op, OpList operands, size_t num_outputs,
 
 void TsNode::SetShapeDeferred(
     const std::function<lazy_tensors::Shape()>& shape_fn) {
-  auto shape = GetOpShape(shape_fn);
-  CHECK(!shape.IsTuple());
-  shapes_.push_back(std::move(shape));
+  shapes_.push_back(GetOpShape(shape_fn));
 }
 
 TsNode::TsNode(OpKind op, lazy_tensors::Shape shape, size_t num_outputs,
                torch::lazy::hash_t hash_seed)
     : Node(op, num_outputs, GetOpHash(op, shape, hash_seed))
 {
-  CHECK(!shape.IsTuple());
   shapes_.push_back(std::move(shape));
 }
 
