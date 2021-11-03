@@ -842,8 +842,8 @@ def _handle_reduce_dim_none(g, self, op_name):
 
 
 _default_onnx_opset_version = 9
-_onnx_main_opset = 14
-_onnx_stable_opsets = [7, 8, 9, 10, 11, 12, 13]
+_onnx_main_opset = 15
+_onnx_stable_opsets = [7, 8, 9, 10, 11, 12, 13, 14]
 _export_onnx_opset_version = _default_onnx_opset_version
 
 
