@@ -526,7 +526,7 @@ class ShapePropagator {
     }
 
     at::optional<at::ScalarType> default_type =
-        tryScalarTypeFromJitType(input_base_type);
+        tryScalarTypeFromJitType(*input_base_type);
     if (auto grad_index = node->schema().argumentIndexWithName("dtype")) {
       auto inp = toIValue(node->inputs().at(*grad_index));
       if (inp == c10::nullopt) {
@@ -1034,7 +1034,7 @@ class ShapePropagator {
           if (auto maybe_tensor_types = gatherTensorTypes(node)) {
             auto first_scalar_type = (*maybe_tensor_types)[0]->scalarType();
             auto second_scalar_type =
-                tryScalarTypeFromJitType(node->inputs()[1]->type());
+                tryScalarTypeFromJitType(*node->inputs()[1]->type());
             if (!first_scalar_type || !second_scalar_type) {
               return {};
             }
@@ -1946,7 +1946,7 @@ class ShapePropagator {
         node->matches("aten::mul(Tensor self, Scalar other) -> Tensor")) {
       auto first_scalar_type = (tensor_types)[0]->scalarType();
       auto second_scalar_type =
-          tryScalarTypeFromJitType(node->inputs()[1]->type());
+          tryScalarTypeFromJitType(*node->inputs()[1]->type());
       if (!first_scalar_type || !second_scalar_type) {
         return false;
       }

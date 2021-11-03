@@ -1169,6 +1169,13 @@ diagonal(offset=0, dim1=0, dim2=1) -> Tensor
 See :func:`torch.diagonal`
 """)
 
+add_docstr_all('diagonal_scatter',
+               r"""
+diagonal(src, offset=0, dim1=0, dim2=1) -> Tensor
+
+See :func:`torch.diagonal_scatter`
+""")
+
 add_docstr_all('fill_diagonal_',
                r"""
 fill_diagonal_(fill_value, wrap=False) -> Tensor
@@ -2422,6 +2429,13 @@ argmax(dim=None, keepdim=False) -> LongTensor
 See :func:`torch.argmax`
 """)
 
+add_docstr_all('argwhere',
+               r"""
+argwhere() -> Tensor
+
+See :func:`torch.argwhere`
+""")
+
 add_docstr_all('mean', r"""
 mean(dim=None, keepdim=False, *, dtype=None) -> Tensor
 
@@ -3352,18 +3366,21 @@ add_docstr_all('select',
                r"""
 select(dim, index) -> Tensor
 
-Slices the :attr:`self` tensor along the selected dimension at the given index.
-This function returns a view of the original tensor with the given dimension removed.
+See :func:`torch.select`
+""")
 
-Args:
-    dim (int): the dimension to slice
-    index (int): the index to select with
+add_docstr_all('select_scatter',
+               r"""
+select_scatter(src, dim, index) -> Tensor
 
-.. note::
+See :func:`torch.select_scatter`
+""")
 
-    :meth:`select` is equivalent to slicing. For example,
-    ``tensor.select(0, index)`` is equivalent to ``tensor[index]`` and
-    ``tensor.select(2, index)`` is equivalent to ``tensor[:,:,index]``.
+add_docstr_all('slice_scatter',
+               r"""
+slice_scatter(src, dim=0, start=None, end=None, step=1) -> Tensor
+
+See :func:`torch.slice_scatter`
 """)
 
 add_docstr_all('set_',
@@ -4831,10 +4848,47 @@ Alias for :meth:`~Tensor.dim()`
 
 add_docstr_all('T',
                r"""
-Is this Tensor with its dimensions reversed.
+Returns a view of this tensor with its dimensions reversed.
 
 If ``n`` is the number of dimensions in ``x``,
 ``x.T`` is equivalent to ``x.permute(n-1, n-2, ..., 0)``.
+
+.. warning::
+    The use of :func:`Tensor.T` on tensors of dimension other than 2 to reverse their shape
+    is deprecated and it will throw an error in a future release. Consider :attr:`~.Tensor.mT`
+    to transpose batches of matrices or `x.permute(*torch.arange(x.ndim - 1, -1, -1))` to reverse
+    the dimensions of a tensor.
+""")
+
+add_docstr_all('H',
+               r"""
+Returns a view of a matrix (2-D tensor) conjugated and transposed.
+
+``x.H`` is equivalent to ``x.transpose(0, 1).conj()`` for complex matrices and
+``x.transpose(0, 1)`` for real matrices.
+
+.. seealso::
+
+        :attr:`~.Tensor.mH`: An attribute that also works on batches of matrices.
+""")
+
+add_docstr_all('mT',
+               r"""
+Returns a view of this tensor with the last two dimensions transposed.
+
+``x.mT`` is equivalent to ``x.transpose(-2, -1)``.
+""")
+
+add_docstr_all('mH',
+               r"""
+Accessing this property is equivalent to calling :func:`adjoint`.
+""")
+
+add_docstr_all('adjoint',
+               r"""
+adjoint() -> Tensor
+
+Alias for :func:`adjoint`
 """)
 
 add_docstr_all('real',

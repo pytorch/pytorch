@@ -148,7 +148,7 @@ option(BUILD_BINARY "Build C++ binaries" OFF)
 option(BUILD_DOCS "Build Caffe2 documentation" OFF)
 option(BUILD_CUSTOM_PROTOBUF "Build and use Caffe2's own protobuf under third_party" ON)
 option(BUILD_PYTHON "Build Python binaries" ON)
-option(BUILD_CAFFE2 "Master flag to build Caffe2" ON)
+option(BUILD_CAFFE2 "Master flag to build Caffe2" OFF)
 option(BUILD_LITE_INTERPRETER "Master flag to build Lite Interpreter" OFF)
 cmake_dependent_option(
     BUILD_CAFFE2_OPS "Build Caffe2 operators" ON
@@ -710,6 +710,10 @@ endif()
 
 if(BUILD_LITE_INTERPRETER)
   string(APPEND CMAKE_CXX_FLAGS " -DBUILD_LITE_INTERPRETER")
+endif()
+
+if(TRACING_BASED)
+  string(APPEND CMAKE_CXX_FLAGS " -DTRACING_BASED")
 endif()
 
 if(USE_PYTORCH_METAL)

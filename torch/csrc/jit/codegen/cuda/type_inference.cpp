@@ -312,7 +312,7 @@ class NaiveTypePropagator {
         node->output(0)->setType(out_type);
 
         auto mean_invstd_type = TensorType::create(
-            *out_type->scalarType(),
+            toAccumulateType(out_type),
             *out_type->device(),
             c10::nullopt,
             c10::nullopt);

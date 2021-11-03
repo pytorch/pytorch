@@ -2,14 +2,15 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/NumericLimits.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/NumericUtils.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <c10/util/Exception.h>
-#include <THC/THCNumerics.cuh>
 
 #include <algorithm>
 #include <cfloat>
@@ -79,7 +80,7 @@ __global__ void fractional_max_pool3d_out_frame(
             for (int64_t w = poolW; w < poolW + poolSizeW; ++w) {
               scalar_t val = input[batch][plane][t][h][w];
               // for consistency with THNN, favor the first max
-              if (val > maxVal || THCNumerics<scalar_t>::isnan(val)) {
+              if (val > maxVal || at::_isnan(val)) {
                 maxIndex = t * input.size(3) *
                   input.size(4) + h * input.size(4) + w;
                 maxVal = val;
@@ -90,7 +91,7 @@ __global__ void fractional_max_pool3d_out_frame(
               int64_t w = i + poolW;
               scalar_t val = input[batch][plane][t][h][w];
               // for consistency with THNN, favor the first max
-              if (val > maxVal || THCNumerics<scalar_t>::isnan(val)) {
+              if (val > maxVal || at::_isnan(val)) {
                 maxIndex = t * input.size(3) * input.size(4) +
                   h * input.size(4) + w;
                 maxVal = val;

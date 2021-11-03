@@ -119,7 +119,7 @@ OperandType getValueType(TypePtr type) {
         ValueType::Tensor,
         tensor_type->scalarType().value(),
         tensor_type->dim().has_value() ? tensor_type->dim().value() : 1};
-  } else if (auto scalar_type = tryScalarTypeFromJitType(type)) {
+  } else if (auto scalar_type = tryScalarTypeFromJitType(*type)) {
     return {ValueType::Scalar, scalar_type.value()};
   } else {
     return {ValueType::None, c10::ScalarType::Undefined};
