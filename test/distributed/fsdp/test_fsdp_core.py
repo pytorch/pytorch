@@ -12,6 +12,7 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_fsdp import (
     DummyDDP,
+    FSDPInitMode,
     FSDPTest,
     MixtureOfExperts,
     NestedWrappedModule,
@@ -24,6 +25,8 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
 )
+
+from torch.distributed._fsdp.fully_sharded_data_parallel import CPUOffload
 
 
 if not dist.is_available():
@@ -44,59 +47,146 @@ class TestParityWithDDP(FSDPTest):
     PyTorch DDP vs. FullyShardedDataParallel.
     """
 
-    @skip_if_lt_x_gpu(2)
-    def test_nested_wrapped_model(self):
-        self._test_identical_outputs(NestedWrappedModule)
+    def _get_init_modes_for_test(self, cpu_offload):
+        modes = [
+            FSDPInitMode.CUDA_AFTER,
+            FSDPInitMode.CUDA_BEFORE
+        ]
+        # Note that FSDPInitMode.CUDA_NEVER works currently only with CPU
+        # offload as we explicitly bring the param back to CUDA device. In
+        # general, it will not work since we try to all_gather p.data which is
+        # on CPU but NCCL only supports GPU.
+        if cpu_offload.offload_params:
+            modes.append(FSDPInitMode.CUDA_NEVER)
+
+        return modes
 
     @skip_if_lt_x_gpu(2)
-    def test_nested_all_wrapped_model(self):
-        model_fn = functools.partial(NestedWrappedModule, wrap_everything=True)
-        self._test_identical_outputs(model_fn)
+    @parametrize(
+        "cpu_offload",
+        [CPUOffload(offload_params=True), CPUOffload(offload_params=False)]
+    )
+    def test_nested_wrapped_model(self, cpu_offload):
+        init_modes = self._get_init_modes_for_test(cpu_offload)
+        for fsdp_init_mode in init_modes:
+            with self.subTest(fsdp_init_mode=fsdp_init_mode):
+                self._test_identical_outputs(
+                    NestedWrappedModule,
+                    fsdp_init_mode=fsdp_init_mode,
+                    cpu_offload=cpu_offload
+                )
 
     @skip_if_lt_x_gpu(2)
-    def test_transformer_parameterized(self):
-        self._test_identical_outputs(TransformerWithSharedParams)
+    @parametrize(
+        "cpu_offload",
+        [CPUOffload(offload_params=True), CPUOffload(offload_params=False)]
+    )
+    def test_nested_all_wrapped_model(self, cpu_offload):
+        init_modes = self._get_init_modes_for_test(cpu_offload)
+        for fsdp_init_mode in init_modes:
+            with self.subTest(fsdp_init_mode=fsdp_init_mode):
+                model_fn = functools.partial(NestedWrappedModule, wrap_everything=True)
+                self._test_identical_outputs(
+                    model_fn,
+                    fsdp_init_mode=fsdp_init_mode,
+                    cpu_offload=cpu_offload
+                )
 
     @skip_if_lt_x_gpu(2)
-    def test_delayed_optim_step(self):
+    @parametrize(
+        "cpu_offload",
+        [CPUOffload(offload_params=True), CPUOffload(offload_params=False)]
+    )
+    def test_transformer_parameterized(self, cpu_offload):
+        init_modes = self._get_init_modes_for_test(cpu_offload)
+        for fsdp_init_mode in init_modes:
+            with self.subTest(fsdp_init_mode=fsdp_init_mode):
+                self._test_identical_outputs(
+                    TransformerWithSharedParams,
+                    fsdp_init_mode=fsdp_init_mode,
+                    cpu_offload=cpu_offload
+                )
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize(
+        "cpu_offload",
+        [CPUOffload(offload_params=True), CPUOffload(offload_params=False)]
+    )
+    def test_delayed_optim_step(self, cpu_offload):
         # We use a model with a long CUDA delay right before the optimizer step.
         # This tests our streams logic, and that we don't start the allgather
         # until after the optimization step completes.
-        model_fn = functools.partial(
-            NestedWrappedModuleWithDelay, delay_after_loss_ms=250
-        )
-        self._test_identical_outputs(model_fn)
+        init_modes = self._get_init_modes_for_test(cpu_offload)
+        for fsdp_init_mode in init_modes:
+            with self.subTest(fsdp_init_mode=fsdp_init_mode):
+                model_fn = functools.partial(
+                    NestedWrappedModuleWithDelay, delay_after_loss_ms=250
+                )
+                self._test_identical_outputs(
+                    model_fn,
+                    fsdp_init_mode=fsdp_init_mode,
+                    cpu_offload=cpu_offload
+                )
 
     @skip_if_lt_x_gpu(2)
-    def test_delayed_reduce_scatter(self):
+    @parametrize(
+        "cpu_offload",
+        [CPUOffload(offload_params=True), CPUOffload(offload_params=False)]
+    )
+    def test_delayed_reduce_scatter(self, cpu_offload):
         # We insert a delay in the torch.distributed._reduce_scatter_base op, so that
         # the post_backward_stream takes much longer than the backward pass.
         # This tests that we properly block at the end of the backward pass for
         # the reductions to finish.
-        model_fn = functools.partial(
-            NestedWrappedModuleWithDelay, delay_before_reduction_ms=250
-        )
-        self._test_identical_outputs(model_fn)
+        init_modes = self._get_init_modes_for_test(cpu_offload)
+        for fsdp_init_mode in init_modes:
+            with self.subTest(fsdp_init_mode=fsdp_init_mode):
+                model_fn = functools.partial(
+                    NestedWrappedModuleWithDelay, delay_before_reduction_ms=250
+                )
+                self._test_identical_outputs(
+                    model_fn,
+                    fsdp_init_mode=fsdp_init_mode,
+                    cpu_offload=cpu_offload
+                )
 
     def _dummy_ddp_fn(self, model):
         return DummyDDP(model)
 
     @skip_if_lt_x_gpu(2)
-    def test_mixture_of_experts(self):
-        self._test_identical_outputs(
-            MixtureOfExperts,
-            # MixtureOfExperts implements custom reduce logic, so the reference
-            # behavior should use that logic instead of PyTorch DDP.
-            ref_ddp_fn=self._dummy_ddp_fn,
-        )
+    @parametrize(
+        "cpu_offload",
+        [CPUOffload(offload_params=True), CPUOffload(offload_params=False)]
+    )
+    def test_mixture_of_experts(self, cpu_offload):
+        init_modes = self._get_init_modes_for_test(cpu_offload)
+        for fsdp_init_mode in init_modes:
+            with self.subTest(fsdp_init_mode=fsdp_init_mode):
+                self._test_identical_outputs(
+                    MixtureOfExperts,
+                    # MixtureOfExperts implements custom reduce logic, so the reference
+                    # behavior should use that logic instead of PyTorch DDP.
+                    ref_ddp_fn=self._dummy_ddp_fn,
+                    fsdp_init_mode=fsdp_init_mode,
+                    cpu_offload=cpu_offload,
+                )
 
     @skip_if_lt_x_gpu(2)
-    def test_mixture_of_experts_with_delay_before_free(self):
-        model_fn = functools.partial(MixtureOfExperts, delay_before_free_ms=250)
-        self._test_identical_outputs(
-            model_fn,
-            ref_ddp_fn=self._dummy_ddp_fn,
-        )
+    @parametrize(
+        "cpu_offload",
+        [CPUOffload(offload_params=True), CPUOffload(offload_params=False)]
+    )
+    def test_mixture_of_experts_with_delay_before_free(self, cpu_offload):
+        init_modes = self._get_init_modes_for_test(cpu_offload)
+        for fsdp_init_mode in init_modes:
+            with self.subTest(fsdp_init_mode=fsdp_init_mode):
+                model_fn = functools.partial(MixtureOfExperts, delay_before_free_ms=250)
+                self._test_identical_outputs(
+                    model_fn,
+                    ref_ddp_fn=self._dummy_ddp_fn,
+                    fsdp_init_mode=fsdp_init_mode,
+                    cpu_offload=cpu_offload,
+                )
 
 
 class TestParamInit(FSDPTest):
@@ -194,6 +284,7 @@ class TestNoGrad(FSDPTest):
 
 
 instantiate_parametrized_tests(TestHooks)
+instantiate_parametrized_tests(TestParityWithDDP)
 
 if __name__ == "__main__":
     run_tests()
