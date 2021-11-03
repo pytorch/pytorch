@@ -512,7 +512,7 @@ torch::lazy::Value LazyGraphExecutor::GetIrValueForScalar(
 torch::lazy::Value LazyGraphExecutor::GetIrValueForScalar(
     const at::Scalar& value, const lazy_tensors::Shape& shape,
     const Device& device) {
-  return GetIrValueForScalar(value, shape.at_element_type(), shape.dimensions(),
+  return GetIrValueForScalar(value, shape.scalar_type(), shape.dimensions(),
                              device);
 }
 
@@ -520,7 +520,7 @@ torch::lazy::Value LazyGraphExecutor::GetIrValueForScalar(
     const at::Scalar& value, const lazy_tensors::Shape& shape,
     c10::optional<at::ScalarType> logical_element_type, const Device& device) {
   c10::ScalarType type =
-      logical_element_type ? *logical_element_type : shape.at_element_type();
+      logical_element_type ? *logical_element_type : shape.scalar_type();
   return GetIrValueForScalar(value, type, shape.dimensions(), device);
 }
 

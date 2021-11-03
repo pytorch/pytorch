@@ -59,7 +59,7 @@ class ShapeUtil {
   }
 
   static bool ElementIsIntegral(const Shape& shape) {
-    return isIntegralType(shape.at_element_type(), /* include_bool */ true);
+    return isIntegralType(shape.scalar_type(), /* include_bool */ true);
   }
 
   // Compute a hash for `shape`.

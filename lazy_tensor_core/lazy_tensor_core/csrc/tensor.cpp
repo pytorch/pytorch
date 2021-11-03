@@ -91,7 +91,7 @@ int64_t LazyTensor::size(int64_t dim) const {
 at::ScalarType LazyTensor::dtype() const {
   return data()->logical_element_type
              ? *data()->logical_element_type
-             : shape().get().at_element_type();
+             : shape().get().scalar_type();
 }
 
 c10::optional<at::ScalarType> LazyTensor::dtype_optional() const {
@@ -199,10 +199,10 @@ void LazyTensor::SetIrValue(torch::lazy::Value ir_value) {
 
 void LazyTensor::SetInPlaceIrValue(torch::lazy::Value ir_value) {
   auto tensor_shape = shape();
-  if (tensor_shape.get().at_element_type() !=
-      ir::GetShapeFromTsValue(ir_value).at_element_type()) {
+  if (tensor_shape.get().scalar_type() !=
+      ir::GetShapeFromTsValue(ir_value).scalar_type()) {
     ir_value = torch::lazy::MakeNode<ir::ops::Cast>(
-        ir_value, tensor_shape.get().at_element_type());
+        ir_value, tensor_shape.get().scalar_type());
   }
   SetIrValue(std::move(ir_value));
 }

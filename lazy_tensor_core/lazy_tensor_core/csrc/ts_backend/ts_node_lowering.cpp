@@ -415,7 +415,7 @@ class TSNodeLowering : public TSNodeLoweringInterface {
         at::TensorOptions()
             .device(torch_lazy_tensors::compiler::getBackendRegistrar()
                         ->HardwareDeviceType())
-            .dtype(shape.at_element_type());
+            .dtype(shape.scalar_type());
     return {
         loctx()->graph()->insertConstant(at::scalar_tensor(value, options))};
   }

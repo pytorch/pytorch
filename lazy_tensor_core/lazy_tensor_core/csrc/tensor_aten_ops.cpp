@@ -70,7 +70,7 @@ std::vector<int64_t> GetExpandDimensions(const lazy_tensors::Shape& shape,
 // Returns a 1-D shape for batch norm weight or bias based on the input shape.
 lazy_tensors::Shape BatchNormFeaturesShape(const LazyTensor& input) {
   auto input_shape = input.shape().get();
-  return lazy_tensors::Shape(input_shape.at_element_type(),
+  return lazy_tensors::Shape(input_shape.scalar_type(),
                              input_shape.dimensions()[1]);
 }
 
@@ -90,7 +90,7 @@ ViewInfo CreateAsStridedViewInfo(const lazy_tensors::Shape& input_shape,
                                  std::vector<int64_t> stride,
                                  c10::optional<int64_t> storage_offset) {
   lazy_tensors::Shape result_shape =
-      lazy_tensors::ShapeUtil::MakeShape(input_shape.at_element_type(), size);
+      lazy_tensors::ShapeUtil::MakeShape(input_shape.scalar_type(), size);
   AsStridedInfo as_strided_info;
   as_strided_info.stride = std::move(stride);
   if (storage_offset) {
@@ -526,7 +526,7 @@ LazyTensor view(const LazyTensor& input, c10::ArrayRef<int64_t> output_size) {
   std::vector<int64_t> complete_dimensions =
       GetCompleteShape(output_size, input_shape.get().dimensions());
   lazy_tensors::Shape shape = lazy_tensors::ShapeUtil::MakeShape(
-      input_shape.get().at_element_type(), complete_dimensions);
+      input_shape.get().scalar_type(), complete_dimensions);
   ViewInfo view_info(ViewInfo::Type::kReshape, std::move(shape), input_shape);
   return input.CreateViewTensor(std::move(view_info));
 }

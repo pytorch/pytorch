@@ -17,7 +17,7 @@ AsStrided::AsStrided(const torch::lazy::Value& input, std::vector<int64_t> size,
           torch::lazy::OpKind(at::aten::as_strided), {input},
           [&]() {
             return lazy_tensors::ShapeUtil::MakeShape(
-                ir::GetShapeFromTsValue(input).at_element_type(), size);
+                ir::GetShapeFromTsValue(input).scalar_type(), size);
           },
           /*num_outputs=*/1, torch::lazy::MHash(size, stride, storage_offset)),
       size_(std::move(size)),

@@ -13,7 +13,7 @@ namespace {
 lazy_tensors::Shape NodeOutputShape(const torch::lazy::Value& input,
                                     c10::ScalarType type) {
   lazy_tensors::Shape shape = ir::GetShapeFromTsValue(input);
-  shape.set_element_type(type);
+  shape.set_scalar_type(type);
   return shape;
 }
 

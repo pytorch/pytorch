@@ -11,27 +11,27 @@ namespace lazy_tensors {
 
 class Shape {
  public:
-  Shape() : at_element_type_(c10::ScalarType::Undefined) {}
+  Shape() : scalar_type_(c10::ScalarType::Undefined) {}
 
-  Shape(at::ScalarType element_type, c10::ArrayRef<int64_t> dimensions);
+  Shape(at::ScalarType scalar_type, c10::ArrayRef<int64_t> dimensions);
 
   Shape(c10::ArrayRef<Shape> element_shapes)
       : is_tuple_(true),
-        at_element_type_(c10::ScalarType::Undefined),
+        scalar_type_(c10::ScalarType::Undefined),
         element_shapes_(element_shapes.begin(), element_shapes.end()) {
     CHECK(element_shapes.size() > 0);
     // TODO(whc) it's not really clear what the definition of element shape
     // should be for a tuple shape.  However, for tuple shapes, we appear
-    // to be accessing the element_type field in some places.  Fix this.
-    at_element_type_ = element_shapes[0].at_element_type();
+    // to be accessing the scalar_type field in some places.  Fix this.
+    scalar_type_ = element_shapes[0].scalar_type();
   }
 
   std::string ToString(bool print_layout = false) const {
-    return c10::str(toString(at_element_type_), "[", c10::Join(",", dimensions_), "]");
+    return c10::str(toString(scalar_type_), "[", c10::Join(",", dimensions_), "]");
   }
 
-  c10::ScalarType at_element_type() const { return at_element_type_; }
-  void set_element_type(at::ScalarType value);
+  c10::ScalarType scalar_type() const { return scalar_type_; }
+  void set_scalar_type(at::ScalarType value) { scalar_type_ = value; }
 
   int64_t rank() const { return dimensions_.size(); }
 
@@ -60,13 +60,13 @@ class Shape {
   const std::vector<Shape>& tuple_shapes() const { return element_shapes_; }
 
   bool operator==(const Shape& other) const {
-    return at_element_type_ == other.at_element_type_ &&
+    return scalar_type_ == other.scalar_type_ &&
            dimensions_ == other.dimensions_;
   }
 
  private:
   bool is_tuple_ = false;
-  c10::ScalarType at_element_type_;
+  c10::ScalarType scalar_type_;
   std::vector<int64_t> dimensions_;
   std::vector<Shape> element_shapes_;
 };

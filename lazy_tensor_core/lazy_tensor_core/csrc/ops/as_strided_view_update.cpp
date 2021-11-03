@@ -19,7 +19,7 @@ AsStridedViewUpdate::AsStridedViewUpdate(const torch::lazy::Value& target,
           ltc_as_strided_view_update, {target, input},
           [&]() {
             return lazy_tensors::ShapeUtil::MakeShape(
-                ir::GetShapeFromTsValue(target).at_element_type(), size);
+                ir::GetShapeFromTsValue(target).scalar_type(), size);
           },
           /*num_outputs=*/1, torch::lazy::MHash(size, stride, storage_offset)),
       size_(std::move(size)),

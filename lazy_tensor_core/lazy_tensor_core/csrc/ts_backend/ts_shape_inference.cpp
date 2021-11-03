@@ -95,12 +95,12 @@ lazy_tensors::Shape InferConvolutionOverrideable(
 
   if (!conv->transposed()) {
     return lazy_tensors::Shape(
-        input_shape.at_element_type(),
+        input_shape.scalar_type(),
         at::native::conv_output_size(input_size, weight_size, padding, stride,
                                      dilation));
   } else {
     return lazy_tensors::Shape(
-        input_shape.at_element_type(),
+        input_shape.scalar_type(),
         at::native::conv_input_size(input_size, weight_size, padding,
                                     output_padding, stride, dilation, groups));
   }
@@ -120,7 +120,7 @@ lazy_tensors::Shape InferRepeat(const ir::ops::Repeat* repeat) {
   for (const auto idx : c10::irange(repeats.size())) {
     target_size[idx] = padded_size[idx] * repeats[idx];
   }
-  return lazy_tensors::Shape(input_shape.at_element_type(), target_size);
+  return lazy_tensors::Shape(input_shape.scalar_type(), target_size);
 }
 
 lazy_tensors::Shape InferSqueeze(const ir::ops::Squeeze* squeeze) {
@@ -129,7 +129,7 @@ lazy_tensors::Shape InferSqueeze(const ir::ops::Squeeze* squeeze) {
       ir::GetShapeFromTsOutput(argument);
   const auto output_sizes =
       BuildSqueezedDimensions(argument_shape.dimensions(), squeeze->dim());
-  return lazy_tensors::Shape(argument_shape.at_element_type(), output_sizes);
+  return lazy_tensors::Shape(argument_shape.scalar_type(), output_sizes);
 }
 
 lazy_tensors::Shape InferStack(const ir::ops::Stack* stack) {
@@ -146,7 +146,7 @@ lazy_tensors::Shape InferStack(const ir::ops::Stack* stack) {
   CHECK_LE(stack->dim(), output_dimensions.size());
   output_dimensions.insert(output_dimensions.begin() + stack->dim(),
                            inputs.size());
-  return lazy_tensors::Shape(input_shape.at_element_type(), output_dimensions);
+  return lazy_tensors::Shape(input_shape.scalar_type(), output_dimensions);
 }
 lazy_tensors::Shape InferShape(const torch::lazy::Node* node) {
   if (node->op() == *ir::ops::ltc_generic_slice) {
@@ -154,7 +154,7 @@ lazy_tensors::Shape InferShape(const torch::lazy::Node* node) {
         node, *ir::ops::ltc_generic_slice);
     const torch::lazy::Output& argument = node->operand(0);
     return lazy_tensors::Shape(
-        ir::GetShapeFromTsOutput(argument).at_element_type(),
+        ir::GetShapeFromTsOutput(argument).scalar_type(),
         generic_slice->sizes());
   }
   if (node->op() == *ir::ops::ltc_update_slice) {
@@ -167,7 +167,7 @@ lazy_tensors::Shape InferShape(const torch::lazy::Node* node) {
           node, ir::OpKind(at::aten::expand));
       const torch::lazy::Output& argument = node->operand(0);
       return lazy_tensors::Shape(
-          ir::GetShapeFromTsOutput(argument).at_element_type(), expand->size());
+          ir::GetShapeFromTsOutput(argument).scalar_type(), expand->size());
     }
     case at::aten::convolution_backward_overrideable: {
       return InferConvolutionBackwardOverrideable(
@@ -224,7 +224,7 @@ lazy_tensors::Shape InferShape(const torch::lazy::Node* node) {
       for (auto rit = pad.rbegin(); rit != pad.rend(); rit += 2, ++i) {
         padded_dimensions[i] += (*rit + *(rit + 1));
       }
-      return lazy_tensors::Shape(argument_shape.at_element_type(),
+      return lazy_tensors::Shape(argument_shape.scalar_type(),
                                  padded_dimensions);
     }
     case at::aten::eq:
