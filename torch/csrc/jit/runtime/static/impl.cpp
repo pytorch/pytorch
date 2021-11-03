@@ -1145,10 +1145,14 @@ float StaticRuntime::benchmark_model(
 
   const bool is_kwargs_empty = kwargs_list.size() == 0;
   const std::unordered_map<std::string, c10::IValue> empty_kwargs;
+  bool manage_output_tensors = static_module_.opts().manage_output_tensors;
   for (const auto i : c10::irange(warmup_runs)) {
     (void)i; // Suppress unused variable warning
     for (const auto j : c10::irange(args_list.size())) {
       operator()(args_list[j], is_kwargs_empty ? empty_kwargs : kwargs_list[j]);
+      if (manage_output_tensors) {
+        deallocateOutputTensors();
+      }
     }
   }
   caffe2::Timer timer;
@@ -1156,6 +1160,9 @@ float StaticRuntime::benchmark_model(
     (void)i; // Suppress unused variable warning
     for (const auto j : c10::irange(args_list.size())) {
       operator()(args_list[j], is_kwargs_empty ? empty_kwargs : kwargs_list[j]);
+      if (manage_output_tensors) {
+        deallocateOutputTensors();
+      }
     }
   }
   float millis = timer.MilliSeconds();
@@ -1253,7 +1260,7 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
 
   const bool is_kwargs_empty = kwargs_list.size() == 0;
   const std::unordered_map<std::string, c10::IValue> empty_kwargs;
-
+  bool manage_output_tensors = static_module_.opts().manage_output_tensors;
   // See comment on above use of InferenceMode for
   // explanation.
   c10::InferenceMode mode;
@@ -1273,6 +1280,9 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
   // iterations just use the already established memory planning.
   timer.Start();
   operator()(args_list[0], is_kwargs_empty ? empty_kwargs : kwargs_list[0]);
+  if (manage_output_tensors) {
+    deallocateOutputTensors();
+  }
   results.first_iter_time = timer.MilliSeconds();
 
   // warmup runs
@@ -1280,6 +1290,9 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
     (void)i; // Suppress unused variable warning
     for (const auto j : c10::irange(args_list.size())) {
       operator()(args_list[j], is_kwargs_empty ? empty_kwargs : kwargs_list[j]);
+      if (manage_output_tensors) {
+        deallocateOutputTensors();
+      }
     }
   }
 
@@ -1309,6 +1322,9 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
         planner_->deallocate();
         // clean up owning refs of input tensors
         clean_up_input_ivalues();
+      }
+      if (manage_output_tensors) {
+        deallocateOutputTensors();
       }
       millis = timer.MilliSeconds();
       results.memory_dealloc_time += millis;
