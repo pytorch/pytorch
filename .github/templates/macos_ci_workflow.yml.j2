@@ -73,6 +73,7 @@ jobs:
         run: |
           .jenkins/pytorch/macos-test.sh
       !{{ common.render_test_results() }}
+      !{{ common.upload_test_reports("macos", use_s3=False) }}
 {%- endif %}
 {% endblock +%}
 

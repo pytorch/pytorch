@@ -122,7 +122,7 @@ concurrency:
 {%- endmacro -%}
 
 
-{%- macro upload_test_reports(name) -%}
+{%- macro upload_test_reports(name, use_s3=True) -%}
       - name: Zip test reports for upload
         if: always()
         env:
@@ -142,8 +142,13 @@ concurrency:
           rm -f test-reports-*.zip
           zip -r "test-reports-${FILE_SUFFIX}.zip" test -i '*.xml'
 {%- endif %}
+{%- if use_s3 %}
       - uses: !{{ upload_artifact_s3_action }}
         name: Store Test Reports on S3
+{%- else %}
+      - uses: actions/upload-artifact@v2
+        name: Store Test Reports on S3
+{%- endif %}
         if: always()
         with:
           retention-days: 14
