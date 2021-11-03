@@ -48,6 +48,15 @@ hu.assert_deadline_disabled()
 from functools import reduce
 
 class TestQuantizationAwareTraining(QuantizationTestCase):
+    def setUp(self):
+        super().setUp()
+
+        self.embed_linear_data_train = [[torch.randint(0, 10, (12, 12), dtype=torch.long),
+                                         torch.randn((12, 1), dtype=torch.float)]
+                                        for _ in range(2)]
+        self.embed_data = [[torch.randint(0, 10, (12, 1))]]
+
+
     def test_manual(self):
         for qengine in supported_qengines:
             with override_quantized_engine(qengine):
@@ -806,7 +815,7 @@ class TestConvBNQATModule(TestCase):
         ).to(dtype=torch.double)
 
         qat_op.apply(torch.ao.quantization.disable_fake_quant)
-        qat_ref_op.apply(torch.quantization.disable_fake_quant)
+        qat_ref_op.apply(torch.ao.quantization.disable_fake_quant)
 
         # align inputs and internal parameters
         qat_ref_op.weight = torch.nn.Parameter(qat_op.weight.detach().clone())
