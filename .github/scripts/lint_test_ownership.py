@@ -16,7 +16,7 @@ import fnmatch
 import json
 import sys
 from pathlib import Path
-from typing import List
+from typing import List, Any
 
 
 # Team/owner labels usually start with "module: " or "oncall: ", but the following are acceptable exceptions
@@ -38,7 +38,7 @@ def get_all_test_files() -> List[Path]:
     return [f for f in test_files if any([fnmatch.fnmatch(str(f), g) for g in GLOB_EXCEPTIONS])]
 
 
-def get_pytorch_labels() -> List[str]:
+def get_pytorch_labels() -> Any:
     bucket = S3_RESOURCE_READ_ONLY.Bucket("ossci-metrics")
     summaries = bucket.objects.filter(Prefix="pytorch_labels.json")
     for summary in summaries:

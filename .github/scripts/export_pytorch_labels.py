@@ -10,14 +10,14 @@ This script assumes the correct env vars are set for AWS permissions.
 
 '''
 
+import boto3
 import json
 from functools import lru_cache
-from typing import List
+from typing import List, Any
 from urllib.request import urlopen, Request
-from tools.stats.s3_stat_parser import get_S3_object_from_bucket
 
 # Modified from https://github.com/pytorch/pytorch/blob/b00206d4737d1f1e7a442c9f8a1cadccd272a386/torch/hub.py#L129
-def _read_url(url):
+def _read_url(url) -> Any:
     with urlopen(url) as r:
         return r.headers, r.read().decode(r.headers.get_content_charset('utf-8'))
 
@@ -27,7 +27,7 @@ def request_for_labels(url: str):
     return _read_url(Request(url, headers=headers))
 
 
-def get_last_page(header):
+def get_last_page(header) -> int:
     # Link info looks like: <https://api.github.com/repositories/65600975/labels?per_page=100&page=2>;
     # rel="next", <https://api.github.com/repositories/65600975/labels?per_page=100&page=3>; rel="last"
     link_info = header['link']
@@ -57,9 +57,9 @@ def get_pytorch_labels() -> List[str]:
     return labels
 
 
-def send_labels_to_S3(labels: List[str]):
+def send_labels_to_S3(labels: List[str]) -> None:
     labels_file_name = "pytorch_labels.json"
-    obj = get_S3_object_from_bucket('ossci-metrics', labels_file_name)
+    obj = boto3.resource('s3').Object('ossci-metrics', labels_file_name)
     obj.put(Body=json.dumps(labels).encode())
 
 
