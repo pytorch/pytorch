@@ -2113,7 +2113,7 @@ class TestCase(expecttest.TestCase):
             with open(expected_file, 'w') as f:
                 # Adjust for producer_version, leave s unmodified
                 s_tag = re.sub(r'(producer_version): "[0-9.]*"',
-                               r'\1producer_version: "CURRENT_VERSION"', s)
+                               r'\1: "CURRENT_VERSION"', s)
                 f.write(s_tag)
 
         try:
