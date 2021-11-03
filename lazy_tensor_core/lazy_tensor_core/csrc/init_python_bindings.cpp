@@ -62,7 +62,7 @@ Device GetDeviceOrCurrent(const std::string& device_str) {
 void PrepareToExit() {
   //TODO(whc) should we hook this interface up? It does nothing currently
   torch_lazy_tensors::compiler::getBackendRegistrar()->PrepareToExit();
-  //TODO(whc) can I call this unconditionally? 
+  //TODO(whc) can I call this unconditionally?
   LazyGraphExecutor::Get()->WaitDeviceOps({});
 }
 
