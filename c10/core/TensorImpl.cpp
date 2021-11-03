@@ -100,8 +100,7 @@ void TensorImpl::_set_fw_grad(
     bool is_inplace_op) {
   if (!autograd_meta_)
     autograd_meta_ = impl::GetAutogradMetaFactory()->make();
-  autograd_meta_->set_fw_grad(
-      new_grad, self, level, is_inplace_op);
+  autograd_meta_->set_fw_grad(new_grad, self, level, is_inplace_op);
 }
 
 TensorImpl::TensorImpl(

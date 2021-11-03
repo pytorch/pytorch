@@ -169,24 +169,4 @@ void doWrite(io fildes, void* raw_buf, size_t nbytes) {
 
 // NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <torch/csrc/generic/serialization.cpp>
-#include <TH/THGenerateAllTypes.h>
-
-// NOLINTNEXTLINE(bugprone-suspicious-include)
-#include <torch/csrc/generic/serialization.cpp>
-#include <TH/THGenerateComplexTypes.h>
-
-// NOLINTNEXTLINE(bugprone-suspicious-include)
-#include <torch/csrc/generic/serialization.cpp>
-#include <TH/THGenerateHalfType.h>
-
-// NOLINTNEXTLINE(bugprone-suspicious-include)
-#include <torch/csrc/generic/serialization.cpp>
-#include <TH/THGenerateBFloat16Type.h>
-
-// NOLINTNEXTLINE(bugprone-suspicious-include)
-#include <torch/csrc/generic/serialization.cpp>
-#include <TH/THGenerateBoolType.h>
-
-// NOLINTNEXTLINE(bugprone-suspicious-include)
-#include <torch/csrc/generic/serialization.cpp>
-#include <TH/THGenerateQTypes.h>
+#include <TH/THGenerateByteType.h>
