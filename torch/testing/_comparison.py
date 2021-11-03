@@ -4,6 +4,7 @@ import collections.abc
 from typing import NamedTuple, Callable, Sequence, List, Union, Optional, Type, Tuple, Any, cast
 
 import torch
+from torch._C import ScriptDict  # type: ignore[attr-defined]
 
 from ._core import _unravel_index
 
@@ -20,6 +21,8 @@ class ErrorMeta(NamedTuple):
         return self.type(msg)
 
 
+# Some analysis of tolerance by logging tests from test_torch.py can be found in
+# https://github.com/pytorch/pytorch/pull/32538.
 _DTYPE_PRECISIONS = {
     torch.float16: (0.001, 1e-5),
     torch.bfloat16: (0.016, 1e-5),
@@ -650,7 +653,9 @@ def originate_pairs(
 
         return None, pairs
 
-    elif isinstance(actual, collections.abc.Mapping) and isinstance(expected, collections.abc.Mapping):
+    elif isinstance(actual, (collections.abc.Mapping, ScriptDict)) and isinstance(
+        expected, (collections.abc.Mapping, ScriptDict)
+    ):
         actual_keys = set(actual.keys())
         expected_keys = set(expected.keys())
         if actual_keys != expected_keys:
