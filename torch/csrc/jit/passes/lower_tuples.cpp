@@ -48,6 +48,7 @@ static void flattenTupleInLoopParams(Node* n, size_t index) {
     block_node->insertInput(index + j + 1, input->node()->inputs().at(j));
   }
   new_construct_node->output()->setType(block->inputs().at(index - 1)->type());
+  new_construct_node->copyMetadata(n);
   block->inputs().at(index - 1)->replaceAllUsesWith(
       new_construct_node->output());
   block->eraseInput(index - 1);
@@ -92,6 +93,7 @@ static void flattenTupleInBlockReturn(Node* n, size_t index) {
   }
   // Replace the block node with the new TupleConstruct node
   new_construct_node->output()->setType(tuple_output->type());
+  new_construct_node->copyMetadata(block_node);
   tuple_output->replaceAllUsesWith(new_construct_node->output());
   block_node->eraseOutput(index);
 }
@@ -141,6 +143,7 @@ void removeTupleNodes(Node* n, bool must_remove_tuples) {
     }
     auto graph = n->owningGraph();
     auto tuple_out = graph->createTuple(values);
+    tuple_out->copyMetadata(n);
     WithInsertPoint insert(n);
     graph->insertNode(tuple_out);
     n->output()->replaceAllUsesWith(tuple_out->output());
@@ -157,7 +160,8 @@ static void RemoveTupleConstants(Node* n) {
   }
 
   auto g = n->owningGraph();
-  auto tuple_elements = toIValue(n->output()).value().toTuple()->elements();
+  auto tuple = toIValue(n->output()).value().toTuple();
+  const auto& tuple_elements = tuple->elements();
   WithInsertPoint insert(n);
   std::vector<Value*> elements;
   for (const auto& elem : tuple_elements) {
@@ -167,6 +171,7 @@ static void RemoveTupleConstants(Node* n) {
   auto tuple_type = n->output()->type()->expect<TupleType>();
   auto tuple_construct = g->insertNode(n->owningGraph()->createTuple(
       elements, tuple_type->schema() ? tuple_type : nullptr));
+  tuple_construct->copyMetadata(n);
 
   // insert the tuple first before recursing on its elements, so that its
   // elements will have a use
@@ -236,6 +241,7 @@ static void flattenOutputs(Node* n, Node* insert_point) {
         }
         auto new_tup =
             graph.createTuple(n->outputs().slice(i + 1, tt->elements().size()));
+        new_tup->copyMetadata(n);
         new_tup->insertBefore(insert_point);
         insert_point = new_tup;
         output->replaceAllUsesWith(new_tup->output());

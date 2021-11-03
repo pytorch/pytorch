@@ -39,7 +39,8 @@ import tempfile
 import json
 import __main__  # type: ignore[import]
 import errno
-from typing import cast, Any, Dict, Iterable, Iterator, Optional, Union
+import ctypes
+from typing import cast, Any, Dict, Iterable, Iterator, Optional, Union, List
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -57,6 +58,8 @@ from torch import Tensor
 import torch.backends.cudnn
 import torch.backends.mkl
 from enum import Enum
+from statistics import mean
+import functools
 
 torch.backends.disable_global_flags()
 
@@ -665,16 +668,19 @@ else:
 
 IS_FILESYSTEM_UTF8_ENCODING = sys.getfilesystemencoding() == 'utf-8'
 
-def _check_module_exists(name):
+def _check_module_exists(name: str) -> bool:
     r"""Returns if a top-level module with :attr:`name` exists *without**
     importing it. This is generally safer than try-catch block around a
     `import X`. It avoids third party libraries breaking assumptions of some of
     our tests, e.g., setting multiprocessing start method when imported
     (see librosa/#747, torchvision/#544).
     """
-    import importlib.util
-    spec = importlib.util.find_spec(name)
-    return spec is not None
+    try:
+        import importlib.util
+        spec = importlib.util.find_spec(name)
+        return spec is not None
+    except ImportError:
+        return False
 
 TEST_NUMPY = _check_module_exists('numpy')
 TEST_SCIPY = _check_module_exists('scipy')
@@ -684,6 +690,8 @@ TEST_NUMBA = _check_module_exists('numba')
 TEST_DILL = _check_module_exists('dill')
 
 TEST_LIBROSA = _check_module_exists('librosa')
+
+BUILD_WITH_CAFFE2 = _check_module_exists("caffe2.python.caffe2_pybind11_state")
 
 # Python 2.7 doesn't have spawn
 NO_MULTIPROCESSING_SPAWN = os.environ.get('NO_MULTIPROCESSING_SPAWN', '0') == '1'
@@ -802,15 +810,21 @@ def skipIfNotMiopenSuggestNHWC(fn):
 # Context manager for setting deterministic flag and automatically
 # resetting it to its original value
 class DeterministicGuard:
-    def __init__(self, deterministic):
+    def __init__(self, deterministic, *, warn_only=False):
         self.deterministic = deterministic
+        self.warn_only = warn_only
 
     def __enter__(self):
         self.deterministic_restore = torch.are_deterministic_algorithms_enabled()
-        torch.use_deterministic_algorithms(self.deterministic)
+        self.warn_only_restore = torch.is_deterministic_algorithms_warn_only_enabled()
+        torch.use_deterministic_algorithms(
+            self.deterministic,
+            warn_only=self.warn_only)
 
     def __exit__(self, exception_type, exception_value, traceback):
-        torch.use_deterministic_algorithms(self.deterministic_restore)
+        torch.use_deterministic_algorithms(
+            self.deterministic_restore,
+            warn_only=self.warn_only_restore)
 
 # Context manager for setting cuda sync debug mode and reset it
 # to original value
@@ -859,7 +873,9 @@ class CudaSyncGuard:
 def wrapDeterministicFlagAPITest(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        with DeterministicGuard(torch.are_deterministic_algorithms_enabled()):
+        with DeterministicGuard(
+                torch.are_deterministic_algorithms_enabled(),
+                warn_only=torch.is_deterministic_algorithms_warn_only_enabled()):
             class CuBLASConfigGuard:
                 cublas_var_name = 'CUBLAS_WORKSPACE_CONFIG'
 
@@ -930,6 +946,8 @@ def skipIfNotRegistered(op_name, message):
         @skipIfNotRegistered('MyOp', 'MyOp is not linked!')
             This will check if 'MyOp' is in the caffe2.python.core
     """
+    if not BUILD_WITH_CAFFE2:
+        return unittest.skip("Pytorch is compiled without Caffe2")
     try:
         from caffe2.python import core
         skipper = unittest.skipIf(op_name not in core._REGISTERED_OPERATORS,
@@ -1163,9 +1181,16 @@ class CudaMemoryLeakCheck():
         afters = self.get_cuda_memory_usage()
 
         for i, (before, after) in enumerate(zip(self.befores, afters)):
-            self.testcase.assertEqual(
-                before, after, msg='{} leaked {} bytes CUDA memory on device {}'.format(
-                    self.name, after - before, i))
+            if not TEST_WITH_ROCM:
+                self.testcase.assertEqual(
+                    before, after, msg='{} leaked {} bytes CUDA memory on device {}'.format(
+                        self.name, after - before, i))
+            else:
+                # See #62533
+                # ROCM: Sometimes the transient memory is reported as leaked memory
+                if before != after:
+                    warnings.warn('{} leaked {} bytes ROCm memory on device {}'.format(
+                        self.name, after - before, i), RuntimeWarning)
 
 @contextmanager
 def skip_exception_type(exc_type):
@@ -1230,7 +1255,8 @@ def check_if_enable(test: unittest.TestCase):
                 "win": IS_WINDOWS,
                 "windows": IS_WINDOWS,
                 "linux": IS_LINUX,
-                "rocm": TEST_WITH_ROCM
+                "rocm": TEST_WITH_ROCM,
+                "asan": TEST_WITH_ASAN
             }
             if platforms == [] or any([platform_to_conditional[platform] for platform in platforms]):
                 raise unittest.SkipTest(
@@ -1609,7 +1635,7 @@ class TestCase(expecttest.TestCase):
     def safeToDense(self, t):
         return t.coalesce().to_dense()
 
-    # Compares torch function with reference function for given sample input (object of SampleInput)
+    # Compares a torch function with a reference function for a given sample input (object of SampleInput)
     # Note: only values are compared, type comparison is not done here
     def compare_with_reference(self, torch_fn, ref_fn, sample_input, **kwargs):
         n_inp, n_args, n_kwargs = sample_input.numpy()
@@ -1781,8 +1807,10 @@ class TestCase(expecttest.TestCase):
         assert (atol is None) == (rtol is None), "If one of atol or rtol is specified, then the other must be too"
         debug_msg: Optional[str] = None
 
+        if x is None or y is None:
+            self.assertTrue(x is None and y is None)
         # Tensor x Number and Number x Tensor comparisons
-        if isinstance(x, torch.Tensor) and isinstance(y, Number):
+        elif isinstance(x, torch.Tensor) and isinstance(y, Number):
             self.assertEqual(x.item(), y, atol=atol, rtol=rtol, msg=msg,
                              exact_dtype=exact_dtype, exact_device=exact_device)
         elif isinstance(y, torch.Tensor) and isinstance(x, Number):
@@ -2295,12 +2323,45 @@ def random_well_conditioned_matrix(*shape, dtype, device, mean=1.0, sigma=0.001)
         .sort(-1, descending=True).values.to(dtype)
     return (u * s.unsqueeze(-2)) @ vh
 
+# Returns a noncontiguous (tensor with the same shape and values as t
+# The noncontiguous tensor is constructed such that elements in the innermost
+#   dimension are separated by zeros or (whenever possible) nans
+# TODO: consider more complicated noncontiguity schemes
+def noncontiguous_like(t):
+    # Short-circuits if t is already noncontiguous
+    if not t.is_contiguous():
+        return t
+
+    # Special-cases 0-dim tensors
+    if t.ndim == 0:
+        result = t.detach().unsqueeze(0).repeat_interleave(2, dim=-1)
+        if t.dtype.is_floating_point or t.dtype.is_complex:
+            result[0] = math.nan
+        else:
+            result[0] = 0
+        result.set_(result.storage(), 1, t.size(), ())
+        result.requires_grad_(t.requires_grad)
+        return result
+
+    # 1+ dim tensor case
+    result = torch.repeat_interleave(t.detach(), 2, dim=-1)
+    if t.dtype.is_floating_point or t.dtype.is_complex:
+        result[..., 1::2] = math.nan
+    else:
+        result[..., 1::2] = 0
+
+    strides = list(result.stride())
+    strides[-1] = strides[-1] * 2
+    result.set_(result.storage(), result.storage_offset(), t.size(), stride=tuple(strides))
+    result.requires_grad_(t.requires_grad)
+    return result
+
 # TODO: remove this (prefer make_symmetric_matrices below)
 def random_symmetric_matrix(l, *batches, **kwargs):
     dtype = kwargs.get('dtype', torch.double)
     device = kwargs.get('device', 'cpu')
     A = torch.randn(*(batches + (l, l)), dtype=dtype, device=device)
-    A = (A + A.transpose(-2, -1)).div_(2)
+    A = (A + A.mT).div_(2)
     return A
 
 # Creates a symmetric matrix or batch of symmetric matrices
@@ -2308,33 +2369,39 @@ def random_symmetric_matrix(l, *batches, **kwargs):
 def make_symmetric_matrices(*shape, device, dtype):
     assert shape[-1] == shape[-2]
     t = make_tensor(shape, device=device, dtype=dtype)
-    t = t + t.transpose(-2, -1).div_(2)
+    t = (t + t.mT).div_(2)
     return t
 
 def random_hermitian_matrix(l, *batches, **kwargs):
     dtype = kwargs.get('dtype', torch.double)
     device = kwargs.get('device', 'cpu')
     A = torch.randn(*(batches + (l, l)), dtype=dtype, device=device)
-    A = (A + A.transpose(-2, -1).conj()).div_(2)
+    A = (A + A.mH).div_(2)
     return A
 
 
 def random_symmetric_psd_matrix(l, *batches, **kwargs):
+    """
+    Returns a batch of random symmetric positive-semi-definite matrices.
+    The shape of the result is batch_dims + (matrix_size, matrix_size)
+    The following example creates a tensor of size 2 x 4 x 3 x 3
+    >>> matrices = random_symmetric_psd_matrix(3, 2, 4, dtype=dtype, device=device)
+    """
     dtype = kwargs.get('dtype', torch.double)
     device = kwargs.get('device', 'cpu')
     A = torch.randn(*(batches + (l, l)), dtype=dtype, device=device)
-    return torch.matmul(A, A.transpose(-2, -1))
+    return A @ A.mT
 
 
 def random_hermitian_psd_matrix(matrix_size, *batch_dims, dtype=torch.double, device='cpu'):
     """
-    Returns a batch of random Hermitian semi-positive-definite matrices.
+    Returns a batch of random Hermitian positive-semi-definite matrices.
     The shape of the result is batch_dims + (matrix_size, matrix_size)
     The following example creates a tensor of size 2 x 4 x 3 x 3
     >>> matrices = random_hermitian_psd_matrix(3, 2, 4, dtype=dtype, device=device)
     """
     A = torch.randn(*(batch_dims + (matrix_size, matrix_size)), dtype=dtype, device=device)
-    return torch.matmul(A, A.conj().transpose(-2, -1))
+    return A @ A.mH
 
 
 # TODO: remove this (prefer make_symmetric_pd_matrices below)
@@ -2343,7 +2410,7 @@ def random_symmetric_pd_matrix(matrix_size, *batch_dims, **kwargs):
     device = kwargs.get('device', 'cpu')
     A = torch.randn(*(batch_dims + (matrix_size, matrix_size)),
                     dtype=dtype, device=device)
-    return torch.matmul(A, A.transpose(-2, -1)) \
+    return torch.matmul(A, A.mT) \
         + torch.eye(matrix_size, dtype=dtype, device=device) * 1e-5
 
 
@@ -2352,9 +2419,8 @@ def random_symmetric_pd_matrix(matrix_size, *batch_dims, **kwargs):
 def make_symmetric_pd_matrices(*shape, device, dtype):
     assert shape[-1] == shape[-2]
     t = make_tensor(shape, device=device, dtype=dtype)
-    t = torch.matmul(t, t.transpose(-2, -1))
     i = torch.eye(shape[-1], device=device, dtype=dtype) * 1e-5
-    return t + i
+    return t @ t.mT + i
 
 def random_hermitian_pd_matrix(matrix_size, *batch_dims, dtype, device):
     """
@@ -2365,8 +2431,7 @@ def random_hermitian_pd_matrix(matrix_size, *batch_dims, dtype, device):
     """
     A = torch.randn(*(batch_dims + (matrix_size, matrix_size)),
                     dtype=dtype, device=device)
-    return torch.matmul(A, A.transpose(-2, -1).conj()) \
-        + torch.eye(matrix_size, dtype=dtype, device=device)
+    return A @ A.mH + torch.eye(matrix_size, dtype=dtype, device=device)
 
 
 # TODO: remove this (prefer make_fullrank_matrices_with_distinct_singular_values below)
@@ -2811,6 +2876,44 @@ def get_tensors_from(args, kwargs):
                [v for v in kwargs.values() if isinstance(v, Tensor)])
 
 
+# Returns scalar tensor representation of a list of integer byte values
+def bytes_to_scalar(byte_list: List[int], dtype: torch.dtype, device: torch.device):
+    dtype_to_ctype: Dict[torch.dtype, Any] = {
+        torch.int8: ctypes.c_int8,
+        torch.uint8: ctypes.c_uint8,
+        torch.int16: ctypes.c_int16,
+        torch.int32: ctypes.c_int32,
+        torch.int64: ctypes.c_int64,
+        torch.bool: ctypes.c_bool,
+        torch.float32: ctypes.c_float,
+        torch.complex64: ctypes.c_float,
+        torch.float64: ctypes.c_double,
+        torch.complex128: ctypes.c_double,
+    }
+    ctype = dtype_to_ctype[dtype]
+    num_bytes = ctypes.sizeof(ctype)
+
+    def check_bytes(byte_list):
+        for byte in byte_list:
+            assert 0 <= byte <= 255
+
+    if dtype.is_complex:
+        assert len(byte_list) == (num_bytes * 2)
+        check_bytes(byte_list)
+        real = ctype.from_buffer((ctypes.c_byte * num_bytes)(
+            *byte_list[:num_bytes])).value
+        imag = ctype.from_buffer((ctypes.c_byte * num_bytes)(
+            *byte_list[num_bytes:])).value
+        res = real + 1j * imag
+    else:
+        assert len(byte_list) == num_bytes
+        check_bytes(byte_list)
+        res = ctype.from_buffer((ctypes.c_byte * num_bytes)(
+            *byte_list)).value
+
+    return torch.tensor(res, device=device, dtype=dtype)
+
+
 def has_breakpad():
     # We always build with breakpad in CI
     if IS_IN_CI:
@@ -2853,3 +2956,53 @@ def sandcastle_skip_if(condition, reason):
 def dtype_name(dtype):
     """ Returns the pretty name of the dtype (e.g. torch.int64 -> int64). """
     return str(dtype).split('.')[1]
+
+
+def set_single_threaded_if_parallel_tbb(fn):
+    """Set test to be single threaded for parallel tbb.
+
+    See https://github.com/pytorch/pytorch/issues/64571#issuecomment-914691883
+    """
+    if not IS_TBB:
+        return fn
+
+    @wraps(fn)
+    def wrap_fn(*args, **kwargs):
+        num_threads = torch.get_num_threads()
+        torch.set_num_threads(1)
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            torch.set_num_threads(num_threads)
+    return wrap_fn
+
+
+@functools.lru_cache()
+def get_cycles_per_ms() -> float:
+    """Measure and return approximate number of cycles per millisecond for torch.cuda._sleep
+    """
+
+    def measure() -> float:
+        start = torch.cuda.Event(enable_timing=True)
+        end = torch.cuda.Event(enable_timing=True)
+        start.record()
+        torch.cuda._sleep(1000000)
+        end.record()
+        end.synchronize()
+        cycles_per_ms = 1000000 / start.elapsed_time(end)
+        return cycles_per_ms
+
+    # Get 10 values and remove the 2 max and 2 min and return the avg.
+    # This is to avoid system disturbance that skew the results, e.g.
+    # the very first cuda call likely does a bunch of init, which takes
+    # much longer than subsequent calls.
+    #
+    # Tested on both Tesla V100, Quadro GP100, Titan RTX, RTX 3090 GPUs
+    # and seems to return stable values. Therefore, we enable caching
+    # using lru_cache decorator above.
+    num = 10
+    vals = []
+    for _ in range(num):
+        vals.append(measure())
+    vals = sorted(vals)
+    return mean(vals[2 : num - 2])

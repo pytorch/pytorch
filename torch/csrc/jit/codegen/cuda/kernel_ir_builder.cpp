@@ -6,43 +6,12 @@ namespace fuser {
 namespace cuda {
 namespace kir {
 
-bool isLoweredScalar(const Val* val) {
-  switch (val->getValType().value()) {
-    case ValType::KirNamedScalar:
-    case ValType::KirScalar:
-      return true;
-    default:
-      return false;
-  }
-}
-
-bool isLoweredVal(const Val* val) {
-  switch (val->getValType().value()) {
-    case ValType::TensorIndex:
-    case ValType::KirNamedScalar:
-    case ValType::KirScalar:
-    case ValType::KirTensorDomain:
-    case ValType::KirIterDomain:
-    case ValType::KirTensorView:
-      return true;
-    default:
-      return false;
-  }
-}
-
-Val* IrBuilder::newResult(const Val* lhs, const Val* rhs) {
-  TORCH_CHECK(isLoweredScalar(lhs));
-  TORCH_CHECK(isLoweredScalar(rhs));
-  TORCH_CHECK(lhs->getDataType() == rhs->getDataType());
-
-  // Allocate a compatible result value
-  switch (lhs->getDataType().value()) {
+Val* IrBuilder::newResult(DataType dtype) {
+  switch (dtype) {
     case DataType::Bool:
       return create<Bool>(c10::nullopt);
-    case DataType::Float:
-      return create<Float>(c10::nullopt);
-    case DataType::Half:
-      return create<Half>(c10::nullopt);
+    case DataType::Double:
+      return create<Double>(c10::nullopt);
     case DataType::Int:
       return create<Int>(c10::nullopt);
     default:
@@ -51,7 +20,8 @@ Val* IrBuilder::newResult(const Val* lhs, const Val* rhs) {
 }
 
 Val* IrBuilder::newArithmeticExpr(BinaryOpType op_type, Val* lhs, Val* rhs) {
-  auto result = newResult(lhs, rhs);
+  TORCH_CHECK(lhs->dtype() == rhs->dtype(), "Incompatible operand types");
+  auto result = newResult(lhs->dtype());
   create<BinaryOp>(op_type, result, lhs, rhs);
   // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
   return result;
@@ -64,6 +34,31 @@ Val* IrBuilder::newLogicExpr(BinaryOpType op_type, Val* lhs, Val* rhs) {
   return result;
 }
 
+Val* IrBuilder::whereExpr(Val* pred, Val* lhs, Val* rhs) {
+  TORCH_CHECK(lhs->dtype() == rhs->dtype(), "Incompatible operand types");
+  auto result = newResult(lhs->dtype());
+  create<TernaryOp>(TernaryOpType::Where, result, pred, lhs, rhs);
+  return result;
+}
+
+Val* IrBuilder::negExpr(Val* val) {
+  auto result = newResult(val->dtype());
+  create<UnaryOp>(UnaryOpType::Neg, result, val);
+  return result;
+}
+
+Val* IrBuilder::setExprNamedScalar(const std::string& name, Val* val) {
+  auto result = create<NamedScalar>(name, val->dtype());
+  create<UnaryOp>(UnaryOpType::Set, result, val);
+  return result;
+}
+
+Val* IrBuilder::addressExprNamedScalar(const std::string& name, Val* val) {
+  auto result = create<NamedScalar>(name, DataType::Int);
+  create<UnaryOp>(UnaryOpType::Address, result, val);
+  return result;
+}
+
 Val* IrBuilder::andExpr(Val* lhs, Val* rhs) {
   return newLogicExpr(BinaryOpType::And, lhs, rhs);
 }
@@ -72,8 +67,20 @@ Val* IrBuilder::eqExpr(Val* lhs, Val* rhs) {
   return newLogicExpr(BinaryOpType::Eq, lhs, rhs);
 }
 
+Val* IrBuilder::gtExpr(Val* lhs, Val* rhs) {
+  return newLogicExpr(BinaryOpType::GT, lhs, rhs);
+}
+
 Val* IrBuilder::ltExpr(Val* lhs, Val* rhs) {
   return newLogicExpr(BinaryOpType::LT, lhs, rhs);
+}
+
+Val* IrBuilder::leExpr(Val* lhs, Val* rhs) {
+  return newLogicExpr(BinaryOpType::LE, lhs, rhs);
+}
+
+Val* IrBuilder::geExpr(Val* lhs, Val* rhs) {
+  return newLogicExpr(BinaryOpType::GE, lhs, rhs);
 }
 
 Val* IrBuilder::addExpr(Val* lhs, Val* rhs) {
@@ -98,6 +105,49 @@ Val* IrBuilder::ceilDivExpr(Val* lhs, Val* rhs) {
 
 Val* IrBuilder::modExpr(Val* lhs, Val* rhs) {
   return newArithmeticExpr(BinaryOpType::Mod, lhs, rhs);
+}
+
+Val* IrBuilder::maxExpr(Val* lhs, Val* rhs) {
+  return newArithmeticExpr(BinaryOpType::Max, lhs, rhs);
+}
+
+Val* IrBuilder::minExpr(Val* lhs, Val* rhs) {
+  return newArithmeticExpr(BinaryOpType::Min, lhs, rhs);
+}
+
+Int* IrBuilder::zeroVal() {
+  if (zero_ == nullptr) {
+    zero_ = create<kir::Int>(0);
+  }
+  return zero_;
+}
+
+Int* IrBuilder::oneVal() {
+  if (one_ == nullptr) {
+    one_ = create<kir::Int>(1);
+  }
+  return one_;
+}
+
+Bool* IrBuilder::falseVal() {
+  if (false_ == nullptr) {
+    false_ = create<kir::Bool>(false);
+  }
+  return false_;
+}
+
+Bool* IrBuilder::trueVal() {
+  if (true_ == nullptr) {
+    true_ = create<kir::Bool>(true);
+  }
+  return true_;
+}
+
+NamedScalar* IrBuilder::magicZeroVal() {
+  if (magic_zero_ == nullptr) {
+    magic_zero_ = create<kir::NamedScalar>("nvfuser_zero", DataType::Int);
+  }
+  return magic_zero_;
 }
 
 } // namespace kir
