@@ -8937,6 +8937,16 @@ class TestAutogradDeviceType(TestCase):
 
         self.assertNotWarn(do_test)
 
+    def test_copy_functional(self, device):
+        def f(x, y):
+            return torch.ops.aten.copy(x, y)
+
+        inp1 = torch.randn(3, 2, dtype=torch.double, device=device,
+                            requires_grad=True)
+        inp2 = torch.randn(3, 2, dtype=torch.double, device=device,
+                            requires_grad=True)
+        torch.autograd.gradcheck(f, [inp1, inp2])
+
     def test_non_differentiable_ops(self, device):
         # Just make sure the op doesn't raise an error
         # and resulting tensor has requires_grad=False.
