@@ -134,7 +134,85 @@ def _autograd_grad(outputs, inputs, grad_outputs=None, retain_graph=False, creat
 
 
 # How do we increment and decrement the nesting? I don't think we can.
-def vjp(f, *primals):
+def vjp(f: Callable, *primals):
+    """
+    Standing for the vector-Jacobian product, returns a tuple containing the
+    results of :attr:`f` applied to :attr:`primals` and a function that, when
+    given ``cotangents``, computes the reverse-mode Jacobian of :attr:`f` with
+    respect to :attr:`primals` times ``cotangents``.
+
+    Args:
+        f (Callable): A Python function that takes one or more arguments. Must
+            return one or more Tensors.
+        primals: Positional arguments to :attr:`f` that must all be Tensors.
+            The returned function will also be computing the derivative with
+            respect to these arguments
+
+    Returns:
+        Returns a tuple containing the output of :attr:`f` applied to
+        :attr:`primals` and a function that computes the vjp of :attr:`f` with
+        respect to all :attr:`primals` using the cotangents passed to the
+        returned function. The returned function will return a tuple of each
+        VJP
+    
+    When used in simple cases, :func:`vjp` behaves the same as :func:`grad`
+        >>> x = torch.randn([5])
+        >>> f = lambda x: x.sin().sum()
+        >>> (_, vjpfunc) = functorch.vjp(f, x)
+        >>> grad = vjpfunc(torch.tensor(1.))[0]
+        >>> assert torch.allclose(grad, functorch.grad(f)(x))
+
+    However, :func:`vjp` can support functions with multiple outputs by
+    passing in the cotangents for each of the outputs
+        >>> x = torch.randn([5])
+        >>> f = lambda x: (x.sin(), x.cos())
+        >>> (_, vjpfunc) = functorch.vjp(f, x)
+        >>> vjps = vjpfunc((torch.ones([5]), torch.ones([5])))
+        >>> assert torch.allclose(vjps[0], x.cos() + -x.sin())
+
+    :func:`vjp` can even support outputs being Python structs
+        >>> x = torch.randn([5])
+        >>> f = lambda x: {'first': x.sin(), 'second': x.cos()}
+        >>> (_, vjpfunc) = functorch.vjp(f, x)
+        >>> cotangents = {'first': torch.ones([5]), 'second': torch.ones([5])}
+        >>> vjps = vjpfunc((cotangents,))
+        >>> assert torch.allclose(vjps[0], x.cos() + -x.sin())
+
+    The function returned by :func:`vjp` will compute the partials with
+    respect to each of the :attr:`primals`
+        >>> x, y = torch.randn([5, 4]), torch.randn([4, 5])
+        >>> (_, vjpfunc) = functorch.vjp(torch.matmul, x, y)
+        >>> cotangents = torch.randn([5, 5])
+        >>> vjps = vjpfunc(cotangents)
+        >>> assert len(vjps) == 2
+        >>> assert torch.allclose(vjps[0], torch.matmul(cotangents, y.transpose(0, 1)))
+        >>> assert torch.allclose(vjps[1], torch.matmul(x.transpose(0, 1), cotangents))
+
+    :attr:`primals` are the positional arguments for :attr:`f`. All kwargs use their
+    default value
+        >>> x = torch.randn([5])
+        >>> def f(x, scale=4.):
+        >>>   return x * 4.
+        >>>
+        >>> (_, vjpfunc) = functorch.vjp(f, x)
+        >>> vjps = vjpfunc(torch.ones_like(x))
+        >>> assert torch.allclose(vjps[0], torch.full(x.shape, 4.))
+
+    .. note:
+        Using PyTorch ``torch.no_grad`` together with ``jacrev``.
+        Case 1: Using ``torch.no_grad`` inside a function:
+            >>> def f(x):
+            >>>     with torch.no_grad():
+            >>>         c = x ** 2
+            >>>     return x - c
+        In this case, ``jacrev(f)(x)`` will respect the inner ``torch.no_grad``.
+        Case 2: Using ``jacrev`` inside ``torch.no_grad`` context manager:
+            >>> with torch.no_grad():
+            >>>     jacrev(f)(x)
+        In this case, ``jacrev`` will respect the inner ``torch.no_grad``, but not the
+        outer one. This is because ``jacrev`` is a "function transform": its result
+        should not depend on the result of a context manager outside of ``f``.
+    """
     level = _grad_increment_nesting()
     try:
         # See NOTE [grad and vjp interaction with no_grad]
