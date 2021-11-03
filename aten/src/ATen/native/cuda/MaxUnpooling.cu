@@ -218,7 +218,7 @@ static void max_unpooling3d_shape_check(
       "There should be exactly three elements (depth, height, width) in padding, but got: ", padding.size(), " elements.");
   TORCH_CHECK(
       input.sizes() == indices.sizes(),
-      "Shape of indices (", indices.size(), ") should match shape of input (", input.sizes(), ")");
+      "Shape of indices (", indices.sizes(), ") should match shape of input (", input.sizes(), ")");
 
   for (int64_t i = 1; i < input.ndimension(); ++i) {
     TORCH_CHECK(input.size(i) > 0, fn_name,
@@ -399,7 +399,7 @@ at::Tensor& max_unpooling2d_backward_out_cuda(const Tensor& grad_output_,
 
   TORCH_CHECK(
       self_.sizes() == indices_.sizes(),
-      "Input shape (", self.sizes(), ") must match indices shape (", indices_.sizes(), ")");
+      "Input shape (", self_.sizes(), ") must match indices shape (", indices_.sizes(), ")");
 
   TORCH_CHECK(output_size.size() == 2, "output_size must have two elements, got size: ", output_size.size());
 

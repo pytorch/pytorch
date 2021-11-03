@@ -3022,7 +3022,7 @@ def sample_inputs_max_unpool1d(op_info, device, dtype, requires_grad, **kwargs):
             output_pool, indices = max_pool1d(input_tensor)
             if output_size:
                 kwargs.update({'output_size': input_tensor.size()})
-            yield SampleInput(output_pool, args=(indices,), kwargs=kwargs)
+            yield SampleInput(output_pool.detach().requires_grad_(requires_grad), args=(indices,), kwargs=kwargs)
 
     return list(generator())
 
@@ -3059,7 +3059,7 @@ def sample_inputs_max_unpool2d(op_info, device, dtype, requires_grad, **kwargs):
             output_pool, indices = max_pool2d(input_tensor)
             if output_size:
                 kwargs.update({'output_size': input_tensor.size()})
-            yield SampleInput(output_pool, args=(indices,), kwargs=kwargs)
+            yield SampleInput(output_pool.detach().requires_grad_(requires_grad), args=(indices,), kwargs=kwargs)
 
     return list(generator())
 
@@ -3097,7 +3097,7 @@ def sample_inputs_max_unpool3d(op_info, device, dtype, requires_grad, **kwargs):
             output_pool, indices = max_pool3d(input_tensor)
             if output_size:
                 kwargs.update({'output_size': input_tensor.size()})
-            yield SampleInput(output_pool, args=(indices,), kwargs=kwargs)
+            yield SampleInput(output_pool.detach().requires_grad_(requires_grad), args=(indices,), kwargs=kwargs)
 
     return list(generator())
 
