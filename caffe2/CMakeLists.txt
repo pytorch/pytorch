@@ -161,7 +161,7 @@ if(BUILD_CAFFE2 AND (NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE))
   # add_subdirectory(test) # todo: use caffe2_gtest_main instead of gtest_main because we will need to call GlobalInit
   add_subdirectory(transforms)
 endif()
-if(NOT BUILD_CAFFE2)
+if(NOT BUILD_CAFFE2 AND (NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE))
   add_subdirectory(proto)
 endif()
 
@@ -176,7 +176,7 @@ endif()
 if(BUILD_SPLIT_CUDA)
   # Splitting the source files that'll be in torch_cuda between torch_cuda_cu and torch_cuda_cpp
   foreach(tmp ${Caffe2_GPU_SRCS})
-    if("${tmp}" MATCHES "(.*aten.*\\.cu|.*(b|B)las.*|.*((s|S)olver|Register.*CUDA|Legacy|THC|TensorShapeCUDA|BatchLinearAlgebra|ReduceOps|Equal|Activation).*\\.cpp)" AND NOT "${tmp}" MATCHES ".*(THC((CachingHost)?Allocator|General)).*")
+    if("${tmp}" MATCHES "(.*aten.*\\.cu|.*(b|B)las.*|.*((s|S)olver|Register.*CUDA|Legacy|THC|TensorShapeCUDA|BatchLinearAlgebra|ReduceOps|Equal|Activation|ScanKernels|Sorting).*\\.cpp)" AND NOT "${tmp}" MATCHES ".*(THC((CachingHost)?Allocator|General)).*")
       # Currently, torch_cuda_cu will have all the .cu files in aten, as well as some others that depend on those files
       list(APPEND Caffe2_GPU_SRCS_CU ${tmp})
     else()
@@ -588,6 +588,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/jit/mobile/backport_manager.cpp
       ${TORCH_SRC_DIR}/csrc/jit/serialization/onnx.cpp
       ${TORCH_SRC_DIR}/csrc/jit/serialization/export.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/serialization/export_bytecode.cpp
       ${TORCH_SRC_DIR}/csrc/jit/serialization/export_module.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/cpu/fused_kernel.cpp
       ${TORCH_SRC_DIR}/csrc/jit/api/module_save.cpp
@@ -1852,7 +1853,7 @@ if(BUILD_TEST)
   endif()
 
   # For special tests that explicitly uses dependencies, we add them here
-  if(USE_MPI)
+  if(BUILD_CAFFE2 AND USE_MPI)
     target_link_libraries(mpi_test ${MPI_CXX_LIBRARIES})
     if(USE_CUDA)
       target_link_libraries(mpi_gpu_test ${MPI_CXX_LIBRARIES})

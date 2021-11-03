@@ -652,10 +652,12 @@ Value* emitBuiltinCall(
   if (matched.first < variants.size()) {
     return emitBuiltinNode(matched.second, loc, graph, name);
   } else {
-    Function* fn = builtin_functions[matched.first - variants.size()];
+    auto& fn = *builtin_functions[matched.first - variants.size()];
     // we inline builtin calls because they are normally very small
     // wrappers and are not useful for keeping around to debug
-    return insertGraph(graph, *fn->graph(), matched.second.inputs).at(0);
+    return insertGraph(
+               graph, *toGraphFunction(fn).graph(), matched.second.inputs)
+        .at(0);
   }
 }
 
