@@ -250,6 +250,24 @@ class TestShapeOps(TestCase):
         for shape in shapes:
             test(shape)
 
+    @onlyCPU
+    @dtypes(torch.bfloat16)
+    def test_trace_bfloat16(self, device, dtype):
+        def test(shape):
+            tensor_bf16 = make_tensor(shape, device, dtype, low=-9, high=9)
+            tensor_fp32 = tensor_bf16.float()
+            self.assertEqual(tensor_bf16.trace(), tensor_fp32.trace(), exact_dtype=False)
+
+        shapes = (
+            [10, 1],
+            [1, 10],
+            [100, 100],
+            [20, 100],
+            [100, 20],
+        )
+        for shape in shapes:
+            test(shape)
+
     def generate_clamp_baseline(self, device, dtype, *, min_vals, max_vals, with_nans):
         """
         Creates a random tensor for a given device and dtype, and computes the expected clamped
