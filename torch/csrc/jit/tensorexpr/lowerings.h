@@ -15,6 +15,7 @@ namespace tensorexpr {
 
 using ArgNone = c10::monostate;
 using BufList = std::vector<tensorexpr::BufHandle>;
+using DoubleList = std::vector<double>;
 using IntList = std::vector<int64_t>;
 using ArgValue = c10::variant<
     tensorexpr::BufHandle,
@@ -23,6 +24,7 @@ using ArgValue = c10::variant<
     int64_t,
     bool,
     BufList,
+    DoubleList,
     IntList,
     ArgNone>;
 
