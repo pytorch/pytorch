@@ -20,10 +20,6 @@ LoweringContext::GetParametersData() const {
   return parameters_;
 }
 
-void LoweringContext::LowerNodeToResult(const torch::lazy::Node* node) {
-  LOG(FATAL) << "Not implemented.";
-}
-
 void LoweringContext::AddParameter(const torch::lazy::Output& output, size_t index,
                                    const lazy_tensors::Shape& shape,
                                    const std::string& name) {

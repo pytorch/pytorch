@@ -70,12 +70,6 @@ class BackendImplInterface {
    * Device Configuration
    * */
 
-  // Identifies a 'host' in distributed setting? Used to hash a particular
-  // host's graph?
-  // -- why do we need this, and should it be renamed if we do?  Should it be
-  // one per gpu in mgpu setting?
-  virtual std::string GetResourceDomain(const std::string& device) const = 0;
-
   virtual std::string GetDefaultDevice() const = 0;
 
   virtual size_t GetNumDevices() const = 0;

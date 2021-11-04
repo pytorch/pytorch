@@ -89,8 +89,6 @@ class TSBackendImpl : public BackendImplInterface {
       Computation& computation, c10::ArrayRef<BackendDataPtr> arguments,
       const std::string& device) const override;
 
-  std::string GetResourceDomain(const std::string& device) const override;
-
   std::string GetDefaultDevice() const override;
 
   size_t GetNumDevices() const override { return 1; }
@@ -160,10 +158,6 @@ std::vector<BackendDataPtr> TSBackendImpl::ExecuteComputation(
         std::make_shared<TSBackendImpl::TSData>(result, shape, device));
   }
   return results;
-}
-
-std::string TSBackendImpl::GetResourceDomain(const std::string& device) const {
-  return "";
 }
 
 std::string TSBackendImpl::GetDefaultDevice() const {
