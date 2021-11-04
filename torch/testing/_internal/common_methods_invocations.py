@@ -2160,11 +2160,16 @@ def sample_inputs_logcumsumexp(self, device, dtype, requires_grad):
     )
     samples = []
 
-    for shape, dim in inputs:
-        t = make_tensor(shape, device, dtype,
-                        low=None, high=None,
-                        requires_grad=requires_grad)
-        samples.append(SampleInput(t, args=(dim,)))
+    for large_number in (True, False):
+        for shape, dim in inputs:
+            t = make_tensor(shape, device, dtype,
+                            low=None, high=None,
+                            requires_grad=requires_grad)
+
+            if large_number and t.dim() > 0:
+                with torch.no_grad():
+                    t[0] = 10000
+            samples.append(SampleInput(t, args=(dim,)))
 
     return tuple(samples)
 
@@ -5806,7 +5811,7 @@ def sample_inputs_lerp(op_info, device, dtype, requires_grad, **kwargs):
         SampleInput(make_arg((S, S)), args=(make_arg((S,)), make_arg((S, S)))),
         # broadcast rhs and weight tensor
         SampleInput(make_arg((S, S)), args=(make_arg((S, 1)), make_arg((S,)))),
-        # broadcast_lhs
+        # broadcast lhs
         SampleInput(make_arg((S,)), args=(make_arg((S, S)), 0.4), broadcasts_input=True),
         # scalar broadcast_lhs
         SampleInput(make_arg(()), args=(make_arg((S, S)), 0.4), broadcasts_input=True),
@@ -5815,6 +5820,14 @@ def sample_inputs_lerp(op_info, device, dtype, requires_grad, **kwargs):
         # tensor broadcast all
         SampleInput(make_arg((S, 1)), args=(make_arg((S, S)), make_arg((S, 1))),
                     broadcasts_input=True),
+        # no broadcast with weight tensor
+        SampleInput(make_arg((S, S)), args=(make_arg((S, S)), make_arg((S, S)))),
+        # broadcast lhs with weight tensor
+        SampleInput(make_arg((S,)), args=(make_arg((S, S)), make_arg((S, S))), broadcasts_input=True),
+        # broadcast lhs and weight tensor
+        SampleInput(make_arg((S,)), args=(make_arg((S, S, S)), make_arg((S, S))), broadcasts_input=True),
+        # broadcast lhs and weight tensor variant
+        SampleInput(make_arg((S, S)), args=(make_arg((S, S, S)), make_arg((S,))), broadcasts_input=True),
     )
 
     if dtype.is_complex:
