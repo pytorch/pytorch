@@ -29,9 +29,94 @@
 #include <c10/core/DispatchKey.h>
 #include <c10/macros/Macros.h>
 
+
+#if defined(ENABLE_RECORD_KERNEL_FUNCTION_DTYPE)
+#include <ATen/record_function.h>
+#endif
+
 namespace c10 {
 
 namespace impl {
+
+constexpr bool op_allowlist_contains(string_view allowlist, string_view item);  // Forward Declare
+
+/**
+ * Accepts 2 const char* (null-terminated strings) pointers, and returns
+ * 'true' if they are equal, and 'false' otherwise.
+ */
+constexpr bool are_char_array_contents_equal(const char* a, const char* b) {
+  for (int i = 0; ; ++i) {
+    if (a[i] == 0 && b[i] == 0) {
+      return true;
+    }
+    if (a[i] != b[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * In selective build mode returns true/false depending on whether a build
+ * feature is available or not.
+ *
+ * In instrumenting mode (tracing mode), always returns true, and doesn't
+ * trigger any side effects.
+ */
+constexpr bool is_build_feature_available(const char* name) {
+#if !defined(ENABLE_RECORD_KERNEL_FUNCTION_DTYPE)
+  // Selective Build mode.
+#if !defined(TORCH_BUILD_FEATURE_ALLOWLIST)
+  (void)name;
+  return true;
+#else
+  return op_allowlist_contains(
+    C10_STRINGIZE(TORCH_BUILD_FEATURE_ALLOWLIST),
+    name);
+#endif
+
+#else
+  // Instrumenting mode.
+  (void)name;
+  return true;
+#endif
+}
+
+[[noreturn]] void build_feature_required_feature_not_available(const char* feature);
+
+/**
+ * Use BUILD_FEATURE_REQUIRED macro in user-code.
+ *
+ * In selective build mode becomes a no-op if the build feature passed
+ * in is available. If not available, throws an exception (c10::Error).
+ * The compiler is able to perform dead code elimination for code
+ * following this method if the build feature is not available.
+ *
+ * In instrumenting mode (tracing mode), registers (as a side effect)
+ * the presence of this specific build feature being triggered.
+ */
+#if !defined(ENABLE_RECORD_KERNEL_FUNCTION_DTYPE)  // selective build mode
+
+#if defined(TORCH_BUILD_FEATURE_ALLOWLIST)
+#define BUILD_FEATURE_REQUIRED(NAME)                                 \
+  if (!c10::impl::is_build_feature_available(NAME)) {                \
+    ::c10::impl::build_feature_required_feature_not_available(NAME); \
+  }
+#else  // Everything trivially selected
+#define BUILD_FEATURE_REQUIRED(NAME)
+
+#endif
+
+#else  // trace mode
+#define BUILD_FEATURE_REQUIRED(NAME)  \
+  RECORD_FUNCTION_WITH_SCOPE(         \
+      at::RecordScope::BUILD_FEATURE, \
+      std::string(NAME),              \
+      {});
+#endif
+
+// Use this macro, and not is_build_feature_available
+#define BUILD_FEATURE_AVAILABLE(NAME) ::c10::impl::is_build_feature_available(NAME)
 
 // returns true iff allowlist contains item
 // op_allowlist_contains("a;bc;d", "bc") == true
