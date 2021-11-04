@@ -275,7 +275,7 @@ class TSNodeLowering : public TSNodeLoweringInterface {
     auto& ctx = at::globalContext();
     CHECK(ctx.userEnabledCuDNN() &&
           compiler::getBackend()
-                  ->HardwareDeviceType() == at::kCUDA);
+                  ->EagerFallbackDeviceType() == at::kCUDA);
 
     // See cudnn_convolution_backward/cudnn_convolution_transpose_backward in
     // native_functions.yaml
@@ -348,7 +348,7 @@ class TSNodeLowering : public TSNodeLoweringInterface {
   TSOpVector LowerConstant(const ir::ops::Constant* node) {
     at::Tensor value = node->value().value();
     if (compiler::getBackend()
-            ->HardwareDeviceType() == at::kCUDA) {
+            ->EagerFallbackDeviceType() == at::kCUDA) {
       value = value.cuda();
     }
     return {loctx()->graph()->insertConstant(value)};
@@ -414,7 +414,7 @@ class TSNodeLowering : public TSNodeLoweringInterface {
     auto options =
         at::TensorOptions()
             .device(compiler::getBackend()
-                        ->HardwareDeviceType())
+                        ->EagerFallbackDeviceType())
             .dtype(shape.scalar_type());
     return {
         loctx()->graph()->insertConstant(at::scalar_tensor(value, options))};

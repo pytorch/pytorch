@@ -1,10 +1,10 @@
 #pragma once
 
+#include <atomic>
 #include <ATen/Tensor.h>
 #include <torch/csrc/lazy/backend/backend_data.h>
 #include <torch/csrc/lazy/core/shape.h>
-
-#include <atomic>
+#include <torch/csrc/lazy/backend/backend_device.h>
 
 #include "lazy_tensor_core/csrc/lowering_context.h"
 
@@ -72,22 +72,34 @@ class BackendImplInterface {
    * Device Configuration
    * */
 
-  virtual std::string GetDefaultDevice() const = 0;
+  // Set or get the default device type.
+  // For backends used with virtual c10:: Devices, this configures what real
+  // device type the backend should use, and matters if the backend supports
+  // more than one type of real device.
+  virtual std::shared_ptr<torch::lazy::BackendDeviceType>
+  GetDefaultDeviceType() const = 0;
+  virtual void SetDefaultDeviceType(std::string) = 0;
 
-  virtual size_t GetNumDevices() const = 0;
+  // Specify which aten device should be used for eager fallback
+  // may change depending on current 'Default' DeviceType
+  virtual at::DeviceType EagerFallbackDeviceType() const = 0;
 
-  // TODO: Return std::vector<torch::lazy::BackendDevice> instead.
-  virtual std::vector<std::string> GetLocalDevices() const = 0;
 
-  virtual std::vector<std::string> GetAllDevices() const = 0;
+  // Query all available backend devices
+  virtual std::vector<torch::lazy::BackendDevice> GetBackendDevices() const = 0;
 
-  virtual void SetReplicationDevices(
-      std::shared_ptr<std::vector<std::string>> devices) const = 0;
+  // Map a particular c10:: device to a concrete backend device
+  // Note:: c10:: devices may be virtual or concrete.  xla:: and lazy:: are
+  // virtual devices, meaning they may map to a gpu, tpu, etc. behind the
+  // scenes. In the future, non-virtual c10:: devices may also use lazy tensors
+  // through a mode, in which case these APIs should still work, but should be
+  // identity mappings.
+  virtual torch::lazy::BackendDevice GetBackendDevice(
+      c10::Device device) const = 0;
 
-  virtual std::shared_ptr<std::vector<std::string>> GetReplicationDevices()
-      const = 0;
-
-  virtual at::DeviceType HardwareDeviceType() const = 0;
+  // TODO(whc)
+  // Additional APIs expected for supporting distributed training, to be
+  // designed
 
   /**
    * Debug/Metrics

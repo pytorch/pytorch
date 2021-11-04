@@ -58,9 +58,9 @@ torch::lazy::BackendDevice GetDeviceOrCurrent(const std::string& device_str) {
 }
 
 void PrepareToExit() {
-  //TODO(whc) should we hook this interface up? It does nothing currently
+  // TODO(whc) should we hook this interface up? It does nothing currently
   compiler::getBackend()->PrepareToExit();
-  //TODO(whc) can I call this unconditionally?
+  // TODO(whc) can I call this unconditionally?
   LazyGraphExecutor::Get()->WaitDeviceOps({});
 }
 
@@ -89,12 +89,12 @@ std::vector<std::string> GetLtcDeviceStrings(
   return ltc_devices;
 }
 
-std::vector<torch::lazy::BackendDevice> GetLtcDevices(
-    const std::vector<std::string>& devices) {
+std::vector<torch::lazy::BackendDevice> GetLtcDevices(const std::vector<std::string>& devices) {
   std::vector<torch::lazy::BackendDevice> ltc_devices;
   ltc_devices.reserve(devices.size());
   for (auto& device_str : devices) {
-    ltc_devices.push_back(bridge::AtenDeviceToLtcDevice(c10::Device(device_str)));
+    ltc_devices.push_back(
+        bridge::AtenDeviceToLtcDevice(c10::Device(device_str)));
   }
   return ltc_devices;
 }
@@ -482,12 +482,10 @@ void InitLtcModuleBindings(py::module m) {
         [](const at::Tensor& tensor) { return GetTensorViewAliasId(tensor); });
   m.def("_ltc_get_tensor_id",
         [](const at::Tensor& tensor) { return GetTensorId(tensor); });
-  m.def("_ltc_get_devices", []() {
-    return compiler::getBackend()->GetLocalDevices();
-  });
-  m.def("_ltc_get_all_devices", []() {
-    return compiler::getBackend()->GetAllDevices();
-  });
+  m.def("_ltc_get_devices",
+        []() { return compiler::getBackend()->GetBackendDevices(); });
+  m.def("_ltc_get_all_devices",
+        []() { return compiler::getBackend()->GetBackendDevices(); });
   m.def("_ltc_real_devices", [](const std::vector<std::string>& devices) {
     std::vector<std::string> ltc_devices;
     {
@@ -496,23 +494,27 @@ void InitLtcModuleBindings(py::module m) {
     }
     return ltc_devices;
   });
-  m.def("_ltc_set_replication_devices",
-        [](const std::vector<std::string>& devices) {
-          auto replication_devices =
-              std::make_shared<std::vector<std::string>>(devices);
-          compiler::getBackend()->SetReplicationDevices(
-              std::move(replication_devices));
-        });
+  m.def(
+      "_ltc_set_replication_devices",
+      [](const std::vector<std::string>& devices) {
+        throw std::runtime_error("TODO(whc) design/implement distributed APIs");
+        //   auto replication_devices =
+        //       std::make_shared<std::vector<std::string>>(devices);
+        //   compiler::getBackend()->SetReplicationDevices(
+        //       std::move(replication_devices));
+      });
   m.def("_ltc_get_replication_devices", []() {
-    auto replication_devices =
-        compiler::getBackend()->GetReplicationDevices();
-    return replication_devices != nullptr ? *replication_devices
-                                          : std::vector<std::string>();
+    throw std::runtime_error("TODO(whc) design/implement distributed APIs");
+    // auto replication_devices =
+    //     compiler::getBackend()->GetReplicationDevices();
+    // return replication_devices != nullptr ? *replication_devices
+    //                                       : std::vector<std::string>();
   });
   m.def("_ltc_get_replication_devices_count", []() {
-    auto replication_devices =
-        compiler::getBackend()->GetReplicationDevices();
-    return replication_devices != nullptr ? replication_devices->size() : 0;
+    throw std::runtime_error("TODO(whc) design/implement distributed APIs");
+    // auto replication_devices =
+    //     compiler::getBackend()->GetReplicationDevices();
+    // return replication_devices != nullptr ? replication_devices->size() : 0;
   });
 
   py::class_<torch::lazy::Value, std::shared_ptr<torch::lazy::Value>>(
@@ -553,27 +555,26 @@ void InitLtcModuleBindings(py::module m) {
           result_tuple[1] = new_token;
           return result_tuple;
         });
-  m.def("_ltc_all_to_all",
-        [](const at::Tensor& input,
-           const std::shared_ptr<torch::lazy::Value>& token,
-           int64_t split_dimension, int64_t concat_dimension,
-           int64_t split_count, const py::list& groups) {
-          std::vector<std::vector<int64_t>> replica_groups =
-              CreateReduceGroups(groups);
-          at::Tensor result;
-          std::shared_ptr<torch::lazy::Value> new_token;
-          {
-            NoGilSection nogil;
-            std::tie(result, new_token) =
-                AllToAll(input, token, split_dimension, concat_dimension,
-                         split_count, replica_groups);
-          }
-          auto result_tuple = py::tuple(2);
-          result_tuple[0] = torch::autograd::make_variable(
-              result, /*requires_grad=*/input.requires_grad());
-          result_tuple[1] = new_token;
-          return result_tuple;
-        });
+  m.def("_ltc_all_to_all", [](const at::Tensor& input,
+                              const std::shared_ptr<torch::lazy::Value>& token,
+                              int64_t split_dimension, int64_t concat_dimension,
+                              int64_t split_count, const py::list& groups) {
+    std::vector<std::vector<int64_t>> replica_groups =
+        CreateReduceGroups(groups);
+    at::Tensor result;
+    std::shared_ptr<torch::lazy::Value> new_token;
+    {
+      NoGilSection nogil;
+      std::tie(result, new_token) =
+          AllToAll(input, token, split_dimension, concat_dimension, split_count,
+                   replica_groups);
+    }
+    auto result_tuple = py::tuple(2);
+    result_tuple[0] = torch::autograd::make_variable(
+        result, /*requires_grad=*/input.requires_grad());
+    result_tuple[1] = new_token;
+    return result_tuple;
+  });
   m.def("_ltc_collective_permute",
         [](const at::Tensor& input,
            const std::shared_ptr<torch::lazy::Value>& token,
@@ -682,7 +683,7 @@ void InitLtcModuleBindings(py::module m) {
   //   return GetMemoryInfo(device);
   // });
   m.def("_ltc_init_ts_backend", []() { compiler::InitTorchScriptBackend(); });
-}
+}  // namespace
 
 }  // namespace
 
