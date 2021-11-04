@@ -1277,19 +1277,18 @@ def check_if_enable(test: unittest.TestCase):
 
 
 class RelaxedNumberPair(NumberPair):
-    def __init__(self, actual, expected, *, id, **other_parameters):
-        if not isinstance(actual, Number) or isinstance(expected, Number):
+    def __init__(self, actual, expected, *, id, check_dtype, **other_parameters,):
+        if not (isinstance(actual, self._NUMBER_TYPES) or isinstance(expected, self._NUMBER_TYPES)):
             raise UnsupportedInputs()
 
         error_meta, numbers = self._apply_unary(self._to_number, actual, expected)
         if error_meta:
             raise UnsupportedInputs(error_meta._replace(id=id))
 
-        super().__init__(*cast(Tuple[Number, Number], numbers), id=id, **other_parameters)
+        super().__init__(*cast(Tuple[Number, Number], numbers), id=id, check_dtype=False, **other_parameters)
 
     def _to_number(self, number_like):
-        number: Union[int, float, complex]
-        if isinstance(number_like, (int, float, complex)):
+        if isinstance(number_like, self._NUMBER_TYPES):
             number = number_like
         elif isinstance(number_like, torch.Tensor):
             if number_like.numel() > 1:
@@ -1763,13 +1762,6 @@ class TestCase(expecttest.TestCase):
                 torch_result = torch_result.to(torch.float)
 
         self.assertEqual(np_result, torch_result, **kwargs)
-
-    # Check in a follow up PR
-    def assertEqualIgnoreType(self, *args, **kwargs) -> None:
-        raise RuntimeError("This test needs to be refactored")
-        # If you are seeing this function used, that means test is written wrongly
-        # and deserves detailed investigation
-        return self.assertEqual(*args, exact_dtype=False, **kwargs)
 
     def assertEqual(
             self,
