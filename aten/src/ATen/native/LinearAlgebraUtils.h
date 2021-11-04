@@ -8,6 +8,7 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/native/TensorIterator.h>
 #include <limits>
+#include <type_traits>
 #include <sstream>
 #include <cstring>
 #include <cctype>
@@ -33,27 +34,32 @@ static char to_blas(TransposeType trans) {
 
 template<class Vec>
 static inline Vec contiguous_strides_template(const IntArrayRef sizes, const bool f_contig=false) {
+  static_assert(std::is_same<IntArrayRef::value_type, typename Vec::value_type>::value,
+                "Incompatible integral type of sizes and strides");
   // f_contig chooses between Fortran (F-contiguous) and C-contiguous strides
+  using Int = IntArrayRef::value_type;
+  constexpr auto one = Int{1};
   const auto n = sizes.size();
   if (n == 0) {
     return Vec{};
   } else if (n == 1) {
-    return Vec{1l};
+    // Use initializer-list to initialize the vector
+    return Vec{one};
   }
-  // Matrix or batch of matrices
+  // Now we have a matrix or batch of matrices
   auto strides = Vec(n);
   const auto last_idx = n - 1;
   const auto snd_last_idx = n - 2;
   // We'll fill the first two strides afterwards, otherwise the first step
   // in the for loop is wrong
-  strides[snd_last_idx] = std::max(sizes[last_idx], 1l);
+  strides[snd_last_idx] = std::max<int64_t>(sizes[last_idx], one);
   for (int i = snd_last_idx - 1; i >= 0; --i) {
-    strides[i] = strides[i + 1] * std::max(sizes[i + 1], 1l);
+    strides[i] = strides[i + 1] * std::max(sizes[i + 1], one);
   }
-  strides[last_idx] = f_contig ? std::max(sizes[snd_last_idx], 1l) : 1l;
+  strides[last_idx] = f_contig ? std::max(sizes[snd_last_idx], one) : one;
   if (f_contig) {
     // We filled the wrong stride before so we correct it
-    strides[snd_last_idx] = 1l;
+    strides[snd_last_idx] = one;
   }
   return strides;
 }
