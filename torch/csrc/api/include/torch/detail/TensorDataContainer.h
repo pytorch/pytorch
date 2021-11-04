@@ -91,6 +91,7 @@ struct TensorDataContainer {
   // NOTE: For tensors with zero-size dimensions (e.g. `torch::tensor({{}, {}})`),
   // the innermost empty braced-init-list `{}` matches the default constructor of
   // the innermost `TensorDataContainer`.
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   TensorDataContainer() :
       sizes_({0}),
       // NOTE: In Python, the dtype of tensors with zero-size dimensions (e.g. `torch.tensor([[], []])`)
@@ -103,9 +104,12 @@ struct TensorDataContainer {
       scalar_type_(at::k##S), \
       type_(TensorDataContainerType::Scalar), \
       scalar_(value) {}
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 AT_FORALL_COMPLEX_TYPES(TENSOR)
 #undef TENSOR
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   TensorDataContainer(std::initializer_list<TensorDataContainer> init_list) :
       sizes_(),
       scalar_type_(init_list.begin()->scalar_type()),
@@ -144,7 +148,9 @@ AT_FORALL_COMPLEX_TYPES(TENSOR)
       tensor_ = at::tensor(values, at::dtype(scalar_type_).device(at::kCPU)); \
     } \
   }
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 AT_FORALL_COMPLEX_TYPES(TENSOR)
 #undef TENSOR
 
@@ -161,7 +167,9 @@ AT_FORALL_COMPLEX_TYPES(TENSOR)
   // ArrayRef<bool> cannot be constructed from a std::vector<bool> bitfield.
 #define TENSOR(T, S) \
   TensorDataContainer(const std::vector<T>& values) : TensorDataContainer(at::ArrayRef<T>(values)) {}
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TENSOR)
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 AT_FORALL_COMPLEX_TYPES(TENSOR)
 #undef TENSOR
 
