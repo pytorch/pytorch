@@ -77,8 +77,20 @@ jobs:
         run: |
           echo "CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname "$(which conda)")/../"}" >> "${GITHUB_ENV}"
           .jenkins/pytorch/macos-build.sh
+      - name: Archive artifacts into zip
+        run: |
+          zip -1 -r artifacts.zip dist/
+      - uses: actions/upload-artifact@v2
+        name: Store PyTorch Build Artifacts on S3
+        with:
+          name: ${{ env.BUILD_ENVIRONMENT }}
+          retention-days: 14
+          if-no-files-found: error
+          path:
+            artifacts.zip
       - name: Test
         run: |
+          python -m pip install dist/*.whl
           .jenkins/pytorch/macos-test.sh
       - name: Install render_test_results dependencies
         if: always()
@@ -102,9 +114,10 @@ jobs:
           rm -f test-reports-*.zip
           zip -r "test-reports-${FILE_SUFFIX}.zip" test -i '*.xml'
       - uses: actions/upload-artifact@v2
-        name: Store Test Reports on S3
+        name: Store Test Reports on Github
         if: always()
         with:
+          name: test-reports
           retention-days: 14
           if-no-files-found: error
           path:

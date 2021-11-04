@@ -122,7 +122,7 @@ concurrency:
 {%- endmacro -%}
 
 
-{%- macro upload_test_reports(name, use_s3=True) -%}
+{%- macro upload_test_reports(name, artifact_name="", use_s3=True) -%}
       - name: Zip test reports for upload
         if: always()
         env:
@@ -147,10 +147,13 @@ concurrency:
         name: Store Test Reports on S3
 {%- else %}
       - uses: actions/upload-artifact@v2
-        name: Store Test Reports on S3
+        name: Store Test Reports on Github
 {%- endif %}
         if: always()
         with:
+{%- if artifact_name != "" %}
+          name: !{{ artifact_name }}
+{%- endif %}
           retention-days: 14
           if-no-files-found: error
           path:

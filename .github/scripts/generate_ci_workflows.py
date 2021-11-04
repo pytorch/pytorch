@@ -646,6 +646,7 @@ MACOS_WORKFLOWS = [
         build_environment="macos-10-15-py3-lite-interpreter-x86-64",
         test_runner_type=MACOS_TEST_RUNNER_10_15,
         exclude_test=True,
+        build_generates_artifacts=False,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_MACOS},
         ),

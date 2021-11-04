@@ -63,12 +63,26 @@ jobs:
         run: |
           echo "CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname "$(which conda)")/../"}" >> "${GITHUB_ENV}"
           .jenkins/pytorch/macos-build.sh
+{%- if build_generates_artifacts %}
+      - name: Archive artifacts into zip
+        run: |
+          zip -1 -r artifacts.zip dist/
+      - uses: actions/upload-artifact@v2
+        name: Store PyTorch Build Artifacts on S3
+        with:
+          name: ${{ env.BUILD_ENVIRONMENT }}
+          retention-days: 14
+          if-no-files-found: error
+          path:
+            artifacts.zip
+{%- endif %}
 {%- if not exclude_test %}
       - name: Test
         run: |
+          python -m pip install dist/*.whl
           .jenkins/pytorch/macos-test.sh
       !{{ common.render_test_results() }}
-      !{{ common.upload_test_reports("macos", use_s3=False) }}
+      !{{ common.upload_test_reports("macos", artifact_name="test-reports", use_s3=False) }}
 {%- endif %}
 {% endblock +%}
 
