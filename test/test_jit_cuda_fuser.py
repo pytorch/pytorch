@@ -2101,7 +2101,6 @@ class TestCudaFuser(JitTestCase):
             num_zeros = num_elems - jit_o.detach().count_nonzero().item()
             percent_zeros = num_zeros / num_elems
 
-            print("percent_zero: ", percent_zeros, " p: " , prob)
             self.assertTrue((percent_zeros >= (prob - 0.01)) and (percent_zeros <= (prob + 0.01)))
             self.assertGraphContainsExactly(t_jit.graph_for(x, prob, True), FUSION_GUARD, 1, consider_subgraphs=True)
 

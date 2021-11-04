@@ -4,7 +4,6 @@
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/node_hashing.h>
-#include <torch/csrc/jit/jit_log.h>
 #include <unordered_set>
 
 namespace torch {
@@ -70,10 +69,7 @@ void ConstantPooling(
 void ConstantPooling(const std::shared_ptr<Graph>& graph) {
   AliasDb aliasDb(graph);
   std::unordered_set<Node*, HashNode, EqualNode> constants;
-
-  GRAPH_DUMP("\nBefore ConstantPooling: ", graph);
   ConstantPooling(graph->block(), constants, aliasDb);
-  GRAPH_DUMP("\nAfter ConstantPooling: ", graph);
 }
 } // namespace jit
 } // namespace torch
