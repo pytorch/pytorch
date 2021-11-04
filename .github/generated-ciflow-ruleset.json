@@ -33,11 +33,13 @@
       "periodic-linux-xenial-cuda11.1-py3.6-gcc7",
       "periodic-win-vs2019-cuda11.1-py3",
       "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single",
+      "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit",
       "win-vs2019-cpu-py3",
       "win-vs2019-cuda11.3-py3"
     ],
     "ciflow/android": [
-      "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single"
+      "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single",
+      "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit"
     ],
     "ciflow/bazel": [
       "linux-xenial-py3.6-gcc7-bazel-test"
@@ -53,6 +55,7 @@
       "linux-xenial-py3.6-gcc7-bazel-test",
       "parallelnative-linux-xenial-py3.6-gcc5.4",
       "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single",
+      "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit",
       "win-vs2019-cpu-py3"
     ],
     "ciflow/cuda": [
@@ -79,6 +82,7 @@
       "linux-xenial-py3.6-gcc7",
       "linux-xenial-py3.6-gcc7-bazel-test",
       "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single",
+      "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit",
       "win-vs2019-cpu-py3",
       "win-vs2019-cuda11.3-py3"
     ],
@@ -118,7 +122,8 @@
       "periodic-libtorch-linux-xenial-cuda11.1-py3.6-gcc7",
       "periodic-linux-xenial-cuda10.2-py3-gcc7-slow-gradcheck",
       "periodic-linux-xenial-cuda11.1-py3.6-gcc7",
-      "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single"
+      "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single",
+      "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit"
     ],
     "ciflow/macos": [
       "ios-12-5-1-arm64",
