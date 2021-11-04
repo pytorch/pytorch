@@ -5,51 +5,11 @@
 
 // NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <TH/generic/THStorage.cpp>
-#include <TH/THGenerateAllTypes.h>
-
-// NOLINTNEXTLINE(bugprone-suspicious-include)
-#include <TH/generic/THStorage.cpp>
-#include <TH/THGenerateComplexTypes.h>
-
-// NOLINTNEXTLINE(bugprone-suspicious-include)
-#include <TH/generic/THStorage.cpp>
-#include <TH/THGenerateHalfType.h>
-
-// NOLINTNEXTLINE(bugprone-suspicious-include)
-#include <TH/generic/THStorage.cpp>
-#include <TH/THGenerateBoolType.h>
-
-// NOLINTNEXTLINE(bugprone-suspicious-include)
-#include <TH/generic/THStorage.cpp>
-#include <TH/THGenerateQTypes.h>
-
-// NOLINTNEXTLINE(bugprone-suspicious-include)
-#include <TH/generic/THStorage.cpp>
-#include <TH/THGenerateBFloat16Type.h>
+#include <TH/THGenerateByteType.h>
 
 // NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <TH/generic/THStorageCopy.cpp>
-#include <TH/THGenerateAllTypes.h>
-
-// NOLINTNEXTLINE(bugprone-suspicious-include)
-#include <TH/generic/THStorageCopy.cpp>
-#include <TH/THGenerateComplexTypes.h>
-
-// NOLINTNEXTLINE(bugprone-suspicious-include)
-#include <TH/generic/THStorageCopy.cpp>
-#include <TH/THGenerateHalfType.h>
-
-// NOLINTNEXTLINE(bugprone-suspicious-include)
-#include <TH/generic/THStorageCopy.cpp>
-#include <TH/THGenerateBoolType.h>
-
-// NOLINTNEXTLINE(bugprone-suspicious-include)
-#include <TH/generic/THStorageCopy.cpp>
-#include <TH/THGenerateQTypes.h>
-
-// NOLINTNEXTLINE(bugprone-suspicious-include)
-#include <TH/generic/THStorageCopy.cpp>
-#include <TH/THGenerateBFloat16Type.h>
+#include <TH/THGenerateByteType.h>
 
 #include <ATen/native/Resize.h>
 

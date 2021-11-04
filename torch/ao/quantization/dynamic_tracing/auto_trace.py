@@ -45,7 +45,8 @@ def add_auto_observation(
     # Counter for tensor IDs, will be modified inplace by quant state.
     # This is used to track tensors from output ops to input ops. For example,
     # if op_n had a tensor output with id=1, and op_n+2 had a tensor input with
-    # id=1, we know that the output of op_n is the input to op_n+2.
+    # id=1, we know that the output of op_n is the input to op_n+2. Note,
+    # this is a list because it needs to incremented inplace.
     qtensor_id = [0]
     module_id_to_fqn: Dict[int, str] = {}
 
@@ -148,18 +149,16 @@ def add_auto_observation(
         Otherwise, calls the original module forward.
         """
 
-        __interception_module__ = True
-
         def __call__(self, *args, **kwargs):
             new_args = map_aggregate(args, convert_to_interception_proxy)
             new_kwargs = map_aggregate(kwargs, convert_to_interception_proxy)
             orig_module_call = torch.nn.Module.__call__
             orig_nn_sequential_forward = torch.nn.Sequential.forward
 
-            def record_module(self, *args, **kwargs):
+            def _patched_module_call(self, *args, **kwargs):
 
                 if enable_logging:
-                    logger.debug(f"record_module: {type(self)}")
+                    logger.debug(f"_patched_module_call: {type(self)}")
 
                 nonlocal cur_module
                 old_module = cur_module
@@ -230,7 +229,7 @@ def add_auto_observation(
                     module_stack.pop()
                     cur_module = old_module
 
-            torch.nn.Module.__call__ = record_module
+            torch.nn.Module.__call__ = _patched_module_call
             torch.nn.Sequential.forward = _nn_sequential_patched_forward  # type: ignore[assignment]
             nonlocal first_call
             try:
@@ -419,7 +418,7 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
             orig_module_call = torch.nn.Module.__call__
             orig_nn_sequential_forward = torch.nn.Sequential.forward
 
-            def record_module(self, *args, **kwargs):
+            def _patched_module_call(self, *args, **kwargs):
                 if enable_logging:
                     fqn = module_id_to_fqn.get(id(self), None)
                     logger.debug(f"\nstarting fqn {fqn}")
@@ -433,7 +432,7 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                     hook_type = get_module_hook_type(parent_module, cur_module)
                     if enable_logging:
                         logger.debug(
-                            f"record_module {type(self)} " +
+                            f"_patched_module_call {type(self)} " +
                             # f"arg_types {[type(arg) for arg in args]} " +
                             f"arg_dtypes {[arg.dtype if isinstance(arg, torch.Tensor) else None for arg in args]} " +
                             f"hook_type {hook_type}")
@@ -490,7 +489,7 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
 
                     if enable_logging:
                         logger.debug(
-                            f"record_module {type(self)} " +
+                            f"_patched_module_call {type(self)} " +
                             # f"out {type(output)} " +
                             f"dtype {output.dtype if isinstance(output, torch.Tensor) else None} " +
                             "end")
@@ -500,7 +499,7 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                     module_stack.pop()
                     cur_module = old_module
 
-            torch.nn.Module.__call__ = record_module
+            torch.nn.Module.__call__ = _patched_module_call
             torch.nn.Sequential.forward = _nn_sequential_patched_forward  # type: ignore[assignment]
 
             try:
