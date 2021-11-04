@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
-# Owner(s): ["module: unknown"]
-
+# Owner(s): ["oncall: mobile"]
 
 from torch.testing._internal.common_utils import run_tests
 
