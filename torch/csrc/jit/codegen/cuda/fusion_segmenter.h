@@ -92,6 +92,10 @@ class TORCH_CUDA_CU_API SegmentedGroup {
     return segmented_fusion_;
   }
 
+  //! Utility to re-collect the operators included in this
+  //!  segmented group after updating the group boundary.
+  void resetExprList();
+
   //! Try to get a scheduler entry for this group with
   //!  the given runtime info.
   //! Returns a new scheduler with the same heuristics

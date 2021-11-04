@@ -759,29 +759,11 @@ void SegmentedFusion::finalize() {
       affected_group_set.insert(edge->from);
       affected_group_set.insert(edge->to);
 
+      // The expr pointers on the group's expr list might have been freed
+      //  by now after `ir_utils::replaceValInExpr`.
       // Need a valid expression list to continue. Update from and to group.
-      // TODO : this could have been a general operation that
-      //  the group supports. Could consider moving this into
-      //  segmentedGroup in a follow up.
-      {
-        // Update from group and reset its expressions
-        auto input_group_vec = getAllInputs(edge->from);
-        std::unordered_set<Val*> input_group_set(
-            input_group_vec.begin(), input_group_vec.end());
-        auto expr_set = DependencyCheck::getAllExprsBetween(
-            input_group_set, getAllOutputs(edge->from));
-        edge->from->exprs_ =
-            std::vector<Expr*>(expr_set.begin(), expr_set.end());
-      }
-      {
-        // Update to group and reset its expressions
-        auto input_group_vec = getAllInputs(edge->to);
-        std::unordered_set<Val*> input_group_set(
-            input_group_vec.begin(), input_group_vec.end());
-        auto expr_set = DependencyCheck::getAllExprsBetween(
-            input_group_set, getAllOutputs(edge->to));
-        edge->to->exprs_ = std::vector<Expr*>(expr_set.begin(), expr_set.end());
-      }
+      edge->from->resetExprList();
+      edge->to->resetExprList();
     }
   }
 }
@@ -1648,6 +1630,15 @@ c10::optional<std::unique_ptr<SchedulerEntry>> SegmentedGroup::
       heuristic(), fusion, runtime_info, data_cache);
 }
 
+void SegmentedGroup::resetExprList() {
+  auto input_group_vec = getAllInputs(this);
+  std::unordered_set<Val*> input_group_set(
+      input_group_vec.begin(), input_group_vec.end());
+  auto expr_set =
+      DependencyCheck::getAllExprsBetween(input_group_set, getAllOutputs(this));
+  exprs_ = std::vector<Expr*>(expr_set.begin(), expr_set.end());
+}
+
 // Custom merge node passes:
 //  These passes are added at the beginning or the end of
 //  the node merging process to direct the heuristics of
@@ -1731,10 +1722,6 @@ class TranslateApplicableWelford {
       Fusion* translated_fusion,
       SchedulerRuntimeInfo& runtime_info);
 
-  //! Update expression list of groups containing
-  //!  welford ops that have been translated.
-  void updateGroupExprs(SegmentedGroup* group);
-
  private:
   //! Indicates any translation happened.
   bool translated_any_welford_ = false;
@@ -1796,7 +1783,7 @@ TranslateApplicableWelford::TranslateApplicableWelford(
   for (auto translated_group : translated_groups) {
     // Update heuristics and expr list of translated groups
     translated_group->heuristic_ = ScheduleHeuristic::Persistent;
-    updateGroupExprs(translated_group);
+    translated_group->resetExprList();
   }
 }
 
@@ -1969,20 +1956,6 @@ void TranslateApplicableWelford::translateSingleWelford(WelfordOp* welford) {
   //  need to clear out its reduction domains.
   out_avg->clearReductionIterDomains();
   out_N->clearReductionIterDomains();
-}
-
-void TranslateApplicableWelford::updateGroupExprs(SegmentedGroup* group) {
-  // Re-evaluate expression list of the translated group
-  auto input_vec = getAllInputs(group);
-  auto output_vec = getAllOutputs(group);
-
-  if (input_vec.empty() || output_vec.empty()) {
-    return;
-  }
-
-  std::unordered_set<Val*> input_set(input_vec.begin(), input_vec.end());
-  auto expr_set = DependencyCheck::getAllExprsBetween(input_set, output_vec);
-  group->exprs_ = std::vector<Expr*>(expr_set.begin(), expr_set.end());
 }
 
 bool SegmentCandidateFinder::TranslateWelfordInFusion(
