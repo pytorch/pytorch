@@ -20,6 +20,8 @@ from torch.ao.quantization import (
     default_qat_qconfig,
     get_default_qat_qconfig,
     FixedQParamsFakeQuantize,
+    FusedMovingAvgObsFakeQuantize,
+    NoopObserver,
 )
 from torch.testing._internal.common_utils import TestCase
 
@@ -127,8 +129,11 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
                 self.checkObservers(model)
 
                 test_only_train_fn(model, self.embed_linear_data_train)
-                # make activation_post_process is not inserted for Embedding
-                self.assertFalse(hasattr(model, "activation_post_process"))
+                # make sure activation_post_process is inserted after Linear.
+                self.assertEqual(type(model.linear.activation_post_process), FusedMovingAvgObsFakeQuantize)
+                # make sure that Embedding has a noop for activation.
+                self.assertEqual(type(model.emb.activation_post_process), NoopObserver)
+
                 model = convert(model)
 
                 def checkQuantized(model):
@@ -142,7 +147,6 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
                     self.checkNoQconfig(model)
 
                 checkQuantized(model)
-
                 model = DeFusedEmbeddingBagLinear()
                 model = quantize_qat(model, test_only_train_fn, [self.embed_linear_data_train])
                 checkQuantized(model)

@@ -69,6 +69,7 @@ class Embedding(nn.Embedding):
         embedding_bag.weight = torch.nn.Parameter(self.weight.detach())
         embedding_bag.train(self.training)
         return embedding_bag
+
 class EmbeddingBag(nn.EmbeddingBag):
     r"""
     An embedding bag module attached with FakeQuantize modules for weight,
