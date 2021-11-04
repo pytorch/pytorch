@@ -7482,8 +7482,8 @@ class TestAutogradForwardModeBatchedGrad(TestCase):
     def test_out_of_place_basic(self):
         a = torch.rand(4, 4, dtype=torch.double, requires_grad=True)
         b = torch.rand(4, 4, dtype=torch.double, requires_grad=True)
-        self.assertTrue(gradcheck(torch.sin, a))
-        self.assertTrue(gradcheck(torch.add, (a, b)))
+        self.assertTrue(gradcheck(torch.sin, a, check_forward_ad=True))
+        self.assertTrue(gradcheck(torch.add, (a, b), check_forward_ad=True))
 
     def test_out_of_place_not_same_layout(self):
         input = torch.zeros([2, 2]).transpose(0, 1)
@@ -7495,18 +7495,17 @@ class TestAutogradForwardModeBatchedGrad(TestCase):
                 return fwAD.unpack_dual(dual_tensor)[1]
         torch._vmap_internals._vmap(jvp, 0, 0)(tangent)
 
-    def test_out_of_place_not_same_layout_inplace_on_view(self):
-        input = torch.zeros([2, 2]).transpose(0, 1)
+    def test_inplace_on_view_not_same_layout(self):
+        input = torch.zeros([2, 2])
         tangent = torch.zeros([2, 2, 2])
-        another_batched_arg = torch.zeros([2, 2, 2])
+        view = torch.zeros([2, 2]).transpose(0, 1)
 
-        def jvp(tangent, another_batched_arg):
+        def jvp(tangent):
             with fwAD.dual_level():
                 dual_tensor = fwAD.make_dual(input, tangent)
-                another_batched_arg = another_batched_arg.view_as(another_batched_arg)  # make it a view
-                another_batched_arg.copy_(dual_tensor)
+                view.copy_(dual_tensor)
                 return fwAD.unpack_dual(dual_tensor)[1]
-        torch._vmap_internals._vmap(jvp, 0, 0)(tangent, another_batched_arg)
+        torch._vmap_internals._vmap(jvp, 0, 0)(tangent)
 
 class TestAutogradForwardMode(TestCase):
     def tearDown(self):
