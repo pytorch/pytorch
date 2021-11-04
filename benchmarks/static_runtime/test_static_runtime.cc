@@ -1519,6 +1519,19 @@ TEST(StaticRuntime, QuantizedLinear) {
   testStaticRuntime(quantize_script, {input, weight}, {input_2, weight_2});
 }
 
+TEST(StaticRuntime, QuantizedLinearDynamicFp16) {
+  at::Tensor weight = torch::randn({3, 2}, torch::kFloat);
+  at::Tensor input = torch::randn({3, 2}, torch::kFloat);
+
+  at::Tensor weight_2 = torch::randn({4, 3}, torch::kFloat);
+  at::Tensor input_2 = torch::randn({4, 3}, torch::kFloat);
+
+  testStaticRuntime(
+      quantized_linear_dynamic_fp16_script,
+      {input, weight},
+      {input_2, weight_2});
+}
+
 TEST(StaticRuntime, IndividualOps_VarStack) {
   // 2D tensors - stack dim = 0
   std::vector<IValue> args1 = {at::randn({6, 6}), at::randn({6, 6}), 0};
