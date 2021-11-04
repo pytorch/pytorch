@@ -113,7 +113,7 @@ def make_scalar_mismatch_msg(
     identifier: Optional[Union[str, Callable[[str], str]]] = None,
 ) -> str:
     abs_diff = abs(actual - expected)
-    rel_diff = abs_diff / abs(expected)
+    rel_diff = float("inf") if expected == 0 else abs_diff / abs(expected)
     return _make_mismatch_msg(
         identifier=identifier,
         default_identifier="Scalars",
@@ -267,6 +267,7 @@ class NumberPair(Pair):
         float: torch.float64,
         complex: torch.complex128,
     }
+    _NUMBER_TYPES = tuple(_TYPE_TO_DTYPE.keys())
 
     def __init__(
         self,
@@ -280,7 +281,7 @@ class NumberPair(Pair):
         check_dtype: bool = False,
         **other_parameters: Any,
     ) -> None:
-        self._check_inputs_isinstance(actual, expected, cls=tuple(self._TYPE_TO_DTYPE.keys()))
+        self._check_inputs_isinstance(actual, expected, cls=self._NUMBER_TYPES)
         error_meta, tolerances = parse_tolerances(
             *[self._TYPE_TO_DTYPE.get(type(input), torch.float64) for input in (actual, expected)], rtol=rtol, atol=atol
         )
@@ -301,8 +302,6 @@ class NumberPair(Pair):
 
         if cmath.isnan(self.actual) and cmath.isnan(self.expected) and self.equal_nan:
             return None
-
-        # 1 / 0
 
         diff = abs(self.actual - self.expected)
         tolerance = self.atol + self.rtol * abs(self.expected)
