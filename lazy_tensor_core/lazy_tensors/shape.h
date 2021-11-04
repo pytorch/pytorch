@@ -34,4 +34,9 @@ class Shape {
 
 std::ostream& operator<<(std::ostream& out, const Shape& shape);
 
+// TODO(alanwaketan): Rethink how code-gen uses shapes.
+std::vector<lazy_tensors::Shape> convertShapes(
+    const std::vector<at::ScalarType>& dtypes,
+    const std::vector<std::vector<int64_t>>& shapes);
+
 }  // namespace lazy_tensors

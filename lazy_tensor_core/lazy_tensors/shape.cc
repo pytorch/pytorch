@@ -18,4 +18,17 @@ std::ostream& operator<<(std::ostream& out, const Shape& shape) {
   return out << shape.ToString();
 }
 
+std::vector<lazy_tensors::Shape> convertShapes(
+    const std::vector<at::ScalarType>& dtypes,
+    const std::vector<std::vector<int64_t>>& shapes) {
+  TORCH_INTERNAL_ASSERT(dtypes.size() == shapes.size());
+
+  std::vector<lazy_tensors::Shape> shape;
+  for (int i = 0; i < dtypes.size(); i++) {
+    shape.emplace_back(dtypes[i], shapes[i]);
+  }
+
+  return shape;
+}
+
 }  // namespace lazy_tensors
