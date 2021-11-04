@@ -93,7 +93,7 @@ ${functor}
 // TODO: setup grid-stride loop
 
 extern "C" __global__
-void ${name}_vectorized_kernel(
+void ${name}_vectorized${vec_size}_kernel(
     const int N,
     Array<char*, ${nInputs}+1> data) //[${nInputs}+1],
     {

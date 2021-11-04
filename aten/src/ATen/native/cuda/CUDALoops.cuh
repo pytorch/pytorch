@@ -184,9 +184,24 @@ static inline void launch_jitted_vectorized_kernel(int64_t N, const std::string&
   //std::cout << "jitted vec_size is " << vec_size << std::endl;
 
   //TODO handle 2 and 4 vec sizes, so far only one vecsize will be compiled (4)
-  static at::cuda::jit::NvrtcFunction fn;
-  if (!fn.function) {
-    //std::cout << "generating code\n";
+  static at::cuda::jit::NvrtcFunction fn4;
+  static at::cuda::jit::NvrtcFunction fn2;
+  static at::cuda::jit::NvrtcFunction fn1;
+  at::cuda::jit::NvrtcFunction * fn_ptr;
+  if (vec_size == 4) {
+    fn_ptr = &fn4;
+  } else if (vec_size == 2) {
+    fn_ptr = &fn2;
+  } else if (vec_size ==1) {
+    fn_ptr = &fn1;
+  } else {
+    TORCH_INTERNAL_ASSERT(false, "unexpected vec_size for jitter vectorized kernel");
+  }
+
+  bool vectorized = vec_size > 1;
+
+  if (!fn_ptr->function) {
+//    std::cout << "generating code\n";
     constexpr int nTensors = array_t::size();
     std::string string_name{name};
     std::string compute_type_str = at::cuda::jit::typeName<compute_type>();
@@ -194,24 +209,41 @@ static inline void launch_jitted_vectorized_kernel(int64_t N, const std::string&
     auto code = at::cuda::jit::generate_code(nTensors, f, string_name,
                                               compute_type_str, result_type_str,
                                               /*contiguous=*/true, /*dynamic_casting=*/false,
-                                              /*vectorized=*/true, vec_size);
+                                              vectorized, vec_size);
     //std::cout << "generated code: " << std::endl;
     //std::cout << code << std::endl;
-    std::string kernel_name = string_name + "_vectorized";
-    fn = at::cuda::jit::jit_pwise_function(code, kernel_name); // TODO proper name
+    std::string kernel_name = vectorized ? string_name + "_vectorized" + std::to_string(vec_size) : string_name;
+    *fn_ptr = at::cuda::jit::jit_pwise_function(code, kernel_name);
   }
 
-  // packs args
-  std::array<void*, 6> args = {
-    (void*)&N,
-    (void*)&data,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-  };
-  at::cuda::jit::launch_jitted_pwise_function(fn, args, grid, num_threads);
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  if (vectorized) {
+    std::array<void*, 6> args = {
+      (void*)&N,
+      (void*)&data,
+      nullptr,
+      nullptr,
+      nullptr,
+      nullptr
+    };
+    at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args, grid, num_threads);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  } else {
+    auto ic = TrivialOffsetCalculator<arity>();
+    auto oc = TrivialOffsetCalculator<1>();
+    auto l = memory::LoadWithoutCast();
+    auto s = memory::StoreWithoutCast();
+
+    std::array<void*, 6> args = {
+      (void*)&N,
+      (void*)&data,
+      (void*)&ic,
+      (void*)&oc,
+      (void*)&l,
+      (void*)&s
+    };
+    at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args, grid, num_threads);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  }
 
 }
 

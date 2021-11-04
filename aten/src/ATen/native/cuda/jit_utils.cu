@@ -157,7 +157,7 @@ NvrtcFunction jit_pwise_function(
   int major = 0, minor = 0;
   bool compile_to_sass = false;
   torch::jit::fuser::cuda::codegenOutputQuery(prop, major, minor, compile_to_sass);
-  std::cout << "create program\n";
+  //std::cout << "create program\n";
   // Creates the NVRTC program
   nvrtcProgram program;
   const auto& nvrtc = at::globalContext().getNVRTC();
@@ -189,7 +189,7 @@ NvrtcFunction jit_pwise_function(
   // Avoid excessive register usage from assertion
   args.push_back("-DNDEBUG");
 #endif
-  std::cout << "compile program\n";
+//  std::cout << "compile program\n";
   // compiles and validates result
   const auto compilation_result =
       nvrtc.nvrtcCompileProgram(program, args.size(), args.data());
