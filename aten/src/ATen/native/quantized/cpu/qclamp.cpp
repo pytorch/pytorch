@@ -137,6 +137,17 @@ Tensor& clamp_out_quantized_cpu(
   return result;
 }
 
+Tensor& clamp_quantized_cpu_(
+    Tensor& self,
+    const optional<Scalar>& min,
+    const optional<Scalar>& max) {
+  Tensor qy;
+  qy = clamp_quantized_cpu(self, min, max);
+  // This can be optimized in a future PR if it becomes a bottleneck.
+  self.copy_(qy);
+  return self;
+}
+
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::clamp"), TORCH_FN(clamp_quantized_cpu));
 }
