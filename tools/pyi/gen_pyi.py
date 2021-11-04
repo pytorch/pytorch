@@ -422,8 +422,8 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
                  'def size(self, dim: _int) -> _int: ...'],
         'stride': ['def stride(self) -> Tuple[_int]: ...',
                    'def stride(self, _int) -> _int: ...'],
-        'new_ones': ['def new_ones(self, size: _size, {}) -> Tensor: ...'.
-                     format(FACTORY_PARAMS)],
+        'new_ones': ['def new(self, *args: Any, {}) ->Tensor: ...'.format(DEVICE_PARAM),
+                     'def new_ones(self, size: _size, {}) -> Tensor: ...'.format(FACTORY_PARAMS)],
         'new_tensor': ["def new_tensor(self, data: Any, {}) -> Tensor: ...".format(FACTORY_PARAMS)],
         # new and __init__ have the same signatures differ only in return type
         # Adapted from legacy_tensor_ctor and legacy_tensor_new
