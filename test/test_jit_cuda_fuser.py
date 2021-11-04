@@ -2864,6 +2864,38 @@ class TestCudaFuser(JitTestCase):
         self.assertGraphContains(graph, 'aten::add', True)
         self.assertGraphContains(graph, 'aten::relu', True)
 
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_conv2d_bias(self):
+        def t(x: torch.Tensor, w: torch.Tensor, bias: torch.Tensor):
+            o = torch.nn.functional.conv2d(x, w, bias)
+            return o.relu()
+
+        jitted = torch.jit.script(t)
+        inp = torch.randn(4, 5, 3, 3, dtype=torch.float32, device="cuda")
+        weight = torch.randn(2, 5, 2, 2, dtype=torch.float32, device="cuda")
+        bias = torch.randn(2, dtype=torch.float32, device="cuda")
+
+        for i in range(3):
+            jit_o = jitted(inp, weight, bias)
+
+        graph = jitted.graph_for(inp)
+        self.assertGraphContains(graph, FUSION_GROUP, True)
+
+        def t_not_fused(x: torch.Tensor, w: torch.Tensor):
+            o = torch.nn.functional.conv2d(x, w)
+            return o.relu()
+
+        jitted_not_fused = torch.jit.script(t_not_fused)
+
+        for i in range(3):
+            jit_o = jitted_not_fused(inp, weight)
+
+        graph = jitted_not_fused.graph_for(inp)
+        self.assertGraphContainsExactly(graph, FUSION_GROUP, 0)
+        self.assertGraphContains(graph, 'aten::relu', True)
+
     @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,

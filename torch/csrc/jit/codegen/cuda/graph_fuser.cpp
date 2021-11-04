@@ -1893,6 +1893,64 @@ void decomposeLinearOps(Block* block) {
   }
 }
 
+// break `conv2d` layer into `conv2d` and `add_optional`. This allows us to fuse
+// the binary operation without supporting gemm.
+// Note that we are not breaking `conv2d` layer without bias.
+void decomposeConvOps(Block* block) {
+  std::vector<Node*> conv_nodes;
+  for (Node* n : block->nodes()) {
+    for (Block* b : n->blocks()) {
+      decomposeConvOps(b);
+    }
+    // TODO: expand this to convXd
+    // only decompose `conv2d` layer with bias.
+    if (n->kind() == aten::conv2d &&
+        n->input(2)->type()->isSubtypeOf(TensorType::get())) {
+      conv_nodes.push_back(n);
+    }
+  }
+
+  auto graph = block->owningGraph();
+  for (Node* n : conv_nodes) {
+    // TODO: only handling conv2d at this moment, expand this to convXd
+    WithInsertPoint guard(n);
+
+    auto const_neg_1 = n->owningGraph()->insertConstant(IValue(-1));
+    auto const_none = n->owningGraph()->insertConstant(IValue());
+
+    auto bias_tensor_type = n->input(2)->type()->cast<c10::TensorType>();
+    auto bias_size_opt = bias_tensor_type->sizes().concrete_sizes();
+    TORCH_INTERNAL_ASSERT(
+        bias_size_opt.has_value(),
+        "concrete shape for bias input to conv2d are required");
+    // bias shape (C)
+    auto bias_size = bias_size_opt.value();
+
+    auto tmp = graph->insertNode(
+        graph->create(aten::unsqueeze, {n->input(2), const_neg_1}, 1));
+    // new shape (C, 1)
+    bias_size.emplace_back(1);
+    tmp->output()->setType(bias_tensor_type->withSizes(bias_size));
+
+    auto unsqueezed_bias = graph->insertNode(
+        graph->create(aten::unsqueeze, {tmp->output(), const_neg_1}, 1));
+    // new shape (C, 1, 1)
+    bias_size.emplace_back(1);
+    unsqueezed_bias->output()->setType(bias_tensor_type->withSizes(bias_size));
+
+    // replace bias input to none
+    n->replaceInput(2, const_none);
+
+    // add bias as a new node
+    auto bias_n = graph->insertNode(graph->create(
+        prim::add_optional, {n->output(0), unsqueezed_bias->output()}, 1));
+    bias_n->output()->setType(n->output(0)->type());
+
+    // replace later uses
+    n->output(0)->replaceAllUsesAfterNodeWith(bias_n, bias_n->output());
+  }
+}
+
 // This is temporary to handle intermediate tensor inserted by autodiff is not
 // being profiled
 void markMissingType(Block* block) {
@@ -1964,7 +2022,10 @@ void CudaFuseGraph(std::shared_ptr<Graph>& graph) {
   // TODO: restore decomposition after fusion, in case we are decomposing
   //       operation that can't be fused;
   decomposeLinearOps(graph->block());
-  GRAPH_DEBUG("decompose operations by nvfuser: ", *graph);
+  GRAPH_DEBUG("After decompose Linear Ops by nvfuser: ", *graph);
+
+  decomposeConvOps(graph->block());
+  GRAPH_DEBUG("After decompose decompose Conv Ops by nvfuser: ", *graph);
 
   CudaGraphFuser(graph->block(), graph).run();
   GRAPH_DEBUG("After Fusion: ", *graph);
