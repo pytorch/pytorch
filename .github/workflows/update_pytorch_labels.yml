@@ -22,7 +22,3 @@ jobs:
         run: |
           python3 -m pip install boto3==1.16.34
           .github/scripts/export_pytorch_labels.py
-
-
-
-
