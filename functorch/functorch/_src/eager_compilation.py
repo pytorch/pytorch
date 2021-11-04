@@ -10,6 +10,8 @@ import torch.utils.dlpack
 from torch.fx.passes import graph_drawer
 import os
 
+from .python_key import pythonkey_decompose
+
 def draw_graph(traced: torch.fx.GraphModule, fname: str, figname: str = "fx_graph"):
     base, ext = os.path.splitext(fname)
     if not ext:
@@ -178,7 +180,7 @@ def normalize_as_list(x):
         return x
     return [x]
 
-def create_compiled_function(flat_fn, fw_compiler, bw_compiler, partition_fn):
+def create_compiled_function(flat_fn, fw_compiler, bw_compiler, partition_fn, decompose):
     joint_forward_backward = create_joint_forward_backward(flat_fn)
 
     compiled_fw = None
@@ -198,7 +200,11 @@ def create_compiled_function(flat_fn, fw_compiler, bw_compiler, partition_fn):
 
                 joint_inputs = (flat_args, out)
                 with torch.enable_grad():
-                    fx_g = make_fx(joint_forward_backward)(*joint_inputs)
+                    if decompose:
+                        with pythonkey_decompose():
+                            fx_g = make_fx(joint_forward_backward)(*joint_inputs)
+                    else:
+                        fx_g = make_fx(joint_forward_backward)(*joint_inputs)
                 fw_module, bw_module = partition_fn(fx_g, joint_inputs)
                 # print(fw_module.code, bw_module.code)
 
@@ -225,9 +231,9 @@ def create_compiled_function(flat_fn, fw_compiler, bw_compiler, partition_fn):
     return CompiledFunction
 
 
-# using this reduces the overhead by about 50%
+# using a C++-based pytree reduces the overhead by about 50%
 # import tree
-def compiled_function(fn, fw_compiler, bw_compiler, partition_fn=default_partition):
+def compiled_function(fn, fw_compiler, bw_compiler, partition_fn=default_partition, decompose=False):
     saved_fn = None
 
     def returned_function(*args, **kwargs):
@@ -241,7 +247,7 @@ def compiled_function(fn, fw_compiler, bw_compiler, partition_fn=default_partiti
                 args, kwargs = pytree.tree_unflatten(args, args_spec)
                 return fn(*args, **kwargs)
 
-            saved_fn = create_compiled_function(flat_fn, fw_compiler, bw_compiler, partition_fn).apply
+            saved_fn = create_compiled_function(flat_fn, fw_compiler, bw_compiler, partition_fn, decompose).apply
         return saved_fn(*flattened_args)
 
     return returned_function
@@ -296,9 +302,9 @@ def tvm_compile(fx_module, example_inputs, name = None):
 def tvm_function(fn, name):
     return compiled_function(fn, partial(tvm_compile, name=f'fw_{name}'), partial(tvm_compile, name=f'bw_{name}'))
 
-def compiled_module(mod, fw_compiler, bw_compiler, partition_fn=default_partition):
+def compiled_module(mod, *args, **kwargs):
     func_mod, params, buffers = make_functional_with_buffers(mod)
-    compiled_f = compiled_function(func_mod, fw_compiler, bw_compiler, partition_fn)
+    compiled_f = compiled_function(func_mod, *args, **kwargs)
 
     class CompiledModule(nn.Module):
         def __init__(self):
