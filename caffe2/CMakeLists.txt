@@ -802,11 +802,11 @@ torch_compile_options(torch_cpu)  # see cmake/public/utils.cmake
 
 if(USE_PRECOMPILED_HEADERS)
   target_precompile_headers(torch_cpu PRIVATE
-      "$<$<COMPILE_LANGUAGE:CXX>:ATen/ATen.h>")
+      "$<$<COMPILE_LANGUAGE:CXX>:ATen/core/ATen_pch.h>")
   # Exclude some files from using PCH
   set_source_files_properties(
-      # Errors when ATen.h is included
-      ${Torch_BINARY_DIR}/aten/src/ATen/core/TensorMethods.cpp
+      # Not built with OpenMP, so PCH is invalid
+      ${Torch_SOURCE_DIR}/aten/src/ATen/MapAllocator.cpp
       # Builds with incompatible compiler flags
       ${Caffe2_CPU_SRCS_AVX2}
       ${Caffe2_CPU_SRCS_AVX512}
@@ -891,7 +891,7 @@ if(USE_ROCM)
 
   if(USE_PRECOMPILED_HEADERS)
     target_precompile_headers(torch_hip PRIVATE
-        "$<$<COMPILE_LANGUAGE:CXX>:ATen/ATen.h>")
+        "$<$<COMPILE_LANGUAGE:CXX>:ATen/core/ATen_pch.h>")
   endif()
 elseif(USE_CUDA)
   set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
@@ -933,12 +933,10 @@ elseif(USE_CUDA)
   if(USE_PRECOMPILED_HEADERS)
     if(BUILD_SPLIT_CUDA)
       target_precompile_headers(torch_cuda_cpp PRIVATE
-          "$<$<COMPILE_LANGUAGE:CXX>:ATen/ATen.h>"
-          "$<$<COMPILE_LANGUAGE:CXX>:ATen/cuda/CUDAContext.h>")
+          "$<$<COMPILE_LANGUAGE:CXX>:ATen/core/ATen_pch.h>")
     else()
       target_precompile_headers(torch_cuda PRIVATE
-          "$<$<COMPILE_LANGUAGE:CXX>:ATen/ATen.h>"
-          "$<$<COMPILE_LANGUAGE:CXX>:ATen/cuda/CUDAContext.h>")
+          "$<$<COMPILE_LANGUAGE:CXX>:ATen/core/ATen_pch.h>")
     endif()
   endif()
 endif()
