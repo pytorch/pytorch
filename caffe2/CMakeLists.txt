@@ -185,6 +185,7 @@ if(BUILD_SPLIT_CUDA)
       "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/BatchLinearAlgebra.cpp"
       "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/BatchLinearAlgebraLib.cpp"
       "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/Blas.cpp"
+      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/Distributions.cpp"
       "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/Equal.cpp"
       "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/GridSampler.cpp"
       "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/IndexKernel.cpp"
