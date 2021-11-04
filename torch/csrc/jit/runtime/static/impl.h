@@ -43,7 +43,7 @@ TORCH_API std::string dumpValueSet(
 // - output_aliases:
 //     values that are either outputs or contain aliases of outputs
 // - external_aliases:
-//     values that are inputs, constants, outputs, or their aliases.
+//     values that are inputs, constants, or their aliases.
 //     The output aliases that end up here are as a result of aliasDb failing to
 //     recognize them as outputs due to collection object (e.g., Tuple) aliasing
 //     inputs.
@@ -277,23 +277,14 @@ class TORCH_API StaticRuntime {
       std::vector<c10::IValue>&& args,
       const std::unordered_map<std::string, c10::IValue>& kwargs);
 
-  void display_nodes(
-      const std::vector<c10::IValue>& args,
-      const std::unordered_map<std::string, c10::IValue>& kwargs);
-
   void benchmark(
-      const std::vector<c10::IValue>& args,
-      const std::unordered_map<std::string, c10::IValue>& kwargs,
+      const std::vector<std::vector<c10::IValue>>& args_list,
+      const std::vector<std::unordered_map<std::string, c10::IValue>>&
+          kwargs_list,
       const int warmup_runs,
       const int main_runs,
       bool print_per_node_time = false,
       bool generate_ai_pep_output = false);
-
-  float benchmark_model(
-      const std::vector<c10::IValue>& args,
-      const std::unordered_map<std::string, c10::IValue>& kwargs,
-      const int warmup_runs,
-      const int main_runs);
 
   struct IndividualMetrics {
     float setup_time{0.0};
@@ -313,8 +304,9 @@ class TORCH_API StaticRuntime {
   };
 
   IndividualMetrics benchmark_individual_ops(
-      const std::vector<c10::IValue>& args,
-      const std::unordered_map<std::string, c10::IValue>& kwargs,
+      const std::vector<std::vector<c10::IValue>>& args_list,
+      const std::vector<std::unordered_map<std::string, c10::IValue>>&
+          kwargs_list,
       const int warmup_runs,
       const int main_runs);
 
@@ -380,6 +372,21 @@ class TORCH_API StaticRuntime {
       ival = IValue();
     }
   }
+
+  void create_memory_planner();
+
+  float benchmark_model(
+      const std::vector<std::vector<c10::IValue>>& args_list,
+      const std::vector<std::unordered_map<std::string, c10::IValue>>&
+          kwargs_list,
+      const int warmup_runs,
+      const int main_runs);
+
+  void display_nodes(
+      const std::vector<c10::IValue>& args,
+      const std::unordered_map<std::string, c10::IValue>& kwargs);
+
+  IValue move_outputs_to_tuple(size_t num_outputs);
 
   // Memory planning is only enabled if sm->opts().cleanup_activations is true.
   // Otherwise, the memory used by activations is cached inside the static
@@ -465,6 +472,11 @@ class TORCH_API ProcessedNode {
     return outputs_[i];
   }
 
+  const IValue& Output(size_t i) const {
+    DCHECK(i < outputs_size_);
+    return outputs_[i];
+  }
+
   void set_input(size_t index, const IValue* ival) {
     inputs_[index] = ival;
   }
@@ -494,6 +506,10 @@ class TORCH_API ProcessedNode {
   }
 
  private:
+  C10_NODISCARD bool verify_outputs_dont_overlap_each_other() const;
+
+  C10_NODISCARD bool verify_inputs_dont_overlap_outputs() const;
+
   Node* node_;
   enum class FunctionKind {
     kOutVariant,
