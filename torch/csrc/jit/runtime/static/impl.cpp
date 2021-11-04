@@ -32,6 +32,14 @@
 namespace torch {
 namespace jit {
 
+// A manually curated set of ops that are disallowed in static runtime.
+// These are rarely-used ops. Disallowing them typically eliminates
+// corner cases in graph optimizations, allowing for more aggressive
+// optimizations and better performance.
+bool isUnsupportedOp(const NodeKind& kind) {
+  return kind == aten::__is__ || kind == aten::__isnot__;
+}
+
 // graph must be frozen or canEnableStaticRuntime would return false if there's
 // any prim::CallMethod op left in the graph
 bool canEnableStaticRuntime(const std::shared_ptr<torch::jit::Graph>& graph) {
@@ -44,14 +52,15 @@ bool canEnableStaticRuntime(const std::shared_ptr<torch::jit::Graph>& graph) {
       VLOG(1) << "Found nested sub-blocks in graph at node: "
               << PrintNode(node);
     }
-    if (node->kind() == prim::Constant) {
+    const auto kind = node->kind();
+    if (kind == prim::Constant) {
       continue;
     }
     // check if can get op from Node
     const Operator* op = node->maybeOperator();
-    if (!op && !nativeOpIsRegistered(node->kind())) {
+    if (isUnsupportedOp(kind) || (!op && !nativeOpIsRegistered(kind))) {
       can_support = false;
-      LOG(WARNING) << "Found unsupported op: " << node->kind().toQualString();
+      LOG(WARNING) << "Found unsupported op: " << kind.toQualString();
     }
   }
   if (has_blocks) {
@@ -103,7 +112,6 @@ void OptimizeGraph(
 #ifdef FBCODE_CAFFE2
     ReplaceWithCopy(graph);
     FuseListUnpack(graph);
-    FuseListUnpackV2(graph);
     EnableStaticRuntimeLayerNorm(graph);
 #endif
   }
@@ -912,6 +920,36 @@ void StaticRuntime::create_memory_planner() {
   }
 }
 
+c10::IValue StaticRuntime::move_outputs_to_tuple(size_t num_outputs) {
+#ifndef NDEBUG
+  for (const auto i : c10::irange(num_outputs)) {
+    // The exact output tensor should never be managed.
+    DCHECK(!isManagedOutputTensor(*outputs_[i]));
+  }
+#endif
+  switch (num_outputs) {
+    case 1:
+      return c10::ivalue::Tuple::create(std::move(*outputs_[0]));
+    case 2:
+      return c10::ivalue::Tuple::create(
+          std::move(*outputs_[0]), std::move(*outputs_[1]));
+    case 3:
+      return c10::ivalue::Tuple::create(
+          std::move(*outputs_[0]),
+          std::move(*outputs_[1]),
+          std::move(*outputs_[2]));
+    default: {
+      std::vector<c10::IValue> outputs;
+      outputs.reserve(num_outputs);
+      for (const auto i : c10::irange(num_outputs)) {
+        // use move here. Otherwise, clean up outputs_[i] explicitly
+        outputs.emplace_back(std::move(*outputs_[i]));
+      }
+      return c10::ivalue::Tuple::create(std::move(outputs));
+    }
+  }
+}
+
 template <typename IValueList>
 c10::IValue StaticRuntime::run_impl(
     IValueList&& args,
@@ -951,15 +989,7 @@ c10::IValue StaticRuntime::run_impl(
 
   // no need to keep references of outputs in static runtime anymore
   if (static_module_.num_outputs() > 1) {
-    std::vector<c10::IValue> outputs;
-    outputs.reserve(static_module_.num_outputs());
-    for (const auto i : c10::irange(static_module_.num_outputs())) {
-      // The exact output tensor should never be managed.
-      DCHECK(!isManagedOutputTensor(*outputs_[i]));
-      // use move here. Otherwise, clean up outputs_[i] explicitly
-      outputs.emplace_back(std::move(*outputs_[i]));
-    }
-    return c10::ivalue::Tuple::create(std::move(outputs));
+    return move_outputs_to_tuple(static_module_.num_outputs());
   }
 #ifndef NDEBUG
   check_for_memory_leak(false);
@@ -1000,18 +1030,26 @@ std::string generate_latency_json(const std::string& label, double millis) {
 } // namespace
 
 void StaticRuntime::benchmark(
-    const std::vector<c10::IValue>& args,
-    const std::unordered_map<std::string, c10::IValue>& kwargs,
+    const std::vector<std::vector<c10::IValue>>& args_list,
+    const std::vector<std::unordered_map<std::string, c10::IValue>>&
+        kwargs_list,
     const int warmup_runs,
     const int main_runs,
     bool print_per_node_time,
     bool generate_ai_pep_output) {
-  float time_per_iter = benchmark_model(args, kwargs, warmup_runs, main_runs);
+  TORCH_CHECK(
+      kwargs_list.size() == 0 || args_list.size() == kwargs_list.size());
+  std::cout << "Input size: " << args_list.size() << std::endl;
+  if (args_list.size() == 0) {
+    return;
+  }
+  float time_per_iter =
+      benchmark_model(args_list, kwargs_list, warmup_runs, main_runs);
   std::cout << "Static runtime ms per iter: " << time_per_iter
             << ". Iters per second: " << 1000.0 / time_per_iter << std::endl;
 
   IndividualMetrics results =
-      benchmark_individual_ops(args, kwargs, warmup_runs, main_runs);
+      benchmark_individual_ops(args_list, kwargs_list, warmup_runs, main_runs);
 
   if (print_per_node_time) {
     for (const auto i : c10::irange(nodes_.size())) {
@@ -1089,28 +1127,46 @@ void StaticRuntime::benchmark(
   check_for_memory_leak();
 
 #ifndef NDEBUG
-  display_nodes(args, kwargs);
+  std::unordered_map<std::string, c10::IValue> empty_kwargs;
+  display_nodes(
+      args_list[0], kwargs_list.size() > 0 ? kwargs_list[0] : empty_kwargs);
 #endif
 }
 
 float StaticRuntime::benchmark_model(
-    const std::vector<c10::IValue>& args,
-    const std::unordered_map<std::string, c10::IValue>& kwargs,
+    const std::vector<std::vector<c10::IValue>>& args_list,
+    const std::vector<std::unordered_map<std::string, c10::IValue>>&
+        kwargs_list,
     const int warmup_runs,
     const int main_runs) {
   TORCH_CHECK(warmup_runs >= 0 && main_runs >= 1);
+  TORCH_CHECK(
+      kwargs_list.size() == 0 || args_list.size() == kwargs_list.size());
 
+  const bool is_kwargs_empty = kwargs_list.size() == 0;
+  const std::unordered_map<std::string, c10::IValue> empty_kwargs;
+  bool manage_output_tensors = static_module_.opts().manage_output_tensors;
   for (const auto i : c10::irange(warmup_runs)) {
     (void)i; // Suppress unused variable warning
-    operator()(args, kwargs);
+    for (const auto j : c10::irange(args_list.size())) {
+      operator()(args_list[j], is_kwargs_empty ? empty_kwargs : kwargs_list[j]);
+      if (manage_output_tensors) {
+        deallocateOutputTensors();
+      }
+    }
   }
   caffe2::Timer timer;
   for (const auto i : c10::irange(main_runs)) {
     (void)i; // Suppress unused variable warning
-    operator()(args, kwargs);
+    for (const auto j : c10::irange(args_list.size())) {
+      operator()(args_list[j], is_kwargs_empty ? empty_kwargs : kwargs_list[j]);
+      if (manage_output_tensors) {
+        deallocateOutputTensors();
+      }
+    }
   }
   float millis = timer.MilliSeconds();
-  return millis / static_cast<float>(main_runs);
+  return millis / (static_cast<float>(main_runs) * args_list.size());
 }
 
 bool display_ivalue(const IValue& iv) {
@@ -1131,7 +1187,7 @@ bool display_ivalue(const IValue& iv) {
     std::cout << "Dict {" << iv.toGenericDict().size() << "}\n";
     return true;
   } else if (iv.isTuple()) {
-    std::cout << "Tuple {" << iv.toTuple()->elements().size() << "}\n";
+    std::cout << "Tuple {" << iv.toTupleRef().elements().size() << "}\n";
     return true;
   } else if (iv.isInt()) {
     std::cout << "int {" << iv.toInt() << "}\n";
@@ -1190,12 +1246,21 @@ void StaticRuntime::display_nodes(
 }
 
 StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
-    const std::vector<c10::IValue>& args,
-    const std::unordered_map<std::string, c10::IValue>& kwargs,
+    const std::vector<std::vector<c10::IValue>>& args_list,
+    const std::vector<std::unordered_map<std::string, c10::IValue>>&
+        kwargs_list,
     const int warmup_runs,
     const int main_runs) {
+  TORCH_CHECK(
+      kwargs_list.size() == 0 || args_list.size() == kwargs_list.size());
   TORCH_CHECK(warmup_runs >= 1 && main_runs >= 1);
+  if (args_list.size() == 0) {
+    return {};
+  }
 
+  const bool is_kwargs_empty = kwargs_list.size() == 0;
+  const std::unordered_map<std::string, c10::IValue> empty_kwargs;
+  bool manage_output_tensors = static_module_.opts().manage_output_tensors;
   // See comment on above use of InferenceMode for
   // explanation.
   c10::InferenceMode mode;
@@ -1206,7 +1271,7 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
   // setup time
   caffe2::Timer timer;
 
-  set_inputs(args, kwargs);
+  set_inputs(args_list[0], is_kwargs_empty ? empty_kwargs : kwargs_list[0]);
 
   results.setup_time = timer.MilliSeconds();
 
@@ -1214,74 +1279,83 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
   // initializes the memory planner with the profile information. Folllowing
   // iterations just use the already established memory planning.
   timer.Start();
-  operator()(args, kwargs);
+  operator()(args_list[0], is_kwargs_empty ? empty_kwargs : kwargs_list[0]);
+  if (manage_output_tensors) {
+    deallocateOutputTensors();
+  }
   results.first_iter_time = timer.MilliSeconds();
 
   // warmup runs
   for (const auto i : c10::irange(warmup_runs - 1)) {
     (void)i; // Suppress unused variable warning
-    operator()(args, kwargs);
+    for (const auto j : c10::irange(args_list.size())) {
+      operator()(args_list[j], is_kwargs_empty ? empty_kwargs : kwargs_list[j]);
+      if (manage_output_tensors) {
+        deallocateOutputTensors();
+      }
+    }
   }
 
   // main runs
-  for (const auto k : c10::irange(main_runs)) {
-    (void)k; // Suppress unused variable warning
+  for (const auto i : c10::irange(main_runs)) {
+    (void)i; // Suppress unused variable warning
 
-    set_inputs(args, kwargs);
+    for (const auto j : c10::irange(args_list.size())) {
+      set_inputs(args_list[j], is_kwargs_empty ? empty_kwargs : kwargs_list[j]);
 
-    timer.Start();
-    if (planner_) {
-      planner_->allocate();
-    }
-    float millis = timer.MilliSeconds();
-    results.memory_alloc_time += millis;
-
-    for (const auto i : c10::irange(nodes_.size())) {
       timer.Start();
-      nodes_[i].run();
-      millis = timer.MilliSeconds();
-      results.time_per_node[i] += millis;
-    }
-    timer.Start();
-    if (static_module_.opts().cleanup_activations) {
-      create_memory_planner();
-      planner_->deallocate();
-      // clean up owning refs of input tensors
-      clean_up_input_ivalues();
-    }
-    millis = timer.MilliSeconds();
-    results.memory_dealloc_time += millis;
-
-    timer.Start();
-    // no need to keep references of outputs in static runtime anymore
-    c10::IValue output;
-    if (static_module_.num_outputs() > 1) {
-      std::vector<c10::IValue> outputs;
-      outputs.reserve(static_module_.num_outputs());
-      for (const auto i : c10::irange(static_module_.num_outputs())) {
-        // use move here. Otherwise, clean up outputs_[i] explicitly
-        outputs.emplace_back(std::move(*outputs_[i]));
+      if (planner_) {
+        planner_->allocate();
       }
-      output = c10::ivalue::Tuple::create(std::move(outputs));
-    }
+      float millis = timer.MilliSeconds();
+      results.memory_alloc_time += millis;
+
+      for (const auto k : c10::irange(nodes_.size())) {
+        timer.Start();
+        nodes_[k].run();
+        millis = timer.MilliSeconds();
+        results.time_per_node[k] += millis;
+      }
+      timer.Start();
+      if (static_module_.opts().cleanup_activations) {
+        create_memory_planner();
+        planner_->deallocate();
+        // clean up owning refs of input tensors
+        clean_up_input_ivalues();
+      }
+      if (manage_output_tensors) {
+        deallocateOutputTensors();
+      }
+      millis = timer.MilliSeconds();
+      results.memory_dealloc_time += millis;
+
+      timer.Start();
+      // no need to keep references of outputs in static runtime anymore
+      c10::IValue output;
+      if (static_module_.num_outputs() > 1) {
+        output = move_outputs_to_tuple(static_module_.num_outputs());
+      }
 
 #ifndef NDEBUG
-    check_for_memory_leak(false);
+      check_for_memory_leak(false);
 #endif
 
-    // use move here. Otherwise, clean up outputs_[0] explicitly
-    output = std::move(*outputs_[0]);
-    // release outputs explicitly to measure the time it takes
-    output = IValue();
-    millis = timer.MilliSeconds();
-    results.output_dealloc_time += millis;
+      // use move here. Otherwise, clean up outputs_[0] explicitly
+      output = std::move(*outputs_[0]);
+      // release outputs explicitly to measure the time it takes
+      output = IValue();
+      millis = timer.MilliSeconds();
+      results.output_dealloc_time += millis;
+    }
   }
 
   // post processing
+  const float num_total_iters =
+      (static_cast<float>(main_runs) * args_list.size());
   for (const auto i : c10::irange(nodes_.size())) {
     const Node* node = nodes_[i].node();
     std::string kind = std::string(node->kind().toQualString());
-    results.time_per_node[i] /= static_cast<float>(main_runs);
+    results.time_per_node[i] /= num_total_iters;
     results.time_per_node_type[kind] += results.time_per_node[i];
     results.instances_per_node_type[kind]++;
     if (nodes_[i].has_out_variant()) {
@@ -1293,9 +1367,9 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
     results.total_time += results.time_per_node[i];
   }
   results.total_nodes_count = nodes_.size();
-  results.memory_alloc_time /= static_cast<float>(main_runs);
-  results.memory_dealloc_time /= static_cast<float>(main_runs);
-  results.output_dealloc_time /= static_cast<float>(main_runs);
+  results.memory_alloc_time /= num_total_iters;
+  results.memory_dealloc_time /= num_total_iters;
+  results.output_dealloc_time /= num_total_iters;
   for (const auto& p : results.time_per_node_type) {
     const std::string& kind = p.first;
     results.percent_per_node_type[kind] = p.second / results.total_time * 100;
@@ -1501,6 +1575,11 @@ static bool checkNoMemoryOverlap(const at::Tensor& a, const at::Tensor& b) {
 }
 
 bool ProcessedNode::verify_no_memory_overlap() const {
+  return verify_outputs_dont_overlap_each_other() &&
+      verify_inputs_dont_overlap_outputs();
+}
+
+bool ProcessedNode::verify_outputs_dont_overlap_each_other() const {
   for (const auto i : c10::irange(outputs_size_)) {
     if (!outputs_[i].isTensor()) {
       continue;
@@ -1518,7 +1597,10 @@ bool ProcessedNode::verify_no_memory_overlap() const {
       }
     }
   }
+  return true;
+}
 
+bool ProcessedNode::verify_inputs_dont_overlap_outputs() const {
   auto schema = node()->maybeSchema();
   // skip memory overlap check for mutable ops with only one output
   if (!schema || (schema->is_mutable() && outputs_size_ == 1)) {
