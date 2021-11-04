@@ -110,7 +110,7 @@ def make_scalar_mismatch_msg(
     identifier: Optional[Union[str, Callable[[str], str]]] = None,
 ) -> str:
     abs_diff = abs(actual - expected)
-    rel_diff = abs_diff / abs(expected)
+    rel_diff = float("inf") if expected == 0 else abs_diff / abs(expected)
     return _make_mismatch_msg(
         identifier=identifier,
         default_identifier="Scalars",
