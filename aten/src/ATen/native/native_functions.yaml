@@ -2234,6 +2234,7 @@
 
 - func: index_copy.out(Tensor self, int dim, Tensor index, Tensor source, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
+  structured_inherits: TensorIteratorBase
   variants: function
   precomputed:
     - dim -> int dim
@@ -7601,10 +7602,10 @@
   dispatch:
     CompositeExplicitAutograd: alias
 
-- func: _index_copy_(Tensor(a!) self, int dim, Tensor index, Tensor source) -> Tensor(a!)
-  dispatch:
-    CPU: _index_copy_impl_
-    CUDA: _index_copy_impl_
+# - func: _index_copy_(Tensor(a!) self, int dim, Tensor index, Tensor source) -> Tensor(a!)
+#   dispatch:
+#     CPU: _index_copy_impl_
+#     CUDA: _index_copy_impl_
 
 - func: _amp_foreach_non_finite_check_and_unscale_(Tensor(a!)[] self, Tensor(b!) found_inf, Tensor inv_scale) -> ()
   variants: function
