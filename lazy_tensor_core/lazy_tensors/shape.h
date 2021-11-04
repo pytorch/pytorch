@@ -25,18 +25,13 @@ class Shape {
   int64_t size(int index) const { return sizes_.at(index); }
   void set_size(int index, int64_t value) { sizes_.at(index) = value; }
 
-  bool operator==(const Shape& other) const {
-    return scalar_type_ == other.scalar_type_ &&
-           sizes_ == other.sizes_;
-  }
+  bool operator==(const Shape& other) const;
 
  private:
   c10::ScalarType scalar_type_ {c10::ScalarType::Undefined};
   std::vector<int64_t> sizes_;
 };
 
-inline std::ostream& operator<<(std::ostream& out, const Shape& shape) {
-  return out << shape.ToString();
-}
+std::ostream& operator<<(std::ostream& out, const Shape& shape);
 
 }  // namespace lazy_tensors
