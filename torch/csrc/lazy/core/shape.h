@@ -1,78 +1,42 @@
 #pragma once
 
-#include <atomic>
 #include <ostream>
 #include <vector>
 
 #include <c10/core/Scalar.h>
-#include <c10/util/Logging.h>
 
-namespace lazy_tensors {
+namespace torch {
+namespace lazy {
 
-class Shape {
+class TORCH_API Shape {
  public:
-  Shape() : at_element_type_(c10::ScalarType::Undefined) {}
+  Shape() = default;
 
-  Shape(at::ScalarType element_type, c10::ArrayRef<int64_t> dimensions);
+  Shape(at::ScalarType scalar_type, c10::ArrayRef<int64_t> sizes);
 
-  Shape(c10::ArrayRef<Shape> element_shapes)
-      : is_tuple_(true),
-        at_element_type_(c10::ScalarType::Undefined),
-        element_shapes_(element_shapes.begin(), element_shapes.end()) {
-    CHECK(element_shapes.size() > 0);
-    // TODO(whc) it's not really clear what the definition of element shape
-    // should be for a tuple shape.  However, for tuple shapes, we appear
-    // to be accessing the element_type field in some places.  Fix this.
-    at_element_type_ = element_shapes[0].at_element_type();
-  }
+  std::string to_string() const;
 
-  std::string ToString(bool print_layout = false) const {
-    return c10::str(toString(at_element_type_), "[", c10::Join(",", dimensions_), "]");
-  }
+  c10::ScalarType scalar_type() const { return scalar_type_; }
+  void set_scalar_type(at::ScalarType value) { scalar_type_ = value; }
 
-  c10::ScalarType at_element_type() const { return at_element_type_; }
-  void set_element_type(at::ScalarType value);
+  int64_t dim() const { return sizes_.size(); }
+  c10::ArrayRef<int64_t> sizes() const { return sizes_; }
+  int64_t size(int64_t dim) const { return sizes_.at(dim); }
+  void set_size(int64_t dim, int64_t size) { sizes_.at(dim) = size; }
 
-  int64_t rank() const { return dimensions_.size(); }
-
-  int64_t dimensions(int index) const {
-    CHECK_LT(index, dimensions_.size());
-    return dimensions_[index];
-  }
-
-  c10::ArrayRef<int64_t> dimensions() const { return dimensions_; }
-
-  void set_dimensions(int index, int64_t value) {
-    CHECK_LT(index, dimensions_.size());
-    dimensions_[index] = value;
-  }
-
-  // TODO(whc) remove tuple support? or keep it (But make dimensions() methods
-  // work consistently with it somehow?)
-  bool IsTuple() const { return is_tuple_; }
-  int tuple_shapes_size() const { return element_shapes_.size(); }
-
-  const Shape& tuple_shapes(int index) const {
-    CHECK_GE(index, 0);
-    CHECK_LT(index, element_shapes_.size());
-    return element_shapes_[index];
-  }
-  const std::vector<Shape>& tuple_shapes() const { return element_shapes_; }
-
-  bool operator==(const Shape& other) const {
-    return at_element_type_ == other.at_element_type_ &&
-           dimensions_ == other.dimensions_;
-  }
+  bool operator==(const Shape& other) const;
 
  private:
-  bool is_tuple_ = false;
-  c10::ScalarType at_element_type_;
-  std::vector<int64_t> dimensions_;
-  std::vector<Shape> element_shapes_;
+  c10::ScalarType scalar_type_ {c10::ScalarType::Undefined};
+  std::vector<int64_t> sizes_;
 };
 
-inline std::ostream& operator<<(std::ostream& out, const Shape& shape) {
-  return out << shape.ToString();
-}
+TORCH_API std::ostream& operator<<(std::ostream& out, const Shape& shape);
 
-}  // namespace lazy_tensors
+// TODO(alanwaketan): Rethink how code-gen uses shapes.
+TORCH_API std::vector<Shape> convertShapes(
+    const std::vector<at::ScalarType>& dtypes,
+    const std::vector<std::vector<int64_t>>& shapes);
+
+}  // namespace lazy
+}  // namespace torch
