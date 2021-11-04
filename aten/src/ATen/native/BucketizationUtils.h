@@ -56,6 +56,23 @@ inline void searchsorted_maybe_trim_input_tensors(
   }
 }
 
+/* unused but needed for internal jagged tensor class */
+inline void searchsorted_maybe_trim_input_tensors(
+    Tensor& trimmed_input,
+    Tensor& trimmed_boundaries,
+    const Tensor& raw_input,
+    const Tensor& raw_boundaries) {
+  Tensor trimmed_sorter;
+  Tensor raw_sorter;
+  return searchsorted_maybe_trim_input_tensors(
+      trimmed_input,
+      trimmed_boundaries,
+      trimmed_sorter,
+      raw_input,
+      raw_boundaries,
+      raw_sorter);
+}
+
 inline bool searchsorted_dims_matched_before_last_dim(const Tensor& boundaries, const Tensor& input) {
   if (boundaries.dim() != input.dim()) {
     return false;
