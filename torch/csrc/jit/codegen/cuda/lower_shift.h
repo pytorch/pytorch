@@ -58,7 +58,7 @@ class AxisHaloInfo {
 
 //! Helper class for lowering tensors with halo. Only valid at the
 //! lowering time.
-class HaloInfo {
+class TORCH_CUDA_CU_API HaloInfo {
  public:
   //! Scan a fusion and collect all information for lowering
   void build(Fusion* fusion);
@@ -68,9 +68,16 @@ class HaloInfo {
 
   //! Set initial AxisHaloInfo of a root axis
   //!
-  //! This is only for root or rfactor axes. It is an error to query
-  //! with other axes.
+  //! The axis does not need to be a root domain in the case of
+  //! reference tensors. Reference tensors get halo information from
+  //! consumer root domains, which may correspond to rfactor domains
+  //! of tensors from which reference tensors are derived.
   void setRootAxisInfo(IterDomain* id, const AxisHaloInfo& root_axis_info);
+
+  //! Returns true if id has the root halo information set by
+  //! setRootAxisInfo.
+  bool hasRootAxisInfo(IterDomain* id) const;
+  bool hasRootAxisInfo(kir::IterDomain* id) const;
 
   //! Returns the registed AxisHaloInfo of a root axis.
   //!
@@ -151,6 +158,10 @@ class HaloInfo {
       TensorView* producer,
       TensorView* consumer,
       Expr* expr);
+
+  //! Initialize mappings for a given root domain. The given domain
+  //! must be previously given to setRootAxisInfo.
+  void initializeFromRootAxisInfo(IterDomain* id);
 
   //! Validate shift usage
   void validate(TensorView* td) const;

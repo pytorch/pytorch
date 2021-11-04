@@ -246,36 +246,23 @@ void updateHaloInfoForReference(
 
   // First, propagate the halo information of the consumer root domain
   // to the reference root domain.
-  for (auto reference_root_id : reference_domain->getRootDomain()) {
-    // Set empty halo as the default value
-    halo_info.setRootAxisInfo(reference_root_id, AxisHaloInfo());
-    // Try to find a consumer root domain that corresponds to this
-    // reference root domain. If found, the halo information of the
-    // consumer domain is copied to the reference domain.
-    auto reference_concrete_id = reference.id_to_concrete.at(reference_root_id);
-    auto consumer_it = std::find_if(
-        consumer_tv->getRootDomain().begin(),
-        consumer_tv->getRootDomain().end(),
-        [&](IterDomain* root_id) {
-          // Broadcast domains may be marked as having halo (think of
-          // conv filter tensors, which are broadcasted for the
-          // spatial domain of input data tensors). Since the index
-          // map does not map broadcast domains, the loop map is used
-          // here. Note that only root domains are looked at here, so
-          // there should be no side effect due tothe broadcast
-          // forwarding.
-          return gpu_lower->caLoopMap().areMapped(
-              root_id, reference_concrete_id);
-        });
-    // When no corresponding ID of the consumer tensor exists, the
-    // reference axis can be ignored
-    if (consumer_it == consumer_tv->getRootDomain().end()) {
+  for (auto consumer_root_id : consumer_tv->getRootDomain()) {
+    auto consumer_index_concrete_id =
+        gpu_lower->caIndexMap().getConcreteMappedID(consumer_root_id);
+    auto reference_it =
+        reference.concrete_to_id.find(consumer_index_concrete_id);
+    if (reference_it == reference.concrete_to_id.end()) {
+      // This happens when consumer_root_id is a broadcast or an
+      // initialization of a reduction buffer. In those cases, since
+      // the domain is not going to be predicated, it's not necessary
+      // to propagate halo information to the reference tensor.
+      TORCH_INTERNAL_ASSERT(
+          consumer_root_id->isBroadcast() || consumer_root_id->isReduction());
       continue;
     }
-    auto consumer_root_axis = *consumer_it;
-    auto root_axis_info =
-        gpu_lower->haloInfo().getRootAxisInfo(consumer_root_axis);
-    halo_info.setRootAxisInfo(reference_root_id, root_axis_info);
+    auto reference_id = reference_it->second;
+    halo_info.setRootAxisInfo(
+        reference_id, halo_info.getRootAxisInfo(consumer_root_id));
   }
 
   // Now that the reference root has halo information copied from
@@ -2195,9 +2182,31 @@ std::vector<PredicateContigInfo> getPredicateContigIds(
     const ReferenceTensor& reference,
     TensorView* consumer_tv,
     const std::unordered_map<IterDomain*, IterDomain*>& ref_root_2_consumer) {
-  auto reference_domain = reference.domain;
-  const auto& reference_root_domain = reference_domain->getRootDomain();
-  std::vector<IterDomain*> contiguous_ids = reference_root_domain;
+  const auto gpu_lower = GpuLower::current();
+
+  std::vector<IterDomain*> reference_predicated_root_domain;
+  for (const auto consumer_root : consumer_tv->getRootDomain()) {
+    if (consumer_root->isBroadcast()) {
+      continue;
+    }
+    auto consumer_root_concrete =
+        gpu_lower->caIndexMap().getConcreteMappedID(consumer_root);
+    auto it = reference.concrete_to_id.find(consumer_root_concrete);
+    // When initializing a reduction buffer, the reduction axis
+    // doesn't have a loop, so the reference tensor doesn't have a
+    // mapped domain. The reduction axis can be safely ignored.
+    if (it == reference.concrete_to_id.end()) {
+      TORCH_INTERNAL_ASSERT(
+          consumer_root->isReduction(),
+          "No mapped reference domain found for: ",
+          consumer_root);
+      continue;
+    }
+    auto reference_root = it->second;
+    reference_predicated_root_domain.emplace_back(reference_root);
+  }
+
+  std::vector<IterDomain*> contiguous_ids = reference_predicated_root_domain;
 
   if (contiguous_ids.empty()) {
     return std::vector<PredicateContigInfo>();
@@ -2210,20 +2219,20 @@ std::vector<PredicateContigInfo> getPredicateContigIds(
   // about halo to do correct predication, so they must be excluded.
   std::unordered_set<IterDomain*> excluded_ids;
 
-  for (auto reference_root_id : reference_root_domain) {
+  for (auto reference_predicated_id : reference_predicated_root_domain) {
     if (GpuLower::current()
             ->haloInfo()
-            .getRootAxisInfo(reference_root_id)
+            .getRootAxisInfo(reference_predicated_id)
             .hasHalo()) {
       continue;
     }
-    auto it = ref_root_2_consumer.find(reference_root_id);
+    auto it = ref_root_2_consumer.find(reference_predicated_id);
     if (it == ref_root_2_consumer.end()) {
       continue;
     }
     auto consumer_root_id = it->second;
     if (consumer_root_id->maybePartial()) {
-      excluded_ids.insert(reference_root_id);
+      excluded_ids.insert(reference_predicated_id);
       continue;
     }
     // Shifted or gathered axes need to be predicated at the root domain
@@ -2236,14 +2245,14 @@ std::vector<PredicateContigInfo> getPredicateContigIds(
     if ((shift_expr && shift_expr->offset(consumer_root_pos) != 0) ||
         (gather_expr && consumer_root_pos < gather_expr->windowShape().size() &&
          !gather_expr->windowShape().at(consumer_root_pos)->isOneInt())) {
-      excluded_ids.insert(reference_root_id);
+      excluded_ids.insert(reference_predicated_id);
     }
   }
 
   // Run through iteration domain history
   auto exprs = ExprSort::getExprs(
       consumer_tv->fusion(),
-      {reference_domain->domain().begin(), reference_domain->domain().end()});
+      {reference.domain->domain().begin(), reference.domain->domain().end()});
 
   for (auto expr : exprs) {
     // If not a merge, output is not contiguous
@@ -2275,7 +2284,12 @@ std::vector<PredicateContigInfo> getPredicateContigIds(
 
   // Create entries and return them
   for (auto contig_id : contiguous_ids) {
-    auto contig_root_vals = IterVisitor::getInputsTo({contig_id});
+    // Pick inputs from the starting domains, i.e.,
+    // reference_predicated_root_domain.
+    auto contig_root_vals = IterVisitor::getInputsTo(
+        {contig_id},
+        {reference_predicated_root_domain.begin(),
+         reference_predicated_root_domain.end()});
     auto contig_root_ids = ir_utils::filterByType<IterDomain>(contig_root_vals);
     PredicateContigInfo contig_id_info;
     contig_id_info.contig_id = contig_id;

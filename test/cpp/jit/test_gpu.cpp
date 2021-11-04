@@ -18200,6 +18200,51 @@ TEST(NVFuserTest, FusionIssue1223_CUDA) {
       &fusion, cg_outputs, {at_t0}, {at_t1, at_t0}, __LINE__, __FILE__);
 }
 
+// See #1247 and #1250
+TEST(NVFuserTest, FusionRfactorPredication1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = min(tv1, {0});
+
+  fusion.addOutput(tv2);
+
+  // Make TIDx non-exact
+  auto tv3 = makeContigTensor(1);
+  fusion.addInput(tv3);
+
+  auto tv4 = add(tv3, new Double(1));
+  fusion.addOutput(tv4);
+
+  tv2->split(0, 4);
+  auto tv5 = tv2->rFactor({1});
+
+  tv0->computeAt(tv2, 1);
+
+  tv2->axis(0)->parallelize(ParallelType::TIDx);
+
+  tv4->axis(0)->parallelize(ParallelType::TIDx);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor at_t0 = at::randn({9}, options);
+  at_t0 = at::abs(at_t0);
+  at::Tensor at_t3 = at::randn({128}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_outputs = fe.runFusion({at_t0, at_t3});
+
+  auto at_t2 = (at_t0 + 1).min();
+  auto at_t4 = at_t3 + 1;
+
+  testValidate(
+      &fusion, cg_outputs, {at_t0, at_t3}, {at_t2, at_t4}, __LINE__, __FILE__);
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)

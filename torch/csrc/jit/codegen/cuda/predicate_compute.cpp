@@ -317,7 +317,12 @@ UnswitchPredicateKey::UnswitchPredicateKey(
 
 std::string UnswitchPredicateKey::toString() const {
   std::stringstream ss;
-  ss << "Predicated domain: " << predicatedId();
+  ss << "Predicated domain: ";
+  if (predicatedId() != nullptr) {
+    ss << predicatedId();
+  } else {
+    ss << "null";
+  }
   for (auto pt : kParallelTypeThreads) {
     auto pid = parallelId(pt);
     ss << ", " << pt << ": ";
@@ -398,7 +403,9 @@ kir::Bool* PredicateCompute::getInlinePredicate(
         TORCH_INTERNAL_ASSERT(
             it != out_tv->domain()->rootDomain().end(),
             "No corresponding root ID found for ",
-            pred_root_id);
+            pred_root_id,
+            " when generating inline predicate for ",
+            kir::toString(expr));
         auto out_root_id = *it;
         if (out_root_id->isReduction()) {
           if (!out_root_id->start()->isZeroInt()) {
@@ -571,10 +578,11 @@ void UnswitchPredicate::predicateOn(kir::Expr* tv_expr) {
           [&first_key](const auto& merged_predicates) {
             return merged_predicates.predicate_key == first_key;
           });
-      TORCH_INTERNAL_ASSERT(
-          merged_pred_it != pending_predicates_.end(),
-          "Key not found: ",
-          first_key.toString());
+      // Note: It is possible that no matching merged predicate info
+      // is found. Since add_pred is false here, the root domain is
+      // already predicated. It must mean that the root domain
+      // is included in a contiguous merged domain, which means there
+      // must be no halo-extended domain involved.
     }
 
     // If a corresponding MergedPredicates is found, merge both the
