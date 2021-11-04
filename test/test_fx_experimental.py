@@ -1480,6 +1480,7 @@ class TestNormalizeOperators(JitTestCase):
             "igammac",
             "index_put",
             "nn.functional.conv2d",
+            "nn.functional.alpha_dropout",
             "nn.functional.dropout",
             "nn.functional.embedding",  # Implemented with a lambda
             "polygamma",
