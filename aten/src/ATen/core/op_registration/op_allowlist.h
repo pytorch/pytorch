@@ -38,23 +38,7 @@ namespace c10 {
 
 namespace impl {
 
-constexpr bool op_allowlist_contains(string_view allowlist, string_view item);  // Forward Declare
-
-/**
- * Accepts 2 const char* (null-terminated strings) pointers, and returns
- * 'true' if they are equal, and 'false' otherwise.
- */
-constexpr bool are_char_array_contents_equal(const char* a, const char* b) {
-  for (int i = 0; ; ++i) {
-    if (a[i] == 0 && b[i] == 0) {
-      return true;
-    }
-    if (a[i] != b[i]) {
-      return false;
-    }
-  }
-  return true;
-}
+constexpr bool allowlist_contains(string_view allowlist, string_view item);  // Forward Declare
 
 /**
  * In selective build mode returns true/false depending on whether a build
@@ -70,7 +54,7 @@ constexpr bool is_build_feature_available(const char* name) {
   (void)name;
   return true;
 #else
-  return op_allowlist_contains(
+  return allowlist_contains(
     C10_STRINGIZE(TORCH_BUILD_FEATURE_ALLOWLIST),
     name);
 #endif
@@ -119,8 +103,8 @@ constexpr bool is_build_feature_available(const char* name) {
 #define BUILD_FEATURE_AVAILABLE(NAME) ::c10::impl::is_build_feature_available(NAME)
 
 // returns true iff allowlist contains item
-// op_allowlist_contains("a;bc;d", "bc") == true
-constexpr bool op_allowlist_contains(string_view allowlist, string_view item) {
+// allowlist_contains("a;bc;d", "bc") == true
+constexpr bool allowlist_contains(string_view allowlist, string_view item) {
     //Choose a really big value for next so that if something goes wrong
     //this code will blow up in a hopefully detectable way.
     size_t next = std::numeric_limits<size_t>::max();
@@ -154,7 +138,7 @@ constexpr bool op_allowlist_check(string_view op_name) {
   // all ops are to be registered
   return true;
 #else
-  return op_allowlist_contains(
+  return allowlist_contains(
     C10_STRINGIZE(TORCH_OPERATOR_WHITELIST),
     // This function is majorly used for mobile selective build with
     // root operators, where the overload is included in the allowlist.
@@ -185,7 +169,7 @@ constexpr bool custom_class_allowlist_check(string_view custom_class_name) {
   (void)custom_class_name;
   return true;
 #else
-  return op_allowlist_contains(
+  return allowlist_contains(
     C10_STRINGIZE(TORCH_CUSTOM_CLASS_ALLOWLIST),
     custom_class_name);
 #endif
@@ -194,7 +178,7 @@ constexpr bool custom_class_allowlist_check(string_view custom_class_name) {
 // schema_allowlist_check() implicitly depends on a macro, TORCH_OPERATOR_WHITELIST.
 // Add this API to pass arbitrary allowlist.
 constexpr bool op_allowlist_contains_name_in_schema(string_view allowlist, string_view schema) {
-  return op_allowlist_contains(allowlist, schema.substr(0, schema.find("(")));
+  return allowlist_contains(allowlist, schema.substr(0, schema.find("(")));
 }
 
 // Returns true iff the given dispatch key is on the allowlist

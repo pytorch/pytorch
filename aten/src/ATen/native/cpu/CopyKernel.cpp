@@ -13,7 +13,6 @@ namespace native {
 namespace {
 
 static void copy_kernel(TensorIterator& iter, bool non_blocking) {
-  BUILD_FEATURE_REQUIRED("copykernel");
   ScalarType dtype = iter.dtype(0);
   if (dtype == iter.dtype(1)) {
     // TODO: as the majority of these operations can be done treating
