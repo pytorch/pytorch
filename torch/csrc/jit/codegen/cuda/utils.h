@@ -34,7 +34,7 @@ enum class DebugDumpOption {
   Halo //! Halo information of tensors
 };
 
-bool isDebugDumpEnabled(DebugDumpOption option);
+TORCH_CUDA_CU_API bool isDebugDumpEnabled(DebugDumpOption option);
 
 // Check if fallback path should be used which will dispatch to eagermode if any
 // errors are encountered. Helpful for debugging.

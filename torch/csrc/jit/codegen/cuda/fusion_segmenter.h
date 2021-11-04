@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/all_schedulers.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/registry.h>
+#include <torch/csrc/jit/codegen/cuda/utils.h>
 
 #include <deque>
 #include <list>
@@ -436,6 +437,10 @@ class TORCH_CUDA_CU_API SegmentCandidateFinder {
       const at::ArrayRef<IValue>& inputs,
       SegmentCandidateFinderOptions options = SegmentCandidateFinderOptions()) {
     auto fusion_copy = std::make_unique<Fusion>(*fusion);
+    if (isDebugDumpEnabled(DebugDumpOption::FusionSegments)) {
+      std::cout << "Segment the fusion: " << std::endl;
+      fusion_copy->printMath();
+    }
     SegmentCandidateFinder scf(std::move(fusion_copy), inputs, options);
     return std::move(scf.segmented_fusion_);
   }
@@ -446,6 +451,10 @@ class TORCH_CUDA_CU_API SegmentCandidateFinder {
       const at::ArrayRef<IValue>& inputs,
       SegmentCandidateFinderOptions options = SegmentCandidateFinderOptions()) {
     SegmentCandidateFinder scf(std::move(fusion), inputs, options);
+    if (isDebugDumpEnabled(DebugDumpOption::FusionSegments)) {
+      std::cout << "Segment the fusion: " << std::endl;
+      scf.completeFusion()->printMath();
+    }
     return std::move(scf.segmented_fusion_);
   }
 
