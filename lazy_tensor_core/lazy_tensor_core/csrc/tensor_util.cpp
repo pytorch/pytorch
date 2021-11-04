@@ -325,7 +325,7 @@ compiler::BackendDataPtr TensorToDataHandle(const at::Tensor& tensor,
   return compiler::getBackend()
       ->MakeComputationDataFromTensor(
           tensor, lazy_tensors::Shape(tensor.scalar_type(), tensor.sizes()),
-          device.ToString());
+          device.toString());
 }
 
 std::vector<compiler::BackendDataPtr> CreateTensorsData(

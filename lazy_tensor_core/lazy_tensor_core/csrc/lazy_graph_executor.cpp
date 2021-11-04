@@ -532,7 +532,7 @@ LazyGraphExecutor::Async::Async(SyncTensorCollection* coll,
       indices(std::move(coll->indices)),
       unlocker(std::move(coll->unlocker)),
       parameters_data(std::move(parameters_data)),
-      device(coll->device.ToString()),
+      device(coll->device.toString()),
       cached_computation(std::move(cached_computation)),
       tensors_data(std::move(tensors_data)) {}
 
@@ -605,12 +605,11 @@ LazyGraphExecutor::SyncTensorCollection LazyGraphExecutor::CollectSyncTensors(
         c10::optional<at::Tensor> tensor_data = tensors[i].CurrentTensorData();
         CHECK(tensor_data);
         at_tensors.push_back(*tensor_data);
-        devices.push_back(tensors[i].GetDevice().ToString());
+        devices.push_back(tensors[i].GetDevice().toString());
         at_tensor_index.push_back(i);
       }
     }
   }
-
   if (!at_tensors.empty()) {
     LTC_COUNTER("SyncTensorsToData", at_tensors.size());
     std::vector<compiler::BackendDataPtr> handles =
@@ -658,7 +657,7 @@ std::vector<compiler::BackendDataPtr> LazyGraphExecutor::FetchTensorData(
     if (handle == nullptr && config.force_ltc_data) {
       const Device& tensor_device = tensor.GetDevice();
       handle = compiler::getBackend()
-                   ->CreateDataPlaceholder(tensor_device.ToString(),
+                   ->CreateDataPlaceholder(tensor_device.toString(),
                                            std::move(tensor.shape()));
       tensor.SetDataHandle(handle, config.sync_ltc_data);
     }
@@ -709,7 +708,7 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::TryRunCachedSync(
 
   return ScheduleSyncTensorsGraph(
       tensors, coll, std::move(po_data->parameters_data),
-      coll->device.ToString(), std::move(cached_computation));
+      coll->device.toString(), std::move(cached_computation));
 }
 
 LazyGraphExecutor::CompilationResult LazyGraphExecutor::Compile(
@@ -862,7 +861,7 @@ LazyGraphExecutor::SyncTensorsGraphInternal(std::vector<LazyTensor>* tensors,
 
   return ScheduleSyncTensorsGraph(
       tensors, &coll, std::move(compile_result.parameters_data),
-      compile_result.device.ToString(), std::move(cached_computation));
+      compile_result.device.toString(), std::move(cached_computation));
 }
 
 std::shared_ptr<LazyGraphExecutor::Async>

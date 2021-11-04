@@ -97,7 +97,7 @@ std::vector<std::string> GetLtcDevices(
   ltc_devices.reserve(devices.size());
   for (auto& device_str : devices) {
     Device device = bridge::AtenDeviceToLtcDevice(c10::Device(device_str));
-    ltc_devices.emplace_back(device.ToString());
+    ltc_devices.emplace_back(device.toString());
   }
   return ltc_devices;
 }
@@ -389,7 +389,7 @@ py::object LtcNms(const at::Tensor& boxes, const at::Tensor& scores,
 //     NoGilSection nogil;
 //     Device device = GetDeviceOrCurrent(device_str);
 //     mem_info = compiler::getBackend()->GetMemoryInfo(
-//         device.ToString());
+//         device.toString());
 //   }
 //   auto py_dict = py::dict();
 //   py_dict["kb_free"] = mem_info.kb_free;

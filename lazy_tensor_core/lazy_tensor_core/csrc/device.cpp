@@ -13,8 +13,20 @@ thread_local c10::optional<Device> g_current_device;
 
 Device::Device(const std::string& device_spec) {}
 
-std::string Device::ToString() const {
-  return c10::str("Default:", ordinal);
+std::string Device::toString() const {
+  return c10::str("Default:", ordinal_);
+}
+
+int Device::compare(const Device& rhs) const {
+  if (type_ != rhs.type_) {
+    return type_ < rhs.type_ ? -1 : +1;
+  }
+  return ordinal_ < rhs.ordinal_ ? -1 : (ordinal_ > rhs.ordinal_ ? +1 : 0);
+}
+
+std::ostream& operator<<(std::ostream& os, const Device& device) {
+  os << device.toString();
+  return os;
 }
 
 const Device* GetDefaultDevice() {
