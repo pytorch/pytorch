@@ -208,7 +208,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
     def _create_process_group_nccl(self, store, rank, world_size, opts):
         # create nccl pg with opts
         pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size, opts)
-        dist.barrier(group=pg)
+        # dist.barrier(group=pg)
         return pg
 
     def opts(self, high_priority_stream=False):
