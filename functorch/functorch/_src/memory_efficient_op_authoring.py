@@ -1,74 +1,9 @@
+from functorch._src.python_key import pythonkey_decompose
 import torch
 from torch import fx
 from torch.fx.proxy import GraphAppendingTracer
 from typing import Iterable
 from .eager_compilation import compiled_function, partition_with_recompute_fwd_in_bwd
-
-
-def tanh_backward_decomposition(out_grad, y):
-    return torch.sub(out_grad, out_grad * y * y)
-
-
-def sigmoid_backward_decomposition(out_grad, y):
-    # Computation - out_grad * (y * (1 - y))
-    return out_grad * (y - y * y)
-
-
-def softplus_backward_decomposition(out_grad, x, beta, threshold, out):
-    return out_grad * torch.sigmoid(x)
-
-
-def noop(x):
-    return x
-
-
-def _s_where_decomposition(a, b, c):
-    return torch.where(a, b, c)
-
-
-decomposition_rules = {}
-decomposition_rules[torch.ops.aten.tanh_backward] = tanh_backward_decomposition
-decomposition_rules[torch.ops.aten._s_where] = _s_where_decomposition
-decomposition_rules[torch.ops.aten.sigmoid_backward] = sigmoid_backward_decomposition
-decomposition_rules[torch.ops.aten.softplus_backward] = softplus_backward_decomposition
-decomposition_rules[torch.ops.aten.detach] = noop
-
-# TODO - Move to the python key based decomposition
-def decompose(fx_module):
-    """
-    Decompose `model` into smaller constituent operations.
-    Currently,this only supports decomposing ReLU into its
-    mathematical definition: (x > 0) * x
-    """
-    graph = fx_module.graph
-    new_graph = fx.Graph()
-    env = {}
-    for node in graph.nodes:
-        if node.op == "call_function" and node.target in decomposition_rules:
-            # By wrapping the arguments with proxies,
-            # we can dispatch to the appropriate
-            # decomposition rule and implicitly add it
-            # to the Graph by symbolically tracing it.
-            tracer = GraphAppendingTracer(new_graph)
-            proxy_args = [
-                fx.Proxy(env[x.name], tracer) if isinstance(x, fx.Node) else x
-                for x in node.args
-            ]
-            output_proxy = decomposition_rules[node.target](*proxy_args)
-
-            # Operations on `Proxy` always yield new `Proxy`s, and the
-            # return value of our decomposition rule is no exception.
-            # We need to extract the underlying `Node` from the `Proxy`
-            # to use it in subsequent iterations of this transform.
-            new_node = output_proxy.node
-            env[node.name] = new_node
-        else:
-            # Default case: we don't have a decomposition rule for this
-            # node, so just copy the node over into the new graph.
-            new_node = new_graph.node_copy(node, lambda x: env[x.name])
-            env[node.name] = new_node
-    return fx.GraphModule(fx_module, new_graph)
-
 
 def tensorexpr_compile(fx_module, flat_args):
     """Compiles the given fx_module using TensorExpr Kernel"""
@@ -100,7 +35,6 @@ def tensorexpr_compile(fx_module, flat_args):
     fx_module.graph.lint()
     fx_module.recompile()
 
-    fx_module = decompose(fx_module)
     for i in range(0, 100):
         attr = f"_tensor_constant{i}"
         if hasattr(fx_module, attr):
@@ -133,7 +67,6 @@ def tensorexpr_compile(fx_module, flat_args):
 
 def torchscript_nnc_compile(fx_module, flat_args):
     """Compiles the given fx_module using torchscript"""
-    fx_module = decompose(fx_module)
     traced_module = torch.jit.trace(fx_module, flat_args)
     frozen_module = torch.jit.freeze(traced_module.eval())
     return frozen_module
@@ -143,7 +76,7 @@ def torchscript_nvfuser_compile(fx_module, flat_args):
     """Compiles the given fx_module using torchscript nvfuser"""
     if not torch._C._jit_nvfuser_enabled():
         raise RuntimeError("Wrap the call with `with jit.fuser(\"fuser2\") to turn nvfuser on")
-    fx_module = decompose(fx_module)
+    print(fx_module.code)
     scripted_module = torch.jit.script(fx_module)
     frozen_module = torch.jit.freeze(scripted_module.eval())
     return frozen_module
@@ -152,19 +85,19 @@ def torchscript_nvfuser_compile(fx_module, flat_args):
 def torchscript_nnc_operator_authoring(fn, partition_fn):
     fw_compiler = torchscript_nnc_compile
     bw_compiler = torchscript_nnc_compile
-    return compiled_function(fn, fw_compiler, bw_compiler, partition_fn)
+    return compiled_function(fn, fw_compiler, bw_compiler, partition_fn, decompose=True)
 
 
 def torchscript_nvfuser_operator_authoring(fn, partition_fn):
     fw_compiler = torchscript_nvfuser_compile
     bw_compiler = torchscript_nvfuser_compile
-    return compiled_function(fn, fw_compiler, bw_compiler, partition_fn)
+    return compiled_function(fn, fw_compiler, bw_compiler, partition_fn, decompose=True)
 
 
 def tensorexpr_operator_authoring(fn, partition_fn):
     fw_compiler = tensorexpr_compile
     bw_compiler = tensorexpr_compile
-    return compiled_function(fn, fw_compiler, bw_compiler, partition_fn)
+    return compiled_function(fn, fw_compiler, bw_compiler, partition_fn, decompose=True)
 
 
 def memory_efficient_operator_authoring(fn, compiler_name="torchscript_nnc"):
