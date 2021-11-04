@@ -5,28 +5,13 @@
 
 namespace torch_lazy_tensors {
 namespace ir {
-
-// TODO(whc) don't duplicate this
-static std::vector<lazy_tensors::Shape> convertShape(
-    const std::vector<at::ScalarType>& dtypes,
-    const std::vector<std::vector<int64_t>>& shapes) {
-  TORCH_INTERNAL_ASSERT(dtypes.size() == shapes.size());
-
-  std::vector<lazy_tensors::Shape> shape;
-  for (int i = 0; i < dtypes.size(); i++) {
-    shape.emplace_back(dtypes[i], shapes[i]);
-  }
-
-  return shape;
-}
-
 namespace ops {
 
 Cat::Cat(std::vector<torch::lazy::Value> values, int64_t dim,
          const std::vector<at::ScalarType>& out_dtypes,
          const std::vector<std::vector<int64_t>>& out_shapes)
     : TsNode(torch::lazy::OpKind(at::aten::cat), values,
-             convertShape(out_dtypes, out_shapes),
+             lazy_tensors::convertShapes(out_dtypes, out_shapes),
              /*num_outputs=*/1, torch::lazy::MHash(dim)),
       dim_(dim),
       at_dtypes_(out_dtypes),

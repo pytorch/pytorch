@@ -9,20 +9,6 @@ ${external_backend_headers}
 
 namespace torch_lazy_tensors {
 namespace ir {
-
-static std::vector<lazy_tensors::Shape> convertShape(
-    const std::vector<at::ScalarType>& dtypes,
-    const std::vector<std::vector<int64_t>>& shapes) {
-  TORCH_INTERNAL_ASSERT(dtypes.size() == shapes.size());
-
-  std::vector<lazy_tensors::Shape> shape;
-  for (int i = 0; i < dtypes.size(); i++) {
-    shape.emplace_back(dtypes[i], shapes[i]);
-  }
-
-  return shape;
-}
-
 namespace ops {
 
 // kNullValue is used to contribute a static hash value any time

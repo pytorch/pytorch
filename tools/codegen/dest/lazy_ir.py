@@ -83,7 +83,7 @@ class {schema.node_name} : public {self.node_base} {{
       const std::vector<std::vector<int64_t>>& out_shapes)
       : {self.node_base}(torch::lazy::OpKind(at::aten::{schema.aten_name}),
               {{{base_ctor_value_args}}},
-              convertShape(out_dtypes, out_shapes),
+              lazy_tensors::convertShapes(out_dtypes, out_shapes),
               /* num_outputs */ {len(func.returns)},
               torch::lazy::MHash({scalar_hashes})),
         at_dtypes_(out_dtypes),
