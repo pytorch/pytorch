@@ -20,6 +20,8 @@ from torch.ao.quantization import (
     default_qat_qconfig,
     get_default_qat_qconfig,
     FixedQParamsFakeQuantize,
+    FusedMovingAvgObsFakeQuantize,
+    NoopObserver,
 )
 from torch.testing._internal.common_utils import TestCase
 
@@ -48,6 +50,15 @@ hu.assert_deadline_disabled()
 from functools import reduce
 
 class TestQuantizationAwareTraining(QuantizationTestCase):
+    def setUp(self):
+        super().setUp()
+
+        self.embed_linear_data_train = [[torch.randint(0, 10, (12, 12), dtype=torch.long),
+                                         torch.randn((12, 1), dtype=torch.float)]
+                                        for _ in range(2)]
+        self.embed_data = [[torch.randint(0, 10, (12, 1))]]
+
+
     def test_manual(self):
         for qengine in supported_qengines:
             with override_quantized_engine(qengine):
@@ -118,8 +129,11 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
                 self.checkObservers(model)
 
                 test_only_train_fn(model, self.embed_linear_data_train)
-                # make activation_post_process is not inserted for Embedding
-                self.assertFalse(hasattr(model, "activation_post_process"))
+                # make sure activation_post_process is inserted after Linear.
+                self.assertEqual(type(model.linear.activation_post_process), FusedMovingAvgObsFakeQuantize)
+                # make sure that Embedding has a noop for activation.
+                self.assertEqual(type(model.emb.activation_post_process), NoopObserver)
+
                 model = convert(model)
 
                 def checkQuantized(model):
@@ -133,7 +147,6 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
                     self.checkNoQconfig(model)
 
                 checkQuantized(model)
-
                 model = DeFusedEmbeddingBagLinear()
                 model = quantize_qat(model, test_only_train_fn, [self.embed_linear_data_train])
                 checkQuantized(model)
@@ -806,7 +819,7 @@ class TestConvBNQATModule(TestCase):
         ).to(dtype=torch.double)
 
         qat_op.apply(torch.ao.quantization.disable_fake_quant)
-        qat_ref_op.apply(torch.quantization.disable_fake_quant)
+        qat_ref_op.apply(torch.ao.quantization.disable_fake_quant)
 
         # align inputs and internal parameters
         qat_ref_op.weight = torch.nn.Parameter(qat_op.weight.detach().clone())

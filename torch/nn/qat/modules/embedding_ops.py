@@ -44,7 +44,7 @@ class Embedding(nn.Embedding):
     def from_float(cls, mod):
         r"""Create a qat module from a float module
 
-            Args: `mod` a float module, either produced by torch.quantization utilities
+            Args: `mod` a float module, either produced by torch.ao.quantization utilities
             or directly from user
         """
         assert type(mod) == cls._FLOAT_MODULE, ' qat.' + cls.__name__ + '.from_float only works for ' + \
@@ -69,6 +69,7 @@ class Embedding(nn.Embedding):
         embedding_bag.weight = torch.nn.Parameter(self.weight.detach())
         embedding_bag.train(self.training)
         return embedding_bag
+
 class EmbeddingBag(nn.EmbeddingBag):
     r"""
     An embedding bag module attached with FakeQuantize modules for weight,
