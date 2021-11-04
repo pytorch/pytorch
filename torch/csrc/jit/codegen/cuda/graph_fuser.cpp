@@ -1871,7 +1871,15 @@ void decomposeLinearOps(Block* block) {
         mat0_size.has_value() && mat1_size.has_value(),
         "concrete shape for linear input & weight are required");
     auto out_size = mat0_size.value();
-    out_size[out_size.size() - 1] = mat1_size.value()[0];
+    TORCH_INTERNAL_ASSERT(
+        mat1_size->size() == 2 || mat1_size->size() == 1,
+        "weight dimension for linear is expected to be 1 or 2, but got: ",
+        mat1_size->size());
+    if (mat1_size->size() == 2) {
+      out_size[out_size.size() - 1] = mat1_size.value()[0];
+    } else if (mat1_size->size() == 1) {
+      out_size.pop_back();
+    }
     matmul->output()->setType(input_tensor_type->withSizes(out_size));
 
     // TODO: memory stride should be considered here, our inference above is not

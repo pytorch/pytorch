@@ -415,13 +415,11 @@ class NaiveTypePropagator {
       }
       case prim::add_optional: {
         const auto type0 = getInputTensorType(node, 0);
-        const auto type1 = getInputTensorType(node, 1, true);
+        // const auto type1 = getInputTensorType(node, 1, true);
+        // note: add_optional is supposed to replace an inplace add on input0,
+        // so we just directly forward dtype
         TORCH_CHECK(type0 != nullptr);
-        if (type1 != nullptr) {
-          node->output()->setType(type0);
-        } else {
-          node->output()->setType(binary_broadcast_type(type0, type1));
-        }
+        node->output()->setType(type0);
         break;
       }
       case aten::_autocast_to_reduced_precision: {
