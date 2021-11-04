@@ -181,30 +181,51 @@ void MemoryPlanner::allocateManagedTensors() {
   if (managed_bytes_ == 0) {
     return;
   }
+  DCHECK(!managed_tensor_storages_.empty());
   buffer_ = allocate_buffer(managed_bytes_);
 
   size_t offset = 0;
   uint8_t* start = static_cast<uint8_t*>(buffer_.get());
 
   reused_tensors_ = 0;
-  for (const auto& ms : managed_tensors_) {
+#ifndef NDEBUG
+  auto group_idx = 0;
+#endif
+  for (const auto& ms : managed_tensor_storages_) {
     auto tensor_size = ms.first;
     if (tensor_size == 0) {
+#ifndef NDEBUG
+      group_idx++;
+#endif
       continue;
     }
-    const auto& tensors = ms.second;
+    const auto& storages = ms.second;
     DCHECK_LE(offset + tensor_size, managed_bytes_);
     void* src = static_cast<void*>(start + offset);
 
-    for (auto* tensor : tensors) {
-      tensor->storage().set_data_ptr_noswap(
-          at::DataPtr(src, src, nullptr, tensor->device()));
-      tensor->storage().set_nbytes(tensor_size);
+#ifndef NDEBUG
+    auto storage_idx = 0;
+    DCHECK_EQ(storages.size(), managed_tensors_[group_idx].second.size());
+    DCHECK_EQ(tensor_size, managed_tensors_[group_idx].first);
+#endif
+    for (auto* storage : storages) {
+#ifndef NDEBUG
+      DCHECK_EQ(storage->device().type(), c10::DeviceType::CPU);
+      DCHECK_EQ(
+          storage,
+          &managed_tensors_[group_idx].second[storage_idx++]->storage());
+#endif
+      storage->set_data_ptr_noswap(
+          at::DataPtr(src, src, nullptr, c10::Device(c10::DeviceType::CPU)));
+      storage->set_nbytes(tensor_size);
       reused_tensors_++;
     }
     reused_tensors_--;
 
     offset += tensor_size;
+#ifndef NDEBUG
+    group_idx++;
+#endif
   }
   DCHECK_EQ(offset, managed_bytes_);
 }
@@ -246,14 +267,30 @@ void MemoryPlanner::allocate() {
 void MemoryPlanner::deallocate() {
   managed_bytes_ = 0;
   // free memory used by outputs of ops in out variants
-  // but keep the TensorImpl and StorageImpl around
+  // but keep the TensorImpl and StorageImpl around.
+
+  // We don't have any guarantee that the model doesn't change the
+  // Storage for managed tensors out from under us during execution,
+  // so we have to grab the Storages each time we deallocate.
+  auto group_idx = 0;
+  const bool first_time = managed_tensor_storages_.empty();
   for (auto& ms : managed_tensors_) {
     const auto& tensors = ms.second;
     size_t max = ms.first;
+    if (C10_UNLIKELY(first_time)) {
+      managed_tensor_storages_.emplace_back(
+          std::piecewise_construct,
+          std::make_tuple(ms.first),
+          std::make_tuple(tensors.size()));
+    }
+    auto& mss = managed_tensor_storages_[group_idx++];
+    auto& storages = mss.second;
+    auto tensor_idx = 0;
     for (auto& tensor : tensors) {
-      size_t current_size =
-          compute_aligned_tensor_size(tensor->storage().nbytes());
-      tensor->storage().unsafeGetStorageImpl()->reset();
+      const auto& storage = tensor->storage();
+      size_t current_size = compute_aligned_tensor_size(storage.nbytes());
+      storage.unsafeGetStorageImpl()->reset();
+      storages[tensor_idx++] = &storage;
       max = std::max(max, current_size);
     }
     // Static runtime does not know the size of tensors statically, so we use
@@ -261,7 +298,7 @@ void MemoryPlanner::deallocate() {
     // run (following C2 tradition), exploiting the fact that tensor storage
     // size does not have to match that of real tensor size. The following logic
     // records the tensor storage size for the next run.
-    ms.first = max;
+    mss.first = ms.first = max;
     managed_bytes_ += max;
   }
 

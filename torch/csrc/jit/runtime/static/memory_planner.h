@@ -103,8 +103,19 @@ class MemoryPlanner {
   std::vector<IValue*> unmanaged_ivalues_;
 
   // each pair contains the size (in bytes) of data to be allocated
-  // and a vector of Tensors that should be backed by that same data.
-  // Thus, if memonger is disabled, all vectors are of size 1.
+  // and a vector of Tensors' storages that should be backed by that
+  // same data. Thus, if memonger is disabled, all vectors are of
+  // size 1.
+
+  // We cache the storage pointers directly rather than caching Tensor
+  // objects so that we don't have to do an extra load from memory
+  // (which will likely miss in CPU data cache) per Tensor reading
+  // the Storage pointer from the TensorImpl object.
+  std::vector<std::pair<size_t, std::vector<const at::Storage*>>>
+      managed_tensor_storages_{};
+  // We don't have any guarantee that the model doesn't change the
+  // Storage for managed tensors out from under us during execution,
+  // so we have to grab the Storages each time we deallocate.
   std::vector<std::pair<size_t, std::vector<at::Tensor*>>> managed_tensors_;
   at::DataPtr buffer_; // allocated each time we call Run()
   size_t num_managed_tensors_{0};
