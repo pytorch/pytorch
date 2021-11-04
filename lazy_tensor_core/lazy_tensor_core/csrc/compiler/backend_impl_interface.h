@@ -107,7 +107,7 @@ class BackendRegistrar {
 
 // TODO(whc) do we want this to be const?
 // can we implement methods like transfer to/from server if we use a const ref
-inline const BackendImplInterface* getBackendRegistrar() {
+inline const BackendImplInterface* getBackend() {
   auto p = backend_impl_registry.load();
   CHECK(p) << "Lazy tensor backend not registered.";
   return p;

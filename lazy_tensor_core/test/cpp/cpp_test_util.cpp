@@ -199,7 +199,7 @@ void WithAllDevices(
     std::vector<Device> devices;
     std::vector<Device> all_devices;
     for (const auto& device_str :
-         torch_lazy_tensors::compiler::getBackendRegistrar()
+         compiler::getBackend()
              ->GetLocalDevices()) {
       Device device(device_str);
       if (device.hw_type == device_type) {
@@ -207,7 +207,7 @@ void WithAllDevices(
       }
     }
     for (const auto& device_str :
-         torch_lazy_tensors::compiler::getBackendRegistrar()->GetAllDevices()) {
+         compiler::getBackend()->GetAllDevices()) {
       Device device(device_str);
       if (device.hw_type == device_type) {
         all_devices.push_back(device);

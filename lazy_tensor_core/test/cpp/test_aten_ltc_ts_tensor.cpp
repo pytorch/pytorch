@@ -19,7 +19,7 @@ namespace {
 class AtenLtcTsTensorTest : public AtenLtcTsTensorTestBase {};
 
 bool IsCuda() {
-  return torch_lazy_tensors::compiler::getBackendRegistrar()->HardwareDeviceType() ==
+  return compiler::getBackend()->HardwareDeviceType() ==
          at::kCUDA;
 }
 
