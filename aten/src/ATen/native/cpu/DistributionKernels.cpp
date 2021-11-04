@@ -117,7 +117,7 @@ void uniform_kernel(TensorIteratorBase& iter, double from, double to, c10::optio
   templates::cpu::uniform_kernel(iter, from, to, generator);
 }
 
-void normal_kernel(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
+void normal_kernel(const TensorBase &self, double mean, double std, c10::optional<Generator> gen) {
   CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
   templates::cpu::normal_kernel(self, mean, std, generator);
 }
@@ -151,7 +151,7 @@ REGISTER_DISPATCH(log_normal_stub, &log_normal_kernel);
 #ifdef CPU_CAPABILITY_AVX512
 // normal_stub isn't being dispatched to AVX512 because it exposes
 // flakiness in test_sgd of test/test_optim.py
-REGISTER_NO_AVX512_DISPATCH(normal_stub, void(*)(Tensor&, const double, const double, c10::optional<Generator>));
+REGISTER_NO_AVX512_DISPATCH(normal_stub, void(*)(const TensorBase&, const double, const double, c10::optional<Generator>));
 #else
 REGISTER_DISPATCH(normal_stub, &normal_kernel);
 #endif
