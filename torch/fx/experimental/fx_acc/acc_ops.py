@@ -933,6 +933,12 @@ def ceil(*, input):
     return torch.ceil(**locals())
 
 
+@register_acc_op_mapping(op_and_target=("call_function", torch.nn.functional.pad))
+@register_acc_op
+def pad(*, input, pad, mode, value):
+    return torch.nn.functional.pad(**locals())
+
+
 @register_acc_op_mapping(op_and_target=("call_function", torch.conv2d))
 @register_acc_op
 def conv2d(*, input, weight, bias, stride, padding, dilation, groups):
