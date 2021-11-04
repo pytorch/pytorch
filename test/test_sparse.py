@@ -1464,26 +1464,26 @@ class TestSparse(TestCase):
     @dtypes(torch.double)
     def test_sparse_sum(self, device, dtype, coalesced):
 
-        def run_tests(S, td=None):
+        def run_tests(S, td=None, dtype=None):
             D = S.coalesce().to_dense().detach().requires_grad_(True)
             if td is None:
-                S_sum = torch.sparse.sum(S)
-                D_sum = D.sum()
+                S_sum = torch.sparse.sum(S, dtype=dtype)
+                D_sum = D.sum(dtype=dtype)
                 self.assertEqual(S_sum.item(), D_sum.item())
 
                 def fn(S):
-                    res = torch.sparse.sum(S)
+                    res = torch.sparse.sum(S, dtype=dtype)
                     if res.is_sparse:
                         res = res.to_dense()
                     return res
                 gradcheck(fn, (S,), check_sparse_nnz=True)
             else:
-                S_sum = torch.sparse.sum(S, td)
-                D_sum = D.sum(td)
+                S_sum = torch.sparse.sum(S, td, dtype=dtype)
+                D_sum = D.sum(td, dtype=dtype)
                 self.assertEqual(S_sum.to_dense() if S_sum.is_sparse else S_sum, D_sum)
 
                 def fn(S):
-                    res = torch.sparse.sum(S, td)
+                    res = torch.sparse.sum(S, td, dtype=dtype)
                     if res.is_sparse:
                         res = res.to_dense()
                     return res
@@ -1530,6 +1530,7 @@ class TestSparse(TestCase):
         for test_dim in test_dims:
             S = self._gen_sparse(sparse_dims, nnz, with_size, dtype, device, coalesced)[0]
             run_tests(S.requires_grad_(True), test_dim)
+            run_tests(S.requires_grad_(True), test_dim, dtype)
 
     @dtypes(*get_all_dtypes(include_bool=False, include_half=False, include_bfloat16=False))
     def test_sparse_sum_int(self, device, dtype):
