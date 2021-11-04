@@ -6280,7 +6280,6 @@ def sample_inputs_dropout(op_info, device, dtype, requires_grad, **kwargs):
         SampleInput(make_arg(), kwargs=dict(training=False)),
     ]
 
-
 def sample_inputs_embedding(op_info, device, dtype, requires_grad, **kwargs):
     def make_input(shape):
         return make_tensor(shape, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -11545,6 +11544,27 @@ op_db: List[OpInfo] = [
                    dtypes=all_types_and(torch.bool),
                    safe_casts_outputs=True),
     OpInfo(
+        "nn.functional.alpha_dropout",
+        op=lambda input, *args, **kwargs:
+            wrapper_set_seed(torch.nn.functional.alpha_dropout, input, *args, **kwargs),
+        ref=_NOTHING,
+        dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        skips=(
+            # Because we have used lambda for the op here
+            # AssertionError: JIT Test does not execute any logic
+            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+            # inplace variant dispatches to dropout kernel, while on CUDA
+            # the op dispatches to _fused_dropout (with a few more conditions)
+            # hence, different values and this skip here
+            # DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view', device_type='cuda'),),
+        ),
+        supports_forward_ad=True,
+        supports_out=False,
+        sample_inputs_func=sample_inputs_dropout,
+        inplace_variant=lambda input, *args, **kwargs:
+            wrapper_set_seed(torch.nn.functional.alpha_dropout, input, *args, **kwargs, inplace=True)),
+    OpInfo(
         "nn.functional.dropout",
         op=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.dropout, input, *args, **kwargs),
@@ -11552,7 +11572,7 @@ op_db: List[OpInfo] = [
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         skips=(
-            # Probably because we have used lambda for the op here
+            # Because we have used lambda for the op here
             # AssertionError: JIT Test does not execute any logic
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
             # inplace variant dispatches to dropout kernel, while on CUDA
