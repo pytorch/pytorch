@@ -96,19 +96,23 @@ class TestOptim(TestCase):
 
         self.assertLessEqual(params.data.dist(solution), initial_dist)
 
-    def _test_basic_cases_template(self, weight, bias, input, constructor, scheduler_constructors, constructor_accepts_maximize=True):
+    def _test_basic_cases_template(
+            self, weight, bias, input, constructor, scheduler_constructors, constructor_accepts_maximize=True
+                                ):
         maximize_options = set([False, constructor_accepts_maximize])
         if not constructor_accepts_maximize:
-            wrapped_constructor = lambda x, y, z: constructor(x,y)
+            def three_arg_constructor(weight, bias, maximize):
+                self.assertFalse(maximize)
+                return constructor(weight, bias)
         else:
-            wrapped_constructor = constructor
+            three_arg_constructor = constructor
 
         for maximize in maximize_options:
             weight = Variable(weight, requires_grad=True)
             bias = Variable(bias, requires_grad=True)
             input = Variable(input)
             #  import ipdb; ipdb.set_trace()
-            optimizer = wrapped_constructor(weight, bias, maximize)
+            optimizer = three_arg_constructor(weight, bias, maximize)
             schedulers = []
             for scheduler_constructor in scheduler_constructors:
                 schedulers.append(scheduler_constructor(optimizer))
@@ -215,7 +219,8 @@ class TestOptim(TestCase):
         if scheduler_constructors is None:
             scheduler_constructors = []
         if constructor_accepts_maximize:
-            wrapped_constructor = lambda x,y: constructor(x,y,False)
+            def wrapped_constructor(weight, bias):
+                return constructor(weight, bias, False)
         else:
             wrapped_constructor = constructor
         self._test_state_dict(
@@ -355,7 +360,8 @@ class TestOptim(TestCase):
                 constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias, maximize: optimizer([weight, bias], nesterov=True, lr=1e-3, momentum=1, weight_decay=1, maximize=maximize),
+                lambda weight, bias, maximize: optimizer([weight, bias], nesterov=True, lr=1e-3, momentum=1, 
+                    weight_decay=1, maximize=maximize),
                 constructor_accepts_maximize=True
             )
             with self.assertRaisesRegex(ValueError, "Invalid momentum value: -0.5"):
