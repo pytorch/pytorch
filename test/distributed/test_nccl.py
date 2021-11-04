@@ -4,6 +4,7 @@ import sys
 import torch
 import torch.cuda.nccl as nccl
 import torch.cuda
+import torch.distributed as c10d
 
 from torch.testing._internal.common_utils import (TestCase, run_tests,
                                                   IS_WINDOWS, load_tests,
@@ -25,7 +26,7 @@ if not TEST_CUDA:
 
 
 datatypes = [torch.float]
-if (CUDA11OrLater and torch.cuda.nccl.version() >= (2, 10)) or TEST_WITH_ROCM:
+if (TEST_CUDA and CUDA11OrLater and c10d.is_nccl_available() and nccl.version() >= (2, 10)) or TEST_WITH_ROCM:
     datatypes.append(torch.bfloat16)
 
 class TestNCCL(TestCase):
