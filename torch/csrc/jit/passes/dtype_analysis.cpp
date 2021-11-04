@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <memory>
 #include <stdexcept>
+#include "c10/util/Exception.h"
 
 namespace torch {
 namespace jit {
