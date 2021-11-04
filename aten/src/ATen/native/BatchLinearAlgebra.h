@@ -226,6 +226,12 @@ using lu_factor_fn = void (*)(
     bool /*compute_pivots*/);
 DECLARE_DISPATCH(lu_factor_fn, lu_factor_stub);
 
+using unpack_pivots_fn = void(*)(
+  TensorIterator& iter,
+  const int64_t dim_size
+);
+DECLARE_DISPATCH(unpack_pivots_fn, unpack_pivots_stub);
+
 using lu_solve_fn = void (*)(
     const Tensor& /*b*/,
     const Tensor& /*lu*/,

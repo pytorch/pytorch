@@ -124,44 +124,8 @@ static void linalg_vector_norm_kernel_cpu(TensorIterator& iter, Scalar ord) {
   });
 }
 
-void unpack_pivots_cpu_kernel(
-  TensorIterator& iter,
-  int64_t dim_size
-) {
-  if (iter.numel() == 0) {
-    return;
-  }
-
-  auto loop = [&](char** data, const int64_t* strides, int64_t nelems) {
-    auto* unpacked_pivots_ptr = data[0];
-    const auto* pivots_ptr = data[1];
-
-    for (const auto elem : c10::irange(nelems)) {
-      (void)elem; //Suppress unused variable warning
-      // WARNING: torch.lu returns int32 pivots,
-      // this behavior could change in the future.
-      auto* unpacked_pivots_data = reinterpret_cast<int32_t*>(unpacked_pivots_ptr);
-      auto* pivots_data = reinterpret_cast<const int32_t*>(pivots_ptr);
-
-      for (const auto i : c10::irange(dim_size)) {
-        std::swap(
-          unpacked_pivots_data[i],
-          unpacked_pivots_data[pivots_data[i]]
-        );
-      }
-
-      unpacked_pivots_ptr += strides[0];
-      pivots_ptr += strides[1];
-    }
-  };
-
-  iter.for_each(loop);
-}
-
 } // anonymous namespace
 
 REGISTER_DISPATCH(addr_stub, &addr_kernel);
 REGISTER_DISPATCH(linalg_vector_norm_stub, &linalg_vector_norm_kernel_cpu);
-REGISTER_DISPATCH(unpack_pivots_stub, &unpack_pivots_cpu_kernel);
-
 }} // namespace at::native

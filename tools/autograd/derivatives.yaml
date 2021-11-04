@@ -887,6 +887,12 @@
   LU: lu_factor_ex_jvp(A_t, LU, pivots)
   output_differentiability: [True, False, False]
 
+- name: linalg_lu(Tensor A, *, bool pivot=True) -> (Tensor P, Tensor L, Tensor U)
+  A: linalg_lu_backward(grad, A, P, L, U)
+  L: std::get<0>(linalg_lu_jvp(A_t, P, L, U))
+  U: std::get<1>(linalg_lu_jvp(A_t, P, L, U))
+  output_differentiability: [False, True, True]
+
 - name: lu_solve(Tensor self, Tensor LU_data, Tensor LU_pivots) -> Tensor
   self, LU_data: lu_solve_backward(grad, self, LU_data, LU_pivots)
   result: lu_solve_jvp(result, LU_data_p, LU_data_t, self_t, LU_pivots)

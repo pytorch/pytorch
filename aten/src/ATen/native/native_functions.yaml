@@ -10444,6 +10444,20 @@
   dispatch:
     CPU, CUDA: linalg_lu_factor_ex_out
 
+# linalg.lu
+- func: linalg_lu(Tensor A, *, bool pivot=True) -> (Tensor P, Tensor L, Tensor U)
+  python_module: linalg
+  structured_delegate: linalg_lu.out
+  variants: function
+
+- func: linalg_lu.out(Tensor A, *, bool pivot=True, Tensor(a!) P, Tensor(b!) L, Tensor(c!) U) -> (Tensor(a!) P, Tensor(b!) L, Tensor(c!) U)
+  python_module: linalg
+  variants: function
+  structured: True
+  dispatch:
+    CPU, CUDA: linalg_lu_out
+
+# linalg.det
 - func: linalg_det(Tensor self) -> Tensor
   python_module: linalg
   variants: function
