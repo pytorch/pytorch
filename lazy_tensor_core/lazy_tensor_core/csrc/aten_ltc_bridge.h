@@ -21,13 +21,17 @@ c10::optional<torch::lazy::BackendDevice> GetLtcDevice(const at::Tensor& tensor)
 
 c10::optional<torch::lazy::BackendDevice> GetLtcDevice(const c10::optional<c10::Device>& device = c10::nullopt);
 
+c10::optional<torch::lazy::BackendDevice> GetSameBackendDeviceOrUseDefault();
+c10::optional<torch::lazy::BackendDevice> GetSameBackendDeviceOrUseDefault(const at::Tensor& tensor);
+c10::optional<torch::lazy::BackendDevice> GetSameBackendDeviceOrUseDefault(const at::TensorList& tensors);
+
 template<typename T, typename... Args>
-c10::optional<torch::lazy::BackendDevice> GetLtcDevice(const T& tensor, const Args&... forward_tensors) {
-    auto optional_device = GetLtcDevice(tensor);
+c10::optional<torch::lazy::BackendDevice> GetSameBackendDeviceOrUseDefault(const T& tensor, const Args&... forward_tensors) {
+    auto optional_device = GetSameBackendDeviceOrUseDefault(tensor);
     if (optional_device) {
         return optional_device;
     }
-    return GetLtcDevice(forward_tensors...);
+    return GetSameBackendDeviceOrUseDefault(forward_tensors...);
 }
 
 torch::lazy::BackendDevice AtenDeviceToLtcDevice(const c10::Device& device);
