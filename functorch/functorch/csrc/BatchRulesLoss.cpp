@@ -151,110 +151,54 @@ std::tuple<Tensor, Tensor> nll_loss_forward_decomposition(
   return std::make_tuple(result, total_weight);
 }
 
-std::tuple<at::Tensor,optional<int64_t>>
-nll_loss_backward_self_target_batch_rule(
-    const at::Tensor & grad_output, optional<int64_t> grad_bdim,
-    const at::Tensor & self, optional<int64_t> self_bdim,
-    const at::Tensor & target, optional<int64_t> target_bdim,
-    int64_t reduction, const at::Tensor & total_weight) {
-  TORCH_INTERNAL_ASSERT(self.dim() == 3 && target.dim() == 2);
-
-  if (reduction == Reduction::None) {
-    int64_t batch_size = self.size(*self_bdim);
-    auto self_ = reshape_dim_into(*self_bdim, 0, self);
-    auto target_ = reshape_dim_into(*target_bdim, 0, target);
-    Tensor grad_output_;
-    if (grad_bdim) {
-      TORCH_INTERNAL_ASSERT(grad_output.dim() == 2);
-      grad_output_ = reshape_dim_into(*grad_bdim, 0, grad_output);
-    } else {
-      TORCH_INTERNAL_ASSERT(grad_output.dim() == 1);
-      grad_output_ = grad_output.repeat({ batch_size });
-    }
-    auto result = at::nll_loss_backward(
-        grad_output_, self_, target_,
-        nullopt, reduction, -100, total_weight);
-    return std::make_tuple(reshape_dim_outof(0, batch_size, result), 0);
-  }
-  TORCH_INTERNAL_ASSERT(reduction == Reduction::Sum || reduction == Reduction::Mean);
-  int64_t batch_size = self.size(*self_bdim);
-  auto self_ = reshape_dim_into(*self_bdim, 0, self);
-  auto target_ = reshape_dim_into(*target_bdim, 0, target);
-  int64_t mean_groups = self_.size(0) / batch_size;
-  Tensor grad_output_ = grad_output;
-  if (reduction == Reduction::Mean) {
-    grad_output_ = grad_output_ / mean_groups;
-  }
-  if (grad_bdim) {
-    TORCH_INTERNAL_ASSERT(grad_output_.dim() == 1);
-    grad_output_ = grad_output_.repeat({mean_groups});
-  } else {
-    grad_output_ = grad_output_.expand({self_.size(0)});
-  }
-  TORCH_INTERNAL_ASSERT(grad_output_.dim() == 1 && grad_output_.size(0) == self_.size(0));
-  auto result = at::nll_loss_backward(
-      grad_output_, self_, target_,
-      nullopt, Reduction::None, -100, total_weight);
-  return std::make_tuple(reshape_dim_outof(0, batch_size, result), 0);
-}
-
-at::Tensor nll_loss_backward_plumbing(
+at::Tensor nll_loss_backward_decomposition(
     const at::Tensor & grad_output, const at::Tensor & self,
     const at::Tensor & target, const c10::optional<at::Tensor> & weight,
     int64_t reduction, int64_t ignore_index, const at::Tensor & total_weight) {
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
 
-  Tensor grad_output_value;
-  optional<int64_t> grad_output_bdim;
-  std::tie(grad_output_value, grad_output_bdim) = unwrapTensorAtLevel(grad_output, cur_level);
+  int64_t channel_dim = 1;
+  if (self.dim() < 2) {
+    channel_dim = 0;
+  }
+  auto self_ = self;
+  auto target_ = target.unsqueeze(channel_dim);
 
-  Tensor self_value;
-  optional<int64_t> self_bdim;
-  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
-
-  Tensor target_value;
-  optional<int64_t> target_bdim;
-  std::tie(target_value, target_bdim) = unwrapTensorAtLevel(target, cur_level);
-
-  optional<Tensor> weight_value;
-  optional<int64_t> weight_bdim;
-  if (weight) {
-    std::tie(weight_value, weight_bdim) = unwrapTensorAtLevel(*weight, cur_level);
+  auto grad_output_ = grad_output;
+  if (reduction == Reduction::Mean) {
+    grad_output_ = grad_output_ / total_weight;
   }
 
-  Tensor total_weight_value;
-  optional<int64_t> total_weight_bdim;
-  std::tie(total_weight_value, total_weight_bdim) = unwrapTensorAtLevel(total_weight, cur_level);
+  auto grad_input = at::zeros_like(self);
+  grad_input = at::scatter(grad_input, channel_dim, target_, -1.0);
 
-  if (!self_bdim && !target_bdim && !weight_bdim && !grad_output_bdim && !total_weight_bdim) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-    return at::nll_loss_backward(
-        grad_output_value, self_value, target_value,
-        weight_value, reduction, ignore_index, total_weight_value);
+  if (grad_output_.dim() < grad_input.dim() && grad_output_.dim() > 0) {
+    grad_output_ = grad_output_.unsqueeze(channel_dim);
   }
 
-  if (self_bdim && target_bdim && (!weight || !weight->defined()) &&
-      !total_weight_bdim && ignore_index < 0) {
-    auto result = nll_loss_backward_self_target_batch_rule(
-        grad_output_value, grad_output_bdim,
-        self_value, self_bdim,
-        target_value, target_bdim,
-        reduction, total_weight);
-    return makeBatched(std::get<0>(result), std::get<1>(result), cur_level);
+  Tensor weight_;
+  if (weight && weight->defined()) {
+    auto shape = weight->sizes();
+    VmapDimVector new_shape(self_.dim(), 1);
+    new_shape[channel_dim] = shape[0];
+    weight_ = weight->reshape(new_shape);
+    grad_output_ = grad_output_ * weight_;
   }
 
-  static auto op = c10::Dispatcher::singleton()
-    .findSchemaOrThrow("aten::nll_loss_backward", "");
-  return slow_fallback<Tensor>(op, {grad_output, self, target, weight, reduction, ignore_index, total_weight});
+  bool has_ignore_index = ignore_index >= 0;
+  Tensor ignore_index_mask;
+  if (has_ignore_index) {
+    ignore_index_mask = target_ != ignore_index;
+    grad_output_ = grad_output_ * ignore_index_mask;
+  }
+
+  return grad_input * grad_output_;
 }
-
 
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("nll_loss_forward", nll_loss_forward_decomposition);
   m.impl("nll_loss2d_forward", nll_loss_forward_decomposition);
-  m.impl("nll_loss_backward", nll_loss_backward_plumbing);
+  m.impl("nll_loss_backward", nll_loss_backward_decomposition);
+  m.impl("nll_loss2d_backward", nll_loss_backward_decomposition);
   VMAP_SUPPORT("mse_loss", mse_loss_batch_rule);
   VMAP_SUPPORT("mse_loss_backward", mse_loss_backward_batch_rule);
 }
