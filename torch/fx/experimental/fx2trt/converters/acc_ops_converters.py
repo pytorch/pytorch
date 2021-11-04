@@ -480,6 +480,52 @@ def acc_ops_conv2d(network, target, args, kwargs, name):
     return layer.get_output(0)
 
 
+@tensorrt_converter(acc_ops.pad)
+def acc_ops_pad(network, target, args, kwargs, name):
+    input_val = kwargs["input"]
+    pad = kwargs["pad"]
+    mode = kwargs["mode"]
+    value = kwargs["value"]
+    rank = len(input_val.shape)
+
+    if not isinstance(input_val, trt.tensorrt.ITensor):
+        raise RuntimeError(
+            f"pad received input {input_val} that is not part "
+            "of the TensorRT region!"
+        )
+
+    if mode != "constant":
+        raise RuntimeError(
+            f"Currently we only support constant mode for pad, got {mode}."
+        )
+
+    if len(pad) / 2 > rank:
+        raise RuntimeError(
+            f"Trying to pad last {len(pad) / 2} dimension but the input only has {rank} dimension."
+        )
+
+    # TODO: Padding layer is deprecating starting on 8.2. We need to convert acc_ops.pad
+    # to Slice layer instead. Slice layer also allows more modes, filling value other
+    # than 0, and more dimensions.
+    if value != 0:
+        raise RuntimeError(
+            f"Currently we only support padding value of 0, got {value}."
+        )
+    if len(pad) > 4:
+        raise RuntimeError("Currently we only support padding last two dimensions.")
+
+    pre_padding = tuple(pad[len(pad) - i - 2] for i in range(0, len(pad), 2))
+    post_padding = tuple(pad[len(pad) - i - 1] for i in range(0, len(pad), 2))
+
+    layer = network.add_padding(
+        input_val,
+        pre_padding if len(pre_padding) == 2 else (0,) + pre_padding,
+        post_padding if len(post_padding) == 2 else (0,) + post_padding
+    )
+    set_layer_name(layer, target, name)
+    return layer.get_output(0)
+
+
 @tensorrt_converter(acc_ops.flatten)
 def acc_ops_flatten(network, target, args, kwargs, name):
     input_val = kwargs["input"]
