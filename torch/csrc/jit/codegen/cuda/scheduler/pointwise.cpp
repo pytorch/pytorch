@@ -452,8 +452,6 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
   }
 
   TORCH_INTERNAL_ASSERT(inner_most_id != nullptr);
-  auto vectorizable_dims =
-      scheduler_utils::FindAllMappedDims::from(reference_tv, inner_most_id);
 
   // Caches of inputs
   std::vector<TensorView*> cached_inputs;
@@ -469,13 +467,7 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
     if (inp->uses().empty()) {
       continue;
     }
-    // Need to check before caching.
-    bool vectorize = params.vectorize &&
-        scheduler_utils::hasInnerDim(inp, vectorizable_dims, true);
     cached_inputs.emplace_back(inp->cache_after());
-    if (vectorize) {
-      vectorized_tensor.emplace(cached_inputs.back());
-    }
   }
 
   // Figure out which outputs to cache for unrolling or vectorization
@@ -483,13 +475,7 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
     if (out->definition() == nullptr) {
       continue;
     }
-    // Need to check before caching.
-    bool vectorize = params.vectorize &&
-        scheduler_utils::hasInnerDim(out, vectorizable_dims, true);
     cached_outputs.emplace_back(std::make_pair(out, out->cache_before()));
-    if (vectorize) {
-      vectorized_tensor.emplace(out);
-    }
   }
 
   auto all_tvs = ir_utils::allTvs(fusion);
@@ -633,9 +619,15 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
   scheduler_utils::parallelizeAllLike(reference_tv, all_tvs);
 
   if (params.vectorize) {
+    // Grab all tensor views that should be vectorized
+    auto vectorizable_inputs_outputs =
+        scheduler_utils::getInputsOutputsWithInnerDim(reference_tv, true);
     // Clear vectorize on tensors that shouldn't have it
     for (auto tv : all_tvs) {
-      if (!vectorized_tensor.count(tv)) {
+      if (std::find(
+              vectorizable_inputs_outputs.begin(),
+              vectorizable_inputs_outputs.end(),
+              tv) == vectorizable_inputs_outputs.end()) {
         for (auto id : tv->domain()->domain()) {
           if (id->getParallelType() == ParallelType::Vectorize) {
             id->parallelize(ParallelType::Serial);

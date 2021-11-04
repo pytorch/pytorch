@@ -672,7 +672,94 @@ std::vector<std::pair<TensorView*, TensorView*>> cacheAndForkOutputs(
   return cached_outputs;
 }
 
-FindAllMappedDims::FindAllMappedDims(TensorView* from, IterDomain* id)
+namespace {
+IterDomain* innerMostRootDim(TensorView* tv) {
+  if (tv->nDims() == 0) {
+    return nullptr;
+  }
+
+  IterDomain* inner_most_id = nullptr;
+  for (auto it = tv->getMaybeRFactorDomain().rbegin();
+       it != tv->getMaybeRFactorDomain().rend();
+       it++) {
+    if ((*it)->isReduction() && tv->isFusionInput()) {
+      continue;
+    }
+    if ((*it)->isBroadcast()) {
+      if (inner_most_id == nullptr) {
+        inner_most_id = *it;
+      }
+      continue;
+    }
+    if ((*it)->isTrivialReduction()) {
+      if (inner_most_id == nullptr) {
+        inner_most_id = *it;
+      }
+      continue;
+    }
+    inner_most_id = *it;
+    break;
+  }
+
+  return inner_most_id;
+}
+
+// Take the inner most rfactor id from innerMostRootDim and project it to the
+// root domain if the provided domain is on the rfactor domain. If vectorize,
+// will not project if not following the inner most path.
+IterDomain* projectIdToRoot(
+    TensorView* tv,
+    IterDomain* reference_id,
+    bool vectorize) {
+  if (reference_id == nullptr) {
+    return nullptr;
+  }
+
+  if (!tv->hasRFactor()) {
+    return reference_id;
+  }
+
+  auto replay_exprs = ExprSort::getExprs(tv->fusion(), {reference_id});
+  if (replay_exprs.empty()) {
+    return reference_id;
+  }
+
+  IterDomain* projected_id = reference_id;
+  for (auto expr_it = replay_exprs.rbegin(); expr_it != replay_exprs.rend();
+       ++expr_it) {
+    auto expr = *expr_it;
+    if (expr->isA<Merge>()) {
+      auto merge = expr->as<Merge>();
+      if (merge->out() == projected_id) {
+        projected_id = merge->inner();
+      }
+    } else if (expr->isA<Split>()) {
+      auto split = expr->as<Split>();
+      if (split->inner() == projected_id) {
+        projected_id = split->in();
+      } else if (split->outer() == projected_id) {
+        if (vectorize) {
+          projected_id = nullptr;
+        } else {
+          projected_id = split->in();
+        }
+      }
+    } else {
+      TORCH_INTERNAL_ASSERT(
+          false, "Didn't recognize the iterdomain expression: ", expr);
+    }
+    if (projected_id == nullptr) {
+      break;
+    }
+  }
+  return projected_id;
+}
+} // namespace
+
+FindAllMappedDims::FindAllMappedDims(
+    TensorView* from,
+    IterDomain* id,
+    bool vectorize_pass)
     : starting_tv(from), starting_id(id) {
   std::deque<TensorView*> to_visit{starting_tv};
   std::unordered_set<TensorView*> visited;
@@ -709,6 +796,13 @@ FindAllMappedDims::FindAllMappedDims(TensorView* from, IterDomain* id)
       }
     }
 
+    // For producers, project to root
+    tv_id = projectIdToRoot(tv, tv_id, vectorize_pass);
+    // If projection fails, don't map to producers
+    if (tv_id == nullptr) {
+      continue;
+    }
+
     for (auto producer_tv : ir_utils::producerTvsOf(tv)) {
       if (visited.find(producer_tv) != visited.end()) {
         continue;
@@ -732,7 +826,8 @@ FindAllMappedDims::FindAllMappedDims(TensorView* from, IterDomain* id)
 
 std::unordered_set<IterDomain*> FindAllMappedDims::from(
     TensorView* tv,
-    IterDomain* id) {
+    IterDomain* id,
+    bool vectorize_pass) {
   TORCH_INTERNAL_ASSERT(
       std::find_if(
           tv->getMaybeRFactorDomain().begin(),
@@ -745,7 +840,7 @@ std::unordered_set<IterDomain*> FindAllMappedDims::from(
       tv,
       " to the rest of the fusion, but id does not belong to this tv.");
 
-  FindAllMappedDims mapped_dims(tv, id);
+  FindAllMappedDims mapped_dims(tv, id, vectorize_pass);
 
   std::unordered_set<IterDomain*> mapped_id_set;
   for (auto entry : mapped_dims.mapped_ids) {
@@ -758,15 +853,10 @@ bool hasInnerDim(
     TensorView* tv,
     std::unordered_set<IterDomain*> vector_dims,
     bool should_vectorize) {
-  const auto& root_dom = TensorDomain::noBroadcasts(
-      TensorDomain::noReductions(tv->getMaybeRFactorDomain()));
-
-  // Don't vectorize 0-dim tensors
-  if (root_dom.size() == 0) {
+  const auto& inner_most_dim = innerMostRootDim(tv);
+  if (inner_most_dim == nullptr || inner_most_dim->isReduction()) {
     return false;
   }
-
-  auto inner_most_dim = root_dom[root_dom.size() - 1];
 
   // Make sure inner most dimension is in the vector_dim set
   if (vector_dims.count(inner_most_dim) == 0) {
@@ -801,52 +891,28 @@ bool hasInnerDim(
 
 std::vector<TensorView*> getInputsOutputsWithInnerDim(
     TensorView* reference_tv,
-    bool can_vectorize) {
-  if (reference_tv->nDims() == 0) {
-    return {};
-  }
-
-  IterDomain* inner_most_id = nullptr;
-  for (auto it = reference_tv->getMaybeRFactorDomain().rbegin();
-       it != reference_tv->getMaybeRFactorDomain().rend();
-       it++) {
-    if ((*it)->isReduction() && reference_tv->isFusionInput()) {
-      continue;
-    }
-    if ((*it)->isBroadcast()) {
-      if (inner_most_id == nullptr) {
-        inner_most_id = *it;
-      }
-      continue;
-    }
-    if ((*it)->isTrivialReduction()) {
-      if (inner_most_id == nullptr) {
-        inner_most_id = *it;
-      }
-      continue;
-    }
-    inner_most_id = *it;
-    break;
-  }
+    bool vectorize_pass) {
+  auto inner_most_id = innerMostRootDim(reference_tv);
 
   if (inner_most_id == nullptr) {
     return {};
   }
 
-  auto vectorizable_dims = FindAllMappedDims::from(reference_tv, inner_most_id);
+  auto vectorizable_dims =
+      FindAllMappedDims::from(reference_tv, inner_most_id, vectorize_pass);
 
   std::vector<TensorView*> vectorizable_tensors;
 
   for (auto input_tv :
        ir_utils::filterByType<TensorView>(reference_tv->fusion()->inputs())) {
-    if (hasInnerDim(input_tv, vectorizable_dims, can_vectorize)) {
+    if (hasInnerDim(input_tv, vectorizable_dims, vectorize_pass)) {
       vectorizable_tensors.push_back(input_tv);
     }
   }
 
   for (auto output_tv :
        ir_utils::filterByType<TensorView>(reference_tv->fusion()->outputs())) {
-    if (hasInnerDim(output_tv, vectorizable_dims, can_vectorize)) {
+    if (hasInnerDim(output_tv, vectorizable_dims, vectorize_pass)) {
       vectorizable_tensors.push_back(output_tv);
     }
   }
