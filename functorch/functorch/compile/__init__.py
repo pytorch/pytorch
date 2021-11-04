@@ -1,4 +1,5 @@
 from .._src.operator_authoring import pointwise_operator
+from .._src.memory_efficient_op_authoring import memory_efficient_operator_authoring
 from .._src.python_key import nnc_jit, make_nnc
 from .._src.nnc_compile import nnc_compile, get_ops
 from .._src.eager_compilation import (
