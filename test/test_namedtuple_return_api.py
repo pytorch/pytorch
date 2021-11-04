@@ -21,7 +21,7 @@ all_operators_with_namedtuple_return = {
     'frexp', 'lu_unpack', 'histogram', '_fake_quantize_per_tensor_affine_cachemask_tensor_qparams',
     '_fused_moving_avg_obs_fq_helper', 'linalg_lu_factor', 'linalg_lu_factor_ex', 'linalg_lu',
     '_det_lu_based_helper',
-    '_lu_with_info',
+    '_lu_with_info', 'linalg_lu'
 }
 
 

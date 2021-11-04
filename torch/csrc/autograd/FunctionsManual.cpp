@@ -4204,8 +4204,7 @@ Tensor lu_unpack_backward(
 
   Tensor L_grad_contrib;
   if (L_grad.defined()) {
-    L_grad_contrib = L_grad.tril();
-    L_grad_contrib.diagonal(0, -2, -1).fill_(0);
+    L_grad_contrib = L_grad.tril(-1);
     res.narrow(-2, 0, m).narrow(-1, 0, k).add_(L_grad_contrib);
   }
 
@@ -4344,17 +4343,18 @@ Tensor gather_with_keepdimed_indices(const Tensor& input, int64_t dim, const Ten
 //
 // X1_grad = P L^{-H} [L^H L_grad o 1_L + U1_grad U1^H o 1_U - U2_grad U2^H o 1_L] U1^{-H},
 // X2_grad = P L^{-H} U2_grad
-Tensor plu_backward_base(
+Tensor linalg_lu_backward(
   const variable_list& grads,
-  const Tensor& self,
+  const Tensor& A,
   const Tensor& P,
   const Tensor& L,
-  const Tensor& U) {
-  auto L_grad = grads[0];
-  auto U_grad = grads[1];
+  const Tensor& U,
+  const bool pivot) {
+  auto L_grad = grads[1];
+  auto U_grad = grads[2];
 
-  auto m = self.size(-2);
-  auto n = self.size(-1);
+  auto m = A.size(-2);
+  auto n = A.size(-1);
   auto k = std::min(m, n);
 
   auto L_principal = L.narrow(-2, 0, k).narrow(-1, 0, k);
@@ -4369,7 +4369,6 @@ Tensor plu_backward_base(
 
   auto phi = phi_L + phi_U;
 
-  Tensor self_grad;
   if (m <= n) {
     auto U_complement = U.narrow(-2, 0, k).narrow(-1, k, n - k);
     auto U_grad_complement = U_grad.narrow(-2, 0, k).narrow(-1, k, n - k);
@@ -4394,15 +4393,15 @@ Tensor plu_backward_base(
     auto psi = at::cat({psi_principal, U_grad_complement}, /*dim=*/-1);
 
     // solve for the grad to avoid the inversion of L1^H
-    self_grad = P.matmul(
+    auto A_grad =
       std::get<0>(at::triangular_solve(
         psi,
         L_principal_H,
         /*upper=*/true,
         /*transpose=*/false,
         /*unitriangular=*/true
-      ))
-    );
+      ));
+    return pivot ? P.matmul(A_grad) : A_grad;
   }
   else {
     // variables psi and phi carry the same meaning as in the case (m <= n),
@@ -4422,48 +4421,47 @@ Tensor plu_backward_base(
     ));
     auto psi = at::cat({psi_principal, L_grad_complement}, -2);
 
-    self_grad = std::get<0>(at::triangular_solve(
-      P.matmul(psi).mT(),
+    return std::get<0>(at::triangular_solve(
+      pivot ? P.matmul(psi).mT() : psi.mT(),
       U_principal.conj(),
       /*upper=*/true,
       /*transpose=*/false,
       /*unitriangular=*/false
     )).mT();
   }
-
-  return self_grad;
 }
 
 Tensor lu_factor_ex_backward(
   const Tensor& grad,
   const Tensor& self,
   const Tensor& LU,
-  const Tensor& pivs) {
+  const Tensor& pivs,
+  const bool pivot) {
   Tensor P, L, U;
   std::tie(P, L, U) = at::lu_unpack(LU, pivs);
   // Note that packed LU could be represented as
   // LU = L + U - I, hence
   // L_grad = LU_grad,
   // U_grad = LU_grad.
-  return plu_backward_base({/*L_grad=*/grad, /*U_grad=*/grad}, self, P, L, U);
+  return linalg_lu_backward({/*P_grad=*/Tensor{}, /*L_grad=*/grad, /*U_grad=*/grad}, self, P, L, U, pivot);
 }
 
-Tensor lu_factor_ex_jvp(
+// This function is based on the forward AD derivations outlined
+// in the description to the linalg_lu_backward function.
+// This function returns the forward gradients in one variable, to reuse it
+// in torch.lu_unpack and torch.linalg.
+Tensor linalg_lu_jvp_aux(
   const Tensor& dA,
-  const Tensor& LU,
-  const Tensor& pivs
-) {
-  // This function is based on the forward AD derivations outlined
-  // in the description to the plu_backward_base function.
+  const Tensor& P,
+  const Tensor& L,
+  const Tensor& U,
+  const bool pivot) {
 
-  Tensor P, L, U;
-  std::tie(P, L, U) = at::lu_unpack(LU, pivs);
-
-  auto m = LU.size(-2);
-  auto n = LU.size(-1);
+  auto m = dA.size(-2);
+  auto n = dA.size(-1);
   auto k = std::min(m, n);
 
-  auto pdA = P.mT().matmul(dA);
+  auto pdA = pivot ? P.mT().matmul(dA) : dA;
 
   // similar to the backward implementation, we also consider block structures such as:
   // for a matrix A of size m x n we decompose it as
@@ -4500,7 +4498,7 @@ Tensor lu_factor_ex_jvp(
     return dL1 + dU1;
   }
   else {
-    auto dLU = at::zeros_like(LU);
+    auto dLU = at::zeros_like(dA);
     dLU.narrow(-2, 0, k).narrow(-1, 0, k).copy_(dL1 + dU1);
 
     if (m < n) {
@@ -4531,6 +4529,45 @@ Tensor lu_factor_ex_jvp(
 
     return dLU;
   }
+}
+
+Tensor lu_factor_ex_jvp(
+  const Tensor& dA,
+  const Tensor& LU,
+  const Tensor& pivs,
+  const bool pivot
+) {
+  Tensor P, L, U;
+  std::tie(P, L, U) = at::lu_unpack(LU, pivs, /*unpack_data=*/true, /*unpack_pivots=*/pivot);
+  return linalg_lu_jvp_aux(dA, P, L, U, pivot);
+}
+
+std::tuple<Tensor, Tensor> linalg_lu_jvp(
+  const Tensor& dA,
+  const Tensor& P,
+  const Tensor& L,
+  const Tensor& U,
+  const bool pivot) {
+  const auto m = dA.sizes().cend()[-2];
+  const auto n = dA.sizes().cend()[-1];
+
+  if (m > n) {
+    // L has the same size as dLU
+    Tensor dL = linalg_lu_jvp_aux(dA, P, L, U, pivot);
+    Tensor dU = dL.narrow(-2, 0, n).triu();
+    dL.tril_(-1);
+  } else {
+    // U has the same size as dLU
+    Tensor dU = linalg_lu_jvp_aux(dA, P, L, U, pivot);
+    Tensor dL = dU.narrow(-1, 0, m).tril(-1);
+    dU.triu_();
+  }
+
+  // dU will hold dU after we do triu_(0) on it
+  Tensor dU = linalg_lu_jvp_aux(dA, P, L, U, pivot);
+  Tensor dL = dU.tril(-1);
+  dU.triu_(0);
+  return std::make_tuple(std::move(dL), std::move(dU));
 }
 
 Tensor warn_backwards(const Tensor &grad_output) {

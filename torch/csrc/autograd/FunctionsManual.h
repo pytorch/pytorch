@@ -322,23 +322,33 @@ std::tuple<Tensor, Tensor> linalg_lstsq_backward(
   const std::array<bool, 2>& grad_input_mask
 );
 
-Tensor lu_backward_base(
+Tensor linalg_lu_backward(
   const variable_list& grads,
-  const Tensor& self,
+  const Tensor& A,
   const Tensor& P,
   const Tensor& L,
-  const Tensor& U
-);
+  const Tensor& U,
+  const bool pivot);
+
+std::tuple<Tensor, Tensor> linalg_lu_jvp(
+  const Tensor& dA,
+  const Tensor& P,
+  const Tensor& L,
+  const Tensor& U,
+  const bool pivot);
+
 Tensor lu_factor_ex_backward(
   const Tensor& grad,
   const Tensor& self,
   const Tensor& LU,
-  const Tensor& pivs
+  const Tensor& pivs,
+  const bool pivot
 );
 Tensor lu_factor_ex_jvp(
   const Tensor& dX,
   const Tensor& LU,
-  const Tensor& pivs
+  const Tensor& pivs,
+  const bool pivot
 );
 
 Tensor cat_jvp(at::TensorList tensors, int64_t dim);

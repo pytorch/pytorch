@@ -33,6 +33,7 @@ Decompositions
 
     cholesky
     qr
+    lu
     lu_factor
     eig
     eigvals
