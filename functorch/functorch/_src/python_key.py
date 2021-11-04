@@ -38,6 +38,14 @@ def sigmoid_backward_decomposition(out_grad, y):
 def _s_where_decomposition(a, b, c):
     return torch.where(a, b, c)
 
+@register_decomposition(torch.ops.aten.detach)
+def noop(x):
+    return x
+
+@register_decomposition(torch.ops.aten.softplus_backward)
+def softplus_backward_decomposition(out_grad, x, beta, threshold, out):
+    return out_grad * torch.sigmoid(x)
+
 USE_DECOMPOSE = False
 
 @contextmanager
