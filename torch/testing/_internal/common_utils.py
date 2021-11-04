@@ -4,7 +4,6 @@ no CUDA calls shall be made, including torch.cuda.device_count(), etc.
 
 torch.testing._internal.common_cuda.py can freely initialize CUDA context when imported.
 """
-
 import sys
 import os
 import platform
@@ -33,7 +32,6 @@ from contextlib import contextmanager, closing
 from functools import wraps
 from itertools import product
 from copy import deepcopy
-from numbers import Number
 import tempfile
 import json
 import __main__  # type: ignore[import]
@@ -1277,20 +1275,20 @@ def check_if_enable(test: unittest.TestCase):
 
 
 class RelaxedNumberPair(NumberPair):
-    def __init__(self, actual, expected, *, id, check_dtype, **other_parameters,):
+    def _process_inputs(
+        self, actual: Any, expected: Any, *, id: Tuple[Any, ...]
+    ) -> Tuple[Union[int, float, complex], Union[int, float, complex]]:
+        # We require only one of the inputs of the inputs to be a number,
+        # whereas in NumberPair both inputs have to be numbers.
         if not (isinstance(actual, self._NUMBER_TYPES) or isinstance(expected, self._NUMBER_TYPES)):
             raise UnsupportedInputs()
-
-        error_meta, numbers = self._apply_unary(self._to_number, actual, expected)
+        error_meta, numbers = self._apply_unary(self._to_number, actual, expected, id=id)
         if error_meta:
-            raise UnsupportedInputs(error_meta._replace(id=id))
-
-        super().__init__(*cast(Tuple[Number, Number], numbers), id=id, check_dtype=False, **other_parameters)
+            raise UnsupportedInputs(error_meta)
+        return cast(Tuple[Union[int, float, complex], Union[int, float, complex]], numbers)
 
     def _to_number(self, number_like):
-        if isinstance(number_like, self._NUMBER_TYPES):
-            number = number_like
-        elif isinstance(number_like, torch.Tensor):
+        if isinstance(number_like, torch.Tensor):
             if number_like.numel() > 1:
                 error_meta = ErrorMeta(
                     ValueError,
@@ -1299,15 +1297,9 @@ class RelaxedNumberPair(NumberPair):
                 )
                 return error_meta, None
 
-            number = number_like.item()
+            return None, number_like.item()
         else:
-            error_meta = ErrorMeta(
-                TypeError,
-                f"Only single element tensors can be compared against a number. Got {type(number_like)} instead."
-            )
-            return error_meta, None
-
-        return None, number
+            return super()._to_number(number_like)
 
 
 class TensorOrArrayPair(TensorLikePair):
@@ -1316,7 +1308,7 @@ class TensorOrArrayPair(TensorLikePair):
         self.rtol = max(self.rtol, rtol_override)
         self.atol = max(self.atol, atol_override)
 
-    def _check_supported_inputs(
+    def _process_inputs(
         self, actual, expected, *, id, allow_subclasses
     ):
         self._check_inputs_isinstance(actual, expected, cls=(torch.Tensor, np.ndarray))

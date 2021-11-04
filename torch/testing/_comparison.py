@@ -1,10 +1,11 @@
 import abc
 import cmath
 import collections.abc
+import contextlib
 from typing import NamedTuple, Callable, Sequence, List, Union, Optional, Type, Tuple, Any, cast
 
 import torch
-from torch._C import ScriptDict  # type: ignore[attr-defined]
+from torch._C import ScriptList, ScriptDict  # type: ignore[attr-defined]
 
 from ._core import _unravel_index
 
@@ -627,9 +628,9 @@ def originate_pairs(
     # We explicitly exclude str's here since they are self-referential and would cause an infinite recursion loop:
     # "a" == "a"[0][0]...
     if (
-        isinstance(actual, collections.abc.Sequence)
+        isinstance(actual, (collections.abc.Sequence, ScriptList))
         and not isinstance(actual, str)
-        and isinstance(expected, collections.abc.Sequence)
+        and isinstance(expected, (collections.abc.Sequence, ScriptList))
         and not isinstance(expected, str)
     ):
         actual_len = len(actual)
@@ -670,7 +671,11 @@ def originate_pairs(
             )
             return error_meta, None
 
-        for key in sorted(actual_keys):
+        # Since the origination aborts after the first failure, we try to be deterministic
+        with contextlib.suppress(Exception):
+            actual_keys = sorted(actual_keys)
+
+        for key in actual_keys:
             error_meta, partial_pairs = originate_pairs(
                 actual[key], expected[key], pair_types=pair_types, id=(*id, key), **options
             )
