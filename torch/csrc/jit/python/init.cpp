@@ -1087,6 +1087,15 @@ void initJITBindings(PyObject* module) {
             return self.writeRecord(
                 name, reinterpret_cast<const char*>(data), size);
           })
+      .def(
+          "write_bytes",
+          [](PyTorchStreamWriter& self,
+             const std::string& name,
+             char* data,
+             size_t size) {
+            return self.writeRecord(
+                name, reinterpret_cast<const char*>(data), size);
+          })
       .def("archive_name", &PyTorchStreamWriter::archiveName)
       .def(
           "get_all_written_records",

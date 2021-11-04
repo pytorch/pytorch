@@ -112,6 +112,7 @@ static ssize_t doPartialPythonWrite(PyObject* fildes, void* buf, size_t nbytes) 
 // Requires that we read EXACTLY nbytes; fails if we don't.
 template <typename io>
 void doRead(io fildes, void* raw_buf, size_t nbytes) {
+  std::cout << "Reading " << nbytes << " bytes\n";
   char* buf = static_cast<char*>(raw_buf);
   while (nbytes > 0) {
     errno = 0; // doPartialRead may not set errno

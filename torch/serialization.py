@@ -560,7 +560,9 @@ def _save(obj, zip_file, pickle_module, pickle_protocol):
             storage = storage.cpu()
         # Now that it is on the CPU we can directly copy it into the zip file
         num_bytes = storage.nbytes()
-        zip_file.write_record(name, storage.data_ptr(), num_bytes)
+        storage_io = io.BytesIO()
+        storage._write_file(storage_io, _should_read_directly(storage_io), False, num_bytes)
+        zip_file.write_bytes(name, storage_io.getvalue(), num_bytes)
 
 
 def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
@@ -950,15 +952,29 @@ def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', **pickl
 
     loaded_storages = {}
 
-    def load_tensor(dtype, numel, key, location):
+    def load_tensor(dtype, nbytes, key, location):
         name = f'data/{key}'
 
-        storage = zip_file.get_storage_from_record(name, numel, torch.UntypedStorage).storage()._untyped()
+        # storage = zip_file.get_storage_from_record(name, numel, torch.UntypedStorage).storage()._untyped()
+        storage_bytes = zip_file.get_record(name)
+        storage_io = io.BytesIO(storage_bytes)
+        obj = cast(Storage, torch.UntypedStorage(nbytes))
         # TODO: Once we decide to break serialization FC, we can
         # stop wrapping with TypedStorage
-        loaded_storages[key] = torch.storage.TypedStorage(
-            wrap_storage=restore_location(storage, location),
-            dtype=dtype)
+        storage = torch.storage.TypedStorage(wrap_storage=restore_location(obj, location), dtype=dtype)
+        offset = None
+        print(len(storage_io.getvalue()))
+        f_should_read_directly = _should_read_directly(storage_io)
+        storage._set_from_file(storage_io, offset, f_should_read_directly, torch._utils._element_size(storage.dtype))
+        loaded_storages[key] = storage
+
+        # obj = cast(Storage, torch.UntypedStorage)._new_with_file(storage_io, torch._utils._element_size(dtype))
+        # obj = restore_location(obj, location)
+        # # TODO: Once we decide to break serialization FC, we can
+        # # stop wrapping with TypedStorage
+        # loaded_storages[key] = torch.storage.TypedStorage(
+        #     wrap_storage=obj,
+        #     dtype=dtype)
 
     def persistent_load(saved_id):
         assert isinstance(saved_id, tuple)

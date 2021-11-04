@@ -97,11 +97,19 @@ THWStorage * THPStorage_(readFileRaw)(io file, THWStorage *_storage, uint64_t el
   }
 #endif
 
+  // Todo: make this a param with default = false, only set it to true for zipfile serialization
+  bool skipSize = true;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   scalar_t *data;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t size;
-  doRead(file, &size, sizeof(int64_t));
+  if (skipSize) {
+    size = element_size;
+  } else {
+    doRead(file, &size, sizeof(int64_t));
+  }
+  // size = 4;
+  std::cout << "size " << size << "   el: " << element_size << "\n";
   int64_t nbytes = element_size * size;
   if (torch::utils::THP_nativeByteOrder() ==
       torch::utils::THPByteOrder::THP_BIG_ENDIAN) {
