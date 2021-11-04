@@ -197,7 +197,7 @@ class ProcessGroupNCCLNoGPUTest(TestCase):
         torch.cuda.device_count() > 0, "GPUs are available, skipping test"
     )
     def test_init_no_gpus(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
+        store = c10d.FileStore(self.file.name, self.world_size)
         with self.assertRaisesRegex(
             RuntimeError, "ProcessGroupNCCL is only supported with GPUs, no GPUs found!"
         ):
@@ -206,6 +206,7 @@ class ProcessGroupNCCLNoGPUTest(TestCase):
 
 class ProcessGroupNCCLTest(MultiProcessTestCase):
     def _create_process_group_nccl(self, store, rank, world_size, opts):
+        # create nccl pg with opts
         pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size, opts)
         dist.barrier(group=pg)
         return pg
@@ -2573,6 +2574,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
     def test_nccl_barrier_timeout(self):
+        os.environ["ENABLE_NCCL_HEALTH_CHECK"] = "1"
         store = c10d.FileStore(self.file_name, self.world_size)
         if self.rank == 0:
             with self.assertRaisesRegex(
@@ -2589,6 +2591,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
     def test_nccl_barrier_timeout_new_group(self):
+        os.environ["ENABLE_NCCL_HEALTH_CHECK"] = "1"
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
             backend="nccl",
@@ -2612,6 +2615,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
     def test_nccl_barrier_timeout_new_group_non_member(self):
+        os.environ["ENABLE_NCCL_HEALTH_CHECK"] = "1"
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
             backend="nccl",
@@ -2653,6 +2657,23 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         with self.assertRaisesRegex(RuntimeError, "Invalid function argument"):
             c10d.barrier(device_ids=self.rank)
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @with_dist_debug_levels(levels=["DETAIL"])
+    def test_nccl_warn_not_in_group_debug_detail(self):
+        self._test_warn_not_in_group(backend="nccl")
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @with_dist_debug_levels(levels=["INFO"])
+    def test_nccl_warn_not_in_group_debug_info(self):
+        self._test_warn_not_in_group(backend="nccl")
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @with_dist_debug_levels(levels=["OFF"])
+    def test_nccl_warn_not_in_group_debug_off(self):
+        self._test_warn_not_in_group(backend="nccl")
 
 if __name__ == "__main__":
     assert (

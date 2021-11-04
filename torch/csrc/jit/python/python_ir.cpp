@@ -841,7 +841,10 @@ void initPythonIRBindings(PyObject* module_) {
       .def_static("get", &ComplexType::get);
   py::class_<TensorType, Type, std::shared_ptr<TensorType>>(m, "TensorType")
       .def_static("get", &TensorType::get)
-      .def_static("getInferred", &TensorType::getInferred);
+      .def_static("getInferred", &TensorType::getInferred)
+      .def_static("create_from_tensor", [](const at::Tensor& t) {
+        return TensorType::create(t);
+      });
   py::class_<BoolType, Type, std::shared_ptr<BoolType>>(m, "BoolType")
       .def_static("get", &BoolType::get);
   py::class_<StringType, Type, std::shared_ptr<StringType>>(m, "StringType")
