@@ -524,7 +524,7 @@ TEST(StaticRuntime, IndividualOps_Stack) {
   testStaticRuntime(stack_three, args1_three_tensors, args2_three_tensors);
 }
 
-TEST(StaicRuntime, IndividualOps_ReLU) {
+TEST(StaticRuntime, IndividualOps_ReLU) {
   auto a = torch::tensor({{1, -1}, {2, 0}});
   auto b = torch::tensor({{1, -1, -1}, {2, 0, -1}});
 
@@ -535,7 +535,7 @@ TEST(StaicRuntime, IndividualOps_ReLU) {
   testStaticRuntime(relu_script, args1, args2);
 }
 
-TEST(StaicRuntime, IndividualOps_Tanh) {
+TEST(StaticRuntime, IndividualOps_Tanh) {
   auto a = at::randn({2, 2});
   auto b = at::randn({3, 3, 3});
 

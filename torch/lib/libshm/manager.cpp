@@ -1,11 +1,11 @@
-#include <algorithm>
-#include <cerrno>
 #include <fcntl.h>
-#include <memory>
 #include <poll.h>
-#include <set>
 #include <sys/mman.h>
 #include <unistd.h>
+#include <algorithm>
+#include <cerrno>
+#include <memory>
+#include <set>
 #include <unordered_map>
 #include <vector>
 
@@ -26,18 +26,16 @@ const int SHUTDOWN_TIMEOUT = 2000; // 2s
 #endif
 
 struct ClientSession {
-  ClientSession(ManagerSocket s): socket(std::move(s)), pid(0) {}
+  ClientSession(ManagerSocket s) : socket(std::move(s)), pid(0) {}
 
   ManagerSocket socket;
   pid_t pid;
 };
 
-
 std::vector<struct pollfd> pollfds;
 std::unordered_map<int, ClientSession> client_sessions;
 // TODO: check if objects have been freed from time to time
 std::set<std::string> used_objects;
-
 
 void register_fd(int fd) {
   struct pollfd pfd = {0};
@@ -46,17 +44,17 @@ void register_fd(int fd) {
   pollfds.push_back(pfd);
 }
 
-
 void unregister_fd(int fd) {
   pollfds.erase(
-    std::remove_if(pollfds.begin(), pollfds.end(),
-        [fd](const struct pollfd &pfd) { return pfd.fd == fd; }),
-    pollfds.end());
+      std::remove_if(
+          pollfds.begin(),
+          pollfds.end(),
+          [fd](const struct pollfd& pfd) { return pfd.fd == fd; }),
+      pollfds.end());
   client_sessions.erase(fd);
 }
 
-
-void print_init_message(const char *message) {
+void print_init_message(const char* message) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   size_t unused;
   // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
@@ -65,7 +63,7 @@ void print_init_message(const char *message) {
   unused = write(1, "\n", 1);
 }
 
-bool object_exists(const char *name) {
+bool object_exists(const char* name) {
   int fd = shm_open(name, O_RDONLY, 0);
   if (fd >= 0) {
     close(fd);
@@ -75,7 +73,7 @@ bool object_exists(const char *name) {
   }
 }
 
-void free_used_object(const std::string &name) {
+void free_used_object(const std::string& name) {
   if (!object_exists(name.c_str())) {
     DEBUG("object %s appears to have been freed", name.c_str());
     used_objects.erase(name);
@@ -85,14 +83,13 @@ void free_used_object(const std::string &name) {
 }
 
 // NOLINTNEXTLINE(bugprone-exception-escape)
-int main(int argc, char *argv[]) {
-  setsid();  // Daemonize the process
+int main(int argc, char* argv[]) {
+  setsid(); // Daemonize the process
 
   std::unique_ptr<ManagerServerSocket> srv_socket;
   c10::optional<c10::TempDir> tempdir;
   try {
-    tempdir =
-      c10::try_make_tempdir(/*name_prefix=*/"torch-shm-dir-");
+    tempdir = c10::try_make_tempdir(/*name_prefix=*/"torch-shm-dir-");
     if (!tempdir.has_value()) {
       throw std::runtime_error(
           "could not generate a random directory for manager socket");
@@ -122,17 +119,18 @@ int main(int argc, char *argv[]) {
     int nevents;
     if (client_sessions.size() == 0)
       timeout = SHUTDOWN_TIMEOUT;
-    SYSCHECK_ERR_RETURN_NEG1(nevents = poll(pollfds.data(), pollfds.size(), timeout));
+    SYSCHECK_ERR_RETURN_NEG1(
+        nevents = poll(pollfds.data(), pollfds.size(), timeout));
     timeout = -1;
     if (nevents == 0 && client_sessions.size() == 0)
       break;
 
-    for (auto &pfd: pollfds) {
+    for (auto& pfd : pollfds) {
       if (pfd.revents & (POLLERR | POLLHUP)) {
         // some process died
         DEBUG("detaching process");
-        auto &session = client_sessions.at(pfd.fd);
-        (void) session;
+        auto& session = client_sessions.at(pfd.fd);
+        (void)session;
         DEBUG("%d has died", session.pid);
         to_remove.push_back(pfd.fd);
       } else if (pfd.revents & POLLIN) {
@@ -146,10 +144,14 @@ int main(int argc, char *argv[]) {
         } else {
           // someone wants to register a segment
           DEBUG("got alloc info");
-          auto &session = client_sessions.at(pfd.fd);
+          auto& session = client_sessions.at(pfd.fd);
           AllocInfo info = session.socket.receive();
           session.pid = info.pid;
-          DEBUG("got alloc info: %d %d %s", (int)info.free, info.pid, info.filename);
+          DEBUG(
+              "got alloc info: %d %d %s",
+              (int)info.free,
+              info.pid,
+              info.filename);
           if (info.free) {
             free_used_object(info.filename);
           } else {
@@ -161,22 +163,22 @@ int main(int argc, char *argv[]) {
       }
     }
 
-    for (int fd: to_add)
+    for (int fd : to_add)
       register_fd(fd);
     to_add.clear();
 
-    for (int fd: to_remove)
+    for (int fd : to_remove)
       unregister_fd(fd);
     to_remove.clear();
   }
 
-  for (auto &obj_name: used_objects) {
+  for (auto& obj_name : used_objects) {
     DEBUG("freeing %s", obj_name.c_str());
     shm_unlink(obj_name.c_str());
   }
 
   // Clean up file descriptors
-  for (auto &pfd: pollfds) {
+  for (auto& pfd : pollfds) {
     unregister_fd(pfd.fd);
   }
   // Clean up manager.sock
