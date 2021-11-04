@@ -11,7 +11,7 @@ namespace at {
 namespace functorch {
 
 /// Initialize python bindings for kernel compilation cache.
-void initCompileCacheBindings(PyObject* module);
+void initPointwiseOperatorCompileCacheBindings(PyObject *module);
 
 } // namespace functorch
 } // namespace at
