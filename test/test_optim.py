@@ -96,9 +96,8 @@ class TestOptim(TestCase):
 
         self.assertLessEqual(params.data.dist(solution), initial_dist)
 
-    def _test_basic_cases_template(
-            self, weight, bias, input, constructor, scheduler_constructors, constructor_accepts_maximize=True
-                                ):
+    def _test_basic_cases_template(self, weight, bias, input, constructor, 
+                                   scheduler_constructors, constructor_accepts_maximize=True):
         maximize_options = set([False, constructor_accepts_maximize])
         if not constructor_accepts_maximize:
             def three_arg_constructor(weight, bias, maximize):
@@ -360,8 +359,8 @@ class TestOptim(TestCase):
                 constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias, maximize: optimizer([weight, bias], nesterov=True, lr=1e-3, momentum=1, 
-                    weight_decay=1, maximize=maximize),
+                lambda weight, bias, maximize: 
+                optimizer([weight, bias], nesterov=True, lr=1e-3, momentum=1, weight_decay=1, maximize=maximize),
                 constructor_accepts_maximize=True
             )
             with self.assertRaisesRegex(ValueError, "Invalid momentum value: -0.5"):
