@@ -350,6 +350,14 @@ def get_op_packing_only_uses_module_attributes(
     args: Tuple[Any, ...],
     module: torch.nn.Module,
 ) -> bool:
+    """
+    Returns True if all arguments of this op which are weights are module
+    attributes on the root module, and False otherwise.
+
+    For example, for `F.linear(input, weight, bias)`, this would return
+    True if `weight` is stored directly on the parent module (the common case),
+    and False if `weight` was an output of a different op.
+    """
     # check for ops which need packed weights but the weights are
     # coming from another function
     packable_tensor_arg_idxs = get_packable_tensor_arg_idxs(op)
