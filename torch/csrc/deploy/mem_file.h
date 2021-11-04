@@ -21,6 +21,7 @@ struct MemFile {
   explicit MemFile(const char* filename_) : fd_(0), mem_(nullptr), n_bytes_(0) {
     fd_ = open(filename_, O_RDONLY);
     TORCH_CHECK(fd_ != -1, "failed to open {}: {}", filename_, strerror(errno));
+    // NOLINTNEXTLINE
     struct stat s;
     if (-1 == fstat(fd_, &s)) {
       close(fd_); // destructors don't run during exceptions
