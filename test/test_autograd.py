@@ -8942,9 +8942,9 @@ class TestAutogradDeviceType(TestCase):
             return torch.ops.aten.copy(x, y)
 
         inp1 = torch.randn(3, 2, dtype=torch.double, device=device,
-                            requires_grad=True)
+                requires_grad=True)
         inp2 = torch.randn(3, 2, dtype=torch.double, device=device,
-                            requires_grad=True)
+                requires_grad=True)
         torch.autograd.gradcheck(f, [inp1, inp2])
 
     def test_non_differentiable_ops(self, device):

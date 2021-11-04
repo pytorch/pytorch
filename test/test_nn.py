@@ -14667,7 +14667,6 @@ class TestNNDeviceType(NNTestCase):
 
                             self.assertEqual(a_cuda.grad, a_cpu.grad)
 
-    @onlyCPU
     @dtypes(torch.float, torch.double)
     def test_adaptive_pooling_max_nhwc(self, device, dtype):
         def helper(n, c, h, w, output_height, output_width, contig):
