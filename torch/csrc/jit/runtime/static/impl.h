@@ -311,13 +311,13 @@ class TORCH_API StaticRuntime {
       const int main_runs);
 
   // Input is readwrite
-  IValue& Input(size_t i) {
+  IValue& Input(uint32_t i) {
     DCHECK(i < inputs_.size());
     return inputs_[i];
   }
 
   // Output is readonly. The writing process happens inside ProcessedNodes
-  const IValue& Output(size_t i) const {
+  const IValue& Output(uint32_t i) const {
     DCHECK(i < outputs_.size());
     return *outputs_[i];
   }
@@ -386,7 +386,7 @@ class TORCH_API StaticRuntime {
       const std::vector<c10::IValue>& args,
       const std::unordered_map<std::string, c10::IValue>& kwargs);
 
-  IValue move_outputs_to_tuple(size_t num_outputs);
+  IValue move_outputs_to_tuple(uint32_t num_outputs);
 
   // Memory planning is only enabled if sm->opts().cleanup_activations is true.
   // Otherwise, the memory used by activations is cached inside the static
@@ -406,7 +406,7 @@ class TORCH_API ProcessedNode {
   ProcessedNode(
       Node* n,
       std::unique_ptr<const IValue*[]> inputs,
-      size_t inputsSize,
+      uint32_t inputsSize,
       bool enable_out_variant);
 
   ProcessedNode(const ProcessedNode& rhs)
@@ -461,23 +461,23 @@ class TORCH_API ProcessedNode {
   }
 
   // Input is readonly
-  const IValue& Input(size_t i) const {
+  const IValue& Input(uint32_t i) const {
     DCHECK(i < inputs_size_);
     return *inputs_[i];
   }
 
   // Output is readwrite
-  IValue& Output(size_t i) {
+  IValue& Output(uint32_t i) {
     DCHECK(i < outputs_size_);
     return outputs_[i];
   }
 
-  const IValue& Output(size_t i) const {
+  const IValue& Output(uint32_t i) const {
     DCHECK(i < outputs_size_);
     return outputs_[i];
   }
 
-  void set_input(size_t index, const IValue* ival) {
+  void set_input(uint32_t index, const IValue* ival) {
     inputs_[index] = ival;
   }
 
@@ -501,9 +501,11 @@ class TORCH_API ProcessedNode {
 
   bool verify_no_memory_overlap() const;
 
+#ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   const char* get_op_name() const {
     return op_name_;
   }
+#endif
 
  private:
   C10_NODISCARD bool verify_outputs_dont_overlap_each_other() const;
@@ -523,9 +525,11 @@ class TORCH_API ProcessedNode {
   Function fn_;
   std::unique_ptr<const IValue*[]> inputs_; // unowned
   std::unique_ptr<IValue[]> outputs_;
-  size_t inputs_size_;
-  size_t outputs_size_;
+  uint32_t inputs_size_;
+  uint32_t outputs_size_;
+#ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   const char* op_name_;
+#endif
 };
 
 } // namespace jit

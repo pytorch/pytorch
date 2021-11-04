@@ -921,7 +921,7 @@ void StaticRuntime::create_memory_planner() {
   }
 }
 
-c10::IValue StaticRuntime::move_outputs_to_tuple(size_t num_outputs) {
+c10::IValue StaticRuntime::move_outputs_to_tuple(uint32_t num_outputs) {
 #ifndef NDEBUG
   for (const auto i : c10::irange(num_outputs)) {
     // The exact output tensor should never be managed.
@@ -1474,13 +1474,14 @@ bool StaticRuntime::isManagedOutputTensor(const IValue& ivalue) {
 ProcessedNode::ProcessedNode(
     Node* node,
     std::unique_ptr<const IValue*[]> inputs,
-    size_t inputsSize,
+    uint32_t inputsSize,
     bool enable_out_variant)
     : node_(node),
       inputs_(std::move(inputs)),
       inputs_size_(inputsSize),
       op_name_(node->kind().toQualString()) {
   // TODO leverage type information
+  DCHECK_LE(node->outputs().size(), UINT_MAX);
   outputs_size_ = node->outputs().size();
   outputs_ = std::make_unique<IValue[]>(outputs_size_);
 
