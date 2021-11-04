@@ -3,7 +3,7 @@ from typing import List
 import torch
 
 from .utils import (
-    get_next_seen_ops,
+    get_users_of_seen_op,
 )
 
 from .mappings import (
@@ -40,7 +40,7 @@ def get_module_fusion_fqns(
                 for mod_type in fusion_pattern:
                     if cur_seen_op is not None and mod_type == cur_seen_op.type:
                         cur_fqns.append(cur_seen_op.fqn)
-                        next_seen_ops = get_next_seen_ops(
+                        next_seen_ops = get_users_of_seen_op(
                             qstate.idx_to_seen_ops, cur_seen_op)
                         if len(next_seen_ops) == 1:
                             cur_seen_op = next_seen_ops[0]

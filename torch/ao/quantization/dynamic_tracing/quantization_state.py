@@ -28,7 +28,7 @@ from .utils import (
     iterate_and_apply,
     get_op_packing_only_uses_module_attributes,
     get_packable_tensor_kwarg_names,
-    get_prev_seen_op,
+    get_producer_of_seen_op,
     clone_detach_tensor_without_dispatch,
 )
 
@@ -215,9 +215,9 @@ class AutoQuantizationState(torch.nn.Module):
                 # hacky check for collections.namedtuple, TODO improve this
                 # https://stackoverflow.com/questions/2166818/how-to-check-if-an-object-is-an-instance-of-a-namedtuple
                 if hasattr(outputs, '_fields'):
-                    return outputs.__class__(*new_outputs)
+                    outputs = outputs.__class__(*new_outputs)
                 else:
-                    return tuple(new_outputs)
+                    outputs = tuple(new_outputs)
             else:
                 pass
 
@@ -270,6 +270,13 @@ class AutoQuantizationState(torch.nn.Module):
         func_output_dtype_type: FuncOutputDTypeType,
         qtensor_id: List[int],
     ) -> None:
+        """
+        Runs the prepare hook during first_call for individual
+        tensors. If the input argument is a tensor, this function is
+        called directly. If the input argument is an iterable such
+        as a list or a tuple, this function is called on each element of
+        the iteratble.
+        """
         # TODO(next): fix this for torch.cat
         if not isinstance(arg, torch.Tensor):
             arg_tensor_infos.append(None)
@@ -376,18 +383,12 @@ class AutoQuantizationState(torch.nn.Module):
 
             key = str(self.idx)
             if key not in self.idx_to_seen_ops:
-                if not isinstance(op, torch.nn.Module):
-                    self.idx_to_seen_ops[key] = SeenOp(
-                        self.idx, op, fqn, arg_tensor_infos, [],
-                        packable_tensor_idx_to_name, packable_nontensor_idx_to_arg,
-                        packable_tensor_kwarg_name_to_name,
-                        op_packing_only_uses_module_attributes)
-                else:
-                    self.idx_to_seen_ops[key] = SeenOp(
-                        self.idx, type(op), fqn, arg_tensor_infos, [],
-                        packable_tensor_idx_to_name, packable_nontensor_idx_to_arg,
-                        packable_tensor_kwarg_name_to_name,
-                        op_packing_only_uses_module_attributes)
+                op_type = op if not isinstance(op, torch.nn.Module) else type(op)
+                self.idx_to_seen_ops[key] = SeenOp(
+                    self.idx, op_type, fqn, arg_tensor_infos, [],
+                    packable_tensor_idx_to_name, packable_nontensor_idx_to_arg,
+                    packable_tensor_kwarg_name_to_name,
+                    op_packing_only_uses_module_attributes)
 
             return args, kwargs
 
@@ -451,7 +452,7 @@ class AutoQuantizationState(torch.nn.Module):
                     # into having a soft link.
                     # TODO: make this handle more cases
                     # TODO: handle module -> add_scalar -> add_scalar
-                    prev_op = get_prev_seen_op(
+                    prev_op = get_producer_of_seen_op(
                         self.idx_to_seen_ops, seen_op)
                     assert prev_op is not None
                     # TODO: the following line needs to only check fqn
@@ -486,6 +487,11 @@ class AutoQuantizationState(torch.nn.Module):
                 dtype_to_use = torch.float
             else:
                 if isinstance(args[0], (tuple, list)):  # for torch.cat
+                    unique_arg_dtypes = [
+                        arg._qtensor_info.inf_dtype for arg in args[0]]
+                    assert len(set(unique_arg_dtypes)) == 1, \
+                        'an iterable with arguments with different inference ' + \
+                        'dtypes is not supported yet'
                     dtype_to_use = args[0][0]._qtensor_info.inf_dtype
                 else:
                     dtype_to_use = args[0]._qtensor_info.inf_dtype

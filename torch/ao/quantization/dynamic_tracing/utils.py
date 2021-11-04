@@ -498,7 +498,7 @@ def iterate_and_apply(
         else:
             return args
 
-def get_prev_seen_op(
+def get_producer_of_seen_op(
     idx_to_seen_op: Dict[str, SeenOp],
     cur_seen_op: SeenOp,
 ) -> Optional[SeenOp]:
@@ -514,7 +514,7 @@ def get_prev_seen_op(
                     return seen_op
     return None
 
-def get_next_seen_ops(
+def get_users_of_seen_op(
     idx_to_seen_op: Dict[str, SeenOp],
     cur_seen_op: SeenOp,
 ) -> List[SeenOp]:
