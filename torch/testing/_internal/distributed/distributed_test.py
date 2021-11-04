@@ -61,7 +61,6 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     FILE_SCHEMA,
     IS_FBCODE,
-    NO_MULTIPROCESSING_SPAWN,
     sandcastle_skip,
     sandcastle_skip_if,
 )
@@ -4153,11 +4152,6 @@ class DistributedTest:
         @sandcastle_skip_if(
             BACKEND != "nccl" and BACKEND != "gloo",
             "MPI backend does not support DDP communication hook on CUDA devices",
-        )
-        @sandcastle_skip_if(
-            NO_MULTIPROCESSING_SPAWN,
-            "Disabled for environments that \
-                         don't support multiprocessing with spawn start method",
         )
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         @skip_if_rocm
