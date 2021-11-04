@@ -146,6 +146,10 @@ public:
   inline operator T*() {
     return values;
   }
+  // Return the values as char* for type punning
+  auto as_bytes() const -> const char* {
+    return (const char*)values;
+  }
   template <int64_t mask_>
   static Vectorized<T> blend(const Vectorized<T>& a, const Vectorized<T>& b) {
     int64_t mask = mask_;
@@ -752,16 +756,16 @@ static inline Vectorized<T> bitwise_binary_op(const Vectorized<T> &a, const Vect
   // see: https://github.com/pytorch/pytorch/issues/66119
   // Using char* is defined in the C11 standard 6.5 Expression paragraph 7
   // (http://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf)
-  const auto* a_data = reinterpret_cast<const char*>((const T*) a);
-  const auto* b_data = reinterpret_cast<const char*>((const T*) b);
+  const auto* a_data = a.as_bytes();
+  const auto* b_data = b.as_bytes();
   // load each intmax_t chunk and process; increase pointers by sizeof(intmax_t)
   for (auto& out : buffer) {
     out = op(load<intmax_t>(a_data), load<intmax_t>(b_data));
     a_data += sizeof(intmax_t);
     b_data += sizeof(intmax_t);
   }
-  assert(a_data == reinterpret_cast<const char*>((const T*) a) + sizeof(a));
-  assert(b_data == reinterpret_cast<const char*>((const T*) b) + sizeof(b));
+  assert(a_data == a.as_bytes() + sizeof(a));
+  assert(b_data == b.as_bytes() + sizeof(b));
   return Vectorized<T>::loadu(buffer);
 }
 
