@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <memory>
 #include <stdexcept>
+#include "c10/util/Exception.h"
 
 namespace torch {
 namespace jit {
@@ -150,8 +151,9 @@ using DtypePropRule = std::function<bool(Node*)>;
 // Returns true if the dtype information was changed
 
 bool setIfAllDtypeMatch(Node* n) {
-  // Sets all tesnsor outputs to the dtype of the first input
+  // Sets all tensor outputs to the dtype of the first input
   // only if all inputs are the same dtype, otherwise do nothing
+  TORCH_INTERNAL_ASSERT(n->inputs().size() >= 1);
   auto first_arg = n->inputs().at(0);
   auto tensor_type = first_arg->type()->cast<TensorType>();
   TORCH_INTERNAL_ASSERT(tensor_type, "Expecting a tensor type");
