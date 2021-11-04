@@ -181,51 +181,38 @@ void MemoryPlanner::allocateManagedTensors() {
   if (managed_bytes_ == 0) {
     return;
   }
-  DCHECK(!managed_tensor_storages_.empty());
+  DCHECK(!managed_tensor_storage_impls_.empty());
   buffer_ = allocate_buffer(managed_bytes_);
 
   size_t offset = 0;
   uint8_t* start = static_cast<uint8_t*>(buffer_.get());
 
   reused_tensors_ = 0;
-#ifndef NDEBUG
   auto group_idx = 0;
-#endif
-  for (const auto& ms : managed_tensor_storages_) {
+  for (auto& ms : managed_tensor_storage_impls_) {
     auto tensor_size = ms.first;
     if (tensor_size == 0) {
-#ifndef NDEBUG
       group_idx++;
-#endif
       continue;
     }
-    const auto& storages = ms.second;
+    at::StorageImpl* storageImpl = &ms.second;
     DCHECK_LE(offset + tensor_size, managed_bytes_);
     void* src = static_cast<void*>(start + offset);
 
 #ifndef NDEBUG
-    auto storage_idx = 0;
-    DCHECK_EQ(storages.size(), managed_tensors_[group_idx].second.size());
     DCHECK_EQ(tensor_size, managed_tensors_[group_idx].first);
-#endif
-    for (auto* storage : storages) {
-#ifndef NDEBUG
-      DCHECK_EQ(storage->device().type(), c10::DeviceType::CPU);
-      DCHECK_EQ(
-          storage,
-          &managed_tensors_[group_idx].second[storage_idx++]->storage());
-#endif
-      storage->set_data_ptr_noswap(
-          at::DataPtr(src, src, nullptr, c10::Device(c10::DeviceType::CPU)));
-      storage->set_nbytes(tensor_size);
-      reused_tensors_++;
+    for (auto* tensor : managed_tensors_[group_idx].second) {
+      DCHECK_EQ(storageImpl, tensor->storage().unsafeGetStorageImpl());
     }
-    reused_tensors_--;
+#endif
+    DCHECK_NE(managed_tensors_[group_idx].second.size(), 0);
+    reused_tensors_ += managed_tensors_[group_idx].second.size() - 1;
+    storageImpl->set_data_ptr_noswap(
+        at::DataPtr(src, src, nullptr, c10::Device(c10::DeviceType::CPU)));
+    storageImpl->set_nbytes(tensor_size);
 
     offset += tensor_size;
-#ifndef NDEBUG
     group_idx++;
-#endif
   }
   DCHECK_EQ(offset, managed_bytes_);
 }
@@ -271,26 +258,63 @@ void MemoryPlanner::deallocate() {
 
   // We don't have any guarantee that the model doesn't change the
   // Storage for managed tensors out from under us during execution,
-  // so we have to grab the Storages each time we deallocate.
+  // so we have to check the Storages each time we deallocate.
   auto group_idx = 0;
-  const bool first_time = managed_tensor_storages_.empty();
+  const bool first_time = managed_tensor_storage_impls_.empty();
+  if (C10_UNLIKELY(first_time)) {
+    managed_tensor_storage_impls_.reserve(managed_tensors_.size());
+  }
   for (auto& ms : managed_tensors_) {
     const auto& tensors = ms.second;
     size_t max = ms.first;
-    if (C10_UNLIKELY(first_time)) {
-      managed_tensor_storages_.emplace_back(
-          std::piecewise_construct,
-          std::make_tuple(ms.first),
-          std::make_tuple(tensors.size()));
-    }
-    auto& mss = managed_tensor_storages_[group_idx++];
-    auto& storages = mss.second;
     auto tensor_idx = 0;
     for (auto& tensor : tensors) {
       const auto& storage = tensor->storage();
       size_t current_size = compute_aligned_tensor_size(storage.nbytes());
-      storage.unsafeGetStorageImpl()->reset();
-      storages[tensor_idx++] = &storage;
+      at::StorageImpl* tensorStorageImpl = storage.unsafeGetStorageImpl();
+      if (C10_UNLIKELY(first_time)) {
+        tensorStorageImpl->reset();
+
+        DCHECK(
+            managed_tensor_storage_impls_.size() == group_idx ||
+            managed_tensor_storage_impls_.size() == group_idx + 1);
+        if (managed_tensor_storage_impls_.size() == group_idx) {
+          managed_tensor_storage_impls_.emplace_back(
+              0, // will be set at end of outer loop
+              std::move(*tensorStorageImpl));
+        }
+        at::StorageImpl* newImpl = &managed_tensor_storage_impls_.back().second;
+
+        // We want to manage StorageImpls' lifetimes ourselves, but TensorImpl
+        // expects to refcount them. unsafe_adapt_non_heap_allocated is our
+        // escape hatch: it sets the reference count for the StorageImpl to an
+        // impractically high value so that it will never get deallocated by
+        // intrusive_ptr, leaving us free to manage its lifetime as we see fit.
+        // (Note that allowing it to be deallocated by intrusive_ptr would be
+        // UB, because that would entail deleting an object that wasn't
+        // allocated with operator new.)
+        //
+        // For more information, see the doc comment for
+        // intrusive_ptr::unsafe_adapt_non_heap_allocated.
+        tensor->unsafeGetTensorImpl()->set_storage_keep_dtype(at::Storage(
+            c10::intrusive_ptr<at::StorageImpl>::
+                unsafe_adapt_non_heap_allocated(newImpl, tensors.size())));
+      } else if (C10_UNLIKELY(
+                     tensorStorageImpl !=
+                     &managed_tensor_storage_impls_[group_idx].second)) {
+        tensorStorageImpl->reset();
+
+        // If somehow the tensor got different storage, put it back to
+        // the shared impl for this group.
+        tensor->unsafeGetTensorImpl()->set_storage_keep_dtype(at::Storage(
+            c10::intrusive_ptr<at::StorageImpl>::
+                unsafe_adapt_non_heap_allocated(
+                    &managed_tensor_storage_impls_[group_idx].second,
+                    tensors.size())));
+      }
+      DCHECK_EQ(
+          tensor->storage().unsafeGetStorageImpl(),
+          &managed_tensor_storage_impls_[group_idx].second);
       max = std::max(max, current_size);
     }
     // Static runtime does not know the size of tensors statically, so we use
@@ -298,9 +322,11 @@ void MemoryPlanner::deallocate() {
     // run (following C2 tradition), exploiting the fact that tensor storage
     // size does not have to match that of real tensor size. The following logic
     // records the tensor storage size for the next run.
-    mss.first = ms.first = max;
+    managed_tensor_storage_impls_[group_idx++].first = ms.first = max;
     managed_bytes_ += max;
   }
+
+  DCHECK_EQ(managed_tensor_storage_impls_.size(), managed_tensors_.size());
 
   // for unmanaged ivalues (either tensor or non-tensor), we reset the *iv so
   // that the objects pointed to by *iv may be reclaimed by reference counting
