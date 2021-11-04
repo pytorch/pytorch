@@ -96,40 +96,48 @@ class TestOptim(TestCase):
 
         self.assertLessEqual(params.data.dist(solution), initial_dist)
 
-    def _test_basic_cases_template(self, weight, bias, input, constructor, scheduler_constructors, maximize=False):
-        weight = Variable(weight, requires_grad=True)
-        bias = Variable(bias, requires_grad=True)
-        input = Variable(input)
-        optimizer = constructor(weight, bias)
-        schedulers = []
-        for scheduler_constructor in scheduler_constructors:
-            schedulers.append(scheduler_constructor(optimizer))
-
-        # to check if the optimizer can be printed as a string
-        optimizer.__repr__()
-
-        def fn():
-            optimizer.zero_grad()
-            y = weight.mv(input)
-            if y.is_cuda and bias.is_cuda and y.get_device() != bias.get_device():
-                y = y.cuda(bias.get_device())
-            loss = (y + bias).pow(2).sum()
-            loss.backward()
-            return loss
-
-        initial_value = fn().item()
-        for _i in range(200):
-            optimizer.step(fn)
-            for scheduler in schedulers:
-                if isinstance(scheduler, ReduceLROnPlateau):
-                    val_loss = fn()
-                    scheduler.step(val_loss)
-                else:
-                    scheduler.step()
-        if maximize:
-            self.assertGreater(fn().item(), initial_value)
+    def _test_basic_cases_template(self, weight, bias, input, constructor, scheduler_constructors, constructor_accepts_maximize=True):
+        maximize_options = set([False, constructor_accepts_maximize])
+        if not constructor_accepts_maximize:
+            wrapped_constructor = lambda x, y, z: constructor(x,y)
         else:
-            self.assertLess(fn().item(), initial_value)
+            wrapped_constructor = constructor
+
+        for maximize in maximize_options:
+            weight = Variable(weight, requires_grad=True)
+            bias = Variable(bias, requires_grad=True)
+            input = Variable(input)
+            #  import ipdb; ipdb.set_trace()
+            optimizer = wrapped_constructor(weight, bias, maximize)
+            schedulers = []
+            for scheduler_constructor in scheduler_constructors:
+                schedulers.append(scheduler_constructor(optimizer))
+
+            # to check if the optimizer can be printed as a string
+            optimizer.__repr__()
+
+            def fn():
+                optimizer.zero_grad()
+                y = weight.mv(input)
+                if y.is_cuda and bias.is_cuda and y.get_device() != bias.get_device():
+                    y = y.cuda(bias.get_device())
+                loss = (y + bias).pow(2).sum()
+                loss.backward()
+                return loss
+
+            initial_value = fn().item()
+            for _i in range(200):
+                for scheduler in schedulers:
+                    if isinstance(scheduler, ReduceLROnPlateau):
+                        val_loss = fn()
+                        scheduler.step(val_loss)
+                    else:
+                        scheduler.step()
+                optimizer.step(fn)
+            if maximize:
+                self.assertGreater(fn().item(), initial_value)
+            else:
+                self.assertLess(fn().item(), initial_value)
 
     def _test_state_dict(self, weight, bias, input, constructor):
         weight = Variable(weight, requires_grad=True)
@@ -203,15 +211,18 @@ class TestOptim(TestCase):
         self.assertEqual(getPublicAttr(optimizer), getPublicAttr(deepcopy(optimizer)))
 
     def _test_basic_cases(self, constructor, scheduler_constructors=None,
-                          ignore_multidevice=False, maximize=False):
-        # TODO: see if we can make sure that maximize is set for the constructor if it is set to true here
+                          ignore_multidevice=False, constructor_accepts_maximize=False):
         if scheduler_constructors is None:
             scheduler_constructors = []
+        if constructor_accepts_maximize:
+            wrapped_constructor = lambda x,y: constructor(x,y,False)
+        else:
+            wrapped_constructor = constructor
         self._test_state_dict(
             torch.randn(10, 5),
             torch.randn(10),
             torch.randn(5),
-            constructor,
+            wrapped_constructor ,
         )
         self._test_basic_cases_template(
             torch.randn(10, 5),
@@ -219,7 +230,7 @@ class TestOptim(TestCase):
             torch.randn(5),
             constructor,
             scheduler_constructors,
-            maximize,
+            constructor_accepts_maximize,
         )
         # non-contiguous parameters
         self._test_basic_cases_template(
@@ -228,7 +239,7 @@ class TestOptim(TestCase):
             torch.randn(5),
             constructor,
             scheduler_constructors,
-            maximize,
+            constructor_accepts_maximize,
         )
         # CUDA
         if not torch.cuda.is_available():
@@ -239,7 +250,7 @@ class TestOptim(TestCase):
             torch.randn(5).cuda(),
             constructor,
             scheduler_constructors,
-            maximize,
+            constructor_accepts_maximize,
         )
         # Multi-GPU
         if not torch.cuda.device_count() > 1 or ignore_multidevice:
@@ -250,7 +261,7 @@ class TestOptim(TestCase):
             torch.randn(5).cuda(0),
             constructor,
             scheduler_constructors,
-            maximize,
+            constructor_accepts_maximize,
         )
 
     def _test_complex_optimizer(self, optimizer_constructor):
@@ -275,69 +286,80 @@ class TestOptim(TestCase):
         return [dict(params=bias, **kwargs)]
 
     def test_sgd(self):
-        for optimizer in [optim.SGD, ]: # optim_mt.SGD]:
-
+        for optimizer in [optim.SGD, optim_mt.SGD]:
             self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3, maximize=True),
-                maximize=True
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, maximize=maximize),
+                constructor_accepts_maximize=True
             )
-            for maximize in (False, ):
-                self._test_basic_cases(
-                    lambda weight, bias: optimizer([weight, bias], lr=1e-3, maximize=maximize)
-                )
-                self._test_basic_cases(
-                    lambda weight, bias: optimizer(
-                        self._build_params_dict(weight, bias, lr=1e-2),
-                        lr=1e-3, maximize=maximize)
-                )
-                self._test_basic_cases(
-                    lambda weight, bias: optimizer(
-                        self._build_params_dict_single(weight, bias, lr=1e-2),
-                        lr=1e-3, maximize=maximize)
-                )
-                self._test_basic_cases(
-                    lambda weight, bias: optimizer(
-                        self._build_params_dict_single(weight, bias, lr=1e-2), maximize=maximize)
-                )
-                self._test_basic_cases(
-                    lambda weight, bias: optimizer([weight, bias], lr=1e-3, maximize=maximize),
-                    [lambda opt: StepLR(opt, gamma=0.9, step_size=10)]
-                )
-                self._test_basic_cases(
-                    lambda weight, bias: optimizer([weight, bias], lr=1e-3, maximize=maximize),
-                    [lambda opt: LinearLR(opt, start_factor=0.4, end_factor=0.8, total_iters=4)]
-                )
-                self._test_basic_cases(
-                    lambda weight, bias: optimizer([weight, bias], lr=1e-3, maximize=maximize),
-                    [lambda opt: ConstantLR(opt, factor=0.4, total_iters=4)]
-                )
-                self._test_basic_cases(
-                    lambda weight, bias: optimizer([weight, bias], lr=1e-3, maximize=maximize),
-                    [lambda opt: StepLR(opt, gamma=0.9, step_size=10),
-                     lambda opt: LinearLR(opt, start_factor=0.4, end_factor=0.6, total_iters=4)]
-                )
-                self._test_basic_cases(
-                    lambda weight, bias: optimizer([weight, bias], lr=1e-3, maximize=maximize),
-                    [lambda opt: StepLR(opt, gamma=0.9, step_size=10),
-                     lambda opt: ReduceLROnPlateau(opt)]
-                )
-                self._test_basic_cases(
-                    lambda weight, bias: optimizer([weight, bias], lr=1e-3),
-                    [lambda opt: StepLR(opt, gamma=0.99, step_size=10),
-                     lambda opt: ExponentialLR(opt, gamma=0.99),
-                     lambda opt: ReduceLROnPlateau(opt)]
-                )
-                self._test_basic_cases(
-                    lambda weight, bias: optimizer([weight, bias], lr=1e-3, momentum=1)
-                )
-                self._test_basic_cases(
-                    lambda weight, bias: optimizer([weight, bias], lr=1e-3, momentum=1, weight_decay=1)
-                )
-                self._test_basic_cases(
-                    lambda weight, bias: optimizer([weight, bias], nesterov=True, lr=1e-3, momentum=1, weight_decay=1)
-                )
-                with self.assertRaisesRegex(ValueError, "Invalid momentum value: -0.5"):
-                    optimizer(None, lr=1e-2, momentum=-0.5)
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, maximize=maximize),
+                constructor_accepts_maximize=True
+            )
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2),
+                    lr=1e-3, maximize=maximize),
+                constructor_accepts_maximize=True
+            )
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer(
+                    self._build_params_dict_single(weight, bias, lr=1e-2),
+                    lr=1e-3, maximize=maximize),
+                constructor_accepts_maximize=True
+            )
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer(
+                    self._build_params_dict_single(weight, bias, lr=1e-2), maximize=maximize), 
+                constructor_accepts_maximize=True
+            )
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, maximize=maximize),
+                [lambda opt: StepLR(opt, gamma=0.9, step_size=10)],
+                constructor_accepts_maximize=True
+            )
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, maximize=maximize),
+                [lambda opt: LinearLR(opt, start_factor=0.4, end_factor=0.8, total_iters=4)],
+                constructor_accepts_maximize=True
+            )
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, maximize=maximize),
+                [lambda opt: ConstantLR(opt, factor=0.4, total_iters=4)],
+                constructor_accepts_maximize=True
+            )
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, maximize=maximize),
+                [lambda opt: StepLR(opt, gamma=0.9, step_size=10),
+                 lambda opt: LinearLR(opt, start_factor=0.4, end_factor=0.6, total_iters=4)],
+                constructor_accepts_maximize=True
+            )
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, maximize=maximize),
+                [lambda opt: StepLR(opt, gamma=0.9, step_size=10),
+                 lambda opt: ReduceLROnPlateau(opt)],
+                constructor_accepts_maximize=True
+            )
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, maximize=maximize),
+                [lambda opt: StepLR(opt, gamma=0.99, step_size=10),
+                 lambda opt: ExponentialLR(opt, gamma=0.99),
+                 lambda opt: ReduceLROnPlateau(opt)],
+                constructor_accepts_maximize=True
+            )
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, momentum=1, maximize=maximize),
+                constructor_accepts_maximize=True
+            )
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, momentum=1, weight_decay=1, maximize=maximize),
+                constructor_accepts_maximize=True
+            )
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer([weight, bias], nesterov=True, lr=1e-3, momentum=1, weight_decay=1, maximize=maximize),
+                constructor_accepts_maximize=True
+            )
+            with self.assertRaisesRegex(ValueError, "Invalid momentum value: -0.5"):
+                optimizer(None, lr=1e-2, momentum=-0.5)
 
     def test_sgd_sparse(self):
         for optimizer in [optim.SGD, optim_mt.SGD]:
