@@ -1,9 +1,9 @@
 #include <ATen/native/layer_norm.h>
 
-#include <ATen/AccumulateType.h>
 #include <ATen/ATen.h>
-#include <ATen/Config.h>
+#include <ATen/AccumulateType.h>
 #include <ATen/CPUApplyUtils.h>
+#include <ATen/Config.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <c10/util/irange.h>
@@ -33,7 +33,7 @@ void layer_norm_cpu_out(
     return;
   }
 
-  LayerNormKernel(kCPU, input, gamma, beta, M, N, eps, &out, &mean, &rstd);
+  LayerNormKernel(kCPU, input, gamma, beta, M, N, eps, out, mean, rstd);
   const auto input_shape = input.sizes();
   const size_t axis = input.dim() - normalized_shape.size();
 
@@ -52,14 +52,17 @@ void layer_norm_cpu_out(
 
 std::tuple<Tensor, Tensor, Tensor> layer_norm_cpu(
     const Tensor& input,
-    IntArrayRef normalized_shape, const c10::optional<Tensor>& weight_opt /* optional */, const c10::optional<Tensor>& bias_opt /* optional */,
+    IntArrayRef normalized_shape,
+    const c10::optional<Tensor>& weight_opt /* optional */,
+    const c10::optional<Tensor>& bias_opt /* optional */,
     double eps) {
   // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  c10::MaybeOwned<Tensor> weight_maybe_owned =
+      at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
-  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  c10::MaybeOwned<Tensor> bias_maybe_owned =
+      at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
-
 
   auto M_N = _check_layer_norm_inputs(input, normalized_shape, weight, bias);
   auto M = M_N.first;
@@ -78,7 +81,8 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_cpu(
   Tensor mean = at::empty({M}, X->options());
   Tensor rstd = at::empty({M}, X->options());
 
-  layer_norm_cpu_out(Y, mean, rstd, *X, normalized_shape, *gamma, *beta, eps, M, N);
+  layer_norm_cpu_out(
+      Y, mean, rstd, *X, normalized_shape, *gamma, *beta, eps, M, N);
   return std::make_tuple(std::move(Y), std::move(mean), std::move(rstd));
 }
 
@@ -152,24 +156,28 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cpu(
   }
   if (M > 0) {
     LayerNormBackwardKernel(
-        kCPU, dY, *X, mean, rstd, *gamma, M, N, &dX, &dgamma, &dbeta);
+        kCPU, dY, *X, mean, rstd, *gamma, M, N, dX, dgamma, dbeta);
   }
   return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
 }
 
 Tensor layer_norm(
     const Tensor& input,
-    IntArrayRef normalized_shape, const c10::optional<Tensor>& weight_opt /* optional */, const c10::optional<Tensor>& bias_opt /* optional */,
+    IntArrayRef normalized_shape,
+    const c10::optional<Tensor>& weight_opt /* optional */,
+    const c10::optional<Tensor>& bias_opt /* optional */,
     double eps,
     bool /* cudnn_enable, deprecated */) {
   // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  c10::MaybeOwned<Tensor> weight_maybe_owned =
+      at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
-  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  c10::MaybeOwned<Tensor> bias_maybe_owned =
+      at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
-
-  return std::get<0>(at::native_layer_norm(input, normalized_shape, weight, bias, eps));
+  return std::get<0>(
+      at::native_layer_norm(input, normalized_shape, weight, bias, eps));
 }
 
 DEFINE_DISPATCH(LayerNormKernel);
@@ -178,12 +186,16 @@ DEFINE_DISPATCH(LayerNormBackwardKernel);
 // Ported from pytorch/xla repo
 std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
     const Tensor& input,
-    IntArrayRef normalized_shape, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
+    IntArrayRef normalized_shape,
+    const c10::optional<Tensor>& weight_opt,
+    const c10::optional<Tensor>& bias_opt,
     double eps) {
   // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  c10::MaybeOwned<Tensor> weight_maybe_owned =
+      at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
-  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  c10::MaybeOwned<Tensor> bias_maybe_owned =
+      at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
   auto M_N = _check_layer_norm_inputs(input, normalized_shape, weight, bias);
@@ -202,8 +214,14 @@ std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
   // per-element scale and bias. E.g. For input {N, C, H, W}, weight for
   // batchnorm has shape {C} while weight for layernorm has shape {H, W} or {W}.
   auto outputs = at::native_batch_norm(
-      input_reshaped, /*weight=*/{}, /*bias=*/{}, /*running_mean=*/{},
-      /*running_var=*/{}, /*training=*/true, /*momentum=*/0, eps);
+      input_reshaped,
+      /*weight=*/{},
+      /*bias=*/{},
+      /*running_mean=*/{},
+      /*running_var=*/{},
+      /*training=*/true,
+      /*momentum=*/0,
+      eps);
   at::Tensor out = std::get<0>(outputs);
   out = out.view(input_shape);
   if (weight.defined() && bias.defined()) {

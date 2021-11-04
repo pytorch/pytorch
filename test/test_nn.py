@@ -13400,6 +13400,25 @@ class TestNNDeviceType(NNTestCase):
             Y_cpu = layer_norm(X.cpu())
             self.assertEqual(Y_cpu, Y, rtol=0, atol=1e-5)
 
+    @onlyCUDA
+    def test_LayerNorm_overflow(self, device):
+        normalized_shape = [3]
+        layer_norm = nn.LayerNorm(
+            normalized_shape, dtype=torch.float32, device=device)
+        layer_norm_ref = nn.LayerNorm(
+            normalized_shape, dtype=torch.float64, device=device)
+        X = torch.tensor([[1, 1e20, 4], [4, 2, 1]], dtype=torch.float32,
+                         requires_grad=True, device=device)
+        X_ref = X.detach().clone().requires_grad_(True)
+
+        Y = layer_norm(X)
+        Y_ref = layer_norm_ref(X_ref.double()).float()
+        self.assertEqual(Y, Y_ref, rtol=0, atol=1e-5)
+
+        Y.sum().backward()
+        Y_ref.sum().backward()
+        self.assertEqual(X.grad, X_ref.grad, rtol=0, atol=1e-5)
+
     @onlyNativeDeviceTypes
     def test_GroupNorm_general(self, device):
         self._test_GroupNorm_general(device)

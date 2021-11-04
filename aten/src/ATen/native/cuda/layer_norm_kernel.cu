@@ -73,25 +73,24 @@ __global__ void LayerNormForwardCUDAKernel(
   const int64_t i = blockIdx.x;
   for (int64_t j = threadIdx.x; j < N; j += blockDim.x) {
     const int64_t index = i * N + j;
-    const T_ACC gamma_v =
+    const T_ACC gamma_acc =
         gamma == nullptr ? T_ACC(1) : static_cast<T_ACC>(gamma[j]);
-    const T_ACC beta_v =
+    const T_ACC beta_acc =
         beta == nullptr ? T_ACC(0) : static_cast<T_ACC>(beta[j]);
-    Y[index] = (static_cast<T_ACC>(X[index]) - static_cast<T_ACC>(mean[i])) *
-            static_cast<T_ACC>(rstd[i]) * gamma_v +
-        beta_v;
+    Y[index] = (static_cast<T_ACC>(X[index]) - mean[i]) * rstd[i] * gamma_acc +
+        beta_acc;
   }
 }
 
-template <typename T>
+template <typename T, typename T_ACC>
 __global__ void ComputeInternalGradientsCUDAKernel(
     int64_t N,
     const T* dY,
     const T* X,
+    const T_ACC* mean,
     const T* gamma,
-    acc_type<T, true>* ds,
-    acc_type<T, true>* db) {
-  using T_ACC = acc_type<T, true>;
+    T_ACC* ds,
+    T_ACC* db) {
   __shared__ T_ACC ds_shared[C10_WARP_SIZE];
   __shared__ T_ACC db_shared[C10_WARP_SIZE];
   const int64_t i = blockIdx.x;
@@ -99,11 +98,12 @@ __global__ void ComputeInternalGradientsCUDAKernel(
   T_ACC sum2 = 0;
   for (int64_t j = threadIdx.x; j < N; j += blockDim.x) {
     const int64_t index = i * N + j;
-    const T_ACC gamma_v =
+    const T_ACC dy_acc = static_cast<T_ACC>(dY[index]);
+    const T_ACC x_acc = static_cast<T_ACC>(X[index]);
+    const T_ACC gamma_acc =
         gamma == nullptr ? T_ACC(1) : static_cast<T_ACC>(gamma[j]);
-    sum1 +=
-        static_cast<T_ACC>(dY[index]) * static_cast<T_ACC>(X[index]) * gamma_v;
-    sum2 += static_cast<T_ACC>(dY[index]) * gamma_v;
+    sum1 += dy_acc * (x_acc - mean[i]) * gamma_acc;
+    sum2 += dy_acc * gamma_acc;
   }
   sum1 = cuda_utils::BlockReduceSum<T_ACC>(sum1, ds_shared);
   sum2 = cuda_utils::BlockReduceSum<T_ACC>(sum2, db_shared);
@@ -119,20 +119,18 @@ __global__ void ComputeGradientFusedParamsCUDAKernel(
     int64_t N,
     const T_ACC* mean,
     const T_ACC* rstd,
-    const acc_type<T, true>* ds,
-    const acc_type<T, true>* db,
-    acc_type<T, true>* c1,
-    acc_type<T, true>* c2) {
+    const T_ACC* ds,
+    const T_ACC* db,
+    T_ACC* c2,
+    T_ACC* c3) {
   const int64_t index = blockIdx.x * blockDim.x + threadIdx.x;
   if (index < M) {
     const T_ACC s = T_ACC(1) / static_cast<T_ACC>(N);
-    const T_ACC a = (db[index] * static_cast<T_ACC>(mean[index]) - ds[index]) *
-        static_cast<T_ACC>(rstd[index]) * static_cast<T_ACC>(rstd[index]) *
-        static_cast<T_ACC>(rstd[index]) * s;
-    c1[index] = a;
-    c2[index] =
-        -(a * static_cast<T_ACC>(mean[index]) +
-          db[index] * static_cast<T_ACC>(rstd[index]) * s);
+    const T_ACC mean_acc = mean[index];
+    const T_ACC rstd_acc = rstd[index];
+    const T_ACC x = -ds[index] * rstd_acc * rstd_acc * rstd_acc * s;
+    c2[index] = x;
+    c3[index] = -x * mean_acc - db[index] * rstd_acc * s;
   }
 }
 
@@ -142,18 +140,17 @@ __global__ void LayerNormBackwardCUDAKernel(
     const T* dY,
     const T* X,
     const T* gamma,
-    const T_ACC* a,
-    const acc_type<T, true>* b,
-    const acc_type<T, true>* c,
+    const T_ACC* c1,
+    const T_ACC* c2,
+    const T_ACC* c3,
     T* dX) {
   const int64_t i = blockIdx.x;
   for (int64_t j = threadIdx.x; j < N; j += blockDim.x) {
     const int64_t index = i * N + j;
-    const T_ACC gamma_v =
+    const T_ACC gamma_acc =
         gamma == nullptr ? T_ACC(1) : static_cast<T_ACC>(gamma[j]);
-    dX[index] =
-        static_cast<T_ACC>(a[i]) * static_cast<T_ACC>(dY[index]) * gamma_v +
-        b[i] * static_cast<T_ACC>(X[index]) + c[i];
+    dX[index] = c1[i] * static_cast<T_ACC>(dY[index]) * gamma_acc +
+        c2[i] * static_cast<T_ACC>(X[index]) + c3[i];
   }
 }
 
@@ -175,8 +172,7 @@ __global__ void GammaBetaBackwardSimpleCUDAKernel(
       const int64_t index = i * N + j;
       sum1 += dg == nullptr ? T_ACC(0)
                             : static_cast<T_ACC>(dY[index]) *
-              (static_cast<T_ACC>(X[index]) - static_cast<T_ACC>(mean[i])) *
-              static_cast<T_ACC>(rstd[i]);
+              (static_cast<T_ACC>(X[index]) - mean[i]) * rstd[i];
       sum2 += db == nullptr ? T_ACC(0) : static_cast<T_ACC>(dY[index]);
     }
     if (dg != nullptr) {
@@ -213,14 +209,12 @@ __global__ void GammaBetaBackwardCUDAKernel(
       const int64_t index2 = i2 * N + j;
       dg_sum1 += dg == nullptr ? T_ACC(0)
                                : static_cast<T_ACC>(dY[index1]) *
-              (static_cast<T_ACC>(X[index1]) - static_cast<T_ACC>(mean[i1])) *
-              static_cast<T_ACC>(rstd[i1]);
+              (static_cast<T_ACC>(X[index1]) - mean[i1]) * rstd[i1];
       db_sum1 += db == nullptr ? T_ACC(0) : static_cast<T_ACC>(dY[index1]);
       if (i2 < M) {
         dg_sum2 += dg == nullptr ? T_ACC(0)
                                  : static_cast<T_ACC>(dY[index2]) *
-                (static_cast<T_ACC>(X[index2]) - static_cast<T_ACC>(mean[i2])) *
-                static_cast<T_ACC>(rstd[i2]);
+                (static_cast<T_ACC>(X[index2]) - mean[i2]) * rstd[i2];
         db_sum2 += db == nullptr ? T_ACC(0) : static_cast<T_ACC>(dY[index2]);
       }
     }
@@ -270,18 +264,18 @@ void LayerNormKernelImplInternal(
     int64_t M,
     int64_t N,
     T_ACC eps,
-    Tensor* Y,
-    Tensor* mean,
-    Tensor* rstd) {
+    Tensor& Y,
+    Tensor& mean,
+    Tensor& rstd) {
   DCHECK_EQ(X.numel(), M * N);
   DCHECK(!gamma.defined() || gamma.numel() == N);
   DCHECK(!beta.defined() || beta.numel() == N);
   const T* X_data = X.data_ptr<T>();
   const T* gamma_data = gamma.defined() ? gamma.data_ptr<T>() : nullptr;
   const T* beta_data = beta.defined() ? beta.data_ptr<T>() : nullptr;
-  T* Y_data = Y->data_ptr<T>();
-  T_ACC* mean_data = mean->data_ptr<T_ACC>();
-  T_ACC* rstd_data = rstd->data_ptr<T_ACC>();
+  T* Y_data = Y.data_ptr<T>();
+  T_ACC* mean_data = mean.data_ptr<T_ACC>();
+  T_ACC* rstd_data = rstd.data_ptr<T_ACC>();
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
   RowwiseMomentsCUDAKernel<T, T_ACC>
       <<<M, cuda_utils::kCUDABlockReduceNumThreads, 0, cuda_stream>>>(
@@ -299,22 +293,22 @@ void LayerNormKernelImpl(
     int64_t M,
     int64_t N,
     double eps,
-    Tensor* Y,
-    Tensor* mean,
-    Tensor* rstd) {
+    Tensor& Y,
+    Tensor& mean,
+    Tensor& rstd) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::Half,
       at::ScalarType::BFloat16,
       X.scalar_type(),
       "LayerNormKernelImpl",
       [&]() {
-        using acc_t = acc_type<scalar_t, true>;
+        using acc_t = double;
         LayerNormKernelImplInternal<scalar_t, acc_t>(
             X, gamma, beta, M, N, static_cast<acc_t>(eps), Y, mean, rstd);
       });
 }
 
-template <typename T>
+template <typename T, typename T_ACC>
 void LayerNormBackwardKernelImplInternal(
     const Tensor& dY,
     const Tensor& X,
@@ -323,10 +317,9 @@ void LayerNormBackwardKernelImplInternal(
     const Tensor& gamma,
     int64_t M,
     int64_t N,
-    Tensor* dX,
-    Tensor* dgamma,
-    Tensor* dbeta) {
-  using T_ACC = acc_type<T, true>;
+    Tensor& dX,
+    Tensor& dgamma,
+    Tensor& dbeta) {
   DCHECK_EQ(dY.numel(), M * N);
   DCHECK_EQ(X.numel(), M * N);
   DCHECK_EQ(mean.numel(), M);
@@ -338,52 +331,37 @@ void LayerNormBackwardKernelImplInternal(
   const T_ACC* rstd_data = rstd.template data_ptr<T_ACC>();
   const T* gamma_data =
       gamma.defined() ? gamma.template data_ptr<T>() : nullptr;
-  T* dX_data = dX->defined() ? dX->template data_ptr<T>() : nullptr;
+  T* dX_data = dX.defined() ? dX.template data_ptr<T>() : nullptr;
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
   if (dX_data != nullptr) {
-    const auto kAccType =
-        (X.scalar_type() == kHalf || X.scalar_type() == kBFloat16)
-        ? kFloat
-        : X.scalar_type();
+    // const auto kAccType =
+    //     at::toAccumulateType(X.scalar_type(), /*is_cuda=*/true);
+    constexpr auto kAccType = kDouble;
     Tensor ds = at::empty({M}, X.options().dtype(kAccType));
     Tensor db = at::empty({M}, X.options().dtype(kAccType));
-    Tensor scale = at::empty({M}, X.options().dtype(kAccType));
-    Tensor bias = at::empty({M}, X.options().dtype(kAccType));
+    Tensor c2 = at::empty({M}, X.options().dtype(kAccType));
+    Tensor c3 = at::empty({M}, X.options().dtype(kAccType));
     T_ACC* ds_data = ds.template data_ptr<T_ACC>();
     T_ACC* db_data = db.template data_ptr<T_ACC>();
-    T_ACC* scale_data = scale.template data_ptr<T_ACC>();
-    T_ACC* bias_data = bias.template data_ptr<T_ACC>();
-    ComputeInternalGradientsCUDAKernel<T>
+    const T_ACC* c1_data = rstd_data;
+    T_ACC* c2_data = c2.template data_ptr<T_ACC>();
+    T_ACC* c3_data = c3.template data_ptr<T_ACC>();
+    ComputeInternalGradientsCUDAKernel<T, T_ACC>
         <<<M, cuda_utils::kCUDABlockReduceNumThreads, 0, cuda_stream>>>(
-            N, dY_data, X_data, gamma_data, ds_data, db_data);
+            N, dY_data, X_data, mean_data, gamma_data, ds_data, db_data);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
     const int64_t B = (M + kCUDANumThreads - 1) / kCUDANumThreads;
     ComputeGradientFusedParamsCUDAKernel<T, T_ACC>
         <<<B, kCUDANumThreads, 0, cuda_stream>>>(
-            M,
-            N,
-            mean_data,
-            rstd_data,
-            ds_data,
-            db_data,
-            scale_data,
-            bias_data);
+            M, N, mean_data, rstd_data, ds_data, db_data, c2_data, c3_data);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
     LayerNormBackwardCUDAKernel<T><<<M, kCUDANumThreads, 0, cuda_stream>>>(
-        N,
-        dY_data,
-        X_data,
-        gamma_data,
-        rstd_data,
-        scale_data,
-        bias_data,
-        dX_data);
+        N, dY_data, X_data, gamma_data, c1_data, c2_data, c3_data, dX_data);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
-  if (dgamma->defined() || dbeta->defined()) {
-    T* dgamma_data =
-        dgamma->defined() ? dgamma->template data_ptr<T>() : nullptr;
-    T* dbeta_data = dbeta->defined() ? dbeta->template data_ptr<T>() : nullptr;
+  if (dgamma.defined() || dbeta.defined()) {
+    T* dgamma_data = dgamma.defined() ? dgamma.template data_ptr<T>() : nullptr;
+    T* dbeta_data = dbeta.defined() ? dbeta.template data_ptr<T>() : nullptr;
     if (M < 512) {
       // For small batch size, do colwise reduce directly.
       const int64_t B = (N + kCUDANumThreads - 1) / kCUDANumThreads;
@@ -426,16 +404,18 @@ void LayerNormBackwardKernelImpl(
     const Tensor& gamma,
     int64_t M,
     int64_t N,
-    Tensor* dX,
-    Tensor* dgamma,
-    Tensor* dbeta) {
+    Tensor& dX,
+    Tensor& dgamma,
+    Tensor& dbeta) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::Half,
       at::ScalarType::BFloat16,
       X.scalar_type(),
       "LayerNormBackwardKernelImpl",
       [&]() {
-        LayerNormBackwardKernelImplInternal<scalar_t>(
+        // using acc_t = acc_type<scalar_t, true>;
+        using acc_t = double;
+        LayerNormBackwardKernelImplInternal<scalar_t, acc_t>(
             dY.contiguous(), X, mean, rstd, gamma, M, N, dX, dgamma, dbeta);
       });
 }
@@ -470,11 +450,13 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_cuda(
       c10::nullopt /* device */,
       c10::nullopt /* pin_memory */,
       LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  auto acc_type = at::toAccumulateType(input.scalar_type(), /*is_cuda=*/true);
-  Tensor mean = at::empty({M}, X->options().dtype(acc_type));
-  Tensor rstd = at::empty({M}, X->options().dtype(acc_type));
+  // const auto kAccType =
+  //     at::toAccumulateType(input.scalar_type(), /*is_cuda=*/true);
+  constexpr auto kAccType = kDouble;
+  Tensor mean = at::empty({M}, X->options().dtype(kAccType));
+  Tensor rstd = at::empty({M}, X->options().dtype(kAccType));
   if (M > 0) {
-    LayerNormKernelImpl(*X, *gamma, *beta, M, N, eps, &Y, &mean, &rstd);
+    LayerNormKernelImpl(*X, *gamma, *beta, M, N, eps, Y, mean, rstd);
 
     const auto input_shape = input.sizes();
     const size_t axis = input.dim() - normalized_shape.size();
@@ -563,7 +545,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cuda(
   }
   if (M > 0) {
     LayerNormBackwardKernelImpl(
-        dY, *X, mean, rstd, *gamma, M, N, &dX, &dgamma, &dbeta);
+        dY, *X, mean, rstd, *gamma, M, N, dX, dgamma, dbeta);
   }
   return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
 }

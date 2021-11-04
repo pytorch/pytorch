@@ -24,9 +24,9 @@ void LayerNormKernelImplInternal(
     int64_t M,
     int64_t N,
     T eps,
-    Tensor* Y,
-    Tensor* mean,
-    Tensor* rstd) {
+    Tensor& Y,
+    Tensor& mean,
+    Tensor& rstd) {
   using T_ACC = vec::vec_scalar_t<T>;
   using Vec = vec::Vectorized<T_ACC>;
   DCHECK_EQ(X.numel(), M * N);
@@ -35,9 +35,9 @@ void LayerNormKernelImplInternal(
   const T* X_data = X.data_ptr<T>();
   const T* gamma_data = gamma.defined() ? gamma.data_ptr<T>() : nullptr;
   const T* beta_data = beta.defined() ? beta.data_ptr<T>() : nullptr;
-  T* Y_data = Y->data_ptr<T>();
-  T* mean_data = mean->data_ptr<T>();
-  T* rstd_data = rstd->data_ptr<T>();
+  T* Y_data = Y.data_ptr<T>();
+  T* mean_data = mean.data_ptr<T>();
+  T* rstd_data = rstd.data_ptr<T>();
   const bool gamma_null = gamma_data == nullptr;
   const bool beta_null = beta_data == nullptr;
   at::parallel_for(0, M, 1, [&](int64_t start, int64_t end) {
@@ -80,14 +80,14 @@ void LayerNormKernelImpl(
     int64_t M,
     int64_t N,
     double eps,
-    Tensor* Y,
-    Tensor* mean,
-    Tensor* rstd) {
-  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, X.scalar_type(),
-      "LayerNormKernelImpl", [&]() {
-    LayerNormKernelImplInternal<scalar_t>(
-        X, gamma, beta, M, N, static_cast<scalar_t>(eps), Y, mean, rstd);
-  });
+    Tensor& Y,
+    Tensor& mean,
+    Tensor& rstd) {
+  AT_DISPATCH_FLOATING_TYPES_AND(
+      at::ScalarType::BFloat16, X.scalar_type(), "LayerNormKernelImpl", [&]() {
+        LayerNormKernelImplInternal<scalar_t>(
+            X, gamma, beta, M, N, static_cast<scalar_t>(eps), Y, mean, rstd);
+      });
 }
 
 template <typename T>
@@ -99,9 +99,9 @@ void LayerNormBackwardKernelImplInternal(
     const Tensor& gamma,
     int64_t M,
     int64_t N,
-    Tensor* dX,
-    Tensor* dgamma,
-    Tensor* dbeta) {
+    Tensor& dX,
+    Tensor& dgamma,
+    Tensor& dbeta) {
   using T_ACC = vec::vec_scalar_t<T>;
   using Vec = vec::Vectorized<T_ACC>;
   DCHECK_EQ(dY.numel(), M * N);
@@ -115,9 +115,9 @@ void LayerNormBackwardKernelImplInternal(
   const T* rstd_data = rstd.template data_ptr<T>();
   const T* gamma_data =
       gamma.defined() ? gamma.template data_ptr<T>() : nullptr;
-  T* dX_data = dX->defined() ? dX->template data_ptr<T>() : nullptr;
-  T* dgamma_data = dgamma->defined() ? dgamma->template data_ptr<T>() : nullptr;
-  T* dbeta_data = dbeta->defined() ? dbeta->template data_ptr<T>() : nullptr;
+  T* dX_data = dX.defined() ? dX.template data_ptr<T>() : nullptr;
+  T* dgamma_data = dgamma.defined() ? dgamma.template data_ptr<T>() : nullptr;
+  T* dbeta_data = dbeta.defined() ? dbeta.template data_ptr<T>() : nullptr;
   const T_ACC scale = T_ACC(1) / static_cast<T_ACC>(N);
   const bool gamma_null = gamma_data == nullptr;
   const bool dX_null = dX_data == nullptr;
@@ -283,14 +283,17 @@ void LayerNormBackwardKernelImpl(
     const Tensor& gamma,
     int64_t M,
     int64_t N,
-    Tensor* dX,
-    Tensor* dgamma,
-    Tensor* dbeta) {
-  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, X.scalar_type(),
-      "LayerNormBackwardKernelImpl", [&]() {
-    LayerNormBackwardKernelImplInternal<scalar_t>(
-        dY.contiguous(), X, mean, rstd, gamma, M, N, dX, dgamma, dbeta);
-  });
+    Tensor& dX,
+    Tensor& dgamma,
+    Tensor& dbeta) {
+  AT_DISPATCH_FLOATING_TYPES_AND(
+      at::ScalarType::BFloat16,
+      X.scalar_type(),
+      "LayerNormBackwardKernelImpl",
+      [&]() {
+        LayerNormBackwardKernelImplInternal<scalar_t>(
+            dY.contiguous(), X, mean, rstd, gamma, M, N, dX, dgamma, dbeta);
+      });
 }
 
 } // namespace

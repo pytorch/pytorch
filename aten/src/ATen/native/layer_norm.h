@@ -14,7 +14,6 @@ C10_ALWAYS_INLINE std::pair<int64_t, int64_t> _check_layer_norm_inputs(
     IntArrayRef normalized_shape,
     const Tensor& weight /* optional */,
     const Tensor& bias /* optional */) {
-
   const int normalized_ndim = normalized_shape.size();
   TORCH_CHECK(
       normalized_ndim >= 1,
@@ -82,9 +81,9 @@ using forward_fn = void (*)(
     int64_t /* M */,
     int64_t /* N */,
     double /* eps */,
-    Tensor* /* Y */,
-    Tensor* /* mean */,
-    Tensor* /* rstd */);
+    Tensor& /* Y */,
+    Tensor& /* mean */,
+    Tensor& /* rstd */);
 
 using backward_fn = void (*)(
     const Tensor& /* dY */,
@@ -94,9 +93,9 @@ using backward_fn = void (*)(
     const Tensor& /* gamma */,
     int64_t /* M */,
     int64_t /* N */,
-    Tensor* /* dX */,
-    Tensor* /* dgamma */,
-    Tensor* /* dbeta */);
+    Tensor& /* dX */,
+    Tensor& /* dgamma */,
+    Tensor& /* dbeta */);
 
 DECLARE_DISPATCH(forward_fn, LayerNormKernel);
 DECLARE_DISPATCH(backward_fn, LayerNormBackwardKernel);
