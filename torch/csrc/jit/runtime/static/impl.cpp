@@ -99,6 +99,7 @@ void OptimizeGraph(
   FuseInferenceOpsForSparseNN(graph);
   UseVariadicCat(graph);
   UseVariadicStack(graph);
+  EliminateTrivialEquallySplit(graph);
 
   if (opts.enable_out_variant) {
     UseVariadicOp(

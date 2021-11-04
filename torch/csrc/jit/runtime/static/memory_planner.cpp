@@ -275,7 +275,6 @@ void MemoryPlanner::deallocate() {
       if (C10_UNLIKELY(first_time)) {
         tensorStorageImpl->reset();
 
-        at::StorageImpl* newImpl;
         DCHECK(
             managed_tensor_storage_impls_.size() == group_idx ||
             managed_tensor_storage_impls_.size() == group_idx + 1);
@@ -284,7 +283,8 @@ void MemoryPlanner::deallocate() {
               0, // will be set at end of outer loop
               std::move(*tensorStorageImpl));
         }
-        newImpl = &managed_tensor_storage_impls_.back().second;
+        at::StorageImpl* newImpl = &managed_tensor_storage_impls_.back().second;
+
         // We want to manage StorageImpls' lifetimes ourselves, but TensorImpl
         // expects to refcount them. unsafe_adapt_non_heap_allocated is our
         // escape hatch: it sets the reference count for the StorageImpl to an
