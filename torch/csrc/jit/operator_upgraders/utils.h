@@ -1,36 +1,42 @@
 #pragma once
-#include <string>
-#include <regex>
-#include <vector>
 #include <torch/csrc/jit/operator_upgraders/version_map.h>
+#include <iostream>
+#include <regex>
+#include <string>
+#include <vector>
 
 namespace torch {
 namespace jit {
 
-static std::string findUpgrader(UpgraderDB upgraders_for_schema, int current_version) {
-    // we want to find the entry which satisfies following two conditions:
-    //    1. the version entry must be greater than current_version
-    //    2. Among the version entries, we need to see if the current version
-    //       is in the upgrader name range
-    for (const auto& upgrader_entry: upgraders_for_schema) {
-        if (upgrader_entry.first > current_version) {
-            auto upgrader_name = upgrader_entry.second;
-            std::regex delimiter("_");
-            std::vector<std::string> tokens(std::sregex_token_iterator(upgrader_name.begin(), upgrader_name.end(), delimiter, -1),
-                                  std::sregex_token_iterator());
+static UpgraderEntry findUpgrader(
+    std::vector<UpgraderEntry> upgraders_for_schema,
+    int current_version) {
+  // we want to find the entry which satisfies following two conditions:
+  //    1. the version entry must be greater than current_version
+  //    2. Among the version entries, we need to see if the current version
+  //       is in the upgrader name range
 
-            int start = std::stoi(tokens[tokens.size()-2]);
-            int end = std::stoi(tokens[tokens.size()-1]);
+  auto upgrader_entry_copy = upgraders_for_schema;
+  std::sort(
+      upgrader_entry_copy.begin(),
+      upgrader_entry_copy.end(),
+      [](const UpgraderEntry& lhs, const UpgraderEntry& rhs) {
+        return lhs.version_bump < rhs.version_bump;
+      });
 
-            if (start <= current_version && current_version <= end) {
-                return upgrader_name;
-            }
+  auto pos = std::find_if(
+      upgrader_entry_copy.begin(),
+      upgrader_entry_copy.end(),
+      [current_version](const UpgraderEntry& entry) {
+        return entry.version_bump > current_version;
+      });
 
-        }
-    }
-    return "";
+  if (pos != upgrader_entry_copy.end()) {
+    return *pos;
+  }
+
+  return {};
 }
-
 
 } // namespace jit
 } // namespace torch

@@ -5,8 +5,8 @@
 namespace torch {
 namespace jit {
 
-static std::unordered_map<std::string, std::string> upgraders_graph({
-    {"div_Tensor_0_3", R"IR(graph(%self.1 : Tensor,
+static std::unordered_map<std::string, std::string> upgraders_graph(
+    {{"div_Tensor_0_3", R"IR(graph(%self.1 : Tensor,
                                   %other.1 : Tensor):
                             %32 : str = prim::Constant[value="trunc"]()
                             %6 : bool = prim::Constant[value=1]()
@@ -25,7 +25,7 @@ static std::unordered_map<std::string, std::string> upgraders_graph({
                                     %37 : Tensor = aten::div(%self.1, %other.1, %32)
                                     -> (%37)
                             return (%35))IR"},
-    {"div_Scalar_0_3", R"IR(graph(%self.1 : Tensor,
+     {"div_Scalar_0_3", R"IR(graph(%self.1 : Tensor,
                                 %other.1 : Scalar):
                             %41 : str = prim::Constant[value=\"trunc\"]()
                             %6 : bool = prim::Constant[value=1]()
@@ -45,7 +45,7 @@ static std::unordered_map<std::string, std::string> upgraders_graph({
                                     %46 : Tensor = aten::div(%self.1, %other.9, %41) # torch/jit/operator_upgraders.py:23:11
                                     -> (%46)
                             return (%44))IR"},
-    {"div_out_0_3", R"IR(graph(%self.1 : Tensor,
+     {"div_out_0_3", R"IR(graph(%self.1 : Tensor,
                             %other.1 : Tensor,
                             %out.1 : Tensor):
                         %41 : str = prim::Constant[value="trunc"]() # torch/jit/operator_upgraders.py:33:44
@@ -70,8 +70,7 @@ static std::unordered_map<std::string, std::string> upgraders_graph({
                             block1():
                                 %46 : Tensor = aten::div(%self.1, %other.1, %41, %out.1) # torch/jit/operator_upgraders.py:33:11
                                 -> (%46)
-                        return (%44))IR"}
-});
+                        return (%44))IR"}});
 
 } // namespace jit
 } // namespace torch

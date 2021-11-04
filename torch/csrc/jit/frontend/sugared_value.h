@@ -207,14 +207,21 @@ struct TORCH_API SimpleValue : public SugaredValue {
 };
 
 struct TORCH_API BuiltinFunction : public SugaredValue {
-  BuiltinFunction(Symbol symbol, c10::optional<NamedValue> self)
-      : symbol(symbol), self(std::move(self)) {}
+  BuiltinFunction(
+      Symbol symbol,
+      c10::optional<NamedValue> self,
+      c10::optional<int64_t> version = c10::nullopt)
+      : symbol(symbol), self(std::move(self)), version_(version) {}
 
   // The symbol of the function (e.g. `aten::relu`).
   Symbol symbol;
 
   // if this is method, then this is the self argument.
   c10::optional<NamedValue> self;
+
+  // version number for the function
+  c10::optional<int64_t> version_;
+
   std::string kind() const override {
     return "builtin";
   }
@@ -315,13 +322,13 @@ struct TORCH_API BuiltinModule : public SugaredValue {
     }
 
     auto sym = Symbol::fromQualString(name + "::" + field);
-    if (version.has_value()) {
-      // Possibly replaces symbol with another that implements its
-      // historic behavior.
-      // See note [Versioned Symbols]
-      sym = get_symbol_for_version(sym, *version);
-    }
-    return std::make_shared<BuiltinFunction>(sym, c10::nullopt);
+    // if (version.has_value()) {
+    //   // Possibly replaces symbol with another that implements its
+    //   // historic behavior.
+    //   // See note [Versioned Symbols]
+    //   sym = get_symbol_for_version(sym, *version);
+    // }
+    return std::make_shared<BuiltinFunction>(sym, c10::nullopt, version);
   }
 
  private:
@@ -396,7 +403,7 @@ struct FunctionValue : public SugaredValue {
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> kwargs,
       size_t n_binders) override {
-    std::vector<const FunctionSchema*> schemas;
+    std::vector<FunctionSchema> schemas;
     for (Function* callee : callees_) {
       try {
         callee->ensure_defined();
@@ -405,7 +412,7 @@ struct FunctionValue : public SugaredValue {
             << " function '" << callee->name() << "' is called recursively. "
             << "Recursive calls are not supported";
       }
-      schemas.push_back(&callee->getSchema());
+      schemas.push_back(callee->getSchema());
     }
     auto match = matchSchemas(schemas, loc, *f.graph(), args, kwargs);
     Value* output =
@@ -456,7 +463,7 @@ struct MethodValue : public SugaredValue {
       size_t n_binders) override {
     std::vector<NamedValue> argsWithSelf = {self_};
     argsWithSelf.insert(argsWithSelf.end(), args.begin(), args.end());
-    std::vector<const FunctionSchema*> schemas;
+    std::vector<FunctionSchema> schemas;
     for (const std::string& method_name : method_names_) {
       if (auto class_type = self_->type()->cast<ClassType>()) {
         Function& method = class_type->getMethod(method_name);
@@ -467,9 +474,9 @@ struct MethodValue : public SugaredValue {
               << " method '" << method.name() << "' is called recursively. "
               << "Recursive calls are not supported";
         }
-        schemas.push_back(&method.getSchema());
+        schemas.push_back(method.getSchema());
       } else if (auto interface_type = self_->type()->cast<InterfaceType>()) {
-        schemas.push_back(interface_type->getMethod(method_name));
+        schemas.push_back(*interface_type->getMethod(method_name));
       } else {
         TORCH_INTERNAL_ASSERT(
             false, "method constructed that is not a class or interface");
