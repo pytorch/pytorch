@@ -54,6 +54,7 @@ full_codegen:
   - relu_
   - rsqrt
   - sigmoid
+  - silu
   - smooth_l1_loss
   - smooth_l1_loss_backward
   - softplus
