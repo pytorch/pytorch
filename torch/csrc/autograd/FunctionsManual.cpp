@@ -3172,12 +3172,11 @@ std::tuple<Tensor, Tensor> linalg_solve_triangular_backward(
       return std::make_tuple(Tensor{}, Tensor{});
   }
   // We always need to comput G_B
-  const Tensor A_H = A.conj().transpose(-2, -1);
-  // gragrad does not go through because it gets confused with this !upper
+  const Tensor A_H = A.mH();
   const Tensor G_B = at::linalg_solve_triangular(A_H, grad, !upper, left, unitriangular);
 
   if (A_requires_grad) {
-    const Tensor X_H = X.conj().transpose(-2, -1);
+    const Tensor X_H = X.mH();
     Tensor G_A = left ? -at::matmul(G_B, X_H) : -at::matmul(X_H, G_B);
     G_A = upper ? G_A.triu(static_cast<int>(unitriangular))
                 : G_A.tril(- static_cast<int>(unitriangular));

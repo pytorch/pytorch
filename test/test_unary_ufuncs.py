@@ -13,11 +13,11 @@ import unittest
 from torch._six import inf, nan
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, torch_to_numpy_dtype_dict, numpy_to_torch_dtype_dict,
-    suppress_warnings, TEST_SCIPY, slowTest, skipIfNoSciPy, IS_WINDOWS)
+    suppress_warnings, TEST_SCIPY, slowTest, skipIfNoSciPy, IS_WINDOWS, gradcheck)
 from torch.testing._internal.common_methods_invocations import (
     unary_ufuncs, _NOTHING)
 from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests, ops, dtypes, onlyCPU, onlyOnCPUAndCUDA,
+    instantiate_device_type_tests, ops, dtypes, onlyCPU, onlyNativeDeviceTypes,
     onlyCUDA, dtypesIfCUDA, precisionOverride, skipCUDAIfRocm, dtypesIfCPU,
     OpDTypes)
 from torch.testing import make_tensor
@@ -1018,6 +1018,21 @@ class TestUnaryUfuncs(TestCase):
             input_noncontig, inplace=True), expected_output_noncontig,
             atol=atol, rtol=rtol)
 
+    # It is not obvious how to merge this into OpInfo becuase these inputs
+    # succeed for gradcheck but are expected to fail for gradgradcheck
+    @dtypes(torch.double)
+    def test_sinc(self, device, dtype):
+        # The derivative of sinc(x) at x=0 has to be special cased.
+        # A naive computation will result in 0/0 -> NaN.
+        # We also need to be careful when we are very close to 0, as the
+        # derivative's denominator is squared, and there are some floats
+        # that are positive and whose squares are zero.
+        a = torch.tensor([0.0, torch.finfo(torch.double).tiny, 1.0],
+                         dtype=dtype,
+                         requires_grad=True,
+                         device=device)
+        gradcheck(torch.sinc, a)
+
     @skipIfNoSciPy
     @dtypes(torch.float, torch.double)
     def test_mish(self, device, dtype):
@@ -1086,7 +1101,7 @@ class TestUnaryUfuncs(TestCase):
     @dtypesIfCPU(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     @dtypes(torch.float32, torch.float64)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_igamma_common(self, device, dtype):
         # test igamma for reasonable range of values
         loglo = -4  # approx 0.018
@@ -1097,7 +1112,7 @@ class TestUnaryUfuncs(TestCase):
     @dtypesIfCPU(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     @dtypes(torch.float32, torch.float64)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_igammac_common(self, device, dtype):
         # test igammac for reasonable range of values
         loglo = -4  # approx 0.018
@@ -1107,7 +1122,7 @@ class TestUnaryUfuncs(TestCase):
 
     @dtypesIfCPU(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     @dtypes(torch.float32, torch.float64)
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_igamma_edge_cases(self, device, dtype):
         tkwargs = {"dtype": dtype, "device": device}
         infs = torch.zeros((3,), **tkwargs) + float("inf")
@@ -1136,7 +1151,7 @@ class TestUnaryUfuncs(TestCase):
 
     @dtypesIfCPU(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     @dtypes(torch.float32, torch.float64)
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_igammac_edge_cases(self, device, dtype):
         tkwargs = {"dtype": dtype, "device": device}
         infs = torch.zeros((3,), **tkwargs) + float("inf")
