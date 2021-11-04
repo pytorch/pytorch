@@ -63,6 +63,7 @@ class LazyTensor {
   // TODO(whc) just a hack for now to get codegen to compile... need to refactor
   // Create a new lazy tensor with the same metadata of the input tensor (with
   // possible overrides), and the new IR value.
+  // (villedepommes) Please keep them public!
   LazyTensor CreateFrom(torch::lazy::Value ir_value) const;
   LazyTensor CreateFrom(torch::lazy::Value ir_value,
                         const Device& device) const;

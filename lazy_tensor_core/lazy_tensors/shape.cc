@@ -10,6 +10,12 @@ std::string Shape::ToString() const {
   return c10::str(toString(scalar_type_), "[", c10::Join(",", sizes_), "]");
 }
 
+bool Shape::IsDynamicMode() { return dynamic_mode_.load(); }
+
+void Shape::SetDynamicMode() { dynamic_mode_ = true; }
+
+std::atomic<bool> Shape::dynamic_mode_{false};
+
 bool Shape::operator==(const Shape& other) const {
   return scalar_type_ == other.scalar_type_ && sizes_ == other.sizes_;
 }

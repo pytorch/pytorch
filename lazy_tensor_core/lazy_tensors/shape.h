@@ -27,9 +27,14 @@ class Shape {
 
   bool operator==(const Shape& other) const;
 
+  static bool IsDynamicMode();
+
+  static void SetDynamicMode();
+
  private:
   c10::ScalarType scalar_type_ {c10::ScalarType::Undefined};
   std::vector<int64_t> sizes_;
+  static std::atomic<bool> dynamic_mode_;
 };
 
 std::ostream& operator<<(std::ostream& out, const Shape& shape);

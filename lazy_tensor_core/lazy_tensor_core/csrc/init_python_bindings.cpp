@@ -638,6 +638,8 @@ void InitLtcModuleBindings(py::module m) {
   //   return GetMemoryInfo(device);
   // });
   m.def("_ltc_init_ts_backend", []() { compiler::InitTorchScriptBackend(); });
+  m.def("_ltc_set_dynamic_shapes_mode",
+      []() { lazy_tensors::Shape::SetDynamicMode(); });
 }
 
 }  // namespace
