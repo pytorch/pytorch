@@ -577,6 +577,10 @@ def run_tests(argv=UNITTEST_ARGS):
         failed_tests = []
         for case in test_cases:
             test_case_full_name = case.id().split('.', 1)[1]
+            if not issubclass(case, TestCase):
+                err = "This test case should extend from torch.testing._internal.common_utils.TestCase but it does not."
+                print(f"{test_case_full_name} - failed. {err}")
+                failed_tests.append(test_case_full_name)
             exitcode = shell([sys.executable] + argv + [test_case_full_name])
             if exitcode != 0:
                 failed_tests.append(test_case_full_name)
