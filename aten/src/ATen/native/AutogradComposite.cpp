@@ -31,12 +31,8 @@ Tensor _new_zeros_with_same_feature_meta(
   auto self_strides = self.strides();
   auto self_num_feature_dims = self.dim() - self_num_batch_dims;
 
-  // NB: We don't check this because we may allow broadcasting
-  // for (int i = 0; i < other.dim(); ++i) {
-  //   TORCH_CHECK(
-  //       other_sizes[i] == self_sizes[i + self_num_batch_dims],
-  //       "Expected the size of self at dim to be equivalent to the size of other at dim ", i);
-  // }
+  // NB: We don't check that the sizes of self is the same as that of other
+  //     because this function is also used in the inplace over view case
 
   std::vector<int64_t> out_sizes;
   out_sizes.reserve(self.dim());
@@ -49,8 +45,7 @@ Tensor _new_zeros_with_same_feature_meta(
   out_strides.reserve(self.dim());
   out_strides.insert(out_strides.begin(), other_strides.begin(), other_strides.end());
 
-  int64_t prod = native::storage_size_for(other_sizes, other_strides) + other_storage_offset;
-
+  int64_t prod = other.storage().nbytes() / other.itemsize();
   for (size_t i = 0; i < self_num_batch_dims; ++i) {
     out_strides.insert(out_strides.begin(), prod);
     prod *= self_strides[i];
