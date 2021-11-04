@@ -116,7 +116,7 @@ TEST(TestVectorizedMemoryAccess, CopyKernel) {
   // vec2 copy
   reset_buffers();
   cudaDeviceSynchronize();
-  vectorized_copy<double, 2><<<16, 64>>>(b2, b1);
+  vectorized_copy<double, 2><<<total_work_size / block_work_size() , num_threads()>>>(b2, b1);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   ASSERT_EQ(cudaSuccess, cudaDeviceSynchronize());
@@ -130,7 +130,7 @@ TEST(TestVectorizedMemoryAccess, CopyKernel) {
   // vec1 copy
   reset_buffers();
   cudaDeviceSynchronize();
-  vectorized_copy<double, 1><<<16, 64>>>(b2, b1);
+  vectorized_copy<double, 1><<<total_work_size / block_work_size() , num_threads()>>>(b2, b1);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   ASSERT_EQ(cudaSuccess, cudaDeviceSynchronize());
