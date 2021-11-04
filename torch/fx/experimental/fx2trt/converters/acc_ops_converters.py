@@ -480,7 +480,7 @@ def acc_ops_conv2d(network, target, args, kwargs, name):
     return layer.get_output(0)
 
 
-@tensorrt_converter(acc_ops.pad)
+@tensorrt_converter(acc_ops.pad, enabled=trt.__version__ < "8.2")
 def acc_ops_pad(network, target, args, kwargs, name):
     input_val = kwargs["input"]
     pad = kwargs["pad"]
