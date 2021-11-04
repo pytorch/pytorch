@@ -430,6 +430,31 @@ def jacfwd(f):
     return wrapper_fn
 
 def grad_and_value(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Callable:
+    """
+    See :func:`grad`. Returns a function to compute a tuple of the gradient and primal, or
+    forward computaiton.
+
+    Args:
+        func (Callable): A Python function that takes one or more arguments.
+            Must return a single-element Tensor. If specified :attr:`has_aux` equals ``True``,
+            function can return a tuple of single-element Tensor and other auxiliairy objects:
+            ``(output, aux)``.
+        argnums (int or Tuple[int]): Specifies arguments to compute gradients with respect to.
+            :attr:`argnums` can be single integer or tuple of integers. Default: 0.
+        has_aux (bool): Flag indicating that :attr:`func` returns a tensor and other
+            auxiliairy objects: ``(output, aux)``. Default: False.
+
+    Returns:
+        Function to compute a tuple of gradients with respect to its inputs and the forward
+        computation. By default, the output of the function is a tuple of the gradient tensor
+        with respect to the first argument and the primal computation. If specified
+        :attr:`has_aux` equals ``True``, tuple of gradients and tuple of the forward computation
+        with output auxiliairy objects is returned. If :attr:`argnums` is a tuple of integers,
+        a tuple of a tuple of the output gradients with respect to each :attr:`argnums` value and 
+        the forward computation is returned.
+
+    See :func:`grad` for examples
+    """
     @wraps(func)
     def wrapper(*args, **kwargs):
         level = _grad_increment_nesting()
