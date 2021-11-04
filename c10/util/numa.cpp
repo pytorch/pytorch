@@ -109,8 +109,7 @@ bool IsNUMAEnabled() {
   return false;
 }
 
-void NUMABind(int numa_node_id) {
-}
+void NUMABind(int numa_node_id) {}
 
 int GetNUMANode(const void* ptr) {
   return -1;
@@ -120,8 +119,7 @@ int GetNumNUMANodes() {
   return -1;
 }
 
-void NUMAMove(void* ptr, size_t size, int numa_node_id) {
-}
+void NUMAMove(void* ptr, size_t size, int numa_node_id) {}
 
 int GetCurrentNUMANode() {
   return -1;

@@ -126,8 +126,10 @@ void tensor_pow_scalar(const Vals vals, const Pows pows, const torch::ScalarType
   const auto tensor = torch::tensor(vals, valsDtype);
 
   for (const auto pow : pows) {
+    // NOLINTNEXTLINE(clang-diagnostic-implicit-const-int-float-conversion)
     if ( dtype == kInt && pow > std::numeric_limits<int>::max()) {
       // value cannot be converted to type int without overflow
+      // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
       EXPECT_THROW(tensor.pow(pow), std::runtime_error);
       continue;
     }
@@ -364,4 +366,3 @@ TEST(PowTest, TestIntegralPow) {
   test_inverse(longs);
   test_inverse(ints);
 }
-

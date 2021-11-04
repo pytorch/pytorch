@@ -2,6 +2,7 @@
 
 #ifdef TORCH_ENABLE_LLVM
 #include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <llvm/ExecutionEngine/JITSymbol.h>
@@ -15,6 +16,14 @@
 namespace torch {
 namespace jit {
 namespace tensorexpr {
+
+extern "C" {
+void DispatchParallel(
+    int8_t* func,
+    int64_t start,
+    int64_t stop,
+    int8_t* packed_data) noexcept;
+}
 
 inline std::string formatError(llvm::Error&& err, const char* msg) {
   static constexpr char* defaultErrorMsg = "Unexpected failure in LLVM JIT";
@@ -45,12 +54,17 @@ class PytorchLLVMJITImpl;
 
 class TORCH_API PytorchLLVMJIT {
  public:
-  PytorchLLVMJIT();
+  PytorchLLVMJIT(
+      c10::optional<std::string> triple,
+      c10::optional<std::string> cpu,
+      c10::optional<std::string> attrs);
   ~PytorchLLVMJIT();
 
-  Error addModule(std::unique_ptr<Module> M, std::unique_ptr<LLVMContext> C);
+  void addModule(std::unique_ptr<Module> M, std::unique_ptr<LLVMContext> C);
 
   JITSymbol findSymbol(const std::string Name);
+
+  bool hasSymbol(const std::string& Name);
 
   TargetMachine& getTargetMachine();
 

@@ -4,11 +4,11 @@ import logging
 import os
 import sys
 import tempfile
+from typing import Optional
 
 import torch
-from typing import Optional
 from torch.distributed.nn.jit.templates.remote_module_template import (
-    REMOTE_MODULE_TEMPLATE,
+    get_remote_module_template,
 )
 
 
@@ -79,8 +79,12 @@ def _write(out_path, text):
         logger.info("Skipped writing {}".format(out_path))
 
 
-def _do_instantiate_remote_module_template(generated_module_name, str_dict):
-    generated_code_text = REMOTE_MODULE_TEMPLATE.format(**str_dict)
+def _do_instantiate_remote_module_template(
+    generated_module_name, str_dict, enable_moving_cpu_tensors_to_cuda
+):
+    generated_code_text = get_remote_module_template(
+        enable_moving_cpu_tensors_to_cuda
+    ).format(**str_dict)
     out_path = os.path.join(
         INSTANTIATED_TEMPLATE_DIR_PATH, f"{generated_module_name}.py"
     )
@@ -96,7 +100,9 @@ def _do_instantiate_remote_module_template(generated_module_name, str_dict):
     return generated_module
 
 
-def instantiate_scriptable_remote_module_template(module_interface_cls):
+def instantiate_scriptable_remote_module_template(
+    module_interface_cls, enable_moving_cpu_tensors_to_cuda=True
+):
     if not getattr(module_interface_cls, "__torch_script_interface__", False):
         raise ValueError(
             f"module_interface_cls {module_interface_cls} must be a type object decorated by "
@@ -104,9 +110,9 @@ def instantiate_scriptable_remote_module_template(module_interface_cls):
         )
 
     # Generate the template instance name.
-    module_interface_cls_name = torch._jit_internal._qualified_name(module_interface_cls).replace(
-        ".", "_"
-    )
+    module_interface_cls_name = torch._jit_internal._qualified_name(
+        module_interface_cls
+    ).replace(".", "_")
     generated_module_name = f"{_FILE_PREFIX}{module_interface_cls_name}"
 
     # Generate type annotation strs.
@@ -130,7 +136,9 @@ def instantiate_scriptable_remote_module_template(module_interface_cls):
         kwargs=kwargs_str,
         jit_script_decorator="@torch.jit.script",
     )
-    return _do_instantiate_remote_module_template(generated_module_name, str_dict)
+    return _do_instantiate_remote_module_template(
+        generated_module_name, str_dict, enable_moving_cpu_tensors_to_cuda
+    )
 
 
 def instantiate_non_scriptable_remote_module_template():
@@ -144,4 +152,6 @@ def instantiate_non_scriptable_remote_module_template():
         arrow_and_future_return_type="",
         jit_script_decorator="",
     )
-    return _do_instantiate_remote_module_template(generated_module_name, str_dict)
+    # For a non-scriptable template, always enable moving CPU tensors to a cuda device,
+    # because there is no syntax limitation on the extra handling caused by the script.
+    return _do_instantiate_remote_module_template(generated_module_name, str_dict, True)

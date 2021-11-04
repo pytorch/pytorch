@@ -17,13 +17,21 @@ class atest : public ::testing::Test {
     y_float = tensor({1.0, 1.1, 8.7, 10.0, 24.0});
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   Tensor x_tensor, y_tensor;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   Tensor x_logical, y_logical;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   Tensor x_float, y_float;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const int INT = 1;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const int FLOAT = 2;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const int INTFLOAT = 3;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const int INTBOOL = 5;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const int INTBOOLFLOAT = 7;
 };
 
@@ -239,6 +247,7 @@ TEST_F(atest, atest) {
 
   trace();
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   float data[] = {1, 2, 3, 4, 5, 6};
 
   auto f = from_blob(data, {1, 2, 3});
@@ -255,6 +264,7 @@ TEST_F(atest, atest) {
   ASSERT_EQ(f.sizes()[2], 3);
 
   // TODO(ezyang): maybe do a more precise exception type.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(f.resize_({3, 4, 5}), std::exception);
   {
     int isgone = 0;
@@ -285,6 +295,7 @@ TEST_F(atest, atest) {
 
     // Attempt to specify the wrong device in from_blob
     auto t = at::empty({1, 2, 3}, TensorOptions(kCUDA, 0));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
     EXPECT_ANY_THROW(from_blob(t.data_ptr(), {1, 2, 3}, at::Device(kCUDA, 1)));
 
     // Infers the correct device

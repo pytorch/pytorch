@@ -50,6 +50,7 @@ bool GeluGradientFunctor<CPUContext>::Forward(
     T* dX,
     CPUContext* context) const {
   const int N = std::accumulate(
+      // NOLINTNEXTLINE(modernize-use-transparent-functors)
       dY_dims.cbegin(), dY_dims.cend(), 1, std::multiplies<int>());
   ConstEigenVectorArrayMap<T> dY_arr(dY, N);
   ConstEigenVectorArrayMap<T> X_arr(X, N);

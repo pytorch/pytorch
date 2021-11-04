@@ -5,7 +5,6 @@
 
 from caffe2.python import core
 from functools import partial
-from hypothesis import given
 from hypothesis import strategies as st
 
 import caffe2.python.hypothesis_test_util as hu

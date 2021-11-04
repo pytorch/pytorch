@@ -14,7 +14,7 @@ namespace caffe2 {
  * a sparse blob, its gradient name should be written into indice_ for
  * the sparse indices and value_ for the values.
  */
-struct CAFFE2_API GradientWrapper {
+struct TORCH_API GradientWrapper {
   string dense_;
   string indices_;
   string values_;
@@ -33,7 +33,7 @@ struct CAFFE2_API GradientWrapper {
 /**
  * A struct that holds the gradient operators and related gradient maps.
  */
-struct CAFFE2_API GradientOpsMeta {
+struct TORCH_API GradientOpsMeta {
   vector<OperatorDef> ops_;
   vector<GradientWrapper> g_input_;
 
@@ -44,7 +44,7 @@ struct CAFFE2_API GradientOpsMeta {
       : ops_(ops), g_input_(v) {}
 };
 
-class CAFFE2_API GradientMakerBase {
+class TORCH_API GradientMakerBase {
  public:
   GradientMakerBase(
       const OperatorDef& def,
@@ -256,7 +256,7 @@ class CAFFE2_API GradientMakerBase {
  * that the gradient computation should not flow through it at all, and throws
  * an error if it is called.
  */
-class CAFFE2_API NoGradient : public GradientMakerBase {
+class TORCH_API NoGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
     return vector<OperatorDef>();
@@ -328,7 +328,7 @@ C10_DECLARE_REGISTRY(
 /**
  * @brief Gets the GradientOpsMeta for the given operator def.
  */
-CAFFE2_API GradientOpsMeta GetGradientForOp(
+TORCH_API GradientOpsMeta GetGradientForOp(
     const OperatorDef& def,
     const vector<GradientWrapper>& g_output);
 

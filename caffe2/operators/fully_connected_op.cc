@@ -28,7 +28,9 @@ using namespace std::placeholders;
 OPERATOR_SCHEMA(FCTransposed)
     .NumInputs(3)
     .NumOutputs(1)
+    // NOLINTNEXTLINE(modernize-avoid-bind)
     .TensorInferenceFunction(std::bind(FCShapeInference, _1, _2, true))
+    // NOLINTNEXTLINE(modernize-avoid-bind)
     .CostInferenceFunction(std::bind(CostInferenceForFC, _1, _2, true))
     .SetDoc(R"DOC(
 Same as FC, but weight matrix is supposed to be already pretransposed.
@@ -39,7 +41,9 @@ FCTransposed stands for calling blass with no noTrans, noTrans
 OPERATOR_SCHEMA(FC)
     .NumInputs(3)
     .NumOutputs(1)
+    // NOLINTNEXTLINE(modernize-avoid-bind)
     .TensorInferenceFunction(std::bind(FCShapeInference, _1, _2, false))
+    // NOLINTNEXTLINE(modernize-avoid-bind)
     .CostInferenceFunction(std::bind(CostInferenceForFC, _1, _2, false))
     .SetDoc(R"DOC(
 The FC operator computes an output $(Y)$ as a linear combination of the input data blob $(X)$ with a weight blob $(W)$ and bias blob $(b)$. More formally,
@@ -137,14 +141,18 @@ Y:
 GRADIENT_OPERATOR_SCHEMA(FCGradient)
     .NumInputs(3)
     .NumOutputs(2, 3)
+    // NOLINTNEXTLINE(modernize-avoid-bind)
     .TensorInferenceFunction(std::bind(FCGradientShapeInference, _1, _2, false))
     .CostInferenceFunction(
+        // NOLINTNEXTLINE(modernize-avoid-bind)
         std::bind(CostInferenceForFCGradient, _1, _2, false));
 GRADIENT_OPERATOR_SCHEMA(FCTransposedGradient)
     .NumInputs(3)
     .NumOutputs(2, 3)
+    // NOLINTNEXTLINE(modernize-avoid-bind)
     .TensorInferenceFunction(std::bind(FCGradientShapeInference, _1, _2, false))
     .CostInferenceFunction(
+        // NOLINTNEXTLINE(modernize-avoid-bind)
         std::bind(CostInferenceForFCGradient, _1, _2, false));
 
 namespace {

@@ -16,7 +16,7 @@ constexpr DeviceType HIP = DeviceType::HIP;
 constexpr DeviceType COMPILE_TIME_MAX_DEVICE_TYPES =
     DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES;
 
-inline CAFFE2_API DeviceType ProtoToType(const caffe2::DeviceTypeProto p) {
+inline TORCH_API DeviceType ProtoToType(const caffe2::DeviceTypeProto p) {
   switch (p) {
     case caffe2::PROTO_CPU:
       return DeviceType::CPU;
@@ -44,11 +44,11 @@ inline CAFFE2_API DeviceType ProtoToType(const caffe2::DeviceTypeProto p) {
   }
 }
 
-inline CAFFE2_API DeviceType ProtoToType(int p) {
+inline TORCH_API DeviceType ProtoToType(int p) {
   return ProtoToType(static_cast<caffe2::DeviceTypeProto>(p));
 }
 
-inline CAFFE2_API DeviceTypeProto TypeToProto(const DeviceType& t) {
+inline TORCH_API DeviceTypeProto TypeToProto(const DeviceType& t) {
   switch (t) {
     case DeviceType::CPU:
       return caffe2::PROTO_CPU;
@@ -76,8 +76,7 @@ inline CAFFE2_API DeviceTypeProto TypeToProto(const DeviceType& t) {
   }
 }
 
-inline CAFFE2_API caffe2::DeviceOption DeviceToOption(
-    const at::Device& device) {
+inline TORCH_API caffe2::DeviceOption DeviceToOption(const at::Device& device) {
   caffe2::DeviceOption option;
   auto type = device.type();
   option.set_device_type(TypeToProto(type));
@@ -109,18 +108,18 @@ inline CAFFE2_API caffe2::DeviceOption DeviceToOption(
   return option;
 }
 
-inline CAFFE2_API at::Device OptionToDevice(const caffe2::DeviceOption option) {
+inline TORCH_API at::Device OptionToDevice(const caffe2::DeviceOption option) {
   auto type = option.device_type();
-  int32_t id = -1;
+  c10::DeviceIndex id = -1;
   switch (type) {
     case caffe2::PROTO_CPU:
       if (option.has_numa_node_id()) {
-        id = option.numa_node_id();
+        id = static_cast<c10::DeviceIndex>(option.numa_node_id());
       }
       break;
     case caffe2::PROTO_CUDA:
     case caffe2::PROTO_HIP:
-      id = option.device_id();
+      id = static_cast<c10::DeviceIndex>(option.device_id());
       break;
   }
   return at::Device(ProtoToType(type), id);

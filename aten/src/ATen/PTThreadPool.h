@@ -5,7 +5,7 @@
 
 namespace at {
 
-class CAFFE2_API PTThreadPool : public c10::ThreadPool {
+class TORCH_API PTThreadPool : public c10::ThreadPool {
 public:
   explicit PTThreadPool(
       int pool_size,

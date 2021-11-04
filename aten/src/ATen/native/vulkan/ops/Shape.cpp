@@ -21,8 +21,8 @@ Tensor view(
     self.options(),
   };
 
-  api::Command::Buffer command_buffer = context->command().pool.allocate();
-  command_buffer.begin();
+  api::Command::Pool& command_pool = context->command().pool;
+  api::Command::Buffer& command_buffer = command_pool.stream();
   {
     command_buffer.copy(
         // Read-only access is implied on const tensors and triggers an async
@@ -37,16 +37,23 @@ Tensor view(
             vTensor::Stage::Transfer,
             vTensor::Access::Write));
   }
-  command_buffer.end();
-  command_buffer.submit(context->gpu().queue);
+  command_pool.submit(context->gpu().queue, command_buffer);
 
   return convert(v_output);
+}
+
+Tensor _reshape_alias(
+    const Tensor& self_arg,
+    const IntArrayRef shape,
+    const IntArrayRef strides) {
+  return view(self_arg, shape);
 }
 
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
-  m.impl("view", TORCH_FN(view));
+  m.impl(TORCH_SELECTIVE_NAME("aten::view"), TORCH_FN(view));
+  m.impl(TORCH_SELECTIVE_NAME("aten::_reshape_alias"), TORCH_FN(_reshape_alias));
 }
 
 #endif /* USE_VULKAN_API */

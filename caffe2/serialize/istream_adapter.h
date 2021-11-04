@@ -9,14 +9,14 @@ namespace caffe2 {
 namespace serialize {
 
 // this is a reader implemented by std::istream
-class CAFFE2_API IStreamAdapter final : public ReadAdapterInterface {
+class TORCH_API IStreamAdapter final : public ReadAdapterInterface {
  public:
   C10_DISABLE_COPY_AND_ASSIGN(IStreamAdapter);
   explicit IStreamAdapter(std::istream* istream);
   size_t size() const override;
   size_t read(uint64_t pos, void* buf, size_t n, const char* what = "")
       const override;
-  ~IStreamAdapter();
+  ~IStreamAdapter() override;
 
  private:
   std::istream* istream_;

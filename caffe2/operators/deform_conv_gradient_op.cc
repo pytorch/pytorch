@@ -16,6 +16,7 @@ class GetDeformConvGradient : public GradientMakerBase {
     ArgumentHelper argsHelper(def_);
 
     auto compute_dX =
+        // NOLINTNEXTLINE(modernize-use-bool-literals)
         !argsHelper.GetSingleArgument<bool>("no_gradient_to_input", 0);
 
     if (def_.input_size() == 4) {

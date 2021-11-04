@@ -18,6 +18,7 @@ class HistogramOp final : public Operator<Context> {
         bin_edges_.size(),
         2,
         "Number of bin edges must be greater than or equal to 2.");
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 1; i < bin_edges_.size(); i++) {
       CAFFE_ENFORCE_GT(
           bin_edges_[i],
@@ -48,6 +49,7 @@ class HistogramOp final : public Operator<Context> {
         const auto bisection_it = std::upper_bound(
             bin_edges_.begin(), bin_edges_.end(), x_data[data_idx]);
         const int bisection_idx = bisection_it - bin_edges_.begin();
+        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
         if (bisection_idx > 0 && bisection_idx < bin_edges_.size()) {
           histogram_data[bisection_idx - 1]++;
         }

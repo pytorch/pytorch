@@ -9,7 +9,7 @@ namespace math {
 
 // Transpose tensor X with dims by axes and write the result to tensor Y.
 template <typename TIndex, typename TData, class Context>
-CAFFE2_API void Transpose(
+TORCH_API void Transpose(
     int ndim,
     const TIndex* dims,
     const int* axes,
@@ -18,11 +18,11 @@ CAFFE2_API void Transpose(
     Context* context);
 
 template <typename T, class Context>
-CAFFE2_API void
+TORCH_API void
 NCHW2NHWC(int N, int C, int HxW, const T* X, T* Y, Context* context);
 
 template <typename T, class Context>
-CAFFE2_API void
+TORCH_API void
 NHWC2NCHW(int N, int C, int HxW, const T* X, T* Y, Context* context);
 
 } // namespace math

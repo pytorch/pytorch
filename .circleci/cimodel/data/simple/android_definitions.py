@@ -51,13 +51,15 @@ class AndroidGradleJob:
                  template_name,
                  dependencies,
                  is_master_only=True,
-                 is_pr_only=False):
+                 is_pr_only=False,
+                 extra_props=tuple()):
 
         self.job_name = job_name
         self.template_name = template_name
         self.dependencies = dependencies
         self.is_master_only = is_master_only
         self.is_pr_only = is_pr_only
+        self.extra_props = dict(extra_props)
 
     def gen_tree(self):
 
@@ -70,6 +72,8 @@ class AndroidGradleJob:
             props_dict["filters"] = branch_filters.gen_filter_dict(branch_filters.NON_PR_BRANCH_LIST)
         elif self.is_pr_only:
             props_dict["filters"] = branch_filters.gen_filter_dict(branch_filters.PR_BRANCH_LIST)
+        if self.extra_props:
+            props_dict.update(self.extra_props)
 
         return [{self.template_name: props_dict}]
 
@@ -79,17 +83,10 @@ WORKFLOW_DATA = [
     AndroidJob(["x86_64"], "pytorch_linux_build"),
     AndroidJob(["arm", "v7a"], "pytorch_linux_build"),
     AndroidJob(["arm", "v8a"], "pytorch_linux_build"),
-    AndroidJob(["vulkan", "x86_32"], "pytorch_linux_build", is_master_only=False),
     AndroidGradleJob(
         "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build-x86_32",
         "pytorch_android_gradle_build-x86_32",
         ["pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_32_build"],
-        is_master_only=False,
-        is_pr_only=True),
-    AndroidGradleJob(
-        "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single",
-        "pytorch_android_gradle_custom_build_single",
-        [DOCKER_REQUIREMENT_NDK],
         is_master_only=False,
         is_pr_only=True),
     AndroidGradleJob(

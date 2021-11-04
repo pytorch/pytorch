@@ -12,6 +12,7 @@ inline float logit(float p) {
   // it computes log(p / (1-p))
   // to avoid numeric issue, hard code p log(p) when p approaches 0
   float x = std::min(std::max(p, kLOG_THRESHOLD()), 1 - kLOG_THRESHOLD());
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return -log(1. / x - 1.);
 }
 

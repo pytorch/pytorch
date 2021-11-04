@@ -97,15 +97,24 @@ std::string used_cpu_capability() {
   ss << "CPU capability usage: ";
   auto capability = native::get_cpu_capability();
   switch (capability) {
+#ifdef HAVE_VSX_CPU_DEFINITION
+    case native::CPUCapability::DEFAULT:
+      ss << "DEFAULT";
+      break;
+    case native::CPUCapability::VSX:
+      ss << "VSX";
+      break;
+#else
     case native::CPUCapability::DEFAULT:
       ss << "NO AVX";
-      break;
-    case native::CPUCapability::AVX:
-      ss << "AVX";
       break;
     case native::CPUCapability::AVX2:
       ss << "AVX2";
       break;
+    case native::CPUCapability::AVX512:
+      ss << "AVX512";
+      break;
+#endif
     default:
       break;
   }
@@ -155,7 +164,7 @@ std::string show_config() {
   ss << "  - " << get_openmp_version() << "\n";
 #endif
 
-#ifdef USE_LAPACK
+#if AT_BUILD_WITH_LAPACK()
   // TODO: Actually record which one we actually picked
   ss << "  - LAPACK is enabled (usually provided by MKL)\n";
 #endif
@@ -165,10 +174,18 @@ std::string show_config() {
   ss << "  - NNPACK is enabled\n";
 #endif
 
+#ifdef CROSS_COMPILING_MACOSX
+  ss << "  - Cross compiling on MacOSX\n";
+#endif
+
   ss << "  - "<< used_cpu_capability() << "\n";
 
   if (hasCUDA()) {
     ss << detail::getCUDAHooks().showConfig();
+  }
+
+  if (hasORT()) {
+    ss << detail::getORTHooks().showConfig();
   }
 
   ss << "  - Build settings: ";
@@ -181,6 +198,7 @@ std::string show_config() {
 
   // TODO: do HIP
   // TODO: do XLA
+  // TODO: do MLC
 
   return ss.str();
 }

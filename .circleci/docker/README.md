@@ -12,8 +12,20 @@ each image as the `BUILD_ENVIRONMENT` environment variable.
 
 See `build.sh` for valid build environments (it's the giant switch).
 
+Docker builds are now defined with `.circleci/cimodel/data/simple/docker_definitions.py`
+
 ## Contents
 
 * `build.sh` -- dispatch script to launch all builds
 * `common` -- scripts used to execute individual Docker build stages
 * `ubuntu-cuda` -- Dockerfile for Ubuntu image with CUDA support for nvidia-docker
+
+## Usage
+
+```bash
+# Build a specific image
+./build.sh pytorch-linux-bionic-py3.8-gcc9 -t myimage:latest
+
+# Set flags (see build.sh) and build image
+sudo bash -c 'PROTOBUF=1 ./build.sh pytorch-linux-bionic-py3.8-gcc9 -t myimage:latest
+```

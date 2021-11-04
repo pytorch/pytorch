@@ -23,7 +23,7 @@ class IDEEPContext final : public BaseContext {
 
   ~IDEEPContext() noexcept override {}
 
-  inline void SwitchToDevice(int /*stream_id*/) {}
+  inline void SwitchToDevice(int64_t /*stream_id*/) {}
   using BaseContext::SwitchToDevice;
 
   inline void WaitEvent(const Event& ev) {

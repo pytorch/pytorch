@@ -15,6 +15,7 @@ ERArrXXf BoxesArea(const ERArrXXf& boxes, const bool legacy_plus_one) {
   const auto h = boxes.col(3) - boxes.col(1) + int(legacy_plus_one);
   const ERArrXXf areas = w * h;
   CAFFE_ENFORCE((areas >= 0).all(), "Negative areas founds: ", boxes);
+  // NOLINTNEXTLINE(performance-no-automatic-move)
   return areas;
 }
 
@@ -182,6 +183,7 @@ bool CollectAndDistributeFpnRpnProposalsOp<CPUContext>::RunOnDevice() {
   const int canon_level = roi_canonical_level_;
   auto rois_block = rois.block(0, 1, rois.rows(), 4);
   auto lvls = utils::MapRoIsToFpnLevels(
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       rois_block, lvl_min, lvl_max, canon_scale, canon_level, legacy_plus_one_);
 
   // equivalent to python code
@@ -327,6 +329,7 @@ bool DistributeFpnProposalsOp<CPUContext>::RunOnDevice() {
   const int canon_level = roi_canonical_level_;
   auto rois_block = rois.block(0, 1, rois.rows(), 4);
   auto lvls = utils::MapRoIsToFpnLevels(
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       rois_block, lvl_min, lvl_max, canon_scale, canon_level, legacy_plus_one_);
 
   // Create new roi blobs for each FPN level

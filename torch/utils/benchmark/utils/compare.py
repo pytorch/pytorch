@@ -4,9 +4,8 @@ import enum
 import itertools as it
 from typing import DefaultDict, List, Optional, Tuple
 
-import numpy as np
-
 from torch.utils.benchmark.utils import common
+from torch import tensor as _tensor
 
 __all__ = ["Compare"]
 
@@ -44,7 +43,7 @@ class _Column(object):
             and any(r.has_warnings for r in self._flat_results if r)
         )
         leading_digits = [
-            int(np.ceil(np.log10(r.median / self._time_scale))) if r else None
+            int(_tensor(r.median / self._time_scale).log10().ceil()) if r else None
             for r in self._flat_results
         ]
         unit_digits = max(d for d in leading_digits if d is not None)

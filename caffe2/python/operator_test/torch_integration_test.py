@@ -558,8 +558,8 @@ class TorchIntegration(hu.HypothesisTestCase):
 
         roi_feature_ref = roi_align_ref(feature, rois)
         roi_feature = torch.ops._caffe2.RoIAlign(
-            torch.Tensor(feature).to(device),
-            torch.Tensor(rois).to(device),
+            torch.tensor(feature).to(device),
+            torch.tensor(rois).to(device),
             order="NCHW",
             spatial_scale=1.0,
             pooled_h=3,
@@ -615,8 +615,8 @@ class TorchIntegration(hu.HypothesisTestCase):
 
         roi_feature_ref = roi_align_ref(feature, rois)
         roi_feature = torch.ops._caffe2.RoIAlignRotated(
-            torch.Tensor(feature).to(device),
-            torch.Tensor(rois).to(device),
+            torch.tensor(feature).to(device),
+            torch.tensor(rois).to(device),
             order="NCHW",
             spatial_scale=1.0,
             pooled_h=3,
@@ -639,7 +639,7 @@ class TorchIntegration(hu.HypothesisTestCase):
         im_dims = np.random.randint(100, 600, batch_size)
         rpn_rois_and_scores = []
         for i in range(5):
-            rpn_rois_and_scores.append(torch.Tensor(generate_rois(roi_counts, im_dims)))
+            rpn_rois_and_scores.append(torch.tensor(generate_rois(roi_counts, im_dims)))
         for i in range(5):
             rpn_rois_and_scores.append(torch.rand(sum(roi_counts)))
 
@@ -842,16 +842,16 @@ class TorchIntegration(hu.HypothesisTestCase):
 
     def test_alias_with_name_is_in_place(self):
         device = "cuda" if workspace.has_cuda_support else "cpu"
-        x = torch.Tensor([3, 42]).to(device)
+        x = torch.tensor([3., 42.]).to(device=device)
         y = torch.ops._caffe2.AliasWithName(x, "new_name")
         x[1] = 6
-        torch.testing.assert_allclose(x, torch.Tensor([3, 6]).to(device))
+        torch.testing.assert_allclose(x, torch.tensor([3., 6.]).to(device=device))
         # y should also change because y is alias of x
-        torch.testing.assert_allclose(y, torch.Tensor([3, 6]).to(device))
+        torch.testing.assert_allclose(y, torch.tensor([3., 6.]).to(device=device))
 
     @unittest.skipIf(not workspace.has_cuda_support, "No cuda support")
     def test_copy_between_cpu_and_gpu(self):
-        x_cpu_ref = torch.Tensor([1, 2, 3])
+        x_cpu_ref = torch.tensor([1., 2., 3.])
         x_gpu_ref = x_cpu_ref.to("cuda")
 
         x_gpu = torch.ops._caffe2.CopyCPUToGPU(x_cpu_ref)
@@ -923,8 +923,8 @@ class TorchIntegration(hu.HypothesisTestCase):
         expected_output = _percentile_ref(original_values, value_to_pct, lengths)
         actual_output = torch.ops._caffe2.Percentile(
             torch.tensor(original_values),
-            torch.Tensor(value_to_pct),
-            torch.Tensor(lengths).int(),
+            torch.tensor(value_to_pct),
+            torch.tensor(lengths),
         )
         torch.testing.assert_allclose(expected_output, actual_output.cpu())
 
@@ -945,7 +945,7 @@ class TorchIntegration(hu.HypothesisTestCase):
 
         expected_output = _batch_bucket_one_hot_ref(data, lengths, boundaries)
         actual_output = torch.ops._caffe2.BatchBucketOneHot(
-            torch.tensor(data), torch.Tensor(lengths).int(), torch.Tensor(boundaries)
+            torch.tensor(data), torch.tensor(lengths), torch.tensor(boundaries)
         )
         torch.testing.assert_allclose(expected_output, actual_output.cpu())
 
@@ -991,7 +991,7 @@ class TorchIntegration(hu.HypothesisTestCase):
             np.testing.assert_array_almost_equal(ref_outputs[i], outputs[i].numpy())
 
     @given(lengths_0=st.integers(1, 10), lengths_1=st.integers(1, 10))
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_merge_id_lists(self, lengths_0, lengths_1):
         def _merge_id_lists(lengths, values):
             ref_op = core.CreateOperator(

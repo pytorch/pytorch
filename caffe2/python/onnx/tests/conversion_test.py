@@ -6,7 +6,6 @@
 
 
 import json
-import six
 import tempfile
 import textwrap
 import traceback
@@ -82,9 +81,9 @@ class TestConversion(TestCase):
         caffe2_net.flush()
 
         args = [caffe2_net.name, '--output', output.name]
-        six.assertRaisesRegex(self, Exception,
-                              'value info',
-                              self._run_command, caffe2_to_onnx, args)
+        self.assertRaisesRegex(Exception,
+                               'value info',
+                               self._run_command, caffe2_to_onnx, args)
 
         args.extend([
             '--value-info',
@@ -99,6 +98,7 @@ class TestConversion(TestCase):
         self.assertEqual(onnx_model.graph.node[0].op_type, 'Relu')
         self.assertEqual(len(onnx_model.graph.initializer), 0)
 
+    @unittest.skip("Disabled due to onnx optimizer deprecation")
     def test_onnx_to_caffe2(self):
         onnx_model = tempfile.NamedTemporaryFile()
         output = tempfile.NamedTemporaryFile()
@@ -241,6 +241,7 @@ class TestConversion(TestCase):
         ]
         return retval_nodes
 
+    @unittest.skip("Disabled due to onnx optimizer deprecation")
     def test_onnx_to_caffe2_loop(self):
         body_nodes = [helper.make_node(
             "MatMul", ["_X", "W"], ["_Y"])]

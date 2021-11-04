@@ -99,7 +99,7 @@ echo "ndk.dir=/opt/ndk" >> $GRADLE_LOCAL_PROPERTIES
 chown -R jenkins /var/lib/jenkins/gradledeps
 chgrp -R jenkins /var/lib/jenkins/gradledeps
 
-sudo -H -u jenkins $GRADLE_HOME/bin/gradle -p /var/lib/jenkins/gradledeps -g /var/lib/jenkins/.gradle --refresh-dependencies --debug --stacktrace assemble
+sudo -H -u jenkins $GRADLE_HOME/bin/gradle -Pandroid.useAndroidX=true -p /var/lib/jenkins/gradledeps -g /var/lib/jenkins/.gradle --refresh-dependencies --debug --stacktrace assemble
 
 chown -R jenkins /var/lib/jenkins/.gradle
 chgrp -R jenkins /var/lib/jenkins/.gradle

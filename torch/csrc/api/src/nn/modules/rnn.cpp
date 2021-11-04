@@ -5,6 +5,7 @@
 #include <torch/utils.h>
 
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 #include <array>
 #include <cmath>
@@ -50,6 +51,7 @@ namespace detail {
 template <typename Derived>
 RNNImplBase<Derived>::RNNImplBase(const RNNOptionsBase& options_)
   : options_base(options_) {
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
 
@@ -71,11 +73,23 @@ void RNNImplBase<Derived>::reset() {
       "num_layers=", options_base.num_layers());
   }
 
+  TORCH_CHECK(
+    0 <= options_base.proj_size() && options_base.proj_size() < options_base.hidden_size(),
+    "proj_size has to be a positive integer, smaller than ",
+    "hidden_size or zero to disable projections");
+
+  if (options_base.proj_size() > 0) {
+    TORCH_CHECK(
+      c10::get_if<enumtype::kLSTM>(&options_base.mode()),
+      "proj_size argument is only supported for LSTM, not RNN or GRU");
+  }
+
   int64_t gate_size = 0;
   if (c10::get_if<enumtype::kLSTM>(&options_base.mode())) {
     gate_size = 4 * options_base.hidden_size();
   } else if (c10::get_if<enumtype::kGRU>(&options_base.mode())) {
     gate_size = 3 * options_base.hidden_size();
+  // NOLINTNEXTLINE(bugprone-branch-clone)
   } else if (c10::get_if<enumtype::kRNN_TANH>(&options_base.mode())) {
     gate_size = options_base.hidden_size();
   } else if (c10::get_if<enumtype::kRNN_RELU>(&options_base.mode())) {
@@ -87,31 +101,38 @@ void RNNImplBase<Derived>::reset() {
   flat_weights_names_ = {};
   all_weights_ = {};
 
-  for (int64_t layer = 0; layer < options_base.num_layers(); layer++) {
-    for (int64_t direction = 0; direction < num_directions; direction++) {
-      int64_t layer_input_size = layer == 0 ? options_base.input_size() : options_base.hidden_size() * num_directions;
+  for(const auto layer : c10::irange(options_base.num_layers())) {
+    for(const auto direction : c10::irange(num_directions)) {
+      int64_t real_hidden_size = options_base.proj_size() > 0 ? options_base.proj_size() : options_base.hidden_size();
+      int64_t layer_input_size = layer == 0 ? options_base.input_size() : real_hidden_size * num_directions;
 
       auto w_ih = torch::empty({gate_size, layer_input_size});
-      auto w_hh = torch::empty({gate_size, options_base.hidden_size()});
+      auto w_hh = torch::empty({gate_size, real_hidden_size});
       auto b_ih = torch::empty({gate_size});
       // Second bias vector included for CuDNN compatibility. Only one
       // bias vector is needed in standard definition.
       auto b_hh = torch::empty({gate_size});
-      std::vector<Tensor> layer_params = {w_ih, w_hh, b_ih, b_hh};
+      std::vector<Tensor> layer_params = {w_ih, w_hh};
 
       std::string suffix = direction == 1 ? "_reverse" : "";
       std::vector<std::string> param_names = {"weight_ih_l{layer}{suffix}", "weight_hh_l{layer}{suffix}"};
       if (options_base.bias()) {
         param_names.emplace_back("bias_ih_l{layer}{suffix}");
         param_names.emplace_back("bias_hh_l{layer}{suffix}");
+        layer_params.emplace_back(b_ih);
+        layer_params.emplace_back(b_hh);
       }
-      for (size_t i = 0; i < param_names.size(); i++) {  // NOLINT(modernize-loop-convert)
-        std::string x = std::regex_replace(param_names[i], std::regex("\\{layer\\}"), c10::str(layer));
-        x = std::regex_replace(x, std::regex("\\{suffix\\}"), c10::str(suffix));
-        param_names[i] = x;
+      if (options_base.proj_size() > 0) {
+        auto w_hr = torch::empty({options_base.proj_size(), options_base.hidden_size()});
+        layer_params.emplace_back(w_hr);
+        param_names.emplace_back("weight_hr_l{layer}{suffix}");
+      }
+      for(auto& param_name : param_names) {
+        std::string x = std::regex_replace(param_name, std::regex("\\{layer\\}"), c10::str(layer));
+        param_name = std::regex_replace(x, std::regex("\\{suffix\\}"), c10::str(suffix));
       }
 
-      for (size_t i = 0; i < param_names.size(); i++) {
+      for(const auto i : c10::irange(param_names.size())) {
         auto name = param_names[i];
         auto param = layer_params[i];
         this->register_parameter(name, param);
@@ -180,12 +201,17 @@ void RNNImplBase<Derived>::flatten_parameters() {
     {
       torch::NoGradGuard no_grad;
       if (torch::_use_cudnn_rnn_flatten_weight()) {
+        int64_t num_weights = options_base.bias() ? 4 : 2;
+        if (options_base.proj_size() > 0) {
+          ++num_weights;
+        }
         torch::_cudnn_rnn_flatten_weight(
               flat_weights_,
-              options_base.bias() ? 4 : 2,
+              num_weights,
               options_base.input_size(),
               static_cast<int64_t>(get_cudnn_mode_for_rnn(options_base.mode())),
               options_base.hidden_size(),
+              options_base.proj_size(),
               options_base.num_layers(),
               options_base.batch_first(),
               options_base.bidirectional());
@@ -260,7 +286,8 @@ std::tuple<int64_t, int64_t, int64_t> RNNImplBase<Derived>::get_expected_hidden_
     mini_batch = options_base.batch_first() ? input.size(0) : input.size(1);
   }
   int64_t num_directions = options_base.bidirectional() ? 2 : 1;
-  return std::make_tuple(options_base.num_layers() * num_directions, mini_batch, options_base.hidden_size());
+  int64_t real_hidden_size = options_base.proj_size() > 0 ? options_base.proj_size() : options_base.hidden_size();
+  return std::make_tuple(options_base.num_layers() * num_directions, mini_batch, real_hidden_size);
 }
 
 template <typename Derived>
@@ -306,8 +333,11 @@ void RNNImplBase<Derived>::pretty_print(std::ostream& stream) const {
          << ", bias=" << options_base.bias()
          << ", batch_first=" << options_base.batch_first()
          << ", dropout=" << options_base.dropout()
-         << ", bidirectional=" << options_base.bidirectional()
-         << ")";
+         << ", bidirectional=" << options_base.bidirectional();
+  if (options_base.proj_size() > 0) {
+    stream << ", proj_size=" << options_base.proj_size();
+  }
+  stream << ")";
 }
 
 template <typename Derived>
@@ -438,16 +468,27 @@ LSTMImpl::LSTMImpl(const LSTMOptions& options_)
               .bias(options_.bias())
               .batch_first(options_.batch_first())
               .dropout(options_.dropout())
-              .bidirectional(options_.bidirectional())),
+              .bidirectional(options_.bidirectional())
+              .proj_size(options_.proj_size())),
       options(options_) {}
+
+std::tuple<int64_t, int64_t, int64_t> LSTMImpl::get_expected_cell_size(
+  const Tensor& input, const Tensor& batch_sizes) const {
+  int64_t mini_batch = 0;
+  if (batch_sizes.defined()) {
+    mini_batch = batch_sizes[0].item<int64_t>();
+  } else {
+    mini_batch = options_base.batch_first() ? input.size(0) : input.size(1);
+  }
+  int64_t num_directions = options_base.bidirectional() ? 2 : 1;
+  return std::make_tuple(options_base.num_layers() * num_directions, mini_batch, options_base.hidden_size());
+}
 
 void LSTMImpl::check_forward_args(const Tensor& input, std::tuple<Tensor, Tensor> hidden, const Tensor& batch_sizes) const {
   this->check_input(input, batch_sizes);
-  auto expected_hidden_size = this->get_expected_hidden_size(input, batch_sizes);
-
-  this->check_hidden_size(std::get<0>(hidden), expected_hidden_size,
+  this->check_hidden_size(std::get<0>(hidden), this->get_expected_hidden_size(input, batch_sizes),
                           "Expected hidden[0] size {1}, got {2}");
-  this->check_hidden_size(std::get<1>(hidden), expected_hidden_size,
+  this->check_hidden_size(std::get<1>(hidden), this->get_expected_cell_size(input, batch_sizes),
                           "Expected hidden[1] size {1}, got {2}");
 }
 
@@ -471,10 +512,14 @@ std::tuple<Tensor, std::tuple<Tensor, Tensor>> LSTMImpl::forward_helper(
   std::tuple<Tensor, Tensor> hx;
   if (!hx_opt.has_value()) {
     int64_t num_directions = options.bidirectional() ? 2 : 1;
-    auto zeros = torch::zeros({options.num_layers() * num_directions,
-                     max_batch_size, options.hidden_size()},
-                     torch::dtype(input.dtype()).device(input.device()));
-    hx = std::make_tuple(zeros, zeros);
+    int64_t real_hidden_size = options.proj_size() > 0 ? options.proj_size() : options.hidden_size();
+    auto h_zeros = torch::zeros({options.num_layers() * num_directions,
+                       max_batch_size, real_hidden_size},
+                       torch::dtype(input.dtype()).device(input.device()));
+    auto c_zeros = torch::zeros({options.num_layers() * num_directions,
+                       max_batch_size, options.hidden_size()},
+                       torch::dtype(input.dtype()).device(input.device()));
+    hx = std::make_tuple(h_zeros, c_zeros);
   } else {
     hx = hx_opt.value();
     // Each batch of the hidden state should match the input sequence that
@@ -607,6 +652,7 @@ template <typename Derived>
 RNNCellImplBase<Derived>::RNNCellImplBase(
   const RNNCellOptionsBase& options_)
   : options_base(options_) {
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
 
@@ -650,13 +696,13 @@ void RNNCellImplBase<Derived>::pretty_print(std::ostream& stream) const {
   if (!nonlinearity_str.empty() && nonlinearity_str != "kTanh") {
     stream << ", nonlinearity=" << nonlinearity_str;
   }
-  stream << ")"; 
+  stream << ")";
 }
 
 template <typename Derived>
 void RNNCellImplBase<Derived>::check_forward_input(const Tensor& input) const {
   TORCH_CHECK(
-    input.size(1) == options_base.input_size(), 
+    input.size(1) == options_base.input_size(),
     "input has inconsistent input_size: got ", input.size(1), " expected ", options_base.input_size());
 }
 

@@ -1,6 +1,8 @@
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/BucketizationUtils.h>
+#include <ATen/native/Resize.h>
+#include <c10/util/irange.h>
 
 /* Implement a TF like searchsorted and a bucketize function running on cpu
  *
@@ -57,7 +59,7 @@ void searchsorted_cpu_contiguous(Tensor& result, const Tensor& input, const Tens
 
   bool is_1d_boundaries = boundaries.dim() == 1;
   at::parallel_for(0, numel_in, SEARCHSORTED_GRAIN_SIZE, [&](int64_t start, int64_t end) {
-    for (int64_t i = start; i < end; ++i) {
+    for (const auto i : c10::irange(start, end)) {
       // If boundaries tensor is 1d, we always search the entire boundary tensor
       int64_t start_bd = is_1d_boundaries ? 0 : i / idim_in * idim_bd;
       const input_t *data_bd_start = &data_bd[start_bd];
@@ -74,24 +76,35 @@ void searchsorted_cpu_contiguous(Tensor& result, const Tensor& input, const Tens
 
 void dispatch(Tensor& result, const Tensor& input, const Tensor& boundaries, bool out_int32, bool right) {
   if (!out_int32) {
-    AT_DISPATCH_ALL_TYPES(input.scalar_type(), "searchsorted_out_cpu", [&] {
-      searchsorted_cpu_contiguous<scalar_t, int64_t>(result, input, boundaries, right);
-    });
+    AT_DISPATCH_ALL_TYPES_AND2(
+        ScalarType::Half,
+        ScalarType::BFloat16,
+        input.scalar_type(),
+        "searchsorted_out_cpu",
+        [&] {
+          searchsorted_cpu_contiguous<scalar_t, int64_t>(
+              result, input, boundaries, right);
+        });
   }
   else {
-    AT_DISPATCH_ALL_TYPES(input.scalar_type(), "searchsorted_out_cpu", [&] {
-      searchsorted_cpu_contiguous<scalar_t, int>(result, input, boundaries, right);
-    });
+    AT_DISPATCH_ALL_TYPES_AND2(
+        ScalarType::Half,
+        ScalarType::BFloat16,
+        input.scalar_type(),
+        "searchsorted_out_cpu",
+        [&] {
+          searchsorted_cpu_contiguous<scalar_t, int>(
+              result, input, boundaries, right);
+        });
   }
 }
 
 }
 
-Tensor& searchsorted_out_cpu(Tensor& result, const Tensor& sorted_sequence, const Tensor& self, bool out_int32, bool right) {
+Tensor& searchsorted_out_cpu(const Tensor& sorted_sequence, const Tensor& self, bool out_int32, bool right, Tensor& result) {
   searchsorted_pre_check(sorted_sequence, self, result, out_int32);
-  if (result.numel() == 0) {
-    result.resize_(self.sizes());
-  }
+  at::native::resize_output(result, self.sizes());
+
   if (self.numel() == 0) {
     return result;
   }
@@ -113,17 +126,17 @@ Tensor searchsorted_cpu(const Tensor& sorted_sequence, const Tensor& self, bool 
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
   c10::TensorOptions options = TensorOptions().device(self.options().device()).dtype(scalar_type);
   Tensor result = at::empty({0}, options, MemoryFormat::Contiguous);
-  searchsorted_out_cpu(result, sorted_sequence, self, out_int32, right);
+  at::native::searchsorted_out_cpu(sorted_sequence, self, out_int32, right, result);
   return result;
 }
 
-Tensor searchsorted_cpu(const Tensor& sorted_sequence, Scalar self, bool out_int32, bool right) {
+Tensor searchsorted_cpu(const Tensor& sorted_sequence, const Scalar& self, bool out_int32, bool right) {
   return searchsorted_cpu(sorted_sequence, searchsorted_scalar_tensor(self, sorted_sequence.device()), out_int32, right);
 }
 
-Tensor& bucketize_out_cpu(Tensor& result, const Tensor& self, const Tensor& boundaries, bool out_int32, bool right) {
+Tensor& bucketize_out_cpu(const Tensor& self, const Tensor& boundaries, bool out_int32, bool right, Tensor& result) {
   TORCH_CHECK(boundaries.dim() == 1, "boundaries tensor must be 1 dimension, but got dim(", boundaries.dim(), ")");
-  searchsorted_out_cpu(result, boundaries, self, out_int32, right);
+  at::native::searchsorted_out_cpu(boundaries, self, out_int32, right, result);
   return result;
 }
 
@@ -131,11 +144,11 @@ Tensor bucketize_cpu(const Tensor& self, const Tensor& boundaries, bool out_int3
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
   c10::TensorOptions options = TensorOptions().device(self.options().device()).dtype(scalar_type);
   Tensor result = at::empty({0}, options, MemoryFormat::Contiguous);
-  bucketize_out_cpu(result, self, boundaries, out_int32, right);
+  at::native::bucketize_out_cpu(self, boundaries, out_int32, right, result);
   return result;
 }
 
-Tensor bucketize_cpu(Scalar self, const Tensor& boundaries, bool out_int32, bool right) {
+Tensor bucketize_cpu(const Scalar& self, const Tensor& boundaries, bool out_int32, bool right) {
   return bucketize_cpu(searchsorted_scalar_tensor(self, boundaries.device()), boundaries, out_int32, right);
 }
 

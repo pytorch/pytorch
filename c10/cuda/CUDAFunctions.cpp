@@ -1,4 +1,5 @@
 #include <c10/cuda/CUDAFunctions.h>
+#include <c10/macros/Macros.h>
 
 #include <limits>
 
@@ -16,7 +17,7 @@ int32_t driver_version() {
   return driver_version;
 }
 
-int device_count_impl() {
+int device_count_impl(bool fail_if_no_driver) {
   int count;
   auto err = cudaGetDeviceCount(&count);
   if (err == cudaSuccess) {
@@ -34,6 +35,11 @@ int device_count_impl() {
     case cudaErrorInsufficientDriver: {
       auto version = driver_version();
       if (version <= 0) {
+        if (!fail_if_no_driver) {
+          // No CUDA driver means no devices
+          count = 0;
+          break;
+        }
         TORCH_CHECK(
             false,
             "Found no NVIDIA driver on your system. Please check that you "
@@ -95,9 +101,11 @@ DeviceIndex device_count() noexcept {
   // initialize number of devices only once
   static int count = []() {
     try {
-      auto result = device_count_impl();
-      TORCH_INTERNAL_ASSERT(result <= std::numeric_limits<DeviceIndex>::max(), "Too many CUDA devices, DeviceIndex overflowed");
-      return device_count_impl();
+      auto result = device_count_impl(/*fail_if_no_driver=*/false);
+      TORCH_INTERNAL_ASSERT(
+          result <= std::numeric_limits<DeviceIndex>::max(),
+          "Too many CUDA devices, DeviceIndex overflowed");
+      return result;
     } catch (const c10::Error& ex) {
       // We don't want to fail, but still log the warning
       // msg() returns the message without the stack trace
@@ -110,7 +118,7 @@ DeviceIndex device_count() noexcept {
 
 DeviceIndex device_count_ensure_non_zero() {
   // Call the implementation every time to throw the exception
-  int count = device_count_impl();
+  int count = device_count_impl(/*fail_if_no_driver=*/true);
   // Zero gpus doesn't produce a warning in `device_count` but we fail here
   TORCH_CHECK(count, "No CUDA GPUs are available");
   return static_cast<DeviceIndex>(count);
@@ -128,6 +136,16 @@ void set_device(DeviceIndex device) {
 
 void device_synchronize() {
   C10_CUDA_CHECK(cudaDeviceSynchronize());
+}
+
+// this function has to be called from callers performing cuda synchronizing
+// operations, to raise proper error or warning
+void warn_or_error_on_sync() {
+  if (warning_state().get_sync_debug_mode() == SyncDebugMode::L_ERROR) {
+    TORCH_CHECK(false, "called a synchronizing CUDA operation");
+  } else if (warning_state().get_sync_debug_mode() == SyncDebugMode::L_WARN) {
+    TORCH_WARN("called a synchronizing CUDA operation");
+  }
 }
 
 } // namespace cuda

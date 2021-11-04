@@ -1,5 +1,9 @@
 #pragma once
 
+#include <c10/core/ScalarType.h>
+#include <c10/core/QScheme.h>
+#include <c10/util/intrusive_ptr.h>
+
 namespace at {
 
 class Tensor;
@@ -32,7 +36,7 @@ using QuantizerPtr = c10::intrusive_ptr<Quantizer>;
  * Quantized Tensor holds an intrusive_ptr to Quantizer, and multiple Tensor can
  * share the same Quantizer. Quantizer should be immutable.
  */
-struct CAFFE2_API Quantizer : public c10::intrusive_ptr_target {
+struct TORCH_API Quantizer : public c10::intrusive_ptr_target {
   const ScalarType scalar_type_;
   explicit Quantizer(ScalarType scalar_type) : scalar_type_(scalar_type) {}
   virtual ~Quantizer();
@@ -58,12 +62,12 @@ struct CAFFE2_API Quantizer : public c10::intrusive_ptr_target {
   /**
    * quantize a float Tensor into a quantized Tensor.
    */
-  virtual Tensor quantize(Tensor t) = 0;
+  virtual Tensor quantize(const Tensor& t) = 0;
 
   /**
    * dequantize a quantized Tensor into a float Tensor.
    */
-  virtual Tensor dequantize(Tensor t) = 0;
+  virtual Tensor dequantize(const Tensor& t) = 0;
 
   /**
    * Compare against `other` for equality.

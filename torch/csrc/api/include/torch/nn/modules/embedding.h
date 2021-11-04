@@ -25,6 +25,7 @@ namespace nn {
 /// ```
 /// Embedding model(EmbeddingOptions(10, 2).padding_idx(3).max_norm(2).norm_type(2.5).scale_grad_by_freq(true).sparse(true));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API EmbeddingImpl : public torch::nn::Cloneable<EmbeddingImpl> {
  public:
   EmbeddingImpl(int64_t num_embeddings, int64_t embedding_dim)
@@ -64,6 +65,7 @@ class Embedding : public torch::nn::ModuleHolder<EmbeddingImpl> {
   static Embedding from_pretrained(const torch::Tensor& embeddings, const EmbeddingFromPretrainedOptions& options = {}) {
     TORCH_CHECK(embeddings.dim() == 2, "Embeddings parameter is expected to be 2-dimensional");
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t rows, cols;
     rows = embeddings.size(0);
     cols = embeddings.size(1);
@@ -93,8 +95,9 @@ class Embedding : public torch::nn::ModuleHolder<EmbeddingImpl> {
 ///
 /// Example:
 /// ```
-/// EmbeddingBag model(EmbeddingBagOptions(10, 2).max_norm(2).norm_type(2.5).scale_grad_by_freq(true).sparse(true).mode(torch::kSum));
+/// EmbeddingBag model(EmbeddingBagOptions(10, 2).max_norm(2).norm_type(2.5).scale_grad_by_freq(true).sparse(true).mode(torch::kSum).padding_idx(1));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API EmbeddingBagImpl : public torch::nn::Cloneable<EmbeddingBagImpl> {
  public:
   EmbeddingBagImpl(int64_t num_embeddings, int64_t embedding_dim)
@@ -132,6 +135,7 @@ class EmbeddingBag : public torch::nn::ModuleHolder<EmbeddingBagImpl> {
   static EmbeddingBag from_pretrained(const torch::Tensor& embeddings, const EmbeddingBagFromPretrainedOptions& options = {}) {
     TORCH_CHECK(embeddings.dim() == 2, "Embeddings parameter is expected to be 2-dimensional");
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t rows, cols;
     rows = embeddings.size(0);
     cols = embeddings.size(1);
@@ -143,7 +147,8 @@ class EmbeddingBag : public torch::nn::ModuleHolder<EmbeddingBagImpl> {
         .norm_type(options.norm_type())
         .scale_grad_by_freq(options.scale_grad_by_freq())
         .mode(options.mode())
-        .sparse(options.sparse()));
+        .sparse(options.sparse())
+        .padding_idx(options.padding_idx()));
     embeddingbag->weight.set_requires_grad(!options.freeze());
     return embeddingbag;
   }

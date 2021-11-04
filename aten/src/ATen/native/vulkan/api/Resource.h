@@ -21,15 +21,6 @@ struct Resource final {
 
   struct Memory final {
     /*
-      Barrier
-    */
-
-    struct Barrier final {
-      VkAccessFlags src;
-      VkAccessFlags dst;
-    };
-
-    /*
       Descriptor
     */
 
@@ -39,8 +30,18 @@ struct Resource final {
       VkMemoryPropertyFlags /* optional */ preferred;
     };
 
-    VmaAllocator allocator;
-    VmaAllocation allocation;
+    /*
+      Barrier
+    */
+
+    struct Barrier final {
+      VkAccessFlags src;
+      VkAccessFlags dst;
+    };
+
+    /*
+      Access
+    */
 
     struct Access final {
       typedef uint8_t Flags;
@@ -73,6 +74,9 @@ struct Resource final {
         Access::Flags kAccess,
         typename Pointer = Access::Pointer<Type, kAccess>>
     Handle<Pointer> map() &;
+
+    VmaAllocator allocator;
+    VmaAllocation allocation;
 
    private:
     // Intentionally disabed to ensure memory access is always properly
@@ -164,7 +168,7 @@ struct Resource final {
 
         typedef Sampler::Descriptor Descriptor;
         typedef VK_DELETER(Sampler) Deleter;
-        typedef Handle<VkSampler, Deleter> Handle;
+        typedef api::Handle<VkSampler, Deleter> Handle;
 
         struct Hasher {
           size_t operator()(const Descriptor& descriptor) const;
@@ -286,8 +290,11 @@ struct Resource final {
 
     // Primary
 
-    Buffer buffer(const Buffer::Descriptor& descriptor);
-    Image image(const Image::Descriptor& descriptor);
+    Buffer create_buffer(const Buffer::Descriptor& descriptor);
+    void register_buffer_cleanup(const Buffer& buffer);
+    Image create_image(const Image::Descriptor& descriptor);
+    void register_image_cleanup(const Image& image);
+
     Fence fence();
     void purge();
 
@@ -298,6 +305,8 @@ struct Resource final {
 
    private:
     friend struct Fence;
+
+    void invalidate();
 
    private:
     struct Configuration final {
@@ -332,6 +341,10 @@ struct Resource final {
   }
 };
 
+void release_buffer(const Resource::Buffer& buffer);
+
+void release_image(const Resource::Image& image);
+
 //
 // Impl
 //
@@ -353,7 +366,8 @@ class Resource::Memory::Scope final {
 
 template<typename, typename Pointer>
 inline Resource::Memory::Handle<Pointer> Resource::Memory::map() const & {
-  void* map(const Memory& memory, Access::Flags);
+  // Forward declaration
+  void* map(const Memory&, Access::Flags);
 
   return Handle<Pointer>{
     reinterpret_cast<Pointer>(map(*this, Access::Read)),
@@ -363,7 +377,8 @@ inline Resource::Memory::Handle<Pointer> Resource::Memory::map() const & {
 
 template<typename, Resource::Memory::Access::Flags kAccess, typename Pointer>
 inline Resource::Memory::Handle<Pointer> Resource::Memory::map() & {
-  void* map(const Memory& memory, Access::Flags);
+  // Forward declaration
+  void* map(const Memory&, Access::Flags);
 
   static_assert(
       (kAccess == Access::Read) ||
@@ -388,10 +403,11 @@ inline Resource::Buffer::operator bool() const {
 inline bool operator==(
     const Resource::Image::Sampler::Descriptor& _1,
     const Resource::Image::Sampler::Descriptor& _2) {
-    return (_1.filter == _2.filter) &&
-           (_1.mipmap_mode == _2.mipmap_mode) &&
-           (_1.address_mode == _2.address_mode) &&
-           (_1.border == _2.border);
+
+  return (_1.filter == _2.filter && \
+          _1.mipmap_mode == _2.mipmap_mode && \
+          _1.address_mode == _2.address_mode && \
+          _1.border == _2.border);
 }
 
 inline size_t Resource::Image::Sampler::Factory::Hasher::operator()(
@@ -417,7 +433,7 @@ inline Resource::Fence::operator bool() const {
 
 template<typename Block>
 inline Resource::Buffer Resource::Pool::uniform(const Block& block) {
-  Buffer uniform = this->buffer({
+  Buffer uniform = this->create_buffer({
       sizeof(Block),
       {
         VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
@@ -428,6 +444,7 @@ inline Resource::Buffer Resource::Pool::uniform(const Block& block) {
         },
       },
     });
+  this->register_buffer_cleanup(uniform);
 
   {
     Memory::Handle<Block*> memory = uniform.memory.template map<

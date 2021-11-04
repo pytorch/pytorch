@@ -106,8 +106,8 @@ createConv2dClampPrePackOpContext(
     std::vector<int64_t>&& padding,
     std::vector<int64_t>&& dilation,
     int64_t groups,
-    c10::optional<Scalar> output_min,
-    c10::optional<Scalar> output_max);
+    const c10::optional<Scalar>& output_min,
+    const c10::optional<Scalar>& output_max);
 
 Tensor conv2d_clamp_run(
     const Tensor& input,

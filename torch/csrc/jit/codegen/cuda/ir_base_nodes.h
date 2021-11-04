@@ -9,7 +9,6 @@
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 
 #include <cstdint>
-#include <deque>
 #include <iostream>
 #include <limits>
 #include <memory>
@@ -38,7 +37,7 @@ namespace cuda {
 
 using StmtNameType = unsigned int;
 
-constexpr StmtNameType UNINITIALIZED_STMTNAMETYPE =
+constexpr StmtNameType kInvalidStmName =
     std::numeric_limits<unsigned int>::max();
 
 class Fusion;
@@ -50,18 +49,19 @@ class BinaryOp;
 class IterDomain;
 class IrCloner;
 
-/*
- * Statement is the highest level node representation. Everything that is
- * considered "IR" will be derived from this class at some point. Both Values
- * and Expr's are a Statement. If there will ever be any more fundamental types,
- * they will also derive from Statement.
- *
- * We use Statements to pass around nodes of unknown compile type. Therefore it
- * is also important for the design to have a dispatch system for a Statment.
- * Basically beinng able to succienctly traverse down the inhereitance stack of
- * a Statment at runtime. This is currently implemented in dispatch.h
- */
-class TORCH_CUDA_API Statement : public NonCopyable, public PolymorphicBase {
+TORCH_CUDA_CU_API void swap(Fusion& a, Fusion& b) noexcept;
+
+//! Statement is the highest level node representation. Everything that is
+//! considered "IR" will be derived from this class at some point. Both Values
+//! and Expr's are a Statement. If there will ever be any more fundamental
+//! types, they will also derive from Statement.
+//!
+//! We use Statements to pass around nodes of unknown compile type. Therefore it
+//! is also important for the design to have a dispatch system for a Statment.
+//! Basically beinng able to succienctly traverse down the inhereitance stack of
+//! a Statment at runtime. This is currently implemented in dispatch.h
+//!
+class TORCH_CUDA_CU_API Statement : public NonCopyable, public PolymorphicBase {
   friend void swap(Fusion&, Fusion&) noexcept;
 
  public:
@@ -125,50 +125,50 @@ class TORCH_CUDA_API Statement : public NonCopyable, public PolymorphicBase {
 
   // Return if this statement is the same as another statement
   // TODO: should this run through dispatch on this and other?
-  bool sameAs(const Statement* const other) const {
+  virtual bool sameAs(const Statement* other) const {
     return this == other;
   }
 
   void print() const;
 
  protected:
-  StmtNameType name_ = UNINITIALIZED_STMTNAMETYPE;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  StmtNameType name_ = kInvalidStmName;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   Fusion* fusion_ = nullptr;
 };
 
-/*
- * A Val represents a "value." These are objects, like tensors, scalars, and
- * memory locations, that are inputs and outputs of computations (represented
- * by Exprs, below). Vals are constant and unique and should always be passed
- * around as a pointer. Val can generally be thought of as representing any type
- * of data. Some examples: a constant size like convolution filter width a
- * runtime constant like batch normalizations momentum a "symbolic" tensor like
- * one passed down from the JIT a memory buffer used in device code
- *
- * Adding a Val:
- * Right now adding a Val is quite involved. Val's can be defined in ir.h or in
- * their own header file. The following is what is currently needed to add a new
- * Val:
- * 1) Definition inheriting from Val
- *     - Members must be private or protected
- *     - Accessor functions for members
- *     - Must call Val constructor, Val constructor registers with fusion
- *     - Implementation of bool sameAs(...)
- *     - Must implement a "cloning" constructor, ex.
- *        Int::Int(const Int* src, IrCloner* ir_cloner)
- * 2) dispatch.h/.cpp must be updated to include dispatch of the new Val
- * 3) Default mutator function should be added to mutator.cpp
- * 4a) Printing functions should be added to ir_iostream.h/.cpp
- * 4b) Graphviz generation must be added to ir_graphviz.h/.cpp
- * 5) An enum value must be added to ValType in type.h
- * 6) A string entry must be added in val_type_string_map
- */
-class TORCH_CUDA_API Val : public Statement {
+//! A Val represents a "value." These are objects, like tensors, scalars, and
+//! memory locations, that are inputs and outputs of computations (represented
+//! by Exprs, below)
+//!
+//! Vals are constant and unique and should always be passed
+//! around as a pointer. Val can generally be thought of as representing any
+//! type of data. Some examples: a constant size like convolution filter width a
+//! runtime constant like batch normalizations momentum a "symbolic" tensor like
+//! one passed down from the JIT a memory buffer used in device code
+//!
+//! Adding a Val:
+//! Right now adding a Val is quite involved. Val's can be defined in ir.h or in
+//! their own header file. The following is what is currently needed to add a
+//! new Val:
+//!
+//! 1) Definition inheriting from Val
+//!     - Members must be private or protected
+//!     - Accessor functions for members
+//!     - Must call Val constructor, Val constructor registers with fusion
+//!     - Implementation of bool sameAs(...)
+//!     - Must implement a "cloning" constructor, ex.
+//!        Int::Int(const Int* src, IrCloner* ir_cloner)
+//! 2) dispatch.h/.cpp must be updated to include dispatch of the new Val
+//! 3) Default mutator function should be added to mutator.cpp
+//! 4a) Printing functions should be added to ir_iostream.h/.cpp
+//! 4b) Graphviz generation must be added to ir_graphviz.h/.cpp
+//! 5) An enum value must be added to ValType in type.h
+//! 6) A string entry must be added in val_type_string_map
+//!
+class TORCH_CUDA_CU_API Val : public Statement {
  public:
-  virtual ~Val() = default;
-
-  Val() = delete;
-
   // We may not want to register this value during Val's constructor. The reason
   // for this is that if we register the val, then ina derived constructor try
   // to throw, fusion's destructor will get called, but the pointer to this Val
@@ -177,31 +177,24 @@ class TORCH_CUDA_API Val : public Statement {
   explicit Val(
       ValType _vtype,
       DataType _dtype = DataType::Null,
-      bool register_val = true,
-      bool lowered = false);
-
-  // Lowers an existing Fusion IR node into a Kernel IR counterpart
-  explicit Val(const Val* fusion_ir_node);
+      bool register_val = true);
 
   Val(const Val* src, IrCloner* ir_cloner);
 
-  // TODO: Values are unique and not copyable
-  Val(const Val& other) = delete;
-  Val& operator=(const Val& other) = delete;
-
-  Val(Val&& other) = delete;
-  Val& operator=(Val&& other) = delete;
-
+  // TODO: why is this optional?
+  //
   c10::optional<ValType> getValType() const override {
     return vtype_;
   }
 
   // Throws if no DataType is found. Vals must have a DataType
+  //
+  // TODO: why is this optional?
+  //
   c10::optional<DataType> getDataType() const override;
 
   bool isScalar() const {
-    return vtype_ == ValType::Scalar || vtype_ == ValType::NamedScalar ||
-        vtype_ == ValType::KirScalar || vtype_ == ValType::KirNamedScalar;
+    return vtype_ == ValType::Scalar || vtype_ == ValType::NamedScalar;
   }
 
   bool isConstScalar() const;
@@ -217,10 +210,30 @@ class TORCH_CUDA_API Val : public Statement {
 
   // Returns the Expr that this value is an output of, returns nullptr if none
   // was found
-  Expr* getOrigin();
-  const Expr* getOrigin() const;
+  Expr* definition() const {
+    if (is_fusion_input_) {
+      return nullptr;
+    }
+    return definition_;
+  }
 
-  virtual bool sameType(const Statement* other) {
+  const std::vector<Expr*>& uses() const;
+
+  bool isFusionInput() const {
+    return is_fusion_input_;
+  }
+
+  bool isFusionOutput() const {
+    return is_fusion_output_;
+  }
+
+  //! Returns true when other is a producer of this
+  bool isProducerOf(const Val* other) const;
+
+  //! Returns true when other is a consumer of this
+  bool isConsumerOf(const Val* other) const;
+
+  bool sameType(const Statement* other) override {
     return Statement::sameType(other) &&
         getDataType() == other->as<Val>()->getDataType();
   }
@@ -228,7 +241,7 @@ class TORCH_CUDA_API Val : public Statement {
   // TODO: Make this more sophisticated. A value being the same as another value
   // should be evaluated based on the DAG that created it, and that DAGs leaf
   // nodes
-  bool sameAs(const Val* const other) const {
+  bool sameAs(const Statement* other) const override {
     return this == other;
   }
 
@@ -243,61 +256,83 @@ class TORCH_CUDA_API Val : public Statement {
   static Statement* mutatorDispatch(T mutator, Val*);
 
  protected:
+  friend Fusion;
+
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const ValType vtype_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const DataType dtype_;
+
+  // Following is managed by Fusion and can change.
+  void setDefinition(Expr* expr) {
+    definition_ = expr;
+  }
+
+  void setIsFusionInput(bool is_fusion_input) {
+    is_fusion_input_ = is_fusion_input;
+  }
+
+  void setIsFusionOutput(bool is_fusion_output) {
+    is_fusion_output_ = is_fusion_output;
+  }
+
+  void setUses(const std::vector<Expr*>& uses) {
+    uses_ = uses;
+  }
+
+ private:
+  // Following is managed by Fusion and can change.
+  bool is_fusion_input_ = false;
+  bool is_fusion_output_ = false;
+
+  Expr* definition_ = nullptr;
+  std::vector<Expr*> uses_;
 };
 
-//  A Expr represents a "computation." These are functions that takes inputs
-//  and produce outputs, inputs and outputs all being Vals. There are
-//  specializations of BinaryOp which takes 2 inputs and produces 1 output, and
-//  UnaryOp which takes 1 input and produces 1 output. Exprs are unique and
-//  immutable. Conceptually, Exprs could always be manipulated using unique
-//  pointers, and we could add this later. However, for now Exprs can be
-//  replaced in a fusion, but they cannot be modified in place.
-
-//  The IR is static single assignment (SSA). Values can only be defined as an
-//  output of an Expr once. If they are re-defined the original definition is
-//  deleted from the program, as opposed to an ordered redefinition of the value
-//  in the program.
-
-//  Note: Registering an Expr with a Fusion is actually 2 parts, one part is
-//  done in the Expr constructor, so that should be called on anything that
-//  inherits Expr. The issue with having registration in Expr's constructor, is
-//  that the constructor of an Expr will set ouputs and inputs. This information
-//  is important for registration with Fuser, so it can track the dependency
-//  chain.
-
-//  Adding an Expr:
-//  Right now adding an Expr is quite involved. Expr's can be defined in ir.h or
-//  in their own header file. The following is what is currently needed for Expr
-//  definitions:
-//  1) Definition inheriting from Expr.
-//      - Members must be private or protected
-//      - Accessor functions for members
-//      - Constructors need to register with the Fusion after inputs/outputs are
-//         defined
-//      - Implementation of bool sameAs(...)
-//  2) dispatch.h/.cpp must be updated to include dispatch of the new Val
-//  3) Default mutator function should be added to mutator.h/.cpp
-//  4) Printing functions should be added to ir_iostream.h/.cpp
-//  5) Lower case convenience functions should be added to arith.h/.cpp (If user
-//   facing)
-//  6) An enum value must be added to ExprType in type.h
-//  7) A string entry must be added in expr_type_string_map
-//  8) Entry added to ir_graphviz .cpp/.h
-
-class TORCH_CUDA_API Expr : public Statement {
+//!  A Expr represents a "computation." These are functions that takes inputs
+//!  and produce outputs, inputs and outputs all being Vals. There are
+//!  specializations of BinaryOp which takes 2 inputs and produces 1 output, and
+//!  UnaryOp which takes 1 input and produces 1 output. Exprs are unique and
+//!  immutable. Conceptually, Exprs could always be manipulated using unique
+//!  pointers, and we could add this later. However, for now Exprs can be
+//!  replaced in a fusion, but they cannot be modified in place.
+//!
+//!  The IR is static single assignment (SSA). Values can only be defined as an
+//!  output of an Expr once. If they are re-defined the original definition is
+//!  deleted from the program, as opposed to an ordered redefinition of the
+//!  value in the program.
+//!
+//!  Note: Registering an Expr with a Fusion is actually 2 parts, one part is
+//!  done in the Expr constructor, so that should be called on anything that
+//!  inherits Expr. The issue with having registration in Expr's constructor, is
+//!  that the constructor of an Expr will set ouputs and inputs. This
+//!  information is important for registration with Fuser, so it can track the
+//!  dependency chain.
+//!
+//!  Adding an Expr:
+//!  Right now adding an Expr is quite involved. Expr's can be defined in ir.h
+//!  or in their own header file. The following is what is currently needed for
+//!  Expr definitions:
+//!
+//! 1) Definition inheriting from Expr.
+//!      - Members must be private or protected
+//!      - Accessor functions for members
+//!      - Constructors need to register with the Fusion after inputs/outputs
+//!         are defined
+//!      - Implementation of bool sameAs(...)
+//!  2) dispatch.h/.cpp must be updated to include dispatch of the new Val
+//!  3) Default mutator function should be added to mutator.h/.cpp
+//!  4) Printing functions should be added to ir_iostream.h/.cpp
+//!  5) Lower case convenience functions should be added to arith.h/.cpp (If
+//!     user facing)
+//!  6) An enum value must be added to ExprType in type.h
+//!  7) A string entry must be added in expr_type_string_map
+//!  8) Entry added to ir_graphviz .cpp/.h
+//!
+class TORCH_CUDA_CU_API Expr : public Statement {
  public:
-  Expr() = delete;
-  explicit Expr(ExprType _type);
+  explicit Expr(ExprType type);
   Expr(const Expr* src, IrCloner* ir_cloner);
-  virtual ~Expr() = default;
-
-  Expr(const Expr& other) = delete;
-  Expr& operator=(const Expr& other) = delete;
-
-  Expr(Expr&& other) = delete;
-  Expr& operator=(Expr&& other) = delete;
 
   c10::optional<ExprType> getExprType() const override {
     return type_;
@@ -307,7 +342,7 @@ class TORCH_CUDA_API Expr : public Statement {
     return type_;
   }
 
-  bool sameAs(const Expr* const other) const;
+  bool sameAs(const Statement* other) const override;
 
   // Input/output accessors
   const auto& inputs() const {

@@ -1,6 +1,5 @@
 #pragma once
 
-#include <torch/arg.h>
 #include <torch/nn/module.h>
 #include <torch/optim/optimizer.h>
 #include <torch/optim/serialize.h>
@@ -32,7 +31,9 @@ public:
   void serialize(torch::serialize::InputArchive& archive) override;
   void serialize(torch::serialize::OutputArchive& archive) const override;
   TORCH_API friend bool operator==(const SGDOptions& lhs, const SGDOptions& rhs);
-  ~SGDOptions() = default;
+  ~SGDOptions() override = default;
+  double get_lr() const override;
+  void set_lr(const double lr) override;
 };
 
 struct TORCH_API SGDParamState : public OptimizerCloneableParamState<SGDParamState> {
@@ -42,7 +43,7 @@ public:
   void serialize(torch::serialize::InputArchive& archive) override;
   void serialize(torch::serialize::OutputArchive& archive) const override;
   TORCH_API friend bool operator==(const SGDParamState& lhs, const SGDParamState& rhs);
-  ~SGDParamState() = default;
+  ~SGDParamState() override = default;
 };
 
 class TORCH_API SGD : public Optimizer {
@@ -56,6 +57,7 @@ class TORCH_API SGD : public Optimizer {
   }
 
   explicit SGD(std::vector<Tensor> params,
+      // NOLINTNEXTLINE(performance-move-const-arg)
       SGDOptions defaults) : SGD({std::move(OptimizerParamGroup(params))}, defaults) {}
 
   torch::Tensor step(LossClosure closure = nullptr) override;

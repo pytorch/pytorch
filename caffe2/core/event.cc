@@ -2,19 +2,28 @@
 
 namespace caffe2 {
 
-CAFFE2_API EventCreateFunction Event::event_creator_[MaxDeviceTypes];
-CAFFE2_API EventRecordFunction Event::event_recorder_[MaxDeviceTypes];
-CAFFE2_API EventWaitFunction
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
+TORCH_API EventCreateFunction Event::event_creator_[MaxDeviceTypes];
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
+TORCH_API EventRecordFunction Event::event_recorder_[MaxDeviceTypes];
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+TORCH_API EventWaitFunction
     Event::event_waiter_[MaxDeviceTypes][MaxDeviceTypes];
-CAFFE2_API EventFinishFunction Event::event_finisher_[MaxDeviceTypes];
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
+TORCH_API EventFinishFunction Event::event_finisher_[MaxDeviceTypes];
 
-CAFFE2_API EventQueryFunction Event::event_querier_[MaxDeviceTypes];
-CAFFE2_API EventErrorMessageFunction
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
+TORCH_API EventQueryFunction Event::event_querier_[MaxDeviceTypes];
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+TORCH_API EventErrorMessageFunction
     Event::event_err_msg_getter_[MaxDeviceTypes];
-CAFFE2_API EventSetFinishedFunction
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+TORCH_API EventSetFinishedFunction
     Event::event_finished_setter_[MaxDeviceTypes];
-CAFFE2_API EventResetFunction Event::event_resetter_[MaxDeviceTypes];
-CAFFE2_API EventSetCallbackFunction
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
+TORCH_API EventResetFunction Event::event_resetter_[MaxDeviceTypes];
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+TORCH_API EventSetCallbackFunction
     Event::event_callback_setter_[MaxDeviceTypes];
 
 namespace {

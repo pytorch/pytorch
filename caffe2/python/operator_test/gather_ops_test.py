@@ -209,7 +209,7 @@ class TestGatherFused8BitRowwise(hu.HypothesisTestCase):
            cols_num=st.integers(1, 128),
            index_num=st.integers(0, 5000),
            **hu.gcs)
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_batch_gather_ops(self, rows_num, cols_num, index_num, gc, dc):
         data = np.random.random((rows_num, cols_num)).astype(np.float32)
         ind = np.random.randint(rows_num, size=(index_num, )).astype('int32')

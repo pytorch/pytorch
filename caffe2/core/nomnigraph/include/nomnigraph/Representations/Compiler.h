@@ -8,7 +8,7 @@
 namespace nom {
 namespace repr {
 
-class CAFFE2_API Value {
+class TORCH_API Value {
  public:
   enum class ValueKind { Value, Instruction, Data };
   Value(ValueKind K) : kind_(K) {}
@@ -22,7 +22,7 @@ class CAFFE2_API Value {
   const ValueKind kind_;
 };
 
-class CAFFE2_API Data : public Value {
+class TORCH_API Data : public Value {
  public:
   Data() : Value(ValueKind::Data) {}
   static bool classof(const Value* V) {
@@ -41,7 +41,7 @@ class CAFFE2_API Data : public Value {
   size_t version_ = 0;
 };
 
-class CAFFE2_API Instruction : public Value {
+class TORCH_API Instruction : public Value {
  public:
   /// \brief All the different types of execution.
   enum class Opcode {
@@ -66,7 +66,7 @@ class CAFFE2_API Instruction : public Value {
   Opcode op_;
 };
 
-class CAFFE2_API Terminator : public Instruction {
+class TORCH_API Terminator : public Instruction {
  public:
   Terminator(Instruction::Opcode op) : Instruction(op) {}
 
@@ -80,17 +80,17 @@ class CAFFE2_API Terminator : public Instruction {
   }
 };
 
-class CAFFE2_API Branch : public Terminator {
+class TORCH_API Branch : public Terminator {
  public:
   Branch() : Terminator(Instruction::Opcode::Branch) {}
 };
 
-class CAFFE2_API Return : public Terminator {
+class TORCH_API Return : public Terminator {
  public:
   Return() : Terminator(Instruction::Opcode::Return) {}
 };
 
-class CAFFE2_API Phi : public Instruction {
+class TORCH_API Phi : public Instruction {
  public:
   Phi() : Instruction(Instruction::Opcode::Phi) {}
 };

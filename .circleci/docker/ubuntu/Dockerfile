@@ -33,7 +33,7 @@ ARG KATEX
 ADD ./common/install_katex.sh install_katex.sh
 RUN bash ./install_katex.sh && rm install_katex.sh
 
-# Install conda and other packages (e.g., numpy, coverage, pytest)
+# Install conda and other packages (e.g., numpy, pytest)
 ENV PATH /opt/conda/bin:$PATH
 ARG ANACONDA_PYTHON_VERSION
 ADD ./common/install_conda.sh install_conda.sh
@@ -105,6 +105,10 @@ ARG NINJA_VERSION
 ADD ./common/install_ninja.sh install_ninja.sh
 RUN if [ -n "${NINJA_VERSION}" ]; then bash ./install_ninja.sh; fi
 RUN rm install_ninja.sh
+
+ADD ./common/install_openssl.sh install_openssl.sh
+RUN bash ./install_openssl.sh
+ENV OPENSSL_ROOT_DIR /opt/openssl
 
 # Install ccache/sccache (do this last, so we get priority in PATH)
 ADD ./common/install_cache.sh install_cache.sh

@@ -20,7 +20,7 @@ __global__ void TileCopyCUDAKernel(
   if (x < total_size) {
     const int r = x / inner_size / tiles;
     const int c = x % inner_size;
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
     Y[x] = __ldg(X + r * inner_size + c);
 #else
     Y[x] = X[r * inner_size + c];
@@ -43,6 +43,8 @@ bool TileOp<CUDAContext>::DoTile(
   TileCopyCUDAKernel<T>
       <<<M, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
           total_size, inner_size, tiles_, X, Y);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 

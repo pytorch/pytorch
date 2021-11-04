@@ -10,14 +10,14 @@ class NegativeBinomial(Distribution):
     Creates a Negative Binomial distribution, i.e. distribution
     of the number of successful independent and identical Bernoulli trials
     before :attr:`total_count` failures are achieved. The probability
-    of failure of each Bernoulli trial is :attr:`probs`.
+    of success of each Bernoulli trial is :attr:`probs`.
 
     Args:
         total_count (float or Tensor): non-negative number of negative Bernoulli
             trials to stop, although the distribution is still valid for real
             valued count
-        probs (Tensor): Event probabilities of failure in the half open interval [0, 1)
-        logits (Tensor): Event log-odds for probabilities of failure
+        probs (Tensor): Event probabilities of success in the half open interval [0, 1)
+        logits (Tensor): Event log-odds for probabilities of success
     """
     arg_constraints = {'total_count': constraints.greater_than_eq(0),
                        'probs': constraints.half_open_interval(0., 1.),
@@ -77,8 +77,10 @@ class NegativeBinomial(Distribution):
 
     @lazy_property
     def _gamma(self):
+        # Note we avoid validating because self.total_count can be zero.
         return torch.distributions.Gamma(concentration=self.total_count,
-                                         rate=torch.exp(-self.logits))
+                                         rate=torch.exp(-self.logits),
+                                         validate_args=False)
 
     def sample(self, sample_shape=torch.Size()):
         with torch.no_grad():
