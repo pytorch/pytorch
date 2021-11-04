@@ -75,6 +75,7 @@ struct Instruction {
 std::ostream& operator<<(std::ostream& out, Instruction inst);
 
 bool isOpSupportedInMobile(OpCode op);
+char const* toString(OpCode op);
 
 } // namespace jit
 } // namespace torch
