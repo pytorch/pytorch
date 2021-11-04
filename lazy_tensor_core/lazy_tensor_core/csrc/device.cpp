@@ -24,13 +24,13 @@ std::string DeviceTypeToString(DeviceType hw_type) {
 void ParseDevice(const std::string& device_spec, Device* device) {
   if (device_spec.empty()) {
     std::string default_device_spec =
-        torch_lazy_tensors::compiler::getBackendRegistrar()->GetDefaultDevice();
+        torch_lazy_tensors::compiler::getBackend()->GetDefaultDevice();
     CHECK(!default_device_spec.empty());
     return ParseDevice(default_device_spec, device);
   }
   if (device_spec[0] == ':') {
     std::string default_device_spec =
-        torch_lazy_tensors::compiler::getBackendRegistrar()->GetDefaultDevice();
+        torch_lazy_tensors::compiler::getBackend()->GetDefaultDevice();
     auto pos = default_device_spec.find(':');
     CHECK_NE(pos, std::string::npos) << default_device_spec;
     return ParseDevice(default_device_spec.substr(0, pos) + device_spec,

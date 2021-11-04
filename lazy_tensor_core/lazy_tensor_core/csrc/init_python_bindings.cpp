@@ -61,7 +61,7 @@ Device GetDeviceOrCurrent(const std::string& device_str) {
 
 void PrepareToExit() {
   //TODO(whc) should we hook this interface up? It does nothing currently
-  torch_lazy_tensors::compiler::getBackendRegistrar()->PrepareToExit();
+  torch_lazy_tensors::compiler::getBackend()->PrepareToExit();
   //TODO(whc) can I call this unconditionally?
   LazyGraphExecutor::Get()->WaitDeviceOps({});
 }
@@ -388,7 +388,7 @@ py::object LtcNms(const at::Tensor& boxes, const at::Tensor& scores,
 //   {
 //     NoGilSection nogil;
 //     Device device = GetDeviceOrCurrent(device_str);
-//     mem_info = torch_lazy_tensors::compiler::getBackendRegistrar()->GetMemoryInfo(
+//     mem_info = torch_lazy_tensors::compiler::getBackend()->GetMemoryInfo(
 //         device.ToString());
 //   }
 //   auto py_dict = py::dict();
@@ -457,10 +457,10 @@ void InitLtcModuleBindings(py::module m) {
   m.def("_ltc_get_tensor_id",
         [](const at::Tensor& tensor) { return GetTensorId(tensor); });
   m.def("_ltc_get_devices", []() {
-    return torch_lazy_tensors::compiler::getBackendRegistrar()->GetLocalDevices();
+    return torch_lazy_tensors::compiler::getBackend()->GetLocalDevices();
   });
   m.def("_ltc_get_all_devices", []() {
-    return torch_lazy_tensors::compiler::getBackendRegistrar()->GetAllDevices();
+    return torch_lazy_tensors::compiler::getBackend()->GetAllDevices();
   });
   m.def("_ltc_real_devices", [](const std::vector<std::string>& devices) {
     std::vector<std::string> ltc_devices;
@@ -474,18 +474,18 @@ void InitLtcModuleBindings(py::module m) {
         [](const std::vector<std::string>& devices) {
           auto replication_devices =
               std::make_shared<std::vector<std::string>>(devices);
-          torch_lazy_tensors::compiler::getBackendRegistrar()->SetReplicationDevices(
+          torch_lazy_tensors::compiler::getBackend()->SetReplicationDevices(
               std::move(replication_devices));
         });
   m.def("_ltc_get_replication_devices", []() {
     auto replication_devices =
-        torch_lazy_tensors::compiler::getBackendRegistrar()->GetReplicationDevices();
+        torch_lazy_tensors::compiler::getBackend()->GetReplicationDevices();
     return replication_devices != nullptr ? *replication_devices
                                           : std::vector<std::string>();
   });
   m.def("_ltc_get_replication_devices_count", []() {
     auto replication_devices =
-        torch_lazy_tensors::compiler::getBackendRegistrar()->GetReplicationDevices();
+        torch_lazy_tensors::compiler::getBackend()->GetReplicationDevices();
     return replication_devices != nullptr ? replication_devices->size() : 0;
   });
 

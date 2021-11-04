@@ -30,7 +30,7 @@ class AtenLtcDeviceMapper {
  private:
   AtenLtcDeviceMapper() {
     for (auto& device_str :
-         torch_lazy_tensors::compiler::getBackendRegistrar()->GetLocalDevices()) {
+         torch_lazy_tensors::compiler::getBackend()->GetLocalDevices()) {
       devices_.emplace_back(device_str);
       devices_ordinals_[devices_.back()] = devices_.size() - 1;
     }
