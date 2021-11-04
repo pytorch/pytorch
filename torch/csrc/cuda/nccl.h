@@ -52,7 +52,13 @@ enum class ncclDataType {
     Float16    = 6, Half       = 6,
     Float32    = 7, Float      = 7,
     Float64    = 8, Double     = 8,
-    numTypes   = 9 };
+#if defined(ENABLE_NCCL_BF16_DATATYPE)
+    Bfloat16   = 9,
+    NumTypes   = 10
+#else
+    NumTypes   = 10
+#endif
+};
 
 
 
