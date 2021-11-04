@@ -358,7 +358,6 @@ class TestOperators(TestCase):
         xfail('nanmean'),
         xfail('block_diag'),
         xfail('nn.functional.dropout'),
-        xfail('double'),
         xfail('fft.fft2'),
         xfail('fft.ifft2'),
         xfail('fft.ihfft2'),
@@ -505,7 +504,6 @@ class TestOperators(TestCase):
         xfail('_masked.sum'),
         xfail('_masked.prod'),
         xfail('cholesky_solve'),
-        xfail('double'),
         xfail('fft.fft2'),
         xfail('fft.ifft2'),
         xfail('fft.ihfft2'),
@@ -567,7 +565,6 @@ class TestOperators(TestCase):
         xfail('lu_unpack'),
         xfail('matrix_exp'),
         xfail('view_as_complex'),
-        xfail('double'),
     }))
     def test_vjpvmap(self, device, dtype, op):
         # NB: there is no vjpvmap_has_batch_rule test because that is almost
