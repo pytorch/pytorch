@@ -104,7 +104,7 @@ void _THArgCheck(const char *file, int line, int condition, int argNumber, const
   }
 }
 
-void* THAlloc(ptrdiff_t size)
+/*void* THAlloc(ptrdiff_t size)
 {
   if(size < 0)
     THError("$ Torch: invalid memory size -- maybe an overflow?");
@@ -115,4 +115,4 @@ void* THAlloc(ptrdiff_t size)
 void THFree(void *ptr)
 {
   c10::free_cpu(ptr);
-}
+}*/
