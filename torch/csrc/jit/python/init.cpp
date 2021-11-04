@@ -377,7 +377,6 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_fuse_frozen_conv_add_relu", &FuseFrozenConvAddRelu)
       .def("_jit_pass_transpose_frozen_linear", &FrozenLinearTranspose)
       .def("_jit_pass_optimize_frozen_graph", &OptimizeFrozenGraph)
-      .def("_jit_pass_optimize_for_inference", &optimize_for_inference)
       .def("_jit_pass_fuse_linear", &FuseLinear)
       .def(
           "_jit_pass_fuse_add_relu",

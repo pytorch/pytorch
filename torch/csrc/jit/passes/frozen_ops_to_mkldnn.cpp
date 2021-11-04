@@ -936,7 +936,8 @@ class MKLDNNSubgraphSlicer {
       return true;
     }
     // see [mkldnn perf strategy]
-    return frozenMkldnnCompatibleConvNode(node);
+    return frozenMkldnnCompatibleLinearNode(node) ||
+        frozenMkldnnCompatibleConvNode(node);
   }
 
  private:
