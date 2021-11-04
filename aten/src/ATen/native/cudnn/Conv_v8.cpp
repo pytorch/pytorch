@@ -20,8 +20,7 @@
 #include <ATen/TensorUtils.h>
 
 #include <c10/util/env.h>
-
-#include <THC/THC.h>
+#include <c10/cuda/CUDAException.h>
 
 #include <mutex>
 #include <unordered_map>
@@ -312,7 +311,7 @@ const auto get_generator_sources(const cudnnBackendDescriptorType_t& desc, const
 
 size_t get_available_workspace() {
   int device;
-  THCudaCheck(cudaGetDevice(&device));
+  C10_CUDA_CHECK(cudaGetDevice(&device));
   size_t max_block_size = 0;
   size_t tmp_bytes = 0;  // Only used for filling pointer parameters that aren't used later
   c10::cuda::CUDACachingAllocator::cacheInfo(device, &tmp_bytes, &max_block_size);
