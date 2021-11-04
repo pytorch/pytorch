@@ -9489,13 +9489,14 @@ op_db: List[OpInfo] = [
                 toleranceOverride({torch.bfloat16: tol(atol=1e-02, rtol=1.6e-02)}), 'TestUnaryUfuncs',), ],
         skips=(DecorateInfo(unittest.expectedFailure,
                             'TestUnaryUfuncs', "test_reference_numerics_normal",
-                            dtypes=(torch.complex64,), active_if=(IS_MACOS or IS_WINDOWS)),
+                            dtypes=(torch.complex64,), active_if=(IS_MACOS)),
                DecorateInfo(unittest.expectedFailure,
                             'TestUnaryUfuncs', "test_reference_numerics_hard",
                             dtypes=(torch.complex64,), active_if=(IS_MACOS)),
                DecorateInfo(unittest.expectedFailure,
                             'TestUnaryUfuncs', "test_reference_numerics_extremal",
-                            dtypes=(torch.complex64,), active_if=(IS_MACOS or IS_WINDOWS)),)
+                            dtypes=(torch.complex64,), device_type='cpu',
+                            active_if=(IS_MACOS or IS_WINDOWS)),)
     ),
     OpInfo(
         'nn.functional.threshold',
