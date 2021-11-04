@@ -11,7 +11,6 @@
 #include <algorithm>
 #include <memory>
 #include <stdexcept>
-#include "c10/util/Exception.h"
 
 namespace torch {
 namespace jit {
@@ -107,7 +106,10 @@ c10::optional<Tensor> inferWithMetaTensor(Node* n) {
   return c10::nullopt;
 }
 
-bool setDtype(Value* value, ScalarType scalarType, bool can_overwrite_dtype=false) {
+bool setDtype(
+    Value* value,
+    ScalarType scalarType,
+    bool can_overwrite_dtype = false) {
   auto tensor_type = value->type()->cast<TensorType>();
   TORCH_INTERNAL_ASSERT(tensor_type, "Expecting a tensor type");
   if (!tensor_type->scalarType().has_value()) {
