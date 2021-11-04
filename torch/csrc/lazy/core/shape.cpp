@@ -25,6 +25,7 @@ std::vector<Shape> convertShapes(
   TORCH_INTERNAL_ASSERT(dtypes.size() == shapes.size());
 
   std::vector<Shape> shape;
+  shape.reserve(dtypes.size());
   for (int i = 0; i < dtypes.size(); i++) {
     shape.emplace_back(dtypes[i], shapes[i]);
   }
