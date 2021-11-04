@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: jit"]
+
 import torch
 from torch.cuda.amp import autocast
 from typing import Optional
@@ -8,6 +10,7 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import run_tests
 from torch.testing import FileCheck
 
+TEST_BFLOAT16 = torch.cuda.is_bf16_supported()
 
 class TestAutocast(JitTestCase):
     def setUp(self):
@@ -32,9 +35,24 @@ class TestAutocast(JitTestCase):
         @torch.jit.script
         def fn(a, b):
             with autocast():
-                return torch.mm(a, b)
-        result = fn(self.a_fp32, self.b_fp32)
-        self.assertEqual(result.dtype, torch.float16)
+                x = torch.mm(a, b)
+                y = torch.sum(x)
+                return x, y
+        x, y = fn(self.a_fp32, self.b_fp32)
+        self.assertEqual(x.dtype, torch.float16)
+        self.assertEqual(y.dtype, torch.float32)
+
+    @unittest.skipIf(not TEST_CUDA or not TEST_BFLOAT16, "No cuda bfloat16 support")
+    def test_linear_bf16(self):
+        @torch.jit.script
+        def fn(a, b):
+            with autocast(dtype=torch.bfloat16):
+                x = torch.mm(a, b)
+                y = torch.sum(x)
+                return x, y
+        x, y = fn(self.a_fp32, self.b_fp32)
+        self.assertEqual(x.dtype, torch.bfloat16)
+        self.assertEqual(y.dtype, torch.float32)
 
     @unittest.skipIf(not TEST_CUDA, "No cuda")
     def test_minimal_cpu(self):
