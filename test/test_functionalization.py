@@ -102,7 +102,7 @@ $4 = torch._ops.aten.mul($3, $3)""")
             return x
         self.assert_functionalization(f, torch.ones(2))
         logs = self.get_logs(f, torch.ones(2))
-        self.assertExpectedInline('\n'.join(logs), """$1 = torch._ops.aten.copy(tensor([0., 0.]), $0)""")
+        self.assertExpectedInline('\n'.join(logs), """$1 = torch._ops.aten.expand($0, [2])""")
 
     def test_split(self):
         def f(x):
