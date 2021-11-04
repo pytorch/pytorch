@@ -11549,15 +11549,10 @@ op_db: List[OpInfo] = [
             wrapper_set_seed(torch.nn.functional.alpha_dropout, input, *args, **kwargs),
         ref=_NOTHING,
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         skips=(
             # Because we have used lambda for the op here
             # AssertionError: JIT Test does not execute any logic
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-            # inplace variant dispatches to dropout kernel, while on CUDA
-            # the op dispatches to _fused_dropout (with a few more conditions)
-            # hence, different values and this skip here
-            # DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view', device_type='cuda'),),
         ),
         supports_forward_ad=True,
         supports_out=False,
