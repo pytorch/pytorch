@@ -85,9 +85,7 @@ class {schema.node_name} : public {self.node_base} {{
               {{{base_ctor_value_args}}},
               lazy_tensors::convertShapes(out_dtypes, out_shapes),
               /* num_outputs */ {len(func.returns)},
-              torch::lazy::MHash({scalar_hashes})),
-        at_dtypes_(out_dtypes),
-        at_shapes_(out_shapes){comma_if_scalar_initializers}
+              torch::lazy::MHash({scalar_hashes})){comma_if_scalar_initializers}
         {scalar_initializers}
 
   {{
@@ -106,11 +104,6 @@ class {schema.node_name} : public {self.node_base} {{
     {ts_lowering_body(f)}
   }}
 
-  // TODO(whc) prefer to move these shapes to TsNode, but need to find a way to populate
-  // them consistently from non-codegen TsNode classes first.
-  // outer vector is for multiple tensors from an operation
-  std::vector<at::ScalarType> at_dtypes_;
-  std::vector<std::vector<int64_t>> at_shapes_;
   {scalar_decls}
   {has_optional_decls}
 
