@@ -1766,6 +1766,7 @@ class TestCase(expecttest.TestCase):
 
     # Check in a follow up PR
     def assertEqualIgnoreType(self, *args, **kwargs) -> None:
+        raise RuntimeError("This test needs to be refactored")
         # If you are seeing this function used, that means test is written wrongly
         # and deserves detailed investigation
         return self.assertEqual(*args, exact_dtype=False, **kwargs)
