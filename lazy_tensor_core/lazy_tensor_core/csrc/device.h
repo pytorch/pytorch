@@ -3,17 +3,15 @@
 #include <iostream>
 #include <string>
 
-#include "lazy_tensors/computation_client/util.h"
-#include "torch/csrc/lazy/core/hash.h"
-
 namespace torch_lazy_tensors {
 
-enum class DeviceType { CPU, GPU, TPU };
+// Backend can define their own enum and mandate that in their implementations.
+using HardwareType = uint8_t;
 
 struct Device {
   Device() = default;
   explicit Device(const std::string& device_spec);
-  Device(DeviceType hw_type, int ordinal)
+  Device(HardwareType hw_type, int ordinal)
       : hw_type(hw_type), ordinal(ordinal) {}
 
   bool operator==(const Device& other) const { return compare(other) == 0; }
@@ -36,13 +34,8 @@ struct Device {
     return os;
   }
 
-  size_t hash() const {
-    return torch::lazy::StdHashCombine(
-        lazy_tensors::util::GetEnumValue(hw_type), ordinal + 1);
-  }
-
-  DeviceType hw_type = DeviceType::CPU;
-  int ordinal = 0;
+  HardwareType hw_type {0};
+  int ordinal {0};
 };
 
 const Device* GetDefaultDevice();
