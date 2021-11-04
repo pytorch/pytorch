@@ -431,8 +431,7 @@ def jacfwd(f):
 
 def grad_and_value(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Callable:
     """
-    See :func:`grad`. Returns a function to compute a tuple of the gradient and primal, or
-    forward computaiton.
+    Returns a function to compute a tuple of the gradient and primal, or forward, computation.
 
     Args:
         func (Callable): A Python function that takes one or more arguments.

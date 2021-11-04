@@ -3021,7 +3021,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.batch_norm'),
         xfail('lu_unpack'),
         xfail('nn.functional.pad', 'constant'),
-        xfail('double'),
         xfail('bfloat16'),
         xfail('bool'),
         xfail('byte'),
