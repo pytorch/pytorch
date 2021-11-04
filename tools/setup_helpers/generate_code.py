@@ -12,7 +12,6 @@ except ImportError:
 
 source_files = {'.py', '.cpp', '.h'}
 
-DECLARATIONS_PATH = 'torch/share/ATen/Declarations.yaml'
 NATIVE_FUNCTIONS_PATH = 'aten/src/ATen/native/native_functions.yaml'
 
 # TODO: This is a little inaccurate, because it will also pick
@@ -28,7 +27,6 @@ def all_generator_source() -> List[str]:
 
 
 def generate_code(ninja_global: Optional[str] = None,
-                  declarations_path: Optional[str] = None,
                   nn_path: Optional[str] = None,
                   native_functions_path: Optional[str] = None,
                   install_dir: Optional[str] = None,
@@ -59,7 +57,6 @@ def generate_code(ninja_global: Optional[str] = None,
 
     if subset == "pybindings" or not subset:
         gen_autograd_python(
-            declarations_path or DECLARATIONS_PATH,
             native_functions_path or NATIVE_FUNCTIONS_PATH,
             autograd_gen_dir,
             autograd_dir)
@@ -70,7 +67,6 @@ def generate_code(ninja_global: Optional[str] = None,
     if subset == "libtorch" or not subset:
 
         gen_autograd(
-            declarations_path or DECLARATIONS_PATH,
             native_functions_path or NATIVE_FUNCTIONS_PATH,
             autograd_gen_dir,
             autograd_dir,
@@ -138,7 +134,6 @@ def get_selector(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description='Autogenerate code')
-    parser.add_argument('--declarations-path')
     parser.add_argument('--native-functions-path')
     parser.add_argument('--nn-path')
     parser.add_argument('--ninja-global')
@@ -171,7 +166,6 @@ def main() -> None:
 
     generate_code(
         options.ninja_global,
-        options.declarations_path,
         options.nn_path,
         options.native_functions_path,
         options.install_dir,
