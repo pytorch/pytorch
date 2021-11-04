@@ -47,7 +47,7 @@ class ElfFile {
     return Section{name, start, len};
   }
 
-  const char* str(size_t off) const {
+  [[nodiscard]] const char* str(size_t off) const {
     TORCH_CHECK(off < strtabSection_.len, "String table index out of range");
     return strtabSection_.start + off;
   }

@@ -1,9 +1,12 @@
+#pragma once
+
 #include <c10/util/Exception.h>
 #include <fcntl.h>
-#include <stdio.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <unistd.h>
 #include <cerrno>
+#include <cstdio>
 
 namespace torch {
 namespace deploy {
@@ -15,10 +18,10 @@ namespace deploy {
 //
 // 2. Used in unity to load the elf file.
 struct MemFile {
-  MemFile(const char* filename_) : fd_(0), mem_(nullptr), n_bytes_(0) {
+  explicit MemFile(const char* filename_) : fd_(0), mem_(nullptr), n_bytes_(0) {
     fd_ = open(filename_, O_RDONLY);
     TORCH_CHECK(fd_ != -1, "failed to open {}: {}", filename_, strerror(errno));
-    struct stat s = {0};
+    struct stat s;
     if (-1 == fstat(fd_, &s)) {
       close(fd_); // destructors don't run during exceptions
       TORCH_CHECK(false, "failed to stat {}: {}", filename_, strerror(errno));
@@ -31,7 +34,8 @@ struct MemFile {
     }
   }
   MemFile(const MemFile&) = delete;
-  const char* data() const {
+  MemFile& operator=(const MemFile&) = delete;
+  [[nodiscard]] const char* data() const {
     return (const char*)mem_;
   }
   ~MemFile() {
@@ -45,7 +49,7 @@ struct MemFile {
   size_t size() {
     return n_bytes_;
   }
-  int fd() const {
+  [[nodiscard]] int fd() const {
     return fd_;
   }
 

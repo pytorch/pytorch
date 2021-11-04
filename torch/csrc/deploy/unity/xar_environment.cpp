@@ -96,7 +96,7 @@ void XarEnvironment::setupPythonApp() {
    * case are the aforementioned complex case, make sure the two prerequisites
    * are met and run again.
    */
-  LOG_IF(CRITICAL, !_dirExists(pythonAppRoot_))
+  LOG_IF(WARNING, !_dirExists(pythonAppRoot_))
       << "The python app root " << pythonAppRoot_ << " does not exists before "
       << " running the executable. If you encounter shared libraries not found "
       << " issue, try create the directory and run the executable again. Check "
