@@ -82,6 +82,7 @@ using namespace ::c10::cuda;
 } // namespace cuda
 
 struct Function;
+struct GraphFunction;
 struct MatchedSchema;
 
 // A Graph represents one "function" of computation.
@@ -675,6 +676,13 @@ struct TORCH_API Node {
   // Result: %3 = f()
   void removeAllInputs();
 
+  // Remove all outputs from a node.
+  //
+  // Given: %1, %2 = f()
+  // Execute:removeAllInputs()
+  // Result: = f()
+  void removeAllOutputs();
+
   // Rearrange the ordering of inputs or outputs of a node
   // Given: %3 = f(%1, %2)
   // Execute: %3.permuteInputs({1, 0})
@@ -1049,6 +1057,9 @@ struct Block {
   void eraseInput(size_t i) {
     input_->eraseOutput(i);
   }
+  void removeAllInputs() {
+    input_->removeAllOutputs();
+  }
   size_t registerOutput(Value* v) {
     output_->addInput(v);
     return outputs().size() - 1;
@@ -1060,6 +1071,10 @@ struct Block {
   void eraseOutput(size_t i) {
     output_->removeInput(i);
   }
+  void removeAllOutputs() {
+    output_->removeAllInputs();
+  }
+
   void replaceOutput(size_t i, Value* n) {
     output_->replaceInput(i, n);
   }
@@ -1099,6 +1114,14 @@ struct Block {
     if (wrap_) {
       wrap_->clear();
     }
+  }
+
+  void clear() {
+    removeAllOutputs();
+    for (auto it = nodes().rbegin(); it != nodes().rend(); it++) {
+      it.destroyCurrent();
+    }
+    removeAllInputs();
   }
 
  private:
@@ -1373,6 +1396,7 @@ struct Graph {
   friend TORCH_API std::ostream& operator<<(std::ostream& out, const Graph& g);
 
   TORCH_API std::shared_ptr<Graph> copy();
+  TORCH_API std::unique_ptr<Graph> copyUnique();
   TORCH_API void remapTypes(const std::function<TypePtr(TypePtr)>& type_map);
 
  private:
@@ -1380,6 +1404,7 @@ struct Graph {
   TORCH_API void freeNode(Node* n);
   TORCH_API void freeValue(Value* v);
   TORCH_API void freeBlock(Block* b);
+  void cloneFrom(Graph& src);
 };
 
 /** \brief An utility class for setting temporary insertion points.
@@ -1539,7 +1564,7 @@ TORCH_API std::vector<Value*> insertGraph(
  */
 TORCH_API std::vector<Value*> inlineCallTo(
     Node* to_replace,
-    Function* callee,
+    GraphFunction* callee,
     bool use_graph = true);
 
 /** If there is only one value in \p OUTPUTS and its kind is Tuple, insert a
