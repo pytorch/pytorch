@@ -48,7 +48,7 @@ void hardswish_impl(const Tensor& input, const Tensor& output) {
 bool use_hardswish(const Tensor& input) {
   return xnnpack::internal::available() && (1 <= input.ndimension()) &&
       (input.device().is_cpu()) && (kFloat == input.scalar_type()) &&
-      !input.requires_grad() && true;
+      !input.requires_grad();
 }
 
 const Tensor& hardswish_out(const Tensor& input, const Tensor& result) {
