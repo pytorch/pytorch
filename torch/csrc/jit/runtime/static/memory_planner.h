@@ -98,6 +98,21 @@ class MemoryPlanner {
     return buffer_start <= tensor_ptr && tensor_ptr < buffer_end;
   }
 
+  bool isManagedStorageImpl(const at::StorageImpl* impl) const {
+    if (managed_tensor_storage_impls_.empty()) {
+      return false;
+    }
+    // Comparing pointers that aren't within the same array is
+    // UB. We're doing fancy memory allocation stuff, so we cast to an
+    // integer type and carry on.
+    const auto impl_p = reinterpret_cast<uintptr_t>(impl);
+    const auto start =
+        reinterpret_cast<uintptr_t>(managed_tensor_storage_impls_.data());
+    const auto end = reinterpret_cast<uintptr_t>(
+        &managed_tensor_storage_impls_[managed_tensor_storage_impls_.size()]);
+    return impl_p >= start && impl_p < end;
+  }
+
  private:
   // ivalues created in one run but not managed by MemoryPlanner
   std::vector<IValue*> unmanaged_ivalues_;
@@ -107,15 +122,16 @@ class MemoryPlanner {
   // same data. Thus, if memonger is disabled, all vectors are of
   // size 1.
 
-  // We cache the storage pointers directly rather than caching Tensor
-  // objects so that we don't have to do an extra load from memory
-  // (which will likely miss in CPU data cache) per Tensor reading
-  // the Storage pointer from the TensorImpl object.
-  std::vector<std::pair<size_t, std::vector<const at::Storage*>>>
-      managed_tensor_storages_{};
+  // We allocate StorageImpls ourselves so that 1) we don't have to do
+  // an extra two loads per Tensor (which will likely miss in the CPU
+  // data cache) first reading the Storage (i.e., StorageImpl pointer)
+  // from the TensorImpl object and then second dereferencing it and
+  // 2) our memory access pattern during allocate() has high locality.
+  std::vector<std::pair<size_t, at::StorageImpl>>
+      managed_tensor_storage_impls_{};
   // We don't have any guarantee that the model doesn't change the
   // Storage for managed tensors out from under us during execution,
-  // so we have to grab the Storages each time we deallocate.
+  // so we have to check the StorageImpls each time we deallocate.
   std::vector<std::pair<size_t, std::vector<at::Tensor*>>> managed_tensors_;
   at::DataPtr buffer_; // allocated each time we call Run()
   size_t num_managed_tensors_{0};
