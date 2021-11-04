@@ -10,24 +10,24 @@ This script assumes the correct env vars are set for AWS permissions.
 
 '''
 
-import boto3
+import boto3  # type: ignore[import]
 import json
 from functools import lru_cache
 from typing import List, Any
 from urllib.request import urlopen, Request
 
 # Modified from https://github.com/pytorch/pytorch/blob/b00206d4737d1f1e7a442c9f8a1cadccd272a386/torch/hub.py#L129
-def _read_url(url) -> Any:
+def _read_url(url: Any) -> Any:
     with urlopen(url) as r:
         return r.headers, r.read().decode(r.headers.get_content_charset('utf-8'))
 
 
-def request_for_labels(url: str):
+def request_for_labels(url: str) -> Any:
     headers = {'Accept': 'application/vnd.github.v3+json'}
     return _read_url(Request(url, headers=headers))
 
 
-def get_last_page(header) -> int:
+def get_last_page(header: Any) -> int:
     # Link info looks like: <https://api.github.com/repositories/65600975/labels?per_page=100&page=2>;
     # rel="next", <https://api.github.com/repositories/65600975/labels?per_page=100&page=3>; rel="last"
     link_info = header['link']
