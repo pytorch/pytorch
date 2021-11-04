@@ -321,7 +321,7 @@ bool TensorCompare(const at::Tensor& t1, const at::Tensor& t2) {
 
 compiler::BackendDataPtr TensorToDataHandle(const at::Tensor& tensor,
                                      const Device& device) {
-  return torch_lazy_tensors::compiler::getBackend()
+  return compiler::getBackend()
       ->MakeComputationDataFromTensor(
           tensor, lazy_tensors::Shape(tensor.scalar_type(), tensor.sizes()),
           device.ToString());
@@ -337,7 +337,7 @@ std::vector<compiler::BackendDataPtr> CreateTensorsData(
     Device device(devices[i]);
     lazy_tensors::Shape shape(tensors[i].scalar_type(), tensors[i].sizes());
     result.push_back(
-        torch_lazy_tensors::compiler::getBackend()
+        compiler::getBackend()
             ->MakeComputationDataFromTensor(tensors[i], shape, devices[i]));
   }
   return result;
@@ -349,7 +349,7 @@ std::vector<at::Tensor> DataHandlesToTensors(
   std::vector<at::Tensor> tensors;
   for (const auto& handle : data_handles) {
     tensors.push_back(
-        torch_lazy_tensors::compiler::getBackend()
+        compiler::getBackend()
             ->MakeTensorFromComputationData(handle, dest_element_type));
   }
   return tensors;

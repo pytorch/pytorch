@@ -443,7 +443,7 @@ void LazyGraphExecutor::WaitDeviceOps(c10::ArrayRef<std::string> devices) {
       wait_devices.insert(Device(device_str));
     }
   } else {
-    for (auto& device_str : torch_lazy_tensors::compiler::getBackend()
+    for (auto& device_str : compiler::getBackend()
                                 ->GetLocalDevices()) {
       wait_devices.insert(Device(device_str));
     }
@@ -657,7 +657,7 @@ std::vector<compiler::BackendDataPtr> LazyGraphExecutor::FetchTensorData(
     compiler::BackendDataPtr handle = tensor.CurrentDataHandle();
     if (handle == nullptr && config.force_ltc_data) {
       const Device& tensor_device = tensor.GetDevice();
-      handle = torch_lazy_tensors::compiler::getBackend()
+      handle = compiler::getBackend()
                    ->CreateDataPlaceholder(tensor_device.ToString(),
                                            std::move(tensor.shape()));
       tensor.SetDataHandle(handle, config.sync_ltc_data);
@@ -757,7 +757,7 @@ LazyGraphExecutor::CompilationResult LazyGraphExecutor::Compile(
   VLOG(3) << "Compiling IR graph hash " << torch::lazy::HashToString(coll.hash)
           << " on device " << coll.device << " ...";
   std::vector<ComputationPtr> computations =
-      torch_lazy_tensors::compiler::getBackend()->Compile(
+      compiler::getBackend()->Compile(
           {computation});
   VLOG(3) << "Compiling IR graph hash " << torch::lazy::HashToString(coll.hash)
           << " on device " << coll.device << " done!";
@@ -879,7 +879,7 @@ LazyGraphExecutor::ScheduleSyncTensorsGraph(
       VLOG(3) << "Executing IR graph hash " << torch::lazy::HashToString(hash)
               << " on device " << async->device << " ...";
       auto results =
-          torch_lazy_tensors::compiler::getBackend()
+          compiler::getBackend()
               ->ExecuteComputation(*async->cached_computation->computation,
                                    async->parameters_data, async->device);
       VLOG(3) << "Executing IR graph hash " << torch::lazy::HashToString(hash)
@@ -964,7 +964,7 @@ std::vector<at::Tensor> LazyGraphExecutor::FetchTensors(
     if (indices != nullptr && sync_index < indices->size() &&
         i == (*indices)[sync_index]) {
       results.push_back(
-          torch_lazy_tensors::compiler::getBackend()
+          compiler::getBackend()
               ->MakeTensorFromComputationData(tensors_data[literals_index],
                                               (*tensors)[i].dtype()));
       ++literals_index;
@@ -976,7 +976,7 @@ std::vector<at::Tensor> LazyGraphExecutor::FetchTensors(
       } else {
         CHECK_LT(literals_index, tensors_data.size());
         results.push_back(
-            torch_lazy_tensors::compiler::getBackend()
+            compiler::getBackend()
                 ->MakeTensorFromComputationData(tensors_data[literals_index],
                                                 (*tensors)[i].dtype()));
         ++literals_index;

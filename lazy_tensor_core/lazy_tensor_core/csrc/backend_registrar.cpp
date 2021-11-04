@@ -12,21 +12,21 @@ BackendRegistrar::BackendRegistrar(
 
 std::vector<std::string> GetCompilationDevices(
     const std::string& device, c10::ArrayRef<std::string> devices) {
-  return torch_lazy_tensors::compiler::getBackend()
+  return compiler::getBackend()
       ->GetCompilationDevices(device, devices);
 }
 
 at::Tensor MakeTensorFromComputationData(
     const torch_lazy_tensors::compiler::BackendDataPtr data,
     c10::optional<at::ScalarType> logical_scalar_type) {
-  return torch_lazy_tensors::compiler::getBackend()
+  return compiler::getBackend()
       ->MakeTensorFromComputationData(data, logical_scalar_type);
 }
 
 torch_lazy_tensors::compiler::BackendDataPtr MakeComputationDataFromTensor(
     const at::Tensor& tensor, const lazy_tensors::Shape& shape,
     const std::string& device) {
-  return torch_lazy_tensors::compiler::getBackend()
+  return compiler::getBackend()
       ->MakeComputationDataFromTensor(tensor, shape, device);
 }
 
@@ -38,13 +38,13 @@ std::unique_ptr<LoweringContext> LoweringContext::Create(
     const std::string& name, Device device,
     c10::ArrayRef<torch::lazy::Node*> post_order,
     Util::EmissionMap emit_status) {
-  return torch_lazy_tensors::compiler::getBackend()
+  return compiler::getBackend()
       ->CreateLoweringContext(name, device, post_order, emit_status);
 }
 
 std::unique_ptr<LoweringContext> LoweringContext::Create(
     const std::string& name, Device device) {
-  return torch_lazy_tensors::compiler::getBackend()
+  return compiler::getBackend()
       ->CreateLoweringContext(name, device);
 }
 

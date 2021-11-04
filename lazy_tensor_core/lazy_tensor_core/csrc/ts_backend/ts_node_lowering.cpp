@@ -274,7 +274,7 @@ class TSNodeLowering : public TSNodeLoweringInterface {
     // TODO: Clean up after convolution unification is done.
     auto& ctx = at::globalContext();
     CHECK(ctx.userEnabledCuDNN() &&
-          torch_lazy_tensors::compiler::getBackend()
+          compiler::getBackend()
                   ->HardwareDeviceType() == at::kCUDA);
 
     // See cudnn_convolution_backward/cudnn_convolution_transpose_backward in
@@ -347,7 +347,7 @@ class TSNodeLowering : public TSNodeLoweringInterface {
 
   TSOpVector LowerConstant(const ir::ops::Constant* node) {
     at::Tensor value = node->value().value();
-    if (torch_lazy_tensors::compiler::getBackend()
+    if (compiler::getBackend()
             ->HardwareDeviceType() == at::kCUDA) {
       value = value.cuda();
     }
@@ -413,7 +413,7 @@ class TSNodeLowering : public TSNodeLoweringInterface {
     const lazy_tensors::Shape& shape = node->shape();
     auto options =
         at::TensorOptions()
-            .device(torch_lazy_tensors::compiler::getBackend()
+            .device(compiler::getBackend()
                         ->HardwareDeviceType())
             .dtype(shape.scalar_type());
     return {

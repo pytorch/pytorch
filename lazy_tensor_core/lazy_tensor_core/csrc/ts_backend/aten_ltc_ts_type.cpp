@@ -190,7 +190,7 @@ LazyNativeFunctions::convolution_backward_overrideable(
     int64_t groups, std::array<bool, 3> output_mask) {
   // Lower to cudnn_convolution_backward when possbile
   if (at::globalContext().userEnabledCuDNN() &&
-      torch_lazy_tensors::compiler::getBackend()
+      compiler::getBackend()
               ->HardwareDeviceType() == at::kCUDA) {
     LTC_FN_COUNTER("lazy::");
     auto result = lazy_tensor_aten_ops::convolution_backward_overrideable(
@@ -230,7 +230,7 @@ LazyNativeFunctions::convolution_backward_overrideable(
   const auto kernel_size = weight.sizes().slice(2);
   CHECK(kernel_size.size() == 2 || kernel_size.size() == 3);
   const at::DeviceType device_type =
-      torch_lazy_tensors::compiler::getBackend()->HardwareDeviceType();
+      compiler::getBackend()->HardwareDeviceType();
   if (transposed) {
     at::TensorOptions options = at::TensorOptions().device(device_type);
     auto&& x_result =
@@ -365,7 +365,7 @@ at::Tensor LazyNativeFunctions::empty(
     c10::optional<bool> pin_memory,
     c10::optional<at::MemoryFormat> memory_format) {
   const auto device_type =
-      torch_lazy_tensors::compiler::getBackend()->HardwareDeviceType();
+      compiler::getBackend()->HardwareDeviceType();
   at::TensorOptions options = at::TensorOptions()
                                   .device(c10::Device(device_type))
                                   .layout(layout)
