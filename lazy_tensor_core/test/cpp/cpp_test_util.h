@@ -58,20 +58,9 @@ static inline void AllEqual(at::Tensor tensor, at::Tensor xla_tensor) {
   EXPECT_TRUE(EqualValues(tensor, xla_tensor));
 }
 
-void ForEachDevice(c10::ArrayRef<DeviceType> device_types,
-                   const std::function<void(const Device&)>& devfn);
-
-void ForEachDevice(c10::ArrayRef<DeviceType> device_types,
-                   const std::function<void(const torch::Device&)>& devfn);
-
 void ForEachDevice(const std::function<void(const Device&)>& devfn);
 
 void ForEachDevice(const std::function<void(const torch::Device&)>& devfn);
-
-void WithAllDevices(
-    c10::ArrayRef<DeviceType> device_types,
-    const std::function<void(const std::vector<Device>&,
-                             const std::vector<Device>&)>& devfn);
 
 std::string GetTensorTextGraph(at::Tensor tensor);
 

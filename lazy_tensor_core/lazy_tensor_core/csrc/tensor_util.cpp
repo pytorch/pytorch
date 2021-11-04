@@ -12,6 +12,7 @@
 #include <thread>
 
 #include "lazy_tensor_core/csrc/compiler/backend_impl_interface.h"
+#include "lazy_tensor_core/csrc/device.h"
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensors/computation_client/multi_wait.h"
 #include "lazy_tensors/computation_client/sys_util.h"

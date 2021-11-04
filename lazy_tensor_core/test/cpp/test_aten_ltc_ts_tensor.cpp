@@ -4270,8 +4270,7 @@ TEST_F(AtenLtcTsTensorTest, TestNonzero) {
     torch::Tensor xla_b = torch::nonzero(xla_a);
     AllClose(b, xla_b);
 
-    if (DebugUtil::ExperimentEnabled("nonzero") &&
-        bridge::AtenDeviceToLtcDevice(device).hw_type == DeviceType::TPU) {
+    if (DebugUtil::ExperimentEnabled("nonzero")) {
       // If the nonzero support is enabled, we must not see any aten:: calls.
       ExpectCounterNotChanged("aten::.*", cpp_test::GetIgnoredCounters());
     }
@@ -4290,8 +4289,7 @@ TEST_F(AtenLtcTsTensorTest, TestMaskedSelect) {
     torch::Tensor xla_c = torch::masked_select(xla_a, xla_b);
     AllClose(c, xla_c);
 
-    if (DebugUtil::ExperimentEnabled("masked_select") &&
-        bridge::AtenDeviceToLtcDevice(device).hw_type == DeviceType::TPU) {
+    if (DebugUtil::ExperimentEnabled("masked_select")) {
       // If the masked_select support is enabled, we must not see any aten::
       // calls.
       ExpectCounterNotChanged("aten::.*", cpp_test::GetIgnoredCounters());
@@ -4313,8 +4311,7 @@ TEST_F(AtenLtcTsTensorTest, TestMaskedScatter) {
     torch::Tensor xla_d = torch::masked_scatter(xla_a, xla_b, xla_c);
     AllClose(d, xla_d);
 
-    if (DebugUtil::ExperimentEnabled("masked_scatter") &&
-        bridge::AtenDeviceToLtcDevice(device).hw_type == DeviceType::TPU) {
+    if (DebugUtil::ExperimentEnabled("masked_scatter")) {
       // If the masked_select support is enabled, we must not see any aten::
       // calls.
       ExpectCounterNotChanged("aten::.*", cpp_test::GetIgnoredCounters());
@@ -9658,10 +9655,6 @@ TEST_F(AtenLtcTsTensorTest, TestEmbeddingBackward) {
 }
 
 TEST_F(AtenLtcTsTensorTest, TestAmpForeachNonFiniteCheckAndUnscale) {
-  DeviceType hw_type = GetDefaultDevice()->hw_type;
-  if (hw_type != DeviceType::GPU && hw_type != DeviceType::CPU) {
-    return;
-  }
   torch::Tensor grads0 =
       torch::tensor({1, 2, 3, 4}, torch::TensorOptions(torch::kFloat));
   torch::Tensor grads1 = torch::tensor({1.0, 2.0, std::nan("1"), 4.0},
@@ -9695,10 +9688,6 @@ TEST_F(AtenLtcTsTensorTest, TestAmpForeachNonFiniteCheckAndUnscale) {
 }
 
 TEST_F(AtenLtcTsTensorTest, TestAmpUpdateScale) {
-  DeviceType hw_type = GetDefaultDevice()->hw_type;
-  if (hw_type != DeviceType::GPU && hw_type != DeviceType::CPU) {
-    return;
-  }
   torch::Tensor growth_tracker =
       torch::scalar_tensor(0, torch::TensorOptions(torch::kInt32));
   torch::Tensor current_scale =

@@ -131,39 +131,17 @@ bool EqualValuesNoElementTypeCheck(at::Tensor tensor1, at::Tensor tensor2) {
   return equal;
 }
 
-void ForEachDevice(c10::ArrayRef<DeviceType> device_types,
-                   const std::function<void(const Device&)>& devfn) {
-  const Device* device = GetDefaultDevice();
-  if (device_types.empty() ||
-      std::find(device_types.begin(), device_types.end(), device->hw_type) !=
-          device_types.end()) {
-    bridge::SetCurrentDevice(*device);
-    devfn(*device);
-  } else {
-    GTEST_SKIP();
-  }
-}
-
-void ForEachDevice(c10::ArrayRef<DeviceType> device_types,
-                   const std::function<void(const torch::Device&)>& devfn) {
-  const Device* device = GetDefaultDevice();
-  if (device_types.empty() ||
-      std::find(device_types.begin(), device_types.end(), device->hw_type) !=
-          device_types.end()) {
-    torch::Device torch_device = bridge::LtcDeviceToAtenDevice(*device);
-    bridge::SetCurrentDevice(torch_device);
-    devfn(torch_device);
-  } else {
-    GTEST_SKIP();
-  }
-}
-
 void ForEachDevice(const std::function<void(const Device&)>& devfn) {
-  ForEachDevice({}, devfn);
+  const Device* device = GetDefaultDevice();
+  bridge::SetCurrentDevice(*device);
+  devfn(*device);
 }
 
 void ForEachDevice(const std::function<void(const torch::Device&)>& devfn) {
-  ForEachDevice({}, devfn);
+  const Device* device = GetDefaultDevice();
+  torch::Device torch_device = bridge::LtcDeviceToAtenDevice(*device);
+  bridge::SetCurrentDevice(torch_device);
+  devfn(torch_device);
 }
 
 bool CloseValues(at::Tensor tensor1, at::Tensor tensor2, double rtol,
@@ -189,34 +167,6 @@ bool CloseValues(at::Tensor tensor1, at::Tensor tensor2, double rtol,
     DumpDifferences(tensor1, tensor2);
   }
   return equal;
-}
-
-void WithAllDevices(
-    c10::ArrayRef<DeviceType> device_types,
-    const std::function<void(const std::vector<Device>&,
-                             const std::vector<Device>&)>& devfn) {
-  for (auto device_type : device_types) {
-    std::vector<Device> devices;
-    std::vector<Device> all_devices;
-    for (const auto& device_str :
-         compiler::getBackend()
-             ->GetLocalDevices()) {
-      Device device(device_str);
-      if (device.hw_type == device_type) {
-        devices.push_back(device);
-      }
-    }
-    for (const auto& device_str :
-         compiler::getBackend()->GetAllDevices()) {
-      Device device(device_str);
-      if (device.hw_type == device_type) {
-        all_devices.push_back(device);
-      }
-    }
-    if (!devices.empty()) {
-      devfn(devices, all_devices);
-    }
-  }
 }
 
 std::string GetTensorTextGraph(at::Tensor tensor) {

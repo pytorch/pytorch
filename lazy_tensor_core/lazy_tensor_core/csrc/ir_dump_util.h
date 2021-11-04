@@ -2,10 +2,12 @@
 
 #include <string>
 
-#include "lazy_tensor_core/csrc/device.h"
 #include "torch/csrc/lazy/core/ir.h"
 
 namespace torch_lazy_tensors {
+
+struct Device;
+
 namespace ir {
 
 class DumpUtil {
