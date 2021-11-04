@@ -242,7 +242,7 @@ TensorDomain* TransformRFactor::runReplay(
             id->start(),
             id->extent(),
             id->stopOffset(),
-            id->getParallelType(),
+            ParallelType::Serial,
             IterType::Reduction,
             true);
         // If this is not an rfactor root, but a reduction root, it should be
@@ -252,7 +252,7 @@ TensorDomain* TransformRFactor::runReplay(
             id->start(),
             id->extent(),
             id->stopOffset(),
-            id->getParallelType(),
+            ParallelType::Serial,
             IterType::Iteration,
             false);
       } else {
@@ -278,6 +278,9 @@ TensorDomain* TransformRFactor::runReplay(
           "Error during rfactor replay, missing an axis.");
       auto replayed_id = replayed_id_it->second;
       replayed_id->parallelize(orig_id->getParallelType());
+      if (orig_id->hasPaddingToMultipleOfWarp()) {
+        replayed_id->padToMultipleOfWarp(orig_id->getMaybeSizeAfterPadding());
+      }
       new_domain[i++] = replayed_id;
     }
   }
@@ -385,6 +388,9 @@ TensorDomain* TransformRFactor::runReplay2(
         auto replayed_id = replayed_id_it->second;
         new_domain.push_back(replayed_id);
         replayed_id->parallelize(orig_id->getParallelType());
+        if (orig_id->hasPaddingToMultipleOfWarp()) {
+          replayed_id->padToMultipleOfWarp(orig_id->getMaybeSizeAfterPadding());
+        }
       } else if (axes_set.find(i) == axes_set.end()) {
         IterDomain* new_id = orig_id->clone();
         new_domain.push_back(new_id);

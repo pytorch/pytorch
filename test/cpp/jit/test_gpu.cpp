@@ -24,6 +24,7 @@
 #include <torch/csrc/jit/codegen/cuda/ops/all_ops.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/all_schedulers.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler/reduction_utils.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 #include <torch/csrc/jit/codegen/cuda/transform_rfactor.h>
@@ -18146,6 +18147,341 @@ TEST(NVFuserTest, FusionRfactorContigIDs_CUDA) {
   auto ref = t0.sum({1});
 
   testValidate(&fusion, outputs, aten_inputs, {ref}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionPersistentBufferCalculation1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = set(tv0);
+  auto tv2 = sum(tv1, {1});
+  auto tv3 = broadcast(tv2, {false, true});
+  auto tv4 = set(tv1);
+  auto tv5 = add(tv3, tv4);
+  fusion.addOutput(tv5);
+
+  auto persistent_buffer_info = scheduler_utils::persistentBuffers(&fusion);
+
+  auto isTvWithinVec = [](std::vector<TensorView*>& vec, TensorView* tv) {
+    return std::find(vec.begin(), vec.end(), tv) != vec.end();
+  };
+
+  auto tvEntryInVecVec = [](std::vector<std::vector<TensorView*>>& vec_o_vec,
+                            std::vector<TensorView*>& buffer_vec,
+                            TensorView* tv) {
+    auto buffer_it = std::find(buffer_vec.begin(), buffer_vec.end(), tv);
+    return vec_o_vec.begin() + std::distance(buffer_vec.begin(), buffer_it);
+  };
+
+  auto& buffers = persistent_buffer_info.persistent_buffers;
+  auto& resolution = persistent_buffer_info.persistent_buffer_resolution_points;
+  auto& projectable = persistent_buffer_info.projectable_persistent_buffers;
+  auto& projectable_inputs = persistent_buffer_info.projectable_buffer_inputs;
+
+  TORCH_INTERNAL_ASSERT(buffers.size() == 1);
+  TORCH_INTERNAL_ASSERT(resolution.size() == 1 && resolution[0].size() == 1);
+  TORCH_INTERNAL_ASSERT(projectable.size() == 1);
+  TORCH_INTERNAL_ASSERT(projectable_inputs.size() == 1);
+
+  TORCH_INTERNAL_ASSERT(isTvWithinVec(buffers, tv1));
+  TORCH_INTERNAL_ASSERT(isTvWithinVec(projectable, tv1));
+  TORCH_INTERNAL_ASSERT(isTvWithinVec(projectable_inputs, tv0));
+
+  auto tv1_resolution_it = tvEntryInVecVec(resolution, buffers, tv1);
+  TORCH_INTERNAL_ASSERT(tv1_resolution_it != resolution.end())
+
+  TORCH_INTERNAL_ASSERT(isTvWithinVec(*tv1_resolution_it, tv5));
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor aten_t0 = at::randn({99, 101}, options);
+
+  // Schedule through magic scheduler
+  auto runtime_info = SchedulerRuntimeInfo(&fusion, {aten_t0}, true);
+  auto persistent_buffer_size =
+      persistentBufferSize(&fusion, runtime_info, persistent_buffer_info);
+
+  TORCH_INTERNAL_ASSERT(
+      persistent_buffer_size.persistent_buffer_size ==
+      aten_t0.size(1) * dataTypeSize(DataType::Float));
+  TORCH_INTERNAL_ASSERT(
+      persistent_buffer_size.projected_persistent_buffer_size ==
+      aten_t0.size(1) * dataTypeSize(DataType::Float));
+}
+
+TEST(NVFuserTest, FusionPersistentBufferCalculation2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2, DataType::Half);
+  fusion.addInput(tv0);
+
+  auto tv1 = castOp(DataType::Float, tv0);
+  auto tv2 = sum(tv1, {1});
+  auto tv3 = broadcast(tv2, {false, true});
+  auto tv4 = set(tv1);
+  auto tv5 = add(tv3, tv4);
+  auto tv6 = castOp(DataType::Half, tv5);
+  fusion.addOutput(tv6);
+
+  auto persistent_buffer_info = scheduler_utils::persistentBuffers(&fusion);
+
+  auto isTvWithinVec = [](std::vector<TensorView*>& vec, TensorView* tv) {
+    return std::find(vec.begin(), vec.end(), tv) != vec.end();
+  };
+
+  auto tvEntryInVecVec = [](std::vector<std::vector<TensorView*>>& vec_o_vec,
+                            std::vector<TensorView*>& buffer_vec,
+                            TensorView* tv) {
+    auto buffer_it = std::find(buffer_vec.begin(), buffer_vec.end(), tv);
+    return vec_o_vec.begin() + std::distance(buffer_vec.begin(), buffer_it);
+  };
+
+  auto& buffers = persistent_buffer_info.persistent_buffers;
+  auto& resolution = persistent_buffer_info.persistent_buffer_resolution_points;
+  auto& projectable = persistent_buffer_info.projectable_persistent_buffers;
+  auto& projectable_inputs = persistent_buffer_info.projectable_buffer_inputs;
+
+  TORCH_INTERNAL_ASSERT(buffers.size() == 1);
+  TORCH_INTERNAL_ASSERT(resolution.size() == 1 && resolution[0].size() == 1);
+  TORCH_INTERNAL_ASSERT(projectable.size() == 1);
+  TORCH_INTERNAL_ASSERT(projectable_inputs.size() == 1);
+
+  TORCH_INTERNAL_ASSERT(isTvWithinVec(buffers, tv1));
+  TORCH_INTERNAL_ASSERT(isTvWithinVec(projectable, tv1));
+  TORCH_INTERNAL_ASSERT(isTvWithinVec(projectable_inputs, tv0));
+
+  auto tv1_resolution_it = tvEntryInVecVec(resolution, buffers, tv1);
+  TORCH_INTERNAL_ASSERT(tv1_resolution_it != resolution.end())
+
+  TORCH_INTERNAL_ASSERT(isTvWithinVec(*tv1_resolution_it, tv5));
+
+  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
+  at::Tensor aten_t0 = at::randn({99, 101}, options);
+
+  // Schedule through magic scheduler
+  auto runtime_info = SchedulerRuntimeInfo(&fusion, {aten_t0}, true);
+  auto persistent_buffer_size =
+      persistentBufferSize(&fusion, runtime_info, persistent_buffer_info);
+
+  TORCH_INTERNAL_ASSERT(
+      persistent_buffer_size.persistent_buffer_size ==
+      aten_t0.size(1) * dataTypeSize(DataType::Float));
+  TORCH_INTERNAL_ASSERT(
+      persistent_buffer_size.projected_persistent_buffer_size ==
+      aten_t0.size(1) * dataTypeSize(DataType::Half));
+}
+
+TEST(NVFuserTest, FusionPersistentBufferCalculation3_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2, DataType::Half);
+  fusion.addInput(tv0);
+
+  auto tv1 = castOp(DataType::Float, tv0);
+  auto tv2 = set(tv1);
+  auto tv3 = sum(tv2, {1});
+  auto tv4 = broadcast(tv3, {false, true});
+
+  auto tv5 = makeSymbolicTensor(2, DataType::Half);
+  fusion.addInput(tv5);
+
+  auto tv6 = castOp(DataType::Float, tv5);
+
+  auto tv7 = add(tv6, tv4);
+  auto tv8 = set(tv1);
+  auto tv9 = add(tv7, tv8);
+  auto tv10 = sum(tv9, {1});
+  auto tv11 = broadcast(tv10, {false, true});
+  auto tv12 = set(tv7);
+  auto tv13 = add(tv12, tv11);
+
+  fusion.addOutput(tv13);
+
+  auto persistent_buffer_info = scheduler_utils::persistentBuffers(&fusion);
+
+  auto isTvWithinVec = [](std::vector<TensorView*>& vec, TensorView* tv) {
+    return std::find(vec.begin(), vec.end(), tv) != vec.end();
+  };
+
+  auto tvEntryInVecVec = [](std::vector<std::vector<TensorView*>>& vec_o_vec,
+                            std::vector<TensorView*>& buffer_vec,
+                            TensorView* tv) {
+    auto buffer_it = std::find(buffer_vec.begin(), buffer_vec.end(), tv);
+    return vec_o_vec.begin() + std::distance(buffer_vec.begin(), buffer_it);
+  };
+
+  auto& buffers = persistent_buffer_info.persistent_buffers;
+  auto& resolution = persistent_buffer_info.persistent_buffer_resolution_points;
+  auto& projectable = persistent_buffer_info.projectable_persistent_buffers;
+  auto& projectable_inputs = persistent_buffer_info.projectable_buffer_inputs;
+
+  TORCH_INTERNAL_ASSERT(buffers.size() == 2);
+  TORCH_INTERNAL_ASSERT(
+      resolution.size() == 2 && resolution[0].size() == 1 &&
+      resolution[1].size() == 1);
+  TORCH_INTERNAL_ASSERT(projectable.size() == 1);
+  TORCH_INTERNAL_ASSERT(projectable_inputs.size() == 1);
+
+  TORCH_INTERNAL_ASSERT(
+      isTvWithinVec(buffers, tv1) && isTvWithinVec(buffers, tv7));
+  TORCH_INTERNAL_ASSERT(
+      isTvWithinVec(projectable, tv1) && !isTvWithinVec(projectable, tv7));
+
+  TORCH_INTERNAL_ASSERT(isTvWithinVec(projectable_inputs, tv0));
+
+  auto tv1_resolution_it = tvEntryInVecVec(resolution, buffers, tv1);
+  TORCH_INTERNAL_ASSERT(tv1_resolution_it != resolution.end())
+  TORCH_INTERNAL_ASSERT(isTvWithinVec(*tv1_resolution_it, tv9));
+
+  auto tv7_resolution_it = tvEntryInVecVec(resolution, buffers, tv7);
+  TORCH_INTERNAL_ASSERT(tv7_resolution_it != resolution.end())
+  TORCH_INTERNAL_ASSERT(isTvWithinVec(*tv7_resolution_it, tv13));
+
+  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
+  at::Tensor aten_t0 = at::randn({99, 101}, options);
+  at::Tensor aten_t5 = at::randn({99, 101}, options);
+
+  // Schedule through magic scheduler
+  auto runtime_info = SchedulerRuntimeInfo(&fusion, {aten_t0, aten_t5}, true);
+  auto persistent_buffer_size =
+      persistentBufferSize(&fusion, runtime_info, persistent_buffer_info);
+
+  TORCH_INTERNAL_ASSERT(
+      persistent_buffer_size.persistent_buffer_size ==
+      aten_t0.size(1) * dataTypeSize(DataType::Float) * 2);
+  TORCH_INTERNAL_ASSERT(
+      persistent_buffer_size.projected_persistent_buffer_size ==
+      aten_t0.size(1) *
+          (dataTypeSize(DataType::Half) + dataTypeSize(DataType::Float)));
+}
+
+TEST(NVFuserTest, FusionPersistentBufferCalculation4_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2, DataType::Half);
+  fusion.addInput(tv0);
+
+  auto tv1 = castOp(DataType::Float, tv0);
+  auto tv2 = set(tv1);
+  auto tv3 = sum(tv2, {1});
+  auto tv4 = broadcast(tv3, {false, true});
+  auto tv5 = set(tv1);
+  auto tv6 = add(tv4, tv5);
+  auto tv7 = set(tv2);
+  auto tv8 = add(tv7, tv6);
+  auto tv9 = castOp(DataType::Half, tv8);
+
+  fusion.addOutput(tv9);
+
+  auto persistent_buffer_info = scheduler_utils::persistentBuffers(&fusion);
+
+  auto isTvWithinVec = [](std::vector<TensorView*>& vec, TensorView* tv) {
+    return std::find(vec.begin(), vec.end(), tv) != vec.end();
+  };
+
+  auto tvEntryInVecVec = [](std::vector<std::vector<TensorView*>>& vec_o_vec,
+                            std::vector<TensorView*>& buffer_vec,
+                            TensorView* tv) {
+    auto buffer_it = std::find(buffer_vec.begin(), buffer_vec.end(), tv);
+    return vec_o_vec.begin() + std::distance(buffer_vec.begin(), buffer_it);
+  };
+
+  auto& buffers = persistent_buffer_info.persistent_buffers;
+  auto& resolution = persistent_buffer_info.persistent_buffer_resolution_points;
+  auto& projectable = persistent_buffer_info.projectable_persistent_buffers;
+  auto& projectable_inputs = persistent_buffer_info.projectable_buffer_inputs;
+
+  TORCH_INTERNAL_ASSERT(buffers.size() == 2);
+  TORCH_INTERNAL_ASSERT(
+      resolution.size() == 2 && resolution[0].size() == 1 &&
+      resolution[1].size() == 1);
+
+  TORCH_INTERNAL_ASSERT(projectable.size() == 2);
+  TORCH_INTERNAL_ASSERT(projectable_inputs.size() == 1);
+
+  TORCH_INTERNAL_ASSERT(
+      isTvWithinVec(buffers, tv1) && isTvWithinVec(buffers, tv2));
+  TORCH_INTERNAL_ASSERT(
+      isTvWithinVec(projectable, tv1) && isTvWithinVec(projectable, tv2));
+
+  TORCH_INTERNAL_ASSERT(isTvWithinVec(projectable_inputs, tv0));
+
+  auto tv1_resolution_it = tvEntryInVecVec(resolution, buffers, tv1);
+  TORCH_INTERNAL_ASSERT(tv1_resolution_it != resolution.end())
+  TORCH_INTERNAL_ASSERT(isTvWithinVec(*tv1_resolution_it, tv6));
+
+  auto tv2_resolution_it = tvEntryInVecVec(resolution, buffers, tv2);
+  TORCH_INTERNAL_ASSERT(tv2_resolution_it != resolution.end())
+  TORCH_INTERNAL_ASSERT(isTvWithinVec(*tv2_resolution_it, tv8));
+
+  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
+  at::Tensor aten_t0 = at::randn({99, 101}, options);
+
+  // Schedule through magic scheduler
+  auto runtime_info = SchedulerRuntimeInfo(&fusion, {aten_t0}, true);
+  auto persistent_buffer_size =
+      persistentBufferSize(&fusion, runtime_info, persistent_buffer_info);
+
+  TORCH_INTERNAL_ASSERT(
+      persistent_buffer_size.persistent_buffer_size ==
+      aten_t0.size(1) * dataTypeSize(DataType::Float) * 2);
+
+  TORCH_INTERNAL_ASSERT(
+      persistent_buffer_size.projected_persistent_buffer_size ==
+      aten_t0.size(1) * dataTypeSize(DataType::Half));
+}
+
+TEST(NVFuserTest, PersistentBufferProjection_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2, DataType::Half);
+  fusion.addInput(tv0);
+
+  auto tv1 = castOp(DataType::Float, tv0);
+  auto tv2 = set(tv1);
+  auto tv3 = sum(tv2, {1});
+  auto tv4 = broadcast(tv3, {false, true});
+  auto tv5 = set(tv1);
+  auto tv6 = add(tv4, tv5);
+  auto tv7 = set(tv2);
+  auto tv8 = add(tv7, tv6);
+  auto tv9 = castOp(DataType::Half, tv8);
+
+  fusion.addOutput(tv9);
+
+  reduction_scheduler_utils::projectPersistentBuffers(&fusion);
+
+  auto tv5_producers = ir_utils::producerTvsOf(tv5);
+  auto tv7_producers = ir_utils::producerTvsOf(tv7);
+
+  // Projection should have broken these dependencies
+
+  TORCH_INTERNAL_ASSERT(
+      std::find(tv5_producers.begin(), tv5_producers.end(), tv1) ==
+      tv5_producers.end());
+  TORCH_INTERNAL_ASSERT(
+      std::find(tv7_producers.begin(), tv7_producers.end(), tv2) ==
+      tv7_producers.end());
+
+  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
+  at::Tensor aten_t0 = at::randn({99, 101}, options);
+
+  FusionExecutorCache fec(std::move(fusion_ptr));
+  auto cg_outputs = fec.runFusionWithInputs({aten_t0});
+
+  auto aten_t1 = aten_t0.to(c10::kDouble);
+  auto aten_t3 = aten_t1.sum({1});
+  auto aten_t4 = aten_t3.unsqueeze(1);
+  auto aten_t7 = aten_t4.add(aten_t1).add(aten_t1);
+
+  testValidate(&fusion, cg_outputs, {aten_t0}, {aten_t7}, __LINE__, __FILE__);
 }
 
 TEST(NVFuserTest, FusionIssue1223_CUDA) {

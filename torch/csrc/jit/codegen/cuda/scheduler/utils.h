@@ -21,6 +21,8 @@ namespace scheduler_utils {
 constexpr int64_t register_file_size = 256 * 1024 / 2;
 constexpr int64_t x_grid_limit = ((int64_t)1 << (int64_t)31) - (int64_t)1;
 constexpr int64_t y_grid_limit = 65535;
+constexpr int64_t z_grid_limit = 65535;
+constexpr int64_t z_block_limit = 64;
 
 // Largest Power of 2 less-than n
 constexpr int64_t lastPow2(int64_t n) {
@@ -61,8 +63,27 @@ TORCH_CUDA_CU_API void computeWithOutputs(
     ComputeAtMode mode = ComputeAtMode::Standard);
 
 struct PersistentBufferInfo {
-  std::vector<TensorView*> buffers;
+  std::vector<TensorView*> persistent_buffers;
   std::unordered_set<IterDomain*> unmappable_dims;
+
+  // Persistent buffers are needed until the path through the reduction -
+  // broadcast chain is resolved by any other chain using the persistent buffer
+  // that is not going through a reduction. This assumes all reduction paths
+  // have the same reduction pattern. Order is the same as persistent_buffers
+  std::vector<std::vector<TensorView*>> persistent_buffer_resolution_points;
+
+  // Not all persistent buffers can be projected to inputs, if a buffer can be
+  // projected to the inputs which may reduce the persistent buffer size (BN
+  // Backwards specifically) then keep track of it here. Persistent buffers that
+  // have a persistent buffer/reduction before them should not be projected
+  // through that.
+  std::vector<TensorView*> projectable_persistent_buffers;
+
+  // Track inputs of input projectable buffers
+  std::vector<TensorView*> projectable_buffer_inputs;
+
+  // Map unmappable dims to projectable_buffer_inputs
+  std::unordered_set<IterDomain*> unamppable_dims_projected_to_inputs;
 };
 
 // Buffers whos roots can't map to all producer roots based on compute at. These
@@ -71,7 +92,7 @@ struct PersistentBufferInfo {
 // return inputs as being marked persistent if they follow this pattern. It is
 // important to note however inputs don't strictly have to be persistent as they
 // can simply be read multiple times from GMEM in the same kernel.
-PersistentBufferInfo persistentBuffers(Fusion* fusion);
+TORCH_CUDA_CU_API PersistentBufferInfo persistentBuffers(Fusion* fusion);
 
 struct TvProperties {
   // How many elements in tensor view are there to reduce.
@@ -109,11 +130,18 @@ void computeAtBetween(
     ComputeAtMode mode,
     std::unordered_set<IterDomain*> mapped_to_trivial_reduction = {});
 
+// Struct to store persistent buffer sizes. also holds the persistent buffer
+// size of the buffers are projected to the inputs.
+struct PersistentBufferSizeReturn {
+  int64_t persistent_buffer_size = 0;
+  int64_t projected_persistent_buffer_size = 0;
+};
+
 // Compute the amount of register space would be needed to perform this kernel
 // persistently, only based on buffers that must be persistent, and based on the
 // maximum of all minimum size requirement. i.e. if must be persistent, only
 // hold persistent dimension.
-int64_t persistentBufferSize(
+TORCH_CUDA_CU_API PersistentBufferSizeReturn persistentBufferSize(
     Fusion* fusion,
     SchedulerRuntimeInfo& runtime_info,
     PersistentBufferInfo& persistent_buffers,
@@ -135,7 +163,7 @@ std::pair<bool, bool> canonicalDimReduction(
 // Return a list of tensor views that are outputs of reduction operations. If
 // multiple outputs of an expression are found, only include one in the list
 // (WelfordOp)
-std::vector<TensorView*> getReductionTvs(Fusion* fusion);
+TORCH_CUDA_CU_API std::vector<TensorView*> getReductionTvs(Fusion* fusion);
 
 // Reset inputs and outputs to global memory, everything else to local.
 void clearMemorySpace(Fusion* fusion);

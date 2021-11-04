@@ -194,9 +194,8 @@ void parallelizeAllLike(
   for (auto id : reference_tv->domain()->domain()) {
     ca_loop_map.getConcreteMappedID(id)->parallelize(id->getParallelType());
     if (id->hasPaddingToMultipleOfWarp()) {
-      TORCH_INTERNAL_ASSERT(id->getMaybeSizeAfterPadding().has_value());
       ca_loop_map.getConcreteMappedID(id)->padToMultipleOfWarp(
-          id->getMaybeSizeAfterPadding().value());
+          id->getMaybeSizeAfterPadding());
     }
   }
 
@@ -205,8 +204,11 @@ void parallelizeAllLike(
       continue;
     }
     for (const auto i : c10::irange(tv->domain()->domain().size())) {
-      tv->axis(i)->parallelize(
-          ca_loop_map.getConcreteMappedID(tv->axis(i))->getParallelType());
+      auto ca_id = ca_loop_map.getConcreteMappedID(tv->axis(i));
+      tv->axis(i)->parallelize(ca_id->getParallelType());
+      if (ca_id->hasPaddingToMultipleOfWarp()) {
+        tv->axis(i)->padToMultipleOfWarp(ca_id->getMaybeSizeAfterPadding());
+      }
     }
   }
 }
@@ -223,10 +225,151 @@ void computeWithOutputs(TensorView* producer, int pos, ComputeAtMode mode) {
   }
 }
 
+namespace {
+
+// Find the resolution points of the persistent buffers in the provided
+// persistent_buffer_info. Resolution points are identified by tracking if a
+// tensor view is dependent on a reduction, or a persistent buffer. When an
+// expression has inputs that are on both a reduction and persistent buffer
+// path, that's a point where we may be resolving the persistent buffer. In
+// other words, we know the persistent buffer has to be live at that point, but
+// don't know if it has to be live after it.
+//
+// For example if we have:
+//
+// t0 = makeSymbolicTensor(2)
+// t1 = set(t0)
+// t2 = sum(t1, 1)
+// t3 = broadcast(t2, {false, true})
+// t4 = set(t1)
+// t5 = add(t4, t3)
+//
+// In this case, t1 is the persistent buffer, that buffer is resolved at t5, so
+// it needs to exist in full until t5 is "resolved". This class assumes all
+// reduction patterns in the fusion are matching.
+class PersistentBufferResolution : public IterVisitor {
+ public:
+  static std::vector<TensorView*> getResolutionPointsOf(
+      Fusion* fusion,
+      TensorView* persistent_buffer) {
+    PersistentBufferResolution resolution(fusion, persistent_buffer);
+
+    TORCH_INTERNAL_ASSERT(
+        !resolution.resolution_points_.empty(),
+        "Could not resolve persistent buffer: ",
+        persistent_buffer);
+
+    return resolution.resolution_points_;
+  }
+
+  PersistentBufferResolution() = delete;
+
+ private:
+  PersistentBufferResolution(Fusion* fusion, TensorView* persistent_buffer)
+      : persistent_buffer_(persistent_buffer) {
+    traverse(fusion);
+  }
+
+ private:
+  void handle(Val* val) final {
+    if (!val->isA<TensorView>()) {
+      return;
+    }
+    auto tv = val->as<TensorView>();
+    if (tv == persistent_buffer_) {
+      persistent_buffer_hit = true;
+      on_persitent_buffer_path_.emplace(tv);
+      return;
+    }
+
+    if (!persistent_buffer_hit) {
+      return;
+    }
+
+    if (tv->hasReduction()) {
+      on_reduction_path_.emplace(tv);
+    }
+  }
+
+  void handle(Expr* expr) final {
+    if (!persistent_buffer_hit) {
+      return;
+    }
+
+    bool output_is_reduction =
+        std::any_of(expr->outputs().begin(), expr->outputs().end(), [](Val* v) {
+          if (!v->isA<TensorView>()) {
+            return false;
+          }
+          return v->as<TensorView>()->hasReduction();
+        });
+
+    // Persistent buffers cannot be resolved on a reduction expression
+    if (output_is_reduction) {
+      return;
+    }
+
+    bool input_on_reduction_path = std::any_of(
+        expr->inputs().begin(), expr->inputs().end(), [&](Val* inp) {
+          return on_reduction_path_.count(inp);
+        });
+
+    auto input_on_persitent_buffer_path_it = std::find_if(
+        expr->inputs().begin(), expr->inputs().end(), [&](Val* inp) {
+          return on_persitent_buffer_path_.count(inp);
+        });
+
+    bool input_on_persistent_buffer_path =
+        input_on_persitent_buffer_path_it != expr->inputs().end();
+
+    if (input_on_reduction_path && input_on_persistent_buffer_path) {
+      // Expression has inputs on both a reduction and persistent buffer path,
+      // this is a resolution.
+      auto out_tvs = ir_utils::filterByType<TensorView>(expr->outputs());
+
+      // Add resolution point
+      resolution_points_.insert(
+          resolution_points_.end(), out_tvs.begin(), out_tvs.end());
+
+      // Outputs are still on a persistent path
+      for (auto out : expr->outputs()) {
+        on_persitent_buffer_path_.emplace(out);
+      }
+    } else if (input_on_reduction_path) {
+      // Propagate forward the reduction path
+      on_reduction_path_.insert(expr->outputs().begin(), expr->outputs().end());
+    } else if (input_on_persistent_buffer_path) {
+      // Propagate forward the persistent path
+      for (auto out : expr->outputs()) {
+        on_persitent_buffer_path_.emplace(out);
+      }
+    }
+  }
+
+  // Don't do processing until we see the buffer we're looking for
+  bool persistent_buffer_hit = false;
+
+  // Track if key is dependent on a persistent reduction, resolves if
+  // encountering a persistent buffer. For this analysis doesn't matter which
+  // reduction the path is based on.
+  std::unordered_set<Val*> on_reduction_path_;
+
+  // Track if key is dependent on a persistent buffer, resolves if encountering
+  // a persistent reduction or changes path if encountering another persistent
+  // buffer
+  std::unordered_set<Val*> on_persitent_buffer_path_;
+
+  // Tracks where the persistent buffer (key) is resolved (values)
+  std::vector<TensorView*> resolution_points_;
+
+  const TensorView* persistent_buffer_;
+};
+
+} // namespace
+
 PersistentBufferInfo persistentBuffers(Fusion* fusion) {
   FusionGuard fg(fusion);
-
-  PersistentBufferInfo info;
+  PersistentBufferInfo persistent_buffer_info;
 
   ComputeAtRootDomainMap root_map;
   root_map.build();
@@ -234,32 +377,101 @@ PersistentBufferInfo persistentBuffers(Fusion* fusion) {
   auto all_tvs = ir_utils::allTvs(fusion);
 
   for (auto producer : all_tvs) {
+    // Are all producer ids mappable to all consumers
     bool mappable = true;
     auto consumers = ir_utils::consumerTvsOf(producer);
     if (consumers.empty()) {
       continue;
     }
 
-    auto mappable_roots =
-        root_map.getMappableDims(producer->domain(), consumers[0]->domain());
+    // Track which consumers have unmappable dims from producer
+    std::vector<TensorView*> unmappable_consumers;
 
-    auto p_root = producer->getMaybeRFactorDomain();
+    for (auto consumer : consumers) {
+      bool consumer_mappable = true;
+      auto mappable_roots =
+          root_map.getMappableDims(producer->domain(), consumer->domain());
 
-    for (auto p_root_id : p_root) {
-      if (p_root_id->isReduction()) {
-        continue;
+      auto p_root = producer->getMaybeRFactorDomain();
+
+      for (auto p_root_id : p_root) {
+        if (p_root_id->isReduction() || p_root_id->isBroadcast()) {
+          continue;
+        }
+        if (!mappable_roots.count(p_root_id)) {
+          mappable = false;
+          consumer_mappable = false;
+          persistent_buffer_info.unmappable_dims.emplace(p_root_id);
+        }
       }
-      if (!mappable_roots.count(p_root_id)) {
-        mappable = false;
-        info.unmappable_dims.emplace(p_root_id);
+
+      if (!consumer_mappable) {
+        unmappable_consumers.emplace_back(consumer);
       }
     }
 
     if (!mappable) {
-      info.buffers.push_back(producer);
+      // If there's unmappable dims from producer to consumer, producer is a
+      // persistent buffer.
+      persistent_buffer_info.persistent_buffers.emplace_back(producer);
     }
   }
-  return info;
+
+  // Set the persistent buffer resolution points
+  persistent_buffer_info.persistent_buffer_resolution_points = {};
+  for (auto buffer : persistent_buffer_info.persistent_buffers) {
+    persistent_buffer_info.persistent_buffer_resolution_points.emplace_back(
+        PersistentBufferResolution::getResolutionPointsOf(fusion, buffer));
+  }
+
+  // Find projectable persistent buffers
+  auto reduction_tvs = getReductionTvs(fusion);
+  for (auto persistent_buffer : persistent_buffer_info.persistent_buffers) {
+    // Inputs marked as persistent buffers can't be projected any further back
+    if (persistent_buffer->isFusionInput()) {
+      continue;
+    }
+    auto dep_vals = DependencyCheck::getAllValsBetween(
+        {reduction_tvs.begin(), reduction_tvs.end()}, {persistent_buffer});
+
+    // If there's a reduction between a persistent buffer and the inputs, it
+    // can't be projected backwards.
+    if (dep_vals.empty()) {
+      persistent_buffer_info.projectable_persistent_buffers.push_back(
+          persistent_buffer);
+    }
+  }
+
+  // Get a list of inputs of the projectable buffers
+  auto all_inputs = ir_utils::inputTvsOf(
+      persistent_buffer_info.projectable_persistent_buffers);
+
+  // Map unmappable dims to inputs, doesn't matter which compute at map used
+  auto ca_index_map = ComputeAtMap(ComputeAtMap::MappingMode::INDEX);
+  ca_index_map.build(fusion);
+
+  std::unordered_set<IterDomain*> unmappable_concrete_ids;
+  for (auto id : persistent_buffer_info.unmappable_dims) {
+    unmappable_concrete_ids.emplace(ca_index_map.getConcreteMappedID(id));
+  }
+
+  for (auto input : all_inputs) {
+    bool has_unmappable_dim = false;
+    for (auto input_id : input->getMaybeRFactorDomain()) {
+      auto concrete_input_id = ca_index_map.getConcreteMappedID(input_id);
+      if (unmappable_concrete_ids.find(concrete_input_id) !=
+          unmappable_concrete_ids.end()) {
+        persistent_buffer_info.unamppable_dims_projected_to_inputs.emplace(
+            input_id);
+        has_unmappable_dim = true;
+      }
+    }
+    if (has_unmappable_dim) {
+      persistent_buffer_info.projectable_buffer_inputs.emplace_back(input);
+    }
+  }
+
+  return persistent_buffer_info;
 }
 
 TvProperties getProperties(
@@ -392,26 +604,42 @@ void computeAtBetween(
 
 namespace {
 
-std::unique_ptr<HeuristicCompileTime::ScopedPersistenceFactorMap>
+// Figure out which persistent buffers are active at the generation of values in
+// the fusion. This will be used at runtime to compute the size and max size of
+// the persistent buffers.
+std::unique_ptr<HeuristicCompileTime::ScopedPersistenceBufferMap>
 getScopePersistenceFactors(
     Fusion* fusion,
-    PersistentBufferInfo& persistent_buffers) {
+    PersistentBufferInfo& persistent_buffer_info) {
   auto new_persistent_factor_map_ptr =
-      std::make_unique<HeuristicCompileTime::ScopedPersistenceFactorMap>();
+      std::make_unique<HeuristicCompileTime::ScopedPersistenceBufferMap>();
   auto& new_persistent_factor_map = *new_persistent_factor_map_ptr;
 
-  for (auto tv : persistent_buffers.buffers) {
-    auto& consumer_tv_to_factor_map_ptr = new_persistent_factor_map[tv];
-    consumer_tv_to_factor_map_ptr =
-        std::make_unique<HeuristicCompileTime::ValToFactorMap>();
-    auto& consumer_tv_to_factor_map = *consumer_tv_to_factor_map_ptr;
+  // Convenience accessors
+  const auto& persistent_buffers = persistent_buffer_info.persistent_buffers;
+  const auto& projectable_buffer_inputs =
+      persistent_buffer_info.projectable_buffer_inputs;
+  const auto& projectable_persistent_buffers =
+      persistent_buffer_info.projectable_persistent_buffers;
+  const auto& persistent_buffer_resolution_points =
+      persistent_buffer_info.persistent_buffer_resolution_points;
 
-    // All expressions between tv and its consumers must have tv's persistent
-    // buffer allocated. This is an optimistic view on how many registers we
-    // need allocated in the kernel, since if we ordered two persistent
-    // buffers that are completely independent to somehow overlap with
-    // eachother we would assume we wouldn't need those two buffers active at
-    // the same time, even though they would be.
+  // Append projectable buffer inputs, going to compute size of those as well.
+  auto persistent_buffers_and_inputs = persistent_buffers;
+  persistent_buffers_and_inputs.insert(
+      persistent_buffers_and_inputs.end(),
+      projectable_buffer_inputs.begin(),
+      projectable_buffer_inputs.end());
+
+  for (auto persistent_buffer_i : c10::irange(persistent_buffers.size())) {
+    auto persistent_buffer = persistent_buffers[persistent_buffer_i];
+    // All expressions between tv and its resolution points must have tv's
+    // persistent buffer allocated. This is an optimistic view on how many
+    // registers we need allocated in the kernel, since if we ordered two
+    // persistent buffers that are completely independent to somehow overlap
+    // with eachothers loop nests both persistent buffers would have to be
+    // allocated at the same time even though this function would assume they
+    // don't.
     //
     // Unfortunately this limitation is hard to work around as we would have
     // to actually generate the kernel before we know if it would fit
@@ -419,20 +647,78 @@ getScopePersistenceFactors(
     // as inlining loop structures where the persistent buffer is used should
     // prevent muiltiple persistent buffers from being merged togther if not
     // necessary.
-    auto consumers_of_tv = ir_utils::consumerTvsOf(tv);
+    auto resolution_points =
+        persistent_buffer_resolution_points[persistent_buffer_i];
     for (auto val : DependencyCheck::getAllValsBetween(
-             {tv}, {consumers_of_tv.begin(), consumers_of_tv.end()})) {
+             {persistent_buffer},
+             {resolution_points.begin(), resolution_points.end()})) {
       // Persistent normalization kernels imply that all persistent buffers
       // have the same dimensionality. Assume if a persistent buffer is
       // consumed by another we can alias and reuse the memory.
-      if (val == tv) {
+      if (val == persistent_buffer) {
         continue;
       }
 
-      if (consumer_tv_to_factor_map.count(val)) {
-        consumer_tv_to_factor_map.at(val) += 1;
-      } else {
-        consumer_tv_to_factor_map[val] = 1;
+      // All vals between resolution point and the corresponding buffer have
+      // that buffer live during their generation.
+      if (new_persistent_factor_map.find(val) ==
+          new_persistent_factor_map.end()) {
+        new_persistent_factor_map[val] =
+            std::vector<bool>(persistent_buffers_and_inputs.size(), false);
+      }
+      new_persistent_factor_map.at(val)[persistent_buffer_i] = true;
+    }
+  }
+
+  // Processing projectable persistent buffers is a little more complex, simply
+  // because we have to line up inputs with their persistent buffers.
+
+  // Offset into the bool vector
+  size_t bool_vector_offset = persistent_buffers.size();
+  for (auto projectable_persistent_buffer_i :
+       c10::irange(projectable_persistent_buffers.size())) {
+    auto projectable_persistent_buffer =
+        projectable_persistent_buffers[projectable_persistent_buffer_i];
+    auto inputs = ir_utils::inputTvsOf(projectable_persistent_buffer);
+
+    for (auto input : inputs) {
+      auto input_it = std::find(
+          projectable_buffer_inputs.begin(),
+          projectable_buffer_inputs.end(),
+          input);
+      // If input wasn't recorded as a projectable buffer input, then it doesn't
+      // have any persistent dims, so ignore it.
+      if (input_it == projectable_buffer_inputs.end()) {
+        continue;
+      }
+
+      // get inuput index entry in the buffer inputs vector
+      auto input_i = std::distance(projectable_buffer_inputs.begin(), input_it);
+
+      // Get the offset in the bool vector for this input
+      input_i += bool_vector_offset;
+
+      // If we project persistence from the persistent buffers to the inputs,
+      // then it would have to be active from the resolution points of the
+      // persistent buffer all the way back to the projected inputs.
+      auto resolution_points =
+          persistent_buffer_resolution_points[projectable_persistent_buffer_i];
+
+      for (auto val : DependencyCheck::getAllValsBetween(
+               {input}, {resolution_points.begin(), resolution_points.end()})) {
+        // Persistent normalization kernels imply that all persistent buffers
+        // have the same dimensionality. Assume if a persistent buffer is
+        // consumed by another we can alias and reuse the memory.
+        if (val == input) {
+          continue;
+        }
+
+        if (new_persistent_factor_map.find(val) ==
+            new_persistent_factor_map.end()) {
+          new_persistent_factor_map[val] =
+              std::vector<bool>(persistent_buffers_and_inputs.size(), false);
+        }
+        new_persistent_factor_map.at(val)[input_i] = true;
       }
     }
   }
@@ -441,86 +727,139 @@ getScopePersistenceFactors(
 
 } // namespace
 
-int64_t persistentBufferSize(
+PersistentBufferSizeReturn persistentBufferSize(
     Fusion* fusion,
     SchedulerRuntimeInfo& runtime_info,
-    PersistentBufferInfo& persistent_buffers,
+    PersistentBufferInfo& persistent_buffer_info,
     HeuristicSummary* data_cache) {
   FUSER_PERF_SCOPE("scheduler_utils::persistentBufferSize");
 
-  if (persistent_buffers.buffers.empty()) {
-    return 0;
+  if (persistent_buffer_info.persistent_buffers.empty()) {
+    PersistentBufferSizeReturn empty_sizes;
+    return empty_sizes;
   }
 
-  int64_t persistent_buffer_size = 0;
+  // Compute size of all the buffers
+  const auto& persistent_buffers = persistent_buffer_info.persistent_buffers;
+  const auto& projectable_buffers =
+      persistent_buffer_info.projectable_persistent_buffers;
+  const auto& projectable_buffers_inputs =
+      persistent_buffer_info.projectable_buffer_inputs;
+  const auto& unmappable_dims = persistent_buffer_info.unmappable_dims;
+  const auto& input_unmappable_dims =
+      persistent_buffer_info.unamppable_dims_projected_to_inputs;
 
-  auto persistent_buffer_info_entry =
-      HeuristicSummaryEntry<HeuristicCompileTime::ScopePersistentFactorInfo>(
-          data_cache, [&fusion, &persistent_buffers]() {
-            return getScopePersistenceFactors(fusion, persistent_buffers);
-          });
+  std::vector<TensorView*> all_buffers = persistent_buffers;
+  all_buffers.insert(
+      all_buffers.end(),
+      projectable_buffers_inputs.begin(),
+      projectable_buffers_inputs.end());
 
-  auto& scoped_persistence_factor = persistent_buffer_info_entry.get();
+  std::vector<int64_t> persistent_buffer_sizes(all_buffers.size(), -1);
 
-  // Runtime: convert the persistent factor to actual values
-  std::unordered_map<Val*, int64_t> scoped_persistence;
+  for (auto buffer_i : c10::irange(all_buffers.size())) {
+    bool is_input = buffer_i >= persistent_buffers.size();
+    auto buffer = all_buffers[buffer_i];
 
-  for (auto tv : persistent_buffers.buffers) {
-    int64_t tv_persistent_numel = -1;
-    for (auto id : tv->getMaybeRFactorDomain()) {
+    for (auto id : buffer->getMaybeRFactorDomain()) {
       if (id->isReduction() || id->isBroadcast()) {
         continue;
       }
       // Unmappable dimensions are those that we cannot inline into other
       // tensor views. So they're the ones that need to be persistent.
-      if (!persistent_buffers.unmappable_dims.count(id)) {
+      if (!is_input && !unmappable_dims.count(id)) {
+        continue;
+      }
+
+      if (is_input && !input_unmappable_dims.count(id)) {
         continue;
       }
 
       auto id_size = runtime_info.expressionEvaluator().evaluate(id->extent());
       TORCH_INTERNAL_ASSERT(
-          id_size.has_value(),
-          "Cannot generate heuristics if we don't have input information.");
-      if (tv_persistent_numel == -1) {
-        tv_persistent_numel = id_size.value();
+          id_size.has_value(), "Could not infer persistent buffer size.");
+      if (persistent_buffer_sizes[buffer_i] == -1) {
+        persistent_buffer_sizes[buffer_i] = id_size.value();
       } else {
-        tv_persistent_numel *= id_size.value();
+        persistent_buffer_sizes[buffer_i] *= id_size.value();
       }
     }
 
-    persistent_buffer_size =
-        tv_persistent_numel * dataTypeSize(tv->getDataType().value());
+    persistent_buffer_sizes[buffer_i] = persistent_buffer_sizes[buffer_i] == -1
+        ? 0
+        : persistent_buffer_sizes[buffer_i] *
+            dataTypeSize(buffer->getDataType().value());
+  }
 
-    // Look up the contribution part from the cached matrix:
-    auto scoped_factor_it = scoped_persistence_factor.find(tv);
-    if (scoped_factor_it != scoped_persistence_factor.end()) {
-      // now looking at scoped_persistence_factor[tv]
-      for (auto val_to_factor_it : *(scoped_factor_it->second)) {
-        // (val_to_factor_it) is (val, factor)
-        int64_t persistent_buffer_size_contribution =
-            persistent_buffer_size * val_to_factor_it.second;
+  // Buffers involved in normal persistence
+  std::vector<bool> persistent_mask(all_buffers.size(), false);
 
-        //  try to write factor * persistent_buffer_size into
-        //  scoped_persistence[val]
-        auto val_it = scoped_persistence.find(val_to_factor_it.first);
-        if (val_it == scoped_persistence.end()) {
-          scoped_persistence[val_to_factor_it.first] =
-              persistent_buffer_size_contribution;
-        } else {
-          val_it->second += persistent_buffer_size_contribution;
-        }
-      }
+  for (auto buffer_i : c10::irange(persistent_buffers.size())) {
+    auto buffer = all_buffers[buffer_i];
+    persistent_mask[buffer_i] = true;
+  }
+
+  // Buffers involved in projected to inputs
+  std::vector<bool> projected_mask(all_buffers.size(), true);
+
+  for (auto buffer_i : c10::irange(persistent_buffers.size())) {
+    auto buffer = persistent_buffers[buffer_i];
+    // Not a projectable buffer, or an input of a projectable buffer
+    if (std::find(
+            projectable_buffers.begin(), projectable_buffers.end(), buffer) !=
+        projectable_buffers.end()) {
+      projected_mask[buffer_i] = false;
     }
   }
 
-  // Find the maximum persistent buffer use
+  // Function to take the mask of active buffers at a val, the mask (for if this
+  // is a normal persistent calculation, or a calculation projected on to the
+  // input buffers), and sizes, and returns total persistent buffer size.
+  auto masked_dot_product = [](const std::vector<bool>& mask0,
+                               const std::vector<bool>& mask1,
+                               const std::vector<int64_t>& sizes) {
+    int64_t buffer_size = 0;
+    TORCH_INTERNAL_ASSERT(
+        mask0.size() == mask1.size() && mask0.size() == sizes.size());
+    for (auto buffer_i : c10::irange(sizes.size())) {
+      if (mask0[buffer_i] && mask1[buffer_i]) {
+        buffer_size += sizes[buffer_i];
+      }
+    }
+    return buffer_size;
+  };
+
+  auto persistent_buffer_info_entry =
+      HeuristicSummaryEntry<HeuristicCompileTime::ScopePersistentFactorInfo>(
+          data_cache, [&fusion, &persistent_buffer_info]() {
+            return getScopePersistenceFactors(fusion, persistent_buffer_info);
+          });
+
+  auto& scoped_persistence_factor = persistent_buffer_info_entry.get();
+
+  // Go through all values, compute the size of the active persistent buffers,
+  // do both without and with projection
   int64_t max_persistence_size = 0;
-  for (auto persistent_entry : scoped_persistence) {
+  int64_t max_proj_persistence_size = 0;
+  for (const auto& entry : scoped_persistence_factor) {
+    auto val = entry.first;
+    auto active_buffers = entry.second;
+    auto persistent_buffer_size = masked_dot_product(
+        persistent_mask, active_buffers, persistent_buffer_sizes);
     max_persistence_size =
-        std::max(max_persistence_size, persistent_entry.second);
+        std::max(max_persistence_size, persistent_buffer_size);
+
+    auto projected_buffer_size = masked_dot_product(
+        projected_mask, active_buffers, persistent_buffer_sizes);
+    max_proj_persistence_size =
+        std::max(max_proj_persistence_size, projected_buffer_size);
   }
 
-  return max_persistence_size;
+  PersistentBufferSizeReturn persistent_buffer_size;
+  persistent_buffer_size.persistent_buffer_size = max_persistence_size;
+  persistent_buffer_size.projected_persistent_buffer_size =
+      max_proj_persistence_size;
+  return persistent_buffer_size;
 }
 
 std::unordered_set<IterDomain*> getTrivialReductionMap(Fusion* fusion) {
@@ -538,8 +877,8 @@ std::unordered_set<IterDomain*> getTrivialReductionMap(Fusion* fusion) {
 
   if (!mapped_to_trivial_reduction.empty()) {
     // Use the loop map as that is the most permissive
-    auto ca_index_map = ComputeAtMap(ComputeAtMap::MappingMode::LOOP);
-    ca_index_map.build(fusion);
+    auto ca_loop_map = ComputeAtMap(ComputeAtMap::MappingMode::LOOP);
+    ca_loop_map.build(fusion);
     // Make a copy we need to check mappings of all
     auto trivial_ids = mapped_to_trivial_reduction;
     for (auto tv : all_tvs) {
@@ -550,8 +889,8 @@ std::unordered_set<IterDomain*> getTrivialReductionMap(Fusion* fusion) {
         if (std::any_of(
                 trivial_ids.begin(),
                 trivial_ids.end(),
-                [&ca_index_map, &id](IterDomain* trivial_id) {
-                  return ca_index_map.areMapped(id, trivial_id);
+                [&ca_loop_map, &id](IterDomain* trivial_id) {
+                  return ca_loop_map.areMapped(id, trivial_id);
                 })) {
           mapped_to_trivial_reduction.emplace(id);
         }

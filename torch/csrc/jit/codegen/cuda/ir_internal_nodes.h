@@ -533,14 +533,16 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
   //!      is "dynamically" padded to next smallest multiple
   //!      of a warp size, i.e. 17 padded to 32, 33 padded to 64
   //!      based on the given input.
-  void padToMultipleOfWarp(int64_t to_size = -1) {
+  void padToMultipleOfWarp(c10::optional<int64_t> maybe_to_size = {}) {
     // Currently only restricted to TIDx to generate warp reduce
     TORCH_CHECK(
         parallel_type_ == ParallelType::TIDx,
         "padToMultipleOfWarp : warp padding only supported on TIDx parallel dimension");
     is_padded_dimension_ = true;
-    if (to_size > 0) {
-      padded_to_size_ = to_size;
+    if (maybe_to_size.has_value()) {
+      if (maybe_to_size.value() > 0) {
+        padded_to_size_ = maybe_to_size.value();
+      }
     }
   }
 

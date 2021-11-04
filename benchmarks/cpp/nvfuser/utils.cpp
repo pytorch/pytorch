@@ -9,10 +9,9 @@ using namespace torch::jit::fuser::cuda;
 std::string toString(ReductionParams rparams) {
   std::stringstream ss;
   ss << (rparams.fastest_dim ? "Red On Fastest Dim // " : "Red On Slow Dim // ")
-     << (rparams.persistent_kernel ? "Persistent Kernel // " : "");
-  if (rparams.batches_per_block > 1 || rparams.persistent_kernel) {
-    ss << "Batches per block: " << rparams.batches_per_block << "// ";
-  }
+     << (rparams.persistent_kernel ? "Persistent Kernel // " : "")
+     << (rparams.project_persistent_buffers ? "Project Persistent Buffers // "
+                                            : "");
 
   if (rparams.schedule_3D) {
     ss << "3D Schedule // "
@@ -20,6 +19,11 @@ std::string toString(ReductionParams rparams) {
        << (rparams.cross_block_outer_reduce ? "cross block / " : "")
        << (rparams.cross_grid_outer_reduce ? "cross grid / " : "")
        << (rparams.split_grid_dim_outer_reduction ? "split grid dim / " : "");
+    if (rparams.batches_per_block_outer_reduction > 1 ||
+        rparams.persistent_kernel) {
+      ss << "persistent batch - " << rparams.batches_per_block_outer_reduction
+         << " / ";
+    }
   }
 
   ss << " // Iteration Domain: "
@@ -35,8 +39,16 @@ std::string toString(ReductionParams rparams) {
 
   ss << " // Inner Reduction Domain: "
      << (rparams.cross_block_inner_reduce ? "cross block reduction / " : "")
-     << (rparams.cross_grid_inner_reduce ? "cross grid reduction / " : "")
-     << (rparams.cross_grid_inner_reduce &&
+     << (rparams.pad_inner_reduction_to_warp ? "pad to warp / " : "")
+     << (rparams.cross_grid_inner_reduce ? "cross grid reduction / " : "");
+
+  if (rparams.batches_per_block_inner_reduction > 1 ||
+      rparams.persistent_kernel) {
+    ss << "persistent batch - " << rparams.batches_per_block_inner_reduction
+       << " / ";
+  }
+
+  ss << (rparams.cross_grid_inner_reduce &&
                  rparams.split_grid_dim_inner_reduction
              ? "split grid dimension / "
              : "")

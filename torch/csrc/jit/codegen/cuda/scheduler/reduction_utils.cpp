@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/codegen/cuda/scheduler/reduction_utils.h>
 
 #include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
+#include <torch/csrc/jit/codegen/cuda/ir_cloner.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/registry.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
@@ -63,18 +64,24 @@ TensorView* scheduleReductionTV(
     if (rparams.persistent_kernel) {
       if (rparams.vectorize_inner_reduction) {
         reduction_tv->split(
-            inner_reduce_axis, rparams.batches_per_block, false);
+            inner_reduce_axis,
+            rparams.batches_per_block_inner_reduction,
+            false);
         reduction_tv->split(
             inner_reduce_axis + 1, rparams.unroll_factor_inner_reduction);
 
         reduction_tv->axis(inner_reduce_axis + 1)
             ->parallelize(rparams.block_dim_inner_reduction);
+        if (rparams.pad_inner_reduction_to_warp) {
+          reduction_tv->axis(inner_reduce_axis + 1)->padToMultipleOfWarp();
+        }
         reduction_tv->axis(inner_reduce_axis + 2)
             ->parallelize(ParallelType::Vectorize);
       } else {
         reduction_tv->split(
             inner_reduce_axis,
-            rparams.batches_per_block * rparams.unroll_factor_inner_reduction,
+            rparams.batches_per_block_inner_reduction *
+                rparams.unroll_factor_inner_reduction,
             false);
         reduction_tv->split(
             inner_reduce_axis, rparams.unroll_factor_inner_reduction);
@@ -83,6 +90,9 @@ TensorView* scheduleReductionTV(
             ->parallelize(ParallelType::Unroll);
         reduction_tv->axis(inner_reduce_axis + 2)
             ->parallelize(rparams.block_dim_inner_reduction);
+        if (rparams.pad_inner_reduction_to_warp) {
+          reduction_tv->axis(inner_reduce_axis + 2)->padToMultipleOfWarp();
+        }
       }
     } else {
       if (isParallelTypeThread(rparams.block_dim_inner_reduction)) {
@@ -92,11 +102,13 @@ TensorView* scheduleReductionTV(
           reduction_tv->split(
               inner_reduce_axis,
               NamedScalar::getParallelDim(rparams.block_dim_inner_reduction));
-
           reduction_tv->axis(inner_reduce_axis + 2)
               ->parallelize(ParallelType::Vectorize);
           reduction_tv->axis(inner_reduce_axis + 1)
               ->parallelize(rparams.block_dim_inner_reduction);
+          if (rparams.pad_inner_reduction_to_warp) {
+            reduction_tv->axis(inner_reduce_axis + 1)->padToMultipleOfWarp();
+          }
         } else {
           reduction_tv->split(
               inner_reduce_axis,
@@ -108,6 +120,10 @@ TensorView* scheduleReductionTV(
               ->parallelize(ParallelType::Unroll);
           reduction_tv->axis(inner_reduce_axis + 2)
               ->parallelize(rparams.block_dim_inner_reduction);
+
+          if (rparams.pad_inner_reduction_to_warp) {
+            reduction_tv->axis(inner_reduce_axis + 2)->padToMultipleOfWarp();
+          }
         }
       } else {
         // Inner reduction is not parallelized, but is unrolled or vectorized:
@@ -130,15 +146,24 @@ TensorView* scheduleReductionTV(
     if (rparams.cross_block_inner_reduce) {
       if (rparams.persistent_kernel) {
         reduction_tv->split(
-            inner_reduce_axis, rparams.batches_per_block, false);
+            inner_reduce_axis,
+            rparams.batches_per_block_inner_reduction,
+            false);
         reduction_tv->axis(inner_reduce_axis + 1)
             ->parallelize(rparams.block_dim_inner_reduction);
+
+        if (rparams.pad_inner_reduction_to_warp) {
+          reduction_tv->axis(inner_reduce_axis + 1)->padToMultipleOfWarp();
+        }
       } else {
         reduction_tv->split(
             inner_reduce_axis,
             NamedScalar::getParallelDim(rparams.block_dim_inner_reduction));
         reduction_tv->axis(inner_reduce_axis + 1)
             ->parallelize(rparams.block_dim_inner_reduction);
+        if (rparams.pad_inner_reduction_to_warp) {
+          reduction_tv->axis(inner_reduce_axis + 1)->padToMultipleOfWarp();
+        }
       }
     } else {
       // No parallelization on reduction dim, fake an unswitch axis for
@@ -160,13 +185,67 @@ TensorView* scheduleReductionTV(
 
   // Outer reduction axis
   if (rparams.schedule_3D) {
+    if (rparams.unroll_outer_reduction) {
+      if (rparams.persistent_kernel) {
+        reduction_tv->split(
+            outer_reduce_axis,
+            rparams.batches_per_block_outer_reduction *
+                rparams.unroll_factor_outer_reduction,
+            false);
+        reduction_tv->split(
+            outer_reduce_axis, rparams.unroll_factor_outer_reduction);
+
+        reduction_tv->axis(outer_reduce_axis + 1)
+            ->parallelize(ParallelType::Unroll);
+        reduction_tv->axis(outer_reduce_axis + 2)
+            ->parallelize(rparams.block_dim_outer_reduction);
+      } else {
+        if (isParallelTypeThread(rparams.block_dim_outer_reduction)) {
+          reduction_tv->split(
+              outer_reduce_axis,
+              NamedScalar::getParallelDim(rparams.block_dim_outer_reduction));
+          reduction_tv->split(
+              outer_reduce_axis, rparams.unroll_factor_outer_reduction);
+
+          reduction_tv->axis(outer_reduce_axis + 1)
+              ->parallelize(ParallelType::Unroll);
+          reduction_tv->axis(outer_reduce_axis + 2)
+              ->parallelize(rparams.block_dim_outer_reduction);
+
+        } else {
+          // outer reduction is not parallelized, but is unrolled or vectorized:
+          reduction_tv->split(
+              outer_reduce_axis, rparams.unroll_factor_outer_reduction);
+          reduction_tv->axis(outer_reduce_axis + 1)
+              ->parallelize(ParallelType::Unroll);
+        }
+      }
+    } else {
+      // Parallelize reduction axis, don't unroll it0
+      if (rparams.cross_block_outer_reduce) {
+        if (rparams.persistent_kernel) {
+          reduction_tv->split(
+              outer_reduce_axis,
+              rparams.batches_per_block_outer_reduction,
+              false);
+          reduction_tv->axis(outer_reduce_axis + 1)
+              ->parallelize(rparams.block_dim_outer_reduction);
+        } else {
+          reduction_tv->split(
+              outer_reduce_axis,
+              NamedScalar::getParallelDim(rparams.block_dim_outer_reduction));
+          reduction_tv->axis(outer_reduce_axis + 1)
+              ->parallelize(rparams.block_dim_outer_reduction);
+        }
+      }
+    }
+
     if (rparams.cross_grid_outer_reduce) {
-      // Unsafe as we could be over the grid y dim limit, but this is 3D
-      // scheduler so seems unlikely in practice
       reduction_tv->split(
           outer_reduce_axis,
-          NamedScalar::getParallelDim(rparams.grid_dim_outer_reduction));
-      reduction_tv->axis(outer_reduce_axis + 1)
+          NamedScalar::getParallelDim(rparams.grid_dim_outer_reduction),
+          false);
+      reduction_tv->axis(outer_reduce_axis)
           ->parallelize(rparams.grid_dim_outer_reduction);
     }
   }
@@ -488,95 +567,110 @@ void multiReductionInliner(
 }
 
 namespace {
+
+// Convert properties of an ID to a numeric value
+int idPos(const IterDomain* id) {
+  int inner_most = std::numeric_limits<int>::max();
+  int outer_most = std::numeric_limits<int>::min();
+
+  // Trivial reduction
+  if (id->isReduction() && id->getParallelType() == ParallelType::Serial &&
+      id->extent()->isOneInt()) {
+    return inner_most;
+  }
+  inner_most--;
+
+  // Broadcast
+  if (id->isBroadcast() || id->isImplicitBroadcast()) {
+    return inner_most;
+  }
+  inner_most--;
+
+  // Reduction and unrolled
+  if (id->isReduction() &&
+      (id->getParallelType() == ParallelType::Unroll ||
+       id->getParallelType() == ParallelType::Vectorize ||
+       id->getParallelType() == ParallelType::MisalignedVectorize)) {
+    return inner_most;
+  }
+  inner_most--;
+
+  // Reduction and block
+  if (id->isReduction() && id->isBlockDim()) {
+    return inner_most;
+  }
+  inner_most--;
+
+  // Reduction and constant
+  if (id->isReduction() && id->extent()->isConstScalar()) {
+    return inner_most;
+  }
+  inner_most--;
+
+  // Reduction and unswitched
+  if (id->isReduction() && id->getParallelType() == ParallelType::Unswitch) {
+    return inner_most;
+  }
+  inner_most--;
+
+  // Reduction and thread
+  if (id->isReduction() && id->isThreadDim()) {
+    return inner_most;
+  }
+  inner_most--;
+
+  // Iter and unrolled
+  if (!id->isReduction() &&
+      (id->getParallelType() == ParallelType::Unroll ||
+       id->getParallelType() == ParallelType::Vectorize ||
+       id->getParallelType() == ParallelType::MisalignedVectorize)) {
+    return inner_most;
+  }
+  inner_most--;
+
+  // Iter and unswitched
+  if (!id->isReduction() && id->getParallelType() == ParallelType::Unswitch) {
+    return inner_most;
+  }
+  inner_most--;
+
+  // Reduction and non-constant
+  if (id->isReduction() && !id->extent()->isConstScalar()) {
+    return inner_most;
+  }
+  inner_most--;
+
+  // Iter and block (outer)
+  if (!id->isReduction() && id->isBlockDim()) {
+    return outer_most;
+  }
+  outer_most++;
+
+  // Iter and thread (outer)
+  if (!id->isReduction() && id->isThreadDim()) {
+    return outer_most;
+  }
+  outer_most++;
+
+  // Iter and constant
+  if (!id->isReduction() && id->extent()->isConstScalar()) {
+    return outer_most;
+  }
+  outer_most++;
+
+  // Iter and non-constant
+  if (!id->isReduction() && !id->extent()->isConstScalar()) {
+    return outer_most;
+  }
+  outer_most++;
+
+  return 0;
+}
+
 struct id_lt {
   // Return if id0 should be before id1
   inline bool operator()(const IterDomain* id0, const IterDomain* id1) {
-    // Trivial reductions should always be inner most location
-    if (id0->isReduction() && id0->getParallelType() == ParallelType::Serial &&
-        id0->extent()->isOneInt()) {
-      return false;
-    } else if (
-        id1->isReduction() && id1->getParallelType() == ParallelType::Serial &&
-        id1->extent()->isOneInt()) {
-      return true;
-    }
-
-    // Broadcast should also be in the inner most position
-    if (id0->isBroadcast() || id0->isImplicitBroadcast()) {
-      return false;
-    } else if (id1->isBroadcast() || id1->isImplicitBroadcast()) {
-      return true;
-    }
-
-    // Potentially counter-intuitively, parallelized reductions can always go
-    // inside non reduction dims
-    if ((id0->isReduction() && id0->isThread()) && !id1->isReduction()) {
-      return false;
-    } else if (!id0->isReduction() && (id1->isReduction() && id1->isThread())) {
-      return true;
-    }
-
-    // Grids and blocks before others
-    if (id0->isBlockDim() && !id1->isBlockDim()) {
-      return true;
-    } else if (!id0->isBlockDim() && id1->isBlockDim()) {
-      return false;
-    }
-    if (id0->isThreadDim() && !id1->isThreadDim()) {
-      return true;
-    } else if (!id0->isThreadDim() && id1->isThreadDim()) {
-      return false;
-    }
-
-    bool id0_non_const = !id0->extent()->isConstScalar();
-    bool id1_non_const = !id1->extent()->isConstScalar();
-    // Non constant dimensions should be outside constant ones.
-    if (id0_non_const && !id1_non_const) {
-      return true;
-    } else if (!id0_non_const && id1_non_const) {
-      return false;
-    }
-
-    // Iteration domains before reductions
-    if (id0->isReduction() && !id1->isReduction()) {
-      return false;
-    } else if (!id0->isReduction() && id1->isReduction()) {
-      return true;
-    }
-
-    // Unroll and vectorizations should be pushed right (not inside broadcast or
-    // trivial reductions)
-    if (id0->getParallelType() == ParallelType::Unroll ||
-        id0->getParallelType() == ParallelType::Vectorize ||
-        id0->getParallelType() == ParallelType::MisalignedVectorize) {
-      return false;
-    } else if (
-        id1->getParallelType() == ParallelType::Unroll ||
-        id1->getParallelType() == ParallelType::Vectorize ||
-        id1->getParallelType() == ParallelType::MisalignedVectorize) {
-      return true;
-    }
-
-    // Unswitch should be outside unrolled and vectorized loops
-    if (id0->getParallelType() == ParallelType::Unswitch) {
-      return false;
-    } else if (id1->getParallelType() == ParallelType::Unswitch) {
-      return true;
-    }
-
-    //[block, thread, ... unroll/vec, bcast/trivial reduce]
-    if (id0->extent()->isConstScalar()) {
-      return false;
-    } else if (id1->extent()->isConstScalar()) {
-      return true;
-    }
-
-    TORCH_INTERNAL_ASSERT(
-        id0->getIterType() != IterType::Gather &&
-            id1->getIterType() != IterType::Gather,
-        "Gather not supported in this function.");
-
-    return true;
+    return idPos(id0) < idPos(id1);
   }
 };
 } // namespace
@@ -633,6 +727,81 @@ TensorView* sortAndRFactor(TensorView* reference_tv) {
   }
 
   return ir_utils::rfactorHelper(reference_tv, rfactor_axes);
+}
+
+void projectPersistentBuffers(Fusion* fusion) {
+  auto persistent_info = scheduler_utils::persistentBuffers(fusion);
+
+  // Convenience accessors
+  const auto& persistent_buffers = persistent_info.persistent_buffers;
+  const auto& persistent_resolution_points =
+      persistent_info.persistent_buffer_resolution_points;
+  const auto& projected_buffers =
+      persistent_info.projectable_persistent_buffers;
+
+  TORCH_INTERNAL_ASSERT(persistent_buffers.size() == persistent_buffers.size());
+
+  // Iterate through projected buffers, tracking which index it corresponds too
+  // since there's a resolution point entry for every buffer.
+  for (auto buffer_i : c10::irange(persistent_buffers.size())) {
+    auto buffer = persistent_buffers[buffer_i];
+    if (std::find(projected_buffers.begin(), projected_buffers.end(), buffer) ==
+        projected_buffers.end()) {
+      continue;
+    }
+
+    auto resolution_points = persistent_resolution_points[buffer_i];
+
+    std::vector<Val*> persistent_use_of_buffer;
+
+    // Go through the resolution points one by one. Resolution points are points
+    // in which the reduction branch meets the residual branch. These are points
+    // where the persitent buffer may no longer be needed (one point could be
+    // after another, and the buffer would be needed until the last resolution
+    // points)
+    for (auto resolution_point : resolution_points) {
+      // Need to go through all paths from the persistent buffer to the
+      // resolution point
+      auto chains_to_resolution =
+          DependencyCheck::getAllDependencyChains(buffer, resolution_point);
+      for (auto chain : chains_to_resolution) {
+        auto tv_chain = ir_utils::filterByType<TensorView>(chain);
+
+        // To move the persistent buffers to the inputs, we need to recompute
+        // the persistent buffer for all branches that don't go through a
+        // reduction. If there's a reduction on the current path between the
+        // persistent buffer and resolution, continue, there's no need to
+        // replicate this use.
+        if (std::any_of(tv_chain.begin(), tv_chain.end(), [](TensorView* tv) {
+              return tv->hasReduction();
+            })) {
+          continue;
+        }
+
+        // Grab use of the buffer, chain[0] is the persistent buffer, chain[1]
+        // is its first use.
+        auto use = chain[1];
+
+        // Only grab unique uses, a persistent buffer could be used multiple
+        // times in the same expression.
+        if (std::find(
+                persistent_use_of_buffer.begin(),
+                persistent_use_of_buffer.end(),
+                use) != persistent_use_of_buffer.end()) {
+          continue;
+        }
+        persistent_use_of_buffer.emplace_back(use);
+      }
+
+      // For all uses that do not go towards the reduction operations in the
+      // persistent section of the graph, recompute the persistent buffer.
+      for (auto use : persistent_use_of_buffer) {
+        TORCH_INTERNAL_ASSERT(use->definition() != nullptr);
+        auto buffer_replicate = RecomputeTv::recompute(buffer);
+        ir_utils::replaceValInExpr(use->definition(), buffer, buffer_replicate);
+      }
+    }
+  }
 }
 
 } // namespace reduction_scheduler_utils

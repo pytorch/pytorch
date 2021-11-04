@@ -26,12 +26,13 @@ ReductionParams innerReductionHeuristic(
     const int64_t inner_most_dimension_numel,
     const int64_t n_tensor_inputs,
     const int64_t max_input_dtype_size,
-    size_t vectorize_factor) {
+    const size_t vectorize_factor) {
   // Set some targets for parallelization
 
   const int64_t n_elems = total_reduction_numel * total_iteration_numel;
 
-  // WARNING: Current device for codegen may not be the target device
+  // WARNING: At some point we may want to generate heuristics for another
+  // device that is not the current device.
   const int64_t device_max_threads_per_multiprocessor =
       (int64_t)at::cuda::getCurrentDeviceProperties()
           ->maxThreadsPerMultiProcessor;
@@ -58,9 +59,11 @@ ReductionParams innerReductionHeuristic(
   const bool fits_in_l2 = n_elems * max_input_dtype_size * n_tensor_inputs <
       at::cuda::getCurrentDeviceProperties()->l2CacheSize;
 
-  // If it fits in l2, we just want to make sure each thread uses 32Bytes.
+  // If it fits in l2, we just want to make sure each warp uses 32Bytes. Set
+  // minimum warp as 16 threads instead of 32 as if we have a small reduction
+  // dim going a bit smaller than 32 usually helps.
   const int64_t warp_size_based_on_l2 =
-      fits_in_l2 ? (int64_t)32 / max_input_dtype_size : 32;
+      fits_in_l2 ? (int64_t)32 / max_input_dtype_size : 16;
 
   // Check how many elements it would take per thread to start thrashing l1
   // set that to minimum number we want to reduce per thread.
@@ -142,7 +145,7 @@ ReductionParams innerReductionHeuristic(
     // targetting 4 waves, so try to use a quarter of available threads
     max_threads_in_block = std::min(
         ceilDiv(n_elems, target_blocks * target_unroll),
-        ceilDiv(device_max_threads_per_multiprocessor, (int64_t)8));
+        ceilDiv(device_max_threads_per_multiprocessor, (int64_t)4));
   }
 
   // Round up to nearest warp.
@@ -160,22 +163,27 @@ ReductionParams innerReductionHeuristic(
   // (1) x dim in multiple outputs
   // (2) y dim in multiple reductions
 
-  // Blocks for reductions
-  int64_t grdim = 1;
+  // Cross grid inner reduction, number of blocks to cross-grid on
+  int64_t gridim = 1;
+  // Cross grid outer reduction, number of blocks to cross-grid on
+  int64_t grodim = 1;
   // Blocks for outputs
   int64_t godim = 1;
 
-  // Threads for outputs
-  int64_t bdimy = 1;
   // Threads for reduction
   int64_t bdimx = 1;
+  // Threads for outputs
+  int64_t bdimy = 1;
+  // Threads for outer reduction dimension
+  int64_t bdimz = 1;
 
   // Unroll amount
   int64_t inner_reduction_unroll_factor = 1;
+  int64_t outer_reduction_unroll_factor = 1;
   int64_t iter_unroll_factor = 1;
 
   inner_reduction_unroll_factor =
-      std::min(total_reduction_numel, target_unroll);
+      vectorize_factor > 1 ? (int64_t)vectorize_factor : 1;
 
   // Grab what we can out of reduction domain, but don't go over a warp size yet
   bdimx = std::min(
@@ -183,29 +191,51 @@ ReductionParams innerReductionHeuristic(
           ceilDiv(inner_most_dimension_numel, inner_reduction_unroll_factor),
           (int64_t)warp_size),
       max_threads_in_block);
-  bdimx = bdimx > warp_size ? bdimx - bdimx % warp_size
-                            : scheduler_utils::lastPow2(bdimx);
+
+  // If we're not just barely covering the dimension, round to a more friendly
+  // number
+  if (bdimx * inner_reduction_unroll_factor != inner_most_dimension_numel) {
+    // Round bdimx down to multiple of warp size or power 2
+    if (bdimx < warp_size) {
+      bdimx = scheduler_utils::lastPow2(bdimx);
+    } else {
+      bdimx = bdimx - bdimx % warp_size;
+    }
+  }
 
   // Put everything else in bdimy for now
-  bdimy = std::max(max_threads_in_block / bdimx, (int64_t)1);
+  bdimy = std::max(warp_size / bdimx, (int64_t)1);
 
-  int64_t remainder_in_reduction = ceilDiv(total_reduction_numel, bdimx);
-  int64_t remainder_in_inner_dim = ceilDiv(inner_most_dimension_numel, bdimx);
-  int64_t remainder_in_output = ceilDiv(total_iteration_numel, bdimy);
+  // If 3D fill the rest of the threads into bdimz
+  bdimz = std::min(
+      std::min(
+          std::max(max_threads_in_block / (bdimx * bdimy), (int64_t)1),
+          ceilDiv(total_reduction_numel, inner_most_dimension_numel)),
+      scheduler_utils::z_block_limit);
+
+  // If 3D doesn't fill out the threads, adjust to add to bdimy
+  bdimy = std::max(max_threads_in_block / (bdimx * bdimz), (int64_t)1);
 
   // If we don't have a full warp and have an unroll factor, move unroll into
   // bdimx
-  if (bdimx * bdimy < warp_size && inner_reduction_unroll_factor > 1) {
+  if (bdimx * bdimy * bdimz < warp_size && inner_reduction_unroll_factor > 1) {
     bdimx = std::min(
-        std::max(total_reduction_numel, warp_size), max_threads_in_block);
-    bdimx = bdimx > warp_size ? bdimx - bdimx % warp_size
-                              : scheduler_utils::lastPow2(bdimx);
+        std::max(inner_most_dimension_numel, warp_size), max_threads_in_block);
 
     inner_reduction_unroll_factor =
-        std::min(ceilDiv(total_reduction_numel, bdimx), max_unroll);
-    // readjust bdimy
-    bdimy = std::max(max_threads_in_block / bdimx, (int64_t)1);
+        std::min(ceilDiv(inner_most_dimension_numel, bdimx), max_unroll);
+
+    // Readjust bdimy and bdimz
+    bdimy = std::max(warp_size / bdimx, (int64_t)1);
+
+    bdimz = std::min(
+        std::max(max_threads_in_block / (bdimx * bdimy), (int64_t)1),
+        ceilDiv(total_reduction_numel, inner_most_dimension_numel));
+
+    bdimy = std::max(max_threads_in_block / (bdimx * bdimz), (int64_t)1);
   }
+
+  godim = ceilDiv(total_iteration_numel, bdimy);
 
   bool vectorize = false;
 
@@ -217,19 +247,32 @@ ReductionParams innerReductionHeuristic(
         (int64_t)vectorize_factor);
   }
 
-  remainder_in_reduction = ceilDiv(
+  // Attempt to put some unrolling into the outer reduction if inner hasn't
+  // taken the max unrolling
+  if (inner_reduction_unroll_factor < max_unroll) {
+    outer_reduction_unroll_factor = std::min(
+        ceilDiv(max_unroll, inner_reduction_unroll_factor),
+        ceilDiv(
+            ceilDiv(total_reduction_numel, inner_most_dimension_numel), bdimz));
+  }
+
+  int64_t remainder_in_reduction = ceilDiv(
       total_reduction_numel,
-      bdimx * inner_reduction_unroll_factor * target_iterations);
-  remainder_in_inner_dim = ceilDiv(
+      bdimx * inner_reduction_unroll_factor * bdimz *
+          outer_reduction_unroll_factor * target_iterations);
+
+  int64_t remainder_in_inner_dim = ceilDiv(
       inner_most_dimension_numel,
       bdimx * inner_reduction_unroll_factor * target_iterations);
-  godim = remainder_in_output;
 
   // If we haven't gotten to the max_unroll case, try to take it out of the
   // iteration domain
-  if (inner_reduction_unroll_factor < max_unroll) {
+  if (inner_reduction_unroll_factor * outer_reduction_unroll_factor <
+      max_unroll) {
     // Don't go over a combined inner/outer unroll of max_unroll
-    auto unroll_available = ceilDiv(max_unroll, inner_reduction_unroll_factor);
+    auto unroll_available = ceilDiv(
+        max_unroll,
+        inner_reduction_unroll_factor * outer_reduction_unroll_factor);
 
     if (unroll_available > 1 && godim > 2 * device_multiprocessor_count) {
       unroll_available = std::min(
@@ -238,72 +281,77 @@ ReductionParams innerReductionHeuristic(
     }
   }
 
-  remainder_in_output =
-      ceilDiv(total_iteration_numel, bdimy * iter_unroll_factor);
-  godim = remainder_in_output;
+  godim = ceilDiv(total_iteration_numel, bdimy * iter_unroll_factor);
 
   // Clang tidy
   constexpr int64_t kEight = 8;
-
-  bool outer_grid_reduce = false;
-
-  // Cross grid reduction if we haven't hit our target blocks, and we have many
+  // Cross grid reduction if we haven't hit our target blocks, and we have manyr
   // reduction elements.
   if ((godim < target_blocks && remainder_in_reduction >= 0) ||
       (remainder_in_reduction >= kEight)) {
-    auto remainder_in_outer_dim =
-        total_reduction_numel / inner_most_dimension_numel;
-    outer_grid_reduce = remainder_in_outer_dim > remainder_in_inner_dim;
+    auto grdim = std::min(remainder_in_reduction, bdimx * bdimy * kEight);
 
-    // Do at least 2 iterations of unrolling per thread before we go cross
-    // grid. Limit cross grid to a multiple of the block size so cleanup on
-    // the last block doesn't take too long.
-    if (outer_grid_reduce) {
-      grdim =
-          std::max(remainder_in_reduction / remainder_in_inner_dim, (int64_t)1);
-    } else {
-      grdim = remainder_in_inner_dim;
-    }
-    grdim = std::min(grdim, bdimx * bdimy * kEight);
+    gridim = remainder_in_inner_dim;
+    grodim = std::max(grdim / gridim, (int64_t)1);
+    grodim = std::max(
+        std::min(remainder_in_reduction / remainder_in_inner_dim, grodim),
+        (int64_t)1);
   }
 
-  // Try to do some cleanup of ragged waves on device
-  // godim is a remainder of a split, so can only control bdimy
-  if (
+  // Try to do some cleanup of ragged waves on device, don't do this if we're
+  // trying to do a 3D schedule. godim is a remainder of a split, so can only
+  // control gridim
+  if (grodim == 1 &&
       // If we have less than 8 waves of blocks
-      grdim * godim < device_multiprocessor_count * kEight &&
+      gridim * godim < device_multiprocessor_count * kEight &&
       // And we don't have an even divisible number of blocks
-      (grdim * godim) % device_multiprocessor_count != 0 &&
+      (gridim * godim) % device_multiprocessor_count != 0 &&
       // And we have more than one wave
-      grdim * godim > device_multiprocessor_count) {
+      gridim * godim > device_multiprocessor_count) {
     // round waves down
     auto waves =
-        std::max((godim * grdim) / device_multiprocessor_count, (int64_t)1);
-    auto new_grdim =
+        std::max((godim * gridim) / device_multiprocessor_count, (int64_t)1);
+    auto new_gridim =
         std::max((waves * device_multiprocessor_count) / godim, (int64_t)1);
     if (
-        // If difference is less than 25% of the original grdim
-        (new_grdim - grdim) * 4 < grdim &&
+        // If difference is less than 25% of the original gridim
+        (new_gridim - gridim) * 4 < gridim &&
         // and difference is less than 25% of the original number of blocks
-        ((new_grdim * godim) - (grdim * godim)) * 4 < grdim * godim) {
-      grdim = new_grdim;
+        ((new_gridim * godim) - (gridim * godim)) * 4 < gridim * godim) {
+      gridim = new_gridim;
     }
   }
 
-  if (grdim > 1) {
+  if (grodim > 1 || gridim > 1) {
     // Grid reductions do not support unrolling iteration dimension, revert if
     // set.
     if (iter_unroll_factor) {
       iter_unroll_factor = 1;
     }
+    // This could mess up parallelization which could be redone, but that would
+    // require iterating over this entire function.
   }
 
   ReductionParams rparams;
   rparams.fastest_dim = true;
   rparams.cross_block_inner_reduce = true;
   rparams.block_dim_inner_reduction = ParallelType::TIDx;
-  rparams.cross_grid_inner_reduce = grdim > 1;
+  rparams.cross_grid_inner_reduce = gridim > 1;
   rparams.multiple_reds_per_blk = bdimy > 1;
+  bool pad_bdimx = bdimx > 16 &&
+      bdimx * bdimy <
+          (int64_t)at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
+  // If barely just covering reduction dim, don't pad to the next warp
+  pad_bdimx = pad_bdimx &&
+      bdimx * inner_reduction_unroll_factor != inner_most_dimension_numel;
+  rparams.pad_inner_reduction_to_warp = pad_bdimx;
+
+  if (rparams.pad_inner_reduction_to_warp) {
+    // Adjust bdimx based on padding
+    auto warp_size = (int64_t)at::cuda::getCurrentDeviceProperties()->warpSize;
+    bdimx =
+        bdimx % warp_size == 0 ? bdimx : bdimx + warp_size - bdimx % warp_size;
+  }
 
   if (bdimy > 1) {
     rparams.block_dim_iter_dom = ParallelType::TIDy;
@@ -320,29 +368,28 @@ ReductionParams innerReductionHeuristic(
   }
 
   rparams.schedule_3D = total_reduction_numel != inner_most_dimension_numel;
-  rparams.cross_grid_outer_reduce = outer_grid_reduce;
+  // Outer reduction domain
+  if (rparams.schedule_3D) {
+    rparams.cross_grid_outer_reduce = grodim > 1;
+    if (bdimz > 1) {
+      rparams.block_dim_outer_reduction = ParallelType::TIDz;
+      rparams.cross_block_outer_reduce = true;
+    }
+    rparams.unroll_outer_reduction = outer_reduction_unroll_factor > 1;
+    rparams.unroll_factor_outer_reduction = outer_reduction_unroll_factor;
+  }
 
   int64_t gdimx = LaunchParams::UNINITIALIZED_VAL;
   int64_t gdimy = LaunchParams::UNINITIALIZED_VAL;
+  int64_t gdimz = LaunchParams::UNINITIALIZED_VAL;
 
   // If we have a cross grid case we want to have gdimy assigned to godim and
   // gdimx assigned to grdim. Otherwise it's helpful to pull godim into gdimx in
   // case it's larger than gdimy can hold, as not doing so can thrash the cache.
 
-  if (rparams.schedule_3D) {
-    rparams.cross_grid_inner_reduce = false;
-    rparams.grid_dim_outer_reduction = ParallelType::BIDy;
-    gdimy = grdim;
-    rparams.split_grid_dim_outer_reduction =
-        gdimy > scheduler_utils::y_grid_limit;
-
-    rparams.grid_dim_iter_dom = ParallelType::BIDx;
-    gdimx = godim;
-    rparams.split_grid_dim_iter_dom = gdimx > scheduler_utils::x_grid_limit;
-
-  } else if (rparams.cross_grid_inner_reduce) {
+  if (rparams.cross_grid_inner_reduce) {
     rparams.grid_dim_inner_reduction = ParallelType::BIDx;
-    gdimx = grdim;
+    gdimx = gridim;
     rparams.split_grid_dim_inner_reduction =
         gdimx > scheduler_utils::x_grid_limit;
 
@@ -354,6 +401,16 @@ ReductionParams innerReductionHeuristic(
     gdimx = godim;
     rparams.grid_dim_iter_dom = ParallelType::BIDx;
     rparams.split_grid_dim_iter_dom = gdimx > scheduler_utils::x_grid_limit;
+  }
+
+  if (rparams.cross_grid_outer_reduce) {
+    if (rparams.cross_block_inner_reduce) {
+      gdimz = grodim;
+      rparams.grid_dim_outer_reduction = ParallelType::BIDz;
+    } else {
+      gdimy = grodim;
+      rparams.grid_dim_outer_reduction = ParallelType::BIDy;
+    }
   }
 
   // If iteration numel is 1, making this really a 1D reduction problem, make
@@ -372,10 +429,10 @@ ReductionParams innerReductionHeuristic(
       rparams.grid_dim_iter_dom == ParallelType::BIDy
           ? LaunchParams::UNINITIALIZED_VAL
           : gdimy,
-      LaunchParams::UNINITIALIZED_VAL,
+      gdimz,
       bdimx,
       bdimy > 1 ? bdimy : LaunchParams::UNINITIALIZED_VAL,
-      LaunchParams::UNINITIALIZED_VAL);
+      bdimz > 1 ? bdimz : LaunchParams::UNINITIALIZED_VAL);
 
   if (isDebugDumpEnabled(DebugDumpOption::SchedulerDebug)) {
     std::cerr << "\n===== Reduction Stats ========\n"
@@ -383,18 +440,24 @@ ReductionParams innerReductionHeuristic(
               << total_reduction_numel / inner_most_dimension_numel << " * "
               << inner_most_dimension_numel << "\n"
               << "total_iteration_numel: " << total_iteration_numel << "\n"
+              << "vectorize_factor: " << vectorize_factor << "\n"
               << "n_tensor_inputs: " << n_tensor_inputs << "\n"
-              << "max_input_dtype_size: " << max_input_dtype_size << std::endl;
+              << "max_input_dtype_size: " << max_input_dtype_size << "\n"
+              << "block(" << bdimx << ", " << bdimy << ", " << bdimz << ")"
+              << std::endl;
     std::cerr << rparams.toString() << std::endl;
   }
 
   // If 3d, check if it's supported by the scheduler, otherwise force 1D
   // schedule
   if (rparams.schedule_3D) {
-    if ((rparams.multiple_reds_per_blk && !rparams.unroll_inner_reduction) ||
-        (!rparams.multiple_reds_per_blk && !rparams.cross_grid_inner_reduce)) {
+    if (rparams.multiple_reds_per_blk &&
+        (rparams.cross_grid_inner_reduce || rparams.cross_grid_outer_reduce)) {
       if (isDebugDumpEnabled(DebugDumpOption::SchedulerDebug)) {
         std::cerr << "\n===== UNSUPPORTED REDUCTION HEURISTIC ========\n";
+        std::cerr << rparams.multiple_reds_per_blk << ", "
+                  << rparams.unroll_inner_reduction << ", "
+                  << rparams.cross_grid_inner_reduce << std::endl;
       }
       return innerReductionHeuristic(
           total_reduction_numel,
@@ -412,10 +475,9 @@ ReductionParams innerReductionHeuristic(
 ReductionParams OuterReductionHeuristic(
     const int64_t total_reduction_numel,
     const int64_t total_iteration_numel,
-    const int64_t inner_most_dimension_numel,
     const int64_t n_tensor_inputs,
     const int64_t max_input_dtype_size,
-    size_t vectorize_factor) {
+    const size_t vectorize_factor) {
   // Set some targets for parallelization
 
   const int64_t n_elems = total_reduction_numel * total_iteration_numel;
@@ -662,8 +724,10 @@ ReductionParams OuterReductionHeuristic(
     std::cerr << "\n===== Reduction Stats ========\n"
               << "total_reduction_numel: " << total_reduction_numel << "\n"
               << "total_iteration_numel: " << total_iteration_numel << "\n"
+              << "vectorize_factor: " << vectorize_factor << "\n"
               << "n_tensor_inputs: " << n_tensor_inputs << "\n"
-              << "max_input_dtype_size: " << max_input_dtype_size << std::endl;
+              << "max_input_dtype_size: " << max_input_dtype_size << "\n"
+              << "block(" << bdimx << ", " << bdimy << ", 1)" << std::endl;
     std::cerr << rparams.toString() << std::endl;
   }
   return rparams;
@@ -672,13 +736,13 @@ ReductionParams OuterReductionHeuristic(
 } // namespace
 
 ReductionParams reductionHeuristic(
-    int64_t total_reduction_numel,
-    int64_t total_iteration_numel,
-    int64_t inner_most_dimension_numel,
-    bool fastest_dim_reduction,
-    size_t n_tensor_inputs,
-    size_t max_input_dtype_size,
-    size_t vectorize_factor) {
+    const int64_t total_reduction_numel,
+    const int64_t total_iteration_numel,
+    const int64_t inner_most_dimension_numel,
+    const bool fastest_dim_reduction,
+    const size_t n_tensor_inputs,
+    const size_t max_input_dtype_size,
+    const size_t vectorize_factor) {
   if (fastest_dim_reduction) {
     return innerReductionHeuristic(
         total_reduction_numel,
@@ -688,10 +752,10 @@ ReductionParams reductionHeuristic(
         max_input_dtype_size,
         vectorize_factor);
   } else {
+    // 3D schedules not enabled for outer reductions
     return OuterReductionHeuristic(
         total_reduction_numel,
         total_iteration_numel,
-        inner_most_dimension_numel,
         n_tensor_inputs,
         max_input_dtype_size,
         vectorize_factor);
@@ -831,7 +895,7 @@ void scheduleReduction(Fusion* fusion, const ReductionParams& rparams) {
   auto reduction_tv = reduction_tvs[0];
 
   auto dim_analysis = scheduler_utils::canonicalDimReduction(
-      fusion, reduction_tv, rparams.schedule_3D);
+      fusion, reduction_tv, rparams.fastest_dim && rparams.schedule_3D);
 
   bool has_iter_axis = dim_analysis.first;
   bool has_red_axis = dim_analysis.second;

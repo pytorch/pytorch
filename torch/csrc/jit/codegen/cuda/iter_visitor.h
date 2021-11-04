@@ -224,7 +224,7 @@ class TORCH_CUDA_CU_API DependencyCheck {
   static std::deque<std::deque<Val*>> getAllUseChains(Val* dependency);
 
   // Grab all values that exist between and including provided
-  // vals. Returned values are topologicaly ordered.
+  // vals. Returned values are topologicaly ordered, and unique.
   static std::vector<Val*> getAllValsBetween(
       const std::unordered_set<Val*>& dependencies,
       const std::vector<Val*>& of);

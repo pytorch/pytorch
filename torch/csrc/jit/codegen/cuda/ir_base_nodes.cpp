@@ -21,7 +21,13 @@ namespace fuser {
 namespace cuda {
 
 Statement::Statement(const Statement* src, IrCloner* ir_cloner) {
-  name_ = src->name_;
+  // IRCloner when cloning to a new fusion will copy the names of the original
+  // fusion. If we're cloning into the same fusion, we let Val and Expr get
+  // their names as usual by registering with the current fusion in their
+  // constructors, so don't overwrite that here.
+  if (src->fusion() != ir_cloner->fusion()) {
+    name_ = src->name_;
+  }
   fusion_ = ir_cloner->fusion();
   ir_cloner->registerClone(src, this);
 }
@@ -65,7 +71,12 @@ Val::Val(const Val* src, IrCloner* ir_cloner)
       vtype_(src->vtype_),
       dtype_(src->dtype_),
       is_fusion_input_(src->is_fusion_input_),
-      is_fusion_output_(src->is_fusion_output_) {}
+      is_fusion_output_(src->is_fusion_output_) {
+  // If we're "cloning" into the same fusion, register with the fusion
+  if (src->fusion() == ir_cloner->fusion()) {
+    name_ = src->fusion()->registerVal(this);
+  }
+}
 
 const std::vector<Expr*>& Val::uses() const {
   if (vtype_ == ValType::TensorView) {
@@ -186,7 +197,12 @@ Expr::Expr(const Expr* src, IrCloner* ir_cloner)
     : Statement(src, ir_cloner),
       type_(src->type_),
       inputs_(ir_cloner->clone(src->inputs_)),
-      outputs_(ir_cloner->clone(src->outputs_)) {}
+      outputs_(ir_cloner->clone(src->outputs_)) {
+  // If we're "cloning" into the same fusion, register with the fusion
+  if (src->fusion() == ir_cloner->fusion()) {
+    name_ = src->fusion()->registerExpr(this);
+  }
+}
 
 bool Expr::sameAs(const Statement* other) const {
   if (this == other) {

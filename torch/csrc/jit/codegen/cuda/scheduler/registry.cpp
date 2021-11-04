@@ -804,8 +804,8 @@ class ReductionScheduler : public SchedulerEntry {
     }
 
     // Doesn't allow persistent kernels in this scheduler
-    auto persistent_buffers = scheduler_utils::persistentBuffers(fusion);
-    if (persistent_buffers.buffers.size() > 0) {
+    auto persistent_buffer_info = scheduler_utils::persistentBuffers(fusion);
+    if (persistent_buffer_info.persistent_buffers.size() > 0) {
       return false;
     }
 
@@ -947,8 +947,8 @@ class PersistentKernelScheduler : public SchedulerEntry {
     }
 
     // Only accept persistent kernels
-    auto persistent_buffers = scheduler_utils::persistentBuffers(fusion);
-    if (persistent_buffers.buffers.size() == 0) {
+    auto persistent_buffer_info = scheduler_utils::persistentBuffers(fusion);
+    if (persistent_buffer_info.persistent_buffers.size() == 0) {
       return false;
     }
 
@@ -981,10 +981,15 @@ class PersistentKernelScheduler : public SchedulerEntry {
                   scheduler_utils::persistentBuffers(fusion));
             });
 
-    auto& persistent_buffers = persistent_buffer_info_entry.get();
+    auto& persistent_buffer_info = persistent_buffer_info_entry.get();
 
-    auto persistent_buffer_size = scheduler_utils::persistentBufferSize(
-        fusion, runtime_info, persistent_buffers, data_cache);
+    auto persistent_buffer_size_info = scheduler_utils::persistentBufferSize(
+        fusion, runtime_info, persistent_buffer_info, data_cache);
+
+    auto persistent_buffer_size = std::min(
+        persistent_buffer_size_info.persistent_buffer_size,
+        persistent_buffer_size_info.projected_persistent_buffer_size);
+
     if (persistent_buffer_size > scheduler_utils::register_file_size) {
       return false;
     }
@@ -1016,11 +1021,11 @@ class PersistentKernelScheduler : public SchedulerEntry {
         // Don't go persistent if we can't fit half a warp on an SM
         (!properties.fastest_dim_reduction &&
          max_multi_reduction_factor < warp_size / 2) ||
-        ( // Don't go persistent if we can't use a quarter of the available SMs
-          // but have a large reduction size
+        ( // Don't go persistent if we can't use a small fraction of the
+          // available SMs yet have a large reduction size
             properties.total_iteration_numel <
                 (properties.fastest_dim_reduction
-                     ? 1
+                     ? std::max(device_multiprocessor_count / 8, (int64_t)1)
                      // Make sure we at least use a quarter of the device * a
                      // half warp
                      : (warp_size / 8) * device_multiprocessor_count) &&
@@ -1235,7 +1240,7 @@ void HeuristicSummary::validate() const {
                   CompileTimeInfo<HeuristicCompileTime::PersistentBufferInfo>>()
               ->get();
       TORCH_INTERNAL_ASSERT(
-          !persistent_buffer_info->buffers.empty() &&
+          !persistent_buffer_info->persistent_buffers.empty() &&
           entry_type_map_.count(EntryType::SCOPE_PERSISTENT_FACTOR_INFO));
       break;
   }

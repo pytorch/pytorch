@@ -43,6 +43,9 @@ void multiReductionInliner(
 // Reduction inliner expects an rfactored domain.
 TensorView* sortAndRFactor(TensorView* reference_tv);
 
+// Take all projectable persistent buffers, and move them to the inputs.
+TORCH_CUDA_CU_API void projectPersistentBuffers(Fusion* fusion);
+
 } // namespace reduction_scheduler_utils
 } // namespace cuda
 } // namespace fuser

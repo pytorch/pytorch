@@ -69,16 +69,16 @@ class PersistentBufferInfo {
 };
 
 //! Auxiliary data types for `SCOPE_PERSISTENT_FACTOR_INFO` entry type.
-using ValToFactorMap = std::unordered_map<Val*, int>;
-using ValToFactorMapPtr = std::unique_ptr<ValToFactorMap>;
-using ScopedPersistenceFactorMap = std::unordered_map<Val*, ValToFactorMapPtr>;
+using ScopedPersistenceBufferMap = std::unordered_map<Val*, std::vector<bool>>;
 
 //! Entry type definition class for `SCOPE_PERSISTENT_FACTOR_INFO`,
-//!  stores the estimated contribution factor from each tensorview
-//!   to each persistent bufffer based on scope info of fusion.
+// Tracks which buffers are active at a given Val*, order of bool vector is
+// based on persistence buffer order from persistence buffer info, this is then
+// appended by the projectable persistent buffers' inputs. True in the bool
+// vector means the persistent buffer is active at the generation of the key.
 class ScopePersistentFactorInfo {
  public:
-  using DataType = ScopedPersistenceFactorMap;
+  using DataType = ScopedPersistenceBufferMap;
   static const CompileTimeEntryType EntryType =
       CompileTimeEntryType::SCOPE_PERSISTENT_FACTOR_INFO;
 };
