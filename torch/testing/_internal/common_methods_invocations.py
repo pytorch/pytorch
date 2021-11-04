@@ -11552,8 +11552,7 @@ op_db: List[OpInfo] = [
         skips=(
             # Because we have used lambda for the op here
             # AssertionError: JIT Test does not execute any logic
-            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-        ),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),),
         supports_forward_ad=True,
         supports_out=False,
         sample_inputs_func=sample_inputs_dropout,
