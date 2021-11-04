@@ -1,11 +1,14 @@
 #pragma once
 
 #include <c10/core/Scalar.h>
+#include <ATen/core/Formatting.h>
 
 #include <iostream>
 
 #include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 #include "lazy_tensors/computation_client/types.h"
+
+using namespace at;
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -29,8 +32,6 @@ class Scalar : public TsNode {
 };
 
 torch::lazy::hash_t ScalarHash(const at::Scalar& s);
-
-std::ostream& operator<<(std::ostream& ostrm, at::Scalar s);
 
 }  // namespace ops
 }  // namespace ir

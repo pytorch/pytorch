@@ -2,7 +2,6 @@
 #include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_node_lowering.h"
 #include "lazy_tensors/computation_client/util.h"
-#include "lazy_tensors/str_join.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -21,10 +20,10 @@ std::string Random::ToString() const {
   std::stringstream ss;
   ss << TsNode::ToString();
   if (from) {
-    lazy_tensors::ToString("from", *from, ss);
+    ss << ", from=" << *from;
   }
   if (to) {
-    lazy_tensors::ToString("to", *to, ss);
+    ss << ", to=" << *to;
   }
   return ss.str();
 }
