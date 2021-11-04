@@ -125,7 +125,7 @@ TypePtr IValue::type() const {
     case Tag::Capsule:
       return CapsuleType::get();
     case Tag::Tuple:
-      return toTuple()->type();
+      return toTupleRef().type();
     case Tag::Generator:
       return GeneratorType::get();
     case Tag::Quantizer:
@@ -147,7 +147,7 @@ void IValue::visit(const std::function<bool (const IValue &)>& visitor) const {
     case Tag::GenericList: {
       c10::ArrayRef<IValue> elems;
       if (isTuple()) {
-        elems = this->toTuple()->elements();
+        elems = this->toTupleRef().elements();
       } else {
         elems = this->toListRef();
       }
@@ -196,7 +196,7 @@ void IValue::getSubValues(HashAliasedIValues& subValues) const {
       subValues.insert(*this);
       c10::ArrayRef<IValue> elems;
       if (isTuple()) {
-        elems = this->toTuple()->elements();
+        elems = this->toTupleRef().elements();
       } else {
         elems = this->toListRef();
       }
@@ -542,7 +542,7 @@ std::ostream& IValue::repr(
     case IValue::Tag::Bool:
       return out << (v.toBool() ? "True" : "False");
     case IValue::Tag::Tuple: {
-      const auto& elements = v.toTuple()->elements();
+      const auto& elements = v.toTupleRef().elements();
       const auto& finish = elements.size() == 1 ? ",)" : ")";
       return printList(out, elements, "(", finish, formatter);
     }
@@ -633,7 +633,7 @@ IValueComparator getLessThanComparator(const IValue& v) {
   }
 
   if (v.isTuple()) {
-      const auto& elements = v.toTuple()->elements();
+      const auto& elements = v.toTupleRef().elements();
       size_t n = elements.size();
 
       std::vector<IValueComparator> elements_lts;
@@ -643,8 +643,8 @@ IValueComparator getLessThanComparator(const IValue& v) {
       }
 
       return [elements_lts=std::move(elements_lts), n](const IValue& a, const IValue& b) {
-        const auto& a_elements = a.toTuple()->elements();
-        const auto& b_elements = b.toTuple()->elements();
+        const auto& a_elements = a.toTupleRef().elements();
+        const auto& b_elements = b.toTupleRef().elements();
 
         for (const auto i : c10::irange(n)) {
           if (elements_lts[i](a_elements[i], b_elements[i])) {
@@ -728,7 +728,7 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
     case IValue::Tag::Bool:
       return out << (v.toBool() ? "True" : "False");
     case IValue::Tag::Tuple: {
-      const auto& elements = v.toTuple()->elements();
+      const auto& elements = v.toTupleRef().elements();
       const auto& finish = elements.size() == 1 ? ",)" : ")";
       return printList(out, elements, "(", finish, formatter);
     }
@@ -803,7 +803,7 @@ IValue IValue::deepcopy(
       break;
     case IValue::Tag::Tuple: {
       std::vector<IValue> copied_tuple;
-      for (const auto& e : toTuple()->elements()) {
+      for (const auto& e : toTupleRef().elements()) {
         copied_tuple.push_back(e.deepcopy(memo));
       }
       copy = IValue(ivalue::Tuple::create(copied_tuple));

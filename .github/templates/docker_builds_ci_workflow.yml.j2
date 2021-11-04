@@ -19,6 +19,10 @@ on:
 {%- endif %}
 !{{ common.concurrency(build_environment) }}
 
+env:
+  ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+  AWS_DEFAULT_REGION: us-east-1
+
 jobs:
 {% block docker_build +%}
   docker-build:
