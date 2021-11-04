@@ -1,3 +1,5 @@
+#include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
 #include <ATen/native/cuda/KernelUtils.cuh>
 
 namespace at { namespace native {

@@ -1,9 +1,7 @@
 #pragma once
 
-#include <algorithm>
-#include <cmath>
-#include <cstdint>
-#include <utility>
+#include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
 
 namespace at { namespace native {
 
