@@ -114,11 +114,14 @@ core_sources_common = [
     "torch/csrc/jit/runtime/vararg_functions.cpp",
     "torch/csrc/jit/mobile/promoted_prim_ops.cpp",
     "torch/csrc/jit/mobile/prim_ops_registery.cpp",
+]
+
+torch_unpickler_common = [
     "torch/csrc/jit/serialization/import_read.cpp",
     "torch/csrc/jit/serialization/unpickler.cpp",
 ]
 
-libtorch_sources_common = core_sources_common
+libtorch_sources_common = sorted(core_sources_common + torch_unpickler_common)
 
 # The profilers are not needed in the lite interpreter build.
 libtorch_profiler_sources = [
@@ -365,6 +368,7 @@ lazy_tensor_core_sources = [
 
 libtorch_core_sources = sorted(
     core_sources_common +
+    torch_unpickler_common +
     core_sources_full +
     core_trainer_sources +
     libtorch_profiler_sources +
@@ -495,7 +499,12 @@ libtorch_lite_eager_symbolication = [
 ]
 
 # TODO: core_trainer_sources is not necessary for libtorch lite
-libtorch_lite_cmake_sources = sorted(core_trainer_sources + core_sources_common + torch_mobile_core)
+libtorch_lite_cmake_sources = sorted(
+    core_trainer_sources +
+    core_sources_common +
+    torch_unpickler_common +
+    torch_mobile_core,
+)
 
 libtorch_cmake_sources = libtorch_core_sources + libtorch_core_jit_sources
 
