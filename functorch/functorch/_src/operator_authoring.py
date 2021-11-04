@@ -8,7 +8,7 @@ import operator
 import torch
 from torch import fx
 from torch._C import _te  # type: ignore[attr-defined]
-from functorch._C import CompileCache, CompileResult
+from functorch._C import PointwiseOperatorCompileCache, PointwiseOperatorCompileResult
 
 FOLD_ALIASES = True
 _SHAPE_TYPES = {"one", "other"}
@@ -137,7 +137,7 @@ class PointwiseCompiler(object):
         module_name: str,
         pointwise_fn: Callable,
         spec: List,
-        result: CompileResult,
+        result: PointwiseOperatorCompileResult,
     ):
         self.name = name
         self.module_name = module_name
@@ -409,7 +409,7 @@ class PointwiseCompiler(object):
         self.compute_code()
 
 
-class _CompileCache(CompileCache):
+class _PointwiseOperatorCompileCache(PointwiseOperatorCompileCache):
     pass
 
 
@@ -417,7 +417,7 @@ class _CompileCache(CompileCache):
 def _source_to_pointwise_operator(
     fn_str: str, name: Optional[str] = None, module_name: Optional[str] = None
 ):
-    """ Used when creating backwards() methods """
+    """Used when creating backwards() methods"""
     return pointwise_operator(eval(fn_str), name=name, module_name=module_name)
 
 
@@ -441,7 +441,9 @@ def pointwise_operator(
         return PointwiseCompiler(str(name), str(module_name), fn, spec, result)
 
     # This items are needed to support FX tracing
-    rv = _CompileCache(name, module_name, [signature], compile_fn, _num_args(fn))
+    rv = _PointwiseOperatorCompileCache(
+        name, module_name, [signature], compile_fn, _num_args(fn)
+    )
     rv.__name__ = name
     rv.__qualname__ = name
     rv.__module__ = module_name

@@ -13,7 +13,7 @@
 #include <functorch/csrc/VmapTransforms.h>
 #include <functorch/csrc/BatchedFallback.h>
 #include <functorch/csrc/BatchRulesHelper.h>
-#include <functorch/csrc/CompileCache.h>
+#include <functorch/csrc/PointwiseOperatorCompileCache.h>
 
 
 namespace at {
@@ -253,5 +253,5 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("get_unwrapped", &at::functorch::get_unwrapped);
   m.def("maybe_get_level", &at::functorch::maybe_get_level);
   m.def("maybe_get_bdim", &at::functorch::maybe_get_bdim);
-  at::functorch::initCompileCacheBindings(m.ptr());
+  at::functorch::initPointwiseOperatorCompileCacheBindings(m.ptr());
 }
