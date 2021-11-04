@@ -116,7 +116,9 @@ QuantizationFactory* QuantizationFactory::GetDefaultInstance() {
       FLAGS_caffe2_dnnlowp_force_scale_power_of_two,
       StringToKind(FLAGS_caffe2_dnnlowp_activation_quantization_kind),
       StringToKind(FLAGS_caffe2_dnnlowp_weight_quantization_kind),
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       FLAGS_caffe2_dnnlowp_weight_p99_threshold,
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       FLAGS_caffe2_dnnlowp_activation_p99_threshold);
 
   static bool log_printed = false;
@@ -281,6 +283,7 @@ TensorQuantizationParams QuantizationFactory::ChooseQuantizationParams(
 RequantizationParams QuantizationFactory::ChooseRequantizationMultiplier(
     float real_multiplier,
     TensorQuantizationParams target_qparams) const {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   RequantizationParams params;
   params.target_qparams = target_qparams;
   params.real_multiplier = real_multiplier;
@@ -300,6 +303,7 @@ adjust_hist_to_include_zero(const Histogram& hist, float* min, float* max) {
   *min = hist.Min();
   *max = hist.Max();
   int nbins = bins.size();
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   float bin_width = (*max - *min) / nbins;
 
   // Pad histogram to include zero
@@ -309,10 +313,12 @@ adjust_hist_to_include_zero(const Histogram& hist, float* min, float* max) {
     // additional nbins to include 0
     additional_nbins = ceil(*min / bin_width);
     offset = additional_nbins;
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     *min -= additional_nbins * bin_width;
     assert(*min <= 0);
   } else if (*max < 0) {
     additional_nbins = ceil((-*max) / bin_width);
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     *max += additional_nbins * bin_width;
     assert(*max >= 0);
   }

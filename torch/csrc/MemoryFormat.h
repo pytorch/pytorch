@@ -11,6 +11,7 @@ const int MEMORY_FORMAT_NAME_LEN = 64;
 struct THPMemoryFormat {
   PyObject_HEAD
   at::MemoryFormat memory_format;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   char name[MEMORY_FORMAT_NAME_LEN + 1];
 };
 

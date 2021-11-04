@@ -14,9 +14,8 @@
 
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
-
-#include <THC/THCAtomics.cuh>
+#include <ATen/cuda/Atomic.cuh>
+#include <ATen/cuda/CUDAContext.h>
 
 #include <type_traits>
 #include <numeric>
@@ -58,7 +57,7 @@ __device__ static inline int64_t get_target_prime(
 // computed when we start a new block_s. This is why we have our own for loop here.
 template<typename scalar_t, typename target_t>
 __global__ void
-#if defined (__HIP_PLATFORM_HCC__)
+#if defined (USE_ROCM)
 C10_LAUNCH_BOUNDS_2((std::is_same<scalar_t, float>::value ? 1024 : 896), 1)
 #endif
 ctc_loss_log_alpha_gpu_kernel(scalar_t* __restrict__ log_alpha_data,
@@ -414,7 +413,7 @@ ctc_loss_backward_log_beta_gpu_kernel(scalar_t* __restrict__ log_beta_data,
 // alphabets the inplace nature is a considerable advantage.
 template<typename scalar_t, typename target_t>
 __global__ void
-#if defined (__HIP_PLATFORM_HCC__)
+#if defined (USE_ROCM)
 C10_LAUNCH_BOUNDS_2((std::is_same<scalar_t, float>::value ? 1024 : 896), 1)
 #endif
 ctc_loss_backward_collect_nonblank_gpu_kernel(scalar_t* __restrict__ gradient_data,
@@ -455,7 +454,7 @@ ctc_loss_backward_collect_nonblank_gpu_kernel(scalar_t* __restrict__ gradient_da
 
   for (int64_t t = 0; t < input_length; t++) {
     scalar_t lp = log_probs_data[lp_batch_offset + t * lp_input_stride + lp_char_stride * target];
-    gpuAtomicAdd(&gradient_data[gr_batch_offset + t * gr_input_stride + gr_char_stride * target],
+    gpuAtomicAddNoReturn(&gradient_data[gr_batch_offset + t * gr_input_stride + gr_char_stride * target],
               -std::exp(log_alpha_data[la_batch_offset + la_input_stride * t + la_target_stride * (s*2+1)]
                         + log_beta_data[lb_batch_offset + lb_input_stride * t + lb_target_stride * (s*2+1)]
                         + nll - lp) * gr);
@@ -466,7 +465,7 @@ ctc_loss_backward_collect_nonblank_gpu_kernel(scalar_t* __restrict__ gradient_da
 // It appears to be faster than the above method for small batch sizes.
 template<typename scalar_t, typename target_t>
 __global__ void
-#if defined (__HIP_PLATFORM_HCC__)
+#if defined (USE_ROCM)
 C10_LAUNCH_BOUNDS_2((std::is_same<scalar_t, float>::value ? 1024 : 896), 1)
 #endif
 ctc_loss_backward_collect_gpu_kernel(scalar_t* __restrict__ gradient_data,
@@ -538,7 +537,7 @@ ctc_loss_backward_collect_gpu_kernel(scalar_t* __restrict__ gradient_data,
 // elements are padded
 template<typename scalar_t>
 __global__ void
-#if defined (__HIP_PLATFORM_HCC__)
+#if defined (USE_ROCM)
 C10_LAUNCH_BOUNDS_2((std::is_same<scalar_t, float>::value ? 1024 : 896), 1)
 #endif
 ctc_loss_zero_padded_gradients(

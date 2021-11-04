@@ -1,6 +1,8 @@
 #pragma once
 
 #include <c10/core/Device.h>
+#include <c10/core/Event.h>
+#include <c10/core/Stream.h>
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/distributed/rpc/rpc_command_base.h>
 #include <torch/csrc/jit/serialization/pickle.h>
@@ -15,7 +17,7 @@ namespace distributed {
 namespace rpc {
 
 // Parse error message and return RPCErrorType based on the message.
-TORCH_API RPCErrorType getRPCErrorType(const FutureMessage& fm);
+TORCH_API RPCErrorType getRPCErrorType(const JitFuture& jitFuture);
 // Create an error string given the error description and error type
 TORCH_API std::string makeRPCError(
     const std::string& rpcErrorStr,

@@ -10,7 +10,7 @@ namespace jit {
 namespace tensorexpr {
 class HasRand : public IRVisitor {
  public:
-  HasRand(Stmt* stmt) : stmt_(stmt) {
+  HasRand(StmtPtr stmt) : stmt_(stmt) {
     stmt_->accept(this);
   }
 
@@ -19,105 +19,189 @@ class HasRand : public IRVisitor {
   }
 
  private:
-  void visit(const Intrinsics* v) override {
+  void visit(IntrinsicsPtr v) override {
     if (v->op_type() == IntrinsicsOp::kRand) {
       has_rand_ = true;
     } else {
       IRVisitor::visit(v);
     }
   }
-  Stmt* stmt_;
+  StmtPtr stmt_;
   bool has_rand_ = false;
 };
 
-template <typename Node>
+template <typename Op>
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class NodeFinder : public IRVisitor {
  public:
-  virtual void visit(const Node* v) override {
-    nodes.push_back((Node*)v);
+  void visit(NodePtr<Op> v) override {
+    nodes.push_back((NodePtr<Op>)v);
     IRVisitor::visit(v);
   }
 
-  static std::vector<Node*> find(const Stmt* s) {
-    NodeFinder<Node> nf;
+  static std::vector<NodePtr<Op>> find(StmtPtr s) {
+    NodeFinder<Op> nf;
     s->accept(&nf);
     return nf.nodes;
   }
 
-  static std::vector<Node*> find(const Expr* e) {
-    NodeFinder<Node> nf;
+  static std::vector<NodePtr<Op>> find(ExprPtr e) {
+    NodeFinder<Op> nf;
     e->accept(&nf);
     return nf.nodes;
   }
 
-  std::vector<Node*> nodes;
+  std::vector<NodePtr<Op>> nodes;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class VarFinder : public IRVisitor {
  public:
-  virtual void visit(const Var* v) override {
+  void visit(VarPtr v) override {
     vars_.insert(v);
     IRVisitor::visit(v);
   }
 
-  static std::unordered_set<const Var*> find(Stmt* s) {
+  static std::unordered_set<VarPtr> find(StmtPtr s) {
     VarFinder nf;
     s->accept(&nf);
     return nf.vars();
   }
 
-  static std::unordered_set<const Var*> find(const Expr* e) {
+  static std::unordered_set<VarPtr> find(ExprPtr e) {
     VarFinder nf;
     e->accept(&nf);
     return nf.vars();
   }
 
-  const std::unordered_set<const Var*>& vars() {
+  const std::unordered_set<VarPtr>& vars() {
     return vars_;
   }
 
  private:
-  std::unordered_set<const Var*> vars_;
+  std::unordered_set<VarPtr> vars_;
+};
+
+class BufFinder : public IRVisitor {
+ public:
+  void visit(BufPtr v) override {
+    bufs_.insert(v);
+    IRVisitor::visit(v);
+  }
+
+  static std::unordered_set<BufPtr> find(StmtPtr s) {
+    BufFinder nf;
+    s->accept(&nf);
+    return nf.bufs();
+  }
+
+  static std::unordered_set<BufPtr> find(ExprPtr e) {
+    BufFinder nf;
+    e->accept(&nf);
+    return nf.bufs();
+  }
+
+  const std::unordered_set<BufPtr>& bufs() {
+    return bufs_;
+  }
+
+ private:
+  std::unordered_set<BufPtr> bufs_;
 };
 
 // Finds all kinds of write operations to the provided Buf.
 class WritesToBuf : public IRVisitor {
  public:
-  WritesToBuf(const Buf* target) : target_(target) {}
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  WritesToBuf(BufPtr target) : target_(target) {}
 
-  std::vector<const Stmt*> writes() {
+  std::vector<StmtPtr> writes() {
     return writes_;
   }
 
-  static std::vector<const Stmt*> find(Stmt* s, const Buf* b) {
+  static std::vector<StmtPtr> find(StmtPtr s, BufPtr b) {
     WritesToBuf finder(b);
     s->accept(&finder);
     return finder.writes();
   }
 
  private:
-  void visit(const Store* v) override {
+  void visit(StorePtr v) override {
     if (v->buf() == target_) {
       writes_.push_back(v);
     }
   }
 
-  void visit(const AtomicAdd* v) override {
+  void visit(AtomicAddPtr v) override {
     if (v->buf() == target_) {
       writes_.push_back(v);
     }
   }
 
-  const Buf* target_;
-  std::vector<const Stmt*> writes_;
+  BufPtr target_;
+  std::vector<StmtPtr> writes_;
+};
+
+class StmtsReadingBuf : public IRVisitor {
+ public:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  StmtsReadingBuf(BufPtr target) : target_(target) {}
+
+  std::vector<StmtPtr> reads() {
+    return reads_;
+  }
+
+  static std::vector<StmtPtr> find(StmtPtr s, BufPtr b) {
+    StmtsReadingBuf finder(b);
+    s->accept(&finder);
+    return finder.reads();
+  }
+
+ private:
+  bool readsBuffer(StmtPtr s) {
+    auto loads = NodeFinder<Load>::find(s);
+    for (auto l : loads) {
+      if (l->buf() == target_) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  void visit(StorePtr v) override {
+    if (readsBuffer(v)) {
+      reads_.push_back(v);
+    }
+  }
+
+  void visit(LetPtr v) override {
+    if (readsBuffer(v)) {
+      reads_.push_back(v);
+    }
+  }
+
+  void visit(CondPtr v) override {
+    if (readsBuffer(v)) {
+      reads_.push_back(v);
+    }
+  }
+
+  void visit(AtomicAddPtr v) override {
+    if (readsBuffer(v)) {
+      reads_.push_back(v);
+    }
+  }
+
+  BufPtr target_;
+  std::vector<StmtPtr> reads_;
 };
 
 // Traverses the IR to determine if a particular Var is modified within it.
 class ModifiesVarChecker : public IRVisitor {
  public:
-  ModifiesVarChecker(const Var* v) : var_(v) {}
+  ModifiesVarChecker(VarPtr v) : var_(v) {}
 
-  static bool check(const Stmt* s, const Var* v) {
+  static bool check(StmtPtr s, VarPtr v) {
     ModifiesVarChecker checker(v);
     s->accept(&checker);
     return checker.found();
@@ -128,7 +212,7 @@ class ModifiesVarChecker : public IRVisitor {
   }
 
  private:
-  void visit(const Store* v) override {
+  void visit(StorePtr v) override {
     if (v->buf()->base_handle() == var_) {
       found_ = true;
       return;
@@ -136,7 +220,7 @@ class ModifiesVarChecker : public IRVisitor {
     IRVisitor::visit(v);
   }
 
-  void visit(const AtomicAdd* v) override {
+  void visit(AtomicAddPtr v) override {
     if (v->buf()->base_handle() == var_) {
       found_ = true;
       return;
@@ -144,7 +228,7 @@ class ModifiesVarChecker : public IRVisitor {
     IRVisitor::visit(v);
   }
 
-  void visit(const Let* v) override {
+  void visit(LetPtr v) override {
     if (v->var() == var_) {
       found_ = true;
       return;
@@ -152,7 +236,7 @@ class ModifiesVarChecker : public IRVisitor {
     IRVisitor::visit(v);
   }
 
-  void visit(const For* v) override {
+  void visit(ForPtr v) override {
     if (v->var() == var_) {
       found_ = true;
       return;
@@ -160,7 +244,7 @@ class ModifiesVarChecker : public IRVisitor {
     IRVisitor::visit(v);
   }
 
-  const Var* var_;
+  VarPtr var_;
   bool found_{false};
 };
 
@@ -168,27 +252,28 @@ class ModifiesVarChecker : public IRVisitor {
 // It creates a map of multi dim buffers and their flat verions
 class CreateBufferMap : public IRVisitor {
  public:
-  const std::unordered_map<std::string, const Buf*>& getBufferMap() const {
+  const std::unordered_map<std::string, BufPtr>& getBufferMap() const {
     return map_input_to_tensor_bufs_;
   }
 
  private:
-  void visit(const Store* v) override {
-    auto load_node = dynamic_cast<const Load*>(v->value());
-    auto call_node = dynamic_cast<const FunctionCall*>(v->value());
-    if (load_node || call_node) {
-      TORCH_INTERNAL_ASSERT(!(load_node && call_node));
-      auto t_buf = load_node ? load_node->buf() : call_node->tensor()->buf();
-      if (load_node) {
-        map_input_to_tensor_bufs_.emplace(t_buf->name_hint(), v->buf());
-      } else {
-        map_input_to_tensor_bufs_.emplace(v->buf()->name_hint(), t_buf);
-      }
+  void visit(StorePtr v) override {
+    auto load_node = to<Load>(v->value());
+    if (load_node) {
+      auto t_buf = load_node->buf();
+      map_input_to_tensor_bufs_.emplace(t_buf->name_hint(), v->buf());
+    } else {
+      auto add_node = to<Add>(v->value());
+      auto mul_node = to<Mul>(v->value());
+      // This means for now, v->value() can be Add or Mul
+      TORCH_INTERNAL_ASSERT(add_node || mul_node, buildErrorMessage());
+      map_input_to_tensor_bufs_.emplace(v->buf()->name_hint(), v->buf());
     }
     v->value()->accept(this);
   }
-  std::unordered_map<std::string, const Buf*> map_input_to_tensor_bufs_;
+  std::unordered_map<std::string, BufPtr> map_input_to_tensor_bufs_;
 };
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch

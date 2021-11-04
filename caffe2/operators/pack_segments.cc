@@ -58,6 +58,7 @@ bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
   if (return_presence_mask_) {
     // Shape of presence is batch_size x max_len
     std::vector<int64_t> presence_shape{lengths.numel(), max_length};
+    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
     presence_mask->Resize(presence_shape);
     presence_mask_data = presence_mask->template mutable_data<bool>();
   }
@@ -95,6 +96,7 @@ bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
         output->numel(), 0, output->template mutable_data<char>(), &context_);
   }
   if (return_presence_mask_) {
+    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
     memset(presence_mask_data, (int)false, presence_mask->numel());
   }
 
@@ -110,6 +112,7 @@ bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
         d + block_bytesize * start,
         out + block_bytesize * max_length * i);
     if (return_presence_mask_) {
+      // NOLINTNEXTLINE(clang-analyzer-unix.cstring.NullArg)
       memset(presence_mask_data + max_length * i, (int)true, len);
     }
     start += l[i];

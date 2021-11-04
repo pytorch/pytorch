@@ -17,6 +17,7 @@ void batch_permutation_loop(
     const float* src,
     const int* indices,
     float* dst) {
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   long numBytes = K * sizeof(float);
   if (forwards) {
 #ifdef _OPENMP
@@ -64,6 +65,7 @@ bool BatchPermutationOp<float, CPUContext>::RunOnDevice() {
   if (X.dim32(0) > 0) {
     batch_permutation_loop<true>(
         X.dim32(0),
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         X.numel() / X.dim32(0),
         X.data<float>(),
         indices.data<int>(),
@@ -82,6 +84,7 @@ bool BatchPermutationGradientOp<float, CPUContext>::RunOnDevice() {
   if (dY.dim32(0) > 0) {
     batch_permutation_loop<false>(
         dY.dim32(0),
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         dY.numel() / dY.dim32(0),
         dY.data<float>(),
         indices.data<int>(),

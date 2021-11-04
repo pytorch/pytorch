@@ -3,7 +3,7 @@
 
 
 
-from caffe2.python import core, workspace, test_util
+from caffe2.python import core, test_util
 from caffe2.proto import caffe2_pb2
 import caffe2.python.nomnigraph as ng
 

@@ -73,7 +73,9 @@ bool ResizeNearestOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
     width_scale_ = scales_data[1];
   }
 
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   int output_width = input_width * width_scale_;
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   int output_height = input_height * height_scale_;
   auto* Y = Output(
       0,
@@ -93,8 +95,10 @@ bool ResizeNearestOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   for (int n = 0; n < batch_size; ++n) {
     for (int c = 0; c < num_channels; ++c) {
       for (int y = 0; y < output_height; ++y) {
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         const int in_y = std::min((int)(y / height_scale_), (input_height - 1));
         for (int x = 0; x < output_width; ++x) {
+          // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
           const int in_x = std::min((int)(x / width_scale_), (input_width - 1));
           Ydata[output_width * y + x] = Xdata[input_width * in_y + in_x];
         }
@@ -122,7 +126,9 @@ bool ResizeNearestOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
     width_scale_ = scales_data[1];
   }
 
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   int output_width = input_width * width_scale_;
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   int output_height = input_height * height_scale_;
 
   const int output_width_stride = output_width * num_channels;
@@ -138,8 +144,10 @@ bool ResizeNearestOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
 
   for (int n = 0; n < batch_size; ++n) {
     for (int y = 0; y < output_height; ++y) {
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       const int in_y = std::min((int)(y / height_scale_), (input_height - 1));
       for (int x = 0; x < output_width; ++x) {
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         const int in_x = std::min((int)(x / width_scale_), (input_width - 1));
         std::memcpy(
             &Ydata[output_width_stride * y + num_channels * x],
@@ -199,9 +207,11 @@ bool ResizeNearestGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
     for (int c = 0; c < num_channels; ++c) {
       for (int y = 0; y < input_height; ++y) {
         const int out_y =
+            // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
             std::min((int)(y / height_scale_), (output_height - 1));
         for (int x = 0; x < input_width; ++x) {
           const int out_x =
+              // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
               std::min((int)(x / width_scale_), (output_width - 1));
           dXdata[output_width * out_y + out_x] += dYdata[input_width * y + x];
         }
@@ -248,8 +258,10 @@ bool ResizeNearestGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
 
   for (int n = 0; n < batch_size; ++n) {
     for (int y = 0; y < input_height; ++y) {
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       const int out_y = std::min((int)(y / height_scale_), (output_height - 1));
       for (int x = 0; x < input_width; ++x) {
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         const int out_x = std::min((int)(x / width_scale_), (output_width - 1));
 
         float* dXdata_c0 =

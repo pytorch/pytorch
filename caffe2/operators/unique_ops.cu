@@ -127,6 +127,7 @@ bool UniqueOp<CUDAContext>::DoRunWithType() {
         0,
         context_.cuda_stream()>>>(
         order2.data(), order1.data(), remapping, N, K);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
   return true;
 }

@@ -7,8 +7,10 @@
 namespace caffe2 {
 namespace math {
 
+bool can_use_broadcast_fastpath(int ndim, const int* dims);
+
 template <typename T, class Context, StorageOrder kOrder>
-CAFFE2_API void AffineChannel(
+TORCH_API void AffineChannel(
     const int N,
     const int C,
     const int HxW,

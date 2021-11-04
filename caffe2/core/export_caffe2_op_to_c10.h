@@ -28,8 +28,8 @@ inline c10::List<at::Tensor> _call_caffe2_op(
     const c10::FunctionSchema& schema,
     std::vector<c10::IValue>&& inputs,
     c10::List<at::Tensor>&& outputs) {
-  Caffe2Operator op(schema, std::move(inputs), std::move(outputs));
-  op.Run();
+  Caffe2Operator op(schema, std::move(inputs), std::move(outputs), -1);
+  op.Run(-1);
   return std::move(op).move_newstyle_outputs();
 }
 
@@ -57,7 +57,7 @@ inline void _call_caffe2_op_from_c10(
   AT_ASSERT(
       schema.arguments().size() != 0 &&
       schema.arguments().back().type()->isSubtypeOf(
-          OptionalType::create(ListType::ofTensors())));
+          *OptionalType::create(ListType::ofTensors())));
   IValue preallocated_outputs = torch::jit::pop(*stack);
 
   const size_t num_outputs = schema.returns().size();
@@ -180,7 +180,7 @@ inline FunctionSchema make_function_schema_for_c10(const char* schema_str) {
 #define C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(OperatorName)   \
   namespace caffe2 {                                        \
   namespace _c10_ops {                                      \
-  CAFFE2_API const FunctionSchema& schema_##OperatorName(); \
+  TORCH_API const FunctionSchema& schema_##OperatorName(); \
   }                                                         \
   }
 

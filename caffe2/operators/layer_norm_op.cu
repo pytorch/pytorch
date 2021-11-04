@@ -166,7 +166,7 @@ __global__ void ComputeFusedParamsCUDAKernel(
 }
 
 template <typename T>
-__global__ void LayerNormBackwardCUDAKenrel(
+__global__ void LayerNormBackwardCUDAKernel(
     const int M,
     const int N,
     const T* dY,
@@ -183,7 +183,7 @@ __global__ void LayerNormBackwardCUDAKenrel(
 }
 
 template <typename T>
-__global__ void LayerNormBackwardCUDAKenrel(
+__global__ void LayerNormBackwardCUDAKernel(
     const int M,
     const int N,
     const T* dY,
@@ -219,6 +219,7 @@ void LayerNormOp<CUDAContext>::ComputeSigmaAndFusedParams(
     ComputeSigmaAndFusedParamsCUDAKernel<T>
         <<<M, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
             N, static_cast<T>(eps), mean, var, sigma, scale, bias);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 }
 
@@ -239,12 +240,14 @@ void LayerNormOp<CUDAContext>::LayerNormForward(
       LayerNormForwardCUDAKernel<T>
           <<<K, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
               M, N, X, scale, bias, gamma, beta, Y);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
       CAFFE_ENFORCE(gamma == nullptr);
       CAFFE_ENFORCE(beta == nullptr);
       LayerNormForwardCUDAKernel<T>
           <<<K, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
               M, N, X, scale, bias, Y);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
   }
 }
@@ -267,10 +270,12 @@ void LayerNormGradientOp<CUDAContext>::ComputeInternalGradients(
     ComputeInternalGradientsCUDAKernel<T>
         <<<M, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
             M, N, dYxX, dY, gamma, ds, db);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     ComputeInternalGradientsCUDAKernel<T>
         <<<M, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
             M, N, dYxX, dY, ds, db);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 }
 
@@ -292,6 +297,7 @@ void LayerNormGradientOp<CUDAContext>::ComputeFusedParams(
     ComputeFusedParamsCUDAKernel<T>
         <<<K, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
             M, N, mean, sigma, ds, db, rstd, X_scale, bias, g_scale);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 }
 
@@ -310,13 +316,15 @@ void LayerNormGradientOp<CUDAContext>::LayerNormBackward(
   if (M * N > 0) {
     const int K = math::DivUp(M * N, CAFFE_CUDA_NUM_THREADS);
     if (gamma != nullptr) {
-      LayerNormBackwardCUDAKenrel<T>
+      LayerNormBackwardCUDAKernel<T>
           <<<K, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
               M, N, dY, X, gamma, dY_scale, X_scale, bias, dX);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
-      LayerNormBackwardCUDAKenrel<T>
+      LayerNormBackwardCUDAKernel<T>
           <<<K, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
               M, N, dY, X, dY_scale, X_scale, bias, dX);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
   }
 }

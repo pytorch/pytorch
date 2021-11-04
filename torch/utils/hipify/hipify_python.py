@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """ The Python Hipify script.
 ##
 # Copyright (c) 2015-2016 Advanced Micro Devices, Inc. All rights reserved.
@@ -174,7 +174,7 @@ def preprocess_file_and_save_result(
     result = preprocessor(output_directory, filepath, all_files, includes, stats,
                           hip_clang_launch, is_pytorch_extension, clean_ctx, show_progress)
 
-    fin_path = os.path.join(output_directory, filepath)
+    fin_path = os.path.abspath(os.path.join(output_directory, filepath))
     # Show what happened
     if show_progress:
         print(
@@ -193,7 +193,7 @@ def preprocess(
         show_progress: bool = True,
         hip_clang_launch: bool = False,
         is_pytorch_extension: bool = False,
-        clean_ctx: GeneratedFileCleaner = None) -> HipifyFinalResult:
+        clean_ctx: Optional[GeneratedFileCleaner] = None) -> HipifyFinalResult:
     """
     Call preprocessor on selected files.
 
@@ -459,7 +459,7 @@ def replace_math_functions(input_string):
     return output_string
 
 
-RE_SYNCTHREADS = re.compile(r"[:]?[:]?\b(__syncthreads)\b(\w*\()")
+RE_SYNCTHREADS = re.compile(r":?:?\b(__syncthreads)\b(\w*\()")
 
 
 def hip_header_magic(input_string):
@@ -600,6 +600,11 @@ def is_pytorch_file(filepath):
     return False
 
 
+def is_cusparse_file(filepath):
+    if is_pytorch_file(filepath):
+        return "sparse" in filepath.lower()
+    return False
+
 def is_caffe2_gpu_file(filepath):
     if filepath.startswith("c10/cuda"):
         return True
@@ -673,7 +678,17 @@ class Trie():
 CAFFE2_TRIE = Trie()
 CAFFE2_MAP = {}
 PYTORCH_TRIE = Trie()
-PYTORCH_MAP = {}
+PYTORCH_MAP: Dict[str, object] = {}
+
+# In PyTorch, we map cuBLAS->rocBLAS and cuSPARSE->hipSPARSE. Note the prefix, roc versus hip.
+# The 'hip' APIs offer a more direct CUDA-friendly mapping, but calling rocBLAS directly has better performance.
+# Unfortunately, the roc* types and hip* types differ, i.e., rocblas_float_complex versus hipComplex.
+# In the case of SPARSE, we must use the hip types for complex instead of the roc types,
+# but the pytorch mappings assume roc. Therefore, we create a new SPARSE mapping that has a higher priority.
+# Its mappings will trigger first, and only when a miss occurs will the lower-priority pytorch mapping take place.
+# When a file contains "sparse" in the filename, a mapping marked with API_SPARSE is preferred over other choices.
+PYTORCH_SPARSE_MAP = {}
+
 for mapping in CUDA_TO_HIP_MAPPINGS:
     assert isinstance(mapping, Mapping)
     for src, value in mapping.items():
@@ -681,7 +696,12 @@ for mapping in CUDA_TO_HIP_MAPPINGS:
         meta_data = value[1:]
         if constants.API_CAFFE2 not in meta_data:
             PYTORCH_TRIE.add(src)
-            PYTORCH_MAP[src] = dst
+            # if src is already in PYTORCH_MAP and dst belongs to API_SPARSE
+            # do not overwrite PYTORCH_MAP, store dst separately
+            if constants.API_SPARSE in meta_data and PYTORCH_MAP.get(src, ""):
+                PYTORCH_SPARSE_MAP[src] = dst
+            else:
+                PYTORCH_MAP[src] = dst
         if constants.API_PYTORCH not in meta_data:
             CAFFE2_TRIE.add(src)
             CAFFE2_MAP[src] = dst
@@ -711,7 +731,7 @@ def preprocessor(
         clean_ctx: GeneratedFileCleaner,
         show_progress: bool) -> HipifyResult:
     """ Executes the CUDA -> HIP conversion on the specified file. """
-    fin_path = os.path.join(output_directory, filepath)
+    fin_path = os.path.abspath(os.path.join(output_directory, filepath))
 
     with open(fin_path, 'r', encoding='utf-8') as fin:
         if fin.readline() == HIPIFY_C_BREADCRUMB:
@@ -721,7 +741,7 @@ def preprocessor(
 
     orig_output_source = output_source
 
-    fout_path = os.path.join(output_directory, get_hip_file_path(filepath, is_pytorch_extension))
+    fout_path = os.path.abspath(os.path.join(output_directory, get_hip_file_path(filepath, is_pytorch_extension)))
     if not os.path.exists(os.path.dirname(fout_path)):
         clean_ctx.makedirs(os.path.dirname(fout_path))
 
@@ -729,10 +749,16 @@ def preprocessor(
     def pt_repl(m):
         return PYTORCH_MAP[m.group(0)]
 
+    def pt_sparse_repl(m):
+        # checks SPARSE map first, and if a miss occurs, falls back to pytorch mappings
+        return PYTORCH_SPARSE_MAP.get(m.group(0), pt_repl(m))
+
     if is_pytorch_extension:
         output_source = RE_PYTORCH_PREPROCESSOR.sub(pt_repl, output_source)
     else:
-        if is_pytorch_file(filepath):
+        if is_cusparse_file(filepath):
+            output_source = RE_PYTORCH_PREPROCESSOR.sub(pt_sparse_repl, output_source)
+        elif is_pytorch_file(filepath):
             output_source = RE_PYTORCH_PREPROCESSOR.sub(pt_repl, output_source)
         else:
             def c2_repl(m):
@@ -750,7 +776,6 @@ def preprocessor(
                 or f.startswith("ATen/native/quantized/cuda")
                 or f.startswith("ATen/native/sparse/cuda")
                 or f.startswith("THC/")
-                or f.startswith("THCUNN/")
                 or (f.startswith("THC") and not f.startswith("THCP"))
             ):
                 return templ.format(get_hip_file_path(m.group(1), is_pytorch_extension))
@@ -782,7 +807,9 @@ def preprocessor(
                                                     os.path.relpath(header_filepath, output_directory),
                                                     all_files, includes, stats, hip_clang_launch, is_pytorch_extension,
                                                     clean_ctx, show_progress)
-                return templ.format(os.path.relpath(HIPIFY_FINAL_RESULT[header_filepath]["hipified_path"], header_dir))
+                value = HIPIFY_FINAL_RESULT[header_filepath]["hipified_path"]
+                assert value is not None
+                return templ.format(os.path.relpath(value, header_dir))
 
             return m.group(0)
         return repl
@@ -827,9 +854,14 @@ def preprocessor(
         with open(fout_path, 'r', encoding='utf-8') as fout_old:
             do_write = fout_old.read() != output_source
     if do_write:
-        with clean_ctx.open(fout_path, 'w', encoding='utf-8') as fout:
-            fout.write(output_source)
-        return {"hipified_path": fout_path, "status": "ok"}
+        try:
+            with clean_ctx.open(fout_path, 'w', encoding='utf-8') as fout:
+                fout.write(output_source)
+            return {"hipified_path": fout_path, "status": "ok"}
+        except PermissionError as e:
+            print(f"{bcolors.WARNING}Failed to save {fout_path} with \"{e.strerror}\", leaving {fin_path} unchanged.{bcolors.ENDC}",
+                  file=sys.stderr)
+            return {"hipified_path": fin_path, "status": "skipped"}
     else:
         return {"hipified_path": fout_path, "status": "skipped"}
 
@@ -934,7 +966,7 @@ def hipify(
     show_progress: bool = True,
     hip_clang_launch: bool = False,
     is_pytorch_extension: bool = False,
-    clean_ctx: GeneratedFileCleaner = None
+    clean_ctx: Optional[GeneratedFileCleaner] = None
 ) -> HipifyFinalResult:
     if project_directory == "":
         project_directory = os.getcwd()

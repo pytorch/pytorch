@@ -9,22 +9,39 @@ namespace functional {
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
+
+inline std::string padding_unwrap(enumtype::kValid) {
+  return "valid";
+}
+
+inline std::string padding_unwrap(enumtype::kSame) {
+  return "same";
+}
+
+template<size_t D>
+IntArrayRef padding_unwrap(const ExpandingArray<D>& array) {
+  return array;
+}
+
+
 inline Tensor conv1d(
     const Tensor& input,
     const Tensor& weight,
     const Tensor& bias,
     ExpandingArray<1> stride,
-    ExpandingArray<1> padding,
+    const Conv1dFuncOptions::padding_t& padding,
     ExpandingArray<1> dilation,
     int64_t groups) {
-  return torch::conv1d(
-    input,
-    weight,
-    bias,
-    stride,
-    padding,
-    dilation,
-    groups);
+  return c10::visit([&](const auto & pad) {
+      return torch::conv1d(
+        input,
+        weight,
+        bias,
+        stride,
+        padding_unwrap(pad),
+        dilation,
+        groups);
+    }, padding);
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
@@ -61,17 +78,19 @@ inline Tensor conv2d(
     const Tensor& weight,
     const Tensor& bias,
     ExpandingArray<2> stride,
-    ExpandingArray<2> padding,
+    const Conv2dFuncOptions::padding_t& padding,
     ExpandingArray<2> dilation,
     int64_t groups) {
-  return torch::conv2d(
-    input,
-    weight,
-    bias,
-    stride,
-    padding,
-    dilation,
-    groups);
+  return c10::visit([&](const auto & pad) {
+      return torch::conv2d(
+        input,
+        weight,
+        bias,
+        stride,
+        padding_unwrap(pad),
+        dilation,
+        groups);
+    }, padding);
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
@@ -108,17 +127,19 @@ inline Tensor conv3d(
     const Tensor& weight,
     const Tensor& bias,
     ExpandingArray<3> stride,
-    ExpandingArray<3> padding,
+    const Conv3dFuncOptions::padding_t& padding,
     ExpandingArray<3> dilation,
     int64_t groups) {
-  return torch::conv3d(
-    input,
-    weight,
-    bias,
-    stride,
-    padding,
-    dilation,
-    groups);
+  return c10::visit([&](const auto & pad) {
+      return torch::conv3d(
+        input,
+        weight,
+        bias,
+        stride,
+        padding_unwrap(pad),
+        dilation,
+        groups);
+    }, padding);
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */

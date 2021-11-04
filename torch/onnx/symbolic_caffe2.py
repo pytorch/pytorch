@@ -6,18 +6,18 @@ from inspect import getmembers, isfunction
 
 def register_quantized_ops(domain, version):
     # Register all the non-quantized ops
-    sym_registry.register_version('', version)
+    sym_registry.register_version("", version)
     # Register all quantized ops
-    module = importlib.import_module('torch.onnx.symbolic_caffe2')
-    sym_registry._symbolic_versions['caffe2'] = module
-    quant_version_ops = getmembers(sym_registry._symbolic_versions['caffe2'])
+    module = importlib.import_module("torch.onnx.symbolic_caffe2")
+    sym_registry._symbolic_versions["caffe2"] = module
+    quant_version_ops = getmembers(sym_registry._symbolic_versions["caffe2"])
     for op in quant_version_ops:
         if isfunction(op[1]) and not sym_registry.is_registered_op(op[0], domain, version):
-            aten_q_ops = ['relu', '_empty_affine_quantized', 'dequantize',
-                          'quantize_per_tensor', 'upsample_nearest2d', 'avg_pool2d',
-                          'reshape', 'slice', 'cat', 'max_pool2d', 'sigmoid']
+            aten_q_ops = ["relu", "_empty_affine_quantized", "dequantize",
+                          "quantize_per_tensor", "upsample_nearest2d", "avg_pool2d",
+                          "reshape", "slice", "cat", "max_pool2d", "sigmoid"]
             if op[0] in aten_q_ops:
-                sym_registry.register_op(op[0], op[1], '', version)
+                sym_registry.register_op(op[0], op[1], "", version)
             sym_registry.register_op(op[0], op[1], domain, version)
 
 def _permute_helper(g, input, axes):
@@ -46,7 +46,7 @@ def linear_prepack(g, weight, bias):
     sym_help._quantized_ops.add(output)
     return output
 
-@parse_args('v', 'v', 'v', 'f', 'i')
+@parse_args("v", "v", "v", "f", "i")
 def linear(g, input, weight, bias, scale, zero_point):
     kwargs = {
         "Y_scale_f": scale,
@@ -64,7 +64,7 @@ def conv_prepack(g, input, weight, bias, stride, padding, dilation, groups):
     sym_help._quantized_ops.add(output)
     return output
 
-@parse_args('v', 'v', 'v', 'is', 'is', 'is', 'i', 'f', 'i')
+@parse_args("v", "v", "v", "is", "is", "is", "i", "f", "i")
 def conv2d(g, input, weight, bias, stride, padding, dilation, groups, scale, zero_point):
     kernel_size = weight.node()["shape"][1:3]
     kwargs = {
@@ -81,7 +81,7 @@ def conv2d(g, input, weight, bias, stride, padding, dilation, groups, scale, zer
     sym_help._quantized_ops.add(output)
     return output
 
-@parse_args('v', 'v', 'v', 'is', 'is', 'is', 'i', 'f', 'i')
+@parse_args("v", "v", "v", "is", "is", "is", "i", "f", "i")
 def conv2d_relu(g, input, weight, bias, stride, padding, dilation, groups, scale, zero_point):
     kernel_size = weight.node()["shape"][1:3]
     kwargs = {
@@ -98,7 +98,7 @@ def conv2d_relu(g, input, weight, bias, stride, padding, dilation, groups, scale
     sym_help._quantized_ops.add(output)
     return output
 
-@parse_args('v', 'v', 'f', 'i')
+@parse_args("v", "v", "f", "i")
 def add(g, input_a, input_b, scale, zero_point):
     kwargs = {
         "Y_scale_f": scale,
@@ -108,7 +108,7 @@ def add(g, input_a, input_b, scale, zero_point):
     sym_help._quantized_ops.add(output)
     return output
 
-@parse_args('v')
+@parse_args("v")
 def relu(g, input):
     if input not in sym_help._quantized_ops:
         from torch.onnx.symbolic_opset9 import relu
@@ -121,7 +121,7 @@ def relu(g, input):
     sym_help._quantized_ops.add(output)
     return output
 
-@parse_args('v', 'f', 'i', 't')
+@parse_args("v", "f", "i", "t")
 def quantize_per_tensor(g, input, scale, zero_point, dtype):
     kwargs = {
         "Y_scale_f": scale,
@@ -131,11 +131,11 @@ def quantize_per_tensor(g, input, scale, zero_point, dtype):
     sym_help._quantized_ops.add(output)
     return output
 
-@parse_args('v')
+@parse_args("v")
 def dequantize(g, input):
     return g.op("_caffe2::Int8Dequantize", input)
 
-@parse_args('v', 't', 't', 't', 't', 't', 't', 't')
+@parse_args("v", "t", "t", "t", "t", "t", "t", "t")
 def _empty_affine_quantized(g, input, shape, scale, zero_point, dtype, pin_memory, memory_format, layout):
     return input
 
@@ -144,7 +144,7 @@ def upsample_nearest2d(g, input, output_size, align_corners=None, scales_h=None,
         from torch.onnx.symbolic_opset9 import upsample_nearest2d as upsample_nearest2d_impl
         return upsample_nearest2d_impl(g, input, output_size, align_corners)
 
-    output_size = sym_help._parse_arg(output_size, 'is')
+    output_size = sym_help._parse_arg(output_size, "is")
     kwargs = {
         "output_size_i": output_size,
         "Y_scale_f": input.node()["Y_scale"],
@@ -155,7 +155,7 @@ def upsample_nearest2d(g, input, output_size, align_corners=None, scales_h=None,
     output = nhwc2nchw(g, output)
     sym_help._quantized_ops.add(output)
     return output
-@parse_args('v', 'is', 'is', 'is', 'is', 'i')
+@parse_args("v", "is", "is", "is", "is", "i")
 def max_pool2d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
     if input not in sym_help._quantized_ops:
         from torch.onnx.symbolic_opset9 import max_pool2d
@@ -174,7 +174,7 @@ def max_pool2d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
     sym_help._quantized_ops.add(output)
     return output
 
-@parse_args('v', 'is', 'is', 'is', 'i', 'i', 'none')
+@parse_args("v", "is", "is", "is", "i", "i", "none")
 def avg_pool2d(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override=None):
     if input not in sym_help._quantized_ops:
         from torch.onnx.symbolic_opset9 import avg_pool2d
@@ -206,7 +206,7 @@ def reshape(g, input, shape):
     sym_help._quantized_ops.add(output)
     return output
 
-@parse_args('v', 'v', 'v', 'v', 'i')
+@parse_args("v", "v", "v", "v", "i")
 def slice(g, input, dim, start, end, step):
     if input not in sym_help._quantized_ops:
         from torch.onnx.symbolic_opset9 import slice
@@ -214,9 +214,9 @@ def slice(g, input, dim, start, end, step):
 
     if step != 1:
         raise RuntimeError("ONNX quantized slice export only works for step 1.")
-    start = sym_help._parse_arg(start, 'i')
-    end = sym_help._parse_arg(end, 'i')
-    dim = sym_help._parse_arg(dim, 'i')
+    start = sym_help._parse_arg(start, "i")
+    end = sym_help._parse_arg(end, "i")
+    dim = sym_help._parse_arg(dim, "i")
 
     kwargs = {
         "start_idx_i": start,
@@ -236,7 +236,7 @@ def cat(g, tensor_list, dim, scale=None, zero_point=None):
         from torch.onnx.symbolic_opset9 import cat
         return cat(g, tensor_list, dim)
 
-    dim = sym_help._parse_arg(dim, 'i')
+    dim = sym_help._parse_arg(dim, "i")
     kwargs = {
         "Y_scale_f": tensors[0].node()["Y_scale"],
         "Y_zero_point_i": tensors[0].node()["Y_zero_point"],
@@ -245,7 +245,7 @@ def cat(g, tensor_list, dim, scale=None, zero_point=None):
     sym_help._quantized_ops.add(output)
     return output
 
-@parse_args('v')
+@parse_args("v")
 def sigmoid(g, input):
     if input not in sym_help._quantized_ops:
         from torch.onnx.symbolic_opset9 import sigmoid

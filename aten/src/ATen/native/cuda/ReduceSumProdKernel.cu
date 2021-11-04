@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Reduce.cuh>
 #include <ATen/native/DispatchStub.h>
@@ -31,6 +32,17 @@ struct prod_functor {
     gpu_reduce_kernel<scalar_t, out_t>(
         iter, func_wrapper<out_t>([] GPU_LAMBDA(acc_t a, acc_t b) -> acc_t {
           return a * b;
+        }), 1);
+  }
+};
+
+// Workaround for the error: '*' in boolean context, suggest '&&' instead [-Werror=int-in-bool-context]
+template <>
+struct prod_functor<bool> {
+  void operator()(TensorIterator& iter) {
+    gpu_reduce_kernel<bool, bool>(
+        iter, func_wrapper<bool>([] GPU_LAMBDA(bool a, bool b) -> bool {
+          return a && b;
         }), 1);
   }
 };
@@ -88,7 +100,7 @@ static void nansum_kernel_cuda(TensorIterator& iter) {
 
 static void prod_kernel_cuda(TensorIterator& iter) {
   auto general_dispatcher = [](TensorIterator& iter) {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "prod_cuda", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(ScalarType::Bool, iter.dtype(), "prod_cuda", [&]() {
       prod_functor<scalar_t>{}(iter);
     });
   };

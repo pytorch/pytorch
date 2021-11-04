@@ -37,12 +37,14 @@ inline at::Tensor cdot_pow2(const at::Tensor& bmat) {
 /// All definitions below this point are data. These are constant, and should not be modified
 /// without notice
 
+constexpr int64_t MAXDIM = 21201;
+constexpr int64_t MAXDEG = 18;
 constexpr int64_t MAXBIT = 30;
-constexpr int64_t LARGEST_NUMBER = 1 << 30;
+constexpr int64_t LARGEST_NUMBER = 1 << MAXBIT;
 constexpr float RECIPD = 1.0 / LARGEST_NUMBER;
 
-extern const int64_t poly[1111];
-extern const int64_t initsobolstate[1111][13];
+extern const int64_t poly[MAXDIM];
+extern const int64_t initsobolstate[MAXDIM][MAXDEG];
 
 } // namespace sobol_utils
 } // namespace native

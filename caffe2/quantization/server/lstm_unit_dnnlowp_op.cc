@@ -10,6 +10,7 @@ namespace caffe2 {
 using namespace std;
 using namespace dnnlowp;
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 template <typename T>
 LSTMUnitDNNLowPOp<T>::LSTMUnitDNNLowPOp(
     const OperatorDef& operator_def,
@@ -278,6 +279,7 @@ bool LSTMUnitDNNLowPOp<T>::RunOnDevice() {
   OutputTensorCPU_(HIDDEN_T)->ResizeLike(InputTensorCPU_(CELL_T_M_1));
 
   vector<uint8_t> Ctemp, Htemp;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   uint8_t *Cdata, *Hdata;
   if (dequantize_output_) {
     Ctemp.resize(OutputTensorCPU_(CELL_T)->size());

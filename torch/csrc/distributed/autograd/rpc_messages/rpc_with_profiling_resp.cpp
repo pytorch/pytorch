@@ -12,18 +12,18 @@ constexpr auto kProfileEventsStartIdx = 3;
 // it as a message over the wire.
 RpcWithProfilingResp::RpcWithProfilingResp(
     rpc::MessageType messageType,
-    rpc::Message&& wrappedMessage,
+    c10::intrusive_ptr<rpc::Message> wrappedMessage,
     std::vector<torch::autograd::profiler::LegacyEvent> profiledEvents,
     rpc::ProfilingId profilingId)
     : messageType_(messageType),
       wrappedMessage_(std::move(wrappedMessage)),
       profiledEvents_(std::move(profiledEvents)),
       profilingId_(profilingId) {
-  tensors_ = wrappedMessage_.tensors();
+  tensors_ = wrappedMessage_->tensors();
   TORCH_INTERNAL_ASSERT(
       messageType_ == rpc::MessageType::RUN_WITH_PROFILING_RESP,
       "Incorrect Message type");
-  wrappedMessageType_ = wrappedMessage_.type();
+  wrappedMessageType_ = wrappedMessage_->type();
 }
 // this constructor is called in fromMessage() which is called when
 // reconstructing this RPC command when processing a message of this type
@@ -66,10 +66,10 @@ void RpcWithProfilingResp::setWrappedRpc(
   wrappedRpc_ = std::move(wrappedRpc);
 }
 
-rpc::Message RpcWithProfilingResp::toMessageImpl() && {
-  auto wrappedMsgId = wrappedMessage_.id();
-  auto wrappedMsgType = wrappedMessage_.type();
-  auto wrappedPayload = std::move(wrappedMessage_).movePayload();
+c10::intrusive_ptr<rpc::Message> RpcWithProfilingResp::toMessageImpl() && {
+  auto wrappedMsgId = wrappedMessage_->id();
+  auto wrappedMsgType = wrappedMessage_->type();
+  auto wrappedPayload = std::move(*wrappedMessage_).movePayload();
   // Wrapped payload should not be empty
   TORCH_INTERNAL_ASSERT(
       !wrappedPayload.empty(), "Wrapped payload cannot be empty");
@@ -86,7 +86,7 @@ rpc::Message RpcWithProfilingResp::toMessageImpl() && {
       jit::pickle(c10::ivalue::Tuple::create(std::move(ivalues)), &tensorTable);
   rpc::writeWrappedPayload(wrappedPayload, profilingPayload);
 
-  auto returnMsg = rpc::Message(
+  auto returnMsg = c10::make_intrusive<rpc::Message>(
       std::move(wrappedPayload),
       std::move(tensors_),
       messageType_,
@@ -124,6 +124,7 @@ std::unique_ptr<RpcWithProfilingResp> RpcWithProfilingResp::fromMessage(
   for (int i = kProfileEventsStartIdx;
        i < kProfileEventsStartIdx + profiledEventsSize;
        ++i) {
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     TORCH_CHECK(i < tupleElements.size());
     // Reconstruct remote event from the ivalues.
     torch::autograd::profiler::LegacyEvent fromIvalueEvent =
@@ -131,18 +132,18 @@ std::unique_ptr<RpcWithProfilingResp> RpcWithProfilingResp::fromMessage(
     remoteEvents.push_back(std::move(fromIvalueEvent));
   }
 
-  rpc::Message wrappedMessage(
+  auto wrappedMessage = c10::make_intrusive<rpc::Message>(
       std::move(payload), std::move(tensors), wrappedMsgType, msgId);
   TORCH_INTERNAL_ASSERT(
-      wrappedMessage.isResponse(),
+      wrappedMessage->isResponse(),
       "Messages wrapped with profiling response must be responses.");
   std::unique_ptr<RpcCommandBase> wrappedRpc =
-      deserializeResponse(wrappedMessage, wrappedMsgType);
+      deserializeResponse(*wrappedMessage, wrappedMsgType);
   return std::make_unique<RpcWithProfilingResp>(
       origMsgType,
       std::move(wrappedRpc),
       wrappedMsgType,
-      std::move(wrappedMessage.tensors()),
+      std::move(wrappedMessage->tensors()),
       std::move(remoteEvents),
       profilingId);
 }

@@ -19,7 +19,8 @@ class MomentsOp final : public Operator<Context> {
   explicit MomentsOp(Args&&... args)
       : Operator<Context>(std::forward<Args>(args)...),
         axes_(this->template GetRepeatedArgument<int>("axes")),
-        OP_SINGLE_ARG(bool, "keepdims", keep_dims_, true) {}
+        OP_SINGLE_ARG(bool, "keepdims", keep_dims_, true),
+        OP_SINGLE_ARG(bool, "allow_broadcast_fastpath", allow_broadcast_fastpath_, true) {}
 
   bool RunOnDevice() override {
     const auto& X = Input(0);
@@ -63,13 +64,15 @@ class MomentsOp final : public Operator<Context> {
         X.template data<T>(),
         mean->template mutable_data<T>(),
         var->template mutable_data<T>(),
-        &context_);
+        &context_,
+        allow_broadcast_fastpath_);
     return true;
   }
 
  private:
   std::vector<int> axes_;
   const int keep_dims_;
+  const bool allow_broadcast_fastpath_;
 };
 
 template <typename T, class Context>
@@ -80,7 +83,8 @@ class MomentsGradientOp final : public Operator<Context> {
   template <class... Args>
   explicit MomentsGradientOp(Args&&... args)
       : Operator<Context>(std::forward<Args>(args)...),
-        axes_(this->template GetRepeatedArgument<int>("axes")) {}
+        axes_(this->template GetRepeatedArgument<int>("axes")),
+        OP_SINGLE_ARG(bool, "allow_broadcast_fastpath", allow_broadcast_fastpath_, true) {}
 
   bool RunOnDevice() override {
     const auto& dmean = Input(0);
@@ -127,6 +131,7 @@ class MomentsGradientOp final : public Operator<Context> {
       T* dX_data);
 
   std::vector<int> axes_;
+  const bool allow_broadcast_fastpath_;
 };
 
 } // namespace caffe2

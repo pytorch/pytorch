@@ -16,11 +16,6 @@
 #include <ATen/native/Distributions.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/TensorIterator.h>
-#include <ATen/LegacyTHFunctionsCUDA.h>
-
-#include <THC/THCGeneral.h>
-#include <THC/THCApply.cuh>
-#include <THC/THCDeviceUtils.cuh>
 
 #include <cstdint>
 #include <limits>
@@ -92,7 +87,7 @@ void binomial_cuda_kernel(
 
   at::native::distribution_binary_kernel(iter, philox_args,
       [philox_args] GPU_LAMBDA (curandStatePhilox4_32_10_t& state, scalar_t count, scalar_t prob) {
-        #if defined(__CUDA_ARCH__) || defined(__HIP_PLATFORM_HCC__)
+        #if defined(__CUDA_ARCH__) || defined(USE_ROCM)
         auto uniform_lambda = curand_uniform_wrapper(state);
         BaseSampler<accscalar_t, decltype(uniform_lambda)> standard_uniform(uniform_lambda);
         auto sample = sample_binomial<scalar_t, accscalar_t, decltype(uniform_lambda)>(count, prob, standard_uniform);
@@ -133,7 +128,7 @@ void gamma_cuda_kernel(
         ret_val = (min_value > sample) ? min_value : sample;
       };
   at::cuda::CUDA_tensor_apply2<scalar_t, scalar_t, decltype(functor),
-                               /*max_threads_per_block=*/512,
+                               /*max_threads_per_block=*/256,
                                /*min_blocks_per_sm==*/2>(ret, alpha, functor);
 }
 

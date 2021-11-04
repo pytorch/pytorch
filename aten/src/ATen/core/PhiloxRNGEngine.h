@@ -40,13 +40,13 @@ typedef at::detail::Array<float, 2> FLOAT2;
  * Note that currently this implementation of the philox engine is not used
  * anywhere except for tests in cpu_generator_test.cpp. However, this engine
  * will replace curandStatePhilox4_32_10_t in the future.
- * 
+ *
  * The philox engine takes a seed value, a subsequeunce
  * for starting the generation and an offset for the subsequence.
- * Think of this engine as an algorithm producing a huge array. We are 
- * parallelizing this array by partitioning the huge array and assigning 
- * a thread index to each partition. In other words, each seed value 
- * (there are 2^64 possible seed values) gives a sub array of size 
+ * Think of this engine as an algorithm producing a huge array. We are
+ * parallelizing this array by partitioning the huge array and assigning
+ * a thread index to each partition. In other words, each seed value
+ * (there are 2^64 possible seed values) gives a sub array of size
  * 2^128 (each element in that array is a 128 bit number). Reasoning
  * behind the array being of size 2^128 is, there are 2^64 possible
  * thread index value and there is an array of size 2^64 for each of
@@ -59,9 +59,9 @@ typedef at::detail::Array<float, 2> FLOAT2;
  * seed:        Seed values could be any number from 0 to 2^64-1.
  * subsequence: Subsequence is just the cuda thread indexing with:
  *              - blockIdx.x * blockDim.x + threadIdx.x
- * offset:      The offset variable in PhiloxEngine  decides how many 128-bit 
+ * offset:      The offset variable in PhiloxEngine  decides how many 128-bit
  *              random numbers to skip (i.e. how many groups of 4, 32-bit numbers to skip)
- *              and hence really decides the total number of randoms that can be achieved 
+ *              and hence really decides the total number of randoms that can be achieved
  *              for the given subsequence.
  */
 

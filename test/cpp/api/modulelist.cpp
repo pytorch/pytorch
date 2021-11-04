@@ -28,6 +28,7 @@ TEST_F(ModuleListTest, ConstructsFromConcreteType) {
 
   struct M : torch::nn::Module {
     explicit M(int value_) : value(value_) {}
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     M(const M& other) : torch::nn::Module(other) {
       copy_count++;
     }

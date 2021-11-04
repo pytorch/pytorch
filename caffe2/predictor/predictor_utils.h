@@ -8,18 +8,18 @@
 namespace caffe2 {
 namespace predictor_utils {
 
-CAFFE2_API const NetDef& getNet(const MetaNetDef& def, const std::string& name);
+TORCH_API const NetDef& getNet(const MetaNetDef& def, const std::string& name);
 const ::google::protobuf::RepeatedPtrField<::std::string>& getBlobs(
     const MetaNetDef& def,
     const std::string& name);
 
-CAFFE2_API std::unique_ptr<MetaNetDef> extractMetaNetDef(
+TORCH_API std::unique_ptr<MetaNetDef> extractMetaNetDef(
     db::Cursor* cursor,
     const std::string& key);
 
 // Extract the MetaNetDef from `db`, and run the global init net on the
 // `master` workspace.
-CAFFE2_API std::unique_ptr<MetaNetDef> runGlobalInitialization(
+TORCH_API std::unique_ptr<MetaNetDef> runGlobalInitialization(
     std::unique_ptr<db::DBReader> db,
     Workspace* master);
 

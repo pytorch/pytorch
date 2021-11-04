@@ -10,11 +10,11 @@ namespace at {
 
 class DeprecatedTypeProperties;
 
-struct CAFFE2_API DeprecatedTypePropertiesDeleter {
+struct TORCH_API DeprecatedTypePropertiesDeleter {
   void operator()(DeprecatedTypeProperties * ptr);
 };
 
-class CAFFE2_API DeprecatedTypePropertiesRegistry {
+class TORCH_API DeprecatedTypePropertiesRegistry {
  public:
   DeprecatedTypePropertiesRegistry();
 
@@ -26,6 +26,6 @@ private:
     [static_cast<int>(ScalarType::NumOptions)];
 };
 
-CAFFE2_API DeprecatedTypePropertiesRegistry& globalDeprecatedTypePropertiesRegistry();
+TORCH_API DeprecatedTypePropertiesRegistry& globalDeprecatedTypePropertiesRegistry();
 
 } // namespace at

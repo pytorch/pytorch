@@ -848,6 +848,7 @@ CAFFE2_SPECIALIZED_MAX_POOL_FUNCTOR_FORWARD(float, StorageOrder::NCHW)
 CAFFE2_SPECIALIZED_MAX_POOL_FUNCTOR_FORWARD(float, StorageOrder::NHWC)
 #undef CAFFE2_SPECIALIZED_MAX_POOL_FUNCTOR_FORWARD
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 constexpr char kAveragePoolDoc[] = R"DOC(
 consumes an input blob and applies average pooling across the the blob according
 to kernel sizes, stride sizes, pad lengths and dilation. Average pooling consists
@@ -917,6 +918,7 @@ Y:
 
 )DOC";
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 constexpr char kMaxPoolDoc[] = R"DOC(
 consumes an input blob and applies max pooling across the the blob according to
 kernel sizes, stride sizes, pad lengths and dilation. Max pooling consists of

@@ -1,9 +1,10 @@
 #include <ATen/ATen.h>
+#include <ATen/ceil_div.h>
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/native/BucketizationUtils.h>
 #include <THC/THC.h>
+#include <ATen/native/Resize.h>
 
 namespace at {
 namespace native {
@@ -81,7 +82,7 @@ void searchsorted_cuda_contiguous(Tensor& result, const Tensor& input, const Ten
   int64_t maxThread = at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
   int64_t maxGrid = 1024;
   dim3 block = dim3(std::min(maxThread, numel_in));
-  dim3 grid  = dim3(std::min(maxGrid, cuda::ATenCeilDiv<int64_t>(numel_in, block.x)));
+  dim3 grid  = dim3(std::min(maxGrid, ceil_div<int64_t>(numel_in, block.x)));
   at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();
 
   searchsorted_cuda_kernel<<<grid, block, 0, stream>>>(
@@ -91,12 +92,12 @@ void searchsorted_cuda_contiguous(Tensor& result, const Tensor& input, const Ten
 
 void dispatch(Tensor& result, const Tensor& input, const Tensor& boundaries, bool out_int32, bool right) {
   if (!out_int32) {
-    AT_DISPATCH_ALL_TYPES(input.scalar_type(), "searchsorted_out_cuda", [&] {
+    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, input.scalar_type(), "searchsorted_out_cuda", [&] {
       searchsorted_cuda_contiguous<scalar_t, int64_t>(result, input, boundaries, right);
     });
   }
   else {
-    AT_DISPATCH_ALL_TYPES(input.scalar_type(), "searchsorted_out_cuda", [&] {
+    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, input.scalar_type(), "searchsorted_out_cuda", [&] {
       searchsorted_cuda_contiguous<scalar_t, int>(result, input, boundaries, right);
     });
   }
@@ -104,11 +105,9 @@ void dispatch(Tensor& result, const Tensor& input, const Tensor& boundaries, boo
 
 }
 
-Tensor& searchsorted_out_cuda(Tensor& result, const Tensor& sorted_sequence, const Tensor& self, bool out_int32, bool right) {
+Tensor& searchsorted_out_cuda(const Tensor& sorted_sequence, const Tensor& self, bool out_int32, bool right, Tensor& result) {
   searchsorted_pre_check(sorted_sequence, self, result, out_int32);
-  if (result.numel() == 0) {
-    result.resize_(self.sizes());
-  }
+  at::native::resize_output(result, self.sizes());
   if (self.numel() == 0) {
     return result;
   }
@@ -130,17 +129,22 @@ Tensor searchsorted_cuda(const Tensor& sorted_sequence, const Tensor& self, bool
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
   c10::TensorOptions options = TensorOptions().device(self.options().device()).dtype(scalar_type);
   Tensor result = at::empty({0}, options, MemoryFormat::Contiguous);
-  searchsorted_out_cuda(result, sorted_sequence, self, out_int32, right);
+  at::native::searchsorted_out_cuda(sorted_sequence, self, out_int32, right, result);
   return result;
 }
 
-Tensor searchsorted_cuda(const Tensor& sorted_sequence, Scalar self, bool out_int32, bool right) {
+// See [Note about _torch_cuda_cu_linker_symbol_op and torch_cuda_cu] in native_functions.yaml
+Tensor _torch_cuda_cu_linker_symbol_op_cuda(const Tensor& self) {
+  return self;
+}
+
+Tensor searchsorted_cuda(const Tensor& sorted_sequence, const Scalar& self, bool out_int32, bool right) {
   return searchsorted_cuda(sorted_sequence, searchsorted_scalar_tensor(self, sorted_sequence.device()), out_int32, right);
 }
 
-Tensor& bucketize_out_cuda(Tensor& result, const Tensor& self, const Tensor& boundaries, bool out_int32, bool right) {
+Tensor& bucketize_out_cuda(const Tensor& self, const Tensor& boundaries, bool out_int32, bool right, Tensor& result) {
   TORCH_CHECK(boundaries.dim() == 1, "boundaries tensor must be 1 dimension, but got dim(", boundaries.dim(), ")");
-  searchsorted_out_cuda(result, boundaries, self, out_int32, right);
+  at::native::searchsorted_out_cuda(boundaries, self, out_int32, right, result);
   return result;
 }
 
@@ -148,11 +152,11 @@ Tensor bucketize_cuda(const Tensor& self, const Tensor& boundaries, bool out_int
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
   c10::TensorOptions options = TensorOptions().device(self.options().device()).dtype(scalar_type);
   Tensor result = at::empty({0}, options, MemoryFormat::Contiguous);
-  bucketize_out_cuda(result, self, boundaries, out_int32, right);
+  at::native::bucketize_out_cuda(self, boundaries, out_int32, right, result);
   return result;
 }
 
-Tensor bucketize_cuda(Scalar self, const Tensor& boundaries, bool out_int32, bool right) {
+Tensor bucketize_cuda(const Scalar& self, const Tensor& boundaries, bool out_int32, bool right) {
   return bucketize_cuda(searchsorted_scalar_tensor(self, boundaries.device()), boundaries, out_int32, right);
 }
 

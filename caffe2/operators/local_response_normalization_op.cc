@@ -31,6 +31,7 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   float* padded_square_data = padded_square.template mutable_data<float>();
   math::Set<float, CPUContext>(
       padded_square.numel(), 0., padded_square_data, &context_);
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   const float alpha_over_size = alpha_ / size_;
   // go through the images
   for (int n = 0; n < N; ++n) {
@@ -104,6 +105,7 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   float* padded_square_data = padded_square.template mutable_data<float>();
   math::Set<float, CPUContext>(
       padded_square.numel(), 0., padded_square_data, &context_);
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   const float alpha_over_size = alpha_ / size_;
 
   for (int n = 0; n < num_rows; ++n) {
@@ -161,6 +163,7 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   math::Set<float, CPUContext>(X.numel(), bias_, scale_data, &context_);
   math::Set<float, CPUContext>(
       padded_ratio.numel(), 0., padded_ratio_data, &context_);
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   const float alpha_over_size = alpha_ / size_;
   // go through the images
   for (int n = 0; n < N; ++n) {
@@ -204,6 +207,7 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   Tensor accum_ratio(vector<int64_t>{H, W}, CPU);
   float* accum_ratio_data = accum_ratio.template mutable_data<float>();
 
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   const float cache_ratio = 2. * alpha_ * beta_ / size_;
   const int inverse_pre_pad = size_ - (size_ + 1) / 2;
 
@@ -267,6 +271,7 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   math::Set<float, CPUContext>(X.numel(), bias_, scale_data, &context_);
   math::Set<float, CPUContext>(
       padded_ratio.numel(), 0., padded_ratio_data, &context_);
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   const float alpha_over_size = alpha_ / size_;
 
   for (int n = 0; n < num_rows; ++n) {
@@ -288,6 +293,7 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   math::Set<float, CPUContext>(
       padded_ratio.numel(), 0., padded_ratio_data, &context_);
   // the ratio 2*alpha*beta/size
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   const float cache_ratio = 2. * alpha_ * beta_ / size_;
   const float* Ydata = Y.data<float>();
 

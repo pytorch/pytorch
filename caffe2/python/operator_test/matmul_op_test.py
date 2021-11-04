@@ -9,8 +9,6 @@ import numpy as np
 
 from hypothesis import assume, given, settings
 import hypothesis.strategies as st
-
-from caffe2.proto import caffe2_pb2
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
@@ -62,7 +60,7 @@ class TestMatMul(serial.SerializedTestCase):
         trans_b=st.booleans(),
         **hu.gcs
     )
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_matmul_axis(
         self, M, K, N, axis_a, axis_b, trans_a, trans_b, gc, dc
     ):

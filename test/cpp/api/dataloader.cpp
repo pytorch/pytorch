@@ -29,6 +29,7 @@ struct DummyDataset : datasets::Dataset<DummyDataset, int> {
   explicit DummyDataset(size_t size = 100) : size_(size) {}
 
   int get(size_t index) override {
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     return 1 + index;
   }
   torch::optional<size_t> size() const override {
@@ -72,6 +73,7 @@ struct DummyChunkDataReader
     BatchType batch_data;
     int start_index = chunk_index == 0
         ? 0
+        // NOLINTNEXTLINE(bugprone-fold-init-type)
         : std::accumulate(chunk_sizes, chunk_sizes + chunk_index, 0);
 
     batch_data.resize(chunk_sizes[chunk_index]);
@@ -88,6 +90,7 @@ struct DummyChunkDataReader
   void reset() override{};
 
   const static size_t chunk_count_ = 3;
+  // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-avoid-c-arrays)
   size_t chunk_sizes[chunk_count_] = {10, 5, 20};
 };
 
@@ -613,6 +616,7 @@ struct UnCopyableDataset : public datasets::Dataset<UnCopyableDataset> {
   UnCopyableDataset(UnCopyableDataset&&) = default;
   UnCopyableDataset& operator=(UnCopyableDataset&&) = default;
 
+  // NOLINTNEXTLINE(modernize-use-override)
   ~UnCopyableDataset() = default;
 
   Example<> get(size_t index) override {
@@ -746,6 +750,7 @@ struct UncopyableDataset : datasets::Dataset<UncopyableDataset, int> {
   UncopyableDataset& operator=(const UncopyableDataset&) = delete;
 
   int get(size_t index) override {
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     return 1 + index;
   }
   torch::optional<size_t> size() const override {
@@ -924,7 +929,7 @@ TEST(DataTest, CanSaveAndLoadDistributedRandomSampler) {
   }
   {
     samplers::DistributedRandomSampler a(10);
-    a.set_epoch(3); 
+    a.set_epoch(3);
     std::stringstream stream;
     torch::save(a, stream);
 
@@ -1046,9 +1051,11 @@ TEST(DataLoaderTest, MakeDataLoaderDefaultsAsExpected) {
 }
 
 struct UnsizedDataset : public datasets::Dataset<UnsizedDataset> {
+  // NOLINTNEXTLINE(cppcoreguidelines-explicit--functions,modernize-use-override)
   torch::data::Example<> get(size_t i) {
     return {torch::ones(i), torch::ones(i)};
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-explicit--functions,modernize-use-override)
   torch::optional<size_t> size() const noexcept {
     return torch::nullopt;
   }
@@ -1125,6 +1132,7 @@ TEST(DataLoaderTest, CanDereferenceIteratorMultipleTimes) {
   auto data_loader =
       torch::data::make_data_loader<torch::data::samplers::SequentialSampler>(
           dataset,
+          // NOLINTNEXTLINE(bugprone-argument-comment)
           /*batch_size=*/1);
   auto iterator = data_loader->begin();
   std::vector<int> expected = {1};
@@ -1143,6 +1151,7 @@ TEST(DataLoaderTest, CanDereferenceIteratorMultipleTimes) {
 TEST(DataLoaderTest, CanUseIteratorAlgorithms) {
   struct D : datasets::BatchDataset<D, int> {
     int get_batch(torch::ArrayRef<size_t> indices) override {
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       return 1 + indices.front();
     }
     torch::optional<size_t> size() const override {
@@ -1178,6 +1187,7 @@ TEST(DataLoaderTest, IncrementingExhaustedValidIteratorThrows) {
   auto data_loader =
       torch::data::make_data_loader(dataset, dataset.size().value());
   auto i = data_loader->begin();
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_NO_THROW(++i);
   ASSERT_THROWS_WITH(++i, "Attempted to increment iterator past the end");
 }
@@ -1187,6 +1197,7 @@ TEST(DataLoaderTest, DereferencingExhaustedValidIteratorThrows) {
   auto data_loader =
       torch::data::make_data_loader(dataset, dataset.size().value());
   auto i = data_loader->begin();
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_NO_THROW(++i);
   ASSERT_THROWS_WITH(
       *i, "Attempted to dereference iterator that was past the end");
@@ -1450,6 +1461,7 @@ TEST(DataLoaderTest, TestExceptionsArePropagatedFromWorkers) {
         e.what(),
         std::string("Caught exception in DataLoader worker thread. "
                     "Original message: badness"));
+    // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
     ASSERT_THROW(
         std::rethrow_exception(e.original_exception), std::invalid_argument);
   }
@@ -1625,12 +1637,15 @@ TEST(DataLoaderTest, StatefulDatasetWithCollate) {
 // verifies the return batches size and content when the order is deterministic.
 TEST(DataLoaderTest, ChunkDataSetGetBatch) {
   // different prefetch count for testing.
+  // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   const size_t prefetch_counts[] = {1, 2, 3, 4};
 
   // different batch size for testing.
+  // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   const size_t batch_sizes[] = {5, 7};
 
   // test with/without worker threads
+  // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   const size_t dataloader_worker_counts[] = {0, 2};
 
   const size_t total_example_count = 35;
@@ -1784,6 +1799,7 @@ TEST(DataLoaderTest, ChunkDataSetGetBatchWithUnevenBatchSize) {
     void reset() override{};
   };
 
+  // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   const size_t batch_sizes[] = {17, 30};
   D data_reader;
   samplers::SequentialSampler sampler(0);
@@ -1936,6 +1952,7 @@ TEST(DataLoaderTest, ChunkDatasetSave) {
   DummyTestChunkDataReader data_reader;
 
   // tested save_intervals
+  // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   const size_t save_intervals[] = {1, 2};
 
   using datasets::ChunkDatasetOptions;
@@ -2162,7 +2179,9 @@ TEST(DataLoaderTest, ChunkDatasetCrossChunkShuffle) {
 
   const size_t prefetch_count = 1;
   const size_t cache_size = 10;
+  // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   const size_t cross_chunk_shuffle_counts[] = {2, 3};
+  // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   const size_t chunk_counts[] = {3, 4, 5};
 
   samplers::SequentialSampler chunk_sampler(0);
@@ -2234,6 +2253,7 @@ TEST(DataLoaderTest, CustomPreprocessPolicy) {
 
     BatchType read_chunk(size_t chunk_index) override {
       BatchType batch_data(chunk_size);
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,clang-analyzer-security.insecureAPI.rand)
       auto rand_gen = []() { return std::rand() % 100; };
       std::generate(batch_data.begin(), batch_data.end(), rand_gen);
       return batch_data;
@@ -2256,7 +2276,9 @@ TEST(DataLoaderTest, CustomPreprocessPolicy) {
 
   const size_t prefetch_count = 1;
   const size_t cache_size = 10;
+  // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   const size_t cross_chunk_shuffle_counts[] = {1, 2};
+  // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   const size_t chunk_counts[] = {3, 4};
 
   samplers::SequentialSampler chunk_sampler(0);

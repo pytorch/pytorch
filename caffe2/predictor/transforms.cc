@@ -1,4 +1,4 @@
-#include "caffe2/caffe2/fb/predictor/Transforms.h"
+#include "caffe2/predictor/transforms.h"
 #include "caffe2/onnx/onnx_exporter.h"
 #include "caffe2/utils/proto_utils.h"
 

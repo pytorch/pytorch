@@ -14,6 +14,21 @@ struct ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
   GraphExecutorState getDebugState() override;
   ~ProfilingGraphExecutorImpl() override = default;
 
+  void debugFlushCompilationCache() {
+    std::lock_guard<std::mutex> lock(compile_mutex);
+    pr_.reset();
+    fallback_plan_.reset();
+    profiling_plan_.reset();
+    optimized_plan_.reset();
+    // prevent memory leaks
+    fallback_functions_.clear();
+    remaining_bailout_depth_.reset();
+  }
+
+  bool isOptimized() const override {
+    return optimized_plan_.has_value();
+  }
+
  private:
   const ExecutionPlan& getOptimizedPlanFor(
       Stack& stack,

@@ -3,6 +3,8 @@
 
 #include "caffe2/operators/string_ops.h"
 
+#include <c10/util/irange.h>
+
 namespace caffe2 {
 
 class StringJoinOpTest : public testing::Test {
@@ -33,6 +35,7 @@ class StringJoinOpTest : public testing::Test {
   }
 
  protected:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   Workspace ws_;
 };
 
@@ -43,7 +46,8 @@ TEST_F(StringJoinOpTest, testString1DJoin) {
   auto* tensor = BlobGetMutableTensor(blob.get(), CPU);
   tensor->Resize(input.size());
   auto* data = tensor->template mutable_data<std::string>();
-  for (int i = 0; i < input.size(); ++i) {
+  for (const auto i : c10::irange(input.size())) {
+    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
     *data++ = input[i];
   }
 
@@ -63,8 +67,9 @@ TEST_F(StringJoinOpTest, testString2DJoin) {
   auto* tensor = BlobGetMutableTensor(blob.get(), CPU);
   tensor->Resize(input.size(), input[0].size());
   auto* data = tensor->template mutable_data<std::string>();
-  for (int i = 0; i < input.size(); ++i) {
-    for (int j = 0; j < input[0].size(); ++j) {
+  for (const auto i : c10::irange(input.size())) {
+    for (const auto j : c10::irange(input[0].size())) {
+      // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
       *data++ = input[i][j];
     }
   }
@@ -83,7 +88,8 @@ TEST_F(StringJoinOpTest, testFloat1DJoin) {
   auto* tensor = BlobGetMutableTensor(blob.get(), CPU);
   tensor->Resize(input.size());
   auto* data = tensor->template mutable_data<float>();
-  for (int i = 0; i < input.size(); ++i) {
+  for (const auto i : c10::irange(input.size())) {
+    // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
     *data++ = input[i];
   }
 
@@ -103,8 +109,9 @@ TEST_F(StringJoinOpTest, testFloat2DJoin) {
   auto* tensor = BlobGetMutableTensor(blob.get(), CPU);
   tensor->Resize(input.size(), input[0].size());
   auto* data = tensor->template mutable_data<float>();
-  for (int i = 0; i < input.size(); ++i) {
-    for (int j = 0; j < input[0].size(); ++j) {
+  for (const auto i : c10::irange(input.size())) {
+    for (const auto j : c10::irange(input[0].size())) {
+      // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
       *data++ = input[i][j];
     }
   }
@@ -123,8 +130,9 @@ TEST_F(StringJoinOpTest, testLong2DJoin) {
   auto* tensor = BlobGetMutableTensor(blob.get(), CPU);
   tensor->Resize(input.size(), input[0].size());
   auto* data = tensor->template mutable_data<int64_t>();
-  for (int i = 0; i < input.size(); ++i) {
-    for (int j = 0; j < input[0].size(); ++j) {
+  for (const auto i : c10::irange(input.size())) {
+    for (const auto j : c10::irange(input[0].size())) {
+      // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
       *data++ = input[i][j];
     }
   }

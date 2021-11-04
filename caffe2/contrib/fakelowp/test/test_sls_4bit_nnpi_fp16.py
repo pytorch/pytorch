@@ -122,10 +122,10 @@ class SparseLengthsSum4BitFakeNNPIFp16Test(serial.SerializedTestCase):
         data = data * 1e-3
 
         lengths = np.random.choice(np.arange(1, num_rows), batch_size).astype(np.int32)
-        indices = []
+        _indices = []
         for length in lengths:
-            indices.extend(np.random.choice(np.arange(1, num_rows), length))
-        indices = np.asarray(indices).astype(np.int64)
+            _indices.extend(np.random.choice(np.arange(1, num_rows), length))
+        indices = np.asarray(_indices).astype(np.int64)
 
         weights = np.random.uniform(
             low=0,

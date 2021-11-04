@@ -4,6 +4,7 @@
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/cross_entropy_op.h"
 #include "caffe2/operators/operator_fallback_gpu.h"
+#include "caffe2/utils/cub_namespace.cuh"
 
 namespace caffe2 {
 
@@ -54,6 +55,8 @@ bool LabelCrossEntropyOp<float, CUDAContext>::RunOnDevice() {
       label.data<int>(),
       kLOG_THRESHOLD(),
       Y->template mutable_data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 
@@ -91,6 +94,8 @@ bool LabelCrossEntropyGradientOp<float, CUDAContext>::RunOnDevice() {
       dY.data<float>(),
       kLOG_THRESHOLD(),
       dX->template mutable_data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 
@@ -124,6 +129,8 @@ bool MakeTwoClassOp<float, CUDAContext>::RunOnDevice() {
       0,
       context_.cuda_stream()>>>(
       N, X.data<float>(), Y->template mutable_data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 
@@ -143,6 +150,8 @@ bool MakeTwoClassGradientOp<float, CUDAContext>::RunOnDevice() {
       0,
       context_.cuda_stream()>>>(
       N, dY.data<float>(), dX->template mutable_data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 
@@ -274,6 +283,8 @@ bool SigmoidCrossEntropyWithLogitsOp<float, CUDAContext>::RunOnDevice() {
       logits_ptr,
       targets_ptr,
       out_ptr);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 
@@ -308,6 +319,8 @@ bool SigmoidCrossEntropyWithLogitsGradientOp<float, CUDAContext>::
       logits_ptr,
       targets_ptr,
       out_ptr);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 
@@ -384,6 +397,8 @@ bool WeightedSigmoidCrossEntropyWithLogitsOp<float, CUDAContext>::
       0,
       context_.cuda_stream()>>>(
       outer_size, inner_size, logits_ptr, targets_ptr, weights_ptr, out_ptr);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 
@@ -420,6 +435,8 @@ bool WeightedSigmoidCrossEntropyWithLogitsGradientOp<float, CUDAContext>::
       targets_ptr,
       weights_ptr,
       out_ptr);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 

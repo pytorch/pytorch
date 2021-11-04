@@ -10,11 +10,11 @@ class LlvmCoverageSegment(NamedTuple):
     is_gap_entry: Optional[int]
 
     @property
-    def has_coverage(self):
+    def has_coverage(self) -> bool:
         return self.segment_count > 0
 
     @property
-    def is_executable(self):
+    def is_executable(self) -> bool:
         return self.has_count > 0
 
     def get_coverage(
@@ -34,8 +34,8 @@ class LlvmCoverageSegment(NamedTuple):
 
 def parse_segments(raw_segments: List[List[int]]) -> List[LlvmCoverageSegment]:
     """
-        Creates LlvmCoverageSegment from a list of lists in llvm export json.
-        each segment is represented by 5-element array.
+    Creates LlvmCoverageSegment from a list of lists in llvm export json.
+    each segment is represented by 5-element array.
     """
     ret: List[LlvmCoverageSegment] = []
     for raw_segment in raw_segments:

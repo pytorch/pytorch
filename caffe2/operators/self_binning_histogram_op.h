@@ -84,7 +84,7 @@ class SelfBinningHistogramOp final : public Operator<Context> {
       return true;
     }
 
-    CAFFE_ENFORCE(min <= max, "Incorrect min-max computation");
+    CAFFE_ENFORCE(min <= max, "Incorrect min-max computation min=", min, " max=", max);
     T scaled_max = 0;  // this is set in both branches
     if (bin_spacing_ == "linear") {
       // Let's scale the range so that the last count is 0.

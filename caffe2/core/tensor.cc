@@ -14,6 +14,7 @@ namespace caffe2 {
 CAFFE_KNOWN_TYPE(Tensor);
 
 TensorPrinter::TensorPrinter(
+    // NOLINTNEXTLINE(modernize-pass-by-value)
     const std::string& tensor_name,
     const std::string& file_name,
     int limit)
@@ -23,6 +24,7 @@ TensorPrinter::TensorPrinter(
   if (to_file_) {
     // We will output to file instead of printing on screen.
     // We will write each individual tensor to its individual file.
+    // NOLINTNEXTLINE(modernize-make-unique)
     log_file_.reset(new std::ofstream(
         file_name, std::ofstream::out | std::ofstream::trunc));
     CAFFE_ENFORCE(
@@ -34,6 +36,7 @@ TensorPrinter::TensorPrinter(
   }
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 TensorPrinter::~TensorPrinter() {
   if (log_file_.get()) {
     log_file_->close();
@@ -95,6 +98,7 @@ GetTensorInfo(const void* c, size_t* capacity, DeviceOption* device) {
   CHECK(capacity);
   const Tensor* tc = static_cast<const Tensor*>(c);
   CHECK(tc);
+  // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
   CHECK(tc->unsafeGetTensorImpl());
   CHECK(tc->unsafeGetTensorImpl()->storage().unsafeGetStorageImpl());
   *capacity = tc->storage().nbytes();
@@ -295,7 +299,7 @@ void Tensor::CopyFrom(const Tensor& src, bool async) {
 
 #if defined(EXPOSE_C2_OPS) || \
     !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
-Tensor::Tensor(at::Tensor tensor) : impl_(std::move(tensor.impl_)) {
+Tensor::Tensor(at::Tensor tensor) : impl_(tensor.unsafeReleaseIntrusivePtr()) {
   enforce_invariants();
 }
 

@@ -30,7 +30,6 @@
 
 #include <type_traits>
 
-#include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/core/Array.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
@@ -134,7 +133,7 @@ static void launch_kernel(int64_t N, const func_t& f) {
   dim3 grid((N + block.x * vt - 1) / (block.x * vt));
   auto stream = at::cuda::getCurrentCUDAStream();
   elementwise_kernel<nt, vt, func_t><<<grid, block, 0, stream>>>(N, f);
-  AT_CUDA_CHECK(cudaGetLastError());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <typename traits, typename func_t, typename index_t, size_t... INDEX>
@@ -296,7 +295,7 @@ static void launch_kernel(int64_t N, const func_t& f, array_t data) {
   int64_t grid = (N + block_work_size - 1) / block_work_size;
   auto stream = at::cuda::getCurrentCUDAStream();
   elementwise_kernel<func_t, array_t><<<grid, num_threads, 0, stream>>>(N, f, data);
-  AT_CUDA_CHECK(cudaGetLastError());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template<typename func_t, typename array_t, std::enable_if_t<!detail::has_same_arg_types<func_t>::value, int> = 0>
@@ -322,7 +321,7 @@ void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f) {
 
   at::detail::Array<ScalarType, ntensors> dtypes;
   for (int i = 0; i < ntensors; i++) {
-    dtypes[i] = iter.tensor(i).scalar_type();
+    dtypes[i] = iter.dtype(i);
   }
 
   int64_t numel = iter.numel();

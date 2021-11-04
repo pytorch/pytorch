@@ -10,6 +10,7 @@
 #include <torch/csrc/utils/python_strings.h>
 
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 #include <sstream>
 
@@ -74,7 +75,8 @@ std::pair<std::shared_ptr<Graph>, Stack> createGraphByTracing(
     const py::function& var_name_lookup_fn,
     bool strict,
     bool force_outplace,
-    Module* self) {
+    Module* self,
+    const std::vector<std::string>& argument_names) {
   C10_LOG_API_USAGE_ONCE("torch.tracer");
 
   auto lookup_fn_adapter =
@@ -88,7 +90,7 @@ std::pair<std::shared_ptr<Graph>, Stack> createGraphByTracing(
       [&func](Stack inputs) -> Stack {
         size_t num_func_inputs = inputs.size();
         py::tuple py_inputs(num_func_inputs);
-        for (size_t i = 0; i < num_func_inputs; ++i) {
+        for (const auto i : c10::irange(num_func_inputs)) {
           py_inputs[i] = py::cast(inputs[i]);
         }
         auto out = func(*py_inputs);
@@ -102,7 +104,8 @@ std::pair<std::shared_ptr<Graph>, Stack> createGraphByTracing(
       lookup_fn_adapter,
       strict,
       force_outplace,
-      self);
+      self,
+      argument_names);
   return std::make_pair(std::get<0>(outs)->graph, std::get<1>(outs));
 }
 
@@ -190,7 +193,8 @@ void initPythonTracerBindings(PyObject* module) {
       py::arg("var_name_lookup_fn"),
       py::arg("strict"),
       py::arg("force_outplace"),
-      py::arg("self") = nullptr);
+      py::arg("self") = nullptr,
+      py::arg("argument_names") = std::vector<std::string>());
   m.def("_get_tracing_state", []() { return getTracingState(); });
   m.def("_set_tracing_state", [](std::shared_ptr<TracingState> state) {
     return setTracingState(std::move(state));

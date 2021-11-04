@@ -1,0 +1,8 @@
+self-hosted-runner:
+  labels:
+    - linux.2xlarge
+    - linux.8xlarge.nvidia.gpu
+    - linux.16xlarge.nvidia.gpu
+    - windows.4xlarge
+    - windows.8xlarge.nvidia.gpu
+    - bm-runner

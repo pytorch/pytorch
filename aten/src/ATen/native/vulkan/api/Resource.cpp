@@ -57,8 +57,11 @@ VmaAllocationCreateInfo create_allocation_create_info(
     0u,
     VK_NULL_HANDLE,
     nullptr,
+    0.5f,
   };
 }
+
+} // namespace
 
 void release_buffer(const Resource::Buffer& buffer) {
   // Safe to pass null as buffer or allocation.
@@ -83,8 +86,6 @@ void release_image(const Resource::Image& image) {
       image.object.handle,
       image.memory.allocation);
 }
-
-} // namespace
 
 void* map(
     const Resource::Memory& memory,
@@ -192,6 +193,11 @@ VkFence Resource::Fence::handle(const bool add_to_waitlist) const {
       "Invalid Vulkan fence!");
 
   const VkFence fence = pool->fence_.pool[id].get();
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      fence,
+      "Invalid Vulkan fence!");
+
   if (add_to_waitlist) {
     pool->fence_.waitlist.push_back(fence);
   }
@@ -360,14 +366,13 @@ Resource::Pool::Pool(
   : device_(gpu.device),
     allocator_(
         create_allocator(
-          gpu.adapter->runtime->instance(),
-          gpu.adapter->handle,
-          device_),
+            gpu.adapter->runtime->instance(),
+            gpu.adapter->handle,
+            device_),
         vmaDestroyAllocator),
     memory_{
       std::move(policy),
     },
-    buffer_{},
     image_{
       .sampler = Image::Sampler{gpu},
     },
@@ -377,23 +382,6 @@ Resource::Pool::Pool(
   fence_.pool.reserve(Configuration::kReserve);
 }
 
-Resource::Pool::~Pool() {
-  try {
-    if (device_ && allocator_) {
-      purge();
-    }
-  }
-  catch (const std::exception& e) {
-    LOG(WARNING)
-        << "Vulkan: Resource pool destructor raised an exception!  Error: "
-        << e.what();
-  }
-  catch (...) {
-    LOG(WARNING)
-        << "Vulkan: Resource pool destructor raised an unknown exception!";
-  }
-}
-
 Resource::Pool::Pool(Pool&& pool)
   : device_(std::move(pool.device_)),
     allocator_(std::move(pool.allocator_)),
@@ -401,7 +389,7 @@ Resource::Pool::Pool(Pool&& pool)
     buffer_(std::move(pool.buffer_)),
     image_(std::move(pool.image_)),
     fence_(std::move(pool.fence_)) {
-  pool.device_ = VK_NULL_HANDLE;
+  pool.invalidate();
 }
 
 Resource::Pool& Resource::Pool::operator=(Pool&& pool) {
@@ -413,13 +401,31 @@ Resource::Pool& Resource::Pool::operator=(Pool&& pool) {
     image_ = std::move(pool.image_);
     fence_ = std::move(pool.fence_);
 
-    pool.device_ = VK_NULL_HANDLE;
+    pool.invalidate();
   };
 
   return *this;
 }
 
-Resource::Buffer Resource::Pool::buffer(
+Resource::Pool::~Pool() {
+  try {
+    if (device_ && allocator_) {
+      purge();
+    }
+  }
+  catch (const std::exception& e) {
+    TORCH_WARN(
+        "Vulkan: Resource pool destructor raised an exception! Error: ",
+        e.what());
+  }
+  catch (...) {
+    TORCH_WARN(
+        "Vulkan: Resource pool destructor raised an exception! "
+        "Error: Unknown");
+  }
+}
+
+Resource::Buffer Resource::Pool::create_buffer(
     const Buffer::Descriptor& descriptor) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       device_ && allocator_,
@@ -481,24 +487,24 @@ Resource::Buffer Resource::Pool::buffer(
       allocation,
       buffer));
 
-  buffer_.pool.emplace_back(
-      Buffer{
-        Buffer::Object{
-          buffer,
-          0u,
-          descriptor.size,
-        },
-        Memory{
-          allocator_.get(),
-          allocation,
-        },
-      },
-      &release_buffer);
-
-  return buffer_.pool.back().get();
+  return Buffer{
+    Buffer::Object{
+      buffer,
+      0u,
+      descriptor.size,
+    },
+    Memory{
+      allocator_.get(),
+      allocation,
+    },
+  };
 }
 
-Resource::Image Resource::Pool::image(
+void Resource::Pool::register_buffer_cleanup(const Resource::Buffer& buffer) {
+  buffer_.pool.emplace_back(buffer, &release_buffer);
+}
+
+Resource::Image Resource::Pool::create_image(
     const Image::Descriptor& descriptor) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       device_ && allocator_,
@@ -600,22 +606,22 @@ Resource::Image Resource::Pool::image(
       view,
       "Invalid Vulkan image view!");
 
-  image_.pool.emplace_back(
-      Image{
-        Image::Object{
-          image,
-          VK_IMAGE_LAYOUT_UNDEFINED,
-          view,
-          image_.sampler.cache.retrieve(descriptor.sampler),
-        },
-        Memory{
-          allocator_.get(),
-          allocation,
-        },
-      },
-      &release_image);
+  return Image{
+    Image::Object{
+      image,
+      VK_IMAGE_LAYOUT_UNDEFINED,
+      view,
+      image_.sampler.cache.retrieve(descriptor.sampler),
+    },
+    Memory{
+      allocator_.get(),
+      allocation,
+    },
+  };
+}
 
-  return image_.pool.back().get();
+void Resource::Pool::register_image_cleanup(const Resource::Image& image) {
+  image_.pool.emplace_back(image, &release_image);
 }
 
 Resource::Fence Resource::Pool::fence() {
@@ -676,6 +682,11 @@ void Resource::Pool::purge() {
   fence_.in_use = 0u;
   image_.pool.clear();
   buffer_.pool.clear();
+}
+
+void Resource::Pool::invalidate() {
+  device_ = VK_NULL_HANDLE;
+  allocator_.reset();
 }
 
 } // namespace api

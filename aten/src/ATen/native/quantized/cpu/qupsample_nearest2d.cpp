@@ -3,6 +3,9 @@
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <ATen/quantized/Quantizer.h>
+
+#include <c10/util/irange.h>
+
 #include <cstring>
 
 
@@ -26,6 +29,9 @@ static void upsample_nearest2d_out_frame(
   float width_scale = compute_scales_value<float>(scales_w, input_width, output_width);
 
   channels = channels * nbatch;
+  if (channels == 0 || output_height == 0 || output_width == 0) {
+    return;
+  }
   auto* i_p = reinterpret_cast<typename scalar_t::underlying*>(idata);
   auto* o_p = reinterpret_cast<typename scalar_t::underlying*>(odata);
 
@@ -70,7 +76,7 @@ static void upsample_nearest2d_out_frame_nhwc(
   float height_scale = compute_scales_value<float>(scales_h, input_height, output_height);
   float width_scale = compute_scales_value<float>(scales_w, input_width, output_width);
 
-  for (int b = 0; b < nbatch; b++) {
+  for (const auto b : c10::irange(nbatch)) {
     auto* i_p = reinterpret_cast<typename scalar_t::underlying*>(idata + b * input_height * input_width * channels);
     auto* o_p = reinterpret_cast<typename scalar_t::underlying*>(odata + b * output_height * output_width * channels);
     // special case: just copy

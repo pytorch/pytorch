@@ -1,10 +1,10 @@
 #pragma once
 
 #include <c10/core/Backend.h>
-#include <c10/util/Exception.h>
 #include <c10/util/ArrayRef.h>
+#include <c10/util/Exception.h>
 
-#include <iostream>
+#include <ostream>
 
 // Memory format is not the property of a Tensor. It is the way to tell an
 // operator how the result should be organized in memory and nothing more. That
@@ -17,14 +17,20 @@
 //    should be in channels_last format
 //
 //  Contiguous:
-//    Regardless of input tensors format, the output should be contiguous Tensor.
+//    Regardless of input tensors format, the output should be contiguous
+//    Tensor.
 //
 //  ChannelsLast:
-//    Regardless of input tensors format, the output should be in channels_last format.
-
+//    Regardless of input tensors format, the output should be in channels_last
+//    format.
 
 namespace c10 {
-enum class MemoryFormat : int8_t { Contiguous, Preserve, ChannelsLast, ChannelsLast3d };
+enum class MemoryFormat : int8_t {
+  Contiguous,
+  Preserve,
+  ChannelsLast,
+  ChannelsLast3d
+};
 
 // If you are seeing this, it means that this call site was not checked if
 // the memory format could be preserved, and it was switched to old default
@@ -48,11 +54,12 @@ inline std::ostream& operator<<(
     case MemoryFormat::ChannelsLast3d:
       return stream << "ChannelsLast3d";
     default:
-      AT_ERROR("Unknown memory format");
+      TORCH_CHECK(false, "Unknown memory format");
   }
 }
 
-// Note: Hardcoded the channel last stride indices here to get better performance
+// Note: Hardcoded the channel last stride indices here to get better
+// performance
 inline std::vector<int64_t> get_channels_last_strides_2d(IntArrayRef sizes) {
   std::vector<int64_t> strides(sizes.size());
   switch (sizes.size()) {
@@ -68,7 +75,8 @@ inline std::vector<int64_t> get_channels_last_strides_2d(IntArrayRef sizes) {
       strides[1] = strides[2] * sizes[2];
       return strides;
     default:
-      TORCH_INTERNAL_ASSERT(false, "ChannelsLast2d doesn't support size ", sizes.size());
+      TORCH_INTERNAL_ASSERT(
+          false, "ChannelsLast2d doesn't support size ", sizes.size());
   }
 }
 
@@ -89,7 +97,8 @@ inline std::vector<int64_t> get_channels_last_strides_3d(IntArrayRef sizes) {
       strides[1] = strides[2] * sizes[2];
       return strides;
     default:
-      TORCH_INTERNAL_ASSERT(false, "ChannelsLast3d doesn't support size ", sizes.size());
+      TORCH_INTERNAL_ASSERT(
+          false, "ChannelsLast3d doesn't support size ", sizes.size());
   }
 }
 
@@ -98,14 +107,18 @@ inline std::vector<int64_t> get_channels_last_strides_3d(IntArrayRef sizes) {
 // 1. Please do not combine these helper functions, each helper function handles
 // exactly one case of sizes + memory_format, by doing this, the strides indices
 // will be a constant array and we can access it using constant index number,
-// the complier will fully unroll the loop on strides indices to gain a better
+// the compiler will fully unroll the loop on strides indices to gain a better
 // performance.
-// 2. No error check in helper function, caller ensures the correctness of the input
-// 3. All helper functions have similar comments, only 1st helper function is commented here.
-inline bool is_channels_last_strides_2d_s4(const IntArrayRef sizes, const IntArrayRef strides) {
+// 2. No error check in helper function, caller ensures the correctness of the
+// input
+// 3. All helper functions have similar comments, only 1st helper function is
+// commented here.
+inline bool is_channels_last_strides_2d_s4(
+    const IntArrayRef sizes,
+    const IntArrayRef strides) {
   int64_t min = 0;
   // special case for trivial C dimension. default to NCHW
-  if (strides[1]==0) {
+  if (strides[1] == 0) {
     return false;
   }
   // loop strides indices
@@ -121,8 +134,9 @@ inline bool is_channels_last_strides_2d_s4(const IntArrayRef sizes, const IntArr
     // N111 tensor with identical strides for size 1 dimension;
     // Two cases could lead us here:
     // a. N111 contiguous Tensor ([N,1,1,1]@[1,1,1,1])
-    // b. N11W contiguous Tensor sliced on the W-dimension. ([N,1,1,1]@[W,W,W,W])
-    if (d==0 && min==strides[1]) {
+    // b. N11W contiguous Tensor sliced on the W-dimension.
+    // ([N,1,1,1]@[W,W,W,W])
+    if (d == 0 && min == strides[1]) {
       return false;
     }
     // This is necessary to:
@@ -140,7 +154,9 @@ inline bool is_channels_last_strides_2d_s4(const IntArrayRef sizes, const IntArr
   return true;
 }
 
-inline bool is_channels_last_strides_3d_s5(const IntArrayRef sizes, const IntArrayRef strides) {
+inline bool is_channels_last_strides_3d_s5(
+    const IntArrayRef sizes,
+    const IntArrayRef strides) {
   int64_t min = 0;
   if (strides[1] == 0) {
     return false;
@@ -205,14 +221,17 @@ inline bool is_channels_last_strides_3d_s5(const IntArrayRef sizes, const IntArr
 //   a. we identify corner cases where the implementation compromises on.
 //
 // By the time accumulated permutation is enabled to replace implicit
-// memory_foramt through strides, we should be updating our tests and fix the
+// memory_format through strides, we should be updating our tests and fix the
 // issues in our tests.
 //
 // We use Channels Last 2d as an example above.
-// This is a general problem for all the is_channels_last_strides_xd implementation.
-// Please check the helper functions (is_channels_last_strides_*d_s*) for more details.
+// This is a general problem for all the is_channels_last_strides_xd
+// implementation. Please check the helper functions
+// (is_channels_last_strides_*d_s*) for more details.
 
-inline bool is_channels_last_strides_2d(const IntArrayRef sizes, const IntArrayRef strides) {
+inline bool is_channels_last_strides_2d(
+    const IntArrayRef sizes,
+    const IntArrayRef strides) {
   switch (sizes.size()) {
     case 4:
       return is_channels_last_strides_2d_s4(sizes, strides);
@@ -224,7 +243,9 @@ inline bool is_channels_last_strides_2d(const IntArrayRef sizes, const IntArrayR
   }
 }
 
-inline bool is_channels_last_strides_3d(const IntArrayRef sizes, const IntArrayRef strides) {
+inline bool is_channels_last_strides_3d(
+    const IntArrayRef sizes,
+    const IntArrayRef strides) {
   switch (sizes.size()) {
     case 5:
       return is_channels_last_strides_3d_s5(sizes, strides);

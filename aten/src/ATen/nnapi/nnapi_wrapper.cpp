@@ -27,63 +27,90 @@ int check__getDeviceCount(uint32_t* numDevices) {
   CAFFE_ENFORCE(nnapi_._getDeviceCount);
   int ret = nnapi_._getDeviceCount(numDevices);
   // TODO: Maybe add better logging here.
-  CAFFE_ENFORCE(ret == ANEURALNETWORKS_NO_ERROR);
+  CAFFE_ENFORCE(
+    ret == ANEURALNETWORKS_NO_ERROR,
+    "_getDeviceCount", "failed with error ", ret
+  );
   return ret;
 }
 int check__getDevice(uint32_t devIndex, ANeuralNetworksDevice** device) {
   CAFFE_ENFORCE(nnapi_._getDevice);
   int ret = nnapi_._getDevice(devIndex,device);
   // TODO: Maybe add better logging here.
-  CAFFE_ENFORCE(ret == ANEURALNETWORKS_NO_ERROR);
+  CAFFE_ENFORCE(
+    ret == ANEURALNETWORKS_NO_ERROR,
+    "_getDevice", "failed with error ", ret
+  );
   return ret;
 }
 int check_Device_getName(const ANeuralNetworksDevice* device, const char** name) {
   CAFFE_ENFORCE(nnapi_.Device_getName);
   int ret = nnapi_.Device_getName(device,name);
   // TODO: Maybe add better logging here.
-  CAFFE_ENFORCE(ret == ANEURALNETWORKS_NO_ERROR);
+  CAFFE_ENFORCE(
+    ret == ANEURALNETWORKS_NO_ERROR,
+    "Device_getName", "failed with error ", ret
+  );
   return ret;
 }
 int check_Device_getVersion(const ANeuralNetworksDevice* device, const char** version) {
   CAFFE_ENFORCE(nnapi_.Device_getVersion);
   int ret = nnapi_.Device_getVersion(device,version);
   // TODO: Maybe add better logging here.
-  CAFFE_ENFORCE(ret == ANEURALNETWORKS_NO_ERROR);
+  CAFFE_ENFORCE(
+    ret == ANEURALNETWORKS_NO_ERROR,
+    "Device_getVersion", "failed with error ", ret
+  );
   return ret;
 }
 int check_Device_getFeatureLevel(const ANeuralNetworksDevice* device, int64_t* featureLevel) {
   CAFFE_ENFORCE(nnapi_.Device_getFeatureLevel);
   int ret = nnapi_.Device_getFeatureLevel(device,featureLevel);
   // TODO: Maybe add better logging here.
-  CAFFE_ENFORCE(ret == ANEURALNETWORKS_NO_ERROR);
+  CAFFE_ENFORCE(
+    ret == ANEURALNETWORKS_NO_ERROR,
+    "Device_getFeatureLevel", "failed with error ", ret
+  );
   return ret;
 }
 int check_Model_getSupportedOperationsForDevices( const ANeuralNetworksModel* model, const ANeuralNetworksDevice* const* devices, uint32_t numDevices, bool* supportedOps) {
   CAFFE_ENFORCE(nnapi_.Model_getSupportedOperationsForDevices);
   int ret = nnapi_.Model_getSupportedOperationsForDevices(model,devices,numDevices,supportedOps);
   // TODO: Maybe add better logging here.
-  CAFFE_ENFORCE(ret == ANEURALNETWORKS_NO_ERROR);
+  CAFFE_ENFORCE(
+    ret == ANEURALNETWORKS_NO_ERROR,
+    "Model_getSupportedOperationsForDevices", "failed with error ", ret
+  );
   return ret;
 }
 int check_Compilation_createForDevices(ANeuralNetworksModel* model, const ANeuralNetworksDevice* const* devices, uint32_t numDevices, ANeuralNetworksCompilation** compilation) {
   CAFFE_ENFORCE(nnapi_.Compilation_createForDevices);
   int ret = nnapi_.Compilation_createForDevices(model,devices,numDevices,compilation);
   // TODO: Maybe add better logging here.
-  CAFFE_ENFORCE(ret == ANEURALNETWORKS_NO_ERROR);
+  CAFFE_ENFORCE(
+    ret == ANEURALNETWORKS_NO_ERROR,
+    "Compilation_createForDevices", "failed with error ", ret
+  );
   return ret;
 }
 int check_Execution_compute(ANeuralNetworksExecution* execution) {
   CAFFE_ENFORCE(nnapi_.Execution_compute);
   int ret = nnapi_.Execution_compute(execution);
   // TODO: Maybe add better logging here.
-  CAFFE_ENFORCE(ret == ANEURALNETWORKS_NO_ERROR);
+  CAFFE_ENFORCE(
+    ret == ANEURALNETWORKS_NO_ERROR,
+    "Execution_compute", "failed with error ", ret
+  );
   return ret;
 }
 int check_Memory_createFromFd(size_t size, int protect, int fd, size_t offset, ANeuralNetworksMemory** memory) {
   CAFFE_ENFORCE(nnapi_.Memory_createFromFd);
   int ret = nnapi_.Memory_createFromFd(size,protect,fd,offset,memory);
   // TODO: Maybe add better logging here.
-  CAFFE_ENFORCE(ret == ANEURALNETWORKS_NO_ERROR);
+  CAFFE_ENFORCE(
+    ret == ANEURALNETWORKS_NO_ERROR,
+    "Memory_createFromFd", "failed with error ", ret
+  );
   return ret;
 }
 void check_Memory_free(ANeuralNetworksMemory* memory) {
@@ -94,7 +121,10 @@ int check_Model_create(ANeuralNetworksModel** model) {
   CAFFE_ENFORCE(nnapi_.Model_create);
   int ret = nnapi_.Model_create(model);
   // TODO: Maybe add better logging here.
-  CAFFE_ENFORCE(ret == ANEURALNETWORKS_NO_ERROR);
+  CAFFE_ENFORCE(
+    ret == ANEURALNETWORKS_NO_ERROR,
+    "Model_create", "failed with error ", ret
+  );
   return ret;
 }
 void check_Model_free(ANeuralNetworksModel* model) {
@@ -105,56 +135,80 @@ int check_Model_finish(ANeuralNetworksModel* model) {
   CAFFE_ENFORCE(nnapi_.Model_finish);
   int ret = nnapi_.Model_finish(model);
   // TODO: Maybe add better logging here.
-  CAFFE_ENFORCE(ret == ANEURALNETWORKS_NO_ERROR);
+  CAFFE_ENFORCE(
+    ret == ANEURALNETWORKS_NO_ERROR,
+    "Model_finish", "failed with error ", ret
+  );
   return ret;
 }
 int check_Model_addOperand(ANeuralNetworksModel* model, const ANeuralNetworksOperandType* type) {
   CAFFE_ENFORCE(nnapi_.Model_addOperand);
   int ret = nnapi_.Model_addOperand(model,type);
   // TODO: Maybe add better logging here.
-  CAFFE_ENFORCE(ret == ANEURALNETWORKS_NO_ERROR);
+  CAFFE_ENFORCE(
+    ret == ANEURALNETWORKS_NO_ERROR,
+    "Model_addOperand", "failed with error ", ret
+  );
   return ret;
 }
 int check_Model_setOperandValue(ANeuralNetworksModel* model, int32_t index, const void* buffer, size_t length) {
   CAFFE_ENFORCE(nnapi_.Model_setOperandValue);
   int ret = nnapi_.Model_setOperandValue(model,index,buffer,length);
   // TODO: Maybe add better logging here.
-  CAFFE_ENFORCE(ret == ANEURALNETWORKS_NO_ERROR);
+  CAFFE_ENFORCE(
+    ret == ANEURALNETWORKS_NO_ERROR,
+    "Model_setOperandValue", "failed with error ", ret
+  );
   return ret;
 }
 int check_Model_setOperandValueFromMemory(ANeuralNetworksModel* model, int32_t index, const ANeuralNetworksMemory* memory, size_t offset, size_t length) {
   CAFFE_ENFORCE(nnapi_.Model_setOperandValueFromMemory);
   int ret = nnapi_.Model_setOperandValueFromMemory(model,index,memory,offset,length);
   // TODO: Maybe add better logging here.
-  CAFFE_ENFORCE(ret == ANEURALNETWORKS_NO_ERROR);
+  CAFFE_ENFORCE(
+    ret == ANEURALNETWORKS_NO_ERROR,
+    "Model_setOperandValueFromMemory", "failed with error ", ret
+  );
   return ret;
 }
 int check_Model_addOperation(ANeuralNetworksModel* model, ANeuralNetworksOperationType type, uint32_t inputCount, const uint32_t* inputs, uint32_t outputCount, const uint32_t* outputs) {
   CAFFE_ENFORCE(nnapi_.Model_addOperation);
   int ret = nnapi_.Model_addOperation(model,type,inputCount,inputs,outputCount,outputs);
   // TODO: Maybe add better logging here.
-  CAFFE_ENFORCE(ret == ANEURALNETWORKS_NO_ERROR);
+  CAFFE_ENFORCE(
+    ret == ANEURALNETWORKS_NO_ERROR,
+    "Model_addOperation", "failed with error ", ret
+  );
   return ret;
 }
 int check_Model_identifyInputsAndOutputs(ANeuralNetworksModel* model, uint32_t inputCount, const uint32_t* inputs, uint32_t outputCount, const uint32_t* outputs) {
   CAFFE_ENFORCE(nnapi_.Model_identifyInputsAndOutputs);
   int ret = nnapi_.Model_identifyInputsAndOutputs(model,inputCount,inputs,outputCount,outputs);
   // TODO: Maybe add better logging here.
-  CAFFE_ENFORCE(ret == ANEURALNETWORKS_NO_ERROR);
+  CAFFE_ENFORCE(
+    ret == ANEURALNETWORKS_NO_ERROR,
+    "Model_identifyInputsAndOutputs", "failed with error ", ret
+  );
   return ret;
 }
 int check_Model_relaxComputationFloat32toFloat16(ANeuralNetworksModel* model, bool allow) {
   CAFFE_ENFORCE(nnapi_.Model_relaxComputationFloat32toFloat16);
   int ret = nnapi_.Model_relaxComputationFloat32toFloat16(model,allow);
   // TODO: Maybe add better logging here.
-  CAFFE_ENFORCE(ret == ANEURALNETWORKS_NO_ERROR);
+  CAFFE_ENFORCE(
+    ret == ANEURALNETWORKS_NO_ERROR,
+    "Model_relaxComputationFloat32toFloat16", "failed with error ", ret
+  );
   return ret;
 }
 int check_Compilation_create(ANeuralNetworksModel* model, ANeuralNetworksCompilation** compilation) {
   CAFFE_ENFORCE(nnapi_.Compilation_create);
   int ret = nnapi_.Compilation_create(model,compilation);
   // TODO: Maybe add better logging here.
-  CAFFE_ENFORCE(ret == ANEURALNETWORKS_NO_ERROR);
+  CAFFE_ENFORCE(
+    ret == ANEURALNETWORKS_NO_ERROR,
+    "Compilation_create", "failed with error ", ret
+  );
   return ret;
 }
 void check_Compilation_free(ANeuralNetworksCompilation* compilation) {
@@ -165,21 +219,30 @@ int check_Compilation_setPreference(ANeuralNetworksCompilation* compilation, int
   CAFFE_ENFORCE(nnapi_.Compilation_setPreference);
   int ret = nnapi_.Compilation_setPreference(compilation,preference);
   // TODO: Maybe add better logging here.
-  CAFFE_ENFORCE(ret == ANEURALNETWORKS_NO_ERROR);
+  CAFFE_ENFORCE(
+    ret == ANEURALNETWORKS_NO_ERROR,
+    "Compilation_setPreference", "failed with error ", ret
+  );
   return ret;
 }
 int check_Compilation_finish(ANeuralNetworksCompilation* compilation) {
   CAFFE_ENFORCE(nnapi_.Compilation_finish);
   int ret = nnapi_.Compilation_finish(compilation);
   // TODO: Maybe add better logging here.
-  CAFFE_ENFORCE(ret == ANEURALNETWORKS_NO_ERROR);
+  CAFFE_ENFORCE(
+    ret == ANEURALNETWORKS_NO_ERROR,
+    "Compilation_finish", "failed with error ", ret
+  );
   return ret;
 }
 int check_Execution_create(ANeuralNetworksCompilation* compilation, ANeuralNetworksExecution** execution) {
   CAFFE_ENFORCE(nnapi_.Execution_create);
   int ret = nnapi_.Execution_create(compilation,execution);
   // TODO: Maybe add better logging here.
-  CAFFE_ENFORCE(ret == ANEURALNETWORKS_NO_ERROR);
+  CAFFE_ENFORCE(
+    ret == ANEURALNETWORKS_NO_ERROR,
+    "Execution_create", "failed with error ", ret
+  );
   return ret;
 }
 void check_Execution_free(ANeuralNetworksExecution* execution) {
@@ -190,42 +253,60 @@ int check_Execution_setInput(ANeuralNetworksExecution* execution, int32_t index,
   CAFFE_ENFORCE(nnapi_.Execution_setInput);
   int ret = nnapi_.Execution_setInput(execution,index,type,buffer,length);
   // TODO: Maybe add better logging here.
-  CAFFE_ENFORCE(ret == ANEURALNETWORKS_NO_ERROR);
+  CAFFE_ENFORCE(
+    ret == ANEURALNETWORKS_NO_ERROR,
+    "Execution_setInput", "failed with error ", ret
+  );
   return ret;
 }
 int check_Execution_setInputFromMemory(ANeuralNetworksExecution* execution, int32_t index, const ANeuralNetworksOperandType* type, const ANeuralNetworksMemory* memory, size_t offset, size_t length) {
   CAFFE_ENFORCE(nnapi_.Execution_setInputFromMemory);
   int ret = nnapi_.Execution_setInputFromMemory(execution,index,type,memory,offset,length);
   // TODO: Maybe add better logging here.
-  CAFFE_ENFORCE(ret == ANEURALNETWORKS_NO_ERROR);
+  CAFFE_ENFORCE(
+    ret == ANEURALNETWORKS_NO_ERROR,
+    "Execution_setInputFromMemory", "failed with error ", ret
+  );
   return ret;
 }
 int check_Execution_setOutput(ANeuralNetworksExecution* execution, int32_t index, const ANeuralNetworksOperandType* type, void* buffer, size_t length) {
   CAFFE_ENFORCE(nnapi_.Execution_setOutput);
   int ret = nnapi_.Execution_setOutput(execution,index,type,buffer,length);
   // TODO: Maybe add better logging here.
-  CAFFE_ENFORCE(ret == ANEURALNETWORKS_NO_ERROR);
+  CAFFE_ENFORCE(
+    ret == ANEURALNETWORKS_NO_ERROR,
+    "Execution_setOutput", "failed with error ", ret
+  );
   return ret;
 }
 int check_Execution_setOutputFromMemory(ANeuralNetworksExecution* execution, int32_t index, const ANeuralNetworksOperandType* type, const ANeuralNetworksMemory* memory, size_t offset, size_t length) {
   CAFFE_ENFORCE(nnapi_.Execution_setOutputFromMemory);
   int ret = nnapi_.Execution_setOutputFromMemory(execution,index,type,memory,offset,length);
   // TODO: Maybe add better logging here.
-  CAFFE_ENFORCE(ret == ANEURALNETWORKS_NO_ERROR);
+  CAFFE_ENFORCE(
+    ret == ANEURALNETWORKS_NO_ERROR,
+    "Execution_setOutputFromMemory", "failed with error ", ret
+  );
   return ret;
 }
 int check_Execution_startCompute(ANeuralNetworksExecution* execution, ANeuralNetworksEvent** event) {
   CAFFE_ENFORCE(nnapi_.Execution_startCompute);
   int ret = nnapi_.Execution_startCompute(execution,event);
   // TODO: Maybe add better logging here.
-  CAFFE_ENFORCE(ret == ANEURALNETWORKS_NO_ERROR);
+  CAFFE_ENFORCE(
+    ret == ANEURALNETWORKS_NO_ERROR,
+    "Execution_startCompute", "failed with error ", ret
+  );
   return ret;
 }
 int check_Event_wait(ANeuralNetworksEvent* event) {
   CAFFE_ENFORCE(nnapi_.Event_wait);
   int ret = nnapi_.Event_wait(event);
   // TODO: Maybe add better logging here.
-  CAFFE_ENFORCE(ret == ANEURALNETWORKS_NO_ERROR);
+  CAFFE_ENFORCE(
+    ret == ANEURALNETWORKS_NO_ERROR,
+    "Event_wait", "failed with error ", ret
+  );
   return ret;
 }
 void check_Event_free(ANeuralNetworksEvent* event) {
@@ -236,14 +317,20 @@ int check_Execution_getOutputOperandRank(ANeuralNetworksExecution* execution, in
   CAFFE_ENFORCE(nnapi_.Execution_getOutputOperandRank);
   int ret = nnapi_.Execution_getOutputOperandRank(execution,index,rank);
   // TODO: Maybe add better logging here.
-  CAFFE_ENFORCE(ret == ANEURALNETWORKS_NO_ERROR);
+  CAFFE_ENFORCE(
+    ret == ANEURALNETWORKS_NO_ERROR,
+    "Execution_getOutputOperandRank", "failed with error ", ret
+  );
   return ret;
 }
 int check_Execution_getOutputOperandDimensions(ANeuralNetworksExecution* execution, int32_t index, uint32_t* dimensions) {
   CAFFE_ENFORCE(nnapi_.Execution_getOutputOperandDimensions);
   int ret = nnapi_.Execution_getOutputOperandDimensions(execution,index,dimensions);
   // TODO: Maybe add better logging here.
-  CAFFE_ENFORCE(ret == ANEURALNETWORKS_NO_ERROR);
+  CAFFE_ENFORCE(
+    ret == ANEURALNETWORKS_NO_ERROR,
+    "Execution_getOutputOperandDimensions", "failed with error ", ret
+  );
   return ret;
 }
 void nnapi_wrapper_load(struct nnapi_wrapper** nnapi, struct nnapi_wrapper** check_nnapi) {

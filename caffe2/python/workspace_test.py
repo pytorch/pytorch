@@ -1,20 +1,15 @@
-
-
-
-
-
-import numpy as np
 import os
 import shutil
 import tempfile
 import unittest
-
-import torch
-from caffe2.proto import caffe2_pb2
-from caffe2.python import core, test_util, workspace, model_helper, brew
+from collections import namedtuple
 
 import caffe2.python.hypothesis_test_util as htu
 import hypothesis.strategies as st
+import numpy as np
+import torch
+from caffe2.proto import caffe2_pb2
+from caffe2.python import core, test_util, workspace, model_helper, brew
 from hypothesis import given, settings
 
 
@@ -22,14 +17,14 @@ class TestWorkspace(unittest.TestCase):
     def setUp(self):
         self.net = core.Net("test-net")
         self.testblob_ref = self.net.ConstantFill(
-            [], "testblob", shape=[1, 2, 3, 4], value=1.0)
+            [], "testblob", shape=[1, 2, 3, 4], value=1.0
+        )
         workspace.ResetWorkspace()
 
     def testRootFolder(self):
         self.assertEqual(workspace.ResetWorkspace(), True)
         self.assertEqual(workspace.RootFolder(), ".")
-        self.assertEqual(
-            workspace.ResetWorkspace("/tmp/caffe-workspace-test"), True)
+        self.assertEqual(workspace.ResetWorkspace("/tmp/caffe-workspace-test"), True)
         self.assertEqual(workspace.RootFolder(), "/tmp/caffe-workspace-test")
 
     def testWorkspaceHasBlobWithNonexistingName(self):
@@ -37,9 +32,7 @@ class TestWorkspace(unittest.TestCase):
 
     def testRunOperatorOnce(self):
         self.assertEqual(
-            workspace.RunOperatorOnce(
-                self.net.Proto().op[0].SerializeToString()
-            ), True
+            workspace.RunOperatorOnce(self.net.Proto().op[0].SerializeToString()), True
         )
         self.assertEqual(workspace.HasBlob("testblob"), True)
         blobs = workspace.Blobs()
@@ -49,7 +42,8 @@ class TestWorkspace(unittest.TestCase):
     def testGetOperatorCost(self):
         op = core.CreateOperator(
             "Conv2D",
-            ["X", "W"], ["Y"],
+            ["X", "W"],
+            ["Y"],
             stride_h=1,
             stride_w=1,
             pad_t=1,
@@ -62,18 +56,25 @@ class TestWorkspace(unittest.TestCase):
         W = np.zeros((1, 1, 3, 3))
         workspace.FeedBlob("X", X)
         workspace.FeedBlob("W", W)
-        flops, _ = workspace.GetOperatorCost(op.SerializeToString(), ["X", "W"])
-        self.assertEqual(flops, 1152)
+        op_cost = workspace.GetOperatorCost(op.SerializeToString(), ["X", "W"])
+        self.assertTupleEqual(
+            op_cost,
+            namedtuple("Cost", ["flops", "bytes_written", "bytes_read"])(
+                1152, 256, 4168
+            ),
+        )
 
     def testRunNetOnce(self):
         self.assertEqual(
-            workspace.RunNetOnce(self.net.Proto().SerializeToString()), True)
+            workspace.RunNetOnce(self.net.Proto().SerializeToString()), True
+        )
         self.assertEqual(workspace.HasBlob("testblob"), True)
 
     def testCurrentWorkspaceWrapper(self):
         self.assertNotIn("testblob", workspace.C.Workspace.current.blobs)
         self.assertEqual(
-            workspace.RunNetOnce(self.net.Proto().SerializeToString()), True)
+            workspace.RunNetOnce(self.net.Proto().SerializeToString()), True
+        )
         self.assertEqual(workspace.HasBlob("testblob"), True)
         self.assertIn("testblob", workspace.C.Workspace.current.blobs)
         workspace.ResetWorkspace()
@@ -82,8 +83,7 @@ class TestWorkspace(unittest.TestCase):
     def testRunPlan(self):
         plan = core.Plan("test-plan")
         plan.AddStep(core.ExecutionStep("test-step", self.net))
-        self.assertEqual(
-            workspace.RunPlan(plan.Proto().SerializeToString()), True)
+        self.assertEqual(workspace.RunPlan(plan.Proto().SerializeToString()), True)
         self.assertEqual(workspace.HasBlob("testblob"), True)
 
     def testRunPlanInBackground(self):
@@ -102,7 +102,8 @@ class TestWorkspace(unittest.TestCase):
 
     def testResetWorkspace(self):
         self.assertEqual(
-            workspace.RunNetOnce(self.net.Proto().SerializeToString()), True)
+            workspace.RunNetOnce(self.net.Proto().SerializeToString()), True
+        )
         self.assertEqual(workspace.HasBlob("testblob"), True)
         self.assertEqual(workspace.ResetWorkspace(), True)
         self.assertEqual(workspace.HasBlob("testblob"), False)
@@ -134,9 +135,9 @@ class TestWorkspace(unittest.TestCase):
             tensor.init([3, 4], core.DataType.STRING)
 
         """ feed (copy) data into tensor """
-        val = np.array([[b'abc', b'def'], [b'ghi', b'jkl']], dtype=np.object)
+        val = np.array([[b"abc", b"def"], [b"ghi", b"jkl"]], dtype=np.object)
         tensor.feed(val)
-        self.assertEquals(tensor.data[0, 0], b'abc')
+        self.assertEquals(tensor.data[0, 0], b"abc")
         np.testing.assert_array_equal(ws.blobs["tensor"].fetch(), val)
 
         val = np.array([1.1, 10.2])
@@ -155,7 +156,8 @@ class TestWorkspace(unittest.TestCase):
 
     def testFetchFeedBlob(self):
         self.assertEqual(
-            workspace.RunNetOnce(self.net.Proto().SerializeToString()), True)
+            workspace.RunNetOnce(self.net.Proto().SerializeToString()), True
+        )
         fetched = workspace.FetchBlob("testblob")
         # check if fetched is correct.
         self.assertEqual(fetched.shape, (1, 2, 3, 4))
@@ -168,7 +170,8 @@ class TestWorkspace(unittest.TestCase):
 
     def testFetchFeedBlobViaBlobReference(self):
         self.assertEqual(
-            workspace.RunNetOnce(self.net.Proto().SerializeToString()), True)
+            workspace.RunNetOnce(self.net.Proto().SerializeToString()), True
+        )
         fetched = workspace.FetchBlob(self.testblob_ref)
         # check if fetched is correct.
         self.assertEqual(fetched.shape, (1, 2, 3, 4))
@@ -180,9 +183,18 @@ class TestWorkspace(unittest.TestCase):
         np.testing.assert_array_equal(fetched_again, 2.0)
 
     def testFetchFeedBlobTypes(self):
-        for dtype in [np.float16, np.float32, np.float64, np.bool,
-                      np.int8, np.int16, np.int32, np.int64,
-                      np.uint8, np.uint16]:
+        for dtype in [
+            np.float16,
+            np.float32,
+            np.float64,
+            np.bool,
+            np.int8,
+            np.int16,
+            np.int32,
+            np.int64,
+            np.uint8,
+            np.uint16,
+        ]:
             try:
                 rng = np.iinfo(dtype).max * 2
             except ValueError:
@@ -205,16 +217,26 @@ class TestWorkspace(unittest.TestCase):
         np.testing.assert_array_equal(fetched_back, data)
 
     def testGetBlobSizeBytes(self):
-        for dtype in [np.float16, np.float32, np.float64, np.bool,
-                      np.int8, np.int16, np.int32, np.int64,
-                      np.uint8, np.uint16]:
+        for dtype in [
+            np.float16,
+            np.float32,
+            np.float64,
+            np.bool,
+            np.int8,
+            np.int16,
+            np.int32,
+            np.int64,
+            np.uint8,
+            np.uint16,
+        ]:
             data = np.random.randn(2, 3).astype(dtype)
             self.assertTrue(workspace.FeedBlob("testblob_sizeBytes", data), True)
             self.assertEqual(
                 workspace.GetBlobSizeBytes("testblob_sizeBytes"),
-                6 * np.dtype(dtype).itemsize)
-        strs1 = np.array([b'Hello World!', b'abcd'])
-        strs2 = np.array([b'element1', b'element2'])
+                6 * np.dtype(dtype).itemsize,
+            )
+        strs1 = np.array([b"Hello World!", b"abcd"])
+        strs2 = np.array([b"element1", b"element2"])
         strs1_len, strs2_len = 0, 0
         for str in strs1:
             strs1_len += len(str)
@@ -225,8 +247,10 @@ class TestWorkspace(unittest.TestCase):
         # size of blob "testblob_str1" = size_str1 * meta_.itemsize() + strs1_len
         # size of blob "testblob_str2" = size_str2 * meta_.itemsize() + strs2_len
         self.assertEqual(
-            workspace.GetBlobSizeBytes("testblob_str1") -
-            workspace.GetBlobSizeBytes("testblob_str2"), strs1_len - strs2_len)
+            workspace.GetBlobSizeBytes("testblob_str1")
+            - workspace.GetBlobSizeBytes("testblob_str2"),
+            strs1_len - strs2_len,
+        )
 
     def testFetchFeedBlobZeroDim(self):
         data = np.empty(shape=(2, 0, 3), dtype=np.float32)
@@ -237,22 +261,25 @@ class TestWorkspace(unittest.TestCase):
 
     def testFetchFeedLongStringTensor(self):
         # long strings trigger array of object creation
-        strs = np.array([
-            b' '.join(10 * [b'long string']),
-            b' '.join(128 * [b'very long string']),
-            b'small \0\1\2 string',
-            b"Hello, world! I have special \0 symbols \1!"])
-        workspace.FeedBlob('my_str_tensor', strs)
-        strs2 = workspace.FetchBlob('my_str_tensor')
+        strs = np.array(
+            [
+                b" ".join(10 * [b"long string"]),
+                b" ".join(128 * [b"very long string"]),
+                b"small \0\1\2 string",
+                b"Hello, world! I have special \0 symbols \1!",
+            ]
+        )
+        workspace.FeedBlob("my_str_tensor", strs)
+        strs2 = workspace.FetchBlob("my_str_tensor")
         self.assertEqual(strs.shape, strs2.shape)
         for i in range(0, strs.shape[0]):
             self.assertEqual(strs[i], strs2[i])
 
     def testFetchFeedShortStringTensor(self):
         # small strings trigger NPY_STRING array
-        strs = np.array([b'elem1', b'elem 2', b'element 3'])
-        workspace.FeedBlob('my_str_tensor_2', strs)
-        strs2 = workspace.FetchBlob('my_str_tensor_2')
+        strs = np.array([b"elem1", b"elem 2", b"element 3"])
+        workspace.FeedBlob("my_str_tensor_2", strs)
+        strs2 = workspace.FetchBlob("my_str_tensor_2")
         self.assertEqual(strs.shape, strs2.shape)
         for i in range(0, strs.shape[0]):
             self.assertEqual(strs[i], strs2[i])
@@ -260,22 +287,23 @@ class TestWorkspace(unittest.TestCase):
     def testFetchFeedPlainString(self):
         # this is actual string, not a tensor of strings
         s = b"Hello, world! I have special \0 symbols \1!"
-        workspace.FeedBlob('my_plain_string', s)
-        s2 = workspace.FetchBlob('my_plain_string')
+        workspace.FeedBlob("my_plain_string", s)
+        s2 = workspace.FetchBlob("my_plain_string")
         self.assertEqual(s, s2)
 
     def testFetchBlobs(self):
         s1 = b"test1"
         s2 = b"test2"
-        workspace.FeedBlob('s1', s1)
-        workspace.FeedBlob('s2', s2)
-        fetch1, fetch2 = workspace.FetchBlobs(['s1', 's2'])
+        workspace.FeedBlob("s1", s1)
+        workspace.FeedBlob("s2", s2)
+        fetch1, fetch2 = workspace.FetchBlobs(["s1", "s2"])
         self.assertEquals(s1, fetch1)
         self.assertEquals(s2, fetch2)
 
     def testFetchFeedViaBlobDict(self):
         self.assertEqual(
-            workspace.RunNetOnce(self.net.Proto().SerializeToString()), True)
+            workspace.RunNetOnce(self.net.Proto().SerializeToString()), True
+        )
         fetched = workspace.blobs["testblob"]
         # check if fetched is correct.
         self.assertEqual(fetched.shape, (1, 2, 3, 4))
@@ -293,23 +321,29 @@ class TestWorkspace(unittest.TestCase):
             self.assertEqual(key, "testblob")
 
     def testTorchInterop(self):
-        workspace.RunOperatorOnce(core.CreateOperator(
-            "ConstantFill", [], "foo", shape=(4,), value=2, dtype=10))
+        workspace.RunOperatorOnce(
+            core.CreateOperator(
+                "ConstantFill", [], "foo", shape=(4,), value=2, dtype=10
+            )
+        )
         t = workspace.FetchTorch("foo")
         t.resize_(5)
         t[4] = t[2] = 777
-        np.testing.assert_array_equal(t.numpy(), np.array([2,2,777,2,777]))
+        np.testing.assert_array_equal(t.numpy(), np.array([2, 2, 777, 2, 777]))
         np.testing.assert_array_equal(
-            workspace.FetchBlob("foo"), np.array([2,2,777,2,777]))
+            workspace.FetchBlob("foo"), np.array([2, 2, 777, 2, 777])
+        )
 
         z = torch.ones((4,), dtype=torch.int64)
-        workspace.FeedBlob('bar', z)
+        workspace.FeedBlob("bar", z)
         workspace.RunOperatorOnce(
-            core.CreateOperator("Reshape", ['bar'], ['bar', '_'], shape=(2,2)))
-        z[0,1] = 123
+            core.CreateOperator("Reshape", ["bar"], ["bar", "_"], shape=(2, 2))
+        )
+        z[0, 1] = 123
         np.testing.assert_array_equal(
-            workspace.FetchBlob("bar"), np.array([[1,123],[1,1]]))
-        np.testing.assert_array_equal(z, np.array([[1,123],[1,1]]))
+            workspace.FetchBlob("bar"), np.array([[1, 123], [1, 1]])
+        )
+        np.testing.assert_array_equal(z, np.array([[1, 123], [1, 1]]))
 
 
 class TestMultiWorkspaces(unittest.TestCase):
@@ -344,7 +378,6 @@ class TestMultiWorkspaces(unittest.TestCase):
 
 @unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
 class TestWorkspaceGPU(test_util.TestCase):
-
     def setUp(self):
         workspace.ResetWorkspace()
         self.net = core.Net("test-net")
@@ -353,7 +386,8 @@ class TestWorkspaceGPU(test_util.TestCase):
 
     def testFetchBlobGPU(self):
         self.assertEqual(
-            workspace.RunNetOnce(self.net.Proto().SerializeToString()), True)
+            workspace.RunNetOnce(self.net.Proto().SerializeToString()), True
+        )
         fetched = workspace.FetchBlob("testblob")
         # check if fetched is correct.
         self.assertEqual(fetched.shape, (1, 2, 3, 4))
@@ -371,33 +405,49 @@ class TestWorkspaceGPU(test_util.TestCase):
         self.assertEqual(pattern.shape[0], pattern.shape[1])
         self.assertEqual(pattern.shape[0], workspace.NumGpuDevices())
 
-    @unittest.skipIf(not workspace.has_cuda_support,
-                     "Tensor interop doesn't yet work on ROCm")
+    @unittest.skipIf(
+        not workspace.has_cuda_support, "Tensor interop doesn't yet work on ROCm"
+    )
     def testTorchInterop(self):
         # CUDA has convenient mem stats, let's use them to make sure we didn't
         # leak memory
         initial_mem = torch.cuda.memory_allocated()
-        workspace.RunOperatorOnce(core.CreateOperator(
-            "ConstantFill", [], "foo", shape=(4,), value=2, dtype=10,
-            device_option=core.DeviceOption(workspace.GpuDeviceType)))
+        workspace.RunOperatorOnce(
+            core.CreateOperator(
+                "ConstantFill",
+                [],
+                "foo",
+                shape=(4,),
+                value=2,
+                dtype=10,
+                device_option=core.DeviceOption(workspace.GpuDeviceType),
+            )
+        )
         t = workspace.FetchTorch("foo")
         t.resize_(5)
         self.assertTrue(t.is_cuda)
         t[4] = t[2] = 777
+        np.testing.assert_array_equal(t.cpu().numpy(), np.array([2, 2, 777, 2, 777]))
         np.testing.assert_array_equal(
-            t.cpu().numpy(), np.array([2,2,777,2,777]))
-        np.testing.assert_array_equal(
-            workspace.FetchBlob("foo"), np.array([2,2,777,2,777]))
+            workspace.FetchBlob("foo"), np.array([2, 2, 777, 2, 777])
+        )
 
         z = torch.ones((4,), dtype=torch.int64, device="cuda")
-        workspace.FeedBlob('bar', z)
+        workspace.FeedBlob("bar", z)
         workspace.RunOperatorOnce(
-            core.CreateOperator("Reshape", ['bar'], ['bar', '_'], shape=(2,2),
-            device_option=core.DeviceOption(workspace.GpuDeviceType)))
-        z[0,1] = 123
+            core.CreateOperator(
+                "Reshape",
+                ["bar"],
+                ["bar", "_"],
+                shape=(2, 2),
+                device_option=core.DeviceOption(workspace.GpuDeviceType),
+            )
+        )
+        z[0, 1] = 123
         np.testing.assert_array_equal(
-            workspace.FetchBlob("bar"), np.array([[1,123],[1,1]]))
-        np.testing.assert_array_equal(z.cpu(), np.array([[1,123],[1,1]]))
+            workspace.FetchBlob("bar"), np.array([[1, 123], [1, 1]])
+        )
+        np.testing.assert_array_equal(z.cpu(), np.array([[1, 123], [1, 1]]))
 
         self.assertGreater(torch.cuda.memory_allocated(), initial_mem)
         # clean up everything
@@ -409,13 +459,12 @@ class TestWorkspaceGPU(test_util.TestCase):
 
 @unittest.skipIf(not workspace.C.use_mkldnn, "No MKLDNN support.")
 class TestWorkspaceIDEEP(test_util.TestCase):
-
     def testFeedFetchBlobIDEEP(self):
         arr = np.random.randn(2, 3).astype(np.float32)
-        workspace.FeedBlob(
-            "testblob_ideep", arr, core.DeviceOption(caffe2_pb2.IDEEP))
+        workspace.FeedBlob("testblob_ideep", arr, core.DeviceOption(caffe2_pb2.IDEEP))
         fetched = workspace.FetchBlob("testblob_ideep")
         np.testing.assert_array_equal(arr, fetched)
+
 
 class TestImmedibate(test_util.TestCase):
     def testImmediateEnterExit(self):
@@ -428,8 +477,7 @@ class TestImmedibate(test_util.TestCase):
         workspace.StartImmediate(i_know=True)
         net = core.Net("test-net")
         net.ConstantFill([], "testblob", shape=[1, 2, 3, 4], value=1.0)
-        self.assertEqual(
-            workspace.ImmediateBlobs(), ["testblob"])
+        self.assertEqual(workspace.ImmediateBlobs(), ["testblob"])
         content = workspace.FetchImmediate("testblob")
         # Also, the immediate mode should not invade the original namespace,
         # so we check if this is so.
@@ -438,8 +486,7 @@ class TestImmedibate(test_util.TestCase):
         np.testing.assert_array_equal(content, 1.0)
         content[:] = 2.0
         self.assertTrue(workspace.FeedImmediate("testblob", content))
-        np.testing.assert_array_equal(
-            workspace.FetchImmediate("testblob"), 2.0)
+        np.testing.assert_array_equal(workspace.FetchImmediate("testblob"), 2.0)
         workspace.StopImmediate()
         with self.assertRaises(RuntimeError):
             content = workspace.FetchImmediate("testblob")
@@ -487,22 +534,24 @@ class TestCWorkspace(htu.HypothesisTestCase):
         net = ws.nets[net_name].run()
         blob = ws.blobs["testblob"]
         np.testing.assert_array_equal(
-            np.ones((1, 2, 3, 4), dtype=np.float32),
-            blob.fetch())
+            np.ones((1, 2, 3, 4), dtype=np.float32), blob.fetch()
+        )
 
     @given(name=st.text(), value=st.floats(min_value=-1, max_value=1.0))
     def test_operator_run(self, name, value):
         ws = workspace.C.Workspace()
-        op = core.CreateOperator(
-            "ConstantFill", [], [name], shape=[1], value=value)
+        op = core.CreateOperator("ConstantFill", [], [name], shape=[1], value=value)
         ws.run(op)
         self.assertIn(name, ws.blobs)
         np.testing.assert_allclose(
-            [value], ws.blobs[name].fetch(), atol=1e-4, rtol=1e-4)
+            [value], ws.blobs[name].fetch(), atol=1e-4, rtol=1e-4
+        )
 
-    @given(blob_name=st.text(),
-           net_name=st.text(),
-           value=st.floats(min_value=-1, max_value=1.0))
+    @given(
+        blob_name=st.text(),
+        net_name=st.text(),
+        value=st.floats(min_value=-1, max_value=1.0),
+    )
     def test_net_run(self, blob_name, net_name, value):
         ws = workspace.C.Workspace()
         net = core.Net(net_name)
@@ -511,12 +560,15 @@ class TestCWorkspace(htu.HypothesisTestCase):
         self.assertIn(blob_name, ws.blobs)
         self.assertNotIn(net_name, ws.nets)
         np.testing.assert_allclose(
-            [value], ws.blobs[blob_name].fetch(), atol=1e-4, rtol=1e-4)
+            [value], ws.blobs[blob_name].fetch(), atol=1e-4, rtol=1e-4
+        )
 
-    @given(blob_name=st.text(),
-           net_name=st.text(),
-           plan_name=st.text(),
-           value=st.floats(min_value=-1, max_value=1.0))
+    @given(
+        blob_name=st.text(),
+        net_name=st.text(),
+        plan_name=st.text(),
+        value=st.floats(min_value=-1, max_value=1.0),
+    )
     def test_plan_run(self, blob_name, plan_name, net_name, value):
         ws = workspace.C.Workspace()
         plan = core.Plan(plan_name)
@@ -529,11 +581,14 @@ class TestCWorkspace(htu.HypothesisTestCase):
         self.assertIn(blob_name, ws.blobs)
         self.assertIn(net.Name(), ws.nets)
         np.testing.assert_allclose(
-            [value], ws.blobs[blob_name].fetch(), atol=1e-4, rtol=1e-4)
+            [value], ws.blobs[blob_name].fetch(), atol=1e-4, rtol=1e-4
+        )
 
-    @given(blob_name=st.text(),
-           net_name=st.text(),
-           value=st.floats(min_value=-1, max_value=1.0))
+    @given(
+        blob_name=st.text(),
+        net_name=st.text(),
+        value=st.floats(min_value=-1, max_value=1.0),
+    )
     def test_net_create(self, blob_name, net_name, value):
         ws = workspace.C.Workspace()
         net = core.Net(net_name)
@@ -542,11 +597,14 @@ class TestCWorkspace(htu.HypothesisTestCase):
         self.assertIn(blob_name, ws.blobs)
         self.assertIn(net.Name(), ws.nets)
         np.testing.assert_allclose(
-            [value], ws.blobs[blob_name].fetch(), atol=1e-4, rtol=1e-4)
+            [value], ws.blobs[blob_name].fetch(), atol=1e-4, rtol=1e-4
+        )
 
-    @given(name=st.text(),
-           value=htu.tensor(),
-           device_option=st.sampled_from(htu.device_options))
+    @given(
+        name=st.text(),
+        value=htu.tensor(),
+        device_option=st.sampled_from(htu.device_options),
+    )
     def test_array_serde(self, name, value, device_option):
         ws = workspace.C.Workspace()
         ws.create_blob(name).feed(value, device_option=device_option)
@@ -559,7 +617,7 @@ class TestCWorkspace(htu.HypothesisTestCase):
 
     @given(name=st.text(), value=st.text())
     def test_string_serde(self, name, value):
-        value = value.encode('ascii', 'ignore')
+        value = value.encode("ascii", "ignore")
         ws = workspace.C.Workspace()
         ws.create_blob(name).feed(value)
         self.assertIn(name, ws.blobs)
@@ -579,11 +637,16 @@ class TestCWorkspace(htu.HypothesisTestCase):
 class TestPredictor(unittest.TestCase):
     def _create_model(self):
         m = model_helper.ModelHelper()
-        y = brew.fc(m, "data", "y",
-                    dim_in=4, dim_out=2,
-                    weight_init=('ConstantFill', dict(value=1.0)),
-                    bias_init=('ConstantFill', dict(value=0.0)),
-                    axis=0)
+        y = brew.fc(
+            m,
+            "data",
+            "y",
+            dim_in=4,
+            dim_out=2,
+            weight_init=("ConstantFill", dict(value=1.0)),
+            bias_init=("ConstantFill", dict(value=0.0)),
+            axis=0,
+        )
         m.net.AddExternalOutput(y)
         return m
 
@@ -608,54 +671,59 @@ class TestPredictor(unittest.TestCase):
     def test_predictor_memory_model(self):
         workspace.ResetWorkspace()
         m = self._create_model()
-        workspace.FeedBlob("data", np.zeros([4], dtype='float32'))
+        workspace.FeedBlob("data", np.zeros([4], dtype="float32"))
         self.predictor = workspace.Predictor(
             workspace.StringifyProto(m.param_init_net.Proto()),
-            workspace.StringifyProto(m.net.Proto()))
+            workspace.StringifyProto(m.net.Proto()),
+        )
 
-        inputs = np.array([1, 3, 256, 256], dtype='float32')
+        inputs = np.array([1, 3, 256, 256], dtype="float32")
         outputs = self.predictor.run([inputs])
         np.testing.assert_array_almost_equal(
-            np.array([[516, 516]], dtype='float32'), outputs)
+            np.array([[516, 516]], dtype="float32"), outputs
+        )
 
 
 class TestTransform(htu.HypothesisTestCase):
-    @given(input_dim=st.integers(min_value=1, max_value=10),
-           output_dim=st.integers(min_value=1, max_value=10),
-           batch_size=st.integers(min_value=1, max_value=10))
+    @given(
+        input_dim=st.integers(min_value=1, max_value=10),
+        output_dim=st.integers(min_value=1, max_value=10),
+        batch_size=st.integers(min_value=1, max_value=10),
+    )
     def test_simple_transform(self, input_dim, output_dim, batch_size):
         m = model_helper.ModelHelper()
         fc1 = brew.fc(m, "data", "fc1", dim_in=input_dim, dim_out=output_dim)
         fc2 = brew.fc(m, fc1, "fc2", dim_in=output_dim, dim_out=output_dim)
-        conv = brew.conv(m, fc2, "conv",
-                            dim_in=output_dim,
-                            dim_out=output_dim,
-                            use_cudnn=True,
-                            engine="CUDNN",
-                            kernel=3)
+        conv = brew.conv(
+            m,
+            fc2,
+            "conv",
+            dim_in=output_dim,
+            dim_out=output_dim,
+            use_cudnn=True,
+            engine="CUDNN",
+            kernel=3,
+        )
 
-        conv.Relu([], conv)\
-           .Softmax([], "pred") \
-           .LabelCrossEntropy(["label"], ["xent"]) \
-           .AveragedLoss([], "loss")
+        conv.Relu([], conv).Softmax([], "pred").LabelCrossEntropy(
+            ["label"], ["xent"]
+        ).AveragedLoss([], "loss")
 
-        transformed_net_proto = workspace.ApplyTransform(
-            "ConvToNNPack",
-            m.net.Proto())
+        transformed_net_proto = workspace.ApplyTransform("ConvToNNPack", m.net.Proto())
 
         self.assertEqual(transformed_net_proto.op[2].engine, "NNPACK")
 
-    @given(input_dim=st.integers(min_value=1, max_value=10),
-           output_dim=st.integers(min_value=1, max_value=10),
-           batch_size=st.integers(min_value=1, max_value=10))
+    @given(
+        input_dim=st.integers(min_value=1, max_value=10),
+        output_dim=st.integers(min_value=1, max_value=10),
+        batch_size=st.integers(min_value=1, max_value=10),
+    )
     @settings(deadline=10000)
     def test_registry_invalid(self, input_dim, output_dim, batch_size):
         m = model_helper.ModelHelper()
         brew.fc(m, "data", "fc1", dim_in=input_dim, dim_out=output_dim)
         with self.assertRaises(RuntimeError):
-            workspace.ApplyTransform(
-                "definitely_not_a_real_transform",
-                m.net.Proto())
+            workspace.ApplyTransform("definitely_not_a_real_transform", m.net.Proto())
 
     @given(value=st.floats(min_value=-1, max_value=1))
     @settings(deadline=10000)
@@ -667,38 +735,38 @@ class TestTransform(htu.HypothesisTestCase):
         init_net.ConstantFill([], ["conv_b"], shape=[5], value=value)
 
         self.assertEqual(
-            workspace.RunNetOnce(init_net.Proto().SerializeToString()), True)
+            workspace.RunNetOnce(init_net.Proto().SerializeToString()), True
+        )
 
         m = model_helper.ModelHelper()
-        conv = brew.conv(m, "data", "conv",
-                            dim_in=5,
-                            dim_out=5,
-                            kernel=3,
-                            use_cudnn=True,
-                            engine="CUDNN")
+        conv = brew.conv(
+            m,
+            "data",
+            "conv",
+            dim_in=5,
+            dim_out=5,
+            kernel=3,
+            use_cudnn=True,
+            engine="CUDNN",
+        )
 
-        conv.Relu([], conv)\
-           .Softmax([], "pred") \
-           .AveragedLoss([], "loss")
+        conv.Relu([], conv).Softmax([], "pred").AveragedLoss([], "loss")
 
-        self.assertEqual(
-            workspace.RunNetOnce(m.net.Proto().SerializeToString()), True)
+        self.assertEqual(workspace.RunNetOnce(m.net.Proto().SerializeToString()), True)
 
         proto = workspace.ApplyTransformIfFaster(
-            "ConvToNNPack",
-            m.net.Proto(),
-            init_net.Proto())
-        self.assertEqual(
-            workspace.RunNetOnce(proto.SerializeToString()), True)
+            "ConvToNNPack", m.net.Proto(), init_net.Proto()
+        )
+        self.assertEqual(workspace.RunNetOnce(proto.SerializeToString()), True)
         proto = workspace.ApplyTransformIfFaster(
             "ConvToNNPack",
             m.net.Proto(),
             init_net.Proto(),
             warmup_runs=10,
             main_runs=100,
-            improvement_threshold=2.0)
-        self.assertEqual(
-            workspace.RunNetOnce(proto.SerializeToString()), True)
+            improvement_threshold=2.0,
+        )
+        self.assertEqual(workspace.RunNetOnce(proto.SerializeToString()), True)
 
 
 class MyModule(torch.jit.ScriptModule):
@@ -711,9 +779,13 @@ class MyModule(torch.jit.ScriptModule):
         return self.mult.mm(x)
 
     @torch.jit.script_method
-    def multi_input(self, x, y, z=2):
-        # type: (Tensor, Tensor, int) -> Tensor
+    def multi_input(self, x: torch.Tensor, y: torch.Tensor, z: int = 2) -> torch.Tensor:
         return x + y + z
+
+    @torch.jit.script_method
+    def multi_input_tensor_list(self, tensor_list):  # pyre-ignore: PT type annotations
+        # type: (List[Tensor]) -> Tensor
+        return tensor_list[0] + tensor_list[1] + tensor_list[2]
 
     @torch.jit.script_method
     def multi_output(self, x):
@@ -722,56 +794,103 @@ class MyModule(torch.jit.ScriptModule):
 
 @unittest.skipIf(
     "ScriptModule" not in core._REGISTERED_OPERATORS,
-    "Script module integration in Caffe2 is not enabled")
+    "Script module integration in Caffe2 is not enabled",
+)
 class TestScriptModule(test_util.TestCase):
     def _createFeedModule(self):
-        workspace.FeedBlob('m', MyModule())
+        workspace.FeedBlob("m", MyModule())
 
     def testCreation(self):
         m = MyModule()
-        workspace.FeedBlob('module', m)
-        m2 = workspace.FetchBlob('module')
+        workspace.FeedBlob("module", m)
+        m2 = workspace.FetchBlob("module")
         self.assertTrue(m2 is not None)
 
     def testForward(self):
         self._createFeedModule()
         val = np.random.rand(5, 5).astype(np.float32)
         param = np.array([[1, 2, 3, 4, 5]]).astype(np.float32)
-        workspace.FeedBlob('w', val)
-        workspace.RunOperatorOnce(core.CreateOperator("ScriptModule", ["m", "w"], ["y"]))
-        np.testing.assert_almost_equal(workspace.FetchBlob("y"), np.matmul(param, val), decimal=5)
+        workspace.FeedBlob("w", val)
+        workspace.RunOperatorOnce(
+            core.CreateOperator("ScriptModule", ["m", "w"], ["y"])
+        )
+        np.testing.assert_almost_equal(
+            workspace.FetchBlob("y"), np.matmul(param, val), decimal=5
+        )
 
     def testMultiInputOutput(self):
         self._createFeedModule()
         val = np.random.rand(5, 5).astype(np.float32)
-        workspace.FeedBlob('w', val)
+        workspace.FeedBlob("w", val)
         val2 = np.random.rand(5, 5).astype(np.float32)
-        workspace.FeedBlob('w2', val2)
-        workspace.RunOperatorOnce(core.CreateOperator("ScriptModule", ["m", "w", "w2"], ["y"], method="multi_input"))
-        workspace.RunOperatorOnce(core.CreateOperator("ScriptModule", ["m", "w"], ["y1", "y2"], method="multi_output"))
-        np.testing.assert_almost_equal(workspace.FetchBlob("y"), val + val2 + 2, decimal=5)
+        workspace.FeedBlob("w2", val2)
+        workspace.RunOperatorOnce(
+            core.CreateOperator(
+                "ScriptModule", ["m", "w", "w2"], ["y"], method="multi_input"
+            )
+        )
+        workspace.RunOperatorOnce(
+            core.CreateOperator(
+                "ScriptModule", ["m", "w"], ["y1", "y2"], method="multi_output"
+            )
+        )
+        np.testing.assert_almost_equal(
+            workspace.FetchBlob("y"), val + val2 + 2, decimal=5
+        )
         np.testing.assert_almost_equal(workspace.FetchBlob("y1"), val, decimal=5)
         np.testing.assert_almost_equal(workspace.FetchBlob("y2"), val + 1, decimal=5)
+
+    def testMultiTensorListInput(self):
+        self._createFeedModule()
+        val = np.random.rand(5, 5).astype(np.float32)
+        workspace.FeedBlob("w", val)
+        val2 = np.random.rand(5, 5).astype(np.float32)
+        workspace.FeedBlob("w2", val2)
+        val3 = np.random.rand(5, 5).astype(np.float32)
+        workspace.FeedBlob("w3", val3)
+
+        workspace.RunOperatorOnce(
+            core.CreateOperator(
+                "ScriptModule",
+                ["m", "w", "w2", "w3"],
+                ["y"],
+                method="multi_input_tensor_list",
+                pass_inputs_as_tensor_list=True,
+            )
+        )
+        np.testing.assert_almost_equal(
+            workspace.FetchBlob("y"), val + val2 + val3, decimal=5
+        )
 
     def testSerialization(self):
         tmpdir = tempfile.mkdtemp()
         try:
             self._createFeedModule()
-            workspace.RunOperatorOnce(core.CreateOperator(
-                "Save",
-                ["m"], [],
-                absolute_path=1,
-                db=os.path.join(tmpdir, "db"), db_type="minidb"))
+            workspace.RunOperatorOnce(
+                core.CreateOperator(
+                    "Save",
+                    ["m"],
+                    [],
+                    absolute_path=1,
+                    db=os.path.join(tmpdir, "db"),
+                    db_type="minidb",
+                )
+            )
             workspace.ResetWorkspace()
 
-            self.assertFalse(workspace.HasBlob('m'))
-            workspace.RunOperatorOnce(core.CreateOperator(
-                "Load",
-                [], [],
-                absolute_path=1,
-                db=os.path.join(tmpdir, "db"), db_type="minidb",
-                load_all=1))
-            self.assertTrue(workspace.HasBlob('m'))
+            self.assertFalse(workspace.HasBlob("m"))
+            workspace.RunOperatorOnce(
+                core.CreateOperator(
+                    "Load",
+                    [],
+                    [],
+                    absolute_path=1,
+                    db=os.path.join(tmpdir, "db"),
+                    db_type="minidb",
+                    load_all=1,
+                )
+            )
+            self.assertTrue(workspace.HasBlob("m"))
             # TODO: make caffe2 side load return python-sided module
             # right now it returns the base class (torch._C.ScriptModule)
             # self.assertTrue(isinstance(workspace.FetchBlob('m'), torch.jit.ScriptModule))
@@ -779,9 +898,13 @@ class TestScriptModule(test_util.TestCase):
             # do something with the module
             val = np.random.rand(5, 5).astype(np.float32)
             param = np.array([[1, 2, 3, 4, 5]]).astype(np.float32)
-            workspace.FeedBlob('w', val)
-            workspace.RunOperatorOnce(core.CreateOperator("ScriptModule", ["m", "w"], ["y"]))
-            np.testing.assert_almost_equal(workspace.FetchBlob("y"), np.matmul(param, val), decimal=5)
+            workspace.FeedBlob("w", val)
+            workspace.RunOperatorOnce(
+                core.CreateOperator("ScriptModule", ["m", "w"], ["y"])
+            )
+            np.testing.assert_almost_equal(
+                workspace.FetchBlob("y"), np.matmul(param, val), decimal=5
+            )
         finally:
             # clean up temp folder.
             try:
@@ -795,15 +918,20 @@ class TestScriptModuleFromString(TestScriptModule):
     def _createFeedModule(self):
         workspace.RunOperatorOnce(
             core.CreateOperator(
-                "ScriptModuleLoad", [], ["m"],
-                serialized_binary=self._get_modules_bytes(MyModule())))
+                "ScriptModuleLoad",
+                [],
+                ["m"],
+                serialized_binary=self._get_modules_bytes(MyModule()),
+            )
+        )
 
     def _get_modules_bytes(self, the_module):
         import io
+
         buffer = io.BytesIO()
         torch.jit.save(the_module, buffer)
         return buffer.getvalue()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

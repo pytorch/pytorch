@@ -8,6 +8,8 @@
 #include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 
+#include <c10/util/irange.h>
+
 namespace caffe2 {
 namespace utils {
 
@@ -48,6 +50,7 @@ std::vector<int> nms_cpu_upright(
   std::vector<int> keep;
   while (order.size() > 0) {
     // exit if already enough proposals
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     if (topN >= 0 && keep.size() >= topN) {
       break;
     }
@@ -130,7 +133,7 @@ std::vector<int> soft_nms_cpu_upright(
 
     // Find proposal with max score among remaining proposals
     int max_pos;
-    auto max_score = GetSubArray(*out_scores, pending).maxCoeff(&max_pos);
+    GetSubArray(*out_scores, pending).maxCoeff(&max_pos);
     int i = pending[max_pos];
     keep.push_back(i);
 
@@ -148,7 +151,7 @@ std::vector<int> soft_nms_cpu_upright(
     EArrX ovr = inter / (areas[i] + GetSubArray(areas, rest_indices) - inter);
 
     // Update scores based on computed IoU, overlap threshold and NMS method
-    for (int j = 0; j < rest_indices.size(); ++j) {
+    for (const auto j : c10::irange(rest_indices.size())) {
       typename Derived2::Scalar weight;
       switch (method) {
         case 1: // Linear
@@ -559,6 +562,7 @@ std::vector<int> nms_cpu_rotated(
   std::vector<int> keep;
   while (order.size() > 0) {
     // exit if already enough proposals
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     if (topN >= 0 && keep.size() >= topN) {
       break;
     }
@@ -569,7 +573,7 @@ std::vector<int> nms_cpu_rotated(
         order.data() + 1, order.size() - 1);
 
     EArrX inter(rest_indices.size());
-    for (int j = 0; j < rest_indices.size(); ++j) {
+    for (const auto j : c10::irange(rest_indices.size())) {
       inter[j] = rotated_rect_intersection(
           rotated_rects[i], rotated_rects[rest_indices[j]]);
     }
@@ -630,7 +634,7 @@ std::vector<int> soft_nms_cpu_rotated(
 
     // Find proposal with max score among remaining proposals
     int max_pos;
-    auto max_score = GetSubArray(*out_scores, pending).maxCoeff(&max_pos);
+    GetSubArray(*out_scores, pending).maxCoeff(&max_pos);
     int i = pending[max_pos];
     keep.push_back(i);
 
@@ -638,7 +642,7 @@ std::vector<int> soft_nms_cpu_rotated(
     std::swap(pending(0), pending(max_pos));
     const auto& rest_indices = pending.tail(pending.size() - 1);
     EArrX inter(rest_indices.size());
-    for (int j = 0; j < rest_indices.size(); ++j) {
+    for (const auto j : c10::irange(rest_indices.size())) {
       inter[j] = rotated_rect_intersection(
           rotated_rects[i], rotated_rects[rest_indices[j]]);
     }
@@ -646,7 +650,7 @@ std::vector<int> soft_nms_cpu_rotated(
 
     // Update scores based on computed IoU, overlap threshold and NMS method
     // TODO (viswanath): Should angle info be included as well while filtering?
-    for (int j = 0; j < rest_indices.size(); ++j) {
+    for (const auto j : c10::irange(rest_indices.size())) {
       typename Derived2::Scalar weight;
       switch (method) {
         case 1: // Linear
