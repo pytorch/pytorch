@@ -2237,7 +2237,7 @@
   structured: True
   variants: function
   precomputed:
-    - dim -> int dim
+  - dim -> int dim
   dispatch:
     CPU, CUDA: index_copy_out
 
