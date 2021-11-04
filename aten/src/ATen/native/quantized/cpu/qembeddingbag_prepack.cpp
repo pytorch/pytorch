@@ -54,8 +54,14 @@ c10::intrusive_ptr<EmbeddingPackedParamsBase> PackedEmbeddingBagWeight::prepack(
       "Expect embedding_bag weights to be quantized using kPerChannelAffineFloatQParams");
   std::vector<float> weight_bias(embedding_rows);
 
-  float *weight_scales = qweight.q_per_channel_scales().data_ptr<float>();
-  float *weight_zero_points = qweight.q_per_channel_zero_points().data_ptr<float>();
+  at::Tensor channel_scales = qweight.q_per_channel_scales();
+  at::Tensor channel_zero_points = qweight.q_per_channel_zero_points();
+  std::vector<float> weight_scales(
+    channel_scales.data_ptr<float>(),
+    channel_scales.data_ptr<float>() + embedding_rows);
+  std::vector<float> weight_zero_points(
+    channel_zero_points.data_ptr<float>(),
+    channel_zero_points.data_ptr<float>() + embedding_rows);
 
   for (const auto i : c10::irange(embedding_rows)) {
     weight_bias[i] = weight_zero_points[i] * weight_scales[i] * -1;
@@ -114,7 +120,7 @@ c10::intrusive_ptr<EmbeddingPackedParamsBase> PackedEmbeddingBagWeight::prepack(
   }
 
   auto packed_ptr = c10::make_intrusive<PackedEmbeddingBagWeight>(
-      output, weight_scales, weight_zero_points, bit_width, qtype, version);
+      output, std::move(weight_scales), std::move(weight_zero_points), bit_width, qtype, version);
 
   return packed_ptr;
 }
