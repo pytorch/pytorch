@@ -6084,10 +6084,17 @@ for shape in [(1,), ()]:
                 self.assertEqual(a, y.grad_fn._saved_other)
                 self.assertEqual(a.dtype, y.grad_fn._saved_self.dtype)
                 self.assertEqual(a.layout, y.grad_fn._saved_self.layout)
-                if y.is_sparse:
+                if a.is_sparse:
                     y = y.to_dense()
                 y.sum().backward()
-                self.assertEqual(2 * a, a.grad)
+
+                actual = 2 * a
+                expected = a.grad
+                if a.is_sparse:
+                    actual = actual.coalesce()
+                    expected = expected.coalesce()
+
+                self.assertEqual(actual, expected)
 
         for cuda in [False] + ([True] if torch.cuda.is_available() else []):
             for pin_memory in [True, False]:

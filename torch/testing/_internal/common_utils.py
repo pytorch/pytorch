@@ -1335,7 +1335,7 @@ class TensorOrArrayPair(TensorLikePair):
 
 class UnittestPair(Pair):
     CLS: Union[Type, Tuple[Type, ...]]
-    TYPE_NAME: Optional[str]
+    TYPE_NAME: Optional[str] = None
 
     def __init__(self, actual, expected, **other_parameters):
         self._check_inputs_isinstance(actual, expected, cls=self.CLS)
@@ -1785,9 +1785,21 @@ class TestCase(expecttest.TestCase):
             exact_stride=False,
             exact_is_coalesced=False
     ):
-        if any(isinstance(a, np.ndarray) and a.dtype not in numpy_to_torch_dtype_dict for a in (x, y)):
-            x = x.tolist()
-            y = y.tolist()
+        unsupported_numpy_dtype = any(
+            isinstance(a, np.ndarray) and a.dtype not in numpy_to_torch_dtype_dict for a in (x, y)
+        )
+        tensor_sequence_comparison = (
+            isinstance(x, torch.Tensor)
+            and isinstance(y, Sequence)
+            or isinstance(y, torch.Tensor)
+            and isinstance(x, Sequence)
+        )
+        if unsupported_numpy_dtype or tensor_sequence_comparison:
+            def tolist(input):
+                return input.tolist() if isinstance(input, (torch.Tensor, np.ndarray)) else list(input)
+
+            x = tolist(x)
+            y = tolist(y)
 
         assert_equal(
             x,

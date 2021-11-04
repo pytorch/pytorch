@@ -166,7 +166,7 @@ def make_tensor_mismatch_msg(
     )
 
 
-class UnsupportedInputs(Exception):
+class UnsupportedInputs(Exception):  # noqa: B903
     def __init__(self, meta: Optional[ErrorMeta] = None) -> None:
         self.meta = meta
 
@@ -201,16 +201,13 @@ class Pair(abc.ABC):
         outputs = []
         for input in inputs:
             output: Any = fn(input)
-            if isinstance(output, tuple):
-                error_meta, *output = fn(input)
-            else:
+            if isinstance(output, ErrorMeta) or output is None:
                 error_meta = output
                 output = []
+            else:
+                error_meta, *output = output
             if error_meta:
                 return error_meta._replace(id=id) if id else error_meta, None  # type: ignore[misc]
-
-            if not output:
-                continue
 
             outputs.append(output[0] if len(output) == 1 else output)
         return None, tuple(outputs) if outputs else None
@@ -304,6 +301,8 @@ class NumberPair(Pair):
 
         if cmath.isnan(self.actual) and cmath.isnan(self.expected) and self.equal_nan:
             return None
+
+        # 1 / 0
 
         diff = abs(self.actual - self.expected)
         tolerance = self.atol + self.rtol * abs(self.expected)
@@ -908,12 +907,14 @@ def assert_close(
         ... )
         Traceback (most recent call last):
         ...
-        TypeError: No comparison pair was able to handle inputs of type <class 'torch.nn.parameter.Parameter'> and <class 'torch.Tensor'>.
+        TypeError: No comparison pair was able to handle inputs of type
+        <class 'torch.nn.parameter.Parameter'> and <class 'torch.Tensor'>.
         >>> # If the inputs are not directly related, they are never considered close
         >>> torch.testing.assert_close(actual.numpy(), expected)
         Traceback (most recent call last):
         ...
-        TypeError: No comparison pair was able to handle inputs of type <class 'numpy.ndarray'> and <class 'torch.Tensor'>.
+        TypeError: No comparison pair was able to handle inputs of type <class 'numpy.ndarray'>
+        and <class 'torch.Tensor'>.
         >>> # Exceptions to these rules are Python scalars. They can be checked regardless of
         >>> # their type if check_dtype=False.
         >>> torch.testing.assert_close(1.0, 1, check_dtype=False)
@@ -932,7 +933,7 @@ def assert_close(
 
         >>> expected = torch.tensor([1.0, 2.0, 3.0])
         >>> actual = torch.tensor([1.0, 4.0, 5.0])
-        >>> # The default mismatch message can be overwritten.
+        >>> # The default error message can be overwritten.
         >>> torch.testing.assert_close(actual, expected, msg="Argh, the tensors are not close!")
         Traceback (most recent call last):
         ...
