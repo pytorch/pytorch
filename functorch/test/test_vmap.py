@@ -3022,18 +3022,11 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('lu_unpack'),
         xfail('nn.functional.pad', 'constant'),
         xfail('bfloat16'),
-        xfail('bool'),
-        xfail('byte'),
-        xfail('char'),
         xfail('empty_like'),
-        xfail('float'),
         xfail('half'),
         xfail('histogramdd'),
-        xfail('int'),
-        xfail('long'),
         xfail('nn.functional.embedding'),
         xfail('randn_like'),
-        xfail('short'),
     }
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestVmapOperatorsOpInfo', 'test_vmap_exhaustive', vmap_fail)
