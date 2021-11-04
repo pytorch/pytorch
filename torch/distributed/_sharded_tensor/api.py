@@ -27,7 +27,14 @@ from torch.distributed._sharding_spec._internals import (
 )
 from torch.types import Number
 from .metadata import TensorProperties, ShardedTensorMetadata
-from .ops import kaiming_uniform_, normal_, sharded_embedding, sharded_linear, uniform_
+from .ops import (
+    kaiming_uniform_,
+    normal_,
+    sharded_embedding,
+    sharded_embedding_bag,
+    sharded_linear,
+    uniform_,
+)
 from .shard import Shard
 from .utils import (
     _CURRENT_PROCESS_GROUP,
@@ -363,7 +370,7 @@ class ShardedTensor(object):
                 raise ValueError(
                     f'Local shard tensor is incompatible with local ShardMetadata! '
                     f'local shard tensor size: {local_shard_tensor.size()}, '
-                    f'local ShardMetadata shard lengths: {shard_meta.shard_lengths}'
+                    f'local ShardMetadata shard lengths: {shard_meta.shard_sizes}'
                 )
 
             if local_shard_tensor.is_pinned() != tensor_properties.pin_memory:
@@ -489,6 +496,8 @@ class ShardedTensor(object):
             return sharded_linear(types, args, kwargs, self._process_group)
         if func == torch.nn.functional.embedding:
             return sharded_embedding(types, args, kwargs, self._process_group)
+        if func == torch.nn.functional.embedding_bag:
+            return sharded_embedding_bag(types, args, kwargs, self._process_group)
         elif func == torch.nn.init.normal_:
             return normal_(types, args, kwargs)
         elif func == torch.nn.init.uniform_:

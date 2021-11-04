@@ -48,11 +48,11 @@ class Shard(object):
                 of the shard on each dimension.
             rank(int): Specify the rank for the shard.
         """
-        shard_lengths = list(tensor.size())
+        shard_sizes = list(tensor.size())
         placement = _remote_device(f"rank:{rank}/{str(tensor.device)}")
         shard_meta = ShardMetadata(
             shard_offsets=shard_offsets,
-            shard_lengths=shard_lengths,
+            shard_lengths=shard_sizes,
             placement=placement
         )
         return Shard(tensor, shard_meta)

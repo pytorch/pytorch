@@ -236,6 +236,7 @@ class TestShardingSpec(TestCase):
         self.assertEqual(3, get_split_size(11, 4))
         self.assertEqual(3, get_split_size(12, 4))
         self.assertEqual(4, get_split_size(13, 4))
+        self.assertEqual(2, get_split_size(5, 4))
 
         self.assertEqual(11, get_split_size(11, 1))
         self.assertEqual(1, get_split_size(11, 11))
@@ -245,6 +246,7 @@ class TestShardingSpec(TestCase):
         self.assertEqual(2, get_chunked_dim_size(11, 3, 3))
         self.assertEqual(4, get_chunked_dim_size(13, 4, 0))
         self.assertEqual(1, get_chunked_dim_size(13, 4, 3))
+        self.assertEqual(0, get_chunked_dim_size(5, 2, 3))
 
 if __name__ == '__main__':
     run_tests()
