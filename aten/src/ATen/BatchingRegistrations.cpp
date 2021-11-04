@@ -556,7 +556,6 @@ Tensor _new_zeros_with_same_feature_meta_batching_rule(
     int64_t unused_num_batch_dims) {
   TORCH_CHECK(isBatchedTensor(self) && !isBatchedTensor(other),
     "Only the 'batched grad' use case is supported in PyTorch core.");
-
   auto self_physical_view = at::MultiBatchVmapTransform::logicalToPhysical(self);
   const auto& self_physical_tensor = self_physical_view.tensor();
   int64_t num_batch_dims = self_physical_view.numBatchDims();
