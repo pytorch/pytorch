@@ -1,4 +1,4 @@
-from typing import cast
+from typing import List, cast
 
 import torch
 import torch.distributed as dist
@@ -235,7 +235,7 @@ def _validate_embedding_bag_param(args, kwargs):
         )
     if include_last_offset and offsets is None:
         raise ValueError('offsets is required for flag "include_last_offset"!')
-    if include_last_offset and offsets[-1] != input.size(0):
+    if include_last_offset and cast(List[int], offsets)[-1] != input.size(0):
         raise ValueError(
             'offsets need to have the input size in the end when the flag "include_last_offset" is on!'
         )
