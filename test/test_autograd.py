@@ -7482,8 +7482,10 @@ class TestAutogradForwardModeBatchedGrad(TestCase):
     def test_out_of_place_basic(self):
         a = torch.rand(4, 4, dtype=torch.double, requires_grad=True)
         b = torch.rand(4, 4, dtype=torch.double, requires_grad=True)
-        self.assertTrue(gradcheck(torch.sin, a, check_forward_ad=True))
-        self.assertTrue(gradcheck(torch.add, (a, b), check_forward_ad=True))
+        self.assertTrue(gradcheck(torch.sin, a, check_forward_ad=True, check_batched_grad=True,
+                                  check_batched_forward_grad=True))
+        self.assertTrue(gradcheck(torch.add, (a, b), check_forward_ad=True, check_batched_grad=True,
+                                  check_batched_forward_grad=True))
 
     def test_out_of_place_not_same_layout(self):
         input = torch.zeros([2, 2]).transpose(0, 1)

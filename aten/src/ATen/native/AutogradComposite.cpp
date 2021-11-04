@@ -1,5 +1,4 @@
 #include <ATen/ATen.h>
-#include <ATen/native/ResizeCommon.h>
 
 namespace at {
 namespace native {
@@ -22,7 +21,8 @@ Tensor _new_zeros_with_same_feature_meta(
     const at::Tensor& self,
     const at::Tensor& other,
     int64_t self_num_batch_dims) {
-  // This implementation only applies to the batched grad case
+  // NB: This function can be called directly from _set_fw_grad or
+  //     if self is batched, from this function's batching rule.
   auto other_sizes = other.sizes();
   auto other_strides = other.strides();
   auto other_storage_offset = other.storage_offset();
