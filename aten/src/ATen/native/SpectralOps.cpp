@@ -4,7 +4,6 @@
 #include <ATen/native/SpectralOpsUtils.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/WrapDimUtils.h>
 #include <c10/util/irange.h>
 
 #include <algorithm>
