@@ -1727,9 +1727,9 @@ void removeOutputUsedOnlyInDtype(Node* fusion_node) {
         type_const->node()->moveBefore(fusion_block->return_node());
         fusion_block->replaceOutput(i, type_const);
 
-        // remove the dangling output tensor in CudaFusionGroup
-        fusion_node->eraseOutput(i);
-        fusion_node_graph->eraseOutput(i);
+        // removing the dangling output tensor from CudaFusionGroup would
+        // require tracing output i from block to output j in CudaFusionGroup.
+        // We choose to instead do that later by simply checking uses
       }
 
       {
@@ -1754,6 +1754,18 @@ void removeOutputUsedOnlyInDtype(Node* fusion_node) {
   }
 
   if (updated) {
+    // Remove fusion node output with no uses;
+    for (int64_t i = static_cast<int64_t>(fusion_node->outputs().size()) - 1;
+         i >= 0;
+         --i) {
+      if (fusion_node->output(i)->uses().empty()) {
+        GRAPH_UPDATE(
+            "removing output: ", i, " from fusion node: ", *fusion_node);
+        fusion_node->eraseOutput(i);
+        fusion_node_graph->eraseOutput(i);
+      }
+    }
+
     fusion_node->g_(attr::Subgraph, fusion_node_graph);
   }
 }

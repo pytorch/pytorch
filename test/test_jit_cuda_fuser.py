@@ -2865,6 +2865,38 @@ class TestCudaFuser(JitTestCase):
         self.assertGraphContains(graph, 'aten::add', True)
         self.assertGraphContains(graph, 'aten::relu', True)
 
+    @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_remove_output_used_only_in_dtype(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self, num_features=4):
+                super(MyModule, self).__init__()
+                self.bn0 = torch.nn.BatchNorm2d(num_features)
+                self.bn1 = torch.nn.BatchNorm2d(num_features)
+
+            def forward(self, x, y):
+                o1 = self.bn0(x)
+                o2 = self.bn1(y)
+                return torch.relu(o1 + o2)
+
+        t = MyModule(4).float().cuda()
+
+        jitted = torch.jit.script(t)
+        x = torch.randn(3, 4, 2, 5, dtype=torch.float32, device="cuda")
+        y = torch.randn(3, 4, 2, 5, dtype=torch.float32, device="cuda")
+
+        with torch.cuda.amp.autocast(True):
+            for i in range(5):
+                jit_o = jitted(x, y)
+
+            jit_o = jitted(x, y)
+            o = t(x, y)
+
+            self.assertTrue(torch.allclose(jit_o, o))
+            graph = jitted.graph_for(x, y)
+            self.assertGraphContains(graph, FUSION_GROUP, True)
 
     @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
