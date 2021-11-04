@@ -42,15 +42,15 @@ class JitLoggingConfig {
   void parse();
 
  public:
-  std::string getLoggingLevels() {
+  std::string getLoggingLevels() const {
     return this->logging_levels;
   }
   void setLoggingLevels(std::string levels) {
-    this->logging_levels = levels;
+    this->logging_levels = std::move(levels);
     parse();
   }
 
-  std::unordered_map<std::string, size_t> getFilesToLevels() {
+  const std::unordered_map<std::string, size_t>& getFilesToLevels() const {
     return this->files_to_levels;
   }
 
@@ -68,7 +68,7 @@ std::string get_jit_logging_levels() {
 }
 
 void set_jit_logging_levels(std::string level) {
-  JitLoggingConfig::getInstance().setLoggingLevels(level);
+  JitLoggingConfig::getInstance().setLoggingLevels(std::move(level));
 }
 
 void set_jit_logging_output_stream(std::ostream& stream) {
@@ -91,7 +91,7 @@ void JitLoggingConfig::parse() {
   std::stringstream in_ss;
   in_ss << "function:" << this->logging_levels;
 
-  std::unordered_map<std::string, size_t> new_files_to_levels;
+  files_to_levels.clear();
   std::string line;
   while (std::getline(in_ss, line, ':')) {
     if (line.size() == 0) {
@@ -105,15 +105,12 @@ void JitLoggingConfig::parse() {
         ? line.size()
         : line.find_last_of('.');
     auto filename = line.substr(begin_index, end_index - begin_index);
-    new_files_to_levels.insert({filename, logging_level});
+    files_to_levels.insert({filename, logging_level});
   }
-
-  this->files_to_levels = new_files_to_levels;
 }
 
 bool is_enabled(const char* cfname, JitLoggingLevels level) {
-  const std::unordered_map<std::string, size_t> files_to_levels =
-      JitLoggingConfig::getInstance().getFilesToLevels();
+  auto &files_to_levels = JitLoggingConfig::getInstance().getFilesToLevels();
   std::string fname{cfname};
   fname = c10::detail::StripBasename(fname);
   auto end_index = fname.find_last_of('.') == std::string::npos
