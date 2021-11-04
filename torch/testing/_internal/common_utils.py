@@ -465,7 +465,7 @@ LOG_SUFFIX = args.log_suffix
 RUN_PARALLEL = args.run_parallel
 TEST_BAILOUTS = args.test_bailouts
 TEST_DISCOVER = args.discover_tests
-TEST_IN_SUBPROCESS = args.subprocess
+TEST_IN_SUBPROCESS = True  # args.subprocess
 TEST_SAVE_XML = args.save_xml
 REPEAT_COUNT = args.repeat
 SEED = args.seed
@@ -572,18 +572,25 @@ def run_tests(argv=UNITTEST_ARGS):
     if TEST_DISCOVER:
         _print_test_names()
     elif TEST_IN_SUBPROCESS:
+        print("RUNNING IN SUBPROCESS")
+        print("RUNNING IN SUBPROCESS")
+        print("RUNNING IN SUBPROCESS")
+        print("RUNNING IN SUBPROCESS")
+        print("RUNNING IN SUBPROCESS")
+        print("RUNNING IN SUBPROCESS")
+        print("RUNNING IN SUBPROCESS")
         suite = unittest.TestLoader().loadTestsFromModule(__main__)
         test_cases = discover_test_cases_recursively(suite)
         failed_tests = []
         for case in test_cases:
             test_case_full_name = case.id().split('.', 1)[1]
-            if not issubclass(case, TestCase):
+            if not isinstance(case, TestCase):
                 err = "This test case should extend from torch.testing._internal.common_utils.TestCase but it does not."
                 print(f"{test_case_full_name} - failed. {err}")
                 failed_tests.append(test_case_full_name)
-            exitcode = shell([sys.executable] + argv + [test_case_full_name])
-            if exitcode != 0:
-                failed_tests.append(test_case_full_name)
+        #     exitcode = shell([sys.executable] + argv + [test_case_full_name])
+        #     if exitcode != 0:
+        #         failed_tests.append(test_case_full_name)
 
         assert len(failed_tests) == 0, "{} unit test(s) failed:\n\t{}".format(
             len(failed_tests), '\n\t'.join(failed_tests))
