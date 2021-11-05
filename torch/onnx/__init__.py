@@ -13,16 +13,16 @@ constant_folding_opset_versions = [9, 10, 11, 12, 13, 14]
 
 
 class ExportTypes:
-    r""""Specifies how the ONNX graph is stored"""
+    r""""Specifies how the ONNX model is stored."""
 
-    PROTOBUF_FILE = "Save ONNX graph in the specified protobuf file"
-    ZIP_ARCHIVE = "Save ONNX graph in the specified ZIP file (uncompressed)"
-    COMPRESSED_ZIP_ARCHIVE = "Save ONNX graph in the specified ZIP file (compressed)"
-    DIRECTORY = "Save ONNX graph in the specified folder"
+    PROTOBUF_FILE = "Saves model in the specified protobuf file."
+    ZIP_ARCHIVE = "Saves model in the specified ZIP file (uncompressed)."
+    COMPRESSED_ZIP_ARCHIVE = "Saves model in the specified ZIP file (compressed)."
+    DIRECTORY = "Saves model in the specified folder."
 
 
 class CheckerError(Exception):
-    r"""Exception raised when ONNX checker detects an invalid ONNX graph"""
+    r"""Raised when ONNX checker detects an invalid model."""
 
     pass
 
