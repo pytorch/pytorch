@@ -623,6 +623,7 @@ class TestAutocast(JitTestCase):
         self.assertEqual(t0.grad.dtype, ref_t0.grad.dtype)
         self.assertEqual(t1.grad.dtype, ref_t1.grad.dtype)
 
+    @unittest.skipIf(not TEST_CUDA, "No cuda")
     def test_jit_call_method_under_autocast(self):
         @torch.jit.interface
         class Iface(torch.nn.Module):
