@@ -1926,6 +1926,7 @@ void LLVMCodeGenImpl::visit(ExternalCallPtr v) {
       b->strides()[dim]->accept(this);
       auto stride_val = this->value_;
       irb_.CreateStore(irb_.CreateZExt(stride_val, LongTy_), gep);
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__ << " stride_val:" << stride_val << std::endl;
       stride_idx++;
     }
 

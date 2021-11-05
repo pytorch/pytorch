@@ -59,7 +59,9 @@ std::vector<at::Tensor> constructTensors(
               << " dims:" << c10::IntArrayRef(buf_dims_vec[i])
               << " strides:" << c10::IntArrayRef(buf_strides_vec[i])
               << std::endl;
-    //tensor.as_strided(buf_dims_vec[i], buf_strides_vec[i]);
+    if (!isQIntType(buf_dtypes_vec[i])) {
+      //tensor.as_strided(buf_dims_vec[i], buf_strides_vec[i]);
+    }
     tensors.emplace_back(tensor);
   }
   std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
@@ -149,14 +151,25 @@ void nnc_aten_quantized_conv2d(
       x_qscale,
       x_qzero,
       at::TensorOptions(toQIntType(x_qdtype)));
-  qx.as_strided(tensors[1].sizes(), tensors[1].strides());
+  // ---
+  std::vector<std::vector<int64_t>> buf_strides_vec;
+  int64_t buf_strides_idx = 0;
+  for (const auto i : c10::irange(bufs_num)) {
+    buf_strides_vec.emplace_back();
+    for (const auto dim : c10::irange(buf_ranks[i])) {
+      (void)dim;
+      buf_strides_vec[i].push_back(buf_strides[buf_strides_idx++]);
+    }
+  }
+  //qx.as_strided(tensors[1].sizes(), buf_strides_vec[1]);
+  // ---
   auto uiptr = ((uintptr_t*)buf_data[2])[0];
   auto convPackedParams = reinterpret_cast<ConvPackedParamsBase<2>*>(uiptr);
   const double out_qscale = ((double*)extra_args)[3];
   const int64_t out_qzero = extra_args[4];
   auto r = convPackedParams->apply(qx, out_qscale, out_qzero);
   auto strides = r.strides().vec();
-  r = r.contiguous();
+  //r = r.contiguous();
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
 
@@ -185,12 +198,25 @@ void nnc_aten_quantized_conv2d_relu(
       x_qscale,
       x_qzero,
       at::TensorOptions(toQIntType(x_qdtype)));
+  // ---
+  std::vector<std::vector<int64_t>> buf_strides_vec;
+  int64_t buf_strides_idx = 0;
+  for (const auto i : c10::irange(bufs_num)) {
+    buf_strides_vec.emplace_back();
+    for (const auto dim : c10::irange(buf_ranks[i])) {
+      (void)dim;
+      buf_strides_vec[i].push_back(buf_strides[buf_strides_idx++]);
+    }
+  }
+  //qx.as_strided(tensors[1].sizes(), buf_strides_vec[1]);
+  // ---
+
   auto uiptr = ((uintptr_t*)buf_data[2])[0];
   auto convPackedParams = reinterpret_cast<ConvPackedParamsBase<2>*>(uiptr);
   const double out_qscale = ((double*)extra_args)[3];
   const int64_t out_qzero = extra_args[4];
   auto r = convPackedParams->apply_relu(qx, out_qscale, out_qzero);
-  r = r.contiguous();
+  //r = r.contiguous();
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
 
@@ -235,7 +261,7 @@ void nnc_aten_quantized_add(
   const double out_qscale = ((double*)extra_args)[6];
   const int64_t out_qzero = extra_args[7];
   auto r = at::native::quantized_add(qa, qb, out_qscale, out_qzero);
-  r = r.contiguous();
+  //r = r.contiguous();
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
 
@@ -350,7 +376,7 @@ void nnc_aten_upsample_nearest2d(
       (scale_factor_h != -1.f) ? c10::optional<at::ArrayRef<double>>(
                                      {scale_factor_h, scale_factor_w})
                                : c10::nullopt);
-  r = r.contiguous();
+  //r = r.contiguous();
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
 
