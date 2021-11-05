@@ -6,6 +6,10 @@ namespace at {
 namespace native {
 namespace mobile {
 
+bool is_padded_contiguous(
+    const Tensor& input,
+    const c10::MemoryFormat memory_format);
+
 Tensor allocate_padded_contiguous_if_needed(
     const Tensor& input,
     c10::MemoryFormat memory_format);
