@@ -1413,7 +1413,11 @@ void StaticRuntime::check_for_memory_leak(bool output_returned) {
             const auto& t = ival->toTensor();
             if (t.defined()) {
               auto* storage_impl = t.storage().unsafeGetStorageImpl();
-              TORCH_CHECK(storage_impl->data() == nullptr, error_msg);
+              TORCH_CHECK(
+                  storage_impl->data() == nullptr ||
+                      (planner_ &&
+                       planner_->isManagedStorageImpl(storage_impl)),
+                  error_msg);
             }
           }
         }

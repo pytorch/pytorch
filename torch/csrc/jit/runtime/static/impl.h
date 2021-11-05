@@ -344,8 +344,10 @@ class TORCH_API StaticRuntime {
     return static_module_.is_optimizable_container_type(n);
   }
 
-  // Deallocate managed output tensors. This should be called only when all the
-  // references to the output from Static Runtime are gone.
+  // WARNING: Deallocate managed output tensors.  A client receiving Static
+  // Runtime-managed Tensors needs to be very careful to call
+  // `StaticRuntime::deallocateOutputTensors` after all references of output
+  // Tensors are gone.
   void deallocateOutputTensors();
 
   bool checkOutputTensorMemoryLeaks();
@@ -415,8 +417,12 @@ class TORCH_API ProcessedNode {
         inputs_(std::make_unique<const IValue*[]>(rhs.inputs_size_)),
         outputs_(std::make_unique<IValue[]>(rhs.outputs_size_)),
         inputs_size_(rhs.inputs_size_),
-        outputs_size_(rhs.outputs_size_),
-        op_name_(rhs.op_name_) {
+        outputs_size_(rhs.outputs_size_)
+#ifndef PYTORCH_DISABLE_PER_OP_PROFILING
+        ,
+        op_name_(rhs.op_name_)
+#endif
+  {
     std::copy(
         rhs.inputs_.get(), rhs.inputs_.get() + inputs_size_, inputs_.get());
     std::copy(
@@ -443,7 +449,9 @@ class TORCH_API ProcessedNode {
     }
     std::copy(
         rhs.outputs_.get(), rhs.outputs_.get() + outputs_size_, outputs_.get());
+#ifndef PYTORCH_DISABLE_PER_OP_PROFILING
     op_name_ = rhs.op_name_;
+#endif
 
     return *this;
   }
