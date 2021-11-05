@@ -145,8 +145,7 @@ void AutogradMeta::set_fw_grad(const at::TensorBase& new_grad_base, const at::Te
             // can be re-used.
             new_base_fw_grad = new_grad;
           } else {
-            // if new_grad is actually batched, the batching rule will override the batch dims arg
-            new_base_fw_grad = at::_new_zeros_with_same_feature_meta(new_grad, base, /*batch dims*/0);
+            new_base_fw_grad = at::_new_zeros_with_same_feature_meta(new_grad, base, c10::nullopt);
 
             // Update new_grad to be a view of the base
             Tensor new_fw_grad_value;
@@ -172,8 +171,7 @@ void AutogradMeta::set_fw_grad(const at::TensorBase& new_grad_base, const at::Te
         TORCH_INTERNAL_ASSERT(!this_view_meta->has_fw_view(),
             "Expected the output of forward differentiable view operations to have the tangent have the same layout as primal")
       }
-      // if new_grad is actually batched, the batching rule will override the batch dims arg
-      auto res = at::_new_zeros_with_same_feature_meta(new_grad, self, /*batch dims*/0);
+      auto res = at::_new_zeros_with_same_feature_meta(new_grad, self, c10::nullopt);
       res.copy_(new_grad);
       new_grad = res;
     }
