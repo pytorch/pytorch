@@ -600,7 +600,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
             torch.manual_seed(self.rank)
             np.random.seed(self.rank)
 
-            def check_optimizer_equivalence(optimizer: Type[torch.optim.Optimizer], maximize: bool = False ):
+            def check_optimizer_equivalence(optimizer: Type[torch.optim.Optimizer], maximize: bool = False):
                 # Any model works. Add one different buffer per rank
                 model = torch.nn.Sequential(
                     torch.nn.Linear(2, 3),
@@ -690,7 +690,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                 check_step()
 
             for opt in [torch.optim.Adam]:
-                check_optimizer_equivalence(opt, test_maximize=False)
+                check_optimizer_equivalence(opt, maximize=False)
 
             for opt in [torch.optim.SGD]:
                 for maximize in (True, False):
