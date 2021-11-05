@@ -1014,7 +1014,7 @@ def main():
                 continue
             has_failed = True
             failure_messages.append(err_message)
-            if not True:  # options_clone.continue_through_error:
+            if not options_clone.continue_through_error:
                 raise RuntimeError(err_message)
             print_to_stderr(err_message)
     finally:

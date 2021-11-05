@@ -574,8 +574,6 @@ def run_tests(argv=UNITTEST_ARGS):
         return
 
     # Before running the tests, lint to check that every test case extends from TestCase
-    print("I AM RUNNING THE LINT NOW MWAHAHHAHAH")
-    print("I AM RUNNING THE LINT NOW MWAHAHHAHAH")
     suite = unittest.TestLoader().loadTestsFromModule(__main__)
     test_cases = discover_test_cases_recursively(suite)
     failed = False
@@ -587,8 +585,6 @@ def run_tests(argv=UNITTEST_ARGS):
             failed = True
     if failed:
         sys.exit(1)
-
-    return  # For now just print what needs fixing and don't waste time running actual tests
 
     if TEST_IN_SUBPROCESS:
         failed_tests = []
