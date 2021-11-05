@@ -2302,6 +2302,13 @@ TEST(FuturesTest, Error) {
   ASSERT_TRUE(strcmp(f1->tryRetrieveErrorMessage().c_str(), "Failed") == 0);
   ASSERT_EQ(sat1, 1);
   ASSERT_EQ(sat2, 1);
+  try {
+    (void)f1->constValue();
+    ASSERT_TRUE(false); // Supposed to throw.
+  } catch (const std::exception& e) {
+    // Original error should be logged.
+    ASSERT_TRUE(std::string(e.what()).find("Failed") != std::string::npos);
+  }
 }
 
 // then
