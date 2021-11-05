@@ -10,6 +10,7 @@
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/inliner.h>
+#include <torch/csrc/jit/runtime/static/ProcessedNodeInputs.h>
 
 #ifdef FBCODE_CAFFE2
 #include <folly/container/F14Map.h>
@@ -428,8 +429,7 @@ class TORCH_API ProcessedNode {
   ProcessedNode(const ProcessedNode& rhs)
       : node_(rhs.node_),
         fn_(rhs.fn_),
-        inputs_(std::make_unique<uint16_t[]>(rhs.inputs_size_)),
-        inputs_size_(rhs.inputs_size_),
+        inputs_(rhs.inputs_),
         outputs_offset_(rhs.outputs_offset_),
         num_outputs_(rhs.num_outputs_),
         values_(rhs.values_)
@@ -437,10 +437,7 @@ class TORCH_API ProcessedNode {
         ,
         op_name_(rhs.op_name_)
 #endif
-  {
-    std::copy(
-        rhs.inputs_.get(), rhs.inputs_.get() + inputs_size_, inputs_.get());
-  }
+  {}
 
   ProcessedNode& operator=(const ProcessedNode& rhs) {
     if (this == &rhs) {
@@ -449,16 +446,7 @@ class TORCH_API ProcessedNode {
     node_ = rhs.node_;
     fn_ = rhs.fn_;
 
-    if (!inputs_ || inputs_size_ != rhs.inputs_size_) {
-      if (rhs.inputs_) {
-        inputs_ = std::make_unique<uint16_t[]>(rhs.inputs_size_);
-      }
-      inputs_size_ = rhs.inputs_size_;
-    }
-    if (rhs.inputs_) {
-      std::copy(
-          rhs.inputs_.get(), rhs.inputs_.get() + inputs_size_, inputs_.get());
-    }
+    inputs_ = rhs.inputs_;
 
     outputs_offset_ = rhs.outputs_offset_;
     num_outputs_ = rhs.num_outputs_;
@@ -484,7 +472,6 @@ class TORCH_API ProcessedNode {
 
   // Input is readonly
   const IValue& Input(uint32_t i) const {
-    DCHECK(i < inputs_size_);
     return values_[inputs_[i]];
   }
 
@@ -500,7 +487,6 @@ class TORCH_API ProcessedNode {
   }
 
   void set_input_by_idx(uint32_t index, size_t ival_index) {
-    DCHECK_LT(index, inputs_size_);
     TORCH_CHECK(
         ival_index < (1 << 16),
         "input index in values table ",
@@ -530,7 +516,7 @@ class TORCH_API ProcessedNode {
 #endif
 
   C10_NODISCARD uint16_t num_inputs() const {
-    return inputs_size_;
+    return inputs_.size();
   }
 
   std::vector<IValue> clone_inputs() const;
@@ -572,8 +558,7 @@ class TORCH_API ProcessedNode {
     FunctionKind kind = FunctionKind::kOutVariant;
   };
   Function fn_;
-  std::unique_ptr<uint16_t[]> inputs_; // unowned
-  uint32_t inputs_size_;
+  ProcessedNodeInputs inputs_;
   uint16_t outputs_offset_;
   uint16_t num_outputs_;
   IValue* values_ = nullptr; // unowned

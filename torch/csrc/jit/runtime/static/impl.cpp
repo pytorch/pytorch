@@ -1511,7 +1511,7 @@ ProcessedNode::ProcessedNode(
     uint32_t inputsSize,
     bool enable_out_variant)
     : node_(node),
-      inputs_size_(inputsSize),
+      inputs_(inputsSize),
       op_name_(node->kind().toQualString()) {
   // TODO leverage type information
   TORCH_CHECK(
@@ -1520,9 +1520,6 @@ ProcessedNode::ProcessedNode(
       " inputs to ProcessedNode ",
       node->kind().toQualString(),
       " is too many to use 2-byte indexing");
-  if (inputsSize) {
-    inputs_ = std::make_unique<uint16_t[]>(inputsSize);
-  }
   TORCH_CHECK(
       node->outputs().size() < (1 << (sizeof(num_outputs_) * 8)),
       node->outputs().size(),
@@ -1577,7 +1574,7 @@ ProcessedNode::ProcessedNode(
 
 std::vector<IValue> ProcessedNode::clone_inputs() const {
   std::vector<IValue> result;
-  result.reserve(inputs_size_);
+  result.reserve(inputs_.size());
   for (const auto idx : c10::irange(num_inputs())) {
     result.emplace_back(Input(idx));
   }
@@ -1652,7 +1649,7 @@ bool ProcessedNode::verify_inputs_dont_overlap_outputs() const {
   if (!schema || (schema->is_mutable() && num_outputs_ == 1)) {
     return true;
   }
-  for (const auto i : c10::irange(inputs_size_)) {
+  for (const auto i : c10::irange(inputs_.size())) {
     const IValue* in = &Input(i);
     if (!in->isTensor()) {
       continue;
