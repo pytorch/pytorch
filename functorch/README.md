@@ -47,6 +47,9 @@ is more stable releases of functorch with future versions of PyTorch.
 
 ### Installing functorch main
 
+<details><summary>Click to expand</summary>
+<p>
+
 #### Using Colab
 
 Follow the instructions [in this Colab notebook](https://colab.research.google.com/drive/1CrLkqIrydBYP_svnF89UUO-aQEqNPE8x?usp=sharing)
@@ -92,7 +95,7 @@ Run a quick sanity check in python:
 >>> assert torch.allclose(y, x.sin())
 ```
 
-### From Source
+#### From Source
 
 `functorch` is a PyTorch C++ Extension module. To install,
 
@@ -106,7 +109,13 @@ pytest test/test_vmap.py -v
 pytest test/test_eager_transforms.py -v
 ```
 
+</p>
+</details>
+
 ### Installing functorch preview with PyTorch 1.10
+
+<details><summary>Click to expand</summary>
+<p>
 
 #### Using Colab
 
@@ -130,6 +139,9 @@ Finally, run a quick sanity check in python:
 >>> y = vmap(torch.sin)(x)
 >>> assert torch.allclose(y, x.sin())
 ```
+
+</p>
+</details>
 
 ## What are the transforms?
 
