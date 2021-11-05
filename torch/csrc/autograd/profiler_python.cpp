@@ -3,7 +3,13 @@
 #include <iostream>
 #include <limits>
 #include <memory>
+
+#if CAFFE2_HAVE_RE2
+#include <re2/re2.h>
+#else
 #include <regex>
+#endif
+
 #include <string>
 #include <utility>
 #include <vector>
@@ -21,6 +27,7 @@ namespace py = pybind11;
 
 
 namespace torch { namespace autograd { namespace profiler { namespace python_tracer {
+namespace {
 
 // ============================================================================
 // == Core data types =========================================================
@@ -91,6 +98,7 @@ static PyTypeObject TraceContextType = {
     nullptr,                    /* tp_init */
     nullptr,                    /* tp_alloc */
     PyType_GenericNew,          /* tp_new */
+    nullptr                     /* tp_free */
 };
 
 // CPython has a more expressive set of events for tracing / profiling:
@@ -194,11 +202,11 @@ struct RawEvent {
         void* null_;
     } misc_;
 
-    TraceTag tag() const {
+    C10_NODISCARD TraceTag tag() const {
         return static_cast<TraceTag>(tag_);
     }
 
-    int lasti() const {
+    C10_NODISCARD int lasti() const {
         // f_lasti is positive, with one exception: CPython intializes frames
         // with `f_lasti = -1`. We don't want to give up half of the range by
         // switching to int16_t. So instead we do the fast (underflowing) cast
@@ -210,7 +218,9 @@ struct RawEvent {
     }
 };
 
-static_assert(sizeof(RawEvent) == 16, "RawEvent should be exactly 16 bytes.");
+// Make sure the bit packing that we do in RawEvent actually results in the
+// desired size reduction.
+static_assert(sizeof(RawEvent) <= 16, "RawEvent is too large");
 
 
 // std::hash doesn't have a specialization for pairs so we have to define one.
@@ -228,7 +238,7 @@ struct hash_pair {
 // ============================================================================
 constexpr size_t max_py_threads = std::numeric_limits<uint8_t>::max() + 1;
 
-class PythonTracer {
+class PythonTracer final {
  public:
     // Static methods serve as external interfaces (which expect raw pointers)
     // and handle forwarding to the singleton.
@@ -329,22 +339,18 @@ void PythonTracer::start(size_t max_threads) {
     pybind11::gil_scoped_acquire gil;
     auto t0 = now();
 
-    // Loop over all interpreters and all threads within each interpreter.
-    // We will need to register a trace function with each thread. We set the
-    // current thread to position zero to ensure that it is traced, and so we
-    // can restore the thread state after registration.
+    // Loop over all threads within the current interpreter. We will need to
+    // register a trace function with each thread. We set the current thread to
+    // position zero to ensure that it is traced, and so we can restore the
+    // thread state after registration.
     std::vector<PyThreadState*> thread_states { PyThreadState_Get() };
     if (max_threads > 1) {
-        PyInterpreterState* interpreter_state = PyInterpreterState_Head();
-        while (interpreter_state != nullptr) {
-            PyThreadState* thread_state = PyInterpreterState_ThreadHead(interpreter_state);
-            while (thread_state != nullptr) {
-                if (thread_state != thread_states[0]) {
-                    thread_states.push_back(thread_state);
-                }
-                thread_state = PyThreadState_Next(thread_state);
+        auto thread_state = thread_states[0];
+        while (thread_state != nullptr) {
+            if (thread_state != thread_states[0]) {
+                thread_states.push_back(thread_state);
             }
-            interpreter_state = PyInterpreterState_Next(interpreter_state);
+            thread_state = PyThreadState_Next(thread_state);
         }
 
         if (thread_states.size() > max_threads) {
@@ -446,9 +452,9 @@ void PythonTracer::store_description(PyFrameObject* frame) {
         code_descriptions_.insert({
             { frame->f_code, frame->f_lasti },
             {
-                /*line_no_=*/PyCode_Addr2Line(frame->f_code, frame->f_lasti),
-                /*filename_=*/THPUtils_unpackString(frame->f_code->co_filename),
-                /*funcname_=*/THPUtils_unpackString(frame->f_code->co_name)
+                /*line_no=*/ PyCode_Addr2Line(frame->f_code, frame->f_lasti),
+                /*filename=*/ THPUtils_unpackString(frame->f_code->co_filename),
+                /*funcname=*/ THPUtils_unpackString(frame->f_code->co_name)
             }
         });
     }
@@ -492,10 +498,11 @@ class PyTraceReplay {
     std::vector<std::unique_ptr<PyTraceEvent>> replay_stack() const;
 
     struct ReplayFrame {
-        int64_t t0_;
-        int64_t t1_;
+        int64_t startTime_;
+        int64_t endTime_;
         std::string name_;
         CallType call_type_;
+        size_t module_id_;  // Only set call_type_ == kPyModuleCall
         size_t id_;
         size_t parent_id_;
         uint64_t thread_id_;
@@ -503,6 +510,7 @@ class PyTraceReplay {
         size_t return_idx_;
     };
 
+    ska::flat_hash_map<size_t, PyObject*> module_self_map_;
     ska::flat_hash_map<size_t, std::string> module_name_map_;
     std::regex filename_prune_;
 };
@@ -520,6 +528,7 @@ PyTraceReplay::PyTraceReplay()
             module_names.insert({ call.self_, name_stream.str() });
         }
 
+        module_self_map_.insert({ call.event_index_, call.self_ });
         module_name_map_.insert({ call.event_index_, module_names.at(call.self_) });
     }
 }
@@ -561,12 +570,13 @@ std::vector<std::unique_ptr<PyTraceEvent>> PyTraceReplay::replay_stack() const {
         auto ctx = tracer.trace_contexts_[raw_event.thread_id_];
         auto t = static_cast<int64_t>(raw_event.t_) + ctx->initial_us_;
 
-        auto push_frame = [&](std::string name, CallType call_type) {
+        auto push_frame = [&](std::string name, CallType call_type, size_t module_id = 0) {
             ReplayFrame frame {
-                /*t0_=*/ t,
-                /*t1_=*/ -1,  // Placeholder
+                /*startTime_=*/ t,
+                /*endTime_=*/ -1,  // Placeholder
                 /*name_=*/ name,
                 /*call_type_=*/ call_type,
+                /*module_id_=*/ module_id,
                 /*id_=*/ id_counter++,
                 /*parent_id_=*/ stack.size() ? stack.back().id_ : 0,
                 /*thread_id_=*/ raw_event.thread_id_,
@@ -579,7 +589,10 @@ std::vector<std::unique_ptr<PyTraceEvent>> PyTraceReplay::replay_stack() const {
         switch (raw_event.tag()) {
             case TraceTag::kPy_Call:
                 if (module_name_map_.find(event_idx) != module_name_map_.end()) {
-                    push_frame(module_name_map_.at(event_idx), CallType::kPyModuleCall);
+                    push_frame(
+                        module_name_map_.at(event_idx),
+                        CallType::kPyModuleCall,
+                        reinterpret_cast<size_t>(module_self_map_.at(event_idx)));
                 } else {
                     push_frame(py_name(raw_event), CallType::kPyCall);
                 }
@@ -592,7 +605,7 @@ std::vector<std::unique_ptr<PyTraceEvent>> PyTraceReplay::replay_stack() const {
             case TraceTag::kPy_Return:
             case TraceTag::kC_Return:
                 TORCH_INTERNAL_ASSERT(stack.size(), "Python replay stack is empty.")
-                stack.back().t1_ = t;
+                stack.back().endTime_ = t;
                 stack.back().return_idx_ = event_idx;
                 results.push_back(std::move(stack.back()));
                 stack.pop_back();
@@ -606,7 +619,7 @@ std::vector<std::unique_ptr<PyTraceEvent>> PyTraceReplay::replay_stack() const {
     const auto t_final = now();
     for (auto& stack : stacks) {
         while (stack.size()) {
-            stack.back().t1_ = t_final;
+            stack.back().endTime_ = t_final;
             stack.back().return_idx_ = event_idx;
             results.push_back(std::move(stack.back()));
             stack.pop_back();
@@ -619,12 +632,13 @@ std::vector<std::unique_ptr<PyTraceEvent>> PyTraceReplay::replay_stack() const {
     std::vector<std::unique_ptr<PyTraceEvent>> out;
     for (auto& r : results) {
         out.push_back(std::make_unique<PyTraceEvent>(PyTraceEvent{
-            /*t0_=*/ r.t0_,
-            /*t1_=*/ r.t1_,
+            /*startTime_=*/ r.startTime_,
+            /*endTime_=*/ r.endTime_,
             /*name_=*/ r.name_,
             /*thread_id_=*/ r.thread_id_,
             /*parent_=*/ nullptr,
             /*call_type_=*/ r.call_type_,
+            /*module_id_=*/ r.module_id_,
             /*call_idx_=*/ r.call_idx_,
             /*return_idx_=*/ r.return_idx_
         }));
@@ -695,7 +709,10 @@ void PythonTracer::call(Command c) {
     }
 };
 
+}  // namespace
+
 void init() {
+    pybind11::gil_scoped_acquire gil;
     TORCH_CHECK(PyType_Ready(&TraceContextType) == 0);
 
     registerFunctions(

@@ -65,7 +65,7 @@ void call(Command c) {
   }
 }
 
-auto get_events() {
+std::vector<std::unique_ptr<PyTraceEvent>> get_events() {
   return get_events_fn != nullptr
     ? get_events_fn()
     : std::vector<std::unique_ptr<PyTraceEvent>>();
@@ -81,11 +81,11 @@ struct Replay {
   PyTraceEvent* frame_;
   bool enter_;
 
-  int64_t t() const {
-    return enter_ ? frame_->t0_ : frame_->t1_;
+  C10_NODISCARD int64_t t() const {
+    return enter_ ? frame_->startTime_ : frame_->endTime_;
   }
 
-  size_t idx() const {
+  C10_NODISCARD size_t idx() const {
     return enter_ ? frame_->call_idx_ : frame_->return_idx_;
   }
 
@@ -364,6 +364,23 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
     }
     std::sort(op_start_times.begin(), op_start_times.end());
 
+    // Map PyTraceEvent* to sequential integers for JSON export.
+    ska::flat_hash_map<python_tracer::PyTraceEvent*, std::string> py_event_indices_ {{ nullptr, std::string("null") }};
+    for (size_t i = 0; i < py_events.size(); i++) {
+      py_event_indices_.insert({ py_events[i].get(), std::to_string(i) });
+    }
+
+    ska::flat_hash_map<std::string, size_t> module_counter_;
+    ska::flat_hash_map<size_t, std::string> module_id_map_;
+    auto record_module_id = [&](python_tracer::PyTraceEvent* e) {
+      if (e->call_type_ != python_tracer::CallType::kPyModuleCall) {
+        module_id_map_[e->module_id_] = "null";
+      } else if (module_id_map_.find(e->module_id_) == module_id_map_.end()) {
+        // We use the fact that operator[] will default initialize new keys.
+        module_id_map_[e->module_id_] = std::to_string(module_counter_[e->name_]++);
+      }
+    };
+
     // Python events
     std::vector<python_tracer::Replay> py_replay;
     for (const auto& e : py_events) {
@@ -382,6 +399,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
       while (replay_it != py_replay.end() && replay_it->t() <= t) {
         if (replay_it->enter_) {
           py_stack.push_back(replay_it->frame_);
+          record_module_id(replay_it->frame_);
         } else {
           TORCH_INTERNAL_ASSERT(py_stack.size());
           TORCH_INTERNAL_ASSERT(py_stack.back() == replay_it->frame_);
@@ -397,34 +415,48 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
     auto py_device = libkineto::processId();
     auto main_thread = libkineto::systemThreadId();
     auto push_py_event = [&]() {
-      libkineto::GenericTraceActivity op(
+        auto e = (*py_events_it).get();
+        libkineto::GenericTraceActivity op(
           cpu_trace->span,
           libkineto::ActivityType::USER_ANNOTATION,
-          (*py_events_it)->name_
+          e->name_
         );
 
         op.device = py_device;
         op.resource = main_thread;
-        op.startTime = (*py_events_it)->t0_;
-        op.endTime = (*py_events_it)->t1_;
+        op.startTime = e->startTime_;
+        op.endTime = e->endTime_;
+
+        std::stringstream py_metadata;
+        py_metadata << "{ "
+            << "\"id\": " << py_event_indices_.at(e) <<  ", "
+            << "\"parent_id\": " << py_event_indices_.at(e->parent_) << ", "
+            << "\"module_id\": " << module_id_map_.at(e->module_id_) << ", "
+            << "\"python_thread\": " << e->thread_id_ << " }";
+        op.addMetadata("python_info", py_metadata.str());
+
         cpu_trace->activities.push_back(op);
         py_events_it++;
     };
 
+    TORCH_INTERNAL_ASSERT(activities.size() == kineto_events_.size());
     for (size_t idx = 0; idx < activities.size(); ++idx) {
       auto& activity = activities[idx];
 
       // Add any python events that occurred between this Kineto event and the
       // previous Kineto event.
-      while (py_events_it != py_events.end() && (*py_events_it)->t1_ <= activity.endTime) {
+      while (py_events_it != py_events.end() && (*py_events_it)->endTime_ <= activity.endTime) {
         push_py_event();
       }
+
+      auto python_caller = op_py_map.at(activity.startTime);
+      activity.addMetadata("python_caller_id", py_event_indices_.at(python_caller));
 
       // If the kineto event has a stack that means the JIT model has a stack
       // associated with it that we need to respect.
       if (!kineto_events_[idx].hasStack()) {
         std::vector<std::string> py_names;
-        _push_reverse_order(op_py_map.at(activity.startTime), py_names);
+        _push_reverse_order(python_caller, py_names);
         kineto_events_[idx].stack(py_names);
         activity.addMetadata("Call stack", stacksToStr(py_names, ";"));
       }

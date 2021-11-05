@@ -428,13 +428,14 @@ dependencies in libtorch is common in the PyTorch codebase.
 enum CallType { kPyCall = 0, kPyModuleCall, kCCall };
 
 struct TORCH_API PyTraceEvent {
-  int64_t t0_;
-  int64_t t1_;
+  int64_t startTime_;
+  int64_t endTime_;
   std::string name_;
 
   uint64_t thread_id_;
   PyTraceEvent* parent_;
   CallType call_type_;
+  size_t module_id_;  // Only set call_type_ == kPyModuleCall
 
   // Index in the list of raw call and return events. This allows one to
   // convert a vector of PyTraceEvents back into the constituent call and
