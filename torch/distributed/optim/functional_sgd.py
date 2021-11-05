@@ -24,7 +24,7 @@ class _FunctionalSGD(object):
         weight_decay: float = 0.0,
         nesterov: bool = False,
         maximize: bool = False,
-        _allow_empty_param_list: bool = False
+        _allow_empty_param_list: bool = False,
     ):
         self.defaults = {
             "lr": lr,
