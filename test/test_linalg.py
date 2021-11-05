@@ -2299,7 +2299,7 @@ class TestLinalg(TestCase):
     @dtypes(*floating_and_complex_types())
     def test_eig_with_nan(self, device, dtype):
         with self.assertRaisesRegex(RuntimeError, "linalg_eig: input tensor should not"):
-            a = torch.eye(5,5, device=device, dtype=dtype) * np.nan
+            a = torch.eye(5, 5, device=device, dtype=dtype) * np.nan
             values, vectors = torch.linalg.eig(a)
 
         with self.assertRaisesRegex(RuntimeError, "linalg_eig: input tensor should not"):
