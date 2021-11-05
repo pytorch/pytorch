@@ -38,8 +38,8 @@ class EmbeddingBenchmark(op_bench.TorchBenchmarkBase):
         self.inputs = {"input": input}
         self.set_module_name('embedding')
 
-    def forward(self, input, offset):
-        return self.embedding(input, offset)
+    def forward(self, input):
+        return self.embedding(input)
 
 op_bench.generate_pt_test(configs.embedding_short_configs, EmbeddingBenchmark)
 op_bench.generate_pt_gradient_test(configs.embedding_short_configs, EmbeddingBenchmark)
