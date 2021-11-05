@@ -18,7 +18,6 @@ import ruamel.yaml  # type: ignore[import]
 import argparse
 import json
 import sys
-from pathlib import Path
 from io import StringIO
 from enum import Enum
 from typing import NamedTuple, Optional
