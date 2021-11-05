@@ -11,6 +11,13 @@
 namespace at {
 namespace native {
 
+Tensor quantize_per_tensor_dynamic(
+    const Tensor& self,
+    ScalarType dtype) {
+  auto [scale, zero_point] = at::native::_choose_qparams_per_tensor(self, false);
+  return at::native::quantize_per_tensor(self, scale, zero_point, dtype);
+}
+
 Tensor quantize_per_tensor(
     const Tensor& self,
     double scale,
