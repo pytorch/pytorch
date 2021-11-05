@@ -94,16 +94,16 @@ def get_fallback_and_vmap_exhaustive(op, arg_values, kwarg_values, compute_loop_
         def f(x, *args, **kwargs):
             out = op(*args, **kwargs)
             if isinstance(out, torch.Tensor):
-                return out + x.to(out.device)
+                return out + x.to(out)
             out = list(out)
             for idx in range(len(out)):
-                out[idx] = out[idx] + x.to(out[idx].device)
+                out[idx] = out[idx] + x.to(out[idx])
             return out
 
         vmap1_dims = tuple([None] + list(in_dims))
         vmap2_dims = tuple([0] + [None] * len(in_dims))
         if compute_loop_out:
-            loop_out = pytree.tree_map(lambda v: torch.ones(2, *v.shape, device=v.device) + v, loop_out)
+            loop_out = pytree.tree_map(lambda v: torch.ones(2, *v.shape, dtype=v.dtype, device=v.device) + v, loop_out)
         else:
             loop_out = None
         batched_out = vmap(vmap(f, in_dims=vmap1_dims), in_dims=vmap2_dims)(torch.ones(2), *batched_args, **kwarg_values)
