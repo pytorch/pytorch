@@ -34,10 +34,10 @@ class BackendImplInterface {
 
   virtual BackendDataPtr MakeComputationDataFromTensor(
       const at::Tensor& tensor, const lazy_tensors::Shape& shape,
-      const std::string& device) const = 0;
+      const Device& device) const = 0;
 
-  virtual BackendDataPtr CreateDataPlaceholder(std::string device,
-                                        lazy_tensors::Shape shape) const = 0;
+  virtual BackendDataPtr CreateDataPlaceholder(const Device& device,
+      const lazy_tensors::Shape& shape) const = 0;
 
   virtual at::Tensor MakeTensorFromComputationData(
       const BackendDataPtr data,
@@ -64,7 +64,7 @@ class BackendImplInterface {
 
   virtual std::vector<BackendDataPtr> ExecuteComputation(
       Computation& computation, c10::ArrayRef<BackendDataPtr> arguments,
-      const std::string& device) const = 0;
+      const Device& device) const = 0;
 
   /**
    * Device Configuration
@@ -74,6 +74,7 @@ class BackendImplInterface {
 
   virtual size_t GetNumDevices() const = 0;
 
+  // TODO: Return std::vector<Device> instead.
   virtual std::vector<std::string> GetLocalDevices() const = 0;
 
   virtual std::vector<std::string> GetAllDevices() const = 0;

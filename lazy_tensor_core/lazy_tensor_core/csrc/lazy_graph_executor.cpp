@@ -436,17 +436,11 @@ void LazyGraphExecutor::MarkStep(const Device& device) {
   g_tls_data.Reset();
 }
 
-void LazyGraphExecutor::WaitDeviceOps(c10::ArrayRef<std::string> devices) {
+void LazyGraphExecutor::WaitDeviceOps() {
   std::set<Device> wait_devices;
-  if (!devices.empty()) {
-    for (auto& device_str : devices) {
-      wait_devices.insert(Device(device_str));
-    }
-  } else {
-    for (auto& device_str : compiler::getBackend()
-                                ->GetLocalDevices()) {
-      wait_devices.insert(Device(device_str));
-    }
+  for (auto& device_str : compiler::getBackend()->GetLocalDevices()) {
+    // TODO: Remove the last use of Device(const std::string& device_spec).
+    wait_devices.insert(Device(device_str));
   }
   // The LockDevices() API returns a vector of
   // lazy_tensors::util::ExceptionCleanup object, which is going to be freed
@@ -532,7 +526,7 @@ LazyGraphExecutor::Async::Async(SyncTensorCollection* coll,
       indices(std::move(coll->indices)),
       unlocker(std::move(coll->unlocker)),
       parameters_data(std::move(parameters_data)),
-      device(coll->device.toString()),
+      device(coll->device),
       cached_computation(std::move(cached_computation)),
       tensors_data(std::move(tensors_data)) {}
 
@@ -573,7 +567,7 @@ LazyGraphExecutor::SyncTensorCollection LazyGraphExecutor::CollectSyncTensors(
   }
 
   std::vector<at::Tensor> at_tensors;
-  std::vector<std::string> devices;
+  std::vector<Device> devices;
   std::vector<size_t> at_tensor_index;
   std::unordered_set<int64_t> tensor_ids;
   // The force_ltc_data controls aliasing compilation, so effectively the same
@@ -605,7 +599,7 @@ LazyGraphExecutor::SyncTensorCollection LazyGraphExecutor::CollectSyncTensors(
         c10::optional<at::Tensor> tensor_data = tensors[i].CurrentTensorData();
         CHECK(tensor_data);
         at_tensors.push_back(*tensor_data);
-        devices.push_back(tensors[i].GetDevice().toString());
+        devices.push_back(tensors[i].GetDevice());
         at_tensor_index.push_back(i);
       }
     }
@@ -657,7 +651,7 @@ std::vector<compiler::BackendDataPtr> LazyGraphExecutor::FetchTensorData(
     if (handle == nullptr && config.force_ltc_data) {
       const Device& tensor_device = tensor.GetDevice();
       handle = compiler::getBackend()
-                   ->CreateDataPlaceholder(tensor_device.toString(),
+                   ->CreateDataPlaceholder(tensor_device,
                                            std::move(tensor.shape()));
       tensor.SetDataHandle(handle, config.sync_ltc_data);
     }

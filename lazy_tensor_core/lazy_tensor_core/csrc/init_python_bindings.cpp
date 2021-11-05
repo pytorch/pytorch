@@ -63,7 +63,7 @@ void PrepareToExit() {
   //TODO(whc) should we hook this interface up? It does nothing currently
   compiler::getBackend()->PrepareToExit();
   //TODO(whc) can I call this unconditionally?
-  LazyGraphExecutor::Get()->WaitDeviceOps({});
+  LazyGraphExecutor::Get()->WaitDeviceOps();
 }
 
 std::string GetTensorsDump(
@@ -91,13 +91,23 @@ std::string GetCurrentThreadDevice() {
   return bridge::GetCurrentAtenDevice().str();
 }
 
-std::vector<std::string> GetLtcDevices(
+std::vector<std::string> GetLtcDeviceStrings(
     const std::vector<std::string>& devices) {
   std::vector<std::string> ltc_devices;
   ltc_devices.reserve(devices.size());
   for (auto& device_str : devices) {
     Device device = bridge::AtenDeviceToLtcDevice(c10::Device(device_str));
     ltc_devices.emplace_back(device.toString());
+  }
+  return ltc_devices;
+}
+
+std::vector<Device> GetLtcDevices(
+    const std::vector<std::string>& devices) {
+  std::vector<Device> ltc_devices;
+  ltc_devices.reserve(devices.size());
+  for (auto& device_str : devices) {
+    ltc_devices.push_back(bridge::AtenDeviceToLtcDevice(c10::Device(device_str)));
   }
   return ltc_devices;
 }
@@ -466,7 +476,7 @@ void InitLtcModuleBindings(py::module m) {
     std::vector<std::string> ltc_devices;
     {
       NoGilSection nogil;
-      ltc_devices = GetLtcDevices(devices);
+      ltc_devices = GetLtcDeviceStrings(devices);
     }
     return ltc_devices;
   });
@@ -611,7 +621,10 @@ void InitLtcModuleBindings(py::module m) {
       "_ltc_wait_device_ops",
       [](const std::vector<std::string>& devices) {
         NoGilSection nogil;
-        LazyGraphExecutor::Get()->WaitDeviceOps(devices);
+        if (!devices.empty()) {
+          LOG(ERROR) << "Non-empty devices are not supported.";
+        }
+        LazyGraphExecutor::Get()->WaitDeviceOps();
       },
       py::arg("devices"));
   m.def("_ltc_counter_names",

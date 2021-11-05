@@ -13,6 +13,7 @@ namespace torch_lazy_tensors {
 namespace bridge {
 namespace {
 
+// TODO(alanwaketan): Move it to the backend interface.
 class AtenLtcDeviceMapper {
  public:
   static AtenLtcDeviceMapper* Get();
@@ -31,7 +32,8 @@ class AtenLtcDeviceMapper {
   AtenLtcDeviceMapper() {
     for (auto& device_str :
          compiler::getBackend()->GetLocalDevices()) {
-      devices_.emplace_back(device_str);
+      // TODO(alanwaketan): The backend should do the mapping themselves, and construct the device accordingly.
+      devices_.emplace_back();
       devices_ordinals_[devices_.back()] = devices_.size() - 1;
     }
   }
