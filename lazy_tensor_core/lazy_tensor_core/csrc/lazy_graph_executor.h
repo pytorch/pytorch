@@ -205,7 +205,7 @@ class LazyGraphExecutor {
   std::shared_ptr<Async> ScheduleSyncTensorsGraph(
       std::vector<LazyTensor>* tensors, SyncTensorCollection* coll,
       std::vector<compiler::BackendDataPtr> parameters_data,
-      std::string device, ComputationCache::TypePtr cached_computation);
+      ComputationCache::TypePtr cached_computation);
 
   std::vector<at::Tensor> GetTensorsFused(std::vector<LazyTensor>* tensors);
 
