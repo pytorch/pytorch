@@ -240,6 +240,10 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
         while True:
             if self.main_datapipe_exhausted:
                 raise StopIteration
+            if self._datapipe_iterator is None:
+                raise ValueError(
+                    "_datapipe_iterator has not been set, likely because this private method is called directly "
+                    "without invoking get_next_element_by_instance() first.")
             value = next(self._datapipe_iterator)
             classification = self.classifier_fn(value)
             if classification is None and self.drop_none:
@@ -284,7 +288,6 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
         self.child_buffers = [deque() for _ in range(self.num_instances)]
         self.instance_started = [False] * self.num_instances
         self.main_datapipe_exhausted = False
-        # self.all_children_read = False
 
 @functional_datapipe('mux')
 class MultiplexerIterDataPipe(IterDataPipe):
