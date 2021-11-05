@@ -340,15 +340,12 @@ namespace {
 
 template<typename KeyT, typename ValueT>
 struct KeyValuePairWithKeyEquality {
-private:
-  std::remove_reference_t<KeyT> key_helper;
-  std::remove_reference_t<ValueT> value_helper;
 public:
   KeyT key;
   ValueT value;
 
   __host__ __device__ __forceinline__ KeyValuePairWithKeyEquality()
-    :key(key_helper), value(value_helper) {}
+    :key({}), value({}) {}
 
   __host__ __device__ __forceinline__ KeyValuePairWithKeyEquality(KeyT key, ValueT value)
     :key(key), value(value) {}
