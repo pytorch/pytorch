@@ -33,7 +33,6 @@ class LintMessage(NamedTuple):
     original: Optional[str]
     replacement: Optional[str]
     description: Optional[str]
-    bypassChangedLineFiltering: Optional[bool]
 
 
 def as_posix(name: str) -> str:
@@ -118,7 +117,6 @@ def main() -> None:
             description=(
                 f"Failed due to {err.__class__.__name__}:\n{err}"
             ),
-            bypassChangedLineFiltering=None,
         )
         print(json.dumps(err_msg._asdict()), flush=True)
         exit(0)
@@ -137,7 +135,6 @@ def main() -> None:
             original=None,
             replacement=None,
             description=args.error_description,
-            bypassChangedLineFiltering=None,
         )
         print(json.dumps(msg._asdict()), flush=True)
 
