@@ -452,7 +452,7 @@ You can generate a commit that limits the CI to only run a specific job by using
 
 ```bash
 # --job: specify one or more times to filter to a specific job + its dependencies
-# --filter-gha: specify github actions worklfows to keep
+# --filter-gha: specify github actions workflows to keep
 # --make-commit: commit CI changes to git with a message explaining the change
 python tools/testing/explicit_ci_jobs.py --job binary_linux_manywheel_3_6m_cpu_devtoolset7_nightly_test --filter-gha '*generated*gcc5.4*' --make-commit
 
