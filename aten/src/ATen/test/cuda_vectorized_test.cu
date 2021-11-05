@@ -8,13 +8,11 @@
 using namespace at::native;
 using namespace at::native::memory;
 
-constexpr int buffer_size = 1024;
-
-__managed__ double4 buffer1[buffer_size];
-__managed__ double4 buffer2[buffer_size];
+__managed__ double4 buffer1[1024];
+__managed__ double4 buffer2[1024];
 
 void reset_buffers() {
-  for (int i = 0; i < buffer_size; i++) {
+  for (int i = 0; i < 1024; i++) {
     buffer1[i].x = i;
     buffer1[i].y = i + 0.1;
     buffer1[i].z = i + 0.2;
@@ -76,7 +74,6 @@ TEST(TestVectorizedMemoryAccess, CanVectorizeUpTo) {
 // defined in `ATen/native/cuda/MemoryAccess.cuh`
 template <typename scalar_t, int vec_size>
 __global__ void vectorized_copy(scalar_t *dst, scalar_t *src) {
-  static_assert(vec_size <= thread_work_size() && thread_work_size() % vec_size == 0, "Invalid vec_size");
   using array_t = at::detail::Array<char*, 2>;
   array_t data;
   data[0] = reinterpret_cast<char *>(dst);
@@ -84,9 +81,9 @@ __global__ void vectorized_copy(scalar_t *dst, scalar_t *src) {
   int idx = blockIdx.x;
   using vectorized = policies::vectorized<vec_size, array_t>;
   auto policy = vectorized(data);
-  scalar_t buf[thread_work_size()];
+  scalar_t buf[thread_work_size];
   auto accessor = [&](int index) -> scalar_t & { return buf[index]; };
-  policy.load_single_arg(accessor, src + block_work_size() * blockIdx.x);
+  policy.load_single_arg(accessor, src + 256 * blockIdx.x);
   policy.store(buf, idx);
 }
 
@@ -101,8 +98,7 @@ TEST(TestVectorizedMemoryAccess, CopyKernel) {
   // vec4 copy
   reset_buffers();
   cudaDeviceSynchronize();
-  constexpr int total_work_size = buffer_size * 4;
-  vectorized_copy<double, 4><<<total_work_size / block_work_size() , num_threads()>>>(b2, b1);
+  vectorized_copy<double, 4><<<16, 64>>>(b2, b1);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   ASSERT_EQ(cudaSuccess, cudaDeviceSynchronize());
@@ -116,7 +112,7 @@ TEST(TestVectorizedMemoryAccess, CopyKernel) {
   // vec2 copy
   reset_buffers();
   cudaDeviceSynchronize();
-  vectorized_copy<double, 2><<<total_work_size / block_work_size() , num_threads()>>>(b2, b1);
+  vectorized_copy<double, 2><<<16, 64>>>(b2, b1);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   ASSERT_EQ(cudaSuccess, cudaDeviceSynchronize());
@@ -130,7 +126,7 @@ TEST(TestVectorizedMemoryAccess, CopyKernel) {
   // vec1 copy
   reset_buffers();
   cudaDeviceSynchronize();
-  vectorized_copy<double, 1><<<total_work_size / block_work_size() , num_threads()>>>(b2, b1);
+  vectorized_copy<double, 1><<<16, 64>>>(b2, b1);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   ASSERT_EQ(cudaSuccess, cudaDeviceSynchronize());
@@ -140,8 +136,8 @@ TEST(TestVectorizedMemoryAccess, CopyKernel) {
     ASSERT_EQ(buffer1[i].z, buffer2[i].z);
     ASSERT_EQ(buffer1[i].w, buffer2[i].w);
   }
-
 // Skipping this part until https://github.com/pytorch/pytorch/issues/51863 is resolved
+
 #if 0
   // unaligned
   for (int i = 0; i < 16; i++) {
@@ -150,7 +146,9 @@ TEST(TestVectorizedMemoryAccess, CopyKernel) {
       b2 = reinterpret_cast<double *>(reinterpret_cast<char *>(buffer2) + j);
       cudaGetLastError();
       cudaDeviceSynchronize();
-      vectorized_copy<double, 4><<<1, num_threads()>>>(b2, b1);
+      vectorized_copy<double, 4><<<1, 64>>>(b2, b1);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+
       cudaDeviceSynchronize();
       auto err = cudaGetLastError();
       if (i % 16 == 0 && j % 16 == 0) {
