@@ -4225,6 +4225,9 @@ class ForeachFuncInfo(OpInfo):
         self.ref_inplace = torch_ref_inplace
         self.supports_alpha_param = supports_alpha_param
 
+        if name == "norm":
+            self.ref = torch.linalg.vector_norm
+
 
 def sample_inputs_linalg_cholesky_inverse(op_info, device, dtype, requires_grad=False):
     # Generate Cholesky factors of positive-definite (non-singular) Hermitian (symmetric) matrices
@@ -6849,6 +6852,14 @@ foreach_minmax_op_db: List[ForeachFuncInfo] = [
         "minimum",
         dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         dtypesIfCUDA=all_types_and(torch.float16, torch.bool),
+    ),
+]
+
+foreach_reduce_op_db: List[ForeachFuncInfo] = [
+    ForeachFuncInfo(
+        "norm",
+        dtypesIfCPU=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
     ),
 ]
 
