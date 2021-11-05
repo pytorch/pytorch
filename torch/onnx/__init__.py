@@ -25,6 +25,9 @@ class CheckerError(Exception):
 
 
 class SymbolicContext:
+    r"""
+    Provides extra context for advanced symbolic functions.
+    """
     def __init__(self, params_dict, env, cur_node, onnx_block):
         self.params_dict: Dict[str, _C.IValue] = params_dict
         self.env: Dict[_C.Value, _C.Value] = env

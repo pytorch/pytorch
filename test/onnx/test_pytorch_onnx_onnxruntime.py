@@ -3395,7 +3395,7 @@ class TestONNXRuntime(unittest.TestCase):
                 ctx.save_for_backward(input)
                 return input.clamp(min=0)
 
-        def symbolic_python_op(ctx: torch.onnx.SymbolicContext, g: torch._C.Graph, n: torch._C.Node, *args, **kwargs):
+        def symbolic_python_op(ctx: torch.onnx.SymbolicContext, g: torch._C.Graph, *args, **kwargs):
             n = ctx.cur_node
             name = kwargs["name"]
             if name == "MyClip":
