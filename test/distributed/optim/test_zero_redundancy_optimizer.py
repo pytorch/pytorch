@@ -625,9 +625,9 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                 ddp_model_single = copy.deepcopy(model)
                 ddp_model_single.to(self.device)
 
-                ddp_optimizer = optimizer(ddp_model_single.parameters(), lr=1e-3)
+                ddp_optimizer = optimizer(ddp_model_single.parameters(), lr=1e-3, **defaults)
                 ddp_model = DDP(
-                    ddp_model_single, device_ids=[self.rank], broadcast_buffers=True, find_unused_parameters=True, **defaults
+                    ddp_model_single, device_ids=[self.rank], broadcast_buffers=True, find_unused_parameters=True
                 )
 
                 # The model should be synchronized in between the ranks at construction time, check that
