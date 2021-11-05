@@ -4,6 +4,7 @@ no CUDA calls shall be made, including torch.cuda.device_count(), etc.
 
 torch.testing._internal.common_cuda.py can freely initialize CUDA context when imported.
 """
+
 import sys
 import os
 import platform
@@ -37,7 +38,7 @@ import json
 import __main__  # type: ignore[import]
 import errno
 import ctypes
-from typing import Any, Dict, Iterable, Iterator, Optional, Union, List, Tuple, Type, cast
+from typing import cast, Any, Dict, Iterable, Iterator, Optional, Union, List, Tuple, Type
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -1275,9 +1276,10 @@ def check_if_enable(test: unittest.TestCase):
 
 
 class RelaxedNumberPair(NumberPair):
-    def _process_inputs(
-        self, actual: Any, expected: Any, *, id: Tuple[Any, ...]
-    ) -> Tuple[Union[int, float, complex], Union[int, float, complex]]:
+    def __init__(self, actual, expected, *, check_dtype=None, **other_parameters) -> None:
+        super().__init__(actual, expected, check_dtype=False, **other_parameters)
+
+    def _process_inputs(self, actual, expected, *, id):
         # We require only one of the inputs of the inputs to be a number,
         # whereas in NumberPair both inputs have to be numbers.
         if not (isinstance(actual, self._NUMBER_TYPES) or isinstance(expected, self._NUMBER_TYPES)):
@@ -1298,6 +1300,8 @@ class RelaxedNumberPair(NumberPair):
                 return error_meta, None
 
             return None, number_like.item()
+        elif isinstance(number_like, bool):
+            return None, int(number_like)
         else:
             return super()._to_number(number_like)
 
@@ -1308,9 +1312,7 @@ class TensorOrArrayPair(TensorLikePair):
         self.rtol = max(self.rtol, rtol_override)
         self.atol = max(self.atol, atol_override)
 
-    def _process_inputs(
-        self, actual, expected, *, id, allow_subclasses
-    ):
+    def _process_inputs(self, actual, expected, *, id, allow_subclasses):
         self._check_inputs_isinstance(actual, expected, cls=(torch.Tensor, np.ndarray))
 
         error_meta, tensors = self._apply_unary(self._to_tensor, actual, expected, id=id)
@@ -1332,7 +1334,7 @@ class UnittestPair(Pair):
         self._check_inputs_isinstance(actual, expected, cls=self.CLS)
         super().__init__(actual, expected, **other_parameters)
 
-    def compare(self) -> Optional[ErrorMeta]:
+    def compare(self):
         test_case = unittest.TestCase()
 
         try:
@@ -1755,7 +1757,6 @@ class TestCase(expecttest.TestCase):
 
         self.assertEqual(np_result, torch_result, **kwargs)
 
-    # Check in a follow up PR
     def assertEqualIgnoreType(self, *args, **kwargs) -> None:
         # If you are seeing this function used, that means test is written wrongly
         # and deserves detailed investigation
