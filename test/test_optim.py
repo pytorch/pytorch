@@ -119,13 +119,13 @@ class TestOptim(TestCase):
 
         initial_value = fn().item()
         for _i in range(200):
+            optimizer.step(fn)
             for scheduler in schedulers:
                 if isinstance(scheduler, ReduceLROnPlateau):
                     val_loss = fn()
                     scheduler.step(val_loss)
                 else:
                     scheduler.step()
-            optimizer.step(fn)
         self.assertLess(fn().item(), initial_value)
 
     def _test_state_dict(self, weight, bias, input, constructor):
@@ -1038,6 +1038,7 @@ class TestLRScheduler(TestCase):
         l = []
 
         for _ in range(10):
+            scheduler.optimizer.step()
             scheduler.step(2)
             l.append(self.opt.param_groups[0]['lr'])
         self.assertEqual(min(l), max(l))
@@ -1983,8 +1984,10 @@ class TestLRScheduler(TestCase):
                                  msg='LR is wrong in epoch {}: expected {}, got {}'.format(
                                      epoch, target[epoch], param_group['lr']), atol=1e-5, rtol=0)
             if epoch >= swa_start:
+                self.opt.step()
                 swa_scheduler.step()
             elif scheduler is not None:
+                self.opt.step()
                 scheduler.step()
 
     def test_swalr_hypers(self):
@@ -2067,6 +2070,7 @@ class TestLRScheduler(TestCase):
     def _check_scheduler_state_dict(self, constr, constr2, epochs=10):
         scheduler = constr()
         for _ in range(epochs):
+            scheduler.optimizer.step()
             scheduler.step()
         scheduler_copy = constr2()
         scheduler_copy.load_state_dict(scheduler.state_dict())
@@ -2078,8 +2082,10 @@ class TestLRScheduler(TestCase):
     def _test_get_last_lr(self, schedulers, targets, epochs=10):
         if isinstance(schedulers, _LRScheduler):
             schedulers = [schedulers]
+        optimizers = {scheduler.optimizer for scheduler in schedulers}
         for epoch in range(epochs):
             result = [scheduler.get_last_lr() for scheduler in schedulers]
+            [optimizer.step() for optimizer in optimizers]
             [scheduler.step() for scheduler in schedulers]
             target = [[t[epoch] for t in targets]] * len(schedulers)
             for t, r in zip(target, result):
@@ -2090,7 +2096,9 @@ class TestLRScheduler(TestCase):
     def _test_with_epoch(self, schedulers, targets, epochs=10):
         if isinstance(schedulers, _LRScheduler):
             schedulers = [schedulers]
+        optimizers = {scheduler.optimizer for scheduler in schedulers}
         for epoch in range(epochs):
+            [optimizer.step() for optimizer in optimizers]
             [scheduler.step(epoch) for scheduler in schedulers]  # step before assert: skip initial lr
             for param_group, target in zip(self.opt.param_groups, targets):
                 self.assertEqual(target[epoch], param_group['lr'],
@@ -2100,11 +2108,23 @@ class TestLRScheduler(TestCase):
     def _test(self, schedulers, targets, epochs=10):
         if isinstance(schedulers, _LRScheduler):
             schedulers = [schedulers]
+
+        def get_optimizer(scheduler):
+            if hasattr(scheduler, "optimizer"):
+                return scheduler.optimizer
+            else:
+                assert isinstance(scheduler, ChainedScheduler), \
+                    f"Error: scheduler={scheduler} does not have an optimizer and is not a chained scheduler."
+                return get_optimizer(scheduler._schedulers[0])
+        optimizers = set()
+        for scheduler in schedulers:
+            optimizers.add(get_optimizer(scheduler))
         for epoch in range(epochs):
             for param_group, target in zip(self.opt.param_groups, targets):
                 self.assertEqual(target[epoch], param_group['lr'],
                                  msg='LR is wrong in epoch {}: expected {}, got {}'.format(
                                      epoch, target[epoch], param_group['lr']), atol=1e-5, rtol=0)
+            [optimizer.step() for optimizer in optimizers]
             [scheduler.step() for scheduler in schedulers]
 
     def _test_CosineAnnealingWarmRestarts(self, scheduler, targets, epochs=10):
@@ -2128,10 +2148,12 @@ class TestLRScheduler(TestCase):
         self.setUp()
         targets = []
         for epoch in range(epochs):
+            closed_form_scheduler.optimizer.step()
             closed_form_scheduler.step(epoch)
             targets.append([group['lr'] for group in self.opt.param_groups])
         self.setUp()
         for epoch in range(epochs):
+            self.opt.step()
             scheduler.step()
             for i, param_group in enumerate(self.opt.param_groups):
                 self.assertEqual(targets[epoch][i], param_group['lr'],
@@ -2142,6 +2164,7 @@ class TestLRScheduler(TestCase):
         if isinstance(schedulers, _LRScheduler) or isinstance(schedulers, ReduceLROnPlateau):
             schedulers = [schedulers]
         for epoch in range(epochs):
+            self.opt.step()
             for scheduler in schedulers:
                 if isinstance(scheduler, ReduceLROnPlateau):
                     scheduler.step(metrics[epoch])
@@ -2182,6 +2205,7 @@ class TestLRScheduler(TestCase):
                         momentum_target[batch_num], param_group['momentum'],
                         msg='Momentum is wrong in batch_num {}: expected {}, got {}'.format(
                             batch_num, momentum_target[batch_num], param_group['momentum']), atol=1e-5, rtol=0)
+            self.opt.step()
             scheduler.step()
 
     def test_cosine_then_cyclic(self):
@@ -2199,6 +2223,7 @@ class TestLRScheduler(TestCase):
         )
 
         for i in range(40):
+            optimizer.step()
             if i <= lr_scheduler_1.T_max:
                 lr_scheduler_1.step()
             else:

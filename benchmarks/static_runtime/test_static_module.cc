@@ -39,12 +39,14 @@ TEST(StaticModule, ValueGroup) {
   std::vector<const Node*> nodes(graph.nodes().begin(), graph.nodes().end());
   const auto& value_group = sm.value_group();
 
-  std::vector<const Value*> expected_input_aliases{graph.inputs()[0], graph.inputs()[1], nodes[0]->output()};
+  std::vector<const Value*> expected_input_aliases{
+      graph.inputs()[0], graph.inputs()[1], nodes[0]->output()};
   for (auto* value : expected_input_aliases) {
     EXPECT_TRUE(value_group.isExternalAlias(value));
   }
 
-  std::vector<const Value*> expected_output_aliases{graph.outputs()[0], nodes[2]->output()};
+  std::vector<const Value*> expected_output_aliases{
+      graph.outputs()[0], nodes[2]->output()};
   for (auto* value : expected_output_aliases) {
     EXPECT_TRUE(value_group.isOutputAlias(value));
   }
