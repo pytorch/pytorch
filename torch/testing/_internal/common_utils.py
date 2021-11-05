@@ -587,6 +587,7 @@ def run_tests(argv=UNITTEST_ARGS):
                     world_size = os.environ.get("WORLD_SIZE", "")
                     env_prefix = f"BACKEND={backend} WORLD_SIZE={world_size}"
                     string_cmd = env_prefix + " " + string_cmd
+                # Log the command to reproduce the failure.
                 raise ValueError(f"Test exited with non-zero exitcode {exitcode}. Command to reproduce: {string_cmd}")
                 failed_tests.append(test_case_full_name)
 
