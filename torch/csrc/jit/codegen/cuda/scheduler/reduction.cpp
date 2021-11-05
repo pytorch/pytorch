@@ -353,15 +353,14 @@ ReductionParams innerReductionHeuristic(
         bdimx % warp_size == 0 ? bdimx : bdimx + warp_size - bdimx % warp_size;
   }
 
-  if (bdimy > 1) {
-    rparams.block_dim_iter_dom = ParallelType::TIDy;
-  }
 
   if (inner_reduction_unroll_factor || iter_unroll_factor == 1) {
     rparams.unroll_inner_reduction = true;
     rparams.unroll_factor_inner_reduction = inner_reduction_unroll_factor;
     rparams.vectorize_inner_reduction = vectorize;
   }
+
+  rparams.block_dim_iter_dom = ParallelType::TIDy;
   if (iter_unroll_factor > 1) {
     rparams.unroll_iter_dom = true;
     rparams.unroll_factor_iter_dom = iter_unroll_factor;
@@ -411,15 +410,6 @@ ReductionParams innerReductionHeuristic(
       gdimy = grodim;
       rparams.grid_dim_outer_reduction = ParallelType::BIDy;
     }
-  }
-
-  // If iteration numel is 1, making this really a 1D reduction problem, make
-  // sure it's not parallelized. This can cause issues when the iteration domain
-  // is a pure broadcast, then launch bounds tries to infer the size.
-  // TODO: Fix launch bounds inference as this shouldn't be necessary.
-  if (total_iteration_numel == 1) {
-    rparams.grid_dim_iter_dom = ParallelType::Serial;
-    rparams.block_dim_iter_dom = ParallelType::Serial;
   }
 
   rparams.lparams = LaunchParams(
