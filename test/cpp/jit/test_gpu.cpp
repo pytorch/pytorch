@@ -17393,7 +17393,7 @@ TEST(NVFuserTest, FusionPointwiseBroadcast_CUDA) {
 
   auto at_x_add_bias = at_x + at_bias;
   auto at_x_view = at::native::view(at_x_add_bias, output_shape);
-  auto aten_y = at::gelu(at_x_view, false);
+  auto aten_y = at::gelu(at_x_view);
 
   testValidate(&fusion, outputs, aten_inputs, {aten_y}, __LINE__, __FILE__);
 }

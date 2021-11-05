@@ -212,19 +212,8 @@ class NaiveTypePropagator {
         node->output()->setType(promoted_type);
         break;
       }
-      case aten::native_dropout_backward:
       case aten::dropout: {
         node->output()->setType(getInputTensorType(node, 0));
-        break;
-      }
-      case aten::native_dropout: {
-        auto out_type = getInputTensorType(node, 0);
-        node->output(0)->setType(out_type);
-
-        auto mask_type = TensorType::create(
-            at::ScalarType::Bool, *out_type->device(), c10::nullopt, false);
-
-        node->output(1)->setType(mask_type);
         break;
       }
       case aten::instance_norm:
