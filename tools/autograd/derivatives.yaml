@@ -530,8 +530,8 @@
   other: grad * self
   result: at::vdot(self_t, other_p) + at::vdot(self_p, other_t)
 
-- name: native_dropout(Tensor input, float p, float scale, bool train) -> (Tensor, Tensor)
-  input: "GradMode::is_enabled() ? infinitely_differentiable_native_dropout_backward(grad, result1, scale) : native_dropout_backward(grad, result1, scale)"
+- name: _fused_dropout(Tensor self, float p, Generator? generator=None) -> (Tensor, Tensor)
+  self: _fused_dropout_backward(grad, result1, p)
 
 - name: eig(Tensor self, bool eigenvectors=False) -> (Tensor eigenvalues, Tensor eigenvectors)
   self: eig_backward(grads, self, eigenvectors, eigenvalues, eigenvectors_return)
@@ -1676,12 +1676,8 @@
 - name: celu_(Tensor(a!) self, Scalar alpha=1.0) -> Tensor(a!)
   self: elu_backward(grad, alpha, 1, 1.0/alpha.toFloat(), /* is_result */ true, result)
 
-- name: gelu(Tensor self, bool approximate) -> Tensor
-  self: gelu_backward(grad, self, approximate)
-
-- name: gelu_backward(Tensor grad_output, Tensor self, bool approximate) -> Tensor
-  grad_output: gelu_backward(grad, self, approximate)
-  self: gelu_double_backward(grad, grad_output, self, approximate)
+- name: gelu(Tensor self) -> Tensor
+  self: "GradMode::is_enabled() ? infinitely_differentiable_gelu_backward(grad, self) : gelu_backward(grad, self)"
 
 - name: glu(Tensor self, int dim=-1) -> Tensor
   self: glu_backward(grad, self, dim)

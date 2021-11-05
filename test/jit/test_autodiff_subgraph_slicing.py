@@ -4,7 +4,7 @@ import os
 import sys
 import unittest
 from torch.testing._internal.common_utils import GRAPH_EXECUTOR, ProfilingMode, \
-    enable_profiling_mode_for_profiling_tests
+    num_profiled_runs, enable_profiling_mode_for_profiling_tests
 from torch.testing._internal.common_jit import check_against_reference
 import torch
 
@@ -13,7 +13,6 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase, disable_autodiff_subgraph_inlining
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import num_profiled_runs
 
 from typing import List, Tuple, Optional
 
@@ -54,6 +53,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
             with enable_profiling_mode_for_profiling_tests():
                 output = func(input, profile_and_replay=True)
                 self.assertAutodiffNode(func.graph_for(input), True, ['prim::ConstantChunk'], [])
+
 
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "This threshold is only valid for Profiling Executor")
     def test_diff_graph_inline_threshold(self):

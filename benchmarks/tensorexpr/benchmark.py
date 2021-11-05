@@ -124,7 +124,7 @@ class Benchmark(object):
         if args.cuda_fuser == "old" :
             torch._C._jit_override_can_fuse_on_gpu(True)
             if args.print_kernel :
-                os.environ['PYTORCH_NVFUSER_DUMP'] = 'cuda_kernel'
+                os.environ['PYTORCH_FUSION_DEBUG'] = '1'
             return self.run_impl(True)
         elif args.cuda_fuser == "te" :
             torch._C._jit_set_texpr_fuser_enabled(True)
@@ -142,7 +142,7 @@ class Benchmark(object):
             torch._C._jit_override_can_fuse_on_gpu(False)
             torch._C._jit_set_bailout_depth(20)
             if args.print_kernel :
-                os.environ['PYTORCH_NVFUSER_DUMP'] = 'cuda_kernel'
+                os.environ['PYTORCH_CUDA_FUSER_DEBUG'] = '1'
             return self.run_impl(True)
         else :
             return self.run_impl(False)

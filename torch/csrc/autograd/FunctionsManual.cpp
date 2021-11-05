@@ -917,9 +917,14 @@ Tensor repeat_backward(Tensor grad, IntArrayRef repeats, IntArrayRef input_shape
   return grad;
 }
 
-// scale == (1 / (1 - prob))
-Tensor infinitely_differentiable_native_dropout_backward(Tensor grad, Tensor mask, double scale) {
-  return grad * (mask.type_as(grad) * scale);
+// p1m == 1 - p
+Tensor _fused_dropout_backward(Tensor grad, Tensor mask, double p1m) {
+  if (grad.requires_grad()) {
+    // Use autograd-friendly backward if double backward is required
+    return grad * (mask.type_as(grad) * (1. / p1m));
+  } else {
+    return at::_masked_scale(grad, mask, 1. / p1m);
+  }
 }
 
 Tensor evenly_distribute_backward(Tensor grad, const Tensor & input, const Tensor & value) {
@@ -2151,46 +2156,6 @@ std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
           ggO = ggI * mask + ggW_expanded * nonpositive_mask * input;
       }
       return std::tuple<Tensor,Tensor,Tensor>{ggO, gI, gW};
-  }
-}
-
-Tensor gelu_double_backward(
-                const Tensor & ggI,
-                const Tensor & gO,
-                const Tensor & input,
-                bool approximate) {
-  if (approximate) {
-    constexpr auto kBeta = M_SQRT2 * M_2_SQRTPI * 0.5;
-    constexpr auto kKappa = 0.044715;
-
-    auto inner = kBeta * (input + kKappa * pow(input, 3));
-    auto tanh_inner = tanh(inner);
-    auto sech_inner = 1 / cosh(inner);
-
-    auto f = 0.5 * input;
-    auto g = 1 - tanh_inner * tanh_inner;
-    auto h = kBeta * (1 + 3 * kKappa * input * input);
-
-    auto f_prime_gh = 0.5 * g * h;
-
-    auto g_prime = (2 * sech_inner) * (-sech_inner * tanh_inner) * h;
-    auto g_prime_fh = f * h * g_prime;
-
-    auto h_prime = 6 * kKappa * input * kBeta;
-    auto h_prime_fg = f * g * h_prime;
-
-    // left_derivative = f_prime_gh
-    // right_derivative = f_prime_gh + g_prime_fh + h_prime_fg
-    // dgrad_dX = left_derivative + right_derivative
-    auto gI = ggI * gO * (2 * f_prime_gh + g_prime_fh + h_prime_fg);
-    return gI;
-  } else {
-    constexpr auto kBeta = M_2_SQRTPI * M_SQRT1_2 * 0.5;
-    auto input_sq = input * input;
-    auto pdf = kBeta * at::exp(-0.5 * input_sq);
-    auto dgrad_dInput = 2 * pdf - input_sq * pdf;
-    auto gI = ggI * gO * dgrad_dInput;
-    return gI;
   }
 }
 

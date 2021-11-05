@@ -95,36 +95,6 @@ using GLUFuncOptions = GLUOptions;
 
 // ============================================================================
 
-/// Options for the `GELU` module.
-///
-/// Example:
-/// ```
-/// GELU model(GELUOptions(False));
-/// ```
-struct TORCH_API GELUOptions {
-  /* implicit */ GELUOptions(bool approximate = false);
-
-  /// The tanh gelu estimate is used when the approximation flag is enabled.
-  /// Default: false
-  TORCH_ARG(bool, approximate);
-};
-
-namespace functional {
-/// Options for `torch::nn::functional::gelu`.
-///
-/// See the documentation for `torch::nn::GELUOptions` class to learn what
-/// arguments are supported.
-///
-/// Example:
-/// ```
-/// namespace F = torch::nn::functional;
-/// F::gelu(input, GELUFuncOptions(false));
-/// ```
-using GELUFuncOptions = GELUOptions;
-} // namespace functional
-
-// ============================================================================
-
 /// Options for the `Hardshrink` module.
 ///
 /// Example:
