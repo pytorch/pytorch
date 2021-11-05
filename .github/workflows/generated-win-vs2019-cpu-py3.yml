@@ -15,6 +15,7 @@ on:
 env:
   BUILD_ENVIRONMENT: win-vs2019-cpu-py3
   BUILD_WHEEL: 1
+  MAX_JOBS: 8
   CUDA_VERSION: "cpu"
   IN_CI: 1
   IS_GHA: 1
