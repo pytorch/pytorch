@@ -68,7 +68,7 @@ _hub_dir = None
 
 # Copied from tools/shared/module_loader to be included in torch package
 def import_module(name, path):
-    warnings.warn('The use of import_module is deprecated and will be removed in a future release')
+    warnings.warn('The use of torch.hub.import_module is deprecated in v0.11 and will be removed in v0.12')
     _import_module()
 
 def _import_module(name, path):
