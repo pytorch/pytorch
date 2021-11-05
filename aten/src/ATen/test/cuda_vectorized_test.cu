@@ -141,6 +141,8 @@ TEST(TestVectorizedMemoryAccess, CopyKernel) {
     ASSERT_EQ(buffer1[i].w, buffer2[i].w);
   }
 
+// Skipping this part until https://github.com/pytorch/pytorch/issues/51863 is resolved
+#if 0
   // unaligned
   for (int i = 0; i < 16; i++) {
     for (int j = 0; j < 16; j++) {
@@ -158,4 +160,5 @@ TEST(TestVectorizedMemoryAccess, CopyKernel) {
       }
     }
   }
+#endif
 }
