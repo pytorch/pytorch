@@ -158,3 +158,13 @@ init_args = [
     'ruamel.yaml==0.17.4',
 ]
 bypass_matched_file_filter = true
+
+[[linter]]
+name = 'NEWLINES'
+include_patterns=['**']
+args = [
+    'python3',
+    'tools/linter/adapters/newlines_linter.py',
+    '--',
+    '@{{PATHSFILE}}',
+]
