@@ -240,7 +240,8 @@ CORE_TEST_LIST = [
     "test_modules",
     "test_nn",
     "test_ops",
-    "test_torch"
+    "test_torch",
+    "test_autograd_onboarding_lab"
 ]
 
 # the JSON file to store the S3 test stats
