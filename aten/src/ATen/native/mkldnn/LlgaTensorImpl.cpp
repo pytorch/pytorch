@@ -13,7 +13,10 @@ LlgaTensorImpl::LlgaTensorImpl(
           std::move(storage),
           c10::DispatchKeySet(DispatchKey::MkldnnCPU),
           data_type),
-      desc_(desc) {}
+      desc_(desc) {
+  sizes_and_strides_.set_sizes(desc.sizes());
+  refresh_numel();
+}
 
 // The following are publically exposed as methods of Tensor
 IntArrayRef LlgaTensorImpl::strides() const {
