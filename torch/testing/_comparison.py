@@ -2,7 +2,7 @@ import abc
 import cmath
 import collections.abc
 import contextlib
-from typing import NamedTuple, Callable, Sequence, List, Union, Optional, Type, Tuple, Any, cast
+from typing import NamedTuple, Callable, Sequence, List, Union, Optional, Type, Tuple, Any, cast, Collection
 
 import numpy as np
 
@@ -191,8 +191,16 @@ class Pair(abc.ABC):
         self._unknown_parameters = unknown_parameters
 
     @staticmethod
-    def _check_inputs_isinstance(*inputs: Any, cls: Union[Type, Tuple[Type, ...]]):
+    def _check_inputs_isinstance(
+        *inputs: Any, cls: Union[Type, Tuple[Type, ...]], not_cls: Optional[Union[Type, Tuple[Type, ...]]] = None
+    ) -> None:
         if not all(isinstance(input, cls) for input in inputs):
+            raise UnsupportedInputs()
+
+        if not not_cls:
+            return
+
+        if any(isinstance(input, not_cls) for input in inputs):
             raise UnsupportedInputs()
 
     @staticmethod
@@ -320,7 +328,7 @@ class NumberPair(Pair):
     def _process_inputs(
         self, actual: Any, expected: Any, *, id: Tuple[Any, ...]
     ) -> Tuple[Union[int, float, complex], Union[int, float, complex]]:
-        self._check_inputs_isinstance(actual, expected, cls=self._NUMBER_TYPES)
+        self._check_inputs_isinstance(actual, expected, cls=self._NUMBER_TYPES, not_cls=bool)
         error_meta, numbers = self._apply_unary(self._to_number, actual, expected, id=id)
         if error_meta:
             raise UnsupportedInputs(error_meta)
@@ -717,11 +725,12 @@ def originate_pairs(
             )
             return error_meta, None
 
+        keys: Collection = actual_keys
         # Since the origination aborts after the first failure, we try to be deterministic
         with contextlib.suppress(Exception):
-            actual_keys = sorted(actual_keys)
+            keys = sorted(keys)
 
-        for key in actual_keys:
+        for key in keys:
             error_meta, partial_pairs = originate_pairs(
                 actual[key], expected[key], pair_types=pair_types, id=(*id, key), **options
             )
