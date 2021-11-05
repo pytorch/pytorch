@@ -71,6 +71,5 @@ install(FILES
   generic/THStorageCopy.h
   generic/THTensor.cpp
   generic/THTensor.h
-  generic/THTensor.hpp
   # See Note [TH abstraction violation]
   DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/TH/generic")
