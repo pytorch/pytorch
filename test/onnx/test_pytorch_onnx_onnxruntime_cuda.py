@@ -85,16 +85,16 @@ class TestONNXRuntime_cuda(unittest.TestCase):
         model = amp.initialize(LinearModel(), opt_level="O2")
         self.run_test(model, input)
 
-    # ONNX supported bfloat16 for opsets >= 13
+    # ONNX supports bfloat16 for opsets >= 13
+    # Add, Sub and Mul ops don't support bfloat16 cpu in onnxruntime.
     @skipIfUnsupportedMinOpsetVersion(13)
     @skipIfNoBFloat16Cuda
-    @disableScriptTest()
-    def test_linear_bfp16(self):
+    def test_arithmetic_bfp16(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
                 y = torch.ones(3, 4, dtype=torch.bfloat16, device=torch.device("cuda"))
                 x = x.type_as(y)
-                return torch.add(x, y).to(dtype=torch.float16)
+                return torch.mul(torch.add(x, y), torch.sub(x, y)).to(dtype=torch.float16)
 
         x = torch.ones(3, 4, requires_grad=True, dtype=torch.float16, device=torch.device("cuda"))
         self.run_test(MyModule(), x, rtol=1e-3, atol=1e-5)

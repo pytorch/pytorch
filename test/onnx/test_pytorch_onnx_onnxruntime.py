@@ -6473,7 +6473,7 @@ class TestONNXRuntime(unittest.TestCase):
         model = MyModule()
         self.run_test(model, (x, y))
 
-    # ONNX supported bfloat16 for opsets >= 13
+    # ONNX supports bfloat16 for opsets >= 13
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_cast_type_as_with_bfloat16(self):
         class MyModule(torch.nn.Module):
