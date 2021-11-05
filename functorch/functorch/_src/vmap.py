@@ -276,16 +276,16 @@ def vmap(func: Callable, in_dims: in_dims_t = 0, out_dims: out_dims_t = 0) -> Ca
         >>> batched_dot = functorch.vmap(torch.dot, in_dims=(0, None))  # [N, D], [D] -> [N]
         >>> x, y = torch.randn(2, 5), torch.randn(5)
         >>> batched_dot(x, y) # second arg doesn't have a batch dim because in_dim[1] was None
-    
-    If the input is a Python struct, :attr:`in_dims` must be a tuple containing a struct 
+
+    If the input is a Python struct, :attr:`in_dims` must be a tuple containing a struct
     matching the shape of the input:
 
         >>> f = lambda dict: torch.dot(dict['x'], dict['y'])
         >>> x, y = torch.randn(2, 5), torch.randn(5)
         >>> input = {'x': x, 'y': y}
-        >>> batched_dot = functorch.vmap(f, in_dims=({'x': 0, 'y': None},)) 
+        >>> batched_dot = functorch.vmap(f, in_dims=({'x': 0, 'y': None},))
         >>> batched_dot(input)
-    
+
     By default, the output is batched along the first dimension. However, it can be batched
     along any dimension by using :attr:`out_dims`
 
@@ -303,7 +303,7 @@ def vmap(func: Callable, in_dims: in_dims_t = 0, out_dims: out_dims_t = 0) -> Ca
         >>>
         >>> batched_pow = functorch.vmap(f)
         >>> assert torch.allclose(batched_pow(x), x * 4)
-        >>> batched_pow(x, scale=x) # scale is not batched, output it [2, 2, 5]
+        >>> batched_pow(x, scale=x) # scale is not batched, output has shape [2, 2, 5]
 
     .. note::
         vmap does not provide general autobatching or handle variable-length
