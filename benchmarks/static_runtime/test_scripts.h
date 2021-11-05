@@ -755,6 +755,14 @@ const std::string quantize_script = R"IR(
       return (%1249)
 )IR";
 
+const std::string quantized_linear_dynamic_fp16_script = R"IR(
+  graph(%input: Tensor, %weights: Tensor):
+      %bias: None = prim::Constant()
+      %packed_params = quantized::linear_prepack_fp16(%weights, %bias)
+      %output = quantized::linear_dynamic_fp16(%input, %packed_params)
+      return (%output)
+)IR";
+
 const auto fmod_tensor = R"JIT(
   def forward(self, a: Tensor, b: Tensor):
       return torch.fmod(a, b).clone()
