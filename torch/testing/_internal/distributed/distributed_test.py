@@ -265,16 +265,17 @@ class Task(nn.Module):
 class BatchNormNet(nn.Module):
     def __init__(self, affine=True):
         super(BatchNormNet, self).__init__()
-        self.fc1 = nn.Linear(2, 40, bias=False)
+        #self.fc1 = nn.Linear(2, 40, bias=False)
         self.bn = nn.BatchNorm1d(4, affine=affine)
-        self.fc2 = nn.Linear(40, 4, bias=False)
+        #self.fc2 = nn.Linear(40, 4, bias=False)
 
     def forward(self, x):
-        x = torch.reshape(self.fc1(x), (-1, 4, 10))
+        #x = torch.reshape(self.fc1(x), (-1, 4, 10))
         x = self.bn(x)
-        x = torch.reshape(x, (-1, 40))
-        x = self.fc2(x)
-        return F.softmax(x, dim=1)
+        #x = torch.reshape(x, (-1, 40))
+        #x = self.fc2(x)
+        return x
+        #return F.softmax(x, dim=1)
 
 
 class UnusedParamTwoLinLayerNet(nn.Module):
@@ -3579,6 +3580,9 @@ class DistributedTest:
                 if p_gpu.requires_grad and p_DDP.requires_grad:
                     self.assertTrue(p_gpu.grad is not None)
                     self.assertTrue(p_DDP.grad is not None)
+                    print("P GPU: ", p_gpu.grad[0])
+                    print("P DDP: ", p_DDP.grad[0])
+                    print("DIFFERENCE: ", p_gpu.grad[0] - p_DDP.grad[0])
                     self.assertEqual(p_gpu.grad, p_DDP.grad)
 
         def _test_DDP_niter(
@@ -4585,6 +4589,7 @@ class DistributedTest:
             target = torch.randn(global_batch_size, 4)
             loss = nn.MSELoss()
 
+            print("global batch size: ", global_batch_size)
             print("input: ", input_cpu.shape)
             print("target: ", target.shape)
 
@@ -4946,7 +4951,6 @@ class DistributedTest:
             group, group_id, rank = self._init_global_test()
             gpus = [rank]         # only do single GPU per process
             # cpu training setup
-            model = BN_NET
             num_processes = dist.get_world_size()
             # Generate input with some empty batch sizes on certain GPUs.
             bs_array = torch.randint(low=0, high=10, size=(num_processes,), dtype=torch.int)

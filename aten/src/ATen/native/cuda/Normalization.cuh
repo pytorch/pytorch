@@ -476,7 +476,7 @@ __global__ void batch_norm_reduce_statistics_kernel(
     index_t n = 0;
     for (int j = 0; j < world_size; j++) {
       scalar_t count = counts[j];
-      if (n + count == 0) { continue; }
+      if (count == 0) { continue; }
       accscalar_t m = vec_mean[j][i];
       accscalar_t v = accscalar_t(1.0) / (vec_invstd[j][i]);
       v = (v * v - epsilon) * count;
@@ -495,7 +495,6 @@ __global__ void batch_norm_reduce_statistics_kernel(
       running_var[i] = static_cast<scalar_t>((1 - momentum) * running_var[i] + momentum * unbiasedVar);
     }
   }
-
 }
 
 template <typename input_scalar_t, typename stat_scalar_t, typename stat_accscalar_t, typename index_t>
