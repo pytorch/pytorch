@@ -237,7 +237,7 @@ std::shared_ptr<RpcAgent> RpcAgent::getCurrentRpcAgent() {
   TORCH_CHECK(
       agent,
       "Current RPC agent is not set! Did you initialize the RPC "
-      "framework (e.g. by calling `rpc.init_rpc`?");
+      "framework (e.g. by calling `rpc.init_rpc`)?");
   return agent;
 }
 
