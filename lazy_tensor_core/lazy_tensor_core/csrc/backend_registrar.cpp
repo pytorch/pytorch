@@ -23,13 +23,6 @@ at::Tensor MakeTensorFromComputationData(
       ->MakeTensorFromComputationData(data, logical_scalar_type);
 }
 
-torch_lazy_tensors::compiler::BackendDataPtr MakeComputationDataFromTensor(
-    const at::Tensor& tensor, const lazy_tensors::Shape& shape,
-    const std::string& device) {
-  return compiler::getBackend()
-      ->MakeComputationDataFromTensor(tensor, shape, device);
-}
-
 }  // namespace compiler
 
 namespace ir {

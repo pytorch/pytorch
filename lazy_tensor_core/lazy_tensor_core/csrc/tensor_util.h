@@ -30,7 +30,7 @@ torch::lazy::hash_t TensorHash(const at::Tensor& tensor);
 // corresponding devices.
 std::vector<compiler::BackendDataPtr> CreateTensorsData(
     const std::vector<at::Tensor>& tensors,
-    const std::vector<std::string>& devices);
+    const std::vector<Device>& devices);
 
 template<typename... TupleType>
 std::vector<std::vector<int64_t>> CreateComputationShapeFromMetaTensors(const std::tuple<TupleType...>& tensors) {

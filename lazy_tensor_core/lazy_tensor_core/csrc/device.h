@@ -22,6 +22,7 @@ class Device {
 
   std::string toString() const;
 
+  // The string -> Device conversion should be handled by the backend interface.
   C10_DEPRECATED explicit Device(const std::string& device_spec);
 
  private:

@@ -325,17 +325,16 @@ compiler::BackendDataPtr TensorToDataHandle(const at::Tensor& tensor,
   return compiler::getBackend()
       ->MakeComputationDataFromTensor(
           tensor, lazy_tensors::Shape(tensor.scalar_type(), tensor.sizes()),
-          device.toString());
+          device);
 }
 
 std::vector<compiler::BackendDataPtr> CreateTensorsData(
     const std::vector<at::Tensor>& tensors,
-    const std::vector<std::string>& devices) {
+    const std::vector<Device>& devices) {
   CHECK_EQ(tensors.size(), devices.size());
   std::vector<compiler::BackendDataPtr> result;
   result.reserve(tensors.size());
   for (size_t i = 0; i < tensors.size(); ++i) {
-    Device device(devices[i]);
     lazy_tensors::Shape shape(tensors[i].scalar_type(), tensors[i].sizes());
     result.push_back(
         compiler::getBackend()

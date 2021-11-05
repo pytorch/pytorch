@@ -30,7 +30,7 @@ std::ostream& operator<<(std::ostream& os, const Device& device) {
 }
 
 const Device* GetDefaultDevice() {
-  static const Device* default_device = new Device("");
+  static const Device* default_device = new Device();
   return default_device;
 }
 

@@ -64,9 +64,8 @@ class LazyGraphExecutor {
   // the computation boundaries.
   void MarkStep(const Device& device);
 
-  // Waits for all the outstanding operations on all the supplied devices.
-  // If devices is empty, the wait will happen for all local devices.
-  void WaitDeviceOps(c10::ArrayRef<std::string> devices);
+  // Waits for all the outstanding operations on all local devices.
+  void WaitDeviceOps();
 
   // Retrieves the PyTorch CPU tensors behind the lazy tensors IR operations.
   // All the tensors must be on the same device.
@@ -155,7 +154,7 @@ class LazyGraphExecutor {
     std::vector<size_t> indices;
     std::vector<lazy_tensors::util::ExceptionCleanup> unlocker;
     std::vector<compiler::BackendDataPtr> parameters_data;
-    std::string device;
+    Device device;
     ComputationCache::TypePtr cached_computation;
     std::vector<compiler::BackendDataPtr> tensors_data;
   };
