@@ -461,7 +461,6 @@ else:
 
 IMPORT_SLOW_TESTS = args.import_slow_tests
 IMPORT_DISABLED_TESTS = args.import_disabled_tests
-# This is set by run_test.py
 LOG_SUFFIX = args.log_suffix
 RUN_PARALLEL = args.run_parallel
 TEST_BAILOUTS = args.test_bailouts
@@ -582,6 +581,12 @@ def run_tests(argv=UNITTEST_ARGS):
             string_cmd = " ".join(cmd)
             exitcode = shell(cmd)
             if exitcode != 0:
+                # This is sort of hacky, but add on relevant env variables for distributed tests.
+                if 'TestDistBackendWithSpawn' in test_case_full_name:
+                    backend = os.environ.get("BACKEND", "")
+                    world_size = os.environ.get("WORLD_SIZE", "")
+                    env_prefix = f"BACKEND={backend} WORLD_SIZE={world_size}"
+                    string_cmd = env_prefix + " " + string_cmd
                 raise ValueError(f"Test exited with non-zero exitcode {exitcode}. Command to reproduce: {string_cmd}")
                 failed_tests.append(test_case_full_name)
 
@@ -1436,7 +1441,6 @@ class TestCase(expecttest.TestCase):
             result.stop()
 
     def setUp(self):
-        print(" -- checking if enabled --")
         check_if_enable(self)
         set_rng_seed(SEED)
 

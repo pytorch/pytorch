@@ -452,7 +452,6 @@ def run_test(
 
     command = (launcher_cmd or []) + executable + argv
     print_to_stderr("Executing {} ... [{}]".format(command, datetime.now()))
-    print(f" -- command {command}")
     return shell(command, test_directory)
 
 
