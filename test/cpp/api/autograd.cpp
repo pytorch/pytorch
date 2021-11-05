@@ -1141,10 +1141,7 @@ TEST(TestAutogradNotImplementedFallback, ViewOpWithExtraArg) {
 }
 
 TEST(TestAutogradNotImplementedFallback, RetTensorVectorView) {
-  REGISTER_TEST_OP(
-      "ret_tensor_vector_view",
-      "_test::ret_tensor_vector_view(Tensor(a -> *) self, Tensor other) -> Tensor[]",
-      ret_tensor_vector_view);
+  REGISTER_TEST_OP("ret_tensor_vector_view", "_test::ret_tensor_vector_view(Tensor(a) self, Tensor other) -> Tensor[](a)", ret_tensor_vector_view);
   auto opHandle = c10::Dispatcher::singleton().findSchemaOrThrow("_test::ret_tensor_vector_view", "");
   auto op = [&](const torch::Tensor& _1, const torch::Tensor& _2) {
     return callOpUnboxed<std::vector<at::Tensor>, const torch::Tensor&, const torch::Tensor&>(opHandle, _1, _2);
@@ -1166,9 +1163,8 @@ TEST(TestAutogradNotImplementedFallback, DoubleViewOP) {
   };
   auto a = torch::tensor({1.}, {torch::kFloat32}).set_requires_grad(true);
   auto b = torch::tensor({1.}, {torch::kFloat32});
-  ASSERT_THROWS_WITH(
-      op(a, b),
-      "Expected only a single input in the operator schema to have a non-write alias annotation");
+  ASSERT_THROWS_WITH(op(a, b),
+    "Expected only a single output in the operator schema to have a non-write alias annotation");
 }
 
 TEST(TestAutogradNotImplementedFallback, NonFirstViewOP) {
