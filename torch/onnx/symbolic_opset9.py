@@ -3347,9 +3347,8 @@ class Prim:
     # Symbolic functions that need extra context
     # -----------------------------------------------------------------------------
     @staticmethod
-    def device(g, *inputs, **kwargs):
-        symbolic_function_state = sym_help._get_symbolic_function_state()
-        n = symbolic_function_state.cur_node
+    def device(ctx: torch.onnx.SymbolicContext, g, *inputs, **kwargs):
+        n = ctx.cur_node
 
         if n.output().type().kind() == "DeviceObjType":
             return None
@@ -3357,15 +3356,13 @@ class Prim:
         return _unimplemented("prim::device", "output type is not `DeviceObjType`.")
 
     @staticmethod
-    def Loop(g, *inputs, **attrs):
-        symbolic_function_state = sym_help._get_symbolic_function_state()
-        n = symbolic_function_state.cur_node
-        env = symbolic_function_state.env
-        params_dict = symbolic_function_state.params_dict
+    def Loop(ctx: torch.onnx.SymbolicContext, g, *inputs, **attrs):
+        n = ctx.cur_node
+        env = ctx.env
+        params_dict = ctx.params_dict
 
         operator_export_type = sym_help._operator_export_type
         opset_version = sym_help._export_onnx_opset_version
-        is_sub_block = False
 
         new_op_outputs = g.op("Loop", *inputs, outputs=n.outputsSize())
         new_node = new_op_outputs[0].node() if n.outputsSize() > 1 else new_op_outputs.node()
@@ -3382,7 +3379,7 @@ class Prim:
                     b_in.setType(inputs[i].type())
                 if i > 0 and (i + 1) < len(inputs):
                     b_in.setType(inputs[i + 1].type())
-            torch._C._jit_pass_onnx_block(b, new_block, operator_export_type, env, is_sub_block)  # type:ignore[arg-type]
+            torch._C._jit_pass_onnx_block(b, new_block, operator_export_type, env, False)  # type:ignore[arg-type]
         new_op_outputs = torch._C._jit_pass_fixup_onnx_controlflow_node(new_node, opset_version)
         # Run shape type inference for Loop after subblock is converted.
         from torch.onnx.symbolic_helper import _onnx_shape_inference
@@ -3391,18 +3388,16 @@ class Prim:
         return new_op_outputs
 
     @staticmethod
-    def If(g, *inputs, **attrs):
-        symbolic_function_state = sym_help._get_symbolic_function_state()
-        n = symbolic_function_state.cur_node
-        block = symbolic_function_state.onnx_block
-        env = symbolic_function_state.env
-        params_dict = symbolic_function_state.params_dict
+    def If(ctx: torch.onnx.SymbolicContext, g, *inputs, **attrs):
+        n = ctx.cur_node
+        block = ctx.onnx_block
+        env = ctx.env
+        params_dict = ctx.params_dict
 
         operator_export_type = sym_help._operator_export_type
         opset_version = sym_help._export_onnx_opset_version
 
         static_if = (inputs[0].node().kind() == "onnx::Constant")
-        is_sub_block = False
         if static_if:
             # Fold static if
             #
@@ -3429,13 +3424,12 @@ class Prim:
             # %14 : Bool(device=cpu) = onnx::Equal(%13, %8)
             # %15 : Bool(requires_grad=0, device=cpu) = onnx::Constant[value={0}]()
             # %16 : Long(1, strides=[1], device=cpu) = onnx::Shape(%input.1)
-            input_flag = inputs[0].node()['value'].tolist()
+            input_flag = inputs[0].node()["value"].tolist()
             const_value = all(input_flag) if isinstance(input_flag, list) else bool(input_flag)
             block_idx = 0 if const_value else 1
             current_b = list(n.blocks())[block_idx]
-            is_sub_block = True
             env = torch._C._jit_pass_onnx_block(current_b, block, operator_export_type, env,  # type:ignore[arg-type]
-                                                is_sub_block)
+                                                True)
             if_output_list = list(n.outputs())
             current_b_list = list(current_b.outputs())
 
@@ -3451,7 +3445,7 @@ class Prim:
             new_node = new_op_outputs[0].node() if n.outputsSize() > 1 else new_op_outputs.node()
             for b in n.blocks():
                 new_block = new_node.addBlock()
-                torch._C._jit_pass_onnx_block(b, new_block, operator_export_type, env, is_sub_block)  # type:ignore[arg-type]
+                torch._C._jit_pass_onnx_block(b, new_block, operator_export_type, env, False)  # type:ignore[arg-type]
             new_op_outputs = torch._C._jit_pass_fixup_onnx_controlflow_node(new_node, opset_version)
             # Run shape type inference for If after subblock is converted.
             from torch.onnx.symbolic_helper import _onnx_shape_inference
@@ -3460,9 +3454,8 @@ class Prim:
             return new_op_outputs
 
     @staticmethod
-    def Constant(g, *inputs, **attrs):
-        symbolic_function_state = sym_help._get_symbolic_function_state()
-        n = symbolic_function_state.cur_node
+    def Constant(ctx: torch.onnx.SymbolicContext, g, *inputs, **attrs):
+        n = ctx.cur_node
 
         if n.mustBeNone():
             return None
@@ -3489,10 +3482,9 @@ class Onnx:
     # Symbolic functions that need extra context
     # -----------------------------------------------------------------------------
     @staticmethod
-    def Placeholder(g, *inputs, **attrs):
-        symbolic_function_state = sym_help._get_symbolic_function_state()
-        n = symbolic_function_state.cur_node
-        block = symbolic_function_state.onnx_block
-        env = symbolic_function_state.env
+    def Placeholder(ctx: torch.onnx.SymbolicContext, g, *inputs, **attrs):
+        n = ctx.cur_node
+        block = ctx.onnx_block
+        env = ctx.env
 
         return torch._C._jit_onnx_convert_pattern_from_subblock(block, n, env)

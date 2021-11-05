@@ -15,9 +15,10 @@ import contextlib
 import copy
 import numbers
 import warnings
+import inspect
 from torch._six import string_classes
 from torch.jit import _unique_state_dict
-from torch.onnx import ONNX_ARCHIVE_MODEL_PROTO_NAME, ExportTypes, OperatorExportTypes, TrainingMode, CheckerError
+from torch.onnx import ONNX_ARCHIVE_MODEL_PROTO_NAME, ExportTypes, OperatorExportTypes, SymbolicContext, TrainingMode, CheckerError
 from torch._C import ListType, OptionalType, _propagate_and_assign_input_shapes, _check_onnx_proto
 from typing import List, Tuple, Union
 
@@ -333,7 +334,6 @@ def _decide_constant_folding(do_constant_folding, operator_export_type, training
 
 
 def _decide_input_format(model, args):
-    import inspect
     try:
         sig = inspect.signature(model.forward)
         ordered_list_keys = list(sig.parameters.keys())
@@ -1015,6 +1015,15 @@ def _should_aten_fallback(ns, op_name, opset_version, operator_export_type):
     return is_onnx_aten_export or (not is_exportable_aten_op and is_aten_fallback_export)
 
 
+def _need_symbolic_context(symbolic_fn):
+    # Check if the first argument to symbolic_fn is annotated as type `torch.onnx.SymbolicContext`
+    full_arg_spec = inspect.getfullargspec(symbolic_fn)
+    args = full_arg_spec.args
+    annotations = full_arg_spec.annotations
+    if len(args) == 0:
+        return False
+    return args[0] in annotations and annotations[args[0]] == SymbolicContext
+
 def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=OperatorExportTypes.ONNX):
     # NB: Returning None means the node gets cloned as is into
     # the new graph
@@ -1029,9 +1038,6 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
         if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK and opset_version == 9:
             import torch.onnx.symbolic_caffe2
             torch.onnx.symbolic_caffe2.register_quantized_ops("caffe2", opset_version)
-
-        from torch.onnx.symbolic_helper import _set_symbolic_function_state
-        _set_symbolic_function_state(_params_dict, env, n, block)
 
         # See Note [Export inplace]
         # TODO: I think this is not necessary anymore
@@ -1057,6 +1063,9 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
             # this is inconsistent with regular op symbolic.
             if op_name == "PythonOp":
                 inputs = (n, *inputs)
+            if _need_symbolic_context(symbolic_fn):
+                ctx = SymbolicContext(_params_dict, env, n, block)
+                return symbolic_fn(ctx, g, *inputs, **attrs)
             return symbolic_fn(g, *inputs, **attrs)
         elif ns == "onnx":
             # Clone node to trigger ONNX shape inference
@@ -1069,7 +1078,7 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
             attrs["outputs"] = outputs
             return _graph_at(g, op_name, *inputs, aten=True, **attrs)
         else:
-            sym_registry.raise_unsupported_operator_error(domain, op_name, opset_version)
+            raise sym_registry.UnsupportedOperatorError(domain, op_name, opset_version)
     except RuntimeError:
         if operator_export_type == OperatorExportTypes.ONNX_FALLTHROUGH:
             return None
@@ -1079,9 +1088,6 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
         # Otherwise, the backtrace will have the clues you need.
         e.args = ("{} \n(Occurred when translating {}).".format(e.args[0], op_name),)
         raise
-    finally:
-        from torch.onnx.symbolic_helper import _clear_symbolic_function_state
-        _clear_symbolic_function_state()
 
 
 # Generate an ONNX ATen op node.

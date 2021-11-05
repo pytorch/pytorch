@@ -342,9 +342,15 @@ If the operator is an ATen operator (shows up in the TorchScript graph with the 
   Make sure the function has the same name as the ATen function, which may be declared in
   ``torch/_C/_VariableFunctions.pyi`` or ``torch/nn/functional.pyi`` (these files are generated at
   build time, so will not appear in your checkout until you build PyTorch).
-* The first arg is always the ONNX graph that is being built for export.
+* The first arg is always the ONNX graph that is being built for export (except for advanced symbolic functions).
   Other arg names must EXACTLY match the names in the ``.pyi`` file,
   because dispatch is done with keyword arguments.
+* Advanced symbolic functions may accept an additional `torch.onnx.SymbolicContext`
+  object as the first argument (before the `Graph` object).
+  `torch.onnx.SymbolicContext` is defined in "torch/onnx/__init__.py".
+  In order for the symbolic function to be recognized as advanced symbolic function,
+  the first argument MUST be annotated as `torch.onnx.SymbolicContext`.
+  Hence extra context can be accessed through `torch.onnx.SymbolicContext`
 * In the symbolic function, if the operator is in the
   `ONNX standard operator set <https://github.com/onnx/onnx/blob/master/docs/Operators.md>`_,
   we only need to create a node to represent the ONNX operator in the graph.
@@ -421,8 +427,8 @@ PythonOp Symbolic
 
 Alternatively, you can register a custom symbolic function.
 This gives the symbolic function access to more info through the
-TorchScript ``Node`` object for the original operation, which gets passed in as the second
-argument (after the ``Graph`` object).
+``torch.onnx.SymbolicContext`` object, which gets passed in as the first
+argument (before the ``Graph`` object).
 
 All autograd ``Function``\ s appear in the TorchScript graph as ``prim::PythonOp`` nodes.
 In order to differentiate between different ``Function`` subclasses, the
@@ -449,7 +455,8 @@ The example below shows how you can access ``requires_grad`` via the ``Node`` ob
             ctx.save_for_backward(input)
             return input.clamp(min=0)
 
-    def symbolic_python_op(g: torch._C.Graph, n: torch._C.Node, *args, **kwargs):
+    def symbolic_python_op(ctx: torch.onnx.SymbolicContext, g: torch._C.Graph, *args, **kwargs):
+        n = ctx.cur_node
         print("original node: ", n)
         for i, out in enumerate(n.outputs()):
             print("original output {}: {}, requires grad: {}".format(i, out, out.requiresGrad()))

@@ -26,8 +26,7 @@ def register_version(domain, version):
 
 
 def register_ops_helper(domain, version, iter_version):
-    version_ops = get_ops_in_version(iter_version)
-    for domain, op_name, op_func in version_ops:
+    for domain, op_name, op_func in get_ops_in_version(iter_version):
         if not is_registered_op(op_name, domain, version):
             register_op(op_name, op_func, domain, version)
 
@@ -125,19 +124,20 @@ def get_registered_op(opname, domain, version):
         warnings.warn("ONNX export failed. The ONNX domain and/or version are None.")
     global _registry
     if not is_registered_op(opname, domain, version):
-        raise_unsupported_operator_error(domain, opname, version)
+        raise UnsupportedOperatorError(domain, opname, version)
     return _registry[(domain, version)][opname]
 
-def raise_unsupported_operator_error(domain, opname, version):
-    supported_version = get_op_supported_version(opname, domain, version)
-    if domain in ["", "aten", "prim"]:
-        msg = "Exporting the operator " + opname + " to ONNX opset version " + str(version) + " is not supported. "
-        if supported_version is not None:
-            msg += "Support for this operator was added in version " + str(supported_version) + ", try exporting with this version."
+class UnsupportedOperatorError(RuntimeError):
+    def __init__(self, domain, opname, version):
+        supported_version = get_op_supported_version(opname, domain, version)
+        if domain in ["", "aten", "prim"]:
+            msg = "Exporting the operator " + opname + " to ONNX opset version " + str(version) + " is not supported. "
+            if supported_version is not None:
+                msg += "Support for this operator was added in version " + str(supported_version) + ", try exporting with this version."
+            else:
+                msg += "Please feel free to request support or submit a pull request on PyTorch GitHub."
         else:
-            msg += "Please feel free to request support or submit a pull request on PyTorch GitHub."
-    else:
-        msg = ("ONNX export failed on an operator with unrecognized namespace {}::{}. "
-               "If you are trying to export a custom operator, make sure you registered "
-               "it with the right domain and version.".format(domain, opname))
-    raise RuntimeError(msg)
+            msg = ("ONNX export failed on an operator with unrecognized namespace {}::{}. "
+                  "If you are trying to export a custom operator, make sure you registered "
+                  "it with the right domain and version.".format(domain, opname))
+        super().__init__(msg)
