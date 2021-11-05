@@ -34,11 +34,24 @@ transforms comes from the [JAX framework](https://github.com/google/jax).
 
 ## Install
 
-### Colab
+There are two ways to install functorch:
+1. functorch main
+2. functorch preview with PyTorch 1.10
+
+We recommend installing functorch main development branch for the latest and
+greatest. This requires an installation of the latest PyTorch nightly.
+
+If you're looking for an older version of functorch that works with a stable
+version of PyTorch (1.10), please install the functorch preview. On the roadmap
+is more stable releases of functorch with future versions of PyTorch.
+
+### Installing functorch main
+
+#### Using Colab
 
 Follow the instructions [in this Colab notebook](https://colab.research.google.com/drive/1CrLkqIrydBYP_svnF89UUO-aQEqNPE8x?usp=sharing)
 
-### Binaries
+#### Locally
 
 First, set up an environment. We will be installing a nightly PyTorch binary
 as well as functorch. If you're using conda, create a conda environment:
@@ -91,6 +104,31 @@ Then, try to run some tests to make sure all is OK:
 ```
 pytest test/test_vmap.py -v
 pytest test/test_eager_transforms.py -v
+```
+
+### Installing functorch preview with PyTorch 1.10
+
+#### Using Colab
+
+Follow the instructions [here](https://colab.research.google.com/drive/1GNfb01W_xf8JRu78ZKoNnLqiwcrJrbYG#scrollTo=HJ1srOGeNCGA)
+
+#### Locally
+
+Prerequisite: [Install PyTorch 1.10](https://pytorch.org/get-started/locally/)
+
+Next, run the following.
+```
+pip install ninja  # Makes the build go faster
+pip install --user "git+https://github.com/pytorch/functorch.git@release/torch_1.10_preview"
+```
+
+Finally, run a quick sanity check in python:
+```py
+>>> import torch
+>>> from functorch import vmap
+>>> x = torch.randn(3)
+>>> y = vmap(torch.sin)(x)
+>>> assert torch.allclose(y, x.sin())
 ```
 
 ## What are the transforms?
