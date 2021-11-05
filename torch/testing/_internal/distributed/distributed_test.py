@@ -3566,6 +3566,7 @@ class DistributedTest:
         ):
             model.train()
             output = model(input_var)
+            self.assertTrue(torch.isfinite(output).all().item())
             l = loss(output, target) * scale_factor
             l.backward()
             if memory_format is not None:
@@ -3575,6 +3576,10 @@ class DistributedTest:
             self.assertEqual(len(param_gpu), len(param_DDP))
             for p_gpu, p_DDP in zip(param_gpu, param_DDP):
                 self.assertEqual(p_gpu, p_DDP)
+                if p_gpu.requires_grad and p_DDP.requires_grad:
+                    self.assertTrue(p_gpu.grad is not None)
+                    self.assertTrue(p_DDP.grad is not None)
+                    self.assertEqual(p_gpu.grad, p_DDP.grad)
 
         def _test_DDP_niter(
             self,
@@ -3612,6 +3617,10 @@ class DistributedTest:
                     memory_format=memory_format,
                 )
 
+                self._assert_equal_param(
+                    list(model_base.parameters()), list(model_DDP.module.parameters())
+                )
+
                 # Update weights and run a second iteration to shake out errors
                 if zero_grad:
                     self._model_step_with_zero_grad(model_base)
@@ -3619,9 +3628,7 @@ class DistributedTest:
                 else:
                     self._model_step(model_base)
                     self._model_step(model_DDP)
-                self._assert_equal_param(
-                    list(model_base.parameters()), list(model_DDP.module.parameters())
-                )
+
 
                 # Shuffle the input so that DDP input is different
                 input = input[torch.randperm(batch_size)]
@@ -4540,8 +4547,8 @@ class DistributedTest:
             self,
             gpu_subset,
             rank,
-            local_bs,
-            global_bs,
+            local_batch_size,
+            global_batch_size,
             offset,
             output_device=None,
             affine=True,
@@ -4574,9 +4581,12 @@ class DistributedTest:
                     model_DDP = torch.load(tmp.name)
 
             # data initialization
-            input_cpu = torch.randn(global_bs, 2)
-            target = torch.randn(global_bs, 4)
+            input_cpu = torch.randn(global_batch_size, 2)
+            target = torch.randn(global_batch_size, 4)
             loss = nn.MSELoss()
+
+            print("input: ", input_cpu.shape)
+            print("target: ", target.shape)
 
             # check two model parameters over 5 iterations
             self._test_DDP_niter(
@@ -4585,9 +4595,9 @@ class DistributedTest:
                 input_cpu.cuda(gpu_subset[0]),
                 target.cuda(gpu_subset[0]),
                 loss,
-                local_bs,
+                local_batch_size,
                 rank,
-                global_bs,
+                global_batch_size,
                 True,
                 offset,
                 dist.get_world_size(),
@@ -4947,15 +4957,18 @@ class DistributedTest:
             if bs_array.sum().item() == 0:
                 bs_array[0] = 1     # make sure the batch is not fully empty
 
-            local_bs = bs_array[rank].item()
+            print("bs array: ", bs_array)
+            print("rank: ", rank)
+
+            local_batch_size = bs_array[rank].item()
             bs_offset = bs_array[:rank].sum().item()
-            global_bs = bs_array.sum().item()
+            global_batch_size = bs_array.sum().item()
 
             self._test_DistributedDataParallel_SyncBatchNorm(
                 gpu_subset=gpus,
                 rank=rank,
-                local_bs=local_bs,
-                global_bs=global_bs,
+                local_batch_size=local_batch_size,
+                global_batch_size=global_batch_size,
                 offset=bs_offset)
 
         def _test_ddp_logging_data(self, is_gpu):
