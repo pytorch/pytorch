@@ -122,6 +122,8 @@ def reset_after_n_next_calls(datapipe: Union[IterDataPipe[T_co], MapDataPipe[T_c
         res_before_reset.append(next(it))
     return res_before_reset, list(datapipe)
 
+def odd_or_even(x: int) -> int:
+    return x % 2
 
 class TestDataChunk(TestCase):
     def setUp(self):
@@ -862,6 +864,11 @@ class TestFunctionalIterDataPipe(TestCase):
         self.assertEqual(len(input_dp), len(dp2))
         self.assertEqual(len(input_dp), len(dp3))
 
+        # Pickle Test:
+        dp1, dp2, dp3 = input_dp.fork(num_instances=3)
+        from torch.utils.data.graph import traverse
+        traverse(dp1)  # This should not raise any error
+
     def test_mux_datapipe(self):
 
         # Functional Test: Elements are yielded one at a time from each DataPipe, until they are all exhausted
@@ -1018,6 +1025,11 @@ class TestFunctionalIterDataPipe(TestCase):
             len(dp1)  # It is not implemented as we do not know length for each child in advance
         with self.assertRaises(TypeError):
             len(dp2)
+
+        # Pickle Test:
+        dp1, dp2 = input_dp.demux(num_instances=2, classifier_fn=odd_or_even)
+        from torch.utils.data.graph import traverse
+        traverse(dp1)  # This should not raise any error
 
     @suppress_warnings  # Suppress warning for lambda fn
     def test_map_datapipe(self):
