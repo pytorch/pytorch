@@ -56,14 +56,6 @@ const inline char* getNcclErrorDetailStr(ncclResult_t error, c10::optional<std::
 #define ENABLE_NCCL_P2P_SUPPORT
 #endif
 
-// NCCL BFloat16 is enabled only for CUDA 11+ and NCCL versions 2.10+
-#if (                                                                  \
-    defined(__CUDA_BF16_TYPES_EXIST__) && defined(NCCL_MAJOR) &&       \
-    (NCCL_MAJOR >= 2) && defined(NCCL_MINOR) && (NCCL_MINOR >= 10)) || \
-    (defined(USE_ROCM) && (TORCH_HIP_VERSION >= 301))
-#define ENABLE_NCCL_BF16_DATATYPE
-#endif
-
 // Macro to throw on a non-successful NCCL return value.
 #define C10D_NCCL_CHECK(cmd, failureReason)                                                  \
   do {                                                                        \
