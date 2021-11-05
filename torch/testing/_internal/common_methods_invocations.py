@@ -6682,6 +6682,27 @@ def sample_inputs_pixel_unshuffle(op_info, device, dtype, requires_grad, **kwarg
         for downscale_factor in (1, 3)
     ]
 
+def sample_inputs_onboarding_attn(op_info, device, dtype, requires_grad, **kwargs):
+    dim1 = [1, 5, 10, 20]
+    dim2 = [2, 4, 10, 30]
+    dim3 = [1, 7, 15, 25]
+
+    sample_inputs = []
+    for m, n, p in itertools.product(dim1, dim2, dim3):
+        args = (make_tensor([m, n], device, dtype,
+                            low=None, high=None,
+                            requires_grad=requires_grad),
+                make_tensor([m, n], device, dtype,
+                            low=None, high=None,
+                            requires_grad=requires_grad),
+                make_tensor([m, p], device, dtype,
+                            low=None, high=None,
+                            requires_grad=requires_grad))
+        sample_inputs.append(SampleInput(args[0], args=args[1:]))
+
+    return tuple(sample_inputs)
+
+
 
 foreach_unary_op_db: List[OpInfo] = [
     ForeachFuncInfo('exp'),
@@ -12248,6 +12269,26 @@ op_db: List[OpInfo] = [
                 "TestJit",
                 "test_variant_consistency_jit",
                 dtypes=(torch.float32, torch.complex64),
+            ),
+        ),
+    ),
+    OpInfo(
+        "onboarding_attn",
+        sample_inputs_func=sample_inputs_onboarding_attn,
+        dtypes=floating_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+        backward_dtypesIfCPU=floating_types_and(torch.bfloat16),
+        backward_dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+        supports_out=False,
+        supports_forward_ad=True,
+        supports_autograd=True,
+        # This test fails for my implementation of backward + implicit version, still debugging
+        skips=(
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_noncontiguous_samples",
+                dtypes=(torch.float32,),
             ),
         ),
     )

@@ -10835,3 +10835,6 @@
 - func: unflatten_dense_tensors(Tensor flat, Tensor[] tensors) -> Tensor[]
   variants: function
   python_module: nn
+
+- func: onboarding_attn(Tensor q, Tensor k, Tensor v) -> (Tensor, Tensor)
+  variants: function
