@@ -58,7 +58,9 @@ class TestOnboardinngAttn(TestCase):
         N = 30
         P = 15
         attn = self.Onboarding_Attn.apply
-        input = (torch.randn(M, N, dtype=torch.double, requires_grad=True), torch.randn(M, N, dtype=torch.double, requires_grad=True), torch.randn(M, P,dtype=torch.double, requires_grad=True))
+        input = (torch.randn(M, N, dtype=torch.double, requires_grad=True), 
+                 torch.randn(M, N, dtype=torch.double, requires_grad=True), 
+                 torch.randn(M, P, dtype=torch.double, requires_grad=True))
         test_gradcheck = gradcheck(attn, input, eps=1e-6, atol=1e-4)
         test_gradgradcheck = gradgradcheck(attn, input, eps=1e-6, atol=1e-4)
         assert test_gradcheck, "Gradcheck failed"
