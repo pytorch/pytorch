@@ -298,10 +298,12 @@ if(NOT AT_MKL_ENABLED)
             ENV POCKETFFT_HOME
             "${PROJECT_SOURCE_DIR}/third_party/pocketfft"
            )
-  if(POCKETFFT_INCLUDE_DIR)
-    set(AT_POCKETFFT_ENABLED 1)
-    message(STATUS "Using pocketfft in directory: ${POCKETFFT_INCLUDE_DIR}")
+  if(NOT POCKETFFT_INCLUDE_DIR)
+    message(FATAL_ERROR "pocketfft missing in ${PROJECT_SOURCE_DIR}/third_party/pocketfft")
   endif()
+
+  set(AT_POCKETFFT_ENABLED 1)
+  message(STATUS "Using pocketfft in directory: ${POCKETFFT_INCLUDE_DIR}")
 endif()
 
 # ---[ Dependencies
