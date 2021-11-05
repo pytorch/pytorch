@@ -1017,12 +1017,8 @@ def _should_aten_fallback(ns, op_name, opset_version, operator_export_type):
 
 def _need_symbolic_context(symbolic_fn):
     # Check if the first argument to symbolic_fn is annotated as type `torch.onnx.SymbolicContext`
-    full_arg_spec = inspect.getfullargspec(symbolic_fn)
-    args = full_arg_spec.args
-    annotations = full_arg_spec.annotations
-    if len(args) == 0:
-        return False
-    return args[0] in annotations and annotations[args[0]] == SymbolicContext
+    params = list(inspect.signature(symbolic_fn).parameters.values())
+    return params and issubclass(params[0].annotation, SymbolicContext)
 
 def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=OperatorExportTypes.ONNX):
     # NB: Returning None means the node gets cloned as is into

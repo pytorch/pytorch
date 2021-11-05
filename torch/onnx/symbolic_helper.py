@@ -45,19 +45,15 @@ from torch._C import OptionalType
 # more robust to different graphs.
 #
 # ----------------------------------------------------------------------------------
-# Advanced symbolic functions
+# Extra context for symbolic functions
 # ----------------------------------------------------------------------------------
 #
 # In general, symbolic functions only require inputs and attributes to
 # the original node. In rare circumstances, extra context may be required.
 # For example, symbolic function for `prim::Loop` needs access to the subblock of
 # the original node.
-# For these advanced symbolic functions, an additional `torch.onnx.SymbolicContext`
-# object can be passed in as the first argument (before the `Graph` object).
-# `torch.onnx.SymbolicContext` is defined in "torch/onnx/__init__.py".
-# In order for the symbolic function to be recognized as advanced symbolic function,
-# the first argument MUST be annotated as `torch.onnx.SymbolicContext`.
-# Hence extra context can be accessed through `torch.onnx.SymbolicContext`,
+# A symbolic function that has a first arg (before the Graph object) with the
+# type annotation of torch.onnx.SymbolicContext will be called with that additional context.
 # During export, it is populated from `utils._run_symbolic_function`
 # to contain the context for each node being converted.
 

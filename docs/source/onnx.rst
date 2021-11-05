@@ -342,15 +342,12 @@ If the operator is an ATen operator (shows up in the TorchScript graph with the 
   Make sure the function has the same name as the ATen function, which may be declared in
   ``torch/_C/_VariableFunctions.pyi`` or ``torch/nn/functional.pyi`` (these files are generated at
   build time, so will not appear in your checkout until you build PyTorch).
-* The first arg is always the ONNX graph that is being built for export (except for advanced symbolic functions).
+* By default, the first arg is the ONNX graph.
   Other arg names must EXACTLY match the names in the ``.pyi`` file,
   because dispatch is done with keyword arguments.
-* Advanced symbolic functions may accept an additional `torch.onnx.SymbolicContext`
-  object as the first argument (before the `Graph` object).
-  `torch.onnx.SymbolicContext` is defined in "torch/onnx/__init__.py".
-  In order for the symbolic function to be recognized as advanced symbolic function,
-  the first argument MUST be annotated as `torch.onnx.SymbolicContext`.
-  Hence extra context can be accessed through `torch.onnx.SymbolicContext`
+* A symbolic function that has a first arg (before the Graph object) with the
+  type annotation of torch.onnx.SymbolicContext will be called with that additional context.
+  See examples below.
 * In the symbolic function, if the operator is in the
   `ONNX standard operator set <https://github.com/onnx/onnx/blob/master/docs/Operators.md>`_,
   we only need to create a node to represent the ONNX operator in the graph.
