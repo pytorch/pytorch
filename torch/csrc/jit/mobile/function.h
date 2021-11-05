@@ -48,7 +48,7 @@ class TORCH_API Function : public torch::jit::Function {
   // Returns the debug handle corresponding to where the execution
   // is halted due to exception.
   // If no corresponding debug handle is found then -1 is returned.
-  int64_t getExceptionDebugHandle() const;
+  const std::vector<int64_t>& getExceptionDebugHandles() const;
 
  private:
   c10::QualifiedName name_;

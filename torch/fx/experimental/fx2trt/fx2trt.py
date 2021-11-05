@@ -253,14 +253,26 @@ class TRTModule(torch.nn.Module):
 
 
 CONVERTERS = {}
+NO_IMPLICIT_BATCH_DIM_SUPPORT = {}
+NO_EXPLICIT_BATCH_DIM_SUPPORT = {}
 
 
-def tensorrt_converter(key):
+def tensorrt_converter(key, no_implicit_batch_dim=False, no_explicit_batch_dim=False, enabled=True):
     def register_converter(converter):
         CONVERTERS[key] = converter
+        if no_implicit_batch_dim:
+            NO_IMPLICIT_BATCH_DIM_SUPPORT[key] = converter
+        if no_explicit_batch_dim:
+            NO_EXPLICIT_BATCH_DIM_SUPPORT[key] = converter
         return converter
 
-    return register_converter
+    def pass_converter(converter):
+        return converter
+
+    if enabled:
+        return register_converter
+    else:
+        return pass_converter
 
 
 class InputTensorSpec(NamedTuple):
@@ -474,7 +486,9 @@ class TRTInterpreter(torch.fx.Interpreter):
         if timing_cache:
             cache_file = numpy.array(timing_cache)
             cache = builder_config.create_timing_cache(cache_file.tobytes())
-            builder_config.set_timing_cache(cache, True)
+        else:
+            cache = builder_config.create_timing_cache(b"")
+        builder_config.set_timing_cache(cache, False)
 
         if fp16_mode:
             builder_config.set_flag(trt.BuilderFlag.FP16)
@@ -496,7 +510,7 @@ class TRTInterpreter(torch.fx.Interpreter):
         engine = self.builder.build_engine(self.network, builder_config)
         assert engine
 
-        serialized_cache = bytearray(builder_config.get_timing_cache().serialize()) \
+        serialized_cache = bytearray(cache.serialize()) \
             if builder_config.get_timing_cache() else bytearray()
 
         return TRTInterpreterResult(engine, self._input_names, self._output_names, serialized_cache)
