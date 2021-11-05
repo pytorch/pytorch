@@ -81,7 +81,21 @@ def check_file(filename: str) -> Optional[LintMessage]:
                 return None
             else:
                 f.seek(0)
-                original = f.read()
+                try:
+                    original = f.read().decode("utf-8")
+                except Exception as err:
+                    return LintMessage(
+                        path=filename,
+                        line=None,
+                        char=None,
+                        code=LINTER_CODE,
+                        severity=LintSeverity.ERROR,
+                        name="Decoding failure",
+                        original=None,
+                        replacement=None,
+                        description=f"utf-8 decoding failed due to {err.__class__.__name__}:\n{err}",
+                        bypassChangedLineFiltering=None,
+                    )
 
                 return LintMessage(
                     path=filename,
@@ -90,12 +104,11 @@ def check_file(filename: str) -> Optional[LintMessage]:
                     code=LINTER_CODE,
                     severity=LintSeverity.ERROR,
                     name="Trailing newline",
-                    original=original.decode("utf-8"),
-                    replacement=original.decode("utf-8").rstrip("\n") + "\n",
+                    original=original,
+                    replacement=original.rstrip("\n") + "\n",
                     description="Trailing newline found. Run `lintunner --take NEWLINES -a` to apply changes.",
                     bypassChangedLineFiltering=None,
                 )
-
 
 
 if __name__ == "__main__":

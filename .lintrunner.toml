@@ -162,6 +162,13 @@ bypass_matched_file_filter = true
 [[linter]]
 name = 'NEWLINES'
 include_patterns=['**']
+exclude_patterns=[
+    '**/contrib/**',
+    'third_party/**',
+    '**/*.expect',
+    '**/*.ipynb',
+    'tools/clang_format_hash/**',
+]
 args = [
     'python3',
     'tools/linter/adapters/newlines_linter.py',
