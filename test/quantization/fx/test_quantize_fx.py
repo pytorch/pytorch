@@ -416,7 +416,7 @@ class TestFuseFx(QuantizationTestCase):
                 return self.relu(self.conv(x))
 
         m = M().eval()
-        m = fuse_fx(m, fuse_custom_config_dict = {
+        m = fuse_fx(m, fuse_custom_config_dict={
             "additional_fuser_method_mapping": {
                 (torch.nn.Conv2d, torch.nn.ReLU): my_conv_relu_fuser
             }
