@@ -1770,6 +1770,9 @@ class TestCase(expecttest.TestCase):
             exact_stride=False,
             exact_is_coalesced=False
     ):
+        # Hide this function from `pytest`'s traceback
+        __tracebackhide__ = True
+
         unsupported_numpy_dtype = any(
             isinstance(a, np.ndarray) and a.dtype not in numpy_to_torch_dtype_dict for a in (x, y)
         )
