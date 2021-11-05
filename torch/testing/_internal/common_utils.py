@@ -461,6 +461,7 @@ else:
 
 IMPORT_SLOW_TESTS = args.import_slow_tests
 IMPORT_DISABLED_TESTS = args.import_disabled_tests
+# This is set by run_test.py
 LOG_SUFFIX = args.log_suffix
 RUN_PARALLEL = args.run_parallel
 TEST_BAILOUTS = args.test_bailouts
@@ -577,8 +578,11 @@ def run_tests(argv=UNITTEST_ARGS):
         failed_tests = []
         for case in test_cases:
             test_case_full_name = case.id().split('.', 1)[1]
-            exitcode = shell([sys.executable] + argv + [test_case_full_name])
+            cmd = [sys.executable] + argv + [test_case_full_name]
+            string_cmd = " ".join(cmd)
+            exitcode = shell(cmd)
             if exitcode != 0:
+                raise ValueError(f"Test exited with non-zero exitcode {exitcode}. Command to reproduce: {string_cmd}")
                 failed_tests.append(test_case_full_name)
 
         assert len(failed_tests) == 0, "{} unit test(s) failed:\n\t{}".format(
@@ -1432,6 +1436,7 @@ class TestCase(expecttest.TestCase):
             result.stop()
 
     def setUp(self):
+        print(" -- checking if enabled --")
         check_if_enable(self)
         set_rng_seed(SEED)
 
