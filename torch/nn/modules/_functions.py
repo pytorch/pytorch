@@ -54,6 +54,9 @@ class SyncBatchNorm(Function):
             mean_all, invstd_all, count_all = torch.split(combined, num_channels, dim=1)
 
         # calculate global mean & invstd
+        print("mean all: ", mean_all)
+        print("invstd_all: ", invstd_all)
+        print("count_all: ", count_all.view(-1))
         mean, invstd = torch.batch_norm_gather_stats_with_counts(
             input,
             mean_all,
