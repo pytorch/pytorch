@@ -2513,12 +2513,12 @@ std::tuple<Tensor, Tensor> linalg_eig_jvp(const Tensor& dA,
   const auto dAComplex = dA.to(c10::toComplexType(dA.scalar_type()));
   const auto dVfactor = at::linalg_solve(V, at::matmul(dAComplex, V));
   const auto Lconj = L.conj();
-  const auto Fconj = dVfactor / (Lconj.unsqueeze(-2) - Lconj.unsqueeze(-1));
-  Fconj.diagonal(0, -2, -1).zero_();
-
+  auto FTimesdVfactor = dVfactor / (Lconj.unsqueeze(-2) - Lconj.unsqueeze(-1));
+  FTimesdVfactor.diagonal(0, -2, -1).zero_();
+  
   return std::make_tuple(
     dVfactor.diagonal(0, -2, -1),
-    at::matmul(V, Fconj * dVfactor));
+    at::matmul(V, FTimesdVfactor));
 }
 
 Tensor linalg_lstsq_jvp(
