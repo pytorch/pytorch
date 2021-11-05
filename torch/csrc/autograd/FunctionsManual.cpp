@@ -2515,7 +2515,7 @@ std::tuple<Tensor, Tensor> linalg_eig_jvp(const Tensor& dA,
   const auto Lconj = L.conj();
   auto FTimesdVfactor = dVfactor / (Lconj.unsqueeze(-2) - Lconj.unsqueeze(-1));
   FTimesdVfactor.diagonal(0, -2, -1).zero_();
-  
+
   return std::make_tuple(
     dVfactor.diagonal(0, -2, -1),
     at::matmul(V, FTimesdVfactor));
