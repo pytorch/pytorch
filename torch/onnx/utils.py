@@ -1058,14 +1058,14 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
         if sym_registry.is_registered_op(op_name, domain, opset_version):
             symbolic_fn = _find_symbolic_in_registry(domain, op_name, opset_version, operator_export_type)
             attrs = {k: n[k] for k in n.attributeNames()}
+            if _need_symbolic_context(symbolic_fn):
+                ctx = SymbolicContext(_params_dict, env, n, block)
+                return symbolic_fn(ctx, g, *inputs, **attrs)
             # TODO: https://msdata.visualstudio.com/Vienna/_workitems/edit/1408006
             # PythonOp symbolic need access to the node to resolve the name conflict,
             # this is inconsistent with regular op symbolic.
             if op_name == "PythonOp":
                 inputs = (n, *inputs)
-            if _need_symbolic_context(symbolic_fn):
-                ctx = SymbolicContext(_params_dict, env, n, block)
-                return symbolic_fn(ctx, g, *inputs, **attrs)
             return symbolic_fn(g, *inputs, **attrs)
         elif ns == "onnx":
             # Clone node to trigger ONNX shape inference
@@ -1229,4 +1229,4 @@ torch._C.Graph.op = _graph_op  # type: ignore[attr-defined]
 torch._C.Graph.at = _graph_at  # type: ignore[attr-defined]
 torch._C.Block.op = _block_op  # type: ignore[attr-defined]
 torch._C.Graph.constant = _graph_constant  # type: ignore[attr-defined]
-torch._C.Node.__getitem__ = _node_getitem  # type: ignore[attr-defined, misc]
+torch._C.Node.__getitem__ = _node_getitem  # type: ignore[attr-defined, misc, assignment]

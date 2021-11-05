@@ -1,5 +1,5 @@
 import torch._C as _C
-from typing import Dict
+from typing import Dict, Optional
 
 TensorProtoDataType = _C._onnx.TensorProtoDataType
 OperatorExportTypes = _C._onnx.OperatorExportTypes

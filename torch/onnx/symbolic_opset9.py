@@ -3436,7 +3436,8 @@ class Prim:
             final_b_list = []
             for idx in range(len(if_output_list)):
                 if current_b_list[idx] not in env:
-                    raise RuntimeError("The sub block ATen output " + current_b_list[idx] + " is not in env.")
+                    raise RuntimeError("The sub block ATen output {}"
+                                       " is not in env.".format(current_b_list[idx]))  # type:ignore[operator]
                 onnx_b = env[current_b_list[idx]]
                 final_b_list.append(onnx_b)
             return final_b_list
