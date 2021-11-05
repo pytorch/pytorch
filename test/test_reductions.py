@@ -3236,6 +3236,32 @@ as the input tensor excluding its innermost dimension'):
             self.assertEqual(torch.ones((2, 1, 4), device=device, dtype=out_dtype), xb.all(1, keepdim=True))
             self.assertEqual(torch.ones((), device=device, dtype=out_dtype), xb.all())
 
+    # TODO: can these be merged with their respective OpInfos?
+    def test_reduce_dtype(self, device):
+        def test_reduction(op, has_no_dim, takes_dtype=True):
+            x = torch.randn(3, 3, dtype=torch.float, requires_grad=True, device=device)
+
+            if has_no_dim:
+                grad1, = torch.autograd.grad([op(x)], [x])
+                grad2, = torch.autograd.grad([op(x, dtype=torch.double)], [x])
+                self.assertEqual(grad1, grad2)
+                self.assertEqual(grad2.dtype, torch.float)
+
+            gi = torch.randn(op(x, dim=0).shape, dtype=torch.float, device=device)
+            grad1, = torch.autograd.grad([op(x, dim=0)], [x], gi)
+            if takes_dtype:
+                grad2, = torch.autograd.grad([op(x, dim=0, dtype=torch.double)], [x], gi.double())
+            else:
+                grad2, = torch.autograd.grad([op(x.double(), dim=0)], [x], gi.double())
+            self.assertEqual(grad1, grad2)
+            self.assertEqual(grad2.dtype, torch.float)
+
+        test_reduction(torch.sum, True)
+        test_reduction(torch.prod, True)
+        test_reduction(torch.cumsum, False)
+        test_reduction(torch.cumprod, False)
+        test_reduction(torch.logcumsumexp, False, takes_dtype=False)
+
     @ops(reference_masked_ops)
     def test_reference_masked(self, device, dtype, op):
         """Test masked reduction operations on strided-only tensors using
