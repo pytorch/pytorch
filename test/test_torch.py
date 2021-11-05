@@ -40,13 +40,15 @@ from torch.testing._internal.common_utils import (
     skipIfNotRegistered, bytes_to_scalar)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
+    expectedFailureMeta,
+    expectedFailureXLA,
     instantiate_device_type_tests,
     skipCUDAVersionIn,
     onlyCUDA, onlyCPU,
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
     skipMeta,
-    PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyOnCPUAndCUDA,
-    expectedAlertNondeterministic, get_all_device_types)
+    PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyNativeDeviceTypes,
+    expectedAlertNondeterministic, get_all_device_types, skipXLA)
 from typing import Dict, List, Tuple
 import torch.backends.quantized
 import torch.testing._internal.data
@@ -236,6 +238,8 @@ class AbstractTestCases:
                            'softmax',
                            'split_with_sizes',
                            'unsafe_split_with_sizes',
+                           '_autocast_to_fp16',
+                           '_autocast_to_fp32',
                            )
             test_namespace(torch.nn)
             test_namespace(torch.nn.functional, 'assert_int_or_pair')
@@ -3024,7 +3028,7 @@ class TestTorchDeviceType(TestCase):
         self.assertIsInstance(torch.inf, float)
         self.assertEqual(torch.inf, math.inf)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64,
             torch.bool, torch.float32, torch.complex64, torch.float64,
             torch.complex128)
@@ -3070,7 +3074,7 @@ class TestTorchDeviceType(TestCase):
                 bytes_to_scalar(v_s_byte[start:end], dtype, device),
                 v[dim0][dim1])
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64,
             torch.bool, torch.float32, torch.complex64, torch.float64,
             torch.complex128, torch.quint8, torch.qint8, torch.qint32,
@@ -3105,7 +3109,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(s, storage_type(l))
 
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(*get_all_dtypes())
     def test_tensor_from_storage(self, device, dtype):
         a = make_tensor((4, 5, 3), device, dtype, low=-9, high=9)
@@ -3122,7 +3126,7 @@ class TestTorchDeviceType(TestCase):
                 error_storage = a.to(error_dtype).storage()
                 torch.tensor(error_storage, device=device, dtype=dtype)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(*get_all_dtypes())
     def test_set_storage(self, device, dtype):
         a = make_tensor((4, 5, 3), device, dtype, low=-9, high=9)
@@ -3614,6 +3618,12 @@ class TestTorchDeviceType(TestCase):
         input_ = conv(input_).contiguous()
         input_ = layer_norm(input_.transpose(1, 2).contiguous()).contiguous()
         input_.sum().backward()
+
+        # 3d
+        conv = torch.nn.ConvTranspose3d(3, 3, kernel_size=3).to(device)
+        input = torch.randn(batch_size, 3, length, length, length, device=device)
+        out = conv(input)
+        out.backward(torch.ones_like(out).transpose(-2, -1))
 
     # TODO: this test should be in test_nn.py
     @onlyCUDA
@@ -4158,7 +4168,8 @@ else:
         test_func(torch.Tensor.scatter_add)
         test_func(torch.scatter_add)
 
-    @onlyOnCPUAndCUDA
+    @expectedFailureMeta  # expected a non-determinitic error, but it was not raised
+    @onlyNativeDeviceTypes
     def test_nondeterministic_alert_put(self, device):
         def test_func(op_call):
             a = torch.randn(10, device=device)
@@ -4238,7 +4249,7 @@ else:
         test_func(self, device, 'method')
         test_func(self, device, 'out')
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_nondeterministic_alert_gather(self, device):
         def test_func(op_call):
             a = torch.randn(3, 3, device=device, requires_grad=True)
@@ -4359,7 +4370,7 @@ else:
                     expected[idx[i]] += weight[i]
                 self.assertEqual(grad, expected, atol=0, rtol=0)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_gather_backward_deterministic_path(self, device) -> None:
         self._test_gather_backward_one_dim(device, True)
 
@@ -4367,7 +4378,7 @@ else:
     def test_gather_backward_one_dim(self, device) -> None:
         self._test_gather_backward_one_dim(device, False)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_scatter_add_one_dim_deterministic(self, device) -> None:
         with DeterministicGuard(True):
             m = random.randint(20, 30)
@@ -4584,7 +4595,7 @@ else:
         if dtype != torch.int:
             yield torch.tensor([0, -2, nan, 10.2, inf], dtype=dtype, device=device)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(torch.int, torch.float, torch.cfloat)
     def test_corrcoef(self, device, dtype):
         for x in self._generate_correlation_tensors(device, dtype):
@@ -4889,6 +4900,54 @@ else:
             self.assertTrue(y.is_contiguous())
             self.assertEqual(expected, actual)
 
+    # Maybe merge into OpInfo?
+    def test_cdist_euclidean_large(self, device):
+        def _test_euclidean_large_cdist(sizex, sizey=None):
+            if sizey is None:
+                sizey = sizex
+            x = torch.randn(sizex, device=device, dtype=torch.float)
+            y = torch.randn(sizey, device=device, dtype=torch.float)
+            eps = 1e-6
+            # to avoid extremum
+            x = x - (((x - y) < eps).float() * 2 * eps)
+            x.requires_grad = True
+            y.requires_grad = True
+            dist = torch.cdist(x, y, p=2)
+            # Do a backward pass to check that it is valid for large
+            # matrices
+            loss = dist.sum()
+            loss.backward()
+
+        _test_euclidean_large_cdist((2000, 5))
+
+    # Ensure that cdist backward with p<1 does not produce NaNs
+    def test_cdist_grad_p_lt_1_no_nan(self, device):
+        for p in [0.99, 0.7, 0.5, 0.1, 0.01]:
+            x = torch.randn(1, 2, device=device)
+            y = x.clone().detach() + torch.tensor([[1., 0.]], device=device)
+            x.requires_grad = True
+            y.requires_grad = True
+            result = torch.cdist(x, y, p=p)
+            result.backward(torch.ones_like(result))
+            self.assertFalse(torch.isnan(x.grad).any())
+            self.assertFalse(torch.isnan(y.grad).any())
+
+    def test_cdist_same_inputs(self, device):
+        # Test to detect issues in cdist gradient calculation
+        # When the distances are 0
+        sizex = (1, 27, 32)
+        for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
+            x = torch.randn(sizex, device=device, dtype=torch.float)
+            dist_grad = torch.randn((1, 27, 27), device=device, dtype=torch.float)
+            y = x.clone()
+            eps = 1e-6
+            x.requires_grad = True
+            d = torch.cdist(x, y)
+            d.backward(dist_grad)
+            # Check that the backward passs does not contain invalid
+            # values such as nan or inf
+            assert torch.isfinite(x.grad).all()
+
     def test_multinomial_constraints(self, device):
         x = torch.empty(1, 2, 3, dtype=torch.double, device=device)
         self.assertRaisesRegex(
@@ -5150,7 +5209,7 @@ else:
             self.assertEqual(actual, expected.to(t.dtype))
 
     # All tensors appear contiguous on XLA
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(*get_all_dtypes())
     def test_diff_noncontig(self, device, dtype):
         shapes = (
@@ -5229,7 +5288,7 @@ else:
 
         return actual, expected
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(torch.long, torch.float32, torch.complex64)
     def test_gradient_all(self, device, dtype):
         def create_scalar(shape):
@@ -5280,7 +5339,7 @@ else:
             actual, expected = self._inf_nan_preprocess(list(actual), self._wrap_to_list(expected))
             self.assertEqual(actual, expected, equal_nan=True, atol=1e-4, rtol=0, exact_dtype=False)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(torch.long, torch.float32, torch.complex64)
     def test_gradient_extreme_cases(self, device, dtype):
         # Test behaviour for inf and nan values
@@ -5302,7 +5361,7 @@ else:
         expected = [np.gradient(t_np, coordinates_np, axis=0, edge_order=2)]
         self.assertEqual(actual, expected, exact_dtype=False)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_gradient_type_promotion(self, device):
         inputs = (
             make_tensor((4, 4), device=device, dtype=torch.float32),
@@ -5347,7 +5406,7 @@ else:
                 actual, expected = self._inf_nan_preprocess(list(actual), expected)
                 self.assertEqual(actual, expected, equal_nan=True, exact_dtype=False)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(torch.long, torch.float32, torch.complex64)
     def test_error_gradient(self, device, dtype):
         t = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]], device=device, dtype=dtype)
@@ -5573,9 +5632,9 @@ else:
                     ref_index_copy(dest2, dim, idx, src)
                     self.assertEqual(dest, dest2)
 
-    # onlyOnCPUAndCUDA due to an XLA error:
+    # onlyNativeDeviceTypes due to an XLA error:
     # https://github.com/pytorch/pytorch/issues/53256
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(*get_all_dtypes())
     def test_index_copy_scalars(self, device, dtype):
         # Create the 8 possible combinations of scalar sizes for target / index / source
@@ -5626,7 +5685,7 @@ else:
         index = torch.randint(a[dim], (elems,), device=device)
         return (x, index, src)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_index_copy_deterministic(self, device: torch.device) -> None:
         for dim in range(3):
             x, index, src = self._prepare_data_for_index_copy_and_add_deterministic(dim, device)
@@ -5645,7 +5704,7 @@ else:
 
             self.assertEqual(x0, y0, atol=0, rtol=0)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_index_add_deterministic(self, device: torch.device) -> None:
         for dim in range(3):
             x, index, src = self._prepare_data_for_index_copy_and_add_deterministic(dim, device)
@@ -5662,7 +5721,7 @@ else:
                     y_nd = torch.index_add(x, dim, index, src, alpha=alpha)
                     self.assertEqual(y_nd, y0, atol=1e-3, rtol=1e-5)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_index_put_non_accumulate_deterministic(self, device) -> None:
         with DeterministicGuard(True):
             for i in range(3):
@@ -5697,7 +5756,7 @@ else:
         self.assertEqual(0, x.index_fill_(0, index, -1).dim())
 
     # The test fails for zero-dimensional tensors on XLA
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(*get_all_dtypes())
     def test_index_select(self, device, dtype):
         num_src, num_out = 3, 5
@@ -6033,7 +6092,7 @@ else:
                                             [False, True, False, True, False],
                                             [True, False, True, False, True]], device=device))
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(*get_all_dtypes())
     def test_masked_scatter(self, device, dtype):
         dt = dtype
@@ -6494,7 +6553,7 @@ else:
             actual_gpu = torch.pdist(x.to(device), p=2)
             self.assertEqual(expected_cpu, actual_gpu.cpu())
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypesIfCUDA(*set(get_all_math_dtypes('cuda')))
     @dtypes(*set(get_all_math_dtypes('cpu')))
     def test_addcdiv(self, device, dtype):
@@ -6583,8 +6642,9 @@ else:
             self.ternary_check_input_output_mem_overlap(out_op, dev,
                                                         expected_failure=not has_input_output_mem_overlap_check)
 
+    @expectedFailureMeta  # RuntimeError not raised
     @dtypes(torch.double)
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_copy_mem_overlap(self, device, dtype):
         self.check_internal_mem_overlap(
             torch.Tensor.copy_, num_inputs=2, dtype=dtype, device=device)
@@ -6593,7 +6653,8 @@ else:
         self.unary_check_input_output_mem_overlap(
             doubles, sz, lambda input, out: out.copy_(input))
 
-    @onlyOnCPUAndCUDA
+    @expectedFailureMeta  # RuntimeError not raised
+    @onlyNativeDeviceTypes
     def test_index_add_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
         y = torch.rand((6,), device=device)
@@ -6608,7 +6669,7 @@ else:
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             ind.index_add_(0, ind.clone(), ind)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_index_copy_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
         y = torch.rand((6,), device=device)
@@ -6623,7 +6684,8 @@ else:
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             ind.index_copy_(0, ind.clone(), ind)
 
-    @onlyOnCPUAndCUDA
+    @expectedFailureMeta  # Warning not triggered
+    @onlyNativeDeviceTypes
     def test_index_fill_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
         y = torch.rand((6,), device=device)
@@ -6635,7 +6697,8 @@ else:
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             ind.index_fill_(0, ind, 0)
 
-    @onlyOnCPUAndCUDA
+    @expectedFailureMeta  # RuntimeError not raised
+    @onlyNativeDeviceTypes
     def test_shift_mem_overlap(self, device):
         x = torch.rand(3, device=device)
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
@@ -6643,7 +6706,8 @@ else:
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             x[:-1] >>= x[1:]
 
-    @onlyOnCPUAndCUDA
+    @expectedFailureMeta  # RuntimeError not raised
+    @onlyNativeDeviceTypes
     def test_bernoulli_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
 
@@ -6657,7 +6721,8 @@ else:
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             torch.bernoulli(torch.rand_like(x), out=x)
 
-    @onlyOnCPUAndCUDA
+    @expectedFailureMeta  # RuntimeError not raised
+    @onlyNativeDeviceTypes
     def test_put_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
         y = torch.rand((6,), device=device)
@@ -6676,7 +6741,8 @@ else:
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             ind.put_(ind.clone(), ind)
 
-    @onlyOnCPUAndCUDA
+    @expectedFailureMeta  # UserWarning not triggered
+    @onlyNativeDeviceTypes
     def test_index_put_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
         y = torch.rand((6,), device=device)
@@ -6695,7 +6761,8 @@ else:
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             ind.index_put_((ind.clone(),), ind)
 
-    @onlyOnCPUAndCUDA
+    @expectedFailureMeta  # UserWarning not triggered
+    @onlyNativeDeviceTypes
     def test_masked_fill_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
         mask = torch.tensor([True, False, True, True, False, False], device=device)
@@ -6709,7 +6776,7 @@ else:
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             mask[1:].masked_fill_(mask[:-1], False)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_masked_select_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((3,))
         y = torch.rand((6,), device=device)
@@ -6721,7 +6788,8 @@ else:
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             torch.masked_select(mask.clone(), mask, out=mask)
 
-    @onlyOnCPUAndCUDA
+    @expectedFailureMeta  # RuntimeError not raised
+    @onlyNativeDeviceTypes
     def test_masked_scatter_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
         src = torch.rand((3,), device=device)
@@ -6730,7 +6798,7 @@ else:
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             x.masked_scatter_(mask, src)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_index_select_mem_overlap(self, device):
         x = torch.rand((1, 6), device=device).expand((2, 6))
         y = torch.rand((3, 6), device=device)
@@ -6738,7 +6806,7 @@ else:
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             torch.index_select(y, 1, ind, out=x)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_scatter_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
         src = torch.rand((3,), device=device)
@@ -6751,7 +6819,7 @@ else:
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             ind.scatter_(0, ind, ind.clone())
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_gather_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((3,))
         src = torch.rand((6,), device=device)
@@ -6763,7 +6831,7 @@ else:
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             torch.gather(ind.clone(), 0, ind[1:], out=ind[:1])
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_take_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((3,))
         src = torch.rand((6,), device=device)
@@ -7239,7 +7307,7 @@ else:
                 _test_helper(x, op, unary=True)
 
     @skipMeta
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(*get_all_dtypes(include_bool=False))
     def test_dlpack_capsule_conversion(self, device, dtype):
         # DLpack does not explicitly support bool (xref dmlc/dlpack#75)
@@ -7248,7 +7316,7 @@ else:
         self.assertEqual(z, x)
 
     @skipMeta
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(*get_all_dtypes(include_bool=False))
     def test_dlpack_protocol_conversion(self, device, dtype):
         x = make_tensor((5,), device, dtype)
@@ -7256,7 +7324,7 @@ else:
         self.assertEqual(z, x)
 
     @skipMeta
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_dlpack_shared_storage(self, device):
         x = make_tensor((5,), device, torch.float64)
         z = from_dlpack(to_dlpack(x))
@@ -7301,7 +7369,7 @@ else:
         self.assertEqual(z, x)
 
     @skipMeta
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(*get_all_dtypes(include_bool=False))
     def test_dlpack_tensor_invalid_stream(self, device, dtype):
         with self.assertRaises(TypeError):
@@ -7925,7 +7993,7 @@ else:
             return True
         return False
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(*(get_all_int_dtypes() + get_all_fp_dtypes() +
               get_all_complex_dtypes()))
     def test_where_scalar_invalid_combination_raises(self, device, dtype):
@@ -7961,7 +8029,7 @@ else:
         self._test_where_scalar_template(device, dtype, checkResult)
 
     # As the test fails with Runtime Error not raised on XLA
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_where_scalar_scalar(self, device):
         # Scalar-Scalar Version
         height = 5
@@ -8019,6 +8087,18 @@ else:
 
         _test_helper(remove_hook=True)
         _test_helper(remove_hook=False)
+
+    @skipXLA
+    def test_skip_xla(self, device):
+        if self.device_type == 'xla':
+            # Should not reach here!
+            self.assertTrue(False)
+
+    @expectedFailureXLA
+    def test_expected_failure_xla(self, device):
+        if self.device_type == 'xla':
+            self.assertTrue(False)
+
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.
 class TestDevicePrecision(TestCase):
