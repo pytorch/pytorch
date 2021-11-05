@@ -2302,15 +2302,14 @@ class TestLinalg(TestCase):
         for val in [np.inf, np.nan]:
             with self.assertRaisesRegex(RuntimeError, "torch.linalg.eig: input tensor should not"):
                 a = torch.eye(5, 5, device=device, dtype=dtype) * val
-                values, vectors = torch.linalg.eig(a)
+                torch.linalg.eig(a)
 
-                with self.assertRaisesRegex(RuntimeError, "torch.linalg.eig: input tensor should not"):
-                    batched_a = torch.ones(10, 5, 5, device=device, dtype=dtype)
-                    e = torch.eye(5, 5, device=device, dtype=dtype)
-                    e.fill_diagonal_(val)
-                    batched_a[3] = e
-
-                    values, vectors = torch.linalg.eig(batched_a)
+            with self.assertRaisesRegex(RuntimeError, "torch.linalg.eig: input tensor should not"):
+                batched_a = torch.ones(10, 5, 5, device=device, dtype=dtype)
+                e = torch.eye(5, 5, device=device, dtype=dtype)
+                e.fill_diagonal_(val)
+                batched_a[3] = e
+                torch.linalg.eig(batched_a)
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
