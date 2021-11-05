@@ -461,6 +461,9 @@ class ComputeStaticUnboxingWrapper:
             tensor_option_args: Dict[str, str] = {}
             tensor_option_arg = f.func.arguments.tensor_options
 
+            if sig.name() == "std.correction":
+                print(sig.name())
+                pass
             # parse arguments into C++ code
             for i, arg in enumerate(f.func.arguments.flat_non_out + (list(f.func.arguments.out) if f.func.arguments.out else [] )):
                 ivalue_str = argument_str.format(pos=i, args_num=args_num)
@@ -472,7 +475,8 @@ class ComputeStaticUnboxingWrapper:
 
                 code.extend(res['code'])
             # only generate tensor options when native function is taking it
-            if any(isinstance(a.nctype.type, BaseCType) and a.nctype.type.type == tensorOptionsT for a in sig.arguments()):
+            use_tensor_options = any(isinstance(a.nctype.type, BaseCType) and a.nctype.type.type == tensorOptionsT for a in sig.arguments())
+            if use_tensor_options:
                 code.append(f"""
         const auto options = TensorOptions()
             .dtype({tensor_option_args['dtype']})
@@ -484,18 +488,27 @@ class ComputeStaticUnboxingWrapper:
 
             connector = "\n\t\t"
             # find dispatch native function name
-            if tensor_option_arg is not None or f.func.name.name.base.endswith('_like'):
+            if use_tensor_options:
                 namespace = 'torch'
             else:
                 namespace = 'at'
+            # handle void return type
+            ret_type: cpp.CType = cpp.returns_type(f.func.returns)
+            if isinstance(ret_type, cpp.BaseCType) and ret_type.type == cpp.voidT:
+                ret_str = ""
+                push_str = ""
+            else:
+                ret_str = "auto result_ = "
+                push_str = "pack(stack, std::move(result_));"
             # handle method
+            schema = json.dumps(sig.func.__str__())[1:-1]
             if Variant.method in f.variants:
                 print("Method: " + sig.decl())
                 self_arg = f.func.arguments.self_arg
                 assert self_arg is not None, "No self argument"
                 arg_list = ",\n\t\t\t".join([arguments[a.name] for a in sig.arguments() if a.name != self_arg.argument.name])
                 function_call = f"""
-        auto result_ = {arguments[self_arg.argument.name]}.{sig.name()}(
+        {ret_str}{arguments[self_arg.argument.name]}.{sig.name()}(
             {arg_list}
         );
     """
@@ -503,21 +516,21 @@ class ComputeStaticUnboxingWrapper:
                 print("Function: " + sig.decl())
                 arg_list = ",\n\t\t\t".join([arguments[a.name] for a in sig.arguments()])
                 function_call = f"""
-        auto result_ = {namespace}::{sig.name()}(
+        {ret_str}{namespace}::{sig.name()}(
             {arg_list}
         );
 """
             return f"""
-Operator(
-    "aten::{sig.func}",
+OperatorGenerator(
+    TORCH_SELECTIVE_SCHEMA("aten::{schema}"),
     [](Stack & stack) {{
-        autograd::profiler::RecordFunction record("{sig.name()}");
+        RECORD_FUNCTION("{sig.name()}", std::vector<c10::IValue>());
         {connector.join(code)}
         {function_call}
         drop(stack, {args_num});
-        pack(stack, std::move(result_));
-        return 0;
-    }}
+        {push_str}
+    }},
+    aliasAnalysisFromSchema()
 ),
 """
 

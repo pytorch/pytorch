@@ -317,7 +317,7 @@ def argumenttype_ivalue_convert(t: Type, ival: str, arg_name: str) -> Dict[str, 
     if isinstance(t, BaseType):
         ctype = argumenttype_type(t=t, mutable=True, binds=name).cpp_type(strip_ref=True)
         return {
-            "code": [f"const {ctype} {arg_name}_base = {ival}.to<{ctype}>();"],
+            "code": [f"{ctype} {arg_name}_base = {ival}.to<{ctype}>();"],
             "val_name": f"{arg_name}_base",
             "ctype": ctype,
         }
@@ -328,7 +328,7 @@ def argumenttype_ivalue_convert(t: Type, ival: str, arg_name: str) -> Dict[str, 
         res = argumenttype_ivalue_convert(t.elem, in_name, arg_name)
         ctype = f"c10::optional<{res['ctype']}>"
         code = f"""
-{arg_name + "_opt"} = {ival}.toOptional<c10::IValue>();
+c10::optional<c10::IValue> {arg_name + "_opt"} = {ival}.toOptional<c10::IValue>();
 {ctype} {out_name};
 if ({arg_name + "_opt"}.has_value()) {{
     const c10::IValue {in_name} = {arg_name + "_opt"}.value();
@@ -350,12 +350,18 @@ if ({arg_name + "_opt"}.has_value()) {{
         code = [f"const c10::List<c10::IValue> {in_name} = {ival}.toList();"]
         res = argumenttype_ivalue_convert(t.elem, elem_name, arg_name)
         connector = '\n\t'
+        # handle list type with size, e.g., bool[4]
+        if isinstance(t.elem, BaseType) and t.elem.name == BaseTy.bool and t.size:
+            ctype = f"std::array<{res['ctype']}, {t.size}>"
+            code.extend(f"""
+{ctype} {out_name} = as_array<{res['ctype']}, {t.size}>({in_name});
+            """.split('\n'))
         # we have to use c10::List for optional element. e.g., Tensor?[] -> c10::List<c10::optional<at::Tensor>>
-        if isinstance(t.elem, OptionalType):
+        elif isinstance(t.elem, OptionalType):
             ctype = f"c10::List<{res['ctype']}>"
             code.extend(f"""
 {ctype} {out_name};
-for (auto {elem_name}: {in_name}) {{
+for (c10::IValue {elem_name}: {in_name}) {{
     {connector.join(res['code'])}
     {out_name}.push_back({res['val_name']});
 }}
@@ -366,7 +372,7 @@ for (auto {elem_name}: {in_name}) {{
             vec_name = arg_name + "_vec"
             code.extend(f"""
 std::vector<{res['ctype']}> {vec_name};
-for (auto {elem_name}: {in_name}) {{
+for (c10::IValue {elem_name}: {in_name}) {{
     {connector.join(res['code'])}
     {vec_name}.push_back({res['val_name']});
 }}
