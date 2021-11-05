@@ -66,12 +66,7 @@ bool testModuleHasOp(const std::string& jit_script, const char* op_name) {
 }
 
 Node* getNodeWithKind(const StaticModule& smodule, const std::string& kind) {
-  for (auto& pnode : smodule.nodes()) {
-    if (std::string(pnode.node()->kind().toQualString()) == kind) {
-      return pnode.node();
-    }
-  }
-  return nullptr;
+  return smodule.findNodeWithKindForTesting(kind);
 }
 
 bool hasNodeWithKind(const StaticModule& smodule, const std::string& kind) {
@@ -1187,17 +1182,16 @@ TEST(
   module.define(sigmoid_script);
   torch::jit::StaticModule smodule(module);
   Node* sigmoid_node = getNodeWithKind(smodule, "aten::sigmoid");
-  const at::IValue a = torch::randn({2, 3});
-  at::IValue b = torch::randn({3, 1});
-  std::unique_ptr<const IValue*[]> ivalue_inputs =
-      std::make_unique<const IValue*[]>(1);
-  ivalue_inputs[0] = &a;
-  ProcessedNode pnode(sigmoid_node, std::move(ivalue_inputs), 1, true);
+  IValue values[] = {torch::randn({2, 3}), torch::randn({3, 1})};
+  ProcessedNode pnode(sigmoid_node, 1, true);
+  pnode.set_input_by_idx(0, 0);
+  pnode.set_outputs_offset(1);
+  pnode.set_values(values);
 
-  pnode.Output(0) = b;
+  ASSERT_EQ(&pnode.Output(0), &values[1]);
   EXPECT_TRUE(pnode.verify_no_memory_overlap());
 
-  pnode.Output(0) = a;
+  pnode.Output(0) = values[0];
   EXPECT_FALSE(pnode.verify_no_memory_overlap());
 }
 
@@ -1209,17 +1203,16 @@ TEST(
   module.define(sigmoid_inplace_script);
   torch::jit::StaticModule smodule(module);
   Node* sigmoid_node = getNodeWithKind(smodule, "aten::sigmoid");
-  const at::IValue a = torch::randn({2, 3});
-  at::IValue b = torch::randn({3, 1});
-  std::unique_ptr<const IValue*[]> ivalue_inputs =
-      std::make_unique<const IValue*[]>(1);
-  ivalue_inputs[0] = &a;
-  ProcessedNode pnode(sigmoid_node, std::move(ivalue_inputs), 1, true);
+  IValue values[] = {torch::randn({2, 3}), torch::randn({3, 1})};
+  ProcessedNode pnode(sigmoid_node, 1, true);
+  pnode.set_input_by_idx(0, 0);
+  pnode.set_outputs_offset(1);
+  pnode.set_values(values);
 
-  pnode.Output(0) = b;
+  ASSERT_EQ(&pnode.Output(0), &values[1]);
   EXPECT_TRUE(pnode.verify_no_memory_overlap());
 
-  pnode.Output(0) = a;
+  pnode.Output(0) = values[0];
   EXPECT_TRUE(pnode.verify_no_memory_overlap());
 }
 
@@ -1234,24 +1227,22 @@ TEST(ProcessedNode, VerifyNoMemoryOverlapWithOverlappingOutputs) {
   torch::jit::StaticModule smodule(g);
   Node* list_unpack_node = getNodeWithKind(smodule, "prim::ListUnpack");
   {
-    auto a = at::randn({2, 3});
-    IValue ivalue(a);
-    std::unique_ptr<const IValue*[]> inputs =
-        std::make_unique<const IValue*[]>(1);
-    inputs[0] = &ivalue;
+    IValue values[] = {at::randn({2, 3}), at::empty({1, 3}), at::empty({4, 5})};
     ProcessedNode list_unpack_pnode(
-        list_unpack_node, std::move(inputs), 1, /*enable_out_variant=*/true);
+        list_unpack_node, 1, /*enable_out_variant=*/true);
+    list_unpack_pnode.set_input_by_idx(0, 0);
+    list_unpack_pnode.set_outputs_offset(1);
+    list_unpack_pnode.set_values(values);
     ASSERT_EQ(list_unpack_pnode.outputs().size(), 2);
     EXPECT_TRUE(list_unpack_pnode.verify_no_memory_overlap());
   }
   {
-    auto a = at::randn({2, 3});
-    IValue ivalue(a);
-    std::unique_ptr<const IValue*[]> inputs =
-        std::make_unique<const IValue*[]>(1);
-    inputs[0] = &ivalue;
+    IValue values[] = {at::randn({2, 3}), at::empty({1, 3}), at::empty({4, 5})};
     ProcessedNode list_unpack_pnode(
-        list_unpack_node, std::move(inputs), 1, /*enable_out_variant=*/true);
+        list_unpack_node, 1, /*enable_out_variant=*/true);
+    list_unpack_pnode.set_input_by_idx(0, 0);
+    list_unpack_pnode.set_outputs_offset(1);
+    list_unpack_pnode.set_values(values);
     auto b = at::randn({2, 3});
     list_unpack_pnode.Output(0) = b;
     list_unpack_pnode.Output(1) = b;

@@ -206,9 +206,21 @@ class TORCH_API StaticModule {
     return constants_;
   }
 
+ private:
+  friend class StaticRuntime;
+
+  // Our nodes don't have their inputs & outputs initialized; don't
+  // let anybody but StaticRuntime and tests get them.
   const std::vector<ProcessedNode>& nodes() const {
     return nodes_;
   }
+
+ public:
+  auto num_nodes() const {
+    return nodes_.size();
+  }
+
+  Node* findNodeWithKindForTesting(const std::string& kind) const;
 
   bool is_optimizable_container_type(const Node* n) const {
     auto it = node_is_optimizable_container_type_.find(n);
@@ -312,8 +324,9 @@ class TORCH_API StaticRuntime {
 
   // Input is readwrite
   IValue& Input(uint32_t i) {
-    DCHECK(i < inputs_.size());
-    return inputs_[i];
+    DCHECK_LT(i, static_module_.num_inputs());
+    DCHECK_LT(i, values_.size());
+    return values_[i];
   }
 
   // Output is readonly. The writing process happens inside ProcessedNodes
@@ -370,8 +383,8 @@ class TORCH_API StaticRuntime {
 
   // clean up owning refs of input IValues
   void clean_up_input_ivalues() {
-    for (IValue& ival : inputs_) {
-      ival = IValue();
+    for (const auto idx : c10::irange(static_module_.num_inputs())) {
+      values_[idx] = IValue();
     }
   }
 
@@ -395,7 +408,12 @@ class TORCH_API StaticRuntime {
   // runtime.
   const StaticModule& static_module_;
   std::unique_ptr<MemoryPlanner> planner_;
-  std::vector<IValue> inputs_;
+  // first static_module_.num_inputs() slots are inputs, next
+  // static_module_.constants().size() slots are a copy of
+  // static_module_.constants(), rest are regular values in the
+  // graph. ProcessedNodes reference their inputs and outputs with
+  // offsets into this array, which saves memory.
+  std::vector<IValue> values_;
   std::vector<IValue*> outputs_;
   std::vector<ProcessedNode> nodes_;
 };
@@ -405,19 +423,16 @@ class TORCH_API ProcessedNode {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   ProcessedNode() = default;
-  ProcessedNode(
-      Node* n,
-      std::unique_ptr<const IValue*[]> inputs,
-      uint32_t inputsSize,
-      bool enable_out_variant);
+  ProcessedNode(Node* n, uint32_t inputsSize, bool enable_out_variant);
 
   ProcessedNode(const ProcessedNode& rhs)
       : node_(rhs.node_),
         fn_(rhs.fn_),
-        inputs_(std::make_unique<const IValue*[]>(rhs.inputs_size_)),
-        outputs_(std::make_unique<IValue[]>(rhs.outputs_size_)),
+        inputs_(std::make_unique<uint16_t[]>(rhs.inputs_size_)),
         inputs_size_(rhs.inputs_size_),
-        outputs_size_(rhs.outputs_size_)
+        outputs_offset_(rhs.outputs_offset_),
+        num_outputs_(rhs.num_outputs_),
+        values_(rhs.values_)
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
         ,
         op_name_(rhs.op_name_)
@@ -425,8 +440,6 @@ class TORCH_API ProcessedNode {
   {
     std::copy(
         rhs.inputs_.get(), rhs.inputs_.get() + inputs_size_, inputs_.get());
-    std::copy(
-        rhs.outputs_.get(), rhs.outputs_.get() + outputs_size_, outputs_.get());
   }
 
   ProcessedNode& operator=(const ProcessedNode& rhs) {
@@ -437,18 +450,19 @@ class TORCH_API ProcessedNode {
     fn_ = rhs.fn_;
 
     if (!inputs_ || inputs_size_ != rhs.inputs_size_) {
-      inputs_ = std::make_unique<const IValue*[]>(rhs.inputs_size_);
+      if (rhs.inputs_) {
+        inputs_ = std::make_unique<uint16_t[]>(rhs.inputs_size_);
+      }
       inputs_size_ = rhs.inputs_size_;
     }
-    std::copy(
-        rhs.inputs_.get(), rhs.inputs_.get() + inputs_size_, inputs_.get());
-
-    if (!outputs_ || outputs_size_ != rhs.outputs_size_) {
-      outputs_ = std::make_unique<IValue[]>(rhs.outputs_size_);
-      outputs_size_ = rhs.outputs_size_;
+    if (rhs.inputs_) {
+      std::copy(
+          rhs.inputs_.get(), rhs.inputs_.get() + inputs_size_, inputs_.get());
     }
-    std::copy(
-        rhs.outputs_.get(), rhs.outputs_.get() + outputs_size_, outputs_.get());
+
+    outputs_offset_ = rhs.outputs_offset_;
+    num_outputs_ = rhs.num_outputs_;
+    values_ = rhs.values_;
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
     op_name_ = rhs.op_name_;
 #endif
@@ -471,30 +485,52 @@ class TORCH_API ProcessedNode {
   // Input is readonly
   const IValue& Input(uint32_t i) const {
     DCHECK(i < inputs_size_);
-    return *inputs_[i];
+    return values_[inputs_[i]];
   }
 
   // Output is readwrite
   IValue& Output(uint32_t i) {
-    DCHECK(i < outputs_size_);
-    return outputs_[i];
+    DCHECK(i < num_outputs_);
+    return values_[outputs_offset_ + i];
   }
 
   const IValue& Output(uint32_t i) const {
-    DCHECK(i < outputs_size_);
-    return outputs_[i];
+    DCHECK(i < num_outputs_);
+    return values_[outputs_offset_ + i];
   }
 
-  void set_input(uint32_t index, const IValue* ival) {
-    inputs_[index] = ival;
+  void set_input_by_idx(uint32_t index, size_t ival_index) {
+    DCHECK_LT(index, inputs_size_);
+    TORCH_CHECK(
+        ival_index < (1 << 16),
+        "input index in values table ",
+        ival_index,
+        " would overflow 2-byte index storage");
+    inputs_[index] = ival_index;
+  }
+
+  void set_outputs_offset(size_t offset) {
+    TORCH_CHECK(
+        offset < (1 << 16),
+        "outputs offset in values table ",
+        offset,
+        " would overflow 2-byte index storage");
+    outputs_offset_ = offset;
   }
 
   C10_NODISCARD c10::ArrayRef<const IValue> outputs() const {
-    return c10::ArrayRef<const IValue>(outputs_.get(), outputs_size_);
+    return c10::ArrayRef<const IValue>(values_ + outputs_offset_, num_outputs_);
   }
 
+  // can't support this; let's look at callers
+#if 0
   C10_NODISCARD c10::ArrayRef<const IValue*> inputs() const {
     return c10::ArrayRef<const IValue*>(inputs_.get(), inputs_size_);
+  }
+#endif
+
+  C10_NODISCARD uint16_t num_inputs() const {
+    return inputs_size_;
   }
 
   std::vector<IValue> clone_inputs() const;
@@ -515,6 +551,11 @@ class TORCH_API ProcessedNode {
   }
 #endif
 
+  void set_values(IValue* values) {
+    DCHECK_EQ(nullptr, values_);
+    values_ = values;
+  }
+
  private:
   C10_NODISCARD bool verify_outputs_dont_overlap_each_other() const;
 
@@ -531,10 +572,11 @@ class TORCH_API ProcessedNode {
     FunctionKind kind = FunctionKind::kOutVariant;
   };
   Function fn_;
-  std::unique_ptr<const IValue*[]> inputs_; // unowned
-  std::unique_ptr<IValue[]> outputs_;
+  std::unique_ptr<uint16_t[]> inputs_; // unowned
   uint32_t inputs_size_;
-  uint32_t outputs_size_;
+  uint16_t outputs_offset_;
+  uint16_t num_outputs_;
+  IValue* values_ = nullptr; // unowned
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   const char* op_name_;
 #endif
