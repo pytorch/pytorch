@@ -103,9 +103,9 @@ args = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
     '--pattern=# type:\s*ignore(?!\[)',
-    '--linter_name=TYPEIGNORE',
-    '--error_name=unqualified type: ignore',
-    """--error_description=\
+    '--linter-name=TYPEIGNORE',
+    '--error-name=unqualified type: ignore',
+    """--error-description=\
         This line has an unqualified `type: ignore`; \
         please convert it to `type: ignore[xxxx]`\
     """,
@@ -121,9 +121,9 @@ args = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
     '--pattern=# type:\s*ignore(?!\[)',
-    '--linter_name=TYPEIGNORE',
-    '--error_name=unqualified noqa',
-    """--error_description=\
+    '--linter-name=TYPEIGNORE',
+    '--error-name=unqualified noqa',
+    """--error-description=\
         This line has an unqualified `noqa`; \
         please convert it to `noqa: XXXX`\
     """,
@@ -174,4 +174,27 @@ args = [
     'tools/linter/adapters/newlines_linter.py',
     '--',
     '@{{PATHSFILE}}',
+]
+
+[[linter]]
+name = 'SPACES'
+include_patterns = ['**']
+exclude_patterns = [
+    '**/contrib/**',
+    '**/*.diff',
+    'third_party/**',
+]
+args = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=[[:blank:]]$',
+    '--linter-name=SPACES',
+    '--error-name=trailing spaces',
+    '--replace-pattern=s/[[:blank:]]+$//',
+    """--error-description=\
+        This line has trailing spaces; \
+        please remove them.\
+    """,
+    '--',
+    '@{{PATHSFILE}}'
 ]
