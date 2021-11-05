@@ -8030,6 +8030,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex(),
            dtypesIfCUDA=all_types_and_complex_and(torch.half, *[torch.bfloat16] if CUDA11OrLater else []),
            sample_inputs_func=sample_inputs_corrcoef,
+           supports_forward_ad=True,
            supports_out=False),
     UnaryUfuncInfo('cos',
                    ref=np.cos,
