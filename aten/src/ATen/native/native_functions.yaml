@@ -108,7 +108,7 @@
 
 # _new_zeros_with_same_feature_meta needs to be CompositeExplicitAutograd for
 # jvp support in functorch
-- func: _new_zeros_with_same_feature_meta(Tensor self, Tensor other, int num_feature_dims) -> Tensor
+- func: _new_zeros_with_same_feature_meta(Tensor self, Tensor other, int? self_num_batch_dims=None) -> Tensor
   variants: function
   dispatch:
     CompositeExplicitAutograd: _new_zeros_with_same_feature_meta
