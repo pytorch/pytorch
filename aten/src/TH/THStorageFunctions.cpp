@@ -7,10 +7,6 @@
 #include <TH/generic/THStorage.cpp>
 #include <TH/THGenerateByteType.h>
 
-// NOLINTNEXTLINE(bugprone-suspicious-include)
-#include <TH/generic/THStorageCopy.cpp>
-#include <TH/THGenerateByteType.h>
-
 #include <ATen/native/Resize.h>
 
 THStorage* THStorage_new() {

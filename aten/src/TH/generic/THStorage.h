@@ -25,25 +25,7 @@
 
 // These used to be distinct types; for some measure of backwards compatibility and documentation
 // alias these to the single THStorage type.
-#define THFloatStorage THStorage
-#define THDoubleStorage THStorage
-#define THHalfStorage THStorage
 #define THByteStorage THStorage
-#define THCharStorage THStorage
-#define THShortStorage THStorage
-#define THIntStorage THStorage
-#define THLongStorage THStorage
-#define THBoolStorage THStorage
-#define THBFloat16Storage THStorage
-#define THQUInt8Storage THStorage
-#define THQInt8Storage THStorage
-#define THQInt32Storage THStorage
-#define THQUInt4x2Storage THStorage
-#define THQUInt2x4Storage THStorage
-#define THComplexFloatStorage THStorage
-#define THComplexDoubleStorage THStorage
-
-TH_API scalar_t* THStorage_(data)(const THStorage*);
 
 /* slow access -- checks everything */
 TH_API void THStorage_(set)(THStorage*, ptrdiff_t, scalar_t);

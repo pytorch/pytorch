@@ -46,8 +46,6 @@ install(FILES
 install(FILES
   generic/THStorage.cpp
   generic/THStorage.h
-  generic/THStorageCopy.cpp
-  generic/THStorageCopy.h
   generic/THTensor.cpp
   generic/THTensor.h
   # See Note [TH abstraction violation]
