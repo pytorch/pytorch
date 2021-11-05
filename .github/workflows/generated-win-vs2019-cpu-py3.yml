@@ -12,6 +12,9 @@ on:
       - release/*
   workflow_dispatch:
 
+defaults:
+  run:
+    timeout-minutes: 240
 env:
   BUILD_ENVIRONMENT: win-vs2019-cpu-py3
   BUILD_WHEEL: 1

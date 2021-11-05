@@ -10,6 +10,9 @@ on:
     - cron: 0 */4 * * *
   workflow_dispatch:
 
+defaults:
+  run:
+    timeout-minutes: 240
 env:
   BUILD_ENVIRONMENT: periodic-linux-xenial-cuda10.2-py3-gcc7-slow-gradcheck
   DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7

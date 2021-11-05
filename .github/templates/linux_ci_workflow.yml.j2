@@ -21,6 +21,9 @@ on:
 {%- endif %}
   workflow_dispatch:
 
+defaults:
+  run:
+    timeout-minutes: 240
 env:
   BUILD_ENVIRONMENT: !{{ build_environment }}
   DOCKER_IMAGE_BASE: !{{ docker_image_base }}

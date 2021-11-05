@@ -19,6 +19,9 @@ on:
 {%- endif %}
 !{{ common.concurrency(build_environment) }}
 
+defaults:
+  run:
+    timeout-minutes: 240
 env:
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
   AWS_DEFAULT_REGION: us-east-1

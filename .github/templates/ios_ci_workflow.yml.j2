@@ -25,6 +25,7 @@ on:
 defaults:
   run:
     shell: bash -x -e -l {0}
+    timeout-minutes: 240
 env:
   BUILD_ENVIRONMENT: !{{ build_environment }}
   IN_CI: 1

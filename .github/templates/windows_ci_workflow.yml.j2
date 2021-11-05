@@ -32,6 +32,9 @@ on:
 {%- endif %}
   workflow_dispatch:
 
+defaults:
+  run:
+    timeout-minutes: 240
 env:
   BUILD_ENVIRONMENT: !{{ build_environment }}
   BUILD_WHEEL: 1

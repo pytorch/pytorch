@@ -10,6 +10,9 @@ on:
     - cron: 45 0,4,8,12,16,20 * * *
   workflow_dispatch:
 
+defaults:
+  run:
+    timeout-minutes: 240
 env:
   BUILD_ENVIRONMENT: periodic-win-vs2019-cuda11.1-py3
   BUILD_WHEEL: 1
