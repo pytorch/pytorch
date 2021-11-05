@@ -2113,7 +2113,7 @@ class TestCase(expecttest.TestCase):
             with open(expected_file, 'w') as f:
                 # Adjust for producer_version, leave s unmodified
                 s_tag = re.sub(r'(producer_version): "[0-9.]*"',
-                               r'\1producer_version: "CURRENT_VERSION"', s)
+                               r'\1: "CURRENT_VERSION"', s)
                 f.write(s_tag)
 
         try:
@@ -2232,6 +2232,14 @@ def download_file(url, binary=True):
         raise unittest.SkipTest(msg) from e
 
 def find_free_port():
+    """
+    Finds an available port and returns that port number.
+
+    NOTE: If this function is being used to allocate a port to Store (or
+    indirectly via init_process_group or init_rpc), it should be used
+    in conjuction with the `retry_on_connect_failures` decorator as there is a potential
+    race condition where the allocated port may become unavailable before it can be used
+    """
     with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as sock:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind(('localhost', 0))

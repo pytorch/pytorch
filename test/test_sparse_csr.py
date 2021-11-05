@@ -921,23 +921,13 @@ class TestSparseCSR(TestCase):
             self.assertEqual(out, expected_X)
 
             # test out with F contiguous strides
-            # TODO (@ivanyashchuk): mixed memory format doesn't work yet for cuda
-            # out is F contiguous but B is C contiguous
-            if self.device_type == 'cuda' and (n > 0 and k > 1):
-                with self.assertRaisesRegex(RuntimeError, "INTERNAL ASSERT FAILED"):
-                    out = torch.empty_strided((n, k), (1, n), dtype=dtype, device=device)
-                    torch.triangular_solve(
-                        B, A_sparse,
-                        upper=upper, unitriangular=unitriangular, transpose=transpose, out=(out, actual_A_clone)
-                    )
-            else:
-                out = torch.empty_strided((n, k), (1, n), dtype=dtype, device=device)
-                torch.triangular_solve(
-                    B, A_sparse,
-                    upper=upper, unitriangular=unitriangular, transpose=transpose, out=(out, actual_A_clone)
-                )
-                self.assertEqual(out, expected_X)
-                self.assertEqual(out.stride(), (1, n))
+            out = torch.empty_strided((n, k), (1, n), dtype=dtype, device=device)
+            torch.triangular_solve(
+                B, A_sparse,
+                upper=upper, unitriangular=unitriangular, transpose=transpose, out=(out, actual_A_clone)
+            )
+            self.assertEqual(out, expected_X)
+            self.assertEqual(out.stride(), (1, n))
 
             # test out with discontiguous strides
             out = torch.empty_strided((2 * n, k), (1, 2 * n), dtype=dtype, device=device)[::2]
