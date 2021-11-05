@@ -2300,16 +2300,12 @@ class TestLinalg(TestCase):
     @dtypes(*floating_and_complex_types())
     def test_eig_with_nan(self, device, dtype):
         for val in [np.inf, np.nan]:
-            with self.assertRaisesRegex(RuntimeError, "torch.linalg.eig: input tensor should not"):
-                a = torch.eye(5, 5, device=device, dtype=dtype) * val
-                torch.linalg.eig(a)
+            for batch_dim in [(), (10,)]:
+                a = make_tensor((*batch_dim, 5, 5), device=device, dtype=dtype)
+                a[..., -1, -1] = val
 
-            with self.assertRaisesRegex(RuntimeError, "torch.linalg.eig: input tensor should not"):
-                batched_a = torch.ones(10, 5, 5, device=device, dtype=dtype)
-                e = torch.eye(5, 5, device=device, dtype=dtype)
-                e.fill_diagonal_(val)
-                batched_a[3] = e
-                torch.linalg.eig(batched_a)
+                with self.assertRaisesRegex(RuntimeError, "torch.linalg.eig: input tensor should not"):
+                    torch.linalg.eig(a)
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
