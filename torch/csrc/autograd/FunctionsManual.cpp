@@ -1021,6 +1021,38 @@ Tensor masked_scatter_backward(const Tensor & grad, const Tensor & mask, IntArra
   return mask_selected.view(sizes);
 }
 
+std::tuple<Tensor, Tensor, Tensor> onboarding_attn_backward(const variable_list& grads, Tensor& q, Tensor& k, Tensor& v){
+  auto grad_o = grads[0];
+  auto grad_a = grads[1];
+
+  if (!grad_o.defined()){
+    grad_o = at::zeros({q.size(0), v.size(1)}, q.options());
+  }
+
+  if (!grad_a.defined()){
+    grad_a = at::zeros({q.size(0), k.size(0)}, q.options());
+
+  }
+
+  auto x = at::mm(q, k.transpose(0, 1));
+  auto a = at::tanh(x);
+
+  auto do_da = at::mm(grad_o, v.transpose(0, 1));
+  auto da_dx = at::pow((1/at::cosh(x)), 2);
+
+  auto grad_q_o = at::mm(do_da * da_dx, k);
+  auto grad_q_a = at::mm(grad_a * da_dx, k);
+  auto grad_q = grad_q_o + grad_q_a;
+
+  auto grad_k_o = at::mm((do_da * da_dx).t(), q);
+  auto grad_k_a = at::mm((grad_a * da_dx).t(), q);
+  auto grad_k = grad_k_o + grad_k_a;
+
+  auto grad_v = at::mm(a.t(), grad_o);
+
+  return std::make_tuple(grad_q, grad_k, grad_v);
+}
+
 Tensor cholesky_jvp(const Tensor& input_tangent, const Tensor& L, bool upper) {
   // Differentiation of the Cholesky decomposition, Iain Murray
   // https://arxiv.org/abs/1602.07527

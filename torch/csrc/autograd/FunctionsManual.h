@@ -347,6 +347,8 @@ Tensor gather_with_keepdimed_indices(const Tensor& input, int64_t dim, const Ten
 Tensor evenly_read_jvp(const Tensor& fw_grad, const Tensor & input, const Tensor & value);
 Tensor warn_backwards(const Tensor &grad_output);
 
+std::tuple<Tensor, Tensor, Tensor> onboarding_attn_backward(const variable_list& grads, Tensor& q, Tensor& k, Tensor& v);
+
 } // namespace details
 } // namespace generated
 } // namespace autograd

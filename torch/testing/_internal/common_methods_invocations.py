@@ -12280,7 +12280,6 @@ op_db: List[OpInfo] = [
         backward_dtypesIfCPU=floating_types_and(torch.bfloat16),
         backward_dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
         supports_out=False,
-        supports_forward_ad=True,
         supports_autograd=True,
         # This test fails for my implementation of backward + implicit version, still debugging
         skips=(
