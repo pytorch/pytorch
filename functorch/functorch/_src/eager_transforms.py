@@ -9,7 +9,6 @@ import torch
 from functools import partial, wraps
 import contextlib
 from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
-from typing import Callable, Tuple, Union
 from .pytree_hacks import tree_map_, treespec_pprint
 import torch.autograd.forward_ad as fwAD
 
@@ -142,9 +141,9 @@ def vjp(f: Callable, *primals):
     Args:
         f (Callable): A Python function that takes one or more arguments. Must
             return one or more Tensors.
-        primals: Positional arguments to :attr:`f` that must all be Tensors.
-            The returned function will also be computing the derivative with
-            respect to these arguments
+        primals (Tensors): Positional arguments to :attr:`f` that must all be
+            Tensors. The returned function will also be computing the
+            derivative with respect to these arguments
 
     Returns:
         Returns a tuple containing the output of :attr:`f` applied to
@@ -152,8 +151,9 @@ def vjp(f: Callable, *primals):
         respect to all :attr:`primals` using the cotangents passed to the
         returned function. The returned function will return a tuple of each
         VJP
-    
+
     When used in simple cases, :func:`vjp` behaves the same as :func:`grad`
+
         >>> x = torch.randn([5])
         >>> f = lambda x: x.sin().sum()
         >>> (_, vjpfunc) = functorch.vjp(f, x)
@@ -162,6 +162,7 @@ def vjp(f: Callable, *primals):
 
     However, :func:`vjp` can support functions with multiple outputs by
     passing in the cotangents for each of the outputs
+
         >>> x = torch.randn([5])
         >>> f = lambda x: (x.sin(), x.cos())
         >>> (_, vjpfunc) = functorch.vjp(f, x)
@@ -169,6 +170,7 @@ def vjp(f: Callable, *primals):
         >>> assert torch.allclose(vjps[0], x.cos() + -x.sin())
 
     :func:`vjp` can even support outputs being Python structs
+
         >>> x = torch.randn([5])
         >>> f = lambda x: {'first': x.sin(), 'second': x.cos()}
         >>> (_, vjpfunc) = functorch.vjp(f, x)
@@ -178,6 +180,7 @@ def vjp(f: Callable, *primals):
 
     The function returned by :func:`vjp` will compute the partials with
     respect to each of the :attr:`primals`
+
         >>> x, y = torch.randn([5, 4]), torch.randn([4, 5])
         >>> (_, vjpfunc) = functorch.vjp(torch.matmul, x, y)
         >>> cotangents = torch.randn([5, 5])
@@ -188,6 +191,7 @@ def vjp(f: Callable, *primals):
 
     :attr:`primals` are the positional arguments for :attr:`f`. All kwargs use their
     default value
+
         >>> x = torch.randn([5])
         >>> def f(x, scale=4.):
         >>>   return x * 4.
@@ -196,19 +200,24 @@ def vjp(f: Callable, *primals):
         >>> vjps = vjpfunc(torch.ones_like(x))
         >>> assert torch.allclose(vjps[0], torch.full(x.shape, 4.))
 
-    .. note:
-        Using PyTorch ``torch.no_grad`` together with ``jacrev``.
+    .. note::
+        Using PyTorch ``torch.no_grad`` together with ``vjp``.
         Case 1: Using ``torch.no_grad`` inside a function:
+
             >>> def f(x):
             >>>     with torch.no_grad():
             >>>         c = x ** 2
             >>>     return x - c
-        In this case, ``jacrev(f)(x)`` will respect the inner ``torch.no_grad``.
-        Case 2: Using ``jacrev`` inside ``torch.no_grad`` context manager:
+
+        In this case, ``vjp(f)(x)`` will respect the inner ``torch.no_grad``.
+
+        Case 2: Using ``vjp`` inside ``torch.no_grad`` context manager:
+
             >>> with torch.no_grad():
-            >>>     jacrev(f)(x)
-        In this case, ``jacrev`` will respect the inner ``torch.no_grad``, but not the
-        outer one. This is because ``jacrev`` is a "function transform": its result
+            >>>     vjp(f)(x)
+
+        In this case, ``vjp`` will respect the inner ``torch.no_grad``, but not the
+        outer one. This is because ``vjp`` is a "function transform": its result
         should not depend on the result of a context manager outside of ``f``.
     """
     level = _grad_increment_nesting()
@@ -253,42 +262,53 @@ def vjp(f: Callable, *primals):
 
 def jacrev(f: Callable, argnums: Union[int, Tuple[int]] = 0):
     """
-    Computes the Jacobian of :attr:`f` with respect to the arg(s) at index :attr:`argnum` using reverse
-    mode autodiff
+    Computes the Jacobian of :attr:`f` with respect to the arg(s) at index
+    :attr:`argnum` using reverse mode autodiff
 
     Args:
-        func (function): A Python function that takes one or more arguments, one of which must be a
-            Tensor, and returns one or more Tensors
-        argnums: Optional, integer or tuple of integers, saying which arguments to get the Jacobian with
-            respect to. Default: 0.
+        func (function): A Python function that takes one or more arguments,
+            one of which must be a Tensor, and returns one or more Tensors
+        argnums (int or Tuple[int]): Optional, integer or tuple of integers,
+            saying which arguments to get the Jacobian with respect to.
+            Default: 0.
 
     Returns:
-        Returns a function that takes in the same inputs as :attr:`f` and returns the Jacobian of :attr:`f` with 
-        respect to the arg(s) at :attr:`argnums`
+        Returns a function that takes in the same inputs as :attr:`f` and
+        returns the Jacobian of :attr:`f` with respect to the arg(s) at
+        :attr:`argnums`
 
-    A basic usage with a pointwise, unary operation will give a diagonal array as the Jacobian
+    A basic usage with a pointwise, unary operation will give a diagonal array
+    as the Jacobian
+
         >>> from functorch import jacrev
         >>> x = torch.randn(5)
         >>> jacobian = jacrev(torch.sin)(x)
         >>> expected = torch.diag(torch.cos(x))
         >>> assert torch.allclose(jacobian, expected)
 
-    :func:`jacrev` can be composed with vmap to produce batched Jacobians:
+    :func:`jacrev` can be composed with vmap to produce batched
+    Jacobians:
+
         >>> from functorch import jacrev
         >>> x = torch.randn(64, 5)
         >>> jacobian = vmap(jacrev(torch.sin))(x)
         >>> assert jacobian.shape == (64, 5, 5)
-    
-    Additionally, :func:`jacrev` can be composed with itself to produce Hessians
+
+    Additionally, :func:`jacrev` can be composed with itself to produce
+    Hessians
+
+        >>> from functorch import jacrev
         >>> def f(x):
         >>>   return x.sin().sum()
         >>>
         >>> x = torch.randn(5)
         >>> hessian = jacrev(jacrev(f))(x)
         >>> assert torch.allclose(hessian, torch.diag(-x.sin()))
-    
-    By default, :func:`jacrev` computes the Jacobian with respect to the first input. However, it can compute the
-    Jacboian with respect to a different argument by using :attr:`argnums`:
+
+    By default, :func:`jacrev` computes the Jacobian with respect to the first
+    input. However, it can compute the Jacboian with respect to a different
+    argument by using :attr:`argnums`:
+
         >>> from functorch import jacrev
         >>> def f(x, y):
         >>>   return x + y ** 2
@@ -297,8 +317,10 @@ def jacrev(f: Callable, argnums: Union[int, Tuple[int]] = 0):
         >>> jacobian = jacrev(f, argnums=1)(x, y)
         >>> expected = torch.diag(2 * y)
         >>> assert torch.allclose(jacobian, expected)
-    
-    Additionally, passing a tuple to :attr:`argnums` will compute the Jacobian with respect to multiple arguments
+
+    Additionally, passing a tuple to :attr:`argnums` will compute the Jacobian
+    with respect to multiple arguments
+
         >>> from functorch import jacrev
         >>> def f(x, y):
         >>>   return x + y ** 2
@@ -310,17 +332,22 @@ def jacrev(f: Callable, argnums: Union[int, Tuple[int]] = 0):
         >>> assert torch.allclose(jacobian[0], expectedX)
         >>> assert torch.allclose(jacobian[1], expectedY)
 
-    .. note:
+    .. note::
         Using PyTorch ``torch.no_grad`` together with ``jacrev``.
         Case 1: Using ``torch.no_grad`` inside a function:
+
             >>> def f(x):
             >>>     with torch.no_grad():
             >>>         c = x ** 2
             >>>     return x - c
+
         In this case, ``jacrev(f)(x)`` will respect the inner ``torch.no_grad``.
+
         Case 2: Using ``jacrev`` inside ``torch.no_grad`` context manager:
+
             >>> with torch.no_grad():
             >>>     jacrev(f)(x)
+
         In this case, ``jacrev`` will respect the inner ``torch.no_grad``, but not the
         outer one. This is because ``jacrev`` is a "function transform": its result
         should not depend on the result of a context manager outside of ``f``.
@@ -431,26 +458,29 @@ def jacfwd(f):
 
 def grad_and_value(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Callable:
     """
-    Returns a function to compute a tuple of the gradient and primal, or forward, computation.
+    Returns a function to compute a tuple of the gradient and primal, or
+    forward, computation.
 
     Args:
         func (Callable): A Python function that takes one or more arguments.
-            Must return a single-element Tensor. If specified :attr:`has_aux` equals ``True``,
-            function can return a tuple of single-element Tensor and other auxiliary objects:
-            ``(output, aux)``.
-        argnums (int or Tuple[int]): Specifies arguments to compute gradients with respect to.
-            :attr:`argnums` can be single integer or tuple of integers. Default: 0.
-        has_aux (bool): Flag indicating that :attr:`func` returns a tensor and other
-            auxiliary objects: ``(output, aux)``. Default: False.
+            Must return a single-element Tensor. If specified :attr:`has_aux`
+            equals ``True``, function can return a tuple of single-element
+            Tensor and other auxiliary objects: ``(output, aux)``.
+        argnums (int or Tuple[int]): Specifies arguments to compute gradients
+            with respect to. :attr:`argnums` can be single integer or tuple of
+            integers. Default: 0.
+        has_aux (bool): Flag indicating that :attr:`func` returns a tensor and
+            other auxiliary objects: ``(output, aux)``. Default: False.
 
     Returns:
-        Function to compute a tuple of gradients with respect to its inputs and the forward
-        computation. By default, the output of the function is a tuple of the gradient tensor(s)
-        with respect to the first argument and the primal computation. If specified
-        :attr:`has_aux` equals ``True``, tuple of gradients and tuple of the forward computation
-        with output auxiliary objects is returned. If :attr:`argnums` is a tuple of integers,
-        a tuple of a tuple of the output gradients with respect to each :attr:`argnums` value and
-        the forward computation is returned.
+        Function to compute a tuple of gradients with respect to its inputs
+        and the forward computation. By default, the output of the function is
+        a tuple of the gradient tensor(s) with respect to the first argument
+        and the primal computation. If specified :attr:`has_aux` equals
+        ``True``, tuple of gradients and tuple of the forward computation with
+        output auxiliary objects is returned. If :attr:`argnums` is a tuple of
+        integers, a tuple of a tuple of the output gradients with respect to
+        each :attr:`argnums` value and the forward computation is returned.
 
     See :func:`grad` for examples
     """
@@ -534,6 +564,7 @@ def grad(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Calla
 
     When composed with ``vmap``, ``grad`` can be used to compute per-sample-gradients:
 
+        >>> from functorch import grad
         >>> from functorch import vmap
         >>> batch_size, feature_size = 3, 5
         >>>
@@ -554,6 +585,7 @@ def grad(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Calla
 
     Example of using ``grad`` with :attr:`has_aux` and :attr:`argnums`:
 
+        >>> from functorch import grad
         >>> def my_loss_func(y, y_pred):
         >>>    loss_per_sample = (0.5 * y_pred - y) ** 2
         >>>    loss = loss_per_sample.mean()
@@ -565,7 +597,7 @@ def grad(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Calla
         >>> out = fn(y_true, y_preds)
         >>> > output is ((grads w.r.t y_true, grads w.r.t y_preds), (y_pred, loss_per_sample))
 
-    .. note:
+    .. note::
         Using PyTorch ``torch.no_grad`` together with ``grad``.
 
         Case 1: Using ``torch.no_grad`` inside a function:
