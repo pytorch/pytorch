@@ -67,19 +67,13 @@ jobs:
         run: |
           # Install dependencies
           brew install libomp
-      - name: Install sccache (only for non-forked PRs)
-        if: github.event.pull_request.head.repo.full_name == github.repository
-        run: |
-          sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
-          sudo chmod +x /usr/local/bin/sccache
-          echo "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> "${GITHUB_ENV}"
       - name: Build
         run: |
           echo "CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname "$(which conda)")/../"}" >> "${GITHUB_ENV}"
           .jenkins/pytorch/macos-build.sh
       - name: Archive artifacts into zip
         run: |
-          zip -1 -r artifacts.zip dist/
+          zip -1 -r artifacts.zip dist/ build/
       - uses: actions/upload-artifact@v2
         name: Store PyTorch Build Artifacts on S3
         with:
