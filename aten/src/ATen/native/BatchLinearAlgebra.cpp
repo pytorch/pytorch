@@ -2791,8 +2791,7 @@ std::tuple<Tensor&, Tensor&> linalg_eig_out(const Tensor& input, Tensor& values,
 
   // Now check LAPACK/MAGMA error codes
   if (input.dim() > 2) {
-    batchCheckErrors(infos
-, "torch.linalg.eig");
+    batchCheckErrors(infos, "torch.linalg.eig");
   } else {
     singleCheckErrors(infos.item().toInt(), "torch.linalg.eig");
   }
