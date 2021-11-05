@@ -1,8 +1,7 @@
 #include "lazy_tensor_core/csrc/device.h"
 
+#include <c10/util/Logging.h>
 #include <c10/util/Optional.h>
-#include "lazy_tensor_core/csrc/compiler/backend_impl_interface.h"
-#include "lazy_tensors/str_split.h"
 
 namespace torch_lazy_tensors {
 namespace {
@@ -11,15 +10,27 @@ thread_local c10::optional<Device> g_current_device;
 
 }  // namespace
 
+Device::Device()
+  : type_(std::make_shared<BackendDeviceType>()) {}
+
+Device::Device(std::shared_ptr<BackendDeviceType>&& type, int ordinal)
+      : type_(std::move(type)), ordinal_(ordinal) {}
+
 Device::Device(const std::string& device_spec) {}
 
+int8_t Device::type() const {
+  TORCH_INTERNAL_ASSERT(type_);
+  return type_->type;
+}
+
 std::string Device::toString() const {
-  return c10::str("Default:", ordinal_);
+  TORCH_INTERNAL_ASSERT(type_);
+  return c10::str(type_->toString(), ordinal_);
 }
 
 int Device::compare(const Device& rhs) const {
-  if (type_ != rhs.type_) {
-    return type_ < rhs.type_ ? -1 : +1;
+  if (type() != rhs.type()) {
+    return type() < rhs.type() ? -1 : +1;
   }
   return ordinal_ < rhs.ordinal_ ? -1 : (ordinal_ > rhs.ordinal_ ? +1 : 0);
 }
