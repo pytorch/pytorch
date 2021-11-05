@@ -3,6 +3,8 @@ import cmath
 import collections.abc
 from typing import NamedTuple, Callable, Sequence, List, Union, Optional, Type, Tuple, Any, cast
 
+import numpy as np
+
 import torch
 
 from ._core import _unravel_index
@@ -247,9 +249,27 @@ class NonePair(Pair):
 
 
 class BooleanPair(Pair):
-    def __init__(self, actual: Any, expected: Any, **other_parameters: Any) -> None:
-        self._check_inputs_isinstance(actual, expected, cls=bool)
+    def __init__(self, actual: Any, expected: Any, id: Tuple[Any, ...] = (), **other_parameters: Any) -> None:
+        actual, expected = self._process_inputs(actual, expected, id=id)
         super().__init__(actual, expected, **other_parameters)
+
+    def _process_inputs(self, actual: Any, expected: Any, *, id: Tuple[Any, ...]) -> Tuple[bool, bool]:
+        self._check_inputs_isinstance(actual, expected, cls=(bool, np.bool_))
+        error_meta, bools = self._apply_unary(self._to_bool, actual, expected, id=id)
+        if error_meta:
+            raise UnsupportedInputs(error_meta)
+        return cast(Tuple[bool, bool], bools)
+
+    def _to_bool(self, bool_like: Any) -> Tuple[Optional[ErrorMeta], Optional[bool]]:
+        if isinstance(bool_like, bool):
+            bool_ = bool_like
+        elif isinstance(bool_like, np.bool_):
+            bool_ = bool_like.item()
+        else:
+            error_meta = ErrorMeta(TypeError, f"Unknown boolean type {type(bool_like)}.")
+            return error_meta, None
+
+        return None, bool_
 
     def compare(self) -> Optional[ErrorMeta]:
         if self.actual is self.expected:
@@ -264,6 +284,9 @@ class NumberPair(Pair):
         float: torch.float64,
         complex: torch.complex128,
     }
+    _PYTHON_NUMBER_TYPES = tuple(_TYPE_TO_DTYPE.keys())
+    _NUMPY_NUMBER_TYPE = np.number
+    _NUMBER_TYPES = (*_PYTHON_NUMBER_TYPES, _NUMPY_NUMBER_TYPE)
 
     def __init__(
         self,
@@ -277,9 +300,10 @@ class NumberPair(Pair):
         check_dtype: bool = False,
         **other_parameters: Any,
     ) -> None:
-        self._check_inputs_isinstance(actual, expected, cls=tuple(self._TYPE_TO_DTYPE.keys()))
+        actual, expected = self._process_inputs(actual, expected, id=id)
+
         error_meta, tolerances = parse_tolerances(
-            *[self._TYPE_TO_DTYPE.get(type(input), torch.float64) for input in (actual, expected)], rtol=rtol, atol=atol
+            *[self._TYPE_TO_DTYPE[type(input)] for input in (actual, expected)], rtol=rtol, atol=atol
         )
         if error_meta:
             raise UnsupportedInputs(error_meta._replace(id=id))
@@ -289,6 +313,26 @@ class NumberPair(Pair):
         self.equal_nan = equal_nan
         self.check_dtype = check_dtype
 
+    def _process_inputs(
+        self, actual: Any, expected: Any, *, id: Tuple[Any, ...]
+    ) -> Tuple[Union[int, float, complex], Union[int, float, complex]]:
+        self._check_inputs_isinstance(actual, expected, cls=self._NUMBER_TYPES)
+        error_meta, numbers = self._apply_unary(self._to_number, actual, expected, id=id)
+        if error_meta:
+            raise UnsupportedInputs(error_meta)
+        return cast(Tuple[Union[int, float, complex], Union[int, float, complex]], numbers)
+
+    def _to_number(self, number_like: Any) -> Tuple[Optional[ErrorMeta], Optional[Union[int, float, complex]]]:
+        if isinstance(number_like, self._NUMPY_NUMBER_TYPE):
+            number = number_like.item()
+        elif isinstance(number_like, self._PYTHON_NUMBER_TYPES):
+            number = number_like
+        else:
+            error_meta = ErrorMeta(TypeError, f"Unknown number type {type(number_like)}.")
+            return error_meta, None
+
+        return None, number
+
     def compare(self) -> Optional[ErrorMeta]:
         if self.check_dtype and type(self.actual) is not type(self.expected):
             return self._make_error_meta(
@@ -296,13 +340,16 @@ class NumberPair(Pair):
                 f"The (d)types do not match: {type(self.actual)} != {type(self.expected)}.",
             )
 
-        if cmath.isnan(self.actual) and cmath.isnan(self.expected) and self.equal_nan:
+        if self.actual == self.expected:
             return None
 
-        diff = abs(self.actual - self.expected)
+        if self.equal_nan and cmath.isnan(self.actual) and cmath.isnan(self.expected):
+            return None
+
+        abs_diff = abs(self.actual - self.expected)
         tolerance = self.atol + self.rtol * abs(self.expected)
 
-        if diff <= tolerance:
+        if cmath.isfinite(abs_diff) and abs_diff <= tolerance:
             return None
 
         return self._make_error_meta(
@@ -328,7 +375,7 @@ class TensorLikePair(Pair):
         check_is_coalesced: bool = True,
         **other_parameters: Any,
     ):
-        actual, expected = self._check_supported_inputs(actual, expected, id=id, allow_subclasses=allow_subclasses)
+        actual, expected = self._process_inputs(actual, expected, id=id, allow_subclasses=allow_subclasses)
 
         error_meta, tolerances = parse_tolerances(actual, expected, rtol=rtol, atol=atol)
         if error_meta:
@@ -344,7 +391,7 @@ class TensorLikePair(Pair):
         self.check_stride = check_stride
         self.check_is_coalesced = check_is_coalesced
 
-    def _check_supported_inputs(
+    def _process_inputs(
         self, actual: Any, expected: Any, *, id: Tuple[Any, ...], allow_subclasses: bool
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         directly_related = isinstance(actual, type(expected)) or isinstance(expected, type(actual))
