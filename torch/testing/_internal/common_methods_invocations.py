@@ -11596,13 +11596,6 @@ op_db: List[OpInfo] = [
             # Probably because we have used lambda for the op here
             # AssertionError: JIT Test does not execute any logic
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),),
-            # inplace variant dispatches to dropout kernel, while on CUDA
-            # the op dispatches to _fused_dropout (with a few more conditions)
-            # hence, different values and this skip here
-            # DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view', device_type='cuda'),
-            # On CUDA, the op is dispatched (and a few more conditions) to
-            # _fused_dropout, which doesn't support forward AD
-            # DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD', device_type='cuda'),),
         gradcheck_wrapper=wrapper_set_seed,
         supports_forward_ad=True,
         supports_out=False,
