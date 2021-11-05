@@ -2296,19 +2296,21 @@ class TestLinalg(TestCase):
                 torch.linalg.eig(a, out=(out_w, out_v))
 
     @skipCPUIfNoLapack
+    @skipCUDAIfNoMagma
     @dtypes(*floating_and_complex_types())
     def test_eig_with_nan(self, device, dtype):
-        with self.assertRaisesRegex(RuntimeError, "linalg_eig: input tensor should not"):
-            a = torch.eye(5,5, device=device, dtype=dtype) * np.nan
-            values, vectors = torch.linalg.eig(a)
+        for val in [np.inf, np.nan]:
+            with self.assertRaisesRegex(RuntimeError, "torch.linalg.eig: input tensor should not"):
+                a = torch.eye(5, 5, device=device, dtype=dtype) * val
+                values, vectors = torch.linalg.eig(a)
 
-        with self.assertRaisesRegex(RuntimeError, "linalg_eig: input tensor should not"):
-            batched_a = torch.ones(10, 5, 5, device=device)
-            e = torch.eye(5, 5, device=device)
-            e.fill_diagonal_(float('nan'))
-            batched_a[3] = e
+                with self.assertRaisesRegex(RuntimeError, "torch.linalg.eig: input tensor should not"):
+                    batched_a = torch.ones(10, 5, 5, device=device, dtype=dtype)
+                    e = torch.eye(5, 5, device=device, dtype=dtype)
+                    e.fill_diagonal_(val)
+                    batched_a[3] = e
 
-            values, vectors = torch.linalg.eig(batched_a)
+                    values, vectors = torch.linalg.eig(batched_a)
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
