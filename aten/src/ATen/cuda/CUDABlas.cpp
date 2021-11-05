@@ -5,6 +5,7 @@
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/Exceptions.h>
 #include <c10/util/irange.h>
+#include <c10/macros/Export.h>
 
 #define CUDABLAS_POSINT_CHECK(FD, X)         \
   TORCH_CHECK(                               \
@@ -96,7 +97,7 @@ namespace at {
 namespace cuda {
 namespace blas {
 
-const char* _cublasGetErrorEnum(cublasStatus_t error) {
+C10_EXPORT const char* _cublasGetErrorEnum(cublasStatus_t error) {
   if (error == CUBLAS_STATUS_SUCCESS) {
     return "CUBLAS_STATUS_SUCCESS";
   }

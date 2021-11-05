@@ -22,6 +22,7 @@
 #include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/decompose_ops.h>
+#include <torch/csrc/jit/passes/dtype_analysis.h>
 #include <torch/csrc/jit/passes/erase_number_types.h>
 #include <torch/csrc/jit/passes/fold_conv_bn.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
@@ -431,6 +432,7 @@ void initJITBindings(PyObject* module) {
               std::vector<std::pair<std::string, std::string>>())
       .def("_jit_pass_constant_pooling", ConstantPooling)
       // RemoveInplaceOps is used by CoreML so it must be removed with care.
+      .def("_jit_pass_propagate_dtype", DtypePropagation)
       .def(
           "_jit_pass_remove_inplace_ops",
           [](const std::shared_ptr<Graph>& g) { return RemoveInplaceOps(g); })
@@ -458,11 +460,11 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph>& g) { return InlineFunctionalGraphs(g); })
       .def(
           "_jit_pass_peephole",
-          [](const std::shared_ptr<Graph>& g, bool addmm_fusion_enabled) {
-            return PeepholeOptimize(g, addmm_fusion_enabled);
+          [](const std::shared_ptr<Graph>& g, bool disable_shape_peepholes) {
+            return PeepholeOptimize(g, disable_shape_peepholes);
           },
           py::arg("graph"),
-          py::arg("addmm_fusion_enabled") = false)
+          py::arg("disable_shape_peepholes") = false)
       .def(
           "_jit_pass_peephole_list_idioms",
           [](const std::shared_ptr<Graph>& g, bool refine_list_len) {
