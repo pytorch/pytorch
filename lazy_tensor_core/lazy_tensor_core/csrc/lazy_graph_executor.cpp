@@ -701,8 +701,7 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::TryRunCachedSync(
   VLOG(5) << "TensorsGraphSize=" << po_data->post_order.size();
 
   return ScheduleSyncTensorsGraph(
-      tensors, coll, std::move(po_data->parameters_data),
-      coll->device.toString(), std::move(cached_computation));
+      tensors, coll, std::move(po_data->parameters_data), std::move(cached_computation));
 }
 
 LazyGraphExecutor::CompilationResult LazyGraphExecutor::Compile(
@@ -854,8 +853,7 @@ LazyGraphExecutor::SyncTensorsGraphInternal(std::vector<LazyTensor>* tensors,
   GetComputationCache()->Add(coll.hash, cached_computation);
 
   return ScheduleSyncTensorsGraph(
-      tensors, &coll, std::move(compile_result.parameters_data),
-      compile_result.device.toString(), std::move(cached_computation));
+      tensors, &coll, std::move(compile_result.parameters_data), std::move(cached_computation));
 }
 
 std::shared_ptr<LazyGraphExecutor::Async>
@@ -911,7 +909,7 @@ LazyGraphExecutor::ScheduleSyncTensorsGraph(
 std::shared_ptr<LazyGraphExecutor::Async>
 LazyGraphExecutor::ScheduleSyncTensorsGraph(
     std::vector<LazyTensor>* tensors, SyncTensorCollection* coll,
-    std::vector<compiler::BackendDataPtr> parameters_data, std::string device,
+    std::vector<compiler::BackendDataPtr> parameters_data,
     ComputationCache::TypePtr cached_computation) {
   auto tensors_data = FetchTensorData(tensors, coll->config, coll->indices);
   return ScheduleSyncTensorsGraph(coll, std::move(parameters_data),
