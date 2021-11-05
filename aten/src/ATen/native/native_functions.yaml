@@ -8294,6 +8294,13 @@
     CPU: foreach_tensor_minimum_slow
     CUDA: foreach_tensor_minimum_cuda
 
+- func: _foreach_norm.Scalar(Tensor[] tensors, Scalar ord=2) -> Tensor[]
+  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_norm_slow
+    CUDA: foreach_tensor_norm_cuda
+
 - func: bucketize.Tensor(Tensor self, Tensor boundaries, *, bool out_int32=False, bool right=False) -> Tensor
   dispatch:
     CPU: bucketize_cpu
