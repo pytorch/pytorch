@@ -133,11 +133,12 @@ class UnsupportedOperatorError(RuntimeError):
         if domain in ["", "aten", "prim"]:
             msg = "Exporting the operator " + opname + " to ONNX opset version " + str(version) + " is not supported. "
             if supported_version is not None:
-                msg += "Support for this operator was added in version " + str(supported_version) + ", try exporting with this version."
+                msg += "Support for this operator was added in version " + str(supported_version) + \
+                       ", try exporting with this version."
             else:
                 msg += "Please feel free to request support or submit a pull request on PyTorch GitHub."
         else:
             msg = ("ONNX export failed on an operator with unrecognized namespace {}::{}. "
-                  "If you are trying to export a custom operator, make sure you registered "
-                  "it with the right domain and version.".format(domain, opname))
+                   "If you are trying to export a custom operator, make sure you registered "
+                   "it with the right domain and version.".format(domain, opname))
         super().__init__(msg)

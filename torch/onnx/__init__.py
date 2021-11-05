@@ -1,5 +1,5 @@
 import torch._C as _C
-from typing import Dict, Optional
+from typing import Dict
 
 TensorProtoDataType = _C._onnx.TensorProtoDataType
 OperatorExportTypes = _C._onnx.OperatorExportTypes
@@ -26,12 +26,12 @@ class CheckerError(Exception):
 
 class SymbolicContext:
     def __init__(self, params_dict, env, cur_node, onnx_block):
-        self.params_dict: Optional[Dict[str, _C.IValue]] = params_dict
-        self.env: Optional[Dict[_C.Value, _C.Value]] = env
+        self.params_dict: Dict[str, _C.IValue] = params_dict
+        self.env: Dict[_C.Value, _C.Value] = env
         # Current node that is being converted.
-        self.cur_node: Optional[_C.Node] = cur_node
+        self.cur_node: _C.Node = cur_node
         # Current onnx block that converted nodes are being appended to.
-        self.onnx_block: Optional[_C.Block] = onnx_block
+        self.onnx_block: _C.Block = onnx_block
 
 def _export(*args, **kwargs):
     from torch.onnx import utils
