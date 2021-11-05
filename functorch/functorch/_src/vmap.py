@@ -257,7 +257,7 @@ def vmap(func: Callable, in_dims: in_dims_t = 0, out_dims: out_dims_t = 0) -> Ca
     :func:`vmap` can also be nested, producing an output with multiple batched dimensions
 
         >>> torch.dot                            # [D], [D] -> []
-        >>> batched_dot = functorch.vmap(torch.dot)  # [N1, N0, D], [N1, N0, D] -> [N1, N0]
+        >>> batched_dot = functorch.vmap(functorch.vmap(torch.dot))  # [N1, N0, D], [N1, N0, D] -> [N1, N0]
         >>> x, y = torch.randn(2, 3, 5), torch.randn(2, 3, 5)
         >>> batched_dot(x, y) # tensor of size [2, 3]
 
