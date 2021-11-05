@@ -1250,10 +1250,16 @@ TensorExprKernel::TensorExprKernel(
 }
 
 void TensorExprKernel::run(Stack& stack) {
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
+            << std::endl;
   if (!use_fallback_ && !allow_fallback_) {
+    std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
+              << std::endl;
     runKernel(stack);
   } else if (!use_fallback_ && allow_fallback_) {
     try {
+      std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
+                << std::endl;
       runKernel(stack);
     } catch (...) {
       fallback(stack);
@@ -1305,17 +1311,25 @@ StmtPtr TensorExprKernel::getCodeGenStmt() {
 }
 
 void TensorExprKernel::runKernel(Stack& stack) {
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
+            << " nInputs_:" << nInputs_ << std::endl;
   // Set up arguments (inputs, then outputs) for kernel call.
   auto inputs = last(stack, nInputs_);
   std::vector<at::Tensor> outputs;
 
   std::vector<CodeGen::CallArg> runArgs = prepareRunArgs(inputs, outputs);
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
+            << std::endl;
 
   // Call the kernel.
   codegen_->call(runArgs);
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
+            << std::endl;
 
   // Update the stack.
   drop(stack, nInputs_);
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
+            << std::endl;
   for (auto& o : outputs) {
     push_one(stack, std::move(o));
   }

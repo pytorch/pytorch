@@ -34,25 +34,57 @@ bool isQuantized(const BufHandle& qx) {
   return qx.node()->qscale() && qx.node()->qzero();
 }
 
-BufHandle makeQBufHandle(
+BufHandle makeQBufHandleNCHW(
     const std::string& name,
     const std::vector<ExprHandle>& dims,
     Dtype dtype,
     const ExprPtr qscale,
     const ExprPtr qzero) {
+  std::cout << "XXX " << __FUNCTION__ << " " << __LINE__ << std::endl;
   BufHandle ResultBuf(name, dims, dtype);
   ResultBuf.node()->set_qscale(qscale);
   ResultBuf.node()->set_qzero(qzero);
+  ResultBuf.node()->set_strides(make_contiguous_strides(dims));
   return ResultBuf;
 }
 
-BufHandle makeQBufHandle(
+BufHandle makeQBufHandleNHWC(
+    const std::string& name,
+    const std::vector<ExprHandle>& dims,
+    Dtype dtype,
+    const ExprPtr qscale,
+    const ExprPtr qzero) {
+  std::cout << "XXX " << __FUNCTION__ << " " << __LINE__ << std::endl;
+  BufHandle ResultBuf(name, dims, dtype);
+  ResultBuf.node()->set_qscale(qscale);
+  ResultBuf.node()->set_qzero(qzero);
+  ResultBuf.node()->set_strides(make_channels_last_strides(dims));
+  return ResultBuf;
+}
+
+BufHandle makeQBufHandleNHWC(
     const std::string& name,
     const std::vector<ExprHandle>& dims,
     Dtype dtype,
     const double qscale,
     const int64_t qzero) {
-  return makeQBufHandle(
+  std::cout << "XXX " << __FUNCTION__ << " " << __LINE__ << std::endl;
+  return makeQBufHandleNHWC(
+      name,
+      dims,
+      dtype,
+      DoubleImm::make(qscale).node(),
+      LongImm::make(qzero).node());
+}
+
+BufHandle makeQBufHandleNCHW(
+    const std::string& name,
+    const std::vector<ExprHandle>& dims,
+    Dtype dtype,
+    const double qscale,
+    const int64_t qzero) {
+  std::cout << "XXX " << __FUNCTION__ << " " << __LINE__ << std::endl;
+  return makeQBufHandleNCHW(
       name,
       dims,
       dtype,
@@ -99,6 +131,7 @@ Tensor computeQuantizePerTensor(
       ExprHandleVectorToExprVector(outputShape),
       dtype,
       nullptr,
+      c10::nullopt,
       qscale.node(),
       qzero.node());
   return Tensor(buf, vars, exprHandle.node());
@@ -124,7 +157,7 @@ Tensor computeQuantizePerTensorExternalCall(
     throw malformed_input("Expected quantized dtype");
   }(qdtype);
   auto ResultBuf =
-      makeQBufHandle("quantize_per_tensor", outputShape, dtype, qscale, qzero);
+      makeQBufHandleNCHW("quantize_per_tensor", outputShape, dtype, qscale, qzero);
   StmtPtr s = ExternalCall::make(
       ResultBuf, "nnc_aten_quantize_per_tensor", {x}, {qscale, qzero, qdtype});
   return Tensor(ResultBuf.node(), s);
@@ -212,12 +245,14 @@ Tensor computeQuantizedConv2d(
   const auto out_qzero = c10::get<int64_t>(inputs[3]);
   // Change to dtype based on outputType when dtype propagation implemented
   const auto out_qdtype = immQDType(qx);
-  auto ResultBuf = makeQBufHandle(
+  auto ResultBuf = makeQBufHandleNHWC(
       "quantized_conv2d",
       outputShape,
       Dtype(out_qdtype),
       out_qscale,
       out_qzero);
+  std::cout << __FUNCTION__ << ":" << __LINE__ 
+    << " strides:" << ResultBuf.node()->strides() << std::endl;
   StmtPtr s = ExternalCall::make(
       ResultBuf,
       "nnc_aten_quantized_conv2d",
@@ -243,7 +278,7 @@ Tensor computeQuantizedConv2dRelu(
   const auto out_qzero = c10::get<int64_t>(inputs[3]);
   // Change to dtype based on outputType when dtype propagation implemented
   const auto out_qdtype = immQDType(qx);
-  auto ResultBuf = makeQBufHandle(
+  auto ResultBuf = makeQBufHandleNHWC(
       "quantized_conv2d_relu",
       outputShape,
       Dtype(out_qdtype),
@@ -274,7 +309,8 @@ Tensor computeQuantizedAdd(
   const auto out_qzero = c10::get<int64_t>(inputs[3]);
   // Change to dtype based on outputType when dtype propagation implemented
   const auto out_qdtype = immQDType(qa);
-  auto ResultBuf = makeQBufHandle(
+  // TODO: check what are output strides
+  auto ResultBuf = makeQBufHandleNCHW(
       "quantized_add", outputShape, Dtype(out_qdtype), out_qscale, out_qzero);
   StmtPtr s = ExternalCall::make(
       ResultBuf,
@@ -361,7 +397,7 @@ Tensor computeUpsampleNearest2d(
 
   BufHandle ResultBuf = [&]() {
     if (isQuantized(x)) {
-      return makeQBufHandle(
+      return makeQBufHandleNHWC(
           "upsample_nearest2d",
           outputShape,
           Dtype(immQDType(x)),

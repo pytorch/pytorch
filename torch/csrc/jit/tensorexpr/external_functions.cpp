@@ -25,17 +25,24 @@ std::vector<at::Tensor> constructTensors(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
+    int64_t* buf_strides,
     int8_t* buf_dtypes) {
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
+            << std::endl;
   std::vector<void*> buf_data_vec;
   std::vector<std::vector<int64_t>> buf_dims_vec;
+  std::vector<std::vector<int64_t>> buf_strides_vec;
   std::vector<c10::ScalarType> buf_dtypes_vec;
   int64_t buf_dims_idx = 0;
+  int64_t buf_strides_idx = 0;
   for (const auto i : c10::irange(bufs_num)) {
     buf_data_vec.push_back(buf_data[i]);
     buf_dims_vec.emplace_back();
+    buf_strides_vec.emplace_back();
     for (const auto dim : c10::irange(buf_ranks[i])) {
       (void)dim;
       buf_dims_vec[i].push_back(buf_dims[buf_dims_idx++]);
+      buf_strides_vec[i].push_back(buf_strides[buf_strides_idx++]);
     }
     buf_dtypes_vec.push_back(static_cast<c10::ScalarType>(buf_dtypes[i]));
   }
@@ -47,9 +54,16 @@ std::vector<at::Tensor> constructTensors(
                        .layout(at::kStrided)
                        .device(at::kCPU) // TODO: support GPUs too
                        .requires_grad(false);
-    tensors.emplace_back(
-        at::from_blob(buf_data_vec[i], buf_dims_vec[i], options));
+    auto tensor = at::from_blob(buf_data_vec[i], buf_dims_vec[i], options);
+    std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
+              << " dims:" << c10::IntArrayRef(buf_dims_vec[i])
+              << " strides:" << c10::IntArrayRef(buf_strides_vec[i])
+              << std::endl;
+    //tensor.as_strided(buf_dims_vec[i], buf_strides_vec[i]);
+    tensors.emplace_back(tensor);
   }
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
+            << std::endl;
   return tensors;
 }
 
@@ -62,11 +76,14 @@ void nnc_aten_conv2d(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
+    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors =
-      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
+            << std::endl;
+  std::vector<at::Tensor> tensors = constructTensors(
+      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
 
   at::Tensor& r = tensors[0];
   const at::Tensor& x = tensors[1];
@@ -112,11 +129,14 @@ void nnc_aten_quantized_conv2d(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
+    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors =
-      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
+            << std::endl;
+  std::vector<at::Tensor> tensors = constructTensors(
+      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
   const double x_qscale = ((double*)extra_args)[0];
   const int64_t x_qzero = extra_args[1];
   const c10::ScalarType x_qdtype = static_cast<c10::ScalarType>(extra_args[2]);
@@ -129,11 +149,13 @@ void nnc_aten_quantized_conv2d(
       x_qscale,
       x_qzero,
       at::TensorOptions(toQIntType(x_qdtype)));
+  qx.as_strided(tensors[1].sizes(), tensors[1].strides());
   auto uiptr = ((uintptr_t*)buf_data[2])[0];
   auto convPackedParams = reinterpret_cast<ConvPackedParamsBase<2>*>(uiptr);
   const double out_qscale = ((double*)extra_args)[3];
   const int64_t out_qzero = extra_args[4];
   auto r = convPackedParams->apply(qx, out_qscale, out_qzero);
+  auto strides = r.strides().vec();
   r = r.contiguous();
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
@@ -143,11 +165,14 @@ void nnc_aten_quantized_conv2d_relu(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
+    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors =
-      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
+            << std::endl;
+  std::vector<at::Tensor> tensors = constructTensors(
+      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
   const double x_qscale = ((double*)extra_args)[0];
   const int64_t x_qzero = extra_args[1];
   const c10::ScalarType x_qdtype = static_cast<c10::ScalarType>(extra_args[2]);
@@ -174,11 +199,14 @@ void nnc_aten_quantized_add(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
+    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors =
-      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
+            << std::endl;
+  std::vector<at::Tensor> tensors = constructTensors(
+      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
 
   const double a_qscale = ((double*)extra_args)[0];
   const int64_t a_qzero = extra_args[1];
@@ -237,11 +265,14 @@ void nnc_aten_quantized_conv2d_prepack(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
+    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors =
-      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
+            << std::endl;
+  std::vector<at::Tensor> tensors = constructTensors(
+      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
 
   const double w_qscale = ((double*)extra_args)[7];
   const int64_t w_qzero = extra_args[8];
@@ -280,11 +311,14 @@ void nnc_aten_upsample_nearest2d(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
+    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors =
-      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
+            << std::endl;
+  std::vector<at::Tensor> tensors = constructTensors(
+      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
   // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
   at::Tensor x = tensors[0];
   const double x_qscale = ((double*)extra_args)[0];
@@ -325,11 +359,14 @@ void nnc_aten_quantize_per_tensor(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
+    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors =
-      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
+            << std::endl;
+  std::vector<at::Tensor> tensors = constructTensors(
+      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
   // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
   at::Tensor x = tensors[1];
   const double qscale = ((double*)extra_args)[0];
@@ -344,11 +381,14 @@ void nnc_aten_dequantize(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
+    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors =
-      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
+            << std::endl;
+  std::vector<at::Tensor> tensors = constructTensors(
+      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
   const double qscale = ((double*)extra_args)[0];
   const int64_t qzero = extra_args[1];
   const int64_t qdtype = extra_args[2];
@@ -363,6 +403,8 @@ void nnc_aten_dequantize(
       at::TensorOptions(toQIntType(static_cast<c10::ScalarType>(qdtype))));
   auto r = at::dequantize(qx);
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
+            << std::endl;
 }
 
 void nnc_aten_adaptive_avg_pool2d(
@@ -370,11 +412,14 @@ void nnc_aten_adaptive_avg_pool2d(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
+    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors =
-      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
+            << std::endl;
+  std::vector<at::Tensor> tensors = constructTensors(
+      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
 
   at::Tensor& r = tensors[0];
   const at::Tensor& x = tensors[1];
@@ -394,11 +439,14 @@ void nnc_aten_mean(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
+    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors =
-      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
+            << std::endl;
+  std::vector<at::Tensor> tensors = constructTensors(
+      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
 
   at::Tensor& r = tensors[0];
   const at::Tensor& x = tensors[1];
@@ -417,11 +465,14 @@ void nnc_aten_addmm(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
+    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors =
-      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
+            << std::endl;
+  std::vector<at::Tensor> tensors = constructTensors(
+      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
 
   at::Tensor& r = tensors[0];
   const at::Tensor& x = tensors[1];
@@ -443,11 +494,14 @@ void nnc_aten_triangular_solve(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
+    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors =
-      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
+            << std::endl;
+  std::vector<at::Tensor> tensors = constructTensors(
+      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
   at::Tensor& r = tensors[0];
   at::Tensor r2 = tensors[2].clone();
   const at::Tensor& input = tensors[1];
@@ -466,13 +520,16 @@ void nnc_prepacked_linear_clamp_run(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
+    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
+            << std::endl;
   using namespace at::native::xnnpack;
 
-  std::vector<at::Tensor> tensors =
-      constructTensors(bufs_num - 1, buf_data, buf_ranks, buf_dims, buf_dtypes);
+  std::vector<at::Tensor> tensors = constructTensors(
+      bufs_num - 1, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
 
   const at::Tensor& x = tensors[1];
   auto context = reinterpret_cast<LinearOpContext*>(buf_data[2]);
@@ -486,13 +543,16 @@ void nnc_prepacked_conv2d_clamp_run(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
+    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
+            << std::endl;
   using namespace at::native::xnnpack;
 
-  std::vector<at::Tensor> tensors =
-      constructTensors(bufs_num - 1, buf_data, buf_ranks, buf_dims, buf_dtypes);
+  std::vector<at::Tensor> tensors = constructTensors(
+      bufs_num - 1, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
 
   const at::Tensor& x = tensors[1];
   auto context = reinterpret_cast<Conv2dOpContext*>(buf_data[2]);

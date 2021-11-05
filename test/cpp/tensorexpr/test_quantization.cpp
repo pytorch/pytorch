@@ -45,12 +45,18 @@ TEST_F(Quantization, QuantDequantInt8) {
   auto x = at::rand({2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
   auto q = at::quantize_per_tensor(x, 0.1f, 13, at::kQInt8);
   auto y_expected = at::dequantize(q);
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__  << std::endl;
   TensorExprKernel k(graph);
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__  << std::endl;
   std::vector<at::Tensor> inputs = {x};
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__  << std::endl;
   StmtPtr s = k.getCodeGenStmt();
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__  << std::endl;
 
   std::vector<IValue> stack = fmap<IValue>(inputs);
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__  << std::endl;
   k.run(stack);
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__  << std::endl;
   auto y = stack[0].toTensor();
   bool check = at::allclose(y_expected, y);
   if (!check) {
@@ -126,7 +132,9 @@ TEST_F(Quantization, QuantAddDequantInt8) {
   auto q2 = at::quantize_per_tensor(x2, 0.1f, 13, at::kQInt8);
   auto qa = quantized_add(q1, q2, 0.1f, 13);
   auto y_expected = at::dequantize(qa);
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__ << std::endl;
   TensorExprKernel k(graph);
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__ << std::endl;
   std::vector<at::Tensor> inputs = {x1, x2};
   StmtPtr s = k.getCodeGenStmt();
 

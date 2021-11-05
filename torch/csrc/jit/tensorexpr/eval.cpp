@@ -771,6 +771,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     std::vector<void*> buf_ptrs;
     std::vector<int64_t> buf_ranks;
     std::vector<int64_t> buf_dims;
+    std::vector<int64_t> buf_strides;
     std::vector<int8_t> buf_dtypes;
     std::vector<int64_t> extra_args;
 
@@ -786,6 +787,10 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       for (ExprPtr dim_expr : b->dims()) {
         dim_expr->accept(this);
         buf_dims.push_back(value().intValue());
+      }
+      for (ExprPtr stride_expr : b->strides()) {
+        stride_expr->accept(this);
+        buf_strides.push_back(value().intValue());
       }
     }
     for (ExprPtr a : v->args()) {
@@ -809,12 +814,16 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       extra_args.push_back(val);
     }
 
+    std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
+              << " buf_strides:" << c10::IntArrayRef(buf_strides) << std::endl;
+
     auto fn_ptr = func_registry.at(v->func_name());
     (*fn_ptr)(
         bufs.size(),
         buf_ptrs.data(),
         buf_ranks.data(),
         buf_dims.data(),
+        buf_strides.data(),
         buf_dtypes.data(),
         extra_args.size(),
         extra_args.data());
