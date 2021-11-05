@@ -252,7 +252,7 @@ There is also another situation in which we use annotations, namely views.
 
 When a Tensor views are contained in a Tensor list, we need to represent that the output list
 contains Tensors that alias the input.
-  - `func: chunk(Tensor(a -> *) self, int chunks, int dim=0) -> Tensor[]`
+  - `func: chunk(Tensor(a -> *) self, int chunks, int dim=0) -> Tensor(a)[]`
 We assume lists contain memory which aliases the heap, so in order to correctly set up the aliasing
 relationship between the output and input, we annotate that the input Tensor enters the wildcard set `(a -> *)`.
 For more details, see the JIT [README](https://github.com/pytorch/pytorch/blob/master/torch/csrc/jit/OVERVIEW.md#aliasing-and-mutation-annotations-in-functionschema).
