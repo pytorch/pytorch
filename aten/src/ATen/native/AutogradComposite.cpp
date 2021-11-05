@@ -43,20 +43,20 @@ Tensor _new_zeros_with_same_feature_meta(
 
   std::vector<int64_t> out_sizes;
   out_sizes.reserve(other.dim() + _self_num_batch_dims);
-  out_sizes.insert(out_sizes.begin(), other_sizes.begin(), other_sizes.end());
-  out_sizes.insert(out_sizes.begin(), self_sizes.begin(), self_sizes.begin() + _self_num_batch_dims);
+  out_sizes.insert(out_sizes.end(), self_sizes.begin(), self_sizes.begin() + _self_num_batch_dims);
+  out_sizes.insert(out_sizes.end(), other_sizes.begin(), other_sizes.end());
 
   // We use the strides of other, and tack on the strides computed with
   // the batch dims of self, so that the slices are arranged contiguously
   std::vector<int64_t> out_strides;
   out_strides.reserve(other.dim() + _self_num_batch_dims);
-  out_strides.insert(out_strides.begin(), other_strides.begin(), other_strides.end());
 
   int64_t prod = other_storage_numel;
   for (size_t i = 0; i < _self_num_batch_dims; ++i) {
     out_strides.insert(out_strides.begin(), prod);
     prod *= self_strides[i];
   }
+  out_strides.insert(out_strides.end(), other_strides.begin(), other_strides.end());
 
   int64_t storage_numel = prod;
 

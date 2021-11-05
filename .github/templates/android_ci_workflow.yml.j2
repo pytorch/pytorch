@@ -53,6 +53,12 @@ on:
           echo "DOCKER_IMAGE: ${DOCKER_IMAGE}"
           time docker pull "${DOCKER_IMAGE}" >/dev/null
 
+          export BUILD_LITE_INTERPRETER
+          BUILD_LITE_INTERPRETER="1"
+          if [[ "${BUILD_ENVIRONMENT}" == *"full-jit" ]]; then
+            BUILD_LITE_INTERPRETER="0"
+          fi
+
           git submodule sync && git submodule update -q --init --recursive --depth 1 --jobs 0
           # shellcheck disable=SC2016
           export id
@@ -64,6 +70,7 @@ on:
             -e PR_LABELS \
             -e SKIP_SCCACHE_INITIALIZATION=1 \
             -e TORCH_CUDA_ARCH_LIST \
+            -e BUILD_LITE_INTERPRETER \
             -e http_proxy="!{{ common.squid_proxy }}" -e https_proxy="!{{ common.squid_proxy }}" -e no_proxy="!{{ common.squid_no_proxy }}" \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
@@ -81,7 +88,7 @@ on:
           # shellcheck disable=SC2016
           export COMMAND
           # shellcheck disable=SC2016
-          COMMAND='((echo "export GRADLE_OFFLINE=1" && echo "export BUILD_LITE_INTERPRETER=1" && echo "sudo chown -R jenkins workspace && cd workspace && ./.circleci/scripts/build_android_gradle.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          COMMAND='((echo "export GRADLE_OFFLINE=1" && echo "export BUILD_LITE_INTERPRETER=${BUILD_LITE_INTERPRETER}" && echo "sudo chown -R jenkins workspace && cd workspace && ./.circleci/scripts/build_android_gradle.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
           echo "${COMMAND}" > ./command.sh && bash ./command.sh
           # Skip docker push as this job is purely for size analysis purpose.
           # Result binaries are already in `/home/circleci/project/` as it's mounted instead of copied.
@@ -100,6 +107,8 @@ on:
         run: |
           COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
           export COMMIT_TIME
+          ANDROID_BUILD_TYPE="custom-build-single"
+          export ANDROID_BUILD_TYPE
           pip3 install requests==2.26 boto3==1.16.34
           python3 -m tools.stats.upload_binary_size_to_scuba "android" || exit 0
       !{{ common.teardown_ec2_linux() }}
