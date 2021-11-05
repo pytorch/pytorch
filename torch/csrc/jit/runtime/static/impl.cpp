@@ -99,6 +99,7 @@ void OptimizeGraph(
   FuseInferenceOpsForSparseNN(graph);
   UseVariadicCat(graph);
   UseVariadicStack(graph);
+  EliminateTrivialEquallySplit(graph);
 
   if (opts.enable_out_variant) {
     UseVariadicOp(
@@ -112,7 +113,6 @@ void OptimizeGraph(
 #ifdef FBCODE_CAFFE2
     ReplaceWithCopy(graph);
     FuseListUnpack(graph);
-    FuseListUnpackV2(graph);
     EnableStaticRuntimeLayerNorm(graph);
 #endif
   }
@@ -921,6 +921,36 @@ void StaticRuntime::create_memory_planner() {
   }
 }
 
+c10::IValue StaticRuntime::move_outputs_to_tuple(size_t num_outputs) {
+#ifndef NDEBUG
+  for (const auto i : c10::irange(num_outputs)) {
+    // The exact output tensor should never be managed.
+    DCHECK(!isManagedOutputTensor(*outputs_[i]));
+  }
+#endif
+  switch (num_outputs) {
+    case 1:
+      return c10::ivalue::Tuple::create(std::move(*outputs_[0]));
+    case 2:
+      return c10::ivalue::Tuple::create(
+          std::move(*outputs_[0]), std::move(*outputs_[1]));
+    case 3:
+      return c10::ivalue::Tuple::create(
+          std::move(*outputs_[0]),
+          std::move(*outputs_[1]),
+          std::move(*outputs_[2]));
+    default: {
+      std::vector<c10::IValue> outputs;
+      outputs.reserve(num_outputs);
+      for (const auto i : c10::irange(num_outputs)) {
+        // use move here. Otherwise, clean up outputs_[i] explicitly
+        outputs.emplace_back(std::move(*outputs_[i]));
+      }
+      return c10::ivalue::Tuple::create(std::move(outputs));
+    }
+  }
+}
+
 template <typename IValueList>
 c10::IValue StaticRuntime::run_impl(
     IValueList&& args,
@@ -960,15 +990,7 @@ c10::IValue StaticRuntime::run_impl(
 
   // no need to keep references of outputs in static runtime anymore
   if (static_module_.num_outputs() > 1) {
-    std::vector<c10::IValue> outputs;
-    outputs.reserve(static_module_.num_outputs());
-    for (const auto i : c10::irange(static_module_.num_outputs())) {
-      // The exact output tensor should never be managed.
-      DCHECK(!isManagedOutputTensor(*outputs_[i]));
-      // use move here. Otherwise, clean up outputs_[i] explicitly
-      outputs.emplace_back(std::move(*outputs_[i]));
-    }
-    return c10::ivalue::Tuple::create(std::move(outputs));
+    return move_outputs_to_tuple(static_module_.num_outputs());
   }
 #ifndef NDEBUG
   check_for_memory_leak(false);
@@ -1124,10 +1146,14 @@ float StaticRuntime::benchmark_model(
 
   const bool is_kwargs_empty = kwargs_list.size() == 0;
   const std::unordered_map<std::string, c10::IValue> empty_kwargs;
+  bool manage_output_tensors = static_module_.opts().manage_output_tensors;
   for (const auto i : c10::irange(warmup_runs)) {
     (void)i; // Suppress unused variable warning
     for (const auto j : c10::irange(args_list.size())) {
       operator()(args_list[j], is_kwargs_empty ? empty_kwargs : kwargs_list[j]);
+      if (manage_output_tensors) {
+        deallocateOutputTensors();
+      }
     }
   }
   caffe2::Timer timer;
@@ -1135,6 +1161,9 @@ float StaticRuntime::benchmark_model(
     (void)i; // Suppress unused variable warning
     for (const auto j : c10::irange(args_list.size())) {
       operator()(args_list[j], is_kwargs_empty ? empty_kwargs : kwargs_list[j]);
+      if (manage_output_tensors) {
+        deallocateOutputTensors();
+      }
     }
   }
   float millis = timer.MilliSeconds();
@@ -1159,7 +1188,7 @@ bool display_ivalue(const IValue& iv) {
     std::cout << "Dict {" << iv.toGenericDict().size() << "}\n";
     return true;
   } else if (iv.isTuple()) {
-    std::cout << "Tuple {" << iv.toTuple()->elements().size() << "}\n";
+    std::cout << "Tuple {" << iv.toTupleRef().elements().size() << "}\n";
     return true;
   } else if (iv.isInt()) {
     std::cout << "int {" << iv.toInt() << "}\n";
@@ -1232,7 +1261,7 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
 
   const bool is_kwargs_empty = kwargs_list.size() == 0;
   const std::unordered_map<std::string, c10::IValue> empty_kwargs;
-
+  bool manage_output_tensors = static_module_.opts().manage_output_tensors;
   // See comment on above use of InferenceMode for
   // explanation.
   c10::InferenceMode mode;
@@ -1252,6 +1281,9 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
   // iterations just use the already established memory planning.
   timer.Start();
   operator()(args_list[0], is_kwargs_empty ? empty_kwargs : kwargs_list[0]);
+  if (manage_output_tensors) {
+    deallocateOutputTensors();
+  }
   results.first_iter_time = timer.MilliSeconds();
 
   // warmup runs
@@ -1259,6 +1291,9 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
     (void)i; // Suppress unused variable warning
     for (const auto j : c10::irange(args_list.size())) {
       operator()(args_list[j], is_kwargs_empty ? empty_kwargs : kwargs_list[j]);
+      if (manage_output_tensors) {
+        deallocateOutputTensors();
+      }
     }
   }
 
@@ -1289,6 +1324,9 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
         // clean up owning refs of input tensors
         clean_up_input_ivalues();
       }
+      if (manage_output_tensors) {
+        deallocateOutputTensors();
+      }
       millis = timer.MilliSeconds();
       results.memory_dealloc_time += millis;
 
@@ -1296,13 +1334,7 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
       // no need to keep references of outputs in static runtime anymore
       c10::IValue output;
       if (static_module_.num_outputs() > 1) {
-        std::vector<c10::IValue> outputs;
-        outputs.reserve(static_module_.num_outputs());
-        for (const auto k : c10::irange(static_module_.num_outputs())) {
-          // use move here. Otherwise, clean up outputs_[i] explicitly
-          outputs.emplace_back(std::move(*outputs_[k]));
-        }
-        output = c10::ivalue::Tuple::create(std::move(outputs));
+        output = move_outputs_to_tuple(static_module_.num_outputs());
       }
 
 #ifndef NDEBUG
@@ -1381,7 +1413,11 @@ void StaticRuntime::check_for_memory_leak(bool output_returned) {
             const auto& t = ival->toTensor();
             if (t.defined()) {
               auto* storage_impl = t.storage().unsafeGetStorageImpl();
-              TORCH_CHECK(storage_impl->data() == nullptr, error_msg);
+              TORCH_CHECK(
+                  storage_impl->data() == nullptr ||
+                      (planner_ &&
+                       planner_->isManagedStorageImpl(storage_impl)),
+                  error_msg);
             }
           }
         }
@@ -1544,6 +1580,11 @@ static bool checkNoMemoryOverlap(const at::Tensor& a, const at::Tensor& b) {
 }
 
 bool ProcessedNode::verify_no_memory_overlap() const {
+  return verify_outputs_dont_overlap_each_other() &&
+      verify_inputs_dont_overlap_outputs();
+}
+
+bool ProcessedNode::verify_outputs_dont_overlap_each_other() const {
   for (const auto i : c10::irange(outputs_size_)) {
     if (!outputs_[i].isTensor()) {
       continue;
@@ -1561,7 +1602,10 @@ bool ProcessedNode::verify_no_memory_overlap() const {
       }
     }
   }
+  return true;
+}
 
+bool ProcessedNode::verify_inputs_dont_overlap_outputs() const {
   auto schema = node()->maybeSchema();
   // skip memory overlap check for mutable ops with only one output
   if (!schema || (schema->is_mutable() && outputs_size_ == 1)) {

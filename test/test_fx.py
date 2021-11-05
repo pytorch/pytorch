@@ -3187,92 +3187,25 @@ class TestOperatorSignatures(JitTestCase):
     @onlyCPU
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_get_torch_func_signature_exhaustive(self, device, dtype, op):
-        # Sorted and one entry on each line to minimize merge conflicts.
-        known_no_schema = {'block_diag',
-                           'broadcast_tensors',
-                           'cdist',
-                           'contiguous',
-                           'dstack',
-                           'einsum',
-                           'expand',
-                           'expand_as',
-                           'fill_',
-                           'hstack',
-                           'histogramdd',
-                           'igamma',
-                           'igammac',
-                           'linalg.multi_dot',
-                           'lu',
-                           'T',   # Implemented with a lambda
-                           'H',   # Implemented with a lambda
-                           'mT',  # Implemented with a lambda
-                           'mH',  # Implemented with a lambda
-                           'norm',
-                           'polygamma',
-                           'special.polygamma',
-                           'repeat',
-                           'reshape_as',
-                           'resize_',
-                           'resize_as_',
-                           'special.zeta',
-                           'stack',
-                           'to_sparse',
-                           'unique',
-                           'unique_consecutive',
-                           'view',
-                           'view_as',
-                           'nn.functional.hardshrink',
-                           'vstack',
-                           'where',
-                           'zero_',
-                           'bfloat16',
-                           'bool',
-                           'byte',
-                           'char',
-                           'double',
-                           'float',
-                           'half',
-                           'int',
-                           'long',
-                           'short',
-                           'empty_like',
-                           'ones_like',
-                           'randn_like',
-                           'zeros_like',
-                           'full_like',
-                           '__getitem__',
-                           '__radd__',
-                           '__rsub__',
-                           '__rmul__',
-                           '__rdiv__',
-                           '__rmod__',
-                           '__rpow__',
-                           '__rand__',
-                           '__ror__',
-                           '__rxor__',
-                           '__rmatmul__'}
-
-        try:
-            sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
-            schemas = get_signature_for_torch_op(op.op)
-            if not schemas:
-                raise RuntimeError('No Schemas Returned')
-            for sample_input in sample_inputs_itr:
-                # Iterate through overloads until we hit a match. If we exit this
-                # loop via `else`, we haven't found a match
-                for schema in schemas:
-                    try:
-                        bound_args = schema.bind(sample_input.input, *sample_input.args, **sample_input.kwargs)
-                        bound_args.apply_defaults()
-                        op(*bound_args.args, **bound_args.kwargs)
-                        break
-                    except TypeError as e:
-                        pass
-                else:
-                    raise RuntimeError(f'Did not match any schemas for op {op.name}!')
-
-        except Exception as e:
-            assert op.name in known_no_schema or "nn.functional" in op.name or "_masked." in op.name, op.name
+        if not isinstance(op.op, types.BuiltinFunctionType):
+            raise unittest.SkipTest("This path doesn't work on Python functions")
+        sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
+        schemas = get_signature_for_torch_op(op.op)
+        if not schemas:
+            raise RuntimeError('No Schemas Returned')
+        for sample_input in sample_inputs_itr:
+            # Iterate through overloads until we hit a match. If we exit this
+            # loop via `else`, we haven't found a match
+            for schema in schemas:
+                try:
+                    bound_args = schema.bind(sample_input.input, *sample_input.args, **sample_input.kwargs)
+                    bound_args.apply_defaults()
+                    op(*bound_args.args, **bound_args.kwargs)
+                    break
+                except TypeError as e:
+                    pass
+            else:
+                raise RuntimeError(f'Did not match any schemas for op {op.name}!')
 
 
 class TestFXAPIBackwardCompatibility(JitTestCase):
