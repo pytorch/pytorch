@@ -3,6 +3,7 @@ import fnmatch
 import warnings
 
 from io import IOBase
+from functools import cache
 from typing import Iterable, List, Tuple, Union
 
 
@@ -73,30 +74,44 @@ def deprecation_warning_torchdata(name):
                   f"Please import those features from the new package TorchData: https://github.com/pytorch/data",
                   DeprecationWarning)
 
+
 class StreamWrapper:
-    def __init__(self, file_obj):
-        self.file_obj = file_obj
+    pass
 
-    def __getattr__(self, name):
-        return getattr(self.file_obj, name)
 
-    def __del__(self):
-        self.file_obj.close()
+def wrap_stream(file_obj):
+    return get_wrapper_cls(type(file_obj))(file_obj)
 
-    def __getstate__(self):
-        return self.file_obj.__getstate__()
 
-    def __repr__(self):
-        return "StreamWrapper<" + repr(self.file_obj) + ">"
+def _magic_fn_wrapper(fn_name):
+    def magic_fn(self, *args, **kwargs):
+        return getattr(self.file_obj, fn_name)(*args, **kwargs)
+    return magic_fn
 
-    def __iter__(self):
-        return self.file_obj.__iter__()
 
-    def __next__(self):
-        return self.file_obj.__next__()
+@cache
+def get_wrapper_cls(t):
+    class StreamWrapperMeta(type):
+        def __new__(cls, clsname, bases, methods):
+            for attr in dir(t):
+                if attr.startswith("__") and attr not in ('__new__', '__init__', '__getattribute__', '__setattr__', '__getattr__', '__dir__', '__del__', '__repr__'):
+                    methods[attr] = _magic_fn_wrapper(attr)
+            return super().__new__(cls, clsname, bases, methods)
 
-    def __setstate__(self, state):
-        self.file_obj.__setstate__(state)
+    class _StreamWrapper(StreamWrapper, t, metaclass=StreamWrapperMeta):
+        def __init__(self, file_obj) -> None:
+            self.file_obj = file_obj
 
-    def __sizeof__(self, *args, **kwargs):
-        return self.file_obj.__sizeof__(*args, **kwargs)
+        def __getattr__(self, name):
+            return getattr(self.file_obj, name)
+
+        def __dir__(self) -> Iterable[str]:
+            return ['file_obj'] + dir(self.file_obj)
+
+        def __del__(self) -> None:
+            self.file_obj.close()
+
+        def __repr__(self) -> str:
+            return "StreamWrapper<" + repr(self.file_obj) + ">"
+
+    return _StreamWrapper
