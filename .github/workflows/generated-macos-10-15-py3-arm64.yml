@@ -71,7 +71,7 @@ jobs:
         run: |
           echo "CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname "$(which conda)")/../"}" >> "${GITHUB_ENV}"
           .jenkins/pytorch/macos-build.sh
-      - name: Archive artifacts into zip
+      - name: Archive artifacts into zip  # bleh
         run: |
           zip -1 -r artifacts.zip dist/ build/
       - uses: actions/upload-artifact@v2
