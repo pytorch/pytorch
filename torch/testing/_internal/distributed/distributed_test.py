@@ -682,7 +682,6 @@ class DistributedTest:
                     dist.get_backend(group_id)
 
         def test_Backend_enum_class(self):
-            raise ValueError("Intentional")
             # test parsing
             backend = BACKEND.lower()
             self.assertEqual(dist.Backend(BACKEND.upper()), backend)
@@ -757,6 +756,12 @@ class DistributedTest:
                 pass
 
         @sandcastle_skip_if(BACKEND != "gloo", "Only gloo backend supports timeouts")
+        @sandcastle_skip_if(
+            not INIT_METHOD.startswith("file://"),
+            "Requires file:// initialization method. "
+            + "Both tcp:// and env:// rely on the TCP store for which "
+            "reinitialization has proven racy.",
+        )
         def test_barrier_timeout_global(self):
             dist.destroy_process_group()
 
@@ -4399,7 +4404,6 @@ class DistributedTest:
             "get_future is only supported on mpi, nccl and gloo",
         )
         @nccl_skip_if_lt_x_gpu(BACKEND, 2)
-        @sandcastle_skip_if(True, "foo")
         def test_get_future(self):
             def mult(fut):
                 return [t * 3 for t in fut.wait()]
