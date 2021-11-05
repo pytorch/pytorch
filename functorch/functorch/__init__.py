@@ -26,6 +26,7 @@ from ._src.make_functional import (
     make_functional,
     combine_state_for_ensemble,
     FunctionalModule,
+    FunctionalModuleWithBuffers,
 )
 
 # Monkeypatching lol
