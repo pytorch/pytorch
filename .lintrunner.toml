@@ -145,7 +145,7 @@ bypass_matched_file_filter = true
 
 [[linter]]
 name = 'NATIVEFUNCTIONS'
-include_patterns=['**']
+include_patterns=['aten/src/ATen/native/native_functions.yaml']
 args = [
     'python3',
     'tools/linter/adapters/nativefunctions_linter.py',
