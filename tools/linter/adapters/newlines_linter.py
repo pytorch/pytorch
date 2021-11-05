@@ -1,5 +1,5 @@
 """
-NEWLINES: Checks files to make sure there are no trailing newlines.
+NEWLINE: Checks files to make sure there are no trailing newlines.
 """
 import argparse
 import json
@@ -68,7 +68,7 @@ def check_file(filename: str) -> Optional[LintMessage]:
                 name="testestTrailing newline",
                 original=None,
                 replacement=None,
-                description="Trailing newline found. Run `lintunner --take NEWLINES -a` to apply changes.",
+                description="Trailing newline found. Run `lintunner --take NEWLINE -a` to apply changes.",
                 bypassChangedLineFiltering=None,
             )
 
@@ -106,7 +106,7 @@ def check_file(filename: str) -> Optional[LintMessage]:
                     name="Trailing newline",
                     original=original,
                     replacement=original.rstrip("\n") + "\n",
-                    description="Trailing newline found. Run `lintunner --take NEWLINES -a` to apply changes.",
+                    description="Trailing newline found. Run `lintunner --take NEWLINE -a` to apply changes.",
                     bypassChangedLineFiltering=None,
                 )
 
