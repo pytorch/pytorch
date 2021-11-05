@@ -44,10 +44,6 @@ class LintMessage(NamedTuple):
     bypassChangedLineFiltering: Optional[bool]
 
 
-def fn(base: str) -> str:
-    return str(base / Path("aten/src/ATen/native/native_functions.yaml"))
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="native functions linter", fromfile_prefix_chars="@",
