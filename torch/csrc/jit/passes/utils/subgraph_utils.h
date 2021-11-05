@@ -46,6 +46,10 @@ TORCH_API void mergeNodeIntoSubgraphAndUpdateAliasing(
     Node* subgraphNode,
     AliasDb& db);
 
+TORCH_API std::vector<Node*> unmergeAliasedOutputs(
+    Node* subgraphNode,
+    AliasDb& db);
+
 // Move nodes from a subgraph node to the outer graph.
 // `subgraphNode` is destroyed.
 TORCH_API void unmergeSubgraph(Node* subgraphNode);

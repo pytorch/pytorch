@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/passes/canonicalize.h>
 
 #include <c10/util/irange.h>
+#include "ATen/core/interned_strings.h"
 
 namespace torch {
 namespace jit {

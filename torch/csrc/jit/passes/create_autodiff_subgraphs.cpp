@@ -6,13 +6,16 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
+#include <torch/csrc/jit/passes/remove_redundant_profiles.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
-
+#include "ATen/core/interned_strings.h"
 namespace torch {
 namespace jit {
 
 namespace {
+
+static c10::Symbol dont_merge_sym = Symbol::attr("dont_merge");
 
 struct WorkBlock : public std::pair<Node*, Node*> {
   using pair::pair;
@@ -22,6 +25,12 @@ struct WorkBlock : public std::pair<Node*, Node*> {
   }
   Node* end() {
     return this->second;
+  }
+};
+
+struct topo_cmp {
+  bool operator()(Value* a, Value* b) {
+    return a->node()->isBefore(b->node());
   }
 };
 
@@ -69,6 +78,8 @@ class SubgraphSlicer {
       curNode = prevNode;
     }
 
+    // clean up dont merge attributes as they are irrelevant outside this pass
+    clearDontMergeSym(block_);
     for (Node* n : block_->nodes()) {
       for (Block* b : n->blocks()) {
         SubgraphSlicer(b, graph_, minSubgraphSize_, aliasDb_, diff_nodes_)
@@ -97,7 +108,8 @@ class SubgraphSlicer {
     auto workblocks = buildWorkBlocks();
     for (auto& workblock : workblocks) {
       bool any_changed = true;
-      while (any_changed) {
+      while (any_changed ||
+             unfuseGroupsWithAliasedOutputs(workblock, aliasDb_)) {
         any_changed = false;
         for (auto it = workblock.end()->reverseIterator();
              it != workblock.begin()->reverseIterator();) {
@@ -120,6 +132,109 @@ class SubgraphSlicer {
   }
 
  private:
+  // Autodiff doesn't support aliased outputs in DifferentiableGraphs
+  // If we detect such graphs, we
+  // 1. build sets of alised outputs for each such graph. The sets are
+  // topologically sorted
+  // 2. mark all but the earliest output from each set and their descendants
+  // with the "dont_merge" attribute
+  // 3. unfuse graphs
+  // 4. restart fusion
+  // 5. `shouldConsiderMerge` also checks if the node has the "dont_merge" attr
+  bool unfuseGroupsWithAliasedOutputs(WorkBlock& workblock, AliasDb& db) {
+    bool unfuse = false;
+
+    // we unfuse all graphs that have aliased outputs to reduce the number
+    // of restarts we need to do
+    for (auto it = workblock.end()->reverseIterator();
+         it != workblock.begin()->reverseIterator();) {
+      if (it->kind() == prim::DifferentiableGraph && markNodesToNotFuse(*it)) {
+        SubgraphUtils::unmergeSubgraph(*it);
+        unfuse = true;
+      }
+    }
+    return unfuse;
+  }
+
+  bool markNodesToNotFuse(Node* subgraphNode) {
+    if (subgraphNode->outputs().size() < 2) {
+      return false;
+    }
+
+    bool needs_unfuse = false;
+
+    auto subgraph = subgraphNode->g(attr::Subgraph);
+    auto sets = buildAliasedSets(subgraph->outputs());
+
+    for (auto i : c10::irange(sets.size())) {
+      if (sets[i].size() <= 1) {
+        continue;
+      }
+
+      needs_unfuse = true;
+
+      // we have at least two aliased outputs
+      // we skip the earliest node w.r.t. the topo order
+      // NB. after some nodes are unfused, the outputs of some other nodes
+      // may become the outputs of the subgraph and alias the remaining ones
+      // ideally, we should repeat markNodesToNotFuse until we stop marking
+      // nodes as don't merge.
+      auto it = ++sets[i].begin();
+      while (it != sets[i].end()) {
+        markNodeToNotFuse((*it)->node());
+      }
+    }
+
+    return needs_unfuse;
+  }
+
+  std::vector<std::set<Value*, topo_cmp>> buildAliasedSets(
+      c10::ArrayRef<Value*> outputs) {
+    TORCH_INTERNAL_ASSERT(outputs.size() > 1);
+    std::vector<std::set<Value*, topo_cmp>> res;
+    for (auto o : outputs) {
+      auto grouped = false;
+      for (auto& s : res) {
+        auto os = *s.begin();
+        if (aliasDb_.mayContainAlias(os, o) ||
+            aliasDb_.mayContainAlias(o, os)) {
+          s.insert(o);
+          grouped = true;
+        }
+      }
+      if (!grouped) {
+        res.push_back({o});
+      }
+    }
+    return res;
+  }
+
+  void markNodeToNotFuse(Node* start) {
+    TORCH_INTERNAL_ASSERT(
+        start->kind() != prim::Return && start->kind() != prim::Param);
+
+    if (start->hasAttribute(dont_merge_sym)) {
+      // already visited, no need to visit descendants
+      return;
+    }
+
+    start->i_(dont_merge_sym, 1);
+
+    for (auto o : start->outputs()) {
+      for (auto use : o->uses()) {
+        markNodeToNotFuse(use.user);
+      }
+    }
+  }
+
+  void clearDontMergeSym(Block* b) {
+    for (auto n : b->nodes()) {
+      if (n->hasAttribute(dont_merge_sym)) {
+        n->removeAttribute(dont_merge_sym);
+      }
+    }
+  }
+
   std::vector<WorkBlock> buildWorkBlocks() {
     // [workblocks]
     // the IR has many nodes which can never be reordered around, such as a
@@ -221,6 +336,11 @@ class SubgraphSlicer {
     if (isViewOp(node)) {
       return false;
     }
+
+    if (node->hasAttribute(dont_merge_sym)) {
+      return false;
+    }
+
     return isDifferentiable(node);
   }
 
@@ -250,20 +370,6 @@ class SubgraphSlicer {
     bool canMerge = shouldConsiderForMerge(producer) &&
         aliasDb_.moveBeforeTopologicallyValid(producer, consumer);
 
-    // We need to check that no producer's output aliases
-    // any differentiable graph's output as this is not currently supported by
-    // autodiff producer's output is only used by the differentiable graph, it
-    // should be valid to merge the producer, as aliasing will be contained
-    // within the subgraph
-    auto node_has_multiuses = std::any_of(
-        producer->outputs().begin(), producer->outputs().end(), [](Value* v) {
-          return v->uses().size() != 1;
-        });
-
-    canMerge = canMerge &&
-        (!node_has_multiuses ||
-         !aliasDb_.mayContainAlias(producer->outputs(), consumer->outputs()));
-
     if (!canMerge) {
       return c10::nullopt;
     }
@@ -286,6 +392,8 @@ std::vector<Node*> CreateAutodiffSubgraphs(
     size_t threshold) {
   std::vector<Node*> diff_nodes;
   AliasDb db(graph);
+  GRAPH_DEBUG("Before removing redundant profiles", *graph);
+  RemoveRedundantProfiles(graph->block(), db);
   GRAPH_DEBUG("Before creating autodiff subgraphs", *graph);
   SubgraphSlicer(graph->block(), graph, threshold, db, diff_nodes).run();
   GRAPH_DEBUG("After creating autodiff subgraphs", *graph);
