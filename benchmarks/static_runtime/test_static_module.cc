@@ -17,10 +17,8 @@ StaticModule makeStaticModuleFromScript(const std::string& script) {
 
 } // namespace
 
-/**
- * Test that StaticModule::value_group groups values of the graph into
- * 1) Inputs/Constants and their aliases 2) Outputs and their aliases.
- */
+// Test that StaticModule::value_group groups values of the graph into
+// 1) Inputs/Constants and their aliases 2) Outputs and their aliases.
 TEST(StaticModule, ValueGroup) {
   const std::string src = R"IR(
     graph(%input0 : Tensor, %input1 : Tensor):
@@ -41,12 +39,14 @@ TEST(StaticModule, ValueGroup) {
   std::vector<const Node*> nodes(graph.nodes().begin(), graph.nodes().end());
   const auto& value_group = sm.value_group();
 
-  std::vector<const Value*> expected_input_aliases{graph.inputs()[0], graph.inputs()[1], nodes[0]->output()};
+  std::vector<const Value*> expected_input_aliases{
+      graph.inputs()[0], graph.inputs()[1], nodes[0]->output()};
   for (auto* value : expected_input_aliases) {
-    EXPECT_TRUE(value_group.isInputAlias(value));
+    EXPECT_TRUE(value_group.isExternalAlias(value));
   }
 
-  std::vector<const Value*> expected_output_aliases{graph.outputs()[0], nodes[2]->output()};
+  std::vector<const Value*> expected_output_aliases{
+      graph.outputs()[0], nodes[2]->output()};
   for (auto* value : expected_output_aliases) {
     EXPECT_TRUE(value_group.isOutputAlias(value));
   }
@@ -114,4 +114,23 @@ TEST(StaticModule, IsOptimizableContainerType_CanUseOutVariant) {
       EXPECT_FALSE(sm.is_optimizable_container_type(n));
     }
   }
+}
+
+// Test operator() with rvalue inputs
+TEST(StaticModule, RValueInputs) {
+  const std::string src = R"JIT(
+    def forward(self, x):
+        y = torch.relu(x)
+        return y.clone()
+  )JIT";
+  auto sm = makeStaticModuleFromScript(src);
+
+  std::vector<IValue> input{at::randn({1})};
+
+  auto expected = sm(input, {});
+  auto actual = sm(std::move(input), {});
+
+  EXPECT_TRUE(expected.isTensor());
+  EXPECT_TRUE(actual.isTensor());
+  EXPECT_TRUE(expected.toTensor().equal(actual.toTensor()));
 }

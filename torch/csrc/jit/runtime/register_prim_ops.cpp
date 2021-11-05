@@ -117,6 +117,38 @@ static const OperatorGeneratorArgs opGenArgs[] = {
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::numpy_T.a(Tensor(a) self) -> Tensor(a)"),
+        [](Stack& stack) {
+          at::Tensor a;
+          pop(stack, a);
+          push(stack, a.numpy_T());
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::matrix_H.a(Tensor(a) self) -> Tensor(a)"),
+        [](Stack& stack) {
+          at::Tensor a;
+          pop(stack, a);
+          push(stack, a.matrix_H());
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::mT.a(Tensor(a) self) -> Tensor(a)"),
+        [](Stack& stack) {
+          at::Tensor a;
+          pop(stack, a);
+          push(stack, a.mT());
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::mH.a(Tensor(a) self) -> Tensor(a)"),
+        [](Stack& stack) {
+          at::Tensor a;
+          pop(stack, a);
+          push(stack, a.mH());
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::layout(Tensor a) -> int"),
         [](Stack& stack) {
           at::Tensor a;
@@ -1285,7 +1317,7 @@ void dictConstructFromList(Stack& stack) {
       tup_type->elements().at(0), tup_type->elements().at(1));
   dict.reserve(list.size());
   for (IValue input : list) {
-    const auto& tup = input.toTuple()->elements();
+    const auto& tup = input.toTupleRef().elements();
     dict.insert_or_assign(tup[0], tup[1]);
   }
   push(stack, dict);
@@ -2902,6 +2934,21 @@ static const OperatorGeneratorArgs opGenArgs2[] = {
           } else {
             push(stack, reinterpret_cast<int64_t>(a.internalToPointer()));
           }
+        },
+        aliasAnalysisFromSchema()),
+    // This operator is generated inside the compiler for indexing into
+    // ModuleList without a statically determinable key. Accordingly,
+    // self must be a ModuleType and the output must be an InterfaceType.
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
+            "prim::ModuleContainerIndex.list(Any self, int ind) -> Any"),
+        [](Stack& stack) {
+          IValue ind = pop(stack);
+          IValue module_dict = pop(stack);
+          std::stringstream ss;
+          ss << ind.toInt();
+          push(
+              stack, torch::jit::Object(module_dict.toObject()).attr(ss.str()));
         },
         aliasAnalysisFromSchema()),
 

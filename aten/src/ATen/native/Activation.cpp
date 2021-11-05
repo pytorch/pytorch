@@ -165,6 +165,10 @@ TORCH_META_FUNC(softshrink_backward) (
   build_borrowing_binary_op(maybe_get_output(), grad, self);
 }
 
+TORCH_META_FUNC(hardswish)(const Tensor& self) {
+  build_unary_op(maybe_get_output(), self);
+}
+
 TORCH_META_FUNC(gelu) (const Tensor & self) {
   build_unary_op(maybe_get_output(), self);
 }
@@ -385,34 +389,13 @@ Tensor hardtanh_backward(const Tensor& grad_output, const Tensor& self, const Sc
   return iter.output();
 }
 
-Tensor hardswish(const Tensor& self) {
-  #if defined(C10_MOBILE) && defined(USE_XNNPACK)
+TORCH_IMPL_FUNC(hardswish_out)(const Tensor& self, const Tensor& result) {
+#if defined(C10_MOBILE) && defined(USE_XNNPACK)
   if (xnnpack::use_hardswish(self)) {
-    return xnnpack::hardswish(self);
+    xnnpack::hardswish_out(self, result);
   }
-  #endif
-  Tensor result;
-  auto iter = TensorIterator::unary_op(result, self);
-  hardswish_stub(iter.device_type(), iter);
-  return iter.output();
-}
-
-Tensor& hardswish_out(const Tensor& self, Tensor& result) {
-  auto iter = TensorIterator::unary_op(result, self);
-  hardswish_stub(iter.device_type(), iter);
-  return result;
-}
-
-Tensor& hardswish_(Tensor& self) {
-  #if defined(C10_MOBILE) && defined(USE_XNNPACK)
-  if (xnnpack::use_hardswish(self)) {
-    xnnpack::hardswish_(self);
-    return self;
-  }
-  #endif
-  auto iter = TensorIterator::unary_op(self, self);
-  hardswish_stub(iter.device_type(), iter);
-  return self;
+#endif
+  hardswish_stub(device_type(), *this);
 }
 
 Tensor hardswish_backward(const Tensor& grad_output, const Tensor& self) {
@@ -500,7 +483,7 @@ inline void _rrelu_with_noise_train(
   scalar_t* noise_data = noise.data_ptr<scalar_t>();
   auto gen  = at::get_generator_or_default<CPUGeneratorImpl>(generator, detail::getDefaultCPUGenerator());
   std::lock_guard<std::mutex> lock(gen->mutex_);
-  for (int64_t i = 0; i < input.numel(); i++) {
+  for (const auto i : c10::irange(input.numel())) {
     if (input_data[i] <= 0) {
       at::uniform_real_distribution<double> uniform(lower, upper);
       const scalar_t r = (scalar_t)uniform(gen);
@@ -610,7 +593,7 @@ void inline prelu_cpu_kernel_share_weights(
   auto weight_val = weight.data_ptr<scalar_t>()[0];
 
   at::parallel_for(0, input_numel, 1000, [&](int64_t start, int64_t end) {
-    for (auto i = start; i < end; i++) {
+    for (const auto i : c10::irange(start, end)) {
       scalar_t input_data_val = input_data[i];
       // to allow for compiler optimization, here splitting into two lines:
       scalar_t r = (input_data_val > 0) ? scalar_t(1) : weight_val;
@@ -725,7 +708,7 @@ void inline prelu_cpu_backward_kernel_share_weights(
   scalar_t sum = at::parallel_reduce(0, input_numel, 1000, scalar_t(0),
       [&](int64_t start, int64_t end, scalar_t ident) -> scalar_t {
     scalar_t partial_sum = ident;
-    for (auto i = start; i < end; i++) {
+    for (const auto i : c10::irange(start, end)) {
       scalar_t input_data_val = input_data[i];
       scalar_t grad_out_data_val = grad_out_data[i];
       // to allow for compiler optimization, here splitting into two lines:
@@ -839,7 +822,9 @@ std::tuple<Tensor, Tensor> prelu_backward_cpu(const Tensor& grad_out_, const Ten
     std::vector<int64_t> reduce_dims;
     reduce_dims.push_back(0);
     if (dims > 2) {
-      for(int64_t i = 2; i < dims; i++) reduce_dims.push_back(i);
+      for (const auto i : c10::irange(2, dims)) {
+        reduce_dims.push_back(i);
+      }
     }
     weight_grad = weight_grad_collector.sum(reduce_dims);
   }

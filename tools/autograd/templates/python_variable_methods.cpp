@@ -35,6 +35,7 @@
 #include "torch/csrc/utils/structseq.h"
 
 #include <ATen/ATen.h>
+#include <ATen/FunctionalTensorWrapper.h>
 #include "c10/util/Optional.h"
 #include "c10/core/Stream.h"
 

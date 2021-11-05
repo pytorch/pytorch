@@ -5,8 +5,6 @@
 #include <ATen/Utils.h>
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
-#include <THC/THCGeneral.h>
-#include <THC/THCNumerics.cuh>
 #include <c10/util/Exception.h>
 
 #include <algorithm>
