@@ -6,7 +6,7 @@
 
 namespace torch_lazy_tensors {
 
-struct Device;
+class Device;
 
 namespace ir {
 
