@@ -53,7 +53,13 @@ def run_command(args: List[str],) -> "subprocess.CompletedProcess[bytes]":
         logging.debug("took %dms", (end_time - start_time) * 1000)
 
 
-def lint_file(matching_line: str, args):
+def lint_file(
+    matching_line: str,
+    replace_pattern: str,
+    linter_name: str,
+    error_name: str,
+    error_description: str,
+) -> LintMessage:
     # matching_line looks like:
     #   tools/linter/clangtidy_linter.py:13:import foo.bar.baz
     split = matching_line.split(":")
@@ -61,19 +67,19 @@ def lint_file(matching_line: str, args):
 
     original = None
     replacement = None
-    if args.replace_pattern:
+    if replace_pattern:
         with open(filename, "r") as f:
             original = f.read()
 
         try:
-            proc = run_command(["sed", "-r", args.replace_pattern, filename])
+            proc = run_command(["sed", "-r", replace_pattern, filename])
             replacement = proc.stdout.decode("utf-8")
         except Exception as err:
             return LintMessage(
                 path=None,
                 line=None,
                 char=None,
-                code=args.linter_name,
+                code=linter_name,
                 severity=LintSeverity.ERROR,
                 name="command-failed",
                 original=None,
@@ -99,12 +105,12 @@ def lint_file(matching_line: str, args):
         path=split[0],
         line=int(split[1]),
         char=None,
-        code=args.linter_name,
+        code=linter_name,
         severity=LintSeverity.ERROR,
-        name=args.error_name,
+        name=error_name,
         original=original,
         replacement=replacement,
-        description=args.error_description,
+        description=error_description,
     )
 
 
@@ -186,7 +192,13 @@ def main() -> None:
 
     lines = proc.stdout.decode().splitlines()
     for line in lines:
-        lint_message = lint_file(line, args)
+        lint_message = lint_file(
+            line,
+            args.replace_pattern,
+            args.linter_name,
+            args.error_name,
+            args.error_description,
+        )
         print(json.dumps(lint_message._asdict()), flush=True)
 
 
