@@ -96,7 +96,7 @@ class TestOptim(TestCase):
 
         self.assertLessEqual(params.data.dist(solution), initial_dist)
 
-    def _test_basic_cases_template(self, weight, bias, input, constructor, 
+    def _test_basic_cases_template(self, weight, bias, input, constructor,
                                    scheduler_constructors, constructor_accepts_maximize=True):
         maximize_options = set([False, constructor_accepts_maximize])
         if not constructor_accepts_maximize:
@@ -110,7 +110,6 @@ class TestOptim(TestCase):
             weight = Variable(weight, requires_grad=True)
             bias = Variable(bias, requires_grad=True)
             input = Variable(input)
-            #  import ipdb; ipdb.set_trace()
             optimizer = three_arg_constructor(weight, bias, maximize)
             schedulers = []
             for scheduler_constructor in scheduler_constructors:
@@ -217,17 +216,19 @@ class TestOptim(TestCase):
                           ignore_multidevice=False, constructor_accepts_maximize=False):
         if scheduler_constructors is None:
             scheduler_constructors = []
-        if constructor_accepts_maximize:
-            def wrapped_constructor(weight, bias):
-                return constructor(weight, bias, False)
-        else:
-            wrapped_constructor = constructor
-        self._test_state_dict(
-            torch.randn(10, 5),
-            torch.randn(10),
-            torch.randn(5),
-            wrapped_constructor ,
-        )
+
+        def make_two_arg_constructor(constructor, maximize: bool = False):
+            if constructor_accepts_maximize:
+                return lambda weight, bias: constructor(weight, bias, maximize)
+            return constructor
+
+        for maximize in (True, False):
+            self._test_state_dict(
+                torch.randn(10, 5),
+                torch.randn(10),
+                torch.randn(5),
+                make_two_arg_constructor(constructor, maximize),
+            )
         self._test_basic_cases_template(
             torch.randn(10, 5),
             torch.randn(10),
@@ -313,7 +314,7 @@ class TestOptim(TestCase):
             )
             self._test_basic_cases(
                 lambda weight, bias, maximize: optimizer(
-                    self._build_params_dict_single(weight, bias, lr=1e-2), maximize=maximize), 
+                    self._build_params_dict_single(weight, bias, lr=1e-2), maximize=maximize),
                 constructor_accepts_maximize=True
             )
             self._test_basic_cases(
@@ -359,7 +360,7 @@ class TestOptim(TestCase):
                 constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias, maximize: 
+                lambda weight, bias, maximize:
                 optimizer([weight, bias], nesterov=True, lr=1e-3, momentum=1, weight_decay=1, maximize=maximize),
                 constructor_accepts_maximize=True
             )
