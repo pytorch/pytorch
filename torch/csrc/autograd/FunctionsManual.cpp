@@ -2498,35 +2498,27 @@ Tensor linalg_eig_backward(const std::vector<torch::autograd::Variable> &grads,
 Tensor linalg_eig_jvp_eigenvalues(const Tensor& dA,
                                   const Tensor& L,
                                   const Tensor& V) {
-  const auto dAComplex = at::complex(dA, at::zeros(dA.size(-1), dA.options()));
-  const auto dVfactor = at::linalg_solve(V, at::matmul(dAComplex, V));
-  return at::diag(at::mul(at::eye(V.size(-1), V.options()), dVfactor));
+  return std::get<0>(linalg_eig_jvp(dA, L, V));
 }
 
 Tensor linalg_eig_jvp_eigenvectors(const Tensor& dA,
                                    const Tensor& L,
                                    const Tensor& V) {
-  const auto dAComplex = at::complex(dA, at::zeros(dA.size(-1), dA.options()));
-  const auto dVfactor = at::linalg_solve(V, at::matmul(dAComplex, V));
-  const auto Lconj = L.conj();
-  const auto Econj = Lconj.unsqueeze(-2) - Lconj.unsqueeze(-1);
-  auto Fconj = at::pow(Econj, -1);
-  Fconj.diagonal(0, -2, -1).zero_();
-  return at::matmul(V, at::mul(Fconj, dVfactor));
+  return std::get<1>(linalg_eig_jvp(dA, L, V));
 }
 
 std::tuple<Tensor, Tensor> linalg_eig_jvp(const Tensor& dA,
                                           const Tensor& L,
                                           const Tensor& V) {
-  const auto dAComplex = at::complex(dA, at::zeros(dA.size(-1), dA.options()));
+  const auto dAComplex = dA.to(c10::toComplexType(dA.scalar_type()));
   const auto dVfactor = at::linalg_solve(V, at::matmul(dAComplex, V));
   const auto Lconj = L.conj();
-  const auto Econj = Lconj.unsqueeze(-2) - Lconj.unsqueeze(-1);
-  const auto Fconj = at::pow(Econj, -1);
+  const auto Fconj = dVfactor / (Lconj.unsqueeze(-2) - Lconj.unsqueeze(-1));
   Fconj.diagonal(0, -2, -1).zero_();
+
   return std::make_tuple(
-    at::diag(at::mul(at::eye(V.size(-1), V.options()), dVfactor)),
-    at::matmul(V, at::mul(Fconj, dVfactor)));
+    dVfactor.diagonal(0, -2, -1),
+    at::matmul(V, Fconj * dVfactor));
 }
 
 Tensor linalg_lstsq_jvp(
