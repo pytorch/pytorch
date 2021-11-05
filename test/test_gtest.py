@@ -2,8 +2,11 @@ import subprocess
 import time
 import os
 import sys
+import unittest
+
 from pathlib import Path
 from typing import List, Any
+
 import torch
 from torch.testing._internal.common_utils import (
     TestCase,
@@ -15,6 +18,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     TEST_WITH_ROCM,
 )
+
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TEST_BINARY_DIR = REPO_ROOT / "build" / "bin"
@@ -39,6 +43,11 @@ if IS_WINDOWS:
         r"C:\actions-runner\_work\pytorch\pytorch\build\lib",
         r"C:\Jenkins\Miniconda3",
         r"C:\actions-runner\bin",
+        r"C:\Program Files\NVIDIA^ GPU^ Computing^ Toolkit\CUDA\v11.3\bin",
+        r"C:\actions-runner\_work\pytorch\pytorch\build\lib.win-amd64-3.8\torch\bin",
+        r"C:\actions-runner\_work\pytorch\pytorch\build\lib.win-amd64-3.8\torch\lib",
+        r"C:\actions-runner\_work\pytorch\pytorch\torch\bin",
+        r"C:\actions-runner\_work\pytorch\pytorch\torch\lib",
     ]
     env["PATH"] = ";".join(paths) + ";" + env["PATH"]
 
@@ -50,7 +59,6 @@ if IS_IN_CI:
         # TEST_BINARY_DIR = REPO_ROOT / "build"
 BUILD_ENVIRONMENT = os.getenv("BUILD_ENVIRONMENT", "")
 
-print(f"[remove] USING PATH {TEST_BINARY_DIR}")
 
 # This is a temporary list of tests that use this framework rather than get run
 # as regular binaries.
@@ -101,7 +109,6 @@ class GTest(TestCase):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        print("main")
         if TEST_WITH_ROCM:
             # C++ tests don't run on rocm
             return
@@ -112,30 +119,9 @@ class GTest(TestCase):
                 "must run from a PyTorch checkout"
             )
 
-        print("CWD", os.getcwd())
-        print(TEST_BINARY_DIR)
-
-        def try_dir(path):
-            print("Looking at", path)
-            print("\texists:", path.exists())
-            print("all", list(path.glob("*")))
-            print("tests", list(path.glob("*test*")))
-
-        try_dir(TEST_BINARY_DIR)
-        # try_dir(TEST_BINARY_DIR / "win_tmp")
-        # try_dir(TEST_BINARY_DIR / "win_tmp" / "torch" / "build" / "bin")
-        # try_dir(TEST_BINARY_DIR / "win_tmp" / "build" / "bin")
-        # try_dir(REPO_ROOT / "build" / "bin")
-        # try_dir(REPO_ROOT / "build" / "win_tmp")
-        # try_dir(REPO_ROOT / "build" / "win_tmp" / "torch" / "build" / "bin")
-        # try_dir(REPO_ROOT / "build" / "win_tmp" / "build" / "bin")
-        # print("ALL FILES GLOB")
-        # print(list(REPO_ROOT.glob("**/*")))
-
         self.binaries = {}
 
         for binary in TEST_BINARY_DIR.glob("*test*"):
-            print("adding", binary)
             # If the test already has a properly formatted name, don't prepend a
             # redundant 'test_'
             if IS_WINDOWS and binary.suffix != ".exe":
@@ -162,14 +148,11 @@ class GTest(TestCase):
 
                 setattr(self, test_name, test_case)
 
-            # maybe_existing_case = generate_test_case(
-            #     getattr(GTest, test_name, None), binary, test_name
-            # )
-            # setattr(
-            #     GTest, test_name, maybe_existing_case,
-            # )
-
     @skipIfRocm
+    @unittest.skipIf(
+        IS_WINDOWS and torch.cuda.is_available(),
+        "CUDA environment doesn't work out of the box yet",
+    )
     def test_jit(self):
         test_name = "test_jit"
         binary = self.binaries[test_name]
@@ -223,59 +206,7 @@ class GTest(TestCase):
         run_cmd([sys.executable, str(setup_path), "shutdown"])
 
 
-# def generate_test_case(existing_case, binary: Path, test_name: str):
-#     if existing_case is None:
-
-#         def test_case(self):
-#             run_binary(binary, test_name)
-
-#     else:
-
-#         def test_case(self):
-#             existing_case(self, binary, test_name)
-
-#     return skipIfRocm(test_case)
-
-
-print("not main")
 if __name__ == "__main__":
-    # print("main")
-    # if not TEST_BINARY_DIR.exists():
-    #     print(
-    #         f"{TEST_BINARY_DIR} does not exist, this test "
-    #         "must run from a PyTorch checkout"
-    #     )
-    #     exit(1)
-
-    # print(TEST_BINARY_DIR)
-    # print("globs")
-    # print('list(TEST_BINARY_DIR.glob("*"))', list(TEST_BINARY_DIR.glob("*")))
-    # print('list(TEST_BINARY_DIR.glob("*test*"))', list(TEST_BINARY_DIR.glob("*test*")))
-    # for binary in TEST_BINARY_DIR.glob("*test*"):
-    #     # If the test already has a properly formatted name, don't prepend a
-    #     # redundant 'test_'
-    #     if IS_WINDOWS and binary.suffix != ".exe":
-    #         continue
-
-    #     if binary.name.startswith("test_"):
-    #         if IS_WINDOWS:
-    #             # Get rid of the ".exe"
-    #             test_name = binary.stem
-    #         else:
-    #             test_name = binary.name
-    #     else:
-    #         test_name = f"test_{binary.name}"
-
-    #     if test_name not in ALLOWLISTED_TESTS:
-    #         continue
-
-    #     maybe_existing_case = generate_test_case(
-    #         getattr(GTest, test_name, None), binary, test_name
-    #     )
-    #     setattr(
-    #         GTest, test_name, maybe_existing_case,
-    #     )
-
     # Don't 'save_xml' since gtest does that for us and we don't want to
     # duplicate it for these test cases
     run_tests(save_xml=False)
