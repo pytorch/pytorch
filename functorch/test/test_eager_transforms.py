@@ -425,8 +425,8 @@ class TestGradTransform(TestCase):
                 return x
 
         B = 10
-        weights, fn, _ = functional_init(MLPClassifier, (B,))(32, 2)
-        inputs = torch.randn(B, 7, 2)
+        weights, fn, _ = functional_init(MLPClassifier, (B,), device=device)(32, 2)
+        inputs = torch.randn(B, 7, 2, device=device)
         vmap(fn)(weights, (inputs,))
 
     def test_functional_init_with_buffers(self, device):
@@ -450,8 +450,8 @@ class TestGradTransform(TestCase):
 
         B = 10
         weights, buffers, fn, _, _ = \
-            functional_init_with_buffers(MLPClassifier, [B])(32, 2)
-        inputs = torch.randn(B, 7, 2)
+            functional_init_with_buffers(MLPClassifier, [B], device=device)(32, 2)
+        inputs = torch.randn(B, 7, 2, device=device)
         vmap(fn)(weights, buffers, (inputs,))
 
     def test_advanced_indexing(self, device):
@@ -561,7 +561,7 @@ class TestGradTransform(TestCase):
                 shift = grad(f)(x)
             return r1 - shift
 
-        x = torch.randn([], requires_grad=True)
+        x = torch.randn([], requires_grad=True, device=device)
         y = grad(g)(x)
         # The only differential part of g is x ** 3
         self.assertEqual(y, 6 * x)
@@ -735,8 +735,8 @@ class TestVmapOfGrad(TestCase):
             self.assertEqual(r, e, atol=0, rtol=1e-4)
 
     def test_log_softmax(self, device):
-        x = torch.randn(3, 5)
-        v = torch.randn(5)
+        x = torch.randn(3, 5, device=device)
+        v = torch.randn(5, device=device)
 
         def foo(x, v):
             _, vjp_fn = vjp(partial(torch.log_softmax, dim=-1), x)
@@ -796,7 +796,7 @@ class TestJacrev(TestCase):
         assert len(z) == 2
         assert torch.allclose(z[0], expected0)
         assert torch.allclose(z[1], expected1)
-    
+
     def test_empty_argnums(self, device):
         x = torch.randn(3, device=device)
         with self.assertRaisesRegex(RuntimeError, "must be non-empty"):
@@ -829,7 +829,7 @@ class TestComposability(TestCase):
             y = vmap(torch.sin)(x)
             return y.sum()
 
-        x = torch.randn(3)
+        x = torch.randn(3, device=device)
         y = grad(foo)(x)
         self.assertEqual(y, x.cos())
 
@@ -1072,8 +1072,8 @@ class TestExamplesCorrectness(TestCase):
             return \
                 -epsilon * ((-12 * sigma**12 / r**13) + (6 * sigma**6 / r**7))
 
-        r = torch.linspace(0.5, 2 * sigma, requires_grad=True)
-        drs = torch.outer(r, torch.tensor([1.0, 0, 0]))
+        r = torch.linspace(0.5, 2 * sigma, requires_grad=True, device=device)
+        drs = torch.outer(r, torch.tensor([1.0, 0, 0], device=device))
         norms = torch.norm(drs, dim=1).reshape(-1, 1)
         training_energies = \
             torch.stack(list(map(lennard_jones, norms))).reshape(-1, 1)
@@ -1091,7 +1091,7 @@ class TestExamplesCorrectness(TestCase):
             nn.Linear(16, 16),
             nn.Tanh(),
             nn.Linear(16, 1)
-        )
+        ).to(device)
 
         def make_prediction(model, drs, use_functorch):
             norms = torch.norm(drs, dim=1).reshape(-1, 1)
