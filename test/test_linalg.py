@@ -21,7 +21,7 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes,
      onlyCPU, skipCUDAIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
-     skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, onlyOnCPUAndCUDA, dtypesIfCUDA,
+     skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, onlyNativeDeviceTypes, dtypesIfCUDA,
      onlyCUDA, skipCUDAVersionIn, skipMeta, skipCUDAIfNoCusolver)
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
@@ -3309,7 +3309,7 @@ class TestLinalg(TestCase):
 
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
-    @onlyOnCPUAndCUDA   # TODO: XLA doesn't raise exception
+    @onlyNativeDeviceTypes   # TODO: XLA doesn't raise exception
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_inverse_errors(self, device, dtype):
         # inverse expects batches of square matrices as input
@@ -3328,7 +3328,7 @@ class TestLinalg(TestCase):
 
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
-    @onlyOnCPUAndCUDA   # TODO: XLA doesn't raise exception
+    @onlyNativeDeviceTypes   # TODO: XLA doesn't raise exception
     @skipCUDAIfRocm
     @skipCUDAVersionIn([(11, 3)])  # https://github.com/pytorch/pytorch/issues/57482
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
@@ -4082,12 +4082,12 @@ class TestLinalg(TestCase):
             x_cpu = x.expand(3).cpu()
             check(x_cpu, y.to(x.dtype), 'Expected all tensors to be on the same device')
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_vdot_invalid_args(self, device):
         self._test_dot_vdot_invalid_args(device, torch.vdot)
         self._test_dot_vdot_invalid_args(device, torch.vdot, complex_dtypes=True)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_dot_invalid_args(self, device):
         self._test_dot_vdot_invalid_args(device, torch.dot)
         self._test_dot_vdot_invalid_args(device, torch.dot, complex_dtypes=True)
@@ -4297,7 +4297,7 @@ class TestLinalg(TestCase):
             self.assertEqual(torch.matrix_rank(aaT, True), np.linalg.matrix_rank(aaT.cpu().numpy(), True))
             self.assertEqual(torch.matrix_rank(aaT, 0.01, True), np.linalg.matrix_rank(aaT.cpu().numpy(), 0.01, True))
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(torch.double)
     # This tests only the cases where torch.chain_matmul differs from torch.linalg.multi_dot which this is an "alias" for.
     def test_chain_matmul(self, device, dtype):
@@ -4312,7 +4312,7 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError, r"Tensor dimension is 1, expected 2 instead"):
             torch.chain_matmul(make_tensor(1, device, dtype), make_tensor(1, device, dtype))
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(torch.double, torch.cdouble)
     def test_multi_dot(self, device, dtype):
         def check(*shapes, noncontiguous=False):
@@ -4351,7 +4351,7 @@ class TestLinalg(TestCase):
         check([3, 2], [2, 2], [2, 3], [3, 4], noncontiguous=True)
         check([15, 5], [5, 10], [10, 20], [20, 25], noncontiguous=True)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(torch.float)
     def test_multi_dot_errors(self, device, dtype):
         def check(tensors, out, msg):
@@ -4991,12 +4991,12 @@ class TestLinalg(TestCase):
         b = torch.randn(2, 1, dtype=dtype, device=device)
         out = torch.empty_like(b).to(torch.int)
         clone_a = torch.empty_like(a)
-        with self.assertRaisesRegex(RuntimeError, "but got result with dtype Int"):
+        with self.assertRaisesRegex(RuntimeError, "Expected out tensor to have dtype"):
             torch.triangular_solve(b, a, out=(out, clone_a))
 
         out = torch.empty_like(b)
         clone_a = clone_a.to(torch.int)
-        with self.assertRaisesRegex(RuntimeError, "but got clone_A with dtype Int"):
+        with self.assertRaisesRegex(RuntimeError, "Expected out tensor to have dtype"):
             torch.triangular_solve(b, a, out=(out, clone_a))
 
         # device should match
@@ -6125,6 +6125,28 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                     self.assertRaisesRegex(RuntimeError, f"{n}x{k + 1}.*{k}x{m}", lambda: torch.addmm(M, m1, m2))
                     self.assertRaisesRegex(RuntimeError, f"{n}x{k + 1}.*{k}x{m}", lambda: torch.mm(m1, m2))
 
+    @dtypes(torch.half)
+    @onlyCUDA
+    def test_addmm_baddbmm_overflow(self, device, dtype):
+        inp = torch.zeros(128, 128, dtype=torch.half, device=device)
+        mat1 = torch.ones(128, 1000, dtype=torch.half, device=device) * 100
+        mat2 = torch.ones(1000, 128, dtype=torch.half, device=device) * 100
+        out = torch.addmm(inp, mat1, mat2, alpha=0.001, beta=0.)
+        # just check for no overflow on ROCM
+        if TEST_WITH_ROCM:
+            self.assertFalse(out.isinf().any())
+        else:
+            self.assertTrue((out == 10000.).all())
+
+        inp = torch.zeros(3, 128, 128, dtype=torch.half, device=device)
+        mat1 = torch.ones(3, 128, 1000, dtype=torch.half, device=device) * 100
+        mat2 = torch.ones(3, 1000, 128, dtype=torch.half, device=device) * 100
+        out = torch.baddbmm(inp, mat1, mat2, alpha=0.001, beta=0.)
+        if TEST_WITH_ROCM:
+            self.assertFalse(out.isinf().any())
+        else:
+            self.assertTrue((out == 10000.).all())
+
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @onlyCUDA
     def test_matmul_45724(self, device):
@@ -6137,7 +6159,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         self.assertEqual(c, cpu_result)
 
     @slowTest
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.int32, torch.int64, torch.cfloat, torch.cdouble)
     @dtypesIfCUDA(torch.float32, torch.float64, torch.cfloat, torch.cdouble)
     @tf32_on_and_off(0.01)
@@ -6232,7 +6254,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
             _test_mm(n, m, p, dtype, genf)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_mm_bmm_non_memory_dense(self, device):
         def _slice(tensor, fn):
             return fn(tensor)[..., ::2]
@@ -6264,7 +6286,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         self.assertEqual(torch.bmm(Ab_conj, Bb_, out=out_b), torch.bmm(Ab_conj_physical, Bb_, out=out_b))
         self.assertEqual(torch.bmm(t_b(Ab_conj), Bb_, out=out_b), torch.bmm(t_b(Ab_conj_physical), Bb_, out=out_b))
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(torch.float32, torch.float64)
     def test_strided_mm_bmm(self, device, dtype):
         # Tests strided view case with stride smaller than corresponding dimension size
@@ -6282,7 +6304,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
     @precisionOverride({torch.half: 0.05, torch.bfloat16: 0.05})
     @skipCUDAIf(torch.version.cuda == "10.1", "flaky on CUDA 10.1")
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(*get_all_fp_dtypes(), *get_all_complex_dtypes())
     @tf32_on_and_off(0.05)
     def test_bmm(self, device, dtype):
@@ -6394,7 +6416,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         self.assertEqual(res7, ref)
 
     @precisionOverride({torch.half: 0.05, torch.bfloat16: 0.05})
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(*get_all_fp_dtypes(), *get_all_complex_dtypes())
     @tf32_on_and_off(0.05)
     def test_addbmm(self, device, dtype):
@@ -6467,7 +6489,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             self._test_addbmm_baddbmm("addbmm", b1, b2, ref, out_tensor)
 
     @precisionOverride({torch.half: 0.1, torch.bfloat16: 0.5})
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(*get_all_fp_dtypes(), *get_all_complex_dtypes())
     @tf32_on_and_off(0.05)
     def test_baddbmm(self, device, dtype):
@@ -7809,7 +7831,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         run_subtest(guess_rank, actual_rank, size, batches, device, jitted)
 
     # Ensure that nuclear_norm's out variant gives the same result as the non-out
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64)
