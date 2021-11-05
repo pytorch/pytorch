@@ -41,25 +41,6 @@ void _foreach_tensor(
   }
 }
 
-bool isTensorList(const at::TypePtr& type) {
-  auto as_list = type->castRaw<at::ListType>();
-  return as_list && as_list->getElementType()->castRaw<at::TensorType>();
-}
-
-bool afterSetIsWildcard(const at::AliasInfo& alias_info) {
-  if (alias_info.beforeSets().size() == 0) {
-    return false;
-  }
-  TORCH_CHECK(alias_info.beforeSets().size() == 1);
-  TORCH_CHECK(alias_info.afterSets().size() == 1);
-  if (alias_info.beforeSet() == *alias_info.afterSets().begin()) {
-    return false;
-  }
-  TORCH_CHECK(
-      alias_info.isWildcardAfter(),
-      "Only supported changed after set is wildcard set");
-  return true;
-}
 }
 
 void autogradNotImplementedFallbackImpl(const c10::OperatorHandle& op, c10::DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
@@ -83,72 +64,36 @@ void autogradNotImplementedFallbackImpl(const c10::OperatorHandle& op, c10::Disp
   is_inplace_output.reserve(num_returns);
   is_aliased_output.reserve(num_returns);
 
-  int aliased_input_idx = -1;
-  int aliased_output_idx = -1;
-
-  // if a Tensor is annotated with (a -> *) that implies that all lists of
-  // tensors alias it, so we need to handle an output tensor list even if it
-  // does not have an annotation
-  bool aliased_input_enters_list = false;
-  for (const auto i : c10::irange(num_arguments)) {
-    const at::AliasInfo* alias_info = arguments[i].alias_info();
-    if (alias_info == nullptr) {
-      continue;
-    }
-    if (!alias_info->isWrite()) {
-      TORCH_CHECK(
-          aliased_input_idx == -1,
-          "Expected only a single input in the operator schema to have a non-write alias annotation (i.e., 'Tensor(a)'). "
-          "Non-composite functions where multiple inputs are aliased with outputs aren't supported. "
-          "Please rewrite your function as a composite function.");
-      aliased_input_idx = i;
-    }
-    if (afterSetIsWildcard(*alias_info)) {
-      aliased_input_enters_list = true;
-    }
-  }
   for (const auto i : c10::irange(num_returns)) {
     const at::AliasInfo* alias_info = returns[i].alias_info();
     is_inplace_output.push_back(alias_info != nullptr && alias_info->isWrite());
     any_is_inplace_output |= alias_info != nullptr && alias_info->isWrite();
-    if (aliased_input_enters_list && isTensorList(returns[i].type())) {
-      is_aliased_output.push_back(true);
-      continue;
-    }
     is_aliased_output.push_back(alias_info != nullptr);
-  }
 
+  }
+  int aliased_input_idx = -1;
+  int aliased_output_idx = -1;
   for (const auto i : c10::irange(num_returns)) {
     const at::AliasInfo* alias_info = returns[i].alias_info();
-    // if the aliased input tensor enters a list, we expect list of tensors
-    // output to alias it
-    if (aliased_input_enters_list) {
-      const auto& return_type = returns[i].type();
-      if (isTensorList(return_type)) {
-        TORCH_CHECK(
-            aliased_output_idx == -1,
-            "Expected only a single output to alias an input (i.e. Tensor(a) or Tensor[] where an input enters the wildcard set). "
-            "Non-composite functions where multiple outputs are aliased with inputs aren't supported."
-            "Please rewrite your function as a composite function.");
-        aliased_output_idx = i;
-        continue;
-      }
-    }
     if (alias_info != nullptr && !alias_info->isWrite()) {
       TORCH_CHECK(
-          aliased_output_idx == -1,
-          "Expected only a single output in the operator schema to have a non-write alias annotation (i.e., 'Tensor(a)'). "
-          "Non-composite functions where multiple outputs are aliased with inputs aren't supported."
-          "Please rewrite your function as a composite function.");
+        aliased_output_idx == -1,
+        "Expected only a single output in the operator schema to have a non-write alias annotation (i.e., 'Tensor(a)'). "
+        "Non-composite functions where multiple outputs are aliased with inputs aren't supported."
+        "Please rewrite your function as a composite function.");
       aliased_output_idx = i;
     }
   }
-  if (aliased_input_enters_list &&
-      (aliased_output_idx == -1 ||
-       !isTensorList(returns[aliased_output_idx].type()))) {
-    TORCH_CHECK(
-        false,
-        "Got an input tensor annotated with an afterset of * but none of the outputs are tensor lists.");
+  for (const auto i : c10::irange(num_arguments)) {
+    const at::AliasInfo* alias_info = arguments[i].alias_info();
+    if (alias_info != nullptr && !alias_info->isWrite()) {
+      TORCH_CHECK(
+        aliased_input_idx == -1,
+        "Expected only a single input in the operator schema to have a non-write alias annotation (i.e., 'Tensor(a)'). "
+        "Non-composite functions where multiple inputs are aliased with outputs aren't supported. "
+        "Please rewrite your function as a composite function.");
+      aliased_input_idx = i;
+    }
   }
 
   size_t num_tensor_inputs = 0;  // Only used for DEBUG-only checks
@@ -277,18 +222,24 @@ void autogradNotImplementedInplaceOrViewFallbackImpl(const c10::OperatorHandle& 
 
   at::Tensor aliased_input;
 
-  // if a Tensor is annotated with (a -> *) that implies that all lists of
-  // tensors alias it, so we need to handle an output tensor list even if it
-  // does not have an annotation
-  bool aliased_input_enters_list = false;
+  int64_t aliased_output_idx = -1;
+  for (const auto i : c10::irange(num_returns)) {
+    const at::AliasInfo* alias_info = returns[i].alias_info();
+    if (alias_info != nullptr && !alias_info->isWrite()) {
+      TORCH_CHECK(
+        aliased_output_idx == -1,
+        "Fallback ADInplaceOrView kernel expects only a single output in the operator schema to have a "
+        "non-write alias annotation (i.e., 'Tensor(a)'). "
+        "Non-composite functions where multiple outputs are aliased with inputs aren't supported."
+        "Please rewrite your function as a composite function.");
+      aliased_output_idx = i;
+    }
+  }
 
   int64_t aliased_input_idx = -1;
   for (const auto i : c10::irange(num_arguments)) {
     const at::AliasInfo* alias_info = arguments[i].alias_info();
     if (alias_info != nullptr) {
-      if (afterSetIsWildcard(*alias_info)) {
-        aliased_input_enters_list = true;
-      }
       if (!alias_info->isWrite()) {
         TORCH_CHECK(
           aliased_input_idx == -1,
@@ -305,43 +256,6 @@ void autogradNotImplementedInplaceOrViewFallbackImpl(const c10::OperatorHandle& 
       }
     }
   }
-
-  int64_t aliased_output_idx = -1;
-  for (const auto i : c10::irange(num_returns)) {
-    const at::AliasInfo* alias_info = returns[i].alias_info();
-    if (aliased_input_enters_list) {
-      const auto& return_type = returns[i].type();
-      auto as_list = return_type->castRaw<at::ListType>();
-      if (as_list && as_list->getElementType()->castRaw<at::TensorType>()) {
-        TORCH_CHECK(
-            aliased_output_idx == -1,
-            "Fallback ADInplaceOrView kernel expects only a single output in the operator schema to have a "
-            "non-write alias annotation (i.e., 'Tensor(a)'). "
-            "Non-composite functions where multiple outputs are aliased with inputs aren't supported."
-            "Please rewrite your function as a composite function.");
-        aliased_output_idx = i;
-        continue;
-      }
-    }
-
-    if (alias_info != nullptr && !alias_info->isWrite()) {
-      TORCH_CHECK(
-          aliased_output_idx == -1,
-          "Fallback ADInplaceOrView kernel expects only a single output in the operator schema to have a "
-          "non-write alias annotation (i.e., 'Tensor(a)'). "
-          "Non-composite functions where multiple outputs are aliased with inputs aren't supported."
-          "Please rewrite your function as a composite function.");
-      aliased_output_idx = i;
-    }
-  }
-  if (aliased_input_enters_list &&
-      (aliased_output_idx == -1 ||
-       !isTensorList(returns[aliased_output_idx].type()))) {
-    TORCH_CHECK(
-        false,
-        "Got an input tensor annotated with an afterset of * but none of the outputs are tensor lists.");
-  }
-
   // See NOTE [ Limitations of ADInplaceOrView boxed kernel ] above
   TORCH_CHECK(
     (aliased_input_idx == -1 && aliased_output_idx == -1) ||
@@ -358,7 +272,7 @@ void autogradNotImplementedInplaceOrViewFallbackImpl(const c10::OperatorHandle& 
 
   for (const auto i : c10::irange(num_returns)) {
     const at::AliasInfo* alias_info = returns[i].alias_info();
-    if (alias_info && alias_info->isWrite()) {
+    if (alias_info->isWrite()) {
       increment_version((*stack)[stack->size() - num_returns + i].toTensor());
     }
   }

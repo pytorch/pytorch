@@ -1281,7 +1281,7 @@ Note the alias set `*`. This is the **wildcard set**. These are values which we 
 
 Similarly, we have operators which result in Tensors being contained in a list. In this case, to preserve the relationship between output list and input, we annotate that the input enters the wildcard set with the `(a -> *)` syntax.
 ```
-func: chunk(Tensor(a -> *) self, int chunks, int dim=0) -> Tensor[]
+func: chunk(Tensor(a -> *) self, int chunks, int dim=0) -> Tensor(a)[]
 ```
 
 This annotation language is consumed by the `FunctionSchema` parser, which produces `AliasInfo` objects summarizing the aliasing relationships for each schema `Argument`.
