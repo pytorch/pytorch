@@ -2356,7 +2356,7 @@
   self: non_differentiable
   output_differentiability: [False]
 
-- name: _new_zeros_with_same_feature_meta(Tensor self, Tensor other, int num_feature_dims) -> Tensor
+- name: _new_zeros_with_same_feature_meta(Tensor self, Tensor other, int? self_num_batch_dims=None) -> Tensor
   self: non_differentiable
   other: non_differentiable
   output_differentiability: [False]
