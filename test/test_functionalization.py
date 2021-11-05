@@ -19,6 +19,7 @@ class TestFunctionalization(TestCase):
         input_functional_logging = torch._to_functional_tensor(input_clone_logging)
 
         with capture_logs() as logs:
+            log_input("input", input_clone_logging)
             torch._enable_functionalization()
             try:
                 func(input_functional_logging)
@@ -57,6 +58,7 @@ class TestFunctionalization(TestCase):
         self.assert_functionalization(f, torch.ones(4, 2))
         logs = self.get_logs(f, torch.ones(4, 2))
         self.assertExpectedInline('\n'.join(logs), """\
+$0 = input('input')
 $1 = torch._ops.aten.view($0, [4, 2])
 $2 = torch._ops.aten.add($1, tensor([[1., 1.],
         [1., 1.],
@@ -76,6 +78,7 @@ $4 = torch._ops.aten.mul($3, $3)""")
         self.assert_functionalization(f, torch.ones(2, 2))
         logs = self.get_logs(f, torch.ones(2, 2))
         self.assertExpectedInline('\n'.join(logs), """\
+$0 = input('input')
 $1 = torch._ops.aten.diagonal($0)
 $2 = torch._ops.aten.add($1, tensor([1., 1.]))
 $3 = torch._ops.aten.diagonal_scatter($0, $2)
@@ -91,19 +94,6 @@ $4 = torch._ops.aten.mul($3, $3)""")
         x = torch.ones(2, 2)
         self.assert_functionalization(f, x)
 
-    def test_copy__functionalized(self):
-        def f(x):
-            # simple test: functionalizing copy_() should call its out-of-place variant
-            tmp = torch.zeros(2, 2)
-            # NOTE: LoggingTensor isn't a mode, which means that the diagonal call
-            # will not be logged. This is fine for testing.
-            tmp_slice = tmp.diagonal()
-            tmp_slice.copy_(x)
-            return x
-        self.assert_functionalization(f, torch.ones(2))
-        logs = self.get_logs(f, torch.ones(2))
-        self.assertExpectedInline('\n'.join(logs), """$1 = torch._ops.aten.expand($0, [2])""")
-
     def test_split(self):
         def f(x):
             # test: view ops that return multiple tensors (split)
@@ -116,6 +106,7 @@ $4 = torch._ops.aten.mul($3, $3)""")
         self.assert_functionalization(f, torch.ones(4, 2))
         logs = self.get_logs(f, torch.ones(4, 2))
         self.assertExpectedInline('\n'.join(logs), """\
+$0 = input('input')
 $1, $2 = torch._ops.aten.split($0, 2)
 $3 = torch._ops.aten.diagonal($2)
 $4 = torch._ops.aten.add($3, tensor([1., 1.]))
@@ -135,6 +126,7 @@ $9 = torch._ops.aten.mul($8, $8)""")
         self.assert_functionalization(f, torch.ones(4, 2))
         logs = self.get_logs(f, torch.ones(4, 2))
         self.assertExpectedInline('\n'.join(logs), """\
+$0 = input('input')
 $1 = torch._ops.aten.transpose($0, 1, 0)
 $2 = torch._ops.aten.select($1, 0, 0)
 $3 = torch._ops.aten.add($2, tensor([1., 1., 1., 1.]))""")
@@ -155,6 +147,7 @@ $3 = torch._ops.aten.add($2, tensor([1., 1., 1., 1.]))""")
         self.assert_functionalization(f, torch.ones(4, 2))
         logs = self.get_logs(f, torch.ones(4, 2))
         self.assertExpectedInline('\n'.join(logs), """\
+$0 = input('input')
 $1 = torch._ops.aten.view($0, [8])
 $2 = torch._ops.aten._reshape_alias($1, [2, 4], [4, 1])
 $3 = torch._ops.aten.transpose($2, 1, 0)
@@ -210,6 +203,53 @@ $33 = torch._ops.aten.add($32, $18)""")
         _y = torch._from_functional_tensor(y)
         _z = torch._from_functional_tensor(z)
         self.assertTrue(are_aliased(_y, _z))
+
+    # copy_() gets its own test, because it is special cased in functionalization.
+    # self.copy_(src) decomposes into src.to(self).expand_as(self).
+    def test_copy_(self):
+        def f(x):
+            tmp = torch.zeros(2, 2)
+            # NOTE: LoggingTensor isn't a mode, which means that the diagonal call
+            # will not be logged. This is fine for testing.
+            tmp_slice = tmp.diagonal()
+            y = tmp_slice.copy_(x)
+            z = y.add_(x)
+            return z
+
+        # Test 1: copy_() with same dtype and shape
+        # to() is a composite op that noops when the dtype/shape match, so nothing gets logged.
+        self.assert_functionalization(f, torch.ones(2))
+        logs = self.get_logs(f, torch.ones(2))
+        self.assertExpectedInline('\n'.join(logs), """\
+$0 = input('input')
+$1 = torch._ops.aten.expand($0, [2])
+$2 = torch._ops.aten.add($1, $0)""")
+
+        # Test 2: copy_() with same dtype, different shape
+        self.assert_functionalization(f, torch.ones(1))
+        logs = self.get_logs(f, torch.ones(1))
+        self.assertExpectedInline('\n'.join(logs), """\
+$0 = input('input')
+$1 = torch._ops.aten.expand($0, [2])
+$2 = torch._ops.aten.add($1, $0)""")
+
+        # Test 3: copy_() with different dtype, same shape
+        self.assert_functionalization(f, torch.ones(2, dtype=torch.long))
+        logs = self.get_logs(f, torch.ones(2, dtype=torch.long))
+        self.assertExpectedInline('\n'.join(logs), """\
+$0 = input('input')
+$1 = torch._ops.aten._to_copy($0, dtype=6, layout=0, device=device(type='cpu'), pin_memory=False)
+$2 = torch._ops.aten.expand($1, [2])
+$3 = torch._ops.aten.add($2, $0)""")
+
+        # Test 4: copy_() with different dtype, different shape
+        self.assert_functionalization(f, torch.ones(1, dtype=torch.long))
+        logs = self.get_logs(f, torch.ones(1, dtype=torch.long))
+        self.assertExpectedInline('\n'.join(logs), """\
+$0 = input('input')
+$1 = torch._ops.aten._to_copy($0, dtype=6, layout=0, device=device(type='cpu'), pin_memory=False)
+$2 = torch._ops.aten.expand($1, [2])
+$3 = torch._ops.aten.add($2, $0)""")
 
 if __name__ == '__main__':
     run_tests()
