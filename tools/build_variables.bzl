@@ -360,6 +360,7 @@ lazy_tensor_core_sources = [
     "torch/csrc/lazy/core/ir.cpp",
     "torch/csrc/lazy/core/ir_metadata.cpp",
     "torch/csrc/lazy/core/ir_util.cpp",
+    "torch/csrc/lazy/core/shape.cpp",
 ]
 
 libtorch_core_sources = sorted(
