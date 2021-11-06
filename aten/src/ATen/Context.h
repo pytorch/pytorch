@@ -241,7 +241,7 @@ class TORCH_API Context {
   bool benchmark_cudnn = false;
   bool allow_tf32_cudnn = true;
   bool allow_tf32_cublas = true;
-  bool allow_fp16_reduction_cublas = false;
+  bool allow_fp16_reduction_cublas = true;
   bool enabled_mkldnn = true;
   #ifdef C10_MOBILE
   bool release_original_weights = true;
