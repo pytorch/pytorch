@@ -53,9 +53,29 @@ class QATEmbeddingBenchmark(op_bench.TorchBenchmarkBase):
     def forward(self, input):
         return self.embedding(input)
 
-
 op_bench.generate_pt_test(configs.embedding_short_configs, QATEmbeddingBenchmark)
 op_bench.generate_pt_gradient_test(configs.embedding_short_configs, QATEmbeddingBenchmark)
+
+class FusedFakeQuantEmbeddingBenchmark(op_bench.TorchBenchmarkBase):
+    def init(self, num_embeddings, embedding_dim, input_size, device):
+        qconfig = default_embedding_qat_qconfig
+        self.embedding = nnqat.FusedFakeQuantEmbedding(
+            num_embeddings=num_embeddings,
+            embedding_dim=embedding_dim,
+            qconfig=qconfig, device=device)
+        self.embedding.qconfig = default_embedding_qat_qconfig
+        numpy.random.seed((1 << 32) - 1)
+        self.input = torch.tensor(numpy.random.randint(0, num_embeddings, input_size),
+                                  device=device).long()
+        self.inputs = {"input": self.input}
+        self.set_module_name('qatFusedFakeQuantEmbedding')
+
+    def forward(self, input):
+        return self.embedding(input)
+
+op_bench.generate_pt_test(configs.embedding_short_configs, FusedFakeQuantEmbeddingBenchmark)
+op_bench.generate_pt_gradient_test(configs.embedding_short_configs, FusedFakeQuantEmbeddingBenchmark)
+
 
 if __name__ == "__main__":
     op_bench.benchmark_runner.main()
