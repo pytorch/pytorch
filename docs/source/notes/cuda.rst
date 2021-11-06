@@ -131,6 +131,36 @@ For more information about TF32, see:
 .. _CUDA 11: https://devblogs.nvidia.com/cuda-11-features-revealed/
 .. _Ampere architecture: https://devblogs.nvidia.com/nvidia-ampere-architecture-in-depth/
 
+Reduced Precision Reduction in FP16 GEMMs
+-----------------------------------------
+
+fp16 GEMMs are potentially done with reduced precision reductions (e.g., in fp16 rather than fp32). This reduction in precision can allow for higher performance on certain workloads (particularly those with a large `k` dimension) and GPU architectures at the cost of numerical precision and potential for overflow.
+
+Some example benchmark data on V100::
+  [--------------------------- bench_gemm_transformer --------------------------]
+        [  m ,  k  ,  n  ]    |  allow_fp16_reduc=True  |  allow_fp16_reduc=False
+  1 threads: --------------------------------------------------------------------
+        [4096, 4048, 4096]    |           1634.6        |           1639.8
+        [4096, 4056, 4096]    |           1670.8        |           1661.9
+        [4096, 4080, 4096]    |           1664.2        |           1658.3
+        [4096, 4096, 4096]    |           1639.4        |           1651.0
+        [4096, 4104, 4096]    |           1677.4        |           1674.9
+        [4096, 4128, 4096]    |           1655.7        |           1646.0
+        [4096, 4144, 4096]    |           1796.8        |           2519.6
+(times in microseconds).
+
+If full precision reductions are needed, users can disable reduced precision reductions in fp16 GEMMs with:
+
+.. code:: python
+
+  torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+
+To toggle the reduced precision reduction flags in C++, you can do
+
+.. code:: C++
+
+  at::globalContext().setAllowFP16ReductionCuBLAS(false);
+
 Asynchronous execution
 ----------------------
 
