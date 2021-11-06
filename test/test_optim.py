@@ -793,7 +793,7 @@ class TestOptim(TestCase):
             self.assertIn('a parameter group with duplicate parameters', str(w[0].message))
 
     def test_no_grad_for_all_params(self):
-        param = torch.randn(5, 5, requires_grad=False)
+        params = [torch.randn(5, 5, requires_grad=False) for _ in range(2)]
 
         optimizer_list = [
             optim.Adadelta,
@@ -807,7 +807,7 @@ class TestOptim(TestCase):
             optim.ASGD,
         ]
         for optim_ctr in optimizer_list:
-            opt = optim_ctr([param, param], lr=0.1)
+            opt = optim_ctr(params, lr=0.1)
             # make sure step can still run even if
             # all params have no grad
             opt.step()
@@ -1039,7 +1039,8 @@ class TestLRScheduler(TestCase):
 
         for _ in range(10):
             scheduler.optimizer.step()
-            scheduler.step(2)
+            with warnings.catch_warnings(record=True) as w:
+                scheduler.step(2)
             l.append(self.opt.param_groups[0]['lr'])
         self.assertEqual(min(l), max(l))
 
@@ -2099,7 +2100,8 @@ class TestLRScheduler(TestCase):
         optimizers = {scheduler.optimizer for scheduler in schedulers}
         for epoch in range(epochs):
             [optimizer.step() for optimizer in optimizers]
-            [scheduler.step(epoch) for scheduler in schedulers]  # step before assert: skip initial lr
+            with warnings.catch_warnings(record=True) as w:
+                [scheduler.step(epoch) for scheduler in schedulers]  # step before assert: skip initial lr
             for param_group, target in zip(self.opt.param_groups, targets):
                 self.assertEqual(target[epoch], param_group['lr'],
                                  msg='LR is wrong in epoch {}: expected {}, got {}'.format(
@@ -2149,7 +2151,8 @@ class TestLRScheduler(TestCase):
         targets = []
         for epoch in range(epochs):
             closed_form_scheduler.optimizer.step()
-            closed_form_scheduler.step(epoch)
+            with warnings.catch_warnings(record=True) as w:
+                closed_form_scheduler.step(epoch)
             targets.append([group['lr'] for group in self.opt.param_groups])
         self.setUp()
         for epoch in range(epochs):
