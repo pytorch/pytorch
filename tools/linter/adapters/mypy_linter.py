@@ -35,6 +35,7 @@ class LintMessage(NamedTuple):
     original: Optional[str]
     replacement: Optional[str]
     description: Optional[str]
+    bypassChangedLineFiltering: Optional[bool]
 
 
 def as_posix(name: str) -> str:
@@ -108,6 +109,7 @@ def check_file(
                 description=(
                     f"Failed due to {err.__class__.__name__}:\n{err}"
                 ),
+                bypassChangedLineFiltering=None,
             )
         ]
     stdout = str(proc.stdout, "utf-8").strip()
@@ -124,6 +126,7 @@ def check_file(
             severity=severities.get(match["severity"], LintSeverity.ERROR),
             original=None,
             replacement=None,
+            bypassChangedLineFiltering=None,
         )
         for match in RESULTS_RE.finditer(stdout)
     ]
