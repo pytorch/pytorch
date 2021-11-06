@@ -100,6 +100,7 @@ def lint_file(
                         stdout=err.stdout.decode("utf-8").strip() or "(empty)",
                     )
                 ),
+                bypassChangedLineFiltering=None,
             )
 
     return LintMessage(
@@ -112,6 +113,7 @@ def lint_file(
         original=original,
         replacement=replacement,
         description=error_description,
+        bypassChangedLineFiltering=None,
     )
 
 
