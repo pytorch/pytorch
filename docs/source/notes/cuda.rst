@@ -140,6 +140,7 @@ fp16 GEMMs are potentially done with reduced precision reductions (e.g., in fp16
 
 Some example benchmark data on V100
 .. code::
+
   [--------------------------- bench_gemm_transformer --------------------------]
         [  m ,  k  ,  n  ]    |  allow_fp16_reduc=True  |  allow_fp16_reduc=False
   1 threads: --------------------------------------------------------------------
