@@ -125,6 +125,7 @@ command = [
 [[linter]]
 code = 'CLANGTIDY'
 include_patterns = [
+    '**/*.cpp',
     'torch/csrc/fx/**/*.cpp',
     'torch/csrc/utils/**/*.cpp',
     'torch/csrc/generic/**/*.cpp',
@@ -193,7 +194,6 @@ command = [
     '--config-yml=.circleci/config.yml',
     '--regen-script=generate_config_yml.py',
 ]
-bypass_matched_file_filter = true
 
 [[linter]]
 code = 'NATIVEFUNCTIONS'
@@ -209,7 +209,6 @@ init_command = [
     '--dry-run={{DRYRUN}}',
     'ruamel.yaml==0.17.4',
 ]
-bypass_matched_file_filter = true
 
 [[linter]]
 code = 'NEWLINE'
