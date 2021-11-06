@@ -77,7 +77,7 @@ change):
 
 ```
 AutoQuantizationState(
-  (seen_ops): {
+  (seen_op_infos): {
     0: (type): <built-in method add of type object at 0x112a7fe50>
        (input_tensor_infos): [
          QTensorInfo(id=0, inf_dtype=torch.float32),
