@@ -29,6 +29,10 @@ import torch.nn.functional as F
 import torch.testing._internal.common_utils as common
 from test_c10d_common import gpus_for_rank, DoubleGpuNet, ConvNet, ModuleForDdpCommHook
 from torch import nn
+from torch.distributed.optim import functional_optim_map
+from torch.distributed.optim.functional_adam import _FunctionalAdam
+from torch.distributed.optim.functional_adamw import _FunctionalAdamW
+from torch.distributed.optim.functional_sgd import _FunctionalSGD
 from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
@@ -50,11 +54,6 @@ from torch.testing._internal.common_utils import (
     sandcastle_skip_if,
 )
 from torch.utils.checkpoint import checkpoint
-from torch.distributed.optim import functional_optim_map
-
-from torch.distributed.optim.functional_sgd import _FunctionalSGD
-from torch.distributed.optim.functional_adam import _FunctionalAdam
-from torch.distributed.optim.functional_adamw import _FunctionalAdamW
 
 if TEST_WITH_DEV_DBG_ASAN:
     print(
@@ -66,7 +65,9 @@ if TEST_WITH_DEV_DBG_ASAN:
 BFLOAT16_AVAILABLE = (
     torch.cuda.is_available()
     and torch.version.cuda is not None
-    and int(torch.version.cuda.split('.')[0]) >= 11)
+    and int(torch.version.cuda.split(".")[0]) >= 11
+)
+
 
 class RendezvousEnvTest(TestCase):
     @retry_on_connect_failures
@@ -78,7 +79,7 @@ class RendezvousEnvTest(TestCase):
         vars = {
             "WORLD_SIZE": "1",
             "RANK": "0",
-            "MASTER_ADDR": "127.0.0.1",
+            "MASTER_ADDR": "localhost",
             "MASTER_PORT": str(common.find_free_port()),
         }
 
@@ -297,7 +298,7 @@ class ProcessGroupNCCLTest(TestCase):
 
         # Avg (only available for NCCL 2.10+)
         if torch.cuda.nccl.version() >= (2, 10, 0):
-            tensors = [torch.tensor([i + 1.]).cuda(i) for i in range(self.num_gpus)]
+            tensors = [torch.tensor([i + 1.0]).cuda(i) for i in range(self.num_gpus)]
 
             allreduce(tensors, c10d.ReduceOp.AVG)
 
@@ -305,7 +306,7 @@ class ProcessGroupNCCLTest(TestCase):
                 # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
                 ndev = float(self.num_gpus)
                 self.assertEqualIgnoreType(
-                    torch.tensor([ndev * (ndev + 1.) / (2. * ndev)]),
+                    torch.tensor([ndev * (ndev + 1.0) / (2.0 * ndev)]),
                     tensors[i],
                 )
 
@@ -663,7 +664,9 @@ class DistributedDataParallelTest(
         # constructor. Look into reducing this test's runtime.
         store = c10d.FileStore(self.file_name, self.world_size)
         # provide sufficient timeout to initialize NCCL comm.
-        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size, timeout=timedelta(seconds=15))
+        pg = c10d.ProcessGroupNCCL(
+            store, self.rank, self.world_size, timeout=timedelta(seconds=15)
+        )
         pg_gloo = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
         pg.barrier().wait(timedelta(seconds=5))
         # Simulate stuckness in rank 0.
@@ -1695,7 +1698,7 @@ class DistributedDataParallelTest(
         functional_optim_cls,
         *functional_optim_args,
         gradient_as_bucket_view=False,
-        **functional_optim_kwargs
+        **functional_optim_kwargs,
     ):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
@@ -1831,7 +1834,7 @@ class DistributedDataParallelTest(
             sgd_lr,
             momentum=sgd_momentum,
             weight_decay=sgd_weight_decay,
-            gradient_as_bucket_view=True
+            gradient_as_bucket_view=True,
         )
 
     @requires_nccl()
@@ -1845,7 +1848,7 @@ class DistributedDataParallelTest(
             adamw_lr,
             betas=adamw_betas,
             eps=adamw_eps,
-            gradient_as_bucket_view=True
+            gradient_as_bucket_view=True,
         )
 
     @requires_nccl()
@@ -1859,7 +1862,7 @@ class DistributedDataParallelTest(
             adam_lr,
             betas=adam_betas,
             eps=adam_eps,
-            gradient_as_bucket_view=True
+            gradient_as_bucket_view=True,
         )
 
     @requires_nccl()
@@ -1873,7 +1876,7 @@ class DistributedDataParallelTest(
             adam_lr,
             betas=adam_betas,
             eps=adam_eps,
-            gradient_as_bucket_view=True
+            gradient_as_bucket_view=True,
         )
 
     @requires_nccl()
@@ -2350,7 +2353,9 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         if self.rank == 0:
             with self.assertRaisesRegex(RuntimeError, self.blocking_wait_error_msg):
                 # This should timeout
-                process_group.barrier().wait(timeout=timedelta(seconds=self.op_timeout_sec))
+                process_group.barrier().wait(
+                    timeout=timedelta(seconds=self.op_timeout_sec)
+                )
 
     def _run_invalid_nccl_blocking_wait_env(self, val):
         os.environ["NCCL_BLOCKING_WAIT"] = val
@@ -2390,13 +2395,17 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         process_group = c10d.ProcessGroupNCCL(
             store, self.rank, self.world_size, timeout=timedelta(seconds=10)
         )
-        process_group.allreduce(torch.rand(10).cuda(self.rank)).wait(timeout=timedelta(seconds=5))
+        process_group.allreduce(torch.rand(10).cuda(self.rank)).wait(
+            timeout=timedelta(seconds=5)
+        )
 
         if self.rank == 0:
             # This should timeout in about 1 second.
             # Watchdog may abort timed out work resulting in NCCL error instead of operation timed out.
             with self.assertRaisesRegex(RuntimeError, self.blocking_wait_error_msg):
-                process_group.allreduce(torch.rand(10).cuda(self.rank)).wait(timeout=timedelta(seconds=1))
+                process_group.allreduce(torch.rand(10).cuda(self.rank)).wait(
+                    timeout=timedelta(seconds=1)
+                )
         else:
             # Sleep to ensure timeout.
             time.sleep(10)
@@ -2549,9 +2558,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         os.environ["ENABLE_NCCL_HEALTH_CHECK"] = "1"
         store = c10d.FileStore(self.file_name, self.world_size)
         if self.rank == 0:
-            with self.assertRaisesRegex(
-                RuntimeError, "Health check failure"
-            ):
+            with self.assertRaisesRegex(RuntimeError, "Health check failure"):
                 c10d.init_process_group(
                     backend="nccl",
                     rank=self.rank,
@@ -2574,9 +2581,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         )
 
         if self.rank == 0:
-            with self.assertRaisesRegex(
-                RuntimeError, "Health check failure"
-            ):
+            with self.assertRaisesRegex(RuntimeError, "Health check failure"):
                 c10d.new_group([0, 1], timeout=timedelta(seconds=1))
 
             with self.assertRaisesRegex(
@@ -2598,9 +2603,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         )
 
         if self.rank == 1:
-            with self.assertRaisesRegex(
-                RuntimeError, "Health check failure"
-            ):
+            with self.assertRaisesRegex(RuntimeError, "Health check failure"):
                 c10d.new_group([0, 1], timeout=timedelta(seconds=1))
 
             with self.assertRaisesRegex(

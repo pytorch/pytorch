@@ -18,10 +18,7 @@ if not dist.is_available():
 
 import torch.testing._internal.common_utils as common
 from torch._six import string_classes
-from torch.testing._internal.common_distributed import (
-    skip_if_win32,
-    create_tcp_store
-)
+from torch.testing._internal.common_distributed import skip_if_win32, create_tcp_store
 from torch.testing._internal.common_utils import (
     TestCase,
     load_tests,
@@ -56,7 +53,7 @@ def gpus_for_rank(world_size):
     gpus_for_rank = []
     for rank in range(world_size):
         gpus_for_rank.append(
-            visible_devices[rank * gpus_per_process: (rank + 1) * gpus_per_process]
+            visible_devices[rank * gpus_per_process : (rank + 1) * gpus_per_process]
         )
     return gpus_for_rank
 
@@ -89,7 +86,9 @@ class StoreTestBase(object):
         self._test_set_get(self._create_store())
 
     def _test_compare_set(self, store):
-        missing_key_result = store.compare_set("cs_key0", "wrong_old_value", "new_value0")
+        missing_key_result = store.compare_set(
+            "cs_key0", "wrong_old_value", "new_value0"
+        )
         self.assertEqual(b"wrong_old_value", missing_key_result)
 
         store.set("cs_key0", "value0")
@@ -246,11 +245,17 @@ class TCPStoreTest(TestCase, StoreTestBase):
         self._test_numkeys_delkeys(self._create_store())
 
     def _create_client(self, index, addr, port, world_size):
-        client_store = dist.TCPStore(addr, port, world_size, timeout=timedelta(seconds=10))
+        client_store = dist.TCPStore(
+            addr, port, world_size, timeout=timedelta(seconds=10)
+        )
         self.assertEqual("value".encode(), client_store.get("key"))
         client_store.set(f"new_key{index}", f"new_value{index}")
-        self.assertEqual(f"next_value{index}".encode(),
-                         client_store.compare_set(f"new_key{index}", f"new_value{index}", f"next_value{index}"))
+        self.assertEqual(
+            f"next_value{index}".encode(),
+            client_store.compare_set(
+                f"new_key{index}", f"new_value{index}", f"next_value{index}"
+            ),
+        )
 
     def _multi_worker_helper(self, world_size):
         addr = DEFAULT_HOSTNAME
@@ -266,6 +271,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
 
     def test_multi_worker_with_nonfixed_world_size(self):
         self._multi_worker_helper(-1)
+
 
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
     def setUp(self):
@@ -334,7 +340,7 @@ class RendezvousEnvTest(TestCase):
     @retry_on_connect_failures
     def test_nominal(self):
         os.environ["WORLD_SIZE"] = "1"
-        os.environ["MASTER_ADDR"] = "127.0.0.1"
+        os.environ["MASTER_ADDR"] = DEFAULT_HOSTNAME
         os.environ["MASTER_PORT"] = str(common.find_free_port())
 
         # Single rank

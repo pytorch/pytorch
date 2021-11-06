@@ -181,7 +181,7 @@ class RendezvousEnvTest(TestCase):
     @retry_on_connect_failures
     def test_logging_init(self):
         os.environ["WORLD_SIZE"] = "1"
-        os.environ["MASTER_ADDR"] = "127.0.0.1"
+        os.environ["MASTER_ADDR"] = "localhost"
         os.environ["MASTER_PORT"] = str(common.find_free_port())
         os.environ["RANK"] = "0"
 
@@ -559,7 +559,9 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             opts = c10d.AllreduceCoalescedOptions()
             pg.allreduce_coalesced([], opts)
 
-        with self.assertRaisesRegex(RuntimeError, "tensors must all have the same type"):
+        with self.assertRaisesRegex(
+            RuntimeError, "tensors must all have the same type"
+        ):
             opts = c10d.AllreduceCoalescedOptions()
             pg.allreduce_coalesced([t1, t2], opts)
 
@@ -676,7 +678,9 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
         # Sparse allreduce only works with c10d.ReduceOp.SUM.
         for op in [c10d.ReduceOp.PRODUCT, c10d.ReduceOp.MIN, c10d.ReduceOp.MAX]:
-            with self.assertRaisesRegex(RuntimeError, "unsupported reduction operation"):
+            with self.assertRaisesRegex(
+                RuntimeError, "unsupported reduction operation"
+            ):
                 opts = c10d.AllreduceOptions()
                 opts.reduceOp = op
                 pg.allreduce([t3], opts)
@@ -744,12 +748,16 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             opts.rootRank = 0
             pg.scatter([t1, t1], [], opts)
 
-        with self.assertRaisesRegex(RuntimeError, "requires a single-element input list"):
+        with self.assertRaisesRegex(
+            RuntimeError, "requires a single-element input list"
+        ):
             opts = c10d.ScatterOptions()
             opts.rootRank = self.rank
             pg.scatter([t1], [], opts)
 
-        with self.assertRaisesRegex(RuntimeError, "requires a single-element input list"):
+        with self.assertRaisesRegex(
+            RuntimeError, "requires a single-element input list"
+        ):
             opts = c10d.ScatterOptions()
             opts.rootRank = self.rank
             pg.scatter([t1], [[t1] * self.world_size, [t1] * self.world_size], opts)
@@ -1054,7 +1062,9 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         t2 = torch.zeros([1], dtype=torch.float64)
         t3 = torch.zeros([2], dtype=torch.float32)
 
-        with self.assertRaisesRegex(RuntimeError, "requires non-empty input tensor list"):
+        with self.assertRaisesRegex(
+            RuntimeError, "requires non-empty input tensor list"
+        ):
             pg.allgather([], [])
 
         with self.assertRaisesRegex(
@@ -1208,11 +1218,19 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         )
 
         xxs = [2 * [torch.tensor([i + self.rank])] for i in range(2)]
-        yys = [[[torch.zeros_like(x) for x in xx] for _ in range(self.world_size)] for xx in xxs]
-        futs = [c10d.all_gather_coalesced(yy, xx, async_op=True) for xx, yy in zip(xxs, yys)]
+        yys = [
+            [[torch.zeros_like(x) for x in xx] for _ in range(self.world_size)]
+            for xx in xxs
+        ]
+        futs = [
+            c10d.all_gather_coalesced(yy, xx, async_op=True) for xx, yy in zip(xxs, yys)
+        ]
 
         # expected outputs
-        zzs = [[2 * [torch.tensor([i + r])] for r in range(self.world_size)] for i in range(2)]
+        zzs = [
+            [2 * [torch.tensor([i + r])] for r in range(self.world_size)]
+            for i in range(2)
+        ]
 
         torch.futures.wait_all(futs)
         for yy, zz in zip(yys, zzs):
@@ -1988,7 +2006,9 @@ class DistributedDataParallelTest(
             ModuleForDdpCommHook(), process_group=process_group
         )
 
-        expected_err = "Communication hook: return annotation should be torch.futures.Future"
+        expected_err = (
+            "Communication hook: return annotation should be torch.futures.Future"
+        )
         with self.assertRaisesRegex(
             ValueError,
             expected_err,
@@ -2104,7 +2124,9 @@ class ReducerTest(TestCase):
         model = ReducerModule()
         parameters = list(model.parameters())
         buckets = [list(range(len(parameters)))]
-        dist.Reducer(parameters, buckets, [dist._DEFAULT_FIRST_BUCKET_BYTES], self.process_group)
+        dist.Reducer(
+            parameters, buckets, [dist._DEFAULT_FIRST_BUCKET_BYTES], self.process_group
+        )
 
     def _create_mixed_precision_model(self):
         model = ReducerModule()
@@ -2125,7 +2147,7 @@ class ReducerTest(TestCase):
                 parameters,
                 buckets,
                 [dist._DEFAULT_FIRST_BUCKET_BYTES],
-                self.process_group
+                self.process_group,
             )
 
     @requires_gloo()
@@ -2140,7 +2162,7 @@ class ReducerTest(TestCase):
             parameters,
             buckets,
             [dist._DEFAULT_FIRST_BUCKET_BYTES for _ in buckets],
-            self.process_group
+            self.process_group,
         )
 
     def _create_reducer_for_models(self, models, find_unused_parameters=False):

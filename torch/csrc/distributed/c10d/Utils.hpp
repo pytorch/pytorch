@@ -50,7 +50,8 @@ TORCH_API std::string parse_env(const char* env_var_name);
 TORCH_API DistributedDebugLevel parseDistDebugLevel();
 
 // Retrieve tensor shapes from a given tensor.
-TORCH_API std::vector<at::Tensor> getTensorShapes(const std::vector<at::Tensor>& tensors);
+TORCH_API std::vector<at::Tensor> getTensorShapes(
+    const std::vector<at::Tensor>& tensors);
 
 // Turns at::IntArrayRef into "(1, 2, 3, 4)".
 inline std::string toString(at::IntArrayRef l) {
@@ -92,7 +93,8 @@ inline bool parseEnvVarFlag(const char* envVarName) {
     try {
       val = std::stoi(stringValue);
     } catch (std::exception& e) {
-      TORCH_CHECK(false,
+      TORCH_CHECK(
+          false,
           "Invalid value for environment variable: " + std::string(envVarName));
     }
     if (val == 1) {
@@ -100,7 +102,8 @@ inline bool parseEnvVarFlag(const char* envVarName) {
     } else if (val == 0) {
       return false;
     } else {
-      TORCH_CHECK(false,
+      TORCH_CHECK(
+          false,
           "Invalid value for environment variable: " + std::string(envVarName));
     }
   }
@@ -448,7 +451,7 @@ size_t computeLengthsAndOffsets(
     equal_splits = true;
     split_size = tensor.size(0) / group_size;
   }
-  for(const auto i : c10::irange(group_size)) {
+  for (const auto i : c10::irange(group_size)) {
     size_t length = row_size * (equal_splits ? split_size : split_sizes[i]);
     TORCH_INTERNAL_ASSERT(
         length <= std::numeric_limits<int>::max() &&
@@ -468,7 +471,7 @@ size_t computeLengthsAndOffsets(
     std::vector<T>* offsets) {
   size_t group_size = lengths->size();
   size_t offset = 0;
-  for(const auto i : c10::irange(group_size)) {
+  for (const auto i : c10::irange(group_size)) {
     size_t length = tensors[i].numel();
     TORCH_INTERNAL_ASSERT(
         length <= std::numeric_limits<int>::max() &&
@@ -504,7 +507,7 @@ using SizeType = uint64_t;
         continue;                                                         \
       } else if (                                                         \
           errno_local == WSAETIMEDOUT || errno_local == WSAEWOULDBLOCK) { \
-        TORCH_CHECK(false, "Socket Timeout");                       \
+        TORCH_CHECK(false, "Socket Timeout");                             \
       } else {                                                            \
         throw std::system_error(errno_local, std::system_category());     \
       }                                                                   \
@@ -521,7 +524,7 @@ using SizeType = uint64_t;
       if (errno == EINTR) {                                     \
         continue;                                               \
       } else if (errno == EAGAIN || errno == EWOULDBLOCK) {     \
-        TORCH_CHECK(false, "Socket Timeout");             \
+        TORCH_CHECK(false, "Socket Timeout");                   \
       } else {                                                  \
         throw std::system_error(errno, std::system_category()); \
       }                                                         \

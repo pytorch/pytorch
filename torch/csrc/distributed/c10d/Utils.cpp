@@ -1,3 +1,4 @@
+#include <sys/socket.h>
 #ifdef _WIN32
 #include <c10d/WinSockUtils.hpp>
 #else
@@ -103,6 +104,17 @@ namespace {
 
 constexpr int LISTEN_QUEUE_SIZE = 2048;
 
+// IPv6-only calls can fail in various different ways depending on the OS and
+// the compiler. Try to be exhaustive
+constexpr bool _is_addr_not_suported(int err) {
+  return err == EAI_FAMILY ||
+#ifdef _WIN32
+      err == WSAEINVAL || err == WSAHOST_NOT_FOUND;
+#else
+      err == EAI_ADDRFAMILY || err == EAI_NONAME;
+#endif
+}
+
 void setSocketNoDelay(int socket) {
   int flag = 1;
   socklen_t optlen = sizeof(flag);
@@ -122,7 +134,7 @@ PortType getSocketPort(int fd) {
         reinterpret_cast<struct ::sockaddr_in*>(&addrStorage);
     listenPort = ntohs(addr->sin_port);
 
-  } else if (addrStorage.ss_family == AF_INET6) { // AF_INET6
+  } else if (addrStorage.ss_family == AF_INET6) {
     struct ::sockaddr_in6* addr =
         reinterpret_cast<struct ::sockaddr_in6*>(&addrStorage);
     listenPort = ntohs(addr->sin6_port);
@@ -160,13 +172,18 @@ std::pair<int, PortType> listen(PortType port) {
   struct ::addrinfo hints, *res = NULL;
   std::memset(&hints, 0x00, sizeof(hints));
   hints.ai_flags = AI_PASSIVE | AI_ADDRCONFIG;
-  hints.ai_family = AF_SELECTED; // IPv4 on Windows, IPv4/6 on Linux
+  hints.ai_family = AF_INET6; // default to IPv6
   hints.ai_socktype = SOCK_STREAM; // TCP
 
   // `getaddrinfo` will sort addresses according to RFC 3484 and can be tweeked
-  //  by editing `/etc/gai.conf`. so there is no need to manual sorting
+  // by editing `/etc/gai.conf`. so there is no need to manual sorting
   // or protocol preference.
   int err = ::getaddrinfo(nullptr, std::to_string(port).data(), &hints, &res);
+  if (_is_addr_not_suported(err)) {
+    // IPv6 is disabled or invalid for this host, fallback to IPv4
+    hints.ai_family = AF_INET;
+    err = ::getaddrinfo(nullptr, std::to_string(port).data(), &hints, &res);
+  }
   if (err != 0 || !res) {
     throw std::invalid_argument(
         "cannot find host to listen on: " + std::string(gai_strerror(err)));
@@ -179,18 +196,26 @@ std::pair<int, PortType> listen(PortType port) {
   int socket;
   while (true) {
     try {
+      C10_LOG_FIRST_N(INFO, 10)
+          << "Trying to listen on " << sockaddrToString(nextAddr->ai_addr);
       SYSCHECK_ERR_RETURN_NEG1(
           socket = ::socket(
               nextAddr->ai_family,
               nextAddr->ai_socktype,
               nextAddr->ai_protocol))
       SYSCHECK_ERR_RETURN_NEG1(tcputil::setSocketAddrReUse(socket))
+      if (nextAddr->ai_family == AF_INET6) {
+        SYSCHECK_ERR_RETURN_NEG1(tcputil::setSocketDualStack(socket))
+      }
       SYSCHECK_ERR_RETURN_NEG1(
           ::bind(socket, nextAddr->ai_addr, nextAddr->ai_addrlen))
       SYSCHECK_ERR_RETURN_NEG1(::listen(socket, LISTEN_QUEUE_SIZE))
       break;
 
     } catch (const std::system_error& e) {
+      C10_LOG_FIRST_N(INFO, 10)
+          << "Failed to listen on " << sockaddrToString(nextAddr->ai_addr);
+
       tcputil::closeSocket(socket);
       nextAddr = nextAddr->ai_next;
 
@@ -215,6 +240,9 @@ void handleConnectException(
     std::chrono::time_point<std::chrono::high_resolution_clock> start,
     std::shared_ptr<struct ::addrinfo> addresses,
     std::chrono::milliseconds timeout) {
+  C10_LOG_FIRST_N(INFO, 10)
+      << "Failed to connect to " << sockaddrToString((*nextAddr)->ai_addr);
+
   // ECONNREFUSED happens if the server is not yet listening.
   if (error_code == ECONNREFUSED) {
     *anyRefused = true;
@@ -278,18 +306,43 @@ int connect(
     PortType port,
     bool wait,
     const std::chrono::milliseconds& timeout) {
-  struct ::addrinfo hints, *res = NULL;
+  struct ::addrinfo hints {};
+  struct ::addrinfo *ipv4res = nullptr, *res = nullptr;
   std::memset(&hints, 0x00, sizeof(hints));
   hints.ai_flags = AI_NUMERICSERV; // specifies that port (service) is numeric
-  hints.ai_family = AF_SELECTED; // IPv4 on Windows, IPv4/6 on Linux
+  hints.ai_family = AF_INET6; // default to IPv6
   hints.ai_socktype = SOCK_STREAM; // TCP
 
   // `getaddrinfo` will sort addresses according to RFC 3484 and can be tweeked
   // by editing `/etc/gai.conf`. so there is no need to manual sorting
   // or protcol preference.
-  int err =
+  int ipv6err =
       ::getaddrinfo(address.data(), std::to_string(port).data(), &hints, &res);
-  if (err != 0 || !res) {
+  // Append all the IPv4 addresses, we loop over them anyway
+  hints.ai_family = AF_INET;
+  int ipv4err = ::getaddrinfo(
+      address.data(), std::to_string(port).data(), &hints, &ipv4res);
+  if (res) {
+    // We got both IPv6 results, append the IPv4 ones
+    struct ::addrinfo* nres = res;
+    for (; nres->ai_next != nullptr; nres = nres->ai_next) {
+    }
+    nres->ai_next = ipv4res;
+  } else {
+    // No IPv6 result
+    res = ipv4res;
+  }
+  // This is really hard to read, but basically:
+  // 1. If we have an IPv4 error that's not not-supported
+  // 2. OR if we have an IPv6 error that's not not-supported
+  // 3. OR we didn't get any result
+  // then throw: we had some kind of error
+  if ((ipv4err != 0 && !_is_addr_not_suported(ipv4err)) ||
+      (ipv6err != 0 && !_is_addr_not_suported(ipv6err)) || !res) {
+    int err = ipv4err;
+    if (err == 0 || _is_addr_not_suported(ipv4err)) {
+      err = ipv6err;
+    }
     throw std::invalid_argument(
         "host not found: " + std::string(gai_strerror(err)));
   }
