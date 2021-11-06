@@ -31,6 +31,10 @@ torch::lazy::hash_t ScalarHash(const at::Scalar& s) {
                              : torch::lazy::Hash(s.toLong());
 }
 
+std::ostream& operator<<(std::ostream& ostrm, at::Scalar s) {
+  return ostrm << (s.isFloatingPoint() ? s.toDouble() : s.toLong());
+}
+
 }  // namespace ops
 }  // namespace ir
 }  // namespace torch_lazy_tensors
