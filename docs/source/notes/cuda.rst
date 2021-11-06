@@ -131,7 +131,7 @@ For more information about TF32, see:
 .. _CUDA 11: https://devblogs.nvidia.com/cuda-11-features-revealed/
 .. _Ampere architecture: https://devblogs.nvidia.com/nvidia-ampere-architecture-in-depth/
 
-.. _FP16ReducedPrecision:
+.. _fp16reducedprecision:
 
 Reduced Precision Reduction in FP16 GEMMs
 -----------------------------------------
