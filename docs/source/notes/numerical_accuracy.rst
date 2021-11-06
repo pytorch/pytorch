@@ -72,4 +72,3 @@ If reduced-precision reductions are problematic, they can be turned off with
 ``torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False``
 
 For more information see :ref:`allow_fp16_reduced_precision_reduction<_FP16ReducedPrecision>`
-
