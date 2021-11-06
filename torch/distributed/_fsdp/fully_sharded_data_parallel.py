@@ -139,7 +139,7 @@ class FullyShardedDataParallel(nn.Module):
             module, param_list=params
         )
         del module  # free original module in case it helps garbage collection
-        if self._fsdp_wrapped_module.flat_param is not None:
+        if hasattr(self._fsdp_wrapped_module, "flat_param"):
             self.params = [self._fsdp_wrapped_module.flat_param]
         else:
             self.params = []

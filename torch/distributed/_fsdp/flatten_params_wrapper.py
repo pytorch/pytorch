@@ -44,7 +44,6 @@ class FlattenParamsWrapper(nn.Module):
     def __init__(self, module: nn.Module, param_list: List[nn.Parameter]):
         super().__init__()
         self._fpw_module = module
-        self.flat_param = None
 
         if len(param_list) == 0:
             return
@@ -61,19 +60,6 @@ class FlattenParamsWrapper(nn.Module):
                 if p in unique_param_list:
                     self.param_set.add((m, n))
 
-        params = self._init_flatten_params()
-        self.flat_param = nn.Parameter(
-            torch.cat(
-                [
-                    p.detach().reshape(-1)
-                    if isinstance(p, nn.Parameter)
-                    else p.reshape(-1)
-                    for p in params
-                ],
-                0,
-            ),
-            requires_grad=params[0].requires_grad,
-        )
         self._flatten_params()
 
     @property
@@ -127,10 +113,20 @@ class FlattenParamsWrapper(nn.Module):
         attributes with views to the flat param.
         """
         # register the flatten one
-        assert self.flat_param is not None, (
-            "Can not flatten params when flat_param is None"
+        params = self._init_flatten_params()
+        flat_param = nn.Parameter(
+            torch.cat(
+                [
+                    p.detach().reshape(-1)
+                    if isinstance(p, nn.Parameter)
+                    else p.reshape(-1)
+                    for p in params
+                ],
+                0,
+            ),
+            requires_grad=params[0].requires_grad,
         )
-        self.register_parameter("flat_param", self.flat_param)
+        self.register_parameter("flat_param", flat_param)
 
         # deregister the names as parameters
         for _, m, n in self._param_infos:
@@ -145,8 +141,8 @@ class FlattenParamsWrapper(nn.Module):
         """Unlike ``_unflatten_params``, this function unflatten into views and keep
         self.flat_param unchanged.
         """
-        assert self.flat_param is not None, (
-            "Can not unflatten params as views when flat_param is None."
+        assert hasattr(self, "flat_param"), (
+            "Can not unflatten params as views when flat_param is not registered."
         )
         ps = self._get_param_views()
         for (_, m, n), p in zip(self._param_infos, ps):
@@ -159,8 +155,8 @@ class FlattenParamsWrapper(nn.Module):
         """Undo flattening and create separate parameters from the already flattened
         self.flat_param.
         """
-        assert self.flat_param is not None, (
-            "Can not unflatten params when flat_param is None."
+        assert hasattr(self, "flat_param"), (
+            "Can not unflatten params when flat_param is not registered."
         )
         ps = self._get_param_views()
         for (_, m, n), p in zip(self._param_infos, ps):
@@ -178,7 +174,13 @@ class FlattenParamsWrapper(nn.Module):
         self, external_data: Optional[Tensor] = None
     ) -> Iterator[Tensor]:
         """Return a generator of views that map to the original parameters."""
-        data = external_data if external_data is not None else self.flat_param
+        if external_data is not None:
+            data = external_data
+        else:
+            assert hasattr(self, "flat_param"), (
+                "Can not get param views when flat_param is not registered."
+            )
+            data = self.flat_param
         # Data should not be sharded when getting param views
         if data.numel() != sum(self._param_numels):  # type: ignore[union-attr]
             raise ValueError(
@@ -206,6 +208,6 @@ class FlattenParamsWrapper(nn.Module):
         return self.module.__getitem__(key)
 
     def forward(self, *inputs: Any, **kwinputs: Any) -> Any:
-        if self.flat_param is not None:
+        if hasattr(self, "flat_param"):
             self._unflatten_params_as_views()
         return self.module(*inputs, **kwinputs)
