@@ -59,7 +59,6 @@ from .utils import (
     assert_and_get_unique_device,
     node_bool_tensor_arg_indexes,
     get_new_attr_name_with_prefix,
-    NON_QUANTIZABLE_WEIGHT_OPS,
     WEIGHT_INDEX_DICT,
     BIAS_INDEX_DICT,
 )
@@ -77,11 +76,8 @@ from ..utils import (
     get_combined_dict,
     get_qconfig_dtypes,
     get_swapped_custom_module_class,
-    weight_is_quantized,
     activation_is_statically_quantized,
     activation_is_int8_quantized,
-    activation_dtype,
-    weight_dtype,
 )
 
 from .backend_config_dict.utils import (
@@ -124,7 +120,7 @@ def node_arg_is_bias(node: Node, arg: Any) -> bool:
 def is_input_arg_dtype_supported_by_backend(
     arg: Argument,
     node: Node,
-    node_name_to_target_dtype: Dict[str, Any],
+    node_name_to_target_dtype: Dict[str, Dict[str, Any]],
     dtype_config: Dict[str, torch.dtype],
 ) -> bool:
     """ Check if the configured qconfig for the argument
@@ -562,7 +558,7 @@ def maybe_insert_input_equalization_observers_for_node(
     modules: Dict[str, torch.nn.Module],
     graph: Graph,
     node_name_to_current_dtype: Dict[str, Any],
-    node_name_to_target_dtype: Dict[str, Any],
+    node_name_to_target_dtype: Dict[str, Dict[str, Any]],
     is_branch: bool,
 ) -> None:
     """
@@ -612,7 +608,7 @@ def maybe_insert_output_observer_for_node(
     graph: Graph,
     matches: Dict[str, MatchResult],
     node_name_to_current_dtype: Dict[str, Any],
-    node_name_to_target_dtype: Dict[str, Any],
+    node_name_to_target_dtype: Dict[str, Dict[str, Any]],
     matched_pattern: Any,
     qhandler: Optional[QuantizeHandler],
 ) -> Optional[Node]:
@@ -769,7 +765,7 @@ def maybe_insert_observers_before_graph_output(
 def maybe_propagate_dtype_for_node(
     node: Node,
     target_dtype: torch.dtype,
-        node_name_to_target_dtype: Dict[str, Dict[str, Any]],
+    node_name_to_target_dtype: Dict[str, Dict[str, Any]],
     matches: Dict[str, MatchResult],
 ) -> None:
     """
