@@ -26,8 +26,8 @@
 #define DLPACK_DLL
 #endif
 
-#include <stdint.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -160,15 +160,15 @@ typedef struct DLManagedTensor {
   /*! \brief the context of the original host framework of DLManagedTensor in
    *   which DLManagedTensor is used in the framework. It can also be NULL.
    */
-  void * manager_ctx;
+  void* manager_ctx;
   /*! \brief Destructor signature void (*)(void*) - this should be called
    *   to destruct manager_ctx which holds the DLManagedTensor. It can be NULL
    *   if there is no way for the caller to provide a reasonable destructor.
    *   The destructors deletes the argument self as well.
    */
-  void (*deleter)(struct DLManagedTensor * self);
+  void (*deleter)(struct DLManagedTensor* self);
 } DLManagedTensor;
 #ifdef __cplusplus
-}  // DLPACK_EXTERN_C
+} // DLPACK_EXTERN_C
 #endif
-#endif  // DLPACK_DLPACK_H_
+#endif // DLPACK_DLPACK_H_
