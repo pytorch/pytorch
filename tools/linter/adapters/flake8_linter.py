@@ -35,7 +35,6 @@ class LintMessage(NamedTuple):
     original: Optional[str]
     replacement: Optional[str]
     description: Optional[str]
-    bypassChangedLineFiltering: Optional[bool]
 
 
 def as_posix(name: str) -> str:
@@ -286,7 +285,6 @@ def check_file(
                         stdout=err.stdout.strip() or "(empty)",
                     )
                 ),
-                bypassChangedLineFiltering=None,
             )
         ]
 
@@ -306,7 +304,6 @@ def check_file(
             severity=severities.get(match["code"]) or get_issue_severity(match["code"]),
             original=None,
             replacement=None,
-            bypassChangedLineFiltering=None,
         )
         for match in RESULTS_RE.finditer(proc.stdout)
     ]
