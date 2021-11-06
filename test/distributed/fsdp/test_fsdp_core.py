@@ -1,16 +1,20 @@
 # Owner(s): ["oncall: distributed"]
 
 import functools
+import pickle
 import sys
 from unittest import mock
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+from torch.distributed._fsdp import FullyShardedDataParallel
+from torch.distributed._fsdp.fully_sharded_data_parallel import CPUOffload
 from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_fsdp import (
+    DummyProcessGroup,
     DummyDDP,
     FSDPInitMode,
     FSDPTest,
@@ -25,8 +29,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
 )
-
-from torch.distributed._fsdp.fully_sharded_data_parallel import CPUOffload
 
 
 if not dist.is_available():
@@ -48,10 +50,7 @@ class TestParityWithDDP(FSDPTest):
     """
 
     def _get_init_modes_for_test(self, cpu_offload):
-        modes = [
-            FSDPInitMode.CUDA_AFTER,
-            FSDPInitMode.CUDA_BEFORE
-        ]
+        modes = [FSDPInitMode.CUDA_AFTER, FSDPInitMode.CUDA_BEFORE]
         # Note that FSDPInitMode.CUDA_NEVER works currently only with CPU
         # offload as we explicitly bring the param back to CUDA device. In
         # general, it will not work since we try to all_gather p.data which is
@@ -64,7 +63,7 @@ class TestParityWithDDP(FSDPTest):
     @skip_if_lt_x_gpu(2)
     @parametrize(
         "cpu_offload",
-        [CPUOffload(offload_params=True), CPUOffload(offload_params=False)]
+        [CPUOffload(offload_params=True), CPUOffload(offload_params=False)],
     )
     def test_nested_wrapped_model(self, cpu_offload):
         init_modes = self._get_init_modes_for_test(cpu_offload)
@@ -73,13 +72,13 @@ class TestParityWithDDP(FSDPTest):
                 self._test_identical_outputs(
                     NestedWrappedModule,
                     fsdp_init_mode=fsdp_init_mode,
-                    cpu_offload=cpu_offload
+                    cpu_offload=cpu_offload,
                 )
 
     @skip_if_lt_x_gpu(2)
     @parametrize(
         "cpu_offload",
-        [CPUOffload(offload_params=True), CPUOffload(offload_params=False)]
+        [CPUOffload(offload_params=True), CPUOffload(offload_params=False)],
     )
     def test_nested_all_wrapped_model(self, cpu_offload):
         init_modes = self._get_init_modes_for_test(cpu_offload)
@@ -87,15 +86,13 @@ class TestParityWithDDP(FSDPTest):
             with self.subTest(fsdp_init_mode=fsdp_init_mode):
                 model_fn = functools.partial(NestedWrappedModule, wrap_everything=True)
                 self._test_identical_outputs(
-                    model_fn,
-                    fsdp_init_mode=fsdp_init_mode,
-                    cpu_offload=cpu_offload
+                    model_fn, fsdp_init_mode=fsdp_init_mode, cpu_offload=cpu_offload
                 )
 
     @skip_if_lt_x_gpu(2)
     @parametrize(
         "cpu_offload",
-        [CPUOffload(offload_params=True), CPUOffload(offload_params=False)]
+        [CPUOffload(offload_params=True), CPUOffload(offload_params=False)],
     )
     def test_transformer_parameterized(self, cpu_offload):
         init_modes = self._get_init_modes_for_test(cpu_offload)
@@ -104,13 +101,13 @@ class TestParityWithDDP(FSDPTest):
                 self._test_identical_outputs(
                     TransformerWithSharedParams,
                     fsdp_init_mode=fsdp_init_mode,
-                    cpu_offload=cpu_offload
+                    cpu_offload=cpu_offload,
                 )
 
     @skip_if_lt_x_gpu(2)
     @parametrize(
         "cpu_offload",
-        [CPUOffload(offload_params=True), CPUOffload(offload_params=False)]
+        [CPUOffload(offload_params=True), CPUOffload(offload_params=False)],
     )
     def test_delayed_optim_step(self, cpu_offload):
         # We use a model with a long CUDA delay right before the optimizer step.
@@ -123,15 +120,13 @@ class TestParityWithDDP(FSDPTest):
                     NestedWrappedModuleWithDelay, delay_after_loss_ms=250
                 )
                 self._test_identical_outputs(
-                    model_fn,
-                    fsdp_init_mode=fsdp_init_mode,
-                    cpu_offload=cpu_offload
+                    model_fn, fsdp_init_mode=fsdp_init_mode, cpu_offload=cpu_offload
                 )
 
     @skip_if_lt_x_gpu(2)
     @parametrize(
         "cpu_offload",
-        [CPUOffload(offload_params=True), CPUOffload(offload_params=False)]
+        [CPUOffload(offload_params=True), CPUOffload(offload_params=False)],
     )
     def test_delayed_reduce_scatter(self, cpu_offload):
         # We insert a delay in the torch.distributed._reduce_scatter_base op, so that
@@ -145,9 +140,7 @@ class TestParityWithDDP(FSDPTest):
                     NestedWrappedModuleWithDelay, delay_before_reduction_ms=250
                 )
                 self._test_identical_outputs(
-                    model_fn,
-                    fsdp_init_mode=fsdp_init_mode,
-                    cpu_offload=cpu_offload
+                    model_fn, fsdp_init_mode=fsdp_init_mode, cpu_offload=cpu_offload
                 )
 
     def _dummy_ddp_fn(self, model):
@@ -156,7 +149,7 @@ class TestParityWithDDP(FSDPTest):
     @skip_if_lt_x_gpu(2)
     @parametrize(
         "cpu_offload",
-        [CPUOffload(offload_params=True), CPUOffload(offload_params=False)]
+        [CPUOffload(offload_params=True), CPUOffload(offload_params=False)],
     )
     def test_mixture_of_experts(self, cpu_offload):
         init_modes = self._get_init_modes_for_test(cpu_offload)
@@ -174,7 +167,7 @@ class TestParityWithDDP(FSDPTest):
     @skip_if_lt_x_gpu(2)
     @parametrize(
         "cpu_offload",
-        [CPUOffload(offload_params=True), CPUOffload(offload_params=False)]
+        [CPUOffload(offload_params=True), CPUOffload(offload_params=False)],
     )
     def test_mixture_of_experts_with_delay_before_free(self, cpu_offload):
         init_modes = self._get_init_modes_for_test(cpu_offload)
@@ -211,6 +204,79 @@ class TestParamInit(FSDPTest):
             new_output,
             msg="new_output did not reflect change to param after init",
         )
+
+
+class TestSerialization(FSDPTest):
+    def _get_init_modes_for_test(self, cpu_offload):
+        # cpu offload does not support FSDPInitMode.CUDA_AFTER
+        if cpu_offload.offload_params:
+            return [FSDPInitMode.CUDA_NEVER, FSDPInitMode.CUDA_BEFORE]
+        # model should be placed on CUDA when cpu_offload is not enabled
+        else:
+            return [FSDPInitMode.CUDA_AFTER, FSDPInitMode.CUDA_BEFORE]
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize(
+        "cpu_offload",
+        [CPUOffload(offload_params=True), CPUOffload(offload_params=False)],
+    )
+    def test_pickle(self, cpu_offload):
+        """
+        Ensure that wrapped modules can be pickled/unpickled.
+        """
+        init_modes = self._get_init_modes_for_test(cpu_offload)
+        for fsdp_init_mode in init_modes:
+            with self.subTest(fsdp_init_mode=fsdp_init_mode):
+                group = dist.distributed_c10d._get_default_group()
+                model = self._get_model(group, fsdp_init_mode, cpu_offload)
+                model = pickle.loads(pickle.dumps(model))
+                self._one_step(model, group)
+
+    # Can not use parametrize to instatiate tests for test_multiprocessing,
+    # it throws error ''TestSerialization' object has no attribute 'test_multiprocessing''
+    @skip_if_lt_x_gpu(2)
+    def test_multiprocessing(self):
+        self._test_multiprocessing(cpu_offload=CPUOffload(offload_params=False))
+
+    @skip_if_lt_x_gpu(2)
+    def test_multiprocessing_cpu_offload(self):
+        self._test_multiprocessing(cpu_offload=CPUOffload(offload_params=True))
+
+    def _test_multiprocessing(self, cpu_offload):
+        """
+        Ensure that wrapped modules can be sent via multiprocessing.
+        """
+        mp = torch.multiprocessing.Pool(1)
+        group = dist.distributed_c10d._get_default_group()
+        dummy_group = DummyProcessGroup(rank=group.rank(), size=group.size())
+        # it seems multiprocessing shared memory allows CPU model only
+        model = mp.apply(
+            self._get_model, (dummy_group, FSDPInitMode.CUDA_NEVER, cpu_offload)
+        )
+        if not cpu_offload.offload_params:
+            model.cuda()
+        self._one_step(model, group)
+
+    def _get_model(self, group, fsdp_init_mode, cpu_offload):
+        with torch.no_grad():
+            model = NestedWrappedModule(
+                group,
+                wrap_fsdp=True,
+                fsdp_init_mode=fsdp_init_mode,
+                cpu_offload=cpu_offload,
+            )
+            model = FullyShardedDataParallel(model, group, cpu_offload=cpu_offload)
+            if fsdp_init_mode == FSDPInitMode.CUDA_AFTER:
+                model = model.cuda()
+            return model
+
+    def _one_step(self, model, group):
+        optim = torch.optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
+        input = model.module.get_input(torch.device("cuda"))
+        output = model(*input)
+        loss = model.module.get_loss(input, output)
+        model.module.run_backward(loss)
+        optim.step()
 
 
 class TestHooks(FSDPTest):
@@ -285,6 +351,8 @@ class TestNoGrad(FSDPTest):
 
 instantiate_parametrized_tests(TestHooks)
 instantiate_parametrized_tests(TestParityWithDDP)
+instantiate_parametrized_tests(TestSerialization)
+
 
 if __name__ == "__main__":
     run_tests()

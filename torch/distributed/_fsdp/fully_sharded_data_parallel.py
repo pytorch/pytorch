@@ -1,3 +1,4 @@
+import copy
 import functools
 import traceback
 from dataclasses import dataclass
@@ -29,7 +30,6 @@ from .utils import (
 
 if TYPE_CHECKING:
     from collections import OrderedDict  # noqa: F401
-
 
 
 @dataclass
@@ -100,7 +100,7 @@ class FullyShardedDataParallel(nn.Module):
         self,
         module: nn.Module,
         process_group: Optional[ProcessGroup] = None,
-        cpu_offload: Optional[CPUOffload] = None
+        cpu_offload: Optional[CPUOffload] = None,
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
@@ -248,22 +248,12 @@ class FullyShardedDataParallel(nn.Module):
                 self.numel_padded_per_param.append(0)
                 continue
 
-            # Save the original storage and free it later on.
-            # Since we're modifying the tensor's storage directly,
-            # make sure the tensor is the sole occupant of the storage.
-            assert (
-                p.storage_offset() == 0
-            ), "The tensor is not the sole occupant of the storage."
-            orig_storage = p.storage()
-
-            # Replace p with the relevant shard.
-            local_shard, num_padded = self._get_shard(p)
-            p.set_(local_shard)  # type: ignore[call-overload]
+            # Replace p.data with the relevant shard.
+            orig_data = p.data
+            p.data, num_padded = self._get_shard(p)
             self.numel_padded_per_param.append(num_padded)
+            _free_storage(orig_data)
 
-            # Free storage that contains the original full data.
-            if orig_storage.size() > 0:
-                orig_storage.resize_(0)  # type: ignore[attr-defined]
         assert len(self.numel_padded_per_param) == len(
             self.params
         ), "numel_padded_per_param is not populated correctly."
@@ -304,6 +294,41 @@ class FullyShardedDataParallel(nn.Module):
     def __getitem__(self, key: int) -> Any:
         """Forward indexing calls in case the module is a nn.Sequential."""
         return self.module.__getitem__(key)  # type: ignore[operator]
+
+    def __getstate__(self) -> Dict[str, Any]:
+        """Serialize the state of the current FullyShardedDataParallel instance.
+        Some properties are not serializable (e.g., process groups, streams), so
+        we remove them and try to reconstruct them in :func:`__setstate__`.
+        """
+        state = copy.copy(self.__dict__)
+        state["is_sharded"] = [p._is_sharded for p in self.params]
+        state["orig_sizes"] = [p._orig_size for p in self.params]
+        if state["process_group"] is not None:
+            state["process_group"] = "MISSING"  # process_group isn't pickleable
+        self._reset_lazy_init()
+        return state
+
+    def __setstate__(self, state: Dict[str, Any]) -> None:
+        """Intercept state setting and perform needed changes on params."""
+        super().__setstate__(state)
+
+        def fixup(p: Parameter, is_sharded: bool, size: torch.Size) -> Parameter:
+            assert isinstance(p, Parameter)
+            p.data = p.data.clone()  # move tensors out of shared memory
+            p._is_sharded = is_sharded
+            p._orig_size = size
+            return p
+
+        self.params = [
+            fixup(p, is_sharded, size)
+            for p, is_sharded, size in zip(
+                self.params, self.is_sharded, self.orig_sizes
+            )
+        ]
+        del self.is_sharded
+        del self.orig_sizes
+        self.process_group = _get_default_group()
+        self._reset_lazy_init()
 
     def _reset_lazy_init(self) -> None:
         """
@@ -382,16 +407,20 @@ class FullyShardedDataParallel(nn.Module):
             # If CPU offloading, p._local_shard should have been placed on CPU
             # during its first lazy construction.
             if self.cpu_offload.offload_params:
-                assert (
-                    p._local_shard.device == torch.device("cpu")  # type: ignore[attr-defined]
-                ), "Expected p._local_shard to be on CPU."  # type: ignore[attr-defined]
+                assert p._local_shard.device == torch.device(
+                    "cpu"
+                ), (  # type: ignore[attr-defined]
+                    "Expected p._local_shard to be on CPU."
+                )  # type: ignore[attr-defined]
             return
 
         # A single shard of the parameters. Also makes p._local_shard to be on
         # CPU if we are CPU offloading, since p.data would be on CPU during
         # init.
         if self.cpu_offload.offload_params:
-            assert p.device == torch.device("cpu"), "Expected param to be on CPU when cpu_offloading is enabled."
+            assert p.device == torch.device(
+                "cpu"
+            ), "Expected param to be on CPU when cpu_offloading is enabled."
         p._local_shard = p.data  # type: ignore[attr-defined]
         # If CPU offloading, pin the memory to enable faster CPU -> GPU device
         # transfer.
@@ -403,8 +432,7 @@ class FullyShardedDataParallel(nn.Module):
             # CPU grad shard in pinned memory so that we can do a non-blocking
             # transfer.
             p._cpu_grad = torch.zeros_like(  # type: ignore[attr-defined]
-                p,
-                device=torch.device("cpu")
+                p, device=torch.device("cpu")
             ).pin_memory()
 
         # We also maintain a full-sized parameter of type self.compute_dtype.
@@ -875,15 +903,17 @@ class FullyShardedDataParallel(nn.Module):
     @torch.no_grad()
     def _use_param_local_shard(self, params: Optional[List[Parameter]] = None) -> None:
         """Use local shard for a list of params. Also implicitly offloads
-           parameters back to CPU if we are CPU offloading."""
+        parameters back to CPU if we are CPU offloading."""
         if params is None:
             params = self.params
         for p in params:
             if self.cpu_offload.offload_params:
                 # Ensure local_shard resides in CPU if we are offloading params.
-                assert (
-                    p._local_shard.device == torch.device("cpu")  # type: ignore[attr-defined]
-                ), "Expected p._local_shard to be on CPU"  # type: ignore[attr-defined]
+                assert p._local_shard.device == torch.device(
+                    "cpu"
+                ), (  # type: ignore[attr-defined]
+                    "Expected p._local_shard to be on CPU"
+                )  # type: ignore[attr-defined]
             p.data = p._local_shard  # type: ignore[attr-defined]
 
     def _assert_state(self, state: Union[TrainingState_, List[TrainingState_]]) -> None:
@@ -920,6 +950,7 @@ def _get_default_cuda_device(module: nn.Module) -> torch.device:
     # Fall back to current CUDA device
     return torch.device("cuda")
 
+
 def _get_data_type(module: nn.Module) -> torch.dtype:
     """Try to infer data type from module parameters."""
     try:
@@ -931,6 +962,7 @@ def _get_data_type(module: nn.Module) -> torch.dtype:
         pass
     # Fall back to torch.float32
     return torch.float32
+
 
 def _free_storage(data: torch.Tensor) -> None:
     """Free underlying storage of a Tensor."""
