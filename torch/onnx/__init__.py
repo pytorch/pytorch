@@ -7,10 +7,6 @@ PYTORCH_ONNX_CAFFE2_BUNDLE = _C._onnx.PYTORCH_ONNX_CAFFE2_BUNDLE
 
 ONNX_ARCHIVE_MODEL_PROTO_NAME = "__MODEL_PROTO"
 
-# TODO: Update these variables when there
-# is a new ir_version and producer_version
-# and use these values in the exporter
-ir_version = _C._onnx.IR_VERSION
 producer_name = "pytorch"
 producer_version = _C._onnx.PRODUCER_VERSION
 constant_folding_opset_versions = [9, 10, 11, 12, 13, 14]
@@ -292,14 +288,14 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
 
         use_external_data_format (bool, default False): Deprecated and ignored. Will be removed in
             next Pytorch release.
-        export_modules_as_functions (bool or set of str, type or nn.Module, default False): Flag to enable
+        export_modules_as_functions (bool or set of type of nn.Module, default False): Flag to enable
             exporting all ``nn.Module`` forward calls as local functions in ONNX. Or a set to indicate the
             particular modules to export as local functions in ONNX.
 
             * ``False``(default): export ``nn.Module`` forward calls as fine grained nodes.
             * ``True``: export all ``nn.Module`` forward calls as local function nodes.
-            * Set of str, type or nn.Module: export ``nn.Module`` forward calls as local function nodes,
-              only if the name, type or obj of the ``nn.Module`` is found in the set.
+            * Set of type of nn.Module: export ``nn.Module`` forward calls as local function nodes,
+              only if the type of the ``nn.Module`` is found in the set.
 
     Raises:
       CheckerError: If the ONNX checker detects an invalid ONNX graph. Will still export the

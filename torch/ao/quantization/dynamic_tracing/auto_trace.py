@@ -35,7 +35,7 @@ def add_auto_observation(
 ) -> torch.nn.Module:
     def convert_to_interception_proxy(x):
         if isinstance(x, torch.Tensor):
-            return x.as_subclass(QuantizationInterceptionProxy)  # type: ignore[arg-type]
+            return x.as_subclass(QuantizationPrepareTensorProxy)  # type: ignore[arg-type]
         else:
             return x
 
@@ -53,7 +53,7 @@ def add_auto_observation(
     # logging.
     global_op_idx = [0]
 
-    class QuantizationInterceptionProxy(torch.Tensor):
+    class QuantizationPrepareTensorProxy(torch.Tensor):
         """
         An override of `torch.Tensor` to enable dynamic tracing for
         quantization.
@@ -110,13 +110,13 @@ def add_auto_observation(
             if output is NotImplemented:
                 with torch._C.DisableTorchFunction():
                     output = func(*args, **kwargs).as_subclass(
-                        QuantizationInterceptionProxy)
+                        QuantizationPrepareTensorProxy)
                 assert output is not NotImplemented
 
             return output
 
         def __repr__(self):
-            return f'QuantizationInterceptionProxy({super().__repr__()})'
+            return f'QuantizationPrepareTensorProxy({super().__repr__()})'
 
         # TODO(future PR): add other math overrides
 
@@ -287,7 +287,7 @@ def add_auto_observation(
 def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
     def convert_to_dispatch_proxy(x):
         if isinstance(x, torch.Tensor):
-            return x.as_subclass(QuantizationDispatchProxy)  # type: ignore[arg-type]
+            return x.as_subclass(QuantizationConvertTensorProxy)  # type: ignore[arg-type]
         else:
             return x
 
@@ -296,7 +296,7 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
     # logging.
     global_op_idx = [0]
 
-    class QuantizationDispatchProxy(torch.Tensor):
+    class QuantizationConvertTensorProxy(torch.Tensor):
         """
         An override of `torch.Tensor` to enable dynamic dispatch for
         quantization inference.
@@ -371,7 +371,7 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
             if output is NotImplemented:
                 with torch._C.DisableTorchFunction():
                     output = func(*args, **kwargs).as_subclass(
-                        QuantizationDispatchProxy)
+                        QuantizationConvertTensorProxy)
                 assert output is not NotImplemented
 
             if enable_logging:
@@ -383,7 +383,7 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
             return output
 
         def __repr__(self):
-            return f'QuantizationDispatchProxy({super().__repr__()})'
+            return f'QuantizationConvertTensorProxy({super().__repr__()})'
 
     cur_module = None
     module_stack : List[torch.nn.Module] = []
@@ -398,7 +398,7 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
 
         `cur_module` keeps track of the current module in the stack.
 
-        Tensor arguments are converted to `QuantizationDispatchProxy`.
+        Tensor arguments are converted to `QuantizationConvertTensorProxy`.
 
         We override the `__call__` function to do the following for each
         module:
@@ -488,7 +488,7 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                             for arg in args:
                                 if isinstance(arg, torch.Tensor) and arg.is_quantized:
                                     dequant = arg.dequantize().as_subclass(
-                                        QuantizationDispatchProxy)  # type: ignore[arg-type]
+                                        QuantizationConvertTensorProxy)  # type: ignore[arg-type]
                                     new_args.append(dequant)
                                 else:
                                     new_args.append(arg)
@@ -535,7 +535,7 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                     output = qstate.outputs_convert_hook(output)
 
                 def unwrap_proxy(a):
-                    if isinstance(a, QuantizationDispatchProxy):
+                    if isinstance(a, QuantizationConvertTensorProxy):
                         a.__class__ = torch.Tensor  # type: ignore[assignment]
                     return a
                 output = map_aggregate(output, unwrap_proxy)
