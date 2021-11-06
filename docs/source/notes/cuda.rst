@@ -147,6 +147,12 @@ Some example benchmark data on V100::
         [4096, 4104, 4096]    |           1677.4        |           1674.9
         [4096, 4128, 4096]    |           1655.7        |           1646.0
         [4096, 4144, 4096]    |           1796.8        |           2519.6
+        [4096, 5096, 4096]    |           2094.6        |           3190.0
+        [4096, 5104, 4096]    |           2144.0        |           2663.5
+        [4096, 5112, 4096]    |           2149.1        |           2766.9
+        [4096, 5120, 4096]    |           2142.8        |           2631.0
+        [4096, 9728, 4096]    |           3875.1        |           5779.8
+        [4096, 16384, 4096]   |           6182.9        |           9656.5
 (times in microseconds).
 
 If full precision reductions are needed, users can disable reduced precision reductions in fp16 GEMMs with:
