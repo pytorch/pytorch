@@ -5,6 +5,10 @@ namespace jit {
 
 TORCH_API void FuseInferenceOpsForSparseNN(
     std::shared_ptr<torch::jit::Graph>& graph);
+
+TORCH_API void EliminateTrivialEquallySplit(
+    std::shared_ptr<torch::jit::Graph>& graph);
+
 TORCH_API void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph);
 
 // If outputs_are_immutable is set to false, don't replace the view ops that

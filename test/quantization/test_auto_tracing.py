@@ -782,8 +782,12 @@ class TestAutoTracing(AutoTracingTestCase):
             fuse_modules=False)
 
     def test_embedding(self):
-        # test subclass
+        # Note: this test is just testing that models with embeddings
+        # do not crash with a global qconfig defined. Embedding quantization
+        # is not actually happening in this prototype yet.
+        # TODO(future PR): fix this and update this code.
 
+        # test subclass
         class EmbeddingSubclass(nn.Embedding):
             pass
 

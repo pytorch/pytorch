@@ -37,8 +37,8 @@ def _raise_obs_op_mismatch(func, prev_op):
 
 
 # TODO(future PR): figure out if there is a better option than namedtuple
-SeenOp = collections.namedtuple(
-    'SeenOp',
+SeenOpInfo = collections.namedtuple(
+    'SeenOpInfo',
     [
         # string
         'idx',
@@ -76,7 +76,7 @@ SeenOp = collections.namedtuple(
         'op_packing_only_uses_module_attributes',
     ],
 )
-def seen_op_repr(self) -> str:
+def seen_op_info_repr(self) -> str:
     s = f"(type): {self.type}\n"
     s += f"     (fqn): {self.fqn}\n"
     s += f"     (input_tensor_infos): {self.input_tensor_infos}\n"
@@ -89,7 +89,7 @@ def seen_op_repr(self) -> str:
         s += f"\n     (packable_tensor_kwarg_name_to_name): {self.packable_tensor_kwarg_name_to_name}"
     return s
 
-SeenOp.__repr__ = seen_op_repr  # type: ignore[assignment]
+SeenOpInfo.__repr__ = seen_op_info_repr  # type: ignore[assignment]
 
 QTensorInfo = collections.namedtuple(
     'QTensorInfo',
@@ -168,24 +168,24 @@ def pack_weights_for_functionals(
     if hasattr(module, '_auto_quant_state'):
         qstate = module._auto_quant_state
         # find any ops which need packing
-        for idx, seen_op in qstate.idx_to_seen_ops.items():  # type: ignore[union-attr, operator]
-            packable_args_len = len(seen_op.packable_tensor_idx_to_name) + \
-                len(seen_op.packable_nontensor_idx_to_arg)
+        for idx, seen_op_info in qstate.idx_to_seen_op_infos.items():  # type: ignore[union-attr, operator]
+            packable_args_len = len(seen_op_info.packable_tensor_idx_to_name) + \
+                len(seen_op_info.packable_nontensor_idx_to_arg)
             if packable_args_len == 0:
                 continue
 
-            if seen_op.type == F.conv2d:
+            if seen_op_info.type == F.conv2d:
                 # fetch all the info needed for packed params
-                weight = getattr(module, seen_op.packable_tensor_idx_to_name[1])
-                bias = getattr(module, seen_op.packable_tensor_idx_to_name[2])
-                stride = seen_op.packable_nontensor_idx_to_arg[3]
-                padding = seen_op.packable_nontensor_idx_to_arg[4]
-                dilation = seen_op.packable_nontensor_idx_to_arg[5]
-                groups = seen_op.packable_nontensor_idx_to_arg[6]
+                weight = getattr(module, seen_op_info.packable_tensor_idx_to_name[1])
+                bias = getattr(module, seen_op_info.packable_tensor_idx_to_name[2])
+                stride = seen_op_info.packable_nontensor_idx_to_arg[3]
+                padding = seen_op_info.packable_nontensor_idx_to_arg[4]
+                dilation = seen_op_info.packable_nontensor_idx_to_arg[5]
+                groups = seen_op_info.packable_nontensor_idx_to_arg[6]
 
                 # quantize the weight
                 # TODO: create weight observers from qconfig.weight
-                weight_tensor_id = seen_op.input_tensor_infos[1].id
+                weight_tensor_id = seen_op_info.input_tensor_infos[1].id
                 weight_obs = qstate.tensor_id_to_observer[str(weight_tensor_id)]  # type: ignore[union-attr, index]
                 assert isinstance(weight_obs, (ObserverBase, FakeQuantizeBase))
                 scale, zp = weight_obs.calculate_qparams()
@@ -206,14 +206,14 @@ def pack_weights_for_functionals(
                 qstate.idx_to_packed_weight_name[str(idx)] = name_candidate  # type: ignore[union-attr, operator, index, assignment]
                 # TODO: delete the original weights
 
-            elif seen_op.type == F.linear:
+            elif seen_op_info.type == F.linear:
                 # fetch all the info needed for packed params
-                weight = getattr(module, seen_op.packable_tensor_idx_to_name[1])
-                bias = getattr(module, seen_op.packable_tensor_kwarg_name_to_name['bias'])
+                weight = getattr(module, seen_op_info.packable_tensor_idx_to_name[1])
+                bias = getattr(module, seen_op_info.packable_tensor_kwarg_name_to_name['bias'])
 
                 # quantize the weight
                 # TODO: create weight observers from qconfig.weight
-                weight_tensor_id = seen_op.input_tensor_infos[1].id
+                weight_tensor_id = seen_op_info.input_tensor_infos[1].id
                 weight_obs = qstate.tensor_id_to_observer[str(weight_tensor_id)]  # type: ignore[union-attr, index]
                 assert isinstance(weight_obs, (ObserverBase, FakeQuantizeBase))
                 scale, zp = weight_obs.calculate_qparams()
@@ -282,12 +282,12 @@ def get_func_output_obs_type(
             return FuncOutputObsType.NONE
     return FuncOutputObsType.NEW_OBS
 
-def converted_func_needs_scale_zp(op: Callable, seen_op: SeenOp) -> bool:
+def converted_func_needs_scale_zp(op: Callable, seen_op_info: SeenOpInfo) -> bool:
     if isinstance(op, torch.nn.Module):
         return False
     if op in add_and_mul_ops:
         # check if both arguments are tensors
-        inputs = seen_op.input_tensor_infos
+        inputs = seen_op_info.input_tensor_infos
         both_args_tensors = len(inputs) == 2 and inputs[0] is not None and \
             inputs[1] is not None
         # disable quantization for torch.mul with int tensor arguments
@@ -295,12 +295,12 @@ def converted_func_needs_scale_zp(op: Callable, seen_op: SeenOp) -> bool:
             inputs[0].inf_dtype not in (torch.int32, torch.int64)
         return both_args_tensors and first_dtype_is_not_int
     elif op == torch.cat:
-        inputs = seen_op.input_tensor_infos
+        inputs = seen_op_info.input_tensor_infos
         first_dtype_is_not_int = len(inputs) > 0 and \
             inputs[0].inf_dtype not in (torch.int32, torch.int64)
         return first_dtype_is_not_int
     elif op in (F.conv2d, F.linear):
-        outputs = seen_op.output_tensor_infos
+        outputs = seen_op_info.output_tensor_infos
         is_int8 = outputs[0].inf_dtype == torch.quint8
         return is_int8
     # TODO: add more ops
@@ -370,16 +370,16 @@ def get_op_packing_only_uses_module_attributes(
 
 def get_quantized_op(
     op: Callable,
-    seen_op: SeenOp,
+    seen_op_info: SeenOpInfo,
 ) -> Callable:
-    if seen_op.output_tensor_infos[0].inf_dtype != torch.quint8:
+    if seen_op_info.output_tensor_infos[0].inf_dtype != torch.quint8:
         return op
 
     new_op = op
     if not isinstance(op, torch.nn.Module):
         if (
             (op in add_and_mul_ops or op == torch.cat) and
-            seen_op.input_tensor_infos[0].inf_dtype in (torch.int32, torch.int64)
+            seen_op_info.input_tensor_infos[0].inf_dtype in (torch.int32, torch.int64)
         ):
             # handle torch.mul with int tensor arguments
             pass
@@ -506,39 +506,39 @@ def iterate_and_apply(
         else:
             return args
 
-def get_producer_of_seen_op(
-    idx_to_seen_op: Dict[str, SeenOp],
-    cur_seen_op: SeenOp,
-) -> Optional[SeenOp]:
+def get_producer_of_seen_op_info(
+    idx_to_seen_op_info: Dict[str, SeenOpInfo],
+    cur_seen_op_info: SeenOpInfo,
+) -> Optional[SeenOpInfo]:
     """
-    Input: cur_seen_op, all seen ops
-    Output: the SeenOp which created the input to the current SeenOp
+    Input: cur_seen_op_info, all seen ops
+    Output: the SeenOpInfo which created the input to the current SeenOpInfo
     """
-    input_tensor_id = cur_seen_op.input_tensor_infos[0].id
-    for idx, seen_op in idx_to_seen_op.items():
-        for output_tensor_info in seen_op.output_tensor_infos:
+    input_tensor_id = cur_seen_op_info.input_tensor_infos[0].id
+    for idx, seen_op_info in idx_to_seen_op_info.items():
+        for output_tensor_info in seen_op_info.output_tensor_infos:
             if output_tensor_info is not None:
                 if input_tensor_id == output_tensor_info.id:
-                    return seen_op
+                    return seen_op_info
     return None
 
-def get_users_of_seen_op(
-    idx_to_seen_op: Dict[str, SeenOp],
-    cur_seen_op: SeenOp,
-) -> List[SeenOp]:
+def get_users_of_seen_op_info(
+    idx_to_seen_op_info: Dict[str, SeenOpInfo],
+    cur_seen_op_info: SeenOpInfo,
+) -> List[SeenOpInfo]:
     """
-    Input: cur_seen_op
-    Output: list of all seen_ops which use the output of the cur_seen_op,
+    Input: cur_seen_op_info
+    Output: list of all seen_op_infos which use the output of the cur_seen_op_info,
     """
-    if len(cur_seen_op.output_tensor_infos) != 1:
+    if len(cur_seen_op_info.output_tensor_infos) != 1:
         return []
-    output_tensor_id = cur_seen_op.output_tensor_infos[0].id
+    output_tensor_id = cur_seen_op_info.output_tensor_infos[0].id
     results = []
-    for idx, seen_op in idx_to_seen_op.items():
-        for input_tensor_info in seen_op.input_tensor_infos:
+    for idx, seen_op_info in idx_to_seen_op_info.items():
+        for input_tensor_info in seen_op_info.input_tensor_infos:
             if input_tensor_info is not None:
                 if output_tensor_id == input_tensor_info.id:
-                    results.append(seen_op)
+                    results.append(seen_op_info)
     return results
 
 class HookType(enum.Enum):
