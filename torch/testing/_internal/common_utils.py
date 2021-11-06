@@ -524,11 +524,13 @@ def repeat_test_for_types(dtypes):
     return repeat_helper
 
 
+
 def discover_test_cases_recursively(suite_or_case):
     if isinstance(suite_or_case, unittest.TestCase):
         return [suite_or_case]
     rc = []
     for element in suite_or_case:
+        print(element)
         rc.extend(discover_test_cases_recursively(element))
     return rc
 
@@ -573,21 +575,25 @@ def run_tests(argv=UNITTEST_ARGS):
         _print_test_names()
         return
 
-    # Before running the tests, lint to check that every test case extends from TestCase
+    # Before running the tests, lint to check that every test class extends from TestCase
     suite = unittest.TestLoader().loadTestsFromModule(__main__)
-    test_cases = discover_test_cases_recursively(suite)
     failed = False
-    for case in test_cases:
-        test_case_full_name = case.id().split('.', 1)[1]
-        if not isinstance(case, TestCase):
-            err = "This test case should extend from torch.testing._internal.common_utils.TestCase but it does not."
-            print(f"{test_case_full_name} - failed. {err}")
-            failed = True
+    for tc in suite:
+        test_case = tc
+        if isinstance(tc, unittest.TestSuite):
+            test_case = tc._tests[0] if len(tc._tests) > 0 else None
+        if test_case is not None:
+            test_class = test_case.id().split('.', 1)[1].split('.')[0]
+            if not isinstance(test_case, TestCase):
+                err = "This test class should extend from torch.testing._internal.common_utils.TestCase but it doesn't."
+                print(f"{test_class} - failed. {err}")
+                failed = True
     if failed:
         sys.exit(1)
 
     if TEST_IN_SUBPROCESS:
         failed_tests = []
+        test_cases = discover_test_cases_recursively(suite)
         for case in test_cases:
             test_case_full_name = case.id().split('.', 1)[1]
             exitcode = shell([sys.executable] + argv + [test_case_full_name])
@@ -597,6 +603,7 @@ def run_tests(argv=UNITTEST_ARGS):
         assert len(failed_tests) == 0, "{} unit test(s) failed:\n\t{}".format(
             len(failed_tests), '\n\t'.join(failed_tests))
     elif RUN_PARALLEL > 1:
+        test_cases = discover_test_cases_recursively(suite)
         test_batches = chunk_list(get_test_names(test_cases), RUN_PARALLEL)
         processes = []
         for i in range(RUN_PARALLEL):
