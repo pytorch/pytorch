@@ -436,11 +436,17 @@ void LazyGraphExecutor::MarkStep(const Device& device) {
   g_tls_data.Reset();
 }
 
-void LazyGraphExecutor::WaitDeviceOps() {
+void LazyGraphExecutor::WaitDeviceOps(c10::ArrayRef<Device> devices) {
   std::set<Device> wait_devices;
-  for (auto& device_str : compiler::getBackend()->GetLocalDevices()) {
-    // TODO: Remove the last use of Device(const std::string& device_spec).
-    wait_devices.insert(Device(device_str));
+  if (!devices.empty()) {
+    for (auto& device : devices) {
+      wait_devices.insert(device);
+    }
+  } else {
+    for (auto& device_str : compiler::getBackend()->GetLocalDevices()) {
+      // TODO: Remove the last use of Device(const std::string& device_spec).
+      wait_devices.insert(Device(device_str));
+    }
   }
   // The LockDevices() API returns a vector of
   // lazy_tensors::util::ExceptionCleanup object, which is going to be freed

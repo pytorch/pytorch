@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/ArrayRef.h>
 #include "lazy_tensor_core/csrc/ir_util.h"
 #include "lazy_tensor_core/csrc/lowering_context.h"
 #include "lazy_tensor_core/csrc/tensor.h"
@@ -64,8 +65,9 @@ class LazyGraphExecutor {
   // the computation boundaries.
   void MarkStep(const Device& device);
 
-  // Waits for all the outstanding operations on all local devices.
-  void WaitDeviceOps();
+  // Waits for all the outstanding operations on all the supplied devices.
+  // If devices is empty, the wait will happen for all local devices.
+  void WaitDeviceOps(c10::ArrayRef<Device> devices);
 
   // Retrieves the PyTorch CPU tensors behind the lazy tensors IR operations.
   // All the tensors must be on the same device.
