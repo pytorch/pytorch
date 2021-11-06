@@ -1025,6 +1025,7 @@ class IrParser {
           nullptr);
     }
 
+#if false // temporarily disable this for dropout changes
     {
       auto ptr_op = getOperatorForLiteral(
           "aten::native_dropout(Tensor input, float p, float scale, bool train) -> (Tensor, Tensor)");
@@ -1058,6 +1059,7 @@ class IrParser {
           nullptr,
           nullptr);
     }
+#endif
 
     {
       auto ptr_op = getOperatorForLiteral(
@@ -1092,6 +1094,7 @@ class IrParser {
           nullptr);
     }
 
+#if false // temporarily disable this for dropout changes
     {
       auto ptr_op = getOperatorForLiteral(
           "aten::native_dropout_backward(Tensor grad, Tensor mask, float scale) -> Tensor");
@@ -1119,6 +1122,7 @@ class IrParser {
           nullptr,
           nullptr);
     }
+#endif
 
     {
       std::array<const char*, kNumInstancenormFwd> InstanceNormFwd = {
@@ -2058,7 +2062,7 @@ class IrParser {
 
     {
       auto ptr_op = getOperatorForLiteral(
-          "aten::gelu_backward(Tensor grad_output, Tensor self) -> Tensor");
+          "aten::gelu_backward(Tensor grad, Tensor self) -> Tensor");
       REGISTER_PARSE_RULE(
           ptr_op,
           {
@@ -2557,6 +2561,7 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
     return true;
   }
 
+#if false // temporarily disable this for dropout changes
   static auto native_dropout_schema =
       getOperatorForLiteral(
           "aten::native_dropout(Tensor input, float p, float scale, bool train) -> (Tensor, Tensor)")
@@ -2572,6 +2577,7 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
     }
     return true;
   }
+#endif
 
   static auto amax_schema =
       getOperatorForLiteral(
@@ -2657,38 +2663,6 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
     switch (offset) {
       // argument 5: training;
       case 5:
-        profileBool(pr, node, offset);
-        break;
-      default:
-        return false;
-    }
-    return true;
-  }
-
-  static auto gelu_schema =
-      getOperatorForLiteral(
-          "aten::gelu(Tensor self, bool approximate) -> Tensor")
-          ->schema();
-  if (node->matches(gelu_schema)) {
-    switch (offset) {
-      // argument 1: approximate;
-      case 1:
-        profileBool(pr, node, offset);
-        break;
-      default:
-        return false;
-    }
-    return true;
-  }
-
-  static auto gelu_backward_schema =
-      getOperatorForLiteral(
-          "aten::gelu_backward(Tensor grad_output, Tensor self, bool approximate) -> Tensor")
-          ->schema();
-  if (node->matches(gelu_backward_schema)) {
-    switch (offset) {
-      // argument 2: approximate;
-      case 2:
         profileBool(pr, node, offset);
         break;
       default:
