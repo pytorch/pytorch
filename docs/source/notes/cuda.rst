@@ -131,6 +131,8 @@ For more information about TF32, see:
 .. _CUDA 11: https://devblogs.nvidia.com/cuda-11-features-revealed/
 .. _Ampere architecture: https://devblogs.nvidia.com/nvidia-ampere-architecture-in-depth/
 
+.. _FP16ReducedPrecision:
+
 Reduced Precision Reduction in FP16 GEMMs
 -----------------------------------------
 
@@ -153,6 +155,7 @@ Some example benchmark data on V100::
         [4096, 5120, 4096]    |           2142.8        |           2631.0
         [4096, 9728, 4096]    |           3875.1        |           5779.8
         [4096, 16384, 4096]   |           6182.9        |           9656.5
+
 (times in microseconds).
 
 If full precision reductions are needed, users can disable reduced precision reductions in fp16 GEMMs with:
