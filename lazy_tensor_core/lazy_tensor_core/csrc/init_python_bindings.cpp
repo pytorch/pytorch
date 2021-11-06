@@ -63,7 +63,7 @@ void PrepareToExit() {
   //TODO(whc) should we hook this interface up? It does nothing currently
   compiler::getBackend()->PrepareToExit();
   //TODO(whc) can I call this unconditionally?
-  LazyGraphExecutor::Get()->WaitDeviceOps();
+  LazyGraphExecutor::Get()->WaitDeviceOps({});
 }
 
 std::string GetTensorsDump(
@@ -621,10 +621,11 @@ void InitLtcModuleBindings(py::module m) {
       "_ltc_wait_device_ops",
       [](const std::vector<std::string>& devices) {
         NoGilSection nogil;
+        // TODO: Add support of non-empty devices.
         if (!devices.empty()) {
           LOG(ERROR) << "Non-empty devices are not supported.";
         }
-        LazyGraphExecutor::Get()->WaitDeviceOps();
+        LazyGraphExecutor::Get()->WaitDeviceOps({});
       },
       py::arg("devices"));
   m.def("_ltc_counter_names",
