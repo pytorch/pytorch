@@ -88,12 +88,13 @@ class FullyShardedDataParallel(nn.Module):
         process_group (Optional[ProcessGroup]):
             process group for sharding
         cpu_offload (Optional [CPUOffload]):
-            CPU offloading config. Currently, only parameter and grad CPU
+            CPU offloading config. Currently, only parameter and gradient CPU
             offload is supported. It can be enabled via passing in
-            cpu_offload=CPUOffload(offload_params=True). Note that this
+            ``cpu_offload=CPUOffload(offload_params=True)``. Note that this
             currently implicitly enables gradient offloading to CPU in order for
             params and grads to be on same device to work with optimizer. This
-            API is subject to change.
+            API is subject to change. Default is ``None`` in which case there
+            will be no offloading.
     """
 
     def __init__(
@@ -382,9 +383,12 @@ class FullyShardedDataParallel(nn.Module):
             # If CPU offloading, p._local_shard should have been placed on CPU
             # during its first lazy construction.
             if self.cpu_offload.offload_params:
-                assert (
-                    p._local_shard.device == torch.device("cpu")  # type: ignore[attr-defined]
-                ), "Expected p._local_shard to be on CPU."  # type: ignore[attr-defined]
+                assert p._local_shard.device == torch.device(  # type: ignore[attr-defined]
+                    "cpu"
+                ), (
+                    "Expected p._local_shard to be on CPU, "  # type: ignore[attr-defined]
+                    f"but it's on {p._local_shard.device}"  # type: ignore[attr-defined]
+                )
             return
 
         # A single shard of the parameters. Also makes p._local_shard to be on
@@ -732,9 +736,10 @@ class FullyShardedDataParallel(nn.Module):
         torch.cuda.current_stream().wait_stream(self._streams["post_backward"])
         if self.cpu_offload.offload_params:
             # We need to wait for the non-blocking GPU ->
-            # CPU grad transfers to finish. TODO investigate why this is needed
-            # and if we can remove it, as we've done transfer on post_backward
-            # stream and synchronized it above.
+            # CPU grad transfers to finish. We need to do this for GPU -> CPU
+            # copies because when grad is on CPU, it won't wait for any CUDA
+            # stream to finish GPU -> CPU copies unless we explicitly block the
+            # host-side with synchronize().
             torch.cuda.current_stream().synchronize()
 
         # A backward pass is done, clean up below.
