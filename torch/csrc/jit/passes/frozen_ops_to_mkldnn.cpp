@@ -322,9 +322,11 @@ Operation BroadOp(const Node* node) {
 
       auto exp_a = a;
       auto exp_b = b;
+      int stacked = 0;
       // mkldnn tensors only support reshape, not expand or view operators
       if (a_size.equals(out_size)) {
         push(stack, a);
+        ++stacked;
       } else if (out_numel == a.numel()) {
         exp_a = a.reshape(out_size);
       } else {
@@ -335,13 +337,17 @@ Operation BroadOp(const Node* node) {
 
       if (b_size.equals(out_size)) {
         push(stack, b);
+        ++stacked;
       } else if (out_numel == b.numel()) {
         exp_b = b.reshape(out_size);
       } else {
         exp_b = b.to_dense().expand(out_size).to_mkldnn();
       }
 
-      {
+      if (stacked < 2) {
+        if (stacked == 1) {
+          pop(stack);
+        }
         // If one of the inputs was expanded and converted to nchw/nhwc
         // we might end up in a very bad spot if the second argument
         // is in a blocked format. In this case, MKLDNN uses its

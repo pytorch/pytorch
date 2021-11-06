@@ -1,8 +1,11 @@
+# Owner(s): ["oncall: mobile"]
+
 import torch
 import torch.utils.bundled_inputs
 import io
 from typing import Dict, List
 import inspect
+from torch.testing import FileCheck
 
 from torch.jit.mobile import _load_for_lite_interpreter, _export_operator_list
 from torch.testing._internal.common_utils import TestCase, run_tests
@@ -218,7 +221,8 @@ class TestLiteScriptModule(TestCase):
         script_module = torch.jit.script(MyTestModule())
         with self.assertRaisesRegex(RuntimeError,
                                     r"Workaround: instead of using arbitrary class type \(class Foo\(\)\), "
-                                    r"define a pytorch class \(class Foo\(torch\.nn\.Module\)\)\.$"):
+                                    r"define a pytorch class \(class Foo\(torch\.nn\.Module\)\)\. "
+                                    r"The problematic type is: "):
             script_module._save_to_buffer_for_lite_interpreter()
 
     def test_unsupported_return_list_with_module_class(self):
@@ -419,6 +423,55 @@ class TestLiteScriptModule(TestCase):
         # occured w/o first changing
         # torch::jit::JITException to extend c10::Error.
         self.assertTrue('self.val and val are same' in error_message)
+
+    def test_stacktrace_interface_call(self):
+        @torch.jit.interface
+        class Forward(torch.nn.Module):
+            def forward(self, x) -> torch.Tensor:
+                pass
+
+            def forwardError(self, x) -> torch.Tensor:
+                pass
+
+        class B(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x
+
+            def forwardError(self, x):
+                return self.call() + x
+
+            def call(self):
+                return torch.ones(-1)
+
+        class A(torch.nn.Module):
+            b : Forward
+
+            def __init__(self):
+                super().__init__()
+                self.b = B()
+
+            def forward(self):
+                self.b.forward(torch.ones(1))
+                self.b.forwardError(torch.ones(1))
+
+        a = torch.jit.script(A())
+        torch._C._enable_mobile_interface_call_export()
+        buffer = io.BytesIO(a._save_to_buffer_for_lite_interpreter(_save_mobile_debug_info=True))
+        buffer.seek(0)
+        mobile_module = _load_for_lite_interpreter(buffer)
+        try:
+            mobile_module()
+            self.assertTrue(False)
+        except RuntimeError as exp:
+            FileCheck().check("Trying to create tensor with negative dimension") \
+                .check("Traceback of TorchScript") \
+                .check("self.b.forwardError").check_next("~~~~~~~~~~~~~~~~~~~ <--- HERE") \
+                .check("return self.call").check_next("~~~~~~~~~ <--- HERE") \
+                .check("return torch.ones").check_next("~~~~~~~~~~ <--- HERE").run(str(exp))
+
 
 
 class TestLiteScriptQuantizedModule(QuantizationLiteTestCase):

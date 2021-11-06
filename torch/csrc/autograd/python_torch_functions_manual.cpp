@@ -450,14 +450,15 @@ static PyObject * THPVariable_get_device(PyObject* self_, PyObject* args, PyObje
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
-}static PyObject * THPVariable_frombuffer(PyObject* self_, PyObject* args, PyObject* kwargs)
+}
+
+static PyObject * THPVariable_frombuffer(PyObject* self_, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
     "frombuffer(PyObject* buffer, *, ScalarType dtype, int64_t count=-1, int64_t offset=0, bool requires_grad=False)",
   }, /*traceable=*/false);
 
-  PyObject* ret = nullptr;
   ParsedArgs<5> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
 
@@ -468,76 +469,35 @@ static PyObject * THPVariable_get_device(PyObject* self_, PyObject* args, PyObje
     auto offset = r.toInt64(3);
     auto requires_grad = r.toBool(4);
 
-    auto elsize = at::elementSize(dtype);
-    size_t actual_count = 0;
-    Py_buffer view;
-
     TORCH_CHECK_VALUE(
         PyObject_CheckBuffer(buffer) != 0,
         "object does not implement Python buffer protocol.");
-
-    if (PyObject_GetBuffer(buffer, &view, PyBUF_WRITABLE) < 0) {
-      TORCH_CHECK(
-          PyObject_GetBuffer(buffer, &view, PyBUF_SIMPLE) >= 0,
-          "could not retrieve buffer from object");
-      TORCH_WARN_ONCE(
-          "The given buffer is not writable, and PyTorch does "
-          "not support non-writable tensors. This means you can write to the "
-          "underlying (supposedly non-writable) buffer using the tensor. "
-          "You may want to copy the buffer to protect its data or make it writable "
-          "before converting it to a tensor. This type of warning will be "
-          "suppressed for the rest of this program.");
-      PyErr_Clear();
-    }
-
-    Py_INCREF(view.obj);
-    THPObjectPtr obj(view.obj);
-
-    auto len = view.len;
-    auto buf = view.buf;
-    PyBuffer_Release(&view);
-
-    TORCH_CHECK_VALUE(
-        len > 0 && count != 0,
-        "both buffer length (", len, ") and count (", count, ") must not be 0");
-    TORCH_CHECK_VALUE(
-        offset >= 0 && offset < len,
-        "offset (", offset, " bytes) must be non-negative and no greater than "
-        "buffer length (", len, " bytes) minus 1");
-    TORCH_CHECK_VALUE(
-        count > 0 || (len - offset) % elsize == 0,
-        "buffer length (", len - offset, " bytes) after offset (", offset, " bytes) "
-        "must be a multiple of element size (", elsize, ")");
-
-    if (count < 0) {
-      actual_count = (len - offset) / elsize;
-    } else {
-      actual_count = static_cast<size_t>(count);
-    }
-
-    TORCH_CHECK_VALUE(
-        static_cast<size_t>(offset) + actual_count * elsize <= len,
-        "requested buffer length (", actual_count, " * ", elsize, " bytes) "
-        "after offset (", offset, " bytes) must not be greater than actual "
-        "buffer length (", len, " bytes)");
-
-    auto offset_buf = static_cast<char*>(buf) + offset;
-    auto options = TensorOptions()
-        .dtype(dtype)
-        .device(c10::kCPU);
-
-    auto tensor = at::for_blob(offset_buf, static_cast<int64_t>(actual_count))
-                      .options(options)
-                      .deleter([obj = obj.release()](void*) {
-                        pybind11::gil_scoped_acquire gil;
-                        Py_DECREF(obj);
-                      })
-                      .make_tensor();
-    tensor.set_requires_grad(requires_grad);
-    ret = wrap(tensor);
+    return wrap(torch::utils::tensor_frombuffer(
+        buffer, dtype, count, offset, requires_grad));
   }
 
-  return ret;
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable_asarray(PyObject* self_, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "asarray(PyObject* obj, *, ScalarType? dtype=None, Device? device=None, bool? copy=None, bool requires_grad=False)",
+  }, /*traceable=*/false);
+
+  ParsedArgs<5> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+
+  if (r.idx == 0) {
+    auto obj = r.pyobject(0);
+    auto dtype = r.scalartypeOptional(1);
+    auto device = r.deviceOptional(2);
+    auto copy = r.toBoolOptional(3);
+    auto requires_grad = r.toBool(4);
+    return wrap(torch::utils::asarray(obj, dtype, device, copy, requires_grad));
+  }
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -647,6 +607,8 @@ static PyObject * THPVariable_logspace(PyObject* self_, PyObject* args, PyObject
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 static PyMethodDef torch_functions_manual[] = {
   {"arange", castPyCFunctionWithKeywords(THPVariable_arange),
+    METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"asarray", castPyCFunctionWithKeywords(THPVariable_asarray),
     METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
   {"as_tensor", castPyCFunctionWithKeywords(THPVariable_as_tensor),
     METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},

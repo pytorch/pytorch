@@ -23,6 +23,10 @@ bool tensorEqual(const at::Tensor& lhs, const at::Tensor& rhs) {
   if (lhs.is_mkldnn() || rhs.is_mkldnn()) {
     return false;
   }
+  // If device is not equal, lhs.equal(rhs) would throw an error.
+  if (lhs.device() != rhs.device()) {
+    return false;
+  }
   return lhs.options().type_equal(rhs.options()) && lhs.equal(rhs);
 }
 
@@ -103,8 +107,8 @@ bool ivaluesEqual(const IValue& a1, const IValue& a2) {
     return attributesEqual(a1.toListRef(), a2.toListRef());
   }
   if (a1.isTuple()) {
-    at::ArrayRef<IValue> a1_elem = a1.toTuple()->elements();
-    at::ArrayRef<IValue> a2_elem = a2.toTuple()->elements();
+    at::ArrayRef<IValue> a1_elem = a1.toTupleRef().elements();
+    at::ArrayRef<IValue> a2_elem = a2.toTupleRef().elements();
     return attributesEqual(a1_elem, a2_elem);
   }
   if (a1.isGenericDict()) {

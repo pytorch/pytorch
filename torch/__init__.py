@@ -15,7 +15,6 @@ import platform
 import textwrap
 import ctypes
 import warnings
-from .autocast_mode import autocast
 if sys.version_info < (3,):
     raise Exception("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
 
@@ -366,7 +365,7 @@ def set_default_dtype(d):
     """
     _C._set_default_dtype(d)
 
-def use_deterministic_algorithms(mode):
+def use_deterministic_algorithms(mode, *, warn_only=False):
     r""" Sets whether PyTorch operations must use "deterministic"
     algorithms. That is, algorithms which, given the same input, and when
     run on the same software and hardware, always produce the same output.
@@ -467,6 +466,11 @@ def use_deterministic_algorithms(mode):
             operations switch to a deterministic algorithm or throw a runtime
             error. If False, allows nondeterministic operations.
 
+    Keyword args:
+        warn_only (:class:`bool`, optional): If True, operations that do not
+            have a deterministic implementation will throw a warning instead of
+            an error. Default: ``False``
+
     Example::
 
         >>> torch.use_deterministic_algorithms(True)
@@ -481,13 +485,20 @@ def use_deterministic_algorithms(mode):
         ...
         RuntimeError: index_add_cuda_ does not have a deterministic implementation...
     """
-    _C._set_deterministic_algorithms(mode)
+    _C._set_deterministic_algorithms(mode, warn_only=warn_only)
 
 def are_deterministic_algorithms_enabled():
     r"""Returns True if the global deterministic flag is turned on. Refer to
     :func:`torch.use_deterministic_algorithms` documentation for more details.
     """
     return _C._get_deterministic_algorithms()
+
+def is_deterministic_algorithms_warn_only_enabled():
+    r"""Returns True if the global deterministic flag is set to warn only.
+    Refer to :func:`torch.use_deterministic_algorithms` documentation for more
+    details.
+    """
+    return _C._get_deterministic_algorithms_warn_only()
 
 def set_warn_always(b):
     r"""When this flag is False (default) then some PyTorch warnings may only
@@ -642,6 +653,7 @@ def manager_path():
         raise RuntimeError("Unable to find torch_shm_manager at " + path)
     return path.encode('utf-8')
 
+from .autocast_mode import autocast
 
 # Shared memory manager needs to know the exact location of manager executable
 _C._initExtension(manager_path())
@@ -790,6 +802,11 @@ quantized_lstm = torch.ops.aten.quantized_lstm
 quantized_gru = torch.ops.aten.quantized_gru
 
 from torch.utils.dlpack import from_dlpack, to_dlpack
+
+# Import experimental masked operations support. See
+# [RFC-0016](https://github.com/pytorch/rfcs/pull/27) for more
+# information.
+from . import _masked
 
 
 def _register_device_module(device_type, module):

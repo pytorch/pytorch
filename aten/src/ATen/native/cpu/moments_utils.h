@@ -10,6 +10,7 @@
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/cpu/utils.h>
 #include <c10/util/SmallVector.h>
+#include <c10/util/irange.h>
 
 namespace at {
 namespace native {
@@ -69,12 +70,12 @@ std::pair<T, T> RowwiseMomentsImpl(const T* X, int64_t N, int64_t ddof = 0) {
   c10::SmallVector<Vec, kMaxDepth> m1_stk(depth, kZeroVec);
   c10::SmallVector<Vec, kMaxDepth> m2_stk(depth, kZeroVec);
 
-  for (int64_t i = 0; i < m; ++i) {
+  for (const auto i : c10::irange(m)) {
     const T* X_ptr = X + i * kChunkSize * kVecSize;
     const int64_t m0 = std::min(kChunkSize, n - i * kChunkSize);
     Vec m1_vec(0);
     Vec m2_vec(0);
-    for (int64_t j = 0; j < m0; ++j) {
+    for (const auto j : c10::irange(m0)) {
       const Vec x_vec = Vec::loadu(X_ptr + j * kVecSize);
       const Vec delta_vec = x_vec - m1_vec;
       const Vec c_vec = Vec(T(1) / static_cast<T>(j + 1));
@@ -97,7 +98,7 @@ std::pair<T, T> RowwiseMomentsImpl(const T* X, int64_t N, int64_t ddof = 0) {
       mask >>= 1;
     }
   }
-  for (int64_t i = 1; i < depth; ++i) {
+  for (const auto i : c10::irange(1, depth)) {
     AddMomentsVec(
         m0_stk[i], m1_stk[i], m2_stk[i], m0_stk[0], m1_stk[0], m2_stk[0]);
   }
@@ -116,7 +117,7 @@ std::pair<T, T> RowwiseMomentsImpl(const T* X, int64_t N, int64_t ddof = 0) {
     m1 += delta / static_cast<T>(m0);
     m2 += delta * (X[i] - m1);
   }
-  for (int64_t i = 0; i < kVecSize; ++i) {
+  for (const auto i : c10::irange(kVecSize)) {
     AddMoments(n, m1_arr[i], m2_arr[i], m0, m1, m2);
   }
 

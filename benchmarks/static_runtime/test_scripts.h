@@ -303,13 +303,7 @@ const auto to_script_alias = R"JIT(
       return (c)
 )JIT";
 
-const auto detach_script_0 = R"JIT(
-  def forward(self, input: Tensor):
-      a = input.detach()
-      return input is a
-)JIT";
-
-const auto detach_script_1 = R"JIT(
+const auto detach_script = R"JIT(
   def forward(self, input: Tensor):
       a = input.detach()
       return a.clone()
@@ -586,20 +580,6 @@ const auto addmm_script = R"JIT(
    return torch.addmm(inp, mat1, mat2, alpha=alpha, beta=beta).clone()
 )JIT";
 
-const auto if_script = R"JIT(
-  def forward(self, a: Tensor, b: Tensor, x: bool):
-    c = (a + b).relu().half().float()
-    d = b * c
-    if x:
-      e = a.flatten().half() * b.flatten().half()
-    else:
-      e = a.flatten().half() + b.flatten().half()
-    f = e.float().relu()
-    g = {"d": d, "b": b}
-    h = {"e": e, "f": f}
-    return [g, h]
-)JIT";
-
 const auto var_cat_script = R"JIT(
   def forward(self, inp1: Tensor, inp2: Tensor, dim: int):
    return torch.cat([inp1, inp2], dim).clone()
@@ -638,8 +618,8 @@ const auto index_without_none_script = R"JIT(
 )JIT";
 
 const auto index_with_none_script = R"JIT(
-  def forward(self, a: Tensor, idx: Tensor):
-      return a[idx, None].clone()
+  def forward(self, a: Tensor, idx: Tensor, none: Optional[Tensor]):
+      return a[idx, none].clone()
 )JIT";
 
 const auto index_with_two_tensors_script = R"JIT(
@@ -773,6 +753,14 @@ const std::string quantize_script = R"IR(
       %1254 = quantized::linear(%input, %packed_params, %scale, %zero_point)
       %1249: Tensor = aten::dequantize(%1254)
       return (%1249)
+)IR";
+
+const std::string quantized_linear_dynamic_fp16_script = R"IR(
+  graph(%input: Tensor, %weights: Tensor):
+      %bias: None = prim::Constant()
+      %packed_params = quantized::linear_prepack_fp16(%weights, %bias)
+      %output = quantized::linear_dynamic_fp16(%input, %packed_params)
+      return (%output)
 )IR";
 
 const auto fmod_tensor = R"JIT(

@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: distributed"]
+
 import sys
 import test_c10d_spawn
 import torch

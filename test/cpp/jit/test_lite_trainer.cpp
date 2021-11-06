@@ -1,12 +1,10 @@
 #include <gtest/gtest.h>
-#include "jit/mobile/runtime_compatibility.h"
 
 #include <c10/core/TensorOptions.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/import_data.h>
-#include <torch/csrc/jit/mobile/model_compatibility.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/mobile/train/export_data.h>
 #include <torch/csrc/jit/mobile/train/optim/sgd.h>
@@ -19,85 +17,6 @@
 // Tests go in torch::jit
 namespace torch {
 namespace jit {
-
-TEST(LiteTrainerTest, CustomOp) {
-  // std::string mobile_model =
-  //     "/home/chenlai/local/notebooks/tmp/ads_dper_fl_model_dummy_f286591080_debug.ptl";
-  // std::string jit_model = "/data/users/chenlai/ads_dper_fl_model_simple.pt";
-  // std::string jit_model =
-  //     "/home/chenlai/fbsource/fbcode/papaya/fb/client/dper/test/resources/ads_dper_sparsenn_full_jit_fl_model.pt";
-  // std::string jit_model =
-  //     "/data/users/chenlai/dper_fl_with_sparse_sot_oc_20mb.pt";
-  // std::string jit_model = "/data/users/chenlai/ads_dper_fl_282028873.pt";
-  std::string jit_model = "/data/users/chenlai/ads_dper_fl_model_debug_after_materialize.pt";
-  // std::string jit_model = "/data/users/chenlai/namedtuple.pt";
-  ExtraFilesMap extra_files;
-  auto reader =
-      std::make_shared<caffe2::serialize::PyTorchStreamReader>(jit_model);
-  auto records = reader->getAllRecords();
-  for (const auto& record : records) {
-    std::size_t found = record.find_last_of("/\\");
-    auto path = record.substr(0, found);
-    if ("extra" == path) {
-      extra_files.emplace(record.substr(found + 1), "");
-    }
-  }
-  // Loading the TS module is required for this backport, because bytecode needs
-  // to be re-emitted (refer to the comments below)
-
-  c10::optional<c10::Device> device;
-  Module jit_m = load(jit_model, device, extra_files);
-  std::cout << "extra files size: " << extra_files.size() << std::endl;
-  for (auto extra_file : extra_files) {
-    std::cout << "key: " << extra_file.first << " value: " << extra_file.second
-              << std::endl;
-  }
-  // torch::jit::Module module_freeze = freeze(jit_m);
-  // module_freeze._save_for_mobile(mobile_model);
-  // jit_m._save_for_mobile(mobile_model);
-
-  // Module jit_m = load(mobile_model);
-  jit_m.eval();
-  torch::jit::Module module_freeze = freeze(jit_m);
-  // // jit_m.train();
-  // std::vector<IValue> inputs{
-  //     {1 * torch::ones(10, 1034), 3 * torch::ones(10, 1034)},
-  // };
-  // IValue tuple = c10::ivalue::Tuple::create(
-  //     {1 * torch::ones({10, 1034}), 3 * torch::ones({10, 1034})});
-  // std::vector<IValue> inputs_1{tuple};
-  // auto jit_output = jit_m.forward(inputs_1);
-  // std::cout << "jit output: " << std::endl;
-  // jit_output.dump();
-
-  std::stringstream ss;
-  jit_m._save_for_mobile(ss);
-  // jit_m._save_for_mobile(mobile_model);
-  // // jit_m._save_for_mobile(mobile_model_debug);
-  // jit_m._save_for_mobile(ss);
-  jit_m._save_for_mobile(
-      "/home/chenlai/local/notebooks/tmp/tmp.ptl", extra_files);
-
-  // auto it_model = ModelCompatibilityInfo::get(ss);
-  // auto it_runtime = RuntimeCompatibilityInfo::get();
-  // is_compatible(it_runtime, it_model);
-
-  // // // // jit_m.forward(inputs);
-  // torch::jit::mobile::Module mobile_m = _load_for_mobile(ss);
-  // // // torch::jit::mobile::Module mobile_m = _load_for_mobile(mobile_model);
-  // // // mobile_m.train();
-  // auto mobile_output = mobile_m.forward(inputs_1);
-  // std::cout << "mobile output: " << std::endl;
-  // mobile_output.dump();
-  // auto mobile_list =
-  //     mobile_output.toGenericDict().at("prediction").toTuple()->elements();
-  // auto jit_list =
-  //     jit_output.toGenericDict().at("prediction").toTuple()->elements();
-  // for (auto i = 0; i < mobile_list.size(); i++) {
-  //   mobile_list[i].toTensor().equal(jit_list[i].toTensor());
-  // }
-  // std::cout << "mobile output: " << std::endl;
-}
 
 TEST(LiteTrainerTest, Params) {
   Module m("m");

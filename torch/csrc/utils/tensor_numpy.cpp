@@ -168,6 +168,16 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor) {
   return array.release();
 }
 
+void warn_numpy_not_writeable() {
+  TORCH_WARN_ONCE(
+    "The given NumPy array is not writeable, and PyTorch does "
+    "not support non-writeable tensors. This means you can write to the "
+    "underlying (supposedly non-writeable) NumPy array using the tensor. "
+    "You may want to copy the array to protect its data or make it writeable "
+    "before converting it to a tensor. This type of warning will be "
+    "suppressed for the rest of this program.");
+}
+
 at::Tensor tensor_from_numpy(PyObject* obj, bool warn_if_not_writeable/*=true*/) {
   if (!is_numpy_available()) {
     throw std::runtime_error("Numpy is not available");
@@ -180,14 +190,7 @@ at::Tensor tensor_from_numpy(PyObject* obj, bool warn_if_not_writeable/*=true*/)
   // warn_if_not_writable is true when a copy of numpy variable is created.
   // the warning is suppressed when a copy is being created.
   if (!PyArray_ISWRITEABLE(array) && warn_if_not_writeable) {
-    TORCH_WARN_ONCE(
-      "The given NumPy array is not writeable, and PyTorch does "
-      "not support non-writeable tensors. This means you can write to the "
-      "underlying (supposedly non-writeable) NumPy array using the tensor. "
-      "You may want to copy the array to protect its data or make it writeable "
-      "before converting it to a tensor. This type of warning will be "
-      "suppressed for the rest of this program.");
-
+    warn_numpy_not_writeable();
   }
 
   int ndim = PyArray_NDIM(array);
