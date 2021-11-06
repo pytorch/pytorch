@@ -55,8 +55,6 @@ static void average_pooling_q8(benchmark::State& state, const char* net) {
   status = pytorch_qnnp_create_average_pooling2d_nhwc_q8(
       paddingSize,
       paddingSize,
-      paddingSize,
-      paddingSize,
       poolingSize,
       poolingSize,
       stride,
