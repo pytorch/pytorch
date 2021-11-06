@@ -466,11 +466,9 @@ bool autocastEnabled() {
 void Autocast(const std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP("\nBefore Autocast: ", graph);
   if (autocastEnabled()) {
-    auto is_gpu_enabled = at::autocast::is_enabled();
-    auto is_cpu_enabled = at::autocast::is_cpu_enabled();
     AutocastContext init = {
-        is_gpu_enabled,
-        is_cpu_enabled,
+        at::autocast::is_enabled(),
+        at::autocast::is_cpu_enabled(),
         at::autocast::get_autocast_gpu_dtype(),
         at::autocast::get_autocast_cpu_dtype()};
     handleBlock(graph->block(), init);
