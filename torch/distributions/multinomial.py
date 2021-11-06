@@ -109,8 +109,7 @@ class Multinomial(Distribution):
         n = torch.tensor(self.total_count)
 
         cat_entropy = self._categorical.entropy()
-        log_factorial_n = torch.lgamma(n + 1) * torch.ones_like(cat_entropy)
-        term1 = -log_factorial_n + n * cat_entropy
+        term1 = n * cat_entropy - torch.lgamma(n + 1)
 
         support = self._binomial.enumerate_support(expand=False)[1:]
         binomial_probs = torch.exp(self._binomial.log_prob(support))
