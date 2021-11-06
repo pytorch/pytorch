@@ -16,9 +16,13 @@ namespace jit {
 // It is seprated out from Peephole Pass so that Peephole does not have
 // maintain alias db correctness throughout the pass.
 struct PeepholeOptimizeAliasSensitiveImpl {
-  PeepholeOptimizeAliasSensitiveImpl(std::shared_ptr<Graph> graph)
+  PeepholeOptimizeAliasSensitiveImpl(
+      std::shared_ptr<Graph> graph,
+      bool shape_peepholes)
       : graph_(std::move(graph)),
-        aliasDb_(torch::make_unique<AliasDb>(graph_)) {}
+        aliasDb_(torch::make_unique<AliasDb>(graph_)) {
+    shape_peepholes_ = shape_peepholes;
+  }
 
   bool run() {
     return runBlock(graph_->block());
@@ -28,6 +32,12 @@ struct PeepholeOptimizeAliasSensitiveImpl {
   void replaceWithIValue(Value* v, IValue val) {
     WithInsertPoint guard(v->node());
     v->replaceAllUsesWith(v->owningGraph()->insertConstant(val));
+  }
+
+  bool isFloatingPoint(TensorType& t) {
+    auto input_dtype = t.scalarType();
+    return (
+        shape_peepholes_ && input_dtype && at::isFloatingType(*input_dtype));
   }
 
   bool runBlock(Block* block) {
@@ -74,6 +84,16 @@ struct PeepholeOptimizeAliasSensitiveImpl {
               "aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor",
               /*const_inputs=*/{attr::alpha, attr::other})) {
         // x + 0 == x - 0 == x
+        // if either scalar input is a float, than removing this operator could
+        // remove type promotion and affect semantics
+        if (!isFloatingPoint(node->input(0)->type()->expectRef<TensorType>())) {
+          auto inps = node->inputs();
+          if (!inps.at(1)->type()->isSubtypeOf(IntType::get()) ||
+              !inps.at(2)->type()->isSubtypeOf(IntType::get())) {
+            continue;
+          }
+        }
+
         if (node->get<at::Scalar>(attr::alpha)->toDouble() == 1 &&
             node->get<at::Scalar>(attr::other)->toDouble() == 0) {
           if (tryToReplaceOutputWithInput(node->input(0), node->output())) {
@@ -93,6 +113,15 @@ struct PeepholeOptimizeAliasSensitiveImpl {
               "aten::div(Tensor self, Scalar other) -> Tensor",
               /*const_inputs=*/attr::other)) {
         // x * 1 == x / 1 == x
+        // is the node is a division or other isn't an integer, than removing
+        // this operator could remove type promotion and affect semantics
+        if (!isFloatingPoint(node->input(0)->type()->expectRef<TensorType>())) {
+          if (node->kind() == aten::div ||
+              !node->input(1)->type()->isSubtypeOf(IntType::get())) {
+            continue;
+          }
+        }
+
         if (node->get<at::Scalar>(attr::other)->toDouble() == 1) {
           if (tryToReplaceOutputWithInput(node->input(0), node->output())) {
             GRAPH_UPDATE(
@@ -133,10 +162,13 @@ struct PeepholeOptimizeAliasSensitiveImpl {
   ValueSet stale_alias_values_;
   std::shared_ptr<Graph> graph_;
   std::unique_ptr<AliasDb> aliasDb_;
+  bool shape_peepholes_;
 };
 
-bool PeepholeOptimizeAliasSensitive(const std::shared_ptr<Graph>& graph) {
-  PeepholeOptimizeAliasSensitiveImpl opt(graph);
+bool PeepholeOptimizeAliasSensitive(
+    const std::shared_ptr<Graph>& graph,
+    bool shape_peepholes) {
+  PeepholeOptimizeAliasSensitiveImpl opt(graph, shape_peepholes);
   return opt.run();
 }
 

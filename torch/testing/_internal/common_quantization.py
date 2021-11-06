@@ -340,11 +340,6 @@ class QuantizationTestCase(TestCase):
                               2 : self.img_data_2d,
                               3 : self.img_data_3d}
 
-        self.embed_linear_data_train = [[torch.randint(0, 10, (12, 12), dtype=torch.long),
-                                         torch.randn((12, 1), dtype=torch.float)]
-                                        for _ in range(2)]
-        self.embed_data = [[torch.randint(0, 10, (12, 1))]]
-
         # Quant types that produce statically quantized ops
         self.static_quant_types = [QuantType.STATIC, QuantType.QAT]
         # All quant types for (fx based) graph mode quantization
@@ -1673,6 +1668,7 @@ class ManualConvLinearQATModel(torch.nn.Module):
         x = self.fc1(x)
         x = self.fc2(x)
         return self.dequant(x)
+
 class ManualEmbeddingBagLinear(nn.Module):
     def __init__(self):
         super(ManualEmbeddingBagLinear, self).__init__()

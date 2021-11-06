@@ -44,7 +44,6 @@ DEFAULT_STATIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nn.ELU: nnq.ELU,
     nn.Embedding: nnq.Embedding,
     nn.EmbeddingBag: nnq.EmbeddingBag,
-    nn.Embedding: nnq.Embedding,
     nn.GroupNorm: nnq.GroupNorm,
     nn.Hardswish: nnq.Hardswish,
     nn.InstanceNorm1d: nnq.InstanceNorm1d,
