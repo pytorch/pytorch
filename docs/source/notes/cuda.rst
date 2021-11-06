@@ -139,7 +139,7 @@ Reduced Precision Reduction in FP16 GEMMs
 fp16 GEMMs are potentially done with reduced precision reductions (e.g., in fp16 rather than fp32). This reduction in precision can allow for higher performance on certain workloads (particularly those with a large `k` dimension) and GPU architectures at the cost of numerical precision and potential for overflow.
 
 Some example benchmark data on V100
-::
+.. code::
   [--------------------------- bench_gemm_transformer --------------------------]
         [  m ,  k  ,  n  ]    |  allow_fp16_reduc=True  |  allow_fp16_reduc=False
   1 threads: --------------------------------------------------------------------
