@@ -301,9 +301,9 @@ LlgaGraphHelper::LlgaGraphHelper(
   GRAPH_DEBUG("Get Partitions");
   std::vector<dnnl::graph::partition> partitions = g.get_partitions(policy);
   // excluded unsupported Wildcard partitions
-  for (size_t partId = 0; partId < partitions.size(); partId++) {
-    if (partitions[partId].is_supported())
-      partitions_.push_back(partitions[partId]);
+  for (auto& partition : partitions) {
+    if (partition.is_supported())
+      partitions_.push_back(partition);
   }
 
   GRAPH_DEBUG("  Got #partitions: ", partitions_.size());
@@ -434,7 +434,7 @@ std::vector<dnnl::graph::partition> LlgaGraphHelper::getPartitions() const {
 }
 
 LlgaNodeWrapper::LlgaNodeWrapper(const Node* node)
-    : n(const_cast<Node*>(node)) {
+    : n(const_cast<Node*>(node)) { // NOLINT
   TORCH_CHECK(
       LlgaGraphHelper::isLlgaSubgraph(n), "Cannot wrap a non-LLGA fusion node");
 }
@@ -442,7 +442,7 @@ LlgaNodeWrapper::LlgaNodeWrapper(const Node* node)
 void LlgaNodeWrapper::setOpaqueLayout(size_t offset) {
   TORCH_CHECK(offset < n->outputs().size(), "Invalid output offset ", offset);
   auto& layouts =
-      const_cast<std::vector<int64_t>&>(n->is(attr::output_layouts));
+      const_cast<std::vector<int64_t>&>(n->is(attr::output_layouts)); // NOLINT
   layouts.at(offset) = 1;
 }
 

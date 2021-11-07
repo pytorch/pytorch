@@ -97,7 +97,7 @@ class GraphRewriter {
         auto workblock_end = workblock.end()->reverseIterator();
         auto workblock_begin = workblock.begin()->reverseIterator();
         for (auto it = workblock_end; it != workblock_begin;) {
-          bool changed;
+          bool changed = false;
           std::tie(it, changed) = scanNode(*it, workblock_begin);
           any_changed |= changed;
         }

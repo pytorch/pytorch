@@ -664,7 +664,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     include(../mlc/mlc_build.cmake)
   endif()
 
-  if(MKLDNN_FOUND)
+  if(MKLDNN_FOUND AND NOT WIN32 AND NOT APPLE)
     list(APPEND Caffe2_CPU_SRCS
       ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/graph_fuser.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/graph_helper.cpp

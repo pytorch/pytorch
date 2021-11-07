@@ -44,11 +44,11 @@ bool getLlgaEnvEnabled() {
 
 namespace {
 class RegisterInterface {
-public:
- RegisterInterface() {
-   RegisterProfilingNode(canFuseNode);
-   torch::jit::RegisterLlgaFuseGraph::setEnabled(getLlgaEnvEnabled());
- }
+ public:
+  RegisterInterface() {
+    RegisterProfilingNode(canFuseNode);
+    torch::jit::RegisterLlgaFuseGraph::setEnabled(getLlgaEnvEnabled());
+  }
 };
 
 static RegisterInterface register_interface_;

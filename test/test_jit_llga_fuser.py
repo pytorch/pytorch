@@ -3,8 +3,36 @@ import unittest
 import itertools
 import torch.nn as nn
 import torch.nn.functional as F
-from test_jit_llga_utils import JitLlgaTestCase, run_tests, LLGA_FUSION_GROUP
-from torch.testing._internal.common_utils import TEST_SCIPY
+from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.common_utils import run_tests, TEST_SCIPY, IS_WINDOWS, IS_MACOS
+
+LLGA_FUSION_GROUP = 'prim::LlgaFusionGroup'
+LLGA_NOT_ENABLED = not torch._C.has_mkldnn or IS_WINDOWS or IS_MACOS
+
+
+def warmup_forward(f, *args, profiling_count=2):
+    for i in range(profiling_count):
+        results = f(*args)
+
+    return results
+
+
+class JitLlgaTestCase(JitTestCase):
+    def checkTrace(self, m, x, *args, **kwargs):
+        with torch.no_grad(), \
+                torch._jit_internal._disable_emit_hooks():
+            traced = torch.jit.trace(m, x)
+            warmup_forward(traced, *x)
+            fwd_graph = traced.graph_for(*x)
+
+            ref_o = m(*x)
+            jit_o = traced(*x)
+            self.assertEqual(jit_o, ref_o)
+        return traced, fwd_graph
+
+    def assertFused(self, graph, fused_patterns):
+        for pat in fused_patterns:
+            self.assertGraphContainsExactly(graph, pat, 0)
 
 try:
     import torchvision
@@ -28,19 +56,10 @@ def get_eltwise_fn(name):
         raise NameError('Eltwise function %s not found' % name)
 
 
+@unittest.skipIf(LLGA_NOT_ENABLED, "MKL-DNN build is disabled")
 class TestOp(JitLlgaTestCase):
     def test_conv2d(self):
-        for [
-                spatial,
-                in_channels,
-                out_channels,
-                kernel,
-                padding,
-                stride,
-                dilation,
-                g,
-                bias
-            ] in itertools.product(
+        for [spatial, in_channels, out_channels, kernel, padding, stride, dilation, g, bias] in itertools.product(
                 [7, 8],
                 [8, 15],
                 [7, 16],
@@ -87,14 +106,7 @@ class TestOp(JitLlgaTestCase):
             self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
 
     def test_max_pool2d(self):
-        for [
-                spatial,
-                kernel,
-                padding,
-                stride,
-                dilation,
-                ceil_mode
-            ] in itertools.product(
+        for [spatial, kernel, padding, stride, dilation, ceil_mode] in itertools.product(
                 [15, 16, 17, 18, 19],
                 [4, 5],
                 [0, 1, 2],
@@ -113,14 +125,7 @@ class TestOp(JitLlgaTestCase):
             self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
 
     def test_avg_pool2d(self):
-        for [
-                spatial,
-                kernel,
-                padding,
-                stride,
-                ceil_mode,
-                count_include_pad,
-            ] in itertools.product(
+        for [spatial, kernel, padding, stride, ceil_mode, count_include_pad] in itertools.product(
                 [15, 16, 17, 18, 19],
                 [4, 5],
                 [0, 1, 2],
@@ -257,6 +262,7 @@ class TestOp(JitLlgaTestCase):
         self.assertEqual(m(x), traced(x))
 
 
+@unittest.skipIf(LLGA_NOT_ENABLED, "MKL-DNN build is disabled")
 class TestFusionPattern(JitLlgaTestCase):
     def test_conv2d_eltwise(self):
         class M(nn.Module):
@@ -434,6 +440,7 @@ class TestFusionPattern(JitLlgaTestCase):
         self.assertFused(graph, ['aten::_convolution', 'aten::relu'])
 
 
+@unittest.skipIf(LLGA_NOT_ENABLED, "MKL-DNN build is disabled")
 class TestModel(JitLlgaTestCase):
     @skipIfNoTorchVision
     def _test_vision(self, model_name):
