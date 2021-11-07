@@ -94,18 +94,3 @@ TH_API void THTensor_free(THTensor *self);
 
 TH_CPP_API void THTensor_resize(THTensor *self, at::IntArrayRef size, at::IntArrayRef stride);
 TH_CPP_API void THTensor_setStorage(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_, at::IntArrayRef size_, at::IntArrayRef stride_);
-
-#include <TH/generic/THTensor.hpp>
-#include <TH/THGenerateAllTypes.h>
-
-#include <TH/generic/THTensor.hpp>
-#include <TH/THGenerateComplexTypes.h>
-
-#include <TH/generic/THTensor.hpp>
-#include <TH/THGenerateHalfType.h>
-
-#include <TH/generic/THTensor.hpp>
-#include <TH/THGenerateBoolType.h>
-
-#include <TH/generic/THTensor.hpp>
-#include <TH/THGenerateBFloat16Type.h>
