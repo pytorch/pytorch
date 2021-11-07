@@ -24,6 +24,7 @@
 #include <torch/csrc/jit/codegen/cuda/ops/all_ops.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/all_schedulers.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler/reduction_utils.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 #include <torch/csrc/jit/codegen/cuda/transform_rfactor.h>
@@ -1173,31 +1174,31 @@ TEST(NVFuserTest, FusionParser_CUDA) {
   const std::string expected_kernel = R"(
 __global__ void CUDAGeneratedKernel(Tensor<float, 1> T0, Tensor<float, 1> T1, Tensor<float, 1> T3) {
   if ((((((((((nvfuser_index_t)blockIdx.x) * 1) + 0) * 1) + 0) * 128) + ((nvfuser_index_t)threadIdx.x)) < T0.size[0])) {
-    constexpr nvfuser_index_t ki173 = 0;
+    constexpr nvfuser_index_t ki183 = 0;
     float T5[1];
-    constexpr nvfuser_index_t ki207 = 0;
-    T5[ki207] = 0;
-    constexpr nvfuser_index_t ki198 = 0;
-    T5[ki198]
-       = T1[(((((((((nvfuser_index_t)blockIdx.x) * 1) + ki173) * 1) + ki198) * 128) + ((nvfuser_index_t)threadIdx.x)) * 1)];
+    constexpr nvfuser_index_t ki217 = 0;
+    T5[ki217] = 0;
+    constexpr nvfuser_index_t ki208 = 0;
+    T5[ki208]
+       = T1[(((((((((nvfuser_index_t)blockIdx.x) * 1) + ki183) * 1) + ki208) * 128) + ((nvfuser_index_t)threadIdx.x)) * 1)];
     float T4[1];
-    constexpr nvfuser_index_t ki213 = 0;
-    T4[ki213] = 0;
-    constexpr nvfuser_index_t ki193 = 0;
-    T4[ki193]
-       = T0[(((((((((nvfuser_index_t)blockIdx.x) * 1) + ki173) * 1) + ki193) * 128) + ((nvfuser_index_t)threadIdx.x)) * 1)];
+    constexpr nvfuser_index_t ki223 = 0;
+    T4[ki223] = 0;
+    constexpr nvfuser_index_t ki203 = 0;
+    T4[ki203]
+       = T0[(((((((((nvfuser_index_t)blockIdx.x) * 1) + ki183) * 1) + ki203) * 128) + ((nvfuser_index_t)threadIdx.x)) * 1)];
     float T6[1];
-    constexpr nvfuser_index_t ki182 = 0;
+    constexpr nvfuser_index_t ki192 = 0;
     float T2[1];
     T2[0]
-      = T4[ki182]
-      * T5[ki182];
-    T6[ki182]
+      = T4[ki192]
+      * T5[ki192];
+    T6[ki192]
       = T2[0]
-      * T4[ki182];
-    constexpr nvfuser_index_t ki175 = 0;
-    T3[(((((((((nvfuser_index_t)blockIdx.x) * 1) + ki173) * 1) + ki175) * 128) + ((nvfuser_index_t)threadIdx.x)) * 1)]
-       = T6[ki175];
+      * T4[ki192];
+    constexpr nvfuser_index_t ki185 = 0;
+    T3[(((((((((nvfuser_index_t)blockIdx.x) * 1) + ki183) * 1) + ki185) * 128) + ((nvfuser_index_t)threadIdx.x)) * 1)]
+       = T6[ki185];
   }
 }
 )";
@@ -17401,7 +17402,7 @@ TEST(NVFuserTest, FusionPointwiseBroadcast_CUDA) {
 
   auto at_x_add_bias = at_x + at_bias;
   auto at_x_view = at::native::view(at_x_add_bias, output_shape);
-  auto aten_y = at::gelu(at_x_view, false);
+  auto aten_y = at::gelu(at_x_view);
 
   testValidate(&fusion, outputs, aten_inputs, {aten_y}, __LINE__, __FILE__);
 }
@@ -17880,30 +17881,30 @@ TEST(NVFuserTest, FusionChannelsLastParser_CUDA) {
   const std::string expected_kernel = R"(
 __global__ void CUDAGeneratedKernel(Tensor<__half, 4> T0, Tensor<__half, 4> T2, Tensor<__half, 4> T7) {
   if ((((((((((nvfuser_index_t)blockIdx.x) * 1) + 0) * 1) + 0) * 128) + ((nvfuser_index_t)threadIdx.x)) < (T0.size[0] * (T0.size[1] * (T0.size[2] * T0.size[3]))))) {
-    constexpr nvfuser_index_t ki566 = 0;
+    constexpr nvfuser_index_t ki674 = 0;
     __half T9[1];
-    constexpr nvfuser_index_t ki608 = 0;
-    T9[ki608] = 0;
-    constexpr nvfuser_index_t ki599 = 0;
-    T9[ki599]
-       = T2[((((((((((nvfuser_index_t)blockIdx.x) * 1) + ki566) * 1) + ki599) * 128) + ((nvfuser_index_t)threadIdx.x)) / (T0.size[1] * (T0.size[2] * T0.size[3]))) * (((1 * T0.size[2]) * T0.size[1]) * T0.size[3])) + ((((((((((((nvfuser_index_t)blockIdx.x) * 1) + ki566) * 1) + ki599) * 128) + ((nvfuser_index_t)threadIdx.x)) % (T0.size[1] * (T0.size[2] * T0.size[3]))) % (T0.size[2] * T0.size[3])) % T0.size[3]) * ((1 * T0.size[2]) * T0.size[1])) + (((((((((((nvfuser_index_t)blockIdx.x) * 1) + ki566) * 1) + ki599) * 128) + ((nvfuser_index_t)threadIdx.x)) % (T0.size[1] * (T0.size[2] * T0.size[3]))) / (T0.size[2] * T0.size[3])) * (1 * T0.size[2])) + ((((((((((((nvfuser_index_t)blockIdx.x) * 1) + ki566) * 1) + ki599) * 128) + ((nvfuser_index_t)threadIdx.x)) % (T0.size[1] * (T0.size[2] * T0.size[3]))) % (T0.size[2] * T0.size[3])) / T0.size[3]) * 1)];
+    constexpr nvfuser_index_t ki716 = 0;
+    T9[ki716] = 0;
+    constexpr nvfuser_index_t ki707 = 0;
+    T9[ki707]
+       = T2[((((((((((nvfuser_index_t)blockIdx.x) * 1) + ki674) * 1) + ki707) * 128) + ((nvfuser_index_t)threadIdx.x)) / (T0.size[1] * (T0.size[2] * T0.size[3]))) * (((1 * T0.size[2]) * T0.size[1]) * T0.size[3])) + ((((((((((((nvfuser_index_t)blockIdx.x) * 1) + ki674) * 1) + ki707) * 128) + ((nvfuser_index_t)threadIdx.x)) % (T0.size[1] * (T0.size[2] * T0.size[3]))) % (T0.size[2] * T0.size[3])) % T0.size[3]) * ((1 * T0.size[2]) * T0.size[1])) + (((((((((((nvfuser_index_t)blockIdx.x) * 1) + ki674) * 1) + ki707) * 128) + ((nvfuser_index_t)threadIdx.x)) % (T0.size[1] * (T0.size[2] * T0.size[3]))) / (T0.size[2] * T0.size[3])) * (1 * T0.size[2])) + ((((((((((((nvfuser_index_t)blockIdx.x) * 1) + ki674) * 1) + ki707) * 128) + ((nvfuser_index_t)threadIdx.x)) % (T0.size[1] * (T0.size[2] * T0.size[3]))) % (T0.size[2] * T0.size[3])) / T0.size[3]) * 1)];
     __half T8[1];
-    constexpr nvfuser_index_t ki614 = 0;
-    T8[ki614] = 0;
-    constexpr nvfuser_index_t ki594 = 0;
-    T8[ki594]
-       = T0[(((((((((nvfuser_index_t)blockIdx.x) * 1) + ki566) * 1) + ki594) * 128) + ((nvfuser_index_t)threadIdx.x)) * 1)];
+    constexpr nvfuser_index_t ki722 = 0;
+    T8[ki722] = 0;
+    constexpr nvfuser_index_t ki702 = 0;
+    T8[ki702]
+       = T0[(((((((((nvfuser_index_t)blockIdx.x) * 1) + ki674) * 1) + ki702) * 128) + ((nvfuser_index_t)threadIdx.x)) * 1)];
     __half T10[1];
-    constexpr nvfuser_index_t ki575 = 0;
+    constexpr nvfuser_index_t ki683 = 0;
     float T3[1];
     T3[0]
-       = __half2float(T9[ki575]);
+       = __half2float(T9[ki683]);
     float T4[1];
     T4[0]
        = T3[0];
     float T1[1];
     T1[0]
-       = __half2float(T8[ki575]);
+       = __half2float(T8[ki683]);
     float T5[1];
     T5[0]
       = T1[0]
@@ -17911,11 +17912,11 @@ __global__ void CUDAGeneratedKernel(Tensor<__half, 4> T0, Tensor<__half, 4> T2, 
     float T6[1];
     T6[0]
        = relu(T5[0]);
-    T10[ki575]
+    T10[ki683]
        = __float2half(T6[0]);
-    constexpr nvfuser_index_t ki568 = 0;
-    T7[(((((((((nvfuser_index_t)blockIdx.x) * 1) + ki566) * 1) + ki568) * 128) + ((nvfuser_index_t)threadIdx.x)) * 1)]
-       = T10[ki568];
+    constexpr nvfuser_index_t ki676 = 0;
+    T7[(((((((((nvfuser_index_t)blockIdx.x) * 1) + ki674) * 1) + ki676) * 128) + ((nvfuser_index_t)threadIdx.x)) * 1)]
+       = T10[ki676];
   }
 }
 )";
@@ -18163,6 +18164,341 @@ TEST(NVFuserTest, FusionRfactorContigIDs_CUDA) {
   testValidate(&fusion, outputs, aten_inputs, {ref}, __LINE__, __FILE__);
 }
 
+TEST(NVFuserTest, FusionPersistentBufferCalculation1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = set(tv0);
+  auto tv2 = sum(tv1, {1});
+  auto tv3 = broadcast(tv2, {false, true});
+  auto tv4 = set(tv1);
+  auto tv5 = add(tv3, tv4);
+  fusion.addOutput(tv5);
+
+  auto persistent_buffer_info = scheduler_utils::persistentBuffers(&fusion);
+
+  auto isTvWithinVec = [](std::vector<TensorView*>& vec, TensorView* tv) {
+    return std::find(vec.begin(), vec.end(), tv) != vec.end();
+  };
+
+  auto tvEntryInVecVec = [](std::vector<std::vector<TensorView*>>& vec_o_vec,
+                            std::vector<TensorView*>& buffer_vec,
+                            TensorView* tv) {
+    auto buffer_it = std::find(buffer_vec.begin(), buffer_vec.end(), tv);
+    return vec_o_vec.begin() + std::distance(buffer_vec.begin(), buffer_it);
+  };
+
+  auto& buffers = persistent_buffer_info.persistent_buffers;
+  auto& resolution = persistent_buffer_info.persistent_buffer_resolution_points;
+  auto& projectable = persistent_buffer_info.projectable_persistent_buffers;
+  auto& projectable_inputs = persistent_buffer_info.projectable_buffer_inputs;
+
+  TORCH_INTERNAL_ASSERT(buffers.size() == 1);
+  TORCH_INTERNAL_ASSERT(resolution.size() == 1 && resolution[0].size() == 1);
+  TORCH_INTERNAL_ASSERT(projectable.size() == 1);
+  TORCH_INTERNAL_ASSERT(projectable_inputs.size() == 1);
+
+  TORCH_INTERNAL_ASSERT(isTvWithinVec(buffers, tv1));
+  TORCH_INTERNAL_ASSERT(isTvWithinVec(projectable, tv1));
+  TORCH_INTERNAL_ASSERT(isTvWithinVec(projectable_inputs, tv0));
+
+  auto tv1_resolution_it = tvEntryInVecVec(resolution, buffers, tv1);
+  TORCH_INTERNAL_ASSERT(tv1_resolution_it != resolution.end())
+
+  TORCH_INTERNAL_ASSERT(isTvWithinVec(*tv1_resolution_it, tv5));
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor aten_t0 = at::randn({99, 101}, options);
+
+  // Schedule through magic scheduler
+  auto runtime_info = SchedulerRuntimeInfo(&fusion, {aten_t0}, true);
+  auto persistent_buffer_size =
+      persistentBufferSize(&fusion, runtime_info, persistent_buffer_info);
+
+  TORCH_INTERNAL_ASSERT(
+      persistent_buffer_size.persistent_buffer_size ==
+      aten_t0.size(1) * dataTypeSize(DataType::Float));
+  TORCH_INTERNAL_ASSERT(
+      persistent_buffer_size.projected_persistent_buffer_size ==
+      aten_t0.size(1) * dataTypeSize(DataType::Float));
+}
+
+TEST(NVFuserTest, FusionPersistentBufferCalculation2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2, DataType::Half);
+  fusion.addInput(tv0);
+
+  auto tv1 = castOp(DataType::Float, tv0);
+  auto tv2 = sum(tv1, {1});
+  auto tv3 = broadcast(tv2, {false, true});
+  auto tv4 = set(tv1);
+  auto tv5 = add(tv3, tv4);
+  auto tv6 = castOp(DataType::Half, tv5);
+  fusion.addOutput(tv6);
+
+  auto persistent_buffer_info = scheduler_utils::persistentBuffers(&fusion);
+
+  auto isTvWithinVec = [](std::vector<TensorView*>& vec, TensorView* tv) {
+    return std::find(vec.begin(), vec.end(), tv) != vec.end();
+  };
+
+  auto tvEntryInVecVec = [](std::vector<std::vector<TensorView*>>& vec_o_vec,
+                            std::vector<TensorView*>& buffer_vec,
+                            TensorView* tv) {
+    auto buffer_it = std::find(buffer_vec.begin(), buffer_vec.end(), tv);
+    return vec_o_vec.begin() + std::distance(buffer_vec.begin(), buffer_it);
+  };
+
+  auto& buffers = persistent_buffer_info.persistent_buffers;
+  auto& resolution = persistent_buffer_info.persistent_buffer_resolution_points;
+  auto& projectable = persistent_buffer_info.projectable_persistent_buffers;
+  auto& projectable_inputs = persistent_buffer_info.projectable_buffer_inputs;
+
+  TORCH_INTERNAL_ASSERT(buffers.size() == 1);
+  TORCH_INTERNAL_ASSERT(resolution.size() == 1 && resolution[0].size() == 1);
+  TORCH_INTERNAL_ASSERT(projectable.size() == 1);
+  TORCH_INTERNAL_ASSERT(projectable_inputs.size() == 1);
+
+  TORCH_INTERNAL_ASSERT(isTvWithinVec(buffers, tv1));
+  TORCH_INTERNAL_ASSERT(isTvWithinVec(projectable, tv1));
+  TORCH_INTERNAL_ASSERT(isTvWithinVec(projectable_inputs, tv0));
+
+  auto tv1_resolution_it = tvEntryInVecVec(resolution, buffers, tv1);
+  TORCH_INTERNAL_ASSERT(tv1_resolution_it != resolution.end())
+
+  TORCH_INTERNAL_ASSERT(isTvWithinVec(*tv1_resolution_it, tv5));
+
+  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
+  at::Tensor aten_t0 = at::randn({99, 101}, options);
+
+  // Schedule through magic scheduler
+  auto runtime_info = SchedulerRuntimeInfo(&fusion, {aten_t0}, true);
+  auto persistent_buffer_size =
+      persistentBufferSize(&fusion, runtime_info, persistent_buffer_info);
+
+  TORCH_INTERNAL_ASSERT(
+      persistent_buffer_size.persistent_buffer_size ==
+      aten_t0.size(1) * dataTypeSize(DataType::Float));
+  TORCH_INTERNAL_ASSERT(
+      persistent_buffer_size.projected_persistent_buffer_size ==
+      aten_t0.size(1) * dataTypeSize(DataType::Half));
+}
+
+TEST(NVFuserTest, FusionPersistentBufferCalculation3_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2, DataType::Half);
+  fusion.addInput(tv0);
+
+  auto tv1 = castOp(DataType::Float, tv0);
+  auto tv2 = set(tv1);
+  auto tv3 = sum(tv2, {1});
+  auto tv4 = broadcast(tv3, {false, true});
+
+  auto tv5 = makeSymbolicTensor(2, DataType::Half);
+  fusion.addInput(tv5);
+
+  auto tv6 = castOp(DataType::Float, tv5);
+
+  auto tv7 = add(tv6, tv4);
+  auto tv8 = set(tv1);
+  auto tv9 = add(tv7, tv8);
+  auto tv10 = sum(tv9, {1});
+  auto tv11 = broadcast(tv10, {false, true});
+  auto tv12 = set(tv7);
+  auto tv13 = add(tv12, tv11);
+
+  fusion.addOutput(tv13);
+
+  auto persistent_buffer_info = scheduler_utils::persistentBuffers(&fusion);
+
+  auto isTvWithinVec = [](std::vector<TensorView*>& vec, TensorView* tv) {
+    return std::find(vec.begin(), vec.end(), tv) != vec.end();
+  };
+
+  auto tvEntryInVecVec = [](std::vector<std::vector<TensorView*>>& vec_o_vec,
+                            std::vector<TensorView*>& buffer_vec,
+                            TensorView* tv) {
+    auto buffer_it = std::find(buffer_vec.begin(), buffer_vec.end(), tv);
+    return vec_o_vec.begin() + std::distance(buffer_vec.begin(), buffer_it);
+  };
+
+  auto& buffers = persistent_buffer_info.persistent_buffers;
+  auto& resolution = persistent_buffer_info.persistent_buffer_resolution_points;
+  auto& projectable = persistent_buffer_info.projectable_persistent_buffers;
+  auto& projectable_inputs = persistent_buffer_info.projectable_buffer_inputs;
+
+  TORCH_INTERNAL_ASSERT(buffers.size() == 2);
+  TORCH_INTERNAL_ASSERT(
+      resolution.size() == 2 && resolution[0].size() == 1 &&
+      resolution[1].size() == 1);
+  TORCH_INTERNAL_ASSERT(projectable.size() == 1);
+  TORCH_INTERNAL_ASSERT(projectable_inputs.size() == 1);
+
+  TORCH_INTERNAL_ASSERT(
+      isTvWithinVec(buffers, tv1) && isTvWithinVec(buffers, tv7));
+  TORCH_INTERNAL_ASSERT(
+      isTvWithinVec(projectable, tv1) && !isTvWithinVec(projectable, tv7));
+
+  TORCH_INTERNAL_ASSERT(isTvWithinVec(projectable_inputs, tv0));
+
+  auto tv1_resolution_it = tvEntryInVecVec(resolution, buffers, tv1);
+  TORCH_INTERNAL_ASSERT(tv1_resolution_it != resolution.end())
+  TORCH_INTERNAL_ASSERT(isTvWithinVec(*tv1_resolution_it, tv9));
+
+  auto tv7_resolution_it = tvEntryInVecVec(resolution, buffers, tv7);
+  TORCH_INTERNAL_ASSERT(tv7_resolution_it != resolution.end())
+  TORCH_INTERNAL_ASSERT(isTvWithinVec(*tv7_resolution_it, tv13));
+
+  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
+  at::Tensor aten_t0 = at::randn({99, 101}, options);
+  at::Tensor aten_t5 = at::randn({99, 101}, options);
+
+  // Schedule through magic scheduler
+  auto runtime_info = SchedulerRuntimeInfo(&fusion, {aten_t0, aten_t5}, true);
+  auto persistent_buffer_size =
+      persistentBufferSize(&fusion, runtime_info, persistent_buffer_info);
+
+  TORCH_INTERNAL_ASSERT(
+      persistent_buffer_size.persistent_buffer_size ==
+      aten_t0.size(1) * dataTypeSize(DataType::Float) * 2);
+  TORCH_INTERNAL_ASSERT(
+      persistent_buffer_size.projected_persistent_buffer_size ==
+      aten_t0.size(1) *
+          (dataTypeSize(DataType::Half) + dataTypeSize(DataType::Float)));
+}
+
+TEST(NVFuserTest, FusionPersistentBufferCalculation4_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2, DataType::Half);
+  fusion.addInput(tv0);
+
+  auto tv1 = castOp(DataType::Float, tv0);
+  auto tv2 = set(tv1);
+  auto tv3 = sum(tv2, {1});
+  auto tv4 = broadcast(tv3, {false, true});
+  auto tv5 = set(tv1);
+  auto tv6 = add(tv4, tv5);
+  auto tv7 = set(tv2);
+  auto tv8 = add(tv7, tv6);
+  auto tv9 = castOp(DataType::Half, tv8);
+
+  fusion.addOutput(tv9);
+
+  auto persistent_buffer_info = scheduler_utils::persistentBuffers(&fusion);
+
+  auto isTvWithinVec = [](std::vector<TensorView*>& vec, TensorView* tv) {
+    return std::find(vec.begin(), vec.end(), tv) != vec.end();
+  };
+
+  auto tvEntryInVecVec = [](std::vector<std::vector<TensorView*>>& vec_o_vec,
+                            std::vector<TensorView*>& buffer_vec,
+                            TensorView* tv) {
+    auto buffer_it = std::find(buffer_vec.begin(), buffer_vec.end(), tv);
+    return vec_o_vec.begin() + std::distance(buffer_vec.begin(), buffer_it);
+  };
+
+  auto& buffers = persistent_buffer_info.persistent_buffers;
+  auto& resolution = persistent_buffer_info.persistent_buffer_resolution_points;
+  auto& projectable = persistent_buffer_info.projectable_persistent_buffers;
+  auto& projectable_inputs = persistent_buffer_info.projectable_buffer_inputs;
+
+  TORCH_INTERNAL_ASSERT(buffers.size() == 2);
+  TORCH_INTERNAL_ASSERT(
+      resolution.size() == 2 && resolution[0].size() == 1 &&
+      resolution[1].size() == 1);
+
+  TORCH_INTERNAL_ASSERT(projectable.size() == 2);
+  TORCH_INTERNAL_ASSERT(projectable_inputs.size() == 1);
+
+  TORCH_INTERNAL_ASSERT(
+      isTvWithinVec(buffers, tv1) && isTvWithinVec(buffers, tv2));
+  TORCH_INTERNAL_ASSERT(
+      isTvWithinVec(projectable, tv1) && isTvWithinVec(projectable, tv2));
+
+  TORCH_INTERNAL_ASSERT(isTvWithinVec(projectable_inputs, tv0));
+
+  auto tv1_resolution_it = tvEntryInVecVec(resolution, buffers, tv1);
+  TORCH_INTERNAL_ASSERT(tv1_resolution_it != resolution.end())
+  TORCH_INTERNAL_ASSERT(isTvWithinVec(*tv1_resolution_it, tv6));
+
+  auto tv2_resolution_it = tvEntryInVecVec(resolution, buffers, tv2);
+  TORCH_INTERNAL_ASSERT(tv2_resolution_it != resolution.end())
+  TORCH_INTERNAL_ASSERT(isTvWithinVec(*tv2_resolution_it, tv8));
+
+  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
+  at::Tensor aten_t0 = at::randn({99, 101}, options);
+
+  // Schedule through magic scheduler
+  auto runtime_info = SchedulerRuntimeInfo(&fusion, {aten_t0}, true);
+  auto persistent_buffer_size =
+      persistentBufferSize(&fusion, runtime_info, persistent_buffer_info);
+
+  TORCH_INTERNAL_ASSERT(
+      persistent_buffer_size.persistent_buffer_size ==
+      aten_t0.size(1) * dataTypeSize(DataType::Float) * 2);
+
+  TORCH_INTERNAL_ASSERT(
+      persistent_buffer_size.projected_persistent_buffer_size ==
+      aten_t0.size(1) * dataTypeSize(DataType::Half));
+}
+
+TEST(NVFuserTest, PersistentBufferProjection_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2, DataType::Half);
+  fusion.addInput(tv0);
+
+  auto tv1 = castOp(DataType::Float, tv0);
+  auto tv2 = set(tv1);
+  auto tv3 = sum(tv2, {1});
+  auto tv4 = broadcast(tv3, {false, true});
+  auto tv5 = set(tv1);
+  auto tv6 = add(tv4, tv5);
+  auto tv7 = set(tv2);
+  auto tv8 = add(tv7, tv6);
+  auto tv9 = castOp(DataType::Half, tv8);
+
+  fusion.addOutput(tv9);
+
+  reduction_scheduler_utils::projectPersistentBuffers(&fusion);
+
+  auto tv5_producers = ir_utils::producerTvsOf(tv5);
+  auto tv7_producers = ir_utils::producerTvsOf(tv7);
+
+  // Projection should have broken these dependencies
+
+  TORCH_INTERNAL_ASSERT(
+      std::find(tv5_producers.begin(), tv5_producers.end(), tv1) ==
+      tv5_producers.end());
+  TORCH_INTERNAL_ASSERT(
+      std::find(tv7_producers.begin(), tv7_producers.end(), tv2) ==
+      tv7_producers.end());
+
+  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
+  at::Tensor aten_t0 = at::randn({99, 101}, options);
+
+  FusionExecutorCache fec(std::move(fusion_ptr));
+  auto cg_outputs = fec.runFusionWithInputs({aten_t0});
+
+  auto aten_t1 = aten_t0.to(c10::kDouble);
+  auto aten_t3 = aten_t1.sum({1});
+  auto aten_t4 = aten_t3.unsqueeze(1);
+  auto aten_t7 = aten_t4.add(aten_t1).add(aten_t1);
+
+  testValidate(&fusion, cg_outputs, {aten_t0}, {aten_t7}, __LINE__, __FILE__);
+}
+
 TEST(NVFuserTest, FusionIssue1223_CUDA) {
   if (at::cuda::getDeviceProperties(0)->major < 6) {
     return;
@@ -18216,6 +18552,51 @@ TEST(NVFuserTest, FusionIssue1223_CUDA) {
 
   testValidate(
       &fusion, cg_outputs, {at_t0}, {at_t1, at_t0}, __LINE__, __FILE__);
+}
+
+// See #1247 and #1250
+TEST(NVFuserTest, FusionRfactorPredication1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = min(tv1, {0});
+
+  fusion.addOutput(tv2);
+
+  // Make TIDx non-exact
+  auto tv3 = makeContigTensor(1);
+  fusion.addInput(tv3);
+
+  auto tv4 = add(tv3, new Double(1));
+  fusion.addOutput(tv4);
+
+  tv2->split(0, 4);
+  auto tv5 = tv2->rFactor({1});
+
+  tv0->computeAt(tv2, 1);
+
+  tv2->axis(0)->parallelize(ParallelType::TIDx);
+
+  tv4->axis(0)->parallelize(ParallelType::TIDx);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor at_t0 = at::randn({9}, options);
+  at_t0 = at::abs(at_t0);
+  at::Tensor at_t3 = at::randn({128}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_outputs = fe.runFusion({at_t0, at_t3});
+
+  auto at_t2 = (at_t0 + 1).min();
+  auto at_t4 = at_t3 + 1;
+
+  testValidate(
+      &fusion, cg_outputs, {at_t0, at_t3}, {at_t2, at_t4}, __LINE__, __FILE__);
 }
 
 } // namespace jit
