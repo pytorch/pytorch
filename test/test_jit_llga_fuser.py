@@ -15,8 +15,8 @@ except RuntimeError:
     HAS_TORCHVISION = False
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, 'no torchvision')
 
-
-torch.jit.enable_onednn_fusion(True)
+if torch._C.has_mkldnn:
+    torch.jit.enable_onednn_fusion(True)
 
 
 def get_eltwise_fn(name):
