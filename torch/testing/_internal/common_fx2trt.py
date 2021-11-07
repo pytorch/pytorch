@@ -49,8 +49,8 @@ class TRTTestCase(unittest.TestCase):
             if len(expected_ops):
                 self.assert_has_op(mod, expected_ops)
 
-            engine, input_names, output_names = interpreter.run(fp16_mode=False)
-            trt_mod = TRTModule(engine, input_names, output_names)
+            interpreter_result = interpreter.run(fp16_mode=False)
+            trt_mod = TRTModule(interpreter_result.engine, interpreter_result.input_names, interpreter_result.output_names)
 
             ref_outputs = mod(*inputs)
             outputs = trt_mod(*cuda_inputs)
@@ -91,8 +91,8 @@ class TRTTestCase(unittest.TestCase):
             if len(expected_ops):
                 self.assert_has_op(mod, expected_ops)
 
-            engine, input_names, output_names = interpreter.run(fp16_mode=False)
-            trt_mod = TRTModule(engine, input_names, output_names)
+            interpreter_result = interpreter.run(fp16_mode=False)
+            trt_mod = TRTModule(interpreter_result.engine, interpreter_result.input_names, interpreter_result.output_names)
             res_trt = trt_mod(*cuda_inputs).cpu()
             res_cpu = mod(*inputs)
             assert len(res_trt) == len(res_cpu)

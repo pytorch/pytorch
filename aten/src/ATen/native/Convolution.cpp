@@ -210,7 +210,8 @@ auto ConvParams::use_cudnn(const at::Tensor& input, const at::Tensor& weight) co
   if (input.scalar_type() == at::kBFloat16 || weight.scalar_type() == at::kBFloat16) {
     return false;
   }
-  if (!cudnn_conv_use_channels_last(input, weight)) { // bypass dilation checks for channels-last convolution
+  if (cudnn_conv_suggest_memory_format(input, weight) == at::MemoryFormat::Contiguous) {
+    // bypass dilation checks for channels_last convolution
     if (deterministic && is_dilated()) {
       // cudnn doesn't support deterministic dilated convolution fully yet
       return false;
@@ -432,14 +433,65 @@ bool check_cudnn_depthwise_workload(const at::Tensor& input, int stride) {
   }
   return false;
 }
+
+// simplified version for cudnn 8.2 and above
+bool check_cudnn_depthwise_workload_with_filter(const at::Tensor& input, int stride, const at::Tensor& weight) {
+  // 1D conv
+  if(input.size(2) == 1 && stride == 1){
+    return true;
+  }
+
+  // 2d conv
+  // only square filters
+  if (weight.size(2) != weight.size(3)) return false;
+  int filter = weight.size(3);
+  // only 1/3/5 filter
+  if (filter != 1 && filter != 3 && filter != 5) return false;
+  // we don't enforce square input but only check width to reduce heuristic space
+  if (input.size(3) < 7) return false; // min width 7
+  int w = input.size(3);
+  // only 1/2 stride, use cudnn for all stride 1
+  if (stride == 1) return true;
+  if (stride != 2) return false;
+
+  int ch = input.size(1);
+  int bs = input.size(0);
+  // special case since bs1 show good perf in lots of cases
+  if (bs == 1) {
+    if (filter == 1 && w <= 28) return true;
+    if (filter == 3 || filter == 5) return true;
+  } else {
+    if (filter == 1 && bs <= 16 && ch >= 128 && w <= 7) return true;
+    if (filter == 3 || filter == 5) {
+      if ((ch >= 512) || (ch >= 256 && w >= 28)) return true;
+    }
+  }
+  return false;
+}
+
 // Use cudnn for FP16 depthwise convolutions
 auto ConvParams::use_cudnn_depthwise(
         const at::Tensor& input, const at::Tensor& weight) const -> bool {
-  if (cudnn_conv_use_channels_last(input, weight) && use_cudnn(input, weight)) {
+  if (cudnn_conv_suggest_memory_format(input, weight) != at::MemoryFormat::Contiguous && use_cudnn(input, weight)) {
+    // always use cudnn_depthwise for channels_last format
     return true;
   }
   if (detail::getCUDAHooks().supportsDepthwiseConvolutionWithCuDNN()) {
     long cudnn_version = detail::getCUDAHooks().versionCuDNN();
+    if (cudnn_version >= 8200) {
+      bool kernel_cond =  (use_cudnn(input, weight) &&
+                           input.scalar_type() == kHalf && // only for FP16
+                           weight.scalar_type() == kHalf &&
+                           is_depthwise(input, weight) &&
+                           input.ndimension() == 4 &&   // TODO: 5-D contiguous depthwise is not supported yet, need benchmarks
+                           !is_dilated() && // no dilation supported
+                           (stride[0] == stride[1] || input.size(2) == 1) && // square or 1d
+                           input.size(1) >= 32); // min 32 channels supported)
+      if (kernel_cond) {
+        return check_cudnn_depthwise_workload_with_filter(input, stride[1], weight);
+      }
+    }
+    // keep (7600 <= cudnn < 8200) code unchanged
     bool kernel_cond =  (cudnn_version >= 7600 &&
                          use_cudnn(input, weight) &&
                          input.scalar_type() == kHalf && // only for FP16
@@ -494,10 +546,11 @@ static void check_shape_forward(const at::Tensor& input,
     bool kernel_size_correct = true;
 
     TORCH_CHECK(input.size(1) == (weight_sizes[1] * groups),
-             "Given groups=", groups, ", weight of size ", weight_sizes,
-             ", expected input", input.sizes(), " to have ",
-             (weight_sizes[1] * groups), " channels, but got ", input.size(1),
-             " channels instead");
+                "Given groups=", groups, ", weight of size ", weight_sizes,
+                ", expected input", input.sizes(), " to have ",
+                (weight_sizes[1] * groups), " channels, but got ", input.size(1),
+                " channels instead");
+
     TORCH_CHECK(!bias.defined() || (bias.ndimension() == 1 && bias.size(0) == weight_sizes[0]),
              "Given weight of size ", weight_sizes,
              ", expected bias to be 1-dimensional with ", weight_sizes[0], " elements",
@@ -800,7 +853,7 @@ at::Tensor _convolution(
 
   check_shape_forward(input, weight_sizes, bias, params);
 
-  if (input.size(0) == 0) {
+  if (input.size(0) == 0 || input.size(1) == 0) {
     // don't send empty inputs through backends
     // but need to compute correct output size first and set up history for params
     std::vector<int64_t> o;
@@ -812,6 +865,9 @@ at::Tensor _convolution(
                           params.output_padding, params.stride, params.dilation,
                           params.groups);
     }
+    if (input.size(1) == 0) {
+      o[input_channels_dim] = 0;
+    }
     if (input_is_mkldnn && weight.is_mkldnn()) {
       // mkldnn will error on the below 0-dim handling code
       return empty_mkldnn(
@@ -821,10 +877,12 @@ at::Tensor _convolution(
           input.options().device_opt(),
           input.options().pinned_memory_opt());
     }
+
     auto weight_view = at::_unsafe_view(weight, -1);
-    auto out = input*weight_view[0];
-    if (bias.defined())
+    auto out = (input.size(1) == 0) ? (input.view(-1) * weight_view) : (input * weight_view[0]);
+    if (bias.defined()) {
       out.add_(bias[0]);
+    }
     return out.view(o);
   }
 
@@ -839,14 +897,17 @@ at::Tensor _convolution(
   }
 
   at::MemoryFormat backend_memory_format = at::MemoryFormat::Contiguous;
-
-  if (detail::getCUDAHooks().compiledWithCuDNN() && cudnn_conv_use_channels_last(input, weight)) {
-    backend_memory_format = (k == 5) ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast;
+#if !defined(C10_MOBILE)
+  // cudnn and miopen are guaranteed not to be on mobile, and T102591915
+  // suggests that maybe the cudnn condition sometimes segfaults (though
+  // I can't imagine how)
+  if (detail::getCUDAHooks().compiledWithCuDNN()) {
+    backend_memory_format = cudnn_conv_suggest_memory_format(input, weight);
   }
-
   if (detail::getCUDAHooks().compiledWithMIOpen() && miopen_conv_use_channels_last(input, weight)) {
     backend_memory_format = (k == 5) ? at::MemoryFormat::Contiguous /*at::MemoryFormat::ChannelsLast3d*/ : at::MemoryFormat::ChannelsLast;
   }
+#endif
 
   Tensor output;
   if (params.is_depthwise(input, weight)) {
@@ -1281,22 +1342,13 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const c10::option
         auto input_shape = input.sizes().slice(2);
         auto grad_output_shape = gO.sizes().slice(2);
 
-        if (kernel_size.size() == 1) {
-          auto expected_input_shape = (kernel_size[0] - 1) * gi_conv_params.dilation[1]
-            - 2 * gi_conv_params.padding[1]
-            + (gi_conv_params.stride[1] * (grad_output_shape[0] - 1) + 1);
-          if (expected_input_shape != input_shape[0]) {
-            gi_conv_params.output_padding[1] = input_shape[0] - expected_input_shape;
-          }
-        } else {
-          for (const auto i : c10::irange(kernel_size.size())) {
-            // Check if whole input has been used or not
-            auto expected_input_shape = (kernel_size[i] - 1) * gi_conv_params.dilation[i]
-              - 2 * gi_conv_params.padding[i]
-              + (gi_conv_params.stride[i] * (grad_output_shape[i] - 1) + 1);
-            if (expected_input_shape != input_shape[i]) {
-              gi_conv_params.output_padding[i] = input_shape[i] - expected_input_shape;
-            }
+        for (const auto i : c10::irange(kernel_size.size())) {
+          // Check if whole input has been used or not
+          auto expected_input_shape = (kernel_size[i] - 1) * gi_conv_params.dilation[i]
+            - 2 * gi_conv_params.padding[i]
+            + (gi_conv_params.stride[i] * (grad_output_shape[i] - 1) + 1);
+          if (expected_input_shape != input_shape[i]) {
+            gi_conv_params.output_padding[i] = input_shape[i] - expected_input_shape;
           }
         }
 
