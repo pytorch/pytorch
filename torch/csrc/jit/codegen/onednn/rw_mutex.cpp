@@ -4,8 +4,8 @@
 #include <pthread.h>
 #endif
 
-#include "rw_mutex.hpp"
-#include "utils.hpp"
+#include <torch/csrc/jit/codegen/onednn/rw_mutex.hpp>
+#include <torch/csrc/jit/codegen/onednn/utils.hpp>
 
 namespace torch {
 namespace jit {
@@ -22,8 +22,8 @@ struct rw_mutex_t::rw_mutex_impl_t {
     return impl_;
   }
 
-  private:
-    rwlock_t impl_;
+ private:
+  rwlock_t impl_;
 };
 
 rw_mutex_t::rw_mutex_t() {
