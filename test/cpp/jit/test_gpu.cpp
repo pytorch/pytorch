@@ -18452,6 +18452,9 @@ TEST(NVFuserTest, FusionPersistentBufferCalculation4_CUDA) {
 }
 
 TEST(NVFuserTest, PersistentBufferProjection_CUDA) {
+  if (at::cuda::getDeviceProperties(0)->major < 6) {
+    return;
+  }
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
   Fusion& fusion = *fusion_ptr.get();
   FusionGuard fg(&fusion);
