@@ -2,6 +2,14 @@
 
 namespace lazy_tensors {
 
+bool thread_local shape_check = true;
+void set_dynamic_mode_shape_check(bool v) {
+  shape_check = v;
+}
+bool dynamic_mode_shape_check() {
+  return shape_check;
+}
+
 Shape::Shape(at::ScalarType scalar_type, c10::ArrayRef<int64_t> sizes)
     : scalar_type_(scalar_type),
       sizes_(sizes.begin(), sizes.end()) {}
@@ -17,6 +25,9 @@ void Shape::SetDynamicMode() { dynamic_mode_ = true; }
 std::atomic<bool> Shape::dynamic_mode_{false};
 
 bool Shape::operator==(const Shape& other) const {
+  if (dynamic_mode_shape_check() && Shape::IsDynamicMode()) {
+      throw std::runtime_error("Exact shape not known");
+  }
   return scalar_type_ == other.scalar_type_ && sizes_ == other.sizes_;
 }
 

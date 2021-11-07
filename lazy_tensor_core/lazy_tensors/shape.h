@@ -9,6 +9,17 @@
 
 namespace lazy_tensors {
 
+// these helpers used to temporarily disable
+// the "exact shape is not known" check for spots
+// where we know it's actually save to get shapes
+// for example, in EagerFallback, we should be able
+// to always get the exact shape for arguments
+// since we are materializing those arguments
+// eventually, we will remove these helpers along
+// with "the exact shape check"
+void set_dynamic_mode_shape_check(bool v);
+bool dynamic_mode_shape_check();
+
 class Shape {
  public:
   Shape() = default;
@@ -21,8 +32,18 @@ class Shape {
   void set_scalar_type(at::ScalarType value) { scalar_type_ = value; }
 
   int64_t dim() const { return sizes_.size(); }
-  c10::ArrayRef<int64_t> sizes() const { return sizes_; }
-  int64_t size(int index) const { return sizes_.at(index); }
+  c10::ArrayRef<int64_t> sizes() const {
+    if (dynamic_mode_shape_check() && Shape::IsDynamicMode()) {
+      throw std::runtime_error("Exact shape not known");
+    }
+    return sizes_;
+  }
+  int64_t size(int index) const {
+    if (dynamic_mode_shape_check() && Shape::IsDynamicMode()) {
+      throw std::runtime_error("Exact shape not known");
+    }
+    return sizes_.at(index);
+  }
   void set_size(int index, int64_t value) { sizes_.at(index) = value; }
 
   bool operator==(const Shape& other) const;

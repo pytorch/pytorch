@@ -134,6 +134,12 @@ std::string TsNode::ToString() const {
 torch::lazy::hash_t TsNode::GetOpHash(OpKind op,
                                       const lazy_tensors::Shape& shape,
                                       torch::lazy::hash_t hash_seed) {
+  if (lazy_tensors::Shape::IsDynamicMode()) {
+    torch::lazy::hash_t h = torch::lazy::HashCombine(
+        op.hash(), torch::lazy::Hash(shape.dim()));
+    return torch::lazy::HashCombine(h, hash_seed);
+  }
+
   torch::lazy::hash_t h =
       torch::lazy::HashCombine(op.hash(), torch::lazy::Hash(shape.ToString()));
   return torch::lazy::HashCombine(h, hash_seed);
