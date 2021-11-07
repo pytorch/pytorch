@@ -12,6 +12,19 @@ struct TensorIteratorBase;
 class TensorBase;
 }
 
+namespace at {
+namespace Gelu {
+
+// Keep this in sync with Gelu class in torch/nn/_gelu.py
+// These constants control the approximation behavior of gelu functions.
+enum Gelu {
+  None,             // Baseline Gelu
+  Tanh,             // Tahn Gelu Approximation
+  END
+};
+} // namespace Gelu
+} // namespace at
+
 namespace at { namespace native {
 
 using structured_activation_fn = void (*)(TensorIteratorBase&);
@@ -35,8 +48,8 @@ using elu_backward_fn = void (*)(TensorIteratorBase&, const c10::Scalar&, const 
 using leaky_relu_fn = void (*)(TensorIteratorBase&, const c10::Scalar&);
 using leaky_relu_backward_fn = void (*)(TensorIteratorBase&, const c10::Scalar&);
 using log_sigmoid_cpu_fn = void (*)(TensorBase&, TensorBase&, const TensorBase&);
-using gelu_fn = void (*)(TensorIteratorBase&, bool);
-using gelu_backward_fn = void (*)(TensorIteratorBase&, bool);
+using gelu_fn = void (*)(TensorIteratorBase&, int64_t);
+using gelu_backward_fn = void (*)(TensorIteratorBase&, int64_t);
 
 DECLARE_DISPATCH(elu_fn, elu_stub);
 DECLARE_DISPATCH(elu_backward_fn, elu_backward_stub);

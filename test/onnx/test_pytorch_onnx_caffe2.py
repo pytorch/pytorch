@@ -2383,7 +2383,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
     def test_gelu(self):
         class GeluModel(torch.nn.Module):
             def forward(self, x):
-                return torch.nn.functional.gelu(x, False)
+                return torch.nn.functional.gelu(x, 'none')
 
         model = GeluModel()
         inputs = torch.randn(2, 4, 5, 6, requires_grad=True)
@@ -2393,7 +2393,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
     def test_tanh_gelu(self):
         class GeluModel(torch.nn.Module):
             def forward(self, x):
-                return torch.nn.functional.gelu(x, True)
+                return torch.nn.functional.gelu(x, 'tanh')
 
         model = GeluModel()
         inputs = torch.randn(2, 4, 5, 6, requires_grad=True)

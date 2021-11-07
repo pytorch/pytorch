@@ -523,7 +523,7 @@ RegisterNNCLoweringsFunction aten_relu6(
     });
 
 RegisterNNCLoweringsFunction aten_gelu(
-    {"aten::gelu(Tensor self) -> (Tensor)"},
+    {"aten::gelu(Tensor self, int approximate=0) -> (Tensor)"},
     [](const std::vector<ArgValue>& inputs,
        const std::vector<ExprHandle>& outputShape,
        const c10::optional<ScalarType>& outputType,

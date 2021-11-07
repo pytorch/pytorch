@@ -913,7 +913,7 @@ const std::vector<std::string> functions = {
                 return grad_output * torch.where(self > 0, 1.0, negative_slope).type_as(result), None
             return result, backward
 
-        def gelu(self : Tensor, approximate : bool):
+        def gelu(self : Tensor, approximate : int):
             result = torch.gelu(self, approximate)
             def backward(grad_output):
                 return torch.gelu_backward(grad_output, self, approximate), None

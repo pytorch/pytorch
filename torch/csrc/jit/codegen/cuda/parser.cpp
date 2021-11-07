@@ -1386,12 +1386,12 @@ class IrParser {
 
     {
       auto ptr_op = getOperatorForLiteral(
-          "aten::gelu(Tensor self, bool approximate=False) -> Tensor");
+          "aten::gelu(Tensor self, int approximate=0) -> Tensor");
       REGISTER_PARSE_RULE(
           ptr_op,
           {
             auto self = value_map[node->inputs()[0]->unique()];
-            auto approximate = constant_as<bool>(node->input(1));
+            auto approximate = constant_as<int64_t>(node->input(1));
             TORCH_INTERNAL_ASSERT(
                 approximate.has_value(),
                 "The approximate (bool) parameter is required.");
@@ -1407,13 +1407,13 @@ class IrParser {
 
     {
       auto ptr_op = getOperatorForLiteral(
-          "aten::gelu_backward(Tensor grad_output, Tensor self, bool approximate=False) -> Tensor");
+          "aten::gelu_backward(Tensor grad_output, Tensor self, int approximate=0) -> Tensor");
       REGISTER_PARSE_RULE(
           ptr_op,
           {
             auto grad_out = value_map[node->inputs()[0]->unique()];
             auto self = value_map[node->inputs()[1]->unique()];
-            auto approximate = constant_as<bool>(node->input(2));
+            auto approximate = constant_as<int64_t>(node->input(2));
             TORCH_INTERNAL_ASSERT(
                 approximate.has_value(),
                 "The approximate (bool) parameter is required.");
@@ -1956,13 +1956,13 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
 
   static auto gelu_schema =
       getOperatorForLiteral(
-          "aten::gelu(Tensor self, bool approximate=False) -> Tensor")
+          "aten::gelu(Tensor self, int approximate=0) -> Tensor")
           ->schema();
   if (node->matches(gelu_schema)) {
     switch (offset) {
       // argument 1: approximate;
       case 1:
-        profileBool(pr, node, offset);
+        profileInt(pr, node, offset);
         break;
       default:
         return false;
@@ -1972,13 +1972,13 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
 
   static auto gelu_backward_schema =
       getOperatorForLiteral(
-          "aten::gelu_backward(Tensor grad_output, Tensor self, bool approximate=False) -> Tensor")
+          "aten::gelu_backward(Tensor grad_output, Tensor self, int approximate=0) -> Tensor")
           ->schema();
   if (node->matches(gelu_backward_schema)) {
     switch (offset) {
       // argument 2: approximate;
       case 2:
-        profileBool(pr, node, offset);
+        profileInt(pr, node, offset);
         break;
       default:
         return false;

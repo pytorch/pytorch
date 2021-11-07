@@ -142,7 +142,7 @@ const OperatorSet& supported_eltwise_set() {
       "aten::leaky_relu(Tensor self, Scalar negative_slope=0.01) -> Tensor",
       "aten::softplus(Tensor self, Scalar beta=1, Scalar threshold=20) -> Tensor",
       "aten::relu6(Tensor self) -> Tensor",
-      "aten::gelu(Tensor self, bool approximate) -> Tensor",
+      "aten::gelu(Tensor self, int approximate=0) -> Tensor",
       "aten::addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor",
       "aten::neg(Tensor self) -> Tensor",
       "aten::reciprocal(Tensor self) -> Tensor",

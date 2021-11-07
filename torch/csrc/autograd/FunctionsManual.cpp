@@ -12,6 +12,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/LinearAlgebraUtils.h>
+#include <ATen/native/Activation.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/Utils.h>
@@ -2163,8 +2164,8 @@ Tensor gelu_double_backward(
                 const Tensor & ggI,
                 const Tensor & gO,
                 const Tensor & input,
-                bool approximate) {
-  if (approximate) {
+                int64_t approximate) {
+  if (approximate == at::Gelu::Tanh) {
     constexpr auto kBeta = M_SQRT2 * M_2_SQRTPI * 0.5;
     constexpr auto kKappa = 0.044715;
 

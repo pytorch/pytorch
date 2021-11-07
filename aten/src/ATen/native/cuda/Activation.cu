@@ -392,8 +392,8 @@ void elu_backward_kernel(TensorIteratorBase& iter, const Scalar& alpha, const Sc
   });
 }
 
-void GeluCUDAKernelImpl(TensorIteratorBase& it, bool approximate) {
-  if (approximate) {
+void GeluCUDAKernelImpl(TensorIteratorBase& it, int64_t approximate) {
+  if (approximate == at::Gelu::Tanh) {
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, it.dtype(), "GeluCUDAKernelImpl", [&]() {
       using T_ACC = acc_type<scalar_t, true>;
       gpu_kernel(it, [] GPU_LAMBDA(scalar_t x) -> scalar_t {
@@ -415,8 +415,8 @@ void GeluCUDAKernelImpl(TensorIteratorBase& it, bool approximate) {
   }
 }
 
-void GeluBackwardCUDAKernelImpl(TensorIteratorBase& it, bool approximate) {
-  if (approximate) {
+void GeluBackwardCUDAKernelImpl(TensorIteratorBase& it, int64_t approximate) {
+  if (approximate == at::Gelu::Tanh) {
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
         it.dtype(), "GeluBackwardCUDAKernelImpl", [&]() {
           using T_ACC = acc_type<scalar_t, true>;

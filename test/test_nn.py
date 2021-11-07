@@ -8969,14 +8969,14 @@ class TestNN(NNTestCase):
                 Z = M_SQRT_2_PI * (X + 0.044715 * np.power(X, 3.0))
                 return 0.5 * X * (1.0 + np.tanh(Z))
 
-            for approximate in [False, True]:
+            for approximate in ['none', 'tanh']:
                 for d in devices:
                     if contiguous:
                         X = torch.rand(n, m, dtype=dtype, requires_grad=True, device=d)
                     else:
                         X = torch.rand(n, m, dtype=dtype, requires_grad=True, device=d)[:, ::2]
                     res = F.gelu(X, approximate)
-                    if approximate:
+                    if approximate == 'tanh':
                         ref = _tanh_gelu_ref(X.to(numpy_dtype).cpu().detach().numpy())
                     else:
                         ref = _gelu_ref(X.to(numpy_dtype).cpu().detach().numpy())
