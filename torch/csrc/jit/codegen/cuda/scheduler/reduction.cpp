@@ -353,7 +353,6 @@ ReductionParams innerReductionHeuristic(
         bdimx % warp_size == 0 ? bdimx : bdimx + warp_size - bdimx % warp_size;
   }
 
-
   if (inner_reduction_unroll_factor || iter_unroll_factor == 1) {
     rparams.unroll_inner_reduction = true;
     rparams.unroll_factor_inner_reduction = inner_reduction_unroll_factor;
