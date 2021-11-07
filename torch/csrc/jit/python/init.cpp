@@ -683,8 +683,10 @@ void initJITBindings(PyObject* module) {
             return oldState;
           })
       .def("_jit_nvfuser_enabled", &RegisterCudaFuseGraph::isRegistered)
+#ifdef HAVE_MKLDNN
       .def("_jit_set_llga_enabled", &RegisterLlgaFuseGraph::setEnabled)
       .def("_jit_llga_enabled", &RegisterLlgaFuseGraph::isEnabled)
+#endif
       .def(
           "_jit_set_profiling_mode",
           [](bool profiling_flag) {

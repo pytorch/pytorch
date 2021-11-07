@@ -1802,6 +1802,7 @@ if(NOT INTERN_BUILD_MOBILE)
   set(AT_MKLDNN_ENABLED 0)
   set(CAFFE2_USE_MKLDNN OFF)
   if(USE_MKLDNN)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHAVE_MKLDNN")
     if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
       message(WARNING
         "x64 operating system is required for MKLDNN. "

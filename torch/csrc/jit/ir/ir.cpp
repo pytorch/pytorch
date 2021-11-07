@@ -508,7 +508,9 @@ void Node::lint() const {
       break;
     case prim::FusionGroup:
     case prim::CudaFusionGroup:
+#ifdef HAVE_MKLDNN
     case prim::LlgaFusionGroup:
+#endif
       checkSameDevice(this);
       // TODO: Typecheck the parameters
       g(attr::Subgraph)->lint();

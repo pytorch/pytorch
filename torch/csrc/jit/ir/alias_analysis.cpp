@@ -615,7 +615,9 @@ void AliasDb::analyzeImpl(Node* node) {
       return analyzeLoop(node);
     case prim::FusionGroup:
     case prim::CudaFusionGroup:
+#ifdef HAVE_MKLDNN
     case prim::LlgaFusionGroup:
+#endif
     case prim::FunctionalGraph:
     case prim::DifferentiableGraph:
     case prim::FallbackGraph:

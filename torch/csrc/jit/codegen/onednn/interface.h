@@ -3,6 +3,8 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/pass_manager.h>
 
+#ifdef HAVE_MKLDNN
+
 namespace torch {
 namespace jit {
 namespace fuser {
@@ -55,3 +57,4 @@ struct TORCH_API RegisterLlgaFuseGraph
 
 } // namespace jit
 } // namespace torch
+#endif

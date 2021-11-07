@@ -28,6 +28,7 @@ def get_eltwise_fn(name):
         raise NameError('Eltwise function %s not found' % name)
 
 
+@unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
 class TestOp(JitLlgaTestCase):
     def test_conv2d(self):
         for [
@@ -257,6 +258,7 @@ class TestOp(JitLlgaTestCase):
         self.assertEqual(m(x), traced(x))
 
 
+@unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
 class TestFusionPattern(JitLlgaTestCase):
     def test_conv2d_eltwise(self):
         class M(nn.Module):
@@ -434,6 +436,7 @@ class TestFusionPattern(JitLlgaTestCase):
         self.assertFused(graph, ['aten::_convolution', 'aten::relu'])
 
 
+@unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
 class TestModel(JitLlgaTestCase):
     @skipIfNoTorchVision
     def _test_vision(self, model_name):
