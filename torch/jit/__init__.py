@@ -201,14 +201,16 @@ def enable_onednn_fusion(enabled: bool):
     """
     Enables or disables onednn JIT fusion based on the parameter `enabled`.
     """
-
-    torch._C._jit_set_llga_enabled(enabled)
+    if torch._C.has_mkldnn:
+        torch._C._jit_set_llga_enabled(enabled)
 
 def onednn_fusion_enabled():
     """
     Returns whether onednn JIT fusion is enabled
     """
-    return torch._C._jit_llga_enabled()
+    if torch._C.has_mkldnn:
+        return torch._C._jit_llga_enabled()
+    return False
 
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")
