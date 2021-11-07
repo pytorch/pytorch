@@ -6280,6 +6280,9 @@ TEST(NVFuserTest, FusionSoftmaxComputeAt_CUDA) {
 
 // Similar to FusionReduction but uses grid reduction
 TEST(NVFuserTest, FusionGridReduction1_CUDA) {
+  if (at::cuda::getDeviceProperties(0)->major < 6) {
+    return;
+  }
   const int gdimx = 32;
   const int bdimx = 128;
 
@@ -6338,6 +6341,9 @@ TEST(NVFuserTest, FusionGridReduction1_CUDA) {
 
 // Same test as the above but uses BIDy and TIDx for reduction
 TEST(NVFuserTest, FusionGridReduction2_CUDA) {
+  if (at::cuda::getDeviceProperties(0)->major < 6) {
+    return;
+  }
   const int gdimy = 32;
   const int bdimx = 128;
 
@@ -10732,6 +10738,9 @@ TEST(NVFuserTest, FusionBiasGeluFwd_CUDA) {
 }
 
 TEST(NVFuserTest, FusionBiasGeluBwd_CUDA) {
+  if (at::cuda::getDeviceProperties(0)->major < 6) {
+    return;
+  }
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -17676,6 +17685,9 @@ TEST(NVFuserTest, FusionPredicateParallelizedDomains_CUDA) {
 
 // Repro of #1102 and #1129
 TEST(NVFuserTest, FusionSmemPredicateUnswitch_CUDA) {
+  if (at::cuda::getDeviceProperties(0)->major < 6) {
+    return;
+  }
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -18043,6 +18055,9 @@ TEST(NVFuserTest, FusionTestWarpSoftMax_CUDA) {
 }
 
 TEST(NVFuserTest, FusionIssue1133_CUDA) {
+  if (at::cuda::getDeviceProperties(0)->major < 6) {
+    return;
+  }
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -18149,6 +18164,9 @@ TEST(NVFuserTest, FusionRfactorContigIDs_CUDA) {
 }
 
 TEST(NVFuserTest, FusionIssue1223_CUDA) {
+  if (at::cuda::getDeviceProperties(0)->major < 6) {
+    return;
+  }
   Fusion fusion;
   FusionGuard fg(&fusion);
 
