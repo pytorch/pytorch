@@ -1,7 +1,6 @@
-#include "caffe2/mpi/mpi_ops.h"
 #include "caffe2/core/context_gpu.h"
+#include "caffe2/mpi/mpi_ops.h"
 #include "caffe2/operators/operator_fallback_gpu.h"
-
 
 namespace caffe2 {
 
@@ -61,26 +60,16 @@ REGISTER_CUDA_OPERATOR(MPISendTensor, MPISendTensorOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(MPIReceiveTensor, MPIReceiveTensorOp<CUDAContext>);
 #else
 REGISTER_CUDA_OPERATOR(MPIBroadcast, GPUFallbackOp);
-REGISTER_CUDA_OPERATOR(
-    MPIReduce,
-    GPUFallbackOp);
-REGISTER_CUDA_OPERATOR(
-    MPIAllgather,
-    GPUFallbackOp);
-REGISTER_CUDA_OPERATOR(
-    MPISendTensor,
-    GPUFallbackOp);
-REGISTER_CUDA_OPERATOR(
-    MPIReceiveTensor,
-    GPUFallbackOpEx<SkipIndices<1, 2>>);
+REGISTER_CUDA_OPERATOR(MPIReduce, GPUFallbackOp);
+REGISTER_CUDA_OPERATOR(MPIAllgather, GPUFallbackOp);
+REGISTER_CUDA_OPERATOR(MPISendTensor, GPUFallbackOp);
+REGISTER_CUDA_OPERATOR(MPIReceiveTensor, GPUFallbackOpEx<SkipIndices<1, 2>>);
 #endif
 
 #if CAFFE2_HAS_CUDA_MPI_ALLREDUCE
 REGISTER_CUDA_OPERATOR(MPIAllreduce, MPIAllreduceOp<float, CUDAContext>);
 #else
-REGISTER_CUDA_OPERATOR(
-    MPIAllreduce,
-    GPUFallbackOp);
+REGISTER_CUDA_OPERATOR(MPIAllreduce, GPUFallbackOp);
 #endif
 
-}  // namespace caffe2
+} // namespace caffe2
