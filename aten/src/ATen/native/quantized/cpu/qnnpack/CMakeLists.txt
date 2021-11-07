@@ -319,7 +319,6 @@ endif()
 target_include_directories(pytorch_qnnpack PUBLIC include)
 target_include_directories(pytorch_qnnpack PUBLIC src)
 set_target_properties(pytorch_qnnpack PROPERTIES PUBLIC_HEADER include/pytorch_qnnpack.h)
-set_target_properties(pytorch_qnnpack PROPERTIES PUBLIC_HEADER include/conv_utils.h)
 set_target_properties(pytorch_qnnpack PROPERTIES PUBLIC_HEADER include/qnnpack_func.h)
 
 # ---[ Configure clog

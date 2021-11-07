@@ -208,6 +208,7 @@ class _RemoteModule(nn.Module):
             >>> rpc.shutdown()
         """
         super().__init__()
+        torch._C._log_api_usage_once("torch.distributed.nn.api.remote_module")
 
         enable_moving_cpu_tensors_to_cuda = self._prepare_init(remote_device)
 
