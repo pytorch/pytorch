@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: quantization"]
+
 # Torch
 import torch
 from torch.ao.quantization import (
