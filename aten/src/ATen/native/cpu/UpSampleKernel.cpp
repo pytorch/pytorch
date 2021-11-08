@@ -702,7 +702,7 @@ struct HelperInterpBase {
 
     int64_t xmin, xmax;
 
-    for (int64_t i = 0; i < output_size; i++) {
+    for (const auto i : c10::irange(output_size)) {
       HelperInterpBase::_compute_weights_aa(
           i,
           input_size,
@@ -1063,7 +1063,7 @@ void _separable_upsample_generic_Nd_kernel_impl_single_dim(
       shape.size() == oshape.size() && shape.size() == 2 + out_ndims);
   TORCH_INTERNAL_ASSERT(strides.size() == 2 + out_ndims);
 
-  for (int i = 0; i < out_ndims; i++) {
+  for (const auto i : c10::irange(out_ndims)) {
     shape[i + 2] = oshape[i + 2];
   }
   strides[interp_dim] = 0;
@@ -1122,7 +1122,7 @@ void separable_upsample_generic_Nd_kernel_impl(
 
   auto temp_oshape = input.sizes().vec();
   at::Tensor temp_output, temp_input = input;
-  for (int i = 0; i < out_ndims - 1; i++) {
+  for (const auto i : c10::irange(out_ndims - 1)) {
     int interp_dim = 2 + out_ndims - 1 - i;
     temp_oshape[interp_dim] = output.sizes()[interp_dim];
     temp_output = at::empty(temp_oshape, input.options());
@@ -1427,7 +1427,7 @@ void cpu_upsample_genNd_backward_aa(
     typedef scalar_t (*aa_filter_fn_t)(scalar_t);
     aa_filter_fn_t filter_fn = &F::aa_filter;
 
-    for (int64_t oh = 0; oh < output_height; oh++) {
+    for (const auto oh : c10::irange(output_height)) {
       F::_compute_weights_aa(
           oh,
           input_height,
@@ -1439,7 +1439,7 @@ void cpu_upsample_genNd_backward_aa(
           ymin,
           ysize);
 
-      for (int64_t ow = 0; ow < output_width; ow++) {
+      for (const auto ow : c10::irange(output_width)) {
         F::_compute_weights_aa(
             ow,
             input_width,
@@ -1451,12 +1451,12 @@ void cpu_upsample_genNd_backward_aa(
             xmin,
             xsize);
 
-        for (int64_t c = begin; c < end; c++) {
+        for (const auto c : c10::irange(begin, end)) {
           scalar_t grad_output_value =
               grad_output_data[c * output_slice_size + oh * output_width + ow];
 
-          for (size_t y = 0; y < ysize; y++) {
-            for (size_t x = 0; x < xsize; x++) {
+          for (const auto y : c10::irange(ysize)) {
+            for (const auto x : c10::irange(xsize)) {
               *input_indexr(c, ymin + y, xmin + x) +=
                   wx[x] * wy[y] * grad_output_value;
             }
