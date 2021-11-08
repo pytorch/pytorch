@@ -319,79 +319,6 @@ cudaError_t cudaMallocMaybeCapturing(void** p, size_t size) {
 
 } // namespace
 
-class CachingAllocatorConfig {
- public:
-  static size_t max_split_size() {
-    return instance().m_max_split_size;
-  }
-
-  static const std::string& allocator_backend() {
-    return instance().m_allocator_backend;
-  }
-
- private:
-  static std::once_flag s_flag;
-  static CachingAllocatorConfig* s_instance;
-  static CachingAllocatorConfig& instance() {
-    std::call_once(s_flag, &CachingAllocatorConfig::init);
-    return *s_instance;
-  }
-  static void init() {
-    s_instance = new CachingAllocatorConfig();
-    s_instance->parseArgs();
-  }
-
-  CachingAllocatorConfig()
-      : m_max_split_size(std::numeric_limits<size_t>::max()),
-        m_allocator_backend("native") {}
-  size_t m_max_split_size;
-  std::string m_allocator_backend;
-
-  void parseArgs() {
-    const char* val = getenv("PYTORCH_CUDA_ALLOC_CONF");
-    if (val != NULL) {
-      const std::string config(val);
-
-      std::regex exp("[\\s,]+");
-      std::sregex_token_iterator it(config.begin(), config.end(), exp, -1);
-      std::sregex_token_iterator end;
-      std::vector<std::string> options(it, end);
-
-      for (auto option : options) {
-        std::regex exp2("[:]+");
-        std::sregex_token_iterator it2(option.begin(), option.end(), exp2, -1);
-        std::sregex_token_iterator end2;
-        std::vector<std::string> kv(it2, end2);
-        if (kv.size() >= 2) {
-          /* Maximum split size in MB.  Limited to large size blocks */
-          if (kv[0].compare("max_split_size_mb") == 0) {
-            size_t val2 = stoi(kv[1]);
-            TORCH_CHECK(
-                val2 > kLargeBuffer / (1024 * 1024),
-                "CachingAllocator option max_split_size_mb too small, must be >= ",
-                kLargeBuffer / (1024 * 1024),
-                "");
-            val2 = std::max(val2, kLargeBuffer / (1024 * 1024));
-            val2 = std::min(
-                val2, (std::numeric_limits<size_t>::max() / (1024 * 1024)));
-            m_max_split_size = val2 * 1024 * 1024;
-          } else if (kv[0].compare("backend") == 0) {
-            TORCH_CHECK(((kv[1].compare("native") == 0) ||
-                         (kv[1].compare("cudaMallocAsync") == 0)),
-                        "Unknown allocator backend, "
-                        "options are native and cudaMallocAsync");
-            m_allocator_backend = kv[1];
-          } else {
-            TORCH_CHECK(false, "Unrecognized CachingAllocator option: ", kv[0]);
-          }
-        }
-      }
-    }
-  }
-};
-CachingAllocatorConfig* CachingAllocatorConfig::s_instance;
-std::once_flag CachingAllocatorConfig::s_flag;
-
 class DeviceCachingAllocator {
  private:
   // lock around all operations
@@ -598,7 +525,7 @@ class DeviceCachingAllocator {
     update_stat_array(stats.allocated_bytes, block->size, params.stat_types);
     update_stat_array(stats.active, 1, params.stat_types);
     update_stat_array(stats.active_bytes, block->size, params.stat_types);
-    if (block->size >= CachingAllocatorConfig::max_split_size())
+    if (block->size >= stats.max_split_size)
       update_stat(stats.oversize_allocations, 1);
 
     c10::reportMemoryUsageToProfiler(
@@ -627,7 +554,7 @@ class DeviceCachingAllocator {
         true;
     update_stat_array(stats.allocation, -1, {stat_types});
     update_stat_array(stats.allocated_bytes, -block->size, {stat_types});
-    if (block->size >= CachingAllocatorConfig::max_split_size())
+    if (block->size >= stats.max_split_size)
       update_stat(stats.oversize_allocations, -1);
 
     if (!block->stream_uses.empty()) {
@@ -1018,7 +945,7 @@ class DeviceCachingAllocator {
     if (block->pool->is_small) {
       return remaining >= kMinBlockSize;
     } else {
-      return (size < CachingAllocatorConfig::max_split_size()) &&
+      return (size < stats.max_split_size) &&
           (remaining > kSmallSize);
     }
   }
@@ -1039,11 +966,11 @@ class DeviceCachingAllocator {
     if (it == pool.blocks.end() || (*it)->stream != p.stream())
       return false;
     // Do not return an oversized block for a large request
-    if ((p.size() < CachingAllocatorConfig::max_split_size()) &&
-        ((*it)->size >= CachingAllocatorConfig::max_split_size()))
+    if ((p.size() < stats.max_split_size) &&
+        ((*it)->size >= stats.max_split_size))
       return false;
     // Allow oversized block size to be rounded up but within a limit
-    if ((p.size() >= CachingAllocatorConfig::max_split_size()) &&
+    if ((p.size() >= stats.max_split_size) &&
         ((*it)->size >= p.size() + kLargeBuffer))
       return false;
     p.block = *it;
@@ -1107,7 +1034,7 @@ class DeviceCachingAllocator {
     p.block = new Block(p.device(), p.stream(), size, p.pool, (char*)ptr);
     update_stat_array(stats.segment, 1, p.stat_types);
     update_stat_array(stats.reserved_bytes, size, p.stat_types);
-    if (size >= CachingAllocatorConfig::max_split_size())
+    if (size >= stats.max_split_size)
       update_stat(stats.oversize_segments, 1);
 
     // p.block came from new, not cudaMalloc. It should not be nullptr here.
@@ -1119,13 +1046,13 @@ class DeviceCachingAllocator {
    * **/
   /** to satisfy the target size **/
   bool release_available_cached_blocks(const AllocParams& p) {
-    if (CachingAllocatorConfig::max_split_size() ==
+    if (stats.max_split_size ==
         std::numeric_limits<size_t>::max())
       return false;
     BlockPool& pool = *p.pool;
     Block key = p.search_key;
-    key.size = (key.size < CachingAllocatorConfig::max_split_size())
-        ? CachingAllocatorConfig::max_split_size()
+    key.size = (key.size < stats.max_split_size)
+        ? stats.max_split_size
         : key.size;
     auto it = pool.blocks.lower_bound(&key);
     if (it == pool.blocks.end() || (*it)->stream != p.stream()) {
@@ -1137,7 +1064,7 @@ class DeviceCachingAllocator {
       --it; // Back up one item.  Now on the largest block for the correct
             // stream
       while ((totalReleased < key.size) &&
-             ((*it)->size >= CachingAllocatorConfig::max_split_size()) &&
+             ((*it)->size >= stats.max_split_size) &&
              ((*it)->stream == p.stream())) {
         auto cur = it;
         totalReleased += (*it)->size;
@@ -1200,7 +1127,7 @@ class DeviceCachingAllocator {
     stat_types[static_cast<size_t>(get_stat_type_for_pool(*pool))] = true;
     update_stat_array(stats.segment, -1, stat_types);
     update_stat_array(stats.reserved_bytes, -block->size, stat_types);
-    if (block->size >= CachingAllocatorConfig::max_split_size())
+    if (block->size >= stats.max_split_size)
       update_stat(stats.oversize_segments, -1);
 
     pool->blocks.erase(block);

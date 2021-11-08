@@ -1,6 +1,7 @@
 #ifndef THC_DEVICE_ALLOCATOR_INC
 #define THC_DEVICE_ALLOCATOR_INC
 #include <c10/core/Allocator.h>
+#include <c10/cuda/CachingAllocatorConfig.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAMacros.h>
 #include <c10/cuda/CUDAStream.h>
@@ -148,10 +149,6 @@ CUDA_ALLOCATOR_BACKEND_INTERFACE
 namespace CudaMallocAsync {
 CUDA_ALLOCATOR_BACKEND_INTERFACE
 }
-
-// Returns string describing the allocator backend
-// (currently "native" or "cudaMallocAsync")
-std::string allocatorBackend();
 
 // The following functions ARE meant to be called directly by clients.
 // They'll choose the appropriate backend based on the runtime value of

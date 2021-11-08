@@ -147,10 +147,11 @@ void CUDAGraph::capture_end() {
   if (version < 11040) {
     AT_CUDA_CHECK(cudaGraphInstantiate(&graph_exec_, graph_, NULL, NULL, 0));
   } else {
-    // If there's a chance we're using capturable cudaMallocAsync, in typical graph
-    // usage some tensors (e.g. the tensors used for graph IO) are not freed between
-    // graph replays. To accommodate these, the graph's internal bookkeeping requires
-    // that we instantiate with
+    // In typical graph usage some tensors (e.g. the tensors used for graph IO) are not
+    // freed between replays.
+    // For CUDA 11.4+, there's a chance the allocator backend is cudaMallocAsync.
+    // cudaMallocAsync is generally graph-safe, but if some tensors are not freed
+    // between replays, the graph's internal bookkeeping requires that we instantiate with
     // cudaGraphInstantiateFlagAutoFreeOnLaunch. See
     // cudaGraphLaunch
     // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__GRAPH.html#group__CUDART__GRAPH_1g1accfe1da0c605a577c22d9751a09597
