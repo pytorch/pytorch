@@ -283,11 +283,22 @@ ModelCompatCheckResult is_compatible(
   ModelCompatCheckResult result = {ModelCompatibilityStatus::OK, {}};
   // Check that the models bytecode version is less than or equal to
   // kMaxSupportedBytecodeVersion from the runtime
-  if (model_info.bytecode_version > runtime_info.bytecode_version) {
+  if (model_info.bytecode_version >
+      runtime_info.min_max_supported_bytecode_version.second) {
     result.status = ModelCompatibilityStatus::ERROR;
     std::ostringstream s;
     s << "model bytecode version " << model_info.bytecode_version
-      << "is greater than the runtimes " << runtime_info.bytecode_version;
+      << "is greater than the max supported bytecode version in runtimes "
+      << runtime_info.min_max_supported_bytecode_version.second;
+    result.errors.emplace_back(s.str());
+  } else if (
+      model_info.bytecode_version <
+      runtime_info.min_max_supported_bytecode_version.first) {
+    result.status = ModelCompatibilityStatus::ERROR;
+    std::ostringstream s;
+    s << "model bytecode version " << model_info.bytecode_version
+      << "is less than the minimum supported bytecode version in runtime "
+      << runtime_info.min_max_supported_bytecode_version.first;
     result.errors.emplace_back(s.str());
   }
 
