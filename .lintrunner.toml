@@ -117,3 +117,15 @@ args = [
     '--',
     '@{{PATHSFILE}}'
 ]
+
+[[linter]]
+name = 'CIRCLECI'
+include_patterns=['.circleci/**']
+args = [
+    'python3',
+    'tools/linter/adapters/circleci_linter.py',
+    '--regen-script-working-dir=.circleci',
+    '--config-yml=.circleci/config.yml',
+    '--regen-script=generate_config_yml.py',
+]
+bypass_matched_file_filter = true

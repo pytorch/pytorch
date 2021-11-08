@@ -26,7 +26,7 @@ class LintSeverity(str, Enum):
 
 
 class LintMessage(NamedTuple):
-    path: str
+    path: Optional[str]
     line: Optional[int]
     char: Optional[int]
     code: str
@@ -97,7 +97,7 @@ def check_file(
     except OSError as err:
         return [
             LintMessage(
-                path=filename,
+                path=None,
                 line=None,
                 char=None,
                 code="MYPY",
