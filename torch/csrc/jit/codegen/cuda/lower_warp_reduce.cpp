@@ -1,3 +1,4 @@
+#include <ATen/cuda/CUDAContext.h>
 #include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
@@ -452,7 +453,8 @@ class FuseBroadcastWithWarpReduce {
 
   // Checks if the given IterDomain is mapped to a single warp,
   //  i.e. they are known at compile time to be of constant
-  //   size of C10_WARP_SIZE and they are paralleled on TIDx
+  //   size of warp_size and they are paralleled on TIDx
+  int warp_size = at::cuda::warp_size();
   bool isSingleWarp(IterDomain* id) {
     if (id->getParallelType() != ParallelType::TIDx) {
       return false;
@@ -464,12 +466,12 @@ class FuseBroadcastWithWarpReduce {
 
     // Prioritize checking for padded dimension
     if (id->getMaybeSizeAfterPadding().has_value()) {
-      return id->getMaybeSizeAfterPadding().value() == C10_WARP_SIZE;
+      return id->getMaybeSizeAfterPadding().value() == warp_size;
     }
 
     if (id->extent()->isConstScalar()) {
       ExpressionEvaluator evaluator(FusionGuard::getCurFusion());
-      return evaluator.evaluate(id->extent()).value() == C10_WARP_SIZE;
+      return evaluator.evaluate(id->extent()).value() == warp_size;
     }
 
     return false;
