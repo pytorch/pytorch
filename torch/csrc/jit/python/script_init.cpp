@@ -14,6 +14,7 @@
 #include <torch/csrc/jit/python/module_python.h>
 #include <torch/csrc/jit/python/python_ivalue.h>
 #include <torch/csrc/jit/python/python_sugared_value.h>
+#include <torch/csrc/jit/operator_upgraders/upgraders.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/testing/file_check.h>
 
@@ -1703,6 +1704,12 @@ void initJitScriptBindings(PyObject* module) {
     Parser p(std::make_shared<Source>(comment));
     return Decl(p.parseTypeComment());
   });
+
+  m.def("populate_upgraders_map", [](std::unordered_map<std::string, std::string> content) {
+    populate_upgraders_map(content);
+  });
+
+  m.def("print_upgraders_map", &print_upgraders_map);
 
   m.def("merge_type_from_type_comment", &mergeTypesFromTypeComment);
   m.def(

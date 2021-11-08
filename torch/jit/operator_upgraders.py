@@ -66,13 +66,29 @@ def format_bytecode(code_table):
         code_table_dict[code_list[0]] = listify(code_list[1:])
     return code_table_dict
 
-yaml_content = [
-    {"div_Tensor_0_3": format_bytecode(torch._C.MobileCode(div_Tensor_0_3.graph, "div_Tensor_0_3").bytecode_table())},
-    {"div_Scalar_0_3": format_bytecode(torch._C.MobileCode(div_Scalar_0_3.graph, "div_Scalar_0_3").bytecode_table())},
-    {"div_out_0_3": format_bytecode(torch._C.MobileCode(div_out_0_3.graph, "div_out_0_3").bytecode_table())},
-    {"div__Tensor_0_3": format_bytecode(torch._C.MobileCode(div__Tensor_0_3.graph, "div__Tensor_0_3").bytecode_table())},
-    {"div__Scalar_0_3": format_bytecode(torch._C.MobileCode(div__Scalar_0_3.graph, "div__Scalar_0_3").bytecode_table())},
-]
+def generate_bytecode(file_name):
+    yaml_content = [
+        {"div_Tensor_0_3": format_bytecode(torch._C.MobileCode(div_Tensor_0_3.graph, "div_Tensor_0_3").bytecode_table())},
+        {"div_Scalar_0_3": format_bytecode(torch._C.MobileCode(div_Scalar_0_3.graph, "div_Scalar_0_3").bytecode_table())},
+        {"div_out_0_3": format_bytecode(torch._C.MobileCode(div_out_0_3.graph, "div_out_0_3").bytecode_table())},
+        {"div__Tensor_0_3": format_bytecode(torch._C.MobileCode(div__Tensor_0_3.graph, "div__Tensor_0_3").bytecode_table())},
+        {"div__Scalar_0_3": format_bytecode(torch._C.MobileCode(div__Scalar_0_3.graph, "div__Scalar_0_3").bytecode_table())},
+    ]
 
-stream = open('upgraders.yaml', 'w')
-yaml.dump(yaml_content, stream)
+    stream = open(file_name, 'w')
+    yaml.dump(yaml_content, stream)
+
+def generate_graph():
+    """
+    returns a map that maps upgrader name to the corresponding TS graph
+    """
+
+    content = {
+        "div_Tensor_0_3": str(div_Tensor_0_3.graph),
+        "div_Scalar_0_3": str(div_Scalar_0_3.graph),
+        "div_out_0_3": str(div_out_0_3.graph),
+        "div__Tensor_0_3": str(div__Tensor_0_3.graph),
+        "div__Scalar_0_3": str(div__Scalar_0_3.graph)
+    }
+
+    torch._C.populate_upgraders_map(content)
