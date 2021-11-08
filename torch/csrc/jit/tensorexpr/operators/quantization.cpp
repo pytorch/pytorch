@@ -316,7 +316,6 @@ Tensor computeQuantizedAdd(
   const auto out_qzero = c10::get<int64_t>(inputs[3]);
   // Change to dtype based on outputType when dtype propagation implemented
   const auto out_qdtype = immQDType(qa);
-  // TODO: check what are output strides
   const bool isQAChannelsLast = isChannelsLast(qa);
   const bool isQBChannelsLast = isChannelsLast(qb);
   auto ResultBuf = (isQAChannelsLast || isQBChannelsLast)

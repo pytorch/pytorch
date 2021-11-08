@@ -10,6 +10,7 @@
 #include <ATen/native/xnnpack/OpContext.h>
 #include <ATen/quantized/Quantizer.h>
 #include <c10/core/TensorOptions.h>
+#include <c10/util/ArrayRef.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/serialization/import_source.h>
 #include <torch/csrc/jit/serialization/pickle.h>
@@ -19,6 +20,22 @@
 namespace torch {
 namespace jit {
 namespace tensorexpr {
+
+c10::MemoryFormat deduce_memory_format(
+    c10::IntArrayRef strides,
+    c10::IntArrayRef dims) {
+  if (strides.size() == 4 && strides[3] == dims[1] && strides[1] == 1l) {
+    return c10::MemoryFormat::ChannelsLast;
+  }
+  return c10::MemoryFormat::Contiguous;
+}
+
+c10::MemoryFormat deduce_memory_format(
+    const std::vector<int64_t>& strides,
+    const std::vector<int64_t>& dims) {
+  return deduce_memory_format(
+      c10::IntArrayRef(strides), c10::IntArrayRef(dims));
+}
 
 std::vector<at::Tensor> constructTensors(
     int64_t bufs_num,
@@ -47,15 +64,12 @@ std::vector<at::Tensor> constructTensors(
 
   std::vector<at::Tensor> tensors;
   for (const auto i : c10::irange(buf_data_vec.size())) {
-    auto memory_format = c10::MemoryFormat::Contiguous;
-    if (buf_strides_vec[i].size() == 4 && buf_strides_vec[i][3] != 1) {
-      memory_format = c10::MemoryFormat::ChannelsLast;
-    }
     auto options = at::TensorOptions()
                        .dtype(buf_dtypes_vec[i])
                        .layout(at::kStrided)
                        .device(at::kCPU) // TODO: support GPUs too
-                       .memory_format(memory_format)
+                       .memory_format(deduce_memory_format(
+                           buf_strides_vec[i], buf_dims_vec[i]))
                        .requires_grad(false);
     auto tensor = at::from_blob(
         buf_data_vec[i], buf_dims_vec[i], buf_strides_vec[i], options);
@@ -133,31 +147,19 @@ void nnc_aten_quantized_conv2d(
   const double x_qscale = ((double*)extra_args)[0];
   const int64_t x_qzero = extra_args[1];
   const c10::ScalarType x_qdtype = static_cast<c10::ScalarType>(extra_args[2]);
-  std::vector<std::vector<int64_t>> buf_strides_vec;
-  int64_t buf_strides_idx = 0;
-  for (const auto i : c10::irange(bufs_num)) {
-    buf_strides_vec.emplace_back();
-    for (const auto dim : c10::irange(buf_ranks[i])) {
-      (void)dim;
-      buf_strides_vec[i].push_back(buf_strides[buf_strides_idx++]);
-    }
-  }
-  auto memory_format = c10::MemoryFormat::Contiguous;
-  if (buf_strides_vec[1].size() == 4 && buf_strides_vec[1][3] != 1) {
-    memory_format = c10::MemoryFormat::ChannelsLast;
-  }
   at::Tensor qx = at::from_blob_quantized_per_tensor_affine(
       buf_data[1],
       // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
       tensors[1].sizes(),
-      buf_strides_vec[1],
+      tensors[1].strides(),
       [](void*) {},
       // NOLINTNEXTLINE
       x_qscale,
       x_qzero,
       at::TensorOptions()
           .dtype(toQIntType(x_qdtype))
-          .memory_format(memory_format));
+          .memory_format(
+              deduce_memory_format(tensors[1].strides(), tensors[1].sizes())));
   auto convPackedParams =
       reinterpret_cast<ConvPackedParamsBase<2>*>(buf_data[2]);
   const double out_qscale = ((double*)extra_args)[3];
@@ -180,31 +182,19 @@ void nnc_aten_quantized_conv2d_relu(
   const double x_qscale = ((double*)extra_args)[0];
   const int64_t x_qzero = extra_args[1];
   const c10::ScalarType x_qdtype = static_cast<c10::ScalarType>(extra_args[2]);
-  std::vector<std::vector<int64_t>> buf_strides_vec;
-  int64_t buf_strides_idx = 0;
-  for (const auto i : c10::irange(bufs_num)) {
-    buf_strides_vec.emplace_back();
-    for (const auto dim : c10::irange(buf_ranks[i])) {
-      (void)dim;
-      buf_strides_vec[i].push_back(buf_strides[buf_strides_idx++]);
-    }
-  }
-  auto memory_format = c10::MemoryFormat::Contiguous;
-  if (buf_strides_vec[1].size() == 4 && buf_strides_vec[1][3] != 1) {
-    memory_format = c10::MemoryFormat::ChannelsLast;
-  }
   at::Tensor qx = at::from_blob_quantized_per_tensor_affine(
       buf_data[1],
       // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
       tensors[1].sizes(),
-      buf_strides_vec[1],
+      tensors[1].strides(),
       [](void*) {},
       // NOLINTNEXTLINE
       x_qscale,
       x_qzero,
       at::TensorOptions()
           .dtype(toQIntType(x_qdtype))
-          .memory_format(memory_format));
+          .memory_format(
+              deduce_memory_format(tensors[1].strides(), tensors[1].sizes())));
 
   auto convPackedParams =
       reinterpret_cast<ConvPackedParamsBase<2>*>(buf_data[2]);
@@ -229,35 +219,22 @@ void nnc_aten_quantized_add(
   const double a_qscale = ((double*)extra_args)[0];
   const int64_t a_qzero = extra_args[1];
   const c10::ScalarType a_qdtype = static_cast<c10::ScalarType>(extra_args[2]);
-  std::vector<std::vector<int64_t>> buf_strides_vec;
-  int64_t buf_strides_idx = 0;
-  for (const auto i : c10::irange(bufs_num)) {
-    buf_strides_vec.emplace_back();
-    for (const auto dim : c10::irange(buf_ranks[i])) {
-      (void)dim;
-      buf_strides_vec[i].push_back(buf_strides[buf_strides_idx++]);
-    }
-  }
-  auto memory_formata = c10::MemoryFormat::Contiguous;
-  if (buf_strides_vec[1].size() == 4 && buf_strides_vec[1][3] != 1) {
-    memory_formata = c10::MemoryFormat::ChannelsLast;
-  }
-  auto memory_formatb = c10::MemoryFormat::Contiguous;
-  if (buf_strides_vec[2].size() == 4 && buf_strides_vec[2][3] != 1) {
-    memory_formatb = c10::MemoryFormat::ChannelsLast;
-  }
+  auto a_memory_format =
+      deduce_memory_format(tensors[1].strides(), tensors[1].sizes());
+  auto b_memory_format =
+      deduce_memory_format(tensors[1].strides(), tensors[1].sizes());
   at::Tensor qa = at::from_blob_quantized_per_tensor_affine(
       buf_data[1],
       // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
       tensors[1].sizes(),
-      buf_strides_vec[1],
+      tensors[1].strides(),
       [](void*) {},
       // NOLINTNEXTLINE
       a_qscale,
       a_qzero,
       at::TensorOptions()
           .dtype(toQIntType(a_qdtype))
-          .memory_format(memory_formata));
+          .memory_format(a_memory_format));
   const double b_qscale = ((double*)extra_args)[3];
   const int64_t b_qzero = extra_args[4];
   const c10::ScalarType b_qdtype = static_cast<c10::ScalarType>(extra_args[5]);
@@ -265,14 +242,14 @@ void nnc_aten_quantized_add(
       buf_data[2],
       // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
       tensors[2].sizes(),
-      buf_strides_vec[2],
+      tensors[2].strides(),
       [](void*) {},
       // NOLINTNEXTLINE
       b_qscale,
       b_qzero,
       at::TensorOptions()
           .dtype(toQIntType(b_qdtype))
-          .memory_format(memory_formatb));
+          .memory_format(b_memory_format));
   const double out_qscale = ((double*)extra_args)[6];
   const int64_t out_qzero = extra_args[7];
   auto r = at::native::quantized_add(qa, qb, out_qscale, out_qzero);
@@ -351,31 +328,19 @@ void nnc_aten_upsample_nearest2d(
   const int64_t x_qdtype = extra_args[2];
   const auto is_quantized = x_qdtype != -1;
   if (is_quantized) {
-    std::vector<std::vector<int64_t>> buf_strides_vec;
-    int64_t buf_strides_idx = 0;
-    for (const auto i : c10::irange(bufs_num)) {
-      buf_strides_vec.emplace_back();
-      for (const auto dim : c10::irange(buf_ranks[i])) {
-        (void)dim;
-        buf_strides_vec[i].push_back(buf_strides[buf_strides_idx++]);
-      }
-    }
-    auto memory_format = c10::MemoryFormat::Contiguous;
-    if (buf_strides_vec[1].size() == 4 && buf_strides_vec[1][3] != 1) {
-      memory_format = c10::MemoryFormat::ChannelsLast;
-    }
     x = at::from_blob_quantized_per_tensor_affine(
         buf_data[1],
         // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
         tensors[1].sizes(),
-        buf_strides_vec[1],
+        tensors[1].strides(),
         [](void*) {},
         // NOLINTNEXTLINE
         x_qscale,
         x_qzero,
         at::TensorOptions()
             .dtype(toQIntType(static_cast<c10::ScalarType>(x_qdtype)))
-            .memory_format(memory_format));
+            .memory_format(deduce_memory_format(
+                tensors[1].strides(), tensors[1].sizes())));
   }
 
   int64_t output_size_h = extra_args[3];
@@ -446,11 +411,12 @@ void nnc_aten_conv1d(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
+    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors =
-      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+  std::vector<at::Tensor> tensors = constructTensors(
+      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
 
   at::Tensor& r = tensors[0];
   const at::Tensor& x = tensors[1];
@@ -534,11 +500,12 @@ void nnc_aten_max_red(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
+    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors =
-      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+  std::vector<at::Tensor> tensors = constructTensors(
+      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
 
   at::Tensor& r = tensors[0];
   const at::Tensor& x = tensors[1];
@@ -651,11 +618,12 @@ void nnc_aten_embedding(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
+    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors =
-      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+  std::vector<at::Tensor> tensors = constructTensors(
+      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
 
   at::Tensor& r = tensors[0];
   const at::Tensor& weight = tensors[1];

@@ -397,13 +397,14 @@ Buf::Buf(
     : ExprNodeBase(dtype, kPrimitive),
       base_handle_(var),
       dims_(std::move(dims)),
+      strides_(
+          strides
+              ? *strides
+              : make_contiguous_strides(ExprVectorToExprHandleVector(dims_))),
       initializer_(std::move(initializer)),
       qscale_(std::move(qscale)),
       qzero_(std::move(qzero)) {
   TORCH_CHECK(var);
-  strides_ = strides
-      ? *strides
-      : make_contiguous_strides(ExprVectorToExprHandleVector(dims_));
 }
 
 ExprHandle Buf::make(
