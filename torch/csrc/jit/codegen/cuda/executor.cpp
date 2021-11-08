@@ -222,7 +222,8 @@ void FusionExecutor::compileFusion(
   c10::optional<int> block_size = c10::nullopt;
   if (!inputs.empty()) {
     auto expr_eval = executor_utils::bindKernelInputs(inputs, kernel);
-    auto launch_params = computeLaunchParams(launch_constraints, expr_eval, warp_size_);
+    auto launch_params =
+        computeLaunchParams(launch_constraints, expr_eval, warp_size_);
     block_size = launch_params.nThreads();
     TORCH_INTERNAL_ASSERT(
         block_size > 0, "launch param inferred block size < 0");
@@ -458,8 +459,7 @@ LaunchParams FusionExecutor::computeLaunchParams(
         } else {
           // If no specified constant, pad to the smallest multiple of warp
           //  above the value.
-          auto padded_number_of_warps =
-              (*val + warp_size - 1) / warp_size;
+          auto padded_number_of_warps = (*val + warp_size - 1) / warp_size;
           *val = warp_size * padded_number_of_warps;
         }
         TORCH_INTERNAL_ASSERT(
@@ -682,7 +682,8 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
     evaluator_precomputed_integers_->bindKernelInputs(inputs);
     expr_eval.precomputedIntegers() = evaluator_precomputed_integers_.get();
 
-    launch_params = computeLaunchParams(launch_constraints, expr_eval, warp_size_);
+    launch_params =
+        computeLaunchParams(launch_constraints, expr_eval, warp_size_);
 
     executor_utils::validateVectorizedTensors(
         &fusion_, inputs, outputs, lowered_, compileTimeDataCache());
