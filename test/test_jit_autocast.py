@@ -590,5 +590,38 @@ class TestAutocast(JitTestCase):
         # no cast op should be observed when executing outside autocast context
         self._test_autocast(t, None, cpu0, cpu1, cuda0, cuda1)
 
+    @unittest.skipIf(not TEST_CUDA, "No cuda")
+    def test_autocast_autodiff(self):
+        def t(t0, t1):
+            o = torch.mm(t0, t1)
+            return o.relu()
+
+        jit_t = torch.jit.script(t)
+        t0 = torch.randn(5, 5, device="cuda", dtype=torch.float32).requires_grad_()
+        t1 = torch.randn(5, 5, device="cuda", dtype=torch.float32).requires_grad_()
+
+        # run optimization
+        for i in range(5):
+            with torch.autocast("cuda", torch.float16):
+                jit_o = jit_t(t0, t1)
+            jit_o.sum().backward()
+
+        t0.grad = None
+        t1.grad = None
+        ref_t0 = t0.detach().requires_grad_()
+        ref_t1 = t1.detach().requires_grad_()
+
+        with torch.autocast("cuda", torch.float16):
+            o = t(ref_t0, ref_t1)
+            jit_o = jit_t(t0, t1)
+        jit_o.sum().backward()
+        o.sum().backward()
+        self.assertEqual(o, jit_o)
+        self.assertEqual(t0.grad, ref_t0.grad)
+        self.assertEqual(t1.grad, ref_t1.grad)
+        self.assertEqual(o.dtype, jit_o.dtype)
+        self.assertEqual(t0.grad.dtype, ref_t0.grad.dtype)
+        self.assertEqual(t1.grad.dtype, ref_t1.grad.dtype)
+
 if __name__ == '__main__':
     run_tests()

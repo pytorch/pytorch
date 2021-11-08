@@ -19,7 +19,7 @@ class IrUtilNode : public Node {
     if (!v.node) {
       return;
     }
-    operands_as_outputs_.emplace_back(Output(v.node.get(), v.index));
+    operands_as_outputs_.emplace_back(v.node.get(), v.index);
     operands_.push_back(std::move(v.node));
   }
 
