@@ -714,15 +714,6 @@ TEST(StaticRuntime, IndividualOps_to) {
   }
 }
 
-TEST(StaticRuntime, IndividualOps_Detach) {
-  auto a = at::randn({4, 3, 1, 2});
-  auto b = at::randn({3, 2, 2});
-  std::vector<IValue> args{a};
-  std::vector<IValue> args2{b};
-  testStaticRuntime(detach_script, args);
-  testStaticRuntime(detach_script, args, args2);
-}
-
 TEST(StaticRuntime, IndividualOps_ExpandAs) {
   auto a = at::randn({3, 1});
   auto b = at::randn({3, 2});
