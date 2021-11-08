@@ -46,7 +46,7 @@ class ConcaterMapDataPipe(MapDataPipe):
 
 
 @functional_datapipe('zip')
-class ZipperMapDataPipe(MapDataPipe[Tuple[T_co]]):
+class ZipperMapDataPipe(MapDataPipe[Tuple[T_co, ...]]):
     r""" :class:`ZipperMapDataPipe`.
 
     Map DataPipe that aggregates elements into a tuple from each of
@@ -56,10 +56,10 @@ class ZipperMapDataPipe(MapDataPipe[Tuple[T_co]]):
     Args:
         *datapipes: Map DataPipes being aggregated
     """
-    datapipes: Tuple[MapDataPipe]
+    datapipes: Tuple[MapDataPipe[T_co], ...]
     length: int
 
-    def __init__(self, *datapipes: MapDataPipe) -> None:
+    def __init__(self, *datapipes: MapDataPipe[T_co]) -> None:
         if len(datapipes) == 0:
             raise ValueError("Expected at least one DataPipe, but got nothing")
         if not all(isinstance(dp, MapDataPipe) for dp in datapipes):
@@ -69,7 +69,7 @@ class ZipperMapDataPipe(MapDataPipe[Tuple[T_co]]):
         self.datapipes = datapipes
         self.length = -1
 
-    def __getitem__(self, index) -> Tuple[T_co]:
+    def __getitem__(self, index) -> Tuple[T_co, ...]:
         res = []
         for dp in self.datapipes:
             try:
