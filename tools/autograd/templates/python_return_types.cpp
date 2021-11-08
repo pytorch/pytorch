@@ -15,12 +15,16 @@ ${py_return_types}
 namespace torch {
 namespace autograd {
 
-static std::map<std::string, PyTypeObject*> return_types_map = {
+std::map<std::string, PyTypeObject*>& get_namedtuple_types_map() {
+  static std::map<std::string, PyTypeObject*> namedtuple_types_map = {
     ${py_return_types_map}
-};
+  };
+  return namedtuple_types_map;
+}
 
 PyTypeObject* get_namedtuple(std::string name) {
-  return return_types_map[name];
+  static auto& namedtuple_types_map = get_namedtuple_types_map();
+  return namedtuple_types_map[name];
 }
 
 void initReturnTypes(PyObject* module) {
@@ -31,7 +35,7 @@ void initReturnTypes(PyObject* module) {
     throw python_error();
   }
 
-  for (const auto& return_type_pair : return_types_map) {
+  for (const auto& return_type_pair : get_namedtuple_types_map()) {
     // hold onto the TypeObject for the unlikely case of user
     // deleting or overriding it.
     Py_INCREF(return_type_pair.second);
