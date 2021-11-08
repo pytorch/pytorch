@@ -848,7 +848,7 @@ class TestLRScheduler(TestCase):
             [{'params': self.net.conv1.parameters()}, {'params': self.net.conv2.parameters(), 'lr': 0.5}],
             lr=0.05)
 
-    def _check_warning_is_epoch_deprecation_warning(self, w, *, num_warnings:int =1):
+    def _check_warning_is_epoch_deprecation_warning(self, w, *, num_warnings: int = 1):
         """This function swallows the epoch deprecation warning which is produced when we
         call `scheduler.step(epoch)` with some not `None` value of `epoch`.
         this is deprecated, and this function will need to be removed/updated when
