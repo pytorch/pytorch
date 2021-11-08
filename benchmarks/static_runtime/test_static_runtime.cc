@@ -95,8 +95,46 @@ TEST(StaticRuntime, ModuleHasOp) {
 }
 
 TEST(StaticRuntime, CanEnableStaticRuntime) {
+  const auto while_script = R"JIT(
+    def forward(self, a: Tensor, x: int):
+        c = 0
+        while c < x:
+            a = a * a
+            c += 2
+        return a
+  )JIT";
+
+  const auto for_script = R"JIT(
+    def forward(self, a: Tensor, x: int):
+        for c in range(x):
+            a = a * a
+        return a
+  )JIT";
+
+  const auto if_script = R"JIT(
+    def forward(self, a: Tensor, b: bool):
+        if b:
+            return a
+        else:
+            return a * a
+  )JIT";
+
+  const auto is_script = R"JIT(
+    def forward(self, a: Tensor, b: Tensor):
+        return a is b
+  )JIT";
+
+  const auto is_not_script = R"JIT(
+    def forward(self, a: Tensor, b: Tensor):
+        return a is not b
+  )JIT";
+
   EXPECT_TRUE(testCanEnableStaticRuntime(reshape_inplace_script));
+  EXPECT_FALSE(testCanEnableStaticRuntime(for_script));
+  EXPECT_FALSE(testCanEnableStaticRuntime(while_script));
   EXPECT_FALSE(testCanEnableStaticRuntime(if_script));
+  EXPECT_FALSE(testCanEnableStaticRuntime(is_script));
+  EXPECT_FALSE(testCanEnableStaticRuntime(is_not_script));
 }
 
 TEST(StaticRuntime, NestedOutput) {
@@ -486,7 +524,7 @@ TEST(StaticRuntime, IndividualOps_Stack) {
   testStaticRuntime(stack_three, args1_three_tensors, args2_three_tensors);
 }
 
-TEST(StaicRuntime, IndividualOps_ReLU) {
+TEST(StaticRuntime, IndividualOps_ReLU) {
   auto a = torch::tensor({{1, -1}, {2, 0}});
   auto b = torch::tensor({{1, -1, -1}, {2, 0, -1}});
 
@@ -497,7 +535,7 @@ TEST(StaicRuntime, IndividualOps_ReLU) {
   testStaticRuntime(relu_script, args1, args2);
 }
 
-TEST(StaicRuntime, IndividualOps_Tanh) {
+TEST(StaticRuntime, IndividualOps_Tanh) {
   auto a = at::randn({2, 2});
   auto b = at::randn({3, 3, 3});
 
@@ -676,17 +714,6 @@ TEST(StaticRuntime, IndividualOps_to) {
   }
 }
 
-TEST(StaticRuntime, IndividualOps_Detach) {
-  auto a = at::randn({4, 3, 1, 2});
-  auto b = at::randn({3, 2, 2});
-  std::vector<IValue> args{a};
-  std::vector<IValue> args2{b};
-  testStaticRuntime(detach_script_0, args);
-  testStaticRuntime(detach_script_0, args, args2);
-  testStaticRuntime(detach_script_1, args);
-  testStaticRuntime(detach_script_1, args, args2);
-}
-
 TEST(StaticRuntime, IndividualOps_ExpandAs) {
   auto a = at::randn({3, 1});
   auto b = at::randn({3, 2});
@@ -830,7 +857,7 @@ TEST(StaticRuntime, DeepWide) {
 
       // run static runtime
       std::vector<c10::IValue> input_tensors({ad_emb_packed, user_emb, wide});
-      auto outputs = smod(input_tensors, {}).toTuple()->elements();
+      auto outputs = smod(input_tensors, {}).toTupleRef().elements();
       ASSERT_TRUE(outputs.size() > 0);
       at::Tensor output_2 = outputs[0].toTensor();
       smod.runtime().check_for_memory_leak();
@@ -966,7 +993,7 @@ TEST(StaticRuntime, CleanUpMemory) {
               // run static runtime
               std::vector<c10::IValue> input_tensors(
                   {ad_emb_packed, user_emb, wide});
-              auto outputs = runtime(input_tensors, {}).toTuple()->elements();
+              auto outputs = runtime(input_tensors, {}).toTupleRef().elements();
               ASSERT_TRUE(outputs.size() > 0);
               auto output_2 = outputs[0].toTensor();
               runtime.check_for_memory_leak();
@@ -1026,12 +1053,12 @@ TEST(
   {
     IValue tuple = runtime(args, {});
     ASSERT_TRUE(tuple.isTuple());
-    ASSERT_EQ(tuple.toTuple()->elements().size(), 1);
+    ASSERT_EQ(tuple.toTupleRef().elements().size(), 1);
     // Do not manage intput value.
     EXPECT_FALSE(runtime.isManagedOutputTensor(args[0]));
     // Do not manage direct output value.
     EXPECT_FALSE(runtime.isManagedOutputTensor(tuple));
-    IValue element = tuple.toTuple()->elements()[0];
+    IValue element = tuple.toTupleRef().elements()[0];
     // Tensor to be managed, but not yet from the profile run.
     EXPECT_FALSE(runtime.isManagedOutputTensor(element));
     tuple = IValue();
@@ -1042,12 +1069,12 @@ TEST(
   {
     IValue tuple = runtime(args, {});
     ASSERT_TRUE(tuple.isTuple());
-    ASSERT_EQ(tuple.toTuple()->elements().size(), 1);
+    ASSERT_EQ(tuple.toTupleRef().elements().size(), 1);
     // Do not manage intput value.
     EXPECT_FALSE(runtime.isManagedOutputTensor(args[0]));
     // Do not manage direct output value.
     EXPECT_FALSE(runtime.isManagedOutputTensor(tuple));
-    IValue element = tuple.toTuple()->elements()[0];
+    IValue element = tuple.toTupleRef().elements()[0];
     // Tensor to be managed, but not yet from the profile run.
     EXPECT_TRUE(runtime.isManagedOutputTensor(element));
     tuple = IValue();
@@ -1483,6 +1510,19 @@ TEST(StaticRuntime, QuantizedLinear) {
   testStaticRuntime(quantize_script, {input, weight}, {input_2, weight_2});
 }
 
+TEST(StaticRuntime, QuantizedLinearDynamicFp16) {
+  at::Tensor weight = torch::randn({3, 2}, torch::kFloat);
+  at::Tensor input = torch::randn({3, 2}, torch::kFloat);
+
+  at::Tensor weight_2 = torch::randn({4, 3}, torch::kFloat);
+  at::Tensor input_2 = torch::randn({4, 3}, torch::kFloat);
+
+  testStaticRuntime(
+      quantized_linear_dynamic_fp16_script,
+      {input, weight},
+      {input_2, weight_2});
+}
+
 TEST(StaticRuntime, IndividualOps_VarStack) {
   // 2D tensors - stack dim = 0
   std::vector<IValue> args1 = {at::randn({6, 6}), at::randn({6, 6}), 0};
@@ -1793,4 +1833,62 @@ TEST(StaticRuntime, IndividualOps_Size) {
   testStaticRuntime(src, args1);
   testStaticRuntime(src, args2);
   testStaticRuntime(src, args1, args3);
+}
+
+TEST(StaticRuntime, IndividuaOps_Squeeze) {
+  // Note: this is a native op, not an out variant, but clone anyways
+  // to silence warnings in testStaticRuntime
+  const auto src = R"JIT(
+    def forward(self, inp, dim: int):
+        return inp.squeeze(dim).clone()
+  )JIT";
+
+  const auto a = at::randn({2, 2});
+  const auto b = at::randn({2, 2, 2});
+
+  testStaticRuntime(src, {a, 0});
+  testStaticRuntime(src, {a, 1});
+  testStaticRuntime(src, {a, -1}, {b, 2});
+}
+
+TEST(StaticRuntime, NumToTensorScalar) {
+  const auto num_to_tensor_ir = R"IR(
+    graph(%1 : int):
+      %2 : NoneType = prim::Constant()
+      %3 : Tensor = prim::NumToTensor(%1)
+      %4 : Tensor = aten::clone(%3, %2)
+      return (%4)
+  )IR";
+
+  IValue arg{5};
+  std::vector<IValue> args = {arg};
+  testStaticRuntime(num_to_tensor_ir, args);
+}
+
+TEST(StaticRuntime, NumToTensorFalse) {
+  const auto num_to_tensor_ir = R"IR(
+    graph(%1 : bool):
+      %2 : NoneType = prim::Constant()
+      %3 : Tensor = prim::NumToTensor(%1)
+      %4 : Tensor = aten::clone(%3, %2)
+      return (%4)
+  )IR";
+
+  IValue arg{false};
+  std::vector<IValue> args = {arg};
+  testStaticRuntime(num_to_tensor_ir, args);
+}
+
+TEST(StaticRuntime, NumToTensorTrue) {
+  const auto num_to_tensor_ir = R"IR(
+    graph(%1 : bool):
+      %2 : NoneType = prim::Constant()
+      %3 : Tensor = prim::NumToTensor(%1)
+      %4 : Tensor = aten::clone(%3, %2)
+      return (%4)
+  )IR";
+
+  IValue arg{true};
+  std::vector<IValue> args = {arg};
+  testStaticRuntime(num_to_tensor_ir, args);
 }
