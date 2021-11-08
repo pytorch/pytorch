@@ -2116,7 +2116,7 @@
 
 - func: grid_sampler_2d(Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> Tensor
   dispatch:
-    CPU: grid_sampler_2d_cpu
+    CPU, QuantizedCPU: grid_sampler_2d_cpu
     CUDA: grid_sampler_2d_cuda
 
 # `grid_sampler_2d_backward` takes in `output_mask` to optimize performance for
@@ -8627,6 +8627,7 @@
   python_module: nn
   dispatch:
     CPU, CUDA: hardsigmoid_out
+    QuantizedCPU: hardsigmoid_out_quantized_cpu
 
 - func: hardsigmoid(Tensor self) -> Tensor
   structured_delegate: hardsigmoid.out
@@ -8683,22 +8684,22 @@
     QuantizedCPU: hardtanh_quantized_cpu_
 
 - func: hardswish.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   python_module: nn
   dispatch:
     CPU, CUDA: hardswish_out
 
 - func: hardswish(Tensor self) -> Tensor
+  structured_delegate: hardswish.out
   device_check: NoCheck   # TensorIterator
   python_module: nn
-  dispatch:
-    CPU, CUDA: hardswish
 
 - func: hardswish_(Tensor(a!) self) -> Tensor(a!)
+  structured_delegate: hardswish.out
   device_check: NoCheck   # TensorIterator
   python_module: nn
-  dispatch:
-    CPU, CUDA: hardswish_
 
 - func: hardswish_backward(Tensor grad_output, Tensor self) -> Tensor
   python_module: nn

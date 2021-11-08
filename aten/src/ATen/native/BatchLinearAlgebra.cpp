@@ -1766,10 +1766,10 @@ TORCH_IMPL_FUNC(linalg_lu_out)(const Tensor& A,
   // U.shape[-2:] == (k, n)
   // with k = min(m, n)
 
-  auto pivots = at::empty({0}, A.options().dtype(kInt));
-  auto info = at::empty({0}, A.options().dtype(kInt));
   // Use L as it has the correct size
   const bool use_L = m > n;
+  auto pivots = at::empty({0}, A.options().dtype(kInt));
+  auto info = at::empty({0}, A.options().dtype(kInt));
   at::linalg_lu_factor_ex_out(const_cast<Tensor&>(use_L ? L : U),
                               const_cast<Tensor&>(pivots),
                               const_cast<Tensor&>(info),

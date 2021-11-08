@@ -1906,6 +1906,14 @@ the output has the same batch dimensions.
 """ + fr"""
 .. note:: {common_notes["sync_note_has_ex"].format("torch.linalg.lu_factor_ex")}
 """ + r"""
+.. warning:: The LU decomposition is almost never unique, as often there are different permutation
+             matrices that can yield different LU decompositions.
+             As such, different platforms, like SciPy, or inputs on different devices,
+             may produce different valid decompositions.
+
+.. warning:: Gradient computations are only supported if the input matrix is full-rank.
+             If this condition is not met, no error will be thrown, but the gradient may not be finite.
+             This is because the LU decomposition with pivoting is not differentiable at these points.
 
 .. seealso::
 
@@ -1962,6 +1970,15 @@ It also returns the :attr:`info` tensor returned by `LAPACK's getrf`_.
 
 .. warning:: {common_notes["experimental_warning"]}
 """ + r"""
+
+.. warning:: The LU decomposition is almost never unique, as often there are different permutation
+             matrices that can yield different LU decompositions.
+             As such, different platforms, like SciPy, or inputs on different devices,
+             may produce different valid decompositions.
+
+.. warning:: Gradient computations are only supported if the input matrix is full-rank.
+             If this condition is not met, no error will be thrown, but the gradient may not be finite.
+             This is because the LU decomposition with pivoting is not differentiable at these points.
 
 .. seealso::
         :func:`~lu_factor` is a variant that always checks for errors.
@@ -2021,7 +2038,7 @@ If :attr:`pivot`\ `= False` and :attr:`A` is on GPU, then the **LU decomposition
 
 When :attr:`pivot`\ `= False`, the returned matrix :attr:`P` will be empty.
 The LU decomposition without pivoting `may not exist`_ if any of the principal minors of :attr:`A` is singular.
-In this case, the output matrix will contain `inf` or `NaN`.
+In this case, the output matrix may contain `inf` or `NaN`.
 
 Supports input of float, double, cfloat and cdouble dtypes.
 Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
@@ -2033,7 +2050,7 @@ the output has the same batch dimensions.
         with partial pivoting.
 
 .. warning:: The LU decomposition is almost never unique, as often there are different permutation
-             matrices that can be used.
+             matrices that can yield different LU decompositions.
              As such, different platforms, like SciPy, or inputs on different devices,
              may produce different valid decompositions.
 

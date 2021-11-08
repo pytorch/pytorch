@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: package/deploy"]
+
 from pathlib import Path
 from unittest import skipIf
 

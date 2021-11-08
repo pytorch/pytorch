@@ -32,11 +32,11 @@
 /torch/testing/_internal/distributed @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @H-Huang @bowangbj
 
 # ONNX Export
-/torch/csrc/jit/passes/onnx.h @bowenbao @neginraoof @shubhambhokare1
-/torch/csrc/jit/passes/onnx.cpp @bowenbao @neginraoof @shubhambhokare1
-/torch/csrc/jit/passes/onnx/ @bowenbao @neginraoof @shubhambhokare1
-/torch/onnx/ @bowenbao @neginraoof @shubhambhokare1
-/test/onnx/ @bowenbao @neginraoof @shubhambhokare1
+/torch/csrc/jit/passes/onnx.h @bowenbao @shubhambhokare1
+/torch/csrc/jit/passes/onnx.cpp @bowenbao @shubhambhokare1
+/torch/csrc/jit/passes/onnx/ @bowenbao @shubhambhokare1
+/torch/onnx/ @bowenbao @shubhambhokare1
+/test/onnx/ @bowenbao @shubhambhokare1
 
 # Docker
 /.circleci/docker/ @jeffdaily @jithunnair-amd
