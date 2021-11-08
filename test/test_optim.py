@@ -2246,10 +2246,7 @@ class TestLRScheduler(TestCase):
                         momentum_target[batch_num], param_group['momentum'],
                         msg='Momentum is wrong in batch_num {}: expected {}, got {}'.format(
                             batch_num, momentum_target[batch_num], param_group['momentum']), atol=1e-5, rtol=0)
-<<<<<<< HEAD
             self.opt.step()
-=======
->>>>>>> Revert "Applying black formatting"
             scheduler.step()
 
     def test_cosine_then_cyclic(self):
