@@ -7,7 +7,8 @@
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>
-
+#include <ATen/ExpandUtils.h>
+#include <ATen/MetaFunctions.h>
 #include <torch/library.h>
 
 namespace at {
@@ -613,28 +614,61 @@ Tensor& mul_(Tensor& self, const Scalar& other) {
   return at::mul_out(self, wrapped_scalar_tensor(other), self); // redispatch!
 }
 
-void size_and_device_check(const Tensor& self, const Tensor& other) {
-  // if one of the self or other is a Scalar Tensor
-  if (!(self.sizes().size() == 0 || other.sizes().size() == 0)) {
-    TORCH_CHECK(self.sizes() == other.sizes());
+Device device_check(const Tensor& self, const Tensor& other) {
+  auto self_device = self.device();
+  auto other_device = other.device();
+  bool is_equal = (self_device == other_device);
+  if (!is_equal){
+    auto self_dim_is_zero = (self.dim() == 0);
+    auto other_dim_is_zero =  (other.dim() == 0);
+    if (self_dim_is_zero && other_dim_is_zero) {
+      if (self_device.is_cpu()) return other_device;
+    }
+    else if (self_dim_is_zero) {
+      TORCH_CHECK(self_device.is_cpu() && other_device.is_cuda());
+      return other_device;
+    }
+    if (other_dim_is_zero) {
+      TORCH_CHECK(other_device.is_cpu() && self_device.is_cuda());
+    }
   }
-  TORCH_CHECK(self.device() == other.device());
+  return self_device;
 }
 
 Tensor mul_zerotensor(const Tensor& self, const Tensor& other) {
-  size_and_device_check(self, other);
-  auto commonDtype = at::result_type(self, other);
-  auto result_options = self.options().dtype(commonDtype);
-  return at::_efficientzerotensor(self.sizes(), result_options);
+  // hack to use the TensorIterator to get the correct broadcasting and type promotion logic
+  auto device_ = Device(DeviceType::Meta);
+  auto self_device = self.device();
+  auto meta_out = at::meta::mul(self.to(device_), other.to(device_));
+  if (self.is_meta() || other.is_meta()) {
+    return meta_out;
+  }
+  auto out_device = device_check(self, other);
+  TORCH_CHECK(self.device() == self_device);
+  return at::_efficientzerotensor(meta_out.sizes(), meta_out.options().device(out_device));
 }
 
 Tensor add_zerotensor(const Tensor& self, const Tensor& other, const Scalar& alpha) {
-  size_and_device_check(self, other);
-  auto commonDtype = at::result_type(self, other);
+  // hack to use the TensorIterator to get the correct broadcasting and type promotion logic
+  auto device_ = Device(DeviceType::Meta);
+  auto meta_out = at::meta::add(self.to(device_), other.to(device_));
+
+  if (self.is_meta() || other.is_meta()) {
+    return meta_out;
+  }
+  auto out_device = device_check(self, other);
+
+  auto get_out_like = [&] (const Tensor& tensor)
+  {
+      auto sizes = meta_out.sizes();
+      return at::_to_copy(tensor.expand(sizes), meta_out.options().device(out_device));
+  };
+
   if (self.is_zerotensor()) {
-    return (commonDtype == other.scalar_type()) ? other.mul(alpha) : other.to(commonDtype).mul(alpha);
+    auto res = get_out_like(other);
+    return alpha.equal(1) ? res : res.mul(alpha);
   } else {
-    return (commonDtype == self.scalar_type()) ? self.clone() : self.to(commonDtype);
+    return get_out_like(self);
   }
 }
 
