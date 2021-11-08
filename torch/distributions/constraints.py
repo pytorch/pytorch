@@ -418,6 +418,7 @@ class _Multinomial(Constraint):
     def check(self, x):
         return (x >= 0).all(dim=-1) & (x.sum(dim=-1) <= self.upper_bound)
 
+    
 class _Symmetric(Constraint):
     """
     Constrain to Symmetric square matrices.
@@ -426,6 +427,7 @@ class _Symmetric(Constraint):
     
     def check(self, value):
         return (value.transpose(-2, -1) == value).all()
+    
 
 class _LowerTriangular(Constraint):
     """
@@ -570,4 +572,3 @@ corr_cholesky = _CorrCholesky()
 positive_definite = _PositiveDefinite()
 cat = _Cat
 stack = _Stack
-
