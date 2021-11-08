@@ -373,7 +373,7 @@ class DeviceCachingAllocator {
   DeviceCachingAllocator()
       : large_blocks(BlockComparator, /*is_small=*/false),
         small_blocks(BlockComparator, /*is_small=*/true) {
-    stats.max_split_size = CachingAllocatorConfig::max_split_size();
+    stats.max_split_size = CUDACachingAllocator::maxSplitSize();
   }
 
   // All public methods (except the above) acquire the allocator mutex.

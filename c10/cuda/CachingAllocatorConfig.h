@@ -3,13 +3,9 @@ namespace cuda {
 namespace CUDACachingAllocator {
 
 // Currently either "native" or "cudaMallocAsync"
-const std::string& allocatorBacked() {
-  return CachingAllocatorConfig::allocator_backend();
-}
+const std::string& allocatorBackend();
 
-size_t maxSplitSize() {
-  return CachingAllocatorConfig::max_split_size()
-}
+size_t maxSplitSize();
 
 } // namespace CUDACachingAllocator
 } // namespace cuda

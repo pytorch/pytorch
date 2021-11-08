@@ -20,8 +20,6 @@ namespace CudaMallocAsync {
 //
 // cudaMallocAsync works transparently with CUDA graphs.
 
-namespace {
-
 // Implementation details, not declared in CUDACachingAllocator.h
 namespace {
 
@@ -244,14 +242,16 @@ void* getBaseAllocation(void* ptr, size_t* size) {
 }
 
 void recordStream(const DataPtr& ptr, cuda::CUDAStream stream) {
-  std::shared_lock<std::shared_mutex> lock(general_mutex);
+  std::lock_guard<std::mutex> lock(general_mutex);
 
   // The pointer should exist in the map already.
-  auto iter = usage_streams_each_ptr.find(ptr.get());
-  TORCH_INTERNAL_ASSERT(iter != iter.end(),
+  auto it = usage_streams_each_ptr.find(ptr.get());
+  TORCH_INTERNAL_ASSERT(it != it.end(),
                         "ptr not represented in usage_streams_each_ptr");
-  TORCH_INTERNAL_ASSERT(iter.second.size() != 0,
+  TORCH_INTERNAL_ASSERT(it->second.size() != 0,
                         "ptr's stream uses vector is empty");
+
+  it->second.push_back(stream);
 }
 
 std::mutex* getFreeMutex() {
