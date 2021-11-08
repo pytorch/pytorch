@@ -214,8 +214,10 @@ class CompileTimeInfoBase : public PolymorphicBase {
   CompileTimeEntryType entry_type_;
 };
 
+// Note: Do NOT export this class. MSVC issue with exported class that contains
+// std::vector<unique_ptr<xxx>>: https://godbolt.org/z/3E4e8T1P1
 //! Compile-time information cache
-class TORCH_CUDA_CU_API ExecutorCompileTimeInfoCache {
+class ExecutorCompileTimeInfoCache {
   using Entry = CompileTimeInfoBase;
   using EntryOwningPtr = std::unique_ptr<Entry>;
   using EntryPtr = Entry*;

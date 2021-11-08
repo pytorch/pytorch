@@ -7003,8 +7003,8 @@ TEST(NVFuserTest, FusionZeroDimBroadcast_CUDA) {
   tv3->computeAt(tv4, -1);
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-  at::Tensor t0 = at::randn({}, options);
-  at::Tensor t1 = at::randn({10, 10}, options);
+  at::Tensor t0 = at::randint(1, 20, {}, options);
+  at::Tensor t1 = at::randint(1, 20, {10, 10}, options);
 
   auto aten_output = (t0.unsqueeze(-1).unsqueeze(-1).expand({10, 10}) + t1)
                          .to(at::kDouble)
@@ -17251,6 +17251,9 @@ TEST(NVFuserTest, FusionIssue1099_CUDA) {
 
 // Repro of issue #1080
 TEST(NVFuserTest, FusionUnswitchPredicate_CUDA) {
+  if (at::cuda::getDeviceProperties(0)->major < 6) {
+    return;
+  }
   Fusion fusion;
   FusionGuard fg(&fusion);
 
