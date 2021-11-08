@@ -141,7 +141,7 @@ def generate_tensors_from_vals(vals, device, dtype, domain, filter_):
 #   argument.
 def generate_numeric_tensors(device, dtype, *,
                              domain=(None, None),
-                             filter_=(lambda _: True, None)):
+                             filter_=(lambda _: torch.tensor(False), 0)):
     # Special-cases bool
     if dtype is torch.bool:
         tensors = (torch.empty(0, device=device, dtype=torch.bool),
@@ -170,7 +170,7 @@ def generate_numeric_tensors(device, dtype, *,
 
 def generate_numeric_tensors_hard(device, dtype, *,
                                   domain=(None, None),
-                                  filter_=(lambda _: True, None)):
+                                  filter_=(lambda _: torch.tensor(False), 0)):
     is_signed_integral = dtype in (torch.int8, torch.int16, torch.int32, torch.int64)
     if not (dtype.is_floating_point or dtype.is_complex or is_signed_integral):
         return ()
@@ -193,7 +193,7 @@ def generate_numeric_tensors_hard(device, dtype, *,
 
 def generate_numeric_tensors_extremal(device, dtype, *,
                                       domain=(None, None),
-                                      filter_=(lambda _: True, None)):
+                                      filter_=(lambda _: torch.tensor(False), 0)):
     if not (dtype.is_floating_point or dtype.is_complex):
         return ()
 
