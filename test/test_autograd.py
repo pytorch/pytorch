@@ -7476,6 +7476,42 @@ class TestAutogradForwardMode(TestCase):
             view += dual
             self.assertIsNone(fwAD.unpack_dual(baz)[1])
 
+    def test_view_inplace_always_creates_a_view(self):
+        # See https://github.com/pytorch/pytorch/issues/67800
+        # The codepath may depend on the op. At the time writing, when self is not a dual tensor
+        # the resulting forward grad for self for...
+        # - add_ has the same layout as self
+        # - mul_ has the same layout as other
+        # This is kind of fragile because the above depends on how the forward grad expression
+        # is written. For add and mul at least, the output inherits the layout of LHS.
+        # We want to handle at least these two cases.
+        inplace_binary_ops = (  # Add more to this list?
+            lambda x, y: x.add_(y),
+            lambda x, y: x.mul_(y),
+            lambda x, y: x.copy_(y),
+        )
+
+        for inplace_binary_op in inplace_binary_ops:
+            base = torch.randn(2, 2)
+            view = base.transpose(0, 1)
+
+            primal = torch.randn(2, 2)
+            tangent = torch.randn(2, 2)
+
+            with fwAD.dual_level():
+                dual = fwAD.make_dual(primal, tangent)
+                inplace_binary_op(view, dual)
+
+                # Verify that a view relationship is created for both the primal and tangent
+                p, t = fwAD.unpack_dual(base)
+                p_clone = p.clone()
+                t_clone = t.clone()
+                view *= 2
+                p, t = fwAD.unpack_dual(base)
+
+                self.assertTrue(torch.allclose(p_clone * 2, p))
+                self.assertTrue(torch.allclose(t_clone * 2, t))
+
     def test_grad_cleanup(self):
         foo = torch.rand(2)
         bar = torch.rand(2)
