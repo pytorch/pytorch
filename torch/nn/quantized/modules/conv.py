@@ -195,7 +195,7 @@ class _ConvNd(nn.Module):
         if weight_post_process is None:
             weight_post_process = mod.qconfig.weight()
         weight_post_process(mod.weight)
-        act_scale, act_zp = activation_post_process.calculate_qparams()
+        
         assert weight_post_process.dtype == torch.qint8, \
             'Weight observer must have a dtype of qint8'
         qweight = _quantize_weight(mod.weight.float(), weight_post_process)
@@ -204,6 +204,11 @@ class _ConvNd(nn.Module):
                     mod.stride, mod.padding, mod.dilation, mod.groups,
                     mod.bias is not None, mod.padding_mode)
         qconv.set_weight_bias(qweight, mod.bias)
+        if isinstance(activation_post_process, torch.ao.quantization.PlaceholderObserver):
+            # we give scale and zero_point to dynamic convT to avoid breaking serialization
+            act_scale, act_zp = 0, 0
+        else:
+            act_scale, act_zp = activation_post_process.calculate_qparams()
         qconv.scale = float(act_scale)
         qconv.zero_point = int(act_zp)
         return qconv
@@ -575,7 +580,6 @@ class _ConvTransposeNd(_ConvNd):
             'Input float module must have qconfig defined.'
         weight_post_process = mod.qconfig.weight()
         weight_post_process(mod.weight)
-        act_scale, act_zp = mod.activation_post_process.calculate_qparams()
         assert weight_post_process.dtype == torch.qint8, \
             'Weight observer must have a dtype of qint8'
         qweight = _quantize_weight(mod.weight.float(), weight_post_process)
@@ -584,6 +588,11 @@ class _ConvTransposeNd(_ConvNd):
                     mod.stride, mod.padding, mod.output_padding, mod.groups,
                     mod.bias is not None, mod.dilation, mod.padding_mode)
         qconv.set_weight_bias(qweight, mod.bias)
+        if isinstance(mod.activation_post_process, torch.ao.quantization.PlaceholderObserver):
+            # we give scale and zero_point to dynamic convT to avoid breaking serialization
+            act_scale, act_zp = 0, 0
+        else:
+            act_scale, act_zp = mod.activation_post_process.calculate_qparams()
         qconv.scale = float(act_scale)
         qconv.zero_point = int(act_zp)
 

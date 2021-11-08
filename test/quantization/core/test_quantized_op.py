@@ -3649,6 +3649,12 @@ class TestQuantizedEmbeddingOps(TestCase):
 
         torch.testing.assert_close(result, qresult, atol=0.05, rtol=1e-3)
 
+class TestDynamicQuantizedConv(TestCase):
+    def test_qconv(self):
+        #behavior should be the same as fake_quant+conv
+        X = torch.randn(3,3)
+        assert(False)
+
 
 class TestQuantizedConv(TestCase):
     def _test_qconv_unpack_impl(self, qconv_prepack_fn, qconv_unpack_fn, inputs,
