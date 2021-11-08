@@ -47,6 +47,7 @@ jobs:
   build:
     runs-on: linux.2xlarge
     needs: [!{{ ciflow_config.root_job_name }}]
+    timeout-minutes: !{{ common.timeout_minutes }}
     env:
       JOB_BASE_NAME: !{{ build_environment }}-build
     outputs:
@@ -138,6 +139,7 @@ jobs:
   generate-test-matrix:
     runs-on: ubuntu-18.04
     needs: [!{{ ciflow_config.root_job_name }}]
+    timeout-minutes: !{{ common.timeout_minutes }}
     env:
       TEST_RUNNER_TYPE: !{{ test_runner_type }}
       ENABLE_DISTRIBUTED_TEST: !{{ enable_distributed_test }}
@@ -176,6 +178,7 @@ jobs:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
       fail-fast: false
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: !{{ common.timeout_minutes }}
     env:
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: !{{ build_environment }}-test
@@ -288,6 +291,7 @@ jobs:
 {%- if enable_doc_jobs %}
   build-docs:
     runs-on: linux.2xlarge
+    timeout-minutes: !{{ common.timeout_minutes }}
     strategy:
       matrix:
         docs_type: [cpp, python]

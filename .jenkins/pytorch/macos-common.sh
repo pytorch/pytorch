@@ -9,9 +9,17 @@ sysctl -a | grep machdep.cpu
 
 # NOTE: mkl 2021.3.0+ cmake requires sub-command PREPEND, may break the build
 retry conda install -y \
-  mkl=2021.2.0 mkl-include=2021.2.0 \
-  numpy=1.18.5 pyyaml=5.3 setuptools=46.0.0 \
-  cmake cffi ninja typing_extensions dataclasses pip
+  mkl=2021.2.0 \
+  mkl-include=2021.2.0 \
+  numpy=1.18.5 \
+  pyyaml=5.3 \
+  setuptools=46.0.0 \
+  cmake=3.14 \
+  cffi \
+  ninja \
+  typing_extensions \
+  dataclasses \
+  pip
 
 # The torch.hub tests make requests to GitHub.
 #
