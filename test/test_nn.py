@@ -14574,8 +14574,7 @@ class TestNNDeviceType(NNTestCase):
                 self.assertEqual(output_cuda.cpu(), output_cpu)
 
         helper("nearest")
-        # Uncomment below once F.interpolate is updated
-        # helper("nearest-exact")
+        helper("nearest-exact")
 
     def test_upsamplingNearest1d_correctness(self, device):
         # Here we check if output matches OpenCV's INTER_NEAREST-like result
@@ -14604,12 +14603,9 @@ class TestNNDeviceType(NNTestCase):
         # for s in [1.00001, 0.99999]:  # 0.9999 case is broken
         # See issue: https://github.com/pytorch/pytorch/issues/62396
         for s in [1.00001, ]:
-            # Uncomment below once F.interpolate is updated
-            # And remove torch._C._nn.upsample_nearest1d
-            # out_t = F.interpolate(
-            #     in_t, scale_factor=s, recompute_scale_factor=False, mode="nearest-exact"
-            # )
-            out_t = torch._C._nn.upsample_nearest1d(in_t, None, (s, ), True)
+            out_t = F.interpolate(
+                in_t, scale_factor=s, recompute_scale_factor=False, mode="nearest-exact"
+            )
             expected_out = in_t
             self.assertEqual(out_t, expected_out, msg=f"scale: {s}")
 
@@ -14617,12 +14613,9 @@ class TestNNDeviceType(NNTestCase):
         # for s in [2.00001, 1.99999]:  # 1.99999 case is broken
         # See issue: https://github.com/pytorch/pytorch/issues/62396
         for s in [2.00001, ]:
-            # Uncomment below once F.interpolate is updated
-            # And remove torch._C._nn.upsample_nearest1d
-            # out_t = F.interpolate(
-            #     in_t, scale_factor=s, recompute_scale_factor=False, mode="nearest-exact"
-            # )
-            out_t = torch._C._nn.upsample_nearest1d(in_t, None, (s, ), True)
+            out_t = F.interpolate(
+                in_t, scale_factor=s, recompute_scale_factor=False, mode="nearest-exact"
+            )
             # input is [[[0, 1, 2, 3, ..., 9]]]
             # expected out is [[[0, 0, 1, 1, 2, 2, ..., 9, 9]]]
             expected_out = in_t.repeat_interleave(2, dim=-1)
@@ -14633,12 +14626,9 @@ class TestNNDeviceType(NNTestCase):
         # Checks https://github.com/pytorch/pytorch/issues/34808
         def helper(isize, osize):
             in_t = torch.arange(isize, dtype=torch.float, device=device).unsqueeze(0).unsqueeze(0)
-            # Uncomment below once F.interpolate is updated
-            # And remove torch._C._nn.upsample_nearest1d
-            # out_t = F.interpolate(
-            #     in_t, size=(osize, ), recompute_scale_factor=False, mode="nearest-exact"
-            # )
-            out_t = torch._C._nn.upsample_nearest1d(in_t, (osize, ), None, True)
+            out_t = F.interpolate(
+                in_t, size=(osize, ), recompute_scale_factor=False, mode="nearest-exact"
+            )
             # compute expected output as scikit-image/scipy
             expected_out = torch.zeros(osize, dtype=torch.float).unsqueeze(0).unsqueeze(0)
             scale = 1.0 * isize / osize
@@ -14748,12 +14738,9 @@ class TestNNDeviceType(NNTestCase):
         def helper(memory_format, isize, osize):
             in_t = torch.arange(isize * isize, dtype=torch.float, device=device).reshape(1, 1, isize, isize)
             in_t = in_t.contiguous(memory_format=memory_format)
-            # Uncomment below once F.interpolate is updated
-            # And remove torch._C._nn.upsample_nearest2d
-            # out_t = F.interpolate(
-            #     in_t, size=(osize, osize), recompute_scale_factor=False, mode="nearest-exact"
-            # )
-            out_t = torch._C._nn.upsample_nearest2d(in_t, (osize, osize), None, None, True)
+            out_t = F.interpolate(
+                in_t, size=(osize, osize), recompute_scale_factor=False, mode="nearest-exact"
+            )
             # compute expected output as Scikit-Image/Scipy
             expected_out = torch.zeros(1, 1, osize, osize, dtype=torch.float)
             scale = 1.0 * isize / osize
@@ -14815,9 +14802,8 @@ class TestNNDeviceType(NNTestCase):
 
         helper(torch.contiguous_format, "nearest")
         helper(torch.channels_last_3d, "nearest")
-        # Uncomment below once F.interpolate is updated
-        # helper(torch.contiguous_format, "nearest-exact")
-        # helper(torch.channels_last_3d, "nearest-exact")
+        helper(torch.contiguous_format, "nearest-exact")
+        helper(torch.channels_last_3d, "nearest-exact")
 
     def test_upsamplingNearest3d_correctness(self, device):
         # Here we check if output matches OpenCV's INTER_NEAREST-like result
@@ -14856,12 +14842,9 @@ class TestNNDeviceType(NNTestCase):
             in_t = torch.arange(isize * isize * isize, dtype=torch.float, device=device)
             in_t = in_t.reshape(1, 1, isize, isize, isize)
             in_t = in_t.contiguous(memory_format=memory_format)
-            # Uncomment below once F.interpolate is updated
-            # And remove torch._C._nn.upsample_nearest3d
-            # out_t = F.interpolate(
-            #     in_t, size=(osize, osize, osize), recompute_scale_factor=False, mode="nearest-exact"
-            # )
-            out_t = torch._C._nn.upsample_nearest3d(in_t, (osize, osize, osize), None, None, None, True)
+            out_t = F.interpolate(
+                in_t, size=(osize, osize, osize), recompute_scale_factor=False, mode="nearest-exact"
+            )
             # compute expected output as Scikit-Image/Scipy
             expected_out = torch.zeros(1, 1, osize, osize, osize, dtype=torch.float)
             scale = 1.0 * isize / osize
