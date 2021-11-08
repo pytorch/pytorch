@@ -8495,6 +8495,9 @@ TEST(NVFuserTest, FusionMagicSchedulerLayerNormalization_CUDA) {
 }
 
 TEST(NVFuserTest, FusionMagicSchedulerBatchNormalization_CUDA) {
+  if (at::cuda::getDeviceProperties(0)->major < 7) {
+    return;
+  }
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
 
@@ -11588,7 +11591,7 @@ TEST(NVFuserTest, FusionIssue549_CUDA) {
       &fusion, cg_outputs, {t0, t1}, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, simplecompileRtc) {
+TEST(NVFuserTest, simplecompileRtc_CUDA) {
   FusionExecutor fe;
   std::string kernel = R"(
 __global__ void kernel1(Tensor<float, 1> T0, Tensor<float, 1> T1) {

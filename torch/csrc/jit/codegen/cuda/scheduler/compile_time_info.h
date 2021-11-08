@@ -125,7 +125,7 @@ class CompileTimeInfoBase : public PolymorphicBase {
 //!  - when not in `recording` mode, compiled-time data has
 //!     been stored in this cache and the entries can be accessed
 //!!    but new entries can no longer be inserted.
-class TORCH_CUDA_CU_API HeuristicSummary {
+class HeuristicSummary {
   using Entry = HeuristicCompileTime::CompileTimeInfoBase;
   using EntryOwningPtr = std::unique_ptr<Entry>;
   using EntryPtr = Entry*;
