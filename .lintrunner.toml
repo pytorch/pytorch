@@ -1,5 +1,5 @@
 [[linter]]
-name = 'FLAKE8'
+code = 'FLAKE8'
 include_patterns = ['**/*.py']
 exclude_patterns = [
     '.git/**',
@@ -18,14 +18,14 @@ exclude_patterns = [
     'venv/**',
     '**/*.pyi',
 ]
-args = [
+command = [
     'python3',
     'tools/linter/adapters/flake8_linter.py',
     '--binary=flake8',
     '--',
     '@{{PATHSFILE}}'
 ]
-init_args = [
+init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
@@ -41,7 +41,7 @@ init_args = [
 
 
 [[linter]]
-name = 'CLANGFORMAT'
+code = 'CLANGFORMAT'
 include_patterns = [
     'c10/**/*.h',
     'c10/**/*.cpp',
@@ -54,8 +54,7 @@ include_patterns = [
     'test/cpp/tensorexpr/**/*.h',
     'test/cpp/tensorexpr/**/*.cpp',
 ]
-exclude_patterns = []
-args = [
+command = [
     'python3',
     'tools/linter/adapters/clangformat_linter.py',
     '--binary=clang-format',
@@ -64,7 +63,7 @@ args = [
 ]
 
 [[linter]]
-name = 'MYPY'
+code = 'MYPY'
 include_patterns = [
     'torch/**/*.py',
     'caffe2/**/*.py',
@@ -84,7 +83,7 @@ exclude_patterns = [
     'torch/csrc/**',
     'torch/distributed/elastic/agent/server/api.py',
 ]
-args = [
+command = [
     'python3',
     'tools/linter/adapters/mypy_linter.py',
     '--binary=mypy',
@@ -92,7 +91,7 @@ args = [
     '--',
     '@{{PATHSFILE}}'
 ]
-init_args = [
+init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
@@ -104,7 +103,7 @@ init_args = [
 ]
 
 [[linter]]
-name = 'MYPY_STRICT'
+code = 'MYPYSTRICT'
 include_patterns = [
     '.github/**/*.py',
     'benchmarks/instruction_counts/**/*.py',
@@ -114,8 +113,7 @@ include_patterns = [
     'torch/utils/benchmark/utils/timer.py',
     'torch/utils/benchmark/utils/valgrind_wrapper/**/*.py',
 ]
-exclude_patterns = []
-args = [
+command = [
     'python3',
     'tools/linter/adapters/mypy_linter.py',
     '--binary=mypy',
@@ -125,17 +123,23 @@ args = [
 ]
 
 [[linter]]
-name = 'CLANGTIDY'
-include_patterns = ['**/*.cpp']
-exclude_patterns = []
-init_args = [
+code = 'CLANGTIDY'
+include_patterns = [
+    '**/*.cpp',
+    'torch/csrc/fx/**/*.cpp',
+    'torch/csrc/utils/**/*.cpp',
+    'torch/csrc/generic/**/*.cpp',
+    'torch/csrc/deploy/**/*.cpp',
+    'torch/csrc/tensor/**/*.cpp',
+]
+init_command = [
     'python3',
     'tools/linter/adapters/clangtidy_init.py',
     '--dry_run={{DRYRUN}}',
     '--output_dir=.clang-tidy-bin',
     '--output_name=clang-tidy',
 ]
-args = [
+command = [
     'python3',
     'tools/linter/adapters/clangtidy_linter.py',
     '--binary=.clang-tidy-bin/clang-tidy',
@@ -145,10 +149,10 @@ args = [
 ]
 
 [[linter]]
-name = 'TYPEIGNORE'
+code = 'TYPEIGNORE'
 include_patterns = ['**/*.py', '**/*.pyi']
 exclude_patterns = ['test/test_jit.py']
-args = [
+command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
     '--pattern=# type:\s*ignore(?!\[)',
@@ -163,10 +167,10 @@ args = [
 ]
 
 [[linter]]
-name = 'NOQA'
+code = 'NOQA'
 include_patterns = ['**/*.py', '**/*.pyi']
 exclude_patterns = ['caffe2/**']
-args = [
+command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
     '--pattern=# type:\s*ignore(?!\[)',
@@ -181,35 +185,33 @@ args = [
 ]
 
 [[linter]]
-name = 'CIRCLECI'
+code = 'CIRCLECI'
 include_patterns=['.circleci/**']
-args = [
+command = [
     'python3',
     'tools/linter/adapters/circleci_linter.py',
     '--regen-script-working-dir=.circleci',
     '--config-yml=.circleci/config.yml',
     '--regen-script=generate_config_yml.py',
 ]
-bypass_matched_file_filter = true
 
 [[linter]]
-name = 'NATIVEFUNCTIONS'
+code = 'NATIVEFUNCTIONS'
 include_patterns=['aten/src/ATen/native/native_functions.yaml']
-args = [
+command = [
     'python3',
     'tools/linter/adapters/nativefunctions_linter.py',
     '--native-functions-yml=aten/src/ATen/native/native_functions.yaml',
 ]
-init_args = [
+init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
     'ruamel.yaml==0.17.4',
 ]
-bypass_matched_file_filter = true
 
 [[linter]]
-name = 'NEWLINE'
+code = 'NEWLINE'
 include_patterns=['**']
 exclude_patterns=[
     '**/contrib/**',
@@ -218,7 +220,7 @@ exclude_patterns=[
     '**/*.ipynb',
     'tools/clang_format_hash/**',
 ]
-args = [
+command = [
     'python3',
     'tools/linter/adapters/newlines_linter.py',
     '--',
@@ -226,14 +228,14 @@ args = [
 ]
 
 [[linter]]
-name = 'SPACES'
+code = 'SPACES'
 include_patterns = ['**']
 exclude_patterns = [
     '**/contrib/**',
     '**/*.diff',
     'third_party/**',
 ]
-args = [
+command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
     '--pattern=[[:blank:]]$',
@@ -248,7 +250,7 @@ args = [
 ]
 
 [[linter]]
-name = 'TABS'
+code = 'TABS'
 include_patterns = ['**']
 exclude_patterns = [
     '**/*.svg',
@@ -258,7 +260,7 @@ exclude_patterns = [
     '**/.gitattributes',
     '**/.gitmodules',
 ]
-args = [
+command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
     '--pattern=\t',
@@ -273,7 +275,7 @@ args = [
 ]
 
 [[linter]]
-name = 'INCLUDE'
+code = 'INCLUDE'
 include_patterns = [
     'c10/**',
     'aten/**',
@@ -282,7 +284,7 @@ include_patterns = [
 exclude_patterns = [
     'aten/src/ATen/native/quantized/cpu/qnnpack/**',
 ]
-args = [
+command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
     '--pattern=#include "',
@@ -297,7 +299,7 @@ args = [
 ]
 
 [[linter]]
-name = 'PYPIDEP'
+code = 'PYPIDEP'
 include_patterns = ['.github/**']
 exclude_patterns = [
     '**/*.rst',
@@ -305,7 +307,7 @@ exclude_patterns = [
     '**/*.md',
     '**/*.diff',
 ]
-args = [
+command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
     """--pattern=\
