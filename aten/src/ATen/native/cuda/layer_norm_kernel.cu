@@ -155,12 +155,11 @@ __device__ WelfordDataLN compute_stats(
         wd = cuWelfordOnlineSum(static_cast<acc_t>(data.val[ii]), wd);
       }
     }
-//    intra-warp reduction
-    for (int l = 0;  l <= 4;  ++l) {
-      int srcLaneB = (threadIdx.x+(1<<l))&31;
-      WelfordDataLN wdB{WARP_SHFL(wd.mean, srcLaneB),
-      WARP_SHFL(wd.sigma2, srcLaneB),WARP_SHFL(wd.count, srcLaneB)};
-      wd = cuWelfordCombine(wd, wdB);
+    // intra-warp reduction
+    for (int offset = (C10_WARP_SIZE >> 1); offset > 0; offset >>= 1) {
+        WelfordDataLN wdB{WARP_SHFL_DOWN(wd.mean, offset),
+        WARP_SHFL_DOWN(wd.sigma2, offset), WARP_SHFL_DOWN(wd.count, offset)};
+        wd = cuWelfordCombine(wd, wdB);
     }
     // threadIdx.x == 0 has correct values for each warp
     // inter-warp reductions
@@ -185,7 +184,7 @@ __device__ WelfordDataLN compute_stats(
         }
         __syncthreads();
       }
-      if (threadIdx.x == 0 && threadIdx.y == 0) {
+      if (threadIdx.x == 0 && threadIdx.y ==0) {
         meansigmabuf[0] = wd.mean;
         meansigmabuf[1] = wd.sigma2/float(N);
       }
