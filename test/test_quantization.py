@@ -2,6 +2,8 @@
 # Owner(s): ["oncall: quantization"]
 
 from torch.testing._internal.common_utils import run_tests
+# the above uses a different run_tests() than the one in the current pytorch dir
+# from ..torch.testing._internal.common_utils import run_tests
 
 # Quantization core tests. These include tests for
 # - quantized kernels

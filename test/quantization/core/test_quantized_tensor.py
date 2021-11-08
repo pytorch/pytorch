@@ -143,9 +143,27 @@ class TestQuantizedTensor(TestCase):
     @unittest.skipIf(not TEST_CUDA, "No gpu is available.")
     def test_qtensor_cuda(self):
         self._test_qtensor(torch.device('cuda'))
+        self._test_qtensor_dynamic(torch.device('cuda'))
 
     def test_qtensor_cpu(self):
-        self._test_qtensor(torch.device('cpu'))
+        # self._test_qtensor(torch.device('cpu'))
+        self._test_qtensor_dynamic(torch.device('cpu'))
+
+    def _test_qtensor_dynamic(self, device):
+        mat2quant = torch.randn((4, 4), dtype=torch.float, device=device)
+        reduce_flag = False
+
+        for dtype in [torch.qint8, torch.quint8]:
+            q_d = torch.quantize_per_tensor_dynamic(mat2quant, dtype, reduce_flag)
+            scale, zero_pt = _calculate_dynamic_qparams(mat2quant, dtype, reduce_flag)
+            q_s = torch.quantize_per_tensor(mat2quant, scale, zero_pt, dtype)
+
+            print("Original tensor: \n", mat2quant)
+            print("Dynamically quantized tensor: \n", q_d)
+            print("Statically quantized tensor: \n", q_s)
+            print("Scale = ", scale, "Zero point = ", zero_pt)
+            # l2 = torch.norm(q_d - q_s)
+            # print("l2 norm between dynamically and statically quantized tensors: ", l2)
 
     def _test_qtensor(self, device):
         device = str(device)
