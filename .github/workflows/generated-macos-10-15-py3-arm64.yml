@@ -21,8 +21,8 @@ env:
   COMPACT_JOB_NAME: macos-10-15-py3-arm64
   IN_CI: 1
   IS_GHA: 1
-  # Set xcode to 12.0.1
-  DEVELOPER_DIR: /Applications/Xcode_12.app/Contents/Developer
+  # Set xcode xcode version to 12.3
+  DEVELOPER_DIR: /Applications/Xcode_12.3.app/Contents/Developer
 
 jobs:
 

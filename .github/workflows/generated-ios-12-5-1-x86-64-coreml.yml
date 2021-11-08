@@ -20,6 +20,8 @@ env:
   BUILD_ENVIRONMENT: ios-12-5-1-x86-64-coreml
   IN_CI: 1
   IS_GHA: 1
+  # Set xcode xcode version to 12.4
+  DEVELOPER_DIR: /Applications/Xcode_12.4.app/Contents/Developer
 
 jobs:
 
