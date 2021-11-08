@@ -10,6 +10,7 @@ These backends include:
 
 - ``torch.backends.cuda``
 - ``torch.backends.cudnn``
+- ``torch.backends.linalg``
 - ``torch.backends.mkl``
 - ``torch.backends.mkldnn``
 - ``torch.backends.openmp``
@@ -68,6 +69,15 @@ torch.backends.cudnn
 
     A :class:`bool` that, if True, causes cuDNN to benchmark multiple convolution algorithms
     and select the fastest.
+
+torch.backends.linalg
+^^^^^^^^^^^^^^^^^^^^^
+
+.. attribute::  torch.backends.linalg.cuda_prefer_cusolver
+
+    .. warning:: This flag is experimental and subject to change.
+
+    A :class:`bool` that lets pytorch to prefer cuSOLVER implementations when calling linear algebra functions on GPU.
 
 
 torch.backends.mkl
