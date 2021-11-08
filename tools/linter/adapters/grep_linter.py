@@ -24,7 +24,7 @@ class LintSeverity(str, Enum):
 
 
 class LintMessage(NamedTuple):
-    path: str
+    path: Optional[str]
     line: Optional[int]
     char: Optional[int]
     code: str
@@ -107,7 +107,7 @@ def main() -> None:
         proc = run_command(["grep", "-nPH", args.pattern, *args.filenames])
     except OSError as err:
         err_msg = LintMessage(
-            path="<none>",
+            path=None,
             line=None,
             char=None,
             code=args.linter_name,

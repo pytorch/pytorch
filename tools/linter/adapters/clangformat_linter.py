@@ -25,7 +25,7 @@ class LintSeverity(str, Enum):
 
 
 class LintMessage(NamedTuple):
-    path: str
+    path: Optional[str]
     line: Optional[int]
     char: Optional[int]
     code: str
