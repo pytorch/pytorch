@@ -307,7 +307,7 @@ struct SchemaParser {
       int begin,
       int sep,
       int end,
-      const std::function<void()>& callback) {
+      c10::function_ref<void()> callback) {
     auto r = L.cur().range;
     if (begin != TK_NOTHING)
       L.expect(begin);
