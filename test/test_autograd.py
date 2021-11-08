@@ -2697,7 +2697,6 @@ class TestAutograd(TestCase):
         torch.autograd.backward(r2, grad)
         self.assertEqual(input1.grad, input2.grad, rtol=0.01, atol=0.0)
 
-    @slowTest
     @skipIfNoLapack
     def test_lobpcg(self):
 
