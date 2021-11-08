@@ -67,4 +67,53 @@ inline constexpr bool greater_than_max(const T& x) {
   return can_overflow && x > std::numeric_limits<Limit>::max();
 }
 
+/// Returns true if x < lowest(Limit). Standard comparison
+template <typename Limit, typename T>
+static inline constexpr bool less_than_lowest(
+    const T& x,
+    std::false_type limit_is_unsigned,
+    std::false_type x_is_unsigned) {
+  return x < std::numeric_limits<Limit>::lowest();
+}
+
+/// Returns false since all the limit is signed and therefore includes
+/// negative values but x cannot be negative because it is unsigned
+template <typename Limit, typename T>
+static inline constexpr bool less_than_lowest(
+    const T& x,
+    std::false_type limit_is_unsigned,
+    std::true_type x_is_unsigned) {
+  return false;
+}
+
+/// Returns true if x < 0, where 0 is constructed from T.
+/// Limit is not signed, so its lower value is zero
+template <typename Limit, typename T>
+static inline constexpr bool less_than_lowest(
+    const T& x,
+    std::true_type limit_is_unsigned,
+    std::false_type x_is_unsigned) {
+  return x < T(0);
+}
+
+/// Returns false sign both types are unsigned
+template <typename Limit, typename T>
+static inline constexpr bool less_than_lowest(
+    const T& x,
+    std::true_type limit_is_unsigned,
+    std::true_type x_is_unsigned) {
+  return false;
+}
+
+/// Returns true if x is less than the lowest value of type T
+/// NOTE: Will fail on an unsigned custom type
+///       For the most part it's possible to fix this if
+///       the custom type has a constexpr constructor.
+///       However, notably, c10::Half does not :
+template <typename Limit, typename T>
+inline constexpr bool less_than_lowest(const T& x) {
+  return less_than_lowest<Limit>(
+      x, std::is_unsigned<Limit>(), std::is_unsigned<T>());
+}
+
 } // namespace c10

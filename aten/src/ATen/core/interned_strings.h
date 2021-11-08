@@ -266,6 +266,8 @@ namespace c10 {
   _(aten, ne_)                       \
   _(aten, not_equal)                 \
   _(aten, not_equal_)                \
+  _(aten, nonzero)                   \
+  _(aten, argwhere)                  \
   _(aten, _ger)                      \
   _(aten, ger)                       \
   _(aten, outer)                     \
@@ -391,6 +393,7 @@ namespace c10 {
   _(aten, hardswish_)                \
   _(aten, hardsigmoid_)              \
   _(aten, hardtanh_)                 \
+  _(aten, quantize_per_tensor)       \
   _(aten, dequantize)                \
   FORALL_ATEN_BASE_SYMBOLS(_)        \
   _(onnx, Add)                       \
