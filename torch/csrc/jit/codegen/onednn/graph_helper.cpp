@@ -301,7 +301,7 @@ LlgaGraphHelper::LlgaGraphHelper(
   GRAPH_DEBUG("Get Partitions");
   std::vector<dnnl::graph::partition> partitions = g.get_partitions(policy);
   // excluded unsupported Wildcard partitions
-  for (auto & partition : partitions) {
+  for (auto& partition : partitions) {
     if (partition.is_supported())
       partitions_.push_back(partition);
   }
@@ -434,7 +434,8 @@ std::vector<dnnl::graph::partition> LlgaGraphHelper::getPartitions() const {
 }
 
 // NOLINTNEXTLINE
-LlgaNodeWrapper::LlgaNodeWrapper(const Node* node) : n(const_cast<Node*>(node)) {
+LlgaNodeWrapper::LlgaNodeWrapper(const Node* node)
+    : n(const_cast<Node*>(node)) {
   TORCH_CHECK(
       LlgaGraphHelper::isLlgaSubgraph(n), "Cannot wrap a non-LLGA fusion node");
 }

@@ -19,7 +19,7 @@ set_property(
 if(NOT APPLE AND NOT WIN32)
   if(NOT TARGET caffe2::dnnl_graph_static)
     add_library(caffe2::dnnl_graph_static INTERFACE IMPORTED)
-  endif()  
+  endif()
 
   set_property(
     TARGET caffe2::dnnl_graph_static PROPERTY INTERFACE_INCLUDE_DIRECTORIES
