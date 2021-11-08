@@ -94,7 +94,8 @@ static void NvFuserScheduler_LayerNorm_BWD(
   at::Tensor mean = at::randn({input_shape[0], 1}, options);
   at::Tensor rstd = at::randn({input_shape[0], 1}, options);
 
-  std::vector<c10::IValue> aten_inputs({grad_out, input, weight, bias, mean, rstd});
+  std::vector<c10::IValue> aten_inputs(
+      {grad_out, input, weight, bias, mean, rstd});
 
   runBenchmarkIterations(benchmark_state, fusion_executor_cache, aten_inputs);
 

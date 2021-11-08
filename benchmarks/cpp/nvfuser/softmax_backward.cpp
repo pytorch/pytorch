@@ -63,15 +63,15 @@ static void NvFuserScheduler_Softmax_BWD(
 
   at::Tensor input =
       (reduction_axis ? at::randn({iter_size, reduction_size}, options)
-                     : at::randn({reduction_size, iter_size}, options));
+                      : at::randn({reduction_size, iter_size}, options));
 
   at::Tensor grad_output =
       (reduction_axis ? at::randn({iter_size, reduction_size}, options)
-                     : at::randn({reduction_size, iter_size}, options));
+                      : at::randn({reduction_size, iter_size}, options));
 
   at::Tensor output =
       (reduction_axis ? at::randn({iter_size, reduction_size}, options)
-                     : at::randn({reduction_size, iter_size}, options));
+                      : at::randn({reduction_size, iter_size}, options));
 
   std::vector<c10::IValue> aten_inputs({grad_output, output, input});
 
@@ -88,7 +88,6 @@ static void Baseline_Softmax_BWD(
     benchmark::State& benchmark_state,
     DataType dtype,
     const int reduction_axis) {
-
   at::manual_seed(0);
   auto options =
       at::TensorOptions().dtype(data_type_to_aten(dtype)).device(at::kCUDA, 0);
@@ -98,20 +97,21 @@ static void Baseline_Softmax_BWD(
 
   at::Tensor input =
       (reduction_axis ? at::randn({iter_size, reduction_size}, options)
-                     : at::randn({reduction_size, iter_size}, options));
+                      : at::randn({reduction_size, iter_size}, options));
 
   at::Tensor grad_output =
       (reduction_axis ? at::randn({iter_size, reduction_size}, options)
-                     : at::randn({reduction_size, iter_size}, options));
+                      : at::randn({reduction_size, iter_size}, options));
 
   at::Tensor output =
       (reduction_axis ? at::randn({iter_size, reduction_size}, options)
-                     : at::randn({reduction_size, iter_size}, options));
+                      : at::randn({reduction_size, iter_size}, options));
 
   for (auto _ : benchmark_state) {
     clearL2Cache();
     CudaKernelTimer timer;
-    auto grad_input = at::_softmax_backward_data(grad_output, output, reduction_axis, data_type_to_aten(dtype));
+    auto grad_input = at::_softmax_backward_data(
+        grad_output, output, reduction_axis, data_type_to_aten(dtype));
     benchmark_state.SetIterationTime(timer.elapsed() / 1000.0);
   }
   // Sync everything up before we're finished, don't want to run ahead on the

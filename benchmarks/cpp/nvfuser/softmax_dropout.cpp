@@ -15,7 +15,6 @@
 
 using namespace torch::jit::fuser::cuda;
 
-
 //------------------------------------------------------------------------------
 
 static void setupSoftmaxDropout(
