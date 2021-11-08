@@ -24,7 +24,6 @@ __all__ = [
     'log_softmax',
 ]
 
-
 addmm = _add_docstr(_sparse._sparse_addmm, r"""
 sparse.addmm(mat, mat1, mat2, *, beta=1., alpha=1.) -> Tensor
 
@@ -89,6 +88,20 @@ def mm(mat1: Tensor, mat2: Tensor) -> Tensor:
     if mat1.is_sparse and mat2.is_sparse:
         return torch._sparse_sparse_matmul(mat1, mat2)
     return torch._sparse_mm(mat1, mat2)
+
+
+sampled_addmm = _add_docstr(_sparse.sampled_addmm, r"""
+sparse.sampled_addmm(input, mat1, mat2, *, beta=1., alpha=1., out=None) -> Tensor
+
+Computes alpha*(mat1 @ mat2) * spy(input) + beta*input, where spy(input) is the sparsity pattern matrix of input.
+
+Args:
+    input (Tensor): a dense matrix to be added
+    mat1 (Tensor): a sparse matrix to be multiplied
+    mat2 (Tensor): a dense matrix to be multiplied
+    beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
+    alpha (Number, optional): multiplier for :math:`mat1 @ mat2` (:math:`\alpha`)
+""")
 
 
 def sum(input: Tensor, dim: DimOrDims = None,
