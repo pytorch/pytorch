@@ -10324,5 +10324,13 @@ TestONNXRuntime_opset14 = type(str("TestONNXRuntime_opset14"),
                                     keep_initializers_as_inputs=False,
                                     onnx_shape_inference=True))
 
+# opset 15 tests
+TestONNXRuntime_opset15 = type(str("TestONNXRuntime_opset15"),
+                               (unittest.TestCase,),
+                               dict(TestONNXRuntime.__dict__, opset_version=15,
+                                    keep_initializers_as_inputs=False,
+                                    onnx_shape_inference=True))
+
+
 if __name__ == "__main__":
     unittest.main()
