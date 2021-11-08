@@ -1025,30 +1025,29 @@ std::tuple<Tensor, Tensor, Tensor> onboarding_attn_backward(const variable_list&
   auto grad_o = grads[0];
   auto grad_a = grads[1];
 
-  if (!grad_o.defined()){
-    grad_o = at::zeros({q.size(0), v.size(1)}, q.options());
-  }
-
-  if (!grad_a.defined()){
-    grad_a = at::zeros({q.size(0), k.size(0)}, q.options());
-
-  }
+  Tensor grad_q, grad_k, grad_v;
 
   auto x = at::mm(q, k.transpose(0, 1));
   auto a = at::tanh(x);
 
-  auto do_da = at::mm(grad_o, v.transpose(0, 1));
-  auto da_dx = at::pow((1/at::cosh(x)), 2);
+  if (grad_o.defined()){
+    auto do_da = at::mm(grad_o, v.transpose(0, 1));
+    auto da_dx = at::pow((1/at::cosh(x)), 2);
+    grad_q = at::mm(do_da * da_dx, k);
+    grad_k = at::mm((do_da * da_dx).t(), q);
+    grad_v = at::mm(a.t(), grad_o);
+  }
 
-  auto grad_q_o = at::mm(do_da * da_dx, k);
-  auto grad_q_a = at::mm(grad_a * da_dx, k);
-  auto grad_q = grad_q_o + grad_q_a;
-
-  auto grad_k_o = at::mm((do_da * da_dx).t(), q);
-  auto grad_k_a = at::mm((grad_a * da_dx).t(), q);
-  auto grad_k = grad_k_o + grad_k_a;
-
-  auto grad_v = at::mm(a.t(), grad_o);
+  if (grad_a.defined()){
+    auto da_dx = at::pow((1/at::cosh(x)), 2);
+    if (grad_o.defined()){
+      grad_q = grad_q + at::mm(grad_a * da_dx, k);
+      grad_k = grad_k + at::mm((grad_a * da_dx).t(), q);
+    } else{
+      grad_q = at::mm(grad_a * da_dx, k);
+      grad_k = at::mm((grad_a * da_dx).t(), q);
+    }
+  }
 
   return std::make_tuple(grad_q, grad_k, grad_v);
 }
