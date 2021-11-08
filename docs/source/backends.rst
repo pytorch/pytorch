@@ -70,6 +70,7 @@ torch.backends.cudnn
     A :class:`bool` that, if True, causes cuDNN to benchmark multiple convolution algorithms
     and select the fastest.
 
+
 torch.backends.linalg
 ^^^^^^^^^^^^^^^^^^^^^
 
@@ -77,7 +78,11 @@ torch.backends.linalg
 
     .. warning:: This flag is experimental and subject to change.
 
-    A :class:`bool` that lets pytorch to prefer cuSOLVER implementations when calling linear algebra functions on GPU.
+    The default value for this flag is *False*.
+
+    A :class:`bool` that, if True, lets pytorch prefer cuSOLVER implementations when calling linear algebra functions on GPU.
+
+    Note: cuSOLVER implementations may still be used in some functions even if this flag is set to False.
 
 
 torch.backends.mkl
