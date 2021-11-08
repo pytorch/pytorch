@@ -10,8 +10,7 @@ namespace jit {
 
 char const* toString(OpCode op);
 namespace mobile {
-Function::Function(c10::QualifiedName name)
-    : name_(std::move(name)), code_(std::make_shared<Code>()) {}
+Function::Function(c10::QualifiedName name) : name_(std::move(name)) {}
 
 const c10::QualifiedName& Function::qualname() const {
   return name_;
@@ -22,8 +21,8 @@ void Function::append_instruction(OpCode op, int X, int N, int64_t dbg_handle) {
       isOpSupportedInMobile(op),
       toString(op),
       " is not supported in mobile module.");
-  code_->instructions_.emplace_back(op, X, N);
-  code_->debug_handles_.emplace_back(dbg_handle);
+  code_.instructions_.emplace_back(op, X, N);
+  code_.debug_handles_.emplace_back(dbg_handle);
 }
 
 void Function::append_instruction(OpCode op, int X, int N) {
@@ -31,7 +30,7 @@ void Function::append_instruction(OpCode op, int X, int N) {
       isOpSupportedInMobile(op),
       toString(op),
       " is not supported in mobile module.");
-  code_->instructions_.emplace_back(op, X, N);
+  code_.instructions_.emplace_back(op, X, N);
 }
 
 bool Function::append_operator(
@@ -41,8 +40,8 @@ bool Function::append_operator(
     int64_t model_version) { /* TODO: T90339189 deprecate all v3 when v3 models
                                 are removed */
   // Keep the original opname in code_
-  code_->op_names_.emplace_back(name, overload_name);
-  const auto& opname = code_->op_names_.back();
+  code_.op_names_.emplace_back(name, overload_name);
+  const auto& opname = code_.op_names_.back();
   const auto full_name = c10::toString(opname);
 
   std::function<void(Stack&)> fn;
@@ -125,32 +124,31 @@ bool Function::append_operator(
       }
     }
   }
-  code_->operators_.emplace_back(fn);
+  code_.operators_.emplace_back(fn);
   return true;
 }
 
 void Function::append_constant(const c10::IValue& constant) {
-  code_->constants_.push_back(constant);
+  code_.constants_.push_back(constant);
 }
 
 void Function::append_type(const at::TypePtr& type) {
-  code_->types_.push_back(type);
+  code_.types_.push_back(type);
 }
 
 void Function::append_function(mobile::Function& function) {
-  code_->functions_.push_back(&function);
+  code_.functions_.push_back(&function);
 }
 
 void Function::set_register_size(size_t size) {
-  code_->register_size_ = size;
+  code_.register_size_ = size;
 }
 
 int64_t Function::get_debug_handle(size_t pc) const {
-  TORCH_CHECK(code_, "Valid code must exist.");
   TORCH_CHECK(
-      pc < code_->debug_handles_.size(),
+      pc < code_.debug_handles_.size(),
       "Module debug info index out of boundary.");
-  return code_->debug_handles_[pc];
+  return code_.debug_handles_[pc];
 }
 
 torch::jit::Function& Function::setSchema(c10::FunctionSchema schema) {
@@ -171,7 +169,7 @@ void Function::run(Stack& stack) {
     getSchema().checkAndNormalizeInputs(
         stack, std::unordered_map<std::string, IValue>{} /*kwargs*/);
   }
-  InterpreterState interp_state(*code_);
+  InterpreterState interp_state(code_);
   interp_state.run(stack);
 }
 
@@ -185,11 +183,11 @@ size_t Function::num_inputs() const {
 }
 
 bool Function::call(Stack&, c10::function_ref<void(const mobile::Code&)> f) {
-  f(*code_);
+  f(code_);
   return true;
 }
 
-const std::shared_ptr<Code> Function::get_code() const {
+const Code& Function::get_code() const {
   return code_;
 }
 
