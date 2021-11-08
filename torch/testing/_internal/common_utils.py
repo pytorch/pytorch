@@ -752,6 +752,25 @@ numpy_to_torch_dtype_dict = {
     np.complex128 : torch.complex128
 }
 
+
+# numpy dtypes like np.float64 are not instances, but rather classes. This leads to rather absurd cases like
+# np.float64 != np.dtype("float64") but np.float64 == np.dtype("float64").type.
+# Especially when checking against a reference we can't be sure which variant we get, so we simply try both.
+def numpy_to_torch_dtype(np_dtype):
+    try:
+        return numpy_to_torch_dtype_dict[np_dtype]
+    except KeyError:
+        return numpy_to_torch_dtype_dict[np_dtype.type]
+
+
+def has_corresponding_torch_dtype(np_dtype):
+    try:
+        numpy_to_torch_dtype(np_dtype)
+        return True
+    except KeyError:
+        return False
+
+
 if IS_WINDOWS:
     # Size of `np.intc` is platform defined.
     # It is returned by functions like `bitwise_not`.
@@ -1776,7 +1795,7 @@ class TestCase(expecttest.TestCase):
         __tracebackhide__ = True
 
         unsupported_numpy_dtype = any(
-            isinstance(a, np.ndarray) and a.dtype not in numpy_to_torch_dtype_dict for a in (x, y)
+            isinstance(a, np.ndarray) and not has_corresponding_torch_dtype(a.dtype) for a in (x, y)
         )
         tensor_sequence_comparison = (
             isinstance(x, torch.Tensor)
