@@ -14,7 +14,7 @@ from functools import partial
 
 from torch._six import inf, nan
 from torch.testing._internal.common_utils import (
-    TestCase, iter_indices, TEST_WITH_ASAN, run_tests,
+    TestCase, iter_indices, TEST_WITH_ASAN, run_tests, gradcheck,
     torch_to_numpy_dtype_dict, TEST_SCIPY, set_default_dtype)
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta, instantiate_device_type_tests, onlyCUDA, onlyCPU, dtypes, dtypesIfCUDA,
@@ -777,6 +777,14 @@ class TestBinaryUfuncs(TestCase):
             self.assertEqual(actual, expected.to(actual))
             self.assertEqual(actual2, expected.to(actual))
 
+    # We can potentially merge this into OpInfo, but one blocker is that the
+    # first input must be a scalar. It is not as simple as just wrapping this in
+    # a lambada that switches the inputs, because we also want to test samples inputs
+    # where the second input is a scalar. The wrapper would need some more logic.
+    def test_pow_scalar_base(self, device):
+        a = torch.arange(1, 13, dtype=torch.double, device=device).view(3, 4).requires_grad_()
+        gradcheck(lambda a: torch.pow(2, a), (a,))
+
     # Tests pow() for integral, floating-type tensors, with integral, floating-type
     # exponents (tensor or scalar), respectively. noncontiguous tensors are also tested.
     def test_int_and_float_pow(self, device):
@@ -1436,6 +1444,19 @@ class TestBinaryUfuncs(TestCase):
             self.assertEqual(tensor_result_1, numpy_result_1)
             self.assertEqual(tensor_result_2, numpy_result_2)
 
+    @dtypes(*product(get_all_fp_dtypes(), get_all_fp_dtypes()))
+    def test_maximum_and_minimum_subgradient(self, device, dtypes):
+        def run_test(f, a, b, expected_a_grad, expected_b_grad):
+            a = torch.tensor(a, requires_grad=True, device=device, dtype=dtypes[0])
+            b = torch.tensor(b, requires_grad=True, device=device, dtype=dtypes[1])
+            z = f(a, b)
+            z.sum().backward()
+            self.assertEqual(a.grad, expected_a_grad)
+            self.assertEqual(b.grad, expected_b_grad)
+
+        run_test(torch.maximum, [0., 1., 2.], [1., 1., 1.], [0., 0.5, 1.], [1., 0.5, 0.])
+        run_test(torch.minimum, [0., 1., 2.], [1., 1., 1.], [1., 0.5, 0.], [0., 0.5, 1.])
+
     # TODO: tests like this should be generic
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float, torch.double)
@@ -1581,6 +1602,41 @@ class TestBinaryUfuncs(TestCase):
             a = make_tensor((10, 10), device=device, dtype=dtypes[0], low=-9, high=9)
             for case in cases:
                 _test_copysign_numpy(a, torch.tensor([case], device=device, dtype=dtypes[1]))
+
+    @dtypes(*product(get_all_fp_dtypes(),
+                     get_all_fp_dtypes()))
+    def test_copysign_subgradient(self, device, dtypes):
+        # Input is 0.0
+        x = torch.tensor([0.0, 0.0, 0.0], dtype=dtypes[0], device=device, requires_grad=True)
+        y = torch.tensor([-1.0, 0.0, 1.0], dtype=dtypes[1], device=device, requires_grad=True)
+        out = torch.copysign(x, y)
+        out.sum().backward()
+        self.assertEqual(x.grad.tolist(), [0.0, 0.0, 0.0])
+        self.assertEqual(y.grad.tolist(), [0.0] * 3)
+
+        # Input is -0.0
+        x = torch.tensor([-0.0, -0.0, -0.0], dtype=dtypes[0], device=device, requires_grad=True)
+        y = torch.tensor([-1.0, 0.0, 1.0], dtype=dtypes[1], device=device, requires_grad=True)
+        out = torch.copysign(x, y)
+        out.sum().backward()
+        self.assertEqual(x.grad.tolist(), [0.0, 0.0, 0.0])
+        self.assertEqual(y.grad.tolist(), [0.0] * 3)
+
+        # Other is 0.0
+        x = torch.tensor([-1.0, 0.0, 1.0], dtype=dtypes[0], device=device, requires_grad=True)
+        y = torch.tensor([0.0, 0.0, 0.0], dtype=dtypes[1], device=device, requires_grad=True)
+        out = torch.copysign(x, y)
+        out.sum().backward()
+        self.assertEqual(x.grad.tolist(), [-1.0, 0.0, 1.0])
+        self.assertEqual(y.grad.tolist(), [0.0] * 3)
+
+        # Other is -0.0
+        x = torch.tensor([-1.0, 0.0, 1.0], dtype=dtypes[0], device=device, requires_grad=True)
+        y = torch.tensor([-0.0, -0.0, -0.0], dtype=dtypes[1], device=device, requires_grad=True)
+        out = torch.copysign(x, y)
+        out.sum().backward()
+        self.assertEqual(x.grad.tolist(), [1.0, 0.0, -1.0])
+        self.assertEqual(y.grad.tolist(), [0.0] * 3)
 
     @dtypes(torch.bfloat16, torch.float)
     def test_div(self, device, dtype):
@@ -2515,6 +2571,7 @@ class TestBinaryUfuncs(TestCase):
         m2 = torch.tensor(4., dtype=torch.float64)
         self.assertRaisesRegex(RuntimeError, r"result type ComplexFloat can't be cast to the desired output type Double",
                                lambda: torch.add(m1, m1, out=m2))
+
 
     @onlyCUDA
     def test_addsub_half_tensor(self, device):
