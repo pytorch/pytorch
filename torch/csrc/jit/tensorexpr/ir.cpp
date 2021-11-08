@@ -100,14 +100,6 @@ ExprPtr flatten_index(
   if (ndim == 0) {
     return alloc<LongImm>(0);
   }
-  /*
-  // stride[i] = stride[i+1]*dims[i+1], i < ndim-1
-  // stride[i] = 1,                     i = ndim-1
-  strides[ndim - 1] = immLike(dims[ndim - 1], 1);
-  for (size_t i = 1; i < ndim; i++) {
-    strides[ndim - 1 - i] = alloc<Mul>(strides[ndim - i], dims[ndim - i]);
-  }
-  */
   ExprPtr total_index = immLike(indices[0], 0);
   for (const auto i : c10::irange(ndim)) {
     total_index = alloc<Add>(total_index, alloc<Mul>(indices[i], strides[i]));
