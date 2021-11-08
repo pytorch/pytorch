@@ -1,6 +1,8 @@
 #include <torch/csrc/jit/python/python_ir.h>
 
 #include <pybind11/pybind11.h>
+#include <torch/csrc/Dtype.h>
+#include <torch/csrc/api/include/torch/python.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
@@ -233,7 +235,6 @@ void initPythonIRBindings(PyObject* module_) {
              bool add_node_names,
              bool use_external_data_format,
              const std::string& onnx_file_path,
-             const ValAttrNameMap& val_attr_to_name,
              const NodeAttrNameMap& node_attr_to_name) {
             std::string graph;
             std::shared_ptr<::ONNX_NAMESPACE::ModelProto> model_proto;
@@ -258,7 +259,6 @@ void initPythonIRBindings(PyObject* module_) {
                     add_node_names,
                     use_external_data_format,
                     onnx_file_path,
-                    val_attr_to_name,
                     node_attr_to_name);
             std::unordered_map<std::string, py::bytes>
                 python_serialized_export_map;
@@ -289,7 +289,6 @@ void initPythonIRBindings(PyObject* module_) {
           py::arg("add_node_names") = true,
           py::arg("use_external_data_format") = false,
           py::arg("onnx_file_path") = std::string(),
-          py::arg("val_attr_to_name") = ValAttrNameMap(),
           py::arg("node_attr_to_name") = NodeAttrNameMap())
       .def(
           "_pretty_print_onnx",
@@ -802,6 +801,31 @@ void initPythonIRBindings(PyObject* module_) {
             auto scalar_type =
                 t.shared_from_this()->expectRef<TensorType>().scalarType();
             return (scalar_type) ? toString(*scalar_type) : nullptr;
+          })
+      .def(
+          "dtype",
+          [](Type& t) -> py::object {
+            auto scalar_type =
+                t.shared_from_this()->expectRef<TensorType>().scalarType();
+            if (!scalar_type) {
+              return py::none();
+            }
+            THPDtype* thp_dtype = torch::getTHPDtype(*scalar_type);
+            py::object dtype =
+                py::reinterpret_borrow<py::object>((PyObject*)thp_dtype);
+            return dtype;
+          })
+      .def(
+          "with_dtype",
+          [](Type& t, py::object dtype) -> py::object {
+            at::ScalarType scalar_type =
+                python::detail::py_object_to_dtype(dtype);
+
+            if (auto ptt = t.expect<TensorType>()) {
+              // auto scalar_type = dtype->scalar_type;
+              return py::cast(ptt->withScalarType(scalar_type));
+            }
+            return py::none();
           })
       .def(
           "__eq__",
