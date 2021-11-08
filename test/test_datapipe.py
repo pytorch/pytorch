@@ -52,6 +52,7 @@ from torch.utils.data import (
     runtime_validation,
     runtime_validation_disabled,
 )
+from torch.utils.data.graph import traverse
 from torch.utils.data.datapipes.utils.decoder import (
     basichandlers as decoder_basichandlers,
 )
@@ -866,8 +867,10 @@ class TestFunctionalIterDataPipe(TestCase):
 
         # Pickle Test:
         dp1, dp2, dp3 = input_dp.fork(num_instances=3)
-        from torch.utils.data.graph import traverse
         traverse(dp1)  # This should not raise any error
+        for _ in zip(dp1, dp2, dp3):
+            pass
+        traverse(dp2)  # This should not raise any error either
 
     def test_mux_datapipe(self):
 
@@ -1028,8 +1031,12 @@ class TestFunctionalIterDataPipe(TestCase):
 
         # Pickle Test:
         dp1, dp2 = input_dp.demux(num_instances=2, classifier_fn=odd_or_even)
-        from torch.utils.data.graph import traverse
         traverse(dp1)  # This should not raise any error
+        for _ in zip(dp1, dp2):
+            pass
+        traverse(dp2)  # This should not raise any error either
+
+
 
     @suppress_warnings  # Suppress warning for lambda fn
     def test_map_datapipe(self):
