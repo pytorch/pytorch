@@ -201,7 +201,8 @@ __device__ WelfordData compute_stats(
 }
 
 
-template <typename T, typename T_ACC>
+template <typename T, typename T_ACC,
+typename std::enable_if<!std::is_same<T, double>::value, int>::type = 0>
 __global__ void vectorized_layer_norm_kernel(
   const int N,
   T_ACC eps,
@@ -248,6 +249,20 @@ __global__ void vectorized_layer_norm_kernel(
       rstd[i1] = rstd_val;
     }
 }
+
+template <typename T, typename T_ACC,
+typename std::enable_if<std::is_same<T, double>::value, int>::type = 0>
+__global__ void vectorized_layer_norm_kernel(
+  const int N,
+  T_ACC eps,
+  const  T* __restrict__ X,
+  const  T* gamma,
+  const  T* beta,
+  T_ACC* mean,
+  T_ACC* rstd,
+  T* Y){
+    CUDA_KERNEL_ASSERT("doesn't work with double");
+  }
 
 template <typename T>
 __global__ void ComputeInternalGradientsCUDAKernel(
