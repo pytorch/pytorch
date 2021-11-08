@@ -147,6 +147,15 @@ void Context::setAllowTF32CuBLAS(bool b) {
   allow_tf32_cublas = b;
 }
 
+bool Context::linalgCudaPreferCusolver() const {
+  return linalg_cuda_prefer_cusolver;
+
+}
+
+void Context::setLinalgCudaPreferCusolver(bool b) {
+  linalg_cuda_prefer_cusolver = b;
+}
+
 bool Context::hasMKL() {
 #if AT_MKL_ENABLED()
   return true;

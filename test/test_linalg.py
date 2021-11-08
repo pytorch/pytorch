@@ -8082,6 +8082,11 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         an = torch.from_numpy(np.tensordot(np.zeros((), dtype=np.float32), np.zeros((), dtype=np.float32), 0))
         self.assertEqual(a, an)
 
+    def test_linalg_cuda_prefer_cusolver_get_set(self):
+        with torch.backends.linalg.flags(cuda_prefer_cusolver=False):
+            self.assertFalse(torch.backends.linalg.cuda_prefer_cusolver)
+        with torch.backends.linalg.flags(cuda_prefer_cusolver=True):
+            self.assertTrue(torch.backends.linalg.cuda_prefer_cusolver)
 
 instantiate_device_type_tests(TestLinalg, globals())
 

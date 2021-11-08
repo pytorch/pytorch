@@ -122,6 +122,9 @@ class TORCH_API Context {
   bool deterministicCuDNN() const;
   void setDeterministicCuDNN(bool);
 
+  bool linalgCudaPreferCusolver() const;
+  void setLinalgCudaPreferCusolver(bool);
+
   // Note [Enabling Deterministic Operations]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   // Operations in PyTorch that normally act nondeterministically, but have an alternate
@@ -240,6 +243,7 @@ class TORCH_API Context {
   bool allow_tf32_cudnn = true;
   bool allow_tf32_cublas = true;
   bool enabled_mkldnn = true;
+  bool linalg_cuda_prefer_cusolver = false; // if this is set to false, use existing heuristics
   #ifdef C10_MOBILE
   bool release_original_weights = true;
   #else

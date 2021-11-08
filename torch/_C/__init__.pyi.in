@@ -594,6 +594,8 @@ def _get_warnAlways() -> _bool: ...  # THPModule_warnAlways
 def _set_warnAlways(arg: _bool) -> None: ...  # THPModule_setWarnAlways
 def _get_cudnn_allow_tf32() -> _bool: ...  # THPModule_allowTF32CuDNN
 def _set_cudnn_allow_tf32(arg: _bool) -> None: ...  # THPModule_setAllowTF32CuDNN
+def _get_linalg_cuda_prefer_cusolver() -> _bool: ...  # THPModule_linalgCudaPreferCusolver
+def _set_linalg_cuda_prefer_cusolver(arg: _bool) -> None: ...  # THPModule_setLinalgCudaPreferCusolver
 def _get_cublas_allow_tf32() -> _bool: ...  # THPModule_allowTF32CuBLAS
 def _set_cublas_allow_tf32(arg: _bool) -> None: ...  # THPModule_setAllowTF32CuBLAS
 # NB: There is no Capsule type in typing, see
