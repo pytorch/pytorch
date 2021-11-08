@@ -28,7 +28,7 @@ from pathlib import Path
 import socket
 import subprocess
 import time
-from collections.abc import Sequence
+from collections.abc import Sequence, Mapping
 from contextlib import contextmanager, closing
 from functools import wraps
 from itertools import product
@@ -66,6 +66,8 @@ import torch.backends.mkl
 from enum import Enum
 from statistics import mean
 import functools
+from torch.nn import ModuleList, ModuleDict, Sequential, ParameterList, ParameterDict
+from torch._C import ScriptList, ScriptDict  # type: ignore[attr-defined]
 
 torch.backends.disable_global_flags()
 
@@ -1794,21 +1796,21 @@ class TestCase(expecttest.TestCase):
         # Hide this function from `pytest`'s traceback
         __tracebackhide__ = True
 
-        unsupported_numpy_dtype = any(
-            isinstance(a, np.ndarray) and not has_corresponding_torch_dtype(a.dtype) for a in (x, y)
-        )
-        tensor_sequence_comparison = (
+        if any(
+            isinstance(input, np.ndarray) and not has_corresponding_torch_dtype(input.dtype) for input in (x, y)
+        ):
+            def to_list(input):
+                return input.tolist() if isinstance(input, (torch.Tensor, np.ndarray)) else list(input)
+
+            x = to_list(x)
+            y = to_list(y)
+        elif(
             isinstance(x, torch.Tensor)
             and isinstance(y, Sequence)
             or isinstance(y, torch.Tensor)
             and isinstance(x, Sequence)
-        )
-        if unsupported_numpy_dtype or tensor_sequence_comparison:
-            def tolist(input):
-                return input.tolist() if isinstance(input, (torch.Tensor, np.ndarray)) else list(input)
-
-            x = tolist(x)
-            y = tolist(y)
+        ):
+            x, y = [torch.as_tensor(input) for input in (x, y)]
 
         assert_equal(
             x,
@@ -1823,6 +1825,8 @@ class TestCase(expecttest.TestCase):
                 TypePair,
                 ObjectPair,
             ),
+            sequence_types=(Sequence, Sequential, ModuleList, ParameterList, ScriptList),
+            mapping_types=(Mapping, ModuleDict, ParameterDict, ScriptDict),
             rtol=rtol,
             rtol_override=self.rel_tol,
             atol=atol,
@@ -1965,7 +1969,7 @@ class TestCase(expecttest.TestCase):
             with open(expected_file, 'w') as f:
                 # Adjust for producer_version, leave s unmodified
                 s_tag = re.sub(r'(producer_version): "[0-9.]*"',
-                               r'\1producer_version: "CURRENT_VERSION"', s)
+                               r'\1: "CURRENT_VERSION"', s)
                 f.write(s_tag)
 
         try:
@@ -2084,6 +2088,14 @@ def download_file(url, binary=True):
         raise unittest.SkipTest(msg) from e
 
 def find_free_port():
+    """
+    Finds an available port and returns that port number.
+
+    NOTE: If this function is being used to allocate a port to Store (or
+    indirectly via init_process_group or init_rpc), it should be used
+    in conjuction with the `retry_on_connect_failures` decorator as there is a potential
+    race condition where the allocated port may become unavailable before it can be used
+    """
     with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as sock:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind(('localhost', 0))
