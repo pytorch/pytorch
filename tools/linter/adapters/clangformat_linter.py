@@ -34,7 +34,6 @@ class LintMessage(NamedTuple):
     original: Optional[str]
     replacement: Optional[str]
     description: Optional[str]
-    bypassChangedLineFiltering: Optional[bool]
 
 
 def as_posix(name: str) -> str:
@@ -115,7 +114,6 @@ def check_file(
                     "Please report an issue in pytorch/pytorch with the "
                     "label 'module: lint'"
                 ),
-                bypassChangedLineFiltering=None,
             )
         ]
     except (OSError, subprocess.CalledProcessError) as err:
@@ -144,7 +142,6 @@ def check_file(
                         stdout=err.stdout.decode("utf-8").strip() or "(empty)",
                     )
                 ),
-                bypassChangedLineFiltering=None,
             )
         ]
 
@@ -163,7 +160,6 @@ def check_file(
             original=original.decode("utf-8"),
             replacement=replacement.decode("utf-8"),
             description="See https://clang.llvm.org/docs/ClangFormat.html.\nRun `lintrunner -a` to apply this patch.",
-            bypassChangedLineFiltering=True,
         )
     ]
 

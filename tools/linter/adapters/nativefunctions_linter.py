@@ -40,7 +40,6 @@ class LintMessage(NamedTuple):
     original: Optional[str]
     replacement: Optional[str]
     description: Optional[str]
-    bypassChangedLineFiltering: Optional[bool]
 
 
 if __name__ == "__main__":
@@ -75,7 +74,6 @@ if __name__ == "__main__":
             original=None,
             replacement=None,
             description=f"Failed due to {err.__class__.__name__}:\n{err}",
-            bypassChangedLineFiltering=None,
         )
 
         print(json.dumps(msg._asdict()), flush=True)
@@ -102,7 +100,6 @@ if __name__ == "__main__":
                 "YAML roundtrip failed; run `lintrunner --take NATIVEFUNCTIONS -a` to apply the suggested changes. "
                 "If you think this is in error, please see tools/linter/adapters/nativefunctions_linter.py"
             ),
-            bypassChangedLineFiltering=None,
         )
 
         print(json.dumps(msg._asdict()), flush=True)

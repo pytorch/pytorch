@@ -37,7 +37,6 @@ class LintMessage(NamedTuple):
     original: Optional[str]
     replacement: Optional[str]
     description: Optional[str]
-    bypassChangedLineFiltering: Optional[bool]
 
 
 def as_posix(name: str) -> str:
@@ -100,7 +99,6 @@ def lint_file(
                         stdout=err.stdout.decode("utf-8").strip() or "(empty)",
                     )
                 ),
-                bypassChangedLineFiltering=None,
             )
 
     return LintMessage(
@@ -113,7 +111,6 @@ def lint_file(
         original=original,
         replacement=replacement,
         description=error_description,
-        bypassChangedLineFiltering=None,
     )
 
 
@@ -189,7 +186,6 @@ def main() -> None:
                     stdout=err.stdout.decode("utf-8").strip() or "(empty)",
                 )
             ),
-            bypassChangedLineFiltering=None,
         )
         print(json.dumps(err_msg._asdict()), flush=True)
         exit(0)

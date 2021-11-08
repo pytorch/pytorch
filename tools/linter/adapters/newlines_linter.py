@@ -31,7 +31,6 @@ class LintMessage(NamedTuple):
     original: Optional[str]
     replacement: Optional[str]
     description: Optional[str]
-    bypassChangedLineFiltering: Optional[bool]
 
 
 def correct_trailing_newlines(filename: str) -> bool:
@@ -69,7 +68,6 @@ def check_file(filename: str) -> Optional[LintMessage]:
                 original=None,
                 replacement=None,
                 description="Trailing newline found. Run `lintunner --take NEWLINE -a` to apply changes.",
-                bypassChangedLineFiltering=None,
             )
 
         else:
@@ -94,7 +92,6 @@ def check_file(filename: str) -> Optional[LintMessage]:
                         original=None,
                         replacement=None,
                         description=f"utf-8 decoding failed due to {err.__class__.__name__}:\n{err}",
-                        bypassChangedLineFiltering=None,
                     )
 
                 return LintMessage(
@@ -107,7 +104,6 @@ def check_file(filename: str) -> Optional[LintMessage]:
                     original=original,
                     replacement=original.rstrip("\n") + "\n",
                     description="Trailing newline found. Run `lintunner --take NEWLINE -a` to apply changes.",
-                    bypassChangedLineFiltering=None,
                 )
 
 
