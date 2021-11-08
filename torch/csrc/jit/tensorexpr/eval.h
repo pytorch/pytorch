@@ -223,16 +223,10 @@ class ExprEval {
 
   template <typename... Ts>
   void call(Ts... ts) {
-    std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
-              << std::endl;
     call({CallArg(ts)...});
-    std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
-              << std::endl;
   }
 
   void call(const std::vector<CallArg>& call_args) {
-    std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
-              << std::endl;
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<CallArg> call_args_extended = call_args;
     switch (dtype_.scalar_type()) {
@@ -263,8 +257,6 @@ class ExprEval {
   }
 
   void call_raw(const std::vector<void*>& args) {
-    std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
-              << std::endl;
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<void*> args_extended = args;
     switch (dtype_.scalar_type()) {
@@ -293,21 +285,13 @@ class ExprEval {
 
   template <typename T>
   T value(const std::vector<void*>& args) {
-    std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
-              << std::endl;
     call_raw(args);
-    std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
-              << std::endl;
     return ret_value_.as<T>();
   }
 
   template <typename T, typename... Ts>
   T value(Ts... ts) {
-    std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
-              << std::endl;
     call(std::forward<Ts>(ts)...);
-    std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
-              << std::endl;
     return ret_value_.as<T>();
   }
 

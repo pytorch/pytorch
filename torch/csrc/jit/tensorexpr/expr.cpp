@@ -357,8 +357,6 @@ ExprHandle ifThenElse(
 
 std::vector<ExprPtr> make_contiguous_strides(
     const std::vector<ExprHandle> dims) {
-  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
-            << std::endl;
   std::vector<ExprPtr> strides;
 
   if (dims.size() > 0) {
@@ -374,12 +372,6 @@ std::vector<ExprPtr> make_contiguous_strides(
 
 std::vector<ExprPtr> make_channels_last_strides(
     const std::vector<ExprHandle> dims) {
-  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
-            << std::endl;
-  std::cout << " dims:" << std::endl;
-  for (const auto& dim : dims) {
-    std::cout << " " << dim.node() << std::endl;
-  }
   std::vector<ExprPtr> strides;
   TORCH_INTERNAL_ASSERT(dims.size() == 4, "got size:", dims.size());
   strides.resize(dims.size());
@@ -391,10 +383,6 @@ std::vector<ExprPtr> make_channels_last_strides(
   strides[2] = handle.node();
   handle = handle * dims[2];
   strides[0] = handle.node();
-  std::cout << " strides:" << std::endl;
-  for (const auto& stride : strides) {
-    std::cout << " " << stride << std::endl;
-  }
   return strides;
 }
 
@@ -412,34 +400,21 @@ Buf::Buf(
       initializer_(std::move(initializer)),
       qscale_(std::move(qscale)),
       qzero_(std::move(qzero)) {
-  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
-            << " name_hint:" << var->name_hint() << std::endl;
-  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
-            << " has_strides:" << ((bool)(strides)) << std::endl;
-
   TORCH_CHECK(var);
   strides_ = strides
       ? *strides
       : make_contiguous_strides(ExprVectorToExprHandleVector(dims_));
-  for (const auto& s : strides_) {
-    std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
-              << " stride_i:" << ((bool)s) << std::endl;
-  }
 }
 
 ExprHandle Buf::make(
     const std::string& name_hint,
     const std::vector<ExprHandle>& dims,
     Dtype dtype) {
-  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
-            << std::endl;
   return ExprHandle(
       alloc<Buf>(name_hint, ExprHandleVectorToExprVector(dims), dtype));
 }
 
 ExprHandle Buf::make(const std::vector<ExprHandle>& dims, Dtype dtype) {
-  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
-            << std::endl;
   return Buf::make("", dims, dtype);
 }
 

@@ -27,8 +27,6 @@ std::vector<at::Tensor> constructTensors(
     int64_t* buf_dims,
     int64_t* buf_strides,
     int8_t* buf_dtypes) {
-  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
-            << std::endl;
   std::vector<void*> buf_data_vec;
   std::vector<std::vector<int64_t>> buf_dims_vec;
   std::vector<std::vector<int64_t>> buf_strides_vec;
@@ -49,23 +47,20 @@ std::vector<at::Tensor> constructTensors(
 
   std::vector<at::Tensor> tensors;
   for (const auto i : c10::irange(buf_data_vec.size())) {
+    auto memory_format = c10::MemoryFormat::Contiguous;
+    if (buf_strides_vec[i].size() == 4 && buf_strides_vec[i][3] != 1) {
+      memory_format = c10::MemoryFormat::ChannelsLast;
+    }
     auto options = at::TensorOptions()
                        .dtype(buf_dtypes_vec[i])
                        .layout(at::kStrided)
                        .device(at::kCPU) // TODO: support GPUs too
+                       .memory_format(memory_format)
                        .requires_grad(false);
-    auto tensor = at::from_blob(buf_data_vec[i], buf_dims_vec[i], options);
-    std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
-              << " dims:" << c10::IntArrayRef(buf_dims_vec[i])
-              << " strides:" << c10::IntArrayRef(buf_strides_vec[i])
-              << std::endl;
-    if (!isQIntType(buf_dtypes_vec[i])) {
-      //tensor.as_strided(buf_dims_vec[i], buf_strides_vec[i]);
-    }
+    auto tensor = at::from_blob(
+        buf_data_vec[i], buf_dims_vec[i], buf_strides_vec[i], options);
     tensors.emplace_back(tensor);
   }
-  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
-            << std::endl;
   return tensors;
 }
 
@@ -82,8 +77,6 @@ void nnc_aten_conv2d(
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
-            << std::endl;
   std::vector<at::Tensor> tensors = constructTensors(
       bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
 
@@ -135,23 +128,11 @@ void nnc_aten_quantized_conv2d(
     int8_t* buf_dtypes,
     int64_t,
     int64_t* extra_args) {
-  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
-            << std::endl;
   std::vector<at::Tensor> tensors = constructTensors(
       bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
   const double x_qscale = ((double*)extra_args)[0];
   const int64_t x_qzero = extra_args[1];
   const c10::ScalarType x_qdtype = static_cast<c10::ScalarType>(extra_args[2]);
-  at::Tensor qx = at::from_blob_quantized_per_tensor_affine(
-      buf_data[1],
-      // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
-      tensors[1].sizes(),
-      [](void*) {},
-      // NOLINTNEXTLINE
-      x_qscale,
-      x_qzero,
-      at::TensorOptions(toQIntType(x_qdtype)));
-  // ---
   std::vector<std::vector<int64_t>> buf_strides_vec;
   int64_t buf_strides_idx = 0;
   for (const auto i : c10::irange(bufs_num)) {
@@ -161,15 +142,27 @@ void nnc_aten_quantized_conv2d(
       buf_strides_vec[i].push_back(buf_strides[buf_strides_idx++]);
     }
   }
-  //qx.as_strided(tensors[1].sizes(), buf_strides_vec[1]);
-  // ---
-  auto uiptr = ((uintptr_t*)buf_data[2])[0];
-  auto convPackedParams = reinterpret_cast<ConvPackedParamsBase<2>*>(uiptr);
+  auto memory_format = c10::MemoryFormat::Contiguous;
+  if (buf_strides_vec[1].size() == 4 && buf_strides_vec[1][3] != 1) {
+    memory_format = c10::MemoryFormat::ChannelsLast;
+  }
+  at::Tensor qx = at::from_blob_quantized_per_tensor_affine(
+      buf_data[1],
+      // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
+      tensors[1].sizes(),
+      buf_strides_vec[1],
+      [](void*) {},
+      // NOLINTNEXTLINE
+      x_qscale,
+      x_qzero,
+      at::TensorOptions()
+          .dtype(toQIntType(x_qdtype))
+          .memory_format(memory_format));
+  auto convPackedParams =
+      reinterpret_cast<ConvPackedParamsBase<2>*>(buf_data[2]);
   const double out_qscale = ((double*)extra_args)[3];
   const int64_t out_qzero = extra_args[4];
   auto r = convPackedParams->apply(qx, out_qscale, out_qzero);
-  auto strides = r.strides().vec();
-  //r = r.contiguous();
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
 
@@ -182,23 +175,11 @@ void nnc_aten_quantized_conv2d_relu(
     int8_t* buf_dtypes,
     int64_t,
     int64_t* extra_args) {
-  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
-            << std::endl;
   std::vector<at::Tensor> tensors = constructTensors(
       bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
   const double x_qscale = ((double*)extra_args)[0];
   const int64_t x_qzero = extra_args[1];
   const c10::ScalarType x_qdtype = static_cast<c10::ScalarType>(extra_args[2]);
-  at::Tensor qx = at::from_blob_quantized_per_tensor_affine(
-      buf_data[1],
-      // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
-      tensors[1].sizes(),
-      [](void*) {},
-      // NOLINTNEXTLINE
-      x_qscale,
-      x_qzero,
-      at::TensorOptions(toQIntType(x_qdtype)));
-  // ---
   std::vector<std::vector<int64_t>> buf_strides_vec;
   int64_t buf_strides_idx = 0;
   for (const auto i : c10::irange(bufs_num)) {
@@ -208,15 +189,28 @@ void nnc_aten_quantized_conv2d_relu(
       buf_strides_vec[i].push_back(buf_strides[buf_strides_idx++]);
     }
   }
-  //qx.as_strided(tensors[1].sizes(), buf_strides_vec[1]);
-  // ---
+  auto memory_format = c10::MemoryFormat::Contiguous;
+  if (buf_strides_vec[1].size() == 4 && buf_strides_vec[1][3] != 1) {
+    memory_format = c10::MemoryFormat::ChannelsLast;
+  }
+  at::Tensor qx = at::from_blob_quantized_per_tensor_affine(
+      buf_data[1],
+      // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
+      tensors[1].sizes(),
+      buf_strides_vec[1],
+      [](void*) {},
+      // NOLINTNEXTLINE
+      x_qscale,
+      x_qzero,
+      at::TensorOptions()
+          .dtype(toQIntType(x_qdtype))
+          .memory_format(memory_format));
 
-  auto uiptr = ((uintptr_t*)buf_data[2])[0];
-  auto convPackedParams = reinterpret_cast<ConvPackedParamsBase<2>*>(uiptr);
+  auto convPackedParams =
+      reinterpret_cast<ConvPackedParamsBase<2>*>(buf_data[2]);
   const double out_qscale = ((double*)extra_args)[3];
   const int64_t out_qzero = extra_args[4];
   auto r = convPackedParams->apply_relu(qx, out_qscale, out_qzero);
-  //r = r.contiguous();
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
 
@@ -229,23 +223,41 @@ void nnc_aten_quantized_add(
     int8_t* buf_dtypes,
     int64_t,
     int64_t* extra_args) {
-  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
-            << std::endl;
   std::vector<at::Tensor> tensors = constructTensors(
       bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
 
   const double a_qscale = ((double*)extra_args)[0];
   const int64_t a_qzero = extra_args[1];
   const c10::ScalarType a_qdtype = static_cast<c10::ScalarType>(extra_args[2]);
+  std::vector<std::vector<int64_t>> buf_strides_vec;
+  int64_t buf_strides_idx = 0;
+  for (const auto i : c10::irange(bufs_num)) {
+    buf_strides_vec.emplace_back();
+    for (const auto dim : c10::irange(buf_ranks[i])) {
+      (void)dim;
+      buf_strides_vec[i].push_back(buf_strides[buf_strides_idx++]);
+    }
+  }
+  auto memory_formata = c10::MemoryFormat::Contiguous;
+  if (buf_strides_vec[1].size() == 4 && buf_strides_vec[1][3] != 1) {
+    memory_formata = c10::MemoryFormat::ChannelsLast;
+  }
+  auto memory_formatb = c10::MemoryFormat::Contiguous;
+  if (buf_strides_vec[2].size() == 4 && buf_strides_vec[2][3] != 1) {
+    memory_formatb = c10::MemoryFormat::ChannelsLast;
+  }
   at::Tensor qa = at::from_blob_quantized_per_tensor_affine(
       buf_data[1],
       // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
       tensors[1].sizes(),
+      buf_strides_vec[1],
       [](void*) {},
       // NOLINTNEXTLINE
       a_qscale,
       a_qzero,
-      at::TensorOptions(toQIntType(a_qdtype)));
+      at::TensorOptions()
+          .dtype(toQIntType(a_qdtype))
+          .memory_format(memory_formata));
   const double b_qscale = ((double*)extra_args)[3];
   const int64_t b_qzero = extra_args[4];
   const c10::ScalarType b_qdtype = static_cast<c10::ScalarType>(extra_args[5]);
@@ -253,37 +265,18 @@ void nnc_aten_quantized_add(
       buf_data[2],
       // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
       tensors[2].sizes(),
+      buf_strides_vec[2],
       [](void*) {},
       // NOLINTNEXTLINE
       b_qscale,
       b_qzero,
-      at::TensorOptions(toQIntType(b_qdtype)));
+      at::TensorOptions()
+          .dtype(toQIntType(b_qdtype))
+          .memory_format(memory_formatb));
   const double out_qscale = ((double*)extra_args)[6];
   const int64_t out_qzero = extra_args[7];
   auto r = at::native::quantized_add(qa, qb, out_qscale, out_qzero);
-  //r = r.contiguous();
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
-}
-
-c10::intrusive_ptr<ConvPackedParamsBase<2>> quantized_conv2d_prepack(
-    at::Tensor qweight,
-    c10::optional<at::Tensor> bias,
-    c10::List<int64_t> stride,
-    c10::List<int64_t> padding,
-    c10::List<int64_t> dilation,
-    int64_t groups) {
-  auto qconv2d_prepack_op =
-      c10::Dispatcher::singleton()
-          .findSchemaOrThrow("quantized::conv2d_prepack", "")
-          .typed<c10::intrusive_ptr<ConvPackedParamsBase<2>>(
-              at::Tensor,
-              c10::optional<at::Tensor>,
-              c10::List<int64_t>,
-              c10::List<int64_t>,
-              c10::List<int64_t>,
-              int64_t)>();
-  return qconv2d_prepack_op.call(
-      qweight, bias, stride, padding, dilation, groups);
 }
 
 void nnc_aten_quantized_conv2d_prepack(
@@ -295,8 +288,6 @@ void nnc_aten_quantized_conv2d_prepack(
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
-            << std::endl;
   std::vector<at::Tensor> tensors = constructTensors(
       bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
 
@@ -322,8 +313,18 @@ void nnc_aten_quantized_conv2d_prepack(
   c10::List<int64_t> strides = {strideH, strideW};
   c10::List<int64_t> paddings = {paddingH, paddingW};
   c10::List<int64_t> dilations = {dilationH, dilationW};
-  c10::intrusive_ptr<ConvPackedParamsBase<2>> prepacked =
-      quantized_conv2d_prepack(qw, b, strides, paddings, dilations, groups);
+  auto qconv2d_prepack_op =
+      c10::Dispatcher::singleton()
+          .findSchemaOrThrow("quantized::conv2d_prepack", "")
+          .typed<c10::intrusive_ptr<ConvPackedParamsBase<2>>(
+              at::Tensor,
+              c10::optional<at::Tensor>,
+              c10::List<int64_t>,
+              c10::List<int64_t>,
+              c10::List<int64_t>,
+              int64_t)>();
+  auto prepacked =
+      qconv2d_prepack_op.call(qw, b, strides, paddings, dilations, groups);
   TORCH_INTERNAL_ASSERT(
       prepacked, buildErrorMessage("Quantized conv2d prepack failed"));
   static std::vector<c10::intrusive_ptr<ConvPackedParamsBase<2>>> cache;
@@ -341,8 +342,6 @@ void nnc_aten_upsample_nearest2d(
     int8_t* buf_dtypes,
     int64_t,
     int64_t* extra_args) {
-  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
-            << std::endl;
   std::vector<at::Tensor> tensors = constructTensors(
       bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
   // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
@@ -352,15 +351,31 @@ void nnc_aten_upsample_nearest2d(
   const int64_t x_qdtype = extra_args[2];
   const auto is_quantized = x_qdtype != -1;
   if (is_quantized) {
+    std::vector<std::vector<int64_t>> buf_strides_vec;
+    int64_t buf_strides_idx = 0;
+    for (const auto i : c10::irange(bufs_num)) {
+      buf_strides_vec.emplace_back();
+      for (const auto dim : c10::irange(buf_ranks[i])) {
+        (void)dim;
+        buf_strides_vec[i].push_back(buf_strides[buf_strides_idx++]);
+      }
+    }
+    auto memory_format = c10::MemoryFormat::Contiguous;
+    if (buf_strides_vec[1].size() == 4 && buf_strides_vec[1][3] != 1) {
+      memory_format = c10::MemoryFormat::ChannelsLast;
+    }
     x = at::from_blob_quantized_per_tensor_affine(
         buf_data[1],
         // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
         tensors[1].sizes(),
+        buf_strides_vec[1],
         [](void*) {},
         // NOLINTNEXTLINE
         x_qscale,
         x_qzero,
-        at::TensorOptions(toQIntType(static_cast<c10::ScalarType>(x_qdtype))));
+        at::TensorOptions()
+            .dtype(toQIntType(static_cast<c10::ScalarType>(x_qdtype)))
+            .memory_format(memory_format));
   }
 
   int64_t output_size_h = extra_args[3];
@@ -376,7 +391,6 @@ void nnc_aten_upsample_nearest2d(
       (scale_factor_h != -1.f) ? c10::optional<at::ArrayRef<double>>(
                                      {scale_factor_h, scale_factor_w})
                                : c10::nullopt);
-  //r = r.contiguous();
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
 
@@ -389,8 +403,6 @@ void nnc_aten_quantize_per_tensor(
     int8_t* buf_dtypes,
     int64_t,
     int64_t* extra_args) {
-  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
-            << std::endl;
   std::vector<at::Tensor> tensors = constructTensors(
       bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
   // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
@@ -411,8 +423,6 @@ void nnc_aten_dequantize(
     int8_t* buf_dtypes,
     int64_t,
     int64_t* extra_args) {
-  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
-            << std::endl;
   std::vector<at::Tensor> tensors = constructTensors(
       bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
   const double qscale = ((double*)extra_args)[0];
@@ -429,8 +439,45 @@ void nnc_aten_dequantize(
       at::TensorOptions(toQIntType(static_cast<c10::ScalarType>(qdtype))));
   auto r = at::dequantize(qx);
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
-  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
-            << std::endl;
+}
+
+void nnc_aten_conv1d(
+    int64_t bufs_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int8_t* buf_dtypes,
+    int64_t args_num,
+    int64_t* extra_args) {
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+
+  at::Tensor& r = tensors[0];
+  const at::Tensor& x = tensors[1];
+  const at::Tensor& w = tensors[2];
+  if (args_num > 0) {
+    // Check that if the extra arguments are provided, then the bias tensor is
+    // also present
+    TORCH_INTERNAL_ASSERT(args_num == 4 && bufs_num == 4);
+    const at::Tensor& b = tensors[3];
+
+    int64_t stride = extra_args[0];
+    int64_t padding = extra_args[1];
+    int64_t dilation = extra_args[2];
+    int64_t groups = extra_args[3];
+
+    try {
+      r = at::conv1d(x, w, b, {stride}, {padding}, {dilation}, groups);
+    } catch (...) {
+    }
+  } else {
+    try {
+      r = at::conv1d(x, w);
+    } catch (...) {
+    }
+  }
+
+  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
 
 void nnc_aten_adaptive_avg_pool2d(
@@ -442,8 +489,6 @@ void nnc_aten_adaptive_avg_pool2d(
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
-            << std::endl;
   std::vector<at::Tensor> tensors = constructTensors(
       bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
 
@@ -469,8 +514,6 @@ void nnc_aten_mean(
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
-            << std::endl;
   std::vector<at::Tensor> tensors = constructTensors(
       bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
 
@@ -486,6 +529,28 @@ void nnc_aten_mean(
   }
 }
 
+void nnc_aten_max_red(
+    int64_t bufs_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int8_t* buf_dtypes,
+    int64_t args_num,
+    int64_t* extra_args) {
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+
+  at::Tensor& r = tensors[0];
+  const at::Tensor& x = tensors[1];
+  int64_t max_dim = extra_args[0];
+  bool keep_dim = extra_args[1];
+  try {
+    r = std::get<0>(at::max(x, max_dim, keep_dim));
+  } catch (...) {
+  }
+  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+}
+
 void nnc_aten_addmm(
     int64_t bufs_num,
     void** buf_data,
@@ -495,8 +560,6 @@ void nnc_aten_addmm(
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
-            << std::endl;
   std::vector<at::Tensor> tensors = constructTensors(
       bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
 
@@ -524,8 +587,6 @@ void nnc_aten_triangular_solve(
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
-            << std::endl;
   std::vector<at::Tensor> tensors = constructTensors(
       bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
   at::Tensor& r = tensors[0];
@@ -550,8 +611,6 @@ void nnc_prepacked_linear_clamp_run(
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
-            << std::endl;
   using namespace at::native::xnnpack;
 
   std::vector<at::Tensor> tensors = constructTensors(
@@ -573,8 +632,6 @@ void nnc_prepacked_conv2d_clamp_run(
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
-            << std::endl;
   using namespace at::native::xnnpack;
 
   std::vector<at::Tensor> tensors = constructTensors(
@@ -588,6 +645,29 @@ void nnc_prepacked_conv2d_clamp_run(
 }
 
 #endif // USE_XNNPACK
+
+void nnc_aten_embedding(
+    int64_t bufs_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int8_t* buf_dtypes,
+    int64_t args_num,
+    int64_t* extra_args) {
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+
+  at::Tensor& r = tensors[0];
+  const at::Tensor& weight = tensors[1];
+  const at::Tensor& indices = tensors[2];
+  try {
+    r = at::embedding(weight, indices);
+  } catch (...) {
+  }
+  // TODO: have to copy output because at::embedding doesnt have an out variant
+  // and NNC's external calls don't support allocations
+  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+}
 
 #ifndef C10_MOBILE
 
@@ -615,12 +695,18 @@ const static RegisterNNCExternalFunction nnc_quantized_conv2d_prepack(
 const static RegisterNNCExternalFunction nnc_upsample_nearest2d(
     "nnc_aten_upsample_nearest2d",
     nnc_aten_upsample_nearest2d);
+const static RegisterNNCExternalFunction nnc_conv1d(
+    "nnc_aten_conv1d",
+    nnc_aten_conv1d);
 const static RegisterNNCExternalFunction nnc_adaptive_avg_pool2d(
     "nnc_aten_adaptive_avg_pool2d",
     nnc_aten_adaptive_avg_pool2d);
 const static RegisterNNCExternalFunction nnc_mean(
     "nnc_aten_mean",
     nnc_aten_mean);
+const static RegisterNNCExternalFunction nnc_max_red(
+    "nnc_aten_max_red",
+    nnc_aten_max_red);
 const static RegisterNNCExternalFunction nnc_addmm(
     "nnc_aten_addmm",
     nnc_aten_addmm);
@@ -628,6 +714,10 @@ const static RegisterNNCExternalFunction nnc_addmm(
 const static RegisterNNCExternalFunction nnc_triangular_solve(
     "nnc_aten_triangular_solve",
     nnc_aten_triangular_solve);
+
+const static RegisterNNCExternalFunction nnc_embedding(
+    "nnc_aten_embedding",
+    nnc_aten_embedding);
 
 #ifdef USE_XNNPACK
 const static RegisterNNCExternalFunction reg_nnc_prepacked_linear_clamp_run(

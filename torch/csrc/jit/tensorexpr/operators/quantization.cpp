@@ -40,7 +40,6 @@ BufHandle makeQBufHandleNCHW(
     Dtype dtype,
     const ExprPtr qscale,
     const ExprPtr qzero) {
-  std::cout << "XXX " << __FUNCTION__ << " " << __LINE__ << std::endl;
   BufHandle ResultBuf(name, dims, dtype);
   ResultBuf.node()->set_qscale(qscale);
   ResultBuf.node()->set_qzero(qzero);
@@ -54,7 +53,6 @@ BufHandle makeQBufHandleNHWC(
     Dtype dtype,
     const ExprPtr qscale,
     const ExprPtr qzero) {
-  std::cout << "XXX " << __FUNCTION__ << " " << __LINE__ << std::endl;
   BufHandle ResultBuf(name, dims, dtype);
   ResultBuf.node()->set_qscale(qscale);
   ResultBuf.node()->set_qzero(qzero);
@@ -68,7 +66,6 @@ BufHandle makeQBufHandleNHWC(
     Dtype dtype,
     const double qscale,
     const int64_t qzero) {
-  std::cout << "XXX " << __FUNCTION__ << " " << __LINE__ << std::endl;
   return makeQBufHandleNHWC(
       name,
       dims,
@@ -83,7 +80,6 @@ BufHandle makeQBufHandleNCHW(
     Dtype dtype,
     const double qscale,
     const int64_t qzero) {
-  std::cout << "XXX " << __FUNCTION__ << " " << __LINE__ << std::endl;
   return makeQBufHandleNCHW(
       name,
       dims,
@@ -156,8 +152,8 @@ Tensor computeQuantizePerTensorExternalCall(
     }
     throw malformed_input("Expected quantized dtype");
   }(qdtype);
-  auto ResultBuf =
-      makeQBufHandleNCHW("quantize_per_tensor", outputShape, dtype, qscale, qzero);
+  auto ResultBuf = makeQBufHandleNCHW(
+      "quantize_per_tensor", outputShape, dtype, qscale, qzero);
   StmtPtr s = ExternalCall::make(
       ResultBuf, "nnc_aten_quantize_per_tensor", {x}, {qscale, qzero, qdtype});
   return Tensor(ResultBuf.node(), s);
@@ -251,8 +247,6 @@ Tensor computeQuantizedConv2d(
       Dtype(out_qdtype),
       out_qscale,
       out_qzero);
-  std::cout << __FUNCTION__ << ":" << __LINE__ 
-    << " strides:" << ResultBuf.node()->strides() << std::endl;
   StmtPtr s = ExternalCall::make(
       ResultBuf,
       "nnc_aten_quantized_conv2d",
@@ -296,6 +290,19 @@ Tensor computeQuantizedConv2dRelu(
   return Tensor(ResultBuf.node(), s);
 }
 
+bool isChannelsLast(const BufHandle& buf) {
+  const auto& strides = buf.node()->strides();
+  const auto& dims = buf.node()->dims();
+  if (strides.size() != 4) {
+    return false;
+  }
+  auto dims1 = to<LongImm>(IRSimplifier::simplify(dims[1]))->value();
+  auto strides1 = to<LongImm>(IRSimplifier::simplify(strides[1]))->value();
+  auto strides3 = to<LongImm>(IRSimplifier::simplify(strides[3]))->value();
+
+  return ((strides3 == dims1) && (strides1 == 1));
+}
+
 Tensor computeQuantizedAdd(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
@@ -310,8 +317,21 @@ Tensor computeQuantizedAdd(
   // Change to dtype based on outputType when dtype propagation implemented
   const auto out_qdtype = immQDType(qa);
   // TODO: check what are output strides
-  auto ResultBuf = makeQBufHandleNCHW(
-      "quantized_add", outputShape, Dtype(out_qdtype), out_qscale, out_qzero);
+  const bool isQAChannelsLast = isChannelsLast(qa);
+  const bool isQBChannelsLast = isChannelsLast(qb);
+  auto ResultBuf = (isQAChannelsLast || isQBChannelsLast)
+      ? makeQBufHandleNHWC(
+            "quantized_add",
+            outputShape,
+            Dtype(out_qdtype),
+            out_qscale,
+            out_qzero)
+      : makeQBufHandleNCHW(
+            "quantized_add",
+            outputShape,
+            Dtype(out_qdtype),
+            out_qscale,
+            out_qzero);
   StmtPtr s = ExternalCall::make(
       ResultBuf,
       "nnc_aten_quantized_add",

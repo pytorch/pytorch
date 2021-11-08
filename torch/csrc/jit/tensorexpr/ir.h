@@ -911,7 +911,7 @@ TORCH_API std::vector<VarHandle> VarVectorToVarHandleVector(
 TORCH_API ExprPtr flatten_index(
     const std::vector<ExprPtr>& dims,
     const std::vector<ExprPtr>& indices,
-    const c10::optional<std::vector<ExprPtr>> strides = c10::nullopt);
+    const std::vector<ExprPtr>& strides);
 
 } // namespace tensorexpr
 } // namespace jit

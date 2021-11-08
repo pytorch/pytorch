@@ -679,7 +679,8 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     }
     void* ptr = iter->second;
 
-    ExprPtr flat_idx = flatten_index(v->buf()->dims(), v->indices());
+    ExprPtr flat_idx =
+        flatten_index(v->buf()->dims(), v->indices(), v->buf()->strides());
     flat_idx->accept(this);
     auto index = indexVec(value());
     ScalarType v_sdtype = v->dtype().scalar_type();
@@ -721,7 +722,8 @@ class SimpleIREvaluatorImpl : public IRVisitor {
 
     void* ptr = iter->second;
 
-    ExprPtr flat_idx = flatten_index(v->buf()->dims(), v->indices());
+    ExprPtr flat_idx =
+        flatten_index(v->buf()->dims(), v->indices(), v->buf()->strides());
     flat_idx->accept(this);
     auto index = indexVec(value());
     ScalarType v_sdtype = v->value()->dtype().scalar_type();
@@ -813,9 +815,6 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       }
       extra_args.push_back(val);
     }
-
-    std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
-              << " buf_strides:" << c10::IntArrayRef(buf_strides) << std::endl;
 
     auto fn_ptr = func_registry.at(v->func_name());
     (*fn_ptr)(

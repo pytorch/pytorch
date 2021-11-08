@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <ATen/native/quantized/cpu/conv_packed_params.h>
+#include <ATen/quantized/Quantizer.h>
 #include <test/cpp/tensorexpr/test_base.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/irparser.h>
@@ -45,18 +46,12 @@ TEST_F(Quantization, QuantDequantInt8) {
   auto x = at::rand({2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
   auto q = at::quantize_per_tensor(x, 0.1f, 13, at::kQInt8);
   auto y_expected = at::dequantize(q);
-  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__  << std::endl;
   TensorExprKernel k(graph);
-  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__  << std::endl;
   std::vector<at::Tensor> inputs = {x};
-  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__  << std::endl;
   StmtPtr s = k.getCodeGenStmt();
-  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__  << std::endl;
 
   std::vector<IValue> stack = fmap<IValue>(inputs);
-  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__  << std::endl;
   k.run(stack);
-  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__  << std::endl;
   auto y = stack[0].toTensor();
   bool check = at::allclose(y_expected, y);
   if (!check) {
@@ -132,9 +127,7 @@ TEST_F(Quantization, QuantAddDequantInt8) {
   auto q2 = at::quantize_per_tensor(x2, 0.1f, 13, at::kQInt8);
   auto qa = quantized_add(q1, q2, 0.1f, 13);
   auto y_expected = at::dequantize(qa);
-  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__ << std::endl;
   TensorExprKernel k(graph);
-  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__ << std::endl;
   std::vector<at::Tensor> inputs = {x1, x2};
   StmtPtr s = k.getCodeGenStmt();
 
@@ -286,7 +279,7 @@ at::Tensor quantized_conv2d_relu(
   return qconv2d_op.call(qx, packed_weight, scale, zero);
 }
 
-TEST_F(Quantization, QuantConv2dDequantUInt8) {
+TEST_F(Quantization, DISABLED_QuantConv2dDequantUInt8) {
   const auto graph_string = R"IR(
       graph(%x : Float(1, 3, 2, 2, strides=[12, 4, 2, 1], device=cpu), %w : Float(2, 3, 2, 2, strides=[12, 4, 2, 1], device=cpu), %b : Float(2, strides=[1], device=cpu)):
         %qdti : int = prim::Constant[value=12]()
@@ -333,7 +326,7 @@ TEST_F(Quantization, QuantConv2dDequantUInt8) {
   CHECK_EQ(check, 1);
 }
 
-TEST_F(Quantization, QuantConv2dReluDequantUInt8) {
+TEST_F(Quantization, DISABLED_QuantConv2dReluDequantUInt8) {
   const auto graph_string = R"IR(
       graph(%x : Float(1, 3, 2, 2, strides=[12, 4, 2, 1], device=cpu), %w : Float(2, 3, 2, 2, strides=[12, 4, 2, 1], device=cpu), %b : Float(2, strides=[1], device=cpu)):
         %qdti : int = prim::Constant[value=12]()

@@ -95,8 +95,8 @@ class TORCH_API ProfileOperatorObserver final
 };
 
 class TORCH_API ProfileObserver final : public OperatorAttachingNetObserver<
-                                             ProfileOperatorObserver,
-                                             ProfileObserver> {
+                                            ProfileOperatorObserver,
+                                            ProfileObserver> {
  public:
   explicit ProfileObserver(NetBase* subject)
       : OperatorAttachingNetObserver<ProfileOperatorObserver, ProfileObserver>(
