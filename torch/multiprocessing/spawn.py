@@ -1,12 +1,20 @@
 
 from typing import Optional
+import logging
+import mmap
 import multiprocessing
 import multiprocessing.connection
+import os
 import signal
 import sys
 import warnings
 
 from . import _prctl_pr_set_pdeathsig  # type: ignore[attr-defined]
+
+
+logger = logging.getLogger(__name__)
+
+RANK_STATUSES_FILE_NAME = "rank_statuses"
 
 
 class ProcessException(Exception):
@@ -67,9 +75,10 @@ def _wrap(fn, i, args, error_queue):
 
 
 class ProcessContext:
-    def __init__(self, processes, error_queues):
+    def __init__(self, processes, error_queues, envs):
         self.error_queues = error_queues
         self.processes = processes
+        self.envs = envs
         self.sentinels = {
             process.sentinel: index
             for index, process in enumerate(processes)
@@ -121,15 +130,58 @@ class ProcessContext:
                 process.terminate()
             process.join()
 
+        def _get_status(b: int) -> str:
+            if b == 0x00:
+                return "Not stuck"
+            elif b == 0x01:
+                return "Stuck"
+            elif b == 0x02:
+                return "Timed out"
+            elif b == 0xFF:
+                return "Not set"
+            else:
+                return "Unknown"
+
+        def _rank_statuses() -> str:
+            msg = "\n"
+            if self.envs:
+                msg += "failed rank = %s\n" % self.envs.get(error_index, {}).get("RANK")
+            else:
+                msg += "failed local rank = %s\n" % error_index
+            msg += "Rank statuses were:\n"
+            try:
+                with \
+                    open(RANK_STATUSES_FILE_NAME, "r+b") as fd, \
+                        mmap.mmap(fd.fileno(), len(self.processes), access=mmap.ACCESS_READ, offset=0) as mm:
+                    for rank in range(len(self.processes)):
+                        status = _get_status(mm[rank])
+                        if self.envs:
+                            msg += "(rank = %s, status = %s)\n" % (self.envs.get(rank, {}).get("RANK"), status)
+                        else:
+                            msg += "(local rank = %s, status = %s)\n" % (rank, status)
+            except Exception:
+                logger.exception("_rank_statuses exception")
+            return msg
+
+        def _remove_rank_statuses_file():
+            try:
+                os.remove(RANK_STATUSES_FILE_NAME)
+            except Exception:
+                logger.exception("_remove_rank_statuses_file exception")
+
         # There won't be an error on the queue if the process crashed.
         failed_process = self.processes[error_index]
+        rank_statuses = _rank_statuses()
+        # This is only necessary to make CI happy.
+        # The CI asserts for working directory being not dirty.
+        _remove_rank_statuses_file()
         if self.error_queues[error_index].empty():
             exitcode = self.processes[error_index].exitcode
             if exitcode < 0:
                 name = signal.Signals(-exitcode).name
                 raise ProcessExitedException(
-                    "process %d terminated with signal %s" %
-                    (error_index, name),
+                    "process %d terminated with signal %s\n%s" %
+                    (error_index, name, rank_statuses),
                     error_index=error_index,
                     error_pid=failed_process.pid,
                     exit_code=exitcode,
@@ -137,8 +189,8 @@ class ProcessContext:
                 )
             else:
                 raise ProcessExitedException(
-                    "process %d terminated with exit code %d" %
-                    (error_index, exitcode),
+                    "process %d terminated with exit code %d\n%s" %
+                    (error_index, exitcode, rank_statuses),
                     error_index=error_index,
                     error_pid=failed_process.pid,
                     exit_code=exitcode
@@ -147,13 +199,14 @@ class ProcessContext:
         original_trace = self.error_queues[error_index].get()
         msg = "\n\n-- Process %d terminated with the following error:\n" % error_index
         msg += original_trace
+        msg += rank_statuses
         raise ProcessRaisedException(msg, error_index, failed_process.pid)
 
 
 class SpawnContext(ProcessContext):
     def __init__(self, processes, error_queues):
         warnings.warn('SpawnContext is renamed to ProcessContext since 1.4 release.')
-        super(SpawnContext, self).__init__(processes, error_queues)
+        super(SpawnContext, self).__init__(processes, error_queues, None)
     pass
 
 
@@ -165,10 +218,22 @@ class SpawnContext(ProcessContext):
 # general enough, and backends like XLA can reuse them in Colab notebooks as well.
 # Currently we only add this API first, we can consider adding it to documentation as
 # needed in the future.
-def start_processes(fn, args=(), nprocs=1, join=True, daemon=False, start_method='spawn'):
+def start_processes(fn, args=(), nprocs=1, join=True, daemon=False, start_method='spawn', envs=None):
     mp = multiprocessing.get_context(start_method)
     error_queues = []
     processes = []
+
+    def _create_rank_statuses_file():
+        try:
+            # create initial file
+            with open(RANK_STATUSES_FILE_NAME, "w+b") as fd:
+                fd.truncate()
+                for i in range(nprocs):
+                    fd.write(b'\xFF')
+        except Exception:
+            logger.exception("_create_rank_statuses_file exception")
+
+    _create_rank_statuses_file()
     for i in range(nprocs):
         error_queue = mp.SimpleQueue()
         process = mp.Process(
@@ -180,14 +245,13 @@ def start_processes(fn, args=(), nprocs=1, join=True, daemon=False, start_method
         error_queues.append(error_queue)
         processes.append(process)
 
-    context = ProcessContext(processes, error_queues)
+    context = ProcessContext(processes, error_queues, envs)
     if not join:
         return context
 
     # Loop on join until it returns True or raises an exception.
     while not context.join():
         pass
-
 
 def spawn(fn, args=(), nprocs=1, join=True, daemon=False, start_method='spawn'):
     r"""Spawns ``nprocs`` processes that run ``fn`` with ``args``.

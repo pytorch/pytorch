@@ -38,6 +38,27 @@ constexpr const char* NCCL_ASYNC_ERROR_HANDLING = "NCCL_ASYNC_ERROR_HANDLING";
 
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
+// Helper class to manage rank statuses
+// Each rank sets one byte in a memory-mapped file on entering a collective
+// and resets it upon exiting the collective
+// In case of a timeout, ranks with the byte set to 0x01 are deemed as stuck
+// ranks with byte set to 0x00 are not stuck and ranks with byte set to 0x02 timed out
+class RankStatusHelper {
+public:
+  explicit RankStatusHelper(size_t worldSize);
+  RankStatusHelper(const RankStatusHelper&) = delete;
+  RankStatusHelper& operator=(const RankStatusHelper&) = delete;
+  RankStatusHelper(RankStatusHelper&&) = delete;
+  RankStatusHelper& operator=(RankStatusHelper&& rhs) = delete;
+  ~RankStatusHelper();
+  bool operator!() const noexcept;
+  [[nodiscard]] char* get() const noexcept;
+  char& operator[] (int rank);
+private:
+  char* handle_;
+  size_t worldSize_;
+};
+
 // ProcessGroupNCCL implements NCCL bindings for c10d.
 //
 // All functions of the class are expected to be called in the same order
@@ -181,6 +202,10 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
 
     // The future returned by getFuture.
     c10::intrusive_ptr<at::ivalue::Future> future_;
+
+    // Reference to the rank status helper so that we can mark ranks as "not stuck"
+    // This is owned by ProcessGroupNCCL
+    char* rankStatusHelperUnowned_;
 
     friend class ProcessGroupNCCL;
   };
@@ -574,6 +599,9 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
   // by 1 when ncclGroupStart() is called and decreased by 1 when ncclGroupEnd()
   // is called.
   static thread_local uint64_t ncclActiveGroupCounter_;
+
+  // Rank status helper so that we can mark ranks as stuck or timed out
+  RankStatusHelper rankStatusHelper_;
 };
 
 } // namespace c10d

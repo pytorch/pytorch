@@ -449,6 +449,7 @@ class MultiprocessContext(PContext):
             join=False,
             daemon=False,
             start_method=self.start_method,
+            envs=self.envs,
         )
 
     def _is_done(self) -> bool:

@@ -1,4 +1,5 @@
 #include <c10d/ProcessGroupNCCL.hpp>
+#include <c10d/ProcessGroup.hpp>
 #include <sstream>
 
 #ifdef USE_C10D_NCCL
@@ -6,6 +7,7 @@
 #include <exception>
 #include <map>
 #include <stdexcept>
+#include <sys/mman.h>
 #include <tuple>
 #include <unordered_set>
 
@@ -234,7 +236,63 @@ inline void errorIfCapturingNonCapturableNCCL() {
   }
 }
 
+void markRankNotStuck(char *rankStatusHelper, int rank) {
+  if (!rankStatusHelper) {
+    LOG(ERROR) << "rankStatusHelper is NULL";
+    return;
+  }
+  rankStatusHelper[rank] = 0x00;
+}
+
+void markRankStuck(char *rankStatusHelper, int rank) {
+  if (!rankStatusHelper) {
+    LOG(ERROR) << "rankStatusHelper is NULL";
+    return;
+  }
+  rankStatusHelper[rank] = 0x01;
+}
+
+void markRankTimedOut(char *rankStatusHelper, int rank) {
+  if (!rankStatusHelper) {
+    LOG(ERROR) << "rankStatusHelper is NULL";
+    return;
+  }
+  rankStatusHelper[rank] = 0x02;
+}
+
 } // namespace
+
+RankStatusHelper::RankStatusHelper(size_t worldSize): worldSize_(worldSize) {
+  // assume file exists
+  int fd;
+  if ((fd = open("rank_statuses", O_RDWR, 0)) == -1) {
+    LOG(ERROR) << "unable to open rank_statuses";
+  }
+  handle_ = static_cast<char*>(mmap(
+                        nullptr,
+                        worldSize,
+                        PROT_WRITE | PROT_READ,
+                        MAP_SHARED,
+                        fd,
+                        /* offset */ 0));
+}
+
+RankStatusHelper::~RankStatusHelper() {
+  munmap(handle_, worldSize_);
+}
+
+bool RankStatusHelper::operator!() const noexcept {
+  return handle_ == MAP_FAILED;
+}
+char* RankStatusHelper::get() const noexcept {
+  if (handle_ == MAP_FAILED) {
+    return nullptr;
+  }
+  return handle_;
+}
+char& RankStatusHelper::operator[] (int rank) {
+  return handle_[rank];
+}
 
 const int64_t ProcessGroupNCCL::kWatchdogThreadSleepMillis = 10000;
 const int64_t ProcessGroupNCCL::kWorkCleanupThreadSleepMillis = 1000;
@@ -276,7 +334,8 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(
     const c10::optional<std::vector<at::Tensor>>& inputs)
     : Work(rank, opType, profilingTitle, inputs),
       devices_(devices),
-      workStartTime_(std::chrono::steady_clock::now()) {
+      workStartTime_(std::chrono::steady_clock::now()),
+      rankStatusHelperUnowned_(nullptr) {
   // Creates the CUDA event wrappers
   // Note: The actual events are lazily created when first recorded to with
   // DEFAULT_FLAGS = cudaEventDisableTiming.
@@ -293,7 +352,8 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(const WorkNCCL& w)
       ncclComms_(w.ncclComms_),
       blockingWait_(w.blockingWait_),
       opTimeout_(w.opTimeout_),
-      workStartTime_(w.workStartTime_) {
+      workStartTime_(w.workStartTime_),
+      rankStatusHelperUnowned_(w.rankStatusHelperUnowned_) {
   exception_ = w.exception_;
 }
 
@@ -461,6 +521,7 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
       AT_CUDA_CHECK(cudaDeviceSynchronize());
     }
   }
+  markRankNotStuck(rankStatusHelperUnowned_, rank_ % at::cuda::getNumGPUs());
 }
 
 // Same as calling synchronize().
@@ -498,7 +559,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       store_(store),
       options_(options),
       ncclCommCounter_(0),
-      terminateProcessGroup_(false) {
+      terminateProcessGroup_(false),
+      rankStatusHelper_(size) {
   TORCH_CHECK(
       at::cuda::getNumGPUs() != 0,
       "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");
@@ -670,6 +732,7 @@ void ProcessGroupNCCL::abortTimedOutCollectives(
     // Check for Timeouts in the WorkNCCL Operations, and abort all
     // communicators accordingly.
     if (work.timedOut()) {
+      markRankTimedOut(rankStatusHelper_.get(), rank_ % at::cuda::getNumGPUs());
       auto currentTimepoint = std::chrono::steady_clock::now();
       auto timeElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
           currentTimepoint - work.workStartTime_);
@@ -1333,6 +1396,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
   work->blockingWait_ = blockingWait_;
   work->opTimeout_ = options_->timeout;
   work->store_ = store_;
+  work->rankStatusHelperUnowned_ = rankStatusHelper_.get();
 
   if (asyncErrorHandling_) {
     workEnqueue(work);
@@ -1446,6 +1510,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     Fn fn,
     OpType opType,
     const char* profilingTitle) {
+  markRankStuck(rankStatusHelper_.get(), rank_ % at::cuda::getNumGPUs());
   return collective(
       inputs,
       outputs,

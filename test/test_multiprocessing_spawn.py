@@ -111,14 +111,14 @@ class _TestMultiProcessing(object):
         for i in range(nprocs):
             with self.assertRaisesRegex(
                 Exception,
-                "\nValueError: legitimate exception from process %d$" % i,
+                "\nValueError: legitimate exception from process %d" % i,
             ):
                 mp.start_processes(test_exception_single_func, args=(i,), nprocs=nprocs, start_method=self.start_method)
 
     def test_exception_all(self):
         with self.assertRaisesRegex(
             Exception,
-            "\nValueError: legitimate exception from process (0|1)$",
+            "\nValueError: legitimate exception from process (0|1)",
         ):
             mp.start_processes(test_exception_all_func, nprocs=2, start_method=self.start_method)
 
