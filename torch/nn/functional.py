@@ -5072,19 +5072,19 @@ def multi_head_attention_forward(
     # Shape check.
     if query.dim() == 3:
         assert key.dim() == 3 and value.dim() == 3, \
-            ("For batched (3-D) `query`, expected `key` and `value` to 3-D",
+            ("For batched (3-D) `query`, expected `key` and `value` to be 3-D"
              f" but found {key.dim()}-D and {value.dim()}-D tensors respectively")
         if key_padding_mask is not None:
             assert key_padding_mask.dim() == 2, \
-                ("For batched (3-D) `query`, expected `key_padding_mask` to be `None` or 2-D",
+                ("For batched (3-D) `query`, expected `key_padding_mask` to be `None` or 2-D"
                  f" but found {key_padding_mask.dim()}-D tensor instead")
         if attn_mask is not None:
             assert attn_mask.dim() in (2, 3), \
-                ("For batched (3-D) `query`, expected `attn_mask` to be 2-D, 3-D or `None`",
+                ("For batched (3-D) `query`, expected `attn_mask` to be `None`, 2-D or 3-D"
                  f" but found {attn_mask.dim()}-D tensor instead")
     elif query.dim() == 2:
         assert key.dim() == 2 and value.dim() == 2, \
-            ("For unbatched (2-D) `query`, expected `key` and `value` to 3-D",
+            ("For unbatched (2-D) `query`, expected `key` and `value` to be 2-D"
              f" but found {key.dim()}-D and {value.dim()}-D tensors respectively")
         query = query.unsqueeze(1)
         key = key.unsqueeze(1)
@@ -5092,16 +5092,18 @@ def multi_head_attention_forward(
 
         if key_padding_mask is not None:
             assert key_padding_mask.dim() == 1, \
-                ("For unbatched (2-D) `query`, expected `key_padding_mask` to be `None` or 1-D",
+                ("For unbatched (2-D) `query`, expected `key_padding_mask` to be `None` or 1-D"
                  f" but found {key_padding_mask.dim()}-D tensor instead")
             key_padding_mask = key_padding_mask.unsqueeze(0)
 
         if attn_mask is not None:
             assert attn_mask.dim() in (2, 3), \
-                ("For unbatched (2-D) `query`, expected `attn_mask` to be `None`, 2-D or 3-D",
+                ("For unbatched (2-D) `query`, expected `attn_mask` to be `None`, 2-D or 3-D"
                  f" but found {attn_mask.dim()}-D tensor instead")
             if attn_mask.dim() == 3:
-                assert attn_mask.shape == (num_heads, query.shape[0], key.shape[0])
+                expected_shape = (num_heads, query.shape[0], key.shape[0])
+                assert attn_mask.shape == expected_shape, \
+                    (f"Expected `attn_mask` shape to be {expected_shape} but got {attn_mask.shape}")
 
         is_unbatched = True
     else:
