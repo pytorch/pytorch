@@ -4,6 +4,7 @@
 {%- set squid_proxy    = "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -%}
 {# squid_no_proxy is a list of common set of fixed domains or IPs that we don't need to proxy. See https://docs.aws.amazon.com/AmazonECS/latest/developerguide/http_proxy_config.html#windows-proxy #}
 {%- set squid_no_proxy = "localhost,127.0.0.1,github.com,amazonaws.com,s3.amazonaws.com,169.254.169.254,169.254.170.2,/var/run/docker.sock" -%}
+{%- set timeout_minutes = 240 -%}
 
 {%- macro concurrency(build_environment) -%}
 concurrency:
@@ -167,6 +168,7 @@ concurrency:
 {%- macro ciflow_should_run_job(ciflow_config) %}
   !{{ ciflow_config.root_job_name }}:
     runs-on: ubuntu-18.04
+    timeout-minutes: !{{ timeout_minutes }}
     env:
       IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == '!{{ ciflow_config.trigger_action }}') && (github.event.assigneed.login == '!{{ ciflow_config.trigger_actor }}') }}
       LABEL_CONDITIONS: ${{ !{{ ciflow_config.label_conditions }} }}
