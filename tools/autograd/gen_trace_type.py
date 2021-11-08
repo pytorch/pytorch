@@ -28,6 +28,7 @@ MANUAL_BACKEND = set([
 # You can find the manual registration in torch/csrc/autograd/VariableTypeManual.cpp
 MANUAL_AUTOGRAD_AND_TRACER = set([
     'resize_', 'resize_as_', 'detach', 'detach_', 'copy_', '_fw_primal',
+    'min.other', 'max.other',
 ])
 
 # Currently MANUAL_AUTOGRAD and MANUAL_TRACER share the same set of ops:
@@ -364,7 +365,7 @@ def type_wrapper_name(f: NativeFunction) -> str:
 
 @with_native_function
 def method_definition(f: NativeFunction) -> str:
-    assert cpp.name(f.func) not in MANUAL_TRACER
+    assert str(f.func.name) not in MANUAL_TRACER
 
     formals = ', '.join(
         # code-generated tracing kernels plumb and recompute dispatch keys directly through the kernel for performance.
@@ -389,7 +390,7 @@ m.impl("${name}",
 
 @with_native_function
 def method_registration(f: NativeFunction) -> str:
-    assert cpp.name(f.func) not in MANUAL_TRACER
+    assert str(f.func.name) not in MANUAL_TRACER
 
     return WRAPPER_REGISTRATION.substitute(
         name=f.func.name,
@@ -411,7 +412,7 @@ def gen_trace_type(out: str, native_functions: List[NativeFunction], template_pa
     fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
     fm.write_sharded(
         'TraceType.cpp',
-        [fn for fn in native_functions if cpp.name(fn.func) not in MANUAL_TRACER],
+        [fn for fn in native_functions if str(fn.func.name) not in MANUAL_TRACER],
         key_fn=lambda fn: cpp.name(fn.func),
         base_env={
             'generated_comment':

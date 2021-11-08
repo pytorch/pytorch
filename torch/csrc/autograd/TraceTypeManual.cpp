@@ -1,4 +1,5 @@
 #include <ATen/TracerMode.h>
+#include <ATen/RedispatchFunctions.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Optional.h>
@@ -124,6 +125,52 @@ Tensor & detach_(Tensor & self) {
   return self;
 }
 
+at::Tensor min_other(c10::DispatchKeySet ks, const at::Tensor & self, const at::Tensor & other) {
+  torch::jit::Node* node = nullptr;
+  std::shared_ptr<jit::tracer::TracingState> tracer_state;
+  if (jit::tracer::isTracing()) {
+    tracer_state = jit::tracer::getTracingState();
+    at::Symbol op_name;
+    op_name = jit::Symbol::fromQualString("aten::minimum");
+    node = tracer_state->graph->create(op_name, /*num_outputs=*/0);
+    jit::tracer::recordSourceLocation(node);
+    jit::tracer::addInputs(node, "self", self);
+    jit::tracer::addInputs(node, "other", other);
+    tracer_state->graph->insertNode(node);
+
+    jit::tracer::setTracingState(nullptr);
+  }
+  auto result = at::redispatch::min(ks & c10::DispatchKeySet(c10::DispatchKeySet::FULL_AFTER, c10::DispatchKey::Tracer), self, other);
+  if (tracer_state) {
+    jit::tracer::setTracingState(std::move(tracer_state));
+    jit::tracer::addOutput(node, result);
+  }
+  return result;
+}
+
+at::Tensor max_other(c10::DispatchKeySet ks, const at::Tensor & self, const at::Tensor & other) {
+  torch::jit::Node* node = nullptr;
+  std::shared_ptr<jit::tracer::TracingState> tracer_state;
+  if (jit::tracer::isTracing()) {
+    tracer_state = jit::tracer::getTracingState();
+    at::Symbol op_name;
+    op_name = jit::Symbol::fromQualString("aten::maximum");
+    node = tracer_state->graph->create(op_name, /*num_outputs=*/0);
+    jit::tracer::recordSourceLocation(node);
+    jit::tracer::addInputs(node, "self", self);
+    jit::tracer::addInputs(node, "other", other);
+    tracer_state->graph->insertNode(node);
+
+    jit::tracer::setTracingState(nullptr);
+  }
+  auto result = at::redispatch::max(ks & c10::DispatchKeySet(c10::DispatchKeySet::FULL_AFTER, c10::DispatchKey::Tracer), self, other);
+  if (tracer_state) {
+    jit::tracer::setTracingState(std::move(tracer_state));
+    jit::tracer::addOutput(node, result);
+  }
+  return result;
+}
+
 // Invariant:
 // - Ops registered to DispatchKey::Tracer below must be included in `MANUAL_TRACER` in tools/autograd/gen_variable_type.py
 TORCH_LIBRARY_IMPL(aten, Tracer, m) {
@@ -132,6 +179,8 @@ TORCH_LIBRARY_IMPL(aten, Tracer, m) {
   m.impl("detach", TORCH_FN(detach));
   m.impl("detach_", detach_);
   m.impl("copy_", copy_);
+  m.impl("min.other", TORCH_FN(min_other));
+  m.impl("max.other", TORCH_FN(max_other));
 
   // Skip tracing for the following ops by registering fallthrough kernel explicitly.
   m.impl("_backward", CppFunction::makeFallthrough());
