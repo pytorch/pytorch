@@ -52,7 +52,7 @@ static PyObject * THPStorage_(elementSize)(PyObject *_self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   auto self = (THPStorage*)_self;
-  return THPUtils_packInt64(THWStorage_(elementSize)(LIBRARY_STATE_NOARGS));
+  return THPUtils_packInt64(sizeof(scalar_t));
   END_HANDLE_TH_ERRORS
 }
 
