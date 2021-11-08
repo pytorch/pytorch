@@ -11,9 +11,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/native/cuda/block_reduce.cuh>
-#include <iostream>
-//#include <ATen/native/cuda/Loops.cuh> // needed for thread_work_size
-//#include <ATen/native/cuda/MemoryAccess.cuh>
+//#include <iostream>
 
 #include <c10/cuda/CUDAMathCompat.h>
 
@@ -461,7 +459,7 @@ void launch_vectorized_layer_norm_kernel(
     const dim3 blocks(M);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(threads.y % 2 == 0 || threads.y == 1);
     int nshared = threads.y > 1 ? threads.y * 3/2 *sizeof(T_ACC) : 0;
-    vectorized_layer_norm_kernel<T, acc_type<T, true>><<<blocks, threads, nshared, stream>>>(N, eps, X_data,
+    vectorized_layer_norm_kernel<<<blocks, threads, nshared, stream>>>(N, eps, X_data,
     gamma_data, beta_data, mean_data, rstd_data, Y_data);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 
