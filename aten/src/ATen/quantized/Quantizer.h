@@ -230,6 +230,15 @@ TORCH_API void set_quantizer_(const Tensor& self, ConstQuantizerPtr quantizer);
 TORCH_API Tensor from_blob_quantized_per_tensor_affine(
     void* data,
     IntArrayRef sizes,
+    IntArrayRef strides,
+    std::function<void(void*)> deleter,
+    const float scale,
+    const int64_t zeroPoint,
+    const TensorOptions& options);
+
+TORCH_API Tensor from_blob_quantized_per_tensor_affine(
+    void* data,
+    IntArrayRef sizes,
     std::function<void(void*)> deleter,
     const float scale,
     const int64_t zeroPoint,

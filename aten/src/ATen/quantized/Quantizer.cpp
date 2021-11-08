@@ -231,6 +231,7 @@ C10_EXPORT void set_quantizer_(const Tensor& self, ConstQuantizerPtr quantizer) 
 Tensor from_blob_quantized_per_tensor_affine(
     void* data,
     IntArrayRef sizes,
+    IntArrayRef strides,
     std::function<void(void*)> deleter,
     const float scale,
     const int64_t zeroPoint,
@@ -260,10 +261,34 @@ Tensor from_blob_quantized_per_tensor_affine(
       at::DispatchKeySet(options.computeDispatchKey()),
       options.dtype(),
       quantizer);
-  get_qtensorimpl(qtensor)->set_sizes_contiguous(sizes);
+  get_qtensorimpl(qtensor)->set_sizes_and_strides(sizes, strides);
   return qtensor;
 }
 
+Tensor from_blob_quantized_per_tensor_affine(
+    void* data,
+    IntArrayRef sizes,
+    std::function<void(void*)> deleter,
+    const float scale,
+    const int64_t zeroPoint,
+    const TensorOptions& options) {
+  std::vector<int64_t> strides;
+  auto ndim = sizes.size();
+  strides.resize(ndim);
+  int i = ndim - 1;
+  strides[i] = 1;
+  while (--i >= 0) {
+    strides[i] = sizes[i] * strides[i + 1];
+  }
+  return from_blob_quantized_per_tensor_affine(
+      data,
+      sizes,
+      strides,
+      deleter,
+      scale,
+      zeroPoint,
+      options);
+}
 
 Tensor from_blob_quantized_per_channel_affine(
     void* data,
