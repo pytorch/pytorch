@@ -7,7 +7,6 @@ from typing import NamedTuple, Callable, Sequence, List, Union, Optional, Type, 
 import numpy as np
 
 import torch
-from torch._C import ScriptList, ScriptDict  # type: ignore[attr-defined]
 
 from ._core import _unravel_index
 
@@ -674,6 +673,8 @@ def originate_pairs(
     expected: Any,
     *,
     pair_types: Sequence[Type[Pair]],
+    sequence_types: Tuple[Type, ...],
+    mapping_types: Tuple[Type, ...],
     id: Tuple[Any, ...] = (),
     **options: Any,
 ) -> Tuple[Optional[ErrorMeta], Optional[List[Pair]]]:
@@ -682,9 +683,9 @@ def originate_pairs(
     # We explicitly exclude str's here since they are self-referential and would cause an infinite recursion loop:
     # "a" == "a"[0][0]...
     if (
-        isinstance(actual, (collections.abc.Sequence, ScriptList))
+        isinstance(actual, sequence_types)
         and not isinstance(actual, str)
-        and isinstance(expected, (collections.abc.Sequence, ScriptList))
+        and isinstance(expected, sequence_types)
         and not isinstance(expected, str)
     ):
         actual_len = len(actual)
@@ -697,7 +698,13 @@ def originate_pairs(
 
         for idx in range(actual_len):
             error_meta, partial_pairs = originate_pairs(
-                actual[idx], expected[idx], pair_types=pair_types, id=(*id, idx), **options
+                actual[idx],
+                expected[idx],
+                pair_types=pair_types,
+                sequence_types=sequence_types,
+                mapping_types=mapping_types,
+                id=(*id, idx),
+                **options,
             )
             if error_meta:
                 return error_meta, None
@@ -706,9 +713,7 @@ def originate_pairs(
 
         return None, pairs
 
-    elif isinstance(actual, (collections.abc.Mapping, ScriptDict)) and isinstance(
-        expected, (collections.abc.Mapping, ScriptDict)
-    ):
+    elif isinstance(actual, mapping_types) and isinstance(expected, mapping_types):
         actual_keys = set(actual.keys())
         expected_keys = set(expected.keys())
         if actual_keys != expected_keys:
@@ -732,7 +737,13 @@ def originate_pairs(
 
         for key in keys:
             error_meta, partial_pairs = originate_pairs(
-                actual[key], expected[key], pair_types=pair_types, id=(*id, key), **options
+                actual[key],
+                expected[key],
+                pair_types=pair_types,
+                sequence_types=sequence_types,
+                mapping_types=mapping_types,
+                id=(*id, key),
+                **options,
             )
             if error_meta:
                 return error_meta, None
@@ -762,12 +773,20 @@ def originate_pairs(
 
 
 def assert_equal(
-    actual: Any, expected: Any, *, pair_types: Sequence[Type[Pair]] = (ObjectPair,), **options: Any
+    actual: Any,
+    expected: Any,
+    *,
+    pair_types: Sequence[Type[Pair]] = (ObjectPair,),
+    sequence_types: Tuple[Type, ...] = (collections.abc.Sequence,),
+    mapping_types: Tuple[Type, ...] = (collections.abc.Sequence,),
+    **options: Any,
 ) -> None:
     # Hide this function from `pytest`'s traceback
     __tracebackhide__ = True
 
-    error_meta, pairs = originate_pairs(actual, expected, pair_types=pair_types, **options)
+    error_meta, pairs = originate_pairs(
+        actual, expected, pair_types=pair_types, sequence_types=sequence_types, mapping_types=mapping_types, **options
+    )
     if error_meta:
         raise error_meta.to_error()
 
