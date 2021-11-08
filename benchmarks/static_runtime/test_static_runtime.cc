@@ -1850,3 +1850,45 @@ TEST(StaticRuntime, IndividuaOps_Squeeze) {
   testStaticRuntime(src, {a, 1});
   testStaticRuntime(src, {a, -1}, {b, 2});
 }
+
+TEST(StaticRuntime, NumToTensorScalar) {
+  const auto num_to_tensor_ir = R"IR(
+    graph(%1 : int):
+      %2 : NoneType = prim::Constant()
+      %3 : Tensor = prim::NumToTensor(%1)
+      %4 : Tensor = aten::clone(%3, %2)
+      return (%4)
+  )IR";
+
+  IValue arg{5};
+  std::vector<IValue> args = {arg};
+  testStaticRuntime(num_to_tensor_ir, args);
+}
+
+TEST(StaticRuntime, NumToTensorFalse) {
+  const auto num_to_tensor_ir = R"IR(
+    graph(%1 : bool):
+      %2 : NoneType = prim::Constant()
+      %3 : Tensor = prim::NumToTensor(%1)
+      %4 : Tensor = aten::clone(%3, %2)
+      return (%4)
+  )IR";
+
+  IValue arg{false};
+  std::vector<IValue> args = {arg};
+  testStaticRuntime(num_to_tensor_ir, args);
+}
+
+TEST(StaticRuntime, NumToTensorTrue) {
+  const auto num_to_tensor_ir = R"IR(
+    graph(%1 : bool):
+      %2 : NoneType = prim::Constant()
+      %3 : Tensor = prim::NumToTensor(%1)
+      %4 : Tensor = aten::clone(%3, %2)
+      return (%4)
+  )IR";
+
+  IValue arg{true};
+  std::vector<IValue> args = {arg};
+  testStaticRuntime(num_to_tensor_ir, args);
+}
