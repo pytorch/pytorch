@@ -485,12 +485,28 @@ REGISTER_OPERATOR_FUNCTOR(
         }
         // prepare inputs
         const size_t size = p_node->inputs().size();
-        std::vector<IValue> vals;
-        vals.reserve(size);
-        for (const auto i : c10::irange(size)) {
-          vals.push_back(p_node->Input(i));
+        switch (size) {
+          case 1:
+            p_node->Output(0) = c10::ivalue::Tuple::create(p_node->Input(0));
+            break;
+          case 2:
+            p_node->Output(0) =
+                c10::ivalue::Tuple::create(p_node->Input(0), p_node->Input(1));
+            break;
+          case 3:
+            p_node->Output(0) = c10::ivalue::Tuple::create(
+                p_node->Input(0), p_node->Input(1), p_node->Input(2));
+            break;
+          default: {
+            std::vector<IValue> vals;
+            vals.reserve(size);
+            for (const auto i : c10::irange(size)) {
+              vals.push_back(p_node->Input(i));
+            }
+            p_node->Output(0) = c10::ivalue::Tuple::create(std::move(vals));
+            break;
+          }
         }
-        p_node->Output(0) = c10::ivalue::Tuple::create(std::move(vals));
       };
     });
 
@@ -1724,6 +1740,47 @@ REGISTER_OPERATOR_FUNCTOR(
               input, output_scale, output_zero_point, out_t);
         }
       };
+    });
+
+REGISTER_OPERATOR_FUNCTOR(
+    quantized::linear_dynamic_fp16,
+    quantized_linear_dynamic_fp16,
+    [](Node* n) -> SROperator {
+      if (!n->matches(torch::schema(
+              "quantized::linear_dynamic_fp16(Tensor X, __torch__.torch.classes."
+              "quantized.LinearPackedParamsBase W_prepack) -> Tensor Y"))) {
+        LogAndDumpSchema(n);
+        return nullptr;
+      }
+      const auto weight = toIValue(n->inputs()[1]);
+      c10::intrusive_ptr<LinearPackedParamsBase> packed_weight;
+      if (weight) {
+        packed_weight = weight->toCustomClass<LinearPackedParamsBase>();
+      }
+      if (packed_weight) {
+        return [packed_weight](ProcessedNode* p_node) {
+          const auto& input = p_node->Input(0).toTensor();
+          if (p_node->Output(0).isNone()) {
+            p_node->Output(0) = create_empty_from(input, at::kFloat);
+          }
+          auto& out_t = p_node->Output(0).toTensor();
+          fastResizeToZero(out_t);
+          packed_weight->apply_dynamic_out(input, out_t, false);
+        };
+      } else {
+        return [](ProcessedNode* p_node) {
+          const auto& input = p_node->Input(0).toTensor();
+          if (p_node->Output(0).isNone()) {
+            p_node->Output(0) = create_empty_from(input, at::kFloat);
+          }
+          auto& out_t = p_node->Output(0).toTensor();
+          fastResizeToZero(out_t);
+          // Weights could be quantized on the fly
+          auto packed_weight_tmp =
+              p_node->Input(1).toCustomClass<LinearPackedParamsBase>();
+          packed_weight_tmp->apply_dynamic_out(input, out_t, false);
+        };
+      }
     });
 
 REGISTER_OPERATOR_FUNCTOR(aten::full, aten_full, [](Node* n) -> SROperator {

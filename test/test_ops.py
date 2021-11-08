@@ -16,7 +16,7 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_methods_invocations import \
     (op_db, _NOTHING, UnaryUfuncInfo, ReductionOpInfo, SpectralFuncInfo)
 from torch.testing._internal.common_device_type import \
-    (deviceCountAtLeast, instantiate_device_type_tests, ops, onlyCUDA, onlyOnCPUAndCUDA, skipCUDAIfRocm, OpDTypes)
+    (deviceCountAtLeast, instantiate_device_type_tests, ops, onlyCUDA, onlyNativeDeviceTypes, skipCUDAIfRocm, OpDTypes, skipMeta)
 from torch.testing._internal.common_jit import JitCommonTestCase, check_against_reference
 from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, create_traced_fn, \
     check_alias_annotation
@@ -58,8 +58,9 @@ class TestCommon(TestCase):
 
     # Validates that each OpInfo specifies its forward and backward dtypes
     #   correctly for CPU and CUDA devices
+    @skipMeta
     @skipCUDAIfRocm
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @ops(op_db, dtypes=OpDTypes.none)
     def test_dtypes(self, device, op):
         # dtypes to try to backward in
@@ -197,7 +198,7 @@ class TestCommon(TestCase):
 
     # Tests that the function and its (ndarray-accepting) reference produce the same
     #   values on the tensors from sample_inputs func for the corresponding op.
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @suppress_warnings
     @ops(_ref_test_ops, allowed_dtypes=(torch.float32, torch.long, torch.complex64))
     def test_reference_testing(self, device, dtype, op):
@@ -211,7 +212,7 @@ class TestCommon(TestCase):
     # TODO: get working with ASAN by addressing failing operators
     @unittest.skipIf(IS_WINDOWS, "Skipped under Windows")
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @suppress_warnings
     @ops(op_db, allowed_dtypes=(torch.float32, torch.long, torch.complex64))
     def test_noncontiguous_samples(self, device, dtype, op):
@@ -240,26 +241,42 @@ class TestCommon(TestCase):
             if not test_grad:
                 continue
 
+            def assertEqualGradients(expected, actual, i=None):
+                grad_for_expected = torch.randn_like(expected)
+                grad_for_actual = noncontiguous_like(grad_for_expected)
+                expected.backward(grad_for_expected)
+                actual.backward(grad_for_actual)
+
+                t_inputs = (t_inp,) + t_args if isinstance(t_inp, torch.Tensor) else tuple(t_inp) + t_args
+                n_inputs = (n_inp,) + n_args if isinstance(n_inp, torch.Tensor) else tuple(n_inp) + n_args
+                for j, (t, n) in enumerate(zip(t_inputs, n_inputs)):
+                    if isinstance(t, torch.Tensor) and t.requires_grad:
+                        msg = ("{}Got different gradients for contiguous / non-contiguous input {}."
+                               .format(f"Output {i}. " if i is not None else "", j))
+                        self.assertEqual(t.grad, n.grad, msg=msg)
+
+            def clearGradients(inp):
+                if isinstance(inp, torch.Tensor):
+                    inp = [inp]
+                for t in inp:
+                    if isinstance(t, torch.Tensor) and t.requires_grad and t.grad is not None:
+                        t.grad.zero_()
+
             if isinstance(expected, torch.Tensor):
-                expected_backward_tensor = expected
-                actual_backward_tensor = actual
-            elif isinstance(expected, Sequence) and isinstance(expected[0], torch.Tensor):
-                expected_backward_tensor = expected[0]
-                actual_backward_tensor = actual[0]
+                assertEqualGradients(expected, actual)
+            elif isinstance(expected, Sequence):
+                for i, (ex, act) in enumerate(zip(expected, actual)):
+                    if isinstance(ex, torch.Tensor) and ex.requires_grad:
+                        assertEqualGradients(ex, act, i)
+                        # Clear the gradients in case there are more outputs that require grad
+                        clearGradients(t_inp)
+                        clearGradients(t_args)
+                        clearGradients(n_inp)
+                        clearGradients(n_args)
+                    n_inp_grad = n_inp.grad if isinstance(n_inp, torch.Tensor) else n_inp[0].grad
             else:
                 continue
 
-            grad_for_expected = torch.randn_like(expected_backward_tensor)
-            grad_for_actual = noncontiguous_like(grad_for_expected)
-            expected_backward_tensor.backward(grad_for_expected)
-            actual_backward_tensor.backward(grad_for_actual)
-
-            # Acquires grad (which may be on the first element in a list)
-            expected_grad = t_inp.grad if isinstance(t_inp, torch.Tensor) else t_inp[0].grad
-            actual_grad = n_inp.grad if isinstance(n_inp, torch.Tensor) else n_inp[0].grad
-
-            # TODO: FIXME: only validates grad on first tensor input
-            self.assertEqual(actual_grad, expected_grad)
 
     # Validates ops implement the correct out= behavior
     # See https://github.com/pytorch/pytorch/wiki/Developer-FAQ#how-does-out-work-in-pytorch

@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <iostream>
+#include <memory>
 #include <set>
 #include <sstream>
 #include <string>
@@ -1564,6 +1565,14 @@ void Node::removeAllInputs() {
   inputs_.clear();
 }
 
+void Node::removeAllOutputs() {
+  op_ = nullptr;
+  size_t init_osize = outputs_.size();
+  for (auto i : c10::irange(init_osize)) {
+    eraseOutput(init_osize - i - 1);
+  }
+}
+
 void Node::permuteInputs(const std::vector<size_t>& new_order) {
   op_ = nullptr;
   AT_ASSERT(new_order.size() == inputs_.size());
@@ -2293,6 +2302,15 @@ OperatorSet::OperatorSet(std::initializer_list<const char*> sig_literals) {
     auto op = getOperatorForLiteral(sig);
     ops[Symbol::fromQualString(op->schema().name())].push_back(op);
   }
+}
+
+std::vector<std::shared_ptr<Operator>> OperatorSet::getOps() const {
+  std::vector<std::shared_ptr<Operator>> result;
+  for (const auto& kv : ops) {
+    auto ops_for_symbol = kv.second;
+    result.insert(result.end(), ops_for_symbol.begin(), ops_for_symbol.end());
+  }
+  return result;
 }
 
 bool Node::isMemberOf(const OperatorSet& os) const {
