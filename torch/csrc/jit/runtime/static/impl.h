@@ -344,8 +344,10 @@ class TORCH_API StaticRuntime {
     return static_module_.is_optimizable_container_type(n);
   }
 
-  // Deallocate managed output tensors. This should be called only when all the
-  // references to the output from Static Runtime are gone.
+  // WARNING: Deallocate managed output tensors.  A client receiving Static
+  // Runtime-managed Tensors needs to be very careful to call
+  // `StaticRuntime::deallocateOutputTensors` after all references of output
+  // Tensors are gone.
   void deallocateOutputTensors();
 
   bool checkOutputTensorMemoryLeaks();
@@ -506,6 +508,10 @@ class TORCH_API ProcessedNode {
   }
 
  private:
+  C10_NODISCARD bool verify_outputs_dont_overlap_each_other() const;
+
+  C10_NODISCARD bool verify_inputs_dont_overlap_outputs() const;
+
   Node* node_;
   enum class FunctionKind {
     kOutVariant,
