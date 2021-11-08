@@ -1716,3 +1716,15 @@ def encode_op(
     padded_embedded = embedded * (padding_mask.unsqueeze(-1))
     encoded = padded_embedded.transpose(0, 1)
     return encoded
+
+
+@register_acc_op_mapping(op_and_target=("call_function", encoder.skip_layer_norm))
+def skip_layer_norm_op(
+    input: torch.Tensor,
+    attention: torch.Tensor,
+    attention_layer_norm: nn.Module,
+    weights: dict,  # type: ignore
+) -> torch.Tensor:
+    biased_input = input + attention
+    biased_input = attention_layer_norm(biased_input)
+    return biased_input

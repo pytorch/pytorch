@@ -2159,12 +2159,12 @@ def encode_converter(network, target, args, kwargs, name):
 
     # Specify plugin fields
     weights = kwargs["weights"]
-    # assert weights is None, f'{weights["layer_norm_bias"][0].shape}'
-    layer_norm_bias = to_numpy(weights["layer_norm_bias"][0])
-    layer_norm_weights = to_numpy(weights["layer_norm_weights"][0])
-    token_word_embeddings = to_numpy(weights["token_word_embeddings"][0])
-    type_embeddings = to_numpy(weights["type_embeddings"][0])
-    positional_word_embeddings = to_numpy(weights["positional_word_embeddings"][0])
+    # assert weights is None, f'{weights["layer_norm_bias"].shape}'
+    layer_norm_bias = to_numpy(weights["layer_norm_bias"])
+    layer_norm_weights = to_numpy(weights["layer_norm_weights"])
+    token_word_embeddings = to_numpy(weights["token_word_embeddings"])
+    type_embeddings = to_numpy(weights["type_embeddings"])
+    positional_word_embeddings = to_numpy(weights["positional_word_embeddings"])
 
     output_fp16 = trt.PluginField(
         "output_fp16",
@@ -2238,3 +2238,49 @@ def encode_converter(network, target, args, kwargs, name):
 
     # assert emb_layer.get_output(0) is None, f"{emb_layer.get_output(0).shape}"
     return emb_layer.get_output(0)
+
+@tensorrt_converter(acc_ops.skip_layer_norm_op)
+def skip_layer_norm_converter(network, target, args, kwargs, name):
+
+    # Specify inputs with shapes
+    input = kwargs["input"]
+    skip = kwargs["attention"]
+
+    weights = kwargs["weights"]
+    layer_norm_w = to_numpy(weights["layer_norm_w"])
+    layer_norm_b = to_numpy(weights["layer_norm_b"])
+
+    S, B, E = input.shape
+
+    reshape_input = network.add_shuffle(input)
+    reshape_input.reshape_dims = ((S, B, E, 1, 1))
+    reshape_input.name = f"{name}_reshape_input"
+    input = reshape_input.get_output(0)
+
+    reshape_skip = network.add_shuffle(skip)
+    reshape_skip.reshape_dims = ((S, B, E, 1, 1))
+    reshape_skip.name = f"{name}_reshape_skip"
+    skip = reshape_skip.get_output(0)
+
+    inputs = [input, skip]
+
+
+    # pf_ld = trt.PluginField("ld", np.array([E], np.int32), trt.PluginFieldType.INT32)
+    pf_beta = trt.PluginField("beta", layer_norm_b, trt.PluginFieldType.FLOAT32)
+    pf_gamma = trt.PluginField("gamma", layer_norm_w, trt.PluginFieldType.FLOAT32)
+    pf_type = trt.PluginField(
+        "type_id", np.array([0], np.int32), trt.PluginFieldType.INT32
+    )
+    fields = [pf_beta, pf_gamma, pf_type]
+
+    # get plugin
+    plugin_name = "CustomSkipLayerNormPluginDynamic"
+    field_collection = trt.PluginFieldCollection(fields)
+    plugin_version = "1"
+    plugin = get_trt_plugin(plugin_name, field_collection, plugin_version)
+
+    skip_norm_layer = network.add_plugin_v2(inputs, plugin)
+    skip_norm_layer.name = f"{name}_Skip_Norm_Layer"
+
+    output = skip_norm_layer.get_output(0)
+    return output
