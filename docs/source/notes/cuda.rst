@@ -562,7 +562,7 @@ PyTorch API
 ^^^^^^^^^^^
 
 .. warning::
-    This API is a prototype and may change in future releases.
+    This API is in beta and may change in future releases.
 
 PyTorch exposes graphs via a raw :class:`torch.cuda.CUDAGraph` class
 and two convenience wrappers,

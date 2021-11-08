@@ -141,13 +141,13 @@ std::tuple<Tensor, Tensor, Tensor> unique_cuda_template(
   Tensor sorted_indices;
   if (!return_inverse) {
     if (!consecutive) {
-      cuda::cub::sort_keys(self_c.data_ptr<scalar_t>(), sorted_data, num_inp);
+      cuda::cub::radix_sort_keys(self_c.data_ptr<scalar_t>(), sorted_data, num_inp);
     }
   } else {
     if (!consecutive) {
       Tensor range = at::arange(0, num_inp, options);
       sorted_indices = at::empty({num_inp}, options);
-      cuda::cub::sort_pairs(
+      cuda::cub::radix_sort_pairs(
           self_c.data_ptr<scalar_t>(),
           sorted_data,
           range.data_ptr<int64_t>(),

@@ -30,11 +30,13 @@
   #define VMA_DEBUG_MIN_BUFFER_IMAGE_GRANULARITY 256
   #define VMA_RECORDING_ENABLED 1
 
-  #define VMA_DEBUG_LOG(format, ...)  \
-    do {                              \
-      printf(format, ##__VA_ARGS__);  \
-      printf("\n");                   \
-    } while (false)
+  #define VMA_DEBUG_LOG(format, ...)
+  /*
+  #define VMA_DEBUG_LOG(format, ...) do { \
+      printf(format, __VA_ARGS__); \
+      printf("\n"); \
+  } while(false)
+  */
 #endif /* DEBUG */
 
 #ifdef __clang__

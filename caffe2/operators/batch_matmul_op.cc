@@ -73,11 +73,19 @@ vector<TensorShape> TensorInferenceForBatchMatMul(
       N = dims_B[ndims_B - 1];
     }
 
-    std::vector<int64_t> new_dims;
-    if (ndims_A >= ndims_B) {
-      new_dims.assign(dims_A.begin(), dims_A.end() - 2);
-    } else {
-      new_dims.assign(dims_B.begin(), dims_B.end() - 2);
+    const int ndims = std::max(ndims_A, ndims_B);
+    std::vector<int64_t> new_dims(ndims - 2);
+    std::vector<int64_t> dims_A_broadcast(ndims - 2, 1);
+    std::vector<int64_t> dims_B_broadcast(ndims - 2, 1);
+
+    std::copy_n(dims_A.begin(), ndims_A - 2, dims_A_broadcast.begin() + ndims - ndims_A);
+    std::copy_n(dims_B.begin(), ndims_B - 2, dims_B_broadcast.begin() + ndims - ndims_B);
+    for (int i = 0; i < ndims - 2; ++i) {
+      if (!dims_A_broadcast[i] || !dims_B_broadcast[i]) {
+        new_dims[i] = 0;
+      } else {
+        new_dims[i] = std::max(dims_A_broadcast[i], dims_B_broadcast[i]);
+      }
     }
     if (!A_broadcasted) {
       new_dims.push_back(M);

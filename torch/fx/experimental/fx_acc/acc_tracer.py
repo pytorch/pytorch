@@ -1,8 +1,8 @@
-# type: ignore[]
 import ast
 import builtins
 import copy
 import inspect
+import logging
 import textwrap
 import warnings
 from types import FunctionType
@@ -11,11 +11,15 @@ from typing import Dict, Optional, Any, Type, Tuple, Set, List
 import torch.fx.experimental.fx_acc.acc_normalizer as acc_normalizer
 import torch.fx.experimental.fx_acc.acc_ops  # noqa: F401
 import torch
+import torch.jit as jit
 import torch.nn as nn
 from torch._sources import normalize_source_lines
 from torch.fx import Graph, Tracer
 from torch.fx.experimental.normalize import NormalizeArgs
 from torch.fx.passes import shape_prop
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def _get_exception_wrapper_attr_name(exc_type: Type[Exception]) -> str:
@@ -111,7 +115,7 @@ class Acc_Rewriter(ast.NodeTransformer):
             exc_msg = _reuse_loc(ast.Constant(None))
         elif isinstance(node_for_exc, ast.Call):
             # E.g. `raise AssertionError("error message")`
-            name_node_of_exc = node_for_exc.func
+            name_node_of_exc = node_for_exc.func  # type: ignore[assignment]
             if not isinstance(name_node_of_exc, ast.Name):
                 return if_node
             # Most assertions just take a single string arg, but some may not; skip
@@ -214,6 +218,8 @@ class AccRewritingTracer(Tracer):
         torch.nn.quantized.Linear,
         torch.nn.quantized.Conv2d,
         torch.nn.intrinsic.quantized.ConvReLU2d,
+        jit.ScriptModule,
+        jit.RecursiveScriptModule,
     }
 
     def is_leaf_module(self, m: nn.Module, mod_qual_name: str) -> bool:
@@ -251,7 +257,14 @@ def _rewrite(mod_to_rewrite: nn.Module, allow_list: Optional[Set] = None) -> nn.
     # functions that are attrs of this moodule. Return the new, rewritten module
     # hierarchy.
     def rewrite_module(m: nn.Module):
-        base_class = type(m)
+        if isinstance(m, jit.ScriptModule):
+            # ScriptModule cannot be rewritten, so bypass it. The issue is it
+            # requires explicitly calling its `__init__()`, calling
+            # `nn.Module.__init__()` in the derived `RewrittenModule` is not
+            # enough. And even if we init it we can't do much with it.
+            return m
+
+        base_class : Type[nn.Module] = type(m)
 
         # Keep track of all the ConditionalExceptionWrappers that the
         # Acc_Rewriter calls into in this module so we can add them in init
@@ -259,7 +272,7 @@ def _rewrite(mod_to_rewrite: nn.Module, allow_list: Optional[Set] = None) -> nn.
         all_added_wrappers: Set[Type[Exception]] = set()
 
         # Note: Make this a subclass of our base class.
-        class RewrittenModule(base_class):
+        class RewrittenModule(base_class):  # type: ignore[valid-type, misc]
             # Keep track of the base_class so that symbolic tracing can
             # determine what kind of module this originally was later on.
             _base_class_origin = base_class
@@ -269,7 +282,10 @@ def _rewrite(mod_to_rewrite: nn.Module, allow_list: Optional[Set] = None) -> nn.
             # Write all of the non-dunder or special methods from base_class
             # into RewrittenModule.
             for method_name in dir(base_class):
-                method = getattr(base_class, method_name)
+                method = getattr(base_class, method_name, None)
+                if method is None:
+                    _LOGGER.warning(f"{__qualname__} does not have attribute {method_name}")
+
                 if builtins.type(method) is not FunctionType:
                     continue
 
@@ -279,6 +295,7 @@ def _rewrite(mod_to_rewrite: nn.Module, allow_list: Optional[Set] = None) -> nn.
                     continue
 
                 # Only rewrite those Modules explicitly in the allow_list.
+                assert allow_list is not None
                 if base_class not in allow_list:
                     vars()[method_name] = method
                 else:
@@ -287,6 +304,7 @@ def _rewrite(mod_to_rewrite: nn.Module, allow_list: Optional[Set] = None) -> nn.
 
             def __init__(self, orig):
                 nn.Module.__init__(self)
+
                 # Iterate over all added exception wrappers and add
                 # ConditionalExceptionWrapper attrs for each.
                 for exc_type in all_added_wrappers:

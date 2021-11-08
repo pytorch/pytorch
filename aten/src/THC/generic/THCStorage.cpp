@@ -63,25 +63,6 @@ THCStorage* THCStorage_(newWithSize)(THCState *state, ptrdiff_t size)
   return storage;
 }
 
-THCStorage* THCStorage_(newWithAllocator)(THCState *state, ptrdiff_t size,
-                                          at::Allocator* allocator)
-{
-  THStorage* storage = c10::make_intrusive<at::StorageImpl>(
-                           c10::StorageImpl::use_byte_size_t(),
-                           size * sizeof(scalar_t),
-                           allocator,
-                           true)
-                           .release();
-  return storage;
-}
-
-THCStorage* THCStorage_(newWithSize1)(THCState *state, scalar_t data0)
-{
-  THCStorage *self = THCStorage_(newWithSize)(state, 1);
-  THCStorage_(set)(state, self, 0, data0);
-  return self;
-}
-
 THCStorage* THCStorage_(newWithMapping)(THCState *state, const char *fileName, ptrdiff_t size, int isShared)
 {
   THError("not available yet for THCStorage");

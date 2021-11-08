@@ -9,8 +9,9 @@
 #endif
 
 #include <ATen/Parallel.h>
+#include <c10/util/irange.h>
 
-torch::class_<EmbeddingPackedParamsBase> register_embedding_params();
+int register_embedding_params();
 
 namespace {
 
@@ -44,7 +45,7 @@ at::Tensor& embedding_lookup_fallback_impl(
   std::vector<OffsetType> lengths_data;
 
   int64_t lower = accessor[0];
-  for (int64_t i = 1; i < offsets.numel(); ++i) {
+  for (const auto i : c10::irange(1, offsets.numel())) {
     lengths_data.push_back(accessor[i] - lower);
     lower = accessor[i];
   }
@@ -58,7 +59,7 @@ at::Tensor& embedding_lookup_fallback_impl(
   if (per_sample_weights_.has_value()) {
     per_sample_weights_data = per_sample_weights_.value().data_ptr<float>();
   }
-  for (int m = 0; m < output_size; ++m) {
+  for (const auto m : c10::irange(output_size)) {
     memset(output_data, 0, block_size * sizeof(float));
     TORCH_CHECK(
         current + lengths_data[m] <= index_size,
@@ -126,7 +127,7 @@ at::Tensor& embedding_lookup_fallback_impl(
         bias = weight_val * bias_val;
       }
 
-      for (int j = 0; j < block_size; ++j) {
+      for (const auto j : c10::irange(block_size)) {
         uint8_t quantized =
             weight_data[idx * weight_size + j / NUM_ELEM_PER_BYTE];
         quantized >>= (j % NUM_ELEM_PER_BYTE) * BIT_RATE;
@@ -139,6 +140,35 @@ at::Tensor& embedding_lookup_fallback_impl(
   } // for each m
   return output;
 }
+
+namespace {
+template <typename IndexType, typename OffsetType>
+void fbgemm_spmdm_report_error_(
+    int64_t output_size,
+    int index_size,
+    int64_t N,
+    const OffsetType* offsets,
+    const IndexType* indices) {
+  for (int m = 0; m < output_size; ++m) {
+    for (OffsetType i = offsets[m]; i < offsets[m + 1]; ++i) {
+      TORCH_CHECK(i < index_size);
+      IndexType idx = indices[i];
+      TORCH_CHECK(
+          0 <= idx && idx < N,
+          "Index ",
+          i,
+          " is out of bounds: ",
+          idx,
+          ", range 0 to ",
+          N);
+    }
+  }
+  TORCH_CHECK(
+      offsets[output_size] == index_size,
+      "Yout input seems to be incorrect: the last offset value should be "
+      "the size of the indices tensor, but it appears not.");
+}
+} // namespace
 
 template <typename IndexType, typename OffsetType>
 at::Tensor& embedding_bag_nbit_impl(
@@ -234,11 +264,10 @@ at::Tensor& embedding_bag_nbit_impl(
             : nullptr,
         /*output=*/output_data);
 
-    TORCH_CHECK(
-        success,
-        "FBGEMM GenerateEmbeddingSpMDMNBit kernel failed for ",
-        bit_width,
-        "-bit input");
+    if (!success) {
+      fbgemm_spmdm_report_error_(
+          output_size, index_size, N, offsets_data, indices_data);
+    }
   } else {
     auto kernel =
         fbgemm::GenerateEmbeddingSpMDMNBitRowWiseSparse<IndexType, OffsetType>(
@@ -262,11 +291,14 @@ at::Tensor& embedding_bag_nbit_impl(
             : nullptr,
         /*output=*/output_data,
         /*compressed_indices_table=*/compressed_indices_mapping_data);
-    TORCH_CHECK(
-        success,
-        "FBGEMM GenerateEmbeddingSpMDMNBitRowWiseSparse kernel failed for ",
-        bit_width,
-        "-bit input");
+    if (!success) {
+      fbgemm_spmdm_report_error_(
+          output_size,
+          index_size,
+          compressed_index_size,
+          offsets_data,
+          indices_data);
+    }
   }
   return output;
 #else
@@ -393,9 +425,14 @@ at::Tensor& embedding_bag_byte_impl(
                   : nullptr,
               /*out=*/output_data + start_idx * D);
 
-          TORCH_CHECK(
-              success,
-              "FBGEMM GenerateEmbeddingSpMDM kernel failed for 8-bit input");
+          if (!success) {
+            fbgemm_spmdm_report_error_(
+                end_idx - start_idx,
+                offsets_data[end_idx] - offsets_data[start_idx],
+                N,
+                offsets_data + start_idx,
+                indices_data + offsets_data[start_idx]);
+          }
         });
   } else {
     // pruned weights
@@ -421,9 +458,14 @@ at::Tensor& embedding_bag_byte_impl(
             : nullptr,
         /*output=*/output_data,
         /*compressed_indices_table=*/compressed_indices_mapping_data);
-    TORCH_CHECK(
-        success,
-        "FBGEMM GenerateEmbeddingSpMDMRowWiseSparse kernel failed for 8-bit input");
+    if (!success) {
+      fbgemm_spmdm_report_error_(
+          output_size,
+          index_size,
+          compressed_index_size,
+          offsets_data,
+          indices_data);
+    }
   }
   return output;
 #else

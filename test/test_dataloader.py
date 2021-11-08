@@ -1,6 +1,9 @@
+# Owner(s): ["module: dataloader"]
+
 import math
 import sys
 import errno
+import multiprocessing
 import os
 import ctypes
 import faulthandler
@@ -31,7 +34,7 @@ from torch.utils.data.datapipes.iter import IterableWrapper
 from torch._utils import ExceptionWrapper
 from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS,
                                                   IS_IN_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
-                                                  load_tests, TEST_WITH_TSAN, IS_SANDCASTLE)
+                                                  load_tests, TEST_WITH_ASAN, TEST_WITH_TSAN, IS_SANDCASTLE)
 
 
 try:
@@ -833,6 +836,9 @@ class BulkLoadingSampler(torch.utils.data.Sampler):
     TEST_WITH_TSAN,
     "Fails with TSAN with the following error: starting new threads after multi-threaded "
     "fork is not supported. Dying (set die_after_fork=0 to override)")
+@unittest.skipIf(
+    TEST_WITH_ASAN,
+    "DataLoader tests hang in ASAN, see: https://github.com/pytorch/pytorch/issues/66223")
 class TestDataLoader(TestCase):
 
     def setUp(self):
@@ -1523,6 +1529,28 @@ except RuntimeError as e:
         ):
             self.assertEqual(list(fn()), list(fn()))
 
+        for sampler in (
+            RandomSampler(self.dataset, num_samples=5, replacement=True),
+            RandomSampler(self.dataset, replacement=False),
+            WeightedRandomSampler(weights, num_samples=5, replacement=True),
+            WeightedRandomSampler(weights, num_samples=5, replacement=False),
+            SubsetRandomSampler(range(10)),
+        ):
+            torch.manual_seed(0)
+            l1 = list(sampler) + list(sampler)
+
+            torch.manual_seed(0)
+            l2 = list(sampler) + list(sampler)
+            self.assertEqual(l1, l2)
+
+            its = (iter(sampler), iter(sampler))
+            ls = ([], [])
+            for idx in range(len(sampler)):
+                for i in range(2):
+                    if idx == 0:
+                        torch.manual_seed(0)
+                    ls[i].append(next(its[i]))
+            self.assertEqual(ls[0], ls[1])
 
     def _test_sampler(self, **kwargs):
         indices = range(2, 12)  # using a regular iterable
@@ -2109,6 +2137,8 @@ class DummyDataset(torch.utils.data.Dataset):
     TEST_WITH_TSAN,
     "Fails with TSAN with the following error: starting new threads after multi-threaded "
     "fork is not supported. Dying (set die_after_fork=0 to override)")
+@unittest.skipIf(
+    TEST_WITH_ASAN, "DataLoader tests hang in ASAN, see: https://github.com/pytorch/pytorch/issues/66223")
 class TestDataLoaderPersistentWorkers(TestDataLoader):
 
     def setUp(self):
@@ -2305,6 +2335,9 @@ class TestWorkerQueueDataset(Dataset):
     TEST_WITH_TSAN,
     "Fails with TSAN with the following error: starting new threads after multi-threaded "
     "fork is not supported. Dying (set die_after_fork=0 to override)")
+@unittest.skipIf(
+    TEST_WITH_ASAN,
+    "Flaky with ASAN, see https://github.com/pytorch/pytorch/issues/65727")
 class TestIndividualWorkerQueue(TestCase):
     def setUp(self):
         super(TestIndividualWorkerQueue, self).setUp()
@@ -2313,7 +2346,7 @@ class TestIndividualWorkerQueue(TestCase):
     def _run_ind_worker_queue_test(self, batch_size, num_workers):
         loader = DataLoader(
             self.dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers,
-            worker_init_fn=self.dataset.worker_init_fn
+            timeout=5, worker_init_fn=self.dataset.worker_init_fn
         )
         current_worker_idx = 0
         for i, (worker_ids, sample) in enumerate(loader):
@@ -2353,7 +2386,7 @@ class SetAffinityDataset(IterableDataset):
 
 
 def worker_set_affinity(_):
-    os.sched_setaffinity(0, [2])
+    os.sched_setaffinity(0, [multiprocessing.cpu_count() - 1])
 
 
 @unittest.skipIf(
@@ -2366,7 +2399,7 @@ class TestSetAffinity(TestCase):
         dataloader = torch.utils.data.DataLoader(
             dataset, num_workers=2, worker_init_fn=worker_set_affinity)
         for sample in dataloader:
-            self.assertEqual(sample, [2])
+            self.assertEqual(sample, [multiprocessing.cpu_count() - 1])
 
 class ConvDataset(Dataset):
     def __init__(self):
