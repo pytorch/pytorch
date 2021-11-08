@@ -24,6 +24,7 @@ namespace {
 
 constexpr int kCUDANumThreads = 256;
 constexpr int kColwiseReduceTileSize = 32;
+constexpr int vec_size = 4; //we could make it dependent on dtype, but that would lead to different results between float and low-p types
 
 // aligned vector generates vectorized load/store on CUDA (copy-pasted from MemoryAccess.cuh)
 template<typename scalar_t, int vec_size>
@@ -108,7 +109,7 @@ WelfordData cuWelfordOnlineSum(
 {
   U delta = val - curr_sum.mean;
   U new_count = curr_sum.count + 1.f;
-  U new_mean = curr_sum.mean + delta/new_count;
+  U new_mean = curr_sum.mean + delta * (1.f/new_count); //proper division is slow, this is less accurate but noticeably faster
   return {new_mean, curr_sum.sigma2 + delta * (val - new_mean), new_count};
 }
 
@@ -122,8 +123,9 @@ WelfordData cuWelfordCombine(
   U count = dataA.count + dataB.count;
   U mean, sigma2;
   if (count > decltype(dataB.count){0}) {
-    auto nA = dataA.count / count;
-    auto nB = dataB.count / count;
+    auto coef = 1.f/count; //NB we don't use --use_fast_math, but this is emulation, 1./count goes to intrinsic, `* coef` is multiplication, instead of slow fp division
+    auto nA = dataA.count * coef;
+    auto nB = dataB.count * coef;
     mean = nA*dataA.mean + nB*dataB.mean;
     sigma2 = dataA.sigma2 + dataB.sigma2 + delta * delta * dataA.count * nB;
   } else {
@@ -140,7 +142,6 @@ __device__ WelfordData compute_stats(
   float * buf
   ) {
     //X points to the row to read
-    constexpr int vec_size = alignment / sizeof(T);
     using vec_t = aligned_vector<T, vec_size>;
     using acc_t = acc_type<T, true>;
     const vec_t * X_vec = reinterpret_cast<const vec_t*>(X);
@@ -200,7 +201,7 @@ __device__ WelfordData compute_stats(
 }
 
 
-template <typename T, typename T_ACC, int alignment>
+template <typename T, typename T_ACC>
 __global__ void vectorized_layer_norm_kernel(
   const int N,
   T_ACC eps,
@@ -210,12 +211,11 @@ __global__ void vectorized_layer_norm_kernel(
   T_ACC* mean,
   T_ACC* rstd,
   T* Y){
-    extern __shared__ float s_data[]; //if we made smem WelfordData, there would be bank conflicts,
+    extern __shared__ float s_data[]; //if we made smem WelfordData type, there would be bank conflicts,
     //as one thread would have to write 3 consecutive floats
     auto i1 = blockIdx.x;
     const T * block_row = X + i1 * N;
     WelfordData wd = compute_stats(block_row, N, s_data);
-    constexpr int vec_size = alignment / sizeof(T);
     using vec_t = aligned_vector<T, vec_size>;
     const vec_t * X_vec = reinterpret_cast<const vec_t*>(block_row);
     vec_t * Y_vec = reinterpret_cast<vec_t*>(Y + i1 * N);
@@ -441,14 +441,14 @@ void launch_vectorized_layer_norm_kernel(
   T_ACC* mean_data,
   T_ACC* rstd_data
 ) {
-    constexpr int alignment = 16;
+    constexpr int alignment = 16; //currently unused to make sure float and half results are bw accurate
     auto stream = at::cuda::getCurrentCUDAStream().stream();
     const dim3 threads(32,4,1);
     const dim3 blocks(M);
     int nshared =
         threads.y > 1 ?
 	    threads.y * 3/2 *sizeof(T_ACC) : 0;
-	  vectorized_layer_norm_kernel<T, acc_type<T, true>, alignment><<<blocks, threads, nshared, stream>>>(N, eps, X_data,
+	  vectorized_layer_norm_kernel<T, acc_type<T, true>><<<blocks, threads, nshared, stream>>>(N, eps, X_data,
     gamma_data, beta_data, mean_data, rstd_data, Y_data);
 
 
@@ -476,11 +476,11 @@ void LayerNormKernelImplInternal(
   // check if can take fast path - all tensors are properly aligned, N is less than 2^24 (to use float count),
   // N is multiple of vec_size (so that all rows are aligned if tensor is aligned)
   auto can_vectorize = [&](const T * ptr, int alignment){uint64_t addr = reinterpret_cast<uint64_t>(ptr); return addr % alignment == 0;};
-  constexpr int vec_size = 16;
-  constexpr int num_vec_elems = vec_size / sizeof(T);
+  constexpr int num_vec_elems = vec_size;
+  constexpr int alignment = num_vec_elems * sizeof(T);
   if ((std::is_same<T, float>::value || std::is_same<T, at::Half>::value) &&
   N <= 1ULL << std::numeric_limits<float>::digits && N % num_vec_elems == 0 &&
-  can_vectorize(X_data, vec_size) && can_vectorize(Y_data, vec_size)) {
+  can_vectorize(X_data, alignment) && can_vectorize(Y_data, alignment)) {
     launch_vectorized_layer_norm_kernel(static_cast<int>(N), M, eps, X_data, gamma_data, beta_data, Y_data, mean_data, rstd_data);
   } else {
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
