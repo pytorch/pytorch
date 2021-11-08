@@ -64,6 +64,23 @@ AnomalyMetadata* Node::metadata() noexcept {
   return anomaly_metadata_.get();
 }
 
+uint32_t Node::add_input_metadata(const at::Tensor& t) noexcept {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  uint32_t input_nr = input_metadata_.size();
+  if (t.device().type() == c10::kLazy) {
+
+    TORCH_CHECK(lazy_tensor_to_size_handler, "lazy_tensor_to_size_handler wasn't defined!");
+    auto nt = const_cast<at::Tensor&>(t);
+    auto sz = lazy_tensor_to_size_handler(nt);
+    InputMetadata im(t.options(), sz, t.unsafeGetTensorImpl()->is_python_dispatch());
+    input_metadata_.push_back(std::move(im));
+
+  } else {
+    input_metadata_.emplace_back(t);
+  }
+  return input_nr;
+}
+
 static void gatherFunctions(
     Node* func,
     std::vector<std::shared_ptr<Node>>& stack) {

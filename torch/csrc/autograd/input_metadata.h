@@ -58,6 +58,7 @@ struct InputMetadata {
   }
 
   at::Tensor zeros_like() const {
+    TORCH_CHECK(device() != c10::kLazy, "this needs to handle a lazy tensor");
     return at::zeros(shape_, options_);
   }
 

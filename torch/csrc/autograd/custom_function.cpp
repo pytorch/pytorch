@@ -12,6 +12,15 @@ VariableInfo::VariableInfo(const Variable& var)
   , size(var.sizes().vec())
   , requires_grad(var.requires_grad())
   , is_empty(false) {
+
+    if (var.device().type() == c10::kLazy) {
+      TORCH_CHECK(torch::autograd::getLazyTensorToSizeHandler(), "getLazyTensorToSizeHandler should be defined!");
+      size = torch::autograd::getLazyTensorToSizeHandler()(const_cast<Variable&>(var));
+    }
+    else {
+      size = var.sizes().vec();
+    }
+
 }
 
 VariableInfo::VariableInfo() : requires_grad(false), is_empty(true) {}
@@ -21,6 +30,7 @@ Variable VariableInfo::zeros(at::OptionalDeviceGuard& device_guard) const {
     // Return undefined tensor.
     return at::Tensor();
   } else {
+    TORCH_CHECK(device != c10::kLazy, "this needs to handle lazy tensors!");
     return at::zeros(
         size, at::TensorOptions(scalar_type).device(device).layout(layout));
   }

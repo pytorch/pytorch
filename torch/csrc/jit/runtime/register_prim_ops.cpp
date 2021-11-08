@@ -2356,6 +2356,23 @@ static const OperatorGeneratorArgs opGenArgs1[] = {
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA(
+            "aten::_sum_to_or_throw(int[] meta_size, Tensor grad) -> Tensor"),
+        [](Stack& stack) {
+          IValue meta_size, other_size;
+          pop(stack, meta_size, other_size);
+          auto s = meta_size.toIntVector();
+          auto o = other_size.toTensor();
+          std::stringstream ss;
+          ss << "invalid gradient - got ";
+          ss << o.sizes() << " but expected shape compatible with ";
+          // TODO: maybe pass an error string to not degrade the error message
+          TORCH_CHECK(at::is_expandable_to(s, o.sizes()), ss.str());
+          auto reduced_grad = at::sum_to(o, s);
+          push(stack, reduced_grad);
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
             "aten::_unwrap_optional(t(a)? optional) -> t(a)"),
         [](Stack& stack) {
           auto val = pop(stack);

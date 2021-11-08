@@ -193,16 +193,13 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     bool is_tensor_subclass) noexcept {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     uint32_t input_nr = input_metadata_.size();
+    // TODO: this seems to be used only in one place with views
+    TORCH_CHECK(!options.has_device() || options.device().type() != c10::kLazy, "support later when we get to views");
     input_metadata_.emplace_back(options, shape, is_tensor_subclass);
     return input_nr;
   }
 
-  uint32_t add_input_metadata(const at::Tensor& t) noexcept {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    uint32_t input_nr = input_metadata_.size();
-    input_metadata_.emplace_back(t);
-    return input_nr;
-  }
+  uint32_t add_input_metadata(const at::Tensor& t) noexcept;
 
   /// Adds a placeholder for an input that will not be used.
   uint32_t add_input_metadata(undefined_input u) noexcept {

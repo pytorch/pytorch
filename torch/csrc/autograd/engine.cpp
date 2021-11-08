@@ -678,15 +678,25 @@ void validate_outputs(
       // AT_ERROR(format_error(ss.str()));
       continue;
     }
-    if (!grad.sizes().equals(metadata.shape())) {
-      if (!at::is_expandable_to(metadata.shape(), grad.sizes())) {
-        std::stringstream ss;
-        ss << "invalid gradient at index " << i << " - got ";
-        ss << grad.sizes() << " but expected shape compatible with ";
-        ss << metadata.shape();
-        AT_ERROR(format_error(ss.str()));
+
+    // TODO: keeping a handle to an IR Node in LT's sizes allows us to avoid
+    // threading through lots of autograd infra. Not sure if this is a good long-term solution
+    if (metadata.device().type() == at::kLazy) {
+      // TODO: we can remove handlers when LTC is merged into master
+      TORCH_CHECK(getSumToOrThrowHandler(), "SumOrThrow isn't defined");
+      std::vector<int64_t> isz (metadata.shape().begin(), metadata.shape().end());
+      grad = getSumToOrThrowHandler()(isz, grad);
+    } else {
+      if (!grad.sizes().equals(metadata.shape())) {
+        if (!at::is_expandable_to(metadata.shape(), grad.sizes())) {
+          std::stringstream ss;
+          ss << "invalid gradient at index " << i << " - got ";
+          ss << grad.sizes() << " but expected shape compatible with ";
+          ss << metadata.shape();
+          AT_ERROR(format_error(ss.str()));
+        }
+        grad = at::sum_to(std::move(grad), metadata.shape());
       }
-      grad = at::sum_to(std::move(grad), metadata.shape());
     }
 
     bool input_is_complex = isComplexType(c10::typeMetaToScalarType(metadata.options().dtype()));
@@ -1024,7 +1034,8 @@ auto Engine::execute(const edge_list& roots,
     InputBuffer input_buffer(roots.at(0).function->num_inputs());
     auto input = inputs.at(0);
 
-    const auto input_stream = InputMetadata(input).stream();
+    // TODO: another hack
+    const auto input_stream = InputMetadata(input.options(), {}, input.unsafeGetTensorImpl()->is_python_dispatch()).stream();
     const auto opt_next_stream = roots.at(0).function->stream(c10::DeviceType::CUDA);
     input_buffer.add(roots.at(0).input_nr,
                       std::move(input),
