@@ -336,7 +336,7 @@ void hardtanh_backward_kernel(TensorIterator& iter, const Scalar& min, const Sca
   });
 }
 
-void hardswish_kernel(TensorIterator& iter) {
+void hardswish_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardswish_cpu", [&]() {
     const scalar_t zero(0.0f);
     const scalar_t three(3.0f);

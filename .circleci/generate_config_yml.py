@@ -15,7 +15,6 @@ import cimodel.data.pytorch_build_definitions as pytorch_build_definitions
 import cimodel.data.simple.android_definitions
 import cimodel.data.simple.binary_smoketest
 import cimodel.data.simple.docker_definitions
-import cimodel.data.simple.ios_definitions
 import cimodel.data.simple.macos_definitions
 import cimodel.data.simple.mobile_definitions
 import cimodel.data.simple.nightly_android
@@ -143,7 +142,6 @@ def gen_build_workflows_tree():
         pytorch_build_definitions.get_workflow_jobs,
         cimodel.data.simple.macos_definitions.get_workflow_jobs,
         cimodel.data.simple.android_definitions.get_workflow_jobs,
-        cimodel.data.simple.ios_definitions.get_workflow_jobs,
         cimodel.data.simple.mobile_definitions.get_workflow_jobs,
         cimodel.data.simple.binary_smoketest.get_workflow_jobs,
         cimodel.data.simple.nightly_ios.get_workflow_jobs,
