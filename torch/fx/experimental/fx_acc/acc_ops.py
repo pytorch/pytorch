@@ -2,8 +2,10 @@
 import operator
 
 import torch  # isort:skip
+import math
 from typing import Sequence, Optional, List, cast
 
+import scripts.samsalas.multihead_attention as ma  # type: ignore[import]
 import torch.fx.experimental.fx_acc.acc_utils as acc_utils
 import torch.nn as nn
 from torch.fx.experimental.fx_acc.acc_normalizer import (
@@ -16,6 +18,8 @@ from torch.fx.experimental.fx_acc.acc_op_properties import (
     register_acc_op_properties,
 )
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
+from torch.nn import functional as F
+
 
 this_arg_is_optional = True
 move_to_qparams = True
@@ -1634,3 +1638,50 @@ def cumsum(*, input, dim, dtype=None):
 @register_acc_op
 def chunk(*, input, chunks, dim=0):
     return torch.chunk(input, chunks, dim)
+
+
+@register_acc_op_mapping(op_and_target=("call_function", ma.multihead_attention))
+@register_acc_op
+def multihead_attention_op(
+    *,
+    projection: torch.Tensor, key_padding_mask: torch.Tensor, num_heads: int
+) -> torch.Tensor:
+
+    sequence_length, batch_size, embbeding_dim_3 = projection.shape
+    embbeding_dim = embbeding_dim_3 // 3
+    assert (
+        num_heads and not embbeding_dim % num_heads
+    ), "Embedding dim must be divisible by num_heads"
+    head_size = embbeding_dim // num_heads
+    scaling = float(1 / math.sqrt(head_size))
+
+    q, k, v = projection.chunk(3, dim=-1)
+    q = scaling * q
+
+    batch_heads = batch_size * num_heads
+
+    q = q.contiguous().view(-1, batch_heads, head_size).transpose(0, 1)
+    k = k.contiguous().view(-1, batch_heads, head_size).transpose(0, 1)
+    v = v.contiguous().view(-1, batch_heads, head_size).transpose(0, 1)
+
+    attn_weights = torch.bmm(q, k.transpose(1, 2))
+
+    # don't attend to padding symbols
+    attn_weights = attn_weights.view(
+        batch_size, num_heads, sequence_length, sequence_length
+    )
+    # masked_fill is not a supported op, luckily bertQKVToContextPlugin includes it.
+    # attn_weights = attn_weights.masked_fill(
+    #     key_padding_mask.unsqueeze(1).unsqueeze(2), float("-inf")
+    # )
+    attn_weights = attn_weights.view(batch_heads, sequence_length, sequence_length)
+    attn_weights = F.softmax(attn_weights, dim=-1)
+    # NOTE: no dropout at this step, this model is for inference only!
+
+    attn = torch.bmm(attn_weights, v)
+    attn = (
+        attn.transpose(0, 1)
+        .contiguous()
+        .view(sequence_length, batch_size, head_size * num_heads)
+    )
+    return attn

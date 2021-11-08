@@ -2070,3 +2070,85 @@ def acc_ops_cumsum(network, target, args, kwargs, name):
     set_layer_name(loop_output, target, f"{name}_loop_output")
     loop_output.set_input(1, trip_limit)
     return loop_output.get_output(0)
+
+@tensorrt_converter(acc_ops.multihead_attention_op)
+def multihead_attention_converter(network, target, args, kwargs, name):
+    projection = kwargs["projection"]
+    mask = kwargs["key_padding_mask"]
+    num_heads = kwargs["num_heads"]
+
+    sequence_length, batch_size, embedding_dim_3 = projection.shape
+    embedding_dim = embedding_dim_3 // 3
+    head_size = embedding_dim // num_heads
+
+    # This reshape-transpose-reshape alligns every k examples of QKV
+    # so that all heads can process their "QKV slice"!
+    # k == head_size
+    # the intuition is we get -> k*(Q'K'V')
+
+    first_reshape = ((sequence_length, batch_size, 3, num_heads, head_size))
+    transpose = ((0, 1, 3, 2, 4))
+    second_reshape = ((sequence_length, batch_size, 3 * embedding_dim, 1, 1))
+
+    # First reshape and transpose layer
+    reshape_transpose = network.add_shuffle(projection)
+    reshape_transpose.reshape_dims = first_reshape
+    reshape_transpose.second_transpose = transpose
+    reshape_transpose.name = f"{name}_reshape_transpose"
+    projection = reshape_transpose.get_output(0)
+
+    # Second reshape
+    reshape = network.add_shuffle(projection)
+    reshape.reshape_dims = second_reshape
+    reshape.name = f"{name}_second_reshape"
+    projection = reshape.get_output(0)
+
+    if not isinstance(projection, trt.tensorrt.ITensor):
+        raise RuntimeError(
+            f"MultiHeadAttention received input {projection} that is not part "
+            "of the TensorRT region!"
+        )
+    if not isinstance(mask, trt.tensorrt.ITensor):
+        raise RuntimeError(
+            f"MultiHeadAttention received input {mask} that is not part "
+            "of the TensorRT region!"
+        )
+    if network.has_implicit_batch_dimension:
+        raise RuntimeError(
+            "MultiHeadAttention converter currently doesn't support implicit batch dimension"
+        )
+
+    # Specify plugin fields
+    plugin_name = "CustomQKVToContextPluginDynamic"
+    has_mask = mask is not None
+
+    type_id = trt.PluginField(
+        "type_id", np.array([0], dtype=np.int32), trt.PluginFieldType.INT32
+    )
+    hidden_size = trt.PluginField(
+        "hidden_size", np.array([embedding_dim], np.int32), trt.PluginFieldType.INT32
+    )
+    num_heads = trt.PluginField(
+        "num_heads", np.array([num_heads], np.int32), trt.PluginFieldType.INT32
+    )
+    has_mask = trt.PluginField(
+        "has_mask", np.array([has_mask], np.int32), trt.PluginFieldType.INT32
+    )
+
+    field_collection = trt.PluginFieldCollection(
+        [type_id, hidden_size, num_heads, has_mask]
+    )
+
+    # get plugin
+    plugin_version = "1"
+    plugin = get_trt_plugin(plugin_name, field_collection, plugin_version)
+
+    qkv_in = [projection]
+    if has_mask:
+        qkv_in.append(mask)
+
+    # Add plugin layer
+    layer = network.add_plugin_v2(qkv_in, plugin)
+    layer.name = "Multihead_Attention_" + name
+
+    return layer.get_output(0)
