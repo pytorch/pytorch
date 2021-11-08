@@ -1180,13 +1180,15 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         dtype_initialized(),
         "Cannot access data pointer of Tensor that doesn't have initialized dtype "
         "(e.g., caffe2::Tensor x(CPU), prior to calling mutable_data<T>() on x)");
-    if (storage_offset_) {
-      return static_cast<void*>(
-          static_cast<char*>(storage_.data()) +
-          data_type_.itemsize() * storage_offset_);
-    } else {
-      return storage_.data();
+    // Computing an offset into an empty tensor would be UB, since an empty
+    // tensor's storage will be nullptr, and adding a nonzero offset to nullptr
+    // is UB.  So we skip the offset computation in this case.
+    if (is_empty()) {
+      return nullptr;
     }
+    return static_cast<void*>(
+        static_cast<char*>(storage_.data()) +
+        data_type_.itemsize() * storage_offset_);
   }
 
   /**

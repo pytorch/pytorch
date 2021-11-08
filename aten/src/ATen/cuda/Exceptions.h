@@ -2,6 +2,7 @@
 
 #include <cublas_v2.h>
 #include <cusparse.h>
+#include <c10/macros/Export.h>
 
 #ifdef CUDART_VERSION
 #include <cusolver_common.h>
@@ -39,7 +40,7 @@ class CuDNNError : public c10::Error {
   } while (0)
 
 namespace at { namespace cuda { namespace blas {
-const char* _cublasGetErrorEnum(cublasStatus_t error);
+C10_EXPORT const char* _cublasGetErrorEnum(cublasStatus_t error);
 }}} // namespace at::cuda::blas
 
 #define TORCH_CUDABLAS_CHECK(EXPR)                              \
@@ -66,16 +67,24 @@ const char *cusparseGetErrorString(cusparseStatus_t status);
 #ifdef CUDART_VERSION
 
 namespace at { namespace cuda { namespace solver {
-const char* cusolverGetErrorMessage(cusolverStatus_t status);
+C10_EXPORT const char* cusolverGetErrorMessage(cusolverStatus_t status);
 }}} // namespace at::cuda::solver
 
-#define TORCH_CUSOLVER_CHECK(EXPR)                                \
-  do {                                                            \
-    cusolverStatus_t __err = EXPR;                                \
-    TORCH_CHECK(__err == CUSOLVER_STATUS_SUCCESS,                 \
-                "cusolver error: ",                               \
-                at::cuda::solver::cusolverGetErrorMessage(__err), \
-                ", when calling `" #EXPR "`");                    \
+#define TORCH_CUSOLVER_CHECK(EXPR)                                              \
+  do {                                                                          \
+    cusolverStatus_t __err = EXPR;                                              \
+    if (__err == CUSOLVER_STATUS_EXECUTION_FAILED) {                            \
+      TORCH_CHECK(__err == CUSOLVER_STATUS_SUCCESS,                             \
+                  "cusolver error: ",                                           \
+                  at::cuda::solver::cusolverGetErrorMessage(__err),             \
+                  ", when calling `" #EXPR "`",                                 \
+                  ". This error may appear if the input matrix contains NaN."); \
+    } else {                                                                    \
+      TORCH_CHECK(__err == CUSOLVER_STATUS_SUCCESS,                             \
+                  "cusolver error: ",                                           \
+                  at::cuda::solver::cusolverGetErrorMessage(__err),             \
+                  ", when calling `" #EXPR "`");                                \
+    }                                                                           \
   } while (0)
 
 #else
@@ -89,7 +98,7 @@ const char* cusolverGetErrorMessage(cusolverStatus_t status);
 // This is here instead of in c10 because NVRTC is loaded dynamically via a stub
 // in ATen, and we need to use its nvrtcGetErrorString.
 // See NOTE [ USE OF NVRTC AND DRIVER API ].
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 
 #define AT_CUDA_DRIVER_CHECK(EXPR)                                                                               \
   do {                                                                                                           \

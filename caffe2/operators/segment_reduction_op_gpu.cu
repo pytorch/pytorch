@@ -41,7 +41,7 @@ void inclusive_scan_wrapper(
 }
 
 template <typename T, bool ExactBlock = false, bool Average = false>
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(1024, SEGREDUCE_MINBLOCKS)
 #endif
 __global__ void length_sum_kernel(
@@ -85,7 +85,7 @@ __global__ void length_sum_kernel(
 }
 
 template <typename T, bool ExactBlock = false, bool Average = false>
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(1024, SEGREDUCE_MINBLOCKS)
 #endif
 __global__ void length_sum_gradient_kernel(
@@ -126,7 +126,7 @@ __global__ void length_sum_gradient_kernel(
 }
 
 template <typename T, bool ExactBlock = false>
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(1024, SEGREDUCE_MINBLOCKS)
 #endif
 __global__ void length_max_kernel(
@@ -172,7 +172,7 @@ __global__ void length_max_kernel(
 }
 
 template <typename T, bool ExactBlock = false>
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(1024, SEGREDUCE_MINBLOCKS)
 #endif
 __global__ void length_weighted_sum_gradient_kernel(
@@ -209,7 +209,7 @@ __global__ void length_weighted_sum_gradient_kernel(
 }
 
 template <typename T, typename IndexType, int NumThreads>
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(1024, SEGREDUCE_MINBLOCKS)
 #endif
 __global__ void length_weighted_sum_with_main_input_gradient_kernel(
@@ -252,7 +252,7 @@ __global__ void length_weighted_sum_with_main_input_gradient_kernel(
 }
 
 template <typename T, typename IndexType, bool ExactBlock = false>
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(1024, SEGREDUCE_MINBLOCKS)
 #endif
 __global__ void sparse_length_max_kernel(
@@ -313,7 +313,7 @@ __global__ void sparse_length_max_kernel(
 }
 
 template <typename T, typename IndexType, bool ExactBlock = false>
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(1024, SEGREDUCE_MINBLOCKS)
 #endif
 __global__ void sparse_length_weighted_sum_kernel(

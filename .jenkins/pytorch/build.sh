@@ -12,7 +12,7 @@ COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-if [[ "$BUILD_ENVIRONMENT" == *-linux-xenial-py3-clang7-asan* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *-clang7-asan* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-asan.sh" "$@"
 fi
 
@@ -24,7 +24,7 @@ if [[ "$BUILD_ENVIRONMENT" == *-mobile-code-analysis* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile-code-analysis.sh" "$@"
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *linux-xenial-cuda11.1* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *linux-xenial-cuda11.3* ]]; then
   # Enabling DEPLOY build (embedded torch python interpreter, experimental)
   # only on one config for now, can expand later
   export USE_DEPLOY=ON
@@ -54,8 +54,8 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
   export BUILD_SPLIT_CUDA=ON
 fi
 
-if [[ ${BUILD_ENVIRONMENT} == *"pure_torch"* || ${BUILD_ENVIRONMENT} == *"puretorch"* ]]; then
-  export BUILD_CAFFE2=OFF
+if [[ ${BUILD_ENVIRONMENT} == *"caffe2"* || ${BUILD_ENVIRONMENT} == *"onnx"* ]]; then
+  export BUILD_CAFFE2=ON
 fi
 
 if [[ ${BUILD_ENVIRONMENT} == *"paralleltbb"* ]]; then
@@ -131,7 +131,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   exec ./scripts/build_android.sh "${build_args[@]}" "$@"
 fi
 
-if [[ "$BUILD_ENVIRONMENT" != *android* && "$BUILD_ENVIRONMENT" == *vulkan-linux* ]]; then
+if [[ "$BUILD_ENVIRONMENT" != *android* && "$BUILD_ENVIRONMENT" == *vulkan* ]]; then
   export USE_VULKAN=1
   # shellcheck disable=SC1091
   source /var/lib/jenkins/vulkansdk/setup-env.sh

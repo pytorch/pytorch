@@ -6,10 +6,10 @@ toq = torch.ops.quantized
 from torch.fx import GraphModule
 from torch.fx.graph import Node
 
-from torch.quantization.utils import getattr_from_fqn
+from torch.ao.quantization.utils import getattr_from_fqn
 from .ns_types import NSNodeTargetType
-from torch.quantization.fx.pattern_utils import get_default_quant_patterns
-from torch.quantization import (
+from torch.ao.quantization.fx.pattern_utils import get_default_quant_patterns
+from torch.ao.quantization import (
     ObserverBase,
     FakeQuantizeBase,
 )
