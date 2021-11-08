@@ -25,6 +25,19 @@ args = [
     '--',
     '@{{PATHSFILE}}'
 ]
+init_args = [
+    'python3',
+    'tools/linter/adapters/pip_init.py',
+    '--dry-run={{DRYRUN}}',
+    'flake8==3.8.2',
+    'flake8-bugbear==20.1.4',
+    'flake8-comprehensions==3.3.0',
+    'flake8-executable==2.0.4',
+    'flake8-pyi==20.5.0',
+    'mccabe==0.6.1',
+    'pycodestyle==2.6.0',
+    'pyflakes==2.2.0',
+]
 
 
 [[linter]]
@@ -127,5 +140,21 @@ args = [
     '--regen-script-working-dir=.circleci',
     '--config-yml=.circleci/config.yml',
     '--regen-script=generate_config_yml.py',
+]
+bypass_matched_file_filter = true
+
+[[linter]]
+name = 'NATIVEFUNCTIONS'
+include_patterns=['aten/src/ATen/native/native_functions.yaml']
+args = [
+    'python3',
+    'tools/linter/adapters/nativefunctions_linter.py',
+    '--native-functions-yml=aten/src/ATen/native/native_functions.yaml',
+]
+init_args = [
+    'python3',
+    'tools/linter/adapters/pip_init.py',
+    '--dry-run={{DRYRUN}}',
+    'ruamel.yaml==0.17.4',
 ]
 bypass_matched_file_filter = true
