@@ -13,9 +13,6 @@ at::Tensor CopyTensor(const at::Tensor& ref);
 at::Tensor CopyTensor(const at::Tensor& ref, at::ScalarType dest_type,
                       bool copy = true);
 
-// Return at::ScalarType from at::Scalar
-at::ScalarType GetScalarType(const at::Scalar& scalar);
-
 template <typename T>
 at::Scalar MakeIntScalar(T value) {
   return at::Scalar(static_cast<int64_t>(value));

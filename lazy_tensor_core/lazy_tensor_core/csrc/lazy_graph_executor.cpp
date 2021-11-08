@@ -487,14 +487,14 @@ torch::lazy::Value LazyGraphExecutor::GetDeviceDataIrValue(
 torch::lazy::Value LazyGraphExecutor::GetIrValueForScalar(
     const at::Scalar& value, c10::ScalarType type, const Device& device) {
   if (IsSpecialScalar(value)) {
-    return ir::ops::ScalarOp(std::move(value), type);
+    return ir::ops::ScalarOp(value, type);
   }
   return GetDeviceDataIrValue(value, type, device);
 }
 
 torch::lazy::Value LazyGraphExecutor::GetIrValueForScalar(
     const at::Scalar& value, const Device& device) {
-  return GetIrValueForScalar(value, GetScalarType(value), device);
+  return GetIrValueForScalar(value, value.type(), device);
 }
 
 torch::lazy::Value LazyGraphExecutor::GetIrValueForScalar(
