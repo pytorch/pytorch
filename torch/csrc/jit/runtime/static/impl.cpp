@@ -1511,8 +1511,12 @@ ProcessedNode::ProcessedNode(
     uint32_t inputsSize,
     bool enable_out_variant)
     : node_(node),
-      inputs_size_(inputsSize),
-      op_name_(node->kind().toQualString()) {
+      inputs_size_(inputsSize)
+#ifndef PYTORCH_DISABLE_PER_OP_PROFILING
+    ,
+      op_name_(node->kind().toQualString())
+#endif
+{
   // TODO leverage type information
   TORCH_CHECK(
       inputsSize < (1 << 16),
