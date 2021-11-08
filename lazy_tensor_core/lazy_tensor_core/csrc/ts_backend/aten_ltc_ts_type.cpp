@@ -685,7 +685,7 @@ at::Tensor LazyNativeFunctions::sub(const at::Tensor& self,
                                     const at::Scalar& other,
                                     const at::Scalar& alpha) {
   LTC_FN_COUNTER("lazy::");
-  CheckSubOperandTypes(self.scalar_type(), GetScalarType(other));
+  CheckSubOperandTypes(self.scalar_type(), other.type());
   return DoBinaryOp(self, other,
                     [&](const LazyTensor& xself, const at::Scalar& other,
                         at::ScalarType dtype) {
