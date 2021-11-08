@@ -85,12 +85,13 @@ severities = {
 
 def check_file(
     filename: str,
+    config: str,
     binary: str,
     retries: int,
 ) -> List[LintMessage]:
     try:
         proc = run_command(
-            [binary, filename],
+            [binary, f"--config={config}", filename],
             extra_env={},
             retries=retries,
         )
@@ -148,6 +149,11 @@ def main() -> None:
         help="times to retry timed out mypy",
     )
     parser.add_argument(
+        "--config",
+        required=True,
+        help="path to an mypy .ini config file",
+    )
+    parser.add_argument(
         "--verbose",
         action="store_true",
         help="verbose logging",
@@ -177,6 +183,7 @@ def main() -> None:
             executor.submit(
                 check_file,
                 filename,
+                args.config,
                 args.binary,
                 args.retries,
             ): filename
