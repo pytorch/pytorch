@@ -433,9 +433,8 @@ std::vector<dnnl::graph::partition> LlgaGraphHelper::getPartitions() const {
   return partitions_;
 }
 
-// NOLINTNEXTLINE
 LlgaNodeWrapper::LlgaNodeWrapper(const Node* node)
-    : n(const_cast<Node*>(node)) {
+    : n(const_cast<Node*>(node)) { // NOLINT
   TORCH_CHECK(
       LlgaGraphHelper::isLlgaSubgraph(n), "Cannot wrap a non-LLGA fusion node");
 }
