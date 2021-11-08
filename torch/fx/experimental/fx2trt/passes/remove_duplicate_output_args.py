@@ -10,6 +10,15 @@ import dataclasses as dc
 _LOGGER = logging.getLogger(__name__)
 
 
+RemoveDuplicateOutputArgsFunc = t.Callable[
+    [
+        fx.GraphModule,
+        t.Collection[str],
+    ],
+    t.Mapping[str, "RemoveDuplicateResult"]
+]
+
+
 def remove_duplicate_output_args(
     top_level: fx.GraphModule,
     target_subnets: t.Collection[str]

@@ -107,7 +107,7 @@ class ErrorHandler:
                 else:
                     rootcause_error["message"]["errorCode"] = error_code
 
-            log.info(
+            log.debug(
                 f"child error file ({rootcause_error_file}) contents:\n"
                 f"{json.dumps(rootcause_error, indent=2)}"
             )

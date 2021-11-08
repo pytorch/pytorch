@@ -8,24 +8,25 @@
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/cuda/CUDADevice.h>
 #include <ATen/cuda/Exceptions.h>
+#include <ATen/cuda/PeerToPeerAccess.h>
 #include <ATen/cuda/PinnedMemoryAllocator.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/cuda/CuFFTPlanCache.h>
 #include <c10/util/Exception.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 
-#include <THC/THC.h>
-#include <THC/THCGeneral.hpp>
+#include <THC/THCGeneral.h>  // For THCState
 
 #if AT_CUDNN_ENABLED()
 #include <ATen/cudnn/cudnn-wrapper.h>
 #endif
 
-#ifdef USE_MAGMA
+#if AT_MAGMA_ENABLED()
 #include <magma_v2.h>
 #endif
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 #include <miopen/version.h>
 #endif
 
@@ -47,27 +48,39 @@ namespace detail {
 const at::cuda::NVRTC& nvrtc();
 int64_t current_device();
 
-std::function<void(void)> THCMagma_init;
+static void (*magma_init_fn)() = nullptr;
+
+void set_magma_init_fn(void (*fn)()) {
+  magma_init_fn = fn;
+}
 
 // NB: deleter is dynamic, because we need it to live in a separate
 // compilation unit (alt is to have another method in hooks, but
 // let's not if we don't need to!)
 std::unique_ptr<THCState, void (*)(THCState*)> CUDAHooks::initCUDA() const {
   C10_LOG_API_USAGE_ONCE("aten.init.cuda");
-  THCState* thc_state = THCState_alloc();
+  // NOTE: THCState is now an empty struct but this pointer is passed
+  // to every THC function. So we can't remove it before the rest of THC.
+  auto thc_state = std::unique_ptr<THCState, void (*)(THCState*)>(
+      new THCState(),
+      [](THCState* p) {
+        delete p;
+      });
 
   // Force the update to enable unit testing. This code get executed before unit tests
   // have a chance to enable vitals.
   at::vitals::VitalsAPI.setVital("CUDA", "used", "true", /* force = */ true);
 
-  THCudaInit(thc_state);
-  if (THCMagma_init)
-    THCMagma_init();
-  return std::unique_ptr<THCState, void (*)(THCState*)>(
-      thc_state, [](THCState* p) {
-        if (p)
-          THCState_free(p);
-      });
+  const auto num_devices = c10::cuda::device_count_ensure_non_zero();
+  c10::cuda::CUDACachingAllocator::init(num_devices);
+  at::cuda::detail::init_p2p_access_cache(num_devices);
+
+#if AT_MAGMA_ENABLED()
+  TORCH_INTERNAL_ASSERT(magma_init_fn != nullptr, "Cannot initilaize magma, init routine not set");
+  magma_init_fn();
+#endif
+
+  return thc_state;
 }
 
 const Generator& CUDAHooks::getDefaultCUDAGenerator(DeviceIndex device_index) const {
@@ -93,7 +106,7 @@ bool CUDAHooks::isPinnedPtr(void* data) const {
   }
   cudaPointerAttributes attr;
   cudaError_t err = cudaPointerGetAttributes(&attr, data);
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
   if (err == cudaErrorInvalidValue) {
     cudaGetLastError();
     return false;
@@ -106,7 +119,7 @@ bool CUDAHooks::isPinnedPtr(void* data) const {
     return false;
   }
 #endif
-#if CUDA_VERSION >= 10000
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 10000
   return attr.type == cudaMemoryTypeHost;
 #else
   return attr.memoryType == cudaMemoryTypeHost;
@@ -118,7 +131,7 @@ bool CUDAHooks::hasCUDA() const {
 }
 
 bool CUDAHooks::hasMAGMA() const {
-#ifdef USE_MAGMA
+#if AT_MAGMA_ENABLED()
   return true;
 #else
   return false;
@@ -287,7 +300,7 @@ std::string CUDAHooks::showConfig() const {
     }
   };
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
   oss << "  - CUDA Runtime ";
 #else
   oss << "  - HIP Runtime ";
@@ -296,7 +309,7 @@ std::string CUDAHooks::showConfig() const {
   oss << "\n";
 
   // TODO: Make HIPIFY understand CUDART_VERSION macro
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
   if (runtimeVersion != CUDART_VERSION) {
     oss << "  - Built with CUDA Runtime ";
     printCudaStyleVersion(CUDART_VERSION);
@@ -305,7 +318,7 @@ std::string CUDAHooks::showConfig() const {
   oss << "  - NVCC architecture flags: " << NVCC_FLAGS_EXTRA << "\n";
 #endif
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 #if AT_CUDNN_ENABLED()
 
 
@@ -337,7 +350,7 @@ std::string CUDAHooks::showConfig() const {
   oss << "  - MIOpen " << MIOPEN_VERSION_MAJOR << "." << MIOPEN_VERSION_MINOR << "." << MIOPEN_VERSION_PATCH << "\n";
 #endif
 
-#ifdef USE_MAGMA
+#if AT_MAGMA_ENABLED()
   oss << "  - Magma " << MAGMA_VERSION_MAJOR << "." << MAGMA_VERSION_MINOR << "." << MAGMA_VERSION_MICRO << "\n";
 #endif
 

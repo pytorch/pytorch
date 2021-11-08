@@ -51,6 +51,7 @@ children, and propagates the one with the **smallest** timestamp (e.g. the **fir
 import json
 import os
 import signal
+import socket
 import time
 import warnings
 from dataclasses import dataclass, field
@@ -109,7 +110,7 @@ class ProcessFailure:
             try:
                 with open(self.error_file, "r") as fp:
                     self.error_file_data = json.load(fp)
-                    log.info(
+                    log.debug(
                         f"User process failed with error data: {json.dumps(self.error_file_data, indent=2)}"
                     )
                     self.message, self.timestamp = self._get_error_data(
@@ -130,7 +131,7 @@ class ProcessFailure:
                     f" received by PID {self.pid}"
                 )
             else:
-                self.message = f"Process failed with exitcode {self.exitcode}"
+                self.message = "To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html"
 
     def _get_error_data(self, error_file_data: Dict[str, Any]) -> Tuple[str, int]:
         message = error_file_data["message"]
@@ -162,24 +163,24 @@ class ProcessFailure:
 GlobalRank = int
 
 _FAILURE_FORMAT_TEMPLATE = """[${idx}]:
-  time: ${time}
-  rank: ${rank} (local_rank: ${local_rank})
-  exitcode: ${exitcode} (pid: ${pid})
+  time      : ${time}
+  host      : ${hostname}
+  rank      : ${rank} (local_rank: ${local_rank})
+  exitcode  : ${exitcode} (pid: ${pid})
   error_file: ${error_file}
-  msg: ${message}"""
+  traceback : ${message}"""
 
 # extra new lines before and after are intentional
 _MSG_FORMAT_TEMPLATE = """
 ${boarder}
 ${title}
 ${section}
-Root Cause:
-${root_failure}
-${section}
-Other Failures:
+Failures:
 ${other_failures}
-${boarder}
-"""
+${section}
+Root Cause (first observed failure):
+${root_failure}
+${boarder}"""
 
 
 class ChildFailedError(Exception):
@@ -230,8 +231,8 @@ class ChildFailedError(Exception):
         rank = min(self.failures.keys(), key=lambda r: self.failures[r].timestamp)
         return rank, self.failures[rank]
 
-    def format_msg(self, boarder_delim="*", section_delim="="):
-        title = f"  {self.name} FAILED  "
+    def format_msg(self, boarder_delim="=", section_delim="-"):
+        title = f"{self.name} FAILED"
         root_rank, root_failure = self.get_first_failure()
 
         root_failure_fmt: str = ""
@@ -246,11 +247,11 @@ class ChildFailedError(Exception):
                 other_failures_fmt.append(fmt)
 
         # upper boundary on width
-        width = min(width, 80)
+        width = min(width, 60)
 
         return Template(_MSG_FORMAT_TEMPLATE).substitute(
             boarder=boarder_delim * width,
-            title=title.center(width),
+            title=title,
             section=section_delim * width,
             root_failure=root_failure_fmt,
             other_failures="\n".join(other_failures_fmt or ["  <NO_OTHER_FAILURES>"]),
@@ -279,6 +280,7 @@ class ChildFailedError(Exception):
         fmt = Template(_FAILURE_FORMAT_TEMPLATE).substitute(
             idx=idx,
             time=failure.timestamp_isoformat(),
+            hostname=socket.getfqdn(),
             rank=rank,
             local_rank=failure.local_rank,
             exitcode=failure.exitcode,
@@ -290,32 +292,6 @@ class ChildFailedError(Exception):
         for line in fmt.split("\n"):
             width = max(width, len(line))
         return fmt, width
-
-
-def _no_error_file_warning_msg(rank: int, failure: ProcessFailure) -> str:
-    msg = [
-        "CHILD PROCESS FAILED WITH NO ERROR_FILE",
-        f"Child process {failure.pid} (local_rank {rank}) FAILED (exitcode {failure.exitcode})",
-        f"Error msg: {failure.message}",
-        f"Without writing an error file to {failure.error_file}.",
-        "While this DOES NOT affect the correctness of your application,",
-        "no trace information about the error will be available for inspection.",
-        "Consider decorating your top level entrypoint function with",
-        "torch.distributed.elastic.multiprocessing.errors.record. Example:",
-        "",
-        r"  from torch.distributed.elastic.multiprocessing.errors import record",
-        "",
-        r"  @record",
-        r"  def trainer_main(args):",
-        r"     # do train",
-    ]
-    width = 0
-    for line in msg:
-        width = max(width, len(line))
-
-    boarder = "*" * width
-    header = "CHILD PROCESS FAILED WITH NO ERROR_FILE".center(width)
-    return "\n".join(["\n", boarder, header, boarder, *msg, boarder])
 
 
 def record(
@@ -372,7 +348,13 @@ def record(
                 if failure.error_file != _NOT_AVAILABLE:
                     error_handler.dump_error_file(failure.error_file, failure.exitcode)
                 else:
-                    warnings.warn(_no_error_file_warning_msg(rank, failure))
+                    log.info(
+                        (
+                            f"local_rank {rank} FAILED with no error file."
+                            f" Decorate your entrypoint fn with @record for traceback info."
+                            f" See: https://pytorch.org/docs/stable/elastic/errors.html"
+                        )
+                    )
                 raise
             except Exception as e:
                 error_handler.record_exception(e)
