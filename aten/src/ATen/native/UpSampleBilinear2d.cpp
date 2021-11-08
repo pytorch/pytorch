@@ -48,7 +48,7 @@ TORCH_META_FUNC(upsample_bilinear2d_backward) (
   set_output(input_size, grad_output.options().memory_format(grad_output.suggest_memory_format()));
 }
 
-TORCH_META_FUNC(upsample_bilinear2d_aa) (
+TORCH_META_FUNC(_upsample_bilinear2d_aa) (
   const Tensor& input, IntArrayRef output_size, bool align_corners, c10::optional<double> scales_h, c10::optional<double> scales_w
 ) {
   auto full_output_size = native::upsample_2d_common_check(input.sizes(), output_size);
@@ -62,7 +62,7 @@ TORCH_META_FUNC(upsample_bilinear2d_aa) (
   set_output(full_output_size, input.options().memory_format(input.suggest_memory_format()));
 }
 
-TORCH_META_FUNC(upsample_bilinear2d_aa_backward) (
+TORCH_META_FUNC(_upsample_bilinear2d_aa_backward) (
   const Tensor& grad_output,
   IntArrayRef output_size,
   IntArrayRef input_size,
@@ -116,7 +116,7 @@ TORCH_IMPL_FUNC(upsample_bilinear2d_backward_out_cpu) (
 }
 
 
-TORCH_IMPL_FUNC(upsample_bilinear2d_aa_out_cpu) (
+TORCH_IMPL_FUNC(_upsample_bilinear2d_aa_out_cpu) (
     const Tensor& input,
     IntArrayRef output_size,
     bool align_corners,
@@ -124,10 +124,10 @@ TORCH_IMPL_FUNC(upsample_bilinear2d_aa_out_cpu) (
     c10::optional<double> scales_w,
     const Tensor& output
 ) {
-  upsample_bilinear2d_aa_kernel(kCPU, output, input, align_corners, scales_h, scales_w);
+  _upsample_bilinear2d_aa_kernel(kCPU, output, input, align_corners, scales_h, scales_w);
 }
 
-TORCH_IMPL_FUNC(upsample_bilinear2d_aa_backward_out_cpu) (
+TORCH_IMPL_FUNC(_upsample_bilinear2d_aa_backward_out_cpu) (
     const Tensor& grad_output,
     IntArrayRef output_size,
     IntArrayRef input_size,
@@ -137,7 +137,7 @@ TORCH_IMPL_FUNC(upsample_bilinear2d_aa_backward_out_cpu) (
     const Tensor& grad_input
 ) {
   grad_input.zero_();
-  upsample_bilinear2d_aa_backward_kernel(kCPU, grad_input, grad_output, align_corners, scales_h, scales_w);
+  _upsample_bilinear2d_aa_backward_kernel(kCPU, grad_input, grad_output, align_corners, scales_h, scales_w);
 }
 
 using at::native::upsample::compute_output_size;
@@ -166,7 +166,7 @@ Tensor upsample_bilinear2d_backward(
   return at::upsample_bilinear2d_backward(grad_output, osize, input_size, align_corners, scale_h, scale_w);
 }
 
-Tensor upsample_bilinear2d_aa(
+Tensor _upsample_bilinear2d_aa(
     const Tensor& input,
     c10::optional<IntArrayRef> output_size,
     bool align_corners,
@@ -174,10 +174,10 @@ Tensor upsample_bilinear2d_aa(
   auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
   auto scale_h = get_scale_value(scale_factors, 0);
   auto scale_w = get_scale_value(scale_factors, 1);
-  return at::upsample_bilinear2d_aa(input, osize, align_corners, scale_h, scale_w);
+  return at::_upsample_bilinear2d_aa(input, osize, align_corners, scale_h, scale_w);
 }
 
-Tensor upsample_bilinear2d_aa_backward(
+Tensor _upsample_bilinear2d_aa_backward(
     const Tensor& grad_output,
     c10::optional<IntArrayRef> output_size,
     IntArrayRef input_size,
@@ -186,13 +186,13 @@ Tensor upsample_bilinear2d_aa_backward(
   auto osize = compute_output_size(input_size, output_size, scale_factors);
   auto scale_h = get_scale_value(scale_factors, 0);
   auto scale_w = get_scale_value(scale_factors, 1);
-  return at::upsample_bilinear2d_aa_backward(grad_output, osize, input_size, align_corners, scale_h, scale_w);
+  return at::_upsample_bilinear2d_aa_backward(grad_output, osize, input_size, align_corners, scale_h, scale_w);
 }
 
 DEFINE_DISPATCH(upsample_bilinear2d_kernel);
 DEFINE_DISPATCH(upsample_bilinear2d_backward_kernel);
-DEFINE_DISPATCH(upsample_bilinear2d_aa_kernel);
-DEFINE_DISPATCH(upsample_bilinear2d_aa_backward_kernel);
+DEFINE_DISPATCH(_upsample_bilinear2d_aa_kernel);
+DEFINE_DISPATCH(_upsample_bilinear2d_aa_backward_kernel);
 
 } // namespace native
 } // namespace at

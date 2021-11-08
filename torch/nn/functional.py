@@ -3841,8 +3841,12 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
         return torch._C._nn.upsample_linear1d(input, output_size, align_corners, scale_factors)
     if input.dim() == 4 and mode == "bilinear":
         assert align_corners is not None
+        # Enforce that the full call with the new kwarg is not invoked when scripting.
+        # TODO: Remove this scripting logic once the 2-week FC window has passed.
+        if antialias and torch.jit.is_scripting():
+            raise RuntimeError("TorchScript currently does not support antialias in interpolate")
         if antialias:
-            return torch._C._nn.upsample_bilinear2d_aa(input, output_size, align_corners, scale_factors)
+            return torch._C._nn._upsample_bilinear2d_aa(input, output_size, align_corners, scale_factors)
         return torch._C._nn.upsample_bilinear2d(input, output_size, align_corners, scale_factors)
     if input.dim() == 5 and mode == "trilinear":
         assert align_corners is not None
