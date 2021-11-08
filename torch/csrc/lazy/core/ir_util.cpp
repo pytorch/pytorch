@@ -44,7 +44,7 @@ std::vector<torch::lazy::Node*> Util::ComputePostOrder(
       post_order.push_back(const_cast<torch::lazy::Node*>(node));
       queue.pop_back();
     } else {
-      CHECK_EQ(it->second, kEmitted);
+      TORCH_CHECK(it->second == kEmitted);
       queue.pop_back();
     }
   }

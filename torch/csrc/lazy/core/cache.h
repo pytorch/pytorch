@@ -1,3 +1,8 @@
+/**
+ * Cache utils in this file is adapted from PyTorch/XLA
+ * https://github.com/pytorch/xla/blob/master/third_party/xla_client/cache.h
+ */
+
 #pragma once
 
 #include <functional>
@@ -44,7 +49,7 @@ class Cache {
     return emplace_result.first->second->second;
   }
 
-  // Retrieves the existing object if it exists. If it does, it's position in
+  // Retrieves the existing object if it exists. If it does, its position in
   // the LRU list gets moved to the head of the list.
   // Returns nullptr if no object with the specified key is found within the
   // cache.
