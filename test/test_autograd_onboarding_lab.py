@@ -61,10 +61,8 @@ class TestOnboardinngAttn(TestCase):
         input = (torch.randn(M, N, dtype=torch.double, requires_grad=True),
                  torch.randn(M, N, dtype=torch.double, requires_grad=True),
                  torch.randn(M, P, dtype=torch.double, requires_grad=True))
-        test_gradcheck = gradcheck(attn, input, eps=1e-6, atol=1e-4)
-        test_gradgradcheck = gradgradcheck(attn, input, eps=1e-6, atol=1e-4)
-        assert test_gradcheck, "Gradcheck failed"
-        assert test_gradgradcheck, "Gradgradcheck failed"
+        test_gradcheck = gradcheck(attn, input)
+        test_gradgradcheck = gradgradcheck(attn, input)
 
 if __name__ == '__main__':
     run_tests()
