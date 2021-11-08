@@ -456,7 +456,7 @@ void launch_vectorized_layer_norm_kernel(
   T_ACC* mean_data,
   T_ACC* rstd_data
 ) {
-    constexpr int alignment = 16; //currently unused to make sure float and half results are bw accurate
+    //constexpr int alignment = 16; //currently unused to make sure float and half results are bw accurate
     auto stream = at::cuda::getCurrentCUDAStream().stream();
     const dim3 threads(32,4,1);
     const dim3 blocks(M);
@@ -465,6 +465,8 @@ void launch_vectorized_layer_norm_kernel(
 	    threads.y * 3/2 *sizeof(T_ACC) : 0;
 	  vectorized_layer_norm_kernel<T, acc_type<T, true>><<<blocks, threads, nshared, stream>>>(N, eps, X_data,
     gamma_data, beta_data, mean_data, rstd_data, Y_data);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+
 
 
 }
