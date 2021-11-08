@@ -94,18 +94,18 @@ __global__ void LayerNormForwardCUDAKernel(
   }
 }
 
-struct WelfordData{
+struct WelfordDataLN{
   float mean;
   float sigma2;
   float count;
-  C10_HOST_DEVICE WelfordData(): mean(0.f), sigma2(0.f), count(0.f){}
-  C10_HOST_DEVICE WelfordData(float mean, float sigma2, float count): mean(mean), sigma2(sigma2), count(count) {}
+  C10_HOST_DEVICE WelfordDataLN(): mean(0.f), sigma2(0.f), count(0.f){}
+  C10_HOST_DEVICE WelfordDataLN(float mean, float sigma2, float count): mean(mean), sigma2(sigma2), count(count) {}
 };
 
 template<typename U> __device__
-WelfordData cuWelfordOnlineSum(
+WelfordDataLN cuWelfordOnlineSum(
   const U val,
-  const WelfordData& curr_sum)
+  const WelfordDataLN& curr_sum)
 {
   U delta = val - curr_sum.mean;
   U new_count = curr_sum.count + 1.f;
@@ -114,9 +114,9 @@ WelfordData cuWelfordOnlineSum(
 }
 
 __device__
-WelfordData cuWelfordCombine(
-  const WelfordData dataB,
-  const WelfordData dataA
+WelfordDataLN cuWelfordCombine(
+  const WelfordDataLN dataB,
+  const WelfordDataLN dataA
 ) {
   using U = decltype(dataB.count);
   U delta = dataB.mean - dataA.mean;
@@ -136,7 +136,7 @@ WelfordData cuWelfordCombine(
 }
 
 template<typename T, int alignment=16>
-__device__ WelfordData compute_stats(
+__device__ WelfordDataLN compute_stats(
   const T*  __restrict__ X,
   const int N,
   float * buf
@@ -148,7 +148,7 @@ __device__ WelfordData compute_stats(
     const int numx = blockDim.x * blockDim.y;
     const int thrx = threadIdx.x + threadIdx.y * blockDim.x;
     const int n_vec_to_read = N/vec_size;
-    WelfordData wd(0.f, 0.f, 0.f);
+    WelfordDataLN wd(0.f, 0.f, 0.f);
     //no tail, we check that N is multiple of vec_size
     for (int i = thrx; i < n_vec_to_read; i += numx) {
       vec_t data = X_vec[i];
@@ -160,9 +160,8 @@ __device__ WelfordData compute_stats(
 //    intra-warp reduction
     for (int l = 0;  l <= 4;  ++l) {
       int srcLaneB = (threadIdx.x+(1<<l))&31;
-      WelfordData wdB{WARP_SHFL(wd.mean, srcLaneB),
-      WARP_SHFL(wd.count, srcLaneB),WARP_SHFL(wd.sigma2, srcLaneB)};
-      //WelfordData wdB{meanB, sigma2B, countB};
+      WelfordDataLN wdB{WARP_SHFL(wd.mean, srcLaneB),
+      WARP_SHFL(wd.sigma2, srcLaneB),WARP_SHFL(wd.count, srcLaneB)};
       wd = cuWelfordCombine(wd, wdB);
     }
     // threadIdx.x == 0 has correct values for each warp
@@ -181,7 +180,7 @@ __device__ WelfordData compute_stats(
         __syncthreads();
         // lower half merges
         if (threadIdx.x == 0 && threadIdx.y < offset) {
-          WelfordData wdB{meansigmabuf[2*threadIdx.y],
+          WelfordDataLN wdB{meansigmabuf[2*threadIdx.y],
                           meansigmabuf[2*threadIdx.y+1],
                           countbuf[threadIdx.y]};
           wd = cuWelfordCombine(wd, wdB);
@@ -193,10 +192,10 @@ __device__ WelfordData compute_stats(
         meansigmabuf[1] = wd.sigma2/float(N);
       }
       __syncthreads();
-      return WelfordData{meansigmabuf[0], meansigmabuf[1],0.f};
+      return WelfordDataLN{meansigmabuf[0], meansigmabuf[1],0.f};
 
     } else {
-      return WelfordData{WARP_SHFL(wd.mean,0), WARP_SHFL(wd.sigma2,0)/float(N), 0.f};
+      return WelfordDataLN{WARP_SHFL(wd.mean,0), WARP_SHFL(wd.sigma2,0)/float(N), 0.f};
     }
 }
 
@@ -212,11 +211,11 @@ __global__ void vectorized_layer_norm_kernel(
   T_ACC* mean,
   T_ACC* rstd,
   T* Y){
-    extern __shared__ float s_data[]; //if we made smem WelfordData type, there would be bank conflicts,
+    extern __shared__ float s_data[]; //if we made smem WelfordDataLN type, there would be bank conflicts,
     //as one thread would have to write 3 consecutive floats
     auto i1 = blockIdx.x;
     const T * block_row = X + i1 * N;
-    WelfordData wd = compute_stats(block_row, N, s_data);
+    WelfordDataLN wd = compute_stats(block_row, N, s_data);
     using vec_t = aligned_vector<T, vec_size>;
     const vec_t * X_vec = reinterpret_cast<const vec_t*>(block_row);
     vec_t * Y_vec = reinterpret_cast<vec_t*>(Y + i1 * N);
@@ -460,10 +459,9 @@ void launch_vectorized_layer_norm_kernel(
     auto stream = at::cuda::getCurrentCUDAStream().stream();
     const dim3 threads(32,4,1);
     const dim3 blocks(M);
-    int nshared =
-        threads.y > 1 ?
-	    threads.y * 3/2 *sizeof(T_ACC) : 0;
-	  vectorized_layer_norm_kernel<T, acc_type<T, true>><<<blocks, threads, nshared, stream>>>(N, eps, X_data,
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(threads.y % 2 == 0 || threads.y == 1);
+    int nshared = threads.y > 1 ? threads.y * 3/2 *sizeof(T_ACC) : 0;
+    vectorized_layer_norm_kernel<T, acc_type<T, true>><<<blocks, threads, nshared, stream>>>(N, eps, X_data,
     gamma_data, beta_data, mean_data, rstd_data, Y_data);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 
