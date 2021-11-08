@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/Scalar.h>
+#include <ATen/core/Formatting.h>
 
 #include <iostream>
 
@@ -30,7 +31,7 @@ class Scalar : public TsNode {
 
 torch::lazy::hash_t ScalarHash(const at::Scalar& s);
 
-std::ostream& operator<<(std::ostream& ostrm, at::Scalar s);
+using at::operator<<;
 
 }  // namespace ops
 }  // namespace ir
