@@ -6908,8 +6908,8 @@ def reference_logsigmoid(x):
 
 
 def reference_hardsigmoid(x):
-    int = x / 6 + 0.5
-    y = np.where(int < 0, 0, int)
+    intermediate = x / 6 + 0.5
+    y = np.clip(intermediate, 0, None)
     return np.where(y > 1, 1, y).astype(x.dtype)
 
 
@@ -9428,7 +9428,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(
                 toleranceOverride({torch.float16: tol(atol=1e-04, rtol=0.001)}), 'TestUnaryUfuncs', device_type='cuda',), ],
         skips=[
-            # still want to test that first derivative works though second derivative doesn't
+            # still want to test that first derivative works though second derivative isn't supported
             DecorateInfo(unittest.expectedFailure, 'TestGradients', "test_inplace_gradgrad")
         ]
     ),
@@ -9471,8 +9471,10 @@ op_db: List[OpInfo] = [
         decorators=[
             DecorateInfo(
                 toleranceOverride({torch.float16: tol(atol=1e-03, rtol=1.3e-04)}), 'TestUnaryUfuncs',), ],
-        skips=(DecorateInfo(
-            unittest.expectedFailure, 'TestUnaryUfuncs', "test_reference_numerics_hard", dtypes=(torch.complex64,)),),
+        skips=(
+            # pytorch computes (0+nanj), numpy computes (-5e-18-1j) for input (-501.-1.0000e+20j)
+            DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs',
+                         "test_reference_numerics_hard", dtypes=(torch.complex64,)),),
     ),
     UnaryUfuncInfo(
         'nn.functional.tanhshrink',
@@ -9487,16 +9489,18 @@ op_db: List[OpInfo] = [
         decorators=[
             DecorateInfo(
                 toleranceOverride({torch.bfloat16: tol(atol=1e-02, rtol=1.6e-02)}), 'TestUnaryUfuncs',), ],
-        skips=(DecorateInfo(unittest.expectedFailure,
-                            'TestUnaryUfuncs', "test_reference_numerics_normal",
-                            dtypes=(torch.complex64,), active_if=(IS_MACOS)),
-               DecorateInfo(unittest.expectedFailure,
-                            'TestUnaryUfuncs', "test_reference_numerics_hard",
-                            dtypes=(torch.complex64,), active_if=(IS_MACOS)),
-               DecorateInfo(unittest.expectedFailure,
-                            'TestUnaryUfuncs', "test_reference_numerics_extremal",
-                            dtypes=(torch.complex64,), device_type='cpu',
-                            active_if=(IS_MACOS or IS_WINDOWS)),)
+        skips=(
+            # in each case, pytorch will produce a nan while numpy will not
+            DecorateInfo(unittest.expectedFailure,
+                         'TestUnaryUfuncs', "test_reference_numerics_normal",
+                         dtypes=(torch.complex64,), active_if=(IS_MACOS)),
+            DecorateInfo(unittest.expectedFailure,
+                         'TestUnaryUfuncs', "test_reference_numerics_hard",
+                         dtypes=(torch.complex64,), active_if=(IS_MACOS)),
+            DecorateInfo(unittest.expectedFailure,
+                         'TestUnaryUfuncs', "test_reference_numerics_extremal",
+                         dtypes=(torch.complex64,), device_type='cpu',
+                         active_if=(IS_MACOS or IS_WINDOWS)),)
     ),
     OpInfo(
         'nn.functional.threshold',
@@ -10139,6 +10143,8 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal',
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
                                     active_if=(IS_MACOS or IS_WINDOWS)),
+                       # alias, nn.functional.tanh, will produce (because of warning string saved):
+                       # "RuntimeError: Expected to not find "tanh" but found it"
                        DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_jit_alias_remapping'),
                    )),
     OpInfo('tensor_split',
@@ -11451,6 +11457,8 @@ op_db: List[OpInfo] = [
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal',
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
+                       # alias, nn.functional.sigmoid, will produce (because of warning string saved):
+                       # "RuntimeError: Expected to not find "sigmoid" but found it"
                        DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_jit_alias_remapping')),
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
