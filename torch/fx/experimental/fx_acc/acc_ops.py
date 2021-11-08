@@ -2,8 +2,11 @@
 import operator
 
 import torch  # isort:skip
+import math
 from typing import Sequence, Optional, List, cast
 
+import scripts.samsalas.transformer_encoder as encoder
+import scripts.samsalas.multihead_attention as ma
 import torch.fx.experimental.fx_acc.acc_utils as acc_utils
 import torch.nn as nn
 from torch.fx.experimental.fx_acc.acc_normalizer import (
@@ -16,10 +19,7 @@ from torch.fx.experimental.fx_acc.acc_op_properties import (
     register_acc_op_properties,
 )
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
-
-import scripts.samsalas.multihead_attention as ma
 from torch.nn import functional as F
-import math
 
 
 this_arg_is_optional = True
@@ -1686,3 +1686,33 @@ def multihead_attention_op(
         .view(sequence_length, batch_size, head_size * num_heads)
     )
     return attn
+
+
+@register_acc_op_mapping(op_and_target=("call_function", encoder.encode))
+@register_acc_op
+def encode_op(
+    tokens: torch.Tensor,
+    padding_mask: torch.Tensor,
+    layers: dict,  # type: ignore
+    weights: dict,  # type: ignore
+) -> List[torch.Tensor]:
+
+    token_embedding = layers["token_embedding"]
+    positional_embedding = layers["positional_embedding"]
+    embedding_layer_norm = layers["embedding_layer_norm"]
+
+    # compute padding mask. This is needed for multi-head attention
+    batch_size, seq_length = tokens.shape
+    # key padding mask has to be explicitly shaped to (bs, 1) to feed it
+    # to the plugin later
+    token_embeddings = token_embedding(tokens)
+    embedded_positions = positional_embedding(tokens)
+
+    embedded = token_embeddings + embedded_positions
+    # Using hasattr to make it backward compatible with models
+    # which were trained before attribute was added.
+    embedded = embedding_layer_norm(embedded)
+    # account for padding while computing the representation
+    padded_embedded = embedded * (padding_mask.unsqueeze(-1))
+    encoded = padded_embedded.transpose(0, 1)
+    return encoded

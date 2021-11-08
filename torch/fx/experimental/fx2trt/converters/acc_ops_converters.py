@@ -2120,6 +2120,8 @@ def multihead_attention_converter(network, target, args, kwargs, name):
 
     # Specify plugin fields
     plugin_name = "CustomQKVToContextPluginDynamic"
+    mask = None
+
     has_mask = mask is not None
 
     type_id = trt.PluginField(
@@ -2150,5 +2152,89 @@ def multihead_attention_converter(network, target, args, kwargs, name):
     # Add plugin layer
     layer = network.add_plugin_v2(qkv_in, plugin)
     layer.name = "Multihead_Attention_" + name
-
     return layer.get_output(0)
+
+@tensorrt_converter(acc_ops.encode_op)
+def encode_converter(network, target, args, kwargs, name):
+
+    # Specify plugin fields
+    weights = kwargs["weights"]
+    # assert weights is None, f'{weights["layer_norm_bias"][0].shape}'
+    layer_norm_bias = to_numpy(weights["layer_norm_bias"][0])
+    layer_norm_weights = to_numpy(weights["layer_norm_weights"][0])
+    token_word_embeddings = to_numpy(weights["token_word_embeddings"][0])
+    type_embeddings = to_numpy(weights["type_embeddings"][0])
+    positional_word_embeddings = to_numpy(weights["positional_word_embeddings"][0])
+
+    output_fp16 = trt.PluginField(
+        "output_fp16",
+        np.array(np.array([0]).astype(np.int32)),
+        trt.PluginFieldType.INT32,
+    )
+    mha_type_id = trt.PluginField(
+        "mha_type_id", np.array([0], np.int32), trt.PluginFieldType.INT32
+    )
+    layernorm_b = trt.PluginField(
+        "bert_embeddings_layernorm_beta",
+        layer_norm_bias,
+        trt.PluginFieldType.FLOAT32,
+    )
+    layernorm_w = trt.PluginField(
+        "bert_embeddings_layernorm_gamma",
+        layer_norm_weights,
+        trt.PluginFieldType.FLOAT32,
+    )
+    token_word_embeddings = trt.PluginField(
+        "bert_embeddings_word_embeddings",
+        token_word_embeddings,
+        trt.PluginFieldType.FLOAT32,
+    )
+    type_embeddings = trt.PluginField(
+        "bert_embeddings_token_type_embeddings",
+        type_embeddings,
+        trt.PluginFieldType.FLOAT32,
+    )
+    positional_word_embeddings = trt.PluginField(
+        "bert_embeddings_position_embeddings",
+        positional_word_embeddings,
+        trt.PluginFieldType.FLOAT32,
+    )
+
+    field_collection = trt.PluginFieldCollection(
+        [
+            output_fp16,
+            mha_type_id,
+            layernorm_b,
+            layernorm_w,
+            token_word_embeddings,
+            type_embeddings,
+            positional_word_embeddings,
+        ]
+    )
+    # get plugin
+    plugin_name = "CustomEmbLayerNormPluginDynamic"
+    plugin_version = "1"
+    plugin = get_trt_plugin(plugin_name, field_collection, plugin_version)
+
+    # Specify inputs with shapes
+    tokens = kwargs["tokens"]
+    segment = kwargs["padding_mask"]
+    mask = kwargs["padding_mask"]
+
+    # Still have to add name
+    tokens = network.add_shuffle(tokens)
+    tokens.second_transpose = (1, 0)
+    tokens.name = "trsnpose_tokens"
+    segment = network.add_shuffle(segment)
+    segment.second_transpose = (1, 0)
+    segment.name = "trsnpose_segment"
+    mask = network.add_shuffle(mask)
+    mask.second_transpose = (1, 0)
+    mask.name = "trsnpose_mask"
+    inputs = [tokens.get_output(0), segment.get_output(0), mask.get_output(0)]
+
+    emb_layer = network.add_plugin_v2(inputs, plugin)
+    emb_layer.name = "Embedding_Layer_"
+
+    # assert emb_layer.get_output(0) is None, f"{emb_layer.get_output(0).shape}"
+    return emb_layer.get_output(0)
