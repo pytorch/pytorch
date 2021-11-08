@@ -1469,6 +1469,9 @@ int nnc_lowerings_lazy_registration() {
         return computeSoftmax(inputs, outputShape, true);
       });
 
+  RegisterNNCLoweringsFunction aten_conv1d(
+      {"aten::conv1d(Tensor input, Tensor weight, Tensor? bias=None, int[1] stride=1, int[1] padding=0, int[1] dilation=1, int groups=1) -> (Tensor)"},
+      computeConv1d);
   RegisterNNCLoweringsFunction aten_conv2d(
       {"aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=[1, 1], int[2] padding=[0, 0], int[2] dilation=[1, 1], int groups=1) -> (Tensor)"},
       computeConv2d);
@@ -1481,6 +1484,9 @@ int nnc_lowerings_lazy_registration() {
       {"aten::mean(Tensor self, *, int? dtype=None) -> (Tensor)",
        "aten::mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, int? dtype=None) -> (Tensor)"},
       computeMean);
+  RegisterNNCLoweringsFunction aten_max_reduction(
+      {"aten::max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)"},
+      computeMax);
 
   RegisterNNCLoweringsFunction aten_adaptive_avg_pool2d(
       {"aten::adaptive_avg_pool2d(Tensor self, int[2] output_size) -> (Tensor)"},
@@ -1505,6 +1511,9 @@ int nnc_lowerings_lazy_registration() {
             : computeTwoOperand(
                   "aten_add", inputs, outputShape, outputType, add_lambda);
       });
+  RegisterNNCLoweringsFunction aten_embedding(
+      {"aten::embedding(Tensor weight, Tensor indices, int padding_idx=-1, bool scale_grad_by_freq=False, bool sparse=False) -> Tensor"},
+      computeEmbedding);
 
 #define NNC_QUANTIZATION_EXPR_QUANT 0
 #define NNC_QUANTIZATION_EXPR_DEQUANT 0
