@@ -147,7 +147,8 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
 
   LaunchParams computeLaunchParams(
       const LaunchParams& launch_constraints,
-      kir::ExpressionEvaluator& expr_eval);
+      kir::ExpressionEvaluator& expr_eval,
+      const int warp_size);
 
   uint64_t computeSharedMemory(
       kir::ExpressionEvaluator& expr_eval,
@@ -181,6 +182,7 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
 
   CompileOptions options_;
   size_t max_device_smem = std::numeric_limits<size_t>().max();
+  int warp_size_ = 0;
   executor_utils::NvrtcFunction compiled_kernel_;
 
   // TensorViews actually used in the kernel.

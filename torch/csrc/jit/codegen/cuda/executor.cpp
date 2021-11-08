@@ -175,8 +175,9 @@ void FusionExecutor::compileFusion(
 
   TORCH_INTERNAL_ASSERT(
       options.device.is_cuda(), "Provided device to CUDA fuser is the CPU.");
-  max_device_smem =
-      at::cuda::getDeviceProperties(options.device.index())->sharedMemPerBlock;
+  auto properties = at::cuda::getDeviceProperties(options.device.index());
+  max_device_smem = properties->sharedMemPerBlock;
+  warp_size_ = properties->warpSize;
 
   setUsedTVs();
 
@@ -221,7 +222,7 @@ void FusionExecutor::compileFusion(
   c10::optional<int> block_size = c10::nullopt;
   if (!inputs.empty()) {
     auto expr_eval = executor_utils::bindKernelInputs(inputs, kernel);
-    auto launch_params = computeLaunchParams(launch_constraints, expr_eval);
+    auto launch_params = computeLaunchParams(launch_constraints, expr_eval, warp_size_);
     block_size = launch_params.nThreads();
     TORCH_INTERNAL_ASSERT(
         block_size > 0, "launch param inferred block size < 0");
@@ -333,8 +334,10 @@ uint64_t FusionExecutor::computeSharedMemory(
 
 LaunchParams FusionExecutor::computeLaunchParams(
     const LaunchParams& launch_constraints,
-    kir::ExpressionEvaluator& expr_eval) {
+    kir::ExpressionEvaluator& expr_eval,
+    const int warp_size) {
   FUSER_PERF_SCOPE("FusionExecutor::ComputeLaunchParams");
+  TORCH_INTERNAL_ASSERT(warp_size > 0, "WARP_SIZE should be larger than 0");
 
   LaunchParams launch_params;
 
@@ -456,8 +459,8 @@ LaunchParams FusionExecutor::computeLaunchParams(
           // If no specified constant, pad to the smallest multiple of warp
           //  above the value.
           auto padded_number_of_warps =
-              (*val + C10_WARP_SIZE - 1) / C10_WARP_SIZE;
-          *val = C10_WARP_SIZE * padded_number_of_warps;
+              (*val + warp_size - 1) / warp_size;
+          *val = warp_size * padded_number_of_warps;
         }
         TORCH_INTERNAL_ASSERT(
             *val <= 1024, "padded dimension larger than max block size");
@@ -679,7 +682,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
     evaluator_precomputed_integers_->bindKernelInputs(inputs);
     expr_eval.precomputedIntegers() = evaluator_precomputed_integers_.get();
 
-    launch_params = computeLaunchParams(launch_constraints, expr_eval);
+    launch_params = computeLaunchParams(launch_constraints, expr_eval, warp_size_);
 
     executor_utils::validateVectorizedTensors(
         &fusion_, inputs, outputs, lowered_, compileTimeDataCache());
