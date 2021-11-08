@@ -24,7 +24,7 @@ enum MessageTypeFlags : uint16_t {
 };
 
 // Message types must have values between 0x00 to 0xff
-enum MessageType  : uint16_t  {
+enum MessageType : uint16_t {
   // messages for dist.rpc on builtin operators
   SCRIPT_CALL = 0x00u | MessageTypeFlags::REQUEST_TYPE,
   SCRIPT_RET = 0x01u | MessageTypeFlags::RESPONSE_TYPE,
@@ -40,15 +40,15 @@ enum MessageType  : uint16_t  {
       0x05u | MessageTypeFlags::REQUEST_TYPE, // A remote call on a Python UDF
   REMOTE_RET =
       0x06u | MessageTypeFlags::RESPONSE_TYPE, // Response for remote calls for
-                                              // UDF, builtin, or script
+                                               // UDF, builtin, or script
 
   // RRef related internal messages
   SCRIPT_RREF_FETCH_CALL =
-      0x07u | MessageTypeFlags::REQUEST_TYPE, // A UserRRef<IValue> fetches value
-                                             // from owner
+      0x07u | MessageTypeFlags::REQUEST_TYPE, // A UserRRef<IValue> fetches
+                                              // value from owner
   PYTHON_RREF_FETCH_CALL =
       0x08u | MessageTypeFlags::REQUEST_TYPE, // A UserRRef<py::object> fetches
-                                             // value from owner
+                                              // value from owner
   SCRIPT_RREF_FETCH_RET = 0x09u |
       MessageTypeFlags::RESPONSE_TYPE, // An OwnerRRef sends ivalue to user
   PYTHON_RREF_FETCH_RET = 0x0au |
@@ -56,11 +56,11 @@ enum MessageType  : uint16_t  {
   RREF_USER_DELETE = 0x0bu |
       MessageTypeFlags::REQUEST_TYPE, // A UserRRef tells the owner to deref
   RREF_FORK_REQUEST =
-      0x0cu | MessageTypeFlags::REQUEST_TYPE, // A child UserRRef tells the owner
-                                             // about itself
+      0x0cu | MessageTypeFlags::REQUEST_TYPE, // A child UserRRef tells the
+                                              // owner about itself
   RREF_CHILD_ACCEPT =
       0x0du | MessageTypeFlags::REQUEST_TYPE, // A child UserRRef tells parent
-                                             // that owner knows it
+                                              // that owner knows it
   RREF_ACK =
       0x0eu | MessageTypeFlags::RESPONSE_TYPE, // ACK to internal RRef messages
 
