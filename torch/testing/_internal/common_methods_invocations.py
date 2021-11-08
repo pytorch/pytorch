@@ -2663,6 +2663,30 @@ def sample_inputs_bucketize(op_info, device, dtype, requires_grad):
 
     return sample_inputs
 
+def sample_inputs_searchsorted(op_info, device, dtype, requires_grad):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    sizes = ((0,), (M,), (0, 0), (M, M), (0, 0, 0), (M, M, M))
+    inputs = []
+    for size, noncontiguous, out_int32, right in product(sizes, [False, True], [False, True], [False, True]):
+        unsorted_tensor = make_arg(size, noncontiguous=noncontiguous)
+        input_tensor = make_arg(size, noncontiguous=noncontiguous)
+        if np.product(size) == 0:
+            boundary_tensor = unsorted_tensor
+            sorter = make_tensor(size, dtype=torch.int64, device=device, noncontiguous=noncontiguous)
+        else:
+            boundary_tensor, sorter = torch.sort(unsorted_tensor)
+        side = "right" if right else "left"
+
+        inputs.append(SampleInput(boundary_tensor, args=(input_tensor,), kwargs=dict(out_int32=out_int32, right=right)))
+        inputs.append(SampleInput(boundary_tensor, args=(input_tensor,), kwargs=dict(out_int32=out_int32, side=side)))
+
+        inputs.append(
+            SampleInput(unsorted_tensor, args=(input_tensor,), kwargs=dict(out_int32=out_int32, right=right, sorter=sorter)))
+        inputs.append(
+            SampleInput(unsorted_tensor, args=(input_tensor,), kwargs=dict(out_int32=out_int32, side=side, sorter=sorter)))
+    return inputs
+
 def sample_inputs_gradient(op_info, device, dtype, requires_grad):
     sample_inputs = []
     test_cases_float = (
@@ -7019,6 +7043,40 @@ def reference_group_norm(inp: np.ndarray, num_groups: int, weight=None, bias=Non
         Y = Y + bias
     return Y
 
+
+# using a custom reference function since numpy only has a string side arg (instead of right and side) and doesn't
+# have an out_int32 arg. Additionally, numpy doesn't support searchsorted with ND arrays, so this splits those into
+# stacked 1D cases
+def reference_searchsorted(sorted_sequence, boundary, out_int32=False, right=False, side='left', sorter=None):
+    side = 'right' if (right or side == 'right') else 'left'
+    if len(sorted_sequence.shape) == 1 :
+        ret = np.searchsorted(sorted_sequence, boundary, side=side, sorter=sorter)
+        return ret.astype(np.int32) if out_int32 else ret
+    elif sorted_sequence.shape[0] == 0:
+        if sorter is not None:
+            sorter = sorter.flatten()
+        ret = np.searchsorted(sorted_sequence.flatten(), boundary.flatten(), side=side, sorter=sorter)
+        ret = ret.astype(np.int32) if out_int32 else ret
+        return ret.reshape(boundary.shape)
+    else:
+        # numpy searchsorted only supports 1D inputs so we split up ND inputs
+        orig_shape = boundary.shape
+        num_splits = np.prod(sorted_sequence.shape[:-1])
+        splits = range(0, num_splits)
+        sorted_sequence, boundary = sorted_sequence.reshape(num_splits, -1), boundary.reshape(num_splits, -1)
+        if sorter is not None:
+            sorter = sorter.reshape(num_splits, -1)
+
+        split_sequence = [sorted_sequence[i] for i in splits]
+        split_boundary = [boundary[i] for i in splits]
+        split_sorter = [sorter[i] if (sorter is not None) else None for i in splits]
+
+        split_ret = [np.searchsorted(s_seq, b, side=side, sorter=s_sort)
+                     for (s_seq, b, s_sort) in zip(split_sequence, split_boundary, split_sorter)]
+        split_ret = [i.astype(np.int32) for i in split_ret] if out_int32 else split_ret
+        return np.stack(split_ret).reshape(orig_shape)
+
+
 def gradcheck_wrapper_hermitian_input(op, input, *args, **kwargs):
     """Gradcheck wrapper for functions that take Hermitian matrices as input.
 
@@ -10989,6 +11047,18 @@ op_db: List[OpInfo] = [
            supports_autograd=False,
            skips=(
                # JIT tests don't work with Tensor keyword arguments
+               DecorateInfo(unittest.skip("Expected failure!"), 'TestJit', 'test_variant_consistency_jit'),
+           )),
+    OpInfo('searchsorted',
+           dtypes=all_types(),
+           dtypesIfCPU=all_types_and(torch.bfloat16, torch.float16),
+           dtypesIfCUDA=all_types_and(torch.float16),
+           sample_inputs_func=sample_inputs_searchsorted,
+           supports_autograd=False,
+           ref=reference_searchsorted,
+           skips=(
+               # JIT tests don't work with Tensor keyword arguments
+               # https://github.com/pytorch/pytorch/issues/58507
                DecorateInfo(unittest.skip("Expected failure!"), 'TestJit', 'test_variant_consistency_jit'),
            )),
     OpInfo('cat',
