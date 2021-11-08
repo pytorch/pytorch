@@ -1,3 +1,7 @@
+"""
+Generic linter that greps for a pattern and optionally suggests replacements.
+"""
+
 import argparse
 import json
 import logging
@@ -40,56 +44,111 @@ def as_posix(name: str) -> str:
     return name.replace("\\", "/") if IS_WINDOWS else name
 
 
-def run_command(
-    args: List[str],
-) -> "subprocess.CompletedProcess[bytes]":
+def run_command(args: List[str],) -> "subprocess.CompletedProcess[bytes]":
     logging.debug("$ %s", " ".join(args))
     start_time = time.monotonic()
     try:
-        return subprocess.run(
-            args,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
+        return subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,)
     finally:
         end_time = time.monotonic()
         logging.debug("took %dms", (end_time - start_time) * 1000)
 
 
+def lint_file(
+    matching_line: str,
+    replace_pattern: str,
+    linter_name: str,
+    error_name: str,
+    error_description: str,
+) -> LintMessage:
+    # matching_line looks like:
+    #   tools/linter/clangtidy_linter.py:13:import foo.bar.baz
+    split = matching_line.split(":")
+    filename = split[0]
+
+    original = None
+    replacement = None
+    if replace_pattern:
+        with open(filename, "r") as f:
+            original = f.read()
+
+        try:
+            proc = run_command(["sed", "-r", replace_pattern, filename])
+            replacement = proc.stdout.decode("utf-8")
+        except Exception as err:
+            return LintMessage(
+                path=None,
+                line=None,
+                char=None,
+                code=linter_name,
+                severity=LintSeverity.ERROR,
+                name="command-failed",
+                original=None,
+                replacement=None,
+                description=(
+                    f"Failed due to {err.__class__.__name__}:\n{err}"
+                    if not isinstance(err, subprocess.CalledProcessError)
+                    else (
+                        "COMMAND (exit code {returncode})\n"
+                        "{command}\n\n"
+                        "STDERR\n{stderr}\n\n"
+                        "STDOUT\n{stdout}"
+                    ).format(
+                        returncode=err.returncode,
+                        command=" ".join(as_posix(x) for x in err.cmd),
+                        stderr=err.stderr.decode("utf-8").strip() or "(empty)",
+                        stdout=err.stdout.decode("utf-8").strip() or "(empty)",
+                    )
+                ),
+                bypassChangedLineFiltering=None,
+            )
+
+    return LintMessage(
+        path=split[0],
+        line=int(split[1]),
+        char=None,
+        code=linter_name,
+        severity=LintSeverity.ERROR,
+        name=error_name,
+        original=original,
+        replacement=replacement,
+        description=error_description,
+        bypassChangedLineFiltering=None,
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="grep wrapper linter.",
-        fromfile_prefix_chars="@",
+        description="grep wrapper linter.", fromfile_prefix_chars="@",
     )
     parser.add_argument(
-        "--pattern",
-        required=True,
-        help="pattern to grep for",
+        "--pattern", required=True, help="pattern to grep for",
     )
     parser.add_argument(
-        "--linter_name",
-        required=True,
-        help="name of the linter",
+        "--linter-name", required=True, help="name of the linter",
     )
     parser.add_argument(
-        "--error_name",
+        "--error-name",
         required=True,
         help="human-readable description of what the error is",
     )
     parser.add_argument(
-        "--error_description",
+        "--error-description",
         required=True,
         help="message to display when the pattern is found",
     )
     parser.add_argument(
-        "--verbose",
-        action="store_true",
-        help="verbose logging",
+        "--replace-pattern",
+        help=(
+            "the form of a pattern passed to `sed -r`. "
+            "If specified, this will become proposed replacement text."
+        ),
     )
     parser.add_argument(
-        "filenames",
-        nargs="+",
-        help="paths to lint",
+        "--verbose", action="store_true", help="verbose logging",
+    )
+    parser.add_argument(
+        "filenames", nargs="+", help="paths to lint",
     )
     args = parser.parse_args()
 
@@ -105,7 +164,7 @@ def main() -> None:
 
     try:
         proc = run_command(["grep", "-nPH", args.pattern, *args.filenames])
-    except OSError as err:
+    except Exception as err:
         err_msg = LintMessage(
             path=None,
             line=None,
@@ -117,6 +176,18 @@ def main() -> None:
             replacement=None,
             description=(
                 f"Failed due to {err.__class__.__name__}:\n{err}"
+                if not isinstance(err, subprocess.CalledProcessError)
+                else (
+                    "COMMAND (exit code {returncode})\n"
+                    "{command}\n\n"
+                    "STDERR\n{stderr}\n\n"
+                    "STDOUT\n{stdout}"
+                ).format(
+                    returncode=err.returncode,
+                    command=" ".join(as_posix(x) for x in err.cmd),
+                    stderr=err.stderr.decode("utf-8").strip() or "(empty)",
+                    stdout=err.stdout.decode("utf-8").strip() or "(empty)",
+                )
             ),
             bypassChangedLineFiltering=None,
         )
@@ -125,21 +196,15 @@ def main() -> None:
 
     lines = proc.stdout.decode().splitlines()
     for line in lines:
-        # tools/linter/clangtidy_linter.py:13:import foo.bar.baz
-        split = line.split(":")
-        msg = LintMessage(
-            path=split[0],
-            line=int(split[1]),
-            char=None,
-            code=args.linter_name,
-            severity=LintSeverity.ERROR,
-            name=args.error_name,
-            original=None,
-            replacement=None,
-            description=args.error_description,
-            bypassChangedLineFiltering=None,
+        lint_message = lint_file(
+            line,
+            args.replace_pattern,
+            args.linter_name,
+            args.error_name,
+            args.error_description,
         )
-        print(json.dumps(msg._asdict()), flush=True)
+        print(json.dumps(lint_message._asdict()), flush=True)
+
 
 if __name__ == "__main__":
     main()
