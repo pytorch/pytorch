@@ -676,7 +676,7 @@ MACOS_WORKFLOWS = [
     CIWorkflow(
         arch="macos",
         build_environment="macos-10-15-py3-arm64",
-        xcode_version="12.3",
+        xcode_version="12.4",
         test_runner_type=MACOS_TEST_RUNNER_10_15,
         exclude_test=True,
         ciflow_config=CIFlowConfig(
