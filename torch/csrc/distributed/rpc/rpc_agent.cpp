@@ -234,10 +234,7 @@ bool RpcAgent::isCurrentRpcAgentSet() {
 
 std::shared_ptr<RpcAgent> RpcAgent::getCurrentRpcAgent() {
   std::shared_ptr<RpcAgent> agent = std::atomic_load(&currentRpcAgent_);
-  TORCH_CHECK(
-      agent,
-      "Current RPC agent is not set! Did you initialize the RPC "
-      "framework (e.g. by calling `rpc.init_rpc`)?");
+  TORCH_INTERNAL_ASSERT(agent, "Current RPC agent is not set!");
   return agent;
 }
 
