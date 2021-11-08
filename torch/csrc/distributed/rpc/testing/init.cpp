@@ -71,6 +71,7 @@ PyObject* faulty_agent_init(PyObject* _unused, PyObject* noargs) {
                  std::string name,
                  worker_id_t rank,
                  int world_size,
+                 c10::intrusive_ptr<::c10d::ProcessGroup> process_group,
                  FaultyTensorPipeRpcBackendOptions opts,
                  std::unordered_map<std::string, DeviceMap> reverse_device_maps,
                  std::vector<c10::Device> devices) {
@@ -80,6 +81,7 @@ PyObject* faulty_agent_init(PyObject* _unused, PyObject* noargs) {
                         std::move(name),
                         rank,
                         world_size,
+                        process_group,
                         opts,
                         reverse_device_maps,
                         devices,
@@ -90,6 +92,7 @@ PyObject* faulty_agent_init(PyObject* _unused, PyObject* noargs) {
           py::arg("name"),
           py::arg("rank"),
           py::arg("world_size"),
+          py::arg("process_group"),
           py::arg("opts"),
           py::arg("reverse_device_maps"),
           py::arg("devices"))
