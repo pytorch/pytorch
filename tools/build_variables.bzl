@@ -114,11 +114,14 @@ core_sources_common = [
     "torch/csrc/jit/runtime/vararg_functions.cpp",
     "torch/csrc/jit/mobile/promoted_prim_ops.cpp",
     "torch/csrc/jit/mobile/prim_ops_registery.cpp",
+]
+
+torch_unpickler_common = [
     "torch/csrc/jit/serialization/import_read.cpp",
     "torch/csrc/jit/serialization/unpickler.cpp",
 ]
 
-libtorch_sources_common = core_sources_common
+libtorch_sources_common = sorted(core_sources_common + torch_unpickler_common)
 
 # The profilers are not needed in the lite interpreter build.
 libtorch_profiler_sources = [
@@ -207,9 +210,11 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/passes/restore_mutation.cpp",
     "torch/csrc/jit/passes/create_autodiff_subgraphs.cpp",
     "torch/csrc/jit/passes/dead_code_elimination.cpp",
+    "torch/csrc/jit/passes/eliminate_no_ops.cpp",
     "torch/csrc/jit/passes/remove_redundant_profiles.cpp",
     "torch/csrc/jit/passes/remove_exceptions.cpp",
     "torch/csrc/jit/passes/decompose_ops.cpp",
+    "torch/csrc/jit/passes/dtype_analysis.cpp",
     "torch/csrc/jit/passes/erase_number_types.cpp",
     "torch/csrc/jit/passes/fixup_trace_scope_blocks.cpp",
     "torch/csrc/jit/passes/freeze_module.cpp",
@@ -360,10 +365,12 @@ lazy_tensor_core_sources = [
     "torch/csrc/lazy/core/ir.cpp",
     "torch/csrc/lazy/core/ir_metadata.cpp",
     "torch/csrc/lazy/core/ir_util.cpp",
+    "torch/csrc/lazy/core/shape.cpp",
 ]
 
 libtorch_core_sources = sorted(
     core_sources_common +
+    torch_unpickler_common +
     core_sources_full +
     core_trainer_sources +
     libtorch_profiler_sources +
@@ -494,7 +501,12 @@ libtorch_lite_eager_symbolication = [
 ]
 
 # TODO: core_trainer_sources is not necessary for libtorch lite
-libtorch_lite_cmake_sources = sorted(core_trainer_sources + core_sources_common + torch_mobile_core)
+libtorch_lite_cmake_sources = sorted(
+    core_trainer_sources +
+    core_sources_common +
+    torch_unpickler_common +
+    torch_mobile_core,
+)
 
 libtorch_cmake_sources = libtorch_core_sources + libtorch_core_jit_sources
 

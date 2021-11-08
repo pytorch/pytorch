@@ -4021,10 +4021,9 @@ Tensor& linalg_solve_triangular_out(
     // negation in memory
     if (out_f.is_neg()) {
       A_f = -A_f;
+    } else {
+      A_f = A_f.resolve_neg();
     }
-    // If the -A_f is always in memory, this line could be in an else branch
-    A_f = A_f.resolve_neg();
-
     A_is_neg = false;
     // As we've already resolved the conj of A in the negationa bove
     A_is_conj = out_f.is_conj();

@@ -171,6 +171,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
             store1 = dist.TCPStore(addr, port, 1, True)  # noqa: F841
             store2 = dist.TCPStore(addr, port, 1, True)  # noqa: F841
 
+    @retry_on_connect_failures
     def test_multitenancy(self):
         addr = DEFAULT_HOSTNAME
         port = common.find_free_port()
