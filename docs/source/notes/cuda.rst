@@ -323,6 +323,14 @@ Available options:
   :meth:`~torch.cuda.memory_summary` methods are useful for tuning.  This
   option should be used as a last resort for a workload that is aborting
   due to 'out of memory' and showing a large amount of inactive split blocks.
+* ``backend`` allows selecting the underlying allocator implementation.
+  Currently, valid options are ``native``, which uses Pytorch's native
+  implementation, and ``cudaMallocAsync``, which uses
+  `CUDA's built-in asynchronous allocator`_.
+  ``cudaMallocAsync`` requires CUDA 11.4 or newer. The default is ``native``.
+
+.. _CUDA's built-in asynchronous allocator:
+    https://developer.nvidia.com/blog/using-cuda-stream-ordered-memory-allocator-part-1/
 
 .. _cufft-plan-cache:
 
