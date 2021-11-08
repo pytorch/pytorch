@@ -23,6 +23,7 @@ The following constraints are implemented:
 - ``constraints.real``
 - ``constraints.simplex``
 - ``constraints.stack``
+- ``constraints.symmetric``
 - ``constraints.unit_interval``
 """
 
@@ -54,6 +55,7 @@ __all__ = [
     'real_vector',
     'simplex',
     'stack',
+    'symmetric',
     'unit_interval',
 ]
 
@@ -416,6 +418,14 @@ class _Multinomial(Constraint):
     def check(self, x):
         return (x >= 0).all(dim=-1) & (x.sum(dim=-1) <= self.upper_bound)
 
+class _Symmetric(Constraint):
+    """
+    Constrain to Symmetric square matrices.
+    """
+    event_dim = 2
+    
+    def check(self, value):
+        return (value.transpose(-2, -1) == value).all()
 
 class _LowerTriangular(Constraint):
     """
@@ -466,7 +476,6 @@ class _PositiveDefinite(Constraint):
         # Assumes that the matrix or batch of matrices in value are symmetric
         # info == 0 means no error, that is, it's SPD
         return torch.linalg.cholesky_ex(value).info.eq(0).unsqueeze(0)
-
 
 class _Cat(Constraint):
     """
@@ -554,9 +563,11 @@ unit_interval = _Interval(0., 1.)
 interval = _Interval
 half_open_interval = _HalfOpenInterval
 simplex = _Simplex()
+symmetric = _Symmetric()
 lower_triangular = _LowerTriangular()
 lower_cholesky = _LowerCholesky()
 corr_cholesky = _CorrCholesky()
 positive_definite = _PositiveDefinite()
 cat = _Cat
 stack = _Stack
+
