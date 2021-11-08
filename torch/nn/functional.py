@@ -3724,8 +3724,7 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
             recompute_scale_factor=recompute_scale_factor,
         )
 
-    # TODO: add "nearest-exact" once the 2-week FC window has passed.
-    if mode in ("nearest", "area"):
+    if mode in ("nearest", "area", "nearest-exact"):
         if align_corners is not None:
             raise ValueError(
                 "align_corners option can only be set with the "
@@ -3826,15 +3825,14 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
         return torch._C._nn.upsample_nearest3d(input, output_size, scale_factors)
 
     # TODO: Remove this scripting logic once the 2-week FC window has passed.
-    if not torch.jit.is_scripting():
-        if input.dim() == 3 and mode == "nearest-exact":
-            return torch._C._nn._upsample_nearest_exact1d(input, output_size, scale_factors)
-        if input.dim() == 4 and mode == "nearest-exact":
-            return torch._C._nn._upsample_nearest_exact2d(input, output_size, scale_factors)
-        if input.dim() == 5 and mode == "nearest-exact":
-            return torch._C._nn._upsample_nearest_exact3d(input, output_size, scale_factors)
-    else:
+    if mode == "nearest-exact" and torch.jit.is_scripting():
         raise RuntimeError("TorchScript currently does not support nearest-exact")
+    if input.dim() == 3 and mode == "nearest-exact":
+        return torch._C._nn._upsample_nearest_exact1d(input, output_size, scale_factors)
+    if input.dim() == 4 and mode == "nearest-exact":
+        return torch._C._nn._upsample_nearest_exact2d(input, output_size, scale_factors)
+    if input.dim() == 5 and mode == "nearest-exact":
+        return torch._C._nn._upsample_nearest_exact3d(input, output_size, scale_factors)
 
     if input.dim() == 3 and mode == "area":
         assert output_size is not None
@@ -3872,10 +3870,9 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
     if input.dim() == 5 and mode == "bilinear":
         raise NotImplementedError("Got 5D input, but bilinear mode needs 4D input")
 
-    # TODO: add "nearest-exact" once the 2-week FC window has passed.
     raise NotImplementedError(
         "Input Error: Only 3D, 4D and 5D input Tensors supported"
-        " (got {}D) for the modes: nearest | linear | bilinear | bicubic | trilinear | area "
+        " (got {}D) for the modes: nearest | linear | bilinear | bicubic | trilinear | area | nearest-exact"
         " (got {})".format(input.dim(), mode)
     )
 
