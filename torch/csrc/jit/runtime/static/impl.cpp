@@ -723,7 +723,7 @@ StaticModule::StaticModule(
     node_idx++;
   }
   for (auto& pnode : nodes_) {
-    if (pnode.outputs().size() == 1 &&
+    if (pnode.num_outputs() == 1 &&
         isOptimizableContainerType(pnode.node(), node_has_out_variant)) {
       node_is_optimizable_container_type_.emplace(pnode.node());
     }

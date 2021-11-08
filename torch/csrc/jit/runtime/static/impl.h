@@ -508,12 +508,9 @@ class TORCH_API ProcessedNode {
     return c10::ArrayRef<const IValue>(values_ + outputs_offset_, num_outputs_);
   }
 
-  // can't support this; let's look at callers
-#if 0
-  C10_NODISCARD c10::ArrayRef<const IValue*> inputs() const {
-    return c10::ArrayRef<const IValue*>(inputs_.get(), inputs_size_);
+  C10_NODISCARD auto num_outputs() const {
+    return num_outputs_;
   }
-#endif
 
   C10_NODISCARD uint16_t num_inputs() const {
     return inputs_.size();
