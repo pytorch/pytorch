@@ -1495,8 +1495,8 @@ class NumpyTests(TestCase):
         expected = b.float().unsqueeze(1).expand(100, 100)
         self.assertEqual(a, expected)
 
-instantiate_device_type_tests(TestIndexing, globals())
-instantiate_device_type_tests(NumpyTests, globals())
+instantiate_device_type_tests(TestIndexing, globals(), except_for='meta')
+instantiate_device_type_tests(NumpyTests, globals(), except_for='meta')
 
 if __name__ == '__main__':
     run_tests()
