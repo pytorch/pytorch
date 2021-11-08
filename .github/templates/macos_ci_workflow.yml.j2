@@ -30,6 +30,8 @@ env:
   COMPACT_JOB_NAME: !{{ build_environment }}
   IN_CI: 1
   IS_GHA: 1
+  # Set xcode to 12.0.1
+  DEVELOPER_DIR: /Applications/Xcode_12.app/Contents/Developer
 
 jobs:
 !{{ common.ciflow_should_run_job(ciflow_config) }}
