@@ -150,7 +150,7 @@ class GTest(TestCase):
 
     @skipIfRocm
     @unittest.skipIf(
-        IS_WINDOWS and torch.cuda.is_available(),
+        IS_WINDOWS and "cuda" in os.getenv("BUILD_ENVIRONMENT", ""),
         "CUDA environment doesn't work out of the box yet",
     )
     def test_jit(self):
