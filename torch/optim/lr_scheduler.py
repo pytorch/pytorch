@@ -25,7 +25,6 @@ class _LRScheduler(object):
 
         # Attach optimizer
         if not isinstance(optimizer, Optimizer):
-            import ipdb; ipdb.set_trace()
             raise TypeError('{} is not an Optimizer'.format(
                 type(optimizer).__name__))
         self.optimizer = optimizer
