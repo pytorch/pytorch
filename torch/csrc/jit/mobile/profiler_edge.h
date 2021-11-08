@@ -6,6 +6,10 @@ namespace profiler = torch::autograd::profiler;
 namespace torch {
 namespace jit {
 namespace mobile {
+
+// If we dont have kineto available then edge profiler does not
+// work since it relies on Kineto
+#ifdef USE_KINETO
 class TORCH_API KinetoEdgeCPUProfiler {
  public:
   // This profiler only profiles KINETO events
@@ -56,6 +60,12 @@ class TORCH_API KinetoEdgeCPUProfiler {
 
   const std::unique_ptr<profiler::ProfilerResult>& disableProfiler();
   const std::unique_ptr<profiler::ProfilerResult>& getProfilerResult();
+  void recordBackendEvent(
+      const int64_t start_time_us,
+      const int64_t end_time_us,
+      const int64_t debug_handle,
+      const std::string& event_name,
+      const std::string& backend_name);
 
   ~KinetoEdgeCPUProfiler();
 
@@ -68,6 +78,21 @@ class TORCH_API KinetoEdgeCPUProfiler {
   std::string trace_file_name_;
   std::unique_ptr<profiler::ProfilerResult> profiler_result_;
 };
+
+TORCH_API KinetoEdgeCPUProfiler* getCurrentEdgeProfiler();
+
+#define RECORD_BACKEND_EVENT_TO_EDGE_PROFILER(                               \
+    start_time_us, end_time_us, debug_handle, event_name, backend_name)      \
+  if (mobile::getCurrentEdgeProfiler()) {                                    \
+    mobile::getCurrentEdgeProfiler()->recordBackendEvent(                    \
+        start_time_us, end_time_us, debug_handle, event_name, backend_name); \
+  }
+#else
+
+#define RECORD_BACKEND_EVENT_TO_EDGE_PROFILER( \
+    start_time_us, end_time_us, debug_handle, event_name, backend_name)
+
+#endif
 } // namespace mobile
 } // namespace jit
 } // namespace torch

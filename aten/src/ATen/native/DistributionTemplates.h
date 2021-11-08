@@ -1,9 +1,11 @@
 #pragma once
 
+#include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Generator.h>
 #include <ATen/Tensor.h>
 #include <ATen/MemoryOverlap.h>
+#include <ATen/NamedTensorUtils.h>
 #include <ATen/native/TensorIterator.h>
 #include <c10/util/Optional.h>
 #include <limits>
@@ -24,7 +26,7 @@ namespace templates {
 //
 // If random's uint64_t arithmetics produces 65503 as a random value after casting to torch::half it becomes 65504
 // and violates the requirement that random value must be less than `to`. To resolve this issue `update_from` and `update_to`
-// moves `from` to the left and `to` to the right to the next closest value that won't go outside [from, to) after casting to
+// moves `from` to the right and `to` to the left to the next closest value that won't go outside [from, to) after casting to
 // the target dtype. For `to` = 65504 it moves left for (1 << (log2(to) - 11 + 1)) = 32 and becomes 65472, which is previous
 // available number for torch::half dtype.
 template<typename scalar_t>
@@ -238,7 +240,7 @@ template<template<typename> class normal_kernel, typename RNG>
 Tensor& normal_out_impl(Tensor& output, const Tensor& mean, const Tensor& std, c10::optional<Generator> gen) {
   TORCH_CHECK(!std.is_complex(), "normal expects standard deviation to be non-complex");
   TORCH_CHECK(
-    std.min().ge(0).item<bool>(),
+    std.numel() == 0 || std.min().ge(0).item<bool>(),
     "normal expects all elements of std >= 0.0");
   bool is_deprecated_th_impl = resize_output_for_normal(output, mean, std);
   normal_impl_<normal_kernel, RNG>(output, 0, 1, gen);

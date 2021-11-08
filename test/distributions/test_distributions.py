@@ -1,3 +1,5 @@
+# Owner(s): ["module: distributions"]
+
 """
 Note [Randomized statistical tests]
 -----------------------------------
@@ -20,6 +22,10 @@ change. This file contains two types of randomized tests:
    it's fine to increment the seed of the failing test (but you shouldn't need
    to increment it more than once; otherwise something is probably actually
    wrong).
+
+3. `test_geometric_sample`, `test_binomial_sample` and `test_poisson_sample`
+   are validated against `scipy.stats.` which are not guaranteed to be identical
+   across different versions of scipy (namely, they yield invalid results in 1.7+)
 """
 
 import math
@@ -38,7 +44,7 @@ torch.set_default_dtype(torch.double)
 from torch._six import inf
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN, load_tests,
-     gradcheck, IS_MACOS, IS_WINDOWS)
+     gradcheck)
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.autograd import grad
 from torch.autograd.functional import jacobian
@@ -1034,8 +1040,6 @@ class TestDistributions(TestCase):
         self.assertEqual(Geometric(p).entropy(), scipy.stats.geom(p.detach().numpy(), loc=-1).entropy(), atol=1e-3, rtol=0)
         self.assertEqual(float(Geometric(s).entropy()), scipy.stats.geom(s, loc=-1).entropy().item(), atol=1e-3, rtol=0)
 
-    @unittest.skipIf(IS_WINDOWS, "See https://github.com/pytorch/pytorch/issues/64595")
-    @unittest.skipIf(IS_MACOS, "See https://github.com/pytorch/pytorch/issues/60347")
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_geometric_sample(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
@@ -1052,8 +1056,6 @@ class TestDistributions(TestCase):
         self.assertRaises(NotImplementedError, Binomial(10, p).rsample)
         self.assertRaises(NotImplementedError, Binomial(10, p).entropy)
 
-    @unittest.skipIf(IS_WINDOWS, "See https://github.com/pytorch/pytorch/issues/64595")
-    @unittest.skipIf(IS_MACOS, "See https://github.com/pytorch/pytorch/issues/60347")
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_binomial_sample(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
@@ -1346,8 +1348,6 @@ class TestDistributions(TestCase):
         dist.log_prob(torch.ones_like(rate_zero)).backward()
         torch.testing.assert_allclose(rate_zero.grad, torch.inf)
 
-    @unittest.skipIf(IS_WINDOWS, "See https://github.com/pytorch/pytorch/issues/64595")
-    @unittest.skipIf(IS_MACOS, "See https://github.com/pytorch/pytorch/issues/60347")
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_poisson_sample(self):
         set_rng_seed(1)  # see Note [Randomized statistical tests]
@@ -1357,7 +1357,6 @@ class TestDistributions(TestCase):
                                          'Poisson(lambda={})'.format(rate),
                                          failure_rate=1e-3)
 
-    @unittest.skipIf(IS_WINDOWS, "See https://github.com/pytorch/pytorch/issues/64595")
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_poisson_gpu_sample(self):
@@ -2035,9 +2034,9 @@ class TestDistributions(TestCase):
 
             def gradcheck_func(samples, mu, sigma, prec, scale_tril):
                 if sigma is not None:
-                    sigma = 0.5 * (sigma + sigma.transpose(-1, -2))  # Ensure symmetry of covariance
+                    sigma = 0.5 * (sigma + sigma.mT)  # Ensure symmetry of covariance
                 if prec is not None:
-                    prec = 0.5 * (prec + prec.transpose(-1, -2))  # Ensure symmetry of precision
+                    prec = 0.5 * (prec + prec.mT)  # Ensure symmetry of precision
                 if scale_tril is not None:
                     scale_tril = scale_tril.tril()
                 return MultivariateNormal(mu, sigma, prec, scale_tril).log_prob(samples)

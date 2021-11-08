@@ -1,3 +1,5 @@
+# Owner(s): ["module: optimizer"]
+
 import warnings
 import math
 import unittest
@@ -11,7 +13,7 @@ import torch.nn.functional as F
 from torch.optim import SGD
 from torch.autograd import Variable
 from torch import sparse
-from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, StepLR, \
+from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, SequentialLR, StepLR, \
     MultiStepLR, ConstantLR, LinearLR, ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau, \
     _LRScheduler, CyclicLR, CosineAnnealingWarmRestarts, OneCycleLR, ChainedScheduler
 from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
@@ -117,13 +119,13 @@ class TestOptim(TestCase):
 
         initial_value = fn().item()
         for _i in range(200):
+            optimizer.step(fn)
             for scheduler in schedulers:
                 if isinstance(scheduler, ReduceLROnPlateau):
                     val_loss = fn()
                     scheduler.step(val_loss)
                 else:
                     scheduler.step()
-            optimizer.step(fn)
         self.assertLess(fn().item(), initial_value)
 
     def _test_state_dict(self, weight, bias, input, constructor):
@@ -243,6 +245,21 @@ class TestOptim(TestCase):
             scheduler_constructors
         )
 
+    def _test_complex_optimizer(self, optimizer_constructor):
+        complex_param = torch.randn(5, 5, dtype=torch.complex64, requires_grad=True)
+        real_param = torch.view_as_real(complex_param).detach().clone().requires_grad_()
+        complex_opt = optimizer_constructor(complex_param)
+        real_opt = optimizer_constructor(real_param)
+
+        for i in range(3):
+            complex_param.grad = torch.randn_like(complex_param)
+            real_param.grad = torch.view_as_real(complex_param.grad)
+
+            complex_opt.step()
+            real_opt.step()
+
+            self.assertEqual(torch.view_as_real(complex_param), real_param)
+
     def _build_params_dict(self, weight, bias, **kwargs):
         return [{'params': [weight]}, dict(params=[bias], **kwargs)]
 
@@ -316,6 +333,24 @@ class TestOptim(TestCase):
             self._test_rosenbrock_sparse(
                 lambda params: optimizer(params, lr=0.005),
                 [lambda opt: StepLR(opt, gamma=0.99999, step_size=300)]
+            )
+
+    def test_sgd_complex(self):
+        for optimizer in [optim.SGD, optim_mt.SGD]:
+            self._test_complex_optimizer(
+                lambda param: optimizer([param], lr=0.001)
+            )
+            self._test_complex_optimizer(
+                lambda param: optimizer([param], lr=0.001, momentum=1)
+            )
+            self._test_complex_optimizer(
+                lambda param: optimizer([param], lr=0.001, momentum=1, weight_decay=1)
+            )
+            self._test_complex_optimizer(
+                lambda param: optimizer([param], lr=0.001, nesterov=True, momentum=1, weight_decay=1)
+            )
+            self._test_complex_optimizer(
+                lambda param: optimizer([param], lr=0.001, momentum=1, dampening=0.5, weight_decay=1)
             )
 
     def test_multi_tensor_optimizers(self):
@@ -531,6 +566,18 @@ class TestOptim(TestCase):
             with self.assertRaisesRegex(ValueError, "Invalid rho value: 1.1"):
                 optimizer(None, lr=1e-2, rho=1.1)
 
+    def test_adadelta_complex(self):
+        for optimizer in [optim.Adadelta]:
+            self._test_complex_optimizer(
+                lambda weight: optimizer([weight])
+            )
+            self._test_complex_optimizer(
+                lambda weight: optimizer([weight], rho=0.95)
+            )
+            self._test_complex_optimizer(
+                lambda weight: optimizer([weight], rho=0.95, weight_decay=1)
+            )
+
     def test_nadam(self):
         for optimizer in [optim.NAdam, optim_mt.NAdam]:
             self._test_basic_cases(
@@ -593,6 +640,17 @@ class TestOptim(TestCase):
                 lambda params: optimizer(params, lr=0.1),
                 [lambda opt: StepLR(opt, gamma=1 - 1e-5, step_size=500),
                  lambda opt: ReduceLROnPlateau(opt, threshold=1e-4)]
+            )
+
+    def test_adagrad_complex(self):
+        for optimizer in [optim.Adagrad, optim_mt.Adagrad]:
+            self._test_complex_optimizer(
+                lambda param: optimizer([param], lr=1e-1)
+            )
+            self._test_complex_optimizer(
+                lambda param: optimizer(
+                    [param], lr=1e-1, initial_accumulator_value=0.1
+                )
             )
 
     def test_adamax(self):
@@ -980,6 +1038,7 @@ class TestLRScheduler(TestCase):
         l = []
 
         for _ in range(10):
+            scheduler.optimizer.step()
             scheduler.step(2)
             l.append(self.opt.param_groups[0]['lr'])
         self.assertEqual(min(l), max(l))
@@ -1254,6 +1313,41 @@ class TestLRScheduler(TestCase):
         scheduler = ReduceLROnPlateau(self.opt, mode='max', threshold_mode='rel', min_lr=[0.4, 0.3],
                                       threshold=0.1, patience=5, cooldown=5)
         self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
+
+    def test_sequentiallr1(self):
+        epochs = 19
+        schedulers = [None] * 2
+        targets = [[0.05, 0.04, 0.032] + [0.05 for x in range(4)]
+                                       + [0.05 * 0.1 for x in range(4)]
+                                       + [0.05 * 0.01 for x in range(4)]
+                                       + [0.05 * 0.001 for x in range(4)]]
+        milestones = [3]
+        schedulers[0] = ExponentialLR(self.opt, gamma=0.8)
+        schedulers[1] = StepLR(self.opt, gamma=0.1, step_size=4)
+        scheduler = SequentialLR(self.opt, schedulers=schedulers, milestones=milestones)
+        self._test(scheduler, targets, epochs)
+
+    def test_sequentiallr2(self):
+        epochs = 13
+        schedulers = [None] * 2
+        targets = [[0.005, 0.005, 0.005] + [0.05 * 0.9 ** x for x in range(10)]]
+        milestones = [3]
+        schedulers[0] = ConstantLR(self.opt, factor=0.1, total_iters=3)
+        schedulers[1] = ExponentialLR(self.opt, gamma=0.9)
+        scheduler = SequentialLR(self.opt, schedulers=schedulers, milestones=milestones)
+        self._test(scheduler, targets, epochs)
+
+    def test_sequentiallr3(self):
+        epochs = 12
+        schedulers = [None] * 3
+        targets = [[0.005, 0.005, 0.005] + [0.05, 0.04, 0.032]
+                                         + [0.05, 0.05, 0.005, 0.005, 0.0005, 0.0005]]
+        milestones = [3, 6]
+        schedulers[0] = ConstantLR(self.opt, factor=0.1, total_iters=3)
+        schedulers[1] = ExponentialLR(self.opt, gamma=0.8)
+        schedulers[2] = StepLR(self.opt, gamma=0.1, step_size=2)
+        scheduler = SequentialLR(self.opt, schedulers=schedulers, milestones=milestones)
+        self._test(scheduler, targets, epochs)
 
     def test_chained_lr1(self):
         epochs = 10
@@ -1890,8 +1984,10 @@ class TestLRScheduler(TestCase):
                                  msg='LR is wrong in epoch {}: expected {}, got {}'.format(
                                      epoch, target[epoch], param_group['lr']), atol=1e-5, rtol=0)
             if epoch >= swa_start:
+                self.opt.step()
                 swa_scheduler.step()
             elif scheduler is not None:
+                self.opt.step()
                 scheduler.step()
 
     def test_swalr_hypers(self):
@@ -1974,6 +2070,7 @@ class TestLRScheduler(TestCase):
     def _check_scheduler_state_dict(self, constr, constr2, epochs=10):
         scheduler = constr()
         for _ in range(epochs):
+            scheduler.optimizer.step()
             scheduler.step()
         scheduler_copy = constr2()
         scheduler_copy.load_state_dict(scheduler.state_dict())
@@ -1985,8 +2082,10 @@ class TestLRScheduler(TestCase):
     def _test_get_last_lr(self, schedulers, targets, epochs=10):
         if isinstance(schedulers, _LRScheduler):
             schedulers = [schedulers]
+        optimizers = {scheduler.optimizer for scheduler in schedulers}
         for epoch in range(epochs):
             result = [scheduler.get_last_lr() for scheduler in schedulers]
+            [optimizer.step() for optimizer in optimizers]
             [scheduler.step() for scheduler in schedulers]
             target = [[t[epoch] for t in targets]] * len(schedulers)
             for t, r in zip(target, result):
@@ -1997,7 +2096,9 @@ class TestLRScheduler(TestCase):
     def _test_with_epoch(self, schedulers, targets, epochs=10):
         if isinstance(schedulers, _LRScheduler):
             schedulers = [schedulers]
+        optimizers = {scheduler.optimizer for scheduler in schedulers}
         for epoch in range(epochs):
+            [optimizer.step() for optimizer in optimizers]
             [scheduler.step(epoch) for scheduler in schedulers]  # step before assert: skip initial lr
             for param_group, target in zip(self.opt.param_groups, targets):
                 self.assertEqual(target[epoch], param_group['lr'],
@@ -2007,11 +2108,23 @@ class TestLRScheduler(TestCase):
     def _test(self, schedulers, targets, epochs=10):
         if isinstance(schedulers, _LRScheduler):
             schedulers = [schedulers]
+
+        def get_optimizer(scheduler):
+            if hasattr(scheduler, "optimizer"):
+                return scheduler.optimizer
+            else:
+                assert isinstance(scheduler, ChainedScheduler), \
+                    f"Error: scheduler={scheduler} does not have an optimizer and is not a chained scheduler."
+                return get_optimizer(scheduler._schedulers[0])
+        optimizers = set()
+        for scheduler in schedulers:
+            optimizers.add(get_optimizer(scheduler))
         for epoch in range(epochs):
             for param_group, target in zip(self.opt.param_groups, targets):
                 self.assertEqual(target[epoch], param_group['lr'],
                                  msg='LR is wrong in epoch {}: expected {}, got {}'.format(
                                      epoch, target[epoch], param_group['lr']), atol=1e-5, rtol=0)
+            [optimizer.step() for optimizer in optimizers]
             [scheduler.step() for scheduler in schedulers]
 
     def _test_CosineAnnealingWarmRestarts(self, scheduler, targets, epochs=10):
@@ -2035,10 +2148,12 @@ class TestLRScheduler(TestCase):
         self.setUp()
         targets = []
         for epoch in range(epochs):
+            closed_form_scheduler.optimizer.step()
             closed_form_scheduler.step(epoch)
             targets.append([group['lr'] for group in self.opt.param_groups])
         self.setUp()
         for epoch in range(epochs):
+            self.opt.step()
             scheduler.step()
             for i, param_group in enumerate(self.opt.param_groups):
                 self.assertEqual(targets[epoch][i], param_group['lr'],
@@ -2049,6 +2164,7 @@ class TestLRScheduler(TestCase):
         if isinstance(schedulers, _LRScheduler) or isinstance(schedulers, ReduceLROnPlateau):
             schedulers = [schedulers]
         for epoch in range(epochs):
+            self.opt.step()
             for scheduler in schedulers:
                 if isinstance(scheduler, ReduceLROnPlateau):
                     scheduler.step(metrics[epoch])
@@ -2089,6 +2205,7 @@ class TestLRScheduler(TestCase):
                         momentum_target[batch_num], param_group['momentum'],
                         msg='Momentum is wrong in batch_num {}: expected {}, got {}'.format(
                             batch_num, momentum_target[batch_num], param_group['momentum']), atol=1e-5, rtol=0)
+            self.opt.step()
             scheduler.step()
 
     def test_cosine_then_cyclic(self):
@@ -2106,6 +2223,7 @@ class TestLRScheduler(TestCase):
         )
 
         for i in range(40):
+            optimizer.step()
             if i <= lr_scheduler_1.T_max:
                 lr_scheduler_1.step()
             else:
@@ -2253,6 +2371,38 @@ class TestSWAUtils(TestCase):
             averaged_params = updated_averaged_params
 
         for p_avg, p_swa in zip(averaged_params, averaged_dnn.parameters()):
+            self.assertEqual(p_avg, p_swa)
+
+    def test_averaged_model_exponential_use_state_dict(self):
+        # Test AveragedModel with EMA as avg_fn and use_state_dict as True.
+        dnn = torch.nn.Sequential(
+            torch.nn.Conv2d(1, 5, kernel_size=3),
+            torch.nn.BatchNorm2d(5, momentum=0.3),
+            torch.nn.Linear(5, 10)
+        )
+        alpha = 0.9
+
+        def avg_fn(p_avg, p, n_avg):
+            return alpha * p_avg + (1 - alpha) * p
+        averaged_dnn = AveragedModel(dnn, avg_fn=avg_fn, mode='state_dict')
+        averaged_params = [torch.zeros_like(param) for param in dnn.state_dict().values()
+                           if param.size() != torch.Size([])]
+        n_updates = 10
+        for i in range(n_updates):
+            updated_averaged_params = []
+            for p, p_avg in zip(dnn.state_dict().values(), averaged_params):
+                if p.size() == torch.Size([]):
+                    continue
+                p.detach().add_(torch.randn_like(p))
+                if i == 0:
+                    updated_averaged_params.append(p.clone())
+                else:
+                    updated_averaged_params.append((p_avg * alpha +
+                                                   p * (1 - alpha)).clone())
+            averaged_dnn.update_parameters(dnn)
+            averaged_params = updated_averaged_params
+
+        for p_avg, p_swa in zip(averaged_params, averaged_dnn.module.state_dict().values()):
             self.assertEqual(p_avg, p_swa)
 
     def _test_update_bn(self, dnn, dl_x, dl_xy, cuda):

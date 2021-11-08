@@ -221,13 +221,13 @@ const auto flatten_script_2 = R"JIT(
 const auto clone_script_0 = R"JIT(
   def forward(self, input):
       a = torch.clone(input)
-      return (a + a)
+      return (a * a)
 )JIT";
 
 const auto clone_script_1 = R"JIT(
   def forward(self, input: Tensor, memory_format: int):
       a = torch.clone(input, memory_format=memory_format)
-      return (a + a)
+      return (a * a)
 )JIT";
 
 const auto aten_sum = R"JIT(
@@ -270,36 +270,32 @@ const auto pow_script_sca_ten = R"JIT(
       return torch.pow(input, exponent).clone()
 )JIT";
 
-// to.dtype
-const auto to_script_0 = R"JIT(
+const auto to_script_dtype = R"JIT(
   def forward(self, input: Tensor, dtype: int, non_blocking: bool, copy: bool, memory_format: int):
       a = input + input
       return torch.to(a, dtype, non_blocking, copy, memory_format).clone()
 )JIT";
 
-// to.dtype, strided
-const auto to_script_1 = R"JIT(
+const auto to_script_dtype_strided = R"JIT(
   def forward(self, input: Tensor, dtype: int, non_blocking: bool, copy: bool, memory_format: int):
       b = input.permute(0, 2, 3, 1)
       return torch.to(b, dtype, non_blocking, copy, memory_format).clone()
 )JIT";
 
-// to.prim_dtype
-const auto to_script_2 = R"JIT(
-  def forward(self, input:Tensor, dtype: int, non_blocking: bool, copy: bool):
+const auto to_script_prim_dtype = R"JIT(
+  def forward(self, input:Tensor, dtype: Optional[int], non_blocking: bool, copy: bool):
       a = input + input
       return torch.to(a, dtype, non_blocking, copy).clone()
 )JIT";
 
-// to.other
-const auto to_script_3 = R"JIT(
+const auto to_script_other = R"JIT(
   def forward(self, input:Tensor, other: Tensor, non_blocking: bool, copy: bool, memory_format: int):
       a = input + input
       return torch.to(a, other, non_blocking, copy, memory_format).clone()
 )JIT";
 
 // if input is float tensor, b could be alias of a
-const auto to_script_4 = R"JIT(
+const auto to_script_alias = R"JIT(
   def forward(self, input:Tensor):
       a = input + input
       b = a.float()
@@ -307,13 +303,7 @@ const auto to_script_4 = R"JIT(
       return (c)
 )JIT";
 
-const auto detach_script_0 = R"JIT(
-  def forward(self, input: Tensor):
-      a = input.detach()
-      return input is a
-)JIT";
-
-const auto detach_script_1 = R"JIT(
+const auto detach_script = R"JIT(
   def forward(self, input: Tensor):
       a = input.detach()
       return a.clone()
@@ -590,20 +580,6 @@ const auto addmm_script = R"JIT(
    return torch.addmm(inp, mat1, mat2, alpha=alpha, beta=beta).clone()
 )JIT";
 
-const auto if_script = R"JIT(
-  def forward(self, a: Tensor, b: Tensor, x: bool):
-    c = (a + b).relu().half().float()
-    d = b * c
-    if x:
-      e = a.flatten().half() * b.flatten().half()
-    else:
-      e = a.flatten().half() + b.flatten().half()
-    f = e.float().relu()
-    g = {"d": d, "b": b}
-    h = {"e": e, "f": f}
-    return [g, h]
-)JIT";
-
 const auto var_cat_script = R"JIT(
   def forward(self, inp1: Tensor, inp2: Tensor, dim: int):
    return torch.cat([inp1, inp2], dim).clone()
@@ -642,8 +618,8 @@ const auto index_without_none_script = R"JIT(
 )JIT";
 
 const auto index_with_none_script = R"JIT(
-  def forward(self, a: Tensor, idx: Tensor):
-      return a[idx, None].clone()
+  def forward(self, a: Tensor, idx: Tensor, none: Optional[Tensor]):
+      return a[idx, none].clone()
 )JIT";
 
 const auto index_with_two_tensors_script = R"JIT(
@@ -779,6 +755,14 @@ const std::string quantize_script = R"IR(
       return (%1249)
 )IR";
 
+const std::string quantized_linear_dynamic_fp16_script = R"IR(
+  graph(%input: Tensor, %weights: Tensor):
+      %bias: None = prim::Constant()
+      %packed_params = quantized::linear_prepack_fp16(%weights, %bias)
+      %output = quantized::linear_dynamic_fp16(%input, %packed_params)
+      return (%output)
+)IR";
+
 const auto fmod_tensor = R"JIT(
   def forward(self, a: Tensor, b: Tensor):
       return torch.fmod(a, b).clone()
@@ -838,3 +822,37 @@ const std::string signed_log1p_script = R"IR(
       %res : Tensor = aten::clone(%3, %none)
       return (%res)
 )IR";
+
+const auto getitem_immutable_input_dict_script = R"JIT(
+  def forward(self, input: Dict[int, Tensor]):
+      a = input[0]
+      b = input[1]
+      c = a + b
+      return c.clone()
+)JIT";
+
+const auto getitem_mutable_input_dict_script = R"JIT(
+  def forward(self, input: Dict[int, Tensor]):
+      a = input[0]
+      input[1] = a
+      b = input[1]
+      c = a + b
+      return c.clone()
+)JIT";
+
+const auto var_tuple_unpack_script = R"JIT(
+  def forward(self, input_0: Tuple[Tensor, Tensor], input_1: Tuple[int, int]):
+      a, b = input_0
+      c, d = input_1
+      res = a * c + b * d
+      return res.clone()
+)JIT";
+
+const auto var_tuple_unpack_not_applied_script = R"JIT(
+  def forward(self, input_0: Tuple[Tensor, Tensor], input_1: Tuple[int, int]):
+      a, b = input_0
+      x = a + b
+      c, d = input_1
+      res = a * c + b * d + x
+      return res.clone()
+)JIT";

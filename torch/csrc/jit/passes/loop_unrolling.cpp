@@ -304,7 +304,7 @@ void LoopsPeeler::peelLoops() {
 bool PeelProfilingLoops(const std::shared_ptr<Graph>& graph) {
   auto peel_predicate = [](Node* n) {
     for (auto i : n->inputs()) {
-      if (i->type()->isSubtypeOf(TensorType::get())) {
+      if (i->type()->isSubtypeOf(*TensorType::get())) {
         return true;
       }
     }

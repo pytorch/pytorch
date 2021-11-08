@@ -12,31 +12,15 @@
     size_t src_numel =                                                \
         src->nbytes() / THCuda##TYPECUDA##Storage_elementSize(state); \
     THArgCheck(self_numel == src_numel, 2, "size does not match");    \
-    THCTensor* selfTensor =                                           \
-        THCTensor_(newWithStorage1d)(state, self, 0, self_numel, 1);  \
-    struct THCuda##TYPECUDA##Tensor* srcTensor =                      \
+    at::Tensor selfTensor = tensor_reclaim(                           \
+        THCTensor_(newWithStorage1d)(state, self, 0, self_numel, 1)); \
+    at::Tensor srcTensor = tensor_reclaim(                            \
         THCuda##TYPECUDA##Tensor_newWithStorage1d(                    \
-            state, src, 0, src_numel, 1);                             \
-    THCTensor_(copy)(state, selfTensor, srcTensor);                   \
-    THCuda##TYPECUDA##Tensor_free(state, srcTensor);                  \
-    THCTensor_(free)(state, selfTensor);                              \
+            state, src, 0, src_numel, 1));                            \
+    selfTensor.copy_(srcTensor);                                      \
   }
 
-#if !defined(THC_REAL_IS_COMPLEXFLOAT) && !defined(THC_REAL_IS_COMPLEXDOUBLE)
-  THC_CUDA_STORAGE_IMPLEMENT_COPY(Byte,Byte)
-  THC_CUDA_STORAGE_IMPLEMENT_COPY(Char,Char)
-  THC_CUDA_STORAGE_IMPLEMENT_COPY(Short,Short)
-  THC_CUDA_STORAGE_IMPLEMENT_COPY(Int,Int)
-  THC_CUDA_STORAGE_IMPLEMENT_COPY(Long,Long)
-  THC_CUDA_STORAGE_IMPLEMENT_COPY(Float,)  // i.e. float
-  THC_CUDA_STORAGE_IMPLEMENT_COPY(Double,Double)
-  THC_CUDA_STORAGE_IMPLEMENT_COPY(Half,Half)
-  THC_CUDA_STORAGE_IMPLEMENT_COPY(Bool,Bool)
-  THC_CUDA_STORAGE_IMPLEMENT_COPY(BFloat16,BFloat16)
-#else
-  THC_CUDA_STORAGE_IMPLEMENT_COPY(ComplexFloat,ComplexFloat)
-  THC_CUDA_STORAGE_IMPLEMENT_COPY(ComplexDouble,ComplexDouble)
-#endif
+THC_CUDA_STORAGE_IMPLEMENT_COPY(Byte,Byte)
 
 #undef THC_CUDA_STORAGE_IMPLEMENT_COPY
 
