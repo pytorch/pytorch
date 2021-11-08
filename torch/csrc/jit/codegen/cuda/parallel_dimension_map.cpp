@@ -229,8 +229,7 @@ void ParallelDimensionMap::adjustMappingsForWarpPadding() {
   // single warp, use the constant warp size as the dimension of
   // TIDx. Otherwise, jsut use blockDim.x.
   if (warp_info.is_tidx_single_warp) {
-    dim_map_.at(ParallelType::TIDx) =
-        ir_builder.create<kir::Int>(warp_size);
+    dim_map_.at(ParallelType::TIDx) = ir_builder.create<kir::Int>(warp_size);
   } else {
     dim_map_.at(ParallelType::TIDx) =
         kir::NamedScalar::getParallelDim(ParallelType::TIDx);
