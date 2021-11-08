@@ -30,8 +30,8 @@ env:
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
   no_proxy: localhost,127.0.0.1,github.com,amazonaws.com,s3.amazonaws.com,169.254.169.254,169.254.170.2,/var/run/docker.sock
   AWS_DEFAULT_REGION: us-east-1
-  CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
-  CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+  PR_NUMBER: ${{ github.event.pull_request.number }}
+  SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   USE_CUDA: 0
 
 concurrency:
@@ -101,7 +101,7 @@ jobs:
         shell: bash
         env:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
-          CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          BRANCH: ${{ steps.parse-ref.outputs.branch }}
         run: |
           .jenkins/pytorch/win-build.sh
       # Upload to github so that people can click and download artifacts
@@ -274,12 +274,12 @@ jobs:
         # tools/stats/print_test_stats.py to natively support GitHub Actions
         env:
           AWS_DEFAULT_REGION: us-east-1
-          CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: win-vs2019-cpu-py3-test
-          CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
-          CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
-          CIRCLE_WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          TAG: ${{ steps.parse-ref.outputs.tag }}
+          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
         shell: bash
         run: |
           python3 -m pip install -r requirements.txt
