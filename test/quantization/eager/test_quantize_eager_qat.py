@@ -8,6 +8,9 @@ from torch.nn import Conv2d, BatchNorm2d, ReLU, init
 from torch.nn.intrinsic.qat import ConvBn2d, ConvBnReLU2d
 from torch.nn.modules.utils import _pair
 import torch.nn.quantized as nnq
+import torch.nn.quantized.dynamic as nnqd
+import torch.nn.qat as nnqat
+import torch.nn.qat.dynamic as nnqatd
 from torch.ao.quantization import (
     prepare,
     convert,
@@ -17,6 +20,7 @@ from torch.ao.quantization import (
     DeQuantStub,
     default_qconfig,
     default_qat_qconfig,
+    get_default_qat_qconfig,
     FixedQParamsFakeQuantize,
 )
 from torch.testing._internal.common_utils import TestCase
@@ -25,6 +29,7 @@ from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     QuantStubModel,
     ManualLinearQATModel,
+    ManualLinearDynamicQATModel,
     ManualConvLinearQATModel,
     ManualEmbeddingBagLinear,
     TwoLayerLinearModel,
@@ -106,6 +111,27 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
                 model = ManualConvLinearQATModel()
                 model = quantize_qat(model, test_only_train_fn, [self.img_data_2d_train])
                 checkQuantized(model)
+
+    def test_dynamic_qat_linear(self):
+        for qengine in supported_qengines:
+            with override_quantized_engine(qengine):
+                # Dynamic QAT without memoryless observers should fail
+                with self.assertRaisesRegex(ValueError, "Dynamic QAT requires a memoryless observer"):
+                    model = ManualLinearDynamicQATModel(default_qat_qconfig)
+                    model = prepare_qat(model, mapping={torch.nn.Linear: nnqatd.Linear})
+
+                model = ManualLinearDynamicQATModel()
+                model = prepare_qat(model, mapping={torch.nn.Linear: nnqatd.Linear})
+                self.assertEqual(type(model.fc1), nnqatd.Linear)
+                self.assertEqual(type(model.fc2), nnqatd.Linear)
+                self.checkObservers(model)
+                test_only_train_fn(model, self.train_data)
+                model = convert(model, mapping={nnqatd.Linear: nnqd.Linear})
+                self.assertEqual(type(model.fc1), nnqd.Linear)
+                self.assertEqual(type(model.fc2), nnqd.Linear)
+                test_only_eval_fn(model, self.calib_data)
+                self.checkScriptable(model, self.calib_data)
+                self.checkNoQconfig(model)
 
     def test_embedding_bag_linear(self):
         for qengine in supported_qengines:
@@ -851,6 +877,39 @@ class TestConvBNQATModule(TestCase):
 
             qat_op_optim.step()
             qat_ref_op_optim.step()
+
+class TestEmbeddingBagQATModule(TestCase):
+    def test_qat_embedding_bag_errors(self):
+        default_qat_qconfig = get_default_qat_qconfig(torch.backends.quantized.engine)
+
+        # Test constructor parameters checks here.
+        with self.assertRaisesRegex(AssertionError,
+                                    "qconfig must be provided for QAT module"):
+            nnqat.EmbeddingBag(10, 5, qconfig=None)
+
+        with self.assertRaisesRegex(AssertionError,
+                                    "Embedding Bag weights requires a qscheme of " +
+                                    "torch.per_channel_affine_float_qparams"):
+            nnqat.EmbeddingBag(10, 5, qconfig=default_qat_qconfig)
+
+        # Test from_float checks here.
+        embed = nn.Embedding(10, 5)
+        with self.assertRaisesRegex(AssertionError,
+                                    "qat.EmbeddingBag.from_float only works for EmbeddingBag"):
+            nnqat.EmbeddingBag.from_float(embed)
+        embed_bag = nn.EmbeddingBag(10, 5)
+        with self.assertRaisesRegex(AssertionError,
+                                    "Input float module must have qconfig defined"):
+            nnqat.EmbeddingBag.from_float(embed_bag)
+        embed_bag.qconfig = None
+        with self.assertRaisesRegex(AssertionError,
+                                    "Input float module must have a valid qconfig"):
+            nnqat.EmbeddingBag.from_float(embed_bag)
+        embed_bag.qconfig = default_qat_qconfig
+        with self.assertRaisesRegex(AssertionError,
+                                    "Embedding Bag weights requires a qscheme of " +
+                                    "torch.per_channel_affine_float_qparams"):
+            nnqat.EmbeddingBag.from_float(embed_bag)
 
 
 if __name__ == '__main__':
