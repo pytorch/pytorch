@@ -1626,7 +1626,6 @@ class TestTensorCreation(TestCase):
         self.assertEqual(c1, expected)
         self.assertEqual(c2, expected)
 
-    @skipMeta
     def test_linlogspace_mem_overlap(self, device):
         x = torch.rand(1, device=device).expand(10)
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):

@@ -674,9 +674,7 @@ TEST(LiteInterpreterTest, isCompatibleFail) {
   std::unordered_map<std::string, OperatorInfo> runtime_ops;
   runtime_ops["aten::add.Int"] = OperatorInfo{2};
   auto runtime_info = RuntimeCompatibilityInfo{
-      std::pair<uint64_t, uint64_t>(
-          caffe2::serialize::kMinSupportedBytecodeVersion,
-          caffe2::serialize::kMaxSupportedBytecodeVersion),
+      caffe2::serialize::kMaxSupportedBytecodeVersion,
       runtime_ops,
       _get_mobile_supported_types()};
 
@@ -686,32 +684,14 @@ TEST(LiteInterpreterTest, isCompatibleFail) {
       result.errors[0] ==
       "Operator 'aten::add.Scalar' missing from runtime (not found)");
 
-  // test trivial failure due to bytecode greater than max supported bytecode
-  // version
+  // test trivial failure due to bytecode
   runtime_ops["aten::add.Scalar"] = OperatorInfo{2};
   runtime_info = RuntimeCompatibilityInfo{
-      std::pair<uint64_t, uint64_t>(
-          caffe2::serialize::kMinSupportedBytecodeVersion,
-          caffe2::serialize::kMaxSupportedBytecodeVersion),
+      caffe2::serialize::kMaxSupportedBytecodeVersion,
       runtime_ops,
       _get_mobile_supported_types()};
   model_info.bytecode_version =
       caffe2::serialize::kMaxSupportedBytecodeVersion + 1;
-
-  result = is_compatible(runtime_info, model_info);
-  AT_ASSERT(result.status = ModelCompatibilityStatus::ERROR);
-
-  // test trivial failure due to bytecode less than min supported bytecode
-  // version
-  runtime_ops["aten::add.Scalar"] = OperatorInfo{2};
-  runtime_info = RuntimeCompatibilityInfo{
-      std::pair<uint64_t, uint64_t>(
-          caffe2::serialize::kMinSupportedBytecodeVersion,
-          caffe2::serialize::kMaxSupportedBytecodeVersion),
-      runtime_ops,
-      _get_mobile_supported_types()};
-  model_info.bytecode_version =
-      caffe2::serialize::kMinSupportedBytecodeVersion - 1;
 
   result = is_compatible(runtime_info, model_info);
   AT_ASSERT(result.status = ModelCompatibilityStatus::ERROR);

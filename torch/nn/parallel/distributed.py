@@ -323,10 +323,8 @@ class DistributedDataParallel(Module, Joinable):
 
             >>> import torch.distributed.autograd as dist_autograd
             >>> from torch.nn.parallel import DistributedDataParallel as DDP
-            >>> import torch
             >>> from torch import optim
             >>> from torch.distributed.optim import DistributedOptimizer
-            >>> import torch.distributed.rpc as rpc
             >>> from torch.distributed.rpc import RRef
             >>>
             >>> t1 = torch.rand((3, 3), requires_grad=True)
@@ -347,9 +345,9 @@ class DistributedDataParallel(Module, Joinable):
             >>>
             >>> with dist_autograd.context() as context_id:
             >>>     pred = ddp_model(rref.to_here())
-            >>>     loss = loss_func(pred, target)
-            >>>     dist_autograd.backward(context_id, [loss])
-            >>>     dist_optim.step(context_id)
+            >>>     loss = loss_func(pred, loss)
+            >>>     dist_autograd.backward(context_id, loss)
+            >>>     dist_optim.step()
 
     .. note::
         To let a non-DDP model load a state dict from a DDP model,
