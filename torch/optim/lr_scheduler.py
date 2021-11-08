@@ -25,6 +25,7 @@ class _LRScheduler(object):
 
         # Attach optimizer
         if not isinstance(optimizer, Optimizer):
+            import ipdb; ipdb.set_trace()
             raise TypeError('{} is not an Optimizer'.format(
                 type(optimizer).__name__))
         self.optimizer = optimizer
@@ -765,6 +766,7 @@ class ChainedScheduler(_LRScheduler):
                     "got schedulers at index {} and {} to be different".format(0, scheduler_idx)
                 )
         self._schedulers = list(schedulers)
+        self.optimizer = schedulers[0].optimizer
 
     def step(self):
         for scheduler in self._schedulers:
