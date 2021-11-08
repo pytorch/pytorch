@@ -881,7 +881,12 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   const IValue& constValue() const {
     std::unique_lock<std::mutex> lock(mutex_);
     AT_ASSERT(completed());
-    AT_ASSERT(!eptr_);
+    TORCH_INTERNAL_ASSERT(
+      !eptr_,
+      "value() accessor should only be used when future is not completed with ",
+      "an error, but future had the following error: ",
+      tryRetrieveErrorMessageInternal(eptr_)
+    );
     return value_;
   }
 
