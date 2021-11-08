@@ -262,6 +262,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
       case libkineto::ActivityType::CUDA_RUNTIME:
       case libkineto::ActivityType::CPU_INSTANT_EVENT:
       case libkineto::ActivityType::GLOW_RUNTIME:
+      case libkineto::ActivityType::PYTHON_FUNCTION:
         return c10::DeviceType::CPU;
       default: {
         LOG(WARNING) << "Unknown activity type (" << (uint8_t)activity_type
@@ -278,7 +279,8 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
       // These events are already processed
       if (activity.type() != libkineto::ActivityType::CPU_OP &&
           activity.type() != libkineto::ActivityType::CPU_INSTANT_EVENT &&
-          activity.type() != libkineto::ActivityType::USER_ANNOTATION
+          activity.type() != libkineto::ActivityType::USER_ANNOTATION &&
+          activity.type() != libkineto::ActivityType::PYTHON_FUNCTION
       ) {
         kineto_events_.emplace_back();
         auto& kineto_event = kineto_events_.back();
@@ -373,9 +375,8 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
     ska::flat_hash_map<std::string, size_t> module_counter_;
     ska::flat_hash_map<size_t, std::string> module_id_map_;
     auto record_module_id = [&](python_tracer::PyTraceEvent* e) {
-      if (e->call_type_ != python_tracer::CallType::kPyModuleCall) {
-        module_id_map_[e->module_id_] = "null";
-      } else if (module_id_map_.find(e->module_id_) == module_id_map_.end()) {
+      if (e->call_type_ == python_tracer::CallType::kPyModuleCall &&
+          module_id_map_.find(e->module_id_) == module_id_map_.end()) {
         // We use the fact that operator[] will default initialize new keys.
         module_id_map_[e->module_id_] = std::to_string(module_counter_[e->name_]++);
       }
@@ -418,7 +419,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
         auto e = (*py_events_it).get();
         libkineto::GenericTraceActivity op(
           cpu_trace->span,
-          libkineto::ActivityType::USER_ANNOTATION,
+          libkineto::ActivityType::PYTHON_FUNCTION,
           e->name_
         );
 
@@ -427,13 +428,12 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
         op.startTime = e->startTime_;
         op.endTime = e->endTime_;
 
-        std::stringstream py_metadata;
-        py_metadata << "{ "
-            << "\"id\": " << py_event_indices_.at(e) <<  ", "
-            << "\"parent_id\": " << py_event_indices_.at(e->parent_) << ", "
-            << "\"module_id\": " << module_id_map_.at(e->module_id_) << ", "
-            << "\"python_thread\": " << e->thread_id_ << " }";
-        op.addMetadata("python_info", py_metadata.str());
+        op.addMetadata("Python id", py_event_indices_.at(e));
+        op.addMetadata("Python parent id", py_event_indices_.at(e->parent_));
+        op.addMetadata("Python thread", std::to_string(e->thread_id_));
+        if (e->call_type_ == python_tracer::CallType::kPyModuleCall) {
+          op.addMetadata("Python module id", module_id_map_.at(e->module_id_));
+        }
 
         cpu_trace->activities.push_back(op);
         py_events_it++;
@@ -750,6 +750,7 @@ void prepareProfiler(
     libkineto::ActivityType::USER_ANNOTATION,
     libkineto::ActivityType::EXTERNAL_CORRELATION,
     libkineto::ActivityType::CUDA_RUNTIME,
+    libkineto::ActivityType::PYTHON_FUNCTION,
   };
 
   std::set<libkineto::ActivityType> cudaTypes = {
