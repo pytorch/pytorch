@@ -152,9 +152,9 @@ args = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
     '--pattern=# type:\s*ignore(?!\[)',
-    '--linter_name=TYPEIGNORE',
-    '--error_name=unqualified type: ignore',
-    """--error_description=\
+    '--linter-name=TYPEIGNORE',
+    '--error-name=unqualified type: ignore',
+    """--error-description=\
         This line has an unqualified `type: ignore`; \
         please convert it to `type: ignore[xxxx]`\
     """,
@@ -170,9 +170,9 @@ args = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
     '--pattern=# type:\s*ignore(?!\[)',
-    '--linter_name=TYPEIGNORE',
-    '--error_name=unqualified noqa',
-    """--error_description=\
+    '--linter-name=TYPEIGNORE',
+    '--error-name=unqualified noqa',
+    """--error-description=\
         This line has an unqualified `noqa`; \
         please convert it to `noqa: XXXX`\
     """,
@@ -223,4 +223,101 @@ args = [
     'tools/linter/adapters/newlines_linter.py',
     '--',
     '@{{PATHSFILE}}',
+]
+
+[[linter]]
+name = 'SPACES'
+include_patterns = ['**']
+exclude_patterns = [
+    '**/contrib/**',
+    '**/*.diff',
+    'third_party/**',
+]
+args = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=[[:blank:]]$',
+    '--linter-name=SPACES',
+    '--error-name=trailing spaces',
+    '--replace-pattern=s/[[:blank:]]+$//',
+    """--error-description=\
+        This line has trailing spaces; please remove them.\
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
+name = 'TABS'
+include_patterns = ['**']
+exclude_patterns = [
+    '**/*.svg',
+    '**/*Makefile',
+    '**/contrib/**',
+    'third_party/**',
+    '**/.gitattributes',
+    '**/.gitmodules',
+]
+args = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=\t',
+    '--linter-name=TABS',
+    '--error-name=saw some tabs',
+    '--replace-pattern=s/\t/    /',
+    """--error-description=\
+        This line has tabs; please replace them with spaces.\
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
+name = 'INCLUDE'
+include_patterns = [
+    'c10/**',
+    'aten/**',
+    'torch/csrc/**',
+]
+exclude_patterns = [
+    'aten/src/ATen/native/quantized/cpu/qnnpack/**',
+]
+args = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=#include "',
+    '--linter-name=INCLUDE',
+    '--error-name=quoted include',
+    '--replace-pattern=s/#include "(.*)"$/#include <\1>/',
+    """--error-description=\
+        This #include uses quotes; please convert it to #include <xxxx>\
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
+name = 'PYPIDEP'
+include_patterns = ['.github/**']
+exclude_patterns = [
+    '**/*.rst',
+    '**/*.py',
+    '**/*.md',
+    '**/*.diff',
+]
+args = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    """--pattern=\
+    (pip|pip3|python -m pip|python3 -m pip|python3 -mpip|python -mpip) \
+    install ([a-z][\\.a-z-0-9]*+(?!(=|.*\\.whl))([[:blank:]]|))+\
+    """,
+    '--linter-name=PYPIDEP',
+    '--error-name=unpinned PyPI install',
+    """--error-description=\
+        This line has unpinned PyPi installs; \
+        please pin them to a specific version: e.g. 'thepackage==1.2'\
+    """,
+    '--',
+    '@{{PATHSFILE}}'
 ]
