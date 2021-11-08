@@ -52,6 +52,7 @@ install(FILES
   THGenerateIntTypes.h
   THGenerateQUInt8Type.h
   THGenerateQUInt4x2Type.h
+  THGenerateQUInt2x4Type.h
   THGenerateQInt8Type.h
   THGenerateQInt32Type.h
   THGenerateQTypes.h
@@ -70,6 +71,5 @@ install(FILES
   generic/THStorageCopy.h
   generic/THTensor.cpp
   generic/THTensor.h
-  generic/THTensor.hpp
   # See Note [TH abstraction violation]
   DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/TH/generic")

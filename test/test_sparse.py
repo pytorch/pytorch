@@ -1,3 +1,5 @@
+# Owner(s): ["module: sparse"]
+
 import torch
 import itertools
 import functools
@@ -1228,7 +1230,7 @@ class TestSparse(TestCase):
         # Create coalesced sparse tensor with non-contiguous indices
         weight = torch.randn(hidden_size, input_size, dtype=dtype, device=device).to_sparse()
         self.assertTrue(weight.is_coalesced())
-        non_contig_indices = weight.indices().transpose(-1, -2).contiguous().transpose(-1, -2)
+        non_contig_indices = weight.indices().mT.contiguous().mT
         weight = torch.sparse_coo_tensor(
             indices=non_contig_indices, values=weight.values(), size=weight.shape)
         weight._coalesced_(True)
@@ -3331,7 +3333,7 @@ class TestSparse(TestCase):
     @coalescedonoff
     @dtypes(torch.double)
     def test_assign(self, device, dtype, coalesced):
-        def assign_to(a):
+        def assign_to():
             a, i_a, v_a = self._gen_sparse(2, 5, [2, 3], dtype, device, coalesced)
             a[0] = 100
 
@@ -3445,10 +3447,10 @@ class TestSparseUnaryUfuncs(TestCase):
         self.assertEqual(expected, actual)
 
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA
-instantiate_device_type_tests(TestSparseUnaryUfuncs, globals())
+instantiate_device_type_tests(TestSparseUnaryUfuncs, globals(), except_for='meta')
 
 # e.g., TestSparseCPU and TestSparseCUDA
-instantiate_device_type_tests(TestSparse, globals())
+instantiate_device_type_tests(TestSparse, globals(), except_for='meta')
 
 if __name__ == '__main__':
     run_tests()

@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: jit"]
+
 import os
 import sys
 import inspect
@@ -126,6 +128,59 @@ class TestList(JitTestCase):
         with self.assertRaisesRegexWithHighlight(RuntimeError, "previously had type", "x"):
             self.checkScript(reassign_nested, (), optimize=False)
 
+    def test_list_variance(self):
+        """
+        `List[T1]` is not a subtype of `List[T2]`, even if `T1` is a
+        subtype of `T2`. However, if we have a temporary list object
+        (that is, a list comprehension or a list literal) on the rhs of
+        an assignment statement, we want to ignore the inferred type of
+        the rhs if we can prove that: 1) both the lhs and the rhs are
+        lists, and 2) the inner type of the lhs list is a subtype of the
+        inner type of the rhs list.
+
+        # This should pass
+        x: List[Optional[int]] = [None, None, None]
+
+        # This should fail
+        y: List[None] = [None, None, None]
+        x: List[Optional[int]] = y
+        """
+        def test_listliteral_is_typed_from_annotation():
+            x: List[Optional[int]] = [None, None, None]
+            return x
+
+        self.checkScript(test_listliteral_is_typed_from_annotation, ())
+
+        def test_listcomprehension_is_typed_from_annotation():
+            x: List[Optional[int]] = [None for _ in range(3)]
+            return x
+
+        self.checkScript(test_listcomprehension_is_typed_from_annotation, ())
+
+        def test_lists_with_different_internal_types_are_invariant(self):
+            x: List[int] = [1, 2, 3]
+            y: List[Optional[int]] = x
+            return x
+
+        with self.assertRaisesRegex(RuntimeError, "Variable 'y' is "
+                                    "annotated with type "
+                                    r"List\[Optional\[int\]\] but is "
+                                    "being assigned to a value of type "
+                                    r"List\[int\]"):
+            torch.jit.script(test_lists_with_different_internal_types_are_invariant)
+
+        def test_lists_with_different_internal_types_are_invariant_recursive(self):
+            x: List[List[int]] = [[1, 2], [3]]
+            y: List[List[Optional[int]]] = x
+            return x
+
+        with self.assertRaisesRegex(RuntimeError, "Variable 'y' is "
+                                    "annotated with type "
+                                    r"List\[List\[Optional\[int\]\]\] "
+                                    "but is being assigned to a value "
+                                    r"of type List\[List\[int\]\]"):
+            torch.jit.script(test_lists_with_different_internal_types_are_invariant_recursive)
+
     def test_del(self):
         def inputs():
             return [1, 2, 3, 4]
@@ -244,8 +299,8 @@ class TestList(JitTestCase):
         self.checkScript(fn, ())
 
     def test_dict_keyword_with_mismatched_annotations(self):
-        err_msg = r"is annotated with type Dict\[int, str\] but is " \
-                  r"being assigned to a value of type Dict\[str, int\]"
+        err_msg = r"Dict type annotation `Dict\[int, str\]` did not " \
+                  "match the type of an actual key type `str`"
         with self.assertRaisesRegex(RuntimeError, err_msg):
             @torch.jit.script
             def fn():
@@ -1388,6 +1443,60 @@ class TestDict(JitTestCase):
         with self.assertRaisesRegexWithHighlight(RuntimeError, "KeyError", "x['hi']"):
             self.checkScript(fn, [{}])
 
+    def test_dict_variance(self):
+        """
+        `Dict[T1, _]` is not a subtype of `Dict[T2, _]`, even if `T1` is
+        a subtype of `T2`; similarly `Dict[_, T1]` would not be a
+        subtype of `Dict[_, T2]`.
+
+        However, if we have a temporary dict object (that is, a dict
+        comprehension or a dict literal) on the rhs of an assignment
+        statement, we want to ignore the inferred type of the rhs if we
+        can prove that: 1) both the lhs and the rhs are dicts with the
+        same key types (TorchScript has a restricted set of allowed key
+        types, so we don't need to worry about subtyping relationships
+        here), and 2) the value type of the dict is a subtype of the
+        value type of the rhs dict.
+        """
+        def test_dictliteral_is_typed_from_annotation():
+            x: Dict[str, Optional[int]] = {"foo": None, "bar": None, "baz": None}
+            return x
+
+        self.checkScript(test_dictliteral_is_typed_from_annotation, ())
+
+        def test_dictcomprehension_is_typed_from_annotation():
+            metasyntactics = ["foo", "bar", "baz"]
+            x: Dict[str, Optional[int]] = {word: None for word in metasyntactics}
+            return x
+
+        self.checkScript(test_dictcomprehension_is_typed_from_annotation, ())
+
+        def test_dicts_with_different_value_types_are_invariant(self):
+            x: Dict[str, int] = {"foo": 1, "bar": 2, "baz": 3}
+            y: Dict[str, Optional[int]] = x
+            return x
+
+        with self.assertRaisesRegex(RuntimeError, "Variable 'y' is "
+                                    "annotated with type "
+                                    r"Dict\[str, Optional\[int\]\] but "
+                                    "is being assigned to a value of "
+                                    r"type Dict\[str, int\]"):
+            torch.jit.script(test_dicts_with_different_value_types_are_invariant)
+
+        def test_dicts_with_different_value_types_are_invariant_recursive(self):
+            x: Dict[str, int] = {"foo": 1, "bar": 2, "baz": 3}
+            y: Dict[str, Dict[str, int]] = {"foo": x, "bar": x, "baz": x}
+            z: Dict[str, Dict[str, Optional[int]]] = y
+            return x
+
+        with self.assertRaisesRegex(RuntimeError, "Variable 'z' is "
+                                    "annotated with type "
+                                    r"Dict\[str, Dict\[str, Optional"
+                                    r"\[int\]\]\] but is being assigned"
+                                    r" to a value of type Dict\[str, "
+                                    r"Dict\[str, int\]\]"):
+            torch.jit.script(test_dicts_with_different_value_types_are_invariant_recursive)
+
     def test_keys(self):
         @torch.jit.script
         def keys(x: Dict[str, Tensor]) -> List[str]:
@@ -1578,7 +1687,7 @@ class TestDict(JitTestCase):
         def missing_index(x: Dict[str, int]) -> int:
             return x['dne']
 
-        with self.assertRaisesRegexWithHighlight(RuntimeError, "KeyError", "x['d"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "KeyError", "x['dne'"):
             missing_index({'item': 20, 'other_item': 120})
 
         code = dedent('''

@@ -52,11 +52,11 @@ from tools.codegen.api.python import (PythonArgument, PythonSignature,
                                       dispatch_lambda_return_str,
                                       has_tensor_options,
                                       namedtuple_fieldnames, signature)
-from tools.codegen.gen import cpp_string, parse_native_yaml, FileManager
+from tools.codegen.gen import cpp_string, parse_native_yaml
 from tools.codegen.context import with_native_function
 from tools.codegen.model import (Argument, BaseOperatorName, NativeFunction,
                                  Type, Variant)
-from tools.codegen.utils import split_name_params, YamlLoader
+from tools.codegen.utils import split_name_params, YamlLoader, FileManager
 
 from typing import Dict, Optional, List, Tuple, Set, Sequence, Callable
 
@@ -86,7 +86,7 @@ _SKIP_PYTHON_BINDINGS = [
     'item', '_local_scalar_dense', 'to',
     '_to_copy',
     'copy_sparse_to_sparse_', 'copy_',
-    'numpy_T',  # this needs to be an attribute in Python, not a function
+    'numpy_T', 'matrix_H', 'mT', 'mH',  # these need to be an attributes in Python, not functions
     'nonzero(_(out|numpy))?',
     'set_data',
     '.*_overrideable',  # overrideable functions for backend extension
@@ -94,6 +94,7 @@ _SKIP_PYTHON_BINDINGS = [
     '_fw_primal', 'fake_quantize_per_tensor_affine_cachemask',
     'fake_quantize_per_channel_affine_cachemask',
     '_reshape_alias',
+    'replace_',  # only used by the functionalization pass, doesn't need to be exposed to python
 ]
 
 SKIP_PYTHON_BINDINGS = list(map(lambda pattern: re.compile(rf'^{pattern}$'), _SKIP_PYTHON_BINDINGS))

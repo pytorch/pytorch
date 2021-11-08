@@ -11,7 +11,7 @@ class ShardMetadata(object):
     offsets, lengths and device placement.
 
     Args:
-        shard_offsets(List[int]): Offsets in the orignal tensor indicating
+        shard_offsets(List[int]): Offsets in the original tensor indicating
             the start offsets for this shard. Should have the same rank as
             the original tensor.
         shard_lengths(List[int]): Lengths indicating the length of each
@@ -149,4 +149,4 @@ def get_chunked_dim_size(dim_size, split_size, idx):
     Returns:
         An int indicating the dim size of the chunk.
     """
-    return min(dim_size, split_size * (idx + 1)) - split_size * idx
+    return max(min(dim_size, split_size * (idx + 1)) - split_size * idx, 0)
