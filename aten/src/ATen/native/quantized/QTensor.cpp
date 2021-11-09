@@ -15,6 +15,7 @@ Tensor quantize_per_tensor_dynamic(
     const Tensor& self,
     ScalarType dtype,
     bool reduce_range) {
+  TORCH_CHECK( (dtype == ScalarType::QInt8 || dtype == ScalarType::QUInt8), "dtype ", dtype, "not supported");
   auto input_contig = self.contiguous();
   float x_min = input_contig.min().item<float>();
   float x_max = input_contig.max().item<float>();
@@ -31,8 +32,8 @@ Tensor quantize_per_tensor_dynamic(
     qmin = -128;
     qmax = 127;
   } else if (dtype == ScalarType::QUInt8) {
-  } else {
-    // dtype not supported
+    qmin = 0;
+    qmax = 255;
   }
 
   auto q_params = quant_utils::ChooseQuantizationParams(
