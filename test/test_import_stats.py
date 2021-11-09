@@ -13,7 +13,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 try:
     # Just in case PyTorch was not built in 'develop' mode
     sys.path.append(str(REPO_ROOT))
-    from tools.stats.scribe import rds_write, register_rds_schema
+    from tools.stats.rds import rds_write, register_rds_schema
 except ImportError:
     register_rds_schema = None
     rds_write = None

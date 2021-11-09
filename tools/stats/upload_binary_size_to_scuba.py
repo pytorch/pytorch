@@ -10,8 +10,8 @@ import time
 import zipfile
 
 from typing import Any, Dict, Generator, List
-from tools.stats.scribe import (
-    send_to_scribe,
+from tools.stats.scribe import send_to_scribe
+from tools.stats.rds import (
     rds_write,
     register_rds_schema,
     schema_from_sample,

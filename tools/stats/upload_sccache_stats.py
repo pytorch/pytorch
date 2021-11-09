@@ -3,7 +3,7 @@ import sys
 import os
 from typing import Any
 
-from tools.stats.scribe import (
+from tools.stats.rds import (
     schema_from_sample,
     rds_write,
     register_rds_schema,
