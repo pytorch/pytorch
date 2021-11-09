@@ -22,7 +22,7 @@ c10::intrusive_ptr<Message> PythonCall::toMessageImpl() && {
   return c10::make_intrusive<Message>(
       std::move(payload),
       std::move(serializedPyObj_.tensors_),
-      MessageType::PYTHON_CALL);
+      BuiltinMessageType::PYTHON_CALL);
 }
 
 std::unique_ptr<PythonCall> PythonCall::fromMessage(const Message& message) {

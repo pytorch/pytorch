@@ -45,8 +45,8 @@ std::unique_ptr<RpcCommandBase> RequestCallbackNoPython::
         std::unique_ptr<RpcCommandBase> rpc,
         const MessageType& messageType) const {
   TORCH_CHECK(
-      messageType != MessageType::PYTHON_CALL &&
-          messageType != MessageType::PYTHON_REMOTE_CALL,
+      messageType != BuiltinMessageType::PYTHON_CALL &&
+          messageType != BuiltinMessageType::PYTHON_REMOTE_CALL,
       "Python calls are not supported!");
   return rpc;
 }
@@ -344,7 +344,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
           auto msg = getMessageWithAutograd(
               fromWorkerId,
               wrappedRpcResponseFuture.value().toCustomClass<Message>(),
-              MessageType::FORWARD_AUTOGRAD_RESP);
+              BuiltinMessageType::FORWARD_AUTOGRAD_RESP);
           return withStorages(std::move(msg));
         }
       },
@@ -472,7 +472,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
             populateRemoteProfiledEvents(
                 profiledEvents, profilingConfig, event_lists);
             auto rpcWithProfilingResp = std::make_unique<RpcWithProfilingResp>(
-                MessageType::RUN_WITH_PROFILING_RESP,
+                BuiltinMessageType::RUN_WITH_PROFILING_RESP,
                 wrappedRpcResponseFuture.value().toCustomClass<Message>(),
                 profiledEvents,
                 profilingKeyId);
@@ -503,46 +503,46 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processRpc(
   // we can call here. RpcResponse could have an abstract method to convert it
   // to a python object.
   switch (messageType) {
-    case MessageType::SCRIPT_CALL: {
+    case BuiltinMessageType::SCRIPT_CALL: {
       return processScriptCall(rpc, std::move(streams));
     }
-    case MessageType::PYTHON_CALL: {
+    case BuiltinMessageType::PYTHON_CALL: {
       return processPythonCall(rpc, std::move(streams));
     }
-    case MessageType::SCRIPT_REMOTE_CALL: {
+    case BuiltinMessageType::SCRIPT_REMOTE_CALL: {
       return processScriptRemoteCall(rpc, std::move(streams));
     }
-    case MessageType::PYTHON_REMOTE_CALL: {
+    case BuiltinMessageType::PYTHON_REMOTE_CALL: {
       return processPythonRemoteCall(rpc, std::move(streams));
     }
-    case MessageType::SCRIPT_RREF_FETCH_CALL: {
+    case BuiltinMessageType::SCRIPT_RREF_FETCH_CALL: {
       return processScriptRRefFetchCall(rpc);
     }
-    case MessageType::PYTHON_RREF_FETCH_CALL: {
+    case BuiltinMessageType::PYTHON_RREF_FETCH_CALL: {
       return processPythonRRefFetchCall(rpc);
     }
-    case MessageType::RREF_USER_DELETE: {
+    case BuiltinMessageType::RREF_USER_DELETE: {
       return processRRefUserDelete(rpc);
     }
-    case MessageType::RREF_CHILD_ACCEPT: {
+    case BuiltinMessageType::RREF_CHILD_ACCEPT: {
       return processRRefChildAccept(rpc);
     }
-    case MessageType::RREF_FORK_REQUEST: {
+    case BuiltinMessageType::RREF_FORK_REQUEST: {
       return processRRefForkRequest(rpc);
     }
-    case MessageType::FORWARD_AUTOGRAD_REQ: {
+    case BuiltinMessageType::FORWARD_AUTOGRAD_REQ: {
       return processForwardAutogradReq(rpc, std::move(streams));
     }
-    case MessageType::BACKWARD_AUTOGRAD_REQ: {
+    case BuiltinMessageType::BACKWARD_AUTOGRAD_REQ: {
       return processBackwardAutogradReq(rpc, std::move(streams));
     };
-    case MessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ: {
+    case BuiltinMessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ: {
       return processCleanupAutogradContextReq(rpc);
     }
-    case MessageType::RUN_WITH_PROFILING_REQ: {
+    case BuiltinMessageType::RUN_WITH_PROFILING_REQ: {
       return processRunWithProfilingReq(rpc);
     }
-    case MessageType::RREF_BACKWARD_REQ: {
+    case BuiltinMessageType::RREF_BACKWARD_REQ: {
       return processRRefBackward(rpc);
     }
     default: {

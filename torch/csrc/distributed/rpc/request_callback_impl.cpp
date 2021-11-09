@@ -45,12 +45,12 @@ std::unique_ptr<RpcCommandBase> deserializePythonRpcCommandReference(
     RpcCommandBase& rpc,
     const MessageType& messageType) {
   switch (messageType) {
-    case MessageType::PYTHON_CALL: {
+    case BuiltinMessageType::PYTHON_CALL: {
       auto& pc = static_cast<PythonCall&>(rpc);
       return std::make_unique<UnpickledPythonCall>(
           pc.serializedPyObj(), pc.isAsyncExecution());
     }
-    case MessageType::PYTHON_REMOTE_CALL: {
+    case BuiltinMessageType::PYTHON_REMOTE_CALL: {
       auto& prc = static_cast<PythonRemoteCall&>(rpc);
       return std::make_unique<UnpickledPythonRemoteCall>(
           prc.serializedPyObj(),
@@ -58,7 +58,7 @@ std::unique_ptr<RpcCommandBase> deserializePythonRpcCommandReference(
           prc.retForkId(),
           prc.isAsyncExecution());
     }
-    case MessageType::FORWARD_AUTOGRAD_REQ: {
+    case BuiltinMessageType::FORWARD_AUTOGRAD_REQ: {
       // Deserialize the wrapped RPC if it contains Python UDF
       auto& rwa = static_cast<RpcWithAutograd&>(rpc);
       auto& wrappedRpc = rwa.wrappedRpc();
@@ -69,7 +69,7 @@ std::unique_ptr<RpcCommandBase> deserializePythonRpcCommandReference(
       }
       return nullptr;
     }
-    case MessageType::RUN_WITH_PROFILING_REQ: {
+    case BuiltinMessageType::RUN_WITH_PROFILING_REQ: {
       // Deserialize wrapped RPC if it contains python call
       auto& rpcWithProfilingReq = static_cast<RpcWithProfilingReq&>(rpc);
       auto& wrappedRpc = rpcWithProfilingReq.wrappedRpc();

@@ -29,7 +29,7 @@ c10::intrusive_ptr<Message> PythonRemoteCall::toMessageImpl() && {
   return c10::make_intrusive<Message>(
       std::move(payload),
       std::move(tensor_table),
-      MessageType::PYTHON_REMOTE_CALL);
+      BuiltinMessageType::PYTHON_REMOTE_CALL);
 }
 
 std::unique_ptr<PythonRemoteCall> PythonRemoteCall::fromMessage(

@@ -107,7 +107,7 @@ class TestE2EBase : public ::testing::Test {
         std::move(scriptCall).toMessage());
     response->waitAndThrow();
 
-    MessageType messageType = MessageType::FORWARD_AUTOGRAD_RESP;
+    MessageType messageType = BuiltinMessageType::FORWARD_AUTOGRAD_RESP;
     auto wrappedResponse = deserializeResponse(
         std::move(*response->value().toCustomClass<Message>()), messageType);
     return static_cast<ScriptResp&>(*wrappedResponse).value().toTensor();

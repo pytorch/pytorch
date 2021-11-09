@@ -921,7 +921,7 @@ c10::intrusive_ptr<JitFuture> TensorPipeAgent::send(
               // Remove entry from timeoutMap_.
               removeFromTimeoutMap(messageId);
 
-              if (responseMessage->type() == MessageType::EXCEPTION) {
+              if (responseMessage->type() == BuiltinMessageType::EXCEPTION) {
                 markFutureWithError(
                     std::move(futureResponseMessage),
                     std::string(

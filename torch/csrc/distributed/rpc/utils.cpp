@@ -98,46 +98,46 @@ std::string makeRPCError(
 
 std::unique_ptr<RpcCommandBase> deserializeRequest(const Message& request) {
   switch (request.type()) {
-    case MessageType::SCRIPT_CALL: {
+    case BuiltinMessageType::SCRIPT_CALL: {
       return ScriptCall::fromMessage(request);
     }
-    case MessageType::PYTHON_CALL: {
+    case BuiltinMessageType::PYTHON_CALL: {
       return PythonCall::fromMessage(request);
     }
-    case MessageType::SCRIPT_REMOTE_CALL: {
+    case BuiltinMessageType::SCRIPT_REMOTE_CALL: {
       return ScriptRemoteCall::fromMessage(request);
     }
-    case MessageType::PYTHON_REMOTE_CALL: {
+    case BuiltinMessageType::PYTHON_REMOTE_CALL: {
       return PythonRemoteCall::fromMessage(request);
     }
-    case MessageType::SCRIPT_RREF_FETCH_CALL: {
+    case BuiltinMessageType::SCRIPT_RREF_FETCH_CALL: {
       return ScriptRRefFetchCall::fromMessage(request);
     }
-    case MessageType::PYTHON_RREF_FETCH_CALL: {
+    case BuiltinMessageType::PYTHON_RREF_FETCH_CALL: {
       return PythonRRefFetchCall::fromMessage(request);
     }
-    case MessageType::RREF_USER_DELETE: {
+    case BuiltinMessageType::RREF_USER_DELETE: {
       return RRefUserDelete::fromMessage(request);
     }
-    case MessageType::RREF_CHILD_ACCEPT: {
+    case BuiltinMessageType::RREF_CHILD_ACCEPT: {
       return RRefChildAccept::fromMessage(request);
     }
-    case MessageType::RREF_FORK_REQUEST: {
+    case BuiltinMessageType::RREF_FORK_REQUEST: {
       return RRefForkRequest::fromMessage(request);
     }
-    case MessageType::FORWARD_AUTOGRAD_REQ: {
+    case BuiltinMessageType::FORWARD_AUTOGRAD_REQ: {
       return autograd::RpcWithAutograd::fromMessage(request);
     }
-    case MessageType::BACKWARD_AUTOGRAD_REQ: {
+    case BuiltinMessageType::BACKWARD_AUTOGRAD_REQ: {
       return autograd::PropagateGradientsReq::fromMessage(request);
     }
-    case MessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ: {
+    case BuiltinMessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ: {
       return autograd::CleanupAutogradContextReq::fromMessage(request);
     }
-    case MessageType::RUN_WITH_PROFILING_REQ: {
+    case BuiltinMessageType::RUN_WITH_PROFILING_REQ: {
       return autograd::RpcWithProfilingReq::fromMessage(request);
     }
-    case MessageType::RREF_BACKWARD_REQ: {
+    case BuiltinMessageType::RREF_BACKWARD_REQ: {
       return autograd::RRefBackwardReq::fromMessage(request);
     }
     default: {
@@ -151,25 +151,25 @@ std::unique_ptr<RpcCommandBase> deserializeResponse(
     const Message& response,
     MessageType& wrappedMsgType) {
   switch (response.type()) {
-    case MessageType::SCRIPT_RET: {
+    case BuiltinMessageType::SCRIPT_RET: {
       return ScriptResp::fromMessage(response);
     }
-    case MessageType::PYTHON_RET: {
+    case BuiltinMessageType::PYTHON_RET: {
       return PythonResp::fromMessage(response);
     }
-    case MessageType::REMOTE_RET: {
+    case BuiltinMessageType::REMOTE_RET: {
       return RemoteRet::fromMessage(response);
     }
-    case MessageType::SCRIPT_RREF_FETCH_RET: {
+    case BuiltinMessageType::SCRIPT_RREF_FETCH_RET: {
       return ScriptRRefFetchRet::fromMessage(response);
     }
-    case MessageType::PYTHON_RREF_FETCH_RET: {
+    case BuiltinMessageType::PYTHON_RREF_FETCH_RET: {
       return PythonRRefFetchRet::fromMessage(response);
     }
-    case MessageType::RREF_ACK: {
+    case BuiltinMessageType::RREF_ACK: {
       return RRefAck::fromMessage(response);
     }
-    case MessageType::FORWARD_AUTOGRAD_RESP: {
+    case BuiltinMessageType::FORWARD_AUTOGRAD_RESP: {
       std::unique_ptr<RpcCommandBase> rpcPtr =
           autograd::RpcWithAutograd::fromMessage(response);
       RpcCommandBase& rpc = *rpcPtr;
@@ -193,13 +193,13 @@ std::unique_ptr<RpcCommandBase> deserializeResponse(
 
       return std::move(rpcWithAutograd).moveWrappedRpc();
     }
-    case MessageType::BACKWARD_AUTOGRAD_RESP: {
+    case BuiltinMessageType::BACKWARD_AUTOGRAD_RESP: {
       return autograd::PropagateGradientsResp::fromMessage(response);
     }
-    case MessageType::CLEANUP_AUTOGRAD_CONTEXT_RESP: {
+    case BuiltinMessageType::CLEANUP_AUTOGRAD_CONTEXT_RESP: {
       return autograd::CleanupAutogradContextResp::fromMessage(response);
     }
-    case MessageType::RUN_WITH_PROFILING_RESP: {
+    case BuiltinMessageType::RUN_WITH_PROFILING_RESP: {
       std::unique_ptr<RpcCommandBase> rpcPtr =
           autograd::RpcWithProfilingResp::fromMessage(response);
       RpcCommandBase& rpc = *rpcPtr;
@@ -212,7 +212,7 @@ std::unique_ptr<RpcCommandBase> deserializeResponse(
       auto wrappedRPC = std::move(rpcWithProfilingResp).moveWrappedRpc();
       return wrappedRPC;
     }
-    case MessageType::RREF_BACKWARD_RESP: {
+    case BuiltinMessageType::RREF_BACKWARD_RESP: {
       return autograd::RRefBackwardResp::fromMessage(response);
     }
     default: {
@@ -226,7 +226,7 @@ IValue deserializeResptoIValueInternal(
     RpcCommandBase& rpc,
     MessageType messageType) {
   switch (messageType) {
-    case MessageType::SCRIPT_RET: {
+    case BuiltinMessageType::SCRIPT_RET: {
       auto& ret = static_cast<ScriptResp&>(rpc);
       return ret.value();
     }

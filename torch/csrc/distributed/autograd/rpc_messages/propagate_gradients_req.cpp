@@ -9,7 +9,7 @@ namespace distributed {
 namespace autograd {
 
 using rpc::Message;
-using rpc::MessageType;
+using rpc::BuiltinMessageType;
 using torch::autograd::Variable;
 
 PropagateGradientsReq::PropagateGradientsReq(
@@ -42,7 +42,7 @@ c10::intrusive_ptr<Message> PropagateGradientsReq::toMessageImpl() && {
   return c10::make_intrusive<Message>(
       std::move(payload),
       std::move(tensorTable),
-      MessageType::BACKWARD_AUTOGRAD_REQ);
+      BuiltinMessageType::BACKWARD_AUTOGRAD_REQ);
 }
 
 std::unique_ptr<PropagateGradientsReq> PropagateGradientsReq::fromMessage(

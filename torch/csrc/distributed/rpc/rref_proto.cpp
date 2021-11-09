@@ -75,12 +75,12 @@ c10::intrusive_ptr<Message> ScriptRRefFetchCall::toMessageImpl() && {
   ivalues.reserve(2);
   ivalues.emplace_back(rrefId_.toIValue());
   ivalues.emplace_back(fromWorkerId_);
-  return fromIValues(std::move(ivalues), MessageType::SCRIPT_RREF_FETCH_CALL);
+  return fromIValues(std::move(ivalues), BuiltinMessageType::SCRIPT_RREF_FETCH_CALL);
 }
 
 std::unique_ptr<ScriptRRefFetchCall> ScriptRRefFetchCall::fromMessage(
     const Message& message) {
-  auto values = toIValues(message, MessageType::SCRIPT_RREF_FETCH_CALL);
+  auto values = toIValues(message, BuiltinMessageType::SCRIPT_RREF_FETCH_CALL);
   TORCH_INTERNAL_ASSERT(
       values.size() == 2, "ScriptRRefFetchCall expects 2 IValues from message");
   auto id = values[1].toInt();
@@ -97,12 +97,12 @@ c10::intrusive_ptr<Message> PythonRRefFetchCall::toMessageImpl() && {
   ivalues.reserve(2);
   ivalues.emplace_back(rrefId_.toIValue());
   ivalues.emplace_back(fromWorkerId_);
-  return fromIValues(std::move(ivalues), MessageType::PYTHON_RREF_FETCH_CALL);
+  return fromIValues(std::move(ivalues), BuiltinMessageType::PYTHON_RREF_FETCH_CALL);
 }
 
 std::unique_ptr<PythonRRefFetchCall> PythonRRefFetchCall::fromMessage(
     const Message& message) {
-  auto values = toIValues(message, MessageType::PYTHON_RREF_FETCH_CALL);
+  auto values = toIValues(message, BuiltinMessageType::PYTHON_RREF_FETCH_CALL);
   TORCH_INTERNAL_ASSERT(
       values.size() == 2, "PythonRRefFetchCall expects 2 IValues from message");
   auto id = values[1].toInt();
@@ -124,7 +124,7 @@ c10::intrusive_ptr<Message> RRefFetchRet::toMessageImpl() && {
 
 std::unique_ptr<ScriptRRefFetchRet> ScriptRRefFetchRet::fromMessage(
     const Message& message) {
-  auto values = toIValues(message, MessageType::SCRIPT_RREF_FETCH_RET);
+  auto values = toIValues(message, BuiltinMessageType::SCRIPT_RREF_FETCH_RET);
   TORCH_INTERNAL_ASSERT(
       values.size() == 1,
       "RRef of IValue should contain a single IValue, but got ",
@@ -135,19 +135,19 @@ std::unique_ptr<ScriptRRefFetchRet> ScriptRRefFetchRet::fromMessage(
 std::unique_ptr<PythonRRefFetchRet> PythonRRefFetchRet::fromMessage(
     const Message& message) {
   return std::make_unique<PythonRRefFetchRet>(
-      toIValues(message, MessageType::PYTHON_RREF_FETCH_RET).vec());
+      toIValues(message, BuiltinMessageType::PYTHON_RREF_FETCH_RET).vec());
 }
 
 std::unique_ptr<RRefUserDelete> RRefUserDelete::fromMessage(
     const Message& message) {
   auto pair =
-      ForkMessageBase::fromMessage(message, MessageType::RREF_USER_DELETE);
+      ForkMessageBase::fromMessage(message, BuiltinMessageType::RREF_USER_DELETE);
   return std::make_unique<RRefUserDelete>(
       RRefUserDelete(pair.first, pair.second));
 }
 
 std::unique_ptr<RemoteRet> RemoteRet::fromMessage(const Message& message) {
-  auto pair = ForkMessageBase::fromMessage(message, MessageType::REMOTE_RET);
+  auto pair = ForkMessageBase::fromMessage(message, BuiltinMessageType::REMOTE_RET);
   return std::make_unique<RemoteRet>(pair.first, pair.second);
 }
 
@@ -156,12 +156,12 @@ const ForkId& RRefChildAccept::forkId() const {
 }
 
 c10::intrusive_ptr<Message> RRefChildAccept::toMessageImpl() && {
-  return fromIValues({forkId_.toIValue()}, MessageType::RREF_CHILD_ACCEPT);
+  return fromIValues({forkId_.toIValue()}, BuiltinMessageType::RREF_CHILD_ACCEPT);
 }
 
 std::unique_ptr<RRefChildAccept> RRefChildAccept::fromMessage(
     const Message& message) {
-  auto values = toIValues(message, MessageType::RREF_CHILD_ACCEPT);
+  auto values = toIValues(message, BuiltinMessageType::RREF_CHILD_ACCEPT);
   TORCH_INTERNAL_ASSERT(values.size() == 1, "Expect 1 IValues from message.");
 
   return std::make_unique<RRefChildAccept>(ForkId::fromIValue(values.back()));
@@ -170,20 +170,20 @@ std::unique_ptr<RRefChildAccept> RRefChildAccept::fromMessage(
 std::unique_ptr<RRefForkRequest> RRefForkRequest::fromMessage(
     const Message& message) {
   auto pair =
-      ForkMessageBase::fromMessage(message, MessageType::RREF_FORK_REQUEST);
+      ForkMessageBase::fromMessage(message, BuiltinMessageType::RREF_FORK_REQUEST);
   return std::make_unique<RRefForkRequest>(pair.first, pair.second);
 }
 
 c10::intrusive_ptr<Message> RRefAck::toMessageImpl() && {
   return c10::make_intrusive<Message>(
-      std::vector<char>{}, std::vector<torch::Tensor>{}, MessageType::RREF_ACK);
+      std::vector<char>{}, std::vector<torch::Tensor>{}, BuiltinMessageType::RREF_ACK);
 }
 
 std::unique_ptr<RRefAck> RRefAck::fromMessage(const Message& message) {
   TORCH_INTERNAL_ASSERT(
-      message.type() == MessageType::RREF_ACK,
+      message.type() == BuiltinMessageType::RREF_ACK,
       "Message type miss match, expect ",
-      MessageType::RREF_ACK,
+      BuiltinMessageType::RREF_ACK,
       ", but got ",
       message.type());
   return std::make_unique<RRefAck>();

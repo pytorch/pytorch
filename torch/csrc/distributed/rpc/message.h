@@ -24,7 +24,7 @@ enum MessageTypeFlags : uint16_t {
 };
 
 // Message types must have values between 0x00 to 0xff
-enum MessageType : uint16_t {
+enum BuiltinMessageType : uint16_t {
   // messages for dist.rpc on builtin operators
   SCRIPT_CALL = 0x00u | MessageTypeFlags::REQUEST_TYPE,
   SCRIPT_RET = 0x01u | MessageTypeFlags::RESPONSE_TYPE,
@@ -91,7 +91,9 @@ enum MessageType : uint16_t {
 
 TORCH_API std::ostream& operator<<(
     std::ostream& os,
-    const MessageType& type);
+    const BuiltinMessageType& type);
+
+using MessageType = uint16_t;
 
 // A message to be sent/received by an RpcAgent.
 //
@@ -162,7 +164,7 @@ class TORCH_API Message final : public torch::CustomClassHolder {
  private:
   std::vector<char> payload_;
   std::vector<torch::Tensor> tensors_;
-  MessageType type_ = MessageType::UNKNOWN;
+  MessageType type_ = BuiltinMessageType::UNKNOWN;
   int64_t id_ = -1;
 };
 

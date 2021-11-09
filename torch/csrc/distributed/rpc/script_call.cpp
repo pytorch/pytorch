@@ -117,7 +117,7 @@ c10::intrusive_ptr<Message> ScriptCall::toMessageImpl() && {
       c10::ivalue::Tuple::create(std::move(ivalues)), &tensor_table);
 
   return c10::make_intrusive<Message>(
-      std::move(payload), std::move(tensor_table), MessageType::SCRIPT_CALL);
+      std::move(payload), std::move(tensor_table), BuiltinMessageType::SCRIPT_CALL);
 }
 
 std::unique_ptr<ScriptCall> ScriptCall::fromMessage(const Message& message) {

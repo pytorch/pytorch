@@ -15,7 +15,7 @@ c10::intrusive_ptr<Message> PythonResp::toMessageImpl() && {
   return c10::make_intrusive<Message>(
       std::move(payload),
       std::move(serializedPyObj_.tensors_),
-      MessageType::PYTHON_RET);
+      BuiltinMessageType::PYTHON_RET);
 }
 
 std::unique_ptr<PythonResp> PythonResp::fromMessage(const Message& message) {

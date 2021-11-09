@@ -187,8 +187,8 @@ IValue UserRRef::toHere(const float timeoutSeconds) const {
   MessageType msgType = messagePtr->type();
   auto response = deserializeResponse(*messagePtr, msgType);
   TORCH_INTERNAL_ASSERT(
-      msgType == MessageType::SCRIPT_RREF_FETCH_RET ||
-          msgType == MessageType::PYTHON_RREF_FETCH_RET,
+      msgType == BuiltinMessageType::SCRIPT_RREF_FETCH_RET ||
+          msgType == BuiltinMessageType::PYTHON_RREF_FETCH_RET,
       "Message type should either be SCRIPT_RREF_FETCH_RET "
       "or PYTHON_RREF_FETCH_RET");
   RpcCommandBase& rpc = *response;

@@ -129,17 +129,17 @@ MessageType FaultyTensorPipeAgent::messageStringToType(
     const std::string& messageString) const {
   // Lazily constructed map that returns string to message type mapping
   static std::unordered_map<std::string, MessageType> msgMap = {
-      {"RREF_FORK_REQUEST", MessageType::RREF_FORK_REQUEST},
-      {"RREF_CHILD_ACCEPT", MessageType::RREF_CHILD_ACCEPT},
-      {"RREF_USER_DELETE", MessageType::RREF_USER_DELETE},
+      {"RREF_FORK_REQUEST", BuiltinMessageType::RREF_FORK_REQUEST},
+      {"RREF_CHILD_ACCEPT", BuiltinMessageType::RREF_CHILD_ACCEPT},
+      {"RREF_USER_DELETE", BuiltinMessageType::RREF_USER_DELETE},
       {"CLEANUP_AUTOGRAD_CONTEXT_REQ",
-       MessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ},
-      {"PYTHON_REMOTE_CALL", MessageType::PYTHON_REMOTE_CALL},
-      {"SCRIPT_REMOTE_CALL", MessageType::SCRIPT_REMOTE_CALL},
-      {"PYTHON_CALL", MessageType::PYTHON_CALL},
-      {"SCRIPT_CALL", MessageType::SCRIPT_CALL},
-      {"PYTHON_RREF_FETCH_CALL", MessageType::PYTHON_RREF_FETCH_CALL},
-      {"SCRIPT_RREF_FETCH_CALL", MessageType::SCRIPT_RREF_FETCH_CALL}};
+       BuiltinMessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ},
+      {"PYTHON_REMOTE_CALL", BuiltinMessageType::PYTHON_REMOTE_CALL},
+      {"SCRIPT_REMOTE_CALL", BuiltinMessageType::SCRIPT_REMOTE_CALL},
+      {"PYTHON_CALL", BuiltinMessageType::PYTHON_CALL},
+      {"SCRIPT_CALL", BuiltinMessageType::SCRIPT_CALL},
+      {"PYTHON_RREF_FETCH_CALL", BuiltinMessageType::PYTHON_RREF_FETCH_CALL},
+      {"SCRIPT_RREF_FETCH_CALL", BuiltinMessageType::SCRIPT_RREF_FETCH_CALL}};
   const auto& it = msgMap.find(messageString);
   TORCH_CHECK(
       it != msgMap.end(),

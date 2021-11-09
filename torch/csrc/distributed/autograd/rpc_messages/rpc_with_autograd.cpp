@@ -9,6 +9,7 @@ namespace torch {
 namespace distributed {
 namespace autograd {
 
+using rpc::BuiltinMessageType;
 using rpc::Message;
 using rpc::MessageType;
 using rpc::RpcCommandBase;
@@ -26,8 +27,8 @@ RpcWithAutograd::RpcWithAutograd(
       wrappedMessage_(std::move(wrappedMessage)),
       deviceMap_(std::move(deviceMap)) {
   TORCH_INTERNAL_ASSERT(
-      messageType_ == MessageType::FORWARD_AUTOGRAD_REQ ||
-      messageType_ == MessageType::FORWARD_AUTOGRAD_RESP);
+      messageType_ == BuiltinMessageType::FORWARD_AUTOGRAD_REQ ||
+      messageType_ == BuiltinMessageType::FORWARD_AUTOGRAD_RESP);
   tensors_ = wrappedMessage_->tensors();
   wrappedMessageType_ = wrappedMessage_->type();
 }
@@ -49,8 +50,8 @@ RpcWithAutograd::RpcWithAutograd(
       deviceMap_(std::move(deviceMap)) {
   TORCH_INTERNAL_ASSERT(wrappedRpc_ != nullptr, "wrappedRpc cannot be null!");
   TORCH_INTERNAL_ASSERT(
-      messageType_ == MessageType::FORWARD_AUTOGRAD_REQ ||
-      messageType_ == MessageType::FORWARD_AUTOGRAD_RESP);
+      messageType_ == BuiltinMessageType::FORWARD_AUTOGRAD_REQ ||
+      messageType_ == BuiltinMessageType::FORWARD_AUTOGRAD_RESP);
 }
 
 c10::intrusive_ptr<Message> RpcWithAutograd::toMessageImpl() && {
@@ -92,8 +93,8 @@ std::unique_ptr<RpcWithAutograd> RpcWithAutograd::fromMessage(
     const Message& message) {
   MessageType originalMessageType = message.type();
   TORCH_INTERNAL_ASSERT(
-      MessageType::FORWARD_AUTOGRAD_REQ == originalMessageType ||
-      MessageType::FORWARD_AUTOGRAD_RESP == originalMessageType);
+      BuiltinMessageType::FORWARD_AUTOGRAD_REQ == originalMessageType ||
+      BuiltinMessageType::FORWARD_AUTOGRAD_RESP == originalMessageType);
 
   std::vector<torch::Tensor> tensors = message.tensors();
   int64_t messageId = message.id();
@@ -122,7 +123,7 @@ std::unique_ptr<RpcWithAutograd> RpcWithAutograd::fromMessage(
       std::move(payload), std::move(tensors), wrappedMessageType, messageId);
 
   std::unique_ptr<RpcCommandBase> wrappedRpc;
-  if (originalMessageType == MessageType::FORWARD_AUTOGRAD_REQ) {
+  if (originalMessageType == BuiltinMessageType::FORWARD_AUTOGRAD_REQ) {
     wrappedRpc = deserializeRequest(*wrappedMessage);
   } else {
     wrappedRpc = deserializeResponse(*wrappedMessage, wrappedMessageType);

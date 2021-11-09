@@ -29,7 +29,7 @@ IValue toPyIValue(const Message& message) {
   MessageType msgType = message.type();
   auto response = deserializeResponse(message, msgType);
   switch (msgType) {
-    case MessageType::SCRIPT_RET: {
+    case BuiltinMessageType::SCRIPT_RET: {
       auto& ret = static_cast<ScriptResp&>(*response);
       Stack stack;
       stack.push_back(ret.value());
@@ -40,7 +40,7 @@ IValue toPyIValue(const Message& message) {
           torch::jit::createPyObjectForStack(std::move(stack)),
           PyObjectType::get());
     }
-    case MessageType::PYTHON_RET: {
+    case BuiltinMessageType::PYTHON_RET: {
       // TODO: Try to avoid a copy here.
       auto& resp = static_cast<PythonResp&>(*response);
       auto& pythonRpcHandler = PythonRpcHandler::getInstance();

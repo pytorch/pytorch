@@ -4,7 +4,7 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-std::ostream& operator<<(std::ostream& os, MessageType const& type) {
+std::ostream& operator<<(std::ostream& os, BuiltinMessageType const& type) {
   return os << uint16_t(type);
 }
 
@@ -100,7 +100,7 @@ c10::intrusive_ptr<Message> createExceptionResponse(
   return c10::make_intrusive<Message>(
       std::move(payload),
       std::vector<torch::Tensor>(),
-      MessageType::EXCEPTION,
+      BuiltinMessageType::EXCEPTION,
       id);
 }
 

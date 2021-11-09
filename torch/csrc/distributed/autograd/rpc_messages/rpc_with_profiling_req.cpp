@@ -24,10 +24,10 @@ RpcWithProfilingReq::RpcWithProfilingReq(
       profilingKeyId_(profilingKeyId) {
   tensors_ = wrappedMessage_->tensors();
   TORCH_INTERNAL_ASSERT(
-      messageType_ == rpc::MessageType::RUN_WITH_PROFILING_REQ,
+      messageType_ == rpc::BuiltinMessageType::RUN_WITH_PROFILING_REQ,
       c10::str(
           "Incorrect message type, expected message type ",
-          rpc::MessageType::RUN_WITH_PROFILING_REQ));
+          rpc::BuiltinMessageType::RUN_WITH_PROFILING_REQ));
   wrappedMessageType_ = wrappedMessage_->type();
 }
 

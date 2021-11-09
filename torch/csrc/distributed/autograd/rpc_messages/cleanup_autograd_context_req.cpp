@@ -21,7 +21,7 @@ c10::intrusive_ptr<rpc::Message> CleanupAutogradContextReq::toMessageImpl() && {
   return c10::make_intrusive<rpc::Message>(
       std::move(payload),
       std::move(tensorTable),
-      rpc::MessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ);
+      rpc::BuiltinMessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ);
 }
 
 std::unique_ptr<CleanupAutogradContextReq> CleanupAutogradContextReq::

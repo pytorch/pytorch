@@ -16,6 +16,7 @@ namespace autograd {
 
 using torch::distributed::autograd::AutogradMetadata;
 using torch::distributed::autograd::RpcWithAutograd;
+using torch::distributed::rpc::BuiltinMessageType;
 using torch::distributed::rpc::JitFuture;
 using torch::distributed::rpc::Message;
 using torch::distributed::rpc::MessageType;
@@ -152,7 +153,7 @@ c10::intrusive_ptr<JitFuture> sendMessageWithAutograd(
   auto msg = getMessageWithAutograd(
       dst.id_,
       std::move(wrappedRpcMsg),
-      MessageType::FORWARD_AUTOGRAD_REQ,
+      BuiltinMessageType::FORWARD_AUTOGRAD_REQ,
       forceGradRecording,
       agent.getDeviceMap(dst));
 
@@ -163,7 +164,7 @@ c10::intrusive_ptr<JitFuture> sendMessageWithAutograd(
     auto profilerConfig = torch::autograd::profiler::getProfilerConfig();
     auto msgWithProfiling = getMessageWithProfiling(
         std::move(msg),
-        rpc::MessageType::RUN_WITH_PROFILING_REQ,
+        rpc::BuiltinMessageType::RUN_WITH_PROFILING_REQ,
         // NOLINTNEXTLINE(performance-move-const-arg)
         std::move(profilerConfig));
     fut = agent.send(dst, std::move(msgWithProfiling), rpcTimeoutSeconds);

@@ -21,7 +21,7 @@ RpcWithProfilingResp::RpcWithProfilingResp(
       profilingId_(profilingId) {
   tensors_ = wrappedMessage_->tensors();
   TORCH_INTERNAL_ASSERT(
-      messageType_ == rpc::MessageType::RUN_WITH_PROFILING_RESP,
+      messageType_ == rpc::BuiltinMessageType::RUN_WITH_PROFILING_RESP,
       "Incorrect Message type");
   wrappedMessageType_ = wrappedMessage_->type();
 }

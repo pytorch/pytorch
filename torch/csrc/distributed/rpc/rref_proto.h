@@ -50,7 +50,7 @@ class TORCH_API ForkMessageBase : public RRefMessageBase {
 class TORCH_API ScriptRRefFetchCall final : public RRefMessageBase {
  public:
   ScriptRRefFetchCall(worker_id_t fromWorkerId, const RRefId& rrefId)
-      : RRefMessageBase(rrefId, MessageType::SCRIPT_RREF_FETCH_CALL),
+      : RRefMessageBase(rrefId, BuiltinMessageType::SCRIPT_RREF_FETCH_CALL),
         fromWorkerId_(fromWorkerId) {}
 
   inline worker_id_t fromWorkerId() const {
@@ -68,7 +68,7 @@ class TORCH_API ScriptRRefFetchCall final : public RRefMessageBase {
 class TORCH_API PythonRRefFetchCall final : public RRefMessageBase {
  public:
   PythonRRefFetchCall(worker_id_t fromWorkerId, const RRefId& rrefId)
-      : RRefMessageBase(rrefId, MessageType::PYTHON_RREF_FETCH_CALL),
+      : RRefMessageBase(rrefId, BuiltinMessageType::PYTHON_RREF_FETCH_CALL),
         fromWorkerId_(fromWorkerId) {}
 
   c10::intrusive_ptr<Message> toMessageImpl() && override;
@@ -96,7 +96,7 @@ class TORCH_API RRefFetchRet : public RpcCommandBase {
 class TORCH_API ScriptRRefFetchRet final : public RRefFetchRet {
  public:
   explicit ScriptRRefFetchRet(std::vector<at::IValue> values)
-      : RRefFetchRet(std::move(values), MessageType::SCRIPT_RREF_FETCH_RET) {}
+      : RRefFetchRet(std::move(values), BuiltinMessageType::SCRIPT_RREF_FETCH_RET) {}
 
   static std::unique_ptr<ScriptRRefFetchRet> fromMessage(
       const Message& message);
@@ -105,7 +105,7 @@ class TORCH_API ScriptRRefFetchRet final : public RRefFetchRet {
 class TORCH_API PythonRRefFetchRet final : public RRefFetchRet {
  public:
   explicit PythonRRefFetchRet(std::vector<at::IValue> values)
-      : RRefFetchRet(std::move(values), MessageType::PYTHON_RREF_FETCH_RET) {}
+      : RRefFetchRet(std::move(values), BuiltinMessageType::PYTHON_RREF_FETCH_RET) {}
 
   static std::unique_ptr<PythonRRefFetchRet> fromMessage(
       const Message& message);
@@ -116,7 +116,7 @@ class TORCH_API PythonRRefFetchRet final : public RRefFetchRet {
 class TORCH_API RRefUserDelete final : public ForkMessageBase {
  public:
   RRefUserDelete(const RRefId& rrefId, const ForkId& forkId)
-      : ForkMessageBase(rrefId, forkId, MessageType::RREF_USER_DELETE) {}
+      : ForkMessageBase(rrefId, forkId, BuiltinMessageType::RREF_USER_DELETE) {}
 
   static std::unique_ptr<RRefUserDelete> fromMessage(const Message& message);
 };
@@ -124,7 +124,7 @@ class TORCH_API RRefUserDelete final : public ForkMessageBase {
 class TORCH_API RemoteRet final : public ForkMessageBase {
  public:
   RemoteRet(const RRefId& rrefId, const ForkId& forkId)
-      : ForkMessageBase(rrefId, forkId, MessageType::REMOTE_RET) {}
+      : ForkMessageBase(rrefId, forkId, BuiltinMessageType::REMOTE_RET) {}
 
   static std::unique_ptr<RemoteRet> fromMessage(const Message& message);
 };
@@ -148,7 +148,7 @@ class TORCH_API RRefChildAccept final : public RpcCommandBase {
 class TORCH_API RRefForkRequest final : public ForkMessageBase {
  public:
   RRefForkRequest(const RRefId& rrefId, const ForkId& forkId)
-      : ForkMessageBase(rrefId, forkId, MessageType::RREF_FORK_REQUEST) {}
+      : ForkMessageBase(rrefId, forkId, BuiltinMessageType::RREF_FORK_REQUEST) {}
 
   static std::unique_ptr<RRefForkRequest> fromMessage(const Message& message);
 };

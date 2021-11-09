@@ -63,7 +63,7 @@ c10::intrusive_ptr<Message> ScriptRemoteCall::toMessageImpl() && {
   return c10::make_intrusive<Message>(
       std::move(payload),
       std::move(tensor_table),
-      MessageType::SCRIPT_REMOTE_CALL);
+      BuiltinMessageType::SCRIPT_REMOTE_CALL);
 }
 
 std::unique_ptr<ScriptRemoteCall> ScriptRemoteCall::fromMessage(

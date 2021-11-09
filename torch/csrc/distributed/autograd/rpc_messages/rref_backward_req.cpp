@@ -7,7 +7,7 @@ namespace distributed {
 namespace autograd {
 
 using rpc::Message;
-using rpc::MessageType;
+using rpc::BuiltinMessageType;
 
 RRefBackwardReq::RRefBackwardReq(
     const rpc::RRefId& rrefId,
@@ -33,7 +33,7 @@ c10::intrusive_ptr<Message> RRefBackwardReq::toMessageImpl() && {
   return c10::make_intrusive<Message>(
       std::move(payload),
       std::move(tensorTable),
-      MessageType::RREF_BACKWARD_REQ);
+      BuiltinMessageType::RREF_BACKWARD_REQ);
 }
 
 std::unique_ptr<RRefBackwardReq> RRefBackwardReq::fromMessage(
