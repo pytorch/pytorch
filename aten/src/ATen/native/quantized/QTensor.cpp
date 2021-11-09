@@ -24,8 +24,8 @@ Tensor quantize_per_tensor_dynamic(
     reduce_range = false;
   }
 
-  int qmin = 0;
-  int qmax = 255;
+  int qmin;
+  int qmax;
 
   // should we check additional QInt types beyond 8 bits?
   if (dtype == ScalarType::QInt8) {
@@ -35,6 +35,7 @@ Tensor quantize_per_tensor_dynamic(
     qmin = 0;
     qmax = 255;
   }
+  // add additional cases when quantization support for other dtypes becomes available
 
   auto q_params = quant_utils::ChooseQuantizationParams(
       /*min=*/x_min,
