@@ -778,7 +778,7 @@ def assert_equal(
     *,
     pair_types: Sequence[Type[Pair]] = (ObjectPair,),
     sequence_types: Tuple[Type, ...] = (collections.abc.Sequence,),
-    mapping_types: Tuple[Type, ...] = (collections.abc.Sequence,),
+    mapping_types: Tuple[Type, ...] = (collections.abc.Mapping,),
     **options: Any,
 ) -> None:
     # Hide this function from `pytest`'s traceback

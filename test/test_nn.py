@@ -4022,7 +4022,7 @@ class TestNN(NNTestCase):
         self.assertFalse('weight' in m._buffers)
         self.assertFalse('weight' in m._parameters)
         # it should also be sharing storage as `weight_orig`
-        self.assertEqual(m.weight_orig, m.weight)
+        self.assertEqual(m.weight_orig.storage()._cdata, m.weight.storage()._cdata)
         self.assertEqual(m.weight_orig.size(), m.weight.size())
         self.assertEqual(m.weight_orig.stride(), m.weight.stride())
 
