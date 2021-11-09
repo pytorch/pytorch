@@ -104,7 +104,7 @@ void nnc_aten_conv2d(
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
 
-#ifdef ENABLE_NNC_QUANTIZATION
+#ifndef DISABLE_NNC_QUANTIZATION
 void nnc_aten_quantized_conv2d(
     int64_t bufs_num,
     void** buf_data,
@@ -209,7 +209,7 @@ void nnc_aten_quantized_add(
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
 
-#endif // ENABLE_NNC_QUANTIZATION
+#endif // DISABLE_NNC_QUANTIZATION
 
 void nnc_aten_upsample_nearest2d(
     int64_t bufs_num,
@@ -229,7 +229,7 @@ void nnc_aten_upsample_nearest2d(
   const auto is_quantized = x_qdtype != -1;
 
   if (is_quantized) {
-#ifdef ENABLE_NNC_QUANTIZATION
+#ifndef DISABLE_NNC_QUANTIZATION
     x = at::from_blob_quantized_per_tensor_affine(
         buf_data[1],
         // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
@@ -241,7 +241,7 @@ void nnc_aten_upsample_nearest2d(
         at::TensorOptions(toQIntType(static_cast<c10::ScalarType>(x_qdtype))));
 #else
     TORCH_CHECK(false, "NNC quantization not supported!");
-#endif // ENABLE_NNC_QUANTIZATION
+#endif // DISABLE_NNC_QUANTIZATION
   }
 
   int64_t output_size_h = extra_args[3];
@@ -261,7 +261,7 @@ void nnc_aten_upsample_nearest2d(
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
 
-#ifdef ENABLE_NNC_QUANTIZATION
+#ifndef DISABLE_NNC_QUANTIZATION
 
 void nnc_aten_quantize_per_tensor(
     int64_t bufs_num,
@@ -308,7 +308,7 @@ void nnc_aten_dequantize(
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
 
-#endif // ENABLE_NNC_QUANTIZATION
+#endif // DISABLE_NNC_QUANTIZATION
 
 void nnc_aten_conv1d(
     int64_t bufs_num,
@@ -538,7 +538,7 @@ const static RegisterNNCExternalFunction nnc_conv2d(
     "nnc_aten_conv2d",
     nnc_aten_conv2d);
 
-#ifdef ENABLE_NNC_QUANTIZATION
+#ifndef DISABLE_NNC_QUANTIZATION
 const static RegisterNNCExternalFunction nnc_quantized_conv2d(
     "nnc_aten_quantized_conv2d",
     nnc_aten_quantized_conv2d);
@@ -554,7 +554,7 @@ const static RegisterNNCExternalFunction nnc_quantize_per_tensor(
 const static RegisterNNCExternalFunction nnc_dequantize(
     "nnc_aten_dequantize",
     nnc_aten_dequantize);
-#endif // ENABLE_NNC_QUANTIZATION
+#endif // DISABLE_NNC_QUANTIZATION
 
 const static RegisterNNCExternalFunction nnc_upsample_nearest2d(
     "nnc_aten_upsample_nearest2d",
