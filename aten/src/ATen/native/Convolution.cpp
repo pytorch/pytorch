@@ -210,7 +210,8 @@ auto ConvParams::use_cudnn(const at::Tensor& input, const at::Tensor& weight) co
   if (input.scalar_type() == at::kBFloat16 || weight.scalar_type() == at::kBFloat16) {
     return false;
   }
-  if (!cudnn_conv_use_channels_last(input, weight)) { // bypass dilation checks for channels-last convolution
+  if (cudnn_conv_suggest_memory_format(input, weight) == at::MemoryFormat::Contiguous) {
+    // bypass dilation checks for channels_last convolution
     if (deterministic && is_dilated()) {
       // cudnn doesn't support deterministic dilated convolution fully yet
       return false;
@@ -471,7 +472,8 @@ bool check_cudnn_depthwise_workload_with_filter(const at::Tensor& input, int str
 // Use cudnn for FP16 depthwise convolutions
 auto ConvParams::use_cudnn_depthwise(
         const at::Tensor& input, const at::Tensor& weight) const -> bool {
-  if (cudnn_conv_use_channels_last(input, weight) && use_cudnn(input, weight)) {
+  if (cudnn_conv_suggest_memory_format(input, weight) != at::MemoryFormat::Contiguous && use_cudnn(input, weight)) {
+    // always use cudnn_depthwise for channels_last format
     return true;
   }
   if (detail::getCUDAHooks().supportsDepthwiseConvolutionWithCuDNN()) {
@@ -899,8 +901,8 @@ at::Tensor _convolution(
   // cudnn and miopen are guaranteed not to be on mobile, and T102591915
   // suggests that maybe the cudnn condition sometimes segfaults (though
   // I can't imagine how)
-  if (detail::getCUDAHooks().compiledWithCuDNN() && cudnn_conv_use_channels_last(input, weight)) {
-    backend_memory_format = (k == 5) ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast;
+  if (detail::getCUDAHooks().compiledWithCuDNN()) {
+    backend_memory_format = cudnn_conv_suggest_memory_format(input, weight);
   }
   if (detail::getCUDAHooks().compiledWithMIOpen() && miopen_conv_use_channels_last(input, weight)) {
     backend_memory_format = (k == 5) ? at::MemoryFormat::Contiguous /*at::MemoryFormat::ChannelsLast3d*/ : at::MemoryFormat::ChannelsLast;
