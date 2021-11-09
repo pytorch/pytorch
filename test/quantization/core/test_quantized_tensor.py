@@ -165,10 +165,6 @@ class TestQuantizedTensor(TestCase):
             scale, zero_pt = _calculate_dynamic_qparams(mat2quant, dtype, reduce_flag)
             q_s = torch.quantize_per_tensor(mat2quant, scale, zero_pt, dtype)
 
-            print("Original tensor: \n", mat2quant)
-            print("Dynamically quantized tensor: \n", q_d)
-            print("Statically quantized tensor: \n", q_s)
-            print("Scale = ", scale, "Zero point = ", zero_pt)
             self.assertEqual(q_d, q_s)
 
     def _test_qtensor(self, device):
