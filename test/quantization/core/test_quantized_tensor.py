@@ -150,7 +150,12 @@ class TestQuantizedTensor(TestCase):
         self._test_qtensor_dynamic(torch.device('cpu'))
 
     def _test_qtensor_dynamic(self, device):
-        mat2quant = torch.randn((4, 4), dtype=torch.float, device=device)
+        max_tensor_order = 4 # max number of tensor dimensions
+        max_dim_sz = 20 # max size for any tensor dimension
+
+        num_dim = np.random.randint(low=1, high=max_tensor_order)
+        dims = np.random.randint(low=1, high=max_dim_sz, size=num_dim)
+        mat2quant = torch.randn(*dims, dtype=torch.float, device=device)
         reduce_flag = False
 
         for dtype in [torch.qint8, torch.quint8]:
@@ -162,8 +167,7 @@ class TestQuantizedTensor(TestCase):
             print("Dynamically quantized tensor: \n", q_d)
             print("Statically quantized tensor: \n", q_s)
             print("Scale = ", scale, "Zero point = ", zero_pt)
-            # l2 = torch.norm(q_d - q_s)
-            # print("l2 norm between dynamically and statically quantized tensors: ", l2)
+            self.assertEqual(q_d, q_s)
 
     def _test_qtensor(self, device):
         device = str(device)
