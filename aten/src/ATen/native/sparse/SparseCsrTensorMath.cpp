@@ -30,10 +30,10 @@ TORCH_META_FUNC(_convert_indices_from_coo_to_csr) (
 TORCH_META_FUNC(_convert_indices_from_csr_to_coo) (
   const Tensor& crow_indices, const Tensor& col_indices, const int64_t size, const bool out_int32
 ) {
-  TORCH_CHECK(crow_indices.dim() <= 1, "crow_indices is supposed to be a vector");
-  TORCH_CHECK(col_indices.dim() <= 1, "col_indices is supposed to be a vector");
+  TORCH_CHECK(crow_indices.dim() == 1, "crow_indices is supposed to be a vector");
+  TORCH_CHECK(col_indices.dim() == 1, "col_indices is supposed to be a vector");
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
-  c10::TensorOptions options = TensorOptions().device(crow_indices.options().device()).dtype(scalar_type);
+  c10::TensorOptions options = crow_indices.options().dtype(scalar_type);
   set_output(0, {2, size}, {}, options, {});
 }
 
@@ -73,14 +73,11 @@ void convert_indices_from_coo_to_csr_cpu(const Tensor& result, const Tensor& inp
 template <typename input_t, typename output_t>
 void convert_indices_from_csr_to_coo_cpu(const Tensor& result, const Tensor& crow_indices, const Tensor& col_indices, const int64_t size) {
   int64_t numel = crow_indices.numel();
-  const input_t* col_indices_data_in = col_indices.data_ptr<input_t>();
-  const input_t* crow_indices_data_in;
-  if (crow_indices.is_contiguous()) {
-    crow_indices_data_in = crow_indices.data_ptr<input_t>();
-  } else {
-    auto crow_indices_contiguous = crow_indices.contiguous();
-    crow_indices_data_in = crow_indices_contiguous.data_ptr<input_t>();
-  }
+  auto crow_indices_ = crow_indices.expect_contiguous();
+  auto col_indices_ = col_indices.expect_contiguous();
+  const input_t* crow_indices_data_in = crow_indices_->data_ptr<input_t>();
+  const input_t* col_indices_data_in = col_indices_->data_ptr<input_t>();
+  TORCH_INTERNAL_ASSERT(result.is_contiguous());
   output_t* data_out = result.data_ptr<output_t>();
 
   if (numel == 0) {
