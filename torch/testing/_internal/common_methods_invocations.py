@@ -8530,10 +8530,11 @@ op_db: List[OpInfo] = [
            check_batched_gradgrad=False,
            sample_inputs_func=sample_inputs_linalg_eigh,
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
+           supports_forward_ad=True,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
-               # Gradcheck hangs for this function
-               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD'),),
+               # Gradcheck for complex is not implemented yet
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD', dtypes=complex_types()),),
            ),
     OpInfo('linalg.householder_product',
            aten_name='linalg_householder_product',
@@ -9507,8 +9508,12 @@ op_db: List[OpInfo] = [
                 toleranceOverride({torch.float16: tol(atol=1e-04, rtol=0.001)}), 'TestUnaryUfuncs', device_type='cuda',), ],
         skips=[
             # still want to test that first derivative works though second derivative isn't supported
-            DecorateInfo(unittest.expectedFailure, 'TestGradients', "test_inplace_gradgrad")
-        ]
+            DecorateInfo(unittest.expectedFailure, 'TestGradients', "test_inplace_gradgrad"),
+            # produces 0 instead of nan on ROCM
+            DecorateInfo(unittest.expectedFailure,
+                         'TestUnaryUfuncs', "test_reference_numerics_extremal",
+                         dtypes=(torch.bfloat16, torch.float16, torch.float32,), device_type='cuda',
+                         active_if=(TEST_WITH_ROCM)), ]
     ),
     UnaryUfuncInfo(
         'nn.functional.logsigmoid',
@@ -12296,11 +12301,6 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         supports_out=False,
         sample_inputs_func=sample_inputs_cosine_embedding_loss,
-        skips=(
-            # https://github.com/pytorch/pytorch/issues/67463
-            # test_forward_mode_AD hangs forever
-            DecorateInfo(unittest.skip("Skipped!"), "TestGradients", "test_forward_mode_AD", dtypes=(torch.float64,),),
-        ),
     ),
     OpInfo(
         "nn.functional.nll_loss",
