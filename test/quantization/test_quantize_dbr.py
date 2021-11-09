@@ -1,7 +1,6 @@
 import collections
 import copy
 import math
-import tabulate
 import unittest
 
 import torch
@@ -967,7 +966,6 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
         if False:
             print(tabulate.tabulate(
                 to_print, headers=['layer_name', 'fqn', 'type', 'sqnr']))
-
 
 @skipIfNoFBGEMM
 class TestQuantizeDBRModels(QuantizeDBRTestCase):
