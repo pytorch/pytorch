@@ -714,15 +714,6 @@ TEST(StaticRuntime, IndividualOps_to) {
   }
 }
 
-TEST(StaticRuntime, IndividualOps_Detach) {
-  auto a = at::randn({4, 3, 1, 2});
-  auto b = at::randn({3, 2, 2});
-  std::vector<IValue> args{a};
-  std::vector<IValue> args2{b};
-  testStaticRuntime(detach_script, args);
-  testStaticRuntime(detach_script, args, args2);
-}
-
 TEST(StaticRuntime, IndividualOps_ExpandAs) {
   auto a = at::randn({3, 1});
   auto b = at::randn({3, 2});
@@ -1519,6 +1510,19 @@ TEST(StaticRuntime, QuantizedLinear) {
   testStaticRuntime(quantize_script, {input, weight}, {input_2, weight_2});
 }
 
+TEST(StaticRuntime, QuantizedLinearDynamicFp16) {
+  at::Tensor weight = torch::randn({3, 2}, torch::kFloat);
+  at::Tensor input = torch::randn({3, 2}, torch::kFloat);
+
+  at::Tensor weight_2 = torch::randn({4, 3}, torch::kFloat);
+  at::Tensor input_2 = torch::randn({4, 3}, torch::kFloat);
+
+  testStaticRuntime(
+      quantized_linear_dynamic_fp16_script,
+      {input, weight},
+      {input_2, weight_2});
+}
+
 TEST(StaticRuntime, IndividualOps_VarStack) {
   // 2D tensors - stack dim = 0
   std::vector<IValue> args1 = {at::randn({6, 6}), at::randn({6, 6}), 0};
@@ -1845,4 +1849,46 @@ TEST(StaticRuntime, IndividuaOps_Squeeze) {
   testStaticRuntime(src, {a, 0});
   testStaticRuntime(src, {a, 1});
   testStaticRuntime(src, {a, -1}, {b, 2});
+}
+
+TEST(StaticRuntime, NumToTensorScalar) {
+  const auto num_to_tensor_ir = R"IR(
+    graph(%1 : int):
+      %2 : NoneType = prim::Constant()
+      %3 : Tensor = prim::NumToTensor(%1)
+      %4 : Tensor = aten::clone(%3, %2)
+      return (%4)
+  )IR";
+
+  IValue arg{5};
+  std::vector<IValue> args = {arg};
+  testStaticRuntime(num_to_tensor_ir, args);
+}
+
+TEST(StaticRuntime, NumToTensorFalse) {
+  const auto num_to_tensor_ir = R"IR(
+    graph(%1 : bool):
+      %2 : NoneType = prim::Constant()
+      %3 : Tensor = prim::NumToTensor(%1)
+      %4 : Tensor = aten::clone(%3, %2)
+      return (%4)
+  )IR";
+
+  IValue arg{false};
+  std::vector<IValue> args = {arg};
+  testStaticRuntime(num_to_tensor_ir, args);
+}
+
+TEST(StaticRuntime, NumToTensorTrue) {
+  const auto num_to_tensor_ir = R"IR(
+    graph(%1 : bool):
+      %2 : NoneType = prim::Constant()
+      %3 : Tensor = prim::NumToTensor(%1)
+      %4 : Tensor = aten::clone(%3, %2)
+      return (%4)
+  )IR";
+
+  IValue arg{true};
+  std::vector<IValue> args = {arg};
+  testStaticRuntime(num_to_tensor_ir, args);
 }

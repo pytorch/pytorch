@@ -12,6 +12,7 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/eliminate_no_ops.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
@@ -121,6 +122,8 @@ void OptimizeGraph(
   RemoveImmutableInputDictLookups(graph);
   UseVariadicTupleUnpack(graph);
   UseVariadicGroupedAccessor(graph);
+  EliminateNoOps(
+      graph, /* custom_ops */ {fromQualString("fb::scale_gradient")});
   GRAPH_DUMP("Final graph after optimizations: ", graph);
 }
 
@@ -654,11 +657,10 @@ StaticModule::StaticModule(
   // handle schema
   if (module_.has_value()) {
     Method method = module_->get_method("forward");
-    schema_ = method.function().getSchema();
     if (RemoveSelfFromGraphInput(graph_)) {
       schema_ = RemoveSelfFromSchema(method.function().getSchema());
+      module_ = c10::nullopt;
     } else {
-      first_input_is_self_ = true;
       schema_ = method.function().getSchema();
     }
   }
@@ -1413,7 +1415,11 @@ void StaticRuntime::check_for_memory_leak(bool output_returned) {
             const auto& t = ival->toTensor();
             if (t.defined()) {
               auto* storage_impl = t.storage().unsafeGetStorageImpl();
-              TORCH_CHECK(storage_impl->data() == nullptr, error_msg);
+              TORCH_CHECK(
+                  storage_impl->data() == nullptr ||
+                      (planner_ &&
+                       planner_->isManagedStorageImpl(storage_impl)),
+                  error_msg);
             }
           }
         }
