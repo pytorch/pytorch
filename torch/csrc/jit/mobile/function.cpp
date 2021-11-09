@@ -74,8 +74,8 @@ bool Function::append_operator(
   if (!promoted_op) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(pArgs);
     const auto& args = *pArgs;
-    if (model_version == 0x3LL &&
-        opname == c10::OperatorName("aten::_convolution", "")) {
+    if (model_version == 0x3LL && opname.name == "aten::_convolution" &&
+        opname.overload_name.empty()) {
       // Since byte-code versions 0x4L, convolution has an additional
       // default-value argument (allow_tf32=True, see
       // https://github.com/pytorch/pytorch/pull/40737). This wrapper handles
@@ -90,7 +90,7 @@ bool Function::append_operator(
       // from model. We can use it to handle backward compatibility.
       if (num_specified_args &&
           num_specified_args.value() < static_cast<int64_t>(args.size())) {
-        fn = [fn, num_specified_args, args](Stack& stack) {
+        fn = [fn, num_specified_args, &args](Stack& stack) {
           std::vector<IValue> out_args;
           // The following logic pops and temporarily stores all out arguments
           // from the stack (which can be 0 or more, and always appended to the
@@ -193,8 +193,8 @@ const std::shared_ptr<Code> Function::get_code() const {
   return code_;
 }
 
-int64_t Function::getExceptionDebugHandle() const {
-  return getInterpretersExceptionDebugHandle();
+const std::vector<int64_t>& Function::getExceptionDebugHandles() const {
+  return getInterpretersExceptionDebugHandles();
 }
 
 } // namespace mobile
