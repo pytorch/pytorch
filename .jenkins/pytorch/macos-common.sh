@@ -14,7 +14,7 @@ retry conda install -y \
   numpy=1.18.5 \
   pyyaml=5.3 \
   setuptools=46.0.0 \
-  cmake=3.14 \
+  cmake=3.19 \
   cffi \
   ninja \
   typing_extensions \
