@@ -199,7 +199,7 @@ __device__ WelfordDataLN compute_stats(
 
 template <typename T, typename T_ACC,
 typename std::enable_if<!std::is_same<T, double>::value, int>::type = 0>
-__global__ void vectorized_layer_norm_kernel(
+__device__ __inline__ void vectorized_layer_norm_kernel_impl(
   const int N,
   T_ACC eps,
   const  T* __restrict__ X,
@@ -248,7 +248,7 @@ __global__ void vectorized_layer_norm_kernel(
 
 template <typename T, typename T_ACC,
 typename std::enable_if<std::is_same<T, double>::value, int>::type = 0>
-__global__ void vectorized_layer_norm_kernel(
+__device__ __inline__ void vectorized_layer_norm_kernel_impl(
   const int N,
   T_ACC eps,
   const  T* __restrict__ X,
@@ -258,6 +258,20 @@ __global__ void vectorized_layer_norm_kernel(
   T_ACC* rstd,
   T* Y){
     CUDA_KERNEL_ASSERT("doesn't work with double");
+  }
+
+//to avoid windows SFINAE errors
+template <typename T, typename T_ACC>
+__global__ __inline__ void vectorized_layer_norm_kernel(
+  const int N,
+  T_ACC eps,
+  const  T* __restrict__ X,
+  const  T* gamma,
+  const  T* beta,
+  T_ACC* mean,
+  T_ACC* rstd,
+  T* Y){
+    vectorized_layer_norm_kernel_impl(N, eps, X, gamma, beta, mean, rstd, Y);
   }
 
 template <typename T>
@@ -454,16 +468,14 @@ void launch_vectorized_layer_norm_kernel(
 ) {
     //constexpr int alignment = 16; //currently unused to make sure float and half results are bw accurate
     auto stream = at::cuda::getCurrentCUDAStream().stream();
-    const dim3 threads(32,4,1);
+    const int num_threads = 128;
+    const dim3 threads(C10_WARP_SIZE,num_threads/C10_WARP_SIZE,1);
     const dim3 blocks(M);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(threads.y % 2 == 0 || threads.y == 1);
     int nshared = threads.y > 1 ? threads.y * 3/2 *sizeof(T_ACC) : 0;
     vectorized_layer_norm_kernel<<<blocks, threads, nshared, stream>>>(N, eps, X_data,
     gamma_data, beta_data, mean_data, rstd_data, Y_data);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
-
-
-
 }
 
 template <typename T, typename T_ACC>
@@ -783,8 +795,6 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cuda(
   return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
 }
 
-//REGISTER_DISPATCH(LayerNormKernel, &LayerNormKernelImpl);
-//REGISTER_DISPATCH(LayerNormBackwardKernel, &LayerNormBackwardKernelImpl);
 
 } // namespace native
 } // namespace at
