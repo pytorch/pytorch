@@ -681,8 +681,6 @@ void validate_outputs(
       continue;
     }
 
-    // TODO: keeping a handle to an IR Node in LT's sizes allows us to avoid
-    // threading through lots of autograd infra. Not sure if this is a good long-term solution
     if (metadata.device().type() == at::kLazy) {
       // TODO: we can remove handlers when LTC is merged into master
       TORCH_CHECK(getSumToOrThrowHandler(), "SumOrThrow isn't defined");
@@ -690,7 +688,6 @@ void validate_outputs(
       auto t_sizes = metadata.t_sizes();
       grad = getSumToOrThrowHandler()(t_sizes, grad);
     } else {
-      // TODO: use t_sizes().sizes() instead everywhere
       if (!grad.sizes().equals(metadata.t_sizes().sizes())) {
         if (!at::is_expandable_to(metadata.t_sizes().sizes(), grad.sizes())) {
           std::stringstream ss;
