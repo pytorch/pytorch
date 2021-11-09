@@ -1,6 +1,6 @@
 #pragma once
 
-#include <limits>
+#include <ATen/ATen.h>
 
 namespace at { namespace cuda { namespace detail {
 
