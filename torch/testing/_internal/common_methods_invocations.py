@@ -8702,6 +8702,10 @@ op_db: List[OpInfo] = [
                    safe_casts_outputs=True,
                    supports_forward_ad=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-1}),),
+                   skips=(
+                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                                    dtypes=[torch.cfloat, torch.cdouble]),
+                   ),
                    normal_filter=(lambda x: torch.abs(x) < 0.1, 1)),
     OpInfo('logaddexp',
            dtypes=floating_types(),
