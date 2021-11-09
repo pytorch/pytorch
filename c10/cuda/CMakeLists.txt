@@ -24,7 +24,6 @@ set(C10_CUDA_SRCS
     CUDAFunctions.cpp
     CUDAMiscFunctions.cpp
     CUDACachingAllocator.cpp
-    CUDACachingAllocatorConfig.cpp
     CUDAMallocAsyncAllocator.cpp
     impl/CUDAGuardImpl.cpp
     impl/CUDATest.cpp

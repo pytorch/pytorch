@@ -1,5 +1,4 @@
 #include <c10/cuda/CUDACachingAllocator.h>
-
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAGuard.h>
@@ -7,6 +6,7 @@
 #include <c10/util/irange.h>
 
 #include <mutex>
+#include <set>
 #include <unordered_map>
 #include <vector>
 
@@ -23,12 +23,13 @@ namespace CudaMallocAsync {
 // Implementation details, not declared in CUDACachingAllocator.h
 namespace {
 
+// General helpers
+
 int device_count = 0;
 // these don't need to be std::once_flags as in CUDAGeneratorImpl.cpp
 // because they'll only be flipped by functions that have locked the mutex.
 std::vector<bool> devs_initialized_flags;
 std::vector<CUDAStream> dummy_unifying_free_streams;
-std::vector<expected
 
 // Potential future micro-optimization:
 // Some accesses to usage_streams_each_ptr are read-only.
@@ -37,6 +38,38 @@ std::vector<expected
 // Keeping it simple with an ordinary mutex for now.
 std::mutex general_mutex;
 std::unordered_map<void*, std::vector<CUDAStream>> usage_streams_each_ptr;
+
+// Graph-specific helpers
+
+// During capture, all stream dependencies must branch out from
+// the stream on which capture began and rejoin this initial stream
+// before capture ends.
+// The user rigs desired forking and joining with event waits.
+// But it's hard to be sure when tensor destructors get called relative
+// to the final joins.
+// For example, suppose a user
+//   forks work stream B from initial capture stream A
+//   creates a tensor T in B
+//   joins by syncing A with B
+//   ends capture.
+// All well and good, right? Maybe not: maybe T went out of scope
+// and its destructor got called AFTER the rejoin, leaving the graph with
+// "unjoined work": a dangling cudaFreeAsync node in stream B.
+// Ensuring that all tensor destructors for all side stream tensors
+// are called before side streams rejoin the main stream sounds
+// difficult. The user might have to add a bunch of explicit
+// "del"s at the right spots in code that was fine for ordinary
+// eager execution.
+// Fortunately, we can spare the user this burden:
+// during capture, we remember _all_ free streams,
+// and manually rejoin them with the capture stream during
+// notifyCaptureAboutToEnd.
+// This approach is heavy-handed, but we don't really mind
+// being heavy-handed during capture.
+std::set<CUDAStream> maybe_dangling_free_streams;
+bool capture_maybe_underway = false;
+
+// Implementation functions
 
 // Assumes the caller holds general_mutex
 inline void lazy_init_device(int device) {
@@ -68,12 +101,12 @@ inline void lazy_init_device(int device) {
 }
 
 void free(void* ptr) {
-  std::lock_guard<std::mutex> lock(general_mutex);
+  std::lock_guard<std::mutex> lk(general_mutex);
 
   auto it = usage_streams_each_ptr.find(ptr);
-  TORCH_INTERNAL_ASSERT(usage_streams != usage_streams_each_ptr.end(),
+  TORCH_INTERNAL_ASSERT(it != usage_streams_each_ptr.end(),
                         "ptr not represented in usage_streams_each_ptr");
-  TORCH_INTERNAL_ASSERT(usage_streams.second.size() != 0,
+  TORCH_INTERNAL_ASSERT(it->second.size() != 0,
                         "ptr's stream uses vector is empty");
 
   // Possible micro-optimization: If we did a value-copy here, we could move
@@ -103,6 +136,7 @@ void free(void* ptr) {
     // on which the pointer was originally allocated.
     auto dummy_unifying_free_stream = dummy_unifying_free_streams[usage_streams[0].device_index()];
 
+    // The number of usage streams is typically small (low single digits)
     for (const auto& usage_stream : usage_streams) {
       // Logic here accommodates the chance some of the usage streams were on other devices,
       // which is possible if some usage kernels accessed the memory via p2p.
@@ -110,10 +144,12 @@ void free(void* ptr) {
       // cudaEventRecord requires that the input event and stream are on the same device.
       CUDAGuard g_usage(usage_streams[0].device_index());
 
-      // Records an event in the usage stream
-      auto event = c10::Event(c10::DeviceType::CUDA);
-      event.record(usage_stream);
-      dummy_unifying_free_stream.wait(event);
+      // CUDACachingAllocator.cpp uses raw cuda events, as do we.
+      cudaEvent_t event;
+      C10_CUDA_CHECK(cudaEventCreateWithFlags(&event, cudaEventDisableTiming));
+      C10_CUDA_CHECK(cudaEventRecord(event, usage_stream.stream()));
+      C10_CUDA_CHECK(cudaStreamWaitEvent(dummy_unifying_free_stream.stream(), event));
+      C10_CUDA_CHECK(cudaEventDestroy(event));
     }
 
     // Frees ptr in the dummy "unifier" stream.
@@ -150,7 +186,7 @@ void malloc(void** devPtr, int device, size_t size, cudaStream_t stream) {
 
   C10_CUDA_CHECK(cudaMallocAsync(devPtr, size, stream));
 
-  std::lock_guard<std::mutex> lock(general_mutex);
+  std::lock_guard<std::mutex> lk(general_mutex);
 
   lazy_init_device(device);
 
@@ -217,16 +253,16 @@ void setMemoryFraction(double fraction, int device) {
 }
 
 void emptyCache(void) {
-  std::lock_guard<std::mutex> lock(general_mutex);
+  std::lock_guard<std::mutex> lk(general_mutex);
 
-  for (int device = 0; i < device_count; i++) {
-    if (devs_initialized_flags[device]) {
-      CUDAGuard g(device);
+  for (int dev = 0; dev < device_count; dev++) {
+    if (devs_initialized_flags[dev]) {
+      CUDAGuard g(dev);
 
       cudaMemPool_t mempool;
-      cudaDeviceGetDefaultMemPool(&mempool, device);
+      cudaDeviceGetDefaultMemPool(&mempool, dev);
       cudaDeviceSynchronize();
-      cudaMemPoolTrimTo(pool, 0);
+      cudaMemPoolTrimTo(mempool, 0);
     }
   }
 }
@@ -235,18 +271,18 @@ void cacheInfo(int dev_id, size_t* cachedAndFree, size_t* largestBlock) {
 }
 
 void* getBaseAllocation(void* ptr, size_t* size) {
-  if (outSize) {
-
-  }
+  if (size) {
+    // maybe we do need to track per-ptr sizes after all
+  } 
   return ptr;
 }
 
 void recordStream(const DataPtr& ptr, cuda::CUDAStream stream) {
-  std::lock_guard<std::mutex> lock(general_mutex);
+  std::lock_guard<std::mutex> lk(general_mutex);
 
   // The pointer should exist in the map already.
   auto it = usage_streams_each_ptr.find(ptr.get());
-  TORCH_INTERNAL_ASSERT(it != it.end(),
+  TORCH_INTERNAL_ASSERT(it != usage_streams_each_ptr.end(),
                         "ptr not represented in usage_streams_each_ptr");
   TORCH_INTERNAL_ASSERT(it->second.size() != 0,
                         "ptr's stream uses vector is empty");
@@ -259,7 +295,6 @@ std::mutex* getFreeMutex() {
 }
 
 static inline void assertValidDevice(int device) {
-  const auto device_num = caching_allocator.device_allocator.size();
   TORCH_CHECK(
       0 <= device && device < device_count,
       "Invalid device argument.");
@@ -279,7 +314,7 @@ DeviceStats getDeviceStats(int device) {
   // High-water mark of memory
   uint64_t used_mem_high = 0;
 
-  std::lock_guard<std::mutex> general_mutex;
+  std::lock_guard<std::mutex> lk(general_mutex);
 
   if (devs_initialized_flags[device]) {
     CUDAGuard g(device);
@@ -302,6 +337,9 @@ DeviceStats getDeviceStats(int device) {
                                            cudaMemPoolAttrUsedMemHigh,
                                            &used_mem_high));
   }
+
+  // just to get it to compile, WIP
+  return {};
 }
 
 void resetAccumulatedStats(int device) {
@@ -317,13 +355,14 @@ void resetPeakStats(int device) {
   uint64_t zero = 0;
   C10_CUDA_CHECK(cudaMemPoolSetAttribute(mempool,
                                          cudaMemPoolAttrReservedMemHigh,
-                                         &zero)):
+                                         &zero));
   C10_CUDA_CHECK(cudaMemPoolSetAttribute(mempool,
                                          cudaMemPoolAttrUsedMemHigh,
-                                         &zero)):
+                                         &zero));
 }
 
 std::vector<SegmentInfo> snapshot() {
+  return {};
 }
 
 // CUDAGraph interactions

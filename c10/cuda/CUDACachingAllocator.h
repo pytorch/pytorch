@@ -1,7 +1,7 @@
 #ifndef THC_DEVICE_ALLOCATOR_INC
 #define THC_DEVICE_ALLOCATOR_INC
 #include <c10/core/Allocator.h>
-#include <c10/cuda/CachingAllocatorConfig.h>
+#include <c10/cuda/CUDACachingAllocatorConfig.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAMacros.h>
 #include <c10/cuda/CUDAStream.h>
@@ -153,7 +153,7 @@ CUDA_ALLOCATOR_BACKEND_INTERFACE
 // The following functions ARE meant to be called directly by clients.
 // They'll choose the appropriate backend based on the runtime value of
 // the PYTORCH_CUDA_ALLOC_CONF environment variable
-// (cf CachingAllocatorConfig in CUDACachingAllocator.cpp)
+// (cf parseArgs in CUDACachingAllocatorConfig.cpp)
 
 inline void* raw_alloc(size_t nbytes) {
   // Lean on the out-of-line call here as the surface at which we choose the allocator backend
@@ -175,7 +175,7 @@ inline void* raw_alloc(size_t nbytes) {
   // The downside of ^ is that it's not inlineable even with LTO.
   // If LTO is enabled and we think it's capable of inlining any allocator backend's calls at the
   // point of use, we could just use if statements and hope for good branch prediction.
-  // static bool useNative = (CachingAllocatorConfig::allocator_backend() == "native");
+  // static bool useNative = (allocatorBackend() == "native");
   // if (useCudaMallocAsync) {
   //   return CudaMallocAsync(raw_alloc);
   // } else {
