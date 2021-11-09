@@ -345,6 +345,8 @@ public:
   KeyT key;
   ValueT value;
 
+  using TupleT = thrust::tuple<KeyT, ValueT>;
+
   __host__ __device__ __forceinline__ KeyValuePairWithKeyEquality()
     :key({}), value({}) {}
 
@@ -360,7 +362,11 @@ public:
     return key == other.key;
   }
 
-  __host__ __device__ __forceinline__ operator thrust::tuple<KeyT, ValueT>() {
+  __host__ __device__ __forceinline__ bool operator==(const TupleT &other) const {
+    return key == thrust::get<0>(other);
+  }
+
+  __host__ __device__ __forceinline__ operator TupleT() {
     return {key, value};
   }
 };
