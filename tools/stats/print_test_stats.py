@@ -693,13 +693,13 @@ def parse_reports(folder: str) -> Dict[str, TestFile]:
 
 def build_info() -> ReportMetaMeta:
     return {
-        "build_pr": os.environ.get("CIRCLE_PR_NUMBER", ""),
-        "build_tag": os.environ.get("CIRCLE_TAG", ""),
-        "build_sha1": os.environ.get("CIRCLE_SHA1", ""),
-        "build_base_commit": get_base_commit(os.environ.get("CIRCLE_SHA1", "HEAD")),
-        "build_branch": os.environ.get("CIRCLE_BRANCH", ""),
+        "build_pr": os.environ.get("PR_NUMBER", ""),
+        "build_tag": os.environ.get("TAG", ""),
+        "build_sha1": os.environ.get("SHA1", ""),
+        "build_base_commit": get_base_commit(os.environ.get("SHA1", "HEAD")),
+        "build_branch": os.environ.get("BRANCH", ""),
         "build_job": os.environ.get("JOB_BASE_NAME", os.environ.get("CIRCLE_JOB", "")),
-        "build_workflow_id": os.environ.get("CIRCLE_WORKFLOW_ID", ""),
+        "build_workflow_id": os.environ.get("WORKFLOW_ID", ""),
         "build_start_time_epoch": str(int(os.path.getmtime(os.path.realpath(__file__)))),
     }
 
@@ -781,8 +781,8 @@ def assemble_s3_object(
 
 def send_report_to_s3(head_report: Version2Report) -> None:
     job = os.getenv('JOB_BASE_NAME', os.environ.get('CIRCLE_JOB'))
-    sha1 = os.environ.get('CIRCLE_SHA1')
-    branch = os.environ.get('CIRCLE_BRANCH', '')
+    sha1 = os.environ.get('SHA1')
+    branch = os.environ.get('BRANCH', '')
     now = datetime.datetime.utcnow().isoformat()
 
     # SHARD_NUMBER and TEST_CONFIG are specific to GHA, as these details would be included in CIRCLE_JOB already
@@ -792,7 +792,7 @@ def send_report_to_s3(head_report: Version2Report) -> None:
     job_report_dirname = f'{job}{f"-{test_config}" if test_config is not None else ""}{shard}'
 
     if branch not in ['master', 'nightly'] and not branch.startswith("release/"):
-        pr = os.environ.get('CIRCLE_PR_NUMBER', 'unknown')
+        pr = os.environ.get('PR_NUMBER', 'unknown')
         key = f'pr_test_time/{pr}/{sha1}/{job_report_dirname}/{now}Z.json.bz2'  # Z meaning UTC
     else:
         key = f'test_time/{sha1}/{job_report_dirname}/{now}Z.json.bz2'  # Z meaning UTC
@@ -830,7 +830,7 @@ def upload_failures_to_rds(reports: Dict[str, TestFile]) -> None:
 
 
 def print_regressions(head_report: Report, *, num_prev_commits: int) -> None:
-    sha1 = os.environ.get("CIRCLE_SHA1", "HEAD")
+    sha1 = os.environ.get("SHA1", "HEAD")
 
     base = get_base_commit(sha1)
 
