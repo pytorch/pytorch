@@ -78,11 +78,7 @@ def generate_bytecode(file_name):
     stream = open(file_name, 'w')
     yaml.dump(yaml_content, stream)
 
-def generate_graph():
-    """
-    returns a map that maps upgrader name to the corresponding TS graph
-    """
-
+def populate_upgraders_map():
     content = {
         "div_Tensor_0_3": str(div_Tensor_0_3.graph),
         "div_Scalar_0_3": str(div_Scalar_0_3.graph),
@@ -90,5 +86,4 @@ def generate_graph():
         "div__Tensor_0_3": str(div__Tensor_0_3.graph),
         "div__Scalar_0_3": str(div__Scalar_0_3.graph)
     }
-
     torch._C.populate_upgraders_map(content)
