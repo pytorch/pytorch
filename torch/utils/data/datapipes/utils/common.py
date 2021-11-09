@@ -45,14 +45,12 @@ def get_file_binaries_from_pathnames(pathnames: Iterable, mode: str):
     if not isinstance(pathnames, Iterable):
         pathnames = [pathnames, ]
 
-    if mode in ('b', 't'):
-        mode = 'r' + mode
-
     for pathname in pathnames:
         if not isinstance(pathname, str):
             raise TypeError("Expected string type for pathname, but got {}"
                             .format(type(pathname)))
         yield pathname, StreamWrapper(open(pathname, mode))
+
 
 def validate_pathname_binary_tuple(data: Tuple[str, IOBase]):
     if not isinstance(data, tuple):
@@ -66,6 +64,7 @@ def validate_pathname_binary_tuple(data: Tuple[str, IOBase]):
             f"binary stream within the tuple should have IOBase or"
             f"its subclasses as type, but it is type {type(data[1])}"
         )
+
 
 # Warns user that the DataPipe has been moved to TorchData and will be removed from `torch`
 def deprecation_warning_torchdata(name):

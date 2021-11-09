@@ -14,9 +14,7 @@ class FileLoaderIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
     Args:
         datapipe: Iterable datapipe that provides pathnames
         mode: An optional string that specifies the mode in which
-            the file is opened by `open()`. It defaults to 'b' which
-            means open for reading in binary mode. Another option is
-            't' for text mode
+            the file is opened by Python `open` method ('r' by default)
         length: Nominal length of the datapipe
 
     Note:
@@ -26,14 +24,12 @@ class FileLoaderIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
 
     def __init__(
             self,
-            datapipe : Iterable[str],
-            mode: str = 'b',
-            length : int = -1):
+            datapipe: Iterable[str],
+            mode: str = 'r',
+            length: int = -1):
         super().__init__()
         self.datapipe: Iterable = datapipe
         self.mode: str = mode
-        if self.mode not in ('b', 't', 'rb', 'rt', 'r'):
-            raise ValueError("Invalid mode {}".format(mode))
         # TODO: enforce typing for each instance based on mode, otherwise
         #       `argument_validation` with this DataPipe may be potentially broken
         self.length: int = length
