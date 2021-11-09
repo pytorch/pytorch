@@ -3,7 +3,6 @@
 //
 // This source code is licensed under the BSD-style license found in the
 // LICENSE file in the root directory of this source tree.
-
 #include <functorch/csrc/BatchedTensorImpl.h>
 
 #include <ATen/WrapDimUtils.h>
@@ -15,14 +14,15 @@
 namespace at {
 namespace functorch {
 
-BatchedTensorImpl::BatchedTensorImpl(Tensor value, BatchDims bdims)
+BatchedTensorImpl::BatchedTensorImpl(Tensor value, int64_t bdim, int64_t level)
   : TensorImpl(
       c10::DispatchKeySet(kBatchedKey),
       value.dtype(),
       value.device()
     )
   , value_(std::move(value))
-  , bdims_(std::move(bdims))
+  , level_(level)
+  , bdim_(bdim)
 {
   // TODO: I don't think this ctor gets used.
   TORCH_INTERNAL_ASSERT(false);
@@ -31,7 +31,7 @@ BatchedTensorImpl::BatchedTensorImpl(Tensor value, BatchDims bdims)
   set_has_contiguity_policy(HasContiguityPolicy::CustomBehavior);
   checkInvariants();
 
-  const auto public_dims = value_.dim() - bdims_.size();
+  const auto public_dims = value_.dim() - 1;
   const auto value_sizes = value_.sizes();
   const auto value_strides = value_.strides();
   sizes_and_strides_.resize(public_dims);
@@ -44,26 +44,25 @@ BatchedTensorImpl::BatchedTensorImpl(Tensor value, BatchDims bdims)
   refresh_contiguous();
 }
 
-BatchedTensorImpl::BatchedTensorImpl(DispatchKeySet key_set, Tensor value, BatchDims bdims)
+BatchedTensorImpl::BatchedTensorImpl(DispatchKeySet key_set, Tensor value, int64_t bdim, int64_t level)
   : TensorImpl(
       key_set.add(kBatchedKey),
       value.dtype(),
       value.device()
     )
   , value_(std::move(value))
-  , bdims_(std::move(bdims))
+  , level_(level)
+  , bdim_(bdim)
 {
   TORCH_INTERNAL_ASSERT(value_.defined());
   set_storage_access_should_throw();
   set_has_contiguity_policy(HasContiguityPolicy::CustomBehavior);
   checkInvariants();
-
-  TORCH_INTERNAL_ASSERT(bdims_.size() == 1);
   refreshSizesAndStrides();
 }
 
 void BatchedTensorImpl::refreshSizesAndStrides() {
-  const auto public_dims = value_.dim() - bdims_.size();
+  const auto public_dims = value_.dim() - 1;
   const auto value_sizes = value_.sizes();
   const auto value_strides = value_.strides();
   sizes_and_strides_.resize(public_dims);
@@ -81,7 +80,10 @@ int64_t BatchedTensorImpl::actualDim(int64_t dim, bool wrap_dim) const {
     const auto ndim = sizes_and_strides_.size();
     dim = maybe_wrap_dim(dim, ndim);
   }
-  auto is_bdim = createBatchDimBitset(bdims_);
+  auto is_bdim = createBatchDimBitset(bdim_);
+
+  // TODO(vfdev): As BatchedTensorImpl is refactored and has only one dim.
+  // Below code may be simplified.
 
   // Example: assume dim = 3, and is_bdim = 10010011000...
   // The 1's are batch dims and 0's are normal dims of the underlying value_ Tensor.
@@ -111,11 +113,7 @@ int64_t BatchedTensorImpl::actualDim(int64_t dim, bool wrap_dim) const {
 }
 
 void BatchedTensorImpl::checkInvariants() const {
-  int64_t prev_level = -1;
-  for (const auto& bdim : bdims_) {
-    TORCH_INTERNAL_ASSERT(bdim.level() > prev_level);
-    prev_level = bdim.level();
-  }
+  TORCH_INTERNAL_ASSERT(level_ > -1);
 }
 
 // The following are publically exposed as methods of Tensor
@@ -148,36 +146,18 @@ const char* BatchedTensorImpl::tensorimpl_type_name() const {
   return "BatchedTensorImpl";
 }
 
-Tensor makeBatched(const Tensor& tensor, BatchDims bdims) {
+Tensor makeBatched(const Tensor& tensor, int64_t bdim, int64_t level) {
   DispatchKeySet key_set = getKeysToPropagateToWrapper(tensor);
   auto* batched = maybeGetBatchedImpl(tensor);
   if (batched) {
-    auto requested_level = bdims.back().level();
-    auto batched_level = batched->bdims().back().level();
-    TORCH_INTERNAL_ASSERT(requested_level > batched_level);
+    auto batched_level = batched->level();
+    TORCH_INTERNAL_ASSERT(level > batched_level, " batched_level: ", batched_level, " level: ", level);
   }
-  return at::detail::make_tensor<BatchedTensorImpl>(key_set, tensor, std::move(bdims));
+  return at::detail::make_tensor<BatchedTensorImpl>(key_set, tensor, bdim, level);
 }
 
-Tensor addBatchDim(const Tensor& tensor, int64_t level, int64_t dim) {
-  BatchDims new_bdims = { { level, dim } };
-  TORCH_INTERNAL_ASSERT(new_bdims.size() == 1);
-  return makeBatched(tensor, std::move(new_bdims));
-}
-
-bool inplaceIsVmapCompatible(const Tensor& self, const Tensor& other) {
-  const auto* other_batched = maybeGetBatchedImpl(other);
-  if (!other_batched) {
-    return true;
-  }
-  const auto* self_batched = maybeGetBatchedImpl(self);
-  if (!self_batched) {
-    // self is not batched but other is batched
-    return false;
-  }
-  auto self_levels = createVmapLevelsBitset(self_batched->bdims());
-  auto other_levels = createVmapLevelsBitset(other_batched->bdims());
-  return self_levels == (self_levels | other_levels);
+Tensor addBatchDim(const Tensor& tensor, int64_t dim, int64_t level) {
+  return makeBatched(tensor, dim, level);
 }
 
 }
