@@ -254,6 +254,20 @@ bool NoTF32Guard::should_disable_tf32() {
   return override_allow_tf32_flag;
 }
 
+thread_local bool BackwardPassGuard::is_backward_pass_;
+
+BackwardPassGuard::BackwardPassGuard() {
+  is_backward_pass_ = true;
+}
+
+BackwardPassGuard::~BackwardPassGuard() {
+  is_backward_pass_ = false;
+}
+
+bool BackwardPassGuard::is_backward_pass() {
+  return is_backward_pass_;
+}
+
 bool Context::areVmapFallbackWarningsEnabled() const {
   return display_vmap_fallback_warnings_;
 }
