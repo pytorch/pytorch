@@ -792,6 +792,20 @@ set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS_NON_AVX} ${Caffe2_CPU_SRCS_AVX2} ${Caffe2_
 # ==========================================================
 
 add_library(torch_cpu ${Caffe2_CPU_SRCS})
+
+add_custom_command(
+  OUTPUT ${CMAKE_CURRENT_LIST_DIR}/../torch/csrc/jit/operator_upgraders/version_map.h
+  COMMAND
+  "${PYTHON_EXECUTABLE}" -m tools.codegen.operator_versions.gen_operator_upgraders_entry
+  --input_yaml ${CMAKE_CURRENT_LIST_DIR}/../torch/jit/operator_versions.yaml
+  --output_path ${CMAKE_CURRENT_LIST_DIR}/../torch/csrc/jit/operator_upgraders
+  WORKING_DIRECTORY "${TORCH_ROOT}")
+
+add_custom_target(
+  __upgrader_entry
+  DEPENDS ${CMAKE_CURRENT_LIST_DIR}/../torch/csrc/jit/operator_upgraders/version_map.h)
+add_dependencies(torch_cpu __upgrader_entry)
+
 if(HAVE_SOVERSION)
   set_target_properties(torch_cpu PROPERTIES
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})

@@ -28,22 +28,6 @@ static std::unordered_map<std::string, std::vector<UpgraderEntry>> operator_vers
 } // namespace torch
 """
 
-
-# stuff = """{{"aten::div.Tensor",
-#       {{4,
-#         "div_Tensor_0_3",
-#         "aten::div.Tensor(Tensor self, Tensor other) -> Tensor"}}},
-#      {"aten::div.Scalar",
-#       {{4,
-#         "div_Scalar_0_3",
-#         "aten::div.Scalar(Tensor self, Scalar other) -> Tensor"}}},
-#      {"aten::div.out",
-#       {{4,
-#         "div_out_0_3",
-#         "aten::div.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)"}}}}"""
-
-# print(ct.substitute(version_entry=stuff))
-
 def load_yaml(version_entry_path):
     with open(version_entry_path, "rb") as yaml_file:
         return yaml.safe_load(yaml_file)

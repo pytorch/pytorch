@@ -14,7 +14,7 @@ namespace jit {
 static std::unordered_map<std::string, std::string> upgraders_graph;
 
 void populate_upgraders_map(std::unordered_map<std::string, std::string> content) {
-    // make sure we call this only once
+    // make sure we populate the map only once
     if (!IS_IN_POPULATION_PHASE) return;
 
     for (const auto& entry: content) {
@@ -22,11 +22,8 @@ void populate_upgraders_map(std::unordered_map<std::string, std::string> content
     }
 }
 
-void print_upgraders_map() {
-    std::cout << "TOTAL of " << upgraders_graph.size() << " entries listed below" << std::endl;
-    for(const auto& entry : upgraders_graph) {
-        std::cout << entry.first << " " << entry.second;
-    }
+int get_upgraders_map_size() {
+    return upgraders_graph.size();
 }
 
 } // namespace jit

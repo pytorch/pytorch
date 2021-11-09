@@ -1709,7 +1709,9 @@ void initJitScriptBindings(PyObject* module) {
     populate_upgraders_map(content);
   });
 
-  m.def("print_upgraders_map", &print_upgraders_map);
+  m.def("get_upgraders_map_size", []() -> int {
+    return get_upgraders_map_size();
+  });
 
   m.def("merge_type_from_type_comment", &mergeTypesFromTypeComment);
   m.def(

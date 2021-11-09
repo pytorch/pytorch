@@ -81,6 +81,7 @@ torch/csrc/generated
 torch/csrc/generic/TensorMethods.cpp
 torch/csrc/jit/generated/*
 torch/csrc/jit/fuser/config.h
+torch/csrc/jit/operator_upgraders/version_map.h
 torch/csrc/nn/THCUNN.cpp
 torch/csrc/nn/THCUNN.cwrap
 torch/bin/
