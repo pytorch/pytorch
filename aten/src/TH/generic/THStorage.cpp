@@ -17,11 +17,6 @@ scalar_t* THStorage_(data)(const THStorage *self)
 #endif
 }
 
-size_t THStorage_(elementSize)()
-{
-  return sizeof(scalar_t);
-}
-
 THStorage* THStorage_(new)(void)
 {
   return THStorage_new();
@@ -79,13 +74,6 @@ THStorage* THStorage_(newWithMapping)(const char *filename, ptrdiff_t size, int 
   return storage;
 }
 
-THStorage* THStorage_(newWithSize1)(scalar_t data0)
-{
-  THStorage *self = THStorage_(newWithSize)(1);
-  scalar_t *data = THStorage_(data)(self);
-  data[0] = data0;
-  return self;
-}
 
 void THStorage_(retain)(THStorage *storage)
 {
