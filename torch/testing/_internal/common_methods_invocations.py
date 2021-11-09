@@ -3108,7 +3108,9 @@ class _TestParamsMaxPool1d(object):
                 yield shape, torch.channels_last
 
     def _gen_kwargs(self):
-        yield from (dict(zip(self.kwargs.keys(), values)) for values in product(*self.kwargs.values()))
+        keys = self.kwargs.keys()
+        for values in product(*self.kwargs.values()):
+            yield dict(zip(keys, values))
 
     def gen_input_params(self):
         yield from product(self._gen_shape(), self._gen_kwargs())
@@ -3135,7 +3137,7 @@ class _TestParamsMaxPool3d(_TestParamsMaxPool1d):
         self.shapes.append([5])
 
 def sample_inputs_max_pool(op_info, device, dtype, requires_grad, **kwargs):
-    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
 
     params_generator_type_dict = {
         'nn.functional.max_pool1d': _TestParamsMaxPool1d,
@@ -3146,7 +3148,8 @@ def sample_inputs_max_pool(op_info, device, dtype, requires_grad, **kwargs):
     def generator():
         params_generator = params_generator_type_dict[op_info.name]()
         for (shape, memory_format), kwargs in params_generator.gen_input_params():
-            yield SampleInput(make_arg(shape).to(memory_format=memory_format), kwargs=kwargs)
+            arg = make_arg(shape).to(memory_format=memory_format).requires_grad_(requires_grad)
+            yield SampleInput(arg, kwargs=kwargs)
 
     return list(generator())
 
@@ -9483,6 +9486,8 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.max_pool2d',
            aten_name='max_pool2d',
            supports_autograd=True,
+           # Vmap is note happy with non-contiguous (channels_last) inputs
+           check_batched_gradgrad=False,
            supports_out=False,
            assert_jit_shape_analysis=True,
            dtypesIfCPU=floating_types(),
