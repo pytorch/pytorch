@@ -3098,6 +3098,7 @@ class _TestParamsMaxPool1d(object):
 
     def _gen_shape(self):
         for shape in product(*self.shapes):
+            # shape[0] is None indicates missing batch dimension
             if shape[0] is None:
                 yield shape[1:]
             else:
