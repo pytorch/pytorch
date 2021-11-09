@@ -13,32 +13,19 @@
 namespace at {
 namespace functorch {
 
-// Checks if the batch dims in `bdims` appear at the front of the tensor.
-static bool areBdimsAtFrontInOrder(BatchDimsRef bdims) {
-  for (const auto idx: c10::irange(0, bdims.size())) {
-    if (bdims[idx].dim() != (int64_t)idx) {
-      return false;
-    }
-  }
-  return true;
-}
-
 // Takes a BatchedTensorImpl, permutes all of the batch dims to the front,
 // and then returns a physical version of the Tensor.
 static Tensor permuteBatchDimsToFront(BatchedTensorImpl* batched) {
-  auto bdims = batched->bdims();
   const Tensor& physical_tensor = batched->value();
-  if (areBdimsAtFrontInOrder(bdims)) {
+  if (batched->bdim() == 0) {
     return physical_tensor;
   }
   const auto sizes = physical_tensor.sizes();
   VmapDimVector permutation(sizes.size(), 0);
   permutation.reserve(sizes.size());
-  const auto is_bdim = createBatchDimBitset(bdims);
+  const auto is_bdim = createBatchDimBitset(batched->bdim());
   int64_t idx = 0;
-  for (const auto& bdim : bdims) {
-    permutation[idx++] = bdim.dim();
-  }
+  permutation[idx++] = batched->bdim();
   for (const auto ptr : c10::irange(0, sizes.size())) {
     if (is_bdim[ptr]) {
       continue;
@@ -53,7 +40,7 @@ VmapPhysicalView MultiBatchVmapTransform::logicalToPhysical(const Tensor& logica
   TORCH_INTERNAL_ASSERT(
       batched,
       "logicalToPhysical(tensor) should only be passed a BatchedTensor");
-  return { permuteBatchDimsToFront(batched), createVmapLevelsBitset(batched->bdims()) };
+  return { permuteBatchDimsToFront(batched), createVmapLevelsBitset(batched->level()) };
 }
 
 int64_t VmapPhysicalView::numBatchDims() const {
@@ -89,16 +76,16 @@ VmapDimVector VmapPhysicalView::getPhysicalShape(IntArrayRef logical_shape) cons
   return result;
 }
 
-static BatchDims computeFrontBatchDimsFromLevels(std::bitset<kVmapNumLevels> levels_bitset) {
-  BatchDims bdims;
+static std::tuple<int64_t, int64_t> computeFrontBatchDimsFromLevels(std::bitset<kVmapNumLevels> levels_bitset) {
+  int64_t level = 0;
   int64_t dim = 0;
-  for (int64_t level = 0; level < kVmapNumLevels; level++) {
+  for (; level < kVmapNumLevels; level++) {
     if (!levels_bitset[level]) {
       continue;
     }
-    bdims.emplace_back(level, dim++);
+    break;
   }
-  return bdims;
+  return std::make_tuple(dim, level);
 }
 
 static Tensor moveDimToFrontAndExpand(Tensor tensor, optional<int64_t> dim, int64_t size) {
@@ -132,11 +119,10 @@ MultiBatchVmapTransform::logicalToPhysical(TensorList logical_tensors) {
     if (!batched) {
       continue;
     }
-    TORCH_INTERNAL_ASSERT(batched->bdims().size() == 1);
-    if (batched->bdims().back().level() != cur_level) {
+    if (batched->level() != cur_level) {
       continue;
     }
-    bdim_size = batched->value().size(batched->bdims().back().dim());
+    bdim_size = batched->value().size(batched->bdim());
   }
   TORCH_INTERNAL_ASSERT(bdim_size != -1);
 
@@ -146,7 +132,7 @@ MultiBatchVmapTransform::logicalToPhysical(TensorList logical_tensors) {
   VmapPhysicalViewVec result;
   for (const auto& logical_tensor : logical_tensors) {
     auto* batched = maybeGetBatchedImpl(logical_tensor);
-    if (!batched || (batched->bdims().back().level() != cur_level)) {
+    if (!batched || (batched->level() != cur_level)) {
       // Unsqueeze dim 0, expand it to the correct shape
       c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
       auto value = moveDimToFrontAndExpand(logical_tensor, {}, bdim_size);
@@ -155,7 +141,7 @@ MultiBatchVmapTransform::logicalToPhysical(TensorList logical_tensors) {
     }
     c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
     auto physical = batched->value();
-    auto value = moveDimToFrontAndExpand(physical, batched->bdims().back().dim(), bdim_size);
+    auto value = moveDimToFrontAndExpand(physical, batched->bdim(), bdim_size);
     result.emplace_back(std::move(value), levels);
   }
 
@@ -182,10 +168,10 @@ VmapPhysicalViewVec BroadcastingVmapTransform::logicalToPhysical(TensorList logi
   // Figure out the batch size first
   for (const auto& logical_tensor : logical_tensors) {
     auto* batched = maybeGetBatchedImpl(logical_tensor);
-    if (!batched || (batched->bdims().back().level() != cur_level)) {
+    if (!batched || (batched->level() != cur_level)) {
       continue;
     }
-    bdim_size = batched->value().size(batched->bdims().back().dim());
+    bdim_size = batched->value().size(batched->bdim());
   }
   TORCH_INTERNAL_ASSERT(bdim_size != -1);
 
@@ -201,7 +187,7 @@ VmapPhysicalViewVec BroadcastingVmapTransform::logicalToPhysical(TensorList logi
   VmapPhysicalViewVec result;
   for (const auto& logical_tensor : logical_tensors) {
     auto* batched = maybeGetBatchedImpl(logical_tensor);
-    if (!batched || (batched->bdims().back().level() != cur_level)) {
+    if (!batched || (batched->level() != cur_level)) {
       // Unsqueeze dim 0, expand it to the correct shape
       c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
       auto value = moveDimToFrontAndUnsqueeze(logical_tensor, {}, max_example_dim);
@@ -210,7 +196,7 @@ VmapPhysicalViewVec BroadcastingVmapTransform::logicalToPhysical(TensorList logi
     }
     c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
     auto physical = batched->value();
-    auto value = moveDimToFrontAndUnsqueeze(physical, batched->bdims().back().dim(), max_example_dim);
+    auto value = moveDimToFrontAndUnsqueeze(physical, batched->bdim(), max_example_dim);
     result.emplace_back(std::move(value), levels);
   }
 
@@ -222,7 +208,8 @@ VmapPhysicalToLogicalMap VmapPhysicalView::getPhysicalToLogicalMap() const {
 }
 
 Tensor VmapPhysicalToLogicalMap::apply(const Tensor& physical_tensor) const {
-  return makeBatched(physical_tensor, computeFrontBatchDimsFromLevels(levels_));
+  auto bdim_level = computeFrontBatchDimsFromLevels(levels_);
+  return makeBatched(physical_tensor, std::get<0>(bdim_level), std::get<1>(bdim_level));
 }
 
 void VmapPhysicalToLogicalMap::applyInplace(std::vector<Tensor>& physical_tensors) const {

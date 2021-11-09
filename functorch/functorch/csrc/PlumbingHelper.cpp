@@ -14,7 +14,7 @@ Tensor makeBatched(const Tensor& tensor, optional<int64_t> bdim, int64_t level) 
   if (bdim.has_value()) {
     TORCH_INTERNAL_ASSERT(*bdim >= 0);
     TORCH_INTERNAL_ASSERT(*bdim < tensor.dim());
-    return makeBatched(tensor, {{level, bdim.value()}});
+    return makeBatched(tensor, bdim.value(), level);
   }
   return tensor;
 }
@@ -32,11 +32,8 @@ std::tuple<Tensor, optional<int64_t>> unwrapTensorAtLevel(const Tensor& tensor, 
   if (!batched) {
     return std::make_tuple(tensor, nullopt);
   }
-  TORCH_INTERNAL_ASSERT(batched->bdims().size() == 1);
-  auto batched_level = batched->bdims().back().level();
-  if (batched_level == level) {
-    auto bdim = batched->bdims().back().dim();
-    return std::make_tuple(batched->value(), bdim);
+  if (batched->level() == level) {
+    return std::make_tuple(batched->value(), batched->bdim());
   }
   return std::make_tuple(tensor, nullopt);
 }

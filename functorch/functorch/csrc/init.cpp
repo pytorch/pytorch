@@ -24,43 +24,18 @@ static bool has_level(const Tensor& self, int64_t level) {
   if (!batched) {
     return false;
   }
-  auto bdims = batched->bdims();
-  return bdims.back().level() >= level;
+  return batched->level() >= level;
 }
 
 Tensor _add_batch_dim(const Tensor& self, int64_t batch_dim, int64_t level) {
-  return addBatchDim(self, level, batch_dim);
+  return addBatchDim(self, batch_dim, level);
 }
 
 static std::pair<Tensor,int64_t> remove_existing_batch_dim(
     const BatchedTensorImpl* batched, int64_t level) {
-  auto bdims = batched->bdims();
-  if (bdims.size() == 1) {
-    TORCH_INTERNAL_ASSERT(bdims[0].level() == level);
-    return std::make_pair(batched->value(), bdims[0].dim());
-  }
-  BatchDims new_bdims;
-  int64_t newly_exposed_physical_dim = -1;
-  new_bdims.reserve(bdims.size() - 1);
-  for (const auto& bdim : bdims) {
-    if (bdim.level() == level) {
-      newly_exposed_physical_dim = bdim.dim();
-    } else {
-      new_bdims.push_back(bdim);
-    }
-  }
-  // Because a BatchDim with level `level` must exist inside `batched,
-  // we should have found a `newly_exposed_logical_dim`.
-  TORCH_INTERNAL_ASSERT(newly_exposed_physical_dim != -1);
-  int64_t num_batch_dims_before_newly_exposed_physical_dim = std::count_if(
-      new_bdims.begin(), new_bdims.end(),
-      [&](const BatchDim& bdim) {
-        return bdim.dim() < newly_exposed_physical_dim;
-      });
-  int64_t newly_exposed_logical_dim =
-      newly_exposed_physical_dim - num_batch_dims_before_newly_exposed_physical_dim;
-  auto result_tensor = makeBatched(batched->value(), std::move(new_bdims));
-  return std::make_pair(std::move(result_tensor), newly_exposed_logical_dim);
+
+  TORCH_INTERNAL_ASSERT(batched->level() == level);
+  return std::make_pair(batched->value(), batched->bdim());
 }
 
 // Poor man's version of np.moveaxis. Moves the dimension at `dst` to `src`
@@ -205,7 +180,7 @@ static Tensor get_unwrapped(const Tensor& tensor) {
 static int64_t maybe_get_level(const Tensor& tensor) {
   auto* batched = maybeGetBatchedImpl(tensor);
   if (batched) {
-    return batched->bdims().back().level();
+    return batched->level();
   }
   auto* wrapped = maybeGetTensorWrapper(tensor);
   if (wrapped) {
@@ -221,7 +196,7 @@ static int64_t maybe_get_level(const Tensor& tensor) {
 static int64_t maybe_get_bdim(const Tensor& tensor) {
   auto* batched = maybeGetBatchedImpl(tensor);
   if (batched) {
-    return batched->bdims().back().dim();
+    return batched->bdim();
   }
   return -1;
 }
