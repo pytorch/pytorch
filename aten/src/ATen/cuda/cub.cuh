@@ -10,6 +10,7 @@
 #if USE_GLOBAL_CUB_WRAPPED_NAMESPACE()
 
 #include <cub/cub.cuh>
+#include <thrust/iterator/zip_iterator.h>
 
 #else
 
@@ -355,70 +356,12 @@ public:
   }
 
   template<typename OtherKeyT, typename OtherValueT>
-  __host__ __device__ __forceinline__ KeyValuePairWithKeyEquality(const KeyValuePairWithKeyEquality<OtherKeyT, OtherValueT> &other)
-    :key(other.key), value(other.value) {}
-
-  __host__ __device__ __forceinline__ KeyValuePairWithKeyEquality(const KeyValuePairWithKeyEquality &other)
-    :key(other.key), value(other.value) {}
-
-  template<typename OtherKeyT, typename OtherValueT>
-  __host__ __device__ __forceinline__ KeyValuePairWithKeyEquality &operator=(const KeyValuePairWithKeyEquality<OtherKeyT, OtherValueT> &other) {
-    key = other.key;
-    value = other.value;
+  __host__ __device__ __forceinline__ bool operator==(const KeyValuePairWithKeyEquality<OtherKeyT, OtherValueT> &other) const {
+    return key == other.key;
   }
 
-  __host__ __device__ __forceinline__ KeyValuePairWithKeyEquality &operator=(const KeyValuePairWithKeyEquality &other) {
-    key = other.key;
-    value = other.value;
-  }
-};
-
-template<typename KeyIterT, typename ValueIterT>
-struct KeyValuePairIter {
-  using KeyT = typename std::iterator_traits<KeyIterT>::value_type;
-  using ValueT = typename std::iterator_traits<ValueIterT>::value_type;
-  using KeyRefT = typename std::iterator_traits<KeyIterT>::reference;
-  using ValueRefT = typename std::iterator_traits<ValueIterT>::reference;
-
-  using value_type = KeyValuePairWithKeyEquality<KeyT, ValueT>;
-  using reference = KeyValuePairWithKeyEquality<KeyRefT, ValueRefT>;
-  using pointer = std::nullptr_t;
-  using difference_type = std::ptrdiff_t;
-  using iterator_category = std::random_access_iterator_tag;
-
-  KeyIterT key_iter;
-  ValueIterT value_iter;
-
-  KeyValuePairIter() = default;
-
-  __host__ __device__ __forceinline__ KeyValuePairIter(KeyIterT key_iter, ValueIterT value_iter)
-    :key_iter(key_iter), value_iter(value_iter) {}
-
-  __host__ __device__ __forceinline__ reference operator*() const {
-    return reference(*key_iter, *value_iter);
-  }
-
-  __host__ __device__ __forceinline__ reference operator*() {
-    return reference(*key_iter, *value_iter);
-  }
-
-  __host__ __device__ __forceinline__ KeyValuePairIter &operator+=(difference_type n) {
-    key_iter += n;
-    value_iter += n;
-    return *this;
-  }
-
-  __host__ __device__ __forceinline__ KeyValuePairIter operator+(difference_type n) {
-    KeyValuePairIter result;
-    return (result += n);
-  }
-
-  __host__ __device__ __forceinline__ reference operator[](difference_type n) const {
-    return *(*this + n);
-  }
-
-  __host__ __device__ __forceinline__ reference operator[](difference_type n) {
-    return *(*this + n);
+  __host__ __device__ __forceinline__ operator thrust::tuple<KeyT, ValueT>() {
+    return {key, value};
   }
 };
 
@@ -433,8 +376,13 @@ inline void unique_by_key(
   NumSelectedIteratorT num_selected_out,
   int64_t num_items)
 {
-  KeyValuePairIter<KeysInputIteratorT, ValuesInputIteratorT> input(keys_input, values_input);
-  KeyValuePairIter<KeysOutputIteratorT, ValuesOutputIteratorT> output(keys_output, values_output);
+  using KeyT = typename std::iterator_traits<KeysInputIteratorT>::value_type;
+  using ValueT = typename std::iterator_traits<ValuesInputIteratorT>::value_type;
+  using KeyValueT = KeyValuePairWithKeyEquality<KeyT, ValueT>;
+  auto input_tuple = thrust::make_zip_iterator<KeysInputIteratorT, ValuesInputIteratorT>(keys_input, values_input);
+  auto wrap_tuple = []__device__(thrust::tuple<KeyT, ValueT> t){ return KeyValueT(thrust::get<0>(t), thrust::get<1>(t)); };
+  auto input = NO_ROCM(at_cuda_detail)::cub::TransformInputIterator<KeyValueT, decltype(wrap_tuple), decltype(input_tuple)>(input_tuple, wrap_tuple);
+  auto output = thrust::make_zip_iterator<KeysOutputIteratorT, ValuesOutputIteratorT>(keys_output, values_output);
   unique(input, output, num_selected_out, num_items);
 }
 
