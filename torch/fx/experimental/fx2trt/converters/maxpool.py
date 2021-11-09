@@ -2,12 +2,12 @@ import torch
 import tensorrt as trt
 from torch.fx.experimental.fx2trt.fx2trt import tensorrt_converter
 
-from .helper_functions import mark_as_int8_layer, extend_attr_to_tuple
+from .converter_utils import mark_as_int8_layer, extend_mod_attr_to_tuple
 
 def common_maxpool(network, mod, dimension, input_val, layer_name):
-    kernel_size = extend_attr_to_tuple(mod, "kernel_size", dimension)
-    stride = extend_attr_to_tuple(mod, "stride", dimension)
-    padding = extend_attr_to_tuple(mod, "padding", dimension)
+    kernel_size = extend_mod_attr_to_tuple(mod, "kernel_size", dimension)
+    stride = extend_mod_attr_to_tuple(mod, "stride", dimension)
+    padding = extend_mod_attr_to_tuple(mod, "padding", dimension)
 
     layer = network.add_pooling(
         input=input_val, type=trt.PoolingType.MAX, window_size=kernel_size)
