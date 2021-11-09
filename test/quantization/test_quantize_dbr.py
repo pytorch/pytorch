@@ -22,8 +22,8 @@ from torch.quantization.quantize_fx import (
     convert_fx,
 )
 
-import torch.ao.quantization._quantize_dynamic_tracing as _quantize_dynamic_tracing
-import torch.ao.ns._numeric_suite_dynamic_tracing as ns
+import torch.ao.quantization._quantize_dbr as _quantize_dbr
+import torch.ao.ns._numeric_suite_dbr as ns
 # TODO(future PR): move these utils out of the FX folder
 import torch.ao.ns._numeric_suite_fx as ns_fx
 
@@ -40,7 +40,7 @@ def _allclose(a, b):
     raise AssertionError('unhandled type')
 
 
-class AutoTracingTestCase(QuantizationTestCase):
+class QuantizeDBRTestCase(QuantizationTestCase):
     def _test_auto_tracing(
         self,
         m,
@@ -54,11 +54,11 @@ class AutoTracingTestCase(QuantizationTestCase):
 
         m.qconfig = qconfig
 
-        mp = _quantize_dynamic_tracing.prepare(
+        mp = _quantize_dbr.prepare(
             m, example_args, fuse_modules=fuse_modules)
         out_p = mp(*example_args)
         # print(mp)
-        mq = _quantize_dynamic_tracing.convert(mp)
+        mq = _quantize_dbr.convert(mp)
         # print(mq)
         # verify it runs
         out_q = mq(*example_args)
@@ -107,7 +107,7 @@ class AutoTracingTestCase(QuantizationTestCase):
 
 
 @skipIfNoFBGEMM
-class TestAutoTracing(AutoTracingTestCase):
+class TestQuantizeDBR(QuantizeDBRTestCase):
     def test_fusion(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -127,7 +127,7 @@ class TestAutoTracing(AutoTracingTestCase):
 
         m = M().eval()
         m.qconfig = torch.quantization.default_qconfig
-        mp = _quantize_dynamic_tracing.prepare(m, (torch.randn(1, 1, 1, 1),))
+        mp = _quantize_dbr.prepare(m, (torch.randn(1, 1, 1, 1),))
         self.assertTrue(isinstance(mp.conv, nni.ConvReLU2d))
         self.assertTrue(isinstance(mp.child[0], nni.ConvReLU2d))
 
@@ -178,7 +178,7 @@ class TestAutoTracing(AutoTracingTestCase):
         """
         m = nn.Sequential(nn.Conv2d(1, 1, 1)).eval()
         m.qconfig = torch.quantization.default_qconfig
-        mp = _quantize_dynamic_tracing.prepare(m, (torch.randn(1, 1, 1, 1),))
+        mp = _quantize_dbr.prepare(m, (torch.randn(1, 1, 1, 1),))
         for _, mod in mp.named_modules():
             if isinstance(mod, (ObserverBase, FakeQuantizeBase)):
                 scale, zp = mod.calculate_qparams()
@@ -233,7 +233,7 @@ class TestAutoTracing(AutoTracingTestCase):
         m.qconfig = qconfig
         inputs = torch.randn(1, 1, 1, 1)
         inputs.requires_grad = True
-        mp = _quantize_dynamic_tracing.prepare(m, (inputs,))
+        mp = _quantize_dbr.prepare(m, (inputs,))
         output = mp(inputs)
         labels = torch.randn(1, 1, 1, 1)
         loss = (output - labels).sum()
@@ -267,7 +267,7 @@ class TestAutoTracing(AutoTracingTestCase):
         m.qconfig = qconfig
         inputs = torch.randn(1, 1, 1, 1)
         inputs.requires_grad = True
-        mp = _quantize_dynamic_tracing.prepare(m, (inputs,))
+        mp = _quantize_dbr.prepare(m, (inputs,))
         output = mp(inputs)
         labels = torch.randn(1, 1, 1, 1)
         loss = (output - labels).sum()
@@ -935,9 +935,9 @@ class TestAutoTracing(AutoTracingTestCase):
         m = M().eval()
         m.qconfig = torch.quantization.default_qconfig
         example_args = (torch.randn(1, 1, 2, 2),)
-        mp = _quantize_dynamic_tracing.prepare(m, example_args)
+        mp = _quantize_dbr.prepare(m, example_args)
         out_p = mp(*example_args)
-        mq = _quantize_dynamic_tracing.convert(copy.deepcopy(mp))
+        mq = _quantize_dbr.convert(copy.deepcopy(mp))
         out_q = mq(*example_args)
 
         mp, mq = ns.add_loggers('mp', mp, 'mq', mq)
@@ -970,7 +970,7 @@ class TestAutoTracing(AutoTracingTestCase):
 
 
 @skipIfNoFBGEMM
-class TestAutoTracingModels(AutoTracingTestCase):
+class TestQuantizeDBRModels(QuantizeDBRTestCase):
     @skip_if_no_torchvision
     def test_mobilenet_v2(self):
         import torchvision

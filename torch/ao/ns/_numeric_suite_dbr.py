@@ -1,5 +1,5 @@
 """
-Numeric Suite Core APIs for quantization with dynamic tracing.
+Numeric Suite Core APIs for define-by-run quantization.
 
 Experimental, API may change at any time.
 """
@@ -9,7 +9,7 @@ from typing import Tuple, Any, Optional, List, Dict
 
 import torch
 
-from torch.ao.quantization.dynamic_tracing.quantization_state import (
+from torch.ao.quantization.dbr.quantization_state import (
     AutoQuantizationState,
 )
 

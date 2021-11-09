@@ -1,9 +1,9 @@
-# Quantization with dynamic tracing (final name TBD)
+# Define-by-run quantization
 
 Note: this code is an early prototype and the API may change at any time.
 
-Quantization with dynamic tracing (final name TBD) is a prototype of automated
-quantization syntax transforms for PyTorch Eager mode. High level algorithm:
+Define-by-run quantization is a prototype of automated quantization syntax
+transforms for PyTorch Eager mode. High level algorithm:
 
 1. take a user model and an example input
 2. trace the model with example input and record the subgraphs of seen quantizeable ops
@@ -13,7 +13,7 @@ quantization syntax transforms for PyTorch Eager mode. High level algorithm:
 ## User API overview
 
 ```
-from torch.ao.quantization._quantize_dynamic_tracing import prepare, convert
+from torch.ao.quantization._quantize_dbr import prepare, convert
 
 m = M(...)
 mp = prepare(m, example_input)
