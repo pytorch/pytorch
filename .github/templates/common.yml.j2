@@ -181,7 +181,7 @@ concurrency:
         run: echo running !{{ ciflow_config.root_job_name }}
       - name: print labels
         run: echo "${LABELS}"
-      !{{ common.checkout_pytorch("recursive") }}
+      !{{ checkout_pytorch("recursive") }}
       - name: should run step
         id: should_run_step
         run: python tools/determinator/main.py
