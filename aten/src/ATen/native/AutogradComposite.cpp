@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <c10/util/SmallBuffer.h>
 
 namespace at {
 namespace native {
@@ -17,46 +18,49 @@ std::tuple<at::Tensor, at::Tensor> _unpack_dual(const at::Tensor& tensor, int64_
   return std::tuple<at::Tensor, at::Tensor>(tensor._fw_primal(level), tensor._fw_grad(level));
 }
 
+// NB: This function can be called directly from _set_fw_grad or
+//     if self is batched, from this function's batching rule.
+//     See NOTE: [_new_zeros_with_same_feature_meta] for more information.
 Tensor _new_zeros_with_same_feature_meta(
     const at::Tensor& self,
     const at::Tensor& other,
-    c10::optional<int64_t> self_num_batch_dims) {
-  // NB: This function can be called directly from _set_fw_grad or
-  //     if self is batched, from this function's batching rule.
+    int64_t self_num_batch_dims) {
   auto other_sizes = other.sizes();
   auto other_strides = other.strides();
   auto other_storage_offset = other.storage_offset();
   int64_t other_storage_numel = other.storage().nbytes() / other.itemsize();
 
-  if (!self_num_batch_dims.has_value()) {
+  if (self_num_batch_dims == 0) {
     auto new_tensor = at::zeros({other_storage_numel}, other.options());
     return new_tensor.as_strided(other_sizes, other_strides, other_storage_offset);
   }
-
-  int64_t _self_num_batch_dims = self_num_batch_dims.value();
 
   auto self_sizes = self.sizes();
   auto self_strides = self.strides();
 
   // NB: We don't check that the sizes of self is the same as that of other
   //     because this function is also used in the inplace over view case
+  //     In the inplace over view case we cannot rely on self and other being
+  //     the same size. So we will use the size of other, and simply tack on
+  //     the batch dims from self. For example: If self.sizes: [B, 2, 3],
+  //     and other.size: [6], we return [B, 6].
+  //     Also see the test test_inplace_on_view_not_same_layout, for when we reach
+  //     this case.
+  constexpr int64_t kSmallBufferSizeHint = 8;
 
-  std::vector<int64_t> out_sizes;
-  out_sizes.reserve(other.dim() + _self_num_batch_dims);
-  out_sizes.insert(out_sizes.end(), self_sizes.begin(), self_sizes.begin() + _self_num_batch_dims);
-  out_sizes.insert(out_sizes.end(), other_sizes.begin(), other_sizes.end());
+  auto out_sizes = c10::SmallBuffer<int64_t, kSmallBufferSizeHint>(other.dim() + self_num_batch_dims);
+  std::copy(self_sizes.begin(), self_sizes.begin() + self_num_batch_dims, out_sizes.begin());
+  std::copy(other_sizes.begin(), other_sizes.end(), out_sizes.begin() + self_num_batch_dims);
 
   // We use the strides of other, and tack on the strides computed with
   // the batch dims of self, so that the slices are arranged contiguously
-  std::vector<int64_t> out_strides;
-  out_strides.reserve(other.dim() + _self_num_batch_dims);
-
+  auto out_strides = c10::SmallBuffer<int64_t, kSmallBufferSizeHint>(other.dim() + self_num_batch_dims);
   int64_t prod = other_storage_numel;
-  for (size_t i = 0; i < _self_num_batch_dims; ++i) {
-    out_strides.insert(out_strides.begin(), prod);
+  for (size_t i = 0; i < self_num_batch_dims; ++i) {
+    out_strides[self_num_batch_dims - i - 1] = prod;
     prod *= self_strides[i];
   }
-  out_strides.insert(out_strides.end(), other_strides.begin(), other_strides.end());
+  std::copy(other_strides.begin(), other_strides.end(), out_strides.begin() + self_num_batch_dims);
 
   int64_t storage_numel = prod;
 
