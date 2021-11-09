@@ -272,6 +272,18 @@ Tensor empty_like(
     return result;
   }
 
+  if (options.layout() == kSparseCsr && self.is_sparse_csr()) {
+    auto result = at::native::_sparse_csr_tensor_unsafe(
+        self.crow_indices().clone(),
+        self.col_indices().clone(),
+        at::empty(self.values().sizes(), options.layout(kStrided)),
+        self.sizes(),
+        self.scalar_type(),
+        self.layout(),
+        self.device());
+    return result;
+  }
+
   auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Preserve);
 
   if (self.is_quantized()) {

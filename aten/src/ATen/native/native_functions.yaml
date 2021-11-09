@@ -7613,6 +7613,7 @@
   dispatch:
     CPU, CUDA: normal_
     Meta: normal_meta_
+    SparseCsrCPU, SparseCsrCUDA: normal_sparse_csr_
 
 - func: normal.Tensor_float_out(Tensor mean, float std=1, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
