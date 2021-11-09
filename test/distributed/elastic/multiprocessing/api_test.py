@@ -14,7 +14,6 @@ import signal
 import sys
 import tempfile
 import time
-import unittest
 from itertools import product
 from typing import Callable, Dict, List, Union
 from unittest import mock
@@ -43,14 +42,17 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TSAN,
     run_tests,
     sandcastle_skip_if,
+    TestCase
 )
 
 
-class RunProcResultsTest(unittest.TestCase):
+class RunProcResultsTest(TestCase):
     def setUp(self):
+        super().setUp()
         self.test_dir = tempfile.mkdtemp(prefix=f"{self.__class__.__name__}_")
 
     def tearDown(self):
+        super().tearDown()
         shutil.rmtree(self.test_dir)
 
     def test_is_failed(self):
@@ -86,7 +88,7 @@ class RunProcResultsTest(unittest.TestCase):
             self.assertEqual(1, fail2.timestamp)
 
 
-class StdTest(unittest.TestCase):
+class StdTest(TestCase):
     def test_from_value(self):
         self.assertEqual(Std.NONE, Std.from_str("0"))
         self.assertEqual(Std.OUT, Std.from_str("1"))
@@ -226,12 +228,14 @@ def start_processes_zombie_test(
 # tests incompatible with tsan or asan
 if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
 
-    class StartProcessesTest(unittest.TestCase):
+    class StartProcessesTest(TestCase):
         def setUp(self):
+            super().setUp()
             self.test_dir = tempfile.mkdtemp(prefix=f"{self.__class__.__name__}_")
             self._start_methods = ["spawn"]
 
         def tearDown(self):
+            super().tearDown()
             shutil.rmtree(self.test_dir)
 
         def log_dir(self):
