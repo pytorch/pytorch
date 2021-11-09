@@ -183,7 +183,7 @@ concurrency:
         run: echo "${LABELS}"
       - name: should run step
         id: should_run_step
-        run: echo ::set-output name=should_run::false
+        run: echo ::set-output name=should_run::true
 {%- endmacro -%}
 
 {%- macro calculate_docker_image(always_rebuild) -%}

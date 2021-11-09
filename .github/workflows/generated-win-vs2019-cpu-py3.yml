@@ -62,7 +62,7 @@ jobs:
         run: echo "${LABELS}"
       - name: should run step
         id: should_run_step
-        run: echo ::set-output name=should_run::false
+        run: echo ::set-output name=should_run::true
   build:
     runs-on: "windows.4xlarge"
     needs: [ciflow_should_run]
