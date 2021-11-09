@@ -147,7 +147,9 @@ namespace impl {
 template<typename InputIteratorT1, typename InputIteratorT2, typename OutputIteratorT, class ScanOpT>
 C10_LAUNCH_BOUNDS_1(1)
 __global__ void transform_vals(InputIteratorT1 a, InputIteratorT2 b, OutputIteratorT out, ScanOpT scan_op){
-  *out = scan_op(*a, *b);
+  // NOTE: out here not the final scan output, but an intermediate of the accumulation type.
+  using acc_t = typename std::iterator_traits<OutputIteratorT>::value_type;
+  *out = scan_op(static_cast<acc_t>(*a), static_cast<acc_t>(*b));
 }
 
 template<typename ValueT, typename InputIteratorT>
