@@ -210,6 +210,7 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/passes/restore_mutation.cpp",
     "torch/csrc/jit/passes/create_autodiff_subgraphs.cpp",
     "torch/csrc/jit/passes/dead_code_elimination.cpp",
+    "torch/csrc/jit/passes/eliminate_no_ops.cpp",
     "torch/csrc/jit/passes/remove_redundant_profiles.cpp",
     "torch/csrc/jit/passes/remove_exceptions.cpp",
     "torch/csrc/jit/passes/decompose_ops.cpp",
