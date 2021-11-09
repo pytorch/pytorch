@@ -396,7 +396,7 @@ def module_inputs_torch_nn_MultiheadAttention(module_info, device, dtype, requir
     samples = []
     bool_vals = (True, False)
     key_padding_masks = (None, torch.tensor([False, False, True], device=device, dtype=torch.bool))
-    attn_masks = (None, )  # Grad tests fails with attn_mask.
+    attn_masks = (None, torch.tensor([False, False, True], device=device, dtype=torch.bool).expand((3, 3, 3)))
     products = itertools.product(bool_vals, bool_vals, bool_vals, key_padding_masks, attn_masks)
     for bias, add_bias_kv, add_zero_attn, key_padding_mask, attn_mask in products:
         samples.append(
