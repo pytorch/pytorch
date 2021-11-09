@@ -9429,8 +9429,12 @@ op_db: List[OpInfo] = [
                 toleranceOverride({torch.float16: tol(atol=1e-04, rtol=0.001)}), 'TestUnaryUfuncs', device_type='cuda',), ],
         skips=[
             # still want to test that first derivative works though second derivative isn't supported
-            DecorateInfo(unittest.expectedFailure, 'TestGradients', "test_inplace_gradgrad")
-        ]
+            DecorateInfo(unittest.expectedFailure, 'TestGradients', "test_inplace_gradgrad"),
+            # produces 0 instead of nan on ROCM
+            DecorateInfo(unittest.expectedFailure,
+                         'TestUnaryUfuncs', "test_reference_numerics_extremal",
+                         dtypes=(torch.bfloat16, torch.float16, torch.float32,), device_type='cuda',
+                         active_if=(TEST_WITH_ROCM)), ]
     ),
     UnaryUfuncInfo(
         'nn.functional.logsigmoid',
