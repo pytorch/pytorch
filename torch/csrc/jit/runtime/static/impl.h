@@ -182,6 +182,7 @@ class TORCH_API StaticModule {
   }
 
   const Module& module() const {
+    DCHECK(module_.has_value());
     return *module_;
   }
 
@@ -194,12 +195,8 @@ class TORCH_API StaticModule {
   size_t num_inputs() const;
   size_t num_outputs() const;
 
-  const FastMap<int, std::vector<DefInfo>>& index_map() const {
-    return node_inputs_ssa_def_map_;
-  }
-
-  const std::vector<DefInfo>& output_indices() const {
-    return output_ssa_defs_;
+  const std::vector<uint16_t>& output_indices() const {
+    return output_indices_;
   }
 
   const std::vector<IValue>& constants() const {
@@ -241,14 +238,13 @@ class TORCH_API StaticModule {
   }
 
   bool first_input_is_self() const {
-    return first_input_is_self_;
+    return module_.has_value();
   }
 
   StaticRuntime& runtime();
 
  private:
   StaticModuleOptions opts_;
-  bool first_input_is_self_{false};
   std::shared_ptr<torch::jit::Graph> graph_;
   c10::optional<torch::jit::Module> module_;
   c10::optional<c10::FunctionSchema> schema_;
@@ -259,10 +255,8 @@ class TORCH_API StaticModule {
   std::vector<IValue> constants_;
   // The nodes we need to run
   std::vector<ProcessedNode> nodes_;
-  // a vector of ssa_defs corresponding to graph->outputs()
-  std::vector<DefInfo> output_ssa_defs_;
-  // map a node idx (in graph order) to a vector of ssa_defs for node inputs
-  FastMap<int, std::vector<DefInfo>> node_inputs_ssa_def_map_;
+  // Indices of graph outputs in the single values array.
+  std::vector<uint16_t> output_indices_;
 
   ValueGroup value_group_;
 
@@ -423,12 +417,16 @@ class TORCH_API ProcessedNode {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   ProcessedNode() = default;
-  ProcessedNode(Node* n, uint32_t inputsSize, bool enable_out_variant);
+
+  // ProcessedNodes are created within StaticModule and then
+  // associated with a shared values array using set_values() when
+  // they are copied into a StaticRuntime.
+  ProcessedNode(Node* n, std::unique_ptr<uint16_t[]> inputs, uint16_t inputs_size, uint16_t outputs_offset, bool enable_out_variant);
 
   ProcessedNode(const ProcessedNode& rhs)
       : node_(rhs.node_),
         fn_(rhs.fn_),
-        inputs_(std::make_unique<uint16_t[]>(rhs.inputs_size_)),
+        inputs_(rhs.inputs_size_ ? std::make_unique<uint16_t[]>(rhs.inputs_size_) : std::unique_ptr<uint16_t[]>(nullptr)),
         inputs_size_(rhs.inputs_size_),
         outputs_offset_(rhs.outputs_offset_),
         num_outputs_(rhs.num_outputs_),
@@ -438,8 +436,10 @@ class TORCH_API ProcessedNode {
         op_name_(rhs.op_name_)
 #endif
   {
-    std::copy(
+    if (inputs_size_) {
+      std::copy(
         rhs.inputs_.get(), rhs.inputs_.get() + inputs_size_, inputs_.get());
+    }
   }
 
   ProcessedNode& operator=(const ProcessedNode& rhs) {
@@ -499,25 +499,6 @@ class TORCH_API ProcessedNode {
     return values_[outputs_offset_ + i];
   }
 
-  void set_input_by_idx(uint32_t index, size_t ival_index) {
-    DCHECK_LT(index, inputs_size_);
-    TORCH_CHECK(
-        ival_index < (1 << 16),
-        "input index in values table ",
-        ival_index,
-        " would overflow 2-byte index storage");
-    inputs_[index] = ival_index;
-  }
-
-  void set_outputs_offset(size_t offset) {
-    TORCH_CHECK(
-        offset < (1 << 16),
-        "outputs offset in values table ",
-        offset,
-        " would overflow 2-byte index storage");
-    outputs_offset_ = offset;
-  }
-
   C10_NODISCARD c10::ArrayRef<const IValue> outputs() const {
     return c10::ArrayRef<const IValue>(values_ + outputs_offset_, num_outputs_);
   }
@@ -549,10 +530,13 @@ class TORCH_API ProcessedNode {
 #endif
 
   void set_values(IValue* values) {
-    DCHECK_EQ(nullptr, values_);
+    DCHECK(values_ == nullptr);
     values_ = values;
   }
 
+  C10_NODISCARD uint16_t output_ivalue_index(uint16_t i) const {
+    return outputs_offset_ + i;
+  }
  private:
   C10_NODISCARD bool verify_outputs_dont_overlap_each_other() const;
 

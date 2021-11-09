@@ -657,24 +657,20 @@ StaticModule::StaticModule(
   // handle schema
   if (module_.has_value()) {
     Method method = module_->get_method("forward");
-    schema_ = method.function().getSchema();
     if (RemoveSelfFromGraphInput(graph_)) {
       schema_ = RemoveSelfFromSchema(method.function().getSchema());
+      module_ = c10::nullopt;
     } else {
-      first_input_is_self_ = true;
       schema_ = method.function().getSchema();
     }
   }
 
-  // map Value* to IValue (from inputs or prim::Constant) or null
-  FastMap<Value*, IValue*> value_to_ivalue;
   // map Value* to its SSA definition IR
   FastMap<Value*, DefInfo> value_to_ssa_def;
 
   // N inputs map to the first N entries in storage
   for (const auto i : c10::irange(graph_->inputs().size())) {
     Value* input = graph_->inputs()[i];
-    value_to_ivalue[input] = nullptr;
     value_to_ssa_def[input] = std::make_pair(INPUT_VALUE, i);
   }
 
@@ -700,27 +696,70 @@ StaticModule::StaticModule(
         continue;
       }
       auto* v = node->output();
-      value_to_ssa_def[v] = std::make_pair(CONSTANT_VALUE, i);
-      value_to_ivalue[v] = &(constants_[i++]);
+      value_to_ssa_def[v] = std::make_pair(CONSTANT_VALUE, i++);
     }
   }
 
   // construct SSA definition for non-constant nodes
   int node_idx = 0;
   FastMap<Node*, bool> node_has_out_variant;
+
+  const auto inputs_index_offset = 0;
+  const auto constants_index_offset = inputs_index_offset + num_inputs();
+  const auto values_index_offset =
+      constants_index_offset + constants().size();
+
+  // Map node_idx to index offset in values_. Can't reserve space
+  // because we don't know how many non-constant nodes there are yet.
+  std::vector<uint32_t> node_output_idx_map;
+  uint32_t node_outputs_seen_so_far = 0;
   for (Node* node : graph_->nodes()) {
     if (node->kind() == prim::Constant) {
       continue;
     }
-    std::vector<DefInfo> input_ssa_defs;
-    for (Value* input : node->inputs()) {
-      input_ssa_defs.emplace_back(value_to_ssa_def.at(input));
+    // Assign memory for the outputs
+    const auto outputs_offset_for_node =
+      node_outputs_seen_so_far + values_index_offset;
+    TORCH_CHECK(outputs_offset_for_node < (1 << 16), "outputs offset in values table", outputs_offset_for_node, " would overflow 2-byte index storage");
+    node_output_idx_map.push_back(outputs_offset_for_node);
+    node_outputs_seen_so_far += node->outputs().size();
+  }
+
+  for (Node* node : graph_->nodes()) {
+    if (node->kind() == prim::Constant) {
+      continue;
     }
-    node_inputs_ssa_def_map_[node_idx] = input_ssa_defs;
-    nodes_.emplace_back(node, node->inputs().size(), opts.enable_out_variant);
+    auto input_indices = std::make_unique<uint16_t[]>(node->inputs().size());
+    std::vector<DefInfo> input_ssa_defs;
+    for (const auto input_idx : c10::irange(node->inputs().size())) {
+      Value *const input  = node->inputs()[input_idx];
+      int inner_node_idx = 0;
+      int out_idx = 0;
+      std::tie(inner_node_idx, out_idx) = value_to_ssa_def.at(input);
+      unsigned int input_ivalue_idx = 0;
+      if (inner_node_idx == StaticModule::INPUT_VALUE) {
+        input_ivalue_idx = out_idx + inputs_index_offset;
+      } else if (inner_node_idx == StaticModule::CONSTANT_VALUE) {
+        input_ivalue_idx = out_idx + constants_index_offset;
+      } else {
+        DCHECK_GE(inner_node_idx, 0);
+        const auto global_value_idx = node_output_idx_map[inner_node_idx] + out_idx;
+        if (inner_node_idx < node_output_idx_map.size() - 1) {
+          DCHECK_LT(global_value_idx, node_output_idx_map[inner_node_idx + 1]);
+        } else {
+          DCHECK_LT(global_value_idx, constants_index_offset + node_outputs_seen_so_far);
+        }
+        input_ivalue_idx = global_value_idx;
+      }
+      TORCH_CHECK(input_ivalue_idx < (1 << 16),
+                  "input index in values table ", input_ivalue_idx,
+                  " would overflow 2-byte index storage");
+      input_indices[input_idx] = input_ivalue_idx;
+    }
+
+    nodes_.emplace_back(node, std::move(input_indices), node->inputs().size(), node_output_idx_map[node_idx], opts.enable_out_variant);
     node_has_out_variant.emplace(node, nodes_.back().has_out_variant());
     for (const auto i : c10::irange(node->outputs().size())) {
-      value_to_ivalue[node->outputs()[i]] = nullptr;
       value_to_ssa_def[node->outputs()[i]] = std::make_pair(node_idx, i);
     }
     node_idx++;
@@ -731,8 +770,23 @@ StaticModule::StaticModule(
       node_is_optimizable_container_type_.emplace(pnode.node());
     }
   }
+  output_indices_.reserve(graph_->outputs().size());
   for (auto output : graph_->outputs()) {
-    output_ssa_defs_.emplace_back(value_to_ssa_def[output]);
+    int node_idx = 0;
+    int out_idx = 0;
+    std::tie(node_idx, out_idx) = value_to_ssa_def[output];
+    uint32_t output_index = 0;
+    if (node_idx == StaticModule::INPUT_VALUE) {
+      output_index = out_idx + inputs_index_offset;
+    } else if (node_idx == StaticModule::CONSTANT_VALUE) {
+      output_index = constants_index_offset + out_idx;
+    } else {
+      output_index = nodes_[node_idx].output_ivalue_index(out_idx);
+    }
+    TORCH_CHECK(
+        output_index < (1 << 16),
+        "output index ",  output_index, " would overflow 2-byte index storage");
+    output_indices_.emplace_back(output_index);
   }
 
   // Prepare for memory planning
@@ -789,79 +843,26 @@ c10::IValue StaticModule::operator()(
   return runtime()(std::move(args), kwargs);
 }
 
-StaticRuntime::StaticRuntime(const StaticModule& sm) : static_module_(sm) {
-  // NB: create unchanging std::vector<IValue>s we can reference
-  nodes_.resize(sm.nodes().size());
-
-  // Map node_idx to index offset in values_.
-  std::vector<uint32_t> node_output_idx_map;
-  node_output_idx_map.reserve(sm.nodes().size());
-
+StaticRuntime::StaticRuntime(const StaticModule& sm) : static_module_(sm), nodes_(sm.nodes()) {
+  const auto total_num_node_outputs = std::accumulate(nodes_.begin(), nodes_.end(), 0, [](uint32_t sum, const ProcessedNode &pnode) {
+    return sum + pnode.num_outputs();
+  });
+  values_.resize(
+      sm.num_inputs() + sm.constants().size() + total_num_node_outputs);
   const auto inputs_index_offset = 0;
   const auto constants_index_offset = inputs_index_offset + sm.num_inputs();
-  const auto values_index_offset =
-      constants_index_offset + sm.constants().size();
-  uint32_t node_outputs_seen_so_far = 0;
-  for (const auto idx : c10::irange(sm.nodes().size())) {
-    const auto& n_ref = sm.nodes()[idx];
-    nodes_[idx] = n_ref; // copy the node
-    auto& n = nodes_[idx];
-
-    // Assign memory for the outputs
-    const auto outputs_offset_for_node =
-        node_outputs_seen_so_far + values_index_offset;
-    n.set_outputs_offset(outputs_offset_for_node);
-    node_output_idx_map.push_back(outputs_offset_for_node);
-    node_outputs_seen_so_far += n.outputs().size();
-  }
-
-  values_.resize(
-      sm.num_inputs() + sm.constants().size() + node_outputs_seen_so_far);
-  const auto constants_begin_it = values_.begin() + sm.num_inputs();
+  const auto constants_begin_it = values_.begin() + constants_index_offset;
   const auto constants_end_it = constants_begin_it + sm.constants().size();
-  DCHECK_EQ(values_index_offset + node_outputs_seen_so_far, values_.size());
   std::copy(sm.constants().begin(), sm.constants().end(), constants_begin_it);
 
   for (const auto idx : c10::irange(sm.nodes().size())) {
     auto& n = nodes_[idx];
     n.set_values(values_.data());
-    // hook up the inputs
-
-    for (const auto i : c10::irange(n.num_inputs())) {
-      int node_idx = 0;
-      int out_idx = 0;
-      std::tie(node_idx, out_idx) = sm.index_map().at(idx)[i];
-      DCHECK(out_idx >= 0);
-      // input
-      if (node_idx == StaticModule::INPUT_VALUE) {
-        n.set_input_by_idx(i, out_idx + inputs_index_offset);
-      } else if (node_idx == StaticModule::CONSTANT_VALUE) {
-        n.set_input_by_idx(i, out_idx + constants_index_offset);
-      } else {
-        DCHECK(node_idx >= 0);
-        const auto global_value_idx = node_output_idx_map[node_idx] + out_idx;
-        if (node_idx < node_output_idx_map.size() - 1) {
-          DCHECK_LT(global_value_idx, node_output_idx_map[node_idx + 1]);
-        } else {
-          DCHECK_LT(global_value_idx, values_.size());
-        }
-        n.set_input_by_idx(i, global_value_idx);
-      }
-    }
   }
 
-  for (const auto& index_pair : sm.output_indices()) {
-    int node_idx = 0;
-    int out_idx = 0;
-    std::tie(node_idx, out_idx) = index_pair;
-    if (node_idx == StaticModule::INPUT_VALUE) {
-      outputs_.emplace_back(&values_[out_idx]);
-    } else if (node_idx == StaticModule::CONSTANT_VALUE) {
-      outputs_.emplace_back(&values_[constants_index_offset + out_idx]);
-    } else {
-      auto* out = &nodes_[node_idx].Output(out_idx);
-      outputs_.emplace_back(out);
-    }
+  // TODO: can we convert outputs_ to store indices?
+  for (auto index : sm.output_indices()) {
+    outputs_.emplace_back(&values_[index]);
   }
 }
 
@@ -876,7 +877,6 @@ void StaticRuntime::set_inputs(
         static_module_.schema(),
         "Schema is not available. Consider creating the Static Runtime "
         "with StaticModule(const torch::jit::Module& m) instead.");
-    // XXX: left off here
     std::vector<c10::IValue> stack;
     stack.reserve(static_module_.num_inputs());
     if (static_module_.first_input_is_self()) {
@@ -1424,7 +1424,7 @@ void StaticRuntime::check_for_memory_leak(bool output_returned) {
   FastSet<const IValue*> output_ivalues(outputs_.begin(), outputs_.end());
   for (const auto n : c10::irange(nodes_.size())) {
     auto& pnode = nodes_[n];
-    for (const auto i : c10::irange(pnode.outputs().size())) {
+    for (const auto i : c10::irange(pnode.num_outputs())) {
       const IValue* ival = &pnode.Output(i);
       const Value* val = pnode.node()->output(i);
       if (planner_ && planner_->isManagedOutputTensorValue(val)) {
@@ -1485,7 +1485,7 @@ bool StaticRuntime::checkOutputTensorMemoryLeaks() {
   }
   for (const auto n : c10::irange(nodes_.size())) {
     auto& pnode = nodes_[n];
-    for (const auto i : c10::irange(pnode.outputs().size())) {
+    for (const auto i : c10::irange(pnode.num_outputs())) {
       const IValue* ival = &pnode.Output(i);
       const Value* val = pnode.node()->output(i);
       if (!planner_->isManagedOutputTensorValue(val)) {
@@ -1511,25 +1511,19 @@ bool StaticRuntime::isManagedOutputTensor(const IValue& ivalue) {
 
 ProcessedNode::ProcessedNode(
     Node* node,
-    uint32_t inputsSize,
+    std::unique_ptr<uint16_t[]> inputs,
+    uint16_t inputs_size,
+    uint16_t outputs_offset,
     bool enable_out_variant)
     : node_(node),
-      inputs_size_(inputsSize)
+      inputs_(std::move(inputs)),
+      inputs_size_(inputs_size),
+      outputs_offset_(outputs_offset)
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
     ,
       op_name_(node->kind().toQualString())
 #endif
 {
-  // TODO leverage type information
-  TORCH_CHECK(
-      inputsSize < (1 << 16),
-      inputsSize,
-      " inputs to ProcessedNode ",
-      node->kind().toQualString(),
-      " is too many to use 2-byte indexing");
-  if (inputsSize) {
-    inputs_ = std::make_unique<uint16_t[]>(inputsSize);
-  }
   TORCH_CHECK(
       node->outputs().size() < (1 << (sizeof(num_outputs_) * 8)),
       node->outputs().size(),

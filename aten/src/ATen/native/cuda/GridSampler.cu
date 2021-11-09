@@ -774,7 +774,7 @@ Tensor grid_sampler_3d_cuda(const Tensor& input, const Tensor& grid,
   auto output = at::empty({N, input.size(1), D, H, W}, input.options());
   int64_t count = N * D * H * W;
   if (count > 0) {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "grid_sampler_2d_cuda", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "grid_sampler_3d_cuda", [&] {
       if (canUse32BitIndexMath(input) && canUse32BitIndexMath(grid) &&
           canUse32BitIndexMath(output)) {
         grid_sampler_3d_kernel<scalar_t>
