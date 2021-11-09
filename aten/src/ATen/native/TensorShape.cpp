@@ -861,7 +861,7 @@ Tensor& narrow_copy_dense_cpu_out(
   // resize output
   auto output_sizes = self_sizes.vec();
   output_sizes[dim] = length;
-  at::native::resize_(output, output_sizes);
+  at::native::resize_(output, output_sizes, c10::nullopt);
 
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   const int64_t unit = c10::size_from_dim_(dim + 1, self_sizes);
