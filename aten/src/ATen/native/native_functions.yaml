@@ -454,6 +454,7 @@
   dispatch:
     CPU: addmv_out_cpu
     CUDA: addmv_out_cuda
+    SparseCsrCPU: addmv_out_sparse_csr
     SparseCsrCUDA: addmv_out_sparse_csr_cuda
 
 - func: addr(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
@@ -3128,7 +3129,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: mv
-    SparseCPU, SparseCUDA, SparseCsrCPU: mv_sparse
+    SparseCPU, SparseCUDA: mv_sparse
 
 - func: mv.out(Tensor self, Tensor vec, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
