@@ -194,7 +194,7 @@ inline void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
       size_cub,
       at::cuda::getCurrentCUDAStream());
   C10_CUDA_KERNEL_LAUNCH_CHECK();
-  using input_t = std::remove_cv_t<std::remove_reference_t<decltype(*input)>>;
+  using input_t = typename std::iterator_traits<InputIteratorT>::value_type;
   for (int64_t i = max_cub_size; i < num_items; i += max_cub_size) {
     auto allocator = c10::cuda::CUDACachingAllocator::get();
     c10::DataPtr first_elem = allocator->allocate(sizeof(input_t));
