@@ -23,32 +23,16 @@
 
 namespace torch_lazy_tensors {
 
-  static std::mutex sizes_mut;
-  static std::vector<torch::lazy::Value> sizes_nodes;
-
-  static std::vector<int64_t> generate_sizes_node(at::Tensor& t) {
-
-    std::lock_guard<std::mutex> lock(sizes_mut);
-    int64_t index = sizes_nodes.size();
-    auto lt = torch_lazy_tensors::bridge::GetLtcTensor(t);
-    auto node = torch::lazy::MakeNode<torch_lazy_tensors::ir::ops::DynamicSize2>(lt.GetIrValue());
-    sizes_nodes.push_back(node);
-    std::cerr << "lazy index = " << index << std::endl;
-    return {index};
-  }
-
-  static at::Tensor generate_size_check_for(std::vector<int64_t> sz, at::Tensor& grad) {
-    std::lock_guard<std::mutex> lock(sizes_mut);
-    std::cerr << "sz[0] = " << sz[0] << std::endl;
-    auto input_sizes = sizes_nodes.at(sz[0]);
+  static at::Tensor generate_size_check_for(at::Tensor& input, at::Tensor& grad) {
     auto grad_lt = torch_lazy_tensors::bridge::GetOrCreateLtcTensor(grad, torch_lazy_tensors::GetCurrentDevice());
+    auto input_lt = torch_lazy_tensors::bridge::GetLtcTensor(input);
+    auto sz = torch::lazy::MakeNode<torch_lazy_tensors::ir::ops::DynamicSize2>(input_lt.GetIrValue());
     return torch_lazy_tensors::bridge::AtenFromLtcTensor(
-      grad_lt.CreateFrom(torch::lazy::MakeNode<torch_lazy_tensors::ir::ops::SumToOrThrow>(grad_lt.GetIrValue(), input_sizes)));
+      grad_lt.CreateFrom(torch::lazy::MakeNode<torch_lazy_tensors::ir::ops::SumToOrThrow>(grad_lt.GetIrValue(), sz)));
   }
 
 static struct InitializeHandlers {
     InitializeHandlers() {
-      torch::autograd::setLazyTensorToSizeHandler(generate_sizes_node);
       torch::autograd::setSumToOrThrowHandler(generate_size_check_for);
     }
 } init_handlers;

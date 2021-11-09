@@ -13,20 +13,22 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "autograd/generated/variable_factories.h"
+#include "c10/core/DeviceType.h"
 
 namespace torch { namespace autograd {
 
 static std::function<std::vector<int64_t>(at::Tensor& t)> lazy_tensor_to_size_handler;
-static std::function<at::Tensor (std::vector<int64_t> sz, at::Tensor& grad)> sum_to_size_handler;
+static std::function<at::Tensor (at::Tensor& input, at::Tensor& grad)> sum_to_size_handler;
 
 void setLazyTensorToSizeHandler(std::function<std::vector<int64_t>(at::Tensor& t)> f) {
   lazy_tensor_to_size_handler = f;
 }
-void setSumToOrThrowHandler(std::function<at::Tensor (std::vector<int64_t> sz, at::Tensor& grad)> f) {
+void setSumToOrThrowHandler(std::function<at::Tensor (at::Tensor& input, at::Tensor& grad)> f) {
   sum_to_size_handler = f;
 }
 
-std::function<at::Tensor (std::vector<int64_t> sz, at::Tensor& grad)> getSumToOrThrowHandler() {
+std::function<at::Tensor (at::Tensor& input, at::Tensor& grad)> getSumToOrThrowHandler() {
   return sum_to_size_handler;
 }
 
@@ -67,17 +69,20 @@ AnomalyMetadata* Node::metadata() noexcept {
 uint32_t Node::add_input_metadata(const at::Tensor& t) noexcept {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   uint32_t input_nr = input_metadata_.size();
-  if (t.device().type() == c10::kLazy) {
 
-    TORCH_CHECK(lazy_tensor_to_size_handler, "lazy_tensor_to_size_handler wasn't defined!");
-    auto nt = const_cast<at::Tensor&>(t);
-    auto sz = lazy_tensor_to_size_handler(nt);
-    InputMetadata im(t.options(), sz, t.unsafeGetTensorImpl()->is_python_dispatch());
-    input_metadata_.push_back(std::move(im));
+  auto m = t.device().type() == c10::kLazy ? t : torch::zeros(t.sizes(), at::TensorOptions(c10::kMeta).requires_grad(false));
+  // if (t.device().type() == c10::kLazy) {
+  //   TORCH_CHECK(lazy_tensor_to_size_handler, "lazy_tensor_to_size_handler wasn't defined!");
+  //   auto nt = const_cast<at::Tensor&>(t);
+  //   auto sz = lazy_tensor_to_size_handler(nt);
+  //   InputMetadata im(t.options(), sz, t.unsafeGetTensorImpl()->is_python_dispatch());
+  //   input_metadata_.push_back(std::move(im));
 
-  } else {
-    input_metadata_.emplace_back(t);
-  }
+  // } else {
+  //   input_metadata_.emplace_back(t);
+  // }
+  InputMetadata im(t.options(), m, t.unsafeGetTensorImpl()->is_python_dispatch()); 
+  input_metadata_.push_back(std::move(im));
   return input_nr;
 }
 

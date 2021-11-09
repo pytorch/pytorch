@@ -37,6 +37,8 @@
 #include <typeinfo>
 #include <sstream>
 #include <queue>
+#include "autograd/generated/variable_factories.h"
+#include "c10/core/DeviceType.h"
 #include <TH/TH.h>
 
 namespace torch { namespace autograd {
@@ -684,9 +686,11 @@ void validate_outputs(
     if (metadata.device().type() == at::kLazy) {
       // TODO: we can remove handlers when LTC is merged into master
       TORCH_CHECK(getSumToOrThrowHandler(), "SumOrThrow isn't defined");
-      std::vector<int64_t> isz (metadata.shape().begin(), metadata.shape().end());
-      grad = getSumToOrThrowHandler()(isz, grad);
+      // TODO : clean up constedness
+      auto t_sizes = metadata.t_sizes();
+      grad = getSumToOrThrowHandler()(t_sizes, grad);
     } else {
+      // TODO: use t_sizes().sizes() instead everywhere
       if (!grad.sizes().equals(metadata.shape())) {
         if (!at::is_expandable_to(metadata.shape(), grad.sizes())) {
           std::stringstream ss;
@@ -1034,8 +1038,8 @@ auto Engine::execute(const edge_list& roots,
     InputBuffer input_buffer(roots.at(0).function->num_inputs());
     auto input = inputs.at(0);
 
-    // TODO: another hack
-    const auto input_stream = InputMetadata(input.options(), {}, input.unsafeGetTensorImpl()->is_python_dispatch()).stream();
+    // TODO: this should be fine, double check with Alban
+    const auto input_stream = InputMetadata(input.options(), {torch::zeros({}, at::TensorOptions(c10::kMeta))}, input.unsafeGetTensorImpl()->is_python_dispatch()).stream();
     const auto opt_next_stream = roots.at(0).function->stream(c10::DeviceType::CUDA);
     input_buffer.add(roots.at(0).input_nr,
                       std::move(input),

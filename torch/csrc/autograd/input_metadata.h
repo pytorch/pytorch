@@ -26,6 +26,13 @@ struct InputMetadata {
     stream_ = c10::impl::getDeviceGuardImpl(device_.type())->getStream(device_);
   }
 
+  InputMetadata(const at::TensorOptions options, const at::Tensor& t, bool is_tensor_subclass)
+  : options_{options}, t_sizes_{t}, is_tensor_subclass_{is_tensor_subclass} {
+    auto device_ = options.device();
+    stream_ = c10::impl::getDeviceGuardImpl(device_.type())->getStream(device_);
+  }
+
+  // TODO: remove
   InputMetadata(const at::Tensor& t)
   : InputMetadata(t.options(), t.sizes(), t.unsafeGetTensorImpl()->is_python_dispatch()) { }
 
@@ -33,8 +40,13 @@ struct InputMetadata {
     return options_;
   }
 
+  // TODO: remove
   at::IntArrayRef shape() const {
-    return shape_;
+    return t_sizes_.sizes();
+  }
+
+  at::Tensor t_sizes() const {
+    return t_sizes_;
   }
 
   caffe2::TypeMeta dtype() const {
@@ -59,11 +71,13 @@ struct InputMetadata {
 
   at::Tensor zeros_like() const {
     TORCH_CHECK(device() != c10::kLazy, "this needs to handle a lazy tensor");
-    return at::zeros(shape_, options_);
+    return at::zeros(t_sizes_.sizes(), options_);
   }
 
 private:
   const at::TensorOptions options_;
+  at::Tensor t_sizes_;
+  // TODO: remove
   at::DimVector shape_;
   c10::Stream stream_ = c10::Stream(c10::Stream::Default::DEFAULT, device());
   bool is_tensor_subclass_ = false;

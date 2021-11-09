@@ -153,6 +153,7 @@ struct TORCH_API VariableInfo {
   at::Device device = at::kCPU;
   at::ScalarType scalar_type = at::kFloat;
   std::vector<int64_t> size;
+  at::Tensor t_sizes;
   bool requires_grad;
   bool is_empty;
 };

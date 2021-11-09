@@ -14,8 +14,9 @@ VariableInfo::VariableInfo(const Variable& var)
   , is_empty(false) {
 
     if (var.device().type() == c10::kLazy) {
-      TORCH_CHECK(torch::autograd::getLazyTensorToSizeHandler(), "getLazyTensorToSizeHandler should be defined!");
-      size = torch::autograd::getLazyTensorToSizeHandler()(const_cast<Variable&>(var));
+      t_sizes = var;
+      // TORCH_CHECK(torch::autograd::getLazyTensorToSizeHandler(), "getLazyTensorToSizeHandler should be defined!");
+      // size = torch::autograd::getLazyTensorToSizeHandler()(const_cast<Variable&>(var));
     }
     else {
       size = var.sizes().vec();
@@ -30,6 +31,7 @@ Variable VariableInfo::zeros(at::OptionalDeviceGuard& device_guard) const {
     // Return undefined tensor.
     return at::Tensor();
   } else {
+    // TODO: we could use zeros_like here or another callback to generate at.zeros(t.size())
     TORCH_CHECK(device != c10::kLazy, "this needs to handle lazy tensors!");
     return at::zeros(
         size, at::TensorOptions(scalar_type).device(device).layout(layout));
@@ -394,6 +396,7 @@ void check_variable_result(const at::TensorBase& original, const at::TensorBase&
     throw std::runtime_error(ss.str());
   }
 
+  // TODO: this needs to be specialized for kLazy
   if (original.sizes().vec() != result.sizes().vec()) {
     std::stringstream ss;
     ss << "hook '" << hook_name << "' has changed the size of value";
