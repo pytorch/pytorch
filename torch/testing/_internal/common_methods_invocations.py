@@ -229,7 +229,7 @@ def _getattr_qual(obj, name, default=_NOTHING):
 
 
 # test if a tensor is close to an integer
-def close_to_int(x, eps = 0.1):
+def close_to_int(x, eps=0.1):
     if x.is_complex():
         y = torch.abs(torch.view_as_complex(torch.frac(torch.view_as_real(x))))
     else:
