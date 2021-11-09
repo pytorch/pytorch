@@ -17,7 +17,7 @@ struct OperatorInfo {
 };
 
 struct RuntimeCompatibilityInfo {
-  uint64_t bytecode_version;
+  std::pair<uint64_t, uint64_t> min_max_supported_bytecode_version;
   std::unordered_map<std::string, OperatorInfo> operator_info;
   std::unordered_set<std::string> supported_types;
 
@@ -26,6 +26,9 @@ struct RuntimeCompatibilityInfo {
 };
 
 TORCH_API uint64_t _get_runtime_bytecode_version();
+
+TORCH_API std::pair<uint64_t, uint64_t>
+_get_runtime_operators_min_max_versions();
 
 TORCH_API std::unordered_map<std::string, OperatorInfo>
 _get_runtime_ops_and_info();
