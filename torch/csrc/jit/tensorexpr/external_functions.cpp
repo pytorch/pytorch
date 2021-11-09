@@ -266,64 +266,6 @@ void nnc_aten_quantized_add(
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
 
-void nnc_aten_quantized_conv2d_prepack(
-    int64_t bufs_num,
-    void** buf_data,
-    int64_t* buf_ranks,
-    int64_t* buf_dims,
-    int64_t* buf_strides,
-    int8_t* buf_dtypes,
-    // NOLINTNEXTLINE
-    int64_t args_num,
-    int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
-  TORCH_INTERNAL_ASSERT(tensors.size() == 3);
-
-  const double w_qscale = ((double*)extra_args)[7];
-  const int64_t w_qzero = extra_args[8];
-  const c10::ScalarType w_qdtype = static_cast<c10::ScalarType>(extra_args[9]);
-  auto qw = at::from_blob_quantized_per_tensor_affine(
-      buf_data[1],
-      // NOLINTNEXTLINE
-      tensors[1].sizes(),
-      [](void*) {},
-      // NOLINTNEXTLINE
-      w_qscale,
-      w_qzero,
-      at::TensorOptions(toQIntType(w_qdtype)));
-  auto b = tensors[2];
-
-  int64_t strideH = extra_args[0];
-  int64_t strideW = extra_args[1];
-  int64_t paddingH = extra_args[2];
-  int64_t paddingW = extra_args[3];
-  int64_t dilationH = extra_args[4];
-  int64_t dilationW = extra_args[5];
-  int64_t groups = extra_args[6];
-  c10::List<int64_t> strides = {strideH, strideW};
-  c10::List<int64_t> paddings = {paddingH, paddingW};
-  c10::List<int64_t> dilations = {dilationH, dilationW};
-  auto qconv2d_prepack_op =
-      c10::Dispatcher::singleton()
-          .findSchemaOrThrow("quantized::conv2d_prepack", "")
-          .typed<c10::intrusive_ptr<ConvPackedParamsBase<2>>(
-              at::Tensor,
-              c10::optional<at::Tensor>,
-              c10::List<int64_t>,
-              c10::List<int64_t>,
-              c10::List<int64_t>,
-              int64_t)>();
-  auto prepacked =
-      qconv2d_prepack_op.call(qw, b, strides, paddings, dilations, groups);
-  TORCH_INTERNAL_ASSERT(
-      prepacked, buildErrorMessage("Quantized conv2d prepack failed"));
-  static std::vector<c10::intrusive_ptr<ConvPackedParamsBase<2>>> cache;
-  cache.push_back(prepacked);
-  auto uiptr = reinterpret_cast<std::uintptr_t>(cache.back().get());
-  ((uintptr_t*)buf_data[0])[0] = uiptr;
-}
-
 void nnc_aten_upsample_nearest2d(
     int64_t bufs_num,
     void** buf_data,
@@ -671,9 +613,6 @@ const static RegisterNNCExternalFunction nnc_quantize_per_tensor(
 const static RegisterNNCExternalFunction nnc_dequantize(
     "nnc_aten_dequantize",
     nnc_aten_dequantize);
-const static RegisterNNCExternalFunction nnc_quantized_conv2d_prepack(
-    "nnc_aten_quantized_conv2d_prepack",
-    nnc_aten_quantized_conv2d_prepack);
 const static RegisterNNCExternalFunction nnc_upsample_nearest2d(
     "nnc_aten_upsample_nearest2d",
     nnc_aten_upsample_nearest2d);
