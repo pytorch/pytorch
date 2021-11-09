@@ -45,7 +45,7 @@ jobs:
         run: echo "${LABELS}"
       - name: should run step
         id: should_run_step
-        run: echo ::set-output name=should_run::true
+        run: echo ::set-output name=should_run::false
 
   build:
     runs-on: macos-10.15
