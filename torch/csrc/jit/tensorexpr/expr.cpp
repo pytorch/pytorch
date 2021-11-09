@@ -362,7 +362,9 @@ std::vector<ExprPtr> make_contiguous_strides(
   if (dims.size() > 0) {
     strides.resize(dims.size());
     auto si = LongImm::make(1l);
+    // NOLINTNEXTLINE
     for (int i = dims.size() - 1; i >= 0; --i) {
+      // NOLINTNEXTLINE
       strides[i] = si.node();
       si = si * dims[i];
     }

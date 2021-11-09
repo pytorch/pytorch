@@ -71,6 +71,7 @@ std::vector<at::Tensor> constructTensors(
                        .memory_format(deduce_memory_format(
                            // NOLINTNEXTLINE
                            buf_strides_vec[i],
+                           // NOLINTNEXTLINE
                            buf_dims_vec[i]))
                        .requires_grad(false);
     auto tensor = at::from_blob(
@@ -227,9 +228,11 @@ void nnc_aten_quantized_add(
   const int64_t a_qzero = extra_args[1];
   const c10::ScalarType a_qdtype = static_cast<c10::ScalarType>(extra_args[2]);
   auto a_memory_format =
+      // NOLINTNEXTLINE
       deduce_memory_format(tensors[1].strides(), tensors[1].sizes());
   auto b_memory_format =
-      deduce_memory_format(tensors[1].strides(), tensors[1].sizes());
+      // NOLINTNEXTLINE
+      deduce_memory_format(tensors[2].strides(), tensors[2].sizes());
   at::Tensor qa = at::from_blob_quantized_per_tensor_affine(
       buf_data[1],
       // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
@@ -282,6 +285,7 @@ void nnc_aten_quantized_conv2d_prepack(
   const c10::ScalarType w_qdtype = static_cast<c10::ScalarType>(extra_args[9]);
   auto qw = at::from_blob_quantized_per_tensor_affine(
       buf_data[1],
+      // NOLINTNEXTLINE
       tensors[1].sizes(),
       [](void*) {},
       // NOLINTNEXTLINE

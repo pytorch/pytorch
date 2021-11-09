@@ -278,6 +278,7 @@ Tensor from_blob_quantized_per_tensor_affine(
     strides.resize(ndim);
     // NOLINTNEXTLINE
     int32_t i = ndim - 1;
+    // NOLINTNEXTLINE
     strides[i] = 1;
     while (--i >= 0) {
       strides[i] = sizes[i] * strides[i + 1];
