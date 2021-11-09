@@ -155,7 +155,9 @@ class GTest(TestCase):
         IS_WINDOWS and "cuda" in os.getenv("BUILD_ENVIRONMENT", ""),
         "CUDA environment doesn't work out of the box yet",
     )
-    @unittest.skipIf(IS_SANDCASTLE or IS_FBCODE)
+    @unittest.skipIf(
+        IS_SANDCASTLE or IS_FBCODE, "binaries are run in Sandcastle automatically"
+    )
     def test_jit(self):
         test_name = "test_jit"
         binary = self.binaries[test_name]
