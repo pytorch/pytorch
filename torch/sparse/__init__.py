@@ -91,7 +91,7 @@ def mm(mat1: Tensor, mat2: Tensor) -> Tensor:
     return torch._sparse_mm(mat1, mat2)
 
 
-sampled_addmm = _add_docstr(_sparse.sampled_addmm, r"""
+sampled_addmm = _add_docstr(_sparse.sparse_sampled_addmm, r"""
 sparse.sampled_addmm(input, mat1, mat2, *, beta=1., alpha=1., out=None) -> Tensor
 
 Performs a matrix multiplication of the dense matrices :attr:`mat1` and :attr:`mat2` at the locations

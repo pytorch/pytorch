@@ -18,7 +18,7 @@ namespace native {
   * `self` - [in] sparse Tensor C of size m × n.
   * `result` - [out] sparse Tensor of size m × n.
 */
-Tensor& sampled_addmm_out_sparse_csr_cuda(
+Tensor& sparse_sampled_addmm_out_sparse_csr_cuda(
     const Tensor& self,
     const Tensor& mat1,
     const Tensor& mat2,
@@ -77,14 +77,14 @@ Tensor& sampled_addmm_out_sparse_csr_cuda(
   return result;
 }
 
-Tensor sampled_addmm_sparse_csr_cuda(
+Tensor sparse_sampled_addmm_sparse_csr_cuda(
     const Tensor& self,
     const Tensor& mat1,
     const Tensor& mat2,
     const Scalar& beta,
     const Scalar& alpha) {
   auto result = at::empty({0, 0}, self.options());
-  at::sampled_addmm_out(result, self, mat1, mat2, beta, alpha);
+  at::sparse_sampled_addmm_out(result, self, mat1, mat2, beta, alpha);
   return result;
 }
 
