@@ -97,7 +97,7 @@ class _ForkerIterDataPipe(IterDataPipe):
                 "please be aware of OOM at random places",
                 UserWarning
             )
-        self.child_pointers = [0] * num_instances  # Indicate the indices of the next element to get
+        self.child_pointers: List[int] = [0] * num_instances  # Indicate the indices of the next element to get
         self.slowest_ptr = 0
         self.leading_ptr = 0
         self.end_ptr: Optional[int] = None
@@ -130,6 +130,9 @@ class _ForkerIterDataPipe(IterDataPipe):
                         self.slowest_ptr = new_min
                         self.buffer.popleft()
                 yield return_val
+        if self.end_ptr and self.child_pointers[instance_id] == self.end_ptr and\
+           all(p == self.end_ptr for p in self.child_pointers):
+            self._datapipe_iterator = None
 
     def is_instance_started(self, instance_id: int) -> bool:
         return self.child_pointers[instance_id] != 0
@@ -196,7 +199,7 @@ class DemultiplexerIterDataPipe(IterDataPipe):
                 Use -1 for the unlimited buffer
     """
     def __new__(cls, datapipe: IterDataPipe, num_instances: int,
-                classifier_fn: Callable[[T_co], int], drop_none: bool = False, buffer_size: int = 1000):
+                classifier_fn: Callable[[T_co], Optional[int]], drop_none: bool = False, buffer_size: int = 1000):
         if num_instances < 1:
             raise ValueError(f"Expected `num_instaces` larger than 0, but {num_instances} is found")
         # When num_instances == 1, demux can be replaced by filter,
@@ -215,7 +218,7 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
     """
 
     def __init__(self, datapipe: IterDataPipe[T_co], num_instances: int,
-                 classifier_fn: Callable[[T_co], int], drop_none: bool, buffer_size: int):
+                 classifier_fn: Callable[[T_co], Optional[int]], drop_none: bool, buffer_size: int):
         self.main_datapipe = datapipe
         self._datapipe_iterator: Optional[Iterator[Any]] = None
         self.num_instances = num_instances
@@ -235,9 +238,12 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
 
     def _find_next(self, instance_id: int) -> T_co:
         while True:
+            if self.main_datapipe_exhausted:
+                raise StopIteration
             if self._datapipe_iterator is None:
-                raise ValueError("_datapipe_iterator has not been set, likely because this private method is called directly "
-                                 "without invoking get_next_element_by_instance() first.")
+                raise ValueError(
+                    "_datapipe_iterator has not been set, likely because this private method is called directly "
+                    "without invoking get_next_element_by_instance() first.")
             value = next(self._datapipe_iterator)
             classification = self.classifier_fn(value)
             if classification is None and self.drop_none:
@@ -254,7 +260,7 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
                     f"DemultiplexerIterDataPipe buffer overflow, buffer size {self.buffer_size} is insufficient.")
 
     def get_next_element_by_instance(self, instance_id: int):
-        if self._datapipe_iterator is None:
+        if self._datapipe_iterator is None and not self.main_datapipe_exhausted:
             self._datapipe_iterator = iter(self.main_datapipe)
         stop = False
         self.instance_started[instance_id] = True
@@ -268,6 +274,7 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
                 except StopIteration:
                     stop = True
                     self.main_datapipe_exhausted = True
+                    self._datapipe_iterator = None
 
     def is_instance_started(self, instance_id: int) -> bool:
         return self.instance_started[instance_id]
