@@ -9,7 +9,7 @@ VariableInfo::VariableInfo(const Variable& var)
   : layout(var.layout())
   , device(var.device())
   , scalar_type(var.scalar_type())
-  , size(var.sizes().vec())
+  // , size(var.sizes().vec())
   , requires_grad(var.requires_grad())
   , is_empty(false) {
 

@@ -1,4 +1,5 @@
 #include "lazy_tensor_core/csrc/ts_backend/EagerFallback.h"
+#include "lazy_tensors/shape.h"
 
 #include <sstream>
 
@@ -7,11 +8,14 @@
 #include <ATen/native/CPUFallback.h>
 #include <torch/library.h>
 
+
 namespace torch_lazy_tensors {
 namespace {
 
 std::vector<at::Tensor> _to_eager(at::TensorList tensors,
                                   c10::DeviceType device_type) {
+  bool old_check = lazy_tensors::dynamic_mode_shape_check();
+  lazy_tensors::set_dynamic_mode_shape_check(false);
   switch (device_type) {
     case at::kCPU: {
       return at::_to_cpu(tensors);
@@ -27,6 +31,7 @@ std::vector<at::Tensor> _to_eager(at::TensorList tensors,
       return eager_tensors;
     }
   }
+  lazy_tensors::set_dynamic_mode_shape_check(old_check);
 }
 
 // convenience helper for converting tensors to cpu

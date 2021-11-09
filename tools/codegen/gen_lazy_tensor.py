@@ -155,6 +155,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
                 "lazy_tensor_core/csrc/tensor.h",
                 "lazy_tensor_core/csrc/tensor_util.h",
                 "lazy_tensors/computation_client/metrics.h",
+                "lazy_tensors/shape.h",
                 f"{output_dir}/{backend_key}NativeFunctions.h",
                 f"{output_dir}/{backend_key}LazyIr.h",
                 f"{output_dir}/{backend_key}ShapeDtype.h",

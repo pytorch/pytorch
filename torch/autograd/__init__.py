@@ -32,9 +32,9 @@ def _make_grads(outputs: Sequence[torch.Tensor], grads: Sequence[_OptionalTensor
     new_grads: List[_OptionalTensor] = []
     for out, grad in zip(outputs, grads):
         if isinstance(grad, torch.Tensor):
-            grad_shape = grad.shape if not is_grads_batched else grad.shape[1:]
-
-            # TODO: add an LTC op to do the check
+            
+            #TODO: add an LTC op to do the check
+            # grad_shape = grad.shape if not is_grads_batched else grad.shape[1:]
             # if not out.shape == grad_shape:
             #     if is_grads_batched:
             #         raise RuntimeError("If `is_grads_batched=True`, we interpret the first "

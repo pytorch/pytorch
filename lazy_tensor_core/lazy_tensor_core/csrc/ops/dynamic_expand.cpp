@@ -6,7 +6,7 @@ namespace ir {
 namespace ops {
 
 DynamicExpand2::DynamicExpand2(torch::lazy::Value lhs, torch::lazy::Value sz)
-    : TsNode(torch::lazy::OpKind(c10::Symbol::prim("_dynamic_expand2")), lhs,
+    : TsNode(torch::lazy::OpKind(c10::Symbol::prim("_dynamic_expand2")), {lhs, sz},
              {ir::GetShapeFromTsValue(sz)}) {}
 
 

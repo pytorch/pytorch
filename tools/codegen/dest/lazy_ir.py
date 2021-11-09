@@ -162,7 +162,13 @@ class GenLazyNativeFuncDefinition:
                 meta_out = """auto out_shape = CreateComputationShapeFromMetaTensors(out_meta);
         auto out_dtype = CreateDTypeFromMetaTensors(out_meta);"""
 
-            meta_str = f"""auto out_meta = at::meta::{schema.aten_name}({', '.join(str(t.name) for t in all_types)});
+            meta_str = f"""
+        // we are estimating upper bounds here rather
+        // than capturing a graph, so it's okay to disable exact shape check
+        bool old_check = lazy_tensors::dynamic_mode_shape_check();
+        lazy_tensors::set_dynamic_mode_shape_check(false);
+        auto out_meta = at::meta::{schema.aten_name}({', '.join(str(t.name) for t in all_types)});
+        lazy_tensors::set_dynamic_mode_shape_check(old_check);
         {meta_out}"""
         else:
             shape_sig = ComputeShapeSignature(func)

@@ -36,6 +36,10 @@
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/python/pybind.h"
 #include "torch/csrc/utils/cuda_lazy_init.h"
+#include "lazy_tensor_core/lazy_tensor_core/csrc/ops/sum_to_size.h"
+#include "lazy_tensor_core/lazy_tensor_core/csrc/ops/dynamic_size.h"
+#include "lazy_tensor_core/lazy_tensor_core/csrc/ops/dynamic_expand.h"
+
 namespace torch_lazy_tensors {
 namespace {
 
@@ -491,6 +495,7 @@ void InitLtcModuleBindings(py::module m) {
 
   py::class_<torch::lazy::Value, std::shared_ptr<torch::lazy::Value>>(
       m, "IrValue");
+  py::class_<ir::Node, std::shared_ptr<ir::Node>>(m, "IrNode");
   m.def("_ltc_create_token",
         [](const std::string& device) { return CreateToken(device); });
   m.def(
@@ -508,6 +513,23 @@ void InitLtcModuleBindings(py::module m) {
         }
         return new_token;
       });
+  m.def("_dynamic_expand2",
+        [](at::Tensor& self, std::shared_ptr<torch::lazy::Node> val) {
+          LazyTensor self_lazy_tensor = bridge::GetLtcTensor(self);
+          return bridge::AtenFromLtcTensor(
+              self_lazy_tensor.CreateFrom(torch::lazy::MakeNode<torch_lazy_tensors::ir::ops::DynamicExpand2>(
+                  self_lazy_tensor.GetIrValue(),val)));
+        });
+  m.def("_dynamic_size2",
+        [](at::Tensor& self) {
+          LazyTensor self_lazy_tensor = bridge::GetLtcTensor(self);
+          return torch::lazy::MakeNode<torch_lazy_tensors::ir::ops::DynamicSize2>(self_lazy_tensor.GetIrValue());
+        });
+  m.def("_sum_to_size",
+        [](at::Tensor& self, std::shared_ptr<ir::Node> val) {
+          LazyTensor self_lazy_tensor = bridge::GetLtcTensor(self);
+          return bridge::AtenFromLtcTensor(self_lazy_tensor.CreateFrom(torch::lazy::MakeNode<torch_lazy_tensors::ir::ops::SumToOrThrow>(self_lazy_tensor.GetIrValue(), val)));
+        });
   m.def("_ltc_all_reduce",
         [](const std::string& reduce_type, const at::Tensor& input,
            const std::shared_ptr<torch::lazy::Value>& token, double scale,
