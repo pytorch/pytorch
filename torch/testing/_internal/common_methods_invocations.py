@@ -227,6 +227,16 @@ def _getattr_qual(obj, name, default=_NOTHING):
         else:
             raise
 
+
+# test if a tensor is close to an integer
+def close_to_int(x, eps = 0.1):
+    if x.is_complex():
+        y = torch.abs(torch.view_as_complex(torch.frac(torch.view_as_real(x))))
+    else:
+        y = torch.abs(torch.frac(x))
+    return (y < eps) | (y > (1 - eps))
+
+
 # Note [OpInfos]
 # ~~~~~~~~~~~~~~
 #
@@ -10061,7 +10071,7 @@ op_db: List[OpInfo] = [
                                     device_type='cuda', dtypes=[torch.float64],
                                     active_if=TEST_WITH_ROCM),
                    ),
-                   normal_filter=(lambda x: torch.abs(torch.frac(x.view_as_real() / (math.pi * 0.5)).view_as_complex()) < 0.1, math.pi)),
+                   normal_filter=(lambda x: close_to_int(x / (math.pi * 0.5)), math.pi)),
     UnaryUfuncInfo('tanh',
                    ref=np.tanh,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
@@ -10081,7 +10091,7 @@ op_db: List[OpInfo] = [
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
                                     active_if=(IS_MACOS or IS_WINDOWS)),
                    ),
-                   normal_filter=(lambda x: (torch.abs(torch.frac(x.view_as_real() / (math.pi * 0.5j)).view_as_complex()) < 0.1) if x.is_complex() else torch.tensor(False), 0)),
+                   normal_filter=(lambda x: close_to_int(x / (math.pi * 0.5j)) if x.is_complex() else torch.tensor(False), 0)),
     OpInfo('tensor_split',
            ref=np.array_split,
            dtypes=all_types_and_complex_and(torch.bool),
