@@ -1635,7 +1635,7 @@ class BinaryUfuncInfo(OpInfo):
         self.rhs_make_tensor_kwargs = rhs_make_tensor_kwargs
 
 
-def _resolve_binay_pwise_kwargs(
+def _resolve_binary_pwise_kwargs(
         op_info, *, op_kwargs=None, lhs_make_tensor_kwargs=None, rhs_make_tensor_kwargs=None
 ):
     """Resolves default values for :func:`sample_inputs_binary_pwise`.
@@ -1666,7 +1666,7 @@ def sample_inputs_binary_pwise(
     rhs_make_tensor_kwargs=None,
     **kwargs,
 ):
-    op_kwargs, lhs_make_tensor_kwargs, rhs_make_tensor_kwargs = _resolve_binay_pwise_kwargs(
+    op_kwargs, lhs_make_tensor_kwargs, rhs_make_tensor_kwargs = _resolve_binary_pwise_kwargs(
         op_info,
         op_kwargs=op_kwargs,
         lhs_make_tensor_kwargs=lhs_make_tensor_kwargs,
@@ -1728,7 +1728,7 @@ def sample_inputs_add_sub(
     rhs_make_tensor_kwargs=None,
     **kwargs,
 ):
-    op_kwargs, lhs_make_tensor_kwargs, rhs_make_tensor_kwargs = _resolve_binay_pwise_kwargs(
+    op_kwargs, lhs_make_tensor_kwargs, rhs_make_tensor_kwargs = _resolve_binary_pwise_kwargs(
         op_info,
         op_kwargs=op_kwargs,
         lhs_make_tensor_kwargs=lhs_make_tensor_kwargs,
@@ -9034,6 +9034,27 @@ op_db: List[OpInfo] = [
                     skips=(
                         DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_broadcast_python_scalar'),
                     )),
+    BinaryUfuncInfo('bitwise_or',
+                    ref=np.bitwise_or,
+                    dtypes=integral_types_and(torch.bool),
+                    sample_inputs_func=sample_inputs_binary_pwise,
+                    supports_autograd=False,
+                    ),
+    BinaryUfuncInfo('bitwise_xor',
+                    ref=np.bitwise_xor,
+                    dtypes=integral_types_and(torch.bool),
+                    sample_inputs_func=sample_inputs_binary_pwise,
+                    supports_autograd=False,
+                    ),
+    BinaryUfuncInfo('heaviside',
+                    ref=lambda a, b: (
+                        # necessary because np.heaviside incorrectly returns float64 when passed args of dtype int64
+                        np.int64(np.heaviside(a, b)) if a.dtype == np.int64 and b.dtype == np.int64 else np.heaviside(a, b)
+                    ),
+                    dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
+                    sample_inputs_func=sample_inputs_binary_pwise,
+                    supports_autograd=False,
+                    ),
     # `softmax` supports different dtypes based on whether `dtype` argument,
     # is passed or not. Hence two OpInfo entries, one with dtype and other without.
     OpInfo('softmax',
@@ -11048,7 +11069,7 @@ op_db: List[OpInfo] = [
            supports_autograd=False,
            skips=(
                # JIT tests don't work with Tensor keyword arguments
-               DecorateInfo(unittest.skip("Expected failure!"), 'TestJit', 'test_variant_consistency_jit'),
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
            )),
     OpInfo('searchsorted',
            dtypes=all_types(),
@@ -11060,7 +11081,7 @@ op_db: List[OpInfo] = [
            skips=(
                # JIT tests don't work with Tensor keyword arguments
                # https://github.com/pytorch/pytorch/issues/58507
-               DecorateInfo(unittest.skip("Expected failure!"), 'TestJit', 'test_variant_consistency_jit'),
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
            )),
     OpInfo('cat',
            ref=lambda input_seq, dim=0, **kwargs: np.concatenate(input_seq, axis=dim, **kwargs),

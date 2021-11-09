@@ -53,7 +53,7 @@ except ImportError:
 #
 # This framework was built to make it easier to write tests that run on
 #   multiple device types, multiple datatypes (dtypes), and for multiple
-#   operators. It's also useful for controlling which tests are fun. For example,
+#   operators. It's also useful for controlling which tests are run. For example,
 #   only tests that use a CUDA device can be run on platforms with CUDA.
 #   Let's dive in with an example to get an idea for how it works:
 #
