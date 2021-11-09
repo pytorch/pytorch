@@ -2364,6 +2364,36 @@ class TestFrozenOptimizations(JitTestCase):
             optimized = torch.jit.optimize_for_inference(scripted_mod)
             FileCheck().check("to_mkldnn").run(optimized.graph)
 
+    def test_remove_detach(self):
+        class Mod(nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                y = x.detach()
+                return y * y
+
+        mod = Mod().eval()
+        frozen_mod = torch.jit.freeze(torch.jit.script(mod))
+        inp = torch.randn((2, 2))
+        FileCheck().check_not("aten::detach").run(frozen_mod.graph)
+        self.assertEqual(frozen_mod(inp), mod(inp))
+
+    def test_remove_detach_not_applied(self):
+        class Mod(nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                y = x.detach()
+                return x is y
+
+        mod = Mod().eval()
+        frozen_mod = torch.jit.freeze(torch.jit.script(mod))
+        inp = torch.randn((2, 2))
+        FileCheck().check("aten::detach").run(frozen_mod.graph)
+        self.assertEqual(frozen_mod(inp), mod(inp))
+
 @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
 class TestMKLDNNReinplacing(JitTestCase):
     def setUp(self):
