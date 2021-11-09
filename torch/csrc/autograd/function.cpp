@@ -18,22 +18,14 @@
 
 namespace torch { namespace autograd {
 
-static std::function<std::vector<int64_t>(at::Tensor& t)> lazy_tensor_to_size_handler;
 static std::function<at::Tensor (at::Tensor& input, at::Tensor& grad)> sum_to_size_handler;
 
-void setLazyTensorToSizeHandler(std::function<std::vector<int64_t>(at::Tensor& t)> f) {
-  lazy_tensor_to_size_handler = f;
-}
 void setSumToOrThrowHandler(std::function<at::Tensor (at::Tensor& input, at::Tensor& grad)> f) {
   sum_to_size_handler = f;
 }
 
 std::function<at::Tensor (at::Tensor& input, at::Tensor& grad)> getSumToOrThrowHandler() {
   return sum_to_size_handler;
-}
-
-std::function<std::vector<int64_t>(at::Tensor& t)> getLazyTensorToSizeHandler() {
-  return lazy_tensor_to_size_handler;
 }
 
 // The current evaluating node. This is useful to assign the current node as a

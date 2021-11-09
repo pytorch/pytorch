@@ -34,12 +34,8 @@ using edge_list = std::vector<Edge>;
 using saved_variable_list = std::vector<SavedVariable>;
 using IndexRange = std::pair<size_t, size_t>;
 
-std::vector<int64_t> generate_sizes_node(at::Tensor& t);
-at::Tensor get_lazy_tensor_by_sizes_index(const std::vector<int64_t>& sizes);
-TORCH_API void setLazyTensorToSizeHandler(std::function<std::vector<int64_t>(at::Tensor& t)> f);
 TORCH_API void setSumToOrThrowHandler(std::function<at::Tensor (at::Tensor& input, at::Tensor& grad)> f);
 std::function<at::Tensor (at::Tensor& input, at::Tensor& grad)> getSumToOrThrowHandler();
-std::function<std::vector<int64_t>(at::Tensor& t)> getLazyTensorToSizeHandler();
 
 // Custom deleter to prevent stack overflows.
 TORCH_API void deleteNode(Node* function);

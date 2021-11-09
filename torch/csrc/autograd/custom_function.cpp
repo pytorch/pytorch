@@ -15,8 +15,7 @@ VariableInfo::VariableInfo(const Variable& var)
 
     if (var.device().type() == c10::kLazy) {
       t_sizes = var;
-      // TORCH_CHECK(torch::autograd::getLazyTensorToSizeHandler(), "getLazyTensorToSizeHandler should be defined!");
-      // size = torch::autograd::getLazyTensorToSizeHandler()(const_cast<Variable&>(var));
+      // TODO: use `t_sizes` in this class for kLazy
     }
     else {
       size = var.sizes().vec();
