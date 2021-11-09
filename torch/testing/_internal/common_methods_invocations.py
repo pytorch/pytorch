@@ -6712,19 +6712,21 @@ def sample_inputs_pixel_unshuffle(op_info, device, dtype, requires_grad, **kwarg
 def sample_inputs_allclose(op_info, device, dtype, requires_grad, **kwargs):
     samples = []
     sample_shapes = [(), (S), (S, S, S)]
-    atols = [1e-2, 1e-4, 1e-8, 1e-16]
-    rtols = [1e-1, 0.5, 1., 2.]
+    atols = [1e-2, 1e-16]
+    rtols = [1e-1, 0.5]
     eps = 1e-8
     for s, rtol, atol in product(sample_shapes, rtols, atols):
+        # close sample
         t = make_tensor(s, device=device, dtype=dtype, requires_grad=requires_grad)
-        # make one true case and one false case
-        t1 = t.clone().detach() * rtol + atol + eps
-        t2 = t.clone().detach() * rtol - atol - eps
-        samples.extend([
-            SampleInput(t.clone().detach(), args=(t.clone().detach(),)),
-            SampleInput(t.clone().detach(), args=(t1,), kwargs=dict(rtol=rtol, atol=atol)),
-            SampleInput(t.clone().detach(), args=(t2,), kwargs=dict(rtol=rtol, atol=atol)),
-        ])
+        close = (t + atol).detach().requires_grad_(requires_grad)
+        close_sample = SampleInput(t, args=(close,), kwargs=dict(rtol=rtol, atol=atol))
+        samples.append(close_sample)
+
+        # random sample
+        a = make_tensor(s, device=device, dtype=dtype, requires_grad=requires_grad)
+        b = make_tensor(s, device=device, dtype=dtype, requires_grad=requires_grad)
+        r_sample = SampleInput(a, args=(b,), kwargs=dict(rtol=rtol, atol=atol))
+        samples.append(r_sample)
 
     return samples
 
