@@ -7598,18 +7598,34 @@ class TestAutogradForwardMode(TestCase):
         new_zeroes_fn = torch.ops.aten._new_zeros_with_same_feature_meta
 
         def check(a, b):
-            def assert_same_meta(a, b):
-                # Layout is the same
-                self.assertEqual(a.size(), b.size())
-                self.assertEqual(a.stride(), b.stride())
-                self.assertEqual(a.storage_offset(), b.storage_offset())
-                self.assertEqual(len(a.storage()), len(b.storage()))
+            def assert_same_meta(t, target):
+                import operator
 
-                # TensorOptions is same
-                self.assertEqual(a.dtype, b.dtype)
+                for num_bdim in range(t.dim()):
+                    result = new_zeroes_fn(t, target, num_bdim)
+                    target = target
 
-            assert_same_meta(new_zeroes_fn(a, b, 0), b)
-            assert_same_meta(new_zeroes_fn(b, a, 0), a)
+                    self.assertEqual(result.dim(), target.dim() + num_bdim)
+
+                    # Check size/strides match for feature dims only
+                    for i in range(num_bdim, result.dim()):
+                        self.assertEqual(result.size()[i], target.size()[i - num_bdim])
+                        self.assertEqual(result.stride()[i], target.stride()[i - num_bdim])
+
+                    # Check that we generate strides reasonably
+                    if target.is_contiguous():
+                        self.assertTrue(result.is_contiguous())
+
+                    self.assertEqual(result.storage_offset(), target.storage_offset())
+
+                    prod_of_t_bdims = reduce(operator.mul, t.size()[:num_bdim], 1)
+                    self.assertEqual(len(result.storage()), len(target.storage()) * prod_of_t_bdims)
+
+                    # TensorOptions is same
+                    self.assertEqual(result.dtype, target.dtype)
+
+            assert_same_meta(a, b)
+            assert_same_meta(b, a)
 
         a = torch.randn(5, dtype=torch.float)
         b = torch.randn(2, 3, 4, dtype=torch.double)
@@ -7629,6 +7645,15 @@ class TestAutogradForwardMode(TestCase):
         b = torch.randn(4)
         check(a, b)
 
+        # Zero-numel tensors
+        a = torch.randn(1, 0, 2)
+        b = torch.randn(1, 2)
+        check(a, b)
+
+        # Scalar tensor
+        a = torch.tensor(1.)
+        b = torch.randn(1, 2)
+        check(a, b)
 
     def test_backward_graph_destruction(self):
         def fn():
