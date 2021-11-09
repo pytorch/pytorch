@@ -37,28 +37,28 @@ def _make_grads(outputs: Sequence[torch.Tensor], grads: Sequence[_OptionalTensor
             # this is very similar to what we do in `engine.cpp`, we just need to expose python bindings
             # to generate checks for LTC tensors 
 
-"""
-            grad_shape = grad.shape if not is_grads_batched else grad.shape[1:]
-            if not out.shape == grad_shape:
-                if is_grads_batched:
-                    raise RuntimeError("If `is_grads_batched=True`, we interpret the first "
-                                       "dimension of each grad_output as the batch dimension. "
-                                       "The sizes of the remaining dimensions are expected to match "
-                                       "the shape of corresponding output, but a mismatch "
-                                       "was detected: grad_output["
-                                       + str(grads.index(grad)) + "] has a shape of "
-                                       + str(grad.shape) + " and output["
-                                       + str(outputs.index(out)) + "] has a shape of "
-                                       + str(out.shape) + ". "
-                                       "If you only want some tensors in `grad_output` to be considered "
-                                       "batched, consider using vmap.")
-                else:
-                    raise RuntimeError("Mismatch in shape: grad_output["
-                                       + str(grads.index(grad)) + "] has a shape of "
-                                       + str(grad.shape) + " and output["
-                                       + str(outputs.index(out)) + "] has a shape of "
-                                       + str(out.shape) + ".")
-"""
+            """
+                        grad_shape = grad.shape if not is_grads_batched else grad.shape[1:]
+                        if not out.shape == grad_shape:
+                            if is_grads_batched:
+                                raise RuntimeError("If `is_grads_batched=True`, we interpret the first "
+                                                "dimension of each grad_output as the batch dimension. "
+                                                "The sizes of the remaining dimensions are expected to match "
+                                                "the shape of corresponding output, but a mismatch "
+                                                "was detected: grad_output["
+                                                + str(grads.index(grad)) + "] has a shape of "
+                                                + str(grad.shape) + " and output["
+                                                + str(outputs.index(out)) + "] has a shape of "
+                                                + str(out.shape) + ". "
+                                                "If you only want some tensors in `grad_output` to be considered "
+                                                "batched, consider using vmap.")
+                            else:
+                                raise RuntimeError("Mismatch in shape: grad_output["
+                                                + str(grads.index(grad)) + "] has a shape of "
+                                                + str(grad.shape) + " and output["
+                                                + str(outputs.index(out)) + "] has a shape of "
+                                                + str(out.shape) + ".")
+            """
 
             if out.dtype.is_complex != grad.dtype.is_complex:
                 raise RuntimeError("For complex Tensors, both grad_output and output"
