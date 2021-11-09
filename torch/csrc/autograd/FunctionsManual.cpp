@@ -2717,9 +2717,7 @@ std::tuple<Tensor, Tensor> linalg_qr_jvp(
     auto dA2 = dA.narrow(-1, k, n - k);
     auto R2 = R.narrow(-1, k, n - k);
     auto dR2 = Q.mH().matmul(dA2 - dQ.matmul(R2));
-    dR = at::empty_like(R);
-    dR.narrow(-1, 0, k).copy_(dR1);
-    dR.narrow(-1, k, n - k).copy_(dR2);
+    dR = at::cat({dR1, dR2}, -1);
   }
 
   return std::make_tuple(dQ, dR);
