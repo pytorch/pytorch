@@ -405,12 +405,12 @@ def combine_state_for_ensemble(models):
 #         self.func_model = func_model
 #         self.params = params
 #         self.buffers = buffers if len(buffers) > 0 else None
-# 
+#
 #         in_dims_start = (0, 0) if self.buffers is not None else (0,)
 #         self.in_dims = in_dims_start + in_dims
 #         self.out_dims = out_dims
 #         self._vmap_func = vmap(func_model, self.in_dims, self.out_dims)
-# 
+#
 #     def forward(self, *args, **kwargs):
 #         return self._vmap_func(self.params, self.buffers, *args, **kwargs)
 

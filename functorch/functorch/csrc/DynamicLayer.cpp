@@ -324,7 +324,7 @@ static bool batchedAtCurrentLevel(const Tensor& tensor) {
   if (!batched) {
     return false;
   }
-  auto batched_at_level = batched->bdims().back().level();
+  auto batched_at_level = batched->level();
   return batched_at_level == level;
 }
 
