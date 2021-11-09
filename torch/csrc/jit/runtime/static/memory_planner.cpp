@@ -237,8 +237,23 @@ void MemoryPlanner::allocateOutputTensors() {
     }
     DCHECK_LE(offset + tensor_size, output_buffer_bytes_);
     void* src = static_cast<void*>(start + offset);
+    // NOTE: Populating `ctx` enables clients to take the ownership of a
+    // tensor managed by Static Runtime. Some clients use "move" semantics to
+    // pass a Tensor object to another holding object (e.g., a thrift message)
+    // to avoid `memcpy`.
+    // `torch::distributed::detail::WireDumpOp::dumpTensorData is a concrete
+    // example of doing this (See `torch::distributed::detail::hasDeleter`).
+    // Since this output Tensor object is permanently owned by Static Runtime,
+    // this ownership passing does *not* have an intended effect of keeping the
+    // Tensor alive till the "owner" releases it: A premature call to
+    // `StaticRuntime::deallocateOutputTensors` can destruct such a Tensor
+    // object that a holding object believes to retain, causing it to read
+    // corrupted values from an already destructed Tensor object. Therefore, a
+    // client of receiving Static Runtime-managed Tensors needs to be very
+    // careful to call `StaticRuntime::deallocateOutputTensors` after these
+    // holding objects are gone.
     tensor->storage().set_data_ptr_noswap(
-        at::DataPtr(src, src, nullptr, tensor->device()));
+        at::DataPtr(src, /*ctx=*/src, nullptr, tensor->device()));
     tensor->storage().set_nbytes(tensor_size);
     offset += tensor_size;
   }
