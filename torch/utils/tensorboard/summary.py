@@ -4,9 +4,6 @@ import numpy as np
 import os
 from typing import Optional
 
-# pylint: disable=unused-import
-from six.moves import range
-
 from google.protobuf import struct_pb2
 from tensorboard.compat.proto.summary_pb2 import Summary
 from tensorboard.compat.proto.summary_pb2 import HistogramProto
@@ -68,7 +65,6 @@ def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete=None):
         SessionEndInfo
     """
     import torch
-    from six import string_types
     from tensorboard.plugins.hparams.api_pb2 import (
         Experiment, HParamInfo, MetricInfo, MetricName, Status, DataType
     )
@@ -143,7 +139,7 @@ def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete=None):
             )
             continue
 
-        if isinstance(v, string_types):
+        if isinstance(v, str):
             ssi.hparams[k].string_value = v
 
             if k in hparam_domain_discrete:
