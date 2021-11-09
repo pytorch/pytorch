@@ -1,7 +1,7 @@
 #pragma once
 
-#include <stddef.h>
-#include <stdint.h>
+#include <cstddef>
+#include <cstdint>
 
 #include <memory>
 
@@ -9,7 +9,7 @@
 #include <c10/util/Logging.h>
 
 /**
- * Packed representation of input indexes for ProcessedNode.
+ * Packed representation of input indices for ProcessedNode.
  */
 class ProcessedNodeInputs {
  private:
@@ -43,7 +43,7 @@ class ProcessedNodeInputs {
     }
   }
 
-  uint16_t size() const {
+  C10_NODISCARD uint16_t size() const {
     if (C10_LIKELY(repr_.is_inline())) {
       return repr_.inline_repr_.size;
     } else {
@@ -51,7 +51,7 @@ class ProcessedNodeInputs {
     }
   }
 
-  bool empty() const {
+  C10_NODISCARD bool empty() const {
     return size() == 0;
   }
 
@@ -61,7 +61,7 @@ class ProcessedNodeInputs {
     HeapArrayPtr() = default;
     ~HeapArrayPtr() = default;
 
-    HeapArrayPtr(uint16_t size) : array_(alloc(size)) {}
+    explicit HeapArrayPtr(uint16_t size) : array_(alloc(size)) {}
 
     HeapArrayPtr(const HeapArrayPtr& rhs) : array_(alloc(rhs.size())) {
       if (rhs.array_) {
@@ -89,11 +89,11 @@ class ProcessedNodeInputs {
     HeapArrayPtr(HeapArrayPtr&&) noexcept = default;
     HeapArrayPtr& operator=(HeapArrayPtr&&) noexcept = default;
 
-    bool empty() const {
+    C10_NODISCARD bool empty() const {
       return size() != 0;
     }
 
-    uint16_t size() const {
+    C10_NODISCARD uint16_t size() const {
       return array_ ? array_[0] : 0;
     }
 
@@ -108,8 +108,12 @@ class ProcessedNodeInputs {
     }
 
     private:
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays)
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays)
     std::unique_ptr<uint16_t[]> array_;
 
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays)
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays)
     static std::unique_ptr<uint16_t[]> alloc(uint16_t num_elts) {
       if (num_elts) {
         auto result = std::make_unique<uint16_t[]>(num_elts + 1);
@@ -129,12 +133,22 @@ class ProcessedNodeInputs {
   // awkward.
 #pragma pack(push, 2)
   union Repr {
-    bool is_inline() const {
+    C10_NODISCARD bool is_inline() const {
       uint8_t tag;
-      std::memcpy(&tag, this, 1);
+      // Use of reinterpret_cast to pointer to char or unsigned char
+      // is defined behavior; see
+      // https://en.cppreference.com/w/cpp/language/reinterpret_cast .
+      std::memcpy(&tag, reinterpret_cast<const uint8_t*>(this), 1);
+      // HeapArrayPtr will be represented as a plain old pointer,
+      // which will have alignment to at least a 2-byte boundary
+      // (because it's uint16_t*) and more likely an 8- or 16-byte
+      // boundary because malloc will tend to just align everything to
+      // one of those. So, we just set tag to 1 when inline_repr_ is
+      // active so as to be able to differentiate the two.
       return (tag & 1) != 0;
     }
 
+    // NOLINTNEXTLINE(modernize-use-equals-default)
     Repr() {}
 
     ~Repr() {
