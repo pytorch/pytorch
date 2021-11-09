@@ -185,9 +185,9 @@ class TORCH_API Var : public ExprNode<Var> {
 };
 
 std::vector<ExprPtr> make_contiguous_strides(
-    const std::vector<ExprHandle> dims);
+    const std::vector<ExprHandle>& dims);
 std::vector<ExprPtr> make_channels_last_strides(
-    const std::vector<ExprHandle> dims);
+    const std::vector<ExprHandle>& dims);
 
 class TORCH_API Buf : public ExprNode<Buf> {
  public:

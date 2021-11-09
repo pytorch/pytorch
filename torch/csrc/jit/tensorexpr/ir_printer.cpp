@@ -260,7 +260,7 @@ void IRPrinter::visit(BufPtr v) {
   }
   os() << ", strides=[";
   size_t i = 0;
-  for (ExprPtr s : v->strides()) {
+  for (const ExprPtr& s : v->strides()) {
     if (i++) {
       os() << ", ";
     }
