@@ -3104,7 +3104,7 @@ class _TestParamsMaxPool1d(object):
                 yield shape
 
     def _gen_kwargs(self):
-        return (dict(zip(self.kwargs.keys(), values)) for values in product(*self.kwargs.values()))
+        yield from (dict(zip(self.kwargs.keys(), values)) for values in product(*self.kwargs.values()))
 
     def gen_input_params(self):
         yield from product(self._gen_shape(), self._gen_kwargs())
