@@ -1,7 +1,7 @@
 import torch
 
-from .dbr.auto_trace import add_auto_observation, add_auto_convert
-from .dbr.fusion import get_module_fusion_fqns
+from ._dbr.auto_trace import add_auto_observation, add_auto_convert
+from ._dbr.fusion import get_module_fusion_fqns
 
 
 def prepare(model, example_inputs, inplace=False, allow_list=None,
