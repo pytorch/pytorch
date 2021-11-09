@@ -84,7 +84,12 @@ from ..utils import (
     weight_dtype,
 )
 
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from .backend_config_dict.utils import (
+    get_pattern_to_quantize_handlers,
+    get_pattern_to_dtype_configs,
+)
+
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union, Set
 
 def is_activation_post_process_node(node: Node, modules: Dict[str, torch.nn.Module]) -> bool:
     return isinstance(node, torch.fx.Node) and node.op == "call_module" and \
@@ -112,6 +117,83 @@ def node_arg_is_bias(node: Node, arg: Any) -> bool:
         ((len(node.args) > idx and arg is node.args[idx]) or
             node.kwargs.get('bias', None) is arg)
     )
+
+def is_input_arg_dtype_supported_by_backend(
+    arg: Argument,
+    node: Node,
+    node_name_to_target_dtype: Dict[str, Any],
+    dtype_config: Dict[str, torch.dtype],
+) -> bool:
+    """ Check if the configured qconfig for the argument
+    is supported by the backend or not
+    """
+    if isinstance(arg, (list, tuple)):
+        return all(map(lambda a: is_input_arg_dtype_supported_by_backend(a, node, node_name_to_target_dtype, dtype_config), arg))
+    if not isinstance(arg, Node):
+        return True
+    # TODO: support check for standalone module
+    is_weight = node_arg_is_weight(node, arg)
+    is_bias = node_arg_is_bias(node, arg)
+    is_activation = not (is_weight or is_bias)
+    input_activation_dtype = dtype_config.get("input_activation_dtype", None)
+    if is_activation:
+        return input_activation_dtype is None or node_name_to_target_dtype[arg.name] == input_activation_dtype
+    elif is_weight:
+        # TODO: we need to refactor get_target_activation_dtype_for_node to include
+        # weight, and maybe have a separate current_node_name_to_dtype dict
+        # return weight_dtype is None or node_name_to_target_dtype[arg.name] == weight_dtype
+        raise RuntimeError("weight is not handled yet")
+    elif is_bias:
+        # Note: config for bias is not supported in qconfig currently
+        raise RuntimeError("bias is not handled yet")
+    return True
+
+def is_output_dtype_supported_by_backend(
+    node: Node,
+    node_name_to_target_dtype: Dict[str, Any],
+    dtype_config: Dict[str, torch.dtype],
+) -> bool:
+    """ Check if the configured qconfig for the output
+    is supported by the backend or not
+    """
+    output_dtype = dtype_config.get("output_dtype", None)
+    return output_dtype is None or output_dtype == node_name_to_target_dtype[node.name]
+
+
+def is_pattern_dtype_config_supported_by_backend(
+    pattern: Optional[Pattern],
+    matched_nodes: Optional[List[Node]],
+    node_name_to_target_dtype: Dict[str, Any],
+    backend_config_dict: Optional[Dict[str, Any]]
+) -> bool:
+    """ Check is the dtype configuration of a pattern is supported by
+    the backend or not
+    """
+    if backend_config_dict is None or pattern is None:
+        return True
+    assert matched_nodes is not None and len(matched_nodes) >= 1
+    pattern_to_dtype_configs = get_pattern_to_dtype_configs(backend_config_dict)
+    dtype_configs: List[Dict[str, torch.dtype]] = pattern_to_dtype_configs.get(pattern, [])
+
+    input_node = matched_nodes[0]
+    output_node = matched_nodes[-1]
+    for dtype_config in dtype_configs:
+        # check if arg dtype are supported
+        supported = True
+        for arg in input_node.args:
+            supported = supported and \
+                is_input_arg_dtype_supported_by_backend(
+                    arg, input_node, node_name_to_target_dtype, dtype_config)
+        for k, arg in input_node.kwargs.items():
+            supported = supported and \
+                is_input_arg_dtype_supported_by_backend(
+                    arg, input_node, node_name_to_target_dtype, dtype_config)
+        # check if output dtype is supported
+        supported = supported and is_output_dtype_supported_by_backend(
+            output_node, node_name_to_target_dtype, dtype_config)
+        if supported:
+            return True
+    return False
 
 def get_standalone_module_configs(
     node: Node,
@@ -793,6 +875,8 @@ def insert_observers_for_model(
     equalization_config_map: Dict[str, Any],
     input_quantized_idxs: List[int],
     output_quantized_idxs: List[int],
+    backend_config_dict: Optional[Dict[str, Any]],
+    observed_node_names: Set[str],
 ) -> Optional[Node]:
     """
     Inserts observers, using the following high level algorithm:
@@ -884,11 +968,20 @@ def insert_observers_for_model(
                 (qconfig is None) or
                 output_not_a_tensor or
                 is_getitem
-            ) and (not node.op == 'output')
+            ) and (
+                not node.op == 'output'
+            )
 
-            if not skip_inserting_observers:
+            is_supported_by_backend = is_pattern_dtype_config_supported_by_backend(
+                pattern, matched_nodes, node_name_to_target_dtype, backend_config_dict)
+
+            if not skip_inserting_observers and is_supported_by_backend:
                 modules = dict(model.named_modules(remove_duplicate=False))
                 if node.op != 'output':
+                    assert matched_nodes is not None
+                    # add matched nodes to the observed node name set
+                    for n in matched_nodes:
+                        observed_node_names.add(n.name)
 
                     # This is currently only used for equalization.
                     # Checks if the current node is in a branch in which the two
@@ -1039,6 +1132,7 @@ def save_state(
     equalization_qconfig_map: Dict[str, Any],
     qconfig_dict: Dict[str, Dict[Any, Any]],
     is_training: bool,
+    observed_node_names: Set[str],
 ) -> None:
     observed._patterns = patterns  # type: ignore[assignment]
     observed._qconfig_map = qconfig_map  # type: ignore[assignment]
@@ -1048,6 +1142,7 @@ def save_state(
     observed._equalization_qconfig_map = equalization_qconfig_map  # type: ignore[assignment]
     observed._qconfig_dict = qconfig_dict  # type: ignore[assignment]
     observed._is_training = is_training  # type: ignore[assignment]
+    observed._observed_node_names = observed_node_names  # type: ignore[assignment]
 
 def prepare(
         model: GraphModule,
@@ -1094,9 +1189,13 @@ def prepare(
     #   ((<function relu at 0x7f766a7360d0>, <built-in function add>):
     #     <class 'torch.ao.quantization.fx.quantize.Add'>),
     # }
-    quant_patterns = get_default_quant_patterns()
-    patterns: Dict[Pattern, QuantizeHandler] = get_combined_dict(
-        quant_patterns, additional_quant_patterns)
+    patterns: Dict[Pattern, QuantizeHandler] = {}
+    if backend_config_dict is None:
+        quant_patterns = get_default_quant_patterns()
+        patterns = get_combined_dict(
+            quant_patterns, additional_quant_patterns)
+    else:
+        patterns = get_pattern_to_quantize_handlers(backend_config_dict)
 
     convert_dict_to_ordered_dict(qconfig_dict)
     convert_dict_to_ordered_dict(equalization_qconfig_dict)
@@ -1148,14 +1247,23 @@ def prepare(
     run_prepare_fx_on_standalone_modules(
         model, modules, matches, prepare_custom_config_dict)
 
+    # record names for the set of observed node, so that in convert step
+    # we know whether we need to convert a floating point module to reference
+    # quantized module or not
+    observed_node_names: Set[str] = set()
+
     result_node = insert_observers_for_model(
         model, modules, matches, qconfig_map,
         model.graph, prepare_custom_config_dict,
         equalization_qconfig_map,
-        input_quantized_idxs, output_quantized_idxs)
+        input_quantized_idxs,
+        output_quantized_idxs,
+        backend_config_dict,
+        observed_node_names)
 
     save_state(model, qconfig_map, node_name_to_scope, patterns,
-               prepare_custom_config_dict, equalization_qconfig_map, qconfig_dict, model.training)
+               prepare_custom_config_dict, equalization_qconfig_map, qconfig_dict, model.training, observed_node_names)
+
     preserved_attributes = set(prepare_custom_config_dict.get("preserved_attributes", []))
     model = ObservedGraphModule(model, model.graph, preserved_attributes)
     if is_standalone_module:
