@@ -775,8 +775,6 @@ def maybe_propagate_dtype_for_node(
     the first argument, to propagate the dtype to the caller.
     """
     node_name_to_target_dtype[node.name][node.name] = target_dtype
-    for use_node_name in node_name_to_target_dtype[node.name]:
-        node_name_to_target_dtype[node.name][use_node_name] = target_dtype
     # if this is a copy node, propagate to first arg
     root_node, matched_nodes, pattern, qhandler, qconfig = matches.get(
         node.name, (None, None, None, None, None))
