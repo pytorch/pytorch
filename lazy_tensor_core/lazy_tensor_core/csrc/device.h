@@ -42,14 +42,4 @@ class Device {
 
 std::ostream& operator<<(std::ostream& os, const Device& device);
 
-const Device* GetDefaultDevice();
-
-Device GetCurrentDevice();
-
-Device SetCurrentDevice(const Device& device);
-
-static inline Device GetDeviceOrCurrent(const Device* device) {
-  return device != nullptr ? *device : GetCurrentDevice();
-}
-
 }  // namespace torch_lazy_tensors

@@ -10,23 +10,32 @@
 namespace torch_lazy_tensors {
 namespace {
 
+// LTCGuardImpl is used by CompositeExplicitAutograd ops or eager fallbacks to make sure that some particular tensors
+// within the life scope of the guard are on the same device. For example, in RegisterCompositeExplicitAutograd.cpp,
+// outputs of each op are examined if they are on same device as the supplied TensorOptions. For more information,
+// see DeviceGuard.h.
+// For ops that have LTC native function implementations, this guard is omitted.
+thread_local c10::Device g_device(c10::DeviceType::Lazy);
+
 struct LTCGuardImpl : public c10::impl::DeviceGuardImplInterface {
   at::DeviceType type() const override { return at::DeviceType::Lazy; }
 
   c10::Device exchangeDevice(c10::Device device) const override {
-    return bridge::SetCurrentDevice(device);
+    auto old_device = g_device;
+    g_device = device;
+    return old_device;
   }
 
   c10::Device getDevice() const override {
-    return bridge::GetCurrentAtenDevice();
+    return g_device;
   }
 
   void setDevice(c10::Device device) const override {
-    bridge::SetCurrentDevice(device);
+    g_device = device;
   }
 
   void uncheckedSetDevice(c10::Device device) const noexcept override {
-    bridge::SetCurrentDevice(device);
+    g_device = device;
   }
 
   c10::Stream getStream(c10::Device device) const noexcept override {
@@ -34,7 +43,7 @@ struct LTCGuardImpl : public c10::impl::DeviceGuardImplInterface {
   }
 
   c10::Stream exchangeStream(c10::Stream s) const noexcept override {
-    return c10::Stream(c10::Stream::DEFAULT, bridge::GetCurrentAtenDevice());
+    return c10::Stream(c10::Stream::DEFAULT, g_device);
   }
 
   c10::DeviceIndex deviceCount() const noexcept override {

@@ -247,16 +247,9 @@ c10::optional<Device> GetLtcDevice(const c10::optional<c10::Device>& device) {
 
 Device AtenDeviceToLtcDevice(const c10::Device& device) {
   CHECK_EQ(device.type(), at::kLazy) << device;
-  int ordinal = device.has_index() ? device.index() : -1;
-  if (ordinal < 0) {
-    c10::Device current_device = GetCurrentAtenDevice();
-    if (current_device.has_index()) {
-      ordinal = current_device.index();
-    }
-  }
-  if (ordinal < 0) {
-    return GetCurrentDevice();
-  }
+  // Ordinal doesn't make any sense now given
+  // distributed training is not supported.
+  int ordinal = device.has_index() ? device.index() : 0;
   return AtenLtcDeviceMapper::Get()->GetDeviceFromOrdinal(ordinal);
 }
 
@@ -267,24 +260,6 @@ c10::Device LtcDeviceToAtenDevice(const Device& device) {
 
 std::string ToLtcString(const c10::Device& device) {
   return c10::str("lazy:", device.index());
-}
-
-c10::Device AtenDefaultDevice() {
-  return LtcDeviceToAtenDevice(*GetDefaultDevice());
-}
-
-c10::Device SetCurrentDevice(const c10::Device& device) {
-  Device prev_device =
-      torch_lazy_tensors::SetCurrentDevice(AtenDeviceToLtcDevice(device));
-  return LtcDeviceToAtenDevice(prev_device);
-}
-
-Device SetCurrentDevice(const Device& device) {
-  return torch_lazy_tensors::SetCurrentDevice(device);
-}
-
-c10::Device GetCurrentAtenDevice() {
-  return LtcDeviceToAtenDevice(torch_lazy_tensors::GetCurrentDevice());
 }
 
 at::Tensor LtcToAtenTensor(LazyTensor ltc_tensor,

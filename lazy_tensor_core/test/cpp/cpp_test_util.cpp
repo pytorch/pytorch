@@ -131,16 +131,12 @@ bool EqualValuesNoElementTypeCheck(at::Tensor tensor1, at::Tensor tensor2) {
   return equal;
 }
 
-void ForEachDevice(const std::function<void(const Device&)>& devfn) {
-  const Device* device = GetDefaultDevice();
-  bridge::SetCurrentDevice(*device);
-  devfn(*device);
-}
-
 void ForEachDevice(const std::function<void(const torch::Device&)>& devfn) {
-  const Device* device = GetDefaultDevice();
-  torch::Device torch_device = bridge::LtcDeviceToAtenDevice(*device);
-  bridge::SetCurrentDevice(torch_device);
+  // Currently TorchScript backend only supports one type of hardware per process,
+  // which is set by env. And the ordinal is always 0 given distributed training
+  // is not supported yet.
+  auto device = Device();
+  torch::Device torch_device = bridge::LtcDeviceToAtenDevice(device);
   devfn(torch_device);
 }
 
