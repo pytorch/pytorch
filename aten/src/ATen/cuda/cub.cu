@@ -128,24 +128,24 @@ struct SumOp {
 }
 
 template <typename input_t, typename output_t>
-void inclusive_sum(const input_t *input, output_t *output, int64_t num_items) {
+void inclusive_sum_truncating(const input_t *input, output_t *output, int64_t num_items) {
   using scalar_t = std::common_type_t<input_t, output_t>;
   inclusive_scan(input, output, SumOp<scalar_t>{}, num_items);
 }
 
-template void inclusive_sum(const int32_t *input, int32_t *output, int64_t num_items);
-template void inclusive_sum(const int64_t *input, int64_t *output, int64_t num_items);
-template void inclusive_sum(const int32_t *input, int64_t *output, int64_t num_items);
+template void inclusive_sum_truncating(const int32_t *input, int32_t *output, int64_t num_items);
+template void inclusive_sum_truncating(const int64_t *input, int64_t *output, int64_t num_items);
+template void inclusive_sum_truncating(const int32_t *input, int64_t *output, int64_t num_items);
 
 template <typename input_t, typename output_t>
-void exclusive_sum(const input_t *input, output_t *output, int64_t num_items) {
+void exclusive_sum_in_common_type(const input_t *input, output_t *output, int64_t num_items) {
   using scalar_t = std::common_type_t<input_t, output_t>;
   exclusive_scan(input, output, SumOp<scalar_t>{}, scalar_t(0), num_items);
 }
 
-template void exclusive_sum(const int32_t *input, int32_t *output, int64_t num_items);
-template void exclusive_sum(const int64_t *input, int64_t *output, int64_t num_items);
-template void exclusive_sum(const bool *input, int64_t *output, int64_t num_items);
-template void exclusive_sum(const uint8_t *input, int64_t *output, int64_t num_items);
+template void exclusive_sum_in_common_type(const int32_t *input, int32_t *output, int64_t num_items);
+template void exclusive_sum_in_common_type(const int64_t *input, int64_t *output, int64_t num_items);
+template void exclusive_sum_in_common_type(const bool *input, int64_t *output, int64_t num_items);
+template void exclusive_sum_in_common_type(const uint8_t *input, int64_t *output, int64_t num_items);
 
 }}}  // namespace at::cuda::cub

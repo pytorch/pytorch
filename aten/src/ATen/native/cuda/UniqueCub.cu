@@ -68,7 +68,7 @@ std::tuple<Tensor, Tensor, Tensor, int64_t> compute_unique(
 
     Tensor inv_loc_out =
         consecutive ? inverse_indices : at::empty({num_inp}, options);
-    at::cuda::cub::inclusive_sum(
+    at::cuda::cub::inclusive_sum_truncating(
         inv_loc_ptr,
         inv_loc_out.data_ptr<int64_t>(),
         num_inp);
