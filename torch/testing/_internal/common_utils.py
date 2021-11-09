@@ -1385,14 +1385,6 @@ class TypePair(UnittestPair):
 class ObjectPair(UnittestPair):
     CLS = object
 
-    # FIXME: DEBUG
-    def compare(self):
-        error_meta = super().compare()
-        if not error_meta:
-            return None
-
-        return error_meta._replace(msg=f"\n{list(self.actual)}\n{list(self.expected)}\n{error_meta.msg}")
-
 
 # This implements a variant of assertRaises/assertRaisesRegex where we first test
 # if the exception is NotImplementedError, and if so just skip the test instead
