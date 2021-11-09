@@ -80,9 +80,14 @@ __global__ void convert_indices_from_csr_to_coo_cuda_kernel(output_t* data_out, 
 
 template <typename input_t, typename output_t>
 void convert_indices_from_csr_to_coo_cuda(const Tensor& result, const Tensor& crow_indices, const Tensor& col_indices, const int64_t size) {
-  int64_t numel = crow_indices.numel();
   const input_t* col_indices_data_in = col_indices.data_ptr<input_t>();
-  const input_t* crow_indices_data_in = crow_indices.data_ptr<input_t>();
+  const input_t* crow_indices_data_in;
+  if (crow_indices.is_contiguous()) {
+    crow_indices_data_in = crow_indices.data_ptr<input_t>();
+  } else {
+    auto crow_indices_contiguous = crow_indices.contiguous();
+    crow_indices_data_in = crow_indices_contiguous.data_ptr<input_t>();
+  }
   output_t* data_out = result.data_ptr<output_t>();
 
   if (numel == 0) {
