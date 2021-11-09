@@ -213,7 +213,7 @@
           command: |
             set -ex
             source /Users/distiller/workspace/miniconda3/bin/activate
-            pip install boto3
+            python3 -m pip install boto3==1.19.12
 
             export IN_CI=1
             export JOB_BASE_NAME=$CIRCLE_JOB
