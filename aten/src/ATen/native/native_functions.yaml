@@ -533,7 +533,7 @@
 
 - func: arange.start_out(Scalar start, Scalar end, Scalar step=1, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: arange_cpu_out
+    CPU, Meta: arange_out
     CUDA: arange_cuda_out
 
 # This function is a temporary hack to allow tracing of arange like constructs with dynamic
@@ -2486,7 +2486,7 @@
 
 - func: linspace.out(Scalar start, Scalar end, int? steps=None, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: linspace_cpu_out
+    CPU, Meta: linspace_out
     CUDA: linspace_cuda_out
 
 - func: log(Tensor self) -> Tensor
@@ -2645,7 +2645,7 @@
 
 - func: logspace.out(Scalar start, Scalar end, int? steps=None, float base=10.0, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: logspace_cpu_out
+    CPU, Meta: logspace_out
     CUDA: logspace_cuda_out
 
 # log_softmax allows positional dtype, unlike most operators, because kwonly is BC-breaking when loading jit models.
@@ -3455,7 +3455,7 @@
 
 - func: range.out(Scalar start, Scalar end, Scalar step=1, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: range_cpu_out
+    CPU, Meta: range_out
     CUDA: range_cuda_out
 
 - func: ravel(Tensor(a) self) -> Tensor(a)
@@ -8294,6 +8294,13 @@
     CPU: foreach_tensor_minimum_slow
     CUDA: foreach_tensor_minimum_cuda
 
+- func: _foreach_norm.Scalar(Tensor[] tensors, Scalar ord=2) -> Tensor[]
+  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_norm_slow
+    CUDA: foreach_tensor_norm_cuda
+
 - func: bucketize.Tensor(Tensor self, Tensor boundaries, *, bool out_int32=False, bool right=False) -> Tensor
   dispatch:
     CPU: bucketize_cpu
@@ -8309,7 +8316,7 @@
     CPU: bucketize_cpu
     CUDA: bucketize_cuda
 
-- func: searchsorted.Tensor(Tensor sorted_sequence, Tensor self, *, bool out_int32=False, bool right=False) -> Tensor
+- func: searchsorted.Tensor(Tensor sorted_sequence, Tensor self, *, bool out_int32=False, bool right=False, str? side=None, Tensor? sorter=None) -> Tensor
   dispatch:
     CPU: searchsorted_cpu
     CUDA: searchsorted_cuda
@@ -8324,12 +8331,12 @@
   dispatch:
     CUDA: _torch_cuda_cu_linker_symbol_op_cuda
 
-- func: searchsorted.Tensor_out(Tensor sorted_sequence, Tensor self, *, bool out_int32=False, bool right=False, Tensor(a!) out) -> Tensor(a!)
+- func: searchsorted.Tensor_out(Tensor sorted_sequence, Tensor self, *, bool out_int32=False, bool right=False, str? side=None, Tensor? sorter=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: searchsorted_out_cpu
     CUDA: searchsorted_out_cuda
 
-- func: searchsorted.Scalar(Tensor sorted_sequence, Scalar self, *, bool out_int32=False, bool right=False) -> Tensor
+- func: searchsorted.Scalar(Tensor sorted_sequence, Scalar self, *, bool out_int32=False, bool right=False, str? side=None, Tensor? sorter=None) -> Tensor
   dispatch:
     CPU: searchsorted_cpu
     CUDA: searchsorted_cuda
