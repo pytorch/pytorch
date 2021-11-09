@@ -73,7 +73,7 @@ _large_size = (1029, 917)
 # Replace values satisfying condition with a safe value. This is used to block
 # out values the could cause singularity like tan(pi/2)
 def replace_values_in_tensor(tensor, condition, safe_value):
-    mask = condition(tensor)
+    mask = condition(tensor).to(tensor.device)
     tensor.masked_fill_(mask, safe_value)
 
 
@@ -351,7 +351,8 @@ class TestUnaryUfuncs(TestCase):
     @ops(reference_filtered_ops)
     def test_reference_numerics_normal(self, device, dtype, op):
         tensors = generate_numeric_tensors(device, dtype,
-                                           domain=op.domain)
+                                           domain=op.domain,
+                                           filter_=op.normal_filter)
         self._test_reference_numerics(dtype, op, tensors)
 
     @suppress_warnings
