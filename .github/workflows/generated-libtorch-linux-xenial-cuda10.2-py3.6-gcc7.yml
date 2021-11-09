@@ -51,7 +51,6 @@ jobs:
          }}
     outputs:
       should_run: ${{ steps.should_run_step.outputs.should_run }}
-      test: abc
     steps:
       - name: noop
         run: echo running ciflow_should_run
@@ -59,65 +58,8 @@ jobs:
         run: echo "${LABELS}"
       - name: should run step
         id: should_run_step
-        run: echo ::set-output name=should_run::true
+        run: echo ::set-output name=should_run::false
 
-  testit:
-    runs-on: linux.2xlarge
-    needs: [ciflow_should_run]
-    timeout-minutes: 240
-    env:
-      JOB_BASE_NAME: libtorch-linux-xenial-cuda10.2-py3.6-gcc7-build
-    steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE:?}/*"
-          rm -f ~/.ssh/authorized_keys
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Show the stuff
-        env:
-          RESULT: ${{ needs.ciflow_should_run.outputs.should_run }}
-          TEST: ${{ needs.ciflow_should_run.outputs.test }}
-        run: |
-          echo hi
-          echo $RESULT
-          echo test
-          echo $TEST
-          echo done
   build:
     runs-on: linux.2xlarge
     needs: [ciflow_should_run]

@@ -38,7 +38,6 @@ jobs:
          }}
     outputs:
       should_run: ${{ steps.should_run_step.outputs.should_run }}
-      test: abc
     steps:
       - name: noop
         run: echo running ciflow_should_run
@@ -46,7 +45,7 @@ jobs:
         run: echo "${LABELS}"
       - name: should run step
         id: should_run_step
-        run: echo ::set-output name=should_run::true
+        run: echo ::set-output name=should_run::false
 
   build:
     runs-on: macos-10.15

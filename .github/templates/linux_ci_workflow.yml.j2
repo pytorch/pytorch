@@ -44,24 +44,6 @@ env:
 jobs:
 !{{ common.ciflow_should_run_job(ciflow_config) }}
 {% block build +%}
-  testit:
-    runs-on: linux.2xlarge
-    needs: [!{{ ciflow_config.root_job_name }}]
-    timeout-minutes: !{{ common.timeout_minutes }}
-    env:
-      JOB_BASE_NAME: !{{ build_environment }}-build
-    steps:
-      !{{ common.setup_ec2_linux() }}
-      - name: Show the stuff
-        env:
-          RESULT: ${{ needs.ciflow_should_run.outputs.should_run }}
-          TEST: ${{ needs.ciflow_should_run.outputs.test }}
-        run: |
-          echo hi
-          echo $RESULT
-          echo test
-          echo $TEST
-          echo done
   build:
     runs-on: linux.2xlarge
     needs: [!{{ ciflow_config.root_job_name }}]
