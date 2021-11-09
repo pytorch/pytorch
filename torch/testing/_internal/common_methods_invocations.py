@@ -7946,7 +7946,11 @@ op_db: List[OpInfo] = [
                     sample_inputs_func=partial(sample_inputs_binary_pwise, rounding_mode="floor", python_scalars=True),
                     supports_forward_ad=True,
                     assert_autodiffed=True,
-                    rhs_make_tensor_kwargs=dict(exclude_zero=True)),
+                    rhs_make_tensor_kwargs=dict(exclude_zero=True),
+                    skips=(
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD',
+                                     device_type='cuda', dtypes=[torch.cdouble]),
+                    ),),
     BinaryUfuncInfo('true_divide',
                     dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                     supports_forward_ad=True,

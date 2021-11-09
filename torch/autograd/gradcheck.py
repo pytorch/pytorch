@@ -919,8 +919,8 @@ def _test_undefined_forward_mode(func, outputs, inputs):
                 if not (res1 is None or res2 is None):
                     if not torch.equal(res1, res2):
                         raise GradcheckError("Mismatch in tangent values for output with index: ", index_o,
-                                                " when input: ", inp, " has an undefined tangent value. ",
-                                                " Got: ", res1, " but expected: ", res2)
+                                             " when input: ", inp, " has an undefined tangent value. ",
+                                             " Got: ", res1, " but expected: ", res2)
     return True
 
 def _test_undefined_backward_mode(func, outputs, inputs) -> bool:
