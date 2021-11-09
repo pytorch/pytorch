@@ -58,9 +58,6 @@ class TORCH_CUDA_CU_API LoopNestGenerator {
   // stack of the active for_loops
   std::vector<kir::ForLoop*> for_loops_;
 
-  // How many loops can the next iteration close
-  std::ptrdiff_t max_close = -1;
-
   // Loop structure of each expression
   std::unordered_map<TensorView*, std::vector<IterDomain*>> loop_structures_;
 };
