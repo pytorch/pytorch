@@ -244,10 +244,10 @@ Tensor& copy_(Tensor& self, const Tensor& src, bool non_blocking) {
   auto maybe_outnames = namedinference::compute_broadcast_outnames(self, src);
   {
     NoNamesGuard guard;
-    if (self.is_zerotensor()) {
+    if (self._is_zerotensor()) {
      TORCH_CHECK(false, "ZeroTensors are immutable. Please materialize the tensor using `.clone()`, if you want a mutable zero tensor.");
     }
-    if (src.is_zerotensor()) {
+    if (src._is_zerotensor()) {
       return self.zero_();
     }
     copy_impl(self, src, non_blocking);

@@ -767,7 +767,7 @@ Tensor make_qtensor(const Tensor& self, IntArrayRef size, IntArrayRef stride, Qu
 }
 
 Tensor as_strided_tensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_) {
-  if (self.is_zerotensor()) {
+  if (self._is_zerotensor()) {
     return at::_efficientzerotensor(size, self.options());
   }
   auto storage_offset = storage_offset_.value_or(self.storage_offset());
@@ -1028,7 +1028,7 @@ Tensor alias_with_sizes_and_strides(
     const Vec& sizes,
     const Vec& strides) {
   // it's okay to return a new tensor here since we disallow in-place operation on ZeroTensors
-  if (self.is_zerotensor()) {
+  if (self._is_zerotensor()) {
     return at::_efficientzerotensor(sizes, self.options());
   }
 

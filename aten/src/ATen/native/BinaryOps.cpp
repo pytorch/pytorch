@@ -614,49 +614,27 @@ Tensor& mul_(Tensor& self, const Scalar& other) {
   return at::mul_out(self, wrapped_scalar_tensor(other), self); // redispatch!
 }
 
-Device device_check(const Tensor& self, const Tensor& other) {
-  auto self_device = self.device();
-  auto other_device = other.device();
-  bool is_equal = (self_device == other_device);
-  if (!is_equal){
-    auto self_dim_is_zero = (self.dim() == 0);
-    auto other_dim_is_zero =  (other.dim() == 0);
-    if (self_dim_is_zero && other_dim_is_zero) {
-      if (self_device.is_cpu()) return other_device;
-    }
-    else if (self_dim_is_zero) {
-      TORCH_CHECK(self_device.is_cpu() && other_device.is_cuda());
-      return other_device;
-    }
-    if (other_dim_is_zero) {
-      TORCH_CHECK(other_device.is_cpu() && self_device.is_cuda());
-    }
+Device correct_out_device(const Tensor& self, const Tensor& other) {
+  if (self.device() == at::kCPU){
+      return other.device();
+  } else {
+    return self.device();
   }
-  return self_device;
 }
 
 Tensor mul_zerotensor(const Tensor& self, const Tensor& other) {
+  auto out_device = correct_out_device(self, other);
   // hack to use the TensorIterator to get the correct broadcasting and type promotion logic
   auto device_ = Device(DeviceType::Meta);
-  auto self_device = self.device();
   auto meta_out = at::meta::mul(self.to(device_), other.to(device_));
-  if (self.is_meta() || other.is_meta()) {
-    return meta_out;
-  }
-  auto out_device = device_check(self, other);
-  TORCH_CHECK(self.device() == self_device);
   return at::_efficientzerotensor(meta_out.sizes(), meta_out.options().device(out_device));
 }
 
 Tensor add_zerotensor(const Tensor& self, const Tensor& other, const Scalar& alpha) {
+  auto out_device = correct_out_device(self, other);
   // hack to use the TensorIterator to get the correct broadcasting and type promotion logic
   auto device_ = Device(DeviceType::Meta);
   auto meta_out = at::meta::add(self.to(device_), other.to(device_));
-
-  if (self.is_meta() || other.is_meta()) {
-    return meta_out;
-  }
-  auto out_device = device_check(self, other);
 
   auto get_out_like = [&] (const Tensor& tensor)
   {
@@ -664,7 +642,7 @@ Tensor add_zerotensor(const Tensor& self, const Tensor& other, const Scalar& alp
       return at::_to_copy(tensor.expand(sizes), meta_out.options().device(out_device));
   };
 
-  if (self.is_zerotensor()) {
+  if (self._is_zerotensor()) {
     auto res = get_out_like(other);
     return alpha.equal(1) ? res : res.mul(alpha);
   } else {

@@ -1059,7 +1059,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   /**
    * Whether or not the tensor is a zerotensor
   */
-  inline bool is_zerotensor() const {
+  inline bool _is_zerotensor() const {
     return key_set_.has(DispatchKey::ZeroTensor);
   }
 

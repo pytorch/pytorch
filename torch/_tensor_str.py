@@ -234,7 +234,7 @@ def _tensor_str(self, indent):
 
     summarize = self.numel() > PRINT_OPTS.threshold
 
-    if self.is_zerotensor():
+    if self._is_zerotensor():
         self = self.clone()
 
     # handle the negative bit

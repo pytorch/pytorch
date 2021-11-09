@@ -56,7 +56,7 @@ namespace at {
 
       if (ivalue.isTensor()) {
         auto tensor = std::move(ivalue).toTensor();
-        if (tensor.is_zerotensor()) {
+        if (tensor._is_zerotensor()) {
           TORCH_CHECK(!mut_arg, "ZeroTensors are immutable. Please use the materialized zero tensor ",
                     "obtained using .clone() if you want a mutable tensor.");
           tensor = tensor.clone();
@@ -66,7 +66,7 @@ namespace at {
         auto tensors = std::move(ivalue).toTensorList();
         for(const auto j : c10::irange(tensors.size())) {
           const Tensor& tensor = tensors[j];
-          if (tensor.is_zerotensor()) {
+          if (tensor._is_zerotensor()) {
             // TODO: assert requires_grad=False
             //_like should not propagate zerotensor dispatch key
             TORCH_CHECK(!mut_arg, "ZeroTensors are immutable. Please use the materialized zero tensor ",

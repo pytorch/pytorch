@@ -1439,7 +1439,7 @@ Tensor clone(const Tensor& src, c10::optional<c10::MemoryFormat> optional_memory
     self = at::empty_like(src, src.options(), memory_format);
   }
 
-  if (src.is_zerotensor()) {
+  if (src._is_zerotensor()) {
     self.zero_();
   } else {
     self.copy_(src);

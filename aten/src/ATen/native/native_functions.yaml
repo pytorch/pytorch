@@ -2350,7 +2350,7 @@
   device_guard: False
   manual_cpp_binding: True
 
-- func: is_zerotensor(Tensor self) -> bool
+- func: _is_zerotensor(Tensor self) -> bool
   variants: function, method
   device_guard: False
   manual_cpp_binding: True
