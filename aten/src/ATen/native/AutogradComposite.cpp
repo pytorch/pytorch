@@ -56,9 +56,10 @@ Tensor _new_zeros_with_same_feature_meta(
   // the batch dims of self, so that the slices are arranged contiguously
   auto out_strides = c10::SmallBuffer<int64_t, kSmallBufferSizeHint>(other.dim() + self_num_batch_dims);
   int64_t prod = other_storage_numel;
+
   for (size_t i = 0; i < self_num_batch_dims; ++i) {
     out_strides[self_num_batch_dims - i - 1] = prod;
-    prod *= self_strides[i];
+    prod *= self_sizes[self_num_batch_dims - i - 1];
   }
   std::copy(other_strides.begin(), other_strides.end(), out_strides.begin() + self_num_batch_dims);
 
