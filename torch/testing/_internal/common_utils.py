@@ -524,11 +524,13 @@ def repeat_test_for_types(dtypes):
     return repeat_helper
 
 
+
 def discover_test_cases_recursively(suite_or_case):
     if isinstance(suite_or_case, unittest.TestCase):
         return [suite_or_case]
     rc = []
     for element in suite_or_case:
+        print(element)
         rc.extend(discover_test_cases_recursively(element))
     return rc
 
@@ -552,6 +554,24 @@ def sanitize_test_filename(filename):
     strip_py = re.sub(r'.py$', '', filename)
     return re.sub('/', r'.', strip_py)
 
+def lint_test_case_extension(suite):
+    succeed = True
+    for test_case_or_suite in suite:
+        test_case = test_case_or_suite
+        if isinstance(test_case_or_suite, unittest.TestSuite):
+            first_test = test_case_or_suite._tests[0] if len(test_case_or_suite._tests) > 0 else None
+            if first_test is not None and isinstance(first_test, unittest.TestSuite):
+                return succeed and lint_test_case_extension(test_case_or_suite)
+            test_case = first_test
+
+        if test_case is not None:
+            test_class = test_case.id().split('.', 1)[1].split('.')[0]
+            if not isinstance(test_case, TestCase):
+                err = "This test class should extend from torch.testing._internal.common_utils.TestCase but it doesn't."
+                print(f"{test_class} - failed. {err}")
+                succeed = False
+    return succeed
+
 def run_tests(argv=UNITTEST_ARGS):
     # import test files.
     if IMPORT_SLOW_TESTS:
@@ -571,10 +591,16 @@ def run_tests(argv=UNITTEST_ARGS):
     # Determine the test launch mechanism
     if TEST_DISCOVER:
         _print_test_names()
-    elif TEST_IN_SUBPROCESS:
-        suite = unittest.TestLoader().loadTestsFromModule(__main__)
-        test_cases = discover_test_cases_recursively(suite)
+        return
+
+    # Before running the tests, lint to check that every test class extends from TestCase
+    suite = unittest.TestLoader().loadTestsFromModule(__main__)
+    if not lint_test_case_extension(suite):
+        sys.exit(1)
+
+    if TEST_IN_SUBPROCESS:
         failed_tests = []
+        test_cases = discover_test_cases_recursively(suite)
         for case in test_cases:
             test_case_full_name = case.id().split('.', 1)[1]
             exitcode = shell([sys.executable] + argv + [test_case_full_name])
@@ -584,7 +610,6 @@ def run_tests(argv=UNITTEST_ARGS):
         assert len(failed_tests) == 0, "{} unit test(s) failed:\n\t{}".format(
             len(failed_tests), '\n\t'.join(failed_tests))
     elif RUN_PARALLEL > 1:
-        suite = unittest.TestLoader().loadTestsFromModule(__main__)
         test_cases = discover_test_cases_recursively(suite)
         test_batches = chunk_list(get_test_names(test_cases), RUN_PARALLEL)
         processes = []
