@@ -54,14 +54,21 @@ jobs:
             (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cuda') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/win')) ||
             ((github.event_name == 'pull_request' && github.event.action != 'unassigned') && !contains(join(github.event.pull_request.labels.*.name), 'ciflow/')))
          }}
+    outputs:
+      should_run: ${{ steps.should_run_step.outputs.should_run }}
+      test: abc
     steps:
       - name: noop
         run: echo running ciflow_should_run
       - name: print labels
         run: echo "${LABELS}"
+      - name: should run step
+        id: should_run_step
+        run: echo ::set-output name=should_run::true
   build:
     runs-on: "windows.4xlarge"
     needs: [ciflow_should_run]
+    if: ${{ ((needs.ciflow_should_run.outputs.should_run == 'true')) }}
     timeout-minutes: 240
     env:
       JOB_BASE_NAME: win-vs2019-cuda11.3-py3-build
@@ -144,6 +151,7 @@ jobs:
 
   generate-test-matrix:
     needs: [ciflow_should_run]
+    if: ${{ ((needs.ciflow_should_run.outputs.should_run == 'true')) }}
     runs-on: ubuntu-18.04
     timeout-minutes: 240
     env:
@@ -180,6 +188,7 @@ jobs:
       https_proxy: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
       PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
     needs: [build, generate-test-matrix, ciflow_should_run]
+    if: ${{ ((needs.ciflow_should_run.outputs.should_run == 'true')) }}
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
       fail-fast: false

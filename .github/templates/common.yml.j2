@@ -174,11 +174,17 @@ concurrency:
       LABEL_CONDITIONS: ${{ !{{ ciflow_config.label_conditions }} }}
       LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
     if: !{{ ciflow_config.root_job_condition }}
+    outputs:
+      should_run: ${{ steps.should_run_step.outputs.should_run }}
+      test: abc
     steps:
       - name: noop
         run: echo running !{{ ciflow_config.root_job_name }}
       - name: print labels
         run: echo "${LABELS}"
+      - name: should run step
+        id: should_run_step
+        run: echo ::set-output name=should_run::true
 {%- endmacro -%}
 
 {%- macro calculate_docker_image(always_rebuild) -%}

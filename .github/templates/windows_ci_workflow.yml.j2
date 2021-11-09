@@ -64,6 +64,7 @@ jobs:
   build:
     runs-on: "windows.4xlarge"
     needs: [!{{ ciflow_config.root_job_name }}]
+    if: ${{ (!{{ ciflow_config.child_job_condition }}) }}
     timeout-minutes: !{{ common.timeout_minutes }}
     env:
       JOB_BASE_NAME: !{{ build_environment }}-build
@@ -119,6 +120,7 @@ jobs:
 
   generate-test-matrix:
     needs: [!{{ ciflow_config.root_job_name }}]
+    if: ${{ (!{{ ciflow_config.child_job_condition }}) }}
     runs-on: ubuntu-18.04
     timeout-minutes: !{{ common.timeout_minutes }}
     env:
@@ -155,6 +157,7 @@ jobs:
       https_proxy: "!{{ common.squid_proxy }}"
       PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
     needs: [build, generate-test-matrix, !{{ ciflow_config.root_job_name }}]
+    if: ${{ (!{{ ciflow_config.child_job_condition }}) }}
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
       fail-fast: false

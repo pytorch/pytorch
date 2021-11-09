@@ -36,6 +36,7 @@ jobs:
   build:
     runs-on: macos-10.15
     needs: [!{{ ciflow_config.root_job_name }}]
+    if: ${{ (!{{ ciflow_config.child_job_condition }}) }}
     timeout-minutes: !{{ common.timeout_minutes }}
     env:
       JOB_BASE_NAME: !{{ build_environment }}-build

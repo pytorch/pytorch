@@ -15,6 +15,7 @@ on:
   build-and-test:
     runs-on: !{{ test_runner_type }}
     needs: [!{{ ciflow_config.root_job_name }}]
+    if: ${{ (!{{ ciflow_config.child_job_condition }}) }}
     env:
       JOB_BASE_NAME: !{{ build_environment }}-build-and-test
       NUM_TEST_SHARDS: !{{ num_test_shards }}

@@ -49,16 +49,23 @@ jobs:
             (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/bazel') || contains(github.event.pull_request.labels.*.name, 'ciflow/cpu') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux')) ||
             ((github.event_name == 'pull_request' && github.event.action != 'unassigned') && !contains(join(github.event.pull_request.labels.*.name), 'ciflow/')))
          }}
+    outputs:
+      should_run: ${{ steps.should_run_step.outputs.should_run }}
+      test: abc
     steps:
       - name: noop
         run: echo running ciflow_should_run
       - name: print labels
         run: echo "${LABELS}"
+      - name: should run step
+        id: should_run_step
+        run: echo ::set-output name=should_run::true
 
   # building and testing in a single job since bazel runs only small subset of tests
   build-and-test:
     runs-on: linux.2xlarge
     needs: [ciflow_should_run]
+    if: ${{ ((needs.ciflow_should_run.outputs.should_run == 'true')) }}
     env:
       JOB_BASE_NAME: linux-xenial-py3.6-gcc7-bazel-test-build-and-test
       NUM_TEST_SHARDS: 1

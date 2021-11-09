@@ -80,6 +80,10 @@ class CIFlowConfig:
     trigger_actor: str = 'pytorchbot'
     root_job_name: str = 'ciflow_should_run'
     root_job_condition: str = ''
+
+    # Use the output of the determination step to see if subsequent jobs should
+    # actually run
+    child_job_condition: str = ''
     label_conditions: str = ''
 
     def gen_root_job_condition(self) -> None:
@@ -104,6 +108,11 @@ class CIFlowConfig:
                                   f"            ({self.label_conditions}) ||\n" \
                                   f"            ({run_with_no_labels}))\n"\
                                   f"         }}}}"
+
+        # NB: This is not enclosed in '${{ }}' so it can be combined with other
+        # conditions in the templates if necessary
+        self.child_job_condition = f"(needs.{self.root_job_name}.outputs.should_run == 'true')"
+        # self.child_job_condition = f"('true' == 'true')"
 
     def reset_root_job(self) -> None:
         self.root_job_name = ''

@@ -36,15 +36,22 @@ jobs:
             (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/ios') || contains(github.event.pull_request.labels.*.name, 'ciflow/macos')) ||
             (false))
          }}
+    outputs:
+      should_run: ${{ steps.should_run_step.outputs.should_run }}
+      test: abc
     steps:
       - name: noop
         run: echo running ciflow_should_run
       - name: print labels
         run: echo "${LABELS}"
+      - name: should run step
+        id: should_run_step
+        run: echo ::set-output name=should_run::true
 
   build:
     runs-on: macos-10.15
     needs: [ciflow_should_run]
+    if: ${{ ((needs.ciflow_should_run.outputs.should_run == 'true')) }}
     timeout-minutes: 240
     env:
       JOB_BASE_NAME: ios-12-5-1-x86-64-coreml-build
