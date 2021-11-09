@@ -40,11 +40,6 @@ struct InputMetadata {
     return options_;
   }
 
-  // TODO: remove
-  at::IntArrayRef shape() const {
-    return t_sizes_.sizes();
-  }
-
   at::Tensor t_sizes() const {
     return t_sizes_;
   }

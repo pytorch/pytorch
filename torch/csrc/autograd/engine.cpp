@@ -691,15 +691,15 @@ void validate_outputs(
       grad = getSumToOrThrowHandler()(t_sizes, grad);
     } else {
       // TODO: use t_sizes().sizes() instead everywhere
-      if (!grad.sizes().equals(metadata.shape())) {
-        if (!at::is_expandable_to(metadata.shape(), grad.sizes())) {
+      if (!grad.sizes().equals(metadata.t_sizes().sizes())) {
+        if (!at::is_expandable_to(metadata.t_sizes().sizes(), grad.sizes())) {
           std::stringstream ss;
           ss << "invalid gradient at index " << i << " - got ";
           ss << grad.sizes() << " but expected shape compatible with ";
-          ss << metadata.shape();
+          ss << metadata.t_sizes().sizes();
           AT_ERROR(format_error(ss.str()));
         }
-        grad = at::sum_to(std::move(grad), metadata.shape());
+        grad = at::sum_to(std::move(grad), metadata.t_sizes().sizes());
       }
     }
 
