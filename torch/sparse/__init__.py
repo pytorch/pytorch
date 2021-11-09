@@ -101,7 +101,8 @@ Mathematically this performs the following operation:
 .. math::
     \text{out} = \alpha\ (\text{mat1} \mathbin{@} \text{mat2})*\text{spy}(\text{input}) + \beta\ \text{input}
 
-where :math:`\text{spy}(\text{input}) is the sparsity pattern matrix of :attr:`input`, :attr:`alpha` and :attr:`beta` are the scaling factors.
+where :math:`\text{spy}(\text{input})` is the sparsity pattern matrix of :attr:`input`, :attr:`alpha` and :attr:`beta` are the scaling factors.
+:math:`\text{spy}(\text{input})` has value 1 at the positions where :attr:`input` has non-zero values, and 0 elsewhere.
 
 .. note::
     :attr:`input` must be a sparse CSR tensor. :attr:`mat1` and :attr:`mat2` must be dense tensors.
