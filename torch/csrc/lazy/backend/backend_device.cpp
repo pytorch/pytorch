@@ -6,6 +6,8 @@
 namespace torch {
 namespace lazy {
 
+// TODO(alanwaketan): Use the backend API to get the default device type.
+// In the future, we should also get the default device ordinal.
 BackendDevice::BackendDevice()
   : type_(std::make_shared<BackendDeviceType>()) {}
 
@@ -13,7 +15,7 @@ BackendDevice::BackendDevice(std::shared_ptr<BackendDeviceType>&& type, int ordi
   : type_(std::move(type)), ordinal_(ordinal) {}
 
 BackendDevice::BackendDevice(const std::string& device_spec)
-  : type_(std::make_shared<BackendDeviceType>()) {}
+  : BackendDevice::BackendDevice() {}
 
 int8_t BackendDevice::type() const {
   TORCH_INTERNAL_ASSERT(type_);

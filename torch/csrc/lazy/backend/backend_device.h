@@ -1,21 +1,24 @@
 #pragma once
 
-#include <iostream>
+#include <ostream>
 #include <memory>
 #include <string>
 
+#include <c10/macros/Export.h>
 #include <c10/util/Deprecated.h>
 
 namespace torch {
 namespace lazy {
 
-// Backend can extend it and define their own supported hardware types.
-struct BackendDeviceType {
+// Backend should extend it and define their own supported hardware types.
+struct TORCH_API BackendDeviceType {
   int8_t type {0};
+
+  virtual ~BackendDeviceType() = default;
   virtual std::string toString() const { return "Unknown"; }
 };
 
-class BackendDevice {
+class TORCH_API BackendDevice {
  public:
   BackendDevice();
   BackendDevice(std::shared_ptr<BackendDeviceType>&& type, int ordinal);
@@ -40,7 +43,7 @@ class BackendDevice {
   int64_t ordinal_ {0};
 };
 
-std::ostream& operator<<(std::ostream& os, const BackendDevice& device);
+TORCH_API std::ostream& operator<<(std::ostream& os, const BackendDevice& device);
 
 }  // namespace lazy
 }  // namespace torch
