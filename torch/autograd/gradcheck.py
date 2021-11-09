@@ -896,33 +896,31 @@ def _test_undefined_forward_mode(func, outputs, inputs):
         for i, (fw_grad, u) in enumerate(zip(fw_grads, all_u)):
             fw_grad.copy_(u.view_as(fw_grad))
 
-        dual_inputs_idx = 0
-        for inp in inputs:
-            if is_tensor_like(inp) and inp.requires_grad:
-                dual_inp_obj = dual_inputs[dual_inputs_idx]
+        for idx, inp in tensor_inputs:
+            dual_inp_obj = dual_inputs[idx]
 
-                # case 1 (Materialized Zero Tensor Tangent)
-                dual_inputs[dual_inputs_idx] = fwAD.make_dual(inp, torch.zeros_like(inp))
-                raw_outputs = _as_tuple(func(*dual_inputs))
-                dual_outputs1 = filter(_is_float_or_complex_tensor, raw_outputs)
+            # case 1 (Materialized Zero Tensor Tangent)
+            dual_inputs[idx] = fwAD.make_dual(inp, torch.zeros_like(inp))
+            raw_outputs = _as_tuple(func(*dual_inputs))
+            dual_outputs1 = filter(_is_float_or_complex_tensor, raw_outputs)
 
-                # case 2 (Efficient Zero Tensor Tangent since we don't make a dual object and pass a regular tensor)
-                dual_inputs[dual_inputs_idx] = inp
-                raw_outputs = _as_tuple(func(*dual_inputs))
-                dual_outputs2 = filter(_is_float_or_complex_tensor, raw_outputs)
+            # case 2 (Efficient Zero Tensor Tangent since we don't make a dual object and pass a regular tensor)
+            dual_inputs[idx] = inp
+            raw_outputs = _as_tuple(func(*dual_inputs))
+            dual_outputs2 = filter(_is_float_or_complex_tensor, raw_outputs)
 
-                # reset
-                dual_inputs[dual_inputs_idx] = dual_inp_obj
-                dual_inputs_idx += 1
+            # reset
+            dual_inputs[idx] = dual_inp_obj
 
-                for index_o, (d_o1, d_o2) in enumerate(zip(dual_outputs1, dual_outputs2)):
-                    val1, res1 = fwAD.unpack_dual(d_o1)
-                    val2, res2 = fwAD.unpack_dual(d_o2)
+            for index_o, (d_o1, d_o2) in enumerate(zip(dual_outputs1, dual_outputs2)):
+                val1, res1 = fwAD.unpack_dual(d_o1)
+                val2, res2 = fwAD.unpack_dual(d_o2)
 
-                    if not (res1 is None or res2 is None):
-                        if not torch.equal(res1, res2):
-                            raise GradcheckError("Mismatch in tangent values for output with index: ", index_o,
-                                                 " when input: ", inp, " has an undefined tangent value")
+                if not (res1 is None or res2 is None):
+                    if not torch.equal(res1, res2):
+                        raise GradcheckError("Mismatch in tangent values for output with index: ", index_o,
+                                                " when input: ", inp, " has an undefined tangent value. ",
+                                                " Got: ", res1, " but expected: ", res2)
     return True
 
 def _test_undefined_backward_mode(func, outputs, inputs) -> bool:

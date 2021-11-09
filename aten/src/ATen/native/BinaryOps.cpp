@@ -643,6 +643,9 @@ Tensor add_zerotensor(const Tensor& self, const Tensor& other, const Scalar& alp
   };
 
   if (self._is_zerotensor()) {
+    if (other._is_zerotensor()) {
+      return at::_efficientzerotensor(meta_out.sizes(), meta_out.options().device(out_device));
+    }
     auto res = get_out_like(other);
     return alpha.equal(1) ? res : res.mul(alpha);
   } else {

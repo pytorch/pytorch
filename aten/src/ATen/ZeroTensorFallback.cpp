@@ -5,6 +5,7 @@
 #include <ATen/NativeFunctions.h>
 #include <c10/util/irange.h>
 #include <torch/library.h>
+#include <ATen/native/MathBitFallThroughLists.h>
 
 namespace at {
 
@@ -88,15 +89,16 @@ namespace at {
 
   TORCH_LIBRARY_IMPL(aten, ZeroTensor, m) {
     m.impl("zeros_like", torch::CppFunction::makeFallthrough());
-    m.impl("empty_like", torch::CppFunction::makeFallthrough());
-    m.impl("empty_strided", torch::CppFunction::makeFallthrough());
     m.impl("mul.Scalar", torch::CppFunction::makeFallthrough());
+    m.impl("add.Scalar", torch::CppFunction::makeFallthrough());
     m.impl("copy_", torch::CppFunction::makeFallthrough());
     m.impl("clone", torch::CppFunction::makeFallthrough());
-    m.impl("alias_with_sizes_and_strides", torch::CppFunction::makeFallthrough());
     // The functions in the list below have a specific registeration in native_functions.yaml and
     // do not use the fallback.
     // m.impl("mul.Tensor", torch::CppFunction::makeFallthrough());
     // m.impl("add.Tensor", torch::CppFunction::makeFallthrough());
+
+    TORCH_VIEW_FNS(m)
+    TENSOR_UTILITIES_AND_CONSTRUCTORS(m)
   }
 } // namespace at
