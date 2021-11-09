@@ -990,11 +990,11 @@ class TestSparseCSR(TestCase):
             self.assertEqual(actual.to_dense(), expected)
 
         for index_dtype in [torch.int32, torch.int64]:
-            for m, n, k in itertools.product([1, 5], repeat=3):
+            for (m, n, k), noncontiguous in zip(itertools.product([1, 5], repeat=3), [True, False]):
                 nnz = random.randint(0, m * n)
                 c = self.genSparseCSRTensor((m, n), nnz, dtype=dtype, device=device, index_dtype=index_dtype)
-                a = make_tensor((m, k), dtype=dtype, device=device)
-                b = make_tensor((k, n), dtype=dtype, device=device)
+                a = make_tensor((m, k), dtype=dtype, device=device, noncontiguous=noncontiguous)
+                b = make_tensor((k, n), dtype=dtype, device=device, noncontiguous=noncontiguous)
                 for op_a, op_b in itertools.product([True, False], repeat=2):
                     run_test(c, a, b, op_a, op_b)
 
