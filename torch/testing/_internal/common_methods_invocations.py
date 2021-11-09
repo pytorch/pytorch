@@ -3088,7 +3088,7 @@ def sample_inputs_adaptive_max_pool3d(op_info, device, dtype, requires_grad, **k
     return list(generator())
 
 class _TestParamsMaxPool1d(object):
-    
+
     def __init__(self):
         self.kwargs = {
             'kernel_size': [(2,), 3],
