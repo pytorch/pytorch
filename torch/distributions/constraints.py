@@ -24,6 +24,7 @@ The following constraints are implemented:
 - ``constraints.simplex``
 - ``constraints.stack``
 - ``constraints.symmetric``
+- ``constraints.symmetric_positive_definite``
 - ``constraints.unit_interval``
 """
 
@@ -56,6 +57,7 @@ __all__ = [
     'simplex',
     'stack',
     'symmetric',
+    'symmetric_positive_definite',
     'unit_interval',
 ]
 
@@ -426,7 +428,18 @@ class _Symmetric(Constraint):
     event_dim = 2
     
     def check(self, value):
-        return (value.transpose(-2, -1) == value).all()
+        return (value.transpose(-2, -1) == value).all(dim = -1).all(dim = -1)
+    
+    
+class _SymmetricPositiveDefinite(Constraint):
+    """
+    Constrain to Symmetric positive-definite square matrices.
+    """
+    event_dim = 2
+    
+    def check(self, value):
+        return (value.transpose(-2, -1) == value).all(dim = -1).all(dim = -1) &
+            torch.linalg.cholesky_ex(value).info.eq(0).unsqueeze(0)
     
 
 class _LowerTriangular(Constraint):
@@ -570,5 +583,6 @@ lower_triangular = _LowerTriangular()
 lower_cholesky = _LowerCholesky()
 corr_cholesky = _CorrCholesky()
 positive_definite = _PositiveDefinite()
+symmetric_positive_definite = _SymmetricPositiveDefinite()
 cat = _Cat
 stack = _Stack
