@@ -89,6 +89,10 @@ enum MessageType : uint16_t {
   UNKNOWN = 0x3cu
 };
 
+TORCH_API std::ostream& operator<<(
+    std::ostream& os,
+    const MessageType& type);
+
 // A message to be sent/received by an RpcAgent.
 //
 // A Message object contains 4 fields:

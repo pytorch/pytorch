@@ -27,7 +27,7 @@ RpcWithProfilingReq::RpcWithProfilingReq(
       messageType_ == rpc::MessageType::RUN_WITH_PROFILING_REQ,
       c10::str(
           "Incorrect message type, expected message type ",
-          uint16_t(rpc::MessageType::RUN_WITH_PROFILING_REQ)));
+          rpc::MessageType::RUN_WITH_PROFILING_REQ));
   wrappedMessageType_ = wrappedMessage_->type();
 }
 

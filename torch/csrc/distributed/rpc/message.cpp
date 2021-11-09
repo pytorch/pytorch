@@ -4,6 +4,10 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+std::ostream& operator<<(std::ostream& os, MessageType const& type) {
+  return os << uint16_t(type);
+}
+
 Message::Message() = default;
 
 Message::Message(
