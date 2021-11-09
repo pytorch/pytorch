@@ -790,7 +790,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
         dim_expr->accept(this);
         buf_dims.push_back(value().intValue());
       }
-      for (ExprPtr stride_expr : b->strides()) {
+      for (const ExprPtr& stride_expr : b->strides()) {
         stride_expr->accept(this);
         buf_strides.push_back(value().intValue());
       }

@@ -356,7 +356,7 @@ ExprHandle ifThenElse(
 }
 
 std::vector<ExprPtr> make_contiguous_strides(
-    const std::vector<ExprHandle> dims) {
+    const std::vector<ExprHandle>& dims) {
   std::vector<ExprPtr> strides;
 
   if (dims.size() > 0) {
@@ -371,7 +371,7 @@ std::vector<ExprPtr> make_contiguous_strides(
 }
 
 std::vector<ExprPtr> make_channels_last_strides(
-    const std::vector<ExprHandle> dims) {
+    const std::vector<ExprHandle>& dims) {
   std::vector<ExprPtr> strides;
   TORCH_INTERNAL_ASSERT(dims.size() == 4, "got size:", dims.size());
   strides.resize(dims.size());
