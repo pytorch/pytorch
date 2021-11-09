@@ -30,8 +30,7 @@ env:
   COMPACT_JOB_NAME: !{{ build_environment }}
   IN_CI: 1
   IS_GHA: 1
-  # Set xcode xcode version to !{{ xcode_version }}
-  DEVELOPER_DIR: /Applications/Xcode_!{{ xcode_version }}.app/Contents/Developer
+  !{{ common.set_xcode_version(xcode_version) }}
 
 jobs:
 !{{ common.ciflow_should_run_job(ciflow_config) }}

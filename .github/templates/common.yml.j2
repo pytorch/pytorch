@@ -249,3 +249,10 @@ concurrency:
           python-version: !{{ python_version }}
           activate-environment: build
 {%- endmacro -%}
+
+{%- macro set_xcode_version(xcode_version) -%}
+{%- if xcode_version != '' %}
+  # Set xcode xcode version to !{{ xcode_version }}
+  DEVELOPER_DIR: /Applications/Xcode_!{{ xcode_version }}.app/Contents/Developer
+{%- endif %}
+{%- endmacro -%}
