@@ -5605,11 +5605,9 @@ class TestQuantizeFxModels(QuantizationTestCase):
         model_list = get_available_classification_models(models)
         quantized_model_list = get_available_classification_models(quantized_models)
 
-        no_pretrained_model = set(['shufflenet_v2_x0_5', 'shufflenet_v2_x1_5', 'shufflenet_v2_x2_0'])
-        quantized_model_list = set(quantized_model_list) - no_pretrained_model
+        quantized_model_list = set(quantized_model_list)
         # test eager and graph consistency
         model_list = quantized_model_list
-        model_list = set(model_list)
         # mobilenet/inception_v3/googlenet qat is not working due to AdaptiveAveragePool qat
         # we might observe the output of AdaptiveAveragePool in the future
         # and re-enable the test
