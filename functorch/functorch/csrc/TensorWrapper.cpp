@@ -19,7 +19,7 @@ void dumpTensor(std::ostream& ss, const Tensor& tensor) {
   if (!wrapped) {
     auto* batched = maybeGetBatchedImpl(tensor);
     if (batched) {
-      ss << "Batched[" << batched->bdims() << ", ";
+      ss << "Batched[ lvl=" << batched->level() << " dim=" << batched->bdim() << ", ";
       dumpTensor(ss, batched->value());
       ss << "]";
       return;

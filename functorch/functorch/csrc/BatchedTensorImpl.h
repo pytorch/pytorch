@@ -31,46 +31,26 @@ constexpr int64_t kVmapNumLevels = 64;
 // probably use <= 5 nested vmaps, but adjust this number as necessary.
 constexpr int64_t kBatchDimsStackSize = 5;
 
-// a BatchDim represents a "private" dimension on a Tensor created inside of
-// vmap. It is a (level, dim) tuple, with the `dim` indicating which dimension
-// is being vmap'ed over and the `level` being an identifier for which vmap
-// said dimension was created inside. The `dim` corresponds to a "physical
-// dim" - it is a dimension index on the underlying physical tensor that is being
-// vmapped over.
-struct BatchDim {
-  BatchDim(int64_t level, int64_t dim) : dim_(dim), level_(level) {}
-  int64_t dim() const {
-    return dim_;
-  }
-  int64_t level() const {
-    return level_;
-  }
- private:
-  int64_t dim_;
-  int64_t level_;
-};
-
-using BatchDims = at::SmallVector<BatchDim, kBatchDimsStackSize>;
-using BatchDimsRef = at::ArrayRef<BatchDim>;
-
-// A BatchedTensorImpl holds an underlying Tensor and a list of BatchDim
+// A BatchedTensorImpl holds an underlying Tensor and a single batch dim
 // NB: We use the term "BatchedTensor" to mean a Tensor that is backed with a
 // BatchedTensorImpl.
 //
 // The batch dimensions are treated as being "private"; they are not user-visible.
 // For example, in the following Tensor,
-//    bt = BatchedTensorImpl(ones(2, 3, 5, 7), [(lvl=1, dim=0), (lvl=2, dim=1)])
-// dimensions 0 and 1 are batch dimensions.
+//    bt = BatchedTensorImpl(ones(2, 3, 5, 7), lvl=1, dim=0)
+// dimension 0 is batch dimension.
 //
 // bt.sizes() returns (5, 7); bt.sum(0) performs a reduction over the (public)
 // dim 0, which is equivalent to dim 3 in the underlying ones(2, 3, 5, 7) tensor.
 struct BatchedTensorImpl : public c10::TensorImpl {
-  explicit BatchedTensorImpl(Tensor value, BatchDims bdims);
-  explicit BatchedTensorImpl(at::DispatchKeySet key_set, Tensor value, BatchDims bdims);
+  explicit BatchedTensorImpl(Tensor value, int64_t dim, int64_t level);
+  explicit BatchedTensorImpl(at::DispatchKeySet key_set, Tensor value, int64_t dim, int64_t level);
 
-  // Returns a reference to BatchDims that represent which dimensions of this
-  // tensor are private.
-  BatchDimsRef bdims() const { return bdims_; }
+  // Returns batch dimension of this tensor
+  int64_t bdim() const { return bdim_; }
+
+  // Returns batch dimension of this tensor
+  int64_t level() const { return level_; }
 
   // BatchedTensorImpl wraps a Tensor
   const Tensor& value() const { return value_; };
@@ -78,10 +58,11 @@ struct BatchedTensorImpl : public c10::TensorImpl {
   // Given a public dimension index, return the dimension index in the underlying
   // value() tensor.
   // For example, if we have
-  //    bt = BatchedTensorImpl(ones(2, 3, 5, 7), [(lvl=1, dim=0), (lvl=2, dim=2)])
+  //    bt = BatchedTensorImpl(ones(2, 3, 5, 7), lvl=1, dim=0)
   // bt.actualDim(0) -> 1
-  // bt.actualDim(1) -> 3
-  // bt.actualDim(2) -> Error
+  // bt.actualDim(1) -> 2
+  // bt.actualDim(2) -> 3
+  // bt.actualDim(3) -> Error
   int64_t actualDim(int64_t dim, bool wrap_dim = true) const;
 
   // Override a bunch of methods inherited from TensorImpl to return error messages.
@@ -102,10 +83,8 @@ struct BatchedTensorImpl : public c10::TensorImpl {
 
   Tensor value_;
 
-  // Note: [BatchedTensorImpl levels invariant]
-  // There is an invariant that the BatchDims must be stored in increasing `level`
-  // order. That is, for i < j, bdims_[i].level must be less than bdims_[j].level.
-  BatchDims bdims_;
+  int64_t level_;
+  int64_t bdim_;
 };
 
 // NB: We use the term "BatchedTensor" to mean a Tensor that is backed with a
@@ -128,37 +107,24 @@ inline BatchedTensorImpl* maybeGetBatchedImpl(Tensor tensor) {
 }
 
 // Returns a bitset. If bit i is set, then that means dim i is a batchdim.
-inline std::bitset<kVmapMaxTensorDims> createBatchDimBitset(BatchDimsRef bdims) {
+inline std::bitset<kVmapMaxTensorDims> createBatchDimBitset(int64_t dim) {
   std::bitset<kVmapMaxTensorDims> is_bdim;
-  for (const auto& bdim : bdims) {
-    is_bdim.set(bdim.dim());
-  }
+  is_bdim.set(dim);
   return is_bdim;
 }
 
-// Creates a bitset for all of the levels present in `bdims`
-inline std::bitset<kVmapNumLevels> createVmapLevelsBitset(BatchDimsRef bdims) {
+// Creates a bitset for the given level
+inline std::bitset<kVmapNumLevels> createVmapLevelsBitset(int64_t level) {
   std::bitset<kVmapNumLevels> result;
-  for (const auto& bdim : bdims) {
-    result.set(bdim.level());
-  }
+  result.set(level);
   return result;
 }
 
-inline std::ostream& operator<<(std::ostream& out, const BatchDim& bdim) {
-  out << "(lvl=" << bdim.level() << ", dim=" << bdim.dim() << ")";
-  return out;
-}
-
 // Use this to construct a BatchedTensor from a regular Tensor
-TORCH_API Tensor makeBatched(const Tensor& tensor, BatchDims bdims);
+TORCH_API Tensor makeBatched(const Tensor& tensor, int64_t dim, int64_t level);
 
 // Adds a batch dim to `tensor`, returning a BatchedTensor
-TORCH_API Tensor addBatchDim(const Tensor& tensor, int64_t level, int64_t dim);
-
-// Checks if an inplace operation on self and other is "vmap compatible".
-// See NOTE: [vmap-incompatible in-place operations] for the definition of this.
-TORCH_API bool inplaceIsVmapCompatible(const Tensor& self, const Tensor& other);
+TORCH_API Tensor addBatchDim(const Tensor& tensor, int64_t dim, int64_t level);
 
 constexpr DispatchKeySet kKeysToPropagateToWrapper({
   DispatchKey::Negative,
