@@ -17,10 +17,6 @@ const c10::QualifiedName& Function::qualname() const {
   return name_;
 }
 
-const std::string& Function::name() const {
-  return name_.name();
-}
-
 void Function::append_instruction(OpCode op, int X, int N, int64_t dbg_handle) {
   TORCH_CHECK(
       isOpSupportedInMobile(op),
@@ -78,8 +74,8 @@ bool Function::append_operator(
   if (!promoted_op) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(pArgs);
     const auto& args = *pArgs;
-    if (model_version == 0x3LL &&
-        opname == c10::OperatorName("aten::_convolution", "")) {
+    if (model_version == 0x3LL && opname.name == "aten::_convolution" &&
+        opname.overload_name.empty()) {
       // Since byte-code versions 0x4L, convolution has an additional
       // default-value argument (allow_tf32=True, see
       // https://github.com/pytorch/pytorch/pull/40737). This wrapper handles
@@ -94,7 +90,7 @@ bool Function::append_operator(
       // from model. We can use it to handle backward compatibility.
       if (num_specified_args &&
           num_specified_args.value() < static_cast<int64_t>(args.size())) {
-        fn = [fn, num_specified_args, args](Stack& stack) {
+        fn = [fn, num_specified_args, &args](Stack& stack) {
           std::vector<IValue> out_args;
           // The following logic pops and temporarily stores all out arguments
           // from the stack (which can be 0 or more, and always appended to the
@@ -141,6 +137,10 @@ void Function::append_type(const at::TypePtr& type) {
   code_->types_.push_back(type);
 }
 
+void Function::append_function(mobile::Function& function) {
+  code_->functions_.push_back(&function);
+}
+
 void Function::set_register_size(size_t size) {
   code_->register_size_ = size;
 }
@@ -153,36 +153,48 @@ int64_t Function::get_debug_handle(size_t pc) const {
   return code_->debug_handles_[pc];
 }
 
-void Function::setSchema(c10::FunctionSchema schema) {
+torch::jit::Function& Function::setSchema(c10::FunctionSchema schema) {
   schema_ = std::move(schema);
+  return *this;
 }
 
-const at::optional<c10::FunctionSchema>& Function::getSchema() const {
-  return schema_;
+bool Function::hasSchema() const {
+  return schema_.has_value();
 }
 
-bool Function::run(Stack& stack) const {
-  const auto& schema = getSchema();
-  if (schema) { // if we have a schema then resolve optional args if any
-    schema->checkAndNormalizeInputs(
+const c10::FunctionSchema& Function::getSchema() const {
+  return *schema_;
+}
+
+void Function::run(Stack& stack) {
+  if (hasSchema()) { // if we have a schema then resolve optional args if any
+    getSchema().checkAndNormalizeInputs(
         stack, std::unordered_map<std::string, IValue>{} /*kwargs*/);
   }
-  InterpreterState interp_state(code_);
-  return interp_state.run(stack);
+  InterpreterState interp_state(*code_);
+  interp_state.run(stack);
 }
 
-c10::IValue Function::operator()(Stack& stack) const {
+at::IValue Function::operator()(Stack& stack) {
   run(stack);
   return stack.front();
+}
+
+size_t Function::num_inputs() const {
+  return schema_->arguments().size();
+}
+
+bool Function::call(Stack&, c10::function_ref<void(const mobile::Code&)> f) {
+  f(*code_);
+  return true;
 }
 
 const std::shared_ptr<Code> Function::get_code() const {
   return code_;
 }
 
-int64_t Function::getExceptionDebugHandle() const {
-  size_t pc = getInterpretersExceptionPC();
-  return (pc < code_->debug_handles_.size()) ? code_->debug_handles_[pc] : -1;
+const std::vector<int64_t>& Function::getExceptionDebugHandles() const {
+  return getInterpretersExceptionDebugHandles();
 }
 
 } // namespace mobile

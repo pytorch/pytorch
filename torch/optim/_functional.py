@@ -46,9 +46,19 @@ def adagrad(params: List[Tensor],
             std_values = std._values().sqrt_().add_(eps)
             param.add_(_make_sparse(grad, grad_indices, grad_values / std_values), alpha=-clr)
         else:
+            is_complex = torch.is_complex(param)
+            if is_complex:
+                grad = torch.view_as_real(grad)
+                state_sum = torch.view_as_real(state_sum)
+                param = torch.view_as_real(param)
             state_sum.addcmul_(grad, grad, value=1)
             std = state_sum.sqrt().add_(eps)
             param.addcdiv_(grad, std, value=-clr)
+            if is_complex:
+                param = torch.view_as_complex(param)
+                state_sum = torch.view_as_complex(state_sum)
+
+
 
 
 def adam(params: List[Tensor],
@@ -151,7 +161,8 @@ def sgd(params: List[Tensor],
         momentum: float,
         lr: float,
         dampening: float,
-        nesterov: bool):
+        nesterov: bool,
+        maximize: bool):
     r"""Functional API that performs SGD algorithm computation.
 
     See :class:`~torch.optim.SGD` for details.
@@ -177,7 +188,8 @@ def sgd(params: List[Tensor],
             else:
                 d_p = buf
 
-        param.add_(d_p, alpha=-lr)
+        alpha = lr if maximize else -lr
+        param.add_(d_p, alpha=alpha)
 
 
 def adadelta(params: List[Tensor],
@@ -198,12 +210,18 @@ def adadelta(params: List[Tensor],
         if weight_decay != 0:
             grad = grad.add(param, alpha=weight_decay)
 
+        if torch.is_complex(param):
+            square_avg = torch.view_as_real(square_avg)
+            acc_delta = torch.view_as_real(acc_delta)
+            grad = torch.view_as_real(grad)
+
         square_avg.mul_(rho).addcmul_(grad, grad, value=1 - rho)
         std = square_avg.add(eps).sqrt_()
         delta = acc_delta.add(eps).sqrt_().div_(std).mul_(grad)
-        param.add_(delta, alpha=-lr)
         acc_delta.mul_(rho).addcmul_(delta, delta, value=1 - rho)
-
+        if torch.is_complex(param):
+            delta = torch.view_as_complex(delta)
+        param.add_(delta, alpha=-lr)
 
 def rmsprop(params: List[Tensor],
             grads: List[Tensor],

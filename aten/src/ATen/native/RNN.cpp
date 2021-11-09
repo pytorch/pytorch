@@ -11,7 +11,7 @@
 #include <torch/custom_class.h>
 #include <torch/library.h>
 
-torch::class_<LinearPackedParamsBase> register_linear_params();
+int register_linear_params();
 
 namespace at { namespace native {
 
@@ -1985,7 +1985,7 @@ namespace {
 static auto ensure_linear_params_registered = register_linear_params();
 
 static auto cell_params_base_registry =
-    torch::class_<CellParamsBase>("rnn", "CellParamsBase")
+    torch::selective_class_<CellParamsBase>("rnn", TORCH_SELECTIVE_CLASS("CellParamsBase"))
         .def_pickle(
             [](const c10::intrusive_ptr<CellParamsBase>& self)
                 -> CellParamsSerializationType { return self->__getstate__(); },
