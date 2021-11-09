@@ -69,10 +69,17 @@ std::vector<at::Tensor> constructTensors(
                        .layout(at::kStrided)
                        .device(at::kCPU) // TODO: support GPUs too
                        .memory_format(deduce_memory_format(
-                           buf_strides_vec[i], buf_dims_vec[i]))
+                           // NOLINTNEXTLINE
+                           buf_strides_vec[i],
+                           // NOLINTNEXTLINE
+                           buf_dims_vec[i]))
                        .requires_grad(false);
     auto tensor = at::from_blob(
-        buf_data_vec[i], buf_dims_vec[i], buf_strides_vec[i], options);
+        // NOLINTNEXTLINE
+        buf_data_vec[i],
+        buf_dims_vec[i],
+        buf_strides_vec[i],
+        options);
     tensors.emplace_back(tensor);
   }
   return tensors;
@@ -215,14 +222,17 @@ void nnc_aten_quantized_add(
     int64_t* extra_args) {
   std::vector<at::Tensor> tensors = constructTensors(
       bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  TORCH_INTERNAL_ASSERT(tensors.size() == 3);
 
   const double a_qscale = ((double*)extra_args)[0];
   const int64_t a_qzero = extra_args[1];
   const c10::ScalarType a_qdtype = static_cast<c10::ScalarType>(extra_args[2]);
   auto a_memory_format =
+      // NOLINTNEXTLINE
       deduce_memory_format(tensors[1].strides(), tensors[1].sizes());
   auto b_memory_format =
-      deduce_memory_format(tensors[1].strides(), tensors[1].sizes());
+      // NOLINTNEXTLINE
+      deduce_memory_format(tensors[2].strides(), tensors[2].sizes());
   at::Tensor qa = at::from_blob_quantized_per_tensor_affine(
       buf_data[1],
       // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
@@ -263,18 +273,22 @@ void nnc_aten_quantized_conv2d_prepack(
     int64_t* buf_dims,
     int64_t* buf_strides,
     int8_t* buf_dtypes,
+    // NOLINTNEXTLINE
     int64_t args_num,
     int64_t* extra_args) {
   std::vector<at::Tensor> tensors = constructTensors(
       bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  TORCH_INTERNAL_ASSERT(tensors.size() == 3);
 
   const double w_qscale = ((double*)extra_args)[7];
   const int64_t w_qzero = extra_args[8];
   const c10::ScalarType w_qdtype = static_cast<c10::ScalarType>(extra_args[9]);
   auto qw = at::from_blob_quantized_per_tensor_affine(
       buf_data[1],
+      // NOLINTNEXTLINE
       tensors[1].sizes(),
       [](void*) {},
+      // NOLINTNEXTLINE
       w_qscale,
       w_qzero,
       at::TensorOptions(toQIntType(w_qdtype)));
