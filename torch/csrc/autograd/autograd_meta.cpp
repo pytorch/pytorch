@@ -145,7 +145,7 @@ void AutogradMeta::set_fw_grad(const at::TensorBase& new_grad_base, const at::Te
             // can be re-used.
             new_base_fw_grad = new_grad;
           } else {
-            new_base_fw_grad = at::_new_zeros_with_same_feature_meta(new_grad, base, c10::nullopt);
+            new_base_fw_grad = at::_new_zeros_with_same_feature_meta(new_grad, base);
 
             // Update new_grad to be a view of the base
             Tensor new_fw_grad_value;
@@ -166,7 +166,7 @@ void AutogradMeta::set_fw_grad(const at::TensorBase& new_grad_base, const at::Te
 
     // Enforce the basic layout constraint
     if (!has_same_meta(new_grad, self)) {
-      auto res = at::_new_zeros_with_same_feature_meta(new_grad, self, c10::nullopt);
+      auto res = at::_new_zeros_with_same_feature_meta(new_grad, self);
       res.copy_(new_grad);
       new_grad = res;
     }
