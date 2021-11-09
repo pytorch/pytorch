@@ -14,9 +14,10 @@ Device::Device()
   : type_(std::make_shared<BackendDeviceType>()) {}
 
 Device::Device(std::shared_ptr<BackendDeviceType>&& type, int ordinal)
-      : type_(std::move(type)), ordinal_(ordinal) {}
+  : type_(std::move(type)), ordinal_(ordinal) {}
 
-Device::Device(const std::string& device_spec) {}
+Device::Device(const std::string& device_spec)
+  : type_(std::make_shared<BackendDeviceType>()) {}
 
 int8_t Device::type() const {
   TORCH_INTERNAL_ASSERT(type_);
