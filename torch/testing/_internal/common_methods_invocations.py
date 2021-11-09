@@ -3081,40 +3081,68 @@ def sample_inputs_adaptive_max_pool3d(op_info, device, dtype, requires_grad, **k
 class _TestParamsMaxPool1d(object):
 
     def __init__(self):
-        self.params = {
+        self.kwargs = {
             'kernel_size': [(2,), 3],
-            'stride': [None, (2,)],
+            'stride': [2],
             'ceil_mode': [True, False],
             'padding': [0, 1],
             'dilation': [1],
             'return_indices': [True, False]
         }
 
-    def gen_params(self):
-        return (dict(zip(self.params.keys(), values)) for values in product(*self.params.values()))
+        self.shapes = [
+            [1, 2, None],  # batch
+            [2],  # channels
+            [3, 6]  # signal
+        ]
+
+    def _gen_shape(self):
+        for shape in product(*self.shapes):
+            if shape[0] is None:
+                yield shape[1:]
+            else:
+                yield shape
+
+    def _gen_kwargs(self):
+        return (dict(zip(self.kwargs.keys(), values)) for values in product(*self.kwargs.values()))
+
+    def gen_input_params(self):
+        yield from product(self._gen_shape(), self._gen_kwargs())
 
 class _TestParamsMaxPool2d(_TestParamsMaxPool1d):
 
     def __init__(self):
         super().__init__()
-        self.params['kernel_size'] += [[3, 2]]
-        self.params['stride'] += [[2, 2]]
-        self.params['dilation'] += [[1, 2]]
+        self.kwargs['kernel_size'] = [[3, 2], 3]
+        self.kwargs['stride'] += [[2, 1]]
+        self.kwargs['dilation'] += [[1, 2]]
 
+        self.shapes.append([6])
 
-def sample_inputs_max_pool2d(op_info, device, dtype, requires_grad, **kwargs):
+class _TestParamsMaxPool3d(_TestParamsMaxPool1d):
+
+    def __init__(self):
+        super().__init__()
+        self.kwargs['kernel_size'] = [[3, 2, 3], 3]
+        self.kwargs['stride'] += [[2, 1, 2]]
+        self.kwargs['dilation'] += [[1, 2, 1]]
+
+        self.shapes.append([6])
+        self.shapes.append([5])
+
+def sample_inputs_max_pool(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-
-    Ni = [1, 2, None]
-    Ci = [2]
-    Hi = [3, 6]
-    Wi = [6]
+    
+    params_generator_type_dict = {
+        'nn.functional.max_pool1d': _TestParamsMaxPool1d,
+        'nn.functional.max_pool2d': _TestParamsMaxPool2d,
+        'nn.functional.max_pool3d': _TestParamsMaxPool3d,
+    }
 
     def generator():
-        for params in _TestParamsMaxPool2d().gen_params():
-            for N, C, H, W in product(Ni, Ci, Hi, Wi):
-                sample_input = make_arg((N, C, H, W)) if N is not None else (make_arg((C, H, W)))
-                yield SampleInput(sample_input, kwargs=params)
+        params_generator = params_generator_type_dict[op_info.name]()
+        for shape, kwargs in params_generator.gen_input_params():
+            yield SampleInput(make_arg(shape), kwargs=kwargs)
 
     return list(generator())
 
@@ -9436,6 +9464,14 @@ op_db: List[OpInfo] = [
            dtypesIfCPU=floating_types_and(torch.int64),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_avgpool2d),
+    OpInfo('nn.functional.max_pool1d',
+           aten_name='max_pool1d',
+           supports_autograd=True,
+           supports_out=False,
+           assert_jit_shape_analysis=True,
+           dtypesIfCPU=floating_types(),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           sample_inputs_func=sample_inputs_max_pool),
     OpInfo('nn.functional.max_pool2d',
            aten_name='max_pool2d',
            supports_autograd=True,
@@ -9443,7 +9479,17 @@ op_db: List[OpInfo] = [
            assert_jit_shape_analysis=True,
            dtypesIfCPU=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
-           sample_inputs_func=sample_inputs_max_pool2d),
+           sample_inputs_func=sample_inputs_max_pool),
+    OpInfo('nn.functional.max_pool3d',
+           aten_name='max_pool3d',
+           supports_autograd=True,
+           supports_out=False,
+           assert_jit_shape_analysis=True,
+           dtypesIfCPU=floating_types(),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           # TODO: investigate nondeterminism
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           sample_inputs_func=sample_inputs_max_pool),
     OpInfo('nn.functional.linear',
            aten_name='linear',
            supports_autograd=True,
