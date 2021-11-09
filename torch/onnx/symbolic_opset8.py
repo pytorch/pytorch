@@ -3,7 +3,7 @@ import torch
 import torch.onnx.symbolic_helper as sym_help
 import torch.onnx.symbolic_opset9 as sym_opset9
 
-from torch.onnx.symbolic_helper import parse_args, _unimplemented, _block_list_in_opset, _try_get_scalar_type
+from torch.onnx.symbolic_helper import parse_args, _unimplemented, _block_list_in_opset, _try_get_scalar_type, ScalarType
 from torch.onnx.symbolic_opset9 import _cast_Float  # type: ignore[attr-defined]
 
 import warnings
@@ -209,7 +209,7 @@ def flatten(g, input, start_dim, end_dim):
 
 def _constant_fill(g, sizes, dtype, const_value):
     if dtype is None:
-        dtype = 6  # float
+        dtype = ScalarType.FLOAT
     if not sym_help.scalar_type_to_pytorch_type[dtype].is_floating_point:
         result = g.op(
             "ConstantFill", sizes, dtype_i=sym_help.cast_pytorch_to_onnx["Float"], input_as_shape_i=1, value_f=const_value)
