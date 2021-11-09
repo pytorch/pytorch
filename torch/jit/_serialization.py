@@ -146,6 +146,12 @@ def load(f, map_location=None, _extra_files=None):
         import os
         os.remove("scriptmodule.pt")
     """
+
+    # Populate upgrader map in torch.jit.load because
+    # this is the only place we actually use upgraders
+    from torch.jit.operator_upgraders import populate_upgraders_map
+    populate_upgraders_map()
+
     if isinstance(f, string_classes):
         if not os.path.exists(f):  # type: ignore[type-var]
             raise ValueError("The provided filename {} does not exist".format(f))  # type: ignore[str-bytes-safe]
