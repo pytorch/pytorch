@@ -3132,7 +3132,7 @@ class _TestParamsMaxPool3d(_TestParamsMaxPool1d):
 
 def sample_inputs_max_pool(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-    
+
     params_generator_type_dict = {
         'nn.functional.max_pool1d': _TestParamsMaxPool1d,
         'nn.functional.max_pool2d': _TestParamsMaxPool2d,
