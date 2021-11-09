@@ -9,6 +9,8 @@ from typing import List, Any
 
 import torch
 from torch.testing._internal.common_utils import (
+    IS_FBCODE,
+    IS_SANDCASTLE,
     TestCase,
     run_tests,
     TEST_SAVE_XML,
@@ -153,6 +155,7 @@ class GTest(TestCase):
         IS_WINDOWS and "cuda" in os.getenv("BUILD_ENVIRONMENT", ""),
         "CUDA environment doesn't work out of the box yet",
     )
+    @unittest.skipIf(IS_SANDCASTLE or IS_FBCODE)
     def test_jit(self):
         test_name = "test_jit"
         binary = self.binaries[test_name]
