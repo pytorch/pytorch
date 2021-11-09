@@ -2697,7 +2697,6 @@ class TestAutograd(TestCase):
         torch.autograd.backward(r2, grad)
         self.assertEqual(input1.grad, input2.grad, rtol=0.01, atol=0.0)
 
-    @slowTest
     @skipIfNoLapack
     def test_lobpcg(self):
 
@@ -2708,7 +2707,7 @@ class TestAutograd(TestCase):
             if A.dim() > 2:
                 X = X.expand(X_shape)
 
-            D, U = torch.lobpcg(A=A, k=k, B=B, X=X)
+            D, U = torch.lobpcg(A=A, k=k, B=B, X=X, largest=largest)
 
             # LOBPCG uses a random initial eigenspace approximation
             # if parameter `X` is not provided.
@@ -2746,8 +2745,6 @@ class TestAutograd(TestCase):
             (D.sum() + U.sum()).backward()
             self.assertEqual(A.grad, A.grad.mT)
 
-        # the tests below take about 1-2 minutes to finish,
-        # but we want to be extra sure that the backward is correct.
         for largest in [True, False]:
             run_symeig_test(1, (6, 6), largest=largest)
             run_symeig_test(1, (2, 6, 6), largest=largest)
@@ -7591,21 +7588,38 @@ class TestAutogradForwardMode(TestCase):
     def test_create_new_zeros_with_same_meta(self):
         new_zeroes_fn = torch.ops.aten._new_zeros_with_same_feature_meta
 
-        def assert_same_meta(a, b):
-            # Layout is the same
-            self.assertEqual(a.size(), b.size())
-            self.assertEqual(a.stride(), b.stride())
-            self.assertEqual(a.storage_offset(), b.storage_offset())
-            self.assertEqual(len(a.storage()), len(b.storage()))
+        def check(a, b):
+            def assert_same_meta(a, b):
+                # Layout is the same
+                self.assertEqual(a.size(), b.size())
+                self.assertEqual(a.stride(), b.stride())
+                self.assertEqual(a.storage_offset(), b.storage_offset())
+                self.assertEqual(len(a.storage()), len(b.storage()))
 
-            # TensorOptions is same
-            self.assertEqual(a.dtype, b.dtype)
+                # TensorOptions is same
+                self.assertEqual(a.dtype, b.dtype)
 
-        a = torch.randn(5, dtype=torch.float).resize_(4)[1:]
+            assert_same_meta(new_zeroes_fn(a, b, 0), b)
+            assert_same_meta(new_zeroes_fn(b, a, 0), a)
+
+        a = torch.randn(5, dtype=torch.float)
         b = torch.randn(2, 3, 4, dtype=torch.double)
+        check(a, b)
 
-        assert_same_meta(new_zeroes_fn(a, b, 0), b)
-        assert_same_meta(new_zeroes_fn(b, a, 0), a)
+        # non-contiguous case
+        a = torch.randn(2, 3, 4).transpose(0,1).contiguous().transpose(0, 1)
+        b = torch.randn(2, 3, 4)
+        check(a, b)
+
+        a = torch.randn(5).narrow(0, 1, 2)
+        b = torch.randn(2)
+        check(a, b)
+
+        # tensor is not a view, but still does not index entirety of storage
+        a = torch.randn(5).resize_(4)
+        b = torch.randn(4)
+        check(a, b)
+
 
     def test_backward_graph_destruction(self):
         def fn():
