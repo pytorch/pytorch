@@ -2,7 +2,7 @@ import torch
 import tensorrt as trt
 from torch.fx.experimental.fx2trt.fx2trt import tensorrt_converter
 
-from .helper_functions import mark_as_int8_layer, extend_attr_to_tuple
+from .converter_utils import mark_as_int8_layer, extend_mod_attr_to_tuple
 
 @tensorrt_converter(torch.nn.modules.pooling.AdaptiveAvgPool2d)
 def adaptive_avgpool2d(network, submod, args, kwargs, name):
@@ -14,7 +14,7 @@ def adaptive_avgpool2d(network, submod, args, kwargs, name):
         raise RuntimeError(f"AdaptiveAvgPool2d received input {input_val} that is not part "
                            "of the TensorRT region!")
 
-    output_size = extend_attr_to_tuple(submod, "output_size", 2)
+    output_size = extend_mod_attr_to_tuple(submod, "output_size", 2)
     stride = (input_val.shape[-2] // output_size[-2], input_val.shape[-1] // output_size[-1])
     kernel_size = stride
     layer = network.add_pooling(
