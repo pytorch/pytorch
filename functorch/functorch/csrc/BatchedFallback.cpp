@@ -132,7 +132,7 @@ void batchedTensorInplaceForLoopFallback(const c10::OperatorHandle& op, torch::j
   const auto* self_impl = maybeGetBatchedImpl(self);
   std::bitset<kVmapMaxTensorDims> self_vmap_levels;
   if (self_impl) {
-    self_vmap_levels = createVmapLevelsBitset(self_impl->bdims());
+    self_vmap_levels = createVmapLevelsBitset(self_impl->level());
   }
 
   // Figure out which arguments are BatchedTensor. Save them to a vector.
@@ -164,7 +164,7 @@ void batchedTensorInplaceForLoopFallback(const c10::OperatorHandle& op, torch::j
     // elements than `self` due to being vmapped over.
     //
     // In the vmap fallback, we should error out when we detect this.
-    auto other_vmap_levels = createVmapLevelsBitset(batched->bdims());
+    auto other_vmap_levels = createVmapLevelsBitset(batched->level());
     if (self_vmap_levels != (self_vmap_levels | other_vmap_levels)) {
       // Find one vmap level to complain about
       auto additional_bdims = (self_vmap_levels | other_vmap_levels) ^ self_vmap_levels;
@@ -273,9 +273,7 @@ static bool participatesInCurrentLevel(const Tensor& self) {
   if (!maybe_batched_impl) {
     return false;
   }
-  const auto& bdims = maybe_batched_impl->bdims();
-  TORCH_INTERNAL_ASSERT(bdims.size() == 1);
-  auto self_level = bdims.back().level();
+  auto self_level = maybe_batched_impl->level();
   TORCH_INTERNAL_ASSERT(self_level <= current_level);
   return self_level == current_level;
 }

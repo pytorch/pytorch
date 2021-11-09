@@ -78,9 +78,7 @@ static bool participatesInCurrentLevel(const Tensor& self) {
   if (!maybe_batched_impl) {
     return false;
   }
-  const auto& bdims = maybe_batched_impl->bdims();
-  TORCH_INTERNAL_ASSERT(bdims.size() == 1);
-  auto self_level = bdims.back().level();
+  auto self_level = maybe_batched_impl->level();
   TORCH_INTERNAL_ASSERT(self_level <= current_level);
   return self_level == current_level;
 }
@@ -142,26 +140,15 @@ std::vector<Tensor> tensor_split_indices_batching_rule(const Tensor& self, IntAr
   return result;
 }
 
-// Checks if the batch dims in `bdims` appear at the front of the tensor.
-static bool areBdimsAtFrontInOrder(BatchDimsRef bdims) {
-  for (int64_t idx = 0; idx < (int64_t)bdims.size(); idx++) {
-    if (bdims[idx].dim() != idx) {
-      return false;
-    }
-  }
-  return true;
-}
-
 Tensor& squeeze_dim__batching_rule(Tensor& self, int64_t dim) {
   if (!participatesInCurrentLevel(self)) {
     c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
     return self.squeeze_(dim);
   }
   auto* batched = maybeGetBatchedImpl(self);
-  TORCH_CHECK(areBdimsAtFrontInOrder(batched->bdims()), "NYI: squeeze_ with bdims not at front");
-  auto num_bdims = batched->bdims().size();
+  TORCH_CHECK(batched->bdim() == 0);
   auto logical_dim = self.dim();
-  auto dim_physical = num_bdims + maybe_wrap_dim(dim, logical_dim);
+  auto dim_physical = 1 + maybe_wrap_dim(dim, logical_dim);
   batched->value().squeeze_(dim_physical);
 
   // Also need to change some metadata...
@@ -175,10 +162,9 @@ Tensor& unsqueeze__batching_rule(Tensor& self, int64_t dim) {
     return self.unsqueeze_(dim);
   }
   auto* batched = maybeGetBatchedImpl(self);
-  TORCH_CHECK(areBdimsAtFrontInOrder(batched->bdims()), "NYI: unsqueeze_ with bdims not at front");
-  auto num_bdims = batched->bdims().size();
+  TORCH_CHECK(batched->bdim() == 0);
   auto logical_dim = self.dim();
-  auto dim_physical = num_bdims + maybe_wrap_dim(dim, logical_dim + 1);
+  auto dim_physical = 1 + maybe_wrap_dim(dim, logical_dim + 1);
   batched->value().unsqueeze_(dim_physical);
 
   // Also need to change some metadata...
@@ -608,8 +594,7 @@ Tensor unwrap_and_call(const Tensor& input, ExtraArgs... args) {
   // guard against the user passing in a batch of scalar tensors with batch
   auto* input_batched = unsafeGetBatchedImpl(input);
   auto output_physical = Func(input_batched->value(), args...);
-  auto old_bdims = input_batched->bdims();
-  return makeBatched(output_physical, BatchDims(old_bdims.begin(), old_bdims.end()));
+  return makeBatched(output_physical, input_batched->bdim(), input_batched->level());
 }
 
 template <typename F, F Func, typename... ExtraArgs>
@@ -620,8 +605,7 @@ Tensor unwrap_and_call_method(const Tensor& input, ExtraArgs... extra_args) {
   }
   auto* input_batched = unsafeGetBatchedImpl(input);
   auto output_physical = (input_batched->value().*Func)(extra_args...);
-  auto old_bdims = input_batched->bdims();
-  return makeBatched(output_physical, BatchDims(old_bdims.begin(), old_bdims.end()));
+  return makeBatched(output_physical, input_batched->bdim(), input_batched->level());
 }
 
 
@@ -661,8 +645,7 @@ Tensor clone_batching_rule(const Tensor& self, optional<MemoryFormat> memory_for
   TORCH_INTERNAL_ASSERT(!memory_format.has_value() || memory_format == MemoryFormat::Preserve);
   auto* self_batched = unsafeGetBatchedImpl(self);
   auto output_physical = at::clone(self_batched->value(), memory_format);
-  auto old_bdims = self_batched->bdims();
-  return makeBatched(output_physical, BatchDims(old_bdims.begin(), old_bdims.end()));
+  return makeBatched(output_physical, self_batched->bdim(), self_batched->level());
 }
 
 Tensor bmm_batching_rule(const Tensor& self, const Tensor& other) {
@@ -727,8 +710,7 @@ Tensor to_dtype_layout_batching_rule(
     .pinned_memory(pin_memory);
   auto* input_batched = unsafeGetBatchedImpl(self);
   auto output_physical = input_batched->value().to(options, non_blocking, copy, memory_format);
-  auto old_bdims = input_batched->bdims();
-  return makeBatched(output_physical, BatchDims(old_bdims.begin(), old_bdims.end()));
+  return makeBatched(output_physical, input_batched->bdim(), input_batched->level());
 }
 
 Tensor new_zeros_batching_rule(
