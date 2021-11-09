@@ -3079,7 +3079,7 @@ def sample_inputs_adaptive_max_pool3d(op_info, device, dtype, requires_grad, **k
     return list(generator())
 
 class _TestParamsMaxPool1d(object):
-
+    
     def __init__(self):
         self.kwargs = {
             'kernel_size': [(2,), 3],
@@ -3100,9 +3100,12 @@ class _TestParamsMaxPool1d(object):
         for shape in product(*self.shapes):
             # shape[0] is None indicates missing batch dimension
             if shape[0] is None:
-                yield shape[1:]
-            else:
-                yield shape
+                shape = shape[1:]
+
+            yield shape, torch.contiguous_format
+            # only 2d (N, C, H, W) rank 4 tensors support channels_last memory format
+            if len(self.shapes) == 4 and len(shape) == 4:
+                yield shape, torch.channels_last
 
     def _gen_kwargs(self):
         yield from (dict(zip(self.kwargs.keys(), values)) for values in product(*self.kwargs.values()))
@@ -3142,8 +3145,8 @@ def sample_inputs_max_pool(op_info, device, dtype, requires_grad, **kwargs):
 
     def generator():
         params_generator = params_generator_type_dict[op_info.name]()
-        for shape, kwargs in params_generator.gen_input_params():
-            yield SampleInput(make_arg(shape), kwargs=kwargs)
+        for (shape, memory_format), kwargs in params_generator.gen_input_params():
+            yield SampleInput(make_arg(shape).to(memory_format=memory_format), kwargs=kwargs)
 
     return list(generator())
 
