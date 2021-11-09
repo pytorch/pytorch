@@ -223,14 +223,16 @@ std::vector<Tensor> _to_cpu(TensorList tensors) {
 }
 
 Tensor to_dense_backward(const Tensor& grad, const Tensor& input_) {
-  AT_ASSERT(input_.layout() != c10::kStrided);
+  TORCH_INTERNAL_ASSERT(input_.layout() != c10::kStrided);
   if (input_.layout() == c10::kSparse) {
     auto input = input_.coalesce();
     return grad.sparse_mask(input);
   } else if (input_.layout() == c10::kMkldnn) {
     return grad.to_mkldnn(input_.scalar_type());
+  } else if (input_.layout() == c10::kSparseCsr) {
+    return grad.sparse_mask(input_);
   } else {
-    AT_ERROR("Unsupported input layout: ", input_.layout());
+    TORCH_CHECK(false, "to_dense_backward: unsupported layout ", input_.layout());
   }
 }
 

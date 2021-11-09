@@ -1833,6 +1833,25 @@ def sample_inputs_addmm(op_info, device, dtype, requires_grad, **kwargs):
                         kwargs={'alpha': alpha_val, 'beta': beta_val},))
     return sample_inputs
 
+def sample_inputs_sparse_sampled_addmm(op_info, device, dtype, requires_grad):
+    alpha = 2 + 3j if dtype.is_complex else 0.6
+    beta = 1 + 2j if dtype.is_complex else 0.2
+
+    def generator():
+        # sparse.sampled_addmm performs: alpha * (A @ B) * sparse_ones_like(C) + beta * C
+        for index_dtype in (torch.int32, torch.int64):
+            for m, n, k in itertools.product([0, 5], repeat=3):
+                yield SampleInput(
+                        make_tensor((m, n), device, dtype, requires_grad=requires_grad).to_sparse_csr(),
+                        args=(
+                            make_tensor((m, k), device, dtype,
+                                        requires_grad=requires_grad),
+                            make_tensor((k, n), device, dtype,
+                                        requires_grad=requires_grad)),
+                        kwargs={'alpha': alpha, 'beta': beta})
+
+    return list(generator())
+
 def sample_inputs_mv(self, device, dtype, requires_grad, **kwargs):
     return (
         SampleInput(
@@ -8268,6 +8287,32 @@ op_db: List[OpInfo] = [
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    safe_casts_outputs=True,
                    sample_inputs_func=sample_inputs_i0_i1),
+    OpInfo('sparse.sampled_addmm',
+           dtypes=floating_and_complex_types(),
+           assert_autodiffed=True,
+           sample_inputs_func=sample_inputs_sparse_sampled_addmm,
+           decorators=[onlyCUDA,],
+           skips=(
+                # RuntimeError: torch.empty: Only 2D sparse CSR tensors are supported.
+                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_noncontiguous_samples'),
+                # NotImplementedError: Could not run 'aten::fill_.Scalar' with arguments from the 'SparseCsrCUDA' backend.
+                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out'),
+                # RuntimeError: torch.empty: Only 2D sparse CSR tensors are supported.
+                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager'),
+                #  NotImplementedError: Could not run 'aten::empty_strided' with arguments from the 'SparseCsrCUDA' backend.
+                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad'),
+                # RuntimeError: memory format option is only supported by strided tensors
+                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_gradgrad'),
+                # AssertionError: "Trying to use forward AD with .* that does not support it\."
+                # does not match "Could not run 'aten::empty_strided' with arguments from the 'SparseCsrCUDA'
+                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD'),
+                # NotImplementedError: Could not run 'aten::empty_strided' with arguments from the 'SparseCsrCUDA' backend.
+                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+                # NotImplementedError: Could not run 'aten::empty_strided' with arguments from the 'SparseCsrCUDA' backend.
+                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
+                # NotImplementedError: Could not run 'aten::empty_strided' with arguments from the 'SparseCsrCUDA' backend.
+                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_conj_view'),
+            )),
     UnaryUfuncInfo('special.i0e',
                    aten_name='special_i0e',
                    ref=scipy.special.i0e if TEST_SCIPY else _NOTHING,

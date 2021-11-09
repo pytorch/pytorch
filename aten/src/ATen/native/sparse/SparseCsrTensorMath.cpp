@@ -96,6 +96,33 @@ Tensor& normal_sparse_csr_(Tensor& self, double mean, double std, c10::optional<
   return unary_inplace_op_(&Tensor::normal_, self, mean, std, gen);
 }
 
+Tensor& zero_sparse_csr_(Tensor& self) {
+  return unary_inplace_op_(&Tensor::zero_, self);
+}
+
+Tensor& fill_sparse_csr_(Tensor& self, const Scalar& value) {
+  return unary_inplace_op_(&TensorBase::fill_, self, value);
+}
+
+Tensor sparse_mask_sparse_csr(
+    const Tensor& self,
+    const Tensor& sparse_mask) {
+  TORCH_CHECK(sparse_mask.is_sparse_csr(), "sparse_mask_out_sparse_csr expects mask to be sparse csr");
+  TORCH_CHECK(self.layout() == kStrided, "sparse_mask_out_sparse_csr expects self to be dense");
+  TORCH_CHECK(self.dim() == 2, "sparse_mask_out_sparse_csr expects self to be 2D");
+  TORCH_CHECK(sparse_mask.dim() == 2, "sparse_mask_out_sparse_csr expects mask to be 2D");
+
+  // There must be a better way to do this, but not now
+  self.mul_(at::ones_like(sparse_mask).to_dense());
+  auto self_coo = self.to_sparse();
+
+  auto row_indices = self_coo.indices()[0];
+  auto col_indices = self_coo.indices()[1];
+
+  auto crow_indices = at::_convert_indices_from_coo_to_csr(row_indices, self_coo.size(0), /*out_int32=*/row_indices.scalar_type() == at::kFloat);
+  return at::native::_sparse_csr_tensor_unsafe(crow_indices, col_indices, self_coo.values(), self.sizes(), self.scalar_type(), kSparseCsr, self.device());
+}
+
 template <typename scalar_t>
 void s_addmm_out_sparse_dense_worker(int64_t nnz, int64_t dim_i, int64_t dim_j, int64_t dim_k, Tensor& r, Scalar beta, const Tensor& t, Scalar alpha, const Tensor& csr, const Tensor& col_indices, const Tensor& values, const Tensor& dense) {
 
