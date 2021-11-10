@@ -38,6 +38,7 @@ jobs:
 
   ciflow_should_run:
     runs-on: ubuntu-18.04
+    timeout-minutes: 240
     env:
       IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == 'unassigned') && (github.event.assigneed.login == 'pytorchbot') }}
       LABEL_CONDITIONS: ${{ contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux') || contains(github.event.pull_request.labels.*.name, 'ciflow/mobile') }}
@@ -57,6 +58,7 @@ jobs:
   build:
     runs-on: linux.2xlarge
     needs: [ciflow_should_run]
+    timeout-minutes: 240
     env:
       JOB_BASE_NAME: linux-xenial-py3-clang5-mobile-code-analysis-build
     outputs:

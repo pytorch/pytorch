@@ -104,6 +104,7 @@ void nnc_aten_conv2d(
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
 
+#ifndef DISABLE_NNC_QUANTIZATION
 void nnc_aten_quantized_conv2d(
     int64_t bufs_num,
     void** buf_data,
@@ -208,6 +209,8 @@ void nnc_aten_quantized_add(
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
 
+#endif // DISABLE_NNC_QUANTIZATION
+
 void nnc_aten_upsample_nearest2d(
     int64_t bufs_num,
     void** buf_data,
@@ -224,7 +227,9 @@ void nnc_aten_upsample_nearest2d(
   const int64_t x_qzero = extra_args[1];
   const int64_t x_qdtype = extra_args[2];
   const auto is_quantized = x_qdtype != -1;
+
   if (is_quantized) {
+#ifndef DISABLE_NNC_QUANTIZATION
     x = at::from_blob_quantized_per_tensor_affine(
         buf_data[1],
         // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
@@ -234,6 +239,9 @@ void nnc_aten_upsample_nearest2d(
         x_qscale,
         x_qzero,
         at::TensorOptions(toQIntType(static_cast<c10::ScalarType>(x_qdtype))));
+#else
+    TORCH_CHECK(false, "NNC quantization not supported!");
+#endif // DISABLE_NNC_QUANTIZATION
   }
 
   int64_t output_size_h = extra_args[3];
@@ -252,6 +260,8 @@ void nnc_aten_upsample_nearest2d(
   r = r.contiguous();
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
+
+#ifndef DISABLE_NNC_QUANTIZATION
 
 void nnc_aten_quantize_per_tensor(
     int64_t bufs_num,
@@ -297,6 +307,8 @@ void nnc_aten_dequantize(
   auto r = at::dequantize(qx);
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
+
+#endif // DISABLE_NNC_QUANTIZATION
 
 void nnc_aten_conv1d(
     int64_t bufs_num,
@@ -525,6 +537,8 @@ void nnc_aten_embedding(
 const static RegisterNNCExternalFunction nnc_conv2d(
     "nnc_aten_conv2d",
     nnc_aten_conv2d);
+
+#ifndef DISABLE_NNC_QUANTIZATION
 const static RegisterNNCExternalFunction nnc_quantized_conv2d(
     "nnc_aten_quantized_conv2d",
     nnc_aten_quantized_conv2d);
@@ -540,6 +554,8 @@ const static RegisterNNCExternalFunction nnc_quantize_per_tensor(
 const static RegisterNNCExternalFunction nnc_dequantize(
     "nnc_aten_dequantize",
     nnc_aten_dequantize);
+#endif // DISABLE_NNC_QUANTIZATION
+
 const static RegisterNNCExternalFunction nnc_upsample_nearest2d(
     "nnc_aten_upsample_nearest2d",
     nnc_aten_upsample_nearest2d);
