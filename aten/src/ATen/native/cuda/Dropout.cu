@@ -36,7 +36,6 @@ fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<scalar_t, IndexType> a,
                          at::cuda::detail::TensorInfo<scalar_t, IndexType> b,
                          at::cuda::detail::TensorInfo<mask_t, IndexType> c,
                          IndexType totalElements, accscalar_t p,
-                         accscalar_t scale,
                          PhiloxCudaState philox_args) {
   // make sure we don't break assumption that we can't have > 4 elements / thread
   static_assert(VEC <= 4, "Value of VEC must be in [2, 4]");
@@ -55,6 +54,7 @@ fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<scalar_t, IndexType> a,
   // Helps align the total number of times curand_uniform4 is called by each thread for the same totalElements
   // in the vec=2 and vec=4 cases.
   bool gridxvec_loop_state = 0;
+  accscalar_t scale = 1.0 / p;
 
   float4 rand;
 
@@ -124,7 +124,6 @@ fused_dropout_kernel(cuda::detail::TensorInfo<scalar_t, IndexType> a,
                      cuda::detail::TensorInfo<scalar_t, IndexType> b,
                      cuda::detail::TensorInfo<mask_t, IndexType> c,
                      IndexType totalElements, accscalar_t p,
-                     accscalar_t scale,
                      PhiloxCudaState philox_args) {
   auto seeds = at::cuda::philox::unpack(philox_args);
   IndexType idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -133,6 +132,7 @@ fused_dropout_kernel(cuda::detail::TensorInfo<scalar_t, IndexType> a,
               idx,
               std::get<1>(seeds),
               &state);
+  accscalar_t scale = 1.0 / p;
 
   IndexType rounded_size = ((totalElements - 1)/(blockDim.x * gridDim.x * UNROLL)+1) *
         blockDim.x * gridDim.x * UNROLL;
@@ -210,7 +210,6 @@ inline void launcher(
     Tensor& ret,
     Tensor& mask,
     double p,
-    double scale,
     const int64_t nelem,
     const PhiloxCudaState rng_engine_inputs,
     dim3 grid,
@@ -223,7 +222,6 @@ inline void launcher(
       [&] {
         using accscalar_t = acc_type<scalar_t, true>;
         accscalar_t pa = (accscalar_t)(p);
-        accscalar_t casted_scale = (accscalar_t)(scale);
         auto self_info =
             cuda::detail::getTensorInfo<scalar_t, index_type>(self);
         auto ret_info =
@@ -252,7 +250,6 @@ inline void launcher(
                       mask_info,
                       nelem,
                       pa,
-                      casted_scale,
                       rng_engine_inputs);
               C10_CUDA_KERNEL_LAUNCH_CHECK();
               break;
@@ -269,7 +266,6 @@ inline void launcher(
                       mask_info,
                       nelem,
                       pa,
-                      casted_scale,
                       rng_engine_inputs);
               C10_CUDA_KERNEL_LAUNCH_CHECK();
               break;
@@ -284,7 +280,6 @@ inline void launcher(
                       mask_info,
                       nelem,
                       pa,
-                      casted_scale,
                       rng_engine_inputs);
               C10_CUDA_KERNEL_LAUNCH_CHECK();
               break;
@@ -301,7 +296,6 @@ inline void launcher(
                         mask_info,
                         nelem,
                         pa,
-                        casted_scale,
                         rng_engine_inputs);
                 C10_CUDA_KERNEL_LAUNCH_CHECK();
               } else {
@@ -315,7 +309,6 @@ inline void launcher(
                         mask_info,
                         nelem,
                         pa,
-                        casted_scale,
                         rng_engine_inputs);
                 C10_CUDA_KERNEL_LAUNCH_CHECK();
               }
@@ -328,7 +321,7 @@ inline void launcher(
 
 template <typename mask_t>
 std::tuple<Tensor,Tensor>
-dropout_cuda(CUDAGeneratorImpl* gen, const Tensor& self, double p, double scale, bool train){
+dropout_cuda(CUDAGeneratorImpl* gen, const Tensor& self, double p, bool train){
   Tensor mask = at::empty_like(self, self.options().dtype(c10::CppTypeToScalarType<mask_t>::value));
   const int64_t nelem = self.numel();
   // empty tensors should not get here, but just in case, avoid FPE
@@ -351,28 +344,38 @@ dropout_cuda(CUDAGeneratorImpl* gen, const Tensor& self, double p, double scale,
   }
   if (cuda::detail::canUse32BitIndexMath(self)){
     launcher<unsigned int, mask_t>(
-        self, ret, mask, p, scale, nelem, rng_engine_inputs, grid, dim_block);
+        self, ret, mask, p, nelem, rng_engine_inputs, grid, dim_block);
   } else {
     launcher<uint64_t, mask_t>(
-        self, ret, mask, p, scale, nelem, rng_engine_inputs, grid, dim_block);
+        self, ret, mask, p, nelem, rng_engine_inputs, grid, dim_block);
   }
   return std::tuple<Tensor,Tensor>(ret, mask);
 }
 
 std::tuple<Tensor,Tensor>
 native_dropout_cuda(const Tensor& self, double p, c10::optional<bool> train){
+  // short-cut
+  if (p == 1) {
+    // Technically we don't need to short-cut for inference
+    //
+    // native_dropout_cuda is in derivatives.yaml, so we don't need to add data
+    // dependency from output to input for autograd
+    auto ret = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    auto mask = (!train.has_value() || *train) ? at::ones_like(self, self.options().dtype(c10::CppTypeToScalarType<bool>::value)) : at::empty_like(self, self.options().dtype(c10::CppTypeToScalarType<bool>::value));
+    return std::tuple<Tensor,Tensor>(ret, mask);
+  }
+
   auto gen = get_generator_or_default<CUDAGeneratorImpl>(c10::nullopt, cuda::detail::getDefaultCUDAGenerator());
   double p1m = 1. - p;
   // Check for probability of zero to avoid divide by zero and NaN results
-  double scale = p1m == 0 ? 0. : 1. / p1m;
-  return dropout_cuda<bool>(gen, self, p1m, scale, train.has_value() ? *train : true);
+  return dropout_cuda<bool>(gen, self, p1m, train.has_value() ? *train : true);
 }
 
 // TODO: _fused_dropout_cuda is to be removed, see PR #63937
 std::tuple<Tensor,Tensor>
 fused_dropout_cuda(const Tensor& self, double p, c10::optional<Generator> gen_){
   auto gen = get_generator_or_default<CUDAGeneratorImpl>(gen_, cuda::detail::getDefaultCUDAGenerator());
-  return dropout_cuda<uint8_t>(gen, self, p, 1.0 / p, true);
+  return dropout_cuda<uint8_t>(gen, self, p, true);
 }
 
 template <typename mask_t>
