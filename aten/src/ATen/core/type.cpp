@@ -610,6 +610,9 @@ bool Type::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const {
                          return this->isSubtypeOfExt(*inner, why_not);
                        });
   }
+  if (auto dyn = rhs.castRaw<DynamicType>()) {
+    return DynamicType::create(*this)->isSubtypeOf(*dyn);
+  }
   return false;
 }
 

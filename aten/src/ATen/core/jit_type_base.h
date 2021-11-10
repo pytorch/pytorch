@@ -45,7 +45,8 @@ namespace c10 {
   _(AnyListType)            \
   _(AnyTupleType)           \
   _(AnyClassType)           \
-  _(UnionType)
+  _(UnionType)              \
+  _(DynamicType)
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
