@@ -53,7 +53,7 @@ class Fuser:
             root_node, obj = fusion_pairs.get(node.name, (None, None))
             if root_node is node:
                 assert obj is not None
-                env[node.name] = obj.fuse(self, load_arg)
+                env[node.name] = obj.fuse(self, load_arg, fuse_custom_config_dict)
             elif root_node is None:
                 env[node.name] = self.fused_graph.node_copy(node, load_arg)
             # node matched in patterns and is not root is removed here
