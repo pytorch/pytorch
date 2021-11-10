@@ -2,7 +2,6 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/metal/MetalPrepackOpContext.h>
 #include <c10/util/accumulate.h>
-#include "torch/library.h"
 
 namespace at {
 namespace native {
