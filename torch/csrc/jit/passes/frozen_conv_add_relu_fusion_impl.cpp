@@ -118,7 +118,8 @@ struct ConvAddReluRegisterer {
   }
 };
 
-static ConvAddReluRegisterer convAddReluRegisterer(_fuseFrozenConvAddReluImpl);
+static ConvAddReluRegisterer<decltype(_fuseFrozenConvAddReluImpl)>
+    convAddReluRegisterer(_fuseFrozenConvAddReluImpl);
 
 } // namespace
 
