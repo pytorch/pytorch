@@ -27,7 +27,7 @@ struct Code {
   // We may need a two-stage importing scheme, where we firstly construct all
   // function objects, and then append referenced function pointers. This could
   // be done in parseMethods().
-  std::vector<std::unique_ptr<mobile::Function>> functions_;
+  std::vector<mobile::Function*> functions_;
   size_t register_size_; // Aggregated output size.
 };
 

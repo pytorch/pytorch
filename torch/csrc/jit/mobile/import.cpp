@@ -206,8 +206,8 @@ class BytecodeDeserializer final {
       ExtraFilesMap& extra_files);
 
  private:
-  void init_upgrader(mobile::Function* function);
   TypePtr resolveTypeName(const c10::QualifiedName& qn);
+  void init_upgrader(mobile::Function* function) ;
   void parseMethods(
       c10::ivalue::TupleElements&& vals,
       c10::optional<c10::ivalue::TupleElements>&& debug_handles,
@@ -305,10 +305,8 @@ void BytecodeDeserializer::parseFunctionSchema(
 }
 
 void BytecodeDeserializer::init_upgrader(mobile::Function* function) {
-  for (auto const& [upgrader_name, upgrader_bytecode] : kUpgraderBytecode) {
-    std::unique_ptr<mobile::Function> func = mobile::Function::get(
-        upgrader_name, upgrader_bytecode, operator_version_);
-    function->append_function(std::move(func));
+  for (auto upgrader_function : kUpgraderFunctions) {
+    function->append_function(upgrader_function);
   }
 }
 

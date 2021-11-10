@@ -34,7 +34,7 @@ class TORCH_API Function : public torch::jit::Function {
                                 are removed */
   void append_constant(const c10::IValue& constant);
   void append_type(const c10::TypePtr& type);
-  void append_function(std::unique_ptr<mobile::Function> func);
+  void append_function(mobile::Function& func);
 
   void set_register_size(size_t size);
 
@@ -49,7 +49,7 @@ class TORCH_API Function : public torch::jit::Function {
   // is halted due to exception.
   // If no corresponding debug handle is found then -1 is returned.
   const std::vector<int64_t>& getExceptionDebugHandles() const;
-  static std::unique_ptr<Function> get(
+  static Function& get(
       std::string qualified_name,
       c10::IValue bytecode,
       int64_t model_version);
