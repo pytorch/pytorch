@@ -983,7 +983,6 @@ TEST(StaticRuntime, to) {
         return e
   )JIT";
 
-
   auto test_to = [&](at::ScalarType b, bool c, bool d, c10::MemoryFormat e) {
     auto a = at::randn({4, 3, 1, 2});
     auto other = at::randn({4, 3, 1, 2}, b);
@@ -993,7 +992,8 @@ TEST(StaticRuntime, to) {
     std::vector<IValue> args0{a, b, c, d, e};
     std::vector<IValue> args1{a, b, c, d};
     std::vector<IValue> args2{a, other, c, d, e};
-    std::vector<IValue> args2WithDifferentOtherType{a, at::randn({4, 3, 1, 2}, ScalarType::Double), c, d, e};
+    std::vector<IValue> args2WithDifferentOtherType{
+        a, at::randn({4, 3, 1, 2}, ScalarType::Double), c, d, e};
     std::vector<IValue> args3{a, c10::nullopt, c, d};
 
     std::vector<IValue> args0WithInt{a, ScalarType::Int, c, d, e};
