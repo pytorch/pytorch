@@ -453,8 +453,12 @@ void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
     // manually to be able to use tensor cores for FP16. On CUDA 11, this is no longer required.
     TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_TENSOR_OP_MATH));
 #else
+    cublasMath_t cublas_flags = CUBLAS_DEFAULT_MATH;
+    if (!at::globalContext().allowFP16ReductionCuBLAS()) {
+      cublas_flags = static_cast<cublasMath_t>(cublas_flags | CUBLAS_MATH_DISALLOW_REDUCED_PRECISION_REDUCTION);
+    }
     // Disallow fp16 reductions that could lead to unexpected overflow issues.
-    TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, static_cast<cublasMath_t>(CUBLAS_DEFAULT_MATH | CUBLAS_MATH_DISALLOW_REDUCED_PRECISION_REDUCTION)));
+    TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, cublas_flags));
 #endif  // defined(CUDA_VERSION) && CUDA_VERSION < 11000
     TORCH_CUDABLAS_CHECK(cublasGemmEx(
         handle,

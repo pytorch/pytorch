@@ -338,6 +338,10 @@ class TORCH_API StaticRuntime {
     return static_module_.graph();
   }
 
+  const MemoryPlanner* get_memory_planner() const {
+    return planner_.get();
+  }
+
   void check_for_memory_leak(bool output_returned = true);
 
   bool is_optimizable_container_type(Node* n) const {
