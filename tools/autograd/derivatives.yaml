@@ -486,7 +486,6 @@
 
 - name: diag(Tensor self, int diagonal=0) -> Tensor
   self: diag_backward(grad, self.sizes(), diagonal)
-  result: auto_linear
 
 - name: diagonal(Tensor(a) self, int offset=0, int dim1=0, int dim2=1) -> Tensor(a)
   self: diagonal_backward(grad, self.sizes(), offset, dim1, dim2)
@@ -746,7 +745,6 @@
 
 - name: inverse(Tensor self) -> Tensor
   self: -at::matmul(result.mH(), at::matmul(grad, result.mH()))
-  result: -at::matmul(at::matmul(result, self_t), result)
 
 - name: linalg_inv_ex(Tensor self, *, bool check_errors=False) -> (Tensor inverse, Tensor info)
   self: -at::matmul(inverse.mH(), at::matmul(grad, inverse.mH()))
@@ -1057,7 +1055,6 @@
 
 - name: neg(Tensor self) -> Tensor
   self: grad.neg()
-  result: auto_element_wise
 
 - name: nextafter(Tensor self, Tensor other) -> Tensor
   self: not_implemented("nextafter")
@@ -1391,9 +1388,6 @@
 
 - name: linalg_eig(Tensor self) -> (Tensor eigenvalues, Tensor eigenvectors)
   self: linalg_eig_backward(grads, self, eigenvalues, eigenvectors)
-  # FIXME: Use eigenvalues, eigenvectors: linalg_eig_jvp instead (for now this is not possible due to a codegen limitation)
-  eigenvalues: linalg_eig_jvp_eigenvalues(self_t, eigenvalues, eigenvectors)
-  eigenvectors: linalg_eig_jvp_eigenvectors(self_t, eigenvalues, eigenvectors)
 
 - name: t(Tensor(a) self) -> Tensor(a)
   self: grad.t()
@@ -1864,7 +1858,7 @@
   grad_output, self, weight: _convolution_double_backward(grads[0], grads[1], grads[2], grad_output, weight, self, stride, padding, dilation, true, output_padding, 1, false, false, false, false, grad_input_mask)
 
 - name: slow_conv_transpose3d(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] output_padding=0, int[3] dilation=1) -> Tensor
-  self, weight, bias: "grad.defined() ? slow_conv_transpose3d_backward(grad, self, weight, kernel_size, stride, padding, output_padding, dilation, empty_like(grad, at::MemoryFormat::Preserve), empty_like(grad, at::MemoryFormat::Preserve), grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
+  self, weight, bias: "grad.defined() ? slow_conv_transpose3d_backward(grad, self, weight, kernel_size, stride, padding, output_padding, dilation, empty_like(grad, at::MemoryFormat::Contiguous), empty_like(grad, at::MemoryFormat::Contiguous), grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
 
 - name: slow_conv_transpose3d_backward.output_mask(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, int[3] output_padding, int[3] dilation, Tensor finput, Tensor fgrad_input, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
   grad_output, self, weight: _convolution_double_backward(grads[0], grads[1], grads[2], grad_output, weight, self, stride, padding, dilation, true, output_padding, 1, false, false, false, false, grad_input_mask)
