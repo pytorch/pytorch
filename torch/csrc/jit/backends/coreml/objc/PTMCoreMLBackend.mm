@@ -143,7 +143,7 @@ struct API_AVAILABLE(ios(11.0), macos(10.13)) CoreMLExecutorWrapper
     for (int i = 0; i < inputs.size(); ++i) {
       auto val = inputs.get(i);
       if (val.isTuple()) {
-        auto tuples = val.toTuple()->elements();
+        auto tuples = val.toTupleRef().elements();
         for (auto& ival : tuples) {
           TORCH_CHECK(ival.isTensor());
           auto tensor = ival.toTensor();
@@ -221,6 +221,8 @@ class API_AVAILABLE(ios(11.0), macos(10.13)) CoreMLBackend
     const std::string& sha256 = modelDict.at("hash").toStringRef();
     PTMCoreMLExecutor* executor = [PTMCoreMLExecutor new];
     executor.backend = config.backend();
+    executor.allowLowPrecision = config.allowLowPrecision();
+    executor.coreMLVersion = config.coreMLVersion();
     bool result = [executor compileMLModel:model identifier:sha256];
     TORCH_CHECK(result, "Compiling MLModel failed!");
     auto executorWrapper = c10::make_intrusive<CoreMLExecutorWrapper>(
