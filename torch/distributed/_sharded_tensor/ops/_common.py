@@ -135,7 +135,7 @@ def _result_distribute_with_col_rearrange(
         )
 
     # distribute the outputs using all2all.
-    all_to_all(results, group=pg, out_tensor_list=output_tensor_list)
+    output_tensor_list = all_to_all(results, group=pg, out_tensor_list=output_tensor_list)
     output = torch.cat(output_tensor_list)
 
     # Check if we need to rearrange columns appropriately for output.
