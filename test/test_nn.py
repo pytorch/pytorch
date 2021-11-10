@@ -38,7 +38,8 @@ from torch.testing._internal.common_dtype import integral_types, get_all_fp_dtyp
 from torch.testing._internal.common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, \
     skipIfRocmVersionLessThan, skipIfNotMiopenSuggestNHWC, TEST_NUMPY, TEST_SCIPY, TEST_WITH_ROCM, download_file, \
     get_function_arglist, load_tests, repeat_test_for_types, ALL_TENSORTYPES, \
-    ALL_TENSORTYPES2, suppress_warnings, TemporaryFileName, TEST_WITH_UBSAN, IS_PPC
+    ALL_TENSORTYPES2, suppress_warnings, TemporaryFileName, TEST_WITH_UBSAN, IS_PPC, \
+    parametrize as parametrize_test, subtest
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
     module_tests, criterion_tests, loss_reference_fns, \
@@ -46,7 +47,8 @@ from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, Criteri
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, precisionOverride, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, onlyCPU, \
     skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, skipCUDAIfRocmVersionLessThan, skipCUDAIfNotMiopenSuggestNHWC, \
-    onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, skipMeta, get_all_device_types
+    onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, skipMeta, get_all_device_types, \
+    disableMkldnn, skipCPUIfNoMkldnn, expectedFailure, disablecuDNN, skipCUDAIfMiopen, skipCUDAIfNoMiopen
 from torch.nn import MultiheadAttention
 
 from hypothesis import given
@@ -13260,6 +13262,156 @@ class TestNNDeviceType(NNTestCase):
         gx_actual, gy_actual = x.grad, y.grad
         self.assertEqual(gx_expect, gx_actual)
         self.assertEqual(gy_expect, gy_actual)
+
+    @skipMeta
+    @parametrize_test("input_shape,transposed,dilated,groups,layout,backend_expected", [
+        # === slow ===
+        subtest(((2, 6, 7), False, False, 3, torch.strided, torch._C._ConvBackend.Slow2d),
+                decorators=[onlyCPU, disableMkldnn], name='slow1d'),
+        subtest(((2, 6, 7), True, False, 3, torch.strided, torch._C._ConvBackend.SlowTranspose2d),
+                decorators=[onlyCPU, disableMkldnn], name='slow1d_transposed'),
+        subtest(((2, 6, 7), False, True, 3, torch.strided, torch._C._ConvBackend.SlowDilated2d),
+                decorators=[onlyCPU, disableMkldnn], name='slow1d_dilated'),
+        subtest(((2, 6, 7), True, True, 3, torch.strided, torch._C._ConvBackend.SlowTranspose2d),
+                decorators=[onlyCPU, disableMkldnn], name='slow1d_dilated_transposed'),
+        subtest(((2, 6, 7, 8), False, False, 3, torch.strided, torch._C._ConvBackend.Slow2d),
+                decorators=[onlyCPU, disableMkldnn], name='slow2d'),
+        subtest(((2, 6, 7, 8), True, False, 3, torch.strided, torch._C._ConvBackend.SlowTranspose2d),
+                decorators=[onlyCPU, disableMkldnn], name='slow2d_transposed'),
+        subtest(((2, 6, 7, 8), False, True, 3, torch.strided, torch._C._ConvBackend.SlowDilated2d),
+                decorators=[onlyCPU, disableMkldnn], name='slow2d_dilated'),
+        subtest(((2, 6, 7, 8), True, True, 3, torch.strided, torch._C._ConvBackend.SlowTranspose2d),
+                decorators=[onlyCPU, disableMkldnn], name='slow2d_dilated_transposed'),
+        subtest(((2, 6, 7, 8, 9), False, False, 3, torch.strided, torch._C._ConvBackend.Slow3d),
+                decorators=[onlyCPU, disableMkldnn], name='slow3d'),
+        subtest(((2, 6, 7, 8, 9), True, False, 3, torch.strided, torch._C._ConvBackend.SlowTranspose3d),
+                decorators=[onlyCPU, disableMkldnn], name='slow3d_transposed'),
+        subtest(((2, 6, 7, 8, 9), False, True, 3, torch.strided, torch._C._ConvBackend.SlowDilated3d),
+                decorators=[onlyCPU, disableMkldnn], name='slow3d_dilated'),
+        subtest(((2, 6, 7, 8, 9), True, True, 3, torch.strided, torch._C._ConvBackend.SlowTranspose3d),
+                decorators=[onlyCPU, disableMkldnn], name='slow3d_dilated_transposed'),
+        subtest(((0, 6, 7), False, False, 3, torch.strided, torch._C._ConvBackend.Empty),
+                decorators=[onlyCPU, disableMkldnn], name='empty_batch1d'),
+        subtest(((2, 0, 7), False, False, 3, torch.strided, torch._C._ConvBackend.Empty),
+                decorators=[onlyCPU, disableMkldnn], name='empty_channel1d'),
+        subtest(((0, 0, 7), False, False, 3, torch.strided, torch._C._ConvBackend.Empty),
+                decorators=[onlyCPU, disableMkldnn], name='empty_batch_channel1d'),
+        subtest(((0, 6, 7, 8), False, False, 3, torch.strided, torch._C._ConvBackend.Empty),
+                decorators=[onlyCPU, disableMkldnn], name='empty_batch2d'),
+        subtest(((2, 0, 7, 8), False, False, 3, torch.strided, torch._C._ConvBackend.Empty),
+                decorators=[onlyCPU, disableMkldnn], name='empty_channel2d'),
+        subtest(((0, 0, 7, 8), False, False, 3, torch.strided, torch._C._ConvBackend.Empty),
+                decorators=[onlyCPU, disableMkldnn], name='empty_batch_channel2d'),
+        subtest(((0, 6, 7, 8, 9), False, False, 3, torch.strided, torch._C._ConvBackend.Empty),
+                decorators=[onlyCPU, disableMkldnn], name='empty_batch3d'),
+        subtest(((2, 0, 7, 8, 9), False, False, 3, torch.strided, torch._C._ConvBackend.Empty),
+                decorators=[onlyCPU, disableMkldnn], name='empty_channel3d'),
+        subtest(((0, 0, 7, 8, 9), False, False, 3, torch.strided, torch._C._ConvBackend.Empty),
+                decorators=[onlyCPU, disableMkldnn], name='empty_batch_channel3d'),
+        # === cuda ===
+        # Note that disablecuDNN disables miopen as well.
+        subtest(((2, 6, 7), False, False, 6, torch.strided, torch._C._ConvBackend.CudaDepthwise2d),
+                decorators=[onlyCUDA, disablecuDNN], name='cuda_depthwise1d'),
+        subtest(((2, 6, 7, 8), False, False, 6, torch.strided, torch._C._ConvBackend.CudaDepthwise2d),
+                decorators=[onlyCUDA, disablecuDNN], name='cuda_depthwise2d'),
+        subtest(((2, 6, 7, 8, 9), False, False, 6, torch.strided, torch._C._ConvBackend.CudaDepthwise3d),
+                decorators=[onlyCUDA, disablecuDNN], name='cuda_depthwise3d'),
+        # === cudnn ===
+        subtest(((2, 6, 7), False, False, 3, torch.strided, torch._C._ConvBackend.Cudnn),
+                decorators=[onlyCUDA, skipCUDAIfNoCudnn, skipCUDAIfMiopen], name='cudnn1d'),
+        subtest(((2, 6, 7, 8), False, False, 3, torch.strided, torch._C._ConvBackend.Cudnn),
+                decorators=[onlyCUDA, skipCUDAIfNoCudnn, skipCUDAIfMiopen], name='cudnn2d'),
+        subtest(((2, 6, 7, 8, 9), False, False, 3, torch.strided, torch._C._ConvBackend.Cudnn),
+                decorators=[onlyCUDA, skipCUDAIfNoCudnn, skipCUDAIfMiopen], name='cudnn3d'),
+        subtest(((2, 6, 7), True, False, 3, torch.strided, torch._C._ConvBackend.CudnnTranspose),
+                decorators=[onlyCUDA, skipCUDAIfNoCudnn, skipCUDAIfMiopen], name='cudnn1d_transposed'),
+        subtest(((2, 6, 7, 8), True, False, 3, torch.strided, torch._C._ConvBackend.CudnnTranspose),
+                decorators=[onlyCUDA, skipCUDAIfNoCudnn, skipCUDAIfMiopen], name='cudnn2d_transposed'),
+        subtest(((2, 6, 7, 8, 9), True, False, 3, torch.strided, torch._C._ConvBackend.CudnnTranspose),
+                decorators=[onlyCUDA, skipCUDAIfNoCudnn, skipCUDAIfMiopen], name='cudnn3d_transposed'),
+        # === miopen ===
+        subtest(((2, 6, 7), False, False, 3, torch.strided, torch._C._ConvBackend.Miopen),
+                decorators=[onlyCUDA, skipCUDAIfNoMiopen], name='miopen1d'),
+        subtest(((2, 6, 7, 8), False, False, 3, torch.strided, torch._C._ConvBackend.Miopen),
+                decorators=[onlyCUDA, skipCUDAIfNoMiopen], name='miopen2d'),
+        subtest(((2, 6, 7, 8, 9), False, False, 3, torch.strided, torch._C._ConvBackend.Miopen),
+                decorators=[onlyCUDA, skipCUDAIfNoMiopen], name='miopen3d'),
+        subtest(((2, 6, 7), True, False, 3, torch.strided, torch._C._ConvBackend.MiopenTranspose),
+                decorators=[onlyCUDA, skipCUDAIfNoMiopen], name='miopen1d_transposed'),
+        subtest(((2, 6, 7, 8), True, False, 3, torch.strided, torch._C._ConvBackend.MiopenTranspose),
+                decorators=[onlyCUDA, skipCUDAIfNoMiopen], name='miopen2d_transposed'),
+        subtest(((2, 6, 7, 8, 9), True, False, 3, torch.strided, torch._C._ConvBackend.MiopenTranspose),
+                decorators=[onlyCUDA, skipCUDAIfNoMiopen], name='miopen3d_transposed'),
+        subtest(((2, 6, 7), False, False, 6, torch.strided, torch._C._ConvBackend.MiopenDepthwise),
+                decorators=[onlyCUDA, skipCUDAIfNoMiopen], name='miopen_depthwise1d'),
+        subtest(((2, 6, 7, 8), False, False, 6, torch.strided, torch._C._ConvBackend.MiopenDepthwise),
+                decorators=[onlyCUDA, skipCUDAIfNoMiopen], name='miopen_depthwise2d'),
+        subtest(((2, 6, 7, 8, 9), False, False, 6, torch.strided, torch._C._ConvBackend.MiopenDepthwise),
+                decorators=[onlyCUDA, skipCUDAIfNoMiopen], name='miopen_depthwise3d'),
+        # === mkldnn ===
+        # 1D conv is not supported for mkldnn tensors. See https://github.com/pytorch/pytorch/issues/68034
+        subtest(((2, 6, 7), False, False, 3, torch._mkldnn, torch._C._ConvBackend.Mkldnn),
+                decorators=[onlyCPU, skipCPUIfNoMkldnn, expectedFailure('cpu')], name='mkldnn1d'),
+        subtest(((2, 6, 7), True, False, 3, torch._mkldnn, torch._C._ConvBackend.Mkldnn),
+                decorators=[onlyCPU, skipCPUIfNoMkldnn, expectedFailure('cpu')], name='mkldnn1d_transposed'),
+        subtest(((0, 6, 7), False, False, 3, torch._mkldnn, torch._C._ConvBackend.MkldnnEmpty),
+                decorators=[onlyCPU, skipCPUIfNoMkldnn, expectedFailure('cpu')], name='mkldnn_empty_batch1d'),
+        subtest(((2, 0, 7), False, False, 3, torch._mkldnn, torch._C._ConvBackend.MkldnnEmpty),
+                decorators=[onlyCPU, skipCPUIfNoMkldnn, expectedFailure('cpu')], name='mkldnn_empty_channel1d'),
+        subtest(((0, 0, 7), False, False, 3, torch._mkldnn, torch._C._ConvBackend.MkldnnEmpty),
+                decorators=[onlyCPU, skipCPUIfNoMkldnn, expectedFailure('cpu')], name='mkldnn_empty_batch_channel1d'),
+        subtest(((2, 6, 7, 8), False, False, 3, torch._mkldnn, torch._C._ConvBackend.Mkldnn),
+                decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn2d'),
+        subtest(((2, 6, 7, 8), True, False, 3, torch._mkldnn, torch._C._ConvBackend.Mkldnn),
+                decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn2d_transposed'),
+        subtest(((2, 6, 7, 8, 9), False, False, 3, torch._mkldnn, torch._C._ConvBackend.Mkldnn),
+                decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn3d'),
+        subtest(((2, 6, 7, 8, 9), True, False, 3, torch._mkldnn, torch._C._ConvBackend.Mkldnn),
+                decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn3d_transposed'),
+        subtest(((2, 6, 7), False, True, 3, torch.strided, torch._C._ConvBackend.Mkldnn),
+                decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn1d_cpu_input'),
+        subtest(((2, 6, 7, 8), False, True, 3, torch.strided, torch._C._ConvBackend.Mkldnn),
+                decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn2d_cpu_input'),
+        subtest(((2, 6, 7, 8, 9), False, True, 3, torch.strided, torch._C._ConvBackend.Mkldnn),
+                decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn3d_cpu_input'),
+        subtest(((0, 6, 7, 8), False, False, 3, torch._mkldnn, torch._C._ConvBackend.MkldnnEmpty),
+                decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn_empty_batch2d'),
+        subtest(((2, 0, 7, 8), False, False, 3, torch._mkldnn, torch._C._ConvBackend.MkldnnEmpty),
+                decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn_empty_channel2d'),
+        subtest(((0, 0, 7, 8), False, False, 3, torch._mkldnn, torch._C._ConvBackend.MkldnnEmpty),
+                decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn_empty_batch_channel2d'),
+        subtest(((0, 6, 7, 8, 9), False, False, 3, torch._mkldnn, torch._C._ConvBackend.MkldnnEmpty),
+                decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn_empty_batch3d'),
+        subtest(((2, 0, 7, 8, 9), False, False, 3, torch._mkldnn, torch._C._ConvBackend.MkldnnEmpty),
+                decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn_empty_channel3d'),
+        subtest(((0, 0, 7, 8, 9), False, False, 3, torch._mkldnn, torch._C._ConvBackend.MkldnnEmpty),
+                decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn_empty_batch_channel3d'),
+        # Note: Tests for mobile backends are not currently supported. This comprises
+        # NnpackSpatial, Winograd3x3Depthwise, and Xnnpack2d backends. Testing these
+        # requires the ability to gate tests by whether PyTorch is built with USE_MOBILE=1.
+    ])
+    @parametrize_test("strided", [False, True])
+    def test_conv_backend_selection(
+            self, device, input_shape, strided, transposed, dilated, groups, layout, backend_expected):
+        # Build up inputs.
+        dtype = torch.float32
+        C_in, C_out, dim, kernel_size = input_shape[1], 6, len(input_shape) - 2, 3
+        x = torch.empty(*input_shape, device=device, dtype=dtype, layout=layout, requires_grad=True)
+        weight = torch.empty(C_in if transposed else C_out,
+                             C_out // groups if transposed else C_in // groups,
+                             *[kernel_size for _ in range(dim)],
+                             device=device, dtype=dtype, layout=layout, requires_grad=True)
+        bias = torch.empty(C_out, device=device, dtype=dtype, layout=layout, requires_grad=True)
+
+        stride = (2,) * dim if strided else (1,) * dim
+        padding = (0,) * dim
+        dilation = (2,) * dim if dilated else (1,) * dim
+        output_padding = (0,) * dim
+        inputs = [x, weight, bias, stride, padding, dilation, transposed, output_padding, groups]
+
+        # Ensure correct backend is selected.
+        backend_actual = torch._C._select_conv_backend(*inputs)
+        self.assertEqual(backend_actual, backend_expected)
 
     def test_Dropout(self, device):
         input = torch.empty(1000)
