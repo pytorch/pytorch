@@ -1,4 +1,4 @@
-4#pragma once
+#pragma once
 
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
@@ -475,7 +475,7 @@ class TORCH_API ProcessedNode {
     return values_[outputs_offset_ + i];
   }
 
-  C10_DISCARD const IValue& Output(uint32_t i) const {
+  C10_NODISCARD const IValue& Output(uint32_t i) const {
     DCHECK(i < num_outputs_);
     return values_[outputs_offset_ + i];
   }
