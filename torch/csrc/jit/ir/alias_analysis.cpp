@@ -599,7 +599,7 @@ void AliasDb::analyzeImpl(Node* node) {
       }
       oss << "\n\nCandidates:";
       const auto candidates = getAllOperatorsFor(node->kind());
-      for (const auto candidate : candidates) {
+      for (const auto& candidate : candidates) {
         oss << "\n\t" << candidate->schema();
       }
       TORCH_INTERNAL_ASSERT(
