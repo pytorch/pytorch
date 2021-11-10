@@ -84,28 +84,35 @@ static inline Tensor reshape_bias(int64_t dim, const Tensor& bias) {
   return bias.reshape(shape);
 }
 
-static inline bool cudnn_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
+static inline at::MemoryFormat cudnn_conv_suggest_memory_format(const at::Tensor& input, const at::Tensor& weight) {
   // disable NHWC for float64 input.
   if (!at::detail::getCUDAHooks().compiledWithCuDNN() ||
       input.scalar_type() == at::kDouble ||
       weight.scalar_type() == at::kDouble) {
-    return false;
+    return at::MemoryFormat::Contiguous;
   }
   long cudnn_version = at::detail::getCUDAHooks().versionCuDNN();
   auto input_memory_format = input.suggest_memory_format();
   auto weight_memory_format = weight.suggest_memory_format();
+  auto weight_ndim = weight.ndimension();
 
-  bool can_use_cudnn_channels_last_2d = (cudnn_version >= 7603) && (
+  bool can_use_cudnn_channels_last_2d = (cudnn_version >= 7603) && (weight_ndim == 4) && (
     (input_memory_format  == at::MemoryFormat::ChannelsLast) ||
     (weight_memory_format == at::MemoryFormat::ChannelsLast)
   );
+  if (can_use_cudnn_channels_last_2d) {
+    return at::MemoryFormat::ChannelsLast;
+  }
 
-  bool can_use_cudnn_channels_last_3d = (cudnn_version >= 8005) && (
+  bool can_use_cudnn_channels_last_3d = (cudnn_version >= 8005) && (weight_ndim == 5) && (
     (input_memory_format  == at::MemoryFormat::ChannelsLast3d) ||
     (weight_memory_format == at::MemoryFormat::ChannelsLast3d)
   );
+  if (can_use_cudnn_channels_last_3d) {
+    return at::MemoryFormat::ChannelsLast3d;
+  }
 
-  return can_use_cudnn_channels_last_2d || can_use_cudnn_channels_last_3d;
+  return at::MemoryFormat::Contiguous;
 }
 
 static inline bool miopen_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {

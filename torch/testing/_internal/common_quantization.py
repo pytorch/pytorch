@@ -14,6 +14,7 @@ import torch.distributed as dist
 from torch.testing._internal.common_utils import TestCase
 from torch.ao.quantization import (
     QuantType,
+    default_dynamic_qat_qconfig,
     default_embedding_qat_qconfig,
 )
 from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
@@ -1647,6 +1648,20 @@ class ManualLinearQATModel(torch.nn.Module):
         x = self.fc1(x)
         x = self.fc2(x)
         return self.dequant(x)
+
+class ManualLinearDynamicQATModel(torch.nn.Module):
+    r"""A Module that uses a dynamic QAT by default.
+    """
+    def __init__(self, qconfig=None):
+        super().__init__()
+        self.qconfig = qconfig or default_dynamic_qat_qconfig
+        self.fc1 = torch.nn.Linear(5, 1).to(dtype=torch.float)
+        self.fc2 = torch.nn.Linear(1, 10).to(dtype=torch.float)
+
+    def forward(self, x):
+        x = self.fc1(x)
+        x = self.fc2(x)
+        return x
 
 class ManualConvLinearQATModel(torch.nn.Module):
     r"""A module with manually inserted `QuantStub` and `DeQuantStub`

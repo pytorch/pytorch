@@ -132,7 +132,7 @@ static void unfolded2d_acc_channels_last(
     int64_t input_width,
     int64_t output_height,
     int64_t output_width) {
-      
+
   for (int64_t y = 0; y < output_height; y++) {
     for (int64_t x = 0; x < output_width; x++) {
       scalar_t* src = finput_data + y * output_width * kH * kW * n_input_plane + x * kH * kW * n_input_plane;
