@@ -9,13 +9,9 @@
 
 #include <thrust/tuple.h>
 
-#define NUM_THREADS (C10_WARP_SIZE * 2)
-#define THREAD_WORK_SIZE 4
-#define BLOCK_WORK_SIZE (THREAD_WORK_SIZE * num_threads)
-
-constexpr int num_threads = NUM_THREADS;
-constexpr int thread_work_size = THREAD_WORK_SIZE;
-constexpr int block_work_size = BLOCK_WORK_SIZE;
+constexpr int num_threads() { return C10_WARP_SIZE * 4; }
+constexpr int thread_work_size() { return 4; }
+constexpr int block_work_size() { return thread_work_size() * num_threads(); }
 
 #include <ATen/native/cuda/MemoryAccess.cuh>
 
@@ -55,15 +51,15 @@ __device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
 
   int idx = blockIdx.x;
 
-  return_t results[thread_work_size];
-  args_t args[thread_work_size];
+  return_t results[thread_work_size()];
+  args_t args[thread_work_size()];
 
   // load
   policy.load(args, idx);
 
   // compute
   #pragma unroll
-  for (int i = 0; i < thread_work_size; i++) {
+  for (int i = 0; i < thread_work_size(); i++) {
     if (policy.check_inbounds(i)) {
       results[i] = c10::guts::apply(f, args[i]);
     }
@@ -209,18 +205,18 @@ template <typename T> struct is_tuple: std::false_type {};
 template <typename ...T> struct is_tuple<thrust::tuple<T...>>: std::true_type {};
 
 template <int num_outputs, typename func_t, typename array_t, typename inp_calc_t, typename out_calc_t>
-C10_LAUNCH_BOUNDS_1(num_threads)
+C10_LAUNCH_BOUNDS_1(num_threads())
 __global__ void unrolled_elementwise_kernel_for_multi_outputs(int N, func_t f, array_t data, inp_calc_t ic, out_calc_t oc) {
-  int remaining = N - block_work_size * blockIdx.x;
+  int remaining = N - block_work_size() * blockIdx.x;
   elementwise_kernel_helper(f, memory::policies::multi_outputs_unroll<array_t, inp_calc_t, out_calc_t, num_outputs>(data, remaining, ic, oc));
 }
 
 template <int num_outputs, typename func_t, typename array_t, typename inp_calc_t, typename out_calc_t>
 static inline void launch_unrolled_kernel_for_multi_outputs(int64_t N, const func_t& f, array_t data, inp_calc_t ic, out_calc_t oc) {
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
-  int64_t grid = (N + block_work_size - 1) / block_work_size;
+  int64_t grid = (N + block_work_size() - 1) / block_work_size();
   auto stream = at::cuda::getCurrentCUDAStream();
-  unrolled_elementwise_kernel_for_multi_outputs<num_outputs, func_t, array_t><<<grid, num_threads, 0, stream>>>(N, f, data, ic, oc);
+  unrolled_elementwise_kernel_for_multi_outputs<num_outputs, func_t, array_t><<<grid, num_threads(), 0, stream>>>(N, f, data, ic, oc);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
