@@ -104,6 +104,7 @@ void nnc_aten_conv2d(
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
 
+#ifndef DISABLE_NNC_QUANTIZATION
 void nnc_aten_quantized_conv2d(
     int64_t bufs_num,
     void** buf_data,
@@ -208,6 +209,8 @@ void nnc_aten_quantized_add(
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
 
+#endif // DISABLE_NNC_QUANTIZATION
+
 void nnc_aten_upsample_nearest2d(
     int64_t bufs_num,
     void** buf_data,
@@ -224,7 +227,9 @@ void nnc_aten_upsample_nearest2d(
   const int64_t x_qzero = extra_args[1];
   const int64_t x_qdtype = extra_args[2];
   const auto is_quantized = x_qdtype != -1;
+
   if (is_quantized) {
+#ifndef DISABLE_NNC_QUANTIZATION
     x = at::from_blob_quantized_per_tensor_affine(
         buf_data[1],
         // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
@@ -234,6 +239,9 @@ void nnc_aten_upsample_nearest2d(
         x_qscale,
         x_qzero,
         at::TensorOptions(toQIntType(static_cast<c10::ScalarType>(x_qdtype))));
+#else
+    TORCH_CHECK(false, "NNC quantization not supported!");
+#endif // DISABLE_NNC_QUANTIZATION
   }
 
   int64_t output_size_h = extra_args[3];
@@ -252,6 +260,8 @@ void nnc_aten_upsample_nearest2d(
   r = r.contiguous();
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
+
+#ifndef DISABLE_NNC_QUANTIZATION
 
 void nnc_aten_quantize_per_tensor(
     int64_t bufs_num,
@@ -295,6 +305,47 @@ void nnc_aten_dequantize(
       qzero,
       at::TensorOptions(toQIntType(static_cast<c10::ScalarType>(qdtype))));
   auto r = at::dequantize(qx);
+  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+}
+
+#endif // DISABLE_NNC_QUANTIZATION
+
+void nnc_aten_conv1d(
+    int64_t bufs_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int8_t* buf_dtypes,
+    int64_t args_num,
+    int64_t* extra_args) {
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+
+  at::Tensor& r = tensors[0];
+  const at::Tensor& x = tensors[1];
+  const at::Tensor& w = tensors[2];
+  if (args_num > 0) {
+    // Check that if the extra arguments are provided, then the bias tensor is
+    // also present
+    TORCH_INTERNAL_ASSERT(args_num == 4 && bufs_num == 4);
+    const at::Tensor& b = tensors[3];
+
+    int64_t stride = extra_args[0];
+    int64_t padding = extra_args[1];
+    int64_t dilation = extra_args[2];
+    int64_t groups = extra_args[3];
+
+    try {
+      r = at::conv1d(x, w, b, {stride}, {padding}, {dilation}, groups);
+    } catch (...) {
+    }
+  } else {
+    try {
+      r = at::conv1d(x, w);
+    } catch (...) {
+    }
+  }
+
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
 
@@ -343,6 +394,28 @@ void nnc_aten_mean(
     at::mean_out(r, x, mean_dims);
   } catch (...) {
   }
+}
+
+void nnc_aten_max_red(
+    int64_t bufs_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int8_t* buf_dtypes,
+    int64_t args_num,
+    int64_t* extra_args) {
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+
+  at::Tensor& r = tensors[0];
+  const at::Tensor& x = tensors[1];
+  int64_t max_dim = extra_args[0];
+  bool keep_dim = extra_args[1];
+  try {
+    r = std::get<0>(at::max(x, max_dim, keep_dim));
+  } catch (...) {
+  }
+  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
 
 void nnc_aten_addmm(
@@ -436,11 +509,36 @@ void nnc_prepacked_conv2d_clamp_run(
 
 #endif // USE_XNNPACK
 
+void nnc_aten_embedding(
+    int64_t bufs_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int8_t* buf_dtypes,
+    int64_t args_num,
+    int64_t* extra_args) {
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+
+  at::Tensor& r = tensors[0];
+  const at::Tensor& weight = tensors[1];
+  const at::Tensor& indices = tensors[2];
+  try {
+    r = at::embedding(weight, indices);
+  } catch (...) {
+  }
+  // TODO: have to copy output because at::embedding doesnt have an out variant
+  // and NNC's external calls don't support allocations
+  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+}
+
 #ifndef C10_MOBILE
 
 const static RegisterNNCExternalFunction nnc_conv2d(
     "nnc_aten_conv2d",
     nnc_aten_conv2d);
+
+#ifndef DISABLE_NNC_QUANTIZATION
 const static RegisterNNCExternalFunction nnc_quantized_conv2d(
     "nnc_aten_quantized_conv2d",
     nnc_aten_quantized_conv2d);
@@ -456,15 +554,23 @@ const static RegisterNNCExternalFunction nnc_quantize_per_tensor(
 const static RegisterNNCExternalFunction nnc_dequantize(
     "nnc_aten_dequantize",
     nnc_aten_dequantize);
+#endif // DISABLE_NNC_QUANTIZATION
+
 const static RegisterNNCExternalFunction nnc_upsample_nearest2d(
     "nnc_aten_upsample_nearest2d",
     nnc_aten_upsample_nearest2d);
+const static RegisterNNCExternalFunction nnc_conv1d(
+    "nnc_aten_conv1d",
+    nnc_aten_conv1d);
 const static RegisterNNCExternalFunction nnc_adaptive_avg_pool2d(
     "nnc_aten_adaptive_avg_pool2d",
     nnc_aten_adaptive_avg_pool2d);
 const static RegisterNNCExternalFunction nnc_mean(
     "nnc_aten_mean",
     nnc_aten_mean);
+const static RegisterNNCExternalFunction nnc_max_red(
+    "nnc_aten_max_red",
+    nnc_aten_max_red);
 const static RegisterNNCExternalFunction nnc_addmm(
     "nnc_aten_addmm",
     nnc_aten_addmm);
@@ -472,6 +578,10 @@ const static RegisterNNCExternalFunction nnc_addmm(
 const static RegisterNNCExternalFunction nnc_triangular_solve(
     "nnc_aten_triangular_solve",
     nnc_aten_triangular_solve);
+
+const static RegisterNNCExternalFunction nnc_embedding(
+    "nnc_aten_embedding",
+    nnc_aten_embedding);
 
 #ifdef USE_XNNPACK
 const static RegisterNNCExternalFunction reg_nnc_prepacked_linear_clamp_run(
