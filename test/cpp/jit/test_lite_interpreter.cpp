@@ -22,7 +22,7 @@
 #include <torch/torch.h>
 
 #include <unordered_set>
-
+#include <torch/csrc/jit/serialization/import_export_functions.h>
 // Tests go in torch::jit
 namespace torch {
 namespace jit {
@@ -182,7 +182,7 @@ TEST(LiteInterpreterTest, Tuple) {
   mobile::Module bc = _load_for_mobile(ss);
   std::vector<torch::jit::IValue> inputs({torch::ones({})});
   auto output = bc.get_method("forward")(inputs);
-  AT_ASSERT(output.toTuple()->elements()[1].toInt() == 2);
+  AT_ASSERT(output.toTupleRef().elements()[1].toInt() == 2);
 }
 
 TEST(LiteInterpreterTest, Dict) {
@@ -536,7 +536,7 @@ void runAndCheckTorchScriptModel(
   Module m_mobile = load(input_model_stream);
 
   auto actual_result = m_mobile.forward(input_data);
-  const auto& actual_result_list = actual_result.toTuple()->elements();
+  const auto& actual_result_list = actual_result.toTupleRef().elements();
   compareModelOutput(actual_result_list, expect_result_list);
 }
 
@@ -553,7 +553,7 @@ void runAndCheckBytecodeModel(
   Module m_mobile = load(input_model_stream);
 
   auto actual_result = m_mobile.forward(input_data);
-  const auto& actual_result_list = actual_result.toTuple()->elements();
+  const auto& actual_result_list = actual_result.toTupleRef().elements();
 
   compareModelOutput(actual_result_list, expect_result_list);
 }
@@ -675,7 +675,9 @@ TEST(LiteInterpreterTest, isCompatibleFail) {
   std::unordered_map<std::string, OperatorInfo> runtime_ops;
   runtime_ops["aten::add.Int"] = OperatorInfo{2};
   auto runtime_info = RuntimeCompatibilityInfo{
-      caffe2::serialize::kMaxSupportedBytecodeVersion,
+      std::pair<uint64_t, uint64_t>(
+          caffe2::serialize::kMinSupportedBytecodeVersion,
+          caffe2::serialize::kMaxSupportedBytecodeVersion),
       runtime_ops,
       _get_mobile_supported_types()};
 
@@ -685,14 +687,32 @@ TEST(LiteInterpreterTest, isCompatibleFail) {
       result.errors[0] ==
       "Operator 'aten::add.Scalar' missing from runtime (not found)");
 
-  // test trivial failure due to bytecode
+  // test trivial failure due to bytecode greater than max supported bytecode
+  // version
   runtime_ops["aten::add.Scalar"] = OperatorInfo{2};
   runtime_info = RuntimeCompatibilityInfo{
-      caffe2::serialize::kMaxSupportedBytecodeVersion,
+      std::pair<uint64_t, uint64_t>(
+          caffe2::serialize::kMinSupportedBytecodeVersion,
+          caffe2::serialize::kMaxSupportedBytecodeVersion),
       runtime_ops,
       _get_mobile_supported_types()};
   model_info.bytecode_version =
       caffe2::serialize::kMaxSupportedBytecodeVersion + 1;
+
+  result = is_compatible(runtime_info, model_info);
+  AT_ASSERT(result.status = ModelCompatibilityStatus::ERROR);
+
+  // test trivial failure due to bytecode less than min supported bytecode
+  // version
+  runtime_ops["aten::add.Scalar"] = OperatorInfo{2};
+  runtime_info = RuntimeCompatibilityInfo{
+      std::pair<uint64_t, uint64_t>(
+          caffe2::serialize::kMinSupportedBytecodeVersion,
+          caffe2::serialize::kMaxSupportedBytecodeVersion),
+      runtime_ops,
+      _get_mobile_supported_types()};
+  model_info.bytecode_version =
+      caffe2::serialize::kMinSupportedBytecodeVersion - 1;
 
   result = is_compatible(runtime_info, model_info);
   AT_ASSERT(result.status = ModelCompatibilityStatus::ERROR);
@@ -1485,17 +1505,13 @@ TEST(LiteInterpreterUpgraderTest, DivTensorV2) {
 #endif // !defined(FB_XPLAT_BUILD)
 
 TEST(LiteInterpreterUpgraderTest, Upgrader) {
-  std::vector<std::unique_ptr<mobile::Function>> upgrader_functions;
-  for (auto const& [upgrader_name, upgrader_bytecode] : kUpgraderBytecode) {
-    std::unique_ptr<mobile::Function> func = mobile::Function::get(
-        upgrader_name,
-        upgrader_bytecode,
-        caffe2::serialize::kMaxSupportedBytecodeVersion);
-    ASSERT_NE(func, nullptr);
-    upgrader_functions.push_back(std::move(func));
+  std::vector<mobile::Function> upgrader_functions;
+  for (auto upgrader_function : kUpgraderFunctions) {
+    upgrader_functions.push_back(upgrader_function);
   }
   ASSERT_EQ(kUpgraderBytecode.size(), upgrader_functions.size());
 }
+
 
 } // namespace jit
 } // namespace torch
