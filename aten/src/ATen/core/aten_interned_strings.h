@@ -638,6 +638,7 @@ _(aten, set) \
 _(aten, sign) \
 _(aten, signbit) \
 _(aten, silu) \
+_(aten, silu_backward) \
 _(aten, sgn) \
 _(aten, sin) \
 _(aten, sinh) \
