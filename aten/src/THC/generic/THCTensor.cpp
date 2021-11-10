@@ -21,8 +21,4 @@ THCTensor *THCTensor_(newWithStorage1d)(THCState *state, THCStorage *storage, pt
   return self;
 }
 
-void THCTensor_(free)(THCState *state, THCTensor *self)
-{
-  THCTensor_free(state, self);
-}
 #endif
