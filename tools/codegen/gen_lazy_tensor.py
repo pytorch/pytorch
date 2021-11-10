@@ -110,6 +110,11 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
         TODO(alanwaketan): Once all ops are grouped properly, we should no longer need this hack.
         """
         generated = set()
+        def gen_key(func: NativeFunction):
+            # we want to generate unique entries for overloads of functional variants,
+            # but not for inplace variants unless explicitly told `codegenInplaceVariant`
+            return (func.name.name.base, func.name.overload_name)
+
         for x in xs:
             f = x.functional if isinstance(x, NativeFunctionsGroup) else x
             # For the 'or'd terms:
@@ -118,8 +123,8 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
             # 3. f.func.name.name.base not in generated means even for in-place ops we still need to generate the item
             # as if they were the functional variants for one time.
             if f.func.name in full_codegen and \
-               (codegenInplaceVariant or not f.func.name.name.inplace or f.func.name.name.base not in generated):
-                generated.add(f.func.name.name.base)
+               (codegenInplaceVariant or not f.func.name.name.inplace or gen_key(f.func) not in generated):
+                generated.add(gen_key(f.func))
                 for r in func(f):
                     yield r
 
@@ -169,7 +174,6 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
                 codegenInplaceVariant=True
             )),
         })
-
         # Generate headers for shape/dtype funcs for non-meta kernels
         fm.write_with_template(f'{backend_dispatch_key}ShapeDtype.h', 'ShapeDtype.h', lambda: {
             'lazy_ir_sysinc': [f'#include <{path}>' for path in [
@@ -188,7 +192,6 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
                 grouped_native_functions
             )),
         })
-
         # Generate IR node classes
         fm.write_with_template(f'{backend_dispatch_key}LazyIr.h', 'LazyIr.h', lambda: {
             'lazy_ir_sysinc': [f'#include <{path}>' for path in [
