@@ -76,6 +76,7 @@ supported:
   - bernoulli
   - bernoulli_.float
   - cat
+  - clone
   - constant_pad_nd
   - convolution_overrideable
   - convolution_backward_overrideable

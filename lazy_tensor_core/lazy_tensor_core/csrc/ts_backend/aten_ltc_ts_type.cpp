@@ -174,6 +174,11 @@ at::Tensor LazyNativeFunctions::cat(at::TensorList tensors, int64_t dim) {
   return result;
 }
 
+at::Tensor LazyNativeFunctions::clone(const at::Tensor & self, c10::optional<at::MemoryFormat> memory_format) {
+  auto self_lt = bridge::GetLtcTensor(self);
+  return bridge::AtenFromLtcTensor(self_lt.Create(self_lt.GetIrValue(), self_lt.GetDevice()));
+}
+
 at::Tensor LazyNativeFunctions::constant_pad_nd(const at::Tensor& self,
                                                 at::IntArrayRef pad,
                                                 const at::Scalar& value) {
