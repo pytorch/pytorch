@@ -32,6 +32,7 @@ class FaultyTensorPipeAgent(TensorPipeAgent):
         name: str,
         rank: int,
         world_size: int,
+        process_group: ProcessGroup,
         options: FaultyTensorPipeRpcBackendOptions,
         reverse_device_maps: Dict[str, Dict[torch.device, torch.device]],
         devices: List[torch.device],

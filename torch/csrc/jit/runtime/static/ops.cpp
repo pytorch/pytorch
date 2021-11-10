@@ -2148,5 +2148,27 @@ REGISTER_OPERATOR_FUNCTOR(aten::where, aten_where, [](Node* n) -> SROperator {
   return nullptr;
 });
 
+REGISTER_OPERATOR_FUNCTOR(
+    prim::NumToTensor,
+    prim_NumToTensor,
+    [](Node* n) -> SROperator {
+      if (n->matches(
+              torch::schema("prim::NumToTensor.Scalar(Scalar s) -> Tensor")) ||
+          n->matches(
+              torch::schema("prim::NumToTensor.bool(bool a) -> Tensor"))) {
+        return [](ProcessedNode* pnode) {
+          const auto scalar = pnode->Input(0).toScalar();
+          if (pnode->Output(0).isNone()) {
+            pnode->Output(0) = at::scalar_to_tensor(scalar);
+            return;
+          }
+          auto& out = pnode->Output(0).toTensor();
+          at::detail::scalar_fill(out, scalar);
+        };
+      }
+      LogAndDumpSchema(n);
+      return nullptr;
+    });
+
 } // namespace jit
 } // namespace torch
