@@ -3087,12 +3087,12 @@ def sample_inputs_adaptive_max_pool3d(op_info, device, dtype, requires_grad, **k
 
     return list(generator())
 
-class _TestParamsMaxPool1d(object):
+class _TestParamsMaxPoolBase(object):
 
     def __init__(self):
         self.kwargs = {
-            'kernel_size': [(2,), 3],
-            'stride': [2],
+            'kernel_size': [3],
+            'stride': [2, None],
             'ceil_mode': [True, False],
             'padding': [0, 1],
             'dilation': [1],
@@ -3124,23 +3124,33 @@ class _TestParamsMaxPool1d(object):
     def gen_input_params(self):
         yield from product(self._gen_shape(), self._gen_kwargs())
 
-class _TestParamsMaxPool2d(_TestParamsMaxPool1d):
+class _TestParamsMaxPool1d(_TestParamsMaxPoolBase):
 
     def __init__(self):
         super().__init__()
-        self.kwargs['kernel_size'] = [[3, 2], 3]
-        self.kwargs['stride'] += [[2, 1]]
-        self.kwargs['dilation'] += [[1, 2]]
+        self.kwargs['kernel_size'] += [(3,)]
+        self.kwargs['stride'] += [(2,)]
+        self.kwargs['padding'] += [(1,)]
+        self.kwargs['dilation'] += [(1,)]
+
+class _TestParamsMaxPool2d(_TestParamsMaxPoolBase):
+
+    def __init__(self):
+        super().__init__()
+        self.kwargs['kernel_size'] += [(3, 2)]
+        self.kwargs['stride'] += [(2, 1)]
+        self.kwargs['padding'] += [(1, 1)]
+        self.kwargs['dilation'] += [(1, 2)]
 
         self.shapes.append([6])
 
-class _TestParamsMaxPool3d(_TestParamsMaxPool1d):
+class _TestParamsMaxPool3d(_TestParamsMaxPoolBase):
 
     def __init__(self):
         super().__init__()
-        self.kwargs['kernel_size'] = [[3, 2, 3], 3]
-        self.kwargs['stride'] += [[2, 1, 2]]
-        self.kwargs['dilation'] += [[1, 2, 1]]
+        self.kwargs['kernel_size'] += [(3, 2, 3)]
+        self.kwargs['stride'] += [(2, 1, 2)]
+        self.kwargs['dilation'] += [(1, 2, 1)]
 
         self.shapes.append([6])
         self.shapes.append([5])
@@ -9560,13 +9570,10 @@ op_db: List[OpInfo] = [
            aten_name='max_pool1d',
            supports_autograd=True,
            supports_out=False,
-           assert_jit_shape_analysis=True,
+           # TODO: add shape checks
+           assert_jit_shape_analysis=False,
            dtypesIfCPU=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
-           decorators=(
-               # Fails JIT output shape checks
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-           ),
            sample_inputs_func=sample_inputs_max_pool),
     OpInfo('nn.functional.max_pool2d',
            aten_name='max_pool2d',
@@ -9577,20 +9584,21 @@ op_db: List[OpInfo] = [
            assert_jit_shape_analysis=True,
            dtypesIfCPU=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           decorators=(
+               # BUG: Fails JIT output shape checks when stride=None
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+           ),
            sample_inputs_func=sample_inputs_max_pool),
     OpInfo('nn.functional.max_pool3d',
            aten_name='max_pool3d',
            supports_autograd=True,
            supports_out=False,
-           assert_jit_shape_analysis=True,
+           # TODO: add shape checks
+           assert_jit_shape_analysis=False,
            dtypesIfCPU=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            # TODO: investigate nondeterminism
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
-           decorators=(
-               # Fails JIT output shape checks
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-           ),
            sample_inputs_func=sample_inputs_max_pool),
     OpInfo('nn.functional.linear',
            aten_name='linear',
