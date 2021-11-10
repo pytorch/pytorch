@@ -1833,12 +1833,6 @@ class TestSparse(TestCase):
             result = torch.zeros_like(x, layout=torch.strided, memory_format=mem_format)
             self.assertTrue(result.layout == torch.strided)
 
-        with self.assertRaisesRegex(
-            RuntimeError, r"Could not run 'aten::empty_strided' with arguments from the 'Sparse(CPU|CUDA)' backend"
-        ):
-            dense_tensor = sparse_tensor.to_dense()
-            result = torch.zeros_like(dense_tensor, layout=torch.sparse_coo)
-
     def _assert_sparse_invars(self, t):
         # SparseTensor has the following invariants:
         # - sparse_dim + dense_dim = len(SparseTensor.shape)
