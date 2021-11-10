@@ -465,8 +465,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.grid_sample'),
         xfail('nn.functional.interpolate', 'area'),
         xfail('nn.functional.pad', 'circular'),
-        xfail('nn.functional.pad', 'reflect'),
-        xfail('nn.functional.pad', 'replicate'),
         xfail('nn.functional.unfold'),
         xfail('norm', 'fro'),
         xfail('norm', 'inf'),
