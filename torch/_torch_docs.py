@@ -792,11 +792,11 @@ add_docstr(torch.as_tensor,
            r"""
 as_tensor(data, dtype=None, device=None) -> Tensor
 
-Converts :attr:`data` into a tensor, sharing data and preserving autograd
+Converts dataa into a tensor, sharing data and preserving autograd
 history if possible.
 
-If data is already a tensor with the same
-:attr:`dtype` and :attr:`device` then data itself is returned, but if data is a
+If data is already a tensor with the requeseted dtype and device
+then data itself is returned, but if data is a
 tensor with a different dtype or device then it's copied as if using
 `data.to(dtype=dtype, device=device)`.
 
@@ -805,7 +805,7 @@ tensor is constructed using :func:`torch.from_numpy`.
 
 .. seealso::
 
-    :func:`torch.tensor` never shares its data and creates a new "leaf tensor."
+    :func:`torch.tensor` never shares its data and creates a new "leaf tensor" (see :doc:`/notes/autograd`).
 
 
 Args:
@@ -8009,7 +8009,7 @@ add_docstr(torch.tensor,
            r"""
 tensor(data, *, dtype=None, device=None, requires_grad=False, pin_memory=False) -> Tensor
 
-Constructs a tensor with no autograd history (a "leaf tensor") by copying :attr:`data`.
+Constructs a tensor with no autograd history (also known as a "leaf tensor", see :doc:`/notes/autograd`) by copying :attr:`data`.
 
 .. warning::
 
@@ -8018,11 +8018,6 @@ Constructs a tensor with no autograd history (a "leaf tensor") by copying :attr:
     readability. Letting `t` be a tensor, ``torch.tensor(t)`` is equivalent to
     ``t.clone().detach()``, and ``torch.tensor(t, requires_grad=True)``
     is equivalent to ``t.clone().detach().requires_grad_(True)``.
-
-    To change whether a tensor requires grad without copying it use just
-    :func:`torch.Tensor.requires_grad_` or :func:`torch.Tensor.detach` without
-    cloning the tensor.
-
 
 .. seealso::
 
