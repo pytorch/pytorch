@@ -594,3 +594,13 @@ Functions
 .. autofunction:: register_custom_op_symbolic
 .. autofunction:: select_model_mode_for_export
 .. autofunction:: is_in_onnx_export
+
+Classes
+----------------------------------
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    SymbolicContext
