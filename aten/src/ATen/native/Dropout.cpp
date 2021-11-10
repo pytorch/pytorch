@@ -87,7 +87,7 @@ ALIAS_SPECIALIZATION(_feature_alpha_dropout, true,  true )
 } // anomymous namepsace
 
 std::tuple<Tensor,Tensor>
-native_dropout_cpu(const Tensor& input, double p, c10::optional<double> scale, c10::optional<bool> train) {
+native_dropout_cpu(const Tensor& input, double p, c10::optional<bool> train) {
   if (input.numel() == 0) {
     return std::make_tuple(input, at::empty_like(input, input.options()));
   }
@@ -96,8 +96,11 @@ native_dropout_cpu(const Tensor& input, double p, c10::optional<double> scale, c
   Tensor output;
 
   if (!train.has_value() || *train) {
-    mask.bernoulli_(p);
-    output = input.mul(mask).mul_(scale.has_value() ? *scale : 1.0 / p);
+    double p1m = 1. - p;
+    // Check for probability of zero to avoid divide by zero and NaN results
+    double scale = p1m == 0 ? 0. : 1. / p1m;
+    mask.bernoulli_(p1m);
+    output = input.mul(mask).mul_(scale);
   } else {
     output = input;
   }
@@ -113,10 +116,7 @@ Tensor dropout(const Tensor& input, double p, bool train) {
   auto result = [&]() {
     NoNamesGuard guard;
     if (train && is_fused_kernel_acceptable(input, p)) {
-      double p1m = 1. - p;
-      // Check for probability of zero to avoid divide by zero and NaN results
-      double scale = p1m == 0 ? 0. : 1. / p1m;
-      return std::get<0>(at::native_dropout(input, p1m, scale, train));
+      return std::get<0>(at::native_dropout(input, p, train));
     }
     return _dropout<false>(input, p, train);
   }();

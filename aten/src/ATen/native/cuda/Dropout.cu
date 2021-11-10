@@ -360,9 +360,12 @@ dropout_cuda(CUDAGeneratorImpl* gen, const Tensor& self, double p, double scale,
 }
 
 std::tuple<Tensor,Tensor>
-native_dropout_cuda(const Tensor& self, double p, c10::optional<double> scale, c10::optional<bool> train){
+native_dropout_cuda(const Tensor& self, double p, c10::optional<bool> train){
   auto gen = get_generator_or_default<CUDAGeneratorImpl>(c10::nullopt, cuda::detail::getDefaultCUDAGenerator());
-  return dropout_cuda<bool>(gen, self, p, scale.has_value() ? *scale : 1.0 / p, train.has_value() ? *train : true);
+  double p1m = 1. - p;
+  // Check for probability of zero to avoid divide by zero and NaN results
+  double scale = p1m == 0 ? 0. : 1. / p1m;
+  return dropout_cuda<bool>(gen, self, p1m, scale, train.has_value() ? *train : true);
 }
 
 // TODO: _fused_dropout_cuda is to be removed, see PR #63937

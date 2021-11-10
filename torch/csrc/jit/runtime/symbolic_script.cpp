@@ -1179,7 +1179,7 @@ const std::vector<std::string> functions = {
                     train: bool):
             p1m = 1. - p
             scale = 1. / (float(p1m == 0.) + p1m)
-            res,mask = torch.native_dropout(input, p1m, scale, train)
+            res,mask = torch.native_dropout(input, p, train)
 
             def backward(grad_output):
                 grad_input = torch.native_dropout_backward(grad_output, mask, scale)

@@ -176,7 +176,7 @@
   dispatch:
     CUDA: masked_scale_cuda
 
-- func: native_dropout(Tensor input, float p, float? scale, bool? train) -> (Tensor, Tensor)
+- func: native_dropout(Tensor input, float p, bool? train) -> (Tensor, Tensor)
   variants: function
   dispatch:
     CPU: native_dropout_cpu
