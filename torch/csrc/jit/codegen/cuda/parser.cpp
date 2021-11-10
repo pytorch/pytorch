@@ -9,6 +9,8 @@
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
 #include <torch/csrc/jit/ir/constants.h>
 
+#include <ATen/native/Activation.h>
+
 #include <unordered_map>
 #include <utility>
 
@@ -1397,8 +1399,12 @@ class IrParser {
                 "The approximate (bool) parameter is required.");
             const bool kApproximate = approximate.value();
 
-            auto output = (kApproximate) ? fast_gelu(self)
-                                         : unaryOp(UnaryOpType::Gelu, self);
+            Val* output = nullptr;
+            if (kApproximate == at::Gelu::Tanh) {
+              output = fast_gelu(self);
+            } else {
+              output = unaryOp(UnaryOpType::Gelu, self);
+            }
             value_map.emplace(node->output()->unique(), output);
           },
           nullptr,
@@ -1419,8 +1425,12 @@ class IrParser {
                 "The approximate (bool) parameter is required.");
             const bool kApproximate = approximate.value();
 
-            auto grad_in = (kApproximate) ? fast_gelu_backward(grad_out, self)
-                                          : gelu_backward(grad_out, self);
+            Val* grad_in = nullptr;
+            if (kApproximate == at::Gelu::Tanh) {
+              grad_in = fast_gelu_backward(grad_out, self);
+            } else {
+              grad_in = gelu_backward(grad_out, self);
+            }
             value_map.emplace(node->output()->unique(), grad_in);
           },
           nullptr,
