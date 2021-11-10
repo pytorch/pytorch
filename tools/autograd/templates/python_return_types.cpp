@@ -16,6 +16,13 @@ namespace torch {
 namespace autograd {
 
 std::map<std::string, PyTypeObject*>& get_namedtuple_types_map() {
+  // [NOTE] Non-global map
+  // This map calls Python functions during its initialization.
+  // If it is a global static variable and in case it is loaded
+  // before Python interpreter is ready, then the calls it makes during
+  // initialization will SEGFAULT.
+  // To avoid this we make it function static variable so that it is
+  // initialized only after the Python interpreter is ready.
   static std::map<std::string, PyTypeObject*> namedtuple_types_map = {
     ${py_return_types_map}
   };
