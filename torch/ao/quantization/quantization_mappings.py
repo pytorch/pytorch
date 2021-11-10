@@ -12,6 +12,7 @@ import torch.nn.quantized as nnq
 import torch.nn.quantized._reference as nnqr
 import torch.nn.quantized.dynamic as nnqd
 import torch.nn.qat as nnqat
+import torch.nn.qat.dynamic as nnqatd
 
 from typing import Optional, Union, Dict, Set, Callable, Any
 
@@ -41,6 +42,7 @@ DEFAULT_STATIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nn.Conv3d: nnq.Conv3d,
     nn.ConvTranspose1d: nnq.ConvTranspose1d,
     nn.ConvTranspose2d: nnq.ConvTranspose2d,
+    nn.ConvTranspose3d: nnq.ConvTranspose3d,  # @reviewer, any reason this wasn't here before?
     nn.ELU: nnq.ELU,
     nn.Embedding: nnq.Embedding,
     nn.EmbeddingBag: nnq.EmbeddingBag,
@@ -102,6 +104,13 @@ DEFAULT_QAT_MODULE_MAPPINGS : Dict[Callable, Any] = {
 DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nn.GRUCell: nnqd.GRUCell,
     nn.Linear: nnqd.Linear,
+    nnqatd.Linear: nnqd.Linear,
+    nn.Conv1d: nnqd.Conv1d,
+    nn.Conv2d: nnqd.Conv2d,
+    nn.Conv3d: nnqd.Conv3d,
+    nn.ConvTranspose1d: nnqd.ConvTranspose1d,
+    nn.ConvTranspose2d: nnqd.ConvTranspose2d,
+    nn.ConvTranspose3d: nnqd.ConvTranspose3d,
     nn.modules.linear.NonDynamicallyQuantizableLinear: nnqd.Linear,
     nn.LSTM: nnqd.LSTM,
     nn.GRU: nnqd.GRU,

@@ -312,8 +312,19 @@ class TestQuantizedOps(TestCase):
                 ],
                 'reference_fn': torch.nn.functional.hardsigmoid,
                 'output_range': (0.0, 1.0),
-                'change_zero_point': True
-            }
+                'change_zero_point': True,
+            },
+            {
+                'quantized_fn': [
+                    torch.nn.quantized.functional.hardsigmoid
+                ],
+                'reference_fn': torch.nn.functional.hardsigmoid,
+                'output_range': (0.0, 1.0),
+                'change_zero_point': True,
+                'extra_kwargs': {
+                    'inplace': True,
+                },
+            },
         ]
         shapes = ((4,), (4, 4), (4, 4, 4), (4, 4, 4, 4))
         dtypes = (torch.quint8, torch.qint8)
@@ -3063,7 +3074,7 @@ class TestDynamicQuantizedRNNOp(TestCase):
                 self.assertEqual(result_ref[0], result_dynamic[0], msg="torch.quantized_rnncell results are off")
 
 
-class TestQuantizedLinear(unittest.TestCase):
+class TestQuantizedLinear(TestCase):
     """Tests the correctness of the quantized linear and linear_relu op."""
     @given(batch_size=st.integers(1, 4),
            input_channels=st.integers(16, 32),
@@ -3649,12 +3660,26 @@ class TestQuantizedEmbeddingOps(TestCase):
 
         torch.testing.assert_close(result, qresult, atol=0.05, rtol=1e-3)
 
+
 class TestDynamicQuantizedConv(TestCase):
     def test_qconv(self):
-        #behavior should be the same as fake_quant+conv
-        X = torch.randn(3,3)
-        assert(False)
+        X_fp32 = torch.randn(3, 3, 4, 4)
+        reduce_range = True
+        s, z = _calculate_dynamic_qparams(X_fp32, torch.quint8, reduce_range)
+        X_q = torch.quantize_per_tensor(X_fp32, s, z, torch.quint8)
 
+        quantized_conv2d = torch.nn.quantized.Conv2d(3, 10, 2)
+        quantized_conv2d.scale, quantized_conv2d.zero_point = s, z
+
+        dynamic_conv2d = torch.nn.quantized.dynamic.Conv2d(3, 10, 2)
+        dynamic_conv2d.set_weight_bias(*quantized_conv2d._weight_bias())
+
+        Y_q_ref = quantized_conv2d(X_q)
+        Y_ref = torch.dequantize(Y_q_ref)
+
+        Y = dynamic_conv2d(X_fp32, reduce_range)
+
+        self.assertEqual(Y, Y_ref)
 
 class TestQuantizedConv(TestCase):
     def _test_qconv_unpack_impl(self, qconv_prepack_fn, qconv_unpack_fn, inputs,

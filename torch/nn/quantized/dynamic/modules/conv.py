@@ -112,29 +112,8 @@ class Conv1d(nnq.Conv1d):
 
     def _get_name(self):
         return 'DynamicQuantizedConv1d'
-    
-    ## Do I need these for the dynamic one? Can I just inherit from quantized?
 
-    # def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
-    #     if self.padding_mode == 'zeros':
-    #         self._packed_params = torch.ops.quantized.conv1d_prepack(
-    #             w, b, self.stride, self.padding, self.dilation, self.groups)
-    #     else:
-    #         self._packed_params = torch.ops.quantized.conv1d_prepack(
-    #             w, b, self.stride, _pair(0), self.dilation,
-    #             self.groups)
-
-    # def _weight_bias(self):
-    #     w, b = torch.ops.quantized.conv1d_unpack(self._packed_params)
-    #     return w, b
-
-    # def weight(self):
-    #     return self._weight_bias()[0]
-
-    # def bias(self):
-    #     return self._weight_bias()[1]
-
-    def forward(self, input):
+    def forward(self, input, reduce_range=True):
         # Temporarily using len(shape) instead of ndim due to JIT issue
         # https://github.com/pytorch/pytorch/issues/23890
         if len(input.shape) != 3:
@@ -144,7 +123,7 @@ class Conv1d(nnq.Conv1d):
             _reversed_padding_repeated_twice = _reverse_repeat_padding(self.padding[:1])
             input = F.pad(input, _reversed_padding_repeated_twice,
                           mode=self.padding_mode)
-        return ops.quantized.conv1d_dynamic(input, self._packed_params) #, self.scale, self.zero_point)
+        return ops.quantized.conv1d_dynamic(input, self._packed_params, reduce_range=reduce_range)
 
 # TODO Fix docstring
 class Conv2d(nnq.Conv2d):
@@ -206,24 +185,7 @@ class Conv2d(nnq.Conv2d):
     def _get_name(self):
         return 'DynamicQuantizedConv2d'
 
-    # def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
-    #     if self.padding_mode == 'zeros':
-    #         self._packed_params = torch.ops.quantized.conv2d_prepack(
-    #             w, b, self.stride, self.padding, self.dilation, self.groups)
-    #     else:
-    #         self._packed_params = torch.ops.quantized.conv2d_prepack(
-    #             w, b, self.stride, _pair(0), self.dilation, self.groups)
-
-    # def _weight_bias(self):
-    #     return self._packed_params.unpack()
-
-    # def weight(self):
-    #     return self._weight_bias()[0]
-
-    # def bias(self):
-    #     return self._weight_bias()[1]
-
-    def forward(self, input):
+    def forward(self, input, reduce_range=True):
         # Temporarily using len(shape) instead of ndim due to JIT issue
         # https://github.com/pytorch/pytorch/issues/23890
         if len(input.shape) != 4:
@@ -233,7 +195,7 @@ class Conv2d(nnq.Conv2d):
             input = F.pad(input, _reversed_padding_repeated_twice,
                           mode=self.padding_mode)
         return ops.quantized.conv2d_dynamic(
-            input, self._packed_params)
+            input, self._packed_params, reduce_range=reduce_range)
 
 # TODO Fix docstring
 class Conv3d(nnq.Conv3d):
@@ -296,24 +258,7 @@ class Conv3d(nnq.Conv3d):
     def _get_name(self):
         return 'QuantizedConv3d'
 
-    def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
-        if self.padding_mode == 'zeros':
-            self._packed_params = torch.ops.quantized.conv3d_prepack(
-                w, b, self.stride, self.padding, self.dilation, self.groups)
-        else:
-            self._packed_params = torch.ops.quantized.conv3d_prepack(
-                w, b, self.stride, _triple(0), self.dilation, self.groups)
-
-    def _weight_bias(self):
-        return self._packed_params.unpack()
-
-    def weight(self):
-        return self._weight_bias()[0]
-
-    def bias(self):
-        return self._weight_bias()[1]
-
-    def forward(self, input):
+    def forward(self, input, reduce_range=True):
         # Temporarily using len(shape) instead of ndim due to JIT issue
         # https://github.com/pytorch/pytorch/issues/23890
         if len(input.shape) != 5:
@@ -323,64 +268,7 @@ class Conv3d(nnq.Conv3d):
             input = F.pad(input, _reversed_padding_repeated_twice,
                           mode=self.padding_mode)
         return ops.quantized.conv3d_dynamic(
-            input, self._packed_params) # self.scale, self.zero_point)
-
-# === Transposed Convolutions ===
-MOD = TypeVar('MOD', bound=nn.modules.conv._ConvNd)
-
-# class _ConvTransposeNd(_ConvNd):
-
-#     _FLOAT_MODULE = MOD
-
-#     def __init__(self, in_channels, out_channels, kernel_size, stride,
-#                  padding, dilation, transposed, output_padding,
-#                  groups, bias, padding_mode, device=None, dtype=None):
-#         if padding_mode != 'zeros':
-#             raise ValueError('Only "zeros" padding mode is supported for {}'.format(self.__class__.__name__))
-#         factory_kwargs = {'device': device, 'dtype': dtype}
-#         # Subclasses of _ConvNd need to call _init rather than __init__. See
-#         # discussion on PR #49702
-#         super(_ConvTransposeNd, self)._init(
-#             in_channels, out_channels, kernel_size, stride,
-#             padding, dilation, transposed, output_padding,
-#             groups, bias, padding_mode, **factory_kwargs)
-
-#     def _input_padding(self, kernel_size: List[int], dilation: List[int], padding: List[int]) -> List[int]:
-#         res = torch.jit.annotate(List[int], [])
-#         for kdx in range(len(kernel_size)):
-#             pad = (dilation[kdx] * (kernel_size[kdx] - 1) - padding[kdx])
-#             res.append(pad)
-#         return res
-
-#     @classmethod
-#     def from_float(cls, mod):
-#         r"""Creates a quantized module from a float module or qparams_dict.
-#         Args:
-#             mod (Module): a float module, either produced by torch.ao.quantization
-#               utilities or provided by the user
-#         """
-#         # derived classes override cls._FLOAT_MODULE attribute
-#         msg = ' nnq.' + cls.__name__ + '.from_float only works for ' + \
-#               cls._FLOAT_MODULE.__name__  # type: ignore[attr-defined]
-#         assert type(mod) == cls._FLOAT_MODULE, msg
-#         assert hasattr(mod, 'qconfig'), \
-#             'Input float module must have qconfig defined.'
-#         weight_post_process = mod.qconfig.weight()
-#         weight_post_process(mod.weight)
-#         act_scale, act_zp = mod.activation_post_process.calculate_qparams()
-#         assert weight_post_process.dtype == torch.qint8, \
-#             'Weight observer must have a dtype of qint8'
-#         qweight = _quantize_weight(mod.weight.float(), weight_post_process)
-#         # the __init__ call used is the one from derived classes and not the one from _ConvTransposeNd
-#         qconv = cls(mod.in_channels, mod.out_channels, mod.kernel_size,  # type: ignore[call-arg]
-#                     mod.stride, mod.padding, mod.output_padding, mod.groups,
-#                     mod.bias is not None, mod.dilation, mod.padding_mode)
-#         qconv.set_weight_bias(qweight, mod.bias)
-#         qconv.scale = float(act_scale)
-#         qconv.zero_point = int(act_zp)
-
-#         return qconv
-
+            input, self._packed_params, reduce_range=reduce_range)
 
 class ConvTranspose1d(nnq.ConvTranspose1d):
     r"""Applies a 1D transposed convolution operator over an input image
@@ -442,31 +330,13 @@ class ConvTranspose1d(nnq.ConvTranspose1d):
     def _get_name(self):
         return 'DynamicQuantizedConvTranpose1d'
 
-    # def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
-    #     self._packed_params = torch.ops.quantized.conv_transpose1d_prepack(
-    #         w, b, self.stride, self.padding, self.output_padding, self.dilation,
-    #         self.groups)
-
-    # def _weight_bias(self):
-    #     w, b = torch.ops.quantized.conv_transpose1d_unpack(self._packed_params)
-    #     return w, b
-
-    # def weight(self):
-    #     (w, _) = self._weight_bias()
-    #     return w
-
-    # def bias(self):
-    #     (_, b) = self._weight_bias()
-    #     return b
-
-    def forward(self, input):
+    def forward(self, input, reduce_range=True):
         # Temporarily using len(shape) instead of ndim due to JIT issue
         # https://github.com/pytorch/pytorch/issues/23890
         if len(input.shape) != 3:
             raise ValueError("Input shape must be `(N, C, L)`!")
-        # return torch.ops.quantized.conv_transpose1d_dynamic(
-        #     input, self._packed_params)
-        return None
+        return torch.ops.quantized.conv_transpose1d_dynamic(
+            input, self._packed_params, reduce_range=reduce_range)
 
 
 class ConvTranspose2d(nnq.ConvTranspose2d):
@@ -527,31 +397,13 @@ class ConvTranspose2d(nnq.ConvTranspose2d):
     def _get_name(self):
         return 'QuantizedConvTranpose2d'
 
-    # def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
-    #     self._packed_params = torch.ops.quantized.conv_transpose2d_prepack(
-    #         w, b, self.stride, self.padding, self.output_padding, self.dilation,
-    #         self.groups)
-
-    # def _weight_bias(self):
-    #     w, b = torch.ops.quantized.conv2d_unpack(self._packed_params)
-    #     return w, b
-
-    # def weight(self):
-    #     (w, _) = self._weight_bias()
-    #     return w
-
-    # def bias(self):
-    #     (_, b) = self._weight_bias()
-    #     return b
-
-    def forward(self, input):
+    def forward(self, input, reduce_range=True):
         # Temporarily using len(shape) instead of ndim due to JIT issue
         # https://github.com/pytorch/pytorch/issues/23890
         if len(input.shape) != 4:
             raise ValueError("Input shape must be `(N, C, H, W)`!")
-        # return ops.quantized.conv_transpose2d_dynamic(
-        #     input, self._packed_params)
-        return None
+        return ops.quantized.conv_transpose2d_dynamic(
+            input, self._packed_params, reduce_range=reduce_range)
 
 class ConvTranspose3d(nnq.ConvTranspose3d):
     r"""Applies a 3D transposed convolution operator over an input image
@@ -613,28 +465,10 @@ class ConvTranspose3d(nnq.ConvTranspose3d):
     def _get_name(self):
         return 'DynamicQuantizedConvTranpose3d'
 
-    # def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
-    #     self._packed_params = torch.ops.quantized.conv_transpose3d_prepack(
-    #         w, b, self.stride, self.padding, self.output_padding, self.dilation,
-    #         self.groups)
-
-    # def _weight_bias(self):
-    #     w, b = torch.ops.quantized.conv3d_unpack(self._packed_params)
-    #     return w, b
-
-    # def weight(self):
-    #     (w, _) = self._weight_bias()
-    #     return w
-
-    # def bias(self):
-    #     (_, b) = self._weight_bias()
-    #     return b
-
-    def forward(self, input):
+    def forward(self, input, reduce_range=True):
         # Temporarily using len(shape) instead of ndim due to JIT issue
         # https://github.com/pytorch/pytorch/issues/23890
         if len(input.shape) != 5:
             raise ValueError("Input shape must be `(N, C, T, H, W)`!")
-        # return ops.quantized.conv_transpose3d_dynamic(
-        #     input, self._packed_params)
-        return None
+        return ops.quantized.conv_transpose3d_dynamic(
+            input, self._packed_params, reduce_range=reduce_range)

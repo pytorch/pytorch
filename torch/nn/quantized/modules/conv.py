@@ -195,7 +195,7 @@ class _ConvNd(nn.Module):
         if weight_post_process is None:
             weight_post_process = mod.qconfig.weight()
         weight_post_process(mod.weight)
-        
+
         assert weight_post_process.dtype == torch.qint8, \
             'Weight observer must have a dtype of qint8'
         qweight = _quantize_weight(mod.weight.float(), weight_post_process)
