@@ -4,11 +4,8 @@
 Distributed Optimizers
 ======================
 
-.. autoclass:: torch.distributed.optim.DistributedOptimizer
-    :members:
+.. warning ::
+    Distributed optimizer is not currently supported when using CUDA tensors
 
-.. autoclass:: torch.distributed.optim.PostLocalSGDOptimizer
-    :members:
-
-.. autoclass:: torch.distributed.optim.ZeroRedundancyOptimizer
-    :members:
+.. automodule:: torch.distributed.optim
+    :members: DistributedOptimizer, PostLocalSGDOptimizer, ZeroRedundancyOptimizer
