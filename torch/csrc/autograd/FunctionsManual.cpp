@@ -1118,6 +1118,7 @@ Tensor pinv_jvp(
   const Tensor& pinvA,
   const Tensor& dA
 ) {
+  at::NoTF32Guard disable_tf32;
   auto m = A.size(-2);
   auto n = A.size(-1);
   auto dAh = dA.mH();
@@ -1141,6 +1142,7 @@ Tensor pinv_backward(
   const Tensor& pinvA,
   const Tensor& A
 ) {
+  at::NoTF32Guard disable_tf32;
   auto m = A.size(-2);
   auto n = A.size(-1);
   auto pinvAh = pinvA.mH();
@@ -2489,42 +2491,6 @@ Tensor linalg_eig_backward(const std::vector<torch::autograd::Variable> &grads,
       return at::zeros_like(self, at::MemoryFormat::Contiguous);
     }
   }
-}
-
-// https://people.maths.ox.ac.uk/gilesm/files/NA-08-01.pdf, page 10
-// see also https://arxiv.org/pdf/1701.00392.pdf Eqs. (4.60) and (4.63)
-Tensor linalg_eig_jvp_eigenvalues(const Tensor& dA,
-                                  const Tensor& L,
-                                  const Tensor& V) {
-  const auto dAComplex = at::complex(dA, at::zeros(dA.size(-1), dA.options()));
-  const auto dVfactor = at::linalg_solve(V, at::matmul(dAComplex, V));
-  return at::diag(at::mul(at::eye(V.size(-1), V.options()), dVfactor));
-}
-
-Tensor linalg_eig_jvp_eigenvectors(const Tensor& dA,
-                                   const Tensor& L,
-                                   const Tensor& V) {
-  const auto dAComplex = at::complex(dA, at::zeros(dA.size(-1), dA.options()));
-  const auto dVfactor = at::linalg_solve(V, at::matmul(dAComplex, V));
-  const auto Lconj = L.conj();
-  const auto Econj = Lconj.unsqueeze(-2) - Lconj.unsqueeze(-1);
-  auto Fconj = at::pow(Econj, -1);
-  Fconj.diagonal(0, -2, -1).zero_();
-  return at::matmul(V, at::mul(Fconj, dVfactor));
-}
-
-std::tuple<Tensor, Tensor> linalg_eig_jvp(const Tensor& dA,
-                                          const Tensor& L,
-                                          const Tensor& V) {
-  const auto dAComplex = at::complex(dA, at::zeros(dA.size(-1), dA.options()));
-  const auto dVfactor = at::linalg_solve(V, at::matmul(dAComplex, V));
-  const auto Lconj = L.conj();
-  const auto Econj = Lconj.unsqueeze(-2) - Lconj.unsqueeze(-1);
-  const auto Fconj = at::pow(Econj, -1);
-  Fconj.diagonal(0, -2, -1).zero_();
-  return std::make_tuple(
-    at::diag(at::mul(at::eye(V.size(-1), V.options()), dVfactor)),
-    at::matmul(V, at::mul(Fconj, dVfactor)));
 }
 
 Tensor linalg_lstsq_jvp(
