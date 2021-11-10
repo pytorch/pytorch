@@ -63,7 +63,7 @@ DataRandomFiller::DataRandomFiller(
 
   // load op inputs and outputs
   std::unordered_set<std::string> output_names;
-  for (auto i: c10::irange(run_net.op_size())) {
+  for (auto i : c10::irange(run_net.op_size())) {
     const auto& op = run_net.op(i);
     const auto& op_dims = input_dims[i];
     const auto& op_types = input_types[i];
@@ -78,7 +78,7 @@ DataRandomFiller::DataRandomFiller(
             " inputs; while the input type size is " +
             c10::to_string(op_types.size()));
 
-    for (auto j: c10::irange(op.input_size())) {
+    for (auto j : c10::irange(op.input_size())) {
       inputs_[op.input(j)] =
           std::make_pair(get_tensor_filler(op, j, op_dims), op_types[j]);
     }
@@ -99,19 +99,19 @@ DataRandomFiller::DataRandomFiller(
       }
     }
 
-    for (auto j: c10::irange(op.output_size())) {
+    for (auto j : c10::irange(op.output_size())) {
       output_names.emplace(op.output(j));
     }
   }
 
   // load parameters
   std::unordered_set<std::string> parameters;
-  for (auto i: c10::irange(run_net.arg_size())) {
+  for (auto i : c10::irange(run_net.arg_size())) {
     const auto& arg = run_net.arg(i);
     // TODO: replace "PredictorParameters" with the constant in OSS bbp
     if (arg.has_name() && arg.name() == "PredictorParameters") {
       parameters.reserve(arg.strings_size());
-      for (auto j: c10::irange(arg.strings_size())) {
+      for (auto j : c10::irange(arg.strings_size())) {
         parameters.emplace(arg.strings(j));
       }
       break;

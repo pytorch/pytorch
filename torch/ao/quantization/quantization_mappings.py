@@ -12,6 +12,7 @@ import torch.nn.quantized as nnq
 import torch.nn.quantized._reference as nnqr
 import torch.nn.quantized.dynamic as nnqd
 import torch.nn.qat as nnqat
+import torch.nn.qat.dynamic as nnqatd
 
 from typing import Optional, Union, Dict, Set, Callable, Any
 
@@ -102,6 +103,7 @@ DEFAULT_QAT_MODULE_MAPPINGS : Dict[Callable, Any] = {
 DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nn.GRUCell: nnqd.GRUCell,
     nn.Linear: nnqd.Linear,
+    nnqatd.Linear: nnqd.Linear,
     nn.modules.linear.NonDynamicallyQuantizableLinear: nnqd.Linear,
     nn.LSTM: nnqd.LSTM,
     nn.GRU: nnqd.GRU,
