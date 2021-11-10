@@ -7,17 +7,6 @@
 
 /* basics */
 #include <TH/generic/THTensor.h>
-#include <TH/THGenerateAllTypes.h>
+#include <TH/THGenerateByteType.h>
 
-#include <TH/generic/THTensor.h>
-#include <TH/THGenerateComplexTypes.h>
-
-#include <TH/generic/THTensor.h>
-#include <TH/THGenerateHalfType.h>
-
-#include <TH/generic/THTensor.h>
-#include <TH/THGenerateBoolType.h>
-
-#include <TH/generic/THTensor.h>
-#include <TH/THGenerateBFloat16Type.h>
 #endif
