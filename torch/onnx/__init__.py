@@ -26,6 +26,7 @@ class CheckerError(Exception):
 
 class SymbolicContext:
     r"""Provides extra context for symbolic functions.
+
     Args:
         params_dict (Dict[str, _C.IValue]): Mapping from graph initializer name to IValue.
         env (Dict[_C.Value, _C.Value]): Mapping from Torch domain graph Value to ONNX domain graph Value.
