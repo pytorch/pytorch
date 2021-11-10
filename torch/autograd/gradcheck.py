@@ -896,7 +896,7 @@ def _test_undefined_forward_mode(func, outputs, inputs):
         for i, (fw_grad, u) in enumerate(zip(fw_grads, all_u)):
             fw_grad.copy_(u.view_as(fw_grad))
 
-        for idx, inp in tensor_inputs:
+        for idx, inp in enumerate(tensor_inputs):
             dual_inp_obj = dual_inputs[idx]
 
             # case 1 (Materialized Zero Tensor Tangent)
