@@ -185,14 +185,14 @@ class ParallelTypeBitmap {
   std::bitset<kNumParallelTypes> bitset_;
 
   static constexpr std::bitset<ParallelTypeBitmap::kNumParallelTypes> kTIDBits{
-      (1 << getParallelTypeBitMapOffset(ParallelType::TIDx)) |
-      (1 << getParallelTypeBitMapOffset(ParallelType::TIDy)) |
-      (1 << getParallelTypeBitMapOffset(ParallelType::TIDz))};
+      (1u << getParallelTypeBitMapOffset(ParallelType::TIDx)) |
+      (1u << getParallelTypeBitMapOffset(ParallelType::TIDy)) |
+      (1u << getParallelTypeBitMapOffset(ParallelType::TIDz))};
 
   static constexpr std::bitset<ParallelTypeBitmap::kNumParallelTypes> kBIDBits{
-      (1 << getParallelTypeBitMapOffset(ParallelType::BIDx)) |
-      (1 << getParallelTypeBitMapOffset(ParallelType::BIDy)) |
-      (1 << getParallelTypeBitMapOffset(ParallelType::BIDz))};
+      (1u << getParallelTypeBitMapOffset(ParallelType::BIDx)) |
+      (1u << getParallelTypeBitMapOffset(ParallelType::BIDy)) |
+      (1u << getParallelTypeBitMapOffset(ParallelType::BIDz))};
 };
 
 inline ParallelTypeBitmap operator&(
