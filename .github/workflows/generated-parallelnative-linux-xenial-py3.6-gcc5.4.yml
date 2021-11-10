@@ -28,8 +28,8 @@ env:
   PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   AWS_DEFAULT_REGION: us-east-1
-  PR_NUMBER: ${{ github.event.pull_request.number }}
-  SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+  CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
+  CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
 concurrency:
   group: parallelnative-linux-xenial-py3.6-gcc5.4-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
@@ -168,7 +168,7 @@ jobs:
         run: .github/scripts/parse_ref.py
       - name: Build
         env:
-          BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
         run: |
           # detached container should get cleaned up by teardown_ec2_linux
           container_name=$(docker run \
@@ -177,9 +177,9 @@ jobs:
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e AWS_DEFAULT_REGION \
             -e IS_GHA \
-            -e PR_NUMBER \
-            -e SHA1 \
-            -e BRANCH \
+            -e CIRCLE_PR_NUMBER \
+            -e CIRCLE_SHA1 \
+            -e CIRCLE_BRANCH \
             -e GITHUB_RUN_ID \
             -e SCCACHE_BUCKET \
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
@@ -204,9 +204,9 @@ jobs:
         # tools/stats/print_test_stats.py to natively support GitHub Actions
         env:
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
-          BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          TAG: ${{ steps.parse-ref.outputs.tag }}
-          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
+          CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
+          CIRCLE_WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
         run: |
           COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
           export COMMIT_TIME
@@ -390,7 +390,7 @@ jobs:
       - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
         # Time out the test phase after 240 minutes
         timeout-minutes: 240
         run: |
@@ -415,8 +415,9 @@ jobs:
             -e GITHUB_ACTIONS \
             -e IN_CI \
             -e IS_GHA \
-            -e BRANCH \
-            -e SHA1 \
+            -e CIRCLE_BRANCH \
+            -e CIRCLE_SHA1 \
+            -e CIRCLE_PR_NUMBER \
             -e AWS_DEFAULT_REGION \
             -e IN_WHEEL_TEST \
             -e SHARD_NUMBER \
@@ -483,12 +484,12 @@ jobs:
         # tools/stats/print_test_stats.py to natively support GitHub Actions
         env:
           AWS_DEFAULT_REGION: us-east-1
-          BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: parallelnative-linux-xenial-py3.6-gcc5.4-test
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          TAG: ${{ steps.parse-ref.outputs.tag }}
-          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
+          CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
+          CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
+          CIRCLE_WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
         shell: bash
         run: |
           python3 -m pip install -r requirements.txt

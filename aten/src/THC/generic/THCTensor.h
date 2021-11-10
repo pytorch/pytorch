@@ -30,6 +30,4 @@ TORCH_CUDA_CU_API THCTensor* THCTensor_(newWithStorage1d)(
     int64_t size0_,
     int64_t stride0_);
 
-TORCH_CUDA_CU_API void THCTensor_(free)(THCState* state, THCTensor* self);
-
 #endif
