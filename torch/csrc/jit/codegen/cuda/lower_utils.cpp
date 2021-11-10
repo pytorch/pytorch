@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 
+#include <ATen/cuda/CUDAContext.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
@@ -302,7 +303,7 @@ c10::optional<IterDomain*> getMaybeWarpReductionDim(const ReductionOp* node) {
 
   if (reduction_on_xdim->extent()->isConstScalar()) {
     auto extent_value = reduction_on_xdim->extent()->getInt().value();
-    if (extent_value % C10_WARP_SIZE == 0) {
+    if (extent_value % at::cuda::warp_size() == 0) {
       return c10::optional<IterDomain*>(reduction_on_xdim);
     }
   }

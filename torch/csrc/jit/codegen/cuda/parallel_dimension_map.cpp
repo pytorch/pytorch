@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/parallel_dimension_map.h>
 
+#include <ATen/cuda/CUDAContext.h>
 #include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
@@ -209,6 +210,7 @@ void ParallelDimensionMap::adjustMappingsForWarpPadding() {
   }
 
   const auto tidx_pt = ParallelType::TIDx;
+  auto warp_size = at::cuda::warp_size();
 
   // If the dimension of TIDx is actually a multple of the warp size
   // before padding, it can be left as exact
@@ -216,7 +218,7 @@ void ParallelDimensionMap::adjustMappingsForWarpPadding() {
     auto tidx_dim = dynamic_cast<kir::Int*>(get(tidx_pt));
     if (tidx_dim && tidx_dim->isConst()) {
       auto tidx_dim_val = tidx_dim->value().value();
-      if (tidx_dim_val % C10_WARP_SIZE == 0) {
+      if (tidx_dim_val % warp_size == 0) {
         // Dimension of TIDx is a multiple of the warp size
         return;
       }
@@ -227,8 +229,7 @@ void ParallelDimensionMap::adjustMappingsForWarpPadding() {
   // single warp, use the constant warp size as the dimension of
   // TIDx. Otherwise, jsut use blockDim.x.
   if (warp_info.is_tidx_single_warp) {
-    dim_map_.at(ParallelType::TIDx) =
-        ir_builder.create<kir::Int>(C10_WARP_SIZE);
+    dim_map_.at(ParallelType::TIDx) = ir_builder.create<kir::Int>(warp_size);
   } else {
     dim_map_.at(ParallelType::TIDx) =
         kir::NamedScalar::getParallelDim(ParallelType::TIDx);

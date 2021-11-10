@@ -398,9 +398,10 @@ ReductionParams innerPersistentHeuristic(
     batches_per_block_outer_reduction /= 2;
   }
 
-  auto padded_bdimx = bdimx % C10_WARP_SIZE == 0
+  auto device_warp_size = at::cuda::warp_size();
+  auto padded_bdimx = bdimx % device_warp_size == 0
       ? bdimx
-      : bdimx + (C10_WARP_SIZE - bdimx % C10_WARP_SIZE);
+      : bdimx + (device_warp_size - bdimx % device_warp_size);
 
   bool pad_bdimx = bdimx > 16 &&
       padded_bdimx * bdimy * bdimz <

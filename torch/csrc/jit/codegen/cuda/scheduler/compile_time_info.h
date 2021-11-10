@@ -111,6 +111,8 @@ class CompileTimeInfoBase : public PolymorphicBase {
 
 } // namespace HeuristicCompileTime
 
+// Note: Do NOT export this class. MSVC issue with exported class that contains
+// std::vector<unique_ptr<xxx>>: https://godbolt.org/z/3E4e8T1P1
 //! Compile-time information cache for `canSchedule` and
 //!  `getHeuristics` interfaces. Each cache instance
 //!  stores information that could be inferred at compile
@@ -125,7 +127,7 @@ class CompileTimeInfoBase : public PolymorphicBase {
 //!  - when not in `recording` mode, compiled-time data has
 //!     been stored in this cache and the entries can be accessed
 //!!    but new entries can no longer be inserted.
-class TORCH_CUDA_CU_API HeuristicSummary {
+class HeuristicSummary {
   using Entry = HeuristicCompileTime::CompileTimeInfoBase;
   using EntryOwningPtr = std::unique_ptr<Entry>;
   using EntryPtr = Entry*;
