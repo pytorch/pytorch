@@ -111,7 +111,7 @@ void fuseFrozenConvAddReluImpl(std::shared_ptr<Graph>& graph) {
 #endif
 }
 
-template<typename T>
+template <typename T>
 struct ConvAddReluRegisterer {
   ConvAddReluRegisterer(T& fn) {
     fn = fuseFrozenConvAddReluImpl;
