@@ -28,50 +28,50 @@ from tools.codegen.model import Argument, Type, BaseType, OptionalType, ListType
 #        ```cpp
 #           const c10::List<c10::IValue> size_list_in = (std::move(peek(stack, 0, 7))).toList();
 #
-#     		std::vector<int64_t> size_vec;
-#     		for (c10::IValue size_elem: size_list_in) {
-#     		    int64_t size_base = size_elem.to<int64_t>();
-#     		    size_vec.push_back(size_base);
-#     		}
-#    		at::ArrayRef<int64_t> size_list_out(size_vec);
+#           std::vector<int64_t> size_vec;
+#           for (c10::IValue size_elem: size_list_in) {
+#               int64_t size_base = size_elem.to<int64_t>();
+#               size_vec.push_back(size_base);
+#           }
+#           at::ArrayRef<int64_t> size_list_out(size_vec);
 #                                 ~~~~~~~~~~~~~ <-- The converted argument from ivalues in the stack.
 #                                                   Will be passed to unboxed kernel.
 #       ```
 #    - Dimname[]? names
 #       ```cpp
 #           c10::optional<c10::IValue> names_opt = (std::move(peek(stack, 1, 7))).toOptional<c10::IValue>();
-#     		c10::optional<at::ArrayRef<at::Dimname>> names_opt_out;
-#     		if (names_opt.has_value()) {
+#           c10::optional<at::ArrayRef<at::Dimname>> names_opt_out;
+#           if (names_opt.has_value()) {
 #                         ~~~~~~~~~~~ <-- Unwrapping optional shell
-#     		    const c10::IValue names_opt_in = names_opt.value();
-#     		    const c10::List<c10::IValue> names_list_in = names_opt_in.toList();
+#               const c10::IValue names_opt_in = names_opt.value();
+#               const c10::List<c10::IValue> names_list_in = names_opt_in.toList();
 #
-#     			std::vector<at::Dimname> names_vec;
-#     			for (c10::IValue names_elem: names_list_in) {
+#               std::vector<at::Dimname> names_vec;
+#               for (c10::IValue names_elem: names_list_in) {
 #                                ~~~~~~~~~~~~~~~~~~~~~~~~~ <-- Unrolling list, then convert elements one by one.
-#     			    at::Dimname names_base = names_elem.to<at::Dimname>();
-#     			    names_vec.push_back(names_base);
-#     			}
-#     			at::ArrayRef<at::Dimname> names_list_out(names_vec);
+#                   at::Dimname names_base = names_elem.to<at::Dimname>();
+#                   names_vec.push_back(names_base);
+#               }
+#               at::ArrayRef<at::Dimname> names_list_out(names_vec);
 #
-#     		    names_opt_out = c10::optional<at::ArrayRef<at::Dimname>>(names_list_out);
-#     		} else {
-#     		    names_opt_out = c10::optional<at::ArrayRef<at::Dimname>>();
-#     		}
+#               names_opt_out = c10::optional<at::ArrayRef<at::Dimname>>(names_list_out);
+#           } else {
+#               names_opt_out = c10::optional<at::ArrayRef<at::Dimname>>();
+#           }
 #       ```
 #    - ScalarType? dtype (similarly for the rest of the arguments)
 #       ```cpp
-#    		c10::optional<c10::IValue> dtype_opt = (std::move(peek(stack, 2, 7))).toOptional<c10::IValue>();
+#           c10::optional<c10::IValue> dtype_opt = (std::move(peek(stack, 2, 7))).toOptional<c10::IValue>();
 #           c10::optional<at::ScalarType> dtype_opt_out;
-#     		if (dtype_opt.has_value()) {
-#     		    const c10::IValue dtype_opt_in = dtype_opt.value();
-#     		    at::ScalarType dtype_base = dtype_opt_in.to<at::ScalarType>();
+#           if (dtype_opt.has_value()) {
+#               const c10::IValue dtype_opt_in = dtype_opt.value();
+#               at::ScalarType dtype_base = dtype_opt_in.to<at::ScalarType>();
 #                                                        ~~~~~~~~~~~~~~~~~~~~ <-- For base types, convert ivalue to it
 #                                                                                 directly using ".to<T>()" API.
-#     		    dtype_opt_out = c10::optional<at::ScalarType>(dtype_base);
-#     		} else {
-#     		    dtype_opt_out = c10::optional<at::ScalarType>();
-#     		}
+#               dtype_opt_out = c10::optional<at::ScalarType>(dtype_base);
+#           } else {
+#               dtype_opt_out = c10::optional<at::ScalarType>();
+#           }
 #       ```
 #    - (implicitly) TensorOptions
 #       ```cpp
