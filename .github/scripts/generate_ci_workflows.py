@@ -32,10 +32,10 @@ LINUX_RUNNERS = {
     LINUX_CUDA_TEST_RUNNER,
 }
 
-MACOS_TEST_RUNNER = "macos-10.15"
+MACOS_TEST_RUNNER_10_15 = "macos-10.15"
 
 MACOS_RUNNERS = {
-    MACOS_TEST_RUNNER
+    MACOS_TEST_RUNNER_10_15,
 }
 
 CUDA_RUNNERS = {
@@ -163,6 +163,7 @@ class CIWorkflow:
     num_test_shards_on_pull_request: int = -1
     distributed_test: bool = True
     timeout_after: int = 240
+    xcode_version: str = ''
 
     # The following variables will be set as environment variables,
     # so it's easier for both shell and Python scripts to consume it if false is represented as the empty string.
@@ -543,6 +544,16 @@ ANDROID_WORKFLOWS = [
             labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_ANDROID, LABEL_CIFLOW_DEFAULT},
         ),
     ),
+    CIWorkflow(
+        arch="linux",
+        build_environment="pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c",
+        test_runner_type=LINUX_CPU_TEST_RUNNER,
+        exclude_test=True,
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_ANDROID, LABEL_CIFLOW_DEFAULT},
+        ),
+    ),
 ]
 
 BAZEL_WORKFLOWS = [
@@ -561,6 +572,7 @@ IOS_WORKFLOWS = [
     CIWorkflow(
         arch="macos",
         build_environment="ios-12-5-1-arm64",
+        test_runner_type=MACOS_TEST_RUNNER_10_15,
         exclude_test=True,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_IOS, LABEL_CIFLOW_MACOS},
@@ -569,6 +581,7 @@ IOS_WORKFLOWS = [
     CIWorkflow(
         arch="macos",
         build_environment="ios-12-5-1-arm64-coreml",
+        test_runner_type=MACOS_TEST_RUNNER_10_15,
         exclude_test=True,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_IOS, LABEL_CIFLOW_MACOS},
@@ -577,6 +590,7 @@ IOS_WORKFLOWS = [
     CIWorkflow(
         arch="macos",
         build_environment="ios-12-5-1-arm64-full-jit",
+        test_runner_type=MACOS_TEST_RUNNER_10_15,
         exclude_test=True,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_IOS, LABEL_CIFLOW_MACOS},
@@ -585,6 +599,7 @@ IOS_WORKFLOWS = [
     CIWorkflow(
         arch="macos",
         build_environment="ios-12-5-1-arm64-custom-ops",
+        test_runner_type=MACOS_TEST_RUNNER_10_15,
         exclude_test=True,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_IOS, LABEL_CIFLOW_MACOS},
@@ -593,6 +608,7 @@ IOS_WORKFLOWS = [
     CIWorkflow(
         arch="macos",
         build_environment="ios-12-5-1-arm64-metal",
+        test_runner_type=MACOS_TEST_RUNNER_10_15,
         exclude_test=True,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_IOS, LABEL_CIFLOW_MACOS},
@@ -601,6 +617,7 @@ IOS_WORKFLOWS = [
     CIWorkflow(
         arch="macos",
         build_environment="ios-12-5-1-x86-64",
+        test_runner_type=MACOS_TEST_RUNNER_10_15,
         exclude_test=True,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_IOS, LABEL_CIFLOW_MACOS},
@@ -609,6 +626,7 @@ IOS_WORKFLOWS = [
     CIWorkflow(
         arch="macos",
         build_environment="ios-12-5-1-x86-64-coreml",
+        test_runner_type=MACOS_TEST_RUNNER_10_15,
         exclude_test=True,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_IOS, LABEL_CIFLOW_MACOS},
@@ -617,9 +635,42 @@ IOS_WORKFLOWS = [
     CIWorkflow(
         arch="macos",
         build_environment="ios-12-5-1-x86-64-full-jit",
+        test_runner_type=MACOS_TEST_RUNNER_10_15,
         exclude_test=True,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_IOS, LABEL_CIFLOW_MACOS},
+        ),
+    ),
+]
+
+MACOS_WORKFLOWS = [
+    CIWorkflow(
+        arch="macos",
+        build_environment="macos-10-15-py3-x86-64",
+        xcode_version="12",
+        test_runner_type=MACOS_TEST_RUNNER_10_15,
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_MACOS},
+        ),
+    ),
+    CIWorkflow(
+        arch="macos",
+        build_environment="macos-10-15-py3-lite-interpreter-x86-64",
+        xcode_version="12",
+        test_runner_type=MACOS_TEST_RUNNER_10_15,
+        exclude_test=True,
+        build_generates_artifacts=False,
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_MACOS},
+        ),
+    ),
+    CIWorkflow(
+        arch="macos",
+        build_environment="macos-10-15-py3-arm64",
+        test_runner_type=MACOS_TEST_RUNNER_10_15,
+        exclude_test=True,
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_MACOS},
         ),
     ),
 ]
@@ -657,6 +708,7 @@ def main() -> None:
         (jinja_env.get_template("windows_ci_workflow.yml.j2"), WINDOWS_WORKFLOWS),
         (jinja_env.get_template("bazel_ci_workflow.yml.j2"), BAZEL_WORKFLOWS),
         (jinja_env.get_template("ios_ci_workflow.yml.j2"), IOS_WORKFLOWS),
+        (jinja_env.get_template("macos_ci_workflow.yml.j2"), MACOS_WORKFLOWS),
         (jinja_env.get_template("docker_builds_ci_workflow.yml.j2"), DOCKER_WORKFLOWS),
         (jinja_env.get_template("android_ci_workflow.yml.j2"), ANDROID_WORKFLOWS),
     ]
