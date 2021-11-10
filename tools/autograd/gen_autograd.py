@@ -40,7 +40,6 @@ from .gen_variable_factories import gen_variable_factories
 from .load_derivatives import load_derivatives
 
 def gen_autograd(
-    aten_path: str,
     native_functions_path: str,
     out: str,
     autograd_dir: str,
@@ -76,7 +75,6 @@ def gen_autograd(
 
 
 def gen_autograd_python(
-    aten_path: str,
     native_functions_path: str,
     out: str,
     autograd_dir: str,
@@ -99,8 +97,6 @@ def gen_autograd_python(
 def main() -> None:
     parser = argparse.ArgumentParser(
         description='Generate autograd C++ files script')
-    parser.add_argument('declarations', metavar='DECL',
-                        help='path to Declarations.yaml')
     parser.add_argument('native_functions', metavar='NATIVE',
                         help='path to native_functions.yaml')
     parser.add_argument('out', metavar='OUT',
@@ -108,7 +104,7 @@ def main() -> None:
     parser.add_argument('autograd', metavar='AUTOGRAD',
                         help='path to autograd directory')
     args = parser.parse_args()
-    gen_autograd(args.declarations, args.native_functions,
+    gen_autograd(args.native_functions,
                  args.out, args.autograd,
                  SelectiveBuilder.get_nop_selector())
 
