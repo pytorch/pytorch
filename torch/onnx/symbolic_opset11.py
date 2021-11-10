@@ -217,7 +217,7 @@ upsample_trilinear3d = _interpolate("upsample_trilinear3d", 5, "linear")
 upsample_bicubic2d = _interpolate("upsample_bicubic2d", 4, "cubic")
 
 
-def __interpolate(g, input, size, scale_factor, mode, align_corners, recompute_scale_factor):
+def __interpolate(g, input, size, scale_factor, mode, align_corners, recompute_scale_factor, antialias):
     return sym_help.__interpolate_helper(g, input, size, scale_factor, mode, align_corners, recompute_scale_factor)
 
 @parse_args("v", "i", "v", "v")
