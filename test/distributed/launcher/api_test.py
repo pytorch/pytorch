@@ -9,26 +9,29 @@
 import multiprocessing as mp
 import os
 import shutil
+import signal
 import sys
 import tempfile
 import time
 import unittest
 import uuid
 from contextlib import closing
-from typing import Optional, Any, Dict
+from typing import Any, Dict, Optional
 from unittest import mock
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import torch
 import torch.distributed as dist
 from torch.distributed.elastic.agent.server.api import RunResult, WorkerState
+from torch.distributed.elastic.multiprocessing.api import SignalException
 from torch.distributed.elastic.multiprocessing.errors import ChildFailedError
 from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
 from torch.distributed.elastic.utils import get_socket_with_port
 from torch.distributed.launcher.api import (
     LaunchConfig,
-    elastic_launch,
     _get_entrypoint_name,
+    elastic_launch,
+    launch_agent,
 )
 from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
@@ -60,8 +63,19 @@ def _dist_sum(wait=0):
     return t.item()
 
 
+ELASTIC_AGENT_RUN = "torch.distributed.launcher.api.LocalElasticAgent.run"
+EVENTS_RECORD = "torch.distributed.launcher.api.events.record"
+GET_RDZV_HANDLER = (
+    "torch.distributed.elastic.rendezvous.registry.get_rendezvous_handler"
+)
+
+
 class MockException(Exception):
     pass
+
+
+def short_hash():
+    return str(uuid.uuid4()).split("-")[0]
 
 
 class ElasticLaunchTest(unittest.TestCase):
@@ -128,9 +142,7 @@ class ElasticLaunchTest(unittest.TestCase):
             {str(i) for i in range(world_size)}, set(os.listdir(self.test_dir))
         )
 
-    @sandcastle_skip_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_launch_script_python(self):
         nnodes = 1
         nproc_per_node = 4
@@ -145,9 +157,7 @@ class ElasticLaunchTest(unittest.TestCase):
         world_size = nnodes * nproc_per_node
         self.check_works_ran(world_size)
 
-    @sandcastle_skip_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_launch_script_python_local_rank_transfer(self):
         nnodes = 1
         nproc_per_node = 4
@@ -162,9 +172,7 @@ class ElasticLaunchTest(unittest.TestCase):
         world_size = nnodes * nproc_per_node
         self.check_works_ran(world_size)
 
-    @sandcastle_skip_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_launch_script_bash(self):
         nnodes = 1
         nproc_per_node = 4
@@ -177,9 +185,7 @@ class ElasticLaunchTest(unittest.TestCase):
         world_size = nnodes * nproc_per_node
         self.check_works_ran(world_size)
 
-    @sandcastle_skip_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_launch_function(self):
         nnodes = 1
         nproc_per_node = 4
@@ -193,9 +199,7 @@ class ElasticLaunchTest(unittest.TestCase):
         actual_res = sorted(value for value in res.values())
         self.assertEqual(expected_res, actual_res)
 
-    @sandcastle_skip_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_launch_dist_sum_with_static_rdzv(self):
         nnodes = 1
         nproc_per_node = 4
@@ -224,9 +228,7 @@ class ElasticLaunchTest(unittest.TestCase):
         actual_res = sorted(value for value in res.values())
         self.assertEqual(expected_res, actual_res)
 
-    @sandcastle_skip_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_launch_elastic(self):
         nproc_per_node = 4
 
@@ -338,3 +340,36 @@ class ElasticLaunchTest(unittest.TestCase):
             _get_entrypoint_name(sys.executable, ["-u", "test_script.py"]),
         )
         self.assertEqual("", _get_entrypoint_name(None, []))
+
+    @patch(ELASTIC_AGENT_RUN)
+    @patch(GET_RDZV_HANDLER)
+    def test_rdzv_handler_shutdown_on_agent_signal(self, mock_get_rdzv, mock_agent_run):
+        config = self.get_test_launch_config(min_nodes=1, max_nodes=1, nproc_per_node=1)
+
+        for sigval in [signal.SIGTERM, signal.SIGINT]:
+            with patch(EVENTS_RECORD) as record_event_mock:
+                rdzv_handler_mock = MagicMock()
+                rdzv_handler_mock.get_run_id.return_value = short_hash()
+                mock_get_rdzv.return_value = rdzv_handler_mock
+
+                mock_agent_run.side_effect = SignalException("test", sigval)
+                with self.assertRaises(SignalException):
+                    launch_agent(config, simple_rank_scale, [])
+                rdzv_handler_mock.shutdown.assert_not_called()
+                record_event_mock.assert_called_once()
+
+    @patch(ELASTIC_AGENT_RUN)
+    @patch(GET_RDZV_HANDLER)
+    def test_rdzv_handler_shutdown_on_agent_error(self, mock_get_rdzv, mock_agent_run):
+        config = self.get_test_launch_config(min_nodes=1, max_nodes=1, nproc_per_node=1)
+
+        with patch(EVENTS_RECORD) as record_event_mock:
+            rdzv_handler_mock = MagicMock()
+            rdzv_handler_mock.get_run_id.return_value = short_hash()
+            mock_get_rdzv.return_value = rdzv_handler_mock
+
+            mock_agent_run.side_effect = RuntimeError("any other exception")
+            with self.assertRaises(RuntimeError):
+                launch_agent(config, simple_rank_scale, [])
+            rdzv_handler_mock.shutdown.assert_called_once()
+            record_event_mock.assert_called_once()
