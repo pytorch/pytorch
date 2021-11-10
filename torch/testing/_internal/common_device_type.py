@@ -1059,6 +1059,17 @@ def disablecuDNN(fn):
 
     return disable_cudnn
 
+def disableMkldnn(fn):
+
+    @wraps(fn)
+    def disable_mkldnn(self, *args, **kwargs):
+        if torch.backends.mkldnn.is_available():
+            with torch.backends.mkldnn.flags(enabled=False):
+                return fn(self, *args, **kwargs)
+        return fn(self, *args, **kwargs)
+
+    return disable_mkldnn
+
 
 def expectedFailureCUDA(fn):
     return expectedFailure('cuda')(fn)
@@ -1146,6 +1157,11 @@ def skipCPUIfNoMkl(fn):
 # Skips a test on CPU if MKL Sparse is not available (it's not linked on Windows).
 def skipCPUIfNoMklSparse(fn):
     return skipCPUIf(IS_WINDOWS or not TEST_MKL, "PyTorch is built without MKL support")(fn)
+
+
+# Skips a test on CPU if mkldnn is not available.
+def skipCPUIfNoMkldnn(fn):
+    return skipCPUIf(not torch.backends.mkldnn.is_available(), "PyTorch is built without mkldnn support")(fn)
 
 
 # Skips a test on CUDA if MAGMA is not available.
@@ -1244,6 +1260,12 @@ def skipCUDAIfNoCusparseGeneric(fn):
 
 def skipCUDAIfNoCudnn(fn):
     return skipCUDAIfCudnnVersionLessThan(0)(fn)
+
+def skipCUDAIfMiopen(fn):
+    return skipCUDAIf(torch.version.hip is not None, "Marked as skipped for MIOpen")(fn)
+
+def skipCUDAIfNoMiopen(fn):
+    return skipCUDAIf(torch.version.hip is None, "MIOpen is not available")(skipCUDAIfNoCudnn(fn))
 
 def skipMeta(fn):
     return skipMetaIf(True, "test doesn't work with meta tensors")(fn)
