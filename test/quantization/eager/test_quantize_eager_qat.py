@@ -21,6 +21,8 @@ from torch.ao.quantization import (
     get_default_qat_qconfig,
     FixedQParamsFakeQuantize,
     FusedMovingAvgObsFakeQuantize,
+    get_embedding_qat_module_mappings,
+    get_embedding_static_quant_module_mappings,
     NoopObserver,
 )
 from torch.testing._internal.common_utils import TestCase
@@ -125,7 +127,7 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
         for qengine in supported_qengines:
             with override_quantized_engine(qengine):
                 model = DeFusedEmbeddingBagLinear().train()
-                model = prepare_qat(model)
+                model = prepare_qat(model, mapping=get_embedding_qat_module_mappings())
                 self.checkObservers(model)
 
                 test_only_train_fn(model, self.embed_linear_data_train)
@@ -134,7 +136,7 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
                 # make sure that Embedding has a noop for activation.
                 self.assertEqual(type(model.emb.activation_post_process), NoopObserver)
 
-                model = convert(model)
+                model = convert(model, mapping=get_embedding_static_quant_module_mappings())
 
                 def checkQuantized(model):
                     # make sure Embedding is now a QuantizedEmbedding
@@ -147,22 +149,19 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
                     self.checkNoQconfig(model)
 
                 checkQuantized(model)
-                model = DeFusedEmbeddingBagLinear()
-                model = quantize_qat(model, test_only_train_fn, [self.embed_linear_data_train])
-                checkQuantized(model)
 
 
     def test_embedding_bag_linear(self):
         for qengine in supported_qengines:
             with override_quantized_engine(qengine):
                 model = ManualEmbeddingBagLinear().train()
-                model = prepare_qat(model)
+                model = prepare_qat(model, mapping=get_embedding_qat_module_mappings())
                 self.checkObservers(model)
 
                 test_only_train_fn(model, self.embed_linear_data_train)
                 # make sure not activation_post_process is inserted for EmbeddingBag
                 self.assertFalse(hasattr(model, "activation_post_process"))
-                model = convert(model)
+                model = convert(model, mapping=get_embedding_static_quant_module_mappings())
 
                 def checkQuantized(model):
                     # Make sure EmbeddingBag is now a quantized EmbeddingBag.
@@ -177,8 +176,6 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
                 checkQuantized(model)
 
                 model = ManualEmbeddingBagLinear()
-                model = quantize_qat(model, test_only_train_fn, [self.embed_linear_data_train])
-                checkQuantized(model)
 
     def test_train_save_load_eval(self):
         r"""Test QAT flow of creating a model, doing QAT and saving the quantized state_dict
