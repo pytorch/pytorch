@@ -6,6 +6,7 @@
 namespace torch_lazy_tensors {
 
 // TODO(alanwaketan): Use the backend API to get the default device type.
+// In the future, we should also get the default device ordinal.
 Device::Device()
   : type_(std::make_shared<BackendDeviceType>()) {}
 
