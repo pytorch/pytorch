@@ -1518,7 +1518,7 @@ ProcessedNode::ProcessedNode(
       inputs_(std::move(inputs)),
       outputs_offset_(outputs_offset)
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
-    ,
+      ,
       op_name_(node->kind().toQualString())
 #endif
 {
