@@ -173,6 +173,23 @@ TORCH_META_FUNC(scatter_add)
   scatter_meta_impl(*this, self, dim, index, src, "add");
 }
 
+TORCH_META_FUNC(scatter_reduce2)
+(const Tensor& self,
+ const int64_t dim,
+ const Tensor& index,
+ const c10::string_view reduce,
+ const c10::optional<int64_t> output_size) {
+
+  auto sizes = self.sizes().vec();
+
+  if (output_size.has_value())
+    sizes[dim] = output_size.value();
+  else
+    sizes[dim] = index.numel() > 0 ? index.max().item<int64_t>() + 1: 0;
+
+  set_output(sizes, self.options());
+}
+
 } // namespace meta
 
 namespace native {
@@ -1259,6 +1276,40 @@ TORCH_IMPL_FUNC(scatter_add)
   } else {
     scatter_add_stub(self.device().type(), mut_out, dim, index, src);
   }
+}
+
+TORCH_IMPL_FUNC(scatter_reduce2_structured_cpu)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const c10::string_view reduce,
+ const c10::optional<int64_t> output_size,
+ const Tensor& out) {
+
+  TORCH_CHECK(self.dim() == index.dim(),
+      "Shape mismatch between `self` (got ", self.sizes(), ") ",
+      "and `index` (got ", index.sizes(), ")");
+  TORCH_CHECK(dim >= -self.dim() && dim < self.dim(),
+      "Expected `dim` to be in range ", -self.dim(), " and ", self.dim() - 1,
+      " (got ", dim, ")");
+
+  dim = dim < 0 ? dim + self.dim() : dim;
+
+  for (int64_t i = 0; i < self.dim(); i++) {
+    TORCH_CHECK(self.size(i) == index.size(i),
+        "Shape mismatch between `self` (got ", self.sizes(), ") ",
+        "and `index` (got ", index.sizes(), ")");
+    if (i != dim) {
+      TORCH_CHECK(self.size(i) == out.size(i),
+          "Shape mismatch between `self` (got ", self.sizes(), ") ",
+          "and `out` (got ", index.sizes(), ") in dimension ", i);
+    }
+  }
+
+  TORCH_CHECK(reduce == "sum", "`reduce` argument must be 'sum'");
+
+  out.zero_();
+  scatter_add_stub(self.device().type(), out, dim, index, self);
 }
 
 Tensor masked_scatter(const Tensor & self, const Tensor & mask, const Tensor & source) {
