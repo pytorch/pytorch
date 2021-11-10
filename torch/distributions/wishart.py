@@ -165,14 +165,15 @@ class Wishart(Distribution):
     def log_prob(self, value):
         if self._validate_args:
             self._validate_sample(value)
+        nu = self.df
         p = self._event_shape[0]
         V = self.covariance_matrix
         return (
-            - torch.mvlgamma(self.df / 2, p = p)
+            - torch.mvlgamma(nu / 2, p = p)
             - self.df * self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1)
             - (
-                - (self.df - self._event_shape[0] - 1) * value.logdet()
-                + self.df * self._event_shape[0] * math.log(2)
+                - (nu - p - 1) * value.logdet()
+                + nu * p * math.log(2)
                 + torch.einsum("...ik,...kj->...ij", V.inverse(), value).trace()
             ) / 2
         )
@@ -183,9 +184,9 @@ class Wishart(Distribution):
         H = (
             (p + 1) * self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1)
             + p * (p + 1) * math.log(2) / 2
-            + torch.mvlgamma(self.df / 2, p = p)
-            - (self.df - p - 1) * _mvdigamma(self.df / 2) / 2
-            + self.df * p / 2
+            + torch.mvlgamma(nu / 2, p = p)
+            - (nu - p - 1) * _mvdigamma(nu / 2) / 2
+            + nu * p / 2
         )
         if len(self._batch_shape) == 0:
             return H
