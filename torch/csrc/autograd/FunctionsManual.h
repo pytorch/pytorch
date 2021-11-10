@@ -166,15 +166,6 @@ Tensor slice_backward_wrapper(
     int64_t step);
 Tensor linalg_eig_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
                            const Tensor& L, const Tensor& V);
-Tensor linalg_eig_jvp_eigenvalues(const Tensor& dA,
-                                  const Tensor& L,
-                                  const Tensor& V);
-Tensor linalg_eig_jvp_eigenvectors(const Tensor& dA,
-                                   const Tensor& L,
-                                   const Tensor& V);
-std::tuple<Tensor, Tensor> linalg_eig_jvp(const Tensor& dA,
-                                          const Tensor& L,
-                                          const Tensor& V);
 Tensor linalg_lstsq_jvp(
   const Tensor& A,
   const Tensor& B,
