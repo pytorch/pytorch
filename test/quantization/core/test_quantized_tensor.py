@@ -27,7 +27,7 @@ def _calculate_dynamic_qparams(X, dtype, reduce_range=False):
     """Calculate the dynamic quantization parameters (scale, zero_point)
     according to the min and max element of the tensor"""
     if isinstance(X, torch.Tensor):
-        X = X.numpy()
+        X = X.cpu().data.numpy()
     if dtype == torch.qint8:
         if reduce_range:
             qmin, qmax = -64, 63

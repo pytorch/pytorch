@@ -27,7 +27,6 @@ Tensor quantize_per_tensor_dynamic(
   int qmin;
   int qmax;
 
-  // should we check additional QInt types beyond 8 bits?
   if (dtype == ScalarType::QInt8) {
     qmin = -128;
     qmax = 127;
