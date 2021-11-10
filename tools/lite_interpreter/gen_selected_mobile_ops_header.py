@@ -7,6 +7,13 @@ from tools.codegen.code_template import CodeTemplate
 
 import yaml
 
+# Safely load fast C Yaml loader/dumper if they are available
+try:
+    from yaml import CSafeLoader as Loader
+except ImportError:
+    from yaml import SafeLoader as Loader  # type: ignore[misc]
+
+
 if_condition_template_str = """if (kernel_tag_sv.compare("$kernel_tag_name") == 0) {
   return $dtype_checks;
 }"""
@@ -127,7 +134,7 @@ def main() -> None:
     print("Loading yaml file: ", model_file_name)
     loaded_model = {}
     with open(model_file_name, "rb") as model_file:
-        loaded_model = yaml.load(model_file)
+        loaded_model = yaml.load(model_file, Loader=Loader)
 
 
     root_operators_set = set(loaded_model)
