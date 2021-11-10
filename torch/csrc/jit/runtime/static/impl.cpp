@@ -1520,7 +1520,7 @@ ProcessedNode::ProcessedNode(
       inputs_size_(inputs_size),
       outputs_offset_(outputs_offset)
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
-    ,
+      ,
       op_name_(node->kind().toQualString())
 #endif
 {
