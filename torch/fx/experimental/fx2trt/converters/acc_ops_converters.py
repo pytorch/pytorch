@@ -1,5 +1,6 @@
 import math
 import operator
+import warnings
 
 import numpy as np
 import tensorrt as trt
@@ -12,6 +13,7 @@ from torch.fx.experimental.fx2trt.fx2trt import (
     get_dynamic_dims,
 )
 from torch.fx.immutable_collections import immutable_list
+
 from .converter_utils import (
     get_trt_plugin,
     set_layer_name,
@@ -1595,9 +1597,12 @@ def acc_ops_chunk(network, target, args, kwargs, name):
         dim = dim % input_dim_size
 
     if chunks > input_val.shape[dim]:
-        print(f"Warning! Asked for {chunks} chunks along dimention "
-              f"{dim} on tensor with size {input_val.shape} chunks "
-              f"will default to {input_val.shape[dim]}")
+        warnings.warn(
+            f"Asked for {chunks} chunks along dimention "
+            f"{dim} on tensor with size {input_val.shape}, chunks "
+            f"will default to {input_val.shape[dim]}",
+            RuntimeWarning
+        )
         chunks = input_val.shape[dim]
 
     start = [0] * len(input_val.shape)
