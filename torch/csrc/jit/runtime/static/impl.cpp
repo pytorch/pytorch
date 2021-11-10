@@ -1703,6 +1703,10 @@ bool ProcessedNode::verify_outputs_dont_overlap_each_other() const {
 }
 
 bool ProcessedNode::verify_inputs_dont_overlap_outputs() const {
+  if (!has_out_variant()) {
+    // Non-out-variants are allowed to alias their inputs, we don't care.
+    return true;
+  }
   auto schema = node()->maybeSchema();
   // skip memory overlap check for mutable ops with only one output
   if (!schema || (schema->is_mutable() && num_outputs_ == 1)) {
