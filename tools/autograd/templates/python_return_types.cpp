@@ -43,6 +43,7 @@ void initReturnTypes(PyObject* module) {
             return_types_module,
             return_type_pair.first.c_str(),
             (PyObject*)return_type_pair.second) != 0) {
+      Py_DECREF((PyObject*)return_type_pair.second);
       throw python_error();
     }
   }
