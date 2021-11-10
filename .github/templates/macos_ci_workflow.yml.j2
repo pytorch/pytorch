@@ -54,8 +54,8 @@ jobs:
         run: |
           # Install dependencies
           brew install libomp
-      - name: Install sccache (only for non-forked PRs)
-        if: github.event.pull_request.head.repo.full_name == github.repository
+      - name: Install sccache (only for non-forked PRs, and pushes to trunk)
+        if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
         run: |
           sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
           sudo chmod +x /usr/local/bin/sccache
