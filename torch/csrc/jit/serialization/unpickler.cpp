@@ -248,7 +248,7 @@ inline void append<bool>(std::vector<bool>& a, bool&& e) {
 }
 
 static std::vector<int64_t> tupleToIntList(const IValue& v) {
-  return fmap(v.toTuple()->elements(), [](const IValue& v) -> int64_t {
+  return fmap(v.toTupleRef().elements(), [](const IValue& v) -> int64_t {
     return v.toInt();
   });
 }
@@ -459,9 +459,17 @@ PickleOpCode Unpickler::readInstruction() {
         // for torch.package logic where storage may be loaded already
         storage = storage_context_->getStorage(key);
       } else {
-        at::DataPtr storage_ptr = read_record_(key);
         int64_t numel = args.at(4).toInt();
         caffe2::TypeMeta dtype = at::CPU(type).typeMeta();
+
+        at::DataPtr storage_ptr;
+        if (numel > 0) {
+          // If there are no elements in the tensor, there's no point in
+          // reading a zero (0) byte file from the input stream and paying
+          // that cost.
+          storage_ptr = read_record_(key);
+        }
+
         storage = at::Storage(
             c10::Storage::use_byte_size_t(),
             numel * dtype.itemsize(),
@@ -534,7 +542,7 @@ void Unpickler::readGlobal(
     if (class_name == "build_tensor_from_id") {
       globals_.emplace_back([this] {
         // Pop reduce arg off the stack
-        auto data = stack_.back().toTuple()->elements().at(0);
+        auto data = stack_.back().toTupleRef().elements().at(0);
         stack_.pop_back();
         TORCH_CHECK(
             !tensor_table_.empty(),
@@ -583,7 +591,7 @@ void Unpickler::readGlobal(
       // Unpickle a list specialization (e.g. List[Tensor], List[int], ...)
       globals_.emplace_back([this, elem_type] {
         // Pop reduce arg off the stack
-        auto data = stack_.back().toTuple()->elements().at(0).toList();
+        auto data = stack_.back().toTupleRef().elements().at(0).toList();
         stack_.pop_back();
         data.unsafeSetElementType(elem_type);
         stack_.emplace_back(std::move(data));
@@ -620,7 +628,7 @@ void Unpickler::readGlobal(
     });
   } else if (module_name == "torch" && class_name == "device") {
     globals_.emplace_back([this] {
-      auto device_string = stack_.back().toTuple()->elements().at(0);
+      auto device_string = stack_.back().toTupleRef().elements().at(0);
       stack_.pop_back();
       stack_.emplace_back(c10::Device(device_string.toStringRef()));
     });
