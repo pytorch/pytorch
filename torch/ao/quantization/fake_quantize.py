@@ -6,6 +6,7 @@ during QAT.
 import torch
 from torch.nn import Module
 from torch.ao.quantization.observer import (
+    MinMaxObserver,
     MovingAverageMinMaxObserver,
     HistogramObserver,
     MovingAveragePerChannelMinMaxObserver,
@@ -344,6 +345,12 @@ default_weight_fake_quant = FakeQuantize.with_args(observer=MovingAverageMinMaxO
                                                    dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, reduce_range=False)
 """
 Default fake_quant for weights.
+"""
+
+default_dynamic_fake_quant = FakeQuantize.with_args(observer=MinMaxObserver, quant_min=0, quant_max=255,
+                                                    dtype=torch.quint8, memoryless=True)
+"""
+Default dynamic fake_quant for activations.
 """
 
 # TODO(future PR): remove these defaults and enforce activation functions
