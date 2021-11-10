@@ -23,7 +23,9 @@ DynamicType::Arguments::Arguments(c10::ArrayRef<TypePtr> args)
   }
 }
 
-DynamicType::Arguments::Arguments(const c10::FunctionSchema& schema, c10::ArrayRef<TypePtr> args)
+DynamicType::Arguments::Arguments(
+    const c10::FunctionSchema& schema,
+    c10::ArrayRef<TypePtr> args)
     : Arguments(args) {
   TORCH_INTERNAL_ASSERT(schema.arguments().size() == args.size());
   for (size_t i = 0; i < args.size(); i++) {
@@ -52,6 +54,9 @@ DynamicTypePtr DynamicType::create(Type& other) {
   }
   return std::shared_ptr<DynamicType>(new DynamicType{other});
 }
+
+DynamicType::DynamicType(Tag tag, Arguments arguments)
+    : Type(Kind), tag_(tag), arguments_(std::move(arguments)) {}
 
 DynamicType::DynamicType(const Type& other) : Type(DynamicType::Kind) {
   TORCH_INTERNAL_ASSERT(other.kind() != Kind);

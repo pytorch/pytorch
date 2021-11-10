@@ -78,7 +78,7 @@ std::vector<TypePtr> TypeParser::parseList() {
 // The list of non-simple types supported by currrent parser.
 std::unordered_set<std::string> TypeParser::getNonSimpleType() {
   static std::unordered_set<std::string> nonSimpleTypes{
-      "List", "Union", "Optional", "Future", "Dict", "Tuple"};
+      "List", "Optional", "Future", "Dict", "Tuple"};
   return nonSimpleTypes;
 }
 
@@ -101,7 +101,7 @@ TypePtr TypeParser::parseNonSimple(const std::string& token) {
   if (token == "List") {
     return CreateSingleElementType<ListType>();
   } else if (token == "Optional") {
-    return CreateSingleElementType<OptionalType>();
+    return parseSingleElemenetType(DynamicType::Tag::Optional);
   } else if (token == "Future") {
     return CreateSingleElementType<FutureType>();
   } else if (token == "Dict") {
@@ -295,6 +295,14 @@ template <class T>
 TypePtr TypeParser::CreateSingleElementType() {
   expectChar('[');
   auto result = T::create(parse());
+  expectChar(']');
+  return result;
+}
+
+TypePtr TypeParser::parseSingleElemenetType(DynamicType::Tag tag) {
+  expectChar('[');
+  auto result =
+      std::make_shared<DynamicType>(tag, DynamicType::Arguments(parse()));
   expectChar(']');
   return result;
 }
