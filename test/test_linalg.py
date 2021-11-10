@@ -6127,17 +6127,25 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
     @dtypes(torch.half)
     @onlyCUDA
-    def test_addmm_addbmm_overflow(self, device, dtype):
+    def test_addmm_baddbmm_overflow(self, device, dtype):
         inp = torch.zeros(128, 128, dtype=torch.half, device=device)
         mat1 = torch.ones(128, 1000, dtype=torch.half, device=device) * 100
         mat2 = torch.ones(1000, 128, dtype=torch.half, device=device) * 100
         out = torch.addmm(inp, mat1, mat2, alpha=0.001, beta=0.)
-        self.assertFalse(out.isinf().any())
+        # just check for no overflow on ROCM
+        if TEST_WITH_ROCM:
+            self.assertFalse(out.isinf().any())
+        else:
+            self.assertTrue((out == 10000.).all())
 
+        inp = torch.zeros(3, 128, 128, dtype=torch.half, device=device)
         mat1 = torch.ones(3, 128, 1000, dtype=torch.half, device=device) * 100
         mat2 = torch.ones(3, 1000, 128, dtype=torch.half, device=device) * 100
-        out = torch.addbmm(inp, mat1, mat2, alpha=0.001, beta=0.)
-        self.assertFalse(out.isinf().any())
+        out = torch.baddbmm(inp, mat1, mat2, alpha=0.001, beta=0.)
+        if TEST_WITH_ROCM:
+            self.assertFalse(out.isinf().any())
+        else:
+            self.assertTrue((out == 10000.).all())
 
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @onlyCUDA
