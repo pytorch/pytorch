@@ -1,3 +1,4 @@
+#include <ATen/core/op_registration/op_allowlist.h>
 #include <ATen/ATen.h>
 
 #include <ATen/Dispatch.h>
