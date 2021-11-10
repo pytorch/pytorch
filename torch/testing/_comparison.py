@@ -4,11 +4,16 @@ import collections.abc
 import contextlib
 from typing import NamedTuple, Callable, Sequence, List, Union, Optional, Type, Tuple, Any, cast, Collection
 
-import numpy as np
-
 import torch
 
 from ._core import _unravel_index
+
+try:
+    import numpy as np
+
+    NUMPY_AVAILABLE = True
+except ModuleNotFoundError:
+    NUMPY_AVAILABLE = False
 
 
 class ErrorMeta(NamedTuple):
@@ -25,6 +30,7 @@ class ErrorMeta(NamedTuple):
 
 # Some analysis of tolerance by logging tests from test_torch.py can be found in
 # https://github.com/pytorch/pytorch/pull/32538.
+# {dtype: (rtol, atol)}
 _DTYPE_PRECISIONS = {
     torch.float16: (0.001, 1e-5),
     torch.bfloat16: (0.016, 1e-5),
@@ -37,6 +43,13 @@ _DTYPE_PRECISIONS = {
 
 
 def default_tolerances(*inputs: Union[torch.Tensor, torch.dtype]) -> Tuple[float, float]:
+    """Returns the default absolute and relative testing tolerances for a set of inputs based on the dtype.
+
+    See :func:`assert_close` for a table of the default tolerance for each dtype.
+
+    Returns:
+        (Tuple[float, float]): Loosest tolerances of all input dtypes.
+    """
     dtypes = []
     for input in inputs:
         if isinstance(input, torch.Tensor):
@@ -44,7 +57,7 @@ def default_tolerances(*inputs: Union[torch.Tensor, torch.dtype]) -> Tuple[float
         elif isinstance(input, torch.dtype):
             dtypes.append(input)
         else:
-            raise TypeError()
+            raise TypeError(f"Expected a torch.Tensor or a torch.dtype, but got {type(input)} instead.")
     rtols, atols = zip(*[_DTYPE_PRECISIONS.get(dtype, (0.0, 0.0)) for dtype in dtypes])
     return max(rtols), max(atols)
 
@@ -52,6 +65,24 @@ def default_tolerances(*inputs: Union[torch.Tensor, torch.dtype]) -> Tuple[float
 def parse_tolerances(
     *inputs: Union[torch.Tensor, torch.dtype], rtol: Optional[float], atol: Optional[float]
 ) -> Tuple[Optional[ErrorMeta], Optional[Tuple[float, float]]]:
+    """Parses absolute and relative to be used for numeric comparisons.
+
+    If both ``rtol`` and ``atol`` are specified, this is a no-op. If both are not specified, the return value of
+    :func:`default_tolerances` is used.
+
+    .. note::
+
+        The two outputs of this function are orthogonal, i.e. if the first is ``None`` the second will be valid and
+        vice versa. If an expected error happens, it will be returned as :class:`ErrorMeta` as the first return
+        value. Possible scenarios are listed in the ``Raises`` section, although no error will be raised. If the
+        function executes normally, the second return value is described in the ``Returns`` section.
+
+    Raises:
+        ValueError: If if only ``rtol`` or ``atol`` is specified.
+
+    Returns:
+        (Tuple[float, float]): Valid absolute and relative tolerances.
+    """
     if (rtol is None) ^ (atol is None):
         # We require both tolerance to be omitted or specified, because specifying only one might lead to surprising
         # results. Imagine setting atol=0.0 and the tensors still match because rtol>0.0.
@@ -69,8 +100,8 @@ def parse_tolerances(
 
 def _make_mismatch_msg(
     *,
-    identifier: Optional[Union[str, Callable[[str], str]]],
     default_identifier: str,
+    identifier: Optional[Union[str, Callable[[str], str]]] = None,
     extra: Optional[str] = None,
     abs_diff: float,
     abs_diff_idx: Optional[Union[int, Tuple[int, ...]]] = None,
@@ -79,6 +110,23 @@ def _make_mismatch_msg(
     rel_diff_idx: Optional[Union[int, Tuple[int, ...]]] = None,
     rtol: float,
 ) -> str:
+    """Makes a mismatch error message for numeric values.
+
+    Args:
+        default_identifier (str): Default description of the compared values, e.g. "Tensor-likes".
+        identifier (Optional[Union[str, Callable[[str], str]]]): Optional identifier that overrides
+            ``default_identifier``. Can be passed as callable in which case it will be called with
+            ``default_identifier`` to create the description at runtime.
+        extra (Optional[str]): Extra information to be placed after the message header and the mismatch statistics.
+        abs_diff (float): Absolute difference.
+        abs_diff_idx (Optional[Union[int, Tuple[int, ...]]]): Optional index of the absolute difference.
+        atol (float): Allowed absolute tolerance. Will only be added to mismatch statistics if it or ``rtol`` are
+            ``> 0``.
+        rel_diff (float): Relative difference.
+        rel_diff_idx (Optional[Union[int, Tuple[int, ...]]]): Optional index of the relative difference.
+        rtol (float): Allowed relative tolerance. Will only be added to mismatch statistics if it or ``atol`` are
+            ``> 0``.
+    """
     equality = rtol == 0 and atol == 0
 
     def make_diff_msg(*, type: str, diff: float, idx: Optional[Union[int, Tuple[int, ...]]], tol: float) -> str:
@@ -114,11 +162,22 @@ def make_scalar_mismatch_msg(
     atol: float,
     identifier: Optional[Union[str, Callable[[str], str]]] = None,
 ) -> str:
+    """Makes a mismatch error message for scalars.
+
+    Args:
+        actual (Union[int, float, complex]): Actual scalar.
+        expected (Union[int, float, complex]): Expected scalar.
+        rtol (float): Relative tolerance.
+        atol (float): Absolute tolerance.
+        identifier (Optional[Union[str, Callable[[str], str]]]): Optional description for the scalars. Can be passed
+            as callable in which case it will be called by the default value to create the description at runtime.
+            Defaults to "Scalars".
+    """
     abs_diff = abs(actual - expected)
     rel_diff = float("inf") if expected == 0 else abs_diff / abs(expected)
     return _make_mismatch_msg(
-        identifier=identifier,
         default_identifier="Scalars",
+        identifier=identifier,
         abs_diff=abs_diff,
         atol=atol,
         rel_diff=rel_diff,
@@ -135,6 +194,19 @@ def make_tensor_mismatch_msg(
     atol: float,
     identifier: Optional[Union[str, Callable[[str], str]]] = None,
 ):
+    """Makes a mismatch error message for tensors.
+
+    Args:
+        actual (torch.Tensor): Actual tensor.
+        expected (torch.Tensor): Expected tensor.
+        mismatches (torch.Tensor): Boolean mask of the same shape as ``actual`` and ``expected`` that indicates the
+            location of mismatches.
+        rtol (float): Relative tolerance.
+        atol (float): Absolute tolerance.
+        identifier (Optional[Union[str, Callable[[str], str]]]): Optional description for the tensors. Can be passed
+            as callable in which case it will be called by the default value to create the description at runtime.
+            Defaults to "Tensor-likes".
+    """
     number_of_elements = mismatches.numel()
     total_mismatches = torch.sum(mismatches).item()
     extra = (
@@ -156,8 +228,8 @@ def make_tensor_mismatch_msg(
     rel_diff[matches_flat] = 0
     max_rel_diff, max_rel_diff_flat_idx = torch.max(rel_diff, 0)
     return _make_mismatch_msg(
-        identifier=identifier,
         default_identifier="Tensor-likes",
+        identifier=identifier,
         extra=extra,
         abs_diff=max_abs_diff.item(),
         abs_diff_idx=_unravel_index(max_abs_diff_flat_idx.item(), mismatches.shape),
@@ -169,11 +241,30 @@ def make_tensor_mismatch_msg(
 
 
 class UnsupportedInputs(Exception):  # noqa: B903
+    """Exception to be raised during the construction of a :class:`Pair` in case it doesn't support the inputs.
+
+    If the inputs are generally supported but some specific instances are not, and optional :class:`ErrorMeta` can be
+    supplied that aborts the origination process.
+    """
+
     def __init__(self, meta: Optional[ErrorMeta] = None) -> None:
         self.meta = meta
 
 
 class Pair(abc.ABC):
+    """ABC for all comparison pairs to be used in conjunction with :func:`assert_equal`.
+
+    Each subclass needs to overwrite :meth:`Pair.compare` that performs the actual comparison.
+
+    Each pair receives **all** options, so select the ones applicable for the subclass and forward the rest to the
+    super class.
+
+    Raising a plain :class:`UnsupportedInputs` during constructions indicates that the pair is not able to handle the
+    inputs and the next pair type will be tried. Raising a :class:`UnsupportedInputs` extended by an
+    :class:`ErrorMeta` indicates that the inputs are generally supported, but these specific instances are not. This
+    will abort the origination process.
+    """
+
     def __init__(
         self,
         actual: Any,
@@ -193,13 +284,15 @@ class Pair(abc.ABC):
     def _check_inputs_isinstance(
         *inputs: Any, cls: Union[Type, Tuple[Type, ...]], not_cls: Optional[Union[Type, Tuple[Type, ...]]] = None
     ) -> None:
+        """Checks if all inputs are instances of a given class and and optionally not of another.
+
+        Raises:
+            UnsupportedInputs: If any condition is not met.
+        """
         if not all(isinstance(input, cls) for input in inputs):
             raise UnsupportedInputs()
 
-        if not not_cls:
-            return
-
-        if any(isinstance(input, not_cls) for input in inputs):
+        if not_cls and any(isinstance(input, not_cls) for input in inputs):
             raise UnsupportedInputs()
 
     @staticmethod
@@ -208,6 +301,31 @@ class Pair(abc.ABC):
         *inputs: Any,
         id: Tuple[Any, ...] = (),
     ) -> Tuple[Optional[ErrorMeta], Optional[Tuple[Any, ...]]]:
+        """Applies a unary function to a set of inputs.
+
+        .. note::
+
+            This method works similiar to a list comprehension with additional handling for :class:`ErrorMeta`.
+
+        Args:
+            fn (): Should return :class:`ErrorMeta` or ``None`` as first return value and possible other return values
+                after it.
+            *inputs (Any): Inputs.
+            id (Tuple[Any, ...]): Optional ID to attach to an :class:`ErrorMeta` in case one is returned by ``fn``.
+
+        .. note::
+
+            The two outputs of this function are orthogonal, i.e. if the first is ``None`` the second will be valid and
+            vice versa. If an expected error happens, it will be returned as :class:`ErrorMeta` as the first return
+            value. Possible scenarios are listed in the ``Raises`` section, although no error will be raised. If the
+            function executes normally, the second return value is described in the ``Returns`` section.
+
+        Raises:
+            Exception: Any expected exception that is "raised" by ``fn``.
+
+        Returns:
+            (Tuple[Any, ...]]]): Additional outputs of ``fn`` if available.
+        """
         outputs = []
         for input in inputs:
             output: Any = fn(input)
@@ -223,14 +341,27 @@ class Pair(abc.ABC):
         return None, tuple(outputs) if outputs else None
 
     def _make_error_meta(self, type: Type[Exception], msg: str) -> ErrorMeta:
+        """Makes an :class:`ErrorMeta` from a given exception type and message and the stored id.
+
+        If a ``msg`` was supplied during instantiation, this will override the passed ``msg``.
+        """
         return ErrorMeta(type, self.msg or msg, self.id)
 
     @abc.abstractmethod
     def compare(self) -> Optional[ErrorMeta]:
-        pass
+        """Compares the inputs and returns an :class`ErrorMeta` in case they mismatch."""
 
 
 class ObjectPair(Pair):
+    """Pair for any type of inputs that will be compared with the `==` operator.
+
+    .. note::
+
+        Since this will instantiate for any kind of inputs, it should only be used as fallback after all other pairs
+        couldn't handle the inputs.
+
+    """
+
     def compare(self) -> Optional[ErrorMeta]:
         try:
             equal = self.actual == self.expected
@@ -247,6 +378,7 @@ class ObjectPair(Pair):
 
 
 class NonePair(Pair):
+    """Pair for ``None`` inputs."""
     def __init__(self, actual: Any, expected: Any, **other_parameters: Any) -> None:
         if not (actual is None and expected is None):
             raise UnsupportedInputs()
@@ -260,12 +392,23 @@ class NonePair(Pair):
 
 
 class BooleanPair(Pair):
+    """Pair for :class:`bool` inputs.
+
+    .. note::
+
+        If ``numpy`` is available, also handles :class:`numpy.bool_` inputs.
+
+    """
+
     def __init__(self, actual: Any, expected: Any, id: Tuple[Any, ...] = (), **other_parameters: Any) -> None:
         actual, expected = self._process_inputs(actual, expected, id=id)
         super().__init__(actual, expected, **other_parameters)
 
     def _process_inputs(self, actual: Any, expected: Any, *, id: Tuple[Any, ...]) -> Tuple[bool, bool]:
-        self._check_inputs_isinstance(actual, expected, cls=(bool, np.bool_))
+        cls = [bool]
+        if NUMPY_AVAILABLE:
+            cls.append(np.bool_)
+        self._check_inputs_isinstance(actual, expected, cls=tuple(cls))
         error_meta, bools = self._apply_unary(self._to_bool, actual, expected, id=id)
         if error_meta:
             raise UnsupportedInputs(error_meta)
@@ -290,14 +433,40 @@ class BooleanPair(Pair):
 
 
 class NumberPair(Pair):
+    """Pair for Python number (:class:`int`, :class:`float`, and :class:`complex`) inputs.
+
+    .. note::
+
+        If ``numpy`` is available, also handles :class:`numpy.number` inputs.
+
+    Kwargs:
+        rtol (Optional[float]): Relative tolerance. If specified ``atol`` must also be specified. If omitted, default
+            values based on the type are selected with the below table.
+        atol (Optional[float]): Absolute tolerance. If specified ``rtol`` must also be specified. If omitted, default
+            values based on the type are selected with the below table.
+        equal_nan (bool): If ``True``, two ``NaN`` values are considered equal. Defaults to ``False``.
+        check_dtype (bool): If ``True``, the type of the inputs will be checked for equality. Defaults to ``False``.
+
+    The following table displays correspondence between Python number type and the ``torch.dtype``'s. See
+    :func:`assert_close` for the corresponding tolerances.
+
+    +------------------+-------------------------------+
+    | ``type``         | corresponding ``torch.dtype`` |
+    +==================+===============================+
+    | :class:`int`     | :attr:`~torch.int64`          |
+    +------------------+-------------------------------+
+    | :class:`float`   | :attr:`~torch.float64`        |
+    +------------------+-------------------------------+
+    | :class:`complex` | :attr:`~torch.complex64`      |
+    +------------------+-------------------------------+
+    """
+
     _TYPE_TO_DTYPE = {
         int: torch.int64,
         float: torch.float64,
         complex: torch.complex128,
     }
-    _PYTHON_NUMBER_TYPES = tuple(_TYPE_TO_DTYPE.keys())
-    _NUMPY_NUMBER_TYPE = np.number
-    _NUMBER_TYPES = (*_PYTHON_NUMBER_TYPES, _NUMPY_NUMBER_TYPE)
+    _NUMBER_TYPES = tuple(_TYPE_TO_DTYPE.keys())
 
     def __init__(
         self,
@@ -327,16 +496,19 @@ class NumberPair(Pair):
     def _process_inputs(
         self, actual: Any, expected: Any, *, id: Tuple[Any, ...]
     ) -> Tuple[Union[int, float, complex], Union[int, float, complex]]:
-        self._check_inputs_isinstance(actual, expected, cls=self._NUMBER_TYPES, not_cls=bool)
+        number_types = list(self._NUMBER_TYPES)
+        if NUMPY_AVAILABLE:
+            number_types.append(np.number)
+        self._check_inputs_isinstance(actual, expected, cls=tuple(number_types), not_cls=bool)
         error_meta, numbers = self._apply_unary(self._to_number, actual, expected, id=id)
         if error_meta:
             raise UnsupportedInputs(error_meta)
         return cast(Tuple[Union[int, float, complex], Union[int, float, complex]], numbers)
 
     def _to_number(self, number_like: Any) -> Tuple[Optional[ErrorMeta], Optional[Union[int, float, complex]]]:
-        if isinstance(number_like, self._NUMPY_NUMBER_TYPE):
+        if NUMPY_AVAILABLE and isinstance(number_like, np.number):
             number = number_like.item()
-        elif isinstance(number_like, self._PYTHON_NUMBER_TYPES):
+        elif isinstance(number_like, self._NUMBER_TYPES):
             number = number_like
         else:
             error_meta = ErrorMeta(TypeError, f"Unknown number type {type(number_like)}.")
@@ -369,6 +541,30 @@ class NumberPair(Pair):
 
 
 class TensorLikePair(Pair):
+    """Pair for :class:`torch.Tensor` inputs.
+
+    Kwargs:
+        allow_subclasses (bool):
+        rtol (Optional[float]): Relative tolerance. If specified ``atol`` must also be specified. If omitted, default
+            values based on the type are selected. See :func:assert_close: for details.
+        atol (Optional[float]): Absolute tolerance. If specified ``rtol`` must also be specified. If omitted, default
+            values based on the type are selected. See :func:assert_close: for details.
+        equal_nan (bool): If ``True``, two ``NaN`` values are considered equal. Defaults to ``False``.
+        check_device (bool): If ``True`` (default), asserts that corresponding tensors are on the same
+            :attr:`~torch.Tensor.device`. If this check is disabled, tensors on different
+            :attr:`~torch.Tensor.device`'s are moved to the CPU before being compared.
+        check_dtype (bool): If ``True`` (default), asserts that corresponding tensors have the same ``dtype``. If this
+            check is disabled, tensors with different ``dtype``'s are promoted  to a common ``dtype`` (according to
+            :func:`torch.promote_types`) before being compared.
+        check_layout (bool): If ``True`` (default), asserts that corresponding tensors have the same ``layout``. If this
+            check is disabled, tensors with different ``layout``'s are converted to strided tensors before being
+            compared.
+        check_stride (bool): If ``True`` and corresponding tensors are strided, asserts that they have the same stride.
+        check_is_coalesced (bool): If ``True`` (default) and corresponding tensors are sparse COO, checks that both
+            ``actual`` and ``expected`` are either coalesced or uncoalesced. If this check is disabled, tensors are
+            :meth:`~torch.Tensor.coalesce`'ed before being compared.
+    """
+
     def __init__(
         self,
         actual: Any,
@@ -463,6 +659,25 @@ class TensorLikePair(Pair):
         actual: torch.Tensor,
         expected: torch.Tensor,
     ) -> Optional[ErrorMeta]:
+        """Checks if the attributes of two tensors match.
+
+        Always checks
+
+        - the :attr:`~torch.Tensor.shape`,
+        - whether both inputs are quantized or not,
+         - and if they are the quantization scheme.
+
+        Checks for
+
+        - :attr:`~torch.Tensor.layout`,
+        - :meth:`~torch.Tensor.stride`,
+        - :meth:`~torch.Tensor.is_coalesced`,
+        - :attr:`~torch.Tensor.device`, and
+        - :attr:`~torch.Tensor.dtype`
+
+        are optional and can be disabled through the corresponding ``check_*`` flag during construction of the pair.
+        """
+
         def error_meta(attribute_name: str, actual_value: Any, expected_value: Any) -> ErrorMeta:
             return self._make_error_meta(
                 AssertionError,
@@ -471,6 +686,11 @@ class TensorLikePair(Pair):
 
         if actual.shape != expected.shape:
             return error_meta("shape", actual.shape, expected.shape)
+
+        if actual.is_quantized != expected.is_quantized:
+            return error_meta("is_quantized", actual.is_quantized, expected.is_quantized)
+        elif actual.is_quantized and actual.qscheme() != expected.qscheme():
+            return error_meta("qscheme()", actual.qscheme(), expected.qscheme())
 
         if actual.layout != expected.layout:
             if self.check_layout:
@@ -487,11 +707,6 @@ class TensorLikePair(Pair):
 
         if self.check_device and actual.device != expected.device:
             return error_meta("device", actual.device, expected.device)
-
-        if actual.is_quantized != expected.is_quantized:
-            return error_meta("is_quantized", actual.is_quantized, expected.is_quantized)
-        elif actual.is_quantized and actual.qscheme() != expected.qscheme():
-            return error_meta("qscheme()", actual.qscheme(), expected.qscheme())
 
         if self.check_dtype and actual.dtype != expected.dtype:
             return error_meta("dtype", actual.dtype, expected.dtype)
@@ -514,7 +729,7 @@ class TensorLikePair(Pair):
             expected (Tensor): Expected tensor.
 
         Returns:
-            Tuple(Tensor, Tensor): Equalized tensors.
+            (Tuple[Tensor, Tensor]): Equalized tensors.
         """
         if actual.device != expected.device:
             actual = actual.cpu()
@@ -550,6 +765,7 @@ class TensorLikePair(Pair):
     def _compare_quantized_values(
         self, actual: torch.Tensor, expected: torch.Tensor, *, rtol: float, atol: float, equal_nan: bool
     ) -> Optional[ErrorMeta]:
+        """Compares quantized tensors by comparing the :meth:`~torch.Tensor.dequantize`'d variants for closeness."""
         return self._compare_regular_values(
             actual.dequantize(), expected.dequantize(), rtol=rtol, atol=atol, equal_nan=equal_nan
         )
@@ -557,6 +773,12 @@ class TensorLikePair(Pair):
     def _compare_sparse_coo_values(
         self, actual: torch.Tensor, expected: torch.Tensor, *, rtol: float, atol: float, equal_nan: bool
     ) -> Optional[ErrorMeta]:
+        """Compares sparse COO tensors by comparing
+
+        - the number of non-zero elements (nnz) for equality,
+        - the indices for equality, and
+        - the values for closeness.
+        """
         if actual._nnz() != expected._nnz():
             return self._make_error_meta(
                 AssertionError,
@@ -589,6 +811,13 @@ class TensorLikePair(Pair):
     def _compare_sparse_csr_values(
         self, actual: torch.Tensor, expected: torch.Tensor, *, rtol: float, atol: float, equal_nan: bool
     ) -> Optional[ErrorMeta]:
+        """Compares sparse CSR tensors by comparing
+
+        - the number of non-zero elements (nnz) for equality,
+        - the col_indices for equality,
+        - the crow_indices for equality, and
+        - the values for closeness.
+        """
         if actual._nnz() != expected._nnz():
             return self._make_error_meta(
                 AssertionError,
@@ -639,6 +868,7 @@ class TensorLikePair(Pair):
         equal_nan: bool,
         identifier: Optional[Union[str, Callable[[str], str]]] = None,
     ) -> Optional[ErrorMeta]:
+        """Checks if the values of two tensors are close up to a desired tolerance."""
         actual, expected = TensorLikePair._promote_for_comparison(actual, expected)
         mismatches = ~torch.isclose(actual, expected, rtol=rtol, atol=atol, equal_nan=equal_nan)
         if not torch.any(mismatches):
@@ -652,11 +882,11 @@ class TensorLikePair(Pair):
 
     @staticmethod
     def _promote_for_comparison(actual: torch.Tensor, expected: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Selects the comparison dtype based on the input dtype.
+        """Promotes the inputs to the comparison dtype based on the input dtype.
 
         Returns:
-            Highest precision dtype of the same dtype category as the input. :class:`torch.bool` is treated as integral
-            dtype.
+            Inputs promoted to the highest precision dtype of the same dtype category. :class:`torch.bool` is treated
+            as integral dtype.
         """
         # This is called after self._equalize_attributes() and thus `actual` and `expected` already have the same dtype.
         if actual.dtype.is_complex:
@@ -673,11 +903,42 @@ def originate_pairs(
     expected: Any,
     *,
     pair_types: Sequence[Type[Pair]],
-    sequence_types: Tuple[Type, ...],
-    mapping_types: Tuple[Type, ...],
+    sequence_types: Tuple[Type, ...] = (collections.abc.Sequence,),
+    mapping_types: Tuple[Type, ...] = (collections.abc.Sequence,),
     id: Tuple[Any, ...] = (),
     **options: Any,
 ) -> Tuple[Optional[ErrorMeta], Optional[List[Pair]]]:
+    """Originates pairs from the individual inputs.
+
+    ``actual`` and ``expected`` can be possibly nested :class:`~collections.abc.Sequence`'s or
+    :class:`~collections.abc.Mapping`'s. In this case the pairs are originated by recursing through them.
+
+    Args:
+        actual (Any): Actual input.
+        expected (Any): Expected input.
+        pair_types (Sequence[Type[Pair]]): Sequence of pair types that will be tried to construct with the inputs.
+            First successful pair will be used.
+        sequence_types (Tuple[Type, ...]): Optional types treated as sequences that will be checked elementwise.
+        mapping_types (Tuple[Type, ...]): Optional types treated as mappings that will be checked elementwise.
+        id (Tuple[Any, ...]): Optional id of a pair that will be included in an error message.
+        **options (Any): Options passed to each pair during construction.
+
+    .. note::
+
+        The two outputs of this function are orthogonal, i.e. if the first is ``None`` the second will be valid and
+        vice versa. If an expected error happens, it will be returned as :class:`ErrorMeta` as the first return value.
+        Possible scenarios are listed in the ``Raises`` section, although no error will be raised. If the function
+        executes normally, the second return value is described in the ``Returns`` section.
+
+    Raises:
+        AssertionError: If the inputs are :class:`~collections.abc.Sequence`'s, but their length does not match.
+        AssertionError: If the inputs are :class:`~collections.abc.Mapping`'s, but their set of keys do not match.
+        TypeError: If no pair is able to handle the inputs.
+        Exception: Any expected exception that happens during the construction of a pair.
+
+    Returns:
+        (List[Pair]): Originated pairs.
+    """
     error_meta: Optional[ErrorMeta]
     pairs: List[Pair] = []
     # We explicitly exclude str's here since they are self-referential and would cause an infinite recursion loop:
@@ -781,6 +1042,20 @@ def assert_equal(
     mapping_types: Tuple[Type, ...] = (collections.abc.Mapping,),
     **options: Any,
 ) -> None:
+    """Asserts that inputs are equal.
+
+    ``actual`` and ``expected`` can be possibly nested :class:`~collections.abc.Sequence`'s or
+    :class:`~collections.abc.Mapping`'s. In this case the comparison happens elementwise by recursing through them.
+
+    Args:
+        actual (Any): Actual input.
+        expected (Any): Expected input.
+        pair_types (Sequence[Type[Pair]]): Sequence of :class:`Pair` types that will be tried to construct with the
+            inputs. First successful pair will be used. Defaults to only using :class:`ObjectPair`.
+        sequence_types (Tuple[Type, ...]): Optional types treated as sequences that will be checked elementwise.
+        mapping_types (Tuple[Type, ...]): Optional types treated as mappings that will be checked elementwise.
+        **options (Any): Options passed to each pair during construction.
+    """
     # Hide this function from `pytest`'s traceback
     __tracebackhide__ = True
 
