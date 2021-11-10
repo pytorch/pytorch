@@ -17,7 +17,7 @@ namespace functional {
 /// F::grid_sample(input, grid, F::GridSampleFuncOptions().mode(torch::kBilinear).padding_mode(torch::kZeros).align_corners(true));
 /// ```
 struct TORCH_API GridSampleFuncOptions {
-  typedef c10::variant<enumtype::kBilinear, enumtype::kNearest> mode_t;
+  typedef c10::variant<enumtype::kBilinear, enumtype::kNearest, enumtype::kBicubic> mode_t;
   typedef c10::variant<enumtype::kZeros, enumtype::kBorder, enumtype::kReflection> padding_mode_t;
 
   /// interpolation mode to calculate output values. Default: Bilinear
