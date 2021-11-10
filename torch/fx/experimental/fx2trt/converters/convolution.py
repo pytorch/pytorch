@@ -2,16 +2,16 @@ import torch
 import tensorrt as trt
 from torch.fx.experimental.fx2trt.fx2trt import tensorrt_converter
 
-from .helper_functions import extend_attr_to_tuple, mark_as_int8_layer, to_numpy, get_dyn_range
+from .converter_utils import extend_mod_attr_to_tuple, mark_as_int8_layer, to_numpy, get_dyn_range
 
 def common_conv(network, mod, dimension, input_val, layer_name, is_quantized):
     if mod.padding_mode != "zeros":
         raise RuntimeError(f"Only support padding mode: zeros, got {mod.padding_mode}.")
 
-    kernel_size = extend_attr_to_tuple(mod, "kernel_size", dimension)
-    stride = extend_attr_to_tuple(mod, "stride", dimension)
-    padding = extend_attr_to_tuple(mod, "padding", dimension)
-    dilation = extend_attr_to_tuple(mod, "dilation", dimension)
+    kernel_size = extend_mod_attr_to_tuple(mod, "kernel_size", dimension)
+    stride = extend_mod_attr_to_tuple(mod, "stride", dimension)
+    padding = extend_mod_attr_to_tuple(mod, "padding", dimension)
+    dilation = extend_mod_attr_to_tuple(mod, "dilation", dimension)
 
     kernel = to_numpy(mod.weight() if is_quantized else mod.weight)
     bias = to_numpy(mod.bias() if is_quantized else mod.bias)
