@@ -189,7 +189,7 @@ def gen(out: str, native_yaml_path: str, deprecated_yaml_path: str, template_pat
     # If any method only operator with namedtuple is added in the future,
     # we will have to address that.
     create_python_return_type_bindings(
-        fm, functions, lambda fn: True, 'torch.return_types', 'python_return_types.cpp', method=False)
+        fm, functions, lambda fn: True, 'python_return_types.cpp')
 
 def group_filter_overloads(
     pairs: Sequence[PythonSignatureNativeFunctionPair],
@@ -234,10 +234,7 @@ def create_python_return_type_bindings(
     fm: FileManager,
     pairs: Sequence[PythonSignatureNativeFunctionPair],
     pred: Callable[[NativeFunction], bool],
-    module: Optional[str],
     filename: str,
-    *,
-    method: bool,
 ) -> None:
     """Generates Python bindings to ATen functions"""
     py_return_types_definition: List[str] = []
@@ -472,8 +469,6 @@ def generate_return_type_defintion_and_map_entry(
     Generate block of named tuple type def inits, and add typeref snippets
     to declarations that use them
     """
-    flddefnames: Dict[str, str] = {}  # map from unique field name lists to field def name
-    flddefs: List[str] = []           # field def declarations
     typenames: Dict[str, str] = {}    # map from unique name + field name lists to typedef name
     definitions: List[str] = []          # typedef declarations and init code
     map_entries: List[str] = []
@@ -483,12 +478,7 @@ def generate_return_type_defintion_and_map_entry(
         if not fieldnames:
             continue
 
-        fn_key = '_'.join(fieldnames)
-        fieldsname = flddefnames.get(fn_key)
-        if fieldsname is None:
-            fieldsname = f'NamedTuple_fields{"" if not flddefs else len(flddefs)}'
-            flddefnames[fn_key] = fieldsname
-            fields = ', '.join(f'{{"{fn}", ""}}' for fn in fieldnames)
+        fields = ', '.join(f'{{"{fn}", ""}}' for fn in fieldnames)
 
         name = cpp.name(overload.function.func)  # use @with_native_function?
         tn_key = gen_namedtuple_typename_key(overload.function)
@@ -499,10 +489,10 @@ def generate_return_type_defintion_and_map_entry(
             typenames[tn_key] = typename
             definitions.append(f"""\
 PyTypeObject* get_{name}_namedtuple() {{
-    static PyStructSequence_Field {fieldsname}[] = {{ {fields},  {{nullptr}} }};
+    static PyStructSequence_Field NamedTuple_fields[] = {{ {fields},  {{nullptr}} }};
     static PyTypeObject {typename};
     static bool is_initialized = false;
-    static PyStructSequence_Desc desc = {{ "torch.return_types.{name}", nullptr, {fieldsname}, {len(fieldnames)} }};
+    static PyStructSequence_Desc desc = {{ "torch.return_types.{name}", nullptr, NamedTuple_fields, {len(fieldnames)} }};
     if (!is_initialized) {{
         PyStructSequence_InitType(&{typename}, &desc);
         {typename}.tp_repr = (reprfunc)torch::utils::returned_structseq_repr;
