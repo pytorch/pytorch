@@ -1,9 +1,12 @@
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/mobile/function.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
+#include <torch/csrc/jit/mobile/parse_bytecode.h>
+#include <torch/csrc/jit/mobile/parse_operators.h>
 #include <torch/csrc/jit/mobile/prim_ops_registery.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/serialization/import_export_constants.h>
 
 namespace torch {
 namespace jit {
@@ -74,8 +77,8 @@ bool Function::append_operator(
   if (!promoted_op) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(pArgs);
     const auto& args = *pArgs;
-    if (model_version == 0x3LL &&
-        opname == c10::OperatorName("aten::_convolution", "")) {
+    if (model_version == 0x3LL && opname.name == "aten::_convolution" &&
+        opname.overload_name.empty()) {
       // Since byte-code versions 0x4L, convolution has an additional
       // default-value argument (allow_tf32=True, see
       // https://github.com/pytorch/pytorch/pull/40737). This wrapper handles
@@ -90,7 +93,7 @@ bool Function::append_operator(
       // from model. We can use it to handle backward compatibility.
       if (num_specified_args &&
           num_specified_args.value() < static_cast<int64_t>(args.size())) {
-        fn = [fn, num_specified_args, args](Stack& stack) {
+        fn = [fn, num_specified_args, &args](Stack& stack) {
           std::vector<IValue> out_args;
           // The following logic pops and temporarily stores all out arguments
           // from the stack (which can be 0 or more, and always appended to the
@@ -195,6 +198,51 @@ const std::shared_ptr<Code> Function::get_code() const {
 
 const std::vector<int64_t>& Function::getExceptionDebugHandles() const {
   return getInterpretersExceptionDebugHandles();
+}
+
+Function& Function::get(
+    std::string qualified_name,
+    IValue bytecode,
+    int64_t model_version) {
+  static Function func = mobile::Function(c10::QualifiedName(qualified_name));
+  std::vector<IValue> bytecode_list = bytecode.toTuple()->elements().vec();
+  c10::ivalue::TupleElements debug_handles_m_tuple;
+
+  parseInstructions(
+      qualified_name,
+      std::move(
+          c10::ivalue::TupleElements(bytecode_list[BYTECODE_INDEX_INSTRUCTION]
+                                         .toTuple()
+                                         ->elements()
+                                         .vec())),
+      debug_handles_m_tuple,
+      &func);
+
+  parseOperators(
+      std::move(c10::ivalue::TupleElements(
+          bytecode_list[BYTECODE_INDEX_OPERATOR].toTuple()->elements().vec())),
+      model_version,
+      1,
+      &func);
+
+  parseConstants(
+      std::move(c10::ivalue::TupleElements(
+          bytecode_list[BYTECODE_INDEX_CONSTANT].toTuple()->elements().vec())),
+      &func);
+
+  parseTypes(
+      std::move(c10::ivalue::TupleElements(
+          bytecode_list[BYTECODE_INDEX_TYPE].toTuple()->elements().vec())),
+      &func);
+
+  size_t register_size = bytecode_list[BYTECODE_INDEX_REGISTER_SIZE]
+                             .toTuple()
+                             ->elements()
+                             .vec()[0]
+                             .toInt();
+
+  parseRegisterSize(register_size, &func);
+  return func;
 }
 
 } // namespace mobile
