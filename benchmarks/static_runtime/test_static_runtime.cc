@@ -997,7 +997,13 @@ TEST(StaticRuntime, to) {
     std::vector<IValue> args3{a, c10::nullopt, c, d};
 
     std::vector<IValue> args0WithInt{a, ScalarType::Int, c, d, e};
-    testStaticRuntime(to_script_dtype, args0, args0WithInt);
+    testStaticRuntime(
+        to_script_dtype,
+        args0,
+        args0WithInt,
+        /* default for use_allclose */ false,
+        /* default for use_equalnan */ false,
+        /* check_resize */ false);
     testStaticRuntime(to_script_dtype_strided, args0);
     testStaticRuntime(to_script_prim_dtype, args1);
     if (!d) {
@@ -1005,7 +1011,13 @@ TEST(StaticRuntime, to) {
     }
     // Second set of args tests case where the `other` tensor's dtype
     // changes between iterations.
-    testStaticRuntime(to_script_other, args2, args2WithDifferentOtherType);
+    testStaticRuntime(
+        to_script_other,
+        args2,
+        args2WithDifferentOtherType,
+        /* default for use_allclose */ false,
+        /* default for use_equalnan */ false,
+        /* check_resize */ false);
     testStaticRuntime(to_script_alias, {a});
 
     testStaticRuntime(to_script_memory_planning_fail, {a, a});
