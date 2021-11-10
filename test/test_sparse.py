@@ -1833,6 +1833,10 @@ class TestSparse(TestCase):
             result = torch.zeros_like(x, layout=torch.strided, memory_format=mem_format)
             self.assertTrue(result.layout == torch.strided)
 
+        dense_tensor = sparse_tensor.to_dense()
+        result = torch.zeros_like(dense_tensor, layout=torch.sparse_coo)
+        self.assertTrue(dense_tensor.shape, result.shape)
+
     def _assert_sparse_invars(self, t):
         # SparseTensor has the following invariants:
         # - sparse_dim + dense_dim = len(SparseTensor.shape)
