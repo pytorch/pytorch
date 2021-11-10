@@ -1,4 +1,4 @@
-4#pragma once
+#pragma once
 
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
