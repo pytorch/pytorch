@@ -1626,7 +1626,7 @@ class DistributedDataParallelTest(
             not TEST_WITH_ROCM
             and BFLOAT16_AVAILABLE
             and c10d.is_nccl_available()
-            and torch.cuda.nccl.version() >= (2, 9, 7)
+            and torch.cuda.nccl.version() >= (2, 10)
         ):
             hook_options.append(default.bf16_compress_hook)
         for hook in hook_options:
@@ -1797,7 +1797,7 @@ class DistributedDataParallelTest(
         self._test_fp16_compress_wrapper()
 
     @requires_nccl()
-    @requires_nccl_version((2, 9, 7), "Need NCCL 2.9.7+ for BF16_COMPRESS")
+    @requires_nccl_version((2, 10), "Need NCCL 2.10+ for BF16_COMPRESS")
     @sandcastle_skip_if(
         not BFLOAT16_AVAILABLE,
         "BFloat16 is only supported by CUDA 11+",
@@ -1907,7 +1907,7 @@ class DistributedDataParallelTest(
         self._test_fp16_compress_wrapper(gradient_as_bucket_view=True)
 
     @requires_nccl()
-    @requires_nccl_version((2, 9, 7), "Need NCCL 2.9.7+ for BF16_COMPRESS")
+    @requires_nccl_version((2, 10), "Need NCCL 2.10+ for BF16_COMPRESS")
     @sandcastle_skip_if(
         not BFLOAT16_AVAILABLE,
         "BFloat16 is only supported by CUDA 11+",
