@@ -409,6 +409,14 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   EXISTING_BDIM(replication_pad2d);
   EXISTING_BDIM(replication_pad3d);
 
+  EXISTING_BDIM_ALL_BOXED(replication_pad1d_backward);
+  EXISTING_BDIM_ALL_BOXED(replication_pad2d_backward);
+  EXISTING_BDIM_ALL_BOXED(replication_pad3d_backward);
+
+  EXISTING_BDIM_ALL_BOXED(reflection_pad1d_backward);
+  EXISTING_BDIM_ALL_BOXED(reflection_pad2d_backward);
+  EXISTING_BDIM_ALL_BOXED(reflection_pad3d_backward);
+
   UPSAMPLE_BATCH(upsample_bicubic2d);
   UPSAMPLE_BATCH(upsample_bilinear2d);
   UPSAMPLE_BATCH(upsample_linear1d);
