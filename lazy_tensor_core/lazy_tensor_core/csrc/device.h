@@ -17,6 +17,8 @@ struct BackendDeviceType {
 // TODO(alanwaketan): Rename it to BackendDevice.
 class Device {
  public:
+  // The default constructor will set both the device type and ordinal
+  // to backend specific defaults.
   Device();
   Device(std::shared_ptr<BackendDeviceType>&& type, int ordinal);
 

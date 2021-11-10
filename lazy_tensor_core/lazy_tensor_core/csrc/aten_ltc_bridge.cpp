@@ -247,8 +247,8 @@ c10::optional<Device> GetLtcDevice(const c10::optional<c10::Device>& device) {
 
 Device AtenDeviceToLtcDevice(const c10::Device& device) {
   CHECK_EQ(device.type(), at::kLazy) << device;
-  // Ordinal doesn't make any sense now given
-  // distributed training is not supported.
+  // Ordinal doesn't make any sense currently given
+  // distributed training/multi-device is not supported.
   int ordinal = device.has_index() ? device.index() : 0;
   return AtenLtcDeviceMapper::Get()->GetDeviceFromOrdinal(ordinal);
 }

@@ -4,6 +4,7 @@
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/macros/Macros.h>
 
+#include "c10/util/Exception.h"
 #include "lazy_tensor_core/csrc/aten_ltc_bridge.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
 
@@ -21,6 +22,7 @@ struct LTCGuardImpl : public c10::impl::DeviceGuardImplInterface {
   at::DeviceType type() const override { return at::DeviceType::Lazy; }
 
   c10::Device exchangeDevice(c10::Device device) const override {
+    TORCH_INTERNAL_ASSERT(device.type() == c10::DeviceType::Lazy);
     auto old_device = g_device;
     g_device = device;
     return old_device;
@@ -31,14 +33,17 @@ struct LTCGuardImpl : public c10::impl::DeviceGuardImplInterface {
   }
 
   void setDevice(c10::Device device) const override {
+    TORCH_INTERNAL_ASSERT(device.type() == c10::DeviceType::Lazy);
     g_device = device;
   }
 
   void uncheckedSetDevice(c10::Device device) const noexcept override {
+    TORCH_INTERNAL_ASSERT(device.type() == c10::DeviceType::Lazy);
     g_device = device;
   }
 
   c10::Stream getStream(c10::Device device) const noexcept override {
+    TORCH_INTERNAL_ASSERT(device.type() == c10::DeviceType::Lazy);
     return c10::Stream(c10::Stream::DEFAULT, device);
   }
 

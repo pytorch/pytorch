@@ -572,14 +572,16 @@ void InitLtcModuleBindings(py::module m) {
     // i) It makes sense to set default device type to CPU, GPU or TPU,
     // but not lazy given that would just use whatever default hardware type.
     // ii) Setting ordinal like lazy:0 doesn't make any sense now as distributed
-    // training is still under development.
+    // training/multi-device support is still under development.
     LOG(ERROR) << "Setting the default device is deprecated. Use "
                   "_ltc_set_default_device_type to set the default "
                   "device type instead.";
     return;
   });
   m.def("_ltc_get_default_device", []() {
-    // It's always lazy:0 given distributed training is not supported yet.
+    // TODO: Call the backend API to get the default ordinal as well. For xla, the
+    // default is lazy:1.
+    // It's always lazy:X given distributed training/multi-device is not supported yet.
     return "lazy:0";
   });
   m.def(
