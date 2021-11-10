@@ -192,10 +192,10 @@ def get_default_qconfig(backend='fbgemm'):
         qconfig = default_qconfig
     return qconfig
 
-default_embedding_qat_qconfig = QConfig(activation=NoopObserver,
+default_embedding_qat_qconfig = QConfig(activation=NoopObserver.with_args(dtype=torch.float32),
                                         weight=default_embedding_fake_quant)
 
-default_embedding_qat_qconfig_4bit = QConfig(activation=NoopObserver,
+default_embedding_qat_qconfig_4bit = QConfig(activation=NoopObserver.with_args(dtype=torch.float32),
                                              weight=default_embedding_fake_quant_4bit)
 
 def get_default_qat_qconfig(backend='fbgemm', version=1):
