@@ -94,7 +94,7 @@ def all_gather(tensor, group=dist.group.WORLD):
     return _AllGather.apply(group, tensor)
 
 
-def all_to_all(tensors, group=dist.group.WORLD):
+def all_to_all(tensors, group=dist.group.WORLD, out_tensor_list=None):
     """
     Each process scatters list of input tensors to all processes in a group and
     return gathered list of tensors in output list.
@@ -102,12 +102,15 @@ def all_to_all(tensors, group=dist.group.WORLD):
     Arguments:
         tensors (list[Tensor]): List of tensors to scatter one per rank.
         group (ProcessGroup, optional): The process group to work on.
+        out_tensor_list (list[Tensor]): list of tensors to gather one per rank.
+            This is used when the size of tensor to scatter is not same as the
+            one to gather.
 
     Returns:
-        tuple[Tensor]): Output of the collective.
+        tuple([Tensor]): Output of the collective.
 
     """
-    return _AlltoAll.apply(group, *tensors)
+    return _AlltoAll.apply(group, out_tensor_list, *tensors)
 
 
 def all_reduce(tensor, op=dist.ReduceOp.SUM, group=dist.group.WORLD):
@@ -219,18 +222,19 @@ class _AllGather(Function):
 
     @staticmethod
     def backward(ctx, *grad_outputs):
-        gxs = _AlltoAll.apply(ctx.group, *grad_outputs)
+        gxs = _AlltoAll.apply(ctx.group, None, *grad_outputs)
         gx = torch.sum(torch.stack(gxs), dim=0)
         return (None, gx)
 
 
 class _AlltoAll(Function):
     @staticmethod
-    def forward(ctx, group, *tensors):
+    def forward(ctx, group, out_tensor_list, *tensors):
         ctx.group = group
-        out_tensor_list = [
-            torch.empty_like(tensors[i]) for i in range(dist.get_world_size(group=group))
-        ]
+        if out_tensor_list is None:
+            out_tensor_list = [
+                torch.empty_like(tensors[i]) for i in range(dist.get_world_size(group=group))
+            ]
         reqs = [None] * dist.get_world_size(group=group)
         my_rank = dist.get_rank(group=group)
         # Implement it on means of scatter/gather, send/recv async operations have issues
@@ -241,12 +245,12 @@ class _AlltoAll(Function):
                     to_send = list(tensors)
                 dist.scatter(out_tensor_list[i], to_send, i, group=group)
         else:
-            dist.all_to_all(out_tensor_list, list(tensors), group=group)
+            dist.all_to_all(out_tensor_list, list(tensor.contiguous() for tensor in tensors), group=group)
         return tuple(out_tensor_list)
 
     @staticmethod
     def backward(ctx, *grad_outputs):
-        return (None,) + _AlltoAll.apply(ctx.group, *grad_outputs)
+        return (None, None) + _AlltoAll.apply(ctx.group, None, *grad_outputs)
 
 
 class _AllReduce(Function):

@@ -63,7 +63,37 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
         sharded_output = torch.nn.functional.linear(
             inp, sharded_linear.weight, sharded_linear.bias
         )
+
         self.assertEqual(local_output, sharded_output)
+
+        # Generate expected for loss calculation.
+        expected_result = torch.randint(0, 2, (input_size[0],)).cuda(self.rank)
+        external_grad = torch.ones(input_size[0], dtype=torch.float32).cuda(self.rank).contiguous()
+
+        # Compute loss.
+        local_loss = expected_result - torch.sum(local_output, dim=1)
+        sharded_loss = expected_result - torch.sum(sharded_output, dim=1)
+        sharded_loss = sharded_loss.contiguous()
+
+        # Run backward pass
+        local_loss.backward(gradient=external_grad)
+        sharded_loss.backward(gradient=external_grad)
+
+        # Verify that both weight and bias in the sharded linear has non-None grad.
+        sharded_weight = sharded_linear.weight.local_shards()[0].tensor
+        self.assertEqual(sharded_weight.requires_grad, True)
+        self.assertNotEqual(sharded_linear.bias.grad, None)
+        self.assertNotEqual(sharded_weight.grad, None)
+
+        # # Shard the local linear's weight grad so that we can compare.
+        # local_linear_clone = torch.nn.Linear(linear_size[0], 1).cuda(self.rank)
+        # local_linear_clone.weight.tensor = local_linear.weight.grad
+        # shard_parameter(local_linear_clone, "weight", spec)
+        # local_weight_grad = local_linear_clone.weight.local_shards()[0].tensor
+
+        # # Test backward gradient calculation.
+        # self.assertEqual(sharded_weight.grad, local_weight_grad)
+        # self.assertEqual(sharded_linear.bias.grad, local_linear.bias.grad)
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(4)
@@ -87,5 +117,6 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
             self._run_sharded_linear(spec, [5, 19], [19, 11], 1)
             self._run_sharded_linear(spec, [5, 21], [21, 11], 1)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     run_tests()

@@ -8,6 +8,10 @@ from torch.distributed._sharding_spec._internals import (
     get_split_size,
     get_chunked_dim_size,
 )
+from torch.distributed.nn.functional import (
+    all_gather,
+    all_to_all,
+)
 
 
 def _handle_col_wise_sharding_base(
@@ -54,8 +58,7 @@ def _handle_col_wise_sharding_base(
     Return: final result of input being applied with the op.
     """
     # allgather the inputs first.
-    gathered_inputs = [torch.zeros_like(input) for _ in range(world_size)]
-    dist.all_gather(gathered_inputs, input, group=pg)
+    gathered_inputs = all_gather(input, group=pg)
 
     # run the operator's function for all the inputs.
     results = []
@@ -120,15 +123,20 @@ def _result_distribute_with_col_rearrange(
     # Compute output splits
     split_size = get_split_size(sharding_dim_size, world_size)
     output_split_sizes = [0] * world_size
+    output_tensor_list = [None] * world_size
     for idx, placement in enumerate(weight._sharding_spec.placements):
-        output_split_sizes[placement.rank()] = get_chunked_dim_size(
-            sharding_dim_size, split_size, idx
+        output_split_size = get_chunked_dim_size(sharding_dim_size, split_size, idx)
+        output_split_sizes[placement.rank()] = output_split_size
+        dims[0] = output_split_size
+        output_tensor_list[placement.rank()] = torch.empty(
+            *dims,
+            device=input.device,
+            dtype=combined_results.dtype,
         )
 
     # distribute the outputs using all2all.
-    dist.all_to_all_single(
-        output, combined_results, output_split_sizes=output_split_sizes, group=pg
-    )
+    all_to_all(results, group=pg, out_tensor_list=output_tensor_list)
+    output = torch.cat(output_tensor_list)
 
     # Check if we need to rearrange columns appropriately for output.
     rearrange_columns = any(
