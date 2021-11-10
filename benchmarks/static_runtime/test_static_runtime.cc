@@ -983,7 +983,6 @@ TEST(StaticRuntime, to) {
         return e
   )JIT";
 
-
   auto test_to = [&](at::ScalarType b, bool c, bool d, c10::MemoryFormat e) {
     auto a = at::randn({4, 3, 1, 2});
     auto other = at::randn({4, 3, 1, 2}, b);
