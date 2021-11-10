@@ -1329,11 +1329,9 @@ class RelaxedNumberPair(NumberPair):
         if isinstance(number_like, (torch.Tensor, np.ndarray)):
             numel = number_like.numel() if isinstance(number_like, torch.Tensor) else number_like.size
             if numel > 1:
-                error_meta = ErrorMeta(
-                    ValueError,
-                    f"Only single element tensor-likes can be compared against a number. "
-                    f"Got {numel} elements instead.",
-                )
+                error_meta = self._make_error_meta(ValueError,
+                                                   f"Only single element tensor-likes can be compared against a number. "
+                    f"Got {numel} elements instead.",)
                 return error_meta, None
 
             return None, number_like.item()
@@ -1380,11 +1378,14 @@ class UnittestPair(Pair):
             test_case.assertEqual(self.actual, self.expected)
         except test_case.failureException as error:
             msg = str(error)
+        # FIXME: debug test_broadcast_object_list
+        except Exception as error:
+            raise type(error)(f"{type(self.actual)}, {type(self.expected)}, {str(error)}")
         else:
             return None
 
         type_name = self.TYPE_NAME or (self.CLS if isinstance(self.CLS, type) else self.CLS[0]).__name__
-        return ErrorMeta(AssertionError, f"{type_name.title()} comparison failed: {msg}")
+        return self._make_error_meta(AssertionError, f"{type_name.title()} comparison failed: {msg}")
 
 
 class StringPair(UnittestPair):
@@ -1845,7 +1846,14 @@ class TestCase(expecttest.TestCase):
                 TypePair,
                 ObjectPair,
             ),
-            sequence_types=(Sequence, Sequential, ModuleList, ParameterList, ScriptList),
+            sequence_types=(
+                Sequence,
+                Sequential,
+                ModuleList,
+                ParameterList,
+                ScriptList,
+                torch.utils.data.dataset.Subset,
+            ),
             mapping_types=(Mapping, ModuleDict, ParameterDict, ScriptDict),
             rtol=rtol,
             rtol_override=self.rel_tol,
