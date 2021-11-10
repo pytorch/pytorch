@@ -60,11 +60,16 @@ void convert_indices_from_coo_to_csr_cpu(const Tensor& result, const Tensor& inp
 }
 
 template <typename F, typename ...Args>
-Tensor& unary_inplace_op_(F op_, Tensor& self, Args&&... args) {
+Tensor& unary_inplace_op_(F op_, const Tensor& self, Tensor& result, Args&&... args) {
     TORCH_INTERNAL_ASSERT(self.is_sparse_csr());
-    auto values = self.values();
-    (self.values().*op_)(std::forward<Args>(args)...);
-    return self;
+    TORCH_INTERNAL_ASSERT(result.is_sparse_csr());
+
+    if (!at::sparse::is_same_tensor(self, result)) {
+        result.copy_(self);
+    }
+    auto values = result.values();
+    (values.*op_)(std::forward<Args>(args)...);
+    return result;
 }
 
 } // end anonymous namespace
@@ -74,6 +79,16 @@ namespace native {
 using namespace at::sparse_csr;
 // certain utiliy functions are usable from sparse COO.
 using namespace at::sparse;
+
+namespace {
+
+    inline Tensor get_result_tensor_for_unary_op(const Tensor& input) {
+        if (c10::isIntegralType(input.scalar_type(), /*includeBool=*/true)) {
+            return at::empty_like(input, input.options().dtype(c10::get_default_dtype()));
+        }
+        return at::empty_like(input);
+    }
+}
 
 static constexpr bool is_mkl_supported() {
 #ifdef _MSC_VER
@@ -92,8 +107,17 @@ bool is_square_or_vec(int64_t dim_i, int64_t dim_j, int64_t dim_k) {
   return (dim_i == dim_k  && dim_k == dim_j) || (dim_i == dim_j && dim_k == 1);
 }
 
+Tensor& sin_sparse_csr_out(const Tensor& self, Tensor& result) {
+    return unary_inplace_op_(&Tensor::sin_, self, result);
+}
+
+Tensor sin_sparse_csr(const Tensor& self) {
+    auto result = get_result_tensor_for_unary_op(self);
+    return sin_sparse_csr_out(self, result);
+}
+
 Tensor& sin_sparse_csr_(Tensor& self) {
-    return unary_inplace_op_(&Tensor::sin_, self);
+    return sin_sparse_csr_out(self, self);
 }
 
 template <typename scalar_t>
