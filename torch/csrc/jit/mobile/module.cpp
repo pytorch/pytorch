@@ -52,9 +52,9 @@ void set_train_recurse(
     obj->setSlot(*slot, on);
   } else {
     TORCH_INTERNAL_ASSERT(
-      false,
-      "'training' attribute not found. Did you accidentally "
-      "call .eval() before saving your model?");
+        false,
+        "'training' attribute not found. Did you accidentally "
+        "call .eval() before saving your model?");
   }
   for (const auto& slot : obj->slots()) {
     if (slot.isObject()) {
