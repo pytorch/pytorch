@@ -707,11 +707,6 @@ TensorView* sortAndRFactor(TensorView* reference_tv) {
       continue;
     }
 
-    // Don't rfactor trivial reductions
-    if (!id->isParallelized() && id->extent()->isOneInt()) {
-      continue;
-    }
-
     // We always want an rfactor axis because our inlining logic expects it. If
     // there's no parallelization to split out, just rfactor everything but the
     // unswitch dim.
