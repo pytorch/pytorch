@@ -18,6 +18,7 @@ from torch._C import TensorType, TupleType, FloatType, IntType, ComplexType, \
 from textwrap import dedent
 from torch._sources import get_source_lines_and_file
 from typing import Type
+import typing
 
 if torch.distributed.rpc.is_available():
     from .._jit_internal import RRef, is_rref
@@ -381,6 +382,11 @@ def try_ann_to_type(ann, loc):
             return maybe_script_class
         if torch._jit_internal.can_compile_class(ann):
             return torch.jit._script._recursive_compile_class(ann, loc)
+    if isinstance(ann, typing.ForwardRef):
+        actual_ann = ann.__forward_arg__
+        if actual_ann == "Tensor":
+            return TensorType.get()
+
 
     # Maybe resolve a NamedTuple to a Tuple Type
     def fake_rcb(key):
@@ -392,7 +398,7 @@ def ann_to_type(ann, loc):
     the_type = try_ann_to_type(ann, loc)
     if the_type is not None:
         return the_type
-    raise ValueError(f"Unknown type annotation: '{ann}' at {loc.highlight()}")
+    raise ValueError(f"Unknown type annotation : {ann} at {loc.highlight()}")
 
 
 __all__ = [
