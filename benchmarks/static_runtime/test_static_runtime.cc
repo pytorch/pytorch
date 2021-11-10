@@ -2,6 +2,7 @@
 #include <gtest/gtest.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/irparser.h>
+#include <torch/csrc/jit/runtime/static/ProcessedNodeInputs.h>
 #include <torch/csrc/jit/runtime/static/fusion.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
@@ -66,12 +67,7 @@ bool testModuleHasOp(const std::string& jit_script, const char* op_name) {
 }
 
 Node* getNodeWithKind(const StaticModule& smodule, const std::string& kind) {
-  for (auto& pnode : smodule.nodes()) {
-    if (std::string(pnode.node()->kind().toQualString()) == kind) {
-      return pnode.node();
-    }
-  }
-  return nullptr;
+  return smodule.findNodeWithKindForTesting(kind);
 }
 
 bool hasNodeWithKind(const StaticModule& smodule, const std::string& kind) {
@@ -524,7 +520,7 @@ TEST(StaticRuntime, IndividualOps_Stack) {
   testStaticRuntime(stack_three, args1_three_tensors, args2_three_tensors);
 }
 
-TEST(StaicRuntime, IndividualOps_ReLU) {
+TEST(StaticRuntime, IndividualOps_ReLU) {
   auto a = torch::tensor({{1, -1}, {2, 0}});
   auto b = torch::tensor({{1, -1, -1}, {2, 0, -1}});
 
@@ -535,7 +531,7 @@ TEST(StaicRuntime, IndividualOps_ReLU) {
   testStaticRuntime(relu_script, args1, args2);
 }
 
-TEST(StaicRuntime, IndividualOps_Tanh) {
+TEST(StaticRuntime, IndividualOps_Tanh) {
   auto a = at::randn({2, 2});
   auto b = at::randn({3, 3, 3});
 
@@ -721,15 +717,6 @@ TEST(StaticRuntime, IndividualOps_to) {
   }
 }
 
-TEST(StaticRuntime, IndividualOps_Detach) {
-  auto a = at::randn({4, 3, 1, 2});
-  auto b = at::randn({3, 2, 2});
-  std::vector<IValue> args{a};
-  std::vector<IValue> args2{b};
-  testStaticRuntime(detach_script, args);
-  testStaticRuntime(detach_script, args, args2);
-}
-
 TEST(StaticRuntime, IndividualOps_ExpandAs) {
   auto a = at::randn({3, 1});
   auto b = at::randn({3, 2});
@@ -873,7 +860,7 @@ TEST(StaticRuntime, DeepWide) {
 
       // run static runtime
       std::vector<c10::IValue> input_tensors({ad_emb_packed, user_emb, wide});
-      auto outputs = smod(input_tensors, {}).toTuple()->elements();
+      auto outputs = smod(input_tensors, {}).toTupleRef().elements();
       ASSERT_TRUE(outputs.size() > 0);
       at::Tensor output_2 = outputs[0].toTensor();
       smod.runtime().check_for_memory_leak();
@@ -1009,7 +996,7 @@ TEST(StaticRuntime, CleanUpMemory) {
               // run static runtime
               std::vector<c10::IValue> input_tensors(
                   {ad_emb_packed, user_emb, wide});
-              auto outputs = runtime(input_tensors, {}).toTuple()->elements();
+              auto outputs = runtime(input_tensors, {}).toTupleRef().elements();
               ASSERT_TRUE(outputs.size() > 0);
               auto output_2 = outputs[0].toTensor();
               runtime.check_for_memory_leak();
@@ -1069,12 +1056,12 @@ TEST(
   {
     IValue tuple = runtime(args, {});
     ASSERT_TRUE(tuple.isTuple());
-    ASSERT_EQ(tuple.toTuple()->elements().size(), 1);
+    ASSERT_EQ(tuple.toTupleRef().elements().size(), 1);
     // Do not manage intput value.
     EXPECT_FALSE(runtime.isManagedOutputTensor(args[0]));
     // Do not manage direct output value.
     EXPECT_FALSE(runtime.isManagedOutputTensor(tuple));
-    IValue element = tuple.toTuple()->elements()[0];
+    IValue element = tuple.toTupleRef().elements()[0];
     // Tensor to be managed, but not yet from the profile run.
     EXPECT_FALSE(runtime.isManagedOutputTensor(element));
     tuple = IValue();
@@ -1085,12 +1072,12 @@ TEST(
   {
     IValue tuple = runtime(args, {});
     ASSERT_TRUE(tuple.isTuple());
-    ASSERT_EQ(tuple.toTuple()->elements().size(), 1);
+    ASSERT_EQ(tuple.toTupleRef().elements().size(), 1);
     // Do not manage intput value.
     EXPECT_FALSE(runtime.isManagedOutputTensor(args[0]));
     // Do not manage direct output value.
     EXPECT_FALSE(runtime.isManagedOutputTensor(tuple));
-    IValue element = tuple.toTuple()->elements()[0];
+    IValue element = tuple.toTupleRef().elements()[0];
     // Tensor to be managed, but not yet from the profile run.
     EXPECT_TRUE(runtime.isManagedOutputTensor(element));
     tuple = IValue();
@@ -1186,6 +1173,59 @@ TEST(StaticRuntime, FusionPass) {
   }
 }
 
+static ProcessedNodeInputs createProcessedNodeInputs(
+    c10::ArrayRef<uint16_t> inputs) {
+  ProcessedNodeInputs result(inputs.size());
+  for (const auto idx : c10::irange(inputs.size())) {
+    result[idx] = inputs[idx];
+  }
+  return result;
+}
+
+static void checkProcessedNodeInputs(
+    const ProcessedNodeInputs& io,
+    c10::ArrayRef<uint16_t> inputs) {
+  ASSERT_EQ(inputs.size(), io.size());
+  for (const auto idx : c10::irange(inputs.size())) {
+    EXPECT_EQ(inputs[idx], io[idx]);
+  }
+}
+
+static void testProcessedNodeInputsRoundTrip(c10::ArrayRef<uint16_t> inputs) {
+  auto io = createProcessedNodeInputs(inputs);
+  checkProcessedNodeInputs(io, inputs);
+
+  ProcessedNodeInputs copied(io);
+  checkProcessedNodeInputs(copied, inputs);
+  ProcessedNodeInputs moved(std::move(io));
+  checkProcessedNodeInputs(moved, inputs);
+}
+
+TEST(ProcessedNodeInputs, Basic) {
+  std::vector<std::vector<uint16_t>> testCases = {
+      {}, // empty
+      {0xABCD, 0x5a5a}, // inline
+      {0x11, 0x22, 0x33, 0x44, 0x55}, // max inline size
+      {0x11, 0x22, 0x33, 0x44, 0x55, 0x66}, // minimum outline size
+      std::vector<uint16_t>(100, 0x5a), // large outline size
+  };
+
+  for (const auto& values : testCases) {
+    testProcessedNodeInputsRoundTrip(values);
+    for (const auto& values2 : testCases) {
+      auto from = createProcessedNodeInputs(values);
+      auto to = createProcessedNodeInputs(values2);
+
+      to = from;
+      checkProcessedNodeInputs(to, values);
+
+      auto toMoveInto = createProcessedNodeInputs(values2);
+      toMoveInto = std::move(from);
+      checkProcessedNodeInputs(toMoveInto, values);
+    }
+  }
+}
+
 TEST(
     ProcessedNode,
     VerifyNoMemoryOverlapWithImmutableInputsWithImmutableArguments) {
@@ -1194,17 +1234,14 @@ TEST(
   module.define(sigmoid_script);
   torch::jit::StaticModule smodule(module);
   Node* sigmoid_node = getNodeWithKind(smodule, "aten::sigmoid");
-  const at::IValue a = torch::randn({2, 3});
-  at::IValue b = torch::randn({3, 1});
-  std::unique_ptr<const IValue*[]> ivalue_inputs =
-      std::make_unique<const IValue*[]>(1);
-  ivalue_inputs[0] = &a;
-  ProcessedNode pnode(sigmoid_node, std::move(ivalue_inputs), 1, true);
+  IValue values[] = {torch::randn({2, 3}), torch::randn({3, 1})};
+  ProcessedNode pnode(sigmoid_node, createProcessedNodeInputs({0}), 1, true);
+  pnode.set_values(values);
 
-  pnode.Output(0) = b;
+  ASSERT_EQ(&pnode.Output(0), &values[1]);
   EXPECT_TRUE(pnode.verify_no_memory_overlap());
 
-  pnode.Output(0) = a;
+  pnode.Output(0) = values[0];
   EXPECT_FALSE(pnode.verify_no_memory_overlap());
 }
 
@@ -1216,17 +1253,14 @@ TEST(
   module.define(sigmoid_inplace_script);
   torch::jit::StaticModule smodule(module);
   Node* sigmoid_node = getNodeWithKind(smodule, "aten::sigmoid");
-  const at::IValue a = torch::randn({2, 3});
-  at::IValue b = torch::randn({3, 1});
-  std::unique_ptr<const IValue*[]> ivalue_inputs =
-      std::make_unique<const IValue*[]>(1);
-  ivalue_inputs[0] = &a;
-  ProcessedNode pnode(sigmoid_node, std::move(ivalue_inputs), 1, true);
+  IValue values[] = {torch::randn({2, 3}), torch::randn({3, 1})};
+  ProcessedNode pnode(sigmoid_node, createProcessedNodeInputs({0}), 1, true);
+  pnode.set_values(values);
 
-  pnode.Output(0) = b;
+  ASSERT_EQ(&pnode.Output(0), &values[1]);
   EXPECT_TRUE(pnode.verify_no_memory_overlap());
 
-  pnode.Output(0) = a;
+  pnode.Output(0) = values[0];
   EXPECT_TRUE(pnode.verify_no_memory_overlap());
 }
 
@@ -1241,24 +1275,24 @@ TEST(ProcessedNode, VerifyNoMemoryOverlapWithOverlappingOutputs) {
   torch::jit::StaticModule smodule(g);
   Node* list_unpack_node = getNodeWithKind(smodule, "prim::ListUnpack");
   {
-    auto a = at::randn({2, 3});
-    IValue ivalue(a);
-    std::unique_ptr<const IValue*[]> inputs =
-        std::make_unique<const IValue*[]>(1);
-    inputs[0] = &ivalue;
+    IValue values[] = {at::randn({2, 3}), at::empty({1, 3}), at::empty({4, 5})};
     ProcessedNode list_unpack_pnode(
-        list_unpack_node, std::move(inputs), 1, /*enable_out_variant=*/true);
+        list_unpack_node,
+        createProcessedNodeInputs({0}),
+        1,
+        /*enable_out_variant=*/true);
+    list_unpack_pnode.set_values(values);
     ASSERT_EQ(list_unpack_pnode.outputs().size(), 2);
     EXPECT_TRUE(list_unpack_pnode.verify_no_memory_overlap());
   }
   {
-    auto a = at::randn({2, 3});
-    IValue ivalue(a);
-    std::unique_ptr<const IValue*[]> inputs =
-        std::make_unique<const IValue*[]>(1);
-    inputs[0] = &ivalue;
+    IValue values[] = {at::randn({2, 3}), at::empty({1, 3}), at::empty({4, 5})};
     ProcessedNode list_unpack_pnode(
-        list_unpack_node, std::move(inputs), 1, /*enable_out_variant=*/true);
+        list_unpack_node,
+        createProcessedNodeInputs({0}),
+        1,
+        /*enable_out_variant=*/true);
+    list_unpack_pnode.set_values(values);
     auto b = at::randn({2, 3});
     list_unpack_pnode.Output(0) = b;
     list_unpack_pnode.Output(1) = b;
@@ -1524,6 +1558,19 @@ TEST(StaticRuntime, QuantizedLinear) {
       at::quantize_per_tensor(torch::randn({4, 3}), 2, 3, torch::kQUInt8);
 
   testStaticRuntime(quantize_script, {input, weight}, {input_2, weight_2});
+}
+
+TEST(StaticRuntime, QuantizedLinearDynamicFp16) {
+  at::Tensor weight = torch::randn({3, 2}, torch::kFloat);
+  at::Tensor input = torch::randn({3, 2}, torch::kFloat);
+
+  at::Tensor weight_2 = torch::randn({4, 3}, torch::kFloat);
+  at::Tensor input_2 = torch::randn({4, 3}, torch::kFloat);
+
+  testStaticRuntime(
+      quantized_linear_dynamic_fp16_script,
+      {input, weight},
+      {input_2, weight_2});
 }
 
 TEST(StaticRuntime, IndividualOps_VarStack) {
@@ -1852,4 +1899,46 @@ TEST(StaticRuntime, IndividuaOps_Squeeze) {
   testStaticRuntime(src, {a, 0});
   testStaticRuntime(src, {a, 1});
   testStaticRuntime(src, {a, -1}, {b, 2});
+}
+
+TEST(StaticRuntime, NumToTensorScalar) {
+  const auto num_to_tensor_ir = R"IR(
+    graph(%1 : int):
+      %2 : NoneType = prim::Constant()
+      %3 : Tensor = prim::NumToTensor(%1)
+      %4 : Tensor = aten::clone(%3, %2)
+      return (%4)
+  )IR";
+
+  IValue arg{5};
+  std::vector<IValue> args = {arg};
+  testStaticRuntime(num_to_tensor_ir, args);
+}
+
+TEST(StaticRuntime, NumToTensorFalse) {
+  const auto num_to_tensor_ir = R"IR(
+    graph(%1 : bool):
+      %2 : NoneType = prim::Constant()
+      %3 : Tensor = prim::NumToTensor(%1)
+      %4 : Tensor = aten::clone(%3, %2)
+      return (%4)
+  )IR";
+
+  IValue arg{false};
+  std::vector<IValue> args = {arg};
+  testStaticRuntime(num_to_tensor_ir, args);
+}
+
+TEST(StaticRuntime, NumToTensorTrue) {
+  const auto num_to_tensor_ir = R"IR(
+    graph(%1 : bool):
+      %2 : NoneType = prim::Constant()
+      %3 : Tensor = prim::NumToTensor(%1)
+      %4 : Tensor = aten::clone(%3, %2)
+      return (%4)
+  )IR";
+
+  IValue arg{true};
+  std::vector<IValue> args = {arg};
+  testStaticRuntime(num_to_tensor_ir, args);
 }
