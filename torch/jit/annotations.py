@@ -382,7 +382,7 @@ def try_ann_to_type(ann, loc):
             return maybe_script_class
         if torch._jit_internal.can_compile_class(ann):
             return torch.jit._script._recursive_compile_class(ann, loc)
-    if isinstance(ann, typing.ForwardRef):
+    if hasattr(typing, 'ForwardRef') and isinstance(ann, typing.ForwardRef):
         actual_ann = ann.__forward_arg__
         if actual_ann == "Tensor":
             return TensorType.get()
