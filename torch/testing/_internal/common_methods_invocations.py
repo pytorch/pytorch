@@ -9578,7 +9578,7 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.max_pool2d',
            aten_name='max_pool2d',
            supports_autograd=True,
-           # Vmap is note happy with non-contiguous (channels_last) inputs
+           # Vmap is not happy with non-contiguous (channels_last) inputs
            check_batched_gradgrad=False,
            supports_out=False,
            assert_jit_shape_analysis=True,
