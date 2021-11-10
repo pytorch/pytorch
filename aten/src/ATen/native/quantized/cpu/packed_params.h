@@ -35,8 +35,31 @@ struct LinearPackedParamsBase : public torch::jit::CustomClassHolder {
     return output;
   }
 
-  virtual at::Tensor apply_dynamic(at::Tensor input, bool reduce_range=false) = 0;
-  virtual at::Tensor apply_dynamic_relu(at::Tensor input, bool reduce_range=false) = 0;
+  virtual at::Tensor apply_dynamic(
+      at::Tensor input,
+      bool reduce_range = false) = 0;
+  virtual at::Tensor apply_dynamic_relu(
+      at::Tensor input,
+      bool reduce_range = false) = 0;
+
+  virtual at::Tensor& apply_dynamic_out(
+      const at::Tensor& /* input */,
+      at::Tensor& output,
+      bool /* reduce_range */) {
+    throw std::runtime_error(
+        "apply_dynamic_out is not implemented for this packed "
+        "parameter type");
+    return output;
+  }
+  virtual at::Tensor& apply_dynamic_relu_out(
+      const at::Tensor& /* input */,
+      at::Tensor& output,
+      bool /* reduce_range */) {
+    throw std::runtime_error(
+        "apply_dynamic_relu_out is not implemented for this packed "
+        "parameter type");
+    return output;
+  }
 
   virtual std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() = 0;
 
