@@ -18,8 +18,8 @@ from torch.testing._internal.common_utils import \
      parametrize, subtest, instantiate_parametrized_tests, dtype_name)
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
-     get_device_type_test_bases, instantiate_device_type_tests, onlyCUDA, onlyOnCPUAndCUDA,
-     deviceCountAtLeast, ops)
+     get_device_type_test_bases, instantiate_device_type_tests, onlyCUDA, onlyNativeDeviceTypes,
+     deviceCountAtLeast, ops, expectedFailureMeta)
 from torch.testing._internal.common_methods_invocations import op_db
 import torch.testing._internal.opinfo_helper as opinfo_helper
 from torch.testing._internal.common_dtype import get_all_dtypes
@@ -50,7 +50,7 @@ class TestTesting(TestCase):
     # the other is zeroed.
     # TODO: this is legacy behavior and should be updated after test
     # precisions are reviewed to be consistent with torch.isclose.
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test__comparetensors_legacy(self, device):
         a = torch.tensor((10000000.,))
         b = torch.tensor((10000002.,))
@@ -83,7 +83,7 @@ class TestTesting(TestCase):
             result, debug_msg = op(x, y, atol=0, rtol=1e-5)
             self.assertFalse(result)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test__comparescalars_debug_msg(self, device):
         # float x float
         result, debug_msg = self._compareScalars(4., 7.)
@@ -115,7 +115,7 @@ class TestTesting(TestCase):
         self.assertEqual(debug_msg, expected_msg)
 
     # Checks that compareTensors provides the correct debug info
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test__comparetensors_debug_msg(self, device):
         # Acquires atol that will be used
         atol = max(1e-05, self.precision)
@@ -267,7 +267,7 @@ class TestTesting(TestCase):
         self._isclose_helper(tests, device, dtype, False, atol=1.5, rtol=.5)
         self._comparetensors_helper(tests, device, dtype, False, atol=1.5, rtol=.5)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(torch.float16, torch.float32, torch.float64)
     def test_isclose_comparetensors_float(self, device, dtype):
         tests = (
@@ -586,7 +586,8 @@ if __name__ == '__main__':
         # we are currently disabling CUDA early termination for distributed tests.
         self.assertIn('Ran 2 test', stderr)
 
-    @onlyOnCPUAndCUDA
+    @expectedFailureMeta  # This is only supported for CPU and CUDA
+    @onlyNativeDeviceTypes
     def test_get_supported_dtypes(self, device):
         # Test the `get_supported_dtypes` helper function.
         # We acquire the dtypes for few Ops dynamically and verify them against
