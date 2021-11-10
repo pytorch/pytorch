@@ -3830,6 +3830,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: sin_out
+    SparseCsrCPU, SparseCsrCUDA: sin_sparse_csr_
 
 - func: sinc(Tensor self) -> Tensor
   structured_delegate: sinc.out
