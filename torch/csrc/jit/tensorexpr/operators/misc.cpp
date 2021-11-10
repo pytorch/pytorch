@@ -458,8 +458,8 @@ static std::pair<ScalarType, std::vector<BufHandle>> processCatList(
         buf.node()->dims().size() > 0, buildErrorMessage("Invalid buf rank"));
     // Ignore buffers that are 0-sized on any dimension.
     bool hasEmptyDims = false;
-    for (const auto& dim : buf.node()->dims()) {
-      if (immediateAs<int64_t>(dim) == 0ll) {
+    for (const auto& dim : buf.dims()) {
+      if (dim.AsNode<LongImm>() && immediateAs<int64_t>(dim) == 0ll) {
         hasEmptyDims = true;
         break;
       }
