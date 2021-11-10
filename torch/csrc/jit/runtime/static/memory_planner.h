@@ -62,7 +62,7 @@ class MemoryPlanner {
   }
 
   size_t num_unmanaged_non_scalars() const {
-    return unmanaged_ivalues_.size();
+    return unmanaged_ivalues_.size() + unmanaged_borrowed_tensor_ivalues_.size();
   }
 
   size_t num_unmanaged_scalars() const {
@@ -124,6 +124,16 @@ class MemoryPlanner {
  private:
   // ivalues created in one run but not managed by MemoryPlanner
   std::vector<IValue*> unmanaged_ivalues_;
+
+  // Special class of unmanaged values: static_runtime::select_tensor
+  // creates IValues in a "borrowed Tensor" state that can and must be
+  // cleaned up without a reference count decrement.
+  std::vector<IValue*> unmanaged_borrowed_tensor_ivalues_;
+
+  // Even more special class of unmanaged values: if select_tensor
+  // outputs are outputs of the graph, then they need to be restored
+  // to an ordinary "strong Tensor reference" state.
+  std::vector<IValue*> borrowed_tensor_ivalues_needing_incref_;
 
   // each pair contains the size (in bytes) of data to be allocated
   // and a vector of Tensors' storages that should be backed by that

@@ -124,6 +124,7 @@ MemoryPlanner::MemoryPlanner(
 
   // collect unmanaged output ivalues
   FastSet<IValue*> unmanaged_ivalues;
+  FastSet<IValue*> unmanaged_borrowed_tensor_ivalues;
   for (ProcessedNode& pnode : runtime->nodes()) {
     for (const auto i : c10::irange(pnode.outputs().size())) {
       // Types are stored in the underlying TorchScript IR
@@ -133,9 +134,14 @@ MemoryPlanner::MemoryPlanner(
           setIncludes(leaked_values, out_v)) {
         continue;
       }
+      static const auto select_tensor_symbol =
+        c10::Symbol::fromQualString("static_runtime::select_tensor");
       if (doesNotHeapAllocateWhenStoredInIValue(*out_v->type())) {
         // Scalars do not need to be freed after each iteration.
         num_unmanaged_scalar_ivalues_++;
+      } else if (pnode.node()->kind() == select_tensor_symbol) {
+        IValue& out = pnode.Output(i);
+        unmanaged_borrowed_tensor_ivalues.insert(&out);
       } else {
         IValue& out = pnode.Output(i);
         unmanaged_ivalues.insert(&out);
@@ -147,8 +153,15 @@ MemoryPlanner::MemoryPlanner(
   for (const Value* output : runtime->graph().outputs()) {
     managed_tensor_values.erase(output);
   }
+  FastSet<IValue*> borrowed_tensor_ivalues_needing_incref;
   for (IValue* output : runtime->outputs()) {
-    unmanaged_ivalues.erase(output);
+    auto it = unmanaged_borrowed_tensor_ivalues.find(output);
+    if (it != unmanaged_ivalues.end()) {
+      borrowed_tensor_ivalues_needing_incref_.push_back(output);
+      unmanaged_borrowed_tensor_ivalues.erase(it);
+    } else {
+      unmanaged_ivalues.erase(output);
+    }
   }
 
   GRAPH_DEBUG("managed_tensor_values: ", dumpValueSet(managed_tensor_values));
@@ -159,6 +172,11 @@ MemoryPlanner::MemoryPlanner(
       unmanaged_ivalues_.begin(),
       unmanaged_ivalues.begin(),
       unmanaged_ivalues.end());
+  unmanaged_borrowed_tensor_ivalues_.reserve(unmanaged_borrowed_tensor_ivalues.size());
+  unmanaged_borrowed_tensor_ivalues_.insert(
+      unmanaged_borrowed_tensor_ivalues_.begin(),
+      unmanaged_borrowed_tensor_ivalues.begin(),
+      unmanaged_borrowed_tensor_ivalues.end());
 
   if (enable_out_variant) {
     ::torch::jit::assign_storage_to_managed_tensors(
@@ -357,9 +375,16 @@ void MemoryPlanner::deallocate() {
 
   DCHECK_EQ(managed_tensor_storage_impls_.size(), managed_tensors_.size());
 
+  for (auto& iv : borrowed_tensor_ivalues_needing_incref_) {
+    c10::raw::intrusive_ptr::incref(iv->toTensor().unsafeGetTensorImpl());
+  }
   // for unmanaged ivalues (either tensor or non-tensor), we reset the *iv so
   // that the objects pointed to by *iv may be reclaimed by reference counting
   for (auto& iv : unmanaged_ivalues_) {
+    *iv = IValue();
+  }
+  for (auto& iv : unmanaged_borrowed_tensor_ivalues_) {
+    c10::MaybeOwnedTraits<at::TensorBase>::destroyBorrow(iv->toTensor());
     *iv = IValue();
   }
   buffer_ = {};
