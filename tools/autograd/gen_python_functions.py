@@ -466,12 +466,13 @@ def generate_return_type_defintion_and_map_entry(
     overloads: Sequence[PythonSignatureNativeFunctionPair],
 ) -> Tuple[List[str], List[str]]:
     """
-    Generate block of named tuple type def inits, and add typeref snippets
-    to declarations that use them
+    Generate block of function in `python_return_types.cpp` to initialize
+    and return named tuple for a native function which returns named tuple
+    and relevant entry for the map in same file.
     """
-    typenames: Dict[str, str] = {}    # map from unique name + field name lists to typedef name
-    definitions: List[str] = []          # typedef declarations and init code
-    map_entries: List[str] = []
+    typenames: Dict[str, str] = {}  # map from unique name + field name lists to typedef name
+    definitions: List[str] = []  # function defintion to register the typedef
+    map_entries: List[str] = []  # C++ map entry of <function_name, function creates it namedtuple>
 
     for overload in overloads:
         fieldnames = namedtuple_fieldnames(overload.function.func.returns)
