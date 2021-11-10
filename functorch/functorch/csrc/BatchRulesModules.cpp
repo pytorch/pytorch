@@ -401,7 +401,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("cudnn_grid_sampler", GRID_SAMPLE_BATCH_RULE(cudnn_grid_sampler));
   VMAP_SUPPORT("cross", cross_batch_rule);
 
-  UNARY_POINTWISE(constant_pad_nd);
+  VARIADIC_BDIMS(constant_pad_nd);
   EXISTING_BDIM(reflection_pad1d);
   EXISTING_BDIM(reflection_pad2d);
   EXISTING_BDIM(reflection_pad3d);
