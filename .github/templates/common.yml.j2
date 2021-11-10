@@ -182,9 +182,15 @@ concurrency:
       - name: print labels
         run: echo "${LABELS}"
       !{{ checkout_pytorch("recursive") }}
-      - name: should run step
+      - name: Determinate
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BUILD_ENVIRONMENT: !{{ build_environment }}
         id: should_run_step
-        run: python tools/determinator/main.py
+        run: |
+          python -m tools.determinator \
+            --pr $PR_NUMBER \
+            --build_environment $BUILD_ENVIRONMENT
 {%- endmacro -%}
 
 {%- macro calculate_docker_image(always_rebuild) -%}
