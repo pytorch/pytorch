@@ -472,7 +472,7 @@ std::string LazyGraphExecutor::DumpBackendComputation(
     }
   }
   return !ir_values.empty()
-             ? ir::DumpUtil::ToBackend(ir_values, GetCurrentDevice())
+             ? ir::DumpUtil::ToBackend(ir_values, Device())
              : std::string();
 }
 

@@ -81,14 +81,6 @@ c10::Device LtcDeviceToAtenDevice(const Device& device);
 
 std::string ToLtcString(const c10::Device& device);
 
-c10::Device AtenDefaultDevice();
-
-c10::Device SetCurrentDevice(const c10::Device& device);
-
-Device SetCurrentDevice(const Device& device);
-
-c10::Device GetCurrentAtenDevice();
-
 at::Tensor LtcToAtenTensor(LazyTensor ltc_tensor,
                            const at::TensorOptions& tensor_options);
 

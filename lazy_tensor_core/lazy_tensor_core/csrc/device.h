@@ -17,6 +17,8 @@ struct BackendDeviceType {
 // TODO(alanwaketan): Rename it to BackendDevice.
 class Device {
  public:
+  // The default constructor will set both the device type and ordinal
+  // to backend specific defaults.
   Device();
   Device(std::shared_ptr<BackendDeviceType>&& type, int ordinal);
 
@@ -41,15 +43,5 @@ class Device {
 };
 
 std::ostream& operator<<(std::ostream& os, const Device& device);
-
-const Device* GetDefaultDevice();
-
-Device GetCurrentDevice();
-
-Device SetCurrentDevice(const Device& device);
-
-static inline Device GetDeviceOrCurrent(const Device* device) {
-  return device != nullptr ? *device : GetCurrentDevice();
-}
 
 }  // namespace torch_lazy_tensors
