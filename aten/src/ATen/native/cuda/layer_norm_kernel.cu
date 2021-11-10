@@ -11,7 +11,6 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/native/cuda/block_reduce.cuh>
-//#include <iostream>
 
 #include <c10/cuda/CUDAMathCompat.h>
 
@@ -516,7 +515,6 @@ void LayerNormKernelImplInternal(
       N, X_data, mean_data, rstd_data, gamma_data, beta_data, Y_data);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
-  //std::cout << *mean << *rstd << "\n";
 }
 
 void LayerNormKernelImpl(
