@@ -21,7 +21,7 @@ public_docs = [
 ]
 
 # torch.abs, Tensor.abs, Tensor.abs_ are all considered to be different
-def get_public_overridable_apis(pytorch_root='/raid/rzou/pt/debug-cpu'):
+def get_public_overridable_apis(pytorch_root='/raid/rzou/pt/whiteboard'):
     results = {}
     all_overridable_apis = set(torch.overrides.get_testing_overrides().keys())
     for module, module_name, src in public_docs:
@@ -157,17 +157,47 @@ def get_top_ops(torch_threshold, nn_fn_threshold):
         'manual_seed', 'ones', 'randn', 'arange', 'rand',
         'empty', 'randperm', 'linspace', 'set_grad_enabled',
         'isnan', 'set_default_tensor_type', 'set_num_threads',
-        'set_printoptions', 'isfinite', 'range', 'numel',
+        'set_printoptions', 'range', 'numel',
         'set_default_dtype', 'sparse_coo_tensor', 'set_rng_state',
         'get_rng_state', 'get_default_dtype', 'initial_seed',
         'get_num_threads', 'quantize_per_tensor', 'logspace',
-        'hann_window', 'is_tensor', 'as_tensor', 'randint', 'full', 'eye',
+        'hann_window', 'is_tensor', 'as_tensor', 'full', 'eye',
         'equal', 'enable_grad', 'seed', 'is_storage', 'hamming_window',
         'is_floating_point', 'nn.functional.torch',
+        'set_flush_denormal', 'set_num_interop_threads', 'dequantize',
+        'get_num_interop_threads', 'nn.functional.math',
+        'nn.functional.threshold_',
+        'nn.functional.selu_',
+        'nn.functional.elu_',
+        'nn.functional.rrelu_',
+        'nn.functional.leaky_relu_',
+        'nn.functional.hardtanh_',
+        'nn.functional.has_torch_function',
+        'nn.functional.has_torch_function_unary',
+        'nn.functional.has_torch_function_variadic',
+        'nn.functional.handle_torch_function',
+        'nn.functional.adaptive_max_pool1d_with_indices',
+        'nn.functional.adaptive_max_pool2d_with_indices',
+        'nn.functional.adaptive_max_pool3d_with_indices',
+        'nn.functional.fractional_max_pool2d_with_indices',
+        'nn.functional.fractional_max_pool3d_with_indices',
+        'is_complex',
+        'grad',
+        'bartlett_window',
+        'blackman_window',
+        'quantize_per_channel',
+        'nn.functional.max_pool2d_with_indices',
+        'nn.functional.max_pool3d_with_indices',
+        'nn.functional.max_pool1d_with_indices',
+        'nn.functional.celu_',
+        'nn.functional.grad',
+        'nn.functional.relu_',
+        'nn.functional.boolean_dispatch',
+        'nn.functional.assert_int_or_pair',
     })
 
     torch_ops = [op[0] for op in top_ops.top_torch[:torch_threshold]]
-    nn_fn_ops = [op[0] for op in top_ops.top_nn_functional[:nn_fn_threshold]]
+    nn_fn_ops = [op[0] for op in top_ops.get_nn_functional_top_list()[:nn_fn_threshold]]
     ops = torch_ops + nn_fn_ops
     ops = [op for op in ops if op not in denylist]
     return ops
@@ -273,11 +303,11 @@ overridable_outplace_we_care_about = get_public_overridable_outplace_we_care_abo
 tested_overridable_outplace_ops = get_covered_ops(overridable_outplace_we_care_about)
 untested_overridable_outplace_ops = get_covered_ops(overridable_outplace_we_care_about, invert=True)
 
-print("List of OpInfos we need:")
-for key in untested_overridable_outplace_ops.keys():
-    print(key)
-print("-" * 80)
-print("")
+# print("List of OpInfos we need:")
+# for key in untested_overridable_outplace_ops.keys():
+#     print(key)
+# print("-" * 80)
+# print("")
 
 print(f'Overridable public APIs: {len(overridable_apis)}')
 print(f'Overridable public ops: {len(overridable_ops)}')
@@ -296,17 +326,22 @@ method_only_ops = get_method_only_ops_we_care_about()
 
 # top_ops_not_covered_by_opinfo = get_top_ops_not_covered_by_opinfo(100, 25)
 # for op in top_ops_not_covered_by_opinfo:
-#     print(op)
+#     print(f'{op}, {top_ops.usage_count[op]}')
 
 # print("top ops not covered by opinfo: ")
-# top_ops_not_covered_by_opinfo = get_top_ops_not_covered_by_opinfo(200, 40)
+# top_ops_not_covered_by_opinfo = get_top_ops_not_covered_by_opinfo(200, 50)
 # for op in top_ops_not_covered_by_opinfo:
-#     print('- ' + op)
+#     print(f'{op}, {top_ops.usage_count[op]}')
 
-# print("top ops not covered by opinfo: ")
-# top_ops_not_covered_by_opinfo = get_top_ops_not_covered_by_opinfo(200, 40)
-# for op in top_ops_not_covered_by_opinfo:
-#     print('- ' + op)
+#print("top ops not covered by opinfo: ")
+#top_ops_not_covered_by_opinfo = get_top_ops_not_covered_by_opinfo(220, 92)
+#for op in top_ops_not_covered_by_opinfo:
+#    print(f'{op}, {top_ops.usage_count[op]}')
+
+#print("top ops not covered by opinfo: ")
+top_ops_not_covered_by_opinfo = get_top_ops_not_covered_by_opinfo(999, 999)
+for op in top_ops_not_covered_by_opinfo:
+    print(f'{op}, {top_ops.usage_count[op]}')
 
 def print_coverage_info(th=100, nn=25):
     print('=' * 80)
@@ -318,5 +353,5 @@ def print_coverage_info(th=100, nn=25):
     for test in tests:
         print(f'{test} failing coverage {len(statuses[test])}')
 
-print_coverage_info(100, 25)
-print_coverage_info(200, 50)
+# print_coverage_info(100, 25)
+# print_coverage_info(200, 50)
