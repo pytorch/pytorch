@@ -18,7 +18,13 @@ from torch._C import TensorType, TupleType, FloatType, IntType, ComplexType, \
 from textwrap import dedent
 from torch._sources import get_source_lines_and_file
 from typing import Type
-import typing
+import sys
+if sys.version_info >= (3, 8):
+    # python 3.8
+    from typing import ForwardRef
+else:
+    # ForwardRef is private in python 3.6 and 3.7
+    from typing import _ForwardRef as ForwardRef
 
 if torch.distributed.rpc.is_available():
     from .._jit_internal import RRef, is_rref
@@ -382,13 +388,13 @@ def try_ann_to_type(ann, loc):
             return maybe_script_class
         if torch._jit_internal.can_compile_class(ann):
             return torch.jit._script._recursive_compile_class(ann, loc)
-    if hasattr(typing, 'ForwardRef') and isinstance(ann, typing.ForwardRef):
+    if isinstance(ann, ForwardRef):
         actual_ann = ann.__forward_arg__
         if actual_ann == "Tensor":
             return TensorType.get()
 
-
     # Maybe resolve a NamedTuple to a Tuple Type
+
     def fake_rcb(key):
         return None
     return torch._C._resolve_type_from_object(ann, loc, fake_rcb)
