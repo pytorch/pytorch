@@ -10,6 +10,7 @@ import json
 from dataclasses import dataclass
 import hashlib
 
+from tools.codegen.api.unboxing import convert_arguments
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.model import (Argument, DispatchKey, FunctionSchema,
                                  Location, NativeFunction,
@@ -453,82 +454,33 @@ class ComputeStaticUnboxingWrapper:
                 assert sig is not None
             else:
                 sig = sig_group.signature
-            argument_str = "(std::move(peek(stack, {pos}, {args_num})))"
-            # argument to variable name mapping
-            arguments: Dict[str, str] = {}
-            code: List[str] = []
-            args_num = len(f.func.arguments.flat_non_out) + (0 if f.func.arguments.out is None else len(f.func.arguments.out))
-            tensor_option_args: Dict[str, str] = {}
-            tensor_option_arg = f.func.arguments.tensor_options
+            # gather all the arguments from native function, including "out"
+            args = f.func.arguments.flat_non_out + (list(f.func.arguments.out) if f.func.arguments.out else [])
 
-            if sig.name() == "std.correction":
-                print(sig.name())
-                pass
             # parse arguments into C++ code
-            for i, arg in enumerate(f.func.arguments.flat_non_out + (list(f.func.arguments.out) if f.func.arguments.out else [])):
-                ivalue_str = argument_str.format(pos=i, args_num=args_num)
-                res = unboxing.argumenttype_ivalue_convert(arg.type, ivalue_str, arg.name)
-                # handle tensor options and other keyword arguments
-                if tensor_option_arg and arg.name in tensor_option_arg.__dict__:
-                    tensor_option_args[arg.name] = res['val_name']
-                arguments[arg.name] = res['val_name']
+            arguments = unboxing.convert_arguments(args, f.func.arguments.tensor_options)
 
-                code.extend(res['code'])
-            # only generate tensor options when native function is taking it
-            use_tensor_options = any(isinstance(a.nctype.type, BaseCType) and a.nctype.type.type == tensorOptionsT for a in sig.arguments())
-            if use_tensor_options:
-                code.append(f"""
-        const auto options = TensorOptions()
-            .dtype({tensor_option_args['dtype']})
-            .layout({tensor_option_args['layout']})
-            .device({tensor_option_args['device']})
-            .pinned_memory({tensor_option_args['pin_memory']});
-                """)
-                arguments['options'] = 'options'
+            # for each C++ argument, generate the conversion code
+            code_connector = "\n\t\t"
+            code_list = []
+            for k in sig.arguments():
+                code_list.extend(arguments[k.name].code)
+            code = code_connector.join(code_list)
 
-            connector = "\n\t\t"
-            # find dispatch native function name
-            if use_tensor_options:
-                namespace = 'torch'
-            else:
-                namespace = 'at'
-            # handle void return type
-            ret_type: cpp.CType = cpp.returns_type(f.func.returns)
-            if isinstance(ret_type, cpp.BaseCType) and ret_type.type == cpp.voidT:
-                ret_str = ""
-                push_str = ""
-            else:
-                ret_str = "auto result_ = "
-                push_str = "pack(stack, std::move(result_));"
-            # handle method
+            # function call and push back to stack
+            func_call_and_push = unboxing.generate_unboxed_kernel_call(f, sig, arguments)
+
+            # escape double quote in schema, get rid of extra double quotes
             schema = json.dumps(sig.func.__str__())[1:-1]
-            if Variant.method in f.variants:
-                print("Method: " + sig.decl())
-                self_arg = f.func.arguments.self_arg
-                assert self_arg is not None, "No self argument"
-                arg_list = ",\n\t\t\t".join([arguments[a.name] for a in sig.arguments() if a.name != self_arg.argument.name])
-                function_call = f"""
-        {ret_str}{arguments[self_arg.argument.name]}.{sig.name()}(
-            {arg_list}
-        );
-    """
-            else:
-                print("Function: " + sig.decl())
-                arg_list = ",\n\t\t\t".join([arguments[a.name] for a in sig.arguments()])
-                function_call = f"""
-        {ret_str}{namespace}::{sig.name()}(
-            {arg_list}
-        );
-"""
+
             return f"""
 OperatorGenerator(
     TORCH_SELECTIVE_SCHEMA("aten::{schema}"),
     [](Stack & stack) {{
         RECORD_FUNCTION("{sig.name()}", std::vector<c10::IValue>());
-        {connector.join(code)}
-        {function_call}
-        drop(stack, {args_num});
-        {push_str}
+        {code}
+        drop(stack, {len(args)});
+        {func_call_and_push}
     }},
     aliasAnalysisFromSchema()
 ),
