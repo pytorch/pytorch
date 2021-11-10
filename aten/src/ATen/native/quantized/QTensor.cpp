@@ -30,11 +30,12 @@ Tensor quantize_per_tensor_dynamic(
   if (dtype == ScalarType::QInt8) {
     qmin = -128;
     qmax = 127;
-  } else if (dtype == ScalarType::QUInt8) {
+  } else {
+    // for now, this branch executes for dtype == ScalarType::QUInt8
+    // additional cases will be added when quantization support for other dtypes becomes available
     qmin = 0;
     qmax = 255;
   }
-  // add additional cases when quantization support for other dtypes becomes available
 
   auto q_params = quant_utils::ChooseQuantizationParams(
       /*min=*/x_min,
