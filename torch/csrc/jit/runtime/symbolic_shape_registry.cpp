@@ -181,7 +181,12 @@ const std::string shape_compute_functions =
 
           assert len(stride) == 0 or len(stride) == 1 or len(stride) == 2, "max_pool2d: stride must either be omitted, a single int, or a tuple of two ints"
           dH = kH if len(stride) == 0 else stride[0]
-          dW = kW if len(stride) == 0 else dH if len(stride) == 1 else stride[1]
+          if len(stride) == 0:
+            dW = kW
+          elif len(stride) == 1:
+            dW = dH
+          else:
+            dW = stride[1]
 
           assert len(padding) == 1 or len(padding) == 2, "max_pool2d: padding must be either be a single int, or a tuple of two ints"
           padH = padding[0]
