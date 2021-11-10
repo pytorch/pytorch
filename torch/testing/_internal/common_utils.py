@@ -1297,6 +1297,12 @@ def check_if_enable(test: unittest.TestCase):
 
 
 class RelaxedNumberPair(NumberPair):
+    _TYPE_TO_DTYPE = {
+        int: torch.int64,
+        float: torch.float32,
+        complex: torch.complex64,
+    }
+
     def __init__(self, actual, expected, *, check_dtype=None, **other_parameters) -> None:
         super().__init__(actual, expected, check_dtype=False, **other_parameters)
 
@@ -1311,12 +1317,13 @@ class RelaxedNumberPair(NumberPair):
         return cast(Tuple[Union[int, float, complex], Union[int, float, complex]], numbers)
 
     def _to_number(self, number_like):
-        if isinstance(number_like, torch.Tensor):
-            if number_like.numel() > 1:
+        if isinstance(number_like, (torch.Tensor, np.ndarray)):
+            numel = number_like.numel() if isinstance(number_like, torch.Tensor) else number_like.size
+            if numel > 1:
                 error_meta = ErrorMeta(
                     ValueError,
-                    f"Only single element tensors can be compared against a number. "
-                    f"Got {number_like.numel()} elements instead."
+                    f"Only single element tensor-likes can be compared against a number. "
+                    f"Got {numel} elements instead."
                 )
                 return error_meta, None
 
@@ -1809,13 +1816,10 @@ class TestCase(expecttest.TestCase):
 
             x = to_list(x)
             y = to_list(y)
-        elif(
-            isinstance(x, torch.Tensor)
-            and isinstance(y, Sequence)
-            or isinstance(y, torch.Tensor)
-            and isinstance(x, Sequence)
-        ):
-            x, y = [torch.as_tensor(input) for input in (x, y)]
+        elif isinstance(x, torch.Tensor) and isinstance(y, Sequence):
+            y = torch.as_tensor(y, dtype=x.dtype, device=x.device)
+        elif isinstance(y, torch.Tensor) and isinstance(x, Sequence):
+            x = torch.as_tensor(x, dtype=y.dtype, device=y.device)
 
         assert_equal(
             x,
