@@ -280,9 +280,13 @@ void GpuLower::replaceSymbolicSizes() {
       inputs_and_outputs.push_back(val->as<TensorView>());
     }
   }
-  for (auto val : fusion_->outputs()) {
-    if (ir_utils::isTV(val)) {
-      inputs_and_outputs.push_back(val->as<TensorView>());
+  // Symbolic size is necessary for outputs if there are no inputs.
+  // Otherwise infer output sizes from the inputs via expression evaluation.
+  if (fusion_->inputs().empty()) {
+    for (auto val : fusion_->outputs()) {
+      if (ir_utils::isTV(val)) {
+        inputs_and_outputs.push_back(val->as<TensorView>());
+      }
     }
   }
 

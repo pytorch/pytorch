@@ -219,7 +219,8 @@ enum class IterType {
   Reduction,
   BroadcastWithStride,
   BroadcastWithoutStride,
-  Gather
+  Gather,
+  Stride
 };
 
 enum class SwizzleType { NoSwizzle, Transpose };

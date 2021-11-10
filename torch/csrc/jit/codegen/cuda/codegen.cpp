@@ -1085,6 +1085,14 @@ class CudaKernelGenerator : private kir::IrVisitor {
       handleScope(node->body());
       vectorize_scope_ = false;
       return;
+    } else if (node->iter_domain()->isStride()) {
+      // A stride domain only executes the loop body with the loop
+      // index being zero.
+      indent() << "constexpr "
+               << "nvfuser_index_t"
+               << " " << gen(node->index()) << " = 0;\n";
+      handleScope(node->body());
+      return;
     }
 
     // By default, a parallelized loop would look like:

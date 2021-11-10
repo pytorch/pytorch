@@ -446,7 +446,8 @@ kir::Val* getProducerIndexWithGather(
   // Consumer axis that corresponds to the producer axis
   int consumer_axis = -1;
   for (const auto i : c10::irange(producer_root_axis + 1)) {
-    if (producer_tv->getRootDomain()[i]->isReduction()) {
+    if (producer_tv->getMaybeRFactorDomain()[i]->isReduction() ||
+        producer_tv->getMaybeRFactorDomain()[i]->isStride()) {
       continue;
     }
     ++consumer_axis;
@@ -559,8 +560,9 @@ void IndexCompute::handle(Split* split) {
 
   auto outer_it = index_map_.find(outer_id);
   auto inner_it = index_map_.find(inner_id);
-  if (outer_it == index_map_.end() || inner_it == index_map_.end())
+  if (outer_it == index_map_.end() || inner_it == index_map_.end()) {
     return;
+  }
 
   const auto outer_ind = outer_it->second;
   const auto inner_ind = inner_it->second;
@@ -1204,7 +1206,7 @@ void ensureStaticIndexing(
         tv->domain()->domain().begin(),
         tv->domain()->domain().end(),
         [loop_id, gpu_lower, &id_map](IterDomain* id) {
-          if (id->isBroadcast() || id->isReduction()) {
+          if (id->isBroadcast() || id->isReduction() || id->isStride()) {
             return false;
           }
           auto id_replacement = id_map.find(id);
@@ -1592,7 +1594,8 @@ std::vector<kir::Val*> Index::getNonGlobalProducerStridedIndices(
   // set for references indexing
   std::unordered_set<IterDomain*> preferred_roots;
   for (auto entry : index_map_ref_to_producer) {
-    if (entry.second->isBroadcast() || entry.second->isReduction()) {
+    if (entry.second->isBroadcast() || entry.second->isReduction() ||
+        entry.second->isStride()) {
       continue;
     }
     preferred_roots.emplace(entry.first);
@@ -1669,7 +1672,8 @@ std::vector<kir::Val*> Index::getNonGlobalProducerStridedIndices(
   for (auto root_id : root_dom) {
     // Already taken care of because we can detect no indexing required
     if (root_id->isBroadcast() || root_id->isReduction() ||
-        gpu_lower->trivialReductionInfo().isDerived(root_id)) {
+        gpu_lower->trivialReductionInfo().isDerived(root_id) ||
+        root_id->isStride()) {
       skip_indexing.insert(root_id);
       continue;
     }
@@ -1817,7 +1821,8 @@ std::vector<kir::Val*> Index::getGlobalConsumerStridedIndices(
     int stride_i = 0;
     for (const auto i : c10::irange(root_dom.size())) {
       if (root_dom[i]->isReduction() ||
-          root_dom[i]->getIterType() == IterType::BroadcastWithoutStride) {
+          root_dom[i]->getIterType() == IterType::BroadcastWithoutStride ||
+          root_dom[i]->isStride()) {
         strides[i] = zero;
         continue;
       }
@@ -1832,7 +1837,7 @@ std::vector<kir::Val*> Index::getGlobalConsumerStridedIndices(
   kir::Val* cur_contig_stride = ir_builder.oneVal();
   for (const auto i : c10::irange(root_dom.size())) {
     auto dim = root_dom.size() - i - 1;
-    if (root_dom[dim]->isReduction()) {
+    if (root_dom[dim]->isReduction() || root_dom[dim]->isStride()) {
       continue;
     }
     if (root_dom[dim]->getIterType() == IterType::BroadcastWithoutStride) {
@@ -1885,7 +1890,8 @@ std::vector<kir::Val*> Index::getGlobalConsumerStridedIndices(
     if (root_dom[i]->isReduction() ||
         root_dom[i]->getIterType() == IterType::BroadcastWithoutStride ||
         root_dom[i]->getIterType() == IterType::BroadcastWithStride ||
-        gpu_lower->trivialReductionInfo().isDerived(root_dom[i])) {
+        gpu_lower->trivialReductionInfo().isDerived(root_dom[i]) ||
+        root_dom[i]->isStride()) {
       continue;
     }
 
@@ -1970,7 +1976,8 @@ std::vector<kir::Val*> Index::getNonGlobalConsumerStridedIndices(
   // set for references indexing
   std::unordered_set<IterDomain*> preferred_roots;
   for (auto entry : index_map_ref_to_consumer) {
-    if (entry.second->isBroadcast() || entry.second->isReduction()) {
+    if (entry.second->isBroadcast() || entry.second->isReduction() ||
+        entry.second->isStride()) {
       continue;
     }
     preferred_roots.emplace(entry.first);
@@ -2020,7 +2027,8 @@ std::vector<kir::Val*> Index::getNonGlobalConsumerStridedIndices(
   std::vector<kir::Val*> strided_inds(root_dom.size(), ir_builder.zeroVal());
   for (const auto i : c10::irange(root_dom.size())) {
     if (root_dom[i]->isReduction() || root_dom[i]->isBroadcast() ||
-        gpu_lower->trivialReductionInfo().isDerived(root_dom[i])) {
+        gpu_lower->trivialReductionInfo().isDerived(root_dom[i]) ||
+        root_dom[i]->isStride()) {
       continue;
     }
 
@@ -2045,7 +2053,8 @@ std::vector<kir::Val*> Index::getNonGlobalConsumerStridedIndices(
     kir::Val* stride = nullptr;
     for (const auto j : c10::irange(i + 1, root_dom.size())) {
       if (root_dom[j]->isBroadcast() || root_dom[j]->isReduction() ||
-          gpu_lower->trivialReductionInfo().isDerived(root_dom[j])) {
+          gpu_lower->trivialReductionInfo().isDerived(root_dom[j]) ||
+          root_dom[j]->isStride()) {
         continue;
       }
 

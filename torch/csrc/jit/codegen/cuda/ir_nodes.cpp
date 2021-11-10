@@ -247,7 +247,7 @@ BroadcastOp::BroadcastOp(Val* out, Val* in, std::vector<bool> is_broadcast_dims)
   for (auto id : p_root) {
     if (root_p2c.find(id) == root_p2c.end()) {
       TORCH_INTERNAL_ASSERT(
-          id->isReduction(),
+          id->isReduction() || id->isStride(),
           "Invalid broadcast op: ",
           id,
           ". Non-reduction input dim does't match to output.");
@@ -850,6 +850,15 @@ std::pair<IterDomain*, IterDomain*> IterDomain::split(
   return IterDomain::split(in, factor, inner_split, start_offset, stop_offset);
 }
 
+std::pair<IterDomain*, IterDomain*> IterDomain::stridedSplit(int factor) {
+  auto split_out = IterDomain::split(this, new Int(factor), true);
+
+  split_out.second->iter_type_ = IterType::Stride;
+  split_out.first->is_rfactor_domain_ = true;
+  split_out.second->is_rfactor_domain_ = true;
+  return split_out;
+}
+
 // TODO: We should change parallelize interface to be on tensorview or at least
 // vectorize should be done on tensorview. This would let us check that we don't
 // vectorize to the left of the computeAt domain, and could allow us to do some
@@ -1255,15 +1264,19 @@ std::vector<IterDomain*> TensorDomain::orderedAs(
 std::vector<IterDomain*> TensorDomain::noReductions(
     const std::vector<IterDomain*>& td) {
   size_t size_out = 0;
-  for (auto id : td)
-    if (!id->isReduction())
+  for (auto id : td) {
+    if (!id->isReduction() && !id->isStride()) {
       size_out++;
+    }
+  }
   std::vector<IterDomain*> noReductionDomain(size_out);
 
   int it = 0;
-  for (auto id : td)
-    if (!id->isReduction())
+  for (auto id : td) {
+    if (!id->isReduction() && !id->isStride()) {
       noReductionDomain[it++] = id;
+    }
+  }
 
   return noReductionDomain;
 }

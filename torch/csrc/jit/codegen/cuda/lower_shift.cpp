@@ -311,6 +311,11 @@ void HaloInfo::propagateRootAxisInfo(
       p_info.merge(c_info);
       setRootAxisInfo(p_id, p_info);
       continue;
+    } else if (p_id->isRFactorProduct()) {
+      TORCH_INTERNAL_ASSERT(
+          !c_info.hasHalo(),
+          "Propagating halo info to a rfactor producer domain not yet supported.");
+      continue;
     }
 
     // If the defining expression is shift, adjust the producer halo

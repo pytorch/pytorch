@@ -551,7 +551,7 @@ static TensorView* newForReduction(
     TensorView* tv,
     const std::vector<unsigned int>& axes,
     DataType data_type = DataType::Null) {
-  auto orig_domain = TensorDomain::noReductions(tv->getRootDomain());
+  auto orig_domain = TensorDomain::noReductions(tv->getMaybeRFactorDomain());
   std::set<unsigned int> axes_set(axes.begin(), axes.end());
 
   std::vector<IterDomain*> new_domain;
@@ -562,7 +562,11 @@ static TensorView* newForReduction(
 
   TORCH_INTERNAL_ASSERT(
       (*(axes_set.rbegin())) < orig_domain.size(),
-      "Error setting up reduction, reduction axis is outside nDims. Keep in mind reductions are relative to root domains, not modified views.");
+      "Error setting up reduction, reduction axis (",
+      *(axes_set.rbegin()),
+      ") is outside nDims (",
+      orig_domain.size(),
+      "). Keep in mind reductions are relative to root domains, not modified views.");
 
   auto axis_iter = axes_set.begin();
   for (const auto dim : c10::irange(orig_domain.size())) {
@@ -608,7 +612,7 @@ TensorView* reductionOp(
       "Cannot create a reduction operation where the initial value is not a const scalar.");
 
   TORCH_CHECK(
-      TensorDomain::sameAs(tv->getRootDomain(), tv->domain()->domain()),
+      TensorDomain::sameAs(tv->getMaybeRFactorDomain(), tv->domain()->domain()),
       "Reducing a tensor once it's gone under transformations is not permitted at this time. Please set reductions before calling split/merge/computeAt.");
 
   TORCH_CHECK(tv->nDims() > 0, "Tried to reduce a 0-dim tensor");
@@ -755,7 +759,7 @@ TensorView* broadcast(
 
   std::vector<IterDomain*> out_domain;
   // Don't propagate reduction IDs through arith ops.
-  auto inp_domain = TensorDomain::noReductions(inp->getRootDomain());
+  auto inp_domain = TensorDomain::noReductions(inp->getMaybeRFactorDomain());
   size_t iinp = 0, ibdim = 0;
   while (ibdim < is_broadcast_dim.size()) {
     if (is_broadcast_dim[ibdim]) {
@@ -1263,7 +1267,8 @@ std::vector<Int*> convertToIntVector(const std::vector<int>& x) {
 TensorView* gather(
     TensorView* inp,
     const std::vector<int>& window_shape,
-    const std::vector<std::vector<int>>& pad_width) {
+    const std::vector<std::vector<int>>& pad_width,
+    const std::vector<int>& strides) {
   std::vector<Int*> window_shape_int = convertToIntVector(window_shape);
   std::vector<std::vector<Int*>> pad_width_int;
   std::transform(
@@ -1271,13 +1276,59 @@ TensorView* gather(
       pad_width.end(),
       std::back_inserter(pad_width_int),
       [](const std::vector<int>& x) { return convertToIntVector(x); });
-  return gather(inp, window_shape_int, pad_width_int);
+  return gather(inp, window_shape_int, pad_width_int, strides);
 }
+
+namespace {
+
+// Return a new TensorDomain with given root domains. Apply strides if
+// necessary. With non-unit strides, strided domains become an rfactor
+// domain.
+TensorDomain* generateTensorDomainWithStrides(
+    const std::vector<IterDomain*>& root_domains,
+    const std::vector<int>& strides) {
+  std::vector<IterDomain*> strided_domains;
+
+  // If strides are just unit strides, don't apply striding
+  if (strides.empty() || std::all_of(strides.begin(), strides.end(), [](int s) {
+        return s == 1;
+      })) {
+    return new TensorDomain(
+        root_domains, std::vector<bool>(root_domains.size(), true));
+  }
+
+  for (const auto i : c10::irange(root_domains.size())) {
+    auto root_dom = root_domains.at(i);
+
+    if (i >= strides.size() || strides[i] == 1) {
+      strided_domains.push_back(root_dom);
+      continue;
+    }
+
+    // Split the root domain by the stride
+    auto split_out = root_dom->stridedSplit(strides[i]);
+    strided_domains.push_back(split_out.first);
+    strided_domains.push_back(split_out.second);
+  }
+
+  auto contig_vector_size = strided_domains.size();
+
+  auto strided_td = new TensorDomain(
+      root_domains,
+      strided_domains,
+      strided_domains,
+      std::vector<bool>(contig_vector_size, true));
+
+  return strided_td;
+}
+
+} // namespace
 
 TensorView* gather(
     TensorView* inp,
     const std::vector<Int*>& window_shape,
-    const std::vector<std::vector<Int*>>& pad_width) {
+    const std::vector<std::vector<Int*>>& pad_width,
+    const std::vector<int>& strides) {
   auto inp_dom = TensorDomain::noReductions(inp->getRootDomain());
   const auto ndims = inp_dom.size();
 
@@ -1301,7 +1352,14 @@ TensorView* gather(
         "Each entry of pad_width must have two non-negative integers.");
   });
 
-  std::vector<IterDomain*> out_dom;
+  TORCH_CHECK(
+      strides.empty() || ndims == strides.size(),
+      "Invalid strides: number of entries expected to be ",
+      ndims,
+      " but received ",
+      strides.size());
+
+  std::vector<IterDomain*> out_root_domains;
   std::vector<IterDomain*> out_gather_dom;
 
   for (const auto i : c10::irange(ndims)) {
@@ -1323,7 +1381,9 @@ TensorView* gather(
           add(add(sub(inp_axis->extent(), window_dim), new Int(1)),
               add(pad_left, pad_right));
     }
-    out_dom.push_back(new IterDomain(
+    // TODO: out_axis_dim is assumed to be the same as the extent of
+    // the input domain. Throw an error if it isn't the case.
+    out_root_domains.push_back(new IterDomain(
         new Int(0),
         out_axis_dim,
         ParallelType::Serial,
@@ -1333,14 +1393,15 @@ TensorView* gather(
         new Int(0), window_dim, ParallelType::Serial, IterType::Gather));
   }
 
-  out_dom.insert(out_dom.end(), out_gather_dom.begin(), out_gather_dom.end());
+  out_root_domains.insert(
+      out_root_domains.end(), out_gather_dom.begin(), out_gather_dom.end());
 
-  auto out = new TensorView(
-      new TensorDomain(out_dom, std::vector<bool>(out_dom.size(), true)),
-      inp->getDataType().value());
+  auto out_td = generateTensorDomainWithStrides(out_root_domains, strides);
 
-  new GatherOp(out, inp, window_shape, pad_width);
-  return out;
+  auto out_tv = new TensorView(out_td, inp->getDataType().value());
+
+  new GatherOp(out_tv, inp, window_shape, pad_width);
+  return out_tv;
 }
 
 } // namespace cuda

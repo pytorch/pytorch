@@ -458,6 +458,10 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
     return getIterType() == IterType::Gather;
   }
 
+  bool isStride() const {
+    return getIterType() == IterType::Stride;
+  }
+
   bool isParallelized() const {
     return getParallelType() != ParallelType::Serial;
   }
@@ -579,6 +583,11 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
   bool isTrivialReduction() const {
     return isReduction() && extent()->isOneInt();
   }
+
+  //! Split for stride by a given factor. It effectively does an inner
+  //! split by the factor and sets the inner domain as a Stride
+  //! domain.
+  std::pair<IterDomain*, IterDomain*> stridedSplit(int factor);
 
  protected:
   friend TensorDomain;

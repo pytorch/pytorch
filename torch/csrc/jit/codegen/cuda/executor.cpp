@@ -288,7 +288,7 @@ at::Tensor inferAndAllocOutput(
   std::vector<kir::Val*> sizes;
 
   for (const auto id : maybe_rfactor_domain) {
-    if (id->isReduction() ||
+    if (id->isReduction() || id->isStride() ||
         id->iterType() == IterType::BroadcastWithoutStride) {
       continue;
     }

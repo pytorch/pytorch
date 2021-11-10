@@ -706,6 +706,10 @@ class TORCH_CUDA_CU_API IterDomain final : public Val {
     return iterType() == IterType::Gather;
   }
 
+  bool isStride() const {
+    return iterType() == IterType::Stride;
+  }
+
   bool isParallelized() const {
     return parallelType() != ParallelType::Serial;
   }
