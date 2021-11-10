@@ -1202,6 +1202,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.rand(3, 3).to(dtype=torch.float32)
         self.run_test(model, x)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_hardshrink(self):
         model = torch.nn.Hardshrink()
 
@@ -1214,6 +1215,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.tensor(-0.5).to(dtype=torch.float32)
         self.run_test(model, x)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_softshrink(self):
         model = torch.nn.Softshrink()
 
