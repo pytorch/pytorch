@@ -1,8 +1,9 @@
-#pragma once
+4#pragma once
 
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
 #include <c10/core/CPUAllocator.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/variant.h>
 #include <torch/csrc/jit/api/module.h>
@@ -317,7 +318,7 @@ class TORCH_API StaticRuntime {
   }
 
   // Output is readonly. The writing process happens inside ProcessedNodes
-  const IValue& Output(uint32_t i) const {
+  C10_NODISCARD const IValue& Output(uint32_t i) const {
     DCHECK(i < outputs_.size());
     return *outputs_[i];
   }
@@ -473,7 +474,7 @@ class TORCH_API ProcessedNode {
   }
 
   // Input is readonly
-  const IValue& Input(uint32_t i) const {
+  C10_NODISCARD const IValue& Input(uint32_t i) const {
     DCHECK(i < inputs_size_);
     return *inputs_[i];
   }
@@ -484,7 +485,7 @@ class TORCH_API ProcessedNode {
     return outputs_[i];
   }
 
-  const IValue& Output(uint32_t i) const {
+  C10_NODISCARD const IValue& Output(uint32_t i) const {
     DCHECK(i < outputs_size_);
     return outputs_[i];
   }
