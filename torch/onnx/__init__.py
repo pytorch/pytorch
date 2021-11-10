@@ -25,8 +25,12 @@ class CheckerError(Exception):
 
 
 class SymbolicContext:
-    r"""
-    Provides extra context for advanced symbolic functions.
+    r"""Provides extra context for symbolic functions.
+    Args:
+        params_dict (Dict[str, _C.IValue]): Mapping from graph initializer name to IValue.
+        env (Dict[_C.Value, _C.Value]): Mapping from Torch domain graph Value to ONNX domain graph Value.
+        cur_node (_C.Node): Current node being converted to ONNX domain.
+        onnx_block (_C.Block): Current ONNX block that converted nodes are being appended to.
     """
     def __init__(self, params_dict, env, cur_node, onnx_block):
         self.params_dict: Dict[str, _C.IValue] = params_dict
