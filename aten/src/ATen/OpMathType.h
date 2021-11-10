@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/core/ScalarType.h>
 #include <c10/util/Half.h>
 #include <c10/util/BFloat16.h>
 
@@ -12,5 +13,17 @@ template<> struct OpMathType<at::BFloat16> { using type = float; };
 
 template<typename T>
 using opmath_type = typename OpMathType<T>::type;
+
+namespace {
+
+c10::ScalarType toOpMathType(const c10::ScalarType scalar_type) {
+  if (scalar_type == c10::ScalarType::Half || scalar_type == c10::ScalarType::BFloat16) {
+    return c10::ScalarType::Float;
+  } else {
+    return scalar_type;
+  }
+}
+
+}
 
 } // namespace at
