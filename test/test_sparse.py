@@ -1835,7 +1835,12 @@ class TestSparse(TestCase):
 
         dense_tensor = sparse_tensor.to_dense()
         result = torch.zeros_like(dense_tensor, layout=torch.sparse_coo)
-        self.assertTrue(dense_tensor.shape, result.shape)
+        self.assertEqual(dense_tensor.shape, result.shape)
+        self.assertEqual(result.layout, torch.sparse_coo)
+
+        sparse_zeros = torch.zeros(dense_tensor.shape, layout=torch.sparse_coo)
+        self.assertEqual(result._indices().shape, sparse_zeros._indices().shape)
+        self.assertEqual(result._values().shape, sparse_zeros._values().shape)
 
     def _assert_sparse_invars(self, t):
         # SparseTensor has the following invariants:
