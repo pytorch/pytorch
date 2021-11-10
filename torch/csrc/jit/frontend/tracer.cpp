@@ -122,7 +122,7 @@ Value* TracingState::getValue(const IValue& var) {
   } else if (var.isTuple()) {
     return graph
         ->insertNode(graph->createTuple(fmap(
-            var.toTuple()->elements(),
+            var.toTupleRef().elements(),
             [&](const IValue& val) { return getValue(val); })))
         ->output();
   } else if (var.isGenericDict()) {
@@ -270,7 +270,7 @@ Value* TracingState::getOutput(const IValue& iv, size_t i) {
                 [&](const IValue& ival) { return getOutput(ival, i); })))
         ->output();
   } else if (iv.isTuple()) {
-    const auto& tuple = iv.toTuple()->elements();
+    const auto& tuple = iv.toTupleRef().elements();
     auto tuple_node = graph->createTuple(
         fmap(tuple, [&](const IValue& ival) { return getOutput(ival, i); }));
     graph->insertNode(tuple_node);
@@ -547,7 +547,7 @@ void TracingState::setValue(const IValue& v, Value* value) {
       setValue(outputs.get(i), unpack_node->outputs()[i]);
     }
   } else if (v.isTuple()) {
-    const auto& outputs = v.toTuple()->elements();
+    const auto& outputs = v.toTupleRef().elements();
     Node* unpack_node = graph->insertNode(graph->createTupleUnpack(value));
     for (const auto i : c10::irange(outputs.size())) {
       setValue(outputs[i], unpack_node->outputs()[i]);

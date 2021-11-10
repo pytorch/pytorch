@@ -3,7 +3,7 @@ import torch
 import tensorrt as trt
 from torch.fx.experimental.fx2trt.fx2trt import tensorrt_converter
 
-from .helper_functions import get_dyn_range, mark_as_int8_layer
+from .converter_utils import get_dyn_range, mark_as_int8_layer
 
 @tensorrt_converter(operator.add)
 @tensorrt_converter(torch.add)

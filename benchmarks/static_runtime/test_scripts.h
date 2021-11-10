@@ -317,12 +317,6 @@ const auto to_script_memory_planning_fail = R"JIT(
     return e
 )JIT";
 
-const auto detach_script = R"JIT(
-  def forward(self, input: Tensor):
-      a = input.detach()
-      return a.clone()
-)JIT";
-
 const std::string embedding_bag_default = R"JIT(
   def forward(self, a: Tensor, b: Tensor, c: Tensor):
       return torch.embedding_bag(a, b, c)
@@ -767,6 +761,14 @@ const std::string quantize_script = R"IR(
       %1254 = quantized::linear(%input, %packed_params, %scale, %zero_point)
       %1249: Tensor = aten::dequantize(%1254)
       return (%1249)
+)IR";
+
+const std::string quantized_linear_dynamic_fp16_script = R"IR(
+  graph(%input: Tensor, %weights: Tensor):
+      %bias: None = prim::Constant()
+      %packed_params = quantized::linear_prepack_fp16(%weights, %bias)
+      %output = quantized::linear_dynamic_fp16(%input, %packed_params)
+      return (%output)
 )IR";
 
 const auto fmod_tensor = R"JIT(
