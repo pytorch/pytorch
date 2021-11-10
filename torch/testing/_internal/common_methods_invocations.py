@@ -7,6 +7,7 @@ from enum import Enum
 import operator
 import random
 import unittest
+import warnings
 
 import torch
 import numpy as np
@@ -485,7 +486,10 @@ class OpInfo(object):
                  sample_inputs_func=None,  # function to generate sample inputs
 
                  # the following metadata relates to dtype support and is tested for correctness in test_ops.py
-                 dtypes=None,  # dtypes this function is expected to work with on CPU and external backends.
+                 dtypes=None,  # dtypes this function is expected to work with
+                 # the following dtypesIf... options override the dtypes value
+                 # on their respective device types
+                 dtypesIfCPU=None,  # dtypes this function is expected to work with on CPU
                  dtypesIfCUDA=None,  # dtypes this function is expected to work with on CUDA
                  dtypesIfROCM=None,  # dtypes this function is expected to work with on ROCM
                  backward_dtypes=None,  # backward dtypes this function is expected to work with
@@ -578,7 +582,7 @@ class OpInfo(object):
         self.backward_dtypes = set(backward_dtypes) if backward_dtypes is not None else self.dtypes
         self.backward_dtypesIfCPU = set(backward_dtypesIfCPU) if backward_dtypesIfCPU is not None else (
             backward_dtypes if backward_dtypes is not None
-            else dtypes if dtypes is not None
+            else dtypesIfCPU if dtypesIfCPU is not None
             else dtypes)
         self.backward_dtypesIfCUDA = set(backward_dtypesIfCUDA) if backward_dtypesIfCUDA is not None else (
             backward_dtypes if backward_dtypes is not None
@@ -591,6 +595,9 @@ class OpInfo(object):
             else dtypesIfCUDA if dtypesIfCUDA is not None
             else dtypes)
 
+        if dtypesIfCPU is not None:
+            warnings.warn("`dtypesIfCPU` is being deprecated please use `dtypes` instead", DeprecationWarning)
+        self.dtypesIfCPU = set(dtypesIfCPU) if dtypesIfCPU is not None else self.dtypes
         self.dtypesIfCUDA = set(dtypesIfCUDA) if dtypesIfCUDA is not None else self.dtypes
         self.dtypesIfROCM = set(dtypesIfROCM) if dtypesIfROCM is not None else self.dtypesIfCUDA
 
@@ -767,7 +774,7 @@ class OpInfo(object):
 
     def supported_dtypes(self, device_type):
         if device_type == 'cpu':
-            return self.dtypes
+            return self.dtypesIfCPU
         if device_type == 'cuda':
             return self.dtypesIfROCM if TEST_WITH_ROCM else self.dtypesIfCUDA
         else:
@@ -7919,7 +7926,13 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and(torch.float16, torch.bool, torch.bfloat16),
            supports_forward_ad=True,
            assert_autodiffed=True,
-           sample_inputs_func=partial(sample_inputs_fmod_remainder, autodiffed=True)),
+           sample_inputs_func=partial(sample_inputs_fmod_remainder, autodiffed=True),
+           decorators=(
+               # Fails on XLA
+               # False is not true : Tensors failed to compare as equal!
+               # Attempted to compare equality of tensors with different dtypes
+               DecorateInfo(unittest.expectedFailure, 'TestOpInfo', device_type='xla', dtypes=(torch.long,)),
+           )),
     UnaryUfuncInfo('frac',
                    ref=lambda x: np.modf(x)[0],
                    dtypes=floating_types_and(torch.bfloat16, torch.float16),
@@ -8451,6 +8464,9 @@ op_db: List[OpInfo] = [
            skips=(
                # https://github.com/pytorch/pytorch/issues/67470
                DecorateInfo(unittest.skip("67470!"), 'TestCommon', 'test_noncontiguous_samples'),
+               # Fails on XLA.
+               # AssertionError: False is not true : Tensors failed to compare as equal!
+               DecorateInfo(unittest.expectedFailure, 'TestOpInfo', device_type='xla', dtypes=(torch.long,)),
            )
            ),
     OpInfo('linalg.norm',
@@ -8693,6 +8709,9 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("67470!"),
                             'TestCommon', 'test_noncontiguous_samples',
                             device_type='cpu', dtypes=(torch.long,)),
+               # AssertionError: False is not true : Tensors failed to compare as equal!
+               DecorateInfo(unittest.expectedFailure, 'TestOpInfo',
+                            device_type='xla', dtypes=(torch.long,)),
            )),
     OpInfo('max',
            variant_test_name='reduction_with_dim',
@@ -9749,14 +9768,18 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_matmul,
            supports_out=False,
-           decorators=[
+           decorators=(
                # https://github.com/pytorch/pytorch/issues/67470
                DecorateInfo(unittest.skip("67470!"),
                             'TestCommon', 'test_noncontiguous_samples',
                             device_type='cpu', dtypes=(torch.long,)),
                DecorateInfo(
                    toleranceOverride({torch.complex64: tol(atol=1e-05, rtol=1.2e-03)}),
-                   'TestMathBits', 'test_conj_view')],
+                   'TestMathBits', 'test_conj_view'),
+               # Fails on XLA.
+               # AssertionError: False is not true : Tensors failed to compare as equal
+               DecorateInfo(unittest.expectedFailure, 'TestOpInfo', device_type='xla', dtypes=(torch.long,)),
+           ),
            skips=(
                # RuntimeError:
                # object has no attribute __rmatmul__:
@@ -10716,6 +10739,8 @@ op_db: List[OpInfo] = [
                #     return torch.histogram(i0, 1, weight=tensor(-0.5735, dtype=torch.float32), density=False)
                #                                          ~~~~~~ <--- HERE
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+               # Not Implemented on XLA.
+               DecorateInfo(unittest.expectedFailure, 'TestOpInfo', device_type='xla'),
            )),
     OpInfo('histogramdd',
            dtypes=floating_types(),
