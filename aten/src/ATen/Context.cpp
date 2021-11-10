@@ -162,6 +162,14 @@ void Context::setLinalgCudaPreferCusolver(bool b) {
   }
 }
 
+bool Context::allowFP16ReductionCuBLAS() const {
+  return allow_fp16_reduction_cublas;
+}
+
+void Context::setAllowFP16ReductionCuBLAS(bool b) {
+  allow_fp16_reduction_cublas = b;
+}
+
 bool Context::hasMKL() {
 #if AT_MKL_ENABLED()
   return true;
