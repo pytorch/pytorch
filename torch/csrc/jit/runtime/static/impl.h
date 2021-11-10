@@ -424,37 +424,8 @@ class TORCH_API ProcessedNode {
   // they are copied into a StaticRuntime.
   ProcessedNode(Node* n, ProcessedNodeInputs inputs, uint16_t outputs_offset, bool enable_out_variant);
 
-  ProcessedNode(const ProcessedNode& rhs)
-      : node_(rhs.node_),
-        fn_(rhs.fn_),
-        inputs_(rhs.inputs_),
-        outputs_offset_(rhs.outputs_offset_),
-        num_outputs_(rhs.num_outputs_),
-        values_(rhs.values_)
-#ifndef PYTORCH_DISABLE_PER_OP_PROFILING
-        ,
-        op_name_(rhs.op_name_)
-#endif
-  {}
-
-  ProcessedNode& operator=(const ProcessedNode& rhs) {
-    if (this == &rhs) {
-      return *this;
-    }
-    node_ = rhs.node_;
-    fn_ = rhs.fn_;
-
-    inputs_ = rhs.inputs_;
-
-    outputs_offset_ = rhs.outputs_offset_;
-    num_outputs_ = rhs.num_outputs_;
-    values_ = rhs.values_;
-#ifndef PYTORCH_DISABLE_PER_OP_PROFILING
-    op_name_ = rhs.op_name_;
-#endif
-
-    return *this;
-  }
+  ProcessedNode(const ProcessedNode&) = default;
+  ProcessedNode& operator=(const ProcessedNode&) = default;
 
   // These should be noexcept, but some Android build is failing
   // saying the noexcept specification doesn't match the calculated
