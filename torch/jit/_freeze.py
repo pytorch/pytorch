@@ -121,8 +121,10 @@ def freeze(mod, preserved_attrs: Optional[List[str]] = None, optimize_numerics: 
 def run_frozen_optimizations(mod, optimize_numerics: bool = True):
     r"""
     Runs a series of optimizations looking for patterns that occur in frozen graphs.
-    The current set of optimizations is:
+    The current set of optimizations includes:
         - Dropout Removal
+        - Pretranspose Linear Layers
+        - Concat Linear Layers with same input Tensor
         - Conv -> Batchnorm folding
         - Conv -> Add/Sub folding
         - Conv -> Mul/Div folding
@@ -157,15 +159,7 @@ def run_frozen_optimizations(mod, optimize_numerics: bool = True):
         assert "batch_norm" not in str(frozen_mod.graph)
 
     """
-    # xxx: keep in sync with frozen_graph_optimization.cpp
-    # intentionally duplicated to make to make it easier to create custom optimization sequence
-    torch._C._jit_pass_remove_dropout(mod._c)
-    if optimize_numerics:
-        # run a couple times to capture Conv -> Mul -> Add etc
-        for _ in range(2):
-            torch._C._jit_pass_fold_frozen_conv_bn(mod.graph)
-            torch._C._jit_pass_fold_frozen_conv_add_or_sub(mod.graph)
-            torch._C._jit_pass_fold_frozen_conv_mul_or_div(mod.graph)
+    torch._C._jit_pass_optimize_frozen_graph(mod.graph, optimize_numerics)
 
 def optimize_for_inference(mod: ScriptModule) -> ScriptModule:
     """
@@ -204,6 +198,5 @@ def optimize_for_inference(mod: ScriptModule) -> ScriptModule:
     if hasattr(mod, "training"):
         mod = freeze(mod.eval())
 
-    torch._C._jit_pass_convert_frozen_ops_to_mkldnn(mod.graph)
-    torch._C._jit_pass_fuse_frozen_conv_add_relu(mod.graph)
+    torch._C._jit_pass_optimize_for_inference(mod._c)
     return mod
