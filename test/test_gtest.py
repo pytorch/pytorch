@@ -111,6 +111,10 @@ class GTest(TestCase):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+
+        if IS_SANDCASTLE or IS_FBCODE:
+            return
+
         if TEST_WITH_ROCM:
             # C++ tests don't run on rocm
             return
