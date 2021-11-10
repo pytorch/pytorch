@@ -7594,7 +7594,6 @@ class TestAutogradForwardMode(TestCase):
 
                 for num_bdim in range(t.dim()):
                     result = new_zeroes_fn(t, target, num_bdim)
-                    target = target
 
                     self.assertEqual(result.dim(), target.dim() + num_bdim)
 
@@ -7623,7 +7622,7 @@ class TestAutogradForwardMode(TestCase):
         check(a, b)
 
         # non-contiguous case
-        a = torch.randn(2, 3, 4).transpose(0,1).contiguous().transpose(0, 1)
+        a = torch.randn(2, 3, 4).transpose(0, 1).contiguous().transpose(0, 1)
         b = torch.randn(2, 3, 4)
         check(a, b)
 
