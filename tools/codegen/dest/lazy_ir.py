@@ -29,6 +29,9 @@ def node_ctor_inputs(func: LazyIrSchema) -> str:
         else:
             if isinstance(arg.type, VectorCType) and isinstance(arg.type.elem, BaseCType):
                 node_ctor_values.append(f"lazy_tensors::util::ToVector<{arg.type.elem.type}>({arg.name})")
+            elif (isinstance(arg.type, OptionalCType) and
+                  isinstance(arg.type.elem, VectorCType)):
+                node_ctor_values.append(f"lazy_tensors::util::ToOptionalVector<{arg.type.elem.elem.type}>({arg.name})")
             else:
                 node_ctor_values.append(f"{arg.name}")
 

@@ -124,6 +124,16 @@ hash_t Hash(const std::vector<T>& values) {
   return ContainerHash(values);
 }
 
+// Need a special case for optional<container>?
+template <typename T>
+hash_t Hash(const c10::optional<std::vector<T>>& value) {
+  if (value.has_value()) {
+    return ContainerHash(value.value());
+  } else {
+    return Hash(kNullOpt);
+  }
+}
+
 template <typename T>
 hash_t Hash(const std::set<T>& values) {
   return ContainerHash(values);
