@@ -119,7 +119,7 @@ concurrency:
 {%- endmacro -%}
 
 
-{%- macro upload_test_reports(name) -%}
+{%- macro upload_test_reports(name, artifact_name="", use_s3=True) -%}
       - name: Zip test reports for upload
         if: always()
         env:
@@ -139,10 +139,18 @@ concurrency:
           rm -f test-reports-*.zip
           zip -r "test-reports-${FILE_SUFFIX}.zip" test -i '*.xml'
 {%- endif %}
+{%- if use_s3 %}
       - uses: !{{ upload_artifact_s3_action }}
         name: Store Test Reports on S3
+{%- else %}
+      - uses: actions/upload-artifact@v2
+        name: Store Test Reports on Github
+{%- endif %}
         if: always()
         with:
+{%- if artifact_name != "" %}
+          name: !{{ artifact_name }}
+{%- endif %}
           retention-days: 14
           if-no-files-found: error
           path:
@@ -231,4 +239,20 @@ concurrency:
         run: |
           export IMAGE_NAME=${DOCKER_IMAGE_BASE#308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/}
           ./build_docker.sh
+{%- endmacro -%}
+
+{%- macro setup_miniconda(python_version) -%}
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
+        with:
+          auto-update-conda: true
+          python-version: !{{ python_version }}
+          activate-environment: build
+{%- endmacro -%}
+
+{%- macro set_xcode_version(xcode_version) -%}
+{%- if xcode_version != '' %}
+  # Set xcode xcode version to !{{ xcode_version }}
+  DEVELOPER_DIR: /Applications/Xcode_!{{ xcode_version }}.app/Contents/Developer
+{%- endif %}
 {%- endmacro -%}
