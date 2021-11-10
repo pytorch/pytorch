@@ -231,10 +231,15 @@ class _AlltoAll(Function):
     @staticmethod
     def forward(ctx, group, out_tensor_list, *tensors):
         ctx.group = group
+        ctx.input_tensor_list = [
+            torch.empty_like(tensors[i]) for i in range(dist.get_world_size(group=group))
+        ]
         if out_tensor_list is None:
             out_tensor_list = [
                 torch.empty_like(tensors[i]) for i in range(dist.get_world_size(group=group))
             ]
+        else:
+            out_tensor_list = [tensor.contiguous() for tensor in out_tensor_list]
         reqs = [None] * dist.get_world_size(group=group)
         my_rank = dist.get_rank(group=group)
         # Implement it on means of scatter/gather, send/recv async operations have issues
@@ -250,7 +255,7 @@ class _AlltoAll(Function):
 
     @staticmethod
     def backward(ctx, *grad_outputs):
-        return (None, None) + _AlltoAll.apply(ctx.group, None, *grad_outputs)
+        return (None, None) + _AlltoAll.apply(ctx.group, ctx.input_tensor_list, *grad_outputs)
 
 
 class _AllReduce(Function):

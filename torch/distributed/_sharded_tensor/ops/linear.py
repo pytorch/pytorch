@@ -212,6 +212,7 @@ def _handle_row_wise_sharding(input, world_size, weight, rank, local_shard_t, bi
             input_t_size[1],
             device=input.device,
             dtype=local_shard_t.dtype,
+            requires_grad=local_shard_t.requires_grad,
         )
         for _ in range(world_size)
     ]
