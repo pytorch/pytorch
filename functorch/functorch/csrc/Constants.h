@@ -22,7 +22,7 @@ constexpr auto kVmapModeKey = c10::DispatchKey::FT_VMAP_MODE_KEY;
 constexpr auto kGradWrapperKey = c10::DispatchKey::FT_GRAD_WRAPPER_KEY;
 constexpr auto kDynamicLayerFrontModeKey = c10::DispatchKey::FT_DYNAMIC_LAYER_FRONT_MODE_KEY;
 constexpr auto kDynamicLayerBackModeKey = c10::DispatchKey::FT_DYNAMIC_LAYER_BACK_MODE_KEY;
-constexpr auto kPythonKey = c10::DispatchKey::FT_PYTHON_KEY;
+//# constexpr auto kPythonKey = c10::DispatchKey::FT_PYTHON_KEY;
 
 // Some helper macros
 #define DECLTYPE_AUTO(...) decltype(__VA_ARGS__), __VA_ARGS__
