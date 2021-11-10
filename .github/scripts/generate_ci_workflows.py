@@ -80,6 +80,7 @@ class CIFlowConfig:
     trigger_actor: str = 'pytorchbot'
     root_job_name: str = 'ciflow_should_run'
     root_job_condition: str = ''
+    build_environment: str = ''
 
     # Use the output of the determination step to see if subsequent jobs should
     # actually run
@@ -202,6 +203,9 @@ class CIWorkflow:
                 self.num_test_shards_on_pull_request = 0
             else:
                 self.num_test_shards_on_pull_request = self.num_test_shards
+
+        # TODO: make this less ugly
+        self.ciflow_config.build_environment = self.build_environment
         self.assert_valid()
 
     def assert_valid(self) -> None:

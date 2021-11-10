@@ -185,7 +185,7 @@ concurrency:
       - name: Determinate
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          BUILD_ENVIRONMENT: !{{ build_environment }}
+          BUILD_ENVIRONMENT: !{{ ciflow_config.build_environment }}
         id: should_run_step
         run: |
           python -m tools.determinator \
