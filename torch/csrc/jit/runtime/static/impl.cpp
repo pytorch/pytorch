@@ -12,6 +12,7 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/eliminate_no_ops.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
@@ -99,6 +100,7 @@ void OptimizeGraph(
   FuseInferenceOpsForSparseNN(graph);
   UseVariadicCat(graph);
   UseVariadicStack(graph);
+  EliminateTrivialEquallySplit(graph);
 
   if (opts.enable_out_variant) {
     UseVariadicOp(
@@ -112,7 +114,6 @@ void OptimizeGraph(
 #ifdef FBCODE_CAFFE2
     ReplaceWithCopy(graph);
     FuseListUnpack(graph);
-    FuseListUnpackV2(graph);
     EnableStaticRuntimeLayerNorm(graph);
 #endif
   }
@@ -121,6 +122,8 @@ void OptimizeGraph(
   RemoveImmutableInputDictLookups(graph);
   UseVariadicTupleUnpack(graph);
   UseVariadicGroupedAccessor(graph);
+  EliminateNoOps(
+      graph, /* custom_ops */ {fromQualString("fb::scale_gradient")});
   GRAPH_DUMP("Final graph after optimizations: ", graph);
 }
 
@@ -692,24 +695,20 @@ StaticModule::StaticModule(
   // handle schema
   if (module_.has_value()) {
     Method method = module_->get_method("forward");
-    schema_ = method.function().getSchema();
     if (RemoveSelfFromGraphInput(graph_)) {
       schema_ = RemoveSelfFromSchema(method.function().getSchema());
+      module_ = c10::nullopt;
     } else {
-      first_input_is_self_ = true;
       schema_ = method.function().getSchema();
     }
   }
 
-  // map Value* to IValue (from inputs or prim::Constant) or null
-  FastMap<Value*, IValue*> value_to_ivalue;
   // map Value* to its SSA definition IR
   FastMap<Value*, DefInfo> value_to_ssa_def;
 
   // N inputs map to the first N entries in storage
   for (const auto i : c10::irange(graph_->inputs().size())) {
     Value* input = graph_->inputs()[i];
-    value_to_ivalue[input] = nullptr;
     value_to_ssa_def[input] = std::make_pair(INPUT_VALUE, i);
   }
 
@@ -735,44 +734,97 @@ StaticModule::StaticModule(
         continue;
       }
       auto* v = node->output();
-      value_to_ssa_def[v] = std::make_pair(CONSTANT_VALUE, i);
-      value_to_ivalue[v] = &(constants_[i++]);
+      value_to_ssa_def[v] = std::make_pair(CONSTANT_VALUE, i++);
     }
   }
 
   // construct SSA definition for non-constant nodes
   int node_idx = 0;
   FastMap<Node*, bool> node_has_out_variant;
+
+  const auto inputs_index_offset = 0;
+  const auto constants_index_offset = inputs_index_offset + num_inputs();
+  const auto values_index_offset =
+      constants_index_offset + constants().size();
+
+  // Map node_idx to index offset in values_. Can't reserve space
+  // because we don't know how many non-constant nodes there are yet.
+  std::vector<uint32_t> node_output_idx_map;
+  uint32_t node_outputs_seen_so_far = 0;
   for (Node* node : graph_->nodes()) {
     if (node->kind() == prim::Constant) {
       continue;
     }
-    auto ivalue_inputs =
-        std::make_unique<const IValue*[]>(node->inputs().size());
-    std::vector<DefInfo> input_ssa_defs;
-    size_t idx = 0;
-    for (Value* input : node->inputs()) {
-      ivalue_inputs[idx++] = value_to_ivalue.at(input);
-      input_ssa_defs.emplace_back(value_to_ssa_def.at(input));
+    // Assign memory for the outputs
+    const auto outputs_offset_for_node =
+      node_outputs_seen_so_far + values_index_offset;
+    TORCH_CHECK(outputs_offset_for_node < (1 << 16), "outputs offset in values table", outputs_offset_for_node, " would overflow 2-byte index storage");
+    node_output_idx_map.push_back(outputs_offset_for_node);
+    node_outputs_seen_so_far += node->outputs().size();
+  }
+
+  for (Node* node : graph_->nodes()) {
+    if (node->kind() == prim::Constant) {
+      continue;
     }
-    node_inputs_ssa_def_map_[node_idx] = input_ssa_defs;
-    nodes_.emplace_back(
-        node, std::move(ivalue_inputs), idx, opts.enable_out_variant);
+    ProcessedNodeInputs input_indices(node->inputs().size());
+    std::vector<DefInfo> input_ssa_defs;
+    for (const auto input_idx : c10::irange(node->inputs().size())) {
+      Value *const input  = node->inputs()[input_idx];
+      int inner_node_idx = 0;
+      int out_idx = 0;
+      std::tie(inner_node_idx, out_idx) = value_to_ssa_def.at(input);
+      unsigned int input_ivalue_idx = 0;
+      if (inner_node_idx == StaticModule::INPUT_VALUE) {
+        input_ivalue_idx = out_idx + inputs_index_offset;
+      } else if (inner_node_idx == StaticModule::CONSTANT_VALUE) {
+        input_ivalue_idx = out_idx + constants_index_offset;
+      } else {
+        DCHECK_GE(inner_node_idx, 0);
+        const auto global_value_idx = node_output_idx_map[inner_node_idx] + out_idx;
+        if (inner_node_idx < node_output_idx_map.size() - 1) {
+          DCHECK_LT(global_value_idx, node_output_idx_map[inner_node_idx + 1]);
+        } else {
+          DCHECK_LT(global_value_idx, constants_index_offset + node_outputs_seen_so_far);
+        }
+        input_ivalue_idx = global_value_idx;
+      }
+      TORCH_CHECK(input_ivalue_idx < (1 << 16),
+                  "input index in values table ", input_ivalue_idx,
+                  " would overflow 2-byte index storage");
+      input_indices[input_idx] = input_ivalue_idx;
+    }
+
+    nodes_.emplace_back(node, std::move(input_indices), node_output_idx_map[node_idx], opts.enable_out_variant);
     node_has_out_variant.emplace(node, nodes_.back().has_out_variant());
     for (const auto i : c10::irange(node->outputs().size())) {
-      value_to_ivalue[node->outputs()[i]] = nullptr;
       value_to_ssa_def[node->outputs()[i]] = std::make_pair(node_idx, i);
     }
     node_idx++;
   }
   for (auto& pnode : nodes_) {
-    if (pnode.outputs().size() == 1 &&
+    if (pnode.num_outputs() == 1 &&
         isOptimizableContainerType(pnode.node(), node_has_out_variant)) {
       node_is_optimizable_container_type_.emplace(pnode.node());
     }
   }
+  output_indices_.reserve(graph_->outputs().size());
   for (auto output : graph_->outputs()) {
-    output_ssa_defs_.emplace_back(value_to_ssa_def[output]);
+    int node_idx = 0;
+    int out_idx = 0;
+    std::tie(node_idx, out_idx) = value_to_ssa_def[output];
+    uint32_t output_index = 0;
+    if (node_idx == StaticModule::INPUT_VALUE) {
+      output_index = out_idx + inputs_index_offset;
+    } else if (node_idx == StaticModule::CONSTANT_VALUE) {
+      output_index = constants_index_offset + out_idx;
+    } else {
+      output_index = nodes_[node_idx].output_ivalue_index(out_idx);
+    }
+    TORCH_CHECK(
+        output_index < (1 << 16),
+        "output index ",  output_index, " would overflow 2-byte index storage");
+    output_indices_.emplace_back(output_index);
   }
 
   // Prepare for memory planning
@@ -809,6 +861,15 @@ StaticRuntime& StaticModule::runtime() {
   return *cached_runtime_;
 }
 
+Node* StaticModule::findNodeWithKindForTesting(const std::string& kind) const {
+  for (auto& pnode : nodes()) {
+    if (pnode.node()->kind().toQualString() == kind) {
+      return pnode.node();
+    }
+  }
+  return nullptr;
+}
+
 c10::IValue StaticModule::operator()(
     const std::vector<c10::IValue>& args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
@@ -821,52 +882,26 @@ c10::IValue StaticModule::operator()(
   return runtime()(std::move(args), kwargs);
 }
 
-StaticRuntime::StaticRuntime(const StaticModule& sm) : static_module_(sm) {
-  // NB: create unchanging std::vector<IValue>s we can reference
-  inputs_.resize(sm.num_inputs());
-  nodes_.resize(sm.nodes().size());
+StaticRuntime::StaticRuntime(const StaticModule& sm) : static_module_(sm), nodes_(sm.nodes()) {
+  const auto total_num_node_outputs = std::accumulate(nodes_.begin(), nodes_.end(), 0, [](uint32_t sum, const ProcessedNode &pnode) {
+    return sum + pnode.num_outputs();
+  });
+  values_.resize(
+      sm.num_inputs() + sm.constants().size() + total_num_node_outputs);
+  const auto inputs_index_offset = 0;
+  const auto constants_index_offset = inputs_index_offset + sm.num_inputs();
+  const auto constants_begin_it = values_.begin() + constants_index_offset;
+  const auto constants_end_it = constants_begin_it + sm.constants().size();
+  std::copy(sm.constants().begin(), sm.constants().end(), constants_begin_it);
 
   for (const auto idx : c10::irange(sm.nodes().size())) {
-    const auto& n_ref = sm.nodes()[idx];
-    nodes_[idx] = n_ref; // copy the node
     auto& n = nodes_[idx];
-    // hook up the inputs
-
-    for (const auto i : c10::irange(n.inputs().size())) {
-      if (n.inputs()[i] == nullptr) {
-        int node_idx = 0;
-        int out_idx = 0;
-        std::tie(node_idx, out_idx) = sm.index_map().at(idx)[i];
-        DCHECK(out_idx >= 0);
-        // input
-        if (node_idx == StaticModule::INPUT_VALUE) {
-          n.set_input(i, &inputs_[out_idx]);
-        } else if (node_idx == StaticModule::CONSTANT_VALUE) {
-          n.set_input(i, &sm.constants()[out_idx]);
-        } else {
-          DCHECK(node_idx >= 0);
-          n.set_input(i, &(nodes_[node_idx].Output(out_idx)));
-        }
-      }
-    }
+    n.set_values(values_.data());
   }
 
-  for (const auto& index_pair : sm.output_indices()) {
-    int node_idx = 0;
-    int out_idx = 0;
-    std::tie(node_idx, out_idx) = index_pair;
-    if (node_idx == StaticModule::INPUT_VALUE) {
-      outputs_.emplace_back(&inputs_[out_idx]);
-    } else if (node_idx == StaticModule::CONSTANT_VALUE) {
-      // This is a very rare case where const correctness
-      // breaks -- the user is returning a constant from
-      // the graph.
-      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-      outputs_.emplace_back(const_cast<IValue*>(&sm.constants()[out_idx]));
-    } else {
-      auto* out = &nodes_[node_idx].Output(out_idx);
-      outputs_.emplace_back(out);
-    }
+  // TODO: can we convert outputs_ to store indices?
+  for (auto index : sm.output_indices()) {
+    outputs_.emplace_back(&values_[index]);
   }
 }
 
@@ -882,26 +917,26 @@ void StaticRuntime::set_inputs(
         "Schema is not available. Consider creating the Static Runtime "
         "with StaticModule(const torch::jit::Module& m) instead.");
     std::vector<c10::IValue> stack;
-    stack.reserve(inputs_.size());
+    stack.reserve(static_module_.num_inputs());
     if (static_module_.first_input_is_self()) {
       stack.emplace_back(static_module_.module()._ivalue());
     }
     stack.insert(stack.end(), args.begin(), args.end());
 
     static_module_.schema()->checkAndNormalizeInputs(stack, kwargs);
-    DCHECK_EQ(inputs_.size(), stack.size());
+    DCHECK_EQ(static_module_.num_inputs(), stack.size());
     for (const auto i : c10::irange(stack.size())) {
       Input(i) = std::move(stack[i]);
     }
   } else {
     if (static_module_.first_input_is_self()) {
       Input(0) = static_module_.module()._ivalue();
-      DCHECK_EQ(inputs_.size(), args.size() + 1);
+      DCHECK_EQ(static_module_.num_inputs(), args.size() + 1);
       for (const auto i : c10::irange(args.size())) {
         Input(i + 1) = args[i];
       }
     } else {
-      DCHECK_EQ(inputs_.size(), args.size());
+      DCHECK_EQ(static_module_.num_inputs(), args.size());
       for (const auto i : c10::irange(args.size())) {
         Input(i) = args[i];
       }
@@ -919,7 +954,7 @@ void StaticRuntime::set_inputs(
         "Schema is not available. Consider creating the Static Runtime "
         "with StaticModule(const torch::jit::Module& m) instead.");
     std::vector<c10::IValue> stack;
-    stack.reserve(inputs_.size());
+    stack.reserve(static_module_.num_inputs());
     if (static_module_.first_input_is_self()) {
       stack.emplace_back(static_module_.module()._ivalue());
     }
@@ -929,19 +964,19 @@ void StaticRuntime::set_inputs(
         std::make_move_iterator(args.end()));
 
     static_module_.schema()->checkAndNormalizeInputs(stack, kwargs);
-    DCHECK_EQ(inputs_.size(), stack.size());
+    DCHECK_EQ(static_module_.num_inputs(), stack.size());
     for (const auto i : c10::irange(stack.size())) {
       Input(i) = std::move(stack[i]);
     }
   } else {
     if (static_module_.first_input_is_self()) {
       Input(0) = static_module_.module()._ivalue();
-      DCHECK_EQ(inputs_.size(), args.size() + 1);
+      DCHECK_EQ(static_module_.num_inputs(), args.size() + 1);
       for (const auto i : c10::irange(args.size())) {
         Input(i + 1) = std::move(args[i]);
       }
     } else {
-      DCHECK_EQ(inputs_.size(), args.size());
+      DCHECK_EQ(static_module_.num_inputs(), args.size());
       for (const auto i : c10::irange(args.size())) {
         Input(i) = std::move(args[i]);
       }
@@ -958,6 +993,41 @@ void StaticRuntime::create_memory_planner() {
         static_module_.opts().enable_out_variant,
         static_module_.opts().manage_output_tensors);
   }
+}
+
+c10::IValue StaticRuntime::move_outputs_to_tuple(uint32_t num_outputs) {
+  bool should_move[num_outputs];
+  for (const auto i : c10::irange(num_outputs)) {
+    // REVIEW: is this actually safe or does trying to manage an
+    // output tensor indicate deeper problems? what was supposed to
+    // stop it?
+    should_move[i] = !isManagedOutputTensor(*outputs_[i]);
+  }
+#define TORCH_SR_MOVE_IF_POSSIBLE(idx)                      \
+  (should_move[(idx)] ? IValue(std::move(*outputs_[(idx)])) \
+                      : IValue(*outputs_[(idx)]))
+  switch (num_outputs) {
+    case 1:
+      return c10::ivalue::Tuple::create(TORCH_SR_MOVE_IF_POSSIBLE(0));
+    case 2:
+      return c10::ivalue::Tuple::create(
+          TORCH_SR_MOVE_IF_POSSIBLE(0), TORCH_SR_MOVE_IF_POSSIBLE(1));
+    case 3:
+      return c10::ivalue::Tuple::create(
+          TORCH_SR_MOVE_IF_POSSIBLE(0),
+          TORCH_SR_MOVE_IF_POSSIBLE(1),
+          TORCH_SR_MOVE_IF_POSSIBLE(2));
+    default: {
+      std::vector<c10::IValue> outputs;
+      outputs.reserve(num_outputs);
+      for (const auto i : c10::irange(num_outputs)) {
+        // use move here. Otherwise, clean up outputs_[i] explicitly
+        outputs.emplace_back(TORCH_SR_MOVE_IF_POSSIBLE(i));
+      }
+      return c10::ivalue::Tuple::create(std::move(outputs));
+    }
+  }
+#undef TORCH_SR_MOVE_IF_POSSIBLE
 }
 
 template <typename IValueList>
@@ -999,20 +1069,7 @@ c10::IValue StaticRuntime::run_impl(
 
   // no need to keep references of outputs in static runtime anymore
   if (static_module_.num_outputs() > 1) {
-    std::vector<c10::IValue> outputs;
-    outputs.reserve(static_module_.num_outputs());
-    for (const auto i : c10::irange(static_module_.num_outputs())) {
-      // REVIEW: is this actually safe or does trying to manage an
-      // output tensor indicate deeper problems? what was supposed to
-      // stop it?
-
-      if (C10_UNLIKELY(isManagedOutputTensor(*outputs_[i]))) {
-        outputs.emplace_back(*outputs_[i]);
-      } else {
-        outputs.emplace_back(std::move(*outputs_[i]));
-      }
-    }
-    return c10::ivalue::Tuple::create(std::move(outputs));
+    return move_outputs_to_tuple(static_module_.num_outputs());
   }
 #ifndef NDEBUG
   check_for_memory_leak(false);
@@ -1171,10 +1228,14 @@ float StaticRuntime::benchmark_model(
 
   const bool is_kwargs_empty = kwargs_list.size() == 0;
   const std::unordered_map<std::string, c10::IValue> empty_kwargs;
+  bool manage_output_tensors = static_module_.opts().manage_output_tensors;
   for (const auto i : c10::irange(warmup_runs)) {
     (void)i; // Suppress unused variable warning
     for (const auto j : c10::irange(args_list.size())) {
       operator()(args_list[j], is_kwargs_empty ? empty_kwargs : kwargs_list[j]);
+      if (manage_output_tensors) {
+        deallocateOutputTensors();
+      }
     }
   }
   caffe2::Timer timer;
@@ -1182,6 +1243,9 @@ float StaticRuntime::benchmark_model(
     (void)i; // Suppress unused variable warning
     for (const auto j : c10::irange(args_list.size())) {
       operator()(args_list[j], is_kwargs_empty ? empty_kwargs : kwargs_list[j]);
+      if (manage_output_tensors) {
+        deallocateOutputTensors();
+      }
     }
   }
   float millis = timer.MilliSeconds();
@@ -1206,7 +1270,7 @@ bool display_ivalue(const IValue& iv) {
     std::cout << "Dict {" << iv.toGenericDict().size() << "}\n";
     return true;
   } else if (iv.isTuple()) {
-    std::cout << "Tuple {" << iv.toTuple()->elements().size() << "}\n";
+    std::cout << "Tuple {" << iv.toTupleRef().elements().size() << "}\n";
     return true;
   } else if (iv.isInt()) {
     std::cout << "int {" << iv.toInt() << "}\n";
@@ -1223,10 +1287,9 @@ bool display_ivalue(const IValue& iv) {
 
 void display_pnode_info(const ProcessedNode& pnode) {
   pnode.node()->print(std::cout, 0, nullptr, false);
-  const auto inputs = pnode.inputs();
-  for (const auto i : c10::irange(inputs.size())) {
+  for (const auto i : c10::irange(pnode.num_inputs())) {
     std::cout << "\ti" << i << ": ";
-    if (!display_ivalue(*inputs[i])) {
+    if (!display_ivalue(pnode.Input(i))) {
       std::cout << *(pnode.node()->inputs()[i]->type()) << '\n';
     }
   }
@@ -1279,7 +1342,7 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
 
   const bool is_kwargs_empty = kwargs_list.size() == 0;
   const std::unordered_map<std::string, c10::IValue> empty_kwargs;
-
+  bool manage_output_tensors = static_module_.opts().manage_output_tensors;
   // See comment on above use of InferenceMode for
   // explanation.
   c10::InferenceMode mode;
@@ -1299,6 +1362,9 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
   // iterations just use the already established memory planning.
   timer.Start();
   operator()(args_list[0], is_kwargs_empty ? empty_kwargs : kwargs_list[0]);
+  if (manage_output_tensors) {
+    deallocateOutputTensors();
+  }
   results.first_iter_time = timer.MilliSeconds();
 
   // warmup runs
@@ -1306,6 +1372,9 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
     (void)i; // Suppress unused variable warning
     for (const auto j : c10::irange(args_list.size())) {
       operator()(args_list[j], is_kwargs_empty ? empty_kwargs : kwargs_list[j]);
+      if (manage_output_tensors) {
+        deallocateOutputTensors();
+      }
     }
   }
 
@@ -1336,6 +1405,9 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
         // clean up owning refs of input tensors
         clean_up_input_ivalues();
       }
+      if (manage_output_tensors) {
+        deallocateOutputTensors();
+      }
       millis = timer.MilliSeconds();
       results.memory_dealloc_time += millis;
 
@@ -1343,13 +1415,7 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
       // no need to keep references of outputs in static runtime anymore
       c10::IValue output;
       if (static_module_.num_outputs() > 1) {
-        std::vector<c10::IValue> outputs;
-        outputs.reserve(static_module_.num_outputs());
-        for (const auto k : c10::irange(static_module_.num_outputs())) {
-          // use move here. Otherwise, clean up outputs_[i] explicitly
-          outputs.emplace_back(std::move(*outputs_[k]));
-        }
-        output = c10::ivalue::Tuple::create(std::move(outputs));
+        output = move_outputs_to_tuple(static_module_.num_outputs());
       }
 
 #ifndef NDEBUG
@@ -1399,13 +1465,13 @@ void StaticRuntime::check_for_memory_leak(bool output_returned) {
   }
 
   // check for inputs
-  for (const auto i : c10::irange(inputs_.size())) {
-    TORCH_CHECK(inputs_[i].isNone(), "Input ", i, " was not cleaned up");
+  for (const auto i : c10::irange(static_module_.num_inputs())) {
+    TORCH_CHECK(values_[i].isNone(), "Input ", i, " was not cleaned up");
   }
   FastSet<const IValue*> output_ivalues(outputs_.begin(), outputs_.end());
   for (const auto n : c10::irange(nodes_.size())) {
     auto& pnode = nodes_[n];
-    for (const auto i : c10::irange(pnode.outputs().size())) {
+    for (const auto i : c10::irange(pnode.num_outputs())) {
       const IValue* ival = &pnode.Output(i);
       const Value* val = pnode.node()->output(i);
       // subtlety: isManagedOutputTensorValue may give a false
@@ -1433,7 +1499,11 @@ void StaticRuntime::check_for_memory_leak(bool output_returned) {
             const auto& t = ival->toTensor();
             if (t.defined()) {
               auto* storage_impl = t.storage().unsafeGetStorageImpl();
-              TORCH_CHECK(storage_impl->data() == nullptr, error_msg);
+              TORCH_CHECK(
+                  storage_impl->data() == nullptr ||
+                      (planner_ &&
+                       planner_->isManagedStorageImpl(storage_impl)),
+                  error_msg);
             }
           }
         }
@@ -1467,7 +1537,7 @@ bool StaticRuntime::checkOutputTensorMemoryLeaks() {
   }
   for (const auto n : c10::irange(nodes_.size())) {
     auto& pnode = nodes_[n];
-    for (const auto i : c10::irange(pnode.outputs().size())) {
+    for (const auto i : c10::irange(pnode.num_outputs())) {
       const IValue* ival = &pnode.Output(i);
       const Value* val = pnode.node()->output(i);
       if (!planner_->isManagedOutputTensorValue(val)) {
@@ -1493,16 +1563,24 @@ bool StaticRuntime::isManagedOutputTensor(const IValue& ivalue) {
 
 ProcessedNode::ProcessedNode(
     Node* node,
-    std::unique_ptr<const IValue*[]> inputs,
-    size_t inputsSize,
+    ProcessedNodeInputs inputs,
+    uint16_t outputs_offset,
     bool enable_out_variant)
     : node_(node),
       inputs_(std::move(inputs)),
-      inputs_size_(inputsSize),
-      op_name_(node->kind().toQualString()) {
-  // TODO leverage type information
-  outputs_size_ = node->outputs().size();
-  outputs_ = std::make_unique<IValue[]>(outputs_size_);
+      outputs_offset_(outputs_offset)
+#ifndef PYTORCH_DISABLE_PER_OP_PROFILING
+      ,
+      op_name_(node->kind().toQualString())
+#endif
+{
+  TORCH_CHECK(
+      node->outputs().size() < (1 << (sizeof(num_outputs_) * 8)),
+      node->outputs().size(),
+      " outputs to ProcessedNode ",
+      node->kind().toQualString(),
+      " is too many to use 2-byte indexing");
+  num_outputs_ = node->outputs().size();
 
   if (enable_out_variant) {
     std::function<void(ProcessedNode*)> f = getOutOfPlaceOperation(node);
@@ -1550,12 +1628,10 @@ ProcessedNode::ProcessedNode(
 
 std::vector<IValue> ProcessedNode::clone_inputs() const {
   std::vector<IValue> result;
-  result.reserve(inputs_size_);
-  std::transform(
-      inputs().begin(),
-      inputs().end(),
-      std::back_inserter(result),
-      [](const IValue* ival) { return *ival; });
+  result.reserve(inputs_.size());
+  for (const auto idx : c10::irange(num_inputs())) {
+    result.emplace_back(Input(idx));
+  }
   return result;
 }
 
@@ -1596,16 +1672,21 @@ static bool checkNoMemoryOverlap(const at::Tensor& a, const at::Tensor& b) {
 }
 
 bool ProcessedNode::verify_no_memory_overlap() const {
-  for (const auto i : c10::irange(outputs_size_)) {
-    if (!outputs_[i].isTensor()) {
+  return verify_outputs_dont_overlap_each_other() &&
+      verify_inputs_dont_overlap_outputs();
+}
+
+bool ProcessedNode::verify_outputs_dont_overlap_each_other() const {
+  for (const auto i : c10::irange(num_outputs_)) {
+    if (!Output(i).isTensor()) {
       continue;
     }
-    const auto& out0_t = outputs_[i].toTensor();
-    for (const auto j : c10::irange(i + 1, outputs_size_)) {
-      if (!outputs_[j].isTensor()) {
+    const auto& out0_t = Output(i).toTensor();
+    for (const auto j : c10::irange(i + 1, num_outputs_)) {
+      if (!Output(j).isTensor()) {
         continue;
       }
-      const auto& out1_t = outputs_[j].toTensor();
+      const auto& out1_t = Output(j).toTensor();
       if (!checkNoMemoryOverlap(out0_t, out1_t)) {
         LOG(INFO) << "Node output " << i << " overlaps with output " << j
                   << ", " << PrintNode(node_);
@@ -1613,19 +1694,22 @@ bool ProcessedNode::verify_no_memory_overlap() const {
       }
     }
   }
+  return true;
+}
 
+bool ProcessedNode::verify_inputs_dont_overlap_outputs() const {
   auto schema = node()->maybeSchema();
   // skip memory overlap check for mutable ops with only one output
-  if (!schema || (schema->is_mutable() && outputs_size_ == 1)) {
+  if (!schema || (schema->is_mutable() && num_outputs_ == 1)) {
     return true;
   }
-  for (const auto i : c10::irange(inputs_size_)) {
+  for (const auto i : c10::irange(inputs_.size())) {
     const IValue* in = &Input(i);
     if (!in->isTensor()) {
       continue;
     }
     const auto& in_t = in->toTensor();
-    for (const auto j : c10::irange(outputs_size_)) {
+    for (const auto j : c10::irange(num_outputs_)) {
       const IValue& out = Output(j);
       if (!out.isTensor()) {
         continue;

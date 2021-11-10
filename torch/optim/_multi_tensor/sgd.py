@@ -53,7 +53,7 @@ class SGD(Optimizer):
     """
 
     def __init__(self, params, lr=required, momentum=0, dampening=0,
-                 weight_decay=0, nesterov=False):
+                 weight_decay=0, nesterov=False, *, maximize=False):
         if lr is not required and lr < 0.0:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if momentum < 0.0:
@@ -62,7 +62,7 @@ class SGD(Optimizer):
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
 
         defaults = dict(lr=lr, momentum=momentum, dampening=dampening,
-                        weight_decay=weight_decay, nesterov=nesterov)
+                        weight_decay=weight_decay, nesterov=nesterov, maximize=maximize)
         if nesterov and (momentum <= 0 or dampening != 0):
             raise ValueError("Nesterov momentum requires a momentum and zero dampening")
         super(SGD, self).__init__(params, defaults)
@@ -90,6 +90,7 @@ class SGD(Optimizer):
             momentum = group['momentum']
             dampening = group['dampening']
             nesterov = group['nesterov']
+            maximize = group['maximize']
 
             grads = []
             params_with_grad = []
@@ -144,12 +145,13 @@ class SGD(Optimizer):
                 else:
                     grads = bufs
 
+            alpha = group['lr'] if maximize else -group['lr']
             if not has_sparse_grad:
-                torch._foreach_add_(params_with_grad, grads, alpha=-group['lr'])
+                torch._foreach_add_(params_with_grad, grads, alpha=alpha)
             else:
                 # foreach APIs dont support sparse
                 for i in range(len(params_with_grad)):
-                    params_with_grad[i].add_(grads[i], alpha=-group['lr'])
+                    params_with_grad[i].add_(grads[i], alpha=alpha)
 
         return loss
 
