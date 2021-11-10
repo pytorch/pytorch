@@ -91,6 +91,9 @@ static inline bool is_null_or_equal_to(const c10::optional<T>& test, const T& va
   return test.value() == value;
 }
 
+// NOTE: static runtime's to_maybe_copy_out relies on details of this
+// check; if you change how it works, please update static runtime as
+// well.
 bool to_will_alias(
     const Tensor& self,
     c10::optional<ScalarType> dtype,
@@ -152,7 +155,7 @@ Tensor _autocast_to_reduced_precision(const Tensor& self, bool cuda_enabled, boo
 // If input tensor is fp16, cast it to fp32, otherwise leave it alone.
 // (this is intended to be used internally by the JIT autocast implementation)
 Tensor _autocast_to_full_precision(const Tensor& self, bool cuda_enabled, bool cpu_enabled) {
-  if (self.dtype() == at::ScalarType::Half &&
+  if ((self.dtype() == at::ScalarType::Half || self.dtype() == at::ScalarType::BFloat16) &&
       ((self.device().is_cuda() && cuda_enabled) ||
       (self.device().is_cpu() && cpu_enabled))
       ) {
