@@ -1307,9 +1307,18 @@ class RelaxedNumberPair(NumberPair):
         super().__init__(actual, expected, check_dtype=False, **other_parameters)
 
     def _process_inputs(self, actual, expected, *, id):
-        # We require only one of the inputs of the inputs to be a number,
-        # whereas in NumberPair both inputs have to be numbers.
-        if not (isinstance(actual, self._NUMBER_TYPES) or isinstance(expected, self._NUMBER_TYPES)):
+        # We require only one of the inputs of the inputs to be a number and the other can be a number or a single
+        # element tensor or array, whereas in default NumberPair both inputs have to be numbers.
+        if not (
+            (
+                isinstance(actual, self._NUMBER_TYPES)
+                and isinstance(expected, (*self._NUMBER_TYPES, torch.Tensor, np.ndarray))
+            )
+            or (
+                isinstance(expected, self._NUMBER_TYPES)
+                and isinstance(actual, (*self._NUMBER_TYPES, torch.Tensor, np.ndarray))
+            )
+        ):
             raise UnsupportedInputs()
         error_meta, numbers = self._apply_unary(self._to_number, actual, expected, id=id)
         if error_meta:
@@ -1323,11 +1332,13 @@ class RelaxedNumberPair(NumberPair):
                 error_meta = ErrorMeta(
                     ValueError,
                     f"Only single element tensor-likes can be compared against a number. "
-                    f"Got {numel} elements instead."
+                    f"Got {numel} elements instead.",
                 )
                 return error_meta, None
 
             return None, number_like.item()
+        # We need this check, because combinations of an int and a bool will not be picked up by the BooleanPair,
+        # but will be picked up here since issubclass(bool, int)
         elif isinstance(number_like, bool):
             return None, int(number_like)
         else:
