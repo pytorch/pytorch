@@ -84,6 +84,7 @@ def unpack_dual(tensor, *, level=None):
         ...   inp = make_dual(x, x_t)
         ...   out = f(inp)
         ...   y, jvp = unpack_dual(out)
+        ...   jvp = unpack_dual(out).tangent
     """
     if level is None:
         level = _current_level
