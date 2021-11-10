@@ -39,8 +39,9 @@ namespace {
 struct TraceContext {
     PyObject_HEAD
 
-    // It is wasteful to store an entire PyThreadState*. Instead, we map thread
-    // ids down to a compact space that we can store in a single byte.
+    // It is wasteful to store an entire PyThreadState* in RawEvent. So
+    // instead, we map thread ids down to a compact space that we can store in
+    // a single byte.
     uint8_t thread_id_;
     PyThreadState* thread_state_;
 
@@ -244,7 +245,7 @@ class PythonTracer final {
     // and handle forwarding to the singleton.
     static void call(Command c);
 
-    static int py_profile_fn(
+    static int pyProfileFn(
         PyObject* obj,
         PyFrameObject* frame,
         int what,
@@ -259,12 +260,12 @@ class PythonTracer final {
     void stop();
     void clear();
 
-    void record_py_call(TraceContext* ctx, PyFrameObject* frame);
-    void record_c_call(TraceContext* ctx, PyFrameObject* frame, PyObject* arg);
-    void record_return(TraceContext* ctx, PyFrameObject* frame, TraceTag tag);
+    void recordPyCall(TraceContext* ctx, PyFrameObject* frame);
+    void recordCCall(TraceContext* ctx, PyFrameObject* frame, PyObject* arg);
+    void recordReturn(TraceContext* ctx, PyFrameObject* frame, TraceTag tag);
 
-    void store_description(PyFrameObject* frame);
-    void track_module(PyFrameObject* frame);
+    void storeDescription(PyFrameObject* frame);
+    void trackModule(PyFrameObject* frame);
 
     // It is imperitive that we do not store strings for each python function,
     // as that would do terrible things to our profiling overhead. So instead
@@ -295,7 +296,7 @@ class PythonTracer final {
         // NB:
         //  This is a non-owning reference to keep `ModuleForward` POD;
         //  `PythonTracer` owns the contents instead. We  Py_INCREF in
-        //  `track_module`, and `reset` is responsible for  calling Py_DECREF
+        //  `trackModule`, and `reset` is responsible for  calling Py_DECREF
         //  when clearing `module_calls_`.
         PyObject* self_;
     };
@@ -383,13 +384,13 @@ void PythonTracer::start(size_t max_threads) {
             depth++;
         }
         for (auto it = current_stack.rbegin(); it != current_stack.rend(); it++) {
-            record_py_call(ctx, *it);
+            recordPyCall(ctx, *it);
         }
 
         // Note:
-        //   This profile will not compose with other profilers, and cannot be
-        //   round tripped via `sys.settrace(sys.gettrace())`
-        PyEval_SetProfile(PythonTracer::py_profile_fn, (PyObject*)ctx);
+        //   This profile will not compose with other CPython profilers, and
+        //   cannot be round tripped via `sys.settrace(sys.gettrace())`
+        PyEval_SetProfile(PythonTracer::pyProfileFn, (PyObject*)ctx);
     }
 
     // Restore the thread state to its initial value.
@@ -427,26 +428,26 @@ void PythonTracer::clear() {
     module_calls_.clear();
 }
 
-void PythonTracer::record_py_call(TraceContext* ctx, PyFrameObject* frame) {
+void PythonTracer::recordPyCall(TraceContext* ctx, PyFrameObject* frame) {
     events_.emplace_back(TraceTag::kPy_Call, frame->f_lasti, ctx, frame->f_code);
-    store_description(frame);
-    track_module(frame);
+    storeDescription(frame);
+    trackModule(frame);
 }
 
-void PythonTracer::record_c_call(TraceContext* ctx, PyFrameObject* frame, PyObject* arg) {
+void PythonTracer::recordCCall(TraceContext* ctx, PyFrameObject* frame, PyObject* arg) {
     events_.emplace_back(TraceTag::kC_Call, frame->f_lasti, ctx, arg);
 }
 
-void PythonTracer::record_return(TraceContext* ctx, PyFrameObject* frame, TraceTag tag) {
+void PythonTracer::recordReturn(TraceContext* ctx, PyFrameObject* frame, TraceTag tag) {
     events_.emplace_back(tag, frame->f_lasti, ctx);
 }
 
 // NB:
 //  `frame->f_lasti` will advance as the interpreter progresses through the
-//  code object. Thus, we need to call `store_description` when we record the
+//  code object. Thus, we need to call `storeDescription` when we record the
 //  call rather than the return. (Otherwise we would get the line with the
 //  return stmt.)
-void PythonTracer::store_description(PyFrameObject* frame) {
+void PythonTracer::storeDescription(PyFrameObject* frame) {
     const auto& it = code_descriptions_.find({ frame->f_code, frame->f_lasti });
     if C10_UNLIKELY(it == code_descriptions_.end()) {
         code_descriptions_.insert({
@@ -460,7 +461,7 @@ void PythonTracer::store_description(PyFrameObject* frame) {
     }
 }
 
-void PythonTracer::track_module(PyFrameObject* frame) {
+void PythonTracer::trackModule(PyFrameObject* frame) {
     if ((PyObject*)(frame->f_code) == module_call_code_) {
         // By default, CPython stores locals in a "fast" format, with an array
         // of names and an array of values. Consequently, frame->f_locals is
@@ -489,25 +490,18 @@ void PythonTracer::track_module(PyFrameObject* frame) {
 
 class PyTraceReplay {
  public:
-    static std::vector<std::unique_ptr<PyTraceEvent>> get_events() {
-        return PyTraceReplay().replay_stack();
+    static std::vector<std::unique_ptr<PyTraceEvent>> getEvents() {
+        return PyTraceReplay().replayStack();
     }
 
  private:
     PyTraceReplay();
-    std::vector<std::unique_ptr<PyTraceEvent>> replay_stack() const;
+    std::vector<std::unique_ptr<PyTraceEvent>> replayStack() const;
 
     struct ReplayFrame {
-        int64_t startTime_;
-        int64_t endTime_;
-        std::string name_;
-        CallType call_type_;
-        size_t module_id_;  // Only set call_type_ == kPyModuleCall
+        std::unique_ptr<PyTraceEvent> event_;
         size_t id_;
         size_t parent_id_;
-        uint64_t thread_id_;
-        size_t call_idx_;
-        size_t return_idx_;
     };
 
     ska::flat_hash_map<size_t, PyObject*> module_self_map_;
@@ -534,7 +528,7 @@ PyTraceReplay::PyTraceReplay()
 }
 
 
-std::vector<std::unique_ptr<PyTraceEvent>> PyTraceReplay::replay_stack() const {
+std::vector<std::unique_ptr<PyTraceEvent>> PyTraceReplay::replayStack() const {
     const auto& tracer = PythonTracer::singleton();
 
     // We want to prune paths to a sensible prefix. For example
@@ -571,19 +565,21 @@ std::vector<std::unique_ptr<PyTraceEvent>> PyTraceReplay::replay_stack() const {
         auto t = static_cast<int64_t>(raw_event.t_) + ctx->initial_us_;
 
         auto push_frame = [&](std::string name, CallType call_type, size_t module_id = 0) {
-            ReplayFrame frame {
-                /*startTime_=*/ t,
-                /*endTime_=*/ -1,  // Placeholder
-                /*name_=*/ name,
-                /*call_type_=*/ call_type,
-                /*module_id_=*/ module_id,
+            stack.push_back(ReplayFrame {
+                /*event_=*/ std::make_unique<PyTraceEvent>(PyTraceEvent{
+                    /*startTime_=*/ t,
+                    /*endTime_=*/ -1,  // Placeholder
+                    /*name_=*/ name,
+                    /*thread_id_=*/ raw_event.thread_id_,
+                    /*parent_=*/ nullptr,  // Placeholder
+                    /*call_type_=*/ call_type,
+                    /*module_id_=*/ module_id,
+                    /*call_idx_=*/ event_idx,
+                    /*return_idx_=*/ 0  // Placeholder
+                }),
                 /*id_=*/ id_counter++,
                 /*parent_id_=*/ stack.size() ? stack.back().id_ : 0,
-                /*thread_id_=*/ raw_event.thread_id_,
-                /*call_idx_=*/ event_idx,
-                /*return_idx_=*/ 0  // Placeholder
-            };
-            stack.push_back(frame);
+            });
         };
 
         switch (raw_event.tag()) {
@@ -605,8 +601,8 @@ std::vector<std::unique_ptr<PyTraceEvent>> PyTraceReplay::replay_stack() const {
             case TraceTag::kPy_Return:
             case TraceTag::kC_Return:
                 TORCH_INTERNAL_ASSERT(stack.size(), "Python replay stack is empty.")
-                stack.back().endTime_ = t;
-                stack.back().return_idx_ = event_idx;
+                stack.back().event_->endTime_ = t;
+                stack.back().event_->return_idx_ = event_idx;
                 results.push_back(std::move(stack.back()));
                 stack.pop_back();
                 break;
@@ -619,8 +615,8 @@ std::vector<std::unique_ptr<PyTraceEvent>> PyTraceReplay::replay_stack() const {
     const auto t_final = now();
     for (auto& stack : stacks) {
         while (stack.size()) {
-            stack.back().endTime_ = t_final;
-            stack.back().return_idx_ = event_idx;
+            stack.back().event_->endTime_ = t_final;
+            stack.back().event_->return_idx_ = event_idx;
             results.push_back(std::move(stack.back()));
             stack.pop_back();
             event_idx++;
@@ -631,17 +627,7 @@ std::vector<std::unique_ptr<PyTraceEvent>> PyTraceReplay::replay_stack() const {
     ska::flat_hash_map<size_t, PyTraceEvent*> event_id_map {{0, nullptr}};
     std::vector<std::unique_ptr<PyTraceEvent>> out;
     for (auto& r : results) {
-        out.push_back(std::make_unique<PyTraceEvent>(PyTraceEvent{
-            /*startTime_=*/ r.startTime_,
-            /*endTime_=*/ r.endTime_,
-            /*name_=*/ r.name_,
-            /*thread_id_=*/ r.thread_id_,
-            /*parent_=*/ nullptr,
-            /*call_type_=*/ r.call_type_,
-            /*module_id_=*/ r.module_id_,
-            /*call_idx_=*/ r.call_idx_,
-            /*return_idx_=*/ r.return_idx_
-        }));
+        out.push_back(std::move(r.event_));
         event_id_map.insert({r.id_, out.back().get()});
     }
 
@@ -658,7 +644,7 @@ std::vector<std::unique_ptr<PyTraceEvent>> PyTraceReplay::replay_stack() const {
 // == API =====================================================================
 // ============================================================================
 
-int PythonTracer::py_profile_fn(
+int PythonTracer::pyProfileFn(
         PyObject* obj,
         PyFrameObject* frame,
         int what,
@@ -666,21 +652,21 @@ int PythonTracer::py_profile_fn(
     auto ctx = reinterpret_cast<TraceContext*>(obj);
     switch (what) {
         case PyTrace_CALL:
-            PythonTracer::singleton().record_py_call(ctx, frame);
+            PythonTracer::singleton().recordPyCall(ctx, frame);
             break;
 
         case PyTrace_C_CALL:
-            PythonTracer::singleton().record_c_call(ctx, frame, arg);
+            PythonTracer::singleton().recordCCall(ctx, frame, arg);
             break;
 
         case PyTrace_EXCEPTION:
         case PyTrace_RETURN:
-            PythonTracer::singleton().record_return(ctx, frame, TraceTag::kPy_Return);
+            PythonTracer::singleton().recordReturn(ctx, frame, TraceTag::kPy_Return);
             break;
 
         case PyTrace_C_EXCEPTION:
         case PyTrace_C_RETURN:
-            PythonTracer::singleton().record_return(ctx, frame, TraceTag::kC_Return);
+            PythonTracer::singleton().recordReturn(ctx, frame, TraceTag::kC_Return);
             break;
     }
     return 0;
@@ -717,7 +703,7 @@ void init() {
 
     registerFunctions(
         /*call=*/&PythonTracer::call,
-        /*get_events=*/&PyTraceReplay::get_events
+        /*getEvents=*/&PyTraceReplay::getEvents
     );
 }
 
