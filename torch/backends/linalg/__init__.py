@@ -7,7 +7,8 @@ def set_flags(_preferred=None):
     orig_flags = (torch._C._get_linalg_preferred_backend(),)
     if _preferred is not None:
         if not isinstance(_preferred, torch.linalg_backend):
-            raise RuntimeError("must choose a linalg backend from: torch.linalg_default, torch.linalg_cusolver, torch.linalg_magma.")
+            raise RuntimeError("must choose a linalg backend from: "
+                               "torch.linalg_default, torch.linalg_cusolver, torch.linalg_magma.")
         torch._C._set_linalg_preferred_backend(_preferred)
     return orig_flags
 
