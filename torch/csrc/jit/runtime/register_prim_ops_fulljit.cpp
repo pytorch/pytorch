@@ -690,7 +690,7 @@ void interpolate_op(Stack& stack) {
   std::string mode;
   IValue align_corners;
   IValue recompute_scale_factor;
-  bool antialias;
+  bool antialias = false;
   pop(stack,
       input,
       size,
