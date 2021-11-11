@@ -205,7 +205,7 @@ class TestCommon(TestCase):
         sample_inputs = op.sample_inputs(device, dtype)
         for sample_input in sample_inputs:
             self.compare_with_reference(op, op.ref, sample_input)
-            
+
     @skipMeta
     @onlyNativeDeviceTypes
     @ops([op for op in op_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)
