@@ -79,7 +79,7 @@ class Wishart(Distribution):
             self.df = self.precision_matrix.shape[-1] if df is None else df
             
         assert self.df > self.precision_matrix.shape[-1] - 1, \
-            "Degree of Freedom paramter should be larger than the 
+            "Degree of Freedom paramter should be larger than the dimension - 1"
 
         self.arg_constraints['df'] = constraints.greater_than(event_shape[-1] - 1)
         self.bartlett_decomposition = bartlett_decomposition
