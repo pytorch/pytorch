@@ -34,9 +34,9 @@ class BackendImplInterface {
 
   virtual BackendDataPtr MakeComputationDataFromTensor(
       const at::Tensor& tensor, const lazy_tensors::Shape& shape,
-      const Device& device) const = 0;
+      const torch::lazy::BackendDevice& device) const = 0;
 
-  virtual BackendDataPtr CreateDataPlaceholder(const Device& device,
+  virtual BackendDataPtr CreateDataPlaceholder(const torch::lazy::BackendDevice& device,
       const lazy_tensors::Shape& shape) const = 0;
 
   virtual at::Tensor MakeTensorFromComputationData(
@@ -48,12 +48,12 @@ class BackendImplInterface {
    * */
 
   virtual std::unique_ptr<ir::LoweringContext> CreateLoweringContext(
-      const std::string& name, Device device,
+      const std::string& name, torch::lazy::BackendDevice device,
       c10::ArrayRef<torch::lazy::Node*> post_order,
       ir::Util::EmissionMap emit_status) const = 0;
 
   virtual std::unique_ptr<ir::LoweringContext> CreateLoweringContext(
-      const std::string& name, Device device) const = 0;
+      const std::string& name, torch::lazy::BackendDevice device) const = 0;
 
   // TODO(whc) need to keep this?
   virtual std::vector<std::string> GetCompilationDevices(
@@ -64,7 +64,7 @@ class BackendImplInterface {
 
   virtual std::vector<BackendDataPtr> ExecuteComputation(
       Computation& computation, c10::ArrayRef<BackendDataPtr> arguments,
-      const Device& device) const = 0;
+      const torch::lazy::BackendDevice& device) const = 0;
 
   /**
    * Device Configuration
@@ -74,7 +74,7 @@ class BackendImplInterface {
 
   virtual size_t GetNumDevices() const = 0;
 
-  // TODO: Return std::vector<Device> instead.
+  // TODO: Return std::vector<torch::lazy::BackendDevice> instead.
   virtual std::vector<std::string> GetLocalDevices() const = 0;
 
   virtual std::vector<std::string> GetAllDevices() const = 0;

@@ -10,7 +10,7 @@ namespace cpp_test {
 
 void LtcTsTest::SetUp() {
   at::manual_seed(42);
-  LazyGraphExecutor::Get()->SetRngSeed(Device(), 42);
+  LazyGraphExecutor::Get()->SetRngSeed(torch::lazy::BackendDevice(), 42);
 }
 
 void LtcTsTest::TearDown() {}

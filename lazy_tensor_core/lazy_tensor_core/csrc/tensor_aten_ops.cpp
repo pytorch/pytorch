@@ -79,7 +79,7 @@ lazy_tensors::Shape BatchNormFeaturesShape(const LazyTensor& input) {
 torch::lazy::Value GetIrValueOrDefault(const LazyTensor& input,
                                        const at::Scalar& default_value,
                                        const lazy_tensors::Shape& default_shape,
-                                       const Device& device) {
+                                       const torch::lazy::BackendDevice& device) {
   return input.is_null() ? LazyGraphExecutor::Get()->GetIrValueForScalar(
                                default_value, default_shape, device)
                          : input.GetIrValue();

@@ -22,7 +22,7 @@ bool TensorCompare(const at::Tensor& t1, const at::Tensor& t2);
 // Uploads an ATEN tensor data to the device and fetches the corresponding
 // device data handle.
 compiler::BackendDataPtr TensorToDataHandle(
-    const at::Tensor& tensor, const Device& device);
+    const at::Tensor& tensor, const torch::lazy::BackendDevice& device);
 
 torch::lazy::hash_t TensorHash(const at::Tensor& tensor);
 
@@ -30,7 +30,7 @@ torch::lazy::hash_t TensorHash(const at::Tensor& tensor);
 // corresponding devices.
 std::vector<compiler::BackendDataPtr> CreateTensorsData(
     const std::vector<at::Tensor>& tensors,
-    const std::vector<Device>& devices);
+    const std::vector<torch::lazy::BackendDevice>& devices);
 
 template<typename... TupleType>
 std::vector<std::vector<int64_t>> CreateComputationShapeFromMetaTensors(const std::tuple<TupleType...>& tensors) {

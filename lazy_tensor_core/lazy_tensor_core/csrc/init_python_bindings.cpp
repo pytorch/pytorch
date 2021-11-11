@@ -1,5 +1,6 @@
 #include <c10/core/Device.h>
 #include <c10/util/Optional.h>
+#include <torch/csrc/lazy/backend/backend_device.h>
 
 #include <cstring>
 #include <sstream>
@@ -9,7 +10,6 @@
 
 #include "lazy_tensor_core/csrc/aten_ltc_bridge.h"
 #include "lazy_tensor_core/csrc/compiler/backend_impl_interface.h"
-#include "lazy_tensor_core/csrc/device.h"
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/ir_dump_util.h"
 #include "lazy_tensor_core/csrc/ir_util.h"
@@ -36,6 +36,7 @@
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/python/pybind.h"
 #include "torch/csrc/utils/cuda_lazy_init.h"
+
 namespace torch_lazy_tensors {
 namespace {
 
@@ -45,16 +46,16 @@ struct NoGilSection {
   PyThreadState* state = nullptr;
 };
 
-c10::optional<Device> GetOptionalDevice(const std::string& device_str) {
+c10::optional<torch::lazy::BackendDevice> GetOptionalDevice(const std::string& device_str) {
   if (device_str.empty()) {
     return c10::nullopt;
   }
   return bridge::AtenDeviceToLtcDevice(c10::Device(device_str));
 }
 
-Device GetDeviceOrCurrent(const std::string& device_str) {
+torch::lazy::BackendDevice GetDeviceOrCurrent(const std::string& device_str) {
   if (device_str.empty()) {
-    return Device();
+    return torch::lazy::BackendDevice();
   }
   return bridge::AtenDeviceToLtcDevice(c10::Device(device_str));
 }
@@ -85,15 +86,15 @@ std::vector<std::string> GetLtcDeviceStrings(
   std::vector<std::string> ltc_devices;
   ltc_devices.reserve(devices.size());
   for (auto& device_str : devices) {
-    Device device = bridge::AtenDeviceToLtcDevice(c10::Device(device_str));
+    auto device = bridge::AtenDeviceToLtcDevice(c10::Device(device_str));
     ltc_devices.emplace_back(device.toString());
   }
   return ltc_devices;
 }
 
-std::vector<Device> GetLtcDevices(
+std::vector<torch::lazy::BackendDevice> GetLtcDevices(
     const std::vector<std::string>& devices) {
-  std::vector<Device> ltc_devices;
+  std::vector<torch::lazy::BackendDevice> ltc_devices;
   ltc_devices.reserve(devices.size());
   for (auto& device_str : devices) {
     ltc_devices.push_back(bridge::AtenDeviceToLtcDevice(c10::Device(device_str)));
@@ -228,7 +229,7 @@ void SyncLiveTensors(const std::string& device_str,
 
 void StepMarker(const std::string& device_str,
                 const std::vector<std::string>& devices, bool wait) {
-  Device device = GetDeviceOrCurrent(device_str);
+  auto device = GetDeviceOrCurrent(device_str);
   LazyGraphExecutor::Get()->SyncLiveTensorsGraph(&device, devices, wait);
   LazyGraphExecutor::Get()->MarkStep(device);
   bool debug_mode = lazy_tensors::sys_util::GetEnvBool("PT_LTC_DEBUG", false);
@@ -248,7 +249,7 @@ void StepMarker(const std::string& device_str,
 }
 
 void SetRngSeed(uint64_t seed, const std::string& device_str) {
-  Device device = GetDeviceOrCurrent(device_str);
+  auto device = GetDeviceOrCurrent(device_str);
   LazyGraphExecutor::Get()->SetRngSeed(device, seed);
 }
 
@@ -322,7 +323,7 @@ std::shared_ptr<torch::lazy::Value> CreateToken(const std::string& device_str) {
   // and we handle it accordingly in cross_replica_reduces.cpp. This needs to be
   // device data (hence coming in as computation parameter) as otherwise the
   // backend compiler passes might remove it, vanishing its sequencing effects.
-  Device device = GetDeviceOrCurrent(device_str);
+  auto device = GetDeviceOrCurrent(device_str);
   torch::lazy::Value ir_value = LazyGraphExecutor::Get()->GetDeviceDataIrValue(
       0.0, c10::ScalarType::Float, device);
   return std::make_shared<torch::lazy::Value>(std::move(ir_value));
@@ -386,7 +387,7 @@ py::object LtcNms(const at::Tensor& boxes, const at::Tensor& scores,
 //   lazy_tensors::ComputationClient::MemoryInfo mem_info;
 //   {
 //     NoGilSection nogil;
-//     Device device = GetDeviceOrCurrent(device_str);
+//     auto device = GetDeviceOrCurrent(device_str);
 //     mem_info = compiler::getBackend()->GetMemoryInfo(
 //         device.toString());
 //   }

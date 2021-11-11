@@ -7,10 +7,10 @@
 namespace torch_lazy_tensors {
 namespace ir {
 
-LoweringContext::LoweringContext(const std::string& name, Device device)
+LoweringContext::LoweringContext(const std::string& name, torch::lazy::BackendDevice device)
     : device_(std::move(device)) {}
 
-LoweringContext::LoweringContext(const std::string& name, Device device,
+LoweringContext::LoweringContext(const std::string& name, torch::lazy::BackendDevice device,
                                  c10::ArrayRef<torch::lazy::Node*> post_order,
                                  Util::EmissionMap emit_status)
     : device_(std::move(device)), emit_status_(std::move(emit_status)) {}

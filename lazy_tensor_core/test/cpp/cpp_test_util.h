@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 #include <torch/torch.h>
+#include <torch/csrc/lazy/backend/backend_device.h>
 
 #include <cmath>
 #include <functional>
@@ -9,7 +10,6 @@
 #include <unordered_set>
 
 #include "lazy_tensor_core/csrc/debug_util.h"
-#include "lazy_tensor_core/csrc/device.h"
 #include "lazy_tensor_core/csrc/tensor.h"
 #include "torch/csrc/lazy/core/ir.h"
 

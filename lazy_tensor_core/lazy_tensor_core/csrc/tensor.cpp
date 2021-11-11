@@ -19,7 +19,7 @@ namespace torch_lazy_tensors {
 
 LazyTensor::Data::~Data() { LazyGraphExecutor::Get()->UnregisterTensor(this); }
 
-LazyTensor LazyTensor::Create(const at::Tensor& tensor, const Device& device) {
+LazyTensor LazyTensor::Create(const at::Tensor& tensor, const torch::lazy::BackendDevice& device) {
   CHECK_NE(tensor.device().type(), at::kLazy);
   LazyTensor xtensor(tensor, device);
   LazyGraphExecutor::Get()->RegisterTensor(xtensor.data_ptr());
@@ -35,7 +35,7 @@ LazyTensor LazyTensor::Create(
 }
 
 LazyTensor LazyTensor::Create(
-    torch::lazy::Value ir_value, const Device& device,
+    torch::lazy::Value ir_value, const torch::lazy::BackendDevice& device,
     c10::optional<at::ScalarType> logical_element_type) {
   LazyTensor xtensor(std::move(ir_value), device, logical_element_type);
   LazyGraphExecutor::Get()->RegisterTensor(xtensor.data_ptr());
@@ -43,7 +43,7 @@ LazyTensor LazyTensor::Create(
 }
 
 LazyTensor LazyTensor::Create(
-    std::shared_ptr<View> view, const Device& device,
+    std::shared_ptr<View> view, const torch::lazy::BackendDevice& device,
     c10::optional<at::ScalarType> logical_element_type) {
   LazyTensor xtensor(std::move(view), device, logical_element_type);
   LazyGraphExecutor::Get()->RegisterTensor(xtensor.data_ptr());
@@ -54,22 +54,22 @@ LazyTensor LazyTensor::Create(std::shared_ptr<Data> data) {
   return LazyTensor(std::move(data));
 }
 
-LazyTensor::LazyTensor(const at::Tensor& tensor, const Device& device)
+LazyTensor::LazyTensor(const at::Tensor& tensor, const torch::lazy::BackendDevice& device)
     : data_(std::make_shared<Data>(tensor, device)) {}
 
 LazyTensor::LazyTensor(compiler::BackendDataPtr handle,
                        c10::optional<at::ScalarType> logical_element_type)
-    : data_(std::make_shared<Data>(handle, Device(handle->device()),
+    : data_(std::make_shared<Data>(handle, handle->device(),
                                    logical_element_type)) {}
 
-LazyTensor::LazyTensor(torch::lazy::Value ir_value, const Device& device,
+LazyTensor::LazyTensor(torch::lazy::Value ir_value, const torch::lazy::BackendDevice& device,
                        c10::optional<at::ScalarType> logical_element_type)
     : data_(std::make_shared<Data>(std::move(ir_value), device,
                                    logical_element_type)) {
   TryLimitGraphSize();
 }
 
-LazyTensor::LazyTensor(std::shared_ptr<View> view, const Device& device,
+LazyTensor::LazyTensor(std::shared_ptr<View> view, const torch::lazy::BackendDevice& device,
                        c10::optional<at::ScalarType> logical_element_type)
     : data_(std::make_shared<Data>(std::move(view), device,
                                    logical_element_type)) {}
@@ -110,13 +110,13 @@ lazy_tensors::util::MaybeRef<lazy_tensors::Shape> LazyTensor::shape() const {
     return ir::GetShapeFromTsValue(data()->ir_value);
   }
   CHECK(data()->tensor_data);
-  const Device& device = GetDevice();
+  const torch::lazy::BackendDevice& device = GetDevice();
   return lazy_tensors::ShapeUtil::MakeShape(
       data()->tensor_data->type().scalarType(),
       Helpers::I64List(data()->tensor_data->sizes()));
 }
 
-const Device& LazyTensor::GetDevice() const { return data()->device; }
+const torch::lazy::BackendDevice& LazyTensor::GetDevice() const { return data()->device; }
 
 int64_t LazyTensor::GetUniqueId() const { return data()->unique_id; }
 
@@ -268,7 +268,7 @@ c10::optional<at::Tensor> LazyTensor::CurrentTensorData() const {
 }
 
 torch::lazy::Value LazyTensor::GetIrValueForTensor(const at::Tensor& tensor,
-                                                   const Device& device) const {
+                                                   const torch::lazy::BackendDevice& device) const {
   compiler::BackendDataPtr data;
   bool read_only = false;
   if (tensor.dim() == 0 && tensor.numel() == 1) {
@@ -448,7 +448,7 @@ std::vector<LazyTensor> LazyTensor::MakeOutputTensors(NodePtr node) const {
   return tensors;
 }
 
-LazyTensor LazyTensor::CopyTensorToDevice(const Device& device) {
+LazyTensor LazyTensor::CopyTensorToDevice(const torch::lazy::BackendDevice& device) {
   // TODO: This can be optimized.
   return Create(ToTensor(/*detached=*/true), device);
 }
@@ -458,7 +458,7 @@ LazyTensor LazyTensor::CreateFrom(torch::lazy::Value ir_value) const {
 }
 
 LazyTensor LazyTensor::CreateFrom(torch::lazy::Value ir_value,
-                                  const Device& device) const {
+                                  const torch::lazy::BackendDevice& device) const {
   return Create(std::move(ir_value), device, dtype_optional());
 }
 
@@ -469,7 +469,7 @@ LazyTensor LazyTensor::CreateFrom(
 }
 
 LazyTensor LazyTensor::CreateFrom(torch::lazy::Value ir_value,
-                                  const Device& device,
+                                  const torch::lazy::BackendDevice& device,
                                   at::ScalarType logical_element_type) const {
   return Create(std::move(ir_value), device, logical_element_type);
 }
