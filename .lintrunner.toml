@@ -340,7 +340,7 @@ exclude_patterns = [
 ]
 command = [
     'python3',
-    'tools/linter/adapters/cppexec_linter.py',
+    'tools/linter/adapters/exec_linter.py',
     '--',
     '@{{PATHSFILE}}',
 ]
@@ -387,4 +387,35 @@ command = [
     """,
     '--',
     '@{{PATHSFILE}}'
+]
+
+[[linter]]
+code = 'CMAKE'
+include_patterns = [
+    "**/*.cmake",
+    "**/*.cmake.in",
+    "**/CMakeLists.txt",
+]
+exclude_patterns = [
+    'cmake/Modules/**',
+    'cmake/Modules_CUDA_fix/**',
+    'cmake/Caffe2Config.cmake.in',
+    'aten/src/ATen/ATenConfig.cmake.in',
+    'cmake/Caffe2ConfigVersion.cmake.in',
+    'cmake/TorchConfig.cmake.in',
+    'cmake/TorchConfigVersion.cmake.in',
+    'cmake/cmake_uninstall.cmake.i',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/cmake_linter.py',
+    '--config=.cmakelintrc',
+    '--',
+    '@{{PATHSFILE}}',
+]
+init_command = [
+    'python3',
+    'tools/linter/adapters/pip_init.py',
+    '--dry-run={{DRYRUN}}',
+    'cmakelint==1.4.1',
 ]
