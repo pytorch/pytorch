@@ -703,7 +703,7 @@ void init() {
 
     registerFunctions(
         /*call=*/&PythonTracer::call,
-        /*getEvents=*/&PyTraceReplay::getEvents
+        /*get_events=*/&PyTraceReplay::getEvents
     );
 }
 
