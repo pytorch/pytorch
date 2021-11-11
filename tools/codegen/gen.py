@@ -20,7 +20,7 @@ from tools.codegen.model import (Argument, DispatchKey, FunctionSchema,
                                  assert_never, is_cuda_dispatch_key,
                                  is_generic_dispatch_key)
 from tools.codegen.api.types import (Binding, CppSignature, CppSignatureGroup,
-                                     DispatcherSignature, NativeSignature)
+                                     DispatcherSignature, NativeSignature, BaseCType, tensorOptionsT)
 from tools.codegen.api import cpp
 import tools.codegen.api.dispatcher as dispatcher
 import tools.codegen.api.native as native
@@ -471,13 +471,14 @@ class ComputeStaticUnboxingWrapper:
                 arguments[arg.name] = res['val_name']
 
                 code.extend(res['code'])
-
-            if tensor_option_arg:
+            # only generate tensor options when native function is taking it
+            if any(isinstance(a.nctype.type, BaseCType) and a.nctype.type.type == tensorOptionsT for a in sig.arguments()):
                 code.append(f"""
         const auto options = TensorOptions()
             .dtype({tensor_option_args['dtype']})
             .layout({tensor_option_args['layout']})
-            .device({tensor_option_args['device']});
+            .device({tensor_option_args['device']})
+            .pinned_memory({tensor_option_args['pin_memory']});
                 """)
                 arguments['options'] = 'options'
 
