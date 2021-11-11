@@ -51,7 +51,10 @@ void set_train_recurse(
   if (auto slot = obj->type()->findAttributeSlot("training")) {
     obj->setSlot(*slot, on);
   } else {
-    TORCH_INTERNAL_ASSERT(false, "'training' attribute not found");
+    TORCH_INTERNAL_ASSERT(
+        false,
+        "'training' attribute not found. Did you accidentally "
+        "call .eval() before saving your model?");
   }
   for (const auto& slot : obj->slots()) {
     if (slot.isObject()) {
