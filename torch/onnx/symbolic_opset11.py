@@ -882,23 +882,6 @@ def embedding_bag(g,
     return loop.node().output(), None, None, None
 
 
-def prim_ConstantChunk(g, self, chunks, dim):
-    input_shape = g.op("Shape", self)
-    axis = g.op("Constant", value_t=torch.tensor([dim], dtype=torch.long))
-    input_shape_dim = g.op("Gather", input_shape, axis, axis_i=0)
-    start = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
-    chunk_size = g.op("Constant", value_t=torch.tensor([chunks], dtype=torch.long))
-    chunk_size_minus_1 = g.op("Constant", value_t=torch.tensor([chunks - 1], dtype=torch.long))
-    input_shape_dim_shift = g.op("Add", input_shape_dim, chunk_size_minus_1)
-    chunk_dim = g.op("Div", input_shape_dim_shift, chunk_size)
-    res = []
-    for i in range(chunks):
-        index = g.op("Constant", value_t=torch.tensor([i + 1], dtype=torch.long))
-        end = g.op("Mul", chunk_dim, index)
-        res.append(g.op("Slice", self, start, end, axis))
-        start = end
-    return res
-
 def chunk(g, self, chunks, dim):
     # Calculate chunk size for dynamic chunk
     dim_size = g.op("Gather", g.op("Shape", self), dim, axis_i=0)
@@ -919,3 +902,25 @@ def normal(g, loc, scale, seed):
     # is a sample with mean μ and variance σ's square.
     result = mul(g, scale, g.op("RandomNormalLike", loc))
     return add(g, result, loc)
+
+
+class Prim:
+    domain = "prim"
+
+    @staticmethod
+    def ConstantChunk(g, self, chunks, dim):
+        input_shape = g.op("Shape", self)
+        axis = g.op("Constant", value_t=torch.tensor([dim], dtype=torch.long))
+        input_shape_dim = g.op("Gather", input_shape, axis, axis_i=0)
+        start = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
+        chunk_size = g.op("Constant", value_t=torch.tensor([chunks], dtype=torch.long))
+        chunk_size_minus_1 = g.op("Constant", value_t=torch.tensor([chunks - 1], dtype=torch.long))
+        input_shape_dim_shift = g.op("Add", input_shape_dim, chunk_size_minus_1)
+        chunk_dim = g.op("Div", input_shape_dim_shift, chunk_size)
+        res = []
+        for i in range(chunks):
+            index = g.op("Constant", value_t=torch.tensor([i + 1], dtype=torch.long))
+            end = g.op("Mul", chunk_dim, index)
+            res.append(g.op("Slice", self, start, end, axis))
+            start = end
+        return res
