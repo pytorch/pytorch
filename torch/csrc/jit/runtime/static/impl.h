@@ -44,15 +44,10 @@ TORCH_API inline bool doesNotHeapAllocateWhenStoredInIValue(const Type& type) {
   switch (type.kind()) {
     // NOTE: NumberType may allocate because it includes complex.
     case TypeKind::NoneType:
-      return true;
     case TypeKind::IntType:
-      return true;
     case TypeKind::FloatType:
-      return true;
     case TypeKind::BoolType:
-      return true;
     case TypeKind::DeviceObjType:
-      return true;
     case TypeKind::StreamObjType:
       return true;
     default:
@@ -401,12 +396,16 @@ class TORCH_API StaticRuntime {
       std::vector<c10::IValue>&& args,
       const std::unordered_map<std::string, c10::IValue>& kwargs);
 
+  void verify_and_correct_memory_overlap(ProcessedNode& n);
+
   // clean up owning refs of input IValues
   void clean_up_input_ivalues() {
     for (const auto idx : c10::irange(static_module_.num_inputs())) {
       values_[idx] = IValue();
     }
   }
+
+  IValue move_outputs_to_tuple(uint32_t num_outputs);
 
   void create_memory_planner();
 
@@ -420,8 +419,6 @@ class TORCH_API StaticRuntime {
   void display_nodes(
       const std::vector<c10::IValue>& args,
       const std::unordered_map<std::string, c10::IValue>& kwargs);
-
-  IValue move_outputs_to_tuple(uint32_t num_outputs);
 
   // Memory planning is only enabled if sm->opts().cleanup_activations is true.
   // Otherwise, the memory used by activations is cached inside the static
@@ -443,11 +440,10 @@ class TORCH_API ProcessedNode {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   ProcessedNode() = default;
-
   // ProcessedNodes are created within StaticModule and then
   // associated with a shared values array using set_values() when
   // they are copied into a StaticRuntime.
-  ProcessedNode(Node* n, ProcessedNodeInputs inputs, uint16_t outputs_offset, bool enable_out_variant);
+  ProcessedNode(Node* n, ProcessedNodeInputs inputs, uint16_t outputs_offset, bool enable_out_variant, bool check_memory_overlap);
 
   ProcessedNode(const ProcessedNode&) = default;
   ProcessedNode& operator=(const ProcessedNode&) = default;
@@ -502,13 +498,27 @@ class TORCH_API ProcessedNode {
     return fn_.kind == FunctionKind::kNativeFunction;
   }
 
-  bool verify_no_memory_overlap() const;
-
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   const char* get_op_name() const {
     return op_name_;
   }
 #endif
+
+  bool verify_no_memory_overlap() const;
+
+  bool check_outputs_for_memory_overlap() const {
+    return fn_.check_memory_overlap_;
+  }
+
+  void set_outputs_memory_overlap_detected() {
+    fn_.overlap_detected_ = true;
+  }
+
+  bool outputs_memory_overlap_detected() {
+    return fn_.overlap_detected_;
+  }
+
+  void verify_and_correct_memory_overlap();
 
   void set_values(IValue* values) {
     DCHECK(values_ == nullptr);
@@ -524,7 +534,7 @@ class TORCH_API ProcessedNode {
   C10_NODISCARD bool verify_inputs_dont_overlap_outputs() const;
 
   Node* node_;
-  enum class FunctionKind {
+  enum class FunctionKind : uint8_t {
     kOutVariant,
     kNativeFunction,
     kInterpreterFallback,
@@ -532,6 +542,8 @@ class TORCH_API ProcessedNode {
   struct Function {
     std::function<void(ProcessedNode*)> f;
     FunctionKind kind = FunctionKind::kOutVariant;
+    bool check_memory_overlap_{false};
+    bool overlap_detected_{false};
   };
   Function fn_;
   ProcessedNodeInputs inputs_;
