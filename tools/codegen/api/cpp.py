@@ -305,3 +305,72 @@ def arguments(
             has_tensor_options=arguments.tensor_options is not None,
             cpp_no_default_args=cpp_no_default_args)
     ]
+
+# map the C++ code to convert an ivalue to different types, based on schema type
+TYPE_CONVERSION = {
+        BaseTy.Generator: {
+            "default": "({}).toGenerator(),",
+            "optional": "({}).toOptional<at::Generator>(),"
+        },
+        BaseTy.ScalarType: {
+            "default": "({}).toScalarType(),",
+            "optional": "({}).toOptional<ScalarType>(),"
+        },
+        BaseTy.Tensor: {
+            "default": "({}).toTensor(),",
+            "optional": "toOptionalTensor({}),",
+            "list": "({}).toTensorList()->elements(),",
+        },
+        BaseTy.int: {
+            "default": "({}).toInt(),",
+            "optional": "({}).toOptional<int64_t>(),",
+            "list": "({}).toIntList()->elements(),",
+        },
+        BaseTy.Dimname: {
+            "default": "({}).toDimname(),",
+            "optional": "({}).toOptional<at::Dimname>(),",
+        },
+        BaseTy.float: {
+            "default": "({}).toDouble(),",
+            "optional": "({}).toOptional<double>(),",
+            "list": "({}).toDoubleList()->elements(),",
+        },
+        BaseTy.str: {
+            "default": "({}).toString()->string(),",
+            "optional": "({}).toOptional<c10::string_view>(),",
+        },
+        BaseTy.bool: {
+            "default": "({}).toBool(),",
+            "optional": "({}).toOptional<bool>(),",
+            "list": "({}).toBoolList()->elements(),",
+        },
+        BaseTy.layout: {
+            "default": "({}).toLayout(),",
+            "optional": "({}).toOptional<bool>(),",
+            "list": "({}).toBoolList()->elements(),",
+        },
+        BaseTy.Device: {
+            "default": "({}).toDevice(),",
+            "optional": "({}).toOptional<c10::Device>(),",
+        },
+        BaseTy.Scalar: {
+            "default": "({}).toScalar(),",
+            "optional": "({}).toOptional<at::Scalar>(),",
+        },
+        BaseTy.MemoryFormat: {
+            "default": "({}).toMemoryFormat(),",
+            "optional": "({}).toOptional<at::MemoryFormat>(),",
+        },
+        BaseTy.QScheme: {
+            "default": "({}).toQScheme(),",
+            "optional": "({}).toOptional<at::QScheme>(),",
+        },
+        BaseTy.Storage: {
+            "default": "({}).toStorage(),",
+            "optional": "({}).toOptional<at::Storage>(),",
+        },
+        BaseTy.Stream: {
+            "default": "({}).toStream(),",
+            "optional": "({}).toOptional<c10::Stream>(),",
+        },
+    }
