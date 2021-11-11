@@ -579,13 +579,15 @@ class TestCase:
         if len(error_elements) > 0:
             # We are only expecting 1 element here
             error_element = error_elements[0]
-            self.unexpected_success = error_element.attributes['type'].value == 'UnexpectedSuccess'
+            self.unexpected_success = (error_element.hasAttribute('type') and
+                                       error_element.attributes['type'].value == 'UnexpectedSuccess')
             self.errored = not self.unexpected_success
         skipped_elements = dom.getElementsByTagName('skipped')
         if len(skipped_elements) > 0:
             # We are only expecting 1 element here
             skipped_element = skipped_elements[0]
-            self.expected_failure = skipped_element.attributes['type'].value == 'XFAIL'
+            self.expected_failure = (skipped_element.hasAttribute('type') and
+                                     skipped_element.attributes['type'].value == 'XFAIL')
             self.skipped = not self.expected_failure
         self.failed = len(dom.getElementsByTagName('failure')) > 0
 
@@ -749,19 +751,22 @@ def process_intentional_test_runs(runs: List[TestCase]) -> Tuple[int, int]:
             num_skipped += 1
         else:
             num_pass += 1
-    # err_msg = f'Warning: unintentional test case duplicates found for {test_run.name} in suite  {test_run.class_name}.'
-    # THE BELOW ARE ONLY APPLICABLE WHEN REPORT_ONLY IS TRUE
-    # if num_fail + num_errored + num_unexpected_success < 1:
-    #     raise RuntimeWarning(f'{err_msg} Intentional reruns are only triggered when the first run fails or errors, but'
-    #                          ' we found no failures nor errors.')
-    # if num_unexpected_success + num_expected_fail < 1:
-    #     raise RuntimeWarning(f'{err_msg} Intentional reruns should raise at least one unexpected success or expected '
-    #                          'failure, but none have been found.')
-    # if num_pass != num_unexpected_success:
-    #     raise RuntimeWarning(f'{err_msg} Every success in an intentional rerun is shadowed by one unexpected success.'
-    #                          f'However, successes = {num_pass} and unexpected successes = {num_unexpected_success}')
-    # if num_skipped > 0:
-    #     raise RuntimeWarning(f'{err_msg} No skips should occur in intentional reruns, but skips = {num_skipped}')
+    err_msg = f'Warning: unintentional test case duplicates found for {test_run.name} in suite  {test_run.class_name}.'
+    report_only = os.getenv('PYTORCH_OVERRIDE_FLAKY_SIGNAL') != '1'
+    if report_only and num_fail + num_errored + num_unexpected_success < 1 or not report_only and num_expected_fail < 1:
+        raise RuntimeWarning(f'{err_msg} Intentional reruns are only triggered when the first run fails or errors, but'
+                             ' we found no failures nor errors.')
+    if num_unexpected_success + num_expected_fail < 1:
+        raise RuntimeWarning(f'{err_msg} Intentional reruns should raise at least one unexpected success or expected '
+                             'failure, but none have been found.')
+    if report_only and num_pass != num_unexpected_success:
+        raise RuntimeWarning(f'{err_msg} Every success in an intentional rerun is shadowed by one unexpected success.'
+                             f'However, successes = {num_pass} and unexpected successes = {num_unexpected_success}')
+    if not report_only and num_pass > 1:
+        raise RuntimeWarning(f'{err_msg} There should be at most 1 successful run in an intentional rerun that stops at'
+                             f' first success. The number of successful runs = {num_pass}')
+    if num_skipped > 0:
+        raise RuntimeWarning(f'{err_msg} No skips should occur in intentional reruns, but skips = {num_skipped}')
     return max(num_unexpected_success, num_pass), num_fail + num_expected_fail + num_errored
 
 
@@ -779,7 +784,6 @@ def assemble_flaky_test_stats(duplicated_tests_by_file: Dict[str, DuplicatedDict
                         "num_green": num_green,
                         "num_red": num_red
                     })
-    print(flaky_tests)
     if len(flaky_tests) > 0:
         register_rds_schema("flaky_tests", schema_from_sample(flaky_tests[0]))
         rds_write("flaky_tests", flaky_tests, only_on_master=False)
