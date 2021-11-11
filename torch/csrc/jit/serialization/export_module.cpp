@@ -246,7 +246,8 @@ std::pair<IValue, IValue> getFunctionTuple(
           "__torch__ types other than torchbind (__torch__.torch.classes)"
           "are not supported in lite interpreter. ",
           "Workaround: instead of using arbitrary class type (class Foo()), ",
-          "define a pytorch class (class Foo(torch.nn.Module)).");
+          "define a pytorch class (class Foo(torch.nn.Module)). The problematic type is: ",
+          type_str);
     }
     types.emplace_back(type_str);
   }
