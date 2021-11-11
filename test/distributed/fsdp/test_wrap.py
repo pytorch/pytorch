@@ -280,6 +280,8 @@ class TestAutoWrap(TestCase):
         # outermost instance and skip the sharding.
         if wrap_method == WrapMethod.WRAP_API:
             self.assertTrue(isinstance(model, nn.ModuleList))
+        else:
+            self.assertTrue(isinstance(model, FSDP))
         self.assertTrue(isinstance(model[0], nn.Linear))
         self.assertTrue(isinstance(model[1], nn.Linear))
 
@@ -302,6 +304,8 @@ class TestAutoWrap(TestCase):
 
         if wrap_method == WrapMethod.WRAP_API:
             self.assertTrue(isinstance(model, nn.ModuleList))
+        else:
+            self.assertTrue(isinstance(model, FSDP))
         self.assertTrue(isinstance(model[0], FSDP))
 
     @parametrize("wrap_method", [WrapMethod.FSDP_CTOR, WrapMethod.WRAP_API])
