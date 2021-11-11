@@ -83,10 +83,9 @@ std::vector<std::vector<int64_t>> compute_shape_std(const at::Tensor & self, c10
   if (dim.has_value()) {
     auto sizes = self.sizes().vec();
     if (keepdim) {
-      for (auto reduce_dim:  dim.value()) {
+      for (auto reduce_dim: dim.value()) {
         sizes[at::maybe_wrap_dim(reduce_dim, self)] = 1;
       }
-      return {sizes};
     } else {
       std::vector<int64_t> reduce_dims(dim.value().begin(), dim.value().end());
       at::maybe_wrap_dims(reduce_dims, self.sizes().size());
@@ -95,6 +94,7 @@ std::vector<std::vector<int64_t>> compute_shape_std(const at::Tensor & self, c10
         sizes.erase(sizes.begin() + reduce_dim);
       }
     }
+    return {sizes};
   }
   return {{}};
 }
