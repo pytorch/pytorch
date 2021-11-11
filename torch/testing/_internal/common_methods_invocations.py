@@ -2967,30 +2967,17 @@ def sample_inputs_unique_consecutive(*args, **kwargs):
     return list(generator())
 
 def sample_inputs_index_fill(op_info, device, dtype, requires_grad, **kwargs):
-    samples = []
-    t = make_tensor((S, S, S), device, dtype,
-                    low=None, high=None,
-                    requires_grad=requires_grad)
-    fill_val = torch.tensor(-1 + 1j if t.is_complex() else -1)
-    # non-contiguous input
-    t01 = t.transpose(0, 1)
-    t02 = t.transpose(0, 2)
-    t12 = t.transpose(1, 2)
-    idx = index_variable(1, S, device=device)
-    # non-contiguous index
-    idx_nonctg = torch.empty_strided((S,), (2,), device=device, dtype=torch.int64)
-    idx_nonctg.copy_(idx)
-    for d in range(t.dim()):
-        for tensor in [t, t01, t02, t12]:
-            samples.append(SampleInput(tensor.detach().clone().requires_grad_(requires_grad),
-                                       args=(d, idx, fill_val)))
-            samples.append(SampleInput(tensor.detach().clone().requires_grad_(requires_grad),
-                                       args=(d, -idx - 1, fill_val)))
-            samples.append(SampleInput(tensor.detach().clone().requires_grad_(requires_grad),
-                                       args=(d, idx_nonctg, fill_val)))
-
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     index_tensor = partial(torch.tensor, device=device, dtype=torch.long)
+
+    samples = []
+    fill_val = torch.tensor(-1 + 1j if dtype.is_complex else -1)
+    idx = index_variable(1, S, device=device)
+    ndim = 3
+    for d in range(ndim):
+        samples.append(SampleInput(make_arg((S,) * ndim), args=(d, idx, fill_val)))
+        samples.append(SampleInput(make_arg((S,) * ndim), args=(d, -idx - 1, fill_val)))
+
 
     def unique_idx(numel, max_idx):
         # Generate unique random indices vector of `numel`
@@ -3857,6 +3844,7 @@ def sample_movedim_moveaxis(op_info, device, dtype, requires_grad):
 
 
 def sample_repeat_tile(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
     rep_dims = ((), (0, ), (1, ), (0, 2), (1, 1), (2, 3), (2, 3, 2), (0, 2, 3), (2, 1, 1, 1),)
     shapes = ((), (0,), (2,), (3, 0), (3, 2), (3, 0, 1))
 
@@ -3867,21 +3855,13 @@ def sample_repeat_tile(op_info, device, dtype, requires_grad, **kwargs):
         rep_dims = ((), (0, ), (0, 2), (1, 1), (2, 3), (1, 3, 2), (3, 1, 1))  # type: ignore[assignment]
         shapes = ((), (0,), (2,), (3, 2))  # type: ignore[assignment]
 
-    tensors = [make_tensor(shape, device, dtype,
-                           low=None, high=None,
-                           requires_grad=requires_grad) for shape in shapes]
-
     samples = []
-    for rep_dim, tensor in product(rep_dims, tensors):
-        for t in (tensor, tensor.detach().clone().T.requires_grad_(requires_grad)):
-            if op_info.name == 'repeat' and len(rep_dim) >= t.dim():
-                # `torch.repeat` errors for `len(rep_dims) < t.dim()`,
-                # so we filter such combinations.
-                samples.append(SampleInput(t.detach().clone().requires_grad_(requires_grad),
-                                           args=(rep_dim,),))
-            elif op_info.name == 'tile':
-                samples.append(SampleInput(t.detach().clone().requires_grad_(requires_grad),
-                                           args=(rep_dim,),))
+    for rep_dim, shape in product(rep_dims, shapes):
+        # `torch.repeat` errors for `len(rep_dims) < t.dim()`,
+        # so we filter such combinations.
+        if op_info.name == 'repeat' and len(rep_dim) < len(shape):
+            continue
+        samples.append(SampleInput(make_arg(shape), args=(rep_dim,),))
 
     return samples
 
