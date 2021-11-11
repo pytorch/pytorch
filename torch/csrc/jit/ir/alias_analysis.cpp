@@ -598,7 +598,7 @@ void AliasDb::analyzeImpl(Node* node) {
         oss << input->type()->str() << ", ";
       }
       oss << "\n\nCandidates:";
-      const auto candidates = getAllOperatorsFor(node->kind());
+      const auto& candidates = getAllOperatorsFor(node->kind());
       for (const auto& candidate : candidates) {
         oss << "\n\t" << candidate->schema();
       }
