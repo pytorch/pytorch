@@ -1,5 +1,6 @@
 import torch
 from .grad_mode import _DecoratorContextManager
+from collections import namedtuple
 
 from typing import Any
 
@@ -67,12 +68,23 @@ def make_dual(tensor, tangent, *, level=None):
 
     return torch._VF._make_dual(tensor, tangent, level=level)
 
+UnpackedDualTensor = namedtuple('UnpackedDualTensor', ['primal', 'tangent'])
+
 def unpack_dual(tensor, *, level=None):
-    r"""Function that unpacks a "dual object" to recover two plain tensors, one representing
-    the primal and the other the tangent (both are views of :attr:`tensor`. Neither of these
-    tensors can be dual tensor of level :attr:`level`.
+    r"""Unpacks a "dual object" to return a namedtuple ``(primal, tangent)`` where
+    ``primal`` is a view of :attr:`tensor`'s primal and ``tangent`` is
+    :attr:`tensor`'s tangent. Neither of these tensors can be dual tensor of level
+    :attr:`level`.
 
     This function is backward differentiable.
+
+    Example::
+
+        >>> with dual_level():
+        ...   inp = make_dual(x, x_t)
+        ...   out = f(inp)
+        ...   y, jvp = unpack_dual(out)
+        ...   jvp = unpack_dual(out).tangent
     """
     if level is None:
         level = _current_level
@@ -80,7 +92,9 @@ def unpack_dual(tensor, *, level=None):
     if level < 0:
         return tensor, None
 
-    return torch._VF._unpack_dual(tensor, level=level)
+    primal, dual = torch._VF._unpack_dual(tensor, level=level)
+
+    return UnpackedDualTensor(primal, dual)
 
 class dual_level(_DecoratorContextManager):
     r"""Context-manager that controls the current forward ad level. It
