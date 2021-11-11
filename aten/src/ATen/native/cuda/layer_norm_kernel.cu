@@ -452,6 +452,93 @@ __global__ void GammaBetaBackwardCUDAKernel(
   }
 }
 
+
+
+
+template <typename T, typename T_ACC>
+__global__ void GammaBetaBackwardCUDAKernel1(
+    int64_t M,
+    int64_t N,
+    const T* dY,
+    const T* X,
+    const T_ACC* mean,
+    const T_ACC* rstd,
+    T* dg,
+    T* db) {
+  alignas(sizeof(double)) extern __shared__ char s_data1[];
+  T_ACC * s_data_typed = reinterpret_cast<T_ACC*>(&s_data1);
+  const int64_t j = blockIdx.x * blockDim.x + threadIdx.x;
+  T_ACC dg_sum1 = 0;
+  T_ACC dg_sum2 = 0;
+  T_ACC db_sum1 = 0;
+  T_ACC db_sum2 = 0;
+  constexpr int unroll = 8;
+  T dYs[unroll];
+  T Xs[unroll];
+  T_ACC *  means = s_data_typed;
+  T_ACC * rstds = s_data_typed + unroll * blockDim.y;
+  T_ACC dg_sum = 0;
+  T_ACC db_sum = 0;
+  if (j < N) {
+    int bcounter;
+    for (bcounter = 0; bcounter < M/(blockDim.y * unroll); bcounter++){
+      int offset = (bcounter * blockDim.y + threadIdx.y) * unroll;
+      #pragma unroll
+      for (int ii=0; ii<unroll; ii++){
+        if (threadIdx.x == 0) {
+          means[ii*blockDim.y + threadIdx.y] = mean[offset + ii];
+          rstds[ii*blockDim.y + threadIdx.y] = rstd[offset + ii];
+        }
+        dYs[ii] = dY[(offset + ii) * N + j ];
+        Xs[ii] = X[(offset + ii) * N + j];
+
+      }
+      __syncthreads();
+      #pragma unroll
+      for (int ii=0; ii<unroll; ii++){
+        dg_sum += dYs[ii] * (Xs[ii] - means[ii*blockDim.y + threadIdx.y]) * rstds[ii * blockDim.y + threadIdx.y];
+        db_sum += dYs[ii];
+      }
+      __syncthreads();
+    }
+    int offset = (bcounter * blockDim.y + threadIdx.y) * unroll;
+    for (int ii = 0; ii<8; ii++ ){
+      T_ACC mean_val, rstd_val; // we don't use smem in the tail to avoid awkward synchronizations, perf penalty is negligible
+      if ((offset + ii) < M) {
+        mean_val = mean[offset+ii];
+        rstd_val = rstd[offset+ii];
+        dYs[0] = dY[(offset + ii) * N + j ];
+        Xs[0] = X[(offset + ii) * N + j];
+        dg_sum += dYs[0] * (Xs[0] - mean_val) * rstd_val;
+        db_sum += dYs[0];
+      }
+    }
+    s_data_typed[threadIdx.y * blockDim.x + threadIdx.x] = dg_sum;
+    s_data_typed[blockDim.x * blockDim.y + threadIdx.y * blockDim.x + threadIdx.x] = db_sum;
+    __syncthreads();
+    for (int offset = blockDim.y/2; offset >=1; offset /= 2){
+      if (threadIdx.y < offset) {
+        s_data_typed[threadIdx.y * blockDim.x + threadIdx.x] += s_data_typed[(threadIdx.y + offset) * blockDim.x + threadIdx.x];
+        s_data_typed[blockDim.x * blockDim.y + threadIdx.y * blockDim.x + threadIdx.x] +=
+        s_data_typed[blockDim.x * blockDim.y + (threadIdx.y + offset) * blockDim.x + threadIdx.x];
+      }
+      __syncthreads();
+    }
+    if (threadIdx.y == 0) {
+      if (dg) {
+        dg[j] = s_data_typed[threadIdx.x];
+      }
+      if (db) {
+        db[j] = s_data_typed[threadIdx.x + blockDim.x * blockDim.y];
+      }
+    }
+  }
+}
+
+
+
+
+
 template <typename T, typename T_ACC>
 //typename std::enable_if<!std::is_same<>::type* = nullptr>
 void launch_vectorized_layer_norm_kernel(
@@ -624,12 +711,15 @@ void LayerNormBackwardKernelImplInternal(
               dbeta_data);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
-      const int64_t B =
-          (N + kColwiseReduceTileSize - 1) / kColwiseReduceTileSize;
-      constexpr int kThreadX = kColwiseReduceTileSize;
-      constexpr int kThreadY = kColwiseReduceTileSize / 2;
-      GammaBetaBackwardCUDAKernel<T, T_ACC>
-          <<<B, dim3(kThreadX, kThreadY), 0, cuda_stream>>>(
+      // const int64_t B =
+      //     (N + kColwiseReduceTileSize - 1) / kColwiseReduceTileSize;
+      // constexpr int kThreadX = kColwiseReduceTileSize;
+      // constexpr int kThreadY = kColwiseReduceTileSize / 2;
+      dim3 threads{16, 32};
+      int blocks = N/threads.x;
+      GammaBetaBackwardCUDAKernel1<T, T_ACC>
+//          <<<B, dim3(kThreadX, kThreadY), 0, cuda_stream>>>(
+          <<<blocks, threads, 2 * sizeof(T_ACC) * threads.x * threads.y, cuda_stream>>>(
               M,
               N,
               dY_data,
