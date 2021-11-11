@@ -3661,6 +3661,90 @@ class TestQuantizedEmbeddingOps(TestCase):
         torch.testing.assert_close(result, qresult, atol=0.05, rtol=1e-3)
 
 
+class TestDynamicQuantizedConv(TestCase):
+    def _test_qconv_helper(self, q_mod, dq_mod, dim, q_engine, dtype):
+        X_fp32 = torch.randn(*([3]*dim))
+        torch.backends.quantized.engine = q_engine
+        if q_engine == 'qnnpack':
+            reduce_range = False
+        else:
+            reduce_range=True
+        s, z = _calculate_dynamic_qparams(X_fp32, dtype, reduce_range)
+        X_q = torch.quantize_per_tensor(X_fp32, s, z, dtype)
+        X_dq = torch.dequantize(X_q)
+        quantized_module = q_mod(3, 10, 2)
+        dynamic_module = dq_mod(3, 10, 2)
+
+        quantized_module.scale, quantized_module.zero_point = s, z
+        dynamic_module.set_weight_bias(*quantized_module._weight_bias())
+
+        Y_q_ref = quantized_module(X_q)
+        Y_ref = torch.dequantize(Y_q_ref)
+
+        Y = dynamic_module(X_dq, reduce_range)
+
+        self.assertEqual(Y, Y_ref)
+
+    def test_dynamic_conv1d(self):
+        q_mod = torch.nn.quantized.Conv1d
+        dq_mod = torch.nn.quantized.dynamic.Conv1d
+        dim = 3
+        dtype = torch.quint8
+
+        for q_engine in ["fbgemm", "qnnpack"]:
+            for i in range(10):
+                self._test_qconv_helper(q_mod, dq_mod, dim, q_engine, dtype)
+
+
+    def test_dynamic_conv2d(self):
+        q_mod = torch.nn.quantized.Conv2d
+        dq_mod = torch.nn.quantized.dynamic.Conv2d
+        dim = 4
+        dtype = torch.quint8
+
+        for q_engine in ["fbgemm", "qnnpack"]:
+            self._test_qconv_helper(q_mod, dq_mod, dim, q_engine, dtype)
+
+    def test_dynamic_conv3d(self):
+        q_mod = torch.nn.quantized.Conv3d
+        dq_mod = torch.nn.quantized.dynamic.Conv3d
+        dim = 5
+        dtype = torch.quint8
+
+        for q_engine in ["fbgemm"]: #  qnnpack doesn't support unpacking conv3d
+            for i in range(10):
+                self._test_qconv_helper(q_mod, dq_mod, dim, q_engine, dtype)
+
+    def test_dynamic_convtranspose1d(self):
+        q_mod = torch.nn.quantized.ConvTranspose1d
+        dq_mod = torch.nn.quantized.dynamic.ConvTranspose1d
+        dim = 3
+        dtype = torch.quint8
+
+        for q_engine in ["fbgemm", "qnnpack"]:
+            for i in range(10):
+                self._test_qconv_helper(q_mod, dq_mod, dim, q_engine, dtype)
+
+    def test_dynamic_convtranspose2d(self):
+        q_mod = torch.nn.quantized.ConvTranspose2d
+        dq_mod = torch.nn.quantized.dynamic.ConvTranspose2d
+        dim = 4
+        dtype = torch.quint8
+
+        for q_engine in ["fbgemm", "qnnpack"]:
+            for i in range(10):
+                self._test_qconv_helper(q_mod, dq_mod, dim, q_engine, dtype)
+
+    def test_dynamic_convtranspose3d(self):
+        q_mod = torch.nn.quantized.ConvTranspose3d
+        dq_mod = torch.nn.quantized.dynamic.ConvTranspose3d
+        dim = 5
+        dtype = torch.quint8
+
+        for q_engine in ["fbgemm"]: #  qnnpack doesn't support unpacking conv3d
+            for i in range(10):
+                self._test_qconv_helper(q_mod, dq_mod, dim, q_engine, dtype)
+
 class TestQuantizedConv(TestCase):
     def _test_qconv_unpack_impl(self, qconv_prepack_fn, qconv_unpack_fn, inputs,
                                 strides, i_pads, o_pads, channelwise):
@@ -4007,6 +4091,9 @@ class TestQuantizedConv(TestCase):
             Y_scale, Y_zero_point, use_bias, use_relu=False,
             use_channelwise=False, use_transpose=True)
 
+        # check that this doesn't error
+        torch.nn.quantized.ConvTranspose1d(input_channels, output_channels, 1)
+
         # Test the module implementation
         qconv_op = torch.nn.quantized.ConvTranspose1d(
             in_channels=input_channels,
@@ -4112,6 +4199,9 @@ class TestQuantizedConv(TestCase):
             dilations, X_scale, X_zero_point, W_scale, W_zero_point,
             Y_scale, Y_zero_point, use_bias, use_relu=False,
             use_channelwise=False, use_transpose=True)
+
+        # check that this doesn't error
+        torch.nn.quantized.ConvTranspose2d(input_channels, output_channels, 1)
 
         # Test the module implementation
         qconv_op = torch.nn.quantized.ConvTranspose2d(
@@ -4228,6 +4318,9 @@ class TestQuantizedConv(TestCase):
             dilations, X_scale, X_zero_point, W_scale, W_zero_point,
             Y_scale, Y_zero_point, use_bias, use_relu=False,
             use_channelwise=False, use_transpose=True)
+
+        # check that this doesn't error
+        torch.nn.quantized.ConvTranspose3d(input_channels, output_channels, 1)
 
         # Test the module implementation
         qconv_op = torch.nn.quantized.ConvTranspose3d(
