@@ -41,6 +41,8 @@ full_codegen:
   - log_sigmoid_backward
   - log_sigmoid_forward
   - lt.Tensor
+  - masked_fill_.Scalar
+  - masked_fill_.Tensor
   - mean
   - mean.dim
   - mm

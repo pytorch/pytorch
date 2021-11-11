@@ -51,6 +51,19 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
+std::vector<std::vector<int64_t>> compute_shape_masked_fill(at::Tensor & self, const at::Tensor & mask, const at::Scalar & value) {
+  return {self.sizes().vec()};
+}
+std::vector<c10::ScalarType> compute_dtype_masked_fill(at::Tensor & self, const at::Tensor & mask, const at::Scalar & value) {
+  return {self.scalar_type()};
+}
+std::vector<std::vector<int64_t>> compute_shape_masked_fill(at::Tensor & self, const at::Tensor & mask, const at::Tensor & value) {
+  return {self.sizes().vec()};
+}
+std::vector<c10::ScalarType> compute_dtype_masked_fill(at::Tensor & self, const at::Tensor & mask, const at::Tensor & value) {
+   return {self.scalar_type()};
+}
+
 std::vector<std::vector<int64_t>> compute_shape_embedding(const at::Tensor & weight, const at::Tensor & indices, int64_t padding_idx, bool scale_grad_by_freq, bool sparse){
   // Based on aten/src/ATen/native/Embedding.cpp::embedding.
   std::vector<int64_t> out_sizes = indices.sizes().vec();
