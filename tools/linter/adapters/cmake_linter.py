@@ -5,10 +5,9 @@ import logging
 import os
 import re
 import subprocess
-import sys
 import time
 from enum import Enum
-from typing import Any, Dict, List, NamedTuple, Optional, Pattern
+from typing import List, NamedTuple, Optional, Pattern
 
 
 LINTER_CODE = "CMAKE"
