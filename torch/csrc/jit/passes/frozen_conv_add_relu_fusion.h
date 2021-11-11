@@ -6,7 +6,7 @@
 namespace torch {
 namespace jit {
 
-extern std::function<void(std::shared_ptr<Graph>&)> _fuseFrozenConvAddReluImpl;
+TORCH_API extern std::function<void(std::shared_ptr<Graph>&)> _fuseFrozenConvAddReluImpl;
 
 TORCH_API void FuseFrozenConvAddRelu(std::shared_ptr<Graph>& graph);
 
