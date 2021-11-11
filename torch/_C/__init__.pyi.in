@@ -603,8 +603,8 @@ def _get_warnAlways() -> _bool: ...  # THPModule_warnAlways
 def _set_warnAlways(arg: _bool) -> None: ...  # THPModule_setWarnAlways
 def _get_cudnn_allow_tf32() -> _bool: ...  # THPModule_allowTF32CuDNN
 def _set_cudnn_allow_tf32(arg: _bool) -> None: ...  # THPModule_setAllowTF32CuDNN
-def _get_linalg_preferred_backend() -> _bool: ...  # THPModule_linalgPreferredBackend
-def _set_linalg_preferred_backend(arg: _bool) -> None: ...  # THPModule_setLinalgPreferredBackend
+def _get_linalg_preferred_backend() -> torch.linalg_backend: ...  # THPModule_linalgPreferredBackend
+def _set_linalg_preferred_backend(arg: torch.linalg_backend) -> None: ...  # THPModule_setLinalgPreferredBackend
 def _get_cublas_allow_tf32() -> _bool: ...  # THPModule_allowTF32CuBLAS
 def _set_cublas_allow_tf32(arg: _bool) -> None: ...  # THPModule_setAllowTF32CuBLAS
 def _get_cublas_allow_fp16_reduced_precision_reduction() -> _bool: ... #THPModule_allowFP16ReductionCuBLAS
