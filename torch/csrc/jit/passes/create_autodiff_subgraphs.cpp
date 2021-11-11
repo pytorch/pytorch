@@ -73,17 +73,21 @@ class SubgraphSlicer {
     bool any_changed = true;
 
     while(any_changed) {
-
+        any_changed = false;
         while (curNode != *block_->nodes().rend()) {
           // Save the previous node, since we might delete `curNode` in next block
           auto prevNode = curNode->prev();
           if (curNode->kind() == prim::DifferentiableGraph) {
+
+            
+            
+            any_changed = unfuseAliasedOutputs(curNode);
+
             // Inlining nodes may cause some subexpression to come back in the
             // subgraphs (for example, copying constants in repeatedly will generate
             // redundant prim::Constants). Run CSE to clean them up.
             EliminateCommonSubexpression(curNode->g(attr::Subgraph));
-
-            any_changed = unfuseAliasedOutputs(curNode);
+            
 
             // don't try inlining until we unfuse all unaliased outputs
             if (!any_changed && !inlineIfTooSmall(curNode)) {
@@ -251,14 +255,38 @@ class SubgraphSlicer {
       } 
     }
 
+    WithInsertPoint wip(subgraphNode->next());
+
     // these node inputs need to be added to subgraph's outputs
     // put them in vmap
     for (auto ni : node_inputs) {
-      subgraph->registerOutput(ni);
-      auto sno = subgraphNode->addOutput();
-      sno->setType(ni->type());
-      GRAPH_DEBUG("Mapping %", ni->debugName(), " to %", sno->debugName());
-      local_map[ni] = sno;
+
+      if (local_map.count(ni) != 0) {
+        // this could happen if `n` uses two or more outputs
+        // of a constant node and we already clone the constant
+        // into the outer graph and mapped its outputs
+        continue;
+      }
+
+      Value* sno = nullptr;
+      if (ni->node()->kind() == prim::Constant) {
+        auto copy = subgraphNode->owningGraph()->createClone(ni->node(), env);
+        subgraphNode->owningGraph()->insertNode(copy);
+        // in case we have a multi-output const, map the rest of the outputs
+        // so we get to clone `n`, `n`'s clone will use the outputs of the 
+        // constant clone
+        for (auto i : c10::irange(n->outputs().size())) {
+          GRAPH_DEBUG("Mapping %", ni->node()->output(i)->debugName(), " to %", copy->output(i)->debugName());
+          local_map[ni->node()->output(i)] = copy->output(i);
+        }
+      }
+      else {
+        subgraph->registerOutput(ni);
+        sno = subgraphNode->addOutput();
+        sno->setType(ni->type());
+        GRAPH_DEBUG("Mapping %", ni->debugName(), " to %", sno->debugName());
+        local_map[ni] = sno;
+      }
     }
 
     auto copy = subgraphNode->owningGraph()->createClone(n, env);
@@ -272,11 +300,7 @@ class SubgraphSlicer {
       local_map[oo] = no;    
     }
 
-    copy->insertAfter(subgraphNode);
-
-    for (auto oi: output_indices) {
-
-    }
+    subgraphNode->owningGraph()->insertNode(copy);
 
     for (auto it = output_indices.rbegin(); it != output_indices.rend(); it++) {
       auto replace_val = local_map[subgraph->outputs().at(*it)];
