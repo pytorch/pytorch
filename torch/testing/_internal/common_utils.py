@@ -1364,7 +1364,11 @@ class RelaxedNumberPair(NumberPair):
                 )
                 return error_meta, None
 
-            return None, number_like.item()
+            number = number_like.item()
+            if isinstance(number, bool):
+                number = int(number)
+
+            return None, number
         # We need this check, because combinations of an int and a bool will not be picked up by the BooleanPair,
         # but will be picked up here since issubclass(bool, int)
         elif isinstance(number_like, bool):
