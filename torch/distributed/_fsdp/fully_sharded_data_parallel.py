@@ -23,6 +23,8 @@ from torch.distributed.distributed_c10d import _get_default_group
 from torch.nn.parameter import Parameter
 
 from .flatten_params_wrapper import FlattenParamsWrapper
+from .wrap import ConfigAutoWrap
+
 from .utils import (
     _apply_to_tensors,
 )
@@ -95,16 +97,52 @@ class FullyShardedDataParallel(nn.Module):
             params and grads to be on same device to work with optimizer. This
             API is subject to change. Default is ``None`` in which case there
             will be no offloading.
+        auto_wrap_policy: (Optional [callable]):
+            A callable specifying a policy to recursively wrap layers with FSDP.
     """
 
     def __init__(
         self,
         module: nn.Module,
         process_group: Optional[ProcessGroup] = None,
-        cpu_offload: Optional[CPUOffload] = None
+        cpu_offload: Optional[CPUOffload] = None,
+        fsdp_auto_wrap_policy: Optional[callable] = None,
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
+        # rank = dist.get_rank()
+        # if rank == 0:
+        #     print(f"Call to fsdp")
+        # if fsdp_auto_wrap_policy is specified, submodules should not be wrapped,
+        # otherwise we'd attempt to double wrap them resulting in errors.
+        if fsdp_auto_wrap_policy is not None:
+            self._check_wrapped(
+                module,
+                check_fn=lambda mod: not isinstance(mod, FullyShardedDataParallel),
+                err_fn=lambda mod: f"Expected {mod} to NOT be FullyShardedDataParallel if auto_wrap is enabled.",
+            )
+            config_auto_wrap = ConfigAutoWrap(auto_wrap_policy=fsdp_auto_wrap_policy, wrapper_cls=FullyShardedDataParallel)
+
+            # ConfigAutoWrap.in_autowrap_context = True
+            # ConfigAutoWrap.wrapper_cls = FullyShardedDataParallel
+            # ConfigAutoWrap.auto_wrap_policy = fsdp_auto_wrap_policy
+            with config_auto_wrap:
+                assert ConfigAutoWrap.in_autowrap_context
+                assert ConfigAutoWrap.wrapper_cls == FullyShardedDataParallel
+                assert ConfigAutoWrap.auto_wrap_policy == fsdp_auto_wrap_policy
+                print(" --- asserted ---")
+                wrapped_module, num_params_wrapped = ConfigAutoWrap.recursive_wrap(
+                    module,
+                    auto_wrap_policy=fsdp_auto_wrap_policy,
+                    process_group=process_group,
+                    cpu_offload=cpu_offload,
+                    fsdp_auto_wrap_policy=None,  # Note that we don't propagate it.
+                )
+            assert not ConfigAutoWrap.in_autowrap_context
+            # TODO: it would be good to assert self._check_wrapped to ensure
+            # wrapped_module is wrapped but it may not be due to the policy. We
+            # can apply the policy here and conditionally call _check_wrapped.
+
         self.process_group = process_group or _get_default_group()
         self.rank = self.process_group.rank()
         self.world_size = self.process_group.size()
@@ -163,6 +201,12 @@ class FullyShardedDataParallel(nn.Module):
         if self.cpu_offload.offload_params:
             for p in self.params:
                 self._offload_to_cpu(p)
+
+    @classmethod
+    def _check_wrapped(cls, begin_module, check_fn, err_fn):
+        for _, mod in begin_module.named_modules():
+            if not check_fn(mod):
+                raise ValueError(err_fn(mod))
 
     @property
     def module(self) -> FlattenParamsWrapper:
@@ -480,6 +524,7 @@ class FullyShardedDataParallel(nn.Module):
         self._streams["all_gather"].wait_stream(torch.cuda.current_stream())
 
     def forward(self, *args: Any, **kwargs: Any) -> Any:
+        print(f" --- fsdp forward ----")
         self._lazy_init()
 
         # Start of a forward pass.

@@ -233,7 +233,7 @@ class ConfigAutoWrap:
             )
         ConfigAutoWrap.in_autowrap_context = True
         # Get and save the wrapper cls for the context.
-        assert "wrapper_cls" in kwargs.keys()
+        assert "wrapper_cls" in kwargs.keys(), "Expected to pass in wrapper_cls into ConfigAutoWrap."
         ConfigAutoWrap.wrapper_cls = cast(Callable, kwargs["wrapper_cls"])
         del kwargs["wrapper_cls"]
         # Save the rest.
@@ -274,6 +274,7 @@ class ConfigAutoWrap:
 
         # Make sure no child is not already wrapped.
         for _, child in module.named_modules():
+            # raise ValueError(f"Config auto wrap wrapper_cls is {ConfigAutoWrap.wrapper_cls}")
             assert not isinstance(child, cast(type, ConfigAutoWrap.wrapper_cls))
 
         # We count all params, assuming none of them is already wrapped.

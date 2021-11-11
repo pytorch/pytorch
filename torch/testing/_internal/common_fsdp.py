@@ -321,6 +321,9 @@ class FSDPTest(MultiProcessTestCase):
     def init_method(self):
         return "{}{file_name}".format(FILE_SCHEMA, file_name=self.file_name)
 
+    def _check_cpu_offload(self, fsdp_model, cpu_offload):
+        self.assertEqual(cpu_offload, fsdp_model.cpu_offload)
+
     @classmethod
     def _run(cls, rank, test_name, file_name, pipe):
         self = cls(test_name)
