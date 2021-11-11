@@ -1271,6 +1271,51 @@ class AbstractTestCases:
                 self._test_scatter_base(self, lambda t: t, 'scatter_', reduction=method)
                 self._test_scatter_base(self, lambda t: t, 'scatter_', True, reduction=method)
 
+        def test_scatter_reduce2(self):
+            dtype = device = None
+
+            output_size = 10
+            shape = [5, 10, 20]
+
+            index = torch.randint(0, output_size, shape, dtype=torch.long, device=device)
+            input = torch.randn(shape, dtype=dtype, device=device)
+
+            for dim in range(len(shape)):
+                output = input.scatter_reduce2(dim, index, "sum", output_size=output_size)
+
+                output_shape = copy.copy(shape)
+                output_shape[dim] = output_size
+                self.assertEqual(output.shape, output_shape)
+
+                expected = torch.zeros(output_shape, dtype=dtype, device=device)
+                for i, j, k in itertools.product(range(shape[0]), range(shape[1]), range(shape[2])):
+                    v = input[i, j, k]
+                    m = index[i, j, k]
+
+                    if dim == 0:
+                        i = m
+                    elif dim == 1:
+                        j = m
+                    else:
+                        k = m
+
+                    expected[i, j, k] += v
+
+                self.assertTrue(torch.allclose(output, expected))
+
+                torch.scatter_reduce2(input, dim, index, "sum", out=output)
+                self.assertTrue(torch.allclose(output, expected))
+
+            with self.assertRaisesRegex(RuntimeError, "Expected `dim` to be in range -3 and 2"):
+                torch.scatter_reduce2(input, 4, index, "sum")
+
+            with self.assertRaisesRegex(RuntimeError, "Shape mismatch"):
+                index2 = torch.randint(0, output_size, (10, ), dtype=torch.long, device=device)
+                torch.scatter_reduce2(input, 0, index2, "sum")
+
+            with self.assertRaisesRegex(RuntimeError, "`reduce` argument must be 'sum'"):
+                torch.scatter_reduce2(input, 2, index, "mean")
+
         def test_structseq_repr(self):
             a = torch.arange(250).reshape(5, 5, 10)
             expected = """

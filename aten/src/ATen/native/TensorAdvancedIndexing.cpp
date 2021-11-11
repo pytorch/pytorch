@@ -180,6 +180,9 @@ TORCH_META_FUNC(scatter_reduce2)
  const c10::string_view reduce,
  const c10::optional<int64_t> output_size) {
 
+  TORCH_CHECK(dim >= -self.dim() && dim < self.dim(),
+      "Expected `dim` to be in range ", -self.dim(), " and ", self.dim() - 1, " (got ", dim, ")");
+
   auto sizes = self.sizes().vec();
 
   if (output_size.has_value())
@@ -1287,26 +1290,15 @@ TORCH_IMPL_FUNC(scatter_reduce2_structured_cpu)
  const Tensor& out) {
 
   TORCH_CHECK(self.dim() == index.dim(),
-      "Shape mismatch between `self` (got ", self.sizes(), ") ",
-      "and `index` (got ", index.sizes(), ")");
-  TORCH_CHECK(dim >= -self.dim() && dim < self.dim(),
-      "Expected `dim` to be in range ", -self.dim(), " and ", self.dim() - 1,
-      " (got ", dim, ")");
-
-  dim = dim < 0 ? dim + self.dim() : dim;
-
+      "Shape mismatch between `self` (got ", self.sizes(), ") and `index` (got ", index.sizes(), ")");
   for (int64_t i = 0; i < self.dim(); i++) {
     TORCH_CHECK(self.size(i) == index.size(i),
-        "Shape mismatch between `self` (got ", self.sizes(), ") ",
-        "and `index` (got ", index.sizes(), ")");
-    if (i != dim) {
-      TORCH_CHECK(self.size(i) == out.size(i),
-          "Shape mismatch between `self` (got ", self.sizes(), ") ",
-          "and `out` (got ", index.sizes(), ") in dimension ", i);
-    }
+        "Shape mismatch between `self` (got ", self.sizes(), ") and `index` (got ", index.sizes(), ")");
   }
 
   TORCH_CHECK(reduce == "sum", "`reduce` argument must be 'sum'");
+
+  dim = dim < 0 ? dim + self.dim() : dim;
 
   out.zero_();
   scatter_add_stub(self.device().type(), out, dim, index, self);
