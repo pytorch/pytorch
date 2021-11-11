@@ -6719,6 +6719,34 @@ TEST(NVFuserTest, FusionGridReduction7_CUDA) {
   testValidate(&fusion, out, {input}, {aten_output}, __LINE__, __FILE__);
 }
 
+TEST(NVFuserTest, FusionGridReduction8_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = sum(tv0, {0});
+  fusion.addOutput(tv1);
+
+  tv1->axis(0)->parallelize(ParallelType::BIDx);
+  tv1->axis(1)->parallelize(ParallelType::TIDx);
+
+  const int numel_x = 2;
+  const int numel_y = 4;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input = at::randn({numel_x, numel_y}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto out = fe.runFusion({input});
+
+  auto aten_output = input.sum({0});
+
+  testValidate(&fusion, out, {input}, {aten_output}, __LINE__, __FILE__);
+}
+
 TEST(NVFuserTest, FusionNonRedAxisBind_CUDA) {
   int bid_x = 3;
   int tid_x = 2;
