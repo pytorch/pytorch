@@ -5153,8 +5153,11 @@ def sample_inputs_cross(op_info, device, dtype, requires_grad, **kwargs):
     sample1 = SampleInput(make_tensor((S, 3, S), device=device, dtype=dtype, requires_grad=requires_grad),
                           args=(make_tensor((S, 3, S), device=device, dtype=dtype, requires_grad=requires_grad),),
                           kwargs={'dim': 1})
+    sample2 = SampleInput(make_tensor((S, 3), device=device, dtype=dtype, requires_grad=requires_grad),
+                          args=(make_tensor((S, 3), device=device, dtype=dtype, requires_grad=requires_grad),),
+                          kwargs={'dim': -1})
 
-    return (sample0, sample1)
+    return (sample0, sample1, sample2)
 
 def sample_inputs_cumprod(op_info, device, dtype, requires_grad, **kwargs):
     def make_arg(shape):
@@ -8047,12 +8050,16 @@ op_db: List[OpInfo] = [
            dtypesIfCPU=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.half),
            sample_inputs_func=sample_inputs_cross,
-           supports_forward_ad=True,
-           skips=(
-               # AssertionError: UserWarning not triggered :
-               # Resized a non-empty tensor but did not warn about it.
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out'),
-           )),
+           supports_forward_ad=True),
+    OpInfo('linalg.cross',
+           ref=lambda x, y, dim=-1: np.cross(x, y, axis=dim),
+           op=torch.linalg.cross,
+           dtypes=all_types_and_complex(),
+           dtypesIfCPU=all_types_and_complex_and(torch.bfloat16),
+           dtypesIfCUDA=all_types_and_complex_and(torch.half),
+           aten_name='linalg_cross',
+           sample_inputs_func=sample_inputs_cross,
+           supports_forward_ad=True),
     OpInfo('cumsum',
            dtypesIfCPU=all_types_and_complex(),
            dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),

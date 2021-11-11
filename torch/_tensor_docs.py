@@ -1025,7 +1025,7 @@ See :func:`torch.corrcoef`
 
 add_docstr_all('cross',
                r"""
-cross(other, dim=-1) -> Tensor
+cross(other, dim=None) -> Tensor
 
 See :func:`torch.cross`
 """)

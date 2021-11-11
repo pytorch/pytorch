@@ -5122,8 +5122,7 @@ class TestLinalg(TestCase):
         self.assertRaises(RuntimeError, lambda: torch.mv(m, s))
         self.assertRaises(RuntimeError, lambda: torch.addmv(v, m, s))
 
-    @onlyCPU
-    @dtypes(torch.float)
+    @dtypes(torch.float32, torch.complex64)
     def test_cross(self, device, dtype):
         x = torch.rand(100, 3, 100, dtype=dtype, device=device)
         y = torch.rand(100, 3, 100, dtype=dtype, device=device)
@@ -5132,8 +5131,66 @@ class TestLinalg(TestCase):
         torch.cross(x, y, out=res2)
         self.assertEqual(res1, res2)
 
-    @onlyCPU
-    @dtypes(torch.float)
+    @dtypes(torch.float32, torch.complex64)
+    def test_linalg_cross(self, device, dtype):
+        x = torch.rand(100, 3, 100, dtype=dtype, device=device)
+        y = torch.rand(100, 3, 100, dtype=dtype, device=device)
+        res1 = torch.linalg.cross(x, y, dim=1)
+        res2 = torch.tensor((), dtype=dtype, device=device)
+        torch.linalg.cross(x, y, dim=1, out=res2)
+        self.assertEqual(res1, res2)
+
+        # test for broadcastable inputs
+        x = torch.rand(1, 3, 2, dtype=dtype, device=device)
+        y = torch.rand(4, 3, 1, dtype=dtype, device=device)
+        res1 = torch.linalg.cross(x, y, dim=1)
+        res2 = torch.tensor((), dtype=dtype, device=device)
+        torch.linalg.cross(x, y, dim=1, out=res2)
+        self.assertEqual(res1, res2)
+
+        # non contiguous case 1
+        x = torch.rand((4, 4, 4, 3), dtype=dtype,
+                       device=device).contiguous(memory_format=torch.channels_last)  # non-contiguous
+        y = torch.rand((4, 4, 4, 3), dtype=dtype,
+                       device=device).contiguous(memory_format=torch.channels_last)  # non-contiguous
+        np_expected_ref = np.cross(x.cpu().numpy(), y.cpu().numpy(), axis=-1)
+        res = torch.linalg.cross(x, y, dim=-1)
+        # numpy reference compared to torch result
+        self.assertEqual(res.cpu().numpy(), np_expected_ref)
+
+        # non contiguous case 2
+        x = torch.rand(1, 3, 2, dtype=dtype, device=device)  # contiguous
+        y = torch.rand(1, 3, 4, dtype=dtype, device=device).permute(2, 1, 0)  # non-contiguous
+        np_expected_ref = np.cross(x.cpu().numpy(), y.cpu().numpy(), axis=1)
+        res = torch.linalg.cross(x, y, dim=1)
+        # numpy reference compared to torch result
+        self.assertEqual(res.cpu().numpy(), np_expected_ref)
+
+        # non contiguous case 3
+        x = torch.rand(2, 3, 1, dtype=dtype, device=device).permute(2, 1, 0)  # non-contiguous
+        y = torch.rand(1, 3, 4, dtype=dtype, device=device).permute(2, 1, 0)  # non-contiguous
+        np_expected_ref = np.cross(x.cpu().numpy(), y.cpu().numpy(), axis=1)
+        res = torch.linalg.cross(x, y, dim=1)
+        # numpy reference compared to torch result
+        self.assertEqual(res.cpu().numpy(), np_expected_ref)
+
+        # non contiguous case 4
+        x = torch.randn(12, 3, device=device, dtype=dtype)[::2, :]  # non-contiguous
+        y = torch.randn(18, 3, device=device, dtype=dtype)[::3, :]  # non-contiguous
+        np_expected_ref = np.cross(x.cpu().numpy(), y.cpu().numpy(), axis=1)
+        res = torch.linalg.cross(x, y, dim=1)
+        # numpy reference compared to torch result
+        self.assertEqual(res.cpu().numpy(), np_expected_ref)
+
+        # non contiguous case 5
+        x = torch.randn(1, device=device, dtype=dtype)  # contiguous
+        y = torch.randn(6, device=device, dtype=dtype)[::2]  # non-contiguous
+        np_expected_ref = np.cross(x.expand(3).cpu().numpy(), y.cpu().numpy())
+        res = torch.linalg.cross(x, y)
+        # numpy reference compared to torch result
+        self.assertEqual(res.cpu().numpy(), np_expected_ref)
+
+    @dtypes(torch.float32, torch.complex64)
     def test_cross_with_and_without_dim(self, device, dtype):
         x = torch.rand(100, 3, dtype=dtype, device=device)
         y = torch.rand(100, 3, dtype=dtype, device=device)
@@ -5143,12 +5200,22 @@ class TestLinalg(TestCase):
         self.assertEqual(res1, res2)
         self.assertEqual(res1, res3)
 
+    @dtypes(torch.float32, torch.complex64)
+    def test_linalg_cross_with_and_without_dim(self, device, dtype):
+        x = torch.rand(100, 3, dtype=dtype, device=device)
+        y = torch.rand(100, 3, dtype=dtype, device=device)
+        res1 = torch.linalg.cross(x, y, dim=1)
+        res2 = torch.linalg.cross(x, y, dim=-1)
+        res3 = torch.linalg.cross(x, y)
+        self.assertEqual(res1, res2)
+        self.assertEqual(res1, res3)
+
     def test_cross_errors(self, device):
         self.assertRaisesRegex(
-            RuntimeError, "inconsistent tensors dimensions",
+            RuntimeError, "must match the size of tensor",
             lambda: torch.cross(torch.rand(100, 3, device=device), torch.rand(100, 3, 10, device=device)))
         self.assertRaisesRegex(
-            RuntimeError, "inconsistent tensors sizes",
+            RuntimeError, "must match the size of tensor",
             lambda: torch.cross(torch.rand(5, 3, device=device), torch.rand(3, 5, device=device)))
         self.assertRaisesRegex(
             RuntimeError, "no dimension of size 3 in input",
@@ -5162,6 +5229,26 @@ class TestLinalg(TestCase):
         self.assertRaisesRegex(
             IndexError, "Dimension out of range",
             lambda: torch.cross(torch.rand(5, 3, 4, device=device), torch.rand(5, 3, 4, device=device), dim=-5))
+
+    def test_linalg_cross_errors(self, device):
+        self.assertRaisesRegex(
+            RuntimeError, "dimension -1 does not have size 3",
+            lambda: torch.linalg.cross(torch.rand(5, 3, 4, device=device), torch.rand(5, 3, 4, device=device)))
+        self.assertRaisesRegex(
+            RuntimeError, "must match the size of tensor",
+            lambda: torch.linalg.cross(torch.rand(100, 3, device=device), torch.rand(100, 3, 10, device=device)))
+        self.assertRaisesRegex(
+            RuntimeError, "must match the size of tensor",
+            lambda: torch.linalg.cross(torch.rand(5, 3, device=device), torch.rand(3, 5, device=device)))
+        self.assertRaisesRegex(
+            RuntimeError, "dimension 0 does not have size 3",
+            lambda: torch.linalg.cross(torch.rand(5, 4, 3, device=device), torch.rand(5, 4, 3, device=device), dim=0))
+        self.assertRaisesRegex(
+            RuntimeError, "dimension -1 does not have size 3",
+            lambda: torch.linalg.cross(torch.rand(5, 3, 4, device=device), torch.rand(5, 3, 4, device=device), dim=-1))
+        self.assertRaisesRegex(
+            IndexError, "Dimension out of range",
+            lambda: torch.linalg.cross(torch.rand(5, 3, 4, device=device), torch.rand(5, 3, 4, device=device), dim=-5))
 
     def test_renorm(self, device):
         m1 = torch.randn(20, 20, device=device)  # big enough to exercise vectorized path
