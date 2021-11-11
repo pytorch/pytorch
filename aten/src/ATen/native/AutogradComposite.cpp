@@ -62,9 +62,9 @@ Tensor _new_zeros_with_same_feature_meta(
   auto out_strides = c10::SmallBuffer<int64_t, kSmallBufferSizeHint>(other.dim() + self_num_batch_dims);
   int64_t prod = other_storage_numel;
 
-  for (size_t i = 0; i < self_num_batch_dims; ++i) {
-    out_strides[self_num_batch_dims - i - 1] = prod;
-    prod *= self_sizes[self_num_batch_dims - i - 1];
+  for (int64_t i = self_num_batch_dims - 1; i >= 0; --i) {
+    out_strides[i] = prod;
+    prod *= self_sizes[i];
   }
   std::copy(other_strides.begin(), other_strides.end(), out_strides.begin() + self_num_batch_dims);
 
