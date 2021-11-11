@@ -18,7 +18,7 @@ from tools.codegen.model import (Argument, DispatchKey, FunctionSchema,
                                  OptionalType, SchemaKind, SelfArgument,
                                  TensorOptionsArguments, Type, Variant,
                                  assert_never, is_cuda_dispatch_key,
-                                 is_generic_dispatch_key, BaseTy)
+                                 is_generic_dispatch_key, BaseTy, BaseType)
 from tools.codegen.api.types import (Binding, CppSignature, CppSignatureGroup,
                                      DispatcherSignature, NativeSignature)
 from tools.codegen.api import cpp
@@ -463,7 +463,7 @@ class ComputeStaticUnboxingWrapper:
         # We unconditionally generate function wrappers,
         sig_group = CppSignatureGroup.from_native_function(f, method=False, fallback_binding=f.manual_cpp_binding)
 
-        def gen_arg_str(type_: str, variant: str, template: str) -> str:
+        def gen_arg_str(type_: BaseType, variant: str, template: str) -> str:
 
             assert type_ in cpp.TYPE_CONVERSION, f"Type is: {type_}"
             assert variant in cpp.TYPE_CONVERSION[type_], f"{variant} format of {type_} \
@@ -484,9 +484,9 @@ class ComputeStaticUnboxingWrapper:
             for i, arg in enumerate(f.func.arguments.flat_positional):
                 ivalue_str = argument_str.format(pos=i, args_num=args_num)
                 if arg.type.is_list_like():
-                    arguments.append(gen_arg_str(arg.type.name, "list", ivalue_str))
+                    arguments.append(gen_arg_str(arg.type.elem.name, "list", ivalue_str))
                 elif arg.type.is_nullable():
-                    arguments.append(gen_arg_str(arg.type.name, "optional", ivalue_str))
+                    arguments.append(gen_arg_str(arg.type.elem.name, "optional", ivalue_str))
                 else:
                     arguments.append(gen_arg_str(arg.type.name, "default", ivalue_str))
 
@@ -495,7 +495,7 @@ class ComputeStaticUnboxingWrapper:
                 print(sig.func)
                 self_arg = f.func.arguments.self_arg
                 assert self_arg is not None, "self argument is None for a method."
-                self_str = gen_arg_str(self_arg.argument.type, )
+                # self_str = gen_arg_str(self_arg.argument.type, )
             return f"""
 Operator(
     "aten::{sig.func}",
