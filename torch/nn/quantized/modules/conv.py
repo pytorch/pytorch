@@ -204,6 +204,7 @@ class _ConvNd(nn.Module):
                     mod.bias is not None, mod.padding_mode)
         qconv.set_weight_bias(qweight, mod.bias)
         try:
+            qconv.reduce_range = activation_post_process.reduce_range
             act_scale, act_zp = activation_post_process.calculate_qparams()
         except:
             # for things like dynamic quantization, want to assign arbitrary s+z to not break serialization
@@ -232,7 +233,8 @@ class _ConvNd(nn.Module):
                 cls._FLOAT_MODULE.__name__ + " but got:" + str(type(mod))
             assert hasattr(mod, "qconfig"), \
                 "Input float module must have qconfig defined."
-            activation_post_process = mod.activation_post_process
+            activation_post_process = None if not hasattr(
+                mod, "activation_post_process") else mod.activation_post_process
             if type(mod) == cls._NNI_CONV_RELU_MODULE:
                 mod = mod[0]
             weight_post_process = mod.qconfig.weight()
@@ -589,6 +591,7 @@ class _ConvTransposeNd(_ConvNd):
                     mod.bias is not None, mod.dilation, mod.padding_mode)
         qconv.set_weight_bias(qweight, mod.bias)
         try:
+            qconv.reduce_range = mod.activation_post_process.reduce_range
             act_scale, act_zp = mod.activation_post_process.calculate_qparams()
         except:
             # for things like dynamic quantization, want to assign arbitrary s+z to not break serialization
