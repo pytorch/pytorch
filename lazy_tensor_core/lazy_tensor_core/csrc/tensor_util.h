@@ -3,9 +3,10 @@
 #include <string>
 #include <vector>
 
+#include <torch/csrc/lazy/core/shape.h>
+
 #include "lazy_tensor_core/csrc/compiler/backend_impl_interface.h"
 #include "lazy_tensors/literal.h"
-#include "lazy_tensors/shape.h"
 #include "lazy_tensors/span.h"
 #include "torch/csrc/autograd/variable.h"
 

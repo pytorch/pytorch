@@ -14,7 +14,7 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-inline NodePtr ScalarOp(const at::Scalar& value, lazy_tensors::Shape shape) {
+inline NodePtr ScalarOp(const at::Scalar& value, torch::lazy::Shape shape) {
   return torch::lazy::MakeNode<Scalar>(value, std::move(shape));
 }
 inline NodePtr ScalarOp(const at::Scalar& value,
@@ -27,14 +27,14 @@ inline NodePtr ConstantOp(lazy_tensors::Literal value) {
 }
 
 inline NodePtr GenericOp(OpKind op, OpList operands,
-                         lazy_tensors::Shape shape, size_t num_outputs = 1,
+                         torch::lazy::Shape shape, size_t num_outputs = 1,
                          torch::lazy::hash_t hash_seed = static_cast<uint32_t>(0x5a2d296e9)) {
   return torch::lazy::MakeNode<Generic>(std::move(op), operands, std::move(shape),
                            num_outputs, hash_seed);
 }
 
 inline NodePtr GenericOp(OpKind op, OpList operands,
-                         const std::function<lazy_tensors::Shape()>& shape_fn,
+                         const std::function<torch::lazy::Shape()>& shape_fn,
                          size_t num_outputs = 1,
                          torch::lazy::hash_t hash_seed = static_cast<uint32_t>(0x5a2d296e9)) {
   return torch::lazy::MakeNode<Generic>(std::move(op), operands, shape_fn, num_outputs,
@@ -47,7 +47,7 @@ inline NodePtr GenericOp(OpKind op, OpList operands,
   return torch::lazy::MakeNode<Generic>(std::move(op), operands, num_outputs, hash_seed);
 }
 
-inline NodePtr GenericOp(OpKind op, lazy_tensors::Shape shape,
+inline NodePtr GenericOp(OpKind op, torch::lazy::Shape shape,
                          size_t num_outputs, torch::lazy::hash_t hash_seed) {
   return torch::lazy::MakeNode<Generic>(std::move(op), std::move(shape), num_outputs,
                            hash_seed);

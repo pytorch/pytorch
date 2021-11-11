@@ -10,9 +10,9 @@ namespace ir {
 namespace ops {
 namespace {
 
-lazy_tensors::Shape NodeOutputShape(const torch::lazy::Value& input,
+torch::lazy::Shape NodeOutputShape(const torch::lazy::Value& input,
                                     c10::ScalarType type) {
-  lazy_tensors::Shape shape = ir::GetShapeFromTsValue(input);
+  torch::lazy::Shape shape = ir::GetShapeFromTsValue(input);
   shape.set_scalar_type(type);
   return shape;
 }

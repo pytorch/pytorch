@@ -1,8 +1,10 @@
 #pragma once
+
 #include <c10/core/Scalar.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
 #include <c10/util/Optional.h>
+#include <torch/csrc/lazy/core/shape.h>
 
 #include <complex>
 #include <functional>
@@ -11,7 +13,6 @@
 
 #include "lazy_tensors/computation_client/util.h"
 #include "lazy_tensors/permutation_util.h"
-#include "lazy_tensors/shape.h"
 
 namespace torch_lazy_tensors {
 
@@ -24,7 +25,7 @@ class Helpers {
   };
 
   struct DynamicReshapeInfo {
-    lazy_tensors::Shape output_shape;
+    torch::lazy::Shape output_shape;
     int64_t dynamic_dimension = -1;
   };
 
@@ -33,7 +34,7 @@ class Helpers {
   }
 
   static std::vector<int64_t> GetAllDimensions(
-      const lazy_tensors::Shape& shape) {
+      const torch::lazy::Shape& shape) {
     return lazy_tensors::util::Iota<int64_t>(shape.dim());
   }
 
@@ -80,11 +81,11 @@ class Helpers {
   static std::vector<int64_t> GetPromotedShape(
       c10::ArrayRef<int64_t> shape1_dims, c10::ArrayRef<int64_t> shape2_dims);
 
-  static lazy_tensors::Shape GetPromotedShape(
-      const lazy_tensors::Shape& shape1, const lazy_tensors::Shape& shape2);
+  static torch::lazy::Shape GetPromotedShape(
+      const torch::lazy::Shape& shape1, const torch::lazy::Shape& shape2);
 
-  static lazy_tensors::Shape GetPromotedBinaryOpShape(
-      const lazy_tensors::Shape& shape1, const lazy_tensors::Shape& shape2);
+  static torch::lazy::Shape GetPromotedBinaryOpShape(
+      const torch::lazy::Shape& shape1, const torch::lazy::Shape& shape2);
 
 };
 

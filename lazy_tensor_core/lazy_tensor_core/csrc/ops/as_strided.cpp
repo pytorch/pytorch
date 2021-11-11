@@ -32,7 +32,7 @@ std::string AsStrided::ToString() const {
   return ss.str();
 }
 
-bool AsStrided::StrideIsSupported(const lazy_tensors::Shape& input_shape,
+bool AsStrided::StrideIsSupported(const torch::lazy::Shape& input_shape,
                                   c10::ArrayRef<int64_t> size,
                                   c10::ArrayRef<int64_t> stride,
                                   int64_t storage_offset) {

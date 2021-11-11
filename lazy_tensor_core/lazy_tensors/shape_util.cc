@@ -8,7 +8,7 @@
 namespace torch {
 namespace lazy {
 
-torch::lazy::hash_t SingleShapeHash(const lazy_tensors::Shape& shape, torch::lazy::hash_t seed) {
+torch::lazy::hash_t SingleShapeHash(const torch::lazy::Shape& shape, torch::lazy::hash_t seed) {
   for (auto dim : shape.sizes()) {
     seed = HashCombine(seed, (uint64_t)dim);
   }
@@ -16,13 +16,13 @@ torch::lazy::hash_t SingleShapeHash(const lazy_tensors::Shape& shape, torch::laz
 }
 
 // The hash is deterministic to enable easier debugging between separate runs.
-torch::lazy::hash_t ShapeHash(const lazy_tensors::Shape& shape) {
+torch::lazy::hash_t ShapeHash(const torch::lazy::Shape& shape) {
   torch::lazy::hash_t hash = (uint32_t)0xa5d2d6916;
   return torch::lazy::SingleShapeHash(shape, hash);
 }
 
 
-torch::lazy::hash_t Hash(const lazy_tensors::Shape& shape) {
+torch::lazy::hash_t Hash(const torch::lazy::Shape& shape) {
   return ShapeHash(shape);
 }
 
@@ -31,7 +31,7 @@ torch::lazy::hash_t Hash(const lazy_tensors::Shape& shape) {
 
 namespace lazy_tensors {
 
-/*static*/ size_t ShapeUtil::Hash(const Shape& shape) {
+/*static*/ size_t ShapeUtil::Hash(const torch::lazy::Shape& shape) {
   using lazy_tensors::hash;
   using lazy_tensors::Hash64Combine;
 

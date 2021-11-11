@@ -23,8 +23,8 @@ std::string Permute::ToString() const {
   return ss.str();
 }
 
-lazy_tensors::Shape Permute::MakePermuteShape(
-    const lazy_tensors::Shape& source_shape,
+torch::lazy::Shape Permute::MakePermuteShape(
+    const torch::lazy::Shape& source_shape,
     c10::ArrayRef<int64_t> permutation) {
   return lazy_tensors::ShapeUtil::MakeShape(
       source_shape.scalar_type(),

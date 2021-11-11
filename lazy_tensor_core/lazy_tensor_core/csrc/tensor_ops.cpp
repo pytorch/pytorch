@@ -36,7 +36,7 @@ LazyTensor Cross(const LazyTensor& input, const LazyTensor& other,
     auto dim_3_it = std::find((*input_shape_ref).sizes().begin(),
                               (*input_shape_ref).sizes().end(), 3);
     CHECK(dim_3_it != (*input_shape_ref).sizes().end())
-        << "No dimension of size 3 in input: " << (*input_shape_ref).ToString();
+        << "No dimension of size 3 in input: " << (*input_shape_ref).to_string();
     canonical_dim = dim_3_it - (*input_shape_ref).sizes().begin();
   }
   CHECK_EQ(input.size(canonical_dim), 3)

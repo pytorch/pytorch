@@ -104,7 +104,7 @@ class LazyTensor {
   // Set logical_element_type which is visible to upstream PyTorch.
   void SetScalarType(c10::optional<at::ScalarType> logical_element_type);
 
-  lazy_tensors::util::MaybeRef<lazy_tensors::Shape> shape() const;
+  lazy_tensors::util::MaybeRef<torch::lazy::Shape> shape() const;
 
   const torch::lazy::BackendDevice& GetDevice() const;
   int64_t GetUniqueId() const;

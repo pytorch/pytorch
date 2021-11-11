@@ -14,8 +14,8 @@ class Permute : public TsNode {
 
   const std::vector<int64_t>& dims() const { return dims_; }
 
-  static lazy_tensors::Shape MakePermuteShape(
-      const lazy_tensors::Shape& source_shape,
+  static torch::lazy::Shape MakePermuteShape(
+      const torch::lazy::Shape& source_shape,
       c10::ArrayRef<int64_t> permutation);
 
  private:

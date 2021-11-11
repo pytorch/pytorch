@@ -29,8 +29,8 @@ std::string Diagonal::ToString() const {
   return ss.str();
 }
 
-lazy_tensors::Shape Diagonal::MakeDiagonalShape(
-    const lazy_tensors::Shape& shape, int64_t offset, int64_t dim1,
+torch::lazy::Shape Diagonal::MakeDiagonalShape(
+    const torch::lazy::Shape& shape, int64_t offset, int64_t dim1,
     int64_t dim2) {
   std::vector<int64_t> dimensions;
   for (int64_t dim = 0; dim < shape.dim(); ++dim) {

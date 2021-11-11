@@ -3,6 +3,7 @@
 #include <sstream>
 #include <stdexcept>
 
+#include <c10/util/Logging.h>
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -21,7 +22,7 @@ LoweringContext::GetParametersData() const {
 }
 
 void LoweringContext::AddParameter(const torch::lazy::Output& output, size_t index,
-                                   const lazy_tensors::Shape& shape,
+                                   const torch::lazy::Shape& shape,
                                    const std::string& name) {
   LOG(FATAL) << "Not implemented.";
 }

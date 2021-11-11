@@ -2,18 +2,18 @@
 
 #include <c10/util/Optional.h>
 #include <c10/core/Scalar.h>
+#include <torch/csrc/lazy/core/shape.h>
 
 #include <complex>
 
 #include "lazy_tensors/computation_client/util.h"
-#include "lazy_tensors/shape.h"
 #include "torch/csrc/jit/tensorexpr/types.h"
 #include "torch/csrc/lazy/core/hash.h"
 
 namespace torch {
 namespace lazy {
     // Adapters that provide torch::lazy Hash functions for lazy_tensors types
-    hash_t Hash(const lazy_tensors::Shape& shape);
+    hash_t Hash(const torch::lazy::Shape& shape);
 }
 }
 
@@ -38,28 +38,28 @@ class ShapeIndex {
 
 class ShapeUtil {
  public:
-  static int64_t ElementsIn(const Shape& shape) {
+  static int64_t ElementsIn(const torch::lazy::Shape& shape) {
     return util::Multiply<int64_t>(shape.sizes());
   }
-  static bool SameDimensions(const Shape& lhs, const Shape& rhs) {
+  static bool SameDimensions(const torch::lazy::Shape& lhs, const torch::lazy::Shape& rhs) {
     return lhs.sizes() == rhs.sizes();
   }
 
-  static bool Compatible(const Shape& lhs, const Shape& rhs) {
+  static bool Compatible(const torch::lazy::Shape& lhs, const torch::lazy::Shape& rhs) {
     return lhs == rhs;
   }
 
-  static Shape MakeShape(c10::ScalarType element_type,
+  static torch::lazy::Shape MakeShape(c10::ScalarType element_type,
                          c10::ArrayRef<int64_t> dimensions) {
-    return lazy_tensors::Shape(element_type, dimensions);
+    return torch::lazy::Shape(element_type, dimensions);
   }
 
-  static bool ElementIsIntegral(const Shape& shape) {
+  static bool ElementIsIntegral(const torch::lazy::Shape& shape) {
     return isIntegralType(shape.scalar_type(), /* include_bool */ true);
   }
 
   // Compute a hash for `shape`.
-  static size_t Hash(const Shape& shape);
+  static size_t Hash(const torch::lazy::Shape& shape);
 };
 
 }  // namespace lazy_tensors

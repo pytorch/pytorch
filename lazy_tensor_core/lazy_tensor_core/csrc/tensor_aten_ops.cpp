@@ -45,7 +45,7 @@ namespace {
 using namespace torch_lazy_tensors::ir;
 
 torch::lazy::Value MaybeExpand(const torch::lazy::Value& input,
-                               const lazy_tensors::Shape& target_shape) {
+                               const torch::lazy::Shape& target_shape) {
   if (ir::GetShapeFromTsValue(input).sizes() ==
       target_shape.sizes()) {
     return input;
@@ -55,7 +55,7 @@ torch::lazy::Value MaybeExpand(const torch::lazy::Value& input,
       /*is_scalar_expand=*/false);
 }
 
-std::vector<int64_t> GetExpandDimensions(const lazy_tensors::Shape& shape,
+std::vector<int64_t> GetExpandDimensions(const torch::lazy::Shape& shape,
                                          std::vector<int64_t> dimensions) {
   CHECK_GE(dimensions.size(), shape.dim()) << shape;
   int64_t base = dimensions.size() - shape.dim();
@@ -68,9 +68,9 @@ std::vector<int64_t> GetExpandDimensions(const lazy_tensors::Shape& shape,
 }
 
 // Returns a 1-D shape for batch norm weight or bias based on the input shape.
-lazy_tensors::Shape BatchNormFeaturesShape(const LazyTensor& input) {
+torch::lazy::Shape BatchNormFeaturesShape(const LazyTensor& input) {
   auto input_shape = input.shape().get();
-  return lazy_tensors::Shape(input_shape.scalar_type(),
+  return torch::lazy::Shape(input_shape.scalar_type(),
                              input_shape.sizes()[1]);
 }
 
@@ -78,18 +78,18 @@ lazy_tensors::Shape BatchNormFeaturesShape(const LazyTensor& input) {
 // to the default shape, if the input is undefined.
 torch::lazy::Value GetIrValueOrDefault(const LazyTensor& input,
                                        const at::Scalar& default_value,
-                                       const lazy_tensors::Shape& default_shape,
+                                       const torch::lazy::Shape& default_shape,
                                        const torch::lazy::BackendDevice& device) {
   return input.is_null() ? LazyGraphExecutor::Get()->GetIrValueForScalar(
                                default_value, default_shape, device)
                          : input.GetIrValue();
 }
 
-ViewInfo CreateAsStridedViewInfo(const lazy_tensors::Shape& input_shape,
+ViewInfo CreateAsStridedViewInfo(const torch::lazy::Shape& input_shape,
                                  std::vector<int64_t> size,
                                  std::vector<int64_t> stride,
                                  c10::optional<int64_t> storage_offset) {
-  lazy_tensors::Shape result_shape =
+  torch::lazy::Shape result_shape =
       lazy_tensors::ShapeUtil::MakeShape(input_shape.scalar_type(), size);
   AsStridedInfo as_strided_info;
   as_strided_info.stride = std::move(stride);
@@ -256,7 +256,7 @@ LazyTensor narrow(const LazyTensor& input, int64_t dim, int64_t start,
                   int64_t length) {
   auto input_shape = input.shape();
   dim = Helpers::GetCanonicalDimensionIndex(dim, input_shape.get().dim());
-  lazy_tensors::Shape narrow_shape = input_shape;
+  torch::lazy::Shape narrow_shape = input_shape;
   narrow_shape.set_size(dim, length);
 
   ViewInfo::Type view_type =
@@ -274,7 +274,7 @@ std::tuple<LazyTensor, LazyTensor, LazyTensor> ts_native_batch_norm(
     const LazyTensor& input, const LazyTensor& weight, const LazyTensor& bias,
     LazyTensor& running_mean, LazyTensor& running_var, bool training,
     double momentum, double eps) {
-  lazy_tensors::Shape features_shape = BatchNormFeaturesShape(input);
+  torch::lazy::Shape features_shape = BatchNormFeaturesShape(input);
   torch::lazy::Value weight_value =
       GetIrValueOrDefault(weight, 1, features_shape, input.GetDevice());
   torch::lazy::Value bias_value =
@@ -300,7 +300,7 @@ std::tuple<LazyTensor, LazyTensor, LazyTensor> ts_native_batch_norm_backward(
     const LazyTensor& running_var, const LazyTensor& save_mean,
     const LazyTensor& save_invstd, bool training, double eps,
     c10::ArrayRef<bool> output_mask) {
-  lazy_tensors::Shape features_shape = BatchNormFeaturesShape(input);
+  torch::lazy::Shape features_shape = BatchNormFeaturesShape(input);
   torch::lazy::Value weight_value =
       GetIrValueOrDefault(weight, 1, features_shape, input.GetDevice());
   NodePtr node;
@@ -525,7 +525,7 @@ LazyTensor view(const LazyTensor& input, c10::ArrayRef<int64_t> output_size) {
   auto input_shape = input.shape();
   std::vector<int64_t> complete_dimensions =
       GetCompleteShape(output_size, input_shape.get().sizes());
-  lazy_tensors::Shape shape = lazy_tensors::ShapeUtil::MakeShape(
+  torch::lazy::Shape shape = lazy_tensors::ShapeUtil::MakeShape(
       input_shape.get().scalar_type(), complete_dimensions);
   ViewInfo view_info(ViewInfo::Type::kReshape, std::move(shape), input_shape);
   return input.CreateViewTensor(std::move(view_info));

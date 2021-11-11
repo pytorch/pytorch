@@ -18,7 +18,7 @@ namespace ops {
 // computation graph.
 class Scalar : public TsNode {
  public:
-  Scalar(const at::Scalar& value, lazy_tensors::Shape shape);
+  Scalar(const at::Scalar& value, torch::lazy::Shape shape);
   Scalar(const at::Scalar& value, c10::ScalarType  type);
 
   std::string ToString() const override;

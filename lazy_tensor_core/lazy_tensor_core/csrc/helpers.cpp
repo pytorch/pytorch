@@ -103,15 +103,15 @@ std::vector<int64_t> Helpers::GetPromotedShape(
   return dimensions;
 }
 
-lazy_tensors::Shape Helpers::GetPromotedShape(
-    const lazy_tensors::Shape& shape1, const lazy_tensors::Shape& shape2) {
+torch::lazy::Shape Helpers::GetPromotedShape(
+    const torch::lazy::Shape& shape1, const torch::lazy::Shape& shape2) {
   return lazy_tensors::ShapeUtil::MakeShape(
       shape1.scalar_type(),
       GetPromotedShape(shape1.sizes(), shape2.sizes()));
 }
 
-lazy_tensors::Shape Helpers::GetPromotedBinaryOpShape(
-    const lazy_tensors::Shape& shape1, const lazy_tensors::Shape& shape2) {
+torch::lazy::Shape Helpers::GetPromotedBinaryOpShape(
+    const torch::lazy::Shape& shape1, const torch::lazy::Shape& shape2) {
   return lazy_tensors::ShapeUtil::MakeShape(
       promoteTypes(shape1.scalar_type(), shape2.scalar_type()),
       GetPromotedShape(shape1.sizes(), shape2.sizes()));

@@ -19,7 +19,7 @@ class Diagonal : public TsNode {
 
   int64_t dim2() const { return dim2_; }
 
-  static lazy_tensors::Shape MakeDiagonalShape(const lazy_tensors::Shape& shape,
+  static torch::lazy::Shape MakeDiagonalShape(const torch::lazy::Shape& shape,
                                                int64_t offset, int64_t dim1,
                                                int64_t dim2);
 

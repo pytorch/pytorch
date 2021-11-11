@@ -9,7 +9,7 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-Scalar::Scalar(const at::Scalar& value, lazy_tensors::Shape shape)
+Scalar::Scalar(const at::Scalar& value, torch::lazy::Shape shape)
     : TsNode(OpKind(at::prim::Constant), std::move(shape), /*num_outputs=*/1,
            ScalarHash(value)),
       value_(std::move(value)) {}

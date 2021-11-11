@@ -209,7 +209,7 @@ class TSNodeLowering : public TSNodeLoweringInterface {
     torch::jit::Value* destination =
         GenerateClone(loctx()->GetOutputOp(node->operand(0)));
     const torch::lazy::Output& input_op = node->operand(1);
-    const lazy_tensors::Shape& input_shape = ir::GetShapeFromTsOutput(input_op);
+    const torch::lazy::Shape& input_shape = ir::GetShapeFromTsOutput(input_op);
     const auto input_dimensions = input_shape.sizes();
     std::vector<torch::jit::NamedValue> dest_arguments;
     dest_arguments.emplace_back(destination);
@@ -383,7 +383,7 @@ class TSNodeLowering : public TSNodeLoweringInterface {
     torch::jit::Value* base = loctx()->GetOutputOp(input);
     const auto& base_indices = node->base_indices();
     const auto& sizes = node->sizes();
-    const lazy_tensors::Shape& input_shape = ir::GetShapeFromTsOutput(input);
+    const torch::lazy::Shape& input_shape = ir::GetShapeFromTsOutput(input);
     CHECK_EQ(sizes.size(), base_indices.size());
     CHECK_EQ(input_shape.dim(), base_indices.size());
     for (size_t dim = 0; dim < base_indices.size(); ++dim) {
@@ -410,7 +410,7 @@ class TSNodeLowering : public TSNodeLoweringInterface {
 
   TSOpVector LowerScalar(const ir::ops::Scalar* node) {
     const at::Scalar& value = node->value();
-    const lazy_tensors::Shape& shape = node->shape();
+    const torch::lazy::Shape& shape = node->shape();
     auto options =
         at::TensorOptions()
             .device(compiler::getBackend()
@@ -472,7 +472,7 @@ class TSNodeLowering : public TSNodeLoweringInterface {
         GenerateClone(loctx()->GetOutputOp(node->operand(0)));
     const auto& base_indices = node->base_indices();
     const torch::lazy::Output& source_argument = node->operand(1);
-    const lazy_tensors::Shape& source_shape =
+    const torch::lazy::Shape& source_shape =
         ir::GetShapeFromTsOutput(source_argument);
     CHECK_EQ(source_shape.dim(), base_indices.size());
     torch::jit::Value* base = dest;

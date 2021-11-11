@@ -510,14 +510,14 @@ torch::lazy::Value LazyGraphExecutor::GetIrValueForScalar(
 }
 
 torch::lazy::Value LazyGraphExecutor::GetIrValueForScalar(
-    const at::Scalar& value, const lazy_tensors::Shape& shape,
+    const at::Scalar& value, const torch::lazy::Shape& shape,
     const torch::lazy::BackendDevice& device) {
   return GetIrValueForScalar(value, shape.scalar_type(), shape.sizes(),
                              device);
 }
 
 torch::lazy::Value LazyGraphExecutor::GetIrValueForScalar(
-    const at::Scalar& value, const lazy_tensors::Shape& shape,
+    const at::Scalar& value, const torch::lazy::Shape& shape,
     c10::optional<at::ScalarType> logical_element_type, const torch::lazy::BackendDevice& device) {
   c10::ScalarType type =
       logical_element_type ? *logical_element_type : shape.scalar_type();
@@ -810,9 +810,9 @@ void LazyGraphExecutor::BuildInputOutputAliases(
       auto it = output_tensor_id_map.find(data_info->tensor_id);
       if (it != output_tensor_id_map.end()) {
         size_t output_index = it->second;
-        const lazy_tensors::Shape& root_shape =
+        const torch::lazy::Shape& root_shape =
             lowering_ctx->GetResultShape(output_index);
-        if (lazy_tensors::Shape(parameters_data[i]->shape()) == root_shape &&
+        if (torch::lazy::Shape(parameters_data[i]->shape()) == root_shape &&
             alias_map[output_index] < 0) {
 
           // TODO(whc) deleted this interface until we see a need (no TS impl)
@@ -820,7 +820,7 @@ void LazyGraphExecutor::BuildInputOutputAliases(
           alias_map[output_index] = i;
 
           VLOG(6) << "Aliased paramter " << i << " with output " << output_index
-                  << ": " << lazy_tensors::Shape(parameters_data[i]->shape());
+                  << ": " << torch::lazy::Shape(parameters_data[i]->shape());
         }
       }
     }

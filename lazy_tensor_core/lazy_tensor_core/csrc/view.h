@@ -1,11 +1,11 @@
 #pragma once
 
 #include <c10/util/Optional.h>
+#include <torch/csrc/lazy/core/shape.h>
 
 #include <memory>
 #include <vector>
 
-#include "lazy_tensors/shape.h"
 #include "torch/csrc/lazy/core/ir.h"
 
 namespace torch_lazy_tensors {
@@ -55,15 +55,15 @@ struct ViewInfo {
   };
 
   ViewInfo() = default;
-  ViewInfo(Type view_type, lazy_tensors::Shape shape,
-           lazy_tensors::Shape source_shape);
-  ViewInfo(Type view_type, lazy_tensors::Shape source_shape,
+  ViewInfo(Type view_type, torch::lazy::Shape shape,
+           torch::lazy::Shape source_shape);
+  ViewInfo(Type view_type, torch::lazy::Shape source_shape,
            std::vector<int64_t> permutation);
-  ViewInfo(Type view_type, const lazy_tensors::Shape& source_shape,
+  ViewInfo(Type view_type, const torch::lazy::Shape& source_shape,
            SelectInfo select);
-  ViewInfo(Type view_type, lazy_tensors::Shape shape,
-           lazy_tensors::Shape source_shape, AsStridedInfo as_strided);
-  ViewInfo(Type view_type, const lazy_tensors::Shape& source_shape,
+  ViewInfo(Type view_type, torch::lazy::Shape shape,
+           torch::lazy::Shape source_shape, AsStridedInfo as_strided);
+  ViewInfo(Type view_type, const torch::lazy::Shape& source_shape,
            DiagonalInfo diagonal);
 
   bool operator==(const ViewInfo& ref) const {
@@ -76,12 +76,12 @@ struct ViewInfo {
   Type view_type = Type::kInvalid;
   // The shape of the result of a view. In case of narrowing, this represents
   // the size of the narrow slice.
-  lazy_tensors::Shape shape;
+  torch::lazy::Shape shape;
   // In case of narrowing, the starting indices from where the narrow slice is
   // cut.
   std::vector<int64_t> indices;
   // The shape of the source of this view.
-  lazy_tensors::Shape source_shape;
+  torch::lazy::Shape source_shape;
   // The permutation to be used. If empty, this is not a permute operation.
   std::vector<int64_t> permutation;
   // Information used for sliced views.
@@ -126,18 +126,18 @@ class Alias {
 
 class View {
  public:
-  View(lazy_tensors::Shape shape, std::shared_ptr<Alias> alias,
+  View(torch::lazy::Shape shape, std::shared_ptr<Alias> alias,
        ViewInfo view_info);
-  View(lazy_tensors::Shape shape, std::shared_ptr<Alias> alias,
+  View(torch::lazy::Shape shape, std::shared_ptr<Alias> alias,
        std::vector<ViewInfo> view_infos);
 
   void Update(torch::lazy::Value ir_value);
 
-  const lazy_tensors::Shape& shape() const { return shape_; }
+  const torch::lazy::Shape& shape() const { return shape_; }
 
   const std::shared_ptr<Alias>& alias() const { return alias_; }
 
-  std::shared_ptr<View> CreateSubView(lazy_tensors::Shape shape,
+  std::shared_ptr<View> CreateSubView(torch::lazy::Shape shape,
                                       ViewInfo view_info);
 
   // Extracts the current IrNode out of a view, into a IrNode structure
@@ -151,7 +151,7 @@ class View {
 
  private:
   std::vector<ViewInfo> view_infos_;
-  lazy_tensors::Shape shape_;
+  torch::lazy::Shape shape_;
   std::shared_ptr<Alias> alias_;
   torch::lazy::Value ir_value_;
   size_t generation_ = 0;
