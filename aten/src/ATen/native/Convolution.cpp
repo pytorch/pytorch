@@ -20,25 +20,7 @@
 
 constexpr int MIOPEN_DIM_MAX = 5;
 
-namespace at {
-namespace meta {
-TORCH_META_FUNC(convolution_backward)(
-    const Tensor& grad_output, const Tensor& input, const Tensor& weight, OptionalTensorRef bias,
-    IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, bool transposed, IntArrayRef output_padding,
-    int64_t groups, std::array<bool, 3> output_mask) {
-  if (output_mask[0]) {
-    set_output(0, input.sizes(), input.options());
-  }
-  if (output_mask[1]) {
-    set_output(1, weight.sizes(), weight.options());
-  }
-  if (output_mask[2] && bias.has_value()) {
-    set_output(2, bias->sizes(), bias->options());
-  }
-}
-} // namespace meta
-
-namespace native {
+namespace at { namespace native {
 
 DEFINE_DISPATCH(convolution_depthwise3x3_winograd_stub);
 
@@ -1554,15 +1536,15 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _convolution_backward_nogroup_bac
   }
 }
 
-TORCH_IMPL_FUNC(convolution_backward_out)(
-    const Tensor& grad_output_, const Tensor& input_, const Tensor& weight_, OptionalTensorRef bias_opt,
+std::tuple<Tensor, Tensor, Tensor> convolution_backward(
+    const Tensor& grad_output_, const Tensor& input_, const Tensor& weight_, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, bool transposed, IntArrayRef output_padding,
-    int64_t groups, std::array<bool, 3> output_mask, const Tensor& grad_input, const Tensor& grad_weight,
-    const Tensor& grad_bias) {
+    int64_t groups, std::array<bool, 3> output_mask) {
   auto grad_output = grad_output_;
   auto input = input_;
   auto weight = weight_;
-  auto bias = bias_opt.getTensorRef();
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  auto bias = *bias_maybe_owned;
 
   auto k = weight.ndimension();
   int64_t dim = k - 2;
@@ -1637,16 +1619,16 @@ TORCH_IMPL_FUNC(convolution_backward_out)(
       break;
     case ConvBackend::Empty:
     case ConvBackend::MkldnnEmpty:
-      if (output_mask[0] && grad_input.numel() > 0) {
-        grad_input.fill_(0.);
+      if (output_mask[0]) {
+        backend_grad_input = at::zeros_like(input);
       }
-      if (output_mask[1] && grad_weight.numel() > 0) {
-        grad_weight.fill_(0.);
+      if (output_mask[1]) {
+        backend_grad_weight = at::zeros_like(weight);
       }
-      if (output_mask[2] && grad_bias.numel() > 0) {
-        grad_bias.fill_(0.);
+      if (output_mask[2]) {
+        backend_grad_bias = at::zeros_like(bias);
       }
-      return;
+      break;
     case ConvBackend::Miopen:
       check_input_same_type_as_parameters(input, weight, bias);
       std::tie(backend_grad_input, backend_grad_weight, backend_grad_bias) =
@@ -1733,29 +1715,26 @@ TORCH_IMPL_FUNC(convolution_backward_out)(
       break;
   }
 
-  // TODO: Make these copies unnecessary by refactoring the backend-specific backward
-  // functions to take in output tensors instead of returning them.
   if (output_mask[0]) {
     if (k == 3) {
       backend_grad_input = view3d(backend_grad_input);
     }
-    grad_input.copy_(backend_grad_input);
   }
   if (output_mask[1]) {
     if (k == 3) {
       backend_grad_weight = view3d(backend_grad_weight);
     }
-    grad_weight.copy_(backend_grad_weight);
   }
   if (output_mask[2]) {
-    if (backend_grad_bias.defined()) {
-      grad_bias.copy_(backend_grad_bias);
-    } else {
+    if (bias.defined() && !backend_grad_bias.defined()) {
       // Calculate bias gradients outside of the backend for those that don't support it.
+      backend_grad_bias = at::empty_like(bias);
       auto sum_dims = (dim == 3) ? IntArrayRef{0, 2, 3, 4} : IntArrayRef{0, 2, 3};
-      at::sum_out(const_cast<Tensor&>(grad_bias), grad_output, sum_dims);
+      at::sum_out(const_cast<Tensor&>(backend_grad_bias), grad_output, sum_dims);
     }
   }
+
+  return std::make_tuple(backend_grad_input, backend_grad_weight, backend_grad_bias);
 }
 
 }} // at::native
