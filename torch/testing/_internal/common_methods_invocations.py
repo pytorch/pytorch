@@ -5551,29 +5551,27 @@ def sample_inputs_rsub(op_info, device, dtype, requires_grad, other_scalar, **kw
 
     shapes = ((S, S), (S,), ())
     if dtype.is_complex:
-        dtypes = (torch.int32, torch.float32, dtype)
+        dtypes_a = (torch.int32, torch.float32, dtype)
     elif dtype.is_floating_point:
-        dtypes = (torch.int32, dtype)
+        dtypes_a = (torch.int32, dtype)
     else:
-        dtypes = (dtype, )
+        dtypes_a = (dtype, )
+    dtypes_y = dtypes_a if other_scalar else (dtype,)
 
     def gen_inputs():
-        for shape_x, dtype_x, shape_y, dtype_y, dtype_a in product(shapes, dtypes, shapes, dtypes, dtypes):
-            # At least x or y must be of the given dtype
-            if dtype_x != dtype and dtype_y != dtype:
-                continue
-            # We must be able to compute gradients wrt one of the tensors
-            if other_scalar and not (dtype_x.is_floating_point or dtype_x.is_complex):
-                continue
-            # if other_scalar
+        for shape_x, shape_y, dtype_y, dtype_a in product(shapes, shapes, dtypes_y, dtypes_a):
             if other_scalar and shape_y != ():
                 continue
 
-            x = make_arg(shape_x, dtype=dtype_x, requires_grad=dtype_x.is_floating_point or dtype_x.is_complex)
-            y = make_arg(shape_y, dtype=dtype_y, requires_grad=dtype_y.is_floating_point or dtype_y.is_complex)
+            requires_grad_y = (requires_grad and
+                               not other_scalar and
+                               (dtype_y.is_floating_point or dtype_y.is_complex))
+
+            x = make_arg(shape_x, dtype=dtype, requires_grad=requires_grad)
+            y = make_arg(shape_y, dtype=dtype_y, requires_grad=requires_grad_y)
             if other_scalar:
                 y = y.item()
-            a = make_arg((1,), dtype=dtype_a).item()
+            a = make_arg((), dtype=dtype_a).item()
             yield SampleInput(x, args=(y,), kwargs={"alpha": a})
 
     return list(gen_inputs())
@@ -10057,7 +10055,6 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
            variant_test_name='rsub_tensor',
            supports_out=False,
-           supports_inplace_autograd=False,
            skips=(
                # Reference: https://github.com/pytorch/pytorch/issues/53797
                # JIT doesn't understand complex literals
@@ -10066,13 +10063,12 @@ op_db: List[OpInfo] = [
                # please report a bug to PyTorch.
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', dtypes=[torch.cfloat, torch.cdouble]),  # noqa: B950
            ),
-           sample_inputs_func=partial(sample_inputs_rsub, other_scalar=True),),
+           sample_inputs_func=partial(sample_inputs_rsub, other_scalar=False),),
     OpInfo('rsub',
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
            variant_test_name='rsub_scalar',
            supports_out=False,
-           supports_inplace_autograd=False,
-           sample_inputs_func=partial(sample_inputs_rsub, other_scalar=False),
+           sample_inputs_func=partial(sample_inputs_rsub, other_scalar=True),
            skips=(
                # Reference: https://github.com/pytorch/pytorch/issues/53797
                # JIT doesn't understand complex literals
