@@ -58,7 +58,7 @@ class Adam(Optimizer):
     """
 
     def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
-                 weight_decay=0, amsgrad=False):
+                 weight_decay=0, amsgrad=False, *, maximize: bool = False):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -70,7 +70,7 @@ class Adam(Optimizer):
         if not 0.0 <= weight_decay:
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
         defaults = dict(lr=lr, betas=betas, eps=eps,
-                        weight_decay=weight_decay, amsgrad=amsgrad)
+                        weight_decay=weight_decay, amsgrad=amsgrad, maximize=maximize)
         super(Adam, self).__init__(params, defaults)
 
     def __setstate__(self, state):
@@ -141,5 +141,6 @@ class Adam(Optimizer):
                    beta2=beta2,
                    lr=group['lr'],
                    weight_decay=group['weight_decay'],
-                   eps=group['eps'])
+                   eps=group['eps'],
+                   maximize=group['maximize'])
         return loss

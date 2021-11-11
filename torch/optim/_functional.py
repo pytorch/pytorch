@@ -73,7 +73,8 @@ def adam(params: List[Tensor],
          beta2: float,
          lr: float,
          weight_decay: float,
-         eps: float):
+         eps: float,
+         maximize: bool):
     r"""Functional API that performs Adam algorithm computation.
 
     See :class:`~torch.optim.Adam` for details.
@@ -103,9 +104,10 @@ def adam(params: List[Tensor],
         else:
             denom = (exp_avg_sq.sqrt() / math.sqrt(bias_correction2)).add_(eps)
 
-        step_size = lr / bias_correction1
 
-        param.addcdiv_(exp_avg, denom, value=-step_size)
+        step_size_with_direction =  lr / bias_correction1 if maximize else -lr / bias_correction1
+
+        param.addcdiv_(exp_avg, denom, value=step_size_with_direction)
 
 
 def adamw(params: List[Tensor],
