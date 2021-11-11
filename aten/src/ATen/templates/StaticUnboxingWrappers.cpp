@@ -1,5 +1,6 @@
-#include "torch/csrc/jit/operator.h"
-#include "torch/csrc/jit/custom_operator.h"
+#include "torch/csrc/jit/runtime/operator.h"
+#include "torch/csrc/jit/runtime/custom_operator.h"
+#include "torch/csrc/jit/runtime/register_ops_utils.h"
 
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/autograd/generated/variable_factories.h"
@@ -62,7 +63,7 @@ at::Tensor toOptionalTensor(const IValue& v) {
 // tensor type in interpreter, it should only be used in this file
 std::vector<Tensor> toListOfOptionalTensor(const IValue& v) {
   // v is a list of optional tensor, loop over as generic list
-  auto vlist = v.toGenericListRef();
+  auto vlist = v.toList();
   std::vector<Tensor> res;
 
   for (const IValue &v: vlist) {
@@ -71,37 +72,41 @@ std::vector<Tensor> toListOfOptionalTensor(const IValue& v) {
   return res;
 }
 
-template<size_t N>
-std::array<bool, N> as_bool_array(const std::vector<bool>& vec) {
-  std::array<bool, N> res;
-  AT_ASSERT(vec.size() == N);
+template<typename T, size_t N>
+std::array<T, N> as_array(const c10::List<c10::IValue>& list) {
+  std::array<T, N> res;
+  AT_ASSERT(list.size() == N);
+  std::vector<T> vec;
+  for (c10::IValue elem : list) {
+    vec.push_back(elem.to<T>());
+  }
   std::copy(vec.begin(), vec.end(), res.begin());
   return res;
 }
 
 RegisterOperators reg({
-    Operator(
-        "aten::get_device(Tensor self) -> int",
+    OperatorGenerator(
+        TORCH_SELECTIVE_SCHEMA("aten::get_device(Tensor self) -> int"),
         [](Stack & stack) {
-          autograd::profiler::RecordFunction record("get_device");
+          RECORD_FUNCTION("get_device", std::vector<c10::IValue>());
           auto result = at::get_device(
               (std::move(peek(stack, 0, 1))).toTensor()
           );
           drop(stack, 1);
           pack(stack, std::move(result));
-          return 0;
-        }
-        ),
-    Operator(
-        "aten::storage_offset(Tensor self) -> int",
+        },
+        aliasAnalysisFromSchema()
+    ),
+    OperatorGenerator(
+        TORCH_SELECTIVE_SCHEMA("aten::storage_offset(Tensor self) -> int"),
         [](Stack & stack) {
-          autograd::profiler::RecordFunction record("storage_offset");
+          RECORD_FUNCTION("storage_offset", std::vector<c10::IValue>());
           auto result = ((std::move(peek(stack, 0, 1))).toTensor()).storage_offset();
           drop(stack, 1);
           pack(stack, std::move(result));
-          return 0;
-        }
-        ),
+        },
+        aliasAnalysisFromSchema()
+    ),
 
     // Generated operators
     ${unboxed_ops}

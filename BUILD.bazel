@@ -152,6 +152,7 @@ genrule(
         "aten/src/ATen/Operators_2.cpp",
         "aten/src/ATen/Operators_3.cpp",
         "aten/src/ATen/Operators_4.cpp",
+        "aten/src/ATen/StaticUnboxingWrappers.cpp",
         "aten/src/ATen/NativeFunctions.h",
         "aten/src/ATen/MetaFunctions.h",
         "aten/src/ATen/MetaFunctions_inl.h",
