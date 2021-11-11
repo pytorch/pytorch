@@ -617,28 +617,31 @@ examine our traced module:
     # The generated `forward` function is:
     """
     def forward(self, x, y):
-        add_1 = x + y;  x = y = None
-        return add_1
+        add = x + y;  x = y = None
+        return add
     """
 
     # Print the internal Graph.
     print(traced.graph)
     # This print-out returns:
     """
-    graph(x, y):
-        %add_1 : [#users=1] = call_function[target=<built-in function add>](args = (%x, %y), kwargs = {})
-        return add_1
+    graph():
+        %x : [#users=1] = placeholder[target=x]
+        %y : [#users=1] = placeholder[target=y]
+        %add : [#users=1] = call_function[target=operator.add](args = (%x, %y), kwargs = {})
+        return add
     """
 
     # Print a tabular representation of the internal Graph.
     traced.graph.print_tabular()
     # This gives us:
     """
-    opcode         name    target                   args      kwargs
-    -------------  ------  -----------------------  --------  --------
-    placeholder    x       x                        ()        {}
-    placeholder    y       y                        ()        {}
-    call_function  add_1   <built-in function add>  (x, y)    {}
+    opcode         name    target                   args    kwargs
+    -------------  ------  -----------------------  ------  --------
+    placeholder    x       x                        ()      {}
+    placeholder    y       y                        ()      {}
+    call_function  add     <built-in function add>  (x, y)  {}
+    output         output  output                   (add,)  {}
     """
 
 Using the utility functions above, we can compare our traced Module
