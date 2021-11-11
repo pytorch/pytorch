@@ -303,6 +303,97 @@ __global__ void ComputeInternalGradientsCUDAKernel(
   }
 }
 
+template<typename T>
+struct T2 {
+  T x1;
+  T x2;
+  C10_HOST_DEVICE T2(): x1(0), x2(0) {};
+  C10_HOST_DEVICE T2(T x1, T x2): x1(x1), x2(x2) {};
+};
+
+template<typename T, typename T_ACC>
+T2<T_ACC> __device__ __inline__ compute_gI(
+  const T* __restrict__ dY,
+  const T* __restrict__ X,
+  const T_ACC* __restrict__ mean,
+  const T_ACC* __restrict__ rstd,
+  const T* __restrict__ gamma,
+  T* __restrict__ dX,
+  const int N,
+  T_ACC * buf){
+    const auto i1 = blockIdx.x;
+    const T_ACC mean_val = mean[i1];
+    const T_ACC rstd_val = rstd[i1];
+    using vec_t = aligned_vector<T, vec_size>;
+    using vec_acc_t = aligned_vector<T_ACC, vec_size>;
+    const vec_t * X_vec = reinterpret_cast<const vec_t*>(X + i1 * N);
+    const vec_t * dY_vec = reinterpret_cast<const vec_t*>(dY + i1 * N);
+    vec_t * dX_vec = reinterpret_cast<vec_t*>(dX + i1 * N);
+    const int n_vec_to_read = N/vec_size;
+    T_ACC stats_x1{0}, stats_x2{0};
+    for (int i=threadIdx.x; i<n_vec_to_read; i += blockDim.x){
+      vec_t dataX = X_vec[i];
+      vec_t datadY = dY_vec[i];
+      if (gamma != nullptr){
+        #pragma unroll
+        for (int ii=0; ii < vec_size; ii++){
+          T gamma_val = gamma[i*vec_size + ii];
+          stats_x1 += static_cast<T_ACC>(datadY.val[ii]) * static_cast<T_ACC>(gamma_val);
+          stats_x2 += static_cast<T_ACC>(datadY.val[ii]) * static_cast<T_ACC>(gamma_val)
+          * (static_cast<T_ACC>(dataX.val[ii]) - mean_val) * rstd_val;
+        }
+      } else {
+        for (int ii=0; ii < vec_size; ii++){
+          stats_x1 += static_cast<T_ACC>(datadY.val[ii]);
+          stats_x2 += datadY.val[ii] * (dataX.val[ii] - mean_val) * rstd_val;
+        }
+      }
+    }
+    stats_x1 = cuda_utils::BlockReduceSum(stats_x1, buf);
+    stats_x2 = cuda_utils::BlockReduceSum(stats_x2, buf);
+    if (threadIdx.x == 0) {
+      buf[0] = stats_x1;
+      buf[1] = stats_x2;
+    }
+    __syncthreads();
+    stats_x1 = buf[0];
+    stats_x2 = buf[1];
+    T_ACC fH = N;
+    T_ACC term1 = (T_ACC(1) / fH) * rstd_val;
+    for (int i=threadIdx.x; i<n_vec_to_read; i += blockDim.x){
+      vec_t dataX = X_vec[i];
+      vec_t datadY = dY_vec[i];
+      vec_t dataGamma;
+      vec_t dataGI;
+      #pragma unroll
+      for (int ii=0; ii < vec_size; ii++){
+        T_ACC gamma_val = (gamma != nullptr) ? gamma[i*vec_size+ii] : T(1);
+        T_ACC f_grad_input = fH * datadY.val[ii] * gamma_val;
+        f_grad_input -= stats_x1;
+        f_grad_input -= (dataX.val[ii] - mean_val) * rstd_val * stats_x2;
+        f_grad_input *= term1;
+        dataGI.val[ii] = f_grad_input;
+      }
+      dX_vec[i] = dataGI;
+    }
+  }
+
+template<typename T, typename T_ACC>
+__global__ void layer_norm_grad_input_vectorized_kernel(
+  const T* __restrict__ dY,
+  const T* __restrict__ X,
+  const T_ACC* __restrict__ mean,
+  const T_ACC* __restrict__ rstd,
+  const T* __restrict__ gamma,
+  T* __restrict__ dX,
+  const int N){
+    alignas(sizeof(double)) extern __shared__ char s_data1[];
+    T_ACC * buf = reinterpret_cast<T_ACC*>(&s_data1);
+
+    compute_gI(dY, X, mean, rstd, gamma, dX, N, buf);
+  }
+
+
 template <typename T, typename T_ACC>
 __global__ void ComputeGradientFusedParamsCUDAKernel(
     int64_t M,
@@ -665,6 +756,18 @@ void LayerNormBackwardKernelImplInternal(
     T_ACC* db_data = db.template data_ptr<T_ACC>();
     T_ACC* scale_data = scale.template data_ptr<T_ACC>();
     T_ACC* bias_data = bias.template data_ptr<T_ACC>();
+    auto can_vectorize = [&](const T * ptr, int alignment){uint64_t addr = reinterpret_cast<uint64_t>(ptr); return addr % alignment == 0;};
+    constexpr int num_vec_elems = vec_size;
+    constexpr int alignment = num_vec_elems * sizeof(T);
+
+    if (N % vec_size == 0 && can_vectorize(X_data, alignment) && can_vectorize(dY_data, alignment)
+    && can_vectorize(dX_data, alignment) && can_vectorize(gamma_data, alignment)) {
+      const int num_threads = 128;
+      const dim3 blocks(M);
+      int nshared = 2 * (num_threads/C10_WARP_SIZE) * sizeof(T_ACC);
+      layer_norm_grad_input_vectorized_kernel<<<blocks, num_threads, nshared, cuda_stream>>>(dY_data,
+      X_data, mean_data, rstd_data, gamma_data, dX_data, N);
+    } else {
     ComputeInternalGradientsCUDAKernel<T>
         <<<M, cuda_utils::kCUDABlockReduceNumThreads, 0, cuda_stream>>>(
             N, dY_data, X_data, gamma_data, ds_data, db_data);
@@ -691,6 +794,7 @@ void LayerNormBackwardKernelImplInternal(
         bias_data,
         dX_data);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
+  }
   }
   if (dgamma->defined() || dbeta->defined()) {
     T* dgamma_data =
