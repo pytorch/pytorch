@@ -349,6 +349,18 @@ def hook_iterator(namespace, profile_name):
     def context():
         return torch.autograd.profiler.record_function(profile_name)
 
+    class IteratorDecorator:
+        '''Wrap the iterator return result by adding __next__'''
+        def __init__(self, iterator):
+            self.iterator = iterator
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            with context():
+                return next(self.iterator)
+
     func = namespace['__iter__']
 
     if inspect.isgeneratorfunction(func):
@@ -376,6 +388,14 @@ def hook_iterator(namespace, profile_name):
                     return next_func(*args, **kwargs)
 
             namespace['__next__'] = wrap_next
+        else:
+            # have the __iter__ but not __next__ like what _ChildDataPipe did.
+            @functools.wraps(func)
+            def wrap_iter(*args, **kwargs):
+                iter_ret = func(*args, **kwargs)
+                return IteratorDecorator(iter_ret)
+
+            namespace['__iter__'] = wrap_iter
 
 def _dp_init_subclass(sub_cls, *args, **kwargs):
     # Add function for datapipe instance to reinforce the type
