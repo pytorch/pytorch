@@ -79,16 +79,13 @@ class SubgraphSlicer {
           auto prevNode = curNode->prev();
           if (curNode->kind() == prim::DifferentiableGraph) {
 
-            
-            
+            // aliased outputs in DifferentiableGraphs must be unfused
+            // since autodiff doesn't know how to handle them correctly
             any_changed = unfuseAliasedOutputs(curNode);
-
             // Inlining nodes may cause some subexpression to come back in the
             // subgraphs (for example, copying constants in repeatedly will generate
             // redundant prim::Constants). Run CSE to clean them up.
             EliminateCommonSubexpression(curNode->g(attr::Subgraph));
-            
-
             // don't try inlining until we unfuse all unaliased outputs
             if (!any_changed && !inlineIfTooSmall(curNode)) {
               diff_nodes_.push_back(curNode);
@@ -99,10 +96,6 @@ class SubgraphSlicer {
 
     }
 
-
-
-    // clean up dont merge attributes as they are irrelevant outside this pass
-    clearDontMergeSym(block_);
     for (Node* n : block_->nodes()) {
       for (Block* b : n->blocks()) {
         SubgraphSlicer(b, graph_, minSubgraphSize_, aliasDb_, diff_nodes_)
@@ -182,7 +175,7 @@ class SubgraphSlicer {
       auto it = ++sets[i].begin();
       while (it != sets[i].end()) {
         GRAPH_DEBUG("root aliased value ", (*it)->debugName(), " node ", *(*it)->node());
-        collectNodeToUnfuse((*it)->node(), nodes);
+        collectNodesToUnfuse((*it)->node(), nodes);
         it++;
       }
     }
@@ -199,7 +192,7 @@ class SubgraphSlicer {
     return !nodes.empty();
   }
 
-  void collectNodeToUnfuse(Node* start, std::set<Node*, topo_cmp_node>& s) {
+  void collectNodesToUnfuse(Node* start, std::set<Node*, topo_cmp_node>& s) {
     if(start->kind() == prim::Return || start->kind() == prim::Param) {
       GRAPH_DEBUG("reached the param or return node", getHeader(start));
       return;
@@ -210,12 +203,12 @@ class SubgraphSlicer {
       return;
     }
 
-    GRAPH_DEBUG("collectNodeToUnfuse: inserting node ", getHeader(start));
+    GRAPH_DEBUG("collectNodesToUnfuse: inserting node ", getHeader(start));
     s.insert(start);
 
     for (auto o : start->outputs()) {
       for (auto use : o->uses()) {
-        collectNodeToUnfuse(use.user, s);
+        collectNodesToUnfuse(use.user, s);
       }
     }
   }
@@ -318,27 +311,6 @@ class SubgraphSlicer {
     n->destroy();
   }
 
-  std::vector<std::set<Value*, topo_cmp_value>> buildAliasedSets(
-      c10::ArrayRef<Value*> outputs) {
-    TORCH_INTERNAL_ASSERT(outputs.size() > 1);
-    std::vector<std::set<Value*, topo_cmp_value>> res;
-    for (auto o : outputs) {
-      auto grouped = false;
-      for (auto& s : res) {
-        auto os = *s.begin();
-        if (aliasDb_.mayContainAlias(os, o) ||
-            aliasDb_.mayContainAlias(o, os)) {
-          s.insert(o);
-          grouped = true;
-        }
-      }
-      if (!grouped) {
-        res.push_back({o});
-      }
-    }
-    return res;
-  }
-
   std::vector<std::set<Value*, topo_cmp_value>> buildAliasedSets(std::shared_ptr<Graph> subgraph) {
     auto outputs = subgraph->outputs();
     AliasDb alias_db(subgraph);
@@ -363,32 +335,6 @@ class SubgraphSlicer {
       }
     }
     return res;
-  }
-
-  void markNodeToNotFuse(Node* start) {
-    TORCH_INTERNAL_ASSERT(
-        start->kind() != prim::Return && start->kind() != prim::Param);
-
-    if (start->hasAttribute(dont_merge_sym)) {
-      // already visited, no need to visit descendants
-      return;
-    }
-
-    start->i_(dont_merge_sym, 1);
-
-    for (auto o : start->outputs()) {
-      for (auto use : o->uses()) {
-        markNodeToNotFuse(use.user);
-      }
-    }
-  }
-
-  void clearDontMergeSym(Block* b) {
-    for (auto n : b->nodes()) {
-      if (n->hasAttribute(dont_merge_sym)) {
-        n->removeAttribute(dont_merge_sym);
-      }
-    }
   }
 
   std::vector<WorkBlock> buildWorkBlocks() {
