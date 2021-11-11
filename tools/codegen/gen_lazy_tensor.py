@@ -110,6 +110,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
         TODO(alanwaketan): Once all ops are grouped properly, we should no longer need this hack.
         """
         generated = set()
+
         def gen_key(func: NativeFunction):
             # we want to generate unique entries for overloads of functional variants,
             # but not for inplace variants unless explicitly told `codegenInplaceVariant`
