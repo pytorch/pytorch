@@ -490,7 +490,7 @@ class TestOptim(TestCase):
             )
             self._test_basic_cases(
                 lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, amsgrad=True, maximize=maximize),
-                    constructor_accepts_maximize=True
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
                 lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, weight_decay=0.1, maximize=maximize),

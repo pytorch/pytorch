@@ -105,7 +105,7 @@ def adam(params: List[Tensor],
             denom = (exp_avg_sq.sqrt() / math.sqrt(bias_correction2)).add_(eps)
 
 
-        step_size_with_direction =  lr / bias_correction1 if maximize else -lr / bias_correction1
+        step_size_with_direction = lr / bias_correction1 if maximize else -lr / bias_correction1
 
         param.addcdiv_(exp_avg, denom, value=step_size_with_direction)
 
