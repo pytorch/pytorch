@@ -18,7 +18,7 @@ from tools.codegen.model import (Argument, DispatchKey, FunctionSchema,
                                  OptionalType, SchemaKind, SelfArgument,
                                  TensorOptionsArguments, Type, Variant,
                                  assert_never, is_cuda_dispatch_key,
-                                 is_generic_dispatch_key)
+                                 is_generic_dispatch_key, BaseTy)
 from tools.codegen.api.types import (Binding, CppSignature, CppSignatureGroup,
                                      DispatcherSignature, NativeSignature)
 from tools.codegen.api import cpp
@@ -292,7 +292,7 @@ static C10_NOINLINE c10::TypedOperatorHandle<{name}::schema> create_{name}_typed
             assert_never(self.target)
 
 
-# Generates Function.h, which provides the functional public C++ API,
+# Generates Functions.h, which provides the functional public C++ API,
 # and the scaffolding to call into the dispatcher from these functions.
 @dataclass(frozen=True)
 class ComputeFunction:
@@ -435,6 +435,127 @@ TORCH_API inline {sig.decl(is_redispatching_fn=True)} {{
 
         return result
 
+# Generates Static.cpp.
+# This generates static unboxing wrapper for ATen ops.
+@dataclass(frozen=True)
+class ComputeStaticUnboxingWrapper:
+
+    @method_with_native_function
+    def __call__(self, f: NativeFunction) -> Optional[str]:
+        # We unconditionally generate function wrappers,
+        sig_group = CppSignatureGroup.from_native_function(f, method=False, fallback_binding=f.manual_cpp_binding)
+
+        def generate_defn(faithful: bool) -> str:
+            if faithful:
+                sig = sig_group.faithful_signature
+                assert sig is not None
+            else:
+                sig = sig_group.signature
+            argument_str = "std::move(peek(stack, {pos}, {args_num}))"
+            arguments: List[str] = []
+            args_num = len(f.func.arguments.flat_positional)
+            type_to_conversion = {
+                BaseTy.Generator: {
+                    "default": "({}).toGenerator(),",
+                    "optional": "({}).toOptional<at::Generator>(),"
+                },
+                BaseTy.ScalarType: {
+                    "default": "({}).toScalarType(),",
+                    "optional": "({}).toOptional<ScalarType>(),"
+                },
+                BaseTy.Tensor: {
+                    "default": "({}).toTensor(),",
+                    "optional": "toOptionalTensor({}),",
+                    "list": "({}).toTensorList()->elements(),",
+                },
+                BaseTy.int: {
+                    "default": "({}).toInt(),",
+                    "optional": "({}).toOptional<int64_t>(),",
+                    "list": "({}).toIntList()->elements(),",
+                },
+                BaseTy.Dimname: {
+                    "default": "({}).toDimname(),",
+                    "optional": "({}).toOptional<at::Dimname>(),",
+                },
+                BaseTy.float: {
+                    "default": "({}).toDouble(),",
+                    "optional": "({}).toOptional<double>(),",
+                    "list": "({}).toDoubleList()->elements(),",
+                },
+                BaseTy.str: {
+                    "default": "({}).toString()->string(),",
+                    "optional": "({}).toOptional<c10::string_view>(),",
+                },
+                BaseTy.bool: {
+                    "default": "({}).toBool(),",
+                    "optional": "({}).toOptional<bool>(),",
+                    "list": "({}).toBoolList()->elements(),",
+                },
+                BaseTy.layout: {
+                    "default": "({}).toLayout(),",
+                    "optional": "({}).toOptional<bool>(),",
+                    "list": "({}).toBoolList()->elements(),",
+                },
+                BaseTy.Device: {
+                    "default": "({}).toDevice(),",
+                    "optional": "({}).toOptional<c10::Device>(),",
+                },
+                BaseTy.Scalar: {
+                    "default": "({}).toScalar(),",
+                    "optional": "({}).toOptional<at::Scalar>(),",
+                },
+                BaseTy.MemoryFormat: {
+                    "default": "({}).toMemoryFormat(),",
+                    "optional": "({}).toOptional<at::MemoryFormat>(),",
+                },
+                BaseTy.QScheme: {
+                    "default": "({}).toQScheme(),",
+                    "optional": "({}).toOptional<at::QScheme>(),",
+                },
+                BaseTy.Storage: {
+                    "default": "({}).toStorage(),",
+                    "optional": "({}).toOptional<at::Storage>(),",
+                },
+                BaseTy.Stream: {
+                    "default": "({}).toStream(),",
+                    "optional": "({}).toOptional<c10::Stream>(),",
+                },
+            }
+            # parse arguments into C++ code
+            for i, arg in enumerate(f.func.arguments.flat_positional):
+                ivalue_str = argument_str.format(pos=i, args_num=args_num)
+                assert arg.type.name in type_to_conversion, f"Type is: {arg.type}"
+                if arg.type.is_list_like():
+                    assert "list" in type_to_conversion[arg.type.name], f"List format of {arg.type.name} \
+                    is not implemented!"
+                    arguments.append(type_to_conversion[arg.type.name]["list"].format(ivalue_str))
+                elif arg.type.is_nullable():
+                    assert "optional" in type_to_conversion[arg.type.name], f"Optional format of {arg.type.name} \
+                    is not implemented!"
+                    arguments.append(type_to_conversion[arg.type.name]["optional"].format(ivalue_str))
+                else:
+                    assert "default" in type_to_conversion[arg.type.name], f"Default format of {arg.type.name} \
+                    is not implemented!"
+                    arguments.append(type_to_conversion[arg.type.name]["default"].format(ivalue_str))
+
+            if sig.method:
+                pass
+            return f"""
+Operator(
+    "aten::{sig.func}",
+    [](Stack & stack) {{
+                autograd::profiler::RecordFunction record("{sig.decl()}");
+        drop(stack, {len(sig.arguments())});
+        pack(stack, std::move(result_));
+        return 0;
+    }}
+),
+"""
+        result = generate_defn(False)
+        if sig_group.faithful_signature is not None:
+            result += generate_defn(True)
+
+        return result
 
 # Generates ATenOpList.cpp, a runtime accessible list of all aten
 # operators.
@@ -1292,6 +1413,10 @@ def main() -> None:
     })
 
     cpu_fm.write('Functions.cpp', lambda: {})
+
+    cpu_fm.write('StaticUnboxingWrappers.cpp', lambda: {
+        'unboxed_ops': list(mapMaybe(ComputeStaticUnboxingWrapper(), native_functions)),
+    })
 
     core_fm.write('TensorBody.h', lambda: {
         'static_dispatch_extra_headers': static_dispatch_extra_headers(static_dispatch_idx, skip_tensor_include=True),
