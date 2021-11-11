@@ -11,6 +11,19 @@ def _mvdigamma(x, p) -> torch.Tensor:
     assert x > (p - 1) / 2, "Wrong domain for digamma function."
     return torch.digamma(x - torch.arange(p) / 2).sum()
 
+import math
+
+import torch
+from torch.distributions import constraints
+from torch.distributions.distribution import Distribution
+from torch.distributions.utils import _standard_normal, lazy_property
+from torch.distributions.multivariate_normal import _precision_to_scale_tril
+
+
+def _mvdigamma(x, p) -> torch.Tensor:
+    assert x > (p - 1) / 2, "Wrong domain for digamma function."
+    return torch.digamma(x - torch.arange(p) / 2).sum()
+
 class Wishart(Distribution):
     r"""
     Creates a Wishart distribution parameterized by a square root matrix of symmetric matrix.
@@ -18,10 +31,11 @@ class Wishart(Distribution):
     an outer product of general square root matrix e,g.,
     :math:`\mathbf{\Sigma} = \mathbf{P}\mathbf{D}\mathbf{P}^\top = \mathbf{P'}\mathbf{P'}^\top` or
     an outer product of cholesky decomposition :math:`\mathbf{\Sigma} = \mathbf{L}\mathbf{L}^\top`
-    can be obtained via e.g. Cholesky decomposition of the covariance.  
+    can be obtained via Cholesky decomposition of the covariance.  
     Example:
         >>> m = Wishart(torch.eye(2), torch.Tensor([2]))
-        >>> m.sample()  # Wishart distributed with mean=`df * I` and variance=``
+        >>> m.sample()  #Wishart distributed with mean=`df * I` and
+                        #variance(x_ij)=`df` for i != j and variance(x_ij)=`2 * df` for i == j
     Args:
         covariance_matrix (Tensor): positive-definite covariance matrix
         precision_matrix (Tensor): positive-definite precision matrix
