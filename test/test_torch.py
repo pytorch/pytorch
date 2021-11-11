@@ -2233,9 +2233,9 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             self.assertEqual(xv, x)
 
             # Tests that setting atol or rtol without the other throws
-            self.assertRaises(AssertionError,
+            self.assertRaises(ValueError,
                               lambda: self.assertEqual(x, xv, atol=4))
-            self.assertRaises(AssertionError,
+            self.assertRaises(ValueError,
                               lambda: self.assertEqual(x, xv, rtol=4))
 
             self.assertRaisesRegex(TypeError, "takes from 3 to 4 positional arguments",
