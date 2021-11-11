@@ -101,7 +101,7 @@ graph(%a.1 : Float(8, 8, strides=[8, 1], requires_grad=0, device=cpu),
   auto b = at::rand({8, 8}, TensorOptions(kCPU).dtype(at::kFloat));
   auto o = at::zeros({8, 8}, TensorOptions(kCPU).dtype(at::kFloat));
   auto ref = at::matmul(a, b) + a;
-  TensorExprKernel k(graph, {}, true);
+  TensorExprKernel k(graph, {}, {}, true);
 
   std::vector<at::Tensor> inputs = {a, b};
   auto stmt = k.getCodeGenStmt();

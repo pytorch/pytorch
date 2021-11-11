@@ -12,6 +12,7 @@ import torch.nn.intrinsic.quantized.dynamic as nniqd
 import torch.nn.intrinsic.qat as nniqat
 import torch.nn.intrinsic as nni
 import torch.nn.qat as nnqat
+import torch.nn.qat.dynamic as nnqatd
 
 from .ns_types import NSNodeTargetType
 
@@ -73,6 +74,7 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
             nniq.LinearReLU,
             nniqd.LinearReLU,
             nnqat.Linear,
+            nnqatd.Linear,
             nnqd.Linear,
             nniqat.LinearReLU,
             nn.modules.linear.NonDynamicallyQuantizableLinear,
@@ -488,6 +490,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
     MODS_IO_TYPE_FP32: Set[NSNodeTargetType] = set([
         nn.Linear,
         nnqat.Linear,
+        nnqatd.Linear,
         nnqd.Linear,
         torch.nn.modules.linear.NonDynamicallyQuantizableLinear,
         nn.Conv1d,

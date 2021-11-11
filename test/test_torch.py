@@ -3619,6 +3619,12 @@ class TestTorchDeviceType(TestCase):
         input_ = layer_norm(input_.transpose(1, 2).contiguous()).contiguous()
         input_.sum().backward()
 
+        # 3d
+        conv = torch.nn.ConvTranspose3d(3, 3, kernel_size=3).to(device)
+        input = torch.randn(batch_size, 3, length, length, length, device=device)
+        out = conv(input)
+        out.backward(torch.ones_like(out).transpose(-2, -1))
+
     # TODO: this test should be in test_nn.py
     @onlyCUDA
     @largeTensorTest('12GB')
