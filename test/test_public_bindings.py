@@ -147,6 +147,7 @@ class TestPublicBindings(TestCase):
             "is_inference_mode_enabled",
             "JITException",
             "layout",
+            "linalg_backend",
             "ListType",
             "LiteScriptModule",
             "LockingLogger",
