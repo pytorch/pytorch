@@ -1486,8 +1486,8 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
         extra_ldflags.append('torch_cpu.lib')
         if BUILD_SPLIT_CUDA and with_cuda:
             extra_ldflags.append('torch_cuda_cu.lib')
-            # /INCLUDE is used to ensure torch_cuda_cu is linked against in a project that relies on it.
-            extra_ldflags.append('-INCLUDE:?searchsorted_cuda@native@at@@YA?AVTensor@2@AEBV32@0_N1@Z')
+            # See [Note about _torch_cuda_cu_linker_symbol_op and torch_cuda_cu] in native_functions.yaml
+            extra_ldflags.append('-INCLUDE:?_torch_cuda_cu_linker_symbol_op_cuda@native@at@@YA?AVTensor@2@AEBV32@@Z')
             extra_ldflags.append('torch_cuda_cpp.lib')
             # /INCLUDE is used to ensure torch_cuda_cpp is linked against in a project that relies on it.
             # Related issue: https://github.com/pytorch/pytorch/issues/31611

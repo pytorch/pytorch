@@ -1,9 +1,8 @@
 #include <ATen/Utils.h>
 #include <c10/core/TensorImpl.h>
-// #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/backends/backend.h>
 #include <torch/csrc/jit/backends/backend_exception.h>
-// #include <torch/csrc/jit/mobile/profiler_edge.h>
+#include <torch/csrc/jit/mobile/profiler_edge.h>
 
 namespace torch {
 namespace jit {
@@ -99,13 +98,13 @@ class BackendWithCompiler : public PyTorchBackendInterface {
     op_runtimes_us.reserve(handle.toList().size());
 
     c10::List<at::Tensor> output_list;
-    // auto start_us = autograd::profiler::getTime() / 1000;
+    auto start_us = autograd::profiler::getTime() / 1000;
     for (const auto& token : handle.toList()) {
       IValue val = token;
-      auto instruction = val.toTuple()->elements()[0].toStringRef();
-      auto debug_handle = val.toTuple()->elements()[1].toInt();
+      auto instruction = val.toTupleRef().elements()[0].toStringRef();
+      auto debug_handle = val.toTupleRef().elements()[1].toInt();
       double const_val = 1.0;
-      // auto start_time_us = autograd::profiler::getTime() / 1000;
+      auto start_time_us = autograd::profiler::getTime() / 1000;
       try {
         if (instruction.rfind("prim::Constant", 0) == 0) {
           TORCH_CHECK(
@@ -117,16 +116,20 @@ class BackendWithCompiler : public PyTorchBackendInterface {
           // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
           const_val = stod(sub);
         } else if (instruction == "aten::add" || instruction == "aten::sub") {
+          TORCH_CHECK(x.sizes() == h.sizes());
+          if (x.dim() > 1 || (x.dim() == 1 && x.size(0) > 1)) {
+            TORCH_WARN("Only the first elements of the tensors are added or subbed.");
+          }
+          TORCH_CHECK((x.scalar_type() == c10::ScalarType::Float && h.scalar_type() == c10::ScalarType::Float),
+            "Only float tensors are compatible for add and sub.");
           auto y =
-              at::detail::empty_cpu(x.sizes(), {}, {}, {}, {}, c10::nullopt);
+              at::detail::empty_cpu(x.sizes(), c10::ScalarType::Float, {}, {}, {}, c10::nullopt);
           auto x_ptr = float_data_ptr(x);
           auto h_ptr = float_data_ptr(h);
           auto y_ptr = float_data_ptr(y);
           if (instruction == "aten::add") {
-            TORCH_CHECK(x.sizes() == h.sizes());
             y_ptr[0] = x_ptr[0] + h_ptr[0];
           } else {
-            TORCH_CHECK(x.sizes() == h.sizes());
             y_ptr[0] = x_ptr[0] - h_ptr[0];
           }
           output_list.emplace_back(y);
@@ -141,19 +144,19 @@ class BackendWithCompiler : public PyTorchBackendInterface {
       } catch (c10::Error& e) {
         TORCH_DELEGATED_BACKEND_THROW(false, e.what(), debug_handle);
       }
-      // auto end_time_us = autograd::profiler::getTime() / 1000;
-      // auto duration = end_time_us - start_time_us;
-      // op_runtimes_us.emplace_back(duration, debug_handle, instruction);
+      auto end_time_us = autograd::profiler::getTime() / 1000;
+      auto duration = end_time_us - start_time_us;
+      op_runtimes_us.emplace_back(duration, debug_handle, instruction);
     }
-    // for (const auto& tup : op_runtimes_us) {
-    //   RECORD_BACKEND_EVENT_TO_EDGE_PROFILER(
-    //       start_us,
-    //       start_us + std::get<0>(tup),
-    //       std::get<1>(tup),
-    //       std::get<2>(tup),
-    //       "test_backend");
-    //   start_us = start_us + std::get<0>(tup);
-    // }
+    for (const auto& tup : op_runtimes_us) {
+      RECORD_BACKEND_EVENT_TO_EDGE_PROFILER(
+          start_us,
+          start_us + std::get<0>(tup),
+          std::get<1>(tup),
+          std::get<2>(tup),
+          "test_backend");
+      start_us = start_us + std::get<0>(tup);
+    }
     return c10::impl::toList(output_list);
   }
 };

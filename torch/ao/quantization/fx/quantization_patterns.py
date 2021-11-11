@@ -47,7 +47,7 @@ from .utils import (
 
 from ..qconfig import QConfigAny
 
-from abc import ABC, abstractmethod
+from abc import ABC
 import operator
 import warnings
 
@@ -169,8 +169,6 @@ class QuantizeHandler(ABC):
         """
         return True
 
-
-    @abstractmethod
     def convert(self,
                 node: Node,
                 qconfig: QConfigAny,
@@ -1732,13 +1730,6 @@ class ConvReLUQuantizeHandlerNew(QuantizeHandler):
         elif node.op == "call_function":
             self.conv = node.target  # type: ignore[assignment]
 
-    def should_insert_observer_for_output(
-        self,
-        qconfig: Any,
-        model_is_training: bool,
-    ) -> bool:
-        return False
-
     def is_output_quantized(self, qconfig):
         return False
 
@@ -1885,13 +1876,6 @@ class LinearReLUQuantizeHandlerNew(QuantizeHandler):
         self.linear_node = node
         if node.op == 'call_module':
             self.linear = modules[str(self.linear_node.target)]
-
-    def should_insert_observer_for_output(
-        self,
-        qconfig: Any,
-        model_is_training: bool,
-    ) -> bool:
-        return False
 
     def is_output_quantized(self, qconfig):
         return False

@@ -6,6 +6,7 @@
 #include <vector>
 
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/runtime/static/impl.h>
 
 namespace c10 {
 struct IValue;
@@ -26,9 +27,20 @@ void testStaticRuntime(
     const std::vector<c10::IValue>& args,
     const std::vector<c10::IValue>& args2 = {},
     const bool use_allclose = false,
-    const bool use_equalnan = false);
+    const bool use_equalnan = false,
+    const bool check_resize = true);
 
 std::shared_ptr<Graph> getGraphFromIR(const std::string& ir);
+
+bool hasProcessedNodeWithName(
+    torch::jit::StaticModule& smodule,
+    const char* name);
+
+at::Tensor getTensor(const at::IValue& ival);
+
+Node* getNodeWithKind(const StaticModule& smodule, const std::string& kind);
+
+bool hasNodeWithKind(const StaticModule& smodule, const std::string& kind);
 
 } // namespace test
 } // namespace jit
