@@ -1370,7 +1370,7 @@ class RelaxedNumberPair(NumberPair):
         elif isinstance(number_like, bool):
             return None, int(number_like)
         elif isinstance(number_like, Enum):
-            return None, int(number_like)
+            return None, int(number_like)  # type: ignore[call-overload]
         else:
             return super()._to_number(number_like)
 
@@ -1875,6 +1875,7 @@ class TestCase(expecttest.TestCase):
             ),
             sequence_types=(
                 Sequence,
+                torch.storage.TypedStorage,
                 Sequential,
                 ModuleList,
                 ParameterList,
