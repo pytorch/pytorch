@@ -3,7 +3,7 @@ set(ATen_CUDA_INCLUDE ${ATen_CUDA_INCLUDE}
 PARENT_SCOPE)
 
 set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS}
-  ${CMAKE_CURRENT_SOURCE_DIR}/THCGeneral.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/THCStorage.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THCStorageCopy.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensor.cpp
 
@@ -21,21 +21,7 @@ install(FILES
           THCStorageCopy.h
           THCTensor.h
           THCAtomics.cuh
-          THCGenerateAllTypes.h
-          THCGenerateBFloat16Type.h
-          THCGenerateBoolType.h
           THCGenerateByteType.h
-          THCGenerateCharType.h
-          THCGenerateShortType.h
-          THCGenerateIntType.h
-          THCGenerateLongType.h
-          THCGenerateHalfType.h
-          THCGenerateFloatType.h
-          THCGenerateFloatTypes.h
-          THCGenerateDoubleType.h
-          THCGenerateComplexFloatType.h
-          THCGenerateComplexTypes.h
-          THCGenerateComplexDoubleType.h
           # See Note [TH abstraction violation]
           THCTensor.hpp
           THCStorage.hpp

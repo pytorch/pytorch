@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Owner(s): ["oncall: jit"]
+
 import torch
 
 # This is how we include tests located in test/jit/...
@@ -26,6 +28,7 @@ from jit.test_symbolic_shape_analysis import TestSymbolicShapeAnalysis  # noqa: 
 from jit.test_unsupported_ops import TestUnsupportedOps  # noqa: F401
 from jit.test_freezing import TestFreezing, TestFrozenOptimizations, TestMKLDNNReinplacing  # noqa: F401
 from jit.test_peephole import TestPeephole  # noqa: F401
+from jit.test_alias_analysis import TestAliasAnalysis  # noqa: F401
 from jit.test_save_load import TestSaveLoad  # noqa: F401
 from jit.test_module_containers import TestModuleContainers  # noqa: F401
 from jit.test_python_bindings import TestPythonBindings  # noqa: F401
@@ -65,6 +68,7 @@ from jit.test_optimize_for_mobile_preserve_debug_info import TestOptimizeForMobi
 from jit.test_union import TestUnion  # noqa: F401
 from jit.test_models import MnistNet
 from jit.test_batch_mm import TestBatchMM  # noqa: F401
+from jit.test_dtype_analysis import TestDtypeAnalysis  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -86,7 +90,7 @@ import torch.nn.functional as F
 from torch.testing._internal import jit_utils
 from torch.testing._internal.common_jit import check_against_reference
 from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
-    suppress_warnings, IS_SANDCASTLE, GRAPH_EXECUTOR, ProfilingMode, \
+    suppress_warnings, BUILD_WITH_CAFFE2, IS_SANDCASTLE, GRAPH_EXECUTOR, ProfilingMode, TestCase, \
     freeze_rng_state, slowTest, TemporaryFileName, skipIfCompiledWithoutNumpy, \
     enable_profiling_mode_for_profiling_tests, TEST_MKL, set_default_dtype, num_profiled_runs
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
@@ -15322,6 +15326,7 @@ dedent """
                 self.assertEqual(value, getattr(loaded, "_" + name))
 
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
+    @unittest.skipIf(not BUILD_WITH_CAFFE2, "PyTorch is build without Caffe2 support")
     def test_old_models_bc(self):
         model = {
             'archive/version': b'1',
@@ -16337,7 +16342,7 @@ def normalize_check_ad(check_ad, name):
     return check_ad
 
 
-class TestProducerVersion(unittest.TestCase):
+class TestProducerVersion(TestCase):
 
     def test_version(self):
         # issue gh-32561

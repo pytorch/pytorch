@@ -1,9 +1,10 @@
+# Owner(s): ["oncall: quantization"]
+
 from builtins import round
 
 import copy
 import itertools
 import numpy as np
-import sys
 import unittest
 import operator
 import random
@@ -21,7 +22,7 @@ import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 
 from torch.testing._internal.common_utils import TestCase
-from torch.testing._internal.common_utils import IS_PPC, TEST_WITH_UBSAN, IS_MACOS
+from torch.testing._internal.common_utils import IS_PPC, TEST_WITH_UBSAN, IS_MACOS, BUILD_WITH_CAFFE2
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM, skipIfNoQNNPACK
 from torch.testing._internal.common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
     override_quantized_engine, supported_qengines, override_qengines, _snr
@@ -311,8 +312,19 @@ class TestQuantizedOps(TestCase):
                 ],
                 'reference_fn': torch.nn.functional.hardsigmoid,
                 'output_range': (0.0, 1.0),
-                'change_zero_point': True
-            }
+                'change_zero_point': True,
+            },
+            {
+                'quantized_fn': [
+                    torch.nn.quantized.functional.hardsigmoid
+                ],
+                'reference_fn': torch.nn.functional.hardsigmoid,
+                'output_range': (0.0, 1.0),
+                'change_zero_point': True,
+                'extra_kwargs': {
+                    'inplace': True,
+                },
+            },
         ]
         shapes = ((4,), (4, 4), (4, 4, 4), (4, 4, 4, 4))
         dtypes = (torch.quint8, torch.qint8)
@@ -3062,7 +3074,7 @@ class TestDynamicQuantizedRNNOp(TestCase):
                 self.assertEqual(result_ref[0], result_dynamic[0], msg="torch.quantized_rnncell results are off")
 
 
-class TestQuantizedLinear(unittest.TestCase):
+class TestQuantizedLinear(TestCase):
     """Tests the correctness of the quantized linear and linear_relu op."""
     @given(batch_size=st.integers(1, 4),
            input_channels=st.integers(16, 32),
@@ -3227,7 +3239,8 @@ class TestQuantizedLinear(unittest.TestCase):
                 W_q.q_zero_point(), W_q_origin.q_zero_point())
 
 
-@unittest.skipIf(sys.platform == "darwin", "Known test failure on Mac.")
+@unittest.skipIf(IS_MACOS, "Known test failure on Mac.")
+@unittest.skipIf(not BUILD_WITH_CAFFE2, "Test needs Caffe2")
 class TestQuantizedEmbeddingOps(TestCase):
     def _test_embedding_bag_unpack_fn(self, pack_fn, unpack_fn, num_embeddings, embedding_dim, bit_rate, optimized_qparams,
                                       num_batches, data_type=np.float32):

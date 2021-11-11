@@ -1,3 +1,5 @@
+# Owner(s): ["module: cuda"]
+
 from itertools import repeat, chain, product
 from typing import NamedTuple
 import collections
@@ -581,6 +583,13 @@ class TestCuda(TestCase):
         torch.backends.cuda.matmul.allow_tf32 = not orig
         self.assertEqual(torch._C._get_cublas_allow_tf32(), not orig)
         torch.backends.cuda.matmul.allow_tf32 = orig
+
+    def test_cublas_allow_fp16_reduced_precision_reduction_get_set(self):
+        orig = torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
+        self.assertEqual(torch._C._get_cublas_allow_fp16_reduced_precision_reduction(), orig)
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = not orig
+        self.assertEqual(torch._C._get_cublas_allow_fp16_reduced_precision_reduction(), not orig)
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = orig
 
     def test_cudnn_allow_tf32_get_set(self):
         with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=False):
@@ -1627,6 +1636,8 @@ except RuntimeError as e:
         self.assertEqual(a.norm(p=0, dtype=torch.float32), 65536)
 
     # Test that wrap_with_cuda_memory_check successfully detects leak
+    # skip for ROCM. Look into #62533.
+    @skipIfRocm
     def test_cuda_memory_leak_detection(self):
         l = []
 
