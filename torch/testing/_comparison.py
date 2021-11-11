@@ -371,15 +371,16 @@ class ObjectPair(Pair):
 class NonePair(Pair):
     """Pair for ``None`` inputs."""
     def __init__(self, actual: Any, expected: Any, **other_parameters: Any) -> None:
-        if not (actual is None and expected is None):
+        if not (actual is None or expected is None):
             raise UnsupportedInputs()
 
         super().__init__(actual, expected, **other_parameters)
 
     def compare(self) -> Optional[ErrorMeta]:
-        # At instantiation we already checked that both actual and expected are None, so there is nothing left to do
-        # here
-        return None
+        if self.actual is None and self.expected is None:
+            return None
+
+        return self._make_error_meta(AssertionError, f"None mismatch: {self.actual} is not {self.expected}")
 
 
 class BooleanPair(Pair):
@@ -396,7 +397,7 @@ class BooleanPair(Pair):
         super().__init__(actual, expected, **other_parameters)
 
     def _process_inputs(self, actual: Any, expected: Any, *, id: Tuple[Any, ...]) -> Tuple[bool, bool]:
-        cls = [bool]
+        cls: List[Type] = [bool]
         if NUMPY_AVAILABLE:
             cls.append(np.bool_)
         self._check_inputs_isinstance(actual, expected, cls=tuple(cls))
