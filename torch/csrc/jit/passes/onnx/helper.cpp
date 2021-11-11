@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
+#include <torch/csrc/utils/pybind.h>
 
 #include <onnx/onnx_pb.h>
 
@@ -248,6 +249,11 @@ void ONNXLintGraph(const std::shared_ptr<Graph>& graph) {
       " nodes. Including ",
       const_count_scope,
       " constants.");
+}
+
+int GetOpsetVersion() {
+  py::object onnx_symbolic = py::module::import("torch.onnx.symbolic_helper");
+  return py::cast<int>(onnx_symbolic.attr("_export_onnx_opset_version"));
 }
 
 } // namespace jit

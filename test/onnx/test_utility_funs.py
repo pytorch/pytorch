@@ -1127,6 +1127,34 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         self.assertEqual(graph.graph.input[1].name, "in_weight")
         self.assertEqual(graph.graph.input[2].name, "in_bias")
 
+    def test_deduplicate_initializers_torchscript(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer1 = torch.nn.Linear(3, 3)
+                self.layer2 = torch.nn.Linear(3, 3)
+
+                # Reusing layers.
+                self.layer3 = self.layer1
+
+                # Reusing parameters.
+                self.layer2.weight = self.layer1.weight
+                self.layer1.bias = self.layer2.bias
+
+            def forward(self, x):
+                return self.layer3(self.layer2(self.layer1(x)))
+
+        model = torch.jit.script(MyModule())
+
+        x = torch.randn(3, 3)
+        f = io.BytesIO()
+
+        model.eval()
+        torch.onnx.export(model, (x,), f,
+                          opset_version=self.opset_version)
+        graph = onnx.load(io.BytesIO(f.getvalue()))
+        self.assertSetEqual(set([i.name for i in graph.graph.initializer]), set([k for k, _ in model.named_parameters()]))
+
     def test_duplicated_output_node(self):
         class DuplicatedOutputNet(torch.nn.Module):
             def __init__(self, input_size, num_classes):
@@ -1193,6 +1221,10 @@ class TestUtilityFuns_opset13(TestUtilityFuns_opset9):
 
 class TestUtilityFuns_opset14(TestUtilityFuns_opset9):
     opset_version = 14
+
+
+class TestUtilityFuns_opset15(TestUtilityFuns_opset9):
+    opset_version = 15
 
 
 if __name__ == "__main__":

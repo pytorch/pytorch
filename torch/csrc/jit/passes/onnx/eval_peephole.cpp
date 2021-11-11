@@ -142,9 +142,63 @@ static void fuseConvBatchNorm(Block* b, ValueToParamPairMap& valsToParamsMap) {
   }
 }
 
+static void DeduplicateParameters(
+    Block* b,
+    ValueToParamPairMap& valsToParamsMap) {
+  // Parameters are considered as duplicated if their data_ptr, strides and
+  // sizes are equal.
+  std::vector<Value*> uniqueVals;
+  std::vector<size_t> inputsIndicesToRemove;
+  auto g = b->owningGraph();
+
+  auto is_same_tensor_as = [&valsToParamsMap](Value* v) {
+    return [&valsToParamsMap, v](Value* v2) {
+      if ((valsToParamsMap.find(v) == valsToParamsMap.end()) ||
+          (valsToParamsMap.find(v2) == valsToParamsMap.end())) {
+        return false;
+      }
+      auto iv1 = valsToParamsMap.find(v)->second.second;
+      auto iv2 = valsToParamsMap.find(v2)->second.second;
+      if (!iv1.isTensor() || !iv2.isTensor()) {
+        return false;
+      }
+      auto t1 = iv1.toTensor();
+      auto t2 = iv2.toTensor();
+      return t1.sizes().equals(t2.sizes()) &&
+          t1.strides().equals(t2.strides()) && (t1.data_ptr() == t2.data_ptr());
+    };
+  };
+
+  for (auto i : c10::irange(b->inputs().size())) {
+    auto v = g->inputs().at(i);
+    if (valsToParamsMap.find(v) == valsToParamsMap.end()) {
+      // Skip model inputs
+      continue;
+    }
+    auto it = std::find_if(
+        uniqueVals.begin(), uniqueVals.end(), is_same_tensor_as(v));
+    if (it == uniqueVals.end()) {
+      uniqueVals.emplace_back(v);
+    } else {
+      inputsIndicesToRemove.emplace_back(i);
+      v->replaceAllUsesWith(*it);
+    }
+  }
+  for (auto it = inputsIndicesToRemove.rbegin();
+       it != inputsIndicesToRemove.rend();
+       ++it) {
+    g->eraseInput(*it);
+  }
+}
+
 void EvalPeepholeONNX(Block* b, ParamMap& paramsDict) {
+  auto opset_version = GetOpsetVersion();
   auto valsToParamsMap = buildValueToParamsMap(b, paramsDict);
   fuseConvBatchNorm(b, valsToParamsMap);
+  if (opset_version >= OPSET_VERSION_15) {
+    // Apply de-duplication after opset 15 for backward compatibility.
+    DeduplicateParameters(b, valsToParamsMap);
+  }
   buildParamsMapFromValueToParamsMap(valsToParamsMap, paramsDict);
 }
 
