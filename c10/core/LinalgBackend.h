@@ -21,7 +21,7 @@ inline std::string LinalgBackendToString(at::LinalgBackend backend) {
     case LinalgBackend::Magma:
       return "linalg_magma";
     default:
-      TORCH_CHECK(false, "Unknown memory format");
+      TORCH_CHECK(false, "Unknown linalg backend");
   }
 }
 
