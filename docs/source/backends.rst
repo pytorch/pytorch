@@ -91,11 +91,24 @@ torch.backends.linalg
 
     Usage:
 
-    * Use as a global flag, e.g.  `torch.backends.linalg.preferred = torch.linalg_cusolver`
-    * Use the context manager, e.g.  `with torch.backends.linalg.flags(preferred=torch.linalg_cusolver):`
+    * Use as a global flag, e.g. `torch.backends.linalg.preferred = torch.linalg_cusolver`
+    * Use the context manager, e.g. `with torch.backends.linalg.flags(preferred=torch.linalg_cusolver):`
 
     Note: The usage of a backend is not guaranteed for all linear algebra operators even if that backend is set as preferred.
     Explicitly setting a preferred backend may override existing pytorch linear algebra heuristics and achieve better performance.
+
+    Currently supported linalg operators:
+
+    * :func:`torch.linalg.inv`
+    * :func:`torch.linalg.inv_ex`
+    * :func:`torch.linalg.cholesky`
+    * :func:`torch.linalg.cholesky_ex`
+    * :func:`torch.cholesky_solve`
+    * :func:`torch.cholesky_inverse`
+    * :func:`torch.lu`
+    * :func:`torch.linalg.qr`
+    * :func:`torch.linalg.eigh`
+    * :func:`torch.linalg.svd`
 
 
 torch.backends.mkl
