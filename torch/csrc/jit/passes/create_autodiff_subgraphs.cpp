@@ -177,14 +177,15 @@ class SubgraphSlicer {
       // so we have to re-run this function until there are no more changes
       auto it = ++sets[i].begin();
       while (it != sets[i].end()) {
-        GRAPH_DEBUG("root aliased value ", (*it)->debugName(), " node ", (*it)->node());
+        GRAPH_DEBUG("root aliased value ", (*it)->debugName(), " node ", *(*it)->node());
         collectNodeToUnfuse((*it)->node(), nodes);
+        it++;
       }
     }
 
     // unfuse in the reverse topo order
-    for (auto it = nodes.rend(); it != nodes.rbegin(); it++) {
-      unfuseNode(*it);
+    for (auto it = nodes.rbegin(); it != nodes.rend(); it++) {
+      unfuseNode(*it, subgraphNode);
     }
 
     if (!nodes.empty()) {
@@ -194,9 +195,11 @@ class SubgraphSlicer {
     return !nodes.empty();
   }
 
-    void collectNodeToUnfuse(Node* start, std::set<Node*, topo_cmp_node>& s) {
-    TORCH_INTERNAL_ASSERT(
-        start->kind() != prim::Return && start->kind() != prim::Param);
+  void collectNodeToUnfuse(Node* start, std::set<Node*, topo_cmp_node>& s) {
+    if(start->kind() == prim::Return || start->kind() == prim::Param) {
+      GRAPH_DEBUG("reached the param or return node", getHeader(start));
+      return;
+    }
 
     if (s.count(start) != 0) {
       // already visited, no need to visit descendants
@@ -213,12 +216,12 @@ class SubgraphSlicer {
     }
   }
 
-  void unfuseNode(Node* n) {
+  void unfuseNode(Node* n, Node* subgraphNode) {
     // collect output indices
 
     GRAPH_DEBUG("unfuseNode node ", getHeader(n));
     auto subgraph = n->owningGraph();
-    auto subgraphNode = n->owningBlock()->owningNode();
+    //auto subgraphNode = n->owningBlock()->owningNode();
 
     std::set<Value*> node_outputs(n->outputs().begin(), n->outputs().end()); 
     std::set<size_t> output_indices;
@@ -231,7 +234,7 @@ class SubgraphSlicer {
       if (it != local_map.end()) {
         return it->second;
       }
-      TORCH_INTERNAL_ASSERT(false, "all inputs should've been mapped");
+      TORCH_INTERNAL_ASSERT(false, "all inputs should've been mapped. Couldn't map %", v->debugName());
       return v;
     };
 
@@ -242,6 +245,8 @@ class SubgraphSlicer {
       
       if (node_inputs.count(subgraph->outputs().at(i)) != 0) {
         GRAPH_DEBUG("output %", subgraph->outputs().at(i)->debugName(), " is already subgraph's output");
+        GRAPH_DEBUG("Mapping %", subgraph->outputs().at(i), " to %", subgraphNode->outputs().at(i));
+        local_map[subgraph->outputs().at(i)] = subgraphNode->outputs().at(i);
         node_inputs.erase(subgraph->outputs().at(i));
       } 
     }
@@ -270,15 +275,21 @@ class SubgraphSlicer {
     copy->insertAfter(subgraphNode);
 
     for (auto oi: output_indices) {
-      auto replace_val = local_map[subgraph->outputs().at(oi)];
-      subgraphNode->outputs().at(oi)->replaceAllUsesWith(replace_val);
+
     }
 
-    size_t num_outputs = subgraph->outputs().size();
-    for (int64_t i = num_outputs - 1; i >= 0; i++) {
-      subgraphNode->eraseOutput(i);
-      subgraph->eraseOutput(i);
+    for (auto it = output_indices.rbegin(); it != output_indices.rend(); it++) {
+      auto replace_val = local_map[subgraph->outputs().at(*it)];
+      subgraphNode->outputs().at(*it)->replaceAllUsesWith(replace_val);
+      subgraphNode->eraseOutput(*it);
+      subgraph->eraseOutput(*it);
     }
+
+    // size_t num_outputs = subgraph->outputs().size();
+    // for (int64_t i = num_outputs - 1; i >= 0; i++) {
+    //   subgraphNode->eraseOutput(i);
+    //   subgraph->eraseOutput(i);
+    // }
 
     n->destroy();
   }
