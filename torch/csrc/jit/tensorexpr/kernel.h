@@ -88,7 +88,11 @@ std::vector<T> convertVecArgValue(const std::vector<ArgValue>& v) {
 class TORCH_API TensorExprKernel {
   struct ConstantDescr {
     BufPtr buf;
-    void* ptr;
+    // Only one of ptr and node is used at a time
+    // 1) ptr for the constant tensors
+    // 2) node for the constant custom class ojects
+    void* ptr = nullptr;
+    Node* node = nullptr;
   };
 
  public:

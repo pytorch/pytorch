@@ -55,13 +55,18 @@ std::unique_ptr<Function> compileMethod(
   func->set_input_specs(toInputSpecs(sizes));
 
   std::vector<at::Tensor> parameters;
+  auto params = c10::impl::GenericList(c10::AnyType::get());
   auto const_descriptors = kernel->getConstantDescriptors();
   for (const auto& cd : const_descriptors) {
     auto sizes = getConstSizes(cd.buf);
-    at::Tensor const_tensor = at::from_blob(cd.ptr, sizes).clone();
-    parameters.push_back(const_tensor);
+    if (cd.ptr) {
+      at::Tensor const_tensor = at::from_blob(cd.ptr, sizes).clone();
+      params.push_back(const_tensor);
+    } else {
+      params.emplace_back(toIValue(cd.node->output()));
+    }
   }
-  func->set_parameters(c10::impl::toList(c10::List<at::Tensor>(parameters)));
+  func->set_parameters(params);
 
   MemoryPlan plan;
   plan.buffer_sizes_ = {}; // temp_sizes_;
