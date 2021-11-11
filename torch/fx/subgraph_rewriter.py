@@ -73,12 +73,23 @@ class _SubgraphMatcher:
                 and len(pn.all_input_nodes) != len(gn.all_input_nodes)):
             return False
         if pn.op == "output":
+            print("start =====================")
+            print("pn.all_input_nodes:", pn.all_input_nodes)
+            print("gn.all_input_nodes:", gn.all_input_nodes)
             match_found = any(self._match_nodes(pn.all_input_nodes[0], gn_)
                               for gn_ in gn.all_input_nodes)
+            print("match found:", match_found)
+            print("nodes map:", self.nodes_map)
+            print("end =====================")
         else:
+            print(" matching non output ==============")
+            print("pn.all_input_nodes:", pn.all_input_nodes)
+            print("gn.all_input_nodes:", gn.all_input_nodes)
+            print(" matching non output end ==============")
             match_found = (len(pn.all_input_nodes) == len(gn.all_input_nodes)
                            and all(self._match_nodes(pn_, gn_) for pn_, gn_
                                    in zip(pn.all_input_nodes, gn.all_input_nodes)))
+            print(" non output match:", match_found)
         if not match_found:
             self.nodes_map.pop(pn)
             return False
@@ -270,7 +281,7 @@ def replace_pattern(gm: GraphModule, pattern: Callable, replacement: Callable) -
                     # Nodes that can "leak"...
 
                     # Placeholders (by definition)
-                    if n.op == "placeholder":
+                    if lookup[n].op == "placeholder":
                         continue
                     # Pattern output (acts as a container)
                     if lookup[n].op == "output":
@@ -293,6 +304,7 @@ def replace_pattern(gm: GraphModule, pattern: Callable, replacement: Callable) -
 
             # It's not a match if the pattern leaks out into the rest
             # of the graph
+            print("pattern is contained:", pattern_is_contained(matcher.nodes_map))
             if pattern_is_contained(matcher.nodes_map):
                 # Shallow copy nodes_map
                 matches.append(Match(anchor=anchor,
@@ -316,6 +328,8 @@ def replace_pattern(gm: GraphModule, pattern: Callable, replacement: Callable) -
             if gn in replaced_nodes and gn.op != "placeholder":
                 return True
         return False
+
+    print("matches:", matches)
 
     for match in matches:
         # Skip overlapping matches

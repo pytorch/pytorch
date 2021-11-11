@@ -72,8 +72,11 @@ def _lower_to_native_backend(model: QuantizedGraphModule) -> QuantizedGraphModul
     operator signature so they can be lowered with the same function
     """
     model = _lower_ref_linear_module(model)
-    model.recompile()
     for pattern, replacement in get_fbgemm_patterns_and_replacements():
-        subgraph_rewriter.replace_pattern(model, pattern, replacement)
+        while True:
+            # replace the pattern until there is no more matches
+            matches = subgraph_rewriter.replace_pattern(model, pattern, replacement)
+            if not matches:
+                break
     model.graph.lint()
     return model
