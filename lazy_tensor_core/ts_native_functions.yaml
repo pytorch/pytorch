@@ -18,6 +18,7 @@ full_codegen:
   - div.Tensor_mode
   - elu
   - elu_backward
+  - embedding
   - embedding_dense_backward
   - eq.Scalar
   - eq.Tensor
