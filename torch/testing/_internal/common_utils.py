@@ -1327,8 +1327,12 @@ class RelaxedNumberPair(NumberPair):
         complex: torch.complex64,
     }
 
-    def __init__(self, actual, expected, *, check_dtype=None, **other_parameters) -> None:
+    def __init__(
+        self, actual, expected, *, rtol_override=0.0, atol_override=0.0, check_dtype=None, **other_parameters
+    ) -> None:
         super().__init__(actual, expected, check_dtype=False, **other_parameters)
+        self.rtol = max(self.rtol, rtol_override)
+        self.atol = max(self.atol, atol_override)
 
     def _process_inputs(self, actual, expected, *, id):
         # We require only one of the inputs of the inputs to be a number and the other can be a number or a single
@@ -1365,12 +1369,14 @@ class RelaxedNumberPair(NumberPair):
         # but will be picked up here since issubclass(bool, int)
         elif isinstance(number_like, bool):
             return None, int(number_like)
+        elif isinstance(number_like, Enum):
+            return None, int(number_like)
         else:
             return super()._to_number(number_like)
 
 
 class TensorOrArrayPair(TensorLikePair):
-    def __init__(self, actual, expected, rtol_override, atol_override, **other_parameters):
+    def __init__(self, actual, expected, *, rtol_override=0.0, atol_override=0.0, **other_parameters):
         super().__init__(actual, expected, **other_parameters)
         self.rtol = max(self.rtol, rtol_override)
         self.atol = max(self.atol, atol_override)

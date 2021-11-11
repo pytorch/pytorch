@@ -407,7 +407,7 @@ class BooleanPair(Pair):
 
     @property
     def _supported_types(self) -> Tuple[Type, ...]:
-        cls = [bool]
+        cls: List[Type] = [bool]
         if NUMPY_AVAILABLE:
             cls.append(np.bool_)
         return tuple(cls)
