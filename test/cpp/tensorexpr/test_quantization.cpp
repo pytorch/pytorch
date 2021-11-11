@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <ATen/native/quantized/cpu/conv_packed_params.h>
+#include <ATen/quantized/Quantizer.h>
 #include <test/cpp/tensorexpr/test_base.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/irparser.h>
@@ -221,6 +222,151 @@ TEST_F(Quantization, QuantUpsampleNearst2dDequantUInt8) {
     std::cout << "x:\n" << x << std::endl;
     std::cout << "q:\n" << q << std::endl;
     std::cout << "qu:\n" << qu << std::endl;
+    std::cout << "y_expected:\n" << y_expected << std::endl;
+    std::cout << "y:\n" << y << std::endl;
+  }
+  CHECK_EQ(check, 1);
+}
+
+c10::intrusive_ptr<ConvPackedParamsBase<2>> quantized_conv2d_prepack(
+    at::Tensor qweight,
+    c10::optional<at::Tensor> bias,
+    c10::List<int64_t> stride,
+    c10::List<int64_t> padding,
+    c10::List<int64_t> dilation,
+    int64_t groups) {
+  auto qconv2d_prepack_op =
+      c10::Dispatcher::singleton()
+          .findSchemaOrThrow("quantized::conv2d_prepack", "")
+          .typed<c10::intrusive_ptr<ConvPackedParamsBase<2>>(
+              at::Tensor,
+              c10::optional<at::Tensor>,
+              c10::List<int64_t>,
+              c10::List<int64_t>,
+              c10::List<int64_t>,
+              int64_t)>();
+  return qconv2d_prepack_op.call(
+      qweight, bias, stride, padding, dilation, groups);
+}
+
+at::Tensor quantized_conv2d(
+    at::Tensor qx,
+    c10::intrusive_ptr<ConvPackedParamsBase<2>> packed_weight,
+    double scale,
+    int64_t zero) {
+  auto qconv2d_op = c10::Dispatcher::singleton()
+                        .findSchemaOrThrow("_quantized::conv2d", "")
+                        .typed<at::Tensor(
+                            at::Tensor,
+                            const c10::intrusive_ptr<ConvPackedParamsBase<2>>&,
+                            double,
+                            int64_t)>();
+  return qconv2d_op.call(qx, packed_weight, scale, zero);
+}
+
+at::Tensor quantized_conv2d_relu(
+    at::Tensor qx,
+    c10::intrusive_ptr<ConvPackedParamsBase<2>> packed_weight,
+    double scale,
+    int64_t zero) {
+  auto qconv2d_op = c10::Dispatcher::singleton()
+                        .findSchemaOrThrow("_quantized::conv2d_relu", "")
+                        .typed<at::Tensor(
+                            at::Tensor,
+                            const c10::intrusive_ptr<ConvPackedParamsBase<2>>&,
+                            double,
+                            int64_t)>();
+  return qconv2d_op.call(qx, packed_weight, scale, zero);
+}
+
+TEST_F(Quantization, DISABLED_QuantConv2dDequantUInt8) {
+  const auto graph_string = R"IR(
+      graph(%x : Float(1, 3, 2, 2, strides=[12, 4, 2, 1], device=cpu), %w : Float(2, 3, 2, 2, strides=[12, 4, 2, 1], device=cpu), %b : Float(2, strides=[1], device=cpu)):
+        %qdti : int = prim::Constant[value=12]()
+        %qdtui : int = prim::Constant[value=13]()
+        %qxz : int = prim::Constant[value=13]()
+        %qxs : float = prim::Constant[value=0.1]()
+        %qwz : int = prim::Constant[value=13]()
+        %qws : float = prim::Constant[value=0.1]()
+        %qcz : int = prim::Constant[value=13]()
+        %qcs : float = prim::Constant[value=0.1]()
+        %s : int[] = prim::Constant[value=[1, 1]]()
+        %p : int[] = prim::Constant[value=[0, 0]]()
+        %d : int[] = prim::Constant[value=[1, 1]]()
+        %g : int = prim::Constant[value=1]()
+        %qw : QInt8(2, 3, 2, 2) = aten::quantize_per_tensor(%w, %qws, %qwz, %qdti)
+        %qcp : __torch__.torch.classes.quantized.Conv2dPackedParamsBase = quantized::conv2d_prepack(%qw, %b, %s, %p, %d, %g)
+        %qx : QUInt8(1, 3, 2, 2) = aten::quantize_per_tensor(%x, %qxs, %qxz, %qdtui)
+        %qc : QUInt8(1, 2, 1, 1) = quantized::conv2d(%qx, %qcp, %qcs, %qcz)
+        %6 : Float(1, 2, 1, 1) = aten::dequantize(%qc)
+        return (%6))IR";
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+
+  auto x = at::rand({1, 3, 2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto w = at::rand({2, 3, 2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto b = at::rand({2}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto q = at::quantize_per_tensor(x, 0.1f, 13, at::kQUInt8);
+  auto qw = at::quantize_per_tensor(w, 0.1f, 13, at::kQInt8);
+  auto qcp = quantized_conv2d_prepack(qw, b, {1, 1}, {0, 0}, {1, 1}, 1);
+  auto qc = quantized_conv2d(q, qcp, 0.1f, 13);
+  auto y_expected = at::dequantize(qc);
+
+  TensorExprKernel k(graph);
+  StmtPtr s = k.getCodeGenStmt();
+
+  std::vector<IValue> stack = {IValue(x), IValue(w), IValue(b)};
+  k.run(stack);
+  auto y = stack[0].toTensor();
+  bool check = at::allclose(y_expected, y);
+  if (!check) {
+    std::cout << "y_expected:\n" << y_expected << std::endl;
+    std::cout << "y:\n" << y << std::endl;
+  }
+  CHECK_EQ(check, 1);
+}
+
+TEST_F(Quantization, DISABLED_QuantConv2dReluDequantUInt8) {
+  const auto graph_string = R"IR(
+      graph(%x : Float(1, 3, 2, 2, strides=[12, 4, 2, 1], device=cpu), %w : Float(2, 3, 2, 2, strides=[12, 4, 2, 1], device=cpu), %b : Float(2, strides=[1], device=cpu)):
+        %qdti : int = prim::Constant[value=12]()
+        %qdtui : int = prim::Constant[value=13]()
+        %qxz : int = prim::Constant[value=13]()
+        %qxs : float = prim::Constant[value=0.1]()
+        %qwz : int = prim::Constant[value=13]()
+        %qws : float = prim::Constant[value=0.1]()
+        %qcz : int = prim::Constant[value=53]()
+        %qcs : float = prim::Constant[value=0.2]()
+        %s : int[] = prim::Constant[value=[1, 1]]()
+        %p : int[] = prim::Constant[value=[0, 0]]()
+        %d : int[] = prim::Constant[value=[1, 1]]()
+        %g : int = prim::Constant[value=1]()
+        %qw : QInt8(2, 3, 2, 2) = aten::quantize_per_tensor(%w, %qws, %qwz, %qdti)
+        %qcp : __torch__.torch.classes.quantized.Conv2dPackedParamsBase = quantized::conv2d_prepack(%qw, %b, %s, %p, %d, %g)
+        %qx : QUInt8(1, 3, 2, 2) = aten::quantize_per_tensor(%x, %qxs, %qxz, %qdtui)
+        %qc : QUInt8(1, 2, 1, 1) = quantized::conv2d_relu(%qx, %qcp, %qcs, %qcz)
+        %6 : Float(1, 2, 1, 1) = aten::dequantize(%qc)
+        return (%6))IR";
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+
+  auto x = at::rand({1, 3, 2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto w = at::rand({2, 3, 2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto b = at::rand({2}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto q = at::quantize_per_tensor(x, 0.1f, 13, at::kQUInt8);
+  auto qw = at::quantize_per_tensor(w, 0.1f, 13, at::kQInt8);
+  auto qcp = quantized_conv2d_prepack(qw, b, {1, 1}, {0, 0}, {1, 1}, 1);
+  auto qc = quantized_conv2d_relu(q, qcp, 0.2f, 53);
+  auto y_expected = at::dequantize(qc);
+
+  TensorExprKernel k(graph);
+  StmtPtr s = k.getCodeGenStmt();
+
+  std::vector<IValue> stack = {IValue(x), IValue(w), IValue(b)};
+  k.run(stack);
+  auto y = stack[0].toTensor();
+  bool check = at::allclose(y_expected, y);
+  if (!check) {
     std::cout << "y_expected:\n" << y_expected << std::endl;
     std::cout << "y:\n" << y << std::endl;
   }

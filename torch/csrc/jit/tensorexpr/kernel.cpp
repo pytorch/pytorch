@@ -401,6 +401,11 @@ std::vector<ExprHandle> TensorExprKernel::sizesForValue(
   if (v->type()->isSubtypeOf(*NoneType::get())) {
     return {};
   }
+  if (v->type()->kind() == TypeKind::ClassType) {
+    // TODO: By prepack class name run corresponding op with random inputs with
+    // the same sizes and get the size of the result.
+    return {int64_t{sizeof(uintptr_t)}};
+  }
   GRAPH_DEBUG("Unknown sizes for the node: ", *v->node());
   GRAPH_DEBUG("Full fusion group graph:\n", *v->node()->owningGraph());
   std::string msg = std::string("Unhandled node kind (in sizesForValue): ") +
