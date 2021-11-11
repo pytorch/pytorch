@@ -29,7 +29,8 @@ else:
 
 from ._six import string_classes as _string_classes
 
-from typing import Set, Type, TYPE_CHECKING
+from typing import Set, Type, TYPE_CHECKING, Union
+import builtins
 
 __all__ = [
     'typename', 'is_tensor', 'is_storage', 'set_default_tensor_type',
@@ -42,6 +43,8 @@ __all__ = [
     'ShortTensor', 'CharTensor', 'ByteTensor', 'BoolTensor', 'Tensor',
     'lobpcg', 'use_deterministic_algorithms',
     'are_deterministic_algorithms_enabled',
+    'is_deterministic_algorithms_warn_only_enabled',
+    'set_deterministic_debug_mode', 'get_deterministic_debug_mode',
     'set_warn_always', 'is_warn_always_enabled',
 ]
 
@@ -373,6 +376,9 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
     and if only nondeterministic algorithms are available they will throw a
     :class:`RuntimeError` when called.
 
+    .. note:: :func:`torch.set_deterministic_debug_mode` offers an alternative
+        interface for this feature.
+
     The following normally-nondeterministic operations will act
     deterministically when ``mode=True``:
 
@@ -499,6 +505,62 @@ def is_deterministic_algorithms_warn_only_enabled():
     details.
     """
     return _C._get_deterministic_algorithms_warn_only()
+
+def set_deterministic_debug_mode(debug_mode: Union[builtins.int, str]) -> None:
+    r"""Sets the debug mode for deterministic operations.
+
+    .. note:: This is an alternative interface for
+        :func:`torch.use_deterministic_algorithms`. Refer to that function's
+        documentation for details about affected operations.
+
+    Args:
+        debug_mode(str or int): If "default" or 0, don't error or warn on
+            nondeterministic operations. If "warn" or 1, warn on
+            nondeterministic operations. If "error" or 2, error on
+            nondeterministic operations.
+    """
+
+    # NOTE: builtins.int is used here because int in this scope resolves
+    # to torch.int
+    if not isinstance(debug_mode, (builtins.int, str)):
+        raise TypeError(f'debug_mode must be str or int, but got {type(debug_mode)}')
+
+    if isinstance(debug_mode, str):
+        if debug_mode == 'default':
+            debug_mode = 0
+        elif debug_mode == 'warn':
+            debug_mode = 1
+        elif debug_mode == 'error':
+            debug_mode = 2
+        else:
+            raise RuntimeError(
+                'invalid value of debug_mode, expected one of `default`, '
+                f'`warn`, `error`, but got {debug_mode}')
+
+    if debug_mode == 0:
+        _C._set_deterministic_algorithms(False)
+    elif debug_mode == 1:
+        _C._set_deterministic_algorithms(True, warn_only=True)
+    elif debug_mode == 2:
+        _C._set_deterministic_algorithms(True)
+    else:
+        raise RuntimeError(
+            'invalid value of debug_mode, expected 0, 1, or 2, '
+            f'but got {debug_mode}')
+
+def get_deterministic_debug_mode() -> builtins.int:
+    r"""Returns the current value of the debug mode for deterministic
+    operations. Refer to :func:`torch.set_deterministic_debug_mode`
+    documentation for more details.
+    """
+
+    if _C._get_deterministic_algorithms():
+        if _C._get_deterministic_algorithms_warn_only():
+            return 1
+        else:
+            return 2
+    else:
+        return 0
 
 def set_warn_always(b):
     r"""When this flag is False (default) then some PyTorch warnings may only
