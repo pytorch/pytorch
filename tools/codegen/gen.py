@@ -463,32 +463,21 @@ class ComputeStaticUnboxingWrapper:
         # We unconditionally generate function wrappers,
         sig_group = CppSignatureGroup.from_native_function(f, method=False, fallback_binding=f.manual_cpp_binding)
 
-        def gen_arg_str(type_: BaseType, variant: str, template: str) -> str:
-
-            assert type_ in cpp.TYPE_CONVERSION, f"Type is: {type_}"
-            assert variant in cpp.TYPE_CONVERSION[type_], f"{variant} format of {type_} \
-                    is not implemented!"
-            return cpp.TYPE_CONVERSION[type_][variant].format(template)
-
         def generate_defn(faithful: bool) -> str:
             if faithful:
                 sig = sig_group.faithful_signature
                 assert sig is not None
             else:
                 sig = sig_group.signature
-            argument_str = "std::move(peek(stack, {pos}, {args_num}))"
+            argument_str = "(std::move(peek(stack, {pos}, {args_num})))"
             arguments: List[str] = []
             args_num = len(f.func.arguments.flat_positional)
 
             # parse arguments into C++ code
             for i, arg in enumerate(f.func.arguments.flat_positional):
                 ivalue_str = argument_str.format(pos=i, args_num=args_num)
-                if arg.type.is_list_like():
-                    arguments.append(gen_arg_str(arg.type.elem.name, "list", ivalue_str))
-                elif arg.type.is_nullable():
-                    arguments.append(gen_arg_str(arg.type.elem.name, "optional", ivalue_str))
-                else:
-                    arguments.append(gen_arg_str(arg.type.name, "default", ivalue_str))
+                code, val_name = cpp.argumenttype_ivalue_convert_wrapper(arg, ivalue_str)
+                print(code, val_name)
 
             # handle tensor method
             if sig.method:
