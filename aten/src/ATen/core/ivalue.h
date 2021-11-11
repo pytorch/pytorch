@@ -4,6 +4,7 @@
 #include <ATen/core/blob.h>
 #include <ATen/core/ivalue_to.h>
 #include <c10/util/C++17.h>
+#include <c10/util/MaybeOwned.h>
 #include <c10/util/intrusive_ptr.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <typeindex>
@@ -1012,6 +1013,8 @@ struct TORCH_API IValue final {
       payload.u = p.u;
     }
   }
+
+  friend MaybeOwnedTraits<IValue>;
 
   Payload payload;
   Tag tag;
