@@ -193,7 +193,9 @@ def _convert_do_not_use(
                 # output_quantized_idxs override.
                 # Remove the dequantize operator in the end
                 maybe_dequantize_node = node.args[0]
-                if isinstance(maybe_dequantize_node, Node) and maybe_dequantize_node.op == "call_method" and maybe_dequantize_node.target == "dequantize":
+                if isinstance(maybe_dequantize_node, Node) and \
+                   maybe_dequantize_node.op == "call_method" and \
+                   maybe_dequantize_node.target == "dequantize":
                     quantized_node = maybe_dequantize_node.args[0]
                     maybe_dequantize_node.replace_all_uses_with(quantized_node)
                     model.graph.erase_node(maybe_dequantize_node)
