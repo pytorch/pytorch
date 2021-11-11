@@ -555,6 +555,9 @@ class TORCH_API Tensor: public TensorBase {
     TensorBase::requires_grad_(_requires_grad);
     return *this;
   }
+
+  Tensor add(const Tensor& other, const Scalar& alpha=1) const;
+  Tensor& add_(const Tensor& other, const Scalar& alpha=1) const;
 };
 
 namespace detail {

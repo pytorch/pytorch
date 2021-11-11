@@ -233,4 +233,8 @@ inline bool is_neg(const Tensor& tensor) {
   return tensor.is_neg();
 }
 
+TORCH_API Tensor add(const Tensor& self, const Tensor& other, const Scalar& alpha=1);
+
+TORCH_API Tensor& add_out(Tensor& out, const Tensor& self, const Tensor& other, const Scalar& alpha=1);
+
 }
