@@ -234,8 +234,6 @@ class TestCommon(TestCase):
             self.assertEqual(actual, expected)
 
             # validates backward
-            # NOTE: only handles single tensor outputs and the first tensor
-            #   of ops that output a sequence
 
             # Short-circuits if the op doesn't support grad in this device x dtype
             if not test_grad:
@@ -244,14 +242,14 @@ class TestCommon(TestCase):
             def assertEqualGradients(expected, actual, i=None):
                 grad_for_expected = torch.randn_like(expected)
                 grad_for_actual = noncontiguous_like(grad_for_expected)
-                expected.backward(grad_for_expected)
-                actual.backward(grad_for_actual)
+                expected.backward(grad_for_expected, retain_graph=i is not None)
+                actual.backward(grad_for_actual, retain_graph=i is not None)
 
                 t_inputs = (t_inp,) + t_args if isinstance(t_inp, torch.Tensor) else tuple(t_inp) + t_args
                 n_inputs = (n_inp,) + n_args if isinstance(n_inp, torch.Tensor) else tuple(n_inp) + n_args
                 for j, (t, n) in enumerate(zip(t_inputs, n_inputs)):
                     if isinstance(t, torch.Tensor) and t.requires_grad:
-                        msg = ("{}Got different gradients for contiguous / non-contiguous input {}."
+                        msg = ("{}Got different gradients for contiguous / non-contiguous wrt input {}."
                                .format(f"Output {i}. " if i is not None else "", j))
                         self.assertEqual(t.grad, n.grad, msg=msg)
 

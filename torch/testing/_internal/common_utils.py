@@ -524,11 +524,13 @@ def repeat_test_for_types(dtypes):
     return repeat_helper
 
 
+
 def discover_test_cases_recursively(suite_or_case):
     if isinstance(suite_or_case, unittest.TestCase):
         return [suite_or_case]
     rc = []
     for element in suite_or_case:
+        print(element)
         rc.extend(discover_test_cases_recursively(element))
     return rc
 
@@ -552,6 +554,24 @@ def sanitize_test_filename(filename):
     strip_py = re.sub(r'.py$', '', filename)
     return re.sub('/', r'.', strip_py)
 
+def lint_test_case_extension(suite):
+    succeed = True
+    for test_case_or_suite in suite:
+        test_case = test_case_or_suite
+        if isinstance(test_case_or_suite, unittest.TestSuite):
+            first_test = test_case_or_suite._tests[0] if len(test_case_or_suite._tests) > 0 else None
+            if first_test is not None and isinstance(first_test, unittest.TestSuite):
+                return succeed and lint_test_case_extension(test_case_or_suite)
+            test_case = first_test
+
+        if test_case is not None:
+            test_class = test_case.id().split('.', 1)[1].split('.')[0]
+            if not isinstance(test_case, TestCase):
+                err = "This test class should extend from torch.testing._internal.common_utils.TestCase but it doesn't."
+                print(f"{test_class} - failed. {err}")
+                succeed = False
+    return succeed
+
 def run_tests(argv=UNITTEST_ARGS):
     # import test files.
     if IMPORT_SLOW_TESTS:
@@ -571,10 +591,16 @@ def run_tests(argv=UNITTEST_ARGS):
     # Determine the test launch mechanism
     if TEST_DISCOVER:
         _print_test_names()
-    elif TEST_IN_SUBPROCESS:
-        suite = unittest.TestLoader().loadTestsFromModule(__main__)
-        test_cases = discover_test_cases_recursively(suite)
+        return
+
+    # Before running the tests, lint to check that every test class extends from TestCase
+    suite = unittest.TestLoader().loadTestsFromModule(__main__)
+    if not lint_test_case_extension(suite):
+        sys.exit(1)
+
+    if TEST_IN_SUBPROCESS:
         failed_tests = []
+        test_cases = discover_test_cases_recursively(suite)
         for case in test_cases:
             test_case_full_name = case.id().split('.', 1)[1]
             exitcode = shell([sys.executable] + argv + [test_case_full_name])
@@ -584,7 +610,6 @@ def run_tests(argv=UNITTEST_ARGS):
         assert len(failed_tests) == 0, "{} unit test(s) failed:\n\t{}".format(
             len(failed_tests), '\n\t'.join(failed_tests))
     elif RUN_PARALLEL > 1:
-        suite = unittest.TestLoader().loadTestsFromModule(__main__)
         test_cases = discover_test_cases_recursively(suite)
         test_batches = chunk_list(get_test_names(test_cases), RUN_PARALLEL)
         processes = []
@@ -1808,7 +1833,7 @@ class TestCase(expecttest.TestCase):
         debug_msg: Optional[str] = None
 
         if x is None or y is None:
-            self.assertTrue(x is None and y is None)
+            self.assertTrue(x is None and y is None, msg=msg)
         # Tensor x Number and Number x Tensor comparisons
         elif isinstance(x, torch.Tensor) and isinstance(y, Number):
             self.assertEqual(x.item(), y, atol=atol, rtol=rtol, msg=msg,
@@ -2113,7 +2138,7 @@ class TestCase(expecttest.TestCase):
             with open(expected_file, 'w') as f:
                 # Adjust for producer_version, leave s unmodified
                 s_tag = re.sub(r'(producer_version): "[0-9.]*"',
-                               r'\1producer_version: "CURRENT_VERSION"', s)
+                               r'\1: "CURRENT_VERSION"', s)
                 f.write(s_tag)
 
         try:
@@ -2232,6 +2257,14 @@ def download_file(url, binary=True):
         raise unittest.SkipTest(msg) from e
 
 def find_free_port():
+    """
+    Finds an available port and returns that port number.
+
+    NOTE: If this function is being used to allocate a port to Store (or
+    indirectly via init_process_group or init_rpc), it should be used
+    in conjuction with the `retry_on_connect_failures` decorator as there is a potential
+    race condition where the allocated port may become unavailable before it can be used
+    """
     with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as sock:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind(('localhost', 0))
@@ -2333,27 +2366,36 @@ def noncontiguous_like(t):
         return t
 
     # Special-cases 0-dim tensors
-    if t.ndim == 0:
-        result = t.detach().unsqueeze(0).repeat_interleave(2, dim=-1)
-        if t.dtype.is_floating_point or t.dtype.is_complex:
-            result[0] = math.nan
-        else:
-            result[0] = 0
-        result.set_(result.storage(), 1, t.size(), ())
-        result.requires_grad_(t.requires_grad)
-        return result
+    zero_dim = t.ndim == 0
+    if zero_dim:
+        t = t.unsqueeze(0)
 
-    # 1+ dim tensor case
+    # Handle conj bit. repeat_interleave resolves the conj, which is a bit annoying.
+    is_conj = t.is_conj()
+    if is_conj:
+        t = t.conj()
     result = torch.repeat_interleave(t.detach(), 2, dim=-1)
-    if t.dtype.is_floating_point or t.dtype.is_complex:
-        result[..., 1::2] = math.nan
-    else:
-        result[..., 1::2] = 0
 
-    strides = list(result.stride())
-    strides[-1] = strides[-1] * 2
-    result.set_(result.storage(), result.storage_offset(), t.size(), stride=tuple(strides))
+    # Choose a "weird" value that won't be accessed
+    if t.dtype.is_floating_point or t.dtype.is_complex:
+        value = math.nan
+    elif t.dtype == torch.bool:
+        value = True
+    else:
+        value = 12
+
+    if zero_dim:
+        result[0] = value
+        result.set_(result.storage(), 1, (), ())
+    else:
+        result[..., 1::2] = value
+        strides = list(result.stride())
+        strides[-1] *= 2
+        result.set_(result.storage(), result.storage_offset(), t.size(), stride=tuple(strides))
     result.requires_grad_(t.requires_grad)
+    # At the end so that the conj() is tracked by the autograd
+    if is_conj:
+        result = result.conj()
     return result
 
 # TODO: remove this (prefer make_symmetric_matrices below)
@@ -2432,23 +2474,6 @@ def random_hermitian_pd_matrix(matrix_size, *batch_dims, dtype, device):
     A = torch.randn(*(batch_dims + (matrix_size, matrix_size)),
                     dtype=dtype, device=device)
     return A @ A.mH + torch.eye(matrix_size, dtype=dtype, device=device)
-
-
-# TODO: remove this (prefer make_fullrank_matrices_with_distinct_singular_values below)
-def random_fullrank_matrix_distinct_singular_value(matrix_size, *batch_dims,
-                                                   **kwargs):
-    dtype = kwargs.get('dtype', torch.double)
-    device = kwargs.get('device', 'cpu')
-    silent = kwargs.get("silent", False)
-    if silent and not torch._C.has_lapack:
-        return torch.ones(matrix_size, matrix_size, dtype=dtype, device=device)
-
-    A = torch.randn(batch_dims + (matrix_size, matrix_size), dtype=dtype, device=device)
-    u, _, vh = torch.linalg.svd(A, full_matrices=False)
-    real_dtype = A.real.dtype if A.dtype.is_complex else A.dtype
-    s = torch.arange(1., matrix_size + 1, dtype=real_dtype, device=device).mul_(1.0 / (matrix_size + 1))
-    return (u * s.to(A.dtype)) @ vh
-
 
 # Creates a full rank matrix with distinct signular values or
 #   a batch of such matrices

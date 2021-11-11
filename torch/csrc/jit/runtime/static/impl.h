@@ -182,6 +182,7 @@ class TORCH_API StaticModule {
   }
 
   const Module& module() const {
+    DCHECK(module_.has_value());
     return *module_;
   }
 
@@ -229,14 +230,13 @@ class TORCH_API StaticModule {
   }
 
   bool first_input_is_self() const {
-    return first_input_is_self_;
+    return module_.has_value();
   }
 
   StaticRuntime& runtime();
 
  private:
   StaticModuleOptions opts_;
-  bool first_input_is_self_{false};
   std::shared_ptr<torch::jit::Graph> graph_;
   c10::optional<torch::jit::Module> module_;
   c10::optional<c10::FunctionSchema> schema_;
@@ -338,6 +338,10 @@ class TORCH_API StaticRuntime {
     return static_module_.graph();
   }
 
+  const MemoryPlanner* get_memory_planner() const {
+    return planner_.get();
+  }
+
   void check_for_memory_leak(bool output_returned = true);
 
   bool is_optimizable_container_type(Node* n) const {
@@ -368,12 +372,16 @@ class TORCH_API StaticRuntime {
       std::vector<c10::IValue>&& args,
       const std::unordered_map<std::string, c10::IValue>& kwargs);
 
+  void verify_and_correct_memory_overlap(ProcessedNode& n);
+
   // clean up owning refs of input IValues
   void clean_up_input_ivalues() {
     for (IValue& ival : inputs_) {
       ival = IValue();
     }
   }
+
+  IValue move_outputs_to_tuple(size_t num_outputs);
 
   void create_memory_planner();
 
@@ -387,8 +395,6 @@ class TORCH_API StaticRuntime {
   void display_nodes(
       const std::vector<c10::IValue>& args,
       const std::unordered_map<std::string, c10::IValue>& kwargs);
-
-  IValue move_outputs_to_tuple(size_t num_outputs);
 
   // Memory planning is only enabled if sm->opts().cleanup_activations is true.
   // Otherwise, the memory used by activations is cached inside the static
@@ -409,7 +415,8 @@ class TORCH_API ProcessedNode {
       Node* n,
       std::unique_ptr<const IValue*[]> inputs,
       size_t inputsSize,
-      bool enable_out_variant);
+      bool enable_out_variant,
+      bool check_memory_overlap);
 
   ProcessedNode(const ProcessedNode& rhs)
       : node_(rhs.node_),
@@ -501,11 +508,25 @@ class TORCH_API ProcessedNode {
     return fn_.kind == FunctionKind::kNativeFunction;
   }
 
-  bool verify_no_memory_overlap() const;
-
   const char* get_op_name() const {
     return op_name_;
   }
+
+  bool verify_no_memory_overlap() const;
+
+  bool check_outputs_for_memory_overlap() const {
+    return fn_.check_memory_overlap_;
+  }
+
+  void set_outputs_memory_overlap_detected() {
+    fn_.overlap_detected_ = true;
+  }
+
+  bool outputs_memory_overlap_detected() {
+    return fn_.overlap_detected_;
+  }
+
+  void verify_and_correct_memory_overlap();
 
  private:
   C10_NODISCARD bool verify_outputs_dont_overlap_each_other() const;
@@ -513,7 +534,7 @@ class TORCH_API ProcessedNode {
   C10_NODISCARD bool verify_inputs_dont_overlap_outputs() const;
 
   Node* node_;
-  enum class FunctionKind {
+  enum class FunctionKind : uint8_t {
     kOutVariant,
     kNativeFunction,
     kInterpreterFallback,
@@ -521,6 +542,8 @@ class TORCH_API ProcessedNode {
   struct Function {
     std::function<void(ProcessedNode*)> f;
     FunctionKind kind = FunctionKind::kOutVariant;
+    bool check_memory_overlap_{false};
+    bool overlap_detected_{false};
   };
   Function fn_;
   std::unique_ptr<const IValue*[]> inputs_; // unowned
