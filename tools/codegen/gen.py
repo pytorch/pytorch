@@ -21,7 +21,7 @@ from tools.codegen.model import (Argument, DispatchKey, FunctionSchema,
                                  is_generic_dispatch_key)
 from tools.codegen.api.types import (Binding, CppSignature, CppSignatureGroup,
                                      DispatcherSignature, NativeSignature, BaseCType, tensorOptionsT)
-from tools.codegen.api import cpp
+from tools.codegen.api import cpp, unboxing
 import tools.codegen.api.dispatcher as dispatcher
 import tools.codegen.api.native as native
 import tools.codegen.api.meta as meta
@@ -465,9 +465,9 @@ class ComputeStaticUnboxingWrapper:
                 print(sig.name())
                 pass
             # parse arguments into C++ code
-            for i, arg in enumerate(f.func.arguments.flat_non_out + (list(f.func.arguments.out) if f.func.arguments.out else [] )):
+            for i, arg in enumerate(f.func.arguments.flat_non_out + (list(f.func.arguments.out) if f.func.arguments.out else [])):
                 ivalue_str = argument_str.format(pos=i, args_num=args_num)
-                res = cpp.argumenttype_ivalue_convert(arg.type, ivalue_str, arg.name)
+                res = unboxing.argumenttype_ivalue_convert(arg.type, ivalue_str, arg.name)
                 # handle tensor options and other keyword arguments
                 if tensor_option_arg and arg.name in tensor_option_arg.__dict__:
                     tensor_option_args[arg.name] = res['val_name']
