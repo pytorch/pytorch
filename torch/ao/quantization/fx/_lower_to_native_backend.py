@@ -1,5 +1,5 @@
 import torch
-from torch.fx import subgraph_rewriter
+from . import subgraph_rewriter
 from .graph_module import QuantizedGraphModule
 from .quantized_fusion_patterns_and_replacements import get_fbgemm_patterns_and_replacements
 from .match_utils import is_match
