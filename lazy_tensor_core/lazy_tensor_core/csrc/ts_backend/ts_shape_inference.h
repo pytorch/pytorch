@@ -9,7 +9,7 @@ namespace compiler {
  *
  * It is only used by legacy ops that haven't been ported yet.
  * */
-lazy_tensors::Shape InferShape(const torch::lazy::Node* node);
+torch::lazy::Shape InferShape(const torch::lazy::Node* node);
 
 }
 }

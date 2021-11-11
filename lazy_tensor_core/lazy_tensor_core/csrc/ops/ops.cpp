@@ -198,7 +198,7 @@ NodePtr MinUnary(const torch::lazy::Value& input) {
 }
 
 NodePtr Take(const torch::lazy::Value& input, const torch::lazy::Value& index) {
-  lazy_tensors::Shape result_shape = ir::GetShapeFromTsValue(index);
+  torch::lazy::Shape result_shape = ir::GetShapeFromTsValue(index);
   result_shape.set_scalar_type(ir::GetShapeFromTsValue(input).scalar_type());
   return GenericOp(OpKind(at::aten::take), {input, index},
                    std::move(result_shape));

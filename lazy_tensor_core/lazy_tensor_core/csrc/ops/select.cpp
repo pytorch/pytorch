@@ -27,11 +27,11 @@ std::string Select::ToString() const {
   return ss.str();
 }
 
-lazy_tensors::Shape Select::MakeSelectShape(const lazy_tensors::Shape& shape,
+torch::lazy::Shape Select::MakeSelectShape(const torch::lazy::Shape& shape,
                                             int64_t dim, int64_t start,
                                             int64_t end, int64_t stride) {
   int64_t effective_stride = GetStride(start, end, stride);
-  lazy_tensors::Shape select_shape(shape);
+  torch::lazy::Shape select_shape(shape);
   select_shape.set_size(
       dim, (end - start + effective_stride - 1) / effective_stride);
   return select_shape;

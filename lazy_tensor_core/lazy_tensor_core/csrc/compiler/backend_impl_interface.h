@@ -1,12 +1,12 @@
 #pragma once
 
 #include <ATen/Tensor.h>
+#include <torch/csrc/lazy/core/shape.h>
 
 #include <atomic>
 
 #include "lazy_tensor_core/csrc/compiler/data.h"
 #include "lazy_tensor_core/csrc/lowering_context.h"
-#include "lazy_tensors/shape.h"
 
 namespace torch_lazy_tensors {
 namespace compiler {
@@ -33,11 +33,11 @@ class BackendImplInterface {
    * */
 
   virtual BackendDataPtr MakeComputationDataFromTensor(
-      const at::Tensor& tensor, const lazy_tensors::Shape& shape,
+      const at::Tensor& tensor, const torch::lazy::Shape& shape,
       const torch::lazy::BackendDevice& device) const = 0;
 
   virtual BackendDataPtr CreateDataPlaceholder(const torch::lazy::BackendDevice& device,
-      const lazy_tensors::Shape& shape) const = 0;
+      const torch::lazy::Shape& shape) const = 0;
 
   virtual at::Tensor MakeTensorFromComputationData(
       const BackendDataPtr data,

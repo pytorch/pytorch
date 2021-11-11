@@ -21,7 +21,7 @@ class AsStrided : public TsNode {
 
   int64_t storage_offset() const { return storage_offset_; }
 
-  static bool StrideIsSupported(const lazy_tensors::Shape& input_shape,
+  static bool StrideIsSupported(const torch::lazy::Shape& input_shape,
                                 c10::ArrayRef<int64_t> size,
                                 c10::ArrayRef<int64_t> stride,
                                 int64_t storage_offset);

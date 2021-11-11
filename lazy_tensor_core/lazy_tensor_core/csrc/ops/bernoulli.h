@@ -9,7 +9,7 @@ namespace ops {
 class Bernoulli : public TsNode {
  public:
   Bernoulli(const torch::lazy::Value& probability, const torch::lazy::Value& seed,
-            lazy_tensors::Shape shape);
+            torch::lazy::Shape shape);
 };
 
 }  // namespace ops

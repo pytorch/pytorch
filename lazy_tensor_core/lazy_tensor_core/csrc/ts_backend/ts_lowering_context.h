@@ -39,7 +39,7 @@ class TSComputation : public Computation {
 
   int parameters_size() const override { return parameter_names_.size(); }
 
-  const std::vector<lazy_tensors::Shape>& parameter_shapes() const override {
+  const std::vector<torch::lazy::Shape>& parameter_shapes() const override {
     throw std::runtime_error(
         "TODO(whc) implement TS computation shapes or change interface");
     return parameter_shapes_;
@@ -49,7 +49,7 @@ class TSComputation : public Computation {
     return parameter_names_;
   }
 
-  const lazy_tensors::Shape& result_shape() const override {
+  const torch::lazy::Shape& result_shape() const override {
     throw std::runtime_error(
         "TODO(whc) implement TS computation shapes or change interface");
     return result_shape_;
@@ -63,8 +63,8 @@ class TSComputation : public Computation {
   std::shared_ptr<torch::jit::Graph> graph_;
   torch::jit::GraphExecutor graph_executor_;
   std::vector<std::string> parameter_names_;
-  std::vector<lazy_tensors::Shape> parameter_shapes_;
-  lazy_tensors::Shape result_shape_;
+  std::vector<torch::lazy::Shape> parameter_shapes_;
+  torch::lazy::Shape result_shape_;
 };
 
 class TSLoweringContext : public ir::LoweringContext {
@@ -75,7 +75,7 @@ class TSLoweringContext : public ir::LoweringContext {
                     c10::ArrayRef<torch::lazy::Node*> post_order,
                     ir::Util::EmissionMap emit_status);
 
-  lazy_tensors::Shape GetResultShape(size_t index) const override;
+  torch::lazy::Shape GetResultShape(size_t index) const override;
 
   size_t AddResult(const torch::lazy::Output& output) override;
 

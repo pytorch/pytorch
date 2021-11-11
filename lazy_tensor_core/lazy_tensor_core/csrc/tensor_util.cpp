@@ -324,7 +324,7 @@ compiler::BackendDataPtr TensorToDataHandle(const at::Tensor& tensor,
                                      const torch::lazy::BackendDevice& device) {
   return compiler::getBackend()
       ->MakeComputationDataFromTensor(
-          tensor, lazy_tensors::Shape(tensor.scalar_type(), tensor.sizes()),
+          tensor, torch::lazy::Shape(tensor.scalar_type(), tensor.sizes()),
           device);
 }
 
@@ -335,7 +335,7 @@ std::vector<compiler::BackendDataPtr> CreateTensorsData(
   std::vector<compiler::BackendDataPtr> result;
   result.reserve(tensors.size());
   for (size_t i = 0; i < tensors.size(); ++i) {
-    lazy_tensors::Shape shape(tensors[i].scalar_type(), tensors[i].sizes());
+    torch::lazy::Shape shape(tensors[i].scalar_type(), tensors[i].sizes());
     result.push_back(
         compiler::getBackend()
             ->MakeComputationDataFromTensor(tensors[i], shape, devices[i]));

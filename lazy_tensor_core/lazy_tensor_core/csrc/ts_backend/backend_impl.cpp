@@ -37,7 +37,7 @@ class TSBackendImpl : public BackendImplInterface {
   }
 
   BackendDataPtr MakeComputationDataFromTensor(
-      const at::Tensor& tensor, const lazy_tensors::Shape& shape,
+      const at::Tensor& tensor, const torch::lazy::Shape& shape,
       const torch::lazy::BackendDevice& device) const override {
     at::TensorOptions options = tensor.options().device(HardwareDeviceType());
     return std::make_shared<TSData>(tensor.to(options), shape, device);
@@ -56,11 +56,11 @@ class TSBackendImpl : public BackendImplInterface {
  public:
   class TSData : public BackendData {
    public:
-    TSData(const at::Tensor& data, const lazy_tensors::Shape& shape,
+    TSData(const at::Tensor& data, const torch::lazy::Shape& shape,
            const torch::lazy::BackendDevice& device)
         : BackendData(device, shape), data_(data) {}
 
-    TSData(const lazy_tensors::Shape& shape, const torch::lazy::BackendDevice& device)
+    TSData(const torch::lazy::Shape& shape, const torch::lazy::BackendDevice& device)
         : BackendData(device, shape) {}
 
     Handle GetOpaqueHandle() override {
@@ -80,7 +80,7 @@ class TSBackendImpl : public BackendImplInterface {
   };
 
   BackendDataPtr CreateDataPlaceholder(const torch::lazy::BackendDevice& device,
-      const lazy_tensors::Shape& shape) const override;
+      const torch::lazy::Shape& shape) const override;
 
   std::vector<ComputationPtr> Compile(
       std::vector<ComputationPtr> instances) const override;
@@ -119,7 +119,7 @@ class TSBackendImpl : public BackendImplInterface {
 };
 
 BackendDataPtr TSBackendImpl::CreateDataPlaceholder(const torch::lazy::BackendDevice& device,
-      const lazy_tensors::Shape& shape) const {
+      const torch::lazy::Shape& shape) const {
   return std::make_shared<TSBackendImpl::TSData>(shape, device);
 }
 
@@ -151,7 +151,7 @@ std::vector<BackendDataPtr> TSBackendImpl::ExecuteComputation(
   for (torch::jit::IValue component : stack) {
     at::Tensor result = component.toTensor();
     at::IntArrayRef result_sizes = result.sizes();
-    lazy_tensors::Shape shape(
+    torch::lazy::Shape shape(
         result.scalar_type(),
         std::vector<int64_t>(result_sizes.begin(), result_sizes.end()));
     results.push_back(

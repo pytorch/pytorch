@@ -4,11 +4,11 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/native/TensorFactories.h>
 #include <c10/util/Half.h>
+#include <torch/csrc/lazy/core/shape.h>
 
 #include <complex>
 #include <string>
 
-#include "lazy_tensors/shape.h"
 #include "lazy_tensors/shape_util.h"
 #include "lazy_tensors/span.h"
 
@@ -18,9 +18,9 @@ class Literal {
  public:
   Literal() = default;
 
-  explicit Literal(const Shape& shape);
+  explicit Literal(const torch::lazy::Shape& shape);
 
-  const Shape& shape() const;
+  const torch::lazy::Shape& shape() const;
 
   template <typename NativeT>
   lazy_tensors::Span<const NativeT> data(
@@ -72,7 +72,7 @@ class Literal {
 
  private:
   at::Tensor value_;
-  Shape shape_;
+  torch::lazy::Shape shape_;
 };
 
 template <>

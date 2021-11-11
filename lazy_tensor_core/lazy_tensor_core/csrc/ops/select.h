@@ -21,7 +21,7 @@ class Select : public TsNode {
 
   int64_t stride() const { return stride_; }
 
-  static lazy_tensors::Shape MakeSelectShape(const lazy_tensors::Shape& shape,
+  static torch::lazy::Shape MakeSelectShape(const torch::lazy::Shape& shape,
                                              int64_t dim, int64_t start,
                                              int64_t end, int64_t stride);
 

@@ -26,7 +26,7 @@ TSLoweringContext::TSLoweringContext(
   }
 }
 
-lazy_tensors::Shape TSLoweringContext::GetResultShape(size_t index) const {
+torch::lazy::Shape TSLoweringContext::GetResultShape(size_t index) const {
   LOG(FATAL) << "Not implemented yet.";
 }
 

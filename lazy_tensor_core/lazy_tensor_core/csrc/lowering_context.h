@@ -20,11 +20,11 @@ class Computation {
  public:
   virtual int parameters_size() const  = 0;
 
-  virtual const std::vector<lazy_tensors::Shape>& parameter_shapes() const = 0;
+  virtual const std::vector<torch::lazy::Shape>& parameter_shapes() const = 0;
 
   virtual const std::vector<std::string>& parameter_names() const = 0;
 
-  virtual const lazy_tensors::Shape& result_shape() const = 0;
+  virtual const torch::lazy::Shape& result_shape() const = 0;
 
   virtual ~Computation() = default;
 };
@@ -60,7 +60,7 @@ class LoweringContext {
   GetParametersData() const;
 
   // Get the shape of the result tuple component, given by index.
-  virtual lazy_tensors::Shape GetResultShape(size_t index) const = 0;
+  virtual torch::lazy::Shape GetResultShape(size_t index) const = 0;
 
   // Adds the given output as a component of the result tuple and returns its
   // assigned position within the tuple.
@@ -70,7 +70,7 @@ class LoweringContext {
   // shape. Only used for the operator-by-operator execution, mostly for
   // debugging purposes.
   virtual void AddParameter(const torch::lazy::Output& output, size_t index,
-                            const lazy_tensors::Shape& shape,
+                            const torch::lazy::Shape& shape,
                             const std::string& name);
 
   // Build the computation capturing all the operations created with the

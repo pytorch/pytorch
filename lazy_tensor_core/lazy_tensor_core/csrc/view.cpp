@@ -119,14 +119,14 @@ torch::lazy::Value ApplyUpdate(torch::lazy::Value ir_value,
 
 }  // namespace
 
-ViewInfo::ViewInfo(Type view_type, lazy_tensors::Shape shape,
-                   lazy_tensors::Shape source_shape)
+ViewInfo::ViewInfo(Type view_type, torch::lazy::Shape shape,
+                   torch::lazy::Shape source_shape)
     : view_type(view_type),
       shape(std::move(shape)),
       indices(source_shape.dim(), 0),
       source_shape(std::move(source_shape)) {}
 
-ViewInfo::ViewInfo(Type view_type, lazy_tensors::Shape source_shape,
+ViewInfo::ViewInfo(Type view_type, torch::lazy::Shape source_shape,
                    std::vector<int64_t> permutation)
     : view_type(view_type),
       shape(ir::ops::Permute::MakePermuteShape(source_shape, permutation)),
@@ -135,7 +135,7 @@ ViewInfo::ViewInfo(Type view_type, lazy_tensors::Shape source_shape,
   CHECK(view_type == Type::kPermute);
 }
 
-ViewInfo::ViewInfo(Type view_type, const lazy_tensors::Shape& source_shape,
+ViewInfo::ViewInfo(Type view_type, const torch::lazy::Shape& source_shape,
                    SelectInfo select)
     : view_type(view_type),
       shape(ir::ops::Select::MakeSelectShape(
@@ -145,8 +145,8 @@ ViewInfo::ViewInfo(Type view_type, const lazy_tensors::Shape& source_shape,
   CHECK(view_type == Type::kSelect);
 }
 
-ViewInfo::ViewInfo(Type view_type, lazy_tensors::Shape shape,
-                   lazy_tensors::Shape source_shape, AsStridedInfo as_strided)
+ViewInfo::ViewInfo(Type view_type, torch::lazy::Shape shape,
+                   torch::lazy::Shape source_shape, AsStridedInfo as_strided)
     : view_type(view_type),
       shape(std::move(shape)),
       source_shape(std::move(source_shape)),
@@ -154,7 +154,7 @@ ViewInfo::ViewInfo(Type view_type, lazy_tensors::Shape shape,
   CHECK(view_type == Type::kAsStrided);
 }
 
-ViewInfo::ViewInfo(Type view_type, const lazy_tensors::Shape& source_shape,
+ViewInfo::ViewInfo(Type view_type, const torch::lazy::Shape& source_shape,
                    DiagonalInfo diagonal)
     : view_type(view_type),
       shape(ir::ops::Diagonal::MakeDiagonalShape(source_shape, diagonal.offset,
@@ -181,13 +181,13 @@ torch::lazy::Value Alias::SyncUpdateOperations() {
   return root_ir_value_;
 }
 
-View::View(lazy_tensors::Shape shape, std::shared_ptr<Alias> alias,
+View::View(torch::lazy::Shape shape, std::shared_ptr<Alias> alias,
            ViewInfo view_info)
     : shape_(std::move(shape)), alias_(std::move(alias)) {
   view_infos_.push_back(std::move(view_info));
 }
 
-View::View(lazy_tensors::Shape shape, std::shared_ptr<Alias> alias,
+View::View(torch::lazy::Shape shape, std::shared_ptr<Alias> alias,
            std::vector<ViewInfo> view_infos)
     : view_infos_(std::move(view_infos)),
       shape_(std::move(shape)),
@@ -197,7 +197,7 @@ void View::Update(torch::lazy::Value ir_value) {
   alias_->Update(std::move(ir_value), view_infos_);
 }
 
-std::shared_ptr<View> View::CreateSubView(lazy_tensors::Shape shape,
+std::shared_ptr<View> View::CreateSubView(torch::lazy::Shape shape,
                                           ViewInfo view_info) {
   std::vector<ViewInfo> view_infos(view_infos_);
   view_infos.push_back(std::move(view_info));

@@ -5,13 +5,13 @@ namespace ir {
 namespace ops {
 
 Generic::Generic(OpKind op, OpList operands,
-                 lazy_tensors::Shape shape, size_t num_outputs,
+                 torch::lazy::Shape shape, size_t num_outputs,
                  torch::lazy::hash_t hash_seed)
     : TsNode(std::move(op), operands, {std::move(shape)}, num_outputs, hash_seed),
       hash_seed_(hash_seed) {}
 
 Generic::Generic(OpKind op, OpList operands,
-                 const std::function<lazy_tensors::Shape()>& shape_fn,
+                 const std::function<torch::lazy::Shape()>& shape_fn,
                  size_t num_outputs, torch::lazy::hash_t hash_seed)
     : TsNode(std::move(op), operands, shape_fn, num_outputs, hash_seed),
       hash_seed_(hash_seed) {}
@@ -21,7 +21,7 @@ Generic::Generic(OpKind op, OpList operands,
     : TsNode(std::move(op), operands, num_outputs, hash_seed),
       hash_seed_(hash_seed) {}
 
-Generic::Generic(OpKind op, lazy_tensors::Shape shape, size_t num_outputs,
+Generic::Generic(OpKind op, torch::lazy::Shape shape, size_t num_outputs,
                  torch::lazy::hash_t hash_seed)
     : TsNode(std::move(op), std::move(shape), num_outputs, hash_seed),
       hash_seed_(hash_seed) {}

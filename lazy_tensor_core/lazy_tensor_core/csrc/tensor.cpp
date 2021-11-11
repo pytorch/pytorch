@@ -98,12 +98,12 @@ c10::optional<at::ScalarType> LazyTensor::dtype_optional() const {
   return data()->logical_element_type;
 }
 
-lazy_tensors::util::MaybeRef<lazy_tensors::Shape> LazyTensor::shape() const {
+lazy_tensors::util::MaybeRef<torch::lazy::Shape> LazyTensor::shape() const {
   if (data()->view != nullptr) {
     return data()->view->shape();
   }
   if (data()->handle != nullptr) {
-    return lazy_tensors::Shape(data()->handle->shape());
+    return torch::lazy::Shape(data()->handle->shape());
   }
   if (data()->ir_value) {
     // TODO(whc) remove shape from LazyTensor API too!
@@ -141,7 +141,7 @@ compiler::BackendDataPtr LazyTensor::GetDataHandle() {
     if (handle != nullptr) {
       CHECK(handle->HasValue())
           << "Trying to access data while an async operation is in flight: "
-          << lazy_tensors::Shape(handle->shape());
+          << torch::lazy::Shape(handle->shape());
       return handle;
     }
   }

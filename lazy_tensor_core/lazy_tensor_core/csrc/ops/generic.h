@@ -14,17 +14,17 @@ namespace ops {
 class Generic : public TsNode {
  public:
   Generic(OpKind op, OpList operands,
-          lazy_tensors::Shape shape, size_t num_outputs = 1,
+          torch::lazy::Shape shape, size_t num_outputs = 1,
           torch::lazy::hash_t hash_seed = static_cast<uint32_t>(0x5a2d296e9));
 
   Generic(OpKind op, OpList operands,
-          const std::function<lazy_tensors::Shape()>& shape_fn,
+          const std::function<torch::lazy::Shape()>& shape_fn,
           size_t num_outputs = 1, torch::lazy::hash_t hash_seed = static_cast<uint32_t>(0x5a2d296e9));
 
   Generic(OpKind op, OpList operands,
           size_t num_outputs = 1, torch::lazy::hash_t hash_seed = static_cast<uint32_t>(0x5a2d296e9));
 
-  Generic(OpKind op, lazy_tensors::Shape shape, size_t num_outputs,
+  Generic(OpKind op, torch::lazy::Shape shape, size_t num_outputs,
           torch::lazy::hash_t hash_seed);
 
  private:

@@ -8,14 +8,14 @@ namespace ir {
 using torch::lazy::Output;
 using torch::lazy::OpKind;
 
-const lazy_tensors::Shape& GetShapeFromTsOutput(const torch::lazy::Output& output) {
+const torch::lazy::Shape& GetShapeFromTsOutput(const torch::lazy::Output& output) {
   if (auto* tsnode = dynamic_cast<const TsNode*>(output.node)) {
     return tsnode->shape(output.index);
   }
   throw std::runtime_error("Expected TsNode but could not dynamic cast");
 }
 
-const lazy_tensors::Shape& GetShapeFromTsValue(const torch::lazy::Value& value) {
+const torch::lazy::Shape& GetShapeFromTsValue(const torch::lazy::Value& value) {
   if (auto* tsnode = dynamic_cast<const TsNode*>(value.node.get())) {
     return tsnode->shape(value.index);
   }
@@ -23,7 +23,7 @@ const lazy_tensors::Shape& GetShapeFromTsValue(const torch::lazy::Value& value) 
 }
 
 void TsNodeSetShapeDeferred(
-    NodePtr node, const std::function<lazy_tensors::Shape()>& shape_fn) {
+    NodePtr node, const std::function<torch::lazy::Shape()>& shape_fn) {
   if (auto tsnode = std::dynamic_pointer_cast<TsNode>(node)) {
     tsnode->SetShapeDeferred(shape_fn);
     return;
@@ -45,7 +45,7 @@ torch::lazy::hash_t OperandHashes(const OpList& operands,
   return hash;
 }
 
-TsNode::TsNode(OpKind op, OpList operands, std::vector<lazy_tensors::Shape>&& shapes,
+TsNode::TsNode(OpKind op, OpList operands, std::vector<torch::lazy::Shape>&& shapes,
                size_t num_outputs, torch::lazy::hash_t hash_seed)
     : Node(op, num_outputs,
            // TODO(WHC) this is inefficient (having to compute node_hash twice
@@ -70,34 +70,34 @@ TsNode::TsNode(OpKind op, OpList operands, std::vector<lazy_tensors::Shape>&& sh
 }
 
 TsNode::TsNode(OpKind op, OpList operands,
-               const std::function<lazy_tensors::Shape()>& shape_fn,
+               const std::function<torch::lazy::Shape()>& shape_fn,
                size_t num_outputs, torch::lazy::hash_t hash_seed)
-    : TsNode(op, operands, std::vector<lazy_tensors::Shape>{}, num_outputs, hash_seed) {
+    : TsNode(op, operands, std::vector<torch::lazy::Shape>{}, num_outputs, hash_seed) {
   shapes_.push_back(GetOpShape(shape_fn));
 }
 
 TsNode::TsNode(OpKind op, OpList operands, size_t num_outputs,
                torch::lazy::hash_t hash_seed)
-    : TsNode(op, operands, std::vector<lazy_tensors::Shape>{}, num_outputs, hash_seed) {}
+    : TsNode(op, operands, std::vector<torch::lazy::Shape>{}, num_outputs, hash_seed) {}
 
 void TsNode::SetShapeDeferred(
-    const std::function<lazy_tensors::Shape()>& shape_fn) {
+    const std::function<torch::lazy::Shape()>& shape_fn) {
   shapes_.push_back(GetOpShape(shape_fn));
 }
 
-TsNode::TsNode(OpKind op, lazy_tensors::Shape shape, size_t num_outputs,
+TsNode::TsNode(OpKind op, torch::lazy::Shape shape, size_t num_outputs,
                torch::lazy::hash_t hash_seed)
     : Node(op, num_outputs, GetOpHash(op, shape, hash_seed))
 {
   shapes_.push_back(std::move(shape));
 }
 
-const lazy_tensors::Shape& TsNode::shape(size_t output_index) const {
+const torch::lazy::Shape& TsNode::shape(size_t output_index) const {
   return shapes_.at(output_index);
 }
 
 using ShapeCache =
-    lazy_tensors::util::Cache<torch::lazy::hash_t, lazy_tensors::Shape,
+    lazy_tensors::util::Cache<torch::lazy::hash_t, torch::lazy::Shape,
                               torch::lazy::HashReducer>;
 
 ShapeCache* GetShapeCache() {
@@ -107,13 +107,13 @@ ShapeCache* GetShapeCache() {
   return cache;
 }
 
-lazy_tensors::Shape TsNode::GetOpShape(
-    const std::function<lazy_tensors::Shape()>& shape_fn) const {
+torch::lazy::Shape TsNode::GetOpShape(
+    const std::function<torch::lazy::Shape()>& shape_fn) const {
   ShapeCache* shape_cache = GetShapeCache();
   auto shape = shape_cache->Get(hash());
   if (shape == nullptr) {
     shape = shape_cache->Add(hash(),
-                             std::make_shared<lazy_tensors::Shape>(shape_fn()));
+                             std::make_shared<torch::lazy::Shape>(shape_fn()));
   }
   return *shape;
 }
@@ -132,10 +132,10 @@ std::string TsNode::ToString() const {
 }
 
 torch::lazy::hash_t TsNode::GetOpHash(OpKind op,
-                                      const lazy_tensors::Shape& shape,
+                                      const torch::lazy::Shape& shape,
                                       torch::lazy::hash_t hash_seed) {
   torch::lazy::hash_t h =
-      torch::lazy::HashCombine(op.hash(), torch::lazy::Hash(shape.ToString()));
+      torch::lazy::HashCombine(op.hash(), torch::lazy::Hash(shape.to_string()));
   return torch::lazy::HashCombine(h, hash_seed);
 }
 
