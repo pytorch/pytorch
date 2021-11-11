@@ -77,6 +77,7 @@ torch.backends.cudnn
 
 torch.backends.linalg
 ^^^^^^^^^^^^^^^^^^^^^
+.. py:module::  torch.backends.linalg
 
 .. attribute::  torch.backends.linalg.preferred
 
