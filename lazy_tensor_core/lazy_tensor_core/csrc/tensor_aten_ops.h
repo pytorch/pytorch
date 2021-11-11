@@ -57,12 +57,8 @@ void fill_(LazyTensor& input, const at::Scalar& value);
 
 LazyTensor lt(const LazyTensor& input, const at::Scalar& other);
 
-LazyTensor mul(
-    const LazyTensor& input, const LazyTensor& other,
-    c10::optional<at::ScalarType> logical_element_type = c10::nullopt);
-LazyTensor mul(
-    const LazyTensor& input, const at::Scalar& other,
-    c10::optional<at::ScalarType> logical_element_type = c10::nullopt);
+LazyTensor mul(const LazyTensor& input, const LazyTensor& other);
+LazyTensor mul(const LazyTensor& input, const at::Scalar& other);
 
 // Returns a new tensor that is a narrowed view of the input in the given
 // dimension.
@@ -96,9 +92,8 @@ LazyTensor pow(const LazyTensor& input, const at::Scalar& exponent);
 // repeats.
 LazyTensor repeat(const LazyTensor& input, std::vector<int64_t> repeats);
 
-LazyTensor rsub(
-    const LazyTensor& input, const at::Scalar& other, const at::Scalar& alpha,
-    c10::optional<at::ScalarType> logical_element_type = c10::nullopt);
+LazyTensor rsub(const LazyTensor& input, const at::Scalar& other,
+                const at::Scalar& alpha);
 
 void copy_(LazyTensor& input, LazyTensor& src);
 
@@ -120,12 +115,10 @@ void squeeze_(LazyTensor& input, int64_t dim);
 
 LazyTensor stack(c10::ArrayRef<LazyTensor> tensors, int64_t dim);
 
-LazyTensor sub(
-    const LazyTensor& input, const LazyTensor& other, const at::Scalar& alpha,
-    c10::optional<at::ScalarType> logical_element_type = c10::nullopt);
-LazyTensor sub(
-    const LazyTensor& input, const at::Scalar& other, const at::Scalar& alpha,
-    c10::optional<at::ScalarType> logical_element_type = c10::nullopt);
+LazyTensor sub(const LazyTensor& input, const LazyTensor& other,
+               const at::Scalar& alpha);
+LazyTensor sub(const LazyTensor& input, const at::Scalar& other,
+               const at::Scalar& alpha);
 
 std::tuple<LazyTensor, LazyTensor, LazyTensor> svd(const LazyTensor& input,
                                                    bool some, bool compute_uv);

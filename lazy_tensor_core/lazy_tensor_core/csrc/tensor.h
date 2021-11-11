@@ -15,27 +15,19 @@ class LazyTensor {
   // held. The lazy tensor is nothing more than a shared pointer to a Data
   // object.
   struct Data {
-    Data(compiler::BackendDataPtr handle, const torch::lazy::BackendDevice& device,
-         c10::optional<at::ScalarType> logical_element_type)
+    Data(compiler::BackendDataPtr handle,
+         const torch::lazy::BackendDevice& device)
         : handle(std::move(handle)),
-          logical_element_type(logical_element_type),
           device(device),
           unique_id(GetNextTensorId()) {}
-    Data(torch::lazy::Value ir_value, const torch::lazy::BackendDevice& device,
-         c10::optional<at::ScalarType> logical_element_type)
+    Data(torch::lazy::Value ir_value, const torch::lazy::BackendDevice& device)
         : ir_value(std::move(ir_value)),
-          logical_element_type(logical_element_type),
           device(device),
           unique_id(GetNextTensorId()) {}
-    Data(std::shared_ptr<View> view, const torch::lazy::BackendDevice& device,
-         c10::optional<at::ScalarType> logical_element_type)
-        : view(std::move(view)),
-          logical_element_type(logical_element_type),
-          device(device),
-          unique_id(GetNextTensorId()) {}
+    Data(std::shared_ptr<View> view, const torch::lazy::BackendDevice& device)
+        : view(std::move(view)), device(device), unique_id(GetNextTensorId()) {}
     Data(at::Tensor tensor_data, const torch::lazy::BackendDevice& device)
-        : logical_element_type(tensor_data.scalar_type()),
-          tensor_data(std::move(tensor_data)),
+        : tensor_data(std::move(tensor_data)),
           device(device),
           unique_id(GetNextTensorId()) {}
 
@@ -44,7 +36,6 @@ class LazyTensor {
     compiler::BackendDataPtr handle;
     torch::lazy::Value ir_value;
     std::shared_ptr<View> view;
-    c10::optional<at::ScalarType> logical_element_type;
     c10::optional<at::Tensor> tensor_data;
     const torch::lazy::BackendDevice device;
     const int64_t unique_id = 0;
@@ -52,14 +43,9 @@ class LazyTensor {
   };
 
   static LazyTensor Create(const at::Tensor& tensor, const torch::lazy::BackendDevice& device);
-  static LazyTensor Create(
-      compiler::BackendDataPtr handle,
-      c10::optional<at::ScalarType> logical_element_type = c10::nullopt);
-
-  static LazyTensor Create(
-      torch::lazy::Value ir_value, const torch::lazy::BackendDevice& device,
-      c10::optional<at::ScalarType> logical_element_type = c10::nullopt);
-
+  static LazyTensor Create(torch::lazy::Value ir_value,
+                           const torch::lazy::BackendDevice& device);
+  static LazyTensor Create(compiler::BackendDataPtr handle);
   static LazyTensor Create(std::shared_ptr<Data> data);
 
   // TODO(whc) just a hack for now to get codegen to compile... need to refactor
@@ -68,11 +54,6 @@ class LazyTensor {
   LazyTensor CreateFrom(torch::lazy::Value ir_value) const;
   LazyTensor CreateFrom(torch::lazy::Value ir_value,
                         const torch::lazy::BackendDevice& device) const;
-  LazyTensor CreateFrom(
-      torch::lazy::Value ir_value,
-      c10::optional<at::ScalarType> logical_element_type_opt) const;
-  LazyTensor CreateFrom(torch::lazy::Value ir_value, const torch::lazy::BackendDevice& device,
-                        at::ScalarType logical_element_type) const;
 
   // Creates an empty/null tensor.
   LazyTensor() = default;
@@ -99,10 +80,6 @@ class LazyTensor {
   Data* data() const;
 
   at::ScalarType dtype() const;
-  c10::optional<at::ScalarType> dtype_optional() const;
-
-  // Set logical_element_type which is visible to upstream PyTorch.
-  void SetScalarType(c10::optional<at::ScalarType> logical_element_type);
 
   lazy_tensors::util::MaybeRef<torch::lazy::Shape> shape() const;
 
@@ -152,17 +129,15 @@ class LazyTensor {
 
  private:
   LazyTensor(const at::Tensor& tensor, const torch::lazy::BackendDevice& device);
-  LazyTensor(compiler::BackendDataPtr handle,
-             c10::optional<at::ScalarType> logical_element_type = c10::nullopt);
-  LazyTensor(torch::lazy::Value ir_value, const torch::lazy::BackendDevice& device,
-             c10::optional<at::ScalarType> logical_element_type = c10::nullopt);
-  LazyTensor(std::shared_ptr<View> view, const torch::lazy::BackendDevice& device,
-             c10::optional<at::ScalarType> logical_element_type = c10::nullopt);
+  LazyTensor(torch::lazy::Value ir_value,
+             const torch::lazy::BackendDevice& device);
+  LazyTensor(std::shared_ptr<View> view,
+             const torch::lazy::BackendDevice& device);
+  LazyTensor(compiler::BackendDataPtr handle);
   LazyTensor(std::shared_ptr<Data> data);
 
-  static LazyTensor Create(
-      std::shared_ptr<View> view, const torch::lazy::BackendDevice& device,
-      c10::optional<at::ScalarType> logical_element_type = c10::nullopt);
+  static LazyTensor Create(std::shared_ptr<View> view,
+                           const torch::lazy::BackendDevice& device);
 
   std::shared_ptr<Data> data_ptr() const { return data_; }
 

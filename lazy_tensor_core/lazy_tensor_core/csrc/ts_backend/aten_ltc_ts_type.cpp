@@ -62,17 +62,16 @@ at::Tensor DoBinaryOp(const at::Tensor& self, const at::Tensor& other,
                       const B& bin_op) {
   at::ScalarType dtype = at::result_type(self, other);
   std::pair<LazyTensor, LazyTensor> operands =
-      GetBinaryOperands(self, UnwrapNumber(other, dtype));
-  LazyTensor result = bin_op(operands.first, operands.second, dtype);
+      GetBinaryOperands(UnwrapNumber(self, dtype), UnwrapNumber(other, dtype));
+  LazyTensor result = bin_op(operands.first, operands.second);
   return bridge::AtenFromLtcTensor(result);
 }
 
 template <typename B>
 at::Tensor DoBinaryOp(const at::Tensor& self, const at::Scalar& other,
                       const B& bin_op) {
-  at::ScalarType dtype = at::result_type(self, other);
   LazyTensor self_tensor = bridge::GetLtcTensor(self);
-  LazyTensor result = bin_op(self_tensor, other, dtype);
+  LazyTensor result = bin_op(self_tensor, other);
   return bridge::AtenFromLtcTensor(result);
 }
 
@@ -170,7 +169,7 @@ at::Tensor LazyNativeFunctions::cat(at::TensorList tensors, int64_t dim) {
   auto node =
       torch::lazy::MakeNode<ir::ops::Cat>(values, dim, out_dtypes, out_shapes);
   auto result = bridge::AtenFromLtcTensor(
-      lazy_tensors[0].CreateFrom(torch::lazy::Value(node, 0), out_dtypes[0]));
+      lazy_tensors[0].CreateFrom(torch::lazy::Value(node, 0)));
   return result;
 }
 
@@ -430,9 +429,8 @@ at::Tensor LazyNativeFunctions::mul(const at::Tensor& self,
                                     const at::Tensor& other) {
   LTC_FN_COUNTER("lazy::");
   return DoBinaryOp(self, other,
-                    [&](const LazyTensor& xself, const LazyTensor& xother,
-                        at::ScalarType dtype) {
-                      return lazy_tensor_aten_ops::mul(xself, xother, dtype);
+                    [&](const LazyTensor& xself, const LazyTensor& xother) {
+                      return lazy_tensor_aten_ops::mul(xself, xother);
                     });
 }
 
@@ -440,9 +438,8 @@ at::Tensor LazyNativeFunctions::mul(const at::Tensor& self,
                                     const at::Scalar& other) {
   LTC_FN_COUNTER("lazy::");
   return DoBinaryOp(self, other,
-                    [&](const LazyTensor& xself, const at::Scalar& other,
-                        at::ScalarType dtype) {
-                      return lazy_tensor_aten_ops::mul(xself, other, dtype);
+                    [&](const LazyTensor& xself, const at::Scalar& other) {
+                      return lazy_tensor_aten_ops::mul(xself, other);
                     });
 }
 
@@ -679,10 +676,8 @@ at::Tensor LazyNativeFunctions::sub(const at::Tensor& self,
   CheckSubOperandTypes(self.scalar_type(), other.scalar_type());
   at::native::alpha_check(at::result_type(self, other), alpha);
   return DoBinaryOp(self, other,
-                    [&](const LazyTensor& xself, const LazyTensor& xother,
-                        at::ScalarType dtype) {
-                      return lazy_tensor_aten_ops::sub(xself, xother, alpha,
-                                                       dtype);
+                    [&](const LazyTensor& xself, const LazyTensor& xother) {
+                      return lazy_tensor_aten_ops::sub(xself, xother, alpha);
                     });
 }
 
@@ -692,10 +687,8 @@ at::Tensor LazyNativeFunctions::sub(const at::Tensor& self,
   LTC_FN_COUNTER("lazy::");
   CheckSubOperandTypes(self.scalar_type(), other.type());
   return DoBinaryOp(self, other,
-                    [&](const LazyTensor& xself, const at::Scalar& other,
-                        at::ScalarType dtype) {
-                      return lazy_tensor_aten_ops::sub(xself, other, alpha,
-                                                       dtype);
+                    [&](const LazyTensor& xself, const at::Scalar& other) {
+                      return lazy_tensor_aten_ops::sub(xself, other, alpha);
                     });
 }
 
