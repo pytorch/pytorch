@@ -2,28 +2,29 @@
 
 #include <ATen/core/List.h>
 #include <c10/util/ArrayRef.h>
+#include <c10/util/Exception.h>
 
 #include <initializer_list>
 #include <iterator>
-#include "c10/util/Exception.h"
+#include <type_traits>
 
 namespace at {
 class Tensor;
 }
 
 namespace c10 {
-namespace details {
-    template <typename T>
-    class IList_Unboxed_Impl;
-    template <typename T>
-    class IList_Boxed_Impl;
-}
+namespace detail {
+template <typename T>
+class IList_Unboxed_Impl;
+template <typename T>
+class IList_Boxed_Impl;
+} // namespace detail
 
 #define TORCH_ILIST_FORALL_TAGS(_, ...) \
   _(Unboxed, ##__VA_ARGS__)             \
   _(Boxed, ##__VA_ARGS__)
 
-#define TORCH_ILIST_IMPL(TAG, T) details::IList_##TAG##_Impl<T>
+#define TORCH_ILIST_IMPL(TAG, T) detail::IList_##TAG##_Impl<T>
 
 #define TORCH_ILIST_DISPATCH_CASE(TAG, FN, ...)                \
   case Tag::TAG:                                               \
@@ -39,14 +40,22 @@ namespace details {
 
 template <typename T>
 class IList {
- public:
+ private:
+#define DEFINE_FRIEND_CLASS(TAG) friend class TORCH_ILIST_IMPL(TAG, T);
+  TORCH_ILIST_FORALL_TAGS(DEFINE_FRIEND_CLASS);
+#undef DEFINE_FRIEND_CLASS
+
   using boxed_t = List<T>;
   using unboxed_t = ArrayRef<T>;
 
- private:
+  using const_reference_t =
+      typename detail::ivalue_to_const_ref_overload_return<T>::type;
+
   union Payload {
     boxed_t* boxed;
     unboxed_t unboxed;
+    Payload() : boxed(nullptr) {}
+    ~Payload() = default;
   };
 
   enum class Tag {
@@ -59,28 +68,33 @@ class IList {
  public:
   class Iterator : public std::iterator<std::random_access_iterator_tag, T> {
    private:
-    using boxed_iterator_t = typename boxed_t::iterator;
-    using unboxed_iterator_t = typename unboxed_t::iterator;
+#define DEFINE_FRIEND_CLASS(TAG) friend class TORCH_ILIST_IMPL(TAG, T);
+    TORCH_ILIST_FORALL_TAGS(DEFINE_FRIEND_CLASS);
+#undef DEFINE_FRIEND_CLASS
 
-    union {
+    using boxed_iterator_t = typename boxed_t::const_iterator;
+    using unboxed_iterator_t = typename unboxed_t::const_iterator;
+
+    union Payload {
       boxed_iterator_t boxed_iterator;
       unboxed_iterator_t unboxed_iterator;
-    } impl_;
-
-    Tag tag_;
+      void* _ptr_for_init;
+      Payload() : _ptr_for_init(nullptr) {}
+      ~Payload() = default;
+    };
 
    public:
     Iterator() : tag_(Tag::None) {}
 
-    Iterator(boxed_iterator_t& boxed) : tag_(Tag::Boxed) {
-      impl_.boxed = boxed;
+    Iterator(boxed_iterator_t boxed) : tag_(Tag::Boxed) {
+      impl_.boxed_iterator = boxed;
     }
 
-    Iterator(unboxed_iterator_t& unboxed) : tag_(Tag::Unboxed) {
-      impl_.unboxed = unboxed;
+    Iterator(unboxed_iterator_t unboxed) : tag_(Tag::Unboxed) {
+      impl_.unboxed_iterator = unboxed;
     }
 
-    T& operator*() const {
+    const_reference_t operator*() const& {
       TORCH_ILIST_DISPATCH_RETURN(iterator_get);
     }
 
@@ -88,7 +102,7 @@ class IList {
       TORCH_ILIST_DISPATCH_RETURN(iterator_pre_inc);
     }
 
-    Iterator operator++() const {
+    Iterator operator++(int) {
       TORCH_ILIST_DISPATCH_RETURN(iterator_post_inc);
     }
 
@@ -96,7 +110,7 @@ class IList {
       TORCH_ILIST_DISPATCH_RETURN(iterator_pre_dec);
     }
 
-    Iterator operator--() const {
+    Iterator operator--(int) {
       TORCH_ILIST_DISPATCH_RETURN(iterator_post_dec);
     }
 
@@ -104,12 +118,19 @@ class IList {
       if (tag_ != rhs.tag_) {
         return false;
       }
-      TORCH_ILIST_DISPATCH_RETURN(iterator_eq);
+      if (&impl_ == &rhs.impl_) {
+        TORCH_ILIST_DISPATCH_RETURN(iterator_eq, rhs);
+      }
+      return true;
     }
 
     bool operator!=(const Iterator& rhs) const {
       return !(*this == rhs);
     }
+
+   private:
+    Payload impl_;
+    Tag tag_;
   };
 
   using iterator = Iterator;
@@ -122,16 +143,28 @@ class IList {
     payload_.unboxed = ArrayRef<T>(list);
   }
 
-  IList(const unboxed_t& unboxed) : tag_(Tag::Unboxed) {
-    payload_.unboxed = unboxed;
-  }
-
   IList(const boxed_t& boxed) : tag_(Tag::Boxed) {
     payload_.boxed = &boxed;
   }
 
+  IList(const unboxed_t& unboxed) : tag_(Tag::Unboxed) {
+    payload_.unboxed = unboxed;
+  }
+
+  template <
+      typename UnboxedConstructorArg,
+      typename = std::enable_if_t<
+          std::is_constructible<unboxed_t, UnboxedConstructorArg>::value>>
+  IList(const UnboxedConstructorArg& arg) : tag_(Tag::Unboxed) {
+    payload_.unboxed = unboxed_t(arg);
+  }
+
   size_t size() const {
     TORCH_ILIST_DISPATCH_RETURN(size);
+  }
+
+  bool empty() const {
+    return size() == 0;
   }
 
   Iterator begin() const {
@@ -142,7 +175,7 @@ class IList {
     TORCH_ILIST_DISPATCH_RETURN(end);
   }
 
-  T& operator[](size_t i) const {
+  const_reference_t operator[](size_t i) const {
     TORCH_ILIST_DISPATCH_RETURN(get, i);
   }
 
@@ -164,13 +197,9 @@ class IList {
  private:
   Payload payload_;
   Tag tag_;
-
-#define DEFINE_FRIEND_CLASS(TAG) friend class details::IList_##TAG##_Impl<T>;
-  TORCH_ILIST_FORALL_TAGS(DEFINE_FRIEND_CLASS);
-#undef DEFINE_FRIEND_CLASS
 };
 
-namespace details {
+namespace detail {
 template <typename T>
 class IList_Unboxed_Impl {
  public:
@@ -194,23 +223,24 @@ class IList_Unboxed_Impl {
     return unwrap(ilist).end();
   }
 
-  static T& iterator_get(const iterator_t& it) {
+  static typename ilist_t::const_reference_t iterator_get(
+      const iterator_t& it) {
     return *it.impl_.unboxed_iterator;
   }
-  static iterator_t iterator_pre_inc(const iterator_t& it) {
+  static iterator_t& iterator_pre_inc(iterator_t& it) {
     ++it.impl_.unboxed_iterator;
     return it;
   }
-  static iterator_t iterator_post_inc(const iterator_t& it) {
+  static iterator_t iterator_post_inc(iterator_t& it) {
     auto old = it;
     ++it.impl_.unboxed_iterator;
     return old;
   }
-  static iterator_t iterator_pre_dec(const iterator_t& it) {
+  static iterator_t& iterator_pre_dec(iterator_t& it) {
     --it.impl_.unboxed_iterator;
     return it;
   }
-  static iterator_t iterator_post_dec(const iterator_t& it) {
+  static iterator_t iterator_post_dec(iterator_t& it) {
     auto old = it;
     --it.impl_.unboxed_iterator;
     return old;
@@ -227,7 +257,7 @@ class IList_Boxed_Impl {
   using self_t = typename ilist_t::boxed_t;
   using iterator_t = typename ilist_t::Iterator;
 
-  static self_t unwrap(const ilist_t& ilist) {
+  static self_t* unwrap(const ilist_t& ilist) {
     return ilist.payload_.boxed;
   }
   static size_t size(const ilist_t& ilist) {
@@ -243,23 +273,24 @@ class IList_Boxed_Impl {
     return unwrap(ilist)->end();
   }
 
-  static T& iterator_get(const iterator_t& it) {
-    return T(*it.impl_.boxed_iterator);
+  static typename ilist_t::const_reference_t iterator_get(
+      const iterator_t& it) {
+    return (*it.impl_.boxed_iterator).get();
   }
-  static iterator_t iterator_pre_inc(const iterator_t& it) {
+  static iterator_t& iterator_pre_inc(iterator_t& it) {
     ++it.impl_.boxed_iterator;
     return it;
   }
-  static iterator_t iterator_post_inc(const iterator_t& it) {
+  static iterator_t iterator_post_inc(iterator_t& it) {
     auto old = it;
     ++it.impl_.boxed_iterator;
     return old;
   }
-  static iterator_t iterator_pre_dec(const iterator_t& it) {
+  static iterator_t& iterator_pre_dec(iterator_t& it) {
     --it.impl_.boxed_iterator;
     return it;
   }
-  static iterator_t iterator_post_dec(const iterator_t& it) {
+  static iterator_t iterator_post_dec(iterator_t& it) {
     auto old = it;
     --it.impl_.boxed_iterator;
     return old;
@@ -268,6 +299,9 @@ class IList_Boxed_Impl {
     return lhs.impl_.boxed_iterator == rhs.impl_.boxed_iterator;
   }
 };
-} // namespace details
-
+} // namespace detail
 } // namespace c10
+
+namespace at {
+using ITensorList = c10::IList<Tensor>;
+} // namespace at
