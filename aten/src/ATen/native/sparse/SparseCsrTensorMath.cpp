@@ -13,6 +13,7 @@
 #include <ATen/native/mkl/SparseCsrLinearAlgebra.h>
 
 #include <algorithm>
+#include <iostream>
 
 namespace at {
 namespace meta {
@@ -60,16 +61,16 @@ void convert_indices_from_coo_to_csr_cpu(const Tensor& result, const Tensor& inp
 }
 
 template <typename F, typename ...Args>
-Tensor& unary_inplace_op_(F op_, const Tensor& self, Tensor& result, Args&&... args) {
-    TORCH_INTERNAL_ASSERT(self.is_sparse_csr());
-    TORCH_INTERNAL_ASSERT(result.is_sparse_csr());
+Tensor& unary_op_out(F op_out, const Tensor& self, Tensor& result, Args&&... args) {
+  TORCH_INTERNAL_ASSERT(self.is_sparse_csr());
+  TORCH_INTERNAL_ASSERT(result.is_sparse_csr()); 
 
-    if (!at::sparse::is_same_tensor(self, result)) {
-        result.copy_(self);
-    }
-    auto values = result.values();
-    (values.*op_)(std::forward<Args>(args)...);
-    return result;
+  if (!at::sparse::is_same_tensor(self, result)) {
+    result.copy_(self);
+  }
+  std::cout << self;
+  at::sin_outf(self, result);
+  return result;
 }
 
 } // end anonymous namespace
@@ -82,12 +83,12 @@ using namespace at::sparse;
 
 namespace {
 
-    inline Tensor get_result_tensor_for_unary_op(const Tensor& input) {
-        if (c10::isIntegralType(input.scalar_type(), /*includeBool=*/true)) {
-            return at::empty_like(input, input.options().dtype(c10::get_default_dtype()));
-        }
-        return at::empty_like(input);
-    }
+  inline Tensor get_result_tensor_for_unary_op(const Tensor& input) {
+    // if (c10::isIntegralType(input.scalar_type(), /*includeBool=*/true)) {
+    // return at::empty_like(input, input.options().dtype(c10::get_default_dtype()));
+    // }
+    return at::empty_like(input);
+  }
 }
 
 static constexpr bool is_mkl_supported() {
@@ -108,16 +109,17 @@ bool is_square_or_vec(int64_t dim_i, int64_t dim_j, int64_t dim_k) {
 }
 
 Tensor& sin_sparse_csr_out(const Tensor& self, Tensor& result) {
-    return unary_inplace_op_(&Tensor::sin_, self, result);
+  std::cout << "here\n";
+  return unary_op_out(&at::sin_outf, self, result);
 }
 
 Tensor sin_sparse_csr(const Tensor& self) {
-    auto result = get_result_tensor_for_unary_op(self);
-    return sin_sparse_csr_out(self, result);
+  auto result = get_result_tensor_for_unary_op(self);
+  return sin_sparse_csr_out(self, result);
 }
 
 Tensor& sin_sparse_csr_(Tensor& self) {
-    return sin_sparse_csr_out(self, self);
+  return sin_sparse_csr_out(self, self);
 }
 
 template <typename scalar_t>
