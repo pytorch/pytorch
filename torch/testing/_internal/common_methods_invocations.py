@@ -3542,9 +3542,9 @@ def sample_inputs_index(op_info, device, dtype, requires_grad, **kwargs):
     # target.index_add(dim, idx, source, *, alpha=1)
     add = op_info.name == "index_add"
     # target.index_copy(dim, idx, source)
-    copy  = op_info.name == "index_copy"
+    copy = op_info.name == "index_copy"
     # target.index_fill(dim, idx, value)
-    fill  = op_info.name == "index_fill"
+    fill = op_info.name == "index_fill"
 
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     make_permutation = partial(torch.randperm, device=device, dtype=torch.int64)
