@@ -380,15 +380,16 @@ class ObjectPair(Pair):
 class NonePair(Pair):
     """Pair for ``None`` inputs."""
     def __init__(self, actual: Any, expected: Any, **other_parameters: Any) -> None:
-        if not (actual is None and expected is None):
+        if not (actual is None or expected is None):
             raise UnsupportedInputs()
 
         super().__init__(actual, expected, **other_parameters)
 
     def compare(self) -> Optional[ErrorMeta]:
-        # At instantiation we already checked that both actual and expected are None, so there is nothing left to do
-        # here
-        return None
+        if self.actual is None and self.expected is None:
+            return None
+
+        return self._make_error_meta(AssertionError, f"None mismatch: {self.actual} is not {self.expected}")
 
 
 class BooleanPair(Pair):
@@ -404,11 +405,15 @@ class BooleanPair(Pair):
         actual, expected = self._process_inputs(actual, expected, id=id)
         super().__init__(actual, expected, **other_parameters)
 
-    def _process_inputs(self, actual: Any, expected: Any, *, id: Tuple[Any, ...]) -> Tuple[bool, bool]:
+    @property
+    def _supported_types(self) -> Tuple[Type, ...]:
         cls = [bool]
         if NUMPY_AVAILABLE:
             cls.append(np.bool_)
-        self._check_inputs_isinstance(actual, expected, cls=tuple(cls))
+        return tuple(cls)
+
+    def _process_inputs(self, actual: Any, expected: Any, *, id: Tuple[Any, ...]) -> Tuple[bool, bool]:
+        self._check_inputs_isinstance(actual, expected, cls=self._supported_types)
         error_meta, bools = self._apply_unary(self._to_bool, actual, expected, id=id)
         if error_meta:
             raise UnsupportedInputs(error_meta)
@@ -493,13 +498,17 @@ class NumberPair(Pair):
         self.equal_nan = equal_nan
         self.check_dtype = check_dtype
 
+    @property
+    def _supported_types(self) -> Tuple[Type, ...]:
+        cls = list(self._NUMBER_TYPES)
+        if NUMPY_AVAILABLE:
+            cls.append(np.number)
+        return tuple(cls)
+
     def _process_inputs(
         self, actual: Any, expected: Any, *, id: Tuple[Any, ...]
     ) -> Tuple[Union[int, float, complex], Union[int, float, complex]]:
-        number_types = list(self._NUMBER_TYPES)
-        if NUMPY_AVAILABLE:
-            number_types.append(np.number)
-        self._check_inputs_isinstance(actual, expected, cls=tuple(number_types), not_cls=bool)
+        self._check_inputs_isinstance(actual, expected, cls=self._supported_types, not_cls=bool)
         error_meta, numbers = self._apply_unary(self._to_number, actual, expected, id=id)
         if error_meta:
             raise UnsupportedInputs(error_meta)
