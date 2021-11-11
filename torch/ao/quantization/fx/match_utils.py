@@ -1,3 +1,4 @@
+import collections
 import sys
 import torch
 from torch.fx.graph import (
@@ -27,11 +28,36 @@ class MatchAllNode:
     """
     pass
 
+def calculate_module_name_to_num_node_users(
+    graph: Graph,
+) -> Dict[str, int]:
+    """
+    Given a dictionary of named modules in a parent module and a graph,
+    calculates a dictionary with the key being module name of each child module,
+    and the value being the number of nodes in the graph that use that child
+    module.
+
+    This is useful for detecting whether a single module instance is used by
+    more than one node. This information does not show up in
+    `torch.fx.Node.users`, which is why calculate it here.
+    """
+    results: Dict[str, int] = collections.defaultdict(int)
+    for node in graph.nodes:
+        if node.op == 'call_module':
+            results[node.target] += 1
+    return results
+
 # Note: The order of patterns is important! match function will take whatever is matched first, so we'll
 # need to put the fusion patterns before single patterns. For example, add_relu should be registered come before relu.
 # decorators are applied in the reverse order we see. Also when we match the nodes in the graph with these patterns,
 # we'll start from the last node of the graph and traverse back.
-def is_match(modules, node, pattern, max_uses=sys.maxsize):
+def is_match(
+    modules: Dict[str, torch.nn.Module],
+    node: Node,
+    pattern: Pattern,
+    module_name_to_num_node_users: Dict[str, int],
+    max_uses=sys.maxsize
+) -> bool:
     """ Matches a node in fx against a pattern
     """
     if isinstance(pattern, tuple):
@@ -49,16 +75,30 @@ def is_match(modules, node, pattern, max_uses=sys.maxsize):
     if len(node.users) > max_uses:
         return False
 
+    if (
+        # This is True if we are not at the last node in the pattern
+        max_uses < sys.maxsize and
+        # The following two lines are True if the current module has
+        # more than one node using it
+        node.op == 'call_module' and
+        module_name_to_num_node_users[node.target] > 1  # type: ignore[index]
+    ):
+        # If a module is used by more than one node, we cannot safely
+        # fuse this module without further analysis of the uses. For now,
+        # we disable fusion for such modules. A future optimization can
+        # enable fusion while handling the multiple uses correctly.
+        return False
+
     if isinstance(self_match, type) and issubclass(self_match, torch.nn.Module):
         if node.op != 'call_module':
             return False
-        if not type(modules[node.target]) == self_match:
+        if not type(modules[node.target]) == self_match:  # type: ignore[index]
             return False
     elif callable(self_match):
         if node.op != 'call_function' or node.target is not self_match:
             return False
         elif node.target is getattr:
-            if node.args[1] != pattern[1]:
+            if node.args[1] != pattern[1]:  # type: ignore[index]
                 return False
     elif isinstance(self_match, str):
         if node.op != 'call_method' or node.target != self_match:
@@ -72,7 +112,10 @@ def is_match(modules, node, pattern, max_uses=sys.maxsize):
     if len(arg_matches) != len(node.args):
         return False
 
-    return all(is_match(modules, node, arg_match, max_uses=1) for node, arg_match in zip(node.args, arg_matches))
+    return all(
+        is_match(
+            modules, node, arg_match, module_name_to_num_node_users, max_uses=1)  # type: ignore[arg-type]
+        for node, arg_match in zip(node.args, arg_matches))
 
 def find_matches(
         graph: Graph,
@@ -126,11 +169,14 @@ def find_matches(
         else:
             matched.append(node)
 
+    module_name_to_num_node_users = \
+        calculate_module_name_to_num_node_users(graph)
     cache_for_no_tensor_check: Dict[Node, bool] = dict()
     for node in reversed(graph.nodes):
         if node.name not in match_map and node.name not in all_matched:
             for pattern, value in patterns.items():
-                if is_match(modules, node, pattern):
+                if is_match(
+                        modules, node, pattern, module_name_to_num_node_users):
                     matched: List[Any] = []
                     record_match(pattern, node, matched)
                     for n in matched:

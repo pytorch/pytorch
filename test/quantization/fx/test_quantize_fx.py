@@ -26,6 +26,7 @@ from torch.ao.quantization.fx.common_quantization_patterns import CommonQuantize
 from torch.ao.quantization.fx.match_utils import (
     is_match,
     MatchAllNode,
+    calculate_module_name_to_num_node_users,
 )
 
 from torch.ao.quantization import (
@@ -423,6 +424,53 @@ class TestFuseFx(QuantizationTestCase):
         })
         self.checkGraphModuleNodes(m, expected_node=ns.call_module(MyConvReLU))
 
+    def test_fusion_turns_off_for_multi_use_intermediate_nodes(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv2d = nn.Conv2d(1, 1, 1)
+                self.bn2d = nn.BatchNorm2d(1)
+
+            def forward(self, x):
+                x = self.conv2d(x)
+                x = self.conv2d(x)
+                x = self.bn2d(x)
+                return x
+
+        # test train mode
+        m = M().train()
+        m = prepare_qat_fx(m, {})
+        expected_nodes = [
+            ns.call_module(nn.Conv2d),
+            ns.call_module(nn.Conv2d),
+            ns.call_module(nn.BatchNorm2d),
+        ]
+        expected_occurrence = {
+            ns.call_module(nni.ConvBn2d): 0,
+        }
+        self.checkGraphModuleNodes(
+            m,
+            expected_node_list=expected_nodes,
+            expected_node_occurrence=expected_occurrence)
+
+        # test eval mode
+        m = M().eval()
+        # fuse_fx is a top level api and only supports eval mode
+        m = fuse_fx(m)
+        expected_nodes = [
+            ns.call_module(nn.Conv2d),
+            ns.call_module(nn.Conv2d),
+            ns.call_module(nn.BatchNorm2d),
+        ]
+        expected_occurrence = {
+            ns.call_module(nni.ConvBn2d): 0,
+        }
+        self.checkGraphModuleNodes(
+            m,
+            expected_node_list=expected_nodes,
+            expected_node_occurrence=expected_occurrence)
+
+
 @skipIfNoFBGEMM
 class TestQuantizeFx(QuantizationTestCase):
     def test_pattern_match(self):
@@ -446,9 +494,12 @@ class TestQuantizeFx(QuantizationTestCase):
         pattern = (nn.ReLU, (operator.add, (nn.BatchNorm2d, nn.Conv2d), MatchAllNode))
         m = torch.fx.symbolic_trace(M())
         modules = dict(m.named_modules())
+        module_name_to_num_node_users = \
+            calculate_module_name_to_num_node_users(m.graph)
         for n in m.graph.nodes:
             if n.op == 'call_module' and type(modules[n.target]) == nn.ReLU:
-                self.assertTrue(is_match(modules, n, pattern))
+                self.assertTrue(is_match(
+                    modules, n, pattern, module_name_to_num_node_users))
 
     def _get_conv_linear_test_cases(self, is_reference):
         """ Returns a list of test cases, with format:

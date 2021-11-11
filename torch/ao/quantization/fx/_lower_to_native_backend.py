@@ -2,14 +2,18 @@ import torch
 from torch.fx import subgraph_rewriter
 from .graph_module import QuantizedGraphModule
 from .quantized_fusion_patterns_and_replacements import get_fbgemm_patterns_and_replacements
-from .match_utils import is_match
-from .match_utils import MatchAllNode
+from .match_utils import (
+    is_match,
+    MatchAllNode,
+    calculate_module_name_to_num_node_users,
+)
 from .utils import _parent_name
+from .quantization_types import Pattern
 
 def _lower_ref_linear_module(model: QuantizedGraphModule) -> QuantizedGraphModule:
     # traverse the graph and find dequantize - ref quantized linear - quantize patterns and
     # and replace it with quantized linear modules
-    pattern = (
+    pattern: Pattern = (  # type: ignore[assignment]
         torch.quantize_per_tensor,
         (torch.nn.quantized._reference.Linear, "dequantize"),
         MatchAllNode, MatchAllNode, MatchAllNode)
@@ -17,8 +21,10 @@ def _lower_ref_linear_module(model: QuantizedGraphModule) -> QuantizedGraphModul
     nodes = list(model.graph.nodes)
     # TODO: maybe orgnize this better (e.g. break down to more functions)
     # to make this function more readable
+    module_name_to_num_node_users = \
+        calculate_module_name_to_num_node_users(model.graph)
     for n in model.graph.nodes:
-        if not is_match(modules, n, pattern):
+        if not is_match(modules, n, pattern, module_name_to_num_node_users):
             continue
         q_node = n
         linear_node = q_node.args[0]
