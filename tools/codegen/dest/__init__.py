@@ -1,5 +1,5 @@
 from .lazy_ir import LazyIR as LazyIR
-from .lazy_ir import gen_lazy_shape_dtype_decl as gen_lazy_shape_dtype_decl
+from .lazy_ir import gen_lazy_shape_inference_decl as gen_lazy_shape_inference_decl
 from .lazy_ir import GenLazyNativeFuncDefinition as GenLazyNativeFuncDefinition
 from .register_dispatch_key import RegisterDispatchKey as RegisterDispatchKey
 from .register_dispatch_key import gen_registration_helpers as gen_registration_helpers

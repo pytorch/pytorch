@@ -156,6 +156,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
         fm.write_with_template(f'{backend_dispatch_key}NativeFunctions.cpp', 'DispatchKeyNativeFunctions.cpp', lambda: {
             'includes': [f'#include "{path}"' for path in [
                 "ATen/MetaFunctions.h",
+                "torch/csrc/lazy/core/shape.h",
                 "lazy_tensor_core/csrc/aten_ltc_bridge.h",
                 "lazy_tensor_core/csrc/helpers.h",
                 "lazy_tensor_core/csrc/tensor.h",
@@ -163,7 +164,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
                 "lazy_tensors/computation_client/metrics.h",
                 f"{output_dir}/{backend_key}NativeFunctions.h",
                 f"{output_dir}/{backend_key}LazyIr.h",
-                f"{output_dir}/{backend_key}ShapeDtype.h",
+                f"{output_dir}/{backend_key}ShapeInference.h",
             ]],
             'native_functions_include': '',
             'backend_namespace': 'torch_lazy_tensors',  # this is wrong
@@ -176,7 +177,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
             )),
         })
         # Generate headers for shape/dtype funcs for non-meta kernels
-        fm.write_with_template(f'{backend_dispatch_key}ShapeDtype.h', 'ShapeDtype.h', lambda: {
+        fm.write_with_template(f'{backend_dispatch_key}ShapeInference.h', 'ShapeInference.h', lambda: {
             'lazy_ir_sysinc': [f'#include <{path}>' for path in [
                 "c10/core/ScalarType.h",
                 "c10/util/Optional.h",
@@ -185,11 +186,12 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
             ]],
             'lazy_ir_inc': [f'#include "{path}"' for path in [
                 "torch/csrc/lazy/core/ir.h",
+                "torch/csrc/lazy/core/shape.h",
             ]],
             'DispatchKey': backend_dispatch_key,
             'dispatch_namespace': backend_dispatch_key.lower(),
             'func_declarations': list(concat_map_codegen(
-                lambda f: dest.gen_lazy_shape_dtype_decl(f, backend_indices[backend_dispatch_key]),
+                lambda f: dest.gen_lazy_shape_inference_decl(f, backend_indices[backend_dispatch_key]),
                 grouped_native_functions
             )),
         })

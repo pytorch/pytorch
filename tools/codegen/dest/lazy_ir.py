@@ -88,11 +88,9 @@ class LazyIR:
 // TODO(alanwaketan): Public members don't need to have _ suffix.
 class {schema.node_name} : public {self.node_base} {{
  public:
-  {schema.node_name}({node_ctor_args}, const std::vector<at::ScalarType>& out_dtypes,
-      const std::vector<std::vector<int64_t>>& out_shapes)
+  {schema.node_name}({node_ctor_args}, std::vector<Shape>&& shapes)
       : {self.node_base}(torch::lazy::OpKind(at::aten::{schema.aten_name}),
-              {{{base_ctor_value_args}}},
-              torch::lazy::convertShapes(out_dtypes, out_shapes),
+              {{{base_ctor_value_args}}}, std::move(shapes),
               /* num_outputs */ {len(func.returns)},
               torch::lazy::MHash({scalar_hashes})){comma_if_scalar_initializers}
         {scalar_initializers}
@@ -162,25 +160,25 @@ class GenLazyNativeFuncDefinition:
 
         # call the meta kernel if it exists, to compute output shape/dtype for our IR
         if func.structured or func.structured_delegate is not None:
-            meta_out = """std::vector<std::vector<int64_t>> out_shape{out_meta.sizes().vec()};
-        std::vector<c10::ScalarType> out_dtype{out_meta.scalar_type()};"""
+            meta_out = """std::vector<Shape> shapes{Shape(out_meta.scalar_type(), out_meta.sizes().vec())};"""
             if returns_length > 1:
-                meta_out = """auto out_shape = CreateComputationShapeFromMetaTensors(out_meta);
-        auto out_dtype = CreateDTypeFromMetaTensors(out_meta);"""
+                this_shape = lambda i: f"Shape(std::get<{i}>(out_meta).scalar_type(), std::get<{i}>(out_meta).sizes().vec())"
+                shapes_str = ','.join([this_shape(i) for i in range(returns_length)])
+                meta_out = "std::vector<Shape> shapes{" + shapes_str + "};"
+                # meta_out = f"""std::vector<Shape> shapes{Shape(std::get<i>(out_meta).scalar_type(), std::get<i>(out_meta.sizes().vec())};"""
+                # meta_out = """auto shapes = CreateComputationShapeFromMetaTensors(out_meta);"""
 
             meta_str = f"""auto out_meta = at::meta::{schema.aten_name}({', '.join(str(t.name) for t in all_types)});
         {meta_out}"""
         else:
             shape_sig = ComputeShapeSignature(func)
             meta_str = f"""
-        auto out_shape = {shape_sig.shape_call};
-        auto out_dtype = {shape_sig.dtype_call};"""
+        auto shapes = {shape_sig.shape_call};"""
         meta_str += f"""
-        TORCH_INTERNAL_ASSERT(out_shape.size() == {returns_length});
-        TORCH_INTERNAL_ASSERT(out_dtype.size() == {returns_length});"""
+        TORCH_INTERNAL_ASSERT(shapes.size() == {returns_length});"""
 
         node_str = f"""auto node = torch::lazy::MakeNode<ir::ops::{schema.node_name}>({node_ctor_input_str},
-                                                                                      out_dtype, out_shape);"""
+                                                                                      std::move(shapes));"""
 
         assert len(value_types) > 0, f"Only supporting tensor ops so far, none found in {sig}"
         first_tensor = value_types[0]
@@ -229,23 +227,14 @@ class ComputeShapeSignature:
 
     @property
     def shape_decl(self) -> str:
-        return f"std::vector<std::vector<int64_t>> compute_shape_{self.__decl_suffix()}"
-
-    @property
-    def dtype_decl(self) -> str:
-        return f"std::vector<c10::ScalarType> compute_dtype_{self.__decl_suffix()}"
+        return f"std::vector<Shape> compute_shape_{self.__decl_suffix()}"
 
     @property
     def shape_call(self) -> str:
         return f"torch_lazy_tensors::ir::ops::compute_shape_{self.__call_suffix()}"
 
-    @property
-    def dtype_call(self) -> str:
-        return f"torch_lazy_tensors::ir::ops::compute_dtype_{self.__call_suffix()}"
-
-
 @with_native_function_and_index
-def gen_lazy_shape_dtype_decl(f: NativeFunction, backend_index: BackendIndex) -> List[str]:
+def gen_lazy_shape_inference_decl(f: NativeFunction, backend_index: BackendIndex) -> List[str]:
     sig = kernel_signature(f, backend_index)
 
     # Lazy IR stuff
@@ -258,6 +247,6 @@ def gen_lazy_shape_dtype_decl(f: NativeFunction, backend_index: BackendIndex) ->
     # since we just use the meta function for structured kernels
     if not f.structured and f.structured_delegate is None:
         shape_sig = ComputeShapeSignature(f)
-        return ["\n".join([f"{shape_sig.shape_decl};", f"{shape_sig.dtype_decl};"])]
+        return ["\n".join([f"{shape_sig.shape_decl};"])]
     else:
         return []

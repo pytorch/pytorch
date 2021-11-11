@@ -8,6 +8,7 @@ ${lazy_ir_inc}
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
+using Shape = torch::lazy::Shape;
 
 ${func_declarations}
 
