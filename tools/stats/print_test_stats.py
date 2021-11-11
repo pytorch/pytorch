@@ -642,7 +642,9 @@ class TestSuite:
         test_count = len(sorted_tests)
         print(f"class {self.name}:")
         print(
-            f"    tests: {test_count} failed: {self.failed_count} skipped: {self.skipped_count} errored: {self.errored_count} unexpected_success: {self.unexpected_success_count} expected_failure: {self.expected_failure_count}")
+            f"    tests: {test_count} failed: {self.failed_count} skipped: {self.skipped_count} "
+            f"errored: {self.errored_count} unexpected_success: {self.unexpected_success_count} "
+            f"expected_failure: {self.expected_failure_count}")
         print(f"    run_time: {self.total_time:.2f} seconds")
         print(f"    avg_time: {self.total_time/test_count:.2f} seconds")
         if test_count >= 2:
@@ -714,7 +716,7 @@ def get_recursive_files(folder: str, extension: str) -> Iterable[str]:
 
 def parse_reports(folder: str) -> Tuple[Dict[str, TestFile], Dict[str, DuplicatedDict]]:
     tests_by_file = dict()
-    duplicated_tests_by_file = dict()
+    duplicated_tests_by_file : Dict[str, DuplicatedDict] = dict()
     for report in get_recursive_files(folder, ".xml"):
         report_path = Path(report)
         # basename of the directory of test-report is the test filename

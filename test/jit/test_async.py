@@ -26,7 +26,6 @@ class TestAsync(JitTestCase):
         fut = torch.jit.fork(foo, x)
         y_hat = foo(x)
         y = torch.jit.wait(fut)
-
         # assert nothing; only to make sure the fake python path works
 
     def test_async_future_type_python(self):
