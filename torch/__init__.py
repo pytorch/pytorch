@@ -42,7 +42,7 @@ __all__ = [
     'ShortTensor', 'CharTensor', 'ByteTensor', 'BoolTensor', 'Tensor',
     'lobpcg', 'use_deterministic_algorithms',
     'are_deterministic_algorithms_enabled',
-    'set_warn_always', 'is_warn_always_enabled',
+    'set_warn_always', 'is_warn_always_enabled','float'
 ]
 
 ################################################################################
@@ -199,6 +199,11 @@ else:
 # torch._C module initialization code in C
 if TYPE_CHECKING:
     import torch._C as _C
+    # Appease pyre
+    class float: ...
+    class float16: ...
+    class float32: ...
+    class float64: ...
 
 # Check to see if we can load C extensions, and if not provide some guidance
 # on what the problem might be.
