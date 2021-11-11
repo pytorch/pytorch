@@ -1307,15 +1307,22 @@ TORCH_IMPL_FUNC(scatter_reduce2_structured_cpu)
     auto index_data = index.data_ptr<int64_t>();
     auto out_data = out.data_ptr<scalar_t>();
 
-    for (int64_t i = 0; i < self.numel(); i+=self.stride(dim) * self.size(dim)) {
+    int64_t offset1 = 1, offset2 = 1;
+    for (int64_t d = 0; d < dim; d++)
+      offset1 *= self.size(d);
+    for (int64_t d = dim + 1; d < self.dim(); d++)
+      offset2 *= self.size(d);
+
+    scalar_t value;
+    int64_t dim_index;
+    for (int64_t i = 0; i < offset1; i++) {
       for (int64_t j = 0; j < self.size(dim); j++) {
-        for (int64_t k = 0; k < self.stride(dim); k++) {
-          auto n = i + j * self.stride(dim) + k;
-          auto dim_index = index_data[n];
+        for (int64_t k = 0; k < offset2; k++) {
+          value = self_data[i * self.stride(dim) * self.size(dim) + j * self.stride(dim) + k];
+          dim_index = index_data[i * index.stride(dim) * index.size(dim) + j * index.stride(dim) + k];
           TORCH_CHECK(dim_index >= 0 && dim_index < out.size(dim),
-              "Expected `index` values to be in range ", 0, " to ", self.size(dim), " (got ", dim_index, ")");
-          auto m = i + dim_index * self.stride(dim) + k;
-          out_data[m] += self_data[n];
+              "Expected `index` values to be in range ", 0, " to ", out.size(dim), " (got ", dim_index, ")");
+          out_data[i * out.stride(dim) * out.size(dim) + dim_index * out.stride(dim) + k] += value;
         }
       }
     }
