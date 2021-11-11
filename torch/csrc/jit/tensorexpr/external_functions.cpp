@@ -8,7 +8,7 @@
 #include <ATen/native/quantized/cpu/conv_serialization.h>
 #include <ATen/native/quantized/cpu/qadd.h>
 #include <ATen/native/xnnpack/OpContext.h>
-#include <ATen/quantized/Quantizer.h>
+#include <ATen/quantized/QTensorImpl.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/irange.h>
@@ -141,6 +141,39 @@ void nnc_aten_conv2d(
 }
 
 #ifndef DISABLE_NNC_QUANTIZATION
+
+at::Tensor from_blob_quantized(
+    void* data,
+    at::IntArrayRef sizes,
+    at::IntArrayRef strides,
+    double qscale,
+    int64_t qzero,
+    at::ScalarType dtype) {
+  auto memory_format = deduce_memory_format(strides, sizes);
+  auto qx = at::_empty_affine_quantized(
+      sizes,
+      dtype,
+      c10::kStrided,
+      at::kCPU,
+      false,
+      qscale,
+      qzero,
+      memory_format);
+  auto qtensor_impl = static_cast<at::QTensorImpl*>(qx.unsafeGetTensorImpl());
+  auto typeMeta = c10::scalarTypeToTypeMeta(dtype);
+  const std::size_t itemsize = typeMeta.itemsize();
+  std::size_t size = 1;
+  for (std::int64_t s : sizes) {
+    size *= static_cast<std::size_t>(s);
+  }
+  const std::size_t datasize = size * itemsize;
+  at::DataPtr data_ptr = c10::InefficientStdFunctionContext::makeDataPtr(
+      data, [](void*) {}, at::kCPU);
+  qtensor_impl->ShareExternalPointer(std::move(data_ptr), typeMeta, data_ptr);
+  qtensor_impl->set_sizes_and_strides(sizes, strides);
+  return qx;
+}
+
 void nnc_aten_quantized_conv2d(
     int64_t bufs_num,
     void** buf_data,
@@ -155,19 +188,14 @@ void nnc_aten_quantized_conv2d(
   const double x_qscale = ((double*)extra_args)[0];
   const int64_t x_qzero = extra_args[1];
   const c10::ScalarType x_qdtype = static_cast<c10::ScalarType>(extra_args[2]);
-  at::Tensor qx = at::from_blob_quantized_per_tensor_affine(
+  auto qx = from_blob_quantized(
       buf_data[1],
-      // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
       tensors[1].sizes(),
       tensors[1].strides(),
-      [](void*) {},
-      // NOLINTNEXTLINE
       x_qscale,
       x_qzero,
-      at::TensorOptions()
-          .dtype(toQIntType(x_qdtype))
-          .memory_format(
-              deduce_memory_format(tensors[1].strides(), tensors[1].sizes())));
+      toQIntType(x_qdtype));
+
   auto convPackedParams =
       reinterpret_cast<ConvPackedParamsBase<2>*>(buf_data[2]);
   const double out_qscale = ((double*)extra_args)[3];
@@ -190,19 +218,13 @@ void nnc_aten_quantized_conv2d_relu(
   const double x_qscale = ((double*)extra_args)[0];
   const int64_t x_qzero = extra_args[1];
   const c10::ScalarType x_qdtype = static_cast<c10::ScalarType>(extra_args[2]);
-  at::Tensor qx = at::from_blob_quantized_per_tensor_affine(
+  auto qx = from_blob_quantized(
       buf_data[1],
-      // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
       tensors[1].sizes(),
       tensors[1].strides(),
-      [](void*) {},
-      // NOLINTNEXTLINE
       x_qscale,
       x_qzero,
-      at::TensorOptions()
-          .dtype(toQIntType(x_qdtype))
-          .memory_format(
-              deduce_memory_format(tensors[1].strides(), tensors[1].sizes())));
+      toQIntType(x_qdtype));
 
   auto convPackedParams =
       reinterpret_cast<ConvPackedParamsBase<2>*>(buf_data[2]);
@@ -234,33 +256,23 @@ void nnc_aten_quantized_add(
   auto b_memory_format =
       // NOLINTNEXTLINE
       deduce_memory_format(tensors[2].strides(), tensors[2].sizes());
-  at::Tensor qa = at::from_blob_quantized_per_tensor_affine(
+  auto qa = from_blob_quantized(
       buf_data[1],
-      // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
       tensors[1].sizes(),
       tensors[1].strides(),
-      [](void*) {},
-      // NOLINTNEXTLINE
       a_qscale,
       a_qzero,
-      at::TensorOptions()
-          .dtype(toQIntType(a_qdtype))
-          .memory_format(a_memory_format));
+      toQIntType(a_qdtype));
   const double b_qscale = ((double*)extra_args)[3];
   const int64_t b_qzero = extra_args[4];
   const c10::ScalarType b_qdtype = static_cast<c10::ScalarType>(extra_args[5]);
-  at::Tensor qb = at::from_blob_quantized_per_tensor_affine(
+  auto qb = from_blob_quantized(
       buf_data[2],
-      // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
       tensors[2].sizes(),
       tensors[2].strides(),
-      [](void*) {},
-      // NOLINTNEXTLINE
       b_qscale,
       b_qzero,
-      at::TensorOptions()
-          .dtype(toQIntType(b_qdtype))
-          .memory_format(b_memory_format));
+      toQIntType(b_qdtype));
   const double out_qscale = ((double*)extra_args)[6];
   const int64_t out_qzero = extra_args[7];
   auto r = at::native::quantized_add(qa, qb, out_qscale, out_qzero);
@@ -289,19 +301,13 @@ void nnc_aten_upsample_nearest2d(
 
   if (is_quantized) {
 #ifndef DISABLE_NNC_QUANTIZATION
-    x = at::from_blob_quantized_per_tensor_affine(
+    x = from_blob_quantized(
         buf_data[1],
-        // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
         tensors[1].sizes(),
         tensors[1].strides(),
-        [](void*) {},
-        // NOLINTNEXTLINE
         x_qscale,
         x_qzero,
-        at::TensorOptions()
-            .dtype(toQIntType(static_cast<c10::ScalarType>(x_qdtype)))
-            .memory_format(deduce_memory_format(
-                tensors[1].strides(), tensors[1].sizes())));
+        toQIntType(static_cast<c10::ScalarType>(x_qdtype)));
 #else
     TORCH_CHECK(false, "NNC quantization not supported!");
 #endif // DISABLE_NNC_QUANTIZATION
@@ -359,15 +365,13 @@ void nnc_aten_dequantize(
   const double qscale = ((double*)extra_args)[0];
   const int64_t qzero = extra_args[1];
   const int64_t qdtype = extra_args[2];
-  at::Tensor qx = at::from_blob_quantized_per_tensor_affine(
+  auto qx = from_blob_quantized(
       buf_data[1],
-      // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
       tensors[1].sizes(),
-      [](void*) {},
-      // NOLINTNEXTLINE
+      tensors[1].strides(),
       qscale,
       qzero,
-      at::TensorOptions(toQIntType(static_cast<c10::ScalarType>(qdtype))));
+      toQIntType(static_cast<c10::ScalarType>(qdtype)));
   auto r = at::dequantize(qx);
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
