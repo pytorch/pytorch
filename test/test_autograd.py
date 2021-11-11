@@ -12,6 +12,7 @@ import time
 import unittest
 import uuid
 import warnings
+import operator
 from copy import deepcopy
 from collections import OrderedDict
 from itertools import product
@@ -7209,9 +7210,30 @@ class TestAutogradForwardModeBatchedGrad(TestCase):
 
         def jvp(tangent):
             with fwAD.dual_level():
-                dual_tensor = fwAD.make_dual(input, tangent)
-                return fwAD.unpack_dual(dual_tensor)[1]
-        torch._vmap_internals._vmap(jvp, 0, 0)(tangent)
+                x = fwAD.make_dual(input, tangent)
+                return fwAD.unpack_dual(x)[1]
+        x_tangent = torch._vmap_internals._vmap(jvp, 0, 0)(tangent)
+
+        self.assertIsNot(x_tangent, tangent)
+
+    def test_inplace_on_view_same_layout(self):
+        input = torch.zeros([2, 2])
+        tangent = torch.zeros([2, 2, 2])
+        base = torch.zeros([2, 2])
+        view = base.view_as(base)
+
+        def jvp(tangent):
+            with fwAD.dual_level():
+                x = fwAD.make_dual(input, tangent)
+                view.copy_(x)
+                return fwAD.unpack_dual(x)[1], fwAD.unpack_dual(view)[1], fwAD.unpack_dual(view._base)[1]
+        x_tangent, view_tangent, base_tangent = torch._vmap_internals._vmap(jvp, 0, 0)(tangent)
+
+        self.assertFalse(view_tangent._is_view())  # Optimization to share the same tensor!
+        self.assertIs(view_tangent, base_tangent)
+        self.assertIs(x_tangent, tangent)
+        self.assertIs(view_tangent, tangent)
+
 
     def test_inplace_on_view_not_same_layout(self):
         input = torch.zeros([2, 2])
@@ -7220,10 +7242,14 @@ class TestAutogradForwardModeBatchedGrad(TestCase):
 
         def jvp(tangent):
             with fwAD.dual_level():
-                dual_tensor = fwAD.make_dual(input, tangent)
-                view.copy_(dual_tensor)
-                return fwAD.unpack_dual(dual_tensor)[1]
-        torch._vmap_internals._vmap(jvp, 0, 0)(tangent)
+                x = fwAD.make_dual(input, tangent)
+                view.copy_(x)
+                return fwAD.unpack_dual(x)[1], fwAD.unpack_dual(view)[1], fwAD.unpack_dual(view._base)[1]
+        x_tangent, view_tangent, base_tangent = torch._vmap_internals._vmap(jvp, 0, 0)(tangent)
+
+        self.assertIs(view_tangent._base, base_tangent)
+        self.assertIs(x_tangent, tangent)
+        self.assertIsNot(view_tangent, tangent)
 
 class TestAutogradForwardMode(TestCase):
     def tearDown(self):
@@ -7590,10 +7616,8 @@ class TestAutogradForwardMode(TestCase):
 
         def check(a, b):
             def assert_same_meta(t, target):
-                import operator
-
                 for num_bdim in range(t.dim()):
-                    result = new_zeroes_fn(t, target, num_bdim)
+                    result = new_zeroes_fn(t, target, self_num_batch_dims=num_bdim)
 
                     self.assertEqual(result.dim(), target.dim() + num_bdim)
 
