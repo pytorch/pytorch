@@ -911,7 +911,7 @@ Example::
       )")
       .def(
           py::init([](const std::string& host,
-                      ::c10d::PortType port,
+                      uint16_t port,
                       int worldSize,
                       bool isServer,
                       std::chrono::milliseconds timeout,
