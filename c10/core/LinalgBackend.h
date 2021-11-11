@@ -7,11 +7,7 @@
 
 namespace c10 {
 
-enum class LinalgBackend : int8_t {
-    Default,
-    Cusolver,
-    Magma
-};
+enum class LinalgBackend : int8_t { Default, Cusolver, Magma };
 
 inline std::string LinalgBackendToString(at::LinalgBackend backend) {
   switch (backend) {
@@ -27,7 +23,7 @@ inline std::string LinalgBackendToString(at::LinalgBackend backend) {
 }
 
 inline std::string LinalgBackendToRepr(at::LinalgBackend backend) {
-    return std::string("torch.") + at::LinalgBackendToString(backend);
+  return std::string("torch.") + at::LinalgBackendToString(backend);
 }
 
 inline std::ostream& operator<<(

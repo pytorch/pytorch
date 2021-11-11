@@ -3,8 +3,8 @@
 #include <pybind11/pytypes.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Layout.h>
-#include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/LinalgBackend.h>
+#include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/python/module_python.h>
 #include <climits>
