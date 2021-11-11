@@ -382,7 +382,7 @@ class BooleanPair(Pair):
         super().__init__(actual, expected, **other_parameters)
 
     def _process_inputs(self, actual: Any, expected: Any, *, id: Tuple[Any, ...]) -> Tuple[bool, bool]:
-        cls = [bool]
+        cls: List[Type] = [bool]
         if NUMPY_AVAILABLE:
             cls.append(np.bool_)
         self._check_inputs_isinstance(actual, expected, cls=tuple(cls))
