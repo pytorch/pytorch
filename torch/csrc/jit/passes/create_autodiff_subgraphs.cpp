@@ -28,11 +28,18 @@ struct WorkBlock : public std::pair<Node*, Node*> {
   }
 };
 
-struct topo_cmp {
-  bool operator()(Value* a, Value* b) {
+struct topo_cmp_value {
+  bool operator()(Value* a, Value* b) const {
     return a->node()->isBefore(b->node());
   }
 };
+
+struct topo_cmp_node {
+  bool operator()(Node* a, Node* b) const {
+    return a->isBefore(b);
+  }
+};
+
 
 class SubgraphSlicer {
  public:
@@ -62,21 +69,33 @@ class SubgraphSlicer {
 
   void cleanupSubgraphs() {
     auto curNode = *block_->nodes().rbegin();
-    while (curNode != *block_->nodes().rend()) {
-      // Save the previous node, since we might delete `curNode` in next block
-      auto prevNode = curNode->prev();
-      if (curNode->kind() == prim::DifferentiableGraph) {
-        // Inlining nodes may cause some subexpression to come back in the
-        // subgraphs (for example, copying constants in repeatedly will generate
-        // redundant prim::Constants). Run CSE to clean them up.
-        EliminateCommonSubexpression(curNode->g(attr::Subgraph));
 
-        if (!inlineIfTooSmall(curNode)) {
-          diff_nodes_.push_back(curNode);
-        }
+    bool any_changed = true;
+
+    while(any_changed) {
+
+        while (curNode != *block_->nodes().rend()) {
+          // Save the previous node, since we might delete `curNode` in next block
+          auto prevNode = curNode->prev();
+          if (curNode->kind() == prim::DifferentiableGraph) {
+            // Inlining nodes may cause some subexpression to come back in the
+            // subgraphs (for example, copying constants in repeatedly will generate
+            // redundant prim::Constants). Run CSE to clean them up.
+            EliminateCommonSubexpression(curNode->g(attr::Subgraph));
+
+            any_changed = unfuseAliasedOutputs(curNode);
+
+            // don't try inlining until we unfuse all unaliased outputs
+            if (!any_changed && !inlineIfTooSmall(curNode)) {
+              diff_nodes_.push_back(curNode);
+            }
+          }
+          curNode = prevNode;
       }
-      curNode = prevNode;
+
     }
+
+
 
     // clean up dont merge attributes as they are irrelevant outside this pass
     clearDontMergeSym(block_);
@@ -108,8 +127,7 @@ class SubgraphSlicer {
     auto workblocks = buildWorkBlocks();
     for (auto& workblock : workblocks) {
       bool any_changed = true;
-      while (any_changed ||
-             unfuseGroupsWithAliasedOutputs(workblock, aliasDb_)) {
+      while (any_changed) {
         any_changed = false;
         for (auto it = workblock.end()->reverseIterator();
              it != workblock.begin()->reverseIterator();) {
@@ -132,66 +150,143 @@ class SubgraphSlicer {
   }
 
  private:
-  // Autodiff doesn't support aliased outputs in DifferentiableGraphs
-  // If we detect such graphs, we
-  // 1. build sets of alised outputs for each such graph. The sets are
-  // topologically sorted
-  // 2. mark all but the earliest output from each set and their descendants
-  // with the "dont_merge" attribute
-  // 3. unfuse graphs
-  // 4. restart fusion
-  // 5. `shouldConsiderMerge` also checks if the node has the "dont_merge" attr
-  bool unfuseGroupsWithAliasedOutputs(WorkBlock& workblock, AliasDb& db) {
-    bool unfuse = false;
 
-    // we unfuse all graphs that have aliased outputs to reduce the number
-    // of restarts we need to do
-    for (auto it = workblock.end()->reverseIterator();
-         it != workblock.begin()->reverseIterator();) {
-      if (it->kind() == prim::DifferentiableGraph && markNodesToNotFuse(*it)) {
-        SubgraphUtils::unmergeSubgraph(*it);
-        unfuse = true;
-      }
-    }
-    return unfuse;
-  }
+  bool unfuseAliasedOutputs(Node* subgraphNode) {
 
-  bool markNodesToNotFuse(Node* subgraphNode) {
+    GRAPH_DEBUG("unfuseAliasedOutputs on ", getHeader(subgraphNode));
     if (subgraphNode->outputs().size() < 2) {
       return false;
     }
 
-    bool needs_unfuse = false;
-
     auto subgraph = subgraphNode->g(attr::Subgraph);
-    auto sets = buildAliasedSets(subgraph->outputs());
+    GRAPH_DUMP("unfuseAliasedOutputs Subgraph ", subgraph);
+    auto sets = buildAliasedSets(subgraph);
+    GRAPH_DEBUG("buildAliasedSets sets.size() = ", sets.size());
+
+    std::set<Node*, topo_cmp_node> nodes;
 
     for (auto i : c10::irange(sets.size())) {
       if (sets[i].size() <= 1) {
         continue;
       }
 
-      needs_unfuse = true;
-
       // we have at least two aliased outputs
       // we skip the earliest node w.r.t. the topo order
       // NB. after some nodes are unfused, the outputs of some other nodes
       // may become the outputs of the subgraph and alias the remaining ones
-      // ideally, we should repeat markNodesToNotFuse until we stop marking
-      // nodes as don't merge.
+      // so we have to re-run this function until there are no more changes
       auto it = ++sets[i].begin();
       while (it != sets[i].end()) {
-        markNodeToNotFuse((*it)->node());
+        GRAPH_DEBUG("root aliased value ", (*it)->debugName(), " node ", (*it)->node());
+        collectNodeToUnfuse((*it)->node(), nodes);
       }
     }
 
-    return needs_unfuse;
+    // unfuse in the reverse topo order
+    for (auto it = nodes.rend(); it != nodes.rbegin(); it++) {
+      unfuseNode(*it);
+    }
+
+    if (!nodes.empty()) {
+      GRAPH_DUMP("after unfusing aliased nodes: ", graph_);
+    }
+
+    return !nodes.empty();
   }
 
-  std::vector<std::set<Value*, topo_cmp>> buildAliasedSets(
+    void collectNodeToUnfuse(Node* start, std::set<Node*, topo_cmp_node>& s) {
+    TORCH_INTERNAL_ASSERT(
+        start->kind() != prim::Return && start->kind() != prim::Param);
+
+    if (s.count(start) != 0) {
+      // already visited, no need to visit descendants
+      return;
+    }
+
+    GRAPH_DEBUG("collectNodeToUnfuse: inserting node ", getHeader(start));
+    s.insert(start);
+
+    for (auto o : start->outputs()) {
+      for (auto use : o->uses()) {
+        collectNodeToUnfuse(use.user, s);
+      }
+    }
+  }
+
+  void unfuseNode(Node* n) {
+    // collect output indices
+
+    GRAPH_DEBUG("unfuseNode node ", getHeader(n));
+    auto subgraph = n->owningGraph();
+    auto subgraphNode = n->owningBlock()->owningNode();
+
+    std::set<Value*> node_outputs(n->outputs().begin(), n->outputs().end()); 
+    std::set<size_t> output_indices;
+    std::set<Value*> node_inputs(n->inputs().begin(), n->inputs().end());
+
+
+    std::unordered_map<Value*, Value*> local_map;
+    auto env = [&](Value* v) {
+      auto it = local_map.find(v);
+      if (it != local_map.end()) {
+        return it->second;
+      }
+      TORCH_INTERNAL_ASSERT(false, "all inputs should've been mapped");
+      return v;
+    };
+
+    for (auto i : c10::irange(subgraph->outputs().size())) {
+      if (node_outputs.count(subgraph->outputs().at(i)) != 0) {
+        output_indices.insert(i);
+      }
+      
+      if (node_inputs.count(subgraph->outputs().at(i)) != 0) {
+        GRAPH_DEBUG("output %", subgraph->outputs().at(i)->debugName(), " is already subgraph's output");
+        node_inputs.erase(subgraph->outputs().at(i));
+      } 
+    }
+
+    // these node inputs need to be added to subgraph's outputs
+    // put them in vmap
+    for (auto ni : node_inputs) {
+      subgraph->registerOutput(ni);
+      auto sno = subgraphNode->addOutput();
+      sno->setType(ni->type());
+      GRAPH_DEBUG("Mapping %", ni->debugName(), " to %", sno->debugName());
+      local_map[ni] = sno;
+    }
+
+    auto copy = subgraphNode->owningGraph()->createClone(n, env);
+    GRAPH_DEBUG("copy ", *copy);
+
+    for (auto i : c10::irange(n->outputs().size())) {
+      auto oo = n->outputs()[i];
+      auto no = copy->outputs()[i];
+      no->copyMetadata(oo);
+      GRAPH_DEBUG("Mapping %", oo->debugName(), " to %", no->debugName());
+      local_map[oo] = no;    
+    }
+
+    copy->insertAfter(subgraphNode);
+
+    for (auto oi: output_indices) {
+      auto replace_val = local_map[subgraph->outputs().at(oi)];
+      subgraphNode->outputs().at(oi)->replaceAllUsesWith(replace_val);
+    }
+
+    size_t num_outputs = subgraph->outputs().size();
+    for (int64_t i = num_outputs - 1; i >= 0; i++) {
+      subgraphNode->eraseOutput(i);
+      subgraph->eraseOutput(i);
+    }
+
+    n->destroy();
+  }
+
+  std::vector<std::set<Value*, topo_cmp_value>> buildAliasedSets(
       c10::ArrayRef<Value*> outputs) {
     TORCH_INTERNAL_ASSERT(outputs.size() > 1);
-    std::vector<std::set<Value*, topo_cmp>> res;
+    std::vector<std::set<Value*, topo_cmp_value>> res;
     for (auto o : outputs) {
       auto grouped = false;
       for (auto& s : res) {
@@ -199,6 +294,32 @@ class SubgraphSlicer {
         if (aliasDb_.mayContainAlias(os, o) ||
             aliasDb_.mayContainAlias(o, os)) {
           s.insert(o);
+          grouped = true;
+        }
+      }
+      if (!grouped) {
+        res.push_back({o});
+      }
+    }
+    return res;
+  }
+
+  std::vector<std::set<Value*, topo_cmp_value>> buildAliasedSets(std::shared_ptr<Graph> subgraph) {
+    auto outputs = subgraph->outputs();
+    AliasDb alias_db(subgraph);
+    TORCH_INTERNAL_ASSERT(outputs.size() > 1);
+    std::vector<std::set<Value*, topo_cmp_value>> res;
+    for (auto o : outputs) {
+      auto grouped = false;
+      for (auto& s : res) {
+        auto os = *s.begin();
+        GRAPH_DEBUG("comparing %", o->debugName(), " with %", os->debugName(), " result ", (alias_db.mayContainAlias(os, o) || alias_db.mayContainAlias(o, os)));
+        if (alias_db.mayContainAlias(os, o) ||
+            alias_db.mayContainAlias(o, os) || 
+            alias_db.mayAlias(os, o) ||
+            alias_db.mayAlias(o, os)) {
+          s.insert(o);
+          GRAPH_DEBUG("Grouping %", o->debugName(), " with %", os->debugName());
           grouped = true;
         }
       }
