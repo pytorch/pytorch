@@ -436,3 +436,61 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
                 .check("with prim::DifferentiableGraph") \
                 .check_not("aten::split_with_sizes") \
                 .run(graph)
+
+
+            input_str = """
+    graph(%a : Tensor):
+        %b : Tensor = aten::relu(%a)
+        %0 : int[] = prim::Constant[value=[2, 2, 1]]()
+        %1 : int = prim::Constant[value=0]()
+        %2 : Tensor[] = aten::split_with_sizes(%b, %0, %1)
+        %4 : Tensor = aten::__getitem__(%2, %1)
+        %5 : Tensor = aten::gelu(%4)
+        %3 : (Tensor, Tensor, Tensor[]) = prim::TupleConstruct(%b, %5, %2)
+        return (%3)
+"""
+
+            graph = torch._C.parse_ir(input_str)
+            torch._C._jit_pass_create_autodiff_subgraphs(graph, 1)
+            FileCheck().check("Tensor = prim::DifferentiableGraph") \
+                .check("with prim::DifferentiableGraph") \
+                .check_not("aten::split_with_sizes") \
+                .run(graph)
+
+            input_str = """
+    graph(%a : Tensor):
+        %b : Tensor = aten::relu(%a)
+        %0 : int[] = prim::Constant[value=[2, 2, 1]]()
+        %1 : int = prim::Constant[value=0]()
+        %2 : Tensor = aten::t(%b)
+        %3 : Tensor = aten::gelu(%2)
+        %4 : (Tensor, Tensor, Tensor[]) = prim::TupleConstruct(%b, %3, %2)
+        return (%4)
+"""
+
+            graph = torch._C.parse_ir(input_str)
+            torch._C._jit_pass_create_autodiff_subgraphs(graph, 1)
+            FileCheck().check("Tensor = prim::DifferentiableGraph") \
+                .check("with prim::DifferentiableGraph") \
+                .check_not("aten::t") \
+                .run(graph)
+
+            input_str = """
+    graph(%a : Tensor):
+        %b : Tensor = aten::relu(%a)
+        %c : Tensor = aten::abs(%a)
+        %0 : int[] = prim::Constant[value=[2, 2, 1]]()
+        %1 : int = prim::Constant[value=0]()
+        %d : Tensor = aten::t(%c)
+        %2 : Tensor = aten::t(%b)
+        %3 : Tensor = aten::gelu(%2)
+        %4 : (Tensor, Tensor, Tensor[]) = prim::TupleConstruct(%3, %2, %d, %b, %c, %b)
+        return (%4)
+"""
+
+            graph = torch._C.parse_ir(input_str)
+            torch._C._jit_pass_create_autodiff_subgraphs(graph, 1)
+            FileCheck().check("Tensor = prim::DifferentiableGraph") \
+                .check("with prim::DifferentiableGraph") \
+                .check_not("aten::t") \
+                .run(graph)
