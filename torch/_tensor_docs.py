@@ -4243,7 +4243,7 @@ If this is already of the correct type, no copy is performed and the
 original object is returned.
 
 Args:
-    dtype (type or string): The desired type
+    dtype (dtype or string): The desired type
     non_blocking (bool): If ``True``, and the source is in pinned memory
         and destination is on the GPU or vice versa, the copy is performed
         asynchronously with respect to the host. Otherwise, the argument
