@@ -4855,8 +4855,8 @@ class TestLinalg(TestCase):
     def test_triangular_solve(self, device, dtype):
         ks = [0, 1, 3]
         ns = [0, 5]
-        for (k, n), (upper, unitriangular, transpose) in itertools.product(zip(ks, ns),
-                                                                           itertools.product([True, False], repeat=3)):
+        for k, n, (upper, unitriangular, transpose) in itertools.product(ks, ns,
+                                                                         itertools.product([True, False], repeat=3)):
             b, A = self.triangular_solve_test_helper((n, n), (n, k), upper,
                                                      unitriangular, device, dtype)
             x = torch.triangular_solve(b, A, upper=upper, unitriangular=unitriangular, transpose=transpose)[0]
