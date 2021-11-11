@@ -377,7 +377,7 @@ void PythonTracer::start(size_t max_threads) {
         // to all the prior frames onto our event stack. (We stop at depth=128)
         std::vector<PyFrameObject*> current_stack;
         auto frame = PyEval_GetFrame();
-        size_t depth = 0;
+        size_t depth = 0;  // Make sure we can't infinite loop.
         while (frame != nullptr && depth <= 128) {
             current_stack.push_back(frame);
             frame = frame->f_back;
