@@ -10,6 +10,7 @@
 #include <ATen/detail/ORTHooksInterface.h>
 #include <c10/util/Exception.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <c10/core/LinalgBackend.h>
 #include <c10/core/QEngine.h>
 #include <c10/util/irange.h>
 
@@ -124,6 +125,8 @@ class TORCH_API Context {
 
   bool linalgCudaPreferCusolver() const;
   void setLinalgCudaPreferCusolver(bool);
+  at::LinalgBackend linalgPreferredBackend() const;
+  void setLinalgPreferredBackend(at::LinalgBackend);
 
   // Note [Enabling Deterministic Operations]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -247,6 +250,7 @@ class TORCH_API Context {
   bool allow_fp16_reduction_cublas = true;
   bool enabled_mkldnn = true;
   bool linalg_cuda_prefer_cusolver = false; // if this is set to false, use existing heuristics
+  at::LinalgBackend linalg_preferred_backend = at::LinalgBackend::Default;
   #ifdef C10_MOBILE
   bool release_original_weights = true;
   #else
