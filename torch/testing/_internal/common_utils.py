@@ -2475,8 +2475,10 @@ def make_fullrank_matrices_with_distinct_singular_values(*shape, device, dtype, 
         # TODO: improve the handling of complex tensors here
         real_dtype = t.real.dtype if t.dtype.is_complex else t.dtype
         k = min(shape[-1], shape[-2])
-        s = torch.arange(1., k + 1, dtype=real_dtype, device=device).mul_(1.0 / (k + 1))
-        x = (u * s.to(dtype)) @ vh
+        # The singular values are "around 1". For example, if k = 2n
+        # s = [1 - 1/n, 1 - 1/(n-1), ..., 1, ..., 1 + 1/(n-1)]
+        s = 1. + 1. / torch.arange(-k / 2, k - k / 2, dtype=real_dtype, device=device)
+        x = (u * s.to(u.dtype)) @ vh
     x.requires_grad_(requires_grad)
     return x
 
