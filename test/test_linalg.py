@@ -8182,7 +8182,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         self.assertEqual(a, an)
 
     @onlyCUDA
-    @skipCUDAIfRocm
     @skipCUDAIfNoMagma
     @skipCUDAIfNoCusolver
     def test_preferred_backends(self):
