@@ -12,6 +12,10 @@
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
+namespace {
+static constexpr auto createBorrowedTensor = c10::MaybeOwnedTraits<at::TensorBase>::createBorrow;
+static constexpr auto createBorrowedIValue = c10::MaybeOwnedTraits<c10::IValue>::createBorrow;
+} // namespace
 namespace torch {
 namespace jit {
 
@@ -105,7 +109,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
           const auto& key = p_node->Input(i);
           auto value = dict.find(key);
           TORCH_CHECK(value != dict.end(), "Key not in dict: ", key);
-          p_node->Output(i - 1) = value->value();
+          p_node->Output(i - 1) = createBorrowedIValue(value->value());
         }
       };
     });
@@ -557,7 +561,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         // MemoryPlanner::deallocate. MemoryPlanner knows about this
         // and will safely clean it up by using the corresponding
         // destroyBorrow method.
-        p_node->Output(0) = IValue(c10::MaybeOwnedTraits<at::TensorBase>::createBorrow(assignFrom.toTensor()));
+        p_node->Output(0) = IValue(createBorrowedTensor(assignFrom.toTensor()));
       };
     });
 
