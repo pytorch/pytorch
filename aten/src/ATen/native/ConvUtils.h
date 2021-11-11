@@ -5,6 +5,76 @@
 
 namespace at { namespace native {
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+struct ConvParams {
+  std::vector<int64_t> stride;
+  std::vector<int64_t> padding;
+  std::vector<int64_t> dilation;
+  bool transposed;
+  std::vector<int64_t> output_padding;
+  int groups;
+  bool benchmark;
+  bool deterministic;
+  bool cudnn_enabled;
+  bool allow_tf32;
+
+  bool is_strided() const;
+  bool is_dilated() const;
+  bool is_padded() const;
+  bool is_output_padding_neg() const;
+  bool is_output_padding_big() const;
+  bool is_padding_neg() const;
+  bool is_stride_nonpos() const;
+  void view1d_as_2d();
+  bool use_cpu_depthwise3x3_winograd(const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias) const;
+  bool needs_64bit_indexing_no_split(const at::Tensor& input, const at::Tensor& weight) const;
+  bool use_cudnn(const at::Tensor& input, const at::Tensor& weight) const;
+  bool use_cudnn_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
+  bool use_miopen(const at::Tensor& input, const at::Tensor& weight, bool bias_defined) const;
+  bool use_mkldnn(const at::Tensor& input, const at::Tensor& weight) const;
+  bool use_nnpack(const at::Tensor& input, const at::Tensor& weight) const;
+  bool use_xnnpack(const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias) const;
+  bool is_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
+};
+
+enum class ConvBackend {
+  CudaDepthwise2d,
+  CudaDepthwise3d,
+  Cudnn,
+  CudnnTranspose,
+  Empty,
+  Miopen,
+  MiopenDepthwise,
+  MiopenTranspose,
+  Mkldnn,
+  MkldnnEmpty,
+  NnpackSpatial,
+  Overrideable,
+  Slow2d,
+  Slow3d,
+  SlowDilated2d,
+  SlowDilated3d,
+  SlowTranspose2d,
+  SlowTranspose3d,
+  Winograd3x3Depthwise,
+  Xnnpack2d
+};
+
+// Function to select the convolution backend based on the inputs and params.
+// This overload is used within the convolution internals but not exposed to python.
+TORCH_API ConvBackend select_conv_backend(
+    const Tensor& input,
+    const Tensor& weight,
+    const Tensor& bias,
+    const ConvParams& params);
+
+// Overload for selecting the convolution backend from the full set of convolution inputs.
+// This overload is exposed to python for testing, etc.
+TORCH_API ConvBackend select_conv_backend(
+    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
+    IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
+    bool transposed, IntArrayRef output_padding, int64_t groups);
+
 // ---------------------------------------------------------------------
 //
 // Math
@@ -84,28 +154,35 @@ static inline Tensor reshape_bias(int64_t dim, const Tensor& bias) {
   return bias.reshape(shape);
 }
 
-static inline bool cudnn_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
+static inline at::MemoryFormat cudnn_conv_suggest_memory_format(const at::Tensor& input, const at::Tensor& weight) {
   // disable NHWC for float64 input.
   if (!at::detail::getCUDAHooks().compiledWithCuDNN() ||
       input.scalar_type() == at::kDouble ||
       weight.scalar_type() == at::kDouble) {
-    return false;
+    return at::MemoryFormat::Contiguous;
   }
   long cudnn_version = at::detail::getCUDAHooks().versionCuDNN();
   auto input_memory_format = input.suggest_memory_format();
   auto weight_memory_format = weight.suggest_memory_format();
+  auto weight_ndim = weight.ndimension();
 
-  bool can_use_cudnn_channels_last_2d = (cudnn_version >= 7603) && (
+  bool can_use_cudnn_channels_last_2d = (cudnn_version >= 7603) && (weight_ndim == 4) && (
     (input_memory_format  == at::MemoryFormat::ChannelsLast) ||
     (weight_memory_format == at::MemoryFormat::ChannelsLast)
   );
+  if (can_use_cudnn_channels_last_2d) {
+    return at::MemoryFormat::ChannelsLast;
+  }
 
-  bool can_use_cudnn_channels_last_3d = (cudnn_version >= 8005) && (
+  bool can_use_cudnn_channels_last_3d = (cudnn_version >= 8005) && (weight_ndim == 5) && (
     (input_memory_format  == at::MemoryFormat::ChannelsLast3d) ||
     (weight_memory_format == at::MemoryFormat::ChannelsLast3d)
   );
+  if (can_use_cudnn_channels_last_3d) {
+    return at::MemoryFormat::ChannelsLast3d;
+  }
 
-  return can_use_cudnn_channels_last_2d || can_use_cudnn_channels_last_3d;
+  return at::MemoryFormat::Contiguous;
 }
 
 static inline bool miopen_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
