@@ -4573,7 +4573,7 @@ else:
             torch.empty((1,), device=device, dtype=dtype).exponential_(-0.5)
 
     @onlyCUDA
-    # @dtypes(())  # since dtypes is mandatory
+    @dtypes(())  # since dtypes is mandatory
     @dtypesIfCUDA(torch.half, torch.float)
     def test_exponential_no_zero(self, device, dtype):
         # naively, 0 in exponential can be generated with probability 2^-24
