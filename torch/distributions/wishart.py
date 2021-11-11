@@ -15,12 +15,13 @@ class Wishart(Distribution):
     r"""
     Creates a Wishart distribution parameterized by a square root matrix of symmetric matrix.
     The Wishart distribution can be parameterized either in terms of
-    an outer product of general square root matrix :math:`\mathbf{\Sigma}^{-1}` or
+    an outer product of general square root matrix e,g.,
+    :math:`\mathbf{\Sigma} = \mathbf{P}\mathbf{D}\mathbf{P}^\top = \mathbf{P'}\mathbf{P'}^\top` or
     an outer product of cholesky decomposition :math:`\mathbf{\Sigma} = \mathbf{L}\mathbf{L}^\top`
     can be obtained via e.g. Cholesky decomposition of the covariance.  
     Example:
         >>> m = Wishart(torch.eye(2), torch.Tensor([2]))
-        >>> m.sample()  # Wishart distributed with mean=`I` and covariance_matrix=`I`
+        >>> m.sample()  # Wishart distributed with mean=`df * I` and variance=``
     Args:
         covariance_matrix (Tensor): positive-definite covariance matrix
         precision_matrix (Tensor): positive-definite precision matrix
@@ -32,8 +33,7 @@ class Wishart(Distribution):
         Using :attr:`scale_tril` will be more efficient: all computations internally
         are based on :attr:`scale_tril`. If :attr:`covariance_matrix` or
         :attr:`precision_matrix` is passed instead, it is only used to compute
-        the corresponding lower triangular matrices using a Cholesky decomposition.
-        
+        the corresponding lower triangular matrices using a Cholesky decomposition.        
     """
     arg_constraints = {
         'covariance_matrix': constraints.positive_definite,
@@ -77,6 +77,9 @@ class Wishart(Distribution):
             event_shape = precision_matrix.shape[-2:]
             self.precision_matrix = precision_matrix.expand(batch_shape + (-1, -1))
             self.df = self.precision_matrix.shape[-1] if df is None else df
+            
+        assert self.df > self.precision_matrix.shape[-1] - 1, \
+            "Degree of Freedom paramter should be larger than the 
 
         self.arg_constraints['df'] = constraints.greater_than(event_shape[-1] - 1)
         self.bartlett_decomposition = bartlett_decomposition
