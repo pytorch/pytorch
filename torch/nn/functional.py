@@ -3816,7 +3816,7 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
             output_size = [int(math.floor(float(input.size(i + 2)) * scale_factors[i])) for i in range(dim)]
         scale_factors = None
 
-    if antialias and not (mode in ("bilinear", )):
+    if antialias and not (mode in ("bilinear", ) and input.ndim == 4):
         raise ValueError("Anti-alias option is only supported for bilinear mode")
 
     if input.dim() == 3 and mode == "nearest":
