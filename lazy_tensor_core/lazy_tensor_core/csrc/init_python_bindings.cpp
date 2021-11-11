@@ -54,7 +54,7 @@ c10::optional<Device> GetOptionalDevice(const std::string& device_str) {
 
 Device GetDeviceOrCurrent(const std::string& device_str) {
   if (device_str.empty()) {
-    return GetCurrentDevice();
+    return Device();
   }
   return bridge::AtenDeviceToLtcDevice(c10::Device(device_str));
 }
@@ -78,17 +78,6 @@ std::string GetTensorsDump(
     nodes.push_back(values.back().node.get());
   }
   return coverter(nodes);
-}
-
-std::string SetCurrentThreadDevice(const std::string& device_str) {
-  c10::Device prev_device = bridge::SetCurrentDevice(c10::Device(device_str));
-  std::stringstream ss;
-  ss << prev_device;
-  return ss.str();
-}
-
-std::string GetCurrentThreadDevice() {
-  return bridge::GetCurrentAtenDevice().str();
 }
 
 std::vector<std::string> GetLtcDeviceStrings(
@@ -578,9 +567,23 @@ void InitLtcModuleBindings(py::module m) {
           return result_tuple;
         });
   m.def("_ltc_set_default_device", [](const std::string& device) {
-    return SetCurrentThreadDevice(device);
+    // TODO: Replace this API with _ltc_set_default_device_type.
+    // The reasons why deprecating this API are that:
+    // i) It makes sense to set default device type to CPU, GPU or TPU,
+    // but not lazy given that would just use whatever default hardware type.
+    // ii) Setting ordinal like lazy:0 doesn't make any sense now as distributed
+    // training/multi-device support is still under development.
+    LOG(ERROR) << "Setting the default device is deprecated. Use "
+                  "_ltc_set_default_device_type to set the default "
+                  "device type instead.";
+    return;
   });
-  m.def("_ltc_get_default_device", []() { return GetCurrentThreadDevice(); });
+  m.def("_ltc_get_default_device", []() {
+    // TODO: Call the backend API to get the default ordinal as well. For xla, the
+    // default is lazy:1.
+    // It's always lazy:X given distributed training/multi-device is not supported yet.
+    return "lazy:0";
+  });
   m.def(
       "_ltc_set_rng_seed",
       [](uint64_t seed, const std::string& device) {

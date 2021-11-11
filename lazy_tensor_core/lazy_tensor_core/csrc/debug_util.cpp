@@ -102,7 +102,7 @@ std::string DebugUtil::GetTensorsGraphInfo(c10::ArrayRef<LazyTensor> tensors,
     graph_str = ir::DumpUtil::ToDot(root_nodes);
   } else if (format == GraphFormat::kBackend) {
     graph_str = ir::DumpUtil::ToBackend(
-        root_values, unique_device ? *unique_device : GetCurrentDevice());
+        root_values, unique_device ? *unique_device : Device());
   } else {
     LOG(ERROR) << "Invalid graph format: " << format;
   }

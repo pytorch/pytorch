@@ -63,6 +63,17 @@ std::vector<std::vector<int64_t>> compute_shape_masked_fill(at::Tensor & self, c
 std::vector<c10::ScalarType> compute_dtype_masked_fill(at::Tensor & self, const at::Tensor & mask, const at::Tensor & value) {
    return {self.scalar_type()};
 }
+
+std::vector<std::vector<int64_t>> compute_shape_embedding(const at::Tensor & weight, const at::Tensor & indices, int64_t padding_idx, bool scale_grad_by_freq, bool sparse){
+  // Based on aten/src/ATen/native/Embedding.cpp::embedding.
+  std::vector<int64_t> out_sizes = indices.sizes().vec();
+  out_sizes.emplace_back(weight.size(1));
+  return {out_sizes};
+}
+std::vector<c10::ScalarType> compute_dtype_embedding(const at::Tensor & weight, const at::Tensor & indices, int64_t padding_idx, bool scale_grad_by_freq, bool sparse){
+  return {weight.scalar_type()};
+}
+
 std::vector<std::vector<int64_t>> compute_shape_embedding_dense_backward(const at::Tensor& grad_output, const at::Tensor& indices, int64_t num_weights, int64_t padding_idx, bool scale_grad_by_freq) {
   // Based on aten/src/ATen/native/Embedding.cpp::embedding_dense_backward_cpu.
   return {{num_weights, grad_output.size(-1)}};

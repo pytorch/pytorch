@@ -1627,9 +1627,9 @@ TEST_F(AtenLtcTsTensorTest, TestNormInDimsKeep) {
 TEST_F(AtenLtcTsTensorTest, TestNormalTwoTensor) {
   at::Tensor mean = at::zeros({10, 10, 10}, at::dtype(at::kFloat));
   at::Tensor std = at::ones({10, 10, 10}, at::dtype(at::kFloat));
-  ForEachDevice([&](const Device& device) {
-    at::Tensor xla_mean = bridge::CreateLtcTensor(mean, device);
-    at::Tensor xla_std = bridge::CreateLtcTensor(std, device);
+  ForEachDevice([&](const torch::Device& device) {
+    at::Tensor xla_mean = CopyToDevice(mean, device);
+    at::Tensor xla_std = CopyToDevice(std, device);
     at::Tensor xla_normal = at::normal(xla_mean, xla_std);
     double res_mean = xla_normal.mean().item().toDouble();
     double res_std = xla_normal.std().item().toDouble();
@@ -1642,8 +1642,8 @@ TEST_F(AtenLtcTsTensorTest, TestNormalTwoTensor) {
 
 TEST_F(AtenLtcTsTensorTest, TestNormalDoubleMean) {
   at::Tensor std = at::ones({10, 10, 10}, at::dtype(at::kFloat));
-  ForEachDevice([&](const Device& device) {
-    at::Tensor xla_std = bridge::CreateLtcTensor(std, device);
+  ForEachDevice([&](const torch::Device& device) {
+    at::Tensor xla_std = CopyToDevice(std, device);
     at::Tensor xla_normal = at::normal(0, xla_std);
     double res_mean = xla_normal.mean().item().toDouble();
     double res_std = xla_normal.std().item().toDouble();
@@ -1656,8 +1656,8 @@ TEST_F(AtenLtcTsTensorTest, TestNormalDoubleMean) {
 
 TEST_F(AtenLtcTsTensorTest, TestNormalDoubleStd) {
   at::Tensor mean = at::zeros({10, 10, 10}, at::dtype(at::kFloat));
-  ForEachDevice([&](const Device& device) {
-    at::Tensor xla_mean = bridge::CreateLtcTensor(mean, device);
+  ForEachDevice([&](const torch::Device& device) {
+    at::Tensor xla_mean = CopyToDevice(mean, device);
     at::Tensor xla_normal = at::normal(xla_mean, 1);
     double res_mean = xla_normal.mean().item().toDouble();
     double res_std = xla_normal.std().item().toDouble();
@@ -1670,8 +1670,8 @@ TEST_F(AtenLtcTsTensorTest, TestNormalDoubleStd) {
 
 TEST_F(AtenLtcTsTensorTest, TestNormalInPlace) {
   at::Tensor a = at::zeros({10, 10, 10}, at::dtype(at::kFloat));
-  ForEachDevice([&](const Device& device) {
-    at::Tensor xla_a = bridge::CreateLtcTensor(a, device);
+  ForEachDevice([&](const torch::Device& device) {
+    at::Tensor xla_a = CopyToDevice(a, device);
     xla_a.normal_(/*mean=*/0, /*std=*/1);
     double res_mean = xla_a.mean().item().toDouble();
     double res_std = xla_a.std().item().toDouble();
@@ -1685,8 +1685,8 @@ TEST_F(AtenLtcTsTensorTest, TestNormalInPlace) {
 TEST_F(AtenLtcTsTensorTest, TestUniformInPlace) {
   const double eps = 1e-3;
   at::Tensor a = at::zeros({10, 10, 10}, at::dtype(at::kFloat));
-  ForEachDevice([&](const Device& device) {
-    at::Tensor xla_a = bridge::CreateLtcTensor(a, device);
+  ForEachDevice([&](const torch::Device& device) {
+    at::Tensor xla_a = CopyToDevice(a, device);
     xla_a.uniform_(/*from=*/0, /*to=*/1);
     at::Tensor cpu_a = ToCpuTensor(xla_a);
     double res_min = cpu_a.min().item().toDouble();
