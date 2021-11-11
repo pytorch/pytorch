@@ -6,8 +6,9 @@
 #include <utility>
 #include <vector>
 
+#include <torch/csrc/lazy/backend/backend_device.h>
+
 #include "lazy_tensor_core/csrc/compiler/data.h"
-#include "lazy_tensor_core/csrc/device.h"
 #include "lazy_tensor_core/csrc/ir_util.h" // This is already landed on master, needs rebase
 #include "torch/csrc/lazy/core/ir.h"
 
@@ -36,22 +37,22 @@ namespace ir {
 // Keeps track of the code generation state.
 class LoweringContext {
  public:
-  LoweringContext(const std::string& name, Device device);
-  LoweringContext(const std::string& name, Device device,
+  LoweringContext(const std::string& name, torch::lazy::BackendDevice device);
+  LoweringContext(const std::string& name, torch::lazy::BackendDevice device,
                   c10::ArrayRef<torch::lazy::Node*> post_order,
                   Util::EmissionMap emit_status);
 
   virtual ~LoweringContext() = default;
 
   static std::unique_ptr<LoweringContext> Create(
-      const std::string& name, Device device,
+      const std::string& name, torch::lazy::BackendDevice device,
       c10::ArrayRef<torch::lazy::Node*> post_order,
       Util::EmissionMap emit_status);
 
   static std::unique_ptr<LoweringContext> Create(const std::string& name,
-                                                 Device device);
+                                                 torch::lazy::BackendDevice device);
 
-  const Device& device() const { return device_; };
+  const torch::lazy::BackendDevice& device() const { return device_; };
 
   // Retrieves the vector holding all the tensors associated with the parameter
   // instructions which have been created.
@@ -79,7 +80,7 @@ class LoweringContext {
   size_t GetEmittedNodeCount() const { return emit_status_.size(); }
 
  protected:
-  Device device_;
+  torch::lazy::BackendDevice device_;
   std::vector<compiler::BackendDataPtr> parameters_;
   std::vector<size_t> parameter_sequence_;
   Util::EmissionMap emit_status_;

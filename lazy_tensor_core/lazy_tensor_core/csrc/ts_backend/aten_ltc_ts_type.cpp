@@ -455,7 +455,7 @@ LazyNativeFunctions::native_batch_norm(
     double momentum, double eps) {
   LTC_FN_COUNTER("lazy::");
   LazyTensor input_tensor = bridge::GetLtcTensor(input);
-  const Device& device = input_tensor.GetDevice();
+  const torch::lazy::BackendDevice& device = input_tensor.GetDevice();
   LazyTensor running_mean_tensor =
       bridge::GetOrCreateLtcTensor(running_mean, device);
   LazyTensor running_var_tensor =
@@ -480,7 +480,7 @@ LazyNativeFunctions::native_batch_norm_backward(
     std::array<bool, 3> output_mask) {
   LTC_FN_COUNTER("lazy::");
   LazyTensor grad_out_tensor = bridge::GetLtcTensor(grad_out);
-  const Device& device = grad_out_tensor.GetDevice();
+  const torch::lazy::BackendDevice& device = grad_out_tensor.GetDevice();
   LazyTensor null_tensor;
   bool running_stats = running_mean && running_mean->defined();
   CHECK_EQ(running_var && running_var->defined(), running_stats);

@@ -11,7 +11,7 @@ namespace compiler {
 class TSBackendImpl : public BackendImplInterface {
  public:
   std::unique_ptr<ir::LoweringContext> CreateLoweringContext(
-      const std::string& name, Device device,
+      const std::string& name, torch::lazy::BackendDevice device,
       c10::ArrayRef<torch::lazy::Node*> post_order,
       ir::Util::EmissionMap emit_status) const override {
     return std::make_unique<ts_backend::TSLoweringContext>(
@@ -19,7 +19,7 @@ class TSBackendImpl : public BackendImplInterface {
   }
 
   std::unique_ptr<ir::LoweringContext> CreateLoweringContext(
-      const std::string& name, Device device) const override {
+      const std::string& name, torch::lazy::BackendDevice device) const override {
     return std::make_unique<ts_backend::TSLoweringContext>(name, device);
   }
 
@@ -38,7 +38,7 @@ class TSBackendImpl : public BackendImplInterface {
 
   BackendDataPtr MakeComputationDataFromTensor(
       const at::Tensor& tensor, const lazy_tensors::Shape& shape,
-      const Device& device) const override {
+      const torch::lazy::BackendDevice& device) const override {
     at::TensorOptions options = tensor.options().device(HardwareDeviceType());
     return std::make_shared<TSData>(tensor.to(options), shape, device);
   }
@@ -57,10 +57,10 @@ class TSBackendImpl : public BackendImplInterface {
   class TSData : public BackendData {
    public:
     TSData(const at::Tensor& data, const lazy_tensors::Shape& shape,
-           const Device& device)
+           const torch::lazy::BackendDevice& device)
         : BackendData(device, shape), data_(data) {}
 
-    TSData(const lazy_tensors::Shape& shape, const Device& device)
+    TSData(const lazy_tensors::Shape& shape, const torch::lazy::BackendDevice& device)
         : BackendData(device, shape) {}
 
     Handle GetOpaqueHandle() override {
@@ -79,7 +79,7 @@ class TSBackendImpl : public BackendImplInterface {
     at::Tensor data_;
   };
 
-  BackendDataPtr CreateDataPlaceholder(const Device& device,
+  BackendDataPtr CreateDataPlaceholder(const torch::lazy::BackendDevice& device,
       const lazy_tensors::Shape& shape) const override;
 
   std::vector<ComputationPtr> Compile(
@@ -87,7 +87,7 @@ class TSBackendImpl : public BackendImplInterface {
 
   std::vector<BackendDataPtr> ExecuteComputation(
       Computation& computation, c10::ArrayRef<BackendDataPtr> arguments,
-      const Device& device) const override;
+      const torch::lazy::BackendDevice& device) const override;
 
   std::string GetDefaultDevice() const override;
 
@@ -118,7 +118,7 @@ class TSBackendImpl : public BackendImplInterface {
   at::DeviceType HardwareDeviceType() const override;
 };
 
-BackendDataPtr TSBackendImpl::CreateDataPlaceholder(const Device& device,
+BackendDataPtr TSBackendImpl::CreateDataPlaceholder(const torch::lazy::BackendDevice& device,
       const lazy_tensors::Shape& shape) const {
   return std::make_shared<TSBackendImpl::TSData>(shape, device);
 }
@@ -134,7 +134,7 @@ std::vector<ComputationPtr> TSBackendImpl::Compile(
 
 std::vector<BackendDataPtr> TSBackendImpl::ExecuteComputation(
     Computation& computation, c10::ArrayRef<BackendDataPtr> arguments,
-    const Device& device) const {
+    const torch::lazy::BackendDevice& device) const {
   torch::jit::GraphExecutor& graph_executor =
       static_cast<compiler::ts_backend::TSComputation&>(computation)
           .graph_executor();

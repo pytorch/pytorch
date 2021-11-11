@@ -5,7 +5,8 @@
 #include <sstream>
 #include <unordered_set>
 
-#include "lazy_tensor_core/csrc/device.h"
+#include <torch/csrc/lazy/backend/backend_device.h>
+
 #include "lazy_tensor_core/csrc/ir_dump_util.h"
 #include "lazy_tensor_core/csrc/ir_util.h"
 #include "lazy_tensor_core/csrc/python_util.h"
@@ -56,7 +57,7 @@ std::string DebugUtil::GetTensorsGraphInfo(c10::ArrayRef<LazyTensor> tensors,
   std::vector<torch::lazy::Node*> root_nodes;
   std::vector<torch::lazy::Value> root_values;
   std::vector<torch::lazy::hash_t> root_hashes;
-  lazy_tensors::util::Unique<Device> unique_device;
+  lazy_tensors::util::Unique<torch::lazy::BackendDevice> unique_device;
   if (indices != nullptr) {
     for (auto index : *indices) {
       const LazyTensor& tensor = tensors[index];
@@ -102,7 +103,7 @@ std::string DebugUtil::GetTensorsGraphInfo(c10::ArrayRef<LazyTensor> tensors,
     graph_str = ir::DumpUtil::ToDot(root_nodes);
   } else if (format == GraphFormat::kBackend) {
     graph_str = ir::DumpUtil::ToBackend(
-        root_values, unique_device ? *unique_device : Device());
+        root_values, unique_device ? *unique_device : torch::lazy::BackendDevice());
   } else {
     LOG(ERROR) << "Invalid graph format: " << format;
   }

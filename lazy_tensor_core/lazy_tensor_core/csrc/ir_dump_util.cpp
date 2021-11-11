@@ -257,7 +257,7 @@ std::string DumpUtil::PostOrderToText(
 }
 
 std::string DumpUtil::ToBackend(c10::ArrayRef<torch::lazy::Value> values,
-                                const Device& device) {
+                                const torch::lazy::BackendDevice& device) {
   auto lowering_ctx = ir::LoweringContext::Create("IrToBackend", device);
   for (auto& ir_value : values) {
     lowering_ctx->AddResult(ir_value);

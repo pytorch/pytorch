@@ -69,9 +69,9 @@ class TSComputation : public Computation {
 
 class TSLoweringContext : public ir::LoweringContext {
  public:
-  TSLoweringContext(const std::string& name, Device device);
+  TSLoweringContext(const std::string& name, torch::lazy::BackendDevice device);
 
-  TSLoweringContext(const std::string& name, Device device,
+  TSLoweringContext(const std::string& name, torch::lazy::BackendDevice device,
                     c10::ArrayRef<torch::lazy::Node*> post_order,
                     ir::Util::EmissionMap emit_status);
 

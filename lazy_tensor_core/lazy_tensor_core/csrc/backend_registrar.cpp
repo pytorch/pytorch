@@ -28,7 +28,7 @@ at::Tensor MakeTensorFromComputationData(
 namespace ir {
 
 std::unique_ptr<LoweringContext> LoweringContext::Create(
-    const std::string& name, Device device,
+    const std::string& name, torch::lazy::BackendDevice device,
     c10::ArrayRef<torch::lazy::Node*> post_order,
     Util::EmissionMap emit_status) {
   return compiler::getBackend()
@@ -36,7 +36,7 @@ std::unique_ptr<LoweringContext> LoweringContext::Create(
 }
 
 std::unique_ptr<LoweringContext> LoweringContext::Create(
-    const std::string& name, Device device) {
+    const std::string& name, torch::lazy::BackendDevice device) {
   return compiler::getBackend()
       ->CreateLoweringContext(name, device);
 }

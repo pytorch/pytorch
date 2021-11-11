@@ -3,6 +3,7 @@
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
 #include <c10/util/complex.h>
+#include <torch/csrc/lazy/backend/backend_device.h>
 
 #include <algorithm>
 #include <cstring>
@@ -12,7 +13,6 @@
 #include <thread>
 
 #include "lazy_tensor_core/csrc/compiler/backend_impl_interface.h"
-#include "lazy_tensor_core/csrc/device.h"
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensors/computation_client/multi_wait.h"
 #include "lazy_tensors/computation_client/sys_util.h"
@@ -321,7 +321,7 @@ bool TensorCompare(const at::Tensor& t1, const at::Tensor& t2) {
 }
 
 compiler::BackendDataPtr TensorToDataHandle(const at::Tensor& tensor,
-                                     const Device& device) {
+                                     const torch::lazy::BackendDevice& device) {
   return compiler::getBackend()
       ->MakeComputationDataFromTensor(
           tensor, lazy_tensors::Shape(tensor.scalar_type(), tensor.sizes()),
@@ -330,7 +330,7 @@ compiler::BackendDataPtr TensorToDataHandle(const at::Tensor& tensor,
 
 std::vector<compiler::BackendDataPtr> CreateTensorsData(
     const std::vector<at::Tensor>& tensors,
-    const std::vector<Device>& devices) {
+    const std::vector<torch::lazy::BackendDevice>& devices) {
   CHECK_EQ(tensors.size(), devices.size());
   std::vector<compiler::BackendDataPtr> result;
   result.reserve(tensors.size());

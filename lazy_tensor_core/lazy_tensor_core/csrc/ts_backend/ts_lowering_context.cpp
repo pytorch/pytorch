@@ -7,14 +7,14 @@ namespace torch_lazy_tensors {
 namespace compiler {
 namespace ts_backend {
 
-TSLoweringContext::TSLoweringContext(const std::string& name, Device device)
+TSLoweringContext::TSLoweringContext(const std::string& name, torch::lazy::BackendDevice device)
     : ir::LoweringContext(name, device),
       graph_(std::make_shared<torch::jit::Graph>()) {
   lowering_ = TSNodeLoweringInterface::Create(this);
 }
 
 TSLoweringContext::TSLoweringContext(
-    const std::string& name, Device device,
+    const std::string& name, torch::lazy::BackendDevice device,
     c10::ArrayRef<torch::lazy::Node*> post_order,
     ir::Util::EmissionMap emit_status)
     : ir::LoweringContext(name, device, post_order, emit_status),

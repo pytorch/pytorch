@@ -135,7 +135,7 @@ void ForEachDevice(const std::function<void(const torch::Device&)>& devfn) {
   // Currently TorchScript backend only supports one type of hardware per process,
   // which is set by env. And the ordinal is always 0 given distributed training/
   // multi-device is not supported yet.
-  auto device = Device();
+  auto device = torch::lazy::BackendDevice();
   torch::Device torch_device = bridge::LtcDeviceToAtenDevice(device);
   devfn(torch_device);
 }

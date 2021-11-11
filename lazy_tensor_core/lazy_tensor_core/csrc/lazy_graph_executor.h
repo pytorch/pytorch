@@ -27,30 +27,30 @@ class LazyGraphExecutor {
   void UnregisterTensor(LazyTensor::Data* data);
 
   // Seed for random generator
-  torch::lazy::Value GetRngSeed(const Device& device);
-  uint64_t GetRunningSeed(const Device& device);
-  void SetRngSeed(const Device& device, uint64_t seed);
+  torch::lazy::Value GetRngSeed(const torch::lazy::BackendDevice& device);
+  uint64_t GetRunningSeed(const torch::lazy::BackendDevice& device);
+  void SetRngSeed(const torch::lazy::BackendDevice& device, uint64_t seed);
 
-  void DeviceBarrier(const Device& device);
+  void DeviceBarrier(const torch::lazy::BackendDevice& device);
 
   compiler::BackendDataPtr GetDeviceData(
-      const at::Tensor& tensor, const Device& device);
+      const at::Tensor& tensor, const torch::lazy::BackendDevice& device);
 
   compiler::BackendDataPtr GetDeviceData(
       const at::Scalar& value, at::ScalarType scalar_type,
-      const Device& device);
+      const torch::lazy::BackendDevice& device);
 
   // Retrieves the set of lazy tensors which are currently live in the system,
   // for the given device. If device is nullptr, the live tensors for all
   // devices will be returned. Returned tensors are sorted by device as primary
   // key, and by unique ID as secondary key.
-  std::vector<LazyTensor> GetLiveTensors(const Device* device);
+  std::vector<LazyTensor> GetLiveTensors(const torch::lazy::BackendDevice* device);
 
   // Makes sure that any outstanding IR operation accumulated over live tensors,
   // gets turned into device data. If wait is true, the sync operation will be
   // run synchronously. The devices argument, if not empty, tells the devices
   // which should be partecipating into the replicated computation.
-  void SyncLiveTensorsGraph(const Device* device,
+  void SyncLiveTensorsGraph(const torch::lazy::BackendDevice* device,
                             c10::ArrayRef<std::string> devices, bool wait);
 
   // Applies all the pending IR operations queued over the input tensors. All
@@ -63,11 +63,11 @@ class LazyGraphExecutor {
 
   // Marks an execution step, which allows the tensor framework to understand
   // the computation boundaries.
-  void MarkStep(const Device& device);
+  void MarkStep(const torch::lazy::BackendDevice& device);
 
   // Waits for all the outstanding operations on all the supplied devices.
   // If devices is empty, the wait will happen for all local devices.
-  void WaitDeviceOps(c10::ArrayRef<Device> devices);
+  void WaitDeviceOps(c10::ArrayRef<torch::lazy::BackendDevice> devices);
 
   // Retrieves the PyTorch CPU tensors behind the lazy tensors IR operations.
   // All the tensors must be on the same device.
@@ -81,22 +81,22 @@ class LazyGraphExecutor {
 
   torch::lazy::Value GetDeviceDataIrValue(const at::Scalar& value,
                                           c10::ScalarType type,
-                                          const Device& device);
+                                          const torch::lazy::BackendDevice& device);
   torch::lazy::Value GetIrValueForScalar(const at::Scalar& value,
                                          c10::ScalarType type,
-                                         const Device& device);
+                                         const torch::lazy::BackendDevice& device);
   torch::lazy::Value GetIrValueForScalar(const at::Scalar& value,
-                                         const Device& device);
+                                         const torch::lazy::BackendDevice& device);
   torch::lazy::Value GetIrValueForScalar(const at::Scalar& value,
                                          c10::ScalarType type,
                                          c10::ArrayRef<int64_t> dimensions,
-                                         const Device& device);
+                                         const torch::lazy::BackendDevice& device);
   torch::lazy::Value GetIrValueForScalar(const at::Scalar& value,
                                          const lazy_tensors::Shape& shape,
-                                         const Device& device);
+                                         const torch::lazy::BackendDevice& device);
   torch::lazy::Value GetIrValueForScalar(
       const at::Scalar& value, const lazy_tensors::Shape& shape,
-      c10::optional<at::ScalarType> logical_element_type, const Device& device);
+      c10::optional<at::ScalarType> logical_element_type, const torch::lazy::BackendDevice& device);
 
  private:
   struct SyncTensorsConfig {
@@ -115,7 +115,7 @@ class LazyGraphExecutor {
     std::vector<size_t> indices;
     torch::lazy::hash_t hash;
     std::vector<lazy_tensors::util::ExceptionCleanup> unlocker;
-    Device device;
+    torch::lazy::BackendDevice device;
   };
 
   struct PostOrderData {
@@ -126,7 +126,7 @@ class LazyGraphExecutor {
   };
 
   struct CompilationResult {
-    Device device;
+    torch::lazy::BackendDevice device;
     size_t emitted_nodes = 0;
     compiler::ComputationPtr computation;
     std::vector<compiler::BackendDataPtr> parameters_data;
@@ -156,7 +156,7 @@ class LazyGraphExecutor {
     std::vector<size_t> indices;
     std::vector<lazy_tensors::util::ExceptionCleanup> unlocker;
     std::vector<compiler::BackendDataPtr> parameters_data;
-    Device device;
+    torch::lazy::BackendDevice device;
     ComputationCache::TypePtr cached_computation;
     std::vector<compiler::BackendDataPtr> tensors_data;
   };

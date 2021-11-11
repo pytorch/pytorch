@@ -4,10 +4,13 @@
 
 #include "torch/csrc/lazy/core/ir.h"
 
+namespace torch {
+namespace lazy {
+    class BackendDevice;
+}
+}
+
 namespace torch_lazy_tensors {
-
-class Device;
-
 namespace ir {
 
 class DumpUtil {
@@ -25,7 +28,7 @@ class DumpUtil {
       c10::ArrayRef<torch::lazy::Node *> roots);
 
   static std::string ToBackend(c10::ArrayRef<torch::lazy::Value> values,
-                               const Device &device);
+                               const torch::lazy::BackendDevice& device);
 };
 
 }  // namespace ir
