@@ -181,7 +181,7 @@ TORCH_META_FUNC(scatter_reduce2)
  const c10::optional<int64_t> output_size) {
 
   TORCH_CHECK(dim >= -self.dim() && dim < self.dim(),
-      "Expected `dim` to be in range ", -self.dim(), " and ", self.dim() - 1, " (got ", dim, ")");
+      "Expected `dim` to be in range ", -self.dim(), " to ", self.dim() - 1, " (got ", dim, ")");
 
   auto sizes = self.sizes().vec();
 
@@ -1301,7 +1301,25 @@ TORCH_IMPL_FUNC(scatter_reduce2_structured_cpu)
   dim = dim < 0 ? dim + self.dim() : dim;
 
   out.zero_();
-  scatter_add_stub(self.device().type(), out, dim, index, self);
+
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, self.scalar_type(), "scatter_reduce2", [&] {
+    auto self_data = self.data_ptr<scalar_t>();
+    auto index_data = index.data_ptr<int64_t>();
+    auto out_data = out.data_ptr<scalar_t>();
+
+    for (int64_t i = 0; i < self.numel(); i+=self.stride(dim) * self.size(dim)) {
+      for (int64_t j = 0; j < self.size(dim); j++) {
+        for (int64_t k = 0; k < self.stride(dim); k++) {
+          auto n = i + j * self.stride(dim) + k;
+          auto dim_index = index_data[n];
+          TORCH_CHECK(dim_index >= 0 && dim_index < out.size(dim),
+              "Expected `index` values to be in range ", 0, " to ", self.size(dim), " (got ", dim_index, ")");
+          auto m = i + dim_index * self.stride(dim) + k;
+          out_data[m] += self_data[n];
+        }
+      }
+    }
+  });
 }
 
 Tensor masked_scatter(const Tensor & self, const Tensor & mask, const Tensor & source) {
