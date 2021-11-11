@@ -13,7 +13,6 @@
 #include <ATen/native/mkl/SparseCsrLinearAlgebra.h>
 
 #include <algorithm>
-#include <iostream>
 
 namespace at {
 namespace meta {
@@ -61,16 +60,14 @@ void convert_indices_from_coo_to_csr_cpu(const Tensor& result, const Tensor& inp
 }
 
 template <typename F, typename ...Args>
-Tensor& unary_op_out(F op_out, const Tensor& self, Tensor& result, Args&&... args) {
+Tensor& unary_op_out(F op_out, const Tensor& self, const Tensor& result, Args&&... args) {
   TORCH_INTERNAL_ASSERT(self.is_sparse_csr());
-  TORCH_INTERNAL_ASSERT(result.is_sparse_csr()); 
+  TORCH_INTERNAL_ASSERT(result.is_sparse_csr());
 
-  if (!at::sparse::is_same_tensor(self, result)) {
-    result.copy_(self);
-  }
-  std::cout << self;
-  at::sin_outf(self, result);
-  return result;
+  auto self_values = self.values();
+  auto result_values = result.values();
+  op_out(self_values, std::forward<Args>(args)..., result_values);
+  return const_cast<Tensor&>(result);
 }
 
 } // end anonymous namespace
@@ -84,9 +81,9 @@ using namespace at::sparse;
 namespace {
 
   inline Tensor get_result_tensor_for_unary_op(const Tensor& input) {
-    // if (c10::isIntegralType(input.scalar_type(), /*includeBool=*/true)) {
-    // return at::empty_like(input, input.options().dtype(c10::get_default_dtype()));
-    // }
+    if (c10::isIntegralType(input.scalar_type(), /*includeBool=*/true)) {
+      return at::empty_like(input, input.options().dtype(c10::get_default_dtype()));
+    }
     return at::empty_like(input);
   }
 }
@@ -109,7 +106,6 @@ bool is_square_or_vec(int64_t dim_i, int64_t dim_j, int64_t dim_k) {
 }
 
 Tensor& sin_sparse_csr_out(const Tensor& self, Tensor& result) {
-  std::cout << "here\n";
   return unary_op_out(&at::sin_outf, self, result);
 }
 
