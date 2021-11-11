@@ -12,6 +12,7 @@
 #include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 #include <torch/csrc/jit/tensorexpr/graph_opt.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
+#include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 
 using namespace torch::jit;
@@ -82,6 +83,17 @@ std::unique_ptr<Function> compileMethod(
     output.sizes_ = getConstSizes(ba.buf());
     // TODO: assert the output is a buffer and not a scalar
     output.dtype_ = ba.buf()->dtype().scalar_type();
+    if (isQIntType(output.dtype_)) {
+      // Supporting only static qscale/qzero
+      output.qscale_ =
+          to<DoubleImm>(torch::jit::tensorexpr::IRSimplifier::simplify(
+                            ba.buf()->qscale()))
+              ->value();
+      output.qzero_ =
+          to<LongImm>(
+              torch::jit::tensorexpr::IRSimplifier::simplify(ba.buf()->qzero()))
+              ->value();
+    }
     out_spec.push_back(output);
   }
   func->set_output_specs(out_spec);
