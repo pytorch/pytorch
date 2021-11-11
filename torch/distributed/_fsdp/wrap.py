@@ -205,7 +205,7 @@ def auto_wrap(module: nn.Module, auto_wrap_policy: Optional[Callable] = None, **
             (default: wrap if > 100M parameters)
     """
     if ConfigAutoWrap.in_autowrap_context:
-        wrapped_module, remainder = ConfigAutoWrap.recursive_wrap(module, auto_wrap_policy=auto_wrap_policy, **kwargs)
+        wrapped_module, _ = ConfigAutoWrap.recursive_wrap(module, auto_wrap_policy=auto_wrap_policy, **kwargs)
         return wrapped_module
     return module
 

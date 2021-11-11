@@ -23,7 +23,7 @@ from torch.distributed.distributed_c10d import _get_default_group
 from torch.nn.parameter import Parameter
 
 from .flatten_params_wrapper import FlattenParamsWrapper
-from .wrap import ConfigAutoWrap
+from .wrap import ConfigAutoWrap, auto_wrap
 
 from .utils import (
     _apply_to_tensors,
@@ -121,23 +121,33 @@ class FullyShardedDataParallel(nn.Module):
                 check_fn=lambda mod: not isinstance(mod, FullyShardedDataParallel),
                 err_fn=lambda mod: f"Expected {mod} to NOT be FullyShardedDataParallel if auto_wrap is enabled.",
             )
+            # TODO: refactor recursive_wrap so that it is not dependent on
+            # ConfigAutoWrap.
             config_auto_wrap = ConfigAutoWrap(auto_wrap_policy=fsdp_auto_wrap_policy, wrapper_cls=FullyShardedDataParallel)
-
-            # ConfigAutoWrap.in_autowrap_context = True
-            # ConfigAutoWrap.wrapper_cls = FullyShardedDataParallel
-            # ConfigAutoWrap.auto_wrap_policy = fsdp_auto_wrap_policy
             with config_auto_wrap:
                 assert ConfigAutoWrap.in_autowrap_context
                 assert ConfigAutoWrap.wrapper_cls == FullyShardedDataParallel
                 assert ConfigAutoWrap.auto_wrap_policy == fsdp_auto_wrap_policy
                 print(" --- asserted ---")
-                wrapped_module, num_params_wrapped = ConfigAutoWrap.recursive_wrap(
+                # TODO: can use auto_wrap or ConfigAutoWrap.recursive_wrap.
+                wrapped_module = auto_wrap(
                     module,
                     auto_wrap_policy=fsdp_auto_wrap_policy,
                     process_group=process_group,
                     cpu_offload=cpu_offload,
-                    fsdp_auto_wrap_policy=None,  # Note that we don't propagate it.
+                    fsdp_auto_wrap_policy=None
                 )
+                # wrapped_module, num_params_wrapped = ConfigAutoWrap.recursive_wrap(
+                #     module,
+                #     auto_wrap_policy=fsdp_auto_wrap_policy,
+                #     process_group=process_group,
+                #     cpu_offload=cpu_offload,
+                #     # Note that recursive_wap should not call FSDP with wrapping
+                #     # enabled, as this recursive call handles all wrapping,
+                #     # including for nested children.
+                #     fsdp_auto_wrap_policy=None,
+                # )
+                # if num_params_wrapped == len(list(module.parameters()))
             assert not ConfigAutoWrap.in_autowrap_context
             # TODO: it would be good to assert self._check_wrapped to ensure
             # wrapped_module is wrapped but it may not be due to the policy. We
@@ -524,7 +534,6 @@ class FullyShardedDataParallel(nn.Module):
         self._streams["all_gather"].wait_stream(torch.cuda.current_stream())
 
     def forward(self, *args: Any, **kwargs: Any) -> Any:
-        print(f" --- fsdp forward ----")
         self._lazy_init()
 
         # Start of a forward pass.
