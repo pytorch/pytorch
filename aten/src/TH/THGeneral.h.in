@@ -71,8 +71,6 @@ typedef void (*THArgErrorHandlerFunction)(int argNumber, const char *msg, void *
 TH_API TH_NO_RETURN void _THError(const char *file, const int line, const char *fmt, ...);
 TH_API void _THAssertionFailed(const char *file, const int line, const char *exp, const char *fmt, ...);
 TH_API void _THArgCheck(const char *file, int line, int condition, int argNumber, const char *fmt, ...);
-TH_API void* THAlloc(ptrdiff_t size);
-TH_API void THFree(void *ptr);
 
 #define THError(...) _THError(__FILE__, __LINE__, __VA_ARGS__)
 
