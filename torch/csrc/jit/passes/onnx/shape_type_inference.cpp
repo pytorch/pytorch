@@ -2105,6 +2105,7 @@ void ONNXShapeTypeInference(
   ConstantValueMap::ClearMaps();
   SetGraphInputTypeReliable(graph.get());
   ONNXShapeTypeInference(graph->block(), params_dict, opset_version);
+  ConstantValueMap::ClearMaps();
 }
 
 } // namespace jit
