@@ -47,6 +47,13 @@ def torch_dtype_from_trt(dtype):
         raise TypeError("%s is not supported by torch" % dtype)
 
 
+def to_tuple(d):
+    if hasattr(d, "to_tuple"):
+        return d.to_tuple()
+    else:
+        return tuple(d)
+
+
 class TRTModule(torch.nn.Module):
     def __init__(self, engine=None, input_names=None, output_names=None, cuda_graph_batch_size=-1):
         super(TRTModule, self).__init__()
@@ -56,7 +63,7 @@ class TRTModule(torch.nn.Module):
         self.output_names = output_names
         self.cuda_graph_batch_size = cuda_graph_batch_size
         self.initialized = False
-        self.to_tuple = lambda d: (d.to_tuple() if hasattr(d, "to_tuple") else tuple(d))
+        self.to_tuple = to_tuple
 
         if engine:
             self._initialize()
