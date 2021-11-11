@@ -7215,6 +7215,16 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         for indices in itertools.product((True, False), repeat=2):
             verify_batched_matmul(*indices)
 
+    def lu_solve_test_helper(self, A_dims, b_dims, pivot, device, dtype):
+        make_fullrank = make_fullrank_matrices_with_distinct_singular_values
+        make_A = partial(make_fullrank, device=device, dtype=dtype)
+
+        b = torch.randn(*b_dims, dtype=dtype, device=device)
+        A = make_A(*A_dims)
+        LU_data, LU_pivots, info = torch.lu(A, get_infos=True, pivot=pivot)
+        self.assertEqual(info, torch.zeros_like(info))
+        return b, A, LU_data, LU_pivots
+
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
