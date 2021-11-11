@@ -175,7 +175,7 @@ TORCH_META_FUNC(scatter_add)
 
 TORCH_META_FUNC(scatter_reduce2)
 (const Tensor& self,
- const int64_t dim,
+ int64_t dim,
  const Tensor& index,
  const c10::string_view reduce,
  const c10::optional<int64_t> output_size) {
@@ -184,6 +184,8 @@ TORCH_META_FUNC(scatter_reduce2)
       "Expected `dim` to be in range ", -self.dim(), " to ", self.dim() - 1, " (got ", dim, ")");
 
   auto sizes = self.sizes().vec();
+
+  dim = dim < 0 ? dim + self.dim() : dim;
 
   if (output_size.has_value())
     sizes[dim] = output_size.value();
