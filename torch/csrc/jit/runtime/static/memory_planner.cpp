@@ -158,7 +158,7 @@ MemoryPlanner::MemoryPlanner(
   FastSet<IValue*> borrowed_ivalues_needing_incref;
   for (IValue* output : runtime->outputs()) {
     auto it = unmanaged_borrowed_ivalues.find(output);
-    if (it != unmanaged_ivalues.end()) {
+    if (it != unmanaged_borrowed_ivalues.end()) {
       borrowed_ivalues_needing_incref_.push_back(output);
       unmanaged_borrowed_ivalues.erase(it);
     } else {
@@ -167,6 +167,9 @@ MemoryPlanner::MemoryPlanner(
   }
 
   GRAPH_DEBUG("managed_tensor_values: ", dumpValueSet(managed_tensor_values));
+  GRAPH_DEBUG(
+      "managed_output_tensor_values_: ",
+      dumpValueSet(managed_output_tensor_values_));
 
   // copy to unmanaged_ivalues_
   unmanaged_ivalues_.reserve(unmanaged_ivalues.size());
@@ -220,6 +223,8 @@ void MemoryPlanner::allocateManagedTensors() {
 
   size_t offset = 0;
   uint8_t* start = static_cast<uint8_t*>(buffer_.get());
+  buffer_start_ = start;
+  buffer_end_ = start + managed_bytes_;
 
   reused_tensors_ = 0;
   auto group_idx = 0;
@@ -376,6 +381,7 @@ void MemoryPlanner::deallocate() {
   }
 
   DCHECK_EQ(managed_tensor_storage_impls_.size(), managed_tensors_.size());
+  VLOG(1) << "managed_bytes: " << managed_bytes_;
 
   for (auto& iv : borrowed_ivalues_needing_incref_) {
     auto old = std::move(*iv);
