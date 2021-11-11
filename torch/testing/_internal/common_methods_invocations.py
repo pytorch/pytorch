@@ -8315,8 +8315,6 @@ op_db: List[OpInfo] = [
                             'TestJit', 'test_variant_consistency_jit'),
            ],
            dtypes=floating_and_complex_types(),
-           # FIXME: col2im does not support automatic differentiation for outputs with complex dtype.
-           supports_autograd=False,
            sample_inputs_func=lambda *a, **kw: list(sample_inputs_istft(*a, **kw)),
            check_batched_grad=False,
            check_batched_gradgrad=False,
@@ -9411,8 +9409,8 @@ op_db: List[OpInfo] = [
            autodiff_nonfusible_nodes=["aten::hardswish"]),
     OpInfo('nn.functional.unfold',
            aten_name='im2col',
-           dtypes=floating_types_and(torch.half),
-           dtypesIfCPU=floating_types_and(torch.half, torch.bfloat16),
+           dtypes=floating_and_complex_types_and(torch.half),
+           dtypesIfCPU=floating_and_complex_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_nn_unfold,
            skips=(
                # RuntimeError: false
