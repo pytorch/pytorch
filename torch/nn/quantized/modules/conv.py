@@ -204,7 +204,6 @@ class _ConvNd(nn.Module):
                     mod.bias is not None, mod.padding_mode)
         qconv.set_weight_bias(qweight, mod.bias)
         try:
-            qconv.reduce_range = activation_post_process.reduce_range
             act_scale, act_zp = activation_post_process.calculate_qparams()
         except:
             # for things like dynamic quantization, want to assign arbitrary s+z to not break serialization
@@ -591,7 +590,6 @@ class _ConvTransposeNd(_ConvNd):
                     mod.bias is not None, mod.dilation, mod.padding_mode)
         qconv.set_weight_bias(qweight, mod.bias)
         try:
-            qconv.reduce_range = mod.activation_post_process.reduce_range
             act_scale, act_zp = mod.activation_post_process.calculate_qparams()
         except:
             # for things like dynamic quantization, want to assign arbitrary s+z to not break serialization

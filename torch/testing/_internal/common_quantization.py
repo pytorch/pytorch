@@ -515,9 +515,7 @@ class QuantizationTestCase(TestCase):
             self._checkModuleCorrectnessAgainstOrig(orig_mod, loaded_mod, calib_data)
 
     def _checkModuleCorrectnessAgainstOrig(self, orig_mod, test_mod, calib_data):
-        print(calib_data)
         for inp in calib_data:
-            print(inp)
             ref_output = orig_mod(*inp)
             scripted_output = test_mod(*inp)
             self.assertEqual(scripted_output, ref_output)

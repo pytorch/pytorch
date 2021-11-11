@@ -888,16 +888,10 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             self.checkEmbeddingSerialization(qemb, num_embeddings, embedding_dim, indices,
                                              offsets, set_qconfig, is_emb_bag=True, dtype=qdtype)
 
-
-
 class TestDynamicQuantizedModule(QuantizationTestCase):
-    def _test_qconv_impl(self, q_mod, dq_mod, dim, q_engine, dtype):
+    def _test_qconv_impl(self, q_mod, dq_mod, dim, q_engine, dtype, bias):
         
         torch.backends.quantized.engine = q_engine
-        if q_engine == 'qnnpack':
-            reduce_range = False
-        else:
-            reduce_range=True
         
         in_channels = 3
         out_channels = 10
@@ -906,16 +900,16 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
         padding=0
         dilation=1
         groups=1
-        use_bias=True,
         padding_mode='zeros'
+        reduce_range=True
 
         X_fp32 = torch.randn(*([in_channels]*dim))
         s, z = _calculate_dynamic_qparams(X_fp32, dtype, reduce_range)
         X_q = torch.quantize_per_tensor(X_fp32, s, z, dtype)
         X_dq = torch.dequantize(X_q)
 
-        quantized_module = q_mod(in_channels, out_channels, kernel_size) #, stride, padding, dilation, groups, use_bias, padding_mode)
-        dynamic_module = dq_mod(in_channels, out_channels, kernel_size) #, stride, padding, dilation, groups, use_bias, padding_mode)
+        quantized_module = q_mod(in_channels, out_channels, kernel_size, stride=stride, padding=padding, dilation=dilation, groups=groups, bias=bias, padding_mode=padding_mode)
+        dynamic_module = dq_mod(in_channels, out_channels, kernel_size, stride=stride, padding=padding, dilation=dilation, groups=groups, bias=bias, padding_mode=padding_mode)
 
         quantized_module.scale, quantized_module.zero_point = s, z
         dynamic_module.set_weight_bias(*quantized_module._weight_bias())
@@ -939,7 +933,7 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
         for key in loaded_dict:
             self.assertEqual(model_dict[key], loaded_dict[key])
         loaded_qconv_module = type(dynamic_module)(
-            in_channels, out_channels, kernel_size) #, stride, padding, dilation, groups, use_bias, padding_mode=padding_mode)
+            in_channels, out_channels, kernel_size, stride=stride, padding=padding, dilation=dilation, groups=groups, bias=bias, padding_mode=padding_mode)
         loaded_qconv_module.load_state_dict(loaded_dict)
 
         self.assertTrue(dir(loaded_qconv_module) == dir(dynamic_module))
@@ -948,7 +942,7 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
         self.assertTrue(hasattr(loaded_qconv_module, '_weight_bias'))
 
         self.assertEqual(dynamic_module.weight(), loaded_qconv_module.weight())
-        if use_bias:
+        if bias:
             self.assertEqual(dynamic_module.bias(), loaded_qconv_module.bias())
         self.assertEqual(dynamic_module.scale, loaded_qconv_module.scale)
         self.assertEqual(dynamic_module.zero_point,
@@ -988,15 +982,14 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
             Y.numpy(), Y_deepcopied.numpy(), decimal=0)
 
         # need to fix this
-        # # JIT testing
-        # self.checkScriptable(
-        #     dynamic_module, [[X_dq]],
-        #     check_save_load=True)
+        # JIT testing
+        self.checkScriptable(
+            dynamic_module, [[X_dq]],
+            check_save_load=True)
 
         # Test from_float
         conv_module = dynamic_module._FLOAT_MODULE(in_channels, out_channels, kernel_size)
         conv_module.qconfig = torch.ao.quantization.default_dynamic_qconfig # type: ignore
-        # torch.ao.quantization.prepare(conv_module, inplace=True)
         prepare_dynamic(conv_module)
         conv_module(X_dq)
         quantized_conv_module = dq_mod.from_float(conv_module)
@@ -1014,8 +1007,9 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
         dtype = torch.quint8
 
         for q_engine in ["fbgemm", "qnnpack"]:
-            for i in range(10):
-                self._test_qconv_impl(q_mod, dq_mod, dim, q_engine, dtype)
+            for bias in [True, False]:
+                for i in range(10):
+                    self._test_qconv_impl(q_mod, dq_mod, dim, q_engine, dtype, bias)
 
 
     def test_dynamic_conv2d(self):
@@ -1025,7 +1019,9 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
         dtype = torch.quint8
 
         for q_engine in ["fbgemm", "qnnpack"]:
-            self._test_qconv_impl(q_mod, dq_mod, dim, q_engine, dtype)
+            for bias in [True, False]:
+                for i in range(10):
+                    self._test_qconv_impl(q_mod, dq_mod, dim, q_engine, dtype, bias)
 
     def test_dynamic_conv3d(self):
         q_mod = torch.nn.quantized.Conv3d
@@ -1034,8 +1030,9 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
         dtype = torch.quint8
 
         for q_engine in ["fbgemm"]: #  qnnpack doesn't support unpacking conv3d
-            for i in range(10):
-                self._test_qconv_impl(q_mod, dq_mod, dim, q_engine, dtype)
+            for bias in [True, False]:
+                for i in range(10):
+                    self._test_qconv_impl(q_mod, dq_mod, dim, q_engine, dtype, bias)
 
     def test_dynamic_convtranspose1d(self):
         q_mod = torch.nn.quantized.ConvTranspose1d
@@ -1044,8 +1041,9 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
         dtype = torch.quint8
 
         for q_engine in ["fbgemm", "qnnpack"]:
-            for i in range(10):
-                self._test_qconv_impl(q_mod, dq_mod, dim, q_engine, dtype)
+            for bias in [True, False]:
+                for i in range(10):
+                    self._test_qconv_impl(q_mod, dq_mod, dim, q_engine, dtype, bias)
 
     def test_dynamic_convtranspose2d(self):
         q_mod = torch.nn.quantized.ConvTranspose2d
@@ -1054,8 +1052,9 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
         dtype = torch.quint8
 
         for q_engine in ["fbgemm", "qnnpack"]:
-            for i in range(10):
-                self._test_qconv_impl(q_mod, dq_mod, dim, q_engine, dtype)
+            for bias in [True, False]:
+                for i in range(10):
+                    self._test_qconv_impl(q_mod, dq_mod, dim, q_engine, dtype, bias)
 
     def test_dynamic_convtranspose3d(self):
         q_mod = torch.nn.quantized.ConvTranspose3d
@@ -1064,8 +1063,9 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
         dtype = torch.quint8
 
         for q_engine in ["fbgemm"]: #  qnnpack doesn't support unpacking conv3d
-            for i in range(10):
-                self._test_qconv_impl(q_mod, dq_mod, dim, q_engine, dtype)
+            for bias in [True, False]:
+                for i in range(10):
+                    self._test_qconv_impl(q_mod, dq_mod, dim, q_engine, dtype, bias)
 
     @given(
         batch_size=st.integers(1, 5),

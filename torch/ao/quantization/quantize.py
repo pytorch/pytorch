@@ -527,6 +527,7 @@ def _convert(
     if convert_custom_config_dict is None:
         convert_custom_config_dict = {}
     custom_module_class_mapping = convert_custom_config_dict.get("observed_to_quantized_custom_module_class", {})
+
     if not inplace:
         module = copy.deepcopy(module)
     reassign = {}

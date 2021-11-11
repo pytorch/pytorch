@@ -19,10 +19,6 @@ template <int kSpatialDim>
 at::Tensor PackedConvWeight<kSpatialDim>::apply_dynamic(
     const at::Tensor& input,
     bool reduce_range) {
-  /// is this needed?
-//   auto input_contig = input.contiguous();
-//   const auto* input_ptr = input.data_ptr<float>();
-
   TORCH_CHECK(
       fbgemm::fbgemmSupportedCPU(), "Your CPU does not support FBGEMM.");
 
@@ -48,15 +44,15 @@ at::Tensor PackedConvWeight<kSpatialDim>::apply_dynamic(
       /*force_scale_power_of_two=*/false,
       /*reduce_range=*/reduce_range);
 
-  // q_params.precision = precision;
-
   // Quantize input
   at::Tensor q_input = at::quantize_per_tensor(
       input, q_params.scale, q_params.zero_point, c10::kQUInt8);
 
-  at::Tensor out = apply_impl<false>(q_input, q_params.scale, q_params.zero_point);
-  
-  return at::dequantize(out);  //TODO: optimized kernel that outputs fp32 so this step isn't necessary
+  at::Tensor out =
+      apply_impl<false>(q_input, q_params.scale, q_params.zero_point);
+
+  return at::dequantize(out); // TODO: optimized kernel that outputs fp32 so
+                              // this step isn't necessary
 }
 
 template at::Tensor PackedConvWeight<2>::apply_dynamic(
@@ -75,39 +71,40 @@ template <int kSpatialDim>
 at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_dynamic(
     const at::Tensor& input,
     bool reduce_range) {
+  // On empty input, no output data will be generated,
+  // so use arbitrary qparams.
+  float x_min = 0;
+  float x_max = 0;
+  // Otherwise...
+  if (input.numel() > 0) {
+    x_min = input.min().item<float>();
+    x_max = input.max().item<float>();
+  }
 
-    // On empty input, no output data will be generated,
-    // so use arbitrary qparams.
-    float x_min = 0;
-    float x_max = 0;
-    // Otherwise...
-    if (input.numel() > 0) {
-      x_min = input.min().item<float>();
-      x_max = input.max().item<float>();
-    }
+  // Input tensor is quantized as 8-bit unsigned values
+  static constexpr int precision = 8;
+  static constexpr bool is_signed = false;
 
-    // Input tensor is quantized as 8-bit unsigned values
-    static constexpr int precision = 8;
-    static constexpr bool is_signed = false;
+  // Calculate scale and zero point for quantization of input tensor
+  auto q_params = quant_utils::ChooseQuantizationParams(
+      /*min=*/x_min,
+      /*max=*/x_max,
+      /*qmin=*/is_signed ? -(1 << (precision - 1)) : 0,
+      /*qmax=*/
+      is_signed ? ((1 << (precision - 1)) - 1) : (1 << precision) - 1,
+      /*preserve_sparsity=*/false,
+      /*force_scale_power_of_two=*/false,
+      /*reduce_range=*/reduce_range);
 
-    // Calculate scale and zero point for quantization of input tensor
-    auto q_params = quant_utils::ChooseQuantizationParams(
-        /*min=*/x_min,
-        /*max=*/x_max,
-        /*qmin=*/is_signed ? -(1 << (precision - 1)) : 0,
-        /*qmax=*/
-        is_signed ? ((1 << (precision - 1)) - 1) : (1 << precision) - 1,
-        /*preserve_sparsity=*/false,
-        /*force_scale_power_of_two=*/false,
-        /*reduce_range=*/reduce_range);
+  // Quantize input
+  at::Tensor q_input = at::quantize_per_tensor(
+      input, q_params.scale, q_params.zero_point, c10::kQUInt8);
 
-    // Quantize input
-    at::Tensor q_input = at::quantize_per_tensor(
-        input, q_params.scale, q_params.zero_point, c10::kQUInt8);
+  at::Tensor out =
+      apply_impl<false>(q_input, q_params.scale, q_params.zero_point);
 
-    at::Tensor out = apply_impl<false>(q_input, q_params.scale, q_params.zero_point);
-
-    return at::dequantize(out);  //TODO: optimized kernel that outputs fp32 so this step isn't necessary
+  return at::dequantize(out); // TODO: optimized kernel that outputs fp32 so
+                              // this step isn't necessary
 }
 
 template at::Tensor PackedConvWeightsQnnp<2>::apply_dynamic(
@@ -124,7 +121,7 @@ namespace at {
 namespace native {
 namespace {
 
-//note: this works for both Conv and ConvT due to transpose()
+// note: this works for both Conv and ConvT due to transpose()
 template <int kSpatialDim>
 class QConvDynamicInt8 final {
  public:
@@ -132,12 +129,12 @@ class QConvDynamicInt8 final {
       at::Tensor input,
       const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>&
           packed_weight,
-    bool reduce_range) {
+      bool reduce_range) {
     return packed_weight->apply_dynamic(input, reduce_range);
   }
 };
 
-//note: this works for both Conv and ConvT due to transpose()
+// note: this works for both Conv and ConvT due to transpose()
 class QConv1dDynamicInt8 final {
  public:
   static at::Tensor run(
@@ -165,19 +162,16 @@ TORCH_LIBRARY_IMPL(quantized, CPU, m) {
       TORCH_FN(QConvDynamicInt8<3>::run));
 
   // transpose
-  m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose1d_dynamic"),
-  TORCH_FN(QConv1dDynamicInt8::run));
-  m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose2d_dynamic"),
-  TORCH_FN(QConvDynamicInt8<2>::run));
-  m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose3d_dynamic"),
-  TORCH_FN(QConvDynamicInt8<3>::run));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::conv_transpose1d_dynamic"),
+      TORCH_FN(QConv1dDynamicInt8::run));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::conv_transpose2d_dynamic"),
+      TORCH_FN(QConvDynamicInt8<2>::run));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::conv_transpose3d_dynamic"),
+      TORCH_FN(QConvDynamicInt8<3>::run));
 }
-
-/* is this needed?
-TORCH_LIBRARY_IMPL(_quantized, CPU, m) {
-  m.impl(TORCH_SELECTIVE_NAME("_quantized::linear_dynamic"),
-TORCH_FN(QLinearDynamicInt8<false>::run));
-}*/
 
 } // namespace
 } // namespace native
