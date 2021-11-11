@@ -254,7 +254,12 @@ class ConfigAutoWrap:
         self.disable_autowrap_context()
 
     @staticmethod
-    def recursive_wrap(module: nn.Module, auto_wrap_policy: Optional[Callable], **kwargs: Any) -> Tuple[nn.Module, int]:
+    def recursive_wrap(
+        module: nn.Module,
+        auto_wrap_policy: Optional[Callable],
+        only_wrap_children: bool = False,
+        **kwargs: Any
+        ) -> Tuple[nn.Module, int]:
         """
         Automatically wrap child modules of *module* that meet the given
         criteria with :func:`auto_wrap`.
@@ -264,6 +269,11 @@ class ConfigAutoWrap:
                 module to recursively wrap
             auto_wrap_policy (Callable, Optional):
                 optionally, override the :func:`auto_wrap_policy` from the context.
+            only_wrap_children (bool, Optional):
+                If ``True``, will not wrap the passed in (i.e. outer-most)
+                module passed into ``recursive_wrap``. This is useful if the
+                function is being called from FSDP constructor which takes care
+                of wrapping the outer-most user module.
 
         Returns:
             (nn.Module, int):
@@ -274,7 +284,6 @@ class ConfigAutoWrap:
 
         # Make sure no child is not already wrapped.
         for _, child in module.named_modules():
-            # raise ValueError(f"Config auto wrap wrapper_cls is {ConfigAutoWrap.wrapper_cls}")
             assert not isinstance(child, cast(type, ConfigAutoWrap.wrapper_cls))
 
         # We count all params, assuming none of them is already wrapped.
@@ -294,7 +303,7 @@ class ConfigAutoWrap:
             # decide if we need to wrap the current module,
             # since the left over parameters exceed the number of params to wrap
             remainder = num_params - total_wrapped_params
-            if auto_wrap_policy(module=module, recurse=False, unwrapped_params=remainder):
+            if not only_wrap_children and auto_wrap_policy(module=module, recurse=False, unwrapped_params=remainder):
                 # Leaf node or final wrapping of the remainder both happen here.
                 return wrap(module, **kwargs), num_params
             else:

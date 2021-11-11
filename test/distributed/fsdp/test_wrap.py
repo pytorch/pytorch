@@ -108,28 +108,50 @@ class TestFSDPWrap(FSDPTest):
         model = MyModel(nested=nested)
         return model
 
+    # TODO: this generates 8 tests, is it worth testing all these config?
     @skip_if_lt_x_gpu(2)
     @parametrize("nested", [True, False])
     @parametrize(
         "cpu_offload",
         [CPUOffload(offload_params=True), CPUOffload(offload_params=False)]
     )
-    def test_error_auto_wrap(self, nested):
-        wrapped_fsdp = self._get_already_wrapped_fsdp(nested=nested)
+    @parametrize(
+        "fsdp_init_mode",
+        [FSDPInitMode.CUDA_AFTER, FSDPInitMode.CUDA_BEFORE]
+    )
+    def test_error_auto_wrap(self, nested, cpu_offload, fsdp_init_mode):
+        """
+        Test that an error is raised if we attempt to wrap when submodules are
+        already FSDP.
+        """
+        wrapped_fsdp = self._get_already_wrapped_fsdp(nested=nested, fsdp_init_mode=fsdp_init_mode)
+        if fsdp_init_mode == FSDPInitMode.CUDA_AFTER:
+            wrapped_fsdp = wrapped_fsdp.cuda()
+
         with self.assertRaisesRegex(ValueError, "to NOT be FullyShardedDataParallel"):
-            mod = FSDP(wrapped_fsdp, fsdp_auto_wrap_policy=default_auto_wrap_policy)
+            mod = FSDP(wrapped_fsdp, cpu_offload=cpu_offload, fsdp_auto_wrap_policy=default_auto_wrap_policy)
 
     @skip_if_lt_x_gpu(2)
     @parametrize(
         "cpu_offload",
-        [CPUOffload(offload_params=True), CPUOffload(offload_params=False)]
+        [CPUOffload(offload_params=False), CPUOffload(offload_params=True)]
     )
-    def test_main_api_auto_wrap(self, cpu_offload):
+    @parametrize(
+        "fsdp_init_mode",
+        [FSDPInitMode.CUDA_AFTER, FSDPInitMode.CUDA_BEFORE]
+    )
+    def test_main_api_auto_wrap(self, cpu_offload, fsdp_init_mode):
+
+        if fsdp_init_mode == FSDPInitMode.CUDA_AFTER and cpu_offload.offload_params:
+            # they don't work together, expected
+            return
+
+        move_to_cuda = fsdp_init_mode == FSDPInitMode.CUDA_BEFORE
 
         class Nested(nn.Module):
             def __init__(self):
                 super().__init__()
-                self.nested_lin = nn.Linear(1, 1, bias=False).cuda()
+                self.nested_lin = _maybe_cuda(nn.Linear(1, 1, bias=False), move_to_cuda)
 
             def forward(self, input):
                 return self.nested_lin(input)
@@ -137,10 +159,10 @@ class TestFSDPWrap(FSDPTest):
         class MyModel(nn.Module):
             def __init__(self):
                 super().__init__()
-                self.lin1 = nn.Linear(1, 1, bias=False).cuda()
-                self.lin2 = nn.Linear(1, 1, bias=False).cuda()
-                self.lin3 = nn.Linear(1, 1, bias=False).cuda()
-                self.lin4 = Nested().cuda()
+                self.lin1 = _maybe_cuda(nn.Linear(1, 1, bias=False), move_to_cuda)
+                self.lin2 = _maybe_cuda(nn.Linear(1, 1, bias=False), move_to_cuda)
+                self.lin3 = _maybe_cuda(nn.Linear(1, 1, bias=False), move_to_cuda)
+                self.lin4 = Nested()
 
             def forward(self, input):
                 return self.lin4(self.lin3(self.lin2(self.lin1(input))))
@@ -154,6 +176,9 @@ class TestFSDPWrap(FSDPTest):
             ),
             cpu_offload=cpu_offload,
         )
+        if fsdp_init_mode == FSDPInitMode.CUDA_AFTER:
+            wrapped_model = wrapped_model.cuda()
+
         modules = [
             wrapped_model,
             wrapped_model.module.lin1,
@@ -167,7 +192,7 @@ class TestFSDPWrap(FSDPTest):
             self.assertTrue(isinstance(module, FSDP))
             self._check_cpu_offload(module, cpu_offload)
         # Run model a few times for sanity check.
-        optim = torch.optim.SGD(model.parameters(), lr=1e-2, momentum=0.9)
+        optim = torch.optim.SGD(wrapped_model.parameters(), lr=1e-2, momentum=0.9)
         inp = torch.ones(1).cuda()
         for _ in range(6):
             optim.zero_grad()
@@ -230,52 +255,78 @@ class TestAutoWrap(TestCase):
         TestFSDPWrap.NestedSequentialModel.verify_model(self, model)
 
 
-    def test_auto_wrap_preset_exclude_wrap(self):
+    @parametrize("wrap_method", [WrapMethod.FSDP_CTOR, WrapMethod.WRAP_API])
+    def test_auto_wrap_preset_exclude_wrap(self, wrap_method):
         """
         Test to ensure excluded modules are not wrapped, regardless if the total param size is greater than the
         min_num_params. the default_auto_wrap_policy excludes wrapping for {nn.ModuleList, nn.ModuleDict}
         """
-        with enable_wrap(wrapper_cls=FSDP, process_group=self.process_group):
-            sequential = nn.ModuleList([nn.Linear(5, 5), nn.Linear(5, 5)])
-            my_auto_wrap_policy = functools.partial(
-                default_auto_wrap_policy, min_num_params=40
-            )
-            model = auto_wrap(sequential, auto_wrap_policy=my_auto_wrap_policy)
-        self.assertTrue(isinstance(model, nn.ModuleList))
+        sequential = nn.ModuleList([nn.Linear(5, 5), nn.Linear(5, 5)])
+        my_auto_wrap_policy = functools.partial(
+            default_auto_wrap_policy, min_num_params=40
+        )
+
+        if wrap_method == WrapMethod.WRAP_API:
+            with enable_wrap(wrapper_cls=FSDP, process_group=self.process_group):
+                model = auto_wrap(sequential, auto_wrap_policy=my_auto_wrap_policy)
+        else:
+            assert wrap_method == WrapMethod.FSDP_CTOR
+            model = FSDP(sequential, process_group=self.process_group, fsdp_auto_wrap_policy=my_auto_wrap_policy)
+
+        # Note that outermost module will be FSDP instance for FSDP_CTOR
+        # approach, because we need to call the FSDP ctor so the returned obj
+        # will be an FSDP instance. If we don't want to shard the outermost
+        # module based on policy, we can apply the policy manually to the
+        # outermost instance and skip the sharding.
+        if wrap_method == WrapMethod.WRAP_API:
+            self.assertTrue(isinstance(model, nn.ModuleList))
         self.assertTrue(isinstance(model[0], nn.Linear))
         self.assertTrue(isinstance(model[1], nn.Linear))
 
-    def test_auto_wrap_preset_exclude_wrap_include_children(self):
+    @parametrize("wrap_method", [WrapMethod.FSDP_CTOR, WrapMethod.WRAP_API])
+    def test_auto_wrap_preset_exclude_wrap_include_children(self, wrap_method):
         """
         Test to ensure excluded modules are not wrapped, but children are if param size is greater than
         min_num_params
         """
-        with enable_wrap(wrapper_cls=FSDP, process_group=self.process_group):
-            sequential = nn.ModuleList([nn.Linear(10, 10)])
-            my_auto_wrap_policy = functools.partial(
-                default_auto_wrap_policy, min_num_params=40
-            )
-            model = auto_wrap(sequential, auto_wrap_policy=my_auto_wrap_policy)
-        self.assertTrue(isinstance(model, nn.ModuleList))
+        sequential = nn.ModuleList([nn.Linear(10, 10)])
+        my_auto_wrap_policy = functools.partial(
+            default_auto_wrap_policy, min_num_params=40
+        )
+        if wrap_method == WrapMethod.WRAP_API:
+            with enable_wrap(wrapper_cls=FSDP, process_group=self.process_group):
+                model = auto_wrap(sequential, auto_wrap_policy=my_auto_wrap_policy)
+        else:
+            assert wrap_method == WrapMethod.FSDP_CTOR
+            model = FSDP(sequential, process_group=self.process_group, fsdp_auto_wrap_policy=my_auto_wrap_policy)
+
+        if wrap_method == WrapMethod.WRAP_API:
+            self.assertTrue(isinstance(model, nn.ModuleList))
         self.assertTrue(isinstance(model[0], FSDP))
 
-    def test_auto_wrap_preset_force_leaf(self):
+    @parametrize("wrap_method", [WrapMethod.FSDP_CTOR, WrapMethod.WRAP_API])
+    def test_auto_wrap_preset_force_leaf(self, wrap_method):
         """
         Test to ensure force-leaf modules are not wrapped, and children are not wrapped. The
         default_auto_wrap_policy forces leaf modules of type {nn.MultiheadAttention} to not be wrapped
         """
-        with enable_wrap(wrapper_cls=FSDP, process_group=self.process_group):
-            sequential = nn.Sequential(nn.Linear(10, 10), nn.MultiheadAttention(100, 1))
-            my_auto_wrap_policy = functools.partial(
-                default_auto_wrap_policy, min_num_params=40
-            )
-            model = auto_wrap(sequential, auto_wrap_policy=my_auto_wrap_policy)
+        sequential = nn.Sequential(nn.Linear(10, 10), nn.MultiheadAttention(100, 1))
+        my_auto_wrap_policy = functools.partial(
+            default_auto_wrap_policy, min_num_params=40
+        )
+        if wrap_method == WrapMethod.WRAP_API:
+            with enable_wrap(wrapper_cls=FSDP, process_group=self.process_group):
+                model = auto_wrap(sequential, auto_wrap_policy=my_auto_wrap_policy)
+        else:
+            assert wrap_method == WrapMethod.FSDP_CTOR
+            model = FSDP(sequential, process_group=self.process_group, fsdp_auto_wrap_policy=my_auto_wrap_policy)
         self.assertTrue(isinstance(model.module[0], FSDP))
         # Assert children of multihead attention are not wrapped
         self.assertTrue(isinstance(model.module[1], nn.MultiheadAttention))
         self.assertTrue(isinstance(model.module[1].out_proj, nn.Linear))
 
-    def test_auto_wrap_preset_force_leaf_custom(self):
+    @parametrize("wrap_method", [WrapMethod.FSDP_CTOR, WrapMethod.WRAP_API])
+    def test_auto_wrap_preset_force_leaf_custom(self, wrap_method):
         """
         Test to ensure force-leaf modules are not wrapped.
         """
@@ -286,22 +337,26 @@ class TestAutoWrap(TestCase):
                 {nn.Linear}
             ),
         )
-        with enable_wrap(
-            auto_wrap_policy=my_auto_wrap_policy,
-            wrapper_cls=FSDP,
-            process_group=self.process_group,
-        ):
-            sequential = nn.Sequential(
-                nn.Linear(10, 10), nn.ModuleList([nn.Linear(10, 10)])
-            )
-            model = auto_wrap(sequential)
+        sequential = nn.Sequential(
+            nn.Linear(10, 10), nn.ModuleList([nn.Linear(10, 10)])
+        )
+        if wrap_method == WrapMethod.WRAP_API:
+            with enable_wrap(
+                auto_wrap_policy=my_auto_wrap_policy,
+                wrapper_cls=FSDP,
+                process_group=self.process_group,
+            ):
+                model = auto_wrap(sequential)
+        else:
+            assert wrap_method == WrapMethod.FSDP_CTOR
+            model = FSDP(sequential, process_group=self.process_group, fsdp_auto_wrap_policy=my_auto_wrap_policy)
         # Model was wrapped in FSDP as no inner modules were wrapped.
         self.assertTrue(isinstance(model, FSDP))
         self.assertTrue(isinstance(model.module[0], nn.Linear))
         self.assertTrue(isinstance(model.module[1], nn.ModuleList))
 
     @unittest.skipIf(not torch.cuda.is_available(), "Test Requires CUDA")
-    @parametrize("wrap_method", [WrapMethod.FSDP_CTOR, WrapMethod.WRAP_API])
+    @parametrize("wrap_method", [WrapMethod.FSDP_CTOR])
     def test_auto_wrap_smoke_test(self, wrap_method):
         device = torch.device("cuda")
         torch.cuda.set_device(0)
@@ -311,9 +366,10 @@ class TestAutoWrap(TestCase):
         os.environ["MASTER_PORT"] = str(find_free_port())
         torch.distributed.init_process_group(backend="nccl", rank=0, world_size=1)
 
-
+        # NOTE: We move model to CUDA after init with FSDP to simulate real use
+        # cases where full model cannot be loaded onto GPU, but their shards can.
         try:
-            sequential = TestFSDPWrap.NestedSequentialModel.get_model()
+            sequential = TestFSDPWrap.NestedSequentialModel.get_model(cuda=False)
             my_auto_wrap_policy = functools.partial(
                 default_auto_wrap_policy, min_num_params=40
             )
@@ -322,8 +378,8 @@ class TestAutoWrap(TestCase):
                     model = auto_wrap(sequential, auto_wrap_policy=my_auto_wrap_policy)
             else:
                 model = FSDP(sequential, fsdp_auto_wrap_policy=my_auto_wrap_policy)
-
             TestFSDPWrap.NestedSequentialModel.verify_model(self, model)
+            model = model.cuda()
             input = torch.rand((1, 5), dtype=torch.float).to(device)
             output = model(input)
             loss = F.mse_loss(input, output)
