@@ -17,6 +17,7 @@ from .nnc_compile import nnc_compile
 from enum import Enum
 import warnings
 from contextlib import contextmanager
+aten = torch.ops.aten
 
 decomposition_table = {}
 
@@ -26,25 +27,26 @@ def register_decomposition(aten_op):
         return f
     return decomposition_decorator
 
-@register_decomposition(torch.ops.aten.tanh_backward)
+@register_decomposition(aten.tanh_backward)
 def tanh_backward_decomposition(out_grad, y):
-    return torch.sub(out_grad, out_grad * y * y)
+    return aten.sub(out_grad, out_grad * y * y)
 
-@register_decomposition(torch.ops.aten.sigmoid_backward)
+@register_decomposition(aten.sigmoid_backward)
 def sigmoid_backward_decomposition(out_grad, y):
     return out_grad * (y * (1 - y))
 
-@register_decomposition(torch.ops.aten._s_where)
+@register_decomposition(aten._s_where)
 def _s_where_decomposition(a, b, c):
-    return torch.where(a, b, c)
+    return aten.where(a, b, c)
 
-@register_decomposition(torch.ops.aten.detach)
+@register_decomposition(aten.detach)
 def noop(x):
     return x
 
-@register_decomposition(torch.ops.aten.softplus_backward)
+@register_decomposition(aten.softplus_backward)
 def softplus_backward_decomposition(out_grad, x, beta, threshold, out):
-    return out_grad * torch.sigmoid(x)
+    z = (x * beta).exp()
+    return aten.where((x * beta) > threshold, out_grad, out_grad * z / (z + 1.0))
 
 USE_DECOMPOSE = False
 
