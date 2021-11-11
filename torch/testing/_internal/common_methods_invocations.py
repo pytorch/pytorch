@@ -542,6 +542,8 @@ class OpInfo(object):
                  supports_sparse=False,  # whether the op supports sparse inputs
 
                  supports_scripting=True,  # only run tracing tests
+                 # the following metadata relates to sparse csr support and is used in test_sparse_csr.py
+                 supports_sparse_csr=False,  # whether the op supports sparse csr inputs
                  # the following metadata relates to complex support and is checked in test_ops.py
                  test_conjugated_samples=True,
                  test_neg_view=True,
@@ -666,6 +668,7 @@ class OpInfo(object):
         self.supports_inplace_autograd = supports_inplace_autograd
 
         self.supports_sparse = supports_sparse
+        self.supports_sparse_csr = supports_sparse_csr
 
         self.aliases = ()
         if aliases is not None:
@@ -9869,6 +9872,7 @@ op_db: List[OpInfo] = [
                    handles_large_floats=False,
                    handles_complex_extremals=False,
                    safe_casts_outputs=True,
+                   supports_sparse_csr=True,
                    supports_forward_ad=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),)),
     UnaryUfuncInfo('sinc',

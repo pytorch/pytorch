@@ -10,8 +10,9 @@ from torch.testing._internal.common_cuda import SM53OrLater, SM80OrLater, TEST_C
 from torch.testing._internal.common_utils import \
     (IS_MACOS, IS_WINDOWS, TEST_WITH_ROCM, TestCase, run_tests, load_tests, coalescedonoff)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoCusparseGeneric,
+    (ops, instantiate_device_type_tests, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoCusparseGeneric,
      precisionOverride, skipMeta, skipCUDAIf)
+from torch.testing._internal.common_methods_invocations import (op_db, )
 from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing._internal.common_dtype import floating_types, get_all_dtypes
 from test_sparse import CUSPARSE_SPMM_COMPLEX128_SUPPORTED
@@ -32,6 +33,7 @@ def _check_cusparse_spgemm_available():
     min_supported_version = (11, 0)
     return version >= min_supported_version
 
+_sparse_csr_ops = list(filter(lambda op: op.supports_sparse_csr, op_db))
 
 # This should be just an import from test_linalg instead of code duplication
 # but https://github.com/pytorch/pytorch/pull/63511#discussion_r733989701
@@ -957,6 +959,23 @@ class TestSparseCSR(TestCase):
             csr_sparse = coo_sparse.to_sparse_csr()
 
             self.assertEqual(csr_sparse.to_dense(), dense)
+
+    @ops(_sparse_csr_ops)
+    def test_sparse_csr_no_error(self, device, dtype, op):
+        samples = op.sample_inputs(device, dtype)
+
+        if len(samples) == 0:
+            self.skipTest("Skipped! No sample inputs!")
+
+        for sample in samples:
+            assert isinstance(sample.input, torch.Tensor)
+            if sample.input.ndim != 2:
+                continue
+
+            expected = op(sample.input)
+            assert torch.is_tensor(expected)
+            output = op(sample.input.to_sparse_csr())
+            assert torch.is_tensor(output)
 
 
 # e.g., TestSparseCSRCPU and TestSparseCSRCUDA
