@@ -200,6 +200,7 @@ def with_dist_debug_levels(levels):
             for level in levels:
                 os.environ["TORCH_DISTRIBUTED_DEBUG"] = level
                 ret = func(*args, **kwargs)
+                c10d.barrier()
                 if old_level is not None:
                     os.environ["TORCH_DISTRIBUTED_DEBUG"] = old_level
             # Only returns test return for last test, but since these are
