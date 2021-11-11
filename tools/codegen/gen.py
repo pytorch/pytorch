@@ -18,7 +18,7 @@ from tools.codegen.model import (Argument, DispatchKey, FunctionSchema,
                                  OptionalType, SchemaKind, SelfArgument,
                                  TensorOptionsArguments, Type, Variant,
                                  assert_never, is_cuda_dispatch_key,
-                                 is_generic_dispatch_key, BaseTy, BaseType)
+                                 is_generic_dispatch_key)
 from tools.codegen.api.types import (Binding, CppSignature, CppSignatureGroup,
                                      DispatcherSignature, NativeSignature)
 from tools.codegen.api import cpp
@@ -36,7 +36,6 @@ from tools.codegen.context import (method_with_native_function,
 import tools.codegen.dest as dest
 
 T = TypeVar('T')
-
 
 # Welcome to the ATen code generator v2!  The ATen code generator is
 # responsible for parsing native_functions.yaml and then generating
@@ -75,13 +74,10 @@ class LineLoader(YamlLoader):
         mapping['__line__'] = node.start_mark.line + 1
         return mapping
 
-
 _GLOBAL_PARSE_NATIVE_YAML_CACHE = {}
 
 # Parse native_functions.yaml into a sequence of NativeFunctions and Backend Indices.
 ParsedYaml = namedtuple('ParsedYaml', ['native_functions', 'backend_indices'])
-
-
 def parse_native_yaml(path: str) -> ParsedYaml:
     global _GLOBAL_PARSE_NATIVE_YAML_CACHE
     if path not in _GLOBAL_PARSE_NATIVE_YAML_CACHE:
@@ -109,7 +105,6 @@ def parse_native_yaml(path: str) -> ParsedYaml:
 
     return _GLOBAL_PARSE_NATIVE_YAML_CACHE[path]
 
-
 # Some assertions are already performed during parsing, but those are only within a single NativeFunction.
 # Assertions here are meant to be performed across NativeFunctions.
 def error_check_native_functions(funcs: Sequence[NativeFunction]) -> None:
@@ -124,7 +119,6 @@ def error_check_native_functions(funcs: Sequence[NativeFunction]) -> None:
                 f"{f.structured_delegate}, but {f.structured_delegate} is not marked as structured. " \
                 f"Consider adding 'structured=True' to the delegated operator"
 
-
 def cpp_string(s: str) -> str:
     """Convert a python string into a c++ string literal """
     s = s.replace('\\', '\\\\')
@@ -136,7 +130,6 @@ def cpp_string(s: str) -> str:
     s = s.replace('\v', '\\v')
     s = s.replace('\t', '\\t')
     return f'"{s}"'
-
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
@@ -160,7 +153,6 @@ def static_dispatch_keys(backend: Optional[BackendIndex]) -> List[DispatchKey]:
             DispatchKey.CompositeExplicitAutograd
         ]
 
-
 def static_dispatch_extra_headers(backend: Optional[BackendIndex], skip_tensor_include: bool = False) -> str:
     if skip_tensor_include:
         # See Note [Avoiding Include Cycles In Static Dispatch]
@@ -169,7 +161,6 @@ def static_dispatch_extra_headers(backend: Optional[BackendIndex], skip_tensor_i
         maybe_inl = ''
     return '\n'.join([
         f'#include <ATen/{dispatch_key}Functions{maybe_inl}.h>' for dispatch_key in static_dispatch_keys(backend)])
-
 
 def static_dispatch(
         f: NativeFunction, cpp_sig: CppSignature,
@@ -198,7 +189,6 @@ def static_dispatch(
 
     return f'TORCH_CHECK(false, "Static dispatch does not support {name} for {backend_index.dispatch_key}.");'
 
-
 # Generates RegisterSchema.cpp.  Depending on the selector, either
 # all schemas are registered, or only some are (in the case of
 # selective build)
@@ -211,7 +201,6 @@ class RegisterSchema:
         if not self.selector.is_native_function_selected(f):
             return None
         return f'm.def({cpp_string(str(f.func))});\n'
-
 
 # Generates Operators.h and Operators.cpp.
 # These provide macros that, given an operator and overload name, allow users
@@ -328,8 +317,7 @@ class ComputeFunction:
             exprs = translate(sig.arguments(), target_sig.arguments())
             exprs_str = ', '.join([e.expr for e in exprs])
 
-            static_dispatch_block = static_dispatch(f, sig, method=False,
-                                                    backend_index=self.static_dispatch_backend_index)
+            static_dispatch_block = static_dispatch(f, sig, method=False, backend_index=self.static_dispatch_backend_index)
             if static_dispatch_block is None:
                 return f"""
 // aten::{f.func}
@@ -344,13 +332,11 @@ TORCH_API inline {sig.decl()} {{
     {static_dispatch_block}
 }}
 """
-
         result = generate_defn(False)
         if sig_group.faithful_signature is not None:
             result += generate_defn(True)
 
         return result
-
 
 # Generates TensorBody.h. This file provides the object-oriented (method-based)
 # public C++ API, and the scaffolding to call into the dispatcher from these functions.
@@ -392,8 +378,7 @@ class ComputeTensorMethod:
             exprs = translate(sig.arguments(), target_sig.arguments(), method=True)
             exprs_str = ', '.join([e.expr for e in exprs])
 
-            static_dispatch_block = static_dispatch(f, sig, method=True,
-                                                    backend_index=self.static_dispatch_backend_index)
+            static_dispatch_block = static_dispatch(f, sig, method=True, backend_index=self.static_dispatch_backend_index)
             if static_dispatch_block is None:
                 return f"""
 // aten::{f.func}
@@ -414,7 +399,6 @@ inline {sig.defn(prefix="Tensor::")} const {{
             result += generate_defn(faithful=True)
 
         return result
-
 
 # Generates RedispatchFunctions.h.
 # This is similar to the C++ API defined in Functions.h, but provides access
@@ -513,7 +497,6 @@ Operator(
 def compute_aten_op(f: NativeFunction) -> str:
     return f'{{"aten::{f.func.name.name}", "{f.func.name.overload_name}"}},'
 
-
 # Generates MetaFunctions.h
 def compute_meta_function_declaration(g: NativeFunctionsGroup) -> Optional[str]:
     if not g.structured:
@@ -534,8 +517,7 @@ def compute_meta_function_declaration(g: NativeFunctionsGroup) -> Optional[str]:
             # terms of position) precomputed element has been set.
             precomputed_elements = [elem for replace_list in precomputed.replace.values() for elem in replace_list]
             precomputed_template_parameters = [elem.name.upper() for elem in precomputed_elements]
-            precomputed_template_params_str = ", ".join(
-                f"bool {param} = false" for param in precomputed_template_parameters)
+            precomputed_template_params_str = ", ".join(f"bool {param} = false" for param in precomputed_template_parameters)
             precompute_template_decl = f"template <{precomputed_template_params_str}>"
 
             # Generate a string containing declarations of all precomputed elements.
@@ -621,7 +603,6 @@ struct TORCH_API structured_{name} : public {parent_class} {{
 }};
 """
 
-
 # Generates RegisterBackendSelect.cpp, a series of kernels which provide
 # specialized computation of dispatch key for operator signatures which cannot
 # be easily done automatically using templating.
@@ -691,7 +672,6 @@ C10_ALWAYS_INLINE
         else:
             assert_never(self.target)
 
-
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
 #                       YAML CODE GENERATION
@@ -705,13 +685,11 @@ def format_yaml(data: object) -> str:
     # Support serializing OrderedDict
     def dict_representer(dumper: Any, data: Any) -> Any:
         return dumper.represent_dict(data.items())
-
     YamlDumper.add_representer(OrderedDict, dict_representer)  # type: ignore[no-untyped-call]
     # Some yaml parsers (e.g. Haskell's) don't understand line breaks.
     # width=1e9 turns off optional line breaks and improves
     # the portability of the outputted yaml.
     return yaml.dump(data, default_flow_style=False, Dumper=YamlDumper, width=1e9)  # type: ignore[no-any-return]
-
 
 # For some reason, some defaults we write to YAML are written as native
 # YAML objects, rather than doing them uniformly as strings.  This
@@ -731,7 +709,6 @@ def pythonify_default(s: str) -> object:
         except ValueError:
             return s
 
-
 # What is a dynamic type?  Over time, the semantic meaning of
 # dynamic type has degraded to meaninglessness (in the old days,
 # it captured dtype-ness of types, but that has gone away with
@@ -750,7 +727,6 @@ def dynamic_type(t: Type) -> str:
         return 'at::Tensor'
     return cpp.argumenttype_type(t, mutable=False, binds='__placeholder__').cpp_type()
 
-
 def compute_method_of_yaml(variants: Set[Variant]) -> List[str]:
     # This is written out explicitly to ensure that Tensor and
     # namespace are put into the list in the right order
@@ -760,7 +736,6 @@ def compute_method_of_yaml(variants: Set[Variant]) -> List[str]:
     if Variant.function in variants:
         method_of.append('namespace')
     return method_of
-
 
 def compute_returns_yaml(f: NativeFunction) -> Tuple[List[Dict[str, str]], Dict[str, str]]:
     # Note [name and field_name]
@@ -824,7 +799,6 @@ def compute_returns_yaml(f: NativeFunction) -> Tuple[List[Dict[str, str]], Dict[
 
     return returns, name_to_field_name
 
-
 # arguments in yaml roughly corresponds to the public C++ API
 def compute_cpp_argument_yaml(cpp_a: Binding, *, schema_order: bool, kwarg_only_set: Set[str],
                               out_arg_set: Set[str], name_to_field_name: Dict[str, str]) -> object:
@@ -846,7 +820,6 @@ def compute_cpp_argument_yaml(cpp_a: Binding, *, schema_order: bool, kwarg_only_
         return compute_argument_yaml(
             cpp_a.argument, schema_order=schema_order,
             kwarg_only_set=kwarg_only_set, out_arg_set=out_arg_set, name_to_field_name=name_to_field_name)
-
 
 def compute_argument_yaml(a: Argument, *, schema_order: bool, kwarg_only_set: Set[str],
                           out_arg_set: Set[str], name_to_field_name: Dict[str, str]) -> object:
@@ -873,7 +846,6 @@ def compute_argument_yaml(a: Argument, *, schema_order: bool, kwarg_only_set: Se
     if l is not None and l.size is not None and str(l.elem) != 'bool':
         arg['size'] = l.size
     return arg
-
 
 @with_native_function
 def compute_declaration_yaml(f: NativeFunction) -> object:
@@ -913,7 +885,7 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
     schema_order_cpp_signature = f"{cpp_returns} ({', '.join(cpp_schema_order_types)})"
 
     is_factory_method = any(isinstance(a.argument, TensorOptionsArguments) for a in cpp_args) \
-                        and Variant.method not in f.variants
+        and Variant.method not in f.variants
 
     return OrderedDict([
         ('name', cpp.name(f.func)),
@@ -938,12 +910,10 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
         ('has_math_kernel', f.has_composite_implicit_autograd_kernel),
     ])
 
-
 # See Note [Auto generated composite kernels]
 def has_autogenerated_composite_kernel(f: NativeFunction) -> bool:
     return (f.structured or f.structured_delegate is not None) and \
            (f.func.kind() == SchemaKind.functional or f.func.kind() == SchemaKind.inplace)
-
 
 @with_native_function_and_indices
 def compute_registration_declarations(f: NativeFunction, backend_indices: Dict[DispatchKey, BackendIndex]) -> str:
@@ -951,7 +921,7 @@ def compute_registration_declarations(f: NativeFunction, backend_indices: Dict[D
     returns_type = dispatcher.returns_type(f.func.returns).cpp_type_registration_declarations()
     args = dispatcher.arguments(f.func)
     args_str = ', '.join(a.no_default().decl_registration_declarations() for a in args)
-    comment_data: Dict[str, str] = {
+    comment_data : Dict[str, str] = {
         'schema': f'aten::{f.func}',
         # TODO: What exactly is the semantics of the 'dispatch' field?
         'dispatch': str(
@@ -960,7 +930,6 @@ def compute_registration_declarations(f: NativeFunction, backend_indices: Dict[D
     }
     return f"""{returns_type} {name}({args_str}); // {json.dumps(comment_data)}
 """
-
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
@@ -977,7 +946,6 @@ def _read_template(template_fn: str) -> CodeTemplate:
 def string_stable_hash(s: str) -> int:
     sha1 = hashlib.sha1(s.encode('latin1')).digest()
     return int.from_bytes(sha1, byteorder='little')
-
 
 # A small abstraction for writing out generated files and keeping track
 # of what files have been written (so you can write out a list of output
@@ -1025,6 +993,7 @@ class FileManager:
             else:
                 assert_never(env)
 
+
     def write(self, filename: str, env_callable: Callable[[], Union[str, Union[str, Dict[str, Any]]]]) -> None:
         self.write_with_template(filename, filename, env_callable)
 
@@ -1055,6 +1024,7 @@ class FileManager:
                     shard[key] = shard[key].copy()
                 else:
                     shard[key] = []
+
 
         def merge_env(into: Dict[str, List[str]], from_: Dict[str, List[str]]) -> None:
             for k, v in from_.items():
@@ -1092,13 +1062,12 @@ class FileManager:
             filename,
             ''.join(name + ";" for name in sorted(self.filenames)))
 
-
 def get_custom_build_selector(
         provided_op_registration_allowlist: Optional[List[str]],
         op_selection_yaml_path: Optional[str]) -> SelectiveBuilder:
     assert not (
-            provided_op_registration_allowlist is not None and
-            op_selection_yaml_path is not None), (
+        provided_op_registration_allowlist is not None and
+        op_selection_yaml_path is not None), (
             "Both provided_op_registration_allowlist and " +
             "op_selection_yaml_path can NOT be provided at the " +
             "same time.")
@@ -1120,7 +1089,6 @@ def get_custom_build_selector(
 
     return selector
 
-
 def get_grouped_native_functions(
         native_functions: Sequence[NativeFunction]) -> Sequence[Union[NativeFunction, NativeFunctionsGroup]]:
     pre_grouped_native_functions: Dict[FunctionSchema, Dict[SchemaKind, NativeFunction]] = defaultdict(dict)
@@ -1138,7 +1106,6 @@ def get_grouped_native_functions(
 
     # TODO: how come ValuesView isn't a Sequence lol
     return list(concatMap(flatten_pre_group, list(pre_grouped_native_functions.values())))
-
 
 def main() -> None:
     parser = argparse.ArgumentParser(description='Generate ATen source files')
@@ -1407,7 +1374,7 @@ def main() -> None:
             # Backends are allowed to repeat kernel names; only generate the declaration once!
             lambda f: list(OrderedDict.fromkeys(concatMap(
                 lambda backend_idx:
-                dest.compute_native_function_declaration(f, backend_idx),
+                    dest.compute_native_function_declaration(f, backend_idx),
                 backend_indices.values()))),
             grouped_native_functions)),
     })
@@ -1421,7 +1388,6 @@ def main() -> None:
         cpu_fm.write_outputs(options.output_dependencies)
         core_fm.write_outputs(f"{options.output_dependencies}-core")
         cuda_fm.write_outputs(f"{options.output_dependencies}-cuda")
-
 
 if __name__ == '__main__':
     main()
