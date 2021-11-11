@@ -380,20 +380,20 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
             # Case 1: aliasing between relu and split_with_sizes
             # is within a DifferentiableGraph. It should be valid
             # to merge both split_with_sizes in relu in one graph
-    #         input_str = """
-    # graph(%a : Tensor):
-    #     %b : Tensor = aten::relu(%a)
-    #     %0 : int[] = prim::Constant[value=[2, 2, 1]]()
-    #     %1 : int = prim::Constant[value=0]()
-    #     %2 : Tensor[] = aten::split_with_sizes(%b, %0, %1)
-    #     return (%2)
-    # """
+            input_str = """
+    graph(%a : Tensor):
+        %b : Tensor = aten::relu(%a)
+        %0 : int[] = prim::Constant[value=[2, 2, 1]]()
+        %1 : int = prim::Constant[value=0]()
+        %2 : Tensor[] = aten::split_with_sizes(%b, %0, %1)
+        return (%2)
+    """
 
-    #         graph = torch._C.parse_ir(input_str)
-    #         torch._C._jit_pass_create_autodiff_subgraphs(graph, 1)
-    #         FileCheck().check("with prim::DifferentiableGraph") \
-    #             .check("aten::relu").check("aten::split_with_sizes") \
-    #             .run(graph)
+            graph = torch._C.parse_ir(input_str)
+            torch._C._jit_pass_create_autodiff_subgraphs(graph, 1)
+            FileCheck().check("with prim::DifferentiableGraph") \
+                .check("aten::relu").check("aten::split_with_sizes") \
+                .run(graph)
 
             # Case 2: aliasing between relu and split_with_sizes
             # are both outputs of a Diff graph. It should be invalid
@@ -412,8 +412,27 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
 
             graph = torch._C.parse_ir(input_str)
             torch._C._jit_pass_create_autodiff_subgraphs(graph, 1)
-            FileCheck().check("with prim::DifferentiableGraph") \
-                .check("aten::relu") \
+            FileCheck().check("Tensor = prim::DifferentiableGraph") \
                 .check("with prim::DifferentiableGraph") \
-                .check("aten::split_with_sizes") \
+                .check_not("aten::split_with_sizes") \
+                .run(graph)
+
+
+            input_str = """
+    graph(%a : Tensor):
+        %b : Tensor = aten::relu(%a)
+        %s1 : int[] = prim::Constant[value=[2, 2, 1]]()
+        %s2 : int[] = prim::Constant[value=[3, 1]]()
+        %1 : int = prim::Constant[value=0]()
+        %2 : Tensor[] = aten::split_with_sizes(%b, %s1, %1)
+        %3 : Tensor[] = aten::split_with_sizes(%b, %s2, %1)
+        %4 : (Tensor, Tensor[]) = prim::TupleConstruct(%b, %2, %3)
+        return (%4)
+"""
+
+            graph = torch._C.parse_ir(input_str)
+            torch._C._jit_pass_create_autodiff_subgraphs(graph, 1)
+            FileCheck().check("Tensor = prim::DifferentiableGraph") \
+                .check("with prim::DifferentiableGraph") \
+                .check_not("aten::split_with_sizes") \
                 .run(graph)
