@@ -1058,7 +1058,6 @@ if __name__ == '__main__':
     reports_by_file, duplicated_tests_by_file = parse_reports(args.folder)
     assemble_flaky_test_stats(duplicated_tests_by_file)
 
-    sys.exit(0)
     upload_failures_to_rds(reports_by_file)
     if reports_has_no_tests(reports_by_file):
         print(f"No tests in reports found in {args.folder}")

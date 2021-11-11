@@ -27,7 +27,6 @@ class TestAsync(JitTestCase):
         y_hat = foo(x)
         y = torch.jit.wait(fut)
 
-        self.assertTrue(False)
         # assert nothing; only to make sure the fake python path works
 
     def test_async_future_type_python(self):
@@ -41,9 +40,6 @@ class TestAsync(JitTestCase):
             return all_outputs
 
         # assert nothing, just to make sure python type parsing works
-        import random
-        if random.randint(0, 4) < 2:
-            self.assertTrue(False)
         foo(torch.randn(3, 4))
 
     def test_async_parsing(self):
@@ -116,11 +112,7 @@ class TestAsync(JitTestCase):
         with torch.jit.optimized_execution(False):
             y, y_hat = m.forward(x1, x2)
 
-        import random
-        if random.randint(0, 4) < 2:
-            self.assertEqual(y, y_hat)
-        else:
-            self.assertTrue(False)
+        self.assertEqual(y, y_hat)
 
     def test_async_script_nested(self):
         @torch.jit.script
