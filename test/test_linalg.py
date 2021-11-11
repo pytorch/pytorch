@@ -2297,6 +2297,18 @@ class TestLinalg(TestCase):
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
+    @dtypes(*floating_and_complex_types())
+    def test_eig_with_nan(self, device, dtype):
+        for val in [np.inf, np.nan]:
+            for batch_dim in [(), (10,)]:
+                a = make_tensor((*batch_dim, 5, 5), device=device, dtype=dtype)
+                a[..., -1, -1] = val
+
+                with self.assertRaisesRegex(RuntimeError, "torch.linalg.eig: input tensor should not"):
+                    torch.linalg.eig(a)
+
+    @skipCPUIfNoLapack
+    @skipCUDAIfNoMagma
     # NumPy computes only in float64 and complex128 precisions
     # for float32 or complex64 results might be very different from float64 or complex128
     @dtypes(torch.float64, torch.complex128)
