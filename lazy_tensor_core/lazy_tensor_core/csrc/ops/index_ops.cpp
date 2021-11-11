@@ -228,9 +228,9 @@ LazyTensor IndexByTensors(const LazyTensor& base,
   LazyTensor indices_nd =
       lazy_tensor_aten_ops::stack(canonical_indices, indices_rank);
   return LazyTensor::Create(
-      torch::lazy::MakeNode<ir::ops::IndexGet>(base.GetIrValue(),
-                                      indices_nd.GetIrValue(), start_dim),
-      base.GetDevice(), base.dtype());
+      torch::lazy::MakeNode<ir::ops::IndexGet>(
+          base.GetIrValue(), indices_nd.GetIrValue(), start_dim),
+      base.GetDevice());
 }
 
 torch::lazy::Value IndexPutByTensors(

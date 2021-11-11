@@ -516,14 +516,6 @@ torch::lazy::Value LazyGraphExecutor::GetIrValueForScalar(
                              device);
 }
 
-torch::lazy::Value LazyGraphExecutor::GetIrValueForScalar(
-    const at::Scalar& value, const torch::lazy::Shape& shape,
-    c10::optional<at::ScalarType> logical_element_type, const torch::lazy::BackendDevice& device) {
-  c10::ScalarType type =
-      logical_element_type ? *logical_element_type : shape.scalar_type();
-  return GetIrValueForScalar(value, type, shape.sizes(), device);
-}
-
 LazyGraphExecutor::Async::Async(SyncTensorCollection* coll,
                                 std::vector<compiler::BackendDataPtr> parameters_data,
                                 std::vector<compiler::BackendDataPtr> tensors_data,

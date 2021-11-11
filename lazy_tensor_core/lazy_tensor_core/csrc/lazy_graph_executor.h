@@ -91,12 +91,9 @@ class LazyGraphExecutor {
                                          c10::ScalarType type,
                                          c10::ArrayRef<int64_t> dimensions,
                                          const torch::lazy::BackendDevice& device);
-  torch::lazy::Value GetIrValueForScalar(const at::Scalar& value,
-                                         const torch::lazy::Shape& shape,
-                                         const torch::lazy::BackendDevice& device);
   torch::lazy::Value GetIrValueForScalar(
       const at::Scalar& value, const torch::lazy::Shape& shape,
-      c10::optional<at::ScalarType> logical_element_type, const torch::lazy::BackendDevice& device);
+      const torch::lazy::BackendDevice& device);
 
  private:
   struct SyncTensorsConfig {

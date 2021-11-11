@@ -59,8 +59,7 @@ std::pair<LazyTensor, torch::lazy::Value> all_to_all(
 LazyTensor get_dimensions_size(const LazyTensor& input,
                                std::vector<int64_t> dimensions) {
   return input.CreateFrom(torch::lazy::MakeNode<ir::ops::GetDimensionsSize>(
-                              input.GetIrValue(), std::move(dimensions)),
-                          at::ScalarType::Int);
+      input.GetIrValue(), std::move(dimensions)));
 }
 
 std::pair<LazyTensor, torch::lazy::Value> collective_permute(
