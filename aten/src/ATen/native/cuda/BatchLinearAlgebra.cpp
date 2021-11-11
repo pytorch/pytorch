@@ -1473,8 +1473,7 @@ Tensor _inverse_helper_cuda(const Tensor& self) {
 #ifdef USE_CUSOLVER
   if ((self.dim() == 2) ||
       (/* self.dim() > 2 && */ batchCount(self) <= 2) ||
-      !use_magma_ ||
-      at::globalContext().linalgCudaPreferCusolver()) {
+      !use_magma_) {
     return _inverse_helper_cuda_lib(self);    // cusolver or cublas
   } else {
     return _inverse_helper_cuda_legacy(self); // magma-cuda
@@ -1508,8 +1507,7 @@ Tensor& _linalg_inv_out_helper_cuda(Tensor &result, Tensor& infos_lu, Tensor& in
 #ifdef USE_CUSOLVER
   if ((result.dim() == 2) ||
       (/* result.dim() > 2 && */ batchCount(result) <= 2) ||
-      !use_magma_ ||
-      at::globalContext().linalgCudaPreferCusolver()) {
+      !use_magma_) {
     return _linalg_inv_out_helper_cuda_lib(result, infos_lu, infos_getri);  // cusolver or cublas
   } else {
     return _linalg_inv_out_helper_cuda_legacy(result, infos_lu, infos_getri);  // magma-cuda
@@ -1607,8 +1605,7 @@ Tensor _cholesky_solve_helper_cuda_magma(const Tensor& self, const Tensor& A, bo
 Tensor _cholesky_solve_helper_cuda(const Tensor& self, const Tensor& A, bool upper) {
 #ifdef USE_CUSOLVER
   if (batchCount(self) == 1 ||
-      !use_magma_ ||
-      at::globalContext().linalgCudaPreferCusolver()) {
+      !use_magma_) {
     return _cholesky_solve_helper_cuda_cusolver(self, A, upper);
   } else {
     return _cholesky_solve_helper_cuda_magma(self, A, upper);
@@ -1716,8 +1713,7 @@ static void cholesky_kernel(const Tensor& input, const Tensor& info, bool upper)
 #ifdef USE_CUSOLVER
   if (batchCount(input) == 1 ||
       !use_magma_ ||
-      use_cusolver_potrf_batched_ ||
-      at::globalContext().linalgCudaPreferCusolver()) {
+      use_cusolver_potrf_batched_) {
     cholesky_helper_cusolver(input, upper, info);
   } else {
     cholesky_helper_magma(input, upper, info);
@@ -1789,8 +1785,7 @@ Tensor& cholesky_inverse_kernel_impl(Tensor &result, Tensor& infos, bool upper) 
   // the content of result is overwritten by 'apply_cholesky_inverse'
 #ifdef USE_CUSOLVER
   if (batchCount(result) == 1 ||
-      !use_magma_ ||
-      at::globalContext().linalgCudaPreferCusolver()) {
+      !use_magma_) {
     return cholesky_inverse_kernel_impl_cusolver(result, infos, upper);
   } else {
     return cholesky_inverse_kernel_impl_magma(result, infos, upper);
@@ -1962,8 +1957,7 @@ static void apply_lu(const Tensor& input, const Tensor& pivots, const Tensor& in
   // exclude complex128 since nan_to_num_ does not work with it.
   if ((batch_size == 1 ||
         (batch_size <= 8 && m <= 16) ||
-        !use_magma_ ||
-        at::globalContext().linalgCudaPreferCusolver())
+        !use_magma_)
       && !input.is_complex()) {
     lu_looped_cusolver(input, pivots, infos, compute_pivots);
   }

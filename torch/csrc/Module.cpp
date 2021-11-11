@@ -526,22 +526,6 @@ PyObject *THPModule_allowTF32CuBLAS(PyObject *_unused, PyObject *noargs)
   Py_RETURN_FALSE;
 }
 
-PyObject *THPModule_setLinalgCudaPreferCusolver(PyObject *_unused, PyObject *arg)
-{
-  THPUtils_assert(PyBool_Check(arg), "set_linalg_cuda_prefer_cusolver expects a bool, "
-          "but got %s", THPUtils_typename(arg));
-  at::globalContext().setLinalgCudaPreferCusolver(arg == Py_True);
-  Py_RETURN_NONE;
-}
-
-PyObject *THPModule_linalgCudaPreferCusolver(PyObject *_unused, PyObject *noargs)
-{
-  if (at::globalContext().linalgCudaPreferCusolver()) {
-    Py_RETURN_TRUE;
-  }
-  Py_RETURN_FALSE;
-}
-
 PyObject *THPModule_setLinalgPreferredBackend(PyObject *_unused, PyObject *arg)
 {
   THPUtils_assert(THPLinalgBackend_Check(arg), "set_linalg_preferred_backend expects a linalg_backend, "
@@ -729,8 +713,6 @@ static PyMethodDef TorchMethods[] = {
   {"_set_warnAlways", THPModule_setWarnAlways, METH_O,  nullptr},
   {"_get_cublas_allow_tf32", THPModule_allowTF32CuBLAS, METH_NOARGS,     nullptr},
   {"_set_cublas_allow_tf32", THPModule_setAllowTF32CuBLAS, METH_O,  nullptr},
-  {"_get_linalg_cuda_prefer_cusolver", THPModule_linalgCudaPreferCusolver, METH_NOARGS,     nullptr},
-  {"_set_linalg_cuda_prefer_cusolver", THPModule_setLinalgCudaPreferCusolver, METH_O,  nullptr},
   {"_get_linalg_preferred_backend", THPModule_linalgPreferredBackend, METH_NOARGS,     nullptr},
   {"_set_linalg_preferred_backend", THPModule_setLinalgPreferredBackend, METH_O,  nullptr},
   {"_get_cublas_allow_fp16_reduced_precision_reduction", THPModule_allowFP16ReductionCuBLAS, METH_NOARGS, nullptr},

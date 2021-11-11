@@ -147,21 +147,6 @@ void Context::setAllowTF32CuBLAS(bool b) {
   allow_tf32_cublas = b;
 }
 
-bool Context::linalgCudaPreferCusolver() const {
-  return linalg_cuda_prefer_cusolver;
-}
-
-void Context::setLinalgCudaPreferCusolver(bool b) {
-  linalg_cuda_prefer_cusolver = b;
-  if (b) {
-    TORCH_WARN_ONCE(
-      "torch.backends.linalg.cuda_prefer_cusolver is an experimental feature. "
-      "If you see any error or regression when this flag is enabled, "
-      "you're encourged to file an issue on GitHub."
-    );
-  }
-}
-
 at::LinalgBackend Context::linalgPreferredBackend() const {
   return linalg_preferred_backend;
 }

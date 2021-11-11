@@ -123,8 +123,6 @@ class TORCH_API Context {
   bool deterministicCuDNN() const;
   void setDeterministicCuDNN(bool);
 
-  bool linalgCudaPreferCusolver() const;
-  void setLinalgCudaPreferCusolver(bool);
   at::LinalgBackend linalgPreferredBackend() const;
   void setLinalgPreferredBackend(at::LinalgBackend);
 
@@ -249,7 +247,6 @@ class TORCH_API Context {
   bool allow_tf32_cublas = true;
   bool allow_fp16_reduction_cublas = true;
   bool enabled_mkldnn = true;
-  bool linalg_cuda_prefer_cusolver = false; // if this is set to false, use existing heuristics
   at::LinalgBackend linalg_preferred_backend = at::LinalgBackend::Default;
   #ifdef C10_MOBILE
   bool release_original_weights = true;
