@@ -1122,7 +1122,7 @@ struct CheckToWillAlias {
 
 template <>
 struct CheckToWillAlias<true, false> {
-  // Special case!. First, there is no memory format to check. Second,
+  // Special case! First, there is no memory format to check. Second,
   // we know that the layout and device will match self, so we only
   // need to check the dtype.
   static bool call(ProcessedNode* p_node, const at::Tensor& self) {
