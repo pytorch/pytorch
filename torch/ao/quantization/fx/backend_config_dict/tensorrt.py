@@ -31,7 +31,9 @@ def get_tensorrt_backend_config_dict():
         "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
         "dtype_configs": [
             weighted_op_qint8_dtype_config,
-        ]
+        ],
+        "root_module": torch.nn.Linear,
+        "reference_quantized_module_for_root": torch.nn.quantized._reference.Linear,
     }
     # TODO: maybe make "pattern" to be a list of patterns
     # TODO: current patterns are the ones after fusion, we will want to expose fusion
@@ -56,35 +58,45 @@ def get_tensorrt_backend_config_dict():
         "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
         "dtype_configs": [
             weighted_op_qint8_dtype_config,
-        ]
+        ],
+        "root_module": torch.nn.Linear,
+        "reference_quantized_module_for_root": torch.nn.quantized._reference.Linear,
     }
     conv_module_config = {
         "pattern": torch.nn.Conv2d,
         "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
         "dtype_configs": [
             weighted_op_qint8_dtype_config,
-        ]
+        ],
+        "root_module": torch.nn.Conv2d,
+        "reference_quantized_module_for_root": torch.nn.quantized._reference.Conv2d,
     }
     conv_relu_1d_fused_config = {
         "pattern": torch.nn.intrinsic.ConvReLU1d,
         "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
         "dtype_configs": [
             weighted_op_qint8_dtype_config,
-        ]
+        ],
+        "root_module": torch.nn.Conv1d,
+        "reference_quantized_module_for_root": torch.nn.quantized._reference.Conv1d,
     }
     conv_relu_2d_fused_config = {
         "pattern": torch.nn.intrinsic.ConvReLU2d,
         "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
         "dtype_configs": [
             weighted_op_qint8_dtype_config,
-        ]
+        ],
+        "root_module": torch.nn.Conv2d,
+        "reference_quantized_module_for_root": torch.nn.quantized._reference.Conv2d,
     }
     conv_relu_3d_fused_config = {
         "pattern": torch.nn.intrinsic.ConvReLU3d,
         "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
         "dtype_configs": [
             weighted_op_qint8_dtype_config,
-        ]
+        ],
+        "root_module": torch.nn.Conv3d,
+        "reference_quantized_module_for_root": torch.nn.quantized._reference.Conv3d,
     }
     addmm_config = {
         "pattern": torch.addmm,
