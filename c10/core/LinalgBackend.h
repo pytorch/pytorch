@@ -9,8 +9,9 @@ namespace c10 {
 
 enum class LinalgBackend : int8_t { Default, Cusolver, Magma };
 
-// WARNING: These exact strings, e.g. "torch.linalg_default", are also used in python bindings.
-// Modifying output strings is **very** likely to cause BC-breaking in python side.
+// WARNING: These exact strings, e.g. "torch.linalg_default", are also used in
+// python bindings. Modifying output strings is **very** likely to cause
+// BC-breaking in python side.
 inline std::string LinalgBackendToString(at::LinalgBackend backend) {
   switch (backend) {
     case LinalgBackend::Default:
