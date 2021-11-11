@@ -309,6 +309,12 @@ class TestMkldnn(TestCase):
                 conv2d(x),
                 conv2d_loaded(x.to_mkldnn()).to_dense())
 
+    def test_conv1d_functional(self):
+        input = torch.randn(2, 3, 10).to_mkldnn()
+        weight = torch.randn(3, 3, 3).to_mkldnn()
+        bias = torch.randn(3).to_mkldnn()
+        output = torch.nn.functional.conv1d(input, weight, bias)
+
     def test_relu(self):
         x = torch.randn((4, 5), dtype=torch.float32) * 10
         x1 = x.clone().requires_grad_()
