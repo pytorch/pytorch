@@ -74,7 +74,6 @@ class _ConvNd(nn.Module):
         bias_float = (
             torch.zeros(out_channels, dtype=torch.float,
                         **{k: v for k, v in factory_kwargs.items() if k != 'dtype'}) if bias else None)
-
         self.set_weight_bias(qweight, bias_float)
         self.scale = 1.0
         self.zero_point = 0
@@ -646,11 +645,11 @@ class ConvTranspose1d(_ConvTransposeNd):
                  padding=0, output_padding=0, groups=1, bias=True,
                  dilation=1, padding_mode='zeros', device=None, dtype=None):
         factory_kwargs = {'device': device, 'dtype': dtype}
-        kernel_size = _pair(kernel_size)
-        stride = _pair(stride)
-        padding = _pair(padding)
-        dilation = _pair(dilation)
-        output_padding = _pair(output_padding)
+        kernel_size = _single(kernel_size)  # @reviewer should this be single or double? neither cause an error
+        stride = _single(stride)
+        padding = _single(padding)
+        dilation = _single(dilation)
+        output_padding = _single(output_padding)
 
         super(ConvTranspose1d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
@@ -815,11 +814,11 @@ class ConvTranspose3d(_ConvTransposeNd):
                  padding=0, output_padding=0, groups=1, bias=True,
                  dilation=1, padding_mode='zeros', device=None, dtype=None):
         factory_kwargs = {'device': device, 'dtype': dtype}
-        kernel_size = _pair(kernel_size)
-        stride = _pair(stride)
-        padding = _pair(padding)
-        dilation = _pair(dilation)
-        output_padding = _pair(output_padding)
+        kernel_size = _triple(kernel_size)  # this causes an error unless fixed
+        stride = _triple(stride)
+        padding = _triple(padding)
+        dilation = _triple(dilation)
+        output_padding = _triple(output_padding)
 
         super(ConvTranspose3d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,

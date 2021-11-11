@@ -113,6 +113,7 @@ class Conv1d(nnq.Conv1d):
     def _get_name(self):
         return 'DynamicQuantizedConv1d'
 
+    # @reviewer unsure whether reduce range should be true or false, here I mimic qlinear_dynamic using true
     def forward(self, input, reduce_range=True):
         # Temporarily using len(shape) instead of ndim due to JIT issue
         # https://github.com/pytorch/pytorch/issues/23890
@@ -185,6 +186,7 @@ class Conv2d(nnq.Conv2d):
     def _get_name(self):
         return 'DynamicQuantizedConv2d'
 
+    # @reviewer unsure whether reduce range should be true or false, here I mimic qlinear_dynamic using true
     def forward(self, input, reduce_range=True):
         # Temporarily using len(shape) instead of ndim due to JIT issue
         # https://github.com/pytorch/pytorch/issues/23890
@@ -258,6 +260,7 @@ class Conv3d(nnq.Conv3d):
     def _get_name(self):
         return 'QuantizedConv3d'
 
+    # @reviewer unsure whether reduce range should be true or false, here I mimic qlinear_dynamic using true
     def forward(self, input, reduce_range=True):
         # Temporarily using len(shape) instead of ndim due to JIT issue
         # https://github.com/pytorch/pytorch/issues/23890
@@ -317,11 +320,6 @@ class ConvTranspose1d(nnq.ConvTranspose1d):
                  padding=0, output_padding=0, groups=1, bias=True,
                  dilation=1, padding_mode='zeros', device=None, dtype=None):
         factory_kwargs = {'device': device, 'dtype': dtype}
-        kernel_size = _pair(kernel_size)
-        stride = _pair(stride)
-        padding = _pair(padding)
-        dilation = _pair(dilation)
-        output_padding = _pair(output_padding)
 
         super(ConvTranspose1d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, output_padding, 
@@ -330,6 +328,7 @@ class ConvTranspose1d(nnq.ConvTranspose1d):
     def _get_name(self):
         return 'DynamicQuantizedConvTranpose1d'
 
+    # @reviewer unsure whether reduce range should be true or false, here I mimic qlinear_dynamic using true
     def forward(self, input, reduce_range=True):
         # Temporarily using len(shape) instead of ndim due to JIT issue
         # https://github.com/pytorch/pytorch/issues/23890
@@ -384,11 +383,6 @@ class ConvTranspose2d(nnq.ConvTranspose2d):
                  padding=0, output_padding=0, groups=1, bias=True,
                  dilation=1, padding_mode='zeros', device=None, dtype=None):
         factory_kwargs = {'device': device, 'dtype': dtype}
-        kernel_size = _pair(kernel_size)
-        stride = _pair(stride)
-        padding = _pair(padding)
-        dilation = _pair(dilation)
-        output_padding = _pair(output_padding)
 
         super(ConvTranspose2d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, output_padding, 
@@ -397,6 +391,7 @@ class ConvTranspose2d(nnq.ConvTranspose2d):
     def _get_name(self):
         return 'QuantizedConvTranpose2d'
 
+    # @reviewer unsure whether reduce range should be true or false, here I mimic qlinear_dynamic using true
     def forward(self, input, reduce_range=True):
         # Temporarily using len(shape) instead of ndim due to JIT issue
         # https://github.com/pytorch/pytorch/issues/23890
@@ -452,11 +447,6 @@ class ConvTranspose3d(nnq.ConvTranspose3d):
                  padding=0, output_padding=0, groups=1, bias=True,
                  dilation=1, padding_mode='zeros', device=None, dtype=None):
         factory_kwargs = {'device': device, 'dtype': dtype}
-        kernel_size = _pair(kernel_size)
-        stride = _pair(stride)
-        padding = _pair(padding)
-        dilation = _pair(dilation)
-        output_padding = _pair(output_padding)
 
         super(ConvTranspose3d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, output_padding, 
@@ -465,6 +455,7 @@ class ConvTranspose3d(nnq.ConvTranspose3d):
     def _get_name(self):
         return 'DynamicQuantizedConvTranpose3d'
 
+    # # @reviewer unsure whether reduce range should be true or false, here I mimic qlinear_dynamic using trueeviewer unsure whether reduce range should be true or false, here I mimic qlinear_dynamic using true
     def forward(self, input, reduce_range=True):
         # Temporarily using len(shape) instead of ndim due to JIT issue
         # https://github.com/pytorch/pytorch/issues/23890

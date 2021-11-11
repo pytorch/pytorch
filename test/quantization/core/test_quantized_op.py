@@ -3662,24 +3662,88 @@ class TestQuantizedEmbeddingOps(TestCase):
 
 
 class TestDynamicQuantizedConv(TestCase):
-    def test_qconv(self):
-        X_fp32 = torch.randn(3, 3, 4, 4)
-        reduce_range = True
-        s, z = _calculate_dynamic_qparams(X_fp32, torch.quint8, reduce_range)
-        X_q = torch.quantize_per_tensor(X_fp32, s, z, torch.quint8)
+    def _test_qconv_helper(self, q_mod, dq_mod, dim, q_engine, dtype):
+        X_fp32 = torch.randn(*([3]*dim))
+        torch.backends.quantized.engine = q_engine
+        if q_engine == 'qnnpack':
+            reduce_range = False
+        else:
+            reduce_range=True
+        s, z = _calculate_dynamic_qparams(X_fp32, dtype, reduce_range)
+        X_q = torch.quantize_per_tensor(X_fp32, s, z, dtype)
+        X_dq = torch.dequantize(X_q)
+        quantized_module = q_mod(3, 10, 2)
+        dynamic_module = dq_mod(3, 10, 2)
 
-        quantized_conv2d = torch.nn.quantized.Conv2d(3, 10, 2)
-        quantized_conv2d.scale, quantized_conv2d.zero_point = s, z
+        quantized_module.scale, quantized_module.zero_point = s, z
+        dynamic_module.set_weight_bias(*quantized_module._weight_bias())
 
-        dynamic_conv2d = torch.nn.quantized.dynamic.Conv2d(3, 10, 2)
-        dynamic_conv2d.set_weight_bias(*quantized_conv2d._weight_bias())
-
-        Y_q_ref = quantized_conv2d(X_q)
+        Y_q_ref = quantized_module(X_q)
         Y_ref = torch.dequantize(Y_q_ref)
 
-        Y = dynamic_conv2d(X_fp32, reduce_range)
+        Y = dynamic_module(X_dq, reduce_range)
 
         self.assertEqual(Y, Y_ref)
+
+    def test_dynamic_conv1d(self):
+        q_mod = torch.nn.quantized.Conv1d
+        dq_mod = torch.nn.quantized.dynamic.Conv1d
+        dim = 3
+        dtype = torch.quint8
+
+        for q_engine in ["fbgemm", "qnnpack"]:
+            for i in range(10):
+                self._test_qconv_helper(q_mod, dq_mod, dim, q_engine, dtype)
+
+
+    def test_dynamic_conv2d(self):
+        q_mod = torch.nn.quantized.Conv2d
+        dq_mod = torch.nn.quantized.dynamic.Conv2d
+        dim = 4
+        dtype = torch.quint8
+
+        for q_engine in ["fbgemm", "qnnpack"]:
+            self._test_qconv_helper(q_mod, dq_mod, dim, q_engine, dtype)
+
+    def test_dynamic_conv3d(self):
+        q_mod = torch.nn.quantized.Conv3d
+        dq_mod = torch.nn.quantized.dynamic.Conv3d
+        dim = 5
+        dtype = torch.quint8
+
+        for q_engine in ["fbgemm"]: #  qnnpack doesn't support unpacking conv3d
+            for i in range(10):
+                self._test_qconv_helper(q_mod, dq_mod, dim, q_engine, dtype)
+
+    def test_dynamic_convtranspose1d(self):
+        q_mod = torch.nn.quantized.ConvTranspose1d
+        dq_mod = torch.nn.quantized.dynamic.ConvTranspose1d
+        dim = 3
+        dtype = torch.quint8
+
+        for q_engine in ["fbgemm", "qnnpack"]:
+            for i in range(10):
+                self._test_qconv_helper(q_mod, dq_mod, dim, q_engine, dtype)
+
+    def test_dynamic_convtranspose2d(self):
+        q_mod = torch.nn.quantized.ConvTranspose2d
+        dq_mod = torch.nn.quantized.dynamic.ConvTranspose2d
+        dim = 4
+        dtype = torch.quint8
+
+        for q_engine in ["fbgemm", "qnnpack"]:
+            for i in range(10):
+                self._test_qconv_helper(q_mod, dq_mod, dim, q_engine, dtype)
+
+    def test_dynamic_convtranspose3d(self):
+        q_mod = torch.nn.quantized.ConvTranspose3d
+        dq_mod = torch.nn.quantized.dynamic.ConvTranspose3d
+        dim = 5
+        dtype = torch.quint8
+
+        for q_engine in ["fbgemm"]: #  qnnpack doesn't support unpacking conv3d
+            for i in range(10):
+                self._test_qconv_helper(q_mod, dq_mod, dim, q_engine, dtype)
 
 class TestQuantizedConv(TestCase):
     def _test_qconv_unpack_impl(self, qconv_prepack_fn, qconv_unpack_fn, inputs,

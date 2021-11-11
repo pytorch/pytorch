@@ -20,15 +20,15 @@ at::Tensor PackedConvWeight<kSpatialDim>::apply_dynamic(
     const at::Tensor& input,
     bool reduce_range) {
   /// is this needed?
-  auto input_contig = input.contiguous();
-  const auto* input_ptr = input_contig.data_ptr<float>();
+//   auto input_contig = input.contiguous();
+//   const auto* input_ptr = input.data_ptr<float>();
 
   TORCH_CHECK(
       fbgemm::fbgemmSupportedCPU(), "Your CPU does not support FBGEMM.");
 
   float x_min, x_max;
   fbgemm::FindMinMax(
-      /*m=*/input_ptr,
+      /*m=*/input.data_ptr<float>(),
       /*min=*/&x_min,
       /*max=*/&x_max,
       /*len=*/input.numel());
@@ -54,9 +54,9 @@ at::Tensor PackedConvWeight<kSpatialDim>::apply_dynamic(
   at::Tensor q_input = at::quantize_per_tensor(
       input, q_params.scale, q_params.zero_point, c10::kQUInt8);
 
-  at::Tensor out = apply_impl<false>(input, q_params.scale, q_params.zero_point);
+  at::Tensor out = apply_impl<false>(q_input, q_params.scale, q_params.zero_point);
   
-  return at::dequantize(out);
+  return at::dequantize(out);  //TODO: optimized kernel that outputs fp32 so this step isn't necessary
 }
 
 template at::Tensor PackedConvWeight<2>::apply_dynamic(
@@ -107,7 +107,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_dynamic(
 
     at::Tensor out = apply_impl<false>(q_input, q_params.scale, q_params.zero_point);
 
-    return at::dequantize(out);
+    return at::dequantize(out);  //TODO: optimized kernel that outputs fp32 so this step isn't necessary
 }
 
 template at::Tensor PackedConvWeightsQnnp<2>::apply_dynamic(
