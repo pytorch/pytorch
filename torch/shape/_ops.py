@@ -1,4 +1,9 @@
 R"("
+### DO NOT REMOVE THIS STRING!!!
+# this file is included in torch/csrc/jit/runtime/symbolic_shape_registry.cpp
+# at compile time and turned into a "raw" string
+# there's a matching ")" at the bottom
+
 from typing import List, Any, Optional
 
 from numpy import number
