@@ -827,6 +827,7 @@ ConvBackend select_conv_backend(
   check_shape_forward(input, weight.sizes(), bias, params);
 
   // Expand 1d -> 2d.
+  // This is only done for backends that don't natively support 1d spatial input.
   if (k == 3 && !input.is_mkldnn()) {
     // avoid accidentally going through NHWC for permuted 3d input.
     input = input.contiguous();
@@ -1017,6 +1018,7 @@ at::Tensor _convolution(
   check_shape_forward(input, weight_sizes, bias, params);
 
   // Expand 1d -> 2d.
+  // This is only done for backends that don't natively support 1d spatial input.
   if (k == 3 && !input.is_mkldnn()) {
     // avoid accidentally going through NHWC for permuted 3d input.
     input = input.contiguous();
