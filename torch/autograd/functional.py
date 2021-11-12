@@ -424,9 +424,9 @@ def _construct_standard_basis_for(tensors: Tuple[torch.Tensor, ...], tensor_nume
 def _jacfwd(func, inputs, strict=False, vectorize=False):
     if strict:
         raise RuntimeError('torch.autograd.functional.jacobian: `strict=True` '
-                           'and `use_forward_ad=True` are not supported together (yet). '
+                           'and `strategy="forward-mode"` are not supported together (yet). '
                            'Please either set `strict=False` or '
-                           '`use_forward_ad=False`.')
+                           '`strategy="reverse-mode"`.')
     is_inputs_tuple, inputs = _as_tuple(inputs, "inputs", "jacobian")
     output_info = []
 
@@ -478,7 +478,7 @@ def _jacfwd(func, inputs, strict=False, vectorize=False):
                                   "only implemented for `vectorize=True`.")
 
 
-def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False, use_forward_ad=False):
+def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False, strategy="reverse-mode"):
     r"""Function that computes the Jacobian of a given function.
 
     Args:
@@ -503,9 +503,10 @@ def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False, us
             because this feature is still experimental, there may be performance
             cliffs. See :func:`torch.autograd.grad`'s ``batched_grad`` parameter for
             more information.
-        use_forward_ad (bool, optional): If ``True``, the Jacobian will be computed
-            with forward-mode AD. Currently this flag should be invoked with
-            ``vectorized=True`` only.
+        strategy (str, optional): Set to ``"forward-mode"`` or ``"reverse-mode"`` to
+            determine whether the Jacobian will be computed with forward or reverse
+            mode AD. Currently, ``"forward-mode"`` requires ``vectorized=True``.
+            Defaults to ``"reverse-mode"``.
 
     Returns:
         Jacobian (Tensor or nested tuple of Tensors): if there is a single
@@ -517,7 +518,7 @@ def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False, us
         ``i``\th output and ``j``\th input and will have as size the
         concatenation of the sizes of the corresponding output and the
         corresponding input and will have same dtype and device as the
-        corresponding input. If ``use_forward_ad=True``, the dtype will be
+        corresponding input. If strategy is ``forward-mode``, the dtype will be
         that of the output; otherwise, the input.
 
     Example:
@@ -546,12 +547,13 @@ def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False, us
          tensor([[3., 0.],
                  [0., 3.]]))
     """
-    if use_forward_ad:
+    assert strategy in ("forward-mode", "reverse-mode")
+    if strategy == "forward-mode":
         if create_graph:
             raise NotImplementedError('torch.autograd.functional.jacobian: `create_graph=True` '
-                                      'and `use_forward_ad=True` are not supported together (yet). '
+                                      'and `strategy="forward-mode"` are not supported together (yet). '
                                       'Please either set `create_graph=False` or '
-                                      '`use_forward_ad=False`.')
+                                      '`strategy="reverse-mode"`.')
         return _jacfwd(func, inputs, strict, vectorize)
 
     with torch.enable_grad():
@@ -679,7 +681,7 @@ def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False, us
 
         return _tuple_postprocess(jacobian, (is_outputs_tuple, is_inputs_tuple))
 
-def hessian(func, inputs, create_graph=False, strict=False, vectorize=False, use_forward_ad=False):
+def hessian(func, inputs, create_graph=False, strict=False, vectorize=False, outer_jacobian_strategy="reverse-mode"):
     r"""Function that computes the Hessian of a given scalar function.
 
     Args:
@@ -705,10 +707,13 @@ def hessian(func, inputs, create_graph=False, strict=False, vectorize=False, use
             use `torch._C._debug_only_display_vmap_fallback_warnings(True)`
             to show any performance warnings and file us issues if
             warnings exist for your use case. Defaults to ``False``.
-        use_forward_ad (bool, optional): If ``True``, the Hessian will be computed
-            by first doing reverse-mode AD and then forward-mode AD. Otherwise,
-            the "outer" Jacobian will also be computed in reverse-mode AD.
-            Currently this flag should be invoked with the``vectorized=True`` only.
+        outer_jacobian_strategy (str, optional): The Hessian is computed by
+            computing the Jacobian of a Jacobian. The inner Jacobian is always
+            computed in reverse-mode AD. Setting strategy to ``"forward-mode"``
+            or ``"reverse-mode"`` determines whether the outer Jacobian will be
+            computed with forward or reverse mode AD. Currently, computing the outer
+            Jacobian in ``"forward-mode"`` requires ``vectorized=True``. Defaults
+            to ``"reverse-mode"``.
 
     Returns:
         Hessian (Tensor or a tuple of tuple of Tensors): if there is a single input,
@@ -760,6 +765,7 @@ def hessian(func, inputs, create_graph=False, strict=False, vectorize=False, use
     """
 
     is_inputs_tuple, inputs = _as_tuple(inputs, "inputs", "hessian")
+    assert outer_jacobian_strategy in ("forward-mode", "reverse-mode")
 
     def ensure_single_output_function(*inp):
         out = func(*inp)
@@ -775,7 +781,7 @@ def hessian(func, inputs, create_graph=False, strict=False, vectorize=False, use
         return out.squeeze()
 
     def jac_func(*inp):
-        if use_forward_ad:
+        if outer_jacobian_strategy == "forward-mode":
             # _grad_preprocess requires create_graph=True and input to require_grad
             # or else the input will be detached
             inp = tuple(t.requires_grad_(True) for t in inp)
@@ -783,7 +789,8 @@ def hessian(func, inputs, create_graph=False, strict=False, vectorize=False, use
         _check_requires_grad(jac, "jacobian", strict=strict)
         return jac
 
-    res = jacobian(jac_func, inputs, create_graph=create_graph, strict=strict, vectorize=vectorize, use_forward_ad=use_forward_ad)
+    res = jacobian(jac_func, inputs, create_graph=create_graph, strict=strict, vectorize=vectorize,
+                   strategy=outer_jacobian_strategy)
     return _tuple_postprocess(res, (is_inputs_tuple, is_inputs_tuple))
 
 

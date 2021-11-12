@@ -543,11 +543,7 @@ static void checkBasicAsStridedValidForSlice(
 }
 
 Tensor _reshape_alias_batching_rule(const Tensor& self, IntArrayRef sizes, IntArrayRef strides) {
-  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
-  auto physical_shape = self_physical.getPhysicalShape(sizes);
-  auto physical_strides = self_physical.getPhysicalStrides(strides);
-  auto result = self_physical.tensor()._reshape_alias(physical_shape, physical_strides);
-  return self_physical.getPhysicalToLogicalMap().apply(result);
+  return reshape_batching_rule(self, sizes);
 }
 
 Tensor _new_zeros_with_same_feature_meta_batching_rule(
