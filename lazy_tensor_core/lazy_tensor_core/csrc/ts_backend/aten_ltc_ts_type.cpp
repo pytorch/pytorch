@@ -51,7 +51,7 @@ std::pair<LazyTensor, LazyTensor> GetBinaryOperands(const at::Tensor& self,
     other_tensor = bridge::GetLtcTensor(other);
     self_tensor = bridge::GetOrCreateLtcTensor(self, other_tensor.GetDevice());
   } else {
-    self_tensor = *self_xtensor;
+    self_tensor = self_xtensor;
     other_tensor = bridge::GetOrCreateLtcTensor(other, self_tensor.GetDevice());
   }
   return std::pair<LazyTensor, LazyTensor>(self_tensor, other_tensor);
@@ -83,7 +83,13 @@ at::Tensor subtensor(const at::Tensor& tensor, int dim, int groups, int g) {
   return tensor.narrow(dim, n * g, n).contiguous();
 }
 
-
+at::Tensor CreateLtcTensor(const at::Tensor& tensor,
+                           const c10::optional<torch::lazy::BackendDevice>& device) {
+  if (tensor.defined() && device) {
+    return bridge::AtenFromLtcTensor(LazyTensor::Create(tensor, *device));
+  }
+  return tensor;
+}
 
 }  // namespace
 
@@ -260,11 +266,11 @@ LazyNativeFunctions::convolution_backward_overrideable(
                                  at::MemoryFormat::Preserve),
                   output_mask);
     return std::tuple<at::Tensor, at::Tensor, at::Tensor>(
-        bridge::CreateLtcTensor(std::get<0>(x_result),
+        CreateLtcTensor(std::get<0>(x_result),
                                 bridge::GetLtcDevice(grad_output)),
-        bridge::CreateLtcTensor(std::get<1>(x_result),
+        CreateLtcTensor(std::get<1>(x_result),
                                 bridge::GetLtcDevice(grad_output)),
-        bridge::CreateLtcTensor(std::get<2>(x_result),
+        CreateLtcTensor(std::get<2>(x_result),
                                 bridge::GetLtcDevice(grad_output)));
   }
   auto&& x_result =
@@ -278,11 +284,11 @@ LazyNativeFunctions::convolution_backward_overrideable(
                 weight.to(device_type), kernel_size, stride, padding, dilation,
                 output_mask);
   return std::tuple<at::Tensor, at::Tensor, at::Tensor>(
-      bridge::CreateLtcTensor(std::get<0>(x_result),
+      CreateLtcTensor(std::get<0>(x_result),
                               bridge::GetLtcDevice(grad_output)),
-      bridge::CreateLtcTensor(std::get<1>(x_result),
+      CreateLtcTensor(std::get<1>(x_result),
                               bridge::GetLtcDevice(grad_output)),
-      bridge::CreateLtcTensor(std::get<2>(x_result),
+      CreateLtcTensor(std::get<2>(x_result),
                               bridge::GetLtcDevice(grad_output)));
 }
 
@@ -318,26 +324,26 @@ at::Tensor LazyNativeFunctions::_copy_from(const at::Tensor& self,
     static bool sync_update =
         lazy_tensors::sys_util::GetEnvBool("XLA_TENSOR_UPDATE_SYNC", true);
     CHECK(dst_tensor);
-    dst_tensor->UpdateFromTensor(self, /*sync=*/sync_update);
+    dst_tensor.UpdateFromTensor(self, /*sync=*/sync_update);
   } else if (!dst_tensor) {
-    at::Tensor tensor = self_tensor->ToTensor(/*detached=*/true);
+    at::Tensor tensor = self_tensor.ToTensor(/*detached=*/true);
     at::Tensor typed_tensor =
         CopyTensor(tensor, dst.scalar_type(), /*copy=*/false);
     dst.resize_as_(typed_tensor).copy_(typed_tensor);
   } else {
-    if (!dst_tensor->CurrentIrValue()) {
-      auto dst_tensor_data = dst_tensor->CurrentTensorData();
+    if (!dst_tensor.CurrentIrValue()) {
+      auto dst_tensor_data = dst_tensor.CurrentTensorData();
       CHECK(dst_tensor_data);
-      auto src_tensor_data = self_tensor->CurrentTensorData();
+      auto src_tensor_data = self_tensor.CurrentTensorData();
       if (src_tensor_data) {
         dst_tensor_data->copy_(*src_tensor_data);
       } else {
-        dst_tensor_data->copy_(self_tensor->ToTensor(/*detached=*/true));
+        dst_tensor_data->copy_(self_tensor.ToTensor(/*detached=*/true));
       }
     } else {
-      lazy_tensor_aten_ops::copy_(*dst_tensor, *self_tensor);
+      lazy_tensor_aten_ops::copy_(dst_tensor, self_tensor);
       auto* impl = dynamic_cast<LTCTensorImpl*>(dst.unsafeGetTensorImpl());
-      impl->set_tensor(*dst_tensor);
+      impl->set_tensor(dst_tensor);
     }
   }
   return dst;
@@ -350,9 +356,9 @@ at::Tensor LazyNativeFunctions::_copy_from_and_resize(const at::Tensor& self,
   auto self_tensor = bridge::TryGetLtcTensor(self);
   if (!self_tensor) {
     CHECK(dst_tensor);
-    dst_tensor->UpdateFromTensorOut(self);
+    dst_tensor.UpdateFromTensorOut(self);
   } else if (!dst_tensor) {
-    at::Tensor tensor = self_tensor->ToTensor(/*detached=*/true);
+    at::Tensor tensor = self_tensor.ToTensor(/*detached=*/true);
     at::Tensor typed_tensor =
         CopyTensor(tensor, dst.scalar_type(), /*copy=*/false);
     dst.resize_as_(typed_tensor).copy_(typed_tensor);
@@ -360,7 +366,7 @@ at::Tensor LazyNativeFunctions::_copy_from_and_resize(const at::Tensor& self,
     // at this point we know dst is a lazy tensor
     LTCTensorImpl* dest_impl =
         dynamic_cast<LTCTensorImpl*>(dst.unsafeGetTensorImpl());
-    dest_impl->tensor().UpdateFromTensorOut(*self_tensor);
+    dest_impl->tensor().UpdateFromTensorOut(self_tensor);
     dest_impl->force_refresh_sizes();
   }
   return dst;
@@ -379,7 +385,7 @@ at::Tensor LazyNativeFunctions::empty(
                                   .pinned_memory(pin_memory)
                                   .dtype(dtype);
   auto x_result = at::empty(size, options, memory_format);
-  return bridge::CreateLtcTensor(x_result, bridge::GetLtcDevice(device));
+  return CreateLtcTensor(x_result, bridge::GetLtcDevice(device));
 }
 
 at::Tensor LazyNativeFunctions::empty_strided(

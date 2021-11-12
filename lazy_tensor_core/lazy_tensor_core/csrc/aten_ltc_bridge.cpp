@@ -50,24 +50,29 @@ LTCTensorImpl* GetLtcTensorImpl(const at::Tensor& tensor) {
   return dynamic_cast<LTCTensorImpl*>(tensor.unsafeGetTensorImpl());
 }
 
+LazyTensor GetOrCreateLtcTensor(const at::Tensor& tensor,
+                                const torch::lazy::BackendDevice& device) {
+  if (!tensor.defined()) {
+    return LazyTensor();
+  }
+  auto xtensor = TryGetLtcTensor(tensor);
+  return xtensor ? xtensor : LazyTensor::Create(tensor, device);
+}
+
 }  // namespace
 
-c10::optional<LazyTensor> TryGetLtcTensor(const at::Tensor& tensor) {
+LazyTensor TryGetLtcTensor(const at::Tensor& tensor) {
   LTCTensorImpl* impl = GetLtcTensorImpl(tensor);
   if (impl == nullptr) {
-    return c10::nullopt;
+    return LazyTensor();
   }
   return impl->tensor();
 }
 
-bool IsLtcTensor(const at::Tensor& tensor) {
-  return GetLtcTensorImpl(tensor) != nullptr;
-}
-
 LazyTensor GetLtcTensor(const at::Tensor& tensor) {
-  auto xtensor = TryGetLtcTensor(tensor);
-  CHECK(xtensor) << "Input tensor is not a lazy tensor: " << tensor.toString();
-  return *xtensor;
+  auto lazy_tensor = TryGetLtcTensor(tensor);
+  CHECK(lazy_tensor) << "Input tensor is not a lazy tensor: " << tensor.toString();
+  return lazy_tensor;
 }
 
 std::vector<LazyTensor> GetLtcTensors(c10::ArrayRef<at::Tensor> tensors) {
@@ -79,22 +84,9 @@ std::vector<LazyTensor> GetLtcTensors(c10::ArrayRef<at::Tensor> tensors) {
   return ltc_tensors;
 }
 
-LazyTensor GetOrCreateLtcTensor(const at::Tensor& tensor,
-                                const torch::lazy::BackendDevice& device) {
-  if (!tensor.defined()) {
-    return LazyTensor();
-  }
-  auto xtensor = TryGetLtcTensor(tensor);
-  return xtensor ? *xtensor : LazyTensor::Create(tensor, device);
-}
-
 LazyTensor GetOrCreateLtcTensor(const c10::optional<at::Tensor>& tensor,
                                 const torch::lazy::BackendDevice& device) {
-  if (!IsDefined(tensor)) {
-    return LazyTensor();
-  }
-  auto xtensor = TryGetLtcTensor(*tensor);
-  return xtensor ? *xtensor : LazyTensor::Create(*tensor, device);
+  return GetOrCreateLtcTensor(tensor.value_or(at::Tensor()), device);
 }
 
 LazyTensor GetLtcTensorOrCreateForWrappedNumber(const at::Tensor& tensor, const torch::lazy::BackendDevice& device) {
@@ -102,42 +94,12 @@ LazyTensor GetLtcTensorOrCreateForWrappedNumber(const at::Tensor& tensor, const 
       GetOrCreateLtcTensor(tensor, device) : GetLtcTensor(tensor);
 }
 
-std::vector<at::Tensor> LtcCreateTensorList(const at::TensorList& tensors) {
-  std::vector<at::Tensor> aten_ltc_tensors(tensors.size());
-  std::vector<LazyTensor> ltc_tensors;
-  // We need to separate out the defined tensors first, GetLtcTensor() doesn't
-  // work with undefined tensors.
-  std::vector<bool> to_translate(tensors.size());
-  for (size_t i = 0; i < tensors.size(); ++i) {
-    const at::Tensor& tensor = tensors[i];
-    if (tensor.defined()) {
-      auto xtensor = TryGetLtcTensor(tensor);
-      if (xtensor) {
-        to_translate[i] = true;
-        ltc_tensors.push_back(*xtensor);
-      } else {
-        aten_ltc_tensors[i] = tensor;
-      }
-    }
-  }
-  auto defined_aten_ltc_tensors =
-      LazyGraphExecutor::Get()->GetTensors(&ltc_tensors);
-  // Insert undefined tensors into the result, back into the original undefined
-  // positions.
-  for (size_t i = 0, defined_pos = 0; i < tensors.size(); ++i) {
-    if (to_translate[i]) {
-      aten_ltc_tensors[i] = std::move(defined_aten_ltc_tensors[defined_pos++]);
-    }
-  }
-  return aten_ltc_tensors;
-}
-
 c10::optional<torch::lazy::BackendDevice> GetLtcDevice(const at::Tensor& tensor) {
   auto xtensor = TryGetLtcTensor(tensor);
   if (!xtensor) {
     return c10::nullopt;
   }
-  return xtensor->GetDevice();
+  return xtensor.GetDevice();
 }
 
 c10::optional<torch::lazy::BackendDevice> GetLtcDevice(const c10::optional<c10::Device>& device) {
@@ -167,15 +129,6 @@ at::Tensor AtenFromLtcTensor(LazyTensor ltc_tensor) {
   return ltc_tensor.is_null() ? at::Tensor()
                               : at::Tensor(c10::make_intrusive<LTCTensorImpl>(
                                     std::move(ltc_tensor)));
-}
-
-at::Tensor CreateLtcTensor(at::Tensor tensor,
-                           const c10::optional<torch::lazy::BackendDevice>& device) {
-  if (tensor.defined() && device) {
-    LazyTensor ltc_tensor = LazyTensor::Create(std::move(tensor), *device);
-    tensor = AtenFromLtcTensor(ltc_tensor);
-  }
-  return tensor;
 }
 
 }  // namespace bridge

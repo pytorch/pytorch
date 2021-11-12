@@ -9,6 +9,7 @@
 
 namespace torch_lazy_tensors {
 using NodePtr = torch::lazy::NodePtr;
+
 class LazyTensor {
  public:
   // This is the core lazy tensor data structure where all the tensor data is
@@ -59,6 +60,7 @@ class LazyTensor {
   LazyTensor() = default;
 
   bool is_null() const { return data_ptr() == nullptr; }
+  operator bool() const { return !is_null(); }
 
   size_t generation() const { return data()->generation; }
 

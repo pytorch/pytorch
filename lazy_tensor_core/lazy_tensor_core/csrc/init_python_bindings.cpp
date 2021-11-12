@@ -113,7 +113,7 @@ std::vector<LazyTensor> GetLtcTensors(const std::vector<at::Tensor>& tensors,
     for (auto& tensor : tensors) {
       auto xtensor = bridge::TryGetLtcTensor(tensor);
       if (xtensor) {
-        xtensors.push_back(*xtensor);
+        xtensors.push_back(xtensor);
       }
     }
   }
@@ -382,6 +382,36 @@ py::object LtcNms(const at::Tensor& boxes, const at::Tensor& scores,
   return result_tuple;
 }
 
+std::vector<at::Tensor> LtcCreateTensorList(const at::TensorList& tensors) {
+  std::vector<at::Tensor> aten_ltc_tensors(tensors.size());
+  std::vector<LazyTensor> ltc_tensors;
+  // We need to separate out the defined tensors first, GetLtcTensor() doesn't
+  // work with undefined tensors.
+  std::vector<bool> to_translate(tensors.size());
+  for (size_t i = 0; i < tensors.size(); ++i) {
+    const at::Tensor& tensor = tensors[i];
+    if (tensor.defined()) {
+      auto xtensor = bridge::TryGetLtcTensor(tensor);
+      if (xtensor) {
+        to_translate[i] = true;
+        ltc_tensors.push_back(xtensor);
+      } else {
+        aten_ltc_tensors[i] = tensor;
+      }
+    }
+  }
+  auto defined_aten_ltc_tensors =
+      LazyGraphExecutor::Get()->GetTensors(&ltc_tensors);
+  // Insert undefined tensors into the result, back into the original undefined
+  // positions.
+  for (size_t i = 0, defined_pos = 0; i < tensors.size(); ++i) {
+    if (to_translate[i]) {
+      aten_ltc_tensors[i] = std::move(defined_aten_ltc_tensors[defined_pos++]);
+    }
+  }
+  return aten_ltc_tensors;
+}
+
 // py::dict GetMemoryInfo(const std::string& device_str) {
 //   lazy_tensors::ComputationClient::MemoryInfo mem_info;
 //   {
@@ -441,8 +471,7 @@ void InitLtcModuleBindings(py::module m) {
     std::vector<at::Tensor> result;
     {
       NoGilSection nogil;
-      std::vector<at::Tensor> cpu_tensors =
-          bridge::LtcCreateTensorList(tensors);
+      std::vector<at::Tensor> cpu_tensors = LtcCreateTensorList(tensors);
       result.reserve(cpu_tensors.size());
       for (size_t i = 0; i < cpu_tensors.size(); ++i) {
         result.push_back(torch::autograd::make_variable(

@@ -21,7 +21,7 @@ def node_ctor_arg_rvalue_string(arg: NamedCType) -> str:
             return f"lazy_{arg.name}.GetIrValue()"
         elif isinstance(arg.type, OptionalCType):
             return f"lazy_{arg.name} ? " \
-                   f"c10::make_optional(lazy_{arg.name}->GetIrValue()) : " \
+                   f"c10::make_optional(lazy_{arg.name}.GetIrValue()) : " \
                    "c10::nullopt"
         else:
             raise AssertionError("TODO not sure if there are other valid types to handle here")
@@ -132,10 +132,7 @@ def lazy_tensor_decls(value_types: List[NamedCType]) -> str:
             # TODO(alanwaketan): Maybe we want to apply GetLtcTensorOrCreateForWrappedNumber here, but hold it
             # until we encounter a real world example.
             lazy_tensor_decls.append(
-                f"c10::optional<LazyTensor> lazy_{t.name} =  "
-                f"{t.name} ? "
-                f"bridge::TryGetLtcTensor(*{t.name}) : "
-                f"c10::nullopt;")
+                f"    LazyTensor lazy_{t.name} =  bridge::TryGetLtcTensor({t.name}.value_or(at::Tensor()));")
         else:
             raise AssertionError("TODO not sure if there are other valid types to handle here")
     return "\n    ".join(lazy_tensor_decls)
