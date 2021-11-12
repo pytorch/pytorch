@@ -3088,7 +3088,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.cross_entropy', 'mean'),
         xfail('nn.functional.cross_entropy', 'none'),
         xfail('nn.functional.cross_entropy', 'sum'),
-        xfail('nn.functional.interpolate', 'area'),
         xfail('nn.functional.pad', 'circular'),
         xfail('nn.functional.unfold'),
         xfail('norm', 'fro'),
@@ -3137,10 +3136,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('fft.rfft2'),
         xfail('isinf'),
         xfail('isreal'),
-        xfail('nn.functional.adaptive_avg_pool1d'),
-        xfail('nn.functional.adaptive_avg_pool3d'),
-        xfail('nn.functional.avg_pool1d'),
-        xfail('nn.functional.avg_pool3d'),
         xfail('nn.functional.pixel_shuffle'),
         xfail('nn.functional.pixel_unshuffle'),
     }))
