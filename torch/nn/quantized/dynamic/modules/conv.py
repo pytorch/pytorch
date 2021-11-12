@@ -1,7 +1,5 @@
 # coding=utf-8
-r"""Quantized convolution modules."""
-
-from typing import Optional, List, TypeVar
+r"""Dynamically quantized convolution modules."""
 
 import torch
 import torch.nn as nn
@@ -19,12 +17,6 @@ from torch.nn.quantized.modules.conv import _reverse_repeat_padding
 import torch.nn.quantized.modules as nnq
 
 
-_SUPPORTED_PADDING = {
-    'zeros',
-    'reflect'
-}
-
-# TODO Fix docstring!
 class Conv1d(nnq.Conv1d):
     r"""A dynamically quantized conv module with floating point tensors as inputs and outputs.
 
@@ -78,7 +70,7 @@ class Conv1d(nnq.Conv1d):
         return 'DynamicQuantizedConv1d'
 
     # @reviewer unsure whether reduce range should be true or false, here I mimic qlinear_dynamic using true
-    def forward(self, input: Tensor, reduce_range: bool=True)->Tensor:
+    def forward(self, input: Tensor, reduce_range: bool = True) -> Tensor:
         # Temporarily using len(shape) instead of ndim due to JIT issue
         # https://github.com/pytorch/pytorch/issues/23890
         if len(input.shape) != 3:
@@ -91,6 +83,8 @@ class Conv1d(nnq.Conv1d):
         return ops.quantized.conv1d_dynamic(input, self._packed_params, reduce_range)
 
 # TODO Fix docstring
+
+
 class Conv2d(nnq.Conv2d):
     r"""A dynamically quantized conv module with floating point tensors as inputs and outputs.
 
@@ -131,7 +125,7 @@ class Conv2d(nnq.Conv2d):
         stride = _pair(stride)
         padding = _pair(padding)
         dilation = _pair(dilation)
-        
+
         super(Conv2d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             groups, bias, padding_mode, **factory_kwargs)
@@ -140,7 +134,7 @@ class Conv2d(nnq.Conv2d):
         return 'DynamicQuantizedConv2d'
 
     # @reviewer unsure whether reduce range should be true or false, here I mimic qlinear_dynamic using true
-    def forward(self, input: Tensor, reduce_range: bool=True) -> Tensor:
+    def forward(self, input: Tensor, reduce_range: bool = True) -> Tensor:
         # Temporarily using len(shape) instead of ndim due to JIT issue
         # https://github.com/pytorch/pytorch/issues/23890
         if len(input.shape) != 4:
@@ -153,6 +147,8 @@ class Conv2d(nnq.Conv2d):
             input, self._packed_params, reduce_range)
 
 # TODO Fix docstring
+
+
 class Conv3d(nnq.Conv3d):
     r"""A dynamically quantized conv module with floating point tensors as inputs and outputs.
 
@@ -203,7 +199,7 @@ class Conv3d(nnq.Conv3d):
         return 'QuantizedConv3d'
 
     # @reviewer unsure whether reduce range should be true or false, here I mimic qlinear_dynamic using true
-    def forward(self, input: Tensor, reduce_range: bool=True)->Tensor:  
+    def forward(self, input: Tensor, reduce_range: bool = True) -> Tensor:
         # Temporarily using len(shape) instead of ndim due to JIT issue
         # https://github.com/pytorch/pytorch/issues/23890
         if len(input.shape) != 5:
@@ -257,14 +253,14 @@ class ConvTranspose1d(nnq.ConvTranspose1d):
         factory_kwargs = {'device': device, 'dtype': dtype}
 
         super(ConvTranspose1d, self).__init__(
-            in_channels, out_channels, kernel_size, stride, padding, output_padding, 
+            in_channels, out_channels, kernel_size, stride, padding, output_padding,
             groups, bias, dilation, padding_mode, **factory_kwargs)
 
     def _get_name(self):
         return 'DynamicQuantizedConvTranpose1d'
 
     # @reviewer unsure whether reduce range should be true or false, here I mimic qlinear_dynamic using true
-    def forward(self, input: Tensor, reduce_range: bool=True)->Tensor:  
+    def forward(self, input: Tensor, reduce_range: bool = True) -> Tensor:
         # Temporarily using len(shape) instead of ndim due to JIT issue
         # https://github.com/pytorch/pytorch/issues/23890
         if len(input.shape) != 3:
@@ -314,20 +310,21 @@ class ConvTranspose2d(nnq.ConvTranspose2d):
         factory_kwargs = {'device': device, 'dtype': dtype}
 
         super(ConvTranspose2d, self).__init__(
-            in_channels, out_channels, kernel_size, stride, padding, output_padding, 
+            in_channels, out_channels, kernel_size, stride, padding, output_padding,
             groups, bias, dilation, padding_mode, **factory_kwargs)
 
     def _get_name(self):
         return 'QuantizedConvTranpose2d'
 
     # @reviewer unsure whether reduce range should be true or false, here I mimic qlinear_dynamic using true
-    def forward(self, input: Tensor, reduce_range: bool=True)->Tensor:  
+    def forward(self, input: Tensor, reduce_range: bool = True) -> Tensor:
         # Temporarily using len(shape) instead of ndim due to JIT issue
         # https://github.com/pytorch/pytorch/issues/23890
         if len(input.shape) != 4:
             raise ValueError("Input shape must be `(N, C, H, W)`!")
         return ops.quantized.conv_transpose2d_dynamic(
             input, self._packed_params, reduce_range)
+
 
 class ConvTranspose3d(nnq.ConvTranspose3d):
     r"""A dynamically quantized transposed convolution module with floating point tensors as inputs and outputs.
@@ -370,13 +367,13 @@ class ConvTranspose3d(nnq.ConvTranspose3d):
         factory_kwargs = {'device': device, 'dtype': dtype}
 
         super(ConvTranspose3d, self).__init__(
-            in_channels, out_channels, kernel_size, stride, padding, output_padding, 
+            in_channels, out_channels, kernel_size, stride, padding, output_padding,
             groups, bias, dilation, padding_mode, **factory_kwargs)
 
     def _get_name(self):
         return 'DynamicQuantizedConvTranpose3d'
 
-    def forward(self, input: Tensor, reduce_range: bool=True)->Tensor:  
+    def forward(self, input: Tensor, reduce_range: bool = True) -> Tensor:
         # Temporarily using len(shape) instead of ndim due to JIT issue
         # https://github.com/pytorch/pytorch/issues/23890
         if len(input.shape) != 5:

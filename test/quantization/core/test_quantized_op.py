@@ -3663,17 +3663,16 @@ class TestQuantizedEmbeddingOps(TestCase):
 
 class TestDynamicQuantizedConv(TestCase):
     def _test_qconv_op_impl(self, q_mod, dq_op, dim, q_engine, dtype):
-        
+
         torch.backends.quantized.engine = q_engine
         if q_engine == 'qnnpack':
             reduce_range = True
         else:
-            reduce_range=True
+            reduce_range = True
 
-        X_fp32 = torch.randn(*([3]*dim))
+        X_fp32 = torch.randn(*([3] * dim))
         s, z = _calculate_dynamic_qparams(X_fp32, dtype, reduce_range)
-        
-        
+
         quantized_module = q_mod(3, 10, 2)
         packed_params = quantized_module._packed_params
 
@@ -3698,7 +3697,6 @@ class TestDynamicQuantizedConv(TestCase):
             for i in range(10):
                 self._test_qconv_op_impl(q_mod, dq_op, dim, q_engine, dtype)
 
-
     def test_dynamic_conv2d(self):
         q_mod = torch.nn.quantized.Conv2d
         dq_op = torch.ops.quantized.conv2d_dynamic
@@ -3715,7 +3713,7 @@ class TestDynamicQuantizedConv(TestCase):
         dim = 5
         dtype = torch.quint8
 
-        for q_engine in ["fbgemm"]: #  qnnpack doesn't support unpacking conv3d
+        for q_engine in ["fbgemm"]:  # qnnpack doesn't support unpacking conv3d
             for i in range(10):
                 self._test_qconv_op_impl(q_mod, dq_op, dim, q_engine, dtype)
 
@@ -3745,7 +3743,7 @@ class TestDynamicQuantizedConv(TestCase):
         dim = 5
         dtype = torch.quint8
 
-        for q_engine in ["fbgemm"]: #  qnnpack doesn't support unpacking conv3d
+        for q_engine in ["fbgemm"]:  # qnnpack doesn't support unpacking conv3d
             for i in range(10):
                 self._test_qconv_op_impl(q_mod, dq_op, dim, q_engine, dtype)
 
