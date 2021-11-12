@@ -809,8 +809,7 @@ void initTensorExprBindings(PyObject* module) {
           [](TensorExprKernel& self, const std::string& attr = "") {
             return self.getCodeText(attr);
           },
-          py::arg("attr") = "")
-      .def("recompile", [](TensorExprKernel& self) { self.recompile(); });
+          py::arg("attr") = "");
 
   py::class_<CodeGen>(te, "CodeGen")
       .def(
@@ -887,25 +886,6 @@ void initTensorExprBindings(PyObject* module) {
       });
   te.def("annotate_input_shapes", &tensorexpr::annotateInputShapes);
   te.def("remove_unused_self_argument", &tensorexpr::removeUnusedSelfArgument);
-  te.def("is_graph_compilable", &tensorexpr::isGraphCompilable);
-  te.def("fixup_missing_shape_info", &tensorexpr::fixupMissingShapeInfo);
-  te.def("remove_graph_output", &tensorexpr::removeGraphOutput);
-  te.def(
-      "replace_list_output_with_tuple",
-      &tensorexpr::replaceListOutputWithTuple);
-  te.def("trim_graph", &tensorexpr::trimGraph);
-  te.def("set_llvm_target_triple", [](const c10::optional<std::string>& val) {
-    tensorexpr::LLVMTargetTriple() = val;
-  });
-  te.def("set_llvm_target_cpu", [](const c10::optional<std::string>& val) {
-    tensorexpr::LLVMTargetCPU() = val;
-  });
-  te.def("set_llvm_target_attrs", [](const c10::optional<std::string>& val) {
-    tensorexpr::LLVMTargetAttrs() = val;
-  });
-  te.def("set_llvm_aot_workflow", [](bool val) {
-    tensorexpr::LLVMAOTWorkflow() = val;
-  });
 }
 } // namespace jit
 } // namespace torch
