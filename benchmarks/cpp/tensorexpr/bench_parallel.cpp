@@ -24,8 +24,8 @@ class ParallelAdd : public benchmark::Fixture {
   }
 
   void TearDown(benchmark::State& state) override {
-    state.counters["tasks"] = benchmark::Counter(uint64_t(state.iterations()) * M,
-                                                 benchmark::Counter::kIsRate);
+    state.counters["tasks"] = benchmark::Counter(
+        uint64_t(state.iterations()) * M, benchmark::Counter::kIsRate);
   }
 
   int M;
@@ -37,10 +37,9 @@ class ParallelAdd : public benchmark::Fixture {
 BENCHMARK_DEFINE_F(ParallelAdd, Simple)(benchmark::State& state) {
   BufHandle a_buf("a", {M}, kFloat);
   BufHandle b_buf("b", {M}, kFloat);
-  Tensor c_tensor = Compute(
-      "c", {{M, "m"}}, [&](const VarHandle& m) {
-        return a_buf.load(m) + b_buf.load(m);
-      });
+  Tensor c_tensor = Compute("c", {{M, "m"}}, [&](const VarHandle& m) {
+    return a_buf.load(m) + b_buf.load(m);
+  });
   LoopNest loop_nest({c_tensor});
   auto const& loops = loop_nest.getLoopStmtsFor(c_tensor);
   ForPtr m = loops[0];

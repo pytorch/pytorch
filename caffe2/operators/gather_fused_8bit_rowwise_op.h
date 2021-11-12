@@ -30,7 +30,6 @@ class GatherFused8BitRowwiseOp : public Operator<Context> {
     const std::vector<int64_t> shape = {indices.size(0), data.size(1) - 8};
     auto* output = Output(0, shape, at::dtype<float>());
 
-    int block_size = shape[1];
     auto block_bytesize = data.size_from_dim(1) * data.dtype().itemsize();
     int N = indices.numel();
 

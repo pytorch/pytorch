@@ -97,11 +97,16 @@ jobs:
       - name: Ensure no direct cub include
         if: always()
         run: |
-          (! git --no-pager grep -I -no $'#include <cub/' --  ./aten  ':(exclude)aten/src/ATen/cuda/cub.cuh' || (echo "The above files have direct cub include; please include ATen/cuda/cub.cuh instead and wrap your cub calls in at::native namespace if necessary"; false))
+          (! git --no-pager grep -I -no $'#include <cub/' --  ./aten  ':(exclude)aten/src/ATen/cuda/cub*.cuh' || (echo "The above files have direct cub include; please include ATen/cuda/cub.cuh instead and wrap your cub calls in at::native namespace if necessary"; false))
       - name: Ensure no raw cuda api calls
         if: always()
         run: |
           (! git --no-pager grep -I -no $'cudaStreamSynchronize' --  ./aten ./c10 ':(exclude)aten/src/ATen/test' ':(exclude)c10/cuda/CUDAFunctions.h' || (echo "The above files call raw cuda APIs directly; please use at::cuda wrappers instead"; false))
+      - name: Ensure all test files have header containing ownership information
+        if: always()
+        run: |
+          python3 -m pip install boto3==1.19.12
+          .github/scripts/lint_test_ownership.py
 
   clang-format:
     runs-on: ubuntu-18.04
@@ -366,7 +371,7 @@ jobs:
         run: |
           cd "${GITHUB_WORKSPACE}"
           python3 -m tools.linter.clang_tidy.generate_build_files
-      - name: Run clang-tidy
+      - name: Run PR clang-tidy
         if: ${{ github.event_name == 'pull_request' }}
         run: |
           cd "${GITHUB_WORKSPACE}"
@@ -379,8 +384,7 @@ jobs:
 
       # Run clang-tidy on a smaller subset of the codebase on master until we
       # make the repository clang-tidy clean
-      - name: Run clang-tidy
-        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
+      - name: Run master clang-tidy
         run: |
           cd "${GITHUB_WORKSPACE}"
 
@@ -392,7 +396,7 @@ jobs:
               torch/csrc/deploy \
               torch/csrc/tensor \
             --clang-tidy-exe "$(which clang-tidy)" \
-            --disable-progress-bar 2>&1 | tee "${GITHUB_WORKSPACE}"/clang-tidy-output.txt
+            --disable-progress-bar 2>&1 | tee -a "${GITHUB_WORKSPACE}"/clang-tidy-output.txt
 
       - name: Annotate output
         if: ${{ github.event_name == 'pull_request' }}

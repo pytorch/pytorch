@@ -65,7 +65,7 @@ class DLPackWrapper {
     managed_tensor.dl_tensor = dlTensor;
     // C2 Tensor memory is managed by C2
     managed_tensor.manager_ctx = nullptr;
-    managed_tensor.deleter= [](DLManagedTensor*) {};
+    managed_tensor.deleter = [](DLManagedTensor*) {};
 
     return py::reinterpret_steal<py::object>(
         PyCapsule_New(&managed_tensor, "dltensor", nullptr));

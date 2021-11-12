@@ -1,9 +1,10 @@
+# Owner(s): ["oncall: quantization"]
+
 from builtins import round
 
 import copy
 import itertools
 import numpy as np
-import sys
 import unittest
 import operator
 import random
@@ -21,7 +22,7 @@ import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 
 from torch.testing._internal.common_utils import TestCase
-from torch.testing._internal.common_utils import IS_PPC, TEST_WITH_UBSAN, IS_MACOS
+from torch.testing._internal.common_utils import IS_PPC, TEST_WITH_UBSAN, IS_MACOS, BUILD_WITH_CAFFE2
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM, skipIfNoQNNPACK
 from torch.testing._internal.common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
     override_quantized_engine, supported_qengines, override_qengines, _snr
@@ -311,8 +312,19 @@ class TestQuantizedOps(TestCase):
                 ],
                 'reference_fn': torch.nn.functional.hardsigmoid,
                 'output_range': (0.0, 1.0),
-                'change_zero_point': True
-            }
+                'change_zero_point': True,
+            },
+            {
+                'quantized_fn': [
+                    torch.nn.quantized.functional.hardsigmoid
+                ],
+                'reference_fn': torch.nn.functional.hardsigmoid,
+                'output_range': (0.0, 1.0),
+                'change_zero_point': True,
+                'extra_kwargs': {
+                    'inplace': True,
+                },
+            },
         ]
         shapes = ((4,), (4, 4), (4, 4, 4), (4, 4, 4, 4))
         dtypes = (torch.quint8, torch.qint8)
@@ -978,6 +990,27 @@ class TestQuantizedOps(TestCase):
         np.testing.assert_equal(qC, qC_hat.int_repr(),
                                 "Quantized multiplication failed.")
 
+    """Tests that quantized add works with broadcasting"""
+    def test_qadd_broadcast(self):
+        A = torch.randn(1, 1, 4, 4)
+        B = torch.randn(2, 1, 4, 4)
+        qA = torch.quantize_per_tensor(A, 0.02, 0, torch.quint8)
+        qB = torch.quantize_per_tensor(B, 0.04, 2, torch.quint8)
+
+        output_scale = 0.01
+        output_zp = 1
+
+        # ground truth
+        C = qA.dequantize() + qB.dequantize()
+        qC = torch.quantize_per_tensor(C, output_scale, output_zp, torch.quint8)
+
+        # quantized
+        qC_hat_1 = torch.ops.quantized.add(qA, qB, output_scale, output_zp)
+        qC_hat_2 = torch.ops.quantized.add(qB, qA, output_scale, output_zp)
+
+        self.assertTrue(torch.allclose(qC.dequantize(), qC_hat_1.dequantize()))
+        self.assertTrue(torch.allclose(qC.dequantize(), qC_hat_2.dequantize()))
+
     """Tests channel shuffle operation on quantized tensors."""
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
                                               min_side=2, max_side=32, max_numel=10**5),
@@ -1596,56 +1629,40 @@ class TestQuantizedOps(TestCase):
                                  msg=error_message.format(name + '.zero_point', scale,
                                  X_hat.q_zero_point()))
 
-    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
-                                              min_side=1, max_side=10),
-                       qparams=hu.qparams()),
-           k=st.integers(1, 10),
-           dim=st.integers(1, 4),
-           largest=st.booleans(),
-           sorted=st.booleans())
-    def test_qtopk(self, X, k, dim, largest, sorted):
-        X, (scale, zero_point, torch_type) = X
-        qX = torch.quantize_per_tensor(torch.from_numpy(X), scale, zero_point, torch_type)
-        assume(dim < X.ndim)
-        assume(k < X.shape[dim])
+    def test_qtopk(self):
+        x_dims = [3, 4]  # Num elements in the shape
+        sides = [3, 5]  # Side of the tensor generated
+        dims = [0, 1, 2, 3]  # dimension over which to perform topk
+        largest = [False, True]  # Return largest or smallest element
+        sorted = [False, True]  # Return sorted or not
+        dtypes = [torch.qint8, torch.quint8]
+        is_nhwc = [False, True]  # Is input in the NHWC format?
 
-        unquantized_out = torch.topk(qX.dequantize(), k, dim=dim, largest=largest, sorted=sorted)
+        test_cases = itertools.product(x_dims, sides, dims, largest, sorted, dtypes, is_nhwc)
+        k = 2
+        for x_dim, side, dim, larg, sort, dtype, nhwc in test_cases:
+            if nhwc and x_dim != 4:  # NHWC requires 4 dimensions
+                continue
+            if dim >= x_dim:  # Dimension to find top-k for should exist
+                continue
+            shape = [side] * x_dim
+            X, scale, zp = _get_random_tensor_and_q_params(shape, 1.0, dtype)
+            qX = torch.quantize_per_tensor(X, scale, zp, dtype)
 
-        values = torch.quantize_per_tensor(torch.from_numpy(X), scale, zero_point, torch_type)
-        indices = torch.tensor(torch.from_numpy(X)).long()
+            if nhwc:
+                qX = qX.permute([0, 3, 1, 2])
+                X = np.transpose(X, [0, 3, 1, 2])
 
-        quantized_out = torch.topk(qX, k, dim=dim, largest=largest, sorted=sorted)
+            unquantized_out = torch.topk(qX.dequantize(), k, dim=dim, largest=larg, sorted=sort)
 
-        assert(len(unquantized_out) == len(quantized_out))
-        torch.testing.assert_close(quantized_out[0].dequantize(), unquantized_out[0])
-        torch.testing.assert_close(quantized_out[1], unquantized_out[1])
+            values = torch.quantize_per_tensor(X, scale, zp, dtype)
+            indices = torch.tensor(X).long()
 
-    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
-                                              min_side=1, max_side=10),
-                       qparams=hu.qparams()),
-           k=st.integers(1, 10),
-           dim=st.integers(1, 4),
-           largest=st.booleans(),
-           sorted=st.booleans())
-    def test_qtopk_nhwc(self, X, k, dim, largest, sorted):
-        # X is NHWC, we permute to view as NCHW but keep NHWC in memory
-        X, (scale, zero_point, torch_type) = X
-        qX = torch.quantize_per_tensor(torch.from_numpy(X), scale, zero_point, torch_type).permute([0, 3, 1, 2])
-        X = np.transpose(X, [0, 3, 1, 2])
-        assume(dim < X.ndim)
-        assume(k < X.shape[dim])
+            quantized_out = torch.topk(qX, k, dim=dim, largest=larg, sorted=sort)
 
-        unquantized_out = torch.topk(qX.dequantize(), k, dim=dim, largest=largest, sorted=sorted)
-
-        values = torch.quantize_per_tensor(torch.from_numpy(X), scale, zero_point, torch_type)
-        indices = torch.tensor(torch.from_numpy(X)).long()
-
-        quantized_out = torch.topk(qX, k, dim=dim, largest=largest, sorted=sorted)
-
-        assert(len(unquantized_out) == len(quantized_out))
-        torch.testing.assert_close(quantized_out[0].dequantize(), unquantized_out[0])
-        torch.testing.assert_close(quantized_out[1], unquantized_out[1])
-
+            assert(len(unquantized_out) == len(quantized_out))
+            torch.testing.assert_close(quantized_out[0].dequantize(), unquantized_out[0])
+            torch.testing.assert_close(quantized_out[1], unquantized_out[1])
 
     """Tests quantize concatenation (both fused and not)."""
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
@@ -3057,7 +3074,7 @@ class TestDynamicQuantizedRNNOp(TestCase):
                 self.assertEqual(result_ref[0], result_dynamic[0], msg="torch.quantized_rnncell results are off")
 
 
-class TestQuantizedLinear(unittest.TestCase):
+class TestQuantizedLinear(TestCase):
     """Tests the correctness of the quantized linear and linear_relu op."""
     @given(batch_size=st.integers(1, 4),
            input_channels=st.integers(16, 32),
@@ -3222,7 +3239,8 @@ class TestQuantizedLinear(unittest.TestCase):
                 W_q.q_zero_point(), W_q_origin.q_zero_point())
 
 
-@unittest.skipIf(sys.platform == "darwin", "Known test failure on Mac.")
+@unittest.skipIf(IS_MACOS, "Known test failure on Mac.")
+@unittest.skipIf(not BUILD_WITH_CAFFE2, "Test needs Caffe2")
 class TestQuantizedEmbeddingOps(TestCase):
     def _test_embedding_bag_unpack_fn(self, pack_fn, unpack_fn, num_embeddings, embedding_dim, bit_rate, optimized_qparams,
                                       num_batches, data_type=np.float32):
@@ -3989,6 +4007,10 @@ class TestQuantizedConv(TestCase):
             Y_scale, Y_zero_point, use_bias, use_relu=False,
             use_channelwise=False, use_transpose=True)
 
+        # check that this doesn't error
+        test_conv = torch.nn.quantized.ConvTranspose1d(input_channels, output_channels, 1)
+        test_conv(X_q)
+
         # Test the module implementation
         qconv_op = torch.nn.quantized.ConvTranspose1d(
             in_channels=input_channels,
@@ -4094,6 +4116,10 @@ class TestQuantizedConv(TestCase):
             dilations, X_scale, X_zero_point, W_scale, W_zero_point,
             Y_scale, Y_zero_point, use_bias, use_relu=False,
             use_channelwise=False, use_transpose=True)
+
+        # check that this doesn't error
+        test_conv = torch.nn.quantized.ConvTranspose2d(input_channels, output_channels, 1)
+        test_conv(X_q)
 
         # Test the module implementation
         qconv_op = torch.nn.quantized.ConvTranspose2d(
@@ -4210,6 +4236,10 @@ class TestQuantizedConv(TestCase):
             dilations, X_scale, X_zero_point, W_scale, W_zero_point,
             Y_scale, Y_zero_point, use_bias, use_relu=False,
             use_channelwise=False, use_transpose=True)
+
+        # check that this doesn't error
+        test_conv = torch.nn.quantized.ConvTranspose3d(input_channels, output_channels, 1)
+        test_conv(X_q)
 
         # Test the module implementation
         qconv_op = torch.nn.quantized.ConvTranspose3d(
@@ -4404,7 +4434,7 @@ class TestQuantizedConv(TestCase):
            use_bias=st.booleans(),
            use_relu=st.booleans(),
            use_channelwise=st.booleans(),
-           qengine=st.sampled_from(("fbgemm",)))
+           qengine=st.sampled_from(("qnnpack", "fbgemm")))
     def test_qconv3d(
         self,
         batch_size,

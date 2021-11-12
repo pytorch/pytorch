@@ -29,7 +29,8 @@ if [ -z "${SCCACHE}" ] && which ccache > /dev/null; then
   ln -sf "$(which ccache)" ./ccache/g++
   ln -sf "$(which ccache)" ./ccache/x86_64-linux-gnu-gcc
   if [[ "${BUILD_ENVIRONMENT}" == *-cuda* ]]; then
-    ln -sf "$(which ccache)" ./ccache/nvcc
+    mkdir -p ./ccache/cuda
+    ln -sf "$(which ccache)" ./ccache/cuda/nvcc
   fi
   export CACHE_WRAPPER_DIR="$PWD/ccache"
   export PATH="$CACHE_WRAPPER_DIR:$PATH"
@@ -93,7 +94,8 @@ if [[ $BUILD_ENVIRONMENT == *cuda* ]]; then
 
   # Explicitly set path to NVCC such that the symlink to ccache or sccache is used
   if [ -n "${CACHE_WRAPPER_DIR}" ]; then
-    build_args+=("CUDA_NVCC_EXECUTABLE=${CACHE_WRAPPER_DIR}/nvcc")
+    build_args+=("CUDA_NVCC_EXECUTABLE=${CACHE_WRAPPER_DIR}/cuda/nvcc")
+    build_args+=("CMAKE_CUDA_COMPILER_LAUNCHER=${CACHE_WRAPPER_DIR}/ccache")
   fi
 
   # Ensure FindCUDA.cmake can infer the right path to the CUDA toolkit.

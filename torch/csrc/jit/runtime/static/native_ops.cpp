@@ -60,7 +60,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     prim_TupleUnpack,
     [](Node* n) -> SROperator {
       return [](ProcessedNode* p_node) {
-        const auto& elems = p_node->Input(0).toTuple()->elements();
+        const auto& elems = p_node->Input(0).toTupleRef().elements();
         const size_t num_outputs = p_node->outputs().size();
         TORCH_CHECK(
             num_outputs == elems.size(),
@@ -340,35 +340,50 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(aten::narrow, aten_narrow, [](Node* n) -> SROpe
 });
 
 REGISTER_NATIVE_OPERATOR_FUNCTOR(aten::to, aten_to, [](Node* n) -> SROperator {
-  if (!n->matches(torch::schema(
-          "aten::to.other(Tensor(a) self, Tensor other, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor(a)")) &&
-      !n->matches(torch::schema(
-          "aten::to.dtype(Tensor(a) self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor(a)"))) {
-    LogAndDumpSchema(n);
-    return nullptr;
-  }
-  return [](ProcessedNode* p_node) {
-    const auto& in0_t = p_node->Input(0).toTensor();
-    const auto in2_i = p_node->Input(2).toBool();
-    const auto in3_i = p_node->Input(3).toBool();
-    const auto in4_o = p_node->Input(4).toOptional<at::MemoryFormat>();
-    if (p_node->Input(1).isTensor()) {
-      // to.other(Tensor(a) self, Tensor other, bool non_blocking=False, bool
-      // copy=False, MemoryFormat? memory_format=None) -> Tensor(a)
-      const auto in1_t = p_node->Input(1).toTensor();
+  if (n->matches(torch::schema(
+          "aten::to.other(Tensor(a) self, Tensor other, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor(a)"))) {
+    return [](ProcessedNode* p_node) {
+      const auto& in0_t = p_node->Input(0).toTensor();
+      const auto& in1_t = p_node->Input(1).toTensor();
+      const auto in2_i = p_node->Input(2).toBool();
+      const auto in3_i = p_node->Input(3).toBool();
+      const auto in4_o = p_node->Input(4).toOptional<at::MemoryFormat>();
       p_node->Output(0) = at::native::to(in0_t, in1_t, in2_i, in3_i, in4_o);
-    } else {
-      // to.dtype(Tensor(a) self, ScalarType dtype, bool non_blocking=False,
-      // bool copy=False, MemoryFormat? memory_format=None) -> Tensor(a)
+    };
+  }
+  if (n->matches(torch::schema(
+          "aten::to.dtype(Tensor(a) self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor(a)"))) {
+    return [](ProcessedNode* p_node) {
+      const auto& in0_t = p_node->Input(0).toTensor();
       const auto in1_i = p_node->Input(1).toScalarType();
+      const auto in2_i = p_node->Input(2).toBool();
+      const auto in3_i = p_node->Input(3).toBool();
+      const auto in4_o = p_node->Input(4).toOptional<at::MemoryFormat>();
       p_node->Output(0) = at::native::to(in0_t, in1_i, in2_i, in3_i, in4_o);
-    }
-    // in case that Output(0) is an alias of in0_t, copy the tensor.
-    if (p_node->Output(0).toTensor().unsafeGetTensorImpl() ==
-        in0_t.unsafeGetTensorImpl()) {
-      p_node->Output(0) = in0_t.clone();
-    }
-  };
+    };
+  }
+  if (n->matches(torch::schema(
+          "aten::to.prim_dtype(Tensor(a) self, int? dtype, bool non_blocking=False, bool copy=False) -> Tensor(a|b)"))) {
+    return [](ProcessedNode* p_node) {
+      const auto& in0_t = p_node->Input(0).toTensor();
+      const auto in1_i = p_node->Input(1).toOptional<at::ScalarType>();
+      const auto in2_i = p_node->Input(2).toBool();
+      const auto in3_i = p_node->Input(3).toBool();
+      // To mimick the behavior of the JIT interpreter, if both dtype
+      // and copy are not set, we return self. Otherwise, we assume
+      // that dtype is set.
+      if (!in1_i && !in3_i) {
+        p_node->Output(0) = in0_t;
+      } else {
+        TORCH_CHECK(
+            in1_i,
+            "dytpe cannot be None when copy is True for aten::to.prim_dtype");
+        p_node->Output(0) = at::native::to(in0_t, *in1_i, in2_i, in3_i);
+      }
+    };
+  }
+  LogAndDumpSchema(n);
+  return nullptr;
 });
 
 REGISTER_NATIVE_OPERATOR_FUNCTOR(
@@ -417,7 +432,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         auto* node = p_node->node();
         std::vector<TypePtr> candidates = node->tys(attr::types);
         for (const auto& candidate_type : candidates) {
-          if (input_type->isSubtypeOf(candidate_type)) {
+          if (input_type->isSubtypeOf(*candidate_type)) {
             p_node->Output(0) = true;
             return;
           }
@@ -464,12 +479,82 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       return [](ProcessedNode* pnode) {
         size_t output_idx = 0;
         for (const auto& tuple : pnode->inputs()) {
-          for (auto& elem : tuple->toTuple()->elements()) {
+          for (auto& elem : tuple->toTupleRef().elements()) {
             pnode->Output(output_idx) = elem;
             ++output_idx;
           }
         }
       };
     });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::view,
+    aten_view,
+    [](Node* n) -> SROperator {
+      if (!n->matches(torch::schema(
+              "aten::view(Tensor(a) self, int[] size) -> (Tensor(a))"))) {
+        LogAndDumpSchema(n);
+        return nullptr;
+      }
+      return [](ProcessedNode* p_node) {
+        const auto& input = p_node->Input(0).toTensor();
+        const auto size = p_node->Input(1).toIntList();
+        p_node->Output(0) = at::native::view(input, size.vec());
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::size,
+    aten_size,
+    [](Node* n) -> SROperator {
+      if (!n->matches(
+              torch::schema("aten::size(Tensor self, int dim) -> int"))) {
+        LogAndDumpSchema(n);
+        return nullptr;
+      }
+      return [](ProcessedNode* p_node) {
+        const auto& input = p_node->Input(0).toTensor();
+        auto dim = p_node->Input(1).toInt();
+        const auto ndim = input.dim();
+
+        if (dim < 0 || dim >= ndim) {
+          dim = c10::maybe_wrap_dim(dim, ndim);
+        }
+        p_node->Output(0) = input.sizes()[dim];
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::squeeze,
+    aten_squeeze,
+    [](Node* n) -> SROperator {
+      if (!n->matches(torch::schema(
+              "aten::squeeze.dim(Tensor(a) self, int dim) -> Tensor(a)"))) {
+        LogAndDumpSchema(n);
+        return nullptr;
+      }
+
+      return [](ProcessedNode* p_node) {
+        const auto& self = p_node->Input(0).toTensor();
+        const auto dim = p_node->Input(1).toInt();
+        p_node->Output(0) = at::native::squeeze(self, dim);
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(aten::split, aten_split, [](Node* n) -> SROperator {
+  if (!n->matches(torch::schema(
+          "aten::split(Tensor(a -> *) self, int split_size, int dim=0) -> Tensor(a)[]"))) {
+    LogAndDumpSchema(n);
+    return nullptr;
+  }
+
+  return [](ProcessedNode* p_node) {
+    const auto& self = p_node->Input(0).toTensor();
+    const auto split_size = p_node->Input(1).toInt();
+    const auto dim = p_node->Input(2).toInt();
+    p_node->Output(0) = at::native::split(self, split_size, dim);
+  };
+});
+
 } // namespace jit
 } // namespace torch

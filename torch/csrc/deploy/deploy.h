@@ -1,7 +1,9 @@
 #pragma once
+#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/api/include/torch/imethod.h>
 #include <torch/csrc/deploy/interpreter/interpreter_impl.h>
+#include <torch/csrc/deploy/noop_environment.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <cassert>
 #include <fstream>
@@ -57,9 +59,10 @@ class TORCH_API Interpreter {
   std::unique_ptr<InterpreterImpl> pImpl_;
   bool customLoader_ = false;
   InterpreterManager* manager_; // optional if managed by one
+  std::shared_ptr<Environment> env_;
 
  public:
-  Interpreter(InterpreterManager* manager);
+  Interpreter(InterpreterManager* manager, std::shared_ptr<Environment> env);
   InterpreterSession acquireSession() const {
     TORCH_DEPLOY_TRY
     return InterpreterSession(pImpl_->acquireSession(), manager_);
@@ -108,7 +111,9 @@ struct TORCH_API LoadBalancer {
 };
 
 struct TORCH_API InterpreterManager {
-  explicit InterpreterManager(size_t nInterp = 2);
+  explicit InterpreterManager(
+      size_t nInterp = 2,
+      std::shared_ptr<Environment> env = std::make_shared<NoopEnvironment>());
 
   // get a free model, guarenteed that no other user of acquireOne has the same
   // model. It _is_ possible that other users will be using the interpreter.
@@ -143,7 +148,7 @@ struct TORCH_API InterpreterManager {
   // execute python code, or for small amounts of application logic that are
   // best written in Python. For larger amounts of code, prefer creating and
   // loading them as packages.
-  void reigsterModuleSource(std::string name, std::string src) {
+  void registerModuleSource(std::string name, std::string src) {
     registeredModuleSource_[std::move(name)] = std::move(src);
   }
 

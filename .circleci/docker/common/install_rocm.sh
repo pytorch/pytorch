@@ -4,13 +4,10 @@ set -ex
 
 install_magma() {
     # "install" hipMAGMA into /opt/rocm/magma by copying after build
-    git clone https://bitbucket.org/icl/magma.git -b magma_ctrl_launch_bounds
+    git clone https://bitbucket.org/icl/magma.git
     pushd magma
-    # The branch "magma_ctrl_launch_bounds" is having a fix over the below commit, so keeping the below comment for reference.
-    #git checkout 878b1ce02e9cfe4a829be22c8f911e9c0b6bd88f
-    # Work around non-asii characters in certain magma sources; remove this after upstream magma fixes this.
-    perl -i.bak -pe 's/[^[:ascii:]]//g' sparse/control/magma_zfree.cpp
-    perl -i.bak -pe 's/[^[:ascii:]]//g' sparse/control/magma_zsolverinfo.cpp
+    # fix for magma_queue memory leak issue
+    git checkout c62d700d880c7283b33fb1d615d62fc9c7f7ca21
     cp make.inc-examples/make.inc.hip-gcc-mkl make.inc
     echo 'LIBDIR += -L$(MKLROOT)/lib' >> make.inc
     echo 'LIB += -Wl,--enable-new-dtags -Wl,--rpath,/opt/rocm/lib -Wl,--rpath,$(MKLROOT)/lib -Wl,--rpath,/opt/rocm/magma/lib' >> make.inc
@@ -19,7 +16,7 @@ install_magma() {
     sed -i 's/^FOPENMP/#FOPENMP/g' make.inc
     export PATH="${PATH}:/opt/rocm/bin"
     make -f make.gen.hipMAGMA -j $(nproc)
-    make lib/libmagma.so -j $(nproc) MKLROOT=/opt/conda
+    LANG=C.UTF-8 make lib/libmagma.so -j $(nproc) MKLROOT=/opt/conda
     make testing/testing_dgemm -j $(nproc) MKLROOT=/opt/conda
     popd
     mv magma /opt/rocm
@@ -33,6 +30,10 @@ install_ubuntu() {
     apt-get update
     if [[ $UBUNTU_VERSION == 18.04 ]]; then
       # gpg-agent is not available by default on 18.04
+      apt-get install -y --no-install-recommends gpg-agent
+    fi
+    if [[ $UBUNTU_VERSION == 20.04 ]]; then
+      # gpg-agent is not available by default on 20.04
       apt-get install -y --no-install-recommends gpg-agent
     fi
     apt-get install -y kmod
