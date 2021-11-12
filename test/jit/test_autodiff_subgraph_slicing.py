@@ -418,6 +418,8 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
                 .run(graph)
 
 
+            # Case 3: two aliased nodes in a graph.
+            # Both `split_with_sizes` should be unfused
             input_str = """
     graph(%a : Tensor):
         %b : Tensor = aten::relu(%a)
@@ -437,26 +439,9 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
                 .check_not("aten::split_with_sizes") \
                 .run(graph)
 
-
-            input_str = """
-    graph(%a : Tensor):
-        %b : Tensor = aten::relu(%a)
-        %0 : int[] = prim::Constant[value=[2, 2, 1]]()
-        %1 : int = prim::Constant[value=0]()
-        %2 : Tensor[] = aten::split_with_sizes(%b, %0, %1)
-        %4 : Tensor = aten::__getitem__(%2, %1)
-        %5 : Tensor = aten::gelu(%4)
-        %3 : (Tensor, Tensor, Tensor[]) = prim::TupleConstruct(%b, %5, %2)
-        return (%3)
-"""
-
-            graph = torch._C.parse_ir(input_str)
-            torch._C._jit_pass_create_autodiff_subgraphs(graph, 1)
-            FileCheck().check("Tensor = prim::DifferentiableGraph") \
-                .check("with prim::DifferentiableGraph") \
-                .check_not("aten::split_with_sizes") \
-                .run(graph)
-
+            # Case 4: the aliased output has a descendant
+            # Both should be unfused. Note, %3 comes before %2
+            # to test that we unfuse in the reverse topo order
             input_str = """
     graph(%a : Tensor):
         %b : Tensor = aten::relu(%a)
@@ -475,6 +460,9 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
                 .check_not("aten::t") \
                 .run(graph)
 
+            # Case 5: multiple aliased groups
+            # Both should be unfused. Note, %3 comes before %2
+            # to test that we unfuse in the reverse topo order
             input_str = """
     graph(%a : Tensor):
         %b : Tensor = aten::relu(%a)
