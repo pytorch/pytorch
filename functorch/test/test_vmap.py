@@ -451,6 +451,22 @@ class TestVmapAPI(TestCase):
         result = vmap(vmap(foo, 1, 1), 1, 1)(x)
         self.assertEqual(result, x * 2)
 
+    def test_item_throws(self):
+        def f(x):
+            return x.item()
+
+        with self.assertRaisesRegex(RuntimeError, r'item\(\) on a Tensor'):
+            vmap(f)(torch.randn(3))
+
+    def test_data_dependent_control_flow_throws(self):
+        def f(x):
+            if x:
+                return x
+            return 0
+
+        with self.assertRaisesRegex(RuntimeError, r'data-dependent control flow'):
+            vmap(f)(torch.randn(3))
+
     def test_accepts_nested_inputs(self):
         B0 = 2
         x = torch.randn(2, 3)
