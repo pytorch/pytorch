@@ -226,4 +226,10 @@ inline bool is_neg(const Tensor& tensor) {
   return tensor.is_neg();
 }
 
+// aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
+TORCH_API at::Tensor add(const at::Tensor & self, const at::Tensor & other, const at::Scalar & alpha=1);
+
+// aten::add.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+TORCH_API at::Tensor & add_out(at::Tensor & out, const at::Tensor & self, const at::Tensor & other, const at::Scalar & alpha=1);
+
 }

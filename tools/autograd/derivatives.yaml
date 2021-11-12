@@ -201,11 +201,6 @@
   self: grad * -((-self * self + 1).rsqrt()).conj()
   result: auto_element_wise
 
-- name: add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
-  self: handle_r_to_c(self.scalar_type(), grad)
-  other: handle_r_to_c(other.scalar_type(), maybe_multiply(grad, alpha.conj()))
-  result: self_t + maybe_multiply(other_t, alpha)
-
 - name: add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
   self: handle_r_to_c(self.scalar_type(), grad)
   result: self_t

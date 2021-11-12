@@ -441,6 +441,8 @@ class TORCH_API Tensor: public TensorBase {
 
   //example
   //Tensor * add(Tensor & b);
+  at::Tensor add(const at::Tensor & other, const at::Scalar & alpha=1) const;
+  at::Tensor & add_(const at::Tensor & other, const at::Scalar & alpha=1) const;
   ${tensor_method_declarations}
 
   // Special C++ only overloads for std()-like functions (See gh-40287)
@@ -572,6 +574,7 @@ Tensor make_tensor(Args&&... args) {
 
 // See Note [Avoiding Include Cycles In Static Dispatch]
 ${static_dispatch_extra_headers}
+
 namespace at {
 ${tensor_method_definitions}
 } // namespace at

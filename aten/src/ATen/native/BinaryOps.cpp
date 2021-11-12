@@ -678,6 +678,22 @@ Tensor& add_(Tensor& self, const Scalar& other, const Scalar& alpha) {
   return self.add_(wrapped_scalar_tensor(other), alpha);
 }
 
+void check_add_compatibility(const Tensor& self, const Tensor& other, const Scalar& alpha){
+
+}
+
+Tensor add(const Tensor& self, const Tensor& other, const Scalar& alpha) {
+  return at::add(self, other, alpha);
+}
+
+Tensor& add_(Tensor& self, const Tensor& other, const Scalar& alpha) {
+  return self.add_(other, alpha);
+}
+
+Tensor& add_out(const Tensor& self, const Tensor& other, const Scalar& alpha, Tensor& result) {
+  return at::add_out(result, self, other, alpha);
+}
+
 Tensor remainder(const Tensor& self, const Scalar& other) {
   // redispatch
   return at::remainder(self, wrapped_scalar_tensor(other));

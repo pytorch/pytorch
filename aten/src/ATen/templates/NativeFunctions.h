@@ -26,6 +26,9 @@ struct Type;
 namespace at {
 namespace native {
 
+struct TORCH_API structured_add_out : public at::meta::structured_add_Tensor {
+void impl(const at::Tensor & self, const at::Tensor & other, const at::Scalar & alpha, const at::Tensor & out);
+};
 ${native_function_declarations}
 
 } // namespace native
