@@ -2,6 +2,7 @@
 
 #include <exception>
 #include <string>
+#include <system_error>
 #include <memory>
 #include <queue>
 #include <mutex>
@@ -79,7 +80,8 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
       retstmnt;                                                      \
     }                                                                \
     catch (const c10d::TimeoutException& e) {                        \
-      PyErr_SetString(PyExc_TimeoutError, e.what());                 \
+      auto msg = torch::processErrorMsg(e.what());                   \
+      PyErr_SetString(PyExc_TimeoutError, msg);                      \
       retstmnt;                                                      \
     }                                                                \
     catch (const c10::Error& e) {                                    \
@@ -91,6 +93,11 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
     catch (torch::PyTorchError & e) {                                \
       auto msg = torch::processErrorMsg(e.what());                   \
       PyErr_SetString(e.python_type(), msg);                         \
+      retstmnt;                                                      \
+    }                                                                \
+    catch (const std::system_error& e) {                             \
+      errno = e.code().value();                                      \
+      PyErr_SetFromErrno(PyExc_OSError);                             \
       retstmnt;                                                      \
     }
 

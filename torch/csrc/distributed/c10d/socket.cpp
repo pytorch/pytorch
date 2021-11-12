@@ -80,6 +80,29 @@ inline void setSocketError(int val) noexcept {
 
 #endif
 
+// Suspends the current thread for one second.
+void delay() {
+  constexpr std::chrono::seconds pause{1};
+
+#ifdef _WIN32
+  std::this_thread::sleep_for(pause);
+#else
+  ::timespec req{};
+  req.tv_sec = pause.count();
+
+  // The C++ Standard does not specify whether `thread::sleep_for()` should be
+  // signal-aware; therefore, we use the `nanosleep()` syscall.
+  if (::nanosleep(&req, nullptr) != 0) {
+    std::error_code err = getSocketError();
+    // We don't care about error conditions other than EINTR since a failure
+    // here is not critical.
+    if (err == std::errc::interrupted) {
+      throw std::system_error{err};
+    }
+  }
+#endif
+}
+
 class SocketListenOp;
 class SocketConnectOp;
 } // namespace
@@ -582,7 +605,7 @@ bool SocketConnectOp::tryConnect(const ::addrinfo& addr) {
 
         if (Clock::now() < deadline) {
           // Wait a little to avoid choking the server.
-          std::this_thread::sleep_for(std::chrono::seconds(1));
+          delay();
         }
         continue;
       }
