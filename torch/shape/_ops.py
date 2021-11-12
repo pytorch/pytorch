@@ -1,17 +1,18 @@
-R"=====("
-### DO NOT REMOVE THIS STRING!!!
+R"=====("  ### DO NOT REMOVE THIS STRING!!!
 # this file is included in torch/csrc/jit/runtime/symbolic_shape_registry.cpp
 # at compile time and turned into a "raw" string
-# there's a matching ")=====" at the bottom
+# there's a matching one at the bottom
 
-from typing import List, Any, Optional
+from typing import List, Any, Optional, Tuple
 
 from numpy import number
 
 import torch
+from torch import ops
 
 
 ####    SHAPE COMPUTE FUNCTIONS START   ###
+
 
 def broadcast(a: List[int], b: List[int]):
     dimsA = len(a)
@@ -126,8 +127,8 @@ def infer_size_impl(shape: List[int], numel: int) -> List[int]:
         else:
             raise AssertionError("invalid shape dimensions")
     if not (
-            numel == newsize
-            or (infer_dim is not None and newsize > 0 and numel % newsize == 0)
+        numel == newsize
+        or (infer_dim is not None and newsize > 0 and numel % newsize == 0)
     ):
         raise AssertionError("invalid shape")
     out = _copy(shape)
@@ -172,25 +173,25 @@ def div_rtn(x: int, y: int):
 
 
 def pooling_output_shape_pad_lr(
-        inputSize: int,
-        kernelSize: int,
-        pad_l: int,
-        pad_r: int,
-        stride: int,
-        dilation: int,
-        ceil_mode: bool,
+    inputSize: int,
+    kernelSize: int,
+    pad_l: int,
+    pad_r: int,
+    stride: int,
+    dilation: int,
+    ceil_mode: bool,
 ):
     outputSize = (
-            div_rtn(
-                inputSize
-                + pad_l
-                + pad_r
-                - dilation * (kernelSize - 1)
-                - 1
-                + (stride - 1 if ceil_mode else 0),
-                stride,
-            )
-            + 1
+        div_rtn(
+            inputSize
+            + pad_l
+            + pad_r
+            - dilation * (kernelSize - 1)
+            - 1
+            + (stride - 1 if ceil_mode else 0),
+            stride,
+        )
+        + 1
     )
     if ceil_mode:
         if (outputSize - 1) * stride >= inputSize + pad_l:
@@ -199,12 +200,12 @@ def pooling_output_shape_pad_lr(
 
 
 def pooling_output_shape(
-        inputSize: int,
-        kernelSize: int,
-        pad_l: int,
-        stride: int,
-        dilation: int,
-        ceil_mode: bool,
+    inputSize: int,
+    kernelSize: int,
+    pad_l: int,
+    stride: int,
+    dilation: int,
+    ceil_mode: bool,
 ):
     assert stride != 0, "stride should not be zeero"
     return pooling_output_shape_pad_lr(
@@ -213,20 +214,20 @@ def pooling_output_shape(
 
 
 def pool2d_shape_check(
-        input: List[int],
-        kH: int,
-        kW: int,
-        dH: int,
-        dW: int,
-        padH: int,
-        padW: int,
-        dilationH: int,
-        dilationW: int,
-        nInputPlane: int,
-        inputHeight: int,
-        inputWidth: int,
-        outputHeight: int,
-        outputWidth: int,
+    input: List[int],
+    kH: int,
+    kW: int,
+    dH: int,
+    dW: int,
+    padH: int,
+    padW: int,
+    dilationH: int,
+    dilationW: int,
+    nInputPlane: int,
+    inputHeight: int,
+    inputWidth: int,
+    outputHeight: int,
+    outputWidth: int,
 ):
     ndim = len(input)
     nOutputPlane = nInputPlane
@@ -237,10 +238,10 @@ def pool2d_shape_check(
 
     valid_dims = input[1] != 0 and input[2] != 0
     assert (
-            ndim == 3
-            and input[0] != 0
-            and valid_dims
-            or (ndim == 4 and valid_dims and input[3] != 0)
+        ndim == 3
+        and input[0] != 0
+        and valid_dims
+        or (ndim == 4 and valid_dims and input[3] != 0)
     )
 
     assert kW // 2 >= padW and kH // 2 >= padH
@@ -248,33 +249,33 @@ def pool2d_shape_check(
 
 
 def max_pool2d(
-        input: List[int],
-        kernel_size: List[int],
-        stride: List[int],
-        padding: List[int],
-        dilation: List[int],
-        ceil_mode: bool,
+    input: List[int],
+    kernel_size: List[int],
+    stride: List[int],
+    padding: List[int],
+    dilation: List[int],
+    ceil_mode: bool,
 ):
     assert (
-            len(kernel_size) == 1 or len(kernel_size) == 2
+        len(kernel_size) == 1 or len(kernel_size) == 2
     ), "max_pool2d: kernel_size must either be a single int, or a tuple of two ints"
     kH = kernel_size[0]
     kW = kH if len(kernel_size) == 1 else kernel_size[1]
 
     assert (
-            len(stride) == 0 or len(stride) == 1 or len(stride) == 2
+        len(stride) == 0 or len(stride) == 1 or len(stride) == 2
     ), "max_pool2d: stride must either be omitted, a single int, or a tuple of two ints"
     dH = kH if len(stride) == 0 else stride[0]
     dW = kW if len(stride) == 0 else dH if len(stride) == 1 else stride[1]
 
     assert (
-            len(padding) == 1 or len(padding) == 2
+        len(padding) == 1 or len(padding) == 2
     ), "max_pool2d: padding must be either be a single int, or a tuple of two ints"
     padH = padding[0]
     padW = padH if len(padding) == 1 else padding[1]
 
     assert (
-            len(dilation) == 1 or len(dilation) == 2
+        len(dilation) == 1 or len(dilation) == 2
     ), "max_pool2d: dilation must be either a single int, or a tuple of two ints"
     dilationH = dilation[0]
     dilationW = dilationH if len(dilation) == 1 else dilation[1]
@@ -313,28 +314,28 @@ def max_pool2d(
 
 
 def max_pool2d_with_indices(
-        input: List[int],
-        kernel_size: List[int],
-        stride: List[int],
-        padding: List[int],
-        dilation: List[int],
-        ceil_mode: bool,
+    input: List[int],
+    kernel_size: List[int],
+    stride: List[int],
+    padding: List[int],
+    dilation: List[int],
+    ceil_mode: bool,
 ):
     out = max_pool2d(input, kernel_size, stride, padding, dilation, ceil_mode)
     return (out, out)
 
 
 def upsample_nearest2d(
-        input: List[int],
-        output_size: Optional[List[int]],
-        scale_factors: Optional[List[float]],
+    input: List[int],
+    output_size: Optional[List[int]],
+    scale_factors: Optional[List[float]],
 ):
     out: List[int] = []
     out.append(input[0])
     out.append(input[1])
     if output_size is not None:
         assert (
-                scale_factors is None
+            scale_factors is None
         ), "Must specify exactly one of output_size and scale_factors"
         assert len(output_size) == 2
         out.append(output_size[0])
@@ -343,7 +344,7 @@ def upsample_nearest2d(
 
     if scale_factors is not None:
         assert (
-                output_size is None
+            output_size is None
         ), "Must specify exactly one of output_size and scale_factors"
         assert len(scale_factors) == 2
         out.append(int(input[2] * scale_factors[0]))
@@ -353,14 +354,14 @@ def upsample_nearest2d(
 
 
 def my_upsample_bilinear2d(
-        input: List[int], output_size: List[int], scale_factors: Optional[List[float]]
+    input: List[int], output_size: List[int], scale_factors: Optional[List[float]]
 ):
     out: List[int] = []
     out.append(input[0])
     out.append(input[1])
     if output_size is not None:
         assert (
-                scale_factors is None
+            scale_factors is None
         ), "Must specify exactly one of output_size and scale_factors"
         assert len(output_size) == 2
         out.append(output_size[0])
@@ -369,7 +370,7 @@ def my_upsample_bilinear2d(
 
     if scale_factors is not None:
         assert (
-                output_size is None
+            output_size is None
         ), "Must specify exactly one of output_size and scale_factors"
         assert len(scale_factors) == 2
         out.append(int(input[2] * scale_factors[0]))
@@ -442,13 +443,13 @@ def index_select(self: List[int], dim: int, index: List[int]):
 
 
 def avg_pool2d(
-        input: List[int],
-        kernel_size: List[int],
-        stride: List[int],
-        padding: List[int],
-        ceil_mode: bool,
-        count_include_pad: bool,
-        divisor_override: Optional[int],
+    input: List[int],
+    kernel_size: List[int],
+    stride: List[int],
+    padding: List[int],
+    ceil_mode: bool,
+    count_include_pad: bool,
+    divisor_override: Optional[int],
 ):
     assert len(kernel_size) == 1 or len(kernel_size) == 2
     kH = kernel_size[0]
@@ -491,11 +492,11 @@ def avg_pool2d(
 
 
 def embedding(
-        weight: List[int],
-        indices: List[int],
-        padding_idx: int = -1,
-        scale_grad_by_freq: bool = False,
-        sparse: bool = False,
+    weight: List[int],
+    indices: List[int],
+    padding_idx: int = -1,
+    scale_grad_by_freq: bool = False,
+    sparse: bool = False,
 ):
     assert len(weight) == 2
     if len(indices) == 1:
@@ -510,7 +511,7 @@ def max_int():
 
 
 def slice(
-        self: List[int], dim: int, start: Optional[int], end: Optional[int], step: int
+    self: List[int], dim: int, start: Optional[int], end: Optional[int], step: int
 ):
     ndim = len(self)
     assert ndim != 0
@@ -558,7 +559,7 @@ def should_skip(tensor: List[int]):
 
 
 def check_cat_shape_except_dim(
-        first: List[int], second: List[int], dimension: int, index: int
+    first: List[int], second: List[int], dimension: int, index: int
 ):
     first_dims = len(first)
     second_dims = len(second)
@@ -566,7 +567,7 @@ def check_cat_shape_except_dim(
     for dim in range(0, first_dims):
         if dim != dimension:
             assert (
-                    first[dim] == second[dim]
+                first[dim] == second[dim]
             ), "Sizes of tensors must match except in dimension"
 
 
@@ -702,13 +703,13 @@ def check_non_negative(array: List[int]) -> bool:
 
 
 def check_shape_forward(
-        input: List[int],
-        weight_sizes: List[int],
-        bias: Optional[List[int]],
-        stride: List[int],
-        padding: List[int],
-        dilation: List[int],
-        groups: int,
+    input: List[int],
+    weight_sizes: List[int],
+    bias: Optional[List[int]],
+    stride: List[int],
+    padding: List[int],
+    dilation: List[int],
+    groups: int,
 ):
     k = len(input)
     weight_dim = len(weight_sizes)
@@ -726,20 +727,20 @@ def check_shape_forward(
 
     for i in range(k, k):
         assert (input[i] + 2 * padding[i - 2]) >= (
-                dilation[i - 2] * (weight_sizes[i] - 1) + 1
+            dilation[i - 2] * (weight_sizes[i] - 1) + 1
         ), "kernel size can't be bigger than input size"
 
     # this is not handling transposed convolution yet
 
 
 def conv_output_size(
-        input_size: List[int],
-        weight_size: List[int],
-        bias: Optional[List[int]],
-        stride: List[int],
-        padding: List[int],
-        dilation: List[int],
-        groups: int,
+    input_size: List[int],
+    weight_size: List[int],
+    bias: Optional[List[int]],
+    stride: List[int],
+    padding: List[int],
+    dilation: List[int],
+    groups: int,
 ):
     check_shape_forward(
         input_size, weight_size, bias, stride, padding, dilation, groups
@@ -768,21 +769,21 @@ def conv_output_size(
             )
         else:
             append_value = (
-                                   input_size[d] + (2 * padding[d - 2]) - (kernel - 1)
-                           ) // stride[d - 2]
+                input_size[d] + (2 * padding[d - 2]) - (kernel - 1)
+            ) // stride[d - 2]
         output_size.append(append_value)
 
     return output_size
 
 
 def conv1d(
-        input: List[int],
-        weight: List[int],
-        bias: Optional[List[int]],
-        stride: List[int],
-        padding: List[int],
-        dilation: List[int],
-        groups: int,
+    input: List[int],
+    weight: List[int],
+    bias: Optional[List[int]],
+    stride: List[int],
+    padding: List[int],
+    dilation: List[int],
+    groups: int,
 ):
     assert len(weight) == 3
     assert len(input) == 3
@@ -790,13 +791,13 @@ def conv1d(
 
 
 def conv2d(
-        input: List[int],
-        weight: List[int],
-        bias: Optional[List[int]],
-        stride: List[int],
-        padding: List[int],
-        dilation: List[int],
-        groups: int,
+    input: List[int],
+    weight: List[int],
+    bias: Optional[List[int]],
+    stride: List[int],
+    padding: List[int],
+    dilation: List[int],
+    groups: int,
 ):
     assert len(weight) == 4
     assert len(input) == 4
@@ -804,15 +805,15 @@ def conv2d(
 
 
 def batch_norm(
-        input: List[int],
-        weight: List[int],
-        bias: Optional[List[int]],
-        running_mean: Optional[List[int]],
-        running_var: Optional[List[int]],
-        training: bool,
-        momentum: float,
-        eps: float,
-        cudnn_enabled: bool,
+    input: List[int],
+    weight: List[int],
+    bias: Optional[List[int]],
+    running_mean: Optional[List[int]],
+    running_var: Optional[List[int]],
+    training: bool,
+    momentum: float,
+    eps: float,
+    cudnn_enabled: bool,
 ):
     out: List[int] = []
     for elem in input:
@@ -821,13 +822,13 @@ def batch_norm(
 
 
 def conv3d(
-        input: List[int],
-        weight: List[int],
-        bias: Optional[List[int]],
-        stride: List[int],
-        padding: List[int],
-        dilation: List[int],
-        groups: int,
+    input: List[int],
+    weight: List[int],
+    bias: Optional[List[int]],
+    stride: List[int],
+    padding: List[int],
+    dilation: List[int],
+    groups: int,
 ):
     assert len(weight) == 5
     assert len(input) == 5
@@ -864,7 +865,7 @@ def arange_end(end: number, inp0: Any, inp1: Any, inp2: Any, inp3: Any):
 
 
 def arange_start(
-        start: number, end: number, inp0: Any, inp1: Any, inp2: Any, inp3: Any
+    start: number, end: number, inp0: Any, inp1: Any, inp2: Any, inp3: Any
 ):
     assert end >= 0
     assert end >= start
@@ -872,7 +873,7 @@ def arange_start(
 
 
 def arange_start_step(
-        start: number, end: number, step: number, inp0: Any, inp1: Any, inp2: Any, inp3: Any
+    start: number, end: number, step: number, inp0: Any, inp1: Any, inp2: Any, inp3: Any
 ):
     assert step != 0
     if step < 0:
@@ -927,7 +928,8 @@ def quantized_prepacked_conv2d(input: List[int], conv2dOpContext: Any):
     assert isinstance(conv2dOpContext, __torch__.torch.classes.quantized.Conv2dPackedParamsBase)
     (weight, bias, stride, padding, dilation, groups) = unchecked_cast(
         Tuple[List[int], Optional[List[int]], List[int], List[int], List[int], int],
-        ops.quantized.conv2d_unpack_sizes(conv2dOpContext))
+        ops.quantized.conv2d_unpack_sizes(conv2dOpContext)
+    )
     return conv2d(input, weight, bias, stride, padding, dilation, groups)
 
 
