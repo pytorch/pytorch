@@ -361,12 +361,12 @@ std::vector<ExprPtr> make_contiguous_strides(
 
   if (dims.size() > 0) {
     strides.resize(dims.size());
-    auto si = LongImm::make(1l);
+    auto si = immLike(dims[0], 1);
     // NOLINTNEXTLINE
     for (int i = dims.size() - 1; i >= 0; --i) {
       // NOLINTNEXTLINE
-      strides[i] = si.node();
-      si = si * dims[i];
+      strides[i] = si;
+      si = alloc<Mul>(si, dims[i].node());
     }
   }
   return strides;
@@ -377,7 +377,7 @@ std::vector<ExprPtr> make_channels_last_strides(
   std::vector<ExprPtr> strides;
   TORCH_INTERNAL_ASSERT(dims.size() == 4, "got size:", dims.size());
   strides.resize(dims.size());
-  ExprHandle handle = LongImm::make(1l);
+  ExprHandle handle = ExprHandle(immLike(dims[0], 1));
   strides[1] = handle.node();
   handle = handle * dims[1];
   strides[3] = handle.node();
