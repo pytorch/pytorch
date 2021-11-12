@@ -8,7 +8,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/MetaFunctions.h>
+#include <ATen/RedispatchFunctions.h>
 #include <torch/library.h>
 
 namespace at {
@@ -626,7 +626,7 @@ Tensor mul_zerotensor(const Tensor& self, const Tensor& other) {
   auto out_device = correct_out_device(self, other);
   // hack to use the TensorIterator to get the correct broadcasting and type promotion logic
   auto device_ = Device(DeviceType::Meta);
-  auto meta_out = at::meta::mul(self.to(device_), other.to(device_));
+  auto meta_out = at::redispatch::mul(c10::DispatchKeySet(at::DispatchKey::Meta), self.to(device_), other.to(device_));
   return at::_efficientzerotensor(meta_out.sizes(), meta_out.options().device(out_device));
 }
 
@@ -634,7 +634,7 @@ Tensor add_zerotensor(const Tensor& self, const Tensor& other, const Scalar& alp
   auto out_device = correct_out_device(self, other);
   // hack to use the TensorIterator to get the correct broadcasting and type promotion logic
   auto device_ = Device(DeviceType::Meta);
-  auto meta_out = at::meta::add(self.to(device_), other.to(device_));
+  auto meta_out = at::redispatch::add(c10::DispatchKeySet(at::DispatchKey::Meta), self.to(device_), other.to(device_));
 
   auto get_out_like = [&] (const Tensor& tensor)
   {
