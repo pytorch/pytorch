@@ -28,7 +28,7 @@ torch::lazy::Shape Permute::MakePermuteShape(
     c10::ArrayRef<int64_t> permutation) {
   return lazy_tensors::ShapeUtil::MakeShape(
       source_shape.scalar_type(),
-      lazy_tensors::Permute(permutation, source_shape.sizes()));
+      torch::lazy::Permute(permutation, source_shape.sizes()));
 }
 
 }  // namespace ops

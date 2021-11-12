@@ -1,12 +1,13 @@
 #include "lazy_tensor_core/csrc/tensor_ops.h"
 
+#include <torch/csrc/lazy/core/ir.h>
+
 #include "lazy_tensor_core/csrc/aten_ltc_bridge.h"
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/tensor_aten_ops.h"
 #include "lazy_tensor_core/csrc/tensor_distributed.h"
 #include "lazy_tensor_core/csrc/ts_backend/LazyLazyIr.h"
 #include "lazy_tensors/computation_client/util.h"
-#include "torch/csrc/lazy/core/ir.h"
 #include "torch/csrc/lazy/core/ir_metadata.h"
 
 namespace torch_lazy_tensors {

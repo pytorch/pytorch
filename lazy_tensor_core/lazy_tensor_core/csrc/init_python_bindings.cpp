@@ -1,6 +1,7 @@
 #include <c10/core/Device.h>
 #include <c10/util/Optional.h>
 #include <torch/csrc/lazy/backend/backend_device.h>
+#include <torch/csrc/lazy/core/ir_util.h>
 
 #include <cstring>
 #include <sstream>
@@ -12,7 +13,6 @@
 #include "lazy_tensor_core/csrc/compiler/backend_impl_interface.h"
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/ir_dump_util.h"
-#include "lazy_tensor_core/csrc/ir_util.h"
 #include "lazy_tensor_core/csrc/lazy_graph_executor.h"
 #include "lazy_tensor_core/csrc/python_util.h"
 #include "lazy_tensor_core/csrc/tensor_aten_ops.h"
@@ -20,7 +20,6 @@
 #include "lazy_tensor_core/csrc/tensor_impl.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensor_core/csrc/torch_util.h"
-#include "lazy_tensor_core/csrc/python_util.h"
 #include "lazy_tensor_core/csrc/ts_backend/backend_impl.h"
 #include "lazy_tensor_core/csrc/version.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
@@ -273,7 +272,7 @@ std::string GetLiveTensorsReport(size_t nodes_threshold,
     torch::lazy::Value ir_value = tensor.CurrentIrValue();
     if (ir_value) {
       std::vector<torch::lazy::Node*> roots({ir_value.node.get()});
-      auto post_order = ir::Util::ComputePostOrder(roots);
+      auto post_order = torch::lazy::Util::ComputePostOrder(roots);
       if (post_order.size() > nodes_threshold) {
         ss << "Tensor: id=" << tensor.GetUniqueId()
            << ", shape=" << tensor.shape().get()

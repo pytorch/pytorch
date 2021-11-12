@@ -1,14 +1,14 @@
 #pragma once
 
+#include <torch/csrc/lazy/core/ir.h>
 #include <torch/csrc/lazy/core/shape.h>
 
 #include "c10/util/ArrayRef.h"
 #include "lazy_tensor_core/csrc/lowering_context.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_lowering_context.h"
 #include "lazy_tensors/computation_client/sys_util.h"
-#include "torch/csrc/lazy/core/ir.h"
-#include "torch/csrc/jit/ir/ir.h"
 #include "torch/csrc/jit/api/function_impl.h"
+#include "torch/csrc/jit/ir/ir.h"
 
 namespace torch_lazy_tensors {
 namespace ir {

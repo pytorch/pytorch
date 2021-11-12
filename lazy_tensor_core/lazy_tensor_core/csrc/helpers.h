@@ -4,6 +4,7 @@
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
 #include <c10/util/Optional.h>
+#include <torch/csrc/lazy/core/permutation_util.h>
 #include <torch/csrc/lazy/core/shape.h>
 
 #include <complex>
@@ -12,7 +13,6 @@
 #include <vector>
 
 #include "lazy_tensors/computation_client/util.h"
-#include "lazy_tensors/permutation_util.h"
 
 namespace torch_lazy_tensors {
 

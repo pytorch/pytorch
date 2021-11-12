@@ -73,7 +73,7 @@ class TSLoweringContext : public ir::LoweringContext {
 
   TSLoweringContext(const std::string& name, torch::lazy::BackendDevice device,
                     c10::ArrayRef<torch::lazy::Node*> post_order,
-                    ir::Util::EmissionMap emit_status);
+                    torch::lazy::Util::EmissionMap emit_status);
 
   torch::lazy::Shape GetResultShape(size_t index) const override;
 

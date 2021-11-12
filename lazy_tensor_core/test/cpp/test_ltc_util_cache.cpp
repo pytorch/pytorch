@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
+#include <torch/csrc/lazy/core/cache.h>
 
 #include <string>
 
-#include "lazy_tensors/computation_client/cache.h"
 #include "lazy_tensors/computation_client/util.h"
 
 namespace torch_lazy_tensors {
@@ -10,7 +10,7 @@ namespace cpp_test {
 
 TEST(LtcUtilCacheTest, BasicTest) {
   static const int kMaxSize = 64;
-  lazy_tensors::util::Cache<int, std::string> cache(kMaxSize);
+  torch::lazy::Cache<int, std::string> cache(kMaxSize);
 
   for (int i = 0; i < 2 * kMaxSize; ++i) {
     std::string istr = std::to_string(i);

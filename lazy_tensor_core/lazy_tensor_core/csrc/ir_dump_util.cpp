@@ -1,13 +1,13 @@
 #include "lazy_tensor_core/csrc/ir_dump_util.h"
 
 #include <c10/util/Optional.h>
+#include <torch/csrc/lazy/core/ir_util.h>
 
 #include <regex>
 #include <sstream>
 #include <unordered_map>
 
 #include "lazy_tensor_core/csrc/compiler/backend_impl_interface.h"
-#include "lazy_tensor_core/csrc/ir_util.h"
 #include "lazy_tensor_core/csrc/lowering_context.h"
 
 // TODO(whc) don't have ir util depend on ts_backend
@@ -190,7 +190,7 @@ std::string GenerateTextNodeSpec(const torch::lazy::Node* node,
 }  // namespace
 
 std::string DumpUtil::ToDot(c10::ArrayRef<torch::lazy::Node*> nodes) {
-  auto post_order = Util::ComputePostOrder(nodes);
+  auto post_order = torch::lazy::Util::ComputePostOrder(nodes);
   return PostOrderToDot(post_order, nodes);
 }
 
@@ -231,7 +231,7 @@ std::string DumpUtil::PostOrderToDot(
 }
 
 std::string DumpUtil::ToText(c10::ArrayRef<torch::lazy::Node*> nodes) {
-  auto post_order = Util::ComputePostOrder(nodes);
+  auto post_order = torch::lazy::Util::ComputePostOrder(nodes);
   return PostOrderToText(post_order, nodes);
 }
 
