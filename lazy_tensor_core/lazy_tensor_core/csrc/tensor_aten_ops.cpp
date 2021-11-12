@@ -7,7 +7,6 @@
 #include "lazy_tensor_core/csrc/aten_ltc_bridge.h"
 #include "lazy_tensor_core/csrc/data_ops.h"
 #include "lazy_tensor_core/csrc/helpers.h"
-#include "lazy_tensor_core/csrc/ir_util.h"
 #include "lazy_tensor_core/csrc/lazy_graph_executor.h"
 #include "lazy_tensor_core/csrc/ops/arithmetic_ir_ops.h"
 #include "lazy_tensor_core/csrc/ops/as_strided.h"
@@ -36,6 +35,7 @@
 #include "lazy_tensors/computation_client/util.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/lazy/core/ir_metadata.h"
+#include "torch/csrc/lazy/core/ir_util.h"
 
 namespace torch_lazy_tensors {
 namespace lazy_tensor_aten_ops {

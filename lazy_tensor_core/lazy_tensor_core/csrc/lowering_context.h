@@ -1,16 +1,16 @@
 #pragma once
 
+#include <torch/csrc/lazy/backend/backend_device.h>
+#include <torch/csrc/lazy/core/ir.h>
+#include <torch/csrc/lazy/core/ir_util.h>  // This is already landed on master, needs rebase
+
 #include <memory>
 #include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
-#include <torch/csrc/lazy/backend/backend_device.h>
-
 #include "lazy_tensor_core/csrc/compiler/data.h"
-#include "lazy_tensor_core/csrc/ir_util.h" // This is already landed on master, needs rebase
-#include "torch/csrc/lazy/core/ir.h"
 
 namespace torch_lazy_tensors {
 
@@ -40,14 +40,14 @@ class LoweringContext {
   LoweringContext(const std::string& name, torch::lazy::BackendDevice device);
   LoweringContext(const std::string& name, torch::lazy::BackendDevice device,
                   c10::ArrayRef<torch::lazy::Node*> post_order,
-                  Util::EmissionMap emit_status);
+                  torch::lazy::Util::EmissionMap emit_status);
 
   virtual ~LoweringContext() = default;
 
   static std::unique_ptr<LoweringContext> Create(
       const std::string& name, torch::lazy::BackendDevice device,
       c10::ArrayRef<torch::lazy::Node*> post_order,
-      Util::EmissionMap emit_status);
+      torch::lazy::Util::EmissionMap emit_status);
 
   static std::unique_ptr<LoweringContext> Create(const std::string& name,
                                                  torch::lazy::BackendDevice device);
@@ -83,7 +83,7 @@ class LoweringContext {
   torch::lazy::BackendDevice device_;
   std::vector<compiler::BackendDataPtr> parameters_;
   std::vector<size_t> parameter_sequence_;
-  Util::EmissionMap emit_status_;
+  torch::lazy::Util::EmissionMap emit_status_;
 };
 
 }  // namespace ir

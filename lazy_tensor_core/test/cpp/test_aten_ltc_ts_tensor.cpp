@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <torch/csrc/lazy/core/permutation_util.h>
 #include <torch/torch.h>
 
 #include <iostream>
@@ -9,7 +10,6 @@
 #include "lazy_tensor_core/csrc/torch_util.h"
 #include "lazy_tensor_core/csrc/ts_backend/backend_impl.h"
 #include "lazy_tensors/computation_client/metrics.h"
-#include "lazy_tensors/permutation_util.h"
 #include "torch_ltc_ts_test.h"
 
 namespace torch_lazy_tensors {
@@ -3769,7 +3769,7 @@ TEST_F(AtenLtcTsTensorTest, TestRandperm) {
   std::vector<int64_t> shuffle_data(shuffle_cpu.data_ptr<int64_t>(),
                                     shuffle_cpu.data_ptr<int64_t>() + n);
   EXPECT_TRUE(shuffle_data.size() == n &&
-              lazy_tensors::IsPermutation(shuffle_data));
+              torch::lazy::IsPermutation(shuffle_data));
 }
 
 TEST_F(AtenLtcTsTensorTest, TestSlice) {

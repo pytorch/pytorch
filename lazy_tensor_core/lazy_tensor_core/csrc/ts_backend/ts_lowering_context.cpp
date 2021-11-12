@@ -16,7 +16,7 @@ TSLoweringContext::TSLoweringContext(const std::string& name, torch::lazy::Backe
 TSLoweringContext::TSLoweringContext(
     const std::string& name, torch::lazy::BackendDevice device,
     c10::ArrayRef<torch::lazy::Node*> post_order,
-    ir::Util::EmissionMap emit_status)
+    torch::lazy::Util::EmissionMap emit_status)
     : ir::LoweringContext(name, device, post_order, emit_status),
       graph_(std::make_shared<torch::jit::Graph>()) {
   lowering_ = TSNodeLoweringInterface::Create(this);
@@ -45,7 +45,8 @@ ComputationPtr TSLoweringContext::Build() {
 torch::jit::Value* TSLoweringContext::GetOutputOp(const torch::lazy::Output& output) {
   auto it = emitted_outputs_.find(output);
   if (it == emitted_outputs_.end()) {
-    auto post_order = ir::Util::ComputePostOrder(output.node, &emit_status_);
+    auto post_order =
+        torch::lazy::Util::ComputePostOrder(output.node, &emit_status_);
     for (auto node : post_order) {
       bool ok = lowering_->Lower(node);
       CHECK(ok) << "Failed to lower: " << *node;

@@ -203,7 +203,8 @@ void LazyTensor::TryLimitGraphSize() {
       lazy_tensors::sys_util::GetEnvInt("TRIM_GRAPH_SIZE", 100000);
   if (data()->ir_value &&
       LazyGraphExecutor::Get()->IncTrimCounter() % kCheckFrequency == 0) {
-    size_t graph_size = ir::Util::GetGraphSize({data()->ir_value.node.get()});
+    size_t graph_size =
+        torch::lazy::Util::GetGraphSize({data()->ir_value.node.get()});
     if (graph_size > kMaxPendingGraphSize) {
       LTC_COUNTER("TrimIrGraph", 1);
       ApplyPendingGraph();

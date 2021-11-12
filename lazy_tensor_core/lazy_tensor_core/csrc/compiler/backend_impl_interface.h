@@ -50,7 +50,7 @@ class BackendImplInterface {
   virtual std::unique_ptr<ir::LoweringContext> CreateLoweringContext(
       const std::string& name, torch::lazy::BackendDevice device,
       c10::ArrayRef<torch::lazy::Node*> post_order,
-      ir::Util::EmissionMap emit_status) const = 0;
+      torch::lazy::Util::EmissionMap emit_status) const = 0;
 
   virtual std::unique_ptr<ir::LoweringContext> CreateLoweringContext(
       const std::string& name, torch::lazy::BackendDevice device) const = 0;

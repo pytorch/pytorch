@@ -1,19 +1,19 @@
 #include "lazy_tensor_core/csrc/debug_util.h"
 
+#include <torch/csrc/lazy/backend/backend_device.h>
+#include <torch/csrc/lazy/core/ir.h>
+#include <torch/csrc/lazy/core/ir_util.h>
+
 #include <fstream>
 #include <mutex>
 #include <sstream>
 #include <unordered_set>
 
-#include <torch/csrc/lazy/backend/backend_device.h>
-
 #include "lazy_tensor_core/csrc/ir_dump_util.h"
-#include "lazy_tensor_core/csrc/ir_util.h"
 #include "lazy_tensor_core/csrc/python_util.h"
 #include "lazy_tensors/computation_client/sys_util.h"
 #include "lazy_tensors/computation_client/unique.h"
 #include "lazy_tensors/str_split.h"
-#include "torch/csrc/lazy/core/ir.h"
 
 namespace torch_lazy_tensors {
 namespace {

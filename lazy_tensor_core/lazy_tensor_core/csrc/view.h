@@ -1,12 +1,11 @@
 #pragma once
 
 #include <c10/util/Optional.h>
+#include <torch/csrc/lazy/core/ir.h>
 #include <torch/csrc/lazy/core/shape.h>
 
 #include <memory>
 #include <vector>
-
-#include "torch/csrc/lazy/core/ir.h"
 
 namespace torch_lazy_tensors {
 

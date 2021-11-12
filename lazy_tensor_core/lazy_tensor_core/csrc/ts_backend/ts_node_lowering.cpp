@@ -3,6 +3,7 @@
 #include <ATen/core/Reduction.h>
 #include <ATen/native/ConvUtils.h>
 #include <torch/csrc/jit/frontend/sugared_value.h>
+#include <torch/csrc/lazy/core/permutation_util.h>
 #include <torch/jit.h>
 
 #include "lazy_tensor_core/csrc/data_ops.h"
@@ -32,7 +33,6 @@
 #include "lazy_tensor_core/csrc/ops/view.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_lowering_context.h"
-#include "lazy_tensors/permutation_util.h"
 
 namespace torch_lazy_tensors {
 namespace compiler {

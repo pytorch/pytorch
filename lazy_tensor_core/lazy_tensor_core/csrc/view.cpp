@@ -1,5 +1,7 @@
 #include "lazy_tensor_core/csrc/view.h"
 
+#include <torch/csrc/lazy/core/permutation_util.h>
+
 #include <algorithm>
 #include <functional>
 #include <numeric>
@@ -16,7 +18,6 @@
 #include "lazy_tensor_core/csrc/ops/unselect.h"
 #include "lazy_tensor_core/csrc/ops/update_slice.h"
 #include "lazy_tensor_core/csrc/ops/view.h"
-#include "lazy_tensors/permutation_util.h"
 
 namespace torch_lazy_tensors {
 namespace {
@@ -85,7 +86,7 @@ torch::lazy::Value ApplyUpdate(torch::lazy::Value ir_value,
         break;
       case ViewInfo::Type::kPermute:
         result = torch::lazy::MakeNode<ir::ops::Permute>(
-            result, lazy_tensors::InversePermutation(view_info.permutation));
+            result, torch::lazy::InversePermutation(view_info.permutation));
         break;
       case ViewInfo::Type::kReshape:
         result = torch::lazy::MakeNode<ir::ops::View>(

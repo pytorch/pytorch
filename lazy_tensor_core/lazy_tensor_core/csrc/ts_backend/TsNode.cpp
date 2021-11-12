@@ -1,7 +1,8 @@
 #include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 
+#include <torch/csrc/lazy/core/cache.h>
+
 #include "lazy_tensors/computation_client/sys_util.h"
-#include "third_party/computation_client/cache.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -96,9 +97,8 @@ const torch::lazy::Shape& TsNode::shape(size_t output_index) const {
   return shapes_.at(output_index);
 }
 
-using ShapeCache =
-    lazy_tensors::util::Cache<torch::lazy::hash_t, torch::lazy::Shape,
-                              torch::lazy::HashReducer>;
+using ShapeCache = torch::lazy::Cache<torch::lazy::hash_t, torch::lazy::Shape,
+                                      torch::lazy::HashReducer>;
 
 ShapeCache* GetShapeCache() {
   static int64_t shape_cache_size =

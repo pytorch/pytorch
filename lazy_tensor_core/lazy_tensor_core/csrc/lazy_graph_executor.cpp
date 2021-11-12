@@ -190,8 +190,8 @@ class DataCacheArena {
     }
   };
 
-  using DataCache = lazy_tensors::util::Cache<at::Tensor, compiler::BackendData,
-                                              TensorHasher, TensorComparer>;
+  using DataCache = torch::lazy::Cache<at::Tensor, compiler::BackendData,
+                                       TensorHasher, TensorComparer>;
 
   DataCache* GetDataCache(const torch::lazy::BackendDevice& device) {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -667,7 +667,8 @@ LazyGraphExecutor::PostOrderData LazyGraphExecutor::RunPostOrder(
     roots.push_back(ir_value.node.get());
   }
   PostOrderData po_data;
-  po_data.post_order = ir::Util::ComputePostOrder(roots, &po_data.emission_map);
+  po_data.post_order =
+      torch::lazy::Util::ComputePostOrder(roots, &po_data.emission_map);
   std::unordered_map<compiler::BackendData::Handle, size_t> data_handles;
   for (auto node : po_data.post_order) {
     const ir::ops::DeviceData* device_data = ir::ops::DeviceData::Cast(node);

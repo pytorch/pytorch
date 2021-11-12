@@ -30,7 +30,7 @@ namespace ir {
 std::unique_ptr<LoweringContext> LoweringContext::Create(
     const std::string& name, torch::lazy::BackendDevice device,
     c10::ArrayRef<torch::lazy::Node*> post_order,
-    Util::EmissionMap emit_status) {
+    torch::lazy::Util::EmissionMap emit_status) {
   return compiler::getBackend()
       ->CreateLoweringContext(name, device, post_order, emit_status);
 }

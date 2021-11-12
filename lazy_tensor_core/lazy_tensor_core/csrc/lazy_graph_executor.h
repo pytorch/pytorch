@@ -1,11 +1,12 @@
 #pragma once
 
 #include <c10/util/ArrayRef.h>
-#include "lazy_tensor_core/csrc/ir_util.h"
+#include <torch/csrc/lazy/core/cache.h>
+#include <torch/csrc/lazy/core/ir_util.h>
+
 #include "lazy_tensor_core/csrc/lowering_context.h"
 #include "lazy_tensor_core/csrc/tensor.h"
 #include "lazy_tensors/computation_client/async_task.h"
-#include "lazy_tensors/computation_client/cache.h"
 #include "lazy_tensors/computation_client/multi_wait.h"
 #include "lazy_tensors/computation_client/util.h"
 
@@ -117,7 +118,7 @@ class LazyGraphExecutor {
 
   struct PostOrderData {
     std::vector<torch::lazy::Node*> post_order;
-    ir::Util::EmissionMap emission_map;
+    torch::lazy::Util::EmissionMap emission_map;
     std::vector<compiler::BackendDataPtr> parameters_data;
     std::vector<size_t> parameter_sequence;
   };
@@ -138,8 +139,8 @@ class LazyGraphExecutor {
   };
 
   using ComputationCache =
-      lazy_tensors::util::Cache<torch::lazy::hash_t, CachedComputation,
-                                torch::lazy::HashReducer>;
+      torch::lazy::Cache<torch::lazy::hash_t, CachedComputation,
+                         torch::lazy::HashReducer>;
 
   struct Async {
     Async(SyncTensorCollection* coll,
