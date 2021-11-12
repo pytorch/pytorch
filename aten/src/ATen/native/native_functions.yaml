@@ -5850,15 +5850,15 @@
 - func: scatter_add.dimname(Tensor self, Dimname dim, Tensor index, Tensor src) -> Tensor
   variants: function, method
 
-- func: scatter_reduce2(Tensor self, int dim, Tensor index, str reduce, *, int? output_size=None) -> Tensor
-  structured_delegate: scatter_reduce2.out
+- func: _scatter_reduce(Tensor self, int dim, Tensor index, str reduce, *, int? output_size=None) -> Tensor
+  structured_delegate: _scatter_reduce.out
   variants: function, method
 
-- func: scatter_reduce2.out(Tensor self, int dim, Tensor index, str reduce, *, int? output_size=None, Tensor(a!) out) -> Tensor(a!)
+- func: _scatter_reduce.out(Tensor self, int dim, Tensor index, str reduce, *, int? output_size=None, Tensor(a!) out) -> Tensor(a!)
   structured: True
   variants: function
   dispatch:
-    CPU: scatter_reduce2_structured_cpu
+    CPU: _scatter_reduce_structured_cpu
 
 - func: eq_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   structured_delegate: eq.Scalar_out
