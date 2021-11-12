@@ -1454,20 +1454,27 @@ class TestCase(expecttest.TestCase):
     def wrap_with_cuda_memory_check(self, method):
         return self.wrap_method_with_policy(method, self.assertLeaksNoCudaTensors)
 
-    # Recursive function that incorporates retry logic when PYTORCH_RETRY_TEST_CASES=1 and adds early test termination
+    # Recursive function that incorporates retry logic when PYTORCH_RETRY_TEST_CASES=1 and enables early test
+    # termination. [DISCLAIMER: ONLY WORKS WITH UNITTEST]
+    # When report_only is True, flaky tests are only reported, but the signal remains the same (the test will still
+    # show up red).
+    # Otherwise, the flaky test will show up green while its stats are captured by test reports.
     def _run_with_retry(self, result=None, num_runs_left=0, report_only=True):
         if num_runs_left == 0:
             return
 
-        failures_before = 0 if result is None else len(result.failures)  # num tests marked as failed before starting
-        errors_before = 0 if result is None else len(result.errors)  # num tests marked as errored before starting
+        using_unittest = isinstance(result, unittest.TestResult)
+
+        if using_unittest:
+            failures_before = 0 if result is None else len(result.failures)  # num tests marked as failed before starting
+            errors_before = 0 if result is None else len(result.errors)  # num tests marked as errored before starting
 
         super().run(result=result)
         # Early terminate test if necessary.
         if self._should_stop_test_suite():
             result.stop()
 
-        if not RETRY_TEST_CASES:
+        if not RETRY_TEST_CASES or not using_unittest:
             return
 
         err = sys.exc_info()
