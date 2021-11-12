@@ -1008,9 +1008,9 @@ def gen_headers(
     for name, functions in functions_by_base_name.items():
         cpu_fm.write_with_template(
             f'ops/{name}_ops.h', 'Operator.h', lambda: {
-            'declarations': list(mapMaybe(ComputeOperators(
-                Target.DECLARATION), functions)),
-        })
+                'declarations': list(mapMaybe(ComputeOperators(
+                    Target.DECLARATION), functions)),
+            })
 
         cpu_fm.write_with_template(
             f'ops/{name}.h', 'Function.h', lambda: {
@@ -1018,7 +1018,7 @@ def gen_headers(
                 'operator_includes': f'#include <ATen/ops/{name}_ops.h>',
                 'function_definitions': list(mapMaybe(ComputeFunction(
                     static_dispatch_backend_index=static_dispatch_idx), functions)),
-        })
+            })
 
         grouped_functions = grouped_functions_by_base_name.get(name, [])
         structured_functions = [fn for fn in grouped_functions
@@ -1031,7 +1031,7 @@ def gen_headers(
                 f'ops/{name}_meta.h', 'NativeMetaFunction.h', lambda: {
                     'meta_function_declarations': list(mapMaybe(
                         compute_meta_function_declaration, structured_functions)),
-            })
+                })
 
 
         cpu_fm.write_with_template(
@@ -1046,7 +1046,7 @@ def gen_headers(
                             dest.compute_native_function_declaration(f, backend_idx),
                         backend_indices.values()))),
                     grouped_functions)),
-        })
+            })
 
     for category, suffix in [
             ('Functions', ''),
@@ -1170,7 +1170,7 @@ def gen_source_files(
     })
 
     def key_func(fn: NativeFunction) -> str:
-        return fn.func.name.unambiguous_name()
+        return fn.func.name.name.base
 
     def key_func_grouped(g: Union[NativeFunction, NativeFunctionsGroup]) -> str:
         if isinstance(g, NativeFunction):
