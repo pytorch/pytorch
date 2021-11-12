@@ -678,10 +678,6 @@ Tensor& add_(Tensor& self, const Scalar& other, const Scalar& alpha) {
   return self.add_(wrapped_scalar_tensor(other), alpha);
 }
 
-void check_add_compatibility(const Tensor& self, const Tensor& other, const Scalar& alpha){
-
-}
-
 Tensor add(const Tensor& self, const Tensor& other, const Scalar& alpha) {
   return at::add(self, other, alpha);
 }
