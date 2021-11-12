@@ -103,15 +103,15 @@ at::Tensor from_blob_quantized(
       memory_format);
   auto qtensor_impl = static_cast<at::QTensorImpl*>(qx.unsafeGetTensorImpl());
   auto typeMeta = c10::scalarTypeToTypeMeta(dtype);
-  const std::size_t itemsize = typeMeta.itemsize();
   std::size_t size = 1;
   for (std::int64_t s : sizes) {
     size *= static_cast<std::size_t>(s);
   }
-  const std::size_t datasize = size * itemsize;
-  at::DataPtr data_ptr = c10::InefficientStdFunctionContext::makeDataPtr(
-      data, [](void*) {}, at::kCPU);
-  qtensor_impl->ShareExternalPointer(std::move(data_ptr), typeMeta, data_ptr);
+  qtensor_impl->ShareExternalPointer(
+      c10::InefficientStdFunctionContext::makeDataPtr(
+          data, [](void*) {}, at::kCPU),
+      typeMeta,
+      size * typeMeta.itemsize());
   qtensor_impl->set_sizes_and_strides(sizes, strides);
   return qx;
 }
@@ -261,12 +261,6 @@ void nnc_aten_quantized_add(
   const double a_qscale = ((double*)extra_args)[0];
   const int64_t a_qzero = extra_args[1];
   const c10::ScalarType a_qdtype = static_cast<c10::ScalarType>(extra_args[2]);
-  auto a_memory_format =
-      // NOLINTNEXTLINE
-      deduce_memory_format(tensors[1].strides(), tensors[1].sizes());
-  auto b_memory_format =
-      // NOLINTNEXTLINE
-      deduce_memory_format(tensors[2].strides(), tensors[2].sizes());
   auto qa = from_blob_quantized(
       buf_data[1],
       tensors[1].sizes(),
