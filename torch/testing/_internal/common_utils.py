@@ -1320,6 +1320,42 @@ def check_if_enable(test: unittest.TestCase):
             raise unittest.SkipTest("test is fast; we disabled it with PYTORCH_TEST_SKIP_FAST")
 
 
+class RelaxedBooleanPair(BooleanPair):
+    def _process_inputs(self, actual, expected, *, id):
+        # We require only one of the inputs of the inputs to be a boolean and the other can also be a boolean or
+        # a single element tensor or array, whereas in default BooleanPair both inputs have to be booleans.
+        if not (
+                (
+                        isinstance(actual, self._supported_types)
+                        and isinstance(expected, (*self._supported_types, torch.Tensor, np.ndarray))
+                )
+                or (
+                        isinstance(expected, self._supported_types)
+                        and isinstance(actual, (*self._supported_types, torch.Tensor, np.ndarray))
+                )
+        ):
+            raise UnsupportedInputs()
+        error_meta, bools = self._apply_unary(self._to_bool, actual, expected, id=id)
+        if error_meta:
+            raise UnsupportedInputs(error_meta)
+        return bools
+
+    def _to_bool(self, bool_like):
+        if isinstance(bool_like, (torch.Tensor, np.ndarray)):
+            numel = bool_like.numel() if isinstance(bool_like, torch.Tensor) else bool_like.size
+            if numel > 1:
+                error_meta = self._make_error_meta(
+                    ValueError,
+                    f"Only single element tensor-likes can be compared against a boolean. "
+                    f"Got {numel} elements instead.",
+                )
+                return error_meta, None
+
+            return None, bool_like.item()
+        else:
+            return super()._to_bool(bool_like)
+
+
 class RelaxedNumberPair(NumberPair):
     _TYPE_TO_DTYPE = {
         int: torch.int64,
@@ -1335,7 +1371,7 @@ class RelaxedNumberPair(NumberPair):
         self.atol = max(self.atol, atol_override)
 
     def _process_inputs(self, actual, expected, *, id):
-        # We require only one of the inputs of the inputs to be a number and the other can be a number or a single
+        # We require only one of the inputs of the inputs to be a number and the other can also be a number or a single
         # element tensor or array, whereas in default NumberPair both inputs have to be numbers.
         if not (
             (
@@ -1869,7 +1905,7 @@ class TestCase(expecttest.TestCase):
             y,
             pair_types=(
                 NonePair,
-                BooleanPair,
+                RelaxedBooleanPair,
                 RelaxedNumberPair,
                 TensorOrArrayPair,
                 StringPair,
