@@ -37,7 +37,7 @@ performance-*,
 -performance-noexcept-move-constructor,
 -performance-unnecessary-value-param,
 '
-HeaderFilterRegex: 'torch/csrc/.*'
+HeaderFilterRegex: 'torch/csrc/(?!deploy/interpreter/cpython).*'
 AnalyzeTemporaryDtors: false
 WarningsAsErrors: '*'
 CheckOptions:
