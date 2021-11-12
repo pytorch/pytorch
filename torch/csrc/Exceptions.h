@@ -8,6 +8,7 @@
 
 #include <c10/util/Exception.h>
 #include <pybind11/pybind11.h>
+#include <torch/csrc/distributed/c10d/exception.h>
 #include <torch/csrc/THP_export.h>
 #include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/jit/runtime/jit_exception.h>
@@ -75,6 +76,10 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
       auto msg = torch::get_cpp_stacktraces_enabled() ?              \
                     e.what() : e.what_without_backtrace();           \
       PyErr_SetString(PyExc_NotImplementedError, torch::processErrorMsg(msg)); \
+      retstmnt;                                                      \
+    }                                                                \
+    catch (const c10d::TimeoutException& e) {                        \
+      PyErr_SetString(PyExc_TimeoutError, e.what());                 \
       retstmnt;                                                      \
     }                                                                \
     catch (const c10::Error& e) {                                    \

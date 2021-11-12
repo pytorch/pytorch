@@ -30,7 +30,7 @@
 #include <fmt/format.h>
 
 #include <c10d/error.h>
-#include <c10d/interrupt_exception.h>
+#include <c10d/exception.h>
 #include <c10d/logging.h>
 
 namespace c10d {
@@ -38,8 +38,13 @@ namespace detail {
 namespace {
 #ifdef _WIN32
 
+// Since Winsock uses the name `WSAPoll` instead of `poll`, we alias it here
+// to avoid #ifdefs in the source code.
 const auto pollFd = ::WSAPoll;
 
+// Winsock's `getsockopt()` and `setsockopt()` functions expect option values to
+// be passed as `char*` instead of `void*`. We wrap them here to avoid redundant
+// casts in the source code.
 int getSocketOption(SOCKET s, int level, int optname, void* optval, int* optlen) {
   return ::getsockopt(s, level, optname, static_cast<char*>(optval), optlen);
 }
@@ -48,44 +53,14 @@ int setSocketOption(SOCKET s, int level, int optname, const void* optval, int op
   return ::setsockopt(s, level, optname, static_cast<const char*>(optval), optlen);
 }
 
-std::error_code getSocketError() noexcept {
-  int wsa_error = ::WSAGetLastError();
-
-  std::errc err{};
-  switch (wsa_error) {
-    case WSAEINTR:
-      err = std::errc::interrupted;
-      break;
-    case WSAEINVAL:
-      err = std::errc::invalid_argument;
-      break;
-    case WSAEWOULDBLOCK:
-      err = std::errc::operation_would_block;
-      break;
-    case WSAEINPROGRESS:
-      err = std::errc::operation_in_progress;
-      break;
-    case WSAECONNABORTED:
-      err = std::errc::connection_aborted;
-      break;
-    case WSAECONNRESET:
-      err = std::errc::connection_reset;
-      break;
-    case WSAEISCONN:
-      err = std::errc::already_connected;
-      break;
-    case WSAECONNREFUSED:
-      err = std::errc::connection_refused;
-      break;
-
-    default:
-      return std::error_code{wsa_error, std::generic_category()};
-  }
-  return std::make_error_code(err);
+// Winsock has its own error codes which differ from Berkeley's. Fortunately the
+// C++ Standard Library on Windows can map them to standard error codes.
+inline std::error_code getSocketError() noexcept {
+  return std::error_code{::WSAGetLastError(), std::system_category()};
 }
 
-inline void setSocketError(int e) noexcept {
-  ::WSASetLastError(e);
+inline void setSocketError(int val) noexcept {
+  ::WSASetLastError(val);
 }
 
 #else
@@ -99,8 +74,8 @@ inline std::error_code getSocketError() noexcept {
   return lastError();
 }
 
-inline void setSocketError(int e) noexcept {
-  errno = e;
+inline void setSocketError(int val) noexcept {
+  errno = val;
 }
 
 #endif
@@ -151,7 +126,11 @@ class SocketImpl {
 
   bool enableDualStack() noexcept;
 
+#ifdef _WIN32
+  bool enableExclusiveAddressUse() noexcept;
+#else
   bool enableAddressReuse() noexcept;
+#endif
 
   std::uint16_t getPort() const;
 
@@ -184,7 +163,7 @@ std::unique_ptr<SocketImpl> SocketImpl::accept() const {
   if (hnd == invalid_socket) {
     std::error_code err = getSocketError();
     if (err == std::errc::interrupted) {
-      throw InterruptException{};
+      throw std::system_error{err};
     }
 
     std::string msg{};
@@ -207,6 +186,7 @@ std::unique_ptr<SocketImpl> SocketImpl::accept() const {
 
   auto impl = std::make_unique<SocketImpl>(hnd);
 
+  // Make sure that we do not "leak" our file descriptors to child processes.
   impl->closeOnExec();
 
   if (!impl->enableNoDelay()) {
@@ -239,6 +219,7 @@ void SocketImpl::enableNonBlocking() {
   throw SocketError{"The socket cannot be switched to non-blocking mode."};
 }
 
+// TODO: Remove once we migrate everything to non-blocking mode.
 void SocketImpl::disableNonBlocking() {
 #ifdef _WIN32
   unsigned long value = 0;
@@ -264,9 +245,15 @@ bool SocketImpl::enableDualStack() noexcept {
   return setSocketFlag(IPPROTO_IPV6, IPV6_V6ONLY, false);
 }
 
+#ifdef _WIN32
+bool SocketImpl::enableExclusiveAddressUse() noexcept {
+  return setSocketFlag(SOL_SOCKET, SO_EXCLUSIVEADDRUSE, true);
+}
+#else
 bool SocketImpl::enableAddressReuse() noexcept {
   return setSocketFlag(SOL_SOCKET, SO_REUSEADDR, true);
 }
+#endif
 
 std::uint16_t SocketImpl::getPort() const {
   ::sockaddr_storage addr_s{};
@@ -278,7 +265,7 @@ std::uint16_t SocketImpl::getPort() const {
   }
 
   if (addr_s.ss_family == AF_INET) {
-    return ntohs(reinterpret_cast<::sockaddr_in*>(&addr_s)->sin_port);
+    return ntohs(reinterpret_cast<::sockaddr_in*> (&addr_s)->sin_port);
   } else {
     return ntohs(reinterpret_cast<::sockaddr_in6*>(&addr_s)->sin6_port);
   }
@@ -305,7 +292,7 @@ using addrinfo_ptr = std::unique_ptr<::addrinfo, addrinfo_delete>;
 
 class SocketListenOp {
  public:
-  SocketListenOp(std::uint16_t port, bool prefer_ipv6);
+  SocketListenOp(std::uint16_t port, const SocketOptions& opts);
 
   std::unique_ptr<SocketImpl> run();
 
@@ -324,16 +311,16 @@ class SocketListenOp {
   }
 
   std::string port_;
-  bool prefer_ipv6_;
+  const SocketOptions* opts_;
   std::vector<std::string> errors_{};
   std::unique_ptr<SocketImpl> socket_{};
 };
 
-SocketListenOp::SocketListenOp(std::uint16_t port, bool prefer_ipv6)
-    : port_{fmt::to_string(port)}, prefer_ipv6_{prefer_ipv6} {}
+SocketListenOp::SocketListenOp(std::uint16_t port, const SocketOptions& opts)
+    : port_{fmt::to_string(port)}, opts_{&opts} {}
 
 std::unique_ptr<SocketImpl> SocketListenOp::run() {
-  if (prefer_ipv6_) {
+  if (opts_->prefer_ipv6()) {
     logInfo("The server socket will attempt to listen on an IPv6 address.");
     if (tryListen(AF_INET6)) {
       return std::move(socket_);
@@ -344,12 +331,13 @@ std::unique_ptr<SocketImpl> SocketListenOp::run() {
       return std::move(socket_);
     }
   } else {
+    logInfo("The server socket will attempt to listen on an IPv4 or IPv6 address.");
     if (tryListen(AF_UNSPEC)) {
       return std::move(socket_);
     }
   }
 
-  constexpr const char* msg = "The server socket has failed to listen on any local network address.";
+  constexpr auto* msg = "The server socket has failed to listen on any local network address.";
 
   logError(msg);
 
@@ -365,9 +353,12 @@ bool SocketListenOp::tryListen(int family) {
 
   int r = ::getaddrinfo(nullptr, port_.c_str(), &hints, &naked_result);
   if (r != 0) {
-    const char* gai = ::gai_strerror(r);
+    const char* gai_err = ::gai_strerror(r);
 
-    recordError("The local network addresses cannot be retrieved (GAI Error: {} - {}).", r, gai);
+    recordError("The local {}network addresses cannot be retrieved (gai error: {} - {}).",
+                family == AF_INET ? "IPv4 " : family == AF_INET6 ? "IPv6 " : "",
+                r,
+                gai_err);
 
     return false;
   }
@@ -394,10 +385,26 @@ bool SocketListenOp::tryListen(const ::addrinfo& addr) {
 
   socket_ = std::make_unique<SocketImpl>(hnd);
 
+#ifdef _WIN32
+  // The SO_REUSEADDR flag has a significantly different behavior on Windows
+  // compared to Unix-like systems. It allows two or more processes to share
+  // the same port simultaneously, which is totally unsafe.
+  //
+  // Here we follow the recommendation of Microsoft and use the non-standard
+  // SO_EXCLUSIVEADDRUSE flag instead.
+  if (!socket_->enableExclusiveAddressUse()) {
+    logWarning("The exclusive address use option cannot be enabled for the server socket on {}.",
+               addr);
+  }
+#else
   if (!socket_->enableAddressReuse()) {
     logWarning("The address reuse option cannot be enabled for the server socket on {}.", addr);
   }
+#endif
 
+  // Not all operating systems support dual-stack sockets by default. Since we
+  // wish to use our IPv6 socket for IPv4 communication as well, we explicitly
+  // ask the system to enable it.
   if (addr.ai_family == AF_INET6 && !socket_->enableDualStack()) {
     logWarning("The server socket does not support IPv4 communication on {}.", addr);
   }
@@ -428,7 +435,7 @@ class SocketConnectOp {
   using TimePoint = std::chrono::time_point<std::chrono::steady_clock>;
 
  public:
-  SocketConnectOp(const std::string& host, std::uint16_t port, bool prefer_ipv6);
+  SocketConnectOp(const std::string& host, std::uint16_t port, const SocketOptions& opts);
 
   std::unique_ptr<SocketImpl> run();
 
@@ -450,37 +457,62 @@ class SocketConnectOp {
 
   const char* host_;
   std::string port_;
-  bool prefer_ipv6_;
+  const SocketOptions* opts_;
   std::vector<std::string> errors_{};
+  bool timed_out_ = false;
   std::unique_ptr<SocketImpl> socket_{};
 };
 
-SocketConnectOp::SocketConnectOp(const std::string& host, std::uint16_t port, bool prefer_ipv6)
-    : host_{host.c_str()}, port_{fmt::to_string(port)}, prefer_ipv6_{prefer_ipv6} {}
+SocketConnectOp::SocketConnectOp(const std::string& host,
+                                 std::uint16_t port,
+                                 const SocketOptions& opts)
+    : host_{host.c_str()}, port_{fmt::to_string(port)}, opts_{&opts} {}
 
 std::unique_ptr<SocketImpl> SocketConnectOp::run() {
-  if (prefer_ipv6_) {
-    logInfo("The client socket will attempt to connect to an IPv6 address on ({}, {}).", host_, port_);
+  if (opts_->prefer_ipv6()) {
+    logInfo("The client socket will attempt to connect to an IPv6 address of ({}, {}).",
+            host_,
+            port_);
+
     if (tryConnect(AF_INET6)) {
       return std::move(socket_);
     }
 
-    logInfo("The client socket will attempt to connect to an IPv4 address on ({}, {}).", host_, port_);
+    logInfo("The client socket will attempt to connect to an IPv4 address of ({}, {}).",
+            host_,
+            port_);
+
     if (tryConnect(AF_INET)) {
       return std::move(socket_);
     }
   } else {
+    logInfo("The client socket will attempt to connect to an IPv4 or IPv6 address of ({}, {}).",
+            host_,
+            port_);
+
     if (tryConnect(AF_UNSPEC)) {
       return std::move(socket_);
     }
   }
 
-  auto msg = fmt::format(
-      "The client socket has failed to connect to any network address on ({}, {}).", host_, port_);
+  std::string msg{};
+  if (timed_out_) {
+    msg = "The client socket has timed out while waiting to connect to ({}, {}).";
+  } else {
+    msg = "The client socket has failed to connect to any network address of ({}, {}).";
+  }
+
+  msg = fmt::format(msg, host_, port_);
 
   logError(msg);
 
-  throw SocketError{fmt::format("{} {}", msg, fmt::join(errors_, " "))};
+  msg = fmt::format("{} {}", msg, fmt::join(errors_, " "));
+
+  if (timed_out_) {
+    throw TimeoutException{msg};
+  } else {
+    throw SocketError{msg};
+  }
 }
 
 bool SocketConnectOp::tryConnect(int family) {
@@ -492,13 +524,14 @@ bool SocketConnectOp::tryConnect(int family) {
 
   int r = ::getaddrinfo(host_, port_.c_str(), &hints, &naked_result);
   if (r != 0) {
-    const char* gai = ::gai_strerror(r);
+    const char* gai_err = ::gai_strerror(r);
 
-    recordError("The network addresses of ({}, {}) cannot be retrieved (GAI Error: {} - {}).",
+    recordError("The {}network addresses of ({}, {}) cannot be retrieved (gai error: {} - {}).",
+                family == AF_INET ? "IPv4 " : family == AF_INET6 ? "IPv6 " : "",
                 host_,
                 port_,
                 r,
-                gai);
+                gai_err);
 
     return false;
   }
@@ -516,15 +549,14 @@ bool SocketConnectOp::tryConnect(int family) {
 }
 
 bool SocketConnectOp::tryConnect(const ::addrinfo& addr) {
-  std::chrono::seconds timeout{300};
-
-  TimePoint deadline = Clock::now() + timeout;
+  TimePoint deadline = Clock::now() + opts_->connect_timeout();
 
   while (Clock::now() < deadline) {
     SocketImpl::Handle hnd = ::socket(addr.ai_family, addr.ai_socktype, addr.ai_protocol);
     if (hnd == SocketImpl::invalid_socket) {
-      std::error_code err = getSocketError();
-      recordError("The client socket cannot be initialized to connect to {} {}.", addr, err);
+      recordError("The client socket cannot be initialized to connect to {} {}.",
+                  addr,
+                  getSocketError());
 
       return false;
     }
@@ -533,11 +565,13 @@ bool SocketConnectOp::tryConnect(const ::addrinfo& addr) {
 
     socket_->enableNonBlocking();
 
+    // This function returns -1 in case of an error, 0 if the attempt has timed
+    // out, and 1 if the connection is established.
     int r = tryConnect(addr, deadline);
     if (r == -1) {
       std::error_code err = getSocketError();
       if (err == std::errc::interrupted) {
-        throw InterruptException{};
+        throw std::system_error{err};
       }
 
       // Retry if the server is not yet listening or if its backlog is exhausted.
@@ -547,6 +581,7 @@ bool SocketConnectOp::tryConnect(const ::addrinfo& addr) {
         logWarning("The server socket on {} is not yet listening {}, retrying...", addr, err);
 
         if (Clock::now() < deadline) {
+          // Wait a little to avoid choking the server.
           std::this_thread::sleep_for(std::chrono::seconds(1));
         }
         continue;
@@ -557,13 +592,14 @@ bool SocketConnectOp::tryConnect(const ::addrinfo& addr) {
       return false;
     }
 
-    // A return value of 0 indicates that the operation has timed out.
+    // A 0 from `tryConnect()` indicates that the attempt has timed out.
     if (r == 0) {
       continue;
     }
 
     socket_->closeOnExec();
 
+    // TODO: Remove once we fully migrate to non-blocking mode.
     socket_->disableNonBlocking();
 
     logInfo("The client socket has connected to {} on {}.", addr, *socket_);
@@ -575,6 +611,8 @@ bool SocketConnectOp::tryConnect(const ::addrinfo& addr) {
     return true;
   }
 
+  timed_out_ = true;
+
   recordError("The client socket has timed out while trying to connect to {}.", addr);
 
   return false;
@@ -583,17 +621,17 @@ bool SocketConnectOp::tryConnect(const ::addrinfo& addr) {
 int SocketConnectOp::tryConnect(const ::addrinfo& addr, TimePoint deadline) {
   Duration remaining = deadline - Clock::now();
   if (remaining <= Duration::zero()) {
-    return 0;
+    return 0;  // Time out.
   }
 
   int r = ::connect(socket_->handle(), addr.ai_addr, addr.ai_addrlen);
   if (r == 0) {
-    return 1;
+    return 1;  // Success.
   }
 
   std::error_code err = getSocketError();
   if (err == std::errc::already_connected) {
-    return 1;
+    return 1;  // Success.
   }
 
   if (err != std::errc::operation_in_progress && err != std::errc::operation_would_block) {
@@ -608,20 +646,20 @@ int SocketConnectOp::tryConnect(const ::addrinfo& addr, TimePoint deadline) {
 
   r = pollFd(&pfd, 1, static_cast<int>(ms.count()));
   if (r <= 0) {
-    return r;
+    return r;  // Error (-1) or time out (0).
   }
 
-  int e = 0;
+  int err_code = 0;
 
-  ::socklen_t errlen = sizeof(int);
+  ::socklen_t err_len = sizeof(int);
 
-  r = getSocketOption(socket_->handle(), SOL_SOCKET, SO_ERROR, &e, &errlen);
+  r = getSocketOption(socket_->handle(), SOL_SOCKET, SO_ERROR, &err_code, &err_len);
   if (r != 0) {
     return -1;
   }
 
-  if (e != 0) {
-    setSocketError(e);
+  if (err_code != 0) {
+    setSocketError(err_code);
 
     return -1;
   }
@@ -645,14 +683,14 @@ void Socket::initialize() {
 #endif
 }
 
-Socket Socket::listen(std::uint16_t port, bool prefer_ipv6) {
-  SocketListenOp op{port, prefer_ipv6};
+Socket Socket::listen(std::uint16_t port, const SocketOptions& opts) {
+  SocketListenOp op{port, opts};
 
   return Socket{op.run()};
 }
 
-Socket Socket::connect(const std::string& host, std::uint16_t port, bool prefer_ipv6) {
-  SocketConnectOp op{host, port, prefer_ipv6};
+Socket Socket::connect(const std::string& host, std::uint16_t port, const SocketOptions& opts) {
+  SocketConnectOp op{host, port, opts};
 
   return Socket{op.run()};
 }
@@ -694,6 +732,9 @@ SocketError::~SocketError() = default;
 
 } // namespace c10d
 
+//
+// libfmt formatters for `addrinfo` and `Socket`
+//
 namespace fmt {
 
 template <>
@@ -706,14 +747,19 @@ struct formatter<::addrinfo> {
   decltype(auto) format(const ::addrinfo& addr, FormatContext& ctx) {
     char host[NI_MAXHOST], port[NI_MAXSERV]; // NOLINT
 
-    int r = ::getnameinfo(
-        addr.ai_addr, addr.ai_addrlen, host, NI_MAXHOST, port, NI_MAXSERV, NI_NUMERICSERV);
+    int r = ::getnameinfo(addr.ai_addr,
+                          addr.ai_addrlen,
+                          host,
+                          NI_MAXHOST,
+                          port,
+                          NI_MAXSERV,
+                          NI_NUMERICSERV);
     if (r != 0) {
       return format_to(ctx.out(), "?UNKNOWN?");
     }
 
     if (addr.ai_addr->sa_family == AF_INET) {
-      return format_to(ctx.out(), "{}:{}", host, port);
+      return format_to(ctx.out(), "{}:{}",   host, port);
     } else {
       return format_to(ctx.out(), "[{}]:{}", host, port);
     }

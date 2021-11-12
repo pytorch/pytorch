@@ -6,7 +6,6 @@
 
 #pragma once
 
-#include <cerrno>
 #include <system_error>
 
 #include <fmt/format.h>
@@ -21,11 +20,11 @@ struct formatter<std::error_code> {
 
   template <typename FormatContext>
   decltype(auto) format(const std::error_code& err, FormatContext& ctx) {
-#ifdef _WIN32
-    return format_to(ctx.out(), "(Error: {})", err.value());
-#else
-    return format_to(ctx.out(), "(Error: {} - {})", err.value(), err.message());
-#endif
+    return format_to(ctx.out(),
+                     "({} error: {} - {})",
+                     err.category().name(),
+                     err.value(),
+                     err.message());
   }
 };
 

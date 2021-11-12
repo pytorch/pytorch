@@ -9,23 +9,52 @@
 #include <chrono>
 #include <cstdint>
 #include <memory>
-#include <stdexcept>
 #include <string>
 
 #include <c10/macros/Macros.h>
+#include <c10d/exception.h>
 
 namespace c10d {
 namespace detail {
+
+class SocketOptions {
+ public:
+  SocketOptions& prefer_ipv6(bool value) noexcept {
+    prefer_ipv6_ = value;
+
+    return *this;
+  }
+
+  bool prefer_ipv6() const noexcept {
+    return prefer_ipv6_;
+  }
+
+  SocketOptions& connect_timeout(std::chrono::milliseconds value) noexcept {
+    connect_timeout_ = value;
+
+    return *this;
+  }
+
+  std::chrono::milliseconds connect_timeout() const noexcept {
+    return connect_timeout_;
+  }
+
+private:
+  bool prefer_ipv6_ = true;
+  std::chrono::milliseconds connect_timeout_{300};
+};
 
 class SocketImpl;
 
 class Socket {
  public:
+  // This function initializes the underlying socket library and must be called
+  // before any other socket function.
   static void initialize();
 
-  static Socket listen(std::uint16_t port, bool prefer_ipv6 = true);
+  static Socket listen(std::uint16_t port, const SocketOptions& opts = {});
 
-  static Socket connect(const std::string& host, std::uint16_t port, bool prefer_ipv6 = true);
+  static Socket connect(const std::string& host, std::uint16_t port, const SocketOptions& opts = {});
 
   Socket() noexcept = default;
 
@@ -53,9 +82,9 @@ class Socket {
 
 } // namespace detail
 
-class TORCH_API SocketError : public std::runtime_error {
+class TORCH_API SocketError : public C10dError {
  public:
-  using std::runtime_error::runtime_error;
+  using C10dError::C10dError;
 
   SocketError(const SocketError&) = default;
 

@@ -16,7 +16,6 @@ from torch.distributed.elastic.utils.logging import get_logger
 log = get_logger()
 
 _ADDRESS_IN_USE = "Address already in use"
-_CONNECT_TIMEOUT = "connect() timed out."
 _SOCKET_TIMEOUT = "Socket Timeout"
 
 _MEMBER_CHECKIN = "_tcp_store/num_members"
@@ -75,18 +74,14 @@ def create_c10d_store(
             # detects timeouts and port conflicts in their own unittests
             # see - caffe2/torch/testing/_internal/common_utils.py
             # TODO properly map the exceptions in pybind (c10d/init.cpp)
-            if _CONNECT_TIMEOUT in str(e) and not is_server:
-                raise TimeoutError(
-                    f"timed out waiting for tcp store's server: {server_addr}:{port}"
-                ) from e
-            elif str(e) == _ADDRESS_IN_USE:  # this will only happen on the server
+            if str(e) == _ADDRESS_IN_USE:  # this will only happen on the server
                 if attempt < retries:
                     log.warning(
                         f"port: {port} already in use, attempt: [{attempt}/{retries}]"
                     )
                     attempt += 1
                 else:
-                    raise IOError(
+                    raise RuntimeError(
                         f"on {server_addr}, port: {port} already in use"
                     ) from e
             else:

@@ -142,7 +142,7 @@ class DistributedUtilTest(TestCase):
             port = sock.getsockname()[1]
             # on the worker port conflict shouldn't matter, it should just timeout
             # since we never created a server
-            with self.assertRaises(RuntimeError):
+            with self.assertRaises(TimeoutError):
                 create_c10d_store(
                     is_server=False,
                     server_addr=socket.gethostname(),
