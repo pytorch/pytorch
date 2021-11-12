@@ -207,6 +207,7 @@ class TestPythonKeyOperatorsOpInfo(TestCase):
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestPythonKeyOperatorsOpInfo', 'test_make_fx_exhaustive', {
     xfail('to_sparse'),
+    xfail('allclose'),
     xfail('rsub', 'rsub_scalar'),
     xfail('linalg.matrix_power'),
     xfail('linalg.inv'),
@@ -214,8 +215,12 @@ class TestPythonKeyOperatorsOpInfo(TestCase):
     xfail('nn.functional.dropout'),
     xfail('linalg.eigvals'),
     xfail('nn.functional.pad', 'circular'),
+    xfail('nn.functional.ctc_loss'),
     xfail('empty_like'), # randomness
     xfail('randn_like'), # randomness
+    xfail('rand_like'), # randomness
+    xfail('randint_like'), # randomness
+    xfail('new_empty'), # nondeterministic
     })
     def test_make_fx_exhaustive(self, device, dtype, op):
 
