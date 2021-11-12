@@ -7,24 +7,26 @@
 #include <c10/util/Optional.h>
 
 /**
- * bits       15    12         11      10      9       8      7     1        0
- * | covariant | ... | Optional | Class | Dict | Tuple | List | ... | Tensor |
+ * bits       31    30        29    12         11      10      9     1 0 |
+ * covariant | any | singleton | ... | Optional | Class | Dict | ... | Tensor |
  */
-#define FORALL_DYNAMIC_TYPES(_) \
-  _(Tensor, 0x0001)             \
-  _(None, 0x0002)               \
-  _(Bool, 0x0004)               \
-  _(Int, 0x0008)                \
-  _(Float, 0x0010)              \
-  _(Complex, 0x0020)            \
-  _(Number, 0x0038)             \
-  _(String, 0x0040)             \
-  _(List, 0x0080)               \
-  _(Tuple, 0x8100)              \
-  _(Dict, 0x0200)               \
-  _(Class, 0x0400)              \
-  _(Optional, 0x8802)           \
-  _(Any, 0xffff)
+#define FORALL_DYNAMIC_JIT_TYPES(_) \
+  _(Tensor, 0x00000001)             \
+  _(None, 0x00000002)               \
+  _(Bool, 0x00000004)               \
+  _(Int, 0x00000008)                \
+  _(Float, 0x00000010)              \
+  _(Complex, 0x00000020)            \
+  _(Number, 0x00000038)             \
+  _(String, 0x00000040)             \
+  _(List, 0x00000080)               \
+  _(Tuple, 0x80000100)              \
+  _(Dict, 0x00000200)               \
+  _(Class, 0x00000400)              \
+  _(Optional, 0x80000802)           \
+  _(AnyList, 0x40000080)            \
+  _(AnyTuple, 0xc0000100)           \
+  _(Any, 0xffffffff)
 
 namespace c10 {
 
@@ -34,7 +36,7 @@ class DynamicType;
 using DynamicTypePtr = std::shared_ptr<DynamicType>;
 
 // Low dependency jit type with minimal subtyping and structucing support,
-// designed for mobile cases.
+// designed for embedded cases.
 class DynamicType : public Type {
   using ClassTypePtr = std::shared_ptr<const c10::ClassType>;
 
@@ -45,14 +47,14 @@ class DynamicType : public Type {
     Arguments() = default;
     Arguments(c10::ArrayRef<TypePtr>);
     Arguments(const c10::FunctionSchema&, c10::ArrayRef<TypePtr>);
-    size_t size{0};
-    std::unique_ptr<LabeledDynamicType[]> elems{nullptr};
+    std::vector<LabeledDynamicType> elems;
   };
 
-  enum class Tag : std::uint16_t {
+  enum class Tag : std::uint32_t {
 #define DYNAMIC_TYPE_ITEM(NAME, VAL) NAME = VAL,
-    FORALL_DYNAMIC_TYPES(DYNAMIC_TYPE_ITEM)
+    FORALL_DYNAMIC_JIT_TYPES(DYNAMIC_TYPE_ITEM)
 #undef DYNAMIC_TYPE_ITEM
+        Singleton = 0x20000000,
   };
 
   bool operator==(const Type& rhs) const override;
@@ -73,10 +75,10 @@ class DynamicType : public Type {
 
   template <typename F>
   bool compare(const DynamicType& other, F&& f) const {
-    if (arguments_.size != other.arguments_.size) {
+    if (arguments_.elems.size() != other.arguments_.elems.size()) {
       return false;
     }
-    for (uint16_t i = 0; i < arguments_.size; i++) {
+    for (uint16_t i = 0; i < arguments_.elems.size(); i++) {
       if (!f(arguments_.elems[i], other.arguments_.elems[i])) {
         return false;
       }
@@ -88,12 +90,14 @@ class DynamicType : public Type {
   union {
     Arguments arguments_;
     ClassTypePtr class_;
+    TypeKind typeKind_;
   };
 };
 
 struct LabeledDynamicType {
   c10::optional<std::string> label;
   DynamicTypePtr ty;
+  explicit LabeledDynamicType(DynamicTypePtr t) : ty(std::move(t)) {}
 
   bool equals(const LabeledDynamicType& other) const;
   bool isSubtypeOf(const LabeledDynamicType& other) const;

@@ -8,18 +8,18 @@
 namespace c10 {
 
 namespace {
-bool contains(DynamicType::Tag lhs, uint16_t rhs) {
-  return (static_cast<uint16_t>(lhs) | rhs) == static_cast<uint16_t>(lhs);
+bool contains(DynamicType::Tag lhs, uint32_t rhs) {
+  return (static_cast<uint32_t>(lhs) | rhs) == static_cast<uint32_t>(lhs);
 }
 bool contains(DynamicType::Tag lhs, DynamicType::Tag rhs) {
-  return contains(lhs, static_cast<uint16_t>(rhs));
+  return contains(lhs, static_cast<uint32_t>(rhs));
 }
 } // namespace
 
-DynamicType::Arguments::Arguments(c10::ArrayRef<TypePtr> args)
-    : size(args.size()), elems(std::make_unique<LabeledDynamicType[]>(size)) {
-  for (size_t i = 0; i < size; i++) {
-    elems[i].ty = create(*args[i]);
+DynamicType::Arguments::Arguments(c10::ArrayRef<TypePtr> args) {
+  elems.reserve(args.size());
+  for (size_t i = 0; i < args.size(); i++) {
+    elems.emplace_back(create(*args[i]));
   }
 }
 
@@ -34,10 +34,15 @@ DynamicType::Arguments::Arguments(
 }
 
 DynamicType::~DynamicType() {
+  if (tag_ == Tag::Singleton) {
+    return;
+  }
+
   if (tag_ == Tag::Class) {
     class_.~ClassTypePtr();
     return;
   }
+
   arguments_.~Arguments();
 }
 
@@ -59,21 +64,28 @@ DynamicType::DynamicType(Tag tag, Arguments arguments)
     : Type(Kind), tag_(tag), arguments_(std::move(arguments)) {}
 
 DynamicType::DynamicType(const Type& other) : Type(DynamicType::Kind) {
-  TORCH_INTERNAL_ASSERT(other.kind() != Kind);
+  auto kind = other.kind();
+  TORCH_INTERNAL_ASSERT(kind != Kind);
   if (auto cls = other.cast<ClassType>()) {
     new (&class_) ClassTypePtr(std::move(cls));
     tag_ = Tag::Class;
     return;
   }
-  switch (other.kind()) {
+  switch (kind) {
 #define CASE_TYPE(T, _) \
   case T##Type::Kind:   \
     tag_ = Tag::T;      \
     break;
-    FORALL_DYNAMIC_TYPES(CASE_TYPE)
+    FORALL_DYNAMIC_JIT_TYPES(CASE_TYPE)
 #undef CASE_TYPE
     default:
-      TORCH_INTERNAL_ASSERT(false);
+      if (kind == DeviceObjType::Kind || kind == StreamObjType::Kind ||
+          kind == CapsuleType::Kind) {
+        tag_ = Tag::Singleton;
+        typeKind_ = kind;
+        return;
+      }
+      TORCH_INTERNAL_ASSERT(false, "Unsupported dynamic type: ", other.str());
   }
 
   auto args = other.containedTypes();
@@ -96,18 +108,20 @@ bool DynamicType::equals(const DynamicType& other) const {
   if (this == &other) {
     return true;
   }
-  if (tag_ == other.tag_) {
-    if (tag_ == Tag::Class) {
+  if (tag_ != other.tag_) {
+    return false;
+  }
+  switch (tag_) {
+    case Tag::Class:
       return *class_ == *other.class_;
-    } else {
+    case Tag::Singleton:
+      return typeKind_ == other.typeKind_;
+    default:
       return compare(
           other, [](const LabeledDynamicType& a, const LabeledDynamicType& b) {
             return a.equals(b);
           });
-    }
   }
-
-  return false;
 }
 
 bool DynamicType::operator==(const Type& rhs) const {
@@ -124,7 +138,7 @@ bool DynamicType::isSubtypeOfExt(const Type& rhs, std::ostream*) const {
     return true;
   }
 
-  if (contains(tag_, 0x8000)) {
+  if (contains(tag_, 0x80000000)) {
     if (compare(
             *other,
             [](const LabeledDynamicType& a, const LabeledDynamicType& b) {
