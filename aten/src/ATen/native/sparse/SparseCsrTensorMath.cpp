@@ -87,7 +87,7 @@ namespace {
     // To handle type promotion for inputs to unary ops,
     // we first get the result from the underlined op, and use the result
     // to create a sparse CSR tensor, which is used as the input to the out= variant
-    auto result_values = (*op)(values);
+    auto result_values = op(values);
 
     auto result = at::native::sparse_csr_tensor(
       input.crow_indices().clone(),

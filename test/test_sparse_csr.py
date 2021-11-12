@@ -965,9 +965,11 @@ class TestSparseCSR(TestCase):
             self.skipTest("Skipped! No sample inputs!")
 
         for sample in samples:
-            assert isinstance(sample.input, torch.Tensor)
+            assert torch.is_tensor(sample.input)
+            # Sparse CSR only supports 2D tensors as inputs
+            # Fail early to prevent silent success with this test
             if sample.input.ndim != 2:
-                continue
+                raise ValueError("Expeced 2D tensor but got tensor with dimension: {sample.input.ndim}.")
 
             expected = op(sample.input)
             assert torch.is_tensor(expected)

@@ -275,28 +275,16 @@ Tensor empty_like(
   auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Preserve);
 
   if (options.layout() == kSparseCsr && self.is_sparse_csr()) {
-    if (dtype.has_value()) {
-      auto result = at::native::_sparse_csr_tensor_unsafe(
+    auto result_dtype = dtype.value_or(self.scalar_type());
+    auto result = at::native::_sparse_csr_tensor_unsafe(
         self.crow_indices().clone(),
         self.col_indices().clone(),
         at::empty(self.values().sizes(), options.layout(kStrided)),
         self.sizes(),
-        dtype,
+        result_dtype,
         self.layout(),
-        self.device());
-      return result;
-    } else {
-      auto result = at::native::_sparse_csr_tensor_unsafe(
-        self.crow_indices().clone(),
-        self.col_indices().clone(),
-        at::empty(self.values().sizes(), options.layout(kStrided)),
-        self.sizes(),
-        self.scalar_type(),
-        self.layout(),
-        self.device());
-      return result;
-    }
-
+        self.device()
+    );
   }
 
   if (self.is_quantized()) {
