@@ -991,7 +991,7 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
 
         # Test from_float
         conv_module = dynamic_module._FLOAT_MODULE(in_channels, out_channels, kernel_size)
-        conv_module.qconfig = torch.ao.quantization.default_dynamic_qconfig  # type: ignore
+        conv_module.qconfig = torch.ao.quantization.default_dynamic_qconfig  # type: ignore[assignment]
         prepare_dynamic(conv_module)
         conv_module(X_dq)
         quantized_conv_module = dq_mod.from_float(conv_module)
