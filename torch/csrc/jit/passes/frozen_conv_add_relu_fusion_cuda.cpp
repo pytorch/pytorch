@@ -111,15 +111,10 @@ void fuseFrozenConvAddReluImpl(std::shared_ptr<Graph>& graph) {
 #endif
 }
 
-template <typename T>
-struct ConvAddReluRegisterer {
-  ConvAddReluRegisterer(T& fn) {
-    fn = fuseFrozenConvAddReluImpl;
-  }
-};
-
-static ConvAddReluRegisterer<decltype(_fuseFrozenConvAddReluImpl)>
-    convAddReluRegisterer(_fuseFrozenConvAddReluImpl);
+auto dummyInitializer = []() {
+  _fuseFrozenConvAddReluImpl = fuseFrozenConvAddReluImpl;
+  return true;
+}();
 
 } // namespace
 
