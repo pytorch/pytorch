@@ -108,8 +108,9 @@ MemoryPlanner::MemoryPlanner(
           // first iteration, assume it will continue to not do anything
           // and avoid managing its output.
           static const auto to_maybe_copy_out_symbol =
-            c10::Symbol::fromQualString("static_runtime::to_maybe_copy_out");
-          if (pnode.node()->kind() == to_maybe_copy_out_symbol && pnode.Output(i).isNone()) {
+              c10::Symbol::fromQualString("static_runtime::to_maybe_copy_out");
+          if (pnode.node()->kind() == to_maybe_copy_out_symbol &&
+              pnode.Output(i).isNone()) {
             continue;
           }
           managed_tensor_values.insert(out_v);
@@ -135,13 +136,17 @@ MemoryPlanner::MemoryPlanner(
         continue;
       }
       static const std::array<c10::Symbol, 2> symbols_with_borrowed_outputs = {
-        c10::Symbol::fromQualString("static_runtime::select_tensor"),
-        c10::Symbol::fromQualString("static_runtime::dict_unpack"),
+          c10::Symbol::fromQualString("static_runtime::select_tensor"),
+          c10::Symbol::fromQualString("static_runtime::dict_unpack"),
       };
       if (doesNotHeapAllocateWhenStoredInIValue(*out_v->type())) {
         // Scalars do not need to be freed after each iteration.
         num_unmanaged_scalar_ivalues_++;
-      } else if (std::find(symbols_with_borrowed_outputs.begin(), symbols_with_borrowed_outputs.end(), pnode.node()->kind()) != symbols_with_borrowed_outputs.end()) {
+      } else if (
+          std::find(
+              symbols_with_borrowed_outputs.begin(),
+              symbols_with_borrowed_outputs.end(),
+              pnode.node()->kind()) != symbols_with_borrowed_outputs.end()) {
         IValue& out = pnode.Output(i);
         unmanaged_borrowed_ivalues.insert(&out);
       } else {
