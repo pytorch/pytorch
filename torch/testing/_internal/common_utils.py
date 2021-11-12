@@ -73,6 +73,10 @@ IS_SANDCASTLE = os.getenv('SANDCASTLE') == '1' or os.getenv('TW_JOB_USER') == 's
 IS_FBCODE = os.getenv('PYTORCH_TEST_FBCODE') == '1'
 IS_REMOTE_GPU = os.getenv('PYTORCH_TEST_REMOTE_GPU') == '1'
 
+RETRY_TEST_CASES = os.getenv('PYTORCH_RETRY_TEST_CASES') == '1'
+OVERRIDE_FLAKY_SIGNAL = os.getenv('PYTORCH_OVERRIDE_FLAKY_SIGNAL') == '1'
+MAX_NUM_RETRIES = 3
+
 DISABLED_TESTS_FILE = '.pytorch-disabled-tests.json'
 SLOW_TESTS_FILE = '.pytorch-slow-tests.json'
 
@@ -1460,11 +1464,52 @@ class TestCase(expecttest.TestCase):
     def wrap_with_cuda_memory_check(self, method):
         return self.wrap_method_with_policy(method, self.assertLeaksNoCudaTensors)
 
-    def run(self, result=None):
+    # Recursive function that incorporates retry logic when PYTORCH_RETRY_TEST_CASES=1 and enables early test
+    # termination. [DISCLAIMER: ONLY WORKS WITH UNITTEST]
+    # When report_only is True, flaky tests are only reported, but the signal remains the same (the test will still
+    # show up red).
+    # Otherwise, the flaky test will show up green while its stats are captured by test reports.
+    def _run_with_retry(self, result=None, num_runs_left=0, report_only=True):
+        if num_runs_left == 0:
+            return
+
+        using_unittest = isinstance(result, unittest.TestResult)
+
+        if using_unittest:
+            failures_before = 0 if result is None else len(result.failures)  # num tests marked as failed before starting
+            errors_before = 0 if result is None else len(result.errors)  # num tests marked as errored before starting
+
         super().run(result=result)
         # Early terminate test if necessary.
         if self._should_stop_test_suite():
             result.stop()
+
+        if not RETRY_TEST_CASES or not using_unittest:
+            return
+
+        err = sys.exc_info()
+        num_retries_left = num_runs_left - 1
+        if failures_before < len(result.failures):
+            print(f"    {self._testMethodName} failed - num_retries_left: {num_retries_left}")
+            if (report_only and num_retries_left < MAX_NUM_RETRIES) or (not report_only and num_retries_left > 0):
+                result.failures.pop(-1)
+                result.addExpectedFailure(self, err)
+            self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only)
+        elif errors_before < len(result.errors):
+            print(f"    {self._testMethodName} errored - num_retries_left: {num_retries_left}")
+            if (report_only and num_retries_left < MAX_NUM_RETRIES) or (not report_only and num_retries_left > 0):
+                result.errors.pop(-1)
+                result.addExpectedFailure(self, err)
+            self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only)
+        elif report_only and num_retries_left < MAX_NUM_RETRIES:
+            print(f"    {self._testMethodName} succeeded - num_retries_left: {num_retries_left}")
+            result.addUnexpectedSuccess(self)
+            self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only)
+
+
+    def run(self, result=None):
+        num_runs = MAX_NUM_RETRIES + 1 if RETRY_TEST_CASES else 1
+        self._run_with_retry(result=result, num_runs_left=num_runs, report_only=not OVERRIDE_FLAKY_SIGNAL)
 
     def setUp(self):
         check_if_enable(self)
