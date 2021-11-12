@@ -320,6 +320,22 @@ class TestSymbolicShapeAnalysis(JitTestCase):
             inps[2].setType(inps[2].type().with_sizes(args[1].size()))
             self.checkShapeAnalysis(out_size, mod.graph, assert_propagation=True)
 
+    def test_returning_input_symbolic_shapes(self):
+        mm = torch.jit.freeze(torch.jit.script(nn.Conv2d(16, 33, 3, stride=2).eval()))
+        inps = list(mm.graph.inputs())
+        inps[1].setType(inps[1].type().with_sizes([None, None, None, None]))
+        shape_compute_graph = torch._C._jit_pass_propagate_shapes_on_graph_and_build_compute(mm.graph)
+        print(shape_compute_graph.partial_eval_shape_graph())
+        g = shape_compute_graph.partial_eval_shape_graph()
+        # to make into a jit function cant have multiple outputs
+        g.makeMultiOutputIntoTuple()
+        func = torch._C._create_function_from_graph("partial_eval_graph", g)
+        out = func([20, 16, 5, 10])
+        # first four outputs should be unknown symbolic shapes from input
+        self.assertEqual(out[0:4], [20, 16, 5, 10])
+        # last two are two new symbolic dims - height and width
+        self.assertEqual(out[4:], list(mm(torch.rand([20, 16, 5, 10])).size()[2:]))
+
     def test_partial_eval_graph_conv(self):
         mm = torch.jit.freeze(torch.jit.script(nn.Conv2d(16, 33, 3, stride=2).eval()))
         shape_compute_graph = torch._C._jit_pass_propagate_shapes_on_graph_and_build_compute(mm.graph)
