@@ -830,8 +830,8 @@ struct SymbolicShapeGraphAnalyzer {
           continue;
         }
         auto rank = *tt->symbolic_sizes().rank();
-        for (size_t i = 0; i < rank; ++i) {
-          auto shape = tt->symbolic_sizes()[i];
+        for (size_t j = 0; j < rank; ++j) {
+          auto shape = tt->symbolic_sizes()[j];
           if (shape.is_static() ||
               symbolic_shape_value_to_graph_output_.count(shape.value())) {
             continue;
@@ -839,7 +839,7 @@ struct SymbolicShapeGraphAnalyzer {
           auto input = enclosing_graph_value_to_shape_graph_input_[node_input];
           WithInsertPoint guard(stitched_shape_compute_graph->block());
           auto index = stitched_shape_compute_graph->insertConstant(
-              static_cast<int64_t>(i));
+              static_cast<int64_t>(j));
           auto li_index = stitched_shape_compute_graph->insert(
               aten::__getitem__, {input, index});
           registerStitchedComputeOutput(
