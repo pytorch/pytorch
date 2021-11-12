@@ -669,7 +669,7 @@ def unconvertible_ops(model, args, training=TrainingMode.EVAL, opset_version=Non
 
 def _setup_trace_module_map(model, export_modules_as_functions):
     def __setup_trace_module_map():
-        trace_module_map = {_m : torch.typename(_m) for _m in model.modules()}
+        trace_module_map = {_m : torch.typename(type(_m)) for _m in model.modules()}
         torch.jit._trace._trace_module_map = trace_module_map
         return trace_module_map
 
@@ -677,9 +677,15 @@ def _setup_trace_module_map(model, export_modules_as_functions):
         trace_module_map = __setup_trace_module_map()
         export_modules_as_functions = {v for k, v in trace_module_map.items()}
     elif isinstance(export_modules_as_functions, set) and len(export_modules_as_functions) > 0:
+        def _find_typename(v):
+            if isinstance(v, type):
+                return torch.typename(v)
+            else:
+                raise RuntimeError("Only type of the `nn.Module` should be "
+                                   "passed in the set for argument `export_modules_as_functions`. "
+                                   "Got `%s`." % (type(v).__name__))
         trace_module_map = __setup_trace_module_map()
-        module_typenames = {torch.typename(v) if isinstance(v, (torch.nn.Module, type)) else v
-                            for v in export_modules_as_functions}
+        module_typenames = {_find_typename(v) for v in export_modules_as_functions}
         export_modules_as_functions = module_typenames
     else:
         export_modules_as_functions = None
@@ -757,25 +763,23 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
                 custom_opsets = {}
 
             torch._C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
-            val_attr_to_name = {}  # type: ignore[var-annotated]
             node_attr_to_name = {}  # type: ignore[var-annotated]
             if export_modules_as_functions is not None:
                 # NOTE: cannot call DCE after this pass. DCE will remove function definition nodes.
-                val_attr_to_name, node_attr_to_name = torch._C._jit_pass_onnx_function_extraction(
+                node_attr_to_name = torch._C._jit_pass_onnx_function_extraction(
                     graph, export_modules_as_functions, list(params_dict.keys()))
             if export_params:
                 proto, export_map, val_use_external_data_format = graph._export_onnx(
                     params_dict, opset_version, dynamic_axes, defer_weight_export,
                     operator_export_type, not verbose, val_keep_init_as_ip, custom_opsets,
                     val_add_node_names, val_use_external_data_format, model_file_location,
-                    val_attr_to_name, node_attr_to_name)
+                    node_attr_to_name)
             else:
                 proto, export_map, val_use_external_data_format = graph._export_onnx(
                     {}, opset_version, dynamic_axes, False, operator_export_type,
                     not verbose, val_keep_init_as_ip, custom_opsets, val_add_node_names,
                     val_use_external_data_format, model_file_location,
-                    val_attr_to_name, node_attr_to_name)
-
+                    node_attr_to_name)
             if export_type == ExportTypes.PROTOBUF_FILE:
                 assert(len(export_map) == 0)
                 with torch.serialization._open_file_like(f, "wb") as opened_file:

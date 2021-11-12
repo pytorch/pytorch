@@ -28,7 +28,7 @@ class LintSeverity(str, Enum):
 
 
 class LintMessage(NamedTuple):
-    path: str
+    path: Optional[str]
     line: Optional[int]
     char: Optional[int]
     code: str
@@ -37,7 +37,6 @@ class LintMessage(NamedTuple):
     original: Optional[str]
     replacement: Optional[str]
     description: Optional[str]
-    bypassChangedLineFiltering: Optional[bool]
 
 
 def as_posix(name: str) -> str:
@@ -126,7 +125,7 @@ for dir in include_dir:
 def check_file(
     filename: str,
     binary: str,
-    build_dir: str,
+    build_dir: Path,
 ) -> List[LintMessage]:
     try:
         proc = run_command(
@@ -146,7 +145,6 @@ def check_file(
                 description=(
                     f"Failed due to {err.__class__.__name__}:\n{err}"
                 ),
-                bypassChangedLineFiltering=None,
             )
         ]
     lint_messages = []
@@ -171,7 +169,6 @@ def check_file(
                 severity=severities.get(match["severity"], LintSeverity.ERROR),
                 original=None,
                 replacement=None,
-                bypassChangedLineFiltering=None,
             )
             lint_messages.append(message)
     finally:
@@ -232,10 +229,11 @@ def main() -> None:
                 f"Could not find clang-tidy binary at {args.binary},"
                 " you may need to run `lintrunner init`."
             ),
-            bypassChangedLineFiltering=None,
         )
         print(json.dumps(err_msg._asdict()), flush=True)
         exit(0)
+
+    abs_build_dir = Path(args.build_dir).resolve()
 
     with concurrent.futures.ThreadPoolExecutor(
         max_workers=os.cpu_count(),
@@ -246,7 +244,7 @@ def main() -> None:
                 check_file,
                 filename,
                 args.binary,
-                args.build_dir,
+                abs_build_dir,
             ): filename
             for filename in args.filenames
         }
