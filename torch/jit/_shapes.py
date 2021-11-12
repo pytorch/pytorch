@@ -757,18 +757,21 @@ def conv_output_size(
         kernel = dilation_ * (weight_size[d] - 1) + 1
         # most common case of just enough padding to fit kernel and stride evenly
         # paves the input
-        if 2 * padding[d - 2] == kernel - 1 and input_size[d] % stride[d - 2] == 0:
-            append_value = int(input_size[d] / stride[d - 2])
-        elif 2 * padding[d - 2] == kernel - 1:
-            append_value = input_size[d] // stride[d - 2]
-        elif (input_size[d] + (2 * padding[d - 2]) - (kernel - 1)) % stride[d - 2] == 0:
-            append_value = int(
-                (input_size[d] + (2 * padding[d - 2]) - (kernel - 1)) / stride[d - 2]
-            )
-        else:
-            append_value = (
-                input_size[d] + (2 * padding[d - 2]) - (kernel - 1)
-            ) // stride[d - 2]
+        # if 2 * padding[d - 2] == kernel - 1 and input_size[d] % stride[d - 2] == 0:
+        #     append_value = int(input_size[d] / stride[d - 2])
+        # elif 2 * padding[d - 2] == kernel - 1:
+        #     append_value = input_size[d] // stride[d - 2]
+        # elif (input_size[d] + (2 * padding[d - 2]) - (kernel - 1)) % stride[d - 2] == 0:
+        #     append_value = int(
+        #         (input_size[d] + (2 * padding[d - 2]) - (kernel - 1)) / stride[d - 2]
+        #     )
+        # else:
+        #     append_value = (
+        #         input_size[d] + (2 * padding[d - 2]) - (kernel - 1)
+        #     ) // stride[d - 2]
+        append_value = (input_size[d] + (2 * padding[d - 2]) - (kernel - 1)) // stride[
+            d - 2
+        ]
         output_size.append(append_value)
 
     return output_size
