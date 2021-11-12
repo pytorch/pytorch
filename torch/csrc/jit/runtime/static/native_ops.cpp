@@ -13,8 +13,6 @@
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
 namespace {
-constexpr auto createBorrowedTensor =
-    c10::MaybeOwnedTraits<at::TensorBase>::createBorrow;
 constexpr auto createBorrowedIValue =
     c10::MaybeOwnedTraits<c10::IValue>::createBorrow;
 } // namespace
@@ -43,7 +41,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       return [](ProcessedNode* p_node) {
         // prepare inputs
         std::vector<IValue> stack;
-        const size_t size = p_node->num_inputs();
+        const size_t size = p_node->inputs().size();
         stack.reserve(size);
         for (const auto i : c10::irange(size)) {
           stack.emplace_back(p_node->Input(i));
@@ -84,7 +82,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       return [](ProcessedNode* p_node) {
         // prepare inputs
         std::vector<IValue> stack;
-        const size_t size = p_node->num_inputs();
+        const size_t size = p_node->inputs().size();
         stack.reserve(size);
         for (const auto i : c10::irange(size)) {
           stack.emplace_back(p_node->Input(i));
@@ -105,9 +103,9 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     static_runtime_dict_unpack,
     [](Node*) -> SROperator {
       return [](ProcessedNode* p_node) {
-        DCHECK(p_node->num_inputs() - 1 == p_node->outputs().size());
+        DCHECK(p_node->inputs().size() - 1 == p_node->outputs().size());
         auto dict = p_node->Input(0).toGenericDict();
-        for (size_t i = 1; i < p_node->num_inputs(); ++i) {
+        for (size_t i = 1; i < p_node->inputs().size(); ++i) {
           const auto& key = p_node->Input(i);
           auto value = dict.find(key);
           TORCH_CHECK(value != dict.end(), "Key not in dict: ", key);
@@ -151,7 +149,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       return [](ProcessedNode* p_node) {
         // prepare inputs
         std::vector<IValue> stack;
-        const size_t size = p_node->num_inputs();
+        const size_t size = p_node->inputs().size();
         stack.reserve(size);
         for (const auto i : c10::irange(size)) {
           stack.emplace_back(p_node->Input(i));
@@ -160,7 +158,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         listConstruct(
             stack,
             p_node->node()->output()->type()->expectRef<ListType>(),
-            p_node->num_inputs());
+            p_node->inputs().size());
         // put output back
         p_node->Output(0) = std::move(stack[0]);
       };
@@ -173,7 +171,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       return [](ProcessedNode* p_node) {
         // prepare inputs
         std::vector<IValue> stack;
-        const size_t size = p_node->num_inputs();
+        const size_t size = p_node->inputs().size();
         stack.reserve(size);
         for (const auto i : c10::irange(size)) {
           stack.emplace_back(p_node->Input(i));
@@ -484,9 +482,8 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     [](Node*) -> SROperator {
       return [](ProcessedNode* pnode) {
         size_t output_idx = 0;
-        for (const auto idx : c10::irange(pnode->num_inputs())) {
-          const auto& tuple = pnode->Input(idx);
-          for (auto& elem : tuple.toTupleRef().elements()) {
+        for (const auto& tuple : pnode->inputs()) {
+          for (auto& elem : tuple->toTupleRef().elements()) {
             pnode->Output(output_idx) = createBorrowedIValue(elem);
             ++output_idx;
           }
@@ -562,26 +559,6 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(aten::split, aten_split, [](Node* n) -> SROpera
     p_node->Output(0) = at::native::split(self, split_size, dim);
   };
 });
-
-REGISTER_NATIVE_OPERATOR_FUNCTOR(
-    static_runtime::select_tensor,
-    aten_select_tensor,
-    [](Node* n) -> SROperator {
-      TORCH_CHECK(n->inputs().size() == 3);
-      return [](ProcessedNode* p_node) {
-        const auto did_copy = p_node->Input(2).toBool();
-        DCHECK(p_node->Input(0).isTensor());
-        DCHECK(!did_copy || p_node->Input(1).isTensor());
-        const IValue& assignFrom =
-            did_copy ? p_node->Input(1) : p_node->Input(0);
-        // Create an IValue that borrows the input Tensor in order to
-        // save a refcount increment here and decrement in
-        // MemoryPlanner::deallocate. MemoryPlanner knows about this
-        // and will safely clean it up by using the corresponding
-        // destroyBorrow method.
-        p_node->Output(0) = IValue(createBorrowedTensor(assignFrom.toTensor()));
-      };
-    });
 
 } // namespace jit
 } // namespace torch

@@ -3,7 +3,6 @@
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
 #include <c10/core/CPUAllocator.h>
-#include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/variant.h>
 #include <torch/csrc/jit/api/module.h>
@@ -11,7 +10,6 @@
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/inliner.h>
-#include <torch/csrc/jit/runtime/static/ProcessedNodeInputs.h>
 
 #ifdef FBCODE_CAFFE2
 #include <folly/container/F14Map.h>
@@ -39,21 +37,6 @@ TORCH_API bool canEnableStaticRuntime(
 TORCH_API std::string dumpValueSet(
     const FastSet<const Value*>& value_set,
     const char* set_name = "");
-
-TORCH_API inline bool doesNotHeapAllocateWhenStoredInIValue(const Type& type) {
-  switch (type.kind()) {
-    // NOTE: NumberType may allocate because it includes complex.
-    case TypeKind::NoneType:
-    case TypeKind::IntType:
-    case TypeKind::FloatType:
-    case TypeKind::BoolType:
-    case TypeKind::DeviceObjType:
-    case TypeKind::StreamObjType:
-      return true;
-    default:
-      return false;
-  }
-}
 
 // Group values used by `graph` into three categories:
 //
@@ -212,29 +195,21 @@ class TORCH_API StaticModule {
   size_t num_inputs() const;
   size_t num_outputs() const;
 
-  C10_NODISCARD const std::vector<uint16_t>& output_indices() const {
-    return output_indices_;
+  const FastMap<int, std::vector<DefInfo>>& index_map() const {
+    return node_inputs_ssa_def_map_;
+  }
+
+  const std::vector<DefInfo>& output_indices() const {
+    return output_ssa_defs_;
   }
 
   const std::vector<IValue>& constants() const {
     return constants_;
   }
 
- private:
-  friend class StaticRuntime;
-
-  // Our nodes don't have their inputs & outputs initialized; don't
-  // let anybody but StaticRuntime and tests get them.
   const std::vector<ProcessedNode>& nodes() const {
     return nodes_;
   }
-
- public:
-  auto num_nodes() const {
-    return nodes_.size();
-  }
-
-  C10_NODISCARD Node* findNodeWithKindForTesting(const std::string& kind) const;
 
   bool is_optimizable_container_type(const Node* n) const {
     auto it = node_is_optimizable_container_type_.find(n);
@@ -272,8 +247,10 @@ class TORCH_API StaticModule {
   std::vector<IValue> constants_;
   // The nodes we need to run
   std::vector<ProcessedNode> nodes_;
-  // Indices of graph outputs in the single values array.
-  std::vector<uint16_t> output_indices_;
+  // a vector of ssa_defs corresponding to graph->outputs()
+  std::vector<DefInfo> output_ssa_defs_;
+  // map a node idx (in graph order) to a vector of ssa_defs for node inputs
+  FastMap<int, std::vector<DefInfo>> node_inputs_ssa_def_map_;
 
   ValueGroup value_group_;
 
@@ -334,14 +311,13 @@ class TORCH_API StaticRuntime {
       const int main_runs);
 
   // Input is readwrite
-  IValue& Input(uint32_t i) {
-    DCHECK_LT(i, static_module_.num_inputs());
-    DCHECK_LT(i, values_.size());
-    return values_[i];
+  IValue& Input(size_t i) {
+    DCHECK(i < inputs_.size());
+    return inputs_[i];
   }
 
   // Output is readonly. The writing process happens inside ProcessedNodes
-  C10_NODISCARD const IValue& Output(uint32_t i) const {
+  const IValue& Output(size_t i) const {
     DCHECK(i < outputs_.size());
     return *outputs_[i];
   }
@@ -402,12 +378,12 @@ class TORCH_API StaticRuntime {
 
   // clean up owning refs of input IValues
   void clean_up_input_ivalues() {
-    for (const auto idx : c10::irange(static_module_.num_inputs())) {
-      values_[idx] = IValue();
+    for (IValue& ival : inputs_) {
+      ival = IValue();
     }
   }
 
-  IValue move_outputs_to_tuple(uint32_t num_outputs);
+  IValue move_outputs_to_tuple(size_t num_outputs);
 
   void create_memory_planner();
 
@@ -428,12 +404,7 @@ class TORCH_API StaticRuntime {
   const StaticModule& static_module_;
   bool manage_output_tensors_enabled_ = false;
   std::unique_ptr<MemoryPlanner> planner_;
-  // first static_module_.num_inputs() slots are inputs, next
-  // static_module_.constants().size() slots are a copy of
-  // static_module_.constants(), rest are regular values in the
-  // graph. ProcessedNodes reference their inputs and outputs with
-  // offsets into this array, which saves memory.
-  std::vector<IValue> values_;
+  std::vector<IValue> inputs_;
   std::vector<IValue*> outputs_;
   std::vector<ProcessedNode> nodes_;
 };
@@ -443,18 +414,51 @@ class TORCH_API ProcessedNode {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   ProcessedNode() = default;
-  // ProcessedNodes are created within StaticModule and then
-  // associated with a shared values array using set_values() when
-  // they are copied into a StaticRuntime.
   ProcessedNode(
       Node* n,
-      ProcessedNodeInputs inputs,
-      uint16_t outputs_offset,
+      std::unique_ptr<const IValue*[]> inputs,
+      size_t inputsSize,
       bool enable_out_variant,
       bool check_memory_overlap);
 
-  ProcessedNode(const ProcessedNode&) = default;
-  ProcessedNode& operator=(const ProcessedNode&) = default;
+  ProcessedNode(const ProcessedNode& rhs)
+      : node_(rhs.node_),
+        fn_(rhs.fn_),
+        inputs_(std::make_unique<const IValue*[]>(rhs.inputs_size_)),
+        outputs_(std::make_unique<IValue[]>(rhs.outputs_size_)),
+        inputs_size_(rhs.inputs_size_),
+        outputs_size_(rhs.outputs_size_),
+        op_name_(rhs.op_name_) {
+    std::copy(
+        rhs.inputs_.get(), rhs.inputs_.get() + inputs_size_, inputs_.get());
+    std::copy(
+        rhs.outputs_.get(), rhs.outputs_.get() + outputs_size_, outputs_.get());
+  }
+
+  ProcessedNode& operator=(const ProcessedNode& rhs) {
+    if (this == &rhs) {
+      return *this;
+    }
+    node_ = rhs.node_;
+    fn_ = rhs.fn_;
+
+    if (!inputs_ || inputs_size_ != rhs.inputs_size_) {
+      inputs_ = std::make_unique<const IValue*[]>(rhs.inputs_size_);
+      inputs_size_ = rhs.inputs_size_;
+    }
+    std::copy(
+        rhs.inputs_.get(), rhs.inputs_.get() + inputs_size_, inputs_.get());
+
+    if (!outputs_ || outputs_size_ != rhs.outputs_size_) {
+      outputs_ = std::make_unique<IValue[]>(rhs.outputs_size_);
+      outputs_size_ = rhs.outputs_size_;
+    }
+    std::copy(
+        rhs.outputs_.get(), rhs.outputs_.get() + outputs_size_, outputs_.get());
+    op_name_ = rhs.op_name_;
+
+    return *this;
+  }
 
   // These should be noexcept, but some Android build is failing
   // saying the noexcept specification doesn't match the calculated
@@ -469,31 +473,32 @@ class TORCH_API ProcessedNode {
   }
 
   // Input is readonly
-  C10_NODISCARD const IValue& Input(uint32_t i) const {
-    return values_[inputs_[i]];
+  const IValue& Input(size_t i) const {
+    DCHECK(i < inputs_size_);
+    return *inputs_[i];
   }
 
   // Output is readwrite
-  IValue& Output(uint32_t i) {
-    DCHECK(i < num_outputs_);
-    return values_[outputs_offset_ + i];
+  IValue& Output(size_t i) {
+    DCHECK(i < outputs_size_);
+    return outputs_[i];
   }
 
-  C10_NODISCARD const IValue& Output(uint32_t i) const {
-    DCHECK(i < num_outputs_);
-    return values_[outputs_offset_ + i];
+  const IValue& Output(size_t i) const {
+    DCHECK(i < outputs_size_);
+    return outputs_[i];
+  }
+
+  void set_input(size_t index, const IValue* ival) {
+    inputs_[index] = ival;
   }
 
   C10_NODISCARD c10::ArrayRef<const IValue> outputs() const {
-    return c10::ArrayRef<const IValue>(values_ + outputs_offset_, num_outputs_);
+    return c10::ArrayRef<const IValue>(outputs_.get(), outputs_size_);
   }
 
-  C10_NODISCARD auto num_outputs() const {
-    return num_outputs_;
-  }
-
-  C10_NODISCARD uint16_t num_inputs() const {
-    return inputs_.size();
+  C10_NODISCARD c10::ArrayRef<const IValue*> inputs() const {
+    return c10::ArrayRef<const IValue*>(inputs_.get(), inputs_size_);
   }
 
   std::vector<IValue> clone_inputs() const;
@@ -506,11 +511,9 @@ class TORCH_API ProcessedNode {
     return fn_.kind == FunctionKind::kNativeFunction;
   }
 
-#ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   const char* get_op_name() const {
     return op_name_;
   }
-#endif
 
   bool verify_no_memory_overlap() const;
 
@@ -527,15 +530,6 @@ class TORCH_API ProcessedNode {
   }
 
   void verify_and_correct_memory_overlap();
-
-  void set_values(IValue* values) {
-    DCHECK(values_ == nullptr);
-    values_ = values;
-  }
-
-  C10_NODISCARD uint16_t output_ivalue_index(uint16_t i) const {
-    return outputs_offset_ + i;
-  }
 
  private:
   C10_NODISCARD bool verify_outputs_dont_overlap_each_other() const;
@@ -555,13 +549,11 @@ class TORCH_API ProcessedNode {
     bool overlap_detected_{false};
   };
   Function fn_;
-  ProcessedNodeInputs inputs_;
-  uint16_t outputs_offset_;
-  uint16_t num_outputs_;
-  IValue* values_ = nullptr; // unowned
-#ifndef PYTORCH_DISABLE_PER_OP_PROFILING
+  std::unique_ptr<const IValue*[]> inputs_; // unowned
+  std::unique_ptr<IValue[]> outputs_;
+  size_t inputs_size_;
+  size_t outputs_size_;
   const char* op_name_;
-#endif
 };
 
 } // namespace jit
