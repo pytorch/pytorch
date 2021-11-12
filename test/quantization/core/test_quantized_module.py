@@ -24,6 +24,7 @@ from torch.testing._internal.common_quantized import (
     _calculate_dynamic_qparams,
     override_quantized_engine,
     override_qengines,
+    qengine_is_qnnpack,
 )
 from hypothesis import assume, given
 from hypothesis import strategies as st
@@ -888,12 +889,9 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             self.checkEmbeddingSerialization(qemb, num_embeddings, embedding_dim, indices,
                                              offsets, set_qconfig, is_emb_bag=True, dtype=qdtype)
 
-class TestDynamicQuantizedModule(QuantizationTestCase):
-    def _test_qconv_impl(self, q_mod, dq_mod, dim, q_engine, dtype, bias):
-        if q_engine not in torch.backends.quantized.supported_engines:
-            return
-        torch.backends.quantized.engine = q_engine
 
+class TestDynamicQuantizedModule(QuantizationTestCase):
+    def _test_qconv_impl(self, q_mod, dq_mod, dim, dtype, bias):
         in_channels = 3
         out_channels = 10
         kernel_size = 2
@@ -1004,71 +1002,69 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
         # Smoke test extra_repr
         self.assertEqual(dynamic_module._get_name(), quantized_conv_module._get_name())
 
+    @override_qengines
     def test_dynamic_conv1d(self):
         q_mod = torch.nn.quantized.Conv1d
         dq_mod = torch.nn.quantized.dynamic.Conv1d
         dim = 3
         dtype = torch.quint8
 
-        for q_engine in ["fbgemm", "qnnpack"]:
-            for bias in [True, False]:
-                for i in range(10):
-                    self._test_qconv_impl(q_mod, dq_mod, dim, q_engine, dtype, bias)
+        for bias in [True, False]:
+            self._test_qconv_impl(q_mod, dq_mod, dim, dtype, bias)
 
+    @override_qengines
     def test_dynamic_conv2d(self):
         q_mod = torch.nn.quantized.Conv2d
         dq_mod = torch.nn.quantized.dynamic.Conv2d
         dim = 4
         dtype = torch.quint8
 
-        for q_engine in ["fbgemm", "qnnpack"]:
-            for bias in [True, False]:
-                for i in range(10):
-                    self._test_qconv_impl(q_mod, dq_mod, dim, q_engine, dtype, bias)
+        for bias in [True, False]:
+            self._test_qconv_impl(q_mod, dq_mod, dim, dtype, bias)
 
+    @override_qengines
     def test_dynamic_conv3d(self):
         q_mod = torch.nn.quantized.Conv3d
         dq_mod = torch.nn.quantized.dynamic.Conv3d
         dim = 5
         dtype = torch.quint8
 
-        for q_engine in ["fbgemm"]:  # qnnpack doesn't support unpacking conv3d
-            for bias in [True, False]:
-                for i in range(10):
-                    self._test_qconv_impl(q_mod, dq_mod, dim, q_engine, dtype, bias)
+        if qengine_is_qnnpack():
+            return  # qnnpack doesn't support unpacking conv3d
+        for bias in [True, False]:
+            self._test_qconv_impl(q_mod, dq_mod, dim, dtype, bias)
 
+    @override_qengines
     def test_dynamic_convtranspose1d(self):
         q_mod = torch.nn.quantized.ConvTranspose1d
         dq_mod = torch.nn.quantized.dynamic.ConvTranspose1d
         dim = 3
         dtype = torch.quint8
 
-        for q_engine in ["fbgemm", "qnnpack"]:
-            for bias in [True, False]:
-                for i in range(10):
-                    self._test_qconv_impl(q_mod, dq_mod, dim, q_engine, dtype, bias)
+        for bias in [True, False]:
+            self._test_qconv_impl(q_mod, dq_mod, dim, dtype, bias)
 
+    @override_qengines
     def test_dynamic_convtranspose2d(self):
         q_mod = torch.nn.quantized.ConvTranspose2d
         dq_mod = torch.nn.quantized.dynamic.ConvTranspose2d
         dim = 4
         dtype = torch.quint8
 
-        for q_engine in ["fbgemm", "qnnpack"]:
-            for bias in [True, False]:
-                for i in range(10):
-                    self._test_qconv_impl(q_mod, dq_mod, dim, q_engine, dtype, bias)
+        for bias in [True, False]:
+            self._test_qconv_impl(q_mod, dq_mod, dim, dtype, bias)
 
+    @override_qengines
     def test_dynamic_convtranspose3d(self):
         q_mod = torch.nn.quantized.ConvTranspose3d
         dq_mod = torch.nn.quantized.dynamic.ConvTranspose3d
         dim = 5
         dtype = torch.quint8
 
-        for q_engine in ["fbgemm"]:  # qnnpack doesn't support unpacking conv3d
-            for bias in [True, False]:
-                for i in range(10):
-                    self._test_qconv_impl(q_mod, dq_mod, dim, q_engine, dtype, bias)
+        if qengine_is_qnnpack():
+            return  # qnnpack doesn't support unpacking conv3d
+        for bias in [True, False]:
+            self._test_qconv_impl(q_mod, dq_mod, dim, dtype, bias)
 
     @given(
         batch_size=st.integers(1, 5),
