@@ -46,53 +46,7 @@ AtenLtcDeviceMapper* AtenLtcDeviceMapper::Get() {
   return device_mapper;
 }
 
-LTCTensorImpl* GetLtcTensorImpl(const at::Tensor& tensor) {
-  return dynamic_cast<LTCTensorImpl*>(tensor.unsafeGetTensorImpl());
-}
-
-LazyTensor GetOrCreateLtcTensor(const at::Tensor& tensor,
-                                const torch::lazy::BackendDevice& device) {
-  if (!tensor.defined()) {
-    return LazyTensor();
-  }
-  auto xtensor = TryGetLtcTensor(tensor);
-  return xtensor ? xtensor : LazyTensor::Create(tensor, device);
-}
-
 }  // namespace
-
-LazyTensor TryGetLtcTensor(const at::Tensor& tensor) {
-  LTCTensorImpl* impl = GetLtcTensorImpl(tensor);
-  if (impl == nullptr) {
-    return LazyTensor();
-  }
-  return impl->tensor();
-}
-
-LazyTensor GetLtcTensor(const at::Tensor& tensor) {
-  auto lazy_tensor = TryGetLtcTensor(tensor);
-  CHECK(lazy_tensor) << "Input tensor is not a lazy tensor: " << tensor.toString();
-  return lazy_tensor;
-}
-
-std::vector<LazyTensor> GetLtcTensors(c10::ArrayRef<at::Tensor> tensors) {
-  std::vector<LazyTensor> ltc_tensors;
-  ltc_tensors.reserve(tensors.size());
-  for (const auto& tensor : tensors) {
-    ltc_tensors.push_back(bridge::GetLtcTensor(tensor));
-  }
-  return ltc_tensors;
-}
-
-LazyTensor GetOrCreateLtcTensor(const c10::optional<at::Tensor>& tensor,
-                                const torch::lazy::BackendDevice& device) {
-  return GetOrCreateLtcTensor(tensor.value_or(at::Tensor()), device);
-}
-
-LazyTensor GetLtcTensorOrCreateForWrappedNumber(const at::Tensor& tensor, const torch::lazy::BackendDevice& device) {
-  return tensor.unsafeGetTensorImpl()->is_wrapped_number() ?
-      GetOrCreateLtcTensor(tensor, device) : GetLtcTensor(tensor);
-}
 
 c10::optional<torch::lazy::BackendDevice> GetLtcDevice(const at::Tensor& tensor) {
   auto xtensor = TryGetLtcTensor(tensor);
@@ -123,12 +77,6 @@ torch::lazy::BackendDevice AtenDeviceToLtcDevice(const c10::Device& device) {
 c10::Device LtcDeviceToAtenDevice(const torch::lazy::BackendDevice& device) {
   return c10::Device(at::kLazy,
                      AtenLtcDeviceMapper::Get()->GetDeviceOrdinal(device));
-}
-
-at::Tensor AtenFromLtcTensor(LazyTensor ltc_tensor) {
-  return ltc_tensor.is_null() ? at::Tensor()
-                              : at::Tensor(c10::make_intrusive<LTCTensorImpl>(
-                                    std::move(ltc_tensor)));
 }
 
 }  // namespace bridge

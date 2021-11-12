@@ -170,12 +170,12 @@ bool CloseValues(at::Tensor tensor1, at::Tensor tensor2, double rtol,
 }
 
 std::string GetTensorTextGraph(at::Tensor tensor) {
-  LazyTensor xtensor = bridge::GetLtcTensor(tensor);
+  LazyTensor xtensor = TryGetLtcTensor(tensor);
   return ir::DumpUtil::ToText({xtensor.GetIrValue().node.get()});
 }
 
 std::string GetTensorDotGraph(at::Tensor tensor) {
-  LazyTensor xtensor = bridge::GetLtcTensor(tensor);
+  LazyTensor xtensor = TryGetLtcTensor(tensor);
   return ir::DumpUtil::ToDot({xtensor.GetIrValue().node.get()});
 }
 
