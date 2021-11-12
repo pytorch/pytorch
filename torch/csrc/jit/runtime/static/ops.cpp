@@ -1060,12 +1060,10 @@ void to_copy_functor(ProcessedNode* p_node) {
   auto non_blocking = p_node->Input(2).toBool(); // non_blocking
   // handle memory format
   bool copy_strides = false;
-  c10::optional<c10::MemoryFormat> memory_format;
+  c10::optional<c10::MemoryFormat> memory_format = c10::MemoryFormat::Preserve;
   if (has_memory_format) {
     memory_format = p_node->Input(4).toOptional<c10::MemoryFormat>().value_or(
         c10::MemoryFormat::Preserve);
-  } else {
-    memory_format = c10::MemoryFormat::Preserve;
   }
 
   if (!has_constant_non_tensor_dtype_and_flags || p_node->Output(0).isNone()) {
