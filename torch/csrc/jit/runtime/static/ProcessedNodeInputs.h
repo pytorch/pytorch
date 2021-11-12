@@ -31,7 +31,7 @@ class ProcessedNodeInputs {
   }
 
   uint16_t operator[](uint16_t idx) const {
-    return (*const_cast<ProcessedNodeInputs *>(this))[idx];
+    return (*const_cast<ProcessedNodeInputs*>(this))[idx];
   }
 
   uint16_t& operator[](uint16_t idx) {
@@ -57,7 +57,7 @@ class ProcessedNodeInputs {
 
  private:
   class HeapArrayPtr {
-    public:
+   public:
     HeapArrayPtr() = default;
     ~HeapArrayPtr() = default;
 
@@ -66,7 +66,9 @@ class ProcessedNodeInputs {
     HeapArrayPtr(const HeapArrayPtr& rhs) : array_(alloc(rhs.size())) {
       if (rhs.array_) {
         std::memcpy(
-            array_.get(), rhs.array_.get(), (rhs.size() + 1) * sizeof(uint16_t));
+            array_.get(),
+            rhs.array_.get(),
+            (rhs.size() + 1) * sizeof(uint16_t));
       }
     }
 
@@ -81,7 +83,9 @@ class ProcessedNodeInputs {
 
       if (rhs.array_) {
         std::memcpy(
-            array_.get(), rhs.array_.get(), (rhs.size() + 1) * sizeof(uint16_t));
+            array_.get(),
+            rhs.array_.get(),
+            (rhs.size() + 1) * sizeof(uint16_t));
       }
       return *this;
     }
@@ -107,7 +111,7 @@ class ProcessedNodeInputs {
       return array_[idx + 1];
     }
 
-    private:
+   private:
     // NOLINTNEXTLINE(modernize-avoid-c-arrays)
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays)
     std::unique_ptr<uint16_t[]> array_;
@@ -219,6 +223,7 @@ class ProcessedNodeInputs {
 
     InlineRepr inline_repr_{};
     OutlineRepr outline_repr_;
+
    private:
     void destroyIfOutline() {
       if (!is_inline()) {
@@ -229,4 +234,6 @@ class ProcessedNodeInputs {
 #pragma pack(pop)
 };
 
-static_assert(sizeof(ProcessedNodeInputs) == 12, "ProcessedNodeInputs has the wrong size!");
+static_assert(
+    sizeof(ProcessedNodeInputs) == 12,
+    "ProcessedNodeInputs has the wrong size!");
