@@ -223,6 +223,10 @@ namespace functionalization {
 namespace impl {
 
 Tensor to_functional_tensor(const Tensor& tensor) {
+  // Note [Wrapped Numbers <> Functionalization]
+  if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
+      return tensor;
+  }
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!isFunctionalTensor(tensor));
   return at::detail::make_tensor<FunctionalTensorWrapper>(tensor);
 }
@@ -249,6 +253,10 @@ TensorList to_functional_tensor(const TensorList& t_list) {
 }
 
 Tensor from_functional_tensor(const Tensor& tensor) {
+  // Note [Wrapped Numbers <> Functionalization]
+  if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
+      return tensor;
+  }
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(isFunctionalTensor(tensor));
   auto impl = unsafeGetFunctionalWrapper(tensor);
   return impl->value();
@@ -285,6 +293,7 @@ TensorList from_functional_tensor(const TensorList& t_list) {
 
 void sync(const Tensor& t) {
   if (t.unsafeGetTensorImpl()->is_wrapped_number()) {
+    // Note [Wrapped Numbers <> Functionalization]
     // Unfortunately, we can't easily guarantee that wrapped numbers (scalar-tensors)
     // get wrapped up in a FunctionalTensorWrapper object, since they skip the dispatcher.
     // That shouldn't matter, since I don't think we're allowed to assign to wrapped numbers anyway.

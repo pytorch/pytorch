@@ -67,6 +67,24 @@ $2 = torch._ops.aten.add($1, tensor([[1., 1.],
 $3 = torch._ops.aten.view($2, [4, 2])
 $4 = torch._ops.aten.mul($3, $3)""")
 
+    def test_inplace_on_non_view(self):
+        def f(x):
+            # test for the case where we functionalize an inplace op on the other tensor - not a view.
+            # This is worth checking because the tensor will have an empty ViewMeta stack, which needs to be special cased.
+            tmp = torch.ones(4, 2)
+            y = x.view(4, 2)
+            x.add_(tmp)
+            return y
+        self.assert_functionalization(f, torch.ones(4, 2))
+        logs = self.get_logs(f, torch.ones(4, 2))
+        self.assertExpectedInline('\n'.join(logs), """\
+$0 = input('input')
+$1 = torch._ops.aten.view($0, [4, 2])
+$2 = torch._ops.aten.add($0, tensor([[1., 1.],
+        [1., 1.],
+        [1., 1.],
+        [1., 1.]]))""")
+
     def test_diagonal(self):
         def f(x):
             # test: view ops that take a subset of the original tensor (select/diagonal)
@@ -130,6 +148,24 @@ $0 = input('input')
 $1 = torch._ops.aten.transpose($0, 1, 0)
 $2 = torch._ops.aten.select($1, 0, 0)
 $3 = torch._ops.aten.add($2, tensor([1., 1., 1., 1.]))""")
+
+    def test_scalars(self):
+        def f(x):
+            # test: the pass can handle scalar inputs properly
+            tmp = torch.ones(4, 2)
+            y = x.view(4, 2)
+            y.add_(1)
+            z = 2 * y
+            z.div_(1)
+            return z
+        self.assert_functionalization(f, torch.ones(4, 2))
+        logs = self.get_logs(f, torch.ones(4, 2))
+        self.assertExpectedInline('\n'.join(logs), """\
+$0 = input('input')
+$1 = torch._ops.aten.view($0, [4, 2])
+$2 = torch._ops.aten.add($1, tensor(1))
+$3 = torch._ops.aten.mul($2, tensor(2))
+$4 = torch._ops.aten.div($3, tensor(1))""")
 
     def test_everything(self):
         def f(x):
