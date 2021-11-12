@@ -35,10 +35,10 @@ int nnc_lowerings_lazy_registration() {
   //     {"prepacked::conv2d_clamp_run"},
   //     computePrepackedConv2dClampRun);
 
-  // TODO: convert to schema, add a test
-  // RegisterNNCLoweringsFunction prepacked_linear_clamp_run(
-  //     {"prepacked::linear_clamp_run"},
-  //     computePrepackedLinearClampRun);
+  // TODO: add a test
+  RegisterNNCLoweringsFunction prepacked_linear_clamp_run(
+      {"prepacked::linear_clamp_run(Tensor X, __torch__.torch.classes.xnnpack.LinearOpContext W_prepack) -> (Tensor Y)"},
+      computePrepackedLinearClampRun);
 
   RegisterNNCLoweringsFunction aten_sub(
       {"aten::sub.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> (Tensor)",
