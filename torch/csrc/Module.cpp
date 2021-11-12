@@ -6,6 +6,7 @@
 #endif
 
 #include <ATen/ATen.h>
+#include <ATen/native/ConvUtils.h>
 #include <ATen/DLConvertor.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
@@ -965,6 +966,36 @@ Call this whenever a new thread is created in order to propagate values from
       return WeakTensorRef(THPVariable_Unpack(tensor.ptr()));
     }))
     .def("expired", &WeakTensorRef::expired);
+
+  py::enum_<at::native::ConvBackend>(py_module, "_ConvBackend")
+    .value("CudaDepthwise2d", at::native::ConvBackend::CudaDepthwise2d)
+    .value("CudaDepthwise3d", at::native::ConvBackend::CudaDepthwise3d)
+    .value("Cudnn", at::native::ConvBackend::Cudnn)
+    .value("CudnnTranspose", at::native::ConvBackend::CudnnTranspose)
+    .value("Empty", at::native::ConvBackend::Empty)
+    .value("Miopen", at::native::ConvBackend::Miopen)
+    .value("MiopenDepthwise", at::native::ConvBackend::MiopenDepthwise)
+    .value("MiopenTranspose", at::native::ConvBackend::MiopenTranspose)
+    .value("Mkldnn", at::native::ConvBackend::Mkldnn)
+    .value("MkldnnEmpty", at::native::ConvBackend::MkldnnEmpty)
+    .value("NnpackSpatial", at::native::ConvBackend::NnpackSpatial)
+    .value("Overrideable", at::native::ConvBackend::Overrideable)
+    .value("Slow2d", at::native::ConvBackend::Slow2d)
+    .value("Slow3d", at::native::ConvBackend::Slow3d)
+    .value("SlowDilated2d", at::native::ConvBackend::SlowDilated2d)
+    .value("SlowDilated3d", at::native::ConvBackend::SlowDilated3d)
+    .value("SlowTranspose2d", at::native::ConvBackend::SlowTranspose2d)
+    .value("SlowTranspose3d", at::native::ConvBackend::SlowTranspose3d)
+    .value("Winograd3x3Depthwise", at::native::ConvBackend::Winograd3x3Depthwise)
+    .value("Xnnpack2d", at::native::ConvBackend::Xnnpack2d);
+
+  py_module.def("_select_conv_backend", [](
+        const at::Tensor& input, const at::Tensor& weight, const c10::optional<at::Tensor>& bias_opt,
+        at::IntArrayRef stride_, at::IntArrayRef padding_, at::IntArrayRef dilation_,
+        bool transposed_, at::IntArrayRef output_padding_, int64_t groups_) {
+      return at::native::select_conv_backend(
+          input, weight, bias_opt, stride_, padding_, dilation_, transposed_, output_padding_, groups_);
+  });
 
 #ifdef USE_CUDA
   PyObject *has_cuda = Py_True;
