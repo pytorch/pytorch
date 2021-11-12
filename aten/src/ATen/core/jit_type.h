@@ -2082,6 +2082,7 @@ inline bool IValue::isBoolList() const {
 
 template<>
 inline std::shared_ptr<NamedType> Type::cast() {
+  TORCH_INTERNAL_ASSERT(kind()!= TypeKind::DynamicType);
   if (kind() == TypeKind::TupleType || kind() == TypeKind::FunctionType ||
       kind() == TypeKind::ClassType || kind() == TypeKind::InterfaceType) {
     return std::static_pointer_cast<NamedType>(shared_from_this());
@@ -2091,6 +2092,7 @@ inline std::shared_ptr<NamedType> Type::cast() {
 
 template<>
 inline std::shared_ptr<const NamedType> Type::cast<NamedType>() const {
+  TORCH_INTERNAL_ASSERT(kind()!= TypeKind::DynamicType);
   if (kind() == TypeKind::TupleType || kind() == TypeKind::FunctionType ||
       kind() == TypeKind::ClassType || kind() == TypeKind::InterfaceType) {
     return std::static_pointer_cast<const NamedType>(shared_from_this());
