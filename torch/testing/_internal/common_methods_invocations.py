@@ -1134,7 +1134,7 @@ def sample_inputs_tensor_split(op_info, device, dtype, requires_grad, **kwargs):
     return list(generator())
 
 
-def sample_inputs_linalg_det(op_info, device, dtype, requires_grad):
+def sample_inputs_linalg_det(op_info, device, dtype, requires_grad, **kwargs):
     kw = dict(device=device, dtype=dtype)
     inputs = [
         make_tensor((S, S), **kw),
@@ -1161,7 +1161,7 @@ def sample_inputs_linalg_det(op_info, device, dtype, requires_grad):
         t.requires_grad = requires_grad
     return [SampleInput(t) for t in inputs]
 
-def sample_inputs_linalg_det_singular(op_info, device, dtype, requires_grad):
+def sample_inputs_linalg_det_singular(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     def make_singular_matrix_batch_base(size, rank):
@@ -1180,7 +1180,7 @@ def sample_inputs_linalg_det_singular(op_info, device, dtype, requires_grad):
             u_diag_abs_largest = u_diag_abs.max(dim=-1, keepdim=True).values
             u_diag_abs_smallest_idxs = torch.topk(u_diag_abs, k=(n - rank), largest=False).indices
             u.diagonal(0, -2, -1).div_(u_diag_abs_largest)
-            u.diagonal(0, -2, -1)[..., u_diag_abs_smallest_idxs] = torch.finfo(dtype).eps
+            u[..., u_diag_abs_smallest_idxs] = torch.finfo(dtype).eps
 
             matrix = p @ l @ u
 
