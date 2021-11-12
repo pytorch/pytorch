@@ -438,7 +438,6 @@ void UseVariadicTupleUnpack(const std::shared_ptr<Graph>& graph) {
   }
 }
 
-
 // This macro makes maps from c10::Symbol -> c10::Symbol a lot easier to read.
 #define OP_PAIR(first, second) \
   { fromQualString(first), fromQualString(second) }

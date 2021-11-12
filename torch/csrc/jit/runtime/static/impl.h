@@ -446,7 +446,12 @@ class TORCH_API ProcessedNode {
   // ProcessedNodes are created within StaticModule and then
   // associated with a shared values array using set_values() when
   // they are copied into a StaticRuntime.
-  ProcessedNode(Node* n, ProcessedNodeInputs inputs, uint16_t outputs_offset, bool enable_out_variant, bool check_memory_overlap);
+  ProcessedNode(
+      Node* n,
+      ProcessedNodeInputs inputs,
+      uint16_t outputs_offset,
+      bool enable_out_variant,
+      bool check_memory_overlap);
 
   ProcessedNode(const ProcessedNode&) = default;
   ProcessedNode& operator=(const ProcessedNode&) = default;
@@ -531,6 +536,7 @@ class TORCH_API ProcessedNode {
   C10_NODISCARD uint16_t output_ivalue_index(uint16_t i) const {
     return outputs_offset_ + i;
   }
+
  private:
   C10_NODISCARD bool verify_outputs_dont_overlap_each_other() const;
 
