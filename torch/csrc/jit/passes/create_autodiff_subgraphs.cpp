@@ -28,6 +28,9 @@ struct WorkBlock : public std::pair<Node*, Node*> {
 
 struct topo_cmp_value {
   bool operator()(Value* a, Value* b) const {
+    if (a->node() == b->node()) {
+      return a->unique() < b->unique();
+    }
     return a->node()->isBefore(b->node());
   }
 };
@@ -66,11 +69,11 @@ class SubgraphSlicer {
   }
 
   void cleanupSubgraphs() {
-    auto curNode = *block_->nodes().rbegin();
-
     bool any_changed = true;
 
     while(any_changed) {
+      auto curNode = *block_->nodes().rbegin();
+      GRAPH_DEBUG("Running cleanupSubgraphs on ", getHeader(curNode));
         any_changed = false;
         while (curNode != *block_->nodes().rend()) {
           // Save the previous node, since we might delete `curNode` in next block
@@ -79,7 +82,8 @@ class SubgraphSlicer {
 
             // aliased outputs in DifferentiableGraphs must be unfused
             // since autodiff doesn't know how to handle them correctly
-            any_changed = unfuseAliasedOutputs(curNode);
+            any_changed = any_changed || unfuseAliasedOutputs(curNode);
+            GRAPH_DEBUG("any_changed on ", any_changed, " ", curNode->g(attr::Subgraph)->toString(false));
             // Inlining nodes may cause some subexpression to come back in the
             // subgraphs (for example, copying constants in repeatedly will generate
             // redundant prim::Constants). Run CSE to clean them up.
@@ -94,6 +98,7 @@ class SubgraphSlicer {
 
     }
 
+    GRAPH_DEBUG("Running on sublocks");
     for (Node* n : block_->nodes()) {
       for (Block* b : n->blocks()) {
         SubgraphSlicer(b, graph_, minSubgraphSize_, aliasDb_, diff_nodes_)
@@ -162,6 +167,7 @@ class SubgraphSlicer {
 
     for (auto i : c10::irange(sets.size())) {
       if (sets[i].size() <= 1) {
+        GRAPH_DEBUG("Set ", i, " with leader ", (*(sets[i].begin()))->debugName(), " size = ", sets[i].size());
         continue;
       }
 

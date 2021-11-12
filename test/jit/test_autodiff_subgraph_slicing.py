@@ -52,8 +52,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         with disable_autodiff_subgraph_inlining():
             with enable_profiling_mode_for_profiling_tests():
                 output = func(input, profile_and_replay=True)
-                self.assertAutodiffNode(func.graph_for(input), True, ['prim::ConstantChunk'], [])
-
+                FileCheck().check_not("prim::DifferentiableGraph").run(func.graph_for(input))
 
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "This threshold is only valid for Profiling Executor")
     def test_diff_graph_inline_threshold(self):
