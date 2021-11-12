@@ -4008,7 +4008,8 @@ class TestQuantizedConv(TestCase):
             use_channelwise=False, use_transpose=True)
 
         # check that this doesn't error
-        torch.nn.quantized.ConvTranspose1d(input_channels, output_channels, 1)
+        test_conv = torch.nn.quantized.ConvTranspose1d(input_channels, output_channels, 1)
+        test_conv(X_q)
 
         # Test the module implementation
         qconv_op = torch.nn.quantized.ConvTranspose1d(
@@ -4117,7 +4118,8 @@ class TestQuantizedConv(TestCase):
             use_channelwise=False, use_transpose=True)
 
         # check that this doesn't error
-        torch.nn.quantized.ConvTranspose2d(input_channels, output_channels, 1)
+        test_conv = torch.nn.quantized.ConvTranspose2d(input_channels, output_channels, 1)
+        test_conv(X_q)
 
         # Test the module implementation
         qconv_op = torch.nn.quantized.ConvTranspose2d(
@@ -4236,7 +4238,8 @@ class TestQuantizedConv(TestCase):
             use_channelwise=False, use_transpose=True)
 
         # check that this doesn't error
-        torch.nn.quantized.ConvTranspose3d(input_channels, output_channels, 1)
+        test_conv = torch.nn.quantized.ConvTranspose3d(input_channels, output_channels, 1)
+        test_conv(X_q)
 
         # Test the module implementation
         qconv_op = torch.nn.quantized.ConvTranspose3d(
