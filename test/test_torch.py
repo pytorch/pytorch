@@ -1271,7 +1271,7 @@ class AbstractTestCases:
                 self._test_scatter_base(self, lambda t: t, 'scatter_', reduction=method)
                 self._test_scatter_base(self, lambda t: t, 'scatter_', True, reduction=method)
 
-        def test_scatter_reduce2(self):
+        def test_scatter_reduce(self):
             dtype = device = None
 
             output_size = 10
@@ -1281,7 +1281,7 @@ class AbstractTestCases:
             input = torch.randn(shape, dtype=dtype, device=device)
 
             for dim in range(len(shape)):
-                output = input.scatter_reduce2(dim, index, "sum", output_size=output_size)
+                output = input._scatter_reduce(dim, index, "sum", output_size=output_size)
 
                 output_shape = copy.copy(shape)
                 output_shape[dim] = output_size
@@ -1303,23 +1303,23 @@ class AbstractTestCases:
 
                 self.assertTrue(torch.allclose(output, expected))
 
-                torch.scatter_reduce2(input, dim, index, "sum", out=output)
+                torch._scatter_reduce(input, dim, index, "sum", out=output)
                 self.assertTrue(torch.allclose(output, expected))
 
             with self.assertRaisesRegex(RuntimeError, "Expected `dim` to be in range -3 to 2"):
-                torch.scatter_reduce2(input, 4, index, "sum")
+                torch._scatter_reduce(input, 4, index, "sum")
 
             with self.assertRaisesRegex(RuntimeError, "Shape mismatch"):
                 index2 = torch.randint(0, output_size, (10, ), dtype=torch.long, device=device)
-                torch.scatter_reduce2(input, 0, index2, "sum")
+                torch._scatter_reduce(input, 0, index2, "sum")
 
             with self.assertRaisesRegex(RuntimeError, "`reduce` argument must be 'sum'"):
-                torch.scatter_reduce2(input, 2, index, "mean")
+                torch._scatter_reduce(input, 2, index, "mean")
 
             with self.assertRaisesRegex(RuntimeError, "Expected `index` values to be in range 0 to 2"):
                 input2 = torch.randn(10, dtype=dtype, device=device)
                 index2 = torch.tensor([0, 1, 0, 1, 2, 3, 3, 4, 4, 3])
-                torch.scatter_reduce2(input2, 0, index2, "sum", output_size=2)
+                torch._scatter_reduce(input2, 0, index2, "sum", output_size=2)
 
         def test_structseq_repr(self):
             a = torch.arange(250).reshape(5, 5, 10)
