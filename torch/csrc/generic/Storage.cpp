@@ -2,9 +2,13 @@
 #define TH_GENERIC_FILE "torch/csrc/generic/Storage.cpp"
 #else
 
+#if !defined(THC_GENERIC_FILE)
+#include <c10/core/CPUAllocator.h>
+#endif
+
 PyObject *THPStorageClass = nullptr;
 
-PyObject * THPStorage_(New)(THWStorage *ptr)
+PyObject * THPStorage_(New)(c10::StorageImpl *ptr)
 {
   AT_ASSERT(ptr);
   PyTypeObject *type = (PyTypeObject *)THPStorageClass;
@@ -12,25 +16,17 @@ PyObject * THPStorage_(New)(THWStorage *ptr)
   if (obj) {
     ((THPStorage *)obj)->cdata = ptr;
   } else {
-    THWStorage_(free)(LIBRARY_STATE ptr);
+    c10::raw::intrusive_ptr::decref(ptr);
   }
   return obj;
 }
 
 static void THPStorage_(dealloc)(THPStorage* self)
 {
-  THWStorage_(free)(LIBRARY_STATE self->cdata);
+  if (self->cdata) {
+    c10::raw::intrusive_ptr::decref(self->cdata);
+  }
   Py_TYPE(self)->tp_free((PyObject*)self);
-}
-
-static THWStorage* THPStorage_(newWithAllocator)(int64_t size, at::Allocator* allocator)
-{
-#if defined(THC_GENERIC_FILE)
-  THPUtils_setError(THPStorageStr " does not support custom allocators");
-  return nullptr;
-#else
-  return THWStorage_(newWithAllocator)(LIBRARY_STATE size, allocator);
-#endif
 }
 
 static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObject *kwargs)
@@ -55,22 +51,28 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
     if (num_args == 0) {
       PyObject *cdata_ptr = PyDict_GetItemString(kwargs, "cdata");
       if (num_kwargs == 1 && cdata_ptr && THPUtils_checkLong(cdata_ptr)) {
-        THWStorage *ptr = (THWStorage*)PyLong_AsVoidPtr(cdata_ptr);
+        c10::StorageImpl *ptr = (c10::StorageImpl*)PyLong_AsVoidPtr(cdata_ptr);
         self->cdata = ptr;
         return (PyObject*)self.release();
       }
     }
     THPUtils_assert(num_kwargs == 0, THPStorageStr "(): invalid keyword arguments");
   }
+  if (allocator == nullptr) {
+#if defined(THC_GENERIC_FILE)
+      allocator = c10::cuda::CUDACachingAllocator::get();
+#else
+      allocator = c10::GetDefaultCPUAllocator();
+#endif
+  }
 
   // torch.Storage()
   if (num_args == 0) {
-    // NOLINTNEXTLINE(bugprone-branch-clone)
-    if (allocator) {
-      self->cdata = THPStorage_(newWithAllocator)(0, allocator);
-    } else {
-      self->cdata = THWStorage_(new)(LIBRARY_STATE_NOARGS);
-    }
+    self->cdata = c10::make_intrusive<at::StorageImpl>(
+      c10::StorageImpl::use_byte_size_t(),
+      0,
+      allocator,
+      /*resizable=*/true).release();
     return (PyObject*)self.release();
   }
 
@@ -79,12 +81,11 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
   // torch.Storage(size)
   if (num_args == 1 && THPUtils_checkLong(first_arg)) {
     int64_t size = THPUtils_unpackLong(first_arg);
-    // NOLINTNEXTLINE(bugprone-branch-clone)
-    if (allocator) {
-      self->cdata = THPStorage_(newWithAllocator)(size, allocator);
-    } else {
-      self->cdata = THWStorage_(newWithSize)(LIBRARY_STATE size);
-    }
+    self->cdata = c10::make_intrusive<at::StorageImpl>(
+      c10::StorageImpl::use_byte_size_t(),
+      size,
+      allocator,
+      /*resizable=*/true).release();
     return (PyObject*)self.release();
   }
 
@@ -93,7 +94,16 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
     Py_ssize_t length = PySequence_Length(first_arg);
     THPUtils_assert(length >= 0, "couldn't obtain the length of %s",
         THPUtils_typename(first_arg));
-    self->cdata = THWStorage_(newWithSize)(LIBRARY_STATE length);
+    self->cdata = c10::make_intrusive<at::StorageImpl>(
+      c10::StorageImpl::use_byte_size_t(),
+      length,
+#if defined(THC_GENERIC_FILE)
+      c10::cuda::CUDACachingAllocator::get(),
+#else
+      c10::GetDefaultCPUAllocator(),
+#endif
+      /*resizable=*/true)
+      .release();
     THPObjectPtr item;
     try {
       for (Py_ssize_t i = 0; i < length; i++) {
@@ -104,7 +114,10 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
         self->cdata->unsafe_data<scalar_t>()[i] = value;
 #else
         // TODO: this might be slow - consider batched updates?
-        THCStorage_(set)(LIBRARY_STATE self->cdata, i, value);
+        storage_set(
+          at::unsafeStorageFromTH(self->cdata, /*retain=*/true),
+          i,
+          value);
 #endif
       }
     } catch (const std::exception &e) {
@@ -147,7 +160,7 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
             nindex, self->cdata->nbytes() / sizeof(scalar_t)));
       return nullptr;
     }
-    scalar_t value = THWStorage_(get)(LIBRARY_STATE self->cdata, nindex);
+    scalar_t value = storage_get(at::unsafeStorageFromTH(self->cdata, /*retain=*/true), nindex);
     return THPUtils_(newReal)(value);
   /* Slice index */
   } else if (PySlice_Check(index)) {
@@ -205,7 +218,10 @@ static int THPStorage_(set)(THPStorage *self, PyObject *index, PyObject *value)
   scalar_t rvalue = THPUtils_(unpackReal)(value);
   if (THPUtils_checkLong(index)) {
     int64_t nindex = THPUtils_unpackLong(index);
-    THWStorage_(set)(LIBRARY_STATE self->cdata, nindex, rvalue);
+    storage_set(
+      at::unsafeStorageFromTH(self->cdata, /*retain=*/true),
+      nindex,
+      rvalue);
     return 0;
   } else if (PySlice_Check(index)) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -221,7 +237,10 @@ static int THPStorage_(set)(THPStorage *self, PyObject *index, PyObject *value)
     // TODO: check the bounds only once
     // TODO: fill?
     for (;start < stop; start++)
-      THWStorage_(set)(LIBRARY_STATE self->cdata, start, rvalue);
+      storage_set(
+        at::unsafeStorageFromTH(self->cdata, /*retain=*/true),
+        start,
+        rvalue);
     return 0;
   }
   THPUtils_setError("can't index a " THPStorageStr " with %s",

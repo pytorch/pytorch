@@ -9,7 +9,6 @@
 #include <TH/TH.h>
 // See Note [TH abstraction violation]
 //  - Used to get at the allocator associated with a storage
-#include <TH/THStorageFunctions.hpp>
 #include <libshm.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/copy_utils.h>
@@ -24,9 +23,11 @@
 #include <torch/csrc/generic/Storage.cpp>
 #include <TH/THGenerateByteType.h>
 
+#include <c10/util/intrusive_ptr.h>
+
 template<>
-void THPPointer<THStorage>::free() {
+void THPPointer<c10::StorageImpl>::free() {
   if (ptr) {
-    THStorage_free(ptr);
+    c10::raw::intrusive_ptr::decref(ptr);
   }
 }
