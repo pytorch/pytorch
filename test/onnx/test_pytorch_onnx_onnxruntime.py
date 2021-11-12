@@ -3654,6 +3654,9 @@ class TestONNXRuntime(unittest.TestCase):
             def __init__(self):
                 super(GatherModule, self).__init__()
                 self.register_buffer("weight", torch.ones(5))
+                # torch.nn.Embedding is converted to ONNX::Gather.
+                # Constant folding will be triggerred for constant inputs.
+                # This pattern is common for constant mask inputs in transformer models.
                 self.embed = torch.nn.Embedding(8, 3)
 
             def forward(self, x):

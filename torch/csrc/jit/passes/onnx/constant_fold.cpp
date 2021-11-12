@@ -463,7 +463,8 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     axis += axis < 0 ? inputTensorValues[0].sizes().size() : 0;
     at::Tensor indices = inputTensorValues[1];
     auto q = indices.dim();
-    // Cases where rank of indices > 1 are not currently supported.
+    // at::index_select only supports indices with rank <= 1.
+    // See https://pytorch.org/docs/master/generated/torch.index_select.html
     if (q > 1) {
       return c10::nullopt;
     }
