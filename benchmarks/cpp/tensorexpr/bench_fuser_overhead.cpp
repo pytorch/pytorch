@@ -1,7 +1,7 @@
 #include <benchmark/benchmark.h>
+#include <c10/core/InferenceMode.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/torch.h>
-#include <c10/core/InferenceMode.h>
 
 using namespace torch::jit;
 
