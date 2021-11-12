@@ -260,6 +260,7 @@ if(INTERN_BUILD_ATEN_OPS)
     include("${CMAKE_BINARY_DIR}/aten/src/ATen/cuda_generated_${gen_type}.cmake")
 
     add_custom_command(
+      COMMENT "Generating ATen ${gen_type}"
       OUTPUT ${generated_${gen_type}} ${cuda_generated_${gen_type}} ${core_generated_${gen_type}}
         ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_${gen_type}.cmake
         ${CMAKE_BINARY_DIR}/aten/src/ATen/core_generated_${gen_type}.cmake
