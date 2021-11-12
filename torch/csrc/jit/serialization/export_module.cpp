@@ -38,6 +38,10 @@
 namespace torch {
 namespace jit {
 
+IValue to_tuple(std::initializer_list<IValue> ivalues) {
+  return c10::ivalue::Tuple::create(ivalues);
+}
+
 IValue to_tuple(std::vector<IValue> ivalues) {
   return c10::ivalue::Tuple::create(std::move(ivalues));
 }
@@ -242,7 +246,8 @@ std::pair<IValue, IValue> getFunctionTuple(
           "__torch__ types other than torchbind (__torch__.torch.classes)"
           "are not supported in lite interpreter. ",
           "Workaround: instead of using arbitrary class type (class Foo()), ",
-          "define a pytorch class (class Foo(torch.nn.Module)).");
+          "define a pytorch class (class Foo(torch.nn.Module)). The problematic type is: ",
+          type_str);
     }
     types.emplace_back(type_str);
   }
@@ -963,16 +968,16 @@ void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
   BytecodeExportSet exportSet = moduleMethodsTuple(m, dummy_uniquer);
   pushFunctionToIValues(std::move(exportSet), elements, dummy, dummy_uniquer);
   for (const auto& element : elements) {
-    auto table = element.toTuple()->elements()[1];
+    auto table = element.toTupleRef().elements()[1];
     auto row =
-        table.toTuple()->elements().at(BYTECODE_INDEX_OPERATOR).toTuple();
+        table.toTupleRef().elements().at(BYTECODE_INDEX_OPERATOR).toTuple();
     TORCH_INTERNAL_ASSERT(
         row->elements().at(0).toStringRef() == "operators",
         "Expected operators but found ",
         row->elements().at(0).toStringRef());
-    const auto& ops_list = row->elements().at(1).toTuple()->elements();
+    const auto& ops_list = row->elements().at(1).toTupleRef().elements();
     for (const auto& op : ops_list) {
-      const auto& op_item = op.toTuple()->elements();
+      const auto& op_item = op.toTupleRef().elements();
       TORCH_CHECK(
           op_item.size() >= 2,
           "There should be either two parts (name and overload name), ",
