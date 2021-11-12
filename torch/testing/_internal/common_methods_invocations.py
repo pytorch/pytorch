@@ -3508,6 +3508,53 @@ def sample_inputs_linear(self, device, dtype, requires_grad):
         sample_inputs.append(SampleInput(input_tensor, args=(weight, bias)))
     return sample_inputs
 
+def sample_inputs_bilinear(self, device, dtype, requires_grad):
+    features_options = [[3, 4, 5], [8, 8, 8]]
+    batch_options: List[List[int]] = [
+        [],  # no batch
+        [0],
+        [8],
+        [2, 3],
+    ]
+    create_tensor = partial(make_tensor, device=device, dtype=dtype,
+                            requires_grad=requires_grad, low=-2, high=2)
+
+    sample_inputs = []
+    for has_bias, (in_feat1, in_feat2, out_feat), batch_shape in \
+            itertools.product([True, False], features_options, batch_options):
+        input_tensor1 = create_tensor(batch_shape + [in_feat1])
+        input_tensor2 = create_tensor(batch_shape + [in_feat2])
+        weight = create_tensor([out_feat, in_feat1, in_feat2])
+        if not has_bias:
+            sample_inputs.append(SampleInput(input_tensor1, args=(input_tensor2, weight,)))
+            continue
+        bias = create_tensor([out_feat])
+        sample_inputs.append(SampleInput(input_tensor1, args=(input_tensor2, weight, bias)))
+
+    return sample_inputs
+
+def sample_inputs_glu(self, device, dtype, requires_grad):
+    features_options = [[2], [2, 4], [8, 8], [3, 6, 8], [1, 4, 6, 7]]
+    batch_options: List[List[int]] = [
+        [],  # no batch
+        [0],
+        [8],
+        [2, 3],
+    ]
+    create_tensor = partial(make_tensor, device=device, dtype=dtype,
+                            requires_grad=requires_grad, low=-2, high=2)
+
+    sample_inputs = []
+    for features, batch_shape in itertools.product(features_options, batch_options):
+        ndim = len(features) + len(batch_shape)
+        for dim in range(ndim):
+            input_tensor = create_tensor(batch_shape + features)
+            dim_size = input_tensor.size(dim)
+            if dim_size > 0 and dim_size % 2 == 0:
+                sample_inputs.append(SampleInput(input_tensor, args=(dim,)))
+
+    return sample_inputs
+
 def sample_inputs_interpolate(mode, self, device, dtype, requires_grad):
     N, C = 2, 3
     D = 4
@@ -9714,6 +9761,30 @@ op_db: List[OpInfo] = [
            # https://pytorch.org/docs/stable/generated/torch.use_deterministic_algorithms.html#torch.use_deterministic_algorithms
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            supports_forward_ad=True,
+           supports_out=False),
+    OpInfo('nn.functional.bilinear',
+           aten_name='bilinear',
+           supports_autograd=True,
+           sample_inputs_func=sample_inputs_bilinear,
+           dtypesIfCPU=all_types_and(torch.half, torch.bfloat16),
+           dtypesIfROCM=floating_types_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
+           backward_dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
+           skips=(
+               # FIXME: bfloat16 backward support likely depends on CUDA11+ and SM53+
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
+           ),
+           supports_forward_ad=False,
+           supports_out=False),
+    OpInfo('nn.functional.glu',
+           aten_name='glu',
+           supports_autograd=True,
+           sample_inputs_func=sample_inputs_glu,
+           dtypesIfCPU=floating_types(),
+           dtypesIfROCM=floating_types_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           supports_forward_ad=False,
            supports_out=False),
     UnaryUfuncInfo(
         'nn.functional.celu',
