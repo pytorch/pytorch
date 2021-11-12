@@ -1,4 +1,5 @@
 result = "subpackage_1"
+subpackage_1_li = [456]
 
 
 class PackageBSubpackage1Object_0:
