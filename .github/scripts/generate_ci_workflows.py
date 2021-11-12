@@ -370,17 +370,6 @@ LINUX_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="linux",
-        build_environment="linux-xenial-py3-clang5-mobile-custom-build-dynamic",
-        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c",
-        test_runner_type=LINUX_CPU_TEST_RUNNER,
-        build_generates_artifacts=False,
-        exclude_test=True,
-        ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_MOBILE, LABEL_CIFLOW_DEFAULT},
-        ),
-    ),
-    CIWorkflow(
-        arch="linux",
         build_environment="linux-xenial-py3-clang5-mobile-custom-build-static",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
@@ -388,17 +377,6 @@ LINUX_WORKFLOWS = [
         exclude_test=True,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_MOBILE, LABEL_CIFLOW_DEFAULT},
-        ),
-    ),
-    CIWorkflow(
-        arch="linux",
-        build_environment="linux-xenial-py3-clang5-mobile-code-analysis",
-        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c",
-        test_runner_type=LINUX_CPU_TEST_RUNNER,
-        build_generates_artifacts=False,
-        exclude_test=True,
-        ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_MOBILE},
         ),
     ),
     CIWorkflow(
