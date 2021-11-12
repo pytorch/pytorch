@@ -76,7 +76,6 @@ def torchscript_nvfuser_compile(fx_module, flat_args):
     """Compiles the given fx_module using torchscript nvfuser"""
     if not torch._C._jit_nvfuser_enabled():
         raise RuntimeError("Wrap the call with `with jit.fuser(\"fuser2\") to turn nvfuser on")
-    print(fx_module.code)
     scripted_module = torch.jit.script(fx_module)
     frozen_module = torch.jit.freeze(scripted_module.eval())
     return frozen_module
