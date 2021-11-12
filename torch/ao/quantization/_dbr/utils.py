@@ -302,12 +302,7 @@ def get_func_output_obs_type(
 
 def converted_func_needs_scale_zp(seen_op_info: SeenOpInfo) -> bool:
     op_type = seen_op_info.type
-    is_module = False
-    try:
-        is_module = issubclass(op_type, torch.nn.Module)
-    except TypeError:
-        # op_type must be a class type, otherwise TypeError is thrown
-        pass
+    is_module = isinstance(op_type, type(torch.nn.Module))
     if is_module:
         return False
     if op_type in add_and_mul_ops:
