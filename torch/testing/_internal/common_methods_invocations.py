@@ -198,6 +198,20 @@ class SampleInput(object):
         return self.transform(to_noncontiguous)
 
 
+class ErrorInput(object):
+    """
+    A SampleInput that will cause the operation to throw an error plus information
+    about the resulting error.
+    """
+
+    __slots__ = ['sample_input', 'error_type', 'error_regex']
+
+    def __init__(self, sample_input, *, error_type, error_regex):
+        self.sample_input = sample_input
+        self.error_type = error_type
+        self.error_regex = error_regex
+
+
 class AliasInfo(object):
     """Class holds alias information. For example, torch.abs ->
     torch.absolute, torch.Tensor.absolute, torch.Tensor.absolute_
@@ -229,13 +243,16 @@ def _getattr_qual(obj, name, default=_NOTHING):
 # Note [OpInfos]
 # ~~~~~~~~~~~~~~
 #
-# This note was written shortly after the PyTorch 1.9 release.
+# The majority of this note was written shortly after the PyTorch 1.9 release.
 # If you notice it's out-of-date or think it could be improved then please
 # file an issue.
 #
 # See also: the OpInfo tracker (https://github.com/pytorch/pytorch/issues/54261)
 # See also: "Writing Test Templates" in common_device_type.py to learn how to
 #   parametrize a test template using OpInfos.
+# See also: PyTorch's GitHub wiki on running and writing tests
+#   https://github.com/pytorch/pytorch/wiki/Running-and-writing-tests
+# See also: ModuleInfos, OpInfo's sister class, defined in common_modules.py
 #
 # An OpInfo is a collection of metadata related to a PyTorch operator. This
 #   metadata is used to generate tests that validate properties of the operator,
@@ -244,30 +261,38 @@ def _getattr_qual(obj, name, default=_NOTHING):
 # WHY OPINFOS?
 # ~~~~~~~~~~~~
 #
-# OpInfos are principally intended to do two things:
+# OpInfos are principally intended to do three things:
 #
-#   1) to simplify testing an operator
-#   2) to allow systems (like autograd, torchscript, fx, nnc...) to test
+#   1) to allow systematic testing over all PyTorch's operators
+#   2) to simplify operating testing by autogenerating many tests
+#   3) to allow systems (like autograd, torchscript, fx, nnc...) to test
 #        against every PyTorch operator
 #
-# Both these goals are still a work in progress. Not every operator has an
-#   OpInfo, and some operator tests still have to be written manually.
+# All these goals are still a work in progress. Not every operator has an
+#   OpInfo, and some operator tests that could be automatically generated
+#   still have to be written manually.
 #
-# The utility of OpInfos can also be motivated from a different perspective.
-#   PyTorch is a complicated framework with many interrelated systems, too
-#   many for any one person to keep track of. An OpInfo can be thought of as the
+# It's helpful to understand that OpInfos are both about test simplification and
+#   modularity. PyTorch is a complicated framework with many interrelated systems,
+#   too many for any one person to keep track of. An OpInfo can be thought of as the
 #   interface between an operator implementer and those other systems. Instead of
 #   requiring the implementer of torch.foo understand how to test its forward
 #   mode AD or NNC support that's typically handled automatically just by
-#   defining an OpInfo. This is a helpful perspective to have, because it's often
-#   surprising to OpInfo writers that just implementing an OpInfo typically can't
-#   verify an operator is actually implemented correctly. "If an OpInfo doesn't
-#   validate my op works as expected, what's the point of it?" But the point of
-#   it is that it lets engineers focus on testing their operator logic instead
-#   of having to write tests for how the operator interacts with each of
-#   PyTorch's many systems. And, OK, sometimes it validates your op works
-#   the way you want and all you have to do is write an OpInfo and you're done
-#   testing... more on that below.
+#   defining an OpInfo.
+#
+# It's often surprising to OpInfo writers that just implementing an OpInfo
+#   typically can't verify an operator is actually implemented correctly:
+#
+# "If an OpInfo doesn't validate my op works as expected, what's the point
+#     of it?"
+#
+# But the point of is the above. OpInfos are intended to let you focus on testing
+#   the operator logic you're familiar with instead of having to write tests for
+#   how the operator interacts with each of PyTorch's many systems.
+#
+# And, OK, it turns out that SOMETIMES just writing an OpInfo DOES
+#   validate your op works as expected, but that's only in special
+#   cases. See below for details.
 #
 # WHAT'S AN OPINFO?
 # ~~~~~~~~~~~~~~~~~
@@ -327,6 +352,20 @@ def _getattr_qual(obj, name, default=_NOTHING):
 #
 # "name" is a string that's just used for debugging. It appears when printing
 #   the SampleInput.
+#
+# THE (OPTIONAL) ERROR INPUTS FUNCTION
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#
+# OpInfos may optionally specify "error inputs" through an error function. If
+#   specified test_errors in test_ops.py will call the op with these inputs
+#   and validate that the desired error is thrown.
+#
+# Error inputs automate a common testing pattern where multiple inputs are
+#   passed to an operation and the errors they thrown are reviewed. Tests
+#   written in this style should be ported to the new OpInfo pattern.
+#
+# Error inputs are specified using the ErrorInputs class, which contains
+#   a SampleInput (see above) and data about the expected error.
 #
 # OPINFO FILE ORGANIZATION
 # ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -398,16 +437,19 @@ def _getattr_qual(obj, name, default=_NOTHING):
 # TESTING A NEW OPERATOR
 # ~~~~~~~~~~~~~~~~~~~~~~
 #
-# If you're adding a new operator to the torch, torch.fft, torch.linalg,
-#   or torch.special namespaces then you should add an OpInfo for it. As
-#   mentioned a couple times above, implementing an OpInfo is not usually
-#   sufficient testing (unless the operator is a unary elementwise operator).
-#   The OpInfo will only test the properties described in the "WHAT'S TESTED"
-#   section. It DOES NOT verify that the operator is implemented correctly.
+# If you're adding a new operator to any of the following namespaces:
+#   - torch
+#   - torch.fft
+#   - torch.linalg,
+#   - torch.special
+#   - torch.nn.functional
+# then you should typically add an OpInfo for it.
 #
-# We are currently reviewing if operators in the torch.nn.functional namespace
-#   will be added as OpInfos, but you are encouraged to add an OpInfo for
-#   such operators, too.
+# As mentioned a couple times above, implementing an OpInfo is not
+#   usually sufficient testing (unless the operator is a unary elementwise
+#   operator). The OpInfo will only test the properties described in the
+#   "WHAT'S TESTED" section. It DOES NOT verify that the operator is
+#   implemented correctly.
 #
 # TIPS FOR WRITING AN OPINFO AND OPINFO TESTS
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -443,15 +485,9 @@ def _getattr_qual(obj, name, default=_NOTHING):
 # THE FUTURE OF OPINFOS AND OPINFO TESTING
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #
-# In the future we expect OpInfo coverage to improve, particularly for the
-#   torch, torch.fft, torch.linalg, and torch.special namespaces, and possibly
-#   for the torch.nn.functional namespace, too. In addition an analogous class,
-#   ModuleInfo, will be developed to improve module testing.
+# In the future we expect OpInfo coverage to improve and cover
+#   the great majority of PyTorch's (public) operators.
 #
-# We also expect at least two new OpInfo subclasses: BinaryUfuncInfo and
-#   ReductionInfo. Both will have new automated tests for correctness, too,
-#   which might make testing binary elementwise operations and reductions as
-#   simple as testing unary elementwise operations today.
 
 # Classes and methods for the operator database
 class OpInfo(object):
@@ -478,16 +514,19 @@ class OpInfo(object):
                                             # if None, then the OpInfo specifies no method variant
 
                  # the following metadata are test directives for skipping or
-                 # modifying tests and a pointer to the op's sample inputs function
-                 # this function lets the OpInfo generate valid inputs
+                 #   modifying tests
                  skips=tuple(),  # information about which tests to skip
                  decorators=tuple(),  # decorators to apply to generated tests
+
+                 # the following are pointers to functions to generate certain classes
+                 #   of inputs
                  sample_inputs_func=None,  # function to generate sample inputs
+                 error_inputs_func=None,  # function to generate inputs that will throw errors
 
                  # the following metadata relates to dtype support and is tested for correctness in test_ops.py
                  dtypes=floating_types(),  # dtypes this function is expected to work with
                  # the following dtypesIf... options override the dtypes value
-                 # on their respective device types
+                 #   on their respective device types
                  dtypesIfCPU=None,  # dtypes this function is expected to work with on CPU
                  dtypesIfCUDA=None,  # dtypes this function is expected to work with on CUDA
                  dtypesIfROCM=None,  # dtypes this function is expected to work with on ROCM
@@ -612,7 +651,9 @@ class OpInfo(object):
         self.safe_casts_outputs = safe_casts_outputs
 
         self.decorators = (*decorators, *skips)
+
         self.sample_inputs_func = sample_inputs_func
+        self.error_inputs_func = error_inputs_func
 
         self.assert_autodiffed = assert_autodiffed
         self.autodiff_fusible_nodes = autodiff_fusible_nodes if autodiff_fusible_nodes else []
@@ -755,6 +796,12 @@ class OpInfo(object):
             samples = tuple(samples_list)
 
         return samples
+
+    def error_inputs(self, device, **kwargs):
+        """
+        Returns an iterable of ErrorInputs.
+        """
+        return self.error_inputs_func(self, device, **kwargs)
 
     def get_decorators(self, test_class, test_name, device, dtype):
         '''Returns the decorators targeting the given test.'''
@@ -5254,6 +5301,13 @@ def sample_inputs_prod(op_info, device, dtype, requires_grad):
 
     return list(sample_generator())
 
+def error_inputs_neg(op_info, device, **kwargs):
+    si = SampleInput(torch.tensor((False, True), device=device))
+    msg = ("Negation, the `\\-` operator, on a bool tensor is not supported."
+           " If you are trying to invert a mask, use the `\\~` or"
+           " `logical_not\\(\\)` operator instead.")
+    return (ErrorInput(si, error_type=RuntimeError, error_regex=msg),)
+
 def sample_inputs_nextafter(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
@@ -6430,6 +6484,14 @@ def sample_inputs_kthvalue(op_info, device, dtype, requires_grad, **kwargs):
     ]
 
     return [SampleInput(tensor, args=args) for tensor, args in test_cases]
+
+def error_inputs_kthvalue(op_info, device, **kwargs):
+    # tests overlapping output fails
+    t = make_tensor(10, dtype=torch.float32, device=device)
+    indices = torch.empty((), device=device, dtype=torch.long)
+    si = SampleInput(t, args=(5,), kwargs={'out': (t, indices)})
+    return (ErrorInput(si, error_type=RuntimeError, error_regex="unsupported operation"),)
+
 
 def sample_inputs_dropout(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, (S,), device=device, dtype=dtype, requires_grad=requires_grad)
@@ -8563,7 +8625,8 @@ op_db: List[OpInfo] = [
            dtypesIfCPU=all_types_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.float16),
            supports_forward_ad=True,
-           sample_inputs_func=sample_inputs_kthvalue),
+           sample_inputs_func=sample_inputs_kthvalue,
+           error_inputs_func=error_inputs_kthvalue),
     OpInfo('le',
            aliases=('less_equal',),
            dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16),
@@ -9954,6 +10017,7 @@ op_db: List[OpInfo] = [
                    aliases=('negative', ),
                    ref=np.negative,
                    dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
+                   error_inputs_func=error_inputs_neg,
                    assert_autodiffed=True,),
     OpInfo('dist',
            op=torch.dist,
