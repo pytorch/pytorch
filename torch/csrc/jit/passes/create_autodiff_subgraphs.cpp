@@ -15,8 +15,6 @@ namespace jit {
 
 namespace {
 
-static c10::Symbol dont_merge_sym = Symbol::attr("dont_merge");
-
 struct WorkBlock : public std::pair<Node*, Node*> {
   using pair::pair;
 
@@ -218,7 +216,6 @@ class SubgraphSlicer {
 
     GRAPH_DEBUG("unfuseNode node ", getHeader(n));
     auto subgraph = n->owningGraph();
-    //auto subgraphNode = n->owningBlock()->owningNode();
 
     std::set<Value*> node_outputs(n->outputs().begin(), n->outputs().end()); 
     std::set<size_t> output_indices;
@@ -242,7 +239,7 @@ class SubgraphSlicer {
       
       if (node_inputs.count(subgraph->outputs().at(i)) != 0) {
         GRAPH_DEBUG("output %", subgraph->outputs().at(i)->debugName(), " is already subgraph's output");
-        GRAPH_DEBUG("Mapping %", subgraph->outputs().at(i), " to %", subgraphNode->outputs().at(i));
+        GRAPH_DEBUG("Mapping %", subgraph->outputs().at(i)->debugName(), " to %", subgraphNode->outputs().at(i)->debugName());
         local_map[subgraph->outputs().at(i)] = subgraphNode->outputs().at(i);
         node_inputs.erase(subgraph->outputs().at(i));
       } 
@@ -320,11 +317,8 @@ class SubgraphSlicer {
       auto grouped = false;
       for (auto& s : res) {
         auto os = *s.begin();
-        GRAPH_DEBUG("comparing %", o->debugName(), " with %", os->debugName(), " result ", (alias_db.mayContainAlias(os, o) || alias_db.mayContainAlias(o, os)));
-        if (alias_db.mayContainAlias(os, o) ||
-            alias_db.mayContainAlias(o, os) || 
-            alias_db.mayAlias(os, o) ||
-            alias_db.mayAlias(o, os)) {
+        GRAPH_DEBUG("comparing %", o->debugName(), " with %", os->debugName(), " result ", (alias_db.mayContainAlias(os, o)));
+        if (alias_db.mayContainAlias(os, o)) {
           s.insert(o);
           GRAPH_DEBUG("Grouping %", o->debugName(), " with %", os->debugName());
           grouped = true;
@@ -417,10 +411,6 @@ class SubgraphSlicer {
       return true;
     }
     if (node->kind() == prim::Constant) {
-      return false;
-    }
-
-    if (node->hasAttribute(dont_merge_sym)) {
       return false;
     }
 
