@@ -81,7 +81,7 @@ DLDevice getDLDevice(const Tensor& tensor, const int64_t& device_id) {
       // while everyone else should see HIP
       ctx.device_type = DLDeviceType::kDLROCM;
 #else
-      ctx.device_type = DLDeviceType::kDLCUDA;
+      ctx.device_type = DLDeviceType::kDLGPU;
 #endif
       break;
     case DeviceType::OPENCL:
@@ -102,7 +102,7 @@ static Device getATenDevice(const DLDevice& ctx) {
       return at::Device(DeviceType::CPU);
 #ifndef USE_ROCM
     // if we are compiled under HIP, we cannot do cuda
-    case DLDeviceType::kDLCUDA:
+    case DLDeviceType::kDLGPU:
       return at::Device(DeviceType::CUDA, ctx.device_id);
 #endif
     case DLDeviceType::kDLOpenCL:
