@@ -597,6 +597,9 @@ Utilities
     promote_types
     use_deterministic_algorithms
     are_deterministic_algorithms_enabled
+    is_deterministic_algorithms_warn_only_enabled
+    set_deterministic_debug_mode
+    get_deterministic_debug_mode
     set_warn_always
     is_warn_always_enabled
     vmap
