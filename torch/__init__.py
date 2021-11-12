@@ -833,7 +833,6 @@ def compiled_with_cxx11_abi():
 # Import the ops "namespace"
 from torch._ops import ops
 from torch._classes import classes
-from torch import shape as _shape
 
 # quantization depends on torch.fx
 # Import quantization
