@@ -365,7 +365,9 @@ bool SocketListenOp::tryListen(int family) {
 
   int r = ::getaddrinfo(nullptr, port_.c_str(), &hints, &naked_result);
   if (r != 0) {
-    recordError("The local network addresses cannot be retrieved {}.", ::gai_strerror(r));
+    const char* gai = ::gai_strerror(r);
+
+    recordError("The local network addresses cannot be retrieved (GAI Error: {} - {}).", r, gai);
 
     return false;
   }
@@ -492,7 +494,11 @@ bool SocketConnectOp::tryConnect(int family) {
   if (r != 0) {
     const char* gai = ::gai_strerror(r);
 
-    recordError("The network addresses of ({}, {}) cannot be retrieved {}.", host_, port_, gai);
+    recordError("The network addresses of ({}, {}) cannot be retrieved (GAI Error: {} - {}).",
+                host_,
+                port_,
+                r,
+                gai);
 
     return false;
   }
