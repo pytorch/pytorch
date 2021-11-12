@@ -40,13 +40,19 @@ def _s_where_decomposition(a, b, c):
     return aten.where(a, b, c)
 
 @register_decomposition(aten.detach)
-def noop(x):
+def detach_decomposition(x):
     return x
 
 @register_decomposition(aten.softplus_backward)
 def softplus_backward_decomposition(out_grad, x, beta, threshold, out):
     z = (x * beta).exp()
     return aten.where((x * beta) > threshold, out_grad, out_grad * z / (z + 1.0))
+
+# @register_decomposition(aten._fused_dropout)
+# def _fused_dropout_decomposition(input, p, generator=None):
+#     mask = aten.to(aten.rand_like(input) < p, dtype=torch.uint8)
+#     res = mask.type_as(input) * input * (1./p)
+#     return [res, mask]
 
 USE_DECOMPOSE = False
 

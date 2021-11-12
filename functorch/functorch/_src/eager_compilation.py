@@ -5,12 +5,17 @@ import torch.nn as nn
 from functorch import make_functional_with_buffers, make_fx
 from torch.fx.node import map_arg
 import torch.fx as fx
+from torch.fx.proxy import GraphAppendingTracer
+from torch.fx import immutable_collections
 import torch.utils._pytree as pytree
 import torch.utils.dlpack
 from torch.fx.passes import graph_drawer
+import operator
 import os
 
 from .python_key import pythonkey_decompose
+pytree._register_pytree_node(immutable_collections.immutable_list, lambda x: (list(x), None), lambda x, c: immutable_collections.immutable_list(x))
+pytree._register_pytree_node(immutable_collections.immutable_dict, lambda x: (list(x.values()), list(x.keys())), lambda x, c: immutable_collections.immutable_dict({key: value for key, value in zip(c, x)}))
 
 def draw_graph(traced: torch.fx.GraphModule, fname: str, figname: str = "fx_graph"):
     base, ext = os.path.splitext(fname)
@@ -84,6 +89,57 @@ def default_partition(fx_module: fx.GraphModule, _joint_inputs):
     bw_module.graph.lint()
     return fw_module, bw_module
 
+class InvalidNodeBase(object):
+    def __repr__(self):
+        return "Invalid Node"
+InvalidNode = InvalidNodeBase()
+
+def _extract_graph_with_inputs_outputs(joint_graph, inputs, outputs):
+    """
+    Given a graph, extracts out a subgraph that takes the specified nodes as inputs and returns the specified outputs.
+
+    This includes specifying non-placeholder nodes as inputs.
+
+    The general strategy is to initialize all inputs with proxies as we
+    encounter them, and trace through the graph, only keeping values which take
+    in valid proxies. Then, all dead code is eliminated.
+    """
+    new_graph = fx.Graph()
+    tracer = GraphAppendingTracer(new_graph)
+    env = {}
+    for node in joint_graph.nodes:
+        if node in inputs:
+            new_node = new_graph.placeholder(node.name)
+            env[node] = fx.Proxy(new_node, tracer)
+        elif node.op == 'placeholder':
+            env[node] = InvalidNode
+        elif node.op == 'call_function':
+            def map_arg_to_proxy(x):
+                if isinstance(x, fx.Node):
+                    out = env[x]
+                    return out
+                else:
+                    return x
+            all_args = pytree.tree_flatten((node.args, node.kwargs))[0]
+            all_args = [isinstance(env[x], InvalidNodeBase) for x in all_args if isinstance(x, fx.Node)]
+            if any(all_args):
+                env[node] = InvalidNode
+                continue
+            args = pytree.tree_map(map_arg_to_proxy, node.args)
+            kwargs = pytree.tree_map(map_arg_to_proxy, node.kwargs)
+            out = node.target(*args, **kwargs)
+            env[node] = out
+        elif node.op == 'get_attr':
+            new_node = new_graph.node_copy(node, lambda x: env[x])
+            env[node] = fx.Proxy(new_node, tracer)
+        elif node.op == 'output':
+            pass
+    new_graph.output([env[x].node for x in outputs])
+
+    new_graph.eliminate_dead_code()
+    new_graph.lint()
+    return new_graph
+
 def partition_with_recompute_fwd_in_bwd(joint_module: fx.GraphModule, _joint_inputs):
     """
     Partitions the joint graph such that the backward recomputes the forward.
@@ -93,68 +149,34 @@ def partition_with_recompute_fwd_in_bwd(joint_module: fx.GraphModule, _joint_inp
     outputs to just original forward or backward outputs. And then we run the
     resulting graphs through dead code elimintation.
     """
+            
 
-    def _extract_graph_with_given_outputs(joint_graph, outputs, is_fwd=False):
-        """
-        Returns a copy of joint_graph with given outputs.
+    def is_primal(node):
+        return node.op == "placeholder" and "tangents" not in node.target
 
-        If its forward graph, we need extra bookkeeping
-            1) Remove tangent nodes in the input.
-            2) Pass the inputs directly to the output. This will be saved in the
-            backward ctx.
-        """
-        # Set up val_map to be used later for copying the graph
-        val_map = {}
-        saved_nodes = []
-        if is_fwd:
-            # Remove the tangent placeholder nodes from the graph
-            def _tangent_finder(node):
-                return node.op == "placeholder" and "tangents" in node.target
-            tangent_nodes = filter(_tangent_finder, joint_graph.nodes)
-            for tangent_node in tangent_nodes:
-                val_map[tangent_node] = 1
-
-            # Find the saved tensor nodes that will be used by ctx later
-            def _placeholder_finder(node):
-                return node.op == "placeholder" and "tangents" not in node.target
-            saved_nodes = list(filter(_placeholder_finder, joint_graph.nodes))
-
-        # Make a copy of the joint graph
-        graph = fx.Graph()
-        graph.graph_copy(joint_graph, val_map)
-
-        # Set the outputs
-        outputs = outputs + saved_nodes
-        if len(outputs) == 1:
-            graph.output(val_map[outputs[0]])
-        else:
-            graph.output([val_map[out] for out in outputs])
-
-        # Run dead code elimination to remove unnecessary nodes
-        graph.eliminate_dead_code()
-        graph.lint()
-        return graph
-
-    # Find the output node
-    output_node = None
-    for n in reversed(joint_module.graph.nodes):
-        if n.op == "output":
-            output_node = n
-            break
-
-    # Get the forward and backward output nodes
+    def is_tangent(node):
+        return node.op == "placeholder" and "tangents" in node.target
+    nodes = joint_module.graph.nodes
     num_fwd_outputs = joint_module._out_spec.children_specs[0].num_leaves
-    fwd_outputs = output_node.args[0][0:num_fwd_outputs]
-    bwd_outputs = output_node.args[0][num_fwd_outputs:]
+    outputs = pytree.tree_flatten([node.args for node in nodes if node.op == 'output'])[0]
+    fwd_outputs = outputs[:num_fwd_outputs]
+    bwd_outputs = outputs[num_fwd_outputs:]
 
+    saved_values = list(filter(is_primal, nodes))
+
+    # Also save the mask from _fused_dropout
+    dropout_nodes = list(filter(lambda x: x.target == torch.ops.aten._fused_dropout, nodes))
+    for node in joint_module.graph.nodes:
+        if node.target == operator.getitem and node.args[0] in dropout_nodes and node.args[1] == 1:
+            saved_values.append(node)
+    primal_inputs = list(filter(is_primal, joint_module.graph.nodes))
+    tangent_inputs = list(filter(is_tangent, joint_module.graph.nodes))
     # Construct the forward module
-    fwd_graph = _extract_graph_with_given_outputs(
-        joint_module.graph, fwd_outputs, is_fwd=True
-    )
+    fwd_graph = _extract_graph_with_inputs_outputs(joint_module.graph, primal_inputs, fwd_outputs + saved_values)
     fwd_module = fx.GraphModule(joint_module, fwd_graph)
 
     # Construct the backward module
-    bwd_graph = _extract_graph_with_given_outputs(joint_module.graph, bwd_outputs)
+    bwd_graph = _extract_graph_with_inputs_outputs(joint_module.graph, saved_values + tangent_inputs, bwd_outputs)
     bwd_module = fx.GraphModule(joint_module, bwd_graph)
 
     return fwd_module, bwd_module
