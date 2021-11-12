@@ -31,4 +31,15 @@
   XCTAssertTrue(outputTensor.numel() == 1000);
 }
 
+	
+- (void)testMetal {
+  NSString* modelPath = [[NSBundle bundleForClass:[self class]] pathForResource:@"model_metal"
+                                                                         ofType:@"ptl"];
+  auto module = torch::jit::_load_for_mobile(modelPath.UTF8String);
+  c10::InferenceMode mode;
+  auto input = torch::ones({1, 3, 224, 224}, at::kFloat).metal();
+  auto outputTensor = module.forward({input}).toTensor().cpu();
+  XCTAssertTrue(outputTensor.numel() == 1000);
+}
+
 @end

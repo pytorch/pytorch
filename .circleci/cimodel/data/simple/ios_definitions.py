@@ -70,6 +70,9 @@ WORKFLOW_DATA = [
     IOSJob(XCODE_VERSION, ArchVariant("arm64", "metal"), extra_props={
         "use_metal": miniutils.quote(str(int(True))),
         "lite_interpreter": miniutils.quote(str(int(True)))}),
+    IOSJob(XCODE_VERSION, ArchVariant("x86_64", "metal"), extra_props={
+        "use_metal": miniutils.quote(str(int(True))),
+        "lite_interpreter": miniutils.quote(str(int(True)))}),
     IOSJob(XCODE_VERSION, ArchVariant("arm64", "full_jit"), extra_props={
         "lite_interpreter": miniutils.quote(str(int(False)))}),
     IOSJob(XCODE_VERSION, ArchVariant("arm64", "custom"), extra_props={

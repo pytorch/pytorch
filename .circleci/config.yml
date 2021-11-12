@@ -1635,6 +1635,8 @@ jobs:
             if [ ${BUILD_LITE_INTERPRETER} == 1 ]; then
               if [ ${USE_COREML_DELEGATE} == 1 ]; then
                 fastlane scan --only_testing TestAppTests/TestAppTests/testCoreML
+              elif  [ ${USE_PYTORCH_METAL} == 1 ]; then
+                fastlane scan --only_testing TestAppTests/TestAppTests/testMetal
               else
                 fastlane scan --only_testing TestAppTests/TestAppTests/testLiteInterpreter
               fi
