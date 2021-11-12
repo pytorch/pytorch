@@ -3740,8 +3740,8 @@ TEST(LoopNest, CacheReadsSimple) {
 
   // just this once: verify the whole thing.
   checkIR(result, R"IR(
-#CHECK: Allocate(A); // dtype=int, dims=[64, 64]
 #CHECK: Allocate(A_local); // dtype=int, dims=[1, 10]
+#CHECK: Allocate(A); // dtype=int, dims=[64, 64]
 #CHECK: for (int i
 #CHECK:  for (int j
 #CHECK:   A[
@@ -3760,8 +3760,8 @@ TEST(LoopNest, CacheReadsSimple) {
 #CHECK:   C[
 #CHECK:  }
 #CHECK: }
-#CHECK: Free(A_local);
 #CHECK: Free(A);
+#CHECK: Free(A_local);
       )IR");
 
   std::vector<int> b_data(200, 0);
