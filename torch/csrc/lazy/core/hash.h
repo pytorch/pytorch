@@ -84,7 +84,7 @@ static inline hash_t Hash(const c10::Scalar& value) {
   case c10::ScalarType::Bool:
     return Hash(value.toBool());
   default:
-    throw std::runtime_error("Unknown scalar type.");
+    TORCH_INTERNAL_ASSERT(false, "Unknown scalar type.");
   }
 }
 
