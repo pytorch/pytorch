@@ -742,6 +742,8 @@ StaticModule::StaticModule(
     if (node->kind() == prim::Constant) {
       continue;
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays)
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays)
     auto input_indices = std::make_unique<uint16_t[]>(node->inputs().size());
     std::vector<DefInfo> input_ssa_defs;
     for (const auto input_idx : c10::irange(node->inputs().size())) {
@@ -1667,6 +1669,8 @@ void StaticRuntime::disableManageOutputTensors() {
 
 ProcessedNode::ProcessedNode(
     Node* node,
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays)
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays)
     std::unique_ptr<uint16_t[]> inputs,
     uint16_t inputs_size,
     uint16_t outputs_offset,
