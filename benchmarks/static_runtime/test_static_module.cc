@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/irparser.h>
-#include <torch/csrc/jit/runtime/static/ProcessedNodeInputs.h>
 #include <torch/csrc/jit/runtime/static/fusion.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
@@ -787,15 +786,6 @@ TEST(StaticRuntime, FusionPass) {
   }
 }
 
-static ProcessedNodeInputs createProcessedNodeInputs(
-    c10::ArrayRef<uint16_t> inputs) {
-  ProcessedNodeInputs result(inputs.size());
-  for (const auto idx : c10::irange(inputs.size())) {
-    result[idx] = inputs[idx];
-  }
-  return result;
-}
-
 TEST(
     ProcessedNode,
     VerifyNoMemoryOverlapWithImmutableInputsWithImmutableArguments) {
@@ -809,13 +799,17 @@ TEST(
   module.define(sigmoid_script);
   torch::jit::StaticModule smodule(module);
   Node* sigmoid_node = getNodeWithKind(smodule, "aten::sigmoid");
-  std::array<IValue, 2> values = {torch::randn({2, 3}), torch::randn({3, 1})};
-  ProcessedNode pnode(
-      sigmoid_node, createProcessedNodeInputs({0}), 1, true, false);
-  pnode.set_values(values.data());
+  const at::IValue a = torch::randn({2, 3});
+  at::IValue b = torch::randn({3, 1});
+  std::unique_ptr<const IValue*[]> ivalue_inputs =
+      std::make_unique<const IValue*[]>(1);
+  ivalue_inputs[0] = &a;
+  ProcessedNode pnode(sigmoid_node, std::move(ivalue_inputs), 1, true, false);
+
+  pnode.Output(0) = b;
   EXPECT_TRUE(pnode.verify_no_memory_overlap());
 
-  pnode.Output(0) = values[0];
+  pnode.Output(0) = a;
   EXPECT_FALSE(pnode.verify_no_memory_overlap());
 }
 
@@ -827,15 +821,17 @@ TEST(
   module.define(sigmoid_inplace_script);
   torch::jit::StaticModule smodule(module);
   Node* sigmoid_node = getNodeWithKind(smodule, "aten::sigmoid");
-  std::array<IValue, 2> values = {torch::randn({2, 3}), torch::randn({3, 1})};
-  ProcessedNode pnode(
-      sigmoid_node, createProcessedNodeInputs({0}), 1, true, false);
-  pnode.set_values(values.data());
+  const at::IValue a = torch::randn({2, 3});
+  at::IValue b = torch::randn({3, 1});
+  std::unique_ptr<const IValue*[]> ivalue_inputs =
+      std::make_unique<const IValue*[]>(1);
+  ivalue_inputs[0] = &a;
+  ProcessedNode pnode(sigmoid_node, std::move(ivalue_inputs), 1, true, false);
 
-  ASSERT_EQ(&pnode.Output(0), &values[1]);
+  pnode.Output(0) = b;
   EXPECT_TRUE(pnode.verify_no_memory_overlap());
 
-  pnode.Output(0) = values[0];
+  pnode.Output(0) = a;
   EXPECT_TRUE(pnode.verify_no_memory_overlap());
 }
 
@@ -850,28 +846,32 @@ TEST(ProcessedNode, VerifyNoMemoryOverlapWithOverlappingOutputs) {
   torch::jit::StaticModule smodule(g);
   Node* list_unpack_node = getNodeWithKind(smodule, "prim::ListUnpack");
   {
-    std::array<IValue, 3> values = {
-        at::randn({2, 3}), at::empty({1, 3}), at::empty({4, 5})};
+    auto a = at::randn({2, 3});
+    IValue ivalue(a);
+    std::unique_ptr<const IValue*[]> inputs =
+        std::make_unique<const IValue*[]>(1);
+    inputs[0] = &ivalue;
     ProcessedNode list_unpack_pnode(
         list_unpack_node,
-        createProcessedNodeInputs({0}),
+        std::move(inputs),
         1,
         /*enable_out_variant=*/true,
         /* check_memory_overlap */ false);
-    list_unpack_pnode.set_values(values.data());
     ASSERT_EQ(list_unpack_pnode.outputs().size(), 2);
     EXPECT_TRUE(list_unpack_pnode.verify_no_memory_overlap());
   }
   {
-    std::array<IValue, 3> values = {
-        at::randn({2, 3}), at::empty({1, 3}), at::empty({4, 5})};
+    auto a = at::randn({2, 3});
+    IValue ivalue(a);
+    std::unique_ptr<const IValue*[]> inputs =
+        std::make_unique<const IValue*[]>(1);
+    inputs[0] = &ivalue;
     ProcessedNode list_unpack_pnode(
         list_unpack_node,
-        createProcessedNodeInputs({0}),
+        std::move(inputs),
         1,
         /*enable_out_variant=*/true,
         /* check_memory_overlap */ false);
-    list_unpack_pnode.set_values(values.data());
     auto b = at::randn({2, 3});
     list_unpack_pnode.Output(0) = b;
     list_unpack_pnode.Output(1) = b;
