@@ -358,6 +358,8 @@ class TORCH_API StaticRuntime {
 
   bool isManagedOutputTensor(const IValue& ivalue);
 
+  void disableManageOutputTensors();
+
  private:
   template <typename IValueList>
   c10::IValue run_impl(
@@ -400,6 +402,7 @@ class TORCH_API StaticRuntime {
   // Otherwise, the memory used by activations is cached inside the static
   // runtime.
   const StaticModule& static_module_;
+  bool manage_output_tensors_enabled_ = false;
   std::unique_ptr<MemoryPlanner> planner_;
   std::vector<IValue> inputs_;
   std::vector<IValue*> outputs_;
