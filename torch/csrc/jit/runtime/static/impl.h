@@ -358,6 +358,8 @@ class TORCH_API StaticRuntime {
 
   bool isManagedOutputTensor(const IValue& ivalue);
 
+  void disableManageOutputTensors();
+
  private:
   template <typename IValueList>
   c10::IValue run_impl(
@@ -372,12 +374,16 @@ class TORCH_API StaticRuntime {
       std::vector<c10::IValue>&& args,
       const std::unordered_map<std::string, c10::IValue>& kwargs);
 
+  void verify_and_correct_memory_overlap(ProcessedNode& n);
+
   // clean up owning refs of input IValues
   void clean_up_input_ivalues() {
     for (IValue& ival : inputs_) {
       ival = IValue();
     }
   }
+
+  IValue move_outputs_to_tuple(size_t num_outputs);
 
   void create_memory_planner();
 
@@ -392,12 +398,11 @@ class TORCH_API StaticRuntime {
       const std::vector<c10::IValue>& args,
       const std::unordered_map<std::string, c10::IValue>& kwargs);
 
-  IValue move_outputs_to_tuple(size_t num_outputs);
-
   // Memory planning is only enabled if sm->opts().cleanup_activations is true.
   // Otherwise, the memory used by activations is cached inside the static
   // runtime.
   const StaticModule& static_module_;
+  bool manage_output_tensors_enabled_ = false;
   std::unique_ptr<MemoryPlanner> planner_;
   std::vector<IValue> inputs_;
   std::vector<IValue*> outputs_;
@@ -413,7 +418,8 @@ class TORCH_API ProcessedNode {
       Node* n,
       std::unique_ptr<const IValue*[]> inputs,
       size_t inputsSize,
-      bool enable_out_variant);
+      bool enable_out_variant,
+      bool check_memory_overlap);
 
   ProcessedNode(const ProcessedNode& rhs)
       : node_(rhs.node_),
@@ -505,11 +511,25 @@ class TORCH_API ProcessedNode {
     return fn_.kind == FunctionKind::kNativeFunction;
   }
 
-  bool verify_no_memory_overlap() const;
-
   const char* get_op_name() const {
     return op_name_;
   }
+
+  bool verify_no_memory_overlap() const;
+
+  bool check_outputs_for_memory_overlap() const {
+    return fn_.check_memory_overlap_;
+  }
+
+  void set_outputs_memory_overlap_detected() {
+    fn_.overlap_detected_ = true;
+  }
+
+  bool outputs_memory_overlap_detected() {
+    return fn_.overlap_detected_;
+  }
+
+  void verify_and_correct_memory_overlap();
 
  private:
   C10_NODISCARD bool verify_outputs_dont_overlap_each_other() const;
@@ -517,7 +537,7 @@ class TORCH_API ProcessedNode {
   C10_NODISCARD bool verify_inputs_dont_overlap_outputs() const;
 
   Node* node_;
-  enum class FunctionKind {
+  enum class FunctionKind : uint8_t {
     kOutVariant,
     kNativeFunction,
     kInterpreterFallback,
@@ -525,6 +545,8 @@ class TORCH_API ProcessedNode {
   struct Function {
     std::function<void(ProcessedNode*)> f;
     FunctionKind kind = FunctionKind::kOutVariant;
+    bool check_memory_overlap_{false};
+    bool overlap_detected_{false};
   };
   Function fn_;
   std::unique_ptr<const IValue*[]> inputs_; // unowned
