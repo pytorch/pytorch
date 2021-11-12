@@ -961,6 +961,7 @@ def gen_headers(
         core_fm: FileManager,
         cpu_fm: FileManager,
         cuda_fm: FileManager,
+        ops_fm: FileManager,
         dispatch_keys: Sequence[DispatchKey],
         functions_keys: Set[DispatchKey],
         rocm: bool,
@@ -1006,14 +1007,14 @@ def gen_headers(
 
     static_dispatch_headers = static_dispatch_extra_headers(static_dispatch_idx)
     for name, functions in functions_by_base_name.items():
-        cpu_fm.write_with_template(
-            f'ops/{name}_ops.h', 'Operator.h', lambda: {
+        ops_fm.write_with_template(
+            f'{name}_ops.h', 'Operator.h', lambda: {
                 'declarations': list(mapMaybe(ComputeOperators(
                     Target.DECLARATION), functions)),
             })
 
-        cpu_fm.write_with_template(
-            f'ops/{name}.h', 'Function.h', lambda: {
+        ops_fm.write_with_template(
+            f'{name}.h', 'Function.h', lambda: {
                 'static_dispatch_extra_headers': static_dispatch_headers,
                 'operator_includes': f'#include <ATen/ops/{name}_ops.h>',
                 'function_definitions': list(mapMaybe(ComputeFunction(
@@ -1027,15 +1028,15 @@ def gen_headers(
 
 
         if is_structured:
-            cpu_fm.write_with_template(
-                f'ops/{name}_meta.h', 'NativeMetaFunction.h', lambda: {
+            ops_fm.write_with_template(
+                f'{name}_meta.h', 'NativeMetaFunction.h', lambda: {
                     'meta_function_declarations': list(mapMaybe(
                         compute_meta_function_declaration, structured_functions)),
                 })
 
 
-        cpu_fm.write_with_template(
-            f'ops/{name}_native.h', 'NativeFunction.h', lambda: {
+        ops_fm.write_with_template(
+            f'{name}_native.h', 'NativeFunction.h', lambda: {
                 'extra_includes': (f'#include <ATen/ops/{name}_meta.h>'
                                    if is_structured else []),
                 'native_function_declarations': list(concatMap(
@@ -1315,9 +1316,9 @@ def main() -> None:
     #
     #   Invalid character escape '\c'.
     core_install_dir = f'{options.install_dir}/core'
-    core_install_path = pathlib.Path(core_install_dir)
-    core_install_path.mkdir(parents=True, exist_ok=True)
-    (core_install_path.parent / 'ops').mkdir(exist_ok=True)
+    pathlib.Path(core_install_dir).mkdir(parents=True, exist_ok=True)
+    ops_install_dir = f'{options.install_dir}/ops'
+    pathlib.Path(ops_install_dir).mkdir(parents=True, exist_ok=True)
 
     def make_file_manager(install_dir: str) -> FileManager:
         return FileManager(install_dir=install_dir, template_dir=template_dir, dry_run=options.dry_run)
@@ -1325,6 +1326,7 @@ def main() -> None:
     core_fm = make_file_manager(core_install_dir)
     cpu_fm = make_file_manager(options.install_dir)
     cuda_fm = make_file_manager(options.install_dir)
+    ops_fm = make_file_manager(ops_install_dir)
 
     extra_cuda_headers = '''\
 #include <c10/cuda/CUDAGuard.h>
@@ -1395,6 +1397,7 @@ def main() -> None:
             core_fm=core_fm,
             cpu_fm=cpu_fm,
             cuda_fm=cuda_fm,
+            ops_fm=ops_fm,
             dispatch_keys=dispatch_keys,
             functions_keys=functions_keys,
             rocm=options.rocm)
@@ -1409,7 +1412,12 @@ def main() -> None:
         depfile_name = depfile_path.name
         depfile_stem = depfile_path.stem
 
-        for fm, prefix in [(cpu_fm, ""), (core_fm, "core_"), (cuda_fm, "cuda_")]:
+        for fm, prefix in [
+                (cpu_fm, ""),
+                (core_fm, "core_"),
+                (cuda_fm, "cuda_"),
+                (ops_fm, "ops_"),
+        ]:
             varname = prefix + depfile_stem
             path = depfile_path.parent / (prefix + depfile_name)
             fm.write_outputs(varname, str(path))

@@ -19,7 +19,7 @@ class List;
 class Stream;
 class Scalar;
 struct Storage;
-class TensorOptions;
+struct TensorOptions;
 
 }
 

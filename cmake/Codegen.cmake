@@ -255,10 +255,15 @@ if(INTERN_BUILD_ATEN_OPS)
     include("${CMAKE_BINARY_DIR}/aten/src/ATen/generated_${gen_type}.cmake")
     include("${CMAKE_BINARY_DIR}/aten/src/ATen/core_generated_${gen_type}.cmake")
     include("${CMAKE_BINARY_DIR}/aten/src/ATen/cuda_generated_${gen_type}.cmake")
+    include("${CMAKE_BINARY_DIR}/aten/src/ATen/ops_generated_${gen_type}.cmake")
 
     add_custom_command(
       COMMENT "Generating ATen ${gen_type}"
-      OUTPUT ${generated_${gen_type}} ${cuda_generated_${gen_type}} ${core_generated_${gen_type}}
+      OUTPUT
+        ${generated_${gen_type}}
+        ${cuda_generated_${gen_type}}
+        ${core_generated_${gen_type}}
+        ${ops_generated_${gen_type}}
         ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_${gen_type}.cmake
         ${CMAKE_BINARY_DIR}/aten/src/ATen/core_generated_${gen_type}.cmake
         ${CMAKE_BINARY_DIR}/aten/src/ATen/cuda_generated_${gen_type}.cmake
@@ -273,8 +278,8 @@ if(INTERN_BUILD_ATEN_OPS)
   # not tracked correctly in CMake. We make the libATen.so depend explicitly
   # on building the generated ATen files to workaround.
   add_custom_target(ATEN_CPU_FILES_GEN_TARGET DEPENDS
-      ${generated_headers} ${core_generated_headers}
-      ${generated_sources} ${core_generated_sources}
+      ${generated_headers} ${core_generated_headers} ${ops_generated_headers}
+      ${generated_sources} ${core_generated_sources} ${ops_generated_sources}
       ${generated_declarations_yaml})
   add_custom_target(ATEN_CUDA_FILES_GEN_TARGET DEPENDS
       ${cuda_generated_headers} ${cuda_generated_sources})
