@@ -55,24 +55,6 @@ C10_DEFINE_bool(
 namespace torch {
 namespace jit {
 namespace tensorexpr {
-
-c10::optional<std::string>& LLVMTargetTriple() {
-  static c10::optional<std::string> triple = c10::nullopt;
-  return triple;
-}
-c10::optional<std::string>& LLVMTargetCPU() {
-  static c10::optional<std::string> cpu = c10::nullopt;
-  return cpu;
-}
-c10::optional<std::string>& LLVMTargetAttrs() {
-  static c10::optional<std::string> attrs = c10::nullopt;
-  return attrs;
-}
-bool& LLVMAOTWorkflow() {
-  static bool aot_workflow = false;
-  return aot_workflow;
-}
-
 namespace {
 
 llvm::CmpInst::Predicate llvm_comparison_predicate(
@@ -440,15 +422,6 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
     c10::optional<std::string> cpu,
     c10::optional<std::string> attrs)
     : context_(std::make_unique<llvm::LLVMContext>()), irb_(getContext()) {
-  if (!triple) {
-    triple = LLVMTargetTriple();
-  }
-  if (!cpu) {
-    cpu = LLVMTargetCPU();
-  }
-  if (!attrs) {
-    attrs = LLVMTargetAttrs();
-  }
   // Manually map types to LLVM types.
   ByteTy_ = llvm::Type::getInt8Ty(getContext());
   CharTy_ = llvm::Type::getInt8Ty(getContext());
@@ -505,10 +478,8 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   emitKernel(stmt, params);
 
   jit_->addModule(std::move(module_), std::move(context_));
-  if (!LLVMAOTWorkflow()) {
-    auto sym = jit_->findSymbol("wrapper");
-    kernelAddress_ = assertSuccess(sym.getAddress());
-  }
+  auto sym = jit_->findSymbol("wrapper");
+  kernelAddress_ = assertSuccess(sym.getAddress());
 }
 
 llvm::LLVMContext& LLVMCodeGenImpl::getContext() {

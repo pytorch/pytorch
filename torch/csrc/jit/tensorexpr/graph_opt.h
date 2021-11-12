@@ -63,22 +63,6 @@ TORCH_API void annotateInputShapes(
     const std::vector<c10::optional<at::Tensor>>& example_inputs);
 TORCH_API std::shared_ptr<Graph> removeUnusedSelfArgument(
     const std::shared_ptr<Graph>& graph);
-TORCH_API std::shared_ptr<Graph> removeGraphOutput(
-    const std::shared_ptr<Graph>& graph,
-    size_t idx);
-TORCH_API std::shared_ptr<Graph> replaceListOutputWithTuple(
-    const std::shared_ptr<Graph>& graph);
-TORCH_API std::shared_ptr<Graph> trimGraph(const std::shared_ptr<Graph>& graph);
-
-// Inspect the graph and report whether it can be converted to TE IR.
-// TODO: add error reporting for graphs that can't be converted.
-TORCH_API bool isGraphCompilable(const std::shared_ptr<Graph>& graph);
-
-// Examine the graph and (hackily) fill in missing tensor type info, such as
-// scalar type, device, and strides. Ideally, this should be done by a proper
-// dtype/device/shape propagation passes, but until they are ready we can use
-// this, not always correct, workaround pass.
-TORCH_API void fixupMissingShapeInfo(const std::shared_ptr<Graph>& graph);
 
 } // namespace tensorexpr
 } // namespace jit
