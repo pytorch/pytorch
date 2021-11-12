@@ -2,7 +2,6 @@
 
 #include <sstream>
 
-#include <c10/util/irange.h>
 #include <torch/csrc/lazy/core/shape.h>
 
 namespace torch {
