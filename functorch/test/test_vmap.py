@@ -189,7 +189,7 @@ class TestVmapAPI(TestCase):
         # Don't support non-tensor returns. This is a limitation of vmap;
         # functions that don't return tensors must be special cased
         with self.assertRaisesRegex(RuntimeError, 'Batching rule not implemented'):
-            vmap(torch.Tensor.item)(tensor)
+            vmap(torch.equal)(tensor, tensor)
 
     def test_nonzero_out_dims(self):
         # Basic test
