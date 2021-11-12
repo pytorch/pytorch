@@ -423,7 +423,15 @@ Tensor computeReshape(
           dims.push_back(outputShape[idx].node());
           indices.push_back(axes[idx].node());
         }
-        ExprHandle flat_idx = ExprHandle(flatten_index(dims, indices));
+
+        auto ndim = dims.size();
+        std::vector<ExprPtr> strides(ndim);
+        strides[ndim - 1] = immLike(dims[ndim - 1], 1);
+        for (size_t i = 1; i < ndim; i++) {
+          strides[ndim - 1 - i] = alloc<Mul>(strides[ndim - i], dims[ndim - i]);
+        }
+
+        ExprHandle flat_idx = ExprHandle(flatten_index(dims, indices, strides));
         std::vector<ExprHandle> orig_buf_indexes(A.ndim(), ExprHandle(0));
         ExprHandle stride = ExprHandle(immLike(flat_idx, 1));
         for (size_t idx = 0; idx < A.ndim(); idx++) {
