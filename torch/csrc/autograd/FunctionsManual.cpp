@@ -2495,18 +2495,6 @@ Tensor linalg_eig_backward(const std::vector<torch::autograd::Variable> &grads,
 
 // https://people.maths.ox.ac.uk/gilesm/files/NA-08-01.pdf, page 10
 // see also https://arxiv.org/pdf/1701.00392.pdf Eqs. (4.60) and (4.63)
-Tensor linalg_eig_jvp_eigenvalues(const Tensor& dA,
-                                  const Tensor& L,
-                                  const Tensor& V) {
-  return std::get<0>(linalg_eig_jvp(dA, L, V));
-}
-
-Tensor linalg_eig_jvp_eigenvectors(const Tensor& dA,
-                                   const Tensor& L,
-                                   const Tensor& V) {
-  return std::get<1>(linalg_eig_jvp(dA, L, V));
-}
-
 std::tuple<Tensor, Tensor> linalg_eig_jvp(const Tensor& dA,
                                           const Tensor& L,
                                           const Tensor& V) {
