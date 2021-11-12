@@ -15333,6 +15333,7 @@ class TestNNDeviceType(NNTestCase):
     @onlyCUDA
     @dtypesIfCUDA(torch.float, torch.half)
     @largeTensorTest("20GB")
+    @largeTensorTest("90GB", "cpu")
     @precisionOverride({torch.half: 0.001})
     def test_softmax_64bit_indexing(self, device, dtype):
         def run_test(*shape):
