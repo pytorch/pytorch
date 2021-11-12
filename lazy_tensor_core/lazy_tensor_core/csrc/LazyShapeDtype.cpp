@@ -45,7 +45,6 @@
 
 #include <functional>
 #include "lazy_tensor_core/csrc/ts_backend/LazyShapeDtype.h"
-#include "aten/src/ATen/WrapDimUtils.h"
 #include "aten/src/ATen/native/ReduceOpsUtils.h"
 #include "torch/csrc/api/include/torch/enum.h"
 namespace torch_lazy_tensors {
