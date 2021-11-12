@@ -84,8 +84,13 @@ max_pool2d_with_indices_batch_rule(
 
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   EXISTING_BDIM(_adaptive_avg_pool2d);
+  EXISTING_BDIM_ALL_BOXED(_adaptive_avg_pool2d_backward);
+  EXISTING_BDIM(_adaptive_avg_pool3d);
+  EXISTING_BDIM_ALL_BOXED(_adaptive_avg_pool3d_backward);
   EXISTING_BDIM(avg_pool2d);
+  EXISTING_BDIM(avg_pool3d);
   EXISTING_BDIM_ALL_BOXED(avg_pool2d_backward);
+  EXISTING_BDIM_ALL_BOXED(avg_pool3d_backward);
   VMAP_SUPPORT("max_pool2d_with_indices", max_pool2d_with_indices_batch_rule);
   VMAP_SUPPORT("max_pool2d_with_indices_backward", max_pool2d_with_indices_backward_batch_rule);
 }
