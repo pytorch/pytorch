@@ -1351,7 +1351,7 @@ class RelaxedBooleanPair(BooleanPair):
                 )
                 return error_meta, None
 
-            return None, bool_like.item()
+            return None, bool(bool_like.item())
         else:
             return super()._to_bool(bool_like)
 
