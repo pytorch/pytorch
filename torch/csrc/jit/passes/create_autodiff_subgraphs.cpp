@@ -253,7 +253,7 @@ class SubgraphSlicer {
 
       if (local_map.count(ni) != 0) {
         // this could happen if `n` uses two or more outputs
-        // of a constant node and we already clone the constant
+        // of a constant node and we already cloned the constant
         // into the outer graph and mapped its outputs
         continue;
       }
@@ -263,7 +263,7 @@ class SubgraphSlicer {
         auto copy = subgraphNode->owningGraph()->createClone(ni->node(), env);
         subgraphNode->owningGraph()->insertNode(copy);
         // in case we have a multi-output const, map the rest of the outputs
-        // so we get to clone `n`, `n`'s clone will use the outputs of the 
+        // so when we get to clone `n`, `n`'s clone will use the outputs of this 
         // constant clone
         for (auto i : c10::irange(n->outputs().size())) {
           GRAPH_DEBUG("Mapping %", ni->node()->output(i)->debugName(), " to %", copy->output(i)->debugName());
@@ -298,12 +298,6 @@ class SubgraphSlicer {
       subgraphNode->eraseOutput(*it);
       subgraph->eraseOutput(*it);
     }
-
-    // size_t num_outputs = subgraph->outputs().size();
-    // for (int64_t i = num_outputs - 1; i >= 0; i++) {
-    //   subgraphNode->eraseOutput(i);
-    //   subgraph->eraseOutput(i);
-    // }
 
     n->destroy();
   }
