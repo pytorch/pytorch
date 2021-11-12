@@ -1823,6 +1823,15 @@ TEST(JitTracing, Basic) {
   auto graph = build_lstm();
   auto stack = createStack({input, hx, cx, w_ih, w_hh});
   auto traced = TraceGraph(graph, stack);
+
+  // Check that the inputs of traced graph have the same type as the inputs
+  // specified here.
+  ASSERT_EQ(*traced->inputs().at(0)->type(), *TensorType::create(input));
+  ASSERT_EQ(*traced->inputs().at(1)->type(), *TensorType::create(hx));
+  ASSERT_EQ(*traced->inputs().at(2)->type(), *TensorType::create(cx));
+  ASSERT_EQ(*traced->inputs().at(3)->type(), *TensorType::create(w_ih));
+  ASSERT_EQ(*traced->inputs().at(4)->type(), *TensorType::create(w_hh));
+
   Tensor prof_out;
   pop(stack, prof_out);
 
