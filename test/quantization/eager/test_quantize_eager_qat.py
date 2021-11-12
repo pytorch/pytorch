@@ -20,9 +20,11 @@ from torch.ao.quantization import (
     DeQuantStub,
     default_qconfig,
     default_qat_qconfig,
+    default_embedding_qat_qconfig,
     get_default_qat_qconfig,
     FixedQParamsFakeQuantize,
 )
+from torch.ao.quantization.qconfig import qconfig_equals
 from torch.testing._internal.common_utils import TestCase
 
 from torch.testing._internal.common_quantization import (
@@ -911,6 +913,16 @@ class TestEmbeddingBagQATModule(TestCase):
                                     "torch.per_channel_affine_float_qparams"):
             nnqat.EmbeddingBag.from_float(embed_bag)
 
+    def test_embedding_qat_qconfig_equal(self):
+        # Embedding QAT uses a NoopObserver class for activation,
+        # and a FakeQuant for weight, make sure that qconfig comparison
+        # functions properly for a mix of partial function and class in
+        # qconfig.
+        model = ManualEmbeddingBagLinear().train()
+        model = prepare_qat(model)
+
+        self.assertTrue(qconfig_equals(model.emb.qconfig,
+                                       default_embedding_qat_qconfig))
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"

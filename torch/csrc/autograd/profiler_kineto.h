@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/csrc/autograd/profiler_legacy.h>
+#include <string>
 #include <vector>
 
 #ifdef USE_KINETO
@@ -408,6 +409,54 @@ TORCH_API void prepareProfiler(
 
 TORCH_API void addMetadataJson(
     const std::string& key, const std::string& value);
+
+
+namespace python_tracer {
+
+/*
+Libtorch does not depend on Python (e.g. cannot #include <Python.h>); however
+when we call the profiler from libtorch_python we need the profiler to be able
+to ingest the data that we collect from the Python tracer. (`PyEval_SetProfile`)
+
+In order to solve this dependency issue we define a set of methods which do not
+contain any Python symbols, but can contain the information that Kineto needs
+such as times and names. The python tracer then implements these functions and
+wraps their registration in an init function which is called from
+`torch/csrc/autograd/init.cpp`. This pattern of registration for faux python
+dependencies in libtorch is common in the PyTorch codebase.
+*/
+enum CallType { kPyCall = 0, kPyModuleCall, kCCall };
+
+struct TORCH_API PyTraceEvent {
+  int64_t startTime_;
+  int64_t endTime_;
+  std::string name_;
+
+  uint64_t thread_id_;
+  PyTraceEvent* parent_;
+  CallType call_type_;
+  size_t module_id_;  // Only set call_type_ == kPyModuleCall
+
+  // Index in the list of raw call and return events. This allows one to
+  // convert a vector of PyTraceEvents back into the constituent call and
+  // return events, even when events share the same timestamp.
+  size_t call_idx_;
+  size_t return_idx_;
+};
+
+enum Command { kStartOne = 0, kStartAll, kStop, kClear };
+using CallFn = void (*)(Command);
+using TraceEventsFn = std::vector<std::unique_ptr<PyTraceEvent>> (*)();
+
+TORCH_API void registerFunctions(
+  CallFn call,
+  TraceEventsFn get_events
+);
+
+// Because we are interleaving events, the Python tracer should use the same
+// timer as the profiler.
+TORCH_API int64_t now();
+}  // namespace python_tracer
 
 } // namespace profiler
 }} // namespace torch::autograd
