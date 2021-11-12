@@ -666,7 +666,6 @@ class _SplitterBase:
 
         # Result accumulator
         subgraphs: List[Subgraph] = []
-
         while current_cpu_nodes or current_acc_nodes:
             # Find the first node that should belong to the current subgraph and has all dependencies resolved
             current_nodes = current_acc_nodes if acc_subgraph else current_cpu_nodes
@@ -693,7 +692,10 @@ class _SplitterBase:
 
             # Add fusion buddies
             if node in self.fusions:
-                current_acc_nodes.update(self.fusions[node] - visited_nodes)
+                if node in self.acc_nodes:
+                    current_acc_nodes.update(self.fusions[node] - visited_nodes)
+                else:
+                    current_cpu_nodes.update(self.fusions[node] - visited_nodes)
 
             # Put depending nodes into the queue
             for user in node.users:
