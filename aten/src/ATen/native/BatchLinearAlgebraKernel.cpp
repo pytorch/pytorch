@@ -206,6 +206,7 @@ std::tuple<Tensor, Tensor> eig_kernel_impl(const Tensor& self, bool& eigenvector
   });
   // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
   singleCheckErrors(info, "eig_cpu");
+
   return std::tuple<Tensor, Tensor>(vals_, vecs_);
 }
 
