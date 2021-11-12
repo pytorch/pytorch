@@ -206,6 +206,16 @@ class TestCommon(TestCase):
         for sample_input in sample_inputs:
             self.compare_with_reference(op, op.ref, sample_input)
 
+    @skipMeta
+    @onlyNativeDeviceTypes
+    @ops([op for op in op_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)
+    def test_errors(self, device, op):
+        error_inputs = op.error_inputs(device)
+        for ei in error_inputs:
+            si = ei.sample_input
+            with self.assertRaisesRegex(ei.error_type, ei.error_regex):
+                op(si.input, *si.args, **si.kwargs)
+
     # Tests that the function produces the same result when called with
     #   noncontiguous tensors.
     # TODO: get working with Windows by addressing failing operators
