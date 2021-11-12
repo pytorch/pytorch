@@ -1696,8 +1696,8 @@ TEST(Reductions, ReductionRfactorCacheTempOuter) {
   oss << *s;
   const std::string& expected_ir =
       R"IR(
-#CHECK: Allocate(sum_rfac); // dtype=float, dims=[n]
 #CHECK: Allocate(tmp); // dtype=float, dims=[n]
+#CHECK: Allocate(sum_rfac); // dtype=float, dims=[n]
 #CHECK: for (int a = 0; a < m
 #CHECK:   for (int i = 0; i < n
 #CHECK:     tmp[i] = 0
@@ -1762,8 +1762,8 @@ TEST(Reductions, ReductionRfactorCacheTempInner) {
   oss << *s;
   const std::string& expected_ir =
       R"IR(
-#CHECK: Allocate(sum_rfac); // dtype=float, dims=[n]
 #CHECK: Allocate(tmp); // dtype=float, dims=[1]
+#CHECK: Allocate(sum_rfac); // dtype=float, dims=[n]
 #CHECK: for (int a = 0; a < m
 #CHECK:   for (int b = 0; b < n
 #CHECK:     tmp[0] = 0
