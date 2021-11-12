@@ -559,14 +559,13 @@ class TORCH_API LoopNest {
   // TODO: refactor function 'prepareForCodegen' to remove argument
   // 'interm_bufs'.
   void prepareForCodegen(
-      const c10::optional<std::unordered_set<BufPtr>>& interm_bufs =
-          c10::nullopt);
+      const c10::optional<std::vector<BufPtr>>& interm_bufs = c10::nullopt);
 
   const std::unordered_set<BufPtr> getInputBufs() const;
   const std::unordered_set<BufPtr> getOutputBufs() const {
     return output_bufs_;
   }
-  std::unordered_set<BufPtr> getIntermediateBufs() const;
+  std::vector<BufPtr> getIntermediateBufs() const;
 
  private:
   void initialize(
@@ -574,8 +573,7 @@ class TORCH_API LoopNest {
       const std::vector<Tensor>& tensors_to_compute);
   StmtPtr insertAllocFree(
       StmtPtr stmt,
-      const c10::optional<std::unordered_set<BufPtr>>& interm_bufs =
-          c10::nullopt);
+      const c10::optional<std::vector<BufPtr>>& interm_bufs = c10::nullopt);
 
   StmtPtr root_stmt_;
 
