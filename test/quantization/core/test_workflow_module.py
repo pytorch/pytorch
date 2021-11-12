@@ -19,8 +19,12 @@ from torch.ao.quantization import (
     default_per_channel_weight_observer,
     get_observer_dict,
     prepare,
+    prepare_qat,
+    convert,
     QConfig,
     FusedMovingAvgObsFakeQuantize,
+    get_embedding_qat_module_mappings,
+    get_embedding_static_quant_module_mappings,
 )
 
 import torch.nn as nn
@@ -1145,7 +1149,8 @@ class TestFusedObsFakeQuantModule(TestCase):
 
             model.qconfig = qconfig
 
-            quant_model = torch.ao.quantization.prepare_qat(model)
+            quant_model = prepare_qat(model,
+                                      mapping=get_embedding_qat_module_mappings())
 
             count_fake_quant = 0
             for name, mod in quant_model.named_modules():
@@ -1155,7 +1160,8 @@ class TestFusedObsFakeQuantModule(TestCase):
             self.assertEqual(count_fake_quant, 2)
 
             quant_model(indices)
-            inference_gm = torch.ao.quantization.convert(quant_model.eval().cpu())
+            inference_gm = convert(quant_model.eval().cpu(),
+                                   mapping=get_embedding_static_quant_module_mappings())
 
             # Ensure that EmbeddingBags are now quantized with the appropriate bitwidth.
             self.assertEqual(type(inference_gm.emb1), torch.nn.quantized.EmbeddingBag)
@@ -1168,7 +1174,8 @@ class TestFusedObsFakeQuantModule(TestCase):
             with override_quantized_engine(qengine):
                 model = DeFusedEmbeddingBagLinear()
                 indices = torch.randint(0, 10, (5, 12))
-                quant_model = torch.ao.quantization.prepare_qat(model)
+                quant_model = prepare_qat(model,
+                                          mapping=get_embedding_qat_module_mappings())
 
                 count_fake_quant = 0
                 count_activation_postproc = 0
@@ -1188,7 +1195,8 @@ class TestFusedObsFakeQuantModule(TestCase):
                 self.assertEqual(type(quant_model.linear.activation_post_process), FusedMovingAvgObsFakeQuantize)
 
                 quant_model(indices)
-                inference_gm = torch.ao.quantization.convert(quant_model)
+                inference_gm = convert(quant_model,
+                                       mapping=get_embedding_static_quant_module_mappings())
                 # Ensure that Embedding is now quantized
                 self.assertEqual(type(inference_gm.emb), torch.nn.quantized.Embedding)
                 # Ensure that Linear is now quantized
