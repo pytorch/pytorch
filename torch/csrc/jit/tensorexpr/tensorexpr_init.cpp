@@ -893,6 +893,7 @@ void initTensorExprBindings(PyObject* module) {
   te.def(
       "replace_list_output_with_tuple",
       &tensorexpr::replaceListOutputWithTuple);
+#ifdef TORCH_ENABLE_LLVM
   te.def("set_llvm_target_triple", [](const c10::optional<std::string>& val) {
     tensorexpr::LLVMTargetTriple() = val;
   });
@@ -905,6 +906,7 @@ void initTensorExprBindings(PyObject* module) {
   te.def("set_llvm_aot_workflow", [](bool val) {
     tensorexpr::LLVMAOTWorkflow() = val;
   });
+#endif
 }
 } // namespace jit
 } // namespace torch
