@@ -642,6 +642,31 @@ void launch_vectorized_layer_norm_kernel(
 }
 
 template <typename T, typename T_ACC>
+//typename std::enable_if<!std::is_same<>::type* = nullptr>
+void launch_vectorized_layer_norm_kernel(
+  int N,
+  int64_t M,
+  T_ACC eps,
+  const T* X_data,
+  const T* gamma_data,
+  const T* beta_data,
+  T* Y_data,
+  T_ACC* mean_data,
+  T_ACC* rstd_data
+) {
+    //constexpr int alignment = 16; //currently unused to make sure float and half results are bw accurate
+    auto stream = at::cuda::getCurrentCUDAStream().stream();
+    const int num_threads = 128;
+    const dim3 threads(C10_WARP_SIZE,num_threads/C10_WARP_SIZE,1);
+    const dim3 blocks(M);
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(threads.y % 2 == 0 || threads.y == 1);
+    int nshared = threads.y > 1 ? threads.y * 3/2 *sizeof(T_ACC) : 0;
+    vectorized_layer_norm_kernel<<<blocks, threads, nshared, stream>>>(N, eps, X_data,
+    gamma_data, beta_data, mean_data, rstd_data, Y_data);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
+template <typename T, typename T_ACC>
 void LayerNormKernelImplInternal(
     const Tensor& X,
     const Tensor& gamma,
