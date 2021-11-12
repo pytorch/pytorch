@@ -195,6 +195,7 @@ def unsqueeze(*, input, dim):
 
 
 @register_acc_op_properties(AccOpProperty.unary)
+@register_acc_op_mapping(op_and_target=("call_method", "tile"))
 @register_acc_op_mapping(op_and_target=("call_function", torch.tile))
 @register_acc_op
 def tile(*, input, dims):
@@ -931,6 +932,12 @@ def floor(*, input):
 @register_acc_op
 def ceil(*, input):
     return torch.ceil(**locals())
+
+
+@register_acc_op_mapping(op_and_target=("call_function", torch.nn.functional.pad))
+@register_acc_op
+def pad(*, input, pad, mode, value):
+    return torch.nn.functional.pad(**locals())
 
 
 @register_acc_op_mapping(op_and_target=("call_function", torch.conv2d))
