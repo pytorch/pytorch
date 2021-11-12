@@ -445,8 +445,6 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   }
   if (!cpu) {
     cpu = LLVMTargetCPU();
-    if (cpu)
-      std::cerr << "Using CPU: " << *cpu << "\n";
   }
   if (!attrs) {
     attrs = LLVMTargetAttrs();
