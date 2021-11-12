@@ -3663,7 +3663,8 @@ class TestQuantizedEmbeddingOps(TestCase):
 
 class TestDynamicQuantizedConv(TestCase):
     def _test_qconv_op_impl(self, q_mod, dq_op, dim, q_engine, dtype):
-
+        # The goal here is to show that the dynamic op is the same as
+        # calc params->quantize_input->quantized op->dequantize output
         torch.backends.quantized.engine = q_engine
         if q_engine == 'qnnpack':
             reduce_range = True
