@@ -947,6 +947,7 @@ if __name__ == '__main__':
                 'include/ATen/cuda/detail/*.cuh',
                 'include/ATen/cuda/detail/*.h',
                 'include/ATen/cudnn/*.h',
+                'include/ATen/ops/*.h',
                 'include/ATen/hip/*.cuh',
                 'include/ATen/hip/*.h',
                 'include/ATen/hip/detail/*.cuh',
