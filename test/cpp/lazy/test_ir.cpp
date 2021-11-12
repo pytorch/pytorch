@@ -13,7 +13,7 @@ class TestLeafNode : public Node {
   explicit TestLeafNode(size_t param)
       : Node(OpKind(), /* num_outputs */ 1, /* hash_seed */ Hash(param)),
         param_(param) {}
-  ~TestLeafNode() override {}
+  ~TestLeafNode() override = default;
 
   const std::vector<Output>& operands() const override {
     TORCH_INTERNAL_ASSERT(false, "Can't access operands of leaf node");

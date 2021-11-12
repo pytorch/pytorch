@@ -118,7 +118,7 @@ def _check_capability():
             current_arch = major * 10 + minor
             min_arch = min((int(arch.split("_")[1]) for arch in torch.cuda.get_arch_list()), default=35)
             if current_arch < min_arch:
-                warnings.warn(old_gpu_warn.format(d, name, major, minor, min_arch // 10, min_arch % 10))
+                warnings.warn(old_gpu_warn % (d, name, major, minor, min_arch // 10, min_arch % 10))
             elif CUDA_VERSION <= 9000 and major >= 7 and minor >= 5:
                 warnings.warn(incorrect_binary_warn % (d, name, 10000, CUDA_VERSION))
 
