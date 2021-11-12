@@ -463,11 +463,11 @@ class _Symmetric(Constraint):
     Constrain to Symmetric square matrices.
     """
     event_dim = 2
-    
+
     def check(self, value):
-        return (value.transpose(-2, -1) == value).all(dim = -1).all(dim = -1)
-    
-    
+        return (value.transpose(-2, -1) == value).all(dim=-1).all(dim=-1)
+
+
 class _PositiveDefinite(Constraint):
     """
     Constrain to positive-definite matrices.
@@ -543,7 +543,7 @@ class _Stack(Constraint):
         vs = [value.select(self.dim, i) for i in range(value.size(self.dim))]
         return torch.stack([constr.check(v)
                             for v, constr in zip(vs, self.cseq)], self.dim)
-    
+
 
 
 
