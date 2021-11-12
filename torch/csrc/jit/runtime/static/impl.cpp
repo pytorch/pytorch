@@ -736,8 +736,7 @@ StaticModule::StaticModule(
 
   const auto inputs_index_offset = 0;
   const auto constants_index_offset = inputs_index_offset + num_inputs();
-  const auto values_index_offset =
-      constants_index_offset + constants().size();
+  const auto values_index_offset = constants_index_offset + constants().size();
 
   // Map node_idx to index offset in values_. Can't reserve space
   // because we don't know how many non-constant nodes there are yet.
@@ -749,8 +748,12 @@ StaticModule::StaticModule(
     }
     // Assign memory for the outputs
     const auto outputs_offset_for_node =
-      node_outputs_seen_so_far + values_index_offset;
-    TORCH_CHECK(outputs_offset_for_node < (1 << 16), "outputs offset in values table", outputs_offset_for_node, " would overflow 2-byte index storage");
+        node_outputs_seen_so_far + values_index_offset;
+    TORCH_CHECK(
+        outputs_offset_for_node < (1 << 16),
+        "outputs offset in values table",
+        outputs_offset_for_node,
+        " would overflow 2-byte index storage");
     node_output_idx_map.push_back(outputs_offset_for_node);
     node_outputs_seen_so_far += node->outputs().size();
   }
@@ -762,7 +765,7 @@ StaticModule::StaticModule(
     ProcessedNodeInputs input_indices(node->inputs().size());
     std::vector<DefInfo> input_ssa_defs;
     for (const auto input_idx : c10::irange(node->inputs().size())) {
-      Value *const input  = node->inputs()[input_idx];
+      Value* const input = node->inputs()[input_idx];
       int inner_node_idx = 0;
       int out_idx = 0;
       std::tie(inner_node_idx, out_idx) = value_to_ssa_def.at(input);
@@ -773,17 +776,22 @@ StaticModule::StaticModule(
         input_ivalue_idx = out_idx + constants_index_offset;
       } else {
         DCHECK_GE(inner_node_idx, 0);
-        const auto global_value_idx = node_output_idx_map[inner_node_idx] + out_idx;
+        const auto global_value_idx =
+            node_output_idx_map[inner_node_idx] + out_idx;
         if (inner_node_idx < node_output_idx_map.size() - 1) {
           DCHECK_LT(global_value_idx, node_output_idx_map[inner_node_idx + 1]);
         } else {
-          DCHECK_LT(global_value_idx, constants_index_offset + node_outputs_seen_so_far);
+          DCHECK_LT(
+              global_value_idx,
+              constants_index_offset + node_outputs_seen_so_far);
         }
         input_ivalue_idx = global_value_idx;
       }
-      TORCH_CHECK(input_ivalue_idx < (1 << 16),
-                  "input index in values table ", input_ivalue_idx,
-                  " would overflow 2-byte index storage");
+      TORCH_CHECK(
+          input_ivalue_idx < (1 << 16),
+          "input index in values table ",
+          input_ivalue_idx,
+          " would overflow 2-byte index storage");
       input_indices[input_idx] = input_ivalue_idx;
     }
 
@@ -826,7 +834,9 @@ StaticModule::StaticModule(
     }
     TORCH_CHECK(
         output_index < (1 << 16),
-        "output index ",  output_index, " would overflow 2-byte index storage");
+        "output index ",
+        output_index,
+        " would overflow 2-byte index storage");
     output_indices_.emplace_back(output_index);
   }
 
@@ -886,9 +896,13 @@ StaticRuntime::StaticRuntime(const StaticModule& sm)
     : static_module_(sm),
       manage_output_tensors_enabled_(sm.opts().manage_output_tensors),
       nodes_(sm.nodes()) {
-  const auto total_num_node_outputs = std::accumulate(nodes_.begin(), nodes_.end(), 0, [](uint32_t sum, const ProcessedNode &pnode) {
-    return sum + pnode.num_outputs();
-  });
+  const auto total_num_node_outputs = std::accumulate(
+      nodes_.begin(),
+      nodes_.end(),
+      0,
+      [](uint32_t sum, const ProcessedNode& pnode) {
+        return sum + pnode.num_outputs();
+      });
   values_.resize(
       sm.num_inputs() + sm.constants().size() + total_num_node_outputs);
   const auto inputs_index_offset = 0;
