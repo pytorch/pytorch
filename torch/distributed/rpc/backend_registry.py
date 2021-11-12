@@ -291,7 +291,6 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
         name,
         rank,
         world_size,
-        group,
         rpc_backend_options,
         reverse_device_maps,
         devices,

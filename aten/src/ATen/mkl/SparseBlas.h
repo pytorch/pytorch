@@ -9,8 +9,8 @@
   The functions are available in at::mkl::sparse namespace.
 */
 
-#include <c10/util/complex.h>
 #include <c10/util/Exception.h>
+#include <c10/util/complex.h>
 
 #include <mkl_spblas.h>
 
@@ -19,9 +19,9 @@ namespace mkl {
 namespace sparse {
 
 #define MKL_SPARSE_CREATE_CSR_ARGTYPES(scalar_t)                              \
-  sparse_matrix_t* A, const sparse_index_base_t indexing, const MKL_INT rows, \
-      const MKL_INT cols, MKL_INT* rows_start, MKL_INT* rows_end,             \
-      MKL_INT* col_indx, scalar_t* values
+  sparse_matrix_t *A, const sparse_index_base_t indexing, const MKL_INT rows, \
+      const MKL_INT cols, MKL_INT *rows_start, MKL_INT *rows_end,             \
+      MKL_INT *col_indx, scalar_t *values
 
 template <typename scalar_t>
 inline void create_csr(MKL_SPARSE_CREATE_CSR_ARGTYPES(scalar_t)) {
@@ -45,7 +45,7 @@ void create_csr<c10::complex<double>>(
 #define MKL_SPARSE_MV_ARGTYPES(scalar_t)                        \
   const sparse_operation_t operation, const scalar_t alpha,     \
       const sparse_matrix_t A, const struct matrix_descr descr, \
-      const scalar_t* x, const scalar_t beta, scalar_t* y
+      const scalar_t *x, const scalar_t beta, scalar_t *y
 
 template <typename scalar_t>
 inline void mv(MKL_SPARSE_MV_ARGTYPES(scalar_t)) {
@@ -63,6 +63,51 @@ template <>
 void mv<c10::complex<float>>(MKL_SPARSE_MV_ARGTYPES(c10::complex<float>));
 template <>
 void mv<c10::complex<double>>(MKL_SPARSE_MV_ARGTYPES(c10::complex<double>));
+
+#define MKL_SPARSE_ADD_ARGTYPES(scalar_t)                      \
+  const sparse_operation_t operation, const sparse_matrix_t A, \
+      const scalar_t alpha, const sparse_matrix_t B, sparse_matrix_t *C
+
+template <typename scalar_t>
+inline void add(MKL_SPARSE_ADD_ARGTYPES(scalar_t)) {
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "at::mkl::sparse::add: not implemented for ",
+      typeid(scalar_t).name());
+}
+
+template <>
+void add<float>(MKL_SPARSE_ADD_ARGTYPES(float));
+template <>
+void add<double>(MKL_SPARSE_ADD_ARGTYPES(double));
+template <>
+void add<c10::complex<float>>(MKL_SPARSE_ADD_ARGTYPES(c10::complex<float>));
+template <>
+void add<c10::complex<double>>(MKL_SPARSE_ADD_ARGTYPES(c10::complex<double>));
+
+#define MKL_SPARSE_EXPORT_CSR_ARGTYPES(scalar_t)                              \
+  const sparse_matrix_t source, sparse_index_base_t *indexing, MKL_INT *rows, \
+      MKL_INT *cols, MKL_INT **rows_start, MKL_INT **rows_end,                \
+      MKL_INT **col_indx, scalar_t **values
+
+template <typename scalar_t>
+inline void export_csr(MKL_SPARSE_EXPORT_CSR_ARGTYPES(scalar_t)) {
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "at::mkl::sparse::export_csr: not implemented for ",
+      typeid(scalar_t).name());
+}
+
+template <>
+void export_csr<float>(MKL_SPARSE_EXPORT_CSR_ARGTYPES(float));
+template <>
+void export_csr<double>(MKL_SPARSE_EXPORT_CSR_ARGTYPES(double));
+template <>
+void export_csr<c10::complex<float>>(
+    MKL_SPARSE_EXPORT_CSR_ARGTYPES(c10::complex<float>));
+template <>
+void export_csr<c10::complex<double>>(
+    MKL_SPARSE_EXPORT_CSR_ARGTYPES(c10::complex<double>));
 
 } // namespace sparse
 } // namespace mkl

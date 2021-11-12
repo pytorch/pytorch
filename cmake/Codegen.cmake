@@ -173,37 +173,16 @@ if(INTERN_BUILD_ATEN_OPS)
   endif()
 
   if(SELECTED_OP_LIST)
-    # With static dispatch we can omit the OP_DEPENDENCY flag. It will not calculate the transitive closure
-    # of used ops. It only needs to register used root ops.
     if(TRACING_BASED)
       message(STATUS "Running tracing-based selective build given operator list: ${SELECTED_OP_LIST}")
       list(APPEND CUSTOM_BUILD_FLAGS
         --op_selection_yaml_path ${SELECTED_OP_LIST})
-    elseif(NOT STATIC_DISPATCH_BACKEND AND NOT OP_DEPENDENCY)
+    elseif(NOT STATIC_DISPATCH_BACKEND)
       message(WARNING
-        "For custom build with dynamic dispatch you have to provide the dependency graph of PyTorch operators.\n"
-        "Switching to STATIC_DISPATCH_BACKEND=CPU. If you run into problems with static dispatch and still want"
-        " to use selective build with dynamic dispatch, please try:\n"
-        "1. Run the static analysis tool to generate the dependency graph, e.g.:\n"
-        "   LLVM_DIR=/usr ANALYZE_TORCH=1 tools/code_analyzer/build.sh\n"
-        "2. Run the custom build with the OP_DEPENDENCY option pointing to the generated dependency graph, e.g.:\n"
-        "   scripts/build_android.sh -DSELECTED_OP_LIST=<op_list.yaml> -DOP_DEPENDENCY=<dependency_graph.yaml>\n"
+        "You have to run tracing-based selective build with dynamic dispatch.\n"
+        "Switching to STATIC_DISPATCH_BACKEND=CPU."
       )
       set(STATIC_DISPATCH_BACKEND CPU)
-    else()
-      execute_process(
-        COMMAND
-        "${PYTHON_EXECUTABLE}" ${CMAKE_CURRENT_LIST_DIR}/../tools/code_analyzer/gen_op_registration_allowlist.py
-        --op-dependency "${OP_DEPENDENCY}"
-        --root-ops "${SELECTED_OP_LIST}"
-        OUTPUT_VARIABLE OP_REGISTRATION_WHITELIST
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-      )
-      separate_arguments(OP_REGISTRATION_WHITELIST)
-      message(STATUS "Custom build with op registration whitelist: ${OP_REGISTRATION_WHITELIST}")
-      list(APPEND CUSTOM_BUILD_FLAGS
-        --force_schema_registration
-        --op_registration_whitelist ${OP_REGISTRATION_WHITELIST})
     endif()
   endif()
 
