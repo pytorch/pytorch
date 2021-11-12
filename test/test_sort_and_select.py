@@ -880,17 +880,6 @@ class TestSortAndSelect(TestCase):
             self.assertEqual(res1val[:, :], res2val[:, :, k - 1], atol=0, rtol=0)
             self.assertEqual(res1ind[:, :], res2ind[:, :, k - 1], atol=0, rtol=0)
 
-    # test overlapping output
-    @dtypes(torch.double)
-    @onlyNativeDeviceTypes   # Fails on XLA
-    def test_kthvalue_overlap(self, device, dtype):
-        S = 10
-        k = 5
-        a = torch.randn(S, device=device)
-        indices = torch.empty((), device=device, dtype=torch.long)
-        with self.assertRaisesRegex(RuntimeError, "unsupported operation:"):
-            torch.kthvalue(a, k, out=(a, indices))
-
     @dtypes(torch.float)
     @onlyNativeDeviceTypes   # Fails on XLA
     def test_kthvalue_scalar(self, device, dtype):
