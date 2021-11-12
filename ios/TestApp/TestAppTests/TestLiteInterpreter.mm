@@ -31,7 +31,6 @@
   XCTAssertTrue(outputTensor.numel() == 1000);
 }
 
-	
 - (void)testMetal {
   NSString* modelPath = [[NSBundle bundleForClass:[self class]] pathForResource:@"model_metal"
                                                                          ofType:@"ptl"];
