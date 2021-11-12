@@ -488,7 +488,9 @@ class NativeFunction:
         rets = self.func.returns
         is_non_mutating_view = len(rets) > 0 and any(r.annotation is not None and not r.annotation.is_write for r in rets)
         is_inplace_view = self.tag is not None and self.tag is Tag.inplace_view
-        return is_non_mutating_view or is_inplace_view
+        is_wildcard_view = any(inp.annotation is not None and
+                               inp.annotation.alias_set_after != "" for inp in self.func.schema_order_arguments())
+        return is_non_mutating_view or is_inplace_view or is_wildcard_view
 
 SchemaKind = Enum('SchemaKind', ('functional', 'inplace', 'out'))
 
@@ -765,7 +767,9 @@ class FunctionSchema:
     def parse(func: str) -> 'FunctionSchema':
         # We should probably get a proper parser here
         assert ' -> ' in func, "function schema missing return type (spaces are mandatory)"
-        func_decl, return_decl = [x.strip() for x in func.split(' -> ')]
+        last_index = func.rfind(" -> ")
+        func_decl = func[:last_index]
+        return_decl = func[last_index + len(" -> "):]
         ops, args = func_decl.split('(', 1)
         assert args[-1] == ")", "Expecting closing )"
         args = args[:-1]
@@ -909,19 +913,30 @@ class Annotation:
     # we can conveniently assume it is canonically ordered
     alias_set: Tuple[str, ...]
     is_write: bool
+    alias_set_after: str
 
     @staticmethod
     def parse(ann: str) -> 'Annotation':
-        m = re.match(r'^([a-z])(!?)(!?)$', ann)
+        # Only handling afterSet == Wildcard for now
+        becomes_wildcard_index = ann.find(" -> *")
+        if becomes_wildcard_index != -1:
+            after_set = "*"
+            # TODO: im not good enough with regexes to ignore -> *
+            m = re.match(r'^([a-z])(!?)(!?)$', ann[:becomes_wildcard_index] + ann[becomes_wildcard_index + len(" -> *"):])
+        else:
+            after_set = ""
+            m = re.match(r'^([a-z])(!?)(!?)$', ann)
         assert m is not None, f'unrecognized alias annotation {ann}'
         alias_set = (m.group(1),)
         is_write = m.group(2) == '!'
-        r = Annotation(alias_set=alias_set, is_write=is_write)
+        r = Annotation(alias_set=alias_set, is_write=is_write, alias_set_after=after_set)
         assert str(r) == ann, f'{r} != {ann}'
         return r
 
     def __str__(self) -> str:
         alias_set = '|'.join(self.alias_set)
+        if self.alias_set_after:
+            alias_set = f'{alias_set}{" -> "}{self.alias_set_after}'
         is_write = '!' if self.is_write else ''
         return f'{alias_set}{is_write}'
 

@@ -14,6 +14,7 @@
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/frozen_conv_add_relu_fusion.h>
 #include <torch/csrc/jit/passes/frozen_graph_optimizations.h>
+#include <torch/csrc/jit/passes/frozen_linear_transpose.h>
 #include <torch/csrc/jit/passes/frozen_ops_to_mkldnn.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/operator.h>
@@ -491,6 +492,7 @@ Module optimize_for_inference(Module& module) {
   auto graph = module.get_method("forward").graph();
   FuseFrozenConvAddRelu(graph);
   ConvertFrozenOpsToMKLDNN(graph);
+  FrozenLinearTranspose(graph);
   return module;
 }
 
