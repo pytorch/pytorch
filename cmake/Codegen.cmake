@@ -226,10 +226,6 @@ if(INTERN_BUILD_ATEN_OPS)
   file(GLOB_RECURSE sources_templates "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/templates/*\.cpp")
   set(declarations_yaml_templates "")
 
-  file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/aten/src/ATen)
-  file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/aten/src/ATen/ops)
-  file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/aten/src/ATen/core)
-
   foreach(gen_type "headers" "sources" "declarations_yaml")
     # The codegen outputs may change dynamically as PyTorch is
     # developed, but add_custom_command only supports dynamic inputs.

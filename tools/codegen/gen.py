@@ -1315,7 +1315,9 @@ def main() -> None:
     #
     #   Invalid character escape '\c'.
     core_install_dir = f'{options.install_dir}/core'
-    pathlib.Path(core_install_dir).mkdir(parents=True, exist_ok=True)
+    core_install_path = pathlib.Path(core_install_dir)
+    core_install_path.mkdir(parents=True, exist_ok=True)
+    (core_install_path.parent / 'ops').mkdir(exist_ok=True)
 
     def make_file_manager(install_dir: str) -> FileManager:
         return FileManager(install_dir=install_dir, template_dir=template_dir, dry_run=options.dry_run)
