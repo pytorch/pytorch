@@ -207,7 +207,7 @@ class IterableDataset(Dataset[T_co], metaclass=_DataPipeMeta):
         [3, 4, 5, 6]
     """
     functions: Dict[str, Callable] = {}
-    reduce_ex_hook : Optional[Callable] = None
+    reduce_ex_hook: Optional[Callable] = None
     getstate_hook: Optional[Callable] = None
 
     def __iter__(self) -> Iterator[T_co]:
