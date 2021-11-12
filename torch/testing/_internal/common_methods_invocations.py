@@ -2125,6 +2125,64 @@ def sample_inputs_like_fns(self, device, dtype, requires_grad, **kwargs):
 
     return tuple(samples)
 
+def get_independent_tensor(tensor):
+    return tensor.detach().clone().requires_grad_(tensor.requires_grad)
+
+def sample_inputs_randint_like(self, device, dtype, requires_grad, **kwargs):
+    samples = []
+    low = 2
+    high = 10
+
+    for sample in sample_inputs_like_fns(self, device, dtype, requires_grad, **kwargs):
+        # With high
+        samples.append(SampleInput(
+            sample.input,
+            args=(high,) + sample.args,
+            kwargs=sample.kwargs))
+        # With low and high
+        samples.append(SampleInput(
+            get_independent_tensor(sample.input),
+            args=(low, high,) + sample.args,
+            kwargs=sample.kwargs))
+    return tuple(samples)
+
+def sample_inputs_new_fns(self, device, dtype, requires_grad, **kwargs):
+    inputs = [
+        ((), (), {}),
+        ((S, S), (2, 0), {}),
+        ((0, S, 0), (3, 2, 2), {}),
+        ((S,), (2, 3), {'dtype': dtype, 'device': device}),
+        # Hard-code some dtypes/devices. We want to test cases where the
+        # (dtype, device) is different from the input's (dtype, device)
+        ((S,), (10,), {'dtype': torch.double}),
+        ((S,), (1, 1, 12), {'device': 'cpu'}),
+        ((S,), (2, 2, 2), {'dtype': torch.double, 'device': 'cpu'}),
+    ]
+    if torch.cuda.is_available():
+        inputs.append(((S,), (7, 2), {'device': 'cuda'}))
+
+    samples = []
+    for input_shape, output_shape, kwargs in inputs:
+        t = make_tensor(input_shape, device, dtype,
+                        low=None, high=None,
+                        requires_grad=requires_grad)
+        samples.append(SampleInput(t, args=(output_shape,), kwargs=kwargs))
+
+    return tuple(samples)
+
+def sample_inputs_new_full(self, device, dtype, requires_grad, **kwargs):
+    def get_val(dtype):
+        return make_tensor([], 'cpu', dtype).item()
+
+    samples = []
+    for sample in sample_inputs_new_fns(self, device, dtype, requires_grad, **kwargs):
+        # The scalar we are passing to new_full must be the same dtype
+        # as the one of the resulting tensor
+        use_dtype = sample.kwargs['dtype'] if 'dtype' in sample.kwargs else dtype
+        samples.append(SampleInput(
+            sample.input, args=sample.args + (get_val(use_dtype),), kwargs=sample.kwargs))
+    return tuple(samples)
+
 def sample_inputs_full_like(self, device, dtype, requires_grad, **kwargs):
     def get_val(dtype):
         return make_tensor([], 'cpu', dtype).item()
@@ -2909,30 +2967,17 @@ def sample_inputs_unique_consecutive(*args, **kwargs):
     return list(generator())
 
 def sample_inputs_index_fill(op_info, device, dtype, requires_grad, **kwargs):
-    samples = []
-    t = make_tensor((S, S, S), device, dtype,
-                    low=None, high=None,
-                    requires_grad=requires_grad)
-    fill_val = torch.tensor(-1 + 1j if t.is_complex() else -1)
-    # non-contiguous input
-    t01 = t.transpose(0, 1)
-    t02 = t.transpose(0, 2)
-    t12 = t.transpose(1, 2)
-    idx = index_variable(1, S, device=device)
-    # non-contiguous index
-    idx_nonctg = torch.empty_strided((S,), (2,), device=device, dtype=torch.int64)
-    idx_nonctg.copy_(idx)
-    for d in range(t.dim()):
-        for tensor in [t, t01, t02, t12]:
-            samples.append(SampleInput(tensor.detach().clone().requires_grad_(requires_grad),
-                                       args=(d, idx, fill_val)))
-            samples.append(SampleInput(tensor.detach().clone().requires_grad_(requires_grad),
-                                       args=(d, -idx - 1, fill_val)))
-            samples.append(SampleInput(tensor.detach().clone().requires_grad_(requires_grad),
-                                       args=(d, idx_nonctg, fill_val)))
-
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     index_tensor = partial(torch.tensor, device=device, dtype=torch.long)
+
+    samples = []
+    fill_val = torch.tensor(-1 + 1j if dtype.is_complex else -1)
+    idx = index_variable(1, S, device=device)
+    ndim = 3
+    for d in range(ndim):
+        samples.append(SampleInput(make_arg((S,) * ndim), args=(d, idx, fill_val)))
+        samples.append(SampleInput(make_arg((S,) * ndim), args=(d, -idx - 1, fill_val)))
+
 
     def unique_idx(numel, max_idx):
         # Generate unique random indices vector of `numel`
@@ -3157,6 +3202,34 @@ def sample_inputs_conv_transpose2d(op_info, device, dtype, requires_grad, **kwar
         ((1, 4, 5, 5), (4, 8, 3, 3), None,
          {})
     )
+
+    def generator():
+        for input_shape, weight, bias, kwargs in cases:
+            yield SampleInput(make_arg(input_shape), args=(
+                make_arg(weight),
+                make_arg(bias) if bias is not None else bias
+            ), kwargs=kwargs)
+
+    return list(generator())
+
+
+def sample_inputs_conv1d(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # Ordered as shapes for input, weight, bias,
+    # and a dict of values of (stride, padding, dilation, groups)
+    cases: Tuple = (
+        ((1, 3, 4), (3, 3, 3), (3,), {'stride': (2,), 'padding': 2, 'groups': 1}),
+        ((2, 4, 8), (2, 2, 3), (2,), {'stride': 3, 'padding': 1, 'groups': 2, 'dilation': 2}),
+        ((1, 4, 5), (1, 4, 3), None, {'stride': (2,), 'padding': 'valid'}),
+        ((2, 2, 4), (2, 1, 4), (2,), {'stride': (1,), 'padding': 'same', 'groups': 2, 'dilation': (2,)}),
+        # With defaults
+        ((1, 4, 5), (3, 4, 3), None, {}),
+    )
+
+    # TODO: (@krshrimali), add error_inputs_func once https://github.com/pytorch/pytorch/pull/67354 is merged
+    # Should replace test_conv_modules_raise_error_on_incorrect_input_size and test_conv_shapecheck
+    # in test/test_nn.py
 
     def generator():
         for input_shape, weight, bias, kwargs in cases:
@@ -3771,6 +3844,7 @@ def sample_movedim_moveaxis(op_info, device, dtype, requires_grad):
 
 
 def sample_repeat_tile(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
     rep_dims = ((), (0, ), (1, ), (0, 2), (1, 1), (2, 3), (2, 3, 2), (0, 2, 3), (2, 1, 1, 1),)
     shapes = ((), (0,), (2,), (3, 0), (3, 2), (3, 0, 1))
 
@@ -3781,21 +3855,13 @@ def sample_repeat_tile(op_info, device, dtype, requires_grad, **kwargs):
         rep_dims = ((), (0, ), (0, 2), (1, 1), (2, 3), (1, 3, 2), (3, 1, 1))  # type: ignore[assignment]
         shapes = ((), (0,), (2,), (3, 2))  # type: ignore[assignment]
 
-    tensors = [make_tensor(shape, device, dtype,
-                           low=None, high=None,
-                           requires_grad=requires_grad) for shape in shapes]
-
     samples = []
-    for rep_dim, tensor in product(rep_dims, tensors):
-        for t in (tensor, tensor.detach().clone().T.requires_grad_(requires_grad)):
-            if op_info.name == 'repeat' and len(rep_dim) >= t.dim():
-                # `torch.repeat` errors for `len(rep_dims) < t.dim()`,
-                # so we filter such combinations.
-                samples.append(SampleInput(t.detach().clone().requires_grad_(requires_grad),
-                                           args=(rep_dim,),))
-            elif op_info.name == 'tile':
-                samples.append(SampleInput(t.detach().clone().requires_grad_(requires_grad),
-                                           args=(rep_dim,),))
+    for rep_dim, shape in product(rep_dims, shapes):
+        # `torch.repeat` errors for `len(rep_dims) < t.dim()`,
+        # so we filter such combinations.
+        if op_info.name == 'repeat' and len(rep_dim) < len(shape):
+            continue
+        samples.append(SampleInput(make_arg(shape), args=(rep_dim,),))
 
     return samples
 
@@ -5067,8 +5133,11 @@ def sample_inputs_cross(op_info, device, dtype, requires_grad, **kwargs):
     sample1 = SampleInput(make_tensor((S, 3, S), device=device, dtype=dtype, requires_grad=requires_grad),
                           args=(make_tensor((S, 3, S), device=device, dtype=dtype, requires_grad=requires_grad),),
                           kwargs={'dim': 1})
+    sample2 = SampleInput(make_tensor((S, 3), device=device, dtype=dtype, requires_grad=requires_grad),
+                          args=(make_tensor((S, 3), device=device, dtype=dtype, requires_grad=requires_grad),),
+                          kwargs={'dim': -1})
 
-    return (sample0, sample1)
+    return (sample0, sample1, sample2)
 
 def sample_inputs_cumprod(op_info, device, dtype, requires_grad, **kwargs):
     def make_arg(shape):
@@ -7099,7 +7168,6 @@ def wrapper_set_seed(op, input, *args, **kwargs):
     torch.manual_seed(42)
     return op(input, *args, **kwargs)
 
-
 def reference_layer_norm(inp: np.ndarray, normalized_shape: Tuple[int], weight=None, bias=None, eps=1e-5):
     feature_size = np.prod(normalized_shape)
     inp_view = inp.reshape(-1, feature_size)  # type: ignore[call-overload]
@@ -7962,12 +8030,16 @@ op_db: List[OpInfo] = [
            dtypesIfCPU=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.half),
            sample_inputs_func=sample_inputs_cross,
-           supports_forward_ad=True,
-           skips=(
-               # AssertionError: UserWarning not triggered :
-               # Resized a non-empty tensor but did not warn about it.
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out'),
-           )),
+           supports_forward_ad=True),
+    OpInfo('linalg.cross',
+           ref=lambda x, y, dim=-1: np.cross(x, y, axis=dim),
+           op=torch.linalg.cross,
+           dtypes=all_types_and_complex(),
+           dtypesIfCPU=all_types_and_complex_and(torch.bfloat16),
+           dtypesIfCUDA=all_types_and_complex_and(torch.half),
+           aten_name='linalg_cross',
+           sample_inputs_func=sample_inputs_cross,
+           supports_forward_ad=True),
     OpInfo('cumsum',
            dtypesIfCPU=all_types_and_complex(),
            dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
@@ -9311,6 +9383,19 @@ op_db: List[OpInfo] = [
            skips=(
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":104, please report a bug to PyTorch.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+           ),
+           supports_out=False,),
+    OpInfo('nn.functional.conv1d',
+           aliases=('conv1d',),
+           aten_name='conv1d',
+           dtypes=floating_types_and(torch.int64),
+           dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
+           sample_inputs_func=sample_inputs_conv1d,
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           skips=(
+               # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
+               # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":103, please report a bug to PyTorch.
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
            ),
            supports_out=False,),
@@ -11206,6 +11291,32 @@ op_db: List[OpInfo] = [
                # AssertionError: JIT Test does not execute any logic
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
            )),
+    OpInfo('rand_like',
+           dtypes=floating_types_and(torch.half, torch.bfloat16, torch.complex64, torch.complex128),
+           op=lambda inp, *args, **kwargs:
+               wrapper_set_seed(torch.randn_like, inp, *args, **kwargs),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_like_fns,
+           supports_autograd=False,
+           skips=(
+               # AssertionError: JIT Test does not execute any logic
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+               # Can't find schemas for this operator for some reason
+               DecorateInfo(unittest.skip("Skipped!"), 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
+           )),
+    OpInfo('randint_like',
+           dtypes=all_types_and(torch.half, torch.bfloat16),
+           op=lambda inp, *args, **kwargs:
+               wrapper_set_seed(torch.randint_like, inp, *args, **kwargs),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_randint_like,
+           supports_autograd=False,
+           skips=(
+               # AssertionError: JIT Test does not execute any logic
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+               # Can't find schemas for this operator for some reason
+               DecorateInfo(unittest.skip("Skipped!"), 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
+           )),
     OpInfo('full_like',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            supports_out=False,
@@ -11215,6 +11326,56 @@ op_db: List[OpInfo] = [
                # Can't find schemas for this operator for some reason
                DecorateInfo(unittest.skip("Skipped!"), 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
            )),
+    OpInfo('new_zeros',
+           op=lambda x, *args, **kwargs: x.new_zeros(*args, **kwargs),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_new_fns,
+           skips=(
+               # Can't find schemas for this operator for some reason
+               DecorateInfo(unittest.skip("Skipped!"), 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
+           ),
+           supports_autograd=False),
+    OpInfo('new_ones',
+           op=lambda x, *args, **kwargs: x.new_ones(*args, **kwargs),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_new_fns,
+           skips=(
+               # Can't find schemas for this operator for some reason
+               DecorateInfo(unittest.skip("Skipped!"), 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
+           ),
+           supports_autograd=False),
+    OpInfo('new_empty',
+           op=lambda x, *args, **kwargs: x.new_empty(*args, **kwargs),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_new_fns,
+           skips=(
+               # Empty tensor data is garbage so it's hard to make comparisons with it.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+               # Empty tensor data is garbage so it's hard to make comparisons with it.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager'),
+               # Empty tensor data is garbage so it's hard to make comparisons with it.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_noncontiguous_samples'),
+               # Empty tensor data is garbage so it's hard to make comparisons with it.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_conj_view'),
+               # Empty tensor data is garbage so it's hard to make comparisons with it.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
+               # Can't find schemas for this operator for some reason
+               DecorateInfo(unittest.skip("Skipped!"), 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
+           ),
+           supports_autograd=False),
+    OpInfo('new_full',
+           op=lambda x, *args, **kwargs: x.new_full(*args, **kwargs),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_new_full,
+           skips=(
+               # Can't find schemas for this operator for some reason
+               DecorateInfo(unittest.skip("Skipped!"), 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
+           ),
+           supports_autograd=False),
     OpInfo('scatter_add',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_scatter_add,
