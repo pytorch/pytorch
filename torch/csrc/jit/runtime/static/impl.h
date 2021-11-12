@@ -196,7 +196,7 @@ class TORCH_API StaticModule {
   size_t num_inputs() const;
   size_t num_outputs() const;
 
-  const std::vector<uint16_t>& output_indices() const {
+  C10_NODISCARD const std::vector<uint16_t>& output_indices() const {
     return output_indices_;
   }
 
@@ -218,7 +218,7 @@ class TORCH_API StaticModule {
     return nodes_.size();
   }
 
-  Node* findNodeWithKindForTesting(const std::string& kind) const;
+  C10_NODISCARDNode* findNodeWithKindForTesting(const std::string& kind) const;
 
   bool is_optimizable_container_type(const Node* n) const {
     auto it = node_is_optimizable_container_type_.find(n);
