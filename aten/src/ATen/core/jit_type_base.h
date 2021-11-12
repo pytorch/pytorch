@@ -159,7 +159,6 @@ struct TORCH_API Type : std::enable_shared_from_this<Type> {
   // template variable, returning nullptr if the cast is invalid.
   template <typename T>
   std::shared_ptr<T> cast() {
-    TORCH_INTERNAL_ASSERT(kind()!= TypeKind::DynamicType);
     if (T::Kind == kind()) {
       return std::static_pointer_cast<T>(shared_from_this());
     }
@@ -167,7 +166,6 @@ struct TORCH_API Type : std::enable_shared_from_this<Type> {
   }
   template <typename T>
   std::shared_ptr<const T> cast() const {
-    TORCH_INTERNAL_ASSERT(kind()!= TypeKind::DynamicType);
     if (T::Kind == kind()) {
       return std::static_pointer_cast<const T>(shared_from_this());
     }
@@ -175,7 +173,6 @@ struct TORCH_API Type : std::enable_shared_from_this<Type> {
   }
   template <typename T>
   T* castRaw() {
-    TORCH_INTERNAL_ASSERT(kind()!= TypeKind::DynamicType);
     if (T::Kind == kind()) {
       return static_cast<T*>(this);
     }
@@ -183,7 +180,6 @@ struct TORCH_API Type : std::enable_shared_from_this<Type> {
   }
   template <typename T>
   const T* castRaw() const {
-    TORCH_INTERNAL_ASSERT(kind()!= TypeKind::DynamicType);
     if (T::Kind == kind()) {
       return static_cast<const T*>(this);
     }
