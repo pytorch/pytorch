@@ -303,16 +303,9 @@ __global__ void ComputeInternalGradientsCUDAKernel(
   }
 }
 
-template<typename T>
-struct T2 {
-  T x1;
-  T x2;
-  C10_HOST_DEVICE T2(): x1(0), x2(0) {};
-  C10_HOST_DEVICE T2(T x1, T x2): x1(x1), x2(x2) {};
-};
 
 template<typename T, typename T_ACC>
-T2<T_ACC> __device__ __inline__ compute_gI(
+__device__ __inline__ void compute_gI(
   const T* __restrict__ dY,
   const T* __restrict__ X,
   const T_ACC* __restrict__ mean,
@@ -324,31 +317,31 @@ T2<T_ACC> __device__ __inline__ compute_gI(
     const auto i1 = blockIdx.x;
     const T_ACC mean_val = mean[i1];
     const T_ACC rstd_val = rstd[i1];
-    using vec_t = aligned_vector<T, vec_size>;
-    using vec_acc_t = aligned_vector<T_ACC, vec_size>;
-    const vec_t * X_vec = reinterpret_cast<const vec_t*>(X + i1 * N);
-    const vec_t * dY_vec = reinterpret_cast<const vec_t*>(dY + i1 * N);
-    vec_t * dX_vec = reinterpret_cast<vec_t*>(dX + i1 * N);
-    const int n_vec_to_read = N/vec_size;
     T_ACC stats_x1{0}, stats_x2{0};
-    for (int i=threadIdx.x; i<n_vec_to_read; i += blockDim.x){
-      vec_t dataX = X_vec[i];
-      vec_t datadY = dY_vec[i];
-      if (gamma != nullptr){
-        #pragma unroll
-        for (int ii=0; ii < vec_size; ii++){
-          T gamma_val = gamma[i*vec_size + ii];
-          stats_x1 += static_cast<T_ACC>(datadY.val[ii]) * static_cast<T_ACC>(gamma_val);
-          stats_x2 += static_cast<T_ACC>(datadY.val[ii]) * static_cast<T_ACC>(gamma_val)
-          * (static_cast<T_ACC>(dataX.val[ii]) - mean_val) * rstd_val;
-        }
-      } else {
-        for (int ii=0; ii < vec_size; ii++){
-          stats_x1 += static_cast<T_ACC>(datadY.val[ii]);
-          stats_x2 += datadY.val[ii] * (dataX.val[ii] - mean_val) * rstd_val;
-        }
+    constexpr int unroll = 4;
+    auto l = 4 * threadIdx.x;
+    const T * X_i = X + i1 * N;
+    const T * dY_i = dY + i1 * N;
+    T * dX_i = dX + i1 * N;
+    //vectorized reads don't improve perf, so use regular unrolling
+
+    for (; l+unroll - 1 < N; l += blockDim.x * unroll){
+      for (int k=0; k< unroll; k++){
+          T_ACC gamma_val = (gamma != nullptr) ? static_cast<T_ACC>(gamma[l+k]) : T_ACC(1);
+          const T_ACC c_h = static_cast<T_ACC>(X_i[l+k]);
+          const T_ACC c_loss = static_cast<T_ACC>(dY_i[l+k]);
+          stats_x1 += c_loss * gamma_val;
+          stats_x2 += c_loss * gamma_val * (c_h - mean_val) * rstd_val;
       }
     }
+    for (;  l < N; l ++) {
+          T_ACC gamma_val = (gamma != nullptr) ? static_cast<T_ACC>(gamma[l]) : T_ACC(1);
+          const T_ACC c_h = static_cast<T_ACC>(X_i[l]);
+          const T_ACC c_loss = static_cast<T_ACC>(dY_i[l]);
+          stats_x1 += c_loss * gamma_val;
+          stats_x2 += c_loss * gamma_val * (c_h - mean_val) * rstd_val;
+    }
+
     stats_x1 = cuda_utils::BlockReduceSum(stats_x1, buf);
     stats_x2 = cuda_utils::BlockReduceSum(stats_x2, buf);
     if (threadIdx.x == 0) {
@@ -360,21 +353,14 @@ T2<T_ACC> __device__ __inline__ compute_gI(
     stats_x2 = buf[1];
     T_ACC fH = N;
     T_ACC term1 = (T_ACC(1) / fH) * rstd_val;
-    for (int i=threadIdx.x; i<n_vec_to_read; i += blockDim.x){
-      vec_t dataX = X_vec[i];
-      vec_t datadY = dY_vec[i];
-      vec_t dataGamma;
-      vec_t dataGI;
-      #pragma unroll
-      for (int ii=0; ii < vec_size; ii++){
-        T_ACC gamma_val = (gamma != nullptr) ? gamma[i*vec_size+ii] : T(1);
-        T_ACC f_grad_input = fH * datadY.val[ii] * gamma_val;
+
+    for (int l = threadIdx.x; l < N; l += blockDim.x){
+        T_ACC gamma_val = (gamma != nullptr) ? static_cast<T_ACC>(gamma[l]) : T_ACC(1);
+        T_ACC f_grad_input = fH * dY_i[l] * gamma_val;
+        f_grad_input -= (X_i[l] - mean_val) * rstd_val * stats_x2;
         f_grad_input -= stats_x1;
-        f_grad_input -= (dataX.val[ii] - mean_val) * rstd_val * stats_x2;
         f_grad_input *= term1;
-        dataGI.val[ii] = f_grad_input;
-      }
-      dX_vec[i] = dataGI;
+        dX_i[l] = f_grad_input;
     }
   }
 
