@@ -42,6 +42,7 @@ DEFAULT_STATIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nn.Conv3d: nnq.Conv3d,
     nn.ConvTranspose1d: nnq.ConvTranspose1d,
     nn.ConvTranspose2d: nnq.ConvTranspose2d,
+    nn.ConvTranspose3d: nnq.ConvTranspose3d,
     nn.ELU: nnq.ELU,
     nn.Embedding: nnq.Embedding,
     nn.EmbeddingBag: nnq.EmbeddingBag,
