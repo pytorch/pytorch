@@ -257,16 +257,20 @@ if(INTERN_BUILD_ATEN_OPS)
     include("${CMAKE_BINARY_DIR}/aten/src/ATen/cuda_generated_${gen_type}.cmake")
     include("${CMAKE_BINARY_DIR}/aten/src/ATen/ops_generated_${gen_type}.cmake")
 
-    add_custom_command(
-      COMMENT "Generating ATen ${gen_type}"
-      OUTPUT
+    set(gen_outputs
         ${generated_${gen_type}}
         ${cuda_generated_${gen_type}}
         ${core_generated_${gen_type}}
         ${ops_generated_${gen_type}}
         ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_${gen_type}.cmake
         ${CMAKE_BINARY_DIR}/aten/src/ATen/core_generated_${gen_type}.cmake
-        ${CMAKE_BINARY_DIR}/aten/src/ATen/cuda_generated_${gen_type}.cmake
+        ${CMAKE_BINARY_DIR}/aten/src/ATen/cuda_generated_${gen_type}.cmake)
+
+    message(STATUS "${gen_type} outputs: ${gen_outputs}")
+
+    add_custom_command(
+      COMMENT "Generating ATen ${gen_type}"
+      OUTPUT ${gen_outputs}
       COMMAND ${GEN_COMMAND_${gen_type}}
       DEPENDS ${all_python} ${${gen_type}_templates}
         ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/native_functions.yaml
