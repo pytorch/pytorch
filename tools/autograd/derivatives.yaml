@@ -446,10 +446,10 @@
 - name: count_nonzero(Tensor self, int? dim=None) -> Tensor
   output_differentiability: [False]
 
-- name: cross(Tensor self, Tensor other, int? dim=None) -> Tensor
-  self: other.conj().cross(grad, dim)
-  other: grad.cross(self.conj(), dim)
-  result: "at::cross(self_t, other_p, dim) + at::cross(self_p, other_t, dim)"
+- name: linalg_cross(Tensor self, Tensor other, *, int dim=-1) -> Tensor
+  self: at::linalg_cross(other.conj(), grad, dim)
+  other: at::linalg_cross(grad, self.conj(), dim)
+  result: "at::linalg_cross(self_t, other_p, dim) + at::linalg_cross(self_p, other_t, dim)"
 
 - name: logcumsumexp(Tensor self, int dim) -> Tensor
   self: logcumsumexp_backward(grad, self, result, dim)
