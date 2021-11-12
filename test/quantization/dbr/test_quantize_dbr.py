@@ -968,6 +968,31 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
             print(tabulate.tabulate(
                 to_print, headers=['layer_name', 'fqn', 'type', 'sqnr']))
 
+    def test_scale_zp_inlining(self):
+        """
+        Verifies that scale and zero point are inlined into the model
+        after the convert step.
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                # self.conv = nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                # x = self.conv(x)
+                x = x + x
+                return x
+
+        m = M().eval()
+        m.qconfig = torch.quantization.default_qconfig
+        example_args = (torch.randn(1, 1, 2, 2),)
+        mp = _quantize_dbr.prepare(m, example_args)
+        mp(*example_args)
+        mq = _quantize_dbr.convert(copy.deepcopy(mp))
+        print(mq)
+        mqs = torch.jit.trace(mq, example_args)
+        print(mqs.graph)
+
 @skipIfNoFBGEMM
 class TestQuantizeDBRModels(QuantizeDBRTestCase):
     @skip_if_no_torchvision
