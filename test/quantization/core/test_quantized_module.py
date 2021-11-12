@@ -935,7 +935,8 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
         for key in loaded_dict:
             self.assertEqual(model_dict[key], loaded_dict[key])
         loaded_qconv_module = type(dynamic_module)(
-            in_channels, out_channels, kernel_size, stride=stride, padding=padding, dilation=dilation, groups=groups, bias=bias, padding_mode=padding_mode)
+            in_channels, out_channels, kernel_size, stride=stride, padding=padding,
+            dilation=dilation, groups=groups, bias=bias, padding_mode=padding_mode)
         loaded_qconv_module.load_state_dict(loaded_dict)
 
         self.assertTrue(dir(loaded_qconv_module) == dir(dynamic_module))
