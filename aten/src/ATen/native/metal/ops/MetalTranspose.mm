@@ -94,8 +94,8 @@ Tensor t(const Tensor& input) {
 }
 
 TORCH_LIBRARY_IMPL(aten, Metal, m) {
-  m.impl("t", TORCH_FN(t));
-  m.impl("transpose.int", TORCH_FN(transpose));
+  m.impl(TORCH_SELECTIVE_NAME("aten::t"), TORCH_FN(t));
+  m.impl(TORCH_SELECTIVE_NAME("aten::transpose.int"), TORCH_FN(transpose));
 };
 
 }

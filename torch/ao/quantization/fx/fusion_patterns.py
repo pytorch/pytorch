@@ -22,7 +22,7 @@ class FuseHandler(ABC):
 
     @abstractmethod
     def fuse(self, quantizer: QuantizerCls, load_arg: Callable,
-             fuse_custom_config_dict: Dict[str, Any] = None) -> Node:
+             fuse_custom_config_dict: Dict[str, Any]) -> Node:
         pass
 
 @register_fusion_pattern((torch.nn.ReLU, torch.nn.Conv1d))
@@ -62,9 +62,7 @@ class ConvOrLinearBNReLUFusion(FuseHandler):
         self.conv_or_linear = quantizer.modules[self.conv_or_linear_node.target]
 
     def fuse(self, quantizer: QuantizerCls, load_arg: Callable,
-             fuse_custom_config_dict: Dict[str, Any] = None) -> Node:
-        if fuse_custom_config_dict is None:
-            fuse_custom_config_dict = {}
+             fuse_custom_config_dict: Dict[str, Any]) -> Node:
         additional_fuser_method_mapping = fuse_custom_config_dict.get("additional_fuser_method_mapping", {})
         op_list = []
         if self.relu_node is not None:
@@ -119,9 +117,7 @@ class ModuleReLUFusion(FuseHandler):
         self.module = quantizer.modules[self.module_node.target]
 
     def fuse(self, quantizer: QuantizerCls, load_arg: Callable,
-             fuse_custom_config_dict: Dict[str, Any] = None) -> Node:
-        if fuse_custom_config_dict is None:
-            fuse_custom_config_dict = {}
+             fuse_custom_config_dict: Dict[str, Any]) -> Node:
         additional_fuser_method_mapping = fuse_custom_config_dict.get("additional_fuser_method_mapping", {})
         op_list = []
         # since relu can be used multiple times, we'll need to create a relu module for each match

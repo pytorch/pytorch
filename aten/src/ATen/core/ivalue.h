@@ -466,6 +466,7 @@ struct TORCH_API IValue final {
   }
   c10::intrusive_ptr<ivalue::Tuple> toTuple() &&;
   c10::intrusive_ptr<ivalue::Tuple> toTuple() const&;
+  C10_NODISCARD ivalue::Tuple& toTupleRef() const;
 
   // Double
   IValue(double d) : tag(Tag::Double), is_intrusive_ptr(false) {
@@ -1225,9 +1226,7 @@ template <typename T>
 c10::ClassTypePtr getCustomClassTypeImpl() {
   auto& tmap = c10::getCustomClassTypeMap();
   auto res = tmap.find(std::type_index(typeid(T)));
-  if (res == tmap.end()) {
-    throw c10::Error("Can't find class id in custom class type map", "");
-  }
+  TORCH_CHECK(res != tmap.end(), "Can't find class id in custom class type map", "");
   return res->second;
 }
 
