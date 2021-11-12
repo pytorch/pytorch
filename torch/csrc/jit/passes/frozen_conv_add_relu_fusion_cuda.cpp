@@ -1,5 +1,6 @@
 #include <ATen/Utils.h>
 
+#include <ATen/cuda/CUDAConfig.h>
 #include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -8,16 +9,12 @@
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
-#ifdef USE_CUDA
-#include <ATen/cuda/CUDAConfig.h>
-#endif
 
 namespace torch {
 namespace jit {
 
 namespace {
 void fuseFrozenConvAddReluImpl(std::shared_ptr<Graph>& graph) {
-#ifdef USE_CUDA
 #if AT_CUDNN_ENABLED()
   SubgraphRewriter rewriter;
 
@@ -107,7 +104,6 @@ void fuseFrozenConvAddReluImpl(std::shared_ptr<Graph>& graph) {
   graph_rewrite_helper::replaceConvolutionWithAtenConv(graph);
 
   rewriter.runOnGraph(graph, filter);
-#endif
 #endif
 }
 
