@@ -14,13 +14,13 @@ from utils import to_markdown_table, TimingResultType, InputsType, GetterType, V
 
 def get_task_func(task: str) -> Callable:
     def hessian_fwdrev(model, inp, strict=None):
-        return functional.hessian(model, inp, strict=False, vectorize=True, use_forward_ad=True)
+        return functional.hessian(model, inp, strict=False, vectorize=True, outer_jacobian_strategy="forward-mode")
 
     def hessian_revrev(model, inp, strict=None):
         return functional.hessian(model, inp, strict=False, vectorize=True)
 
     def jacfwd(model, inp, strict=None):
-        return functional.jacobian(model, inp, strict=False, vectorize=True, use_forward_ad=True)
+        return functional.jacobian(model, inp, strict=False, vectorize=True, strategy="forward-mode")
 
     def jacrev(model, inp, strict=None):
         return functional.jacobian(model, inp, strict=False, vectorize=True)

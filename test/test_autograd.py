@@ -6504,7 +6504,7 @@ class TestAutogradFunctional(TestCase):
         self.assertEqual(result_backward_mode, expected)
 
         if test_forward_ad:
-            result_forward_mode = autogradF.jacobian(f, inputs, use_forward_ad=True, vectorize=True)
+            result_forward_mode = autogradF.jacobian(f, inputs, strategy="forward-mode", vectorize=True)
             self.assertEqual(result_forward_mode, expected)
 
     def test_jacobian_vectorize_correctness_simple(self):
@@ -6586,7 +6586,7 @@ class TestAutogradFunctional(TestCase):
         result = autogradF.hessian(f, inputs, vectorize=True)
         self.assertEqual(result, expected)
 
-        result_forward_mode = autogradF.hessian(f, inputs, use_forward_ad=True, vectorize=True)
+        result_forward_mode = autogradF.hessian(f, inputs, outer_jacobian_strategy="forward-mode", vectorize=True)
         self.assertEqual(result_forward_mode, expected)
 
     def test_hessian_vectorize_correctness_simple(self):
@@ -7371,6 +7371,12 @@ class TestAutogradForwardMode(TestCase):
             baz_primal, baz_tangent = fwAD.unpack_dual(baz)
             self.assertEqual(baz_primal, foo)
             self.assertIs(baz_tangent, bar)
+
+            # Check unpacked dual is returned as a named tuple
+            # NB: Every invocation of unpack_dual returns a new tensor view
+            self.assertIsNot(baz_primal, fwAD.unpack_dual(baz).primal)
+            self.assertEqual(baz_primal, fwAD.unpack_dual(baz).primal)
+            self.assertIs(baz_tangent, fwAD.unpack_dual(baz).tangent)
 
             # Check that packing/unpacking did not change the input
             foo_primal, foo_tangent = fwAD.unpack_dual(foo)
