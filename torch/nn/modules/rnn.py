@@ -472,7 +472,7 @@ class RNN(RNNBase):
             # Mypy thinks output should be a Tensor. It doesn't know about the
             # relationship between this code and _overload_method above, which
             # is used to distinguish between the Tensor and PackedSequence case.
-            output = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices)  # type: ignore
+            output = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices)  # type: ignore[assignment]
         return output, self.permute_hidden(hidden, unsorted_indices)
 
 # XXX: LSTM and GRU implementation is different from RNNBase, this is because:
