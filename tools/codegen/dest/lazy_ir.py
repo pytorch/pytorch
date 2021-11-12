@@ -30,7 +30,7 @@ def node_ctor_arg_rvalue_string(arg: NamedCType) -> str:
             return f"lazy_tensors::util::ToVector<{arg.type.elem.type}>({arg.name})"
         elif (isinstance(arg.type, OptionalCType) and
                 isinstance(arg.type.elem, VectorCType)):
-            return f"lazy_tensors::util::ToOptionalVector<{arg.type.elem.elem.type}>({arg.name})"
+            return f"torch::lazy::ToOptionalVector<{arg.type.elem.elem.type}>({arg.name})"
         else:
             return f"{arg.name}"
 
