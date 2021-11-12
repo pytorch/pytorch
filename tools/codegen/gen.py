@@ -1201,6 +1201,9 @@ def main() -> None:
         '--output-dependencies',
         help='output a list of dependencies into the given file and exit')
     parser.add_argument(
+        '--dry-run', action='store_true',
+        help='run without writing any files (still updates outputs)')
+    parser.add_argument(
         '-d', '--install_dir', help='output directory',
         default='build/aten/src/ATen')
     parser.add_argument(
@@ -1271,7 +1274,7 @@ def main() -> None:
     pathlib.Path(core_install_dir).mkdir(parents=True, exist_ok=True)
 
     def make_file_manager(install_dir: str) -> FileManager:
-        return FileManager(install_dir=install_dir, template_dir=template_dir, dry_run=options.output_dependencies)
+        return FileManager(install_dir=install_dir, template_dir=template_dir, dry_run=options.dry_run)
 
     core_fm = make_file_manager(core_install_dir)
     cpu_fm = make_file_manager(options.install_dir)
@@ -1356,9 +1359,14 @@ def main() -> None:
             cpu_fm=cpu_fm)
 
     if options.output_dependencies:
-        cpu_fm.write_outputs(options.output_dependencies)
-        core_fm.write_outputs(f"{options.output_dependencies}-core")
-        cuda_fm.write_outputs(f"{options.output_dependencies}-cuda")
+        depfile_path = pathlib.Path(options.output_dependencies).resolve()
+        depfile_name = depfile_path.name
+        depfile_stem = depfile_path.stem
+
+        for fm, prefix in [(cpu_fm, ""), (core_fm, "core_"), (cuda_fm, "cuda_")]:
+            varname = prefix + depfile_stem
+            path = depfile_path.parent / (prefix + depfile_name)
+            fm.write_outputs(varname, str(path))
 
 
 if __name__ == '__main__':
