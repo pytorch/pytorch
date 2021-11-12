@@ -3669,7 +3669,11 @@ class TestDynamicQuantizedConv(TestCase):
         if qengine_is_qnnpack() and (IS_PPC or TEST_WITH_UBSAN):
             return  # not supported by QNNPACK
 
-        reduce_range = True
+        if qengine_is_qnnpack():
+            reduce_range = False
+        else:
+            reduce_range = True
+        
 
         X_fp32 = torch.randn(*([2] * dim))
         s, z = _calculate_dynamic_qparams(X_fp32, dtype, reduce_range)

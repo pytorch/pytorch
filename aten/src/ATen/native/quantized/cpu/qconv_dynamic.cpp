@@ -94,7 +94,8 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_dynamic(
       is_signed ? ((1 << (precision - 1)) - 1) : (1 << precision) - 1,
       /*preserve_sparsity=*/false,
       /*force_scale_power_of_two=*/false,
-      /*reduce_range=*/reduce_range);
+      /*reduce_range=*/false); // note: this is set to false rather than
+                               // reduce_range for qnnpack
 
   // Quantize input
   at::Tensor q_input = at::quantize_per_tensor(
