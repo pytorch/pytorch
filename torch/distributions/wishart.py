@@ -37,23 +37,17 @@ class Wishart(Distribution):
         the corresponding lower triangular matrices using a Cholesky decomposition.        
     """
     arg_constraints = {
-        'covariance_matrix': constraints.positive_definite,
-        'precision_matrix': constraints.positive_definite,
-        'scale_tril': constraints.lower_cholesky,
+        'covariance_matrix': constraints.stack([constraints.symmetric, constraints.positive_definite]),
+        'precision_matrix': constraints.stack([constraints.symmetric, constraints.positive_definite]),
+        'scale_tril': constraints.stack([constraints.symmetric, constraints.positive_definite]),
         'df': None,
     }
-    support = constraints.positive_definite
+    support = constraints.stack([constraints.symmetric, constraints.positive_definite])
     has_rsample = True
 
-    def __init__(
-        self,
-        covariance_matrix=None,
-        precision_matrix=None,
-        scale_tril=None,
-        df=None,
-        bartlett_decomposition=True,
-        validate_args=None):
-        
+    def __init__(self, covariance_matrix=None, precision_matrix=None, scale_tril=None, df=None,
+                 bartlett_decomposition=True, validate_args=None):
+
         assert (covariance_matrix is not None) + (scale_tril is not None) + (precision_matrix is not None) == 1, \
             "Exactly one of covariance_matrix or precision_matrix or scale_tril may be specified."
 
@@ -78,13 +72,13 @@ class Wishart(Distribution):
             event_shape = precision_matrix.shape[-2:]
             self.precision_matrix = precision_matrix.expand(batch_shape + (-1, -1))
             self.df = self.precision_matrix.shape[-1] if df is None else df
-            
+
         assert self.df > self.precision_matrix.shape[-1] - 1, \
             "Degree of Freedom paramter should be larger than the dimension - 1"
 
         self.arg_constraints['df'] = constraints.greater_than(event_shape[-1] - 1)
         self.bartlett_decomposition = bartlett_decomposition
-            
+
         super(Wishart, self).__init__(batch_shape, event_shape, validate_args=validate_args)
 
         if scale_tril is not None:
@@ -93,10 +87,10 @@ class Wishart(Distribution):
             self._unbroadcasted_scale_tril = torch.linalg.cholesky(covariance_matrix)
         else:  # precision_matrix is not None
             self._unbroadcasted_scale_tril = _precision_to_scale_tril(precision_matrix)
-            
+
         self.dist_gamma = torch.distributions.Gamma(
-            self.df - torch.arange(self._event_shape[0], device = self._unbroadcasted_scale_tril.device) / 2,
-            1/2,
+            self.df - torch.arange(self._event_shape[0], device=self._unbroadcasted_scale_tril.device) / 2,
+            1 / 2,
         )
 
     def expand(self, batch_shape, _instance=None):
@@ -147,16 +141,16 @@ class Wishart(Distribution):
     @property
     def variance(self):
         V = self.covariance_matrix
-        diag_V = V.diagonal(dim1=-2, dim2=-1)
-        return self.df * (V.pow(2) + torch.einsum("...i,...j->...ij", diag_V, diag_V))
+        diag_V = V.diag()
+        return self.df * (V.pow(2) + torch.einsum("i,j->ij", diag_V, diag_V))
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)   
-        
-        #Implemented Bartlett decomposition
+
+        # Implemented Bartlett decomposition
         if self.bartlett_decomposition:
-            noise = self.dist_gamma.sample(sample_shape).diag_embed(dim1 = -2, dim2 = -1).sqrt()
-            noise = noise + torch.randn(shape, device = noise.device).tril(diagonal=-1)
+            noise = self.dist_gamma.sample(sample_shape).diag_embed(dim1=-2, dim2=-1).sqrt()
+            noise = noise + torch.randn(shape, device=noise.device).tril(diagonal=-1)
         else:
             noise = _standard_normal(
                 shape,
@@ -173,12 +167,12 @@ class Wishart(Distribution):
         p = self._event_shape[0]
         V = self.covariance_matrix
         return (
-            - torch.mvlgamma(nu / 2, p = p)
+            - torch.mvlgamma(nu / 2, p=p)
             - nu * self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1)
             - (
                 - (nu - p - 1) * value.logdet()
                 + nu * p * math.log(2)
-                + torch.einsum("...ik,...kj->...ij", V.inverse(), value).trace()
+                + torch.einsum("ik,...kj->...ij", V.inverse(), value).trace()
             ) / 2
         )
 
@@ -188,7 +182,7 @@ class Wishart(Distribution):
         H = (
             (p + 1) * self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1)
             + p * (p + 1) * math.log(2) / 2
-            + torch.mvlgamma(nu / 2, p = p)
+            + torch.mvlgamma(nu / 2, p=p)
             - (nu - p - 1) * _mvdigamma(nu / 2) / 2
             + nu * p / 2
         )
