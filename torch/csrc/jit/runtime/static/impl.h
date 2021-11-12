@@ -441,7 +441,9 @@ class TORCH_API ProcessedNode {
   ProcessedNode(const ProcessedNode& rhs)
       : node_(rhs.node_),
         fn_(rhs.fn_),
-        inputs_(rhs.inputs_size_ ? std::make_unique<uint16_t[]>(rhs.inputs_size_) : std::unique_ptr<uint16_t[]>(nullptr)),
+        inputs_(
+            rhs.inputs_size_ ? std::make_unique<uint16_t[]>(rhs.inputs_size_)
+                             : std::unique_ptr<uint16_t[]>(nullptr)),
         inputs_size_(rhs.inputs_size_),
         outputs_offset_(rhs.outputs_offset_),
         num_outputs_(rhs.num_outputs_),
@@ -453,7 +455,7 @@ class TORCH_API ProcessedNode {
   {
     if (inputs_size_) {
       std::copy(
-        rhs.inputs_.get(), rhs.inputs_.get() + inputs_size_, inputs_.get());
+          rhs.inputs_.get(), rhs.inputs_.get() + inputs_size_, inputs_.get());
     }
   }
 
@@ -566,6 +568,7 @@ class TORCH_API ProcessedNode {
   C10_NODISCARD uint16_t output_ivalue_index(uint16_t i) const {
     return outputs_offset_ + i;
   }
+
  private:
   C10_NODISCARD bool verify_outputs_dont_overlap_each_other() const;
 
