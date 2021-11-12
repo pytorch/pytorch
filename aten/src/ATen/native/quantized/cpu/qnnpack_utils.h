@@ -274,7 +274,7 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
 
   at::Tensor apply_dynamic(
       const at::Tensor& input,
-      bool reduce_range) override;
+      bool reduce_range=false) override;
 
   std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
 
