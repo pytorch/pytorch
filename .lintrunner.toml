@@ -3,7 +3,6 @@ code = 'FLAKE8'
 include_patterns = ['**/*.py']
 exclude_patterns = [
     '.git/**',
-    'build_code_analyzer',
     'build_test_custom_build/**',
     'build/**',
     'caffe2/**',
