@@ -887,6 +887,7 @@ void initTensorExprBindings(PyObject* module) {
       });
   te.def("annotate_input_shapes", &tensorexpr::annotateInputShapes);
   te.def("remove_unused_self_argument", &tensorexpr::removeUnusedSelfArgument);
+#ifdef TORCH_ENABLE_LLVM
   te.def("set_llvm_target_triple", [](const c10::optional<std::string>& val) {
     tensorexpr::LLVMTargetTriple() = val;
   });
@@ -899,6 +900,7 @@ void initTensorExprBindings(PyObject* module) {
   te.def("set_llvm_aot_workflow", [](bool val) {
     tensorexpr::LLVMAOTWorkflow() = val;
   });
+#endif
 }
 } // namespace jit
 } // namespace torch
