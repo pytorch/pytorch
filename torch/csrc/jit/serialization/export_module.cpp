@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/serialization/export.h>
 
 #include <c10/util/Exception.h>
+#include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/backends/backend_debug_handler.h>
 #include <torch/csrc/jit/backends/backend_debug_info.h>
 #include <torch/csrc/jit/frontend/source_range.h>
@@ -36,6 +37,10 @@
 
 namespace torch {
 namespace jit {
+
+IValue to_tuple(std::initializer_list<IValue> ivalues) {
+  return c10::ivalue::Tuple::create(ivalues);
+}
 
 IValue to_tuple(std::vector<IValue> ivalues) {
   return c10::ivalue::Tuple::create(std::move(ivalues));
@@ -241,7 +246,8 @@ std::pair<IValue, IValue> getFunctionTuple(
           "__torch__ types other than torchbind (__torch__.torch.classes)"
           "are not supported in lite interpreter. ",
           "Workaround: instead of using arbitrary class type (class Foo()), ",
-          "define a pytorch class (class Foo(torch.nn.Module)).");
+          "define a pytorch class (class Foo(torch.nn.Module)). The problematic type is: ",
+          type_str);
     }
     types.emplace_back(type_str);
   }
@@ -367,10 +373,10 @@ std::unordered_set<const FunctionSchema*> getInterfaceCalls(Graph& graph) {
 }
 
 struct ModuleMethod {
-  ModuleMethod(const Module& m, const Function& f, c10::QualifiedName n)
+  ModuleMethod(const Module& m, const GraphFunction& f, c10::QualifiedName n)
       : module(m), function(f), exportName(std::move(n)) {}
   Module module;
-  const Function& function;
+  const GraphFunction& function;
   c10::QualifiedName exportName;
 };
 
@@ -387,9 +393,9 @@ std::vector<ModuleMethod> getModuleInterfaceExports(
   std::vector<ModuleMethod> ret;
   for (const auto& submodule : module.modules()) {
     for (const auto& method : submodule.get_methods()) {
-      if (names.find(method.function().qualname().name()) != names.end()) {
-        ret.emplace_back(
-            submodule, method.function(), method.function().qualname());
+      const auto& f = toGraphFunction(method.function());
+      if (names.find(f.qualname().name()) != names.end()) {
+        ret.emplace_back(submodule, f, f.qualname());
       }
     }
   }
@@ -441,8 +447,8 @@ void setstateTuple(
     if (exportSet.contains(qn)) {
       return;
     }
-    if (setstate.isGraphFunction()) {
-      exportFunction(exportSet, ModuleMethod{module, setstate, qn}, toplevel);
+    if (auto f = tryToGraphFunction(setstate)) {
+      exportFunction(exportSet, ModuleMethod{module, *f, qn}, toplevel);
     }
   } else {
     for (size_t i = 0, n = type->numAttributes(); i < n; ++i) {
@@ -545,10 +551,9 @@ BytecodeExportSet moduleMethodsTuple(
   auto methods = module.get_methods();
   // top level methods
   for (const auto& method : methods) {
+    const auto& f = toGraphFunction(method.function());
     exportFunction(
-        exportSet,
-        ModuleMethod{module, method.function(), method.function().qualname()},
-        /* toplevel */ true);
+        exportSet, ModuleMethod{module, f, f.qualname()}, /* toplevel */ true);
   }
 
   // __setstate__ of all components
@@ -963,16 +968,16 @@ void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
   BytecodeExportSet exportSet = moduleMethodsTuple(m, dummy_uniquer);
   pushFunctionToIValues(std::move(exportSet), elements, dummy, dummy_uniquer);
   for (const auto& element : elements) {
-    auto table = element.toTuple()->elements()[1];
+    auto table = element.toTupleRef().elements()[1];
     auto row =
-        table.toTuple()->elements().at(BYTECODE_INDEX_OPERATOR).toTuple();
+        table.toTupleRef().elements().at(BYTECODE_INDEX_OPERATOR).toTuple();
     TORCH_INTERNAL_ASSERT(
         row->elements().at(0).toStringRef() == "operators",
         "Expected operators but found ",
         row->elements().at(0).toStringRef());
-    const auto& ops_list = row->elements().at(1).toTuple()->elements();
+    const auto& ops_list = row->elements().at(1).toTupleRef().elements();
     for (const auto& op : ops_list) {
-      const auto& op_item = op.toTuple()->elements();
+      const auto& op_item = op.toTupleRef().elements();
       TORCH_CHECK(
           op_item.size() >= 2,
           "There should be either two parts (name and overload name), ",

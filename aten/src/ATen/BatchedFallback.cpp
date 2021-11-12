@@ -73,9 +73,9 @@ static void warnFallback(const c10::FunctionSchema& schema) {
   TORCH_WARN("There is a performance drop because we have not yet implemented ",
              "the batching rule for ", schema.operator_name(), ". ",
              "We've moved development of vmap to to functorch "
-             "(https://github.com/pytorch/functorch), please try functorch.vmap) "
+             "(https://github.com/pytorch/functorch), please try functorch.vmap "
              "instead and/or file ",
-             "us an issue on GitHub so that we can prioritize its implementation.");
+             " an issue on GitHub so that we can prioritize its implementation.");
 }
 
 // The general flow of the algorithm is as follows.

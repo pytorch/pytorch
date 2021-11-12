@@ -51,6 +51,7 @@ from quantization.eager.test_quantize_eager_ptq import TestQuantizeONNXExport  #
 from quantization.eager.test_quantize_eager_qat import TestQuantizationAwareTraining  # noqa: F401
 from quantization.eager.test_quantize_eager_qat import TestQATActivationOps  # noqa: F401
 from quantization.eager.test_quantize_eager_qat import TestConvBNQATModule  # noqa: F401
+from quantization.eager.test_quantize_eager_qat import TestEmbeddingBagQATModule  # noqa: F401
 # 3. Eager mode fusion passes
 from quantization.eager.test_fusion import TestFusion  # noqa: F401
 # 4. Testing model numerics between quanitzed and FP32 models
@@ -110,6 +111,12 @@ from quantization.jit.test_deprecated_jit_quant import TestDeprecatedJitQuantize
 from quantization.ao_migration.test_quantization import TestAOMigrationQuantization  # noqa: F401
 try:
     from quantization.ao_migration.test_quantization_fx import TestAOMigrationQuantizationFx  # noqa: F401
+except ImportError:
+    pass
+
+try:
+    from quantization.dbr.test_quantize_dbr import TestQuantizeDBR  # noqa: F401
+    from quantization.dbr.test_quantize_dbr import TestQuantizeDBRModels  # noqa: F401
 except ImportError:
     pass
 
