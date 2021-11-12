@@ -4,15 +4,11 @@ r"""Dynamically quantized convolution modules."""
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-# import torch.nn.intrinsic as nni
-# import torch.nn.intrinsic.qat as nniqat
 
 from torch import Tensor
 from torch._ops import ops
 from torch.nn.common_types import _size_1_t
 from torch.nn.modules.utils import _single, _pair, _triple
-# from torch.nn.quantized.modules.utils import _quantize_weight
-# from torch.nn.utils import fuse_conv_bn_weights
 from torch.nn.quantized.modules.conv import _reverse_repeat_padding
 import torch.nn.quantized.modules as nnq
 
@@ -21,7 +17,7 @@ class Conv1d(nnq.Conv1d):
     r"""A dynamically quantized conv module with floating point tensors as inputs and outputs.
 
     For details on input arguments, parameters, and implementation see
-    :class:`~torch.nn.Conv1d` and :class:`~torch.nn.quantized.dynamic.Conv1d` and 
+    :class:`~torch.nn.Conv1d` and :class:`~torch.nn.quantized.dynamic.Conv1d` and
 
     Attributes:
         weight (Tensor):     packed tensor derived from the learnable weight
@@ -40,8 +36,8 @@ class Conv1d(nnq.Conv1d):
     """
 
     _FLOAT_MODULE = nn.Conv1d
-    _NNIQAT_CONV_BN_MODULE = None  # type: ignore
-    _NNI_CONV_RELU_MODULE = None  # type: ignore
+    _NNIQAT_CONV_BN_MODULE = None  # type: ignore[assignment]
+    _NNI_CONV_RELU_MODULE = None  # type: ignore[assignment]
 
     def __init__(self,
                  in_channels: int,
@@ -82,14 +78,12 @@ class Conv1d(nnq.Conv1d):
                           mode=self.padding_mode)
         return ops.quantized.conv1d_dynamic(input, self._packed_params, reduce_range)
 
-# TODO Fix docstring
-
 
 class Conv2d(nnq.Conv2d):
     r"""A dynamically quantized conv module with floating point tensors as inputs and outputs.
 
     For details on input arguments, parameters, and implementation see
-    :class:`~torch.nn.Conv2d` and :class:`~torch.nn.quantized.dynamic.Conv2d` and 
+    :class:`~torch.nn.Conv2d` and :class:`~torch.nn.quantized.dynamic.Conv2d` and
 
     Attributes:
         weight (Tensor):     packed tensor derived from the learnable weight
@@ -112,10 +106,8 @@ class Conv2d(nnq.Conv2d):
 
     """
     _FLOAT_MODULE = nn.Conv2d
-    _NNIQAT_CONV_BN_MODULE = None  # type: ignore
-    _NNI_CONV_RELU_MODULE = None  # type: ignore
-    # _NNIQAT_CONV_BN_MODULE = nniqat.ConvBn2d
-    # _NNI_CONV_RELU_MODULE = nni.ConvReLU2d
+    _NNIQAT_CONV_BN_MODULE = None  # type: ignore[assignment]
+    _NNI_CONV_RELU_MODULE = None  # type: ignore[assignment]
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
@@ -146,14 +138,12 @@ class Conv2d(nnq.Conv2d):
         return ops.quantized.conv2d_dynamic(
             input, self._packed_params, reduce_range)
 
-# TODO Fix docstring
-
 
 class Conv3d(nnq.Conv3d):
     r"""A dynamically quantized conv module with floating point tensors as inputs and outputs.
 
     For details on input arguments, parameters, and implementation see
-    :class:`~torch.nn.Conv3d` and :class:`~torch.nn.quantized.dynamic.Conv3d` and 
+    :class:`~torch.nn.Conv3d` and :class:`~torch.nn.quantized.dynamic.Conv3d` and
 
     Attributes:
         weight (Tensor):     packed tensor derived from the learnable weight
@@ -176,10 +166,8 @@ class Conv3d(nnq.Conv3d):
 
     """
     _FLOAT_MODULE = nn.Conv3d
-    _NNIQAT_CONV_BN_MODULE = None  # type: ignore
-    _NNI_CONV_RELU_MODULE = None  # type: ignore
-    # _NNIQAT_CONV_BN_MODULE = nniqat.ConvBn3d
-    # _NNI_CONV_RELU_MODULE = nni.ConvReLU3d
+    _NNIQAT_CONV_BN_MODULE = None  # type: ignore[assignment]
+    _NNI_CONV_RELU_MODULE = None  # type: ignore[assignment]
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
