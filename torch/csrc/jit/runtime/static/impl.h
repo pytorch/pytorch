@@ -234,7 +234,7 @@ class TORCH_API StaticModule {
     return nodes_.size();
   }
 
-  C10_NODISCARDNode* findNodeWithKindForTesting(const std::string& kind) const;
+  C10_NODISCARD Node* findNodeWithKindForTesting(const std::string& kind) const;
 
   bool is_optimizable_container_type(const Node* n) const {
     auto it = node_is_optimizable_container_type_.find(n);
@@ -382,6 +382,8 @@ class TORCH_API StaticRuntime {
 
   bool isManagedOutputTensor(const IValue& ivalue);
 
+  void disableManageOutputTensors();
+
  private:
   template <typename IValueList>
   c10::IValue run_impl(
@@ -424,6 +426,7 @@ class TORCH_API StaticRuntime {
   // Otherwise, the memory used by activations is cached inside the static
   // runtime.
   const StaticModule& static_module_;
+  bool manage_output_tensors_enabled_ = false;
   std::unique_ptr<MemoryPlanner> planner_;
   // first static_module_.num_inputs() slots are inputs, next
   // static_module_.constants().size() slots are a copy of
