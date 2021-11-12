@@ -10,30 +10,36 @@ from tools.codegen.api.lazy import LazyIrSchema, isValueType
 from tools.codegen.dest.lazy_ts_lowering import ts_lowering_body
 
 
+def node_ctor_arg_rvalue_string(arg: NamedCType) -> str:
+    """
+    Given a NamedCType from a lazy IR schema,
+    generate a c++ string for materializing an rvalue of that arg for passing into
+    a lazy Node constructor.
+    """
+    if isValueType(arg.type):
+        if isinstance(arg.type, BaseCType):
+            return f"lazy_{arg.name}.GetIrValue()"
+        elif isinstance(arg.type, OptionalCType):
+            return f"lazy_{arg.name} ? " \
+                   f"c10::make_optional(lazy_{arg.name}->GetIrValue()) : " \
+                   "c10::nullopt"
+        else:
+            raise AssertionError("TODO not sure if there are other valid types to handle here")
+    else:
+        if isinstance(arg.type, VectorCType) and isinstance(arg.type.elem, BaseCType):
+            return f"lazy_tensors::util::ToVector<{arg.type.elem.type}>({arg.name})"
+        elif (isinstance(arg.type, OptionalCType) and
+                isinstance(arg.type.elem, VectorCType)):
+            return f"torch::lazy::ToOptionalVector<{arg.type.elem.elem.type}>({arg.name})"
+        else:
+            return f"{arg.name}"
+
 def node_ctor_inputs(func: LazyIrSchema) -> str:
     """
     Produce a formatted string with the arguments as passed into the constructor of a node class.
     """
-    node_ctor_values = []
-    for arg in func.filtered_types():
-        if isValueType(arg.type):
-            if isinstance(arg.type, BaseCType):
-                node_ctor_values.append(f"lazy_{arg.name}.GetIrValue()")
-            elif isinstance(arg.type, OptionalCType):
-                node_ctor_values.append(
-                    f"lazy_{arg.name} ? "
-                    f"c10::make_optional(lazy_{arg.name}->GetIrValue()) : "
-                    "c10::nullopt")
-            else:
-                raise AssertionError("TODO not sure if there are other valid types to handle here")
-        else:
-            if isinstance(arg.type, VectorCType) and isinstance(arg.type.elem, BaseCType):
-                node_ctor_values.append(f"lazy_tensors::util::ToVector<{arg.type.elem.type}>({arg.name})")
-            else:
-                node_ctor_values.append(f"{arg.name}")
-
-    node_ctor_inputs_str = ",\n                              ".join(node_ctor_values)
-    return node_ctor_inputs_str
+    node_ctor_values = [node_ctor_arg_rvalue_string(arg) for arg in func.filtered_types()]
+    return ",\n                              ".join(node_ctor_values)
 
 
 @dataclass(frozen=True)

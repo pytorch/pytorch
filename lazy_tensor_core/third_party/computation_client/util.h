@@ -33,6 +33,13 @@ hash_t MHash(c10::ArrayRef<T> value, Targs... Fargs) {
   return HashCombine(Hash(value), MHash(Fargs...));
 }
 
+template<typename T>
+c10::optional<std::vector<T>> ToOptionalVector(c10::optional<c10::ArrayRef<T>> arrayRef) {
+  if (arrayRef.has_value()) {
+    return std::vector<T>(arrayRef.value().begin(), arrayRef.value().end());
+  }
+  return c10::nullopt;
+}
 }  // namespace lazy
 }  // namespace torch
 

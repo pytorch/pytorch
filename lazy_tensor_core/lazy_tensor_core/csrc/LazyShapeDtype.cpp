@@ -43,10 +43,10 @@
  *
  */
 
+#include <functional>
 #include "lazy_tensor_core/csrc/ts_backend/LazyShapeDtype.h"
-#include "aten/src/ATen/WrapDimUtils.h"
+#include "aten/src/ATen/native/ReduceOpsUtils.h"
 #include "torch/csrc/api/include/torch/enum.h"
-
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
@@ -73,6 +73,30 @@ std::vector<std::vector<int64_t>> compute_shape_embedding(const at::Tensor & wei
 std::vector<c10::ScalarType> compute_dtype_embedding(const at::Tensor & weight, const at::Tensor & indices, int64_t padding_idx, bool scale_grad_by_freq, bool sparse){
   return {weight.scalar_type()};
 }
+std::vector<std::vector<int64_t>> compute_shape_std(const at::Tensor & self, bool unbiased){
+  return compute_shape_std(self, c10::nullopt, c10::nullopt, false);
+}
+std::vector<std::vector<int64_t>> compute_shape_std(const at::Tensor & self, at::IntArrayRef dim, bool unbiased, bool keepdim){
+  return compute_shape_std(self, dim, c10::nullopt, keepdim);
+}
+std::vector<std::vector<int64_t>> compute_shape_std(const at::Tensor & self, c10::optional<at::IntArrayRef> dim, c10::optional<int64_t> correction, bool keepdim){
+  if (dim.has_value()) {
+    auto shape = at::native::shape_from_dim_mask(self, at::native::make_dim_mask(dim.value(), self.dim()), keepdim);
+    return {std::vector<int64_t>(shape.begin(), shape.end())};
+  }
+  return {{}};
+}
+
+std::vector<c10::ScalarType> compute_dtype_std(const at::Tensor & self, bool unbiased) {
+  return {self.scalar_type()};
+}
+std::vector<c10::ScalarType> compute_dtype_std(const at::Tensor & self, at::IntArrayRef dim, bool unbiased, bool keepdim) {
+  return {self.scalar_type()};
+}
+std::vector<c10::ScalarType> compute_dtype_std(const at::Tensor & self, c10::optional<at::IntArrayRef> dim, c10::optional<int64_t> correction, bool keepdim){
+  return {self.scalar_type()};
+}
+
 
 std::vector<std::vector<int64_t>> compute_shape_embedding_dense_backward(const at::Tensor& grad_output, const at::Tensor& indices, int64_t num_weights, int64_t padding_idx, bool scale_grad_by_freq) {
   // Based on aten/src/ATen/native/Embedding.cpp::embedding_dense_backward_cpu.

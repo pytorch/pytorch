@@ -64,6 +64,9 @@ full_codegen:
   - softplus_backward
   - sort
   - sqrt
+  - std
+  - std.dim
+  - std.correction
   - sum
   - sum.dim_IntList
   - tanh
