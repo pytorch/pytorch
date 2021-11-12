@@ -48,7 +48,7 @@ Args:
     padding: implicit paddings on both sides of the input. Can be a string {'valid', 'same'},
       single number or a one-element tuple `(padW,)`. Default: 0
       ``padding='valid'`` is the same as no padding. ``padding='same'`` pads
-      the input so the output has the shape as the input. However, this mode
+      the input so the output has the same shape as the input. However, this mode
       doesn't support any stride values other than 1.
 
       .. warning::
@@ -96,7 +96,7 @@ Args:
     padding: implicit paddings on both sides of the input. Can be a string {'valid', 'same'},
       single number or a tuple `(padH, padW)`. Default: 0
       ``padding='valid'`` is the same as no padding. ``padding='same'`` pads
-      the input so the output has the shape as the input. However, this mode
+      the input so the output has the same shape as the input. However, this mode
       doesn't support any stride values other than 1.
 
       .. warning::
@@ -146,7 +146,7 @@ Args:
     padding: implicit paddings on both sides of the input. Can be a string {'valid', 'same'},
       single number or a tuple `(padT, padH, padW)`. Default: 0
       ``padding='valid'`` is the same as no padding. ``padding='same'`` pads
-      the input so the output has the shape as the input. However, this mode
+      the input so the output has the same shape as the input. However, this mode
       doesn't support any stride values other than 1.
 
       .. warning::
@@ -2113,9 +2113,15 @@ def embedding(
 
     if has_torch_function_variadic(input, weight):
         return handle_torch_function(
-            embedding, (input, weight),
-            input, weight, padding_idx, max_norm, norm_type,
-            scale_grad_by_freq, sparse
+            embedding,
+            (input, weight),
+            input,
+            weight,
+            padding_idx=padding_idx,
+            max_norm=max_norm,
+            norm_type=norm_type,
+            scale_grad_by_freq=scale_grad_by_freq,
+            sparse=sparse,
         )
     if padding_idx is not None:
         if padding_idx > 0:
