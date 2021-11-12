@@ -6,6 +6,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/native/quantized/cpu/conv_packed_params.h>
 #include <ATen/native/quantized/cpu/conv_serialization.h>
+#include <ATen/native/quantized/cpu/qadd.h>
 #include <ATen/native/xnnpack/OpContext.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <c10/core/TensorOptions.h>
@@ -114,18 +115,6 @@ at::Tensor from_blob_quantized(
       size * typeMeta.itemsize());
   qtensor_impl->set_sizes_and_strides(sizes, strides);
   return qx;
-}
-
-at::Tensor quantized_add(
-    at::Tensor x1,
-    at::Tensor x2,
-    double scale,
-    int64_t zero) {
-  const auto qadd_op =
-      c10::Dispatcher::singleton()
-          .findSchemaOrThrow("quantized::add", "")
-          .typed<at::Tensor(at::Tensor, at::Tensor, double, int64_t)>();
-  return qadd_op.call(x1, x2, scale, zero);
 }
 
 #ifdef C10_MOBILE
@@ -280,7 +269,7 @@ void nnc_aten_quantized_add(
       toQIntType(b_qdtype));
   const double out_qscale = ((double*)extra_args)[6];
   const int64_t out_qzero = extra_args[7];
-  auto r = quantized_add(qa, qb, out_qscale, out_qzero);
+  auto r = at::native::quantized_add(qa, qb, out_qscale, out_qzero);
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
 
