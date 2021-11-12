@@ -83,6 +83,8 @@ at::Tensor subtensor(const at::Tensor& tensor, int dim, int groups, int g) {
   return tensor.narrow(dim, n * g, n).contiguous();
 }
 
+
+
 }  // namespace
 
 at::Tensor LazyNativeFunctions::alias(const at::Tensor& self) {
@@ -334,7 +336,8 @@ at::Tensor LazyNativeFunctions::_copy_from(const at::Tensor& self,
       }
     } else {
       lazy_tensor_aten_ops::copy_(*dst_tensor, *self_tensor);
-      bridge::ReplaceLtcTensor(dst, *dst_tensor);
+      auto* impl = dynamic_cast<LTCTensorImpl*>(dst.unsafeGetTensorImpl());
+      impl->set_tensor(*dst_tensor);
     }
   }
   return dst;
