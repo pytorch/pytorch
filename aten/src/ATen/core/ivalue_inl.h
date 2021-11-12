@@ -2185,7 +2185,7 @@ struct MaybeOwnedTraits<IValue> {
     return &borrow;
   }
 
-  static bool debugBorrowIsValid(const borrow_type& borrow) {
+  static bool debugBorrowIsValid(const borrow_type&) {
     return true;
   }
 };
