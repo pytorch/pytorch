@@ -18,7 +18,10 @@ namespace at { namespace functorch {
 
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   OP_DECOMPOSE(absolute);
+  OP_DECOMPOSE(avg_pool1d);
+  OP_DECOMPOSE(adaptive_avg_pool1d);
   OP_DECOMPOSE(adaptive_avg_pool2d);
+  OP_DECOMPOSE(adaptive_avg_pool3d);
   OP_DECOMPOSE(arccos);
   OP_DECOMPOSE(arccosh);
   OP_DECOMPOSE(arcsin);
