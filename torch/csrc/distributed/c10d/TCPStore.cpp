@@ -23,7 +23,7 @@
 #include <c10d/UnixSockUtils.hpp>
 #endif
 
-#include "c10d/socket.h"
+#include <c10d/socket.h>
 
 namespace c10d {
 namespace detail {

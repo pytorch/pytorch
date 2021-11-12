@@ -4,7 +4,7 @@
 // This source code is licensed under the BSD-style license found in the
 // LICENSE file in the root directory of this source tree.
 
-#include "c10d/socket.h"
+#include <c10d/socket.h>
 
 #include <cstring>
 #include <system_error>
@@ -29,9 +29,9 @@
 
 #include <fmt/format.h>
 
-#include "c10d/detail/error.h"
-#include "c10d/detail/logging.h"
-#include "c10d/interrupt_exception.h"
+#include <c10d/error.h>
+#include <c10d/interrupt_exception.h>
+#include <c10d/logging.h>
 
 namespace c10d {
 namespace detail {
