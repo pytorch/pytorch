@@ -108,8 +108,9 @@ MemoryPlanner::MemoryPlanner(
           // first iteration, assume it will continue to not do anything
           // and avoid managing its output.
           static const auto to_maybe_copy_out_symbol =
-            c10::Symbol::fromQualString("static_runtime::to_maybe_copy_out");
-          if (pnode.node()->kind() == to_maybe_copy_out_symbol && pnode.Output(i).isNone()) {
+              c10::Symbol::fromQualString("static_runtime::to_maybe_copy_out");
+          if (pnode.node()->kind() == to_maybe_copy_out_symbol &&
+              pnode.Output(i).isNone()) {
             continue;
           }
           managed_tensor_values.insert(out_v);
@@ -135,7 +136,7 @@ MemoryPlanner::MemoryPlanner(
         continue;
       }
       static const auto select_tensor_symbol =
-        c10::Symbol::fromQualString("static_runtime::select_tensor");
+          c10::Symbol::fromQualString("static_runtime::select_tensor");
       if (doesNotHeapAllocateWhenStoredInIValue(*out_v->type())) {
         // Scalars do not need to be freed after each iteration.
         num_unmanaged_scalar_ivalues_++;
@@ -175,7 +176,8 @@ MemoryPlanner::MemoryPlanner(
       unmanaged_ivalues_.begin(),
       unmanaged_ivalues.begin(),
       unmanaged_ivalues.end());
-  unmanaged_borrowed_tensor_ivalues_.reserve(unmanaged_borrowed_tensor_ivalues.size());
+  unmanaged_borrowed_tensor_ivalues_.reserve(
+      unmanaged_borrowed_tensor_ivalues.size());
   unmanaged_borrowed_tensor_ivalues_.insert(
       unmanaged_borrowed_tensor_ivalues_.begin(),
       unmanaged_borrowed_tensor_ivalues.begin(),
