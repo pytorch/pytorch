@@ -227,6 +227,7 @@ if(INTERN_BUILD_ATEN_OPS)
   set(declarations_yaml_templates "")
 
   file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/aten/src/ATen)
+  file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/aten/src/ATen/ops)
   file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/aten/src/ATen/core)
 
   foreach(gen_type "headers" "sources" "declarations_yaml")

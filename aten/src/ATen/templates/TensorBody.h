@@ -1,6 +1,13 @@
 #pragma once
 
-#include <ATen/Operators.h>
+#ifdef TORCH_ASSERT_NO_OPERATORS
+#error This change adds a dependency on native_functions.yaml,            \
+  meaning the file will need to be re-compiled every time an operator     \
+  is changed or added. Consider if your change would be better placed in  \
+  another file, or if a more specific header might achieve the same goal. \
+  See NOTE: [Tensor vs. TensorBase]
+#endif
+
 #include <c10/core/Device.h>
 #include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>
@@ -19,12 +26,15 @@
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
+#include <ATen/core/CheckMemoryFormat.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/NamedTensor.h>
 #include <ATen/core/QuantizerBase.h>
 #include <ATen/core/TensorBase.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
+
+${operator_includes}
 
 namespace c10{
 template<class T> class List;

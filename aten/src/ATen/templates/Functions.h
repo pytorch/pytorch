@@ -2,21 +2,7 @@
 
 // ${generated_comment}
 
-#include <c10/core/Scalar.h>
-#include <ATen/Tensor.h>
-#include <c10/core/Storage.h>
-#include <ATen/core/Generator.h>
-#include <c10/util/Deprecated.h>
-#include <ATen/DeviceGuard.h>
-#include <c10/core/TensorOptions.h>
-#include <ATen/core/Reduction.h>
-#include <c10/util/Optional.h>
-#include <ATen/TensorUtils.h>
-#include <ATen/Context.h>
-#include <ATen/TracerMode.h>
-#include <ATen/Operators.h>
-
-${static_dispatch_extra_headers}
+${Functions_includes}
 
 namespace at {
 
@@ -42,8 +28,6 @@ namespace at {
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
 AT_FORALL_COMPLEX_TYPES(TENSOR)
 #undef TENSOR
-
-${function_definitions}
 
 // Special C++ only overloads for std()-like functions (See gh-40287)
 // These are needed because int -> bool conversion takes precedence over int -> IntArrayRef
