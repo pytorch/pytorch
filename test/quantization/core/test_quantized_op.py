@@ -3665,16 +3665,15 @@ class TestDynamicQuantizedConv(TestCase):
     def _test_qconv_op_impl(self, q_mod, dq_op, dim, q_engine, dtype):
         # The goal here is to show that the dynamic op is the same as
         # calc params->quantize_input->quantized op->dequantize output
+        if q_engine not in torch.backends.quantized.supported_engines:
+            return
         torch.backends.quantized.engine = q_engine
-        if q_engine == 'qnnpack':
-            reduce_range = True
-        else:
-            reduce_range = True
+        reduce_range = True
 
-        X_fp32 = torch.randn(*([3] * dim))
+        X_fp32 = torch.randn(*([2] * dim))
         s, z = _calculate_dynamic_qparams(X_fp32, dtype, reduce_range)
 
-        quantized_module = q_mod(3, 10, 2)
+        quantized_module = q_mod(2, 3, 1)
         packed_params = quantized_module._packed_params
 
         quantized_module.scale, quantized_module.zero_point = s, z
@@ -3714,7 +3713,7 @@ class TestDynamicQuantizedConv(TestCase):
         dim = 5
         dtype = torch.quint8
 
-        for q_engine in ["fbgemm"]:  # qnnpack doesn't support unpacking conv3d
+        for q_engine in ["fbgemm", "qnnpack"]:
             for i in range(10):
                 self._test_qconv_op_impl(q_mod, dq_op, dim, q_engine, dtype)
 
@@ -3744,7 +3743,7 @@ class TestDynamicQuantizedConv(TestCase):
         dim = 5
         dtype = torch.quint8
 
-        for q_engine in ["fbgemm"]:  # qnnpack doesn't support unpacking conv3d
+        for q_engine in ["fbgemm"]:  # TODO: fix MakeDeConvOutputShape overflowing for convT3d with qnnpack
             for i in range(10):
                 self._test_qconv_op_impl(q_mod, dq_op, dim, q_engine, dtype)
 
