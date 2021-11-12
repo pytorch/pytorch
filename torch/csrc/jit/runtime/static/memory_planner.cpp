@@ -108,8 +108,9 @@ MemoryPlanner::MemoryPlanner(
           // first iteration, assume it will continue to not do anything
           // and avoid managing its output.
           static const auto to_maybe_copy_out_symbol =
-            c10::Symbol::fromQualString("static_runtime::to_maybe_copy_out");
-          if (pnode.node()->kind() == to_maybe_copy_out_symbol && pnode.Output(i).isNone()) {
+              c10::Symbol::fromQualString("static_runtime::to_maybe_copy_out");
+          if (pnode.node()->kind() == to_maybe_copy_out_symbol &&
+              pnode.Output(i).isNone()) {
             continue;
           }
           managed_tensor_values.insert(out_v);
