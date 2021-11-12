@@ -46,6 +46,7 @@
 #include <functional>
 #include "lazy_tensor_core/csrc/ts_backend/LazyShapeDtype.h"
 #include "aten/src/ATen/WrapDimUtils.h"
+#include "aten/src/ATen/native/ReduceOpsUtils.h"
 #include "torch/csrc/api/include/torch/enum.h"
 namespace torch_lazy_tensors {
 namespace ir {
@@ -81,20 +82,8 @@ std::vector<std::vector<int64_t>> compute_shape_std(const at::Tensor & self, at:
 }
 std::vector<std::vector<int64_t>> compute_shape_std(const at::Tensor & self, c10::optional<at::IntArrayRef> dim, c10::optional<int64_t> correction, bool keepdim){
   if (dim.has_value()) {
-    auto sizes = self.sizes().vec();
-    if (keepdim) {
-      for (auto reduce_dim: dim.value()) {
-        sizes[at::maybe_wrap_dim(reduce_dim, self)] = 1;
-      }
-    } else {
-      std::vector<int64_t> reduce_dims(dim.value().begin(), dim.value().end());
-      at::maybe_wrap_dims(reduce_dims, self.dim());
-      sort(reduce_dims.begin(), reduce_dims.end(), std::greater<int64_t>());
-      for (auto reduce_dim: reduce_dims) {
-        sizes.erase(sizes.begin() + reduce_dim);
-      }
-    }
-    return {sizes};
+    auto shape = at::native::shape_from_dim_mask(self, at::native::make_dim_mask(dim.value(), self.dim()), keepdim);
+    return {std::vector<int64_t>(shape.begin(), shape.end())};
   }
   return {{}};
 }
