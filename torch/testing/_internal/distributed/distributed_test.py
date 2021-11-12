@@ -5471,7 +5471,7 @@ class DistributedTest:
             subgroup = dist.new_group(backend=backend)
             return self._test_allgather_object(subgroup=subgroup)
 
-        def _test_gather_object(self, pg):
+        def _test_gather_object(self, pg=None):
             # Ensure stateful objects can be gathered
             gather_objects = COLLECTIVES_OBJECT_TEST_LIST
             output_gathered = [None for _ in range(dist.get_world_size(pg))]
@@ -5510,13 +5510,13 @@ class DistributedTest:
 
         @require_backend({"gloo"})
         @sandcastle_skip_if(BACKEND == "nccl", "NCCL does not support gather")
-        @with_dist_debug_levels(levels=["DETAIL"])
+        @with_dist_debug_levels(levels=["DETAIL", "OFF", "INFO"])
         def test_gather_object(self):
             return self._test_gather_object()
 
         @require_backend({"gloo"})
         @sandcastle_skip_if(BACKEND == "nccl", "NCCL does not support gather")
-        @with_dist_debug_levels(levels=["DETAIL"])
+        @with_dist_debug_levels(levels=["DETAIL", "OFF", "INFO"])
         def test_gather_object_subgroup(self):
             default = _get_default_group()
             backend = dist.get_backend(default)
