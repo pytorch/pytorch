@@ -11,7 +11,6 @@
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/record_function.h>
 #include <torch/csrc/autograd/profiler.h>
-#include <torch/csrc/autograd/profiler_python.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/saved_variable.h>
@@ -83,7 +82,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .def(py::init<ProfilerState,
           bool, /* record_input_shapes */
           bool, /* profile_memory */
-          bool, /* with_stack */
+          bool, /* with_stac k*/
           bool, /* with_flops */
           bool  /* with_modules */
           >());
@@ -345,7 +344,6 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
         s.register_hooks(std::make_unique<torch::autograd::PySavedVariableHooks>(pack_hook, unpack_hook));
     });
 
-  torch::autograd::profiler::python_tracer::init();
   Py_RETURN_TRUE;
 }
 
