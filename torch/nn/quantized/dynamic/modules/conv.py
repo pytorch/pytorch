@@ -65,7 +65,6 @@ class Conv1d(nnq.Conv1d):
     def _get_name(self):
         return 'DynamicQuantizedConv1d'
 
-    # @reviewer unsure whether reduce range should be true or false, here I mimic qlinear_dynamic using true
     def forward(self, input: Tensor, reduce_range: bool = True) -> Tensor:
         # Temporarily using len(shape) instead of ndim due to JIT issue
         # https://github.com/pytorch/pytorch/issues/23890
@@ -125,7 +124,6 @@ class Conv2d(nnq.Conv2d):
     def _get_name(self):
         return 'DynamicQuantizedConv2d'
 
-    # @reviewer unsure whether reduce range should be true or false, here I mimic qlinear_dynamic using true
     def forward(self, input: Tensor, reduce_range: bool = True) -> Tensor:
         # Temporarily using len(shape) instead of ndim due to JIT issue
         # https://github.com/pytorch/pytorch/issues/23890
@@ -184,9 +182,8 @@ class Conv3d(nnq.Conv3d):
             False, _triple(0), groups, bias, padding_mode, **factory_kwargs)
 
     def _get_name(self):
-        return 'QuantizedConv3d'
+        return 'DynamicQuantizedConv3d'
 
-    # @reviewer unsure whether reduce range should be true or false, here I mimic qlinear_dynamic using true
     def forward(self, input: Tensor, reduce_range: bool = True) -> Tensor:
         # Temporarily using len(shape) instead of ndim due to JIT issue
         # https://github.com/pytorch/pytorch/issues/23890
@@ -247,7 +244,6 @@ class ConvTranspose1d(nnq.ConvTranspose1d):
     def _get_name(self):
         return 'DynamicQuantizedConvTranpose1d'
 
-    # @reviewer unsure whether reduce range should be true or false, here I mimic qlinear_dynamic using true
     def forward(self, input: Tensor, reduce_range: bool = True) -> Tensor:
         # Temporarily using len(shape) instead of ndim due to JIT issue
         # https://github.com/pytorch/pytorch/issues/23890
@@ -302,9 +298,8 @@ class ConvTranspose2d(nnq.ConvTranspose2d):
             groups, bias, dilation, padding_mode, **factory_kwargs)
 
     def _get_name(self):
-        return 'QuantizedConvTranpose2d'
+        return 'DynamicQuantizedConvTranpose2d'
 
-    # @reviewer unsure whether reduce range should be true or false, here I mimic qlinear_dynamic using true
     def forward(self, input: Tensor, reduce_range: bool = True) -> Tensor:
         # Temporarily using len(shape) instead of ndim due to JIT issue
         # https://github.com/pytorch/pytorch/issues/23890

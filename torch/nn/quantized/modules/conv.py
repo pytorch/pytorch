@@ -205,13 +205,11 @@ class _ConvNd(nn.Module):
         qconv.set_weight_bias(qweight, mod.bias)
         try:
             act_scale, act_zp = activation_post_process.calculate_qparams()
+            qconv.scale = float(act_scale)
+            qconv.zero_point = int(act_zp)
+            return qconv
         except Exception:
-            # for things like dynamic quantization, want to assign arbitrary s+z to not break serialization
-            act_scale, act_zp = 0.0, 0
-
-        qconv.scale = float(act_scale)
-        qconv.zero_point = int(act_zp)
-        return qconv
+            return qconv
 
     @staticmethod
     def from_float(cls, mod):
@@ -591,14 +589,11 @@ class _ConvTransposeNd(_ConvNd):
         qconv.set_weight_bias(qweight, mod.bias)
         try:
             act_scale, act_zp = mod.activation_post_process.calculate_qparams()
+            qconv.scale = float(act_scale)
+            qconv.zero_point = int(act_zp)
+            return qconv
         except Exception:
-            # for things like dynamic quantization, want to assign arbitrary s+z to not break serialization
-            act_scale, act_zp = 0.0, 0
-
-        qconv.scale = float(act_scale)
-        qconv.zero_point = int(act_zp)
-
-        return qconv
+            return qconv
 
 
 class ConvTranspose1d(_ConvTransposeNd):
