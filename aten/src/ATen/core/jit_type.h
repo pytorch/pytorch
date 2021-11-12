@@ -654,6 +654,12 @@ struct TORCH_API TensorType : public Type {
         sizes, contiguousStridesOf(sizes));
   }
 
+  TensorTypePtr withDevice(at::Device device) const {
+    auto copy = clone();
+    copy->device_ = device;
+    return copy;
+  }
+
   TensorTypePtr dimensionedOnly() const {
     auto copy = clone();
     copy->sizes_ = SymbolicShape(sizes().size());
