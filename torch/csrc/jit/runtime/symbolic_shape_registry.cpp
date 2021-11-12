@@ -12,7 +12,7 @@ namespace {
 std::mutex lock;
 
 const std::string _shape_compute_functions =
-#include "shapes.py"
+#include "torch/jit/shapes.py"
     ;
 
 const std::string _xnnpack_shape_compute_functions =
