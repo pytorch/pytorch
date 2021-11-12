@@ -453,6 +453,7 @@ void initTensorExprBindings(PyObject* module) {
 
   py::class_<LoopNest>(te, "LoopNest")
       .def(py::init<const std::vector<Tensor>&>())
+      .def(py::init<const std::vector<Tensor>&, const std::vector<Tensor>&>())
       .def(py::init([](StmtPtr s, const std::vector<BufHandle>& bufs) {
         std::unordered_set<BufPtr> buf_nodes;
         for (auto& buf : bufs) {
@@ -623,7 +624,7 @@ void initTensorExprBindings(PyObject* module) {
             return LoopNest::compressBuffer(buf.node(), stmt);
           },
           py::return_value_policy::reference)
-      .def(
+      .def_static(
           "cache_accesses",
           [](const BufHandle& producer,
              const std::string& name,
@@ -633,7 +634,7 @@ void initTensorExprBindings(PyObject* module) {
             return std::make_pair(BufHandle(ret.first), ret.second);
           },
           py::return_value_policy::reference)
-      .def(
+      .def_static(
           "compute_at",
           [](StmtPtr s, ForPtr at) { LoopNest::computeAt(s, at); })
       .def(
@@ -885,12 +886,6 @@ void initTensorExprBindings(PyObject* module) {
       });
   te.def("annotate_input_shapes", &tensorexpr::annotateInputShapes);
   te.def("remove_unused_self_argument", &tensorexpr::removeUnusedSelfArgument);
-  te.def("is_graph_compilable", &tensorexpr::isGraphCompilable);
-  te.def("fixup_missing_shape_info", &tensorexpr::fixupMissingShapeInfo);
-  te.def("remove_graph_output", &tensorexpr::removeGraphOutput);
-  te.def(
-      "replace_list_output_with_tuple",
-      &tensorexpr::replaceListOutputWithTuple);
 }
 } // namespace jit
 } // namespace torch
