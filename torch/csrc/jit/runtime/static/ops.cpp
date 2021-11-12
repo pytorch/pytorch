@@ -1144,7 +1144,7 @@ C10_ALWAYS_INLINE void to_copy_functor_impl(
   // handle memory format
   bool copy_strides = false;
 
-  c10::optional<c10::MemoryFormat> memory_format;
+  c10::optional<c10::MemoryFormat> memory_format = c10::MemoryFormat::Preserve;
   c10::optional<ToArgs> my_args;
   if (!args) {
     my_args = extract_to_args<
@@ -1154,8 +1154,6 @@ C10_ALWAYS_INLINE void to_copy_functor_impl(
   }
   if (has_memory_format) {
     memory_format = args->memory_format.value_or(c10::MemoryFormat::Preserve);
-  } else {
-    memory_format = c10::MemoryFormat::Preserve;
   }
 
   if (memory_format == c10::MemoryFormat::Preserve) {
