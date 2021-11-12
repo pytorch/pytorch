@@ -1012,7 +1012,7 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
 
         for q_engine in ["fbgemm", "qnnpack"]:
             for bias in [True, False]:
-                for i in range(1):
+                for i in range(10):
                     self._test_qconv_impl(q_mod, dq_mod, dim, q_engine, dtype, bias)
 
     def test_dynamic_conv2d(self):
@@ -1023,7 +1023,7 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
 
         for q_engine in ["fbgemm", "qnnpack"]:
             for bias in [True, False]:
-                for i in range(1):
+                for i in range(10):
                     self._test_qconv_impl(q_mod, dq_mod, dim, q_engine, dtype, bias)
 
     def test_dynamic_conv3d(self):
@@ -1034,7 +1034,7 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
 
         for q_engine in ["fbgemm"]:  # qnnpack doesn't support unpacking conv3d
             for bias in [True, False]:
-                for i in range(1):
+                for i in range(10):
                     self._test_qconv_impl(q_mod, dq_mod, dim, q_engine, dtype, bias)
 
     def test_dynamic_convtranspose1d(self):
@@ -1045,7 +1045,7 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
 
         for q_engine in ["fbgemm", "qnnpack"]:
             for bias in [True, False]:
-                for i in range(1):
+                for i in range(10):
                     self._test_qconv_impl(q_mod, dq_mod, dim, q_engine, dtype, bias)
 
     def test_dynamic_convtranspose2d(self):
@@ -1056,7 +1056,7 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
 
         for q_engine in ["fbgemm", "qnnpack"]:
             for bias in [True, False]:
-                for i in range(1):
+                for i in range(10):
                     self._test_qconv_impl(q_mod, dq_mod, dim, q_engine, dtype, bias)
 
     def test_dynamic_convtranspose3d(self):
@@ -1067,7 +1067,7 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
 
         for q_engine in ["fbgemm"]:  # qnnpack doesn't support unpacking conv3d
             for bias in [True, False]:
-                for i in range(1):
+                for i in range(10):
                     self._test_qconv_impl(q_mod, dq_mod, dim, q_engine, dtype, bias)
 
     @given(
