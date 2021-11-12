@@ -47,8 +47,7 @@ class MklSparseDescriptor {
 
 namespace {
 
-c10::MaybeOwned<Tensor> inline prepare_indices_for_mkl(
-    const Tensor& indices) {
+c10::MaybeOwned<Tensor> inline prepare_indices_for_mkl(const Tensor& indices) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       isIntegralType(indices.scalar_type(), /*includeBool=*/false));
 #ifdef MKL_ILP64
@@ -80,6 +79,9 @@ class MklSparseCsrDescriptor
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.is_sparse_csr());
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.dim() == 2);
 
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        input._nnz() > 0, "MKL doesn't work with empty CSR matrices");
+
     IntArrayRef input_sizes = input.sizes();
     auto rows = mkl_int_cast(input_sizes[0], "rows");
     auto cols = mkl_int_cast(input_sizes[1], "cols");
@@ -106,6 +108,11 @@ class MklSparseCsrDescriptor
         col_indices_ptr,
         values_ptr);
 
+    descriptor_.reset(raw_descriptor);
+  }
+
+  MklSparseCsrDescriptor() {
+    sparse_matrix_t raw_descriptor = nullptr;
     descriptor_.reset(raw_descriptor);
   }
 
