@@ -80,11 +80,24 @@ using namespace at::sparse;
 
 namespace {
 
-  inline Tensor get_result_tensor_for_unary_op(const Tensor& input) {
-    if (c10::isIntegralType(input.scalar_type(), /*includeBool=*/true)) {
-      return at::empty_like(input, input.options().dtype(c10::get_default_dtype()));
-    }
-    return at::empty_like(input);
+  template <typename F>
+  inline Tensor get_result_tensor_for_unary_op(F op, const Tensor& input) {
+    auto values = input.values();
+
+    // To handle type promotion for inputs to unary ops,
+    // we first get the result from the underlined op, and use the result
+    // to create a sparse CSR tensor, which is used as the input to the out= variant
+    auto result_values = (*op)(values);
+
+    auto result = at::native::sparse_csr_tensor(
+      input.crow_indices().clone(),
+      input.col_indices().clone(),
+      result_values,
+      result_values.scalar_type(),
+      input.layout(),
+      result_values.device());
+
+    return result;
   }
 }
 
@@ -110,7 +123,7 @@ Tensor& sin_sparse_csr_out(const Tensor& self, Tensor& result) {
 }
 
 Tensor sin_sparse_csr(const Tensor& self) {
-  auto result = get_result_tensor_for_unary_op(self);
+  auto result = get_result_tensor_for_unary_op(&at::sin, self);
   return sin_sparse_csr_out(self, result);
 }
 

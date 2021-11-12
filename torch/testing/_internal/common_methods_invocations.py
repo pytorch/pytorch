@@ -1044,6 +1044,10 @@ def sample_inputs_unary(op_info, device, dtype, requires_grad, **kwargs):
     return (SampleInput(make_tensor((L,), device=device, dtype=dtype,
                                     low=low, high=high,
                                     requires_grad=requires_grad)),
+            # Tensors with dim=2 for sparse CSR testing
+            SampleInput(make_tensor((L, L), device=device, dtype=dtype,
+                                    low=low, high=high,
+                                    requires_grad=requires_grad)),
             SampleInput(make_tensor((), device=device, dtype=dtype,
                                     low=low, high=high,
                                     requires_grad=requires_grad)))
