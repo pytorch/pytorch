@@ -22,6 +22,7 @@ The following constraints are implemented:
 - ``constraints.real_vector``
 - ``constraints.real``
 - ``constraints.simplex``
+- ``constraints.symmetric``
 - ``constraints.stack``
 - ``constraints.symmetric``
 - ``constraints.symmetric_positive_definite``
@@ -57,7 +58,6 @@ __all__ = [
     'simplex',
     'stack',
     'symmetric',
-    'symmetric_positive_definite',
     'unit_interval',
 ]
 
@@ -420,27 +420,6 @@ class _Multinomial(Constraint):
     def check(self, x):
         return (x >= 0).all(dim=-1) & (x.sum(dim=-1) <= self.upper_bound)
 
-    
-class _Symmetric(Constraint):
-    """
-    Constrain to Symmetric square matrices.
-    """
-    event_dim = 2
-    
-    def check(self, value):
-        return (value.transpose(-2, -1) == value).all(dim = -1).all(dim = -1)
-    
-    
-class _SymmetricPositiveDefinite(Constraint):
-    """
-    Constrain to Symmetric positive-definite square matrices.
-    """
-    event_dim = 2
-    
-    def check(self, value):
-        return (value.transpose(-2, -1) == value).all(dim = -1).all(dim = -1) &
-            torch.linalg.cholesky_ex(value).info.eq(0).unsqueeze(0)
-    
 
 class _LowerTriangular(Constraint):
     """
@@ -479,6 +458,16 @@ class _CorrCholesky(Constraint):
         row_norm = torch.linalg.norm(value.detach(), dim=-1)
         unit_row_norm = (row_norm - 1.).abs().le(tol).all(dim=-1)
         return _LowerCholesky().check(value) & unit_row_norm
+
+
+class _Symmetric(Constraint):
+    """
+    Constrain to Symmetric square matrices.
+    """
+    event_dim = 2
+
+    def check(self, value):
+        return (value.transpose(-2, -1) == value).all(dim=-1).all(dim=-1)
 
 
 class _PositiveDefinite(Constraint):
@@ -557,6 +546,8 @@ class _Stack(Constraint):
                             for v, constr in zip(vs, self.cseq)], self.dim)
 
 
+
+
 # Public interface.
 dependent = _Dependent()
 dependent_property = _DependentProperty
@@ -582,7 +573,7 @@ symmetric = _Symmetric()
 lower_triangular = _LowerTriangular()
 lower_cholesky = _LowerCholesky()
 corr_cholesky = _CorrCholesky()
+symmetric = _Symmetric()
 positive_definite = _PositiveDefinite()
-symmetric_positive_definite = _SymmetricPositiveDefinite()
 cat = _Cat
 stack = _Stack

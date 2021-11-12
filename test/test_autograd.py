@@ -2697,7 +2697,6 @@ class TestAutograd(TestCase):
         torch.autograd.backward(r2, grad)
         self.assertEqual(input1.grad, input2.grad, rtol=0.01, atol=0.0)
 
-    @slowTest
     @skipIfNoLapack
     def test_lobpcg(self):
 
@@ -2708,7 +2707,7 @@ class TestAutograd(TestCase):
             if A.dim() > 2:
                 X = X.expand(X_shape)
 
-            D, U = torch.lobpcg(A=A, k=k, B=B, X=X)
+            D, U = torch.lobpcg(A=A, k=k, B=B, X=X, largest=largest)
 
             # LOBPCG uses a random initial eigenspace approximation
             # if parameter `X` is not provided.
@@ -2746,8 +2745,6 @@ class TestAutograd(TestCase):
             (D.sum() + U.sum()).backward()
             self.assertEqual(A.grad, A.grad.mT)
 
-        # the tests below take about 1-2 minutes to finish,
-        # but we want to be extra sure that the backward is correct.
         for largest in [True, False]:
             run_symeig_test(1, (6, 6), largest=largest)
             run_symeig_test(1, (2, 6, 6), largest=largest)
@@ -7315,6 +7312,12 @@ class TestAutogradForwardMode(TestCase):
             baz_primal, baz_tangent = fwAD.unpack_dual(baz)
             self.assertEqual(baz_primal, foo)
             self.assertIs(baz_tangent, bar)
+
+            # Check unpacked dual is returned as a named tuple
+            # NB: Every invocation of unpack_dual returns a new tensor view
+            self.assertIsNot(baz_primal, fwAD.unpack_dual(baz).primal)
+            self.assertEqual(baz_primal, fwAD.unpack_dual(baz).primal)
+            self.assertIs(baz_tangent, fwAD.unpack_dual(baz).tangent)
 
             # Check that packing/unpacking did not change the input
             foo_primal, foo_tangent = fwAD.unpack_dual(foo)
