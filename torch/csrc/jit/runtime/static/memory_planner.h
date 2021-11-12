@@ -62,7 +62,8 @@ class MemoryPlanner {
   }
 
   C10_NODISCARD size_t num_unmanaged_non_scalars() const {
-    return unmanaged_ivalues_.size() + unmanaged_borrowed_tensor_ivalues_.size();
+    return unmanaged_ivalues_.size() +
+        unmanaged_borrowed_tensor_ivalues_.size();
   }
 
   C10_NODISCARD size_t num_unmanaged_scalars() const {
