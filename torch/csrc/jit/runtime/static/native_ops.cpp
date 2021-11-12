@@ -541,5 +541,23 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       };
     });
 
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::split,
+    aten_split,
+    [](Node* n) -> SROperator {
+      if (!n->matches(torch::schema(
+              "aten::split(Tensor self, int split_size, int dim=0) -> Tensor[]"))) {
+        LogAndDumpSchema(n);
+        return nullptr;
+      }
+
+      return [](ProcessedNode* p_node) {
+        const auto& self = p_node->Input(0).toTensor();
+        const auto split_size = p_node->Input(1).toInt();
+        const auto dim = p_node->Input(2).toInt();
+        p_node->Output(0) = at::native::split(self, split_size, dim);
+      };
+    });
+
 } // namespace jit
 } // namespace torch
