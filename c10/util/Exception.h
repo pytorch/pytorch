@@ -229,6 +229,11 @@ class C10_API OnnxfiBackendSystemError : public Error {
   using Error::Error;
 };
 
+// LinAlgError raised by classes in the torch.linalg namespace
+// for indicating errors with linear algebra routines.
+class C10_API LinAlgError : public Error {
+  using Error::Error;
+};
 // A utility function to return an exception std::string by prepending its
 // exception type before its what() content
 C10_API std::string GetExceptionString(const std::exception& e);
@@ -501,6 +506,10 @@ namespace detail {
 // Like TORCH_CHECK, but raises NotImplementedErrors instead of Errors.
 #define TORCH_CHECK_NOT_IMPLEMENTED(cond, ...) \
   TORCH_CHECK_WITH_MSG(NotImplementedError, cond, "TYPE", __VA_ARGS__)
+
+// Like TORCH_CHECK, but raises LinAlgError instead of Error.
+#define TORCH_CHECK_LINALG(cond, ...) \
+  TORCH_CHECK_WITH_MSG(LinAlgError, cond, "LINALG", __VA_ARGS__)
 
 // Report a warning to the user.  Accepts an arbitrary number of extra
 // arguments which are concatenated into the warning message using operator<<
