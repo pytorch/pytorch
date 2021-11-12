@@ -147,6 +147,7 @@ vjp_fail = {
     xfail('linalg.matrix_power'),
     xfail('tensor_split'),
     xfail('to_sparse'),
+    xfail('nn.functional.ctc_loss'),
 }
 
 class TestOperators(TestCase):
@@ -354,6 +355,10 @@ class TestOperators(TestCase):
         xfail('nn.functional.dropout'),
         xfail('fft.ihfft2'),
         xfail('fft.ihfftn'),
+        xfail('double', 'channels_last'),
+        xfail('nn.functional.gaussian_nll_loss'),
+        xfail('nn.functional.poisson_nll_loss'),
+        xfail('nn.functional.conv1d', device_type='cuda'),
         xfail('fft.rfft2'),
         xfail('_masked.prod'), # calls aten::item
     })
@@ -486,6 +491,22 @@ class TestOperators(TestCase):
         xfail('fft.ihfftn'),
         xfail('fft.rfft2'),
         xfail('nn.functional.embedding'),
+        xfail('_masked.mean'),
+        xfail('cross'),
+        xfail('diagonal_scatter'),
+        xfail('double', 'channels_last'),
+        xfail('linalg.cross'),
+        xfail('nn.functional.adaptive_max_pool1d'),
+        xfail('nn.functional.adaptive_max_pool2d'),
+        xfail('nn.functional.adaptive_max_pool3d'),
+        xfail('nn.functional.conv1d'),
+        xfail('nn.functional.gaussian_nll_loss'),
+        xfail('nn.functional.hardsigmoid'),
+        xfail('nn.functional.huber_loss'),
+        xfail('nn.functional.instance_norm'),
+        xfail('nn.functional.poisson_nll_loss'),
+        xfail('select_scatter'),
+        xfail('slice_scatter'),
     }))
     def test_vmapvjp_has_batch_rule(self, device, dtype, op):
         # These are too annoying to put into the list above
@@ -538,6 +559,8 @@ class TestOperators(TestCase):
         xfail('lu_unpack'),
         xfail('matrix_exp'),
         xfail('view_as_complex'),
+        xfail('nn.functional.gaussian_nll_loss'),
+        xfail('double', 'channels_last'),
     }))
     def test_vjpvmap(self, device, dtype, op):
         # NB: there is no vjpvmap_has_batch_rule test because that is almost
