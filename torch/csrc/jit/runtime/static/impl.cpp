@@ -1044,10 +1044,10 @@ c10::IValue StaticRuntime::move_outputs_to_tuple(size_t num_outputs) {
 /// There is another case of failure that step 2 can prevent. With
 /// StaticModule::opts().cleanup_activations = false, the returned Static
 /// Runtime instance in the instance pool can be re-entered while an unintended
-/// output tensor's alias is still being used by the client (in the multi-threaded
-/// setting). This can only be prevented by delaying the deallocation and
-/// returning the Static Runtime instance after the client is done with the
-/// outputs.
+/// output tensor's alias is still being used by the client (in the
+/// multi-threaded setting). This can only be prevented by delaying the
+/// deallocation and returning the Static Runtime instance after the client is
+/// done with the outputs.
 
 void StaticRuntime::verify_and_correct_memory_overlap(ProcessedNode& n) {
   // The slow check can be removed once the internal/output buffers are merged
