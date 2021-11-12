@@ -3373,6 +3373,51 @@ TEST(LoopNest, NormalizeAndSplitWithTail) {
   torch::jit::testing::FileCheck().run(expected_tail_ir, oss_tail.str());
 }
 
+TEST(LoopNest, NotNormalizeAndSplitWithTail) {
+  // Create a dummy tensor to construct LoopNest.
+  ExprHandle n(100);
+  BufHandle a("a", {n}, kFloat);
+  Tensor b =
+      Compute("b", {{n, "i"}}, [&](const VarHandle& i) { return a.load(i); });
+  LoopNest l({b});
+
+  // Input IR:
+  //   for (int x = 5; x < 15; x++) {
+  //     A[x] = x * 2;
+  //   }
+  const int kTotalSize = 10;
+  BufHandle a_buf("A", {kTotalSize}, kInt);
+  VarHandle x("x", kInt);
+  auto for_stmt = For::make(x, 5, 15, Store::make(a_buf, {x}, x * 2));
+  auto parent_block = Block::make({for_stmt});
+
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  ForPtr x_inner;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  ForPtr x_tail;
+  LoopNest::splitWithTail(for_stmt, 8, &x_inner, &x_tail);
+
+  auto x_outer_result = IRSimplifier::simplify(for_stmt);
+  std::ostringstream oss_outer;
+  oss_outer << *x_outer_result;
+  const std::string& expected_outer_ir =
+      R"IR(
+        # CHECK: {
+        # CHECK: }
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_outer_ir, oss_outer.str());
+
+  auto x_tail_result = IRSimplifier::simplify(x_tail);
+  std::ostringstream oss_tail;
+  oss_tail << *x_tail_result;
+  const std::string& expected_tail_ir =
+      R"IR(
+        # CHECK: for (int x_tail = 0; x_tail < 2; x_tail++) {
+        # CHECK:   A[x_tail + 13] = 2 * (x_tail + 13);
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_tail_ir, oss_tail.str());
+}
+
 TEST(LoopNest, FlattenSimpleLoopNest2D) {
   // Input IR:
   //   for (int i = 0; i < 10; i++) {

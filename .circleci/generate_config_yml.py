@@ -15,8 +15,6 @@ import cimodel.data.pytorch_build_definitions as pytorch_build_definitions
 import cimodel.data.simple.android_definitions
 import cimodel.data.simple.binary_smoketest
 import cimodel.data.simple.docker_definitions
-import cimodel.data.simple.ios_definitions
-import cimodel.data.simple.macos_definitions
 import cimodel.data.simple.mobile_definitions
 import cimodel.data.simple.nightly_android
 import cimodel.data.simple.nightly_ios
@@ -140,12 +138,8 @@ def generate_required_docker_images(items):
 
 def gen_build_workflows_tree():
     build_workflows_functions = [
-        # For rocm images, which don't have a circleci job equivalent
-        cimodel.data.simple.docker_definitions.get_workflow_jobs,
         pytorch_build_definitions.get_workflow_jobs,
-        cimodel.data.simple.macos_definitions.get_workflow_jobs,
         cimodel.data.simple.android_definitions.get_workflow_jobs,
-        cimodel.data.simple.ios_definitions.get_workflow_jobs,
         cimodel.data.simple.mobile_definitions.get_workflow_jobs,
         cimodel.data.simple.binary_smoketest.get_workflow_jobs,
         cimodel.data.simple.nightly_ios.get_workflow_jobs,
@@ -169,17 +163,6 @@ def gen_build_workflows_tree():
         binary_build_definitions.get_nightly_uploads,
     ]
 
-    slow_gradcheck_functions = [
-        pytorch_build_definitions.get_workflow_jobs
-    ]
-    slow_gradcheck_jobs = [f(only_slow_gradcheck=True) for f in slow_gradcheck_functions]
-    slow_gradcheck_jobs.extend(
-        cimodel.data.simple.docker_definitions.get_workflow_jobs(
-            # sort for consistency
-            sorted(generate_required_docker_images(slow_gradcheck_jobs))
-        )
-    )
-
     return {
         "workflows": {
             "binary_builds": {
@@ -193,10 +176,6 @@ def gen_build_workflows_tree():
             "master_build": {
                 "when": r"<< pipeline.parameters.run_master_build >>",
                 "jobs": master_build_jobs,
-            },
-            "slow_gradcheck_build": {
-                "when": r"<< pipeline.parameters.run_slow_gradcheck_build >>",
-                "jobs": slow_gradcheck_jobs,
             },
         }
     }
@@ -221,7 +200,6 @@ YAML_SOURCES = [
     File("job-specs/docker_jobs.yml"),
     Header("Workflows"),
     Treegen(gen_build_workflows_tree, 0),
-    File("workflows/workflows-scheduled-ci.yml"),
     File("workflows/workflows-ecr-gc.yml"),
     File("workflows/workflows-promote.yml"),
 ]

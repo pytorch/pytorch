@@ -17,7 +17,9 @@
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 #
 import os
+from os import path
 # import sys
+import pkgutil
 
 # source code directory, relative to this file, for sphinx-autobuild
 # sys.path.insert(0, os.path.abspath('../..'))
@@ -79,61 +81,221 @@ templates_path = ['_templates']
 
 # TODO: document these and remove them from here.
 
-coverage_ignore_modules = [
-    "torch.autograd",
-    "torch.cuda",
-    "torch.distributed",
-    "torch.distributions",
-    "torch.hub",
-    "torch.jit.unsupported_tensor_ops",
-    "torch.onnx",
-    "torch.nn.quantized.functional",
-    "torchvision",
-]
-
 coverage_ignore_functions = [
+    # torch.autograd
+    "register_py_tensor_class_for_device",
+    "variable",
+    # torch.cuda
+    "check_error",
+    "cudart",
+    "is_bf16_supported",
+    # torch.distributed.autograd
+    "is_available",
+    # torch.distributed.elastic.events
+    "construct_and_record_rdzv_event",
+    "record_rdzv_event",
+    # torch.distributed.elastic.metrics
+    "initialize_metrics",
+    # torch.distributed.elastic.rendezvous.registry
+    "get_rendezvous_handler",
+    # torch.distributed.launch
+    "launch",
+    "main",
+    "parse_args",
+    # torch.distributed.rpc
+    "is_available",
+    # torch.distributed.run
+    "config_from_args",
+    "determine_local_world_size",
+    "get_args_parser",
+    "get_rdzv_endpoint",
+    "get_use_env",
+    "main",
+    "parse_args",
+    "parse_min_max_nnodes",
+    "run",
+    "run_script_path",
+    # torch.distributions.constraints
+    "is_dependent",
+    # torch.hub
+    "import_module",
     # torch.jit
-    "annotate",
     "export_opnames",
-    "fuser",
-    "indent",
-    "interface",
-    "is_tracing",
-    "make_module",
-    "make_tuple",
-    "optimized_execution",
-    "script_method",
-    "validate_map_location",
-    "verify",
-    "whichmodule",
-    "wrap_check_inputs",
-    # torch
-    # TODO: This should be documented eventually, but only after
-    # we build out more support for meta functions and actually
-    # do a release with it
-    "empty_meta",
+    # torch.jit.unsupported_tensor_ops
+    "execWrapper",
+    # torch.onnx
+    "unregister_custom_op_symbolic",
 ]
 
 coverage_ignore_classes = [
+    # torch.cuda
+    "BFloat16Storage",
+    "BFloat16Tensor",
+    "BoolStorage",
+    "BoolTensor",
+    "ByteStorage",
+    "ByteTensor",
+    "CharStorage",
+    "CharTensor",
+    "ComplexDoubleStorage",
+    "ComplexFloatStorage",
+    "CudaError",
+    "DeferredCudaCallError",
+    "DoubleStorage",
+    "DoubleTensor",
+    "FloatStorage",
+    "FloatTensor",
+    "HalfStorage",
+    "HalfTensor",
+    "IntStorage",
+    "IntTensor",
+    "LongStorage",
+    "LongTensor",
+    "ShortStorage",
+    "ShortTensor",
+    "UntypedStorage",
+    "cudaStatus",
+    # torch.distributed.elastic.multiprocessing.errors
+    "ChildFailedError",
+    "ProcessFailure",
+    # torch.distributions.constraints
+    "cat",
+    "greater_than",
+    "greater_than_eq",
+    "half_open_interval",
+    "independent",
+    "integer_interval",
+    "interval",
+    "less_than",
+    "multinomial",
+    "stack",
+    # torch.distributions.transforms
+    "AffineTransform",
+    "CatTransform",
+    "ComposeTransform",
+    "CorrCholeskyTransform",
+    "ExpTransform",
+    "IndependentTransform",
+    "PowerTransform",
+    "ReshapeTransform",
+    "SigmoidTransform",
+    "SoftmaxTransform",
+    "StackTransform",
+    "StickBreakingTransform",
+    "TanhTransform",
+    "Transform",
     # torch.jit
-    "Attribute",
     "CompilationUnit",
-    "ConstMap",
     "Error",
     "Future",
-    "ONNXTracedModule",
-    "OrderedDictWrapper",
-    "OrderedModuleDict",
-    "RecursiveScriptModule",
     "ScriptFunction",
-    "ScriptMeta",
-    "ScriptModule",
-    "ScriptWarning",
-    "TopLevelTracedModule",
-    "TracedModule",
-    "TracerWarning",
-    "TracingCheckError",
+    # torch.onnx
+    "CheckerError",
+    "ExportTypes",
 ]
+
+# List of modules that do not have automodule/py:module in the doc yet
+# We should NOT add anything to this list, see the CI failure message
+# on how to solve missing automodule issues
+coverage_missing_automodule = [
+    "torch",
+    "torch.ao",
+    "torch.ao.nn",
+    "torch.ao.nn.sparse",
+    "torch.ao.nn.sparse.quantized",
+    "torch.ao.nn.sparse.quantized.dynamic",
+    "torch.ao.ns",
+    "torch.ao.ns.fx",
+    "torch.ao.quantization",
+    "torch.ao.quantization.fx",
+    "torch.ao.quantization.fx.backend_config_dict",
+    "torch.ao.sparsity",
+    "torch.ao.sparsity.experimental",
+    "torch.ao.sparsity.experimental.pruner",
+    "torch.ao.sparsity.scheduler",
+    "torch.ao.sparsity.sparsifier",
+    "torch.backends",
+    "torch.backends.cuda",
+    "torch.backends.cudnn",
+    "torch.backends.mkl",
+    "torch.backends.mkldnn",
+    "torch.backends.openmp",
+    "torch.backends.quantized",
+    "torch.backends.xnnpack",
+    "torch.contrib",
+    "torch.cpu",
+    "torch.cpu.amp",
+    "torch.distributed.algorithms",
+    "torch.distributed.algorithms.ddp_comm_hooks",
+    "torch.distributed.algorithms.model_averaging",
+    "torch.distributed.elastic",
+    "torch.distributed.elastic.utils",
+    "torch.distributed.elastic.utils.data",
+    "torch.distributed.launcher",
+    "torch.distributed.nn",
+    "torch.distributed.nn.api",
+    "torch.distributed.nn.jit",
+    "torch.distributed.nn.jit.templates",
+    "torch.distributed.pipeline",
+    "torch.distributed.pipeline.sync",
+    "torch.distributed.pipeline.sync.skip",
+    "torch.fft",
+    "torch.for_onnx",
+    "torch.fx.experimental",
+    "torch.fx.experimental.fx2trt",
+    "torch.fx.experimental.fx_acc",
+    "torch.fx.experimental.unification",
+    "torch.fx.experimental.unification.multipledispatch",
+    "torch.fx.passes",
+    "torch.jit.mobile",
+    "torch.nn",
+    "torch.nn.backends",
+    "torch.nn.intrinsic",
+    "torch.nn.intrinsic.modules",
+    "torch.nn.intrinsic.qat",
+    "torch.nn.intrinsic.qat.modules",
+    "torch.nn.intrinsic.quantized",
+    "torch.nn.intrinsic.quantized.dynamic",
+    "torch.nn.intrinsic.quantized.dynamic.modules",
+    "torch.nn.intrinsic.quantized.modules",
+    "torch.nn.modules",
+    "torch.nn.parallel",
+    "torch.nn.qat",
+    "torch.nn.qat.modules",
+    "torch.nn.qat.dynamic",
+    "torch.nn.qat.dynamic.modules",
+    "torch.nn.quantizable",
+    "torch.nn.quantizable.modules",
+    "torch.nn.quantized",
+    "torch.nn.quantized.dynamic",
+    "torch.nn.quantized.dynamic.modules",
+    "torch.nn.quantized.modules",
+    "torch.nn.utils",
+    "torch.package",
+    "torch.package.analyze",
+    "torch.quantization",
+    "torch.quantization.fx",
+    "torch.sparse",
+    "torch.special",
+    "torch.utils",
+    "torch.utils.backcompat",
+    "torch.utils.benchmark.examples",
+    "torch.utils.benchmark.op_fuzzers",
+    "torch.utils.benchmark.utils",
+    "torch.utils.benchmark.utils.valgrind_wrapper",
+    "torch.utils.bottleneck",
+    "torch.utils.data.communication",
+    "torch.utils.data.datapipes",
+    "torch.utils.data.datapipes.dataframe",
+    "torch.utils.data.datapipes.iter",
+    "torch.utils.data.datapipes.map",
+    "torch.utils.data.datapipes.utils",
+    "torch.utils.ffi",
+    "torch.utils.hipify",
+    "torch.utils.model_dump",
+    "torch.utils.tensorboard",
+]
+
 
 # The suffix(es) of source filenames.
 # You can specify multiple suffix as a list of string:
@@ -245,6 +407,71 @@ html_css_files = [
     'css/jit.css',
 ]
 
+from sphinx.ext.coverage import CoverageBuilder
+
+def coverage_post_process(app, exception):
+    if exception is not None:
+        return
+
+    # Only run this test for the coverage build
+    if not isinstance(app.builder, CoverageBuilder):
+        return
+
+    # These are all the modules that have "automodule" in an rst file
+    # These modules are the ones for which coverage is checked
+    # Here, we make sure that no module is missing from that list
+    modules = app.env.domaindata['py']['modules']
+
+    # We go through all the torch submodules and make sure they are
+    # properly tested
+    missing = set()
+
+    def is_not_internal(modname):
+        split_name = modname.split(".")
+        for name in split_name:
+            if name[0] == "_":
+                return False
+        return True
+
+    # The walk function does not return the top module
+    if "torch" not in modules:
+        missing.add("torch")
+
+    for _, modname, ispkg in pkgutil.walk_packages(path=torch.__path__,
+                                                   prefix=torch.__name__ + '.'):
+        if ispkg and is_not_internal(modname):
+            if modname not in modules:
+                missing.add(modname)
+
+    expected = set(coverage_missing_automodule)
+
+    output = []
+
+    unexpected_missing = missing - expected
+    if unexpected_missing:
+        mods = ", ".join(unexpected_missing)
+        output.append(f"\nYou added the following module(s) to the PyTorch namespace '{mods}' "
+                      "but they have no corresponding entry in a doc .rst file. You should "
+                      "either make sure that the .rst file that contains the module's documentation "
+                      "properly contains either '.. automodule:: mod_name' (if you do not want "
+                      "the paragraph added by the automodule, you can simply use py:module) or "
+                      "make the module private (by appending an '_' at the beginning of its name.")
+
+    unexpected_not_missing = expected - missing
+    if unexpected_not_missing:
+        mods = ", ".join(unexpected_not_missing)
+        output.append(f"\nThank you for adding the missing .rst entries for '{mods}', please update "
+                      "the 'coverage_missing_automodule' in 'torch/docs/source/conf.py' to remove "
+                      "the module(s) you fixed and make sure we do not regress on this in the future.")
+
+    # The output file is hard-coded by the coverage tool
+    # Our CI is setup to fail if any line is added to this file
+    output_file = path.join(app.outdir, 'python.txt')
+
+    if output:
+        with open(output_file, "a") as f:
+            for o in output:
+                f.write(o)
 
 # Called automatically by Sphinx, making this `conf.py` an "extension".
 def setup(app):
@@ -260,6 +487,8 @@ def setup(app):
     add_css = getattr(app, 'add_css_file', app.add_stylesheet)
     for css_file in html_css_files:
         add_css(css_file)
+
+    app.connect("build-finished", coverage_post_process)
 
 # From PyTorch 1.5, we now use autogenerated files to document classes and
 # functions. This breaks older references since

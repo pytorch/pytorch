@@ -5,11 +5,11 @@
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/cuda/MiscUtils.h>
 
-#if AT_USE_CUSPARSE_GENERIC_API()
-
 namespace at {
 namespace cuda {
 namespace sparse {
+
+#if AT_USE_CUSPARSE_GENERIC_API()
 
 namespace {
 
@@ -91,6 +91,23 @@ CuSparseDnMatDescriptor::CuSparseDnMatDescriptor(const Tensor& input) {
   descriptor_.reset(raw_descriptor);
 }
 
+CuSparseDnVecDescriptor::CuSparseDnVecDescriptor(const Tensor& input) {
+  // cuSPARSE doesn't support batched vectors
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      input.dim() == 1 || (input.dim() == 2 && input.size(-1) == 1));
+
+  // cuSPARSE doesn't support non-contiguous vectors
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.is_contiguous());
+
+  cudaDataType value_type = ScalarTypeToCudaDataType(input.scalar_type());
+  check_supported_cuda_type(value_type);
+
+  cusparseDnVecDescr_t raw_descriptor;
+  TORCH_CUDASPARSE_CHECK(cusparseCreateDnVec(
+      &raw_descriptor, input.numel(), input.data_ptr(), value_type));
+  descriptor_.reset(raw_descriptor);
+}
+
 CuSparseSpMatCsrDescriptor::CuSparseSpMatCsrDescriptor(const Tensor& input) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.is_sparse_csr());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.dim() == 2);
@@ -133,8 +150,8 @@ CuSparseSpMatCsrDescriptor::CuSparseSpMatCsrDescriptor(const Tensor& input) {
   descriptor_.reset(raw_descriptor);
 }
 
+#endif // AT_USE_CUSPARSE_GENERIC_API()
+
 } // namespace sparse
 } // namespace cuda
 } // namespace at
-
-#endif // AT_USE_CUSPARSE_GENERIC_API()

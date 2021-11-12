@@ -1,5 +1,4 @@
 #include <ATen/ATen.h>
-#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <cmath>
 #include <tuple>
@@ -143,8 +142,7 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cpu(
     const int64_t quant_max,
     const int64_t ch_axis,
     bool per_row_fake_quant,
-    bool symmetric_quant,
-    c10::optional<bool> output_fake_quant) {
+    bool symmetric_quant) {
   // Calculate min/max
   auto observe = observer_on.item().toInt();
   // Calculate the size of the dimension we need to quantize over,
@@ -191,11 +189,7 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cpu(
   }
   // Calculate qparams and fake_quantize
   auto fake_quant = fake_quant_on.item().toInt();
-  // If output_fake_quant has not been specified by user then default to true.
-  auto out_fake_quant_val =
-      output_fake_quant.has_value() ? output_fake_quant.value() : true;
-
-  if (fake_quant && out_fake_quant_val) {
+  if (fake_quant) {
     return choose_qparams_fake_quant(
         self,
         running_min,
@@ -225,8 +219,7 @@ at::Tensor fused_moving_avg_obs_fake_quant(
     const int64_t quant_max,
     const int64_t ch_axis,
     bool per_row_fake_quant,
-    bool symmetric_quant,
-    c10::optional<bool> output_fake_quant) {
+    bool symmetric_quant) {
   if (self.numel() == 0) {
     return self.clone();
   }
@@ -243,8 +236,7 @@ at::Tensor fused_moving_avg_obs_fake_quant(
       quant_max,
       ch_axis,
       per_row_fake_quant,
-      symmetric_quant,
-      output_fake_quant);
+      symmetric_quant);
   return std::get<0>(res);
 }
 } // namespace native

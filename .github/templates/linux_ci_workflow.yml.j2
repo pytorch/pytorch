@@ -8,13 +8,7 @@ name: !{{ build_environment }}
 
 on:
   pull_request:
-  {%- if ciflow_config.enabled %}
-    {%- if ciflow_config.trigger_action_only %}
-    types: [!{{ ciflow_config.trigger_action }}]
-    {%- else %}
     types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
-    {%- endif %}
-  {%- endif %}
 
 {%- if is_scheduled %}
   schedule:
@@ -53,6 +47,7 @@ jobs:
   build:
     runs-on: linux.2xlarge
     needs: [!{{ ciflow_config.root_job_name }}]
+    timeout-minutes: !{{ common.timeout_minutes }}
     env:
       JOB_BASE_NAME: !{{ build_environment }}-build
     outputs:
@@ -60,7 +55,7 @@ jobs:
     steps:
       !{{ common.setup_ec2_linux() }}
       !{{ common.checkout_pytorch("recursive") }}
-      !{{ common.calculate_docker_image() }}
+      !{{ common.calculate_docker_image(false) }}
       - name: Pull Docker image
         run: |
           !{{ common.pull_docker("${DOCKER_IMAGE}") }}
@@ -115,7 +110,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      {%- if not is_libtorch %}
+      {%- if build_generates_artifacts %}
       - name: Archive artifacts into zip
         run: |
           zip -1 -r artifacts.zip dist/ build/custom_test_artifacts build/lib build/bin .pytorch-test-times.json
@@ -143,9 +138,8 @@ jobs:
 {% block test +%}
   generate-test-matrix:
     runs-on: ubuntu-18.04
-    {%- if ciflow_config.enabled %}
     needs: [!{{ ciflow_config.root_job_name }}]
-    {%- endif %}
+    timeout-minutes: !{{ common.timeout_minutes }}
     env:
       TEST_RUNNER_TYPE: !{{ test_runner_type }}
       ENABLE_DISTRIBUTED_TEST: !{{ enable_distributed_test }}
@@ -160,6 +154,7 @@ jobs:
       ENABLE_NOARCH_TEST: !{{ enable_noarch_test }}
       NUM_TEST_SHARDS: !{{ num_test_shards }}
       MULTIGPU_RUNNER_TYPE: linux.16xlarge.nvidia.gpu
+      DISTRIBUTED_GPU_RUNNER_TYPE: linux.8xlarge.nvidia.gpu
       NOGPU_RUNNER_TYPE: linux.2xlarge
       PR_BODY: ${{ github.event.pull_request.body }}
     outputs:
@@ -183,6 +178,7 @@ jobs:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
       fail-fast: false
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: !{{ common.timeout_minutes }}
     env:
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: !{{ build_environment }}-test
@@ -228,11 +224,15 @@ jobs:
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
-        # Time out the test phase after 3.5 hours
-        timeout-minutes: 210
+        # Time out the test phase after !{{ timeout_after }} minutes
+        timeout-minutes: !{{ timeout_after }}
         run: |
+          set -x
+
           if [[ $TEST_CONFIG == 'multigpu' ]]; then
             TEST_COMMAND=.jenkins/pytorch/multigpu-test.sh
+          elif [[ $BUILD_ENVIRONMENT == *onnx* ]]; then
+            TEST_COMMAND=.jenkins/caffe2/test.sh
           else
             TEST_COMMAND=.jenkins/pytorch/test.sh
           fi
@@ -291,6 +291,7 @@ jobs:
 {%- if enable_doc_jobs %}
   build-docs:
     runs-on: linux.2xlarge
+    timeout-minutes: !{{ common.timeout_minutes }}
     strategy:
       matrix:
         docs_type: [cpp, python]
@@ -316,8 +317,8 @@ jobs:
           set -ex
           time docker pull "${DOCKER_IMAGE}" > /dev/null
           echo "${GITHUB_REF}"
-          ref=${GITHUB_REF##*/}
-          target=${ref//v}
+          # TODO: Set it correctly when workflows are scheduled on tags
+          target="master"
           # detached container should get cleaned up by teardown_ec2_linux
           container_name=$(docker run \
             -e BUILD_ENVIRONMENT \
@@ -350,7 +351,7 @@ jobs:
           retention-days: 14
           s3-bucket: doc-previews
           if-no-files-found: error
-          path: pytorch.github.io/docs/merge/
+          path: pytorch.github.io/docs/master/
           s3-prefix: pytorch/${{ github.event.pull_request.number }}
       - uses: !{{ common.upload_artifact_s3_action }}
         name: Upload C++ Docs Preview
