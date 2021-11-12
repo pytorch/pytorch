@@ -77,3 +77,8 @@ class TestPythonBindings(JitTestCase):
         alias_db = gr.alias_db()
         self.assertTrue("WILDCARD" in str(alias_db))
         self.assertTrue("digraph alias_db" in alias_db.to_graphviz_str())
+
+    def test_graph_create(self):
+        gr = torch._C.Graph()
+        with self.assertRaises(ValueError):
+            gr.create("prim::Constant", [None])

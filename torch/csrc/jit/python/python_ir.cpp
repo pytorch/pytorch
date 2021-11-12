@@ -379,6 +379,12 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "create",
           [](Graph& g, const char* str, const std::vector<Value*>& inputs) {
+            TORCH_CHECK_VALUE(
+                std::all_of(
+                    inputs.begin(),
+                    inputs.end(),
+                    [](Value* v) { return (v != nullptr); }),
+                "cannot pass None in inputs");
             return g.create(Symbol::fromQualString(str), inputs);
           })
       .def(
@@ -387,6 +393,12 @@ void initPythonIRBindings(PyObject* module_) {
              const char* str,
              const std::vector<Value*>& inputs,
              size_t noutputs) {
+            TORCH_CHECK_VALUE(
+                std::all_of(
+                    inputs.begin(),
+                    inputs.end(),
+                    [](Value* v) { return (v != nullptr); }),
+                "cannot pass None in inputs");
             return g.create(Symbol::fromQualString(str), inputs, noutputs);
           })
       .def("param_node", [](Graph& g) { return g.block()->param_node(); })
