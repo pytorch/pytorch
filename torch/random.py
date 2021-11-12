@@ -4,7 +4,20 @@ import warnings
 
 from torch._C import default_generator
 import torch
+from torch.types import _int, _float
 
+
+def uniform(low: _float, high: _float, *size: _int) -> torch.Tensor:
+    """
+    Returns a tensor filled with numbers sampled from a uniform random distribution
+
+    Args:
+        low (float): Lower bound of the distribution.
+        high (float): Upper bound of the distribution.
+        size (int...): Sequence of integers defining the shape of the Tensor. Can be a
+            variable number of arguments or a collection like a list or tuple.
+    """
+    return (high - low) * torch.rand(size) + low
 
 def set_rng_state(new_state: torch.Tensor) -> None:
     r"""Sets the random number generator state.
