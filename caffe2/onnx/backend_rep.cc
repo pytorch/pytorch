@@ -1,9 +1,10 @@
-#include "caffe2/core/common.h"
 #include "caffe2/onnx/backend_rep.h"
+#include "caffe2/core/common.h"
 
 #include <iostream>
 
-namespace caffe2 { namespace onnx {
+namespace caffe2 {
+namespace onnx {
 
 void Caffe2BackendRep::CheckInit() {
   if (!predictor_) {
@@ -28,4 +29,5 @@ void Caffe2BackendRep::RunMap(
   (*predictor_)(inputs, outputs);
 }
 
-}}
+} // namespace onnx
+} // namespace caffe2

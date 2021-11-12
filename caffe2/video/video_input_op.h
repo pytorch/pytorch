@@ -606,7 +606,9 @@ bool VideoInputOp<Context>::GetImageAndLabelsFromDBValue(
     img = scaled_img;
   } else {
     cv::cvtColor(
-        scaled_img, img, (channels_rgb_ == 1) ? cv::COLOR_BGR2GRAY : cv::COLOR_GRAY2BGR);
+        scaled_img,
+        img,
+        (channels_rgb_ == 1) ? cv::COLOR_BGR2GRAY : cv::COLOR_GRAY2BGR);
   }
 
   cv::Mat rgb_img;
