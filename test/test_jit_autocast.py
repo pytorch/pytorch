@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: jit"]
+
 import torch
 from torch.cuda.amp import autocast
 from typing import Optional
@@ -8,6 +10,7 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import run_tests
 from torch.testing import FileCheck
 
+TEST_BFLOAT16 = TEST_CUDA and torch.cuda.is_bf16_supported()
 
 class TestAutocast(JitTestCase):
     def setUp(self):
@@ -39,7 +42,7 @@ class TestAutocast(JitTestCase):
         self.assertEqual(x.dtype, torch.float16)
         self.assertEqual(y.dtype, torch.float32)
 
-    @unittest.skipIf(not TEST_CUDA, "No cuda")
+    @unittest.skipIf(not TEST_CUDA or not TEST_BFLOAT16, "No cuda bfloat16 support")
     def test_linear_bf16(self):
         @torch.jit.script
         def fn(a, b):
@@ -587,5 +590,75 @@ class TestAutocast(JitTestCase):
         # no cast op should be observed when executing outside autocast context
         self._test_autocast(t, None, cpu0, cpu1, cuda0, cuda1)
 
-if __name__ == '__main__':
+    @unittest.skipIf(not TEST_CUDA, "No cuda")
+    def test_autocast_autodiff(self):
+        def t(t0, t1):
+            o = torch.mm(t0, t1)
+            return o.relu()
+
+        jit_t = torch.jit.script(t)
+        t0 = torch.randn(5, 5, device="cuda", dtype=torch.float32).requires_grad_()
+        t1 = torch.randn(5, 5, device="cuda", dtype=torch.float32).requires_grad_()
+
+        # run optimization
+        for i in range(5):
+            with torch.autocast("cuda", torch.float16):
+                jit_o = jit_t(t0, t1)
+            jit_o.sum().backward()
+
+        t0.grad = None
+        t1.grad = None
+        ref_t0 = t0.detach().requires_grad_()
+        ref_t1 = t1.detach().requires_grad_()
+
+        with torch.autocast("cuda", torch.float16):
+            o = t(ref_t0, ref_t1)
+            jit_o = jit_t(t0, t1)
+        jit_o.sum().backward()
+        o.sum().backward()
+        self.assertEqual(o, jit_o)
+        self.assertEqual(t0.grad, ref_t0.grad)
+        self.assertEqual(t1.grad, ref_t1.grad)
+        self.assertEqual(o.dtype, jit_o.dtype)
+        self.assertEqual(t0.grad.dtype, ref_t0.grad.dtype)
+        self.assertEqual(t1.grad.dtype, ref_t1.grad.dtype)
+
+    @unittest.skipIf(not TEST_CUDA, "No cuda")
+    def test_jit_call_method_under_autocast(self):
+        @torch.jit.interface
+        class Iface(torch.nn.Module):
+            def forward(self, x, y) -> torch.Tensor:
+                pass
+
+        class Impl(Iface):
+            def forward(self, x, y):
+                return torch.mm(x, y)
+
+        class Thing1(torch.nn.Module):
+            impl: Iface
+
+            def forward(self, x, y):
+                with torch.cuda.amp.autocast():
+                    a = torch.mm(x, y)
+                    b = self.impl.forward(a, x)
+                    return b
+
+        scripted_impl = torch.jit.script(Impl())
+        thing1 = Thing1()
+        thing1.impl = scripted_impl
+        scripted_thing1 = torch.jit.script(thing1)
+        x = torch.rand([2, 2])
+        y = torch.rand([2, 2])
+
+        # make sure this doesn't throw an error
+        with torch.cuda.amp.autocast():
+            ans = scripted_thing1.forward(x, y)
+        self.assertEqual(torch.mm(torch.mm(x, y), x), ans)
+
+        # sanity check: this isn't supported currently when global autocasting
+        # isn't enabled
+        self.assertRaises(RuntimeError, lambda: scripted_thing1.forward(x, y))
+
+
+if __name__ == "__main__":
     run_tests()

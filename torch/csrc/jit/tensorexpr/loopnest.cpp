@@ -59,13 +59,16 @@ LoopNest::LoopNest(const std::vector<Tensor>& output_tensors) {
   verify(root_stmt_);
 }
 
-std::unordered_set<BufPtr> LoopNest::getIntermediateBufs() const {
-  std::unordered_set<BufPtr> result;
+std::vector<BufPtr> LoopNest::getIntermediateBufs() const {
+  std::vector<BufPtr> result;
+  std::unordered_set<BufPtr> result_set;
   auto input_bufs = getInputBufs();
   auto bufs = NodeFinder<Buf>::find(root_stmt_);
   for (auto buf : bufs) {
-    if (!output_bufs_.count(buf) && !input_bufs.count(buf)) {
-      result.insert(buf);
+    if (!output_bufs_.count(buf) && !input_bufs.count(buf) &&
+        !result_set.count(buf)) {
+      result.push_back(buf);
+      result_set.insert(buf);
     }
   }
   return result;
