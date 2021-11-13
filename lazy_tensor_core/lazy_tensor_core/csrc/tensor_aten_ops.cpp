@@ -2,7 +2,7 @@
 
 #include <algorithm>
 #include <functional>
-
+#include <ATen/InferSize.h>
 #include "c10/util/Optional.h"
 #include "lazy_tensor_core/csrc/aten_ltc_bridge.h"
 #include "lazy_tensor_core/csrc/data_ops.h"
@@ -511,11 +511,9 @@ void unsqueeze_(LazyTensor& input, int64_t dim) {
 }
 
 LazyTensor view(const LazyTensor& input, c10::ArrayRef<int64_t> output_size) {
-  auto input_shape = input.shape();
-  std::vector<int64_t> complete_dimensions =
-      GetCompleteShape(output_size, input_shape.get().sizes());
+  auto input_shape = input.shape().get();
   torch::lazy::Shape shape = lazy_tensors::ShapeUtil::MakeShape(
-      input_shape.get().scalar_type(), complete_dimensions);
+      input_shape.scalar_type(), at::infer_size(output_size, input_shape.numel()));
   ViewInfo view_info(ViewInfo::Type::kReshape, std::move(shape), input_shape);
   return input.CreateViewTensor(std::move(view_info));
 }
