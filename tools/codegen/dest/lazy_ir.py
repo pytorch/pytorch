@@ -181,7 +181,7 @@ class GenLazyNativeFuncDefinition:
 
         assert len(value_types) > 0, f"Only supporting tensor ops so far, none found in {sig}"
         first_tensor = value_types[0]
-        bridge_str = f"""auto result = AtenFromLtcTensor(lazy_{first_tensor.name}.CreateFrom(node));"""
+        bridge_str = f"""auto result = CreateAtenFromLtcTensor(lazy_{first_tensor.name}.CreateFrom(node));"""
         if returns_length > 1:
             bridge_str = f"""std::vector<LazyTensor> lazy_tensors;
         for (int i = 0; i < {returns_length}; i++) {{
