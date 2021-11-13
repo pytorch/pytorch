@@ -57,7 +57,7 @@ TEST(MemPlanning, MemReuse1onEval) {
   checkIR(cg.stmt(), R"IR(
 # CHECK: Allocate(gemm); // dtype=float, dims=[1024, 1024]
 # CHECK: Allocate(relu); // dtype=float, dims=[1024, 1024]
-# CHECK: Map(add,gemm);
+# CHECK: Alias(add,gemm);
 # CHECK: Free(relu);
 # CHECK: Free(gemm))IR");
 }
@@ -104,7 +104,7 @@ TEST(MemPlanning, MemReuse2onEval) {
   checkIR(cg.stmt(), R"IR(
 # CHECK: Allocate(gemm); // dtype=float, dims=[1024, 1024]
 # CHECK: Allocate(relu); // dtype=float, dims=[1024, 1024]
-# CHECK-NOT: Map(add,gemm);
+# CHECK-NOT: Alias(add,gemm);
 # CHECK: Allocate(add); // dtype=float, dims=[2048, 2048]
 # CHECK: Free(add);
 # CHECK: Free(relu);
@@ -157,7 +157,7 @@ TEST(MemPlanning, MemReuse1onLLVM) {
   checkIR(cg.stmt(), R"IR(
 # CHECK: Allocate(gemm); // dtype=float, dims=[1024, 1024]
 # CHECK: Allocate(relu); // dtype=float, dims=[1024, 1024]
-# CHECK: Map(add,gemm);
+# CHECK: Alias(add,gemm);
 # CHECK: Free(relu);
 # CHECK: Free(gemm))IR");
 }
@@ -207,7 +207,7 @@ TEST(MemPlanning, MemReuse2onLLVM) {
   checkIR(cg.stmt(), R"IR(
 # CHECK: Allocate(gemm); // dtype=float, dims=[1024, 1024]
 # CHECK: Allocate(relu); // dtype=float, dims=[1024, 1024]
-# CHECK-NOT: Map(add,gemm);
+# CHECK-NOT: Alias(add,gemm);
 # CHECK: Allocate(add); // dtype=float, dims=[2048, 2048]
 # CHECK: Free(add);
 # CHECK: Free(relu);

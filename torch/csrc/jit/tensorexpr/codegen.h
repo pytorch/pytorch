@@ -103,7 +103,7 @@ class TORCH_API CodeGen {
   }
 
   void allocIntermediateBufs(const bool pre_alloc);
-  void insertMemNodes(
+  void insertAllocFree(
       std::vector<std::pair<BufPtr, BufPtr>>& b2m,
       const bool pre_alloc);
 

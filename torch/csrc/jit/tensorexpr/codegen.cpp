@@ -96,7 +96,7 @@ c10::optional<size_t> bufSize(BufPtr buf) {
 }
 
 using BufRangeInfo =
-    std::unordered_map<BufPtr, std::pair<BufAccessInfo, BufAccessInfo>>;
+    std::unordered_map<BufPtr, std::pair<BufAccessNode, BufAccessNode>>;
 
 std::vector<std::pair<BufPtr, BufPtr>> linearScan(
     std::unordered_set<BufPtr>& bufs,
@@ -107,20 +107,16 @@ std::vector<std::pair<BufPtr, BufPtr>> linearScan(
                                             BufPtr b1, BufPtr b2) -> bool {
     auto start1 = buf_ranges.at(b1).first;
     auto start2 = buf_ranges.at(b2).first;
-    return std::get<2>(start1) < std::get<2>(start2);
+    return std::get<2>(start1).getStmtIndex().at(0) < std::get<2>(start2).getStmtIndex().at(0);
   };
   std::sort(
       bufs_sorted.begin(), bufs_sorted.end(), sorting_function_by_start_time);
-  for (auto buf : bufs_sorted) {
-    auto start = buf_ranges.at(buf).first;
-    auto end = buf_ranges.at(buf).second;
-  }
 
   auto sorting_function_by_end_time = [&buf_ranges](
                                           BufPtr b1, BufPtr b2) -> bool {
     auto end1 = buf_ranges.at(b1).second;
     auto end2 = buf_ranges.at(b2).second;
-    return std::get<2>(end1) < std::get<2>(end2);
+    return std::get<2>(end1).getStmtIndex().at(0) < std::get<2>(end2).getStmtIndex().at(0);
   };
 
   // Map intermediate buffers to the most recent used memory if any.
@@ -141,7 +137,7 @@ std::vector<std::pair<BufPtr, BufPtr>> linearScan(
     for (auto& mapped : b2m) {
       auto buf_mapped = mapped.first;
       auto end_buf_mapped = buf_ranges.at(buf_mapped).second;
-      if (std::get<2>(end_buf_mapped) < std::get<2>(start)) {
+      if (std::get<2>(end_buf_mapped).getStmtIndex().at(0) < std::get<2>(start).getStmtIndex().at(0)) {
         buf_to_release.push_back(buf_mapped);
       }
     }
@@ -189,7 +185,7 @@ std::vector<std::pair<BufPtr, BufPtr>> linearScan(
   return b2m_ret;
 }
 
-void CodeGen::insertMemNodes(
+void CodeGen::insertAllocFree(
     std::vector<std::pair<BufPtr, BufPtr>>& b2m,
     const bool pre_alloc) {
   BlockPtr b = to<Block>(stmt_);
@@ -256,7 +252,7 @@ void CodeGen::allocIntermediateBufs(const bool pre_alloc) {
 
   // Insert memory allocation/mapping nodes.
   if (b2m.size() > 0) {
-    insertMemNodes(b2m, pre_alloc);
+    insertAllocFree(b2m, pre_alloc);
   }
 
   GRAPH_DEBUG("\nMemory Allocation:\n\n", *stmt(), "\n");

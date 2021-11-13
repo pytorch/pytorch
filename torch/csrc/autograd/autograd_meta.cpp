@@ -149,7 +149,7 @@ void AutogradMeta::set_fw_grad(const at::TensorBase& new_grad_base, const at::Te
         if (!base._fw_grad(level).defined()) {
           // Enforce same meta here to make sure that the view op below is always valid
           Tensor new_base_fw_grad;
-          if (has_same_meta(new_grad, base)) {
+          if (has_same_meta(new_grad, base) && has_same_meta(new_grad, self)) {
             // TODO extend this special case to when the underlying storage of new_grad
             // can be re-used.
             new_base_fw_grad = new_grad;

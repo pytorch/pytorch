@@ -556,7 +556,7 @@ class TORCH_API LoopNest {
   const std::unordered_set<BufPtr> getOutputBufs() const {
     return output_bufs_;
   }
-  std::unordered_set<BufPtr> getIntermediateBufs() const;
+  std::vector<BufPtr> getIntermediateBufs() const;
 
  private:
   void initialize(
