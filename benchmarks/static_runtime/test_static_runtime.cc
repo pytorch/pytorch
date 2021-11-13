@@ -2,7 +2,6 @@
 #include <gtest/gtest.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/irparser.h>
-#include <torch/csrc/jit/runtime/static/ProcessedNodeInputs.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
 
 #include "deep_wide_pt.h"
@@ -969,20 +968,6 @@ TEST(StaticRuntime, to) {
         return (c)
   )JIT";
 
-  const auto to_script_fails_managed_output_check = R"JIT(
-    def forward(self, a, b):
-        d = a.half() * b.half()
-        e = d.float()
-        return e
-  )JIT";
-
-  const auto to_script_memory_planning_fail = R"JIT(
-    def forward(self, a, b):
-        d = a.half() * b.half()
-        e = d.float().relu()
-        return e
-  )JIT";
-
   auto test_to = [&](at::ScalarType b, bool c, bool d, c10::MemoryFormat e) {
     auto a = at::randn({4, 3, 1, 2});
     auto other = at::randn({4, 3, 1, 2}, b);
@@ -992,36 +977,16 @@ TEST(StaticRuntime, to) {
     std::vector<IValue> args0{a, b, c, d, e};
     std::vector<IValue> args1{a, b, c, d};
     std::vector<IValue> args2{a, other, c, d, e};
-    std::vector<IValue> args2WithDifferentOtherType{
-        a, at::randn({4, 3, 1, 2}, ScalarType::Double), c, d, e};
     std::vector<IValue> args3{a, c10::nullopt, c, d};
 
-    std::vector<IValue> args0WithInt{a, ScalarType::Int, c, d, e};
-    testStaticRuntime(
-        to_script_dtype,
-        args0,
-        args0WithInt,
-        /* default for use_allclose */ false,
-        /* default for use_equalnan */ false,
-        /* check_resize */ false);
+    testStaticRuntime(to_script_dtype, args0);
     testStaticRuntime(to_script_dtype_strided, args0);
     testStaticRuntime(to_script_prim_dtype, args1);
     if (!d) {
       testStaticRuntime(to_script_prim_dtype, args3);
     }
-    // Second set of args tests case where the `other` tensor's dtype
-    // changes between iterations.
-    testStaticRuntime(
-        to_script_other,
-        args2,
-        args2WithDifferentOtherType,
-        /* default for use_allclose */ false,
-        /* default for use_equalnan */ false,
-        /* check_resize */ false);
+    testStaticRuntime(to_script_other, args2);
     testStaticRuntime(to_script_alias, {a});
-
-    testStaticRuntime(to_script_memory_planning_fail, {a, a});
-    testStaticRuntime(to_script_fails_managed_output_check, {a, a});
 
     // dynamic shapes
     testStaticRuntime(to_script_dtype, args0, {a2, b, c, d, e});
@@ -1203,59 +1168,6 @@ TEST(StaticRuntime, LeakyReLU) {
   at::Tensor output_2 = smod(input_tensors, {}).toTensor();
   smod.runtime().check_for_memory_leak();
   EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
-}
-
-static ProcessedNodeInputs createProcessedNodeInputs(
-    c10::ArrayRef<uint16_t> inputs) {
-  ProcessedNodeInputs result(inputs.size());
-  for (const auto idx : c10::irange(inputs.size())) {
-    result[idx] = inputs[idx];
-  }
-  return result;
-}
-
-static void checkProcessedNodeInputs(
-    const ProcessedNodeInputs& io,
-    c10::ArrayRef<uint16_t> inputs) {
-  ASSERT_EQ(inputs.size(), io.size());
-  for (const auto idx : c10::irange(inputs.size())) {
-    EXPECT_EQ(inputs[idx], io[idx]);
-  }
-}
-
-static void testProcessedNodeInputsRoundTrip(c10::ArrayRef<uint16_t> inputs) {
-  auto io = createProcessedNodeInputs(inputs);
-  checkProcessedNodeInputs(io, inputs);
-
-  ProcessedNodeInputs copied(io);
-  checkProcessedNodeInputs(copied, inputs);
-  ProcessedNodeInputs moved(std::move(io));
-  checkProcessedNodeInputs(moved, inputs);
-}
-
-TEST(ProcessedNodeInputs, Basic) {
-  std::vector<std::vector<uint16_t>> testCases = {
-      {}, // empty
-      {0xABCD, 0x5a5a}, // inline
-      {0x11, 0x22, 0x33, 0x44, 0x55}, // max inline size
-      {0x11, 0x22, 0x33, 0x44, 0x55, 0x66}, // minimum outline size
-      std::vector<uint16_t>(100, 0x5a), // large outline size
-  };
-
-  for (const auto& values : testCases) {
-    testProcessedNodeInputsRoundTrip(values);
-    for (const auto& values2 : testCases) {
-      auto from = createProcessedNodeInputs(values);
-      auto to = createProcessedNodeInputs(values2);
-
-      to = from;
-      checkProcessedNodeInputs(to, values);
-
-      auto toMoveInto = createProcessedNodeInputs(values2);
-      toMoveInto = std::move(from);
-      checkProcessedNodeInputs(toMoveInto, values);
-    }
-  }
 }
 
 TEST(StaticRuntime, isinstance) {
