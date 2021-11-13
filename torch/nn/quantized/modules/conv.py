@@ -203,12 +203,12 @@ class _ConvNd(nn.Module):
                     mod.stride, mod.padding, mod.dilation, mod.groups,
                     mod.bias is not None, mod.padding_mode)
         qconv.set_weight_bias(qweight, mod.bias)
-        try:
+        if activation_post_process is None or activation_post_process.dtype == torch.float:
+            return qconv  # dynamic quantization doesn't need scale/zero_point
+        else:
             act_scale, act_zp = activation_post_process.calculate_qparams()
             qconv.scale = float(act_scale)
             qconv.zero_point = int(act_zp)
-            return qconv
-        except Exception:
             return qconv
 
     @staticmethod
@@ -587,12 +587,12 @@ class _ConvTransposeNd(_ConvNd):
                     mod.stride, mod.padding, mod.output_padding, mod.groups,
                     mod.bias is not None, mod.dilation, mod.padding_mode)
         qconv.set_weight_bias(qweight, mod.bias)
-        try:
+        if not hasattr(mod, "activation_post_process") or mod.activation_post_process.dtype == torch.float:
+            return qconv  # dynamic quantization doesn't need scale/zero_point
+        else:
             act_scale, act_zp = mod.activation_post_process.calculate_qparams()
             qconv.scale = float(act_scale)
             qconv.zero_point = int(act_zp)
-            return qconv
-        except Exception:
             return qconv
 
 
