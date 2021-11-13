@@ -644,8 +644,8 @@ bool SocketConnectOp::tryConnect(const ::addrinfo& addr) {
   timed_out_ = true;
 
   recordError("The client socket has timed out after {} while trying to connect to {}.",
-              addr,
-              opts_->connect_timeout());
+              opts_->connect_timeout(),
+              addr);
 
   return false;
 }
