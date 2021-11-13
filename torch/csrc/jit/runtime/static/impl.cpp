@@ -1237,6 +1237,10 @@ void StaticRuntime::benchmark(
               << planner_->total_num_managed_output_tensors() << std::endl;
     std::cout << "Total number of unmanaged values: "
               << planner_->total_num_unmanaged() << std::endl;
+    std::cout << "Number of unmanaged values requiring cleanup: "
+              << planner_->num_unmanaged_non_scalars() << std::endl;
+    std::cout << "Number of unmanaged values not requiring cleanup: "
+              << planner_->num_unmanaged_scalars() << std::endl;
     std::cout << "Total memory managed: " << planner_->total_managed()
               << " bytes" << std::endl;
     if (static_module_.opts().optimize_memory) {
@@ -1531,7 +1535,8 @@ void StaticRuntime::check_for_memory_leak(bool output_returned) {
         if (!ival->isNone()) {
           TORCH_CHECK(
               ival->isTensor() ||
-                  static_module_.is_optimizable_container_type(pnode.node()),
+                  static_module_.is_optimizable_container_type(pnode.node()) ||
+                  doesNotHeapAllocateWhenStoredInIValue(*val->type()),
               error_msg);
           if (ival->isTensor()) {
             const auto& t = ival->toTensor();

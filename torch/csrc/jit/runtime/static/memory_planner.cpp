@@ -124,8 +124,13 @@ MemoryPlanner::MemoryPlanner(
           setIncludes(leaked_values, out_v)) {
         continue;
       }
-      IValue& out = pnode.Output(i);
-      unmanaged_ivalues.insert(&out);
+      if (doesNotHeapAllocateWhenStoredInIValue(*out_v->type())) {
+        // Scalars do not need to be freed after each iteration.
+        num_unmanaged_scalar_ivalues_++;
+      } else {
+        IValue& out = pnode.Output(i);
+        unmanaged_ivalues.insert(&out);
+      }
     }
   }
   // since runtime->outputs() escape from run(), remove them from
