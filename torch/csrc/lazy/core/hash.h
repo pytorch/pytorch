@@ -81,6 +81,9 @@ static inline hash_t Hash(const std::string& value) {
   return DataHash(value.data(), value.size());
 }
 
+static inline hash_t Hash(const c10::string_view& value) {
+  return DataHash(value.data(), value.size());
+}
 // Taken from glibc's implementation of hashing optionals,
 // we want to include a contribution to the hash to distinguish
 // cases where one or another option was null, but we hope it doesn't
