@@ -9,4 +9,6 @@ from .._src.eager_compilation import (
     draw_joint_graph,
     default_partition,
     partition_with_recompute_fwd_in_bwd,
+    num_of_recompilations,
+    clear_compile_cache,
 )
