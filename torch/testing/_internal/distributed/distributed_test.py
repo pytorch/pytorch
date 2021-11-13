@@ -5703,6 +5703,7 @@ class DistributedTest:
             IS_MACOS or IS_WINDOWS,
             "torch.profiler not enabled for mac/windows: https://github.com/pytorch/pytorch/pull/56124",
         )
+        @skip_if_rocm
         def test_ddp_profiling_torch_profiler(self):
             cpu_act = torch.profiler.ProfilerActivity.CPU
             cuda_act = torch.profiler.ProfilerActivity.CUDA
@@ -7692,6 +7693,7 @@ class DistributedTest:
             "Only Nccl & Gloo backend support DistributedDataParallel",
         )
         @skip_if_lt_x_gpu(2)
+        @skip_if_rocm
         def test_ddp_sync_bn_training_vs_eval(self):
             rank = self.rank
             torch.cuda.set_device(rank)
