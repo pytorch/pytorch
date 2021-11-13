@@ -5,6 +5,11 @@
 namespace torch {
 namespace jit {
 
+// For each node, find the set of values that may alias it.
+using AliasMap = FastMap<Value*, FastSet<Value*>>;
+TORCH_API AliasMap
+getAliases(const std::shared_ptr<Graph>& graph, const AliasDb& alias_db);
+
 // A StorageGroup represents a collection of tensors that share backing storage.
 class StorageGroup {
  public:

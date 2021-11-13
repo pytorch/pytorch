@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/runtime/static/fusion.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
+#include <torch/csrc/jit/runtime/static/memory_planner.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
 
@@ -947,4 +948,65 @@ TEST(StaticRuntime, GoodSchemaAliasInfo) {
   const auto x2 = at::randn({3, 6});
   testStaticRuntime(src, {x1, 0}, {x2, 10});
   testStaticRuntime(src, {x1, 10}, {x2, 0});
+}
+
+namespace {
+
+void testAliasSet(
+    const AliasMap& aliases,
+    Value* test_value,
+    FastSet<Value*> expected_set) {
+  auto aliases_it = aliases.find(test_value);
+  if (expected_set.empty()) {
+    EXPECT_EQ(aliases_it, aliases.end());
+    return;
+  }
+
+  ASSERT_NE(aliases_it, aliases.end());
+  auto& actual_set = aliases_it->second;
+  EXPECT_EQ(expected_set, actual_set);
+}
+
+} // namespace
+
+TEST(AliasSet, SimpleCase) {
+  const std::string src = R"IR(
+    graph(%x: Tensor):
+        %y : Tensor = aten::mul(%x, %x)
+        %y_size : int[] = aten::size(%y)
+        %z : Tensor = aten::view(%y, %y_size)
+        %output : Tensor = aten::mul(%z, %z)
+        return (%output)
+  )IR";
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(src, graph.get(), vmap);
+
+  AliasDb alias_db(graph);
+  auto alias_set = getAliases(graph, alias_db);
+
+  testAliasSet(alias_set, vmap["x"], {});
+  testAliasSet(alias_set, vmap["y"], {vmap["z"]});
+  testAliasSet(alias_set, vmap["z"], {vmap["y"]});
+}
+
+TEST(AliasSet, AliasOfAlias) {
+  const std::string src = R"IR(
+    graph(%x : Tensor):
+        %x_size : int[] = aten::size(%x)
+        %y : Tensor = aten::view(%x, %x_size)
+        %z : Tensor = aten::view(%y, %x_size)
+        %output : Tensor = aten::mul(%y, %z)
+        return (%output)
+  )IR";
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(src, graph.get(), vmap);
+
+  AliasDb alias_db(graph);
+  auto alias_set = getAliases(graph, alias_db);
+
+  testAliasSet(alias_set, vmap["x"], {vmap["y"], vmap["z"]});
+  testAliasSet(alias_set, vmap["y"], {vmap["x"], vmap["z"]});
+  testAliasSet(alias_set, vmap["z"], {vmap["x"], vmap["y"]});
 }

@@ -1,10 +1,46 @@
 #include <torch/csrc/jit/runtime/static/memory_planner.h>
 
+#include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
 
 namespace torch {
 namespace jit {
+
+// For each value `v`, find the set of values that that `v` may alias.
+AliasMap getAliases(
+    const std::shared_ptr<Graph>& graph,
+    const AliasDb& alias_db) {
+  AliasMap aliases;
+  std::vector<Value*> all_values;
+
+  for (auto* node : graph->block()->nodes()) {
+    for (auto* output : node->outputs()) {
+      all_values.push_back(output);
+    }
+  }
+
+  for (auto* node : graph->inputs()) {
+    all_values.push_back(node);
+  }
+
+  for (auto* node : graph->outputs()) {
+    all_values.push_back(node);
+  }
+
+  for (const auto i : c10::irange(all_values.size() - 1)) {
+    for (const auto j : c10::irange(i + 1, all_values.size())) {
+      auto* v1 = all_values[i];
+      auto* v2 = all_values[j];
+
+      if (alias_db.mayAlias(v1, v2)) {
+        aliases[v1].insert(v2);
+        aliases[v2].insert(v1);
+      }
+    }
+  }
+  return aliases;
+}
 
 static void assign_storage_to_managed_tensors(
     StaticRuntime* runtime,
