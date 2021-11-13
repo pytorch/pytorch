@@ -394,10 +394,10 @@ class TORCH_API Allocate : public StmtNode<Allocate> {
 class TORCH_API PlacementAllocate : public StmtNode<PlacementAllocate> {
  public:
   static PlacementAllocatePtr make(
-      const BufHandle& src_buf_handle,
-      const BufHandle& dest_buf_handle) {
+      const BufHandle& buf_handle,
+      const BufHandle& buf_handle_to_reuse) {
     return alloc<PlacementAllocate>(
-        src_buf_handle.node(), dest_buf_handle.node());
+        buf_handle.node(), buf_handle_to_reuse.node());
   }
 
   BufPtr buf() const {

@@ -83,7 +83,7 @@ void CodeGen::call_with_numel(void** args, int64_t numel) {
       false, "This codegen backend does not implement call_with_numel");
 }
 
-StmtPtr insertMemNodes(std::unordered_set<BufPtr>& interm_bufs, StmtPtr stmt) {
+StmtPtr insertAllocFree(std::unordered_set<BufPtr>& interm_bufs, StmtPtr stmt) {
   BlockPtr b = to<Block>(stmt);
   if (!b) {
     b = alloc<Block>(std::vector<StmtPtr>({stmt}));
@@ -119,7 +119,7 @@ void CodeGen::allocIntermediateBufs() {
 
   // Insert allocation/free nodes.
   if (interm_bufs.size() > 0) {
-    auto stmt_new = insertMemNodes(interm_bufs, stmt_);
+    auto stmt_new = insertAllocFree(interm_bufs, stmt_);
     set_stmt(stmt_new);
   }
 

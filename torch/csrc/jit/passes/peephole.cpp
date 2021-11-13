@@ -34,7 +34,7 @@ struct PeepholeOptimizeImpl {
     bool changed = optimizeBlock(graph_->block());
     changed |= PeepholeOptimizeListIdioms(graph_);
     changed |= PeepholeOptimizeDictIdioms(graph_);
-    changed |= PeepholeOptimizeAliasSensitive(graph_);
+    changed |= PeepholeOptimizeAliasSensitive(graph_, shape_peepholes_);
     changed |= PeepholeOptimizeNonTensor(graph_);
     return changed;
   }
