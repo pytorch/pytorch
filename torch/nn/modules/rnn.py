@@ -413,16 +413,16 @@ class RNN(RNNBase):
         super(RNN, self).__init__(mode, *args, **kwargs)
 
     @overload
-    @torch._jit_internal._overload_method # noqa: F811
+    @torch._jit_internal._overload_method  # noqa: F811
     def forward(self, input: Tensor, hx: Optional[Tensor] = None) -> Tuple[Tensor, Tensor]:
         pass
 
     @overload
-    @torch._jit_internal._overload_method # noqa: F811
+    @torch._jit_internal._overload_method  # noqa: F811
     def forward(self, input: PackedSequence, hx: Optional[Tensor] = None) -> Tuple[PackedSequence, Tensor]:
         pass
 
-    def forward(self, input, hx=None): # noqa: F811
+    def forward(self, input, hx=None):  # noqa: F811
         orig_input = input
         if isinstance(orig_input, PackedSequence):
             input, batch_sizes, sorted_indices, unsorted_indices = input
@@ -449,23 +449,28 @@ class RNN(RNNBase):
         if batch_sizes is None:
             if self.mode == 'RNN_TANH':
                 result = _VF.rnn_tanh(input, hx, self._flat_weights, self.bias, self.num_layers,
-                           self.dropout, self.training, self.bidirectional, self.batch_first)
+                                      self.dropout, self.training, self.bidirectional,
+                                      self.batch_first)
             else:
                 result = _VF.rnn_relu(input, hx, self._flat_weights, self.bias, self.num_layers,
-                           self.dropout, self.training, self.bidirectional, self.batch_first)
+                                      self.dropout, self.training, self.bidirectional,
+                                      self.batch_first)
         else:
             if self.mode == 'RNN_TANH':
                 result = _VF.rnn_tanh(input, batch_sizes, hx, self._flat_weights, self.bias,
-                           self.num_layers, self.dropout, self.training, self.bidirectional)
+                                      self.num_layers, self.dropout, self.training,
+                                      self.bidirectional)
             else:
                 result = _VF.rnn_relu(input, batch_sizes, hx, self._flat_weights, self.bias,
-                           self.num_layers, self.dropout, self.training, self.bidirectional)
+                                      self.num_layers, self.dropout, self.training,
+                                      self.bidirectional)
 
         output = result[0]
         hidden = result[1]
 
         if isinstance(orig_input, PackedSequence):
-            output = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices)
+            ouput_packed = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices)
+            return output_packed, self.permute_hidden(hidden, unsorted_indices)
         return output, self.permute_hidden(hidden, unsorted_indices)
 
 # XXX: LSTM and GRU implementation is different from RNNBase, this is because:
