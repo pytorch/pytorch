@@ -96,15 +96,6 @@ torch::lazy::Shape InferRepeat(const ir::ops::Repeat* repeat) {
   return torch::lazy::Shape(input_shape.scalar_type(), target_size);
 }
 
-torch::lazy::Shape InferSqueeze(const ir::ops::Squeeze* squeeze) {
-  const torch::lazy::Output& argument = squeeze->operand(0);
-  const torch::lazy::Shape& argument_shape =
-      ir::GetShapeFromTsOutput(argument);
-  const auto output_sizes =
-      BuildSqueezedDimensions(argument_shape.sizes(), squeeze->dim());
-  return torch::lazy::Shape(argument_shape.scalar_type(), output_sizes);
-}
-
 torch::lazy::Shape InferStack(const ir::ops::Stack* stack) {
   const auto& inputs = stack->operands();
   CHECK(!inputs.empty());
@@ -162,10 +153,6 @@ torch::lazy::Shape InferShape(const torch::lazy::Node* node) {
     case at::aten::repeat: {
       return InferRepeat(torch::lazy::NodeCast<ir::ops::Repeat>(
           node, ir::OpKind(at::aten::repeat)));
-    }
-    case at::aten::squeeze: {
-      return InferSqueeze(torch::lazy::NodeCast<ir::ops::Squeeze>(
-          node, ir::OpKind(at::aten::squeeze)));
     }
     case at::aten::stack: {
       return InferStack(torch::lazy::NodeCast<ir::ops::Stack>(

@@ -409,7 +409,7 @@ LazyTensor slice(const LazyTensor& input, int64_t dim, int64_t start,
 
 LazyTensor squeeze(const LazyTensor& input) {
   auto input_shape = input.shape();
-  auto output_dimensions = BuildSqueezedDimensions(
+  auto output_dimensions = ir::ops::BuildSqueezedDimensions(
       input_shape.get().sizes(), /*squeeze_dim=*/-1);
   return view(input, output_dimensions);
 }
@@ -419,7 +419,7 @@ LazyTensor squeeze(const LazyTensor& input, int64_t dim) {
   int64_t squeeze_dim =
       Helpers::GetCanonicalDimensionIndex(dim, input.shape().get().dim());
   auto output_dimensions =
-      BuildSqueezedDimensions(input_shape.get().sizes(), squeeze_dim);
+      ir::ops::BuildSqueezedDimensions(input_shape.get().sizes(), squeeze_dim);
   return view(input, output_dimensions);
 }
 
