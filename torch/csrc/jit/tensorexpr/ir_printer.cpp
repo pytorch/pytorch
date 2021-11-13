@@ -247,6 +247,20 @@ void IRPrinter::visit(VarPtr v) {
   os() << name_manager_.get_unique_name(v);
 }
 
+void IRPrinter::visit(BufPtr v) {
+  auto dtype = v->dtype();
+  os() << "Buf(dtype=" << dtypeToCppString(dtype);
+  if (v->qscale()) {
+    os() << ", qscale=";
+    v->qscale()->accept(this);
+  }
+  if (v->qscale()) {
+    os() << ", qzero=";
+    v->qzero()->accept(this);
+  }
+  os() << ")";
+}
+
 void IRPrinter::visit(RampPtr v) {
   os() << "Ramp(" << *v->base() << ", " << *v->stride() << ", " << v->lanes()
        << ")";

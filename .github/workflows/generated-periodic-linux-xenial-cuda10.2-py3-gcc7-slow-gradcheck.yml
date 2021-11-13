@@ -36,6 +36,7 @@ jobs:
 
   ciflow_should_run:
     runs-on: ubuntu-18.04
+    timeout-minutes: 240
     env:
       IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == 'unassigned') && (github.event.assigneed.login == 'pytorchbot') }}
       LABEL_CONDITIONS: ${{ contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cuda') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux') || contains(github.event.pull_request.labels.*.name, 'ciflow/scheduled') || contains(github.event.pull_request.labels.*.name, 'ciflow/slow') || contains(github.event.pull_request.labels.*.name, 'ciflow/slow-gradcheck') }}
@@ -55,6 +56,7 @@ jobs:
   build:
     runs-on: linux.2xlarge
     needs: [ciflow_should_run]
+    timeout-minutes: 240
     env:
       JOB_BASE_NAME: periodic-linux-xenial-cuda10.2-py3-gcc7-slow-gradcheck-build
     outputs:
@@ -78,12 +80,10 @@ jobs:
           AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
-          aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
-          bash /tmp/ecr-login.sh
-          rm /tmp/ecr-login.sh
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
-        env:
-          ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
         run: |
           retry () {
               "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
@@ -231,8 +231,6 @@ jobs:
         run: .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
-        env:
-          ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
@@ -257,8 +255,9 @@ jobs:
   generate-test-matrix:
     runs-on: ubuntu-18.04
     needs: [ciflow_should_run]
+    timeout-minutes: 240
     env:
-      TEST_RUNNER_TYPE: linux.8xlarge.nvidia.gpu
+      TEST_RUNNER_TYPE: linux.4xlarge.nvidia.gpu
       ENABLE_DISTRIBUTED_TEST: ''
       ENABLE_JIT_LEGACY_TEST: ''
       ENABLE_MULTIGPU_TEST: ''
@@ -271,6 +270,7 @@ jobs:
       ENABLE_NOARCH_TEST: ''
       NUM_TEST_SHARDS: 2
       MULTIGPU_RUNNER_TYPE: linux.16xlarge.nvidia.gpu
+      DISTRIBUTED_GPU_RUNNER_TYPE: linux.8xlarge.nvidia.gpu
       NOGPU_RUNNER_TYPE: linux.2xlarge
       PR_BODY: ${{ github.event.pull_request.body }}
     outputs:
@@ -294,6 +294,7 @@ jobs:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
       fail-fast: false
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 240
     env:
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: periodic-linux-xenial-cuda10.2-py3-gcc7-slow-gradcheck-test
@@ -320,12 +321,10 @@ jobs:
           AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
-          aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
-          bash /tmp/ecr-login.sh
-          rm /tmp/ecr-login.sh
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
-        env:
-          ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
         run: |
           retry () {
               "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
@@ -393,6 +392,8 @@ jobs:
         # Time out the test phase after 360 minutes
         timeout-minutes: 360
         run: |
+          set -x
+
           if [[ $TEST_CONFIG == 'multigpu' ]]; then
             TEST_COMMAND=.jenkins/pytorch/multigpu-test.sh
           elif [[ $BUILD_ENVIRONMENT == *onnx* ]]; then
@@ -490,7 +491,7 @@ jobs:
         shell: bash
         run: |
           python3 -m pip install -r requirements.txt
-          python3 -m pip install boto3==1.16.34
+          python3 -m pip install boto3==1.19.12
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
@@ -498,8 +499,6 @@ jobs:
         run: .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
-        env:
-          ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .

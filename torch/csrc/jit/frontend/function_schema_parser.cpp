@@ -27,7 +27,7 @@ namespace jit {
 namespace {
 struct SchemaParser {
   SchemaParser(const std::string& str)
-      : L(std::make_shared<Source>(str)),
+      : L(std::make_shared<SourceView>(c10::string_view(str))),
         type_parser(L, /*parse_complete_tensor_types*/ false) {}
 
   either<OperatorName, FunctionSchema> parseDeclaration() {

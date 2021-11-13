@@ -5,7 +5,9 @@ import torch
 import torch.nn as nn
 from torch.ao.quantization.fake_quantize import (
     FakeQuantize,
+    FakeQuantizeBase,
     default_fake_quant,
+    default_dynamic_fake_quant,
     default_per_channel_weight_fake_quant,
     default_weight_fake_quant,
     default_fused_act_fake_quant,
@@ -13,6 +15,7 @@ from torch.ao.quantization.fake_quantize import (
     FusedMovingAvgObsFakeQuantize,
     default_fused_per_channel_wt_fake_quant,
     default_embedding_fake_quant,
+    default_embedding_fake_quant_4bit,
 )
 
 from .observer import (
@@ -142,6 +145,12 @@ default_qat_qconfig = QConfig(activation=default_fake_quant,
 Default qconfig for QAT.
 """
 
+default_dynamic_qat_qconfig = QConfig(activation=default_dynamic_fake_quant,
+                                      weight=default_weight_fake_quant)
+"""
+Default qconfig for dynamic QAT.
+"""
+
 default_weight_only_qconfig = QConfig(activation=torch.nn.Identity,
                                       weight=default_weight_fake_quant)
 """
@@ -185,6 +194,9 @@ def get_default_qconfig(backend='fbgemm'):
 
 default_embedding_qat_qconfig = QConfig(activation=NoopObserver,
                                         weight=default_embedding_fake_quant)
+
+default_embedding_qat_qconfig_4bit = QConfig(activation=NoopObserver,
+                                             weight=default_embedding_fake_quant_4bit)
 
 def get_default_qat_qconfig(backend='fbgemm', version=1):
     """
@@ -319,3 +331,15 @@ def qconfig_equals(q1: QConfigAny, q2: QConfigAny):
             return partial_equals(q1.activation.p, q2.activation.p) and partial_equals(q1.weight.p, q2.weight.p)
         except AttributeError:
             return q1 == q2
+
+def activation_is_memoryless(qconfig: QConfig):
+    """
+    Return whether the observer for activations defined in the given QConfig is memoryless.
+    """
+    def _is_memoryless(observer):
+        return hasattr(observer, "memoryless") and observer.memoryless
+    act = qconfig.activation()
+    if isinstance(act, FakeQuantizeBase) and hasattr(act, "activation_post_process"):
+        return _is_memoryless(act.activation_post_process)
+    else:
+        return _is_memoryless(act)

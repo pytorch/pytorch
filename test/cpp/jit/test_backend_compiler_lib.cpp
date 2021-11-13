@@ -95,8 +95,8 @@ class BackendWithCompiler : public PyTorchBackendInterface {
     auto start_us = autograd::profiler::getTime() / 1000;
     for (const auto& token : handle.toList()) {
       IValue val = token;
-      auto instruction = val.toTuple()->elements()[0].toStringRef();
-      auto debug_handle = val.toTuple()->elements()[1].toInt();
+      auto instruction = val.toTupleRef().elements()[0].toStringRef();
+      auto debug_handle = val.toTupleRef().elements()[1].toInt();
       double const_val = 1.0;
       auto start_time_us = autograd::profiler::getTime() / 1000;
       try {

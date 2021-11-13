@@ -607,10 +607,14 @@ def max_pool1d_with_indices(
     return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
     r"""
-    max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False) -> Tensor
+    max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False)
 
     Applies a 1D max pooling over an input signal composed of several input
     planes.
+
+    .. note::
+        The order of :attr:`ceil_mode` and :attr:`return_indices` is different from
+        what seen in :class:`~torch.nn.MaxPool1d`, and will change in a future release.
 
     See :class:`~torch.nn.MaxPool1d` for details.
 
@@ -627,6 +631,12 @@ def max_pool1d_with_indices(
         return_indices: If ``True``, will return the argmax along with the max values.
                         Useful for :class:`torch.nn.functional.max_unpool1d` later
     """
+    # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
+    # and https://github.com/pytorch/pytorch/issues/62545 for context
+    if ceil_mode != return_indices:
+        warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
+                      "to match the args list in nn.MaxPool1d in a future release.")
+
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool1d_with_indices,
@@ -652,6 +662,12 @@ def _max_pool1d(
     ceil_mode: bool = False,
     return_indices: bool = False
 ) -> Tensor:
+    # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
+    # and https://github.com/pytorch/pytorch/issues/62545 for context
+    if ceil_mode != return_indices:
+        warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
+                      "to match the args list in nn.MaxPool1d in a future release.")
+
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool1d,
@@ -689,10 +705,14 @@ def max_pool2d_with_indices(
     return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
     r"""
-    max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False) -> Tensor
+    max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False)
 
     Applies a 2D max pooling over an input signal composed of several input
     planes.
+
+    .. note::
+        The order of :attr:`ceil_mode` and :attr:`return_indices` is different from
+        what seen in :class:`~torch.nn.MaxPool2d`, and will change in a future release.
 
     See :class:`~torch.nn.MaxPool2d` for details.
 
@@ -709,6 +729,12 @@ def max_pool2d_with_indices(
         return_indices: If ``True``, will return the argmax along with the max values.
                         Useful for :class:`torch.nn.functional.max_unpool2d` later
     """
+    # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
+    # and https://github.com/pytorch/pytorch/issues/62545 for context
+    if ceil_mode != return_indices:
+        warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
+                      "to match the args list in nn.MaxPool2d in a future release.")
+
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool2d_with_indices,
@@ -734,6 +760,12 @@ def _max_pool2d(
     ceil_mode: bool = False,
     return_indices: bool = False
 ) -> Tensor:
+    # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
+    # and https://github.com/pytorch/pytorch/issues/62545 for context
+    if ceil_mode != return_indices:
+        warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
+                      "to match the args list in nn.MaxPool2d in a future release.")
+
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool2d,
@@ -771,10 +803,14 @@ def max_pool3d_with_indices(
     return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
     r"""
-    max_pool3d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False) -> Tensor
+    max_pool3d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False)
 
     Applies a 3D max pooling over an input signal composed of several input
     planes.
+
+    .. note::
+        The order of :attr:`ceil_mode` and :attr:`return_indices` is different from
+        what seen in :class:`~torch.nn.MaxPool3d`, and will change in a future release.
 
     See :class:`~torch.nn.MaxPool3d` for details.
 
@@ -791,6 +827,12 @@ def max_pool3d_with_indices(
         return_indices: If ``True``, will return the argmax along with the max values.
                         Useful for :class:`torch.nn.functional.max_unpool3d` later
     """
+    # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
+    # and https://github.com/pytorch/pytorch/issues/62545 for context
+    if ceil_mode != return_indices:
+        warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
+                      "to match the args list in nn.MaxPool3d in a future release.")
+
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool3d_with_indices,
@@ -816,6 +858,12 @@ def _max_pool3d(
     ceil_mode: bool = False,
     return_indices: bool = False
 ) -> Tensor:
+    # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
+    # and https://github.com/pytorch/pytorch/issues/62545 for context
+    if ceil_mode != return_indices:
+        warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
+                      "to match the args list in nn.MaxPool3d in a future release.")
+
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool3d,
@@ -1885,11 +1933,11 @@ def linear(input: Tensor, weight: Tensor, bias: Optional[Tensor] = None) -> Tens
 
     Shape:
 
-        - Input: :math:`(N, *, in\_features)` N is the batch size, `*` means any number of
-          additional dimensions
-        - Weight: :math:`(out\_features, in\_features)`
-        - Bias: :math:`(out\_features)`
-        - Output: :math:`(N, *, out\_features)`
+        - Input: :math:`(*, in\_features)` where `*` means any number of
+          additional dimensions, including none
+        - Weight: :math:`(out\_features, in\_features)` or :math:`(in\_features)`
+        - Bias: :math:`(out\_features)` or :math:`()`
+        - Output: :math:`(*, out\_features)` or :math:`(*)`, based on the shape of the weight
     """
     if has_torch_function_variadic(input, weight, bias):
         return handle_torch_function(linear, (input, weight, bias), input, weight, bias=bias)
@@ -3189,10 +3237,10 @@ def margin_ranking_loss(
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
         reduction_enum = _Reduction.get_enum(reduction)
-    if input1.dim() == 0 or input2.dim() == 0 or target.dim() == 0:
+    if (input1.dim() != input2.dim() or input1.dim() != target.dim()):
         raise RuntimeError(
             (
-                "margin_ranking_loss does not support scalars, got sizes: "
+                "margin_ranking_loss : All input tensors should have same dimension but got sizes: "
                 "input1: {}, input2: {}, target: {} ".format(input1.size(), input2.size(), target.size())
             )
         )
@@ -3310,7 +3358,9 @@ def multilabel_soft_margin_loss(
     if weight is not None:
         loss = loss * weight
 
-    loss = loss.sum(dim=1) / input.size(1)  # only return N loss values
+    class_dim = input.dim() - 1
+    C = input.size(class_dim)
+    loss = loss.sum(dim=class_dim) / C  # only return N loss values
 
     if reduction == "none":
         ret = loss
@@ -3627,7 +3677,7 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
             output `size`. The computed output `size` will be used to infer new scales for
             the interpolation. Note that when `scale_factor` is floating-point, it may differ
             from the recomputed `scale_factor` due to rounding and precision issues.
-            If `recomputed_scale_factor` is ``False``, then `size` or `scale_factor` will
+            If `recompute_scale_factor` is ``False``, then `size` or `scale_factor` will
             be used directly for interpolation.
 
     .. note::
@@ -3698,7 +3748,11 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
         if isinstance(size, (list, tuple)):
             if len(size) != dim:
                 raise ValueError(
-                    "size shape must match input shape. " "Input is {}D, size is {}".format(dim, len(size))
+                    "Input and output must have the same number of spatial dimensions, but got "
+                    f"input with with spatial dimensions of {list(input.shape[2:])} and output size of {size}. "
+                    "Please provide input tensor in (N, C, d1, d2, ...,dK) format and "
+                    "output size in (o1, o2, ...,oK) format."
+
                 )
             output_size = size
         else:
@@ -3709,8 +3763,11 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
         if isinstance(scale_factor, (list, tuple)):
             if len(scale_factor) != dim:
                 raise ValueError(
-                    "scale_factor shape must match input shape. "
-                    "Input is {}D, scale_factor is {}".format(dim, len(scale_factor))
+                    "Input and scale_factor must have the same number of spatial dimensions, but "
+                    f"got input with spatial dimensions of {list(input.shape[2:])} and "
+                    f"scale_factor of shape {scale_factor}. "
+                    "Please provide input tensor in (N, C, d1, d2, ...,dK) format and "
+                    "scale_factor in (s1, s2, ...,sK) format."
                 )
             scale_factors = scale_factor
         else:
@@ -5135,7 +5192,7 @@ def multi_head_attention_forward(
 
     # convert mask to float
     if attn_mask is not None and attn_mask.dtype == torch.bool:
-        new_attn_mask = torch.zeros_like(attn_mask, dtype=torch.float)
+        new_attn_mask = torch.zeros_like(attn_mask, dtype=q.dtype)
         new_attn_mask.masked_fill_(attn_mask, float("-inf"))
         attn_mask = new_attn_mask
 

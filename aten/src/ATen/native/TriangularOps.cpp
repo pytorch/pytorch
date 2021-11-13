@@ -2,28 +2,48 @@
 #include <ATen/CPUApplyUtils.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/native/Resize.h>
-
 #include <ATen/Parallel.h>
+#include <ATen/TensorMeta.h>
+#include <ATen/native/Resize.h>
 #include <ATen/native/TriangularOpsUtils.h>
+#include <c10/util/irange.h>
 
 namespace at {
+namespace meta {
+
+TORCH_META_FUNC(tril)(const Tensor& self, int64_t k) {
+  set_output(self.sizes(), self.options());
+}
+
+TORCH_META_FUNC(triu)(const Tensor& self, int64_t k) {
+  set_output(self.sizes(), self.options());
+}
+
+}  // namespace meta
+
 namespace native {
+namespace {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triu/tril ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-template <typename scalar_t, bool upper>
-static void apply_triu_tril_single(
-    scalar_t* result, scalar_t* self, bool inplace,
-    int64_t k, int64_t n, int64_t m,
-    int64_t res_row_stride, int64_t res_col_stride,
-    int64_t self_row_stride, int64_t self_col_stride) {
-
+template <typename scalar_t>
+void apply_triu_tril_single(
+    scalar_t* result,
+    scalar_t* self,
+    bool inplace,
+    int64_t k,
+    int64_t n,
+    int64_t m,
+    int64_t res_row_stride,
+    int64_t res_col_stride,
+    int64_t self_row_stride,
+    int64_t self_col_stride,
+    bool upper) {
   constexpr int64_t zero = 0;
 
   if (upper) {
-    at::parallel_for(0, n, 0, [&](int64_t start, int64_t end) {
-      for (auto i = start; i < end; i++) {
+    parallel_for(0, n, 0, [&](int64_t start, int64_t end) {
+      for (int64_t i : c10::irange(start, end)) {
         for (int64_t j = 0; j < std::min(m, i + k); j++) {
           result[i * res_row_stride + j * res_col_stride] = 0;
         }
@@ -35,8 +55,8 @@ static void apply_triu_tril_single(
       }
     });
   } else {
-    at::parallel_for(0, n, 0, [&](int64_t start, int64_t end) {
-      for (auto i = start; i < end; i++) {
+    parallel_for(0, n, 0, [&](int64_t start, int64_t end) {
+      for (int64_t i : c10::irange(start, end)) {
         for (int64_t j = std::max(zero, i + k + 1); j < m; j++) {
           result[i * res_row_stride + j * res_col_stride] = 0;
         }
@@ -50,108 +70,101 @@ static void apply_triu_tril_single(
   }
 }
 
-template <typename scalar_t, bool upper>
-void apply_triu_tril(Tensor& result, const Tensor& self, bool inplace, int64_t k) {
+template <typename scalar_t>
+void apply_triu_tril(const Tensor& result, const Tensor& self, bool inplace, int64_t k, bool upper) {
   auto n = self.size(-2);
   auto m = self.size(-1);
   auto self_data = self.data_ptr<scalar_t>();
   auto self_stride = (self.dim() > 2 && self.stride(-3) > 0) ? self.stride(-3) : 1;
   auto batchsize = batchCountTrilTriu(result);
   auto self_row_stride = self.stride(-2);
-  auto self_column_stride = self.stride(-1);
+  auto self_col_stride = self.stride(-1);
 
   auto result_data = result.data_ptr<scalar_t>();
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t result_stride, result_row_stride, result_column_stride;
+  int64_t result_stride, result_row_stride, result_col_stride;
   if (result_data != self_data) {
     result_stride = (result.dim() > 2 && result.stride(-3) > 0) ? result.stride(-3) : 1;
     result_row_stride = result.stride(-2);
-    result_column_stride = result.stride(-1);
+    result_col_stride = result.stride(-1);
   } else {
     result_stride = self_stride;
     result_row_stride = self_row_stride;
-    result_column_stride = self_column_stride;
+    result_col_stride = self_col_stride;
   }
 
-  at::parallel_for(0, batchsize, 0, [&](int64_t start, int64_t end) {
-    for (auto b = start; b < end; b++) {
+  parallel_for(0, batchsize, 0, [&](int64_t start, int64_t end) {
+    for (const auto b : c10::irange(start, end)) {
       scalar_t* self_batch = &self_data[b * self_stride];
       scalar_t* result_batch = &result_data[b * result_stride];
-      apply_triu_tril_single<scalar_t, upper>(
-          result_batch, self_batch, inplace, k, n, m,
-          result_row_stride, result_column_stride, self_row_stride, self_column_stride);
+      apply_triu_tril_single<scalar_t>(
+          result_batch,
+          self_batch,
+          inplace,
+          k,
+          n,
+          m,
+          result_row_stride,
+          result_col_stride,
+          self_row_stride,
+          self_col_stride,
+          upper);
     }
   });
 }
 
-Tensor tril(const Tensor& self, int64_t k) {
-  Tensor result = at::empty({0}, self.options());
-  at::tril_out(result, self, k);
-  return result;
-}
+struct UpperTriangle {
+  static constexpr const char* op_name = "triu";
+  static constexpr bool upper = true;
+};
 
-Tensor& tril_cpu_(Tensor &self, int64_t k) {
+struct LowerTriangle {
+  static constexpr const char *op_name = "tril";
+  static constexpr bool upper = false;
+};
+
+template <typename Triangle>
+void compute_triu_tril(const Tensor& self, int64_t k, const Tensor &result) {
   if (self.numel() == 0) {
-    return self;
+    return;
   }
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  bool inplace;
+
+  bool inplace_op = self.is_same(result);
+
+  bool inplace_update = false;
   Tensor self_c;
-  std::tie(inplace, self_c) = checkTrilTriuBatchContiguous(self, true);
-  Tensor result = inplace ? self : at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::BFloat16, at::ScalarType::Half, at::ScalarType::Bool, self.scalar_type(), "tril", [&]{
-    apply_triu_tril<scalar_t, false>(result, self_c, inplace, k);
-  });
-  if (!inplace) self.copy_(result);
-  return self;
+  std::tie(inplace_update, self_c) = checkTrilTriuBatchContiguous(self, inplace_op);
+
+  Tensor result_c;
+  if (inplace_op && !inplace_update) {
+    result_c = at::empty_like(result, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  } else {
+    result_c = result;
+  }
+
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+      ScalarType::BFloat16,
+      ScalarType::Half,
+      ScalarType::Bool,
+      self.scalar_type(),
+      Triangle::op_name,
+      [&]{
+        apply_triu_tril<scalar_t>(result_c, self_c, inplace_op && inplace_update, k, Triangle::upper);
+      });
+
+  if (inplace_op && !inplace_update) {
+    result.copy_(result_c);
+  }
 }
 
-Tensor& tril_cpu_out(const Tensor& self, int64_t k, Tensor &result) {
-  at::native::resize_output(result, self.sizes());
-  if (self.numel() == 0) {
-    return result;
-  }
-  Tensor self_c;
-  std::tie(std::ignore, self_c) = checkTrilTriuBatchContiguous(self, false);
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::BFloat16, at::ScalarType::Half, at::ScalarType::Bool, self.scalar_type(), "tril", [&]{
-    apply_triu_tril<scalar_t, false>(result, self_c, false, k);
-  });
-  return result;
+}  // namespace
+
+TORCH_IMPL_FUNC(tril_cpu)(const Tensor& self, int64_t k, const Tensor &result) {
+  compute_triu_tril<LowerTriangle>(self, k, result);
 }
 
-Tensor triu(const Tensor& self, int64_t k) {
-  Tensor result = at::empty({0}, self.options());
-  at::triu_out(result, self, k);
-  return result;
-}
-
-Tensor& triu_cpu_(Tensor &self, int64_t k) {
-  if (self.numel() == 0) {
-    return self;
-  }
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  bool inplace;
-  Tensor self_c;
-  std::tie(inplace, self_c) = checkTrilTriuBatchContiguous(self, true);
-  Tensor result = inplace ? self : at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::BFloat16, at::ScalarType::Half, at::ScalarType::Bool, self.scalar_type(), "triu", [&]{
-    apply_triu_tril<scalar_t, true>(result, self_c, inplace, k);
-  });
-  if (!inplace) self.copy_(result);
-  return self;
-}
-
-Tensor& triu_cpu_out(const Tensor& self, int64_t k, Tensor &result) {
-  at::native::resize_output(result, self.sizes());
-  if (self.numel() == 0) {
-    return result;
-  }
-  Tensor self_c;
-  std::tie(std::ignore, self_c) = checkTrilTriuBatchContiguous(self, false);
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::BFloat16, at::ScalarType::Half, at::ScalarType::Bool, self.scalar_type(), "triu", [&]{
-    apply_triu_tril<scalar_t, true>(result, self_c, false, k);
-  });
-  return result;
+TORCH_IMPL_FUNC(triu_cpu)(const Tensor& self, int64_t k, const Tensor &result) {
+  compute_triu_tril<UpperTriangle>(self, k, result);
 }
 
 Tensor trace_backward(const Tensor& grad, IntArrayRef sizes) {
@@ -164,7 +177,6 @@ Tensor trace_backward(const Tensor& grad, IntArrayRef sizes) {
   grad_input.index_fill_(0, indices, grad);
   return grad_input.view(sizes);
 }
-
 
 }  // namespace native
 }  // namespace at

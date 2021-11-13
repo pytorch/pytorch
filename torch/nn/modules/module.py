@@ -225,6 +225,10 @@ class Module:
     Submodules assigned in this way will be registered, and will have their
     parameters converted too when you call :meth:`to`, etc.
 
+    .. note::
+        As per the example above, an ``__init__()`` call to the parent class
+        must be made before assignment on the child.
+
     :ivar training: Boolean represents whether this module is in training or
                     evaluation mode.
     :vartype training: bool

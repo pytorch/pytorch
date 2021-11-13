@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: distributed"]
+
 import tempfile
 import sys
 import torch

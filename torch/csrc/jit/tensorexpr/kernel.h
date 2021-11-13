@@ -2,6 +2,7 @@
 
 #include <c10/util/variant.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/codegen.h>
@@ -57,6 +58,8 @@ inline std::string getArgValueName(const ArgValue& a) {
     return "bool";
   } else if (c10::get_if<BufList>(&a)) {
     return "BufList";
+  } else if (c10::get_if<DoubleList>(&a)) {
+    return "DoubleList";
   } else if (c10::get_if<IntList>(&a)) {
     return "IntList";
   } else if (c10::get_if<ArgNone>(&a)) {
@@ -89,11 +92,38 @@ class TORCH_API TensorExprKernel {
   };
 
  public:
+  // Constructor Params:
+  //  * subgraph
+  //      - the graph that needs to be compiled.
+  //  * kernel_func_name
+  //      - the name that should be used for the generated kernel.
+  //  * custom_lowerings
+  //      - map that represents custom lowering definitions for a set of ops.
+  //  * symbolic_shape_inputs
+  //      - a list of symbolic graph inputs that represent the symbolic dims of
+  //        the input tensors.
+  //  * pre_alloc
+  //      - a flag to control pre-allocation of buffers.
+  explicit TensorExprKernel(
+      const std::shared_ptr<Graph>& subgraph,
+      const std::string& kernel_func_name,
+      std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings =
+          {},
+      std::vector<int64_t> symbolic_shape_inputs = {},
+      bool pre_alloc = false);
+
   explicit TensorExprKernel(
       const std::shared_ptr<Graph>& subgraph,
       std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings =
           {},
-      bool pre_alloc = false);
+      std::vector<int64_t> symbolic_shape_inputs = {},
+      bool pre_alloc = false)
+      : TensorExprKernel(
+            subgraph,
+            SubgraphUtils::generateNameForGraph(subgraph),
+            custom_lowerings,
+            symbolic_shape_inputs,
+            pre_alloc) {}
 
   void run(Stack& stack);
   void runFast(
@@ -122,6 +152,10 @@ class TORCH_API TensorExprKernel {
     return bufferArgs_;
   }
 
+  const std::string& getKernelName() const {
+    return codegen_->kernel_func_name();
+  }
+
  private:
   enum BackendType {
     kUninitialized,
@@ -137,8 +171,6 @@ class TORCH_API TensorExprKernel {
 
   std::vector<DimArg> dimsFromSizes(const std::vector<ExprHandle>& sizes);
   std::vector<ExprHandle> sizesForValue(const torch::jit::Value* v);
-  std::vector<ExprHandle> sizesFromVaryingShape(
-      const c10::VaryingShape<int64_t>& shape);
 
   // These functions broadcast shape and also store a `hasBroadcast_` variable.
   std::vector<ExprHandle> broadcastShapesMut(
@@ -168,6 +200,7 @@ class TORCH_API TensorExprKernel {
   BackendType inferBackendTypeFromDevice(at::Device device);
 
   Tensor bindInput(const torch::jit::Value* input);
+  BlockPtr bindAllInputs();
 
   Tensor convertOutputToCorrectStrides(torch::jit::Value* v);
 
@@ -206,6 +239,12 @@ class TORCH_API TensorExprKernel {
           pinned_memory(opts.pinned_memory_opt()) {}
   };
 
+  ExprHandle getVarForShape(const c10::ShapeSymbol& ss);
+  std::vector<ExprHandle>& getStridesForValue(const Value* v);
+  BufHandle bindSymbolicShapeInput(const Value* input, const std::string& name);
+  std::vector<ExprHandle> sizesFromSymbolicShape(
+      const c10::SymbolicShape& shape);
+
   int64_t nInputs_ = 0;
   std::vector<CodeGen::BufferArg> bufferArgs_;
   std::vector<std::vector<int64_t>> tensorOutputSizes_;
@@ -226,11 +265,23 @@ class TORCH_API TensorExprKernel {
   std::unordered_map<const torch::jit::Value*, std::vector<ExprHandle>>
       known_sizes_;
 
+  std::vector<std::vector<ExprHandle>> tensorOutputSymbolicSizes_;
+  // A map from ShapeSymbol.value() to the corresponding Var.
+  std::unordered_map<int64_t, VarHandle> shapeSymbolToVar_;
+  std::unordered_map<const Value*, std::vector<ExprHandle>> inputToStrides_;
+  std::unordered_map<ExprPtr, size_t> shapeSymbolInputPos_;
+  // List of values corresponding to the ShapeSymbols that are inputs to
+  // kernel being compiled. The order of these values correspond to the order
+  // of the symbolic inputs at the end of the list of inputs to the kernel.
+  std::vector<int64_t> symbolic_shape_inputs_;
+  bool has_symbolic_shapes_{false};
+
   std::vector<at::Tensor> unpacked_constant_tensors_;
   std::vector<ConstantDescr> constants_;
 
   std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings_;
   bool pre_alloc_{false};
+  const std::string& kernel_func_name_;
 };
 
 TORCH_API int& getTECudaPointwiseLoopLevels();
