@@ -137,6 +137,7 @@ class TORCH_API TensorExprKernel {
   void fallback(Stack& stack) {
     InterpreterState(code_).run(stack);
   }
+  void recompile();
 
   StmtPtr getCodeGenStmt();
 
@@ -285,6 +286,7 @@ class TORCH_API TensorExprKernel {
   std::vector<ConstantDescr> constants_;
 
   std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings_;
+  StmtPtr stmt_ = nullptr;
   bool pre_alloc_{false};
   const std::string& kernel_func_name_;
 };
