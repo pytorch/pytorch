@@ -58,7 +58,15 @@ class MemoryPlanner {
   }
 
   size_t total_num_unmanaged() const {
+    return num_unmanaged_non_scalars() + num_unmanaged_scalars();
+  }
+
+  C10_NODISCARD size_t num_unmanaged_non_scalars() const {
     return unmanaged_ivalues_.size();
+  }
+
+  C10_NODISCARD size_t num_unmanaged_scalars() const {
+    return num_unmanaged_scalar_ivalues_;
   }
 
   size_t total_managed() const {
@@ -143,6 +151,7 @@ class MemoryPlanner {
   size_t num_managed_tensors_{0};
   size_t managed_bytes_{0};
   size_t reused_tensors_{0};
+  size_t num_unmanaged_scalar_ivalues_{0};
 
   // Since output tensors are alive after one inference, their storage
   // is managed differently (e.g., deallocation happens on the client side).
