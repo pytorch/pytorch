@@ -959,6 +959,7 @@ def insert_observers_for_model(
     # that's derived from qconfig for the Node, for example, if we have
     # a conv2d node that has a qconfig
     # {
+    #   # information for input and bias node omitted
     #   # for getattr node
     #   # weight = getattr(self, 'weight')
     #   'weight': {
