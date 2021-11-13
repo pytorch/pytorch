@@ -198,6 +198,11 @@ TORCH_IMPL_FUNC(fractional_max_pool2d_backward_cuda)(
   const Tensor& indices,
   const Tensor& gradInput)
 {
+
+  // See Note [Writing Nondeterministic Operations]
+  // Nondeterministic because of atomicAdd usage
+  globalContext().alertNotDeterministic("fractional_max_pool2d_backward_cuda");
+
   int dimh = 1;
   int dimw = 2;
 
@@ -224,6 +229,7 @@ TORCH_IMPL_FUNC(fractional_max_pool2d_backward_cuda)(
   auto indices_ = indices;
 
   if(ndims == 3) {
+    gradInput_ = gradInput_.reshape({1, input.size(0), inputH, inputW});
     gradOutput_ = gradOutput_.reshape({1, gradOutput.size(0), outputH, outputW});
     indices_ = indices_.reshape({1, indices_.size(0), outputH, outputW});
   }
