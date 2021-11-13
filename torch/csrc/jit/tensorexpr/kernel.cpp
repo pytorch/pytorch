@@ -1304,7 +1304,7 @@ void TensorExprKernel::compile() {
   }
 
   BackendType backendType = inferBackendTypeFromDevice(device_);
-  StmtPtr stmt = transformLoops(backendType, block);
+  stmt_ = transformLoops(backendType, block);
 
   for (auto c : constants_) {
     bufferArgs_.emplace_back(BufHandle(c.buf));
@@ -1318,10 +1318,15 @@ void TensorExprKernel::compile() {
   // Generate code.
   codegen_ = CreateCodeGen(
       getCodeGenName(backendType),
-      stmt,
+      stmt_,
       bufferArgs_,
       device_,
       kernel_func_name_);
+}
+
+void TensorExprKernel::recompile() {
+  codegen_ = CreateCodeGen(
+      "llvm_codegen", stmt_, bufferArgs_, device_, kernel_func_name_);
 }
 
 TensorExprKernel::TensorExprKernel(
