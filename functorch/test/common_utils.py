@@ -138,7 +138,7 @@ def skipOps(test_case_name, base_test_name, to_skip):
                                                test_case_name, base_test_name,
                                                device_type=device_type, dtypes=dtypes))
             else:
-                decorators.append(DecorateInfo(unittest.skip,
+                decorators.append(DecorateInfo(unittest.skip("Skipped!"),
                                                test_case_name, base_test_name,
                                                device_type=device_type, dtypes=dtypes))
             opinfo.decorators = tuple(decorators)
