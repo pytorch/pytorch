@@ -38,6 +38,21 @@ TORCH_API std::string dumpValueSet(
     const FastSet<const Value*>& value_set,
     const char* set_name = "");
 
+TORCH_API inline bool doesNotHeapAllocateWhenStoredInIValue(const Type& type) {
+  switch (type.kind()) {
+    // NOTE: NumberType may allocate because it includes complex.
+    case TypeKind::NoneType:
+    case TypeKind::IntType:
+    case TypeKind::FloatType:
+    case TypeKind::BoolType:
+    case TypeKind::DeviceObjType:
+    case TypeKind::StreamObjType:
+      return true;
+    default:
+      return false;
+  }
+}
+
 // Group values used by `graph` into three categories:
 //
 // - output_aliases:
