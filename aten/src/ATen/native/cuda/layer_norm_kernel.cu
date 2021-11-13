@@ -801,7 +801,7 @@ void LayerNormBackwardKernelImplInternal(
       // constexpr int kThreadX = kColwiseReduceTileSize;
       // constexpr int kThreadY = kColwiseReduceTileSize / 2;
       dim3 threads{16, 32};
-      int blocks = N/threads.x;
+      int blocks = (N + threads.x-1)/threads.x;
       GammaBetaBackwardCUDAKernel1<T, T_ACC>
 //          <<<B, dim3(kThreadX, kThreadY), 0, cuda_stream>>>(
           <<<blocks, threads, 2 * sizeof(T_ACC) * threads.x * threads.y, cuda_stream>>>(
