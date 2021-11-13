@@ -491,9 +491,6 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
                 ):
                     existing_obs_node = maybe_obs_node
                     break
-        # if get_arg_target_dtype(
-        #         arg, modules, node_name_to_target_dtype) == node_dtype:
-        #     existing_obs_node = arg
 
         if existing_obs_node is None:
             new_obs_node = insert_observer(
