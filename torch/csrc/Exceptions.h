@@ -9,13 +9,16 @@
 
 #include <c10/util/Exception.h>
 #include <pybind11/pybind11.h>
-#include <torch/csrc/distributed/c10d/exception.h>
 #include <torch/csrc/THP_export.h>
 #include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/jit/runtime/jit_exception.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <c10/util/StringUtil.h>
 #include <ATen/detail/FunctionTraits.h>
+
+#if defined(USE_DISTRIBUTED) && defined(USE_C10D)
+#include <torch/csrc/distributed/c10d/exception.h>
+#endif
 
 static inline void PyErr_SetString(PyObject* type, const std::string& message) {
   PyErr_SetString(type, message.c_str());
@@ -79,18 +82,13 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
       PyErr_SetString(PyExc_NotImplementedError, torch::processErrorMsg(msg)); \
       retstmnt;                                                      \
     }                                                                \
-    catch (const c10d::TimeoutException& e) {                        \
-      auto msg = torch::processErrorMsg(e.what());                   \
-      PyErr_SetString(PyExc_TimeoutError, msg);                      \
-      retstmnt;                                                      \
-    }                                                                \
     catch (const c10::Error& e) {                                    \
       auto msg = torch::get_cpp_stacktraces_enabled() ?              \
                     e.what() : e.what_without_backtrace();           \
       PyErr_SetString(PyExc_RuntimeError, torch::processErrorMsg(msg)); \
       retstmnt;                                                      \
     }                                                                \
-    catch (torch::PyTorchError & e) {                                \
+    catch (torch::PyTorchError& e) {                                 \
       auto msg = torch::processErrorMsg(e.what());                   \
       PyErr_SetString(e.python_type(), msg);                         \
       retstmnt;                                                      \
@@ -101,8 +99,20 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
       retstmnt;                                                      \
     }
 
+#if defined(USE_DISTRIBUTED) && defined(USE_C10D)
+#define CATCH_C10D_ERRORS(retstmnt)                                  \
+    catch (const c10d::TimeoutError& e) {                            \
+      auto msg = torch::processErrorMsg(e.what());                   \
+      PyErr_SetString(PyExc_TimeoutError, msg);                      \
+      retstmnt;                                                      \
+    }
+#else
+#define CATCH_C10D_ERRORS(retstmnt)
+#endif
+
 #define CATCH_ALL_ERRORS(retstmnt)                                   \
     CATCH_TH_ERRORS(retstmnt)                                        \
+    CATCH_C10D_ERRORS(retstmnt)                                      \
     catch (const std::exception& e) {                                \
       auto msg = torch::processErrorMsg(e.what());                   \
       PyErr_SetString(PyExc_RuntimeError, msg);                      \

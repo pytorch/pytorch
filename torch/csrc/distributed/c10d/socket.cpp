@@ -532,7 +532,7 @@ std::unique_ptr<SocketImpl> SocketConnectOp::run() {
   msg = fmt::format("{} {}", msg, fmt::join(errors_, " "));
 
   if (timed_out_) {
-    throw TimeoutException{msg};
+    throw TimeoutError{msg};
   } else {
     throw SocketError{msg};
   }
@@ -541,7 +541,7 @@ std::unique_ptr<SocketImpl> SocketConnectOp::run() {
 bool SocketConnectOp::tryConnect(int family) {
   ::addrinfo hints{}, *naked_result = nullptr;
 
-  hints.ai_flags = AI_ADDRCONFIG | AI_V4MAPPED | AI_ALL | AI_NUMERICSERV;
+  hints.ai_flags = AI_V4MAPPED | AI_ALL | AI_NUMERICSERV;
   hints.ai_family = family;
   hints.ai_socktype = SOCK_STREAM;
 

@@ -4,6 +4,6 @@ namespace c10d {
 
 C10dError::~C10dError() = default;
 
-TimeoutException::~TimeoutException() = default;
+TimeoutError::~TimeoutError() = default;
 
 } // namespace c10d

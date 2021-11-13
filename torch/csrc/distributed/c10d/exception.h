@@ -27,19 +27,19 @@ class TORCH_API C10dError : public std::runtime_error {
   ~C10dError() override;
 };
 
-class TORCH_API TimeoutException : public std::runtime_error {
+class TORCH_API TimeoutError : public C10dError {
  public:
-  using std::runtime_error::runtime_error;
+  using C10dError::C10dError;
 
-  TimeoutException(const TimeoutException&) = default;
+  TimeoutError(const TimeoutError&) = default;
 
-  TimeoutException& operator=(const TimeoutException&) = default;
+  TimeoutError& operator=(const TimeoutError&) = default;
 
-  TimeoutException(TimeoutException&&) = default;
+  TimeoutError(TimeoutError&&) = default;
 
-  TimeoutException& operator=(TimeoutException&&) = default;
+  TimeoutError& operator=(TimeoutError&&) = default;
 
-  ~TimeoutException() override;
+  ~TimeoutError() override;
 };
 
 } // namespace c10d
