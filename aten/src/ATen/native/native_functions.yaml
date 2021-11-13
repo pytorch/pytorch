@@ -6246,13 +6246,9 @@
   device_guard: False
 
 - func: cross.out(Tensor self, Tensor other, int? dim=None, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU, CUDA: cross_out
 
 - func: cross(Tensor self, Tensor other, int? dim=None) -> Tensor
   variants: method, function
-  dispatch:
-    CPU, CUDA: cross
 
 - func: triu.out(Tensor self, int diagonal=0, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -10433,6 +10429,17 @@
 - func: linalg_cholesky.out(Tensor self, *, bool upper=False, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   variants: function
+
+- func: linalg_cross(Tensor self, Tensor other, *, int dim=-1) -> Tensor
+  python_module: linalg
+  variants: function
+  dispatch:
+    CPU, CUDA: linalg_cross
+
+- func: linalg_cross.out(Tensor self, Tensor other, *, int dim=-1, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  dispatch:
+    CPU, CUDA: linalg_cross_out
 
 - func: linalg_det(Tensor self) -> Tensor
   python_module: linalg
