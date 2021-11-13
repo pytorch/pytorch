@@ -27,6 +27,7 @@
 #include <unistd.h>
 #endif
 
+#include <fmt/chrono.h>
 #include <fmt/format.h>
 
 #include <c10d/error.h>
@@ -149,10 +150,12 @@ class SocketImpl {
 
   bool enableDualStack() noexcept;
 
+#ifndef _WIN32
+  bool enableAddressReuse() noexcept;
+#endif
+
 #ifdef _WIN32
   bool enableExclusiveAddressUse() noexcept;
-#else
-  bool enableAddressReuse() noexcept;
 #endif
 
   std::uint16_t getPort() const;
@@ -196,7 +199,7 @@ std::unique_ptr<SocketImpl> SocketImpl::accept() const {
       msg = fmt::format("The server socket on {} has failed to accept a connection {}.", *this, err);
     }
 
-    logError(msg);
+    C10D_ERROR(msg);
 
     throw SocketError{msg};
   }
@@ -205,7 +208,7 @@ std::unique_ptr<SocketImpl> SocketImpl::accept() const {
   addr.ai_addr = addr_ptr;
   addr.ai_addrlen = addr_len;
 
-  logInfo("The server socket on {} has accepted a connection from {}.", *this, addr);
+  C10D_INFO("The server socket on {} has accepted a connection from {}.", *this, addr);
 
   auto impl = std::make_unique<SocketImpl>(hnd);
 
@@ -213,7 +216,7 @@ std::unique_ptr<SocketImpl> SocketImpl::accept() const {
   impl->closeOnExec();
 
   if (!impl->enableNoDelay()) {
-    logWarning("The no-delay option cannot be enabled for the client socket on {}.", addr);
+    C10D_WARNING("The no-delay option cannot be enabled for the client socket on {}.", addr);
   }
 
   return impl;
@@ -268,13 +271,15 @@ bool SocketImpl::enableDualStack() noexcept {
   return setSocketFlag(IPPROTO_IPV6, IPV6_V6ONLY, false);
 }
 
+#ifndef _WIN32
+bool SocketImpl::enableAddressReuse() noexcept {
+  return setSocketFlag(SOL_SOCKET, SO_REUSEADDR, true);
+}
+#endif
+
 #ifdef _WIN32
 bool SocketImpl::enableExclusiveAddressUse() noexcept {
   return setSocketFlag(SOL_SOCKET, SO_EXCLUSIVEADDRUSE, true);
-}
-#else
-bool SocketImpl::enableAddressReuse() noexcept {
-  return setSocketFlag(SOL_SOCKET, SO_REUSEADDR, true);
 }
 #endif
 
@@ -328,7 +333,7 @@ class SocketListenOp {
   void recordError(fmt::string_view format, Args&&... args) {
     auto msg = fmt::format(format, std::forward<Args>(args)...);
 
-    logWarning(msg);
+    C10D_WARNING(msg);
 
     errors_.emplace_back(std::move(msg));
   }
@@ -344,17 +349,17 @@ SocketListenOp::SocketListenOp(std::uint16_t port, const SocketOptions& opts)
 
 std::unique_ptr<SocketImpl> SocketListenOp::run() {
   if (opts_->prefer_ipv6()) {
-    logInfo("The server socket will attempt to listen on an IPv6 address.");
+    C10D_INFO("The server socket will attempt to listen on an IPv6 address.");
     if (tryListen(AF_INET6)) {
       return std::move(socket_);
     }
 
-    logInfo("The server socket will attempt to listen on an IPv4 address.");
+    C10D_INFO("The server socket will attempt to listen on an IPv4 address.");
     if (tryListen(AF_INET)) {
       return std::move(socket_);
     }
   } else {
-    logInfo("The server socket will attempt to listen on an IPv4 or IPv6 address.");
+    C10D_INFO("The server socket will attempt to listen on an IPv4 or IPv6 address.");
     if (tryListen(AF_UNSPEC)) {
       return std::move(socket_);
     }
@@ -362,7 +367,7 @@ std::unique_ptr<SocketImpl> SocketListenOp::run() {
 
   constexpr auto* msg = "The server socket has failed to listen on any local network address.";
 
-  logError(msg);
+  C10D_ERROR(msg);
 
   throw SocketError{fmt::format("{} {}", msg, fmt::join(errors_, " "))};
 }
@@ -389,7 +394,7 @@ bool SocketListenOp::tryListen(int family) {
   addrinfo_ptr result{naked_result};
 
   for (::addrinfo* addr = naked_result; addr != nullptr; addr = addr->ai_next) {
-    logInfo("The server socket is attempting to listen on {}.", *addr);
+    C10D_INFO("The server socket is attempting to listen on {}.", *addr);
     if (tryListen(*addr)) {
       return true;
     }
@@ -408,6 +413,12 @@ bool SocketListenOp::tryListen(const ::addrinfo& addr) {
 
   socket_ = std::make_unique<SocketImpl>(hnd);
 
+#ifndef _WIN32
+  if (!socket_->enableAddressReuse()) {
+    C10D_WARNING("The address reuse option cannot be enabled for the server socket on {}.", addr);
+  }
+#endif
+
 #ifdef _WIN32
   // The SO_REUSEADDR flag has a significantly different behavior on Windows
   // compared to Unix-like systems. It allows two or more processes to share
@@ -416,12 +427,8 @@ bool SocketListenOp::tryListen(const ::addrinfo& addr) {
   // Here we follow the recommendation of Microsoft and use the non-standard
   // SO_EXCLUSIVEADDRUSE flag instead.
   if (!socket_->enableExclusiveAddressUse()) {
-    logWarning("The exclusive address use option cannot be enabled for the server socket on {}.",
-               addr);
-  }
-#else
-  if (!socket_->enableAddressReuse()) {
-    logWarning("The address reuse option cannot be enabled for the server socket on {}.", addr);
+    C10D_WARNING("The exclusive address use option cannot be enabled for the server socket on {}.",
+                 addr);
   }
 #endif
 
@@ -429,7 +436,7 @@ bool SocketListenOp::tryListen(const ::addrinfo& addr) {
   // wish to use our IPv6 socket for IPv4 communication as well, we explicitly
   // ask the system to enable it.
   if (addr.ai_family == AF_INET6 && !socket_->enableDualStack()) {
-    logWarning("The server socket does not support IPv4 communication on {}.", addr);
+    C10D_WARNING("The server socket does not support IPv4 communication on {}.", addr);
   }
 
   if (::bind(socket_->handle(), addr.ai_addr, addr.ai_addrlen) != 0) {
@@ -447,7 +454,7 @@ bool SocketListenOp::tryListen(const ::addrinfo& addr) {
 
   socket_->closeOnExec();
 
-  logInfo("The server socket has started to listen on {}.", addr);
+  C10D_INFO("The server socket has started to listen on {}.", addr);
 
   return true;
 }
@@ -473,7 +480,7 @@ class SocketConnectOp {
   void recordError(fmt::string_view format, Args&&... args) {
     auto msg = fmt::format(format, std::forward<Args>(args)...);
 
-    logWarning(msg);
+    C10D_WARNING(msg);
 
     errors_.emplace_back(std::move(msg));
   }
@@ -493,25 +500,25 @@ SocketConnectOp::SocketConnectOp(const std::string& host,
 
 std::unique_ptr<SocketImpl> SocketConnectOp::run() {
   if (opts_->prefer_ipv6()) {
-    logInfo("The client socket will attempt to connect to an IPv6 address of ({}, {}).",
-            host_,
-            port_);
+    C10D_INFO("The client socket will attempt to connect to an IPv6 address of ({}, {}).",
+              host_,
+              port_);
 
     if (tryConnect(AF_INET6)) {
       return std::move(socket_);
     }
 
-    logInfo("The client socket will attempt to connect to an IPv4 address of ({}, {}).",
-            host_,
-            port_);
+    C10D_INFO("The client socket will attempt to connect to an IPv4 address of ({}, {}).",
+              host_,
+              port_);
 
     if (tryConnect(AF_INET)) {
       return std::move(socket_);
     }
   } else {
-    logInfo("The client socket will attempt to connect to an IPv4 or IPv6 address of ({}, {}).",
-            host_,
-            port_);
+    C10D_INFO("The client socket will attempt to connect to an IPv4 or IPv6 address of ({}, {}).",
+              host_,
+              port_);
 
     if (tryConnect(AF_UNSPEC)) {
       return std::move(socket_);
@@ -527,7 +534,7 @@ std::unique_ptr<SocketImpl> SocketConnectOp::run() {
 
   msg = fmt::format(msg, host_, port_);
 
-  logError(msg);
+  C10D_ERROR(msg);
 
   msg = fmt::format("{} {}", msg, fmt::join(errors_, " "));
 
@@ -562,7 +569,7 @@ bool SocketConnectOp::tryConnect(int family) {
   addrinfo_ptr result{naked_result};
 
   for (::addrinfo* addr = naked_result; addr != nullptr; addr = addr->ai_next) {
-    logInfo("The client socket is attempting to connect to {}.", *addr);
+    C10D_INFO("The client socket is attempting to connect to {}.", *addr);
     if (tryConnect(*addr)) {
       return true;
     }
@@ -601,7 +608,7 @@ bool SocketConnectOp::tryConnect(const ::addrinfo& addr) {
       if (err == std::errc::connection_refused ||
           err == std::errc::connection_reset ||
           err == std::errc::connection_aborted) {
-        logWarning("The server socket on {} is not yet listening {}, retrying...", addr, err);
+        C10D_WARNING("The server socket on {} is not yet listening {}, retrying...", addr, err);
 
         if (Clock::now() < deadline) {
           // Wait a little to avoid choking the server.
@@ -625,10 +632,10 @@ bool SocketConnectOp::tryConnect(const ::addrinfo& addr) {
     // TODO: Remove once we fully migrate to non-blocking mode.
     socket_->disableNonBlocking();
 
-    logInfo("The client socket has connected to {} on {}.", addr, *socket_);
+    C10D_INFO("The client socket has connected to {} on {}.", addr, *socket_);
 
     if (!socket_->enableNoDelay()) {
-      logWarning("The no-delay option cannot be enabled for the client socket on {}.", *socket_);
+      C10D_WARNING("The no-delay option cannot be enabled for the client socket on {}.", *socket_);
     }
 
     return true;
@@ -636,7 +643,9 @@ bool SocketConnectOp::tryConnect(const ::addrinfo& addr) {
 
   timed_out_ = true;
 
-  recordError("The client socket has timed out while trying to connect to {}.", addr);
+  recordError("The client socket has timed out after {} while trying to connect to {}.",
+              addr,
+              opts_->connect_timeout());
 
   return false;
 }

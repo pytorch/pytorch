@@ -53,7 +53,7 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
     try {
 
 // Only catch torch-specific exceptions
-#define CATCH_TH_ERRORS(retstmnt)                                    \
+#define CATCH_CORE_ERRORS(retstmnt)                                  \
     catch (python_error & e) {                                       \
       e.restore();                                                   \
       retstmnt;                                                      \
@@ -92,11 +92,6 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
       auto msg = torch::processErrorMsg(e.what());                   \
       PyErr_SetString(e.python_type(), msg);                         \
       retstmnt;                                                      \
-    }                                                                \
-    catch (const std::system_error& e) {                             \
-      errno = e.code().value();                                      \
-      PyErr_SetFromErrno(PyExc_OSError);                             \
-      retstmnt;                                                      \
     }
 
 #if defined(USE_DISTRIBUTED) && defined(USE_C10D)
@@ -110,9 +105,12 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
 #define CATCH_C10D_ERRORS(retstmnt)
 #endif
 
+#define CATCH_TH_ERRORS(retstmnt)                                    \
+    CATCH_CORE_ERRORS(retstmnt)                                      \
+    CATCH_C10D_ERRORS(retstmnt)
+
 #define CATCH_ALL_ERRORS(retstmnt)                                   \
     CATCH_TH_ERRORS(retstmnt)                                        \
-    CATCH_C10D_ERRORS(retstmnt)                                      \
     catch (const std::exception& e) {                                \
       auto msg = torch::processErrorMsg(e.what());                   \
       PyErr_SetString(PyExc_RuntimeError, msg);                      \

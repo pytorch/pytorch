@@ -6,35 +6,13 @@
 
 #pragma once
 
-#include <utility>
-
 #include <fmt/format.h>
 
 #include <c10/util/Logging.h>
 
-namespace c10d {
-namespace detail {
+#define C10D_LOG_(n, lvl, ...)\
+    LOG_IF(n, FLAGS_caffe2_log_level <= lvl) << fmt::format(__VA_ARGS__)
 
-template <typename... Args>
-inline void logInfo(fmt::string_view msg, Args&&... args) {
-  if (FLAGS_caffe2_log_level <= 0) {
-    LOG(INFO) << fmt::format(msg, std::forward<Args>(args)...);
-  }
-}
-
-template <typename... Args>
-inline void logWarning(fmt::string_view msg, Args&&... args) {
-  if (FLAGS_caffe2_log_level <= 1) {
-    LOG(WARNING) << fmt::format(msg, std::forward<Args>(args)...);
-  }
-}
-
-template <typename... Args>
-inline void logError(fmt::string_view msg, Args&&... args) {
-  if (FLAGS_caffe2_log_level <= 2) {
-    LOG(ERROR) << fmt::format(msg, std::forward<Args>(args)...);
-  }
-}
-
-} // namespace detail
-} // namespace c10d
+#define C10D_ERROR(...)   C10D_LOG_(ERROR,   2, __VA_ARGS__)
+#define C10D_WARNING(...) C10D_LOG_(WARNING, 1, __VA_ARGS__)
+#define C10D_INFO(...)    C10D_LOG_(INFO,    0, __VA_ARGS__)
