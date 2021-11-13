@@ -2,7 +2,7 @@ import torch
 import tensorrt as trt
 from torch.fx.experimental.fx2trt.fx2trt import tensorrt_converter
 
-from .helper_functions import mark_as_int8_layer, to_numpy, get_dyn_range
+from .converter_utils import mark_as_int8_layer, to_numpy, get_dyn_range
 
 def common_linear(network, mod, input_val, layer_name, is_quantized):
     """
