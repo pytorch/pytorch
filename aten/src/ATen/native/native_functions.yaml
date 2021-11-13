@@ -403,6 +403,10 @@
     SparseCsrCUDA: add_out_sparse_csr_cuda
     MkldnnCPU: mkldnn_add_out
 
+- func: add.quantized(Tensor self, Tensor other, float output_scale, int output_zero_point) -> Tensor
+  dispatch:
+    QuantizedCPU: quantized_add
+
 - func: _add_relu.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   variants: function
   dispatch:
