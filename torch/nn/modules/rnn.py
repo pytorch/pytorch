@@ -469,7 +469,7 @@ class RNN(RNNBase):
         hidden = result[1]
 
         if isinstance(orig_input, PackedSequence):
-            ouput_packed = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices)
+            output_packed = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices)
             return output_packed, self.permute_hidden(hidden, unsorted_indices)
         return output, self.permute_hidden(hidden, unsorted_indices)
 
