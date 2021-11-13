@@ -302,6 +302,9 @@ class DeadCodeEliminator {
       // onnx export calls EliminateDeadCode but sometimes passes invalid
       // aten operators. So we call maybeSchema so we handle the cases when
       // there is no valid schema for a node
+      if (node->kind() == prim::SetAttr) {
+        return true;
+      }
       auto schema = node->maybeSchema();
       return schema && schema->is_mutable();
     } else {
