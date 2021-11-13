@@ -1,16 +1,12 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/ThrustAllocator.h>
+#include <ATen/cuda/cub.cuh>
 #include <ATen/TensorUtils.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/cuda/SortingCommon.cuh>
 
 #include <ATen/AccumulateType.h>
-
-#include <thrust/device_ptr.h>
-#include <thrust/execution_policy.h>
-#include <thrust/unique.h>
 
 #include <c10/macros/Macros.h>
 
@@ -179,6 +175,9 @@ __global__ void sum_and_scatter(
 
 } // anon namespace
 
+template<typename index_t>
+int64_t embedding_backward_cuda_kernel_unique_by_key(const Tensor &sorted_indices, Tensor &segment_offsets);
+
 Tensor embedding_backward_cuda_kernel(
         const Tensor &grad,
         const Tensor &orig_indices,
@@ -192,8 +191,6 @@ Tensor embedding_backward_cuda_kernel(
         const Tensor &per_sample_weights) {
 
   auto stream = at::cuda::getCurrentCUDAStream();
-  at::cuda::ThrustAllocator allocator;
-  auto policy = thrust::cuda::par(allocator).on(stream);
   const ptrdiff_t numel = sorted_indices.numel();
 
   auto grad_weight = at::zeros({num_weights, grad.size(-1)}, grad.options());
@@ -205,20 +202,7 @@ Tensor embedding_backward_cuda_kernel(
   // Unit: index in `sorted_indices` and `orig_indices`
   AT_DISPATCH_INDEX_TYPES(orig_indices.scalar_type(), "embedding_backward_cuda_kernel", [&] () {
     auto segment_offsets = at::empty({numel}, orig_indices.options());
-    int64_t num_of_segments;
-    {
-      auto sorted_indices_dev = thrust::device_ptr<index_t>(sorted_indices.data_ptr<index_t>());
-      auto dummy = at::empty_like(sorted_indices, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-      auto dummy_dev = thrust::device_ptr<index_t>(dummy.data_ptr<index_t>());
-      auto ends = thrust::unique_by_key_copy(
-              policy,
-              sorted_indices_dev,
-              sorted_indices_dev + numel,
-              thrust::make_counting_iterator(0),
-              dummy_dev,
-              thrust::device_ptr<index_t>(segment_offsets.data_ptr<index_t>()));
-      num_of_segments = thrust::get<0>(ends) - dummy_dev;
-    }
+    int64_t num_of_segments = embedding_backward_cuda_kernel_unique_by_key<index_t>(sorted_indices, segment_offsets);
 
     // We split the segments up into sizes of `NROWS_PER_THREAD`
     // Compute the number partial-segments per segment (some partial-segments
@@ -238,11 +222,12 @@ Tensor embedding_backward_cuda_kernel(
     // start position of each _segment_ in `partial_segment_offset`.
     // Unit: index in `partial_segment_offset`
     auto partials_per_segment_offset = at::empty({num_of_segments}, orig_indices.options());
-    thrust::exclusive_scan(
-            policy,
-            thrust::device_ptr<index_t>(partials_per_segment.data_ptr<index_t>()),
-            thrust::device_ptr<index_t>(partials_per_segment.data_ptr<index_t>()+num_of_segments),
-            thrust::device_ptr<index_t>(partials_per_segment_offset.data_ptr<index_t>()));
+    cuda::cub::exclusive_scan(
+      partials_per_segment.data_ptr<index_t>(),
+      partials_per_segment_offset.data_ptr<index_t>(),
+      cub::Sum(),
+      index_t(0),
+      num_of_segments);
 
     // The total number of partial-segments is the sum of `partials_per_segment_offset`
     const int num_of_partial_segments = partials_per_segment[num_of_segments-1].item<index_t>() +

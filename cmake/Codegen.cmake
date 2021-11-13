@@ -197,6 +197,7 @@ if(INTERN_BUILD_ATEN_OPS)
         --op-dependency "${OP_DEPENDENCY}"
         --root-ops "${SELECTED_OP_LIST}"
         OUTPUT_VARIABLE OP_REGISTRATION_WHITELIST
+        OUTPUT_STRIP_TRAILING_WHITESPACE
       )
       separate_arguments(OP_REGISTRATION_WHITELIST)
       message(STATUS "Custom build with op registration whitelist: ${OP_REGISTRATION_WHITELIST}")
@@ -221,29 +222,53 @@ if(INTERN_BUILD_ATEN_OPS)
       ${GEN_VULKAN_FLAGS}
   )
 
-  execute_process(
-      COMMAND ${GEN_COMMAND}
-        --output-dependencies ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_cpp.txt
-      RESULT_VARIABLE RETURN_VALUE
-      WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
-  )
-  if(NOT RETURN_VALUE EQUAL 0)
-      message(STATUS ${generated_cpp})
-      message(FATAL_ERROR "Failed to get generated_cpp list")
-  endif()
-  # FIXME: the file/variable name lists cpp, but these list both cpp and .h files
-  file(READ ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_cpp.txt generated_cpp)
-  file(READ ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_cpp.txt-cuda cuda_generated_cpp)
-  file(READ ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_cpp.txt-core core_generated_cpp)
+  foreach(gen_type "headers" "sources" "declarations_yaml")
+    execute_process(
+        COMMAND ${GEN_COMMAND}
+          --generate ${gen_type}
+          --output-dependencies ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_${gen_type}.txt
+        RESULT_VARIABLE RETURN_VALUE
+        WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
+    )
 
-  file(GLOB_RECURSE all_templates "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/templates/*")
+    if(NOT RETURN_VALUE EQUAL 0)
+      message(FATAL_ERROR "Failed to get generated_${gen_type} list")
+    endif()
+
+    file(READ "${CMAKE_BINARY_DIR}/aten/src/ATen/generated_${gen_type}.txt" "generated_${gen_type}")
+    file(READ "${CMAKE_BINARY_DIR}/aten/src/ATen/generated_${gen_type}.txt-cuda" "cuda_generated_${gen_type}")
+    file(READ "${CMAKE_BINARY_DIR}/aten/src/ATen/generated_${gen_type}.txt-core" "core_generated_${gen_type}")
+  endforeach()
+
+  file(GLOB_RECURSE header_templates "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/templates/*\.h")
+  file(GLOB_RECURSE source_templates "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/templates/*\.cpp")
 
   file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/aten/src/ATen)
   file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/aten/src/ATen/core)
 
-  add_custom_command(OUTPUT ${generated_cpp} ${cuda_generated_cpp} ${core_generated_cpp}
-    COMMAND ${GEN_COMMAND}
-    DEPENDS ${all_python} ${all_templates}
+  add_custom_command(
+    OUTPUT ${generated_headers} ${cuda_generated_headers} ${core_generated_headers}
+    COMMAND ${GEN_COMMAND} --generate headers
+    DEPENDS ${all_python} ${header_templates}
+      ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/native_functions.yaml
+    WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
+    )
+
+  add_custom_command(
+    OUTPUT ${generated_sources} ${cuda_generated_sources} ${core_generated_sources}
+    COMMAND ${GEN_COMMAND} --generate sources
+    DEPENDS ${all_python} ${source_templates}
+      ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/native_functions.yaml
+    WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
+    )
+
+  add_custom_command(
+    OUTPUT
+      ${generated_declarations_yaml}
+      ${cuda_generated_declarations_yaml}
+      ${core_generated_declarations_yaml}
+    COMMAND ${GEN_COMMAND} --generate declarations_yaml
+    DEPENDS ${all_python}
       ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/native_functions.yaml
     WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
     )
@@ -251,8 +276,12 @@ if(INTERN_BUILD_ATEN_OPS)
   # Generated headers used from a CUDA (.cu) file are
   # not tracked correctly in CMake. We make the libATen.so depend explicitly
   # on building the generated ATen files to workaround.
-  add_custom_target(ATEN_CPU_FILES_GEN_TARGET DEPENDS ${generated_cpp} ${core_generated_cpp})
-  add_custom_target(ATEN_CUDA_FILES_GEN_TARGET DEPENDS ${cuda_generated_cpp})
+  add_custom_target(ATEN_CPU_FILES_GEN_TARGET DEPENDS
+      ${generated_headers} ${core_generated_headers}
+      ${generated_sources} ${core_generated_sources}
+      ${generated_declarations_yaml})
+  add_custom_target(ATEN_CUDA_FILES_GEN_TARGET DEPENDS
+      ${cuda_generated_headers} ${cuda_generated_sources})
   add_library(ATEN_CPU_FILES_GEN_LIB INTERFACE)
   add_library(ATEN_CUDA_FILES_GEN_LIB INTERFACE)
   add_dependencies(ATEN_CPU_FILES_GEN_LIB ATEN_CPU_FILES_GEN_TARGET)

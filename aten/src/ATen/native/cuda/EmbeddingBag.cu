@@ -177,7 +177,7 @@ Tensor embedding_bag_backward_cuda_sum_avg(
   AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_bag_backward_cuda_sum_avg", [&] () {
     auto range = at::arange(num_indices, indices.options());
     int64_t nbits = cuda::cub::get_num_bits(num_weights);
-    cuda::cub::sort_pairs(
+    cuda::cub::radix_sort_pairs(
       indices.data_ptr<index_t>(), sorted_indices.data_ptr<index_t>(),
       range.data_ptr<index_t>(), orig_indices.data_ptr<index_t>(),
       num_indices, false/*, 0, nbits*/);

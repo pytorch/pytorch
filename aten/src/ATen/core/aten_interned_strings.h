@@ -197,6 +197,8 @@ _(aten, atan2) \
 _(aten, atleast_1d) \
 _(aten, atleast_2d) \
 _(aten, atleast_3d) \
+_(aten, _autocast_to_reduced_precision) \
+_(aten, _autocast_to_full_precision) \
 _(aten, avg_pool1d) \
 _(aten, avg_pool2d) \
 _(aten, avg_pool2d_backward) \
@@ -379,6 +381,7 @@ _(aten, heaviside) \
 _(aten, hinge_embedding_loss) \
 _(aten, histc) \
 _(aten, histogram) \
+_(aten, histogramdd) \
 _(aten, hspmm) \
 _(aten, hsplit) \
 _(aten, hstack) \
@@ -547,7 +550,6 @@ _(aten, nll_loss2d_backward) \
 _(aten, nll_loss2d_forward) \
 _(aten, nll_loss_backward) \
 _(aten, nll_loss_forward) \
-_(aten, nonzero) \
 _(aten, nonzero_numpy) \
 _(aten, norm) \
 _(aten, norm_except_dim) \
@@ -636,6 +638,7 @@ _(aten, set) \
 _(aten, sign) \
 _(aten, signbit) \
 _(aten, silu) \
+_(aten, silu_backward) \
 _(aten, sgn) \
 _(aten, sin) \
 _(aten, sinh) \

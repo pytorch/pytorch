@@ -1,5 +1,6 @@
 #include "caffe2/operators/batch_sparse_to_dense_op.h"
 
+#include "caffe2/utils/cub_namespace.cuh"
 #include <cub/device/device_scan.cuh>
 
 #include "caffe2/core/context_gpu.h"

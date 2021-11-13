@@ -14,6 +14,7 @@
 #include <c10/core/TensorOptions.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/UnaryOps.h>
 
@@ -423,8 +424,7 @@ Tensor& eye_out_cpu(int64_t n, int64_t m, Tensor& result) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::Half, at::ScalarType::Bool, result.scalar_type(), "eye", [&]() -> void {
     scalar_t* result_data = result.data_ptr<scalar_t>();
     at::parallel_for(0, sz, internal::GRAIN_SIZE, [&](int64_t p_begin, int64_t p_end) {
-      for(int64_t i = p_begin; i < p_end; i++)
-        result_data[i*(result.strides()[0] + result.strides()[1])] = 1;
+      for (const auto i : c10::irange(p_begin, p_end))result_data[i*(result.strides()[0] + result.strides()[1])] = 1;
     });
   });
 
@@ -864,8 +864,9 @@ void randperm_cpu(Tensor& result, int64_t n, CPUGeneratorImpl* generator) {
 
   at::parallel_for(0, n, internal::GRAIN_SIZE,
                   [&r__data, &r__stride_0](int64_t p_begin, int64_t p_end) {
-    for(int64_t i = p_begin; i < p_end; i++)
+    for (const auto i : c10::irange(p_begin, p_end)) {
       r__data[i*r__stride_0] = static_cast<scalar_t>(i);
+    }
   });
 
   for(int64_t i = 0; i < n - 1; i++)

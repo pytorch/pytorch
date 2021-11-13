@@ -89,7 +89,12 @@ def fuse_permute_matmul(gm: torch.fx.GraphModule):
 try:
     import tensorrt as trt
     from torch.fx.experimental.fx2trt.fx2trt import tensorrt_converter
-    from torch.fx.experimental.fx2trt.converters.acc_ops_converters import get_trt_tensor, add_binary_elementwise_layer, broadcast
+    from torch.fx.experimental.fx2trt.converters.acc_ops_converters import (
+        get_trt_tensor,
+        add_binary_elementwise_layer,
+        broadcast,
+        set_layer_name,
+    )
 except Exception as e:
     warnings.warn(f"Unable to import TensorRT related libraries.: {e}")
 else:
@@ -103,7 +108,7 @@ else:
             rhs,
             trt.MatrixOperation.TRANSPOSE if rhs_transposed else trt.MatrixOperation.NONE,
         )
-        layer.name = name
+        set_layer_name(layer, target, name)
         return layer.get_output(0)
 
     @tensorrt_converter(trt_transposed_linear)
@@ -120,7 +125,7 @@ else:
             weight,
             trt.MatrixOperation.NONE,
         )
-        layer.name = f"{name}_mm"
+        set_layer_name(layer, target, f"{name}_mm")
         return add_binary_elementwise_layer(
-            network, layer.get_output(0), bias, trt.ElementWiseOperation.SUM, f"{name}_add"
+            network, layer.get_output(0), bias, trt.ElementWiseOperation.SUM, target, f"{name}_add"
         )

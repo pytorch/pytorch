@@ -47,6 +47,7 @@ Value* ConvertSliceToIndex(Node* slice, Value* size, Node* insertBefore) {
        end,
        step});
 
+  sliced_index_n->copyMetadata(insertBefore);
   auto sliced_index = sliced_index_n->insertBefore(insertBefore)->output();
   return sliced_index;
 }
@@ -321,6 +322,7 @@ std::vector<Value*> ConvertIndexPutToONNX(
        index_put_node->input(2),
        index_put_node->input(3)});
   new_index_put_node->insertBefore(index_put_node);
+  new_index_put_node->copyMetadata(index_put_node);
   auto new_index_put = new_index_put_node->output();
   new_index_put->copyMetadata(index_put_node->output());
   index_put_node->output()->replaceAllUsesWith(new_index_put);

@@ -5,14 +5,14 @@
 #include <ATen/native/quantized/cpu/embedding_packed_params.h>
 #include <torch/custom_class.h>
 
-torch::class_<LinearPackedParamsBase> register_linear_params();
+int register_linear_params();
 
 template <int kSpatialDim = 2>
-torch::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params();
+int register_conv_params();
 
-extern template torch::class_<ConvPackedParamsBase<2>> register_conv_params<2>();
-extern template torch::class_<ConvPackedParamsBase<3>> register_conv_params<3>();
-torch::class_<EmbeddingPackedParamsBase> register_embedding_params();
+extern template int register_conv_params<2>();
+extern template int register_conv_params<3>();
+int register_embedding_params();
 
 TORCH_LIBRARY(quantized, m) {
   register_linear_params();
@@ -81,6 +81,7 @@ TORCH_LIBRARY(quantized, m) {
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::conv_unpack(__torch__.torch.classes.quantized.Conv2dPackedParamsBase packed_weights) -> (Tensor unpacked_weights, Tensor? B_origin)"));
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::conv1d_unpack(__torch__.torch.classes.quantized.Conv2dPackedParamsBase packed_weights) -> (Tensor unpacked_weights, Tensor? B_origin)"));
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::conv2d_unpack(__torch__.torch.classes.quantized.Conv2dPackedParamsBase packed_weights) -> (Tensor unpacked_weights, Tensor? B_origin)"));
+  m.def(TORCH_SELECTIVE_SCHEMA("quantized::conv2d_unpack_sizes(Any packed_weights) -> (Any)"));
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::conv3d_unpack(__torch__.torch.classes.quantized.Conv3dPackedParamsBase packed_weights) -> (Tensor unpacked_weights, Tensor? B_origin)"));
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::conv2d_stride(__torch__.torch.classes.quantized.Conv2dPackedParamsBase packed_weights) -> int[]"));
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::conv2d_padding(__torch__.torch.classes.quantized.Conv2dPackedParamsBase packed_weights) -> int[]"));
