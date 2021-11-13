@@ -12,6 +12,9 @@ import torch.utils.dlpack
 from torch.fx.passes import graph_drawer
 import operator
 import os
+import inspect
+from functorch._C import CompileCache
+from typing import Callable
 
 from .python_key import pythonkey_decompose
 pytree._register_pytree_node(immutable_collections.immutable_list, lambda x: (list(x), None), lambda x, c: immutable_collections.immutable_list(x))
@@ -253,27 +256,71 @@ def create_compiled_function(flat_fn, fw_compiler, bw_compiler, partition_fn, de
     return CompiledFunction
 
 
+class _CompileCache(CompileCache):
+    pass
+
+
 # using a C++-based pytree reduces the overhead by about 50%
 # import tree
-def compiled_function(fn, fw_compiler, bw_compiler, partition_fn=default_partition, decompose=False):
-    saved_fn = None
+compile_cache = None
+
+
+def compiled_function(
+    fn, fw_compiler, bw_compiler, partition_fn=default_partition, decompose=False, hasher_type="StaticShapeHasher"
+):
+    global compile_cache
+    if compile_cache is None:
+        compile_cache = CompileCache()
+
+    fn_id = id(fn)
 
     def returned_function(*args, **kwargs):
-        nonlocal saved_fn
+        global compile_cache
         # flattened_args = tree.flatten((args, kwargs))
         flattened_args, _ = pytree.tree_flatten((args, kwargs))
 
-        if saved_fn is None:
+        # Check if the fn is already compiled
+        cached_fn = compile_cache.at(fn_id, len(flattened_args), *flattened_args)
+
+        # Compile the function and save it in the cache
+        if cached_fn is None:
+            # Compile a new function
             flattened_args, args_spec = pytree.tree_flatten((args, kwargs))
             def flat_fn(*args):
                 args, kwargs = pytree.tree_unflatten(args, args_spec)
                 return fn(*args, **kwargs)
 
-            saved_fn = create_compiled_function(flat_fn, fw_compiler, bw_compiler, partition_fn, decompose).apply
-        return saved_fn(*flattened_args)
+            cached_fn = create_compiled_function(
+                flat_fn, fw_compiler, bw_compiler, partition_fn, decompose
+            ).apply
+
+            # Save the compiled_fn in the cache
+            name = "fn_" + str(fn_id)
+            st_args = [
+                f"Tensor inp_{idx}" for idx, _ in enumerate(flattened_args)
+            ]
+            signature = f"{name}({', '.join(st_args)}, *)"
+            compile_cache.insert(
+                fn_id, [signature], len(flattened_args), hasher_type, cached_fn, *flattened_args
+            )
+
+        return cached_fn(*flattened_args)
 
     return returned_function
 
+
+def num_of_recompilations():
+    global compile_cache
+    if compile_cache is None:
+        return 0
+    return compile_cache.size()
+
+
+def clear_compile_cache():
+    global compile_cache
+    if compile_cache is not None:
+        compile_cache.clear()
+        compile_cache = None
 
 def tvm_compile(fx_module, example_inputs, name = None):
     import tvm
