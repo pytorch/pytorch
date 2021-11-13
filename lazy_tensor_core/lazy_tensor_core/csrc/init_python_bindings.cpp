@@ -181,7 +181,7 @@ std::pair<at::Tensor, std::shared_ptr<torch::lazy::Value>> AllReduce(
       TryGetLtcTensor(input), *token, GetReduceType(reduce_type), scale,
       replica_groups);
   return std::pair<at::Tensor, std::shared_ptr<torch::lazy::Value>>(
-      AtenFromLtcTensor(std::move(result)),
+      CreateAtenFromLtcTensor(std::move(result)),
       std::make_shared<torch::lazy::Value>(new_token));
 }
 
@@ -195,7 +195,7 @@ std::pair<at::Tensor, std::shared_ptr<torch::lazy::Value>> AllToAll(
       TryGetLtcTensor(input), *token, split_dimension, concat_dimension,
       split_count, replica_groups);
   return std::pair<at::Tensor, std::shared_ptr<torch::lazy::Value>>(
-      AtenFromLtcTensor(std::move(result)),
+      CreateAtenFromLtcTensor(std::move(result)),
       std::make_shared<torch::lazy::Value>(new_token));
 }
 
@@ -207,7 +207,7 @@ std::pair<at::Tensor, std::shared_ptr<torch::lazy::Value>> CollectivePermute(
   std::tie(result, new_token) = lazy_tensor_distributed::collective_permute(
       TryGetLtcTensor(input), *token, source_target_pairs);
   return std::pair<at::Tensor, std::shared_ptr<torch::lazy::Value>>(
-      AtenFromLtcTensor(std::move(result)),
+      CreateAtenFromLtcTensor(std::move(result)),
       std::make_shared<torch::lazy::Value>(new_token));
 }
 
@@ -311,7 +311,7 @@ std::vector<at::Tensor> GetLtcTensorsFromAten(
   lazy_tensors.reserve(data_handles.size());
   for (auto& data_handle : data_handles) {
     LazyTensor lazy_tensor = LazyTensor::Create(std::move(data_handle));
-    lazy_tensors.push_back(AtenFromLtcTensor(std::move(lazy_tensor)));
+    lazy_tensors.push_back(CreateAtenFromLtcTensor(std::move(lazy_tensor)));
   }
   return lazy_tensors;
 }
@@ -371,8 +371,8 @@ py::object LtcNms(const at::Tensor& boxes, const at::Tensor& scores,
         TryGetLtcTensor(boxes), TryGetLtcTensor(scores),
         TryGetLtcTensor(score_threshold),
         TryGetLtcTensor(iou_threshold), output_size);
-    selected_indices = AtenFromLtcTensor(std::move(nms_result.first));
-    num_valid = AtenFromLtcTensor(std::move(nms_result.second));
+    selected_indices = CreateAtenFromLtcTensor(std::move(nms_result.first));
+    num_valid = CreateAtenFromLtcTensor(std::move(nms_result.second));
   }
   auto result_tuple = py::tuple(2);
   result_tuple[0] =
