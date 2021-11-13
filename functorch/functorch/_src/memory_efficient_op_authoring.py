@@ -5,6 +5,7 @@ from torch.fx.proxy import GraphAppendingTracer
 from typing import Iterable
 from .eager_compilation import compiled_function, partition_with_recompute_fwd_in_bwd
 
+
 def tensorexpr_compile(fx_module, flat_args):
     """Compiles the given fx_module using TensorExpr Kernel"""
     inp_devices = set([i.device for i in flat_args if isinstance(i, torch.Tensor)])
@@ -75,39 +76,67 @@ def torchscript_nnc_compile(fx_module, flat_args):
 def torchscript_nvfuser_compile(fx_module, flat_args):
     """Compiles the given fx_module using torchscript nvfuser"""
     if not torch._C._jit_nvfuser_enabled():
-        raise RuntimeError("Wrap the call with `with jit.fuser(\"fuser2\") to turn nvfuser on")
+        raise RuntimeError(
+            'Wrap the call with `with jit.fuser("fuser2") to turn nvfuser on'
+        )
+
     scripted_module = torch.jit.script(fx_module)
     frozen_module = torch.jit.freeze(scripted_module.eval())
     return frozen_module
 
 
-def torchscript_nnc_operator_authoring(fn, partition_fn):
+def torchscript_nnc_operator_authoring(fn, partition_fn, hasher_type):
     fw_compiler = torchscript_nnc_compile
     bw_compiler = torchscript_nnc_compile
-    return compiled_function(fn, fw_compiler, bw_compiler, partition_fn, decompose=True)
+    return compiled_function(
+        fn,
+        fw_compiler,
+        bw_compiler,
+        partition_fn,
+        decompose=True,
+        hasher_type=hasher_type,
+    )
 
 
-def torchscript_nvfuser_operator_authoring(fn, partition_fn):
+def torchscript_nvfuser_operator_authoring(fn, partition_fn, hasher_type):
     fw_compiler = torchscript_nvfuser_compile
     bw_compiler = torchscript_nvfuser_compile
-    return compiled_function(fn, fw_compiler, bw_compiler, partition_fn, decompose=True)
+    return compiled_function(
+        fn,
+        fw_compiler,
+        bw_compiler,
+        partition_fn,
+        decompose=True,
+        hasher_type=hasher_type,
+    )
 
 
-def tensorexpr_operator_authoring(fn, partition_fn):
+def tensorexpr_operator_authoring(fn, partition_fn, hasher_type):
     fw_compiler = tensorexpr_compile
     bw_compiler = tensorexpr_compile
-    return compiled_function(fn, fw_compiler, bw_compiler, partition_fn, decompose=True)
+    return compiled_function(
+        fn,
+        fw_compiler,
+        bw_compiler,
+        partition_fn,
+        decompose=True,
+        hasher_type=hasher_type,
+    )
 
 
-def memory_efficient_operator_authoring(fn, compiler_name="torchscript_nnc"):
+def memory_efficient_operator_authoring(
+    fn, compiler_name="torchscript_nnc", hasher_type="StaticShapeHasher"
+):
     if compiler_name == "torchscript_nnc":
         return torchscript_nnc_operator_authoring(
-            fn, partition_with_recompute_fwd_in_bwd
+            fn, partition_with_recompute_fwd_in_bwd, hasher_type
         )
     elif compiler_name == "tensorexpr_nnc":
-        return tensorexpr_operator_authoring(fn, partition_with_recompute_fwd_in_bwd)
+        return tensorexpr_operator_authoring(
+            fn, partition_with_recompute_fwd_in_bwd, hasher_type
+        )
     elif compiler_name == "torchscript_nvfuser":
         return torchscript_nvfuser_operator_authoring(
-            fn, partition_with_recompute_fwd_in_bwd
+            fn, partition_with_recompute_fwd_in_bwd, hasher_type
         )
     return NotImplementedError(f"{compiler_name} is not implemented")

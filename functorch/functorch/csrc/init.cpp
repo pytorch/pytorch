@@ -14,6 +14,7 @@
 #include <functorch/csrc/BatchedFallback.h>
 #include <functorch/csrc/BatchRulesHelper.h>
 #include <functorch/csrc/PointwiseOperatorCompileCache.h>
+#include <functorch/csrc/CompileCache.h>
 
 
 namespace at {
@@ -229,4 +230,5 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("maybe_get_level", &at::functorch::maybe_get_level);
   m.def("maybe_get_bdim", &at::functorch::maybe_get_bdim);
   at::functorch::initPointwiseOperatorCompileCacheBindings(m.ptr());
+  at::functorch::initCompileCacheBindings(m.ptr());
 }
