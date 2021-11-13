@@ -4547,6 +4547,38 @@ Tensor warn_backwards(const Tensor &grad_output) {
   return grad_output;
 }
 
+std::tuple<Tensor, Tensor, Tensor> attn_backwards(const Tensor& grad_out_o, const Tensor& grad_out_a, const Tensor& q, const Tensor& k, const Tensor& v) {
+  Tensor grad_q, grad_k, grad_v;
+
+  Tensor x = at::matmul(q, k.t());
+  Tensor da_dx = 1 - at::tanh(x).pow(2);
+
+  Tensor grad1_dl_dx;
+  Tensor dla_dq, dla_dk;
+  if (grad_out_a.defined()) {
+    grad1_dl_dx = grad_out_a * da_dx;
+
+    dla_dq = at::matmul(grad1_dl_dx, k);
+    dla_dk = at::matmul(grad1_dl_dx.t(), q);
+  }
+
+  Tensor grad2_dl_da, grad2_dl_dx;
+  Tensor dlo_dq, dlo_dk;
+  if (grad_out_o.defined()) {
+    grad2_dl_da = at::matmul(grad_out_o, v.t());
+    grad2_dl_dx = grad2_dl_da * da_dx;
+
+    dla_dq = at::matmul(grad2_dl_dx, k);
+    dla_dk = at::matmul(grad2_dl_dx.t(), q);
+  }
+
+  Tensor grad_q = dla_dq + dlo_dq;
+  Tensor grad_k = dla_dk + dlo_dk;
+  Tensor grad_v = at::mul(a.t(), grad_out_o);
+
+  return std::make_tuple(grad_q, grad_k, grad_v);
+}
+
 } // namespace details
 } // namespace generated
 } // namespace autograd
