@@ -454,6 +454,7 @@
   dispatch:
     CPU: addmv_out_cpu
     CUDA: addmv_out_cuda
+    SparseCsrCPU: addmv_out_sparse_csr
     SparseCsrCUDA: addmv_out_sparse_csr_cuda
 
 - func: addr(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
@@ -533,7 +534,7 @@
 
 - func: arange.start_out(Scalar start, Scalar end, Scalar step=1, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: arange_cpu_out
+    CPU, Meta: arange_out
     CUDA: arange_cuda_out
 
 # This function is a temporary hack to allow tracing of arange like constructs with dynamic
@@ -1015,18 +1016,18 @@
   device_check: NoCheck
   device_guard: False
 
-- func: chunk(Tensor(a) self, int chunks, int dim=0) -> Tensor(a)[]
+- func: chunk(Tensor(a -> *) self, int chunks, int dim=0) -> Tensor(a)[]
   variants: function, method
   device_check: NoCheck
   device_guard: False
 
-- func: tensor_split.sections(Tensor(a) self, int sections, int dim=0) -> Tensor(a)[]
+- func: tensor_split.sections(Tensor(a -> *) self, int sections, int dim=0) -> Tensor(a)[]
   variants: function, method
 
-- func: tensor_split.indices(Tensor(a) self, int[] indices, int dim=0) -> Tensor(a)[]
+- func: tensor_split.indices(Tensor(a -> *) self, int[] indices, int dim=0) -> Tensor(a)[]
   variants: function, method
 
-- func: tensor_split.tensor_indices_or_sections(Tensor(a) self, Tensor tensor_indices_or_sections, int dim=0) -> Tensor(a)[]
+- func: tensor_split.tensor_indices_or_sections(Tensor(a -> *) self, Tensor tensor_indices_or_sections, int dim=0) -> Tensor(a)[]
   variants: function, method
 
 - func: clamp(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor
@@ -2486,7 +2487,7 @@
 
 - func: linspace.out(Scalar start, Scalar end, int? steps=None, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: linspace_cpu_out
+    CPU, Meta: linspace_out
     CUDA: linspace_cuda_out
 
 - func: log(Tensor self) -> Tensor
@@ -2645,7 +2646,7 @@
 
 - func: logspace.out(Scalar start, Scalar end, int? steps=None, float base=10.0, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: logspace_cpu_out
+    CPU, Meta: logspace_out
     CUDA: logspace_cuda_out
 
 # log_softmax allows positional dtype, unlike most operators, because kwonly is BC-breaking when loading jit models.
@@ -3128,7 +3129,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: mv
-    SparseCPU, SparseCUDA, SparseCsrCPU: mv_sparse
+    SparseCPU, SparseCUDA: mv_sparse
 
 - func: mv.out(Tensor self, Tensor vec, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -3455,7 +3456,7 @@
 
 - func: range.out(Scalar start, Scalar end, Scalar step=1, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: range_cpu_out
+    CPU, Meta: range_out
     CUDA: range_cuda_out
 
 - func: ravel(Tensor(a) self) -> Tensor(a)
@@ -3975,7 +3976,7 @@
   dispatch:
     CompositeExplicitAutograd: unsafe_split
 
-- func: split.Tensor(Tensor(a) self, int split_size, int dim=0) -> Tensor(a)[]
+- func: split.Tensor(Tensor(a -> *) self, int split_size, int dim=0) -> Tensor(a)[]
   variants: function, method
   device_check: NoCheck
   device_guard: False
@@ -3989,29 +3990,29 @@
   dispatch:
     CompositeExplicitAutograd: unsafe_split_with_sizes
 
-- func: split_with_sizes(Tensor(a) self, int[] split_sizes, int dim=0) -> Tensor(a)[]
+- func: split_with_sizes(Tensor(a -> *) self, int[] split_sizes, int dim=0) -> Tensor(a)[]
   variants: function, method
   device_check: NoCheck
   device_guard: False
   dispatch:
     CompositeExplicitAutograd: split_with_sizes
 
-- func: hsplit.int(Tensor(a) self, int sections) -> Tensor(a)[]
+- func: hsplit.int(Tensor(a -> *) self, int sections) -> Tensor(a)[]
   variants: function, method
 
-- func: hsplit.array(Tensor(a) self, int[] indices) -> Tensor(a)[]
+- func: hsplit.array(Tensor(a -> *) self, int[] indices) -> Tensor(a)[]
   variants: function, method
 
-- func: vsplit.int(Tensor(a) self, int sections) -> Tensor(a)[]
+- func: vsplit.int(Tensor(a -> *) self, int sections) -> Tensor(a)[]
   variants: function, method
 
-- func: vsplit.array(Tensor(a) self, int[] indices) -> Tensor(a)[]
+- func: vsplit.array(Tensor(a -> *) self, int[] indices) -> Tensor(a)[]
   variants: function, method
 
-- func: dsplit.int(Tensor(a) self, int sections) -> Tensor(a)[]
+- func: dsplit.int(Tensor(a -> *) self, int sections) -> Tensor(a)[]
   variants: function, method
 
-- func: dsplit.array(Tensor(a) self, int[] indices) -> Tensor(a)[]
+- func: dsplit.array(Tensor(a -> *) self, int[] indices) -> Tensor(a)[]
   variants: function, method
 
 - func: squeeze(Tensor(a) self) -> Tensor(a)
@@ -5272,12 +5273,12 @@
   dispatch:
     SparseCPU, SparseCUDA: copy_sparse_
 
-- func: unbind.int(Tensor(a) self, int dim=0) -> Tensor(a)[]
+- func: unbind.int(Tensor(a -> *) self, int dim=0) -> Tensor(a)[]
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: unbind
 
-- func: unbind.Dimname(Tensor(a) self, Dimname dim) -> Tensor(a)[]
+- func: unbind.Dimname(Tensor(a -> *) self, Dimname dim) -> Tensor(a)[]
   variants: function, method
 
 - func: to_sparse.sparse_dim(Tensor self, int sparse_dim) -> Tensor
@@ -6245,13 +6246,9 @@
   device_guard: False
 
 - func: cross.out(Tensor self, Tensor other, int? dim=None, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU, CUDA: cross_out
 
 - func: cross(Tensor self, Tensor other, int? dim=None) -> Tensor
   variants: method, function
-  dispatch:
-    CPU, CUDA: cross
 
 - func: triu.out(Tensor self, int diagonal=0, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -8294,6 +8291,13 @@
     CPU: foreach_tensor_minimum_slow
     CUDA: foreach_tensor_minimum_cuda
 
+- func: _foreach_norm.Scalar(Tensor[] tensors, Scalar ord=2) -> Tensor[]
+  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_norm_slow
+    CUDA: foreach_tensor_norm_cuda
+
 - func: bucketize.Tensor(Tensor self, Tensor boundaries, *, bool out_int32=False, bool right=False) -> Tensor
   dispatch:
     CPU: bucketize_cpu
@@ -8309,7 +8313,7 @@
     CPU: bucketize_cpu
     CUDA: bucketize_cuda
 
-- func: searchsorted.Tensor(Tensor sorted_sequence, Tensor self, *, bool out_int32=False, bool right=False) -> Tensor
+- func: searchsorted.Tensor(Tensor sorted_sequence, Tensor self, *, bool out_int32=False, bool right=False, str? side=None, Tensor? sorter=None) -> Tensor
   dispatch:
     CPU: searchsorted_cpu
     CUDA: searchsorted_cuda
@@ -8324,12 +8328,12 @@
   dispatch:
     CUDA: _torch_cuda_cu_linker_symbol_op_cuda
 
-- func: searchsorted.Tensor_out(Tensor sorted_sequence, Tensor self, *, bool out_int32=False, bool right=False, Tensor(a!) out) -> Tensor(a!)
+- func: searchsorted.Tensor_out(Tensor sorted_sequence, Tensor self, *, bool out_int32=False, bool right=False, str? side=None, Tensor? sorter=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: searchsorted_out_cpu
     CUDA: searchsorted_out_cuda
 
-- func: searchsorted.Scalar(Tensor sorted_sequence, Scalar self, *, bool out_int32=False, bool right=False) -> Tensor
+- func: searchsorted.Scalar(Tensor sorted_sequence, Scalar self, *, bool out_int32=False, bool right=False, str? side=None, Tensor? sorter=None) -> Tensor
   dispatch:
     CPU: searchsorted_cpu
     CUDA: searchsorted_cuda
@@ -10425,6 +10429,17 @@
 - func: linalg_cholesky.out(Tensor self, *, bool upper=False, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   variants: function
+
+- func: linalg_cross(Tensor self, Tensor other, *, int dim=-1) -> Tensor
+  python_module: linalg
+  variants: function
+  dispatch:
+    CPU, CUDA: linalg_cross
+
+- func: linalg_cross.out(Tensor self, Tensor other, *, int dim=-1, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  dispatch:
+    CPU, CUDA: linalg_cross_out
 
 - func: linalg_det(Tensor self) -> Tensor
   python_module: linalg
