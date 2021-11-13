@@ -43,7 +43,7 @@ class DataChunk(list, Generic[T]):
         for i in super().__iter__():
             yield i
 
-    def raw_iterator(self):
+    def raw_iterator(self) -> T:
         for i in self.items:
             yield i
 
