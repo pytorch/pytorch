@@ -2,7 +2,6 @@
 
 #include <torch/csrc/lazy/core/shape.h>
 #include <ATen/InferSize.h>
-#include "lazy_tensor_core/csrc/data_ops.h"
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensors/shape_util.h"
 

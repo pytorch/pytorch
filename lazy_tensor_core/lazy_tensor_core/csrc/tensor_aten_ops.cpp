@@ -5,7 +5,6 @@
 #include <ATen/InferSize.h>
 #include "c10/util/Optional.h"
 #include "lazy_tensor_core/csrc/aten_ltc_bridge.h"
-#include "lazy_tensor_core/csrc/data_ops.h"
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/lazy_graph_executor.h"
 #include "lazy_tensor_core/csrc/ops/arithmetic_ir_ops.h"
@@ -499,7 +498,7 @@ LazyTensor unsqueeze(const LazyTensor& input, int64_t dim) {
   int64_t squeeze_dim =
       Helpers::GetCanonicalDimensionIndex(dim, input_shape.get().dim() + 1);
   auto dimensions =
-      BuildUnsqueezeDimensions(input_shape.get().sizes(), squeeze_dim);
+      ir::ops::BuildUnsqueezeDimensions(input_shape.get().sizes(), squeeze_dim);
   return view(input, dimensions);
 }
 
