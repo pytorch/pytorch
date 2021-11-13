@@ -6,7 +6,7 @@ from torch.autograd import gradgradcheck
 class AutogradAttn(torch.autograd.Function):
     @staticmethod
     def forward(ctx, q, k, v):
-        assert q.dim() == k.dim() == v.dim() == 2, "all the inputs must be 2D tensors"
+        assert q.dim() == k.dim() == v.dim() == 2, "All the inputs must be 2D tensors"
         assert q.size()[1] == k.size()[1], "q and k must have the same number of columns"
         assert k.size()[0] == v.size()[0], "k and v must have the same number of rows"
 

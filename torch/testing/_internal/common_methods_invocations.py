@@ -6881,6 +6881,23 @@ def sample_inputs_allclose(op_info, device, dtype, requires_grad, **kwargs):
 
     return samples
 
+def sample_inputs_attn(op_info, device, dtype, requires_grad, **kwargs):
+    A = [10, 40]
+    B = [20, 30]
+    C = [30, 20]
+    D = [40, 10]
+
+    samples = []
+    for a, b, c, d in itertools.product(A, B, C, D):
+        q = make_tensor((a, b), device, dtype, requires_grad=requires_grad)
+        k = make_tensor((c, b), device, dtype, requires_grad=requires_grad)
+        v = make_tensor((c, d), device, dtype, requires_grad=requires_grad)
+
+        samples.append(SampleInput(q, args=(k, v,)))
+    
+    return samples
+
+
 foreach_unary_op_db: List[OpInfo] = [
     ForeachFuncInfo('exp'),
     ForeachFuncInfo('acos'),
@@ -12742,6 +12759,15 @@ op_db: List[OpInfo] = [
                 dtypes=(torch.float32, torch.complex64),
             ),
         ),
+    ),
+    OpInfo(
+        'attn',
+        supports_out=False,
+        dtypes=floating_types_and(torch.bfloat16, torch.complex64, torch.complex128),
+        dtypesIfCUDA=floating_types_and(torch.bfloat16),
+        supports_forward_ad=True,
+        supports_autograd=True,
+        sample_inputs_func=sample_inputs_attn,
     )
 ]
 
