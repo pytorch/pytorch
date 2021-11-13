@@ -258,136 +258,113 @@ class ModifiesVarChecker : public IRVisitor {
 //  d[i] = 0;
 //  for j
 //    d[i] += e[i, j];
-class StmtTrace {
+class StmtIndex {
  public:
   void append(int32_t id) {
-    trace_.emplace_back(id);
+    stmt_index_.emplace_back(id);
   }
   void pop() {
-    trace_.pop_back();
+    stmt_index_.pop_back();
   }
 
-  const std::vector<int32_t>& getTrace() {
-    return trace_;
+  const std::vector<int32_t>& getStmtIndex() {
+    return stmt_index_;
   }
 
-  bool operator==(StmtTrace& trace) {
-    auto compare = trace.getTrace();
-    if (trace_.size() != compare.size()) {
+  bool operator==(StmtIndex& index) {
+    auto compare = index.getStmtIndex();
+    if (stmt_index_.size() != compare.size()) {
       return false;
     }
     int size = compare.size();
     for (int i = 0; i < size; i++) {
-      if (trace_.at(i) != compare.at(i)) {
+      if (stmt_index_.at(i) != compare.at(i)) {
         return false;
       }
     }
     return true;
   }
 
-  bool operator<(StmtTrace& trace) {
-    auto compare = trace.getTrace();
-    int size = trace_.size() < compare.size() ? trace_.size() : compare.size();
+  bool operator<(StmtIndex& index) {
+    auto compare = index.getStmtIndex();
+    int size = stmt_index_.size() < compare.size() ? stmt_index_.size()
+                                                   : compare.size();
     for (int i = 0; i < size; i++) {
-      if (trace_.at(i) > compare.at(i)) {
+      if (stmt_index_.at(i) > compare.at(i)) {
         return false;
       }
     }
-    return !(*this == trace);
+    return !(*this == index);
   }
 
-  bool operator>(StmtTrace& trace) {
-    auto compare = trace.getTrace();
-    int size = trace_.size() < compare.size() ? trace_.size() : compare.size();
+  bool operator>(StmtIndex& index) {
+    auto compare = index.getStmtIndex();
+    int size = stmt_index_.size() < compare.size() ? stmt_index_.size()
+                                                   : compare.size();
     for (int i = 0; i < size; i++) {
-      if (trace_.at(i) < compare.at(i)) {
+      if (stmt_index_.at(i) < compare.at(i)) {
         return false;
       }
     }
-    return !(*this == trace);
+    return !(*this == index);
   }
 
-  std::string getTraceString() {
+  std::string getStmtIndexString() {
     std::string cstr = "";
-    for (int i = 0; i < trace_.size(); i++) {
-      cstr += std::to_string(trace_.at(i));
+    for (int i = 0; i < stmt_index_.size(); i++) {
+      cstr += std::to_string(stmt_index_.at(i));
       cstr += ":";
     }
     return cstr;
   }
 
  private:
-  std::vector<int32_t> trace_;
+  std::vector<int32_t> stmt_index_;
 };
 
 // Traverse the root stmt to identify the position of each stmt in the AST,
-// i.e., a StmtTrace
-class StmtTracer : public IRVisitor {
+// i.e., a StmtIndex
+class StmtIndexer : public IRVisitor {
  public:
-  StmtTrace getStmtTrace() {
-    return trace_;
+  StmtIndex getStmtIndex() {
+    return stmt_index_;
   }
 
  private:
   void visit(BlockPtr v) {
-    if (flatten_) {
-      for (StmtPtr s : *v) {
-        s->accept(this);
-      }
-      return;
-    }
-
     int count = 0;
     for (StmtPtr s : *v) {
-      trace_.append(count);
+      stmt_index_.append(count);
       s->accept(this);
-      trace_.pop();
+      stmt_index_.pop();
       count++;
     }
   }
 
-  void visit(CondPtr v) {
-    flatten_ = true;
-    ExprPtr condition = v->condition();
-    StmtPtr true_stmt = v->true_stmt();
-    StmtPtr false_stmt = v->false_stmt();
-    condition->accept(this);
-    if (true_stmt) {
-      true_stmt->accept(this);
-    }
-    if (false_stmt) {
-      false_stmt->accept(this);
-    }
-    flatten_ = false;
-  }
-
-  StmtTrace trace_;
-  bool flatten_ = false;
+  StmtIndex stmt_index_;
 };
 
-enum AccMode { READ, WRITE, REDUCE };
+enum AccMode { READ, WRITE, BOTH };
 
 // Traverses the IR to identify all reads/writes to a buf, and their positions
-// in the AST which is represented as a StmtTrace
-using BufAccessInfo = std::tuple<StmtPtr, AccMode, StmtTrace>;
-class BufAccesses : public StmtTracer {
+// in the AST which is represented as a StmtIndex
+using BufAccessNode = std::tuple<StmtPtr, AccMode, StmtIndex>;
+class BufAccesses : public StmtIndexer {
  public:
   BufAccesses(BufPtr b) : buf_(b) {}
 
-  std::vector<std::tuple<StmtPtr, AccMode, StmtTrace>> accesses() {
+  std::vector<std::tuple<StmtPtr, AccMode, StmtIndex>> accesses() {
     return accesses_;
   }
 
-  static std::vector<std::tuple<StmtPtr, AccMode, StmtTrace>> find(
-      StmtPtr s,
-      BufPtr b) {
+  static std::vector<BufAccessNode> find(StmtPtr s, BufPtr b) {
     BufAccesses finder(b);
     s->accept(&finder);
     return finder.accesses();
   }
 
  private:
-  bool readBuffer(StmtPtr s) {
+  bool findBufReads(StmtPtr s) {
     auto loads1 = NodeFinder<Load>::find(s);
     for (auto l : loads1) {
       if (l->buf() == buf_) {
@@ -405,7 +382,7 @@ class BufAccesses : public StmtTracer {
     return false;
   }
 
-  bool writeBuffer(StmtPtr s) {
+  bool findBufWrites(StmtPtr s) {
     auto writes1 = NodeFinder<Store>::find(s);
     for (auto w : writes1) {
       if (w->buf() == buf_) {
@@ -422,19 +399,19 @@ class BufAccesses : public StmtTracer {
   }
 
   void insertAccesses(StmtPtr s) {
-    bool has_reads = readBuffer(s), has_writes = writeBuffer(s);
+    bool has_reads = findBufReads(s), has_writes = findBufWrites(s);
     if (has_reads && has_writes) {
-      auto acc = std::make_tuple(s, AccMode::REDUCE, getStmtTrace());
+      auto acc = std::make_tuple(s, AccMode::BOTH, getStmtIndex());
       accesses_.push_back(acc);
       return;
     }
     if (has_reads) {
-      auto acc = std::make_tuple(s, AccMode::READ, getStmtTrace());
+      auto acc = std::make_tuple(s, AccMode::READ, getStmtIndex());
       accesses_.push_back(acc);
       return;
     }
     if (has_writes) {
-      auto acc = std::make_tuple(s, AccMode::WRITE, getStmtTrace());
+      auto acc = std::make_tuple(s, AccMode::WRITE, getStmtIndex());
       accesses_.push_back(acc);
     }
   }
@@ -447,10 +424,6 @@ class BufAccesses : public StmtTracer {
     insertAccesses(v);
   }
 
-  void visit(CondPtr v) {
-    insertAccesses(v);
-  }
-
   void visit(AtomicAddPtr v) {
     insertAccesses(v);
   }
@@ -460,7 +433,7 @@ class BufAccesses : public StmtTracer {
   }
 
   BufPtr buf_;
-  std::vector<BufAccessInfo> accesses_;
+  std::vector<BufAccessNode> accesses_;
 };
 
 // A class that analyzes the given program relevant for Block backend

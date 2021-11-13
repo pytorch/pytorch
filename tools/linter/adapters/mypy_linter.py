@@ -26,7 +26,7 @@ class LintSeverity(str, Enum):
 
 
 class LintMessage(NamedTuple):
-    path: str
+    path: Optional[str]
     line: Optional[int]
     char: Optional[int]
     code: str
@@ -35,7 +35,6 @@ class LintMessage(NamedTuple):
     original: Optional[str]
     replacement: Optional[str]
     description: Optional[str]
-    bypassChangedLineFiltering: Optional[bool]
 
 
 def as_posix(name: str) -> str:
@@ -85,19 +84,20 @@ severities = {
 
 def check_file(
     filename: str,
+    config: str,
     binary: str,
     retries: int,
 ) -> List[LintMessage]:
     try:
         proc = run_command(
-            [binary, filename],
+            [binary, f"--config={config}", filename],
             extra_env={},
             retries=retries,
         )
     except OSError as err:
         return [
             LintMessage(
-                path=filename,
+                path=None,
                 line=None,
                 char=None,
                 code="MYPY",
@@ -108,7 +108,6 @@ def check_file(
                 description=(
                     f"Failed due to {err.__class__.__name__}:\n{err}"
                 ),
-                bypassChangedLineFiltering=None,
             )
         ]
     stdout = str(proc.stdout, "utf-8").strip()
@@ -125,7 +124,6 @@ def check_file(
             severity=severities.get(match["severity"], LintSeverity.ERROR),
             original=None,
             replacement=None,
-            bypassChangedLineFiltering=None,
         )
         for match in RESULTS_RE.finditer(stdout)
     ]
@@ -146,6 +144,11 @@ def main() -> None:
         default=3,
         type=int,
         help="times to retry timed out mypy",
+    )
+    parser.add_argument(
+        "--config",
+        required=True,
+        help="path to an mypy .ini config file",
     )
     parser.add_argument(
         "--verbose",
@@ -177,6 +180,7 @@ def main() -> None:
             executor.submit(
                 check_file,
                 filename,
+                args.config,
                 args.binary,
                 args.retries,
             ): filename
