@@ -1637,6 +1637,32 @@ class TestFunctionalMapDataPipe(TestCase):
                 map_dp[index], torch.tensor(input_dp[index], dtype=torch.int).sum()
             )
 
+    def test_unbatch_datapipe(self):
+        # arr = [0, 1, 2]
+        # arr = [[0, 1], [2]]
+        arr = [[[0, 1], [2, 3], [4, 5]], [[6, 7], [8, 9], [10, 11]]]
+        print()
+        print(f"Input: {arr}")
+        print()
+        # arr = [0, 1, 2, 3, 4, 5]
+        # arr = [[0, 1, 2], [3, 4, 5]]
+        input_dp = dp.map.SequenceWrapper(arr)
+        # unbatch_dp = dp.map.UnBatcher(input_dp)
+        unbatch_dp2 = dp.map.UnBatcher(input_dp, unbatch_level=2)
+        print()
+        # print(unbatch_dp._get_batch_sizes())
+        # print("FINAL RESULT")
+        # print(list(unbatch_dp))
+        # print()
+        # print(unbatch_dp2._get_batch_sizes())
+        print("FINAL RESULT")
+        print(len(unbatch_dp2))
+        # print(list(unbatch_dp2))
+        # for i in iter(unbatch_dp2):
+        #     print(i)
+        # print(unbatch_dp._get_deepest_level())
+        # print(unbatch_dp2._get_deepest_level())
+
 # Metaclass conflict for Python 3.6
 # Multiple inheritance with NamedTuple is not supported for Python 3.9
 _generic_namedtuple_allowed = sys.version_info >= (3, 7) and sys.version_info < (3, 9)
