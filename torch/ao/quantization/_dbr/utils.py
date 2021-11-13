@@ -246,10 +246,12 @@ def attach_scale_zp_values_to_model(
     """
     if hasattr(module, '_auto_quant_state'):
         qstate = module._auto_quant_state
-        for tensor_id, observer in qstate.tensor_id_to_observer.items():
+        # TODO(future PR): refactor this code to be aware of the
+        # AutoQuantizationStateType and remove the mypy ignore statements
+        for tensor_id, observer in qstate.tensor_id_to_observer.items():  # type: ignore[union-attr, operator]
             scale, zp = observer.calculate_qparams()
-            qstate.tensor_id_to_scale_zp[tensor_id] = (scale, zp)
-        qstate.tensor_id_to_observer.clear()
+            qstate.tensor_id_to_scale_zp[tensor_id] = (scale, zp)  # type: ignore[union-attr, operator, assignment]
+        qstate.tensor_id_to_observer.clear()  # type: ignore[union-attr, operator]
 
     for _, child in module.named_children():
         attach_scale_zp_values_to_model(child)

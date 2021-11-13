@@ -134,7 +134,7 @@ class AutoQuantizationState(torch.nn.Module):
             s += "(idx_to_packed_weight_name): {}\n"
         if len(self.tensor_id_to_scale_zp):
             s += "(tensor_id_to_scale_zp): {\n"
-            for k, v in self.tensor_id_to_scale_zp.items():
+            for k, v in self.tensor_id_to_scale_zp.items():  # type: ignore[assignment]
                 s += f"  {k}: {v}\n"
             s += "}"
         return s
@@ -481,7 +481,7 @@ class AutoQuantizationState(torch.nn.Module):
                 additional_kwargs.update({'scale': scale, 'zero_point': zp})
             else:
                 additional_kwargs.update(
-                    {'scale': scale.item(), 'zero_point': zp.item()})
+                    {'scale': scale.item(), 'zero_point': zp.item()})  # type: ignore[dict-item]
 
         return new_op, arg_quant_infos, arg_dequant_infos, packed_param_name, additional_kwargs
 
@@ -538,7 +538,7 @@ class AutoQuantizationState(torch.nn.Module):
                         assert str(tensor_id) in self.tensor_id_to_scale_zp
                         scale, zp = self.tensor_id_to_scale_zp[str(tensor_id)]
                         # TODO: return this to the caller
-                        quant_infos.append((scale, zp,))
+                        quant_infos.append((scale, zp,))  # type: ignore[arg-type]
                         dequant_infos.append(False)
                     else:
                         quant_infos.append(None)
