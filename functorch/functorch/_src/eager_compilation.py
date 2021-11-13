@@ -152,7 +152,7 @@ def partition_with_recompute_fwd_in_bwd(joint_module: fx.GraphModule, _joint_inp
     outputs to just original forward or backward outputs. And then we run the
     resulting graphs through dead code elimintation.
     """
-            
+
 
     def is_primal(node):
         return node.op == "placeholder" and "tangents" not in node.target
@@ -261,7 +261,11 @@ class _CompileCache(CompileCache):
 
 
 # using a C++-based pytree reduces the overhead by about 50%
-# import tree
+try:
+    import tree
+    HAS_TREE = True
+except ImportError:
+    HAS_TREE = False
 compile_cache = None
 
 
@@ -271,13 +275,17 @@ def compiled_function(
     global compile_cache
     if compile_cache is None:
         compile_cache = CompileCache()
+    cached_fn = None
 
     fn_id = id(fn)
 
     def returned_function(*args, **kwargs):
         global compile_cache
-        # flattened_args = tree.flatten((args, kwargs))
-        flattened_args, _ = pytree.tree_flatten((args, kwargs))
+        nonlocal cached_fn
+        if HAS_TREE:
+            flattened_args = tree.flatten((args, kwargs))
+        else:
+            flattened_args, _ = pytree.tree_flatten((args, kwargs))
 
         # Check if the fn is already compiled
         cached_fn = compile_cache.at(fn_id, len(flattened_args), *flattened_args)

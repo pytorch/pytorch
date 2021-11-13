@@ -254,13 +254,13 @@ struct ArgCompileCacheBase {
 
 /// ArgCompileCache is a templated class allowing plugging of different types of
 /// Hasher/Specialization Keys.
-template <int NUM_IN, class SpeciaizationKey>
+template <int NUM_IN, class SpecializationKey>
 struct ArgsCompileCache : public ArgCompileCacheBase {
 public:
   constexpr static int NUM_ARGS = NUM_IN;
 
   /// Array of keys used for specializing kernels in this cache.
-  using SpecializationKeys = std::array<SpeciaizationKey, NUM_ARGS>;
+  using SpecializationKeys = std::array<SpecializationKey, NUM_ARGS>;
 
   /// Array defining groups of aliased tensors.
   using AliasGroups = std::array<int8_t, NUM_ARGS>;
@@ -331,7 +331,7 @@ public:
     AliasGroups aliasGroups = computeAliasGroups(args);
     SpecializationKeys key;
     for (int i = 0; i < NUM_ARGS; ++i) {
-      key[i] = SpeciaizationKey(state, args[i], aliasGroups[i]);
+      key[i] = SpecializationKey(state, args[i], aliasGroups[i]);
     }
     return key;
   }
