@@ -2082,3 +2082,17 @@ TEST(StaticRuntime, NumToTensorTrue) {
   std::vector<IValue> args = {arg};
   testStaticRuntime(num_to_tensor_ir, args);
 }
+
+TEST(StaticRuntime, Split) {
+  const auto src = R"JIT(
+    def forward(self, inp, split_size: int, dim: int):
+        return inp.split(split_size, dim)
+  )JIT";
+
+  const auto a = at::randn({2, 2});
+  const auto b = at::randn({2, 2, 2});
+
+  testStaticRuntime(src, {a, 1, 0});
+  testStaticRuntime(src, {a, 1, 1});
+  testStaticRuntime(src, {a, 2, -1}, {b, 2, 2});
+}
