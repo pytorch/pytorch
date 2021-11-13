@@ -64,6 +64,7 @@ jobs:
   build:
     runs-on: "windows.4xlarge"
     needs: [!{{ ciflow_config.root_job_name }}]
+    timeout-minutes: !{{ common.timeout_minutes }}
     env:
       JOB_BASE_NAME: !{{ build_environment }}-build
       http_proxy: "!{{ common. squid_proxy }}"
@@ -119,6 +120,7 @@ jobs:
   generate-test-matrix:
     needs: [!{{ ciflow_config.root_job_name }}]
     runs-on: ubuntu-18.04
+    timeout-minutes: !{{ common.timeout_minutes }}
     env:
       TEST_RUNNER_TYPE: !{{ test_runner_type }}
       NUM_TEST_SHARDS: !{{ num_test_shards }}
@@ -143,6 +145,7 @@ jobs:
         run: .github/scripts/generate_pytorch_test_matrix.py
 
   test:
+    timeout-minutes: !{{ common.timeout_minutes }}
     env:
       JOB_BASE_NAME: !{{ build_environment }}-test
       SHARD_NUMBER: ${{ matrix.shard }}

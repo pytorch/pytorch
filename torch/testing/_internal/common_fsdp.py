@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 from contextlib import suppress
+from enum import Enum
 import os
 import sys
 from unittest import mock
@@ -21,7 +22,6 @@ from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
 )
 
-from enum import Enum
 
 
 class FSDPInitMode(Enum):
