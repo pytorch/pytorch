@@ -30,6 +30,7 @@ from common_utils import (
     get_fallback_and_vmap_exhaustive,
     opinfo_in_dict,
     xfail,
+    skip,
     skipOps,
     check_vmap_fallback,
 )
@@ -3031,7 +3032,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('matrix_exp'),
         xfail('nn.functional.batch_norm'),
         xfail('lu_unpack'),
-        xfail('empty_like'),
         xfail('histogramdd'),
         xfail('nn.functional.embedding'),
         xfail('randn_like'),
@@ -3046,10 +3046,14 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('long', 'channels_last'),
         xfail('short', 'channels_last'),
         xfail('bool', 'channels_last'),
-        xfail('new_empty'),
         xfail('nn.functional.gaussian_nll_loss'),
         xfail('rand_like'),
         xfail('randint_like'),
+
+        # This is not a bug: testing for empty_like is flaky because the
+        # tensor has garbage values
+        skip('new_empty'),
+        skip('empty_like'),
     }
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestVmapOperatorsOpInfo', 'test_vmap_exhaustive', vmap_fail)
