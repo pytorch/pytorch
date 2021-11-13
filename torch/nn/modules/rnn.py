@@ -1,7 +1,7 @@
 import math
 import warnings
 import numbers
-from typing import List, Tuple, Optional, overload, Union, cast
+from typing import List, Tuple, Optional, overload
 
 import torch
 from torch import Tensor
