@@ -37,6 +37,7 @@ from common_utils import (
     get_fallback_and_vmap_exhaustive,
     opinfo_in_dict,
     xfail,
+    skip,
     skipOps,
 )
 
@@ -220,7 +221,8 @@ class TestPythonKeyOperatorsOpInfo(TestCase):
     xfail('randn_like'), # randomness
     xfail('rand_like'), # randomness
     xfail('randint_like'), # randomness
-    xfail('new_empty'), # nondeterministic
+    skip('new_empty'), # nondeterministic
+    skip('empty_like'), # nondeterministic
     })
     def test_make_fx_exhaustive(self, device, dtype, op):
 
