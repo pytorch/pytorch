@@ -1,5 +1,7 @@
 #include "lazy_tensors/computation_client/metrics.h"
 
+#include <c10/util/Logging.h>
+
 #include <algorithm>
 #include <cmath>
 #include <sstream>

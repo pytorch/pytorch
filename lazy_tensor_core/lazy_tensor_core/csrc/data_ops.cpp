@@ -5,7 +5,6 @@
 #include <numeric>
 
 #include "lazy_tensor_core/csrc/helpers.h"
-#include "lazy_tensor_core/csrc/reduction.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensors/computation_client/sys_util.h"
 #include "lazy_tensors/computation_client/util.h"
