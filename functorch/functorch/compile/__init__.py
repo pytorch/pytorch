@@ -2,7 +2,7 @@ from .._src.operator_authoring import pointwise_operator
 from .._src.memory_efficient_op_authoring import memory_efficient_operator_authoring, torchscript_nvfuser_compile
 from .._src.python_key import nnc_jit, make_nnc
 from .._src.nnc_compile import nnc_compile, get_ops
-from .._src.eager_compilation import (
+from .._src.aot_autograd import (
     compiled_function,
     compiled_module,
     tvm_compile,
