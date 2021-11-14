@@ -69,18 +69,23 @@ void convert_indices_from_coo_to_csr_cuda(const Tensor& result, const Tensor& in
 }
 
 template <typename input_t, typename output_t>
-__global__ void convert_indices_from_csr_to_coo_cuda_kernel(output_t* data_out, const input_t* data_in, const int64_t numel) {
+__global__ void convert_indices_from_csr_to_coo_cuda_kernel(output_t* data_out, const input_t* data_in, const int64_t nrows) {
   int64_t tid = blockDim.x * blockIdx.x + threadIdx.x;
 
-  if (tid < numel - 2) {
+  if (tid < nrows - 1) {
     for (int64_t i = data_in[tid]; i < data_in[tid + 1]; i++)
       data_out[i] = static_cast<output_t>(tid);
   }
 }
 
 template <typename input_t, typename output_t>
-void convert_indices_from_csr_to_coo_cuda(const Tensor& result, const Tensor& crow_indices, const Tensor& col_indices, const int64_t size) {
-  int64_t numel = crow_indices.numel();
+void convert_indices_from_csr_to_coo_cuda(const Tensor& result, const Tensor& crow_indices, const Tensor& col_indices) {
+  int64_t nrows = crow_indices.numel() - 1;
+  if (nrows == 0) {
+    result.zero_();
+    return;
+  }
+
   auto crow_indices_ = crow_indices.expect_contiguous();
   auto col_indices_ = col_indices.expect_contiguous();
   const input_t* crow_indices_data_in = crow_indices_->data_ptr<input_t>();
@@ -88,18 +93,13 @@ void convert_indices_from_csr_to_coo_cuda(const Tensor& result, const Tensor& cr
   TORCH_INTERNAL_ASSERT(result.is_contiguous());
   output_t* data_out = result.data_ptr<output_t>();
 
-  if (numel == 0) {
-    result.zero_();
-    return;
-  }
-
   // Run numel threads...
   int64_t THREADS = at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
-  int64_t BLOCKS = (numel + THREADS) / THREADS;
+  int64_t BLOCKS = (nrows + THREADS) / THREADS;
   at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();
   at::cuda::ThrustAllocator allocator;
-  thrust::copy(thrust::cuda::par(allocator).on(stream), col_indices_data_in, col_indices_data_in + numel, data_out);
-  convert_indices_from_csr_to_coo_cuda_kernel<<<BLOCKS, THREADS, 0, stream>>>(data_out, crow_indices_data_in, numel);
+  thrust::copy(thrust::cuda::par(allocator).on(stream), col_indices_data_in, col_indices_data_in + col_indices.numel(), data_out);
+  convert_indices_from_csr_to_coo_cuda_kernel<<<BLOCKS, THREADS, 0, stream>>>(data_out, crow_indices_data_in, nrows);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
@@ -253,15 +253,15 @@ TORCH_IMPL_FUNC(_convert_indices_from_coo_to_csr_structured_cuda) (
 }
 
 TORCH_IMPL_FUNC(_convert_indices_from_csr_to_coo_structured_cuda) (
-  const Tensor& crow_indices, const Tensor& col_indices, const int64_t size, const bool out_int32, const Tensor& result
+  const Tensor& crow_indices, const Tensor& col_indices, const bool out_int32, const Tensor& result
 ) {
   if (out_int32) {
     AT_DISPATCH_INTEGRAL_TYPES(crow_indices.scalar_type(), "convert_indices_from_csr_to_coo_cuda", [&] {
-      convert_indices_from_csr_to_coo_cuda<scalar_t, int>(result, crow_indices, col_indices, size);
+      convert_indices_from_csr_to_coo_cuda<scalar_t, int32_t>(result, crow_indices, col_indices);
     });
   } else {
     AT_DISPATCH_INTEGRAL_TYPES(crow_indices.scalar_type(), "convert_indices_from_csr_to_coo_cuda", [&] {
-      convert_indices_from_csr_to_coo_cuda<scalar_t, int64_t>(result, crow_indices, col_indices, size);
+      convert_indices_from_csr_to_coo_cuda<scalar_t, int64_t>(result, crow_indices, col_indices);
     });
   }
 }

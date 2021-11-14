@@ -1012,7 +1012,7 @@ class Tensor(torch._C._TensorBase):
         return update_names(self, names, rename_map, inplace=False)
 
     def to_sparse_coo(self):
-        """ Convert a tensor to coordinate format. Only works with 2D tensors.
+        """ Convert a tensor to :ref:`coordinate format <sparse-coo-docs>`.
 
        Examples::
 
@@ -1022,13 +1022,12 @@ class Tensor(torch._C._TensorBase):
             25
 
        """
-        if self.is_sparse and not self.is_sparse_csr:
+        if self.is_sparse:
             return self
         if self.is_sparse_csr:
             crow_indices = self.crow_indices()
             col_indices = self.col_indices()
             indices = torch._convert_indices_from_csr_to_coo(crow_indices, col_indices,
-                                                             col_indices.shape[0],
                                                              out_int32=crow_indices.dtype == torch.int32)
             return torch.sparse_coo_tensor(indices,
                                            self.values(),

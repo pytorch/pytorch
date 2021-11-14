@@ -28,13 +28,13 @@ TORCH_META_FUNC(_convert_indices_from_coo_to_csr) (
 }
 
 TORCH_META_FUNC(_convert_indices_from_csr_to_coo) (
-  const Tensor& crow_indices, const Tensor& col_indices, const int64_t size, const bool out_int32
+  const Tensor& crow_indices, const Tensor& col_indices, const bool out_int32
 ) {
   TORCH_CHECK(crow_indices.dim() == 1, "crow_indices is supposed to be a vector");
   TORCH_CHECK(col_indices.dim() == 1, "col_indices is supposed to be a vector");
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
   c10::TensorOptions options = crow_indices.options().dtype(scalar_type);
-  set_output(0, {2, size}, {}, options, {});
+  set_output(0, {2, col_indices.numel()}, {}, options, {});
 }
 
 } // namespace meta
@@ -71,8 +71,12 @@ void convert_indices_from_coo_to_csr_cpu(const Tensor& result, const Tensor& inp
 }
 
 template <typename input_t, typename output_t>
-void convert_indices_from_csr_to_coo_cpu(const Tensor& result, const Tensor& crow_indices, const Tensor& col_indices, const int64_t size) {
-  int64_t numel = crow_indices.numel();
+void convert_indices_from_csr_to_coo_cpu(const Tensor& result, const Tensor& crow_indices, const Tensor& col_indices) {
+  int64_t nrows = crow_indices.numel() - 1;
+  if (nrows == 0) {
+    result.zero_();
+    return;
+  }
   auto crow_indices_ = crow_indices.expect_contiguous();
   auto col_indices_ = col_indices.expect_contiguous();
   const input_t* crow_indices_data_in = crow_indices_->data_ptr<input_t>();
@@ -80,13 +84,8 @@ void convert_indices_from_csr_to_coo_cpu(const Tensor& result, const Tensor& cro
   TORCH_INTERNAL_ASSERT(result.is_contiguous());
   output_t* data_out = result.data_ptr<output_t>();
 
-  if (numel == 0) {
-    result.zero_();
-    return;
-  }
-
-  std::copy(col_indices_data_in, col_indices_data_in + size, &data_out[size]);
-  at::parallel_for(0, numel - 1, GRAIN_SIZE, [&](int64_t start, int64_t end) {
+  std::copy(col_indices_data_in, col_indices_data_in + col_indices.numel(), &data_out[col_indices.numel()]);
+  at::parallel_for(0, nrows, GRAIN_SIZE, [&](int64_t start, int64_t end) {
     for (int64_t i = start; i < end; i++) {
       std::fill(&data_out[crow_indices_data_in[i]], &data_out[crow_indices_data_in[i + 1]], static_cast<output_t>(i));
     }
@@ -441,15 +440,15 @@ TORCH_IMPL_FUNC(_convert_indices_from_coo_to_csr_structured_cpu) (
 }
 
 TORCH_IMPL_FUNC(_convert_indices_from_csr_to_coo_structured_cpu) (
-  const Tensor& crow_indices, const Tensor& col_indices, const int64_t size, const bool out_int32, const Tensor& result
+  const Tensor& crow_indices, const Tensor& col_indices, const bool out_int32, const Tensor& result
 ) {
   if (out_int32) {
     AT_DISPATCH_INTEGRAL_TYPES(crow_indices.scalar_type(), "convert_indices_from_csr_to_coo_cpu", [&] {
-      convert_indices_from_csr_to_coo_cpu<scalar_t, int>(result, crow_indices, col_indices, size);
+      convert_indices_from_csr_to_coo_cpu<scalar_t, int32_t>(result, crow_indices, col_indices);
     });
   } else {
     AT_DISPATCH_INTEGRAL_TYPES(crow_indices.scalar_type(), "convert_indices_from_csr_to_coo_cpu", [&] {
-      convert_indices_from_csr_to_coo_cpu<scalar_t, int64_t>(result, crow_indices, col_indices, size);
+      convert_indices_from_csr_to_coo_cpu<scalar_t, int64_t>(result, crow_indices, col_indices);
     });
   }
 }
