@@ -651,11 +651,6 @@ bool SocketConnectOp::tryConnect(const ::addrinfo& addr) {
 }
 
 int SocketConnectOp::tryConnect(const ::addrinfo& addr, TimePoint deadline) {
-  Duration remaining = deadline - Clock::now();
-  if (remaining <= Duration::zero()) {
-    return 0;  // Time out.
-  }
-
   int r = ::connect(socket_->handle(), addr.ai_addr, addr.ai_addrlen);
   if (r == 0) {
     return 1;  // Success.
@@ -668,6 +663,11 @@ int SocketConnectOp::tryConnect(const ::addrinfo& addr, TimePoint deadline) {
 
   if (err != std::errc::operation_in_progress && err != std::errc::operation_would_block) {
     return -1;
+  }
+
+  Duration remaining = deadline - Clock::now();
+  if (remaining <= Duration::zero()) {
+    return 0;  // Time out.
   }
 
   ::pollfd pfd{};

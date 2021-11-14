@@ -10,9 +10,11 @@
 
 #include <c10/util/Logging.h>
 
-#define C10D_LOG_(n, lvl, ...)\
-    LOG_IF(n, FLAGS_caffe2_log_level <= lvl) << fmt::format(__VA_ARGS__)
+#define C10D_ERROR(...)\
+    LOG_IF(ERROR,   FLAGS_caffe2_log_level <= 2) << fmt::format(__VA_ARGS__)
 
-#define C10D_ERROR(...)   C10D_LOG_(ERROR,   2, __VA_ARGS__)
-#define C10D_WARNING(...) C10D_LOG_(WARNING, 1, __VA_ARGS__)
-#define C10D_INFO(...)    C10D_LOG_(INFO,    0, __VA_ARGS__)
+#define C10D_WARNING(...)\
+    LOG_IF(WARNING, FLAGS_caffe2_log_level <= 1) << fmt::format(__VA_ARGS__)
+
+#define C10D_INFO(...)\
+    LOG_IF(INFO,    FLAGS_caffe2_log_level <= 0) << fmt::format(__VA_ARGS__)

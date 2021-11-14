@@ -29,19 +29,19 @@ class SocketOptions {
     return prefer_ipv6_;
   }
 
-  SocketOptions& connect_timeout(std::chrono::milliseconds value) noexcept {
+  SocketOptions& connect_timeout(std::chrono::seconds value) noexcept {
     connect_timeout_ = value;
 
     return *this;
   }
 
-  std::chrono::milliseconds connect_timeout() const noexcept {
+  std::chrono::seconds connect_timeout() const noexcept {
     return connect_timeout_;
   }
 
 private:
   bool prefer_ipv6_ = true;
-  std::chrono::milliseconds connect_timeout_{300};
+  std::chrono::seconds connect_timeout_{30};
 };
 
 class SocketImpl;
