@@ -365,7 +365,7 @@ __device__ __inline__ void compute_gI(
   }
 
 template<typename T, typename T_ACC>
-__global__ void layer_norm_grad_input_vectorized_kernel(
+__global__ void layer_norm_grad_input_kernel(
   const T* __restrict__ dY,
   const T* __restrict__ X,
   const T_ACC* __restrict__ mean,
@@ -746,7 +746,7 @@ void LayerNormBackwardKernelImplInternal(
       const int num_threads = 128;
       const dim3 blocks(M);
       int nshared = 2 * (num_threads/C10_WARP_SIZE) * sizeof(T_ACC);
-      layer_norm_grad_input_vectorized_kernel<<<blocks, num_threads, nshared, cuda_stream>>>(dY_data,
+      layer_norm_grad_input_kernel<<<blocks, num_threads, nshared, cuda_stream>>>(dY_data,
       X_data, mean_data, rstd_data, gamma_data, dX_data, N);
     } else {
     ComputeInternalGradientsCUDAKernel<T>
