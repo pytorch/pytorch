@@ -543,14 +543,19 @@ std::vector<std::unique_ptr<PyTraceEvent>> PyTraceReplay::replayStack() const {
         }
     }
 
+    std::cout << "replayStack filename_map built" << std::endl;
+
     auto py_name = [&](const RawEvent& e) {
+        std::cout << "replayStack py_name begin" << std::endl;
         const auto& desc_it = tracer.code_descriptions_.find({e.misc_.f_code_, e.lasti()});
         if (desc_it != tracer.code_descriptions_.end()) {
             std::stringstream name_stream;
             name_stream << filename_map.at(desc_it->second.filename_) << "("
                         << desc_it->second.line_no_ << "): " << desc_it->second.funcname_;
+            std::cout << "replayStack py_name end" << std::endl;
             return name_stream.str();
         }
+        std::cout << "replayStack py_name end" << std::endl;
         return std::string("Python: ???");
     };
 
@@ -611,6 +616,8 @@ std::vector<std::unique_ptr<PyTraceEvent>> PyTraceReplay::replayStack() const {
         event_idx++;
     }
 
+    std::cout << "replayStack first pass done" << std::endl;
+
     // Cleanup by feining return to close out the stack. This is needed so
     // frames above the one that called the profiler still appear in the trace.
     const auto t_final = now();
@@ -624,6 +631,8 @@ std::vector<std::unique_ptr<PyTraceEvent>> PyTraceReplay::replayStack() const {
         }
     }
 
+    std::cout << "replayStack cleanup pass done" << std::endl;
+
     // Convert to `PyTraceEvent`, and map id to pointer.
     ska::flat_hash_map<size_t, PyTraceEvent*> event_id_map {{0, nullptr}};
     std::vector<std::unique_ptr<PyTraceEvent>> out;
@@ -632,9 +641,11 @@ std::vector<std::unique_ptr<PyTraceEvent>> PyTraceReplay::replayStack() const {
         event_id_map.insert({r.id_, out.back().get()});
     }
 
+    std::cout << "replayStack event_id_map built" << std::endl;
+
     // Link parents to children.
     for (int i = 0; i < results.size(); i++) {
-        out[i]->parent_ = event_id_map[results[i].parent_id_];
+        out[i]->parent_ = event_id_map.at(results[i].parent_id_);
     }
 
     std::cout << "replayStack end" << std::endl;
