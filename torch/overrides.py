@@ -844,6 +844,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.nanquantile: lambda input, q, dim=None, keepdim=False, out=None: -1,
         torch.quantize_per_channel: lambda input, scales, zero_points, axis, dtype: -1,
         torch.quantize_per_tensor: lambda input, scale, zero_point, dtype: -1,
+        torch.quantize_per_tensor_dynamic: lambda input, dtype, reduce_range: -1,
         torch.quantized_batch_norm: lambda input, weight, bias, mean, var, eps, output_scale, output_zero_point: -1,
         torch.quantized_gru_cell: (lambda input, hx, w_ih, w_hh, b_ih, b_hh, packed_ih, packed_hh, col_offsets_ih,
                                    col_offsets_hh, scale_ih, scale_hh, zero_point_ih, zero_point_hh: -1),
