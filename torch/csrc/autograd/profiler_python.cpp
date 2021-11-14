@@ -529,6 +529,7 @@ PyTraceReplay::PyTraceReplay()
 
 
 std::vector<std::unique_ptr<PyTraceEvent>> PyTraceReplay::replayStack() const {
+    std::cout << "replayStack begin" << std::endl;
     const auto& tracer = PythonTracer::singleton();
 
     // We want to prune paths to a sensible prefix. For example
@@ -636,6 +637,7 @@ std::vector<std::unique_ptr<PyTraceEvent>> PyTraceReplay::replayStack() const {
         out[i]->parent_ = event_id_map[results[i].parent_id_];
     }
 
+    std::cout << "replayStack end" << std::endl;
     return out;
 }
 
@@ -675,18 +677,22 @@ int PythonTracer::pyProfileFn(
 void PythonTracer::call(Command c) {
     switch (c) {
         case Command::kStartOne:
+            std::cout << "PythonTracer kStartOne" << std::endl;
             PythonTracer::singleton().start(1);
             break;
 
         case Command::kStartAll:
+            std::cout << "PythonTracer kStartAll" << std::endl;
             PythonTracer::singleton().start();
             break;
 
         case Command::kStop:
+            std::cout << "PythonTracer kStop" << std::endl;
             PythonTracer::singleton().stop();
             break;
 
         case Command::kClear:
+            std::cout << "PythonTracer kClear" << std::endl;
             PythonTracer::singleton().clear();
             break;
 
