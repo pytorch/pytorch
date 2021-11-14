@@ -16,11 +16,13 @@ from torch.testing._internal.common_fsdp import (
 from torch.testing._internal.common_utils import (
     run_tests,
     find_free_port,
+    TestCase
 )
 
 
-class TestAutoWrap(unittest.TestCase):
+class TestAutoWrap(TestCase):
     def setUp(self) -> None:
+        super().setUp()
         # For all the tests here, we use a fake group
         self.process_group = DummyProcessGroup(rank=0, size=1)
 
