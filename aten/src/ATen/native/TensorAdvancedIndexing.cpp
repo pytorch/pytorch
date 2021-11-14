@@ -1291,6 +1291,8 @@ TORCH_IMPL_FUNC(_scatter_reduce_structured_cpu)
  const c10::optional<int64_t> output_size,
  const Tensor& out) {
 
+  // TODO: Add documentation.
+
   TORCH_CHECK(self.dim() == index.dim(),
       "Shape mismatch between `self` (got ", self.sizes(), ") and `index` (got ", index.sizes(), ")");
   for (int64_t i = 0; i < self.dim(); i++) {
@@ -1317,6 +1319,7 @@ TORCH_IMPL_FUNC(_scatter_reduce_structured_cpu)
 
     scalar_t value;
     int64_t dim_index;
+    // TODO: We currently expect contiguous memory layout.
     for (int64_t i = 0; i < offset1; i++) {
       for (int64_t j = 0; j < self.size(dim); j++) {
         for (int64_t k = 0; k < offset2; k++) {
