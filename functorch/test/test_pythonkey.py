@@ -313,7 +313,7 @@ class TestEagerFusionOpInfo(TestCase):
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     # entries in here need don't work and need to be fixed.
     # Each one of these is a bug (or needs to be investigated)
-    @skipOps('TestEagerFusionOpInfo', 'test_eager_compilation_exhaustive', {
+    @skipOps('TestEagerFusionOpInfo', 'test_aot_autograd_exhaustive', {
         xfail('__rmatmul__'),
         xfail('linalg.cholesky'),
         xfail('linalg.det'),
@@ -337,7 +337,7 @@ class TestEagerFusionOpInfo(TestCase):
         xfail('trapezoid'),
         xfail('trapz'),
     })
-    def test_eager_compilation_exhaustive(self, device, dtype, op):
+    def test_aot_autograd_exhaustive(self, device, dtype, op):
 
         def f(args, kwargs):
             return op.op(*args, **kwargs)
