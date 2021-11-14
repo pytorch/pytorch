@@ -3,7 +3,6 @@
 #include "c10/util/logging_is_not_google_glog.h"
 #include "lazy_tensors/core/platform/errors.h"
 #include "lazy_tensors/core/platform/hash.h"
-#include "lazy_tensors/layout_util.h"
 
 namespace torch {
 namespace lazy {

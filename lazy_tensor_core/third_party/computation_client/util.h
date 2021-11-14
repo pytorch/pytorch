@@ -13,7 +13,6 @@
 #include <vector>
 
 #include "lazy_tensors/computation_client/types.h"
-#include "lazy_tensors/status.h"
 #include "lazy_tensors/span.h"
 #include "torch/csrc/lazy/core/hash.h"
 
@@ -85,7 +84,6 @@ class Cleanup {
 };
 
 using ExceptionCleanup = Cleanup<std::exception_ptr>;
-using StatusCleanup = Cleanup<lazy_tensors::Status>;
 
 // Allows APIs which might return const references and values, to not be forced
 // to return values in the signature.

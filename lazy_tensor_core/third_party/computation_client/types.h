@@ -6,11 +6,7 @@
 #include <cmath>
 #include <vector>
 
-#include "lazy_tensors/int128.h"
-
 namespace lazy_tensors {
-
-using hash_t = uint128;
 
 struct Percentile {
   enum class UnitOfMeaure {

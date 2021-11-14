@@ -12,7 +12,6 @@
 #include "lazy_tensor_core/csrc/ops/scalar.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensor_core/csrc/torch_util.h"
-#include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/computation_client/metrics.h"
 #include "lazy_tensors/computation_client/unique.h"
 #include "torch/csrc/lazy/core/ir_metadata.h"

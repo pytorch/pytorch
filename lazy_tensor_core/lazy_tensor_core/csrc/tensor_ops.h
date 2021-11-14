@@ -1,6 +1,5 @@
 #pragma once
 
-#include "lazy_tensor_core/csrc/reduction.h"
 #include "lazy_tensor_core/csrc/tensor.h"
 
 // Certain tensor operations can be expressed in terms of other tensor
