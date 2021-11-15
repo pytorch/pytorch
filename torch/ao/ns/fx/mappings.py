@@ -182,6 +182,10 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
             nn.ConvTranspose2d,
             nnq.ConvTranspose2d,
         ]),
+        set([
+            nn.ConvTranspose3d,
+            nnq.ConvTranspose3d,
+        ]),
         # ELU
         set([
             nn.ELU,
@@ -507,6 +511,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nn.BatchNorm3d,
         nn.ConvTranspose1d,
         nn.ConvTranspose2d,
+        nn.ConvTranspose3d,
         nn.ELU,
         nn.GroupNorm,
         nn.InstanceNorm1d,
@@ -549,6 +554,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nnq.BatchNorm3d,
         nnq.ConvTranspose1d,
         nnq.ConvTranspose2d,
+        nnq.ConvTranspose3d,
         nnq.ELU,
         nnq.GroupNorm,
         nnq.InstanceNorm1d,
