@@ -30,6 +30,7 @@ env:
   AWS_DEFAULT_REGION: us-east-1
   PR_NUMBER: ${{ github.event.pull_request.number }}
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+  PYTORCH_RETRY_TEST_CASES: 1
 concurrency:
   group: linux-xenial-py3.6-gcc7-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
