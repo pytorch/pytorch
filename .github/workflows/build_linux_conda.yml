@@ -1,6 +1,10 @@
 name: Build Linux Conda Packages
 
 on:
+  pull_request:
+    paths:
+      - .github/workflows/build_linux_conda.yml
+      - .github/workflows/generate_binary_build_matrix.py
   # TODO: These are only runnable from workflow_dispatch, we need to eventually add
   #       a cron
   # TODO: Add an on_release trigger to build on tags
