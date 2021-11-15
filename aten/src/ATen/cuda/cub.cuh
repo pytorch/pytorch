@@ -151,6 +151,7 @@ inline void unique_by_key(
   KeysOutputIteratorT keys_out, ValuesOutputIteratorT values_out,
   NumSelectedIteratorT num_selected, int64_t num_input_items)
 {
+  // TODO: use thrust::discard_iterator to handle null keys_out when https://github.com/NVIDIA/cub/issues/406 is fixed.
   constexpr bool null_keys_out = std::is_same<KeysOutputIteratorT, std::nullptr_t>::value;
   using KeyT = typename std::iterator_traits<KeysInputIteratorT>::value_type;
   using RealKeysOutputIteratorT = typename std::conditional<null_keys_out, KeyT *, KeysOutputIteratorT>::type;
