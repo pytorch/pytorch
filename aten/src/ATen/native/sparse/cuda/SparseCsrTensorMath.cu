@@ -79,26 +79,23 @@ __global__ void convert_indices_from_csr_to_coo_cuda_kernel(output_t* data_out, 
 }
 
 template <typename input_t, typename output_t>
-void convert_indices_from_csr_to_coo_cuda(const Tensor& result, const Tensor& crow_indices, const Tensor& col_indices) {
+void convert_indices_from_csr_to_coo_cuda(const Tensor& indices, const Tensor& crow_indices, const Tensor& col_indices) {
   int64_t nrows = crow_indices.numel() - 1;
   if (nrows == 0) {
-    result.zero_();
+    indices.zero_();
     return;
   }
 
   auto crow_indices_ = crow_indices.expect_contiguous();
-  auto col_indices_ = col_indices.expect_contiguous();
   const input_t* crow_indices_data_in = crow_indices_->data_ptr<input_t>();
-  const input_t* col_indices_data_in = col_indices_->data_ptr<input_t>();
-  TORCH_INTERNAL_ASSERT(result.is_contiguous());
-  output_t* data_out = result.data_ptr<output_t>();
+  TORCH_INTERNAL_ASSERT(indices.is_contiguous());
+  output_t* data_out = indices.data_ptr<output_t>();
 
-  // Run numel threads...
+  // Run nrows threads...
   int64_t THREADS = at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
   int64_t BLOCKS = (nrows + THREADS) / THREADS;
   at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();
-  at::cuda::ThrustAllocator allocator;
-  thrust::copy(thrust::cuda::par(allocator).on(stream), col_indices_data_in, col_indices_data_in + col_indices.numel(), data_out + col_indices.numel());
+  indices.select(0, 1).copy_(*col_indices.expect_contiguous());
   convert_indices_from_csr_to_coo_cuda_kernel<<<BLOCKS, THREADS, 0, stream>>>(data_out, crow_indices_data_in, nrows);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
