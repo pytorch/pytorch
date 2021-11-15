@@ -1,5 +1,4 @@
 import os
-import re
 import site
 import sys
 import typing

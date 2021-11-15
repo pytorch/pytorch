@@ -537,7 +537,6 @@ void trimPrefix(std::string& s, const std::vector<std::string> prefixes) {
 
 
 std::vector<std::unique_ptr<PyTraceEvent>> PyTraceReplay::replayStack() const {
-    std::cout << "replayStack begin" << std::endl;
     const auto& tracer = PythonTracer::singleton();
 
     // We want to prune paths to a sensible prefix. For example
@@ -552,19 +551,14 @@ std::vector<std::unique_ptr<PyTraceEvent>> PyTraceReplay::replayStack() const {
         }
     }
 
-    std::cout << "replayStack filename_map built" << std::endl;
-
     auto py_name = [&](const RawEvent& e) {
-        std::cout << "replayStack py_name begin" << std::endl;
         const auto& desc_it = tracer.code_descriptions_.find({e.misc_.f_code_, e.lasti()});
         if (desc_it != tracer.code_descriptions_.end()) {
             std::stringstream name_stream;
             name_stream << filename_map.at(desc_it->second.filename_) << "("
                         << desc_it->second.line_no_ << "): " << desc_it->second.funcname_;
-            std::cout << "replayStack py_name end" << std::endl;
             return name_stream.str();
         }
-        std::cout << "replayStack py_name end" << std::endl;
         return std::string("Python: ???");
     };
 
@@ -599,28 +593,22 @@ std::vector<std::unique_ptr<PyTraceEvent>> PyTraceReplay::replayStack() const {
 
         switch (raw_event.tag()) {
             case TraceTag::kPy_Call:
-                std::cout << "replayStack kPy_Call" << std::endl;
                 if (module_name_map_.find(event_idx) != module_name_map_.end()) {
-                    std::cout << "replayStack kPy_Call module" << std::endl;
                     push_frame(
                         module_name_map_.at(event_idx),
                         CallType::kPyModuleCall,
                         reinterpret_cast<size_t>(module_self_map_.at(event_idx)));
                 } else {
-                    std::cout << "replayStack kPy_Call other" << std::endl;
                     push_frame(py_name(raw_event), CallType::kPyCall);
                 }
                 break;
 
             case TraceTag::kC_Call:
-                std::cout << "replayStack kC_Call" << std::endl;
-
                 push_frame(tracer.c_function_reprs_.at(raw_event.misc_.arg_), CallType::kCCall);
                 break;
 
             case TraceTag::kPy_Return:
             case TraceTag::kC_Return:
-                std::cout << "replayStack kPy_Return/kC_Return" << std::endl;
                 TORCH_INTERNAL_ASSERT(stack.size(), "Python replay stack is empty.")
                 stack.back().event_->endTime_ = t;
                 stack.back().event_->return_idx_ = event_idx;
@@ -630,8 +618,6 @@ std::vector<std::unique_ptr<PyTraceEvent>> PyTraceReplay::replayStack() const {
         }
         event_idx++;
     }
-
-    std::cout << "replayStack first pass done" << std::endl;
 
     // Cleanup by feining return to close out the stack. This is needed so
     // frames above the one that called the profiler still appear in the trace.
@@ -646,8 +632,6 @@ std::vector<std::unique_ptr<PyTraceEvent>> PyTraceReplay::replayStack() const {
         }
     }
 
-    std::cout << "replayStack cleanup pass done" << std::endl;
-
     // Convert to `PyTraceEvent`, and map id to pointer.
     ska::flat_hash_map<size_t, PyTraceEvent*> event_id_map {{0, nullptr}};
     std::vector<std::unique_ptr<PyTraceEvent>> out;
@@ -656,14 +640,10 @@ std::vector<std::unique_ptr<PyTraceEvent>> PyTraceReplay::replayStack() const {
         event_id_map.insert({r.id_, out.back().get()});
     }
 
-    std::cout << "replayStack event_id_map built" << std::endl;
-
     // Link parents to children.
     for (int i = 0; i < results.size(); i++) {
         out[i]->parent_ = event_id_map.at(results[i].parent_id_);
     }
-
-    std::cout << "replayStack end" << std::endl;
     return out;
 }
 
@@ -703,22 +683,18 @@ int PythonTracer::pyProfileFn(
 void PythonTracer::call(Command c) {
     switch (c) {
         case Command::kStartOne:
-            std::cout << "PythonTracer kStartOne" << std::endl;
             PythonTracer::singleton().start(1);
             break;
 
         case Command::kStartAll:
-            std::cout << "PythonTracer kStartAll" << std::endl;
             PythonTracer::singleton().start();
             break;
 
         case Command::kStop:
-            std::cout << "PythonTracer kStop" << std::endl;
             PythonTracer::singleton().stop();
             break;
 
         case Command::kClear:
-            std::cout << "PythonTracer kClear" << std::endl;
             PythonTracer::singleton().clear();
             break;
 
