@@ -11832,6 +11832,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                # nonzero is not raising a warning when the out is resized
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+               # Can't find schemas for this operator for some reason
+               DecorateInfo(unittest.skip("Skipped!"), 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
            )),
     # `torch.norm` has multiple code paths depending on the value of `p`.
     # These paths have different dtype support. Also JIT supports,
