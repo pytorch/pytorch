@@ -236,7 +236,6 @@ libtorch_python_generated_sources = [
         "torch/csrc/autograd/generated/python_nn_functions.cpp",
         "torch/csrc/autograd/generated/python_fft_functions.cpp",
         "torch/csrc/autograd/generated/python_linalg_functions.cpp",
-        "torch/csrc/autograd/generated/python_sparse_functions.cpp",
         "torch/csrc/autograd/generated/python_special_functions.cpp",
 ]
 
@@ -418,6 +417,7 @@ filegroup(
 filegroup(
     name = "aten_srcs_cu",
     srcs = [
+        "aten/src/ATen/cuda/cub.cu.cc",
         "aten/src/ATen/cuda/detail/IndexUtils.cu.cc",
         "aten/src/ATen/cuda/detail/CUDAGraphsUtils.cu.cc",
         "aten/src/ATen/native/cuda/Activation.cu.cc",

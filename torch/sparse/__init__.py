@@ -2,7 +2,6 @@
 from typing import Optional, Tuple, List, Union
 
 import torch
-from torch._C import _add_docstr, _sparse  # type: ignore[attr-defined]
 from torch import Tensor
 
 # A workaround to support both TorchScript and MyPy:
@@ -25,21 +24,22 @@ __all__ = [
 ]
 
 
-addmm = _add_docstr(_sparse._sparse_addmm, r"""
-sparse.addmm(mat, mat1, mat2, *, beta=1., alpha=1.) -> Tensor
+def addmm(mat: Tensor, mat1: Tensor, mat2: Tensor,
+          beta: float = 1., alpha: float = 1.) -> Tensor:
+    r"""
+    This function does exact same thing as :func:`torch.addmm` in the forward,
+    except that it supports backward for sparse matrix :attr:`mat1`. :attr:`mat1`
+    need to have `sparse_dim = 2`. Note that the gradients of :attr:`mat1` is a
+    coalesced sparse tensor.
 
-This function does exact same thing as :func:`torch.addmm` in the forward,
-except that it supports backward for sparse matrix :attr:`mat1`. :attr:`mat1`
-need to have `sparse_dim = 2`. Note that the gradients of :attr:`mat1` is a
-coalesced sparse tensor.
-
-Args:
-    mat (Tensor): a dense matrix to be added
-    mat1 (Tensor): a sparse matrix to be multiplied
-    mat2 (Tensor): a dense matrix to be multiplied
-    beta (Number, optional): multiplier for :attr:`mat` (:math:`\beta`)
-    alpha (Number, optional): multiplier for :math:`mat1 @ mat2` (:math:`\alpha`)
-""")
+    Args:
+        mat (Tensor): a dense matrix to be added
+        mat1 (Tensor): a sparse matrix to be multiplied
+        mat2 (Tensor): a dense matrix to be multiplied
+        beta (Number, optional): multiplier for :attr:`mat` (:math:`\beta`)
+        alpha (Number, optional): multiplier for :math:`mat1 @ mat2` (:math:`\alpha`)
+    """
+    return torch._sparse_addmm(mat, mat1, mat2, beta=beta, alpha=alpha)
 
 
 def mm(mat1: Tensor, mat2: Tensor) -> Tensor:
@@ -159,47 +159,45 @@ def sum(input: Tensor, dim: DimOrDims = None,
             return torch._sparse_sum(input, dtype=dtype)
 
 
-softmax = _add_docstr(_sparse._sparse_softmax, r"""
-sparse.softmax(input, dim, *, dtype=None) -> Tensor
+def softmax(input: Tensor, dim: int, dtype: Optional[DType] = None) -> Tensor:
+    r"""Applies a softmax function.
 
-Applies a softmax function.
+    Softmax is defined as:
 
-Softmax is defined as:
+    :math:`\text{Softmax}(x_{i}) = \frac{exp(x_i)}{\sum_j exp(x_j)}`
 
-:math:`\text{Softmax}(x_{i}) = \frac{exp(x_i)}{\sum_j exp(x_j)}`
+    where :math:`i, j` run over sparse tensor indices and unspecified
+    entries are ignores. This is equivalent to defining unspecified
+    entries as negative infinity so that :math:`exp(x_k) = 0` when the
+    entry with index :math:`k` has not specified.
 
-where :math:`i, j` run over sparse tensor indices and unspecified
-entries are ignores. This is equivalent to defining unspecified
-entries as negative infinity so that :math:`exp(x_k) = 0` when the
-entry with index :math:`k` has not specified.
+    It is applied to all slices along `dim`, and will re-scale them so
+    that the elements lie in the range `[0, 1]` and sum to 1.
 
-It is applied to all slices along `dim`, and will re-scale them so
-that the elements lie in the range `[0, 1]` and sum to 1.
-
-Args:
-    input (Tensor): input
-    dim (int): A dimension along which softmax will be computed.
-    dtype (:class:`torch.dtype`, optional): the desired data type
-        of returned tensor.  If specified, the input tensor is
-        casted to :attr:`dtype` before the operation is
-        performed. This is useful for preventing data type
-        overflows. Default: None
-""")
+    Args:
+        input (Tensor): input
+        dim (int): A dimension along which softmax will be computed.
+        dtype (:class:`torch.dtype`, optional): the desired data type
+          of returned tensor.  If specified, the input tensor is
+          casted to :attr:`dtype` before the operation is
+          performed. This is useful for preventing data type
+          overflows. Default: None
+    """
+    return torch._sparse_softmax(input, dim, dtype=dtype)
 
 
-log_softmax = _add_docstr(_sparse._sparse_log_softmax, r"""
-sparse.log_softmax(input, dim, *, dtype=None) -> Tensor
+def log_softmax(input: Tensor, dim: int, dtype: Optional[DType] = None) -> Tensor:
+    r"""Applies a softmax function followed by logarithm.
 
-Applies a softmax function followed by logarithm.
+    See :class:`~torch.sparse.softmax` for more details.
 
-See :class:`~torch.sparse.softmax` for more details.
-
-Args:
-    input (Tensor): input
-    dim (int): A dimension along which softmax will be computed.
-    dtype (:class:`torch.dtype`, optional): the desired data type
-        of returned tensor.  If specified, the input tensor is
-        casted to :attr:`dtype` before the operation is
-        performed. This is useful for preventing data type
-        overflows. Default: None
-""")
+    Args:
+        input (Tensor): input
+        dim (int): A dimension along which softmax will be computed.
+        dtype (:class:`torch.dtype`, optional): the desired data type
+          of returned tensor.  If specified, the input tensor is
+          casted to :attr:`dtype` before the operation is
+          performed. This is useful for preventing data type
+          overflows. Default: None
+    """
+    return torch._sparse_log_softmax(input, dim, dtype=dtype)
