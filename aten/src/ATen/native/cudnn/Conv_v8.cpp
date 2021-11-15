@@ -69,7 +69,7 @@ uint8_t getAlignment(const Tensor &t) {
   // alignment are in bytes
   uint8_t alignment = 1;
   uintptr_t address = reinterpret_cast<uintptr_t>(t.data_ptr());
-  for (; alignment < 128; alignment *= 2) {
+  for (; alignment < 64; alignment *= 2) {
     if (address % (alignment * 2)) {
       return alignment;
     }
