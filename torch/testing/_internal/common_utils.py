@@ -2548,7 +2548,10 @@ def make_fullrank_matrices_with_distinct_singular_values(*shape, device, dtype, 
         # s = [2, -3, 4, ..., (-1)^k k+1]
         s[1::2] *= -1.
         # 1 + 1/s so that the singular values are in the range [2/3, 3/2]
+        # This gives a condition number of 9/4, which should be good enough
         s.reciprocal_().add_(1.)
+        # Note that the singular values need not be ordered in an SVD so
+        # we don't need need to sort S
         x = (u * s.to(u.dtype)) @ vh
     x.requires_grad_(requires_grad)
     return x
