@@ -193,6 +193,11 @@ void initPythonIRBindings(PyObject* module_) {
   py::class_<AliasDb, std::shared_ptr<AliasDb>>(m, "AliasDb")
       .def("dump", &AliasDb::dump)
       .def("to_graphviz_str", &AliasDb::toGraphviz)
+      .def(
+          "may_contain_alias",
+          [&](AliasDb& db, Value* v1, Value* v2) {
+            return db.mayContainAlias(v1, v2);
+          })
       .def("__str__", &AliasDb::toString);
 
 #define GS(name) def(#name, &Graph ::name)
@@ -235,7 +240,6 @@ void initPythonIRBindings(PyObject* module_) {
              bool add_node_names,
              bool use_external_data_format,
              const std::string& onnx_file_path,
-             const ValAttrNameMap& val_attr_to_name,
              const NodeAttrNameMap& node_attr_to_name) {
             std::string graph;
             std::shared_ptr<::ONNX_NAMESPACE::ModelProto> model_proto;
@@ -260,7 +264,6 @@ void initPythonIRBindings(PyObject* module_) {
                     add_node_names,
                     use_external_data_format,
                     onnx_file_path,
-                    val_attr_to_name,
                     node_attr_to_name);
             std::unordered_map<std::string, py::bytes>
                 python_serialized_export_map;
@@ -291,7 +294,6 @@ void initPythonIRBindings(PyObject* module_) {
           py::arg("add_node_names") = true,
           py::arg("use_external_data_format") = false,
           py::arg("onnx_file_path") = std::string(),
-          py::arg("val_attr_to_name") = ValAttrNameMap(),
           py::arg("node_attr_to_name") = NodeAttrNameMap())
       .def(
           "_pretty_print_onnx",
@@ -377,6 +379,12 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "create",
           [](Graph& g, const char* str, const std::vector<Value*>& inputs) {
+            TORCH_CHECK_VALUE(
+                std::all_of(
+                    inputs.begin(),
+                    inputs.end(),
+                    [](Value* v) { return (v != nullptr); }),
+                "cannot pass None in inputs");
             return g.create(Symbol::fromQualString(str), inputs);
           })
       .def(
@@ -385,6 +393,12 @@ void initPythonIRBindings(PyObject* module_) {
              const char* str,
              const std::vector<Value*>& inputs,
              size_t noutputs) {
+            TORCH_CHECK_VALUE(
+                std::all_of(
+                    inputs.begin(),
+                    inputs.end(),
+                    [](Value* v) { return (v != nullptr); }),
+                "cannot pass None in inputs");
             return g.create(Symbol::fromQualString(str), inputs, noutputs);
           })
       .def("param_node", [](Graph& g) { return g.block()->param_node(); })
