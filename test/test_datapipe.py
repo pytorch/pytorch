@@ -1637,31 +1637,65 @@ class TestFunctionalMapDataPipe(TestCase):
                 map_dp[index], torch.tensor(input_dp[index], dtype=torch.int).sum()
             )
 
-    def test_unbatch_datapipe(self):
-        # arr = [0, 1, 2]
-        # arr = [[0, 1], [2]]
-        arr = [[[0, 1], [2, 3], [4, 5]], [[6, 7], [8, 9], [10, 11]]]
-        print()
-        print(f"Input: {arr}")
-        print()
-        # arr = [0, 1, 2, 3, 4, 5]
-        # arr = [[0, 1, 2], [3, 4, 5]]
+    def test_batch_datapipe(self):
+        arr = list(range(13))
         input_dp = dp.map.SequenceWrapper(arr)
-        # unbatch_dp = dp.map.UnBatcher(input_dp)
-        unbatch_dp2 = dp.map.UnBatcher(input_dp, unbatch_level=2)
-        print()
-        # print(unbatch_dp._get_batch_sizes())
-        # print("FINAL RESULT")
-        # print(list(unbatch_dp))
-        # print()
-        # print(unbatch_dp2._get_batch_sizes())
-        print("FINAL RESULT")
-        print(len(unbatch_dp2))
-        # print(list(unbatch_dp2))
-        # for i in iter(unbatch_dp2):
-        #     print(i)
-        # print(unbatch_dp._get_deepest_level())
-        # print(unbatch_dp2._get_deepest_level())
+
+        # Functional Test: batches top level by default
+        batch_dp = dp.map.Batcher(input_dp, batch_size=2)
+        self.assertEqual([[0, 1], [2, 3], [4, 5], [6, 7], [8, 9], [10, 11], [12]], list(batch_dp))
+
+        # Functional Test: drop_last on command
+        batch_dp = dp.map.Batcher(input_dp, batch_size=2, drop_last=True)
+        self.assertEqual([[0, 1], [2, 3], [4, 5], [6, 7], [8, 9], [10, 11]], list(batch_dp))
+
+        # Functional Test: nested batching
+        batch_dp_2 = batch_dp.batch(batch_size=3)
+        self.assertEqual([[[0, 1], [2, 3], [4, 5]], [[6, 7], [8, 9], [10, 11]]], list(batch_dp_2))
+
+        # Functional Test: unbatch everything first before batching again
+        batch_dp_unbatch_first = batch_dp.batch(batch_size=3, unbatch_level=-1)
+        self.assertEqual([[0, 1, 2], [3, 4, 5], [6, 7, 8], [9, 10, 11]], list(batch_dp_unbatch_first))
+
+        # Reset Test:
+        n_elements_before_reset = 3
+        res_before_reset, res_after_reset = reset_after_n_next_calls(batch_dp, n_elements_before_reset)
+        self.assertEqual([[0, 1], [2, 3], [4, 5]], res_before_reset)
+        self.assertEqual([[0, 1], [2, 3], [4, 5], [6, 7], [8, 9], [10, 11]], res_after_reset)
+
+        # __len__ Test:
+        self.assertEqual(6, len(batch_dp))
+        self.assertEqual(2, len(batch_dp_2))
+
+
+    def test_unbatch_datapipe(self):
+        arr = [[[0, 1], [2, 3], [4, 5]], [[6, 7], [8, 9], [10, 11]]]
+        input_dp = dp.map.SequenceWrapper(arr)
+
+        # Functional Test: unbatches the top level by default
+        unbatch_dp = dp.map.UnBatcher(input_dp)
+        self.assertEqual([[0, 1], [2, 3], [4, 5], [6, 7], [8, 9], [10, 11]], list(unbatch_dp))
+
+        # Functional Test: unbatches all level up to specified
+        unbatch_dp = dp.map.UnBatcher(input_dp, unbatch_level=2)
+        self.assertEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], list(unbatch_dp))
+
+        # Functional Test: unbatches all levels when unbatch_level=-1
+        unbatch_dp = input_dp.unbatch(unbatch_level=-1)
+        self.assertEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], list(unbatch_dp))
+
+        # Reset Test:
+        unbatch_dp = dp.map.UnBatcher(input_dp)
+        n_elements_before_reset = 3
+        res_before_reset, res_after_reset = reset_after_n_next_calls(unbatch_dp, n_elements_before_reset)
+        self.assertEqual([[0, 1], [2, 3], [4, 5]], res_before_reset)
+        self.assertEqual([[0, 1], [2, 3], [4, 5], [6, 7], [8, 9], [10, 11]], res_after_reset)
+
+        # __len__ Test:
+        unbatch_dp = dp.map.UnBatcher(input_dp)
+        self.assertEqual(6, len(unbatch_dp))
+        unbatch_dp = input_dp.unbatch(unbatch_level=-1)
+        self.assertEqual(12, len(unbatch_dp))
 
 # Metaclass conflict for Python 3.6
 # Multiple inheritance with NamedTuple is not supported for Python 3.9
