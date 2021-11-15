@@ -12684,7 +12684,9 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_masked_softmax,
            skips=(
-               # torch.jit.frontend.NotSupportedError: Compiled functions can't take variable number of arguments or use keyword-only arguments with defaults
+               # torch.jit.frontend.NotSupportedError: Compiled
+               # functions can't take variable number of arguments or
+               # use keyword-only arguments with defaults
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
            ),
            gradcheck_wrapper=gradcheck_wrapper_masked_operation,
