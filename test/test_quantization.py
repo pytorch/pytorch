@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# Owner(s): ["oncall: quantization"]
 
 from torch.testing._internal.common_utils import run_tests
 
@@ -50,6 +51,7 @@ from quantization.eager.test_quantize_eager_ptq import TestQuantizeONNXExport  #
 from quantization.eager.test_quantize_eager_qat import TestQuantizationAwareTraining  # noqa: F401
 from quantization.eager.test_quantize_eager_qat import TestQATActivationOps  # noqa: F401
 from quantization.eager.test_quantize_eager_qat import TestConvBNQATModule  # noqa: F401
+from quantization.eager.test_quantize_eager_qat import TestEmbeddingBagQATModule  # noqa: F401
 # 3. Eager mode fusion passes
 from quantization.eager.test_fusion import TestFusion  # noqa: F401
 # 4. Testing model numerics between quanitzed and FP32 models
@@ -67,6 +69,8 @@ try:
     from quantization.fx.test_quantize_fx import TestFuseFx  # noqa: F401
     from quantization.fx.test_quantize_fx import TestQuantizeFx  # noqa: F401
     from quantization.fx.test_quantize_fx import TestQuantizeFxOps  # noqa: F401
+    from quantization.fx.test_quantize_fx import TestQuantizeFxOpsNew  # noqa: F401
+    from quantization.fx.test_quantize_fx import TestQuantizeFxTRTOps  # noqa: F401
     from quantization.fx.test_quantize_fx import TestQuantizeFxModels  # noqa: F401
 except ImportError:
     # In FBCode we separate FX out into a separate target for the sake of dev
@@ -107,6 +111,12 @@ from quantization.jit.test_deprecated_jit_quant import TestDeprecatedJitQuantize
 from quantization.ao_migration.test_quantization import TestAOMigrationQuantization  # noqa: F401
 try:
     from quantization.ao_migration.test_quantization_fx import TestAOMigrationQuantizationFx  # noqa: F401
+except ImportError:
+    pass
+
+try:
+    from quantization.dbr.test_quantize_dbr import TestQuantizeDBR  # noqa: F401
+    from quantization.dbr.test_quantize_dbr import TestQuantizeDBRModels  # noqa: F401
 except ImportError:
     pass
 

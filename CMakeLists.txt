@@ -148,7 +148,7 @@ option(BUILD_BINARY "Build C++ binaries" OFF)
 option(BUILD_DOCS "Build Caffe2 documentation" OFF)
 option(BUILD_CUSTOM_PROTOBUF "Build and use Caffe2's own protobuf under third_party" ON)
 option(BUILD_PYTHON "Build Python binaries" ON)
-option(BUILD_CAFFE2 "Master flag to build Caffe2" ON)
+option(BUILD_CAFFE2 "Master flag to build Caffe2" OFF)
 option(BUILD_LITE_INTERPRETER "Master flag to build Lite Interpreter" OFF)
 cmake_dependent_option(
     BUILD_CAFFE2_OPS "Build Caffe2 operators" ON
@@ -423,8 +423,6 @@ else()
 endif()
 set(SELECTED_OP_LIST "" CACHE STRING
     "Path to the yaml file that contains the list of operators to include for custom build. Include all operators by default.")
-set(OP_DEPENDENCY "" CACHE STRING
-    "Path to the yaml file that contains the op dependency graph for custom build.")
 set(STATIC_DISPATCH_BACKEND "" CACHE STRING
     "Name of the backend for which static dispatch code is generated, e.g.: CPU.")
 option(

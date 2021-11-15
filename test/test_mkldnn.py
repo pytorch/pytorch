@@ -1,3 +1,5 @@
+# Owner(s): ["module: mkldnn"]
+
 import copy
 import itertools
 import functools

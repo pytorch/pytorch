@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/ScalarType.h>
+#include <c10/util/irange.h>
 #include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/TensorUtils.h>
@@ -169,7 +170,8 @@ void batch_iterator_with_broadcasting(const Tensor& a, const Tensor& b, const fu
     auto* b_batch_idx_ptr = data[0];
     auto* a_batch_idx_ptr = data[1];
 
-    for (int64_t elem = 0; elem < nelems; ++elem) {
+    for (const auto elem : c10::irange(nelems)) {
+      (void)elem; //Suppress unused variable warning
       auto b_curr_linear_batch_idx = *reinterpret_cast<int64_t*>(b_batch_idx_ptr);
       auto a_curr_linear_batch_idx = *reinterpret_cast<int64_t*>(a_batch_idx_ptr);
 
@@ -223,11 +225,17 @@ static inline void linearSolveCheckInputs(const Tensor& self, const Tensor& A, c
 }
 
 // Validates input shapes for operations on batches of square matrices (inverse, cholesky, symeig, eig)
-static inline void squareCheckInputs(const Tensor& self) {
-  TORCH_CHECK(self.dim() >= 2, "Tensor of matrices must have at least 2 dimensions. ");
+static inline void squareCheckInputs(const Tensor& self, const char* const f_name) {
+  TORCH_CHECK(self.dim() >= 2, f_name, ": The input tensor must have at least 2 dimensions.");
   TORCH_CHECK(self.size(-1) == self.size(-2),
-              "A must be batches of square matrices, "
+              f_name,
+              ": A must be batches of square matrices, "
               "but they are ", self.size(-1), " by ", self.size(-2), " matrices");
+}
+
+static inline void checkFloatingOrComplex(const Tensor& t, const char* const f_name) {
+  TORCH_CHECK((at::isFloatingType(t.scalar_type()) || at::isComplexType(t.scalar_type())),
+              f_name, ": Expected a floating point or complex tensor as input. Got ", toString(t.scalar_type()));
 }
 
 /*
@@ -300,9 +308,7 @@ static inline void checkAllSameDim(TensorList tensors, int64_t dim) {
   }
 }
 
-static inline std::tuple<Tensor,Tensor> _linalg_broadcast_batch_dims(const Tensor& arg1, const Tensor& arg2, const char* name) {
-  linearSolveCheckInputs(arg1, arg2, name);
-
+static inline std::tuple<std::vector<int64_t>, std::vector<int64_t>> _linalg_broadcast_batch_dims(const Tensor& arg1, const Tensor& arg2) {
   // broadcast the batch dimensions of arg1 and arg2.
   IntArrayRef arg1_batch_sizes(arg1.sizes().data(), arg1.ndimension() - 2);
   IntArrayRef arg2_batch_sizes(arg2.sizes().data(), arg2.ndimension() - 2);
@@ -313,6 +319,14 @@ static inline std::tuple<Tensor,Tensor> _linalg_broadcast_batch_dims(const Tenso
 
   std::vector<int64_t> arg2_expand_size({expand_batch_portion});
   arg2_expand_size.insert(arg2_expand_size.end(), { arg2.size(-2), arg2.size(-1) });
+  return std::make_tuple(std::move(arg1_expand_size), std::move(arg2_expand_size));
+}
+
+static inline std::tuple<Tensor,Tensor> _linalg_broadcast_batch_dims(const Tensor& arg1, const Tensor& arg2, const char* name) {
+  linearSolveCheckInputs(arg1, arg2, name);
+
+  std::vector<int64_t> arg1_expand_size, arg2_expand_size;
+  std::tie(arg1_expand_size, arg2_expand_size) = at::native::_linalg_broadcast_batch_dims(arg1, arg2);
 
   Tensor arg1_broadcasted  = arg1.expand(arg1_expand_size);
   Tensor arg2_broadcasted = arg2.expand(arg2_expand_size);
@@ -332,7 +346,7 @@ static inline Tensor _move_to_end(const Tensor& self, IntArrayRef axes) {
   const int64_t ndim = self.ndimension();
   std::vector<int64_t> perm;
 
-  for (int64_t i = 0; i < ndim; i++) {
+  for (const auto i : c10::irange(ndim)) {
     auto it = std::find(a.begin(), a.end(), i);
     if (it == a.end()) {
        perm.push_back(i);
@@ -476,7 +490,7 @@ static inline std::vector<int64_t> create_dim_backshift_permutation(int64_t dim0
     "duplicate or invalid dimensions");
   std::vector<int64_t> permutation(ndim);
   int64_t cur_permuted_dim = 0;
-  for (int64_t dim_ind = 0; dim_ind < ndim; dim_ind++) {
+  for (const auto dim_ind : c10::irange(ndim)) {
     if ((dim_ind != dim0) && (dim_ind != dim1)) {
       permutation[cur_permuted_dim++] = dim_ind;
     }
@@ -493,7 +507,7 @@ static inline std::vector<int64_t> create_dim_backshift_permutation(int64_t dim0
 static inline std::vector<int64_t> create_reverse_permutation(std::vector<int64_t> permutation) {
   int64_t ndim = permutation.size();
   std::vector<int64_t> reverse_permutation(ndim);
-  for (int64_t dim_ind = 0; dim_ind < ndim; dim_ind++) {
+  for (const auto dim_ind : c10::irange(ndim)) {
     reverse_permutation[permutation[dim_ind]] = dim_ind;
   }
   return reverse_permutation;

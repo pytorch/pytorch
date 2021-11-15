@@ -110,7 +110,7 @@ if is_available():
                 :ref:`rpc-backends` for more information and find which options
                 are available.
         """
-
+        torch._C._log_api_usage_once("torch.distributed.init_rpc")
         if backend is not None and not isinstance(
             backend, backend_registry.BackendType
         ):
@@ -151,15 +151,6 @@ if is_available():
 
         if backend is None:
             backend = BackendType.TENSORPIPE  # type: ignore[attr-defined]
-
-        if backend == BackendType.PROCESS_GROUP:  # type: ignore[attr-defined]
-            raise RuntimeError(
-                "RPC was initialized with the PROCESS_GROUP backend which has "
-                "been removed and is superseded by the TENSORPIPE backend. "
-                "Please migrate to the TENSORPIPE backend. "
-                "PyTorch v1.9 was the last release that carries PROCESS_GROUP "
-                "RPC backend."
-            )
 
         if rpc_backend_options is None:
             # default construct a set of RPC backend options.

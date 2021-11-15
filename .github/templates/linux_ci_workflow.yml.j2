@@ -47,6 +47,7 @@ jobs:
   build:
     runs-on: linux.2xlarge
     needs: [!{{ ciflow_config.root_job_name }}]
+    timeout-minutes: !{{ common.timeout_minutes }}
     env:
       JOB_BASE_NAME: !{{ build_environment }}-build
     outputs:
@@ -54,7 +55,7 @@ jobs:
     steps:
       !{{ common.setup_ec2_linux() }}
       !{{ common.checkout_pytorch("recursive") }}
-      !{{ common.calculate_docker_image() }}
+      !{{ common.calculate_docker_image(false) }}
       - name: Pull Docker image
         run: |
           !{{ common.pull_docker("${DOCKER_IMAGE}") }}
@@ -109,7 +110,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      {%- if not is_libtorch %}
+      {%- if build_generates_artifacts %}
       - name: Archive artifacts into zip
         run: |
           zip -1 -r artifacts.zip dist/ build/custom_test_artifacts build/lib build/bin .pytorch-test-times.json
@@ -138,6 +139,7 @@ jobs:
   generate-test-matrix:
     runs-on: ubuntu-18.04
     needs: [!{{ ciflow_config.root_job_name }}]
+    timeout-minutes: !{{ common.timeout_minutes }}
     env:
       TEST_RUNNER_TYPE: !{{ test_runner_type }}
       ENABLE_DISTRIBUTED_TEST: !{{ enable_distributed_test }}
@@ -152,6 +154,7 @@ jobs:
       ENABLE_NOARCH_TEST: !{{ enable_noarch_test }}
       NUM_TEST_SHARDS: !{{ num_test_shards }}
       MULTIGPU_RUNNER_TYPE: linux.16xlarge.nvidia.gpu
+      DISTRIBUTED_GPU_RUNNER_TYPE: linux.8xlarge.nvidia.gpu
       NOGPU_RUNNER_TYPE: linux.2xlarge
       PR_BODY: ${{ github.event.pull_request.body }}
     outputs:
@@ -175,6 +178,7 @@ jobs:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
       fail-fast: false
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: !{{ common.timeout_minutes }}
     env:
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: !{{ build_environment }}-test
@@ -287,6 +291,7 @@ jobs:
 {%- if enable_doc_jobs %}
   build-docs:
     runs-on: linux.2xlarge
+    timeout-minutes: !{{ common.timeout_minutes }}
     strategy:
       matrix:
         docs_type: [cpp, python]
