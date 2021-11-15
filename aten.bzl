@@ -1,4 +1,5 @@
 load("@rules_cc//cc:defs.bzl", "cc_library")
+load("@bazel_skylib//lib:paths.bzl", "paths")
 
 CPU_CAPABILITY_NAMES = ["DEFAULT", "AVX2"]
 CAPABILITY_COMPILER_FLAGS = {
@@ -42,3 +43,29 @@ def intern_build_aten_ops(copts, deps):
         deps = [":ATen_CPU_" + cpu_capability for cpu_capability in CPU_CAPABILITY_NAMES],
         linkstatic = 1,
     )
+
+def generate_aten_impl(ctx):
+    install_dir = paths.dirname(
+        ctx.expand_location("$(location aten/src/ATen/Declarations.yaml)"))
+    ops_dir = ctx.actions.declare_directory(install_dir + "/ops")
+    outputs=[ops_dir] + ctx.outputs.outs
+    ctx.actions.run(
+        outputs=outputs,
+        inputs=ctx.files.srcs,
+        executable=ctx.expand_location(ctx.attr.generator),
+        arguments=["--source-path", "aten/src/ATen",
+                   "--install_dir", install_dir],
+        tools=ctx.files.tools,
+    )
+    return [DefaultInfo(files=depset(outputs))]
+
+
+generate_aten = rule(
+    implementation = generate_aten_impl,
+    attrs = {
+        "outs": attr.output_list(),
+        "srcs": attr.label_list(allow_files=True),
+        "generator": attr.string(),
+        "tools": attr.label_list(allow_files=True),
+    }
+)
