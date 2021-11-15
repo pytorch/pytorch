@@ -1,4 +1,5 @@
 import warnings
+
 import torch
 import torch.fx
 import torch.fx.experimental.fx_acc.acc_ops as acc_ops
@@ -73,6 +74,34 @@ def fuse_permute_matmul(gm: torch.fx.GraphModule):
     gm.graph.lint()
     gm.recompile()
     return gm
+
+
+def fuse_unsqueeze_cat_sum(gm: torch.fx.GraphModule):
+    for node in gm.graph.nodes:
+        if node.target != acc_ops.sum:
+            continue
+        prev_node = node.kwargs["input"]
+        if prev_node.target != acc_ops.cat or len(prev_node.kwargs["tensors"]) != 2:
+            continue
+        lhs, rhs = prev_node.kwargs["tensors"][0], prev_node.kwargs["tensors"][1]
+        if lhs.target != acc_ops.unsqueeze or rhs.target != acc_ops.unsqueeze:
+            continue
+        lhs_input = lhs.kwargs["input"]
+        rhs_input = rhs.kwargs["input"]
+        # prerequisite check
+        cond1 = lhs.kwargs["dim"] == 0 and rhs.kwargs["dim"] == 0
+        cond2 = prev_node.kwargs["dim"] == 0
+        if not cond1 or not cond2:
+            continue
+        with gm.graph.inserting_before(node):
+            fused_node = gm.graph.call_function(acc_ops.add, kwargs={"input": lhs_input, "other": rhs_input})
+        node.replace_all_uses_with(fused_node)
+
+    gm.graph.eliminate_dead_code()
+    gm.graph.lint()
+    gm.recompile()
+    return gm
+
 
 
 try:
