@@ -49,13 +49,16 @@ def generate_aten_impl(ctx):
         ctx.expand_location("$(location aten/src/ATen/Declarations.yaml)"))
     ops_dir = ctx.actions.declare_directory(install_dir + "/ops")
     outputs=[ops_dir] + ctx.outputs.outs
+
+    tool_inputs, tool_inputs_manifest = ctx.resolve_tools(tools=[ctx.attr.generator])
     ctx.actions.run(
         outputs=outputs,
         inputs=ctx.files.srcs,
-        executable=ctx.expand_location(ctx.attr.generator),
+        executable=ctx.executable.generator,
         arguments=["--source-path", "aten/src/ATen",
                    "--install_dir", install_dir],
-        tools=ctx.files.tools,
+        tools=tool_inputs,
+        input_manifests=tool_inputs_manifest,
     )
     return [DefaultInfo(files=depset(outputs))]
 
@@ -65,7 +68,11 @@ generate_aten = rule(
     attrs = {
         "outs": attr.output_list(),
         "srcs": attr.label_list(allow_files=True),
-        "generator": attr.string(),
-        "tools": attr.label_list(allow_files=True),
+        "generator": attr.label(
+            executable=True,
+            allow_files=True,
+            mandatory=True,
+            cfg="host",
+        ),
     }
 )

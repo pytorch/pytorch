@@ -135,11 +135,11 @@ Tensor linear_run(
 }
 
 TORCH_LIBRARY_IMPL(aten, Metal, m) {
-  m.impl("addmm", TORCH_FN(addmm));
+  m.impl(TORCH_SELECTIVE_NAME("aten::addmm"), TORCH_FN(addmm));
 };
 
 TORCH_LIBRARY_IMPL(metal_prepack, Metal, m) {
-  m.impl("linear_run", TORCH_FN(prepack::linear_run));
+  m.impl(TORCH_SELECTIVE_NAME("metal_prepack::linear_run"), TORCH_FN(prepack::linear_run));
 }
 
 }
