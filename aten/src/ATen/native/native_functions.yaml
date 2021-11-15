@@ -5310,6 +5310,11 @@
 
 - func: to_mkldnn_backward(Tensor grad, Tensor input) -> Tensor
 
+- func: quantize_per_tensor_dynamic(Tensor self, ScalarType dtype, bool reduce_range) -> Tensor
+  variants: function
+  dispatch:
+    CPU, CUDA: quantize_per_tensor_dynamic
+
 - func: quantize_per_tensor(Tensor self, float scale, int zero_point, ScalarType dtype) -> Tensor
   variants: function
   dispatch:
