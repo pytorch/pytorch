@@ -16,6 +16,10 @@ namespace torch_lazy_tensors {
 namespace cpp_test {
 namespace {
 
+bool IsLtcTensor(const at::Tensor& tensor) {
+  return dynamic_cast<LTCTensorImpl*>(tensor.unsafeGetTensorImpl());
+}
+
 void DumpDifferences(const at::Tensor& tensor1, const at::Tensor& tensor2) {
   static bool dump_tensors =
       lazy_tensors::sys_util::GetEnvBool("XLA_TEST_DUMP_TENSORS", false);
@@ -39,7 +43,7 @@ void DumpDifferences(const at::Tensor& tensor1, const at::Tensor& tensor2) {
 void MaybeDumpGraph(const at::Tensor& tensor) {
   static std::string dump_graph =
       lazy_tensors::sys_util::GetEnvString("XLA_TEST_DUMP_GRAPHS", "");
-  if (!dump_graph.empty() && bridge::IsLtcTensor(tensor)) {
+  if (!dump_graph.empty() && IsLtcTensor(tensor)) {
     std::string graph_str;
     if (dump_graph == "text") {
       graph_str = GetTensorTextGraph(tensor);
@@ -166,12 +170,12 @@ bool CloseValues(at::Tensor tensor1, at::Tensor tensor2, double rtol,
 }
 
 std::string GetTensorTextGraph(at::Tensor tensor) {
-  LazyTensor xtensor = bridge::GetLtcTensor(tensor);
+  LazyTensor xtensor = TryGetLtcTensor(tensor);
   return ir::DumpUtil::ToText({xtensor.GetIrValue().node.get()});
 }
 
 std::string GetTensorDotGraph(at::Tensor tensor) {
-  LazyTensor xtensor = bridge::GetLtcTensor(tensor);
+  LazyTensor xtensor = TryGetLtcTensor(tensor);
   return ir::DumpUtil::ToDot({xtensor.GetIrValue().node.get()});
 }
 

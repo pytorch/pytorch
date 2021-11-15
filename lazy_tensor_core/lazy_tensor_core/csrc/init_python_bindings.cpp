@@ -73,7 +73,7 @@ std::string GetTensorsDump(
   std::vector<torch::lazy::Node*> nodes;
   std::vector<torch::lazy::Value> values;
   for (auto& tensor : tensors) {
-    LazyTensor xtensor = bridge::GetLtcTensor(tensor);
+    LazyTensor xtensor = TryGetLtcTensor(tensor);
     values.push_back(xtensor.GetIrValue());
     nodes.push_back(values.back().node.get());
   }
@@ -107,13 +107,13 @@ std::vector<LazyTensor> GetLtcTensors(const std::vector<at::Tensor>& tensors,
   xtensors.reserve(tensors.size());
   if (want_all) {
     for (auto& tensor : tensors) {
-      xtensors.push_back(bridge::GetLtcTensor(tensor));
+      xtensors.push_back(TryGetLtcTensor(tensor));
     }
   } else {
     for (auto& tensor : tensors) {
-      auto xtensor = bridge::TryGetLtcTensor(tensor);
+      auto xtensor = TryGetLtcTensor(tensor);
       if (xtensor) {
-        xtensors.push_back(*xtensor);
+        xtensors.push_back(xtensor);
       }
     }
   }
@@ -178,10 +178,10 @@ std::pair<at::Tensor, std::shared_ptr<torch::lazy::Value>> AllReduce(
   LazyTensor result;
   torch::lazy::Value new_token;
   std::tie(result, new_token) = lazy_tensor_distributed::all_reduce(
-      bridge::GetLtcTensor(input), *token, GetReduceType(reduce_type), scale,
+      TryGetLtcTensor(input), *token, GetReduceType(reduce_type), scale,
       replica_groups);
   return std::pair<at::Tensor, std::shared_ptr<torch::lazy::Value>>(
-      bridge::AtenFromLtcTensor(std::move(result)),
+      CreateAtenFromLtcTensor(std::move(result)),
       std::make_shared<torch::lazy::Value>(new_token));
 }
 
@@ -192,10 +192,10 @@ std::pair<at::Tensor, std::shared_ptr<torch::lazy::Value>> AllToAll(
   LazyTensor result;
   torch::lazy::Value new_token;
   std::tie(result, new_token) = lazy_tensor_distributed::all_to_all(
-      bridge::GetLtcTensor(input), *token, split_dimension, concat_dimension,
+      TryGetLtcTensor(input), *token, split_dimension, concat_dimension,
       split_count, replica_groups);
   return std::pair<at::Tensor, std::shared_ptr<torch::lazy::Value>>(
-      bridge::AtenFromLtcTensor(std::move(result)),
+      CreateAtenFromLtcTensor(std::move(result)),
       std::make_shared<torch::lazy::Value>(new_token));
 }
 
@@ -205,9 +205,9 @@ std::pair<at::Tensor, std::shared_ptr<torch::lazy::Value>> CollectivePermute(
   LazyTensor result;
   torch::lazy::Value new_token;
   std::tie(result, new_token) = lazy_tensor_distributed::collective_permute(
-      bridge::GetLtcTensor(input), *token, source_target_pairs);
+      TryGetLtcTensor(input), *token, source_target_pairs);
   return std::pair<at::Tensor, std::shared_ptr<torch::lazy::Value>>(
-      bridge::AtenFromLtcTensor(std::move(result)),
+      CreateAtenFromLtcTensor(std::move(result)),
       std::make_shared<torch::lazy::Value>(new_token));
 }
 
@@ -293,12 +293,12 @@ std::string GetLiveTensorsReport(size_t nodes_threshold,
 }
 
 std::ptrdiff_t GetTensorViewAliasId(const at::Tensor& tensor) {
-  LazyTensor xtensor = bridge::GetLtcTensor(tensor);
+  LazyTensor xtensor = TryGetLtcTensor(tensor);
   return xtensor.GetViewAliasId();
 }
 
 std::ptrdiff_t GetTensorId(const at::Tensor& tensor) {
-  LazyTensor xtensor = bridge::GetLtcTensor(tensor);
+  LazyTensor xtensor = TryGetLtcTensor(tensor);
   return xtensor.GetUniqueId();
 }
 
@@ -311,7 +311,7 @@ std::vector<at::Tensor> GetLtcTensorsFromAten(
   lazy_tensors.reserve(data_handles.size());
   for (auto& data_handle : data_handles) {
     LazyTensor lazy_tensor = LazyTensor::Create(std::move(data_handle));
-    lazy_tensors.push_back(bridge::AtenFromLtcTensor(std::move(lazy_tensor)));
+    lazy_tensors.push_back(CreateAtenFromLtcTensor(std::move(lazy_tensor)));
   }
   return lazy_tensors;
 }
@@ -368,11 +368,11 @@ py::object LtcNms(const at::Tensor& boxes, const at::Tensor& scores,
   {
     NoGilSection nogil;
     auto nms_result = lazy_tensor_aten_ops::nms(
-        bridge::GetLtcTensor(boxes), bridge::GetLtcTensor(scores),
-        bridge::GetLtcTensor(score_threshold),
-        bridge::GetLtcTensor(iou_threshold), output_size);
-    selected_indices = bridge::AtenFromLtcTensor(std::move(nms_result.first));
-    num_valid = bridge::AtenFromLtcTensor(std::move(nms_result.second));
+        TryGetLtcTensor(boxes), TryGetLtcTensor(scores),
+        TryGetLtcTensor(score_threshold),
+        TryGetLtcTensor(iou_threshold), output_size);
+    selected_indices = CreateAtenFromLtcTensor(std::move(nms_result.first));
+    num_valid = CreateAtenFromLtcTensor(std::move(nms_result.second));
   }
   auto result_tuple = py::tuple(2);
   result_tuple[0] =
@@ -380,6 +380,36 @@ py::object LtcNms(const at::Tensor& boxes, const at::Tensor& scores,
   result_tuple[1] =
       torch::autograd::make_variable(num_valid, /*requires_grad=*/false);
   return result_tuple;
+}
+
+std::vector<at::Tensor> LtcCreateTensorList(const at::TensorList& tensors) {
+  std::vector<at::Tensor> aten_ltc_tensors(tensors.size());
+  std::vector<LazyTensor> ltc_tensors;
+  // We need to separate out the defined tensors first, GetLtcTensor() doesn't
+  // work with undefined tensors.
+  std::vector<bool> to_translate(tensors.size());
+  for (size_t i = 0; i < tensors.size(); ++i) {
+    const at::Tensor& tensor = tensors[i];
+    if (tensor.defined()) {
+      auto xtensor = TryGetLtcTensor(tensor);
+      if (xtensor) {
+        to_translate[i] = true;
+        ltc_tensors.push_back(xtensor);
+      } else {
+        aten_ltc_tensors[i] = tensor;
+      }
+    }
+  }
+  auto defined_aten_ltc_tensors =
+      LazyGraphExecutor::Get()->GetTensors(&ltc_tensors);
+  // Insert undefined tensors into the result, back into the original undefined
+  // positions.
+  for (size_t i = 0, defined_pos = 0; i < tensors.size(); ++i) {
+    if (to_translate[i]) {
+      aten_ltc_tensors[i] = std::move(defined_aten_ltc_tensors[defined_pos++]);
+    }
+  }
+  return aten_ltc_tensors;
 }
 
 // py::dict GetMemoryInfo(const std::string& device_str) {
@@ -441,8 +471,7 @@ void InitLtcModuleBindings(py::module m) {
     std::vector<at::Tensor> result;
     {
       NoGilSection nogil;
-      std::vector<at::Tensor> cpu_tensors =
-          bridge::LtcCreateTensorList(tensors);
+      std::vector<at::Tensor> cpu_tensors = LtcCreateTensorList(tensors);
       result.reserve(cpu_tensors.size());
       for (size_t i = 0; i < cpu_tensors.size(); ++i) {
         result.push_back(torch::autograd::make_variable(

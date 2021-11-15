@@ -21,7 +21,7 @@ def node_ctor_arg_rvalue_string(arg: NamedCType) -> str:
             return f"lazy_{arg.name}.GetIrValue()"
         elif isinstance(arg.type, OptionalCType):
             return f"lazy_{arg.name} ? " \
-                   f"c10::make_optional(lazy_{arg.name}->GetIrValue()) : " \
+                   f"c10::make_optional(lazy_{arg.name}.GetIrValue()) : " \
                    "c10::nullopt"
         else:
             raise AssertionError("TODO not sure if there are other valid types to handle here")
@@ -125,15 +125,12 @@ def lazy_tensor_decls(value_types: List[NamedCType]) -> str:
         if isinstance(t.type, BaseCType):
             lazy_tensor_decls.append(
                 f"LazyTensor lazy_{t.name} = "
-                f"bridge::GetLtcTensorOrCreateForWrappedNumber({t.name}, *device);")
+                f"GetLtcTensorOrCreateForWrappedNumber({t.name}, *device);")
         elif isinstance(t.type, OptionalCType):
             # TODO(alanwaketan): Maybe we want to apply GetLtcTensorOrCreateForWrappedNumber here, but hold it
             # until we encounter a real world example.
             lazy_tensor_decls.append(
-                f"c10::optional<LazyTensor> lazy_{t.name} =  "
-                f"{t.name} ? "
-                f"bridge::TryGetLtcTensor(*{t.name}) : "
-                f"c10::nullopt;")
+                f"    LazyTensor lazy_{t.name} = TryGetLtcTensor({t.name}.value_or(at::Tensor()));")
         else:
             raise AssertionError("TODO not sure if there are other valid types to handle here")
     return "\n    ".join(lazy_tensor_decls)
@@ -182,13 +179,13 @@ class GenLazyNativeFuncDefinition:
 
         assert len(value_types) > 0, f"Only supporting tensor ops so far, none found in {sig}"
         first_tensor = value_types[0]
-        bridge_str = f"""auto result = bridge::AtenFromLtcTensor(lazy_{first_tensor.name}.CreateFrom(node));"""
+        bridge_str = f"""auto result = CreateAtenFromLtcTensor(lazy_{first_tensor.name}.CreateFrom(node));"""
         if returns_length > 1:
             bridge_str = f"""std::vector<LazyTensor> lazy_tensors;
         for (int i = 0; i < {returns_length}; i++) {{
             lazy_tensors.push_back(lazy_{first_tensor.name}.CreateFrom(torch::lazy::Value(node, i)));
         }}
-        auto result = bridge::TupleAtenFromLtcTensors<{returns_length}>(lazy_tensors);"""
+        auto result = TupleAtenFromLtcTensors<{returns_length}>(lazy_tensors);"""
         if schema.name.name.inplace:
             assert returns_length == 1, "We assumed there was no such case where an op is an in-place variant " \
                                         "and has tuple outputs."
