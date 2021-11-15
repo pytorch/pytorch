@@ -573,7 +573,7 @@ class MultiProcessTestCase(TestCase):
         # self.id() == e.g. '__main__.TestDistributed.test_get_rank'
         # We're retrieving a corresponding test and executing it.
         try:
-            getattr(self, test_name)()
+            super().run()
         except unittest.SkipTest as se:
             logger.info(
                 f"Process {self.rank} skipping test {test_name} for following reason: {str(se)}"
