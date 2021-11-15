@@ -210,6 +210,7 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/passes/restore_mutation.cpp",
     "torch/csrc/jit/passes/create_autodiff_subgraphs.cpp",
     "torch/csrc/jit/passes/dead_code_elimination.cpp",
+    "torch/csrc/jit/passes/eliminate_no_ops.cpp",
     "torch/csrc/jit/passes/remove_redundant_profiles.cpp",
     "torch/csrc/jit/passes/remove_exceptions.cpp",
     "torch/csrc/jit/passes/decompose_ops.cpp",
@@ -359,12 +360,17 @@ core_sources_full = core_sources_full_mobile + [
 ]
 
 lazy_tensor_core_sources = [
+    "torch/csrc/lazy/backend/backend_device.cpp",
+    "torch/csrc/lazy/backend/lowering_context.cpp",
     "torch/csrc/lazy/core/config.cpp",
     "torch/csrc/lazy/core/hash.cpp",
     "torch/csrc/lazy/core/ir.cpp",
     "torch/csrc/lazy/core/ir_metadata.cpp",
     "torch/csrc/lazy/core/ir_util.cpp",
+    "torch/csrc/lazy/core/permutation_util.cpp",
     "torch/csrc/lazy/core/shape.cpp",
+    "torch/csrc/lazy/ts_backend/config.cpp",
+    "torch/csrc/lazy/ts_backend/ts_node.cpp",
 ]
 
 libtorch_core_sources = sorted(
@@ -931,6 +937,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/native/DispatchStub.cpp",
     "aten/src/ATen/native/UpSample.cpp",
     "aten/src/ATen/native/mkl/LinearAlgebra.cpp",
+    "aten/src/ATen/native/mkl/SparseBlasImpl.cpp",
     "aten/src/ATen/native/mkl/SparseCsrLinearAlgebra.cpp",
     "aten/src/ATen/native/mkl/SpectralOps.cpp",
     "aten/src/ATen/native/mkldnn/BinaryOps.cpp",
@@ -1201,6 +1208,8 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/layer_norm.cpp",
     "aten/src/ATen/native/sparse/ParamUtils.cpp",
     "aten/src/ATen/native/sparse/SoftMax.cpp",
+    "aten/src/ATen/native/sparse/SparseBlas.cpp",
+    "aten/src/ATen/native/sparse/SparseBlasImpl.cpp",
     "aten/src/ATen/native/sparse/SparseMatMul.cpp",
     "aten/src/ATen/native/sparse/SparseTensor.cpp",
     "aten/src/ATen/native/sparse/SparseCsrTensor.cpp",
