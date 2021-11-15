@@ -72,7 +72,7 @@ template <typename input_t, typename output_t>
 __global__ void convert_indices_from_csr_to_coo_cuda_kernel(output_t* data_out, const input_t* data_in, const int64_t nrows) {
   int64_t tid = blockDim.x * blockIdx.x + threadIdx.x;
 
-  if (tid < nrows - 1) {
+  if (tid < nrows) {
     for (int64_t i = data_in[tid]; i < data_in[tid + 1]; i++)
       data_out[i] = static_cast<output_t>(tid);
   }
@@ -98,7 +98,7 @@ void convert_indices_from_csr_to_coo_cuda(const Tensor& result, const Tensor& cr
   int64_t BLOCKS = (nrows + THREADS) / THREADS;
   at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();
   at::cuda::ThrustAllocator allocator;
-  thrust::copy(thrust::cuda::par(allocator).on(stream), col_indices_data_in, col_indices_data_in + col_indices.numel(), data_out);
+  thrust::copy(thrust::cuda::par(allocator).on(stream), col_indices_data_in, col_indices_data_in + col_indices.numel(), data_out + col_indices.numel());
   convert_indices_from_csr_to_coo_cuda_kernel<<<BLOCKS, THREADS, 0, stream>>>(data_out, crow_indices_data_in, nrows);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
