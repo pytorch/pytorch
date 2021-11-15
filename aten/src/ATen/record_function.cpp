@@ -495,13 +495,11 @@ void enableRecordFunction(bool enable) {
 }
 
 RecordFunction::RecordFunction(RecordScope scope, bool pre_sampled) {
-  auto* rf_tls_ptr = &rf_tls();
-  if (rf_tls_ptr->tls_record_function_enabled_) {
-    auto& m = manager();
-    if (!m.sorted_global_callbacks_.empty() || !rf_tls_ptr->sorted_tls_callbacks_.empty()) {
-      m.init(*this, scope, pre_sampled);
-    }
-  }
+  // Don't bother checking if we're enabled; caller should be using
+  // `shouldRunRecordFunction`. Can't debug-check that because there's
+  // the possibility that another thread turned it off after
+  // shouldRunRecordFunction returned.
+  manager().init(*this, scope, pre_sampled);
 }
 
 /* static */
