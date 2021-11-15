@@ -334,6 +334,10 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::barrier(
   return pg_->barrier(opts);
 }
 
+c10::intrusive_ptr<ProcessGroup> ProcessGroupWrapper::getWrappedPg() const {
+  return pg_;
+}
+
 void ProcessGroupWrapper::runCollectiveChecks(
     OpType op_type,
     const std::vector<at::Tensor>& tensors) const {
