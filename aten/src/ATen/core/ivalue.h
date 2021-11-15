@@ -1226,9 +1226,7 @@ template <typename T>
 c10::ClassTypePtr getCustomClassTypeImpl() {
   auto& tmap = c10::getCustomClassTypeMap();
   auto res = tmap.find(std::type_index(typeid(T)));
-  if (res == tmap.end()) {
-    throw c10::Error("Can't find class id in custom class type map", "");
-  }
+  TORCH_CHECK(res != tmap.end(), "Can't find class id in custom class type map", "");
   return res->second;
 }
 

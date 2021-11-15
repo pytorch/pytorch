@@ -14,6 +14,56 @@ common_notes = {
 # Note: This not only adds doc strings for functions in the linalg namespace, but
 # also connects the torch.linalg Python namespace to the torch._C._linalg builtins.
 
+cross = _add_docstr(_linalg.linalg_cross, r"""
+linalg.cross(input, other, *, dim=-1, out=None) -> Tensor
+
+
+Computes the cross product of two 3-dimensional vectors.
+
+Supports input of float, double, cfloat and cdouble dtypes. Also supports batches
+of vectors, for which it computes the product along the dimension :attr:`dim`.
+In this case, the output has the same batch dimensions as the inputs broadcast to
+a common shape.
+
+Args:
+    input (Tensor): the first input tensor.
+    other (Tensor): the second input tensor.
+    dim  (int, optional): the dimension along which to take the cross-product. Default: `-1`.
+
+Keyword args:
+    out (Tensor, optional): the output tensor. Ignored if `None`. Default: `None`.
+
+Raises:
+    RuntimeError: If after broadcasting :attr:`input`\ `.size(\ `:attr:`dim`\ `) != 3`
+                  or :attr:`other`\ `.size(\ `:attr:`dim`\ `) != 3`.
+Example:
+    >>> a = torch.randn(4, 3)
+    >>> a
+    tensor([[-0.3956,  1.1455,  1.6895],
+            [-0.5849,  1.3672,  0.3599],
+            [-1.1626,  0.7180, -0.0521],
+            [-0.1339,  0.9902, -2.0225]])
+    >>> b = torch.randn(4, 3)
+    >>> b
+    tensor([[-0.0257, -1.4725, -1.2251],
+            [-1.1479, -0.7005, -1.9757],
+            [-1.3904,  0.3726, -1.1836],
+            [-0.9688, -0.7153,  0.2159]])
+    >>> torch.linalg.cross(a, b)
+    tensor([[ 1.0844, -0.5281,  0.6120],
+            [-2.4490, -1.5687,  1.9792],
+            [-0.8304, -1.3037,  0.5650],
+            [-1.2329,  1.9883,  1.0551]])
+    >>> a = torch.randn(1, 3)  # a is broadcast to match shape of b
+    >>> a
+    tensor([[-0.9941, -0.5132,  0.5681]])
+    >>> torch.linalg.cross(a, b)
+    tensor([[ 1.4653, -1.2325,  1.4507],
+            [ 1.4119, -2.6163,  0.1073],
+            [ 0.3957, -1.9666, -1.0840],
+            [ 0.2956, -0.3357,  0.2139]])
+""")
+
 cholesky = _add_docstr(_linalg.linalg_cholesky, r"""
 linalg.cholesky(A, *, upper=False, out=None) -> Tensor
 
