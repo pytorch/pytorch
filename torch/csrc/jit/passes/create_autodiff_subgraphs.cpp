@@ -62,6 +62,7 @@ class SubgraphSlicer {
     // un-inlining autodiff subgraphs. We first recursively construct all
     // subgraphs and then recursively cleanup & unmerge the small subgraphs
     buildupSubgraphs();
+    unfuseAliasedOutputs(block_);
     cleanupSubgraphs();
     // Run CSE globally onceto eliminate duplicates that may have occurred
     // while inlining subgraphs.
@@ -69,36 +70,23 @@ class SubgraphSlicer {
   }
 
   void cleanupSubgraphs() {
-    bool any_changed = true;
+    auto curNode = *block_->nodes().rbegin();
+    while (curNode != *block_->nodes().rend()) {
+      // Save the previous node, since we might delete `curNode` in next block
+      auto prevNode = curNode->prev();
+      if (curNode->kind() == prim::DifferentiableGraph) {
+        // Inlining nodes may cause some subexpression to come back in the
+        // subgraphs (for example, copying constants in repeatedly will generate
+        // redundant prim::Constants). Run CSE to clean them up.
+        EliminateCommonSubexpression(curNode->g(attr::Subgraph));
 
-    while(any_changed) {
-      auto curNode = *block_->nodes().rbegin();
-      GRAPH_DEBUG("Running cleanupSubgraphs on ", getHeader(curNode));
-        any_changed = false;
-        while (curNode != *block_->nodes().rend()) {
-          // Save the previous node, since we might delete `curNode` in next block
-          auto prevNode = curNode->prev();
-          if (curNode->kind() == prim::DifferentiableGraph) {
-
-            // aliased outputs in DifferentiableGraphs must be unfused
-            // since autodiff doesn't know how to handle them correctly
-            any_changed = any_changed || unfuseAliasedOutputs(curNode);
-            GRAPH_DEBUG("any_changed on ", any_changed, " ", curNode->g(attr::Subgraph)->toString(false));
-            // Inlining nodes may cause some subexpression to come back in the
-            // subgraphs (for example, copying constants in repeatedly will generate
-            // redundant prim::Constants). Run CSE to clean them up.
-            EliminateCommonSubexpression(curNode->g(attr::Subgraph));
-            // don't try inlining until we unfuse all unaliased outputs
-            if (!any_changed && !inlineIfTooSmall(curNode)) {
-              diff_nodes_.push_back(curNode);
-            }
-          }
-          curNode = prevNode;
+        if (!inlineIfTooSmall(curNode)) {
+          diff_nodes_.push_back(curNode);
+        }
       }
-
+      curNode = prevNode;
     }
 
-    GRAPH_DEBUG("Running on sublocks");
     for (Node* n : block_->nodes()) {
       for (Block* b : n->blocks()) {
         SubgraphSlicer(b, graph_, minSubgraphSize_, aliasDb_, diff_nodes_)
@@ -150,6 +138,30 @@ class SubgraphSlicer {
   }
 
  private:
+
+  void unfuseAliasedOutputs(Block* b) {
+    bool any_changed = true;
+    while (any_changed) {
+      any_changed = false;
+      // we walk in the reverse order, so we can skip
+      // nodes that might get unfused after the current
+      // prim::DifferentiableGraph
+      for (auto n: b->nodes().reverse()) {
+        if (n->kind() == prim::DifferentiableGraph) {
+              // aliased outputs in DifferentiableGraphs must be unfused
+              // since autodiff doesn't know how to handle them correctly
+              any_changed = any_changed || unfuseAliasedOutputs(n);
+              GRAPH_DEBUG("any_changed on ", any_changed, " ", n->g(attr::Subgraph)->toString(false));
+        }
+      }
+    }
+
+    for (Node* n : b->nodes()) {
+      for (Block* ib : n->blocks()) {
+        unfuseAliasedOutputs(ib);
+      }
+    }
+  }
 
   bool unfuseAliasedOutputs(Node* subgraphNode) {
 
@@ -470,6 +482,7 @@ std::vector<Node*> CreateAutodiffSubgraphs(
   GRAPH_DEBUG("Before creating autodiff subgraphs", *graph);
   SubgraphSlicer(graph->block(), graph, threshold, db, diff_nodes).run();
   GRAPH_DEBUG("After creating autodiff subgraphs", *graph);
+  GRAPH_DEBUG("diff_nodes.size() ", diff_nodes.size());
   return diff_nodes;
 }
 } // namespace jit
