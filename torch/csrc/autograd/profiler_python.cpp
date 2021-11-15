@@ -304,6 +304,7 @@ class PythonTracer final {
 
     using DescriptionKey = std::pair</*f_code=*/PyCodeObject*, /*f_lasti=*/int>;
     ska::flat_hash_map<DescriptionKey, CodeDescription, hash_pair> code_descriptions_;
+    ska::flat_hash_map<PyObject*, std::string> c_function_reprs_;
 };
 
 PythonTracer& PythonTracer::singleton() {
@@ -415,6 +416,7 @@ void PythonTracer::clear() {
     trace_contexts_.clear();
     events_.clear();
     code_descriptions_.clear();
+    c_function_reprs_.clear();
     for (auto& i : module_calls_) {
         Py_DECREF(i.self_);
     }
@@ -429,6 +431,10 @@ void PythonTracer::recordPyCall(TraceContext* ctx, PyFrameObject* frame) {
 
 void PythonTracer::recordCCall(TraceContext* ctx, PyFrameObject* frame, PyObject* arg) {
     events_.emplace_back(TraceTag::kC_Call, frame->f_lasti, ctx, arg);
+    const auto& it = c_function_reprs_.find(arg);
+    if C10_UNLIKELY(it == c_function_reprs_.end()) {
+        c_function_reprs_[arg] = py::repr(arg);
+    }
 }
 
 void PythonTracer::recordReturn(TraceContext* ctx, PyFrameObject* frame, TraceTag tag) {
@@ -521,7 +527,7 @@ PyTraceReplay::PyTraceReplay() {
 
 // TODO: Use re2.
 void trimPrefix(std::string& s, const std::vector<std::string> prefixes) {
-    for (const auto p : prefixes) {
+    for (const auto& p : prefixes) {
         if (s.compare(0, p.size(), p) == 0) {
             s.erase(0, p.size());
             return;
@@ -593,22 +599,28 @@ std::vector<std::unique_ptr<PyTraceEvent>> PyTraceReplay::replayStack() const {
 
         switch (raw_event.tag()) {
             case TraceTag::kPy_Call:
+                std::cout << "replayStack kPy_Call" << std::endl;
                 if (module_name_map_.find(event_idx) != module_name_map_.end()) {
+                    std::cout << "replayStack kPy_Call module" << std::endl;
                     push_frame(
                         module_name_map_.at(event_idx),
                         CallType::kPyModuleCall,
                         reinterpret_cast<size_t>(module_self_map_.at(event_idx)));
                 } else {
+                    std::cout << "replayStack kPy_Call other" << std::endl;
                     push_frame(py_name(raw_event), CallType::kPyCall);
                 }
                 break;
 
             case TraceTag::kC_Call:
-                push_frame(py::repr(raw_event.misc_.arg_), CallType::kCCall);
+                std::cout << "replayStack kC_Call" << std::endl;
+
+                push_frame(tracer.c_function_reprs_.at(raw_event.misc_.arg_), CallType::kCCall);
                 break;
 
             case TraceTag::kPy_Return:
             case TraceTag::kC_Return:
+                std::cout << "replayStack kPy_Return/kC_Return" << std::endl;
                 TORCH_INTERNAL_ASSERT(stack.size(), "Python replay stack is empty.")
                 stack.back().event_->endTime_ = t;
                 stack.back().event_->return_idx_ = event_idx;
