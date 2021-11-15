@@ -680,10 +680,7 @@ class TestSparseCSR(TestCase):
                   *((torch.complex128,) if CUSPARSE_SPMM_COMPLEX128_SUPPORTED else ()),
                   *torch.testing.get_all_fp_dtypes(include_bfloat16=SM80OrLater,
                                                    include_half=SM53OrLater))
-    @dtypes(torch.complex64,  # since dtypes is mandatory
-            *((torch.complex128,) if CUSPARSE_SPMM_COMPLEX128_SUPPORTED else ()),
-            *torch.testing.get_all_fp_dtypes(include_bfloat16=SM80OrLater,
-                                             include_half=SM53OrLater))
+    @dtypes()  # since dtypes is mandatory
     @skipCUDAIf(
         not _check_cusparse_spgemm_available(),
         "cuSparse Generic API SpGEMM is not available"
@@ -719,10 +716,7 @@ class TestSparseCSR(TestCase):
             _test_addmm_addmv(self, torch.addmm, M, m1, m2, transpose_out=t4, layout=torch.sparse_csr, all_sparse=True)
 
     @onlyCUDA
-    @dtypes(torch.complex64,  # since dtypes is mandatory
-            *((torch.complex128,) if CUSPARSE_SPMM_COMPLEX128_SUPPORTED else ()),
-            *torch.testing.get_all_fp_dtypes(include_bfloat16=SM80OrLater,
-                                             include_half=SM53OrLater))
+    @dtypes()  # since dtypes is mandatory
     @dtypesIfCUDA(torch.complex64,
                   *((torch.complex128,) if CUSPARSE_SPMM_COMPLEX128_SUPPORTED else ()),
                   *torch.testing.get_all_fp_dtypes(include_bfloat16=SM80OrLater,
