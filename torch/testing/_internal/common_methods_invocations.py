@@ -882,7 +882,7 @@ def sample_inputs_reduction(op_info, device, dtype, requires_grad, **kwargs):
     return inputs
 
 
-def _generate_masked_reduction_mask(input_shape, device, **kwargs):
+def _generate_masked_op_mask(input_shape, device, **kwargs):
     yield None
     yield make_tensor(input_shape, device, torch.bool, requires_grad=False)
     if len(input_shape) > 3:
@@ -912,7 +912,7 @@ def sample_inputs_masked_reduction(op_info, device, dtype, requires_grad, **kwar
     inputs: List[SampleInput] = []
     kwargs['supports_multiple_dims'] = op_info.supports_multiple_dims
     for sample_input in sample_inputs_reduction(op_info, device, dtype, requires_grad, **kwargs):
-        for mask in _generate_masked_reduction_mask(sample_input.input.shape, device, **kwargs):
+        for mask in _generate_masked_op_mask(sample_input.input.shape, device, **kwargs):
             sample_input_args, sample_input_kwargs = sample_input.args, dict(mask=mask, **sample_input.kwargs)
             inputs.append(SampleInput(sample_input.input.detach().clone().requires_grad_(requires_grad),
                                       args=sample_input_args, kwargs=sample_input_kwargs))
@@ -5284,6 +5284,22 @@ def sample_inputs_softmax_variant(op_info, device, dtype, requires_grad, with_dt
         SampleInput(make_arg(shape), args=dim, kwargs=dict(dtype=torch.float64) if with_dtype else None)
         for shape, dim in cases
     ]
+
+
+def sample_inputs_masked_softmax(op_info, device, dtype, requires_grad, with_dtype=False, **kwargs):
+    """Sample inputs for masked softmax and log_softmax.
+
+    Masked reduction operator is a reduction operator with trailing
+    mask optional argument. A mask is a bool tensor with the same
+    shape as input or a shape that is broadcastable to input shape.
+    """
+    inputs: List[SampleInput] = []
+    for sample_input in sample_inputs_softmax_variant(op_info, device, dtype, requires_grad, with_dtype=with_dtype, **kwargs):
+        for mask in _generate_masked_op_mask(sample_input.input.shape, device, **kwargs):
+            sample_input_args, sample_input_kwargs = sample_input.args, dict(mask=mask, **sample_input.kwargs)
+            inputs.append(SampleInput(sample_input.input.detach().clone().requires_grad_(requires_grad),
+                                      args=sample_input_args, kwargs=sample_input_kwargs))
+    return inputs
 
 
 def sample_inputs_logit(op_info, device, dtype, requires_grad, **kwargs):
@@ -12124,6 +12140,17 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_masked_reduction,
         gradcheck_wrapper=gradcheck_wrapper_masked_operation
     ),
+    OpInfo('_masked.softmax',
+           method_variant=None,
+           dtypesIfCPU=floating_types_and(torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+           sample_inputs_func=sample_inputs_masked_softmax,
+           skips=(
+               # torch.jit.frontend.NotSupportedError: Compiled functions can't take variable number of arguments or use keyword-only arguments with defaults
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+           ),
+           gradcheck_wrapper=gradcheck_wrapper_masked_operation,
+           supports_out=False),
     OpInfo(
         "nn.functional.ctc_loss",
         ref=_NOTHING,
