@@ -326,13 +326,7 @@ struct TORCH_API BuiltinModule : public SugaredValue {
     }
 
     auto sym = Symbol::fromQualString(name + "::" + field);
-    if (version.has_value()) {
-      // Possibly replaces symbol with another that implements its
-      // historic behavior.
-      // See note [Versioned Symbols]
-      sym = get_symbol_for_version(sym, *version);
-    }
-    return std::make_shared<BuiltinFunction>(sym, c10::nullopt);
+    return std::make_shared<BuiltinFunction>(sym, c10::nullopt, version);
   }
 
  private:

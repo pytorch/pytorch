@@ -47,7 +47,10 @@ constexpr uint64_t kMaxSupportedFileFormatVersion = 0x6L;
 // 5. (Dynamic) Stops torch.full inferring a floating point dtype
 //      when given bool or integer fill values.
 // 6. Write version string to `./data/version` instead of `version`.
-constexpr uint64_t kProducedFileFormatVersion = 0x3L;
+
+// TODO: this needs to be more descriptive, but for now we know that the global
+// operator version number is at 5.
+constexpr uint64_t kProducedFileFormatVersion = 0x5L;
 
 // The version we write when the archive contains bytecode.
 // It must be higher or eq to kProducedFileFormatVersion.
