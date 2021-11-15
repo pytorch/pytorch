@@ -323,3 +323,68 @@ command = [
     '--',
     '@{{PATHSFILE}}'
 ]
+
+[[linter]]
+code = 'EXEC'
+include_patterns = ['**']
+exclude_patterns = [
+    'third_party/**',
+    'torch/bin/**',
+    '**/*.so',
+    '**/*.py',
+    '**/*.sh',
+    '**/*.bash',
+    '**/git-pre-commit',
+    '**/git-clang-format',
+    '**/gradlew',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/cppexec_linter.py',
+    '--',
+    '@{{PATHSFILE}}',
+]
+
+[[linter]]
+code = 'CUBINCLUDE'
+include_patterns = ['aten/**']
+exclude_patterns = [
+    'aten/src/ATen/cuda/cub*.cuh',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=#include <cub/',
+    '--linter-name=CUBINCLUDE',
+    '--error-name=direct cub include',
+    """--error-description=\
+        This line has a direct cub include; please include \
+        ATen/cuda/cub.cuh instead and wrap your cub calls in \
+        at::native namespace if necessary.
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
+code = 'RAWCUDA'
+include_patterns = [
+    'aten/**',
+    'c10/**',
+]
+exclude_patterns = [
+    'aten/src/ATen/test/**',
+    'c10/cuda/CUDAFunctions.h',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=cudaStreamSynchronize',
+    '--linter-name=RAWCUDA',
+    '--error-name=raw CUDA API usage',
+    """--error-description=\
+        This line calls raw CUDA APIs directly; please use at::cuda wrappers instead.
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]

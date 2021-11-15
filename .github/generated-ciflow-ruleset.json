@@ -27,6 +27,9 @@
       "linux-xenial-py3.6-gcc5.4",
       "linux-xenial-py3.6-gcc7",
       "linux-xenial-py3.6-gcc7-bazel-test",
+      "macos-10-15-py3-arm64",
+      "macos-10-15-py3-lite-interpreter-x86-64",
+      "macos-10-15-py3-x86-64",
       "parallelnative-linux-xenial-py3.6-gcc5.4",
       "periodic-libtorch-linux-xenial-cuda11.1-py3.6-gcc7",
       "periodic-linux-xenial-cuda10.2-py3-gcc7-slow-gradcheck",
@@ -133,7 +136,10 @@
       "ios-12-5-1-arm64-metal",
       "ios-12-5-1-x86-64",
       "ios-12-5-1-x86-64-coreml",
-      "ios-12-5-1-x86-64-full-jit"
+      "ios-12-5-1-x86-64-full-jit",
+      "macos-10-15-py3-arm64",
+      "macos-10-15-py3-lite-interpreter-x86-64",
+      "macos-10-15-py3-x86-64"
     ],
     "ciflow/mobile": [
       "linux-xenial-py3-clang5-mobile-build",
