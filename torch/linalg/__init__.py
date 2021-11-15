@@ -1943,6 +1943,10 @@ This function computes a compact representation of the decomposition given by :f
 If the matrix is square, this representation may be used in :func:`torch.linalg.lu_solve`
 to solve system of linear equations that share the matrix :attr:`A`.
 
+The returned decomposition is represented as a named tuple `(LU, pivots)`.
+The ``LU`` matrix has the same shape as the input matrix ``A``. Its upper and lower triangular
+parts encode the non-constant elements of ``L`` and ``U`` of the LU decomposition of ``A``.
+
 The returned permutation matrix is represented by a 1-indexed vector. `pivots[i] == j` represents
 that in the `i`-th step of the algorithm, the `i`-th row was permuted with the `j-1`-th row.
 
@@ -2012,7 +2016,6 @@ lu_factor_ex = _add_docstr(_linalg.linalg_lu_factor_ex, r"""
 linalg.lu_factor_ex(A, *, pivot=True, check_errors=False, out=None) -> (Tensor, Tensor, Tensor)
 
 This is a version of :func:`~lu_factor` that does not perform error checks unless :attr:`check_errors`\ `= True`.
-
 It also returns the :attr:`info` tensor returned by `LAPACK's getrf`_.
 
 """ + fr"""
@@ -2021,44 +2024,18 @@ It also returns the :attr:`info` tensor returned by `LAPACK's getrf`_.
 .. warning:: {common_notes["experimental_warning"]}
 """ + r"""
 
-.. warning:: The LU decomposition is almost never unique, as often there are different permutation
-             matrices that can yield different LU decompositions.
-             As such, different platforms, like SciPy, or inputs on different devices,
-             may produce different valid decompositions.
-
-.. warning:: Gradient computations are only supported if the input matrix is full-rank.
-             If this condition is not met, no error will be thrown, but the gradient may not be finite.
-             This is because the LU decomposition with pivoting is not differentiable at these points.
-
-.. seealso::
-        :func:`~lu_factor` is a variant that always checks for errors.
-
 Args:
     A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
 
 Keyword args:
-    pivot (bool, optional): [Only on CUDA] Whether to compute the LU decomposition with partial pivoting,
-                            or the regular LU decomposition. Default: `True`.
-    check_errors (bool, optional): controls whether to check the content of ``infos``. Default: `False`.
+    pivot (bool, optional): Whether to compute the LU decomposition with partial pivoting, or the regular LU
+                            decomposition. :attr:`pivot`\ `= False` not supported on CPU. Default: `True`.
+    check_errors (bool, optional): controls whether to check the content of ``infos`` and raise
+                                   an error if it is non-zero. Default: `False`.
     out (tuple, optional): tuple of three tensors to write the output to. Ignored if `None`. Default: `None`.
 
 Returns:
     A named tuple `(LU, pivots, info)`.
-
-Examples::
-
-    >>> A = torch.randn(2, 3, 3)
-    >>> B1 = torch.randn(2, 3, 4)
-    >>> B2 = torch.randn(2, 3, 7)
-    >>> LU, pivots, info = torch.linalg.lu_factor(A)
-    >>> info
-    tensor([0, 0, 0], dtype=torch.int32)
-    >>> X1 = torch.linalg.lu_solve((LU, pivots), B1)
-    >>> X2 = torch.linalg.lu_solve((LU, pivots), B2)
-    >>> torch.allclose(A @ X1, B1)
-    True
-    >>> torch.allclose(A @ X2, B2)
-    True
 
 .. _LAPACK's getrf:
     https://www.netlib.org/lapack/explore-html/dd/d9a/group__double_g_ecomputational_ga0019443faea08275ca60a734d0593e60.html

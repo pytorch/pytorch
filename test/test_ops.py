@@ -249,41 +249,39 @@ class TestCommon(TestCase):
             if not test_grad:
                 continue
 
-            def assertEqualGradients(expected, actual, i=None):
+            if isinstance(expected, torch.Tensor):
                 grad_for_expected = torch.randn_like(expected)
                 grad_for_actual = noncontiguous_like(grad_for_expected)
-                expected.backward(grad_for_expected, retain_graph=i is not None)
-                actual.backward(grad_for_actual, retain_graph=i is not None)
-
-                t_inputs = (t_inp,) + t_args if isinstance(t_inp, torch.Tensor) else tuple(t_inp) + t_args
-                n_inputs = (n_inp,) + n_args if isinstance(n_inp, torch.Tensor) else tuple(n_inp) + n_args
-                for j, (t, n) in enumerate(zip(t_inputs, n_inputs)):
-                    if isinstance(t, torch.Tensor) and t.requires_grad:
-                        msg = ("{}Got different gradients for contiguous / non-contiguous wrt input {}."
-                               .format(f"Output {i}. " if i is not None else "", j))
-                        self.assertEqual(t.grad, n.grad, msg=msg)
-
-            def clearGradients(inp):
-                if isinstance(inp, torch.Tensor):
-                    inp = [inp]
-                for t in inp:
-                    if isinstance(t, torch.Tensor) and t.requires_grad and t.grad is not None:
-                        t.grad.zero_()
-
-            if isinstance(expected, torch.Tensor):
-                assertEqualGradients(expected, actual)
             elif isinstance(expected, Sequence):
-                for i, (ex, act) in enumerate(zip(expected, actual)):
-                    if isinstance(ex, torch.Tensor) and ex.requires_grad:
-                        assertEqualGradients(ex, act, i)
-                        # Clear the gradients in case there are more outputs that require grad
-                        clearGradients(t_inp)
-                        clearGradients(t_args)
-                        clearGradients(n_inp)
-                        clearGradients(n_args)
-                    n_inp_grad = n_inp.grad if isinstance(n_inp, torch.Tensor) else n_inp[0].grad
+                # Filter output elements that do not require grad
+                expected = [t for t in expected
+                            if isinstance(t, torch.Tensor) and t.requires_grad]
+                actual = [n for n in actual
+                          if isinstance(n, torch.Tensor) and n.requires_grad]
+                grad_for_expected = [torch.randn_like(t) for t in expected]
+                grad_for_actual = [noncontiguous_like(n) for n in grad_for_expected]
             else:
+                # Nothing to do if it returns a scalar or things like that
                 continue
+
+            # Concatenate inputs into a tuple
+            t_inputs = (t_inp,) + t_args if isinstance(t_inp, torch.Tensor) else tuple(t_inp) + t_args
+            n_inputs = (n_inp,) + n_args if isinstance(n_inp, torch.Tensor) else tuple(n_inp) + n_args
+
+            # Filter the elemnts that are tensors that require grad
+            t_input_tensors = [t for t in t_inputs if isinstance(t, torch.Tensor) and t.requires_grad]
+            n_input_tensors = [n for n in n_inputs if isinstance(n, torch.Tensor) and n.requires_grad]
+
+            self.assertEqual(len(t_input_tensors), len(n_input_tensors))
+
+            # Some functions may not use all the inputs to generate gradients. One of the
+            # few examples of this "odd" behaviour is F.hinge_embedding_loss
+            t_grads = torch.autograd.grad(expected, t_input_tensors, grad_for_expected, allow_unused=True)
+            n_grads = torch.autograd.grad(actual, n_input_tensors, grad_for_actual, allow_unused=True)
+
+            msg = "Got different gradients for contiguous / non-contiguous wrt input {}."
+            for i, (t, n) in enumerate(zip(t_grads, n_grads)):
+                self.assertEqual(t, n, msg=msg.format(i))
 
     # Validates ops implement the correct out= behavior
     # See https://github.com/pytorch/pytorch/wiki/Developer-FAQ#how-does-out-work-in-pytorch
