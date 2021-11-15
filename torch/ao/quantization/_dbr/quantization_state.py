@@ -113,8 +113,9 @@ class AutoQuantizationState(torch.nn.Module):
             len(self.idx_to_seen_op_infos) == 0 or
             self.idx == len(self.idx_to_seen_op_infos)
         )
-        assert is_at_last_seen_idx, \
-            f"Cur idx: {self.idx}, expected idx: {len(self.idx_to_seen_op_infos)}"
+        if not is_at_last_seen_idx:
+            raise AssertionError(
+                f"Cur idx: {self.idx}, expected idx: {len(self.idx_to_seen_op_infos)}")
 
     def extra_repr(self) -> str:
         s = ""
@@ -170,7 +171,6 @@ class AutoQuantizationState(torch.nn.Module):
         module call which needs hooks. It validates that the new function or
         module is of the expected type based on the order of execution.
         """
-        assert self.cur_op_needs_hooks(cur_op)
         try:
             seen_op_info = self._get_cur_seen_op_info()
             expected_op = seen_op_info.type
@@ -250,7 +250,6 @@ class AutoQuantizationState(torch.nn.Module):
 
         The function returns modified `args` and `kwargs`.
         """
-        assert self.cur_op_needs_hooks(op)
         if first_call:
             return self._first_call_op_prepare_before_hook_create_subgraphs(
                 op, args, kwargs, first_call, qtensor_id, fqn, root_module)
@@ -292,7 +291,6 @@ class AutoQuantizationState(torch.nn.Module):
         If `first_call` is False, we
         * observe the output, if needed
         """
-        assert self.cur_op_needs_hooks(op)
         seen_op_info = self._get_cur_seen_op_info()
         func_output_obs_type = get_func_output_obs_type(seen_op_info)
         if first_call:
@@ -330,8 +328,6 @@ class AutoQuantizationState(torch.nn.Module):
         Returns potentially modified `op`, potentially modified `args`,
         potentially modified `kwargs`.
         """
-        assert self.cur_op_needs_hooks(op)
-
         # TODO generalize this for more things
         # currently:
         # * can quantize args (via arg_quant_infos)
