@@ -38,7 +38,7 @@ import json
 import __main__  # type: ignore[import]
 import errno
 import ctypes
-from typing import cast, Any, Dict, Iterable, Iterator, Optional, Union, List, Tuple, Type
+from typing import Any, Dict, Iterable, Iterator, Optional, Union, List, Tuple, Type
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -52,6 +52,7 @@ from torch.testing._comparison import (
     NumberPair,
     UnsupportedInputs,
     NonePair,
+    ErrorMeta,
 )
 
 import torch
@@ -79,6 +80,10 @@ IS_IN_CI = os.getenv('IN_CI') == '1'
 IS_SANDCASTLE = os.getenv('SANDCASTLE') == '1' or os.getenv('TW_JOB_USER') == 'sandcastle'
 IS_FBCODE = os.getenv('PYTORCH_TEST_FBCODE') == '1'
 IS_REMOTE_GPU = os.getenv('PYTORCH_TEST_REMOTE_GPU') == '1'
+
+RETRY_TEST_CASES = os.getenv('PYTORCH_RETRY_TEST_CASES') == '1'
+OVERRIDE_FLAKY_SIGNAL = os.getenv('PYTORCH_OVERRIDE_FLAKY_SIGNAL') == '1'
+MAX_NUM_RETRIES = 3
 
 DISABLED_TESTS_FILE = '.pytorch-disabled-tests.json'
 SLOW_TESTS_FILE = '.pytorch-slow-tests.json'
@@ -610,8 +615,20 @@ def run_tests(argv=UNITTEST_ARGS):
         test_cases = discover_test_cases_recursively(suite)
         for case in test_cases:
             test_case_full_name = case.id().split('.', 1)[1]
-            exitcode = shell([sys.executable] + argv + [test_case_full_name])
+            other_args = (['--import-disabled-tests'] if IMPORT_DISABLED_TESTS else List[str]([]) +
+                          ['--import-slow-tests'] if IMPORT_SLOW_TESTS else List[str]([]))
+            cmd = [sys.executable] + [argv[0]] + other_args + argv[1:] + [test_case_full_name]
+            string_cmd = " ".join(cmd)
+            exitcode = shell(cmd)
             if exitcode != 0:
+                # This is sort of hacky, but add on relevant env variables for distributed tests.
+                if 'TestDistBackendWithSpawn' in test_case_full_name:
+                    backend = os.environ.get("BACKEND", "")
+                    world_size = os.environ.get("WORLD_SIZE", "")
+                    env_prefix = f"BACKEND={backend} WORLD_SIZE={world_size}"
+                    string_cmd = env_prefix + " " + string_cmd
+                # Log the command to reproduce the failure.
+                print(f"Test exited with non-zero exitcode {exitcode}. Command to reproduce: {string_cmd}")
                 failed_tests.append(test_case_full_name)
 
         assert len(failed_tests) == 0, "{} unit test(s) failed:\n\t{}".format(
@@ -1325,35 +1342,33 @@ class RelaxedBooleanPair(BooleanPair):
         # We require only one of the inputs of the inputs to be a boolean and the other can also be a boolean or
         # a single element tensor or array, whereas in default BooleanPair both inputs have to be booleans.
         if not (
-                (
-                        isinstance(actual, self._supported_types)
-                        and isinstance(expected, (*self._supported_types, torch.Tensor, np.ndarray))
-                )
-                or (
-                        isinstance(expected, self._supported_types)
-                        and isinstance(actual, (*self._supported_types, torch.Tensor, np.ndarray))
-                )
+            (
+                isinstance(actual, self._supported_types)
+                and isinstance(expected, (*self._supported_types, torch.Tensor, np.ndarray))
+            )
+            or (
+                isinstance(expected, self._supported_types)
+                and isinstance(actual, (*self._supported_types, torch.Tensor, np.ndarray))
+            )
         ):
             raise UnsupportedInputs()
-        error_meta, bools = self._apply_unary(self._to_bool, actual, expected, id=id)
-        if error_meta:
-            raise UnsupportedInputs(error_meta)
-        return bools
 
-    def _to_bool(self, bool_like):
+        return [self._to_bool(input, id=id) for input in (actual, expected)]
+
+    def _to_bool(self, bool_like, *, id):
         if isinstance(bool_like, (torch.Tensor, np.ndarray)):
             numel = bool_like.numel() if isinstance(bool_like, torch.Tensor) else bool_like.size
             if numel > 1:
-                error_meta = self._make_error_meta(
+                raise ErrorMeta(
                     ValueError,
                     f"Only single element tensor-likes can be compared against a boolean. "
                     f"Got {numel} elements instead.",
+                    id=id,
                 )
-                return error_meta, None
 
-            return None, bool(bool_like.item())
+            return bool(bool_like.item())
         else:
-            return super()._to_bool(bool_like)
+            return super()._to_bool(bool_like, id=id)
 
 
 class RelaxedNumberPair(NumberPair):
@@ -1384,35 +1399,32 @@ class RelaxedNumberPair(NumberPair):
             )
         ):
             raise UnsupportedInputs()
-        error_meta, numbers = self._apply_unary(self._to_number, actual, expected, id=id)
-        if error_meta:
-            raise UnsupportedInputs(error_meta)
-        return numbers
 
-    def _to_number(self, number_like):
+        return [self._to_number(input, id=id) for input in (actual, expected)]
+
+    def _to_number(self, number_like, *, id):
         if isinstance(number_like, (torch.Tensor, np.ndarray)):
             numel = number_like.numel() if isinstance(number_like, torch.Tensor) else number_like.size
             if numel > 1:
-                error_meta = self._make_error_meta(
+                raise ErrorMeta(
                     ValueError,
                     f"Only single element tensor-likes can be compared against a number. "
                     f"Got {numel} elements instead.",
+                    id=id,
                 )
-                return error_meta, None
-
             number = number_like.item()
             if isinstance(number, bool):
                 number = int(number)
 
-            return None, number
+            return number
         # We need this check, because combinations of an int and a bool will not be picked up by the BooleanPair,
         # but will be picked up here since issubclass(bool, int)
         elif isinstance(number_like, bool):
-            return None, int(number_like)
+            return int(number_like)
         elif isinstance(number_like, Enum):
-            return None, int(number_like)  # type: ignore[call-overload]
+            return int(number_like)  # type: ignore[call-overload]
         else:
-            return super()._to_number(number_like)
+            return super()._to_number(number_like, id=id)
 
 
 class TensorOrArrayPair(TensorLikePair):
@@ -1424,14 +1436,9 @@ class TensorOrArrayPair(TensorLikePair):
     def _process_inputs(self, actual, expected, *, id, allow_subclasses):
         self._check_inputs_isinstance(actual, expected, cls=(torch.Tensor, np.ndarray))
 
-        error_meta, tensors = self._apply_unary(self._to_tensor, actual, expected, id=id)
-        if error_meta:
-            raise UnsupportedInputs(error_meta)
-        actual, expected = cast(Tuple[torch.Tensor, torch.Tensor], tensors)
-        error_meta, _ = self._apply_unary(self._check_supported, actual, expected, id=id)
-        if error_meta:
-            raise UnsupportedInputs(error_meta)
-
+        actual, expected = [self._to_tensor(input, id=id) for input in (actual, expected)]
+        for tensor in (actual, expected):
+            self._check_supported(tensor, id=id)
         return actual, expected
 
 
@@ -1447,14 +1454,9 @@ class UnittestPair(Pair):
         test_case = unittest.TestCase()
 
         try:
-            test_case.assertEqual(self.actual, self.expected)
+            return test_case.assertEqual(self.actual, self.expected)
         except test_case.failureException as error:
             msg = str(error)
-        # FIXME: debug test_broadcast_object_list
-        except Exception as error:
-            raise type(error)(f"{type(self.actual)}, {type(self.expected)}, {str(error)}")
-        else:
-            return None
 
         type_name = self.TYPE_NAME or (self.CLS if isinstance(self.CLS, type) else self.CLS[0]).__name__
         return self._make_error_meta(AssertionError, f"{type_name.title()} comparison failed: {msg}")
@@ -1609,11 +1611,52 @@ class TestCase(expecttest.TestCase):
     def wrap_with_cuda_memory_check(self, method):
         return self.wrap_method_with_policy(method, self.assertLeaksNoCudaTensors)
 
-    def run(self, result=None):
+    # Recursive function that incorporates retry logic when PYTORCH_RETRY_TEST_CASES=1 and enables early test
+    # termination. [DISCLAIMER: ONLY WORKS WITH UNITTEST]
+    # When report_only is True, flaky tests are only reported, but the signal remains the same (the test will still
+    # show up red).
+    # Otherwise, the flaky test will show up green while its stats are captured by test reports.
+    def _run_with_retry(self, result=None, num_runs_left=0, report_only=True):
+        if num_runs_left == 0:
+            return
+
+        using_unittest = isinstance(result, unittest.TestResult)
+
+        if using_unittest:
+            failures_before = 0 if result is None else len(result.failures)  # num tests marked as failed before starting
+            errors_before = 0 if result is None else len(result.errors)  # num tests marked as errored before starting
+
         super().run(result=result)
         # Early terminate test if necessary.
         if self._should_stop_test_suite():
             result.stop()
+
+        if not RETRY_TEST_CASES or not using_unittest:
+            return
+
+        err = sys.exc_info()
+        num_retries_left = num_runs_left - 1
+        if failures_before < len(result.failures):
+            print(f"    {self._testMethodName} failed - num_retries_left: {num_retries_left}")
+            if (report_only and num_retries_left < MAX_NUM_RETRIES) or (not report_only and num_retries_left > 0):
+                result.failures.pop(-1)
+                result.addExpectedFailure(self, err)
+            self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only)
+        elif errors_before < len(result.errors):
+            print(f"    {self._testMethodName} errored - num_retries_left: {num_retries_left}")
+            if (report_only and num_retries_left < MAX_NUM_RETRIES) or (not report_only and num_retries_left > 0):
+                result.errors.pop(-1)
+                result.addExpectedFailure(self, err)
+            self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only)
+        elif report_only and num_retries_left < MAX_NUM_RETRIES:
+            print(f"    {self._testMethodName} succeeded - num_retries_left: {num_retries_left}")
+            result.addUnexpectedSuccess(self)
+            self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only)
+
+
+    def run(self, result=None):
+        num_runs = MAX_NUM_RETRIES + 1 if RETRY_TEST_CASES else 1
+        self._run_with_retry(result=result, num_runs_left=num_runs, report_only=not OVERRIDE_FLAKY_SIGNAL)
 
     def setUp(self):
         check_if_enable(self)
