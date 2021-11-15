@@ -19,8 +19,6 @@
       "linux-vulkan-bionic-py3.6-clang9",
       "linux-xenial-cuda11.3-py3.6-gcc7",
       "linux-xenial-py3-clang5-mobile-build",
-      "linux-xenial-py3-clang5-mobile-code-analysis",
-      "linux-xenial-py3-clang5-mobile-custom-build-dynamic",
       "linux-xenial-py3-clang5-mobile-custom-build-static",
       "linux-xenial-py3.6-clang7-asan",
       "linux-xenial-py3.6-clang7-onnx",
@@ -77,7 +75,6 @@
       "linux-vulkan-bionic-py3.6-clang9",
       "linux-xenial-cuda11.3-py3.6-gcc7",
       "linux-xenial-py3-clang5-mobile-build",
-      "linux-xenial-py3-clang5-mobile-custom-build-dynamic",
       "linux-xenial-py3-clang5-mobile-custom-build-static",
       "linux-xenial-py3.6-clang7-asan",
       "linux-xenial-py3.6-clang7-onnx",
@@ -113,8 +110,6 @@
       "linux-vulkan-bionic-py3.6-clang9",
       "linux-xenial-cuda11.3-py3.6-gcc7",
       "linux-xenial-py3-clang5-mobile-build",
-      "linux-xenial-py3-clang5-mobile-code-analysis",
-      "linux-xenial-py3-clang5-mobile-custom-build-dynamic",
       "linux-xenial-py3-clang5-mobile-custom-build-static",
       "linux-xenial-py3.6-clang7-asan",
       "linux-xenial-py3.6-clang7-onnx",
@@ -143,8 +138,6 @@
     ],
     "ciflow/mobile": [
       "linux-xenial-py3-clang5-mobile-build",
-      "linux-xenial-py3-clang5-mobile-code-analysis",
-      "linux-xenial-py3-clang5-mobile-custom-build-dynamic",
       "linux-xenial-py3-clang5-mobile-custom-build-static"
     ],
     "ciflow/noarch": [
