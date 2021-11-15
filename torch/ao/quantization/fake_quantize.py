@@ -105,6 +105,7 @@ class FakeQuantize(FakeQuantizeBase):
           and zero-point.
         quant_min (int): The minimum allowable quantized value.
         quant_max (int): The maximum allowable quantized value.
+        zero_point_dtype(dtype): The dype for quantization zero point.
         observer_kwargs (optional): Arguments for the observer module
 
     Attributes:
@@ -126,8 +127,12 @@ class FakeQuantize(FakeQuantizeBase):
         self.activation_post_process = observer(**observer_kwargs)
         assert torch.iinfo(self.activation_post_process.dtype).min <= quant_min, 'quant_min out of bound'
         assert quant_max <= torch.iinfo(self.activation_post_process.dtype).max, 'quant_max out of bound'
+        if(self.activation_post_process.qscheme == torch.per_channel_affine_float_qparams):
+            zero_point_dtype=torch.float
+        else:
+            zero_point_dtype=torch.int
         self.register_buffer('scale', torch.tensor([1.0], dtype=torch.float))
-        self.register_buffer('zero_point', torch.tensor([0], dtype=torch.int))
+        self.register_buffer('zero_point', torch.tensor([0], dtype=zero_point_dtype))
         self.dtype = self.activation_post_process.dtype
         self.qscheme = self.activation_post_process.qscheme
         self.ch_axis = self.activation_post_process.ch_axis \
@@ -370,7 +375,6 @@ default_per_channel_weight_fake_quant = FakeQuantize.with_args(observer=MovingAv
 """
 Default fake_quant for per-channel weights.
 """
-
 default_embedding_fake_quant = FakeQuantize.with_args(observer=PerChannelMinMaxObserver,
                                                       qscheme=torch.per_channel_affine_float_qparams,
                                                       dtype=torch.quint8,
