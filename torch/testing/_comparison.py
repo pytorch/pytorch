@@ -1,7 +1,8 @@
 import abc
 import cmath
 import collections.abc
-from typing import NamedTuple, Callable, Sequence, List, Union, Optional, Type, Tuple, Any, cast
+from typing import NoReturn, Callable, Sequence, List, Union, Optional, Type, Tuple, Any
+import contextlib
 
 import torch
 
@@ -15,10 +16,18 @@ except ModuleNotFoundError:
     NUMPY_AVAILABLE = False
 
 
-class ErrorMeta(NamedTuple):
-    type: Type[Exception]
-    msg: str
-    id: Tuple[Any, ...] = ()
+class ErrorMeta(Exception):
+    """Internal testing exception that makes that carries error meta data."""
+    def __init__(self, type: Type[Exception], msg: str, *, id: Tuple[Any, ...] = ()) -> None:
+        super().__init__(
+            "If you are a user and see this message during normal operation "
+            "please file an issue at https://github.com/pytorch/pytorch/issues. "
+            "If you are a developer and working on the comparison functions, please `raise ErrorMeta().to_error()` "
+            "for user facing errors."
+        )
+        self.type = type
+        self.msg = msg
+        self.id = id
 
     def to_error(self) -> Exception:
         msg = self.msg
@@ -62,23 +71,16 @@ def default_tolerances(*inputs: Union[torch.Tensor, torch.dtype]) -> Tuple[float
     return max(rtols), max(atols)
 
 
-def parse_tolerances(
-    *inputs: Union[torch.Tensor, torch.dtype], rtol: Optional[float], atol: Optional[float]
-) -> Tuple[Optional[ErrorMeta], Optional[Tuple[float, float]]]:
-    """Parses absolute and relative to be used for numeric comparisons.
+def get_tolerances(
+    *inputs: Union[torch.Tensor, torch.dtype], rtol: Optional[float], atol: Optional[float], id: Tuple[Any, ...] = ()
+) -> Tuple[float, float]:
+    """Gets absolute and relative to be used for numeric comparisons.
 
     If both ``rtol`` and ``atol`` are specified, this is a no-op. If both are not specified, the return value of
     :func:`default_tolerances` is used.
 
-    .. note::
-
-        The two outputs of this function are orthogonal, i.e. if the first is ``None`` the second will be valid and
-        vice versa. If an expected error happens, it will be returned as :class:`ErrorMeta` as the first return
-        value. Possible scenarios are listed in the ``Raises`` section, although no error will be raised. If the
-        function executes normally, the second return value is described in the ``Returns`` section.
-
     Raises:
-        ValueError: If if only ``rtol`` or ``atol`` is specified.
+        ErrorMeta: With :class:`ValueError`, if only ``rtol`` or ``atol`` is specified.
 
     Returns:
         (Tuple[float, float]): Valid absolute and relative tolerances.
@@ -86,16 +88,16 @@ def parse_tolerances(
     if (rtol is None) ^ (atol is None):
         # We require both tolerance to be omitted or specified, because specifying only one might lead to surprising
         # results. Imagine setting atol=0.0 and the tensors still match because rtol>0.0.
-        error_meta = ErrorMeta(
+        raise ErrorMeta(
             ValueError,
             f"Both 'rtol' and 'atol' must be either specified or omitted, "
             f"but got no {'rtol' if rtol is None else 'atol'}.",
+            id=id,
         )
-        return error_meta, None
     elif rtol is not None and atol is not None:
-        return None, (rtol, atol)
+        return rtol, atol
     else:
-        return None, default_tolerances(*inputs)
+        return default_tolerances(*inputs)
 
 
 def _make_mismatch_msg(
@@ -241,14 +243,7 @@ def make_tensor_mismatch_msg(
 
 
 class UnsupportedInputs(Exception):  # noqa: B903
-    """Exception to be raised during the construction of a :class:`Pair` in case it doesn't support the inputs.
-
-    If the inputs are generally supported but some specific instances are not, and optional :class:`ErrorMeta` can be
-    supplied that aborts the origination process.
-    """
-
-    def __init__(self, meta: Optional[ErrorMeta] = None) -> None:
-        self.meta = meta
+    """Exception to be raised during the construction of a :class:`Pair` in case it doesn't support the inputs."""
 
 
 class Pair(abc.ABC):
@@ -257,12 +252,11 @@ class Pair(abc.ABC):
     Each subclass needs to overwrite :meth:`Pair.compare` that performs the actual comparison.
 
     Each pair receives **all** options, so select the ones applicable for the subclass and forward the rest to the
-    super class.
+    super class. Raising an :class:`UnsupportedInputs` during constructions indicates that the pair is not able to
+    handle the inputs and the next pair type will be tried.
 
-    Raising a plain :class:`UnsupportedInputs` during constructions indicates that the pair is not able to handle the
-    inputs and the next pair type will be tried. Raising a :class:`UnsupportedInputs` extended by an
-    :class:`ErrorMeta` indicates that the inputs are generally supported, but these specific instances are not. This
-    will abort the origination process.
+    All other errors should be raised as :class:`ErrorMeta`. After the instantiation, :meth:`Pair._make_error_meta` can
+    be used to automatically handle overwriting the message with a user supplied one and id handling.
     """
 
     def __init__(
@@ -286,60 +280,21 @@ class Pair(abc.ABC):
         if not all(isinstance(input, cls) for input in inputs):
             raise UnsupportedInputs()
 
-    @staticmethod
-    def _apply_unary(
-        fn: Callable[[Any], Union[Any, Tuple[Optional[ErrorMeta], Any]]],
-        *inputs: Any,
-        id: Tuple[Any, ...] = (),
-    ) -> Tuple[Optional[ErrorMeta], Optional[Tuple[Any, ...]]]:
-        """Applies a unary function to a set of inputs.
-
-        .. note::
-
-            This method works similiar to a list comprehension with additional handling for :class:`ErrorMeta`.
-
-        Args:
-            fn (): Should return :class:`ErrorMeta` or ``None`` as first return value and possible other return values
-                after it.
-            *inputs (Any): Inputs.
-            id (Tuple[Any, ...]): Optional ID to attach to an :class:`ErrorMeta` in case one is returned by ``fn``.
-
-        .. note::
-
-            The two outputs of this function are orthogonal, i.e. if the first is ``None`` the second will be valid and
-            vice versa. If an expected error happens, it will be returned as :class:`ErrorMeta` as the first return
-            value. Possible scenarios are listed in the ``Raises`` section, although no error will be raised. If the
-            function executes normally, the second return value is described in the ``Returns`` section.
-
-        Raises:
-            Exception: Any expected exception that is "raised" by ``fn``.
-
-        Returns:
-            (Tuple[Any, ...]]]): Additional outputs of ``fn`` if available.
-        """
-        outputs = []
-        for input in inputs:
-            output: Any = fn(input)
-            if isinstance(output, ErrorMeta) or output is None:
-                error_meta = output
-                output = []
-            else:
-                error_meta, *output = output
-            if error_meta:
-                return error_meta._replace(id=id) if id else error_meta, None  # type: ignore[misc]
-
-            outputs.append(output[0] if len(output) == 1 else output)
-        return None, tuple(outputs) if outputs else None
-
-    def _make_error_meta(self, type: Type[Exception], msg: str) -> ErrorMeta:
+    def _make_error_meta(self, type: Type[Exception], msg: str, *, id: Tuple[Any, ...] = ()) -> ErrorMeta:
         """Makes an :class:`ErrorMeta` from a given exception type and message and the stored id.
 
-        If a ``msg`` was supplied during instantiation, this will override the passed ``msg``.
+        If ``type`` is an :class:`AssertionError` and a ``msg`` was supplied during instantiation, this will override
+        the passed ``msg``.
+
+        .. warning::
+
+            Since this method uses instance attributes of :class:`Pair`, it should not be used before the
+            ``super().__init__(...)`` call in the constructor.
         """
-        return ErrorMeta(type, self.msg or msg, self.id)
+        return ErrorMeta(type, self.msg if self.msg and type is AssertionError else msg, id=self.id or id)
 
     @abc.abstractmethod
-    def compare(self) -> Optional[ErrorMeta]:
+    def compare(self) -> None:
         """Compares the inputs and returns an :class`ErrorMeta` in case they mismatch."""
 
 
@@ -353,19 +308,16 @@ class ObjectPair(Pair):
 
     """
 
-    def compare(self) -> Optional[ErrorMeta]:
+    def compare(self) -> None:
         try:
             equal = self.actual == self.expected
         except Exception as error:
-            return ErrorMeta(
-                ValueError,
-                f"Comparing {self.actual} and {self.expected} for equality failed with:\n{error}.",
-            )
+            raise self._make_error_meta(
+                ValueError, f"{self.actual} == {self.expected} failed with:\n{error}."
+            ) from error
 
-        if equal:
-            return None
-
-        return self._make_error_meta(AssertionError, f"{self.actual} != {self.expected}")
+        if not equal:
+            raise self._make_error_meta(AssertionError, f"{self.actual} != {self.expected}")
 
 
 class NonePair(Pair):
@@ -376,11 +328,9 @@ class NonePair(Pair):
 
         super().__init__(actual, expected, **other_parameters)
 
-    def compare(self) -> Optional[ErrorMeta]:
-        if self.actual is None and self.expected is None:
-            return None
-
-        return self._make_error_meta(AssertionError, f"None mismatch: {self.actual} is not {self.expected}")
+    def compare(self) -> None:
+        if not (self.actual is None and self.expected is None):
+            raise self._make_error_meta(AssertionError, f"None mismatch: {self.actual} is not {self.expected}")
 
 
 class BooleanPair(Pair):
@@ -392,7 +342,7 @@ class BooleanPair(Pair):
 
     """
 
-    def __init__(self, actual: Any, expected: Any, id: Tuple[Any, ...] = (), **other_parameters: Any) -> None:
+    def __init__(self, actual: Any, expected: Any, *, id: Tuple[Any, ...], **other_parameters: Any) -> None:
         actual, expected = self._process_inputs(actual, expected, id=id)
         super().__init__(actual, expected, **other_parameters)
 
@@ -401,27 +351,20 @@ class BooleanPair(Pair):
         if NUMPY_AVAILABLE:
             cls.append(np.bool_)
         self._check_inputs_isinstance(actual, expected, cls=tuple(cls))
-        error_meta, bools = self._apply_unary(self._to_bool, actual, expected, id=id)
-        if error_meta:
-            raise UnsupportedInputs(error_meta)
-        return cast(Tuple[bool, bool], bools)
+        actual, expected = [self._to_bool(bool_like, id=id) for bool_like in (actual, expected)]
+        return actual, expected
 
-    def _to_bool(self, bool_like: Any) -> Tuple[Optional[ErrorMeta], Optional[bool]]:
+    def _to_bool(self, bool_like: Any, *, id: Tuple[Any, ...]) -> bool:
         if isinstance(bool_like, bool):
-            bool_ = bool_like
+            return bool_like
         elif isinstance(bool_like, np.bool_):
-            bool_ = bool_like.item()
+            return bool_like.item()
         else:
-            error_meta = ErrorMeta(TypeError, f"Unknown boolean type {type(bool_like)}.")
-            return error_meta, None
+            raise ErrorMeta(TypeError, f"Unknown boolean type {type(bool_like)}.", id=id)
 
-        return None, bool_
-
-    def compare(self) -> Optional[ErrorMeta]:
-        if self.actual is self.expected:
-            return None
-
-        return self._make_error_meta(AssertionError, f"Booleans mismatch: {self.actual} is not {self.expected}")
+    def compare(self) -> None:
+        if self.actual is not self.expected:
+            raise self._make_error_meta(AssertionError, f"Booleans mismatch: {self.actual} is not {self.expected}")
 
 
 class NumberPair(Pair):
@@ -473,15 +416,11 @@ class NumberPair(Pair):
         **other_parameters: Any,
     ) -> None:
         actual, expected = self._process_inputs(actual, expected, id=id)
-
-        error_meta, tolerances = parse_tolerances(
-            *[self._TYPE_TO_DTYPE[type(input)] for input in (actual, expected)], rtol=rtol, atol=atol
-        )
-        if error_meta:
-            raise UnsupportedInputs(error_meta._replace(id=id))
-        self.rtol, self.atol = cast(Tuple[float, float], tolerances)
-
         super().__init__(actual, expected, id=id, **other_parameters)
+
+        self.rtol, self.atol = get_tolerances(
+            *[self._TYPE_TO_DTYPE[type(input)] for input in (actual, expected)], rtol=rtol, atol=atol, id=id
+        )
         self.equal_nan = equal_nan
         self.check_dtype = check_dtype
 
@@ -492,48 +431,43 @@ class NumberPair(Pair):
         if NUMPY_AVAILABLE:
             number_types.append(np.number)
         self._check_inputs_isinstance(actual, expected, cls=tuple(number_types))
-        error_meta, numbers = self._apply_unary(self._to_number, actual, expected, id=id)
-        if error_meta:
-            raise UnsupportedInputs(error_meta)
-        return cast(Tuple[Union[int, float, complex], Union[int, float, complex]], numbers)
+        actual, expected = [self._to_number(number_like, id=id) for number_like in (actual, expected)]
+        return actual, expected
 
-    def _to_number(self, number_like: Any) -> Tuple[Optional[ErrorMeta], Optional[Union[int, float, complex]]]:
+    def _to_number(self, number_like: Any, *, id: Tuple[Any, ...]) -> Union[int, float, complex]:
         if NUMPY_AVAILABLE and isinstance(number_like, np.number):
-            number = number_like.item()
+            return number_like.item()
         elif isinstance(number_like, self._NUMBER_TYPES):
-            number = number_like
+            return number_like
         else:
-            error_meta = ErrorMeta(TypeError, f"Unknown number type {type(number_like)}.")
-            return error_meta, None
+            raise ErrorMeta(TypeError, f"Unknown number type {type(number_like)}.", id=id)
 
-        return None, number
-
-    def compare(self) -> Optional[ErrorMeta]:
+    def compare(self) -> None:
         if self.check_dtype and type(self.actual) is not type(self.expected):
-            return self._make_error_meta(
+            raise self._make_error_meta(
                 AssertionError,
                 f"The (d)types do not match: {type(self.actual)} != {type(self.expected)}.",
             )
 
         if self.actual == self.expected:
-            return None
+            return
 
         if self.equal_nan and cmath.isnan(self.actual) and cmath.isnan(self.expected):
-            return None
+            return
 
         abs_diff = abs(self.actual - self.expected)
         tolerance = self.atol + self.rtol * abs(self.expected)
 
         if cmath.isfinite(abs_diff) and abs_diff <= tolerance:
-            return None
+            return
 
-        return self._make_error_meta(
+        raise self._make_error_meta(
             AssertionError, make_scalar_mismatch_msg(self.actual, self.expected, rtol=self.rtol, atol=self.atol)
         )
 
 
 class TensorLikePair(Pair):
-    """Pair for :class:`torch.Tensor` inputs.
+    """Pair for :class:`torch.Tensor`-like inputs.
 
     Kwargs:
         allow_subclasses (bool):
@@ -575,14 +509,9 @@ class TensorLikePair(Pair):
         **other_parameters: Any,
     ):
         actual, expected = self._process_inputs(actual, expected, id=id, allow_subclasses=allow_subclasses)
-
-        error_meta, tolerances = parse_tolerances(actual, expected, rtol=rtol, atol=atol)
-        if error_meta:
-            raise UnsupportedInputs(error_meta._replace(id=id))
-        self.rtol, self.atol = cast(Tuple[float, float], tolerances)
-
         super().__init__(actual, expected, id=id, **other_parameters)
 
+        self.rtol, self.atol = get_tolerances(actual, expected, rtol=rtol, atol=atol, id=self.id)
         self.equal_nan = equal_nan
         self.check_device = check_device
         self.check_dtype = check_dtype
@@ -600,57 +529,41 @@ class TensorLikePair(Pair):
         if not allow_subclasses and type(actual) is not type(expected):
             raise UnsupportedInputs()
 
-        error_meta, tensors = self._apply_unary(self._to_tensor, actual, expected, id=id)
-        if error_meta:
-            raise UnsupportedInputs(error_meta)
-        actual, expected = cast(Tuple[torch.Tensor, torch.Tensor], tensors)
-
-        error_meta, _ = self._apply_unary(self._check_supported, actual, expected, id=id)
-        if error_meta:
-            raise UnsupportedInputs(error_meta)
-
+        actual, expected = [self._to_tensor(input, id=id) for input in (actual, expected)]
+        for tensor in (actual, expected):
+            self._check_supported(tensor, id=id)
         return actual, expected
 
-    def _to_tensor(self, tensor_like: Any) -> Tuple[Optional[ErrorMeta], Optional[torch.Tensor]]:
+    def _to_tensor(self, tensor_like: Any, *, id: Tuple[Any, ...]) -> torch.Tensor:
         if isinstance(tensor_like, torch.Tensor):
-            tensor = tensor_like
-        else:
-            try:
-                tensor = torch.as_tensor(tensor_like)
-            except Exception as error:
-                error_meta = ErrorMeta(
-                    ValueError,
-                    f"Constructing a tensor from {type(tensor_like)} failed with \n{error}.",
-                )
-                return error_meta, None
+            return tensor_like
 
-        return None, tensor
+        try:
+            return torch.as_tensor(tensor_like)
+        except Exception as error:
+            raise ErrorMeta(
+                ValueError,
+                f"Constructing a tensor from {type(tensor_like)} failed with \n{error}.",
+                id=id,
+            ) from error
 
-    def _check_supported(self, tensor: torch.Tensor) -> Optional[ErrorMeta]:
+    def _check_supported(self, tensor: torch.Tensor, *, id: Tuple[Any, ...]) -> None:
         if tensor.layout not in {torch.strided, torch.sparse_coo, torch.sparse_csr}:  # type: ignore[attr-defined]
-            return ErrorMeta(ValueError, f"Unsupported tensor layout {tensor.layout}")
+            raise ErrorMeta(ValueError, f"Unsupported tensor layout {tensor.layout}", id=id)
 
-        return None
-
-    def compare(self) -> Optional[ErrorMeta]:
+    def compare(self) -> None:
         actual, expected = self.actual, self.expected
 
-        error_meta = self._compare_attributes(actual, expected)
-        if error_meta:
-            return error_meta
-
+        self._compare_attributes(actual, expected)
         actual, expected = self._equalize_attributes(actual, expected)
-        error_meta = self._compare_values(actual, expected)
-        if error_meta:
-            return error_meta
 
-        return None
+        self._compare_values(actual, expected)
 
     def _compare_attributes(
         self,
         actual: torch.Tensor,
         expected: torch.Tensor,
-    ) -> Optional[ErrorMeta]:
+    ) -> None:
         """Checks if the attributes of two tensors match.
 
         Always checks
@@ -670,40 +583,38 @@ class TensorLikePair(Pair):
         are optional and can be disabled through the corresponding ``check_*`` flag during construction of the pair.
         """
 
-        def error_meta(attribute_name: str, actual_value: Any, expected_value: Any) -> ErrorMeta:
-            return self._make_error_meta(
+        def raise_mismatch_error(attribute_name: str, actual_value: Any, expected_value: Any) -> NoReturn:
+            raise self._make_error_meta(
                 AssertionError,
                 f"The values for attribute '{attribute_name}' do not match: {actual_value} != {expected_value}.",
             )
 
         if actual.shape != expected.shape:
-            return error_meta("shape", actual.shape, expected.shape)
+            raise_mismatch_error("shape", actual.shape, expected.shape)
 
         if actual.is_quantized != expected.is_quantized:
-            return error_meta("is_quantized", actual.is_quantized, expected.is_quantized)
+            raise_mismatch_error("is_quantized", actual.is_quantized, expected.is_quantized)
         elif actual.is_quantized and actual.qscheme() != expected.qscheme():
-            return error_meta("qscheme()", actual.qscheme(), expected.qscheme())
+            raise_mismatch_error("qscheme()", actual.qscheme(), expected.qscheme())
 
         if actual.layout != expected.layout:
             if self.check_layout:
-                return error_meta("layout", actual.layout, expected.layout)
+                raise_mismatch_error("layout", actual.layout, expected.layout)
         else:
             if actual.layout == torch.strided and self.check_stride and actual.stride() != expected.stride():
-                return error_meta("stride()", actual.stride(), expected.stride())
+                raise_mismatch_error("stride()", actual.stride(), expected.stride())
             elif (
                 actual.layout == torch.sparse_coo
                 and self.check_is_coalesced
                 and actual.is_coalesced() != expected.is_coalesced()
             ):
-                return error_meta("is_coalesced()", actual.is_coalesced(), expected.is_coalesced())
+                raise_mismatch_error("is_coalesced()", actual.is_coalesced(), expected.is_coalesced())
 
         if self.check_device and actual.device != expected.device:
-            return error_meta("device", actual.device, expected.device)
+            raise_mismatch_error("device", actual.device, expected.device)
 
         if self.check_dtype and actual.dtype != expected.dtype:
-            return error_meta("dtype", actual.dtype, expected.dtype)
-
-        return None
+            raise_mismatch_error("dtype", actual.dtype, expected.dtype)
 
     def _equalize_attributes(self, actual: torch.Tensor, expected: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """Equalizes some attributes of two tensors for value comparison.
@@ -742,7 +653,7 @@ class TensorLikePair(Pair):
 
         return actual, expected
 
-    def _compare_values(self, actual: torch.Tensor, expected: torch.Tensor) -> Optional[ErrorMeta]:
+    def _compare_values(self, actual: torch.Tensor, expected: torch.Tensor) -> None:
         if actual.is_quantized:
             compare_fn = self._compare_quantized_values
         elif actual.is_sparse:
@@ -752,19 +663,24 @@ class TensorLikePair(Pair):
         else:
             compare_fn = self._compare_regular_values
 
-        return compare_fn(actual, expected, rtol=self.rtol, atol=self.atol, equal_nan=self.equal_nan)
+        compare_fn(actual, expected, rtol=self.rtol, atol=self.atol, equal_nan=self.equal_nan)
 
     def _compare_quantized_values(
         self, actual: torch.Tensor, expected: torch.Tensor, *, rtol: float, atol: float, equal_nan: bool
-    ) -> Optional[ErrorMeta]:
+    ) -> None:
         """Compares quantized tensors by comparing the :meth:`~torch.Tensor.dequantize`'d variants for closeness."""
         return self._compare_regular_values(
-            actual.dequantize(), expected.dequantize(), rtol=rtol, atol=atol, equal_nan=equal_nan
+            actual.dequantize(),
+            expected.dequantize(),
+            rtol=rtol,
+            atol=atol,
+            equal_nan=equal_nan,
+            identifier=lambda default_identifier: f"Quantized {default_identifier.lower()}",
         )
 
     def _compare_sparse_coo_values(
         self, actual: torch.Tensor, expected: torch.Tensor, *, rtol: float, atol: float, equal_nan: bool
-    ) -> Optional[ErrorMeta]:
+    ) -> None:
         """Compares sparse COO tensors by comparing
 
         - the number of non-zero elements (nnz) for equality,
@@ -772,7 +688,7 @@ class TensorLikePair(Pair):
         - the values for closeness.
         """
         if actual._nnz() != expected._nnz():
-            return self._make_error_meta(
+            raise self._make_error_meta(
                 AssertionError,
                 (
                     f"The number of specified values in sparse COO tensors does not match: "
@@ -780,7 +696,7 @@ class TensorLikePair(Pair):
                 ),
             )
 
-        error_meta = self._compare_regular_values(
+        self._compare_regular_values(
             actual._indices(),
             expected._indices(),
             rtol=0,
@@ -788,10 +704,7 @@ class TensorLikePair(Pair):
             equal_nan=False,
             identifier="Sparse COO indices",
         )
-        if error_meta:
-            return error_meta
-
-        return self._compare_regular_values(
+        self._compare_regular_values(
             actual._values(),
             expected._values(),
             rtol=rtol,
@@ -802,7 +715,7 @@ class TensorLikePair(Pair):
 
     def _compare_sparse_csr_values(
         self, actual: torch.Tensor, expected: torch.Tensor, *, rtol: float, atol: float, equal_nan: bool
-    ) -> Optional[ErrorMeta]:
+    ) -> None:
         """Compares sparse CSR tensors by comparing
 
         - the number of non-zero elements (nnz) for equality,
@@ -811,7 +724,7 @@ class TensorLikePair(Pair):
         - the values for closeness.
         """
         if actual._nnz() != expected._nnz():
-            return self._make_error_meta(
+            raise self._make_error_meta(
                 AssertionError,
                 (
                     f"The number of specified values in sparse CSR tensors does not match: "
@@ -819,7 +732,7 @@ class TensorLikePair(Pair):
                 ),
             )
 
-        error_meta = self._compare_regular_values(
+        self._compare_regular_values(
             actual.crow_indices(),
             expected.crow_indices(),
             rtol=0,
@@ -827,10 +740,7 @@ class TensorLikePair(Pair):
             equal_nan=False,
             identifier="Sparse CSR crow_indices",
         )
-        if error_meta:
-            return error_meta
-
-        error_meta = self._compare_regular_values(
+        self._compare_regular_values(
             actual.col_indices(),
             expected.col_indices(),
             rtol=0,
@@ -838,10 +748,7 @@ class TensorLikePair(Pair):
             equal_nan=False,
             identifier="Sparse CSR col_indices",
         )
-        if error_meta:
-            return error_meta
-
-        return self._compare_regular_values(
+        self._compare_regular_values(
             actual.values(),
             expected.values(),
             rtol=rtol,
@@ -859,21 +766,22 @@ class TensorLikePair(Pair):
         atol: float,
         equal_nan: bool,
         identifier: Optional[Union[str, Callable[[str], str]]] = None,
-    ) -> Optional[ErrorMeta]:
+    ) -> None:
         """Checks if the values of two tensors are close up to a desired tolerance."""
-        actual, expected = TensorLikePair._promote_for_comparison(actual, expected)
+        actual, expected = self._promote_for_comparison(actual, expected)
         mismatches = ~torch.isclose(actual, expected, rtol=rtol, atol=atol, equal_nan=equal_nan)
         if not torch.any(mismatches):
-            return None
+            return
 
         if actual.shape == torch.Size([]):
             msg = make_scalar_mismatch_msg(actual.item(), expected.item(), rtol=rtol, atol=atol, identifier=identifier)
         else:
             msg = make_tensor_mismatch_msg(actual, expected, mismatches, rtol=rtol, atol=atol, identifier=identifier)
-        return self._make_error_meta(AssertionError, msg)
+        raise self._make_error_meta(AssertionError, msg)
 
-    @staticmethod
-    def _promote_for_comparison(actual: torch.Tensor, expected: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _promote_for_comparison(
+        self, actual: torch.Tensor, expected: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Promotes the inputs to the comparison dtype based on the input dtype.
 
         Returns:
@@ -897,7 +805,7 @@ def originate_pairs(
     pair_types: Sequence[Type[Pair]],
     id: Tuple[Any, ...] = (),
     **options: Any,
-) -> Tuple[Optional[ErrorMeta], Optional[List[Pair]]]:
+) -> List[Pair]:
     """Originates pairs from the individual inputs.
 
     ``actual`` and ``expected`` can be possibly nested :class:`~collections.abc.Sequence`'s or
@@ -911,24 +819,17 @@ def originate_pairs(
         id (Tuple[Any, ...]): Optional id of a pair that will be included in an error message.
         **options (Any): Options passed to each pair during construction.
 
-    .. note::
-
-        The two outputs of this function are orthogonal, i.e. if the first is ``None`` the second will be valid and
-        vice versa. If an expected error happens, it will be returned as :class:`ErrorMeta` as the first return value.
-        Possible scenarios are listed in the ``Raises`` section, although no error will be raised. If the function
-        executes normally, the second return value is described in the ``Returns`` section.
-
     Raises:
-        AssertionError: If the inputs are :class:`~collections.abc.Sequence`'s, but their length does not match.
-        AssertionError: If the inputs are :class:`~collections.abc.Mapping`'s, but their set of keys do not match.
-        TypeError: If no pair is able to handle the inputs.
-        Exception: Any expected exception that happens during the construction of a pair.
+        ErrorMeta: With :class`AssertionError`, if the inputs are :class:`~collections.abc.Sequence`'s, but their
+            length does not match.
+        ErrorMeta: With :class`AssertionError`, if the inputs are :class:`~collections.abc.Mapping`'s, but their set of
+            keys do not match.
+        ErrorMeta: With :class`TypeError`, if no pair is able to handle the inputs.
+        ErrorMeta: With any expected exception that happens during the construction of a pair.
 
     Returns:
         (List[Pair]): Originated pairs.
     """
-    error_meta: Optional[ErrorMeta]
-    pairs: List[Pair] = []
     # We explicitly exclude str's here since they are self-referential and would cause an infinite recursion loop:
     # "a" == "a"[0][0]...
     if (
@@ -940,21 +841,14 @@ def originate_pairs(
         actual_len = len(actual)
         expected_len = len(expected)
         if actual_len != expected_len:
-            error_meta = ErrorMeta(
-                AssertionError, f"The length of the sequences mismatch: {actual_len} != {expected_len}", id
+            raise ErrorMeta(
+                AssertionError, f"The length of the sequences mismatch: {actual_len} != {expected_len}", id=id
             )
-            return error_meta, None
 
+        pairs = []
         for idx in range(actual_len):
-            error_meta, partial_pairs = originate_pairs(
-                actual[idx], expected[idx], pair_types=pair_types, id=(*id, idx), **options
-            )
-            if error_meta:
-                return error_meta, None
-
-            pairs.extend(cast(List[Pair], partial_pairs))
-
-        return None, pairs
+            pairs.extend(originate_pairs(actual[idx], expected[idx], pair_types=pair_types, id=(*id, idx), **options))
+        return pairs
 
     elif isinstance(actual, collections.abc.Mapping) and isinstance(expected, collections.abc.Mapping):
         actual_keys = set(actual.keys())
@@ -962,45 +856,30 @@ def originate_pairs(
         if actual_keys != expected_keys:
             missing_keys = expected_keys - actual_keys
             additional_keys = actual_keys - expected_keys
-            error_meta = ErrorMeta(
+            raise ErrorMeta(
                 AssertionError,
                 (
                     f"The keys of the mappings do not match:\n"
                     f"Missing keys in the actual mapping: {sorted(missing_keys)}\n"
                     f"Additional keys in the actual mapping: {sorted(additional_keys)}"
                 ),
-                id,
+                id=id,
             )
-            return error_meta, None
 
+        pairs = []
         for key in sorted(actual_keys):
-            error_meta, partial_pairs = originate_pairs(
-                actual[key], expected[key], pair_types=pair_types, id=(*id, key), **options
-            )
-            if error_meta:
-                return error_meta, None
-
-            pairs.extend(cast(List[Pair], partial_pairs))
-
-        return None, pairs
+            pairs.extend(originate_pairs(actual[key], expected[key], pair_types=pair_types, id=(*id, key), **options))
+        return pairs
 
     else:
         for pair_type in pair_types:
-            try:
-                return None, [pair_type(actual, expected, id=id, **options)]
-            except UnsupportedInputs as error:
-                # In case we encounter an error during origination, we abort
-                if error.meta:
-                    return error.meta, None
-
+            with contextlib.suppress(UnsupportedInputs):
+                return [pair_type(actual, expected, id=id, **options)]
         else:
-            return (
-                ErrorMeta(
-                    TypeError,
-                    f"No comparison pair was able to handle inputs of type {type(actual)} and {type(expected)}.",
-                    id=id,
-                ),
-                None,
+            raise ErrorMeta(
+                TypeError,
+                f"No comparison pair was able to handle inputs of type {type(actual)} and {type(expected)}.",
+                id=id,
             )
 
 
@@ -1022,14 +901,16 @@ def assert_equal(
     # Hide this function from `pytest`'s traceback
     __tracebackhide__ = True
 
-    error_meta, pairs = originate_pairs(actual, expected, pair_types=pair_types, **options)
-    if error_meta:
-        raise error_meta.to_error()
+    try:
+        pairs = originate_pairs(actual, expected, pair_types=pair_types, **options)
+    except ErrorMeta as error_meta:
+        raise error_meta.to_error() from error_meta
 
     error_metas: List[ErrorMeta] = []
-    for pair in cast(List[Pair], pairs):
-        error_meta = pair.compare()
-        if error_meta:
+    for pair in pairs:
+        try:
+            pair.compare()
+        except ErrorMeta as error_meta:
             error_metas.append(error_meta)
 
     if not error_metas:
