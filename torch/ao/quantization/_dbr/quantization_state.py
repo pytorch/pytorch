@@ -72,7 +72,7 @@ class AutoQuantizationState(torch.nn.Module):
         # to be within the module hierarchy.
         self.tensor_id_to_observer = torch.nn.ModuleDict()
         # TODO(future PR): include kwargs
-        self.idx_to_seen_op_infos: Dict[str, SeenOpInfo] = {}
+        self.idx_to_seen_op_infos: Dict[int, SeenOpInfo] = {}
         # qtensor_info objects of tensor outputs of the module, specified
         # in order of iteration through the output type. Non-tensor outputs
         # are represented with `None`.
@@ -82,8 +82,8 @@ class AutoQuantizationState(torch.nn.Module):
         # key: idx of seen op
         # value: name of packed weight
         # note: this is filled out right before convert
-        self.idx_to_packed_weight_name: Dict[str, str] = {}
-        self.tensor_id_to_scale_zp: Dict[str, Tuple[torch.Tensor, torch.Tensor]] = {}
+        self.idx_to_packed_weight_name: Dict[int, str] = {}
+        self.tensor_id_to_scale_zp: Dict[int, Tuple[torch.Tensor, torch.Tensor]] = {}
 
         # Numeric Suite add_loggers functionality
         # if this flag is True, op outputs will be saved for debugging
@@ -147,7 +147,7 @@ class AutoQuantizationState(torch.nn.Module):
         return s
 
     def _get_cur_seen_op_info(self):
-        return self.idx_to_seen_op_infos[str(self.idx)]
+        return self.idx_to_seen_op_infos[self.idx]
 
     def get_cur_output_inf_dtype(self):
         return self._get_cur_seen_op_info().output_tensor_infos[0].inf_dtype
@@ -473,7 +473,7 @@ class AutoQuantizationState(torch.nn.Module):
         if needs_scale_zp:
             output_tensor_infos = seen_op_info.output_tensor_infos
             tensor_id = output_tensor_infos[0].id
-            scale, zp = self.tensor_id_to_scale_zp[str(tensor_id)]
+            scale, zp = self.tensor_id_to_scale_zp[tensor_id]
             additional_kwargs.update({'scale': scale, 'zero_point': zp})
         return maybe_new_op, arg_quant_infos, arg_dequant_infos, \
             packed_param_name, additional_kwargs
@@ -483,7 +483,7 @@ class AutoQuantizationState(torch.nn.Module):
         If the op in seen_op_info has a quantized packed param, returns it.
         Otherwise, returns None.
         """
-        return self.idx_to_packed_weight_name.get(str(seen_op_info.idx), None)
+        return self.idx_to_packed_weight_name.get(seen_op_info.idx, None)
 
     def _first_call_assign_qtensor_infos_to_mod_outputs_tensor(
         self,
@@ -671,10 +671,9 @@ class AutoQuantizationState(torch.nn.Module):
                     packable_tensor_kwarg_name_to_name[kwarg_name] = \
                         kwarg_name_on_module
 
-        key = str(self.idx)
-        if key not in self.idx_to_seen_op_infos:
+        if self.idx not in self.idx_to_seen_op_infos:
             op_type = op if not isinstance(op, torch.nn.Module) else type(op)
-            self.idx_to_seen_op_infos[key] = SeenOpInfo(
+            self.idx_to_seen_op_infos[self.idx] = SeenOpInfo(
                 self.idx, op_type, fqn, arg_tensor_infos, [],
                 packable_tensor_idx_to_name, packable_nontensor_idx_to_arg,
                 packable_tensor_kwarg_name_to_name,
@@ -760,7 +759,7 @@ class AutoQuantizationState(torch.nn.Module):
             else:
                 dtype_to_use = args[0]._qtensor_info.inf_dtype
         output._qtensor_info = QTensorInfo(qtensor_id[0], dtype_to_use)
-        self.idx_to_seen_op_infos[str(self.idx)].output_tensor_infos.append(
+        self.idx_to_seen_op_infos[self.idx].output_tensor_infos.append(
             output._qtensor_info)
         qtensor_id[0] += 1
 

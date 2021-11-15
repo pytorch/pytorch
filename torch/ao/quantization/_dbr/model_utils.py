@@ -58,7 +58,7 @@ def pack_weights_for_functionals(
                     name_idx += 1
                     name_candidate = f"{prefix}{name_idx}"
                 setattr(module, name_candidate, packed_params)
-                qstate.idx_to_packed_weight_name[str(idx)] = name_candidate
+                qstate.idx_to_packed_weight_name[idx] = name_candidate
                 # TODO: delete the original weights
 
             elif seen_op_info.type == F.linear:
@@ -85,7 +85,7 @@ def pack_weights_for_functionals(
                     name_idx += 1
                     name_candidate = f"{prefix}{name_idx}"
                 setattr(module, name_candidate, packed_params)
-                qstate.idx_to_packed_weight_name[str(idx)] = name_candidate
+                qstate.idx_to_packed_weight_name[idx] = name_candidate
                 # TODO: delete the original weights
 
     for _, child in module.named_children():
@@ -103,7 +103,9 @@ def attach_scale_zp_values_to_model(
         qstate: AutoQuantizationState = module._auto_quant_state  # type: ignore[assignment]
         for tensor_id, observer in qstate.tensor_id_to_observer.items():
             scale, zp = observer.calculate_qparams()
-            qstate.tensor_id_to_scale_zp[tensor_id] = (scale, zp)
+            # tensor_id_to_observer is a ModuleDict which has to have string keys
+            # tensor_id_to_scale_zp is a normal dict which can have int keys
+            qstate.tensor_id_to_scale_zp[int(tensor_id)] = (scale, zp)
         qstate.tensor_id_to_observer.clear()
 
     for _, child in module.named_children():
