@@ -40,5 +40,7 @@ class TestDCE(JitTestCase):
 
         t2 = torch.jit.script(unscripted)
         t2.eval()
+
+        # freezing inlines t1.__init__(), after which DCE can occur.
         t2 = torch.jit.freeze(t2)
         FileCheck().check_not("prim::SetAttr").run(t2.graph)
