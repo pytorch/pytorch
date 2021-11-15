@@ -3,19 +3,18 @@
 #include <ATen/Parallel.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
+#include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/freeze_module.h>
+#include <torch/csrc/jit/passes/frozen_graph_optimizations.h>
+#include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/insert_guards.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/jit_trace.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
-
-#include <torch/csrc/jit/ir/ir_views.h>
-#include <torch/csrc/jit/passes/dead_code_elimination.h>
-#include <torch/csrc/jit/passes/freeze_module.h>
-#include <torch/csrc/jit/passes/frozen_graph_optimizations.h>
-#include <torch/csrc/jit/passes/inliner.h>
 #include <unordered_map>
 
 namespace torch {
@@ -301,6 +300,15 @@ std::shared_ptr<Graph> TraceGraph(std::shared_ptr<Graph> graph, Stack& stack) {
   for (auto out : pr->profiled_graph_->outputs()) {
     td.traced_graph_->block()->registerOutput(td.old_to_new_.at(out));
   }
+
+  // type inputs
+  for (auto i : c10::irange(stack.size())) {
+    if (stack[i].isTensor()) {
+      td.traced_graph_->inputs().at(i)->setType(
+          tensorTypeInCurrentExecutionContext(stack[i].toTensor()));
+    }
+  }
+
   GRAPH_DUMP("Traced graph:", td.traced_graph_);
   return td.traced_graph_;
 }
