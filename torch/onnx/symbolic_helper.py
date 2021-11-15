@@ -11,7 +11,7 @@ import torch.onnx
 import torch.onnx.utils
 
 from functools import wraps
-from torch._C import OptionalType
+from torch._C import OptionalType, dtype
 
 
 # Note [Edit Symbolic Files]
@@ -730,7 +730,7 @@ def _index_fill_reshape_helper(g, self, dim, index):
 def _reshape_helper(g, input, shape, allowzero=0):
     shape = _maybe_get_const(shape, "is")
     if not _is_value(shape):
-        shape = g.op("Constant", value_t=torch.LongTensor(shape))
+        shape = g.op("Constant", value_t=torch.LongTensor(shape), dtype=torch.int64)
     if _export_onnx_opset_version <= 13:
         return g.op("Reshape", input, shape)
     else:

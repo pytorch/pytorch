@@ -2899,14 +2899,10 @@ def index(g, self, index):
 
 @parse_args("v", "v", "is", "i", "v")
 def linalg_norm(g, self, ord, dim, keepdim, dtype):
-    # If dim is an int, the vector norm will be computed.
-    # If dim is a 2-tuple, the matrix norm will be computed.
-    # If dim = None and ord = None, A will be flattened to 1D and
-    # the 2-norm of the resulting vector will be computed.
-    # If dim = None and ord != None, A must be 1D or 2D.
+    # Conditions based on https://pytorch.org/docs/stable/generated/torch.linalg.norm.html
     if dim is None:
         if sym_help._is_none(ord):
-            self = sym_help._reshape_helper(g, self, g.op("Constant", value_t=torch.tensor([-1], dtype=torch.int64)))
+            self = sym_help._reshape_helper(g, self, [-1])
             ord = g.op("Constant", value_t=torch.LongTensor([2]))
         self_dim = sym_help._get_tensor_rank(self)
         if self_dim is None:
@@ -2931,7 +2927,7 @@ def linalg_norm(g, self, ord, dim, keepdim, dtype):
 @parse_args("v", "f", "is", "i", "v")
 def linalg_vector_norm(g, self, ord, dim, keepdim, dtype):
     if dim is None:
-        self = sym_help._reshape_helper(g, self, g.op("Constant", value_t=torch.tensor([-1], dtype=torch.int64)))
+        self = sym_help._reshape_helper(g, self, [-1])
         keepdim = None
 
     if ord == math.inf:
@@ -2954,17 +2950,17 @@ def linalg_matrix_norm(g, self, ord, dim, keepdim, dtype):
     if ord_value == 'fro':
         return frobenius_norm(g, self, dim, keepdim)
     elif ord_value == 'nuc':
-        return _unimplemented("linalg.matrix_norm", "ONNX export for ord=`nuc`")
+        return _unimplemented("linalg.matrix_norm", "ord==nuc")
     else:
         ord_value = sym_help._parse_arg(ord, "f")
         if ord_value is None:
             return frobenius_norm(g, self, dim, keepdim)
         if ord_value == 2 or ord_value == -2:
-            return _unimplemented("linalg.matrix_norm", "ONNX export for ord=2")
+            return _unimplemented("linalg.matrix_norm", "ord==2")
         # Wrap the dim vector to handle neagtive dim values
         self_dim = sym_help._get_tensor_rank(self)
         if self_dim is None:
-            return _unimplemented("dim",
+            return _unimplemented("linalg.matrix_norm",
                                   "Input rank must be known at export time.")
         if dim[0] < 0:
             dim[0] += self_dim
