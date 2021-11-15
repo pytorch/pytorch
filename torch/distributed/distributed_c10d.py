@@ -271,6 +271,14 @@ def _rank_not_in_group(group: ProcessGroup):
     return group == GroupMember.NON_GROUP_MEMBER
 
 
+def _warn_not_in_group(op_name):
+    global_rank = -1 if GroupMember.WORLD is None else GroupMember.WORLD.rank()
+    warnings.warn(
+        f"Running {op_name} on global rank {global_rank} which does not "
+        "belong to the given group."
+    )
+
+
 def _get_group_rank(group: ProcessGroup, rank):
     """
     Helper that gets a given group's local rank in the group from a given global
@@ -879,6 +887,7 @@ def isend(tensor, dst, group=None, tag=0):
     """
     _check_single_tensor(tensor, "tensor")
     if _rank_not_in_group(group):
+        _warn_not_in_group("isend")
         return
 
     if group is None or group is GroupMember.WORLD:
@@ -908,6 +917,7 @@ def irecv(tensor, src=None, group=None, tag=0):
     """
     _check_single_tensor(tensor, "tensor")
     if _rank_not_in_group(group):
+        _warn_not_in_group("irecv")
         return
 
     if group is None or group is GroupMember.WORLD:
@@ -939,6 +949,7 @@ def send(tensor, dst, group=None, tag=0):
     """
     _check_single_tensor(tensor, "tensor")
     if _rank_not_in_group(group):
+        _warn_not_in_group("send")
         return
 
     if group is None or group is GroupMember.WORLD:
@@ -968,6 +979,7 @@ def recv(tensor, src=None, group=None, tag=0):
     """
     _check_single_tensor(tensor, "tensor")
     if _rank_not_in_group(group):
+        _warn_not_in_group("recv")
         return -1
 
     if group is None:
@@ -1119,6 +1131,7 @@ def broadcast_multigpu(tensor_list, src, group=None, async_op=False, src_tensor=
 
     """
     if _rank_not_in_group(group):
+        _warn_not_in_group("broadcast_multigpu")
         return
 
     opts = BroadcastOptions()
@@ -1160,6 +1173,7 @@ def broadcast(tensor, src, group=None, async_op=False):
     """
     _check_single_tensor(tensor, "tensor")
     if _rank_not_in_group(group):
+        _warn_not_in_group("broadcast")
         return
 
     opts = BroadcastOptions()
@@ -1283,6 +1297,7 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
     """
     _check_single_tensor(tensor, "tensor")
     if _rank_not_in_group(group):
+        _warn_not_in_group("all_reduce")
         return
 
     if tensor.is_complex():
@@ -1339,6 +1354,7 @@ def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
     """
     _check_tensor_list(tensors, "tensor")
     if _rank_not_in_group(group):
+        _warn_not_in_group("all_reduce_coalesced")
         return
 
     if any([t.is_complex() for t in tensors]) and not supports_complex(op):
@@ -1394,6 +1410,7 @@ def reduce_multigpu(
 
     """
     if _rank_not_in_group(group):
+        _warn_not_in_group("reduce_multigpu")
         return
 
     opts = ReduceOptions()
@@ -1439,6 +1456,7 @@ def reduce(tensor, dst, op=ReduceOp.SUM, group=None, async_op=False):
     """
     _check_single_tensor(tensor, "tensor")
     if _rank_not_in_group(group):
+        _warn_not_in_group("reduce")
         return
 
     opts = ReduceOptions()
@@ -1505,6 +1523,7 @@ def all_gather_multigpu(
 
     """
     if _rank_not_in_group(group):
+        _warn_not_in_group("all_gather_multigpu")
         return
 
     output_tensor_lists = [
@@ -1591,6 +1610,7 @@ def all_gather_object(object_list, obj, group=None):
         ['foo', 12, {1: 2}]
     """
     if _rank_not_in_group(group):
+        _warn_not_in_group("all_gather_object")
         return
 
     input_tensor, local_size = _object_to_tensor(obj)
@@ -1684,6 +1704,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
         ['foo', 12, {1: 2}]
     """
     if _rank_not_in_group(group):
+        _warn_not_in_group("gather_object")
         return
 
     # Ensure object_gather_list is specified appopriately.
@@ -1792,6 +1813,7 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
         ['foo', 12, {1: 2}]
     """
     if _rank_not_in_group(group):
+        _warn_not_in_group("broadcast_object_list")
         return
 
     my_rank = get_rank()
@@ -1903,6 +1925,7 @@ def scatter_object_list(
         [{1: 2}]
     """
     if _rank_not_in_group(group):
+        _warn_not_in_group("scatter_object_list")
         return
 
     if (
@@ -2003,6 +2026,7 @@ def all_gather(tensor_list, tensor, group=None, async_op=False):
     _check_tensor_list(tensor_list, "tensor_list")
     _check_single_tensor(tensor, "tensor")
     if _rank_not_in_group(group):
+        _warn_not_in_group("all_gather")
         return
 
     tensor_list = [
@@ -2062,6 +2086,7 @@ def _all_gather_base(output_tensor, input_tensor, group=None, async_op=False):
     _check_single_tensor(input_tensor, "input_tensor")
     _check_single_tensor(output_tensor, "output_tensor")
     if _rank_not_in_group(group):
+        _warn_not_in_group("_all_gather_base")
         return
 
     output_tensor = (
@@ -2136,6 +2161,7 @@ def all_gather_coalesced(
     # We only check basic compatibility with C++ params here, C++ code will
     # do shape and type checking.
     if _rank_not_in_group(group):
+        _warn_not_in_group("all_gather_coalesced")
         return
     _check_tensor_list(input_tensor_list, "tensor_list")
     if not isinstance(output_tensor_lists, list):
@@ -2206,6 +2232,7 @@ def gather(tensor, gather_list=None, dst=0, group=None, async_op=False):
         gather_list = []
 
     if _rank_not_in_group(group):
+        _warn_not_in_group("gather")
         return
 
     my_rank = get_rank()
@@ -2262,6 +2289,7 @@ def scatter(tensor, scatter_list=None, src=0, group=None, async_op=False):
         scatter_list = []
 
     if _rank_not_in_group(group):
+        _warn_not_in_group("scatter")
         return
     scatter_list = [
         t if not t.is_complex() else torch.view_as_real(t) for t in scatter_list
@@ -2347,6 +2375,7 @@ def reduce_scatter_multigpu(
 
     """
     if _rank_not_in_group(group):
+        _warn_not_in_group("reduce_scatter_multigpu")
         return
 
     opts = ReduceScatterOptions()
@@ -2383,6 +2412,7 @@ def reduce_scatter(output, input_list, op=ReduceOp.SUM, group=None, async_op=Fal
     _check_single_tensor(output, "output")
     _check_tensor_list(input_list, "input_list")
     if _rank_not_in_group(group):
+        _warn_not_in_group("reduce_scatter")
         return
 
     opts = ReduceScatterOptions()
@@ -2420,6 +2450,7 @@ def _reduce_scatter_base(output, input, op=ReduceOp.SUM, group=None, async_op=Fa
     _check_single_tensor(input, "input")
 
     if _rank_not_in_group(group):
+        _warn_not_in_group("_reduce_scatter_base")
         return
 
     opts = ReduceScatterOptions()
@@ -2534,6 +2565,7 @@ def all_to_all_single(
         tensor([4+4j, 8+8j, 12+12j, 16+16j])                            # Rank 3
     """
     if _rank_not_in_group(group):
+        _warn_not_in_group("all_to_all_single")
         return
 
     opts = AllToAllOptions()
@@ -2655,6 +2687,7 @@ def all_to_all(output_tensor_list, input_tensor_list, group=None, async_op=False
 
     """
     if _rank_not_in_group(group):
+        _warn_not_in_group("all_to_all")
         return
 
     opts = AllToAllOptions()
@@ -2700,6 +2733,7 @@ def barrier(group=GroupMember.WORLD, async_op=False, device_ids=None):
         None, if not async_op or if not part of the group
     """
     if _rank_not_in_group(group):
+        _warn_not_in_group("barrier")
         return
 
     opts = BarrierOptions()
@@ -2780,6 +2814,7 @@ def monitored_barrier(group=GroupMember.WORLD, timeout=None, wait_all_ranks=Fals
     # Need to call rank not in group before using the group, otherwise
     # "Invalid process group" error is raised.
     if _rank_not_in_group(group):
+        _warn_not_in_group("monitored_barrier")
         return
 
     if get_backend(group) != Backend.GLOO:

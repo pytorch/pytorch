@@ -662,7 +662,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                 self.celu2 = torch.nn.CELU(2.0)
                 self.dropout = N(0.5)
 
-            def forward(self, x: torch.Tensor, y: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
+            def forward(self, x, y, z):
                 res1 = self.celu1(x)
                 res2 = self.celu2(y)
                 for ln in self.lns:
@@ -673,9 +673,10 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         y = torch.randn(2, 3)
         z = torch.randn(2, 3)
 
-        """
-        Export specified modules, containing non-existed dropout.
-        """
+        # Export specified modules. Test against specifying modules that won't
+        # exist in the exported model.
+        # Model export in inference mode will remove dropout node,
+        # thus the dropout module no longer exist in graph.
         f = io.BytesIO()
         torch.onnx.export(M(3), (x, y, z), f, opset_version=self.opset_version,
                           export_modules_as_functions={torch.nn.CELU, torch.nn.Dropout, torch.nn.LayerNorm})
@@ -704,21 +705,17 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         self.assertEqual(ln_ns[0].domain, "torch.nn.modules.normalization")
         self.assertEqual(len(ln_ns[0].attribute), 1)
 
-        """
-        Export specified modules.
-        """
+        # Export specified modules.
         f = io.BytesIO()
         torch.onnx.export(M(3), (x, y, z), f, opset_version=self.opset_version,
-                          export_modules_as_functions={"torch.nn.modules.activation.CELU"})
+                          export_modules_as_functions={torch.nn.CELU})
 
         onnx_model = onnx.load(io.BytesIO(f.getvalue()))
         funcs = onnx_model.functions
         self.assertEqual(len(funcs), 1)
         self.assertEqual(funcs[0].name, "CELU")
 
-        """
-        Export with empty specified modules. Normal export.
-        """
+        # Export with empty specified modules. Normal export.
         f = io.BytesIO()
         torch.onnx.export(M(3), (x, y, z), f, opset_version=self.opset_version,
                           export_modules_as_functions=set())
@@ -727,9 +724,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         funcs = onnx_model.functions
         self.assertEqual(len(funcs), 0)
 
-        """
-        Export all modules. Should contain {M, CELU, LayerNorm}.
-        """
+        # Export all modules. Should contain {M, CELU, LayerNorm}.
         f = io.BytesIO()
         torch.onnx.export(M(3), (x, y, z), f, opset_version=self.opset_version,
                           export_modules_as_functions=True)
@@ -737,6 +732,40 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         onnx_model = onnx.load(io.BytesIO(f.getvalue()))
         funcs = onnx_model.functions
         self.assertEqual(len(funcs), 3)
+
+    def test_local_function_overloads(self):
+        class NWithOverloads(torch.nn.Module):
+            def forward(self, x, y=None, z=None):
+                if y is None:
+                    return x + 1
+                elif z is None:
+                    return x + y
+                else:
+                    return x + y, x + z
+
+        class M(torch.nn.Module):
+            def __init__(self, num_layers):
+                super().__init__()
+                self.n = NWithOverloads()
+
+            def forward(self, x, y, z):
+                return self.n(x), self.n(x, y), self.n(x, y, z)
+
+        x = torch.randn(2, 3)
+        y = torch.randn(2, 3)
+        z = torch.randn(2, 3)
+
+        f = io.BytesIO()
+        torch.onnx.export(M(3), (x, y, z), f, opset_version=self.opset_version,
+                          export_modules_as_functions={NWithOverloads})
+
+        onnx_model = onnx.load(io.BytesIO(f.getvalue()))
+        funcs = onnx_model.functions
+        self.assertEqual(len(funcs), 3)
+        func_names = [f.name for f in funcs]
+        self.assertIn("NWithOverloads", func_names)
+        self.assertIn("NWithOverloads.1", func_names)
+        self.assertIn("NWithOverloads.2", func_names)
 
     def test_aten_fallthrough(self):
         # Test aten export of op with no symbolic

@@ -13,6 +13,7 @@ from torch.fx.experimental.fx2trt.fx2trt import (
 from torch.fx.experimental.normalize import NormalizeArgs
 from torch.fx.passes import shape_prop
 
+
 def fetch_attr(mod, target):
     """
     Fetch an attribute from the ``Module`` hierarchy of ``mod.module``.
@@ -50,7 +51,11 @@ class TRTTestCase(unittest.TestCase):
                 self.assert_has_op(mod, expected_ops)
 
             interpreter_result = interpreter.run(fp16_mode=False)
-            trt_mod = TRTModule(interpreter_result.engine, interpreter_result.input_names, interpreter_result.output_names)
+            trt_mod = TRTModule(
+                interpreter_result.engine,
+                interpreter_result.input_names,
+                interpreter_result.output_names,
+            )
 
             ref_outputs = mod(*inputs)
             outputs = trt_mod(*cuda_inputs)
@@ -67,8 +72,9 @@ class TRTTestCase(unittest.TestCase):
         mod,
         inputs,
         expected_ops,
-        comparators: List[Tuple[Callable, List]],
         interpreter,
+        comparators: List[Tuple[Callable, List]],
+        fp16_mode=False,
     ):
         """
         Runs the test and compares the result using the provided comparators.
@@ -91,8 +97,12 @@ class TRTTestCase(unittest.TestCase):
             if len(expected_ops):
                 self.assert_has_op(mod, expected_ops)
 
-            interpreter_result = interpreter.run(fp16_mode=False)
-            trt_mod = TRTModule(interpreter_result.engine, interpreter_result.input_names, interpreter_result.output_names)
+            interpreter_result = interpreter.run(fp16_mode=fp16_mode)
+            trt_mod = TRTModule(
+                interpreter_result.engine,
+                interpreter_result.input_names,
+                interpreter_result.output_names,
+            )
             res_trt = trt_mod(*cuda_inputs).cpu()
             res_cpu = mod(*inputs)
             assert len(res_trt) == len(res_cpu)
@@ -141,8 +151,9 @@ class VanillaTestCase(TRTTestCase):
         mod,
         inputs,
         expected_ops,
+        interpreter,
         comparators: List[Tuple[Callable, List]],
-        interpreter=None
+        fp16_mode=False,
     ):
         # interpreter is ignored, we do not need this for Vanilla tests
         # Note this is different from internal version, we need to fix the test case
@@ -152,7 +163,7 @@ class VanillaTestCase(TRTTestCase):
         mod = NormalizeArgs(mod).transform()
         interp = TRTInterpreter(mod, InputTensorSpec.from_tensors(inputs))
         super().run_test_custom_compare_results(
-            mod, inputs, expected_ops, comparators, interp
+            mod, inputs, expected_ops, interp, comparators, fp16_mode=fp16_mode
         )
 
 

@@ -38,6 +38,7 @@ jobs:
 
   ciflow_should_run:
     runs-on: ubuntu-18.04
+    timeout-minutes: 240
     env:
       IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == 'unassigned') && (github.event.assigneed.login == 'pytorchbot') }}
       LABEL_CONDITIONS: ${{ contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux') || contains(github.event.pull_request.labels.*.name, 'ciflow/mobile') }}
@@ -57,6 +58,7 @@ jobs:
   build:
     runs-on: linux.2xlarge
     needs: [ciflow_should_run]
+    timeout-minutes: 240
     env:
       JOB_BASE_NAME: linux-xenial-py3-clang5-mobile-custom-build-static-build
     outputs:
@@ -80,12 +82,10 @@ jobs:
           AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
-          aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
-          bash /tmp/ecr-login.sh
-          rm /tmp/ecr-login.sh
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
-        env:
-          ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
         run: |
           retry () {
               "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
@@ -222,8 +222,6 @@ jobs:
         run: .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
-        env:
-          ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .

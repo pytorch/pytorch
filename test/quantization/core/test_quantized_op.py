@@ -312,8 +312,19 @@ class TestQuantizedOps(TestCase):
                 ],
                 'reference_fn': torch.nn.functional.hardsigmoid,
                 'output_range': (0.0, 1.0),
-                'change_zero_point': True
-            }
+                'change_zero_point': True,
+            },
+            {
+                'quantized_fn': [
+                    torch.nn.quantized.functional.hardsigmoid
+                ],
+                'reference_fn': torch.nn.functional.hardsigmoid,
+                'output_range': (0.0, 1.0),
+                'change_zero_point': True,
+                'extra_kwargs': {
+                    'inplace': True,
+                },
+            },
         ]
         shapes = ((4,), (4, 4), (4, 4, 4), (4, 4, 4, 4))
         dtypes = (torch.quint8, torch.qint8)
@@ -3063,7 +3074,7 @@ class TestDynamicQuantizedRNNOp(TestCase):
                 self.assertEqual(result_ref[0], result_dynamic[0], msg="torch.quantized_rnncell results are off")
 
 
-class TestQuantizedLinear(unittest.TestCase):
+class TestQuantizedLinear(TestCase):
     """Tests the correctness of the quantized linear and linear_relu op."""
     @given(batch_size=st.integers(1, 4),
            input_channels=st.integers(16, 32),

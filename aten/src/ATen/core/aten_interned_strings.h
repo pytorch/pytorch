@@ -550,7 +550,6 @@ _(aten, nll_loss2d_backward) \
 _(aten, nll_loss2d_forward) \
 _(aten, nll_loss_backward) \
 _(aten, nll_loss_forward) \
-_(aten, nonzero) \
 _(aten, nonzero_numpy) \
 _(aten, norm) \
 _(aten, norm_except_dim) \
@@ -639,6 +638,7 @@ _(aten, set) \
 _(aten, sign) \
 _(aten, signbit) \
 _(aten, silu) \
+_(aten, silu_backward) \
 _(aten, sgn) \
 _(aten, sin) \
 _(aten, sinh) \

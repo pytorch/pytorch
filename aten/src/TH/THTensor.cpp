@@ -2,23 +2,7 @@
 
 // NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <TH/generic/THTensor.cpp>
-#include <TH/THGenerateAllTypes.h>
-
-// NOLINTNEXTLINE(bugprone-suspicious-include)
-#include <TH/generic/THTensor.cpp>
-#include <TH/THGenerateComplexTypes.h>
-
-// NOLINTNEXTLINE(bugprone-suspicious-include)
-#include <TH/generic/THTensor.cpp>
-#include <TH/THGenerateHalfType.h>
-
-// NOLINTNEXTLINE(bugprone-suspicious-include)
-#include <TH/generic/THTensor.cpp>
-#include <TH/THGenerateBoolType.h>
-
-// NOLINTNEXTLINE(bugprone-suspicious-include)
-#include <TH/generic/THTensor.cpp>
-#include <TH/THGenerateBFloat16Type.h>
+#include <TH/THGenerateByteType.h>
 
 #include <ATen/native/Resize.h>
 #include <ATen/TensorUtils.h>

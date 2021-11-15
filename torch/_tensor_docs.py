@@ -2429,6 +2429,13 @@ argmax(dim=None, keepdim=False) -> LongTensor
 See :func:`torch.argmax`
 """)
 
+add_docstr_all('argwhere',
+               r"""
+argwhere() -> Tensor
+
+See :func:`torch.argwhere`
+""")
+
 add_docstr_all('mean', r"""
 mean(dim=None, keepdim=False, *, dtype=None) -> Tensor
 

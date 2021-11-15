@@ -8,7 +8,9 @@ from torch.nn import Conv2d, BatchNorm2d, ReLU, init
 from torch.nn.intrinsic.qat import ConvBn2d, ConvBnReLU2d
 from torch.nn.modules.utils import _pair
 import torch.nn.quantized as nnq
+import torch.nn.quantized.dynamic as nnqd
 import torch.nn.qat as nnqat
+import torch.nn.qat.dynamic as nnqatd
 from torch.ao.quantization import (
     prepare,
     convert,
@@ -27,6 +29,7 @@ from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     QuantStubModel,
     ManualLinearQATModel,
+    ManualLinearDynamicQATModel,
     ManualConvLinearQATModel,
     ManualEmbeddingBagLinear,
     TwoLayerLinearModel,
@@ -108,6 +111,27 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
                 model = ManualConvLinearQATModel()
                 model = quantize_qat(model, test_only_train_fn, [self.img_data_2d_train])
                 checkQuantized(model)
+
+    def test_dynamic_qat_linear(self):
+        for qengine in supported_qengines:
+            with override_quantized_engine(qengine):
+                # Dynamic QAT without memoryless observers should fail
+                with self.assertRaisesRegex(ValueError, "Dynamic QAT requires a memoryless observer"):
+                    model = ManualLinearDynamicQATModel(default_qat_qconfig)
+                    model = prepare_qat(model, mapping={torch.nn.Linear: nnqatd.Linear})
+
+                model = ManualLinearDynamicQATModel()
+                model = prepare_qat(model, mapping={torch.nn.Linear: nnqatd.Linear})
+                self.assertEqual(type(model.fc1), nnqatd.Linear)
+                self.assertEqual(type(model.fc2), nnqatd.Linear)
+                self.checkObservers(model)
+                test_only_train_fn(model, self.train_data)
+                model = convert(model, mapping={nnqatd.Linear: nnqd.Linear})
+                self.assertEqual(type(model.fc1), nnqd.Linear)
+                self.assertEqual(type(model.fc2), nnqd.Linear)
+                test_only_eval_fn(model, self.calib_data)
+                self.checkScriptable(model, self.calib_data)
+                self.checkNoQconfig(model)
 
     def test_embedding_bag_linear(self):
         for qengine in supported_qengines:
