@@ -101,7 +101,8 @@ Mathematically this performs the following operation:
 .. math::
     \text{out} = \alpha\ (\text{mat1} \mathbin{@} \text{mat2})*\text{spy}(\text{input}) + \beta\ \text{input}
 
-where :math:`\text{spy}(\text{input})` is the sparsity pattern matrix of :attr:`input`, :attr:`alpha` and :attr:`beta` are the scaling factors.
+where :math:`\text{spy}(\text{input})` is the sparsity pattern matrix of :attr:`input`, :attr:`alpha`
+and :attr:`beta` are the scaling factors.
 :math:`\text{spy}(\text{input})` has value 1 at the positions where :attr:`input` has non-zero values, and 0 elsewhere.
 
 .. note::
@@ -109,7 +110,8 @@ where :math:`\text{spy}(\text{input})` is the sparsity pattern matrix of :attr:`
     This function is implemented only for tensors on CUDA devices.
 
 Args:
-    input (Tensor): a sparse CSR matrix of shape `(m, n)` to be added and used to compute the sampled matrix multiplication
+    input (Tensor): a sparse CSR matrix of shape `(m, n)` to be added and used to compute
+        the sampled matrix multiplication
     mat1 (Tensor): a dense matrix of shape `(m, k)` to be multiplied
     mat2 (Tensor): a dense matrix of shape `(k, n)` to be multiplied
 
