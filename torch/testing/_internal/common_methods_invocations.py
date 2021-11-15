@@ -8210,6 +8210,8 @@ op_db: List[OpInfo] = [
                     skips=(
                         DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD',
                                      device_type='cuda', dtypes=[torch.double, torch.cdouble]),
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_inplace_forward_mode_AD',
+                                     device_type='cuda', dtypes=[torch.double, torch.cdouble]),
                     ),),
     BinaryUfuncInfo('div',
                     aliases=('divide',),
@@ -8222,6 +8224,8 @@ op_db: List[OpInfo] = [
                     skips=(
                         DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD',
                                      device_type='cuda', dtypes=[torch.double, torch.cdouble]),
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_inplace_forward_mode_AD',
+                                     device_type='cuda', dtypes=[torch.double, torch.cdouble]),
                     ),),
     BinaryUfuncInfo('div',
                     aliases=('divide',),
@@ -8233,6 +8237,8 @@ op_db: List[OpInfo] = [
                     rhs_make_tensor_kwargs=dict(exclude_zero=True),
                     skips=(
                         DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD',
+                                     device_type='cuda', dtypes=[torch.double, torch.cdouble]),
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_inplace_forward_mode_AD',
                                      device_type='cuda', dtypes=[torch.double, torch.cdouble]),
                     ),),
     BinaryUfuncInfo('true_divide',
