@@ -90,6 +90,12 @@ class TORCH_API TensorMaker {
     return *this;
   }
 
+  TensorMaker& storage_offset(optional<int64_t> value) noexcept {
+    storage_offset_ = value;
+
+    return *this;
+  }
+
   TensorMaker& deleter(std::function<void(void*)> value) noexcept {
     deleter_ = std::move(value);
 
@@ -132,6 +138,7 @@ class TORCH_API TensorMaker {
   void* data_;
   IntArrayRef sizes_;
   optional<IntArrayRef> strides_{};
+  optional<int64_t> storage_offset_{};
   std::function<void(void*)> deleter_{};
   std::unique_ptr<void, ContextDeleter> ctx_{nullptr, detail::noopDelete};
   optional<Device> device_{};
