@@ -110,7 +110,7 @@ class _LRScheduler(object):
                 print('Adjusting learning rate'
                       ' of group {} to {:.4e}.'.format(group, lr))
             else:
-                print('Epoch {:5d}: adjusting learning rate'
+                print('Epoch {:5f}: adjusting learning rate'
                       ' of group {} to {:.4e}.'.format(epoch, group, lr))
 
 
@@ -931,7 +931,7 @@ class ReduceLROnPlateau(object):
             if old_lr - new_lr > self.eps:
                 param_group['lr'] = new_lr
                 if self.verbose:
-                    print('Epoch {:5d}: reducing learning rate'
+                    print('Epoch {:5f}: reducing learning rate'
                           ' of group {} to {:.4e}.'.format(epoch, i, new_lr))
 
     @property
