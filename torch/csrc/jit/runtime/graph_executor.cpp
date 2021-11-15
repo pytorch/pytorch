@@ -22,6 +22,7 @@
 #include <torch/csrc/jit/passes/loop_unrolling.h>
 #include <torch/csrc/jit/passes/lower_grad_of.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
+#include <torch/csrc/jit/passes/op_replacement.h>
 #include <torch/csrc/jit/passes/pass_manager.h>
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
@@ -647,6 +648,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
     auto opt_graph = graph->copy();
     GRAPH_DUMP("Optimizing the following function:", opt_graph);
     arg_spec_creator_.specializeTypes(*opt_graph, spec);
+    ReplaceOpsWithUpgraders(opt_graph);
 
     // Phase 0. Inline functions, then clean up any artifacts that the inliner
     //          left in that may inhibit optimization
