@@ -414,7 +414,6 @@ __all__ = [
     'TensorType',
     'TupleType',
     'FloatType',
-    'NumberType',
     'ComplexType',
     'IntType',
     'ListType',
