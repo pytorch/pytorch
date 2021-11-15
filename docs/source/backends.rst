@@ -83,20 +83,21 @@ torch.backends.linalg
 
     .. warning:: This flag is experimental and subject to change.
 
-    A flag that lets pytorch prefer one of the many backend implementations when calling linear algebra functions on GPU.
-    Currently the available options are:
+    When PyTorch runs a CUDA linear algebra operation it often uses the cuSOLVER or MAGMA libraries,
+    and if both are available it decides which to use with a heuristic.
+    This flag allows overriding those heuristics.
 
-    * `torch.linalg_default`
-    * `torch.linalg_cusolver`
-    * `torch.linalg_magma`
+    * If `torch.linalg_cusolver` is set then cuSOLVER will be used wherever possible.
+    * If `torch.linalg_magma` is set then MAGMA will be used wherever possible.
+    * If `torch.linalg_default` (the default) is set then heuristics will be used to pick between cuSOLVER and MAGMA if both are available.
 
     Usage:
 
     * Use as a global flag, e.g. `torch.backends.linalg.preferred = torch.linalg_cusolver`
     * Use the context manager, e.g. `with torch.backends.linalg.flags(preferred=torch.linalg_cusolver):`
 
-    Note: The usage of a backend is not guaranteed for all linear algebra operators even if that backend is set as preferred.
-    Explicitly setting a preferred backend may override existing pytorch linear algebra heuristics and achieve better performance.
+    Note: When a library is preferred other libraries may still be used if the preferred library doesn't implement the operation(s) called.
+    This flag may achieve better performance if PyTorch's heuristic library selection is incorrect for your application's inputs.
 
     Currently supported linalg operators:
 

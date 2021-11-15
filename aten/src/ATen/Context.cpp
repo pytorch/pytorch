@@ -156,8 +156,8 @@ void Context::setLinalgPreferredBackend(at::LinalgBackend b) {
   if (b != at::LinalgBackend::Default) {
     TORCH_WARN_ONCE(
       "torch.backends.linalg.preferred is an experimental feature. "
-      "If you see any error or regression when this flag is set, "
-      "you're encourged to file an issue on GitHub."
+      "If you see any error or regression when this flag is set "
+      "please file an issue on GitHub."
     );
   }
 }
