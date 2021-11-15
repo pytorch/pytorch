@@ -358,11 +358,11 @@ std::unique_ptr<SocketImpl> SocketListenOp::run() {
     if (tryListen(AF_INET)) {
       return std::move(socket_);
     }
-  } else {
-    C10D_INFO("The server socket will attempt to listen on an IPv4 or IPv6 address.");
-    if (tryListen(AF_UNSPEC)) {
-      return std::move(socket_);
-    }
+  }
+
+  C10D_INFO("The server socket will attempt to listen on an IPv4 or IPv6 address.");
+  if (tryListen(AF_UNSPEC)) {
+    return std::move(socket_);
   }
 
   constexpr auto* msg = "The server socket has failed to listen on any local network address.";
@@ -515,14 +515,14 @@ std::unique_ptr<SocketImpl> SocketConnectOp::run() {
     if (tryConnect(AF_INET)) {
       return std::move(socket_);
     }
-  } else {
-    C10D_INFO("The client socket will attempt to connect to an IPv4 or IPv6 address of ({}, {}).",
-              host_,
-              port_);
+  }
 
-    if (tryConnect(AF_UNSPEC)) {
-      return std::move(socket_);
-    }
+  C10D_INFO("The client socket will attempt to connect to an IPv4 or IPv6 address of ({}, {}).",
+            host_,
+            port_);
+
+  if (tryConnect(AF_UNSPEC)) {
+    return std::move(socket_);
   }
 
   std::string msg{};
