@@ -1642,7 +1642,7 @@ class TestFunctionalMapDataPipe(TestCase):
         input_dp = dp.map.SequenceWrapper(arr)
 
         # Functional Test: unbatches the top level by default
-        unbatch_dp = dp.map.UnBatcher(input_dp)
+        unbatch_dp: MapDataPipe = dp.map.UnBatcher(input_dp)
         self.assertEqual([[0, 1], [2, 3], [4, 5], [6, 7], [8, 9], [10, 11]], list(unbatch_dp))
 
         # Functional Test: unbatches all level up to specified
@@ -1652,6 +1652,40 @@ class TestFunctionalMapDataPipe(TestCase):
         # Functional Test: unbatches all levels when unbatch_level=-1
         unbatch_dp = input_dp.unbatch(unbatch_level=-1)
         self.assertEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], list(unbatch_dp))
+
+        # Functional Test: still works when the last batch has less elements than the rest
+        arr_last = [[[0, 1], [2, 3], [4, 5]], [[6, 7], [8, 9], [10]]]
+        input_dp_last = dp.map.SequenceWrapper(arr_last)
+        unbatch_dp_last = input_dp_last.unbatch(unbatch_level=-1)
+        self.assertEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], list(unbatch_dp_last))
+
+        # Functional Test: large nested input
+        arr2 = [[[[0, 0], [1, 100]], [[2, 200], [3, 300]], [[4, 400], [5, 500]]],
+                [[[6, 600], [7, 700]], [[8, 800], [9, 900]], [[10, 1000], [11, 1100]]]]
+        input_dp2 = dp.map.SequenceWrapper(arr2)
+        unbatch_dp2 = input_dp2.unbatch(unbatch_level=-1)
+        self.assertEqual([0, 0, 1, 100, 2, 200, 3, 300, 4, 400, 5, 500,
+                          6, 600, 7, 700, 8, 800, 9, 900, 10, 1000, 11, 1100], list(unbatch_dp2))
+        unbatch_dp2 = input_dp2.unbatch(unbatch_level=1)
+        self.assertEqual([[[0, 0], [1, 100]], [[2, 200], [3, 300]], [[4, 400], [5, 500]],
+                          [[6, 600], [7, 700]], [[8, 800], [9, 900]], [[10, 1000], [11, 1100]]], list(unbatch_dp2))
+
+        # Functional Test: throw error when index is out of bound
+        unbatch_dp = dp.map.UnBatcher(input_dp)
+        with self.assertRaisesRegex(IndexError, "out of bound"):
+            unbatch_dp[12]
+
+        # Functional Test: throw error when the input batch nesting isn't valid
+        arr_invalid = [[0, 1], 2, 3, 4]
+        input_dp_invalid = dp.map.SequenceWrapper(arr_invalid)
+        unbatch_dp_invalid = input_dp_invalid.unbatch(unbatch_level=1)
+        with self.assertRaisesRegex(TypeError, "invalid nesting"):
+            list(unbatch_dp_invalid)
+
+        # Functional Test: throw error when the unbatch level exceeds the input batch depth
+        unbatch_dp = dp.map.UnBatcher(input_dp, unbatch_level=5)
+        with self.assertRaisesRegex(RuntimeError, "exceeds input DataPipe's batch depth"):
+            list(unbatch_dp)
 
         # Reset Test:
         unbatch_dp = dp.map.UnBatcher(input_dp)

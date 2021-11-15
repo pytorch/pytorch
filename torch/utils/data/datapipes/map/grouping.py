@@ -1,7 +1,8 @@
-import warnings
+import operator
 
+from functools import reduce
 from torch.utils.data import MapDataPipe, functional_datapipe, DataChunk
-from typing import List, TypeVar
+from typing import List, TypeVar, Union, Optional
 
 
 T = TypeVar('T')
@@ -28,7 +29,7 @@ class UnBatcherMapDataPipe(MapDataPipe[T]):
         self.datapipe = datapipe
         self.deepest_level = self._get_deepest_level()
         self.unbatch_level = unbatch_level if unbatch_level != -1 else self.deepest_level
-        self.length = None
+        self.length: Optional[int] = None
 
     def _get_batch_sizes(self) -> List[int]:
         sizes = [len(self.datapipe)]
@@ -40,7 +41,7 @@ class UnBatcherMapDataPipe(MapDataPipe[T]):
 
     def _get_deepest_level(self) -> int:
         level = 0
-        curr = self.datapipe
+        curr: Union[MapDataPipe, DataChunk, List] = self.datapipe
         try:
             while isinstance(curr[0], list) or isinstance(curr[0], DataChunk):
                 curr = curr[0]
@@ -49,53 +50,31 @@ class UnBatcherMapDataPipe(MapDataPipe[T]):
             pass
         return level
 
-    def _unbatch_up_to_level(self, target, unbatch_level: int) -> T:
-        # print("UNBATCH UP TO LEVEL")
-        # print(f"target: {target}")
-        # print(f"unbatch_level: {unbatch_level}")
-        if unbatch_level == 0 or not (isinstance(target[0], list) or isinstance(target[0], DataChunk)):
-            return target
-        else:
-            res = []
-            for ele in target:
-                ele_res = self._unbatch_up_to_level(ele, unbatch_level - 1)
-                for child in ele_res:
-                    res.append(child)
-            # print(res)
-            return res
-
-    # This only unbatch a specific level
-    # def _unbatch_deeper_level(self, target, unbatch_level: int) -> T:
-    #     if unbatch_level == 1:
-    #         if isinstance(target[0], list) or isinstance(target[0], DataChunk):  # Unbatching is possible
-    #             res = []
-    #             for ele in target:
-    #                 for child in ele:
-    #                     res.append(child)
-    #             return res
-    #         else:  # Unbatching is impossible
-    #             warnings.warn("Unbatching is not possible because the elements are not batches.")
-    #             return target
-    #     else:
-    #         return [self._unbatch_deeper_level(ls, unbatch_level - 1) for ls in target]
-
     def __getitem__(self, index) -> T:
         batch_sizes: List[int] = self._get_batch_sizes()
-        # print(f"__getitem__({index})")
         if self.unbatch_level == 0:
-            return self.datapipe[index]
-        if self.unbatch_level == 1:
-            if len(batch_sizes) == 1:  # No unbatching is possible
-                warnings.warn("Unbatching is not possible because the elements are not batches.")
-                return self.datapipe[index]
-            else:  # Unbatching is possible
-                curr_batch_size = batch_sizes[1]
-                first_index, second_index = index // curr_batch_size, index % curr_batch_size
-                return self.datapipe[first_index][second_index]
-        else:  # We should go to a deeper level
-            # return self._unbatch_deeper_level(self.datapipe[index], self.unbatch_level - 1)
-            # print("Unbatch Level >= 2")
-            return self._unbatch_up_to_level(self.datapipe, self.unbatch_level)[index]
+            return self.datapipe[index]  # type: ignore[return-value]
+        result_index_map = []
+        for i in range(self.unbatch_level):
+            relevant_batch_sizes = batch_sizes[i + 1:self.unbatch_level + 1]
+            if len(relevant_batch_sizes) == 0:
+                raise RuntimeError("Unbatching is not possible because the specified unbatch_level "
+                                   f"{self.unbatch_level} exceeds input DataPipe's batch depth.")
+            inner_batch_size = reduce(operator.mul, relevant_batch_sizes, 1)
+            result_index_map.append(index // inner_batch_size)
+            index = index % inner_batch_size
+        result_index_map.append(index)
+        res = self.datapipe
+        for idx in result_index_map:
+            try:
+                res = res[idx]  # type: ignore[assignment]
+            except IndexError:
+                raise IndexError(f"Index {index} is not valid. This may be caused by index out of bound"
+                                 "or invalid nesting within the input DataPipe.")
+            except TypeError:
+                raise TypeError("Unable to unbatch this input DataPipe."
+                                "This is likely caused by invalid nesting within the input DataPipe.")
+        return res  # type: ignore[return-value]
 
     def __len__(self) -> int:
         if self.length is not None:

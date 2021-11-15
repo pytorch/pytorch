@@ -48,7 +48,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
     dtypesIfCUDA, precisionOverride, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, onlyCPU, \
     skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, skipCUDAIfRocmVersionLessThan, skipCUDAIfNotMiopenSuggestNHWC, \
     onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, skipMeta, get_all_device_types, \
-    disableMkldnn, skipCPUIfNoMkldnn, expectedFailure, disablecuDNN, skipCUDAIfMiopen, skipCUDAIfNoMiopen
+    disableMkldnn, skipCPUIfNoMkldnn, disablecuDNN, skipCUDAIfMiopen, skipCUDAIfNoMiopen
 from torch.nn import MultiheadAttention
 
 from hypothesis import given
@@ -13404,17 +13404,16 @@ class TestNNDeviceType(NNTestCase):
         subtest(((2, 6, 7, 8, 9), False, False, 6, torch.strided, torch._C._ConvBackend.MiopenDepthwise),
                 decorators=[onlyCUDA, skipCUDAIfNoMiopen], name='miopen_depthwise3d'),
         # === mkldnn ===
-        # 1D conv is not supported for mkldnn tensors. See https://github.com/pytorch/pytorch/issues/68034
         subtest(((2, 6, 7), False, False, 3, torch._mkldnn, torch._C._ConvBackend.Mkldnn),
-                decorators=[onlyCPU, skipCPUIfNoMkldnn, expectedFailure('cpu')], name='mkldnn1d'),
+                decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn1d'),
         subtest(((2, 6, 7), True, False, 3, torch._mkldnn, torch._C._ConvBackend.Mkldnn),
-                decorators=[onlyCPU, skipCPUIfNoMkldnn, expectedFailure('cpu')], name='mkldnn1d_transposed'),
+                decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn1d_transposed'),
         subtest(((0, 6, 7), False, False, 3, torch._mkldnn, torch._C._ConvBackend.MkldnnEmpty),
-                decorators=[onlyCPU, skipCPUIfNoMkldnn, expectedFailure('cpu')], name='mkldnn_empty_batch1d'),
+                decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn_empty_batch1d'),
         subtest(((2, 0, 7), False, False, 3, torch._mkldnn, torch._C._ConvBackend.MkldnnEmpty),
-                decorators=[onlyCPU, skipCPUIfNoMkldnn, expectedFailure('cpu')], name='mkldnn_empty_channel1d'),
+                decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn_empty_channel1d'),
         subtest(((0, 0, 7), False, False, 3, torch._mkldnn, torch._C._ConvBackend.MkldnnEmpty),
-                decorators=[onlyCPU, skipCPUIfNoMkldnn, expectedFailure('cpu')], name='mkldnn_empty_batch_channel1d'),
+                decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn_empty_batch_channel1d'),
         subtest(((2, 6, 7, 8), False, False, 3, torch._mkldnn, torch._C._ConvBackend.Mkldnn),
                 decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn2d'),
         subtest(((2, 6, 7, 8), True, False, 3, torch._mkldnn, torch._C._ConvBackend.Mkldnn),
