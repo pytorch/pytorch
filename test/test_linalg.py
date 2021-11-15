@@ -5647,7 +5647,7 @@ class TestLinalg(TestCase):
         def run_test(A, pivot, singular, fn):
             k = min(A.shape[-2:])
             batch = A.shape[:-2]
-            check_errors = fn == torch.linalg.lu_factor
+            check_errors = (fn == torch.linalg.lu_factor)
             if singular and check_errors:
                 # It may or may not throw as the LU decomposition without pivoting
                 # may still succeed for singular matrices
