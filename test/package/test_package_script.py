@@ -107,6 +107,7 @@ class TestPackageScript(PackageTestCase):
 
         buffer = BytesIO()
         with PackageExporter(buffer) as pe:
+            pe.extern("__future__")
             pe.save_module(fake.__name__)
         buffer.seek(0)
 
@@ -142,8 +143,6 @@ class TestPackageScript(PackageTestCase):
         # Make sure the scripted object can be serialized without error.
         buffer2 = scripted_obj_loaded.save_to_buffer()
         torch.jit.load(BytesIO(buffer2))
-
-
 
     def test_different_package_script_class(self):
         """Test a case where the script class defined in the package is
