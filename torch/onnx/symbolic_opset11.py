@@ -9,6 +9,7 @@ import warnings
 
 from torch.onnx.symbolic_helper import parse_args, _unimplemented, _is_tensor_list, ScalarType
 from torch.onnx.symbolic_opset9 import expand, unused, mul
+from torch.onnx.symbolic_opset9 import linalg_vector_norm as lvn
 from torch.nn.modules.utils import _single, _pair, _triple
 from torch.onnx.utils import _add_block, _add_input_to_block, _add_output_to_block
 
@@ -821,7 +822,6 @@ def linalg_vector_norm(g, self, ord, dim, keepdim, dtype):
         cond_op = g.op("Cast", cond_op, to_i=sym_help.cast_pytorch_to_onnx["Long"])
         return sym_help._reducesum_helper(g, cond_op, axes_i=dim, keepdims_i=keepdim)
     else:
-        from torch.onnx.symbolic_opset9 import linalg_vector_norm as lvn
         return lvn(g, self, ord, dim, keepdim, dtype)
 
 @parse_args("v", "v", "v", "i", "i", "i", "v", "i", "i")

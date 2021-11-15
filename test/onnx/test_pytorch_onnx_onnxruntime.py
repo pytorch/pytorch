@@ -6927,6 +6927,10 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(2, 3, 5, 5)
         self.run_test(LinalgNoDimNoOrdModel(), x)
+        y = torch.randn(2, 3)
+        self.run_test(LinalgNoDimNoOrdModel(), y)
+        z = torch.randn(2)
+        self.run_test(LinalgNoDimNoOrdModel(), z)
 
         class LinalgNoDim1DModel(torch.nn.Module):
             def __init__(self, ord_val):
@@ -6970,118 +6974,42 @@ class TestONNXRuntime(unittest.TestCase):
                 return torch.linalg.vector_norm(x, ord=self.ord)
 
         x = torch.randn(2, 3, 5, 5)
-        self.run_test(LinalgVectorNormModel(2), x)
-        self.run_test(LinalgVectorNormModel(float('inf')), x)
-        self.run_test(LinalgVectorNormModel(-float('inf')), x)
-        self.run_test(LinalgVectorNormModel(-4), x)
-        self.run_test(LinalgVectorNormModel(1.5), x)
+        self.run_test(LinalgVectorNormModel(0), x)
 
     def test_linalg_vector_norm(self):
         class LinalgVectorNormModel(torch.nn.Module):
-            def __init__(self, ord_val):
+            def __init__(self, ord_val, dim_info):
                 super(LinalgVectorNormModel, self).__init__()
                 self.ord = ord_val
+                self.dim, self.keepdim = dim_info
 
             def forward(self, x):
-                return torch.linalg.vector_norm(x, ord=self.ord)
+                return torch.linalg.vector_norm(x, ord=self.ord, dim=self.dim, keepdim=self.keepdim)
 
         x = torch.randn(2, 3, 5, 5)
-        self.run_test(LinalgVectorNormModel(2), x)
-        self.run_test(LinalgVectorNormModel(float('inf')), x)
-        self.run_test(LinalgVectorNormModel(-float('inf')), x)
-        self.run_test(LinalgVectorNormModel(-4), x)
-        self.run_test(LinalgVectorNormModel(1.5), x)
-
-        class LinalgVectorSingleDimModel(torch.nn.Module):
-            def __init__(self, ord_val):
-                super(LinalgVectorSingleDimModel, self).__init__()
-                self.ord = ord_val
-
-            def forward(self, x):
-                return torch.linalg.vector_norm(x, ord=self.ord, dim=1)
-
-        x = torch.randn(2, 3, 5, 5)
-        self.run_test(LinalgVectorSingleDimModel(2), x)
-        self.run_test(LinalgVectorSingleDimModel(float('inf')), x)
-        self.run_test(LinalgVectorSingleDimModel(-float('inf')), x)
-        self.run_test(LinalgVectorSingleDimModel(-4), x)
-        self.run_test(LinalgVectorSingleDimModel(1.5), x)
-
-        class LinalgVectorMultiDimModel(torch.nn.Module):
-            def __init__(self, ord_val):
-                super(LinalgVectorMultiDimModel, self).__init__()
-                self.ord = ord_val
-
-            def forward(self, x):
-                return torch.linalg.vector_norm(x, ord=self.ord, dim=(1, 2))
-
-        x = torch.randn(2, 3, 5, 5)
-        self.run_test(LinalgVectorMultiDimModel(2), x)
-        self.run_test(LinalgVectorMultiDimModel(float('inf')), x)
-        self.run_test(LinalgVectorMultiDimModel(-float('inf')), x)
-        self.run_test(LinalgVectorMultiDimModel(-4), x)
-        self.run_test(LinalgVectorMultiDimModel(1.5), x)
-
-        class LinalgVectorKeepDimModel(torch.nn.Module):
-            def __init__(self, ord_val):
-                super(LinalgVectorKeepDimModel, self).__init__()
-                self.ord = ord_val
-
-            def forward(self, x):
-                return torch.linalg.vector_norm(x, ord=self.ord, dim=(1, 2), keepdim=True)
-
-        x = torch.randn(2, 3, 5, 5)
-        self.run_test(LinalgVectorKeepDimModel(2), x)
-        self.run_test(LinalgVectorKeepDimModel(float('inf')), x)
-        self.run_test(LinalgVectorKeepDimModel(-float('inf')), x)
-        self.run_test(LinalgVectorKeepDimModel(-4), x)
-        self.run_test(LinalgVectorKeepDimModel(1.5), x)
+        ord_options = [2, float('inf'), -float('inf'), -4, 1.5]
+        dim_options = [(None, False), (1, False), ((1, 2), False), ((1, 2), True)]
+        for ord_val in ord_options:
+            for dim_info in dim_options:
+                self.run_test(LinalgVectorNormModel(ord_val, dim_info), x)
 
     def test_linalg_matrix_norm(self):
         class LinalgMatrixNormModel(torch.nn.Module):
-            def __init__(self, ord_val):
+            def __init__(self, ord_val, dim_val=(-2, -1), keepdim_val=False):
                 super(LinalgMatrixNormModel, self).__init__()
                 self.ord = ord_val
+                self.dim = dim_val
+                self.keepdim = keepdim_val
 
             def forward(self, x):
-                return torch.linalg.matrix_norm(x, ord=self.ord)
+                return torch.linalg.matrix_norm(x, ord=self.ord, dim=self.dim, keepdim=self.keepdim)
 
         x = torch.randn(2, 3, 5, 5)
-        self.run_test(LinalgMatrixNormModel('fro'), x)
-        self.run_test(LinalgMatrixNormModel(float('inf')), x)
-        self.run_test(LinalgMatrixNormModel(-float('inf')), x)
-        self.run_test(LinalgMatrixNormModel(1), x)
-        self.run_test(LinalgMatrixNormModel(-1), x)
-
-        class LinalgMatrixDimModel(torch.nn.Module):
-            def __init__(self, ord_val):
-                super(LinalgMatrixDimModel, self).__init__()
-                self.ord = ord_val
-
-            def forward(self, x):
-                return torch.linalg.matrix_norm(x, ord=self.ord, dim=(0, 2))
-
-        x = torch.randn(2, 3, 5, 5)
-        self.run_test(LinalgMatrixDimModel('fro'), x)
-        self.run_test(LinalgMatrixDimModel(float('inf')), x)
-        self.run_test(LinalgMatrixDimModel(-float('inf')), x)
-        self.run_test(LinalgMatrixDimModel(1), x)
-        self.run_test(LinalgMatrixDimModel(-1), x)
-
-        class LinalgMatrixKeepDimModel(torch.nn.Module):
-            def __init__(self, ord_val):
-                super(LinalgMatrixKeepDimModel, self).__init__()
-                self.ord = ord_val
-
-            def forward(self, x):
-                return torch.linalg.matrix_norm(x, ord=self.ord, dim=(0, 2), keepdim=True)
-
-        x = torch.randn(2, 3, 5, 5)
-        self.run_test(LinalgMatrixKeepDimModel('fro'), x)
-        self.run_test(LinalgMatrixKeepDimModel(float('inf')), x)
-        self.run_test(LinalgMatrixKeepDimModel(-float('inf')), x)
-        self.run_test(LinalgMatrixKeepDimModel(1), x)
-        self.run_test(LinalgMatrixKeepDimModel(-1), x)
+        ord_options = ['fro', float('inf'), -float('inf'), 1, -1]
+        for ord_val in ord_options:
+            self.run_test(LinalgMatrixNormModel(ord_val), x)
+            self.run_test(LinalgMatrixNormModel(ord_val, (0, 2)), x)
+            self.run_test(LinalgMatrixNormModel(ord_val, (0, 2), True), x)
 
     # This test checks output scalar type in the ONNX graph should not be null
     # https://github.com/pytorch/pytorch/issues/28607
