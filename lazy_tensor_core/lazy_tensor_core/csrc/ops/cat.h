@@ -10,8 +10,8 @@ namespace ops {
 
 class Cat : public TsNode {
  public:
-  Cat(std::vector<torch::lazy::Value> values, int64_t dim, const std::vector<at::ScalarType>& out_dtypes,
-      const std::vector<std::vector<int64_t>>& out_shapes);
+  Cat(std::vector<torch::lazy::Value> values, int64_t dim,
+      std::vector<torch::lazy::Shape>&& shapes);
 
   std::string ToString() const override;
 
@@ -44,8 +44,6 @@ class Cat : public TsNode {
 
  private:
   int64_t dim_;
-  std::vector<at::ScalarType> at_dtypes_;
-  std::vector<std::vector<int64_t>> at_shapes_;
 };
 
 }  // namespace ops

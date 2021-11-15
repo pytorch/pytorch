@@ -33,24 +33,6 @@ std::vector<compiler::BackendDataPtr> CreateTensorsData(
     const std::vector<at::Tensor>& tensors,
     const std::vector<torch::lazy::BackendDevice>& devices);
 
-template<typename... TupleType>
-std::vector<std::vector<int64_t>> CreateComputationShapeFromMetaTensors(const std::tuple<TupleType...>& tensors) {
-  std::vector<std::vector<int64_t>> shape;
-  c10::guts::apply([&shape] (const auto&... tensors) {
-      ((shape.push_back(tensors.sizes().vec())), ...);
-  }, tensors);
-  return shape;
-}
-
-template<typename... TupleType>
-std::vector<at::ScalarType> CreateDTypeFromMetaTensors(const std::tuple<TupleType...>& tensors) {
-  std::vector<at::ScalarType> dtypes;
-  c10::guts::apply([&dtypes] (const auto&... tensors) {
-      ((dtypes.push_back(tensors.scalar_type())), ...);
-  }, tensors);
-  return dtypes;
-}
-
 // Routing values to device data maximizes the changes for compilation cache
 // hits, but it can prevent the compiler to perform optimizations. So tensor
 // values which are within a given set, are routed to constant scalars if this

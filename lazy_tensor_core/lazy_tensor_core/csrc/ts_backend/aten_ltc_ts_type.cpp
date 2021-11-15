@@ -23,10 +23,8 @@ namespace ir {
 namespace ops {
 // TODO(whc) forward declare these since they aren't defined in the autogenned
 // header; this will be solved when moving cat() to codegen
-std::vector<std::vector<int64_t>> compute_shape_cat(at::TensorList tensors,
+std::vector<torch::lazy::Shape> compute_shape_cat(at::TensorList tensors,
                                                     int64_t dim);
-std::vector<c10::ScalarType> compute_dtype_cat(at::TensorList tensors,
-                                               int64_t dim);
 }  // namespace ops
 }  // namespace ir
 
@@ -170,12 +168,10 @@ at::Tensor LazyNativeFunctions::cat(at::TensorList tensors, int64_t dim) {
     values.emplace_back(tensor.GetIrValue());
   }
 
-  auto out_shapes =
+  auto shapes =
       torch_lazy_tensors::ir::ops::compute_shape_cat(tensors, dim);
-  auto out_dtypes =
-      torch_lazy_tensors::ir::ops::compute_dtype_cat(tensors, dim);
   auto node =
-      torch::lazy::MakeNode<ir::ops::Cat>(values, dim, out_dtypes, out_shapes);
+      torch::lazy::MakeNode<ir::ops::Cat>(values, dim, std::move(shapes));
   auto result = CreateAtenFromLtcTensor(
       lazy_tensors[0].CreateFrom(torch::lazy::Value(node, 0)));
   return result;
