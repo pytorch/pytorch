@@ -9196,11 +9196,14 @@ class TestNN(NNTestCase):
         gradgradcheck(func, [v])
 
     def test_PReLU_backward_requires_grad_false(self):
-        m = nn.PReLU()
-        x = torch.randn(2, 3, 4, 5, requires_grad=False)
-        y = m(x)
-        y.mean().backward()
-        self.assertEqual(x.grad, None)
+        devices = ['cpu']
+        devices += ['cuda'] if TEST_CUDA else []
+        for d in devices:
+            m = nn.PReLU().to(d)
+            x = torch.randn(2, 3, 4, 5, device=d, requires_grad=False)
+            y = m(x)
+            y.mean().backward()
+            self.assertEqual(x.grad, None)
 
     def test_bce_loss_always_nonnegative(self):
         target = torch.ones(5)
