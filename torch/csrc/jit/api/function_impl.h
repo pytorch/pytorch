@@ -101,9 +101,7 @@ struct TORCH_API GraphFunction : public Function {
   }
 
   void clear_optimized_graphs() {
-    for (auto& graph : optimized_graphs_) {
-      graph = c10::nullopt;
-    }
+    optimized_graphs_.fill(c10::nullopt);
   }
 
  private:
