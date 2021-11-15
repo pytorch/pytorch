@@ -5,13 +5,13 @@ import warnings
 import unittest
 import random
 import itertools
-from torch.testing import get_all_complex_dtypes, get_all_fp_dtypes, make_tensor
+from torch.testing import get_all_complex_dtypes, get_all_fp_dtypes, floating_and_complex_types, make_tensor
 from torch.testing._internal.common_cuda import SM53OrLater, SM80OrLater, TEST_CUSPARSE_GENERIC
 from torch.testing._internal.common_utils import \
     (IS_MACOS, IS_WINDOWS, TEST_WITH_ROCM, TestCase, run_tests, load_tests, coalescedonoff)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, dtypesIfCUDA, ops, onlyCPU, onlyCUDA, skipCUDAIfNoCusparseGeneric,
-     precisionOverride, skipMeta, skipCUDAIf)
+     precisionOverride, skipMeta, skipCUDAIf, skipCPUIfNoMklSparse)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, )
 from torch.testing._internal.common_cuda import _get_torch_cuda_version
@@ -582,8 +582,9 @@ class TestSparseCSR(TestCase):
                 with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
                     torch.addmm(s, csr, m2)
 
+    @skipCPUIfNoMklSparse
     @skipCUDAIfNoCusparseGeneric
-    @dtypes(*torch.testing.floating_types())
+    @dtypes(*floating_and_complex_types())
     @dtypesIfCUDA(*get_all_complex_dtypes(),
                   *get_all_fp_dtypes(include_half=SM53OrLater, include_bfloat16=SM80OrLater))
     def test_csr_matvec(self, device, dtype):
@@ -598,11 +599,7 @@ class TestSparseCSR(TestCase):
             self.assertEqual(res, expected)
 
             bad_vec = torch.randn(side + 10, dtype=dtype, device=device)
-            err_msg = "mv: expected"
-            # CUDA path now uses generic meta/structured implementation
-            # TODO: move CPU path to not use `mv_sparse` function
-            if self.device_type == 'cuda':
-                err_msg = "size mismatch, got"
+            err_msg = "size mismatch, got"
             with self.assertRaisesRegex(RuntimeError, err_msg):
                 csr.matmul(bad_vec)
 
@@ -852,7 +849,7 @@ class TestSparseCSR(TestCase):
         _test_spadd_shape(10, [100, 1])
         _test_spadd_shape(10, [1, 100])
 
-    @onlyCUDA
+    @skipCPUIfNoMklSparse
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_sparse_add(self, device, dtype):
         def run_test(m, n, index_dtype):
@@ -883,7 +880,6 @@ class TestSparseCSR(TestCase):
             for m, n in itertools.product([3, 5], [3, 5]):
                 run_test(m, n, index_dtype)
 
-    @onlyCUDA
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_sparse_add_errors(self, device, dtype):
         def run_test(index_type):
