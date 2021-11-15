@@ -41,7 +41,6 @@ struct topo_cmp_node {
   }
 };
 
-
 class SubgraphSlicer {
  public:
   SubgraphSlicer(
@@ -138,7 +137,6 @@ class SubgraphSlicer {
   }
 
  private:
-
   void unfuseAliasedOutputs(Block* b) {
     bool any_changed = true;
     while (any_changed) {
@@ -146,12 +144,16 @@ class SubgraphSlicer {
       // we walk in the reverse order, so we can skip
       // nodes that might get unfused after the current
       // prim::DifferentiableGraph
-      for (auto n: b->nodes().reverse()) {
+      for (auto n : b->nodes().reverse()) {
         if (n->kind() == prim::DifferentiableGraph) {
-              // aliased outputs in DifferentiableGraphs must be unfused
-              // since autodiff doesn't know how to handle them correctly
-              any_changed = any_changed || unfuseAliasedOutputs(n);
-              GRAPH_DEBUG("any_changed on ", any_changed, " ", n->g(attr::Subgraph)->toString(false));
+          // aliased outputs in DifferentiableGraphs must be unfused
+          // since autodiff doesn't know how to handle them correctly
+          any_changed = any_changed || unfuseAliasedOutputs(n);
+          GRAPH_DEBUG(
+              "any_changed on ",
+              any_changed,
+              " ",
+              n->g(attr::Subgraph)->toString(false));
         }
       }
     }
@@ -164,7 +166,6 @@ class SubgraphSlicer {
   }
 
   bool unfuseAliasedOutputs(Node* subgraphNode) {
-
     GRAPH_DEBUG("unfuseAliasedOutputs on ", getHeader(subgraphNode));
     if (subgraphNode->outputs().size() < 2) {
       return false;
@@ -179,7 +180,13 @@ class SubgraphSlicer {
 
     for (auto i : c10::irange(sets.size())) {
       if (sets[i].size() <= 1) {
-        GRAPH_DEBUG("Set ", i, " with leader ", (*(sets[i].begin()))->debugName(), " size = ", sets[i].size());
+        GRAPH_DEBUG(
+            "Set ",
+            i,
+            " with leader ",
+            (*(sets[i].begin()))->debugName(),
+            " size = ",
+            sets[i].size());
         continue;
       }
 
@@ -190,7 +197,11 @@ class SubgraphSlicer {
       // so we have to re-run this function until there are no more changes
       auto it = ++sets[i].begin();
       while (it != sets[i].end()) {
-        GRAPH_DEBUG("root aliased value ", (*it)->debugName(), " node ", *(*it)->node());
+        GRAPH_DEBUG(
+            "root aliased value ",
+            (*it)->debugName(),
+            " node ",
+            *(*it)->node());
         collectNodesToUnfuse((*it)->node(), nodes);
         it++;
       }
@@ -209,7 +220,7 @@ class SubgraphSlicer {
   }
 
   void collectNodesToUnfuse(Node* start, std::set<Node*, topo_cmp_node>& s) {
-    if(start->kind() == prim::Return || start->kind() == prim::Param) {
+    if (start->kind() == prim::Return || start->kind() == prim::Param) {
       GRAPH_DEBUG("reached the param or return node", getHeader(start));
       return;
     }
@@ -235,10 +246,9 @@ class SubgraphSlicer {
     GRAPH_DEBUG("unfuseNode node ", getHeader(n));
     auto subgraph = n->owningGraph();
 
-    std::set<Value*> node_outputs(n->outputs().begin(), n->outputs().end()); 
+    std::set<Value*> node_outputs(n->outputs().begin(), n->outputs().end());
     std::set<size_t> output_indices;
     std::set<Value*> node_inputs(n->inputs().begin(), n->inputs().end());
-
 
     std::unordered_map<Value*, Value*> local_map;
     auto env = [&](Value* v) {
@@ -246,7 +256,10 @@ class SubgraphSlicer {
       if (it != local_map.end()) {
         return it->second;
       }
-      TORCH_INTERNAL_ASSERT(false, "all inputs should've been mapped. Couldn't map %", v->debugName());
+      TORCH_INTERNAL_ASSERT(
+          false,
+          "all inputs should've been mapped. Couldn't map %",
+          v->debugName());
       return v;
     };
 
@@ -254,13 +267,20 @@ class SubgraphSlicer {
       if (node_outputs.count(subgraph->outputs().at(i)) != 0) {
         output_indices.insert(i);
       }
-      
+
       if (node_inputs.count(subgraph->outputs().at(i)) != 0) {
-        GRAPH_DEBUG("output %", subgraph->outputs().at(i)->debugName(), " is already subgraph's output");
-        GRAPH_DEBUG("Mapping %", subgraph->outputs().at(i)->debugName(), " to %", subgraphNode->outputs().at(i)->debugName());
+        GRAPH_DEBUG(
+            "output %",
+            subgraph->outputs().at(i)->debugName(),
+            " is already subgraph's output");
+        GRAPH_DEBUG(
+            "Mapping %",
+            subgraph->outputs().at(i)->debugName(),
+            " to %",
+            subgraphNode->outputs().at(i)->debugName());
         local_map[subgraph->outputs().at(i)] = subgraphNode->outputs().at(i);
         node_inputs.erase(subgraph->outputs().at(i));
-      } 
+      }
     }
 
     WithInsertPoint wip(subgraphNode->next());
@@ -268,7 +288,6 @@ class SubgraphSlicer {
     // these node inputs need to be added to subgraph's outputs
     // put them in vmap
     for (auto ni : node_inputs) {
-
       if (local_map.count(ni) != 0) {
         // this could happen if `n` uses two or more outputs
         // of a constant node and we already cloned the constant
@@ -281,14 +300,17 @@ class SubgraphSlicer {
         auto copy = subgraphNode->owningGraph()->createClone(ni->node(), env);
         subgraphNode->owningGraph()->insertNode(copy);
         // in case we have a multi-output const, map the rest of the outputs
-        // so when we get to clone `n`, `n`'s clone will use the outputs of this 
+        // so when we get to clone `n`, `n`'s clone will use the outputs of this
         // constant clone
         for (auto i : c10::irange(n->outputs().size())) {
-          GRAPH_DEBUG("Mapping %", ni->node()->output(i)->debugName(), " to %", copy->output(i)->debugName());
+          GRAPH_DEBUG(
+              "Mapping %",
+              ni->node()->output(i)->debugName(),
+              " to %",
+              copy->output(i)->debugName());
           local_map[ni->node()->output(i)] = copy->output(i);
         }
-      }
-      else {
+      } else {
         subgraph->registerOutput(ni);
         sno = subgraphNode->addOutput();
         sno->setType(ni->type());
@@ -305,7 +327,7 @@ class SubgraphSlicer {
       auto no = copy->outputs()[i];
       no->copyMetadata(oo);
       GRAPH_DEBUG("Mapping %", oo->debugName(), " to %", no->debugName());
-      local_map[oo] = no;    
+      local_map[oo] = no;
     }
 
     subgraphNode->owningGraph()->insertNode(copy);
@@ -320,7 +342,8 @@ class SubgraphSlicer {
     n->destroy();
   }
 
-  std::vector<std::set<Value*, topo_cmp_value>> buildAliasedSets(std::shared_ptr<Graph> subgraph) {
+  std::vector<std::set<Value*, topo_cmp_value>> buildAliasedSets(
+      std::shared_ptr<Graph> subgraph) {
     auto outputs = subgraph->outputs();
     AliasDb alias_db(subgraph);
     TORCH_INTERNAL_ASSERT(outputs.size() > 1);
@@ -329,7 +352,13 @@ class SubgraphSlicer {
       auto grouped = false;
       for (auto& s : res) {
         auto os = *s.begin();
-        GRAPH_DEBUG("comparing %", o->debugName(), " with %", os->debugName(), " result ", (alias_db.mayContainAlias(os, o)));
+        GRAPH_DEBUG(
+            "comparing %",
+            o->debugName(),
+            " with %",
+            os->debugName(),
+            " result ",
+            (alias_db.mayContainAlias(os, o)));
         if (alias_db.mayContainAlias(os, o)) {
           s.insert(o);
           GRAPH_DEBUG("Grouping %", o->debugName(), " with %", os->debugName());
