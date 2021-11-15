@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Owner(s): ["module: unknown"]
+
 from torch import nn
 from torch.ao.sparsity import WeightNormSparsifier
 from torch.ao.sparsity import BaseScheduler, LambdaSL

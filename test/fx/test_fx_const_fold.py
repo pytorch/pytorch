@@ -1,14 +1,14 @@
 # Owner(s): ["oncall: fx"]
 
 import operator
-import unittest
 
 import torch
 import torch.fx
 from torch.fx.experimental import const_fold
+from torch.testing._internal.common_utils import TestCase
 
 
-class TestConstFold(unittest.TestCase):
+class TestConstFold(TestCase):
     def _verify_const_fold_mod(self, mod_folded: const_fold.FoldedGraphModule):
         self.assertTrue(mod_folded.const_subgraph_module is not None)
 

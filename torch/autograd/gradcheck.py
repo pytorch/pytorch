@@ -965,17 +965,22 @@ def _real_and_imag_output(fn):
 
     return apply_to_c_outs(fn, torch.real), apply_to_c_outs(fn, torch.imag)
 
-def _real_and_imag_input(fn, complex_inp_indices):
-    # returns new functions that take real inputs instead of complex inputs and compute fn(x + 0 * 1j)
-    # and f(x * 1j).
+def _real_and_imag_input(fn, complex_inp_indices, tupled_inputs):
+    # returns new functions that take real inputs instead of complex inputs as
+    # (x, y) -> fn(x + y * 1j). And it computes: inp -> fn(inp + y * 1j) and inp -> fn(x + inp * 1j).
+    # In each case, the other part is considered constant.
+    # We do not use 0 for the constant here to make sure we always call the user function with a valid input.
     def apply_to_c_inps(fn, fn_to_apply):
         def wrapped_fn(*inputs):
             new_inputs = list(inputs)
             for should_be_complex in complex_inp_indices:
-                new_inputs[should_be_complex] = fn_to_apply(new_inputs[should_be_complex])
+                new_inputs[should_be_complex] = fn_to_apply(new_inputs[should_be_complex],
+                                                            tupled_inputs[should_be_complex])
             return _as_tuple(fn(*new_inputs))
         return wrapped_fn
-    return apply_to_c_inps(fn, lambda x: x + 0 * 1j), apply_to_c_inps(fn, lambda x: x * 1j)
+    real_fn = apply_to_c_inps(fn, lambda inp, orig: inp + orig.imag * 1j)
+    imag_fn = apply_to_c_inps(fn, lambda inp, orig: orig.real + inp * 1j)
+    return real_fn, imag_fn
 
 
 def _gradcheck_real_imag(gradcheck_fn, func, func_out, tupled_inputs, outputs, eps, rtol,
@@ -1003,7 +1008,7 @@ def _gradcheck_real_imag(gradcheck_fn, func, func_out, tupled_inputs, outputs, e
     if check_forward_ad:
         complex_inp_indices = [i for i, inp in enumerate(tupled_inputs) if is_tensor_like(inp) and inp.is_complex()]
         if complex_inp_indices:
-            real_fn, imag_fn = _real_and_imag_input(func, complex_inp_indices)
+            real_fn, imag_fn = _real_and_imag_input(func, complex_inp_indices, tupled_inputs)
 
             imag_inputs = [inp.imag if is_tensor_like(inp) and inp.is_complex() else inp for inp in tupled_inputs]
             imag_func_out = imag_fn(*imag_inputs)
