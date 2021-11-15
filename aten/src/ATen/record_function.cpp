@@ -495,6 +495,8 @@ void enableRecordFunction(bool enable) {
 }
 
 RecordFunction::RecordFunction(RecordScope scope, bool pre_sampled) {
+  // pre_sampled is only set by shouldRunRecordFunction, which already
+  // checked if we're enabled if it was called.
   if (pre_sampled) {
     manager().init(*this, scope, pre_sampled);
   } else {
