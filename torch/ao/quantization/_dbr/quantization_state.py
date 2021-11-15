@@ -157,7 +157,9 @@ class AutoQuantizationState(torch.nn.Module):
         """
         Resets the internal op counter to start a new top level module call
         """
-        self.idx = 0
+        # torch.nn.Module __setattr__ has overhead,
+        # this code is the explicit fast path for `self.idx = 0`
+        object.__setattr__(self, 'idx', 0)
 
         if self.log_op_outputs:
             self.op_outputs.append([])
