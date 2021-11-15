@@ -10,7 +10,6 @@ import json
 from dataclasses import dataclass
 import hashlib
 
-from tools.codegen.api.unboxing import convert_arguments
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.model import (Argument, DispatchKey, FunctionSchema,
                                  Location, NativeFunction,
@@ -463,8 +462,8 @@ class ComputeStaticUnboxingWrapper:
             # for each C++ argument, generate the conversion code
             code_connector = "\n\t\t"
             code_list = []
-            for k in sig.arguments():
-                code_list.extend(arguments[k.name].code)
+            for arg in arguments:
+                code_list.extend(arguments[arg].code)
             code = code_connector.join(code_list)
 
             # function call and push back to stack
