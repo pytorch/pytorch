@@ -2,11 +2,12 @@ import os
 import re
 import site
 import sys
+import typing
 
 import torch
 
 
-def _prefix_regex() -> str:
+def _prefix_regex() -> typing.List[str]:
     raw_paths = (
         site.getsitepackages() +
         sys.path +
@@ -17,4 +18,4 @@ def _prefix_regex() -> str:
 
     path_prefixes = sorted({os.path.abspath(i) for i in raw_paths})
     assert all(isinstance(i, str) for i in path_prefixes)
-    return f"^({'|'.join([re.escape(i + os.sep) for i in path_prefixes])})"
+    return [i + os.sep for i in path_prefixes]

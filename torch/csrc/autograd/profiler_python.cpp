@@ -3,13 +3,6 @@
 #include <iostream>
 #include <limits>
 #include <memory>
-
-#if CAFFE2_HAVE_RE2
-#include <re2/re2.h>
-#else
-#include <regex>
-#endif
-
 #include <string>
 #include <utility>
 #include <vector>
@@ -303,7 +296,7 @@ class PythonTracer final {
 
     bool active_;
     PyObject* module_call_code_;
-    std::string path_prefixes_;
+    std::vector<std::string> path_prefixes_;
     std::vector<TraceContext*> trace_contexts_;
 
     std::vector<RawEvent> events_;
@@ -320,7 +313,7 @@ PythonTracer& PythonTracer::singleton() {
 
 PythonTracer::PythonTracer() : active_(false) {
     path_prefixes_ = py::module::import("torch.profiler.python_tracer")
-        .attr("_prefix_regex")().cast<std::string>();
+        .attr("_prefix_regex")().cast<std::vector<std::string>>();
 
     module_call_code_ = py::module::import("torch.nn")
         .attr("Module")
@@ -506,11 +499,9 @@ class PyTraceReplay {
 
     ska::flat_hash_map<size_t, PyObject*> module_self_map_;
     ska::flat_hash_map<size_t, std::string> module_name_map_;
-    std::regex filename_prune_;
 };
 
-PyTraceReplay::PyTraceReplay()
-        : filename_prune_(PythonTracer::singleton().path_prefixes_) {
+PyTraceReplay::PyTraceReplay() {
     ska::flat_hash_map<PyObject*, std::string> module_names;
     for (const auto& call : PythonTracer::singleton().module_calls_) {
         if (module_names.find(call.self_) == module_names.end()) {
@@ -528,6 +519,17 @@ PyTraceReplay::PyTraceReplay()
 }
 
 
+// TODO: Use re2.
+void trimPrefix(std::string& s, const std::vector<std::string> prefixes) {
+    for (const auto p : prefixes) {
+        if (s.compare(0, p.size(), p) == 0) {
+            s.erase(0, p.size());
+            return;
+        }
+    }
+}
+
+
 std::vector<std::unique_ptr<PyTraceEvent>> PyTraceReplay::replayStack() const {
     std::cout << "replayStack begin" << std::endl;
     const auto& tracer = PythonTracer::singleton();
@@ -538,7 +540,8 @@ std::vector<std::unique_ptr<PyTraceEvent>> PyTraceReplay::replayStack() const {
     ska::flat_hash_map<std::string, std::string> filename_map;
     for (const auto& i : tracer.code_descriptions_) {
         if (filename_map.find(i.second.filename_) == filename_map.end()) {
-            auto s = std::regex_replace(i.second.filename_, filename_prune_, "");
+            std::string s(i.second.filename_);
+            trimPrefix(s, tracer.path_prefixes_);
             filename_map[i.second.filename_] = s;
         }
     }
