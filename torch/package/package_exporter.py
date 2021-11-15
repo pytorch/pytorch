@@ -19,12 +19,14 @@ from typing import (
     Set,
     Union,
     cast,
+    Tuple,
 )
 
 import torch
 from torch.serialization import location_tag, normalize_storage_type
 from torch.types import Storage
 from torch.utils.hooks import RemovableHandle
+import torch.package._selective_intern as SELECTIVE_INTERN_LIST
 
 from ._digraph import DiGraph
 from ._importlib import _normalize_path
@@ -230,6 +232,9 @@ class PackageExporter:
 
         self.patterns: Dict[GlobGroup, _PatternInfo] = {}
         self._unique_id = 0
+        self._selective_interns: Dict[str, Tuple[GlobGroup, List[str]]] = {}
+        for module_name in SELECTIVE_INTERN_LIST:
+            self._selective_interns[module_name] = (GlobGroup(include=f'{module_name}.**'),[])
 
     def save_source_file(
         self, module_name: str, file_or_directory: str, dependencies=True
@@ -677,6 +682,31 @@ class PackageExporter:
         self._intern_hooks[handle.id] = hook
         return handle
 
+    def _selective_intern(
+        self,
+        package_name,
+        include: "GlobPattern",
+        *,
+        exclude: "GlobPattern" = (),
+        allow_empty: bool = True,
+    ):
+        """Specify extra modules not included in torch.package._selective_intern that should be selectively interned that should be packaged.
+
+        Args:
+            include (Union[List[str], str]): A string e.g. "my_package.my_subpackage", or list of strings
+                for the names of the modules to be externed. This can also be a glob-style pattern, as described in :meth:`mock`.
+
+            exclude (Union[List[str], str]): An optional pattern that excludes some patterns that match the include string.
+
+            allow_empty (bool): An optional flag that specifies whether the intern modules specified by this call
+                to the ``intern`` method must be matched to some module during packaging. If an ``intern`` module glob
+                pattern is added with ``allow_empty=False``, and :meth:`close` is called (either explicitly or via ``__exit__``)
+                before any modules match that pattern, an exception is thrown. If ``allow_empty=True``, no such exception is thrown.
+
+        """
+        assert self._module_exists(package_name), package_name
+        self._selective_interns[package_name] = (GlobGroup(include, exclude=exclude), [])
+
     def intern(
         self,
         include: "GlobPattern",
@@ -890,6 +920,15 @@ class PackageExporter:
             mock_file = str(Path(__file__).parent / "_mock.py")
             self._write_source_string("_mock", _read_file(mock_file), is_package=False)
 
+    def _write_selective_interns(self):
+        if self._selective_interns:
+            selective_intern_file_contents = (
+                "\n".join(self._selective_interns.keys()) + "\n"
+            )
+            self._write(
+                ".data/selective_intern_packages", selective_intern_file_contents
+            )
+
     def _execute_dependency_graph(self):
         """Takes a finalized dependency graph describing how to package all
         modules and executes it, writing to the ZIP archive.
@@ -969,9 +1008,17 @@ class PackageExporter:
         resource = _normalize_path(resource)
         return f"{package_path}/{resource}"
 
-    def _can_implicitly_extern(self, module_name: str):
+    def _check_if_selectively_interned(self, module_name: str) -> bool:
+        for pattern, _ in self._selective_interns.items():
+            if pattern.matches(module_name):
+                return True
+        return False
+
+    def _can_implicitly_extern(self, module_name: str) -> bool:
         top_level_package_name = module_name.partition(".")[0]
-        return top_level_package_name == "torch" or (
+        if self._check_if_selectively_interned(module_name):
+            return False
+        return (top_level_package_name == "torch") or (
             top_level_package_name not in _DISALLOWED_MODULES
             and is_stdlib_module(top_level_package_name)
         )
