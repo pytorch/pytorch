@@ -131,16 +131,17 @@ void CUDAGraph::capture_end() {
   TORCH_CHECK(stream == capture_stream_,
               "Capture must end on the same stream it began on.");
 
-  c10::cuda::CUDACachingAllocator::notifyCaptureEnd(capture_dev_, id_);
+  c10::cuda::CUDACachingAllocator::notifyCaptureAboutToEnd(capture_dev_, id_);
 
   AT_CUDA_CHECK(cudaStreamEndCapture(capture_stream_, &graph_));
   TORCH_CHECK(graph_ != NULL, "Invalid capture.");
   has_graph_ = true;
 
+  c10::cuda::CUDACachingAllocator::notifyCaptureEnded(capture_dev_, id_);
+
   // Trailing NULL, NULL, 0 arguments were recommended by Cuda driver people,
   // who prefer not to report error message through these arguments moving forward
   // (they prefer return value, or errors on api calls internal to the capture)
-
 
   int version;
   AT_CUDA_CHECK(cudaDriverGetVersion(&version));

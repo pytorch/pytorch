@@ -6,8 +6,8 @@
 #include <c10/util/irange.h>
 
 #include <mutex>
-#include <set>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace c10 {
@@ -37,37 +37,65 @@ std::vector<CUDAStream> dummy_unifying_free_streams;
 // have concurrent calls take a shared_lock.
 // Keeping it simple with an ordinary mutex for now.
 std::mutex general_mutex;
-std::unordered_map<void*, std::vector<CUDAStream>> usage_streams_each_ptr;
+
+/**
+ * Note [Avoid freeing uncaptured ptrs during CUDA graph capture]
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ * During CUDA graph capture, it's illegal to call cudaFreeAsync
+ * on a pointer that came from a non-captured cudaMallocAsync.
+ * Unfortunately, Python being what it is, it's impossible to be
+ * sure no uncaptured tensor will ever have its destructor called
+ * in a capturing region.
+ * We avoid errors by
+ *  1. tracking captured and uncaptured allocated pointers separately
+ *  2. during capture, if we detect an attempt to free an uncaptured
+ *     allocation on a capturing stream, don't free it immediately,
+ *     just remember it and defer its cudaFreeAsync call to after
+ *     the end of capture (specifically, to notifyCaptureEnded).
+ */
+std::unordered_map<void*, std::vector<CUDAStream>> usage_streams_ungraphed_ptrs;
+std::unordered_map<void*, std::vector<CUDAStream>> usage_streams_graphed_ptrs;
+std::vector<void*> ungraphed_ptrs_defer_free_until_no_capture;
 
 // Graph-specific helpers
 
-// During capture, all stream dependencies must branch out from
-// the stream on which capture began and rejoin this initial stream
-// before capture ends.
-// The user rigs desired forking and joining with event waits.
-// But it's hard to be sure when tensor destructors get called relative
-// to the final joins.
-// For example, suppose a user
-//   forks work stream B from initial capture stream A
-//   creates a tensor T in B
-//   joins by syncing A with B
-//   ends capture.
-// All well and good, right? Maybe not: maybe T went out of scope
-// and its destructor got called AFTER the rejoin, leaving the graph with
-// "unjoined work": a dangling cudaFreeAsync node in stream B.
-// Ensuring that all tensor destructors for all side stream tensors
-// are called before side streams rejoin the main stream sounds
-// difficult. The user might have to add a bunch of explicit
-// "del"s at the right spots in code that was fine for ordinary
-// eager execution.
-// Fortunately, we can spare the user this burden:
-// during capture, we remember _all_ free streams,
-// and manually rejoin them with the capture stream during
-// notifyCaptureAboutToEnd.
-// This approach is heavy-handed, but we don't really mind
-// being heavy-handed during capture.
-std::set<CUDAStream> maybe_dangling_free_streams;
-bool capture_maybe_underway = false;
+/**
+ * Note [Avoid dangling free streams during CUDA graph capture]
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ * During capture, all stream dependencies must branch out from
+ * the stream on which capture began and rejoin this initial stream
+ * before capture ends.
+ * The user rigs desired forking and joining with event waits.
+ * But it's hard to be sure when tensor destructors get called relative
+ * to the final joins.
+ * For example, suppose a user
+ *   forks work stream B from initial capture stream A
+ *   creates a tensor T in B
+ *   joins by syncing A with B
+ *   ends capture.
+ * All well and good, right? Maybe not: maybe T went out of scope
+ * and its destructor got called AFTER the rejoin, leaving the graph with
+ * "unjoined work": a dangling cudaFreeAsync node in stream B.
+ * Ensuring that all tensor destructors for all side stream tensors
+ * are called before side streams rejoin the main stream is
+ * difficult. The user might have to add a bunch of explicit
+ * "del"s at the right spots in code that was fine for ordinary
+ * eager execution.
+ * Fortunately, we can spare the user this burden:
+ * during capture, we remember _all_ free streams,
+ * and manually rejoin them with the capture stream during
+ * notifyCaptureAboutToEnd.
+ * This approach is heavy-handed, but hopefully capture only needs to
+ * happen once, so we don't mind being heavy-handed.
+ *
+ * TODO: If, someday, we augment the graph bindings to support recapture
+ * https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#whole-graph-update
+ * (eg, as a way to accommodate dynamic params) we should think more
+ * carefully about the CPU overhead of remembering and rejoining
+ * all free streams during capture. Maybe it's not a big deal.
+ */
+std::unordered_set<CUDAStream> capture_free_streams;
+bool capture_underway = false;
 
 // Implementation functions
 
@@ -81,8 +109,8 @@ inline void lazy_init_device(int device) {
     uint64_t threshold = UINT64_MAX;
     C10_CUDA_CHECK(cudaMemPoolSetAttribute(mempool, cudaMemPoolAttrReleaseThreshold, &threshold));
 
-    // I think all these are on by default, but I want to be explicit about enabling
-    // them to ensure awareness.
+    // I think all these are on by default, but I want to enable them
+    // explicitly to ensure awareness.
     int enable = 1;
     C10_CUDA_CHECK(cudaMemPoolSetAttribute(mempool,
                                            cudaMemPoolReuseFollowEventDependencies,
@@ -123,6 +151,11 @@ void free(void* ptr) {
     // the original allocation stream.
     // Frees ptr in the original allocation stream.
     C10_CUDA_CHECK(cudaFreeAsync(ptr, usage_streams[0]));
+
+    if (C10_UNLIKELY(captures_underway)) {
+      // See Note [Avoid dangling free streams during CUDA graph capture]
+      capture_free_streams.insert(usage_streams[0]);
+    }
   } else {
     // ptr was used on many streams. We don't know which was the most recent.
     // There could even have been multiple most recent usage streams acting
@@ -142,7 +175,7 @@ void free(void* ptr) {
       // which is possible if some usage kernels accessed the memory via p2p.
 
       // cudaEventRecord requires that the input event and stream are on the same device.
-      CUDAGuard g_usage(usage_streams[0].device_index());
+      CUDAGuard g_usage(usage_stream.device_index());
 
       // CUDACachingAllocator.cpp uses raw cuda events, as do we.
       cudaEvent_t event;
@@ -165,6 +198,11 @@ void free(void* ptr) {
     // then cudaFreeAsyncing straight back into usage_streams[0];
     // but this forces a potentially false dependency of usage_streams[0]
     // on all the other usage_streams.
+
+    if (C10_UNLIKELY(captures_underway)) {
+      // See Note [Avoid dangling free streams during CUDA graph capture]
+      capture_free_streams.insert(dummy_unifying_free_stream);
+    }
   }
 
   usage_streams_each_ptr.erase(it);
@@ -273,7 +311,7 @@ void cacheInfo(int dev_id, size_t* cachedAndFree, size_t* largestBlock) {
 void* getBaseAllocation(void* ptr, size_t* size) {
   if (size) {
     // maybe we do need to track per-ptr sizes after all
-  } 
+  }
   return ptr;
 }
 
@@ -366,10 +404,33 @@ std::vector<SegmentInfo> snapshot() {
 }
 
 // CUDAGraph interactions
-// Deliberate no-ops: capturing cudaMallocAsync should "just work".
-void notifyCaptureBegin(CaptureId_t graph_id, MempoolId_t mempool_id) {}
-void notifyCaptureEnd(int device, CaptureId_t graph_id) {}
-void notifyCaptureDestroy(int device, MempoolId_t mempool_id) {}
+void notifyCaptureBegin(CaptureId_t graph_id, MempoolId_t mempool_id) {} // no-op
+
+void notifyCaptureAboutToEnd(int device, CaptureId_t graph_id) {
+  assertValidDevice(device);
+
+  auto capture_stream = cuda::getCurrentCUDAStream(device)
+
+  // See Note [Avoid dangling free streams during CUDA graph capture]
+  for (const auto& free_stream : capture_free_streams) {
+    // cudaEventRecord requires that the input event and stream are on the same device.
+    CUDAGuard g(free_stream.device_index());
+
+    // CUDACachingAllocator.cpp uses raw cuda events, as do we.
+    cudaEvent_t event;
+    C10_CUDA_CHECK(cudaEventCreateWithFlags(&event, cudaEventDisableTiming));
+    C10_CUDA_CHECK(cudaEventRecord(event, free_stream.stream()));
+    C10_CUDA_CHECK(cudaStreamWaitEvent(capture_stream.stream(), event));
+    C10_CUDA_CHECK(cudaEventDestroy(event));
+  }
+}
+
+void notifyCaptureEnded(int device, CaptureId_t graph_id) {
+  assertValidDevice(device);
+
+}
+
+void notifyCaptureDestroy(int device, MempoolId_t mempool_id) {} // no-op
 
 void* raw_alloc(size_t nbytes) {
   if (nbytes == 0) {

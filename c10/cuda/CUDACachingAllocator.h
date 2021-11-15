@@ -274,11 +274,18 @@ inline void notifyCaptureBegin(
   return f(device, graph_id, mempool_id);
 }
 
-inline void notifyCaptureEnd(int device, CaptureId_t graph_id) {
+inline void notifyCaptureAboutToEnd(int device, CaptureId_t graph_id) {
   static auto f = (allocatorBackend() == "native") ?
-    THC::notifyCaptureEnd : CudaMallocAsync::notifyCaptureEnd;
+    THC::notifyCaptureEnd : CudaMallocAsync::notifyCaptureAboutToEnd;
   return f(device, graph_id);
 }
+
+inline void notifyCaptureEnded(int device, CaptureId_t graph_id) {
+  static auto f = (allocatorBackend() == "native") ?
+    THC::notifyCaptureEnd : CudaMallocAsync::notifyCaptureEnded;
+  return f(device, graph_id);
+}
+
 inline void notifyCaptureDestroy(int device, MempoolId_t mempool_id) {
   static auto f = (allocatorBackend() == "native") ?
     THC::notifyCaptureDestroy : CudaMallocAsync::notifyCaptureDestroy;

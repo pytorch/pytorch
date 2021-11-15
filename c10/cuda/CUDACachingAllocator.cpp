@@ -88,8 +88,10 @@ namespace THC {
  * (regardless whether those captures are idle or replaying).
  *
  * CUDAGraph's requests for private pools are mediated by
- * DeviceAllocator::notifyCaptureBegin, notifyCaptureEnd, and
- * notifyCaptureDestroy.
+ * DeviceAllocator::notifyCaptureBegin,
+ *                  notifyCaptureAboutToEnd,
+ *                  notifyCaptureEnded,
+ *                  notifyCaptureDestroy.
  */
 
 constexpr size_t kMinBlockSize =
@@ -770,7 +772,7 @@ class DeviceCachingAllocator {
   }
 
   // Called by CUDAGraph::capture_end
-  void notifyCaptureEnd(CaptureId_t graph_id) {
+  void notifyCaptureAboutToEnd(CaptureId_t graph_id) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     captures_underway--;
     auto it = capture_to_pool_map.find(graph_id);
@@ -1505,10 +1507,12 @@ void notifyCaptureBegin(
       graph_id, mempool_id);
 }
 
-void notifyCaptureEnd(int device, CaptureId_t graph_id) {
+void notifyCaptureAboutToEnd(int device, CaptureId_t graph_id) {
   assertValidDevice(device);
-  caching_allocator.device_allocator[device]->notifyCaptureEnd(graph_id);
+  caching_allocator.device_allocator[device]->notifyCaptureAboutToEnd(graph_id);
 }
+
+void notifyCaptureEnded(int device, CaptureId_t graph_id) {} // no-op
 
 void notifyCaptureDestroy(int device, MempoolId_t mempool_id) {
   assertValidDevice(device);
