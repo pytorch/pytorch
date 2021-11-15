@@ -1,3 +1,5 @@
+# Owner(s): ["module: onnx"]
+
 import functools
 import os
 import unittest

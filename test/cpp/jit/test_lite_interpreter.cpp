@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/mobile/backport.h>
 #include <torch/csrc/jit/mobile/backport_manager.h>
 #include <torch/csrc/jit/mobile/import.h>
+#include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/model_compatibility.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/mobile/parse_bytecode.h>
@@ -180,7 +181,7 @@ TEST(LiteInterpreterTest, Tuple) {
   mobile::Module bc = _load_for_mobile(ss);
   std::vector<torch::jit::IValue> inputs({torch::ones({})});
   auto output = bc.get_method("forward")(inputs);
-  AT_ASSERT(output.toTuple()->elements()[1].toInt() == 2);
+  AT_ASSERT(output.toTupleRef().elements()[1].toInt() == 2);
 }
 
 TEST(LiteInterpreterTest, Dict) {
@@ -361,7 +362,7 @@ struct ClassNamespaceValue : public SugaredValue {
 
   std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
-      Function& m,
+      GraphFunction& m,
       const std::string& name) override {
     const auto fullName = c10::QualifiedName(basename_, name);
 
@@ -386,7 +387,7 @@ struct ClassNamespaceValue : public SugaredValue {
 struct TestModuleResolver : public Resolver {
   std::shared_ptr<SugaredValue> resolveValue(
       const std::string& name,
-      Function& m,
+      GraphFunction& m,
       const SourceRange& loc) override {
     if (name == "torch") {
       return std::make_shared<BuiltinModule>("aten");
@@ -465,6 +466,15 @@ TEST(LiteInterpreterTest, GetRuntimeByteCodeVersion) {
       caffe2::serialize::kMaxSupportedBytecodeVersion);
 }
 
+TEST(LiteInterpreterTest, GetRuntimeOperatorsVersion) {
+  auto runtime_operators_version = _get_runtime_operators_min_max_versions();
+  AT_ASSERT(
+      runtime_operators_version.first ==
+          caffe2::serialize::kMinSupportedFileFormatVersion &&
+      runtime_operators_version.second ==
+          caffe2::serialize::kMaxSupportedFileFormatVersion);
+}
+
 /**
  * The test below is disarmed for FB internal xplat builds since
  * BUCK requires us to pass in the script_module_v4.ptl file in
@@ -525,7 +535,7 @@ void runAndCheckTorchScriptModel(
   Module m_mobile = load(input_model_stream);
 
   auto actual_result = m_mobile.forward(input_data);
-  const auto& actual_result_list = actual_result.toTuple()->elements();
+  const auto& actual_result_list = actual_result.toTupleRef().elements();
   compareModelOutput(actual_result_list, expect_result_list);
 }
 
@@ -542,7 +552,7 @@ void runAndCheckBytecodeModel(
   Module m_mobile = load(input_model_stream);
 
   auto actual_result = m_mobile.forward(input_data);
-  const auto& actual_result_list = actual_result.toTuple()->elements();
+  const auto& actual_result_list = actual_result.toTupleRef().elements();
 
   compareModelOutput(actual_result_list, expect_result_list);
 }
@@ -664,7 +674,9 @@ TEST(LiteInterpreterTest, isCompatibleFail) {
   std::unordered_map<std::string, OperatorInfo> runtime_ops;
   runtime_ops["aten::add.Int"] = OperatorInfo{2};
   auto runtime_info = RuntimeCompatibilityInfo{
-      caffe2::serialize::kMaxSupportedBytecodeVersion,
+      std::pair<uint64_t, uint64_t>(
+          caffe2::serialize::kMinSupportedBytecodeVersion,
+          caffe2::serialize::kMaxSupportedBytecodeVersion),
       runtime_ops,
       _get_mobile_supported_types()};
 
@@ -674,14 +686,32 @@ TEST(LiteInterpreterTest, isCompatibleFail) {
       result.errors[0] ==
       "Operator 'aten::add.Scalar' missing from runtime (not found)");
 
-  // test trivial failure due to bytecode
+  // test trivial failure due to bytecode greater than max supported bytecode
+  // version
   runtime_ops["aten::add.Scalar"] = OperatorInfo{2};
   runtime_info = RuntimeCompatibilityInfo{
-      caffe2::serialize::kMaxSupportedBytecodeVersion,
+      std::pair<uint64_t, uint64_t>(
+          caffe2::serialize::kMinSupportedBytecodeVersion,
+          caffe2::serialize::kMaxSupportedBytecodeVersion),
       runtime_ops,
       _get_mobile_supported_types()};
   model_info.bytecode_version =
       caffe2::serialize::kMaxSupportedBytecodeVersion + 1;
+
+  result = is_compatible(runtime_info, model_info);
+  AT_ASSERT(result.status = ModelCompatibilityStatus::ERROR);
+
+  // test trivial failure due to bytecode less than min supported bytecode
+  // version
+  runtime_ops["aten::add.Scalar"] = OperatorInfo{2};
+  runtime_info = RuntimeCompatibilityInfo{
+      std::pair<uint64_t, uint64_t>(
+          caffe2::serialize::kMinSupportedBytecodeVersion,
+          caffe2::serialize::kMaxSupportedBytecodeVersion),
+      runtime_ops,
+      _get_mobile_supported_types()};
+  model_info.bytecode_version =
+      caffe2::serialize::kMinSupportedBytecodeVersion - 1;
 
   result = is_compatible(runtime_info, model_info);
   AT_ASSERT(result.status = ModelCompatibilityStatus::ERROR);
@@ -1369,6 +1399,92 @@ TEST(LiteInterpreterTest, OperatorCacheDifferentiatesDefaultArgs) {
   testLiteModuleCompareResultTensors(m, inputs, "forward");
   testLiteModuleCompareResultTensors(m, inputs, "forward2");
   testLiteModuleCompareResultTensors(m, inputs, "forward3");
+}
+
+TEST(RunTimeTest, RuntimeCall) {
+  //     def call(x):
+  //         return x + x
+  //
+  //     def forward(a):
+  //         x = a + call(a)
+  //         y = a + call(x)
+  //         return y
+
+  std::vector<IValue> instructionsCall{
+      to_tuple({"STORE", 1, 0}),
+      to_tuple({"LOAD", 1, 0}),
+      to_tuple({"MOVE", 1, 0}),
+      to_tuple({"LOADC", 0, 0}),
+      to_tuple({"OP", 0, 0}),
+      to_tuple({"RET", 0, 0}),
+  };
+  std::vector<IValue> instructionsFoo{
+      to_tuple({"STORE", 1, 0}),
+      to_tuple({"LOAD", 1, 0}),
+      to_tuple({"LOAD", 1, 0}),
+      to_tuple({"MOVE", 1, 0}),
+      to_tuple({"CALL", 0, 0}),
+      to_tuple({"LOADC", 0, 0}),
+      to_tuple({"OP", 0, 0}),
+      to_tuple({"CALL", 0, 0}),
+      to_tuple({"LOADC", 0, 0}),
+      to_tuple({"OP", 0, 0}),
+      to_tuple({"RET", 0, 0}),
+  };
+  std::vector<IValue> operatorsFoo{
+      to_tuple({"aten::add", "Tensor", 3}),
+  };
+  std::vector<IValue> constantsFoo{
+      1,
+  };
+  std::vector<IValue> operatorsCall{
+      to_tuple({"aten::add", "Tensor", 3}),
+  };
+  std::vector<IValue> constantsCall{
+      1,
+  };
+  int64_t model_version = caffe2::serialize::kProducedBytecodeVersion;
+
+  auto foo = std::make_unique<mobile::Function>(c10::QualifiedName("foo"));
+  c10::ivalue::TupleElements debug_handles_m_tuple;
+  parseInstructions(
+      "foo",
+      std::move(*c10::ivalue::Tuple::create(instructionsFoo)).elements(),
+      debug_handles_m_tuple,
+      foo.get());
+  parseOperators(
+      std::move(*c10::ivalue::Tuple::create(operatorsFoo)).elements(),
+      model_version,
+      1,
+      foo.get());
+  parseConstants(
+      std::move(*c10::ivalue::Tuple::create(constantsFoo)).elements(),
+      foo.get());
+  const size_t rsize = 5;
+  parseRegisterSize(rsize, foo.get());
+
+  auto call = std::make_unique<mobile::Function>(c10::QualifiedName("call"));
+  parseInstructions(
+      "call",
+      std::move(*c10::ivalue::Tuple::create(instructionsCall)).elements(),
+      debug_handles_m_tuple,
+      call.get());
+  parseOperators(
+      std::move(*c10::ivalue::Tuple::create(operatorsCall)).elements(),
+      model_version,
+      1,
+      call.get());
+  parseConstants(
+      std::move(*c10::ivalue::Tuple::create(constantsCall)).elements(),
+      call.get());
+  parseRegisterSize(rsize, call.get());
+
+  foo->append_function(*call);
+
+  std::vector<IValue> inputs{at::tensor(1)};
+  foo->run(inputs);
+  auto output = inputs[0];
+  ASSERT_EQ(output, at::tensor(7));
 }
 
 } // namespace jit
