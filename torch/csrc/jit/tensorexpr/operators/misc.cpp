@@ -423,7 +423,15 @@ Tensor computeReshape(
           dims.push_back(outputShape[idx].node());
           indices.push_back(axes[idx].node());
         }
-        ExprHandle flat_idx = ExprHandle(flatten_index(dims, indices));
+
+        auto ndim = dims.size();
+        std::vector<ExprPtr> strides(ndim);
+        strides[ndim - 1] = immLike(dims[ndim - 1], 1);
+        for (size_t i = 1; i < ndim; i++) {
+          strides[ndim - 1 - i] = alloc<Mul>(strides[ndim - i], dims[ndim - i]);
+        }
+
+        ExprHandle flat_idx = ExprHandle(flatten_index(dims, indices, strides));
         std::vector<ExprHandle> orig_buf_indexes(A.ndim(), ExprHandle(0));
         ExprHandle stride = ExprHandle(immLike(flat_idx, 1));
         for (size_t idx = 0; idx < A.ndim(); idx++) {
@@ -458,8 +466,8 @@ static std::pair<ScalarType, std::vector<BufHandle>> processCatList(
         buf.node()->dims().size() > 0, buildErrorMessage("Invalid buf rank"));
     // Ignore buffers that are 0-sized on any dimension.
     bool hasEmptyDims = false;
-    for (const auto& dim : buf.node()->dims()) {
-      if (immediateAs<int64_t>(dim) == 0ll) {
+    for (const auto& dim : buf.dims()) {
+      if (dim.AsNode<LongImm>() && immediateAs<int64_t>(dim) == 0ll) {
         hasEmptyDims = true;
         break;
       }

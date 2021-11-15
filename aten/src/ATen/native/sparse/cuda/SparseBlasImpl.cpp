@@ -39,6 +39,22 @@ c10::MaybeOwned<Tensor> inline prepare_dense_matrix_for_cusparse(
 #endif
 }
 
+Tensor copy_strided(const Tensor& tensor, IntArrayRef strides) {
+  Tensor result = at::empty_strided(tensor.sizes(), strides, tensor.options());
+  result.copy_(tensor);
+  return result;
+}
+
+c10::MaybeOwned<Tensor> prepare_dense_matrix_for_cusparse(
+    const Tensor& tensor,
+    IntArrayRef strides) {
+  if (tensor.strides().equals(strides)) {
+    return c10::MaybeOwned<Tensor>::borrowed(tensor);
+  } else {
+    return c10::MaybeOwned<Tensor>::owned(copy_strided(tensor, strides));
+  }
+}
+
 // This function is used for old CUDA Toolkit versions that doesn't support new cuSPARSE Generic API
 void addmm_out_legacy(
     const at::sparse_csr::SparseCsrTensor& mat1,
@@ -637,8 +653,12 @@ void triangular_solve_out_sparse_csr(
     return;
   }
 
-  c10::MaybeOwned<Tensor> B_ = prepare_dense_matrix_for_cusparse(B);
   c10::MaybeOwned<Tensor> X_ = prepare_dense_matrix_for_cusparse(X);
+  // It should be possible to use mixed memory format
+  // but there is a bug in CUDA 11.3.1 version:
+  // strides of matrix B are used to write result to matrix X.
+  // As a workaround we need to convert matrices to have the same strides.
+  c10::MaybeOwned<Tensor> B_ = prepare_dense_matrix_for_cusparse(B, X_->strides());
 
   // TODO: update this to support COO sparse layout
   auto descA = at::cuda::sparse::CuSparseSpMatCsrDescriptor(A);
@@ -711,14 +731,6 @@ void triangular_solve_out_sparse_csr(
           cudaDataType compute_type = at::cuda::getCudaDataType<scalar_t>();
           auto handle = at::cuda::getCurrentCUDASparseHandle();
           size_t buffer_size;
-
-          // TODO: support mixed memory format
-          IntArrayRef X_strides = X_->strides();
-          IntArrayRef B_strides = B_->strides();
-          auto ndim = X_->dim();
-          bool is_X_row_major = (X_strides[ndim - 1] == 1);
-          bool is_B_row_major = (B_strides[ndim - 1] == 1);
-          TORCH_INTERNAL_ASSERT(is_X_row_major && is_B_row_major);
 
           cusparseOperation_t opB = CUSPARSE_OPERATION_NON_TRANSPOSE;
           auto desc_spsm = at::cuda::sparse::CuSparseSpSMDescriptor();
