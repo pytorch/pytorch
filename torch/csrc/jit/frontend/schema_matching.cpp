@@ -1,9 +1,13 @@
 #include <torch/csrc/jit/frontend/schema_matching.h>
 
 #include <ATen/core/jit_type.h>
+#include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/builtin_functions.h>
 #include <torch/csrc/jit/frontend/error_report.h>
+#include <torch/csrc/jit/frontend/function_schema_parser.h>
+#include <torch/csrc/jit/operator_upgraders/utils.h>
+#include <torch/csrc/jit/operator_upgraders/version_map.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
 namespace torch {
@@ -410,6 +414,7 @@ static c10::optional<MatchedSchema> tryMatchSchema(
     }
     positional_inputs.push_back(positional);
   }
+
   // check for unused self argument
   if (self != c10::nullopt && failure_messages) {
     err() << "Provided self argument not used in schema.\n";
@@ -516,7 +521,7 @@ static std::string prefixLine(
 }
 
 std::pair<size_t, MatchedSchema> matchSchemas(
-    const std::vector<const FunctionSchema*>& schemas,
+    const std::vector<::c10::FunctionSchema>& schemas,
     const SourceRange& loc,
     Graph& graph,
     at::ArrayRef<NamedValue> args,
@@ -528,7 +533,7 @@ std::pair<size_t, MatchedSchema> matchSchemas(
   // first. this is faster and puts less dead code in the graph.
   if (schemas.size() == 1) {
     return std::make_pair(
-        0, matchSchema(*schemas.at(0), loc, graph, args, kwargs, self));
+        0, matchSchema(schemas[0], loc, graph, args, kwargs, self));
   }
   std::stringstream failure_messages;
   for (bool allow_conversions : {false, true}) {
@@ -536,7 +541,7 @@ std::pair<size_t, MatchedSchema> matchSchemas(
     failure_messages.str("");
     for (const auto i : c10::irange(schemas.size())) {
       const auto matched_schema = tryMatchSchema(
-          *schemas[i],
+          schemas[i],
           loc,
           graph,
           args,
@@ -612,19 +617,42 @@ Value* emitBuiltinCall(
     Symbol name,
     at::ArrayRef<NamedValue> args,
     at::ArrayRef<NamedValue> kwargs,
-    const c10::optional<NamedValue>& self) {
+    const c10::optional<NamedValue>& self,
+    const c10::optional<int64_t> version) {
   const auto& variants = getAllOperatorsFor(name);
   const auto& builtin_functions = getAllBuiltinFunctionsFor(name);
 
+  // first let's set the graph's version
+  if (version.has_value()) {
+    if (graph.get_op_version().has_value()) {
+      TORCH_INTERNAL_ASSERT(version.value() == graph.get_op_version().value());
+    } else {
+      graph.set_op_version(version.value());
+    }
+  }
+
   std::stringstream failure_messages;
-  std::vector<const FunctionSchema*> schemas;
+  std::vector<FunctionSchema> schemas;
   schemas.reserve(variants.size());
   for (const std::shared_ptr<Operator>& op : variants) {
-    schemas.push_back(&op->schema());
+    auto op_name =
+        op->schema().operator_name().name + "." + op->schema().overload_name();
+    if (version.has_value()) {
+      auto version_entry = operator_version_map.find(op_name);
+      if (version_entry != operator_version_map.end()) {
+        auto old_schema_entry =
+            findUpgrader(version_entry->second, version.value());
+        auto old_schema = parseSchema(old_schema_entry.old_schema);
+        schemas.push_back(old_schema);
+      }
+    } else {
+      schemas.push_back(op->schema());
+    }
   }
+
   for (const auto method : builtin_functions) {
     method->ensure_defined();
-    schemas.push_back(&method->getSchema());
+    schemas.push_back(method->getSchema());
   }
 
   // no operators found with the same name, print out similarly named operators

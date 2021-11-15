@@ -54,7 +54,7 @@ std::shared_ptr<SugaredValue> BuiltinFunction::call(
     at::ArrayRef<NamedValue> kwargs,
     size_t n_binders) {
   return std::make_shared<SimpleValue>(
-      emitBuiltinCall(loc, *m.graph(), symbol, args, kwargs, self));
+      emitBuiltinCall(loc, *m.graph(), symbol, args, kwargs, self, version_));
 }
 
 // older versions of gcc/clang have a bug where enums can't be used as keys
