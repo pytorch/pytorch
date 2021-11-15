@@ -7402,7 +7402,10 @@ else:
                 return self.tensor.__dlpack_device__()
 
             def __dlpack__(self, stream=None):
-                assert stream == 1
+                if torch.version.hip is None:
+                    assert stream == 1
+                else:
+                    assert stream == 0
                 capsule = self.tensor.__dlpack__(stream)
                 converted = True
                 return capsule
