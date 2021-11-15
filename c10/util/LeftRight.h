@@ -3,6 +3,7 @@
 #include <atomic>
 #include <functional>
 #include <mutex>
+#include <shared_mutex>
 #include <thread>
 
 namespace c10 {
@@ -185,6 +186,42 @@ class LeftRight final {
   std::atomic<uint8_t> _foregroundDataIndex;
   std::array<T, 2> _data;
   std::mutex _writeMutex;
+};
+
+// RWSafeLeftRightWrapper is API compatible with LeftRight and uses a
+// read-write lock to protect T (data).
+template <class T>
+class RWSafeLeftRightWrapper final {
+  using mutexType = std::mutex;
+  using rLockType = std::unique_lock<std::mutex>;
+  using wLockType = std::unique_lock<std::mutex>;
+
+ public:
+  template <class... Args>
+  explicit RWSafeLeftRightWrapper(const Args&... args) : _data{args...} {}
+
+  // RWSafeLeftRightWrapper is not copyable or moveable since LeftRight
+  // is not copyable or moveable.
+  RWSafeLeftRightWrapper(const RWSafeLeftRightWrapper&) = delete;
+  RWSafeLeftRightWrapper(RWSafeLeftRightWrapper&&) noexcept = delete;
+  RWSafeLeftRightWrapper& operator=(const RWSafeLeftRightWrapper&) = delete;
+  RWSafeLeftRightWrapper& operator=(RWSafeLeftRightWrapper&&) noexcept = delete;
+
+  template <typename F>
+  auto read(F&& readFunc) const -> typename std::result_of<F(const T&)>::type {
+    rLockType lock(mutex_);
+    return readFunc(_data);
+  }
+
+  template <typename F>
+  auto write(F&& writeFunc) -> typename std::result_of<F(T&)>::type {
+    wLockType lock(mutex_);
+    return writeFunc(_data);
+  }
+
+ private:
+  T _data;
+  mutable mutexType mutex_;
 };
 
 } // namespace c10
