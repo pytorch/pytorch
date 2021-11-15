@@ -128,9 +128,9 @@ class FakeQuantize(FakeQuantizeBase):
         assert torch.iinfo(self.activation_post_process.dtype).min <= quant_min, 'quant_min out of bound'
         assert quant_max <= torch.iinfo(self.activation_post_process.dtype).max, 'quant_max out of bound'
         if(self.activation_post_process.qscheme == torch.per_channel_affine_float_qparams):
-            zero_point_dtype=torch.float
+            zero_point_dtype = torch.float
         else:
-            zero_point_dtype=torch.int
+            zero_point_dtype = torch.int
         self.register_buffer('scale', torch.tensor([1.0], dtype=torch.float))
         self.register_buffer('zero_point', torch.tensor([0], dtype=zero_point_dtype))
         self.dtype = self.activation_post_process.dtype
