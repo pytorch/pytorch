@@ -4789,15 +4789,17 @@ def sample_inputs_cov(op_info, device, dtype, requires_grad, **kwargs):
     return inputs
 
 
-def sample_inputs_svd(op_info, device, dtype, requires_grad=False, is_linalg_svd=False, **kwargs):
+def sample_inputs_svd(op_info, device, dtype, requires_grad=False, **kwargs):
     make_fullrank = make_fullrank_matrices_with_distinct_singular_values
     make_arg = partial(make_fullrank, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    is_linalg_svd = (op_info.name == "linalg.svd")
 
     batches = [(), (0, ), (2, )]
     ns = [0, 2, 5]
 
     # The .abs() is to make these functions invariant under multiplication by e^{i\theta}
-    # since the complex SVD is unique up to multiplication of the columsn of U / V a z \in C with \norm{z} = 1
+    # since the complex SVD is unique up to multiplication of the columns of U / V a z \in C with \norm{z} = 1
     # See the docs of torch.linalg.svd for more info
     def check_grads(usv):
         S = usv[1]
@@ -4807,7 +4809,6 @@ def sample_inputs_svd(op_info, device, dtype, requires_grad=False, is_linalg_svd
         Vh = Vh[..., :k, :]
         return (U.abs(), S, Vh.abs())
 
-    # We'll set the coorect kwargs in the loop
     fullmat = 'full_matrices' if is_linalg_svd else 'some'
 
     def generate_inputs():
@@ -10701,7 +10702,7 @@ op_db: List[OpInfo] = [
     OpInfo('svd',
            op=torch.svd,
            dtypes=floating_and_complex_types(),
-           sample_inputs_func=partial(sample_inputs_svd, is_linalg_svd=False),
+           sample_inputs_func=sample_inputs_svd,
            check_batched_gradgrad=False,
            decorators=[
                skipCUDAIfNoMagmaAndNoCusolver,
@@ -10712,7 +10713,7 @@ op_db: List[OpInfo] = [
            op=torch.linalg.svd,
            aten_name='linalg_svd',
            dtypes=floating_and_complex_types(),
-           sample_inputs_func=partial(sample_inputs_svd, is_linalg_svd=True),
+           sample_inputs_func=sample_inputs_svd,
            check_batched_gradgrad=False,
            decorators=[
                skipCUDAIfNoMagmaAndNoCusolver,
