@@ -358,7 +358,7 @@ def get_arg_target_dtype(
     arg: Node,
     modules: Dict[str, torch.nn.Module],
     node_name_to_target_dtype: Dict[str, Dict[str, Optional[torch.dtype]]],
-) -> Node:
+) -> Optional[torch.dtype]:
     """ Get the target output activation dtype for
     the argumnet in the original graph, skipping inserted observers
     We are assuming that the observers are inserted correctly, and the dtype for
