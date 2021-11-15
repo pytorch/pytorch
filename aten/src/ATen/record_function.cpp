@@ -369,7 +369,11 @@ class CallbackManager {
   std::atomic<uint_fast32_t> num_enabled_global_callbacks_;
 
  private:
-  bool tryRunCallback(
+  static void logTryRunCallbackError(const char* what, const RecordFunction& rf) {
+    LOG(WARNING) << "Exception in RecordFunction callback: " << what << " , for the range " << rf.name();
+  }
+
+  C10_ALWAYS_INLINE static bool tryRunCallback(
       const RecordFunctionCallback& rfcb,
       RecordFunction& rf,
       std::unique_ptr<ObserverContext>& ctx,
@@ -385,18 +389,16 @@ class CallbackManager {
       }
       return true;
     } catch (const std::exception &e) {
-      LOG(WARNING) << "Exception in RecordFunction callback: "
-          << e.what() << " , for the range " << rf.name();
+      logTryRunCallbackError(e.what(), rf);
       return false;
     } catch (...) {
-      LOG(WARNING) << "Exception in RecordFunction callback: unknown"
-          << " , for the range " << rf.name();
+      logTryRunCallbackError("unknown", rf);
       return false;
     }
   }
 
   template <typename RecordFunctionCallbacks>
-  void mergeRunCallbacks(
+  static void mergeRunCallbacks(
       const RecordFunctionCallbacks& sorted_callbacks,
       const CallbackHandles& sorted_handles,
       ObserverContextList& ctx_list,
