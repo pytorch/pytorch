@@ -34,10 +34,15 @@ from .utils import (
 )
 
 OpConvertInfo = Tuple[
+    # quantized equivalent of original op (None means keep original)
     Optional[Callable],
+    # arg_quant_infos, each element is (scale, zp) for quantized and None otherwise
     List[Optional[Tuple[float, int]]],
+    # arg_dequant_infos, each element is True if this arg needs a dequant
     List[bool],
+    # packed param name, if the op has a packed param
     Optional[str],
+    # additional kwargs, such as output scale and zero_point
     Dict[str, Any],
 ]
 
@@ -437,19 +442,7 @@ class AutoQuantizationState(torch.nn.Module):
     ) -> OpConvertInfo:
         """
         Returns the information needed for convert time modifications to `op`.
-        Has no side effects.  Return types:
-
-        `maybe_new_op`. Returns `None` if the callable does not need quantization,
-        or the corresponding quantized target. Note: returns `None`
-        for modules, because they are quantized with module swaps.
-
-        `arg_quant_infos`. Returns information needed to quantize each arg, if
-        applicable.
-
-        `additional_kwargs`. Returns additional kwargs for scale and zero_point, if
-        applicable.
         """
-        assert self.cur_op_needs_hooks(op)
         return self.idx_to_op_convert_info[self.idx]
 
     def calculate_op_convert_info(
