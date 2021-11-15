@@ -223,9 +223,10 @@ if HAS_PYDOT:
                     ):
                         pname1 = node.name + "." + pname
                         label1 = (
-                            pname1 + "|op_code=get_" + ("parameter"
-                            if is_param
-                            else "buffer") + r"\l"
+                            pname1
+                            + "|op_code=get_"
+                            + ("parameter" if is_param else "buffer")
+                            + r"\l"
                         )
                         dot_w_node = pydot.Node(
                             pname1,
