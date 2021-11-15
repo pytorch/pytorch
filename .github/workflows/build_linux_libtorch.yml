@@ -52,8 +52,6 @@ jobs:
       PYTORCH_BUILD_NUMBER: 1
       SKIP_ALL_TESTS: 1
     steps:
-      - name: Clean runner workspace
-        run: rm -rf "$GITHUB_WORKSPACE"
       - name: Clone pytorch/pytorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
