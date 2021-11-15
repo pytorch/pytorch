@@ -113,9 +113,10 @@ class AllModuleTracer(torch.fx.Tracer):
 
                 old_target = target
                 # TODO use arg_dequant_infos
-                target, arg_quant_infos, arg_dequant_infos, packed_param_name, additional_kwargs = \
+                new_target, arg_quant_infos, arg_dequant_infos, packed_param_name, additional_kwargs = \
                     qstate.get_op_convert_info(target, unwrap_scale_zp=True)
-
+                if new_target is not None:
+                    target = new_target
                 args = self._maybe_update_args_with_quants(args, arg_quant_infos, target)
                 # if there is a packed param, replace the relevant args
                 if packed_param_name is not None:
