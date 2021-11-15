@@ -526,7 +526,7 @@ PyTraceReplay::PyTraceReplay() {
 
 
 // TODO: Use re2.
-void trimPrefix(std::string& s, const std::vector<std::string> prefixes) {
+void trimPrefix(std::string& s, const std::vector<std::string>& prefixes) {
     for (const auto& p : prefixes) {
         if (s.compare(0, p.size(), p) == 0) {
             s.erase(0, p.size());
