@@ -360,6 +360,8 @@ core_sources_full = core_sources_full_mobile + [
 ]
 
 lazy_tensor_core_sources = [
+    "torch/csrc/lazy/backend/backend_device.cpp",
+    "torch/csrc/lazy/backend/lowering_context.cpp",
     "torch/csrc/lazy/core/config.cpp",
     "torch/csrc/lazy/core/hash.cpp",
     "torch/csrc/lazy/core/ir.cpp",
@@ -367,6 +369,8 @@ lazy_tensor_core_sources = [
     "torch/csrc/lazy/core/ir_util.cpp",
     "torch/csrc/lazy/core/permutation_util.cpp",
     "torch/csrc/lazy/core/shape.cpp",
+    "torch/csrc/lazy/ts_backend/config.cpp",
+    "torch/csrc/lazy/ts_backend/ts_node.cpp",
 ]
 
 libtorch_core_sources = sorted(
