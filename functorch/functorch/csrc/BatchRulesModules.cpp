@@ -396,6 +396,9 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("conv2d", convNd_decomp);
   m.impl("conv3d", convNd_decomp);
 
+  EXISTING_BDIM(im2col);
+  EXISTING_BDIM(im2col_backward);
+
   VMAP_SUPPORT("grid_sampler_2d", GRID_SAMPLE_BATCH_RULE(grid_sampler));
   VMAP_SUPPORT("grid_sampler_3d", GRID_SAMPLE_BATCH_RULE(grid_sampler));
   VMAP_SUPPORT("cudnn_grid_sampler", GRID_SAMPLE_BATCH_RULE(cudnn_grid_sampler));
