@@ -5,13 +5,13 @@ import warnings
 import unittest
 import random
 import itertools
-from torch.testing import get_all_complex_dtypes, get_all_fp_dtypes, make_tensor
+from torch.testing import get_all_complex_dtypes, get_all_fp_dtypes, floating_and_complex_types, make_tensor
 from torch.testing._internal.common_cuda import SM53OrLater, SM80OrLater, TEST_CUSPARSE_GENERIC
 from torch.testing._internal.common_utils import \
     (IS_MACOS, IS_WINDOWS, TEST_WITH_ROCM, TestCase, run_tests, load_tests, coalescedonoff)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoCusparseGeneric,
-     precisionOverride, skipMeta, skipCUDAIf)
+     precisionOverride, skipMeta, skipCUDAIf, skipCPUIfNoMklSparse)
 from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing._internal.common_dtype import floating_types, get_all_dtypes
 from test_sparse import CUSPARSE_SPMM_COMPLEX128_SUPPORTED
@@ -32,6 +32,11 @@ def _check_cusparse_spgemm_available():
     min_supported_version = (11, 0)
     return version >= min_supported_version
 
+def _check_cusparse_sddmm_available():
+    version = _get_torch_cuda_version()
+    # cusparseSDDMM was added in 11.2.1 but we don't have access to patch version
+    min_supported_version = (11, 3)
+    return version >= min_supported_version
 
 # This should be just an import from test_linalg instead of code duplication
 # but https://github.com/pytorch/pytorch/pull/63511#discussion_r733989701
@@ -573,8 +578,9 @@ class TestSparseCSR(TestCase):
                 with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
                     torch.addmm(s, csr, m2)
 
+    @skipCPUIfNoMklSparse
     @skipCUDAIfNoCusparseGeneric
-    @dtypes(*torch.testing.floating_types())
+    @dtypes(*floating_and_complex_types())
     @dtypesIfCUDA(*get_all_complex_dtypes(),
                   *get_all_fp_dtypes(include_half=SM53OrLater, include_bfloat16=SM80OrLater))
     def test_csr_matvec(self, device, dtype):
@@ -589,11 +595,7 @@ class TestSparseCSR(TestCase):
             self.assertEqual(res, expected)
 
             bad_vec = torch.randn(side + 10, dtype=dtype, device=device)
-            err_msg = "mv: expected"
-            # CUDA path now uses generic meta/structured implementation
-            # TODO: move CPU path to not use `mv_sparse` function
-            if self.device_type == 'cuda':
-                err_msg = "size mismatch, got"
+            err_msg = "size mismatch, got"
             with self.assertRaisesRegex(RuntimeError, err_msg):
                 csr.matmul(bad_vec)
 
@@ -843,7 +845,7 @@ class TestSparseCSR(TestCase):
         _test_spadd_shape(10, [100, 1])
         _test_spadd_shape(10, [1, 100])
 
-    @onlyCUDA
+    @skipCPUIfNoMklSparse
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_sparse_add(self, device, dtype):
         def run_test(m, n, index_dtype):
@@ -874,7 +876,6 @@ class TestSparseCSR(TestCase):
             for m, n in itertools.product([3, 5], [3, 5]):
                 run_test(m, n, index_dtype)
 
-    @onlyCUDA
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_sparse_add_errors(self, device, dtype):
         def run_test(index_type):
@@ -947,6 +948,113 @@ class TestSparseCSR(TestCase):
         for (k, n), (upper, unitriangular, transpose) in itertools.product(itertools.product(ks, ns),
                                                                            itertools.product([True, False], repeat=3)):
             run_test(n, k, upper, unitriangular, transpose)
+
+    @onlyCUDA
+    @skipCUDAIf(
+        not _check_cusparse_sddmm_available(),
+        "cuSparse Generic API SDDMM is not available"
+    )
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
+                        torch.float64: 1e-8, torch.complex128: 1e-8})
+    def test_sampled_addmm(self, device, dtype):
+        def run_test(c, a, b, op_a, op_b, *, alpha=None, beta=None):
+            if dtype.is_complex:
+                alpha = random.random() + 0.3j if alpha is None else alpha
+                beta = random.random() + 0.6j if beta is None else beta
+            else:
+                alpha = random.random() if alpha is None else alpha
+                beta = random.random() if beta is None else beta
+
+            if op_a and a.shape == b.shape:
+                a = a.mH
+            if op_b and a.shape == b.shape:
+                b = b.mH
+
+            actual = torch.sparse.sampled_addmm(c, a, b, alpha=alpha, beta=beta)
+
+            out = torch.sparse_csr_tensor(
+                *map(torch.clone, (actual.crow_indices(), actual.col_indices())),
+                torch.empty_like(actual.values()),
+                size=c.shape
+            )
+            torch.sparse.sampled_addmm(c, a, b, alpha=alpha, beta=beta, out=out)
+
+            spy_c = torch.sparse_csr_tensor(c.crow_indices(), c.col_indices(), torch.ones_like(c.values()), size=c.shape)
+            expected = alpha * (a @ b) * spy_c.to_dense() + beta * c.to_dense()
+            self.assertEqual(actual.to_dense(), out.to_dense())
+            self.assertEqual(actual.to_dense(), expected)
+
+        for index_dtype in [torch.int32, torch.int64]:
+            for (m, n, k), noncontiguous in zip(itertools.product([1, 5], repeat=3), [True, False]):
+                nnz = random.randint(0, m * n)
+                c = self.genSparseCSRTensor((m, n), nnz, dtype=dtype, device=device, index_dtype=index_dtype)
+                a = make_tensor((m, k), dtype=dtype, device=device, noncontiguous=noncontiguous)
+                b = make_tensor((k, n), dtype=dtype, device=device, noncontiguous=noncontiguous)
+                for op_a, op_b in itertools.product([True, False], repeat=2):
+                    run_test(c, a, b, op_a, op_b)
+
+    @onlyCUDA
+    @skipCUDAIf(
+        not _check_cusparse_sddmm_available(),
+        "cuSparse Generic API SDDMM is not available"
+    )
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
+                        torch.float64: 1e-8, torch.complex128: 1e-8})
+    def test_sampled_addmm_zero_sized(self, device, dtype):
+        def run_test(c, a, b):
+            actual = torch.sparse.sampled_addmm(c, a, b)
+            self.assertEqual(actual.shape, c.shape)
+
+        for m, n, k in itertools.product([0, 5], repeat=3):
+            c = torch.empty(m, n, dtype=dtype, device=device, layout=torch.sparse_csr)
+            a = make_tensor((m, k), dtype=dtype, device=device)
+            b = make_tensor((k, n), dtype=dtype, device=device)
+            run_test(c, a, b)
+
+    @onlyCUDA
+    @skipCUDAIf(
+        not _check_cusparse_sddmm_available(),
+        "cuSparse Generic API SDDMM is not available"
+    )
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_sampled_addmm_errors(self, device, dtype):
+        # test that the errors are the same for dense and sparse sampled versions
+        # import re
+
+        # shapes must be compatible for matrix multiplication
+        a = make_tensor((2, 3), dtype=dtype, device=device)
+        a_sparse = a.to_sparse_csr()
+        with self.assertRaisesRegex(RuntimeError, r"cannot be multiplied"):
+            torch.sparse.sampled_addmm(a_sparse, a, a)
+
+        # mat1 must be a matrix
+        with self.assertRaisesRegex(RuntimeError, r"Expected mat1 to be a matrix"):
+            torch.sparse.sampled_addmm(a_sparse, a.unsqueeze(0), a)
+
+        # mat2 must be a matrix
+        with self.assertRaisesRegex(RuntimeError, r"Expected mat2 to be a matrix"):
+            torch.sparse.sampled_addmm(a_sparse, a, a.unsqueeze(0))
+
+        a = make_tensor((2, 2), dtype=dtype, device=device)
+        b = make_tensor((3, 3), dtype=dtype, device=device)
+        b_sparse = b.to_sparse_csr()
+        with self.assertRaisesRegex(RuntimeError, r"self dim 0 must match mat1 dim 0"):
+            torch.sparse.sampled_addmm(b_sparse, a, a)
+
+        b = make_tensor((2, 3), dtype=dtype, device=device)
+        b_sparse = b.to_sparse_csr()
+        with self.assertRaisesRegex(RuntimeError, r"self dim 1 must match mat2 dim 1"):
+            torch.sparse.sampled_addmm(b_sparse, a, a)
+
+        a = make_tensor((2, 2), dtype=dtype, device=device)
+        a_sparse = a.to_sparse_csr()
+        with self.assertRaisesRegex(RuntimeError, r"Expected mat1 to have strided layout"):
+            torch.sparse.sampled_addmm(a_sparse, a_sparse, a_sparse)
+
+        with self.assertRaisesRegex(RuntimeError, r"Expected mat2 to have strided layout"):
+            torch.sparse.sampled_addmm(a_sparse, a, a_sparse)
 
     @dtypes(*get_all_dtypes())
     def test_coo_csr_conversion(self, device, dtype):

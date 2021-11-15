@@ -1545,10 +1545,10 @@ class DistributedDataParallel(Module, Joinable):
                 or int(torch.version.cuda.split('.')[0]) < 11
                 or not dist.is_available()
                 or not dist.is_nccl_available()
-                or torch.cuda.nccl.version() < (2, 9, 7)
+                or torch.cuda.nccl.version() < (2, 10)
             )
         ):
-            self._log_and_throw(TypeError, "BF16 all reduce communication hook required CUDA 11+ and NCCL 2.9.7+.")
+            self._log_and_throw(TypeError, "BF16 all reduce communication hook required CUDA 11+ and NCCL 2.10+.")
 
     @property
     def _distributed_rank(self):
