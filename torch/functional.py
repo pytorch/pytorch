@@ -1653,25 +1653,21 @@ def align_tensors(*tensors):
     raise RuntimeError('`align_tensors` not yet implemented.')
 
 def unravel_index(
-    indices: Union[Tensor, Tuple[int, ...]],
+    indices: Tensor,
     shape: Union[Tensor, Tuple[int, ...]],
     *,
-    as_tuple: bool = False
-) -> Union[Tuple[Tensor, ...], List[Tensor], Tensor]:
+    as_tuple: bool = True
+) -> Union[Tuple[Tensor, ...], Tensor]:
     r"""Converts flat indices into unraveled coordinates for the given target shape.
-
-    Args::
-        indices: A sequence (`tuple`, `list` or a `Tensor`) containing flattened indices to be unraveled, should be integral type.
+    Args:
+        indices: A `Tensor` containing flattened indices to be unraveled, should be integral type.
         shape: The shape (can be a `tuple`, `list` or a `Tensor`) used for unravelling the `indices`.
-
-    Keyword Args::
+    Keyword Args:
         as_tuple: A boolean value, which if `True` will return the unraveled `indices` as tuple,
                   else a `Tensor` will be returned. Default: `False`
-
-    Returns::
+    Returns:
         unraveled coordinates from the given `indices`, and `shape`. See description of `as_tuple` for
         returning a tuple.
-
     Example::
         >>> indices = torch.tensor([22, 41, 37])
         >>> shape = (7, 6)
@@ -1682,60 +1678,35 @@ def unravel_index(
         >>> torch.unravel_index(indices, shape, as_tuple=True)
         (tensor([3, 6, 6]), tensor([4, 5, 1]))
     """
-    if not isinstance(shape, Tensor):
-        if not isinstance(shape, (tuple, list)):
-            raise TypeError("Shape should be either a tuple or a list if not tensor,"
-                            f" but found: {type(shape)}.")
-        for dim in shape:
-            if not isinstance(dim, int):
-                raise TypeError("Expected shape to have only integral elements.")
-            if dim < 0:
-                raise ValueError("Negative dimension in shape is not allowed.")
-        shape = torch.tensor(shape, dtype=torch.int64)
-    else:
-        if shape.dtype not in integral_types():
-            raise TypeError(f"Unsupported dtype for shape {shape.dtype}, only integral types allowed.")
-        if torch.any(shape < 0):
-            raise ValueError("Negative dimension in shape is not allowed.")
+    def _helper_type_check(tens: Union[Sequence, Tensor], name: str):
+        if isinstance(tens, Tensor):
+            if tens.dtype not in integral_types():
+                raise TypeError(f"Unsupported dtype for shape {tens.dtype}, only integral types allowed.")
+            if torch.any(tens < 0):
+                raise ValueError(f"Negative values in {name} are not allowed")
+        else:
+            raise TypeError(f"{name} should either be a Sequence or a Tensor, but found {type(tens)}.")
 
-    if not isinstance(indices, Tensor):
-        if not isinstance(indices, (tuple, list)):
-            raise TypeError("Indices should be either a tuple or a list if not tensor,"
-                            f" but found: {type(indices)}.")
-        for index in indices:
-            if not isinstance(index, int):
-                raise TypeError("Expected indices to have only integral elements.")
-            if index < 0:
-                raise ValueError("Negative indices are not allowed.")
-        indices = torch.tensor(indices, dtype=torch.int64)
-    else:
-        if indices.dtype not in integral_types():
-            raise TypeError(f"Unsupported dtype for indices {indices.dtype}, only integral types allowed.")
-        if torch.any(indices < 0):
-            raise ValueError("Negative indices are not allowed.")
+    _helper_type_check(indices, "indices")
+
+    if isinstance(shape, Sequence):
+        # Convert to a tensor, with the same properties as that of indices
+        shape = indices.new_tensor(shape)
+    _helper_type_check(shape, "shape")
 
     # In case no indices passed, short-circuit to return itself
     if indices.numel() == 0:
         return tuple(indices) if as_tuple else indices
+
     if shape.numel() == 0:
         raise ValueError(f"Empty shape tensor passed, expected shape tensor of minimum size {indices.shape}.")
 
+    shape = torch.cat((shape, torch.tensor((1,))), dim=0)
     if torch.max(indices) >= torch.prod(shape):
         raise ValueError("Given indices should be representible for the given shape.")
 
-    # For zero-dim shape, return 0 by default
-    if shape.dim() == 0:
-        _zero = torch.tensor(0, dtype=torch.int64, device=indices.device)
-        return tuple(_zero) if as_tuple else _zero
-
-    # List to store unraveled indices, to be converted to a tuple/tensor depending on
-    # to_tuple kw-only arg
-    coords = list()
-    for dim in reversed(shape):
-        coords.append(indices % dim)
-        indices = torch.div(indices, dim, rounding_mode='trunc')
-
+    coefs = shape[1:].flipud().cumprod(dim=0).flipud()
+    coords = torch.div(indices[..., None], coefs, rounding_mode='trunc') % shape[:-1]
     if as_tuple:
-        return tuple(reversed(coords))
-    else:
-        return torch.stack(coords[::-1], dim=-1)
+        return tuple(coords[..., i] for i in range(coords.size(-1)))
+    return coords
