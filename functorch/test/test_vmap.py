@@ -3124,7 +3124,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.cross_entropy', 'none'),
         xfail('nn.functional.cross_entropy', 'sum'),
         xfail('nn.functional.pad', 'circular'),
-        xfail('nn.functional.unfold'),
         xfail('norm', 'fro'),
         xfail('norm', 'nuc'),
         xfail('ormqr'),

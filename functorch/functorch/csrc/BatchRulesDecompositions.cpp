@@ -87,6 +87,9 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   OP_DECOMPOSE2(multiply, Tensor );
   OP_DECOMPOSE(narrow);
   OP_DECOMPOSE(negative);
+  OP_DECOMPOSE(nll_loss_nd);
+  OP_DECOMPOSE(nll_loss);
+  OP_DECOMPOSE(nll_loss2d);
   OP_DECOMPOSE2(not_equal, Tensor );
   OP_DECOMPOSE(outer);
   OP_DECOMPOSE(pairwise_distance);
@@ -125,9 +128,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   OP_DECOMPOSE(var_mean);
   OP_DECOMPOSE2(var_mean, dim);
   OP_DECOMPOSE2(where, self);
-  OP_DECOMPOSE(nll_loss_nd);
-  OP_DECOMPOSE(nll_loss);
-  OP_DECOMPOSE(nll_loss2d);
 }
 
 }}
