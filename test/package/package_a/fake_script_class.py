@@ -1,4 +1,4 @@
-from __future__ import annotations
+from typing import Any
 
 import torch
 
@@ -25,7 +25,7 @@ class IdListFeature:
     def __init__(self):
         self.id_list = torch.ones(1, 1)
 
-    def returns_self(self) -> IdListFeature:
+    def returns_self(self) -> "IdListFeature":
         return IdListFeature()
 
 

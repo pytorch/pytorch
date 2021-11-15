@@ -107,7 +107,6 @@ class TestPackageScript(PackageTestCase):
 
         buffer = BytesIO()
         with PackageExporter(buffer) as pe:
-            pe.extern("__future__")
             pe.save_module(fake.__name__)
         buffer.seek(0)
 

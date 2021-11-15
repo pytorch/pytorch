@@ -29,7 +29,6 @@ class TestSaveLoad(PackageTestCase):
     def test_saving_source(self):
         filename = self.temp()
         with PackageExporter(filename) as he:
-            he.extern("__future__")
             he.save_source_file("foo", str(packaging_directory / "module_a.py"))
             he.save_source_file("foodir", str(packaging_directory / "package_a"))
         hi = PackageImporter(filename)
