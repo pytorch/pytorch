@@ -1581,6 +1581,31 @@ class TestFunctionalMapDataPipe(TestCase):
             self.assertEqual(concat_dp[index], (list(range(10)) + list(range(5)))[index])
         self.assertEqual(list(concat_dp), list(range(10)) + list(range(5)))
 
+    def test_zip_datapipe(self):
+        input_dp1 = dp.map.SequenceWrapper(range(10))
+        input_dp2 = dp.map.SequenceWrapper(range(5))
+        input_dp3 = dp.map.SequenceWrapper(range(15))
+
+        # Functional Test: requires at least one input DataPipe
+        with self.assertRaisesRegex(ValueError, r"Expected at least one DataPipe"):
+            dp.map.Zipper()
+
+        # Functional Test: all inputs must be MapDataPipes
+        with self.assertRaisesRegex(TypeError, r"Expected all inputs to be `MapDataPipe`"):
+            dp.map.Zipper(input_dp1, ())  # type: ignore[arg-type]
+
+        # Functional Test: Zip the elements up as a tuples
+        zip_dp = input_dp1.zip(input_dp2, input_dp3)
+        self.assertEqual([(i, i, i) for i in range(5)], [zip_dp[i] for i in range(5)])
+
+        # Functional Test: Raise IndexError when index equal or exceed the length of the shortest DataPipe
+        with self.assertRaisesRegex(IndexError, r"out of range"):
+            input_dp1.zip(input_dp2, input_dp3)[5]
+
+        # __len__ Test: returns the length of the shortest DataPipe
+        zip_dp = input_dp1.zip(input_dp2, input_dp3)
+        self.assertEqual(5, len(zip_dp))
+
     def test_map_datapipe(self):
         arr = range(10)
         input_dp = dp.map.SequenceWrapper(arr)
