@@ -248,6 +248,8 @@ class ModifiesVarChecker : public IRVisitor {
   bool found_{false};
 };
 
+enum AccMode { READ, WRITE, BOTH };
+
 // This indicates the path from root to a stmt A in AST. Specifically, it
 // consists of a vector of integers: each integer represents the number of stmts
 // before A's ancestor or A in the block. For example, "1:1:0" points to stmt
@@ -258,98 +260,11 @@ class ModifiesVarChecker : public IRVisitor {
 //  d[i] = 0;
 //  for j
 //    d[i] += e[i, j];
-class StmtIndex {
- public:
-  void append(int32_t id) {
-    stmt_index_.emplace_back(id);
-  }
-  void pop() {
-    stmt_index_.pop_back();
-  }
-
-  const std::vector<int32_t>& getStmtIndex() {
-    return stmt_index_;
-  }
-
-  bool operator==(StmtIndex& index) {
-    auto compare = index.getStmtIndex();
-    if (stmt_index_.size() != compare.size()) {
-      return false;
-    }
-    int size = compare.size();
-    for (int i = 0; i < size; i++) {
-      if (stmt_index_.at(i) != compare.at(i)) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  bool operator<(StmtIndex& index) {
-    auto compare = index.getStmtIndex();
-    int size = stmt_index_.size() < compare.size() ? stmt_index_.size()
-                                                   : compare.size();
-    for (int i = 0; i < size; i++) {
-      if (stmt_index_.at(i) > compare.at(i)) {
-        return false;
-      }
-    }
-    return !(*this == index);
-  }
-
-  bool operator>(StmtIndex& index) {
-    auto compare = index.getStmtIndex();
-    int size = stmt_index_.size() < compare.size() ? stmt_index_.size()
-                                                   : compare.size();
-    for (int i = 0; i < size; i++) {
-      if (stmt_index_.at(i) < compare.at(i)) {
-        return false;
-      }
-    }
-    return !(*this == index);
-  }
-
-  std::string getStmtIndexString() {
-    std::string cstr = "";
-    for (int i = 0; i < stmt_index_.size(); i++) {
-      cstr += std::to_string(stmt_index_.at(i));
-      cstr += ":";
-    }
-    return cstr;
-  }
-
- private:
-  std::vector<int32_t> stmt_index_;
-};
-
-// Traverse the root stmt to identify the position of each stmt in the AST,
-// i.e., a StmtIndex
-class StmtIndexer : public IRVisitor {
- public:
-  StmtIndex getStmtIndex() {
-    return stmt_index_;
-  }
-
- private:
-  void visit(BlockPtr v) {
-    int count = 0;
-    for (StmtPtr s : *v) {
-      stmt_index_.append(count);
-      s->accept(this);
-      stmt_index_.pop();
-      count++;
-    }
-  }
-
-  StmtIndex stmt_index_;
-};
-
-enum AccMode { READ, WRITE, BOTH };
-
+using StmtIndex = std::vector<int32_t>;
 // Traverses the IR to identify all reads/writes to a buf, and their positions
 // in the AST which is represented as a StmtIndex
 using BufAccessNode = std::tuple<StmtPtr, AccMode, StmtIndex>;
-class BufAccesses : public StmtIndexer {
+class BufAccesses : public IRVisitor {
  public:
   BufAccesses(BufPtr b) : buf_(b) {}
 
@@ -364,6 +279,9 @@ class BufAccesses : public StmtIndexer {
   }
 
  private:
+  StmtIndex getStmtIndex() {
+    return stmt_index_;
+  }
   bool findBufReads(StmtPtr s) {
     auto loads1 = NodeFinder<Load>::find(s);
     for (auto l : loads1) {
@@ -432,8 +350,20 @@ class BufAccesses : public StmtIndexer {
     insertAccesses(v);
   }
 
+  void visit(BlockPtr v) {
+    // Stmt counter of the block
+    int count = 0;
+    for (StmtPtr s : *v) {
+      stmt_index_.push_back(count);
+      s->accept(this);
+      stmt_index_.pop_back();
+      count++;
+    }
+  }
+
   BufPtr buf_;
   std::vector<BufAccessNode> accesses_;
+  StmtIndex stmt_index_;
 };
 
 // A class that analyzes the given program relevant for Block backend
