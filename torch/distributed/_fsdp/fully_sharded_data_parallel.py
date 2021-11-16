@@ -1,4 +1,5 @@
 import functools
+import logging
 import traceback
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -29,7 +30,6 @@ from .utils import (
 
 if TYPE_CHECKING:
     from collections import OrderedDict  # noqa: F401
-
 
 
 @dataclass
@@ -101,7 +101,7 @@ class FullyShardedDataParallel(nn.Module):
         self,
         module: nn.Module,
         process_group: Optional[ProcessGroup] = None,
-        cpu_offload: Optional[CPUOffload] = None
+        cpu_offload: Optional[CPUOffload] = None,
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
@@ -111,7 +111,6 @@ class FullyShardedDataParallel(nn.Module):
         # device for computation, if module is on GPU, use module.device;
         # if module is on CPU, use current device;
         self.compute_device = _get_default_cuda_device(module)
-        self.compute_dtype = _get_data_type(module)
 
         # Free full params and keep shard only after forward
         self.reshard_after_forward = True
@@ -379,7 +378,10 @@ class FullyShardedDataParallel(nn.Module):
         assert hasattr(p, "_is_sharded") and hasattr(
             p, "_orig_size"
         ), "Parameters should have been sharded during construction."
-        if hasattr(p, "_local_shard"):
+        # If _local_shard has been set in the first lazy init and
+        # current parameter is pointed to _local_shard, no need to
+        # set the _local_shard again.
+        if hasattr(p, "_local_shard") and p.data == p._local_shard:
             # If CPU offloading, p._local_shard should have been placed on CPU
             # during its first lazy construction.
             if self.cpu_offload.offload_params:
@@ -391,11 +393,23 @@ class FullyShardedDataParallel(nn.Module):
                 )
             return
 
+        if hasattr(p, "_local_shard") and p.data != p._local_shard:
+            logging.warning(
+                "Parameter storage is changed outside FSDP, it is "
+                "expensive to change parameter storage outside FSDP as "
+                "it needs to reallocate buffers every iteration to store "
+                "gathered full parameters and also sharded gradients if cpu offload "
+                "is enabled. Please try not to change parameter storage "
+                "outside FSDP. "
+            )
+
         # A single shard of the parameters. Also makes p._local_shard to be on
         # CPU if we are CPU offloading, since p.data would be on CPU during
         # init.
         if self.cpu_offload.offload_params:
-            assert p.device == torch.device("cpu"), "Expected param to be on CPU when cpu_offloading is enabled."
+            assert p.device == torch.device(
+                "cpu"
+            ), "Expected param to be on CPU when cpu_offloading is enabled."
         p._local_shard = p.data  # type: ignore[attr-defined]
         # If CPU offloading, pin the memory to enable faster CPU -> GPU device
         # transfer.
@@ -407,8 +421,7 @@ class FullyShardedDataParallel(nn.Module):
             # CPU grad shard in pinned memory so that we can do a non-blocking
             # transfer.
             p._cpu_grad = torch.zeros_like(  # type: ignore[attr-defined]
-                p,
-                device=torch.device("cpu")
+                p, device=torch.device("cpu")
             ).pin_memory()
 
         # We also maintain a full-sized parameter of type self.compute_dtype.
@@ -420,7 +433,7 @@ class FullyShardedDataParallel(nn.Module):
             p._full_param_padded = torch.zeros(  # type: ignore[attr-defined]
                 p.numel() * self.world_size,
                 device=self.compute_device,
-                dtype=self.compute_dtype,
+                dtype=p.dtype,
             )
             _free_storage(p._full_param_padded)  # type: ignore[attr-defined]
 
@@ -880,15 +893,17 @@ class FullyShardedDataParallel(nn.Module):
     @torch.no_grad()
     def _use_param_local_shard(self, params: Optional[List[Parameter]] = None) -> None:
         """Use local shard for a list of params. Also implicitly offloads
-           parameters back to CPU if we are CPU offloading."""
+        parameters back to CPU if we are CPU offloading."""
         if params is None:
             params = self.params
         for p in params:
             if self.cpu_offload.offload_params:
                 # Ensure local_shard resides in CPU if we are offloading params.
-                assert (
-                    p._local_shard.device == torch.device("cpu")  # type: ignore[attr-defined]
-                ), "Expected p._local_shard to be on CPU"  # type: ignore[attr-defined]
+                assert p._local_shard.device == torch.device(
+                    "cpu"
+                ), (  # type: ignore[attr-defined]
+                    "Expected p._local_shard to be on CPU"
+                )  # type: ignore[attr-defined]
             p.data = p._local_shard  # type: ignore[attr-defined]
 
     def _assert_state(self, state: Union[TrainingState_, List[TrainingState_]]) -> None:
@@ -925,17 +940,6 @@ def _get_default_cuda_device(module: nn.Module) -> torch.device:
     # Fall back to current CUDA device
     return torch.device("cuda")
 
-def _get_data_type(module: nn.Module) -> torch.dtype:
-    """Try to infer data type from module parameters."""
-    try:
-        dtype = next(module.parameters()).dtype
-        return dtype
-    # e.g., if module does not have parameters, it will throw StopIteration,
-    # in this case, instead of raising exception, return torch.float32.
-    except StopIteration:
-        pass
-    # Fall back to torch.float32
-    return torch.float32
 
 def _free_storage(data: torch.Tensor) -> None:
     """Free underlying storage of a Tensor."""
