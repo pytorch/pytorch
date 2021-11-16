@@ -61,10 +61,20 @@ ALLOW_LIST = [
     ("aten::_baddbmm_mkl_", datetime.date(2021, 10, 31)),
     ("aten::grid_sampler_2d_backward", datetime.date(2021, 10, 21)),
     ("prim::TensorExprDynamicGuard", datetime.date(2021, 11, 20)),
+    ("aten::split_with_sizes", datetime.date(2021, 11, 20)),
+    ("aten::split", datetime.date(2021, 11, 20)),
+    ("aten::vsplit", datetime.date(2021, 11, 20)),
+    ("aten::tensor_split", datetime.date(2021, 11, 20)),
+    ("aten::chunk", datetime.date(2021, 11, 20)),
+    ("aten::unbind", datetime.date(2021, 11, 20)),
+    ("aten::hsplit", datetime.date(2021, 11, 20)),
+    ("aten::dsplit", datetime.date(2021, 11, 20)),
     ("caffe2::", datetime.date(2021, 10, 23)),
-    ("aten::kl_div_backward", datetime.date(2021, 11, 20)),
-    ("aten::l1_loss_backward.grad_input", datetime.date(2021, 11, 20)),
-    ("aten::smooth_l1_loss_backward.grad_input", datetime.date(2021, 11, 20)),
+    ("prepacked::unpack_prepacked_sizes_conv2d", datetime.date(9999, 1, 1)),
+    ("prepacked::unpack_prepacked_sizes_linear", datetime.date(9999, 1, 1)),
+    ("aten::kl_div_backward", datetime.date(2021, 12, 31)),
+    ("aten::l1_loss_backward.grad_input", datetime.date(2021, 12, 31)),
+    ("aten::smooth_l1_loss_backward.grad_input", datetime.date(2021, 12, 31)),
 ]
 
 ALLOW_LIST_COMPILED = [

@@ -150,27 +150,9 @@ template <typename T>
 struct THPUtils_typeTraits {};
 
 #include <torch/csrc/generic/utils.h>
-#include <TH/THGenerateAllTypes.h>
+#include <TH/THGenerateByteType.h>
 
-#include <torch/csrc/generic/utils.h>
-#include <TH/THGenerateComplexTypes.h>
-
-#include <torch/csrc/generic/utils.h>
-#include <TH/THGenerateHalfType.h>
-
-#include <torch/csrc/generic/utils.h>
-#include <TH/THGenerateBFloat16Type.h>
-
-#include <torch/csrc/generic/utils.h>
-#include <TH/THGenerateBoolType.h>
-
-#include <torch/csrc/generic/utils.h>
-#include <TH/THGenerateQTypes.h>
-
-THLongStoragePtr THPUtils_unpackSize(PyObject *arg);
-bool THPUtils_tryUnpackLongs(PyObject *arg, THLongStoragePtr& result);
 std::vector<int64_t> THPUtils_unpackLongs(PyObject *arg);
-bool THPUtils_tryUnpackLongVarArgs(PyObject *args, int ignore_first, THLongStoragePtr& result);
 PyObject * THPUtils_dispatchStateless(PyObject *tensor, const char *name, PyObject *args, PyObject *kwargs);
 
 template<typename _real, typename = void>
