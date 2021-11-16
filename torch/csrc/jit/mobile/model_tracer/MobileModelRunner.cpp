@@ -29,7 +29,7 @@ std::vector<std::vector<at::IValue>> MobileModelRunner::
         "but got a ",
         input.tagKind(),
         " instead");
-    ret.push_back(input.toTuple()->elements());
+    ret.push_back(input.toTupleRef().elements());
   }
 
   return ret;
@@ -197,15 +197,6 @@ void MobileModelRunner::run_argless_functions(
       module_->run_method(function_name);
     }
   }
-}
-
-std::string MobileModelRunner::get_extra_file_contents(
-    std::string const& file_path,
-    std::string const& extra_file_name) {
-  std::unordered_map<std::string, std::string> extra;
-  extra[extra_file_name] = "";
-  torch::jit::_load_extra_only_for_mobile(file_path, c10::nullopt, extra);
-  return extra[extra_file_name];
 }
 
 bool MobileModelRunner::set_has_metal_gpu_operators(

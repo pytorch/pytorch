@@ -47,8 +47,7 @@ from tools.codegen.api.autograd import (
 from tools.codegen.api import cpp
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.context import native_function_manager, with_native_function
-from tools.codegen.gen import FileManager
-from tools.codegen.utils import mapMaybe
+from tools.codegen.utils import mapMaybe, FileManager
 from tools.codegen.model import (Argument, NativeFunction, SchemaKind,
                                  SelfArgument, TensorOptionsArguments,
                                  BaseType, ListType)
@@ -95,7 +94,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'bmm', 'diagonal', 'alias', 'atan', 'log', 'log10', 'log1p', 'log2', 'reciprocal',
     'tan', 'pow', 'rsqrt', 'tanh', 'tanh_backward', 'asinh', 'acosh', 'atanh', 'take', 'fill_',
     'exp', 'nonzero', 'mean', 'inverse', 'solve', 'linalg_cholesky', 'addcmul', 'addcdiv',
-    'matrix_exp', 'linalg_eigh', 'cholesky_solve', 'linalg_qr', '_svd_helper', '_fft_c2c', '_fft_r2c',
+    'matrix_exp', 'linalg_matrix_exp', 'linalg_eigh', 'cholesky_solve', 'linalg_qr', '_svd_helper', '_fft_c2c', '_fft_r2c',
     'linalg_solve', 'sqrt', 'stack', 'gather', 'index_select', 'index_add_', 'linalg_inv', 'linalg_inv_ex',
     'l1_loss_backward', 'baddbmm', 'addbmm', 'addmm', 'addmv', 'addr', 'linalg_householder_product',
     'constant_pad_nd', 'reflection_pad1d', 'reflection_pad2d', 'reflection_pad3d', 'linalg_cholesky_ex', 'linalg_eig',
@@ -105,9 +104,10 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'replication_pad1d_backward', 'replication_pad2d_backward', 'replication_pad3d_backward',
     'diag', 'masked_scatter', 'masked_select', 'index_fill', 'trace', 'polar', 'cumsum', 'rsub',
     'eig', 'lerp', 'linalg_vector_norm', 'cumprod', 'prod', 'index_copy', 'lu', 'unfold', 'unfold_backward',
-    'index', 'masked_fill', 'cross', 'lu_unpack', 'renorm', '_conj_physical',
+    'index', 'masked_fill', 'linalg_cross', 'lu_unpack', 'renorm', '_conj_physical',
     'scatter', 'scatter_add', 'sigmoid', 'sigmoid_backward', 'trapezoid', 'cumulative_trapezoid',
     'conj_physical_', '_neg_view', '_reshape_alias', '_det_lu_based_helper', 'lu_solve', '_lu_with_info',
+    'linalg_pinv', 'linalg_lstsq',
 }
 
 GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {
@@ -472,7 +472,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
     is_out_fn = f.func.kind() == SchemaKind.out
     returns_void = len(f.func.returns) == 0
     base_name = get_base_name(f)
-    view_info = get_view_info(fn)
+    view_info = get_view_info(f)
 
     def gen_differentiable_input(
         arg: Union[Argument, SelfArgument, TensorOptionsArguments]
@@ -516,8 +516,6 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
     undifferentiable = (base_name in DONT_REQUIRE_DERIVATIVE) or (name in DONT_REQUIRE_DERIVATIVE)
 
     requires_derivative = (not undifferentiable) and (len(differentiable_inputs) > 0) and (len(differentiable_outputs) > 0)
-
-    requires_fw_derivatives = not undifferentiable and len(fw_derivatives) > 0
 
     if info is not None and info.has_derivatives and not requires_derivative:
         raise RuntimeError(f'ERROR: derivative ignored for {name} -- specified an autograd function without derivative')
@@ -812,7 +810,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         unpacked_args = [b.name for b in unpacked_bindings]
         base_type_call = emit_dispatch_call(f, 'self_', unpacked_args)
 
-        if get_view_info(fn) is not None or modifies_arguments(f):
+        if get_view_info(f) is not None or modifies_arguments(f):
             guard = 'at::AutoDispatchBelowAutograd guard;'
         else:
             guard = 'at::AutoDispatchBelowADInplaceOrView guard;'
@@ -976,10 +974,17 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
     if is_out_fn:
         body.append(emit_forbid_fw_derivatives(is_out_fn=True))
     else:
-        if requires_fw_derivatives:
+        if requires_derivative:
             body.extend(emit_fw_derivatives())
-        else:
-            body.append(emit_forbid_fw_derivatives())
+            if len(fw_derivatives) == 0:
+                body.append(emit_forbid_fw_derivatives())
+            else:
+                assert len(fw_derivatives) == len(differentiable_outputs), (
+                    "Expected the number of forward derivatives implemented to match the "
+                    "number of differentiable outputs. NB: This only applies when at least "
+                    "one forward derivative is implemented. Not implementing any forward "
+                    "derivatives is also okay, and we would require inputs to the op to "
+                    "not have associated tangents in that case.")
 
     if requires_derivative:
         # Save only after the forward AD has been set up

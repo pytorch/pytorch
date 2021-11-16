@@ -38,7 +38,7 @@ class MemoryPlanner {
       const FastMap<const Value*, std::vector<const Value*>>&,
       const ValueGroup& value_group,
       bool enable_out_variant,
-      bool manage_graph_output_memory);
+      bool manage_output_tensors);
   // disable copying and moving
   MemoryPlanner(const MemoryPlanner&) = delete;
   MemoryPlanner& operator=(const MemoryPlanner&) = delete;
@@ -47,13 +47,26 @@ class MemoryPlanner {
 
   void allocate();
   void deallocate();
+  void deallocateOutputTensors();
 
   size_t total_num_managed_tensors() const {
     return num_managed_tensors_;
   }
 
+  size_t total_num_managed_output_tensors() const {
+    return managed_output_tensors_.size();
+  }
+
   size_t total_num_unmanaged() const {
+    return num_unmanaged_non_scalars() + num_unmanaged_scalars();
+  }
+
+  C10_NODISCARD size_t num_unmanaged_non_scalars() const {
     return unmanaged_ivalues_.size();
+  }
+
+  C10_NODISCARD size_t num_unmanaged_scalars() const {
+    return num_unmanaged_scalar_ivalues_;
   }
 
   size_t total_managed() const {
@@ -64,26 +77,91 @@ class MemoryPlanner {
     return reused_tensors_;
   }
 
+  size_t numOutputBufferBytes() const {
+    return output_buffer_bytes_;
+  }
+
+  bool isManagedOutputTensorValue(const Value* value) const {
+    return managed_output_tensor_values_.find(value) !=
+        managed_output_tensor_values_.end();
+  }
+
+  // Check if `ivalue` is contained as a managed tensor. Only used in DCHECK().
+  bool isManagedOutputTensor(const IValue& ivalue) const {
+    if (!output_buffer_ || // output buffer got already deallocated.
+        output_buffer_bytes_ == 0 || // memory planning is not yet initialized.
+        !ivalue.isTensor() // a non-tensor is never managed
+    ) {
+      return false;
+    }
+    const auto& tensor = ivalue.toTensor();
+    if (!tensor.has_storage() || !tensor.storage().data_ptr()) {
+      return false;
+    }
+    // TODO: Improve this once D31357486 is landed.
+    uint8_t* tensor_ptr =
+        static_cast<uint8_t*>(tensor.storage().data_ptr().get());
+    uint8_t* buffer_start = static_cast<uint8_t*>(output_buffer_.get());
+    uint8_t* buffer_end = buffer_start + output_buffer_bytes_;
+    return buffer_start <= tensor_ptr && tensor_ptr < buffer_end;
+  }
+
+  bool isManagedStorageImpl(const at::StorageImpl* impl) const {
+    if (managed_tensor_storage_impls_.empty()) {
+      return false;
+    }
+    // Comparing pointers that aren't within the same array is
+    // UB. We're doing fancy memory allocation stuff, so we cast to an
+    // integer type and carry on.
+    const auto impl_p = reinterpret_cast<uintptr_t>(impl);
+    const auto start =
+        reinterpret_cast<uintptr_t>(managed_tensor_storage_impls_.data());
+    const auto end = reinterpret_cast<uintptr_t>(
+        &managed_tensor_storage_impls_[managed_tensor_storage_impls_.size()]);
+    return impl_p >= start && impl_p < end;
+  }
+
+  bool overlapWithInternalBuffer(void* data_ptr) {
+    return buffer_start_ <= data_ptr && data_ptr < buffer_end_;
+  }
+
  private:
   // ivalues created in one run but not managed by MemoryPlanner
   std::vector<IValue*> unmanaged_ivalues_;
 
   // each pair contains the size (in bytes) of data to be allocated
-  // and a vector of Tensors that should be backed by that same data.
-  // Thus, if memonger is disabled, all vectors are of size 1.
+  // and a vector of Tensors' storages that should be backed by that
+  // same data. Thus, if memonger is disabled, all vectors are of
+  // size 1.
+
+  // We allocate StorageImpls ourselves so that 1) we don't have to do
+  // an extra two loads per Tensor (which will likely miss in the CPU
+  // data cache) first reading the Storage (i.e., StorageImpl pointer)
+  // from the TensorImpl object and then second dereferencing it and
+  // 2) our memory access pattern during allocate() has high locality.
+  std::vector<std::pair<size_t, at::StorageImpl>>
+      managed_tensor_storage_impls_{};
+  // We don't have any guarantee that the model doesn't change the
+  // Storage for managed tensors out from under us during execution,
+  // so we have to check the StorageImpls each time we deallocate.
   std::vector<std::pair<size_t, std::vector<at::Tensor*>>> managed_tensors_;
   at::DataPtr buffer_; // allocated each time we call Run()
+  uint8_t* buffer_start_{nullptr};
+  uint8_t* buffer_end_{nullptr};
   size_t num_managed_tensors_{0};
   size_t managed_bytes_{0};
   size_t reused_tensors_{0};
+  size_t num_unmanaged_scalar_ivalues_{0};
 
-  // since output tensors are alive after one inference, their storage
-  // is managed differently (e.g., deallocation happens at client side)
-  // std::vector<std::pair<size_t, std::vector<at::Tensor*>>>
-  //     managed_output_storage_;
-  // size_t managed_output_bytes_{0};
-  // size_t reused_output_tensors_{0};
-  // at::DataPtr output_buffer_; // allocated each time we call Run()
+  // Since output tensors are alive after one inference, their storage
+  // is managed differently (e.g., deallocation happens on the client side).
+  FastSet<const Value*> managed_output_tensor_values_{};
+  std::vector<std::pair<size_t, at::Tensor*>> managed_output_tensors_{};
+  at::DataPtr output_buffer_;
+  size_t output_buffer_bytes_{0};
+
+  void allocateManagedTensors();
+  void allocateOutputTensors();
 
   static size_t compute_aligned_tensor_size(size_t nbytes);
   static at::DataPtr allocate_buffer(size_t size);

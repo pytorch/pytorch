@@ -97,7 +97,7 @@ nn_functional_tests = [
     ('hardshrink', (S, S, S), (0.4,), '', (True,)),
     ('tanhshrink', (S, S, S), (),),
     ('softsign', (S, S, S), (),),
-    ('softplus', (S, S, S), (),),
+    ('softplus', (S, S, S), (), '', (True,)),
     ('softmin', (S, S, S), (0,),),
     ('softmax', (S, S, S), (0,), '', (True,)),
     ('softmax', (S, S, S), (0, 3, torch.double), 'with_all_args', (True,)),
@@ -168,7 +168,7 @@ nn_functional_tests = [
     ('huber_loss', (3, S), ((torch.rand(3, S)),), 'with_grad'),
     ('l1_loss', (3, S), ((torch.rand(3, S)),), 'with_grad'),
     ('mse_loss', (3, S), ((torch.rand(3, S)),), 'with_grad'),
-    ('margin_ranking_loss', (3, S), ((3, S), (S,)),),
+    ('margin_ranking_loss', (S,), ((S,), (S,)),),
     ('hinge_embedding_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
     ('soft_margin_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
     ('multilabel_soft_margin_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
@@ -268,6 +268,8 @@ def value_to_literal(value):
     if isinstance(value, str):
         # Quotes string and escapes special characters
         return ascii(value)
+    if isinstance(value, torch.Tensor):
+        return 'torch.' + str(value)
     else:
         return str(value)
 
@@ -530,10 +532,12 @@ def get_nn_module_name_from_kwargs(**kwargs):
         return kwargs['constructor'].__name__
 
 def get_nn_mod_test_name(**kwargs):
-    name = get_nn_module_name_from_kwargs(**kwargs)
-    test_name = name
-    if 'desc' in kwargs:
-        test_name = "{}_{}".format(test_name, kwargs['desc'])
+    if 'fullname' in kwargs:
+        test_name = kwargs['fullname']
+    else:
+        test_name = get_nn_module_name_from_kwargs(**kwargs)
+        if 'desc' in kwargs:
+            test_name = "{}_{}".format(test_name, kwargs['desc'])
     return 'test_nn_{}'.format(test_name)
 
 def get_nn_module_class_from_kwargs(**kwargs):

@@ -3,12 +3,15 @@
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
 #include <c10/core/CPUAllocator.h>
+#include <c10/macros/Macros.h>
+#include <c10/util/ArrayRef.h>
 #include <c10/util/variant.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/inliner.h>
+#include <torch/csrc/jit/runtime/static/ProcessedNodeInputs.h>
 
 #ifdef FBCODE_CAFFE2
 #include <folly/container/F14Map.h>
@@ -33,25 +36,43 @@ using FastSet = std::unordered_set<Key>;
 TORCH_API bool canEnableStaticRuntime(
     const std::shared_ptr<torch::jit::Graph>& graph);
 
+TORCH_API std::string dumpValueSet(
+    const FastSet<const Value*>& value_set,
+    const char* set_name = "");
+
+TORCH_API inline bool doesNotHeapAllocateWhenStoredInIValue(const Type& type) {
+  switch (type.kind()) {
+    // NOTE: NumberType may allocate because it includes complex.
+    case TypeKind::NoneType:
+    case TypeKind::IntType:
+    case TypeKind::FloatType:
+    case TypeKind::BoolType:
+    case TypeKind::DeviceObjType:
+    case TypeKind::StreamObjType:
+      return true;
+    default:
+      return false;
+  }
+}
+
 // Group values used by `graph` into three categories:
 //
-// - input_or_constant_aliases:
-//     values that are either inputs or contain aliases of inputs
-//     or constants.
 // - output_aliases:
 //     values that are either outputs or contain aliases of outputs
-//     and are not in input_or_constant_aliases.
-// Values that dont't show up in input_or_constant_aliases and output_aliases
-// are
-//     created and consumed within the graph.
+// - external_aliases:
+//     values that are inputs, constants, or their aliases.
+//     The output aliases that end up here are as a result of aliasDb failing to
+//     recognize them as outputs due to collection object (e.g., Tuple) aliasing
+//     inputs.
+// Values that dont't show up in output_aliases or external_aliases are created
+// and consumed within the graph.
 class ValueGroup {
  public:
   explicit ValueGroup() = default;
   void init(const std::shared_ptr<torch::jit::Graph>& graph, AliasDb& db);
 
-  bool isInputAlias(const Value* value) const {
-    return input_or_constant_aliases_.find(value) !=
-        input_or_constant_aliases_.end();
+  bool isExternalAlias(const Value* value) const {
+    return external_aliases_.find(value) != external_aliases_.end();
   }
 
   bool isOutputAlias(const Value* value) const {
@@ -59,12 +80,19 @@ class ValueGroup {
   }
 
   bool isAlwaysAlive(const Value* value) const {
-    return isInputAlias(value) || isOutputAlias(value);
+    return isExternalAlias(value) || isOutputAlias(value);
+  }
+
+  std::string toString() const {
+    return c10::str(
+        dumpValueSet(output_aliases_, "ValueGroup::output_aliases_"),
+        "\n",
+        dumpValueSet(external_aliases_, "ValueGroup::external_aliases_"));
   }
 
  private:
-  FastSet<const Value*> input_or_constant_aliases_;
   FastSet<const Value*> output_aliases_;
+  FastSet<const Value*> external_aliases_;
 };
 
 struct TORCH_API StaticModuleOptions {
@@ -79,7 +107,7 @@ struct TORCH_API StaticModuleOptions {
   // to batch allocate tensor storage for output tensors of the
   // graph, where storage is deallocated outside static runtime
   // (enable_out_variant must be true)
-  bool optimize_graph_output_memory{false};
+  bool manage_output_tensors{false};
 };
 
 /// The static runime supports two execution modes.
@@ -159,12 +187,11 @@ class TORCH_API StaticModule {
   using DefInfo = std::pair<int, int>;
 
  public:
-  std::vector<at::Tensor> operator()(const std::vector<at::Tensor>& inps);
-
-  // This interface only works if StaticModule was initialized
-  // with a TorchScript module, otherwise use the above interface
   c10::IValue operator()(
       const std::vector<c10::IValue>& args,
+      const std::unordered_map<std::string, c10::IValue>& kwargs);
+  c10::IValue operator()(
+      std::vector<c10::IValue>&& args,
       const std::unordered_map<std::string, c10::IValue>& kwargs);
 
   const Graph& graph() const {
@@ -172,28 +199,42 @@ class TORCH_API StaticModule {
   }
 
   const Module& module() const {
+    DCHECK(module_.has_value());
     return *module_;
   }
 
   const StaticModuleOptions& opts() const;
+
+  const ValueGroup& valueGroup() const {
+    return value_group_;
+  }
+
   size_t num_inputs() const;
   size_t num_outputs() const;
 
-  const FastMap<int, std::vector<DefInfo>>& index_map() const {
-    return node_inputs_ssa_def_map_;
-  }
-
-  const std::vector<DefInfo>& output_indices() const {
-    return output_ssa_defs_;
+  C10_NODISCARD const std::vector<uint16_t>& output_indices() const {
+    return output_indices_;
   }
 
   const std::vector<IValue>& constants() const {
     return constants_;
   }
 
+ private:
+  friend class StaticRuntime;
+
+  // Our nodes don't have their inputs & outputs initialized; don't
+  // let anybody but StaticRuntime and tests get them.
   const std::vector<ProcessedNode>& nodes() const {
     return nodes_;
   }
+
+ public:
+  auto num_nodes() const {
+    return nodes_.size();
+  }
+
+  C10_NODISCARD Node* findNodeWithKindForTesting(const std::string& kind) const;
 
   bool is_optimizable_container_type(const Node* n) const {
     auto it = node_is_optimizable_container_type_.find(n);
@@ -214,14 +255,13 @@ class TORCH_API StaticModule {
   }
 
   bool first_input_is_self() const {
-    return first_input_is_self_;
+    return module_.has_value();
   }
 
   StaticRuntime& runtime();
 
  private:
   StaticModuleOptions opts_;
-  bool first_input_is_self_{false};
   std::shared_ptr<torch::jit::Graph> graph_;
   c10::optional<torch::jit::Module> module_;
   c10::optional<c10::FunctionSchema> schema_;
@@ -232,10 +272,8 @@ class TORCH_API StaticModule {
   std::vector<IValue> constants_;
   // The nodes we need to run
   std::vector<ProcessedNode> nodes_;
-  // a vector of ssa_defs corresponding to graph->outputs()
-  std::vector<DefInfo> output_ssa_defs_;
-  // map a node idx (in graph order) to a vector of ssa_defs for node inputs
-  FastMap<int, std::vector<DefInfo>> node_inputs_ssa_def_map_;
+  // Indices of graph outputs in the single values array.
+  std::vector<uint16_t> output_indices_;
 
   ValueGroup value_group_;
 
@@ -255,31 +293,21 @@ class TORCH_API StaticRuntime {
 
   C10_DISABLE_COPY_AND_ASSIGN(StaticRuntime);
 
-  std::vector<at::Tensor> operator()(const std::vector<at::Tensor>& inps);
-
-  // This interface only works if StaticModule was initialized
-  // with a TorchScript module, otherwise use the above interface
   c10::IValue operator()(
       const std::vector<c10::IValue>& args,
       const std::unordered_map<std::string, c10::IValue>& kwargs);
-
-  void display_nodes(
-      const std::vector<c10::IValue>& args,
+  c10::IValue operator()(
+      std::vector<c10::IValue>&& args,
       const std::unordered_map<std::string, c10::IValue>& kwargs);
 
   void benchmark(
-      const std::vector<c10::IValue>& args,
-      const std::unordered_map<std::string, c10::IValue>& kwargs,
+      const std::vector<std::vector<c10::IValue>>& args_list,
+      const std::vector<std::unordered_map<std::string, c10::IValue>>&
+          kwargs_list,
       const int warmup_runs,
       const int main_runs,
       bool print_per_node_time = false,
       bool generate_ai_pep_output = false);
-
-  float benchmark_model(
-      const std::vector<c10::IValue>& args,
-      const std::unordered_map<std::string, c10::IValue>& kwargs,
-      const int warmup_runs,
-      const int main_runs);
 
   struct IndividualMetrics {
     float setup_time{0.0};
@@ -299,19 +327,21 @@ class TORCH_API StaticRuntime {
   };
 
   IndividualMetrics benchmark_individual_ops(
-      const std::vector<c10::IValue>& args,
-      const std::unordered_map<std::string, c10::IValue>& kwargs,
+      const std::vector<std::vector<c10::IValue>>& args_list,
+      const std::vector<std::unordered_map<std::string, c10::IValue>>&
+          kwargs_list,
       const int warmup_runs,
       const int main_runs);
 
   // Input is readwrite
-  IValue& Input(size_t i) {
-    DCHECK(i < inputs_.size());
-    return inputs_[i];
+  IValue& Input(uint32_t i) {
+    DCHECK_LT(i, static_module_.num_inputs());
+    DCHECK_LT(i, values_.size());
+    return values_[i];
   }
 
   // Output is readonly. The writing process happens inside ProcessedNodes
-  const IValue& Output(size_t i) const {
+  C10_NODISCARD const IValue& Output(uint32_t i) const {
     DCHECK(i < outputs_.size());
     return *outputs_[i];
   }
@@ -332,31 +362,83 @@ class TORCH_API StaticRuntime {
     return static_module_.graph();
   }
 
+  const MemoryPlanner* get_memory_planner() const {
+    return planner_.get();
+  }
+
   void check_for_memory_leak(bool output_returned = true);
 
   bool is_optimizable_container_type(Node* n) const {
     return static_module_.is_optimizable_container_type(n);
   }
 
+  // WARNING: Deallocate managed output tensors.  A client receiving Static
+  // Runtime-managed Tensors needs to be very careful to call
+  // `StaticRuntime::deallocateOutputTensors` after all references of output
+  // Tensors are gone.
+  void deallocateOutputTensors();
+
+  bool checkOutputTensorMemoryLeaks();
+
+  bool isManagedOutputTensor(const IValue& ivalue);
+
+  void disableManageOutputTensors();
+
  private:
+  template <typename IValueList>
+  c10::IValue run_impl(
+      IValueList&& args,
+      const std::unordered_map<std::string, c10::IValue>& kwargs);
+
+  template <typename IValueList>
+  c10::IValue run_impl_record_functions(
+      IValueList&& args,
+      const std::unordered_map<std::string, c10::IValue>& kwargs);
+
   // helper method for copying input args/kwargs into inputs_
   void set_inputs(
       const std::vector<c10::IValue>& args,
       const std::unordered_map<std::string, c10::IValue>& kwargs);
+  void set_inputs(
+      std::vector<c10::IValue>&& args,
+      const std::unordered_map<std::string, c10::IValue>& kwargs);
+
+  void verify_and_correct_memory_overlap(ProcessedNode& n);
 
   // clean up owning refs of input IValues
   void clean_up_input_ivalues() {
-    for (IValue& ival : inputs_) {
-      ival = IValue();
+    for (const auto idx : c10::irange(static_module_.num_inputs())) {
+      values_[idx] = IValue();
     }
   }
+
+  IValue move_outputs_to_tuple(uint32_t num_outputs);
+
+  void create_memory_planner();
+
+  float benchmark_model(
+      const std::vector<std::vector<c10::IValue>>& args_list,
+      const std::vector<std::unordered_map<std::string, c10::IValue>>&
+          kwargs_list,
+      const int warmup_runs,
+      const int main_runs);
+
+  void display_nodes(
+      const std::vector<c10::IValue>& args,
+      const std::unordered_map<std::string, c10::IValue>& kwargs);
 
   // Memory planning is only enabled if sm->opts().cleanup_activations is true.
   // Otherwise, the memory used by activations is cached inside the static
   // runtime.
   const StaticModule& static_module_;
+  bool manage_output_tensors_enabled_ = false;
   std::unique_ptr<MemoryPlanner> planner_;
-  std::vector<IValue> inputs_;
+  // first static_module_.num_inputs() slots are inputs, next
+  // static_module_.constants().size() slots are a copy of
+  // static_module_.constants(), rest are regular values in the
+  // graph. ProcessedNodes reference their inputs and outputs with
+  // offsets into this array, which saves memory.
+  std::vector<IValue> values_;
   std::vector<IValue*> outputs_;
   std::vector<ProcessedNode> nodes_;
 };
@@ -366,10 +448,24 @@ class TORCH_API ProcessedNode {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   ProcessedNode() = default;
+  // ProcessedNodes are created within StaticModule and then
+  // associated with a shared values array using set_values() when
+  // they are copied into a StaticRuntime.
   ProcessedNode(
       Node* n,
-      std::vector<const IValue*>&& inputs,
-      bool enable_out_variant);
+      ProcessedNodeInputs inputs,
+      uint16_t outputs_offset,
+      bool enable_out_variant,
+      bool check_memory_overlap);
+
+  ProcessedNode(const ProcessedNode&) = default;
+  ProcessedNode& operator=(const ProcessedNode&) = default;
+
+  // These should be noexcept, but some Android build is failing
+  // saying the noexcept specification doesn't match the calculated
+  // one. Maybe c10::variant is throwing it off?
+  ProcessedNode(ProcessedNode&&) = default;
+  ProcessedNode& operator=(ProcessedNode&&) = default;
 
   void run();
 
@@ -378,55 +474,99 @@ class TORCH_API ProcessedNode {
   }
 
   // Input is readonly
-  const IValue& Input(size_t i) const {
-    DCHECK(i < inputs_.size());
-    return *inputs_[i];
+  C10_NODISCARD const IValue& Input(uint32_t i) const {
+    return values_[inputs_[i]];
   }
 
   // Output is readwrite
-  IValue& Output(size_t i) {
-    DCHECK(i < outputs_.size());
-    return outputs_[i];
+  IValue& Output(uint32_t i) {
+    DCHECK(i < num_outputs_);
+    return values_[outputs_offset_ + i];
   }
 
-  void set_input(size_t index, const IValue* ival) {
-    inputs_[index] = ival;
+  C10_NODISCARD const IValue& Output(uint32_t i) const {
+    DCHECK(i < num_outputs_);
+    return values_[outputs_offset_ + i];
   }
 
-  const std::vector<IValue>& outputs() const {
-    return outputs_;
+  C10_NODISCARD c10::ArrayRef<const IValue> outputs() const {
+    return c10::ArrayRef<const IValue>(values_ + outputs_offset_, num_outputs_);
   }
 
-  const std::vector<const IValue*>& inputs() const {
-    return inputs_;
+  C10_NODISCARD auto num_outputs() const {
+    return num_outputs_;
   }
 
-  std::vector<IValue> clone_inputs() const;
+  C10_NODISCARD uint16_t num_inputs() const {
+    return inputs_.size();
+  }
+
+  std::vector<IValue> inputs_ivalue_vec() const;
 
   bool has_out_variant() const {
-    return fn_.index() == 0;
+    return fn_.kind == FunctionKind::kOutVariant;
   }
 
   bool has_native() const {
-    return fn_.index() == 1;
+    return fn_.kind == FunctionKind::kNativeFunction;
   }
 
-  bool verify_no_memory_overlap() const;
-
+#ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   const char* get_op_name() const {
     return op_name_;
   }
+#endif
+
+  bool verify_no_memory_overlap() const;
+
+  bool check_outputs_for_memory_overlap() const {
+    return fn_.check_memory_overlap_;
+  }
+
+  void set_outputs_memory_overlap_detected() {
+    fn_.overlap_detected_ = true;
+  }
+
+  bool outputs_memory_overlap_detected() {
+    return fn_.overlap_detected_;
+  }
+
+  void verify_and_correct_memory_overlap();
+
+  void set_values(IValue* values) {
+    DCHECK(values_ == nullptr);
+    values_ = values;
+  }
+
+  C10_NODISCARD uint16_t output_ivalue_index(uint16_t i) const {
+    return outputs_offset_ + i;
+  }
 
  private:
-  void run_impl();
+  C10_NODISCARD bool verify_outputs_dont_overlap_each_other() const;
+
+  C10_NODISCARD bool verify_inputs_dont_overlap_outputs() const;
 
   Node* node_;
-  using OutVariant = std::function<void(ProcessedNode*)>;
-  using NativeFunction = std::function<void(ProcessedNode*)>;
-  c10::variant<OutVariant, NativeFunction, Operation> fn_;
-  std::vector<const IValue*> inputs_; // unowned
-  std::vector<IValue> outputs_;
+  enum class FunctionKind : uint8_t {
+    kOutVariant,
+    kNativeFunction,
+    kInterpreterFallback,
+  };
+  struct Function {
+    std::function<void(ProcessedNode*)> f;
+    FunctionKind kind = FunctionKind::kOutVariant;
+    bool check_memory_overlap_{false};
+    bool overlap_detected_{false};
+  };
+  Function fn_;
+  ProcessedNodeInputs inputs_;
+  uint16_t outputs_offset_;
+  uint16_t num_outputs_;
+  IValue* values_ = nullptr; // unowned
+#ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   const char* op_name_;
+#endif
 };
 
 } // namespace jit

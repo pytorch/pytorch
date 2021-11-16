@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: distributed"]
+
 import math
 import io
 import itertools
@@ -262,6 +264,8 @@ class TestShardParameter(ShardedTensorTestBase):
         local_shards = fc.weight.local_shards()
         self.assertEqual(1, len(local_shards))
         self.assertEqual(torch.Size([3, 12]), local_shards[0].tensor.size())
+        self.assertEqual(3, local_shards[0].tensor.size(0))
+        self.assertEqual(12, local_shards[0].tensor.size(1))
         self.assertEqual(torch.narrow(weight_og, 0, 3 * self.rank, 3), local_shards[0].tensor)
 
     @with_comms(init_rpc=False)
@@ -936,6 +940,21 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         # Test with tuple
         sharded_tensor = _sharded_tensor.empty(spec, (10, 20), init_rrefs=True)
         self.assertEqual(torch.Size([10, 20]), sharded_tensor.size())
+
+        # Test with row size
+        sharded_tensor = _sharded_tensor.empty(spec, (10, 20), init_rrefs=True)
+        self.assertEqual(sharded_tensor.size(0), 10)
+
+        # Test with col size
+        sharded_tensor = _sharded_tensor.empty(spec, (10, 20), init_rrefs=True)
+        self.assertEqual(sharded_tensor.size(1), 20)
+
+        # Test with invalid input
+        sharded_tensor = _sharded_tensor.empty(spec, (10, 20), init_rrefs=True)
+        with self.assertRaisesRegex(ValueError, 'must be within the range of tensor dimensions \\[0, 2\\)'):
+            sharded_tensor.size(-1)
+        with self.assertRaisesRegex(ValueError, 'must be within the range of tensor dimensions \\[0, 2\\)'):
+            sharded_tensor.size(2)
 
         with self.assertRaises(TypeError):
             sharded_tensor = _sharded_tensor.empty(spec, 'foo')
@@ -1667,6 +1686,37 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
 
 
 class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
+
+    @with_comms(init_rpc=False)
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
+    def test_local_shards(self):
+        shard_offsets = [(self.rank // 2) * 5, (self.rank % 2) * 5]
+        local_shard_metadata = ShardMetadata(
+            shard_offsets=shard_offsets,
+            shard_lengths=[5, 5],
+            placement=f"rank:{self.rank}/cuda:{self.rank}"
+        )
+
+        local_tensor = torch.randn(5, 5, device=f"cuda:{self.rank}")
+        local_shard = _sharded_tensor.Shard(local_tensor, local_shard_metadata)
+        local_shard_from_offsets = _sharded_tensor.Shard.from_tensor_and_offsets(
+            local_tensor,
+            shard_offsets=shard_offsets,
+            rank=self.rank
+        )
+        self.assertEqual(local_shard.metadata, local_shard_from_offsets.metadata)
+
+        wrong_local_shard_metadata = ShardMetadata(
+            shard_offsets=shard_offsets,
+            shard_lengths=[6, 5],
+            placement=f"rank:{self.rank}/cuda:{self.rank}"
+        )
+        with self.assertRaisesRegex(ValueError, 'Shard tensor size does not match'):
+            local_shard_from_wrong_meta = _sharded_tensor.Shard(
+                local_tensor,
+                metadata=wrong_local_shard_metadata,
+            )
 
     @with_comms
     @skip_if_lt_x_gpu(4)

@@ -9,6 +9,7 @@
 #include <c10d/ProcessGroupRoundRobin.hpp>
 #endif
 #include <c10d/ProcessGroup.hpp>
+#include <c10d/PyProcessGroup.hpp>
 
 #ifdef USE_C10D_GLOO
 #include <c10d/ProcessGroupGloo.hpp>
@@ -453,6 +454,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::arg("device_ids"),
           py::arg("output_device"),
           py::arg("broadcast_buffers"),
+          py::arg("has_sync_bn"),
           py::call_guard<py::gil_scoped_release>())
       .def(
           "set_runtime_stats_and_log",
@@ -961,9 +963,13 @@ Arguments:
       .def(py::init<const std::string&, c10::intrusive_ptr<::c10d::Store>>());
 
   auto processGroup =
-      intrusive_ptr_class_<::c10d::ProcessGroup>(module, "ProcessGroup")
+      py::class_<::c10d::ProcessGroup,
+                 c10::intrusive_ptr<::c10d::ProcessGroup>,
+                 ::c10d::PyProcessGroup>(module, "ProcessGroup")
+          .def(py::init<int, int>())
           .def("rank", &::c10d::ProcessGroup::getRank)
           .def("size", &::c10d::ProcessGroup::getSize)
+          .def("name", &::c10d::ProcessGroup::getBackendName)
 
           .def(
               "broadcast",
@@ -1384,7 +1390,10 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               }),
               py::arg("pg"),
               py::arg("gloo_pg"),
-              py::call_guard<py::gil_scoped_release>());
+              py::call_guard<py::gil_scoped_release>())
+         .def_property_readonly(
+              "wrapped_pg", &::c10d::ProcessGroupWrapper::getWrappedPg
+         );
 #endif
 
 #ifdef USE_C10D_NCCL
@@ -1463,7 +1472,10 @@ Example::
       py::call_guard<py::gil_scoped_release>());
 #endif
 
-  intrusive_ptr_class_<::c10d::ProcessGroup::Work>(module, "Work")
+  py::class_<::c10d::ProcessGroup::Work,
+             c10::intrusive_ptr<::c10d::ProcessGroup::Work>,
+             ::c10d::PyProcessGroup::PyWork>(module, "Work")
+      .def(py::init<>())
       .def("is_completed", &::c10d::ProcessGroup::Work::isCompleted)
       .def(
           "is_success",

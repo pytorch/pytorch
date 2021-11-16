@@ -1,3 +1,5 @@
+# Owner(s): ["module: vmap"]
+
 from torch.testing._internal.common_utils import TestCase, run_tests
 import torch
 import torch.nn.functional as F
@@ -10,7 +12,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 import types
 
 
-FALLBACK_REGEX = r'falling back to slow \(for loop( and stack)?\) implementation'
+FALLBACK_REGEX = r'There is a performance drop'
 
 class EnableVmapFallbackWarnings:
     def __enter__(self):
@@ -1640,7 +1642,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
 
         vmap(bar)(torch.randn(B0, 0, 3))
         vmap(bar, in_dims=1)(torch.randn(0, B0, 3))
-        vmap(bar)(torch.randn(B0, 0, 3).transpose(-1, -2))
+        vmap(bar)(torch.randn(B0, 0, 3).mT)
 
         # is_contiguous with other memory formats
         def baz(x, memory_format):

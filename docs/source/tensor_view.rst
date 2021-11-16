@@ -48,6 +48,7 @@ Users should be pay additional attention as contiguity might have implicit perfo
 For reference, here’s a full list of view ops in PyTorch:
 
 - Basic slicing and indexing op, e.g. ``tensor[0, 2:, 1:7:2]`` returns a view of base ``tensor``, see note below.
+- :meth:`~torch.Tensor.adjoint`
 - :meth:`~torch.Tensor.as_strided`
 - :meth:`~torch.Tensor.detach`
 - :meth:`~torch.Tensor.diagonal`
@@ -61,6 +62,9 @@ For reference, here’s a full list of view ops in PyTorch:
 - :meth:`~torch.Tensor.transpose`
 - :meth:`~torch.Tensor.t`
 - :attr:`~torch.Tensor.T`
+- :attr:`~torch.Tensor.H`
+- :attr:`~torch.Tensor.mT`
+- :attr:`~torch.Tensor.mH`
 - :attr:`~torch.Tensor.real`
 - :attr:`~torch.Tensor.imag`
 - :meth:`~torch.Tensor.view_as_real`

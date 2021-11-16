@@ -20,9 +20,7 @@ name: !{{ build_environment }}
 
 on:
   pull_request:
-  {%- if ciflow_config.enabled %}
     types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
-  {%- endif %}
 {%- if is_scheduled %}
   schedule:
     - cron: !{{ is_scheduled }}
@@ -37,11 +35,13 @@ on:
 env:
   BUILD_ENVIRONMENT: !{{ build_environment }}
   BUILD_WHEEL: 1
+  MAX_JOBS: 8
   CUDA_VERSION: "!{{ cuda_version }}"
   IN_CI: 1
   IS_GHA: 1
   INSTALL_WINDOWS_SDK: 1
   PYTHON_VERSION: "3.8"
+  PYTORCH_RETRY_TEST_CASES: 1
   PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
   SCCACHE_BUCKET: "ossci-compiler-cache"
   VC_PRODUCT: "BuildTools"
@@ -51,12 +51,15 @@ env:
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
   no_proxy: !{{ common.squid_no_proxy }}
   AWS_DEFAULT_REGION: us-east-1
-  CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
-  CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+  PR_NUMBER: ${{ github.event.pull_request.number }}
+  SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+{%- if build_with_debug %}
+  DEBUG: 1
+{%- endif %}
 {%- if cuda_version != "cpu" %}
   TORCH_CUDA_ARCH_LIST: "7.0"
-  USE_CUDA: 1
 {%- endif %}
+  USE_CUDA: !{{ 1 if cuda_version != "cpu" else 0 }}
 
 !{{ common.concurrency(build_environment) }}
 
@@ -64,9 +67,8 @@ jobs:
 !{{ common.ciflow_should_run_job(ciflow_config) }}
   build:
     runs-on: "windows.4xlarge"
-    {%- if ciflow_config.enabled %}
     needs: [!{{ ciflow_config.root_job_name }}]
-    {%- endif %}
+    timeout-minutes: !{{ common.timeout_minutes }}
     env:
       JOB_BASE_NAME: !{{ build_environment }}-build
       http_proxy: "!{{ common. squid_proxy }}"
@@ -97,7 +99,7 @@ jobs:
         shell: bash
         env:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
-          CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          BRANCH: ${{ steps.parse-ref.outputs.branch }}
         run: |
           .jenkins/pytorch/win-build.sh
       # Upload to github so that people can click and download artifacts
@@ -120,10 +122,9 @@ jobs:
           rm -rf ./*
 
   generate-test-matrix:
-    {%- if ciflow_config.enabled %}
     needs: [!{{ ciflow_config.root_job_name }}]
-    {%- endif %}
     runs-on: ubuntu-18.04
+    timeout-minutes: !{{ common.timeout_minutes }}
     env:
       TEST_RUNNER_TYPE: !{{ test_runner_type }}
       NUM_TEST_SHARDS: !{{ num_test_shards }}
@@ -148,6 +149,7 @@ jobs:
         run: .github/scripts/generate_pytorch_test_matrix.py
 
   test:
+    timeout-minutes: !{{ common.timeout_minutes }}
     env:
       JOB_BASE_NAME: !{{ build_environment }}-test
       SHARD_NUMBER: ${{ matrix.shard }}
