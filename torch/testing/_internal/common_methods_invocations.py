@@ -198,6 +198,20 @@ class SampleInput(object):
         return self.transform(to_noncontiguous)
 
 
+class ErrorInput(object):
+    """
+    A SampleInput that will cause the operation to throw an error plus information
+    about the resulting error.
+    """
+
+    __slots__ = ['sample_input', 'error_type', 'error_regex']
+
+    def __init__(self, sample_input, *, error_type, error_regex):
+        self.sample_input = sample_input
+        self.error_type = error_type
+        self.error_regex = error_regex
+
+
 class AliasInfo(object):
     """Class holds alias information. For example, torch.abs ->
     torch.absolute, torch.Tensor.absolute, torch.Tensor.absolute_
@@ -229,13 +243,16 @@ def _getattr_qual(obj, name, default=_NOTHING):
 # Note [OpInfos]
 # ~~~~~~~~~~~~~~
 #
-# This note was written shortly after the PyTorch 1.9 release.
+# The majority of this note was written shortly after the PyTorch 1.9 release.
 # If you notice it's out-of-date or think it could be improved then please
 # file an issue.
 #
 # See also: the OpInfo tracker (https://github.com/pytorch/pytorch/issues/54261)
 # See also: "Writing Test Templates" in common_device_type.py to learn how to
 #   parametrize a test template using OpInfos.
+# See also: PyTorch's GitHub wiki on running and writing tests
+#   https://github.com/pytorch/pytorch/wiki/Running-and-writing-tests
+# See also: ModuleInfos, OpInfo's sister class, defined in common_modules.py
 #
 # An OpInfo is a collection of metadata related to a PyTorch operator. This
 #   metadata is used to generate tests that validate properties of the operator,
@@ -244,30 +261,38 @@ def _getattr_qual(obj, name, default=_NOTHING):
 # WHY OPINFOS?
 # ~~~~~~~~~~~~
 #
-# OpInfos are principally intended to do two things:
+# OpInfos are principally intended to do three things:
 #
-#   1) to simplify testing an operator
-#   2) to allow systems (like autograd, torchscript, fx, nnc...) to test
+#   1) to allow systematic testing over all PyTorch's operators
+#   2) to simplify operating testing by autogenerating many tests
+#   3) to allow systems (like autograd, torchscript, fx, nnc...) to test
 #        against every PyTorch operator
 #
-# Both these goals are still a work in progress. Not every operator has an
-#   OpInfo, and some operator tests still have to be written manually.
+# All these goals are still a work in progress. Not every operator has an
+#   OpInfo, and some operator tests that could be automatically generated
+#   still have to be written manually.
 #
-# The utility of OpInfos can also be motivated from a different perspective.
-#   PyTorch is a complicated framework with many interrelated systems, too
-#   many for any one person to keep track of. An OpInfo can be thought of as the
+# It's helpful to understand that OpInfos are both about test simplification and
+#   modularity. PyTorch is a complicated framework with many interrelated systems,
+#   too many for any one person to keep track of. An OpInfo can be thought of as the
 #   interface between an operator implementer and those other systems. Instead of
 #   requiring the implementer of torch.foo understand how to test its forward
 #   mode AD or NNC support that's typically handled automatically just by
-#   defining an OpInfo. This is a helpful perspective to have, because it's often
-#   surprising to OpInfo writers that just implementing an OpInfo typically can't
-#   verify an operator is actually implemented correctly. "If an OpInfo doesn't
-#   validate my op works as expected, what's the point of it?" But the point of
-#   it is that it lets engineers focus on testing their operator logic instead
-#   of having to write tests for how the operator interacts with each of
-#   PyTorch's many systems. And, OK, sometimes it validates your op works
-#   the way you want and all you have to do is write an OpInfo and you're done
-#   testing... more on that below.
+#   defining an OpInfo.
+#
+# It's often surprising to OpInfo writers that just implementing an OpInfo
+#   typically can't verify an operator is actually implemented correctly:
+#
+# "If an OpInfo doesn't validate my op works as expected, what's the point
+#     of it?"
+#
+# But the point of is the above. OpInfos are intended to let you focus on testing
+#   the operator logic you're familiar with instead of having to write tests for
+#   how the operator interacts with each of PyTorch's many systems.
+#
+# And, OK, it turns out that SOMETIMES just writing an OpInfo DOES
+#   validate your op works as expected, but that's only in special
+#   cases. See below for details.
 #
 # WHAT'S AN OPINFO?
 # ~~~~~~~~~~~~~~~~~
@@ -327,6 +352,20 @@ def _getattr_qual(obj, name, default=_NOTHING):
 #
 # "name" is a string that's just used for debugging. It appears when printing
 #   the SampleInput.
+#
+# THE (OPTIONAL) ERROR INPUTS FUNCTION
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#
+# OpInfos may optionally specify "error inputs" through an error function. If
+#   specified test_errors in test_ops.py will call the op with these inputs
+#   and validate that the desired error is thrown.
+#
+# Error inputs automate a common testing pattern where multiple inputs are
+#   passed to an operation and the errors they thrown are reviewed. Tests
+#   written in this style should be ported to the new OpInfo pattern.
+#
+# Error inputs are specified using the ErrorInputs class, which contains
+#   a SampleInput (see above) and data about the expected error.
 #
 # OPINFO FILE ORGANIZATION
 # ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -398,16 +437,19 @@ def _getattr_qual(obj, name, default=_NOTHING):
 # TESTING A NEW OPERATOR
 # ~~~~~~~~~~~~~~~~~~~~~~
 #
-# If you're adding a new operator to the torch, torch.fft, torch.linalg,
-#   or torch.special namespaces then you should add an OpInfo for it. As
-#   mentioned a couple times above, implementing an OpInfo is not usually
-#   sufficient testing (unless the operator is a unary elementwise operator).
-#   The OpInfo will only test the properties described in the "WHAT'S TESTED"
-#   section. It DOES NOT verify that the operator is implemented correctly.
+# If you're adding a new operator to any of the following namespaces:
+#   - torch
+#   - torch.fft
+#   - torch.linalg,
+#   - torch.special
+#   - torch.nn.functional
+# then you should typically add an OpInfo for it.
 #
-# We are currently reviewing if operators in the torch.nn.functional namespace
-#   will be added as OpInfos, but you are encouraged to add an OpInfo for
-#   such operators, too.
+# As mentioned a couple times above, implementing an OpInfo is not
+#   usually sufficient testing (unless the operator is a unary elementwise
+#   operator). The OpInfo will only test the properties described in the
+#   "WHAT'S TESTED" section. It DOES NOT verify that the operator is
+#   implemented correctly.
 #
 # TIPS FOR WRITING AN OPINFO AND OPINFO TESTS
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -443,15 +485,9 @@ def _getattr_qual(obj, name, default=_NOTHING):
 # THE FUTURE OF OPINFOS AND OPINFO TESTING
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #
-# In the future we expect OpInfo coverage to improve, particularly for the
-#   torch, torch.fft, torch.linalg, and torch.special namespaces, and possibly
-#   for the torch.nn.functional namespace, too. In addition an analogous class,
-#   ModuleInfo, will be developed to improve module testing.
+# In the future we expect OpInfo coverage to improve and cover
+#   the great majority of PyTorch's (public) operators.
 #
-# We also expect at least two new OpInfo subclasses: BinaryUfuncInfo and
-#   ReductionInfo. Both will have new automated tests for correctness, too,
-#   which might make testing binary elementwise operations and reductions as
-#   simple as testing unary elementwise operations today.
 
 # Classes and methods for the operator database
 class OpInfo(object):
@@ -478,16 +514,19 @@ class OpInfo(object):
                                             # if None, then the OpInfo specifies no method variant
 
                  # the following metadata are test directives for skipping or
-                 # modifying tests and a pointer to the op's sample inputs function
-                 # this function lets the OpInfo generate valid inputs
+                 #   modifying tests
                  skips=tuple(),  # information about which tests to skip
                  decorators=tuple(),  # decorators to apply to generated tests
+
+                 # the following are pointers to functions to generate certain classes
+                 #   of inputs
                  sample_inputs_func=None,  # function to generate sample inputs
+                 error_inputs_func=None,  # function to generate inputs that will throw errors
 
                  # the following metadata relates to dtype support and is tested for correctness in test_ops.py
                  dtypes=floating_types(),  # dtypes this function is expected to work with
                  # the following dtypesIf... options override the dtypes value
-                 # on their respective device types
+                 #   on their respective device types
                  dtypesIfCPU=None,  # dtypes this function is expected to work with on CPU
                  dtypesIfCUDA=None,  # dtypes this function is expected to work with on CUDA
                  dtypesIfROCM=None,  # dtypes this function is expected to work with on ROCM
@@ -612,7 +651,9 @@ class OpInfo(object):
         self.safe_casts_outputs = safe_casts_outputs
 
         self.decorators = (*decorators, *skips)
+
         self.sample_inputs_func = sample_inputs_func
+        self.error_inputs_func = error_inputs_func
 
         self.assert_autodiffed = assert_autodiffed
         self.autodiff_fusible_nodes = autodiff_fusible_nodes if autodiff_fusible_nodes else []
@@ -755,6 +796,12 @@ class OpInfo(object):
             samples = tuple(samples_list)
 
         return samples
+
+    def error_inputs(self, device, **kwargs):
+        """
+        Returns an iterable of ErrorInputs.
+        """
+        return self.error_inputs_func(self, device, **kwargs)
 
     def get_decorators(self, test_class, test_name, device, dtype):
         '''Returns the decorators targeting the given test.'''
@@ -2163,6 +2210,64 @@ def sample_inputs_like_fns(self, device, dtype, requires_grad, **kwargs):
 
     return tuple(samples)
 
+def get_independent_tensor(tensor):
+    return tensor.detach().clone().requires_grad_(tensor.requires_grad)
+
+def sample_inputs_randint_like(self, device, dtype, requires_grad, **kwargs):
+    samples = []
+    low = 2
+    high = 10
+
+    for sample in sample_inputs_like_fns(self, device, dtype, requires_grad, **kwargs):
+        # With high
+        samples.append(SampleInput(
+            sample.input,
+            args=(high,) + sample.args,
+            kwargs=sample.kwargs))
+        # With low and high
+        samples.append(SampleInput(
+            get_independent_tensor(sample.input),
+            args=(low, high,) + sample.args,
+            kwargs=sample.kwargs))
+    return tuple(samples)
+
+def sample_inputs_new_fns(self, device, dtype, requires_grad, **kwargs):
+    inputs = [
+        ((), (), {}),
+        ((S, S), (2, 0), {}),
+        ((0, S, 0), (3, 2, 2), {}),
+        ((S,), (2, 3), {'dtype': dtype, 'device': device}),
+        # Hard-code some dtypes/devices. We want to test cases where the
+        # (dtype, device) is different from the input's (dtype, device)
+        ((S,), (10,), {'dtype': torch.double}),
+        ((S,), (1, 1, 12), {'device': 'cpu'}),
+        ((S,), (2, 2, 2), {'dtype': torch.double, 'device': 'cpu'}),
+    ]
+    if torch.cuda.is_available():
+        inputs.append(((S,), (7, 2), {'device': 'cuda'}))
+
+    samples = []
+    for input_shape, output_shape, kwargs in inputs:
+        t = make_tensor(input_shape, device, dtype,
+                        low=None, high=None,
+                        requires_grad=requires_grad)
+        samples.append(SampleInput(t, args=(output_shape,), kwargs=kwargs))
+
+    return tuple(samples)
+
+def sample_inputs_new_full(self, device, dtype, requires_grad, **kwargs):
+    def get_val(dtype):
+        return make_tensor([], 'cpu', dtype).item()
+
+    samples = []
+    for sample in sample_inputs_new_fns(self, device, dtype, requires_grad, **kwargs):
+        # The scalar we are passing to new_full must be the same dtype
+        # as the one of the resulting tensor
+        use_dtype = sample.kwargs['dtype'] if 'dtype' in sample.kwargs else dtype
+        samples.append(SampleInput(
+            sample.input, args=sample.args + (get_val(use_dtype),), kwargs=sample.kwargs))
+    return tuple(samples)
+
 def sample_inputs_full_like(self, device, dtype, requires_grad, **kwargs):
     def get_val(dtype):
         return make_tensor([], 'cpu', dtype).item()
@@ -2947,30 +3052,17 @@ def sample_inputs_unique_consecutive(*args, **kwargs):
     return list(generator())
 
 def sample_inputs_index_fill(op_info, device, dtype, requires_grad, **kwargs):
-    samples = []
-    t = make_tensor((S, S, S), device, dtype,
-                    low=None, high=None,
-                    requires_grad=requires_grad)
-    fill_val = torch.tensor(-1 + 1j if t.is_complex() else -1)
-    # non-contiguous input
-    t01 = t.transpose(0, 1)
-    t02 = t.transpose(0, 2)
-    t12 = t.transpose(1, 2)
-    idx = index_variable(1, S, device=device)
-    # non-contiguous index
-    idx_nonctg = torch.empty_strided((S,), (2,), device=device, dtype=torch.int64)
-    idx_nonctg.copy_(idx)
-    for d in range(t.dim()):
-        for tensor in [t, t01, t02, t12]:
-            samples.append(SampleInput(tensor.detach().clone().requires_grad_(requires_grad),
-                                       args=(d, idx, fill_val)))
-            samples.append(SampleInput(tensor.detach().clone().requires_grad_(requires_grad),
-                                       args=(d, -idx - 1, fill_val)))
-            samples.append(SampleInput(tensor.detach().clone().requires_grad_(requires_grad),
-                                       args=(d, idx_nonctg, fill_val)))
-
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     index_tensor = partial(torch.tensor, device=device, dtype=torch.long)
+
+    samples = []
+    fill_val = torch.tensor(-1 + 1j if dtype.is_complex else -1)
+    idx = index_variable(1, S, device=device)
+    ndim = 3
+    for d in range(ndim):
+        samples.append(SampleInput(make_arg((S,) * ndim), args=(d, idx, fill_val)))
+        samples.append(SampleInput(make_arg((S,) * ndim), args=(d, -idx - 1, fill_val)))
+
 
     def unique_idx(numel, max_idx):
         # Generate unique random indices vector of `numel`
@@ -3125,38 +3217,89 @@ def sample_inputs_adaptive_max_pool3d(op_info, device, dtype, requires_grad, **k
 
     return list(generator())
 
+class _TestParamsMaxPoolBase(object):
 
-def sample_inputs_max_pool2d(op_info, device, dtype, requires_grad, **kwargs):
-    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    def __init__(self):
+        self.kwargs = {
+            'kernel_size': [3],
+            'stride': [2, None],
+            'ceil_mode': [True, False],
+            'padding': [0, 1],
+            'dilation': [1],
+            'return_indices': [True, False]
+        }
 
-    kerneli = [[3, 2], 3]
-    stridei = [[2, 2]]
-    Ni = [1, 2, None]
-    Ci = [2]
-    Hi = [3, 6]
-    Wi = [6]
-    ceil_modei = [True, False]
-    paddingi = [0, 1]
-    dilationi = [1, (1, 2)]
-    return_indicesi = [True, False]
+        self.shapes = [
+            [1, 2, None],  # batch
+            [2],  # channels
+            [3, 6]  # signal
+        ]
 
-    products = product(kerneli, stridei, Ni, Ci, Hi, Wi, ceil_modei, paddingi, dilationi, return_indicesi)
+    def _gen_shape(self):
+        for shape in product(*self.shapes):
+            # shape[0] is None indicates missing batch dimension
+            if shape[0] is None:
+                shape = shape[1:]
+
+            yield shape, torch.contiguous_format
+            # only 2d (N, C, H, W) rank 4 tensors support channels_last memory format
+            if len(self.shapes) == 4 and len(shape) == 4:
+                yield shape, torch.channels_last
+
+    def _gen_kwargs(self):
+        keys = self.kwargs.keys()
+        for values in product(*self.kwargs.values()):
+            yield dict(zip(keys, values))
+
+    def gen_input_params(self):
+        yield from product(self._gen_shape(), self._gen_kwargs())
+
+class _TestParamsMaxPool1d(_TestParamsMaxPoolBase):
+
+    def __init__(self):
+        super().__init__()
+        self.kwargs['kernel_size'] += [(3,)]
+        self.kwargs['stride'] += [(2,)]
+        self.kwargs['padding'] += [(1,)]
+        self.kwargs['dilation'] += [(1,)]
+
+class _TestParamsMaxPool2d(_TestParamsMaxPoolBase):
+
+    def __init__(self):
+        super().__init__()
+        self.kwargs['kernel_size'] += [(3, 2)]
+        self.kwargs['stride'] += [(2, 1)]
+        self.kwargs['padding'] += [(1, 1)]
+        self.kwargs['dilation'] += [(1, 2)]
+
+        self.shapes.append([6])
+
+class _TestParamsMaxPool3d(_TestParamsMaxPoolBase):
+
+    def __init__(self):
+        super().__init__()
+        self.kwargs['kernel_size'] += [(3, 2, 3)]
+        self.kwargs['stride'] += [(2, 1, 2)]
+        self.kwargs['dilation'] += [(1, 2, 1)]
+
+        self.shapes.append([6])
+        self.shapes.append([5])
+
+def sample_inputs_max_pool(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
+
+    params_generator_type_dict = {
+        'nn.functional.max_pool1d': _TestParamsMaxPool1d,
+        'nn.functional.max_pool2d': _TestParamsMaxPool2d,
+        'nn.functional.max_pool3d': _TestParamsMaxPool3d,
+    }
 
     def generator():
-        for kernel, stride, N, C, H, W, ceil_mode, padding, dilation, return_indices in products:
-            max_pool = torch.nn.MaxPool2d(kernel, stride, ceil_mode=ceil_mode, padding=padding,
-                                          dilation=dilation, return_indices=return_indices)
-            kwargs = {
-                "kernel_size": max_pool.kernel_size,
-                "stride": max_pool.stride,
-                "padding": max_pool.padding,
-                "dilation": max_pool.dilation,
-                "ceil_mode": max_pool.ceil_mode,
-                "return_indices": max_pool.return_indices,
-            }
-            sample_input = make_arg((N, C, H, W)) if N is not None else (make_arg((C, H, W)))
+        params_generator = params_generator_type_dict[op_info.name]()
+        for (shape, memory_format), kwargs in params_generator.gen_input_params():
+            arg = make_arg(shape).to(memory_format=memory_format).requires_grad_(requires_grad)
+            yield SampleInput(arg, kwargs=kwargs)
 
-            yield SampleInput(sample_input, kwargs=kwargs)
     return list(generator())
 
 def sample_inputs_normalize(self, device, dtype, requires_grad, **kwargs):
@@ -3195,6 +3338,34 @@ def sample_inputs_conv_transpose2d(op_info, device, dtype, requires_grad, **kwar
         ((1, 4, 5, 5), (4, 8, 3, 3), None,
          {})
     )
+
+    def generator():
+        for input_shape, weight, bias, kwargs in cases:
+            yield SampleInput(make_arg(input_shape), args=(
+                make_arg(weight),
+                make_arg(bias) if bias is not None else bias
+            ), kwargs=kwargs)
+
+    return list(generator())
+
+
+def sample_inputs_conv1d(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # Ordered as shapes for input, weight, bias,
+    # and a dict of values of (stride, padding, dilation, groups)
+    cases: Tuple = (
+        ((1, 3, 4), (3, 3, 3), (3,), {'stride': (2,), 'padding': 2, 'groups': 1}),
+        ((2, 4, 8), (2, 2, 3), (2,), {'stride': 3, 'padding': 1, 'groups': 2, 'dilation': 2}),
+        ((1, 4, 5), (1, 4, 3), None, {'stride': (2,), 'padding': 'valid'}),
+        ((2, 2, 4), (2, 1, 4), (2,), {'stride': (1,), 'padding': 'same', 'groups': 2, 'dilation': (2,)}),
+        # With defaults
+        ((1, 4, 5), (3, 4, 3), None, {}),
+    )
+
+    # TODO: (@krshrimali), add error_inputs_func once https://github.com/pytorch/pytorch/pull/67354 is merged
+    # Should replace test_conv_modules_raise_error_on_incorrect_input_size and test_conv_shapecheck
+    # in test/test_nn.py
 
     def generator():
         for input_shape, weight, bias, kwargs in cases:
@@ -3424,6 +3595,53 @@ def sample_inputs_linear(self, device, dtype, requires_grad):
 
         bias = create_tensor([out_feat])
         sample_inputs.append(SampleInput(input_tensor, args=(weight, bias)))
+    return sample_inputs
+
+def sample_inputs_bilinear(self, device, dtype, requires_grad):
+    features_options = [[3, 4, 5], [8, 8, 8]]
+    batch_options: List[List[int]] = [
+        [],  # no batch
+        [0],
+        [8],
+        [2, 3],
+    ]
+    create_tensor = partial(make_tensor, device=device, dtype=dtype,
+                            requires_grad=requires_grad, low=-2, high=2)
+
+    sample_inputs = []
+    for has_bias, (in_feat1, in_feat2, out_feat), batch_shape in \
+            itertools.product([True, False], features_options, batch_options):
+        input_tensor1 = create_tensor(batch_shape + [in_feat1])
+        input_tensor2 = create_tensor(batch_shape + [in_feat2])
+        weight = create_tensor([out_feat, in_feat1, in_feat2])
+        if not has_bias:
+            sample_inputs.append(SampleInput(input_tensor1, args=(input_tensor2, weight,)))
+            continue
+        bias = create_tensor([out_feat])
+        sample_inputs.append(SampleInput(input_tensor1, args=(input_tensor2, weight, bias)))
+
+    return sample_inputs
+
+def sample_inputs_glu(self, device, dtype, requires_grad):
+    features_options = [[2], [2, 4], [8, 8], [3, 6, 8], [1, 4, 6, 7]]
+    batch_options: List[List[int]] = [
+        [],  # no batch
+        [0],
+        [8],
+        [2, 3],
+    ]
+    create_tensor = partial(make_tensor, device=device, dtype=dtype,
+                            requires_grad=requires_grad, low=-2, high=2)
+
+    sample_inputs = []
+    for features, batch_shape in itertools.product(features_options, batch_options):
+        ndim = len(features) + len(batch_shape)
+        for dim in range(ndim):
+            input_tensor = create_tensor(batch_shape + features)
+            dim_size = input_tensor.size(dim)
+            if dim_size > 0 and dim_size % 2 == 0:
+                sample_inputs.append(SampleInput(input_tensor, args=(dim,)))
+
     return sample_inputs
 
 def sample_inputs_interpolate(mode, self, device, dtype, requires_grad):
@@ -3809,6 +4027,7 @@ def sample_movedim_moveaxis(op_info, device, dtype, requires_grad):
 
 
 def sample_repeat_tile(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
     rep_dims = ((), (0, ), (1, ), (0, 2), (1, 1), (2, 3), (2, 3, 2), (0, 2, 3), (2, 1, 1, 1),)
     shapes = ((), (0,), (2,), (3, 0), (3, 2), (3, 0, 1))
 
@@ -3819,21 +4038,13 @@ def sample_repeat_tile(op_info, device, dtype, requires_grad, **kwargs):
         rep_dims = ((), (0, ), (0, 2), (1, 1), (2, 3), (1, 3, 2), (3, 1, 1))  # type: ignore[assignment]
         shapes = ((), (0,), (2,), (3, 2))  # type: ignore[assignment]
 
-    tensors = [make_tensor(shape, device, dtype,
-                           low=None, high=None,
-                           requires_grad=requires_grad) for shape in shapes]
-
     samples = []
-    for rep_dim, tensor in product(rep_dims, tensors):
-        for t in (tensor, tensor.detach().clone().T.requires_grad_(requires_grad)):
-            if op_info.name == 'repeat' and len(rep_dim) >= t.dim():
-                # `torch.repeat` errors for `len(rep_dims) < t.dim()`,
-                # so we filter such combinations.
-                samples.append(SampleInput(t.detach().clone().requires_grad_(requires_grad),
-                                           args=(rep_dim,),))
-            elif op_info.name == 'tile':
-                samples.append(SampleInput(t.detach().clone().requires_grad_(requires_grad),
-                                           args=(rep_dim,),))
+    for rep_dim, shape in product(rep_dims, shapes):
+        # `torch.repeat` errors for `len(rep_dims) < t.dim()`,
+        # so we filter such combinations.
+        if op_info.name == 'repeat' and len(rep_dim) < len(shape):
+            continue
+        samples.append(SampleInput(make_arg(shape), args=(rep_dim,),))
 
     return samples
 
@@ -5105,8 +5316,11 @@ def sample_inputs_cross(op_info, device, dtype, requires_grad, **kwargs):
     sample1 = SampleInput(make_tensor((S, 3, S), device=device, dtype=dtype, requires_grad=requires_grad),
                           args=(make_tensor((S, 3, S), device=device, dtype=dtype, requires_grad=requires_grad),),
                           kwargs={'dim': 1})
+    sample2 = SampleInput(make_tensor((S, 3), device=device, dtype=dtype, requires_grad=requires_grad),
+                          args=(make_tensor((S, 3), device=device, dtype=dtype, requires_grad=requires_grad),),
+                          kwargs={'dim': -1})
 
-    return (sample0, sample1)
+    return (sample0, sample1, sample2)
 
 def sample_inputs_cumprod(op_info, device, dtype, requires_grad, **kwargs):
     def make_arg(shape):
@@ -5222,6 +5436,13 @@ def sample_inputs_prod(op_info, device, dtype, requires_grad):
                           kwargs={'keepdim': True})
 
     return list(sample_generator())
+
+def error_inputs_neg(op_info, device, **kwargs):
+    si = SampleInput(torch.tensor((False, True), device=device))
+    msg = ("Negation, the `\\-` operator, on a bool tensor is not supported."
+           " If you are trying to invert a mask, use the `\\~` or"
+           " `logical_not\\(\\)` operator instead.")
+    return (ErrorInput(si, error_type=RuntimeError, error_regex=msg),)
 
 def sample_inputs_nextafter(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -6400,6 +6621,14 @@ def sample_inputs_kthvalue(op_info, device, dtype, requires_grad, **kwargs):
 
     return [SampleInput(tensor, args=args) for tensor, args in test_cases]
 
+def error_inputs_kthvalue(op_info, device, **kwargs):
+    # tests overlapping output fails
+    t = make_tensor(10, dtype=torch.float32, device=device)
+    indices = torch.empty((), device=device, dtype=torch.long)
+    si = SampleInput(t, args=(5,), kwargs={'out': (t, indices)})
+    return (ErrorInput(si, error_type=RuntimeError, error_regex="unsupported operation"),)
+
+
 def sample_inputs_dropout(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, (S,), device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -7136,7 +7365,6 @@ def wrapper_set_seed(op, input, *args, **kwargs):
     """
     torch.manual_seed(42)
     return op(input, *args, **kwargs)
-
 
 def reference_layer_norm(inp: np.ndarray, normalized_shape: Tuple[int], weight=None, bias=None, eps=1e-5):
     feature_size = np.prod(normalized_shape)
@@ -8000,12 +8228,16 @@ op_db: List[OpInfo] = [
            dtypesIfCPU=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.half),
            sample_inputs_func=sample_inputs_cross,
-           supports_forward_ad=True,
-           skips=(
-               # AssertionError: UserWarning not triggered :
-               # Resized a non-empty tensor but did not warn about it.
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out'),
-           )),
+           supports_forward_ad=True),
+    OpInfo('linalg.cross',
+           ref=lambda x, y, dim=-1: np.cross(x, y, axis=dim),
+           op=torch.linalg.cross,
+           dtypes=all_types_and_complex(),
+           dtypesIfCPU=all_types_and_complex_and(torch.bfloat16),
+           dtypesIfCUDA=all_types_and_complex_and(torch.half),
+           aten_name='linalg_cross',
+           sample_inputs_func=sample_inputs_cross,
+           supports_forward_ad=True),
     OpInfo('cumsum',
            dtypesIfCPU=all_types_and_complex(),
            dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
@@ -8529,7 +8761,8 @@ op_db: List[OpInfo] = [
            dtypesIfCPU=all_types_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.float16),
            supports_forward_ad=True,
-           sample_inputs_func=sample_inputs_kthvalue),
+           sample_inputs_func=sample_inputs_kthvalue,
+           error_inputs_func=error_inputs_kthvalue),
     OpInfo('le',
            aliases=('less_equal',),
            dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16),
@@ -9395,6 +9628,19 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
            ),
            supports_out=False,),
+    OpInfo('nn.functional.conv1d',
+           aliases=('conv1d',),
+           aten_name='conv1d',
+           dtypes=floating_types_and(torch.int64),
+           dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
+           sample_inputs_func=sample_inputs_conv1d,
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           skips=(
+               # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
+               # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":103, please report a bug to PyTorch.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+           ),
+           supports_out=False,),
     OpInfo('nn.functional.conv2d',
            aliases=('conv2d',),
            aten_name='conv2d',
@@ -9626,14 +9872,36 @@ op_db: List[OpInfo] = [
            dtypesIfCPU=floating_types_and(torch.int64),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_avgpool2d),
+    OpInfo('nn.functional.max_pool1d',
+           aten_name='max_pool1d',
+           supports_autograd=True,
+           supports_out=False,
+           # TODO: add shape checks
+           assert_jit_shape_analysis=False,
+           dtypesIfCPU=floating_types(),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           sample_inputs_func=sample_inputs_max_pool),
     OpInfo('nn.functional.max_pool2d',
            aten_name='max_pool2d',
            supports_autograd=True,
+           # Vmap is not happy with non-contiguous (channels_last) inputs
+           check_batched_gradgrad=False,
            supports_out=False,
            assert_jit_shape_analysis=True,
            dtypesIfCPU=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
-           sample_inputs_func=sample_inputs_max_pool2d),
+           sample_inputs_func=sample_inputs_max_pool),
+    OpInfo('nn.functional.max_pool3d',
+           aten_name='max_pool3d',
+           supports_autograd=True,
+           supports_out=False,
+           # TODO: add shape checks
+           assert_jit_shape_analysis=False,
+           dtypesIfCPU=floating_types(),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           # TODO: investigate nondeterminism
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           sample_inputs_func=sample_inputs_max_pool),
     OpInfo('nn.functional.linear',
            aten_name='linear',
            supports_autograd=True,
@@ -9647,6 +9915,30 @@ op_db: List[OpInfo] = [
            # https://pytorch.org/docs/stable/generated/torch.use_deterministic_algorithms.html#torch.use_deterministic_algorithms
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            supports_forward_ad=True,
+           supports_out=False),
+    OpInfo('nn.functional.bilinear',
+           aten_name='bilinear',
+           supports_autograd=True,
+           sample_inputs_func=sample_inputs_bilinear,
+           dtypesIfCPU=all_types_and(torch.half, torch.bfloat16),
+           dtypesIfROCM=floating_types_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
+           backward_dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
+           skips=(
+               # FIXME: bfloat16 backward support likely depends on CUDA11+ and SM53+
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
+           ),
+           supports_forward_ad=False,
+           supports_out=False),
+    OpInfo('nn.functional.glu',
+           aten_name='glu',
+           supports_autograd=True,
+           sample_inputs_func=sample_inputs_glu,
+           dtypesIfCPU=floating_types(),
+           dtypesIfROCM=floating_types_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           supports_forward_ad=False,
            supports_out=False),
     UnaryUfuncInfo(
         'nn.functional.celu',
@@ -9950,6 +10242,7 @@ op_db: List[OpInfo] = [
                    aliases=('negative', ),
                    ref=np.negative,
                    dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
+                   error_inputs_func=error_inputs_neg,
                    assert_autodiffed=True,),
     OpInfo('dist',
            op=torch.dist,
@@ -11287,6 +11580,32 @@ op_db: List[OpInfo] = [
                # AssertionError: JIT Test does not execute any logic
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
            )),
+    OpInfo('rand_like',
+           dtypes=floating_types_and(torch.half, torch.bfloat16, torch.complex64, torch.complex128),
+           op=lambda inp, *args, **kwargs:
+               wrapper_set_seed(torch.randn_like, inp, *args, **kwargs),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_like_fns,
+           supports_autograd=False,
+           skips=(
+               # AssertionError: JIT Test does not execute any logic
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+               # Can't find schemas for this operator for some reason
+               DecorateInfo(unittest.skip("Skipped!"), 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
+           )),
+    OpInfo('randint_like',
+           dtypes=all_types_and(torch.half, torch.bfloat16),
+           op=lambda inp, *args, **kwargs:
+               wrapper_set_seed(torch.randint_like, inp, *args, **kwargs),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_randint_like,
+           supports_autograd=False,
+           skips=(
+               # AssertionError: JIT Test does not execute any logic
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+               # Can't find schemas for this operator for some reason
+               DecorateInfo(unittest.skip("Skipped!"), 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
+           )),
     OpInfo('full_like',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            supports_out=False,
@@ -11296,6 +11615,56 @@ op_db: List[OpInfo] = [
                # Can't find schemas for this operator for some reason
                DecorateInfo(unittest.skip("Skipped!"), 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
            )),
+    OpInfo('new_zeros',
+           op=lambda x, *args, **kwargs: x.new_zeros(*args, **kwargs),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_new_fns,
+           skips=(
+               # Can't find schemas for this operator for some reason
+               DecorateInfo(unittest.skip("Skipped!"), 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
+           ),
+           supports_autograd=False),
+    OpInfo('new_ones',
+           op=lambda x, *args, **kwargs: x.new_ones(*args, **kwargs),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_new_fns,
+           skips=(
+               # Can't find schemas for this operator for some reason
+               DecorateInfo(unittest.skip("Skipped!"), 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
+           ),
+           supports_autograd=False),
+    OpInfo('new_empty',
+           op=lambda x, *args, **kwargs: x.new_empty(*args, **kwargs),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_new_fns,
+           skips=(
+               # Empty tensor data is garbage so it's hard to make comparisons with it.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+               # Empty tensor data is garbage so it's hard to make comparisons with it.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager'),
+               # Empty tensor data is garbage so it's hard to make comparisons with it.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_noncontiguous_samples'),
+               # Empty tensor data is garbage so it's hard to make comparisons with it.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_conj_view'),
+               # Empty tensor data is garbage so it's hard to make comparisons with it.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
+               # Can't find schemas for this operator for some reason
+               DecorateInfo(unittest.skip("Skipped!"), 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
+           ),
+           supports_autograd=False),
+    OpInfo('new_full',
+           op=lambda x, *args, **kwargs: x.new_full(*args, **kwargs),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_new_full,
+           skips=(
+               # Can't find schemas for this operator for some reason
+               DecorateInfo(unittest.skip("Skipped!"), 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
+           ),
+           supports_autograd=False),
     OpInfo('scatter_add',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_scatter_add,
