@@ -3,6 +3,7 @@
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
 #include <c10/core/CPUAllocator.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/variant.h>
 #include <torch/csrc/jit/api/module.h>
@@ -311,13 +312,13 @@ class TORCH_API StaticRuntime {
       const int main_runs);
 
   // Input is readwrite
-  IValue& Input(size_t i) {
+  IValue& Input(uint32_t i) {
     DCHECK(i < inputs_.size());
     return inputs_[i];
   }
 
   // Output is readonly. The writing process happens inside ProcessedNodes
-  const IValue& Output(size_t i) const {
+  C10_NODISCARD const IValue& Output(uint32_t i) const {
     DCHECK(i < outputs_.size());
     return *outputs_[i];
   }
@@ -388,7 +389,7 @@ class TORCH_API StaticRuntime {
     }
   }
 
-  IValue move_outputs_to_tuple(size_t num_outputs);
+  IValue move_outputs_to_tuple(uint32_t num_outputs);
 
   void create_memory_planner();
 
@@ -422,7 +423,7 @@ class TORCH_API ProcessedNode {
   ProcessedNode(
       Node* n,
       std::unique_ptr<const IValue*[]> inputs,
-      size_t inputsSize,
+      uint32_t inputsSize,
       bool enable_out_variant,
       bool check_memory_overlap);
 
@@ -432,8 +433,12 @@ class TORCH_API ProcessedNode {
         inputs_(std::make_unique<const IValue*[]>(rhs.inputs_size_)),
         outputs_(std::make_unique<IValue[]>(rhs.outputs_size_)),
         inputs_size_(rhs.inputs_size_),
-        outputs_size_(rhs.outputs_size_),
-        op_name_(rhs.op_name_) {
+        outputs_size_(rhs.outputs_size_)
+#ifndef PYTORCH_DISABLE_PER_OP_PROFILING
+        ,
+        op_name_(rhs.op_name_)
+#endif
+  {
     std::copy(
         rhs.inputs_.get(), rhs.inputs_.get() + inputs_size_, inputs_.get());
     std::copy(
@@ -460,7 +465,9 @@ class TORCH_API ProcessedNode {
     }
     std::copy(
         rhs.outputs_.get(), rhs.outputs_.get() + outputs_size_, outputs_.get());
+#ifndef PYTORCH_DISABLE_PER_OP_PROFILING
     op_name_ = rhs.op_name_;
+#endif
 
     return *this;
   }
@@ -478,23 +485,23 @@ class TORCH_API ProcessedNode {
   }
 
   // Input is readonly
-  const IValue& Input(size_t i) const {
+  C10_NODISCARD const IValue& Input(uint32_t i) const {
     DCHECK(i < inputs_size_);
     return *inputs_[i];
   }
 
   // Output is readwrite
-  IValue& Output(size_t i) {
+  IValue& Output(uint32_t i) {
     DCHECK(i < outputs_size_);
     return outputs_[i];
   }
 
-  const IValue& Output(size_t i) const {
+  C10_NODISCARD const IValue& Output(uint32_t i) const {
     DCHECK(i < outputs_size_);
     return outputs_[i];
   }
 
-  void set_input(size_t index, const IValue* ival) {
+  void set_input(uint32_t index, const IValue* ival) {
     inputs_[index] = ival;
   }
 
@@ -516,9 +523,11 @@ class TORCH_API ProcessedNode {
     return fn_.kind == FunctionKind::kNativeFunction;
   }
 
+#ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   const char* get_op_name() const {
     return op_name_;
   }
+#endif
 
   bool verify_no_memory_overlap() const;
 
@@ -556,9 +565,11 @@ class TORCH_API ProcessedNode {
   Function fn_;
   std::unique_ptr<const IValue*[]> inputs_; // unowned
   std::unique_ptr<IValue[]> outputs_;
-  size_t inputs_size_;
-  size_t outputs_size_;
+  uint32_t inputs_size_;
+  uint32_t outputs_size_;
+#ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   const char* op_name_;
+#endif
 };
 
 } // namespace jit
