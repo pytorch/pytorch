@@ -5800,7 +5800,7 @@ for shape in [(1,), ()]:
                 self.assertEqual(a, y.grad_fn._saved_other)
                 self.assertEqual(a.dtype, y.grad_fn._saved_self.dtype)
                 self.assertEqual(a.layout, y.grad_fn._saved_self.layout)
-                if a.is_sparse:
+                if y.is_sparse:
                     y = y.to_dense()
                 y.sum().backward()
 
