@@ -258,6 +258,16 @@ void IRPrinter::visit(BufPtr v) {
     os() << ", qzero=";
     v->qzero()->accept(this);
   }
+  os() << ", strides=[";
+  size_t i = 0;
+  for (const ExprPtr& s : v->strides()) {
+    if (i++) {
+      os() << ", ";
+    }
+    s->accept(this);
+  }
+  os() << "]";
+
   os() << ")";
 }
 

@@ -105,7 +105,8 @@ class IndexFlattener : public IRMutator {
     return alloc<Load>(
         v->dtype(),
         v->buf(),
-        std::vector<ExprPtr>({flatten_index(v->buf()->dims(), v->indices())}));
+        std::vector<ExprPtr>({flatten_index(
+            v->buf()->dims(), v->indices(), v->buf()->strides())}));
   }
 
   StmtPtr mutate(StorePtr v) override {
@@ -115,7 +116,7 @@ class IndexFlattener : public IRMutator {
       return v;
     }
     std::vector<ExprPtr> indices = {
-        flatten_index(v->buf()->dims(), v->indices())};
+        flatten_index(v->buf()->dims(), v->indices(), v->buf()->strides())};
     v->set_indices(indices);
     v->set_value(new_value);
     return v;
