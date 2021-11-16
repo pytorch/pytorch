@@ -275,8 +275,8 @@ class Pair(abc.ABC):
         self._unknown_parameters = unknown_parameters
 
     @staticmethod
-    def _check_inputs_isinstance(*inputs: Any, cls: Union[Type, Tuple[Type, ...]]) -> None:
-        """Checks if all inputs are instances of a given and raise :class:`UnsupportedInputs` otherwise."""
+    def _check_inputs_isinstance(*inputs: Any, cls: Union[Type, Tuple[Type, ...]]):
+        """Checks if all inputs are instances of a given class and raise :class:`UnsupportedInputs` otherwise."""
         if not all(isinstance(input, cls) for input in inputs):
             raise UnsupportedInputs()
 
