@@ -9147,6 +9147,18 @@ op_db: List[OpInfo] = [
                     skips=(
                         DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_broadcast_python_scalar'),
                     )),
+    BinaryUfuncInfo('lcm',
+                    ref=np.lcm,
+                    dtypes=integral_types_and(),
+                    sample_inputs_func=sample_inputs_binary_pwise,
+                    supports_autograd=False,
+                    ),
+    BinaryUfuncInfo('gcd',
+                    ref=np.gcd,
+                    dtypes=integral_types_and(),
+                    sample_inputs_func=sample_inputs_binary_pwise,
+                    supports_autograd=False,
+                    ),
     # `softmax` supports different dtypes based on whether `dtype` argument,
     # is passed or not. Hence two OpInfo entries, one with dtype and other without.
     OpInfo('softmax',
