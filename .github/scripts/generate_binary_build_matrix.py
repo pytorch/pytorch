@@ -113,7 +113,7 @@ def generate_libtorch_matrix(is_pr: bool) -> List[Dict[str, str]]:
         }
         # We don't currently build libtorch for rocm
         for arch_version in ["cpu"] + snip_if(is_pr, CUDA_ARCHES)
-        for libtorch_variant in libtorch_variants
+        for libtorch_variant in snip_if(is_pr, libtorch_variants)
         # one of the values in the following list must be exactly
         # "cxx11-abi", but the precise value of the other one doesn't
         # matter
