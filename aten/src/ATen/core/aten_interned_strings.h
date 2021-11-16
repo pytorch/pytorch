@@ -421,7 +421,6 @@ _(aten, isposinf) \
 _(aten, isneginf) \
 _(aten, kaiser_window) \
 _(aten, kl_div) \
-_(aten, kl_div_backward) \
 _(aten, kthvalue) \
 _(aten, l1_loss) \
 _(aten, l1_loss_backward) \
