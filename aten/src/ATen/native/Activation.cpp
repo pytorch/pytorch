@@ -165,10 +165,6 @@ TORCH_META_FUNC(softshrink_backward) (
   build_borrowing_binary_op(maybe_get_output(), grad, self);
 }
 
-TORCH_META_FUNC(hardswish)(const Tensor& self) {
-  build_unary_op(maybe_get_output(), self);
-}
-
 TORCH_META_FUNC(gelu) (const Tensor & self) {
   build_unary_op(maybe_get_output(), self);
 }
@@ -389,13 +385,34 @@ Tensor hardtanh_backward(const Tensor& grad_output, const Tensor& self, const Sc
   return iter.output();
 }
 
-TORCH_IMPL_FUNC(hardswish_out)(const Tensor& self, const Tensor& result) {
-#if defined(C10_MOBILE) && defined(USE_XNNPACK)
+Tensor hardswish(const Tensor& self) {
+  #if defined(C10_MOBILE) && defined(USE_XNNPACK)
   if (xnnpack::use_hardswish(self)) {
-    xnnpack::hardswish_out(self, result);
+    return xnnpack::hardswish(self);
   }
-#endif
-  hardswish_stub(device_type(), *this);
+  #endif
+  Tensor result;
+  auto iter = TensorIterator::unary_op(result, self);
+  hardswish_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
+Tensor& hardswish_out(const Tensor& self, Tensor& result) {
+  auto iter = TensorIterator::unary_op(result, self);
+  hardswish_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor& hardswish_(Tensor& self) {
+  #if defined(C10_MOBILE) && defined(USE_XNNPACK)
+  if (xnnpack::use_hardswish(self)) {
+    xnnpack::hardswish_(self);
+    return self;
+  }
+  #endif
+  auto iter = TensorIterator::unary_op(self, self);
+  hardswish_stub(iter.device_type(), iter);
+  return self;
 }
 
 Tensor hardswish_backward(const Tensor& grad_output, const Tensor& self) {

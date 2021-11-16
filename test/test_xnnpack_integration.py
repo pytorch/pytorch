@@ -1,4 +1,4 @@
-# Owner(s): ["module: unknown"]
+# Owner(s): ["oncall: mobile"]
 
 import unittest
 

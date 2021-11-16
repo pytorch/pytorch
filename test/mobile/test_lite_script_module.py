@@ -221,7 +221,8 @@ class TestLiteScriptModule(TestCase):
         script_module = torch.jit.script(MyTestModule())
         with self.assertRaisesRegex(RuntimeError,
                                     r"Workaround: instead of using arbitrary class type \(class Foo\(\)\), "
-                                    r"define a pytorch class \(class Foo\(torch\.nn\.Module\)\)\.$"):
+                                    r"define a pytorch class \(class Foo\(torch\.nn\.Module\)\)\. "
+                                    r"The problematic type is: "):
             script_module._save_to_buffer_for_lite_interpreter()
 
     def test_unsupported_return_list_with_module_class(self):
