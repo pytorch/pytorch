@@ -325,7 +325,7 @@ class PackageImporter(Importer):
         ns["__torch_package__"] = True
 
         if is_package and name in self.selective_intern_packages:
-            assert not parent
+            # assert not parent
             ns["_extern_copy"] = importlib.import_module(name)
 
         # Add this module to our private global registry. It should be unique due to mangling.
