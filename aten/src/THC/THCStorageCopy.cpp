@@ -2,13 +2,4 @@
 #include <THC/THCTensor.hpp>
 
 #include <THC/generic/THCStorageCopy.cpp>
-#include <THC/THCGenerateAllTypes.h>
-
-#include <THC/generic/THCStorageCopy.cpp>
-#include <THC/THCGenerateComplexTypes.h>
-
-#include <THC/generic/THCStorageCopy.cpp>
-#include <THC/THCGenerateBoolType.h>
-
-#include <THC/generic/THCStorageCopy.cpp>
-#include <THC/THCGenerateBFloat16Type.h>
+#include <THC/THCGenerateByteType.h>
