@@ -162,7 +162,6 @@ class TestGradTransform(TestCase):
 
         self.assertEqual(result, expected)
 
-    @unittest.expectedFailure
     def test_inplace_on_captures(self, device):
         x = torch.tensor([1., 2., 3.], device=device)
         captured = torch.randn(3, device=device)
@@ -171,9 +170,8 @@ class TestGradTransform(TestCase):
             captured.copy_(x)
             return (x * captured).sum()
 
-        result = grad(foo)(x)
-        expected = 2 * x
-        self.assertEqual(result, expected)
+        with self.assertRaisesRegex(RuntimeError, 'mutate a captured Tensor'):
+            grad(foo)(x)
 
     def test_nesting_simple(self, device):
         x = torch.randn([], device=device)
@@ -1009,6 +1007,17 @@ class TestJac(TestCase):
             z = jacapi(torch.multiply, argnums=(1, 0.0))(x, x)
 
 class TestJvp(TestCase):
+    def test_inplace_on_captures(self, device):
+        x = torch.tensor([1., 2., 3.], device=device)
+        captured = torch.randn(3, device=device)
+
+        def foo(x):
+            captured.copy_(x)
+            return (x * captured).sum()
+
+        with self.assertRaisesRegex(RuntimeError, 'mutate a captured Tensor'):
+            grad(foo)(x)
+
     def test_simple(self, device):
         x = torch.randn(2, 3, device=device)
         t = torch.randn(2, 3, device=device)
