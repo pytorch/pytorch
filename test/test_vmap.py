@@ -12,7 +12,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 import types
 
 
-FALLBACK_REGEX = r'falling back to slow \(for loop( and stack)?\) implementation'
+FALLBACK_REGEX = r'There is a performance drop'
 
 class EnableVmapFallbackWarnings:
     def __enter__(self):
