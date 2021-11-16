@@ -74,7 +74,18 @@ static inline hash_t Hash(const c10::ScalarType& value) {
 }
 
 static inline hash_t Hash(const c10::Scalar& value) {
-  return DataHash(&value, sizeof(value));
+  switch(value.type()){
+  case c10::ScalarType::ComplexDouble:
+    return Hash(value.toComplexDouble());
+  case c10::ScalarType::Double:
+    return Hash(value.toDouble());
+  case c10::ScalarType::Long:
+    return Hash(value.toLong());
+  case c10::ScalarType::Bool:
+    return Hash(value.toBool());
+  default:
+    TORCH_INTERNAL_ASSERT(false, "Unknown scalar type.");
+  }
 }
 
 static inline hash_t Hash(const std::string& value) {
