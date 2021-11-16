@@ -1,4 +1,4 @@
-from typing import Iterable, Tuple
+from typing import Dict, Iterable, Tuple
 
 import torch
 import torch.fx.passes.splitter_base as splitter_base
@@ -8,21 +8,27 @@ from torch.fx.experimental.fx2trt.fx2trt import (
     TRTModule,
     TRTInterpreter,
     CONVERTERS,
+    NO_EXPLICIT_BATCH_DIM_SUPPORT,
+    NO_IMPLICIT_BATCH_DIM_SUPPORT,
 )
 import torch.fx.passes.operator_support as ops
 from torch.fx.passes.tools_common import Tensors
 
 
-def create_trt_operator_support() -> ops.OperatorSupportBase:
+def create_trt_operator_support(use_implicit_batch_dim=True) -> ops.OperatorSupportBase:
     """Creates an `OperatorSupportBase` instance used for TRT splitting purpose.
     """
     # Create an `OperatorSupport` that declares a node supported if it
     # finds a registered TRT converter.
+    support_dict: Dict[str, None] = {}
+    for k in CONVERTERS.keys():
+        if use_implicit_batch_dim:
+            if k not in NO_IMPLICIT_BATCH_DIM_SUPPORT.keys():
+                support_dict[get_acc_ops_name(k)] = None
+        elif k not in NO_EXPLICIT_BATCH_DIM_SUPPORT.keys():
+            support_dict[get_acc_ops_name(k)] = None
     supported_if_converter_registered = ops.OperatorSupport(
-        support_dict={
-            get_acc_ops_name(k): None
-            for k in CONVERTERS.keys()
-        }
+        support_dict=support_dict
     )
 
     return ops.chain(

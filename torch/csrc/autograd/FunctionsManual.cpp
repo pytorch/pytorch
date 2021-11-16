@@ -1118,6 +1118,7 @@ Tensor pinv_jvp(
   const Tensor& pinvA,
   const Tensor& dA
 ) {
+  at::NoTF32Guard disable_tf32;
   auto m = A.size(-2);
   auto n = A.size(-1);
   auto dAh = dA.mH();
@@ -1141,6 +1142,7 @@ Tensor pinv_backward(
   const Tensor& pinvA,
   const Tensor& A
 ) {
+  at::NoTF32Guard disable_tf32;
   auto m = A.size(-2);
   auto n = A.size(-1);
   auto pinvAh = pinvA.mH();
@@ -1266,7 +1268,8 @@ Tensor infinitely_differentiable_logit_backward(
   }
 }
 
-Tensor kl_div_backward(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction, bool log_target) {
+// TODO: remove kl_div_backward from aten namespace and drop the aux here
+Tensor kl_div_backward_aux(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction, bool log_target) {
   auto grad_input = (
     log_target ? -at::exp(target)
                : -target
@@ -1277,7 +1280,8 @@ Tensor kl_div_backward(const Tensor& grad_output, const Tensor& input, const Ten
   return grad_input;
 }
 
-Tensor kl_div_target_backward(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction, bool log_target) {
+// TODO: remove kl_div_backward from aten namespace and drop the aux here
+Tensor kl_div_target_backward_aux(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction, bool log_target) {
   auto grad_target = (
     log_target ? at::exp(target) * (1 + target - input)
                : (1 + at::log(target) - input)
