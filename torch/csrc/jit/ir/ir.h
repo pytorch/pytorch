@@ -676,6 +676,13 @@ struct TORCH_API Node {
   // Result: %3 = f()
   void removeAllInputs();
 
+  // Remove all outputs from a node.
+  //
+  // Given: %1, %2 = f()
+  // Execute:removeAllInputs()
+  // Result: = f()
+  void removeAllOutputs();
+
   // Rearrange the ordering of inputs or outputs of a node
   // Given: %3 = f(%1, %2)
   // Execute: %3.permuteInputs({1, 0})
@@ -1050,6 +1057,9 @@ struct Block {
   void eraseInput(size_t i) {
     input_->eraseOutput(i);
   }
+  void removeAllInputs() {
+    input_->removeAllOutputs();
+  }
   size_t registerOutput(Value* v) {
     output_->addInput(v);
     return outputs().size() - 1;
@@ -1061,6 +1071,10 @@ struct Block {
   void eraseOutput(size_t i) {
     output_->removeInput(i);
   }
+  void removeAllOutputs() {
+    output_->removeAllInputs();
+  }
+
   void replaceOutput(size_t i, Value* n) {
     output_->replaceInput(i, n);
   }
@@ -1100,6 +1114,14 @@ struct Block {
     if (wrap_) {
       wrap_->clear();
     }
+  }
+
+  void clear() {
+    removeAllOutputs();
+    for (auto it = nodes().rbegin(); it != nodes().rend(); it++) {
+      it.destroyCurrent();
+    }
+    removeAllInputs();
   }
 
  private:
