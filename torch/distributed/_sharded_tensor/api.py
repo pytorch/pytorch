@@ -322,24 +322,27 @@ class ShardedTensor(object):
 
         # STEP 2. Validate metadata across ranks, and build a global sharded tensor
         # metadata by gathering local ShardedTensorMetadata
-        gathered_metadatas = [None for _ in range(world_size)]
+        if world_size > 1:
+            gathered_metadatas = [None for _ in range(world_size)]
 
-        if local_shards_device.type == "cuda":
-            # with GPU/NCCL, we need to set a device for all_gather_object
-            # to use as we need to know which device we should put the
-            # serialized tensor on before the NCCL collective.
-            with torch.cuda.device(local_shards_device):
+            if local_shards_device.type == "cuda":
+                # with GPU/NCCL, we need to set a device for all_gather_object
+                # to use as we need to know which device we should put the
+                # serialized tensor on before the NCCL collective.
+                with torch.cuda.device(local_shards_device):
+                    dist.all_gather_object(
+                        gathered_metadatas,
+                        local_sharded_tensor_metadata,
+                        group=process_group
+                    )
+            else:
                 dist.all_gather_object(
                     gathered_metadatas,
                     local_sharded_tensor_metadata,
                     group=process_group
                 )
         else:
-            dist.all_gather_object(
-                gathered_metadatas,
-                local_sharded_tensor_metadata,
-                group=process_group
-            )
+            gathered_metadatas = [local_sharded_tensor_metadata]
 
         global_sharded_tensor_metadata = build_global_metadata(gathered_metadatas)
 
