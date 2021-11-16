@@ -22,7 +22,7 @@ std::string getStmtIndexString(StmtIndex stmt_index) {
   return cstr;
 }
 
-TEST(StmtIndexer, BasicTest) {
+TEST(BufAccesses, BasicTest) {
   VarHandle i("i", kInt), j("j", kInt);
   BufHandle a("a", {32}, kFloat);
   BufHandle b("b", {32, 32}, kFloat);
@@ -69,7 +69,7 @@ TEST(StmtIndexer, BasicTest) {
   ASSERT_TRUE(pass == 2);
 }
 
-TEST(StmtIndexer, CondTest) {
+TEST(BufAccesses, CondTest) {
   VarHandle i("i", kInt);
   BufHandle a("a", {32}, kFloat);
   BufHandle b("b", {32}, kFloat);
