@@ -803,7 +803,9 @@ c10::IValue StaticModule::operator()(
   return runtime()(std::move(args), kwargs);
 }
 
-StaticRuntime::StaticRuntime(const StaticModule& sm) : static_module_(sm) {
+StaticRuntime::StaticRuntime(const StaticModule& sm)
+    : static_module_(sm),
+      manage_output_tensors_enabled_(sm.opts().manage_output_tensors) {
   // NB: create unchanging std::vector<IValue>s we can reference
   inputs_.resize(sm.num_inputs());
   nodes_.resize(sm.nodes().size());
@@ -938,7 +940,7 @@ void StaticRuntime::create_memory_planner() {
         static_module_.values_share_same_storage(),
         static_module_.value_group(),
         static_module_.opts().enable_out_variant,
-        static_module_.opts().manage_output_tensors);
+        manage_output_tensors_enabled_);
   }
 }
 
@@ -1042,10 +1044,10 @@ c10::IValue StaticRuntime::move_outputs_to_tuple(size_t num_outputs) {
 /// There is another case of failure that step 2 can prevent. With
 /// StaticModule::opts().cleanup_activations = false, the returned Static
 /// Runtime instance in the instance pool can be re-entered while an unintended
-/// output tensor's alias is still being used by the client (in the multi-threaded
-/// setting). This can only be prevented by delaying the deallocation and
-/// returning the Static Runtime instance after the client is done with the
-/// outputs.
+/// output tensor's alias is still being used by the client (in the
+/// multi-threaded setting). This can only be prevented by delaying the
+/// deallocation and returning the Static Runtime instance after the client is
+/// done with the outputs.
 
 void StaticRuntime::verify_and_correct_memory_overlap(ProcessedNode& n) {
   // The slow check can be removed once the internal/output buffers are merged
@@ -1085,9 +1087,7 @@ c10::IValue StaticRuntime::run_impl(
   c10::InferenceMode mode;
 
   if (planner_) {
-    DCHECK(
-        !static_module_.opts().manage_output_tensors ||
-        checkOutputTensorMemoryLeaks());
+    DCHECK(!manage_output_tensors_enabled_ || checkOutputTensorMemoryLeaks());
     planner_->allocate();
   }
 
@@ -1126,16 +1126,44 @@ c10::IValue StaticRuntime::run_impl(
   return std::move(*outputs_[0]);
 }
 
+template <typename IValueList>
+c10::IValue StaticRuntime::run_impl_record_functions(
+    IValueList&& args,
+    const std::unordered_map<std::string, c10::IValue>& kwargs) {
+  bool pre_sampled = false;
+  if (C10_UNLIKELY(at::shouldRunRecordFunction(&pre_sampled))) {
+    at::RecordFunction guard(
+        at::RecordScope::TORCHSCRIPT_FUNCTION, pre_sampled);
+    if (guard.isActive()) {
+      if (guard.needsInputs()) {
+        guard.before("forward", &args);
+      } else {
+        guard.before("forward");
+      }
+    }
+    return run_impl(std::forward<IValueList>(args), kwargs);
+  }
+  return run_impl(std::forward<IValueList>(args), kwargs);
+}
+
 c10::IValue StaticRuntime::operator()(
     const std::vector<c10::IValue>& args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
+#ifdef PYTORCH_DISABLE_NET_PROFILING
   return run_impl(args, kwargs);
+#else
+  return run_impl_record_functions(args, kwargs);
+#endif
 }
 
 c10::IValue StaticRuntime::operator()(
     std::vector<c10::IValue>&& args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
+#ifdef PYTORCH_DISABLE_NET_PROFILING
   return run_impl(std::move(args), kwargs);
+#else
+  return run_impl_record_functions(std::move(args), kwargs);
+#endif
 }
 
 namespace {
@@ -1271,12 +1299,11 @@ float StaticRuntime::benchmark_model(
 
   const bool is_kwargs_empty = kwargs_list.size() == 0;
   const std::unordered_map<std::string, c10::IValue> empty_kwargs;
-  bool manage_output_tensors = static_module_.opts().manage_output_tensors;
   for (const auto i : c10::irange(warmup_runs)) {
     (void)i; // Suppress unused variable warning
     for (const auto j : c10::irange(args_list.size())) {
       operator()(args_list[j], is_kwargs_empty ? empty_kwargs : kwargs_list[j]);
-      if (manage_output_tensors) {
+      if (manage_output_tensors_enabled_) {
         deallocateOutputTensors();
       }
     }
@@ -1286,7 +1313,7 @@ float StaticRuntime::benchmark_model(
     (void)i; // Suppress unused variable warning
     for (const auto j : c10::irange(args_list.size())) {
       operator()(args_list[j], is_kwargs_empty ? empty_kwargs : kwargs_list[j]);
-      if (manage_output_tensors) {
+      if (manage_output_tensors_enabled_) {
         deallocateOutputTensors();
       }
     }
@@ -1600,6 +1627,24 @@ bool StaticRuntime::isManagedOutputTensor(const IValue& ivalue) {
   return planner_ && planner_->isManagedOutputTensor(ivalue);
 }
 
+void StaticRuntime::disableManageOutputTensors() {
+  if (!manage_output_tensors_enabled_) {
+    return;
+  }
+  manage_output_tensors_enabled_ = false;
+  if (!planner_) {
+    return;
+  }
+  // Reset all IValues and destruct planner_ so that it can be reconstructed in
+  // the next run.
+  for (auto& n : nodes_) {
+    for (const auto i : c10::irange(n.outputs().size())) {
+      n.Output(i) = IValue();
+    }
+  }
+  planner_.reset();
+}
+
 ProcessedNode::ProcessedNode(
     Node* node,
     std::unique_ptr<const IValue*[]> inputs,
@@ -1658,7 +1703,7 @@ ProcessedNode::ProcessedNode(
   }
 }
 
-std::vector<IValue> ProcessedNode::clone_inputs() const {
+std::vector<IValue> ProcessedNode::inputs_ivalue_vec() const {
   std::vector<IValue> result;
   result.reserve(inputs_size_);
   std::transform(
@@ -1676,7 +1721,7 @@ void ProcessedNode::run() {
     at::RecordFunction guard(at::RecordScope::FUNCTION, pre_sampled);
     if (guard.isActive()) {
       if (guard.needsInputs()) {
-        guard.before(get_op_name(), clone_inputs());
+        guard.before(get_op_name(), inputs_ivalue_vec());
       } else {
         guard.before(get_op_name());
       }

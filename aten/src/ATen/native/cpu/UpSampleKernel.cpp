@@ -18,6 +18,10 @@ static inline int64_t nearest_idx(
     int64_t input_size,
     int64_t output_size,
     c10::optional<double> scales) {
+  // This method specificly treats cases: output_size == input_size or
+  // output_size == 2 * input_size, that we would like to get rid of
+  // We keep this method for BC and consider as deprecated.
+  // See nearest_exact_idx as replacement
   if (output_size == input_size) {
     // scale_factor = 1, simply copy
     return output_index;
@@ -29,6 +33,18 @@ static inline int64_t nearest_idx(
     return nearest_neighbor_compute_source_index(scale, output_index, input_size);
   }
 }
+
+static inline int64_t nearest_exact_idx(
+    int64_t output_index,
+    int64_t input_size,
+    int64_t output_size,
+    c10::optional<double> scales) {
+  float scale = compute_scales_value<float>(scales, input_size, output_size);
+  return nearest_neighbor_exact_compute_source_index(scale, output_index, input_size);
+}
+
+// Define a typedef to dispatch to nearest_idx or nearest_exact_idx
+typedef int64_t (*nearest_idx_fn_t)(int64_t, int64_t, int64_t, c10::optional<double>);
 
 // Helper structs and methods for cpu_upsample_linear
 //
@@ -248,7 +264,7 @@ void cpu_upsample_generic(at::TensorIterator& iter)
   iter.for_each(loop);
 }
 
-template <typename scalar_t, typename scale_type>
+template <typename scalar_t, typename scale_type, nearest_idx_fn_t nearest_idx_fn>
 void cpu_upsample_nearest_channels_last(
     const Tensor& output_,
     const Tensor& input_,
@@ -299,8 +315,8 @@ void cpu_upsample_nearest_channels_last(
     data_index_init(begin, n, num_batches, oh, output_height, ow, output_width);
 
     for (const auto i : c10::irange(begin, end)) {
-      int64_t ih = nearest_idx(oh, input_height, output_height, scales[0]);
-      int64_t iw = nearest_idx(ow, input_width, output_width, scales[1]);
+      int64_t ih = nearest_idx_fn(oh, input_height, output_height, scales[0]);
+      int64_t iw = nearest_idx_fn(ow, input_width, output_width, scales[1]);
       scalar_t* output_ptr = output_data + i * channels;
       scalar_t* input_ptr = input_data + n * input_height * input_width * channels +
           ih * input_width * channels + iw * channels;
@@ -317,9 +333,9 @@ void cpu_upsample_nearest_channels_last(
     data_index_init(begin, n, num_batches, od, output_depth, oh, output_height, ow, output_width);
 
     for (const auto i : c10::irange(begin, end)) {
-      int64_t id = nearest_idx(od, input_depth, output_depth, scales[0]);
-      int64_t ih = nearest_idx(oh, input_height, output_height, scales[1]);
-      int64_t iw = nearest_idx(ow, input_width, output_width, scales[2]);
+      int64_t id = nearest_idx_fn(od, input_depth, output_depth, scales[0]);
+      int64_t ih = nearest_idx_fn(oh, input_height, output_height, scales[1]);
+      int64_t iw = nearest_idx_fn(ow, input_width, output_width, scales[2]);
       scalar_t* output_ptr = output_data + i * channels;
       scalar_t* input_ptr = input_data + n * input_depth * input_height * input_width * channels +
           id * input_height * input_width * channels +
@@ -534,6 +550,10 @@ struct HelperInterpBase {
 };
 
 struct HelperInterpNearest : public HelperInterpBase {
+  // This structure implements outdated and buggy method to compute indices
+  // for nearest neighbours interpolation
+  // We keep this structure for BC and consider as deprecated.
+  // See HelperInterpNearestExact as replacement
 
   static const int interp_size = 1;
 
@@ -569,6 +589,8 @@ struct HelperInterpNearest : public HelperInterpBase {
     int64_t reshape_dim, bool align_corners, const c10::optional<double> opt_scale
   ) {
 
+    TORCH_INTERNAL_ASSERT(!align_corners);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<Tensor> output;
     HelperInterpNearest::init_indices_weights(
       scalar_type, output, output_size, ndims, reshape_dim, HelperInterpNearest::interp_size);
@@ -581,6 +603,12 @@ struct HelperInterpNearest : public HelperInterpBase {
         auto input_index_ptr = output[0].data_ptr<int64_t>();
         int64_t input_index;
 
+        // Indices are computed as following:
+        // scale = 1.0 * isize / osize
+        // index_f32 = (output_index) * scale
+        // input_index = floor(index_f32)
+        // Same as OpenCV INTER_NEAREST
+
         for (const auto i : c10::irange(output_size)) {
           const scalar_t real_input_index = area_pixel_compute_source_index<scalar_t>(
               scale, i, /*align_corners=*/true, /*cubic=*/false);
@@ -592,6 +620,56 @@ struct HelperInterpNearest : public HelperInterpBase {
     return output;
   }
 
+};
+
+struct HelperInterpNearestExact : public HelperInterpNearest {
+
+  // Compute nearest mode indices and weights for each interpolated dimension
+  // indices_weights = {
+  //      {indices_0, 1.0, },  // dim -n
+  //      {indices_0, 1.0, },  // dim -(n-1)
+  //      ...
+  //      {indices_0, 1.0, },  // dim -1
+  // }
+  // Indices and weights are reshaped as (1, 1, ..., N, ..., 1, 1) to
+  // fit input/output tensors.
+  // Indices are already containing the strides to optimize the computations
+  static inline std::vector<Tensor> compute_indices_weights(
+    at::ScalarType scalar_type,
+    int64_t input_size, int64_t output_size, int64_t stride, int64_t ndims,
+    int64_t reshape_dim, bool align_corners, const c10::optional<double> opt_scale
+  ) {
+
+    TORCH_INTERNAL_ASSERT(!align_corners);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    std::vector<Tensor> output;
+    HelperInterpNearest::init_indices_weights(
+      scalar_type, output, output_size, ndims, reshape_dim, HelperInterpNearest::interp_size);
+
+    AT_DISPATCH_FLOATING_TYPES(
+      scalar_type, "compute_indices_weights_nearest", [&] {
+
+        scalar_t scale = area_pixel_compute_scale<scalar_t>(input_size, output_size, align_corners, opt_scale);
+
+        auto input_index_ptr = output[0].data_ptr<int64_t>();
+        int64_t input_index;
+
+        // Indices should be computed as following:
+        // scale = 1.0 * isize / osize
+        // index_f32 = (output_index + 0.5) * scale - 0.5
+        // input_index = round(index_f32)
+        // Same as Pillow and Scikit-Image/Scipy ndi.zoom
+
+        for (int64_t i=0; i<output_size; i++) {
+          const scalar_t real_input_index = area_pixel_compute_source_index<scalar_t>(
+              scale, i, /*align_corners=*/align_corners, /*cubic=*/false);
+          input_index = static_cast<int64_t>(floorf(real_input_index + 0.5));
+          input_index_ptr[i] = static_cast<int64_t>(std::min(input_index, input_size - 1)) * stride;
+        }
+      }
+    );
+    return output;
+  }
 };
 
 struct HelperInterpLinear : public HelperInterpBase {
@@ -613,7 +691,7 @@ struct HelperInterpLinear : public HelperInterpBase {
     int64_t input_size, int64_t output_size, int64_t stride, int64_t ndims, int64_t reshape_dim,
     bool align_corners, const c10::optional<double> opt_scale
   ) {
-
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<Tensor> output;
     HelperInterpLinear::init_indices_weights(
       scalar_type, output, output_size, ndims, reshape_dim, HelperInterpLinear::interp_size);
@@ -668,7 +746,7 @@ struct HelperInterpCubic : public HelperInterpBase {
     int64_t input_size, int64_t output_size, int64_t stride, int64_t ndims, int64_t reshape_dim,
     bool align_corners, const c10::optional<double> opt_scale
   ) {
-
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<Tensor> output;
     HelperInterpCubic::init_indices_weights(
       scalar_type, output, output_size, ndims, reshape_dim, HelperInterpCubic::interp_size);
@@ -737,6 +815,7 @@ void upsample_generic_Nd_kernel_impl(
   }
   auto restrided_input = input.as_strided(shape, strides);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<std::vector<Tensor>> indices_weights;
 
   constexpr int interp_size = F::interp_size;
@@ -794,6 +873,14 @@ void upsample_nearest1d_kernel_impl(
     const Tensor& input,
     c10::optional<double> scales_w) {
   upsample_generic_Nd_kernel_impl<1, scale_t, HelperInterpNearest>(
+      output, input, false, {scales_w});
+}
+
+void _upsample_nearest_exact1d_kernel_impl(
+    const Tensor& output,
+    const Tensor& input,
+    c10::optional<double> scales_w) {
+  upsample_generic_Nd_kernel_impl<1, scale_t, HelperInterpNearestExact>(
     output, input, false, {scales_w});
 }
 
@@ -804,10 +891,25 @@ void upsample_nearest2d_kernel_impl(
     c10::optional<double> scales_w) {
   if (input.is_contiguous(at::MemoryFormat::ChannelsLast)) {
     AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Byte, input.scalar_type(), "upsample_nearest2d_channels_last", [&] {
-      cpu_upsample_nearest_channels_last<scalar_t, scale_t>(output, input, {scales_h, scales_w});
+      cpu_upsample_nearest_channels_last<scalar_t, scale_t, nearest_idx>(output, input, {scales_h, scales_w});
     });
   } else {
     upsample_generic_Nd_kernel_impl<2, scale_t, HelperInterpNearest>(
+      output, input, false, {scales_h, scales_w});
+  }
+}
+
+void _upsample_nearest_exact2d_kernel_impl(
+    const Tensor& output,
+    const Tensor& input,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
+  if (input.is_contiguous(at::MemoryFormat::ChannelsLast)) {
+    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Byte, input.scalar_type(), "upsample_nearest2d_channels_last", [&] {
+      cpu_upsample_nearest_channels_last<scalar_t, scale_t, nearest_exact_idx>(output, input, {scales_h, scales_w});
+    });
+  } else {
+    upsample_generic_Nd_kernel_impl<2, scale_t, HelperInterpNearestExact>(
       output, input, false, {scales_h, scales_w});
   }
 }
@@ -820,10 +922,26 @@ void upsample_nearest3d_kernel_impl(
     c10::optional<double> scales_w) {
   if (input.is_contiguous(at::MemoryFormat::ChannelsLast3d)) {
     AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Byte, input.scalar_type(), "upsample_nearest3d_channels_last", [&] {
-      cpu_upsample_nearest_channels_last<scalar_t, scale_t>(output, input, {scales_d, scales_h, scales_w});
+      cpu_upsample_nearest_channels_last<scalar_t, scale_t, nearest_idx>(output, input, {scales_d, scales_h, scales_w});
     });
   } else {
     upsample_generic_Nd_kernel_impl<3, scale_t, HelperInterpNearest>(
+      output, input, false, {scales_d, scales_h, scales_w});
+  }
+}
+
+void _upsample_nearest_exact3d_kernel_impl(
+    const Tensor& output,
+    const Tensor& input,
+    c10::optional<double> scales_d,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
+  if (input.is_contiguous(at::MemoryFormat::ChannelsLast3d)) {
+    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Byte, input.scalar_type(), "upsample_nearest3d_channels_last", [&] {
+      cpu_upsample_nearest_channels_last<scalar_t, scale_t, nearest_exact_idx>(output, input, {scales_d, scales_h, scales_w});
+    });
+  } else {
+    upsample_generic_Nd_kernel_impl<3, scale_t, HelperInterpNearestExact>(
       output, input, false, {scales_d, scales_h, scales_w});
   }
 }
@@ -882,7 +1000,7 @@ void upsample_bicubic2d_kernel_impl(
     output, input, align_corners, {scales_h, scales_w});
 }
 
-template <typename scalar_t, typename scale_type>
+template <typename scalar_t, typename scale_type, nearest_idx_fn_t nearest_idx_fn>
 void cpu_upsample_nearest_backward(
     const Tensor& grad_input_,
     const Tensor& grad_output_,
@@ -914,7 +1032,7 @@ void cpu_upsample_nearest_backward(
   auto loop1d = [&](int64_t begin, int64_t end) {
     for (const auto c : c10::irange(begin, end)) {
       for (const auto ow : c10::irange(output_width)) {
-        int64_t iw = nearest_idx(ow, input_width, output_width, scales[0]);
+        int64_t iw = nearest_idx_fn(ow, input_width, output_width, scales[0]);
         int64_t output_offset = c * output_slice_size + ow;
         int64_t input_offset = c * input_slice_size + iw;
         grad_input_data[input_offset] += grad_output_data[output_offset];
@@ -925,9 +1043,9 @@ void cpu_upsample_nearest_backward(
   auto loop2d = [&](int64_t begin, int64_t end) {
     for (const auto c : c10::irange(begin, end)) {
       for (const auto oh : c10::irange(output_height)) {
-        int64_t ih = nearest_idx(oh, input_height, output_height, scales[0]);
+        int64_t ih = nearest_idx_fn(oh, input_height, output_height, scales[0]);
         for (const auto ow : c10::irange(output_width)) {
-          int64_t iw = nearest_idx(ow, input_width, output_width, scales[1]);
+          int64_t iw = nearest_idx_fn(ow, input_width, output_width, scales[1]);
           int64_t output_offset = c * output_slice_size + oh * output_width + ow;
           int64_t input_offset = c * input_slice_size + ih * input_width + iw;
           grad_input_data[input_offset] += grad_output_data[output_offset];
@@ -939,11 +1057,11 @@ void cpu_upsample_nearest_backward(
   auto loop3d = [&](int64_t begin, int64_t end) {
     for (const auto c : c10::irange(begin, end)) {
       for (const auto od : c10::irange(output_depth)) {
-        int64_t id = nearest_idx(od, input_depth, output_depth, scales[0]);
+        int64_t id = nearest_idx_fn(od, input_depth, output_depth, scales[0]);
         for (const auto oh : c10::irange(output_height)) {
-          int64_t ih = nearest_idx(oh, input_height, output_height, scales[1]);
+          int64_t ih = nearest_idx_fn(oh, input_height, output_height, scales[1]);
           for (const auto ow : c10::irange(output_width)) {
-            int64_t iw = nearest_idx(ow, input_width, output_width, scales[2]);
+            int64_t iw = nearest_idx_fn(ow, input_width, output_width, scales[2]);
             int64_t output_offset = c * output_slice_size +
                 od *  output_height * output_width + oh * output_width + ow;
             int64_t input_offset = c * input_slice_size +
@@ -977,7 +1095,16 @@ void upsample_nearest1d_backward_kernel_impl(
     const Tensor& grad_output,
     c10::optional<double> scales_w) {
   AT_DISPATCH_FLOATING_TYPES(grad_output.scalar_type(), "upsample_nearest1d_backward", [&] {
-    cpu_upsample_nearest_backward<scalar_t, scale_t>(grad_input, grad_output, {scales_w});
+    cpu_upsample_nearest_backward<scalar_t, scale_t, nearest_idx>(grad_input, grad_output, {scales_w});
+  });
+}
+
+void _upsample_nearest_exact1d_backward_kernel_impl(
+    const Tensor& grad_input,
+    const Tensor& grad_output,
+    c10::optional<double> scales_w) {
+  AT_DISPATCH_FLOATING_TYPES(grad_output.scalar_type(), "_upsample_nearest_exact1d_backward", [&] {
+    cpu_upsample_nearest_backward<scalar_t, scale_t, nearest_exact_idx>(grad_input, grad_output, {scales_w});
   });
 }
 
@@ -987,7 +1114,17 @@ void upsample_nearest2d_backward_kernel_impl(
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
   AT_DISPATCH_FLOATING_TYPES(grad_output.scalar_type(), "upsample_nearest2d_backward", [&] {
-    cpu_upsample_nearest_backward<scalar_t, scale_t>(grad_input, grad_output, {scales_h, scales_w});
+    cpu_upsample_nearest_backward<scalar_t, scale_t, nearest_idx>(grad_input, grad_output, {scales_h, scales_w});
+  });
+}
+
+void _upsample_nearest_exact2d_backward_kernel_impl(
+    const Tensor& grad_input,
+    const Tensor& grad_output,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
+  AT_DISPATCH_FLOATING_TYPES(grad_output.scalar_type(), "_upsample_nearest_exact2d_backward", [&] {
+    cpu_upsample_nearest_backward<scalar_t, scale_t, nearest_exact_idx>(grad_input, grad_output, {scales_h, scales_w});
   });
 }
 
@@ -998,18 +1135,35 @@ void upsample_nearest3d_backward_kernel_impl(
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
   AT_DISPATCH_FLOATING_TYPES(grad_output.scalar_type(), "upsample_nearest3d_backward", [&] {
-    cpu_upsample_nearest_backward<scalar_t, scale_t>(grad_input, grad_output, {scales_d, scales_h, scales_w});
+    cpu_upsample_nearest_backward<scalar_t, scale_t, nearest_idx>(grad_input, grad_output, {scales_d, scales_h, scales_w});
+  });
+}
+
+void _upsample_nearest_exact3d_backward_kernel_impl(
+    const Tensor& grad_input,
+    const Tensor& grad_output,
+    c10::optional<double> scales_d,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
+  AT_DISPATCH_FLOATING_TYPES(grad_output.scalar_type(), "_upsample_nearest_exact3d_backward", [&] {
+    cpu_upsample_nearest_backward<scalar_t, scale_t, nearest_exact_idx>(grad_input, grad_output, {scales_d, scales_h, scales_w});
   });
 }
 
 } // anonymous namespace
 
 REGISTER_DISPATCH(upsample_nearest1d_kernel, &upsample_nearest1d_kernel_impl);
+REGISTER_DISPATCH(_upsample_nearest_exact1d_kernel, &_upsample_nearest_exact1d_kernel_impl);
 REGISTER_DISPATCH(upsample_nearest2d_kernel, &upsample_nearest2d_kernel_impl);
+REGISTER_DISPATCH(_upsample_nearest_exact2d_kernel, &_upsample_nearest_exact2d_kernel_impl);
 REGISTER_DISPATCH(upsample_nearest3d_kernel, &upsample_nearest3d_kernel_impl);
+REGISTER_DISPATCH(_upsample_nearest_exact3d_kernel, &_upsample_nearest_exact3d_kernel_impl);
 REGISTER_DISPATCH(upsample_nearest1d_backward_kernel, &upsample_nearest1d_backward_kernel_impl);
+REGISTER_DISPATCH(_upsample_nearest_exact1d_backward_kernel, &_upsample_nearest_exact1d_backward_kernel_impl);
 REGISTER_DISPATCH(upsample_nearest2d_backward_kernel, &upsample_nearest2d_backward_kernel_impl);
+REGISTER_DISPATCH(_upsample_nearest_exact2d_backward_kernel, &_upsample_nearest_exact2d_backward_kernel_impl);
 REGISTER_DISPATCH(upsample_nearest3d_backward_kernel, &upsample_nearest3d_backward_kernel_impl);
+REGISTER_DISPATCH(_upsample_nearest_exact3d_backward_kernel, &_upsample_nearest_exact3d_backward_kernel_impl);
 
 REGISTER_DISPATCH(upsample_linear1d_kernel, &upsample_linear1d_kernel_impl);
 REGISTER_DISPATCH(upsample_bilinear2d_kernel, &upsample_bilinear2d_kernel_impl);
