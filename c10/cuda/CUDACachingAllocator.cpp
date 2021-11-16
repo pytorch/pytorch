@@ -1,6 +1,4 @@
-
 #include <c10/cuda/CUDACachingAllocator.h>
-
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAGuard.h>
@@ -1619,6 +1617,9 @@ void parseArgs() {
     std::sregex_token_iterator end;
     std::vector<std::string> options(it, end);
 
+    bool used_max_split_size_mb(false);
+    bool used_cudaMallocAsync(false);
+
     for (auto option : options) {
       std::regex exp2("[:]+");
       std::sregex_token_iterator it2(option.begin(), option.end(), exp2, -1);
@@ -1637,16 +1638,22 @@ void parseArgs() {
           val2 = std::min(
               val2, (std::numeric_limits<size_t>::max() / (1024 * 1024)));
           m_max_split_size = val2 * 1024 * 1024;
+          used_max_split_size_mb = true;
         } else if (kv[0].compare("backend") == 0) {
           TORCH_CHECK(((kv[1].compare("native") == 0) ||
                        (kv[1].compare("cudaMallocAsync") == 0)),
                       "Unknown allocator backend, "
                       "options are native and cudaMallocAsync");
           m_allocator_backend = kv[1];
+          used_cudaMallocAsync = (kv[1].compare("cudaMallocAsync") == 0);
         } else {
           TORCH_CHECK(false, "Unrecognized CachingAllocator option: ", kv[0]);
         }
       }
+    }
+
+    if (used_max_split_size_mb && used_cudaMallocAsync) {
+      TORCH_WARN("backend:cudaMallocAsync ignores max_split_size_mb");
     }
   }
 }
