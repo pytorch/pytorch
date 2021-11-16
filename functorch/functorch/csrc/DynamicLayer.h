@@ -6,6 +6,7 @@
 
 #pragma once
 #include <c10/core/DispatchKey.h>
+#include <ATen/core/function_schema.h>
 #include <c10/util/Optional.h>
 #include <unordered_map>
 #include <mutex>
@@ -65,6 +66,14 @@ TORCH_API bool areTransformsActive();
 
 // NB: not lock safe. TODO: does it need a lock?
 TORCH_API std::shared_ptr<bool> getLifeHandleForLevel(int64_t level);
+
+// Returns if an operator is in-place. An operator is inplace if:
+// 1. The first argument is a Tensor and it is being written to
+// 2. The first argument is being returned
+// 3. No other arguments are aliased
+// Here is an example of an in-place operator:
+// add_(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
+bool isInplaceOp(const c10::FunctionSchema& schema);
 
 }
 } // namespace at

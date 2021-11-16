@@ -328,6 +328,57 @@ static bool batchedAtCurrentLevel(const Tensor& tensor) {
   return batched_at_level == level;
 }
 
+bool isInplaceOp(const FunctionSchema& schema) {
+  if (!schema.is_mutable() || schema.returns().size() != 1) {
+    return false;
+  }
+  // Check that the first argument is being written to
+  const auto& first_arg_alias_info = schema.arguments().begin()->alias_info();
+  if (!first_arg_alias_info || !first_arg_alias_info->isWrite()) {
+    return false;
+  }
+  // Check that none of the other args are being aliased
+  for (auto it = schema.arguments().begin() + 1; it != schema.arguments().end(); ++it) {
+    const auto& alias_info = it->alias_info();
+    if (alias_info) {
+      return false;
+    }
+  }
+  // Check that the first tensor is being returned (i.e., output has a (a!))
+  const auto& return_alias_info = schema.returns()[0].alias_info();
+  return return_alias_info && return_alias_info->isWrite();
+}
+
+static void checkForInvalidMutationOnCaptures(
+    const c10::OperatorHandle& op,
+    torch::jit::Stack* stack,
+    const std::vector<DynamicLayer>& dynamicLayerStack) {
+  if (dynamicLayerStack.back().key() != DispatchKey::Autograd) {
+    return;
+  }
+  // TODO: First entry in the stack is a default autograd key.
+  // We should clean up the logic
+  if (dynamicLayerStack.size() <= 1) {
+    return;
+  }
+  if (!isInplaceOp(op.schema())) {
+    return;
+  }
+  auto args = torch::jit::last(stack, op.schema().arguments().size());
+  auto mutated_arg = unwrapIfDead(args[0].toTensor());
+  auto cur_level = dynamicLayerStack.back().layerId();
+  auto* wrapper = maybeGetTensorWrapper(mutated_arg);
+  if (wrapper && wrapper->level().has_value() && wrapper->level().value() == cur_level) {
+    return;
+  }
+  TORCH_CHECK(false,
+      "During a grad (vjp, jvp, grad, etc) transform, the function provided ",
+      "attempted to call in-place operation (", op.schema().operator_name(), ") ",
+      "that would mutate a captured Tensor. This is not supported; please rewrite ",
+      "the function being transformed to explicitly accept the mutated Tensor(s) ",
+      "as inputs.");
+}
+
 void dynamicLayerFrontFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   auto& dynamicLayerStack = dynamicLayerStackAccessor();
 #ifdef HAS_TORCH_SHOW_DISPATCH_TRACE
@@ -342,9 +393,10 @@ void dynamicLayerFrontFallback(const c10::OperatorHandle& op, torch::jit::Stack*
     return;
   }
 
-  // TODO: if is a grad transform, and the operation is in-place, and the mutated
+  // if is a grad transform, and the operation is in-place, and the mutated
   // argument is not currently wrapped in a TensorWrapper, then we need to
   // error out otherwise the result is silently incorrect
+  checkForInvalidMutationOnCaptures(op, stack, dynamicLayerStack);
 
   // Unwrap dead GradWrappers, materialize live ones
   auto maybeTransformGradWrappers = [](const Tensor& tensor) {
