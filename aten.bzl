@@ -59,6 +59,7 @@ def generate_aten_impl(ctx):
                    "--install_dir", install_dir],
         tools=tool_inputs,
         input_manifests=tool_inputs_manifest,
+        use_default_shell_env=True,
     )
     return [DefaultInfo(files=depset(outputs))]
 
