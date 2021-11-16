@@ -2399,7 +2399,6 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         # Control gloo pg used as go-ahead signal/barrier
         # to coordinate btwn ranks.
         pg_gloo = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
-        print("Created gloo pg")
         failed_collective_timeout = timedelta(milliseconds=100)
         process_group.allreduce(torch.rand(10).cuda(self.rank)).wait(timeout=timedelta(seconds=5))
 
