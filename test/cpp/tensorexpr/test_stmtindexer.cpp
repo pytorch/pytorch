@@ -13,6 +13,15 @@ namespace jit {
 
 using namespace torch::jit::tensorexpr;
 
+std::string getStmtIndexString(StmtIndex stmt_index) {
+  std::string cstr = "";
+  for (int i = 0; i < stmt_index.size(); i++) {
+    cstr += std::to_string(stmt_index.at(i));
+    cstr += ":";
+  }
+  return cstr;
+}
+
 TEST(StmtIndexer, BasicTest) {
   VarHandle i("i", kInt), j("j", kInt);
   BufHandle a("a", {32}, kFloat);
@@ -40,7 +49,7 @@ TEST(StmtIndexer, BasicTest) {
   int pass = 0;
   for (auto& acc : accesses) {
     auto store = std::get<0>(acc);
-    auto stmt_index = std::get<2>(acc).getStmtIndexString();
+    auto stmt_index = getStmtIndexString(std::get<2>(acc));
 
     // check the stmtIndex of aInit
     if (store == aInit) {
@@ -84,12 +93,12 @@ TEST(StmtIndexer, CondTest) {
 
   // check the stmtIndex of aStore
   auto acc_a = BufAccesses::find(stmt, a.node()).at(0);
-  auto stmt_index_a = std::get<2>(acc_a).getStmtIndexString();
+  auto stmt_index_a = getStmtIndexString(std::get<2>(acc_a));
   ASSERT_TRUE(stmt_index_a == "0:0:0:");
 
   // check the stmtIndex of bStore
   auto acc_b = BufAccesses::find(stmt, b.node()).at(0);
-  auto stmt_index_b = std::get<2>(acc_b).getStmtIndexString();
+  auto stmt_index_b = getStmtIndexString(std::get<2>(acc_b));
   ASSERT_TRUE(stmt_index_b == "0:0:1:");
 }
 
