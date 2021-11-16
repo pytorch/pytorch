@@ -485,7 +485,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         for (const auto idx : c10::irange(pnode->num_inputs())) {
           const auto& tuple = pnode->Input(idx);
           for (auto& elem : tuple.toTupleRef().elements()) {
-            pnode->Output(output_idx) = elem;
+            pnode->Output(output_idx) = createBorrowedIValue(elem);
             ++output_idx;
           }
         }
