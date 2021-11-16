@@ -1,6 +1,7 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/ops/result_type_native.h>
 #include <c10/util/irange.h>
 
 namespace at {

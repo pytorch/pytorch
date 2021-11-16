@@ -1,7 +1,19 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/native/ForeachUtils.h>
 #include <ATen/native/cuda/ForeachFunctors.cuh>
 #include <ATen/NumericUtils.h>
+
+#include <ATen/ops/_foreach_add_native.h>
+#include <ATen/ops/_foreach_addcdiv_native.h>
+#include <ATen/ops/_foreach_addcmul_native.h>
+#include <ATen/ops/_foreach_div_native.h>
+#include <ATen/ops/_foreach_maximum_native.h>
+#include <ATen/ops/_foreach_minimum_native.h>
+#include <ATen/ops/_foreach_mul_native.h>
+#include <ATen/ops/_foreach_sub_native.h>
+
+#include <ATen/ops/empty_like_native.h>
 
 namespace at { namespace native {
 

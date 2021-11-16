@@ -2,7 +2,7 @@
 
 // ${generated_comment}
 
-#ifdef TORCH_ASSERT_NO_OPERATORS
+#if defined(TORCH_ASSERT_NO_OPERATORS) || defined(TORCH_ASSERT_ONLY_METHOD_OPERATORS)
 #error This change adds a dependency on native_functions.yaml,             \
   meaning the file will need to be re-compiled every time an operator      \
   is changed or added. Consider if your change would be better placed in   \
