@@ -12,7 +12,6 @@
 #include <type_traits>
 #include <vector>
 
-#include "lazy_tensors/computation_client/types.h"
 #include "lazy_tensors/span.h"
 #include "torch/csrc/lazy/core/hash.h"
 
