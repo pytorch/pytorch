@@ -52,7 +52,7 @@ class Shard(object):
         placement = _remote_device(f"rank:{rank}/{str(tensor.device)}")
         shard_meta = ShardMetadata(
             shard_offsets=shard_offsets,
-            shard_lengths=shard_sizes,
+            shard_sizes=shard_sizes,
             placement=placement
         )
         return Shard(tensor, shard_meta)
