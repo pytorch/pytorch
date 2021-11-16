@@ -70,33 +70,6 @@ static bool areAnyArgumentsTensorList(const at::FunctionSchema& schema) {
       [] (const Argument& arg) { return arg.type()->isSubtypeOf(ListType::ofTensors()); });
 }
 
-// Returns if an operator is in-place. An operator is inplace if:
-// 1. The first argument is a Tensor and it is being written to
-// 2. The first argument is being returned
-// 3. No other arguments are aliased
-// Here is an example of an in-place operator:
-// add_(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
-static bool isInplaceOp(const FunctionSchema& schema) {
-  if (!schema.is_mutable() || schema.returns().size() != 1) {
-    return false;
-  }
-  // Check that the first argument is being written to
-  const auto& first_arg_alias_info = schema.arguments().begin()->alias_info();
-  if (!first_arg_alias_info || !first_arg_alias_info->isWrite()) {
-    return false;
-  }
-  // Check that none of the other args are being aliased
-  for (auto it = schema.arguments().begin() + 1; it != schema.arguments().end(); ++it) {
-    const auto& alias_info = it->alias_info();
-    if (alias_info) {
-      return false;
-    }
-  }
-  // Check that the first tensor is being returned (i.e., output has a (a!))
-  const auto& return_alias_info = schema.returns()[0].alias_info();
-  return return_alias_info && return_alias_info->isWrite();
-}
-
 static void warnFallback(const c10::FunctionSchema& schema, bool is_inplace) {
   TORCH_CHECK(isVmapFallbackEnabled(),
       schema.operator_name(), " hit the vmap fallback which is currently disabled");
