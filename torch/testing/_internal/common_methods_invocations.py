@@ -10636,7 +10636,7 @@ op_db: List[OpInfo] = [
                    ),
                    # tan(j * pi/2 * odd_number) is nan
                    reference_numerics_filter=NumericsFilter(
-                       condition=lambda x: (close_to_int(x / (math.pi * 0.5j)) 
+                       condition=lambda x: (close_to_int(x / (math.pi * 0.5j))
                                             if x.is_complex() else x.new_tensor(False)),
                        safe_val=0)),
     OpInfo('tensor_split',
@@ -12058,7 +12058,7 @@ op_db: List[OpInfo] = [
                    assert_autodiffed=True,
                    # sigmoid(z) = 1 / (1 + exp(-z)), at z = j * pi * odd_number, the denominator is zero
                    reference_numerics_filter=NumericsFilter(
-                       condition=lambda x: close_to_int(x / (math.pi * 1j)) if x.is_complex() else torch.tensor(False),
+                       condition=lambda x: (close_to_int(x / (math.pi * 1j)) if x.is_complex() else x.new_tensor(False)),
                        safe_val=0)),
     UnaryUfuncInfo('digamma',
                    ref=scipy.special.digamma if TEST_SCIPY else _NOTHING,
