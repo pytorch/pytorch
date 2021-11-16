@@ -358,20 +358,23 @@ class TestDependencyAPI(PackageTestCase):
         buffer = BytesIO()
         with PackageExporter(buffer) as he:
             he.extern(["package_d.*"])
-            he._selective_intern("package_d.package_d_temp","package_d.package_d_temp")
+            he.save_module("package_d")
+            he._selective_intern("package_d.temp_selective_intern","package_d.temp_selective_intern")
             _write_file(filename_selective_intern, changed_file_content)
             _write_file(filename_extern, changed_file_content)
-            he.save_source_string("foo", "import package_d.package_d_template;")
+            he.save_source_string("foo", "import package_d.temp_selective_intern as temp_selective_intern; import package_d.temp_extern as temp_extern")
         buffer.seek(0)
         hi = PackageImporter(buffer)
-        import package_d.temp_selective_interned
+        foo = hi.import_module("foo")
+
+        # number is not getting overwritten
+        import package_d.temp_selective_intern
         import package_d.temp_extern
 
-        foo_selective_intern = hi.import_module("package_d.temp_selective_intern")
-        foo_selective_extern = hi.import_module("package_d.temp_extern")
-
-        self.assertEqual(foo_selective_extern.test_number, package_d.temp_extern.test_number)
-        self.assertNotEqual(foo_selective_intern.test_number, package_d.temp_selective_intern.test_number)
+        self.assertEqual(foo.temp_extern.test_number, package_d.temp_extern.test_number)
+        # print(foo.temp_selective_intern.test_number)
+        print(package_d.temp_selective_intern.test_number)
+        self.assertNotEqual(foo.temp_selective_intern.test_number, package_d.temp_selective_intern.test_number)
 
     def test_selective_intern_subpackage(self):
         # buffer = BytesIO()
