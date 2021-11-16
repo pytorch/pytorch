@@ -932,7 +932,7 @@ def sample_inputs_reduction(op_info, device, dtype, requires_grad, **kwargs):
 def _generate_masked_op_mask(input_shape, device, **kwargs):
     yield None
     yield make_tensor(input_shape, device, torch.bool, requires_grad=False)
-    if len(input_shape) > 3:
+    if len(input_shape) > 2:
         # broadcast last mask dimension:
         yield make_tensor(input_shape[:-1] + (1,), device, torch.bool, requires_grad=False)
         # broadcast middle mask dimension:
@@ -940,7 +940,7 @@ def _generate_masked_op_mask(input_shape, device, **kwargs):
         # broadcast first mask dimension:
         yield make_tensor((1,) + input_shape[1:], device, torch.bool, requires_grad=False)
         # mask.ndim < input.ndim
-        yield make_tensor(input_shape[2:], device, torch.bool, requires_grad=False)
+        yield make_tensor(input_shape[1:], device, torch.bool, requires_grad=False)
         # mask.ndim == 1
         yield make_tensor(input_shape[-1:], device, torch.bool, requires_grad=False)
         # masks that require broadcasting of inputs (mask.ndim >
@@ -12749,6 +12749,10 @@ op_db: List[OpInfo] = [
             # RuntimeError: undefined value tensor
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
         ),
+        decorators=[
+            DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-03, rtol=1e-03)}),
+                         'TestReductions', 'test_reference_masked'),
+        ],
         sample_inputs_func=sample_inputs_masked_reduction,
         gradcheck_wrapper=gradcheck_wrapper_masked_operation
     ),

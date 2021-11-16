@@ -292,6 +292,8 @@ def _input_mask(input: Tensor, *args, **kwargs) -> Tensor:
         inmask = torch.broadcast_to(mask.clone(), input.shape).to(dtype=torch.bool)
     elif mask.ndim > input.ndim:
         raise IndexError("_input_mask expected broadcastable mask (got mask dimensionality higher than of the input)")
+    elif mask.shape != input.shape:
+        inmask = torch.broadcast_to(mask.clone(), input.shape).to(dtype=torch.bool)
     else:
         inmask = mask.to(dtype=torch.bool)
     return inmask
@@ -469,7 +471,8 @@ def softmax(input: Tensor,
     dim_ = _canonical_dim(dim, input.ndim)[0]
     if input.layout == torch.strided:
         fill = input.new_full([], _reduction_identity('amax', input))
-        mask_input = input if mask is None else torch.where(mask, input, fill)
+        inmask = _input_mask(input, mask=mask)
+        mask_input = torch.where(inmask, input, fill)
         return torch.nn.functional.softmax(mask_input, dim_, dtype=dtype)
     else:
         raise ValueError(f'masked softmax expects strided tensor (got {input.layout} tensor)')
