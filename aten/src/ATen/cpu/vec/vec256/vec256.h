@@ -9,7 +9,7 @@
 #if !(defined(__VSX__)  || defined(CPU_CAPABILITY_VSX) || defined(CPU_CAPABILITY_ZVECTOR))
 #include <ATen/cpu/vec/vec256/vec256_float.h>
 #include <ATen/cpu/vec/vec256/vec256_float_neon.h>
-
+#include <ATen/cpu/vec/vec256/vec256_bfloat16.h>
 #include <ATen/cpu/vec/vec256/vec256_double.h>
 #include <ATen/cpu/vec/vec256/vec256_int.h>
 #include <ATen/cpu/vec/vec256/vec256_qint.h>
@@ -19,9 +19,8 @@
 #include <ATen/cpu/vec/vec256/vsx/vec256_common_vsx.h>
 #else
 #include <ATen/cpu/vec/vec256/zarch/vec256_zarch.h>
-#endif
-//include vec256_bfloat16.h in all cases to fix the bfloat related issue
 #include <ATen/cpu/vec/vec256/vec256_bfloat16.h>
+#endif
 
 #include <algorithm>
 #include <cstddef>
