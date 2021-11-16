@@ -3264,6 +3264,59 @@ def sample_inputs_max_pool(op_info, device, dtype, requires_grad, **kwargs):
 
     return list(generator())
 
+def sample_inputs_max_unpool(op_info, device, dtype, requires_grad, **kwargs):
+    unpool_name_to_pool_method_dict = {
+        'nn.functional.max_unpool1d': torch.nn.functional.max_pool1d,
+        'nn.functional.max_unpool2d': torch.nn.functional.max_pool2d,
+        'nn.functional.max_unpool3d': torch.nn.functional.max_pool3d
+    }
+
+    unpool_name_to_dim = {
+        'nn.functional.max_unpool1d': 1,
+        'nn.functional.max_unpool2d': 2,
+        'nn.functional.max_unpool3d': 3
+    }
+
+    unpool_to_pool_name_dict = dict((
+        (k, f'nn.functional.{v.__name__}') for k, v in unpool_name_to_pool_method_dict.items()
+    ))
+
+    pool_dim = unpool_name_to_dim[op_info.name]
+    pool_method = unpool_name_to_pool_method_dict[op_info.name]
+
+    pool_op_info = copy.copy(op_info)
+    pool_op_info.name = unpool_to_pool_name_dict[op_info.name]
+
+    def generator():
+        for sample in sample_inputs_max_pool(pool_op_info, device, dtype, requires_grad, **kwargs):
+            # shapes (C, ...) do not work as of now,
+            # see https://github.com/pytorch/pytorch/issues/68337
+            # TODO: remove once the issue is resolved
+            if sample.input.dim() != pool_dim + 2:
+                continue
+
+            # No dilation for max_unpool
+            if sample.kwargs['dilation'] != 1:
+                continue
+
+            # Can't unpool without indices
+            if sample.kwargs['return_indices']:
+                pool, indices = pool_method(sample.input, **sample.kwargs)
+                # arg has to be a leaf
+                arg = pool.detach().requires_grad_(requires_grad)
+                sample_kwargs = {
+                    'kernel_size': sample.kwargs['kernel_size'],
+                    'stride': sample.kwargs['stride'],
+                    'padding': sample.kwargs['padding'],
+                    # output_size could be None but we specify it explicitly
+                    # because some of the indices are out of boundaries for
+                    # default computed shapes
+                    'output_size': sample.input.size()
+                }
+                yield SampleInput(arg, args=(indices,), kwargs=sample_kwargs)
+
+    return list(generator())
+
 def sample_inputs_normalize(self, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, low=-1, high=1, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -9821,6 +9874,30 @@ op_db: List[OpInfo] = [
            # TODO: investigate nondeterminism
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=sample_inputs_max_pool),
+    OpInfo('nn.functional.max_unpool1d',
+           aten_name='max_unpool1d',
+           supports_autograd=True,
+           supports_out=False,
+           assert_jit_shape_analysis=False,
+           dtypesIfCPU=floating_types(),
+           dtypesIfCUDA=floating_types_and(torch.float16),
+           sample_inputs_func=sample_inputs_max_unpool),
+    OpInfo('nn.functional.max_unpool2d',
+           aten_name='max_unpool2d',
+           supports_autograd=True,
+           supports_out=False,
+           assert_jit_shape_analysis=False,
+           dtypesIfCPU=floating_types(),
+           dtypesIfCUDA=floating_types_and(torch.float16),
+           sample_inputs_func=sample_inputs_max_unpool),
+    OpInfo('nn.functional.max_unpool3d',
+           aten_name='max_unpool3d',
+           supports_autograd=True,
+           supports_out=False,
+           assert_jit_shape_analysis=False,
+           dtypesIfCPU=floating_types(),
+           dtypesIfCUDA=floating_types_and(torch.float16),
+           sample_inputs_func=sample_inputs_max_unpool),
     OpInfo('nn.functional.linear',
            aten_name='linear',
            supports_autograd=True,
