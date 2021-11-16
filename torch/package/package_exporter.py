@@ -22,7 +22,7 @@ from typing import (
     Tuple,
 )
 from string import Template
-
+import pdb
 
 import torch
 from torch.serialization import location_tag, normalize_storage_type
@@ -488,6 +488,7 @@ class PackageExporter:
         self.dependency_graph.add_node(
             module_name, error=PackagingErrorReason.NO_ACTION
         )
+        # pdb.set_trace()
 
     def save_module(self, module_name: str, dependencies=True):
         """Save the code for ``module`` into the package. Code for the module is resolved using the ``importers`` path to find the
@@ -697,7 +698,7 @@ class PackageExporter:
         exclude: "GlobPattern" = (),
         allow_empty: bool = True,
     ):
-        """Specify extra modules not included in torch.package._selective_intern that should be selectively interned that should be packaged.
+        """Specify extra modules not included in DEFAULT_SELECTIVE_INTERN_LIST that should be selectively interned that should be packaged.
 
         Args:
             include (Union[List[str], str]): A string e.g. "my_package.my_subpackage", or list of strings
@@ -713,8 +714,9 @@ class PackageExporter:
         """
         assert self._module_exists(package_name), package_name
         self._selective_interns[package_name] = (GlobGroup(include, exclude=exclude), [])
+        # pdb.set_trace()
         self.intern(include=include, exclude=exclude, allow_empty=True)
-
+        # pdb.set_trace()
     def intern(
         self,
         include: "GlobPattern",
@@ -1026,7 +1028,7 @@ class PackageExporter:
         return f"{package_path}/{resource}"
 
     def _check_if_selectively_interned(self, module_name: str) -> bool:
-        for pattern, _ in self._selective_interns.items():
+        for _, (pattern,_) in self._selective_interns.items():
             if pattern.matches(module_name):
                 return True
         return False
