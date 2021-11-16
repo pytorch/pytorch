@@ -1015,7 +1015,7 @@ class TestFreezing(JitTestCase):
             m_f = torch._C._freeze_module(m_s._c)
 
     def test_freeze_module_inlining(self):
-        @torch.jit.script
+        @torch.jit.script  # noqa: B903
         class Obj(object):  # noqa: B903
             def __init__(self, x: int, y: int):
                 self.x = x
