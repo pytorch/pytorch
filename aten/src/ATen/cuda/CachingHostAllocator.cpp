@@ -111,11 +111,11 @@ struct HostAllocator
 
   cudaError_t free(void* ptr)
   {
-    std::lock_guard<std::mutex> lock(mutex);
-
     if (!ptr) {
       return cudaSuccess;
     }
+
+    std::lock_guard<std::mutex> lock(mutex);
 
     // process outstanding cuda events which may have occurred
     cudaError_t err = processEvents();
