@@ -6549,6 +6549,29 @@ def sample_inputs_where(op_info, device, dtype, requires_grad, **kwargs):
 
     return list(generator())
 
+def sample_inputs_nonzero(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    sizes = ((), (S,), (S, S), (S, S, S), (S, 1, S), (S, 0, S))
+
+    inputs = []
+    for shape in sizes:
+        # construct input without any non-zero elements
+        zeros = torch.zeros(shape, dtype=dtype, device=device, requires_grad=requires_grad)
+        inputs.append(zeros)
+
+        # construct input with mixed zero and non-zero elements
+        mixed = make_arg(shape).requires_grad_(False)
+        mask_t = make_tensor(shape, dtype=torch.bool, device=device, requires_grad=False)
+        mixed[mask_t] = 0
+        inputs.append(mixed)
+
+    def generator():
+        for input_t, as_tuple in product(inputs, [False, True]):
+            yield(SampleInput(input_t.detach().clone().requires_grad_(requires_grad),
+                              kwargs=dict(as_tuple=as_tuple)))
+
+    return list(generator())
 
 def sample_inputs_chunk(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device)
@@ -12170,6 +12193,18 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
            ),
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16)),
+    OpInfo('nonzero',
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+           sample_inputs_func=sample_inputs_nonzero,
+           supports_autograd=False,
+           skips=(
+               # https://github.com/pytorch/pytorch/issues/67458
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+               # nonzero is not raising a warning when the out is resized
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+               # Can't find schemas for this operator for some reason
+               DecorateInfo(unittest.skip("Skipped!"), 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
+           )),
     # `torch.norm` has multiple code paths depending on the value of `p`.
     # These paths have different dtype support. Also JIT supports,
     # most variants but not all of them. So we split the OpInfo entries,
