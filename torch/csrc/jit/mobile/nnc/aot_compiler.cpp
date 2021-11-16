@@ -12,6 +12,7 @@
 #include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 #include <torch/csrc/jit/tensorexpr/graph_opt.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
+#include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 
 using namespace torch::jit;
@@ -55,13 +56,18 @@ std::unique_ptr<Function> compileMethod(
   func->set_input_specs(toInputSpecs(sizes));
 
   std::vector<at::Tensor> parameters;
+  auto params = c10::impl::GenericList(c10::AnyType::get());
   auto const_descriptors = kernel->getConstantDescriptors();
   for (const auto& cd : const_descriptors) {
     auto sizes = getConstSizes(cd.buf);
-    at::Tensor const_tensor = at::from_blob(cd.ptr, sizes).clone();
-    parameters.push_back(const_tensor);
+    if (cd.ptr) {
+      at::Tensor const_tensor = at::from_blob(cd.ptr, sizes).clone();
+      params.push_back(const_tensor);
+    } else {
+      params.emplace_back(toIValue(cd.node->output()));
+    }
   }
-  func->set_parameters(c10::impl::toList(c10::List<at::Tensor>(parameters)));
+  func->set_parameters(params);
 
   MemoryPlan plan;
   plan.buffer_sizes_ = {}; // temp_sizes_;
@@ -77,6 +83,17 @@ std::unique_ptr<Function> compileMethod(
     output.sizes_ = getConstSizes(ba.buf());
     // TODO: assert the output is a buffer and not a scalar
     output.dtype_ = ba.buf()->dtype().scalar_type();
+    if (isQIntType(output.dtype_)) {
+      // Supporting only static qscale/qzero
+      output.qscale_ =
+          to<DoubleImm>(torch::jit::tensorexpr::IRSimplifier::simplify(
+                            ba.buf()->qscale()))
+              ->value();
+      output.qzero_ =
+          to<LongImm>(
+              torch::jit::tensorexpr::IRSimplifier::simplify(ba.buf()->qzero()))
+              ->value();
+    }
     out_spec.push_back(output);
   }
   func->set_output_specs(out_spec);
