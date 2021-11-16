@@ -108,6 +108,17 @@ std::vector<void*> ungraphed_ptrs_defer_free_until_no_capture;
  * carefully about the CPU overhead of remembering and rejoining
  * all free streams during capture. Maybe it's not a big deal.
  */
+bool operator==(const UsageStream& lhs, const UsageStream& rhs) {
+  return (lhs.stream == rhs.stream) && (lhs.device == rhs.device);
+}
+
+template<>
+struct std::hash<UsageStream> {
+  size_t operator()(const UsageStream& us) const noexcept {
+    return std::hash<void*>{}(us.stream) + reinterpret_cast<size_t>(us.device);
+  }
+}
+
 std::unordered_set<UsageStream> capture_free_streams;
 bool capture_underway = false;
 
