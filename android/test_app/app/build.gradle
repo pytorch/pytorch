@@ -155,7 +155,7 @@ dependencies {
     aarImplementation(name:'pytorch_android', ext:'aar')
     aarImplementation(name:'pytorch_android_torchvision', ext:'aar')
     aarImplementation 'com.facebook.soloader:nativeloader:0.8.0'
-    aarImplementation 'com.facebook.fbjni:fbjni-java-only:0.0.3'
+    aarImplementation 'com.facebook.fbjni:fbjni-java-only:0.2.2'
 
     def camerax_version = "1.0.0-alpha05"
     cameraImplementation "androidx.camera:camera-core:$camerax_version"
