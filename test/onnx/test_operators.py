@@ -1,3 +1,4 @@
+# Owner(s): ["module: onnx"]
 
 from test_pytorch_common import TestCase, run_tests, flatten, skipIfNoLapack, \
     BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
@@ -16,6 +17,7 @@ import inspect
 import glob
 import os
 import shutil
+import tempfile
 import torch.testing._internal.common_utils as common
 
 '''Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]
@@ -281,12 +283,12 @@ class TestOperators(TestCase):
         model = torch.nn.Conv2d(3, 2, 3)
 
         dynamic_axes = {"input_1": [0, 2, 3], "output_1": {0: "output_1_variable_dim_0", 1: "output_1_variable_dim_1"}}
-        model_proto_name = "conv2d.onnx"
-        torch.onnx.export(model, x, model_proto_name, verbose=True, input_names=["input_1"], output_names=["output_1"],
+        model_proto_file = tempfile.NamedTemporaryFile()
+        torch.onnx.export(model, x, model_proto_file.name, verbose=True, input_names=["input_1"], output_names=["output_1"],
                           dynamic_axes=dynamic_axes)
 
         import onnx
-        onnx_model = onnx.load(model_proto_name)
+        onnx_model = onnx.load(model_proto_file.name)
         onnx.checker.check_model(onnx_model)
 
         # Asserting the default dynamic axes names are generated when custom names are not provided
@@ -387,13 +389,11 @@ class TestOperators(TestCase):
 
     def test_mean_dtype(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.assertONNXRaisesRegex(RuntimeError, "Couldn't export operator aten::mean",
-                                   lambda x: torch.mean(x, dtype=torch.double), x)
+        self.assertONNX(lambda x: torch.mean(x, dtype=torch.double), x)
 
     def test_reduced_mean_dtype(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.assertONNXRaisesRegex(RuntimeError, "Couldn't export operator aten::mean",
-                                   lambda x: torch.mean(x, dim=0, dtype=torch.double), x)
+        self.assertONNX(lambda x: torch.mean(x, dim=0, dtype=torch.double), x)
 
     def test_sum(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
@@ -401,13 +401,11 @@ class TestOperators(TestCase):
 
     def test_sum_dtype(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.assertONNXRaisesRegex(RuntimeError, "Couldn't export operator aten::sum",
-                                   lambda x: torch.sum(x, dtype=torch.double), x)
+        self.assertONNX(lambda x: torch.sum(x, dtype=torch.double), x)
 
     def test_reduced_sum_dtype(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.assertONNXRaisesRegex(RuntimeError, "Couldn't export operator aten::sum",
-                                   lambda x: torch.sum(x, dim=0, dtype=torch.double), x)
+        self.assertONNX(lambda x: torch.sum(x, dim=0, dtype=torch.double), x)
 
     def test_reduced_sum(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
@@ -431,13 +429,11 @@ class TestOperators(TestCase):
 
     def test_prod_dtype(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.assertONNXRaisesRegex(RuntimeError, "Couldn't export operator aten::prod",
-                                   lambda x: torch.prod(x, dtype=torch.double), x)
+        self.assertONNX(lambda x: torch.prod(x, dtype=torch.double), x)
 
     def test_reduced_prod_dtype(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.assertONNXRaisesRegex(RuntimeError, "Couldn't export operator aten::prod",
-                                   lambda x: torch.prod(x, dim=0, dtype=torch.double), x)
+        self.assertONNX(lambda x: torch.prod(x, dim=0, dtype=torch.double), x)
 
     def test_sqrt(self):
         x = torch.randn(3, 4, requires_grad=True)

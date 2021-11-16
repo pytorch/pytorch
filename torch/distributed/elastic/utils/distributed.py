@@ -29,6 +29,7 @@ def create_c10d_store(
     server_port: int = -1,
     world_size: int = 1,
     timeout: float = (60 * 10),  # 10 min
+    wait_for_workers: bool = True,
     retries=3,
 ):
     if server_port == -1 and world_size > 1:
@@ -61,8 +62,11 @@ def create_c10d_store(
                 world_size=world_size,
                 is_master=is_server,
                 timeout=datetime.timedelta(seconds=timeout),
+                wait_for_workers=wait_for_workers,
             )
-            _check_full_rank(store, world_size)
+            # skips full rank check when we don't have to wait for all workers
+            if wait_for_workers:
+                _check_full_rank(store, world_size)
             log.info("Successfully created c10d store")
             return store
         except RuntimeError as e:
