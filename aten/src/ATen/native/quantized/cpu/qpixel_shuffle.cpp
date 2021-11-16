@@ -37,7 +37,7 @@ Tensor quantized_pixel_shuffle_impl(
   int64_t nbatch = self.size(0);
   int64_t channels = self.size(1);
   int64_t height = self.size(2);
-  int64_t width = self.size(0);
+  int64_t width = self.size(3);
   int64_t out_channels = channels / (S * S);
   TORCH_CHECK(
       channels % (S * S) == 0,
