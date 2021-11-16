@@ -395,7 +395,7 @@ template <
     bool Z_THREAD,
     typename T,
     typename TN>
-__device__ bool gridWelford(
+__device__ void gridWelford(
     T& out_avg,
     T& out_M2,
     TN& out_N,
@@ -447,15 +447,12 @@ __device__ bool gridWelford(
       work_buf_N[work_buf_offset] = 0;
     }
   }
-  block_sync::sync();
 
-  __shared__ bool last_block;
-  if (threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0) {
-    __threadfence();
-    auto old = (int64_t)atomicAdd((unsigned long long*)&sync_flags[seg_idx], 1);
-    last_block = old + 1 == seg_size;
-  }
-  block_sync::sync();
+  bool last_block =
+      index_utils::maskedIsLast<X_BLOCK, Y_BLOCK, Z_BLOCK>(blockIdx, gridDim);
+
+  grid_sync::sync<X_BLOCK, Y_BLOCK, Z_BLOCK>(
+      sync_flags[seg_idx], false, seg_size);
 
   if (last_block) {
     // final reduction
@@ -472,9 +469,6 @@ __device__ bool gridWelford(
         shared_buf_N,
         write_pred,
         init_val);
-    return true;
-  } else {
-    return false;
   }
 }
 } // namespace welford

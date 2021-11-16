@@ -21,6 +21,7 @@
 #include <nvfuser_resources/broadcast.h>
 #include <nvfuser_resources/fp16_support.h>
 #include <nvfuser_resources/grid_reduction.h>
+#include <nvfuser_resources/grid_sync.h>
 #include <nvfuser_resources/helpers.h>
 #include <nvfuser_resources/index_utils.h>
 #include <nvfuser_resources/random_numbers.h>
@@ -75,6 +76,7 @@ std::string kernelPreamble() {
   }
   ss << nvfuser_resources::index_utils_cu;
   ss << nvfuser_resources::block_reduction_cu;
+  ss << nvfuser_resources::grid_sync_cu;
   ss << nvfuser_resources::grid_reduction_cu;
   ss << nvfuser_resources::broadcast_cu;
   ss << nvfuser_resources::welford_cu;

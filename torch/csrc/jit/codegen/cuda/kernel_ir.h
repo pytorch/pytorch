@@ -1572,8 +1572,6 @@ class TORCH_CUDA_CU_API IfThenElse final : public Expr {
 //! reduction and sync buffers.
 class TORCH_CUDA_CU_API GridReduction final : public Expr {
  public:
-  explicit GridReduction(Passkey passkey, ReductionOp* reduction_op);
-
   void accept(IrVisitor* visitor) const override {
     visitor->visit(this);
   }
@@ -1607,9 +1605,6 @@ class TORCH_CUDA_CU_API GridReduction final : public Expr {
   void setThreadPredicate(const ParallelTypeBitmap& thread_predicate) {
     thread_predicate_ = thread_predicate;
   }
-
-  static std::string getPredicateFlagName(const TensorView* val);
-  static std::string getPredicateFlagName(const fuser::cuda::TensorView* val);
 
  private:
   ReductionOp* reduction_op_ = nullptr;
@@ -1673,9 +1668,6 @@ class TORCH_CUDA_CU_API GridWelford final : public Expr {
   void setThreadPredicate(const ParallelTypeBitmap& thread_predicate) {
     thread_predicate_ = thread_predicate;
   }
-
-  static std::string getPredicateFlagName(const TensorView* val);
-  static std::string getPredicateFlagName(const fuser::cuda::TensorView* val);
 
  private:
   WelfordOp* welford_op_ = nullptr;

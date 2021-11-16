@@ -720,11 +720,6 @@ Allocate::Allocate(
           size == nullptr ? std::vector<Val*>{} : std::vector<Val*>{size},
           zero_init) {}
 
-GridReduction::GridReduction(Passkey passkey, ReductionOp* reduction_op)
-    : Expr(passkey), reduction_op_(reduction_op) {
-  TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
-}
-
 GridReduction::GridReduction(
     Passkey passkey,
     ReductionOp* reduction_op,
@@ -734,20 +729,6 @@ GridReduction::GridReduction(
       reduction_op_(reduction_op),
       reduction_buffer_(reduction_buffer),
       sync_buffer_(sync_buffer) {}
-
-std::string GridReduction::getPredicateFlagName(const TensorView* val) {
-  std::stringstream ss;
-  ss << "T" << val->name() << "_pred";
-  return ss.str();
-}
-
-// TODO(kir): remove this
-std::string GridReduction::getPredicateFlagName(
-    const fuser::cuda::TensorView* val) {
-  std::stringstream ss;
-  ss << "T" << val->name() << "_pred";
-  return ss.str();
-}
 
 GridWelford::GridWelford(
     Passkey passkey,
@@ -762,20 +743,6 @@ GridWelford::GridWelford(
       avg_buffer_(avg_buffer),
       n_buffer_(n_buffer),
       sync_buffer_(sync_buffer) {}
-
-std::string GridWelford::getPredicateFlagName(const TensorView* val) {
-  std::stringstream ss;
-  ss << "T" << val->name() << "_pred";
-  return ss.str();
-}
-
-// TODO(kir): remove this
-std::string GridWelford::getPredicateFlagName(
-    const fuser::cuda::TensorView* val) {
-  std::stringstream ss;
-  ss << "T" << val->name() << "_pred";
-  return ss.str();
-}
 
 } // namespace kir
 } // namespace cuda

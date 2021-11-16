@@ -59,4 +59,18 @@ __device__ bool maskedIsZero(const _dim3& idx) {
     isZero = isZero && idx.z == 0;
   return isZero;
 }
+
+// Checks if provided idx is zero on those dims == true
+template <bool X, bool Y, bool Z, typename _dim3, typename _dim3_2>
+__device__ bool maskedIsLast(const _dim3& idx, const _dim3_2& dim) {
+  bool isZero = true;
+  if (X)
+    isZero = isZero && idx.x == dim.x - 1;
+  if (Y)
+    isZero = isZero && idx.y == dim.y - 1;
+  if (Z)
+    isZero = isZero && idx.z == dim.z - 1;
+  return isZero;
+}
+
 } // namespace index_utils

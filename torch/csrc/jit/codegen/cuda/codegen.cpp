@@ -121,8 +121,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
 
     // Do we have any reductions?
     const bool has_reductions = kernel_summary.has_block_reductions ||
-        kernel_summary.number_of_grid_reductions > 0;
-
+        kernel_summary.has_grid_reductions;
     const bool has_parallel_welford =
         kernel_summary.has_block_welford || kernel_summary.has_grid_welford;
 
@@ -971,8 +970,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
 
     // Since block-level reduction is already done, those dimensions
     // with tidx/y/z being true do not participate in the grid reduction.
-    indent() << kir::GridReduction::getPredicateFlagName(out->view()) << " = "
-             << "reduction::gridReduce<" << flags_str << ">(\n";
+    indent() << "reduction::gridReduce<" << flags_str << ">(\n";
     indent() << kTab << gen(rop->out()) << ",\n";
     if (domain->hasBlockReduction()) {
       indent() << kTab << "block_result_" << block_reduce_name_ << ",\n";
@@ -1024,8 +1022,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
 
     // Since block-level reduction is already done, those dimensions
     // with tidx/y/z being true do not participate in the grid reduction.
-    indent() << kir::GridWelford::getPredicateFlagName(out->view()) << " = "
-             << "welford::gridWelford<" << flags_str << ">(\n";
+    indent() << "welford::gridWelford<" << flags_str << ">(\n";
     indent() << kTab << gen(wop->outAvg()) << ",\n"
              << kTab << gen(wop->outVar()) << ",\n"
              << kTab << gen(wop->outN()) << ",\n";

@@ -194,15 +194,15 @@ static constexpr std::array<ParallelType, 6> kParallelTypeThreads = {
     ParallelType::TIDy,
     ParallelType::TIDz};
 
-static constexpr std::array<ParallelType, 6> kParallelTypeBIDs = {
+static constexpr std::array<ParallelType, 3> kParallelTypeBIDs = {
     ParallelType::BIDx,
     ParallelType::BIDy,
     ParallelType::BIDz};
 
-static constexpr std::array<ParallelType, 6> kParallelTypeTIDs = {
-    ParallelType::BIDx,
-    ParallelType::BIDy,
-    ParallelType::BIDz};
+static constexpr std::array<ParallelType, 3> kParallelTypeTIDs = {
+    ParallelType::TIDx,
+    ParallelType::TIDy,
+    ParallelType::TIDz};
 
 enum class MemoryType { Local, Shared, Global };
 

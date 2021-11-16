@@ -484,8 +484,7 @@ LaunchParams FusionExecutor::computeLaunchParams(
   // Add workspace for reduction and broadcast
   uint64_t reduction_broadcast_workspace = 0;
   const bool has_workspace = kernel_summary.has_block_reductions ||
-      kernel_summary.number_of_grid_reductions > 0 ||
-      kernel_summary.has_block_broadcasts;
+      kernel_summary.has_grid_reductions || kernel_summary.has_block_broadcasts;
   if (has_workspace &&
       kernel_summary.largest_smem_data_type != DataType::Null) {
     // Not using nThreads here since it does not handle uninitialized value

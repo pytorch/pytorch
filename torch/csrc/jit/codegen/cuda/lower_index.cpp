@@ -111,29 +111,6 @@ void IndexLowering::visit(const kir::TernaryOp* top) {
 
 namespace {
 
-void allocateGridReductionFlag(
-    kir::TensorView* out_tv,
-    kir::Expr* current_scope_expr) {
-  kir::IrBuilder ir_builder(GpuLower::current()->kernel());
-
-  const auto flag_name = kir::GridReduction::getPredicateFlagName(out_tv);
-  const auto flag_var = ir_builder.create<kir::Allocate>(
-      ir_builder.create<kir::NamedScalar>(flag_name, DataType::Bool),
-      MemoryType::Local,
-      ir_builder.create<kir::Int>(1));
-
-  // When enclosed by IfThenElse, place the variable outside of the
-  // IfThenElse. This IfThenElse is assumed to be the prediate for
-  // this grid reduction expression.
-  if (current_scope_expr->isA<kir::IfThenElse>()) {
-    scope_utils::insertBefore(
-        current_scope_expr->parentScope(), current_scope_expr, flag_var);
-  } else {
-    TORCH_INTERNAL_ASSERT(current_scope_expr->isA<kir::ForLoop>());
-    current_scope_expr->as<kir::ForLoop>()->body().push_back(flag_var);
-  }
-}
-
 // Get the size of the temporary work buffer for a grid
 // reduction/welford.
 kir::Val* getGridReductionWorkBufferSize(
@@ -247,10 +224,6 @@ void IndexLowering::visit(const kir::ReductionOp* rop) {
   }
 
   if (is_grid_reduce) {
-    // First, declare a boolean flag variable storing the return value
-    // of the gridReduce() helper
-    allocateGridReductionFlag(out_tv, active_scope_expr_);
-
     const auto reduce_buffer = allocGlobalBufferForGridReduction(
         ir_builder_,
         getGridReductionWorkBufferSize(ir_builder_, out_domain),
@@ -371,9 +344,6 @@ void IndexLowering::visit(const kir::WelfordOp* wop) {
   }
 
   if (is_grid_reduce) {
-    // Allocate T_pred
-    allocateGridReductionFlag(out_tv, active_scope_expr_);
-
     // Buffer allocation
     const auto work_buffer_size =
         getGridReductionWorkBufferSize(ir_builder_, out_domain);

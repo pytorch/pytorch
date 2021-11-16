@@ -124,7 +124,7 @@ class KernelIrScanner : private kir::IrVisitor {
 
  private:
   void updateGridReductionInLoop(TensorDomain* dom) {
-    ++summary_.number_of_grid_reductions;
+    summary_.has_grid_reductions = true;
 
     const auto gpu_lower = GpuLower::current();
     for (const auto i : c10::irange(dom->nDims())) {

@@ -453,9 +453,6 @@ void GpuLower::lower() {
   thread_pred_map_.build(fusion_);
 
   // Depends on thread_pred_map_
-  validateThreadPredicates(fusion_);
-
-  // Depends on thread_pred_map_
   validateParallelize(fusion_);
 
   // Scan the whole fusion and build mappings about halo extensions of

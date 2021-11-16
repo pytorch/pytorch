@@ -190,7 +190,7 @@ template <
     bool Z_THREAD,
     typename T,
     typename Func>
-__device__ bool gridReduce(
+__device__ void gridReduce(
     T& out,
     const T& inp_val,
     Func reduction_op,
@@ -235,16 +235,12 @@ __device__ bool gridReduce(
       work_buf[work_buf_offset] = init_val;
     }
   }
-  block_sync::sync();
 
-  __shared__ bool last_block;
-  if (threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0) {
-    __threadfence();
-    auto old = (int64_t)atomicAdd(
-        (unsigned long long*)&sync_flags[idx_in_grid_segment], 1);
-    last_block = old + 1 == grid_reduction_segment_size;
-  }
-  block_sync::sync();
+  grid_sync::sync<X_BLOCK, Y_BLOCK, Z_BLOCK>(
+      sync_flags[idx_in_grid_segment], false, grid_reduction_segment_size);
+
+  bool last_block =
+      index_utils::maskedIsLast<X_BLOCK, Y_BLOCK, Z_BLOCK>(blockIdx, gridDim);
 
   if (last_block) {
     // Cleanup block reduction
@@ -257,9 +253,6 @@ __device__ bool gridReduce(
         shared_buf,
         write_pred,
         init_val);
-    return true;
-  } else {
-    return false;
   }
 }
 

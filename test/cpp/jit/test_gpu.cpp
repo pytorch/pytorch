@@ -6747,6 +6747,48 @@ TEST(NVFuserTest, FusionGridReduction8_CUDA) {
   testValidate(&fusion, out, {input}, {aten_output}, __LINE__, __FILE__);
 }
 
+TEST(NVFuserTest, FusionGridReduction9_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+  auto tv1 = sum(tv0, {1});
+
+  auto tv2 = makeSymbolicTensor(1);
+  fusion.addInput(tv2);
+
+  auto tv3 = add(tv2, tv1);
+  fusion.addOutput(tv3);
+
+  tv1->split(1, 2);
+
+  tv1->axis(1)->parallelize(ParallelType::BIDx);
+  tv1->axis(2)->parallelize(ParallelType::BIDy);
+
+  tv1->computeAt(tv3, 1);
+
+  // TODO: Don't bind threads
+  tv3->axis(0)->parallelize(ParallelType::TIDx);
+
+  const int numel_x = 4;
+  const int numel_y = 10;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({numel_x, numel_y}, options);
+  at::Tensor t2 = at::randn({numel_x}, options);
+
+  at::ArrayRef<IValue> aten_inputs = {t0, t2};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_output = fe.runFusion(aten_inputs);
+
+  auto aten_output = t0.sum({1}).add(t2);
+
+  testValidate(&fusion, cg_output, {t0, t2}, {aten_output}, __LINE__, __FILE__);
+}
+
 TEST(NVFuserTest, FusionNonRedAxisBind_CUDA) {
   int bid_x = 3;
   int tid_x = 2;
@@ -7023,6 +7065,8 @@ TEST(NVFuserTest, FusionZeroDimBroadcast_CUDA) {
   fusion.addOutput(tv4);
 
   tv3->computeAt(tv4, -1);
+  tv3->axis(-2)->parallelize(ParallelType::TIDx);
+  tv3->axis(-1)->parallelize(ParallelType::TIDy);
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({}, options);
@@ -11875,7 +11919,7 @@ __global__ void kernel1(
                     threadIdx.x * inp.stride[2]];
     bool T_pred;
     block_sync::init();
-    T_pred=welford::gridWelford<
+    welford::gridWelford<
         true,true,false,
         true,false,false
     >(
@@ -11895,7 +11939,7 @@ __global__ void kernel1(
         threadIdx.x<out_var.size[0],
         threadIdx.x<out_var.size[0],
         0.f);
-    if(T_pred){
+    if(blockIdx.x == gridDim.x - 1 && blockIdx.y == gridDim.y - 1){
         out_avg[threadIdx.x*out_avg.stride[0]]=tmp_avg;
         out_var[threadIdx.x*out_var.stride[0]]=tmp_M2/tmp_N;
     }
