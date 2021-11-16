@@ -1,10 +1,10 @@
 #pragma once
 
 #include <c10/util/ArrayRef.h>
+#include <torch/csrc/lazy/backend/lowering_context.h>
 #include <torch/csrc/lazy/core/cache.h>
 #include <torch/csrc/lazy/core/ir_util.h>
 
-#include "lazy_tensor_core/csrc/lowering_context.h"
 #include "lazy_tensor_core/csrc/tensor.h"
 #include "lazy_tensors/computation_client/async_task.h"
 #include "lazy_tensors/computation_client/multi_wait.h"
@@ -126,16 +126,15 @@ class LazyGraphExecutor {
   struct CompilationResult {
     torch::lazy::BackendDevice device;
     size_t emitted_nodes = 0;
-    compiler::ComputationPtr computation;
+    torch::lazy::ComputationPtr computation;
     std::vector<torch::lazy::BackendDataPtr> parameters_data;
   };
 
   struct CachedComputation {
-    CachedComputation(
-        compiler::ComputationPtr computation)
+    CachedComputation(torch::lazy::ComputationPtr computation)
         : computation(std::move(computation)) {}
 
-    compiler::ComputationPtr computation;
+    torch::lazy::ComputationPtr computation;
   };
 
   using ComputationCache =
@@ -187,7 +186,7 @@ class LazyGraphExecutor {
 
   void BuildInputOutputAliases(const std::vector<LazyTensor>& tensors,
                                c10::ArrayRef<size_t> indices,
-                               ir::LoweringContext* lowering_ctx);
+                               torch::lazy::LoweringContext* lowering_ctx);
 
   std::shared_ptr<Async> SyncTensorsGraphInternal(
       std::vector<LazyTensor>* tensors, c10::ArrayRef<std::string> devices,

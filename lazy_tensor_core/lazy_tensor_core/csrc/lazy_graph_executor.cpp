@@ -311,7 +311,7 @@ class DeviceContextArena {
     devctx->running_seed = devctx->seed;
     devctx->seed_ir_value = torch::lazy::Value();
   }
-  
+
   std::vector<torch::lazy::BackendDevice> GetActiveDevices() {
     std::vector<torch::lazy::BackendDevice> active_devices;
     std::lock_guard<std::mutex> lock(lock_);
@@ -319,7 +319,7 @@ class DeviceContextArena {
     for (auto& device_contexts : device_contexts_) {
       active_devices.push_back(device_contexts.first);
     }
-    return active_devices; 
+    return active_devices;
   }
 
  private:
@@ -671,9 +671,8 @@ std::vector<torch::lazy::BackendDataPtr> LazyGraphExecutor::FetchTensorData(
     torch::lazy::BackendDataPtr handle = tensor.CurrentDataHandle();
     if (handle == nullptr && config.force_ltc_data) {
       const torch::lazy::BackendDevice& tensor_device = tensor.GetDevice();
-      handle = compiler::getBackend()
-                   ->CreateDataPlaceholder(tensor_device,
-                                           std::move(tensor.shape()));
+      handle = torch::lazy::getBackend()->CreateDataPlaceholder(
+          tensor_device, std::move(tensor.shape()));
       tensor.SetDataHandle(handle, config.sync_ltc_data);
     }
     tensors_data.emplace_back(std::move(handle));
@@ -731,7 +730,7 @@ LazyGraphExecutor::CompilationResult LazyGraphExecutor::Compile(
     const SyncTensorCollection& coll, PostOrderData* po_data) {
   static const bool enable_aliasing =
       lazy_tensors::sys_util::GetEnvBool("ENABLE_PARAM_ALIASING", false);
-  auto lowering_ctx = ir::LoweringContext::Create(
+  auto lowering_ctx = torch::lazy::LoweringContext::Create(
       "SyncTensorsGraph", coll.device, po_data->post_order,
       std::move(po_data->emission_map));
   for (auto index : coll.indices) {
@@ -766,13 +765,12 @@ LazyGraphExecutor::CompilationResult LazyGraphExecutor::Compile(
     BuildInputOutputAliases(tensors, coll.indices, lowering_ctx.get());
   }
 
-  ComputationPtr computation = lowering_ctx->Build();
+  torch::lazy::ComputationPtr computation = lowering_ctx->Build();
 
   VLOG(3) << "Compiling IR graph hash " << torch::lazy::HashToString(coll.hash)
           << " on device " << coll.device << " ...";
-  std::vector<ComputationPtr> computations =
-      compiler::getBackend()->Compile(
-          {computation});
+  std::vector<torch::lazy::ComputationPtr> computations =
+      torch::lazy::getBackend()->Compile({computation});
   VLOG(3) << "Compiling IR graph hash " << torch::lazy::HashToString(coll.hash)
           << " on device " << coll.device << " done!";
   if (computation) {
@@ -809,7 +807,7 @@ LazyGraphExecutor::LookupCachedCompile(const std::vector<LazyTensor>& tensors,
 
 void LazyGraphExecutor::BuildInputOutputAliases(
     const std::vector<LazyTensor>& tensors, c10::ArrayRef<size_t> indices,
-    ir::LoweringContext* lowering_ctx) {
+    torch::lazy::LoweringContext* lowering_ctx) {
   std::unordered_map<int64_t, size_t> output_tensor_id_map;
   for (size_t i = 0; i < indices.size(); ++i) {
     size_t tensor_index = indices[i];
@@ -892,10 +890,9 @@ LazyGraphExecutor::ScheduleSyncTensorsGraph(
     try {
       VLOG(3) << "Executing IR graph hash " << torch::lazy::HashToString(hash)
               << " on device " << async->device << " ...";
-      auto results =
-          compiler::getBackend()
-              ->ExecuteComputation(*async->cached_computation->computation,
-                                   async->parameters_data, async->device);
+      auto results = torch::lazy::getBackend()->ExecuteComputation(
+          *async->cached_computation->computation, async->parameters_data,
+          async->device);
       VLOG(3) << "Executing IR graph hash " << torch::lazy::HashToString(hash)
               << " on device " << async->device << " done!";
 
@@ -978,9 +975,8 @@ std::vector<at::Tensor> LazyGraphExecutor::FetchTensors(
     if (indices != nullptr && sync_index < indices->size() &&
         i == (*indices)[sync_index]) {
       results.push_back(
-          compiler::getBackend()
-              ->MakeTensorFromComputationData(tensors_data[literals_index],
-                                              (*tensors)[i].dtype()));
+          torch::lazy::getBackend()->MakeTensorFromComputationData(
+              tensors_data[literals_index], (*tensors)[i].dtype()));
       ++literals_index;
       ++sync_index;
     } else {
@@ -990,9 +986,8 @@ std::vector<at::Tensor> LazyGraphExecutor::FetchTensors(
       } else {
         CHECK_LT(literals_index, tensors_data.size());
         results.push_back(
-            compiler::getBackend()
-                ->MakeTensorFromComputationData(tensors_data[literals_index],
-                                                (*tensors)[i].dtype()));
+            torch::lazy::getBackend()->MakeTensorFromComputationData(
+                tensors_data[literals_index], (*tensors)[i].dtype()));
         ++literals_index;
       }
     }

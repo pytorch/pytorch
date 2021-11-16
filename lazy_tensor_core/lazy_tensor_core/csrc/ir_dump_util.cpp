@@ -1,14 +1,13 @@
 #include "lazy_tensor_core/csrc/ir_dump_util.h"
 
 #include <c10/util/Optional.h>
+#include <torch/csrc/lazy/backend/backend_interface.h>
+#include <torch/csrc/lazy/backend/lowering_context.h>
 #include <torch/csrc/lazy/core/ir_util.h>
 
 #include <regex>
 #include <sstream>
 #include <unordered_map>
-
-#include "lazy_tensor_core/csrc/compiler/backend_impl_interface.h"
-#include "lazy_tensor_core/csrc/lowering_context.h"
 
 // TODO(whc) don't have ir util depend on ts_backend
 // temporary hack to use Node shape printing from TsNode::shape()
@@ -258,13 +257,13 @@ std::string DumpUtil::PostOrderToText(
 
 std::string DumpUtil::ToBackend(c10::ArrayRef<torch::lazy::Value> values,
                                 const torch::lazy::BackendDevice& device) {
-  auto lowering_ctx = ir::LoweringContext::Create("IrToBackend", device);
+  auto lowering_ctx =
+      torch::lazy::LoweringContext::Create("IrToBackend", device);
   for (auto& ir_value : values) {
     lowering_ctx->AddResult(ir_value);
   }
   auto computation = lowering_ctx->Build();
-  return compiler::getBackend()->GetComputationBackendText(
-      computation);
+  return torch::lazy::getBackend()->GetComputationBackendText(computation);
 }
 
 }  // namespace ir

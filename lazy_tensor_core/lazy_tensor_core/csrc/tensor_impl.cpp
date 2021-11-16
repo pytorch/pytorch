@@ -52,7 +52,7 @@ struct LTCGuardImpl : public c10::impl::DeviceGuardImplInterface {
   }
 
   c10::DeviceIndex deviceCount() const noexcept override {
-    return compiler::getBackend()->GetBackendDevices().size();
+    return torch::lazy::getBackend()->GetBackendDevices().size();
   }
 };
 

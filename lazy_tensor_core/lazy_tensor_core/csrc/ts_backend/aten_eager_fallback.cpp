@@ -1,8 +1,9 @@
 #include "lazy_tensor_core/csrc/ts_backend/aten_eager_fallback.h"
 
+#include <torch/csrc/lazy/backend/backend_interface.h>
+
 #include <unordered_map>
 
-#include "lazy_tensor_core/csrc/compiler/backend_impl_interface.h"
 #include "lazy_tensor_core/csrc/function_call_tracker.h"
 #include "lazy_tensor_core/csrc/ts_backend/EagerFallback.h"
 #include "lazy_tensors/computation_client/metrics.h"
@@ -39,9 +40,8 @@ void ltc_eager_fallback(const c10::OperatorHandle& op,
   }
 
   // Call the actual boxed CPU fallback.
-  eager_fallback(
-      op, stack,
-      compiler::getBackend()->EagerFallbackDeviceType());
+  eager_fallback(op, stack,
+                 torch::lazy::getBackend()->EagerFallbackDeviceType());
 }
 
 TORCH_LIBRARY_IMPL(_, Lazy, m) {

@@ -1,8 +1,8 @@
 #pragma once
 
 #include <torch/csrc/lazy/backend/backend_device.h>
+#include <torch/csrc/lazy/backend/backend_interface.h>
 
-#include "lazy_tensor_core/csrc/compiler/backend_impl_interface.h"
 #include "lazy_tensor_core/csrc/view.h"
 #include "lazy_tensors/computation_client/util.h"
 #include "torch/csrc/lazy/core/ir.h"
