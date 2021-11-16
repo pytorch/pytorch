@@ -27,6 +27,7 @@ from .converter_utils import (
     add_unary_layer,
     add_activation_layer,
     extend_attr_to_tuple,
+    get_positive_dim,
 )
 
 
@@ -214,8 +215,8 @@ def acc_ops_flatten(network, target, args, kwargs, name):
         )
 
     num_dims = len(input_val.shape) + (1 if network.has_implicit_batch_dimension else 0)
-    start_dim = (kwargs["start_dim"] if "start_dim" in kwargs else 0) % num_dims
-    end_dim = (kwargs["end_dim"] if "end_dim" in kwargs else -1) % num_dims
+    start_dim = get_positive_dim(kwargs["start_dim"] if "start_dim" in kwargs else 0, num_dims)
+    end_dim = get_positive_dim(kwargs["end_dim"] if "end_dim" in kwargs else -1, num_dims)
 
     if network.has_implicit_batch_dimension:
         assert start_dim != 0, "Can't flatten batch dimension when it's implicit."
@@ -443,7 +444,7 @@ def acc_ops_softmax(network, target, args, kwargs, name):
     if dim is None:
         dim = get_softmax_dim(input_ranks)
 
-    dim = dim % input_ranks
+    dim = get_positive_dim(dim, input_ranks)
     if network.has_implicit_batch_dimension:
         assert dim != 0, "Can't apply softmax on batch dimension when it's implicit."
         dim -= 1
@@ -835,7 +836,7 @@ def acc_ops_squeeze(network, target, args, kwargs, name):
     # dim, which is a very rare case. For now we just claim not supporting dim=None.
     assert dim is not None, "We don't support dim=None right now."
 
-    dim = dim % (len(input_val.shape) + (1 if network.has_implicit_batch_dimension else 0))
+    dim = get_positive_dim(dim, len(input_val.shape) + (1 if network.has_implicit_batch_dimension else 0))
     if network.has_implicit_batch_dimension:
         assert dim != 0, "We don't support squeeze batch dim when it's implicit."
         dim -= 1
@@ -900,8 +901,8 @@ def acc_ops_unsqueeze(network, target, args, kwargs, name):
     dim = kwargs["dim"]
     input_shape = input_val.shape
     input_shape_size = len(input_val.shape) + 1 if network.has_implicit_batch_dimension else len(input_val.shape)
-    if dim < 0:
-        dim = dim % (input_shape_size + 1)
+    dim = get_positive_dim(dim, input_shape_size + 1)
+
     if network.has_implicit_batch_dimension:
         assert dim != 0
         dim -= 1
@@ -929,7 +930,7 @@ def acc_ops_topk(network, target, args, kwargs, name):
 
     num_dims = len(input_val.shape) + (1 if network.has_implicit_batch_dimension else 0)
     k = kwargs["k"]
-    dim = (kwargs["dim"] if kwargs["dim"] is not None else -1) % num_dims
+    dim = get_positive_dim(kwargs["dim"] if kwargs["dim"] is not None else -1, num_dims)
     operation = trt.TopKOperation.MAX if kwargs["largest"] else trt.TopKOperation.MIN
     layer = network.add_topk(
         input_val, operation, k, get_axes_for_reduce_op(dim, network.has_implicit_batch_dimension)
@@ -1061,7 +1062,7 @@ def acc_ops_slice_tensor(network, target, args, kwargs, name):
                            "of the TensorRT region!")
 
     ranks = len(input_val.shape) + (1 if network.has_implicit_batch_dimension else 0)
-    dims = [dim % ranks for dim in kwargs["dims"]]
+    dims = [get_positive_dim(dim, ranks) for dim in kwargs["dims"]]
 
     if network.has_implicit_batch_dimension:
         if not len(dims):
@@ -1262,9 +1263,9 @@ def acc_ops_getitem(network, target, args, kwargs, name):
         """
         Convert python slice to TensorRT slice layer parameters.
         """
-        start = (py_slice.start % dim_size) if py_slice.start else 0
+        start = get_positive_dim(py_slice.start, dim_size) if py_slice.start else 0
         stride = py_slice.step if py_slice.step else 1
-        stop = (py_slice.stop % dim_size) if py_slice.stop else dim_size
+        stop = get_positive_dim(py_slice.stop, dim_size) if py_slice.stop else dim_size
         size = math.ceil((stop - start) * 1.0 / stride)
         return start, size, stride
 
@@ -1275,7 +1276,7 @@ def acc_ops_getitem(network, target, args, kwargs, name):
         # Raise an error if it's trying to subscript batch dimension unless it's
         # slice(None, None, None).
         batch_subscript = slices[0]
-        if batch_subscript != slice(None, None, None):
+        if batch_subscript not in [slice(None, None, None), slice(0, None, None)]:
             raise RuntimeError(
                 f"{name}: Can't subscript batch dimension when it's implicit. Got {slices}"
             )
@@ -1312,7 +1313,7 @@ def acc_ops_getitem(network, target, args, kwargs, name):
             size.append(params[1])
             stride.append(params[2])
         else:
-            start.append(s % input_val.shape[i])
+            start.append(get_positive_dim(s, input_val.shape[i]))
             size.append(1)
             stride.append(1)
         i += 1
@@ -1416,7 +1417,7 @@ def acc_ops_sigmoid(network, target, args, kwargs, name):
 def acc_ops_permute(network, target, args, kwargs, name):
     input_val = kwargs["input"]
     ranks = len(input_val.shape) + (1 if network.has_implicit_batch_dimension else 0)
-    permutation = [i % ranks for i in kwargs["permutation"]]
+    permutation = [get_positive_dim(i, ranks) for i in kwargs["permutation"]]
 
     if not isinstance(input_val, trt.tensorrt.ITensor):
         raise RuntimeError(
@@ -1590,11 +1591,11 @@ def acc_ops_chunk(network, target, args, kwargs, name):
 
     if network.has_implicit_batch_dimension:
         input_dim_size += 1
-        dim = dim % input_dim_size
+        dim = get_positive_dim(dim, input_dim_size)
         assert dim != 0, "Can't chunk on batch dim when it's implicit!"
         dim -= 1
     else:
-        dim = dim % input_dim_size
+        dim = get_positive_dim(dim, input_dim_size)
 
     if chunks > input_val.shape[dim]:
         warnings.warn(
@@ -1637,8 +1638,7 @@ def acc_ops_cumsum(network, target, args, kwargs, name):
         raise RuntimeError(
             "cumsum converter currently doesn't support implicit batch dimension"
         )
-    if dim < 0:
-        dim = dim % input_dim_size
+    dim = get_positive_dim(dim, input_dim_size)
     loop = network.add_loop()
     trip_limit = None
     if (input_shape[dim] > 0):
