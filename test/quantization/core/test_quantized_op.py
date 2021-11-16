@@ -1057,7 +1057,7 @@ class TestQuantizedOps(TestCase):
         qa = torch.quantize_per_tensor(a, scale=scale, zero_point=zero_point,
                                        dtype=torch_type)
 
-        a_hat = torch.nn.functional.pixel_shuffle(qa, scale)
+        a_hat = torch.nn.functional.pixel_shuffle(qa, upscale_factor)
         self.assertEqual(a_ref, a_hat.dequantize(),
                          msg="torch.nn.functional.pixel_shuffle results are off")
 
