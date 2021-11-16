@@ -47,6 +47,7 @@ def intern_build_aten_ops(copts, deps):
 def generate_aten_impl(ctx):
     install_dir = paths.dirname(
         ctx.expand_location("$(location aten/src/ATen/Declarations.yaml)"))
+    # Declare the entire ATen/ops/ directory is an output
     ops_dir = ctx.actions.declare_directory(install_dir + "/ops")
     outputs=[ops_dir] + ctx.outputs.outs
 
