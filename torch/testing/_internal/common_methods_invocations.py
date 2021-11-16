@@ -524,7 +524,9 @@ class OpInfo(object):
                  error_inputs_func=None,  # function to generate inputs that will throw errors
 
                  # the following metadata relates to dtype support and is tested for correctness in test_ops.py
-                 dtypes=None,  # dtypes this function is expected to work with on the CPU
+                 dtypes=None,  # dtypes this function works with on the CPU,
+                               # inherited by other device types that don't specify their own dtypes
+
                  # the following dtypesIf... options override the dtypes value
                  # on their respective device types
                  dtypesIfCPU=None,  # dtypes this function is expected to work with on the CPU,
