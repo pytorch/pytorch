@@ -910,6 +910,34 @@ class TestJac(TestCase):
         self.assertEqual(z, expected)
 
     @jacrev_and_jacfwd
+    def test_unrelated_input(self, device, jacapi):
+        def f(x, y):
+            return x
+
+        x = torch.randn(2, 3, device=device)
+        y = torch.randn(2, 3, device=device)
+
+        result = jacapi(f, argnums=(0, 1))(x, y)
+        expected0 = torch.eye(6, 6, device=device).view(2, 3, 2, 3)
+        expected1 = y.new_zeros(2, 3, 2, 3)
+        expected = (expected0, expected1)
+        self.assertTrue(isinstance(result, tuple))
+        self.assertEqual(result, expected)
+
+    @jacrev_and_jacfwd
+    def test_unrelated_output(self, device, jacapi):
+        y = torch.randn(2, 3, device=device)
+
+        def f(x):
+            return y
+
+        x = torch.randn(2, 3, device=device)
+
+        result = jacapi(f)(x)
+        expected = x.new_zeros(2, 3, 2, 3)
+        self.assertEqual(result, expected)
+
+    @jacrev_and_jacfwd
     def test_argnums_tuple(self, device, jacapi):
         x = torch.randn(3, device=device)
         y = torch.randn(3, device=device)
@@ -1000,6 +1028,34 @@ class TestJvp(TestCase):
 
         result = jvp(f, (x, y), (tx, ty))
         expected = (x * y, y * tx + x * ty)
+        self.assertTrue(isinstance(result, tuple))
+        self.assertEqual(result, expected)
+
+    def test_unrelated_input(self, device):
+        def f(x, y):
+            return x
+
+        x = torch.randn(2, 3, device=device)
+        y = torch.randn(2, 3, device=device)
+        tx = torch.randn(2, 3, device=device)
+        ty = torch.randn(2, 3, device=device)
+
+        result = jvp(f, (x, y), (tx, ty))
+        expected = (x, tx)
+        self.assertTrue(isinstance(result, tuple))
+        self.assertEqual(result, expected)
+
+    def test_unrelated_output(self, device):
+        y = torch.randn(2, 3, device=device)
+
+        def f(x):
+            return y
+
+        x = torch.randn(2, 3, device=device)
+        tx = torch.randn(2, 3, device=device)
+
+        result = jvp(f, (x,), (tx,))
+        expected = (y, torch.zeros_like(y))
         self.assertTrue(isinstance(result, tuple))
         self.assertEqual(result, expected)
 
