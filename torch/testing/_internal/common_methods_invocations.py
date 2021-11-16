@@ -7,7 +7,6 @@ from enum import Enum
 import operator
 import random
 import unittest
-import warnings
 
 import torch
 import numpy as np
@@ -486,10 +485,11 @@ class OpInfo(object):
                  sample_inputs_func=None,  # function to generate sample inputs
 
                  # the following metadata relates to dtype support and is tested for correctness in test_ops.py
-                 dtypes=None,  # dtypes this function is expected to work with
+                 dtypes=None,  # dtypes this function is expected to work with on the CPU
                  # the following dtypesIf... options override the dtypes value
                  # on their respective device types
-                 dtypesIfCPU=None,  # dtypes this function is expected to work with on CPU
+                 dtypesIfCPU=None,  # dtypes this function is expected to work with on the CPU,
+                                    # typically unnecessary since it's (now) redundant with the dtypes kwarg above
                  dtypesIfCUDA=None,  # dtypes this function is expected to work with on CUDA
                  dtypesIfROCM=None,  # dtypes this function is expected to work with on ROCM
                  backward_dtypes=None,  # backward dtypes this function is expected to work with
@@ -551,7 +551,7 @@ class OpInfo(object):
 
         assert dtypes is not None, ("`dtypes` argument for OpInfo should not be None,",
                                     f"but found None for {name}")
-        dtypes_args = (dtypes, dtypesIfCUDA, dtypesIfROCM)
+        dtypes_args = (dtypes, dtypesIfCPU, dtypesIfCUDA, dtypesIfROCM)
         # Validates the dtypes are generated from the dispatch-related functions
         for dtype_list in dtypes_args:
             assert isinstance(dtype_list, (_dispatch_dtypes, type(None)))
@@ -595,8 +595,6 @@ class OpInfo(object):
             else dtypesIfCUDA if dtypesIfCUDA is not None
             else dtypes)
 
-        if dtypesIfCPU is not None:
-            warnings.warn("`dtypesIfCPU` is being deprecated please use `dtypes` instead", DeprecationWarning)
         self.dtypesIfCPU = set(dtypesIfCPU) if dtypesIfCPU is not None else self.dtypes
         self.dtypesIfCUDA = set(dtypesIfCUDA) if dtypesIfCUDA is not None else self.dtypes
         self.dtypesIfROCM = set(dtypesIfROCM) if dtypesIfROCM is not None else self.dtypesIfCUDA

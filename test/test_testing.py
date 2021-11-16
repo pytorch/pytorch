@@ -598,7 +598,7 @@ if __name__ == '__main__':
             dynamic_dtypes = opinfo_helper.get_supported_dtypes(op.op, op.sample_inputs_func, self.device_type)
             dynamic_dispatch = opinfo_helper.dtypes_dispatch_hint(dynamic_dtypes)
             if self.device_type == 'cpu':
-                dtypes = op.dtypes
+                dtypes = op.dtypesIfCPU
             else:  # device_type ='cuda'
                 dtypes = op.dtypesIfCUDA
 
