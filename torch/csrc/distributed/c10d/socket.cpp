@@ -81,18 +81,16 @@ inline void setSocketError(int val) noexcept {
 
 #endif
 
-// Suspends the current thread for one second.
-void delay() {
-  constexpr std::chrono::seconds pause{1};
-
+// Suspends the current thread for the specified duration.
+void delay(std::chrono::seconds d) {
 #ifdef _WIN32
-  std::this_thread::sleep_for(pause);
+  std::this_thread::sleep_for(d);
 #else
   ::timespec req{};
-  req.tv_sec = pause.count();
+  req.tv_sec = d.count();
 
-  // The C++ Standard does not specify whether `thread::sleep_for()` should be
-  // signal-aware; therefore, we use the `nanosleep()` syscall.
+  // The C++ Standard does not specify whether `sleep_for()` should be signal-
+  // aware; therefore, we use the `nanosleep()` syscall.
   if (::nanosleep(&req, nullptr) != 0) {
     std::error_code err = getSocketError();
     // We don't care about error conditions other than EINTR since a failure
@@ -299,13 +297,13 @@ std::uint16_t SocketImpl::getPort() const {
   }
 }
 
-bool SocketImpl::setSocketFlag(int lvl, int optname, bool value) noexcept {
+bool SocketImpl::setSocketFlag(int level, int optname, bool value) noexcept {
 #ifdef _WIN32
   auto buf = value ? TRUE : FALSE;
 #else
   auto buf = value ? 1 : 0;
 #endif
-  return setSocketOption(hnd_, lvl, optname, &buf, sizeof(buf)) == 0;
+  return setSocketOption(hnd_, level, optname, &buf, sizeof(buf)) == 0;
 }
 
 namespace {
@@ -358,11 +356,11 @@ std::unique_ptr<SocketImpl> SocketListenOp::run() {
     if (tryListen(AF_INET)) {
       return std::move(socket_);
     }
-  }
-
-  C10D_INFO("The server socket will attempt to listen on an IPv4 or IPv6 address.");
-  if (tryListen(AF_UNSPEC)) {
-    return std::move(socket_);
+  } else {
+    C10D_INFO("The server socket will attempt to listen on an IPv4 or IPv6 address.");
+    if (tryListen(AF_UNSPEC)) {
+      return std::move(socket_);
+    }
   }
 
   constexpr auto* msg = "The server socket has failed to listen on any local network address.";
@@ -464,6 +462,15 @@ class SocketConnectOp {
   using Duration = std::chrono::steady_clock::duration;
   using TimePoint = std::chrono::time_point<std::chrono::steady_clock>;
 
+  static constexpr std::chrono::seconds delay_duration_{1};
+
+  enum class ConnectResult {
+    Success,
+    Error,
+    Retry,
+    TimeOut
+  };
+
  public:
   SocketConnectOp(const std::string& host, std::uint16_t port, const SocketOptions& opts);
 
@@ -472,9 +479,9 @@ class SocketConnectOp {
  private:
   bool tryConnect(int family);
 
-  bool tryConnect(const ::addrinfo& addr);
+  ConnectResult tryConnect(const ::addrinfo& addr);
 
-  int tryConnect(const ::addrinfo& addr, TimePoint deadline);
+  ConnectResult tryConnectCore(const ::addrinfo& addr);
 
   template <typename... Args>
   void recordError(fmt::string_view format, Args&&... args) {
@@ -488,8 +495,8 @@ class SocketConnectOp {
   const char* host_;
   std::string port_;
   const SocketOptions* opts_;
+  TimePoint deadline_{};
   std::vector<std::string> errors_{};
-  bool timed_out_ = false;
   std::unique_ptr<SocketImpl> socket_{};
 };
 
@@ -515,34 +522,24 @@ std::unique_ptr<SocketImpl> SocketConnectOp::run() {
     if (tryConnect(AF_INET)) {
       return std::move(socket_);
     }
-  }
-
-  C10D_INFO("The client socket will attempt to connect to an IPv4 or IPv6 address of ({}, {}).",
-            host_,
-            port_);
-
-  if (tryConnect(AF_UNSPEC)) {
-    return std::move(socket_);
-  }
-
-  std::string msg{};
-  if (timed_out_) {
-    msg = "The client socket has timed out while waiting to connect to ({}, {}).";
   } else {
-    msg = "The client socket has failed to connect to any network address of ({}, {}).";
+    C10D_INFO("The client socket will attempt to connect to an IPv4 or IPv6 address of ({}, {}).",
+              host_,
+              port_);
+
+    if (tryConnect(AF_UNSPEC)) {
+      return std::move(socket_);
+    }
   }
 
-  msg = fmt::format(msg, host_, port_);
+  auto msg = fmt::format(
+      "The client socket has failed to connect to any network address of ({}, {}).",
+      host_,
+      port_);
 
   C10D_ERROR(msg);
 
-  msg = fmt::format("{} {}", msg, fmt::join(errors_, " "));
-
-  if (timed_out_) {
-    throw TimeoutError{msg};
-  } else {
-    throw SocketError{msg};
-  }
+  throw SocketError{fmt::format("{} {}", msg, fmt::join(errors_, " "))};
 }
 
 bool SocketConnectOp::tryConnect(int family) {
@@ -568,106 +565,125 @@ bool SocketConnectOp::tryConnect(int family) {
 
   addrinfo_ptr result{naked_result};
 
-  for (::addrinfo* addr = naked_result; addr != nullptr; addr = addr->ai_next) {
-    C10D_INFO("The client socket is attempting to connect to {}.", *addr);
-    if (tryConnect(*addr)) {
-      return true;
+  deadline_ = Clock::now() + opts_->connect_timeout();
+
+  bool retry;
+  do {
+    retry = false;
+
+    errors_.clear();
+
+    for (::addrinfo* addr = naked_result; addr != nullptr; addr = addr->ai_next) {
+      C10D_INFO("The client socket is attempting to connect to {}.", *addr);
+
+      ConnectResult cr = tryConnect(*addr);
+      if (cr == ConnectResult::Success) {
+        return true;
+      }
+
+      if (cr == ConnectResult::TimeOut) {
+        auto msg = fmt::format(
+            "The client socket has timed out after {} while trying to connect to ({}, {}).",
+            opts_->connect_timeout(),
+            host_,
+            port_);
+
+        C10D_ERROR(msg);
+
+        throw TimeoutError{msg};
+      }
+
+      if (cr == ConnectResult::Retry) {
+        retry = true;
+      }
     }
-  }
+  } while (retry);
 
   return false;
 }
 
-bool SocketConnectOp::tryConnect(const ::addrinfo& addr) {
-  TimePoint deadline = Clock::now() + opts_->connect_timeout();
+SocketConnectOp::ConnectResult SocketConnectOp::tryConnect(const ::addrinfo& addr) {
+  if (Clock::now() >= deadline_) {
+    return ConnectResult::TimeOut;
+  }
 
-  while (Clock::now() < deadline) {
-    SocketImpl::Handle hnd = ::socket(addr.ai_family, addr.ai_socktype, addr.ai_protocol);
-    if (hnd == SocketImpl::invalid_socket) {
-      recordError("The client socket cannot be initialized to connect to {} {}.",
-                  addr,
-                  getSocketError());
+  SocketImpl::Handle hnd = ::socket(addr.ai_family, addr.ai_socktype, addr.ai_protocol);
+  if (hnd == SocketImpl::invalid_socket) {
+    recordError("The client socket cannot be initialized to connect to {} {}.",
+                addr,
+                getSocketError());
 
-      return false;
+    return ConnectResult::Error;
+  }
+
+  socket_ = std::make_unique<SocketImpl>(hnd);
+
+  socket_->enableNonBlocking();
+
+  ConnectResult cr = tryConnectCore(addr);
+  if (cr == ConnectResult::Error) {
+    std::error_code err = getSocketError();
+    if (err == std::errc::interrupted) {
+      throw std::system_error{err};
     }
 
-    socket_ = std::make_unique<SocketImpl>(hnd);
+    // Retry if the server is not yet listening or if its backlog is exhausted.
+    if (err == std::errc::connection_refused ||
+        err == std::errc::connection_reset ||
+        err == std::errc::connection_aborted) {
+      C10D_WARNING("The server socket on {} is not yet listening {}.", addr, err);
 
-    socket_->enableNonBlocking();
+      if (Clock::now() < deadline_ - delay_duration_) {
+        // Wait a little to avoid choking the server.
+        delay(delay_duration_);
 
-    // This function returns -1 in case of an error, 0 if the attempt has timed
-    // out, and 1 if the connection is established.
-    int r = tryConnect(addr, deadline);
-    if (r == -1) {
-      std::error_code err = getSocketError();
-      if (err == std::errc::interrupted) {
-        throw std::system_error{err};
+        return ConnectResult::Retry;
+      } else {
+        return ConnectResult::TimeOut;
       }
-
-      // Retry if the server is not yet listening or if its backlog is exhausted.
-      if (err == std::errc::connection_refused ||
-          err == std::errc::connection_reset ||
-          err == std::errc::connection_aborted) {
-        C10D_WARNING("The server socket on {} is not yet listening {}, retrying...", addr, err);
-
-        if (Clock::now() < deadline) {
-          // Wait a little to avoid choking the server.
-          delay();
-        }
-        continue;
-      }
-
+    } else {
       recordError("The client socket has failed to connect to {} {}.", addr, err);
 
-      return false;
+      return ConnectResult::Error;
     }
-
-    // A 0 from `tryConnect()` indicates that the attempt has timed out.
-    if (r == 0) {
-      continue;
-    }
-
-    socket_->closeOnExec();
-
-    // TODO: Remove once we fully migrate to non-blocking mode.
-    socket_->disableNonBlocking();
-
-    C10D_INFO("The client socket has connected to {} on {}.", addr, *socket_);
-
-    if (!socket_->enableNoDelay()) {
-      C10D_WARNING("The no-delay option cannot be enabled for the client socket on {}.", *socket_);
-    }
-
-    return true;
   }
 
-  timed_out_ = true;
+  if (cr == ConnectResult::TimeOut) {
+    return cr;
+  }
 
-  recordError("The client socket has timed out after {} while trying to connect to {}.",
-              opts_->connect_timeout(),
-              addr);
+  socket_->closeOnExec();
 
-  return false;
+  // TODO: Remove once we fully migrate to non-blocking mode.
+  socket_->disableNonBlocking();
+
+  C10D_INFO("The client socket has connected to {} on {}.", addr, *socket_);
+
+  if (!socket_->enableNoDelay()) {
+    C10D_WARNING("The no-delay option cannot be enabled for the client socket on {}.", *socket_);
+  }
+
+  return ConnectResult::Success;
 }
 
-int SocketConnectOp::tryConnect(const ::addrinfo& addr, TimePoint deadline) {
+SocketConnectOp::ConnectResult SocketConnectOp::tryConnectCore(const ::addrinfo& addr) {
   int r = ::connect(socket_->handle(), addr.ai_addr, addr.ai_addrlen);
   if (r == 0) {
-    return 1;  // Success.
+    return ConnectResult::Success;
   }
 
   std::error_code err = getSocketError();
   if (err == std::errc::already_connected) {
-    return 1;  // Success.
+    return ConnectResult::Success;
   }
 
   if (err != std::errc::operation_in_progress && err != std::errc::operation_would_block) {
-    return -1;
+    return ConnectResult::Error;
   }
 
-  Duration remaining = deadline - Clock::now();
+  Duration remaining = deadline_ - Clock::now();
   if (remaining <= Duration::zero()) {
-    return 0;  // Time out.
+    return ConnectResult::TimeOut;
   }
 
   ::pollfd pfd{};
@@ -677,8 +693,11 @@ int SocketConnectOp::tryConnect(const ::addrinfo& addr, TimePoint deadline) {
   auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(remaining);
 
   r = pollFd(&pfd, 1, static_cast<int>(ms.count()));
-  if (r <= 0) {
-    return r;  // Error (-1) or time out (0).
+  if (r == 0) {
+    return ConnectResult::TimeOut;
+  }
+  if (r == -1) {
+    return ConnectResult::Error;
   }
 
   int err_code = 0;
@@ -687,15 +706,16 @@ int SocketConnectOp::tryConnect(const ::addrinfo& addr, TimePoint deadline) {
 
   r = getSocketOption(socket_->handle(), SOL_SOCKET, SO_ERROR, &err_code, &err_len);
   if (r != 0) {
-    return -1;
+    return ConnectResult::Error;
   }
 
   if (err_code != 0) {
     setSocketError(err_code);
 
-    return -1;
+    return ConnectResult::Error;
+  } else {
+    return ConnectResult::Success;
   }
-  return 1;
 }
 
 } // namespace
