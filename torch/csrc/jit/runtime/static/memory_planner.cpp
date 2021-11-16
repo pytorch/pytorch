@@ -125,8 +125,9 @@ MemoryPlanner::MemoryPlanner(
           setIncludes(leaked_values, out_v)) {
         continue;
       }
-      static const std::array<c10::Symbol, 1> symbols_with_borrowed_outputs = {
+      static const std::array<c10::Symbol, 2> symbols_with_borrowed_outputs = {
           c10::Symbol::fromQualString("static_runtime::dict_unpack"),
+          c10::Symbol::fromQualString("static_runtime::VarTupleUnpack"),
       };
       if (doesNotHeapAllocateWhenStoredInIValue(*out_v->type())) {
         // Scalars do not need to be freed after each iteration.
