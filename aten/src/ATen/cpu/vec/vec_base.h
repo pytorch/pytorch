@@ -148,7 +148,7 @@ public:
   }
   // Return the values as char* for type punning
   auto as_bytes() const -> const char* {
-    return (const char*)values;
+    return reinterpret_cast<const char*>(values);
   }
   template <int64_t mask_>
   static Vectorized<T> blend(const Vectorized<T>& a, const Vectorized<T>& b) {
