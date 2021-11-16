@@ -41,6 +41,7 @@ class NCCLTestBase {
 
     c10::intrusive_ptr<c10d::ProcessGroupNCCL::Options> opts = c10::make_intrusive<c10d::ProcessGroupNCCL::Options>();
     opts->timeout = pgTimeout_;
+    setenv("ENABLE_NCCL_HEALTH_CHECK", "1", /* overwrite */ 1);
     pg_ = std::unique_ptr<::c10d::ProcessGroupNCCL>(
         new ::c10d::ProcessGroupNCCL(store, rank, size, std::move(opts)));
   }

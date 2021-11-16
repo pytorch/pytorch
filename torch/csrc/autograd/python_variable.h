@@ -6,6 +6,7 @@
 
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/THP_export.h>
+#include <torch/csrc/Exceptions.h>
 
 // Python object that backs torch.autograd.Variable
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
@@ -43,7 +44,13 @@ static inline bool THPVariable_CheckExact(PyObject *obj) {
 
 inline bool THPVariable_Check(PyObject *obj)
 {
-  return THPVariableClass && PyObject_IsInstance(obj, THPVariableClass);
+  if (!THPVariableClass)
+      return false;
+
+  const auto result = PyObject_IsInstance(obj, THPVariableClass);
+  if (result == -1)
+      throw python_error();
+  return result;
 }
 
 inline const at::Tensor& THPVariable_Unpack(THPVariable* var) {

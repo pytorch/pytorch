@@ -215,13 +215,14 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
             'class_name': class_name,
             # Convert to a set first to remove duplicate kernel names.
             # Backends are allowed to repeat kernel names; only generate the declaration once!
-            'dispatch_declarations': list(set(concatMap(
+            # Sort for deterministic output.
+            'dispatch_declarations': list(sorted(set(concatMap(
                 lambda f: dest.compute_native_function_declaration(f, backend_indices[backend_dispatch_key]),
                 grouped_native_functions
-            ))) + list(set(concatMap(
+            )))) + list(sorted(set(concatMap(
                 lambda f: dest.compute_native_function_declaration(f, backend_indices[autograd_dispatch_key]),
                 grouped_native_functions
-            ))),
+            )))),
         })
 
         for dispatch_key in [backend_dispatch_key, autograd_dispatch_key]:
