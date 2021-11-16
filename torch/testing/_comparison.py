@@ -275,18 +275,9 @@ class Pair(abc.ABC):
         self._unknown_parameters = unknown_parameters
 
     @staticmethod
-    def _check_inputs_isinstance(
-        *inputs: Any, cls: Union[Type, Tuple[Type, ...]], not_cls: Optional[Union[Type, Tuple[Type, ...]]] = None
-    ) -> None:
-        """Checks if all inputs are instances of a given class and and optionally not of another.
-
-        Raises:
-            UnsupportedInputs: If any condition is not met.
-        """
+    def _check_inputs_isinstance(*inputs: Any, cls: Union[Type, Tuple[Type, ...]]) -> None:
+        """Checks if all inputs are instances of a given and raise :class:`UnsupportedInputs` otherwise."""
         if not all(isinstance(input, cls) for input in inputs):
-            raise UnsupportedInputs()
-
-        if not_cls and any(isinstance(input, not_cls) for input in inputs):
             raise UnsupportedInputs()
 
     def _make_error_meta(self, type: Type[Exception], msg: str, *, id: Tuple[Any, ...] = ()) -> ErrorMeta:
@@ -825,7 +816,7 @@ def originate_pairs(
     *,
     pair_types: Sequence[Type[Pair]],
     sequence_types: Tuple[Type, ...] = (collections.abc.Sequence,),
-    mapping_types: Tuple[Type, ...] = (collections.abc.Sequence,),
+    mapping_types: Tuple[Type, ...] = (collections.abc.Mapping,),
     id: Tuple[Any, ...] = (),
     **options: Any,
 ) -> List[Pair]:
