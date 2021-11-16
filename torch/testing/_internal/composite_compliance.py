@@ -78,12 +78,18 @@ def is_view_fn(func):
         'alias',
     }
 
+# manually populated from native_functions that have inplace_view: True.
+# In the future we will probably be able to grab that list directly
 def is_inplace_view_fn(func):
     return func.__name__ in {
+        'as_strided_',
+        'detach_',
         'squeeze_',
-        'unsqueeze_',
-        'transpose_',
+        'swapaxes_',
+        'swapdims_',
         't_',
+        'transpose_',
+        'unsqueeze_',
     }
 
 class CompositeCompliantTensor(torch.Tensor):
