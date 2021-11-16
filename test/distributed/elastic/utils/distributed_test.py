@@ -23,6 +23,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     run_tests,
     TEST_WITH_TSAN,
+    TestCase
 )
 
 
@@ -39,7 +40,7 @@ if IS_WINDOWS or IS_MACOS:
     sys.exit(0)
 
 
-class DistributedUtilTest(unittest.TestCase):
+class DistributedUtilTest(TestCase):
     def test_create_store_single_server(self):
         store = create_c10d_store(is_server=True, server_addr=socket.gethostname())
         self.assertIsNotNone(store)
