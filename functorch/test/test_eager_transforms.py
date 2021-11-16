@@ -25,6 +25,9 @@ from functorch import (
 from functorch._src.make_functional import (
     functional_init, functional_init_with_buffers,
 )
+from functorch.experimental import (
+    jvp, jacfwd,
+)
 
 # NB: numpy is a testing dependency!
 import numpy as np
@@ -939,6 +942,103 @@ class TestJacrev(TestCase):
         with self.assertRaisesRegex(RuntimeError, "must be int"):
             z = jacrev(torch.multiply, argnums=(1, 0.0))(x, x)
 
+class TestJvp(TestCase):
+    def test_simple(self, device):
+        x = torch.randn(2, 3, device=device)
+        t = torch.randn(2, 3, device=device)
+        result = jvp(torch.sin, (x,), (t,))
+        expected = (x.sin(), x.cos() * t)
+        self.assertTrue(isinstance(result, tuple))
+        self.assertEqual(result, expected)
+
+    def test_multiple_inputs(self, device):
+        x = torch.randn(2, 3, device=device)
+        y = torch.randn(2, 3, device=device)
+        tx = torch.randn(2, 3, device=device)
+        ty = torch.randn(2, 3, device=device)
+
+        def f(x, y):
+            return x * y
+
+        result = jvp(f, (x, y), (tx, ty))
+        expected = (x * y, y * tx + x * ty)
+        self.assertTrue(isinstance(result, tuple))
+        self.assertEqual(result, expected)
+
+    def test_multiple_outputs(self, device):
+        x = torch.randn(2, 3, device=device)
+        t = torch.randn(2, 3, device=device)
+
+        def f(x):
+            return torch.sin(x), torch.cos(x)
+
+        result = jvp(f, (x,), (t,))
+        expected = (f(x), (x.cos() * t, -x.sin() * t))
+        self.assertTrue(isinstance(result, tuple))
+        self.assertEqual(result, expected)
+
+    def test_multiple_inputs_outputs(self, device):
+        x = torch.randn(2, 3, device=device)
+        y = torch.randn(2, 3, device=device)
+        tx = torch.randn(2, 3, device=device)
+        ty = torch.randn(2, 3, device=device)
+
+        def f(x, y):
+            return 2 * x + 3 * y, 4 * x + 5 * y
+
+        result = jvp(f, (x, y), (tx, ty))
+        expected = (f(x, y), f(tx, ty))
+        self.assertTrue(isinstance(result, tuple))
+        self.assertEqual(result, expected)
+
+    def test_primals_tangents_length_mismatch(self, device):
+        x = torch.randn(2, 3, device=device)
+        t = torch.randn(2, 3, device=device)
+
+        with self.assertRaisesRegex(RuntimeError, "same number of Tensors"):
+            jvp(torch.sin, (x,), (t, t))
+        with self.assertRaisesRegex(RuntimeError, "same number of Tensors"):
+            jvp(torch.sin, (x, x), (t, t, t))
+
+    def test_nonempty_primals_and_tangents(self, device):
+        with self.assertRaisesRegex(RuntimeError, "non-empty tuple"):
+            jvp(torch.sin, (), ())
+
+    def test_inputs_are_flat_tuples_of_tensors(self, device):
+        x = torch.randn(2, 3, device=device)
+        t = torch.randn(2, 3, device=device)
+
+        with self.assertRaisesRegex(RuntimeError, "tuple of Tensors"):
+            jvp(torch.sin, x, (t,))
+        with self.assertRaisesRegex(RuntimeError, "tuple of Tensors"):
+            jvp(torch.sin, (x,), t)
+        with self.assertRaisesRegex(RuntimeError, "tuple of Tensors"):
+            jvp(torch.sin, (x,), [t])
+        with self.assertRaisesRegex(RuntimeError, "tuple of Tensors"):
+            jvp(torch.sin, (1.,), (t,))
+        with self.assertRaisesRegex(RuntimeError, "tuple of Tensors"):
+            jvp(torch.sin, (x,), (1.,))
+
+    def test_outputs_should_be_tensor_or_tensors(self, device):
+        x = torch.randn(2, 3, device=device)
+        t = torch.randn(2, 3, device=device)
+
+        def f(x):
+            return
+
+        def g(x):
+            return ()
+
+        def h(x):
+            return x, [x]
+
+        with self.assertRaisesRegex(RuntimeError, "a Tensor or Tensors"):
+            jvp(f, (x,), (t,))
+        with self.assertRaisesRegex(RuntimeError, "non-empty"):
+            jvp(g, (x,), (t,))
+        with self.assertRaisesRegex(RuntimeError, "a Tensor or Tensors"):
+            jvp(h, (x,), (t,))
+
 class TestComposability(TestCase):
     def test_grad_grad(self, device):
         x = torch.randn([], device=device)
@@ -1404,6 +1504,11 @@ instantiate_device_type_tests(
 )
 instantiate_device_type_tests(
     TestJacrev,
+    globals(),
+    only_for=only_for,
+)
+instantiate_device_type_tests(
+    TestJvp,
     globals(),
     only_for=only_for,
 )
