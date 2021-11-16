@@ -1126,16 +1126,44 @@ c10::IValue StaticRuntime::run_impl(
   return std::move(*outputs_[0]);
 }
 
+template <typename IValueList>
+c10::IValue StaticRuntime::run_impl_record_functions(
+    IValueList&& args,
+    const std::unordered_map<std::string, c10::IValue>& kwargs) {
+  bool pre_sampled = false;
+  if (C10_UNLIKELY(at::shouldRunRecordFunction(&pre_sampled))) {
+    at::RecordFunction guard(
+        at::RecordScope::TORCHSCRIPT_FUNCTION, pre_sampled);
+    if (guard.isActive()) {
+      if (guard.needsInputs()) {
+        guard.before("forward", &args);
+      } else {
+        guard.before("forward");
+      }
+    }
+    return run_impl(std::forward<IValueList>(args), kwargs);
+  }
+  return run_impl(std::forward<IValueList>(args), kwargs);
+}
+
 c10::IValue StaticRuntime::operator()(
     const std::vector<c10::IValue>& args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
+#ifdef PYTORCH_DISABLE_NET_PROFILING
   return run_impl(args, kwargs);
+#else
+  return run_impl_record_functions(args, kwargs);
+#endif
 }
 
 c10::IValue StaticRuntime::operator()(
     std::vector<c10::IValue>&& args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
+#ifdef PYTORCH_DISABLE_NET_PROFILING
   return run_impl(std::move(args), kwargs);
+#else
+  return run_impl_record_functions(std::move(args), kwargs);
+#endif
 }
 
 namespace {
@@ -1675,7 +1703,7 @@ ProcessedNode::ProcessedNode(
   }
 }
 
-std::vector<IValue> ProcessedNode::clone_inputs() const {
+std::vector<IValue> ProcessedNode::inputs_ivalue_vec() const {
   std::vector<IValue> result;
   result.reserve(inputs_size_);
   std::transform(
@@ -1693,7 +1721,7 @@ void ProcessedNode::run() {
     at::RecordFunction guard(at::RecordScope::FUNCTION, pre_sampled);
     if (guard.isActive()) {
       if (guard.needsInputs()) {
-        guard.before(get_op_name(), clone_inputs());
+        guard.before(get_op_name(), inputs_ivalue_vec());
       } else {
         guard.before(get_op_name());
       }
