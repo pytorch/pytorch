@@ -7,6 +7,7 @@ result = "package_b"
 
 class PackageBObject:
     __slots__ = ["obj"]
+    package_b_li = [789]
 
     def __init__(self, obj):
         self.obj = obj
