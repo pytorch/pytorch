@@ -49,18 +49,19 @@ TEST(BufAccesses, BasicTest) {
   int pass = 0;
   for (auto& acc : accesses) {
     auto store = std::get<0>(acc);
+    auto mode = std::get<1>(acc);
     auto stmt_index = getStmtIndexString(std::get<2>(acc));
 
     // check the stmtIndex of aInit
     if (store == aInit) {
-      if (stmt_index == "0:0:") {
+      if ((stmt_index == "0:0:") && (mode == AccMode::WRITE)) {
         pass += 1;
       }
     }
 
     // check the stmtIndex of aReduce
     if (store == aReduce) {
-      if (stmt_index == "0:1:0:") {
+      if ((stmt_index == "0:1:0:") && (mode == AccMode::BOTH)) {
         pass += 1;
       }
     }
@@ -94,12 +95,14 @@ TEST(BufAccesses, CondTest) {
   // check the stmtIndex of aStore
   auto acc_a = BufAccesses::find(stmt, a.node()).at(0);
   auto stmt_index_a = getStmtIndexString(std::get<2>(acc_a));
-  ASSERT_TRUE(stmt_index_a == "0:0:0:");
+  ASSERT_TRUE(
+      (stmt_index_a == "0:0:0:") && (std::get<1>(acc_a) == AccMode::WRITE));
 
   // check the stmtIndex of bStore
   auto acc_b = BufAccesses::find(stmt, b.node()).at(0);
   auto stmt_index_b = getStmtIndexString(std::get<2>(acc_b));
-  ASSERT_TRUE(stmt_index_b == "0:0:1:");
+  ASSERT_TRUE(
+      (stmt_index_b == "0:0:1:") && (std::get<1>(acc_b) == AccMode::WRITE));
 }
 
 } // namespace jit
