@@ -250,10 +250,7 @@ class TestQuantizedOps(TestCase):
         self._test_activation_function(X, 'relu', relu_test_configs)
 
     """Tests the correctness of the quantized::relu6 op."""
-    @override_qengines
-    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
-                       qparams=hu.qparams()))
-    def test_qrelu6(self, X):
+    def test_qrelu6(self):
         relu6_test_configs = [
             {
                 'quantized_fn': [
