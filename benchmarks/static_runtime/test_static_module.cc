@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/irparser.h>
+#include <torch/csrc/jit/runtime/static/ProcessedNodeInputs.h>
 #include <torch/csrc/jit/runtime/static/fusion.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
@@ -786,10 +787,12 @@ TEST(StaticRuntime, FusionPass) {
   }
 }
 
-static std::unique_ptr<uint16_t[]> makeInputsArray(
-    std::initializer_list<uint16_t> vals) {
-  auto result = std::make_unique<uint16_t[]>(vals.size());
-  std::copy(vals.begin(), vals.end(), result.get());
+static ProcessedNodeInputs createProcessedNodeInputs(
+    c10::ArrayRef<uint16_t> inputs) {
+  ProcessedNodeInputs result(inputs.size());
+  for (const auto idx : c10::irange(inputs.size())) {
+    result[idx] = inputs[idx];
+  }
   return result;
 }
 
@@ -807,7 +810,8 @@ TEST(
   torch::jit::StaticModule smodule(module);
   Node* sigmoid_node = getNodeWithKind(smodule, "aten::sigmoid");
   std::array<IValue, 2> values = {torch::randn({2, 3}), torch::randn({3, 1})};
-  ProcessedNode pnode(sigmoid_node, makeInputsArray({0}), 1, 1, true, false);
+  ProcessedNode pnode(
+      sigmoid_node, createProcessedNodeInputs({0}), 1, true, false);
   pnode.set_values(values.data());
   EXPECT_TRUE(pnode.verify_no_memory_overlap());
 
@@ -824,7 +828,8 @@ TEST(
   torch::jit::StaticModule smodule(module);
   Node* sigmoid_node = getNodeWithKind(smodule, "aten::sigmoid");
   std::array<IValue, 2> values = {torch::randn({2, 3}), torch::randn({3, 1})};
-  ProcessedNode pnode(sigmoid_node, makeInputsArray({0}), 1, 1, true, false);
+  ProcessedNode pnode(
+      sigmoid_node, createProcessedNodeInputs({0}), 1, true, false);
   pnode.set_values(values.data());
 
   ASSERT_EQ(&pnode.Output(0), &values[1]);
@@ -849,8 +854,7 @@ TEST(ProcessedNode, VerifyNoMemoryOverlapWithOverlappingOutputs) {
         at::randn({2, 3}), at::empty({1, 3}), at::empty({4, 5})};
     ProcessedNode list_unpack_pnode(
         list_unpack_node,
-        makeInputsArray({0}),
-        1,
+        createProcessedNodeInputs({0}),
         1,
         /*enable_out_variant=*/true,
         /* check_memory_overlap */ false);
@@ -863,8 +867,7 @@ TEST(ProcessedNode, VerifyNoMemoryOverlapWithOverlappingOutputs) {
         at::randn({2, 3}), at::empty({1, 3}), at::empty({4, 5})};
     ProcessedNode list_unpack_pnode(
         list_unpack_node,
-        makeInputsArray({0}),
-        1,
+        createProcessedNodeInputs({0}),
         1,
         /*enable_out_variant=*/true,
         /* check_memory_overlap */ false);

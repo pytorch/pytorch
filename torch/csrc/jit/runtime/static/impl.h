@@ -11,6 +11,7 @@
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/inliner.h>
+#include <torch/csrc/jit/runtime/static/ProcessedNodeInputs.h>
 
 #ifdef FBCODE_CAFFE2
 #include <folly/container/F14Map.h>
@@ -437,60 +438,13 @@ class TORCH_API ProcessedNode {
   // they are copied into a StaticRuntime.
   ProcessedNode(
       Node* n,
-      std::unique_ptr<uint16_t[]> inputs,
-      uint16_t inputs_size,
+      ProcessedNodeInputs inputs,
       uint16_t outputs_offset,
       bool enable_out_variant,
       bool check_memory_overlap);
 
-  ProcessedNode(const ProcessedNode& rhs)
-      : node_(rhs.node_),
-        fn_(rhs.fn_),
-        inputs_(
-            rhs.inputs_size_ ? std::make_unique<uint16_t[]>(rhs.inputs_size_)
-                             : std::unique_ptr<uint16_t[]>(nullptr)),
-        inputs_size_(rhs.inputs_size_),
-        outputs_offset_(rhs.outputs_offset_),
-        num_outputs_(rhs.num_outputs_),
-        values_(rhs.values_)
-#ifndef PYTORCH_DISABLE_PER_OP_PROFILING
-        ,
-        op_name_(rhs.op_name_)
-#endif
-  {
-    if (inputs_size_) {
-      std::copy(
-          rhs.inputs_.get(), rhs.inputs_.get() + inputs_size_, inputs_.get());
-    }
-  }
-
-  ProcessedNode& operator=(const ProcessedNode& rhs) {
-    if (this == &rhs) {
-      return *this;
-    }
-    node_ = rhs.node_;
-    fn_ = rhs.fn_;
-
-    if (!inputs_ || inputs_size_ != rhs.inputs_size_) {
-      if (rhs.inputs_) {
-        inputs_ = std::make_unique<uint16_t[]>(rhs.inputs_size_);
-      }
-      inputs_size_ = rhs.inputs_size_;
-    }
-    if (rhs.inputs_) {
-      std::copy(
-          rhs.inputs_.get(), rhs.inputs_.get() + inputs_size_, inputs_.get());
-    }
-
-    outputs_offset_ = rhs.outputs_offset_;
-    num_outputs_ = rhs.num_outputs_;
-    values_ = rhs.values_;
-#ifndef PYTORCH_DISABLE_PER_OP_PROFILING
-    op_name_ = rhs.op_name_;
-#endif
-
-    return *this;
-  }
+  ProcessedNode(const ProcessedNode&) = default;
+  ProcessedNode& operator=(const ProcessedNode&) = default;
 
   // These should be noexcept, but some Android build is failing
   // saying the noexcept specification doesn't match the calculated
@@ -506,7 +460,6 @@ class TORCH_API ProcessedNode {
 
   // Input is readonly
   C10_NODISCARD const IValue& Input(uint32_t i) const {
-    DCHECK(i < inputs_size_);
     return values_[inputs_[i]];
   }
 
@@ -530,7 +483,7 @@ class TORCH_API ProcessedNode {
   }
 
   C10_NODISCARD uint16_t num_inputs() const {
-    return inputs_size_;
+    return inputs_.size();
   }
 
   std::vector<IValue> inputs_ivalue_vec() const;
@@ -592,8 +545,7 @@ class TORCH_API ProcessedNode {
     bool overlap_detected_{false};
   };
   Function fn_;
-  std::unique_ptr<uint16_t[]> inputs_; // unowned
-  uint32_t inputs_size_;
+  ProcessedNodeInputs inputs_;
   uint16_t outputs_offset_;
   uint16_t num_outputs_;
   IValue* values_ = nullptr; // unowned
