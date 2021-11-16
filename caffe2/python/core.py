@@ -2779,10 +2779,10 @@ class ExecutionStep(object):
             for net in substep.Nets():
                 _add_net_to_dict(self._net_dict, net)
             self._substeps.append(substep)
-            proto = substep.Proto()
+            self._step.substep.add().CopyFrom(substep.Proto())
+            substep._step = self._step.substep[-1]
         else:
-            proto = substep
-        self._step.substep.add().CopyFrom(proto)
+            self._step.substep.add().CopyFrom(substep)
         return self
 
     def SetConcurrentSubsteps(self, concurrent_substeps):
@@ -2900,6 +2900,7 @@ class Plan(object):
             if _add_net_to_dict(self._net_dict, net):
                 assert isinstance(net, Net)
                 self._plan.network.add().CopyFrom(net.Proto())
+                net._net = self._plan.network[-1]
 
     def Nets(self):
         return list(viewvalues(self._net_dict))
@@ -2910,6 +2911,7 @@ class Plan(object):
         if not step.HasNets() and not step.HasSubsteps():
             return
         self._plan.execution_step.add().CopyFrom(step.Proto())
+        step._step = self._plan.execution_step[-1]
         self._steps.append(step)
         # nets need to be added to the plan in order of usage
         net_list = []
