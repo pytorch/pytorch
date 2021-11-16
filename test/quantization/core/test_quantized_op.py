@@ -1040,16 +1040,16 @@ class TestQuantizedOps(TestCase):
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
                                               min_side=2, max_side=32, max_numel=10**5),
                        qparams=hu.qparams(dtypes=[torch.quint8])),
-           scale=st.integers(2, 6))
-    def test_pixel_shuffle(self, X, scale):
+           upscale_factor=st.integers(2, 6))
+    def test_pixel_shuffle(self, X, upscale_factor):
         X, (scale, zero_point, torch_type) = X
         channels = X.shape[-3]
         iH, iW = X.shape[-2:]
-        assume(channels % (scale * scale) == 0)
+        assume(channels % (upscale_factor * upscale_factor) == 0)
 
         a = torch.from_numpy(X)
         a = torch.rand(a.shape)
-        a_out = torch.nn.functional.pixel_shuffle(a, scale)
+        a_out = torch.nn.functional.pixel_shuffle(a, upscale_factor)
 
         a_ref = torch.quantize_per_tensor(a_out, scale=scale,
                                           zero_point=zero_point, dtype=torch_type)
