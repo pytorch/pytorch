@@ -1,11 +1,13 @@
+#include <torch/csrc/deploy/interpreter/interpreter_impl.h>
+
 #include <dlfcn.h>
 
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
-#include <torch/csrc/deploy/interpreter/interpreter_impl.h>
 
 #include <pybind11/embed.h>
 #include <pybind11/functional.h>
+#include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 
@@ -33,78 +35,6 @@ using namespace py::literals;
 #elif (DEBUG == 0)
 #define PYOBJ_ASSERT(obj) assert(NULL != obj);
 #endif
-
-#define FOREACH_LIBRARY(_) \
-  _(array)                 \
-  _(_asyncio)              \
-  _(audioop)               \
-  _(binascii)              \
-  _(_bisect)               \
-  _(_blake2)               \
-  _(_bz2)                  \
-  _(cmath)                 \
-  _(_codecs_cn)            \
-  _(_codecs_hk)            \
-  _(_codecs_iso2022)       \
-  _(_codecs_jp)            \
-  _(_codecs_kr)            \
-  _(_codecs_tw)            \
-  _(_contextvars)          \
-  _(_crypt)                \
-  _(_csv)                  \
-  _(_ctypes)               \
-  _(_ctypes_test)          \
-  _(_curses)               \
-  _(_curses_panel)         \
-  _(_datetime)             \
-  _(_decimal)              \
-  _(_elementtree)          \
-  _(fcntl)                 \
-  _(grp)                   \
-  _(_hashlib)              \
-  _(_heapq)                \
-  _(_json)                 \
-  _(_lsprof)               \
-  _(_lzma)                 \
-  _(math)                  \
-  _(_md5)                  \
-  _(mmap)                  \
-  _(_multibytecodec)       \
-  _(_multiprocessing)      \
-  _(nis)                   \
-  _(_opcode)               \
-  _(ossaudiodev)           \
-  _(parser)                \
-  _(_pickle)               \
-  _(_posixsubprocess)      \
-  _(pyexpat)               \
-  _(_queue)                \
-  _(_random)               \
-  _(readline)              \
-  _(resource)              \
-  _(select)                \
-  _(_sha1)                 \
-  _(_sha256)               \
-  _(_sha3)                 \
-  _(_sha512)               \
-  _(_socket)               \
-  _(spwd)                  \
-  _(_ssl)                  \
-  _(_struct)               \
-  _(syslog)                \
-  _(termios)               \
-  _(_testbuffer)           \
-  _(_testcapi)             \
-  _(_testimportmultiple)   \
-  _(_testmultiphase)       \
-  _(unicodedata)           \
-  _(xxlimited)             \
-  _(_xxtestfuzz)           \
-  _(zlib)
-
-#define DECLARE_LIBRARY_INIT(name) extern "C" PyObject* PyInit_##name(void);
-FOREACH_LIBRARY(DECLARE_LIBRARY_INIT)
-#undef DECLARE_LIBRARY_INIT
 
 const char* start = R"PYTHON(
 import _ssl # must come before _hashlib otherwise ssl's locks will be set to a Python that might no longer exist...
@@ -221,10 +151,6 @@ struct InitLockAcquire {
 struct __attribute__((visibility("hidden"))) ConcreteInterpreterImpl
     : public torch::deploy::InterpreterImpl {
   ConcreteInterpreterImpl() {
-#define APPEND_INIT(name) PyImport_AppendInittab(#name, PyInit_##name);
-    FOREACH_LIBRARY(APPEND_INIT)
-#undef APPEND_INIT
-
     BuiltinRegistry::runPreInitialization();
 
     PyPreConfig preconfig;
@@ -372,8 +298,14 @@ struct __attribute__((visibility("hidden"))) ConcreteInterpreterSessionImpl
               obj.storages_[i], scalarTypeToTypeMeta(obj.types_[i])));
       storages[i] = std::move(new_storage);
     }
+    py::tuple dtypes(obj.types_.size());
+    for (size_t i = 0, N = obj.types_.size(); i < N; ++i) {
+      auto dtype = (PyObject*)torch::getTHPDtype(obj.types_[i]);
+      Py_INCREF(dtype);
+      dtypes[i] = dtype;
+    }
     py::object result = interp_->loadStorage(
-        id, obj.containerFile_, py::bytes(obj.data_), storages);
+        id, obj.containerFile_, py::bytes(obj.data_), storages, dtypes);
     return wrap(result);
   }
   void unload(int64_t id) override {

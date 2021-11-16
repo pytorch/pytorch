@@ -97,11 +97,16 @@ jobs:
       - name: Ensure no direct cub include
         if: always()
         run: |
-          (! git --no-pager grep -I -no $'#include <cub/' --  ./aten  ':(exclude)aten/src/ATen/cuda/cub.cuh' || (echo "The above files have direct cub include; please include ATen/cuda/cub.cuh instead and wrap your cub calls in at::native namespace if necessary"; false))
+          (! git --no-pager grep -I -no $'#include <cub/' --  ./aten  ':(exclude)aten/src/ATen/cuda/cub*.cuh' || (echo "The above files have direct cub include; please include ATen/cuda/cub.cuh instead and wrap your cub calls in at::native namespace if necessary"; false))
       - name: Ensure no raw cuda api calls
         if: always()
         run: |
           (! git --no-pager grep -I -no $'cudaStreamSynchronize' --  ./aten ./c10 ':(exclude)aten/src/ATen/test' ':(exclude)c10/cuda/CUDAFunctions.h' || (echo "The above files call raw cuda APIs directly; please use at::cuda wrappers instead"; false))
+      - name: Ensure all test files have header containing ownership information
+        if: always()
+        run: |
+          python3 -m pip install boto3==1.19.12
+          .github/scripts/lint_test_ownership.py
 
   clang-format:
     runs-on: ubuntu-18.04

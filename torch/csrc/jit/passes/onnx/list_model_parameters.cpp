@@ -61,7 +61,8 @@ Value* addParamAsArgument(Function* function, std::string& name, IValue& attr) {
       schema.is_vararg(),
       schema.is_varret());
   function->setSchema(new_schema);
-  return function->graph()->addInput(name)->setType(attr.type());
+  return toGraphFunction(*function).graph()->addInput(name)->setType(
+      attr.type());
 }
 
 std::vector<IValue> getParamAttributes(
@@ -177,7 +178,7 @@ std::pair<Module, std::vector<IValue>> list_module_parameters(
   Module moduleClone = module.clone(true);
   Method method = moduleClone.get_method("forward");
   auto function = &method.function();
-  auto graph = function->graph();
+  auto graph = toGraphFunction(*function).graph();
   // A map of names and values of referenced attributes, to avoid duplicates.
   std::unordered_map<std::string, Value*> attrValues = {};
 

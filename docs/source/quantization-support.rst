@@ -86,9 +86,6 @@ This describes the quantization related functions of the `torch` namespace.
 
 torch.Tensor (quantization related methods)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
->>>>>>> 76f04ad385 (Quantization docs: rewrite API reference to be more automated)
->>>>>>> 37fe4f87ce (Quantization docs: rewrite API reference to be more automated)
->>>>>>> af26f377de (Quantization docs: rewrite API reference to be more automated)
 
 Quantized Tensors support a limited subset of data manipulation methods of the
 regular full-precision tensor.
@@ -322,6 +319,22 @@ effect of INT8 quantization.
 
     Conv2d
     Conv3d
+    Linear
+
+torch.nn.qat.dynamic
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This module implements versions of the key nn modules such as **Linear()**
+which run in FP32 but with rounding applied to simulate the effect of INT8
+quantization and will be dynamically quantized during inference.
+
+.. currentmodule:: torch.nn.qat.dynamic
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
     Linear
 
 torch.nn.quantized

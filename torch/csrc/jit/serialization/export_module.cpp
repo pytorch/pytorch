@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/serialization/export.h>
 
 #include <c10/util/Exception.h>
+#include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/backends/backend_debug_handler.h>
 #include <torch/csrc/jit/backends/backend_debug_info.h>
 #include <torch/csrc/jit/frontend/source_range.h>
@@ -14,6 +15,7 @@
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/callstack_debug_info_serialization.h>
+#include <torch/csrc/jit/serialization/export_bytecode.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
@@ -29,13 +31,16 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/qualified_name.h>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 namespace torch {
 namespace jit {
 
-char const* toString(OpCode op);
+IValue to_tuple(std::initializer_list<IValue> ivalues) {
+  return c10::ivalue::Tuple::create(ivalues);
+}
 
 IValue to_tuple(std::vector<IValue> ivalues) {
   return c10::ivalue::Tuple::create(std::move(ivalues));
@@ -60,16 +65,14 @@ ExportModuleExtraFilesHook& GetExtraFilesHook() {
 std::pair<IValue, IValue> getFunctionTuple(
     const Module& module,
     const Function& func,
+    std::unique_ptr<Graph> optimizedGraph,
     BackendDebugInfoRecorder& debug_info_recorder,
-    const std::basic_string<char>& qn,
+    const std::string& qn,
     TypeNameUniquer& type_name_uniquer_) {
-  auto graph = func.graph()->copy();
-
-  Inline(*graph);
-
+  TORCH_INTERNAL_ASSERT(optimizedGraph);
   std::shared_ptr<MobileCode> code;
   code = std::make_shared<MobileCode>(
-      graph, func.name(), BytecodeEmitMode::is_default_value_for_unspecified_arg_enabled() /* emit_default_input_instructions */, BytecodeEmitMode::is_default_args_before_out_args_enabled() /* enable_defaults_args_with_out_args */);
+      std::move(optimizedGraph), func.name(), BytecodeEmitMode::is_default_value_for_unspecified_arg_enabled() /* emit_default_input_instructions */, BytecodeEmitMode::is_default_args_before_out_args_enabled() /* enable_defaults_args_with_out_args */);
   auto instructions_copy = code->instructions();
 
   // operator names
@@ -110,18 +113,7 @@ std::pair<IValue, IValue> getFunctionTuple(
       auto node = code->instructions_source()[i];
       for (const auto& input : node->inputs()) {
         const auto& input_type = input->type();
-        if (input_type->kind() == TypeKind::TupleType) {
-          if (const auto& name_typed_input =
-                  input_type->cast<at::NamedType>()) {
-            TORCH_CHECK(
-                !name_typed_input->name(),
-                "A named tuple type is not supported in mobile module. ",
-                "Workaround: instead of using a named tuple type's fields, ",
-                "use a dictionary type's key-value pair itmes or ",
-                "a pytorch class (class Foo(torch.nn.Module))'s attributes.'");
-          }
-        } else if (
-            input_type->kind() == TypeKind::ListType ||
+        if (input_type->kind() == TypeKind::ListType ||
             input_type->kind() == TypeKind::DictType) {
           for (const TypePtr& element_type : input_type->containedTypes()) {
             TORCH_CHECK(
@@ -190,15 +182,72 @@ std::pair<IValue, IValue> getFunctionTuple(
   types.reserve(code->type_table().size());
   static const std::string torch_prefix("__torch__");
   static const std::string class_prefix("__torch__.torch.classes");
+  std::shared_ptr<torch::jit::CompilationUnit> cu =
+      module._ivalue()->compilation_unit();
+
   for (const TypePtr& t : code->type_table()) {
-    auto type_str = t->annotation_str();
-    if (type_str.find(torch_prefix) == 0) {
+    std::string type_str = t->annotation_str();
+    if (t->kind() == TypeKind::TupleType) {
+      TORCH_CHECK(
+          cu->get_named_tuple(t->str()),
+          "Can't find definition for the qualified name: ",
+          t->str(),
+          "(TypeKind::TupleType)  in compilation unit.",
+          "Please report a bug to PyTorch.");
+      auto named_tuple_type = cu->get_named_tuple(t->str());
+      if (named_tuple_type != nullptr) {
+        std::string named_tuple_str = t->str();
+        named_tuple_str.append("[NamedTuple, [");
+        std::vector<IValue> name_type_pairs;
+
+        // Get the field name and field type for the NamedTuple
+        for (auto it = named_tuple_type->schema()->arguments().begin();
+             it != named_tuple_type->schema()->arguments().end();
+             it++) {
+          name_type_pairs.emplace_back(
+              c10::ivalue::Tuple::create({it->name(), it->type()->repr_str()}));
+
+          // When it->type() is Tensor type, in Python, if it's inferred type,
+          // str() return "Tensor" and repr_str() return "Tensor (inferred)". If
+          // it's not inferred type, str() return "Tensor[]" and repr_str()
+          // return "Tensor". In cpp, repr_str() will always return "Tensor"
+          // regardless inferred type. When exporing custom type in bytecode,
+          // "Tensor" is the preferred way to deserialize Tensor type
+          type_str = it->is_inferred_type() ? it->type()->str()
+                                            : it->type()->repr_str();
+          named_tuple_str.append("[" + it->name() + ", " + type_str + "]");
+          if (it != named_tuple_type->schema()->arguments().end() - 1) {
+            named_tuple_str.append(",");
+          }
+        }
+        named_tuple_str.append("]]");
+        // Create a named_tuple type with following structure
+        // "qualified_named[
+        //   NamedTuple, [
+        //       [filed_name_1, field_type_1],
+        //       [filed_name_2, field_type_2]
+        //   ]
+        // ]"
+        //  Example NamedTuple type:
+        //  "__torch__.base_models.sparse_nn.pytorch_preproc_types.PreprocOutputType[
+        //     NamedTuple, [
+        //         [float_features, Tensor],
+        //         [id_list_features, List[Tensor]],
+        //         [label,  Tensor],
+        //         [weight, Tensor],
+        //         ]
+        //     ]"
+        types.emplace_back(named_tuple_str);
+        continue;
+      }
+    } else if (type_str.find(torch_prefix) == 0) {
       TORCH_CHECK(
           type_str.find(class_prefix) == 0,
           "__torch__ types other than torchbind (__torch__.torch.classes)"
           "are not supported in lite interpreter. ",
           "Workaround: instead of using arbitrary class type (class Foo()), ",
-          "define a pytorch class (class Foo(torch.nn.Module)).");
+          "define a pytorch class (class Foo(torch.nn.Module)). The problematic type is: ",
+          type_str);
     }
     types.emplace_back(type_str);
   }
@@ -282,43 +331,128 @@ std::pair<IValue, IValue> getFunctionTuple(
   return std::make_pair(bytecode_vals, debug_info_vals);
 }
 
+void pushFunctionToIValues(
+    BytecodeExportSet exportSet,
+    std::vector<c10::IValue>& elements,
+    std::vector<c10::IValue>& debugInfoElements,
+    BackendDebugInfoRecorder& recorder,
+    TypeNameUniquer& uniquer) {
+  exportSet.visit(
+      [&](const c10::QualifiedName& qn, ExportedFunction& exported) {
+        auto tuple = getFunctionTuple(
+            exported.mod,
+            exported.function,
+            std::move(exported.optimizedGraph),
+            recorder,
+            qn.qualifiedName(),
+            uniquer);
+        elements.push_back(std::move(tuple.first));
+        debugInfoElements.push_back(std::move(tuple.second));
+      });
+}
+
+void pushFunctionToIValues(
+    BytecodeExportSet exportSet,
+    std::vector<c10::IValue>& elements,
+    BackendDebugInfoRecorder& recorder,
+    TypeNameUniquer& uniquer) {
+  std::vector<c10::IValue> debugInfoElements;
+  pushFunctionToIValues(
+      std::move(exportSet), elements, debugInfoElements, recorder, uniquer);
+}
+
+std::unordered_set<const FunctionSchema*> getInterfaceCalls(Graph& graph) {
+  std::unordered_set<const FunctionSchema*> ret;
+  auto nodes = findAllNodes(graph, c10::prim::CallMethod, true);
+  for (Node* node : nodes) {
+    if (auto iface = node->input(0)->type()->castRaw<InterfaceType>()) {
+      ret.insert(iface->getMethod(node->s(attr::name)));
+    }
+  }
+  return ret;
+}
+
+struct ModuleMethod {
+  ModuleMethod(const Module& m, const GraphFunction& f, c10::QualifiedName n)
+      : module(m), function(f), exportName(std::move(n)) {}
+  Module module;
+  const GraphFunction& function;
+  c10::QualifiedName exportName;
+};
+
+std::vector<ModuleMethod> getModuleInterfaceExports(
+    const Module& module,
+    const std::unordered_set<const FunctionSchema*>& schemas) {
+  if (schemas.size() == 0) {
+    return {};
+  }
+  std::unordered_set<std::string> names;
+  for (auto schema : schemas) {
+    names.insert(schema->name());
+  }
+  std::vector<ModuleMethod> ret;
+  for (const auto& submodule : module.modules()) {
+    for (const auto& method : submodule.get_methods()) {
+      const auto& f = toGraphFunction(method.function());
+      if (names.find(f.qualname().name()) != names.end()) {
+        ret.emplace_back(submodule, f, f.qualname());
+      }
+    }
+  }
+  return ret;
+}
+
+void exportFunction(
+    BytecodeExportSet& exportSet,
+    const ModuleMethod& method,
+    bool toplevel = false) {
+  const auto& func = method.function;
+  const auto& qn = method.exportName;
+  if (exportSet.contains(qn)) {
+    if (toplevel) {
+      exportSet.update(qn, toplevel);
+    }
+    return;
+  }
+  auto graph = func.graph()->copyUnique();
+  Inline(*graph);
+  auto interfaceCalls = getInterfaceCalls(*graph);
+  exportSet.add(
+      qn, ExportedFunction{method.module, func, std::move(graph), toplevel});
+
+  if (!getMobileInterfaceCallExport()) {
+    return;
+  }
+
+  auto interfaces = getModuleInterfaceExports(method.module, interfaceCalls);
+  for (const auto& interface : interfaces) {
+    exportFunction(exportSet, interface);
+  }
+}
+
 void setstateTuple(
+    BytecodeExportSet& exportSet,
     const Module& module,
     const IValue& ivalue,
-    std::vector<c10::IValue>& elements,
-    std::unordered_set<std::string>& qn_cache,
-    std::vector<c10::IValue>& debug_info_elements,
-    BackendDebugInfoRecorder& debug_info_recorder,
-    TypeNameUniquer& type_name_uniquer_) {
+    TypeNameUniquer& type_name_uniquer_,
+    bool toplevel = false) {
   if (!ivalue.isObject())
     return;
   auto obj = ivalue.toObject();
   auto type = obj->type();
   if (checkHasValidSetGetState(type)) {
     Function& setstate = type->getMethod("__setstate__");
-    const auto qn =
-        type_name_uniquer_.getUniqueName(obj->type()).qualifiedName() + "." +
-        setstate.name();
-    if (qn_cache.find(qn) != qn_cache.end()) {
+    auto qn = type_name_uniquer_.getUniqueName(obj->type()).qualifiedName() +
+        "." + setstate.name();
+    if (exportSet.contains(qn)) {
       return;
     }
-    if (setstate.isGraphFunction()) {
-      auto func_tuple = getFunctionTuple(
-          module, setstate, debug_info_recorder, qn, type_name_uniquer_);
-      elements.push_back(func_tuple.first);
-      qn_cache.emplace(qn);
-      debug_info_elements.push_back(func_tuple.second);
+    if (auto f = tryToGraphFunction(setstate)) {
+      exportFunction(exportSet, ModuleMethod{module, *f, qn}, toplevel);
     }
   } else {
     for (size_t i = 0, n = type->numAttributes(); i < n; ++i) {
-      setstateTuple(
-          module,
-          obj->getSlot(i),
-          elements,
-          qn_cache,
-          debug_info_elements,
-          debug_info_recorder,
-          type_name_uniquer_);
+      setstateTuple(exportSet, module, obj->getSlot(i), type_name_uniquer_);
     }
   }
 }
@@ -396,38 +530,36 @@ SourceRangeRecords getBackendSourceRanges(const Module& m) {
   return sr_records;
 }
 
+auto& mobileInterfaceCallExport() {
+  static std::atomic<bool> flag{false};
+  return flag;
+}
+
 } // namespace
 
-void moduleMethodsTuple(
+TORCH_API void enableMobileInterfaceCallExport() {
+  mobileInterfaceCallExport().store(true, std::memory_order_relaxed);
+}
+bool getMobileInterfaceCallExport() {
+  return mobileInterfaceCallExport().load(std::memory_order_relaxed);
+}
+
+BytecodeExportSet moduleMethodsTuple(
     const Module& module,
-    std::vector<c10::IValue>& elements, // note: appended to in-place
-    std::vector<c10::IValue>& debug_info_elements,
-    BackendDebugInfoRecorder& debug_info_recorder,
     TypeNameUniquer& type_name_uniquer_) {
+  BytecodeExportSet exportSet;
   auto methods = module.get_methods();
-  std::unordered_set<std::string> qn_cache;
   // top level methods
   for (const auto& method : methods) {
-    const auto qn = method.function().qualname().qualifiedName();
-    if (qn_cache.find(qn) != qn_cache.end()) {
-      continue;
-    }
-    auto func_tuple = getFunctionTuple(
-        module, method.function(), debug_info_recorder, qn, type_name_uniquer_);
-    elements.push_back(func_tuple.first);
-    qn_cache.emplace(qn);
-    debug_info_elements.push_back(func_tuple.second);
+    const auto& f = toGraphFunction(method.function());
+    exportFunction(
+        exportSet, ModuleMethod{module, f, f.qualname()}, /* toplevel */ true);
   }
 
   // __setstate__ of all components
-  setstateTuple(
-      module,
-      module._ivalue(),
-      elements,
-      qn_cache,
-      debug_info_elements,
-      debug_info_recorder,
-      type_name_uniquer_);
+  setstateTuple(exportSet, module, module._ivalue(), type_name_uniquer_, true);
+
+  return exportSet;
 }
 
 void SetExportModuleExtraFilesHook(ExportModuleExtraFilesHook hook) {
@@ -642,12 +774,14 @@ void ScriptModuleSerializer::writeByteCode(
   // Always save debug handles
   debug_info_elements.emplace_back(static_cast<int64_t>(version_to_write));
 
-  moduleMethodsTuple(
-      module,
+  BytecodeExportSet exportSet = moduleMethodsTuple(module, type_name_uniquer_);
+  pushFunctionToIValues(
+      std::move(exportSet),
       elements,
       debug_info_elements,
       debug_info_recorder,
       type_name_uniquer_);
+
   auto telements = to_tuple(std::move(elements));
   writeArchive(
       telements,
@@ -829,21 +963,21 @@ void ExportModule(
 namespace {
 void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
   std::vector<c10::IValue> elements;
-  std::vector<c10::IValue> debug_info_elements;
   BackendDebugInfoRecorder dummy;
   TypeNameUniquer dummy_uniquer = TypeNameUniquer();
-  moduleMethodsTuple(m, elements, debug_info_elements, dummy, dummy_uniquer);
+  BytecodeExportSet exportSet = moduleMethodsTuple(m, dummy_uniquer);
+  pushFunctionToIValues(std::move(exportSet), elements, dummy, dummy_uniquer);
   for (const auto& element : elements) {
-    auto table = element.toTuple()->elements()[1];
+    auto table = element.toTupleRef().elements()[1];
     auto row =
-        table.toTuple()->elements().at(BYTECODE_INDEX_OPERATOR).toTuple();
+        table.toTupleRef().elements().at(BYTECODE_INDEX_OPERATOR).toTuple();
     TORCH_INTERNAL_ASSERT(
         row->elements().at(0).toStringRef() == "operators",
         "Expected operators but found ",
         row->elements().at(0).toStringRef());
-    const auto& ops_list = row->elements().at(1).toTuple()->elements();
+    const auto& ops_list = row->elements().at(1).toTupleRef().elements();
     for (const auto& op : ops_list) {
-      const auto& op_item = op.toTuple()->elements();
+      const auto& op_item = op.toTupleRef().elements();
       TORCH_CHECK(
           op_item.size() >= 2,
           "There should be either two parts (name and overload name), ",

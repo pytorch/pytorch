@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <c10/util/irange.h>
 #include <torch/torch.h>
 
 #include <test/cpp/api/support.h>
@@ -11,7 +12,8 @@ struct OperationTest : torch::test::SeedingFixture {
 };
 
 TEST_F(OperationTest, Lerp) {
-  for (auto i = 0; i < TEST_AMOUNT; i++) {
+  for (const auto i : c10::irange(TEST_AMOUNT)) {
+    (void)i; // Suppress unused variable warning
     // test lerp_kernel_scalar
     auto start = torch::rand({3, 5});
     auto end = torch::rand({3, 5});
@@ -35,13 +37,14 @@ TEST_F(OperationTest, Lerp) {
 }
 
 TEST_F(OperationTest, Cross) {
-  for (auto i = 0; i < TEST_AMOUNT; i++) {
+  for (const auto i : c10::irange(TEST_AMOUNT)) {
+    (void)i; // Suppress unused variable warning
     // input
     auto a = torch::rand({10, 3});
     auto b = torch::rand({10, 3});
     // expected
     auto exp = torch::empty({10, 3});
-    for (int j = 0; j < 10; j++) {
+    for (const auto j : c10::irange(10)) {
       auto u1 = a[j][0], u2 = a[j][1], u3 = a[j][2];
       auto v1 = b[j][0], v2 = b[j][1], v3 = b[j][2];
       exp[j][0] = u2 * v3 - v2 * u3;
