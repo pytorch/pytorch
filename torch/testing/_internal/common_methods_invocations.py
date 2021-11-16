@@ -5524,9 +5524,10 @@ def sample_inputs_softmax_variant(op_info, device, dtype, requires_grad, with_dt
 def sample_inputs_masked_softmax(op_info, device, dtype, requires_grad, with_dtype=False, **kwargs):
     """Sample inputs for masked softmax and log_softmax.
 
-    Masked reduction operator is a reduction operator with trailing
-    mask optional argument. A mask is a bool tensor with the same
-    shape as input or a shape that is broadcastable to input shape.
+    Masked normalization operator is a reduction operator with
+    trailing mask optional argument. A mask is a bool tensor with the
+    same shape as input or a shape that is broadcastable to input
+    shape.
     """
     inputs: List[SampleInput] = []
     for sample_input in sample_inputs_softmax_variant(op_info, device, dtype, requires_grad, with_dtype=with_dtype, **kwargs):
