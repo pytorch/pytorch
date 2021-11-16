@@ -21,6 +21,8 @@ from typing import (
     cast,
     Tuple,
 )
+from string import Template
+
 
 import torch
 from torch.serialization import location_tag, normalize_storage_type
