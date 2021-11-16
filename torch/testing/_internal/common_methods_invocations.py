@@ -1140,7 +1140,7 @@ class UnaryUfuncInfo(OpInfo):
                  sample_inputs_func=sample_inputs_unary,
                  sample_kwargs=lambda device, dtype, input: ({}, {}),
                  supports_sparse=False,
-                 reference_numerics_filter=None  # Filter for singular input values for test_reference_numerics_normal
+                 reference_numerics_filter=None,  # Filter for singular input values for test_reference_numerics_normal
                  **kwargs):
         super(UnaryUfuncInfo, self).__init__(name,
                                              dtypes=dtypes,
@@ -10610,7 +10610,7 @@ op_db: List[OpInfo] = [
                                     active_if=TEST_WITH_ROCM),
                    ),
                    # tan(pi/2 * odd_number) is nan
-                   reference_numerics_filter=NumericsFilter(conditon=lambda x: close_to_int(x / (math.pi * 0.5)), safe_val=math.pi)),
+                   reference_numerics_filter=NumericsFilter(condition=lambda x: close_to_int(x / (math.pi * 0.5)), safe_val=math.pi)),
     UnaryUfuncInfo('tanh',
                    ref=np.tanh,
                    aliases=('nn.functional.tanh',),
@@ -12057,7 +12057,7 @@ op_db: List[OpInfo] = [
                    assert_autodiffed=True,
                    # sigmoid(z) = 1 / (1 + exp(-z)), at z = j * pi * odd_number, the denominator is zero
                    reference_numerics_filter=NumericsFilter(
-                       conditon=lambda x: close_to_int(x / (math.pi * 1j)) if x.is_complex() else torch.tensor(False),
+                       condition=lambda x: close_to_int(x / (math.pi * 1j)) if x.is_complex() else torch.tensor(False),
                        safe_val=0)),
     UnaryUfuncInfo('digamma',
                    ref=scipy.special.digamma if TEST_SCIPY else _NOTHING,

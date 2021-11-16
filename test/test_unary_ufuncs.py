@@ -346,7 +346,7 @@ class TestUnaryUfuncs(TestCase):
     def test_reference_numerics_normal(self, device, dtype, op):
         tensors = generate_numeric_tensors(device, dtype,
                                            domain=op.domain,
-                                           filter_=op.normal_filter)
+                                           filter_=op.reference_numerics_filter)
         self._test_reference_numerics(dtype, op, tensors)
 
     @suppress_warnings
