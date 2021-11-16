@@ -280,7 +280,7 @@ Tensor empty_like(
         self.col_indices().clone(),
         at::empty(self.values().sizes(), options.layout(kStrided)),
         self.sizes(),
-        options.dtype(),
+        c10::typeMetaToScalarType(options.dtype()),
         options.layout(),
         options.device()
     );
