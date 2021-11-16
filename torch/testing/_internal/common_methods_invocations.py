@@ -5957,6 +5957,14 @@ def sample_inputs_embedding_bag(op_info, device, dtype, requires_grad, **kwargs)
                                   kwargs={'offsets': offsets, 'mode': mode,
                                           'per_sample_weights': per_sample_weights})
 
+                # bag with zero length
+                idx = make_long_input((S,), low=0, high=M, noncontiguous=True)
+                per_sample_weights = make_per_sample_weight(generate_per_sample_weight, idx)
+                yield SampleInput(make_input((M, S)), args=(idx,),
+                                  kwargs={'offsets': torch.tensor([0, 0, 3], device=device, dtype=torch.long),
+                                          'mode': mode,
+                                          'per_sample_weights': per_sample_weights})
+
                 # 2-D index tensor
                 idx = make_long_input((S, S), low=0, high=M)
                 per_sample_weights = make_per_sample_weight(generate_per_sample_weight, idx)
