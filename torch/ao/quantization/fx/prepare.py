@@ -122,7 +122,7 @@ def node_arg_is_bias(node: Node, arg: Any) -> bool:
 def is_input_arg_dtype_supported_by_backend(
     arg: Argument,
     node: Node,
-    node_name_to_target_dtype: Dict[str, Dict[str, Any]],
+    node_name_to_target_dtype: Dict[str, Dict[str, Optional[torch.dtype]]],
     dtype_config: Dict[str, torch.dtype],
 ) -> bool:
     """ Check if the configured qconfig for the argument
@@ -152,7 +152,7 @@ def is_input_arg_dtype_supported_by_backend(
 
 def is_output_dtype_supported_by_backend(
     node: Node,
-    node_name_to_target_dtype: Dict[str, Dict[str, Any]],
+    node_name_to_target_dtype: Dict[str, Dict[str, Optional[torch.dtype]]],
     dtype_config: Dict[str, torch.dtype],
 ) -> bool:
     """ Check if the configured qconfig for the output
@@ -165,7 +165,7 @@ def is_output_dtype_supported_by_backend(
 def is_pattern_dtype_config_supported_by_backend(
     pattern: Optional[Pattern],
     matched_nodes: Optional[List[Node]],
-    node_name_to_target_dtype: Dict[str, Dict[str, Any]],
+    node_name_to_target_dtype: Dict[str, Dict[str, Optional[torch.dtype]]],
     backend_config_dict: Optional[Dict[str, Any]]
 ) -> bool:
     """ Check is the dtype configuration of a pattern is supported by
@@ -379,7 +379,7 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
     model: torch.nn.Module,
     modules: Dict[str, torch.nn.Module],
     graph: Graph,
-    node_name_to_target_dtype: Dict[str, Dict[str, Any]],
+    node_name_to_target_dtype: Dict[str, Dict[str, Optional[torch.dtype]]],
     qhandler: Optional[QuantizeHandler],
     prepare_custom_config_dict: Dict[str, Any],
 ) -> Argument:
@@ -509,7 +509,7 @@ def maybe_insert_input_observers_for_node(
     model: torch.nn.Module,
     modules: Dict[str, torch.nn.Module],
     graph: Graph,
-    node_name_to_target_dtype: Dict[str, Dict[str, Any]],
+    node_name_to_target_dtype: Dict[str, Dict[str, Optional[torch.dtype]]],
     qhandler: Optional[QuantizeHandler],
     prepare_custom_config_dict: Dict[str, Any],
 ) -> None:
@@ -559,7 +559,7 @@ def maybe_insert_input_equalization_observers_for_node(
     model: torch.nn.Module,
     modules: Dict[str, torch.nn.Module],
     graph: Graph,
-    node_name_to_target_dtype: Dict[str, Dict[str, Any]],
+    node_name_to_target_dtype: Dict[str, Dict[str, Optional[torch.dtype]]],
     is_branch: bool,
 ) -> None:
     """
@@ -603,7 +603,7 @@ def maybe_insert_output_observer_for_node(
     modules: Dict[str, torch.nn.Module],
     graph: Graph,
     matches: Dict[str, MatchResult],
-    node_name_to_target_dtype: Dict[str, Dict[str, Any]],
+    node_name_to_target_dtype: Dict[str, Dict[str, Optional[torch.dtype]]],
     matched_pattern: Any,
     qhandler: Optional[QuantizeHandler],
 ) -> Optional[Node]:
@@ -977,7 +977,7 @@ def insert_observers_for_model(
     #   }
     #
     # TODO: rename this to node_name_to_target_dtype_info
-    node_name_to_target_dtype: Dict[str, Dict[str, Any]] = defaultdict(dict)
+    node_name_to_target_dtype: Dict[str, Dict[str, Optional[torch.dtype]]] = defaultdict(dict)
     cache_for_no_tensor_check: Dict[Node, bool] = dict()
 
     inputs_seen_counter = 0
