@@ -5,6 +5,9 @@ from io import BytesIO
 from sys import version_info
 from textwrap import dedent
 from unittest import skipIf
+from string import Template
+from pathlib import Path
+import pdb
 
 from torch.package import EmptyMatchError, Importer, PackageExporter, PackageImporter
 from torch.package.package_exporter import PackagingError
@@ -339,6 +342,69 @@ class TestDependencyAPI(PackageTestCase):
         with self.assertRaises(NotImplementedError):
             foo2.package_a.get_something()
 
+    def test_selective_intern(self):
+        # simple push test
+        filename_selective_intern = str(Path(__file__).parent / "package_d/test_selective_intern.py")
+        filename_extern= str(Path(__file__).parent / "package_d/test_extern.py")
+
+        buffer = BytesIO()
+        with PackageExporter(buffer) as he:
+            he.extern(["package_d.*"])
+            he.save_module("package_d")
+            he._selective_intern("package_d.test_selective_intern","package_d.test_selective_intern")
+            he.save_source_string("foo", "import package_d.test_selective_intern as test_selective_intern; import package_d.test_extern as test_extern")
+        buffer.seek(0)
+        hi = PackageImporter(buffer)
+        foo = hi.import_module("foo")
+
+        # number is not getting overwritten
+        import package_d.test_selective_intern
+        import package_d.test_extern
+
+        # test access
+        self.assertEqual(foo.test_extern.test_number, package_d.test_extern.test_number)
+        self.assertEqual(foo.test_selective_intern.test_number, package_d.test_selective_intern.test_number)
+        self.assertIs(foo.test_extern, package_d.test_extern)
+        self.assertIsNot(foo.test_selective_intern, package_d.test_selective_intern)
+
+    def test_selective_intern_subpackage(self):
+        # buffer = BytesIO()
+        buffer = "/tmp/a.out"
+        with PackageExporter(buffer) as he:
+            he.intern("package_b")
+            he.intern("package_b.subpackage_1")
+            # pdb.set_trace()
+            he._selective_intern("package_b.subpackage_0", "package_b.subpackage_0.**", allow_empty=False)
+            # pdb.set_trace()
+            he.save_source_string("foo", "import package_b.subpackage_0 as subpackage_0; import package_b.subpackage_1 as subpackage_1")
+
+        # buffer.seek(0)
+        hi = PackageImporter(buffer)
+        import package_b
+
+        foo =  hi.import_module("foo")
+
+        # subpackage_0 should be interned, subpackage_1 should not.
+        self.assertIsNot(package_b.subpackage_0, foo.subpackage_0)
+        # self.assertIs(package_b.subpackage_1, foo.subpackage_1)
+
+        # Check that attribute access still works on selectively interned module.
+        self.assertEqual(foo.subpackage_0.subpackage_0_li[0], package_b.subpackage_0.subpackage_0_li[0])
+        self.assertIsNot(foo.subpackage_0.subpackage_0_li, package_b.subpackage_0.subpackage_0_li)
+        self.assertEqual(foo.subpackage_1.subpackage_1_li, package_b.subpackage_1.subpackage_1_li)
+
+        # Check that attribute access works correctly on the shim.
+        # self.assertIs(foo.package_b.package_b_li, package_b.package_b_li)
+
+def _read_file(filename: str) -> str:
+    with open(filename, "rb") as f:
+        b = f.read()
+        return b.decode("utf-8")
+
+def _write_file(filename:str, filecontent:str):
+    f = open(filename, "w")
+    f.write(filecontent)
+    f.close()
 
 if __name__ == "__main__":
     run_tests()
