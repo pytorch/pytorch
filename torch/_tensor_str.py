@@ -42,7 +42,7 @@ def set_printoptions(
             None (default) is specified, the value is defined by
             `torch._tensor_str._Formatter`. This value is automatically chosen
             by the framework.
-    
+
     Example::
 
         >>> torch.set_printoptions(precision=2)
