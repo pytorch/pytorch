@@ -54,6 +54,14 @@ TORCH_API std::vector<Node*> unmergeAliasedOutputs(
 // `subgraphNode` is destroyed.
 TORCH_API void unmergeSubgraph(Node* subgraphNode);
 
+// Move `node_to_unmerge` and its descendants after `subgraphNode`
+// promotes any dependencies of `node_to_unmerge` to subgraphNode outputs
+TORCH_API void unmergeNode(Node* node_to_unmerge, Node* subgraphNode);
+
+TORCH_API bool unmergeOutputsAilisingInputs(Node* subgraphNode);
+
+TORCH_API bool unmergeAliasedOutputs(Node* subgraphNode);
+
 // Convenience function
 std::shared_ptr<Graph> getSubgraph(Node* n);
 
