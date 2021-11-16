@@ -3,6 +3,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/Half.h>
 #include <c10/util/BFloat16.h>
+#include <c10/util/Exception.h>
 
 namespace at {
 
@@ -16,11 +17,16 @@ using opmath_type = typename OpMathType<T>::type;
 
 namespace {
 
-c10::ScalarType toOpMathType(const c10::ScalarType scalar_type) {
-  if (scalar_type == c10::ScalarType::Half || scalar_type == c10::ScalarType::BFloat16) {
-    return c10::ScalarType::Float;
-  } else {
-    return scalar_type;
+c10::ScalarType toOpMathType(const c10::ScalarType type) {
+  switch (type) {
+#define DEFINE_CASE(scalar_t, TypeNum)                                  \
+    case ScalarType::TypeNum:                                           \
+      return CppTypeToScalarType<at::opmath_type<scalar_t>>::value;
+
+    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_CASE)
+#undef DEFINE_CASE
+
+    default: TORCH_INTERNAL_ASSERT(false, "Unrecognized ScalarType: ", type);
   }
 }
 
