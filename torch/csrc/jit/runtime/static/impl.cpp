@@ -12,6 +12,7 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/eliminate_no_ops.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
@@ -121,6 +122,8 @@ void OptimizeGraph(
   RemoveImmutableInputDictLookups(graph);
   UseVariadicTupleUnpack(graph);
   UseVariadicGroupedAccessor(graph);
+  EliminateNoOps(
+      graph, /* custom_ops */ {fromQualString("fb::scale_gradient")});
   GRAPH_DUMP("Final graph after optimizations: ", graph);
 }
 
@@ -621,6 +624,13 @@ void ValueGroup::init(
   }
 }
 
+bool containTensorsOnly(at::ArrayRef<Value*> values) {
+  // return true only if all outputs are tensors
+  return std::all_of(values.begin(), values.end(), [](const Value* value) {
+    return value->type()->castRaw<TensorType>() != nullptr;
+  });
+}
+
 StaticModule::StaticModule(
     std::shared_ptr<torch::jit::Graph> g,
     const StaticModuleOptions& opts)
@@ -654,11 +664,10 @@ StaticModule::StaticModule(
   // handle schema
   if (module_.has_value()) {
     Method method = module_->get_method("forward");
-    schema_ = method.function().getSchema();
     if (RemoveSelfFromGraphInput(graph_)) {
       schema_ = RemoveSelfFromSchema(method.function().getSchema());
+      module_ = c10::nullopt;
     } else {
-      first_input_is_self_ = true;
       schema_ = method.function().getSchema();
     }
   }
@@ -702,6 +711,9 @@ StaticModule::StaticModule(
     }
   }
 
+  AliasDb alias_db(
+      graph_, /*isFrozen=*/false, /*enablePreciseTupleContainerAnalysis=*/true);
+
   // construct SSA definition for non-constant nodes
   int node_idx = 0;
   FastMap<Node*, bool> node_has_out_variant;
@@ -714,12 +726,23 @@ StaticModule::StaticModule(
     std::vector<DefInfo> input_ssa_defs;
     size_t idx = 0;
     for (Value* input : node->inputs()) {
-      ivalue_inputs[idx++] = value_to_ivalue.at(input);
-      input_ssa_defs.emplace_back(value_to_ssa_def.at(input));
+      ivalue_inputs[idx++] = value_to_ivalue[input];
+      input_ssa_defs.emplace_back(value_to_ssa_def[input]);
     }
     node_inputs_ssa_def_map_[node_idx] = input_ssa_defs;
+
+    // create a new ProcessedNode
+    // see [Check and correct bad schema alias info at runtime]
+    bool check_outputs_for_overlap =
+        !alias_db.mayContainAlias(node->inputs(), node->outputs()) &&
+        containTensorsOnly(node->outputs());
     nodes_.emplace_back(
-        node, std::move(ivalue_inputs), idx, opts.enable_out_variant);
+        node,
+        std::move(ivalue_inputs),
+        idx,
+        opts.enable_out_variant,
+        check_outputs_for_overlap);
+
     node_has_out_variant.emplace(node, nodes_.back().has_out_variant());
     for (const auto i : c10::irange(node->outputs().size())) {
       value_to_ivalue[node->outputs()[i]] = nullptr;
@@ -738,8 +761,6 @@ StaticModule::StaticModule(
   }
 
   // Prepare for memory planning
-  AliasDb alias_db(
-      graph_, /*isFrozen=*/false, /*enablePreciseTupleContainerAnalysis=*/true);
   value_group_.init(graph_, alias_db);
   GRAPH_DEBUG(value_group_.toString());
 
@@ -782,7 +803,9 @@ c10::IValue StaticModule::operator()(
   return runtime()(std::move(args), kwargs);
 }
 
-StaticRuntime::StaticRuntime(const StaticModule& sm) : static_module_(sm) {
+StaticRuntime::StaticRuntime(const StaticModule& sm)
+    : static_module_(sm),
+      manage_output_tensors_enabled_(sm.opts().manage_output_tensors) {
   // NB: create unchanging std::vector<IValue>s we can reference
   inputs_.resize(sm.num_inputs());
   nodes_.resize(sm.nodes().size());
@@ -917,11 +940,11 @@ void StaticRuntime::create_memory_planner() {
         static_module_.values_share_same_storage(),
         static_module_.value_group(),
         static_module_.opts().enable_out_variant,
-        static_module_.opts().manage_output_tensors);
+        manage_output_tensors_enabled_);
   }
 }
 
-c10::IValue StaticRuntime::move_outputs_to_tuple(size_t num_outputs) {
+c10::IValue StaticRuntime::move_outputs_to_tuple(uint32_t num_outputs) {
 #ifndef NDEBUG
   for (const auto i : c10::irange(num_outputs)) {
     // The exact output tensor should never be managed.
@@ -951,6 +974,108 @@ c10::IValue StaticRuntime::move_outputs_to_tuple(size_t num_outputs) {
   }
 }
 
+/// [Check and correct bad schema alias info at runtime]
+/// Static runtime relies on the operator schema's alias info to be correct for
+/// memory planning. Because it's hard to enforce the alias info to be correct,
+/// we need to do runtime detection for accidental aliases that do not comply
+/// with the schema. Only aliases of managed tensors are problematic. To avoid
+/// runtime crashes, we can add runtime detection and force the op to comply
+/// with its schema by cloning the alias. Because all managed tensors' data_ptrs
+/// are part of the internal buffer that the MemoryPlanner allocates, we can
+/// check aliases by checking the memory overlap with this internal buffer. But
+/// a tensor's storage can be resized during inferenceso we need another way to
+/// handle the resized case.
+///
+/// There are two ways for incorrect schema to break memory planning. Let's look
+/// at two examples:
+///
+/// Example 1:
+/// @code
+///   def forward(x):
+///     a = x + x
+///     b = bad_op(a)  # b ends up aliasing a incorrectly
+///     return (b)
+/// @endcode
+/// bad_op: its schema says it returns a new Tensor, but it actually returns an
+/// alias. In this case, the memory planner would recognize `a` as a managed
+/// tensor and clean up its memory before returning `b`. But `b` is actually an
+/// alias of `a`, when `a`'s data_ptr get reset, `b`'s data_ptr gets reset too.
+///
+/// Example 2:
+/// @code
+///   def forward(x):
+///     a = x + x
+///     a2 = bad_op(a) # a2 ends up alias a incorrectly
+///     b = a + a
+///     c = b * b # c shares storage with a
+///     d = c + 2 # d shares storage with b
+///     e = a2 * a2
+///     return (d, e)
+/// @endcode
+/// With the memory reuse algorithm, `c` could end up sharing storage with `a`,
+/// but because of bad_op, `a2` now aliases `a`. `c` overwrites `a` and
+/// therefore `a2`, leading to the wrong results. We solve this problem with two
+/// steps. Note this doesn't happen with the current memory reuse algorithm
+/// because of the way it's implemented. Things could change with a different
+/// implementation.
+///
+/// Step 1, annotate the ProcessedNodes with a flag `check_memory_overlap_` set
+/// to true if its outputs do not alias its inputs as indicated by the AliasDb
+/// and all of its outputs are Tensors. Then at runtime, we check that the
+/// nodes' output tensors do not overlap with the internal buffer that the
+/// MemoryPlanner allocates. For latency concerns, we only run this check for
+/// fallback ops. The schemas of native ops and out variants are vetted and
+/// enforced with static runtime unit tests. For the first iteration, we do a
+/// full memory overlap check with
+/// ProcessedNode::verify_and_correct_memory_overlap() because the internal
+/// buffer doesn't exist yet.
+///
+/// Step 2, if a managed tensor gets resized during inference, it gets a new
+/// data_ptr which is not from the buffer. We can tackle this corner case by
+/// delaying the deallocation of the managed tensors to after the outputs are no
+/// longer used (essentially merging the internal/output buffers into one).
+/// Before the merging is implemented, we add another flag `overlap_detected_`
+/// to flag any node with overlap detected in Step 1 and do a full memory
+/// overlap check if the fast check (by checking memory overlap with internal
+/// buffer) fails. There is still a corner case that fails with the added flag.
+/// If a resize is triggered at the same time as the op creating an alias at the
+/// same time, the current checks would fail to detect the alias.
+///
+/// There is another case of failure that step 2 can prevent. With
+/// StaticModule::opts().cleanup_activations = false, the returned Static
+/// Runtime instance in the instance pool can be re-entered while an unintended
+/// output tensor's alias is still being used by the client (in the
+/// multi-threaded setting). This can only be prevented by delaying the
+/// deallocation and returning the Static Runtime instance after the client is
+/// done with the outputs.
+
+void StaticRuntime::verify_and_correct_memory_overlap(ProcessedNode& n) {
+  // The slow check can be removed once the internal/output buffers are merged
+  if (C10_UNLIKELY(n.check_outputs_for_memory_overlap())) {
+    if (C10_UNLIKELY(!planner_ && static_module_.opts().cleanup_activations)) {
+      // slow check, for first iter only with cleanup_activations = true
+      n.verify_and_correct_memory_overlap();
+    } else if (planner_) {
+      bool overlap_detected_with_fast_check = false;
+      for (size_t i = 0; i < n.outputs().size(); i++) {
+        at::Tensor& t = n.Output(i).toTensor();
+        if (planner_->overlapWithInternalBuffer(t.data_ptr())) {
+          VLOG(1) << "Detected alias for node: " << PrintNode(n.node());
+          n.Output(i) = at::native::clone(t, c10::nullopt);
+          // set flag if overlap detected
+          overlap_detected_with_fast_check = true;
+          n.set_outputs_memory_overlap_detected();
+        }
+      }
+      if (n.outputs_memory_overlap_detected() &&
+          !overlap_detected_with_fast_check) {
+        // slow check. Only run when the fast check fails.
+        n.verify_and_correct_memory_overlap();
+      }
+    }
+  }
+}
+
 template <typename IValueList>
 c10::IValue StaticRuntime::run_impl(
     IValueList&& args,
@@ -962,9 +1087,7 @@ c10::IValue StaticRuntime::run_impl(
   c10::InferenceMode mode;
 
   if (planner_) {
-    DCHECK(
-        !static_module_.opts().manage_output_tensors ||
-        checkOutputTensorMemoryLeaks());
+    DCHECK(!manage_output_tensors_enabled_ || checkOutputTensorMemoryLeaks());
     planner_->allocate();
   }
 
@@ -976,6 +1099,8 @@ c10::IValue StaticRuntime::run_impl(
   for (auto& n : nodes_) {
     // LOG(INFO) << "Running node: " << PrintNode(n.node());
     n.run();
+    // Check for incorrect schema alias info.
+    verify_and_correct_memory_overlap(n);
   }
 
   if (static_module_.opts().cleanup_activations) {
@@ -1001,16 +1126,44 @@ c10::IValue StaticRuntime::run_impl(
   return std::move(*outputs_[0]);
 }
 
+template <typename IValueList>
+c10::IValue StaticRuntime::run_impl_record_functions(
+    IValueList&& args,
+    const std::unordered_map<std::string, c10::IValue>& kwargs) {
+  bool pre_sampled = false;
+  if (C10_UNLIKELY(at::shouldRunRecordFunction(&pre_sampled))) {
+    at::RecordFunction guard(
+        at::RecordScope::TORCHSCRIPT_FUNCTION, pre_sampled);
+    if (guard.isActive()) {
+      if (guard.needsInputs()) {
+        guard.before("forward", &args);
+      } else {
+        guard.before("forward");
+      }
+    }
+    return run_impl(std::forward<IValueList>(args), kwargs);
+  }
+  return run_impl(std::forward<IValueList>(args), kwargs);
+}
+
 c10::IValue StaticRuntime::operator()(
     const std::vector<c10::IValue>& args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
+#ifdef PYTORCH_DISABLE_NET_PROFILING
   return run_impl(args, kwargs);
+#else
+  return run_impl_record_functions(args, kwargs);
+#endif
 }
 
 c10::IValue StaticRuntime::operator()(
     std::vector<c10::IValue>&& args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
+#ifdef PYTORCH_DISABLE_NET_PROFILING
   return run_impl(std::move(args), kwargs);
+#else
+  return run_impl_record_functions(std::move(args), kwargs);
+#endif
 }
 
 namespace {
@@ -1146,12 +1299,11 @@ float StaticRuntime::benchmark_model(
 
   const bool is_kwargs_empty = kwargs_list.size() == 0;
   const std::unordered_map<std::string, c10::IValue> empty_kwargs;
-  bool manage_output_tensors = static_module_.opts().manage_output_tensors;
   for (const auto i : c10::irange(warmup_runs)) {
     (void)i; // Suppress unused variable warning
     for (const auto j : c10::irange(args_list.size())) {
       operator()(args_list[j], is_kwargs_empty ? empty_kwargs : kwargs_list[j]);
-      if (manage_output_tensors) {
+      if (manage_output_tensors_enabled_) {
         deallocateOutputTensors();
       }
     }
@@ -1161,7 +1313,7 @@ float StaticRuntime::benchmark_model(
     (void)i; // Suppress unused variable warning
     for (const auto j : c10::irange(args_list.size())) {
       operator()(args_list[j], is_kwargs_empty ? empty_kwargs : kwargs_list[j]);
-      if (manage_output_tensors) {
+      if (manage_output_tensors_enabled_) {
         deallocateOutputTensors();
       }
     }
@@ -1413,7 +1565,11 @@ void StaticRuntime::check_for_memory_leak(bool output_returned) {
             const auto& t = ival->toTensor();
             if (t.defined()) {
               auto* storage_impl = t.storage().unsafeGetStorageImpl();
-              TORCH_CHECK(storage_impl->data() == nullptr, error_msg);
+              TORCH_CHECK(
+                  storage_impl->data() == nullptr ||
+                      (planner_ &&
+                       planner_->isManagedStorageImpl(storage_impl)),
+                  error_msg);
             }
           }
         }
@@ -1471,16 +1627,40 @@ bool StaticRuntime::isManagedOutputTensor(const IValue& ivalue) {
   return planner_ && planner_->isManagedOutputTensor(ivalue);
 }
 
+void StaticRuntime::disableManageOutputTensors() {
+  if (!manage_output_tensors_enabled_) {
+    return;
+  }
+  manage_output_tensors_enabled_ = false;
+  if (!planner_) {
+    return;
+  }
+  // Reset all IValues and destruct planner_ so that it can be reconstructed in
+  // the next run.
+  for (auto& n : nodes_) {
+    for (const auto i : c10::irange(n.outputs().size())) {
+      n.Output(i) = IValue();
+    }
+  }
+  planner_.reset();
+}
+
 ProcessedNode::ProcessedNode(
     Node* node,
     std::unique_ptr<const IValue*[]> inputs,
-    size_t inputsSize,
-    bool enable_out_variant)
+    uint32_t inputsSize,
+    bool enable_out_variant,
+    bool check_memory_overlap)
     : node_(node),
       inputs_(std::move(inputs)),
-      inputs_size_(inputsSize),
-      op_name_(node->kind().toQualString()) {
+      inputs_size_(inputsSize)
+#ifndef PYTORCH_DISABLE_PER_OP_PROFILING
+      ,
+      op_name_(node->kind().toQualString())
+#endif
+{
   // TODO leverage type information
+  DCHECK_LE(node->outputs().size(), UINT_MAX);
   outputs_size_ = node->outputs().size();
   outputs_ = std::make_unique<IValue[]>(outputs_size_);
 
@@ -1523,12 +1703,12 @@ ProcessedNode::ProcessedNode(
             pnode->Output(i) = std::move(stack[i]);
           }
         };
-    fn_ = {f, FunctionKind::kInterpreterFallback};
+    fn_ = {f, FunctionKind::kInterpreterFallback, check_memory_overlap};
     VLOG(1) << "Fallback interpreter for node: " << PrintNode(node);
   }
 }
 
-std::vector<IValue> ProcessedNode::clone_inputs() const {
+std::vector<IValue> ProcessedNode::inputs_ivalue_vec() const {
   std::vector<IValue> result;
   result.reserve(inputs_size_);
   std::transform(
@@ -1546,7 +1726,7 @@ void ProcessedNode::run() {
     at::RecordFunction guard(at::RecordScope::FUNCTION, pre_sampled);
     if (guard.isActive()) {
       if (guard.needsInputs()) {
-        guard.before(get_op_name(), clone_inputs());
+        guard.before(get_op_name(), inputs_ivalue_vec());
       } else {
         guard.before(get_op_name());
       }
@@ -1628,6 +1808,24 @@ bool ProcessedNode::verify_inputs_dont_overlap_outputs() const {
     }
   }
   return true;
+}
+
+void ProcessedNode::verify_and_correct_memory_overlap() {
+  for (const auto i : c10::irange(inputs_size_)) {
+    const IValue& in = Input(i);
+    if (!in.isTensor()) {
+      continue;
+    }
+    const auto& in_t = in.toTensor();
+    for (const auto j : c10::irange(outputs_size_)) {
+      const auto& out_t = Output(j).toTensor();
+      if (!checkNoMemoryOverlap(in_t, out_t)) {
+        VLOG(1) << "Detected alias for node: " << PrintNode(node());
+        Output(i) = at::native::clone(out_t, c10::nullopt);
+        set_outputs_memory_overlap_detected();
+      }
+    }
+  }
 }
 
 } // namespace jit

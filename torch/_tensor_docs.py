@@ -563,6 +563,18 @@ atan2_(other) -> Tensor
 In-place version of :meth:`~Tensor.atan2`
 """)
 
+add_docstr_all('arctan2', r"""
+arctan2(other) -> Tensor
+
+See :func:`torch.arctan2`
+""")
+
+add_docstr_all('arctan2_', r"""
+atan2_(other) -> Tensor
+
+In-place version of :meth:`~Tensor.arctan2`
+""")
+
 add_docstr_all('atanh', r"""
 atanh() -> Tensor
 
@@ -1025,7 +1037,7 @@ See :func:`torch.corrcoef`
 
 add_docstr_all('cross',
                r"""
-cross(other, dim=-1) -> Tensor
+cross(other, dim=None) -> Tensor
 
 See :func:`torch.cross`
 """)
@@ -4243,7 +4255,7 @@ If this is already of the correct type, no copy is performed and the
 original object is returned.
 
 Args:
-    dtype (type or string): The desired type
+    dtype (dtype or string): The desired type
     non_blocking (bool): If ``True``, and the source is in pinned memory
         and destination is on the GPU or vice versa, the copy is performed
         asynchronously with respect to the host. Otherwise, the argument
@@ -4403,8 +4415,33 @@ Example::
    :noindex:
 
 Returns a new tensor with the same data as the :attr:`self` tensor but of a
-different :attr:`dtype`. :attr:`dtype` must have the same number of bytes per
-element as :attr:`self`'s dtype.
+different :attr:`dtype`.
+
+If the element size of :attr:`dtype` is different than that of ``self.dtype``,
+then the size of the last dimension of the output will be scaled
+proportionally.  For instance, if :attr:`dtype` element size is twice that of
+``self.dtype``, then each pair of elements in the last dimension of
+:attr:`self` will be combined, and the size of the last dimension of the output
+will be half that of :attr:`self`. If :attr:`dtype` element size is half that
+of ``self.dtype``, then each element in the last dimension of :attr:`self` will
+be split in two, and the size of the last dimension of the output will be
+double that of :attr:`self`. For this to be possible, the following conditions
+must be true:
+
+    * ``self.dim()`` must be greater than 0.
+    * ``self.stride(-1)`` must be 1.
+
+Additionally, if the element size of :attr:`dtype` is greater than that of
+``self.dtype``, the following conditions must be true as well:
+
+    * ``self.size(-1)`` must be divisible by the ratio between the element
+      sizes of the dtypes.
+    * ``self.storage_offset()`` must be divisible by the ratio between the
+      element sizes of the dtypes.
+    * The strides of all dimensions, except the last dimension, must be
+      divisible by the ratio between the element sizes of the dtypes.
+
+If any of the above conditions are not met, an error is thrown.
 
 .. warning::
 
@@ -4440,10 +4477,25 @@ Example::
             [-2.4724, -0.0334, -0.2976, -0.8499],
             [-0.2109,  1.9913, -0.9607, -0.6123]])
 
-    >>> x.view(torch.int16)
-    Traceback (most recent call last):
-      File "<stdin>", line 1, in <module>
-    RuntimeError: Viewing a tensor as a new dtype with a different number of bytes per element is not supported.
+    >>> x.view(torch.cfloat)
+    tensor([[ 0.0047-0.0310j,  1.4999-0.5316j],
+            [-0.1520+0.7472j,  0.5617-0.8649j],
+            [-2.4724-0.0334j, -0.2976-0.8499j],
+            [-0.2109+1.9913j, -0.9607-0.6123j]])
+    >>> x.view(torch.cfloat).size()
+    torch.Size([4, 2])
+
+    >>> x.view(torch.uint8)
+    tensor([[  0, 202, 154,  59, 182, 243, 253, 188, 185, 252, 191,  63, 240,  22,
+               8, 191],
+            [227, 165,  27, 190, 128,  72,  63,  63, 146, 203,  15,  63,  22, 106,
+              93, 191],
+            [205,  59,  30, 192, 112, 206,   8, 189,   7,  95, 152, 190,  12, 147,
+              89, 191],
+            [ 43, 246,  87, 190, 235, 226, 254,  63, 111, 240, 117, 191, 177, 191,
+              28, 191]], dtype=torch.uint8)
+    >>> x.view(torch.uint8).size()
+    torch.Size([4, 16])
 """)
 
 add_docstr_all('view_as',

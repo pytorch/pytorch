@@ -136,6 +136,29 @@ class AbstractTestCases:
                 self.assertEqual(deterministic, torch.are_deterministic_algorithms_enabled())
                 self.assertEqual(warn_only, torch.is_deterministic_algorithms_warn_only_enabled())
 
+                if deterministic:
+                    if warn_only:
+                        debug_mode = 1
+                    else:
+                        debug_mode = 2
+                else:
+                    debug_mode = 0
+
+                self.assertEqual(debug_mode, torch.get_deterministic_debug_mode())
+
+            for debug_mode in [0, 1, 2]:
+                torch.set_deterministic_debug_mode(debug_mode)
+                self.assertEqual(debug_mode, torch.get_deterministic_debug_mode())
+                deterministic = debug_mode in [1, 2]
+                warn_only = debug_mode == 1
+
+                self.assertEqual(deterministic, torch.are_deterministic_algorithms_enabled())
+                self.assertEqual(warn_only, torch.is_deterministic_algorithms_warn_only_enabled())
+
+            for debug_mode, debug_mode_str in [(0, 'default'), (1, 'warn'), (2, 'error')]:
+                torch.set_deterministic_debug_mode(debug_mode_str)
+                self.assertEqual(debug_mode, torch.get_deterministic_debug_mode())
+
             with self.assertRaisesRegex(
                     TypeError,
                     r"_set_deterministic_algorithms\(\): argument 'mode' \(position 1\) must be bool, not int"):
@@ -3589,16 +3612,16 @@ class TestTorchDeviceType(TestCase):
         # TORCH_WARN_ONCE to TORCH_WARN
         a = np.arange(10)
         a.flags.writeable = False
-        with self.assertWarnsOnceRegex(UserWarning, '.*non-writeable.*'):
+        with self.assertWarnsOnceRegex(UserWarning, '.*non-writable.*'):
             torch.from_numpy(a)
 
         # OK, got it once, now try again
-        with self.assertWarnsOnceRegex(UserWarning, '.*non-writeable.*'):
+        with self.assertWarnsOnceRegex(UserWarning, '.*non-writable.*'):
             torch.from_numpy(a)
 
         # Make sure emitting two warnings will pass the assertWarnsOnceRegex
         # context manager
-        with self.assertWarnsOnceRegex(UserWarning, '.*non-writeable.*'):
+        with self.assertWarnsOnceRegex(UserWarning, '.*non-writable.*'):
             torch.from_numpy(a)
             torch.from_numpy(a)
 
@@ -3618,6 +3641,12 @@ class TestTorchDeviceType(TestCase):
         input_ = conv(input_).contiguous()
         input_ = layer_norm(input_.transpose(1, 2).contiguous()).contiguous()
         input_.sum().backward()
+
+        # 3d
+        conv = torch.nn.ConvTranspose3d(3, 3, kernel_size=3).to(device)
+        input = torch.randn(batch_size, 3, length, length, length, device=device)
+        out = conv(input)
+        out.backward(torch.ones_like(out).transpose(-2, -1))
 
     # TODO: this test should be in test_nn.py
     @onlyCUDA
