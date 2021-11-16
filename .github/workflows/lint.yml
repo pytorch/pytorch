@@ -18,14 +18,11 @@ jobs:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
       - name: Install lintrunner
-        run: |
-          cargo install lintrunner --version=0.5
+        run: cargo install lintrunner --version=0.5.0
       - name: init
-        run: |
-          lintrunner init
+        run: lintrunner init
       - name:  lint
-        run: |
-          lintrunner --paths-cmd='git grep -Il .'
+        run: lintrunner --paths-cmd='git grep -Il .'
 
   quick-checks:
     runs-on: ubuntu-18.04
