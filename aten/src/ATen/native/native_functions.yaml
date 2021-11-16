@@ -4960,13 +4960,6 @@
   dispatch:
     CompositeExplicitAutograd: _sparse_addmm
 
-<<<<<<< HEAD
-- func: _sparse_sampled_addmm.out(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    SparseCsrCUDA: sparse_sampled_addmm_out_sparse_csr_cuda
-
-- func: _sparse_sampled_addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
-=======
 - func: sparse_sampled_addmm.out(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   python_module: sparse
   dispatch:
@@ -4974,7 +4967,6 @@
 
 - func: sparse_sampled_addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   python_module: sparse
->>>>>>> e1c32e987e... [sparse] Add `torch._C._sparse` namespace
   dispatch:
     SparseCsrCUDA: sparse_sampled_addmm_sparse_csr_cuda
 
