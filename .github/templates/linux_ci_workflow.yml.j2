@@ -157,8 +157,8 @@ jobs:
       ENABLE_XLA_TEST: !{{ enable_xla_test }}
       ENABLE_NOARCH_TEST: !{{ enable_noarch_test }}
       NUM_TEST_SHARDS: !{{ num_test_shards }}
-      MULTIGPU_RUNNER_TYPE: linux.16xlarge.nvidia.gpu
-      DISTRIBUTED_GPU_RUNNER_TYPE: linux.8xlarge.nvidia.gpu
+      MULTIGPU_RUNNER_TYPE: !{{ multigpu_runner_type }}
+      DISTRIBUTED_GPU_RUNNER_TYPE: !{{ distributed_gpu_runner_type }}
       NOGPU_RUNNER_TYPE: linux.2xlarge
       PR_BODY: ${{ github.event.pull_request.body }}
     outputs:
