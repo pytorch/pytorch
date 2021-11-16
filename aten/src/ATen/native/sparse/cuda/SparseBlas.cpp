@@ -84,7 +84,7 @@ Tensor sparse_sampled_addmm_sparse_csr_cuda(
     const Scalar& beta,
     const Scalar& alpha) {
   auto result = at::empty({0, 0}, self.options());
-  at::sparse_sampled_addmm_out(result, self, mat1, mat2, beta, alpha);
+  at::native::sparse_sampled_addmm_out_sparse_csr_cuda(self, mat1, mat2, beta, alpha, result);
   return result;
 }
 
