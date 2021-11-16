@@ -6,6 +6,8 @@
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
+
+#include <c10/util/irange.h>
 #include <c10/util/math_compat.h>
 
 #include <algorithm>
@@ -45,7 +47,7 @@ static void avg_pool2d_out_frame(
   const auto output_zero_point = output.q_zero_point();
 
   at::parallel_for(0, nInputPlane, 0, [&](int64_t start, int64_t end) {
-    for (auto k = start; k < end; k++) {
+    for (const auto k : c10::irange(start, end)) {
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int64_t xx, yy;
       /* For all output pixels... */
@@ -297,10 +299,8 @@ Tensor qnnpack_avg_pool2d(
   pytorch_qnnp_operator_t qnnpack_operator{nullptr};
   const pytorch_qnnp_status createStatus =
       pytorch_qnnp_create_average_pooling2d_nhwc_q8(
-          padH /* input_padding_top */,
-          padW /* input_padding_right */,
-          padH /* input_padding_bottom */,
-          padW /* input_padding_left */,
+          padH /* input_padding_height */,
+          padW /* input_padding_width */,
           kH /* kernel height */,
           kW /* kernel width */,
           dH /* stride height */,

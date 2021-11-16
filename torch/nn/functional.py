@@ -48,7 +48,7 @@ Args:
     padding: implicit paddings on both sides of the input. Can be a string {'valid', 'same'},
       single number or a one-element tuple `(padW,)`. Default: 0
       ``padding='valid'`` is the same as no padding. ``padding='same'`` pads
-      the input so the output has the shape as the input. However, this mode
+      the input so the output has the same shape as the input. However, this mode
       doesn't support any stride values other than 1.
 
       .. warning::
@@ -96,7 +96,7 @@ Args:
     padding: implicit paddings on both sides of the input. Can be a string {'valid', 'same'},
       single number or a tuple `(padH, padW)`. Default: 0
       ``padding='valid'`` is the same as no padding. ``padding='same'`` pads
-      the input so the output has the shape as the input. However, this mode
+      the input so the output has the same shape as the input. However, this mode
       doesn't support any stride values other than 1.
 
       .. warning::
@@ -146,7 +146,7 @@ Args:
     padding: implicit paddings on both sides of the input. Can be a string {'valid', 'same'},
       single number or a tuple `(padT, padH, padW)`. Default: 0
       ``padding='valid'`` is the same as no padding. ``padding='same'`` pads
-      the input so the output has the shape as the input. However, this mode
+      the input so the output has the same shape as the input. However, this mode
       doesn't support any stride values other than 1.
 
       .. warning::
@@ -607,10 +607,14 @@ def max_pool1d_with_indices(
     return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
     r"""
-    max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False) -> Tensor
+    max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False)
 
     Applies a 1D max pooling over an input signal composed of several input
     planes.
+
+    .. note::
+        The order of :attr:`ceil_mode` and :attr:`return_indices` is different from
+        what seen in :class:`~torch.nn.MaxPool1d`, and will change in a future release.
 
     See :class:`~torch.nn.MaxPool1d` for details.
 
@@ -627,6 +631,12 @@ def max_pool1d_with_indices(
         return_indices: If ``True``, will return the argmax along with the max values.
                         Useful for :class:`torch.nn.functional.max_unpool1d` later
     """
+    # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
+    # and https://github.com/pytorch/pytorch/issues/62545 for context
+    if ceil_mode != return_indices:
+        warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
+                      "to match the args list in nn.MaxPool1d in a future release.")
+
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool1d_with_indices,
@@ -652,6 +662,12 @@ def _max_pool1d(
     ceil_mode: bool = False,
     return_indices: bool = False
 ) -> Tensor:
+    # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
+    # and https://github.com/pytorch/pytorch/issues/62545 for context
+    if ceil_mode != return_indices:
+        warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
+                      "to match the args list in nn.MaxPool1d in a future release.")
+
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool1d,
@@ -689,10 +705,14 @@ def max_pool2d_with_indices(
     return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
     r"""
-    max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False) -> Tensor
+    max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False)
 
     Applies a 2D max pooling over an input signal composed of several input
     planes.
+
+    .. note::
+        The order of :attr:`ceil_mode` and :attr:`return_indices` is different from
+        what seen in :class:`~torch.nn.MaxPool2d`, and will change in a future release.
 
     See :class:`~torch.nn.MaxPool2d` for details.
 
@@ -709,6 +729,12 @@ def max_pool2d_with_indices(
         return_indices: If ``True``, will return the argmax along with the max values.
                         Useful for :class:`torch.nn.functional.max_unpool2d` later
     """
+    # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
+    # and https://github.com/pytorch/pytorch/issues/62545 for context
+    if ceil_mode != return_indices:
+        warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
+                      "to match the args list in nn.MaxPool2d in a future release.")
+
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool2d_with_indices,
@@ -734,6 +760,12 @@ def _max_pool2d(
     ceil_mode: bool = False,
     return_indices: bool = False
 ) -> Tensor:
+    # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
+    # and https://github.com/pytorch/pytorch/issues/62545 for context
+    if ceil_mode != return_indices:
+        warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
+                      "to match the args list in nn.MaxPool2d in a future release.")
+
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool2d,
@@ -771,10 +803,14 @@ def max_pool3d_with_indices(
     return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
     r"""
-    max_pool3d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False) -> Tensor
+    max_pool3d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False)
 
     Applies a 3D max pooling over an input signal composed of several input
     planes.
+
+    .. note::
+        The order of :attr:`ceil_mode` and :attr:`return_indices` is different from
+        what seen in :class:`~torch.nn.MaxPool3d`, and will change in a future release.
 
     See :class:`~torch.nn.MaxPool3d` for details.
 
@@ -791,6 +827,12 @@ def max_pool3d_with_indices(
         return_indices: If ``True``, will return the argmax along with the max values.
                         Useful for :class:`torch.nn.functional.max_unpool3d` later
     """
+    # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
+    # and https://github.com/pytorch/pytorch/issues/62545 for context
+    if ceil_mode != return_indices:
+        warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
+                      "to match the args list in nn.MaxPool3d in a future release.")
+
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool3d_with_indices,
@@ -816,6 +858,12 @@ def _max_pool3d(
     ceil_mode: bool = False,
     return_indices: bool = False
 ) -> Tensor:
+    # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
+    # and https://github.com/pytorch/pytorch/issues/62545 for context
+    if ceil_mode != return_indices:
+        warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
+                      "to match the args list in nn.MaxPool3d in a future release.")
+
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool3d,
@@ -1885,11 +1933,11 @@ def linear(input: Tensor, weight: Tensor, bias: Optional[Tensor] = None) -> Tens
 
     Shape:
 
-        - Input: :math:`(N, *, in\_features)` N is the batch size, `*` means any number of
-          additional dimensions
-        - Weight: :math:`(out\_features, in\_features)`
-        - Bias: :math:`(out\_features)`
-        - Output: :math:`(N, *, out\_features)`
+        - Input: :math:`(*, in\_features)` where `*` means any number of
+          additional dimensions, including none
+        - Weight: :math:`(out\_features, in\_features)` or :math:`(in\_features)`
+        - Bias: :math:`(out\_features)` or :math:`()`
+        - Output: :math:`(*, out\_features)` or :math:`(*)`, based on the shape of the weight
     """
     if has_torch_function_variadic(input, weight, bias):
         return handle_torch_function(linear, (input, weight, bias), input, weight, bias=bias)
@@ -2065,9 +2113,15 @@ def embedding(
 
     if has_torch_function_variadic(input, weight):
         return handle_torch_function(
-            embedding, (input, weight),
-            input, weight, padding_idx, max_norm, norm_type,
-            scale_grad_by_freq, sparse
+            embedding,
+            (input, weight),
+            input,
+            weight,
+            padding_idx=padding_idx,
+            max_norm=max_norm,
+            norm_type=norm_type,
+            scale_grad_by_freq=scale_grad_by_freq,
+            sparse=sparse,
         )
     if padding_idx is not None:
         if padding_idx > 0:
@@ -3189,10 +3243,10 @@ def margin_ranking_loss(
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
         reduction_enum = _Reduction.get_enum(reduction)
-    if input1.dim() == 0 or input2.dim() == 0 or target.dim() == 0:
+    if (input1.dim() != input2.dim() or input1.dim() != target.dim()):
         raise RuntimeError(
             (
-                "margin_ranking_loss does not support scalars, got sizes: "
+                "margin_ranking_loss : All input tensors should have same dimension but got sizes: "
                 "input1: {}, input2: {}, target: {} ".format(input1.size(), input2.size(), target.size())
             )
         )
@@ -3310,7 +3364,9 @@ def multilabel_soft_margin_loss(
     if weight is not None:
         loss = loss * weight
 
-    loss = loss.sum(dim=1) / input.size(1)  # only return N loss values
+    class_dim = input.dim() - 1
+    C = input.size(class_dim)
+    loss = loss.sum(dim=class_dim) / C  # only return N loss values
 
     if reduction == "none":
         ret = loss
@@ -3600,7 +3656,7 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
     `mini-batch x channels x [optional depth] x [optional height] x width`.
 
     The modes available for resizing are: `nearest`, `linear` (3D-only),
-    `bilinear`, `bicubic` (4D-only), `trilinear` (5D-only), `area`
+    `bilinear`, `bicubic` (4D-only), `trilinear` (5D-only), `area`, `nearest-exact`
 
     Args:
         input (Tensor): the input tensor
@@ -3610,7 +3666,7 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
             its length has to match `input.dim()`.
         mode (str): algorithm used for upsampling:
             ``'nearest'`` | ``'linear'`` | ``'bilinear'`` | ``'bicubic'`` |
-            ``'trilinear'`` | ``'area'``. Default: ``'nearest'``
+            ``'trilinear'`` | ``'area'`` | ``'nearest-exact'``. Default: ``'nearest'``
         align_corners (bool, optional): Geometrically, we consider the pixels of the
             input and output as squares rather than points.
             If set to ``True``, the input and output tensors are aligned by the
@@ -3627,7 +3683,7 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
             output `size`. The computed output `size` will be used to infer new scales for
             the interpolation. Note that when `scale_factor` is floating-point, it may differ
             from the recomputed `scale_factor` due to rounding and precision issues.
-            If `recomputed_scale_factor` is ``False``, then `size` or `scale_factor` will
+            If `recompute_scale_factor` is ``False``, then `size` or `scale_factor` will
             be used directly for interpolation.
 
     .. note::
@@ -3635,6 +3691,12 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
         negative values or values greater than 255 for images.
         Explicitly call ``result.clamp(min=0, max=255)`` if you want to reduce the overshoot
         when displaying the image.
+
+    .. note::
+        Mode ``mode='nearest-exact'`` matches Scikit-Image and PIL nearest neighbours interpolation
+        algorithms and fixes known issues with ``mode='nearest'``. This mode is introduced to keep
+        backward compatibility.
+        Mode ``mode='nearest'`` matches buggy OpenCV's ``INTER_NEAREST`` interpolation algorithm.
 
     .. warning::
         With ``align_corners = True``, the linearly interpolating modes
@@ -3668,7 +3730,7 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
             recompute_scale_factor=recompute_scale_factor,
         )
 
-    if mode in ("nearest", "area"):
+    if mode in ("nearest", "area", "nearest-exact"):
         if align_corners is not None:
             raise ValueError(
                 "align_corners option can only be set with the "
@@ -3698,7 +3760,11 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
         if isinstance(size, (list, tuple)):
             if len(size) != dim:
                 raise ValueError(
-                    "size shape must match input shape. " "Input is {}D, size is {}".format(dim, len(size))
+                    "Input and output must have the same number of spatial dimensions, but got "
+                    f"input with with spatial dimensions of {list(input.shape[2:])} and output size of {size}. "
+                    "Please provide input tensor in (N, C, d1, d2, ...,dK) format and "
+                    "output size in (o1, o2, ...,oK) format."
+
                 )
             output_size = size
         else:
@@ -3709,8 +3775,11 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
         if isinstance(scale_factor, (list, tuple)):
             if len(scale_factor) != dim:
                 raise ValueError(
-                    "scale_factor shape must match input shape. "
-                    "Input is {}D, scale_factor is {}".format(dim, len(scale_factor))
+                    "Input and scale_factor must have the same number of spatial dimensions, but "
+                    f"got input with spatial dimensions of {list(input.shape[2:])} and "
+                    f"scale_factor of shape {scale_factor}. "
+                    "Please provide input tensor in (N, C, d1, d2, ...,dK) format and "
+                    "scale_factor in (s1, s2, ...,sK) format."
                 )
             scale_factors = scale_factor
         else:
@@ -3761,6 +3830,18 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
     if input.dim() == 5 and mode == "nearest":
         return torch._C._nn.upsample_nearest3d(input, output_size, scale_factors)
 
+    # TODO: Remove this scripting logic once the 2-week FC window has passed.
+    if mode == "nearest-exact":
+        if not torch.jit.is_scripting():
+            if input.dim() == 3 and mode == "nearest-exact":
+                return torch._C._nn._upsample_nearest_exact1d(input, output_size, scale_factors)
+            if input.dim() == 4 and mode == "nearest-exact":
+                return torch._C._nn._upsample_nearest_exact2d(input, output_size, scale_factors)
+            if input.dim() == 5 and mode == "nearest-exact":
+                return torch._C._nn._upsample_nearest_exact3d(input, output_size, scale_factors)
+        else:
+            raise RuntimeError("TorchScript currently does not support nearest-exact")
+
     if input.dim() == 3 and mode == "area":
         assert output_size is not None
         return adaptive_avg_pool1d(input, output_size)
@@ -3799,7 +3880,7 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
 
     raise NotImplementedError(
         "Input Error: Only 3D, 4D and 5D input Tensors supported"
-        " (got {}D) for the modes: nearest | linear | bilinear | bicubic | trilinear"
+        " (got {}D) for the modes: nearest | linear | bilinear | bicubic | trilinear | area | nearest-exact"
         " (got {})".format(input.dim(), mode)
     )
 
@@ -5135,7 +5216,7 @@ def multi_head_attention_forward(
 
     # convert mask to float
     if attn_mask is not None and attn_mask.dtype == torch.bool:
-        new_attn_mask = torch.zeros_like(attn_mask, dtype=torch.float)
+        new_attn_mask = torch.zeros_like(attn_mask, dtype=q.dtype)
         new_attn_mask.masked_fill_(attn_mask, float("-inf"))
         attn_mask = new_attn_mask
 
