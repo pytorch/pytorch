@@ -1,7 +1,8 @@
-#include <torch/csrc/lazy/backend/backend_device.h>
 #include "lazy_tensor_core/csrc/ts_backend/backend_impl.h"
 
-#include "lazy_tensor_core/csrc/ts_backend/ts_lowering_context.h"
+#include <torch/csrc/lazy/backend/backend_device.h>
+#include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
+
 #include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
 #include "lazy_tensors/computation_client/sys_util.h"
 
@@ -29,7 +30,7 @@ struct TSBackendDeviceType : public BackendDeviceType {
 const std::set<int8_t> TSBackendDeviceType::supported_device_types_ = {
     (int8_t)at::kCPU, (int8_t)at::kCUDA};
 
-class TSBackendImpl : public BackendImplInterface {
+class TSBackendImpl : public torch::lazy::BackendImplInterface {
  public:
   TSBackendImpl() : default_device_type_(at::kCPU) {
     auto type = lazy_tensors::sys_util::GetEnvBool("LTC_TS_CUDA", false)
@@ -37,17 +38,18 @@ class TSBackendImpl : public BackendImplInterface {
                     : at::kCPU;
     default_device_type_ = TSBackendDeviceType(type);
   }
-  std::unique_ptr<ir::LoweringContext> CreateLoweringContext(
+  std::unique_ptr<torch::lazy::LoweringContext> CreateLoweringContext(
       const std::string& name, torch::lazy::BackendDevice device,
       c10::ArrayRef<torch::lazy::Node*> post_order,
       torch::lazy::Util::EmissionMap emit_status) const override {
-    return std::make_unique<ts_backend::TSLoweringContext>(
+    return std::make_unique<torch::lazy::TSLoweringContext>(
         name, device, post_order, emit_status);
   }
 
-  std::unique_ptr<ir::LoweringContext> CreateLoweringContext(
-      const std::string& name, torch::lazy::BackendDevice device) const override {
-    return std::make_unique<ts_backend::TSLoweringContext>(name, device);
+  std::unique_ptr<torch::lazy::LoweringContext> CreateLoweringContext(
+      const std::string& name,
+      torch::lazy::BackendDevice device) const override {
+    return std::make_unique<torch::lazy::TSLoweringContext>(name, device);
   }
 
   std::vector<std::string> GetCompilationDevices(
@@ -71,10 +73,9 @@ class TSBackendImpl : public BackendImplInterface {
   }
 
   std::string GetComputationBackendText(
-      const ComputationPtr computation) const override {
+      const torch::lazy::ComputationPtr computation) const override {
     auto ts_computation =
-        static_cast<torch_lazy_tensors::compiler::ts_backend::TSComputation*>(
-            computation.get());
+        static_cast<torch::lazy::TSComputation*>(computation.get());
     return ts_computation->graph()->toString();
   }
 
@@ -109,11 +110,11 @@ class TSBackendImpl : public BackendImplInterface {
       const torch::lazy::BackendDevice& device,
       const torch::lazy::Shape& shape) const override;
 
-  std::vector<ComputationPtr> Compile(
-      std::vector<ComputationPtr> instances) const override;
+  std::vector<torch::lazy::ComputationPtr> Compile(
+      std::vector<torch::lazy::ComputationPtr> instances) const override;
 
   std::vector<torch::lazy::BackendDataPtr> ExecuteComputation(
-      Computation& computation,
+      torch::lazy::Computation& computation,
       c10::ArrayRef<torch::lazy::BackendDataPtr> arguments,
       const torch::lazy::BackendDevice& device) const override;
 
@@ -162,22 +163,21 @@ torch::lazy::BackendDataPtr TSBackendImpl::CreateDataPlaceholder(
   return std::make_shared<TSBackendImpl::TSData>(shape, device);
 }
 
-std::vector<ComputationPtr> TSBackendImpl::Compile(
-    std::vector<ComputationPtr> instances) const {
+std::vector<torch::lazy::ComputationPtr> TSBackendImpl::Compile(
+    std::vector<torch::lazy::ComputationPtr> instances) const {
   for (const auto& instance : instances) {
     auto ts_computation =
-        static_cast<ts_backend::TSComputation*>(instance.get());
+        static_cast<torch::lazy::TSComputation*>(instance.get());
   }
   return instances;
 }
 
 std::vector<torch::lazy::BackendDataPtr> TSBackendImpl::ExecuteComputation(
-    Computation& computation,
+    torch::lazy::Computation& computation,
     c10::ArrayRef<torch::lazy::BackendDataPtr> arguments,
     const torch::lazy::BackendDevice& device) const {
   torch::jit::GraphExecutor& graph_executor =
-      static_cast<compiler::ts_backend::TSComputation&>(computation)
-          .graph_executor();
+      static_cast<torch::lazy::TSComputation&>(computation).graph_executor();
   std::vector<torch::jit::IValue> stack;
   for (auto argument : arguments) {
     const auto ts_data =
@@ -224,16 +224,16 @@ c10::DeviceType TSBackendImpl::EagerFallbackDeviceType() const {
   return (c10::DeviceType)GetDefaultDeviceType()->type;
 }
 
-compiler::BackendImplInterface* GetTSBackendImpl() {
+torch::lazy::BackendImplInterface* GetTSBackendImpl() {
   static compiler::TSBackendImpl* ts_backend_impl =
       new compiler::TSBackendImpl();
   return ts_backend_impl;
 }
 
 void InitTorchScriptBackend() {
-  static std::unique_ptr<compiler::BackendRegistrar> s_registrar;
+  static std::unique_ptr<torch::lazy::BackendRegistrar> s_registrar;
   s_registrar.reset(
-      new compiler::BackendRegistrar(compiler::GetTSBackendImpl()));
+      new torch::lazy::BackendRegistrar(compiler::GetTSBackendImpl()));
 }
 };  // namespace compiler
 }  // namespace torch_lazy_tensors

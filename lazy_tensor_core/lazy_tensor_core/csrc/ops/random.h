@@ -11,8 +11,9 @@ class Random : public TsNode {
   Random(const torch::lazy::Value& input, const c10::optional<int64_t>& from, const c10::optional<int64_t>& to);
 
   std::string ToString() const override;
-  TSOpVector Lower(std::shared_ptr<torch::jit::GraphFunction> function,
-      ts_backend::TSLoweringContext* loctx) const override;
+  torch::lazy::TSOpVector Lower(
+      std::shared_ptr<torch::jit::GraphFunction> function,
+      torch::lazy::TSLoweringContext* loctx) const override;
 
   c10::optional<int64_t> from;
   c10::optional<int64_t> to;

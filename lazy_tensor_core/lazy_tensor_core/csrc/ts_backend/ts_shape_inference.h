@@ -1,6 +1,6 @@
 #pragma once
 
-#include "lazy_tensor_core/csrc/ts_backend/ts_lowering_context.h"
+#include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
 
 namespace torch_lazy_tensors {
 namespace compiler {

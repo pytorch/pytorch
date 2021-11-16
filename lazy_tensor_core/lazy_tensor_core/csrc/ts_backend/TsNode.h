@@ -1,18 +1,17 @@
 #pragma once
 
+#include <torch/csrc/lazy/backend/lowering_context.h>
 #include <torch/csrc/lazy/core/ir.h>
 #include <torch/csrc/lazy/core/shape.h>
+#include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
 
 #include "c10/util/ArrayRef.h"
-#include "lazy_tensor_core/csrc/lowering_context.h"
-#include "lazy_tensor_core/csrc/ts_backend/ts_lowering_context.h"
 #include "lazy_tensors/computation_client/sys_util.h"
 #include "torch/csrc/jit/api/function_impl.h"
 #include "torch/csrc/jit/ir/ir.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
-using namespace torch_lazy_tensors::compiler;
 using NodePtr = torch::lazy::NodePtr;
 using Node = torch::lazy::Node;
 using OpKind = torch::lazy::OpKind;
@@ -80,8 +79,9 @@ class TsNode : public torch::lazy::Node {
   // Lower is a backend-specific method since it returns a backend specific
   // type. hence, it is convenient to define it differently per-backend rather
   // than at Node API
-  virtual TSOpVector Lower(std::shared_ptr<torch::jit::GraphFunction> function,
-                           ts_backend::TSLoweringContext* loctx) const;
+  virtual torch::lazy::TSOpVector Lower(
+      std::shared_ptr<torch::jit::GraphFunction> function,
+      torch::lazy::TSLoweringContext* loctx) const;
 
  private:
   // Adds node's index output number as operand.

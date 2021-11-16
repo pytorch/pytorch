@@ -32,8 +32,9 @@ c10::optional<torch::lazy::BackendDevice> GetLtcDevice(const c10::optional<c10::
 // should know if they are promoting a tensor to Lazy for the first time?
 
 // Needed zero-arg version to make variadic template work
-c10::optional<torch::lazy::BackendDevice> GetSameBackendDeviceOrUseDefault() { 
-  return torch::lazy::BackendDevice(compiler::getBackend()->GetDefaultDeviceType(), 0);
+c10::optional<torch::lazy::BackendDevice> GetSameBackendDeviceOrUseDefault() {
+  return torch::lazy::BackendDevice(
+      torch::lazy::getBackend()->GetDefaultDeviceType(), 0);
 }
 c10::optional<torch::lazy::BackendDevice> GetSameBackendDeviceOrUseDefault(const at::TensorList& tensors) {
   for (const auto& tensor : tensors) {
@@ -55,7 +56,8 @@ c10::optional<torch::lazy::BackendDevice> GetSameBackendDeviceOrUseDefault(const
 torch::lazy::BackendDevice AtenDeviceToLtcDevice(const c10::Device& device) {
   CHECK_EQ(device.type(), at::kLazy) << device;
   int ordinal = device.has_index() ? device.index() : 0;
-  return torch::lazy::BackendDevice(compiler::getBackend()->GetDefaultDeviceType(), ordinal);
+  return torch::lazy::BackendDevice(
+      torch::lazy::getBackend()->GetDefaultDeviceType(), ordinal);
 }
 
 c10::Device LtcDeviceToAtenDevice(const torch::lazy::BackendDevice& device) {

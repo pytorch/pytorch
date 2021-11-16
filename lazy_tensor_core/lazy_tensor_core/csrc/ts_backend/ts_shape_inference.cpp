@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/frontend/sugared_value.h>
 #include <torch/csrc/lazy/core/permutation_util.h>
 #include <torch/csrc/lazy/core/shape.h>
+#include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
 #include <torch/jit.h>
 
 #include "lazy_tensor_core/csrc/helpers.h"
@@ -31,7 +32,6 @@
 #include "lazy_tensor_core/csrc/ops/update_slice.h"
 #include "lazy_tensor_core/csrc/ops/view.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
-#include "lazy_tensor_core/csrc/ts_backend/ts_lowering_context.h"
 
 namespace torch_lazy_tensors {
 namespace compiler {
@@ -41,8 +41,9 @@ torch::lazy::Shape InferComparison(const torch::lazy::Node* node) {
   const torch::lazy::Output& rhs = node->operand(1);
   return torch::lazy::Shape(
       c10::ScalarType::Bool,
-      Helpers::GetPromotedShape(ir::GetShapeFromTsOutput(lhs).sizes(),
-                                ir::GetShapeFromTsOutput(rhs).sizes()));
+      Helpers::GetPromotedShape(
+          torch_lazy_tensors::ir::GetShapeFromTsOutput(lhs).sizes(),
+          torch_lazy_tensors::ir::GetShapeFromTsOutput(rhs).sizes()));
 }
 
 torch::lazy::Shape InferConvolutionOverrideable(
@@ -53,10 +54,12 @@ torch::lazy::Shape InferConvolutionOverrideable(
   // TODO: Shape::sizes() returns a Span and converting it to
   // a vector of int is awkard. Clean up this after we switch to a
   // PyTorch shape.
-  const auto input_shape = ir::GetShapeFromTsOutput(operands[0]);
+  const auto input_shape =
+      torch_lazy_tensors::ir::GetShapeFromTsOutput(operands[0]);
   const auto& input_size = std::vector<int64_t>(
       input_shape.sizes().begin(), input_shape.sizes().end());
-  const auto weight_shape = ir::GetShapeFromTsOutput(operands[1]);
+  const auto weight_shape =
+      torch_lazy_tensors::ir::GetShapeFromTsOutput(operands[1]);
   const auto& weight_size = std::vector<int64_t>(
       weight_shape.sizes().begin(), weight_shape.sizes().end());
   const auto& dilation = conv->dilation();
@@ -80,7 +83,8 @@ torch::lazy::Shape InferConvolutionOverrideable(
 
 torch::lazy::Shape InferRepeat(const ir::ops::Repeat* repeat) {
   const torch::lazy::Output& input = repeat->operand(0);
-  const torch::lazy::Shape& input_shape = ir::GetShapeFromTsOutput(input);
+  const torch::lazy::Shape& input_shape =
+      torch_lazy_tensors::ir::GetShapeFromTsOutput(input);
   const auto& repeats = repeat->repeats();
   CHECK_GE(repeats.size(), input_shape.dim());
 
@@ -98,9 +102,10 @@ torch::lazy::Shape InferRepeat(const ir::ops::Repeat* repeat) {
 torch::lazy::Shape InferStack(const ir::ops::Stack* stack) {
   const auto& inputs = stack->operands();
   CHECK(!inputs.empty());
-  const torch::lazy::Shape& input_shape = ir::GetShapeFromTsOutput(inputs[0]);
+  const torch::lazy::Shape& input_shape =
+      torch_lazy_tensors::ir::GetShapeFromTsOutput(inputs[0]);
   for (const torch::lazy::Output& input : inputs) {
-    CHECK_EQ(ir::GetShapeFromTsOutput(input), input_shape);
+    CHECK_EQ(torch_lazy_tensors::ir::GetShapeFromTsOutput(input), input_shape);
   }
   const auto input_dimensions = input_shape.sizes();
   std::vector<int64_t> output_dimensions(input_dimensions.begin(),
@@ -117,12 +122,12 @@ torch::lazy::Shape InferShape(const torch::lazy::Node* node) {
         node, *ir::ops::ltc_generic_slice);
     const torch::lazy::Output& argument = node->operand(0);
     return torch::lazy::Shape(
-        ir::GetShapeFromTsOutput(argument).scalar_type(),
+        torch_lazy_tensors::ir::GetShapeFromTsOutput(argument).scalar_type(),
         generic_slice->sizes());
   }
   if (node->op() == *ir::ops::ltc_update_slice) {
     const torch::lazy::Output& argument = node->operand(0);
-    return ir::GetShapeFromTsOutput(argument);
+    return torch_lazy_tensors::ir::GetShapeFromTsOutput(argument);
   }
   switch (node->op().op) {
     case at::aten::expand: {
@@ -130,7 +135,8 @@ torch::lazy::Shape InferShape(const torch::lazy::Node* node) {
           node, ir::OpKind(at::aten::expand));
       const torch::lazy::Output& argument = node->operand(0);
       return torch::lazy::Shape(
-          ir::GetShapeFromTsOutput(argument).scalar_type(), expand->size());
+          torch_lazy_tensors::ir::GetShapeFromTsOutput(argument).scalar_type(),
+          expand->size());
     }
     case at::aten::convolution_overrideable: {
       return InferConvolutionOverrideable(
@@ -142,12 +148,13 @@ torch::lazy::Shape InferShape(const torch::lazy::Node* node) {
           node, ir::OpKind(at::aten::permute));
       const torch::lazy::Output& argument = node->operand(0);
       return ir::ops::Permute::MakePermuteShape(
-          ir::GetShapeFromTsOutput(argument), permute->dims());
+          torch_lazy_tensors::ir::GetShapeFromTsOutput(argument),
+          permute->dims());
     }
     // activation and unary op do not change shape
     case at::aten::pow: {
       const torch::lazy::Output& argument = node->operand(0);
-      return ir::GetShapeFromTsOutput(argument);
+      return torch_lazy_tensors::ir::GetShapeFromTsOutput(argument);
     }
     case at::aten::repeat: {
       return InferRepeat(torch::lazy::NodeCast<ir::ops::Repeat>(
@@ -162,7 +169,7 @@ torch::lazy::Shape InferShape(const torch::lazy::Node* node) {
           node, ir::OpKind(at::aten::constant_pad_nd));
       const torch::lazy::Output& argument = node->operand(0);
       const torch::lazy::Shape& argument_shape =
-          ir::GetShapeFromTsOutput(argument);
+          torch_lazy_tensors::ir::GetShapeFromTsOutput(argument);
       const auto argument_dimensions = argument_shape.sizes();
       const auto& pad = constant_pad_nd->pad();
       CHECK_EQ(argument_dimensions.size() * 2, pad.size());

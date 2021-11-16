@@ -4,6 +4,7 @@
 #include <c10/util/Half.h>
 #include <c10/util/complex.h>
 #include <torch/csrc/lazy/backend/backend_device.h>
+#include <torch/csrc/lazy/backend/backend_interface.h>
 
 #include <algorithm>
 #include <cstring>
@@ -12,7 +13,6 @@
 #include <numeric>
 #include <thread>
 
-#include "lazy_tensor_core/csrc/compiler/backend_impl_interface.h"
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensors/computation_client/multi_wait.h"
 #include "lazy_tensors/computation_client/sys_util.h"
@@ -35,7 +35,7 @@ std::vector<at::Tensor> DataHandlesToTensors(
     at::ScalarType dest_element_type) {
   std::vector<at::Tensor> tensors;
   for (const auto& handle : data_handles) {
-    tensors.push_back(compiler::getBackend()->MakeTensorFromComputationData(
+    tensors.push_back(torch::lazy::getBackend()->MakeTensorFromComputationData(
         handle, dest_element_type));
   }
   return tensors;
@@ -43,10 +43,8 @@ std::vector<at::Tensor> DataHandlesToTensors(
 
 torch::lazy::BackendDataPtr TensorToDataHandle(
     const at::Tensor& tensor, const torch::lazy::BackendDevice& device) {
-  return compiler::getBackend()
-      ->MakeComputationDataFromTensor(
-          tensor, torch::lazy::Shape(tensor.scalar_type(), tensor.sizes()),
-          device);
+  return torch::lazy::getBackend()->MakeComputationDataFromTensor(
+      tensor, torch::lazy::Shape(tensor.scalar_type(), tensor.sizes()), device);
 }
 
 std::vector<torch::lazy::BackendDataPtr> CreateTensorsData(

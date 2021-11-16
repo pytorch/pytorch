@@ -1,9 +1,9 @@
-#include "lazy_tensor_core/csrc/compiler/backend_impl_interface.h"
+#include <torch/csrc/lazy/backend/backend_interface.h>
 
 namespace torch_lazy_tensors {
 namespace compiler {
 
-BackendImplInterface* GetTSBackendImpl();
+torch::lazy::BackendImplInterface* GetTSBackendImpl();
 
 void InitTorchScriptBackend();
 

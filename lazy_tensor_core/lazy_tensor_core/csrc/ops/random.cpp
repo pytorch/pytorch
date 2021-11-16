@@ -1,6 +1,8 @@
 #include "lazy_tensor_core/csrc/ops/random.h"
+
+#include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
+
 #include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
-#include "lazy_tensor_core/csrc/ts_backend/ts_node_lowering.h"
 #include "lazy_tensors/computation_client/util.h"
 
 namespace torch_lazy_tensors {
@@ -28,7 +30,9 @@ std::string Random::ToString() const {
   return ss.str();
 }
 
-TSOpVector Random::Lower(std::shared_ptr<torch::jit::GraphFunction> function, ts_backend::TSLoweringContext* loctx) const {
+torch::lazy::TSOpVector Random::Lower(
+    std::shared_ptr<torch::jit::GraphFunction> function,
+    torch::lazy::TSLoweringContext* loctx) const {
   std::vector<torch::jit::NamedValue> arguments;
   arguments.emplace_back(loctx->GetOutputOp(operand(0)));
   if (from) {
@@ -38,7 +42,7 @@ TSOpVector Random::Lower(std::shared_ptr<torch::jit::GraphFunction> function, ts
     arguments.push_back(*to);
   }
 
-  return compiler::LowerTSBuiltin(function, op().op, arguments);
+  return torch::lazy::LowerTSBuiltin(function, op().op, arguments);
 }
 
 }  // namespace ops

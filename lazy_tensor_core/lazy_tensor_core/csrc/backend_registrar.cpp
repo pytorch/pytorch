@@ -1,7 +1,7 @@
-#include "lazy_tensor_core/csrc/compiler/backend_impl_interface.h"
+#include <torch/csrc/lazy/backend/backend_interface.h>
 
-namespace torch_lazy_tensors {
-namespace compiler {
+namespace torch {
+namespace lazy {
 
 std::atomic<const BackendImplInterface*> backend_impl_registry;
 
@@ -12,34 +12,26 @@ BackendRegistrar::BackendRegistrar(
 
 std::vector<std::string> GetCompilationDevices(
     const std::string& device, c10::ArrayRef<std::string> devices) {
-  return compiler::getBackend()
-      ->GetCompilationDevices(device, devices);
+  return getBackend()->GetCompilationDevices(device, devices);
 }
 
 at::Tensor MakeTensorFromComputationData(
-    const torch::lazy::BackendDataPtr data,
+    const BackendDataPtr data,
     c10::optional<at::ScalarType> logical_scalar_type) {
-  return compiler::getBackend()
-      ->MakeTensorFromComputationData(data, logical_scalar_type);
-}
-
-}  // namespace compiler
-
-namespace ir {
-
-std::unique_ptr<LoweringContext> LoweringContext::Create(
-    const std::string& name, torch::lazy::BackendDevice device,
-    c10::ArrayRef<torch::lazy::Node*> post_order,
-    torch::lazy::Util::EmissionMap emit_status) {
-  return compiler::getBackend()
-      ->CreateLoweringContext(name, device, post_order, emit_status);
+  return getBackend()->MakeTensorFromComputationData(data, logical_scalar_type);
 }
 
 std::unique_ptr<LoweringContext> LoweringContext::Create(
-    const std::string& name, torch::lazy::BackendDevice device) {
-  return compiler::getBackend()
-      ->CreateLoweringContext(name, device);
+    const std::string& name, BackendDevice device,
+    c10::ArrayRef<Node*> post_order, Util::EmissionMap emit_status) {
+  return getBackend()->CreateLoweringContext(name, device, post_order,
+                                             emit_status);
 }
 
-}  // namespace ir
-}  // namespace torch_lazy_tensors
+std::unique_ptr<LoweringContext> LoweringContext::Create(
+    const std::string& name, BackendDevice device) {
+  return getBackend()->CreateLoweringContext(name, device);
+}
+
+}  // namespace lazy
+}  // namespace torch
