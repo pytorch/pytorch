@@ -68,7 +68,6 @@ __inline__ __device__ void blockWelford(
   // Offset into smem for the current thread
   unsigned int smem_offset = reduction_idx * reduction_size + reduction_tid;
 
-  assert(reduction_stride != 0);
   if (read_pred) {
     shared_mem_avg[smem_offset] = in_avg;
     shared_mem_M2[smem_offset] = in_M2;
