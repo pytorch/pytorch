@@ -1063,9 +1063,6 @@ Tensor _efficientzerotensor(IntArrayRef size,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
-  // See [Note: hacky wrapper removal for TensorOptions]
-  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
-
   caffe2::TypeMeta dtype_ = scalarTypeToTypeMeta(dtype_or_default(dtype));
   Tensor tensor = detail::make_tensor<TensorImpl>(c10::DispatchKeySet({at::DispatchKey::ZeroTensor}), dtype_, device);
   // Default TensorImpl has size [0]
