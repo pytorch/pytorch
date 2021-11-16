@@ -240,8 +240,9 @@ def vjp(f: Callable, *primals):
                                    "floating-point or complex Tensors, got Tensor "
                                    f"with dtype {primal_out.dtype}")
 
-        def wrapper(cotangents, *, retain_graph=True):
-            create_graph = torch.is_grad_enabled()
+        def wrapper(cotangents, retain_graph=True, create_graph=None):
+            if create_graph is None:
+                create_graph = torch.is_grad_enabled()
             flat_cotangents, cotangents_spec = tree_flatten(cotangents)
             if primals_out_spec != cotangents_spec:
                 raise RuntimeError(
@@ -632,7 +633,7 @@ def jacfwd(f, argnums=0):
         return tree_unflatten(jac_outs_ins, spec)
     return wrapper_fn
 
-def grad_and_value(func: Callable, argnums: argnums_t = 0, *, has_aux: bool = False) -> Callable:
+def grad_and_value(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Callable:
     """
     Returns a function to compute a tuple of the gradient and primal, or
     forward, computation.
@@ -705,7 +706,7 @@ def grad_and_value(func: Callable, argnums: argnums_t = 0, *, has_aux: bool = Fa
         return grad_input, output
     return wrapper
 
-def grad(func: Callable, argnums: argnums_t = 0, *, has_aux: bool = False) -> Callable:
+def grad(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Callable:
     """``grad`` operator helps computing gradients of :attr:`func` with respect to the
     input(s) specified by :attr:`argnums`. This operator can be nested to
     compute higher-order gradients.
