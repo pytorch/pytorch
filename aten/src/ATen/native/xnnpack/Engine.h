@@ -90,6 +90,10 @@ Tensor channel_shuffle(
 // Activations
 //
 bool use_hardswish(const Tensor& input);
+
+// The first two are needed for the Vulkan test suite.
+Tensor hardswish(const Tensor& input);
+const Tensor& hardswish_(Tensor& input);
 const Tensor& hardswish_out(const Tensor& input, const Tensor& result);
 
 } // namespace xnnpack

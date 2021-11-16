@@ -69,6 +69,20 @@ const Tensor& hardswish_out(const Tensor& input, const Tensor& result) {
   return result;
 }
 
+const Tensor& hardswish_(const Tensor& input) {
+  return hardswish_out(input, input);
+}
+
+Tensor hardswish(const Tensor& input) {
+  Tensor output = mobile::empty_with_tail_padding(
+      input.sizes(),
+      input.options().dtype(),
+      input.suggest_memory_format(),
+      input.names());
+  hardswish_out(input, output);
+  return output;
+}
+
 } // namespace xnnpack
 } // namespace native
 } // namespace at
