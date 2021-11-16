@@ -1348,17 +1348,18 @@ def check_if_enable(test: unittest.TestCase):
 class RelaxedBooleanPair(BooleanPair):
     """Pair for boolean-like inputs.
 
-    In contrast to the builtin :class:`BooleanPair`, this class also supports one input being a 0d tensor-like.
+    In contrast to the builtin :class:`BooleanPair`, this class also supports one input being an :class:`int` or a
+    0d tensor-like.
     """
     def _process_inputs(self, actual, expected, *, id):
         if not (
             (
                 isinstance(actual, self._supported_types)
-                and isinstance(expected, (*self._supported_types, torch.Tensor, np.ndarray))
+                and isinstance(expected, (*self._supported_types, int, torch.Tensor, np.ndarray))
             )
             or (
                 isinstance(expected, self._supported_types)
-                and isinstance(actual, (*self._supported_types, torch.Tensor, np.ndarray))
+                and isinstance(actual, (*self._supported_types, int, torch.Tensor, np.ndarray))
             )
         ):
             raise UnsupportedInputs()
@@ -1366,7 +1367,9 @@ class RelaxedBooleanPair(BooleanPair):
         return [self._to_bool(input, id=id) for input in (actual, expected)]
 
     def _to_bool(self, bool_like, *, id):
-        if isinstance(bool_like, (torch.Tensor, np.ndarray)):
+        if isinstance(bool_like, int):
+            return bool(bool_like)
+        elif isinstance(bool_like, (torch.Tensor, np.ndarray)):
             numel = bool_like.numel() if isinstance(bool_like, torch.Tensor) else bool_like.size
             if numel > 1:
                 raise ErrorMeta(
@@ -1964,13 +1967,13 @@ class TestCase(expecttest.TestCase):
         # Hide this function from `pytest`'s traceback
         __tracebackhide__ = True
 
+        # numpy's dtypes are a superset of what PyTorch supports. In case we encouter an unsupported dtype, we fall
+        # back to an elementwise comparison. Note that this has to happen here and not for example in
+        # `TensorOrArrayPair`, since at that stage we can no longer split the array into its elements and perform
+        # multiple comparisons.
         if any(
             isinstance(input, np.ndarray) and not has_corresponding_torch_dtype(input.dtype) for input in (x, y)
         ):
-            # numpy's dtypes are a superset of what PyTorch supports. In case we encouter an unsupported dtype, we fall
-            # back to an elementwise comparison. Note that this has to happen here and not for example in
-            # `TensorOrArrayPair`, since at that stage we can no longer split the array into its elements and perform
-            # multiple comparisons.
             def to_list(input):
                 return input.tolist() if isinstance(input, (torch.Tensor, np.ndarray)) else list(input)
 
