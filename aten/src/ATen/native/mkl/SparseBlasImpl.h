@@ -15,6 +15,12 @@ void addmv_out_sparse_csr(
     const Scalar& alpha,
     const Tensor& result);
 
+void add_out_sparse_csr(
+    const Tensor& mat1,
+    const Tensor& mat2,
+    const Scalar& alpha,
+    const Tensor& result);
+
 } // namespace mkl
 } // namespace impl
 } // namespace sparse

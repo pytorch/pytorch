@@ -21,31 +21,6 @@ namespace {
 
 }
 
-const char* _mklGetErrorString(sparse_status_t error) {
-  if (error == SPARSE_STATUS_SUCCESS) {
-    return "SPARSE_STATUS_SUCCESS";
-  }
-  if (error == SPARSE_STATUS_NOT_INITIALIZED) {
-    return "SPARSE_STATUS_NOT_INITIALIZED";
-  }
-  if (error == SPARSE_STATUS_ALLOC_FAILED) {
-    return "SPARSE_STATUS_ALLOC_FAILED";
-  }
-  if (error == SPARSE_STATUS_INVALID_VALUE) {
-    return "SPARSE_STATUS_INVALID_VALUE";
-  }
-  if (error == SPARSE_STATUS_EXECUTION_FAILED) {
-    return "SPARSE_STATUS_EXECUTION_FAILED";
-  }
-  if (error == SPARSE_STATUS_INTERNAL_ERROR) {
-    return "SPARSE_STATUS_INTERNAL_ERROR";
-  }
-  if (error == SPARSE_STATUS_NOT_SUPPORTED) {
-    return "SPARSE_STATUS_NOT_SUPPORTED";
-  }
-  return "<unknown>";
-}
-
 // There are link errors when compiling with create_csr functions on Windows.
 // See https://github.com/pytorch/pytorch/pull/50937#issuecomment-779272492
 #if !defined(_WIN32)
@@ -118,6 +93,64 @@ void mv<c10::complex<double>>(MKL_SPARSE_MV_ARGTYPES(c10::complex<double>)) {
       reinterpret_cast<const MKL_Complex16*>(x),
       to_mkl_complex<double, MKL_Complex16>(beta),
       reinterpret_cast<MKL_Complex16*>(y)));
+}
+
+#if !defined(_WIN32)
+template <>
+void add<float>(MKL_SPARSE_ADD_ARGTYPES(float)) {
+  TORCH_MKLSPARSE_CHECK(mkl_sparse_s_add(operation, A, alpha, B, C));
+}
+template <>
+void add<double>(MKL_SPARSE_ADD_ARGTYPES(double)) {
+  TORCH_MKLSPARSE_CHECK(mkl_sparse_d_add(operation, A, alpha, B, C));
+}
+template <>
+void add<c10::complex<float>>(MKL_SPARSE_ADD_ARGTYPES(c10::complex<float>)) {
+  TORCH_MKLSPARSE_CHECK(mkl_sparse_c_add(
+      operation, A, to_mkl_complex<float, MKL_Complex8>(alpha), B, C));
+}
+template <>
+void add<c10::complex<double>>(MKL_SPARSE_ADD_ARGTYPES(c10::complex<double>)) {
+  TORCH_MKLSPARSE_CHECK(mkl_sparse_z_add(
+      operation, A, to_mkl_complex<double, MKL_Complex16>(alpha), B, C));
+}
+#endif // !defined(_WIN32)
+
+template <>
+void export_csr<float>(MKL_SPARSE_EXPORT_CSR_ARGTYPES(float)) {
+  TORCH_MKLSPARSE_CHECK(mkl_sparse_s_export_csr(
+      source, indexing, rows, cols, rows_start, rows_end, col_indx, values));
+}
+template <>
+void export_csr<double>(MKL_SPARSE_EXPORT_CSR_ARGTYPES(double)) {
+  TORCH_MKLSPARSE_CHECK(mkl_sparse_d_export_csr(
+      source, indexing, rows, cols, rows_start, rows_end, col_indx, values));
+}
+template <>
+void export_csr<c10::complex<float>>(
+    MKL_SPARSE_EXPORT_CSR_ARGTYPES(c10::complex<float>)) {
+  TORCH_MKLSPARSE_CHECK(mkl_sparse_c_export_csr(
+      source,
+      indexing,
+      rows,
+      cols,
+      rows_start,
+      rows_end,
+      col_indx,
+      reinterpret_cast<MKL_Complex8**>(values)));
+}
+template <>
+void export_csr<c10::complex<double>>(
+    MKL_SPARSE_EXPORT_CSR_ARGTYPES(c10::complex<double>)) {
+  TORCH_MKLSPARSE_CHECK(mkl_sparse_z_export_csr(
+      source,
+      indexing,
+      rows,
+      cols,
+      rows_start,
+      rows_end,
+      col_indx,
+      reinterpret_cast<MKL_Complex16**>(values)));
 }
 
 } // namespace sparse
