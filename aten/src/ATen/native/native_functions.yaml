@@ -2386,7 +2386,8 @@
 
 - func: kl_div_backward(Tensor grad_output, Tensor self, Tensor target, int reduction=Mean, *, bool log_target=False) -> Tensor
   dispatch:
-    CompositeExplicitAutograd: kl_div_backward_aux
+    CPU: kl_div_backward_cpu
+    CUDA: kl_div_backward_cuda
 
 - func: kron(Tensor self, Tensor other) -> Tensor
   variants: function, method
