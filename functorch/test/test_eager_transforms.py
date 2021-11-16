@@ -4,7 +4,9 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import (
+    TestCase, run_tests, parametrize, subtest
+)
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -766,50 +768,76 @@ class TestVmapOfGrad(TestCase):
         output.backward(v)
         self.assertEqual(result, x.grad)
 
+jacrev_and_jacfwd = parametrize("jacapi", [subtest(jacrev, name='jacrev'), subtest(jacfwd, name='jacfwd')])
 
-class TestJacrev(TestCase):
-    def test_simple(self, device):
+FIXME_jacrev_only = parametrize("jacapi", [subtest(jacrev, name='jacrev')])
+
+class TestJac(TestCase):
+    @jacrev_and_jacfwd
+    def test_simple(self, device, jacapi):
         x = torch.randn(3, device=device)
-        y = jacrev(torch.sin)(x)
+        y = jacapi(torch.sin)(x)
         expected = torch.diagflat(x.cos())
         assert torch.allclose(y, expected)
 
-    def test_simple_not_flat(self, device):
+    @jacrev_and_jacfwd
+    def test_simple_not_flat(self, device, jacapi):
         x = torch.randn(2, 3, device=device)
-        y = jacrev(torch.sin)(x)
+        y = jacapi(torch.sin)(x)
         expected = torch.diagflat(x.view(-1).cos())
         expected = expected.view(2, 3, 2, 3)
         assert torch.allclose(y, expected)
 
-    def test_vmap_on_jacrev_simple(self, device):
+    @FIXME_jacrev_only
+    def test_diff_numel(self, device, jacapi):
+        x = torch.randn(2, 4, device=device)
+
+        # Tensor[2, 4] -> Tensor[3, 1]
+        def f(x):
+            return x[0, 1:].unsqueeze(-1)
+
+        y = jacapi(f)(x)
+        self.assertEqual(y.shape, (3, 1, 2, 4))
+
+        expected = x.new_zeros(3, 1, 2, 4)
+        expected[0, 0, 0, 1] = 1
+        expected[1, 0, 0, 2] = 1
+        expected[2, 0, 0, 3] = 1
+        self.assertEqual(y, expected)
+
+    @FIXME_jacrev_only
+    def test_vmap_on_jac_simple(self, device, jacapi):
         x = torch.randn(2, 3, device=device)
-        y = vmap(jacrev(torch.sin))(x)
+        y = vmap(jacapi(torch.sin))(x)
         expected = torch.stack([torch.diagflat(x[i].cos()) for i in range(2)])
         assert torch.allclose(y, expected)
 
-    def test_hessian_simple(self, device):
+    @FIXME_jacrev_only
+    def test_hessian_simple(self, device, jacapi):
         def foo(x):
             return x.sin().sum()
 
         x = torch.randn(3, device=device)
-        y = jacrev(jacrev(foo))(x)
+        y = jacapi(jacapi(foo))(x)
         expected = torch.diagflat(-x.sin())
         assert torch.allclose(y, expected)
 
-    def test_multiple_args(self, device):
+    @jacrev_and_jacfwd
+    def test_multiple_args(self, device, jacapi):
         x = torch.randn(3, device=device)
         y = torch.randn(3, device=device)
-        z = jacrev(torch.multiply, argnums=1)(x, y)
+        z = jacapi(torch.multiply, argnums=1)(x, y)
         expected = torch.diagflat(x)
         assert torch.allclose(z, expected)
 
-    def test_multiple_outputs_multiple_argnums(self, device):
+    @jacrev_and_jacfwd
+    def test_multiple_outputs_multiple_argnums(self, device, jacapi):
         def f(x, y):
             return 2 * x + 3 * y, 4 * x + 5 * y
 
         x = torch.randn(3, device=device)
         y = torch.randn(3, device=device)
-        z = jacrev(f, argnums=(0, 1))(x, y)
+        z = jacapi(f, argnums=(0, 1))(x, y)
         expected_out0_x = torch.diagflat(torch.full_like(x, 2))
         expected_out0_y = torch.diagflat(torch.full_like(y, 3))
         expected_out1_x = torch.diagflat(torch.full_like(x, 4))
@@ -824,7 +852,8 @@ class TestJacrev(TestCase):
         self.assertEqual(z[1][0], expected_out1_x)
         self.assertEqual(z[1][1], expected_out1_y)
 
-    def test_multiple_outputs_single_argnums(self, device):
+    @jacrev_and_jacfwd
+    def test_multiple_outputs_single_argnums(self, device, jacapi):
         def f(x, y):
             return 2 * x + 3 * y, 4 * x + 5 * y
 
@@ -833,18 +862,19 @@ class TestJacrev(TestCase):
         expected_out0_x = torch.diagflat(torch.full_like(x, 2))
         expected_out1_x = torch.diagflat(torch.full_like(x, 4))
 
-        z = jacrev(f, argnums=0)(x, y)
+        z = jacapi(f, argnums=0)(x, y)
         self.assertEqual(len(z), 2)
         self.assertTrue(isinstance(z, tuple))
         self.assertEqual(z, (expected_out0_x, expected_out1_x))
 
-        z = jacrev(f, argnums=(0,))(x, y)
+        z = jacapi(f, argnums=(0,))(x, y)
         self.assertEqual(len(z), 2)
         self.assertTrue(isinstance(z, tuple))
         self.assertTrue(isinstance(z[0], tuple))
         self.assertEqual(z, ((expected_out0_x,), (expected_out1_x,)))
 
-    def test_outputs_should_be_flat_tuple_of_tensors(self, device):
+    @jacrev_and_jacfwd
+    def test_outputs_should_be_flat_tuple_of_tensors(self, device, jacapi):
         def f(x):
             return [2 * x, 3 * x]
 
@@ -852,11 +882,11 @@ class TestJacrev(TestCase):
             return 2 * x, 1
 
         x = torch.randn(3, device=device)
-        with self.assertRaisesRegex(RuntimeError, "only return Tensors"):
-            result = jacrev(f)(x)
+        with self.assertRaisesRegex(RuntimeError, "Tensors"):
+            result = jacapi(f)(x)
 
-        with self.assertRaisesRegex(RuntimeError, "only return Tensors"):
-            result = jacrev(f)(x)
+        with self.assertRaisesRegex(RuntimeError, "Tensors"):
+            result = jacapi(f)(x)
 
     @unittest.expectedFailure
     def test_multiple_outputs_pytree(self, device):
@@ -879,20 +909,22 @@ class TestJacrev(TestCase):
         self.assertTrue(isinstance(z['right'], dict))
         self.assertEqual(z, expected)
 
-    def test_argnums_tuple(self, device):
+    @jacrev_and_jacfwd
+    def test_argnums_tuple(self, device, jacapi):
         x = torch.randn(3, device=device)
         y = torch.randn(3, device=device)
-        z = jacrev(torch.multiply, argnums=(0, 1))(x, y)
+        z = jacapi(torch.multiply, argnums=(0, 1))(x, y)
         expected0 = torch.diagflat(y)
         expected1 = torch.diagflat(x)
         assert len(z) == 2
         assert torch.allclose(z[0], expected0)
         assert torch.allclose(z[1], expected1)
 
-    def test_argnums_effect_on_return(self, device):
+    @jacrev_and_jacfwd
+    def test_argnums_effect_on_return(self, device, jacapi):
         x = torch.randn(3, device=device)
         y = torch.randn(3, device=device)
-        z = jacrev(torch.multiply, argnums=(0,))(x, y)
+        z = jacapi(torch.multiply, argnums=(0,))(x, y)
         expected0 = torch.diagflat(y)
         assert isinstance(z, tuple)
         assert len(z) == 1
@@ -900,47 +932,53 @@ class TestJacrev(TestCase):
 
         x = torch.randn(3, device=device)
         y = torch.randn(3, device=device)
-        z = jacrev(torch.multiply, argnums=0)(x, y)
+        z = jacapi(torch.multiply, argnums=0)(x, y)
         expected0 = torch.diagflat(y)
         assert isinstance(z, torch.Tensor)
         assert torch.allclose(z, expected0)
 
-    def test_argnums_defaults_to_zero(self, device):
+    @jacrev_and_jacfwd
+    def test_argnums_defaults_to_zero(self, device, jacapi):
         def f(x, y):
             return x * 2 + y * 3 
 
         x = torch.randn(3, device=device)
         y = torch.randn(3, device=device)
-        z = jacrev(f)(x, y)
+        z = jacapi(f)(x, y)
         expected = torch.diagflat(torch.full_like(x, 2))
         self.assertEqual(z, expected)
 
-    def test_empty_argnums(self, device):
+    @jacrev_and_jacfwd
+    def test_empty_argnums(self, device, jacapi):
         x = torch.randn(3, device=device)
         with self.assertRaisesRegex(RuntimeError, "must be non-empty"):
-            z = jacrev(torch.sin, argnums=())(x)
+            z = jacapi(torch.sin, argnums=())(x)
 
-    def test_out_of_bounds_argnums(self, device):
+    @jacrev_and_jacfwd
+    def test_out_of_bounds_argnums(self, device, jacapi):
         x = torch.randn(3, device=device)
         with self.assertRaisesRegex(RuntimeError, "only 1 positional inputs"):
-            z = jacrev(torch.sin, argnums=2)(x)
+            z = jacapi(torch.sin, argnums=2)(x)
 
-    def test_negative_argnums(self, device):
+    @jacrev_and_jacfwd
+    def test_negative_argnums(self, device, jacapi):
         x = torch.randn(3, device=device)
         with self.assertRaisesRegex(RuntimeError, "only 1 positional inputs"):
-            z = jacrev(torch.sin, argnums=-1)(x)
+            z = jacapi(torch.sin, argnums=-1)(x)
 
-    def test_repeated_argnums(self, device):
+    @jacrev_and_jacfwd
+    def test_repeated_argnums(self, device, jacapi):
         x = torch.randn(3, device=device)
         with self.assertRaisesRegex(RuntimeError, "must be unique"):
-            z = jacrev(torch.sin, argnums=(0, 0))(x)
+            z = jacapi(torch.sin, argnums=(0, 0))(x)
 
-    def test_float_argnums(self, device):
+    @jacrev_and_jacfwd
+    def test_float_argnums(self, device, jacapi):
         x = torch.randn(3, device=device)
         with self.assertRaisesRegex(RuntimeError, "must be int or Tuple"):
-            z = jacrev(torch.sin, argnums=0.0)(x)
+            z = jacapi(torch.sin, argnums=0.0)(x)
         with self.assertRaisesRegex(RuntimeError, "must be int"):
-            z = jacrev(torch.multiply, argnums=(1, 0.0))(x, x)
+            z = jacapi(torch.multiply, argnums=(1, 0.0))(x, x)
 
 class TestJvp(TestCase):
     def test_simple(self, device):
@@ -1503,7 +1541,7 @@ instantiate_device_type_tests(
     only_for=only_for,
 )
 instantiate_device_type_tests(
-    TestJacrev,
+    TestJac,
     globals(),
     only_for=only_for,
 )
