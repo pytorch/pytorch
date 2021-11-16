@@ -12,6 +12,7 @@ from torch.distributed._sharding_spec._internals import (
 )
 from torch.distributed.nn.functional import (
     all_to_all,
+    reduce_scatter,
 )
 
 
@@ -231,9 +232,7 @@ def _handle_row_wise_sharding(input, world_size, weight, rank, local_shard_t, bi
         results.append(inp.t().contiguous().matmul(local_shard_t))
 
     # Gather all the results appropriately.
-    output_tensor_list = [torch.empty_like(results[rank]) for _ in range(world_size)]
-    all_to_all(results, group=pg, out_tensor_list=output_tensor_list)
-    local_result = torch.stack(output_tensor_list, dim=0).sum(dim=0).contiguous()
+    local_result = reduce_scatter(torch.empty_like(results[rank]), results, group=pg)
 
     # Return the appropriate local result.
     return local_result + bias

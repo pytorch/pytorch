@@ -123,7 +123,7 @@ def _result_distribute_with_col_rearrange(
     # Compute output splits
     split_size = get_split_size(sharding_dim_size, world_size)
     output_split_sizes = [0] * world_size
-    output_tensor_list = [torch.Tensor] * world_size
+    output_tensor_list = [None] * world_size
     for idx, placement in enumerate(weight._sharding_spec.placements):
         output_split_size = get_chunked_dim_size(sharding_dim_size, split_size, idx)
         output_split_sizes[placement.rank()] = output_split_size
@@ -135,8 +135,9 @@ def _result_distribute_with_col_rearrange(
         )
 
     # distribute the outputs using all2all.
-    output_tensor_list = all_to_all(results, group=pg, out_tensor_list=output_tensor_list)
-    output = torch.cat(output_tensor_list)
+    output = torch.cat(
+        all_to_all(results, group=pg, out_tensor_list=output_tensor_list)
+    )
 
     # Check if we need to rearrange columns appropriately for output.
     rearrange_columns = any(

@@ -358,9 +358,16 @@ class TORCH_API StaticRuntime {
 
   bool isManagedOutputTensor(const IValue& ivalue);
 
+  void disableManageOutputTensors();
+
  private:
   template <typename IValueList>
   c10::IValue run_impl(
+      IValueList&& args,
+      const std::unordered_map<std::string, c10::IValue>& kwargs);
+
+  template <typename IValueList>
+  c10::IValue run_impl_record_functions(
       IValueList&& args,
       const std::unordered_map<std::string, c10::IValue>& kwargs);
 
@@ -400,6 +407,7 @@ class TORCH_API StaticRuntime {
   // Otherwise, the memory used by activations is cached inside the static
   // runtime.
   const StaticModule& static_module_;
+  bool manage_output_tensors_enabled_ = false;
   std::unique_ptr<MemoryPlanner> planner_;
   std::vector<IValue> inputs_;
   std::vector<IValue*> outputs_;
@@ -498,7 +506,7 @@ class TORCH_API ProcessedNode {
     return c10::ArrayRef<const IValue*>(inputs_.get(), inputs_size_);
   }
 
-  std::vector<IValue> clone_inputs() const;
+  std::vector<IValue> inputs_ivalue_vec() const;
 
   bool has_out_variant() const {
     return fn_.kind == FunctionKind::kOutVariant;

@@ -1,6 +1,6 @@
 import torch
-from torch.autograd import Function
 import torch.distributed as dist
+from torch.autograd import Function
 
 
 def broadcast(tensor, src, group=dist.group.WORLD):
@@ -77,6 +77,28 @@ def reduce(tensor, dst, op=dist.ReduceOp.SUM, group=dist.group.WORLD):
 
     """
     return _Reduce.apply(dst, op, group, tensor)
+
+
+def reduce_scatter(tensor, input_tensors, op=dist.ReduceOp.SUM, group=dist.group.WORLD):
+    """
+    Reduces the tensor data across all machines, then scatters a list of
+        tensors to all processes in a group.
+
+    Each process is going to receive its corresponding final result.
+
+    Arguments:
+        tensor (Tensor): Output of the collective.
+        tensors (list[Tensor]): List of tensors to be aggregated and scatter one per rank.
+        op (optional): One of the values from
+            ``torch.distributed.ReduceOp``
+            enum.  Specifies an operation used for element-wise reductions.
+        group (ProcessGroup, optional): The process group to work on.
+
+    Returns:
+        Tensor: Output of the collective.
+
+    """
+    return _Reduce_Scatter.apply(op, group, tensor, *input_tensors)
 
 
 def all_gather(tensor, group=dist.group.WORLD):
@@ -210,6 +232,18 @@ class _Reduce(Function):
         return (None, None, None) + (_Broadcast.apply(ctx.src, ctx.group, grad_output),)
 
 
+class _Reduce_Scatter(Function):
+    @staticmethod
+    def forward(ctx, op, group, tensor, *input_tensor_list):
+        ctx.group = group
+        dist.reduce_scatter(tensor, list(input_tensor_list), op=op, group=group)
+        return tensor
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        return (None, None, None) + _AllGather.apply(ctx.group, grad_output.contiguous())
+
+
 class _AllGather(Function):
     @staticmethod
     def forward(ctx, group, tensor):
@@ -232,11 +266,13 @@ class _AlltoAll(Function):
     def forward(ctx, group, out_tensor_list, *tensors):
         ctx.group = group
         ctx.input_tensor_list = [
-            torch.empty_like(tensors[i]) for i in range(dist.get_world_size(group=group))
+            torch.empty_like(tensors[i])
+            for i in range(dist.get_world_size(group=group))
         ]
         if out_tensor_list is None:
             out_tensor_list = [
-                torch.empty_like(tensors[i]) for i in range(dist.get_world_size(group=group))
+                torch.empty_like(tensors[i])
+                for i in range(dist.get_world_size(group=group))
             ]
         else:
             out_tensor_list = [tensor.contiguous() for tensor in out_tensor_list]
@@ -250,12 +286,18 @@ class _AlltoAll(Function):
                     to_send = list(tensors)
                 dist.scatter(out_tensor_list[i], to_send, i, group=group)
         else:
-            dist.all_to_all(out_tensor_list, list(tensor.contiguous() for tensor in tensors), group=group)
+            dist.all_to_all(
+                out_tensor_list,
+                list(tensor.contiguous() for tensor in tensors),
+                group=group,
+            )
         return tuple(out_tensor_list)
 
     @staticmethod
     def backward(ctx, *grad_outputs):
-        return (None, None) + _AlltoAll.apply(ctx.group, ctx.input_tensor_list, *grad_outputs)
+        return (None, None) + _AlltoAll.apply(
+            ctx.group, ctx.input_tensor_list, *grad_outputs
+        )
 
 
 class _AllReduce(Function):
