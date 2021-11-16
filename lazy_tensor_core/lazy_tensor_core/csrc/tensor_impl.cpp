@@ -60,17 +60,22 @@ C10_REGISTER_GUARD_IMPL(Lazy, LTCGuardImpl);
 
 }  // namespace
 
-LTCTensorImpl::LTCTensorImpl(LazyTensor tensor)
+LTCTensorImpl::LTCTensorImpl(const LazyTensor& tensor)
+    : LTCTensorImpl(LazyTensor(tensor)) {}
+
+LTCTensorImpl::LTCTensorImpl(LazyTensor&& tensor)
     : c10::TensorImpl(c10::DispatchKeySet{c10::DispatchKey::Lazy,
                                           c10::DispatchKey::AutogradLazy},
-                      GetTypeMeta(tensor),
+                      c10::scalarTypeToTypeMeta(tensor.dtype()),
                       bridge::LtcDeviceToAtenDevice(tensor.GetDevice())),
       tensor_(std::move(tensor)) {
+  // This is a temporary fix for a PyTorch core issue,
+  // according to https://github.com/pytorch/xla/pull/2682.
   is_non_overlapping_and_dense_ = false;
 }
 
-void LTCTensorImpl::set_tensor(LazyTensor lazy_tensor) {
-  tensor_ = std::move(lazy_tensor);
+void LTCTensorImpl::set_tensor(const LazyTensor& lazy_tensor) {
+  tensor_ = lazy_tensor;
   generation_ = 0;
 }
 
@@ -78,9 +83,6 @@ c10::intrusive_ptr<c10::TensorImpl> LTCTensorImpl::shallow_copy_and_detach(
     const c10::VariableVersion& version_counter,
     bool allow_tensor_metadata_change) const {
   auto impl = c10::make_intrusive<LTCTensorImpl>(tensor_);
-  if (is_interop_view_) {
-    impl->MarkAsInteropView();
-  }
   copy_tensor_metadata(
       /*src_impl=*/this,
       /*dest_impl=*/impl.get(),
@@ -93,9 +95,6 @@ c10::intrusive_ptr<c10::TensorImpl> LTCTensorImpl::shallow_copy_and_detach(
     c10::VariableVersion&& version_counter,
     bool allow_tensor_metadata_change) const {
   auto impl = c10::make_intrusive<LTCTensorImpl>(tensor_);
-  if (is_interop_view_) {
-    impl->MarkAsInteropView();
-  }
   copy_tensor_metadata(
       /*src_impl=*/this,
       /*dest_impl=*/impl.get(),
@@ -107,6 +106,7 @@ c10::intrusive_ptr<c10::TensorImpl> LTCTensorImpl::shallow_copy_and_detach(
 void LTCTensorImpl::shallow_copy_from(
     const c10::intrusive_ptr<TensorImpl>& impl) {
   LTCTensorImpl* ltc_impl = dynamic_cast<LTCTensorImpl*>(impl.get());
+  TORCH_INTERNAL_ASSERT(ltc_impl);
   copy_tensor_metadata(
       /*src_impl=*/ltc_impl,
       /*dest_impl=*/this,
@@ -117,21 +117,21 @@ void LTCTensorImpl::shallow_copy_from(
 }
 
 at::IntArrayRef LTCTensorImpl::sizes() const {
-  const_cast<LTCTensorImpl*>(this)->SetupSizeProperties();
+  const_cast<LTCTensorImpl*>(this)->setup_size_properties();
   return c10::TensorImpl::sizes();
 }
 
 int64_t LTCTensorImpl::dim() const {
-  const_cast<LTCTensorImpl*>(this)->SetupSizeProperties();
+  const_cast<LTCTensorImpl*>(this)->setup_size_properties();
   return c10::TensorImpl::dim();
 }
 
 int64_t LTCTensorImpl::numel() const {
-  const_cast<LTCTensorImpl*>(this)->SetupSizeProperties();
+  const_cast<LTCTensorImpl*>(this)->setup_size_properties();
   return c10::TensorImpl::numel();
 }
 
-bool LTCTensorImpl::is_contiguous(at::MemoryFormat memory_format) const {
+bool LTCTensorImpl::is_contiguous(c10::MemoryFormat memory_format) const {
   if (tensor_.CurrentTensorData()) {
     return tensor_.CurrentTensorData()->is_contiguous();
   }
@@ -141,33 +141,26 @@ bool LTCTensorImpl::is_contiguous(at::MemoryFormat memory_format) const {
 }
 
 int64_t LTCTensorImpl::size(int64_t d) const {
-  const_cast<LTCTensorImpl*>(this)->SetupSizeProperties();
+  const_cast<LTCTensorImpl*>(this)->setup_size_properties();
   return c10::TensorImpl::size(d);
 }
 
-void LTCTensorImpl::SetupSizeProperties() {
+void LTCTensorImpl::setup_size_properties() {
   size_t generation = tensor_.generation();
   if (generation != generation_) {
     // Fill up the basic dimension data members which the base class
     // implementation uses in its APIs.
     auto shape = tensor_.shape();
-    c10::SmallVector<int64_t, 5> updated_sizes;
+    // We can't call refresh_numel() given we override sizes() too.
+    // TODO(alanwaketan): Replace the following with Shape.numel().
     numel_ = 1;
     for (auto dim : shape.get().sizes()) {
-      updated_sizes.push_back(dim);
       numel_ *= dim;
     }
-    sizes_and_strides_.set_sizes(updated_sizes);
+    sizes_and_strides_.set_sizes(shape.get().sizes());
+    // We can't call empty_tensor_restride(c10::MemoryFormat::Contiguous) given we override sizes() too.
     std::vector<int64_t> updated_strides;
-    if (is_interop_view_ && tensor_.CurrentTensorData()) {
-      at::IntArrayRef strides = tensor_.CurrentTensorData()->strides();
-      updated_strides.assign(strides.begin(), strides.end());
-    } else {
-      // TODO(whc) confirmed this path is still used (fails tests without it)
-      // but I wonder if we can use some c10 utility to set the default strides
-      // instead?
-      updated_strides = ComputeArrayStrides(shape.get().sizes());
-    }
+    updated_strides = ComputeArrayStrides(shape.get().sizes());
     for (int i = 0; i < updated_strides.size(); i++) {
       sizes_and_strides_.stride_at_unchecked(i) = updated_strides[i];
     }
@@ -175,18 +168,8 @@ void LTCTensorImpl::SetupSizeProperties() {
   }
 }
 
-caffe2::TypeMeta LTCTensorImpl::GetTypeMeta(const LazyTensor& tensor) {
-  return c10::scalarTypeToTypeMeta(tensor.dtype());
-}
-
-void LTCTensorImpl::AtenInitialize() {
-  // ATEN specific initialization calls placed below.
-}
-
 const at::Storage& LTCTensorImpl::storage() const {
   LOG(ERROR) << "Lazy tensors do not have storage";
 }
-
-bool LTCTensorImpl::has_storage() const { return false; }
 
 }  // namespace torch_lazy_tensors

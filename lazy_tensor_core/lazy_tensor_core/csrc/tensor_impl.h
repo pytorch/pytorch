@@ -10,13 +10,14 @@ namespace torch_lazy_tensors {
 
 // Tensor implementation class used to be fed to the at::Tensor.
 // Its scope is just to handle an LazyTensor.
-class LTCTensorImpl : public c10::TensorImpl {
+class LTCTensorImpl final : public c10::TensorImpl {
  public:
-  explicit LTCTensorImpl(LazyTensor tensor);
+  explicit LTCTensorImpl(const LazyTensor& tensor);
+  explicit LTCTensorImpl(LazyTensor&& tensor);
 
   LazyTensor& tensor() { return tensor_; }
 
-  void set_tensor(LazyTensor lazy_tensor);
+  void set_tensor(const LazyTensor& lazy_tensor);
 
   void force_refresh_sizes() { generation_ = 0; }
 
@@ -42,22 +43,13 @@ class LTCTensorImpl : public c10::TensorImpl {
 
   const at::Storage& storage() const override;
 
-  bool has_storage() const override;
-
-  void MarkAsInteropView() { is_interop_view_ = true; }
-
-  bool IsInteropView() const { return is_interop_view_; }
-
-  static void AtenInitialize();
+  bool has_storage() const override { return false; }
 
  private:
-  void SetupSizeProperties();
-
-  static caffe2::TypeMeta GetTypeMeta(const LazyTensor& tensor);
+  void setup_size_properties();
 
   LazyTensor tensor_;
-  size_t generation_ = 0;
-  bool is_interop_view_ = false;
+  size_t generation_ {0};
 };
 
 }  // namespace torch_lazy_tensors
