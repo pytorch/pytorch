@@ -360,6 +360,8 @@ core_sources_full = core_sources_full_mobile + [
 ]
 
 lazy_tensor_core_sources = [
+    "torch/csrc/lazy/backend/backend_device.cpp",
+    "torch/csrc/lazy/backend/lowering_context.cpp",
     "torch/csrc/lazy/core/config.cpp",
     "torch/csrc/lazy/core/hash.cpp",
     "torch/csrc/lazy/core/ir.cpp",
@@ -367,6 +369,8 @@ lazy_tensor_core_sources = [
     "torch/csrc/lazy/core/ir_util.cpp",
     "torch/csrc/lazy/core/permutation_util.cpp",
     "torch/csrc/lazy/core/shape.cpp",
+    "torch/csrc/lazy/ts_backend/config.cpp",
+    "torch/csrc/lazy/ts_backend/ts_node.cpp",
 ]
 
 libtorch_core_sources = sorted(
@@ -745,6 +749,7 @@ libtorch_python_core_sources = [
     "torch/csrc/api/src/python/init.cpp",
     "torch/csrc/autograd/functions/init.cpp",
     "torch/csrc/autograd/init.cpp",
+    "torch/csrc/autograd/profiler_python.cpp",
     "torch/csrc/autograd/python_anomaly_mode.cpp",
     "torch/csrc/autograd/python_saved_variable_hooks.cpp",
     "torch/csrc/autograd/python_mode.cpp",
@@ -1055,6 +1060,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/quantized/cpu/qhardswish.cpp",
     "aten/src/ATen/native/quantized/cpu/qlinear.cpp",
     "aten/src/ATen/native/quantized/cpu/qlinear_dynamic.cpp",
+    "aten/src/ATen/native/quantized/cpu/qconv_dynamic.cpp",
     "aten/src/ATen/native/quantized/cpu/qlinear_prepack.cpp",
     "aten/src/ATen/native/quantized/cpu/qlinear_unpack.cpp",
     "aten/src/ATen/native/quantized/cpu/qmul.cpp",
