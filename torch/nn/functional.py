@@ -3656,7 +3656,7 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
     `mini-batch x channels x [optional depth] x [optional height] x width`.
 
     The modes available for resizing are: `nearest`, `linear` (3D-only),
-    `bilinear`, `bicubic` (4D-only), `trilinear` (5D-only), `area`
+    `bilinear`, `bicubic` (4D-only), `trilinear` (5D-only), `area`, `nearest-exact`
 
     Args:
         input (Tensor): the input tensor
@@ -3666,7 +3666,7 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
             its length has to match `input.dim()`.
         mode (str): algorithm used for upsampling:
             ``'nearest'`` | ``'linear'`` | ``'bilinear'`` | ``'bicubic'`` |
-            ``'trilinear'`` | ``'area'``. Default: ``'nearest'``
+            ``'trilinear'`` | ``'area'`` | ``'nearest-exact'``. Default: ``'nearest'``
         align_corners (bool, optional): Geometrically, we consider the pixels of the
             input and output as squares rather than points.
             If set to ``True``, the input and output tensors are aligned by the
@@ -3691,6 +3691,12 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
         negative values or values greater than 255 for images.
         Explicitly call ``result.clamp(min=0, max=255)`` if you want to reduce the overshoot
         when displaying the image.
+
+    .. note::
+        Mode ``mode='nearest-exact'`` matches Scikit-Image and PIL nearest neighbours interpolation
+        algorithms and fixes known issues with ``mode='nearest'``. This mode is introduced to keep
+        backward compatibility.
+        Mode ``mode='nearest'`` matches buggy OpenCV's ``INTER_NEAREST`` interpolation algorithm.
 
     .. warning::
         With ``align_corners = True``, the linearly interpolating modes
@@ -3724,7 +3730,7 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
             recompute_scale_factor=recompute_scale_factor,
         )
 
-    if mode in ("nearest", "area"):
+    if mode in ("nearest", "area", "nearest-exact"):
         if align_corners is not None:
             raise ValueError(
                 "align_corners option can only be set with the "
@@ -3824,6 +3830,18 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
     if input.dim() == 5 and mode == "nearest":
         return torch._C._nn.upsample_nearest3d(input, output_size, scale_factors)
 
+    # TODO: Remove this scripting logic once the 2-week FC window has passed.
+    if mode == "nearest-exact":
+        if not torch.jit.is_scripting():
+            if input.dim() == 3 and mode == "nearest-exact":
+                return torch._C._nn._upsample_nearest_exact1d(input, output_size, scale_factors)
+            if input.dim() == 4 and mode == "nearest-exact":
+                return torch._C._nn._upsample_nearest_exact2d(input, output_size, scale_factors)
+            if input.dim() == 5 and mode == "nearest-exact":
+                return torch._C._nn._upsample_nearest_exact3d(input, output_size, scale_factors)
+        else:
+            raise RuntimeError("TorchScript currently does not support nearest-exact")
+
     if input.dim() == 3 and mode == "area":
         assert output_size is not None
         return adaptive_avg_pool1d(input, output_size)
@@ -3862,7 +3880,7 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
 
     raise NotImplementedError(
         "Input Error: Only 3D, 4D and 5D input Tensors supported"
-        " (got {}D) for the modes: nearest | linear | bilinear | bicubic | trilinear"
+        " (got {}D) for the modes: nearest | linear | bilinear | bicubic | trilinear | area | nearest-exact"
         " (got {})".format(input.dim(), mode)
     )
 
