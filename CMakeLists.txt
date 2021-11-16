@@ -423,8 +423,6 @@ else()
 endif()
 set(SELECTED_OP_LIST "" CACHE STRING
     "Path to the yaml file that contains the list of operators to include for custom build. Include all operators by default.")
-set(OP_DEPENDENCY "" CACHE STRING
-    "Path to the yaml file that contains the op dependency graph for custom build.")
 set(STATIC_DISPATCH_BACKEND "" CACHE STRING
     "Name of the backend for which static dispatch code is generated, e.g.: CPU.")
 option(
