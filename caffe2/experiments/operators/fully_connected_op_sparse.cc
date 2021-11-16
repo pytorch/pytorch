@@ -22,5 +22,5 @@ namespace {
 REGISTER_CPU_OPERATOR(FC_Sparse, FullyConnectedOp_SPARSE<float, CPUContext>);
 
 OPERATOR_SCHEMA(FC_Sparse).NumInputs(5).NumOutputs(1);
-}  // namespace
-}  // namespace caffe2
+} // namespace
+} // namespace caffe2
