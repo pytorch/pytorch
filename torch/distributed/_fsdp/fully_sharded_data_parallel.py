@@ -381,7 +381,7 @@ class FullyShardedDataParallel(nn.Module):
         # If _local_shard has been set in the first lazy init and
         # current parameter is pointed to _local_shard, no need to
         # set the _local_shard again.
-        if hasattr(p, "_local_shard") and p.data == p._local_shard:
+        if hasattr(p, "_local_shard") and p.data == p._local_shard:  # type: ignore[attr-defined]
             # If CPU offloading, p._local_shard should have been placed on CPU
             # during its first lazy construction.
             if self.cpu_offload.offload_params:
@@ -393,7 +393,7 @@ class FullyShardedDataParallel(nn.Module):
                 )
             return
 
-        if hasattr(p, "_local_shard") and p.data != p._local_shard:
+        if hasattr(p, "_local_shard") and p.data != p._local_shard:  # type: ignore[attr-defined]
             logging.warning(
                 "Parameter storage is changed outside FSDP, it is "
                 "expensive to change parameter storage outside FSDP as "
@@ -899,11 +899,11 @@ class FullyShardedDataParallel(nn.Module):
         for p in params:
             if self.cpu_offload.offload_params:
                 # Ensure local_shard resides in CPU if we are offloading params.
-                assert p._local_shard.device == torch.device(
+                assert p._local_shard.device == torch.device(  # type: ignore[attr-defined]
                     "cpu"
-                ), (  # type: ignore[attr-defined]
+                ), (
                     "Expected p._local_shard to be on CPU"
-                )  # type: ignore[attr-defined]
+                )
             p.data = p._local_shard  # type: ignore[attr-defined]
 
     def _assert_state(self, state: Union[TrainingState_, List[TrainingState_]]) -> None:
