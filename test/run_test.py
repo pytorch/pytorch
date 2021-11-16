@@ -597,7 +597,7 @@ def test_distributed(test_module, test_directory, options):
                         test_module, test_directory, options, launcher_cmd=mpiexec
                     )
                 else:
-                    return_code = run_test(test_module, test_directory, options)
+                    return_code = run_test(test_module, test_directory, options, extra_unittest_args=["--subprocess"])
                 if return_code != 0:
                     return return_code
             finally:
