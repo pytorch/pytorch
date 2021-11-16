@@ -323,6 +323,7 @@ class ObjectPair(Pair):
 
 class NonePair(Pair):
     """Pair for ``None`` inputs."""
+
     def __init__(self, actual: Any, expected: Any, **other_parameters: Any) -> None:
         if not (actual is None or expected is None):
             raise UnsupportedInputs()
