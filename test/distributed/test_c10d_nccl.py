@@ -2374,7 +2374,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         while True:
             try:
                 if not timeout:
-                    process_group.allreduce(torch.rand(10).cuda(self.rank))
+                    process_group.allreduce(torch.rand(10).cuda(self.rank)).wait()
                 else:
                     assert isinstance(timeout, timedelta)
                     process_group.allreduce(torch.rand(10).cuda(self.rank)).wait(timeout=timeout)
