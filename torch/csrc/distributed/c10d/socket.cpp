@@ -462,7 +462,7 @@ class SocketConnectOp {
   using Duration = std::chrono::steady_clock::duration;
   using TimePoint = std::chrono::time_point<std::chrono::steady_clock>;
 
-  static constexpr std::chrono::seconds delay_duration_{1};
+  static const std::chrono::seconds delay_duration_;
 
   enum class ConnectResult {
     Success,
@@ -499,6 +499,8 @@ class SocketConnectOp {
   std::vector<std::string> errors_{};
   std::unique_ptr<SocketImpl> socket_{};
 };
+
+const std::chrono::seconds SocketConnectOp::delay_duration_{1};
 
 SocketConnectOp::SocketConnectOp(const std::string& host,
                                  std::uint16_t port,
@@ -628,9 +630,7 @@ SocketConnectOp::ConnectResult SocketConnectOp::tryConnect(const ::addrinfo& add
     }
 
     // Retry if the server is not yet listening or if its backlog is exhausted.
-    if (err == std::errc::connection_refused ||
-        err == std::errc::connection_reset ||
-        err == std::errc::connection_aborted) {
+    if (err == std::errc::connection_refused || err == std::errc::connection_reset) {
       C10D_WARNING("The server socket on {} is not yet listening {}.", addr, err);
 
       if (Clock::now() < deadline_ - delay_duration_) {
