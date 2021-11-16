@@ -1044,10 +1044,10 @@ c10::IValue StaticRuntime::move_outputs_to_tuple(size_t num_outputs) {
 /// There is another case of failure that step 2 can prevent. With
 /// StaticModule::opts().cleanup_activations = false, the returned Static
 /// Runtime instance in the instance pool can be re-entered while an unintended
-/// output tensor's alias is still being used by the client (in the multi-threaded
-/// setting). This can only be prevented by delaying the deallocation and
-/// returning the Static Runtime instance after the client is done with the
-/// outputs.
+/// output tensor's alias is still being used by the client (in the
+/// multi-threaded setting). This can only be prevented by delaying the
+/// deallocation and returning the Static Runtime instance after the client is
+/// done with the outputs.
 
 void StaticRuntime::verify_and_correct_memory_overlap(ProcessedNode& n) {
   // The slow check can be removed once the internal/output buffers are merged
@@ -1126,16 +1126,44 @@ c10::IValue StaticRuntime::run_impl(
   return std::move(*outputs_[0]);
 }
 
+template <typename IValueList>
+c10::IValue StaticRuntime::run_impl_record_functions(
+    IValueList&& args,
+    const std::unordered_map<std::string, c10::IValue>& kwargs) {
+  bool pre_sampled = false;
+  if (C10_UNLIKELY(at::shouldRunRecordFunction(&pre_sampled))) {
+    at::RecordFunction guard(
+        at::RecordScope::TORCHSCRIPT_FUNCTION, pre_sampled);
+    if (guard.isActive()) {
+      if (guard.needsInputs()) {
+        guard.before("forward", &args);
+      } else {
+        guard.before("forward");
+      }
+    }
+    return run_impl(std::forward<IValueList>(args), kwargs);
+  }
+  return run_impl(std::forward<IValueList>(args), kwargs);
+}
+
 c10::IValue StaticRuntime::operator()(
     const std::vector<c10::IValue>& args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
+#ifdef PYTORCH_DISABLE_NET_PROFILING
   return run_impl(args, kwargs);
+#else
+  return run_impl_record_functions(args, kwargs);
+#endif
 }
 
 c10::IValue StaticRuntime::operator()(
     std::vector<c10::IValue>&& args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
+#ifdef PYTORCH_DISABLE_NET_PROFILING
   return run_impl(std::move(args), kwargs);
+#else
+  return run_impl_record_functions(std::move(args), kwargs);
+#endif
 }
 
 namespace {
@@ -1675,7 +1703,7 @@ ProcessedNode::ProcessedNode(
   }
 }
 
-std::vector<IValue> ProcessedNode::clone_inputs() const {
+std::vector<IValue> ProcessedNode::inputs_ivalue_vec() const {
   std::vector<IValue> result;
   result.reserve(inputs_size_);
   std::transform(
@@ -1693,7 +1721,7 @@ void ProcessedNode::run() {
     at::RecordFunction guard(at::RecordScope::FUNCTION, pre_sampled);
     if (guard.isActive()) {
       if (guard.needsInputs()) {
-        guard.before(get_op_name(), clone_inputs());
+        guard.before(get_op_name(), inputs_ivalue_vec());
       } else {
         guard.before(get_op_name());
       }
