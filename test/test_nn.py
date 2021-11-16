@@ -13429,14 +13429,24 @@ class TestNNDeviceType(NNTestCase):
         dtype = torch.float32
         C_in, C_out, dim, kernel_size = input_shape[1], 6, len(input_shape) - 2, 3
         x = torch.randn(*input_shape, device=device, dtype=dtype, requires_grad=True)
-        if not contiguous:
-            x = torch.repeat_interleave(x, 2, dim=-1)
-            x = x[..., ::2].detach()
         weight = torch.randn(C_in if transposed else C_out,
                              C_out // groups if transposed else C_in // groups,
                              *[kernel_size for _ in range(dim)],
                              device=device, dtype=dtype, requires_grad=True)
         bias = torch.randn(C_out, device=device, dtype=dtype, requires_grad=True)
+
+        if not contiguous:
+
+            def _make_noncontiguous(inp):
+                old_requires_grad = inp.requires_grad
+                inp = torch.repeat_interleave(inp, 2, dim=-1)
+                inp = inp[..., ::2].detach().requires_grad_(old_requires_grad)
+                return inp
+
+            x = _make_noncontiguous(x)
+            weight = _make_noncontiguous(weight)
+            bias = _make_noncontiguous(bias)
+
         if layout is torch._mkldnn:
             x = x.to_mkldnn()
             weight = weight.to_mkldnn()
@@ -13452,7 +13462,7 @@ class TestNNDeviceType(NNTestCase):
         backend_actual = torch._C._select_conv_backend(*inputs)
         self.assertEqual(backend_actual, backend_expected)
 
-        # mkldnn doesn't support float64 for gradcheck.
+        # mkldnn doesn't support gradcheck :(
         if layout is torch._mkldnn:
             return
 
