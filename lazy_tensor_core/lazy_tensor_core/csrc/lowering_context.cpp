@@ -17,7 +17,7 @@ LoweringContext::LoweringContext(const std::string& name,
                                  torch::lazy::Util::EmissionMap emit_status)
     : device_(std::move(device)), emit_status_(std::move(emit_status)) {}
 
-const std::vector<compiler::BackendDataPtr>&
+const std::vector<torch::lazy::BackendDataPtr>&
 LoweringContext::GetParametersData() const {
   return parameters_;
 }

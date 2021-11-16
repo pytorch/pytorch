@@ -29,13 +29,13 @@ class TSBackendImpl : public BackendImplInterface {
   }
 
   at::Tensor MakeTensorFromComputationData(
-      const BackendDataPtr data,
+      const torch::lazy::BackendDataPtr data,
       c10::optional<at::ScalarType> logical_scalar_type) const override {
     const auto ts_data = std::static_pointer_cast<TSData>(data);
     return ts_data->data();
   }
 
-  BackendDataPtr MakeComputationDataFromTensor(
+  torch::lazy::BackendDataPtr MakeComputationDataFromTensor(
       const at::Tensor& tensor, const torch::lazy::Shape& shape,
       const torch::lazy::BackendDevice& device) const override {
     at::TensorOptions options = tensor.options().device(HardwareDeviceType());
@@ -53,20 +53,19 @@ class TSBackendImpl : public BackendImplInterface {
   //////////////computation client interfaces///////////////////////
 
  public:
-  class TSData : public BackendData {
+  class TSData : public torch::lazy::BackendData {
    public:
     TSData(const at::Tensor& data, const torch::lazy::Shape& shape,
            const torch::lazy::BackendDevice& device)
-        : BackendData(device, shape), data_(data) {}
+        : torch::lazy::BackendData(device, shape), data_(data) {}
 
-    TSData(const torch::lazy::Shape& shape, const torch::lazy::BackendDevice& device)
-        : BackendData(device, shape) {}
+    TSData(const torch::lazy::Shape& shape,
+           const torch::lazy::BackendDevice& device)
+        : torch::lazy::BackendData(device, shape) {}
 
-    Handle GetOpaqueHandle() override {
-      return reinterpret_cast<int64_t>(this);
-    }
+    Handle GetHandle() override { return reinterpret_cast<int64_t>(this); }
 
-    void Assign(const BackendData& data) override {
+    void Assign(const torch::lazy::BackendData& data) override {
       data_ = static_cast<const TSData&>(data).data_;
     }
 
@@ -78,14 +77,16 @@ class TSBackendImpl : public BackendImplInterface {
     at::Tensor data_;
   };
 
-  BackendDataPtr CreateDataPlaceholder(const torch::lazy::BackendDevice& device,
+  torch::lazy::BackendDataPtr CreateDataPlaceholder(
+      const torch::lazy::BackendDevice& device,
       const torch::lazy::Shape& shape) const override;
 
   std::vector<ComputationPtr> Compile(
       std::vector<ComputationPtr> instances) const override;
 
-  std::vector<BackendDataPtr> ExecuteComputation(
-      Computation& computation, c10::ArrayRef<BackendDataPtr> arguments,
+  std::vector<torch::lazy::BackendDataPtr> ExecuteComputation(
+      Computation& computation,
+      c10::ArrayRef<torch::lazy::BackendDataPtr> arguments,
       const torch::lazy::BackendDevice& device) const override;
 
   std::string GetDefaultDevice() const override;
@@ -117,8 +118,9 @@ class TSBackendImpl : public BackendImplInterface {
   at::DeviceType HardwareDeviceType() const override;
 };
 
-BackendDataPtr TSBackendImpl::CreateDataPlaceholder(const torch::lazy::BackendDevice& device,
-      const torch::lazy::Shape& shape) const {
+torch::lazy::BackendDataPtr TSBackendImpl::CreateDataPlaceholder(
+    const torch::lazy::BackendDevice& device,
+    const torch::lazy::Shape& shape) const {
   return std::make_shared<TSBackendImpl::TSData>(shape, device);
 }
 
@@ -131,8 +133,9 @@ std::vector<ComputationPtr> TSBackendImpl::Compile(
   return instances;
 }
 
-std::vector<BackendDataPtr> TSBackendImpl::ExecuteComputation(
-    Computation& computation, c10::ArrayRef<BackendDataPtr> arguments,
+std::vector<torch::lazy::BackendDataPtr> TSBackendImpl::ExecuteComputation(
+    Computation& computation,
+    c10::ArrayRef<torch::lazy::BackendDataPtr> arguments,
     const torch::lazy::BackendDevice& device) const {
   torch::jit::GraphExecutor& graph_executor =
       static_cast<compiler::ts_backend::TSComputation&>(computation)
@@ -146,7 +149,7 @@ std::vector<BackendDataPtr> TSBackendImpl::ExecuteComputation(
     stack.emplace_back(ts_data->data());
   }
   graph_executor.run(stack);
-  std::vector<torch_lazy_tensors::compiler::BackendDataPtr> results;
+  std::vector<torch::lazy::BackendDataPtr> results;
   for (torch::jit::IValue component : stack) {
     at::Tensor result = component.toTensor();
     at::IntArrayRef result_sizes = result.sizes();

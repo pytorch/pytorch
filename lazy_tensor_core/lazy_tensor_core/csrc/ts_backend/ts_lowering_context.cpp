@@ -65,8 +65,9 @@ void TSLoweringContext::AssignOutputOp(const torch::lazy::Output& output,
   emitted_outputs_[output] = std::move(op);
 }
 
-torch::jit::Value* TSLoweringContext::GetParameter(BackendDataPtr data) {
-  BackendData::Handle handle = data->GetOpaqueHandle();
+torch::jit::Value* TSLoweringContext::GetParameter(
+    torch::lazy::BackendDataPtr data) {
+  torch::lazy::BackendData::Handle handle = data->GetHandle();
   auto it = parameters_map_.find(handle);
   if (it == parameters_map_.end()) {
     torch::jit::Value* param =

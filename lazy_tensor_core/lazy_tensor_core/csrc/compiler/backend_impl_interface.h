@@ -1,11 +1,11 @@
 #pragma once
 
 #include <ATen/Tensor.h>
+#include <torch/csrc/lazy/backend/backend_data.h>
 #include <torch/csrc/lazy/core/shape.h>
 
 #include <atomic>
 
-#include "lazy_tensor_core/csrc/compiler/data.h"
 #include "lazy_tensor_core/csrc/lowering_context.h"
 
 namespace torch_lazy_tensors {
@@ -32,15 +32,16 @@ class BackendImplInterface {
    * Data Transfer
    * */
 
-  virtual BackendDataPtr MakeComputationDataFromTensor(
+  virtual torch::lazy::BackendDataPtr MakeComputationDataFromTensor(
       const at::Tensor& tensor, const torch::lazy::Shape& shape,
       const torch::lazy::BackendDevice& device) const = 0;
 
-  virtual BackendDataPtr CreateDataPlaceholder(const torch::lazy::BackendDevice& device,
+  virtual torch::lazy::BackendDataPtr CreateDataPlaceholder(
+      const torch::lazy::BackendDevice& device,
       const torch::lazy::Shape& shape) const = 0;
 
   virtual at::Tensor MakeTensorFromComputationData(
-      const BackendDataPtr data,
+      const torch::lazy::BackendDataPtr data,
       c10::optional<at::ScalarType> logical_scalar_type) const = 0;
 
   /**
@@ -62,8 +63,9 @@ class BackendImplInterface {
   virtual std::vector<ComputationPtr> Compile(
       std::vector<ComputationPtr> instances) const = 0;
 
-  virtual std::vector<BackendDataPtr> ExecuteComputation(
-      Computation& computation, c10::ArrayRef<BackendDataPtr> arguments,
+  virtual std::vector<torch::lazy::BackendDataPtr> ExecuteComputation(
+      Computation& computation,
+      c10::ArrayRef<torch::lazy::BackendDataPtr> arguments,
       const torch::lazy::BackendDevice& device) const = 0;
 
   /**

@@ -1,16 +1,15 @@
 #pragma once
 
+#include <torch/csrc/lazy/backend/backend_data.h>
 #include <torch/csrc/lazy/backend/backend_device.h>
 #include <torch/csrc/lazy/core/ir.h>
-#include <torch/csrc/lazy/core/ir_util.h>  // This is already landed on master, needs rebase
+#include <torch/csrc/lazy/core/ir_util.h>
 
 #include <memory>
 #include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
-
-#include "lazy_tensor_core/csrc/compiler/data.h"
 
 namespace torch_lazy_tensors {
 
@@ -56,8 +55,7 @@ class LoweringContext {
 
   // Retrieves the vector holding all the tensors associated with the parameter
   // instructions which have been created.
-  const std::vector<compiler::BackendDataPtr>&
-  GetParametersData() const;
+  const std::vector<torch::lazy::BackendDataPtr>& GetParametersData() const;
 
   // Get the shape of the result tuple component, given by index.
   virtual torch::lazy::Shape GetResultShape(size_t index) const = 0;
@@ -81,7 +79,7 @@ class LoweringContext {
 
  protected:
   torch::lazy::BackendDevice device_;
-  std::vector<compiler::BackendDataPtr> parameters_;
+  std::vector<torch::lazy::BackendDataPtr> parameters_;
   std::vector<size_t> parameter_sequence_;
   torch::lazy::Util::EmissionMap emit_status_;
 };
