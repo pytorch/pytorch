@@ -105,7 +105,7 @@ __device__ void blockReduce(
     T* shared_mem,
     bool read_write_pred,
     T init_val) {
-  blockReduce<X_REDUCE, Y_REDUCE, Z_REDUCE, T, Func>(
+  blockReduce<X_REDUCE, Y_REDUCE, Z_REDUCE, T, Func, _dim3, _dim3_2>(
       out,
       inp_val,
       reduction_op,

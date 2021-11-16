@@ -6768,9 +6768,6 @@ TEST(NVFuserTest, FusionGridReduction9_CUDA) {
 
   tv1->computeAt(tv3, 1);
 
-  // TODO: Don't bind threads
-  tv3->axis(0)->parallelize(ParallelType::TIDx);
-
   const int numel_x = 4;
   const int numel_y = 10;
 
@@ -6787,6 +6784,49 @@ TEST(NVFuserTest, FusionGridReduction9_CUDA) {
   auto aten_output = t0.sum({1}).add(t2);
 
   testValidate(&fusion, cg_output, {t0, t2}, {aten_output}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionGridReduction10_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(4);
+  fusion.addInput(tv0);
+
+  auto tv1 = sum(tv0, {-1});
+  auto tv2 = sum(tv1, {-1});
+  auto tv3 = sum(tv2, {-1});
+
+  fusion.addOutput(tv3);
+  tv1->axis(0)->parallelize(ParallelType::TIDx);
+  tv1->axis(1)->parallelize(ParallelType::BIDx);
+  tv1->axis(2)->parallelize(ParallelType::TIDy);
+  tv1->axis(3)->parallelize(ParallelType::TIDz);
+
+  tv2->axis(0)->parallelize(ParallelType::TIDx);
+  tv2->axis(1)->parallelize(ParallelType::BIDx);
+  tv2->axis(2)->parallelize(ParallelType::TIDy);
+
+  tv3->axis(0)->parallelize(ParallelType::TIDx);
+  tv3->axis(1)->parallelize(ParallelType::BIDx);
+
+  tv0->computeAt(tv3, 1);
+
+  const int numel_w = 2;
+  const int numel_x = 3;
+  const int numel_y = 4;
+  const int numel_z = 5;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({numel_w, numel_x, numel_y, numel_z}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_output = fe.runFusion({t0});
+
+  auto aten_output = t0.sum({1, 2, 3});
+
+  testValidate(&fusion, cg_output, {t0}, {aten_output}, __LINE__, __FILE__);
 }
 
 TEST(NVFuserTest, FusionNonRedAxisBind_CUDA) {
@@ -11917,11 +11957,11 @@ __global__ void kernel1(
     float in = inp[ blockIdx.x  * inp.stride[0]+
                     blockIdx.y  * inp.stride[1]+
                     threadIdx.x * inp.stride[2]];
-    bool T_pred;
     block_sync::init();
     welford::gridWelford<
         true,true,false,
-        true,false,false
+        true,false,false,
+        false
     >(
         tmp_avg,
         tmp_M2,
@@ -13406,21 +13446,150 @@ TEST(NVFuserTest, FusionTransposeWithSwizzle1DThreadBlock_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-// Grid reduction can be executed only once in a kernel. Should result
-// in an error at the time of compilation.
-TEST(NVFuserTest, FusionGridReductionInLoop_CUDA) {
+TEST(NVFuserTest, FusionGridPersistence_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = sum(tv0, {0});
+  auto tv2 = broadcast(tv1, {true});
+  auto tv3 = add(tv0, tv2);
+  fusion.addOutput(tv3);
+
+  std::vector<TensorView*> tvs = {tv1, tv2, tv3};
+  for (auto tv : tvs) {
+    tv->split(0, 2);
+    tv->axis(0)->parallelize(ParallelType::BIDx);
+    tv->axis(1)->parallelize(ParallelType::BIDy);
+  }
+
+  const int numel_x = 10;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input = at::randn({numel_x}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto out = fe.runFusion({input});
+
+  auto aten_output = input.sum({0}).unsqueeze(-1).add(input);
+
+  testValidate(&fusion, out, {input}, {aten_output}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionGridPersistence2_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
   auto tv0 = makeSymbolicTensor(2);
   fusion.addInput(tv0);
-  auto tv1 = sum(tv0, {1});
-  fusion.addOutput(tv1);
 
-  tv1->axis(1)->parallelize(ParallelType::BIDx);
+  auto tv1 = sum(tv0, {0});
+  auto tv2 = broadcast(tv1, {true, false});
+  auto tv3 = add(tv0, tv2);
+  fusion.addOutput(tv3);
+
+  std::vector<TensorView*> tvs = {tv1, tv2, tv3};
+  for (auto tv : tvs) {
+    tv->split(0, 2);
+    tv->axis(0)->parallelize(ParallelType::BIDx);
+    tv->axis(1)->parallelize(ParallelType::TIDy);
+    tv->axis(2)->parallelize(ParallelType::TIDx);
+  }
+
+  const int numel_x = 10;
+  const int numel_y = 3;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input = at::randn({numel_x, numel_y}, options);
 
   FusionExecutor fe;
-  ASSERT_ANY_THROW(fe.compileFusion(&fusion));
+  fe.compileFusion(&fusion);
+  auto out = fe.runFusion({input});
+
+  auto aten_output = input.sum({0}).unsqueeze(0).add(input);
+
+  testValidate(&fusion, out, {input}, {aten_output}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionWelfordPersistence_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tvs = Welford(tv0, {0});
+  auto tv4 = add(tvs.avg, tvs.var_sum);
+  auto tv5 = broadcast(tv4, {true});
+  auto tv6 = add(tv0, tv5);
+  fusion.addOutput(tv6);
+
+  std::vector<TensorView*> schedule_tvs = {
+      tvs.avg, tvs.var_sum, tvs.n, tv5, tv6};
+
+  for (auto tv : schedule_tvs) {
+    tv->split(0, 2);
+    tv->axis(0)->parallelize(ParallelType::BIDx);
+    tv->axis(1)->parallelize(ParallelType::BIDy);
+  }
+
+  const int numel_x = 10;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input = at::randn({numel_x}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto out = fe.runFusion({input});
+
+  auto aten_output = (input.mean({0}) + (input.var({0}, false) * numel_x))
+                         .unsqueeze(-1)
+                         .add(input);
+
+  testValidate(&fusion, out, {input}, {aten_output}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionWelfordPersistence2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tvs = Welford(tv0, {0});
+  auto tv4 = add(tvs.avg, tvs.var_sum);
+  auto tv5 = broadcast(tv4, {true, false});
+  auto tv6 = add(tv0, tv5);
+  fusion.addOutput(tv6);
+
+  std::vector<TensorView*> schedule_tvs = {
+      tvs.avg, tvs.var_sum, tvs.n, tv5, tv6};
+  for (auto tv : schedule_tvs) {
+    tv->split(0, 2);
+    tv->axis(0)->parallelize(ParallelType::BIDx);
+    tv->axis(1)->parallelize(ParallelType::TIDy);
+    tv->axis(2)->parallelize(ParallelType::TIDx);
+  }
+  tv4->axis(0)->parallelize(ParallelType::TIDx);
+
+  const int numel_x = 10;
+  const int numel_y = 3;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input = at::randn({numel_x, numel_y}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto out = fe.runFusion({input});
+
+  auto aten_output = (input.mean({0}) + (input.var({0}, false) * numel_x))
+                         .unsqueeze(0)
+                         .add(input);
+
+  testValidate(&fusion, out, {input}, {aten_output}, __LINE__, __FILE__);
 }
 
 TEST(NVFuserTest, FusionIssue633_CUDA) {

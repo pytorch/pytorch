@@ -221,6 +221,12 @@ bool TensorDomain::hasBlockBroadcast() const {
   });
 }
 
+bool TensorDomain::hasGridBroadcast() const {
+  return std::any_of(domain_.begin(), domain_.end(), [](IterDomain* id) {
+    return id->isBroadcast() && id->isBlockDim();
+  });
+}
+
 bool TensorDomain::hasBroadcast() const {
   return no_bcast_domain_.size() != domain_.size();
 }
@@ -355,58 +361,6 @@ WelfordOp::WelfordOp(
   }
   addInput(in_avg);
   addInput(in_N);
-}
-
-std::vector<IterDomain*> WelfordOp::getReductionDomains() const {
-  // out is a TensorIndex after lowering
-  const auto out_val = out()->as<kir::TensorIndex>()->view();
-
-  auto vec_domain = out_val->as<TensorView>()->domain()->domain();
-
-  vec_domain.erase(
-      std::remove_if(
-          vec_domain.begin(),
-          vec_domain.end(),
-          [](IterDomain* id) { return !id->isReduction(); }),
-      vec_domain.end());
-  return vec_domain;
-}
-
-std::unordered_map<ParallelType, IterDomain*, TypeHash> WelfordOp::
-    getParallelReductionDomains() const {
-  std::unordered_map<ParallelType, IterDomain*, TypeHash> parallel_domains;
-  for (auto d : getReductionDomains()) {
-    if (d->isThread()) {
-      parallel_domains.insert(std::make_pair(d->parallelType(), d));
-    }
-  }
-  return parallel_domains;
-}
-
-std::vector<IterDomain*> ReductionOp::getReductionDomains() const {
-  // out is a TensorIndex after lowering
-  const auto out_val = out()->as<kir::TensorIndex>()->view();
-
-  auto vec_domain = out_val->as<TensorView>()->domain()->domain();
-
-  vec_domain.erase(
-      std::remove_if(
-          vec_domain.begin(),
-          vec_domain.end(),
-          [](IterDomain* id) { return !id->isReduction(); }),
-      vec_domain.end());
-  return vec_domain;
-}
-
-std::unordered_map<ParallelType, IterDomain*, TypeHash> ReductionOp::
-    getParallelReductionDomains() const {
-  std::unordered_map<ParallelType, IterDomain*, TypeHash> parallel_domains;
-  for (auto d : getReductionDomains()) {
-    if (d->isThread()) {
-      parallel_domains.insert(std::make_pair(d->parallelType(), d));
-    }
-  }
-  return parallel_domains;
 }
 
 BroadcastOp::BroadcastOp(Passkey passkey, Val* out, Val* in)

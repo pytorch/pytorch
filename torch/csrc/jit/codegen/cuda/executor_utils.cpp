@@ -20,6 +20,7 @@
 #include <nvfuser_resources/block_sync_default.h>
 #include <nvfuser_resources/broadcast.h>
 #include <nvfuser_resources/fp16_support.h>
+#include <nvfuser_resources/grid_broadcast.h>
 #include <nvfuser_resources/grid_reduction.h>
 #include <nvfuser_resources/grid_sync.h>
 #include <nvfuser_resources/helpers.h>
@@ -66,22 +67,30 @@ std::string kernelPreamble() {
   )";
 #endif
 
+  // Base classes and helpers
   ss << nvfuser_resources::tensor_cu;
   ss << nvfuser_resources::random_numbers_cu;
   ss << nvfuser_resources::helpers_cu;
+  ss << nvfuser_resources::index_utils_cu;
+
+  // Synchronization classes
   if (std::getenv("PYTORCH_NVFUSER_USE_BLOCK_SYNC_ATOMIC")) {
     ss << nvfuser_resources::block_sync_atomic_cu;
   } else {
     ss << nvfuser_resources::block_sync_default_cu;
   }
-  ss << nvfuser_resources::index_utils_cu;
-  ss << nvfuser_resources::block_reduction_cu;
   ss << nvfuser_resources::grid_sync_cu;
+
+  // Communication classes
+  ss << nvfuser_resources::block_reduction_cu;
   ss << nvfuser_resources::grid_reduction_cu;
+  ss << nvfuser_resources::grid_broadcast_cu;
   ss << nvfuser_resources::broadcast_cu;
   ss << nvfuser_resources::welford_cu;
-  ss << nvfuser_resources::PhiloxCudaStateRaw_cu;
   ss << nvfuser_resources::warp_cu;
+
+  // Random utilities
+  ss << nvfuser_resources::PhiloxCudaStateRaw_cu;
 
   return ss.str();
 }

@@ -139,7 +139,8 @@ __device__ void gridReduceLastBlock(
 // - sync_flags: A vector of integers for synchronizations
 // - shared_buf: Shared memory buffer for intra-block reduction
 //
-// Return true when the thread block has the valid result.
+// Thread has valid results based on if it's the last block in the grid
+// reduction dimension
 //
 // Template parameters:
 // - X/Y/Z_BLOCK: When true, reduces across thread blocks along the X/Y/Z
@@ -150,6 +151,12 @@ __device__ void gridReduceLastBlock(
 //   previously in producer tensors, and does not participate in the reduction
 //   (right now they can't), so it's just a "pure" iteration domain as far as
 //   the grid reduce is concerned.
+// - PERSISTENT_REDUCTION: Indicates grid reduction will be called in a loop, or
+//   the result of the grid reduction will be broadcasted and used across the
+//   grid. These requires cross grid communication and the grid synchronizations
+//   here to actually synchronize across the entire grid. When false the grid is
+//   not synchronized, the last block just waits for everyone else to finish and
+//   the other blocks can exit early.
 // - T: Scalar data type of input/output data
 // - Func: Type of scalara reduction function
 //
@@ -188,6 +195,7 @@ template <
     bool X_THREAD,
     bool Y_THREAD,
     bool Z_THREAD,
+    bool PERSISTENT_REDUCTION,
     typename T,
     typename Func>
 __device__ void gridReduce(
@@ -236,14 +244,14 @@ __device__ void gridReduce(
     }
   }
 
-  grid_sync::sync<X_BLOCK, Y_BLOCK, Z_BLOCK>(
-      sync_flags[idx_in_grid_segment], false, grid_reduction_segment_size);
+  grid_sync::sync<X_BLOCK, Y_BLOCK, Z_BLOCK, PERSISTENT_REDUCTION>(
+      sync_flags[idx_in_grid_segment], grid_reduction_segment_size);
 
   bool last_block =
       index_utils::maskedIsLast<X_BLOCK, Y_BLOCK, Z_BLOCK>(blockIdx, gridDim);
 
   if (last_block) {
-    // Cleanup block reduction
+    // Cleanup with block reduction
     gridReduceLastBlock<X_THREAD, Y_THREAD, Z_THREAD>(
         out,
         (T*)work_buf,
@@ -253,6 +261,13 @@ __device__ void gridReduce(
         shared_buf,
         write_pred,
         init_val);
+  }
+
+  if (PERSISTENT_REDUCTION) {
+    // Make sure we're done with global memory before we allow the kernel to
+    // continue
+    grid_sync::sync<X_BLOCK, Y_BLOCK, Z_BLOCK, PERSISTENT_REDUCTION>(
+        sync_flags[idx_in_grid_segment], grid_reduction_segment_size);
   }
 }
 

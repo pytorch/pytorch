@@ -42,7 +42,7 @@ struct KernelSummary {
 
   //! Do we have any grid reduction in a loop, or grid reductions dependent on
   //! grid reductions
-  bool has_grid_reduction_in_loop = false;
+  bool has_cooperative_grid_reduction = false;
 
   //! Do we have any block broadcasts?
   bool has_block_broadcasts = false;

@@ -118,6 +118,10 @@ class KernelIrScanner : private kir::IrVisitor {
     updateGridReductionInLoop(dom);
   }
 
+  void visit(const kir::GridBroadcast*) final {
+    summary_.has_cooperative_grid_reduction = true;
+  }
+
  private:
   size_t max_smem_type_size_ = 0;
   KernelSummary summary_;
@@ -130,8 +134,9 @@ class KernelIrScanner : private kir::IrVisitor {
     for (const auto i : c10::irange(dom->nDims())) {
       const auto id =
           gpu_lower->caParallelMap().getConcreteMappedID(dom->domain()[i]);
-      summary_.has_grid_reduction_in_loop =
-          summary_.has_grid_reduction_in_loop ||
+
+      summary_.has_cooperative_grid_reduction =
+          summary_.has_cooperative_grid_reduction ||
           !(id->isThread() || id->extent()->isOneInt());
     }
   }
