@@ -13,6 +13,7 @@ namespace caffe2 {
 
 // TODO(azzolini): support sizes larger than int32
 template <class T>
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class IndexCreateOp : public Operator<CPUContext> {
  public:
   template <class... Args>
@@ -252,7 +253,9 @@ SHOULD_NOT_DO_GRADIENT(IndexSize);
 
 class IndexSerializer : public BlobSerializerBase {
  public:
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   IndexSerializer() {}
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~IndexSerializer() override {}
 
   void Serialize(

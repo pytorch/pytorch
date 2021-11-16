@@ -50,6 +50,7 @@ OPERATOR_SCHEMA(Sleep).NumInputs(0, INT_MAX).NumOutputs(0, 1);
 REGISTER_CPU_OPERATOR(Sleep, SleepOp);
 REGISTER_CUDA_OPERATOR(Sleep, SleepOp);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 const char kSleepNetDefString[] =
     "  name: \"sleepnet\""
     "  type: \"dag\""
@@ -121,6 +122,7 @@ TEST(SimpleNetTest, TestSimpleNetTiming) {
 // This network has two operators reading the same blob at the same time. This
 // should not change anything and the DAG should still make sleep2 and sleep3
 // run in parallel.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 const char kSleepNetDefStringReadAfterRead[] =
     "  name: \"sleepnet\""
     "  type: \"dag\""
@@ -171,6 +173,7 @@ TEST(SimpleNetTest, TestSimpleNetTimingReadAfterRead) {
 // This network has two operators writing out the sleep2 blob. As a result, the
 // operator sleep2-again creates a write after write dependency and the whole
 // process should be sequential.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 const char kSleepNetDefStringWriteAfterWrite[] =
     "  name: \"sleepnet\""
     "  type: \"dag\""
@@ -219,6 +222,7 @@ TEST(SimpleNetTest, TestSimpleNetTimingWriteAfterWrite) {
 // This network has an operator writing to sleep1 while another operator is
 // accessing it. As a result, the operator sleep1-again creates a write after
 // read dependency and the whole process should be sequential.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 const char kSleepNetDefStringWriteAfterRead[] =
     "  name: \"sleepnet\""
     "  type: \"dag\""
@@ -268,6 +272,7 @@ TEST(SimpleNetTest, TestSimpleNetTimingWriteAfterRead) {
 // operator has a control dependency on it. As a result, the operator
 // sleep1-again creates a write after read dependency and the whole
 // process should be sequential.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 const char kSleepNetDefStringControlDependency[] = R"DOC(
   name: "sleepnet"
   type: "dag"

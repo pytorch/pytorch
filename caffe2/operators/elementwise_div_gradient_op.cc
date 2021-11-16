@@ -1,5 +1,6 @@
 #include "caffe2/operators/elementwise_div_op.h"
 #include "caffe2/utils/eigen_utils.h"
+#include "caffe2/utils/math/broadcast.h"
 
 #include <algorithm>
 #include <functional>
@@ -9,6 +10,35 @@
 namespace caffe2 {
 
 namespace {
+
+template <typename TGrad, typename TIn, typename TOut>
+void ComputeDivGradientFastpath(
+    const int A_size,
+    const int B_size,
+    const int C_size,
+    const TGrad* dC,
+    const TIn* B,
+    const TOut* C,
+    TGrad* dA,
+    TGrad* dB) {
+  int A_index = 0;
+  int B_index = 0;
+  for (int C_index = 0; C_index < C_size; ++C_index) {
+    dB[B_index] += -dC[C_index] * C[C_index] / B[B_index];
+    if (dA != nullptr) {
+      dA[A_index] += dC[C_index] / B[B_index];
+      A_index++;
+      if (A_index >= A_size) {
+        A_index = 0;
+      }
+    }
+    B_index++;
+    if (B_index >= B_size) {
+      B_index = 0;
+    }
+  }
+
+}
 
 template <typename TGrad, typename TIn, typename TOut>
 void ComputeDivGradient(
@@ -23,15 +53,24 @@ void ComputeDivGradient(
     TGrad* dB,
     CPUContext* context) {
   const int A_size =
+      // NOLINTNEXTLINE(modernize-use-transparent-functors)
       std::accumulate(A_dims, A_dims + ndim, 1, std::multiplies<int>());
   const int B_size =
+      // NOLINTNEXTLINE(modernize-use-transparent-functors)
       std::accumulate(B_dims, B_dims + ndim, 1, std::multiplies<int>());
   const int C_size =
+      // NOLINTNEXTLINE(modernize-use-transparent-functors)
       std::accumulate(C_dims, C_dims + ndim, 1, std::multiplies<int>());
   if (dA != nullptr) {
     math::Set<TGrad, CPUContext>(A_size, TGrad(0), dA, context);
   }
   math::Set<TGrad, CPUContext>(B_size, TGrad(0), dB, context);
+  if (
+      math::can_use_broadcast_fastpath(ndim, B_dims)
+      && (dA == nullptr || math::can_use_broadcast_fastpath(ndim, A_dims))) {
+    ComputeDivGradientFastpath(A_size, B_size, C_size, dC, B, C, dA, dB);
+    return;
+  }
   std::vector<int> index(ndim, 0);
   for (int C_index = 0; C_index < C_size; ++C_index) {
     const int B_index =
@@ -62,6 +101,7 @@ bool DivFunctor<CPUContext>::Backward(
     CPUContext* context) const {
   if (A_dims == B_dims) {
     const int size = std::accumulate(
+        // NOLINTNEXTLINE(modernize-use-transparent-functors)
         A_dims.cbegin(), A_dims.cend(), 1, std::multiplies<int>());
     EigenVectorMap<TGrad>(dB, size) =
         -ConstEigenVectorArrayMap<TGrad>(dC, size) *
@@ -136,8 +176,7 @@ class BinaryElementwiseWithArgsGradientOp<
         OP_SINGLE_ARG(bool, "broadcast", legacy_broadcast_, false),
         OP_SINGLE_ARG(int, "axis", axis_, -1),
         OP_SINGLE_ARG(string, "axis_str", axis_str_, ""),
-        OP_SINGLE_ARG(string, "order", order_, "NCHW"),
-        functor_(*this) {
+        OP_SINGLE_ARG(string, "order", order_, "NCHW") {
     if (legacy_broadcast_) {
       if (axis_ != -1) {
         // Get axis from an explicit axis argument.
@@ -189,6 +228,7 @@ class BinaryElementwiseWithArgsGradientOp<
           A_dims = {static_cast<int>(C.numel())};
           B_dims = {1};
         } else {
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           size_t pre, n, post;
           std::tie(pre, n, post) =
               elementwise_ops_utils::ComputeLegacyBroadcastSizes(C, B, axis_);
@@ -218,6 +258,7 @@ class BinaryElementwiseWithArgsGradientOp<
           A_dims = {static_cast<int>(A.numel())};
           B_dims = {1};
         } else {
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           size_t pre, n, post;
           std::tie(pre, n, post) =
               elementwise_ops_utils::ComputeLegacyBroadcastSizes(A, B, axis_);
@@ -261,7 +302,7 @@ class BinaryElementwiseWithArgsGradientOp<
   const std::string axis_str_;
   const std::string order_;
 
-  BinaryFunctorWithDefaultCtor<DivFunctor<CPUContext>> functor_;
+  DivFunctor<CPUContext> functor_;
 };
 
 REGISTER_CPU_OPERATOR(

@@ -2,6 +2,7 @@
 
 #include <ATen/core/qualified_name.h>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <ATen/core/ivalue.h>
@@ -91,6 +92,7 @@ enum class PickleOpCode : char {
 
 using ::c10::IValue;
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct WriteableTensorData {
   const char* data() const {
     return static_cast<const char*>(tensor_.storage().data());
@@ -120,17 +122,21 @@ class TORCH_API Pickler {
 
  public:
   Pickler(std::function<void(const char*, size_t)> writer)
-      : Pickler(writer, nullptr, nullptr, nullptr) {}
+      : Pickler(std::move(writer), nullptr, nullptr, nullptr) {}
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Pickler(
       std::function<void(const char*, size_t)> writer,
       std::vector<at::Tensor>* tensor_table,
       std::function<c10::QualifiedName(const c10::ClassTypePtr&)> type_renamer,
-      std::vector<c10::ClassTypePtr>* memorized_class_types)
-      : writer_(writer),
+      std::vector<c10::ClassTypePtr>* memoized_class_types,
+      std::function<std::string(const at::Tensor&)> get_tensor_id = nullptr)
+      : writer_(std::move(writer)),
         tensor_table_(tensor_table),
-        type_renamer_(type_renamer),
-        memorized_class_types_(memorized_class_types) {}
+        type_renamer_(std::move(type_renamer)),
+        memoized_class_types_(memoized_class_types),
+        get_tensor_id_(std::move(get_tensor_id)) {}
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   ~Pickler();
 
   // Push protocol onto the stack
@@ -159,12 +165,14 @@ class TORCH_API Pickler {
   void endTypeTag(const IValue& value);
   void pushBool(bool value);
   void pushDouble(double value);
+  void pushComplexDouble(const IValue& value);
   void pushGenericList(const IValue& ivalue);
   void pushIntList(const IValue& ivalue);
   void pushList(const IValue& ivalue);
   void pushTensor(const IValue& ivalue);
   void pushTensorReference(const IValue& ivalue);
   void pushLiteralTensor(const IValue& ivalue);
+  void pushLiteralSparseTensor(const at::Tensor& tensor);
   void pushTuple(const IValue& ivalue);
   void pushString(const std::string& string);
   void pushDevice(const IValue& ivalue);
@@ -208,7 +216,7 @@ class TORCH_API Pickler {
   // the left of a '::', its type cannot be deduced by the compiler so one must
   // explicitly instantiate the template, i.e. push<int>(int) works, push(int)
   // does not)
-  static constexpr size_t kBufferSize = 256;
+  static CONSTEXPR_EXCEPT_WIN_CUDA size_t kBufferSize = 256;
   template <typename T>
   void push(typename std::common_type<T>::type value) {
     const char* begin = reinterpret_cast<const char*>(&value);
@@ -252,7 +260,11 @@ class TORCH_API Pickler {
   std::function<c10::QualifiedName(const c10::ClassTypePtr&)> type_renamer_;
 
   // List of all the types that it wrote, inspect from the IValues it wrote.
-  std::vector<c10::ClassTypePtr>* memorized_class_types_;
+  std::vector<c10::ClassTypePtr>* memoized_class_types_;
+
+  // Function to grab next id_name for tensor storage, function is responsible
+  // for returning unique ids
+  std::function<std::string(const at::Tensor&)> get_tensor_id_;
 
   // List of tensor storages to serialize in the same binary as the pickle data
   // similar to ivalues, they are memoized using BINPUT

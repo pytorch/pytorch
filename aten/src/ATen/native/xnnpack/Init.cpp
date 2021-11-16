@@ -32,7 +32,7 @@ bool initialize() {
   return is_initialized_;
 }
 
-bool deinitialize() {
+bool C10_UNUSED deinitialize() {
   using namespace internal;
 
   // This implementation allows for retries.

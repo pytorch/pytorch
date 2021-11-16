@@ -1,19 +1,18 @@
-#include <ATen/ATen.h>
-#include <ATen/native/SortingUtils.h>
+#pragma once
+#include <ATen/core/TensorBase.h>
+#include <ATen/ceil_div.h>
+#include <ATen/NumericUtils.h>
 #include <assert.h>
 #include <c10/macros/Macros.h>
 #include <stdlib.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
-#include <THC/THCDeviceUtils.cuh> // only for THCRoundUp?
-#include <THC/THCNumerics.cuh>
-#include <THC/THCScanUtils.cuh>
-#include <THC/THCTensorMathReduce.cuh> // AddOp
 
 namespace at {
 namespace native {
 
-#if defined(__HIP_PLATFORM_HCC__)
+// Is this questionable namespace pollution?
+#if defined(USE_ROCM)
 constexpr int MAX_BLOCK_SIZE = 256;
 
 #else
@@ -33,11 +32,11 @@ static bool getGridFromTiles(int64_t gridTiles, dim3& grid) {
   int64_t gridZ = 1;
 
   if (gridTiles > MAX_GRID_SIZE) {
-    gridTiles = cuda::ATenCeilDiv(gridTiles, MAX_GRID_SIZE);
+    gridTiles = ceil_div(gridTiles, MAX_GRID_SIZE);
     gridY = gridTiles > MAX_GRID_SIZE ? MAX_GRID_SIZE : gridTiles;
 
     if (gridTiles > MAX_GRID_SIZE) {
-      gridTiles = cuda::ATenCeilDiv(gridTiles, MAX_GRID_SIZE);
+      gridTiles = ceil_div(gridTiles, MAX_GRID_SIZE);
       gridZ = gridTiles > MAX_GRID_SIZE ? MAX_GRID_SIZE : gridTiles;
     }
   }
@@ -47,20 +46,16 @@ static bool getGridFromTiles(int64_t gridTiles, dim3& grid) {
 }
 
 template <typename scalar_t, bool handleNaN = false>
-struct ThrustGTOp {
+struct GTOp {
   __device__ bool operator()(const scalar_t& lhs, const scalar_t& rhs) const {
-    return (handleNaN && THCNumerics<scalar_t>::isnan(lhs) &&
-            !THCNumerics<scalar_t>::isnan(rhs)) ||
-        THCNumerics<scalar_t>::gt(lhs, rhs);
+    return (handleNaN && at::_isnan(lhs) && !at::_isnan(rhs)) || (lhs > rhs);
   }
 };
 
 template <typename scalar_t, bool handleNaN = false>
-struct ThrustLTOp {
+struct LTOp {
   __device__ bool operator()(const scalar_t& lhs, const scalar_t& rhs) const {
-    return (handleNaN && THCNumerics<scalar_t>::isnan(rhs) &&
-            !THCNumerics<scalar_t>::isnan(lhs)) ||
-        THCNumerics<scalar_t>::lt(lhs, rhs);
+    return (handleNaN && at::_isnan(rhs) && !at::_isnan(lhs)) || (lhs < rhs);
   }
 };
 
@@ -68,35 +63,6 @@ template <typename index_t>
 __device__ __forceinline__ index_t getLinearBlockId() {
   return blockIdx.z * gridDim.y * gridDim.x + blockIdx.y * gridDim.x +
       blockIdx.x;
-}
-
-// `base` is the base address of a tensor
-// For each slice (defined as a linear point of `out`, from 0 ->
-// (sliceSize - 1) * sliceStride, we fill that slice from `0` to
-// `sliceSize - 1`.
-template <typename index_t, int Dim>
-#ifdef __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS_1(1024)
-#endif
-__global__ void fillSliceWithIndex_kernel(
-    cuda::detail::TensorInfo<int64_t, index_t> out,
-    index_t totalSlices,
-    index_t sliceSize,
-    index_t sliceStride) {
-  index_t slice = getLinearBlockId<index_t>();
-
-  if (slice >= totalSlices) {
-    return;
-  }
-
-  const uint64_t offset =
-      cuda::detail::IndexToOffset<int64_t, index_t, Dim>::get(slice, out);
-  int64_t* base = &out.data[offset];
-
-  for (int64_t i = threadIdx.x; i < sliceSize; i += blockDim.x) {
-    // Torch indices are 1-based (hence the +1)
-    base[i * sliceStride] = i;
-  }
 }
 
 // For slice sorting in Thrust; extracts a slice index from a linear
@@ -143,11 +109,12 @@ static uint64_t nextHighestPowerOf2(uint64_t n) {
 }
 
 
+// WARNING: This function assumes input tensors are contiguous
 template <typename scalar_t, typename index_t, typename Launcher>
 void run_launcher(
-    Tensor& values,
-    Tensor& indices,
-    const Tensor& self,
+    const TensorBase &values,
+    const TensorBase &indices,
+    const TensorBase &self,
     int64_t dim,
     Launcher l) {
   auto self_info = cuda::detail::getTensorInfo<scalar_t, index_t>(self);

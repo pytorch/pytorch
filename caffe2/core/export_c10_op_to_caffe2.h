@@ -46,8 +46,9 @@ class C10OperatorWrapper final : public Operator<Context> {
     AT_ASSERT(
         !has_preallocated_outputs_ ||
         op_.schema().arguments().back().type()->isSubtypeOf(
-            OptionalType::create(ListType::ofTensors())));
+            *OptionalType::create(ListType::ofTensors())));
 
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     AT_ASSERT(operator_def.output_size() == op_.schema().returns().size());
     AT_ASSERT(
         operator_def.input_size() + (has_preallocated_outputs_ ? 1 : 0) <=
@@ -88,26 +89,27 @@ class C10OperatorWrapper final : public Operator<Context> {
 
         AT_ASSERTM(
             argument.type()->isSubtypeOf(
-                OptionalType::create(ListType::ofTensors())),
+                *OptionalType::create(ListType::ofTensors())),
             "Error in caffe2->c10 wrapper: Operator schema has a parameter named ",
             detail::PREALLOCATED_OUTPUT_ARGNAME,
             ", but it's not of type TensorList?");
         stack_.emplace_back(preallocated_outputs_());
 
-      } else if (argument.type()->isSubtypeOf(TensorType::get())) {
+      } else if (argument.type()->isSubtypeOf(*TensorType::get())) {
         AT_ASSERTM(
+            // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
             input_tensor_index < InputSize(),
             "Error in caffe2->c10 wrapper: Too few tensor arguments given (",
             InputSize(),
             "), operator schema expected more.");
         stack_.emplace_back(at::Tensor(Input(input_tensor_index++)));
-      } else if (argument.type()->isSubtypeOf(OptionalType::ofTensor())) {
+      } else if (argument.type()->isSubtypeOf(*OptionalType::ofTensor())) {
         if (input_tensor_index < InputSize()) {
           stack_.emplace_back(at::Tensor(Input(input_tensor_index++)));
         } else {
           stack_.emplace_back(IValue());
         }
-      } else if (argument.type()->isSubtypeOf(ListType::ofTensors())) {
+      } else if (argument.type()->isSubtypeOf(*ListType::ofTensors())) {
         AT_ASSERTM(
             input_tensor_index == 0,
             "Error in caffe2->c10 wrapper: Schema can only have either one or more Tensor inputs or one TensorList input.");
@@ -143,6 +145,7 @@ class C10OperatorWrapper final : public Operator<Context> {
   c10::List<at::Tensor> array_inputs_() {
     c10::List<at::Tensor> result;
     result.reserve(InputSize());
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (size_t i = 0; i < InputSize(); ++i) {
       result.emplace_back(Input(i));
     }
@@ -152,6 +155,7 @@ class C10OperatorWrapper final : public Operator<Context> {
   c10::List<at::Tensor> preallocated_outputs_() {
     c10::List<at::Tensor> result;
     result.reserve(OutputSize());
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (size_t i = 0; i < OutputSize(); ++i) {
       result.emplace_back(OperatorBase::OutputTensorOrUndefined(i));
     }
@@ -159,13 +163,13 @@ class C10OperatorWrapper final : public Operator<Context> {
   }
 
   IValue get_nontensor_argument_(const c10::Argument& argument) {
-    if (argument.type()->isSubtypeOf(IntType::get())) {
+    if (argument.type()->isSubtypeOf(*IntType::get())) {
       return get_nontensor_argument_<int>(
           argument.name(), argument.default_value());
-    } else if (argument.type()->isSubtypeOf(FloatType::get())) {
+    } else if (argument.type()->isSubtypeOf(*FloatType::get())) {
       return get_nontensor_argument_<double>(
           argument.name(), argument.default_value());
-    } else if (argument.type()->isSubtypeOf(BoolType::get())) {
+    } else if (argument.type()->isSubtypeOf(*BoolType::get())) {
       return get_nontensor_argument_<bool>(
           argument.name(), argument.default_value());
     } else {

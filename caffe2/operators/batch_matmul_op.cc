@@ -1,6 +1,7 @@
 #include "caffe2/operators/batch_matmul_op.h"
 
 #include "caffe2/core/operator_schema.h"
+#include "caffe2/core/types.h"
 
 namespace caffe2 {
 
@@ -15,7 +16,9 @@ vector<TensorShape> TensorInferenceForBatchMatMul(
     const auto ndim = in[0].dims_size();
     CAFFE_ENFORCE_GE(ndim, 2);
     CAFFE_ENFORCE_GE(in[1].dims_size(), 2);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int a_dim0;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int b_dim1;
     if (helper.GetSingleArgument<int>("trans_a", 0)) {
       a_dim0 = in[0].dims(ndim - 1);
@@ -57,6 +60,7 @@ vector<TensorShape> TensorInferenceForBatchMatMul(
       ndims_B = 2;
       B_broadcasted = true;
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     size_t M, N;
     if (helper.GetSingleArgument<int>("trans_a", 0)) {
       M = dims_A[ndims_A - 1];
@@ -69,11 +73,19 @@ vector<TensorShape> TensorInferenceForBatchMatMul(
       N = dims_B[ndims_B - 1];
     }
 
-    std::vector<int64_t> new_dims;
-    if (ndims_A >= ndims_B) {
-      new_dims.assign(dims_A.begin(), dims_A.end() - 2);
-    } else {
-      new_dims.assign(dims_B.begin(), dims_B.end() - 2);
+    const int ndims = std::max(ndims_A, ndims_B);
+    std::vector<int64_t> new_dims(ndims - 2);
+    std::vector<int64_t> dims_A_broadcast(ndims - 2, 1);
+    std::vector<int64_t> dims_B_broadcast(ndims - 2, 1);
+
+    std::copy_n(dims_A.begin(), ndims_A - 2, dims_A_broadcast.begin() + ndims - ndims_A);
+    std::copy_n(dims_B.begin(), ndims_B - 2, dims_B_broadcast.begin() + ndims - ndims_B);
+    for (int i = 0; i < ndims - 2; ++i) {
+      if (!dims_A_broadcast[i] || !dims_B_broadcast[i]) {
+        new_dims[i] = 0;
+      } else {
+        new_dims[i] = std::max(dims_A_broadcast[i], dims_B_broadcast[i]);
+      }
     }
     if (!A_broadcasted) {
       new_dims.push_back(M);
@@ -105,6 +117,7 @@ OpSchema::Cost CostInferenceForBatchMatMul(
   uint64_t nElemY = nElemFromDim(Y);
 
   auto ndims_A = A.dims_size();
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   size_t K;
   if (helper.GetSingleArgument<int>("trans_a", 0)) {
     K = in[0].dims(ndims_A - 2);
@@ -112,9 +125,13 @@ OpSchema::Cost CostInferenceForBatchMatMul(
     K = in[0].dims(ndims_A - 1);
   }
 
+  auto const& A_element_size_byte =
+      DataTypeToTypeMeta(A.data_type()).itemsize();
+  auto const& Y_element_size_byte =
+      DataTypeToTypeMeta(Y.data_type()).itemsize();
   c.flops = 2 * nElemY * K;
-  c.bytes_read = (nElemA + nElemB) * sizeof(A.data_type());
-  c.bytes_written = nElemY * sizeof(Y.data_type());
+  c.bytes_read = (nElemA + nElemB) * A_element_size_byte;
+  c.bytes_written = nElemY * Y_element_size_byte;
   c.params_bytes = 0;
   return c;
 }
@@ -161,7 +178,9 @@ class GetBatchMatMulGradient : public GradientMakerBase {
         "Gradient is currently not supported with "
         "broadcast=1 for BatchMatMul.");
 
+    // NOLINTNEXTLINE(modernize-use-bool-literals)
     bool trans_a = 0;
+    // NOLINTNEXTLINE(modernize-use-bool-literals)
     bool trans_b = 0;
 
     if (ArgumentHelper::HasArgument(Def(), "trans_a")) {
@@ -174,72 +193,76 @@ class GetBatchMatMulGradient : public GradientMakerBase {
     auto no_trans_arg = vector<Argument>();
     auto trans_a_arg = vector<Argument>{MakeArgument<int>("trans_a", 1)};
     auto trans_b_arg = vector<Argument>{MakeArgument<int>("trans_b", 1)};
-    auto trans_both_arg = vector<Argument>{MakeArgument<int>("trans_a", 1),
-                                           MakeArgument<int>("trans_b", 1)};
+    auto trans_both_arg = vector<Argument>{
+        MakeArgument<int>("trans_a", 1), MakeArgument<int>("trans_b", 1)};
 
     if (trans_a) {
       if (trans_b) {
         // A'B':
         // dA = B'G', dB = G'A'
-        return vector<OperatorDef>{CreateOperatorDef(
-                                       "BatchMatMul",
-                                       "",
-                                       vector<string>{I(1), GO(0)},
-                                       vector<string>{GI(0)},
-                                       trans_both_arg),
-                                   CreateOperatorDef(
-                                       "BatchMatMul",
-                                       "",
-                                       vector<string>{GO(0), I(0)},
-                                       vector<string>{GI(1)},
-                                       trans_both_arg)};
+        return vector<OperatorDef>{
+            CreateOperatorDef(
+                "BatchMatMul",
+                "",
+                vector<string>{I(1), GO(0)},
+                vector<string>{GI(0)},
+                trans_both_arg),
+            CreateOperatorDef(
+                "BatchMatMul",
+                "",
+                vector<string>{GO(0), I(0)},
+                vector<string>{GI(1)},
+                trans_both_arg)};
       } else {
         // A'B:
         // dA = BG', dB = AG
-        return vector<OperatorDef>{CreateOperatorDef(
-                                       "BatchMatMul",
-                                       "",
-                                       vector<string>{I(1), GO(0)},
-                                       vector<string>{GI(0)},
-                                       trans_b_arg),
-                                   CreateOperatorDef(
-                                       "BatchMatMul",
-                                       "",
-                                       vector<string>{I(0), GO(0)},
-                                       vector<string>{GI(1)},
-                                       no_trans_arg)};
+        return vector<OperatorDef>{
+            CreateOperatorDef(
+                "BatchMatMul",
+                "",
+                vector<string>{I(1), GO(0)},
+                vector<string>{GI(0)},
+                trans_b_arg),
+            CreateOperatorDef(
+                "BatchMatMul",
+                "",
+                vector<string>{I(0), GO(0)},
+                vector<string>{GI(1)},
+                no_trans_arg)};
       }
     } else {
       if (trans_b) {
         // AB':
         // dA = GB, dB = G'A
-        return vector<OperatorDef>{CreateOperatorDef(
-                                       "BatchMatMul",
-                                       "",
-                                       vector<string>{GO(0), I(1)},
-                                       vector<string>{GI(0)},
-                                       no_trans_arg),
-                                   CreateOperatorDef(
-                                       "BatchMatMul",
-                                       "",
-                                       vector<string>{GO(0), I(0)},
-                                       vector<string>{GI(1)},
-                                       trans_a_arg)};
+        return vector<OperatorDef>{
+            CreateOperatorDef(
+                "BatchMatMul",
+                "",
+                vector<string>{GO(0), I(1)},
+                vector<string>{GI(0)},
+                no_trans_arg),
+            CreateOperatorDef(
+                "BatchMatMul",
+                "",
+                vector<string>{GO(0), I(0)},
+                vector<string>{GI(1)},
+                trans_a_arg)};
       } else {
         // AB:
         // dA = GB', dB = A'G
-        return vector<OperatorDef>{CreateOperatorDef(
-                                       "BatchMatMul",
-                                       "",
-                                       vector<string>{GO(0), I(1)},
-                                       vector<string>{GI(0)},
-                                       trans_b_arg),
-                                   CreateOperatorDef(
-                                       "BatchMatMul",
-                                       "",
-                                       vector<string>{I(0), GO(0)},
-                                       vector<string>{GI(1)},
-                                       trans_a_arg)};
+        return vector<OperatorDef>{
+            CreateOperatorDef(
+                "BatchMatMul",
+                "",
+                vector<string>{GO(0), I(1)},
+                vector<string>{GI(0)},
+                trans_b_arg),
+            CreateOperatorDef(
+                "BatchMatMul",
+                "",
+                vector<string>{I(0), GO(0)},
+                vector<string>{GI(1)},
+                trans_a_arg)};
       }
     }
   }

@@ -317,6 +317,40 @@ typedef void (*pytorch_q8gemm_dq_ukernel_function)(
     size_t output_channel_index,
     const struct pytorch_qnnp_conv_dynamic_quantization_params* quantization_params);
 
+typedef void (*pytorch_q8gemm_dq_sparse_ukernel_function)(
+    size_t mr,
+    size_t nr,
+    const uint8_t* a,
+    size_t a_stride,
+    const uint8_t* packed_w,
+    const uint32_t* w_row_ptr,
+    const uint32_t* w_block_ids_ptr,
+    const float* bias,
+    float* c,
+    size_t c_stride,
+    size_t output_channel_index,
+    const struct pytorch_qnnp_conv_dynamic_quantization_params* quantization_params);
+
+typedef void (*pytorch_q8gemm_dq_sparse_packedA_ukernel_function)(
+    size_t mr,
+    size_t nr,
+    const uint8_t* a_packed,
+    const uint8_t* packed_w,
+    const uint32_t* w_row_ptr,
+    const uint32_t* w_block_ids_ptr,
+    const float* bias,
+    float* c,
+    size_t c_stride,
+    size_t output_channel_index,
+    const struct pytorch_qnnp_conv_dynamic_quantization_params* quantization_params);
+
+typedef void (*pytorch_q8gemm_sparse_packA_ukernel_function)(
+    const size_t mr,
+    const size_t K,
+    const uint8_t* a,
+    const size_t a_stride,
+    uint8_t* a_packed);
+
 typedef void (*pytorch_q8conv_ukernel_function)(
     size_t mr,
     size_t nr,
@@ -496,6 +530,19 @@ struct pytorch_q8conv_parameters {
   uint8_t kr;
 };
 
+struct pytorch_q8gemm_sparse_parameters {
+  pytorch_q8gemm_dq_sparse_ukernel_function gemm_dq;
+  pytorch_q8gemm_dq_sparse_packedA_ukernel_function packedA_gemm_dq;
+  pytorch_q8gemm_sparse_packA_ukernel_function packA;
+  uint8_t mr;
+  uint8_t nr;
+  uint8_t kr;
+  uint8_t log2_mr;
+  uint8_t log2_row_block_size;
+  uint32_t row_block_size;
+  uint32_t col_block_size;
+};
+
 struct pytorch_q8conv_xzp_parameters {
   pytorch_q8gemm_xzp_ukernel_function gemm;
   /* no conv ukernel */
@@ -557,6 +604,8 @@ struct pytorch_x8zip_parameters {
 
 struct pytorch_qnnp_parameters {
   struct pytorch_q8conv_parameters q8conv;
+  struct pytorch_q8gemm_sparse_parameters q8gemm_sparse_c1x4;
+  struct pytorch_q8gemm_sparse_parameters q8gemm_sparse_c8x1;
   struct pytorch_q8conv_xzp_parameters q8conv_xzp;
   struct pytorch_q8dwconv_up_parameters q8dw9;
   struct pytorch_q8dwconv_mp_parameters q8dw25;

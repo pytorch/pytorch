@@ -146,7 +146,7 @@ class TreeWalker {
       return size;
     }
 
-    inline const TypeMeta& meta() const {
+    inline const TypeMeta meta() const {
       return walker_.input(fieldId_).dtype();
     }
 

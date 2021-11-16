@@ -18,7 +18,7 @@ Shader::Layout::Factory::Factory(const GPU& gpu)
 
 Shader::Layout::Factory::Handle Shader::Layout::Factory::operator()(
     const Descriptor& descriptor) const {
-  c10::SmallVector<VkDescriptorSetLayoutBinding, 8u> bindings;
+  c10::SmallVector<VkDescriptorSetLayoutBinding, 6u> bindings;
 
   uint32_t binding = 0u;
   for (const VkDescriptorType type : descriptor.signature) {
@@ -58,6 +58,10 @@ Shader::Layout::Factory::Handle Shader::Layout::Factory::operator()(
 
 Shader::Layout::Cache::Cache(Factory factory)
   : cache_(std::move(factory)) {
+}
+
+void Shader::Layout::Cache::purge() {
+  cache_.purge();
 }
 
 #ifdef USE_VULKAN_SHADERC_RUNTIME

@@ -8,37 +8,29 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-/*
- * Nodes in here are intended to be "user facing" users in this sense being
- * those that want to be able to generate CUDA code.
- */
+//! Nodes in here are intended to be "user facing" users in this sense being
+//! those that want to be able to generate CUDA code.
 
 namespace torch {
 namespace jit {
 namespace fuser {
 namespace cuda {
 
-/*
- * A Bool value.
- * This value can be a symbolic value (defined after the kernel
- * is compiled) or a constant value (inlined into the kernel definition).
- */
-class TORCH_CUDA_API Bool : public Val {
- public:
-  ~Bool() = default;
+class WelfordResult;
 
+//! A Bool value
+//!
+//! This value can be a symbolic value (defined after the kernel
+//! is compiled) or a constant value (inlined into the kernel definition).
+//!
+class TORCH_CUDA_CU_API Bool : public Val {
+ public:
   Bool() : Val(ValType::Scalar, DataType::Bool), maybe_value_{c10::nullopt} {}
 
-  explicit Bool(bool _value)
-      : Val(ValType::Scalar, DataType::Bool), maybe_value_{_value} {}
+  explicit Bool(bool value)
+      : Val(ValType::Scalar, DataType::Bool), maybe_value_{value} {}
 
   Bool(const Bool* src, IrCloner* ir_cloner);
-
-  Bool(const Bool& other) = delete;
-  Bool& operator=(const Bool& other) = delete;
-
-  Bool(Bool&& other) = delete;
-  Bool& operator=(Bool&& other) = delete;
 
   bool isSymbolic() const {
     return !(maybe_value_.has_value());
@@ -50,35 +42,26 @@ class TORCH_CUDA_API Bool : public Val {
     return maybe_value_;
   }
 
-  bool sameAs(const Bool* const other) const;
+  bool sameAs(const Statement* other) const override;
 
  private:
   const c10::optional<bool> maybe_value_;
 };
 
-/*
- * A Float32 value. For now we don't have any other type besides
- * Float32. This value can be a symbolic value (defined after the kernel
- * is compiled) or a constant value (inlined into the kernel definition).
- */
-class TORCH_CUDA_API Float : public Val {
+//! A Float64 value. For now we don't have any other type besides
+//! Float64. This value can be a symbolic value (defined after the kernel
+//! is compiled) or a constant value (inlined into the kernel definition).
+class TORCH_CUDA_CU_API Double : public Val {
  public:
   using ScalarType = double;
 
-  ~Float() = default;
+  Double()
+      : Val(ValType::Scalar, DataType::Double), maybe_value_{c10::nullopt} {}
 
-  Float() : Val(ValType::Scalar, DataType::Float), maybe_value_{c10::nullopt} {}
+  explicit Double(ScalarType value)
+      : Val(ValType::Scalar, DataType::Double), maybe_value_{value} {}
 
-  explicit Float(ScalarType _value)
-      : Val(ValType::Scalar, DataType::Float), maybe_value_{_value} {}
-
-  Float(const Float* src, IrCloner* ir_cloner);
-
-  Float(const Float& other) = delete;
-  Float& operator=(const Float& other) = delete;
-
-  Float(Float&& other) = delete;
-  Float& operator=(Float&& other) = delete;
+  Double(const Double* src, IrCloner* ir_cloner);
 
   bool isSymbolic() const {
     return !(maybe_value_.has_value());
@@ -90,70 +73,24 @@ class TORCH_CUDA_API Float : public Val {
     return maybe_value_;
   }
 
-  bool sameAs(const Float* const other) const;
+  bool sameAs(const Statement* other) const override;
 
  private:
   const c10::optional<ScalarType> maybe_value_;
 };
 
-/*
- * An IEEE 754 Float16 value.
- * This value can be a symbolic value (defined after the kernel
- * is compiled) or a constant value (inlined into the kernel definition).
- */
-class TORCH_CUDA_API Half : public Val {
- public:
-  ~Half() = default;
-
-  Half() : Val(ValType::Scalar, DataType::Half), maybe_value_{c10::nullopt} {}
-
-  explicit Half(float _value)
-      : Val(ValType::Scalar, DataType::Half), maybe_value_{_value} {}
-
-  Half(const Half* src, IrCloner* ir_cloner);
-
-  Half(const Half& other) = delete;
-  Half& operator=(const Half& other) = delete;
-
-  Half(Half&& other) = delete;
-  Half& operator=(Half&& other) = delete;
-
-  bool isSymbolic() const {
-    return !(maybe_value_.has_value());
-  }
-  bool isConst() const {
-    return maybe_value_.has_value();
-  }
-  c10::optional<float> value() const {
-    return maybe_value_;
-  }
-
-  bool sameAs(const Half* const other) const;
-
- private:
-  const c10::optional<float> maybe_value_;
-};
-
-// An Int64 value. If used for indexing it's set as size_t. Otherwise it's an
-// inlined literal in the kernel.
-class TORCH_CUDA_API Int : public Val {
+//! An Int64 value. If used for indexing it's set as size_t. Otherwise it's an
+//! inlined literal in the kernel.
+class TORCH_CUDA_CU_API Int : public Val {
  public:
   using ScalarType = int64_t;
 
-  ~Int() = default;
-
   Int() : Val(ValType::Scalar, DataType::Int), maybe_value_{c10::nullopt} {}
 
-  explicit Int(ScalarType _value)
-      : Val(ValType::Scalar, DataType::Int), maybe_value_{_value} {}
+  explicit Int(ScalarType value)
+      : Val(ValType::Scalar, DataType::Int), maybe_value_{value} {}
 
   Int(const Int* src, IrCloner* ir_cloner);
-
-  Int(const Int& other) = delete;
-  Int& operator=(const Int& other) = delete;
-
-  Int(Int&& other) = delete;
-  Int& operator=(Int&& other) = delete;
 
   bool isSymbolic() const {
     return !(maybe_value_.has_value());
@@ -165,59 +102,62 @@ class TORCH_CUDA_API Int : public Val {
     return maybe_value_;
   }
 
-  bool sameAs(const Int* const other) const;
+  bool sameAs(const Statement* other) const override;
 
  private:
   const c10::optional<ScalarType> maybe_value_;
 };
 
+//! Mode during propagation of computeAt, standard will throw an error if
+//! computeAt position provided can't be satisfied, best effort will lower the
+//! computeAt position as needed during traversal, most inlined will increase
+//! the compute at position to maximum possible through traversal.
+enum class ComputeAtMode { Standard, BestEffort, MostInlined };
+
 class ComputeAt;
-class TransformReplay;
+class TransformPropagator;
 class TransformIter;
+class TransformReplay;
 class OptOutMutator;
-class LoopNestGenerator;
 
 namespace ir_utils {
 class TVDomainGuard;
 }
 
-// TensorView is our primitive Tensor Type used in code generation. It can be
-// thought of as representing physical memory, however, its dimensionality is
-// modifed as split/merge/computeAt functions are called. The history of
-// these transformations are kept and used for generating actual code referncing
-// physical memory. Generally when users are thinking of code generation in
-// reference to a Tensor, this is the class they should be interacting with.
-//
-// The reason we need both TensorView and TensorDomain is that we need to have a
-// record of both what is being computed and how it is being computed. For
-// example we may have the operation: TV3[I, J, K] = TV2[I, J, K] + TV1[I, J, K]
-// The mathematical operations here are on the tensor views TV1, TV2, and TV3.
-// This operation is a pointwise operation. To compute this pointwise operation
-// we iterate over the 3D TensorDomain [I, J, K], where K is the fastest
-// changing dimension.
-//
-// TODO: Need to work on the const model for TensorView, making all functions
-// that should be const, const. Gave this a try but expanded really quickly.
-// getComputeAtAxis not being const because it can return a TV that some expect
-// to be non-const is the biggest headache.
-class TORCH_CUDA_API TensorView : public Val {
+//! TensorView is our primitive Tensor Type used in code generation. It can be
+//! thought of as representing physical memory, however, its dimensionality is
+//! modifed as split/merge/computeAt functions are called. The history of
+//! these transformations are kept and used for generating actual code
+//! referncing physical memory. Generally when users are thinking of code
+//! generation in reference to a Tensor, this is the class they should be
+//! interacting with.
+//!
+//! The reason we need both TensorView and TensorDomain is that we need to have
+//! a record of both what is being computed and how it is being computed. For
+//! example we may have the operation:
+//!
+//!   TV3[I, J, K] = TV2[I, J, K] + TV1[I, J, K]
+//!
+//! The mathematical operations here are on the tensor views TV1, TV2, and
+//! TV3. This operation is a pointwise operation. To compute this pointwise
+//! operation we iterate over the 3D TensorDomain [I, J, K], where K is the
+//! fastest changing dimension.
+//!
+//! \todo Need to work on the const model for TensorView, making all functions
+//! that should be const, const. Gave this a try but expanded really quickly.
+//! getComputeAtAxis not being const because it can return a TV that some expect
+//! to be non-const is the biggest headache.
+//!
+class TORCH_CUDA_CU_API TensorView : public Val {
  public:
-  ~TensorView() = default;
-
-  TensorView(const TensorView& other) = delete;
-  TensorView& operator=(const TensorView& other) = delete;
-
-  TensorView(TensorView&& other) = delete;
-  TensorView& operator=(TensorView&& other) = delete;
-
   TensorView(
-      TensorDomain* _domain,
+      TensorDomain* domain,
       DataType dtype,
       MemoryType mtype = MemoryType::Local);
 
-  TensorView(const std::shared_ptr<c10::TensorType>& tensor_type);
+  explicit TensorView(const std::shared_ptr<c10::TensorType>& tensor_type);
 
-  TensorView(const std::shared_ptr<Value>& jit_value)
+  explicit TensorView(const std::shared_ptr<Value>& jit_value)
       : TensorView(jit_value->type()->cast<c10::TensorType>()) {}
 
   TensorView(const TensorView* src, IrCloner* ir_cloner);
@@ -229,9 +169,14 @@ class TORCH_CUDA_API TensorView : public Val {
   bool hasReduction() const;
   bool hasBlockReduction() const;
   bool hasGridReduction() const;
-  bool hasBlockBroadcast() const;
   bool hasBroadcast() const;
   bool hasRFactor() const;
+
+  //! This is the previous hasReduction logic,
+  //! kept here exclusively for lower loop pass will
+  //! deprecate when Fusion IR pass can convert
+  //! trivial reductions
+  bool hasAnyReduction() const;
 
   c10::optional<unsigned int> getReductionAxis() const;
 
@@ -245,66 +190,71 @@ class TORCH_CUDA_API TensorView : public Val {
 
   IterDomain* axis(int pos) const;
 
-  // Is there an active computeAt TensorView/Axis
+  // Does it share outer axes with other tensors?
   bool hasComputeAt() const {
-    return compute_at_view_ != nullptr;
+    return compute_at_pos_ > 0;
   }
 
-  // Return the TensorView we're computing at
-  TensorView* getComputeAtView() const {
-    return compute_at_view_;
+  bool hasMaxProducerPosition() const {
+    return max_producer_pos_ > 0;
   }
 
   size_t nDims() const;
 
-  // Return compute at axis relative to this domain
-  unsigned int getThisComputeAtAxis() const {
-    return this_compute_at_axis_;
+  // Returns the position that this tensor is produced at relative to its axes.
+  unsigned int getComputeAtPosition() const {
+    return compute_at_pos_;
   }
 
-  // Return compute at axis relative to compute at view
-  unsigned int getRelativeComputeAtAxis() const {
-    return relative_compute_at_axis_;
+  // Returns the maximum position of producers are being computed at relative to
+  // this tensor. This position dictates the clear expectations of producers.
+  unsigned int getMaxProducerPosition() const {
+    return max_producer_pos_;
   }
 
-  // Return position in compute_at_view that lines up with this->axis(pos)?
-  int getComputeAtRelPos(int pos);
+  //! This is used when we disconnect a tensorview from a reduction
+  //!  operation and connect it to a non-reduction operator. We need
+  //!  to remove the reduction ids on the tv in this case.
+  //! Currently only used in translate welford, and this function may
+  //!  be refactored or extended if any more use cases appear.
+  void clearReductionIterDomains();
 
-  // Will check if an axis is inside computeAtAxis and will fetch the reference
-  // to be used in code generation.
-  std::pair<int, TensorView*> getComputeAtPos(int pos) {
-    pos = normalizeAxisPos(pos);
-    TORCH_INTERNAL_ASSERT(
-        nDims() > 0, "Tried to access a computeAt axis in a 0-dim TensorView");
-    if (!hasComputeAt() || getThisComputeAtAxis() <= (unsigned int)pos)
-      return std::make_pair(pos, this);
-    return compute_at_view_->getComputeAtPos(getComputeAtRelPos(pos));
-  }
+  //! Compute this TensorView relative to a consumer position, -1 will
+  //! compute tensors inline with each other, 0 doesn't share
+  //! any loop nests between the tensors. It's an error when the given
+  //! position is not legally viable. Alternatively, when the mode
+  //! parameter is ComputeAtMode::BestEffort, the position is lowered
+  //! one by one until a valid position is found. When
+  //! ComputeAtMode::MostInlined is given, the position parameter is
+  //! ignored, and the deepest possible position is searched.
+  TensorView* computeAt(
+      TensorView* consumer,
+      int position,
+      ComputeAtMode mode = ComputeAtMode::Standard);
 
-  std::pair<IterDomain*, TensorView*> getComputeAtAxis(int pos) {
-    const auto computeAtPos = getComputeAtPos(pos);
-    return std::make_pair(
-        computeAtPos.second->axis(computeAtPos.first), computeAtPos.second);
-  }
+  //! Compute this tensor to consumer, at local position, -1 will compute
+  //! tensors inline with eachother, 0 doesn't share any loop nests between the
+  //! tensors. The mode parameter can be used in the same manner as computeAt.
+  TensorView* computeWith(
+      TensorView* consumer,
+      int position,
+      ComputeAtMode mode = ComputeAtMode::Standard);
 
-  // Compute this TensorView relative to another tensor at axis
-  TensorView* computeAt(TensorView* consumer, int axis);
-
-  void clearComputeAt() {
-    this_compute_at_axis_ = 0;
-    relative_compute_at_axis_ = 0;
-    compute_at_view_ = nullptr;
-  }
-
-  // Split "axis" into 2 axes where the inner axes is size of "factor"
-  // and outer axis is size axis.size() / factor
-  TensorView* split(int axis, unsigned int factor);
+  // Split "axis" into 2 axes
+  //! inner_split dictates if the factor section of the split should be inside
+  //! the
+  //! remainer or outside.
+  //! e.g. split(0, 4, inner_split = true) will result in:
+  //! tv[id{extent}] -> tv[id{ceilDiv(extent, factor)}, id{factor}]
+  //! e.g. split(0, 4, inner_split = false) will result in:
+  //! tv[id{extent}] -> tv[id{factor}, id{ceilDiv(extent, factor)}]
+  TensorView* split(int axis, unsigned int factor, bool inner_split = true);
 
   // Split "axis" into 2 axes where the inner axes is size of "factor"
   // and outer axis is size axis.size() / factor. Factor can be a symbolic
   // value instead of constant. This requires setting the symbolic value as an
   // input, or using a parallel dim from NamedScalar::getParallelDim
-  TensorView* split(int axis, Val* factor);
+  TensorView* split(int axis, Val* factor, bool inner_split = true);
 
   // Merge axis_o and axis_i into 1 IterDomain
   TensorView* merge(int axis_o, int axis_i);
@@ -316,6 +266,17 @@ class TORCH_CUDA_API TensorView : public Val {
 
   // Reorder axes according to old2new[old_pos] = new_pos
   TensorView* reorder(const std::unordered_map<int, int>& old2new);
+
+  //! Swizzle indices to improve memory access efficiency.
+  //!
+  //! Swizzle::Transpose is a pattern commonly used to avoid bank
+  //! conflicts in shared memory. It takes two axes and shifts the
+  //! second axis by the first axis as ((axis1 + axis2) % extent). The
+  //! memory type must be Shared.
+  //!
+  //! \input type Swizzle pattern such as transpose.
+  //! \input axes Axes to swizzle
+  TensorView* swizzle(SwizzleType type, const std::vector<int>& axes);
 
   // WARNING: rFactor does not return this TensorView, ir returns a new
   //  tensorview consumed by this!
@@ -337,6 +298,15 @@ class TORCH_CUDA_API TensorView : public Val {
   //
   TensorView* rFactor(const std::vector<int>& axes);
 
+  //! Welford Version of rFactor, semantically similar with
+  //!  the reduction version except that the rfactor is done
+  //!  in a multi-output scan pattern
+  WelfordResult rFactor(
+      const std::vector<int>& axes,
+      TensorView* avg,
+      TensorView* var,
+      TensorView* n);
+
   // Create a TensorView before the original tensor. A common use case is to
   // write results into shared memory or registers before moving to global
   // memory. Analogous to TVM Cache_Write
@@ -346,39 +316,41 @@ class TORCH_CUDA_API TensorView : public Val {
   // read tensor into shared memory or registers. Analogous to TVM Cache_Read
   TensorView* cache_after();
 
+  // For a fusion output with other uses, we want to avoid writing to global
+  // memory and then reading the output again. We write to global memory
+  // separately after an operation. We replace this fusion output with the
+  // direct write TensorView.
+  TensorView* cache_fork();
+
   MemoryType getMemoryType() const {
     return memory_type_;
   }
 
   void setMemoryType(MemoryType mt);
 
-  friend TORCH_CUDA_API TransformReplay;
-  friend TORCH_CUDA_API OptOutMutator;
-  friend TORCH_CUDA_API LoopNestGenerator;
+  SwizzleType swizzleType() const {
+    return swizzle_type_;
+  }
+
+  const std::vector<IterDomain*>& axesToSwizzle() const {
+    return axes_to_swizzle_;
+  }
+
+  friend TORCH_CUDA_CU_API TransformPropagator;
+  friend TORCH_CUDA_CU_API TransformReplay;
+  friend TORCH_CUDA_CU_API OptOutMutator;
   friend ComputeAt;
-  friend void IrFixComputeAt(Fusion*);
   friend void adjustMemoryTypes(Fusion* fusion);
   friend class ir_utils::TVDomainGuard;
 
  protected:
-  // Make an exact copy of this tensor (similar to clone()), however, also grabs
-  // the same name. Current use of this is for initialization of reductions.
-  // This will break our dependency chain as it is a literal clone of a
-  // TensorView but it has a different dependency chain. We need to improve our
-  // dependency model to allow for initailziation of reduction buffers. The only
-  // reason we can get away with this for now is because we don't use dependency
-  // analysis for the IR after we call this.
-  TensorView* unsafeClone() const;
-
   void setDomain(TensorDomain* td) {
     domain_ = td;
   }
 
-  void setComputeAt(TensorView* computeAtView, int axis);
+  void setComputeAt(unsigned int this_pos, bool decrease = false);
 
-  // Set all computeAt members without checking any correctness. Useful for
-  // computeAt with outputs relative to eachother
-  void setComputeAt(TensorView* computeAtView, int thisPos, int relPos);
+  void setMaxProducer(unsigned int this_pos, bool decrease = false);
 
  private:
   int normalizeAxisPos(int pos) const {
@@ -388,30 +360,53 @@ class TORCH_CUDA_API TensorView : public Val {
     return pos;
   }
 
-  // In Cache Before, for the origin expr of the original tensor,
-  // we create a new operation where the original tensor is replaced
-  // with the new cache tensor. This function creates a new expr
-  // given the consumer, the output of the expression.
-  void createExprConsumer(Expr* expr, TensorView* consumer);
-
-  // In Cache After, for all the uses of the original tensor, we create
-  // a new operation where the original tensor is replaced with the new
-  // cache tensor. This function creates a new expr given a producer,
-  // an input for the expression.
-  void createExprProducer(
-      Expr* expr,
-      TensorView* current,
-      TensorView* producer);
-
-  void setThisComputeAtAxis();
+  //! A helper function to maintain the consistency of welford output
+  //! schedules when doing rfactor on welford ops.
+  TensorView* welfordRfactorHelper(
+      TensorView* tv,
+      const std::vector<int>& axes);
 
  private:
   TensorDomain* domain_ = nullptr;
-  TensorView* compute_at_view_ = nullptr;
-  // compute at axis in compute at view
-  unsigned int relative_compute_at_axis_ = 0;
-  unsigned int this_compute_at_axis_ = 0;
+  unsigned int compute_at_pos_ = 0;
+  unsigned int max_producer_pos_ = 0;
   MemoryType memory_type_ = MemoryType::Local;
+  SwizzleType swizzle_type_ = SwizzleType::NoSwizzle;
+  std::vector<IterDomain*> axes_to_swizzle_;
+};
+
+//! A simple TensorView builder
+//!
+//! Example usage:
+//!
+//!   auto tv = TensorViewBuilder()
+//!       .ndims(ndims)
+//!       .dtype(dtype)
+//!       .contiguity(contiguity)
+//!       .build();
+//!
+class TORCH_CUDA_CU_API TensorViewBuilder {
+ public:
+  //! Set the number of dimensions of the tensor (default 0, meaning scalar)
+  TensorViewBuilder& ndims(size_t ndims);
+
+  //! Set the data type of the tensor (default DataType::Float)
+  TensorViewBuilder& dtype(DataType dtype);
+
+  //! Set the contiguity information (default non-contiguous)
+  TensorViewBuilder& contiguity(std::vector<bool> contiguity);
+
+  //! Set the shape (default 0 dimensional, ie. scalar)
+  TensorViewBuilder& shape(std::vector<int64_t> shape);
+
+  //! Creates a new TensorView with the specified options
+  TensorView* build() const;
+
+ private:
+  size_t ndims_ = 0;
+  DataType dtype_ = DataType::Float;
+  std::vector<bool> contiguity_;
+  std::vector<int64_t> shape_;
 };
 
 } // namespace cuda

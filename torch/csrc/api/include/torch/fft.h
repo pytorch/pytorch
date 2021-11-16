@@ -16,7 +16,7 @@ namespace fft {
 inline Tensor fft(const Tensor& self,
                   c10::optional<int64_t> n=c10::nullopt,
                   int64_t dim=-1,
-                  c10::optional<std::string> norm=c10::nullopt) {
+                  c10::optional<c10::string_view> norm=c10::nullopt) {
   return torch::fft_fft(self, n, dim, norm);
 }
 
@@ -31,7 +31,7 @@ inline Tensor fft(const Tensor& self,
 inline Tensor ifft(const Tensor& self,
                   c10::optional<int64_t> n=c10::nullopt,
                   int64_t dim=-1,
-                  c10::optional<std::string> norm=c10::nullopt) {
+                  c10::optional<c10::string_view> norm=c10::nullopt) {
   return torch::fft_ifft(self, n, dim, norm);
 }
 
@@ -46,7 +46,7 @@ inline Tensor ifft(const Tensor& self,
 inline Tensor fft2(const Tensor& self,
                    c10::optional<IntArrayRef> s=c10::nullopt,
                    IntArrayRef dim={-2, -1},
-                   c10::optional<std::string> norm=c10::nullopt) {
+                   c10::optional<c10::string_view> norm=c10::nullopt) {
   return torch::fft_fft2(self, s, dim, norm);
 }
 
@@ -61,7 +61,7 @@ inline Tensor fft2(const Tensor& self,
 inline Tensor ifft2(const Tensor& self,
                     c10::optional<IntArrayRef> s=c10::nullopt,
                     IntArrayRef dim={-2, -1},
-                    c10::optional<std::string> norm=c10::nullopt) {
+                    c10::optional<c10::string_view> norm=c10::nullopt) {
   return torch::fft_ifft2(self, s, dim, norm);
 }
 
@@ -76,7 +76,7 @@ inline Tensor ifft2(const Tensor& self,
 inline Tensor fftn(const Tensor& self,
                    c10::optional<IntArrayRef> s=c10::nullopt,
                    c10::optional<IntArrayRef> dim=c10::nullopt,
-                   c10::optional<std::string> norm=c10::nullopt) {
+                   c10::optional<c10::string_view> norm=c10::nullopt) {
   return torch::fft_fftn(self, s, dim, norm);
 }
 
@@ -91,7 +91,7 @@ inline Tensor fftn(const Tensor& self,
 inline Tensor ifftn(const Tensor& self,
                    c10::optional<IntArrayRef> s=c10::nullopt,
                    c10::optional<IntArrayRef> dim=c10::nullopt,
-                   c10::optional<std::string> norm=c10::nullopt) {
+                   c10::optional<c10::string_view> norm=c10::nullopt) {
   return torch::fft_ifftn(self, s, dim, norm);
 }
 
@@ -107,7 +107,7 @@ inline Tensor ifftn(const Tensor& self,
 inline Tensor rfft(const Tensor& self,
                   c10::optional<int64_t> n=c10::nullopt,
                   int64_t dim=-1,
-                  c10::optional<std::string> norm=c10::nullopt) {
+                  c10::optional<c10::string_view> norm=c10::nullopt) {
   return torch::fft_rfft(self, n, dim, norm);
 }
 
@@ -125,7 +125,7 @@ inline Tensor rfft(const Tensor& self,
 inline Tensor irfft(const Tensor& self,
                     c10::optional<int64_t> n=c10::nullopt,
                     int64_t dim=-1,
-                    c10::optional<std::string> norm=c10::nullopt) {
+                    c10::optional<c10::string_view> norm=c10::nullopt) {
   return torch::fft_irfft(self, n, dim, norm);
 }
 
@@ -140,7 +140,7 @@ inline Tensor irfft(const Tensor& self,
 inline Tensor rfft2(const Tensor& self,
                     c10::optional<IntArrayRef> s=c10::nullopt,
                     IntArrayRef dim={-2, -1},
-                    c10::optional<std::string> norm=c10::nullopt) {
+                    c10::optional<c10::string_view> norm=c10::nullopt) {
   return torch::fft_rfft2(self, s, dim, norm);
 }
 
@@ -155,7 +155,7 @@ inline Tensor rfft2(const Tensor& self,
 inline Tensor irfft2(const Tensor& self,
                      c10::optional<IntArrayRef> s=c10::nullopt,
                      IntArrayRef dim={-2, -1},
-                     c10::optional<std::string> norm=c10::nullopt) {
+                     c10::optional<c10::string_view> norm=c10::nullopt) {
   return torch::fft_irfft2(self, s, dim, norm);
 }
 
@@ -170,7 +170,7 @@ inline Tensor irfft2(const Tensor& self,
 inline Tensor rfftn(const Tensor& self,
                     c10::optional<IntArrayRef> s=c10::nullopt,
                     c10::optional<IntArrayRef> dim=c10::nullopt,
-                    c10::optional<std::string> norm=c10::nullopt) {
+                    c10::optional<c10::string_view> norm=c10::nullopt) {
   return torch::fft_rfftn(self, s, dim, norm);
 }
 
@@ -185,7 +185,7 @@ inline Tensor rfftn(const Tensor& self,
 inline Tensor irfftn(const Tensor& self,
                    c10::optional<IntArrayRef> s=c10::nullopt,
                    c10::optional<IntArrayRef> dim=c10::nullopt,
-                   c10::optional<std::string> norm=c10::nullopt) {
+                   c10::optional<c10::string_view> norm=c10::nullopt) {
   return torch::fft_irfftn(self, s, dim, norm);
 }
 
@@ -204,7 +204,7 @@ inline Tensor irfftn(const Tensor& self,
 inline Tensor hfft(const Tensor& self,
                    c10::optional<int64_t> n=c10::nullopt,
                    int64_t dim=-1,
-                   c10::optional<std::string> norm=c10::nullopt) {
+                   c10::optional<c10::string_view> norm=c10::nullopt) {
   return torch::fft_hfft(self, n, dim, norm);
 }
 
@@ -216,14 +216,86 @@ inline Tensor hfft(const Tensor& self,
 /// Example:
 /// ```
 /// auto T = torch::randn(128, torch::kDouble);
-/// auto t = torch::fft::ihfft(t);
+/// auto t = torch::fft::ihfft(T);
 /// assert(t.is_complex() && T.numel() == 128 / 2 + 1);
 /// ```
 inline Tensor ihfft(const Tensor& self,
                     c10::optional<int64_t> n=c10::nullopt,
                     int64_t dim=-1,
-                    c10::optional<std::string> norm=c10::nullopt) {
+                    c10::optional<c10::string_view> norm=c10::nullopt) {
   return torch::fft_ihfft(self, n, dim, norm);
+}
+
+/// Computes the 2-dimensional FFT of a Hermitian symmetric input signal.
+///
+/// The input is a onesided representation of the Hermitian symmetric time
+/// domain signal. See https://pytorch.org/docs/master/fft.html#torch.fft.hfft2.
+///
+/// Example:
+/// ```
+/// auto t = torch::randn({128, 65}, torch::kComplexDouble);
+/// auto T = torch::fft::hfft2(t, /*s=*/{128, 128});
+/// assert(T.is_floating_point() && T.numel() == 128 * 128);
+/// ```
+inline Tensor hfft2(const Tensor& self,
+                    c10::optional<IntArrayRef> s=c10::nullopt,
+                    IntArrayRef dim={-2, -1},
+                    c10::optional<c10::string_view> norm=c10::nullopt) {
+  return torch::fft_hfft2(self, s, dim, norm);
+}
+
+/// Computes the 2-dimensional IFFT of a real input signal.
+///
+/// The output is a onesided representation of the Hermitian symmetric time
+/// domain signal. See https://pytorch.org/docs/master/fft.html#torch.fft.ihfft2.
+///
+/// Example:
+/// ```
+/// auto T = torch::randn({128, 128}, torch::kDouble);
+/// auto t = torch::fft::hfft2(T);
+/// assert(t.is_complex() && t.size(1) == 65);
+/// ```
+inline Tensor ihfft2(const Tensor& self,
+                     c10::optional<IntArrayRef> s=c10::nullopt,
+                     IntArrayRef dim={-2, -1},
+                     c10::optional<c10::string_view> norm=c10::nullopt) {
+  return torch::fft_ihfft2(self, s, dim, norm);
+}
+
+/// Computes the N-dimensional FFT of a Hermitian symmetric input signal.
+///
+/// The input is a onesided representation of the Hermitian symmetric time
+/// domain signal. See https://pytorch.org/docs/master/fft.html#torch.fft.hfftn.
+///
+/// Example:
+/// ```
+/// auto t = torch::randn({128, 65}, torch::kComplexDouble);
+/// auto T = torch::fft::hfftn(t, /*s=*/{128, 128});
+/// assert(T.is_floating_point() && T.numel() == 128 * 128);
+/// ```
+inline Tensor hfftn(const Tensor& self,
+                    c10::optional<IntArrayRef> s=c10::nullopt,
+                    IntArrayRef dim={-2, -1},
+                    c10::optional<c10::string_view> norm=c10::nullopt) {
+  return torch::fft_hfftn(self, s, dim, norm);
+}
+
+/// Computes the N-dimensional IFFT of a real input signal.
+///
+/// The output is a onesided representation of the Hermitian symmetric time
+/// domain signal. See https://pytorch.org/docs/master/fft.html#torch.fft.ihfftn.
+///
+/// Example:
+/// ```
+/// auto T = torch::randn({128, 128}, torch::kDouble);
+/// auto t = torch::fft::hfft2(T);
+/// assert(t.is_complex() && t.size(1) == 65);
+/// ```
+inline Tensor ihfftn(const Tensor& self,
+                    c10::optional<IntArrayRef> s=c10::nullopt,
+                    IntArrayRef dim={-2, -1},
+                    c10::optional<c10::string_view> norm=c10::nullopt) {
+  return torch::fft_ihfftn(self, s, dim, norm);
 }
 
 /// Computes the discrete Fourier Transform sample frequencies for a signal of size n.

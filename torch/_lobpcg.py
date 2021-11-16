@@ -20,7 +20,7 @@ def _symeig_backward_complete_eigenspace(D_grad, U_grad, A, D, U):
     F.pow_(-1)
 
     # A.grad = U (D.grad + (U^T U.grad * F)) U^T
-    Ut = U.transpose(-1, -2).contiguous()
+    Ut = U.mT.contiguous()
     res = torch.matmul(
         U,
         torch.matmul(
@@ -76,7 +76,7 @@ def _polynomial_value(poly, x, zero_power, transition):
     """
     A generic method for computing poly(x) using the Horner's rule.
 
-    Arguments:
+    Args:
       poly (Tensor): the (possibly batched) 1D Tensor representing
                      polynomial coefficients such that
                      poly[..., i] = (a_{i_0}, ..., a{i_n} (==1)), and
@@ -139,7 +139,7 @@ def _vector_polynomial_value(poly, x, zero_power=None):
 def _symeig_backward_partial_eigenspace(D_grad, U_grad, A, D, U, largest):
     # compute a projection operator onto an orthogonal subspace spanned by the
     # columns of U defined as (I - UU^T)
-    Ut = U.transpose(-2, -1).contiguous()
+    Ut = U.mT.contiguous()
     proj_U_ortho = -U.matmul(Ut)
     proj_U_ortho.diagonal(dim1=-2, dim2=-1).add_(1)
 
@@ -159,7 +159,7 @@ def _symeig_backward_partial_eigenspace(D_grad, U_grad, A, D, U, largest):
             generator=gen
         )
     )
-    U_ortho_t = U_ortho.transpose(-2, -1).contiguous()
+    U_ortho_t = U_ortho.mT.contiguous()
 
     # compute the coefficients of the characteristic polynomial of the tensor D.
     # Note that D is diagonal, so the diagonal elements are exactly the roots
@@ -228,7 +228,7 @@ def _symeig_backward_partial_eigenspace(D_grad, U_grad, A, D, U, largest):
     #
     # check if `chr_poly_D_at_A_to_U_ortho` is positive-definite or negative-definite
     chr_poly_D_at_A_to_U_ortho_sign = -1 if (largest and (k % 2 == 1)) else +1
-    chr_poly_D_at_A_to_U_ortho_L = torch.cholesky(
+    chr_poly_D_at_A_to_U_ortho_L = torch.linalg.cholesky(
         chr_poly_D_at_A_to_U_ortho_sign * chr_poly_D_at_A_to_U_ortho
     )
 
@@ -262,7 +262,7 @@ def _symeig_backward(D_grad, U_grad, A, D, U, largest):
 class LOBPCGAutogradFunction(torch.autograd.Function):
 
     @staticmethod
-    def forward(ctx,
+    def forward(ctx,  # type: ignore[override]
                 A: Tensor,
                 k: Optional[int] = None,
                 B: Optional[Tensor] = None,
@@ -273,7 +273,7 @@ class LOBPCGAutogradFunction(torch.autograd.Function):
                 tol: Optional[float] = None,
                 largest: Optional[bool] = None,
                 method: Optional[str] = None,
-                tracker: Optional[None] = None,
+                tracker: None = None,
                 ortho_iparams: Optional[Dict[str, int]] = None,
                 ortho_fparams: Optional[Dict[str, float]] = None,
                 ortho_bparams: Optional[Dict[str, bool]] = None
@@ -291,7 +291,8 @@ class LOBPCGAutogradFunction(torch.autograd.Function):
             ortho_iparams, ortho_fparams, ortho_bparams
         )
 
-        ctx.save_for_backward(A, B, D, U, largest)
+        ctx.save_for_backward(A, B, D, U)
+        ctx.largest = largest
 
         return D, U
 
@@ -300,7 +301,8 @@ class LOBPCGAutogradFunction(torch.autograd.Function):
         A_grad = B_grad = None
         grads = [None] * 14
 
-        A, B, D, U, largest = ctx.saved_tensors
+        A, B, D, U = ctx.saved_tensors
+        largest = ctx.largest
 
         # lobpcg.backward has some limitations. Checks for unsupported input
         if A.is_sparse or (B is not None and B.is_sparse and ctx.needs_input_grad[2]):
@@ -345,7 +347,7 @@ def lobpcg(A: Tensor,
            tol: Optional[float] = None,
            largest: Optional[bool] = None,
            method: Optional[str] = None,
-           tracker: Optional[None] = None,
+           tracker: None = None,
            ortho_iparams: Optional[Dict[str, int]] = None,
            ortho_fparams: Optional[Dict[str, float]] = None,
            ortho_bparams: Optional[Dict[str, bool]] = None
@@ -384,7 +386,7 @@ def lobpcg(A: Tensor,
       we do the following symmetrization map: `A -> (A + A.t()) / 2`.
       The map is performed only when the `A` requires gradients.
 
-    Arguments:
+    Args:
 
       A (Tensor): the input tensor of size :math:`(*, m, m)`
 
@@ -514,8 +516,8 @@ def lobpcg(A: Tensor,
             # The symmetrization is important for first-order optimization methods,
             # so that (A - alpha * A_grad) is still a symmetric matrix.
             # Same holds for `B`.
-            A_sym = (A + A.transpose(-2, -1)) / 2
-            B_sym = (B + B.transpose(-2, -1)) / 2 if (B is not None) else None
+            A_sym = (A + A.mT) / 2
+            B_sym = (B + B.mT) / 2 if (B is not None) else None
 
             return LOBPCGAutogradFunction.apply(
                 A_sym, k, B_sym, X, n, iK, niter, tol, largest,
@@ -545,7 +547,7 @@ def _lobpcg(A: Tensor,
             tol: Optional[float] = None,
             largest: Optional[bool] = None,
             method: Optional[str] = None,
-            tracker: Optional[None] = None,
+            tracker: None = None,
             ortho_iparams: Optional[Dict[str, int]] = None,
             ortho_fparams: Optional[Dict[str, float]] = None,
             ortho_bparams: Optional[Dict[str, bool]] = None
@@ -606,7 +608,7 @@ def _lobpcg(A: Tensor,
         bparams['ortho_use_drop'] = bparams.get('ortho_use_drop', False)
 
     if not torch.jit.is_scripting():
-        LOBPCG.call_tracker = LOBPCG_call_tracker
+        LOBPCG.call_tracker = LOBPCG_call_tracker  # type: ignore[assignment]
 
     if len(A.shape) > 2:
         N = int(torch.prod(torch.tensor(A.shape[:-2])))
@@ -628,7 +630,7 @@ def _lobpcg(A: Tensor,
             bXret[i] = worker.X[:, :k]
 
         if not torch.jit.is_scripting():
-            LOBPCG.call_tracker = LOBPCG_call_tracker_orig
+            LOBPCG.call_tracker = LOBPCG_call_tracker_orig  # type: ignore[assignment]
 
         return bE.reshape(A.shape[:-2] + (k,)), bXret.reshape(A.shape[:-2] + (m, k))
 
@@ -640,7 +642,7 @@ def _lobpcg(A: Tensor,
     worker.run()
 
     if not torch.jit.is_scripting():
-        LOBPCG.call_tracker = LOBPCG_call_tracker_orig
+        LOBPCG.call_tracker = LOBPCG_call_tracker_orig  # type: ignore[assignment]
 
     return worker.E[:k], worker.X[:, :k]
 
@@ -658,7 +660,7 @@ class LOBPCG(object):
                  fparams,  # type: Dict[str, float]
                  bparams,  # type: Dict[str, bool]
                  method,   # type: str
-                 tracker   # type: Optional[None]
+                 tracker   # type: None
                  ):
         # type: (...) -> None
 
@@ -925,7 +927,7 @@ class LOBPCG(object):
           matrix product `D M` with element-wise product `M *
           d`. Also, creating the diagonal matrix `D` is avoided.
 
-        Arguments:
+        Args:
         S (Tensor): the matrix basis for the search subspace, size is
                     :math:`(m, n)`.
 
@@ -939,9 +941,9 @@ class LOBPCG(object):
         SBS = _utils.qform(B, S)
         d_row = SBS.diagonal(0, -2, -1) ** -0.5
         d_col = d_row.reshape(d_row.shape[0], 1)
-        R = torch.cholesky((SBS * d_row) * d_col, upper=True)
-        # TODO: could use LAPACK ?trtri as R is upper-triangular
-        Rinv = torch.inverse(R)
+        R = torch.linalg.cholesky((SBS * d_row) * d_col, upper=True)
+        Id = torch.eye(R.size(-1), dtype=R.dtype, device=R.device)
+        Rinv = torch.triangular_solve(Id, R, upper=True).solution
         return Rinv * d_col
 
     def _get_svqb(self,
@@ -957,7 +959,7 @@ class LOBPCG(object):
                   modification of the corresponding algorithm
                   introduced in [StathopolousWu2002].
 
-        Arguments:
+        Args:
 
           U (Tensor) : initial approximation, size is (m, n)
           drop (bool) : when True, drop columns that
@@ -997,7 +999,7 @@ class LOBPCG(object):
         # The original algorithm 4 from [DuerschPhD2015].
         d_col = (d ** -0.5).reshape(d.shape[0], 1)
         DUBUD = (UBU * d_col) * _utils.transpose(d_col)
-        E, Z = _utils.symeig(DUBUD, eigenvectors=True)
+        E, Z = _utils.symeig(DUBUD)
         t = tau * abs(E).max()
         if drop:
             keep = torch.where(E > t)
@@ -1023,7 +1025,7 @@ class LOBPCG(object):
         .. note:: If all U columns are B-collinear to V then the
                   returned tensor U will be empty.
 
-        Arguments:
+        Args:
 
           U (Tensor) : initial approximation, size is (m, n)
           V (Tensor) : B-orthogonal external basis, size is (m, k)

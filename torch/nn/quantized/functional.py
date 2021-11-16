@@ -394,10 +394,11 @@ def max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
     return torch.nn.functional.max_pool2d(input, kernel_size, stride, padding,
                                           dilation, ceil_mode, return_indices)
 
-def celu(input: Tensor, scale: float, zero_point: int, alpha: Optional[float] = 1.) -> Tensor:
+def celu(input: Tensor, scale: float, zero_point: int, alpha: float = 1.) -> Tensor:
     r"""celu(input, scale, zero_point, alpha=1.) -> Tensor
 
     Applies the quantized CELU function element-wise.
+
     .. math::
         \text{CELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x / \alpha) - 1))
 
@@ -410,25 +411,8 @@ def celu(input: Tensor, scale: float, zero_point: int, alpha: Optional[float] = 
     return torch.ops.quantized.celu(input, scale, zero_point, alpha)
 
 
-def relu(input: Tensor, inplace: bool = False) -> Tensor:
-    r"""relu(input, inplace=False) -> Tensor
-
-    Applies the rectified linear unit function element-wise.
-    See :class:`~torch.nn.quantized.ReLU` for more details.
-
-    Args:
-        input: quantized input
-        inplace: perform the computation inplace
-    """
-    if not input.is_quantized:
-        raise ValueError("Input to 'quantized.relu' must be quantized!")
-    if inplace:
-        return torch.relu_(input)
-    else:
-        return torch.relu(input)
-
 def leaky_relu(input: Tensor, negative_slope: float = 0.01, inplace: bool = False,
-               scale: float = None, zero_point: int = None):
+               scale: Optional[float] = None, zero_point: Optional[int] = None):
     r"""
     Quantized version of the.
     leaky_relu(input, negative_slope=0.01, inplace=False, scale, zero_point) -> Tensor
@@ -509,15 +493,17 @@ def elu(input: Tensor, scale: float, zero_point: int, alpha: float = 1.) -> Tens
         raise ValueError("Input to 'quantized.elu' must be quantized!")
     return torch.ops.quantized.elu(input, scale, zero_point, alpha)
 
-def hardsigmoid(input: Tensor) -> Tensor:
+def hardsigmoid(input: Tensor, inplace: bool = False) -> Tensor:
     r"""This is the quantized version of :func:`~torch.nn.functional.hardsigmoid`.
     """
     if not input.is_quantized:
         raise ValueError("Input to 'quantized.hardsigmoid' must be quantized!")
+    if inplace:
+        return torch._C._nn.hardsigmoid_(input)  # type: ignore[attr-defined]
     return torch._C._nn.hardsigmoid(input)
 
 def clamp(input: Tensor, min_: float, max_: float) -> Tensor:
-    r"""float(input, min_, max_) -> Tensor
+    r"""float(input, min\_, max\_) -> Tensor
 
     Applies the clamp function element-wise.
     See :class:`~torch.nn.quantized.clamp` for more details.

@@ -4,16 +4,6 @@
 #include <test/cpp/api/support.h>
 
 
-// Tests that the fft function can be called as usual
-TEST(FFTTest, unclobbered_fft) {
-    auto t = torch::randn({64, 2}, torch::dtype(torch::kDouble));
-    torch::fft(t, 1);
-}
-
-// Clobbers torch::fft the function with torch::fft the namespace
-#include <torch/fft.h>
-
-
 // Naive DFT of a 1 dimensional tensor
 torch::Tensor naive_dft(torch::Tensor x, bool forward=true) {
   TORCH_INTERNAL_ASSERT(x.dim() == 1);
@@ -69,10 +59,13 @@ TEST(FFTTest, fft_pad) {
 
 TEST(FFTTest, fft_norm) {
   auto t = torch::randn(128, torch::kComplexDouble);
+  // NOLINTNEXTLINE(bugprone-argument-comment)
   auto unnorm = torch::fft::fft(t, /*n=*/{}, /*axis=*/-1, /*norm=*/{});
+  // NOLINTNEXTLINE(bugprone-argument-comment)
   auto norm = torch::fft::fft(t, /*n=*/{}, /*axis=*/-1, /*norm=*/"forward");
   ASSERT_TRUE(torch::allclose(unnorm / 128, norm));
 
+  // NOLINTNEXTLINE(bugprone-argument-comment)
   auto ortho_norm = torch::fft::fft(t, /*n=*/{}, /*axis=*/-1, /*norm=*/"ortho");
   ASSERT_TRUE(torch::allclose(unnorm / std::sqrt(128), ortho_norm));
 }

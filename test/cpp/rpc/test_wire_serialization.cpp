@@ -1,11 +1,14 @@
 #include <gtest/gtest.h>
 
+#include <c10/util/irange.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 #include <torch/torch.h>
 
 #include <memory>
 #include <string>
 #include <vector>
+
+using ::testing::IsSubstring;
 
 TEST(WireSerialize, Base) {
   auto run = [](const std::string& payload,
@@ -25,7 +28,7 @@ TEST(WireSerialize, Base) {
       EXPECT_TRUE(
           memcmp(deser.first.data(), payload.data(), payload.size()) == 0);
     }
-    for (size_t i = 0; i < tensors.size(); ++i) {
+    for (const auto i : c10::irange(tensors.size())) {
       EXPECT_TRUE(torch::equal(tensors[i], deser.second[i]));
     }
   };
@@ -71,8 +74,8 @@ TEST(WireSerialize, Errors) {
     try {
       f();
       FAIL();
-    } catch (const std::runtime_error& e) {
-      EXPECT_STREQ(e.what(), msg);
+    } catch (const std::exception& e) {
+      EXPECT_PRED_FORMAT2(IsSubstring, msg, e.what());
     } catch (...) {
       FAIL();
     }

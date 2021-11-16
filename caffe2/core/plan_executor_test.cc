@@ -47,6 +47,22 @@ class StuckBlockingOp final : public Operator<CPUContext> {
 REGISTER_CPU_OPERATOR(StuckBlocking, StuckBlockingOp);
 OPERATOR_SCHEMA(StuckBlocking).NumInputs(0).NumOutputs(0);
 
+class NoopOp final : public Operator<CPUContext> {
+ public:
+  NoopOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CPUContext>(operator_def, ws) {}
+
+  bool RunOnDevice() override {
+    // notify Error op we've ran.
+    stuckRun = true;
+    return true;
+  }
+};
+
+REGISTER_CPU_OPERATOR(Noop, NoopOp);
+OPERATOR_SCHEMA(Noop).NumInputs(0).NumOutputs(0);
+
+
 class StuckAsyncOp final : public Operator<CPUContext> {
  public:
   StuckAsyncOp(const OperatorDef& operator_def, Workspace* ws)
@@ -244,6 +260,7 @@ struct HandleExecutorThreadExceptionsGuard {
   void globalInit(std::vector<std::string> args) {
     std::vector<char*> args_ptrs;
     for (auto& arg : args) {
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast,performance-inefficient-vector-operation)
       args_ptrs.push_back(const_cast<char*>(arg.data()));
     }
     char** new_argv = args_ptrs.data();
@@ -258,6 +275,7 @@ TEST(PlanExecutorTest, ErrorAsyncPlan) {
   cancelCount = 0;
   PlanDef plan_def = parallelErrorPlan();
   Workspace ws;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(ws.RunPlan(plan_def), TestError);
   ASSERT_EQ(cancelCount, 1);
 }
@@ -272,6 +290,9 @@ TEST(PlanExecutorTest, BlockingErrorPlan) {
 #endif
 #endif
 
+  testing::GTEST_FLAG(death_test_style) = "threadsafe";
+
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_DEATH(
       [] {
         HandleExecutorThreadExceptionsGuard guard(/*timeout=*/1);
@@ -311,6 +332,7 @@ TEST(PlanExecutorTest, ErrorPlanWithCancellableStuckNet) {
   PlanDef plan_def = parallelErrorPlanWithCancellableStuckNet();
   Workspace ws;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(ws.RunPlan(plan_def), TestError);
   ASSERT_EQ(cancelCount, 1);
 }
@@ -322,8 +344,69 @@ TEST(PlanExecutorTest, ReporterErrorPlanWithCancellableStuckNet) {
   PlanDef plan_def = reporterErrorPlanWithCancellableStuckNet();
   Workspace ws;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(ws.RunPlan(plan_def), TestError);
   ASSERT_EQ(cancelCount, 1);
+}
+
+PlanDef shouldStopWithCancelPlan() {
+  // Set a plan with a looping net with should_stop_blob set and a concurrent
+  // net that throws an error. The error should cause should_stop to return
+  // false and end the concurrent net.
+  PlanDef plan_def;
+
+  auto* should_stop_net = plan_def.add_network();
+  {
+    auto* op = should_stop_net->add_op();
+    op->set_type("Noop");
+  }
+  should_stop_net->set_name("should_stop_net");
+  should_stop_net->set_type("async_scheduling");
+
+  auto* error_net = plan_def.add_network();
+  error_net->set_name("error_net");
+  {
+    auto* op = error_net->add_op();
+    op->set_type("Error");
+  }
+
+  auto* execution_step = plan_def.add_execution_step();
+  execution_step->set_concurrent_substeps(true);
+  {
+    auto* substep = execution_step->add_substep();
+  execution_step->set_concurrent_substeps(true);
+    substep->set_name("concurrent_should_stop");
+    substep->set_should_stop_blob("should_stop_blob");
+    auto* substep2 = substep->add_substep();
+    substep2->set_name("should_stop_net");
+    substep2->add_network(should_stop_net->name());
+    substep2->set_num_iter(10);
+  }
+  {
+    auto* substep = execution_step->add_substep();
+    substep->set_name("error_step");
+    substep->add_network(error_net->name());
+  }
+
+  return plan_def;
+}
+
+TEST(PlanExecutorTest, ShouldStopWithCancel) {
+  HandleExecutorThreadExceptionsGuard guard;
+
+  stuckRun = false;
+  PlanDef plan_def = shouldStopWithCancelPlan();
+  Workspace ws;
+
+  Blob* blob = ws.CreateBlob("should_stop_blob");
+  Tensor* tensor = BlobGetMutableTensor(blob, CPU);
+  const vector<int64_t>& shape{1};
+  tensor->Resize(shape);
+  tensor->mutable_data<bool>()[0] = false;
+
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
+  ASSERT_THROW(ws.RunPlan(plan_def), TestError);
+  ASSERT_TRUE(stuckRun);
 }
 
 } // namespace caffe2

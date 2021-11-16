@@ -8,4 +8,3 @@ static inline T div_rtn(T x, T y) {
     if ((r!=0) && ((r<0) != (y<0))) --q;
     return q;
 }
-

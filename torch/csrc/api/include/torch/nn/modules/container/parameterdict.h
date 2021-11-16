@@ -8,6 +8,7 @@
 namespace torch {
 namespace nn {
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class ParameterDictImpl : public Cloneable<ParameterDictImpl> {
  public:
   using Iterator = OrderedDict<std::string, Tensor>::Iterator;
@@ -112,28 +113,28 @@ class ParameterDictImpl : public Cloneable<ParameterDictImpl> {
   }
 
   /// Returns the value associated with the given `key`. Throws an exception if
-  /// no such key is stored in the `ParameterDict`. Check contains(key) before 
+  /// no such key is stored in the `ParameterDict`. Check contains(key) before
   /// for a non-throwing way of access
   const Tensor& get(const std::string& key) const {
     return parameters_[key];
   }
 
   /// Returns the value associated with the given `key`. Throws an exception if
-  /// no such key is stored in the `ParameterDict`. Check contains(key) before 
+  /// no such key is stored in the `ParameterDict`. Check contains(key) before
   /// for a non-throwing way of access
   Tensor& get(const std::string& key) {
     return parameters_[key];
   }
 
   /// Returns the value associated with the given `key`. Throws an exception if
-  /// no such key is stored in the `ParameterDict`. Check contains(key) before 
+  /// no such key is stored in the `ParameterDict`. Check contains(key) before
   /// for a non-throwing way of access
   Tensor& operator[](const std::string& key) {
     return parameters_[key];
   }
 
   /// Returns the value associated with the given `key`. Throws an exception if
-  /// no such key is stored in the `ParameterDict`. Check contains(key) before 
+  /// no such key is stored in the `ParameterDict`. Check contains(key) before
   /// for a non-throwing way of access
   const Tensor& operator[](const std::string& key) const {
     return parameters_[key];

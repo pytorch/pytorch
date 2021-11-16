@@ -1,6 +1,6 @@
 #include <torch/csrc/python_headers.h>
 #ifdef _MSC_VER
-#include <Windows.h>
+#include <c10/util/win32-headers.h>
 #endif
 #include <structmember.h>
 
@@ -20,23 +20,9 @@
 
 #include <fmt/format.h>
 
+// NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <torch/csrc/generic/Storage.cpp>
-#include <TH/THGenerateAllTypes.h>
-
-#include <torch/csrc/generic/Storage.cpp>
-#include <TH/THGenerateComplexTypes.h>
-
-#include <torch/csrc/generic/Storage.cpp>
-#include <TH/THGenerateHalfType.h>
-
-#include <torch/csrc/generic/Storage.cpp>
-#include <TH/THGenerateBoolType.h>
-
-#include <torch/csrc/generic/Storage.cpp>
-#include <TH/THGenerateBFloat16Type.h>
-
-#include <torch/csrc/generic/Storage.cpp>
-#include <TH/THGenerateQTypes.h>
+#include <TH/THGenerateByteType.h>
 
 template<>
 void THPPointer<THStorage>::free() {

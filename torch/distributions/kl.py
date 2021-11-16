@@ -31,7 +31,7 @@ from .pareto import Pareto
 from .poisson import Poisson
 from .transformed_distribution import TransformedDistribution
 from .uniform import Uniform
-from .utils import _sum_rightmost
+from .utils import _sum_rightmost, euler_constant as _euler_gamma
 
 _KL_REGISTRY = {}  # Source of truth mapping a few general (type, type) pairs to functions.
 _KL_MEMOIZE: Dict[Tuple[Type, Type], Callable] = {}  # Memoized version mapping many specific (type, type) pairs to functions.
@@ -106,8 +106,8 @@ def _dispatch_kl(type_p, type_q):
     # Check that the left- and right- lexicographic orders agree.
     # mypy isn't smart enough to know that _Match implements __lt__
     # see: https://github.com/python/typing/issues/760#issuecomment-710670503
-    left_p, left_q = min(_Match(*m) for m in matches).types  # type: ignore
-    right_q, right_p = min(_Match(*reversed(m)) for m in matches).types  # type: ignore
+    left_p, left_q = min(_Match(*m) for m in matches).types  # type: ignore[type-var]
+    right_q, right_p = min(_Match(*reversed(m)) for m in matches).types  # type: ignore[type-var]
     left_fun = _KL_REGISTRY[left_p, left_q]
     right_fun = _KL_REGISTRY[right_p, right_q]
     if left_fun is not right_fun:
@@ -173,8 +173,6 @@ def kl_divergence(p, q):
 ################################################################################
 # KL Divergence Implementations
 ################################################################################
-
-_euler_gamma = 0.57721566490153286060
 
 # Same distributions
 
@@ -322,7 +320,7 @@ def _kl_lowrankmultivariatenormal_lowrankmultivariatenormal(p, q):
     # Expands term2 according to
     # inv(qcov) @ pcov = [inv(qD) - inv(qD) @ qW @ inv(qC) @ qW.T @ inv(qD)] @ (pW @ pW.T + pD)
     #                  = [inv(qD) - A.T @ A] @ (pD + pW @ pW.T)
-    qWt_qDinv = (q._unbroadcasted_cov_factor.transpose(-1, -2) /
+    qWt_qDinv = (q._unbroadcasted_cov_factor.mT /
                  q._unbroadcasted_cov_diag.unsqueeze(-2))
     A = torch.triangular_solve(qWt_qDinv, q._capacitance_tril, upper=False)[0]
     term21 = (p._unbroadcasted_cov_diag / q._unbroadcasted_cov_diag).sum(-1)
@@ -349,7 +347,7 @@ def _kl_multivariatenormal_lowrankmultivariatenormal(p, q):
     # Expands term2 according to
     # inv(qcov) @ pcov = [inv(qD) - inv(qD) @ qW @ inv(qC) @ qW.T @ inv(qD)] @ p_tril @ p_tril.T
     #                  = [inv(qD) - A.T @ A] @ p_tril @ p_tril.T
-    qWt_qDinv = (q._unbroadcasted_cov_factor.transpose(-1, -2) /
+    qWt_qDinv = (q._unbroadcasted_cov_factor.mT /
                  q._unbroadcasted_cov_diag.unsqueeze(-2))
     A = torch.triangular_solve(qWt_qDinv, q._capacitance_tril, upper=False)[0]
     term21 = _batch_trace_XXT(p._unbroadcasted_scale_tril *
@@ -439,10 +437,7 @@ def _kl_transformed_transformed(p, q):
         raise NotImplementedError
     if p.event_shape != q.event_shape:
         raise NotImplementedError
-    # extra_event_dim = len(p.event_shape) - len(p.base_dist.event_shape)
-    extra_event_dim = len(p.event_shape)
-    base_kl_divergence = kl_divergence(p.base_dist, q.base_dist)
-    return _sum_rightmost(base_kl_divergence, extra_event_dim)
+    return kl_divergence(p.base_dist, q.base_dist)
 
 
 @register_kl(Uniform, Uniform)

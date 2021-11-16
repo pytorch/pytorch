@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/inline_fork_wait.h>
 
 namespace torch {
@@ -57,6 +58,7 @@ void InlineForkWait(
 void InlineForkWait(const std::shared_ptr<Graph>& graph) {
   std::unordered_map<Value*, Value*> future_remap;
   InlineForkWait(graph->block(), future_remap);
+  GRAPH_DUMP("After InlineForkWait: ", graph);
 }
 
 } // namespace jit

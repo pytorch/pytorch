@@ -3,7 +3,8 @@
 
 #include <mutex>
 
-#include "c10/util/Registry.h"
+#include <c10/util/Registry.h>
+#include <c10/util/string_view.h>
 #include "caffe2/core/blob_serialization.h"
 #include "caffe2/proto/caffe2_pb.h"
 
@@ -19,7 +20,7 @@ enum Mode { READ, WRITE, NEW };
 /**
  * An abstract class for the cursor of the database while reading.
  */
-class CAFFE2_API Cursor {
+class TORCH_API Cursor {
  public:
   Cursor() {}
   virtual ~Cursor() {}
@@ -60,14 +61,14 @@ class CAFFE2_API Cursor {
 /**
  * An abstract class for the current database transaction while writing.
  */
-class CAFFE2_API Transaction {
+class TORCH_API Transaction {
  public:
   Transaction() {}
   virtual ~Transaction() {}
   /**
    * Puts the key value pair to the database.
    */
-  virtual void Put(const string& key, const string& value) = 0;
+  virtual void Put(const std::string& key, std::string&& value) = 0;
   /**
    * Commits the current writes.
    */
@@ -79,7 +80,7 @@ class CAFFE2_API Transaction {
 /**
  * An abstract class for accessing a database of key-value pairs.
  */
-class CAFFE2_API DB {
+class TORCH_API DB {
  public:
   DB(const string& /*source*/, Mode mode) : mode_(mode) {}
   virtual ~DB() {}
@@ -97,6 +98,19 @@ class CAFFE2_API DB {
    * ownership of the pointer.
    */
   virtual std::unique_ptr<Transaction> NewTransaction() = 0;
+
+  /**
+   * Set DB options.
+   *
+   * These options should apply for the lifetime of the DB, or until a
+   * subsequent SetOptions() call overrides them.
+   *
+   * This is used by the Save operator to allow the client to pass in
+   * DB-specific options to control the behavior.  This is an opaque string,
+   * where the format is specific to the DB type.  DB types may pass in a
+   * serialized protobuf message here if desired.
+   */
+  virtual void SetOptions(c10::string_view /* options */) {}
 
  protected:
   Mode mode_;
@@ -143,7 +157,7 @@ inline bool DBExists(const string& db_type, const string& full_db_name) {
 /**
  * A reader wrapper for DB that also allows us to serialize it.
  */
-class CAFFE2_API DBReader {
+class TORCH_API DBReader {
  public:
   friend class DBReaderSerializer;
   DBReader() {}
@@ -296,7 +310,7 @@ class CAFFE2_API DBReader {
   C10_DISABLE_COPY_AND_ASSIGN(DBReader);
 };
 
-class CAFFE2_API DBReaderSerializer : public BlobSerializerBase {
+class TORCH_API DBReaderSerializer : public BlobSerializerBase {
  public:
   /**
    * Serializes a DBReader. Note that this blob has to contain DBReader,
@@ -309,7 +323,7 @@ class CAFFE2_API DBReaderSerializer : public BlobSerializerBase {
       BlobSerializerBase::SerializationAcceptor acceptor) override;
 };
 
-class CAFFE2_API DBReaderDeserializer : public BlobDeserializerBase {
+class TORCH_API DBReaderDeserializer : public BlobDeserializerBase {
  public:
   void Deserialize(const BlobProto& proto, Blob* blob) override;
 };

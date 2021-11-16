@@ -68,6 +68,7 @@ bool isOpType(const repr::NNGraph::NodeRef& nodeRef, string typeName) {
     return false;
   }
   auto op = repr::nn::get<repr::NeuralNetOperator>(nodeRef);
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   auto opDef = getOpDef(*op);
   return opDef.type() == typeName;
 }
@@ -172,6 +173,7 @@ void moveOpArg(
 
 bool removeStopGradientForInference(repr::NNModule* nn, caffe2::Workspace* ws) {
   auto allNodes = nn->dataFlow.getMutableNodes();
+  // NOLINTNEXTLINE(modernize-loop-convert,clang-diagnostic-sign-compare)
   for (int i = 0; i < allNodes.size(); ++i) {
     auto node = allNodes[i];
     if (!isOpType(node, "StopGradient")) {
@@ -194,7 +196,9 @@ bool removeStopGradientForInference(repr::NNModule* nn, caffe2::Workspace* ws) {
 bool fuseConvBNAndAffCh(repr::NNModule* nn, caffe2::Workspace* ws) {
   for (auto node_pair : repr::nn::dataIterator<repr::Conv>(nn->dataFlow)) {
     bool no_bias = false;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     repr::NNGraph::NodeRef convNode;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     repr::Conv* conv;
     std::tie(conv, convNode) = node_pair;
 
@@ -215,6 +219,7 @@ bool fuseConvBNAndAffCh(repr::NNModule* nn, caffe2::Workspace* ws) {
       continue;
     }
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     bool isBN;
     auto consumer = consumers.front();
     if (repr::nn::is<repr::BatchNormalization>(consumer)) {
@@ -238,6 +243,7 @@ bool fuseConvBNAndAffCh(repr::NNModule* nn, caffe2::Workspace* ws) {
 
     auto bnOrAffChInputs = repr::nn::getInputs(bnOrAffChNode);
     int numInputs = isBN ? 5 : 3;
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     if (bnOrAffChInputs.size() < numInputs) {
       LOG(WARNING) << "Invalid input size: " << bnOrAffChInputs.size()
                    << ", expect " << numInputs;
@@ -318,6 +324,7 @@ bool fuseConvSum(repr::NNModule* nn, caffe2::Workspace* ws) {
   // Assume the order of nodes from getMutableNodes conforms to
   // the original topo order of operators
   auto allNodes = nn->dataFlow.getMutableNodes();
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   for (int i = allNodes.size() - 1; i > 0; i--) {
     auto sumNode = allNodes[i];
     if (!repr::nn::hasInputs(sumNode)) {
@@ -408,6 +415,7 @@ bool fuseConvSum(repr::NNModule* nn, caffe2::Workspace* ws) {
 
     bool should_fuse = true;
     auto convInput = repr::nn::getInputs(convNode).front();
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int idx = conv_idx + 1; idx < allNodes.size() - 1; ++idx) {
       if (idx == sum_idx ||
           !repr::nn::is<repr::NeuralNetOperator>(allNodes[idx])) {
@@ -420,6 +428,7 @@ bool fuseConvSum(repr::NNModule* nn, caffe2::Workspace* ws) {
       // fused Sum) The other Sum input (sumInputX) should not be used by the
       // other ops after Sum node due to the Sum output is inplace with
       // sumInputX
+      // NOLINTNEXTLINE(modernize-loop-convert)
       for (size_t input_idx = 0; input_idx < checkInputs.size(); ++input_idx) {
         if (convOutput == checkInputs[input_idx] ||
             (idx > sum_idx && sumInputX == checkInputs[input_idx])) {
@@ -436,6 +445,7 @@ bool fuseConvSum(repr::NNModule* nn, caffe2::Workspace* ws) {
       // between Conv and preNode
       if (idx <= pre_idx) {
         auto checkOutputs = repr::nn::getOutputs(checkNode);
+        // NOLINTNEXTLINE(modernize-loop-convert)
         for (size_t output_idx = 0; output_idx < checkOutputs.size();
              ++output_idx) {
           auto check_output_tensor =
@@ -502,7 +512,9 @@ bool fuseConvSum(repr::NNModule* nn, caffe2::Workspace* ws) {
 bool fuseActivation(repr::NNModule* nn, caffe2::Workspace* ws) {
   // Conv+Relu fusion
   for (auto node_pair : repr::nn::dataIterator<repr::Conv>(nn->dataFlow)) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     repr::NNGraph::NodeRef conv_node;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     repr::Conv* conv;
     std::tie(conv, conv_node) = node_pair;
 
@@ -521,7 +533,6 @@ bool fuseActivation(repr::NNModule* nn, caffe2::Workspace* ws) {
       continue;
     }
     auto relu_node = consumers.front();
-    auto relu = repr::nn::get<repr::Relu>(relu_node);
 
     auto relu_outputs = repr::nn::getOutputs(relu_node);
     if (relu_outputs.size() != 1) {
@@ -590,6 +601,7 @@ bool enforceFusionInplace(repr::NNModule* nn, caffe2::Workspace* ws) {
   // be inplaced. To enforce inplace, here to re-check whole graph and correct
   // the ConvFusion Ops.
   auto allNodes = nn->dataFlow.getMutableNodes();
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   for (int i = allNodes.size() - 1; i > 0; i--) {
     auto convNode = allNodes[i];
     if (convNode == nullptr ||
@@ -647,6 +659,7 @@ bool fuseOrderSwitchToQuantizeOp(repr::NNModule* nn, caffe2::Workspace* ws) {
   // On iDEEP, there is chance to fuse the order switch op into the
   // quantize/dequantize op, in order to improve the module performance.
   auto allNodes = nn->dataFlow.getMutableNodes();
+  // NOLINTNEXTLINE(modernize-loop-convert,clang-diagnostic-sign-compare)
   for (int i = 0; i < allNodes.size(); ++i) {
     auto osNode = allNodes[i];
     if (osNode == nullptr || !repr::nn::is<repr::NeuralNetOperator>(osNode)) {
@@ -727,6 +740,7 @@ bool fusePreConvertOp(repr::NNModule* nn, caffe2::Workspace* ws) {
   };
 
   auto allNodes = nn->dataFlow.getMutableNodes();
+  // NOLINTNEXTLINE(modernize-loop-convert,clang-diagnostic-sign-compare)
   for (int i = 0; i < allNodes.size(); ++i) {
     auto opNode = allNodes[i];
     if (opNode == nullptr || !repr::nn::is<repr::NeuralNetOperator>(opNode)) {
@@ -753,6 +767,7 @@ bool fusePreConvertOp(repr::NNModule* nn, caffe2::Workspace* ws) {
 
     bool is_op_found = false;
     auto seqNode = consumers.front();
+    // NOLINTNEXTLINE(modernize-loop-convert,clang-diagnostic-sign-compare)
     for (int j = 0; j < op_list.size(); j++) {
       if (isOpType(seqNode, op_list[j])) {
         is_op_found = true;
@@ -814,6 +829,7 @@ void setPoolingInferenceMode(repr::NNModule* nn) {
   };
 
   auto allNodes = nn->dataFlow.getMutableNodes();
+  // NOLINTNEXTLINE(modernize-loop-convert,clang-diagnostic-sign-compare)
   for (int i = 0; i < allNodes.size(); ++i) {
     auto poolNode = allNodes[i];
     if (poolNode == nullptr ||
@@ -875,8 +891,6 @@ void preConvertFiltersFormat(repr::NNModule* nn, caffe2::Workspace* ws) {
       initValue(strides, {1, 1});
       auto pads = convTranspose->getPads();
       initValue(pads, {0, 0, 0, 0});
-      auto* op = getMutableOpDef(*convTranspose);
-      auto aalgorithm = ialgo::deconvolution_direct;
       auto dataType = filter->get_data_type();
       ideep::tensor::dims filter_dims_mkldnn{filter->get_dim(1),
                                              filter->get_dim(0),
@@ -944,11 +958,13 @@ void preConvertFiltersFormat(repr::NNModule* nn, caffe2::Workspace* ws) {
             f_dims.begin(),
             f_dims.begin() + axis_w,
             1,
+            // NOLINTNEXTLINE(modernize-use-transparent-functors)
             std::multiplies<itensor::dim_t>());
         auto f_dim1 = std::accumulate(
             f_dims.begin() + axis_w,
             f_dims.end(),
             1,
+            // NOLINTNEXTLINE(modernize-use-transparent-functors)
             std::multiplies<itensor::dim_t>());
         filter->reshape({f_dim0, f_dim1});
       }
@@ -968,6 +984,7 @@ void preConvertFiltersFormat(repr::NNModule* nn, caffe2::Workspace* ws) {
 
 // Fusers for ideep to parse the graph and apply operator fusion
 using Fuser = bool (*)(repr::NNModule* nn, caffe2::Workspace* ws);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 static Fuser fusers[] = {
     removeStopGradientForInference,
     fuseConvBNAndAffCh,

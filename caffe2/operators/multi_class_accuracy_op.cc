@@ -44,6 +44,7 @@ bool MultiClassAccuracyOp<float, CPUContext>::RunOnDevice() {
   for (int i = 0; i < D; ++i) {
     int amount = amounts[i];
     if (amount) {
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       accuracies[i] /= amount;
     }
   }

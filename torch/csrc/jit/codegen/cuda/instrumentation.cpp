@@ -3,7 +3,7 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #ifdef _WIN32
-#include <windows.h>
+#include <c10/util/win32-headers.h>
 #else
 #include <pthread.h>
 #include <unistd.h>
@@ -16,7 +16,7 @@ namespace cuda {
 namespace inst {
 
 Trace::Trace() {
-  const char* trace_filename = getenv("PYTORCH_CUDA_FUSER_TRACE");
+  const char* trace_filename = getenv("PYTORCH_NVFUSER_TRACE");
   if (trace_filename != nullptr) {
     log_file_ = fopen(trace_filename, "w");
     TORCH_CHECK(log_file_ != nullptr, "Can't open trace file");

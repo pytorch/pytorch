@@ -192,7 +192,7 @@ class LocalSession(Session):
             task = task_group.to_task()
         plan = core.Plan('task_group_plan')
         plan.AddStep(task.get_step())
-        return (plan, task.output_list(), task.workspace_type)
+        return (plan, task.output_list(), task.workspace_type())
 
     def _run_compiled(self, compiled):
         plan, output_list, workspace_type = compiled

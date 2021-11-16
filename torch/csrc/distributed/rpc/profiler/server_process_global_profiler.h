@@ -82,7 +82,9 @@ TORCH_API extern mutexType currentStateStackEntryMutex;
 class StateStackEntry {
  public:
   StateStackEntry(
+      // NOLINTNEXTLINE(modernize-pass-by-value)
       std::shared_ptr<StateStackEntry> prevPtr,
+      // NOLINTNEXTLINE(modernize-pass-by-value)
       std::shared_ptr<State> statePtr)
       : prevPtr_(prevPtr), statePtr_(statePtr) {}
 

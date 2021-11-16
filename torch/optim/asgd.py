@@ -1,5 +1,6 @@
 import math
 import torch
+from . import _functional as F
 from .optimizer import Optimizer
 
 
@@ -9,7 +10,7 @@ class ASGD(Optimizer):
     It has been proposed in `Acceleration of stochastic approximation by
     averaging`_.
 
-    Arguments:
+    Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
         lr (float, optional): learning rate (default: 1e-2)
@@ -36,7 +37,7 @@ class ASGD(Optimizer):
     def step(self, closure=None):
         """Performs a single optimization step.
 
-        Arguments:
+        Args:
             closure (callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
@@ -46,39 +47,46 @@ class ASGD(Optimizer):
                 loss = closure()
 
         for group in self.param_groups:
+            params_with_grad = []
+            grads = []
+            mus = []
+            axs = []
+            etas = []
+            state_steps = []
+
             for p in group['params']:
-                if p.grad is None:
-                    continue
-                grad = p.grad
-                if grad.is_sparse:
-                    raise RuntimeError('ASGD does not support sparse gradients')
+                if p.grad is not None:
+                    params_with_grad.append(p)
+                    if p.grad.is_sparse:
+                        raise RuntimeError('ASGD does not support sparse gradients')
+                    grads.append(p.grad)
+
+                    state = self.state[p]
+                    # State initialization
+                    if len(state) == 0:
+                        state['step'] = 0
+                        state['eta'] = group['lr']
+                        state['mu'] = 1
+                        state['ax'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+
+                    mus.append(state['mu'])
+                    axs.append(state['ax'])
+                    etas.append(state['eta'])
+
+                    state['step'] += 1
+                    state_steps.append(state['step'])
+
+            F.asgd(params_with_grad,
+                   grads,
+                   axs,
+                   mus,
+                   etas,
+                   weight_decay=group['weight_decay'],
+                   lambd=group['lambd'])
+
+            # update eta and mu
+            for p, mu, eta in zip(params_with_grad, mus, etas):
                 state = self.state[p]
-
-                # State initialization
-                if len(state) == 0:
-                    state['step'] = 0
-                    state['eta'] = group['lr']
-                    state['mu'] = 1
-                    state['ax'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-
-                state['step'] += 1
-
-                if group['weight_decay'] != 0:
-                    grad = grad.add(p, alpha=group['weight_decay'])
-
-                # decay term
-                p.mul_(1 - group['lambd'] * state['eta'])
-
-                # update parameter
-                p.add_(grad, alpha=-state['eta'])
-
-                # averaging
-                if state['mu'] != 1:
-                    state['ax'].add_(p.sub(state['ax']).mul(state['mu']))
-                else:
-                    state['ax'].copy_(p)
-
-                # update eta and mu
                 state['eta'] = (group['lr'] /
                                 math.pow((1 + group['lambd'] * group['lr'] * state['step']), group['alpha']))
                 state['mu'] = 1 / max(1, state['step'] - group['t0'])

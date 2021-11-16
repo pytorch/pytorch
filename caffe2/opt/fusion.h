@@ -25,7 +25,7 @@ namespace opt {
 
 using namespace nom;
 
-CAFFE2_API void fuseConvBN(repr::NNModule* nn, caffe2::Workspace* ws);
+TORCH_API void fuseConvBN(repr::NNModule* nn, caffe2::Workspace* ws);
 
 // Generic activation fusion helper.
 //

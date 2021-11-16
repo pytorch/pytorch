@@ -2,6 +2,7 @@
 #include <c10/core/GeneratorImpl.h>
 #include <algorithm>
 
+#include "caffe2/utils/cub_namespace.cuh"
 #include <cub/device/device_radix_sort.cuh>
 #include "caffe2/sgd/adagrad_fused_op_gpu.cuh"
 #include "caffe2/utils/math.h"
@@ -86,7 +87,7 @@ void sort_pairs_wrapper(
 }
 
 template <typename T>
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(1024, SEGREDUCE_MINBLOCKS)
 #endif
 __global__ void gradient_mean_kernel(
@@ -104,7 +105,7 @@ __global__ void gradient_mean_kernel(
 }
 
 template <typename SIndex, typename TParam, typename T, bool ExactBlock = false>
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(1024, SEGREDUCE_MINBLOCKS)
 #endif
 __global__ void sparse_adagrad_fused_length_sum_gradient_kernel(
@@ -171,7 +172,7 @@ __global__ void sparse_adagrad_fused_length_sum_gradient_kernel(
 }
 
 template <typename SIndex, typename TParam, typename T, int NumThreads>
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(1024, SEGREDUCE_MINBLOCKS)
 #endif
 __global__ void sparse_adagrad_fused_length_weighted_sum_gradient_kernel(
@@ -252,7 +253,7 @@ __global__ void sparse_adagrad_fused_length_weighted_sum_gradient_kernel(
 
 // Construct a reverse map of offset_of_idx -> segment_id.
 template <typename SIndex>
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(1024, SEGREDUCE_MINBLOCKS)
 #endif
 __global__ void linear_index_weight_offsets_dedup_kernel(
@@ -279,7 +280,7 @@ template <
     typename T,
     bool ExactBlock = false,
     roundOption roundOpt = NEAREST>
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(1024, SEGREDUCE_MINBLOCKS)
 #endif
 __global__ void rowwise_sparse_adagrad_fused_length_sum_gradient_dedup_kernel(
@@ -343,7 +344,7 @@ __global__ void rowwise_sparse_adagrad_fused_length_sum_gradient_dedup_kernel(
             sorted_linear_ind_data[sorted_linear_indice_id + num_dup + threadIdx.x] ==
             index;
       }
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
       int32_t num_dup_incr = __popc(__ballot_sync(0xFFFFFFFF, segment_continue));
 #else
       int32_t num_dup_incr = __popc(__ballot(segment_continue));
@@ -438,7 +439,7 @@ __global__ void rowwise_sparse_adagrad_fused_length_sum_gradient_dedup_kernel(
 }
 
 template <typename SIndex, typename TParam, typename T, int NumThreads>
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(1024, SEGREDUCE_MINBLOCKS)
 #endif
 __global__
@@ -488,7 +489,7 @@ __global__
     __shared__ float row_sum_squares_avg;
 
     for (int i = threadIdx.x; i < block_size; i += blockDim.x) {
-      const float x_ij = grad[group * block_size + i] +
+      const float x_ij = grad[group * block_size + i] * in_weight_temp +
           weight_decay * param[index * block_size + i];
       sum_squares += x_ij * x_ij;
     }
@@ -496,8 +497,7 @@ __global__
 
     if (threadIdx.x == 0) {
       row_sum_squares_avg = reduce_result / static_cast<float>(block_size);
-      param_mom[index] +=
-          static_cast<T>(row_sum_squares_avg * in_weight_temp * in_weight_temp);
+      param_mom[index] += static_cast<T>(row_sum_squares_avg);
     }
     __syncthreads();
 
@@ -638,6 +638,7 @@ class CUDASparseAdagradFusedWithSparseLengthsSumGradientOp final
              0,
              context_.cuda_stream()>>>(
               grad, lengths, grad_buffer_data, block_size);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
 
     if (block_size <= maxThreads) {
@@ -660,6 +661,7 @@ class CUDASparseAdagradFusedWithSparseLengthsSumGradientOp final
           is_mean ? grad_buffer_data : grad,
           lr,
           weight_decay_);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
       // calling cuda kernel with ExactBlock = false
       sparse_adagrad_fused_length_sum_gradient_kernel<
@@ -678,6 +680,7 @@ class CUDASparseAdagradFusedWithSparseLengthsSumGradientOp final
           is_mean ? grad_buffer_data : grad,
           lr,
           weight_decay_);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
     return true;
   }
@@ -819,6 +822,7 @@ class CUDASparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
           out_weight_grads,
           lr,
           weight_decay_);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else if (block_size > 64) {
       sparse_adagrad_fused_length_weighted_sum_gradient_kernel<
           IndexType,
@@ -838,6 +842,7 @@ class CUDASparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
           out_weight_grads,
           lr,
           weight_decay_);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else if (block_size > 32) {
       sparse_adagrad_fused_length_weighted_sum_gradient_kernel<
           IndexType,
@@ -857,6 +862,7 @@ class CUDASparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
           out_weight_grads,
           lr,
           weight_decay_);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
       sparse_adagrad_fused_length_weighted_sum_gradient_kernel<
           IndexType,
@@ -876,6 +882,7 @@ class CUDASparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
           out_weight_grads,
           lr,
           weight_decay_);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
     return true;
   }
@@ -1005,6 +1012,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
              0,
              context_.cuda_stream()>>>(
               grad, lengths, grad_buffer_data, block_size);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
 
     // 0: nearest rounding
@@ -1037,6 +1045,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
             lr,
             seed,
             weight_decay_);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       } else {
         rowwise_sparse_adagrad_fused_length_sum_gradient_kernel<
             IndexType,
@@ -1056,6 +1065,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
             lr,
             seed,
             weight_decay_);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
     } else {
       if (round_option_) {
@@ -1081,6 +1091,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
                 lr,
                 seed,
                 weight_decay_);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       } else {
         rowwise_sparse_adagrad_fused_length_sum_gradient_kernel<
             IndexType,
@@ -1104,6 +1115,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
                 lr,
                 seed,
                 weight_decay_);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
     }
     return true;
@@ -1241,6 +1253,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientExactOp final
              0,
              context_.cuda_stream()>>>(
               grad, lengths, grad_buffer_data, block_size);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
 
     sorted_linear_ind_buffer_.ResizeLike(indicesInput);
@@ -1252,6 +1265,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientExactOp final
             indices,
             prefix_sum_length_data,
             seg_id_buffer_.template mutable_data<int>());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
 
     sort_pairs_wrapper<IndexType>(
         num_indices,
@@ -1316,6 +1330,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientExactOp final
                 lr,
                 seed,
                 weight_decay_);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       } else {
         rowwise_sparse_adagrad_fused_length_sum_gradient_dedup_kernel<
             IndexType,
@@ -1342,6 +1357,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientExactOp final
                 lr,
                 seed,
                 weight_decay_);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
     } else {
       const int sm_size = block_size * sizeof(float);
@@ -1376,6 +1392,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientExactOp final
                 lr,
                 seed,
                 weight_decay_);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       } else {
         rowwise_sparse_adagrad_fused_length_sum_gradient_dedup_kernel<
             IndexType,
@@ -1402,6 +1419,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientExactOp final
                 lr,
                 seed,
                 weight_decay_);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
     }
 
@@ -1551,6 +1569,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
           out_weight_grads,
           lr,
           weight_decay_);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else if (block_size > 64) {
       rowwise_sparse_adagrad_fused_length_weighted_sum_gradient_kernel<
           IndexType,
@@ -1570,6 +1589,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
           out_weight_grads,
           lr,
           weight_decay_);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else if (block_size > 32) {
       rowwise_sparse_adagrad_fused_length_weighted_sum_gradient_kernel<
           IndexType,
@@ -1589,6 +1609,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
           out_weight_grads,
           lr,
           weight_decay_);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
       rowwise_sparse_adagrad_fused_length_weighted_sum_gradient_kernel<
           IndexType,
@@ -1608,6 +1629,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
           out_weight_grads,
           lr,
           weight_decay_);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
 
     return true;

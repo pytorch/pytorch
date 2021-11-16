@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
 #include <c10/util/Logging.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/tensorexpr/dim_arg.h>
 #include <torch/csrc/jit/tensorexpr/reduction.h>
 
@@ -8,49 +9,92 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-Tensor* Compute(
-    const std::string& func_name,
-    const std::vector<DimArg>& dim_args,
-    const std::function<ExprHandle(const std::vector<VarHandle>&)>& body_func) {
-  std::vector<const Expr*> dims;
-  std::vector<const Var*> args;
-  unpack_dim_args(dim_args, &dims, &args);
-  const Expr* body = body_func(VarVectorToVarHandleVector(args)).node();
-  return new Tensor(func_name, dims, args, body);
+StmtPtr Tensor::constructStmt(
+    const std::vector<VarPtr>& args,
+    ExprPtr body,
+    const std::vector<ExprPtr>& reduce_dims,
+    const std::vector<VarPtr>& reduce_args) const {
+  std::vector<ExprPtr> indices(args.begin(), args.end());
+
+  StmtPtr s = alloc<Store>(buf_, indices, body);
+
+  size_t ndim = buf()->ndim();
+  size_t reduce_ndim = reduce_dims.size();
+
+  if (ndim == 0 && reduce_ndim == 0) {
+    return s;
+  }
+
+  ExprPtr init_expr = buf()->initializer();
+
+  if (reduce_ndim > 0) {
+    for (const auto i : c10::irange(reduce_ndim)) {
+      // Going in reverse order: from innermost loop to the outermost
+      size_t dim_index = reduce_ndim - i - 1;
+      auto const& dim = reduce_dims[dim_index];
+      s = alloc<For>(reduce_args[dim_index], immLike(dim, 0), dim, s);
+    }
+    if (init_expr) {
+      StorePtr init_stmt = alloc<Store>(buf(), indices, init_expr);
+      s = alloc<Block>(std::vector<StmtPtr>({init_stmt, s}));
+    }
+  }
+
+  for (const auto i : c10::irange(ndim)) {
+    // Going in reverse order: from innermost loop to the outermost
+    size_t dim_index = ndim - i - 1;
+    auto const& dim = buf()->dim(dim_index);
+    s = alloc<For>(args[dim_index], immLike(dim, 0), dim, s);
+  }
+  return s;
 }
 
-Tensor* Compute(
-    const std::string& func_name,
+Tensor Compute(
+    const std::string& name,
+    const std::vector<DimArg>& dim_args,
+    const std::function<ExprHandle(const std::vector<VarHandle>&)>& body_func) {
+  std::vector<ExprPtr> dims;
+  std::vector<VarPtr> args;
+  unpack_dim_args(dim_args, &dims, &args);
+  ExprPtr body = body_func(VarVectorToVarHandleVector(args)).node();
+  BufPtr buf = alloc<Buf>(name, dims, body->dtype());
+  return Tensor(buf, args, body);
+}
+
+Tensor Compute(
+    const std::string& name,
     const std::vector<DimArg>& dim_args,
     const std::function<ExprHandle(const VarHandle&)>& body_func) {
   if (dim_args.size() != 1) {
     throw malformed_input("mismatch between body and arg size (1)");
   }
 
-  std::vector<const Expr*> dims;
-  std::vector<const Var*> args;
+  std::vector<ExprPtr> dims;
+  std::vector<VarPtr> args;
   unpack_dim_args(dim_args, &dims, &args);
-  const Expr* body = body_func(VarHandle(args[0])).node();
-  return new Tensor(func_name, dims, args, body);
+  ExprPtr body = body_func(VarHandle(args[0])).node();
+  BufPtr buf = alloc<Buf>(name, dims, body->dtype());
+  return Tensor(buf, args, body);
 }
 
-Tensor* Compute(
-    const std::string& func_name,
+Tensor Compute(
+    const std::string& name,
     const std::vector<DimArg>& dim_args,
     const std::function<ExprHandle(const VarHandle&, const VarHandle&)>&
         body_func) {
   if (dim_args.size() != 2) {
     throw malformed_input("mismatch between body and arg size (2)");
   }
-  std::vector<const Expr*> dims;
-  std::vector<const Var*> args;
+  std::vector<ExprPtr> dims;
+  std::vector<VarPtr> args;
   unpack_dim_args(dim_args, &dims, &args);
-  const Expr* body = body_func(VarHandle(args[0]), VarHandle(args[1])).node();
-  return new Tensor(func_name, dims, args, body);
+  ExprPtr body = body_func(VarHandle(args[0]), VarHandle(args[1])).node();
+  BufPtr buf = alloc<Buf>(name, dims, body->dtype());
+  return Tensor(buf, args, body);
 }
 
-Tensor* Compute(
-    const std::string& func_name,
+Tensor Compute(
+    const std::string& name,
     const std::vector<DimArg>& dim_args,
     const std::function<
         ExprHandle(const VarHandle&, const VarHandle&, const VarHandle&)>&
@@ -58,17 +102,18 @@ Tensor* Compute(
   if (dim_args.size() != 3) {
     throw malformed_input("mismatch between body and arg size (3)");
   }
-  std::vector<const Expr*> dims;
-  std::vector<const Var*> args;
+  std::vector<ExprPtr> dims;
+  std::vector<VarPtr> args;
   unpack_dim_args(dim_args, &dims, &args);
-  const Expr* body =
+  ExprPtr body =
       body_func(VarHandle(args[0]), VarHandle(args[1]), VarHandle(args[2]))
           .node();
-  return new Tensor(func_name, dims, args, body);
+  BufPtr buf = alloc<Buf>(name, dims, body->dtype());
+  return Tensor(buf, args, body);
 }
 
-Tensor* Compute(
-    const std::string& func_name,
+Tensor Compute(
+    const std::string& name,
     const std::vector<DimArg>& dim_args,
     const std::function<ExprHandle(
         const VarHandle&,
@@ -78,50 +123,44 @@ Tensor* Compute(
   if (dim_args.size() != 4) {
     throw malformed_input("mismatch between body and arg size (4)");
   }
-  std::vector<const Expr*> dims;
-  std::vector<const Var*> args_nodes;
-  unpack_dim_args(dim_args, &dims, &args_nodes);
-  auto args = VarVectorToVarHandleVector(args_nodes);
-  const Expr* body = body_func(args[0], args[1], args[2], args[3]).node();
-  return new Tensor(func_name, dims, args_nodes, body);
+  std::vector<ExprPtr> dims;
+  std::vector<VarPtr> args;
+  unpack_dim_args(dim_args, &dims, &args);
+  ExprPtr body = body_func(
+                     VarHandle(args[0]),
+                     VarHandle(args[1]),
+                     VarHandle(args[2]),
+                     VarHandle(args[3]))
+                     .node();
+  BufPtr buf = alloc<Buf>(name, dims, body->dtype());
+  return Tensor(buf, args, body);
 }
 
-Stmt* Tensor::ElementStmt() {
-  std::vector<const Expr*> indices;
-  for (size_t i = 0; i < buf_->ndim(); i++) {
-    indices.push_back(args_[i]);
-  }
-
-  const Expr* mask = new IntImm(1);
-  Stmt* update_stmt = new Store(buf_, indices, body_, mask);
-  return update_stmt;
-}
-
-Tensor* Reduce(
-    const std::string& func_name,
+Tensor Reduce(
+    const std::string& name,
     const std::vector<DimArg>& dim_args,
     const Reducer& reducer,
-    const Placeholder& buffer,
+    const BufHandle& buffer,
     const std::vector<DimArg>& reduce_args) {
   return Reduce(
-      func_name,
+      name,
       dim_args,
       reducer,
       [&](ParameterList& p) { return buffer.load(p); },
       reduce_args);
 }
 
-Tensor* Reduce(
-    const std::string& func_name,
+Tensor Reduce(
+    const std::string& name,
     const std::vector<DimArg>& dim_args,
     const Reducer& reducer,
-    Tensor* tensor,
+    Tensor tensor,
     const std::vector<DimArg>& reduce_args) {
   return Reduce(
-      func_name,
+      name,
       dim_args,
       reducer,
-      [&](ParameterList& p) { return tensor->call(p); },
+      [&](ParameterList& p) { return tensor.load(p); },
       reduce_args);
 }
 

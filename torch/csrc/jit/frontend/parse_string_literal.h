@@ -12,16 +12,13 @@ inline bool isCharCount(char c, const std::string& str, size_t start, int len) {
       std::count(str.begin() + start, str.begin() + start + len, c) == len;
 }
 
-inline static bool isOctal(char c) {
-  return c >= '0' && c < '8';
-}
-
 inline c10::optional<char> parseOctal(const std::string& str, size_t pos) {
   //\xxx where x are 0-7
   if (pos + 3 >= str.size())
     return c10::nullopt;
   size_t c = 0;
   for (size_t i = 1, b = 64; i < 4; ++i, b /= 8) {
+    // NOLINTNEXTLINE(bugprone-signed-char-misuse)
     int d = str[pos + i];
     if (d < '0' || d > '7')
       return c10::nullopt;

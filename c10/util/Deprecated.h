@@ -15,30 +15,25 @@
 //      ...
 //    };
 
-// NB: In PyTorch, this block is not actually used at the moment
-// because we are C++11.  However, aspirationally, we would like
-// to use this version, because as of C++14 it is the correct and
-// portable way to declare something deprecated.
 // NB: __cplusplus doesn't work for MSVC, so for now MSVC always uses
-// the "__declspec(deprecated)" implementation and not the C++14 "[[deprecated]]"
-// attribute. We tried enabling "[[deprecated]]" for C++14 on MSVC, but
-// ran into issues with some older MSVC versions.
+// the "__declspec(deprecated)" implementation and not the C++14
+// "[[deprecated]]" attribute. We tried enabling "[[deprecated]]" for C++14 on
+// MSVC, but ran into issues with some older MSVC versions.
 #if (defined(__cplusplus) && __cplusplus >= 201402L)
-# define C10_DEPRECATED [[deprecated]]
-# define C10_DEPRECATED_MESSAGE(message) [[deprecated(message)]]
+#define C10_DEPRECATED [[deprecated]]
+#define C10_DEPRECATED_MESSAGE(message) [[deprecated(message)]]
 #elif defined(__GNUC__)
-# define C10_DEPRECATED __attribute__((deprecated))
+#define C10_DEPRECATED __attribute__((deprecated))
 // TODO Is there some way to implement this?
-# define C10_DEPRECATED_MESSAGE(message) __attribute__((deprecated))
+#define C10_DEPRECATED_MESSAGE(message) __attribute__((deprecated))
 
 #elif defined(_MSC_VER)
-# define C10_DEPRECATED __declspec(deprecated)
-# define C10_DEPRECATED_MESSAGE(message) __declspec(deprecated(message))
+#define C10_DEPRECATED __declspec(deprecated)
+#define C10_DEPRECATED_MESSAGE(message) __declspec(deprecated(message))
 #else
-# warning "You need to implement C10_DEPRECATED for this compiler"
-# define C10_DEPRECATED
+#warning "You need to implement C10_DEPRECATED for this compiler"
+#define C10_DEPRECATED
 #endif
-
 
 // Sample usage:
 //
@@ -52,7 +47,8 @@
 // many compilers.
 #if defined(__has_cpp_attribute)
 #if __has_cpp_attribute(deprecated) && !defined(__CUDACC__)
-# define C10_DEFINE_DEPRECATED_USING(TypeName, TypeThingy) using TypeName [[deprecated]] = TypeThingy;
+#define C10_DEFINE_DEPRECATED_USING(TypeName, TypeThingy) \
+  using TypeName [[deprecated]] = TypeThingy;
 #endif
 #endif
 
@@ -65,18 +61,21 @@
 //
 // So we just turn the macro off in this case.
 #if defined(C10_DEFINE_DEPRECATED_USING)
-# undef C10_DEFINE_DEPRECATED_USING
+#undef C10_DEFINE_DEPRECATED_USING
 #endif
-# define C10_DEFINE_DEPRECATED_USING(TypeName, TypeThingy) using TypeName = TypeThingy;
+#define C10_DEFINE_DEPRECATED_USING(TypeName, TypeThingy) \
+  using TypeName = TypeThingy;
 #else
 // [[deprecated]] does work in windows without nvcc, though msc doesn't support
-// `__has_cpp_attribute` when c++14 is supported, otherwise __declspec(deprecated)
-// is used as the alternative.
+// `__has_cpp_attribute` when c++14 is supported, otherwise
+// __declspec(deprecated) is used as the alternative.
 #ifndef C10_DEFINE_DEPRECATED_USING
 #if defined(_MSVC_LANG) && _MSVC_LANG >= 201402L
-# define C10_DEFINE_DEPRECATED_USING(TypeName, TypeThingy) using TypeName [[deprecated]] = TypeThingy;
+#define C10_DEFINE_DEPRECATED_USING(TypeName, TypeThingy) \
+  using TypeName [[deprecated]] = TypeThingy;
 #else
-# define C10_DEFINE_DEPRECATED_USING(TypeName, TypeThingy) using TypeName = __declspec(deprecated) TypeThingy;
+#define C10_DEFINE_DEPRECATED_USING(TypeName, TypeThingy) \
+  using TypeName = __declspec(deprecated) TypeThingy;
 #endif
 #endif
 #endif
@@ -88,14 +87,16 @@
 // attribute when not cuda, and when using a GCC compiler that doesn't support
 // the c++14 syntax we checked for above (available in __GNUC__ >= 5)
 #if !defined(__CUDACC__)
-# define C10_DEFINE_DEPRECATED_USING(TypeName, TypeThingy) using TypeName __attribute__((deprecated)) = TypeThingy;
+#define C10_DEFINE_DEPRECATED_USING(TypeName, TypeThingy) \
+  using TypeName __attribute__((deprecated)) = TypeThingy;
 #else
 // using cuda + gcc < 5, neither deprecated syntax is available so turning off.
-# define C10_DEFINE_DEPRECATED_USING(TypeName, TypeThingy) using TypeName = TypeThingy;
+#define C10_DEFINE_DEPRECATED_USING(TypeName, TypeThingy) \
+  using TypeName = TypeThingy;
 #endif
 #endif
 
-#if ! defined(C10_DEFINE_DEPRECATED_USING)
-# warning "You need to implement C10_DEFINE_DEPRECATED_USING for this compiler"
-# define C10_DEFINE_DEPRECATED_USING
+#if !defined(C10_DEFINE_DEPRECATED_USING)
+#warning "You need to implement C10_DEFINE_DEPRECATED_USING for this compiler"
+#define C10_DEFINE_DEPRECATED_USING
 #endif

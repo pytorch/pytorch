@@ -6,12 +6,13 @@
 #include <initializer_list>
 #include <ostream>
 #include <set>
-#include <vector>
 #include <unordered_map>
+#include <vector>
 
 #include "c10/util/Registry.h"
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
+#include "caffe2/core/types.h"
 #include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/filler.h"
 #include "caffe2/utils/proto_utils.h"
@@ -37,7 +38,7 @@ constexpr int kCannotComputeNumOutputs = -1;
  *     OPERATOR_SCHEMA(name)
  *         .NumInputs(2).NumOutputs(1).AllowInplace({{0, 0}});
  */
-class CAFFE2_API OpSchema {
+class TORCH_API OpSchema {
  public:
   OpSchema() : OpSchema("unknown", "unknown", 0) {}
   OpSchema(const string& type, const string& file, const int line);
@@ -273,8 +274,8 @@ class CAFFE2_API OpSchema {
   OpSchema&
   Arg(const char* name, const char* description, bool required = false);
 
-#define DECLARE_STANDARD_ARG(name, str)     \
-  static const char* Arg_##name; \
+#define DECLARE_STANDARD_ARG(name, str) \
+  static const char* Arg_##name;        \
   OpSchema& Arg##name(const char* description);
 
   DECLARE_STANDARD_ARG(IsTest, is_test)
@@ -339,7 +340,9 @@ class CAFFE2_API OpSchema {
     return inplace_enforced_(x, y);
   }
 
-  CAFFE2_API friend std::ostream& operator<<(std::ostream& out, const OpSchema& schema);
+  TORCH_API friend std::ostream& operator<<(
+      std::ostream& out,
+      const OpSchema& schema);
 
   const std::vector<Argument>& args() const {
     return args_;
@@ -457,24 +460,10 @@ class CAFFE2_API OpSchema {
 /**
  * @brief A registry to hold all the operator schemas.
  */
-class CAFFE2_API OpSchemaRegistry {
+class TORCH_API OpSchemaRegistry {
  public:
   static OpSchema&
-  NewSchema(const string& key, const string& file, const int line) {
-    auto& m = map();
-    auto it = m.find(key);
-    if (it != m.end()) {
-      const auto& schema = it->second;
-      std::ios_base::Init init;
-      std::cerr << "Trying to register schema with name " << key
-                << " from file " << file << " line " << line
-                << ", but it is already registered from file " << schema.file()
-                << " line " << schema.line();
-      abort();
-    }
-    m.emplace(std::make_pair(key, OpSchema(key, file, line)));
-    return m[key];
-  }
+  NewSchema(const string& key, const string& file, const int line);
 
   static const OpSchema* Schema(const string& key) {
     auto& m = map();
@@ -576,34 +565,42 @@ OpSchema::Cost PointwiseCostInference(
   }
 
   c.flops = nElemX * OpsPerPoint;
-  c.bytes_read = nElemRead * sizeof(X.data_type());
-  c.bytes_written = nElemX * sizeof(X.data_type());
+  auto const& X_element_size_byte =
+      DataTypeToTypeMeta(X.data_type()).itemsize();
+  c.bytes_read = nElemRead * X_element_size_byte;
+  c.bytes_written = nElemX * X_element_size_byte;
   return c;
 }
 
 } // namespace caffe2
 
+#if defined(_MSC_VER)
+#define EXPORT_IF_NOT_MSVC
+#else
+#define EXPORT_IF_NOT_MSVC C10_EXPORT
+#endif
+
 #ifndef CAFFE2_NO_OPERATOR_SCHEMA
 
-#define OPERATOR_SCHEMA(name)                                       \
-  C10_EXPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){}; \
-  static OpSchema* C10_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED =     \
+#define OPERATOR_SCHEMA(name)                                               \
+  EXPORT_IF_NOT_MSVC void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){}; \
+  static OpSchema* C10_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED =             \
       &OpSchemaRegistry::NewSchema(#name, __FILE__, __LINE__)
 
 #else // CAFFE2_NO_OPERATOR_SCHEMA
 
-#define OPERATOR_SCHEMA(name)                                       \
-  C10_EXPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){}; \
-  static OpSchema* C10_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED =     \
+#define OPERATOR_SCHEMA(name)                                               \
+  EXPORT_IF_NOT_MSVC void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){}; \
+  static OpSchema* C10_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED =             \
       1 ? nullptr : &OpSchemaRegistry::NewSchema(#name, __FILE__, __LINE__)
 
 #endif // CAFFE2_NO_OPERATOR_SCHEMA
 
 #ifdef CAFFE2_NO_GRADIENT_OPS
 
-#define GRADIENT_OPERATOR_SCHEMA(name)                              \
-  C10_EXPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){}; \
-  static OpSchema* C10_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED =     \
+#define GRADIENT_OPERATOR_SCHEMA(name)                                      \
+  EXPORT_IF_NOT_MSVC void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){}; \
+  static OpSchema* C10_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED =             \
       1 ? nullptr : &OpSchemaRegistry::NewSchema(#name, __FILE__, __LINE__)
 
 #else

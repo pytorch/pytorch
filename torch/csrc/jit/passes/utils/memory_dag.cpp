@@ -8,6 +8,7 @@
 namespace torch {
 namespace jit {
 namespace {
+
 void makePointerToImpl(Element* from, Element* to) {
   from->pointsTo.set(to->index);
   to->pointedFrom.set(from->index);
@@ -51,8 +52,8 @@ bool MemoryDAG::mayAlias(const Element* a, const Element* b) const {
 }
 
 bool MemoryDAG::mayAliasImpl(const Element* a, const Element* b) const {
-  const auto aMemLoc = getMemoryLocations(a);
-  const auto bMemLoc = getMemoryLocations(b);
+  const auto& aMemLoc = getMemoryLocations(a);
+  const auto& bMemLoc = getMemoryLocations(b);
 
   return aMemLoc.intersects(bMemLoc);
 }
@@ -65,6 +66,17 @@ bool MemoryDAG::mayContainAlias(Element* a, Element* b) const {
   return mayContainAliasImpl(a, b);
 }
 
+const MemoryLocations& MemoryDAG::getAllContainedMemoryLocations(
+    const Element* elem) const {
+  if (C10_UNLIKELY(!elem->cachedAllContainedMemoryLocations_.has_value())) {
+    MemoryLocations cache;
+    elem->cachedAllContainedMemoryLocations_ = MemoryLocations();
+    collectAllContainedMemoryLocationsImpl(
+        elem, *elem->cachedAllContainedMemoryLocations_);
+  }
+  return *elem->cachedAllContainedMemoryLocations_;
+}
+
 void MemoryDAG::collectAllContainedMemoryLocations(
     const Element* elem,
     MemoryLocations& cont) const {
@@ -73,6 +85,20 @@ void MemoryDAG::collectAllContainedMemoryLocations(
   if (cont.test(compIdx)) {
     return;
   }
+
+  if (C10_UNLIKELY(!elem->cachedAllContainedMemoryLocations_.has_value())) {
+    MemoryLocations cache;
+    collectAllContainedMemoryLocationsImpl(elem, cache);
+    elem->cachedAllContainedMemoryLocations_ = std::move(cache);
+  }
+  cont |= *elem->cachedAllContainedMemoryLocations_;
+}
+
+void MemoryDAG::collectAllContainedMemoryLocationsImpl(
+    const Element* elem,
+    MemoryLocations& cont) const {
+  unsigned compIdx = elem->index;
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!cont.test(compIdx));
   cont.set(compIdx);
 
   for (const auto& mem_loc : getMemoryLocations(elem)) {
@@ -85,13 +111,8 @@ void MemoryDAG::collectAllContainedMemoryLocations(
 }
 
 bool MemoryDAG::mayContainAliasImpl(const Element* a, const Element* b) const {
-  MemoryLocations all_a_mlocs;
-  MemoryLocations all_b_mlocs;
-
-  collectAllContainedMemoryLocations(a, all_a_mlocs);
-  collectAllContainedMemoryLocations(b, all_b_mlocs);
-
-  return all_a_mlocs.intersects(all_b_mlocs);
+  return getAllContainedMemoryLocations(a).intersects(
+      getAllContainedMemoryLocations(b));
 }
 
 bool MemoryDAG::mayContainAlias(
@@ -131,11 +152,13 @@ Element* MemoryDAGBuilder::makeFreshValue(const Value* v) {
   return makeFreshValueImpl(v, indexToElementMap_);
 }
 
+// This function builds up a bitset representing the "alias set" for
+// `e` (`MemoryLocations` is just a typedef'd c10::SparseBitVector).
 const MemoryLocations& MemoryDAG::getMemoryLocations(const Element* e) const {
   // Note on cache invalidation: all mutation should occur through
-  // MemoryDAGBuilder. Thus, once we consume the builder to create an immutable
-  // MemoryDAG, we can cache here without worrying that we might potentially get
-  // invalidated.
+  // MemoryDAGBuilder. Thus, once we consume the builder to create an
+  // immutable MemoryDAG, we can cache here without worrying that we
+  // might potentially get invalidated.
   if (e->cachedMemoryLocations_) {
     return *e->cachedMemoryLocations_;
   }
@@ -174,7 +197,6 @@ void MemoryDAG::setWildcards(
         makePointerToImpl(from, wildcardElement);
       }
     }
-
     // Track which memory locations we edited with a new pointer to the wildcard
     // element.
     cacheUpdates[wildcardElement] |= pointeeSet;
@@ -187,9 +209,9 @@ void MemoryDAG::setWildcards(
   // For every element, if the cache contains `MemoryLocationFoo`, then we must
   // add `WildcardBar` to it.
   for (const std::unique_ptr<Element>& e : this->indexToElementMap_) {
+    e->cachedAllContainedMemoryLocations_.reset();
     if (e->values.empty()) {
       // This element is a wildcard element, we can skip it.
-      TORCH_INTERNAL_ASSERT(e->pointsTo.empty());
       continue;
     }
 

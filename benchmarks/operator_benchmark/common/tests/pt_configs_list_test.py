@@ -4,7 +4,7 @@ import torch
 """Microbenchmarks for element-wise Add operator. Supports both Caffe2/PyTorch."""
 
 add_short_configs = op_bench.config_list(
-    attr_names=['M', 'N', 'K'], 
+    attr_names=['M', 'N', 'K'],
     attrs=[
         [8, 16, 32],
         [16, 16, 64],
@@ -14,12 +14,12 @@ add_short_configs = op_bench.config_list(
         'device': ['cpu', 'cuda'],
         'dtype': [torch.float, torch.float64],
     },
-    tags=['short'], 
+    tags=['short'],
 )
 
 
 class AddBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, M, N, K, device, dtype): 
+    def init(self, M, N, K, device, dtype):
         self.input_one = torch.rand(M, N, K, device=device, dtype=dtype, requires_grad=True)
         self.input_two = torch.rand(M, N, K, device=device, dtype=dtype)
         self.set_module_name('add')

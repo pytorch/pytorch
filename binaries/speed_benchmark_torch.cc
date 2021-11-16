@@ -17,14 +17,16 @@
 #include <string>
 #include <vector>
 
-#include "ATen/ATen.h"
+#include <ATen/ATen.h>
 #include "caffe2/core/timer.h"
 #include "caffe2/utils/string_utils.h"
-#include "torch/csrc/autograd/grad_mode.h"
-#include "torch/csrc/jit/serialization/import.h"
-#include "torch/script.h"
+#include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/jit/mobile/module.h>
+#include <torch/csrc/jit/mobile/import.h>
+#include <torch/csrc/jit/serialization/import.h>
+#include <torch/script.h>
 
-#include "c10/mobile/CPUCachingAllocator.h"
+#include <c10/mobile/CPUCachingAllocator.h>
 
 #include <chrono>
 using namespace std::chrono;
@@ -46,7 +48,7 @@ C10_DEFINE_string(
 C10_DEFINE_bool(
   no_inputs,
   false,
-  "Whether the model has any input. Will ignore other input arugments if true");
+  "Whether the model has any input. Will ignore other input arguments if true");
 C10_DEFINE_bool(
   use_caching_allocator,
   false,
@@ -69,6 +71,8 @@ C10_DEFINE_bool(
 
 C10_DEFINE_int(pytext_len, 0, "Length of input sequence.");
 C10_DEFINE_bool(vulkan, false, "Whether to use Vulkan backend (GPU).");
+
+namespace {
 
 std::vector<std::string>
 split(char separator, const std::string& string, bool ignore_empty = true) {
@@ -143,14 +147,11 @@ std::vector<c10::IValue> create_inputs() {
           "Unsupported input memory format: ", input_memory_format_list[i]);
     }
 
-    const auto input_tensor = torch::ones(
-        input_dims,
-        at::TensorOptions(input_type).memory_format(input_memory_format));
-    if (FLAGS_vulkan) {
-      inputs.push_back(input_tensor.vulkan());
-    } else {
-      inputs.push_back(input_tensor);
-    }
+    inputs.push_back(
+        torch::ones(
+            input_dims,
+            at::TensorOptions(input_type).
+            memory_format(input_memory_format)));
   }
 
   if (FLAGS_pytext_len > 0) {
@@ -160,6 +161,61 @@ std::vector<c10::IValue> create_inputs() {
 
   return inputs;
 }
+
+template<class T>
+class Runner {
+ public:
+  virtual ~Runner() = default;
+  virtual c10::IValue run(
+      T& module,
+      const std::vector<c10::IValue>& inputs) {
+    return module.forward(inputs);
+  }
+};
+
+template<class T>
+class vkRunner final : public Runner<T> {
+ public:
+  virtual ~vkRunner() = default;
+  virtual c10::IValue run(
+      T& module,
+      const std::vector<c10::IValue>& inputs) override {
+    // Upload the input tensor(s) to GPU memory.
+    inputs_.clear();
+    inputs_.reserve(inputs.size());
+    for (const auto& input : inputs) {
+      if (input.isTensor()) {
+        inputs_.emplace_back(input.toTensor().vulkan());
+      }
+      else if (input.isList()) {
+        const c10::List<c10::IValue> input_as_list = input.toList();
+        c10::List<at::Tensor> input_vk_list;
+        input_vk_list.reserve(input_as_list.size());
+        for (int i=0; i < input_as_list.size(); ++i) {
+          const c10::IValue element = input_as_list.get(i);
+          if (element.isTensor()) {
+            input_vk_list.emplace_back(element.toTensor().vulkan());
+          }
+          else {
+            CAFFE_THROW("Input of type c10::List must only contain Tensors!");
+          }
+        }
+        inputs_.emplace_back(c10::IValue(input_vk_list));
+      }
+      else {
+        CAFFE_THROW("Inputs must only contain IValues of type c10::Tensor or c10::List!");
+      }
+    }
+
+    // Run, and download the output tensor to system memory.
+    return module.forward(inputs_).toTensor().cpu();
+  }
+
+ private:
+  std::vector<c10::IValue> inputs_;
+};
+
+} // namespace
 
 int main(int argc, char** argv) {
   c10::SetUsageMessage(
@@ -177,9 +233,13 @@ int main(int argc, char** argv) {
 
   std::vector<c10::IValue> inputs = create_inputs();
 
-  torch::autograd::AutoGradMode guard(false);
+  c10::InferenceMode mode;
+#if BUILD_LITE_INTERPRETER
+  auto module = torch::jit::_load_for_mobile(FLAGS_model);
+#else
   torch::jit::GraphOptimizerEnabledGuard no_optimizer_guard(false);
   auto module = torch::jit::load(FLAGS_model);
+#endif
 
   if (FLAGS_use_bundled_input >= 0) {
     auto get_method = module.find_method("get_all_bundled_inputs");
@@ -196,12 +256,24 @@ int main(int argc, char** argv) {
       std::cerr << "Model has only " << all_inputs.size() << " bundled inputs." << std::endl;
       return 1;
     }
-    inputs = all_inputs.get(FLAGS_use_bundled_input).toTuple()->elements();
+    inputs = all_inputs.get(FLAGS_use_bundled_input).toTupleRef().elements();
   }
 
+#ifdef BUILD_LITE_INTERPRETER
+  using ModuleType = torch::jit::mobile::Module;
+#else
+  using ModuleType = torch::jit::Module;
+#endif
+
+  const auto runner = FLAGS_vulkan ? std::make_unique<vkRunner<ModuleType>>()
+                                   : std::make_unique<Runner<ModuleType>>();
+
+#ifndef BUILD_LITE_INTERPRETER
   module.eval();
+#endif
+
   if (FLAGS_print_output) {
-    std::cout << module.forward(inputs) << std::endl;
+    std::cout << runner->run(module, inputs) << std::endl;
   }
 
   c10::CPUCachingAllocator caching_allocator;
@@ -217,7 +289,7 @@ int main(int argc, char** argv) {
       FLAGS_warmup,
       ".");
   for (int i = 0; i < FLAGS_warmup; ++i) {
-    module.forward(inputs);
+    runner->run(module, inputs);
   }
 
   std::cout << "Main runs." << std::endl;
@@ -231,7 +303,7 @@ int main(int argc, char** argv) {
   auto micros = timer.MicroSeconds();
   for (int i = 0; i < FLAGS_iter; ++i) {
     auto start = high_resolution_clock::now();
-    module.forward(inputs);
+    runner->run(module, inputs);
     auto stop = high_resolution_clock::now();
     auto duration = duration_cast<microseconds>(stop - start);
     times.push_back(duration.count());

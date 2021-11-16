@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 #include <iostream>
 #include <stdexcept>
@@ -42,61 +43,44 @@ void Statement::print() const {
 }
 
 // When we create a Val we immediately register them with the active fusion.
-Val::Val(ValType _vtype, DataType _dtype, bool register_val, bool lowered)
+Val::Val(ValType _vtype, DataType _dtype, bool register_val)
     : vtype_(_vtype), dtype_(_dtype) {
   Fusion* fusion = FusionGuard::getCurFusion();
   TORCH_CHECK(
       fusion != nullptr, "No active fusion group found when creating a Val.");
   fusion_ = fusion;
   if (register_val) {
-    if (lowered) {
-      name_ = fusion_->registerLoweredVal(this);
-    } else {
-      name_ = fusion_->registerVal(this);
+    name_ = fusion_->registerVal(this);
+  }
+}
+
+// NOTE: we don't clone the definition_ and uses_ here
+//  since they may introduce cloning cycles. Instead, we copy
+//  the original pointers and we'll fix them up later part of the
+//  Fusion copy. Neither definition_ nor uses_ are copied through
+//  this constructor now leaving them to be resolved by later stages
+//
+Val::Val(const Val* src, IrCloner* ir_cloner)
+    : Statement(src, ir_cloner),
+      vtype_(src->vtype_),
+      dtype_(src->dtype_),
+      is_fusion_input_(src->is_fusion_input_),
+      is_fusion_output_(src->is_fusion_output_) {}
+
+const std::vector<Expr*>& Val::uses() const {
+  if (vtype_ == ValType::TensorView) {
+    if (!fusion()->isTVUseInfoValid() && !fusion()->isUpdatingTVUseInfo()) {
+      fusion()->resetTvUses();
     }
   }
+  return uses_;
 }
 
 namespace {
 
-// TODO(kir): remove this
-ValType lowerValType(ValType vtype) {
-  switch (vtype) {
-    case ValType::Scalar:
-      return ValType::KirScalar;
-    case ValType::NamedScalar:
-      return ValType::KirNamedScalar;
-    case ValType::TensorDomain:
-      return ValType::KirTensorDomain;
-    case ValType::IterDomain:
-      return ValType::KirIterDomain;
-    case ValType::TensorView:
-      return ValType::KirTensorView;
-    default:
-      TORCH_CHECK(false, "Unexpected");
-  }
-}
-
-} // namespace
-
-// TODO(kir): remove this
-Val::Val(const Val* fusion_ir_node)
-    : vtype_(lowerValType(fusion_ir_node->vtype_)),
-      dtype_(fusion_ir_node->dtype_) {
-  // The lowered nodes preserve the names from the fusion IR counterparts
-  name_ = fusion_ir_node->name_;
-  fusion_ = fusion_ir_node->fusion_;
-  fusion_->registerLoweredVal(this);
-}
-
-Val::Val(const Val* src, IrCloner* ir_cloner)
-    : Statement(src, ir_cloner), vtype_(src->vtype_), dtype_(src->dtype_) {}
-
-// Traverse origin of all values involved in constructing the provided val.
+// Traverse definition of all values involved in constructing the provided val.
 // Check if all values involved are constant values, meaning the provided
 // val is also a constant value.
-namespace {
-
 class ConstCheck : OptOutConstDispatch {
  private:
   bool is_const_ = true;
@@ -105,12 +89,8 @@ class ConstCheck : OptOutConstDispatch {
     is_const_ = is_const_ && b->isConst();
   }
 
-  void handle(const Float* f) override {
-    is_const_ = is_const_ && f->isConst();
-  }
-
-  void handle(const Half* h) override {
-    is_const_ = is_const_ && h->isConst();
+  void handle(const Double* d) override {
+    is_const_ = is_const_ && d->isConst();
   }
 
   void handle(const Int* i) override {
@@ -121,26 +101,6 @@ class ConstCheck : OptOutConstDispatch {
     is_const_ = is_const_ && false;
   }
 
-  void handle(const kir::Bool* b) override {
-    is_const_ = is_const_ && b->isConst();
-  }
-
-  void handle(const kir::Float* f) override {
-    is_const_ = is_const_ && f->isConst();
-  }
-
-  void handle(const kir::Half* h) override {
-    is_const_ = is_const_ && h->isConst();
-  }
-
-  void handle(const kir::Int* i) override {
-    is_const_ = is_const_ && i->isConst();
-  }
-
-  void handle(const kir::NamedScalar* ns) override {
-    is_const_ = is_const_ && false;
-  }
-
   void handle(const Expr* expr) override {
     for (auto inp : expr->inputs()) {
       handle(inp);
@@ -148,11 +108,11 @@ class ConstCheck : OptOutConstDispatch {
   }
 
   void handle(const Val* val) override {
-    const Expr* orig = FusionGuard::getCurFusion()->origin(val);
-    if (orig != nullptr)
-      handle(orig);
-    else
+    if (val->definition() != nullptr) {
+      handle(val->definition());
+    } else {
       OptOutConstDispatch::handle(val);
+    }
   }
 
  public:
@@ -175,8 +135,6 @@ c10::optional<int64_t> Val::getInt() const {
   if (isConstScalar() && isAnInt()) {
     if (this->getValType() == ValType::Scalar) {
       return this->as<Int>()->value();
-    } else if (this->getValType() == ValType::KirScalar) {
-      return this->as<kir::Int>()->value();
     }
   }
   return c10::optional<int64_t>();
@@ -198,17 +156,26 @@ c10::optional<DataType> Val::getDataType() const {
   return dtype_;
 }
 
-Expr* Val::getOrigin() {
-  return fusion_->origin(this);
+bool Val::isProducerOf(const Val* other) const {
+  TORCH_INTERNAL_ASSERT(other != nullptr);
+  TORCH_INTERNAL_ASSERT(fusion() == other->fusion());
+
+  if (definition() == nullptr) {
+    return false;
+  }
+  return std::any_of(
+      definition()->inputs().begin(),
+      definition()->inputs().end(),
+      [other](const Val* input) { return input == other; });
 }
 
-const Expr* Val::getOrigin() const {
-  return fusion_->origin(this);
+bool Val::isConsumerOf(const Val* other) const {
+  return other->isProducerOf(this);
 }
 
 // We don't register with the active fusion in Expr as this needs to be done
 // after inputs and outputs are registered with the Expr
-Expr::Expr(ExprType _type) : type_{_type} {
+Expr::Expr(ExprType type) : type_{type} {
   Fusion* fusion = FusionGuard::getCurFusion();
   if (fusion == nullptr)
     TORCH_CHECK(false, "No active fusion group found when creating an Expr.");
@@ -221,15 +188,25 @@ Expr::Expr(const Expr* src, IrCloner* ir_cloner)
       inputs_(ir_cloner->clone(src->inputs_)),
       outputs_(ir_cloner->clone(src->outputs_)) {}
 
-bool Expr::sameAs(const Expr* const other) const {
-  if (getExprType() != other->getExprType())
+bool Expr::sameAs(const Statement* other) const {
+  if (this == other) {
+    return true;
+  }
+  if (!other->isA<Expr>()) {
     return false;
-  if (inputs().size() != other->inputs().size() ||
-      outputs().size() != other->outputs().size())
+  }
+  const Expr* other_expr = other->as<Expr>();
+  if (getExprType() != other_expr->getExprType()) {
     return false;
-  for (size_t i = 0; i < inputs().size(); i++) {
-    if (!input(i)->sameAs(other->input(i)))
+  }
+  if (inputs().size() != other_expr->inputs().size() ||
+      outputs().size() != other_expr->outputs().size()) {
+    return false;
+  }
+  for (const auto i : c10::irange(inputs().size())) {
+    if (!input(i)->sameAs(other_expr->input(i))) {
       return false;
+    }
   }
   return true;
 }

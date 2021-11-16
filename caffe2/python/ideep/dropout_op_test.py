@@ -7,8 +7,6 @@ import unittest
 from hypothesis import given
 import hypothesis.strategies as st
 import numpy as np
-
-from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.ideep_test_util as mu

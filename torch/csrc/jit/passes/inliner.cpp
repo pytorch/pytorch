@@ -1,4 +1,6 @@
 #include <torch/csrc/jit/passes/inliner.h>
+
+#include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -20,23 +22,27 @@ void inlineCalls(Block* block) {
         auto function_constant = cur->input(0)->node();
         auto fun_type =
             function_constant->output()->type()->expect<FunctionType>();
-        cur->removeInput(0);
-        GRAPH_UPDATE(
-            "Inlining function '", fun_type->function()->name(), "' to ", *cur);
-        GRAPH_UPDATE(
-            "Function body: ", *fun_type->function()->optimized_graph());
-        inlineCallTo(cur, fun_type->function());
+
+        if (auto graphFunction = tryToGraphFunction(*fun_type->function())) {
+          cur->removeInput(0);
+          GRAPH_UPDATE(
+              "Inlining function '",
+              fun_type->function()->name(),
+              "' to ",
+              *cur);
+          GRAPH_UPDATE("Function body: ", graphFunction->optimized_graph());
+          inlineCallTo(cur, graphFunction);
+        }
       } break;
       case prim::CallMethod: {
         const std::string& name = cur->s(attr::name);
         if (auto class_type = cur->input(0)->type()->cast<ClassType>()) {
           Function& function = class_type->getMethod(name);
-          if (!function.isGraphFunction()) {
-            continue;
+          if (auto graphFunction = tryToGraphFunction(function)) {
+            GRAPH_UPDATE("Inlining method '", function.name(), "' to ", *cur);
+            GRAPH_UPDATE("Function body: ", graphFunction->optimized_graph());
+            inlineCallTo(cur, graphFunction);
           }
-          GRAPH_UPDATE("Inlining method '", function.name(), "' to ", *cur);
-          GRAPH_UPDATE("Function body: ", *function.optimized_graph());
-          inlineCallTo(cur, &function);
         }
       } break;
       default: {

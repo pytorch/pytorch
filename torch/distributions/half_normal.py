@@ -28,7 +28,7 @@ class HalfNormal(TransformedDistribution):
     has_rsample = True
 
     def __init__(self, scale, validate_args=None):
-        base_dist = Normal(0, scale)
+        base_dist = Normal(0, scale, validate_args=False)
         super(HalfNormal, self).__init__(base_dist, AbsTransform(),
                                          validate_args=validate_args)
 
@@ -49,11 +49,15 @@ class HalfNormal(TransformedDistribution):
         return self.scale.pow(2) * (1 - 2 / math.pi)
 
     def log_prob(self, value):
+        if self._validate_args:
+            self._validate_sample(value)
         log_prob = self.base_dist.log_prob(value) + math.log(2)
         log_prob[value.expand(log_prob.shape) < 0] = -inf
         return log_prob
 
     def cdf(self, value):
+        if self._validate_args:
+            self._validate_sample(value)
         return 2 * self.base_dist.cdf(value) - 1
 
     def icdf(self, prob):

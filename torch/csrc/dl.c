@@ -8,11 +8,12 @@ static PyMethodDef TorchDlMethods[] = {
 };
 
 static struct PyModuleDef torchdlmodule = {
-   PyModuleDef_HEAD_INIT,
-   "torch._dl",
-   NULL,
-   -1,
-   TorchDlMethods
+    PyModuleDef_HEAD_INIT,
+    "torch._dl",
+    NULL,
+    -1,
+    TorchDlMethods
+    // NOLINTNEXTLINE(clang-diagnostic-missing-field-initializers)
 };
 
 PyMODINIT_FUNC PyInit__dl(void)

@@ -10,7 +10,7 @@ namespace caffe2 {
 
 class ParallelNetExecutorHelper;
 
-class CAFFE2_API ParallelNet : public NetBase {
+class TORCH_API ParallelNet : public NetBase {
  public:
   ParallelNet(const std::shared_ptr<const NetDef>& net_def, Workspace* ws);
 

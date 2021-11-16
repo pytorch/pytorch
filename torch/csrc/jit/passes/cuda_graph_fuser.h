@@ -1,6 +1,6 @@
 #pragma once
 
-#include <aten/src/ATen/Context.h>
+#include <ATen/Context.h>
 #include <torch/csrc/jit/codegen/cuda/interface.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/pass_manager.h>

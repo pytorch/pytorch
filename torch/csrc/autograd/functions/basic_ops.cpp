@@ -42,9 +42,14 @@ auto UndefinedGradBackward::apply(variable_list&& output_grads) -> variable_list
   tensor_list input_grads;
   output_grads.reserve(input_grads.size());
   for (auto& grad : output_grads) {
+    (void)grad; // Suppress unused variable warning
     input_grads.emplace_back(at::Tensor());
   }
   return input_grads;
+}
+
+auto Identity::apply(variable_list&& grads) -> variable_list {
+  return std::move(grads);
 }
 
 }} // namespace torch::autograd

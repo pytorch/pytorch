@@ -73,7 +73,9 @@ class IDEEPMomentumSGDOp final : public IDEEPOperator {
   }
 
  protected:
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-non-private-member-variables-in-classes)
   float momentum_ = 0.9f;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool nesterov_;
   INPUT_TAGS(GRAD, MOMENTUM, LR);
   OUTPUT_TAGS(OUTPUT_GRAD, OUTPUT_MOMENTUM);
@@ -115,7 +117,9 @@ class IDEEPMomentumSGDUpdateOp final : public IDEEPOperator {
   }
 
  protected:
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-non-private-member-variables-in-classes)
   float momentum_ = 0.9f;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool nesterov_;
   INPUT_TAGS(GRAD, MOMENTUM, LR, PARAM);
   OUTPUT_TAGS(OUTPUT_GRAD, OUTPUT_MOMENTUM, OUTPUT_PARAM);

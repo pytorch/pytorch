@@ -98,7 +98,7 @@ struct Tree : c10::intrusive_ptr_target {
       throw std::runtime_error(ss.str());
     }
   }
-  virtual ~Tree() = default;
+  ~Tree() override = default;
 
  private:
   int kind_;

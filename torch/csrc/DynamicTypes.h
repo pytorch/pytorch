@@ -6,6 +6,7 @@
 
 #include <ATen/Device.h>
 #include <c10/core/ScalarType.h>
+#include <c10/core/ScalarTypeToTypeMeta.h>
 #include <c10/core/Backend.h>
 #include <c10/core/Layout.h>
 
@@ -29,8 +30,9 @@ void registerLayoutObject(THPLayout *thp_layout, at::Layout layout);
 
 PyObject* createPyObject(
     const at::Storage& storage,
-    const caffe2::TypeMeta& data_type);
+    const caffe2::TypeMeta data_type);
 at::Storage createStorage(PyObject* obj);
+at::Storage createStorageGetType(PyObject* obj, at::ScalarType& scalar_type, bool& is_typed_storage);
 bool isStorage(PyObject* obj);
 
 THPDtype* getTHPDtype(at::ScalarType scalarType);

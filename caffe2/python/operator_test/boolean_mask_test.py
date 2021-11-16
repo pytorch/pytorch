@@ -2,7 +2,6 @@
 
 
 
-from caffe2.proto import caffe2_pb2
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
@@ -16,7 +15,7 @@ class TestBooleanMaskOp(serial.SerializedTestCase):
                          max_len=100,
                          elements=hu.floats(min_value=0.5, max_value=1.0)),
            **hu.gcs_cpu_only)
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_boolean_mask_gradient(self, x, gc, dc):
         op = core.CreateOperator("BooleanMask",
                                  ["data", "mask"],
@@ -31,7 +30,7 @@ class TestBooleanMaskOp(serial.SerializedTestCase):
                          max_len=5,
                          elements=hu.floats(min_value=0.5, max_value=1.0)),
            **hu.gcs)
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_boolean_mask(self, x, gc, dc):
         op = core.CreateOperator("BooleanMask",
                                  ["data", "mask"],
