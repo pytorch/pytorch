@@ -30,8 +30,10 @@ def is_in_onnx_export():
     global __IN_ONNX_EXPORT
     return __IN_ONNX_EXPORT
 
+
 # Skip check due to cannot import IValue from torch._C
 _params_dict = {}  # type: ignore[var-annotated]
+
 
 @contextlib.contextmanager
 def select_model_mode_for_export(model, mode):
@@ -101,6 +103,7 @@ def exporter_context(model, mode):
             disable_apex_o2_state_dict_hook(model) as apex_ctx:
         yield (mode_ctx, apex_ctx)
 
+
 def export(model, args, f, export_params=True, verbose=False, training=None,
            input_names=None, output_names=None, operator_export_type=None,
            opset_version=None, do_constant_folding=True, dynamic_axes=None,
@@ -136,6 +139,8 @@ def _is_constant_tensor_list(node):
 
 # ONNX can't handle constants that are lists of tensors, which can
 # get generated in constant prop. So we split them back into prim::ListConstructs
+
+
 def _split_tensor_list_constants(g, block):
     for node in block.nodes():
         for subblock in node.blocks():
@@ -166,8 +171,8 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     torch._C._jit_pass_lint(graph)
     torch._C._jit_pass_lower_all_tuples(graph)
 
-    # we record now record some ops like ones/zeros
-    # into a trace where we previously recorded constants
+    # we now record some ops like ones/zeros
+    # into a trace where we previously recorded constants.
     # use constant prop to maintain our current level of onnx support
     # without implementing symbolics for all of them
     if _disable_torch_constant_prop is False:
@@ -294,7 +299,7 @@ def _decide_keep_init_as_input(keep_initializers_as_inputs, operator_export_type
     # This method encapsulates the logic to decide whether the initializers in the graph
     # should be listed as ONNX graph inputs (i.e., whether to choose ONNX IR v3 or v4).
     # If keep_initializers_as_inputs is not specified (None), then we decide whether to keep
-    # intializers as graph inputs (val_keep_init_as_ip) based on export type. If export type
+    # initializers as graph inputs (val_keep_init_as_ip) based on export type. If export type
     # is ONNX, then do not keep initializers as input (val_keep_init_as_ip=False). For all other
     # export types keep initializers as input (val_keep_init_as_ip=True).
     # If keep_initializers_as_inputs is specified, then respect it. Unless opset version <= 8,
@@ -303,13 +308,13 @@ def _decide_keep_init_as_input(keep_initializers_as_inputs, operator_export_type
 
     # Special handling is needed for opset version 8 or lower, because irrespective
     # of user input for keep_initializers_as_inputs, the graph must follow ONNX IR v3
-    # semantics, i.e. all intializers must be listed as ONNX graph input.
+    # semantics, i.e. all initializers must be listed as ONNX graph input.
     if opset_version < 9:
         if keep_initializers_as_inputs is False:
             warnings.warn("Setting 'keep_initializers_as_inputs=False' for opset version"
                           "8 or lower would lead to an invalid ONNX graph. Therefore, "
                           "'keep_initializers_as_inputs=False' is ignored during export."
-                          "Exported model will have initialiers as graph inputs (compliant "
+                          "Exported model will have initializers as graph inputs (compliant "
                           " to ONNX IR v3).")
         return True  # i.e. True == initializers are part of graph input (ONNX IR v3)
     val_keep_init_as_ip = True if keep_initializers_as_inputs is None else keep_initializers_as_inputs
@@ -347,6 +352,7 @@ def _decide_external_data_format(use_external_data_format, operator_export_type,
     else:
         model_file_location = str()
     return val_use_external_data_format, model_file_location
+
 
 def _decide_input_format(model, args):
     import inspect
@@ -472,6 +478,7 @@ def _get_named_param_dict(graph, params):
     _params_dict = dict(zip(param_names, params))
     return _params_dict
 
+
 def _get_example_outputs(model, args):
     input_args = copy.deepcopy(args)
     input_kwargs = {}
@@ -486,6 +493,7 @@ def _get_example_outputs(model, args):
     if isinstance(example_outputs, list):
         example_outputs = [example_outputs]
     return example_outputs
+
 
 def _model_to_graph(model, args, verbose=False,
                     input_names=None, output_names=None,
@@ -843,6 +851,7 @@ def _set_input_and_output_names(graph, input_names, output_names):
     set_names(list(graph.inputs()), input_names, "input")
     set_names(list(graph.outputs()), output_names, "output")
 
+
 attr_pattern = re.compile("^(.+)_([ifstgz])$")
 
 
@@ -1176,7 +1185,7 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
                     return None
                 attrs = {k: n[k] for k in n.attributeNames()}
                 # TODO: https://msdata.visualstudio.com/Vienna/_workitems/edit/1408006
-                # PythonOp symbolic need access thde node to resolve the name conflict,
+                # PythonOp symbolic need access the node to resolve the name conflict,
                 # this is inconsistent with regular op symbolic.
                 if op_name == "PythonOp":
                     inputs = (n, *inputs)
@@ -1273,17 +1282,19 @@ def _node_getitem(self, k):
 
 def get_ns_op_name_from_custom_op(symbolic_name):
     if not bool(re.match(r"^[a-zA-Z0-9-_]*::[a-zA-Z-_]+[a-zA-Z0-9-_]*$", symbolic_name)):
-        raise RuntimeError("Failed to register operator {}. \
-                           The symbolic name must match the format Domain::Name, \
-                           and should start with a letter and contain only \
-                           alphanumerical characters"
-                           .format(symbolic_name))
+        raise ValueError("Failed to register operator {}. \
+                          The symbolic name must match the format Domain::Name, \
+                          and should start with a letter and contain only \
+                          alphanumerical characters".format(symbolic_name))
     ns, op_name = symbolic_name.split("::")
-    # TODO: Allow users to register custom symbolic in aten domain.
-    # https://msdata.visualstudio.com/Vienna/_workitems/edit/1407799
-    if ns in ("onnx", "aten"):
-        raise RuntimeError("Failed to register operator {}. The domain {} is already a used domain."
-                           .format(symbolic_name, ns))
+    if ns == "onnx":
+        raise ValueError("Failed to register operator {}. \
+                          {} domain cannot be modified."
+                         .format(symbolic_name, ns))
+
+    if ns == "aten":
+        ns = ""
+
     return ns, op_name
 
 
