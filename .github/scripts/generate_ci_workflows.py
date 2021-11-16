@@ -543,7 +543,7 @@ ANDROID_WORKFLOWS = [
         test_runner_type=LINUX_CPU_TEST_RUNNER,
         exclude_test=True,
         ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_LINUX,LABEL_CIFLOW_CPU, LABEL_CIFLOW_ANDROID, LABEL_CIFLOW_DEFAULT}
+            labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_ANDROID, LABEL_CIFLOW_DEFAULT}
         ),
     ),
 ]
