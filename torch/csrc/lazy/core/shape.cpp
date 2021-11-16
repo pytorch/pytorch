@@ -34,7 +34,7 @@ std::vector<Shape> convertShapes(
 }
 
 size_t Shape::numel() const {
-  size_t elts = dim() > 0 ? 1 : 0;
+  size_t elts = 1;
   for (auto size: sizes_) {
     elts *= size;
   }
