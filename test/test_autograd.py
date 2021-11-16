@@ -7313,6 +7313,12 @@ class TestAutogradForwardMode(TestCase):
             self.assertEqual(baz_primal, foo)
             self.assertIs(baz_tangent, bar)
 
+            # Check unpacked dual is returned as a named tuple
+            # NB: Every invocation of unpack_dual returns a new tensor view
+            self.assertIsNot(baz_primal, fwAD.unpack_dual(baz).primal)
+            self.assertEqual(baz_primal, fwAD.unpack_dual(baz).primal)
+            self.assertIs(baz_tangent, fwAD.unpack_dual(baz).tangent)
+
             # Check that packing/unpacking did not change the input
             foo_primal, foo_tangent = fwAD.unpack_dual(foo)
             self.assertEqual(foo_primal, foo)
