@@ -12679,19 +12679,20 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_masked_reduction,
         gradcheck_wrapper=gradcheck_wrapper_masked_operation
     ),
-    OpInfo('_masked.softmax',
-           method_variant=None,
-           dtypesIfCPU=floating_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
-           sample_inputs_func=sample_inputs_masked_softmax,
-           skips=(
-               # torch.jit.frontend.NotSupportedError: Compiled
-               # functions can't take variable number of arguments or
-               # use keyword-only arguments with defaults
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-           ),
-           gradcheck_wrapper=gradcheck_wrapper_masked_operation,
-           supports_out=False),
+    OpInfo(
+        '_masked.softmax',
+        method_variant=None,
+        dtypesIfCPU=floating_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+        sample_inputs_func=sample_inputs_masked_softmax,
+        skips=(
+            # torch.jit.frontend.NotSupportedError: Compiled
+            # functions can't take variable number of arguments or
+            # use keyword-only arguments with defaults
+            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+        ),
+        gradcheck_wrapper=gradcheck_wrapper_masked_operation,
+        supports_out=False),
     OpInfo(
         "nn.functional.ctc_loss",
         ref=_NOTHING,
