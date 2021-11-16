@@ -31,7 +31,7 @@ std::vector<int64_t> ComputeArrayStrides(c10::ArrayRef<int64_t> sizes) {
 }
 
 std::vector<at::Tensor> DataHandlesToTensors(
-    c10::ArrayRef<compiler::BackendDataPtr> data_handles,
+    c10::ArrayRef<torch::lazy::BackendDataPtr> data_handles,
     at::ScalarType dest_element_type) {
   std::vector<at::Tensor> tensors;
   for (const auto& handle : data_handles) {
@@ -41,19 +41,19 @@ std::vector<at::Tensor> DataHandlesToTensors(
   return tensors;
 }
 
-compiler::BackendDataPtr TensorToDataHandle(const at::Tensor& tensor,
-                                     const torch::lazy::BackendDevice& device) {
+torch::lazy::BackendDataPtr TensorToDataHandle(
+    const at::Tensor& tensor, const torch::lazy::BackendDevice& device) {
   return compiler::getBackend()
       ->MakeComputationDataFromTensor(
           tensor, torch::lazy::Shape(tensor.scalar_type(), tensor.sizes()),
           device);
 }
 
-std::vector<compiler::BackendDataPtr> CreateTensorsData(
+std::vector<torch::lazy::BackendDataPtr> CreateTensorsData(
     const std::vector<at::Tensor>& tensors,
     const std::vector<torch::lazy::BackendDevice>& devices) {
   CHECK_EQ(tensors.size(), devices.size());
-  std::vector<compiler::BackendDataPtr> result;
+  std::vector<torch::lazy::BackendDataPtr> result;
   result.reserve(tensors.size());
   for (size_t i = 0; i < tensors.size(); ++i) {
     result.push_back(TensorToDataHandle(tensors[i], devices[i]));

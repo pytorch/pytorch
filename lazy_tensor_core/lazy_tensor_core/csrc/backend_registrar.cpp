@@ -17,7 +17,7 @@ std::vector<std::string> GetCompilationDevices(
 }
 
 at::Tensor MakeTensorFromComputationData(
-    const torch_lazy_tensors::compiler::BackendDataPtr data,
+    const torch::lazy::BackendDataPtr data,
     c10::optional<at::ScalarType> logical_scalar_type) {
   return compiler::getBackend()
       ->MakeTensorFromComputationData(data, logical_scalar_type);

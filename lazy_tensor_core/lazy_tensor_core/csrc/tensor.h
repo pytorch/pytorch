@@ -16,7 +16,7 @@ class LazyTensor {
   // held. The lazy tensor is nothing more than a shared pointer to a Data
   // object.
   struct Data {
-    Data(compiler::BackendDataPtr handle,
+    Data(torch::lazy::BackendDataPtr handle,
          const torch::lazy::BackendDevice& device)
         : handle(std::move(handle)),
           device(device),
@@ -34,7 +34,7 @@ class LazyTensor {
 
     ~Data();
 
-    compiler::BackendDataPtr handle;
+    torch::lazy::BackendDataPtr handle;
     torch::lazy::Value ir_value;
     std::shared_ptr<View> view;
     c10::optional<at::Tensor> tensor_data;
@@ -46,7 +46,7 @@ class LazyTensor {
   static LazyTensor Create(const at::Tensor& tensor, const torch::lazy::BackendDevice& device);
   static LazyTensor Create(torch::lazy::Value ir_value,
                            const torch::lazy::BackendDevice& device);
-  static LazyTensor Create(compiler::BackendDataPtr handle);
+  static LazyTensor Create(torch::lazy::BackendDataPtr handle);
   static LazyTensor Create(std::shared_ptr<Data> data);
 
   // TODO(whc) just a hack for now to get codegen to compile... need to refactor
@@ -94,14 +94,14 @@ class LazyTensor {
 
   // Fetches the data behind the tensor. If the tensor has a graph defining
   // its current value, executes the graph and fetches the data result.
-  compiler::BackendDataPtr GetDataHandle();
+  torch::lazy::BackendDataPtr GetDataHandle();
 
   // Fetches the current value of the data, which can be missing (nullptr)
   // in case the tensor has a graph defining its current value,
-  compiler::BackendDataPtr CurrentDataHandle() const;
+  torch::lazy::BackendDataPtr CurrentDataHandle() const;
 
-  void SetDataHandle(compiler::BackendDataPtr handle);
-  void SetDataHandle(compiler::BackendDataPtr handle, bool sync);
+  void SetDataHandle(torch::lazy::BackendDataPtr handle);
+  void SetDataHandle(torch::lazy::BackendDataPtr handle, bool sync);
 
   // Retrieves the current IR Node, or nullptr in case no active IR Node is
   // available.
@@ -135,7 +135,7 @@ class LazyTensor {
              const torch::lazy::BackendDevice& device);
   LazyTensor(std::shared_ptr<View> view,
              const torch::lazy::BackendDevice& device);
-  LazyTensor(compiler::BackendDataPtr handle);
+  LazyTensor(torch::lazy::BackendDataPtr handle);
   LazyTensor(std::shared_ptr<Data> data);
 
   static LazyTensor Create(std::shared_ptr<View> view,
@@ -147,7 +147,7 @@ class LazyTensor {
 
   void SetTensorData(at::Tensor tensor_data);
 
-  torch::lazy::Value CreateTensorNode(compiler::BackendDataPtr data,
+  torch::lazy::Value CreateTensorNode(torch::lazy::BackendDataPtr data,
                                       bool read_only) const;
 
   std::tuple<torch::lazy::Value, bool> GetViewUpdate(
