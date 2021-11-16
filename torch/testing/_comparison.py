@@ -18,6 +18,7 @@ except ModuleNotFoundError:
 
 class ErrorMeta(Exception):
     """Internal testing exception that makes that carries error meta data."""
+
     def __init__(self, type: Type[Exception], msg: str, *, id: Tuple[Any, ...] = ()) -> None:
         super().__init__(
             "If you are a user and see this message during normal operation "
