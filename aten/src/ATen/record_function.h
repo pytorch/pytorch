@@ -124,9 +124,9 @@ struct TORCH_API RecordFunction {
   RecordFunction(const RecordFunction&) = delete;
   RecordFunction& operator=(const RecordFunction&) = delete;
 
-  const StringView& name() const {
+  const char* name() const {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called name() on inactive RecordFunction");
-    return state_->name_;
+    return state_->name_.str();
   }
 
   int64_t seqNr() const {

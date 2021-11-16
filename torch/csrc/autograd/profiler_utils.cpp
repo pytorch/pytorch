@@ -55,7 +55,7 @@ std::unordered_map<std::string, c10::IValue> saveExtraArgs(const at::RecordFunct
   // for specific types of fn, return the saved extra args for computing flops
   std::unordered_map<std::string, c10::IValue> map;
   std::vector<c10::IValue> inputs = fn.inputs();
-  std::string fname(fn.name().str());
+  std::string fname(fn.name());
 
   if (inputs.empty()) {
     // Input shape is unavailable, return empty map
