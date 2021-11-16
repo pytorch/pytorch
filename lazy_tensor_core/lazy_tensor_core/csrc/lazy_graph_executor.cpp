@@ -11,7 +11,6 @@
 #include "lazy_tensor_core/csrc/ops/ops.h"
 #include "lazy_tensor_core/csrc/ops/scalar.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
-#include "lazy_tensor_core/csrc/torch_util.h"
 #include "lazy_tensors/computation_client/metrics.h"
 #include "lazy_tensors/computation_client/unique.h"
 #include "torch/csrc/lazy/core/ir_metadata.h"
@@ -26,6 +25,19 @@ struct TlsData {
 };
 
 thread_local TlsData g_tls_data;
+
+bool TensorCompare(const at::Tensor& t1, const at::Tensor& t2) {
+  if (t1.scalar_type() != t2.scalar_type() || t1.sizes() != t2.sizes()) {
+    return false;
+  }
+  // PyTorch currently has an issue comparing tensors which have NaN values in
+  // it. The compare is not deterministic. So we do memory compare here until
+  // the PyTorch equal() API is fixed.
+  at::Tensor contiguous_t1 = t1.contiguous();
+  at::Tensor contiguous_t2 = t2.contiguous();
+  return std::memcmp(contiguous_t1.data_ptr(), contiguous_t2.data_ptr(),
+                     contiguous_t1.numel() * contiguous_t1.itemsize()) == 0;
+}
 
 // Locking:
 // We perform two kinds of operations of tensors, synchronous and asynchronous.
@@ -179,7 +191,7 @@ class DataCacheArena {
     size_t operator()(const at::Tensor& tensor) const {
       return torch::lazy::HashReduce(torch::lazy::HashCombine(
           lazy_tensors::util::GetEnumValue(tensor.scalar_type()),
-          TensorHash(tensor)));
+          torch::lazy::TensorHash(tensor)));
     };
   };
   struct TensorComparer {
