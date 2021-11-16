@@ -10610,7 +10610,8 @@ op_db: List[OpInfo] = [
                                     active_if=TEST_WITH_ROCM),
                    ),
                    # tan(pi/2 * odd_number) is nan
-                   reference_numerics_filter=NumericsFilter(condition=lambda x: close_to_int(x / (math.pi * 0.5)), safe_val=math.pi)),
+                   reference_numerics_filter=NumericsFilter(
+                       condition=lambda x: close_to_int(x / (math.pi * 0.5)), safe_val=math.pi)),
     UnaryUfuncInfo('tanh',
                    ref=np.tanh,
                    aliases=('nn.functional.tanh',),
