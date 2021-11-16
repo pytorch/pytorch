@@ -343,38 +343,31 @@ class TestDependencyAPI(PackageTestCase):
             foo2.package_a.get_something()
 
     def test_selective_intern(self):
-
-        package_d_template_file = str(Path(__file__).parent / "package_d/package_d_template.py")
-        package_d_template_file_template = Template(_read_file(package_d_template_file))
-        filename_selective_intern = str(Path(__file__).parent / "package_d/temp_selective_intern.py")
-        filename_extern= str(Path(__file__).parent / "package_d/temp_extern.py")
-        og_number = 123
-        changed_number = 456
-        og_file_content = package_d_template_file_template.substitute(name="package_d_file", test_number=123)
-        changed_file_content = package_d_template_file_template.substitute(name="package_d_file", test_number=456)
-        _write_file(filename_selective_intern, og_file_content)
-        _write_file(filename_extern, og_file_content)
+        # small change for testing
+        filename_selective_intern = str(Path(__file__).parent / "package_d/test_selective_intern.py")
+        filename_extern= str(Path(__file__).parent / "package_d/test_extern.py")
 
         buffer = BytesIO()
         with PackageExporter(buffer) as he:
             he.extern(["package_d.*"])
             he.save_module("package_d")
-            he._selective_intern("package_d.temp_selective_intern","package_d.temp_selective_intern")
-            _write_file(filename_selective_intern, changed_file_content)
-            _write_file(filename_extern, changed_file_content)
-            he.save_source_string("foo", "import package_d.temp_selective_intern as temp_selective_intern; import package_d.temp_extern as temp_extern")
+            he._selective_intern("package_d.test_selective_intern","package_d.test_selective_intern")
+            he.save_source_string("foo", "import package_d.test_selective_intern as test_selective_intern; import package_d.test_extern as test_extern")
         buffer.seek(0)
         hi = PackageImporter(buffer)
         foo = hi.import_module("foo")
 
         # number is not getting overwritten
-        import package_d.temp_selective_intern
-        import package_d.temp_extern
+        import package_d.test_selective_intern
+        import package_d.test_extern
 
-        self.assertEqual(foo.temp_extern.test_number, package_d.temp_extern.test_number)
-        # print(foo.temp_selective_intern.test_number)
-        print(package_d.temp_selective_intern.test_number)
-        self.assertNotEqual(foo.temp_selective_intern.test_number, package_d.temp_selective_intern.test_number)
+        # check access is maintained
+        self.assertEqual(foo.test_extern.test_number, package_d.test_extern.test_number)
+        self.assertEqual(foo.test_selective_intern.test_number, package_d.test_selective_intern.test_number)
+
+        # check extern and selective intern are working as expected
+        self.assertIs(foo.test_extern, package_d.test_extern)
+        self.assertIsNot(foo.test_selective_intern, package_d.test_selective_intern)
 
     def test_selective_intern_subpackage(self):
         # buffer = BytesIO()
