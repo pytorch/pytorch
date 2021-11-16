@@ -5,6 +5,8 @@ from io import BytesIO
 from sys import version_info
 from textwrap import dedent
 from unittest import skipIf
+from string import Template
+from pathlib import Path
 import pdb
 
 from torch.package import EmptyMatchError, Importer, PackageExporter, PackageImporter
@@ -340,6 +342,37 @@ class TestDependencyAPI(PackageTestCase):
         with self.assertRaises(NotImplementedError):
             foo2.package_a.get_something()
 
+    def test_selective_intern(self):
+
+        package_d_template_file = str(Path(__file__).parent / "package_d/package_d_template.py")
+        package_d_template_file_template = Template(_read_file(package_d_template_file))
+        filename_selective_intern = str(Path(__file__).parent / "package_d/temp_selective_intern.py")
+        filename_extern= str(Path(__file__).parent / "package_d/temp_extern.py")
+        og_number = 123
+        changed_number = 456
+        og_file_content = package_d_template_file_template.substitute(name="package_d_file", test_number=123)
+        changed_file_content = package_d_template_file_template.substitute(name="package_d_file", test_number=456)
+        _write_file(filename_selective_intern, og_file_content)
+        _write_file(filename_extern, og_file_content)
+
+        buffer = BytesIO()
+        with PackageExporter(buffer) as he:
+            he.extern(["package_d.*"])
+            he._selective_intern("package_d.package_d_temp","package_d.package_d_temp")
+            _write_file(filename_selective_intern, changed_file_content)
+            _write_file(filename_extern, changed_file_content)
+            he.save_source_string("foo", "import package_d.package_d_template;")
+        buffer.seek(0)
+        hi = PackageImporter(buffer)
+        import package_d.temp_selective_interned
+        import package_d.temp_extern
+
+        foo_selective_intern = hi.import_module("package_d.temp_selective_intern")
+        foo_selective_extern = hi.import_module("package_d.temp_extern")
+
+        self.assertEqual(foo_selective_extern.test_number, package_d.temp_extern.test_number)
+        self.assertNotEqual(foo_selective_intern.test_number, package_d.temp_selective_intern.test_number)
+
     def test_selective_intern_subpackage(self):
         # buffer = BytesIO()
         buffer = "/tmp/a.out"
@@ -368,6 +401,16 @@ class TestDependencyAPI(PackageTestCase):
 
         # Check that attribute access works correctly on the shim.
         # self.assertIs(foo.package_b.package_b_li, package_b.package_b_li)
+
+def _read_file(filename: str) -> str:
+    with open(filename, "rb") as f:
+        b = f.read()
+        return b.decode("utf-8")
+
+def _write_file(filename:str, filecontent:str):
+    f = open(filename, "w")
+    f.write(filecontent)
+    f.close()
 
 if __name__ == "__main__":
     run_tests()
