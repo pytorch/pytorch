@@ -2379,7 +2379,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
                     assert isinstance(timeout, timedelta)
                     process_group.allreduce(torch.rand(10).cuda(self.rank)).wait(timeout=timeout)
             except Exception as e:
-                if "NCCL communicator was aborted" in str(e):
+                if "NCCL communicator was aborted" in str(e) or "NCCL communicator encountered error" in str(e):
                     return
                 else:
                     raise e
