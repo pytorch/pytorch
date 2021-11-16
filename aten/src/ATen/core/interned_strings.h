@@ -204,6 +204,7 @@ namespace c10 {
   _(aten, clamp_)                    \
   _(aten, clip)                      \
   _(aten, clip_)                     \
+  _(aten, linalg_cross)              \
   _(aten, det)                       \
   _(aten, linalg_det)                \
   _(aten, matrix_power)              \
