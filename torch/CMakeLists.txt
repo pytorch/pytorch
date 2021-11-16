@@ -187,8 +187,6 @@ add_custom_target(torch_python_stubs DEPENDS
     "${TORCH_SRC_DIR}/_C/_VariableFunctions.pyi"
     "${TORCH_SRC_DIR}/nn/functional.pyi"
 )
-# For Declarations.yaml dependency
-add_dependencies(torch_python_stubs ATEN_CPU_FILES_GEN_TARGET)
 add_custom_command(
     OUTPUT
     "${TORCH_SRC_DIR}/_C/__init__.pyi"
@@ -203,6 +201,8 @@ add_custom_command(
     "${TORCH_SRC_DIR}/_C/_VariableFunctions.pyi.in"
     "${TORCH_SRC_DIR}/nn/functional.pyi.in"
     "${TOOLS_PATH}/pyi/gen_pyi.py"
+    "${TORCH_ROOT}/aten/src/ATen/native/native_functions.yaml"
+    "${TORCH_ROOT}/tools/autograd/deprecated.yaml"
     WORKING_DIRECTORY
     "${TORCH_ROOT}"
 )
