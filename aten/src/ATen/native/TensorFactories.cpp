@@ -275,15 +275,14 @@ Tensor empty_like(
   auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Preserve);
 
   if (options.layout() == kSparseCsr && self.is_sparse_csr()) {
-    auto result_dtype = dtype.value_or(self.scalar_type());
     auto result = at::native::_sparse_csr_tensor_unsafe(
         self.crow_indices().clone(),
         self.col_indices().clone(),
         at::empty(self.values().sizes(), options.layout(kStrided)),
         self.sizes(),
-        result_dtype,
-        self.layout(),
-        self.device()
+        options.dtype(),
+        options.layout(),
+        options.device()
     );
   }
 
