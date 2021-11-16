@@ -3179,38 +3179,89 @@ def sample_inputs_adaptive_max_pool3d(op_info, device, dtype, requires_grad, **k
 
     return list(generator())
 
+class _TestParamsMaxPoolBase(object):
 
-def sample_inputs_max_pool2d(op_info, device, dtype, requires_grad, **kwargs):
-    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    def __init__(self):
+        self.kwargs = {
+            'kernel_size': [3],
+            'stride': [2, None],
+            'ceil_mode': [True, False],
+            'padding': [0, 1],
+            'dilation': [1],
+            'return_indices': [True, False]
+        }
 
-    kerneli = [[3, 2], 3]
-    stridei = [[2, 2]]
-    Ni = [1, 2, None]
-    Ci = [2]
-    Hi = [3, 6]
-    Wi = [6]
-    ceil_modei = [True, False]
-    paddingi = [0, 1]
-    dilationi = [1, (1, 2)]
-    return_indicesi = [True, False]
+        self.shapes = [
+            [1, 2, None],  # batch
+            [2],  # channels
+            [3, 6]  # signal
+        ]
 
-    products = product(kerneli, stridei, Ni, Ci, Hi, Wi, ceil_modei, paddingi, dilationi, return_indicesi)
+    def _gen_shape(self):
+        for shape in product(*self.shapes):
+            # shape[0] is None indicates missing batch dimension
+            if shape[0] is None:
+                shape = shape[1:]
+
+            yield shape, torch.contiguous_format
+            # only 2d (N, C, H, W) rank 4 tensors support channels_last memory format
+            if len(self.shapes) == 4 and len(shape) == 4:
+                yield shape, torch.channels_last
+
+    def _gen_kwargs(self):
+        keys = self.kwargs.keys()
+        for values in product(*self.kwargs.values()):
+            yield dict(zip(keys, values))
+
+    def gen_input_params(self):
+        yield from product(self._gen_shape(), self._gen_kwargs())
+
+class _TestParamsMaxPool1d(_TestParamsMaxPoolBase):
+
+    def __init__(self):
+        super().__init__()
+        self.kwargs['kernel_size'] += [(3,)]
+        self.kwargs['stride'] += [(2,)]
+        self.kwargs['padding'] += [(1,)]
+        self.kwargs['dilation'] += [(1,)]
+
+class _TestParamsMaxPool2d(_TestParamsMaxPoolBase):
+
+    def __init__(self):
+        super().__init__()
+        self.kwargs['kernel_size'] += [(3, 2)]
+        self.kwargs['stride'] += [(2, 1)]
+        self.kwargs['padding'] += [(1, 1)]
+        self.kwargs['dilation'] += [(1, 2)]
+
+        self.shapes.append([6])
+
+class _TestParamsMaxPool3d(_TestParamsMaxPoolBase):
+
+    def __init__(self):
+        super().__init__()
+        self.kwargs['kernel_size'] += [(3, 2, 3)]
+        self.kwargs['stride'] += [(2, 1, 2)]
+        self.kwargs['dilation'] += [(1, 2, 1)]
+
+        self.shapes.append([6])
+        self.shapes.append([5])
+
+def sample_inputs_max_pool(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
+
+    params_generator_type_dict = {
+        'nn.functional.max_pool1d': _TestParamsMaxPool1d,
+        'nn.functional.max_pool2d': _TestParamsMaxPool2d,
+        'nn.functional.max_pool3d': _TestParamsMaxPool3d,
+    }
 
     def generator():
-        for kernel, stride, N, C, H, W, ceil_mode, padding, dilation, return_indices in products:
-            max_pool = torch.nn.MaxPool2d(kernel, stride, ceil_mode=ceil_mode, padding=padding,
-                                          dilation=dilation, return_indices=return_indices)
-            kwargs = {
-                "kernel_size": max_pool.kernel_size,
-                "stride": max_pool.stride,
-                "padding": max_pool.padding,
-                "dilation": max_pool.dilation,
-                "ceil_mode": max_pool.ceil_mode,
-                "return_indices": max_pool.return_indices,
-            }
-            sample_input = make_arg((N, C, H, W)) if N is not None else (make_arg((C, H, W)))
+        params_generator = params_generator_type_dict[op_info.name]()
+        for (shape, memory_format), kwargs in params_generator.gen_input_params():
+            arg = make_arg(shape).to(memory_format=memory_format).requires_grad_(requires_grad)
+            yield SampleInput(arg, kwargs=kwargs)
 
-            yield SampleInput(sample_input, kwargs=kwargs)
     return list(generator())
 
 def sample_inputs_normalize(self, device, dtype, requires_grad, **kwargs):
@@ -3506,6 +3557,53 @@ def sample_inputs_linear(self, device, dtype, requires_grad):
 
         bias = create_tensor([out_feat])
         sample_inputs.append(SampleInput(input_tensor, args=(weight, bias)))
+    return sample_inputs
+
+def sample_inputs_bilinear(self, device, dtype, requires_grad):
+    features_options = [[3, 4, 5], [8, 8, 8]]
+    batch_options: List[List[int]] = [
+        [],  # no batch
+        [0],
+        [8],
+        [2, 3],
+    ]
+    create_tensor = partial(make_tensor, device=device, dtype=dtype,
+                            requires_grad=requires_grad, low=-2, high=2)
+
+    sample_inputs = []
+    for has_bias, (in_feat1, in_feat2, out_feat), batch_shape in \
+            itertools.product([True, False], features_options, batch_options):
+        input_tensor1 = create_tensor(batch_shape + [in_feat1])
+        input_tensor2 = create_tensor(batch_shape + [in_feat2])
+        weight = create_tensor([out_feat, in_feat1, in_feat2])
+        if not has_bias:
+            sample_inputs.append(SampleInput(input_tensor1, args=(input_tensor2, weight,)))
+            continue
+        bias = create_tensor([out_feat])
+        sample_inputs.append(SampleInput(input_tensor1, args=(input_tensor2, weight, bias)))
+
+    return sample_inputs
+
+def sample_inputs_glu(self, device, dtype, requires_grad):
+    features_options = [[2], [2, 4], [8, 8], [3, 6, 8], [1, 4, 6, 7]]
+    batch_options: List[List[int]] = [
+        [],  # no batch
+        [0],
+        [8],
+        [2, 3],
+    ]
+    create_tensor = partial(make_tensor, device=device, dtype=dtype,
+                            requires_grad=requires_grad, low=-2, high=2)
+
+    sample_inputs = []
+    for features, batch_shape in itertools.product(features_options, batch_options):
+        ndim = len(features) + len(batch_shape)
+        for dim in range(ndim):
+            input_tensor = create_tensor(batch_shape + features)
+            dim_size = input_tensor.size(dim)
+            if dim_size > 0 and dim_size % 2 == 0:
+                sample_inputs.append(SampleInput(input_tensor, args=(dim,)))
+
     return sample_inputs
 
 def sample_inputs_interpolate(mode, self, device, dtype, requires_grad):
@@ -9732,14 +9830,36 @@ op_db: List[OpInfo] = [
            dtypesIfCPU=floating_types_and(torch.int64),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_avgpool2d),
+    OpInfo('nn.functional.max_pool1d',
+           aten_name='max_pool1d',
+           supports_autograd=True,
+           supports_out=False,
+           # TODO: add shape checks
+           assert_jit_shape_analysis=False,
+           dtypesIfCPU=floating_types(),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           sample_inputs_func=sample_inputs_max_pool),
     OpInfo('nn.functional.max_pool2d',
            aten_name='max_pool2d',
            supports_autograd=True,
+           # Vmap is not happy with non-contiguous (channels_last) inputs
+           check_batched_gradgrad=False,
            supports_out=False,
            assert_jit_shape_analysis=True,
            dtypesIfCPU=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
-           sample_inputs_func=sample_inputs_max_pool2d),
+           sample_inputs_func=sample_inputs_max_pool),
+    OpInfo('nn.functional.max_pool3d',
+           aten_name='max_pool3d',
+           supports_autograd=True,
+           supports_out=False,
+           # TODO: add shape checks
+           assert_jit_shape_analysis=False,
+           dtypesIfCPU=floating_types(),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           # TODO: investigate nondeterminism
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           sample_inputs_func=sample_inputs_max_pool),
     OpInfo('nn.functional.linear',
            aten_name='linear',
            supports_autograd=True,
@@ -9753,6 +9873,30 @@ op_db: List[OpInfo] = [
            # https://pytorch.org/docs/stable/generated/torch.use_deterministic_algorithms.html#torch.use_deterministic_algorithms
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            supports_forward_ad=True,
+           supports_out=False),
+    OpInfo('nn.functional.bilinear',
+           aten_name='bilinear',
+           supports_autograd=True,
+           sample_inputs_func=sample_inputs_bilinear,
+           dtypesIfCPU=all_types_and(torch.half, torch.bfloat16),
+           dtypesIfROCM=floating_types_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
+           backward_dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
+           skips=(
+               # FIXME: bfloat16 backward support likely depends on CUDA11+ and SM53+
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
+           ),
+           supports_forward_ad=False,
+           supports_out=False),
+    OpInfo('nn.functional.glu',
+           aten_name='glu',
+           supports_autograd=True,
+           sample_inputs_func=sample_inputs_glu,
+           dtypesIfCPU=floating_types(),
+           dtypesIfROCM=floating_types_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           supports_forward_ad=False,
            supports_out=False),
     UnaryUfuncInfo(
         'nn.functional.celu',
