@@ -1049,7 +1049,7 @@ TEST(VulkanAPITest, hardswish_) {
   auto cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat))*12 - 6;
   auto vulkan = cpu.vulkan();
 
-  at::native::hardswish_(cpu);
+  at::hardswish_(cpu);
   at::hardswish_(vulkan);
 
   const auto check = almostEqual(cpu, vulkan.cpu());
