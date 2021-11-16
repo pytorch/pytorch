@@ -22,7 +22,7 @@ jobs:
       - name: init
         run: lintrunner init
       - name:  lint
-        run: lintrunner --paths-cmd='git grep -Il .'
+        run: lintrunner --paths-cmd='git grep -Il .' --verbose
 
   quick-checks:
     runs-on: ubuntu-18.04
