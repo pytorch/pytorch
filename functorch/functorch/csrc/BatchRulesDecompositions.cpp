@@ -128,6 +128,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   OP_DECOMPOSE(var_mean);
   OP_DECOMPOSE2(var_mean, dim);
   OP_DECOMPOSE2(where, self);
+  OP_DECOMPOSE2(unflatten, int);
 }
 
 }}
