@@ -10636,7 +10636,8 @@ op_db: List[OpInfo] = [
                    ),
                    # tan(j * pi/2 * odd_number) is nan
                    reference_numerics_filter=NumericsFilter(
-                       condition=lambda x: close_to_int(x / (math.pi * 0.5j)) if x.is_complex() else torch.tensor(False),
+                       condition=lambda x: (close_to_int(x / (math.pi * 0.5j)) 
+                                            if x.is_complex() else x.new_tensor(False)),
                        safe_val=0)),
     OpInfo('tensor_split',
            ref=np.array_split,
