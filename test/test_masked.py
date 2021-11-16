@@ -31,6 +31,7 @@ def apply_masked_normalization_along_dim(op, x, dim, dtype=None, mask=None):
 
 reference_functions = dict(
     softmax=lambda *args, **kwargs: apply_masked_normalization_along_dim(torch.softmax, *args, **kwargs),
+    log_softmax=lambda *args, **kwargs: apply_masked_normalization_along_dim(torch.log_softmax, *args, **kwargs),
 )
 
 masked_ops = [op for op in op_db if op.name.startswith('_masked.')]
