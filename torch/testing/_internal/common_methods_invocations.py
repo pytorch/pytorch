@@ -8794,7 +8794,11 @@ op_db: List[OpInfo] = [
            check_batched_gradgrad=False,
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_householder_product,
-           decorators=[skipCUDAIfNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
+           decorators=[skipCUDAIfNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack,
+                       DecorateInfo(
+                           toleranceOverride({torch.complex64: tol(atol=1e-3, rtol=1e-3)}),
+                       ),
+           ],
            ),
     OpInfo('linalg.lstsq',
            aten_name='linalg_lstsq',

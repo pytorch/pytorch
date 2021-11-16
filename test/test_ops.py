@@ -270,10 +270,7 @@ class TestCommon(TestCase):
             actual_grad = n_inp.grad if isinstance(n_inp, torch.Tensor) else n_inp[0].grad
 
             # TODO: FIXME: only validates grad on first tensor input
-            if dtype == torch.complex64:
-                self.assertEqual(actual_grad, expected_grad, atol=1e-3, rtol=1e-3)
-            else:
-                self.assertEqual(actual_grad, expected_grad)
+            self.assertEqual(actual_grad, expected_grad)
 
     # Validates ops implement the correct out= behavior
     # See https://github.com/pytorch/pytorch/wiki/Developer-FAQ#how-does-out-work-in-pytorch
