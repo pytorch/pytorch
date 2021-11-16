@@ -45,17 +45,16 @@ def intern_build_aten_ops(copts, deps):
     )
 
 def generate_aten_impl(ctx):
-    install_dir = paths.dirname(
-        ctx.expand_location("$(location aten/src/ATen/Declarations.yaml)"))
-    # Declare the entire ATen/ops/ directory is an output
-    ops_dir = ctx.actions.declare_directory(install_dir + "/ops")
+    # Declare the entire ATen/ops/ directory as an output
+    ops_dir = ctx.actions.declare_directory("aten/src/ATen/ops")
     outputs=[ops_dir] + ctx.outputs.outs
 
+    install_dir = paths.dirname(ops_dir.path)
     tool_inputs, tool_inputs_manifest = ctx.resolve_tools(tools=[ctx.attr.generator])
-    ctx.actions.run(
+    ctx.actions.run_shell(
         outputs=outputs,
         inputs=ctx.files.srcs,
-        executable=ctx.executable.generator,
+        command=ctx.executable.generator.path + " $@",
         arguments=["--source-path", "aten/src/ATen",
                    "--install_dir", install_dir],
         tools=tool_inputs,
@@ -73,7 +72,7 @@ generate_aten = rule(
             executable=True,
             allow_files=True,
             mandatory=True,
-            cfg="host",
+            cfg="exec",
         ),
     }
 )
