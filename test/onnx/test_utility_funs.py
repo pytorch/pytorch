@@ -274,7 +274,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         x = torch.ones(1, 2, 3)
         graph, _, __ = self._model_to_graph(UnsqueezeModule(), (x, ), input_names=["x"],
                                             dynamic_axes={"x": [0, 1, 2]})
-        print(graph)
+
         for node in graph.nodes():
             self.assertNotEqual(node.kind(), "onnx::Unsqueeze")
             self.assertNotEqual(node.kind(), "onnx::Cast")
