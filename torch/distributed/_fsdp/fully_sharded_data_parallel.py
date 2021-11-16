@@ -1,5 +1,4 @@
 import functools
-import logging
 import traceback
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -381,7 +380,12 @@ class FullyShardedDataParallel(nn.Module):
         # If _local_shard has been set in the first lazy init and
         # current parameter is pointed to _local_shard, no need to
         # set the _local_shard again.
-        if hasattr(p, "_local_shard") and p.data == p._local_shard:  # type: ignore[attr-defined]
+        if hasattr(p, "_local_shard"):
+            assert p.data_ptr() == p._local_shard.data_ptr(), (  # type: ignore[attr-defined]
+                "Parameter storage is changed outside FSDP, this use case "
+                "is not supported right now as parameter may be mutated and "
+                "is pointed to a non-sharded tensor or an invalid shard."
+            )
             # If CPU offloading, p._local_shard should have been placed on CPU
             # during its first lazy construction.
             if self.cpu_offload.offload_params:
@@ -392,16 +396,6 @@ class FullyShardedDataParallel(nn.Module):
                     f"but it's on {p._local_shard.device}"  # type: ignore[attr-defined]
                 )
             return
-
-        if hasattr(p, "_local_shard") and p.data != p._local_shard:  # type: ignore[attr-defined]
-            logging.warning(
-                "Parameter storage is changed outside FSDP, it is "
-                "expensive to change parameter storage outside FSDP as "
-                "it needs to reallocate buffers every iteration to store "
-                "gathered full parameters and also sharded gradients if cpu offload "
-                "is enabled. Please try not to change parameter storage "
-                "outside FSDP. "
-            )
 
         # A single shard of the parameters. Also makes p._local_shard to be on
         # CPU if we are CPU offloading, since p.data would be on CPU during
