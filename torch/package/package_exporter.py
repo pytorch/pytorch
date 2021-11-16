@@ -26,7 +26,6 @@ import torch
 from torch.serialization import location_tag, normalize_storage_type
 from torch.types import Storage
 from torch.utils.hooks import RemovableHandle
-import torch.package._selective_intern as SELECTIVE_INTERN_LIST
 
 from ._digraph import DiGraph
 from ._importlib import _normalize_path
@@ -41,6 +40,12 @@ _gate_torchscript_serialization = True
 
 ActionHook = Callable[["PackageExporter", str], None]
 
+# list of modules which selectively interned by default. These are generally unstable
+#  modules which should not be externed due to lack of backwards compatibility
+DEFAULT_SELECTIVE_INTERN_LIST = [
+    "torch.fb",
+    "torch.quantization",
+]
 
 class _ModuleProviderAction(Enum):
     """Represents one of the actions that :class:`PackageExporter` can take on a module.
@@ -233,7 +238,7 @@ class PackageExporter:
         self.patterns: Dict[GlobGroup, _PatternInfo] = {}
         self._unique_id = 0
         self._selective_interns: Dict[str, Tuple[GlobGroup, List[str]]] = {}
-        for module_name in SELECTIVE_INTERN_LIST:
+        for module_name in DEFAULT_SELECTIVE_INTERN_LIST:
             self._selective_interns[module_name] = (GlobGroup(include=f'{module_name}.**'),[])
 
     def save_source_file(
@@ -706,6 +711,7 @@ class PackageExporter:
         """
         assert self._module_exists(package_name), package_name
         self._selective_interns[package_name] = (GlobGroup(include, exclude=exclude), [])
+        self.intern(include=include, exclude=exclude, allow_empty=True)
 
     def intern(
         self,
@@ -938,7 +944,6 @@ class PackageExporter:
         extern_modules = []
         for module_name, attrs in self.dependency_graph.nodes.items():
             action = attrs["action"]
-
             if action == _ModuleProviderAction.EXTERN:
                 for hook in self._extern_hooks.values():
                     hook(self, module_name)
@@ -971,6 +976,15 @@ class PackageExporter:
 
                 is_package = attrs["is_package"]
                 source = attrs["source"]
+                if is_package and source and self._check_if_selectively_interned(module_name):
+                    selective_intern_template_file = str(Path(__file__).parent / "_selective_intern.py")
+                    selective_intern_file_template = Template(_read_file(selective_intern_template_file))
+
+                    _, matches = self._selective_interns[module_name]
+                    original_init = self._get_source_of_module(self._import_module(module_name))
+                    assert original_init
+                    interned_modules = ", ".join(f"\"{match}\"" for match in matches)
+                    source = "\n\n".join([original_init, selective_intern_file_template.substitute(interned_modules=interned_modules)])
                 self._write_source_string(module_name, source, is_package)
 
             elif action == _ModuleProviderAction.REPACKAGED_MOCK_MODULE:
@@ -984,6 +998,7 @@ class PackageExporter:
 
         extern_file_contents = "\n".join(extern_modules) + "\n"
         self._write(".data/extern_modules", extern_file_contents)
+        self._write_selective_interns()
 
     def close(self):
         """Write the package to the filesystem. Any calls after :meth:`close` are now invalid.
