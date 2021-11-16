@@ -1545,19 +1545,19 @@ void _qadaptive_avg_pool_kernel(
   const int output_zero_point = qy.q_zero_point();
 
   at::parallel_for(0, nBatch, 0, [&](int64_t batch_start, int64_t batch_end) {
-    for (b : c10::irange(batch_start, batch_end)) {
+    for (const auto b : c10::irange(batch_start, batch_end)) {
       auto* i_p = reinterpret_cast<typename T::underlying*>(
           idata + b * istrideB);
 
-      for (od : c10::irange(osizeD)) {
+      for (const auto od : c10::irange(osizeD)) {
         int istartD = (int)std::floor((float)(od * isizeD) / osizeD);
         int iendD = (int)std::ceil((float)((od + 1) * isizeD) / osizeD);
         int kD = iendD - istartD;
-        for (oh : c10::irange(osizeH)) {
+        for (const auto oh : c10::irange(osizeH)) {
           int istartH = (int)std::floor((float)(oh * isizeH) / osizeH);
           int iendH = (int)std::ceil((float)((oh + 1) * isizeH) / osizeH);
           int kH = iendH - istartH;
-          for (int64_t ow = 0; ow < osizeW; ow++) {
+          for (const auto ow : c10::irange(osizeW)) {
             auto* o_p = reinterpret_cast<typename T::underlying*>(
                 odata +
                 b * osizeD * osizeH * osizeW * sizeC +
@@ -1614,6 +1614,7 @@ void _qadaptive_avg_pool_kernel(
                         iw * istrideW;
                     auto val = *(internal_i_p + tcntr + c * istrideC);
                     acc_int32 += val;
+                  }
                 }
               }
               // clamp
