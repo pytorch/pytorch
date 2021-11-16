@@ -82,7 +82,7 @@ class PackageImporter(Importer):
         self.root = _PackageNode(None)
         self.modules = {}
         self.extern_modules = self._read_extern()
-
+        self.selective_intern_packages = self._read_selective_intern()
         for extern_module in self.extern_modules:
             if not module_allowed(extern_module):
                 raise ImportError(
@@ -296,6 +296,13 @@ class PackageImporter(Importer):
             .splitlines(keepends=False)
         )
 
+    def _read_selective_intern(self):
+        return (
+            self.zip_reader.get_record(".data/selective_intern_packages")
+            .decode("utf-8")
+            .splitlines(keepends=False)
+        )
+
     def _make_module(
         self, name: str, filename: Optional[str], is_package: bool, parent: str
     ):
@@ -316,6 +323,10 @@ class PackageImporter(Importer):
         ns["__cached__"] = None
         ns["__builtins__"] = self.patched_builtins
         ns["__torch_package__"] = True
+
+        if is_package and name in self.selective_intern_packages:
+            assert not parent
+            ns["_extern_copy"] = importlib.import_module(name)
 
         # Add this module to our private global registry. It should be unique due to mangling.
         assert module.__name__ not in _package_imported_modules
@@ -340,7 +351,10 @@ class PackageImporter(Importer):
     def _load_module(self, name: str, parent: str):
         cur: _PathNode = self.root
         for atom in name.split("."):
-            if not isinstance(cur, _PackageNode) or atom not in cur.children:
+            if isinstance(cur, _SelectiveInternNode):
+                if atom not in cur.children:
+                    cur.children[atom] = _ExternNode()
+            elif not isinstance(cur, _PackageNode) or atom not in cur.children:
                 raise ModuleNotFoundError(
                     f'No module named "{name}" in self-contained archive "{self.filename}"'
                     f" and the module is also not in the list of allowed external modules: {self.extern_modules}",
@@ -350,7 +364,8 @@ class PackageImporter(Importer):
             if isinstance(cur, _ExternNode):
                 module = self.modules[name] = importlib.import_module(name)
                 return module
-        return self._make_module(name, cur.source_file, isinstance(cur, _PackageNode), parent)  # type: ignore[attr-defined]
+
+        return self._make_module(name, cur.source_file, isinstance(cur,(_SelectiveInternNode, _PackageNode)), parent)  # type: ignore[attr-defined]
 
     def _compile_source(self, fullpath: str, mangled_filename: str):
         source = self.zip_reader.get_record(fullpath)
@@ -538,8 +553,11 @@ class PackageImporter(Importer):
 
     def _get_or_create_package(
         self, atoms: List[str]
-    ) -> "Union[_PackageNode, _ExternNode]":
+    ) -> "Union[_PackageNode, _ExternNode, _SelectiveInternNode]":
         cur = self.root
+        if len(atoms) == 1 and atoms[0] in self.selective_intern_packages and atoms[0] not in cur.children:
+            node = cur.children[atoms[0]] = _SelectiveInternNode()
+            return node
         for i, atom in enumerate(atoms):
             node = cur.children.get(atom, None)
             if node is None:
@@ -551,7 +569,7 @@ class PackageImporter(Importer):
                 raise ImportError(
                     f"inconsistent module structure. module {name} is not a package, but has submodules"
                 )
-            assert isinstance(node, _PackageNode)
+            assert isinstance(node, (_PackageNode, _SelectiveInternNode))
             cur = node
         return cur
 
@@ -598,16 +616,27 @@ class _PackageNode(_PathNode):
         self.source_file = source_file
         self.children: Dict[str, _PathNode] = {}
 
+    def __repr__(self):
+        return f"Package[{self.source_file}]: {self.children}"
+
 
 class _ModuleNode(_PathNode):
     __slots__ = ["source_file"]
 
     def __init__(self, source_file: str):
         self.source_file = source_file
-
+    def __repr__(self):
+        return f"Module[{self.source_file}]"
 
 class _ExternNode(_PathNode):
-    pass
+    def __repr__(self):
+        return f"Extern"
+
+class _SelectiveInternNode(_PathNode):
+    def __init__(self):
+        self.children = {}
+    def __repr__(self):
+        return f"SelectiveIntern"
 
 
 # A private global registry of all modules that have been package-imported.
