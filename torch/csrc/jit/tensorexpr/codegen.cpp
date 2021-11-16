@@ -107,7 +107,7 @@ std::vector<std::pair<BufPtr, BufPtr>> linearScan(
                                             BufPtr b1, BufPtr b2) -> bool {
     auto start1 = buf_ranges.at(b1).first;
     auto start2 = buf_ranges.at(b2).first;
-    return std::get<2>(start1).getStmtIndex().at(0) < std::get<2>(start2).getStmtIndex().at(0);
+    return std::get<2>(start1).at(0) < std::get<2>(start2).at(0);
   };
   std::sort(
       bufs_sorted.begin(), bufs_sorted.end(), sorting_function_by_start_time);
@@ -116,7 +116,7 @@ std::vector<std::pair<BufPtr, BufPtr>> linearScan(
                                           BufPtr b1, BufPtr b2) -> bool {
     auto end1 = buf_ranges.at(b1).second;
     auto end2 = buf_ranges.at(b2).second;
-    return std::get<2>(end1).getStmtIndex().at(0) < std::get<2>(end2).getStmtIndex().at(0);
+    return std::get<2>(end1).at(0) < std::get<2>(end2).at(0);
   };
 
   // Map intermediate buffers to the most recent used memory if any.
@@ -137,7 +137,7 @@ std::vector<std::pair<BufPtr, BufPtr>> linearScan(
     for (auto& mapped : b2m) {
       auto buf_mapped = mapped.first;
       auto end_buf_mapped = buf_ranges.at(buf_mapped).second;
-      if (std::get<2>(end_buf_mapped).getStmtIndex().at(0) < std::get<2>(start).getStmtIndex().at(0)) {
+      if (std::get<2>(end_buf_mapped).at(0) < std::get<2>(start).at(0)) {
         buf_to_release.push_back(buf_mapped);
       }
     }
